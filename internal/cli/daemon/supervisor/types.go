@@ -58,6 +58,8 @@ type AgentProcess struct {
 
 	SoftKnobWarning string // last soft-enforcement warning logged by gateSafetyKnobsEnforceable; deduplicates a per-poll-cycle line down to one per change
 
+	BackendStatePatchedAt time.Time // last control-plane agent-state PATCH issued by gateBackendAvailable; edge-triggers the PATCH so a parked agent does not re-assert the same state every recheck (PUPPET-54)
+
 	LastError      *agenterr.AgentError // classified error from most recent exit (nil on clean exit)
 	RateRetryCount int                  // consecutive rate-limit retries (separate from RestartCount)
 	LastNoWork     bool                 // true if last exit was due to no claimable tasks

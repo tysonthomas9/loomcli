@@ -37,7 +37,7 @@ func (s *Supervisor) gateBackendAvailable(ap *AgentProcess) error {
 		// gate's job is specifically "named backend missing on PATH".
 		return nil
 	}
-	info, lookupErr := backendcheck.CheckBackend(backend)
+	info, misses, lookupErr := backendcheck.ConfirmBackend(backend)
 	if lookupErr != nil {
 		slog.Warn("backend availability check failed; proceeding with spawn",
 			"worktree", ap.Entry.Worktree, "backend", backend, "err", lookupErr)
@@ -45,43 +45,87 @@ func (s *Supervisor) gateBackendAvailable(ap *AgentProcess) error {
 	}
 
 	if info.Installed {
-		// Recovery branch: if the agent was previously blocked for
-		// backend-unavailable and the binary is now back, clear the
-		// state so UIs reflect the recovery before the spawn proceeds.
-		ap.Mu.Lock()
-		wasUnavailable := ap.StopReason == StopReasonBackendUnavailable
-		if wasUnavailable {
-			ap.StopReason = ""
-			ap.LastError = nil
-		}
-		worktree := ap.Entry.Worktree
-		ap.Mu.Unlock()
-		if wasUnavailable {
-			s.markControlPlaneAgentState(ap, domain.AgentStateActive)
-			log.Printf("[daemon] Agent %s: backend %q now on PATH — resuming spawn",
-				worktree, backend)
-		}
+		s.noteBackendAvailable(ap, backend, misses)
 		return nil
 	}
+	s.noteBackendUnavailable(ap, backend, info.InstallHint)
+	return ErrBackendUnavailable
+}
 
+// noteBackendAvailable handles the installed branch of the gate: it clears a
+// previous backend-unavailable block so UIs reflect the recovery before the
+// spawn proceeds, and reports a miss that ConfirmBackend rode out.
+func (s *Supervisor) noteBackendAvailable(ap *AgentProcess, backend string, misses int) {
+	ap.Mu.Lock()
+	wasUnavailable := ap.StopReason == StopReasonBackendUnavailable
+	if wasUnavailable {
+		ap.StopReason = ""
+		ap.LastError = nil
+		ap.BackendStatePatchedAt = time.Now()
+	}
+	worktree := ap.Entry.Worktree
+	ap.Mu.Unlock()
+
+	if misses > 0 {
+		// One line per debounced occurrence, never per attempt. This is the
+		// observability that replaces the flap pair a transient miss used to
+		// produce.
+		log.Printf("[daemon] Agent %s: backend %q lookup missed %d time(s), recovered before declaring unavailable",
+			worktree, backend, misses)
+	}
+	if wasUnavailable {
+		s.markControlPlaneAgentState(ap, domain.AgentStateActive)
+		log.Printf("[daemon] Agent %s: backend %q now on PATH — resuming spawn",
+			worktree, backend)
+	}
+}
+
+// noteBackendUnavailable parks the agent on a confirmed miss.
+//
+// The control-plane PATCH is edge-triggered: a parked agent re-checks every
+// backendUnavailableRecheckInterval, and re-asserting the same state on each of
+// those rechecks is what made the flap unbounded. It fires on transition plus a
+// bounded level re-assert, so a control-plane row reset out from under a parked
+// agent still converges.
+func (s *Supervisor) noteBackendUnavailable(ap *AgentProcess, backend, installHint string) {
+	// Decide under the lock, act after it — markControlPlaneAgentState makes a
+	// network call and must never run while ap.Mu is held.
 	ap.Mu.Lock()
 	wasUnavailable := ap.StopReason == StopReasonBackendUnavailable
 	ap.StopReason = StopReasonBackendUnavailable
 	ap.LastError = &agenterr.AgentError{
 		Class:     agenterr.OutcomeFromDomain(agenterr.BackendUnavailableOutcome),
-		Message:   info.InstallHint,
+		Message:   installHint,
 		Backend:   backend,
 		Timestamp: time.Now(),
 	}
 	worktree := ap.Entry.Worktree
+	// A zero BackendStatePatchedAt makes time.Since huge, so the first gate call
+	// satisfies the re-assert clause as well as the transition clause.
+	shouldPatch := !wasUnavailable ||
+		time.Since(ap.BackendStatePatchedAt) >= s.backendStateReassertBackoff()
+	if shouldPatch {
+		ap.BackendStatePatchedAt = time.Now()
+	}
 	ap.Mu.Unlock()
 
-	s.markControlPlaneAgentState(ap, domain.AgentStateBackendUnavailable)
+	if shouldPatch {
+		s.markControlPlaneAgentState(ap, domain.AgentStateBackendUnavailable)
+	}
 	if !wasUnavailable {
 		log.Printf("[daemon] Agent %s: backend %q not on PATH — skipping spawn (%s)",
-			worktree, backend, info.InstallHint)
+			worktree, backend, installHint)
 	}
-	return ErrBackendUnavailable
+}
+
+// backendStateReassertBackoff is how long gateBackendAvailable waits before
+// re-asserting an unchanged backend-availability state to the control plane
+// (configurable via backendStateReassert; package default otherwise).
+func (s *Supervisor) backendStateReassertBackoff() time.Duration {
+	if s.backendStateReassert > 0 {
+		return s.backendStateReassert
+	}
+	return backendStateReassertInterval
 }
 
 // gateSafetyKnobsEnforceable fails closed when the role carries safety knobs
