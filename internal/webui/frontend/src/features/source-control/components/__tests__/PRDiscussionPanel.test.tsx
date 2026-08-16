@@ -14,12 +14,14 @@ import { PRDiscussionPanel } from "../PRDiscussionPanel";
 
 const mocks = vi.hoisted(() => ({
   ensureReviewer: vi.fn(),
+  archiveReviewer: vi.fn(),
   getReviewerConversation: vi.fn(),
   sendReviewerMessage: vi.fn(),
 }));
 
 vi.mock("../../api/prReview", () => ({
   ensureReviewer: mocks.ensureReviewer,
+  archiveReviewer: mocks.archiveReviewer,
   getReviewerConversation: mocks.getReviewerConversation,
   sendReviewerMessage: mocks.sendReviewerMessage,
 }));
@@ -35,6 +37,10 @@ describe("PRDiscussionPanel", () => {
       agent_name: "review-hello-pr-7",
       checked_out_sha: "sha-old",
       seeded: true,
+    });
+    mocks.archiveReviewer.mockResolvedValue({
+      agent_name: "review-hello-pr-7",
+      archived: true,
     });
     mocks.getReviewerConversation.mockResolvedValue({
       state: "idle",
@@ -102,6 +108,88 @@ describe("PRDiscussionPanel", () => {
 
     fireEvent.click(screen.getByTestId("pr-discussion-tab-terminal"));
     expect(screen.getByTestId("terminal-stub")).toBeInTheDocument();
+  });
+
+  it("archives the checkout reviewer before closing the discussion", async () => {
+    const onClose = vi.fn();
+    render(
+      <PRDiscussionPanel
+        workspaceId="WS"
+        owner="octocat"
+        repo="hello"
+        number={7}
+        onClose={onClose}
+      />,
+    );
+    await screen.findByText("hello");
+
+    fireEvent.click(screen.getByRole("button", { name: "Close discussion" }));
+
+    await waitFor(() => {
+      expect(mocks.archiveReviewer).toHaveBeenCalledWith(
+        "WS",
+        "octocat",
+        "hello",
+        7,
+      );
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("does not allow close to race an in-flight reviewer creation", async () => {
+    let resolveEnsure:
+      | ((value: {
+          agent_name: string;
+          checked_out_sha: string;
+          seeded: boolean;
+        }) => void)
+      | undefined;
+    mocks.ensureReviewer.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveEnsure = resolve;
+        }),
+    );
+    render(
+      <PRDiscussionPanel
+        workspaceId="WS"
+        owner="octocat"
+        repo="hello"
+        number={7}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const close = screen.getByRole("button", { name: "Close discussion" });
+    expect(close).toBeDisabled();
+    expect(mocks.archiveReviewer).not.toHaveBeenCalled();
+
+    resolveEnsure?.({
+      agent_name: "review-hello-pr-7",
+      checked_out_sha: "sha-old",
+      seeded: true,
+    });
+    await waitFor(() => expect(close).not.toBeDisabled());
+  });
+
+  it("keeps the discussion open when reviewer archival fails", async () => {
+    mocks.archiveReviewer.mockRejectedValueOnce(new Error("archive conflict"));
+    const onClose = vi.fn();
+    render(
+      <PRDiscussionPanel
+        workspaceId="WS"
+        owner="octocat"
+        repo="hello"
+        number={7}
+        onClose={onClose}
+      />,
+    );
+    await screen.findByText("hello");
+
+    fireEvent.click(screen.getByRole("button", { name: "Close discussion" }));
+
+    expect(await screen.findByText("archive conflict")).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("keeps the typed message when a send fails", async () => {

@@ -17,6 +17,7 @@ const (
 	ActionDeleteRole                  authority.Action = "agents.delete-role"
 	ActionEnsureManagedRole           authority.Action = "agents.ensure-managed-role"
 	ActionEnsureManagedAgent          authority.Action = "agents.ensure-managed-agent"
+	ActionConvergeManagedReviewer     authority.Action = "agents.converge-managed-reviewer"
 	ActionRepairManagedRolePromptFile authority.Action = "agents.repair-managed-role-prompt-file"
 	ActionAcquireOwnership            authority.Action = "agents.acquire-ownership"
 	ActionRenewOwnership              authority.Action = "agents.renew-ownership"
@@ -38,6 +39,7 @@ func OperationRules() []authority.OperationRule {
 		authority.OperatorOnly(ActionDeleteRole),
 		authority.Allow(ActionEnsureManagedRole, authority.ClassSystem),
 		authority.Allow(ActionEnsureManagedAgent, authority.ClassSystem),
+		authority.Allow(ActionConvergeManagedReviewer, authority.ClassSystem),
 		authority.Allow(ActionRepairManagedRolePromptFile, authority.ClassSystem),
 		authority.Allow(ActionAcquireOwnership, authority.ClassSystem),
 		authority.Allow(ActionRenewOwnership, authority.ClassSystem),
@@ -54,6 +56,7 @@ func OperationRules() []authority.OperationRule {
 // behind their respective capabilities.
 type API interface {
 	ProvisioningCommands
+	ManagedReviewerIdentityCommands
 	ManagedRoleRepairCommands
 	IdentityQueries
 	IdentityCommands
@@ -63,6 +66,18 @@ type API interface {
 	OwnershipCommands
 	LifecycleCommands
 	DesiredStateReconciliationCommands
+}
+
+// ManagedReviewerIdentityCommands is the single deep command used by PR
+// Review. It atomically converges a versioned shared Role and one
+// checkout-specific Agent, or archives only that Agent while preserving the
+// Role. There is deliberately no sequential Role/Agent fallback.
+type ManagedReviewerIdentityCommands interface {
+	ConvergeManagedReviewer(
+		context.Context,
+		authority.SystemAuthority,
+		ManagedReviewerCommand,
+	) (*ManagedReviewerResult, error)
 }
 
 // LifecycleCommands atomically converge Agent desired state, every attached

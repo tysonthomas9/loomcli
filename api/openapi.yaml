@@ -3262,6 +3262,75 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: archivePullRequestReviewer
+      tags: [pull-requests]
+      summary: Archive the checkout-specific PR reviewer agent
+      description: >-
+        Idempotently archives only the deterministic checkout Agent through
+        Agents' managed-reviewer convergence command. The shared reviewer Role
+        remains available for other and future checkouts.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Reviewer Agent archived; shared Role preserved
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  data:
+                    $ref: "#/components/schemas/ReviewerArchiveResult"
+        "400":
+          description: Invalid path parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Repository is not registered or reviewer was not started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Reviewer identity conflicts with managed state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Reviewer archival failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Agents capability unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/messages:
     post:
@@ -5668,6 +5737,15 @@ components:
         checked_out_sha:
           type: string
         seeded:
+          type: boolean
+
+    ReviewerArchiveResult:
+      type: object
+      required: [agent_name, archived]
+      properties:
+        agent_name:
+          type: string
+        archived:
           type: boolean
 
     ReviewerMessageRequest:

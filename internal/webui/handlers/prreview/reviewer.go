@@ -16,7 +16,6 @@ import (
 
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 
-	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
@@ -28,7 +27,6 @@ import (
 const reviewerAgentNameMaxLen = 100
 const legacyReviewerRepoSegmentMaxLen = 48
 const reviewerIdentityHashLen = 8
-const reviewerRoleName = prreviewer.RoleName
 const reviewerGitTimeout = 60 * time.Second
 
 // reviewerAgentName expects the canonical owner/repo pair returned by the
@@ -163,7 +161,7 @@ func (m *Module) resolveRepositoryRef(
 
 //nolint:cyclop,funlen // Keep PR materialization checks and canonical reviewer provisioning in one compensating transaction before identity creation.
 func (m *Module) ensureReviewer(w http.ResponseWriter, r *http.Request) {
-	if m == nil || m.reviewerProvisioning == nil || m.reviewerAgents == nil {
+	if m == nil || m.reviewerIdentities == nil || m.reviewerAgents == nil {
 		writePRReviewErrorCode(
 			w,
 			http.StatusServiceUnavailable,
@@ -416,17 +414,23 @@ func prepareReviewerCheckout(w http.ResponseWriter, spec reviewerCheckoutSpec) (
 }
 
 func (m *Module) ensureReviewerAgent(ctx context.Context, ws, agentName string) error {
-	if m == nil || m.reviewerProvisioning == nil {
-		return prreviewer.ErrUnavailable
+	if m == nil || m.reviewerIdentities == nil {
+		return agents.ErrUnavailable
 	}
-	result, err := m.reviewerProvisioning.EnsureReviewer(ctx, prreviewer.EnsureCommand{
+	preset, err := reviewerPreset()
+	if err != nil {
+		return err
+	}
+	result, err := m.reviewerIdentities.ConvergeReviewerIdentity(ctx, agents.ManagedReviewerCommand{
 		WorkspaceKey: ws,
 		AgentID:      agentName,
+		DesiredState: agents.ManagedReviewerActive,
+		Preset:       preset,
 	})
 	if err != nil {
 		return err
 	}
-	if result == nil || result.Agent == nil ||
+	if result == nil || result.Agent == nil || result.Agent.DeletedAt != nil ||
 		result.Agent.WorkspaceKey != ws || result.Agent.AgentID != agentName {
 		return fmt.Errorf("pr reviewer provisioning returned an invalid identity: %w", agents.ErrInvalidPersistedState)
 	}
@@ -538,8 +542,7 @@ func (m *Module) requireReviewerIdentity(
 
 func writeReviewerProvisioningError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, prreviewer.ErrUnavailable),
-		errors.Is(err, agents.ErrUnavailable):
+	case errors.Is(err, agents.ErrUnavailable):
 		writePRReviewErrorCode(
 			w,
 			http.StatusServiceUnavailable,
@@ -563,6 +566,14 @@ func writeReviewerProvisioningError(w http.ResponseWriter, err error) {
 			http.StatusBadRequest,
 			"invalid",
 			"the PR reviewer identity definition is invalid",
+			false,
+		)
+	case errors.Is(err, agents.ErrNotFound):
+		writePRReviewErrorCode(
+			w,
+			http.StatusNotFound,
+			"reviewer_not_started",
+			"reviewer has not been started for this pull request",
 			false,
 		)
 	default:

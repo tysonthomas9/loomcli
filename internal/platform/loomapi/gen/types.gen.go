@@ -3596,6 +3596,12 @@ type PullRequestsResponse struct {
 	Success bool             `json:"success"`
 }
 
+// ReviewerArchiveResult defines model for ReviewerArchiveResult.
+type ReviewerArchiveResult struct {
+	AgentName string `json:"agent_name"`
+	Archived  bool   `json:"archived"`
+}
+
 // ReviewerConversation defines model for ReviewerConversation.
 type ReviewerConversation struct {
 	// Detail Human-readable context for failed/unsupported states.

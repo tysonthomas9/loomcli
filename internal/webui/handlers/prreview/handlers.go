@@ -25,6 +25,7 @@ const (
 
 type pullRequestReviewResult = loomapi.PullRequestReviewResult
 type reviewerEnsureResult = loomapi.ReviewerEnsureResult
+type reviewerArchiveResult = loomapi.ReviewerArchiveResult
 type reviewerMessageRequest = loomapi.ReviewerMessageRequest
 type reviewerMessageResult = loomapi.ReviewerMessageResult
 

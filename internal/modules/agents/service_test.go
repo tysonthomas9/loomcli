@@ -30,10 +30,21 @@ type fakePorts struct {
 	listOwnership    func(context.Context, string, OwnershipFilter) ([]*AgentOwnershipLease, error)
 	renewOwnership   func(context.Context, RenewOwnershipMutation) (*AgentOwnershipLease, error)
 	releaseOwnership func(context.Context, OwnershipProof) (*AgentOwnershipLease, error)
+	convergeReviewer func(context.Context, ManagedReviewerMutation) (*ManagedReviewerResult, error)
 }
 
 func (*fakePorts) ApplyLifecycle(context.Context, ApplyLifecycleMutation) (*LifecycleResult, error) {
 	return nil, nil
+}
+
+func (f *fakePorts) ConvergeManagedReviewer(
+	ctx context.Context,
+	mutation ManagedReviewerMutation,
+) (*ManagedReviewerResult, error) {
+	if f.convergeReviewer == nil {
+		return nil, nil
+	}
+	return f.convergeReviewer(ctx, mutation)
 }
 
 func (*fakePorts) ListAgentBindingStates(context.Context, string, string) ([]bool, error) {
@@ -119,13 +130,13 @@ func TestNewWithLifecycleRequiresCompleteAgentsBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	ports := &fakePorts{}
-	if _, err := NewWithLifecycle(ports, ports, ports, ports, ports, ports, ports, ports, admission); err != nil {
+	if _, err := NewWithLifecycle(ports, ports, ports, ports, ports, ports, ports, ports, ports, admission); err != nil {
 		t.Fatalf("NewWithLifecycle() with all ports: %v", err)
 	}
-	if _, err := NewWithLifecycle(ports, nil, ports, ports, ports, ports, ports, ports, admission); !errors.Is(err, ErrUnavailable) {
+	if _, err := NewWithLifecycle(ports, nil, ports, ports, ports, ports, ports, ports, ports, admission); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("NewWithLifecycle() missing Role port error = %v, want unavailable", err)
 	}
-	if _, err := NewWithLifecycle(ports, ports, ports, ports, ports, ports, ports, ports, nil); !errors.Is(err, ErrUnavailable) {
+	if _, err := NewWithLifecycle(ports, ports, ports, ports, ports, ports, ports, ports, ports, nil); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("NewWithLifecycle() missing admission error = %v, want unavailable", err)
 	}
 }
@@ -545,7 +556,7 @@ func newTestService(t *testing.T, ports *fakePorts) (*Service, *authority.Issuer
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := NewWithLifecycle(ports, ports, ports, ports, ports, ports, ports, ports, admission)
+	service, err := NewWithLifecycle(ports, ports, ports, ports, ports, ports, ports, ports, ports, admission)
 	if err != nil {
 		t.Fatal(err)
 	}

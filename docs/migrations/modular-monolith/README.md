@@ -101,6 +101,7 @@ one-file packages, and 60 one-or-two-file packages.
 | [25-phase-10-5-repository-admission-evidence.md](25-phase-10-5-repository-admission-evidence.md) | Stack 10.5 implementation and proof for durable Workspace and Repository Admission, exact replay and recovery, cleanup and failure, process-local job-store deletion, and packaged Desktop repository journeys. |
 | [26-phase-10-6-owner-plane-query-evidence.md](26-phase-10-6-owner-plane-query-evidence.md) | Stack 10.6 implementation and proof for owner-local records and ports, production domain/store/ops deletion, immutable operational queries, architecture and full gate results, and packaged Desktop read surfaces. |
 | [27-phase-10-7-atomic-work-item-move-evidence.md](27-phase-10-7-atomic-work-item-move-evidence.md) | Stack 10.7 implementation and proof for the paired FleetDB atomic move command, Loom application/delivery seam, replay/conflict/concurrency and immutable-source contracts, clickable UI history, and packaged restart durability. |
+| [28-phase-10-8-agents-reviewer-convergence-evidence.md](28-phase-10-8-agents-reviewer-convergence-evidence.md) | Stack 10.8 implementation and proof for the paired managed-reviewer convergence command, versioned preset, fail-closed ownership conflict, managed archive/reactivation, Interaction session retirement, live Codex transcript attribution, and packaged Desktop journeys. |
 
 ## Scope boundaries
 

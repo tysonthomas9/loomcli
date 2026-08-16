@@ -51,6 +51,7 @@ type AgentManagementTransport interface {
 	SetAgentServiceDesiredState(context.Context, AgentServiceDesiredStateInput) (*agentsowner.AgentServiceRecord, error)
 	SetAgentServiceDesiredStateOwned(context.Context, AgentServiceOwnedDesiredStateInput) (*agentsowner.AgentServiceRecord, error)
 	ApplyAgentServiceLifecycle(context.Context, AgentServiceLifecycleInput) (*AgentServiceLifecycleResult, error)
+	ConvergeManagedReviewer(context.Context, ManagedReviewerConvergenceInput) (*ManagedReviewerConvergenceResult, error)
 	AcquireAgentOwnership(context.Context, AgentOwnershipAcquireInput) (*AgentOwnershipGrant, error)
 	GetAgentOwnership(context.Context, string, string) (*agentsowner.OwnershipRecord, error)
 	ListAgentOwnership(context.Context, string, AgentOwnershipQuery) ([]*agentsowner.OwnershipRecord, error)
@@ -85,6 +86,24 @@ type AgentServiceLifecycleResult struct {
 	BindingIDs     []string                        `json:"binding_ids,omitempty"`
 	GrantIDs       []string                        `json:"grant_ids,omitempty"`
 	CommittedAt    time.Time                       `json:"committed_at"`
+}
+
+type ManagedReviewerConvergenceInput struct {
+	WorkspaceKey   string
+	AgentID        string
+	DesiredState   agentsowner.ManagedReviewerDesiredState
+	Preset         agentsowner.ManagedReviewerPreset
+	Fingerprint    string
+	DelegatedActor string
+}
+
+type ManagedReviewerConvergenceResult struct {
+	PresetID          string                          `json:"preset_id"`
+	PresetRevision    int64                           `json:"preset_revision"`
+	PresetFingerprint string                          `json:"preset_fingerprint"`
+	Role              *agentsowner.Role               `json:"role"`
+	Agent             *agentsowner.AgentServiceRecord `json:"agent"`
+	Changed           bool                            `json:"changed"`
 }
 
 type AgentRoleInput struct {
@@ -634,6 +653,38 @@ func (transport *agentManagementStore) ApplyAgentServiceLifecycle(
 	var out AgentServiceLifecycleResult
 	path := "/api/v1/" + pathEscape(input.WorkspaceKey) + "/agent-services/" +
 		pathEscape(input.ServiceID) + "/lifecycle"
+	if err := transport.client.DoWithHeaders(ctx, http.MethodPost, path, body, &out, headers); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (transport *agentManagementStore) ConvergeManagedReviewer(
+	ctx context.Context,
+	input ManagedReviewerConvergenceInput,
+) (*ManagedReviewerConvergenceResult, error) {
+	headers, err := delegatedActorHeaders(input.DelegatedActor)
+	if err != nil {
+		return nil, err
+	}
+	body := struct {
+		DesiredState agentsowner.ManagedReviewerDesiredState `json:"desired_state"`
+		Preset       struct {
+			PresetID    string                                     `json:"preset_id"`
+			Revision    int64                                      `json:"revision"`
+			Fingerprint string                                     `json:"fingerprint"`
+			Role        agentsowner.ManagedReviewerRoleDefinition  `json:"role"`
+			Agent       agentsowner.ManagedReviewerAgentDefinition `json:"agent"`
+		} `json:"preset"`
+	}{DesiredState: input.DesiredState}
+	body.Preset.PresetID = input.Preset.PresetID
+	body.Preset.Revision = input.Preset.Revision
+	body.Preset.Fingerprint = input.Fingerprint
+	body.Preset.Role = input.Preset.Role
+	body.Preset.Agent = input.Preset.Agent
+	var out ManagedReviewerConvergenceResult
+	path := "/api/v1/" + pathEscape(input.WorkspaceKey) +
+		"/managed-reviewer-identities/" + pathEscape(input.AgentID) + "/converge"
 	if err := transport.client.DoWithHeaders(ctx, http.MethodPost, path, body, &out, headers); err != nil {
 		return nil, err
 	}

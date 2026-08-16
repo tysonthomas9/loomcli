@@ -88,7 +88,7 @@ func newReconciliationService(t *testing.T, states []bool, desired DesiredState)
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := NewWithLifecycle(ports, ports, ports, ports, ports, ports, lifecycle, &reconciliationBindings{states: states}, admission)
+	service, err := NewWithLifecycle(ports, ports, ports, ports, ports, ports, lifecycle, ports, &reconciliationBindings{states: states}, admission)
 	if err != nil {
 		t.Fatal(err)
 	}

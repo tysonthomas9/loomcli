@@ -8,7 +8,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
@@ -36,8 +35,9 @@ type Module struct {
 	connectorSealer         connectorsmodule.CredentialSealer
 	dispatcher              connectorsmodule.Dispatcher
 	pullRequests            PullRequestLister
-	reviewerProvisioning    prreviewer.Commands
+	reviewerIdentities      ReviewerIdentityCommands
 	reviewerAgents          agents.IdentityQueries
+	reviewerRuntime         ReviewerRuntimeCommands
 	sourceControl           PullRequestCheckoutMaterializer
 	interactionChat         interaction.ChatAPI
 	interactionMessenger    interaction.ChatMessenger
@@ -81,6 +81,22 @@ type PullRequestCheckoutMaterializer interface {
 	PreparePullRequestCheckout(context.Context, sourcecontrol.PullRequestCheckoutCommand) (*sourcecontrol.PullRequestCheckout, error)
 }
 
+// ReviewerIdentityCommands is PR Review's purpose-specific Agents consumer
+// port. Composition supplies an authority-deriving wrapper; the route cannot
+// issue system authority or invoke generic Role/Agent mutations.
+type ReviewerIdentityCommands interface {
+	ConvergeReviewerIdentity(context.Context, agents.ManagedReviewerCommand) (*agents.ManagedReviewerResult, error)
+}
+
+// ReviewerRuntimeCommands is the process-local Interaction lifecycle consumed
+// when a review discussion is retired. PR Review first archives and validates
+// the managed identity, then stops the exact Agent's owned terminal so a later
+// reopen cannot attach to a stale conversation and an unmanaged conflict is
+// never disrupted.
+type ReviewerRuntimeCommands interface {
+	StopReviewerSession(context.Context, string, string) error
+}
+
 // Config contains the owner interfaces and runtime adapters consumed by PR
 // Review. Composition belongs to the application root; the route module never
 // receives a repository collection or constructs an owner implementation.
@@ -91,8 +107,9 @@ type Config struct {
 	Dispatcher           connectorsmodule.Dispatcher
 	PullRequests         PullRequestLister
 	LocalSettingsDir     string
-	ReviewerProvisioning prreviewer.Commands
+	ReviewerIdentities   ReviewerIdentityCommands
 	ReviewerAgents       agents.IdentityQueries
+	ReviewerRuntime      ReviewerRuntimeCommands
 	SourceControl        PullRequestCheckoutMaterializer
 	InteractionChat      interaction.ChatAPI
 	InteractionMessenger interaction.ChatMessenger
@@ -113,8 +130,9 @@ func NewModule(config Config) *Module {
 		connectorSealer:         config.ConnectorSealer,
 		dispatcher:              config.Dispatcher,
 		pullRequests:            config.PullRequests,
-		reviewerProvisioning:    config.ReviewerProvisioning,
+		reviewerIdentities:      config.ReviewerIdentities,
 		reviewerAgents:          config.ReviewerAgents,
+		reviewerRuntime:         config.ReviewerRuntime,
 		sourceControl:           config.SourceControl,
 		interactionChat:         config.InteractionChat,
 		interactionMessenger:    config.InteractionMessenger,
@@ -149,6 +167,7 @@ func (m *Module) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/diff", m.getPullRequestDiff)
 	mux.HandleFunc("POST /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/review", m.postReview)
 	mux.HandleFunc("POST /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/reviewer", m.ensureReviewer)
+	mux.HandleFunc("DELETE /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/reviewer", m.archiveReviewer)
 	mux.HandleFunc("POST /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/messages", m.postReviewerMessage)
 	mux.HandleFunc("GET /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/stream", m.streamReviewer)
 	mux.HandleFunc("GET /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/conversation", m.getReviewerConversation)

@@ -19,7 +19,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
@@ -213,10 +212,30 @@ type prReviewHarness struct {
 	module        *Module
 	dataDir       string
 	reviewers     *reviewerAgentRegistry
+	runtime       *reviewerTestRuntime
 	materializer  *reviewerTestMaterializer
 	chat          *reviewerTestChatAPI
 	messenger     *reviewerTestChatMessenger
 	chatAuthority *reviewerTestOperatorAuthority
+}
+
+type reviewerTestRuntime struct {
+	mu    sync.Mutex
+	calls [][2]string
+	err   error
+}
+
+func (runtime *reviewerTestRuntime) StopReviewerSession(_ context.Context, workspace, agentID string) error {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	runtime.calls = append(runtime.calls, [2]string{workspace, agentID})
+	return runtime.err
+}
+
+func (runtime *reviewerTestRuntime) stopCalls() [][2]string {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	return append([][2]string(nil), runtime.calls...)
 }
 
 type reviewerTestMaterializer struct {
@@ -439,28 +458,25 @@ type fallbackPullRequestLister struct {
 	err    error
 }
 
-// reviewerAgentRegistry is the handler test's canonical Agents seam. The
-// application workflow itself is covered in internal/app/prreviewer; route
-// tests use this narrow double so a successful reviewer ensure cannot be
-// mistaken for a write to the legacy store.Agents/Role surfaces.
+// reviewerAgentRegistry is the handler test's purpose-scoped Agents seam.
 type reviewerAgentRegistry struct {
-	mu      sync.Mutex
-	agents  map[string]*agents.Agent
-	ensures []prreviewer.EnsureCommand
-	err     error
+	mu       sync.Mutex
+	agents   map[string]*agents.Agent
+	commands []agents.ManagedReviewerCommand
+	err      error
 }
 
 func newReviewerAgentRegistry() *reviewerAgentRegistry {
 	return &reviewerAgentRegistry{agents: make(map[string]*agents.Agent)}
 }
 
-func (registry *reviewerAgentRegistry) EnsureReviewer(
+func (registry *reviewerAgentRegistry) ConvergeReviewerIdentity(
 	_ context.Context,
-	command prreviewer.EnsureCommand,
-) (*prreviewer.EnsureResult, error) {
+	command agents.ManagedReviewerCommand,
+) (*agents.ManagedReviewerResult, error) {
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
-	registry.ensures = append(registry.ensures, command)
+	registry.commands = append(registry.commands, command)
 	if registry.err != nil {
 		return nil, registry.err
 	}
@@ -472,13 +488,26 @@ func (registry *reviewerAgentRegistry) EnsureReviewer(
 			AgentID:      command.AgentID,
 			Name:         command.AgentID,
 			Kind:         agents.AgentKindSupport,
-			Behavior:     agents.BehaviorReference{RoleName: prreviewer.RoleName},
+			Behavior:     agents.BehaviorReference{RoleName: reviewerRoleName},
 			DesiredState: agents.DesiredRunning,
 			MaxInstances: 1,
+			CreatedAt:    time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 		}
 		registry.agents[key] = agent
 	}
-	return &prreviewer.EnsureResult{RoleCommitted: true, Agent: cloneReviewerAgent(agent)}, nil
+	if command.DesiredState == agents.ManagedReviewerArchived && agent.DeletedAt == nil {
+		deletedAt := time.Now().UTC()
+		agent.DeletedAt = &deletedAt
+		agent.UpdatedAt = deletedAt
+	}
+	if command.DesiredState == agents.ManagedReviewerActive {
+		agent.DeletedAt = nil
+	}
+	return &agents.ManagedReviewerResult{
+		PresetID: command.Preset.PresetID, PresetRevision: command.Preset.Revision,
+		Role:  &agents.Role{WorkspaceKey: command.WorkspaceKey, Name: reviewerRoleName},
+		Agent: cloneReviewerAgent(agent), Changed: true,
+	}, nil
 }
 
 func (registry *reviewerAgentRegistry) GetAgent(
@@ -498,13 +527,13 @@ func (registry *reviewerAgentRegistry) GetAgent(
 func (registry *reviewerAgentRegistry) ListAgents(
 	_ context.Context,
 	workspace string,
-	_ agents.AgentFilter,
+	filter agents.AgentFilter,
 ) ([]*agents.Agent, error) {
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
 	var out []*agents.Agent
 	for key, agent := range registry.agents {
-		if strings.HasPrefix(key, workspace+"\x00") {
+		if strings.HasPrefix(key, workspace+"\x00") && (filter.IncludeDeleted || agent.DeletedAt == nil) {
 			out = append(out, cloneReviewerAgent(agent))
 		}
 	}
@@ -514,7 +543,13 @@ func (registry *reviewerAgentRegistry) ListAgents(
 func (registry *reviewerAgentRegistry) ensureCount() int {
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
-	return len(registry.ensures)
+	count := 0
+	for _, command := range registry.commands {
+		if command.DesiredState == agents.ManagedReviewerActive {
+			count++
+		}
+	}
+	return count
 }
 
 func cloneReviewerAgent(agent *agents.Agent) *agents.Agent {
@@ -527,6 +562,10 @@ func cloneReviewerAgent(agent *agents.Agent) *agents.Agent {
 		for key, value := range agent.Metadata {
 			out.Metadata[key] = value
 		}
+	}
+	if agent.DeletedAt != nil {
+		deletedAt := *agent.DeletedAt
+		out.DeletedAt = &deletedAt
 	}
 	return &out
 }
@@ -560,6 +599,7 @@ func newPRReviewHarnessWithCredential(
 		mux:           http.NewServeMux(),
 		dataDir:       t.TempDir(),
 		reviewers:     newReviewerAgentRegistry(),
+		runtime:       &reviewerTestRuntime{},
 		materializer:  newReviewerTestMaterializer(),
 		chat:          &reviewerTestChatAPI{},
 		chatAuthority: &reviewerTestOperatorAuthority{},
@@ -592,7 +632,8 @@ func newPRReviewHarnessWithCredential(
 	h.module = NewModule(Config{
 		Workspace: buildTestWorkspaceQueries(t, h.store), ConnectorManagement: connectorManagement, ConnectorSealer: connectorSealer,
 		Dispatcher: dispatcher, PullRequests: pullRequests, LocalSettingsDir: h.dataDir,
-		ReviewerProvisioning: h.reviewers, ReviewerAgents: h.reviewers, SourceControl: h.materializer,
+		ReviewerIdentities: h.reviewers, ReviewerAgents: h.reviewers, SourceControl: h.materializer,
+		ReviewerRuntime: h.runtime,
 		InteractionChat: h.chat, InteractionMessenger: h.messenger, InteractionAuthority: h.chatAuthority,
 	})
 	h.module.Register(h.mux)
@@ -627,7 +668,8 @@ func (h *prReviewHarness) rebuildWithDataDir(t *testing.T, dataDir string) {
 	h.module = NewModule(Config{
 		Workspace: buildTestWorkspaceQueries(t, h.store), ConnectorManagement: connectorManagement, ConnectorSealer: connectorSealer,
 		Dispatcher: dispatcher, LocalSettingsDir: dataDir,
-		ReviewerProvisioning: h.reviewers, ReviewerAgents: h.reviewers, SourceControl: h.materializer,
+		ReviewerIdentities: h.reviewers, ReviewerAgents: h.reviewers, SourceControl: h.materializer,
+		ReviewerRuntime: h.runtime,
 		InteractionChat: h.chat, InteractionMessenger: h.messenger, InteractionAuthority: h.chatAuthority,
 	})
 	h.mux = http.NewServeMux()
@@ -752,6 +794,16 @@ func (h *prReviewHarness) post(t *testing.T, path, body string) (int, []byte) {
 	req := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(body))
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), prReviewTestWorkspace))
 	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(middleware.WithUserIdentity(req.Context(), middleware.UserIdentity{UserID: "user-1"}))
+	rec := httptest.NewRecorder()
+	h.mux.ServeHTTP(rec, req)
+	return rec.Code, rec.Body.Bytes()
+}
+
+func (h *prReviewHarness) delete(t *testing.T, path string) (int, []byte) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodDelete, path, nil)
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), prReviewTestWorkspace))
 	req = req.WithContext(middleware.WithUserIdentity(req.Context(), middleware.UserIdentity{UserID: "user-1"}))
 	rec := httptest.NewRecorder()
 	h.mux.ServeHTTP(rec, req)

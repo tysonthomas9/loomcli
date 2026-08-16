@@ -38,8 +38,8 @@ func checkedInSnapshotViolations(report Report) []string {
 	}
 	checkCount("pending decisions", len(report.PendingDecisions), 0)
 	checkCount("enforced analysis profiles", report.AnalysisProfilesEnforced, 11)
-	checkCount("mutation commands", report.MutationCommands, 107)
-	checkCount("direct persistence-write rows", report.DirectPersistenceWrites, 71)
+	checkCount("mutation commands", report.MutationCommands, 108)
+	checkCount("direct persistence-write rows", report.DirectPersistenceWrites, 72)
 	checkCount("runtime components", report.RuntimeComponents, 71)
 	checkCount("runtime goroutine launches", report.RuntimeGoroutineLaunches, 74)
 	checkCount("performance metrics", report.PerformanceMetrics, 6)

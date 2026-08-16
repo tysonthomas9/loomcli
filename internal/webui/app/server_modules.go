@@ -178,6 +178,7 @@ func (app *Server) buildPRReviewModule() {
 		app.connectorManagement,
 		app.connectorSealer,
 		app.connectorDispatcher,
+		app.agentRuntime,
 	)
 	app.prReviewCredentialSeeds = prReviewModule
 	app.wsModules = append(app.wsModules, prReviewModule)

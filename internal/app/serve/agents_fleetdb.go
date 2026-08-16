@@ -271,6 +271,32 @@ func (transport *agentsFleetDBTransport) ApplyAgentServiceLifecycle(
 	}, nil
 }
 
+func (transport *agentsFleetDBTransport) ConvergeManagedReviewer(
+	ctx context.Context,
+	input agentsfleetdb.ManagedReviewerWire,
+) (*agentsfleetdb.ManagedReviewerResultWire, error) {
+	value, err := transport.transport.ConvergeManagedReviewer(ctx, infrafleetdb.ManagedReviewerConvergenceInput{
+		WorkspaceKey: input.WorkspaceKey, AgentID: input.AgentID,
+		DesiredState: agents.ManagedReviewerDesiredState(input.DesiredState),
+		Preset: agents.ManagedReviewerPreset{
+			PresetID: input.Preset.PresetID, Revision: input.Preset.Revision,
+			Role: input.Preset.Role, Agent: input.Preset.Agent,
+		},
+		Fingerprint: input.Preset.Fingerprint, DelegatedActor: input.ActorID,
+	})
+	if err != nil {
+		return nil, translateAgentsFleetDBError(err)
+	}
+	if value == nil {
+		return nil, nil
+	}
+	return &agentsfleetdb.ManagedReviewerResultWire{
+		PresetID: value.PresetID, PresetRevision: value.PresetRevision,
+		PresetFingerprint: value.PresetFingerprint, Role: roleWire(value.Role),
+		Agent: agentServiceWire(value.Agent), Changed: value.Changed,
+	}, nil
+}
+
 func (transport *agentsFleetDBTransport) AcquireAgentOwnership(
 	ctx context.Context,
 	input agentsfleetdb.AcquireOwnershipWire,

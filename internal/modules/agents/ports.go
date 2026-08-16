@@ -54,6 +54,13 @@ type LifecycleStore interface {
 	ApplyLifecycle(context.Context, ApplyLifecycleMutation) (*LifecycleResult, error)
 }
 
+// ManagedReviewerStore is one atomic persistence command. Implementations
+// own preset provenance together with the Role and Agent writes; they must not
+// emulate convergence through generic identity stores.
+type ManagedReviewerStore interface {
+	ConvergeManagedReviewer(context.Context, ManagedReviewerMutation) (*ManagedReviewerResult, error)
+}
+
 // DesiredStateBindingSource is the read-only Automation projection consumed
 // by Agents' desired-state controller. It reveals only whether each binding
 // attached to one Agent is enabled; binding identity and mutation remain

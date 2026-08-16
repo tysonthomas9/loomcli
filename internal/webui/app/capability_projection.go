@@ -1,17 +1,30 @@
 package app
 
 import (
+	"context"
 	"net/http"
 
-	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/webui"
+	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/prreview"
 )
+
+type reviewerRuntimeProjection struct {
+	runtime agentcoord.InteractiveAgentRuntime
+}
+
+func (projection reviewerRuntimeProjection) StopReviewerSession(
+	ctx context.Context,
+	workspace,
+	agentID string,
+) error {
+	return projection.runtime.StopAgent(ctx, workspace, agentID)
+}
 
 // NewTerminalModules adds Interaction's request-bound authority resolver to an
 // otherwise transport-neutral terminal delivery dependency set.
@@ -79,14 +92,16 @@ func NewPRReviewModule(
 	connectorManagement connectorsmodule.Management,
 	connectorSealer connectorsmodule.CredentialSealer,
 	dispatcher connectorsmodule.Dispatcher,
+	reviewerRuntime agentcoord.InteractiveAgentRuntime,
 ) PRReviewModule {
-	var reviewerProvisioning prreviewer.Commands
+	var reviewerIdentities prreview.ReviewerIdentityCommands
 	var reviewerAgents agents.IdentityQueries
 	var reviewerChat interaction.ChatAPI
 	var reviewerMessenger interaction.ChatMessenger
 	var reviewerInteractionAuthority workflowcataloghttp.OperatorAuthorityResolver
+	var reviewerRuntimeCommands prreview.ReviewerRuntimeCommands
 	if capability := config.AgentsCapability; capability != nil {
-		reviewerProvisioning = capability.PRReviewerProvisioning()
+		reviewerIdentities = capability
 		reviewerAgents = capability.AgentsAPI()
 	}
 	if capability := config.InteractionCapability; capability != nil {
@@ -94,11 +109,15 @@ func NewPRReviewModule(
 		reviewerMessenger = capability.ChatMessenger()
 		reviewerInteractionAuthority = capability.OperatorAuthorityResolver()
 	}
+	if reviewerRuntime != nil {
+		reviewerRuntimeCommands = reviewerRuntimeProjection{runtime: reviewerRuntime}
+	}
 	return prreview.NewModule(prreview.Config{
 		Workspace: workspaceQueries, ConnectorManagement: connectorManagement, ConnectorSealer: connectorSealer,
 		Dispatcher: dispatcher, PullRequests: config.SourceControlCheckout,
-		LocalSettingsDir:     config.LocalSettingsDir,
-		ReviewerProvisioning: reviewerProvisioning, ReviewerAgents: reviewerAgents,
+		LocalSettingsDir:   config.LocalSettingsDir,
+		ReviewerIdentities: reviewerIdentities, ReviewerAgents: reviewerAgents,
+		ReviewerRuntime: reviewerRuntimeCommands,
 		SourceControl:   config.SourceControl,
 		InteractionChat: reviewerChat, InteractionMessenger: reviewerMessenger,
 		InteractionAuthority: reviewerInteractionAuthority,

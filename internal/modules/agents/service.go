@@ -18,6 +18,7 @@ type Service struct {
 	identity  AgentIdentityStore
 	desired   DesiredStateStore
 	lifecycle LifecycleStore
+	reviewers ManagedReviewerStore
 	bindings  DesiredStateBindingSource
 	ownership OwnershipStore
 	admission *authority.Admission
@@ -33,16 +34,17 @@ func NewWithLifecycle(
 	desired DesiredStateStore,
 	ownership OwnershipStore,
 	lifecycle LifecycleStore,
+	reviewers ManagedReviewerStore,
 	bindings DesiredStateBindingSource,
 	admission *authority.Admission,
 ) (*Service, error) {
 	if reader == nil || roles == nil || roleStore == nil || identity == nil ||
-		desired == nil || ownership == nil || lifecycle == nil || bindings == nil || admission == nil {
+		desired == nil || ownership == nil || lifecycle == nil || reviewers == nil || bindings == nil || admission == nil {
 		return nil, fmt.Errorf("compose Agents: all capability ports and admission are required: %w", ErrUnavailable)
 	}
 	return &Service{
 		reader: reader, roles: roles, roleStore: roleStore, identity: identity,
-		desired: desired, lifecycle: lifecycle, bindings: bindings,
+		desired: desired, lifecycle: lifecycle, reviewers: reviewers, bindings: bindings,
 		ownership: ownership, admission: admission,
 	}, nil
 }

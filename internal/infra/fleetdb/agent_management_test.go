@@ -195,6 +195,68 @@ func TestAgentManagementRejectsInvalidDelegationBeforeTransport(t *testing.T) {
 	}
 }
 
+func TestAgentManagementConvergesManagedReviewerWithOneFleetRequest(t *testing.T) {
+	fingerprint := strings.Repeat("b", 64)
+	httpClient := newWorkspaceHTTPClient(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost ||
+			request.URL.Path != "/api/v1/WS/managed-reviewer-identities/review-octo-repo-pr-7/converge" {
+			t.Fatalf("request = %s %s", request.Method, request.URL.Path)
+		}
+		if got := request.Header.Get(FleetDelegatedActorHeader); got != "serve-pr-reviewer-convergence" {
+			t.Fatalf("delegated actor = %q", got)
+		}
+		var body struct {
+			DesiredState string `json:"desired_state"`
+			Preset       struct {
+				PresetID    string                                `json:"preset_id"`
+				Revision    int64                                 `json:"revision"`
+				Fingerprint string                                `json:"fingerprint"`
+				Role        agents.ManagedReviewerRoleDefinition  `json:"role"`
+				Agent       agents.ManagedReviewerAgentDefinition `json:"agent"`
+			} `json:"preset"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.DesiredState != string(agents.ManagedReviewerActive) ||
+			body.Preset.PresetID != "reviewer-v1" || body.Preset.Revision != 3 ||
+			body.Preset.Fingerprint != fingerprint ||
+			body.Preset.Role.Name != "pr-reviewer" ||
+			body.Preset.Agent.RoleName != "pr-reviewer" {
+			t.Fatalf("managed reviewer body = %+v", body)
+		}
+		writeAgentManagementJSON(t, response, ManagedReviewerConvergenceResult{
+			PresetID: body.Preset.PresetID, PresetRevision: body.Preset.Revision,
+			PresetFingerprint: body.Preset.Fingerprint, Changed: true,
+		})
+	})
+	client, err := New(Config{BaseURL: "http://fleet.invalid", APIKey: "service-key", HTTPClient: httpClient})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.AgentManagement().ConvergeManagedReviewer(t.Context(), ManagedReviewerConvergenceInput{
+		WorkspaceKey: "WS", AgentID: "review-octo-repo-pr-7",
+		DesiredState: agents.ManagedReviewerActive, Fingerprint: fingerprint,
+		DelegatedActor: "serve-pr-reviewer-convergence",
+		Preset: agents.ManagedReviewerPreset{
+			PresetID: "reviewer-v1", Revision: 3,
+			Role: agents.ManagedReviewerRoleDefinition{
+				Name: "pr-reviewer", Kind: agents.RoleKindInteractive,
+			},
+			Agent: agents.ManagedReviewerAgentDefinition{
+				Kind: agents.AgentKindSupport, DesiredState: agents.DesiredRunning,
+				RoleName: "pr-reviewer", MaxInstances: 1,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || !result.Changed || result.PresetFingerprint != fingerprint {
+		t.Fatalf("managed reviewer result = %#v", result)
+	}
+}
+
 func TestAgentManagementLifecycleUsesSingleFleetCommand(t *testing.T) {
 	now := time.Date(2026, 7, 30, 12, 0, 0, 123456000, time.UTC)
 	generationID := "0123456789abcdef0123456789abcdef"

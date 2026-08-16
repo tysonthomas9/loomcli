@@ -20,7 +20,7 @@ vi.mock("@/api/common", () => {
   }
 
   return {
-    api: { GET: vi.fn(), POST: vi.fn() },
+    api: { GET: vi.fn(), POST: vi.fn(), DELETE: vi.fn() },
     apiErrorFromResponse: vi.fn((error: unknown, response?: Response) => {
       return new MockApiError(
         response?.status ?? 0,
@@ -65,8 +65,10 @@ let getPullRequestDiff: typeof import("../prReview").getPullRequestDiff;
 let getPullRequestDetail: typeof import("../prReview").getPullRequestDetail;
 let getReviewerConversation: typeof import("../prReview").getReviewerConversation;
 let postPullRequestReview: typeof import("../prReview").postPullRequestReview;
+let archiveReviewer: typeof import("../prReview").archiveReviewer;
 let mockApiGet: ReturnType<typeof vi.fn>;
 let mockApiPost: ReturnType<typeof vi.fn>;
+let mockApiDelete: ReturnType<typeof vi.fn>;
 
 describe("prReview API", () => {
   beforeEach(async () => {
@@ -76,12 +78,14 @@ describe("prReview API", () => {
     const common = await import("@/api/common");
     mockApiGet = vi.mocked(common.api.GET);
     mockApiPost = vi.mocked(common.api.POST);
+    mockApiDelete = vi.mocked(common.api.DELETE);
 
     const prReview = await import("../prReview");
     getPullRequestDiff = prReview.getPullRequestDiff;
     getPullRequestDetail = prReview.getPullRequestDetail;
     getReviewerConversation = prReview.getReviewerConversation;
     postPullRequestReview = prReview.postPullRequestReview;
+    archiveReviewer = prReview.archiveReviewer;
   });
 
   it("fetches and unwraps a pull request diff", async () => {
@@ -176,6 +180,27 @@ describe("prReview API", () => {
       },
     );
     expect(result).toEqual(conversation);
+  });
+
+  it("archives and unwraps the checkout-specific reviewer", async () => {
+    const archived = { agent_name: "review-hello-pr-7", archived: true };
+    mockApiDelete.mockResolvedValueOnce({
+      data: { success: true, data: archived },
+      error: undefined,
+      response: new Response(null, { status: 200, statusText: "OK" }),
+    });
+
+    await expect(archiveReviewer("WS", "octocat", "hello", 7)).resolves.toEqual(
+      archived,
+    );
+    expect(mockApiDelete).toHaveBeenCalledWith(
+      "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/reviewer",
+      {
+        params: {
+          path: { ws: "WS", owner: "octocat", repo: "hello", number: 7 },
+        },
+      },
+    );
   });
 
   it("posts and unwraps a pull request review", async () => {
