@@ -168,8 +168,6 @@ func serveReadyViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 		})
 		return true
 	}
-	// The web UI reviews quarantined recommendations; without this opt-in, it hides issues humans may claim.
-	args.IncludeRecommended = true
 	opts := backend.ReadyOpts{
 		Assignee:           args.Assignee,
 		Unassigned:         args.Unassigned,
@@ -344,9 +342,6 @@ func handleReadyWithPool(pool readyConnectionGetter) http.HandlerFunc {
 			})
 			return
 		}
-		// The web UI reviews quarantined recommendations; without this opt-in, it hides issues humans may claim.
-		args.IncludeRecommended = true
-
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 
@@ -476,6 +471,12 @@ func parseReadyParams(r *http.Request) (*rpc.ReadyArgs, error) {
 
 	var err error
 	if args.Unassigned, err = handler.ParseBoolParam(q, "unassigned"); err != nil {
+		return nil, err
+	}
+	// Quarantine opt-in is caller-driven: the same endpoint serves human
+	// review surfaces (which pass true) and automatic consumers like
+	// `loom data ready` (which must stay excluded by default).
+	if args.IncludeRecommended, err = handler.ParseBoolParam(q, "include_recommended"); err != nil {
 		return nil, err
 	}
 	if err := parseReadyIntParams(q, args); err != nil {

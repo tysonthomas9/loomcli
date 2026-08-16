@@ -144,8 +144,8 @@ func TestHandleReady_BackendWhenNoPool(t *testing.T) {
 	if !resp.Success {
 		t.Fatalf("expected success=true; error=%q", resp.Error)
 	}
-	if len(be.readyOpts) != 1 || !be.readyOpts[0].IncludeRecommended {
-		t.Fatalf("Ready opts = %#v, want IncludeRecommended=true", be.readyOpts)
+	if len(be.readyOpts) != 1 || be.readyOpts[0].IncludeRecommended {
+		t.Fatalf("Ready opts = %#v, want IncludeRecommended=false by default", be.readyOpts)
 	}
 	if len(resp.Data) != 2 {
 		t.Fatalf("data length = %d, want 2", len(resp.Data))

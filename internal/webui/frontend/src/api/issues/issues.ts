@@ -156,6 +156,9 @@ export async function getReadyIssues(
 ): Promise<Issue[]> {
   const mapped = mapWorkFilterToQueryParams(options ?? {});
   const query = cleanQuery({
+    // The web UI is the human review surface for quarantined `recommended`
+    // issues; agents consuming the same endpoint stay excluded by default.
+    include_recommended: true,
     sort: mapped.sort as string | undefined,
     assignee: mapped.assignee as string | undefined,
     type: mapped.type as string | undefined,

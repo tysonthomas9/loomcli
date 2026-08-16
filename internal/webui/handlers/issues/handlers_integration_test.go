@@ -1173,28 +1173,40 @@ func TestHandleReady_ContentType(t *testing.T) {
 	}
 }
 
-func TestHandleReady_PoolIncludesRecommended(t *testing.T) {
+func TestHandleReady_PoolIncludeRecommendedParamDriven(t *testing.T) {
+	newHandler := func(captured **rpc.ReadyArgs) http.HandlerFunc {
+		client := &mockReadyClient{
+			readyFunc: func(args *rpc.ReadyArgs) (*rpc.Response, error) {
+				*captured = args
+				return &rpc.Response{Success: true, Data: json.RawMessage(`[]`)}, nil
+			},
+		}
+		pool := &mockReadyPool{
+			getFunc: func(context.Context) (readyClient, error) { return client, nil },
+		}
+		return handleReadyWithPool(pool)
+	}
+
+	// Default: automatic consumers (loom data ready) must stay excluded.
 	var captured *rpc.ReadyArgs
-	client := &mockReadyClient{
-		readyFunc: func(args *rpc.ReadyArgs) (*rpc.Response, error) {
-			captured = args
-			return &rpc.Response{Success: true, Data: json.RawMessage(`[]`)}, nil
-		},
-	}
-	pool := &mockReadyPool{
-		getFunc: func(context.Context) (readyClient, error) { return client, nil },
-	}
-
-	handler := handleReadyWithPool(pool)
-	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
 	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	newHandler(&captured).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/ready", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d; body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if captured == nil || captured.IncludeRecommended {
+		t.Fatalf("Ready args = %#v, want IncludeRecommended=false by default", captured)
+	}
 
+	// Explicit opt-in: the web UI review surface passes the param.
+	captured = nil
+	rr = httptest.NewRecorder()
+	newHandler(&captured).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/ready?include_recommended=true", nil))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status code = %d, want %d; body=%s", rr.Code, http.StatusOK, rr.Body.String())
 	}
 	if captured == nil || !captured.IncludeRecommended {
-		t.Fatalf("Ready args = %#v, want IncludeRecommended=true", captured)
+		t.Fatalf("Ready args = %#v, want IncludeRecommended=true with opt-in param", captured)
 	}
 }
 
