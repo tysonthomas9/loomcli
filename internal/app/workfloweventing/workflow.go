@@ -32,10 +32,10 @@ type EmitRequest struct {
 // admission.
 type Workflow struct {
 	authority ExecutionAuthorityProvider
-	admission automation.EventAdmission
+	admission automation.WorkflowEventAdmission
 }
 
-func New(authorityProvider ExecutionAuthorityProvider, admission automation.EventAdmission) (*Workflow, error) {
+func New(authorityProvider ExecutionAuthorityProvider, admission automation.WorkflowEventAdmission) (*Workflow, error) {
 	switch {
 	case authorityProvider == nil:
 		return nil, fmt.Errorf("%w: execution authority provider is required", ErrUnavailable)
@@ -56,7 +56,7 @@ func (workflow *Workflow) Emit(ctx context.Context, parent VerifiedRun, request 
 	if workflow == nil || workflow.authority == nil || workflow.admission == nil {
 		return nil, ErrUnavailable
 	}
-	request, err := validateRequest(parent, request)
+	request, err := validateProvenance(parent, request)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +65,7 @@ func (workflow *Workflow) Emit(ctx context.Context, parent VerifiedRun, request 
 	if err != nil {
 		return nil, fmt.Errorf("derive execution authority: %w", err)
 	}
-	result, err := workflow.admission.AdmitEvent(ctx, automation.NewExecutionEventAuthority(executionAuthority), automation.AdmitEventCommand{
+	result, err := workflow.admission.AdmitWorkflowEvent(ctx, executionAuthority, automation.WorkflowEvent{
 		WorkspaceKey:          request.WorkspaceKey,
 		SourceEventID:         request.EventID,
 		EventType:             request.EventType,
@@ -73,8 +73,8 @@ func (workflow *Workflow) Emit(ctx context.Context, parent VerifiedRun, request 
 		ExecutionNodeID:       parent.NodeID,
 		ExecutionLeaseID:      parent.LeaseID,
 		ExecutionFencingToken: parent.FencingToken,
-		Payload:               cloneRawMessage(request.Payload),
-		SubjectAttrs:          cloneStringMap(request.SubjectAttrs),
+		Payload:               request.Payload,
+		SubjectAttrs:          request.SubjectAttrs,
 	})
 	if err != nil {
 		return result, fmt.Errorf("admit workflow event: %w", err)
@@ -82,13 +82,10 @@ func (workflow *Workflow) Emit(ctx context.Context, parent VerifiedRun, request 
 	return result, nil
 }
 
-func validateRequest(parent VerifiedRun, request EmitRequest) (EmitRequest, error) {
+func validateProvenance(parent VerifiedRun, request EmitRequest) (EmitRequest, error) {
 	request.WorkspaceKey = strings.TrimSpace(request.WorkspaceKey)
-	request.EventID = strings.TrimSpace(request.EventID)
-	request.EventType = strings.TrimSpace(request.EventType)
-	request.SubjectRef = strings.TrimSpace(request.SubjectRef)
-	if request.WorkspaceKey == "" || request.EventID == "" || request.EventType == "" {
-		return EmitRequest{}, fmt.Errorf("%w: workspace, event id, and event type are required", ErrInvalidRequest)
+	if request.WorkspaceKey == "" {
+		return EmitRequest{}, fmt.Errorf("%w: workspace is required", ErrInvalidRequest)
 	}
 	if strings.TrimSpace(parent.WorkspaceKey) == "" || strings.TrimSpace(parent.RunID) == "" || parent.Status != "running" ||
 		strings.TrimSpace(parent.NodeID) == "" || strings.TrimSpace(parent.LeaseID) == "" || parent.FencingToken <= 0 {
@@ -97,25 +94,5 @@ func validateRequest(parent VerifiedRun, request EmitRequest) (EmitRequest, erro
 	if parent.WorkspaceKey != request.WorkspaceKey {
 		return EmitRequest{}, fmt.Errorf("%w: parent workspace does not match request workspace", ErrInvalidRequest)
 	}
-	request.Payload = cloneRawMessage(request.Payload)
-	request.SubjectAttrs = cloneStringMap(request.SubjectAttrs)
 	return request, nil
-}
-
-func cloneRawMessage(value json.RawMessage) json.RawMessage {
-	if value == nil {
-		return nil
-	}
-	return append(json.RawMessage(nil), value...)
-}
-
-func cloneStringMap(value map[string]string) map[string]string {
-	if value == nil {
-		return nil
-	}
-	clone := make(map[string]string, len(value))
-	for key, item := range value {
-		clone[key] = item
-	}
-	return clone
 }

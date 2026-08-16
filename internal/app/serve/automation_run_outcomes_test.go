@@ -20,21 +20,21 @@ func (fn runOutcomeAuthorityProviderFunc) AuthorityForVerifiedSource(ctx context
 	return fn(ctx, source)
 }
 
-type runOutcomeAdmissionFunc func(context.Context, automation.EventAuthority, automation.AdmitEventCommand) (*automation.AdmissionResult, error)
+type runOutcomeAdmissionFunc func(context.Context, authority.SystemAuthority, automation.SystemEvent) (*automation.AdmissionResult, error)
 
-func (fn runOutcomeAdmissionFunc) AdmitEvent(ctx context.Context, eventAuthority automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+func (fn runOutcomeAdmissionFunc) AdmitSystemEvent(ctx context.Context, eventAuthority authority.SystemAuthority, command automation.SystemEvent) (*automation.AdmissionResult, error) {
 	return fn(ctx, eventAuthority, command)
 }
 
 func TestAutomationDriverRunOutcomePublisherMapsTrustedEnvelope(t *testing.T) {
 	var gotSource systemeventing.VerifiedSource
-	var gotCommand automation.AdmitEventCommand
+	var gotCommand automation.SystemEvent
 	workflow, err := systemeventing.New(
 		runOutcomeAuthorityProviderFunc(func(_ context.Context, source systemeventing.VerifiedSource) (authority.SystemAuthority, error) {
 			gotSource = source
 			return authority.SystemAuthority{}, nil
 		}),
-		runOutcomeAdmissionFunc(func(_ context.Context, _ automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+		runOutcomeAdmissionFunc(func(_ context.Context, _ authority.SystemAuthority, command automation.SystemEvent) (*automation.AdmissionResult, error) {
 			gotCommand = command
 			return &automation.AdmissionResult{}, nil
 		}),
@@ -66,8 +66,7 @@ func TestAutomationDriverRunOutcomePublisherMapsTrustedEnvelope(t *testing.T) {
 	}) {
 		t.Fatalf("verified source = %+v", gotSource)
 	}
-	if gotCommand.WorkspaceKey != "WS" || gotCommand.SourceKind != automation.SourceKindInternal ||
-		gotCommand.SourceRef != "run-1" || gotCommand.SourceEventID != outcome.EventID ||
+	if gotCommand.WorkspaceKey != "WS" || gotCommand.SourceRef != "run-1" || gotCommand.SourceEventID != outcome.EventID ||
 		gotCommand.EventType != driver.RunFinishedEventType || gotCommand.SubjectRef != "run-1" ||
 		gotCommand.ParentEventID != "event-parent" || gotCommand.EpicID != "EPIC-1" ||
 		!gotCommand.OccurredAt.Equal(occurredAt) || string(gotCommand.Payload) != string(payload) {
@@ -81,7 +80,7 @@ func TestAutomationDriverRunOutcomePublisherRejectsForgedEnvelope(t *testing.T) 
 		runOutcomeAuthorityProviderFunc(func(context.Context, systemeventing.VerifiedSource) (authority.SystemAuthority, error) {
 			return authority.SystemAuthority{}, nil
 		}),
-		runOutcomeAdmissionFunc(func(context.Context, automation.EventAuthority, automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+		runOutcomeAdmissionFunc(func(context.Context, authority.SystemAuthority, automation.SystemEvent) (*automation.AdmissionResult, error) {
 			calls++
 			return &automation.AdmissionResult{}, nil
 		}),

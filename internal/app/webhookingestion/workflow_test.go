@@ -24,9 +24,9 @@ func (function authorityProviderFunc) AuthorityForVerifiedWebhook(ctx context.Co
 	return function(ctx, request)
 }
 
-type admissionFunc func(context.Context, automation.EventAuthority, automation.AdmitEventCommand) (*automation.AdmissionResult, error)
+type admissionFunc func(context.Context, authority.WebhookAuthority, automation.WebhookEvent) (*automation.AdmissionResult, error)
 
-func (function admissionFunc) AdmitEvent(ctx context.Context, eventAuthority automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+func (function admissionFunc) AdmitWebhookEvent(ctx context.Context, eventAuthority authority.WebhookAuthority, command automation.WebhookEvent) (*automation.AdmissionResult, error) {
 	return function(ctx, eventAuthority, command)
 }
 
@@ -60,7 +60,7 @@ func TestIngestOrdersVerificationAuthorityAndAdmission(t *testing.T) {
 			order = append(order, "authority")
 			return authority.WebhookAuthority{}, nil
 		}),
-		admissionFunc(func(context.Context, automation.EventAuthority, automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+		admissionFunc(func(context.Context, authority.WebhookAuthority, automation.WebhookEvent) (*automation.AdmissionResult, error) {
 			order = append(order, "admit")
 			return &automation.AdmissionResult{}, nil
 		}),
@@ -88,7 +88,7 @@ func TestIngestVerificationDenialStopsBeforeAuthority(t *testing.T) {
 			order = append(order, "authority")
 			return authority.WebhookAuthority{}, nil
 		}),
-		admissionFunc(func(context.Context, automation.EventAuthority, automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+		admissionFunc(func(context.Context, authority.WebhookAuthority, automation.WebhookEvent) (*automation.AdmissionResult, error) {
 			order = append(order, "admit")
 			return nil, nil
 		}),
@@ -117,7 +117,7 @@ func TestIngestAuthorityDenialStopsBeforeAdmission(t *testing.T) {
 			order = append(order, "authority")
 			return authority.WebhookAuthority{}, denied
 		}),
-		admissionFunc(func(context.Context, automation.EventAuthority, automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+		admissionFunc(func(context.Context, authority.WebhookAuthority, automation.WebhookEvent) (*automation.AdmissionResult, error) {
 			order = append(order, "admit")
 			return nil, nil
 		}),
@@ -144,8 +144,6 @@ func TestIngestValidatesWorkspaceAndSourceBeforeVerification(t *testing.T) {
 		{name: "internal source", mutate: func(request *IngestRequest) { request.SourceKind = "INTERNAL" }},
 		{name: "cron source", mutate: func(request *IngestRequest) { request.SourceKind = automation.SourceKindCron }},
 		{name: "route", mutate: func(request *IngestRequest) { request.RouteKey = "" }},
-		{name: "source event id", mutate: func(request *IngestRequest) { request.SourceEventID = "" }},
-		{name: "event type", mutate: func(request *IngestRequest) { request.EventType = "" }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -156,7 +154,7 @@ func TestIngestValidatesWorkspaceAndSourceBeforeVerification(t *testing.T) {
 					calls++
 					return authority.WebhookAuthority{}, nil
 				}),
-				admissionFunc(func(context.Context, automation.EventAuthority, automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+				admissionFunc(func(context.Context, authority.WebhookAuthority, automation.WebhookEvent) (*automation.AdmissionResult, error) {
 					calls++
 					return nil, nil
 				}),
@@ -190,7 +188,7 @@ func TestIngestRejectsMissingSourceRef(t *testing.T) {
 			derived = request
 			return authority.WebhookAuthority{}, nil
 		}),
-		admissionFunc(func(context.Context, automation.EventAuthority, automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+		admissionFunc(func(context.Context, authority.WebhookAuthority, automation.WebhookEvent) (*automation.AdmissionResult, error) {
 			return &automation.AdmissionResult{}, nil
 		}),
 	)
@@ -209,7 +207,7 @@ func TestIngestMapsExactAutomationCommand(t *testing.T) {
 	request := validIngestRequest()
 	var gotVerification VerificationRequest
 	var gotAuthority AuthorityRequest
-	var gotCommand automation.AdmitEventCommand
+	var gotCommand automation.WebhookEvent
 	wantResult := &automation.AdmissionResult{Replayed: true}
 	workflow, err := New(
 		verifierFunc(func(_ context.Context, verification VerificationRequest) error {
@@ -220,7 +218,7 @@ func TestIngestMapsExactAutomationCommand(t *testing.T) {
 			gotAuthority = request
 			return authority.WebhookAuthority{}, nil
 		}),
-		admissionFunc(func(_ context.Context, _ automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+		admissionFunc(func(_ context.Context, _ authority.WebhookAuthority, command automation.WebhookEvent) (*automation.AdmissionResult, error) {
 			gotCommand = command
 			return wantResult, nil
 		}),
@@ -253,7 +251,7 @@ func TestIngestMapsExactAutomationCommand(t *testing.T) {
 	if !reflect.DeepEqual(gotAuthority, wantAuthority) {
 		t.Errorf("authority request = %#v, want %#v", gotAuthority, wantAuthority)
 	}
-	wantCommand := automation.AdmitEventCommand{
+	wantCommand := automation.WebhookEvent{
 		WorkspaceKey:     request.WorkspaceKey,
 		SourceKind:       request.SourceKind,
 		SourceRef:        request.SourceRef,
@@ -271,8 +269,10 @@ func TestIngestMapsExactAutomationCommand(t *testing.T) {
 	if !reflect.DeepEqual(gotCommand, wantCommand) {
 		t.Errorf("admission command = %#v, want %#v", gotCommand, wantCommand)
 	}
-	if gotCommand.ParentEventID != "" || gotCommand.EpicID != "" {
-		t.Errorf("caller-controlled provenance reached admission: %+v", gotCommand)
+	for _, forbidden := range []string{"Origin", "HopDepth", "SignatureStatus", "IdempotencyKey", "ParentEventID", "EpicID", "Authority"} {
+		if _, exists := reflect.TypeOf(automation.WebhookEvent{}).FieldByName(forbidden); exists {
+			t.Errorf("WebhookEvent exposes forbidden caller field %q", forbidden)
+		}
 	}
 
 	for _, forbidden := range []string{"Origin", "HopDepth", "SignatureStatus", "IdempotencyKey", "ParentEventID", "EpicID", "DriverVersionID"} {
@@ -290,7 +290,7 @@ func TestIngestMapsExactAutomationCommand(t *testing.T) {
 	}
 }
 
-func TestIngestDefensivelyCopiesPayloadAndAttributes(t *testing.T) {
+func TestIngestProtectsExactBytesFromVerifierMutationAndMapsContent(t *testing.T) {
 	request := validIngestRequest()
 	wantPayload := append(json.RawMessage(nil), request.Payload...)
 	wantAttrs := map[string]string{"repo": "acme/widgets", "pr_number": "42"}
@@ -302,12 +302,10 @@ func TestIngestDefensivelyCopiesPayloadAndAttributes(t *testing.T) {
 		authorityProviderFunc(func(context.Context, AuthorityRequest) (authority.WebhookAuthority, error) {
 			return authority.WebhookAuthority{}, nil
 		}),
-		admissionFunc(func(_ context.Context, _ automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+		admissionFunc(func(_ context.Context, _ authority.WebhookAuthority, command automation.WebhookEvent) (*automation.AdmissionResult, error) {
 			if !reflect.DeepEqual(command.Payload, wantPayload) || !reflect.DeepEqual(command.SubjectAttrs, wantAttrs) {
 				t.Fatalf("command payload/attrs = (%s, %v), want (%s, %v)", command.Payload, command.SubjectAttrs, wantPayload, wantAttrs)
 			}
-			command.Payload[0] = '['
-			command.SubjectAttrs["repo"] = "mutated"
 			return &automation.AdmissionResult{}, nil
 		}),
 	)
@@ -327,7 +325,7 @@ func TestNewAndRequestBoundsFailClosed(t *testing.T) {
 	noopAuthority := authorityProviderFunc(func(context.Context, AuthorityRequest) (authority.WebhookAuthority, error) {
 		return authority.WebhookAuthority{}, nil
 	})
-	noopAdmission := admissionFunc(func(context.Context, automation.EventAuthority, automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+	noopAdmission := admissionFunc(func(context.Context, authority.WebhookAuthority, automation.WebhookEvent) (*automation.AdmissionResult, error) {
 		return &automation.AdmissionResult{}, nil
 	})
 	if _, err := New(nil, noopAuthority, noopAdmission); !errors.Is(err, ErrUnavailable) {
@@ -344,11 +342,6 @@ func TestNewAndRequestBoundsFailClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	oversizedPayload := validIngestRequest()
-	oversizedPayload.Payload = make(json.RawMessage, MaxPayloadBytes+1)
-	if _, err := workflow.Ingest(t.Context(), oversizedPayload); !errors.Is(err, ErrInvalidRequest) {
-		t.Fatalf("oversized payload error = %v, want %v", err, ErrInvalidRequest)
-	}
 	oversizedSignature := validIngestRequest()
 	oversizedSignature.PresentedSignature = string(make([]byte, MaxPresentedSignatureBytes+1))
 	if _, err := workflow.Ingest(t.Context(), oversizedSignature); !errors.Is(err, ErrInvalidRequest) {
@@ -364,7 +357,7 @@ func TestIngestPreservesAdmissionResultAlongsideError(t *testing.T) {
 		authorityProviderFunc(func(context.Context, AuthorityRequest) (authority.WebhookAuthority, error) {
 			return authority.WebhookAuthority{}, nil
 		}),
-		admissionFunc(func(context.Context, automation.EventAuthority, automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+		admissionFunc(func(context.Context, authority.WebhookAuthority, automation.WebhookEvent) (*automation.AdmissionResult, error) {
 			return wantResult, admissionErr
 		}),
 	)
@@ -377,7 +370,7 @@ func TestIngestPreservesAdmissionResultAlongsideError(t *testing.T) {
 	}
 }
 
-func TestIngestVerifiesExactBytesBeforeNormalizingEmptyPayload(t *testing.T) {
+func TestIngestPassesExactVerifiedBytesToAutomation(t *testing.T) {
 	request := validIngestRequest()
 	request.Payload = json.RawMessage(" \n\t")
 	wantSignedBytes := append(json.RawMessage(nil), request.Payload...)
@@ -393,9 +386,9 @@ func TestIngestVerifiesExactBytesBeforeNormalizingEmptyPayload(t *testing.T) {
 		authorityProviderFunc(func(context.Context, AuthorityRequest) (authority.WebhookAuthority, error) {
 			return authority.WebhookAuthority{}, nil
 		}),
-		admissionFunc(func(_ context.Context, _ automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
-			if string(command.Payload) != `{}` {
-				t.Fatalf("admitted payload = %q, want normalized empty object", command.Payload)
+		admissionFunc(func(_ context.Context, _ authority.WebhookAuthority, command automation.WebhookEvent) (*automation.AdmissionResult, error) {
+			if !reflect.DeepEqual(command.Payload, wantSignedBytes) {
+				t.Fatalf("admitted payload = %q, want exact verified bytes %q", command.Payload, wantSignedBytes)
 			}
 			return &automation.AdmissionResult{}, nil
 		}),
@@ -422,7 +415,7 @@ func TestIngestVerifiesBeforeRejectingMalformedJSON(t *testing.T) {
 			t.Fatal("malformed unverified payload reached authority derivation")
 			return authority.WebhookAuthority{}, nil
 		}),
-		admissionFunc(func(context.Context, automation.EventAuthority, automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+		admissionFunc(func(context.Context, authority.WebhookAuthority, automation.WebhookEvent) (*automation.AdmissionResult, error) {
 			t.Fatal("malformed unverified payload reached admission")
 			return nil, nil
 		}),
@@ -435,24 +428,25 @@ func TestIngestVerifiesBeforeRejectingMalformedJSON(t *testing.T) {
 	}
 
 	authorityCalls := 0
+	admissionCalls := 0
 	workflow, err = New(
 		verifierFunc(func(context.Context, VerificationRequest) error { return nil }),
 		authorityProviderFunc(func(context.Context, AuthorityRequest) (authority.WebhookAuthority, error) {
 			authorityCalls++
 			return authority.WebhookAuthority{}, nil
 		}),
-		admissionFunc(func(context.Context, automation.EventAuthority, automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
-			t.Fatal("malformed verified payload reached admission")
-			return nil, nil
+		admissionFunc(func(context.Context, authority.WebhookAuthority, automation.WebhookEvent) (*automation.AdmissionResult, error) {
+			admissionCalls++
+			return nil, automation.ErrInvalid
 		}),
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := workflow.Ingest(t.Context(), request); !errors.Is(err, ErrInvalidRequest) {
-		t.Fatalf("verified malformed payload error = %v, want %v", err, ErrInvalidRequest)
+	if _, err := workflow.Ingest(t.Context(), request); !errors.Is(err, automation.ErrInvalid) {
+		t.Fatalf("verified malformed payload error = %v, want %v", err, automation.ErrInvalid)
 	}
-	if authorityCalls != 0 {
-		t.Fatalf("malformed payload authority calls = %d, want 0", authorityCalls)
+	if authorityCalls != 1 || admissionCalls != 1 {
+		t.Fatalf("malformed payload authority/admission calls = %d/%d, want 1/1", authorityCalls, admissionCalls)
 	}
 }

@@ -172,7 +172,7 @@ func (testWorkflowEventAuthorityProvider) AuthorityForVerifiedRun(context.Contex
 
 type testEventAdmission struct{}
 
-func (testEventAdmission) AdmitEvent(_ context.Context, _ automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+func (testEventAdmission) AdmitWorkflowEvent(_ context.Context, _ authority.ExecutionAuthority, command automation.WorkflowEvent) (*automation.AdmissionResult, error) {
 	return &automation.AdmissionResult{
 		EventType: command.EventType,
 		RouteKey:  "internal." + strings.TrimSpace(command.EventType),

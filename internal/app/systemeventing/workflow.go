@@ -34,7 +34,7 @@ type EmitRequest struct {
 
 type Workflow struct {
 	authority AuthorityProvider
-	admission automation.EventAdmission
+	admission automation.SystemEventAdmission
 }
 
 type issueJournalEmitter struct{ workflow *Workflow }
@@ -43,7 +43,7 @@ type runOutcomeEmitter struct{ workflow *Workflow }
 var _ IssueJournalEmitter = (*issueJournalEmitter)(nil)
 var _ RunOutcomeEmitter = (*runOutcomeEmitter)(nil)
 
-func New(provider AuthorityProvider, admission automation.EventAdmission) (*Workflow, error) {
+func New(provider AuthorityProvider, admission automation.SystemEventAdmission) (*Workflow, error) {
 	switch {
 	case provider == nil:
 		return nil, fmt.Errorf("%w: authority provider is required", ErrUnavailable)
@@ -111,7 +111,7 @@ func (workflow *Workflow) emit(ctx context.Context, source VerifiedSource, reque
 	if workflow == nil || workflow.authority == nil || workflow.admission == nil {
 		return nil, ErrUnavailable
 	}
-	request, err := validateRequest(source, request)
+	request, err := validateProvenance(source, request)
 	if err != nil {
 		return nil, err
 	}
@@ -119,9 +119,8 @@ func (workflow *Workflow) emit(ctx context.Context, source VerifiedSource, reque
 	if err != nil {
 		return nil, fmt.Errorf("derive system authority: %w", err)
 	}
-	result, err := workflow.admission.AdmitEvent(ctx, automation.NewSystemEventAuthority(systemAuthority), automation.AdmitEventCommand{
+	result, err := workflow.admission.AdmitSystemEvent(ctx, systemAuthority, automation.SystemEvent{
 		WorkspaceKey:  request.WorkspaceKey,
-		SourceKind:    automation.SourceKindInternal,
 		SourceRef:     request.SourceRef,
 		SourceEventID: request.SourceEventID,
 		EventType:     request.EventType,
@@ -129,8 +128,8 @@ func (workflow *Workflow) emit(ctx context.Context, source VerifiedSource, reque
 		ParentEventID: request.ParentEventID,
 		EpicID:        request.EpicID,
 		OccurredAt:    request.OccurredAt,
-		Payload:       cloneRawMessage(request.Payload),
-		SubjectAttrs:  cloneStringMap(request.SubjectAttrs),
+		Payload:       request.Payload,
+		SubjectAttrs:  request.SubjectAttrs,
 	})
 	if err != nil {
 		return result, fmt.Errorf("admit system event: %w", err)
@@ -138,42 +137,17 @@ func (workflow *Workflow) emit(ctx context.Context, source VerifiedSource, reque
 	return result, nil
 }
 
-func validateRequest(source VerifiedSource, request EmitRequest) (EmitRequest, error) {
+func validateProvenance(source VerifiedSource, request EmitRequest) (EmitRequest, error) {
 	if strings.TrimSpace(source.ComponentID) == "" || source.ComponentID != strings.TrimSpace(source.ComponentID) ||
 		strings.TrimSpace(source.WorkspaceKey) == "" || source.WorkspaceKey != strings.TrimSpace(source.WorkspaceKey) {
 		return EmitRequest{}, fmt.Errorf("%w: verified component and workspace are required", ErrInvalidRequest)
 	}
 	request.WorkspaceKey = strings.TrimSpace(request.WorkspaceKey)
-	request.SourceEventID = strings.TrimSpace(request.SourceEventID)
-	request.EventType = strings.TrimSpace(request.EventType)
-	if source.ComponentID != DriverRunOutcomeComponentID {
-		request.SourceRef = strings.TrimSpace(request.SourceRef)
-		request.SubjectRef = strings.TrimSpace(request.SubjectRef)
-	}
-	request.ParentEventID = strings.TrimSpace(request.ParentEventID)
-	request.EpicID = strings.TrimSpace(request.EpicID)
-	if request.WorkspaceKey == "" || request.SourceEventID == "" || request.EventType == "" {
-		return EmitRequest{}, fmt.Errorf("%w: workspace, event id, and event type are required", ErrInvalidRequest)
+	if request.WorkspaceKey == "" {
+		return EmitRequest{}, fmt.Errorf("%w: workspace is required", ErrInvalidRequest)
 	}
 	if source.WorkspaceKey != request.WorkspaceKey {
 		return EmitRequest{}, fmt.Errorf("%w: verified source workspace does not match request", ErrInvalidRequest)
 	}
-	request.Payload = cloneRawMessage(request.Payload)
-	request.SubjectAttrs = cloneStringMap(request.SubjectAttrs)
 	return request, nil
-}
-
-func cloneRawMessage(value json.RawMessage) json.RawMessage {
-	return append(json.RawMessage(nil), value...)
-}
-
-func cloneStringMap(value map[string]string) map[string]string {
-	if value == nil {
-		return nil
-	}
-	clone := make(map[string]string, len(value))
-	for key, item := range value {
-		clone[key] = item
-	}
-	return clone
 }

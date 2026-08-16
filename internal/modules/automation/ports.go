@@ -219,7 +219,7 @@ type AdmissionStore interface {
 
 // ExecutionEmissionContext is re-derived by Execution from an
 // ExecutionAuthority. In particular, callers cannot choose their emitting run,
-// parent event, actor, epic, or fencing token through AdmitEventCommand.
+// parent event, actor, epic, or fencing token through WorkflowEvent.
 type ExecutionEmissionContext struct {
 	WorkspaceKey  string
 	RunID         string

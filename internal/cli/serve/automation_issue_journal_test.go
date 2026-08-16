@@ -19,21 +19,21 @@ func (function systemAuthorityProviderFunc) AuthorityForVerifiedSource(ctx conte
 	return function(ctx, source)
 }
 
-type systemAdmissionFunc func(context.Context, automation.EventAuthority, automation.AdmitEventCommand) (*automation.AdmissionResult, error)
+type systemAdmissionFunc func(context.Context, authority.SystemAuthority, automation.SystemEvent) (*automation.AdmissionResult, error)
 
-func (function systemAdmissionFunc) AdmitEvent(ctx context.Context, eventAuthority automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+func (function systemAdmissionFunc) AdmitSystemEvent(ctx context.Context, eventAuthority authority.SystemAuthority, command automation.SystemEvent) (*automation.AdmissionResult, error) {
 	return function(ctx, eventAuthority, command)
 }
 
 func TestAutomationIssueJournalEmitterUsesNamedSystemWorkflow(t *testing.T) {
 	var gotSource systemeventing.VerifiedSource
-	var gotCommand automation.AdmitEventCommand
+	var gotCommand automation.SystemEvent
 	workflow, err := systemeventing.New(
 		systemAuthorityProviderFunc(func(_ context.Context, source systemeventing.VerifiedSource) (authority.SystemAuthority, error) {
 			gotSource = source
 			return authority.SystemAuthority{}, nil
 		}),
-		systemAdmissionFunc(func(_ context.Context, _ automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+		systemAdmissionFunc(func(_ context.Context, _ authority.SystemAuthority, command automation.SystemEvent) (*automation.AdmissionResult, error) {
 			gotCommand = command
 			return &automation.AdmissionResult{
 				Event:     &automation.Event{SourceEventID: command.SourceEventID, EventType: "issue.created", ActorRef: "journal-actor"},
@@ -59,7 +59,7 @@ func TestAutomationIssueJournalEmitterUsesNamedSystemWorkflow(t *testing.T) {
 	if gotSource.ComponentID != systemeventing.IssueJournalBridgeComponentID || gotSource.WorkspaceKey != "WS" || gotSource.ActorRef != "journal-actor" {
 		t.Fatalf("verified source = %+v", gotSource)
 	}
-	if gotCommand.SourceKind != automation.SourceKindInternal || gotCommand.SourceEventID != "fleet-journal-1" || gotCommand.ActorRef != "" {
+	if gotCommand.SourceEventID != "fleet-journal-1" {
 		t.Fatalf("admission command = %+v", gotCommand)
 	}
 	if result == nil || result.EventType != "issue.created" || result.RouteKey != "internal.issue.created" || result.Origin != automation.EventOriginSystem {
@@ -72,7 +72,7 @@ func TestAutomationIssueJournalEmitterMapsNoListenerAndRejectsForgedOrigin(t *te
 		systemAuthorityProviderFunc(func(context.Context, systemeventing.VerifiedSource) (authority.SystemAuthority, error) {
 			return authority.SystemAuthority{}, nil
 		}),
-		systemAdmissionFunc(func(context.Context, automation.EventAuthority, automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+		systemAdmissionFunc(func(context.Context, authority.SystemAuthority, automation.SystemEvent) (*automation.AdmissionResult, error) {
 			return nil, automation.ErrNoMatchingBinding
 		}),
 	)

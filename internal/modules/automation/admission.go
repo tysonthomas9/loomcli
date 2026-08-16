@@ -33,32 +33,68 @@ const (
 	internalAdmissionHashPrefix          = "internal:sha256:"
 )
 
-func (s *Service) AdmitEvent(ctx context.Context, eventAuth EventAuthority, command AdmitEventCommand) (*AdmissionResult, error) {
-	workspace, err := normalizeRequired("workspace", command.WorkspaceKey)
+func (s *Service) AdmitWebhookEvent(ctx context.Context, auth authority.WebhookAuthority, event WebhookEvent) (*AdmissionResult, error) {
+	workspace, err := normalizeRequired("workspace", event.WorkspaceKey)
 	if err != nil {
 		return nil, err
 	}
 	if s == nil || s.authority == nil {
 		return nil, authority.ErrAdmissionDenied
 	}
-	if err := s.authority.Admit(ActionAdmitEvent, workspace, eventAuth.value); err != nil {
+	if err := s.authority.Admit(ActionAdmitEvent, workspace, auth); err != nil {
 		return nil, err
 	}
-	return s.admitEventAuthorized(ctx, eventAuth, command)
+	derived, err := deriveWebhookAdmission(auth, event)
+	if err != nil {
+		return nil, err
+	}
+	return s.admitEventAuthorized(ctx, derived)
 }
 
-// admitEventAuthorized is the single admission-policy implementation shared
-// by public ingestion and already-authorized runtime commands. Callers in this
-// package must admit their own exact action before invoking it.
-func (s *Service) admitEventAuthorized(ctx context.Context, eventAuth EventAuthority, command AdmitEventCommand) (*AdmissionResult, error) {
+func (s *Service) AdmitWorkflowEvent(ctx context.Context, auth authority.ExecutionAuthority, event WorkflowEvent) (*AdmissionResult, error) {
+	workspace, err := normalizeRequired("workspace", event.WorkspaceKey)
+	if err != nil {
+		return nil, err
+	}
+	if s == nil || s.authority == nil {
+		return nil, authority.ErrAdmissionDenied
+	}
+	if err := s.authority.Admit(ActionAdmitEvent, workspace, auth); err != nil {
+		return nil, err
+	}
+	derived, err := s.deriveWorkflowAdmission(ctx, auth, event)
+	if err != nil {
+		return nil, err
+	}
+	return s.admitEventAuthorized(ctx, derived)
+}
+
+func (s *Service) AdmitSystemEvent(ctx context.Context, auth authority.SystemAuthority, event SystemEvent) (*AdmissionResult, error) {
+	workspace, err := normalizeRequired("workspace", event.WorkspaceKey)
+	if err != nil {
+		return nil, err
+	}
+	if s == nil || s.authority == nil {
+		return nil, authority.ErrAdmissionDenied
+	}
+	if err := s.authority.Admit(ActionAdmitEvent, workspace, auth); err != nil {
+		return nil, err
+	}
+	derived, err := s.deriveSystemAdmission(ctx, auth, event)
+	if err != nil {
+		return nil, err
+	}
+	return s.admitEventAuthorized(ctx, derived)
+}
+
+// admitEventAuthorized is Automation's single private admission-policy
+// implementation. Origin adapters can supply only an already-derived value;
+// callers outside this package cannot construct or exchange provenance.
+func (s *Service) admitEventAuthorized(ctx context.Context, derived *derivedAdmission) (*AdmissionResult, error) {
 	if s == nil || s.matcher == nil || s.events == nil || s.admissions == nil || s.execution == nil || s.eventTrustPolicy == nil {
 		return nil, ErrUnavailable
 	}
 
-	derived, err := s.deriveAdmission(ctx, eventAuth, command)
-	if err != nil {
-		return nil, err
-	}
 	if err := validateEventAdmissionTrust(s.eventTrustPolicy, derived); err != nil {
 		return nil, err
 	}
@@ -74,22 +110,22 @@ func (s *Service) admitEventAuthorized(ctx context.Context, eventAuth EventAutho
 	}
 
 	if replayed, err := s.probeAdmissionReplay(ctx, derived); err == nil {
-		return s.dispatchReplayedAdmission(ctx, eventAuth, command, replayed)
+		return s.dispatchReplayedAdmission(ctx, derived, replayed)
 	} else if !errors.Is(err, ErrAdmissionReplayNotFound) {
 		return nil, err
 	}
 
 	matched, err := s.matchBindings(ctx, derived.workspace, derived.routeKey)
 	if err != nil {
-		return s.recheckAdmissionReplay(ctx, eventAuth, command, derived, err)
+		return s.recheckAdmissionReplay(ctx, derived, err)
 	}
 	bindings := matched.Bindings
 	if len(bindings) == 0 {
-		return s.recheckAdmissionReplay(ctx, eventAuth, command, derived, errors.Join(ErrNoMatchingBinding, ErrNotFound))
+		return s.recheckAdmissionReplay(ctx, derived, errors.Join(ErrNoMatchingBinding, ErrNotFound))
 	}
 	reservation, err := s.buildMatchedEventReservation(ctx, derived, matched)
 	if err != nil {
-		return s.recheckAdmissionReplay(ctx, eventAuth, command, derived, err)
+		return s.recheckAdmissionReplay(ctx, derived, err)
 	}
 	reserved, err := s.reserveEvent(ctx, reservation)
 	if err != nil {
@@ -128,14 +164,12 @@ func (s *Service) probeAdmissionReplay(ctx context.Context, derived *derivedAdmi
 
 func (s *Service) recheckAdmissionReplay(
 	ctx context.Context,
-	eventAuth EventAuthority,
-	command AdmitEventCommand,
 	derived *derivedAdmission,
 	preflightErr error,
 ) (*AdmissionResult, error) {
 	replayed, err := s.probeAdmissionReplay(ctx, derived)
 	if err == nil {
-		return s.dispatchReplayedAdmission(ctx, eventAuth, command, replayed)
+		return s.dispatchReplayedAdmission(ctx, derived, replayed)
 	}
 	if errors.Is(err, ErrAdmissionReplayNotFound) {
 		return nil, preflightErr
@@ -152,17 +186,19 @@ func (s *Service) recheckAdmissionReplay(
 // an unbounded retry mechanism.
 func (s *Service) dispatchReplayedAdmission(
 	ctx context.Context,
-	eventAuth EventAuthority,
-	command AdmitEventCommand,
+	derived *derivedAdmission,
 	replayed *ReservationResult,
 ) (*AdmissionResult, error) {
 	result, err := s.dispatchAdmission(ctx, replayed)
 	if err != nil || !exhaustedTaskReadyReplayNeedsRecovery(result) {
 		return result, err
 	}
-	recovery := command
-	recovery.SourceEventID = taskReadyExhaustedRecoverySourceEventID(result.Event.SourceEventID)
-	return s.admitEventAuthorized(ctx, eventAuth, recovery)
+	recovery := *derived
+	recovery.sourceEventID = taskReadyExhaustedRecoverySourceEventID(result.Event.SourceEventID)
+	recovery.idempotencyKey = InternalEventIdempotencyKey(recovery.workspace, recovery.sourceEventID)
+	recovery.payload = cloneRawMessage(derived.payload)
+	recovery.subjectAttrs = cloneStringMap(derived.subjectAttrs)
+	return s.admitEventAuthorized(ctx, &recovery)
 }
 
 func exhaustedTaskReadyReplayNeedsRecovery(result *AdmissionResult) bool {
@@ -790,7 +826,7 @@ func unsafeLegacyWorkflowIssueBinding(binding *Binding, event *Event) bool {
 // workflow that creates an issue retrigger itself forever at hop depth zero.
 //
 // ActorRef is safe to consult here because Automation derives it from sealed
-// authority or verified execution context; AdmitEventCommand cannot override
+// authority or verified execution context; origin-specific event inputs cannot override
 // it for system or workflow admission. The FleetDB reservation boundary uses
 // the same canonical classifier when it atomically revalidates actor filters.
 func eventActorKind(origin EventOrigin, actor string) string {
