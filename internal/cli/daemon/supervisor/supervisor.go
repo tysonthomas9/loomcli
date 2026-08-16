@@ -65,16 +65,36 @@ type Supervisor struct {
 	LivenessTimeout time.Duration
 
 	// livenessStreak counts how many consecutive scans each goroutine's tick
-	// has been observed stale. The watchdog only signals fatal once a tick has
-	// been stale for livenessStaleScansBeforeFatal scans in a row, so a single
-	// transient stall (a slow control-plane cycle, brief mutex contention) does
-	// not crash the daemon. lastLivenessScan records when scanTicks last ran so
-	// it can detect a process-wide suspension (sleep/swap/SIGSTOP) — after which
-	// every tick looks ancient — and skip the fatal for that scan. Both fields
-	// are owned exclusively by the single livenessWatchdog goroutine (tests call
-	// scanTicks serially), so they need no synchronization.
-	livenessStreak   map[string]int
-	lastLivenessScan time.Time
+	// has been observed stale, and livenessStreakStart records when each streak
+	// began. The watchdog only signals fatal once a tick has been stale for
+	// livenessStaleScansBeforeFatal scans in a row AND that streak has spanned
+	// livenessMinStaleSpan of real runtime, so neither a single transient stall
+	// (a slow control-plane cycle, brief mutex contention) nor several scans
+	// crammed into one macOS DarkWake burst crashes the daemon.
+	//
+	// lastLivenessScan and lastLivenessScanWall both record when scanTicks last
+	// ran, in two different clock domains, so the watchdog can tell "the process
+	// was suspended" from "a goroutine is wedged". Two clocks are needed because
+	// on darwin the monotonic clock (mach_absolute_time) is SUSPENDED while the
+	// machine sleeps: after a wake the monotonic scan gap reads a normal ~10s
+	// while tick ages — computed from time.Unix values that carry no monotonic
+	// reading, so Sub falls back to wall clock — include the entire sleep. A
+	// single-clock guard is therefore blind exactly when it is needed, and the
+	// daemon kills itself seconds after every wake. lastLivenessScanWall is
+	// stored via Round(0) so it is wall-only and its gap measures elapsed wall
+	// time regardless of suspension.
+	//
+	// livenessFatalSignaled is set once the watchdog has signaled fatal; the
+	// watchdog then stops scanning, because the daemon is already draining and
+	// further Error records plus goroutine dumps are pure noise.
+	//
+	// All of these fields are owned exclusively by the single livenessWatchdog
+	// goroutine (tests call scanTicks serially), so they need no synchronization.
+	livenessStreak        map[string]int
+	livenessStreakStart   map[string]time.Time
+	lastLivenessScan      time.Time
+	lastLivenessScanWall  time.Time
+	livenessFatalSignaled bool
 
 	Concurrency *ConcurrencyTracker
 	EventBus    EventEmitter
