@@ -316,7 +316,7 @@ func TestWriteStateFile_RoundTripsQuarantinedTasks(t *testing.T) {
 			WriteFailed:    true,
 		},
 	}
-	if err := writeStateFile(stateFilePath, time.Now(), nil, quarantined, 3); err != nil {
+	if err := writeStateFile(stateFilePath, time.Now(), nil, nil, quarantined, 3); err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
 	}
 
@@ -339,7 +339,7 @@ func TestWriteStateFile_RoundTripsQuarantinedTasks(t *testing.T) {
 	}
 
 	// Empty quarantine list keeps the field out of the JSON entirely.
-	if err := writeStateFile(stateFilePath, time.Now(), nil, nil, 3); err != nil {
+	if err := writeStateFile(stateFilePath, time.Now(), nil, nil, nil, 3); err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
 	}
 	raw, err := os.ReadFile(stateFilePath)
@@ -666,7 +666,7 @@ func TestWriteStateFile_Success(t *testing.T) {
 		},
 	}
 
-	err := writeStateFile(stateFilePath, startedAt, agents, nil, 3)
+	err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, 3)
 
 	if err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
@@ -699,7 +699,7 @@ func TestWriteStateFile_AtomicWrite(t *testing.T) {
 
 	// Write state
 	agents := []SupervisedAgentStatus{{Worktree: "test", Role: "plan"}}
-	if err := writeStateFile(stateFilePath, startedAt, agents, nil, 3); err != nil {
+	if err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, 3); err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
 	}
 
@@ -867,7 +867,7 @@ func TestStateFileLifecycle(t *testing.T) {
 	agents := []SupervisedAgentStatus{
 		{Worktree: "falcon", Role: "plan", PID: os.Getpid()},
 	}
-	if err := writeStateFile(stateFilePath, startedAt, agents, nil, 3); err != nil {
+	if err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, 3); err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
 	}
 
@@ -882,7 +882,7 @@ func TestStateFileLifecycle(t *testing.T) {
 
 	// Update state (add agent)
 	agents = append(agents, SupervisedAgentStatus{Worktree: "nova", Role: "task"})
-	if err := writeStateFile(stateFilePath, startedAt, agents, nil, 3); err != nil {
+	if err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, 3); err != nil {
 		t.Fatalf("writeStateFile() update error = %v", err)
 	}
 
@@ -1300,7 +1300,7 @@ func TestWriteStateFile_WithStopReason(t *testing.T) {
 		},
 	}
 
-	err := writeStateFile(stateFilePath, startedAt, agents, nil, 3)
+	err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, 3)
 	if err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
 	}
@@ -1503,7 +1503,7 @@ func TestWriteStateFile_NewFields_RoundTrip(t *testing.T) {
 		},
 	}
 
-	err := writeStateFile(stateFilePath, startedAt, agents, nil, 3)
+	err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, 3)
 	if err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
 	}

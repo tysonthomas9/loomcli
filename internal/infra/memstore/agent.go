@@ -52,6 +52,8 @@ func (s *agentStore) Create(_ context.Context, in store.AgentCreate) (*domain.Ag
 		MaxConcurrency:   in.MaxConcurrency,
 		BudgetPolicy:     in.BudgetPolicy,
 		DesiredState:     in.DesiredState,
+		DrainNodeID:      in.DrainNodeID,
+		DrainExpiresAt:   in.DrainExpiresAt,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
@@ -147,6 +149,7 @@ func applyAgentRuntimePatch(a *domain.Agent, patch store.AgentUpdate) {
 	if patch.DesiredState != nil {
 		a.DesiredState = *patch.DesiredState
 	}
+	applyAgentDrainPatch(a, patch)
 	if patch.Hooks != nil {
 		// A non-nil empty pipeline is the explicit clear marker.
 		if patch.Hooks.IsEmpty() {
@@ -154,6 +157,27 @@ func applyAgentRuntimePatch(a *domain.Agent, patch store.AgentUpdate) {
 		} else {
 			a.Hooks = patch.Hooks.Clone()
 		}
+	}
+}
+
+// applyAgentDrainPatch mirrors fleet-db's drain semantics so daemon tests
+// written against memstore exercise the real rule rather than a laxer one.
+//
+// Clearing is DERIVED, not a wire signal: whenever the patch moves
+// desired_state to anything other than "draining", both drain fields are
+// dropped regardless of what the patch says about them. That is what makes
+// start/stop/restart clear a drain with no client-side bookkeeping.
+func applyAgentDrainPatch(a *domain.Agent, patch store.AgentUpdate) {
+	if patch.DrainNodeID != nil {
+		a.DrainNodeID = *patch.DrainNodeID
+	}
+	if patch.DrainExpiresAt != nil {
+		expires := *patch.DrainExpiresAt
+		a.DrainExpiresAt = &expires
+	}
+	if patch.DesiredState != nil && *patch.DesiredState != domain.AgentDesiredDraining {
+		a.DrainNodeID = ""
+		a.DrainExpiresAt = nil
 	}
 }
 
@@ -173,5 +197,9 @@ func cloneAgent(a *domain.Agent) *domain.Agent {
 	out.Repos = append([]string(nil), a.Repos...)
 	out.RepoGroups = append([]string(nil), a.RepoGroups...)
 	out.Hooks = a.Hooks.Clone()
+	if a.DrainExpiresAt != nil {
+		expires := *a.DrainExpiresAt
+		out.DrainExpiresAt = &expires
+	}
 	return &out
 }

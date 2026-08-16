@@ -79,7 +79,7 @@ func TestPrintIssueDetailTextIncludesOptionalFields(t *testing.T) {
 }
 
 func TestPrintAgentListTextJSONAndEmpty(t *testing.T) {
-	entries := []gen.AgentControlEntry{
+	entries := []agentEntry{
 		{Name: "falcon", Role: "task", Status: "idle"},
 		{Name: "nova", Role: "plan", Status: "running"},
 	}
@@ -102,7 +102,7 @@ func TestPrintAgentListTextJSONAndEmpty(t *testing.T) {
 		if err := printAgentList(&out, entries, formatJSON); err != nil {
 			t.Fatalf("printAgentList json: %v", err)
 		}
-		var decoded []gen.AgentControlEntry
+		var decoded []agentEntry
 		if err := json.Unmarshal(out.Bytes(), &decoded); err != nil {
 			t.Fatalf("decode agent list JSON: %v", err)
 		}
@@ -158,5 +158,56 @@ func TestMonitorWorkspaceNameFallbacks(t *testing.T) {
 	}
 	if got := monitorWorkspaceName(&gen.MonitorStatusResponse{}); got != "(default)" {
 		t.Fatalf("empty fallback = %q, want default", got)
+	}
+}
+
+// TestPrintAgentListStoreBackedColumns covers the regression that left the
+// STATUS (and ROLE) columns blank: the store-backed server marshals
+// domain.Agent directly, so it sends role_name/live_status/state and no
+// "role" or "status" key at all.
+func TestPrintAgentListStoreBackedColumns(t *testing.T) {
+	entries := []agentEntry{
+		{Name: "falcon", RoleName: "task", State: "idle", DesiredState: "draining", LiveStatus: "draining"},
+		{Name: "nova", RoleName: "plan", State: "active", LiveStatus: "idle"},
+		{Name: "ghost", RoleName: "task", State: "stopped"},
+	}
+
+	var out bytes.Buffer
+	if err := printAgentList(&out, entries, formatText); err != nil {
+		t.Fatalf("printAgentList: %v", err)
+	}
+	got := out.String()
+
+	for _, line := range strings.Split(strings.TrimSpace(got), "\n")[1:] {
+		if strings.HasSuffix(strings.TrimRight(line, " "), " ") {
+			t.Errorf("row has a trailing blank column: %q", line)
+		}
+	}
+	for _, need := range []string{"falcon", "draining", "nova", "idle", "ghost", "stopped", "task", "plan"} {
+		if !strings.Contains(got, need) {
+			t.Errorf("output missing %q:\n%s", need, got)
+		}
+	}
+}
+
+// TestAgentDisplayStatusPrecedence pins the fallback order, including the
+// socket-mode payload staying exactly as it was.
+func TestAgentDisplayStatusPrecedence(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry agentEntry
+		want  string
+	}{
+		{"live status wins", agentEntry{Status: "s", State: "st", LiveStatus: "draining"}, "draining"},
+		{"socket mode status is unchanged", agentEntry{Status: "running", State: "st"}, "running"},
+		{"state is the last resort", agentEntry{State: "stopped"}, "stopped"},
+		{"nothing renders a sentinel, never a blank", agentEntry{}, "unknown"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := agentDisplayStatus(tc.entry); got != tc.want {
+				t.Errorf("agentDisplayStatus() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

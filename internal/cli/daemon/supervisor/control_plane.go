@@ -142,6 +142,16 @@ func (s *Supervisor) updateAgentRuntimeState(ap *AgentProcess, state domain.Agen
 	}
 }
 
+// ResolveNodeID exposes this supervisor's node identity to the daemon package.
+//
+// Callers that run before Start() must use this rather than reading the NodeID
+// field: NodeID is assigned inside startControlPlaneNode, which runs from
+// Start(), so it is still empty while NewDaemon is building the agent list.
+// This method falls back to the same PID-derived identity that registration
+// would have used, which is what makes a drain from a previous supervisor
+// resolve as superseded rather than as an unattributable one.
+func (s *Supervisor) ResolveNodeID() string { return s.resolveNodeID() }
+
 func (s *Supervisor) resolveNodeID() string {
 	if s.NodeID != "" {
 		return s.NodeID

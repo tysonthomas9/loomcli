@@ -37,6 +37,10 @@ const (
 	AgentLiveWorking AgentLiveStatus = "working"
 	// AgentLiveIdle means no live session was found.
 	AgentLiveIdle AgentLiveStatus = "idle"
+	// AgentLiveDraining means the agent is under a drain. Strictly weaker than
+	// working: an agent finishing its last task under a drain still reports
+	// working, so this only ever displaces idle.
+	AgentLiveDraining AgentLiveStatus = "draining"
 )
 
 // AgentHookActionType enumerates the completion-hook actions the supervisor
@@ -517,6 +521,13 @@ type Agent struct {
 	MaxConcurrency int               `json:"max_concurrency,omitempty"`
 	BudgetPolicy   string            `json:"budget_policy,omitempty"`
 	DesiredState   AgentDesiredState `json:"desired_state,omitempty"`
+	// DrainNodeID and DrainExpiresAt address a drain to one supervisor for a
+	// bounded time, making `draining` one-shot rather than a permanent park.
+	// They are meaningless unless DesiredState is AgentDesiredDraining, and
+	// fleet-db enforces that server-side: any update moving desired_state off
+	// "draining" clears both. Interpret them only through ResolveDrain.
+	DrainNodeID    string     `json:"drain_node_id,omitempty"`
+	DrainExpiresAt *time.Time `json:"drain_expires_at,omitempty"`
 	// Hooks holds supervisor-owned post-run pipelines. Nil or empty preserves
 	// the pre-hook behavior: the agent's own prompt does its bookkeeping.
 	Hooks     *AgentHooks `json:"hooks,omitempty"`
