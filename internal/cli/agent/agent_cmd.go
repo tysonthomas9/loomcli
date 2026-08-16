@@ -60,6 +60,7 @@ Template Variables (all optional — reference only what you want):
   {{.EpicID}}           Epic this agent is scoped to (--parent), or empty
 
   {{.WorkspaceBlock}}   Multi-repo workspace section with the repo table
+  {{.WorkspaceNotes}}   Approved workspace notes maintained by scout
   {{.EpicScope}}        "Only select tasks from this epic" instruction
   {{.SafetyBlock}}      Shared multi-agent safety rules
   {{.CheckpointBlock}}  Previous-attempt context after a crash or preemption
@@ -351,6 +352,9 @@ func buildCustomPromptData(agentName string, workspace *config.WorkspaceConfig, 
 
 	if refs.has("WorkspaceBlock") {
 		data.WorkspaceBlock = buildWorkspaceContextBlock(workspace)
+	}
+	if refs.has("WorkspaceNotes") {
+		data.WorkspaceNotes = buildWorkspaceNotesBlock(workspace)
 	}
 	if refs.has("EpicScope") {
 		data.EpicScope = buildEpicScopeBlock(agentParentID)

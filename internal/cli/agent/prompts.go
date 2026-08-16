@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/tysonthomas9/loomcli/internal/agentprompt"
+	"github.com/tysonthomas9/loomcli/internal/agentstate"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
@@ -24,6 +25,7 @@ type promptTemplateData struct {
 	AgentName         string
 	Role              string
 	WorkspaceBlock    string
+	WorkspaceNotes    string
 	EpicScope         string
 	SafetyBlock       string
 	ReadyJSON         string
@@ -161,6 +163,39 @@ func buildWorkspaceContextBlock(workspace *config.WorkspaceConfig) string {
 	return sb.String()
 }
 
+const (
+	maxWorkspaceNotesBytes = 32 << 10
+	workspaceNotesMarker   = "... [workspace notes truncated at 32 KiB]"
+)
+
+// buildWorkspaceNotesBlock loads the approved workspace-level notes for worker
+// prompts. Notes are advisory, so a missing or unreadable file never blocks
+// prompt generation.
+func buildWorkspaceNotesBlock(workspace *config.WorkspaceConfig) string {
+	if workspace == nil || strings.TrimSpace(workspace.Path) == "" {
+		return ""
+	}
+
+	path := filepath.Join(workspace.Path, "agents.md")
+	data, err := os.ReadFile(path) //nolint:gosec // G304: workspace root comes from the active workspace config
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("warning: could not read workspace notes %s: %v; continuing without them", path, err)
+		}
+		return ""
+	}
+
+	notes := strings.TrimSpace(agentstate.StripFenceMarkerLines(string(data)))
+	if notes == "" {
+		return ""
+	}
+	notes = truncateUTF8SafeWithMarker(notes, maxWorkspaceNotesBytes, workspaceNotesMarker)
+
+	return "\n### Workspace Notes (Maintained by Scout)\n\n" +
+		"These workspace notes are maintained by the scout agent and are advisory context for this worker.\n\n" +
+		notes + "\n\n"
+}
+
 // buildEpicScopeBlock returns the epic-scoping instruction injected into a
 // prompt when the agent is confined to one epic. Returns empty string when
 // parentID is empty (the agent may select from the whole backlog).
@@ -279,6 +314,7 @@ func GeneratePlanningPrompt(agentName string, workspace *config.WorkspaceConfig,
 	prompt := renderPrompt("planning", promptTemplateData{
 		AgentName:      agentName,
 		WorkspaceBlock: buildWorkspaceContextBlock(workspace),
+		WorkspaceNotes: buildWorkspaceNotesBlock(workspace),
 		EpicScope:      epicScope,
 		SafetyBlock:    buildSafetyGuardrailsBlock(),
 		ReadyJSON:      readyJSON,
@@ -311,6 +347,7 @@ func GenerateTaskPrompt(agentName string, workspace *config.WorkspaceConfig, par
 	prompt := renderPrompt("task", promptTemplateData{
 		AgentName:         agentName,
 		WorkspaceBlock:    buildWorkspaceContextBlock(workspace),
+		WorkspaceNotes:    buildWorkspaceNotesBlock(workspace),
 		EpicScope:         epicScope,
 		SafetyBlock:       buildSafetyGuardrailsBlock(),
 		ReadyJSON:         readyJSON,
@@ -332,6 +369,7 @@ func GenerateFleetPlanningPrompt(agentName, taskID string, workspace *config.Wor
 	prompt := renderPrompt("fleet_planning", promptTemplateData{
 		AgentName:      agentName,
 		WorkspaceBlock: buildWorkspaceContextBlock(workspace),
+		WorkspaceNotes: buildWorkspaceNotesBlock(workspace),
 		SafetyBlock:    buildSafetyGuardrailsBlock(),
 		TaskID:         taskID,
 		DesignFormat:   resolveDesignFormat(workspace),
@@ -346,6 +384,7 @@ func GenerateFleetTaskPrompt(agentName, taskID string, workspace *config.Workspa
 	prompt := renderPrompt("fleet_task", promptTemplateData{
 		AgentName:         agentName,
 		WorkspaceBlock:    buildWorkspaceContextBlock(workspace),
+		WorkspaceNotes:    buildWorkspaceNotesBlock(workspace),
 		SafetyBlock:       buildSafetyGuardrailsBlock(),
 		TaskID:            taskID,
 		TestStep:          buildTestStep(caps),
@@ -568,13 +607,17 @@ func ReadOnlyPreamble() string {
 // truncateUTF8Safe truncates s to at most max bytes without splitting a
 // multi-byte UTF-8 character, appending a truncation marker if shortened.
 func truncateUTF8Safe(s string, max int) string { //nolint:unparam // max is parameterized for readability at call sites
+	return truncateUTF8SafeWithMarker(s, max, "... [truncated]")
+}
+
+func truncateUTF8SafeWithMarker(s string, max int, marker string) string {
 	if len(s) <= max {
 		return s
 	}
 	for max > 0 && !utf8.RuneStart(s[max]) {
 		max--
 	}
-	return s[:max] + "\n... [truncated]"
+	return s[:max] + "\n" + marker
 }
 
 func init() {

@@ -3,7 +3,7 @@
 You are a disciplined software engineer. Follow this workflow EXACTLY for ONE task.
 
 **Your agent name is: {{ .AgentName }}** (Loom actor is set automatically)
-{{ .WorkspaceBlock }}{{ .EpicScope }}
+{{ .WorkspaceBlock }}{{ .WorkspaceNotes }}{{ .EpicScope }}
 ### Multi-Agent Safety Rules
 
 You are running in a parallel multi-agent environment. Follow these rules strictly:

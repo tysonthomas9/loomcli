@@ -66,12 +66,13 @@ at a time. Referencing none of them leaves the file rendered exactly as written.
 | `{{.TaskID}}` | The task the daemon pre-claimed for this run. Empty in one-shot and auto mode, where the agent claims its own task mid-turn. |
 | `{{.EpicID}}` | The epic the agent is scoped to (`--parent`), or empty. |
 | `{{.WorkspaceBlock}}` | Multi-repo workspace section: the repo/path/branch table plus the "run git here, run `loom data` there" rules. Empty outside workspace mode. |
+| `{{.WorkspaceNotes}}` | Approved workspace notes — `agents.md` at the workspace root, maintained by the scout agent. Fence marker lines are stripped, content is capped at 32 KiB. Empty when the file is missing or empty. |
 | `{{.EpicScope}}` | The "only select tasks from this epic" instruction the built-in prompts use. Empty when `EpicID` is empty. |
 | `{{.SafetyBlock}}` | Shared multi-agent safety rules (do not stash, do not switch branches, do not clean up another agent's files). |
 | `{{.CheckpointBlock}}` | "PREVIOUS ATTEMPT CONTEXT" for the last crashed or preempted attempt in this worktree. Empty when there is no checkpoint or a session resume is armed. |
 | `{{.TaskDetail}}` | Full detail of `TaskID`: title, status, priority, labels, description, design, acceptance criteria, notes, dependencies. |
 
-The last five are computed only when the template names them, so a prompt that
+The last six are computed only when the template names them, so a prompt that
 ignores `{{.TaskDetail}}` never pays for the issue-backend fetch it would need.
 The detection reads the parsed template, so mentioning a variable name in prose
 is not a reference; a template that renders the whole context wholesale with

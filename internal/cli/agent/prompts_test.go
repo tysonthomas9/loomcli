@@ -5,7 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
+	"github.com/tysonthomas9/loomcli/internal/agentstate"
 	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
@@ -548,6 +550,132 @@ func TestBuildWorkspaceContextBlock_DefaultBranch(t *testing.T) {
 	// Verify the repo row contains "main"
 	if !strings.Contains(result, "| myrepo | ./myrepo | main |") {
 		t.Errorf("expected table row with default branch 'main', got:\n%s", result)
+	}
+}
+
+func TestBuildWorkspaceNotesBlock(t *testing.T) {
+	t.Run("missing file", func(t *testing.T) {
+		got := buildWorkspaceNotesBlock(&WorkspaceConfig{Path: t.TempDir()})
+		if got != "" {
+			t.Fatalf("buildWorkspaceNotesBlock() = %q, want empty", got)
+		}
+	})
+
+	t.Run("empty file", func(t *testing.T) {
+		root := t.TempDir()
+		if err := os.WriteFile(filepath.Join(root, "agents.md"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got := buildWorkspaceNotesBlock(&WorkspaceConfig{Path: root})
+		if got != "" {
+			t.Fatalf("buildWorkspaceNotesBlock() = %q, want empty", got)
+		}
+	})
+
+	t.Run("plain content is wrapped", func(t *testing.T) {
+		root := t.TempDir()
+		if err := os.WriteFile(filepath.Join(root, "agents.md"), []byte("Use the shared staging environment.\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got := buildWorkspaceNotesBlock(&WorkspaceConfig{Path: root})
+		for _, want := range []string{
+			"### Workspace Notes (Maintained by Scout)",
+			"advisory context for this worker",
+			"Use the shared staging environment.",
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("buildWorkspaceNotesBlock() missing %q:\n%s", want, got)
+			}
+		}
+	})
+
+	t.Run("fence markers are stripped but content remains", func(t *testing.T) {
+		root := t.TempDir()
+		begin, end := agentstate.FenceMarkers("scout-west")
+		content := "Human note\n" + begin + "\nScout-owned note\n" + end + "\nTrailing note\n"
+		if err := os.WriteFile(filepath.Join(root, "agents.md"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got := buildWorkspaceNotesBlock(&WorkspaceConfig{Path: root})
+		for _, want := range []string{"Human note", "Scout-owned note", "Trailing note"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("buildWorkspaceNotesBlock() missing fenced content %q:\n%s", want, got)
+			}
+		}
+		for _, marker := range []string{begin, end} {
+			if strings.Contains(got, marker) {
+				t.Errorf("buildWorkspaceNotesBlock() retained fence marker %q:\n%s", marker, got)
+			}
+		}
+	})
+
+	t.Run("content over 32 KiB is clamped with marker", func(t *testing.T) {
+		root := t.TempDir()
+		content := strings.Repeat("x", (32<<10)+100)
+		if err := os.WriteFile(filepath.Join(root, "agents.md"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got := buildWorkspaceNotesBlock(&WorkspaceConfig{Path: root})
+		wantTail := strings.Repeat("x", 32<<10) + "\n... [workspace notes truncated at 32 KiB]"
+		if !strings.Contains(got, wantTail) {
+			t.Errorf("buildWorkspaceNotesBlock() did not clamp at 32 KiB with marker")
+		}
+	})
+
+	t.Run("clamp does not split a multi-byte rune", func(t *testing.T) {
+		root := t.TempDir()
+		prefix := strings.Repeat("a", (32<<10)-1)
+		content := prefix + "éafter"
+		if err := os.WriteFile(filepath.Join(root, "agents.md"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got := buildWorkspaceNotesBlock(&WorkspaceConfig{Path: root})
+		if !utf8.ValidString(got) {
+			t.Fatal("buildWorkspaceNotesBlock() returned invalid UTF-8")
+		}
+		wantTail := prefix + "\n... [workspace notes truncated at 32 KiB]"
+		if !strings.Contains(got, wantTail) {
+			t.Errorf("buildWorkspaceNotesBlock() split or retained the straddling rune")
+		}
+		if strings.Contains(got, "éafter") {
+			t.Error("buildWorkspaceNotesBlock() retained content beyond the byte clamp")
+		}
+	})
+}
+
+func TestGenerateWorkerPrompts_WorkspaceNotes(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "agents.md"), []byte("Prefer the shared integration harness.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workspace := &WorkspaceConfig{Path: root}
+
+	withNotes := map[string]string{
+		"planning":       GeneratePlanningPrompt("planner", workspace, ""),
+		"task":           GenerateTaskPrompt("worker", workspace, "", "claude"),
+		"fleet planning": GenerateFleetPlanningPrompt("planner", "task-1", workspace),
+		"fleet task":     GenerateFleetTaskPrompt("worker", "task-1", workspace, "claude"),
+	}
+	for name, prompt := range withNotes {
+		t.Run(name+" includes notes", func(t *testing.T) {
+			for _, want := range []string{"Workspace Notes (Maintained by Scout)", "Prefer the shared integration harness."} {
+				if !strings.Contains(prompt, want) {
+					t.Errorf("prompt missing workspace notes %q:\n%s", want, prompt)
+				}
+			}
+		})
+	}
+
+	withoutNotes := &WorkspaceConfig{Path: t.TempDir()}
+	for name, prompt := range map[string]string{
+		"planning": GeneratePlanningPrompt("planner", withoutNotes, ""),
+		"task":     GenerateTaskPrompt("worker", withoutNotes, "", "claude"),
+	} {
+		t.Run(name+" omits absent notes", func(t *testing.T) {
+			if strings.Contains(prompt, "Workspace Notes") {
+				t.Errorf("prompt contains workspace notes section for a missing agents.md:\n%s", prompt)
+			}
+		})
 	}
 }
 

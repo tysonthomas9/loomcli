@@ -22,8 +22,8 @@ import (
 //   - Identity (AgentName, WorktreeName, Role, TaskID, EpicID) is always
 //     populated. Each one is a function argument or a single environment read,
 //     so there is nothing worth gating.
-//   - Context blocks (WorkspaceBlock, EpicScope, SafetyBlock, CheckpointBlock,
-//     TaskDetail) are populated ONLY when the template names them — see
+//   - Context blocks (WorkspaceBlock, WorkspaceNotes, EpicScope, SafetyBlock,
+//     CheckpointBlock, TaskDetail) are populated ONLY when the template names them — see
 //     referencedPromptFields. TaskDetail costs an issue-backend round trip and
 //     CheckpointBlock touches the worktree lock directory, so a prompt that
 //     never mentions them never pays for them.
@@ -55,6 +55,9 @@ type PromptData struct {
 	// table plus the "run git here, run loom data there" rules. Empty outside
 	// workspace mode.
 	WorkspaceBlock string
+	// WorkspaceNotes is the approved workspace-root agents.md content maintained
+	// by scout. Fence markers are removed and the notes are size-bounded.
+	WorkspaceNotes string
 	// EpicScope is the one-line "you must only select tasks from this epic"
 	// instruction the built-in prompts use. Empty when EpicID is empty.
 	EpicScope string
