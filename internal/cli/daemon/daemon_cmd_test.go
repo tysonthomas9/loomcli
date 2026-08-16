@@ -319,8 +319,8 @@ func TestWriteStateFile_RoundTripsQuarantinedTasks(t *testing.T) {
 			WriteFailed:    true,
 		},
 	}
-	if err := writeStateFile(stateFilePath, time.Now(), nil, nil, quarantined, nil, 3); err != nil {
-		t.Fatalf("writeStateFile() error = %v", err)
+	if err := writeStateFile(stateFilePath, time.Now(), nil, nil, nil, quarantined, nil, 3); err != nil {
+		t.Fatalf("writeStateFile(, nil) error = %v", err)
 	}
 
 	result, err := ReadStateFile(stateFilePath)
@@ -342,8 +342,8 @@ func TestWriteStateFile_RoundTripsQuarantinedTasks(t *testing.T) {
 	}
 
 	// Empty quarantine list keeps the field out of the JSON entirely.
-	if err := writeStateFile(stateFilePath, time.Now(), nil, nil, nil, nil, 3); err != nil {
-		t.Fatalf("writeStateFile() error = %v", err)
+	if err := writeStateFile(stateFilePath, time.Now(), nil, nil, nil, nil, nil, 3); err != nil {
+		t.Fatalf("writeStateFile(, nil) error = %v", err)
 	}
 	raw, err := os.ReadFile(stateFilePath)
 	if err != nil {
@@ -371,8 +371,8 @@ func TestWriteStateFile_IncludesUnavailableAgents(t *testing.T) {
 		},
 	}
 
-	if err := writeStateFile(stateFilePath, time.Now(), agents, unavailable, nil, nil, 3); err != nil {
-		t.Fatalf("writeStateFile() error = %v", err)
+	if err := writeStateFile(stateFilePath, time.Now(), agents, unavailable, nil, nil, nil, 3); err != nil {
+		t.Fatalf("writeStateFile(, nil) error = %v", err)
 	}
 
 	state, err := ReadStateFile(stateFilePath)
@@ -715,10 +715,10 @@ func TestWriteStateFile_Success(t *testing.T) {
 		},
 	}
 
-	err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, nil, 3)
+	err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, nil, nil, 3)
 
 	if err != nil {
-		t.Fatalf("writeStateFile() error = %v", err)
+		t.Fatalf("writeStateFile(, nil) error = %v", err)
 	}
 
 	// Read back and verify
@@ -748,8 +748,8 @@ func TestWriteStateFile_AtomicWrite(t *testing.T) {
 
 	// Write state
 	agents := []SupervisedAgentStatus{{Worktree: "test", Role: "plan"}}
-	if err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, nil, 3); err != nil {
-		t.Fatalf("writeStateFile() error = %v", err)
+	if err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, nil, nil, 3); err != nil {
+		t.Fatalf("writeStateFile(, nil) error = %v", err)
 	}
 
 	// Verify temp file was cleaned up
@@ -916,8 +916,8 @@ func TestStateFileLifecycle(t *testing.T) {
 	agents := []SupervisedAgentStatus{
 		{Worktree: "falcon", Role: "plan", PID: os.Getpid()},
 	}
-	if err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, nil, 3); err != nil {
-		t.Fatalf("writeStateFile() error = %v", err)
+	if err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, nil, nil, 3); err != nil {
+		t.Fatalf("writeStateFile(, nil) error = %v", err)
 	}
 
 	// Read state
@@ -931,8 +931,8 @@ func TestStateFileLifecycle(t *testing.T) {
 
 	// Update state (add agent)
 	agents = append(agents, SupervisedAgentStatus{Worktree: "nova", Role: "task"})
-	if err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, nil, 3); err != nil {
-		t.Fatalf("writeStateFile() update error = %v", err)
+	if err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, nil, nil, 3); err != nil {
+		t.Fatalf("writeStateFile(, nil) update error = %v", err)
 	}
 
 	// Re-read
@@ -1349,9 +1349,9 @@ func TestWriteStateFile_WithStopReason(t *testing.T) {
 		},
 	}
 
-	err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, nil, 3)
+	err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, nil, nil, 3)
 	if err != nil {
-		t.Fatalf("writeStateFile() error = %v", err)
+		t.Fatalf("writeStateFile(, nil) error = %v", err)
 	}
 
 	// Read back
@@ -1559,9 +1559,9 @@ func TestWriteStateFile_NewFields_RoundTrip(t *testing.T) {
 		},
 	}
 
-	err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, nil, 3)
+	err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, nil, nil, 3)
 	if err != nil {
-		t.Fatalf("writeStateFile() error = %v", err)
+		t.Fatalf("writeStateFile(, nil) error = %v", err)
 	}
 
 	state, err := ReadStateFile(stateFilePath)
@@ -1797,8 +1797,8 @@ func TestWriteStateFile_RoundTripsWrittenAtAndDegradations(t *testing.T) {
 	}
 
 	before := time.Now()
-	if err := writeStateFile(stateFilePath, before, nil, nil, nil, degradations, 3); err != nil {
-		t.Fatalf("writeStateFile() error = %v", err)
+	if err := writeStateFile(stateFilePath, before, nil, nil, nil, nil, degradations, 3); err != nil {
+		t.Fatalf("writeStateFile(, nil) error = %v", err)
 	}
 
 	result, err := ReadStateFile(stateFilePath)
@@ -1823,8 +1823,8 @@ func TestWriteStateFile_RoundTripsWrittenAtAndDegradations(t *testing.T) {
 	}
 
 	// A healthy daemon writes no degradations key at all.
-	if err := writeStateFile(stateFilePath, before, nil, nil, nil, nil, 3); err != nil {
-		t.Fatalf("writeStateFile() error = %v", err)
+	if err := writeStateFile(stateFilePath, before, nil, nil, nil, nil, nil, 3); err != nil {
+		t.Fatalf("writeStateFile(, nil) error = %v", err)
 	}
 	raw, err := os.ReadFile(stateFilePath)
 	if err != nil {

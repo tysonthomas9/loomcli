@@ -115,7 +115,7 @@ func openCloudStore(cfg fleetdb.Config, logger *slog.Logger) (*StoreHandle, erro
 	if err != nil {
 		return nil, fmt.Errorf("openstore: cloud: %w", err)
 	}
-	logger.Info("opened cloud fleet-db client", "url", cfg.BaseURL)
+	logger.Debug("opened cloud fleet-db client", "url", cfg.BaseURL)
 	return &StoreHandle{Store: client, mode: ModeCloud, url: cfg.BaseURL}, nil
 }
 
