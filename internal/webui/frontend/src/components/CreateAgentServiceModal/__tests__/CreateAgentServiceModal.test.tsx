@@ -128,7 +128,7 @@ describe("CreateAgentServiceModal", () => {
   it("surfaces a duplicate conflict inline", async () => {
     mocks.create.mockRejectedValueOnce(
       new ApiError(409, "Conflict", {
-        error: "agent service scout-west already exists",
+        error: "domain: already exists",
       }),
     );
     renderModal();
@@ -137,8 +137,13 @@ describe("CreateAgentServiceModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add agent" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "agent service scout-west already exists",
+      'An agent with ID "scout-west" already exists.',
     );
+
+    fireEvent.change(screen.getByLabelText("Instance ID"), {
+      target: { value: "scout-east" },
+    });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("turns FileAccess rejection into the local-frontend guidance", async () => {

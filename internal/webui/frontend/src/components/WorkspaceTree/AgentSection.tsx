@@ -280,10 +280,10 @@ export function AgentSection({
             <button
               type="button"
               className={`${styles.addButton} ${styles.autonomousAddButton}`}
-              aria-label="Add autonomous agent"
+              aria-label="+ Add autonomous agent"
               onClick={() => setCreateAutonomousOpen(true)}
             >
-              + Add agent
+              + Add autonomous agent
             </button>
           </div>
         ) : null}

@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
+import { useStore } from "zustand";
 
 import type {
   DriverRunDTO,
   TaskRunDTO,
   TaskRunStatus,
 } from "@/api/agentServices";
+import { getIssue } from "@/api/issues";
+import { useIssueStoreInstance } from "@/hooks/common/useStoreContext";
 import {
   useDriverRunLog,
   useTaskRunLog,
@@ -53,6 +56,12 @@ function TaskLogRow({
 }): JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const [logView, setLogView] = useState<"pretty" | "raw">("pretty");
+  const [fetchedTaskTitle, setFetchedTaskTitle] = useState("");
+  const issueStore = useIssueStoreInstance();
+  const cachedTaskTitle = useStore(
+    issueStore,
+    (state) => state.issuesMap.get(task.taskId)?.title,
+  );
   const live = isLiveTask(task.status);
   const logCouldExist = task.logsAvailable || live;
   const transcriptCouldExist = task.transcriptAvailable || live;
@@ -63,26 +72,42 @@ function TaskLogRow({
     initialized: logInitialized,
     error: logError,
     refresh: refreshLog,
-  } = useTaskRunLog(
-    workspaceId,
-    task.taskRunId,
-    { enabled: expanded && logCouldExist && selectedView === "raw" },
-  );
+  } = useTaskRunLog(workspaceId, task.taskRunId, {
+    enabled: expanded && logCouldExist && selectedView === "raw",
+  });
   const {
     entries,
     loading: transcriptLoading,
     initialized: transcriptInitialized,
     error: transcriptError,
     refresh: refreshTranscript,
-  } = useTaskRunTranscript(
-    workspaceId,
-    task.taskRunId,
-    {
-      enabled:
-        expanded && transcriptCouldExist && selectedView === "pretty",
-    },
-  );
+  } = useTaskRunTranscript(workspaceId, task.taskRunId, {
+    enabled: expanded && transcriptCouldExist && selectedView === "pretty",
+  });
   const taskDuration = duration(task.startedAt, task.finishedAt);
+  const taskTitle =
+    cachedTaskTitle?.trim() ||
+    fetchedTaskTitle.trim() ||
+    task.taskId ||
+    task.taskRunId;
+  const runnerName = task.runner || "Unknown runner";
+
+  useEffect(() => {
+    setFetchedTaskTitle("");
+    if (!task.taskId || cachedTaskTitle?.trim()) return;
+
+    let cancelled = false;
+    getIssue(workspaceId, task.taskId)
+      .then((issue) => {
+        if (!cancelled) setFetchedTaskTitle(issue.title.trim());
+      })
+      .catch(() => {
+        // Historical and phase-only task runs may not map to an issue.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [cachedTaskTitle, task.taskId, workspaceId]);
 
   useEffect(() => {
     if (expanded && liveRefreshTick > 0 && live) {
@@ -92,7 +117,14 @@ function TaskLogRow({
         void refreshLog();
       }
     }
-  }, [expanded, live, liveRefreshTick, refreshLog, refreshTranscript, selectedView]);
+  }, [
+    expanded,
+    live,
+    liveRefreshTick,
+    refreshLog,
+    refreshTranscript,
+    selectedView,
+  ]);
 
   return (
     <article className={styles.taskLogRow}>
@@ -101,7 +133,9 @@ function TaskLogRow({
         className={styles.taskLogToggle}
         aria-expanded={expanded}
         aria-label={
-          (task.runner || task.taskRunId) +
+          taskTitle +
+          " " +
+          runnerName +
           " " +
           formatStatusLabel(task.status) +
           " " +
@@ -110,8 +144,8 @@ function TaskLogRow({
         onClick={() => setExpanded((value) => !value)}
       >
         <span className={styles.rowMain}>
-          <strong>{task.runner || "Unknown runner"}</strong>
-          <span>{task.taskId || task.taskRunId}</span>
+          <strong>{taskTitle}</strong>
+          <span>{runnerName}</span>
         </span>
         <span className={styles.taskLogMeta}>
           <span>{formatStatusLabel(task.status)}</span>
@@ -278,20 +312,17 @@ export function HarnessLog({
           {expanded ? "▾" : "▸"}
         </span>
       </button>
-      {!log ? (
-        <p className={styles.logsRef}>
-          <strong>Logs:</strong> {logsRef}
-        </p>
-      ) : null}
       {expanded ? (
         <div className={styles.logBody}>
           {loading && !initialized ? (
             <p className={styles.emptyText}>Loading harness log…</p>
-          ) : absent ? null : error ? (
+          ) : absent ? (
+            <p className={styles.emptyText}>No harness log content.</p>
+          ) : error ? (
             <p className={styles.errorText} role="alert">
               Harness log unavailable: {error.message}
             </p>
-          ) : log ? (
+          ) : log?.content ? (
             <>
               {log.truncated ? (
                 <p className={styles.truncationNotice} role="status">
@@ -300,6 +331,8 @@ export function HarnessLog({
               ) : null}
               <pre data-testid="harness-log-content">{log.content}</pre>
             </>
+          ) : initialized ? (
+            <p className={styles.emptyText}>No harness log content.</p>
           ) : null}
         </div>
       ) : null}

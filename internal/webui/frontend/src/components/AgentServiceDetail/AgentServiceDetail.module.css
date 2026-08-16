@@ -593,8 +593,6 @@
 }
 
 .transcriptView {
-  max-height: 280px;
-  overflow: auto;
   border: 1px solid var(--color-border-light);
   border-radius: var(--radius-sm, 6px);
   color: var(--color-text-primary);
@@ -695,8 +693,9 @@
 .transcriptView .transcriptOutput,
 .transcriptView .transcriptMessageJson,
 .transcriptView .transcriptOther pre {
-  max-height: 220px;
+  max-height: none;
   margin-top: var(--space-2);
+  overflow: visible;
 }
 
 .transcriptSectionLabel {
@@ -766,14 +765,6 @@
   color: var(--color-text-primary);
   font-size: var(--font-size-xs);
   font-weight: 800;
-}
-
-.logsRef {
-  margin: var(--space-3) 0 0;
-  overflow-wrap: anywhere;
-  color: var(--color-text-secondary);
-  font-family: var(--font-family-mono);
-  font-size: var(--font-size-xs);
 }
 
 .timeline {

@@ -48,7 +48,11 @@ describe("TranscriptRows", () => {
     );
     expect(screen.queryByText("gate failed")).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId("transcript-output-toggle"));
-    expect(screen.getByText(/gate failed/)).toBeInTheDocument();
+    const output = screen.getByText(/gate failed/);
+    expect(output).toBeInTheDocument();
+    expect(output.closest('[data-testid="transcript-view"]')).toBe(
+      screen.getByTestId("transcript-view"),
+    );
     expect(screen.getByTestId("transcript-message")).toHaveTextContent(
       '"recommendations": []',
     );
@@ -59,9 +63,19 @@ describe("TranscriptRows", () => {
 
   it("renders reasoning, system text, unknown entries, and failed results explicitly", () => {
     const entries = [
-      { seq: 1, role: "system", type: "session_meta", text: "local-cli-codex session" },
+      {
+        seq: 1,
+        role: "system",
+        type: "session_meta",
+        text: "local-cli-codex session",
+      },
       { seq: 2, role: "system", type: "text", text: "plain system notice" },
-      { seq: 3, role: "assistant", type: "reasoning", text: "inspect the repo" },
+      {
+        seq: 3,
+        role: "assistant",
+        type: "reasoning",
+        text: "inspect the repo",
+      },
       { seq: 4, role: "system", type: "future_event", text: "new payload" },
       { seq: 5, role: "system", type: "result", text: "failed" },
     ] as unknown as TranscriptEntry[];
