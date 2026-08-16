@@ -9,7 +9,7 @@ import (
 )
 
 // The reported incident's values, kept verbatim so a regression is
-// recognisable: a live PUPPET supervisor's PID printed next to the dogfood
+// recognizable: a live PUPPET supervisor's PID printed next to the dogfood
 // workspace's six-day-old corpse.
 const (
 	incidentLivePID  = 75714
