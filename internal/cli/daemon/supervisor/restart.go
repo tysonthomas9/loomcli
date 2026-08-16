@@ -2,13 +2,18 @@ package supervisor
 
 import (
 	"log"
+	"log/slog"
 	"os"
 	"strconv"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/agentpolicy"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/events"
+
+	"go.opentelemetry.io/otel/attribute"
 )
 
 const primaryBackendRetryCooldown = time.Minute
@@ -465,4 +470,51 @@ func (s *Supervisor) GetSigtermTimeout() time.Duration {
 		return time.Duration(*cfg.Daemon.RestartPolicy.SigtermTimeout) * time.Second
 	}
 	return time.Duration(DefaultSigtermTimeout) * time.Second
+}
+
+// logBackoffWait writes the one line that describes this wait and reports
+// whether the wait should also be announced as a restart (span + event).
+//
+// An idle poll is not a restart: it reaches sleepBeforeRestart because
+// claimTask found nothing, and announcing it as one both floods the log and
+// makes the fleet restart metrics fiction (events.handleAgentRestarted counts
+// every AgentRestarted). The first poll of a streak is announced, so a "went
+// idle" signal survives in the log and in the metrics; the rest are Debug
+// only.
+func logBackoffWait(ap *AgentProcess, backoff time.Duration, count int, lastErr *agenterr.AgentError, noWorkCount int, idleSince time.Time) bool {
+	idle := lastErr != nil && lastErr.Class.Is(agenterr.NoWorkOutcome)
+	// applyNoWorkRestart has already incremented, so the first poll of a
+	// streak arrives here with NoWorkCount == 1.
+	firstIdle := idle && noWorkCount <= 1
+
+	switch {
+	case !idle:
+		slog.Info("waiting before restart", "worktree", ap.Entry.Worktree, "backoff", backoff, "attempt", count)
+	case firstIdle:
+		slog.Info("agent idle", "worktree", ap.Entry.Worktree, "role", ap.Entry.Role, "poll", backoff, "reason", lastErr.Message)
+	default:
+		slog.Debug("agent still idle", "worktree", ap.Entry.Worktree, "poll", backoff, "polls", noWorkCount, "idle_for", time.Since(idleSince))
+	}
+	return !idle || firstIdle
+}
+
+// announceRestartWait opens the restart span and emits the AgentRestarted
+// event for a wait that is a genuine restart — or the first poll of an idle
+// streak, which keeps a "went idle" signal in the restart metrics. It returns
+// the span's End so callers can defer it across the backoff sleep. Repeated
+// idle polls never call this: they are a state, not a restart.
+func (s *Supervisor) announceRestartWait(ap *AgentProcess, count int, errType string) func() {
+	_, span := startSpan(cmdstore.RootContext(),
+		"daemon.supervisor.restart",
+		attribute.String("loom.agent", ap.Entry.Worktree),
+		attribute.String("loom.role", ap.Entry.Role),
+		attribute.String("loom.workspace", s.WorkspaceID),
+		attribute.Int("loom.restart_count", count),
+		attribute.String("loom.error_type", errType),
+	)
+
+	if evt, err := events.NewEvent(events.AgentRestarted, ap.Entry.Worktree, ap.Entry.Role, "", events.AgentRestartedData{PID: 0, RestartCount: count}); err == nil {
+		s.EmitEvent(evt)
+	}
+	return func() { span.End() }
 }
