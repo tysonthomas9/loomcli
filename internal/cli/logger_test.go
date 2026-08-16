@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log"
 	"log/slog"
@@ -16,7 +17,7 @@ func TestInitLogger_TextFormat(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "text.log")
 
-	if err := InitLogger("text", path); err != nil {
+	if err := InitLogger("text", path, ""); err != nil {
 		t.Fatalf("InitLogger(\"text\", %q) error = %v", path, err)
 	}
 
@@ -41,7 +42,7 @@ func TestInitLogger_JSONFormat(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "json.log")
 
-	if err := InitLogger("json", path); err != nil {
+	if err := InitLogger("json", path, ""); err != nil {
 		t.Fatalf("InitLogger(\"json\", %q) error = %v", path, err)
 	}
 
@@ -68,7 +69,7 @@ func TestInitLogger_FileOutput(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "out.log")
 
-	if err := InitLogger("text", path); err != nil {
+	if err := InitLogger("text", path, ""); err != nil {
 		t.Fatalf("InitLogger error: %v", err)
 	}
 
@@ -87,7 +88,7 @@ func TestInitLogger_InvalidFile(t *testing.T) {
 	// Use a path whose parent directory does not exist.
 	badPath := filepath.Join(t.TempDir(), "no-such-dir", "nested", "log.txt")
 
-	err := InitLogger("text", badPath)
+	err := InitLogger("text", badPath, "")
 	if err == nil {
 		t.Fatal("expected error for invalid file path, got nil")
 	}
@@ -96,11 +97,80 @@ func TestInitLogger_InvalidFile(t *testing.T) {
 	}
 }
 
+func TestParseLogLevel(t *testing.T) {
+	cases := []struct {
+		in   string
+		want slog.Level
+	}{
+		{"debug", slog.LevelDebug},
+		{"DEBUG", slog.LevelDebug},
+		{" Debug ", slog.LevelDebug},
+		{"info", slog.LevelInfo},
+		{"INFO", slog.LevelInfo},
+		{"warn", slog.LevelWarn},
+		{"Warn", slog.LevelWarn},
+		{"error", slog.LevelError},
+		{"ERROR", slog.LevelError},
+		{"", slog.LevelInfo},
+		{"garbage", slog.LevelInfo},
+		{"trace", slog.LevelInfo},
+	}
+	for _, c := range cases {
+		if got := parseLogLevel(c.in); got != c.want {
+			t.Errorf("parseLogLevel(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
+func TestInitLogger_DebugLevel(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "debug.log")
+
+	if err := InitLogger("text", path, "debug"); err != nil {
+		t.Fatalf("InitLogger error: %v", err)
+	}
+	if !slog.Default().Enabled(context.Background(), slog.LevelDebug) {
+		t.Error("debug level should be enabled after InitLogger(..., \"debug\")")
+	}
+
+	slog.Debug("debug-visible")
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile error: %v", err)
+	}
+	if !strings.Contains(string(data), "debug-visible") {
+		t.Errorf("debug record should be written, got %q", string(data))
+	}
+}
+
+func TestInitLogger_DefaultLevelDropsDebug(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "default.log")
+
+	if err := InitLogger("text", path, ""); err != nil {
+		t.Fatalf("InitLogger error: %v", err)
+	}
+	if slog.Default().Enabled(context.Background(), slog.LevelDebug) {
+		t.Error("debug level should be disabled after InitLogger(..., \"\")")
+	}
+
+	slog.Debug("debug-hidden")
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile error: %v", err)
+	}
+	if strings.Contains(string(data), "debug-hidden") {
+		t.Errorf("debug record should be dropped at default level, got %q", string(data))
+	}
+}
+
 func TestInitLogger_BridgesLogPrintf(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bridge.log")
 
-	if err := InitLogger("text", path); err != nil {
+	if err := InitLogger("text", path, ""); err != nil {
 		t.Fatalf("InitLogger error: %v", err)
 	}
 

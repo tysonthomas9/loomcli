@@ -5,20 +5,41 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 
 	"go.opentelemetry.io/otel/trace"
 )
 
-// logFormat and logOutput are bound to persistent CLI flags in root.go.
+// logFormat, logOutput and logLevel are bound to persistent CLI flags in
+// root.go.
 var (
 	logFormat string
 	logOutput string
+	logLevel  string
 )
+
+// parseLogLevel maps a level name to a slog.Level. Matching is
+// case-insensitive; an empty or unrecognized value yields slog.LevelInfo.
+// It deliberately never fails: a bad --log-level must not stop the daemon
+// from starting.
+func parseLogLevel(level string) slog.Level {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
+}
 
 // InitLogger configures the process-wide default slog logger.
 // format: "text" (default) or "json"
 // output: "stderr" (default) or a file path
-func InitLogger(format, output string) error {
+// level: "debug"|"info"|"warn"|"error" (anything else means info)
+func InitLogger(format, output, level string) error {
 	// Determine writer
 	var w *os.File
 	switch output {
@@ -32,8 +53,10 @@ func InitLogger(format, output string) error {
 		w = f
 	}
 
+	lvl := parseLogLevel(level)
+
 	opts := &slog.HandlerOptions{
-		Level: slog.LevelInfo,
+		Level: lvl,
 	}
 
 	var handler slog.Handler
@@ -52,7 +75,7 @@ func InitLogger(format, output string) error {
 	slog.SetDefault(slog.New(handler))
 
 	// Bridge existing log.Printf calls through slog
-	slog.SetLogLoggerLevel(slog.LevelInfo)
+	slog.SetLogLoggerLevel(lvl)
 
 	return nil
 }
