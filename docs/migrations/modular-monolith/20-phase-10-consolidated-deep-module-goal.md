@@ -4,12 +4,12 @@
 - **Normative authority:** Sole Phase 10 architecture and delivery plan
 - **Decision closure:** No other Phase 10 planning record or session remains
   active; unincorporated alternatives are superseded
-- **Implemented:** Stacks 10.1 canonical generated HTTP contract seam, 10.2
-  Artifacts and Run Capture seam, 10.3 deep Source Control seam, and 10.4
-  Interaction-owned terminal lifecycle seam; stack 10.5 Repository Admission
-  implementation, gate, architecture, and packaged-sidecar recovery proof are
-  complete, with the required visual Desktop check still in progress
-- **Decision last amended:** 2026-08-14
+- **Implemented:** Stacks 10.1 through 10.6 are complete through source,
+  architecture, full Loom and companion FleetDB gates, and their required
+  packaged Desktop product proof. Stack 10.6 deletes the production
+  `internal/domain`, `internal/store`, and `internal/ops` planes and introduces
+  immutable operational Read Projections.
+- **Decision last amended:** 2026-08-15
 - **Baseline:** Phase 9 Wave 9.41, 158 production packages
 - **Supersedes:** the
   [Post-Phase-9 WebUI deepening discussion](18-post-phase-9-webui-deepening-plan.md),
@@ -332,6 +332,8 @@ Stack 10.4 is documented in
 [Phase 10.4 Interaction and PTY evidence](24-phase-10-4-interaction-pty-evidence.md).
 Stack 10.5 is documented in
 [Phase 10.5 Repository Admission evidence](25-phase-10-5-repository-admission-evidence.md).
+Stack 10.6 is documented in
+[Phase 10.6 owner-plane deletion and query evidence](26-phase-10-6-owner-plane-query-evidence.md).
 
 ## Superseded decisions and alternatives
 
