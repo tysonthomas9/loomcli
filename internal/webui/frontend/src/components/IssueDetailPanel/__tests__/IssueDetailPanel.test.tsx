@@ -622,6 +622,53 @@ describe("IssueDetailPanel", () => {
     });
   });
 
+  describe("atomic move lineage", () => {
+    it("renders a clickable moved-to banner and makes the source read-only", () => {
+      const issue = createTestIssueDetails({
+        id: "SOURCE-1",
+        status: "closed",
+        moved_to: { workspace: "TARGET", issue_id: "TARGET-2" },
+        description: "history",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={issue} onClose={() => {}} />,
+      );
+
+      expect(screen.getByTestId("move-lineage-banner")).toHaveTextContent(
+        "Moved to",
+      );
+      expect(screen.getByTestId("move-lineage-banner")).toHaveTextContent(
+        "read-only",
+      );
+      expect(screen.getByTestId("move-lineage-link")).toHaveAttribute(
+        "href",
+        "/ws/TARGET/issues/TARGET-2",
+      );
+      expect(
+        screen.queryByTestId("header-delete-button"),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId("comment-form")).not.toBeInTheDocument();
+    });
+
+    it("renders a clickable moved-from banner on the target", () => {
+      const issue = createTestIssueDetails({
+        id: "TARGET-2",
+        moved_from: { workspace: "SOURCE", issue_id: "SOURCE-1" },
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={issue} onClose={() => {}} />,
+      );
+
+      expect(screen.getByTestId("move-lineage-banner")).toHaveTextContent(
+        "Moved from",
+      );
+      expect(screen.getByTestId("move-lineage-link")).toHaveAttribute(
+        "href",
+        "/ws/SOURCE/issues/SOURCE-1",
+      );
+    });
+  });
+
   describe("close interactions", () => {
     it("calls onClose when clicking overlay", () => {
       const mockIssue = createTestIssue();

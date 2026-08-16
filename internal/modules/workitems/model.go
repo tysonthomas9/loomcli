@@ -2,6 +2,13 @@ package workitems
 
 import "time"
 
+// Reference identifies one workspace-scoped Work Item for durable move
+// lineage. An issue ID alone is not globally unique.
+type Reference struct {
+	Workspace string `json:"workspace"`
+	IssueID   string `json:"issue_id"`
+}
+
 // IssueSummary is the Work Items-owned list/search projection. Repo mirrors
 // SourceRepo for the existing Web UI wire contract while callers migrate.
 type IssueSummary struct {
@@ -26,6 +33,8 @@ type IssueSummary struct {
 	UpdatedAt        time.Time  `json:"updated_at"`
 	ClosedAt         *time.Time `json:"closed_at,omitempty"`
 	CloseReason      string     `json:"close_reason,omitempty"`
+	MovedTo          *Reference `json:"moved_to,omitempty"`
+	MovedFrom        *Reference `json:"moved_from,omitempty"`
 	ExternalRef      string     `json:"external_ref,omitempty"`
 	DueAt            *time.Time `json:"due_at,omitempty"`
 	DeferUntil       *time.Time `json:"defer_until,omitempty"`
@@ -62,6 +71,8 @@ type IssueDetail struct {
 	UpdatedAt          time.Time    `json:"updated_at"`
 	ClosedAt           *time.Time   `json:"closed_at,omitempty"`
 	CloseReason        string       `json:"close_reason,omitempty"`
+	MovedTo            *Reference   `json:"moved_to,omitempty"`
+	MovedFrom          *Reference   `json:"moved_from,omitempty"`
 	ClosedBySession    string       `json:"closed_by_session,omitempty"`
 	ExternalRef        string       `json:"external_ref,omitempty"`
 	EstimatedMinutes   *int         `json:"estimated_minutes,omitempty"`

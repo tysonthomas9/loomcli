@@ -2787,6 +2787,8 @@ export interface components {
       /** Format: date-time */
       closed_at?: string | null;
       close_reason?: string;
+      moved_to?: components["schemas"]["WorkItemReference"];
+      moved_from?: components["schemas"]["WorkItemReference"];
       /** Format: date-time */
       due_at?: string | null;
       /** Format: date-time */
@@ -3038,11 +3040,18 @@ export interface components {
     };
     MoveIssueRequest: {
       target_workspace: string;
+      /** Format: date-time */
+      expected_source_revision: string;
+      request_id: string;
+    };
+    WorkItemReference: {
+      workspace: string;
+      issue_id: string;
     };
     MoveResult: {
       source_id: string;
       target_id: string;
-      warnings?: string[];
+      replayed: boolean;
     };
     CommentRequest: {
       text: string;
@@ -4874,6 +4883,13 @@ export interface operations {
       };
       /** @description Issue not found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Source revision changed, request id conflicts, or source is not eligible to move */
+      409: {
         headers: {
           [name: string]: unknown;
         };

@@ -94,8 +94,12 @@ export function MoveIssueDialog({
     }
   }, []);
 
+  const hasAssignee = !!issue.assignee;
+  const openDeps = dependencies?.filter((d) => d.status !== "closed") ?? [];
+  const isIneligible = hasAssignee || openDeps.length > 0;
+
   const handleConfirm = async () => {
-    if (!selectedWorkspace || isMoving) return;
+    if (!selectedWorkspace || isMoving || isIneligible) return;
     setIsMoving(true);
     try {
       await onConfirm(selectedWorkspace);
@@ -105,10 +109,6 @@ export function MoveIssueDialog({
   };
 
   if (!isOpen) return null;
-
-  // Compute warnings
-  const hasAssignee = !!issue.assignee;
-  const openDeps = dependencies?.filter((d) => d.status !== "closed") ?? [];
 
   return createPortal(
     <div
@@ -130,7 +130,9 @@ export function MoveIssueDialog({
         </h2>
         <p className={styles.message}>
           Move <strong>{issue.id}</strong> to a different workspace. The issue
-          will be copied to the target workspace and closed in the current one.
+          will be created in the target workspace while this source is closed in
+          the same atomic operation. The source will remain as read-only
+          history.
         </p>
 
         {/* Workspace selector */}
@@ -181,8 +183,8 @@ export function MoveIssueDialog({
                   />
                   <circle cx="8" cy="11.5" r="0.75" fill="currentColor" />
                 </svg>
-                This issue has an active agent ({issue.assignee}). Moving it
-                will not stop the agent.
+                This task is assigned to {issue.assignee}. Unassign it before
+                moving.
               </div>
             )}
             {openDeps.length > 0 && (
@@ -208,9 +210,9 @@ export function MoveIssueDialog({
                   />
                   <circle cx="8" cy="11.5" r="0.75" fill="currentColor" />
                 </svg>
-                {openDeps.length}{" "}
-                {openDeps.length === 1 ? "dependency" : "dependencies"} will be
-                broken by this move.
+                This task has {openDeps.length} active{" "}
+                {openDeps.length === 1 ? "dependency" : "dependencies"}. Remove
+                those relationships before moving.
                 <ul className={styles.depList}>
                   {openDeps.slice(0, 5).map((dep) => (
                     <li key={dep.id}>
@@ -249,7 +251,7 @@ export function MoveIssueDialog({
             type="button"
             className={styles.confirmButton}
             onClick={handleConfirm}
-            disabled={!selectedWorkspace || isMoving}
+            disabled={!selectedWorkspace || isMoving || isIneligible}
             data-testid="move-dialog-confirm"
           >
             {isMoving ? "Moving..." : "Move"}

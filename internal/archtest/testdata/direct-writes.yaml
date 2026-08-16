@@ -201,6 +201,7 @@ method_sets:
       - TriggerDeliveries
       - TriggerEvents
       - TriggerRoutes
+      - WorkItemMoves
       - WorkerProfiles
       - Workers
       - WorkflowCatalog

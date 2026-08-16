@@ -37,6 +37,10 @@ const (
 	// Loom has no safe generic-update fallback for these race-sensitive state
 	// transitions.
 	WorkItemsRepositoryRequirementCapability = "work_items.repository_requirement.v1"
+	// WorkItemsAtomicMoveCapability certifies the one-transaction source
+	// retirement and target creation command. Loom never falls back to generic
+	// create/comment/close writes when it is absent.
+	WorkItemsAtomicMoveCapability = "work_items.atomic_move.v1"
 	// ExecutionAwaitAtomicResumeCapability is required by every Loom serve
 	// profile. Await dispatch and run-outcome reconciliation must never fall
 	// back to separate resolve/resume writes, even when the Catalog and
@@ -110,6 +114,7 @@ func Phase4FoundationCapabilities() []string {
 	return []string{
 		ArtifactsOwnerFencedLifecycleCapability,
 		WorkItemsRepositoryRequirementCapability,
+		WorkItemsAtomicMoveCapability,
 		ExecutionIssueClaimTaskRunStartCapability,
 		ExecutionTaskRunLeaseFencingCapability,
 		ExecutionIssueClaimNextTaskRunStartCapability,

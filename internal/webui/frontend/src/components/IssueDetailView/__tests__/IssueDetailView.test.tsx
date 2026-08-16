@@ -328,5 +328,65 @@ describe("IssueDetailView", () => {
       // Dropdown should be re-enabled after error
       expect(dropdown).not.toBeDisabled();
     });
+
+    it("renders moved-source lineage and keeps the source read-only", () => {
+      const issue = createTestIssue({
+        status: "review",
+        issue_type: "epic",
+        moved_to: {
+          workspace: "target-ws",
+          issue_id: "TARGET-1",
+        },
+      });
+
+      render(
+        <IssueDetailView
+          {...createDefaultProps({
+            issue,
+            onOpenInTerminal: vi.fn(),
+            onRunEpic: vi.fn(),
+          })}
+        />,
+      );
+
+      expect(screen.getByTestId("move-lineage-banner")).toHaveTextContent(
+        "Moved toTARGET-1 in target-wsThis source is read-only.",
+      );
+      expect(screen.getByTestId("move-lineage-link")).toHaveAttribute(
+        "href",
+        "/ws/target-ws/issues/TARGET-1",
+      );
+      expect(screen.getByTestId("status-dropdown")).toBeDisabled();
+      expect(
+        screen.queryByTestId("open-in-terminal-button"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("detail-run-epic-button"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("detail-review-action-bar"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("renders moved-target lineage without making the target read-only", () => {
+      const issue = createTestIssue({
+        status: "open",
+        moved_from: {
+          workspace: "source-ws",
+          issue_id: "SOURCE-1",
+        },
+      });
+
+      render(<IssueDetailView {...createDefaultProps({ issue })} />);
+
+      expect(screen.getByTestId("move-lineage-banner")).toHaveTextContent(
+        "Moved fromSOURCE-1 in source-ws",
+      );
+      expect(screen.getByTestId("move-lineage-link")).toHaveAttribute(
+        "href",
+        "/ws/source-ws/issues/SOURCE-1",
+      );
+      expect(screen.getByTestId("status-dropdown")).not.toBeDisabled();
+    });
   });
 });

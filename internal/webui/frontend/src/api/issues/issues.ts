@@ -560,19 +560,25 @@ export async function removeDependency(
 export interface MoveIssueResult {
   source_id: string;
   target_id: string;
-  warnings?: string[];
+  replayed: boolean;
 }
 
 export async function moveIssue(
   workspaceId: string,
   id: string,
   targetWorkspace: string,
+  expectedSourceRevision: string,
+  requestId: string,
 ): Promise<MoveIssueResult> {
   const { data, error, response } = await api.POST(
     "/api/workspaces/{ws}/issues/{id}/move",
     {
       params: { path: { ws: workspaceId, id } },
-      body: { target_workspace: targetWorkspace },
+      body: {
+        target_workspace: targetWorkspace,
+        expected_source_revision: expectedSourceRevision,
+        request_id: requestId,
+      },
     },
   );
   if (error) throw apiErrorFromResponse(error, response);

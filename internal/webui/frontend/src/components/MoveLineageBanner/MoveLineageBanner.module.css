@@ -1,0 +1,29 @@
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-block: 1px solid
+    color-mix(in srgb, var(--color-primary) 28%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--color-primary) 10%,
+    var(--color-panel-bg)
+  );
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.banner a {
+  color: var(--color-primary);
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.immutable {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}

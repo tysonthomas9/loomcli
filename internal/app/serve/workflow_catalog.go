@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/app/workitemmove"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 
 	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
@@ -31,6 +32,24 @@ const externalOperatorAuthorityTTL = time.Minute
 // Workflow Catalog persistence, authority, or its low-level FleetDB client.
 type RouteModule interface {
 	Register(*http.ServeMux)
+}
+
+// NewWorkItemMove composes the atomic cross-owner workflow from the shared
+// FleetDB client already owned by process composition. It lives beside the
+// other serve-hosted owner graphs so the CLI receives only the application
+// command, never a low-level transport.
+func NewWorkItemMove(
+	client *infrafleetdb.Client,
+	workspaces workspaceowner.API,
+) (workitemmove.Commands, error) {
+	if client == nil || workspaces == nil {
+		return nil, nil
+	}
+	adapter, err := newWorkItemMoveFleetDBAdapter(client.WorkItemMoves())
+	if err != nil {
+		return nil, err
+	}
+	return workitemmove.New(adapter, workspaces)
 }
 
 // WorkflowCatalogCapability is the composition-owned handle for the active

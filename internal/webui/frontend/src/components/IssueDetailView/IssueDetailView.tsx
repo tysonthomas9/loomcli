@@ -15,6 +15,7 @@ import { getReviewType } from "@/utils/issue";
 import { StatusDropdown } from "@/components/StatusDropdown";
 import { ErrorToast } from "@/components/ErrorToast";
 import { DesignPanel, MarkdownRenderer } from "@/components/IssueDetailPanel";
+import { MoveLineageBanner } from "@/components/MoveLineageBanner";
 import { updateIssue } from "@/hooks/api";
 import { useWorkspaceContext } from "@/hooks/workspace";
 
@@ -227,7 +228,7 @@ export function IssueDetailView({
 
   const handleStatusChange = useCallback(
     async (newStatus: Status) => {
-      if (!issue) return;
+      if (!issue || issue.moved_to) return;
 
       setIsSavingStatus(true);
       setStatusError(null);
@@ -244,7 +245,7 @@ export function IssueDetailView({
         setIsSavingStatus(false);
       }
     },
-    [issue, onIssueUpdate],
+    [issue, onIssueUpdate, workspaceId],
   );
 
   // Loading state
@@ -361,6 +362,7 @@ export function IssueDetailView({
   const dependents = issueHasDetails ? issue.dependents : undefined;
   const reviewType = getReviewType(issue);
   const isReviewItem = reviewType !== null;
+  const isMovedSource = !!issue.moved_to;
 
   return (
     <div className={styles.container} data-testid="issue-detail-view">
@@ -395,12 +397,13 @@ export function IssueDetailView({
         <StatusDropdown
           status={(issue.status ?? "open") as Status}
           onStatusChange={handleStatusChange}
+          disabled={isMovedSource}
           isSaving={isSavingStatus}
         />
         <h1 className={styles.headerTitle} data-testid="detail-title">
           {issue.title}
         </h1>
-        {onOpenInTerminal && (
+        {onOpenInTerminal && !isMovedSource && (
           <button
             type="button"
             className={styles.openTerminalButton}
@@ -428,7 +431,7 @@ export function IssueDetailView({
             Open in Terminal
           </button>
         )}
-        {issue.issue_type === "epic" && onRunEpic && (
+        {issue.issue_type === "epic" && onRunEpic && !isMovedSource && (
           <button
             type="button"
             className={styles.openTerminalButton}
@@ -469,6 +472,8 @@ export function IssueDetailView({
 
       {/* Scrollable Content Area */}
       <div className={styles.contentArea}>
+        <MoveLineageBanner issue={issue} />
+
         {/* Metadata */}
         <div className={styles.metadataBar}>
           <span className={styles.metadataItem} data-testid="detail-type">
@@ -533,7 +538,7 @@ export function IssueDetailView({
         </div>
 
         {/* Review Action Bar */}
-        {isReviewItem && !showRejectForm && (
+        {isReviewItem && !isMovedSource && !showRejectForm && (
           <div
             className={styles.reviewActionBar}
             data-testid="detail-review-action-bar"

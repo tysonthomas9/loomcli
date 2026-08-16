@@ -166,9 +166,10 @@ describe("MoveIssueDialog", () => {
       );
 
       expect(screen.getByTestId("move-warnings")).toBeInTheDocument();
-      expect(
-        screen.getByText(/2 dependencies will be broken/),
-      ).toBeInTheDocument();
+      expect(screen.getByTestId("move-warnings")).toHaveTextContent(
+        "2 active dependencies",
+      );
+      expect(screen.getByTestId("move-dialog-confirm")).toBeDisabled();
     });
 
     it("does not show dependency warnings when all dependencies are closed", () => {
@@ -208,8 +209,11 @@ describe("MoveIssueDialog", () => {
       );
 
       expect(screen.getByTestId("move-warnings")).toBeInTheDocument();
-      expect(screen.getByText(/agent-42/)).toBeInTheDocument();
-      expect(screen.getByText(/will not stop the agent/)).toBeInTheDocument();
+      expect(screen.getByTestId("move-warnings")).toHaveTextContent("agent-42");
+      expect(screen.getByTestId("move-warnings")).toHaveTextContent(
+        "Unassign it before moving",
+      );
+      expect(screen.getByTestId("move-dialog-confirm")).toBeDisabled();
     });
 
     it("does not show agent warning when issue has no assignee", () => {

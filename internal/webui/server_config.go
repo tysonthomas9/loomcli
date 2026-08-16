@@ -20,6 +20,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
@@ -130,6 +131,7 @@ type ServerConfig struct {
 	// ProjectionRecords is the composition-only source for legacy WebUI read
 	// projections whose owner APIs have not yet replaced record-level joins.
 	ProjectionRecords    ProjectionRecordSources
+	WorkItemMove         handler.WorkItemMover              // Atomic cross-workspace move capability; nil fails the route closed.
 	BackendOps           operationalview.BackendHealthQuery // Backend health operations interface (optional; nil disables backend health endpoint)
 	ScrollbackMaxLines   int                                // Maximum lines per scrollback buffer (0 = default 10000)
 	LocalSettingsDir     string                             // Desktop-local settings directory; empty disables /api/local/settings

@@ -78,6 +78,7 @@ import { ResizeDivider } from "./actions";
 import { ErrorToast } from "../ErrorToast";
 import { useSplitRatio, useToast } from "@/hooks/ui";
 import { CollapsibleSection } from "./CollapsibleSection";
+import { MoveLineageBanner } from "../MoveLineageBanner";
 import { SessionsTab } from "./sessions";
 import styles from "./IssueDetailPanel.module.css";
 import { formatDate, formatIssueType, isIssueDetails } from "./utils";
@@ -495,7 +496,9 @@ function DefaultContent({
   // Workspace data for move dialog — use stable workspace ids, not display names.
   const workspaces = workspace?.workspaces ?? [];
   const currentWorkspace = workspaceId;
-  const canMove = workspaces.length > 1 && issue?.status !== "closed";
+  const isMovedSource = !!issue?.moved_to;
+  const canMove =
+    workspaces.length > 1 && issue?.status !== "closed" && !isMovedSource;
   const taskRunId = issue?.issue_type === "task" ? issue.id : null;
   const { sessions: taskRuns } = useTaskSessions(taskRunId);
   const failedRun = useMemo(() => latestFailedRun(taskRuns), [taskRuns]);
@@ -1119,7 +1122,18 @@ function DefaultContent({
       if (!issue) return;
       setMoveError(null);
       try {
-        await moveIssue(workspaceId, issue.id, targetWorkspace);
+        if (!issue.updated_at) {
+          throw new Error(
+            "Refresh this task before moving it; its source revision is missing.",
+          );
+        }
+        await moveIssue(
+          workspaceId,
+          issue.id,
+          targetWorkspace,
+          issue.updated_at,
+          crypto.randomUUID(),
+        );
         setShowMoveDialog(false);
         onClose();
       } catch (err) {
@@ -1227,7 +1241,7 @@ function DefaultContent({
       : undefined;
   const prProps = prNumber ? { prUrl: issue.external_ref!, prNumber } : {};
   const canRunEpicWorkflow =
-    issue.issue_type === "epic" && issue.status !== "closed";
+    issue.issue_type === "epic" && issue.status !== "closed" && !isMovedSource;
 
   // Auto-collapse logic for Notes (collapse if long, but keep expanded for review items)
   const shouldCollapseNotes =
@@ -1242,9 +1256,9 @@ function DefaultContent({
         <IssueHeader
           issue={issue}
           onClose={onClose}
-          onTitleSave={handleTitleSave}
+          {...(!isMovedSource && { onTitleSave: handleTitleSave })}
           isSavingTitle={isSavingTitle}
-          onStatusChange={handleStatusChange}
+          {...(!isMovedSource && { onStatusChange: handleStatusChange })}
           isSavingStatus={isSavingStatus}
           {...(canRunEpicWorkflow && {
             onRunEpic: handleRunEpicWorkflow,
@@ -1257,10 +1271,12 @@ function DefaultContent({
               setShowMoveDialog(true);
             },
           })}
-          onDelete={() => {
-            setDeleteError(null);
-            setShowDeleteConfirm(true);
-          }}
+          {...(!isMovedSource && {
+            onDelete: () => {
+              setDeleteError(null);
+              setShowDeleteConfirm(true);
+            },
+          })}
           isDeleting={isDeleting}
           {...prProps}
           {...(onToggleMaximize !== undefined && {
@@ -1289,6 +1305,7 @@ function DefaultContent({
               assigneeDisplayName: activeTaskAgent,
             })}
             onSave={handleAssigneeSave}
+            disabled={isMovedSource}
             isSaving={isSavingAssignee}
             agents={agents}
             agentTasks={agentTasks}
@@ -1298,6 +1315,7 @@ function DefaultContent({
               currentRepo={currentRepo}
               repos={repos.map((r) => r.name)}
               onSave={handleRepoSave}
+              disabled={isMovedSource}
               isSaving={isSavingRepo}
               allowUnassigned={false}
             />
@@ -1313,30 +1331,39 @@ function DefaultContent({
         </div>
       </div>
 
+      <MoveLineageBanner issue={issue} />
+
       {/* Review Action Bar (shown for review items when reject form is not open) */}
-      {isReviewItem && !showRejectForm && onApprove && onReject && (
-        <div className={styles.reviewActionBar} data-testid="review-action-bar">
-          <button
-            type="button"
-            className={styles.reviewApproveButton}
-            onClick={handleApprove}
-            disabled={isApproving}
-            aria-label="Approve"
-            data-testid="panel-approve-button"
+      {!isMovedSource &&
+        isReviewItem &&
+        !showRejectForm &&
+        onApprove &&
+        onReject && (
+          <div
+            className={styles.reviewActionBar}
+            data-testid="review-action-bar"
           >
-            {isApproving ? "..." : "\u2713"} Approve
-          </button>
-          <button
-            type="button"
-            className={styles.reviewRejectButton}
-            onClick={handleRejectClick}
-            aria-label="Reject"
-            data-testid="panel-reject-button"
-          >
-            {"\u2717"} Reject
-          </button>
-        </div>
-      )}
+            <button
+              type="button"
+              className={styles.reviewApproveButton}
+              onClick={handleApprove}
+              disabled={isApproving}
+              aria-label="Approve"
+              data-testid="panel-approve-button"
+            >
+              {isApproving ? "..." : "\u2713"} Approve
+            </button>
+            <button
+              type="button"
+              className={styles.reviewRejectButton}
+              onClick={handleRejectClick}
+              aria-label="Reject"
+              data-testid="panel-reject-button"
+            >
+              {"\u2717"} Reject
+            </button>
+          </div>
+        )}
 
       {/* Reject Comment Form (shown below action bar when rejecting) */}
       {showRejectForm && onReject && (
@@ -1491,7 +1518,7 @@ function DefaultContent({
                   <h3 className={styles.sectionTitle}>Description</h3>
                   <EditableDescription
                     description={issue.description}
-                    isEditable={true}
+                    isEditable={!isMovedSource}
                     onSave={async (newDescription) => {
                       const updatedIssue = await updateIssue(
                         workspaceId,
@@ -1555,7 +1582,7 @@ function DefaultContent({
                 onAddDependency={handleAddDependency}
                 onRemoveDependency={handleRemoveDependency}
                 {...(onNavigateToIssue !== undefined && { onNavigateToIssue })}
-                disabled={isLoading}
+                disabled={isLoading || isMovedSource}
               />
             )}
 
@@ -1581,10 +1608,12 @@ function DefaultContent({
               events={events}
               issueId={issue.id}
             />
-            <CommentForm
-              issueId={issue.id}
-              onCommentAdded={handleCommentAdded}
-            />
+            {!isMovedSource && (
+              <CommentForm
+                issueId={issue.id}
+                onCommentAdded={handleCommentAdded}
+              />
+            )}
           </div>
         </div>
       )}

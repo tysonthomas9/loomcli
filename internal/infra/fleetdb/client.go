@@ -146,6 +146,7 @@ type Client struct {
 	agentManagement      AgentManagementTransport
 	interaction          InteractionTransport
 	repositoryAdmissions RepositoryAdmissionTransport
+	workItemMoves        WorkItemMoveTransport
 	automation           *automationStore
 	profiles             *workerProfileStore
 	services             *agentServiceStore
@@ -208,6 +209,7 @@ func (c *Client) initializeStores() {
 	c.ownership = &agentOwnershipLeaseStore{client: c, management: c.agentManagement}
 	c.interaction = newInteractionTransport(capabilityRequests)
 	c.repositoryAdmissions = newRepositoryAdmissionTransport(capabilityRequests)
+	c.workItemMoves = newWorkItemMoveTransport(capabilityRequests)
 	c.automation = &automationStore{client: c}
 	c.profiles = &workerProfileStore{client: c}
 	c.services = &agentServiceStore{client: c}
@@ -371,6 +373,15 @@ func (c *Client) RepositoryAdmissions() RepositoryAdmissionTransport {
 		return nil
 	}
 	return c.repositoryAdmissions
+}
+
+// WorkItemMoves exposes only FleetDB's backend-atomic cross-workspace move
+// command over this process-wide client's authentication and connection pool.
+func (c *Client) WorkItemMoves() WorkItemMoveTransport {
+	if c == nil {
+		return nil
+	}
+	return c.workItemMoves
 }
 
 // Automation exposes the narrow low-level transport used by Automation's
@@ -685,6 +696,12 @@ func classifyConflictHTTPError(prefix, code string) error {
 		sentinel = ErrAgentServiceDesiredStateConflict
 	case "agent_service_desired_state_idempotency_conflict":
 		sentinel = ErrAgentServiceIdempotencyConflict
+	case "work_item_move_revision_conflict":
+		sentinel = ErrWorkItemMoveRevisionConflict
+	case "work_item_move_idempotency_conflict":
+		sentinel = ErrWorkItemMoveIdempotencyConflict
+	case "work_item_move_ineligible":
+		sentinel = ErrWorkItemMoveIneligible
 	case "already_claimed":
 		sentinel = persistence.ErrAlreadyClaimed
 	case "invalid_transition":
@@ -702,6 +719,9 @@ func classifyConflictHTTPError(prefix, code string) error {
 func classifyForbiddenHTTPError(prefix, path, code string) error {
 	if code == "await_actor_forbidden" {
 		return fmt.Errorf("%s: %w", prefix, execution.ErrAwaitActorForbidden)
+	}
+	if strings.HasSuffix(path, "/move") && strings.Contains(path, "/issues/") {
+		return fmt.Errorf("%s: %w", prefix, ErrWorkItemMoveForbidden)
 	}
 	if strings.Contains(path, "/driver-runs/") || strings.Contains(path, "/task-runs/") ||
 		strings.Contains(path, "/agent-ownership-leases/") ||

@@ -3,11 +3,81 @@ package serve
 import (
 	"context"
 	"errors"
+	"fmt"
 
+	"github.com/tysonthomas9/loomcli/internal/app/workitemmove"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	catalogfleetdb "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/fleetdb"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
+
+// workItemMoveFleetDBAdapter is the one-write bridge for the named
+// cross-workspace workflow. It lives in the existing process-composition
+// package so atomic movement does not create another repository package.
+type workItemMoveFleetDBAdapter struct {
+	transport infrafleetdb.WorkItemMoveTransport
+}
+
+var _ workitemmove.AtomicMover = (*workItemMoveFleetDBAdapter)(nil)
+
+func newWorkItemMoveFleetDBAdapter(
+	transport infrafleetdb.WorkItemMoveTransport,
+) (*workItemMoveFleetDBAdapter, error) {
+	if transport == nil {
+		return nil, fmt.Errorf("compose WorkItemMove FleetDB adapter: %w", workitemmove.ErrUnavailable)
+	}
+	return &workItemMoveFleetDBAdapter{transport: transport}, nil
+}
+
+func (adapter *workItemMoveFleetDBAdapter) MoveAtomic(
+	ctx context.Context,
+	command workitemmove.AtomicCommand,
+) (*workitemmove.AtomicResult, error) {
+	value, err := adapter.transport.MoveWorkItem(
+		ctx,
+		command.SourceWorkspace,
+		command.SourceIssueID,
+		infrafleetdb.WorkItemMoveInput{
+			TargetWorkspace: command.TargetWorkspace, ExpectedSourceRevision: command.ExpectedSourceRevision,
+			RequestID: command.RequestID,
+		},
+	)
+	if err != nil {
+		return nil, translateWorkItemMoveFleetDBError(err)
+	}
+	if value == nil || value.Source == nil || value.Target == nil {
+		return nil, fmt.Errorf("atomic move returned incomplete owner state: %w", workitemmove.ErrInvalidPersistedState)
+	}
+	return &workitemmove.AtomicResult{
+		Source:   workitemmove.Reference{Workspace: value.Source.Workspace, IssueID: value.Source.ID},
+		Target:   workitemmove.Reference{Workspace: value.Target.Workspace, IssueID: value.Target.ID},
+		Replayed: value.Replayed,
+	}, nil
+}
+
+func translateWorkItemMoveFleetDBError(err error) error {
+	switch {
+	case errors.Is(err, persistence.ErrInvalid):
+		return workitemmove.AdapterInvalid("move atomic", "FleetDB rejected the move intent")
+	case errors.Is(err, persistence.ErrNotFound):
+		return workitemmove.AdapterNotFound("move atomic", "source Work Item or target workspace was not found")
+	case errors.Is(err, infrafleetdb.ErrWorkItemMoveRevisionConflict):
+		return workitemmove.AdapterConflict("move atomic", "the source Work Item changed; refresh and try again")
+	case errors.Is(err, infrafleetdb.ErrWorkItemMoveIdempotencyConflict):
+		return workitemmove.AdapterConflict("move atomic", "the move request id was already used for a different intent")
+	case errors.Is(err, infrafleetdb.ErrWorkItemMoveIneligible):
+		return workitemmove.AdapterConflict("move atomic", "the Work Item is assigned, active, claimed, or has dependencies and cannot be moved")
+	case errors.Is(err, infrafleetdb.ErrWorkItemMoveForbidden):
+		return fmt.Errorf("source or target workspace access was denied: %w", workitemmove.ErrForbidden)
+	case errors.Is(err, persistence.ErrConflict), errors.Is(err, persistence.ErrAlreadyExists), errors.Is(err, persistence.ErrNotOwner):
+		return workitemmove.AdapterConflict("move atomic", "FleetDB rejected the move because owner state conflicts")
+	case errors.Is(err, context.DeadlineExceeded):
+		return workitemmove.AdapterTimeout("move atomic", "FleetDB timed out", err)
+	default:
+		return workitemmove.AdapterUnavailable("move atomic", "FleetDB atomic move is unavailable", err)
+	}
+}
 
 // workflowCatalogFleetDBTransport is the composition-owned bridge between the
 // shared low-level FleetDB client and the capability adapter's owned transport

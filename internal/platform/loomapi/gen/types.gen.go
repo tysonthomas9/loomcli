@@ -2199,6 +2199,8 @@ type BlockedIssue struct {
 	Labels       *[]string              `json:"labels,omitempty"`
 	LastActivity *time.Time             `json:"last_activity,omitempty"`
 	MolType      *string                `json:"mol_type,omitempty"`
+	MovedFrom    *WorkItemReference     `json:"moved_from,omitempty"`
+	MovedTo      *WorkItemReference     `json:"moved_to,omitempty"`
 	Notes        *string                `json:"notes,omitempty"`
 	Owner        *string                `json:"owner,omitempty"`
 	Parent       *string                `json:"parent,omitempty"`
@@ -3003,21 +3005,23 @@ type Issue struct {
 	ExternalRef      *string            `json:"external_ref,omitempty"`
 
 	// HasDesign True for either a legacy inline or artifact-backed design.
-	HasDesign    *bool           `json:"has_design,omitempty"`
-	Id           string          `json:"id"`
-	IssueType    *IssueIssueType `json:"issue_type,omitempty"`
-	Labels       *[]string       `json:"labels,omitempty"`
-	LastActivity *time.Time      `json:"last_activity,omitempty"`
-	MolType      *string         `json:"mol_type,omitempty"`
-	Notes        *string         `json:"notes,omitempty"`
-	Owner        *string         `json:"owner,omitempty"`
-	Parent       *string         `json:"parent,omitempty"`
-	Pinned       *bool           `json:"pinned,omitempty"`
-	Priority     int             `json:"priority"`
-	Rig          *string         `json:"rig,omitempty"`
-	RoleType     *string         `json:"role_type,omitempty"`
-	SourceRepo   *string         `json:"source_repo,omitempty"`
-	SourceSystem *string         `json:"source_system,omitempty"`
+	HasDesign    *bool              `json:"has_design,omitempty"`
+	Id           string             `json:"id"`
+	IssueType    *IssueIssueType    `json:"issue_type,omitempty"`
+	Labels       *[]string          `json:"labels,omitempty"`
+	LastActivity *time.Time         `json:"last_activity,omitempty"`
+	MolType      *string            `json:"mol_type,omitempty"`
+	MovedFrom    *WorkItemReference `json:"moved_from,omitempty"`
+	MovedTo      *WorkItemReference `json:"moved_to,omitempty"`
+	Notes        *string            `json:"notes,omitempty"`
+	Owner        *string            `json:"owner,omitempty"`
+	Parent       *string            `json:"parent,omitempty"`
+	Pinned       *bool              `json:"pinned,omitempty"`
+	Priority     int                `json:"priority"`
+	Rig          *string            `json:"rig,omitempty"`
+	RoleType     *string            `json:"role_type,omitempty"`
+	SourceRepo   *string            `json:"source_repo,omitempty"`
+	SourceSystem *string            `json:"source_system,omitempty"`
 
 	// Status User-facing statuses. Internal statuses (tombstone, pinned, hooked)
 	// are not settable via the API and excluded from this enum.
@@ -3351,14 +3355,16 @@ type MonitorWorktreeSyncDetail struct {
 
 // MoveIssueRequest defines model for MoveIssueRequest.
 type MoveIssueRequest struct {
-	TargetWorkspace string `json:"target_workspace"`
+	ExpectedSourceRevision time.Time `json:"expected_source_revision"`
+	RequestId              string    `json:"request_id"`
+	TargetWorkspace        string    `json:"target_workspace"`
 }
 
 // MoveResult defines model for MoveResult.
 type MoveResult struct {
-	SourceId string    `json:"source_id"`
-	TargetId string    `json:"target_id"`
-	Warnings *[]string `json:"warnings,omitempty"`
+	Replayed bool   `json:"replayed"`
+	SourceId string `json:"source_id"`
+	TargetId string `json:"target_id"`
 }
 
 // MutationPayload SSE mutation event payload. `type` is the legacy coarse mutation kind.
@@ -3942,6 +3948,8 @@ type TreeNode struct {
 	Labels       *[]string          `json:"labels,omitempty"`
 	LastActivity *time.Time         `json:"last_activity,omitempty"`
 	MolType      *string            `json:"mol_type,omitempty"`
+	MovedFrom    *WorkItemReference `json:"moved_from,omitempty"`
+	MovedTo      *WorkItemReference `json:"moved_to,omitempty"`
 	Notes        *string            `json:"notes,omitempty"`
 	Owner        *string            `json:"owner,omitempty"`
 	Parent       *string            `json:"parent,omitempty"`
@@ -4079,6 +4087,12 @@ type UsageSessionRecord struct {
 	SessionId        *string   `json:"session_id,omitempty"`
 	StartedAt        time.Time `json:"started_at"`
 	TaskId           *string   `json:"task_id,omitempty"`
+}
+
+// WorkItemReference defines model for WorkItemReference.
+type WorkItemReference struct {
+	IssueId   string `json:"issue_id"`
+	Workspace string `json:"workspace"`
 }
 
 // WorkerRegisterRequest defines model for WorkerRegisterRequest.

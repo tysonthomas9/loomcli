@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/app/workitemmove"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
@@ -13,7 +14,7 @@ import (
 
 // HandleMoveWorkItem routes cross-workspace movement through the named
 // coordinator, which composes Workspace queries with Work Items commands.
-func HandleMoveWorkItem(mover workitemmove.Commands) http.HandlerFunc {
+func HandleMoveWorkItem(mover handler.WorkItemMover) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		issueID := r.PathValue("id")
 		if issueID == "" {
@@ -29,8 +30,13 @@ func HandleMoveWorkItem(mover workitemmove.Commands) http.HandlerFunc {
 			handler.WriteJSON(w, http.StatusBadRequest, MoveIssueResponse{Success: false, Error: "target_workspace is required"})
 			return
 		}
+		requestID := strings.TrimSpace(req.RequestID)
+		if req.ExpectedSourceRevision.IsZero() || requestID == "" || len(requestID) > 200 {
+			handler.WriteJSON(w, http.StatusBadRequest, MoveIssueResponse{Success: false, Error: "expected_source_revision and a request_id of at most 200 bytes are required"})
+			return
+		}
 		if mover == nil {
-			handler.HandleWorkItemsError(w, workitems.ErrUnavailable)
+			writeMoveIssueError(w, workitems.ErrUnavailable)
 			return
 		}
 		currentWorkspace := middleware.WorkspaceFromContext(r.Context())
@@ -39,39 +45,44 @@ func HandleMoveWorkItem(mover workitemmove.Commands) http.HandlerFunc {
 		}
 		result, err := mover.Move(r.Context(), workitemmove.Command{
 			IssueID: issueID, SourceWorkspace: currentWorkspace, TargetWorkspace: targetWorkspace,
+			ExpectedSourceRevision: req.ExpectedSourceRevision, RequestID: requestID,
 		})
 		if err != nil {
-			handler.HandleWorkItemsError(w, err)
+			writeMoveIssueError(w, err)
 			return
 		}
-		handler.WriteJSON(w, http.StatusOK, MoveIssueResponse{Success: true, Data: &MoveResult{
-			SourceID: result.SourceID, TargetID: result.TargetID, Warnings: result.Warnings,
-		}})
+		handler.WriteJSON(w, http.StatusOK, MoveIssueResponse{Success: true, Data: result})
 	}
+}
+
+func writeMoveIssueError(w http.ResponseWriter, err error) {
+	if errors.Is(err, workitemmove.ErrForbidden) {
+		handler.WriteJSON(w, http.StatusForbidden, MoveIssueResponse{Success: false, Error: "source or target workspace access was denied"})
+		return
+	}
+	status, message := handler.WorkItemsHTTPError(err)
+	handler.WriteJSON(w, status, MoveIssueResponse{Success: false, Error: message})
 }
 
 // MoveIssueRequest is the JSON body for POST /api/issues/{id}/move.
 type MoveIssueRequest struct {
-	TargetWorkspace string `json:"target_workspace"`
+	TargetWorkspace        string    `json:"target_workspace"`
+	ExpectedSourceRevision time.Time `json:"expected_source_revision"`
+	RequestID              string    `json:"request_id"`
 }
 
 // MoveIssueResponse is the JSON response for the move endpoint.
 type MoveIssueResponse struct {
-	Success bool        `json:"success"`
-	Data    *MoveResult `json:"data,omitempty"`
-	Error   string      `json:"error,omitempty"`
-}
-
-// MoveResult contains the outcome of a move operation.
-type MoveResult struct {
-	SourceID string   `json:"source_id"`
-	TargetID string   `json:"target_id"`
-	Warnings []string `json:"warnings,omitempty"`
+	Success bool                 `json:"success"`
+	Data    *workitemmove.Result `json:"data,omitempty"`
+	Error   string               `json:"error,omitempty"`
 }
 
 func decodeMoveIssueRequest(w http.ResponseWriter, r *http.Request) (MoveIssueRequest, bool) {
 	var req MoveIssueRequest
-	if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{MaxBytes: handler.MaxRequestBody}); err != nil {
+	if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{
+		MaxBytes: handler.MaxRequestBody, DisallowUnknownFields: true,
+	}); err != nil {
 		var maxBytesErr *http.MaxBytesError
 		if errors.As(err, &maxBytesErr) {
 			handler.WriteJSON(w, http.StatusRequestEntityTooLarge, MoveIssueResponse{Success: false, Error: "request body too large (max 1MB)"})

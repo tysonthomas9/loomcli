@@ -5,6 +5,8 @@ import {
   createWsIssue,
   getWsIssue,
   moveWsIssue,
+  mutateWsIssue,
+  patchWsIssue,
   deleteWsIssue,
   closeTestIssueInWorkspace,
 } from "./helpers";
@@ -58,7 +60,17 @@ test.describe("Cross-Workspace Issue Move Integration", () => {
     const issueId = await createWsIssue(sourceWs.id, title, { priority: 2 });
     trackedIssues.push([sourceWs.id, issueId]);
 
-    const moveResp = await moveWsIssue(sourceWs.id, issueId, targetWs.name);
+    const sourceBeforeMove = await getWsIssue(sourceWs.id, issueId);
+    const intent = {
+      expectedSourceRevision: sourceBeforeMove.updated_at,
+      requestId: crypto.randomUUID(),
+    };
+    const moveResp = await moveWsIssue(
+      sourceWs.id,
+      issueId,
+      targetWs.name,
+      intent,
+    );
     expect(moveResp.status).toBe(200);
     expect(moveResp.body.success).toBe(true);
 
@@ -69,19 +81,77 @@ test.describe("Cross-Workspace Issue Move Integration", () => {
     // Verify target issue
     const targetIssue = await getWsIssue(targetWs.id, targetId!);
     expect(targetIssue.title).toBe(title);
-    expect(targetIssue.description).toContain(`(Moved from ${issueId})`);
+    expect(targetIssue.moved_from).toEqual({
+      workspace: sourceBeforeMove.workspace ?? sourceWs.id,
+      issue_id: issueId,
+    });
     expect(targetIssue.priority).toBe(2);
     expect(targetIssue.status).toBe("open");
 
-    // Verify source issue is closed with move comment
+    // Verify source issue is closed with durable typed lineage.
     const sourceIssue = await getWsIssue(sourceWs.id, issueId);
     expect(sourceIssue.status).toBe("closed");
-    const comments = sourceIssue.comments as Array<{ text?: string }>;
-    expect(comments).toBeInstanceOf(Array);
-    const hasMoveComment = comments.some(
-      (c) => c.text && c.text.includes(`Moved to ${targetId}`),
+    expect(sourceIssue.moved_to).toEqual({
+      workspace: targetIssue.workspace ?? targetWs.id,
+      issue_id: targetId,
+    });
+
+    // Lost-response replay converges on the original target.
+    const replay = await moveWsIssue(
+      sourceWs.id,
+      issueId,
+      targetWs.name,
+      intent,
     );
-    expect(hasMoveComment).toBe(true);
+    expect(replay.status).toBe(200);
+    expect(replay.body.data).toEqual({
+      source_id: issueId,
+      target_id: targetId,
+      replayed: true,
+    });
+
+    // The source is durable read-only history through every public escape
+    // hatch, not only through disabled controls in the UI.
+    for (const mutation of [
+      () =>
+        mutateWsIssue(sourceWs.id, issueId, "PATCH", "", {
+          title: "forbidden",
+        }),
+      () =>
+        mutateWsIssue(sourceWs.id, issueId, "POST", "/comments", {
+          text: "forbidden",
+        }),
+      () => mutateWsIssue(sourceWs.id, issueId, "POST", "/reopen", {}),
+      () => mutateWsIssue(sourceWs.id, issueId, "DELETE"),
+    ]) {
+      const rejected = await mutation();
+      expect(rejected.status).toBe(409);
+      expect(rejected.body.error).toContain("moved");
+    }
+  });
+
+  test("stale source revision conflicts without creating a target", async () => {
+    const issueId = await createWsIssue(
+      sourceWs.id,
+      `Revision Test ${generateTestId()}`,
+    );
+    trackedIssues.push([sourceWs.id, issueId]);
+    const before = await getWsIssue(sourceWs.id, issueId);
+    await patchWsIssue(sourceWs.id, issueId, {
+      title: `Changed ${generateTestId()}`,
+    });
+
+    const response = await moveWsIssue(sourceWs.id, issueId, targetWs.name, {
+      expectedSourceRevision: before.updated_at,
+      requestId: crypto.randomUUID(),
+    });
+    expect(response.status).toBe(409);
+    expect(response.body.success).toBe(false);
+    expect(response.body.data).toBeUndefined();
+
+    const source = await getWsIssue(sourceWs.id, issueId);
+    expect(source.status).toBe("open");
+    expect(source.moved_to).toBeUndefined();
   });
 
   test("move preserves all issue fields", async () => {
@@ -91,7 +161,6 @@ test.describe("Cross-Workspace Issue Move Integration", () => {
       priority: 1,
       description,
       labels: ["test-label-a", "test-label-b"],
-      assignee: "test-agent",
       owner: "test-owner",
     });
     trackedIssues.push([sourceWs.id, issueId]);
@@ -107,16 +176,16 @@ test.describe("Cross-Workspace Issue Move Integration", () => {
     const targetIssue = await getWsIssue(targetWs.id, targetId!);
     expect(targetIssue.title).toBe(title);
     expect(targetIssue.description).toContain(description);
-    expect(targetIssue.description).toContain(`(Moved from ${issueId})`);
+    expect(targetIssue.description).toBe(description);
     expect(targetIssue.priority).toBe(1);
     expect(targetIssue.labels).toEqual(
       expect.arrayContaining(["test-label-a", "test-label-b"]),
     );
-    expect(targetIssue.assignee).toBe("test-agent");
+    expect(targetIssue.assignee ?? "").toBe("");
     expect(targetIssue.owner).toBe("test-owner");
   });
 
-  test("move returns warning for assigned agent", async () => {
+  test("move rejects an assigned source without partial target creation", async () => {
     const title = `Agent Warning Test ${generateTestId()}`;
     const issueId = await createWsIssue(sourceWs.id, title, {
       assignee: "some-agent",
@@ -124,18 +193,9 @@ test.describe("Cross-Workspace Issue Move Integration", () => {
     trackedIssues.push([sourceWs.id, issueId]);
 
     const moveResp = await moveWsIssue(sourceWs.id, issueId, targetWs.name);
-    expect(moveResp.status).toBe(200);
-    expect(moveResp.body.success).toBe(true);
-
-    const targetId = moveResp.body.data?.target_id;
-    expect(targetId).toBeTruthy();
-    if (targetId) trackedIssues.push([targetWs.id, targetId]);
-
-    expect(moveResp.body.data!.warnings).toBeInstanceOf(Array);
-    const hasAgentWarning = moveResp.body.data!.warnings!.some((w) =>
-      /agent.*assigned/i.test(w),
-    );
-    expect(hasAgentWarning).toBe(true);
+    expect(moveResp.status).toBe(409);
+    expect(moveResp.body.success).toBe(false);
+    expect(moveResp.body.data).toBeUndefined();
   });
 
   test("move to same workspace returns 400", async () => {
@@ -146,7 +206,9 @@ test.describe("Cross-Workspace Issue Move Integration", () => {
     const moveResp = await moveWsIssue(sourceWs.id, issueId, sourceWs.name);
     expect(moveResp.status).toBe(400);
     expect(moveResp.body.success).toBe(false);
-    expect(moveResp.body.error).toContain("cannot move issue to the same workspace");
+    expect(moveResp.body.error).toContain(
+      "cannot move issue to the same workspace",
+    );
   });
 
   test("move closed issue returns 400", async () => {
@@ -157,9 +219,9 @@ test.describe("Cross-Workspace Issue Move Integration", () => {
     await closeTestIssueInWorkspace(sourceWs.id, issueId);
 
     const moveResp = await moveWsIssue(sourceWs.id, issueId, targetWs.name);
-    expect(moveResp.status).toBe(400);
+    expect(moveResp.status).toBe(409);
     expect(moveResp.body.success).toBe(false);
-    expect(moveResp.body.error).toContain("cannot move a closed issue");
+    expect(moveResp.body.error).toContain("cannot be moved");
   });
 
   test("move to non-existent workspace returns 400", async () => {

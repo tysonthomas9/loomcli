@@ -40,7 +40,7 @@ func TestFleetIssueWire_FieldDriftGuard(t *testing.T) {
 		"description": true, "acceptance_criteria": true, "notes": true,
 		"external_ref": true, "created_at": true, "created_by": true,
 		"updated_at": true, "due_at": true, "defer_until": true,
-		"closed_at": true, "close_reason": true,
+		"closed_at": true, "close_reason": true, "moved_to": true, "moved_from": true,
 	}
 	if !reflect.DeepEqual(wireKeys, want) {
 		t.Fatalf("fleet issue wire keys drifted\n got: %#v\nwant: %#v", wireKeys, want)
