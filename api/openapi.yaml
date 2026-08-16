@@ -1061,6 +1061,15 @@ paths:
           description: Comma-separated source repo filters
           schema:
             type: string
+        - name: include_recommended
+          in: query
+          description: |
+            Include issues quarantined under the `recommended` label. Defaults
+            to false so automatic consumers (agents, `loom data ready`) never
+            see recommendations; human review surfaces opt in explicitly.
+          schema:
+            type: boolean
+            default: false
       responses:
         "200":
           description: Ready issues

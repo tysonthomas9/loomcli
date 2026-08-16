@@ -4723,6 +4723,12 @@ export interface operations {
         labels_any?: string;
         /** @description Comma-separated source repo filters */
         source_repos?: string;
+        /**
+         * @description Include issues quarantined under the `recommended` label. Defaults
+         *     to false so automatic consumers (agents, `loom data ready`) never
+         *     see recommendations; human review surfaces opt in explicitly.
+         */
+        include_recommended?: boolean;
       };
       header?: never;
       path: {

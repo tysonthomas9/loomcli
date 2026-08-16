@@ -139,6 +139,7 @@ func (s *Supervisor) readyIssues(opts backend.ReadyOpts) ([]backend.IssueData, e
 }
 
 func (s *Supervisor) claimRequestedTask(ap *AgentProcess, opts backend.ReadyOpts, taskID string) bool {
+	opts.IncludeRecommended = true
 	issues, err := s.readyIssues(opts)
 	if err != nil {
 		s.setPreflightError(ap, agenterr.OutcomeFromHarness(wrapper.ErrUnknown), fmt.Sprintf("ready query failed: %v", err))

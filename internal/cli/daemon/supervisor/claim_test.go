@@ -39,6 +39,9 @@ func TestClaimTask_SelectsEligibleTaskAndClaims(t *testing.T) {
 	if opts.ParentID != "parent-1" || opts.Limit != claimReadyLimit {
 		t.Fatalf("ReadyOpts = %#v", opts)
 	}
+	if opts.IncludeRecommended {
+		t.Fatal("ReadyOpts.IncludeRecommended = true, want false for general claim")
+	}
 	if mock.Calls[1].Method != "ClaimIssue" || mock.Calls[1].Args[0] != "task-1" {
 		t.Fatalf("claim call = %#v", mock.Calls[1])
 	}
@@ -75,6 +78,9 @@ func TestClaimTask_ClaimsRequestedTaskIgnoringRoleFilter(t *testing.T) {
 	opts := mock.Calls[0].Args[0].(backend.ReadyOpts)
 	if opts.Assignee != "" {
 		t.Fatalf("ReadyOpts.Assignee = %q, want empty for requested task lookup", opts.Assignee)
+	}
+	if !opts.IncludeRecommended {
+		t.Fatal("ReadyOpts.IncludeRecommended = false, want true for requested task lookup")
 	}
 	if mock.Calls[1].Method != "ClaimIssue" || mock.Calls[1].Args[0] != "task-1" {
 		t.Fatalf("claim call = %#v", mock.Calls[1])

@@ -223,6 +223,7 @@ func readyOptsToQuery(opts backend.ReadyOpts) string {
 	q := url.Values{}
 	setNonEmpty(q, "assignee", opts.Assignee)
 	setBoolIfTrue(q, "unassigned", opts.Unassigned)
+	setBoolIfTrue(q, "include_recommended", opts.IncludeRecommended)
 	setOptInt(q, "priority", opts.Priority)
 	setNonEmpty(q, "type", opts.Type)
 	setNonEmpty(q, "parent_id", opts.ParentID)

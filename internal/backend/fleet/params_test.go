@@ -334,6 +334,29 @@ func TestReadyOptsToQuery_UsesFleetLabelParams(t *testing.T) {
 	}
 }
 
+func TestReadyOptsToQuery_IncludeRecommended(t *testing.T) {
+	tests := []struct {
+		name    string
+		include bool
+		want    bool
+	}{
+		{name: "included", include: true, want: true},
+		{name: "omitted", include: false, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := parseQueryValues(t, readyOptsToQuery(backend.ReadyOpts{IncludeRecommended: tt.include}))
+			got, present := v["include_recommended"]
+			if present != tt.want {
+				t.Fatalf("include_recommended present = %v, want %v", present, tt.want)
+			}
+			if tt.want && (len(got) != 1 || got[0] != "true") {
+				t.Errorf("include_recommended = %v, want [true]", got)
+			}
+		})
+	}
+}
+
 func parseQueryValues(t *testing.T, raw string) url.Values {
 	t.Helper()
 	v, err := url.ParseQuery(raw)

@@ -157,7 +157,7 @@ func (m *mockGraphPool) Put(client graphClient) {
 type mockReadyClient struct {
 	readyFunc    func(args *rpc.ReadyArgs) (*rpc.Response, error)
 	listFunc     func(args *rpc.ListArgs) (*rpc.Response, error)
-	getParentIDs func(args *rpc.GetParentIDsArgs) (*rpc.Response, error)
+	getParentIDs func(args *rpc.GetParentIDsArgs) (*rpc.GetParentIDsResponse, error)
 }
 
 func (m *mockReadyClient) Ready(args *rpc.ReadyArgs) (*rpc.Response, error) {
@@ -174,7 +174,7 @@ func (m *mockReadyClient) List(args *rpc.ListArgs) (*rpc.Response, error) {
 	return nil, errors.New("listFunc not implemented")
 }
 
-func (m *mockReadyClient) GetParentIDs(args *rpc.GetParentIDsArgs) (*rpc.Response, error) {
+func (m *mockReadyClient) GetParentIDs(args *rpc.GetParentIDsArgs) (*rpc.GetParentIDsResponse, error) {
 	if m.getParentIDs != nil {
 		return m.getParentIDs(args)
 	}
@@ -1173,6 +1173,43 @@ func TestHandleReady_ContentType(t *testing.T) {
 	}
 }
 
+func TestHandleReady_PoolIncludeRecommendedParamDriven(t *testing.T) {
+	newHandler := func(captured **rpc.ReadyArgs) http.HandlerFunc {
+		client := &mockReadyClient{
+			readyFunc: func(args *rpc.ReadyArgs) (*rpc.Response, error) {
+				*captured = args
+				return &rpc.Response{Success: true, Data: json.RawMessage(`[]`)}, nil
+			},
+		}
+		pool := &mockReadyPool{
+			getFunc: func(context.Context) (readyClient, error) { return client, nil },
+		}
+		return handleReadyWithPool(pool)
+	}
+
+	// Default: automatic consumers (loom data ready) must stay excluded.
+	var captured *rpc.ReadyArgs
+	rr := httptest.NewRecorder()
+	newHandler(&captured).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/ready", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d; body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if captured == nil || captured.IncludeRecommended {
+		t.Fatalf("Ready args = %#v, want IncludeRecommended=false by default", captured)
+	}
+
+	// Explicit opt-in: the web UI review surface passes the param.
+	captured = nil
+	rr = httptest.NewRecorder()
+	newHandler(&captured).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/ready?include_recommended=true", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d; body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if captured == nil || !captured.IncludeRecommended {
+		t.Fatalf("Ready args = %#v, want IncludeRecommended=true with opt-in param", captured)
+	}
+}
+
 // ===========================================================================
 // Helper functions
 // ===========================================================================
@@ -1184,16 +1221,17 @@ func intPtr(i int) *int {
 // Verify that rpc.ReadyArgs fields match what we expect (compile-time check)
 var _ = func() bool {
 	args := &rpc.ReadyArgs{
-		Assignee:   "",
-		Unassigned: false,
-		Priority:   nil,
-		Type:       "",
-		Limit:      0,
-		SortPolicy: "",
-		Labels:     nil,
-		LabelsAny:  nil,
-		ParentID:   "",
-		MolType:    "",
+		Assignee:           "",
+		Unassigned:         false,
+		IncludeRecommended: false,
+		Priority:           nil,
+		Type:               "",
+		Limit:              0,
+		SortPolicy:         "",
+		Labels:             nil,
+		LabelsAny:          nil,
+		ParentID:           "",
+		MolType:            "",
 	}
 	_ = args
 	return true

@@ -169,17 +169,18 @@ func serveReadyViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 		return true
 	}
 	opts := backend.ReadyOpts{
-		Assignee:    args.Assignee,
-		Unassigned:  args.Unassigned,
-		Priority:    args.Priority,
-		Type:        args.Type,
-		ParentID:    args.ParentID,
-		Limit:       args.Limit,
-		SortPolicy:  args.SortPolicy,
-		Labels:      args.Labels,
-		LabelsAny:   args.LabelsAny,
-		MolType:     args.MolType,
-		SourceRepos: args.SourceRepos,
+		Assignee:           args.Assignee,
+		Unassigned:         args.Unassigned,
+		IncludeRecommended: args.IncludeRecommended,
+		Priority:           args.Priority,
+		Type:               args.Type,
+		ParentID:           args.ParentID,
+		Limit:              args.Limit,
+		SortPolicy:         args.SortPolicy,
+		Labels:             args.Labels,
+		LabelsAny:          args.LabelsAny,
+		MolType:            args.MolType,
+		SourceRepos:        args.SourceRepos,
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
@@ -341,7 +342,6 @@ func handleReadyWithPool(pool readyConnectionGetter) http.HandlerFunc {
 			})
 			return
 		}
-
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 
@@ -471,6 +471,12 @@ func parseReadyParams(r *http.Request) (*rpc.ReadyArgs, error) {
 
 	var err error
 	if args.Unassigned, err = handler.ParseBoolParam(q, "unassigned"); err != nil {
+		return nil, err
+	}
+	// Quarantine opt-in is caller-driven: the same endpoint serves human
+	// review surfaces (which pass true) and automatic consumers like
+	// `loom data ready` (which must stay excluded by default).
+	if args.IncludeRecommended, err = handler.ParseBoolParam(q, "include_recommended"); err != nil {
 		return nil, err
 	}
 	if err := parseReadyIntParams(q, args); err != nil {

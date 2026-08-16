@@ -183,6 +183,33 @@ func TestReadyOptsToQuery_AllFields(t *testing.T) {
 	}
 }
 
+func TestReadyOptsToQuery_IncludeRecommended(t *testing.T) {
+	tests := []struct {
+		name    string
+		include bool
+		want    bool
+	}{
+		{name: "included", include: true, want: true},
+		{name: "omitted", include: false, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			q := readyOptsToQuery(backend.ReadyOpts{IncludeRecommended: tt.include})
+			values, err := url.ParseQuery(q)
+			if err != nil {
+				t.Fatalf("parse query %q: %v", q, err)
+			}
+			got, present := values["include_recommended"]
+			if present != tt.want {
+				t.Fatalf("include_recommended present = %v, want %v", present, tt.want)
+			}
+			if tt.want && (len(got) != 1 || got[0] != "true") {
+				t.Errorf("include_recommended = %v, want [true]", got)
+			}
+		})
+	}
+}
+
 // --- blockedOptsToQuery ---
 
 func TestBlockedOptsToQuery_Empty(t *testing.T) {

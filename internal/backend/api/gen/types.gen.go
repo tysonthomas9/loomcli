@@ -3427,6 +3427,11 @@ type ListReadyParams struct {
 
 	// SourceRepos Comma-separated source repo filters
 	SourceRepos *string `form:"source_repos,omitempty" json:"source_repos,omitempty"`
+
+	// IncludeRecommended Include issues quarantined under the `recommended` label. Defaults
+	// to false so automatic consumers (agents, `loom data ready`) never
+	// see recommendations; human review surfaces opt in explicitly.
+	IncludeRecommended *bool `form:"include_recommended,omitempty" json:"include_recommended,omitempty"`
 }
 
 // ListReadyParamsType defines parameters for ListReady.
