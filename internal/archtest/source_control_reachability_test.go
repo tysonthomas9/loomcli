@@ -32,13 +32,16 @@ func TestPhase5SourceControlProductionReachabilityRatchet(t *testing.T) {
 			"TaskStackBindings",
 			"TaskOutcomes",
 			"RepositoryAdmissionMaterializer",
-			"NewRepositoryAdmissionJournal",
-			"NewStoreBackedWorkspaceAdmissionOperations",
-			"CreateWorkspace",
-			"AddWorkspaceRepos",
+			"NewRepositoryAdmission",
+			"LocalResolver",
+			"Configure",
+		},
+		"internal/cli/serve/opsimpl/repository_admission.go": {
+			"NewRepositoryAdmissionDurability",
+			"NewRepositoryAdmissionLocalWorkspace",
 			"RuntimeRegistrations",
 		},
-		"internal/cli/serve/workspacemgr/workspace_store_repository_materialization.go": {
+		"internal/infra/repositoryadmission/local_repository_materialization.go": {
 			"PrepareRepositoryAdmissionCheckout",
 		},
 		"internal/driver/task_worktree_resolver.go": {

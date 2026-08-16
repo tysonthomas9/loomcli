@@ -2,9 +2,14 @@
 
 - **Status:** Final approved Phase 10 decision; implementation in progress
 - **Normative authority:** Sole Phase 10 architecture and delivery plan
+- **Decision closure:** No other Phase 10 planning record or session remains
+  active; unincorporated alternatives are superseded
 - **Implemented:** Stacks 10.1 canonical generated HTTP contract seam, 10.2
-  Artifacts and Run Capture seam, and 10.3 deep Source Control seam
-- **Decision last amended:** 2026-08-13
+  Artifacts and Run Capture seam, 10.3 deep Source Control seam, and 10.4
+  Interaction-owned terminal lifecycle seam; stack 10.5 Repository Admission
+  implementation, gate, architecture, and packaged-sidecar recovery proof are
+  complete, with the required visual Desktop check still in progress
+- **Decision last amended:** 2026-08-14
 - **Baseline:** Phase 9 Wave 9.41, 158 production packages
 - **Supersedes:** the
   [Post-Phase-9 WebUI deepening discussion](18-post-phase-9-webui-deepening-plan.md),
@@ -53,7 +58,7 @@ they cannot silently revise this architecture. Any future change to the final
 decision requires an explicit amendment here and, when architectural, a new or
 superseding ADR.
 
-### Final cross-session ruling
+### Final cross-session decision
 
 The two later discussions refine this decision; they do not add new stacks or
 parallel authorities:
@@ -76,6 +81,19 @@ parallel authorities:
 
 Any conclusion from a superseded discussion that is not restated in this
 document is rejected rather than implicitly deferred.
+
+The overlap and differences close as follows:
+
+| Topic | Shared conclusion | Final accepted difference | Superseded alternative |
+|---|---|---|---|
+| Package reduction | Move product policy and persistence-shaped knowledge into capability owners and delete displaced paths. | Retain an outside package only for an earned protocol, security, operating-system, runtime, build, or independently replaceable adapter seam. | Minimizing the raw package count or treating every package outside `internal/modules` as legacy. |
+| Source Control unification | One Source Control owner replaces duplicate public Git and file-operation policy. | Consumers use Browse, Mutate, and Checkout while local Git, bounded filesystem execution, stack persistence, forge publication, and credential brokering remain private mechanisms. | One flattened Git package, multiple public Git owners, or forwarding compatibility packages. |
+| Delivery sequencing | Each change deletes its displaced path and tightens architecture inventories. | The accepted work lands only through the existing twelve-stack manifest, principally stacks 10.3, 10.6, and 10.11 for these two discussions. | New parallel stacks, reordered candidate sequences, or independent package-count milestones. |
+
+This closes the planning decision. Documents 18 and 19 and every separately
+recorded Phase 10 session remain historical rationale only. ADRs 0001 through
+0005 remain accepted supporting constraints, and stack evidence records remain
+proof of implementation; neither category is superseded by this closure.
 
 ## Goal
 
@@ -312,6 +330,8 @@ Stack 10.3 is documented in
 [Phase 10.3 deep Source Control evidence](23-phase-10-3-deep-source-control-evidence.md).
 Stack 10.4 is documented in
 [Phase 10.4 Interaction and PTY evidence](24-phase-10-4-interaction-pty-evidence.md).
+Stack 10.5 is documented in
+[Phase 10.5 Repository Admission evidence](25-phase-10-5-repository-admission-evidence.md).
 
 ## Superseded decisions and alternatives
 

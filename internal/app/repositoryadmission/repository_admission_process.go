@@ -1,4 +1,4 @@
-package workspacemgr
+package repositoryadmission
 
 import (
 	"context"
@@ -14,8 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 )
@@ -26,9 +24,8 @@ const (
 )
 
 type repositoryAdmissionProcess struct {
-	admissions        infrafleetdb.RepositoryAdmissionTransport
-	journal           *RepositoryAdmissionJournal
-	materialize       repositoryCheckoutMaterializer
+	admissions        DurableAdmissions
+	journal           Journal
 	ownerID           string
 	now               func() time.Time
 	leases            *repositoryAdmissionLeaseState
@@ -37,11 +34,10 @@ type repositoryAdmissionProcess struct {
 }
 
 func newRepositoryAdmissionProcess(
-	admissions infrafleetdb.RepositoryAdmissionTransport,
-	journal *RepositoryAdmissionJournal,
-	materializer repositoryCheckoutMaterializer,
+	admissions DurableAdmissions,
+	journal Journal,
 ) *repositoryAdmissionProcess {
-	if admissions == nil || journal == nil || materializer == nil {
+	if admissions == nil || journal == nil {
 		return nil
 	}
 	var nonce [16]byte
@@ -49,7 +45,7 @@ func newRepositoryAdmissionProcess(
 		return nil
 	}
 	return &repositoryAdmissionProcess{
-		admissions: admissions, journal: journal, materialize: materializer,
+		admissions: admissions, journal: journal,
 		ownerID: "loom-workspace-admission-" + hex.EncodeToString(nonce[:]),
 		now:     time.Now, leases: newRepositoryAdmissionLeaseState(),
 		ownerLease:        repositoryAdmissionLease,
@@ -69,7 +65,7 @@ func repositoryAdmissionUnavailable() error {
 		workspacemodule.SecurityViolation,
 		"repository admission requires the durable FleetDB and Source Control capabilities",
 		errors.Join(
-			infrafleetdb.ErrRepositoryAdmissionUnavailable,
+			ErrUnavailable,
 			sourcecontrol.ErrUnavailable,
 		),
 	)
@@ -78,19 +74,19 @@ func repositoryAdmissionUnavailable() error {
 //nolint:funlen // Create preparation binds the complete workspace and repository intent before any external materialization begins.
 func (process *repositoryAdmissionProcess) prepareCreate(
 	ctx context.Context,
-	workspace infrafleetdb.RepositoryAdmissionWorkspaceInput,
+	workspace WorkspaceInput,
 	workspacePath string,
-	repositories []infrafleetdb.RepositoryAdmissionRepoSpec,
+	repositories []RepositorySpec,
 	cloneURLs []string,
 	branch string,
-) (*infrafleetdb.RepositoryAdmissionRecord, error) {
+) (*Record, error) {
 	if process == nil {
 		return nil, repositoryAdmissionUnavailable()
 	}
 	if err := process.ensureMaterializationsRunning(); err != nil {
 		return nil, err
 	}
-	operationID, err := repositoryAdmissionOperationID(
+	operationID, err := OperationID(
 		"create_workspace",
 		workspace.Key,
 		workspacePath,
@@ -99,10 +95,10 @@ func (process *repositoryAdmissionProcess) prepareCreate(
 	if err != nil {
 		return nil, err
 	}
-	local, err := process.journal.prepare(ctx, localRepositoryAdmissionIntent{
+	local, err := process.journal.Prepare(ctx, LocalIntent{
 		OperationID: operationID, WorkspaceKey: workspace.Key,
 		WorkspaceName: workspace.Name, WorkspacePath: workspacePath,
-		Kind:   localRepositoryAdmissionCreateWorkspace,
+		Kind:   KindCreateWorkspace,
 		Branch: strings.TrimSpace(branch), CloneURLs: cloneURLs,
 	})
 	if err != nil {
@@ -111,11 +107,11 @@ func (process *repositoryAdmissionProcess) prepareCreate(
 	return process.prepare(
 		ctx,
 		local,
-		func() (*infrafleetdb.RepositoryAdmissionRecord, error) {
+		func() (*Record, error) {
 			result, createErr := process.admissions.
-				CreateWorkspaceWithRepositoryAdmission(
+				CreateWorkspace(
 					ctx,
-					infrafleetdb.WorkspaceRepositoryAdmissionBeginInput{
+					WorkspaceBegin{
 						Workspace: workspace, OperationID: operationID,
 						OwnerID:      process.ownerID,
 						OwnerLease:   process.repositoryAdmissionOwnerLease(),
@@ -126,7 +122,7 @@ func (process *repositoryAdmissionProcess) prepareCreate(
 				return nil, createErr
 			}
 			if result == nil {
-				return nil, infrafleetdb.ErrRepositoryAdmissionInvalid
+				return nil, ErrInvalid
 			}
 			return result.Admission, nil
 		},
@@ -137,18 +133,18 @@ func (process *repositoryAdmissionProcess) prepareExisting(
 	ctx context.Context,
 	workspaceKey,
 	workspacePath string,
-	repositories []infrafleetdb.RepositoryAdmissionRepoSpec,
+	repositories []RepositorySpec,
 	cloneURLs,
 	localRepoPaths []string,
 	branch string,
-) (*infrafleetdb.RepositoryAdmissionRecord, error) {
+) (*Record, error) {
 	if process == nil {
 		return nil, repositoryAdmissionUnavailable()
 	}
 	if err := process.ensureMaterializationsRunning(); err != nil {
 		return nil, err
 	}
-	operationID, err := repositoryAdmissionOperationID(
+	operationID, err := OperationID(
 		"add_repositories",
 		workspaceKey,
 		workspacePath,
@@ -157,10 +153,10 @@ func (process *repositoryAdmissionProcess) prepareExisting(
 	if err != nil {
 		return nil, err
 	}
-	local, err := process.journal.prepare(ctx, localRepositoryAdmissionIntent{
+	local, err := process.journal.Prepare(ctx, LocalIntent{
 		OperationID: operationID, WorkspaceKey: workspaceKey,
 		WorkspacePath: workspacePath,
-		Kind:          localRepositoryAdmissionAddRepositories,
+		Kind:          KindAddRepositories,
 		Branch:        strings.TrimSpace(branch),
 		CloneURLs:     cloneURLs, LocalRepoPaths: localRepoPaths,
 	})
@@ -170,11 +166,11 @@ func (process *repositoryAdmissionProcess) prepareExisting(
 	return process.prepare(
 		ctx,
 		local,
-		func() (*infrafleetdb.RepositoryAdmissionRecord, error) {
-			return process.admissions.BeginRepositoryAdmission(
+		func() (*Record, error) {
+			return process.admissions.Begin(
 				ctx,
 				workspaceKey,
-				infrafleetdb.RepositoryAdmissionBeginInput{
+				Begin{
 					OperationID: operationID, OwnerID: process.ownerID,
 					OwnerLease:   process.repositoryAdmissionOwnerLease(),
 					Repositories: repositories,
@@ -184,69 +180,15 @@ func (process *repositoryAdmissionProcess) prepareExisting(
 	)
 }
 
-//nolint:funlen // Durable prepare handles exact replay, ambiguous responses, and owner generation recovery as one saga step.
 func (process *repositoryAdmissionProcess) prepare(
 	ctx context.Context,
-	local localRepositoryAdmissionRecord,
-	begin func() (*infrafleetdb.RepositoryAdmissionRecord, error),
-) (*infrafleetdb.RepositoryAdmissionRecord, error) {
+	local LocalRecord,
+	begin func() (*Record, error),
+) (*Record, error) {
 	if process == nil || begin == nil {
 		return nil, repositoryAdmissionUnavailable()
 	}
-	var record *infrafleetdb.RepositoryAdmissionRecord
-	var err error
-	if local.AdmissionID != "" {
-		record, err = process.admissions.GetRepositoryAdmission(
-			ctx,
-			local.Intent.WorkspaceKey,
-			local.AdmissionID,
-		)
-	} else {
-		record, err = process.admissions.GetRepositoryAdmissionByOperation(
-			ctx,
-			local.Intent.WorkspaceKey,
-			local.Intent.OperationID,
-		)
-		if errors.Is(err, infrafleetdb.ErrRepositoryAdmissionNotFound) {
-			record, err = begin()
-			if err != nil && errors.Is(err, infrafleetdb.ErrRepositoryAdmissionConflict) {
-				beginErr := err
-				record, err = process.admissions.GetRepositoryAdmissionByOperation(
-					ctx,
-					local.Intent.WorkspaceKey,
-					local.Intent.OperationID,
-				)
-				if errors.Is(err, infrafleetdb.ErrRepositoryAdmissionNotFound) {
-					// A definitive 409 plus an operation miss proves that this
-					// machine's intent never acquired durable coordinates. Keeping
-					// the unbound receipt would make recovery repeatedly replay a
-					// conflict that it can never own.
-					if removeErr := process.journal.remove(
-						ctx,
-						local.Intent.OperationID,
-					); removeErr != nil {
-						return nil, errors.Join(beginErr, removeErr)
-					}
-					return nil, beginErr
-				}
-			}
-		}
-		if err == nil && record != nil {
-			local, err = process.journal.bind(
-				ctx,
-				local.Intent.OperationID,
-				record.AdmissionID,
-				record.SpecFingerprint,
-			)
-			if err == nil && record.OwnerGenerationID == "" {
-				record, err = process.admissions.GetRepositoryAdmission(
-					ctx,
-					local.Intent.WorkspaceKey,
-					record.AdmissionID,
-				)
-			}
-		}
-	}
+	local, record, err := process.resolvePreparedAdmission(ctx, local, begin)
 	if err != nil {
 		return nil, err
 	}
@@ -256,9 +198,114 @@ func (process *repositoryAdmissionProcess) prepare(
 	return process.ensureOwnership(ctx, record)
 }
 
+func (process *repositoryAdmissionProcess) resolvePreparedAdmission(
+	ctx context.Context,
+	local LocalRecord,
+	begin func() (*Record, error),
+) (LocalRecord, *Record, error) {
+	if local.AdmissionID != "" {
+		return process.resolveBoundAdmission(ctx, local, begin)
+	}
+	return process.resolveUnboundAdmission(ctx, local, begin)
+}
+
+func (process *repositoryAdmissionProcess) resolveBoundAdmission(
+	ctx context.Context,
+	local LocalRecord,
+	begin func() (*Record, error),
+) (LocalRecord, *Record, error) {
+	record, err := process.admissions.Get(ctx, local.Intent.WorkspaceKey, local.AdmissionID)
+	if !errors.Is(err, ErrNotFound) {
+		return local, record, err
+	}
+	record, err = process.admissions.GetByOperation(
+		ctx,
+		local.Intent.WorkspaceKey,
+		local.Intent.OperationID,
+	)
+	if errors.Is(err, ErrNotFound) {
+		record, err = process.beginOrResolveConflict(ctx, local, begin)
+	}
+	if err != nil {
+		return LocalRecord{}, nil, err
+	}
+	if record == nil {
+		return local, nil, nil
+	}
+	rebound, err := process.journal.Rebind(
+		ctx,
+		local.Intent.OperationID,
+		local.AdmissionID,
+		local.SpecFingerprint,
+		record.AdmissionID,
+		record.SpecFingerprint,
+	)
+	return rebound, record, err
+}
+
+func (process *repositoryAdmissionProcess) resolveUnboundAdmission(
+	ctx context.Context,
+	local LocalRecord,
+	begin func() (*Record, error),
+) (LocalRecord, *Record, error) {
+	record, err := process.admissions.GetByOperation(
+		ctx,
+		local.Intent.WorkspaceKey,
+		local.Intent.OperationID,
+	)
+	if errors.Is(err, ErrNotFound) {
+		record, err = process.beginOrResolveConflict(ctx, local, begin)
+	}
+	if errors.Is(err, ErrConflict) {
+		// A definitive 409 plus an operation miss proves that this
+		// machine's intent never acquired durable coordinates. Keeping
+		// the unbound receipt would make recovery repeatedly replay a
+		// conflict that it can never own.
+		if removeErr := process.journal.Remove(ctx, local.Intent.OperationID); removeErr != nil {
+			return LocalRecord{}, nil, errors.Join(err, removeErr)
+		}
+		return LocalRecord{}, nil, err
+	}
+	if err != nil || record == nil {
+		return local, record, err
+	}
+	bound, err := process.journal.Bind(
+		ctx,
+		local.Intent.OperationID,
+		record.AdmissionID,
+		record.SpecFingerprint,
+	)
+	if err != nil || record.OwnerGenerationID != "" {
+		return bound, record, err
+	}
+	record, err = process.admissions.Get(ctx, local.Intent.WorkspaceKey, record.AdmissionID)
+	return bound, record, err
+}
+
+func (process *repositoryAdmissionProcess) beginOrResolveConflict(
+	ctx context.Context,
+	local LocalRecord,
+	begin func() (*Record, error),
+) (*Record, error) {
+	record, err := begin()
+	if !errors.Is(err, ErrConflict) {
+		return record, err
+	}
+	beginErr := err
+	record, err = process.admissions.GetByOperation(
+		ctx,
+		local.Intent.WorkspaceKey,
+		local.Intent.OperationID,
+	)
+	if errors.Is(err, ErrNotFound) {
+		return nil, beginErr
+	}
+	return record, err
+}
+
 func verifyPreparedRepositoryAdmission(
-	local localRepositoryAdmissionRecord,
-	record *infrafleetdb.RepositoryAdmissionRecord,
+	local LocalRecord,
+	record *Record,
 ) error {
 	if record == nil ||
 		local.AdmissionID != record.AdmissionID ||
@@ -267,7 +314,7 @@ func verifyPreparedRepositoryAdmission(
 		local.Intent.OperationID != record.OperationID {
 		return fmt.Errorf(
 			"repository admission returned divergent durable coordinates: %w",
-			infrafleetdb.ErrRepositoryAdmissionInvalid,
+			ErrInvalid,
 		)
 	}
 	return nil
@@ -275,8 +322,8 @@ func verifyPreparedRepositoryAdmission(
 
 func (process *repositoryAdmissionProcess) ensureOwnership(
 	ctx context.Context,
-	record *infrafleetdb.RepositoryAdmissionRecord,
-) (*infrafleetdb.RepositoryAdmissionRecord, error) {
+	record *Record,
+) (*Record, error) {
 	if process == nil || record == nil || process.leases == nil {
 		return nil, repositoryAdmissionUnavailable()
 	}
@@ -291,7 +338,7 @@ func (process *repositoryAdmissionProcess) ensureOwnership(
 		return nil, fmt.Errorf(
 			"repository admission is terminal (%s): %w",
 			current.State,
-			infrafleetdb.ErrRepositoryAdmissionState,
+			ErrState,
 		)
 	case "pending", "retryable_failed":
 		// Durable takeover is intentionally deferred until beginMaterialization
@@ -300,13 +347,13 @@ func (process *repositoryAdmissionProcess) ensureOwnership(
 		// starts the local monotonic watchdog before any filesystem side effect.
 		return current, nil
 	default:
-		return nil, infrafleetdb.ErrRepositoryAdmissionInvalid
+		return nil, ErrInvalid
 	}
 }
 
 func exactRecoveredRepositoryAdmission(
-	previous *infrafleetdb.RepositoryAdmissionRecord,
-	recovered *infrafleetdb.RepositoryAdmissionRecord,
+	previous *Record,
+	recovered *Record,
 	ownerID string,
 ) bool {
 	return sameRepositoryAdmissionImmutableRecord(previous, recovered) &&
@@ -331,8 +378,8 @@ func validRepositoryAdmissionGenerationID(value string) bool {
 }
 
 func sameRepositoryAdmissionImmutableRecord(
-	left *infrafleetdb.RepositoryAdmissionRecord,
-	right *infrafleetdb.RepositoryAdmissionRecord,
+	left *Record,
+	right *Record,
 ) bool {
 	if left == nil ||
 		right == nil ||
@@ -348,7 +395,7 @@ func sameRepositoryAdmissionImmutableRecord(
 	}
 
 	rightByName := make(
-		map[string]infrafleetdb.RepositoryAdmissionRepoSpec,
+		map[string]RepositorySpec,
 		len(right.Spec.Repositories),
 	)
 	for _, repository := range right.Spec.Repositories {
@@ -386,16 +433,16 @@ func sameRepositoryAdmissionGroups(left, right []string) bool {
 //nolint:funlen // Commit validates the exact owner generation and complete repository result before publishing terminal state.
 func (process *repositoryAdmissionProcess) commit(
 	ctx context.Context,
-	record *infrafleetdb.RepositoryAdmissionRecord,
-	repositories []config.RepoConfig,
-	finalization *infrafleetdb.RepositoryAdmissionWorkspaceFinalization,
-) (*infrafleetdb.RepositoryAdmissionRecord, error) {
+	record *Record,
+	repositories []RepositoryPlacement,
+	finalization *WorkspaceFinalization,
+) (*Record, error) {
 	if process == nil || record == nil {
 		return nil, repositoryAdmissionUnavailable()
 	}
-	resolved := make([]infrafleetdb.RepositoryAdmissionResolvedBranch, 0, len(repositories))
+	resolved := make([]ResolvedBranch, 0, len(repositories))
 	for _, repository := range repositories {
-		resolved = append(resolved, infrafleetdb.RepositoryAdmissionResolvedBranch{
+		resolved = append(resolved, ResolvedBranch{
 			Name: repository.Name, DefaultBranch: repository.DefaultBranch,
 		})
 	}
@@ -431,7 +478,7 @@ func (process *repositoryAdmissionProcess) commit(
 		}
 		return nil, fmt.Errorf(
 			"repository admission committed by a different owner generation or result: %w",
-			infrafleetdb.ErrRepositoryAdmissionFenceLost,
+			ErrFenceLost,
 		)
 	}
 	if current.OwnerLeaseExpiresAt.Sub(process.now()) <=
@@ -441,12 +488,12 @@ func (process *repositoryAdmissionProcess) commit(
 			return nil, err
 		}
 	}
-	committed, err := process.admissions.CommitRepositoryAdmission(
+	committed, err := process.admissions.Commit(
 		ctx,
-		infrafleetdb.RepositoryAdmissionCommitInput{
-			RepositoryAdmissionGuard: repositoryAdmissionGuard(current),
-			ResolvedDefaultBranches:  resolved,
-			WorkspaceFinalization:    finalization,
+		Commit{
+			Guard:                   repositoryAdmissionGuard(current),
+			ResolvedDefaultBranches: resolved,
+			WorkspaceFinalization:   finalization,
 		},
 	)
 	if err == nil {
@@ -461,10 +508,10 @@ func (process *repositoryAdmissionProcess) commit(
 		}
 		return nil, fmt.Errorf(
 			"repository admission commit returned a divergent owner generation or result: %w",
-			infrafleetdb.ErrRepositoryAdmissionInvalid,
+			ErrInvalid,
 		)
 	}
-	observed, getErr := process.admissions.GetRepositoryAdmission(
+	observed, getErr := process.admissions.Get(
 		ctx,
 		current.WorkspaceKey,
 		current.AdmissionID,
@@ -483,10 +530,10 @@ func (process *repositoryAdmissionProcess) commit(
 
 //nolint:cyclop,funlen // Exact replay comparison intentionally checks every immutable, owner, and terminal repository-admission coordinate.
 func exactCommittedRepositoryAdmission(
-	attempted *infrafleetdb.RepositoryAdmissionRecord,
-	observed *infrafleetdb.RepositoryAdmissionRecord,
-	resolved []infrafleetdb.RepositoryAdmissionResolvedBranch,
-	finalization *infrafleetdb.RepositoryAdmissionWorkspaceFinalization,
+	attempted *Record,
+	observed *Record,
+	resolved []ResolvedBranch,
+	finalization *WorkspaceFinalization,
 	expectedVersion int64,
 ) bool {
 	if attempted == nil ||
@@ -521,7 +568,7 @@ func exactCommittedRepositoryAdmission(
 		resolvedByName[branch.Name] = branch.DefaultBranch
 	}
 	receiptsByName := make(
-		map[string]infrafleetdb.RepositoryAdmissionRepoReceipt,
+		map[string]RepositoryReceipt,
 		len(observed.Receipt.Repositories),
 	)
 	for _, receipt := range observed.Receipt.Repositories {
@@ -552,8 +599,8 @@ func exactCommittedRepositoryAdmission(
 }
 
 func sameRepositoryAdmissionWorkspaceFinalization(
-	left *infrafleetdb.RepositoryAdmissionWorkspaceFinalization,
-	right *infrafleetdb.RepositoryAdmissionWorkspaceFinalization,
+	left *WorkspaceFinalization,
+	right *WorkspaceFinalization,
 ) bool {
 	if left == nil || right == nil {
 		return left == nil && right == nil
@@ -565,7 +612,7 @@ func sameRepositoryAdmissionWorkspaceFinalization(
 //nolint:funlen // Failure convergence preserves original error class while fencing and replaying one durable terminal transition.
 func (process *repositoryAdmissionProcess) fail(
 	ctx context.Context,
-	record *infrafleetdb.RepositoryAdmissionRecord,
+	record *Record,
 	cause error,
 ) error {
 	if process == nil || record == nil || cause == nil || record.State != "pending" {
@@ -607,12 +654,12 @@ func (process *repositoryAdmissionProcess) fail(
 		}
 	}
 	errorClass, retryable := repositoryAdmissionFailureClass(cause)
-	failed, failErr := process.admissions.FailRepositoryAdmission(
+	failed, failErr := process.admissions.Fail(
 		ctx,
-		infrafleetdb.RepositoryAdmissionFailInput{
-			RepositoryAdmissionGuard: repositoryAdmissionGuard(current),
-			ErrorClass:               errorClass,
-			Retryable:                retryable,
+		Fail{
+			Guard:      repositoryAdmissionGuard(current),
+			ErrorClass: errorClass,
+			Retryable:  retryable,
 		},
 	)
 	if failErr != nil {
@@ -623,7 +670,7 @@ func (process *repositoryAdmissionProcess) fail(
 			cause,
 			fmt.Errorf(
 				"persist repository admission failure returned a divergent owner generation or version: %w",
-				infrafleetdb.ErrRepositoryAdmissionInvalid,
+				ErrInvalid,
 			),
 		)
 	}
@@ -632,7 +679,7 @@ func (process *repositoryAdmissionProcess) fail(
 
 func (process *repositoryAdmissionProcess) failMaterialization(
 	ctx context.Context,
-	record *infrafleetdb.RepositoryAdmissionRecord,
+	record *Record,
 	cause error,
 ) error {
 	if fenceCause := context.Cause(ctx); fenceCause != nil {
@@ -642,8 +689,8 @@ func (process *repositoryAdmissionProcess) failMaterialization(
 }
 
 func exactFailedRepositoryAdmission(
-	previous *infrafleetdb.RepositoryAdmissionRecord,
-	failed *infrafleetdb.RepositoryAdmissionRecord,
+	previous *Record,
+	failed *Record,
 	errorClass string,
 	retryable bool,
 ) bool {
@@ -670,9 +717,9 @@ func exactFailedRepositoryAdmission(
 }
 
 func repositoryAdmissionGuard(
-	record *infrafleetdb.RepositoryAdmissionRecord,
-) infrafleetdb.RepositoryAdmissionGuard {
-	return infrafleetdb.RepositoryAdmissionGuard{
+	record *Record,
+) Guard {
+	return Guard{
 		WorkspaceKey: record.WorkspaceKey, AdmissionID: record.AdmissionID,
 		OwnerID: record.OwnerID, OwnerGenerationID: record.OwnerGenerationID,
 		SpecFingerprint: record.SpecFingerprint, ExpectedVersion: record.Version,
@@ -683,7 +730,7 @@ func repositoryAdmissionFailureClass(err error) (string, bool) {
 	if errors.Is(err, context.Canceled) ||
 		errors.Is(err, context.DeadlineExceeded) ||
 		errors.Is(err, sourcecontrol.ErrUnavailable) ||
-		errors.Is(err, infrafleetdb.ErrRepositoryAdmissionUnavailable) {
+		errors.Is(err, ErrUnavailable) {
 		return "materialization_interrupted", true
 	}
 	if errors.Is(err, sourcecontrol.ErrInvalid) ||
@@ -704,13 +751,13 @@ func repositoryAdmissionFailureClass(err error) (string, bool) {
 	return "materialization_failed", true
 }
 
-func repositoryAdmissionOperationID(
+func OperationID(
 	kind,
 	workspaceKey,
 	workspacePath string,
-	repositories []infrafleetdb.RepositoryAdmissionRepoSpec,
+	repositories []RepositorySpec,
 ) (string, error) {
-	canonical := append([]infrafleetdb.RepositoryAdmissionRepoSpec(nil), repositories...)
+	canonical := append([]RepositorySpec(nil), repositories...)
 	for index := range canonical {
 		if canonical[index].Remote == "" {
 			canonical[index].Remote = "origin"
@@ -722,10 +769,10 @@ func repositoryAdmissionOperationID(
 		return canonical[i].Name < canonical[j].Name
 	})
 	encoded, err := json.Marshal(struct {
-		Kind          string                                     `json:"kind"`
-		WorkspaceKey  string                                     `json:"workspace_key"`
-		WorkspacePath string                                     `json:"workspace_path"`
-		Repositories  []infrafleetdb.RepositoryAdmissionRepoSpec `json:"repositories"`
+		Kind          string           `json:"kind"`
+		WorkspaceKey  string           `json:"workspace_key"`
+		WorkspacePath string           `json:"workspace_path"`
+		Repositories  []RepositorySpec `json:"repositories"`
 	}{
 		Kind: kind, WorkspaceKey: workspaceKey,
 		WorkspacePath: filepath.Clean(workspacePath), Repositories: canonical,
@@ -735,67 +782,4 @@ func repositoryAdmissionOperationID(
 	}
 	sum := sha256.Sum256(encoded)
 	return "workspace-" + kind + ":" + hex.EncodeToString(sum[:16]), nil
-}
-
-func cloneAdmissionSpecs(
-	planned []plannedCloneRepo,
-	requestedBranch string,
-) []infrafleetdb.RepositoryAdmissionRepoSpec {
-	specs := make([]infrafleetdb.RepositoryAdmissionRepoSpec, 0, len(planned))
-	for _, repository := range planned {
-		specs = append(specs, infrafleetdb.RepositoryAdmissionRepoSpec{
-			Name: repository.name, RemoteURL: repository.remoteURL,
-			Remote: "origin", DefaultBranch: strings.TrimSpace(requestedBranch),
-			SourceRepoID: repository.sourceRepoID,
-		})
-	}
-	return specs
-}
-
-func (process *repositoryAdmissionProcess) resolveCreateWorkspacePath(
-	ctx context.Context,
-	reqPath,
-	workspaceName,
-	workspaceKey string,
-	repositories []infrafleetdb.RepositoryAdmissionRepoSpec,
-) (workspaceDirPlan, error) {
-	path := strings.TrimSpace(reqPath)
-	if path == "" {
-		path = config.GetWorkspaceDir(workspaceName)
-	}
-	path = expandUserPath(path)
-	absolute, err := filepath.Abs(filepath.Clean(path))
-	if err != nil {
-		return workspaceDirPlan{}, workspacemodule.NewCreateError(
-			workspacemodule.PathNotFound,
-			fmt.Sprintf("cannot resolve workspace path %q", path),
-			err,
-		)
-	}
-	if err := validateWorkspacePath(absolute); err != nil {
-		return workspaceDirPlan{}, err
-	}
-	operationID, err := repositoryAdmissionOperationID(
-		"create_workspace",
-		workspaceKey,
-		absolute,
-		repositories,
-	)
-	if err != nil {
-		return workspaceDirPlan{}, err
-	}
-	local, err := process.journal.getByOperation(ctx, operationID)
-	if err == nil {
-		if local.Intent.WorkspaceKey != workspaceKey ||
-			local.Intent.WorkspaceName != strings.TrimSpace(workspaceName) ||
-			local.Intent.WorkspacePath != absolute ||
-			local.Intent.Kind != localRepositoryAdmissionCreateWorkspace {
-			return workspaceDirPlan{}, errLocalRepositoryAdmissionConflict
-		}
-		return workspaceDirPlan{path: absolute}, nil
-	}
-	if !errors.Is(err, errLocalRepositoryAdmissionNotFound) {
-		return workspaceDirPlan{}, err
-	}
-	return resolveWorkspaceDirForCreate(reqPath, workspaceName)
 }

@@ -46,6 +46,16 @@ func (capability *AgentsCapability) EnsureRole(
 	return capability.capability.EnsureRole(ctx, command)
 }
 
+func (capability *AgentsCapability) GetRole(
+	ctx context.Context,
+	workspace, roleName string,
+) (*agents.Role, error) {
+	if capability == nil || capability.capability == nil {
+		return nil, agents.ErrUnavailable
+	}
+	return capability.capability.GetRole(ctx, workspace, roleName)
+}
+
 func (capability *AgentsCapability) RepairRolePromptFile(
 	ctx context.Context,
 	command agents.RepairManagedRolePromptFileCommand,

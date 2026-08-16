@@ -1,4 +1,4 @@
-package workspacemgr
+package repositoryadmission
 
 import (
 	"context"
@@ -8,8 +8,6 @@ import (
 	"sort"
 	"sync"
 	"time"
-
-	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 )
 
 const repositoryAdmissionRenewalLead = 45 * time.Second
@@ -29,7 +27,7 @@ type repositoryAdmissionMutationLock struct {
 }
 
 type activeRepositoryAdmission struct {
-	coordinate      repositoryAdmissionCoordinate
+	coordinate      Coordinate
 	owned           bool
 	cancel          context.CancelCauseFunc
 	deadlineUpdates chan time.Time
@@ -61,9 +59,9 @@ func newRepositoryAdmissionLeaseState() *repositoryAdmissionLeaseState {
 	}
 }
 
-func repositoryAdmissionCoordinateFromRecord(
-	record *infrafleetdb.RepositoryAdmissionRecord,
-) (repositoryAdmissionCoordinate, error) {
+func CoordinateFromRecord(
+	record *Record,
+) (Coordinate, error) {
 	if record == nil ||
 		record.WorkspaceKey == "" ||
 		record.AdmissionID == "" ||
@@ -71,9 +69,9 @@ func repositoryAdmissionCoordinateFromRecord(
 		record.OwnerID == "" ||
 		record.OwnerGenerationID == "" ||
 		record.SpecFingerprint == "" {
-		return repositoryAdmissionCoordinate{}, infrafleetdb.ErrRepositoryAdmissionInvalid
+		return Coordinate{}, ErrInvalid
 	}
-	return repositoryAdmissionCoordinate{
+	return Coordinate{
 		WorkspaceKey:      record.WorkspaceKey,
 		AdmissionID:       record.AdmissionID,
 		OperationID:       record.OperationID,
@@ -86,17 +84,17 @@ func repositoryAdmissionCoordinateFromRecord(
 //nolint:cyclop,funlen // Ownership acquisition, local locking, lease renewal, and cleanup form one fail-closed materialization boundary.
 func (process *repositoryAdmissionProcess) beginMaterialization(
 	ctx context.Context,
-	record *infrafleetdb.RepositoryAdmissionRecord,
+	record *Record,
 	workspacePath string,
-) (context.Context, *infrafleetdb.RepositoryAdmissionRecord, func(), error) {
+) (context.Context, *Record, func(), error) {
 	if process == nil || process.leases == nil || process.journal == nil ||
 		ctx == nil || record == nil {
 		return nil, nil, nil, repositoryAdmissionUnavailable()
 	}
 	if record.State != "pending" && record.State != "retryable_failed" {
-		return nil, nil, nil, infrafleetdb.ErrRepositoryAdmissionFenceLost
+		return nil, nil, nil, ErrFenceLost
 	}
-	coordinate, err := repositoryAdmissionCoordinateFromRecord(record)
+	coordinate, err := CoordinateFromRecord(record)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -119,12 +117,12 @@ func (process *repositoryAdmissionProcess) beginMaterialization(
 	}
 	if _, exists := process.leases.active[coordinate.AdmissionID]; exists {
 		process.leases.activeMu.Unlock()
-		cancel(infrafleetdb.ErrRepositoryAdmissionConflict)
+		cancel(ErrConflict)
 		close(active.operationDone)
 		return nil, nil, nil, fmt.Errorf(
 			"repository admission %q is already materializing in this serve incarnation: %w",
 			coordinate.AdmissionID,
-			infrafleetdb.ErrRepositoryAdmissionConflict,
+			ErrConflict,
 		)
 	}
 	delete(process.leases.prepared, coordinate.AdmissionID)
@@ -135,7 +133,7 @@ func (process *repositoryAdmissionProcess) beginMaterialization(
 	cleanup := func(cause error) {
 		cancel(cause)
 		process.leases.activeMu.Lock()
-		process.journal.deactivateMaterializationAuthority(ownedCoordinate)
+		process.journal.DeactivateMaterializationAuthority(ownedCoordinate)
 		if process.leases.active[coordinate.AdmissionID] == active {
 			delete(process.leases.active, coordinate.AdmissionID)
 		}
@@ -151,7 +149,7 @@ func (process *repositoryAdmissionProcess) beginMaterialization(
 	for _, repository := range record.Spec.Repositories {
 		targets = append(targets, filepath.Join(workspacePath, repository.Name))
 	}
-	unlock, err := process.journal.acquireMaterializationLock(
+	unlock, err := process.journal.AcquireMaterializationLock(
 		materializationCtx,
 		record.AdmissionID,
 		targets,
@@ -169,7 +167,7 @@ func (process *repositoryAdmissionProcess) beginMaterialization(
 		cleanup(err)
 		return nil, nil, nil, err
 	}
-	ownedCoordinate, err = repositoryAdmissionCoordinateFromRecord(renewed)
+	ownedCoordinate, err = CoordinateFromRecord(renewed)
 	if err != nil {
 		unlock()
 		cleanup(err)
@@ -192,12 +190,12 @@ func (process *repositoryAdmissionProcess) beginMaterialization(
 		unlock()
 		cause := context.Cause(materializationCtx)
 		if cause == nil {
-			cause = infrafleetdb.ErrRepositoryAdmissionFenceLost
+			cause = ErrFenceLost
 		}
 		cleanup(cause)
 		return nil, nil, nil, cause
 	}
-	if err := process.journal.activateMaterializationAuthority(
+	if err := process.journal.ActivateMaterializationAuthority(
 		ownedCoordinate,
 		leaseDeadline,
 	); err != nil {
@@ -222,7 +220,7 @@ func (process *repositoryAdmissionProcess) beginMaterialization(
 		once.Do(func() {
 			cancel(context.Canceled)
 			process.leases.activeMu.Lock()
-			process.journal.deactivateMaterializationAuthority(ownedCoordinate)
+			process.journal.DeactivateMaterializationAuthority(ownedCoordinate)
 			if process.leases.active[coordinate.AdmissionID] == active {
 				delete(process.leases.active, coordinate.AdmissionID)
 			}
@@ -236,8 +234,8 @@ func (process *repositoryAdmissionProcess) beginMaterialization(
 
 func (process *repositoryAdmissionProcess) acquireMaterializationOwnership(
 	ctx context.Context,
-	record *infrafleetdb.RepositoryAdmissionRecord,
-) (*infrafleetdb.RepositoryAdmissionRecord, time.Time, error) {
+	record *Record,
+) (*Record, time.Time, error) {
 	release, err := process.acquireRepositoryAdmissionMutation(ctx, record.AdmissionID)
 	if err != nil {
 		return nil, time.Time{}, err
@@ -255,16 +253,16 @@ func (process *repositoryAdmissionProcess) acquireMaterializationOwnership(
 		if renewErr == nil {
 			return renewed, renewalStart, nil
 		}
-		if !errors.Is(renewErr, infrafleetdb.ErrRepositoryAdmissionFenceLost) {
+		if !errors.Is(renewErr, ErrFenceLost) {
 			return nil, time.Time{}, renewErr
 		}
 	}
 	if current.State != "pending" && current.State != "retryable_failed" {
-		return nil, time.Time{}, infrafleetdb.ErrRepositoryAdmissionState
+		return nil, time.Time{}, ErrState
 	}
-	recovered, err := process.admissions.ClaimRepositoryAdmissionRecovery(
+	recovered, err := process.admissions.ClaimRecovery(
 		ctx,
-		infrafleetdb.RepositoryAdmissionRecoveryClaimInput{
+		RecoveryClaim{
 			WorkspaceKey: current.WorkspaceKey, AdmissionID: current.AdmissionID,
 			ExpectedSpecFingerprint: current.SpecFingerprint,
 			ExpectedVersion:         current.Version,
@@ -280,7 +278,7 @@ func (process *repositoryAdmissionProcess) acquireMaterializationOwnership(
 		recovered,
 		process.ownerID,
 	) {
-		return nil, time.Time{}, infrafleetdb.ErrRepositoryAdmissionInvalid
+		return nil, time.Time{}, ErrInvalid
 	}
 	// Renewal immediately after the exact recovery claim makes begin use the
 	// same response validator and monotonic watchdog rule as a fresh owner.
@@ -313,8 +311,8 @@ func (process *repositoryAdmissionProcess) watchRepositoryAdmissionLease(
 			}
 			timer.Reset(time.Until(deadline))
 		case <-timer.C:
-			process.journal.deactivateMaterializationAuthority(active.coordinate)
-			active.cancel(infrafleetdb.ErrRepositoryAdmissionFenceLost)
+			process.journal.DeactivateMaterializationAuthority(active.coordinate)
+			active.cancel(ErrFenceLost)
 			return
 		}
 	}
@@ -366,13 +364,13 @@ func (process *repositoryAdmissionProcess) releaseRepositoryAdmissionMutationRef
 }
 
 func (process *repositoryAdmissionProcess) materializationLeaseDeadline(
-	record *infrafleetdb.RepositoryAdmissionRecord,
+	record *Record,
 	renewalStart time.Time,
 ) (time.Time, error) {
 	if process == nil || record == nil || renewalStart.IsZero() ||
 		record.UpdatedAt.IsZero() ||
 		!record.OwnerLeaseExpiresAt.After(record.UpdatedAt) {
-		return time.Time{}, infrafleetdb.ErrRepositoryAdmissionInvalid
+		return time.Time{}, ErrInvalid
 	}
 	lease := process.repositoryAdmissionOwnerLease()
 	grantedLease := record.OwnerLeaseExpiresAt.Sub(record.UpdatedAt)
@@ -385,13 +383,13 @@ func (process *repositoryAdmissionProcess) materializationLeaseDeadline(
 	}
 	lifetime := lease - margin
 	if lifetime <= 0 {
-		return time.Time{}, infrafleetdb.ErrRepositoryAdmissionInvalid
+		return time.Time{}, ErrInvalid
 	}
 	return renewalStart.Add(lifetime), nil
 }
 
 func (process *repositoryAdmissionProcess) noteActiveRepositoryAdmissionRenewal(
-	coordinate repositoryAdmissionCoordinate,
+	coordinate Coordinate,
 	deadline time.Time,
 ) {
 	if process == nil || process.leases == nil || deadline.IsZero() {
@@ -404,8 +402,8 @@ func (process *repositoryAdmissionProcess) noteActiveRepositoryAdmissionRenewal(
 		return
 	}
 	if process.journal == nil ||
-		!process.journal.renewMaterializationAuthority(coordinate, deadline) {
-		active.cancel(infrafleetdb.ErrRepositoryAdmissionFenceLost)
+		!process.journal.RenewMaterializationAuthority(coordinate, deadline) {
+		active.cancel(ErrFenceLost)
 		process.leases.activeMu.RUnlock()
 		return
 	}
@@ -422,7 +420,7 @@ func (process *repositoryAdmissionProcess) noteActiveRepositoryAdmissionRenewal(
 }
 
 func (process *repositoryAdmissionProcess) cancelActiveRepositoryAdmission(
-	coordinate repositoryAdmissionCoordinate,
+	coordinate Coordinate,
 	cause error,
 ) {
 	if process == nil || process.leases == nil || cause == nil {
@@ -432,7 +430,7 @@ func (process *repositoryAdmissionProcess) cancelActiveRepositoryAdmission(
 	active := process.leases.active[coordinate.AdmissionID]
 	if active != nil && active.coordinate == coordinate {
 		if process.journal != nil {
-			process.journal.deactivateMaterializationAuthority(coordinate)
+			process.journal.DeactivateMaterializationAuthority(coordinate)
 		}
 		active.cancel(cause)
 	}
@@ -451,7 +449,7 @@ func (process *repositoryAdmissionProcess) stopMaterializations(ctx context.Cont
 		job.cancel(errRepositoryAdmissionProcessStopped)
 	}
 	if process.journal != nil {
-		process.journal.deactivateAllMaterializationAuthorities()
+		process.journal.DeactivateAllMaterializationAuthorities()
 	}
 	process.leases.activeMu.Unlock()
 	for _, job := range active {
@@ -478,7 +476,7 @@ func (process *repositoryAdmissionProcess) ensureMaterializationsRunning() error
 }
 
 func (process *repositoryAdmissionProcess) notePreparedRepositoryAdmission(
-	record *infrafleetdb.RepositoryAdmissionRecord,
+	record *Record,
 ) {
 	if process == nil || process.leases == nil || record == nil ||
 		record.State != "pending" || record.OwnerID != process.ownerID {
@@ -532,12 +530,12 @@ func (process *repositoryAdmissionProcess) isMaterializing(admissionID string) b
 	return active
 }
 
-func (process *repositoryAdmissionProcess) activeRepositoryAdmissions() []repositoryAdmissionCoordinate {
+func (process *repositoryAdmissionProcess) activeRepositoryAdmissions() []Coordinate {
 	if process == nil || process.leases == nil {
 		return nil
 	}
 	process.leases.activeMu.RLock()
-	result := make([]repositoryAdmissionCoordinate, 0, len(process.leases.active))
+	result := make([]Coordinate, 0, len(process.leases.active))
 	for _, active := range process.leases.active {
 		if active.owned {
 			result = append(result, active.coordinate)
@@ -555,7 +553,7 @@ func (process *repositoryAdmissionProcess) activeRepositoryAdmissions() []reposi
 		offset %= len(result)
 		result = append(
 			append(
-				make([]repositoryAdmissionCoordinate, 0, len(result)),
+				make([]Coordinate, 0, len(result)),
 				result[offset:]...,
 			),
 			result[:offset]...,
@@ -596,7 +594,7 @@ func (process *repositoryAdmissionProcess) renewActiveRepositoryAdmissions(
 		return nil
 	}
 	workerCount := min(repositoryAdmissionRenewalConcurrency, len(coordinates))
-	jobs := make(chan repositoryAdmissionCoordinate, len(coordinates))
+	jobs := make(chan Coordinate, len(coordinates))
 	results := make(chan error, len(coordinates))
 	attempted := make(chan struct{}, len(coordinates))
 	for _, coordinate := range coordinates {
@@ -651,7 +649,7 @@ func (process *repositoryAdmissionProcess) renewActiveRepositoryAdmissions(
 
 func (process *repositoryAdmissionProcess) renewActiveRepositoryAdmission(
 	ctx context.Context,
-	coordinate repositoryAdmissionCoordinate,
+	coordinate Coordinate,
 ) error {
 	if process == nil || process.leases == nil {
 		return repositoryAdmissionUnavailable()
@@ -665,7 +663,7 @@ func (process *repositoryAdmissionProcess) renewActiveRepositoryAdmission(
 	}
 	defer release()
 
-	record, err := process.admissions.GetRepositoryAdmission(
+	record, err := process.admissions.Get(
 		ctx,
 		coordinate.WorkspaceKey,
 		coordinate.AdmissionID,
@@ -677,11 +675,11 @@ func (process *repositoryAdmissionProcess) renewActiveRepositoryAdmission(
 		return err
 	}
 	if record.State != "pending" {
-		return infrafleetdb.ErrRepositoryAdmissionFenceLost
+		return ErrFenceLost
 	}
 	if record.OwnerID != process.ownerID ||
 		record.OwnerGenerationID != coordinate.OwnerGenerationID {
-		return infrafleetdb.ErrRepositoryAdmissionFenceLost
+		return ErrFenceLost
 	}
 	_, err = process.renewOwnedRepositoryAdmissionLocked(ctx, record)
 	return err
@@ -689,8 +687,8 @@ func (process *repositoryAdmissionProcess) renewActiveRepositoryAdmission(
 
 func (process *repositoryAdmissionProcess) renewOwnedRepositoryAdmissionLocked(
 	ctx context.Context,
-	record *infrafleetdb.RepositoryAdmissionRecord,
-) (*infrafleetdb.RepositoryAdmissionRecord, error) {
+	record *Record,
+) (*Record, error) {
 	renewed, _, err := process.renewOwnedRepositoryAdmissionWithStartLocked(
 		ctx,
 		record,
@@ -700,27 +698,27 @@ func (process *repositoryAdmissionProcess) renewOwnedRepositoryAdmissionLocked(
 
 func (process *repositoryAdmissionProcess) renewOwnedRepositoryAdmissionWithStartLocked(
 	ctx context.Context,
-	record *infrafleetdb.RepositoryAdmissionRecord,
-) (*infrafleetdb.RepositoryAdmissionRecord, time.Time, error) {
+	record *Record,
+) (*Record, time.Time, error) {
 	if process == nil || record == nil {
 		return nil, time.Time{}, repositoryAdmissionUnavailable()
 	}
 	if record.State != "pending" ||
 		record.OwnerID != process.ownerID {
-		return nil, time.Time{}, infrafleetdb.ErrRepositoryAdmissionFenceLost
+		return nil, time.Time{}, ErrFenceLost
 	}
 	renewalStart := time.Now()
-	renewed, err := process.admissions.RenewRepositoryAdmission(
+	renewed, err := process.admissions.Renew(
 		ctx,
-		infrafleetdb.RepositoryAdmissionRenewInput{
-			RepositoryAdmissionGuard: repositoryAdmissionGuard(record),
-			Lease:                    process.repositoryAdmissionOwnerLease(),
+		Renew{
+			Guard: repositoryAdmissionGuard(record),
+			Lease: process.repositoryAdmissionOwnerLease(),
 		},
 	)
 	if err != nil {
 		return nil, time.Time{}, err
 	}
-	coordinate, err := repositoryAdmissionCoordinateFromRecord(record)
+	coordinate, err := CoordinateFromRecord(record)
 	if err != nil {
 		return nil, time.Time{}, err
 	}
@@ -732,7 +730,7 @@ func (process *repositoryAdmissionProcess) renewOwnedRepositoryAdmissionWithStar
 		renewed,
 		process.ownerID,
 	) {
-		return nil, time.Time{}, infrafleetdb.ErrRepositoryAdmissionInvalid
+		return nil, time.Time{}, ErrInvalid
 	}
 	deadline, err := process.materializationLeaseDeadline(renewed, renewalStart)
 	if err != nil {
@@ -743,16 +741,16 @@ func (process *repositoryAdmissionProcess) renewOwnedRepositoryAdmissionWithStar
 }
 
 func definiteRepositoryAdmissionFenceLoss(err error) bool {
-	return errors.Is(err, infrafleetdb.ErrRepositoryAdmissionFenceLost) ||
-		errors.Is(err, infrafleetdb.ErrRepositoryAdmissionInvalid) ||
-		errors.Is(err, infrafleetdb.ErrRepositoryAdmissionState) ||
-		errors.Is(err, infrafleetdb.ErrRepositoryAdmissionNotFound) ||
-		errors.Is(err, infrafleetdb.ErrRepositoryAdmissionConflict)
+	return errors.Is(err, ErrFenceLost) ||
+		errors.Is(err, ErrInvalid) ||
+		errors.Is(err, ErrState) ||
+		errors.Is(err, ErrNotFound) ||
+		errors.Is(err, ErrConflict)
 }
 
 func exactRenewedRepositoryAdmission(
-	previous *infrafleetdb.RepositoryAdmissionRecord,
-	renewed *infrafleetdb.RepositoryAdmissionRecord,
+	previous *Record,
+	renewed *Record,
 	ownerID string,
 ) bool {
 	return sameRepositoryAdmissionImmutableRecord(previous, renewed) &&
@@ -769,16 +767,16 @@ func exactRenewedRepositoryAdmission(
 
 func (process *repositoryAdmissionProcess) getMatchingRepositoryAdmission(
 	ctx context.Context,
-	expected *infrafleetdb.RepositoryAdmissionRecord,
-) (*infrafleetdb.RepositoryAdmissionRecord, error) {
+	expected *Record,
+) (*Record, error) {
 	if process == nil || expected == nil {
 		return nil, repositoryAdmissionUnavailable()
 	}
-	coordinate, err := repositoryAdmissionCoordinateFromRecord(expected)
+	coordinate, err := CoordinateFromRecord(expected)
 	if err != nil {
 		return nil, err
 	}
-	current, err := process.admissions.GetRepositoryAdmission(
+	current, err := process.admissions.Get(
 		ctx,
 		coordinate.WorkspaceKey,
 		coordinate.AdmissionID,
@@ -794,8 +792,8 @@ func (process *repositoryAdmissionProcess) getMatchingRepositoryAdmission(
 
 func (process *repositoryAdmissionProcess) getMatchingOwnedRepositoryAdmission(
 	ctx context.Context,
-	expected *infrafleetdb.RepositoryAdmissionRecord,
-) (*infrafleetdb.RepositoryAdmissionRecord, error) {
+	expected *Record,
+) (*Record, error) {
 	current, err := process.getMatchingRepositoryAdmission(ctx, expected)
 	if err != nil {
 		return nil, err
@@ -805,21 +803,21 @@ func (process *repositoryAdmissionProcess) getMatchingOwnedRepositoryAdmission(
 	}
 	if current.OwnerID != process.ownerID ||
 		current.OwnerGenerationID != expected.OwnerGenerationID {
-		return nil, infrafleetdb.ErrRepositoryAdmissionFenceLost
+		return nil, ErrFenceLost
 	}
 	switch current.State {
 	case "pending":
 		return current, nil
 	case "retryable_failed", "permanent_failed", "aborted":
-		return nil, infrafleetdb.ErrRepositoryAdmissionState
+		return nil, ErrState
 	default:
-		return nil, infrafleetdb.ErrRepositoryAdmissionInvalid
+		return nil, ErrInvalid
 	}
 }
 
 func verifyRepositoryAdmissionCoordinate(
-	expected repositoryAdmissionCoordinate,
-	record *infrafleetdb.RepositoryAdmissionRecord,
+	expected Coordinate,
+	record *Record,
 ) error {
 	if record == nil ||
 		record.WorkspaceKey != expected.WorkspaceKey ||
@@ -828,29 +826,29 @@ func verifyRepositoryAdmissionCoordinate(
 		record.SpecFingerprint != expected.SpecFingerprint {
 		return fmt.Errorf(
 			"repository admission durable coordinates diverged: %w",
-			infrafleetdb.ErrRepositoryAdmissionInvalid,
+			ErrInvalid,
 		)
 	}
 	return nil
 }
 
 func verifyRepositoryAdmissionOwnerCoordinate(
-	expected repositoryAdmissionCoordinate,
-	record *infrafleetdb.RepositoryAdmissionRecord,
+	expected Coordinate,
+	record *Record,
 ) error {
 	if err := verifyRepositoryAdmissionCoordinate(expected, record); err != nil {
 		return err
 	}
 	if record.OwnerID != expected.OwnerID ||
 		record.OwnerGenerationID != expected.OwnerGenerationID {
-		return infrafleetdb.ErrRepositoryAdmissionFenceLost
+		return ErrFenceLost
 	}
 	return nil
 }
 
 func (process *repositoryAdmissionProcess) verifyMaterializationOwnership(
 	ctx context.Context,
-	expected *infrafleetdb.RepositoryAdmissionRecord,
+	expected *Record,
 ) error {
 	if ctx == nil {
 		return repositoryAdmissionUnavailable()
@@ -865,7 +863,7 @@ func (process *repositoryAdmissionProcess) verifyMaterializationOwnership(
 	if current.State != "pending" ||
 		current.OwnerID != process.ownerID ||
 		current.OwnerGenerationID != expected.OwnerGenerationID {
-		return infrafleetdb.ErrRepositoryAdmissionFenceLost
+		return ErrFenceLost
 	}
 	if cause := context.Cause(ctx); cause != nil {
 		return cause

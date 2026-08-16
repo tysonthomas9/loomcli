@@ -1,4 +1,4 @@
-package workspacemgr
+package repositoryadmissioninfra
 
 import (
 	"context"

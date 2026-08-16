@@ -11,9 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/webui"
-	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
 
 // waitForServerReady polls the health endpoint until the server is ready.
@@ -72,69 +70,6 @@ func TestStartServer_GracefulShutdown_CompletesWithinTimeout(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("server did not shut down within 10s timeout")
-	}
-}
-
-func TestServerRunStopsWorkspaceJobsBeforeReturning(t *testing.T) {
-	app, err := NewServer(t.Context(), webui.ServerConfig{
-		Port:            grabEphemeralPort(t),
-		BindAddress:     "127.0.0.1",
-		MaxPortAttempts: 1,
-		ShutdownTimeout: time.Second,
-		FleetClient:     true,
-		Store:           memstore.New(),
-	})
-	if err != nil {
-		t.Fatalf("NewServer: %v", err)
-	}
-	t.Cleanup(app.Close)
-
-	started := make(chan struct{})
-	unwound := make(chan struct{})
-	app.jobStore.StartPrepared(
-		"shutdown-order-job",
-		workspacecoord.WorkspaceCreateRequest{Name: "shutdown-order", Type: "clone"},
-		func(
-			ctx context.Context,
-			_ workspacecoord.WorkspaceCreateRequest,
-		) (workspacecoord.WorkspaceCreateResult, error) {
-			close(started)
-			<-ctx.Done()
-			close(unwound)
-			return workspacecoord.WorkspaceCreateResult{}, context.Cause(ctx)
-		},
-	)
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("workspace job did not start")
-	}
-
-	runCtx, cancelRun := context.WithCancel(t.Context())
-	runDone := make(chan error, 1)
-	go func() {
-		runDone <- app.run(runCtx)
-	}()
-	client := &http.Client{Timeout: time.Second}
-	waitForServerReady(
-		t,
-		client,
-		fmt.Sprintf("http://127.0.0.1:%d", app.actualPort),
-	)
-	cancelRun()
-
-	select {
-	case runErr := <-runDone:
-		if runErr != nil {
-			t.Fatalf("Server.run: %v", runErr)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("Server.run did not return")
-	}
-	select {
-	case <-unwound:
-	default:
-		t.Fatal("Server.run returned before the accepted workspace job unwound")
 	}
 }
 

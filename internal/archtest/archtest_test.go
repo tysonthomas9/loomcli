@@ -65,7 +65,7 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := len(report.CompositeStoreFiles), 14; got != want {
+	if got, want := len(report.CompositeStoreFiles), 12; got != want {
 		t.Fatalf("composite Store file count = %d, want %d; files = %v", got, want, report.CompositeStoreFiles)
 	}
 	if got, want := len(report.CompositeStoreOutside), 0; got != want {
@@ -86,13 +86,13 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if got, want := report.MutationCommands, 107; got != want {
 		t.Fatalf("mutation commands = %d, want %d", got, want)
 	}
-	if got, want := report.DirectPersistenceWrites, 84; got != want {
+	if got, want := report.DirectPersistenceWrites, 77; got != want {
 		t.Fatalf("direct persistence-write rows = %d, want %d", got, want)
 	}
 	if got, want := report.RuntimeComponents, 71; got != want {
 		t.Fatalf("runtime components = %d, want %d", got, want)
 	}
-	if got, want := report.RuntimeGoroutineLaunches, 78; got != want {
+	if got, want := report.RuntimeGoroutineLaunches, 77; got != want {
 		t.Fatalf("runtime goroutine launches = %d, want %d", got, want)
 	}
 	if got, want := report.PerformanceMetrics, 6; got != want {
@@ -687,8 +687,8 @@ func TestRetiredHorizontalRootsCannotReturn(t *testing.T) {
 		"internal/cli/backendapi",
 		"internal/cli/clitest",
 		"internal/cli/serve/serveadapter/daytonabroker",
-		"internal/cli/serve/workspacemgr/admissionstore",
-		"internal/cli/serve/workspacemgr/workspacematerialization",
+		"internal/app/repositoryadmission/admissionstore",
+		"internal/app/repositoryadmission/workspacematerialization",
 		"internal/connector",
 		"internal/driver/runtypes",
 		"internal/driver/taskworktree",

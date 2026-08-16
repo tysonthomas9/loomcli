@@ -874,8 +874,8 @@ func equalFloat64(left, right *float64) bool {
 
 // writeRolePrompt writes the prompt body to <workspace>/.loom/prompts/<file>
 // and returns the absolute path. The path/write logic is shared with the serve
-// workspacemgr seed/backfill via roleprompts.WritePromptFile so both writers
-// agree on layout (this handler must not be imported by workspacemgr, hence the
+// Repository Admission seed/backfill via roleprompts.WritePromptFile so both writers
+// agree on layout (this handler must not be imported by the workflow, hence the
 // neutral shared package).
 func (m *Module) writeRolePrompt(ctx context.Context, ws, roleName, filename, content string) (string, error) {
 	return writeRolePrompt(ctx, m.workspacePath, ws, roleName, filename, content)

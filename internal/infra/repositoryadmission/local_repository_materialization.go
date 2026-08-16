@@ -1,4 +1,4 @@
-package workspacemgr
+package repositoryadmissioninfra
 
 import (
 	"context"
@@ -10,10 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/app/repositoryadmission"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 )
@@ -25,27 +24,11 @@ type plannedCloneRepo struct {
 }
 
 type preparedCloneRepo struct {
-	config config.RepoConfig
+	config repositoryadmission.RepositoryPlacement
 	reused bool
 }
 
-type repositoryAdmissionOwnershipCheck func(context.Context) error
-
-func checkRepositoryAdmissionOwnership(
-	ctx context.Context,
-	check repositoryAdmissionOwnershipCheck,
-) error {
-	if cause := context.Cause(ctx); cause != nil {
-		return cause
-	}
-	if check == nil {
-		return nil
-	}
-	if err := check(ctx); err != nil {
-		return err
-	}
-	return context.Cause(ctx)
-}
+type repositoryAdmissionOwnershipCheck = repositoryadmission.OwnershipCheck
 
 // materializeAddReposClones registers token-free repository intent before
 // asking Source Control to materialize it. The owner resolves provider
@@ -56,15 +39,15 @@ func checkRepositoryAdmissionOwnership(
 func materializeAddReposClones(
 	ctx context.Context,
 	key string,
-	admission *infrafleetdb.RepositoryAdmissionRecord,
+	admission *repositoryadmission.Record,
 	cloneURLs []string,
 	wsDir string,
 	seen map[string]bool,
 	created []createdWorktree,
 	requestedBranch string,
-	materializer repositoryCheckoutMaterializer,
+	materializer RepositoryCheckoutMaterializer,
 	checkOwnership repositoryAdmissionOwnershipCheck,
-) ([]config.RepoConfig, []config.RepoConfig, error) {
+) ([]repositoryadmission.RepositoryPlacement, []repositoryadmission.RepositoryPlacement, error) {
 	if len(cloneURLs) == 0 {
 		return nil, nil, nil
 	}
@@ -80,7 +63,7 @@ func materializeAddReposClones(
 		admission.AdmissionID == "" ||
 		admission.WorkspaceKey != key {
 		cleanupAttachedWorktrees(created)
-		return nil, nil, repositoryAdmissionUnavailable()
+		return nil, nil, repositoryadmission.ErrUnavailable
 	}
 	admissionID := admission.AdmissionID
 	planned, err := planCloneRepos(cloneURLs, seen)
@@ -135,7 +118,7 @@ func materializeAddReposClones(
 			)
 		}
 		prepared = append(prepared, preparedCloneRepo{
-			config: config.RepoConfig{
+			config: repositoryadmission.RepositoryPlacement{
 				Name:         repository.name,
 				Path:         receipt.CheckoutPath,
 				Remote:       "origin",
@@ -158,7 +141,7 @@ func materializeAddReposClones(
 		prepared[len(prepared)-1].config.DefaultBranch = defaultBranch
 	}
 
-	cloned := make([]config.RepoConfig, 0, len(prepared))
+	cloned := make([]repositoryadmission.RepositoryPlacement, 0, len(prepared))
 	for _, repository := range prepared {
 		cloned = append(cloned, repository.config)
 	}
@@ -170,7 +153,7 @@ func materializeAddReposClones(
 			err,
 		)
 	}
-	clonesToCleanup := make([]config.RepoConfig, 0, len(prepared))
+	clonesToCleanup := make([]repositoryadmission.RepositoryPlacement, 0, len(prepared))
 	for _, repository := range prepared {
 		if !repository.reused {
 			clonesToCleanup = append(clonesToCleanup, repository.config)
@@ -221,11 +204,11 @@ func persistAddReposRecords(
 	ctx context.Context,
 	catalog workspacemodule.API,
 	key, wsDir, branch string,
-	reposToCreate []config.RepoConfig,
-	allRepos []config.RepoConfig,
+	reposToCreate []repositoryadmission.RepositoryPlacement,
+	allRepos []repositoryadmission.RepositoryPlacement,
 	created []createdWorktree,
-	clonedRepos []config.RepoConfig,
-	clonesToCleanup []config.RepoConfig,
+	clonedRepos []repositoryadmission.RepositoryPlacement,
+	clonesToCleanup []repositoryadmission.RepositoryPlacement,
 ) error {
 	var storeRepos []string
 	rollback := func() {
@@ -252,14 +235,14 @@ func persistAddReposRecords(
 		}
 		storeRepos = append(storeRepos, r.Name)
 	}
-	if err := saveLocalWorkspaceState(key, wsDir, allRepos, true); err != nil {
+	if err := saveLocalWorkspaceState(key, wsDir, allRepos); err != nil {
 		rollback()
 		return err
 	}
 	return nil
 }
 
-func createStoreRepo(ctx context.Context, catalog workspacemodule.API, key, branch string, r config.RepoConfig) error {
+func createStoreRepo(ctx context.Context, catalog workspacemodule.API, key, branch string, r repositoryadmission.RepositoryPlacement) error {
 	remoteName := r.Remote
 	if remoteName == "" {
 		remoteName = "origin"

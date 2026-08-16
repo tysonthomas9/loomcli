@@ -17,7 +17,7 @@ ceilings:
   total_packages: 155
   module_packages: 18
   outside_module_packages: 137
-  one_file_packages: 38
+  one_file_packages: 37
   one_or_two_file_packages: 57
 packages:
   - internal/agenterr
@@ -28,6 +28,7 @@ packages:
   - internal/app/prreviewer
   - internal/app/query/runcapture
   - internal/app/query/sessionarchive
+  - internal/app/repositoryadmission
   - internal/app/serve
   - internal/app/systemeventing
   - internal/app/webhookingestion
@@ -65,12 +66,10 @@ packages:
   - internal/cli/serve/opsimpl
   - internal/cli/serve/serveadapter
   - internal/cli/serve/worker
-  - internal/cli/serve/workspacemgr
   - internal/cli/stack
   - internal/cli/trigger
   - internal/cli/workflow
   - internal/cli/workspace
-  - internal/configlock
   - internal/domain
   - internal/driver
   - internal/driver/daytonahost
@@ -96,6 +95,7 @@ packages:
   - internal/infra/localredis
   - internal/infra/memstore
   - internal/infra/pty
+  - internal/infra/repositoryadmission
   - internal/infra/sourcecontrolpublisher
   - internal/infra/sourcecontrolstackstore
   - internal/infra/workflowdistribution

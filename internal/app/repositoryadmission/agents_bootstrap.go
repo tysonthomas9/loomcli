@@ -1,4 +1,4 @@
-package workspacemgr
+package repositoryadmission
 
 import (
 	"context"
@@ -10,5 +10,6 @@ import (
 // creation and exact startup repair.
 type ManagedAgentsCommands interface {
 	EnsureRole(context.Context, agents.EnsureRoleCommand) (*agents.Role, error)
+	GetRole(context.Context, string, string) (*agents.Role, error)
 	RepairRolePromptFile(context.Context, agents.RepairManagedRolePromptFileCommand) (*agents.Role, bool, error)
 }

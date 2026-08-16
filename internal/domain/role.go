@@ -7,7 +7,7 @@ import (
 )
 
 // BuiltinRoleNames are the roles auto-seeded on workspace creation
-// (workspacemgr.seedBuiltInRoles) and assumed to exist by supervisors and the
+// (repositoryadmission.seedBuiltInRoles) and assumed to exist by supervisors and the
 // web UI. Every guard against mutating/deleting a builtin role must consult
 // this list so it cannot drift from what is actually seeded.
 var BuiltinRoleNames = []string{"plan", "task", "lead"}

@@ -104,14 +104,9 @@ if [[ -s "$tmp" ]]; then
       internal/app/serve/workflow_catalog.go | \
       internal/app/serve/workflow_catalog_fleetdb.go | \
       internal/app/agentprovisioning/fleetdb/adapter.go | \
+	  internal/infra/repositoryadmission/fleetdb.go | \
       internal/cli/serve/serve.go | \
       internal/cli/serve/serveadapter/source_control.go | \
-      internal/cli/serve/workspacemgr/workspace_store.go | \
-      internal/cli/serve/workspacemgr/workspace_admission_operations.go | \
-      internal/cli/serve/workspacemgr/workspace_store_repository_materialization.go | \
-      internal/cli/serve/workspacemgr/repository_admission_lease.go | \
-      internal/cli/serve/workspacemgr/repository_admission_process.go | \
-      internal/cli/serve/workspacemgr/repository_admission_workspace_operations.go | \
       internal/cli/serve/serveadapter/workflow_catalog.go)
         ;;
       *)

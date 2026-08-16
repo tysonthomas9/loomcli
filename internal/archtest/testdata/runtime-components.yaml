@@ -14,6 +14,9 @@ exclusions:
     - worktrees
 goroutine_disposition_policy: default-deny
 goroutine_launches:
+  - {file: "internal/app/repositoryadmission/repository_admission_lease.go", function: "repositoryAdmissionProcess.beginMaterialization", site: "go#1", callee: "process.watchRepositoryAdmissionLease", disposition: bounded, reason: "per-materialization lease watchdog expires at its lease deadline or is canceled and joined by materialization cleanup"}
+  - {file: "internal/app/repositoryadmission/repository_admission_lease.go", function: "repositoryAdmissionProcess.renewActiveRepositoryAdmissions", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "renewal workers carry pass and per-attempt timeouts and are WaitGroup-joined before the renewal pass returns"}
+  - {file: "internal/app/repositoryadmission/workspace_admission_operations.go", function: "Workflow.launchAcceptedAdmission", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [workspace-repository-admission-immediate-runner]}
   - {file: "internal/archtest/agents_ownership.go", function: "snapshotPhase5AgentsMutations", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "profile workers are concurrency-limited and WaitGroup-joined before return"}
   - {file: "internal/archtest/direct_writes.go", function: "snapshotDirectWriteProfiles", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "profile workers are concurrency-limited and WaitGroup-joined before return"}
   - {file: "internal/archtest/profiles.go", function: "analyzeProfiles", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "profile workers are concurrency-limited and WaitGroup-joined before return"}
@@ -46,8 +49,6 @@ goroutine_launches:
   - {file: "internal/cli/serve/serve_runtime_loops.go", function: "startOutboxDispatcher", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [execution-outbox-delivery]}
   - {file: "internal/cli/serve/worker/log_forwarder.go", function: "NewLogForwarder", site: "go#1", callee: "lf.periodicFlush", disposition: component, component_ids: [serve-worker-log-forwarder]}
   - {file: "internal/cli/serve/worker/worker_cmd.go", function: "setupWorkerShutdown", site: "go#1", callee: "<anonymous>", disposition: command, reason: "one-shot operating-system signal relay owned by the foreground worker command"}
-  - {file: "internal/cli/serve/workspacemgr/repository_admission_lease.go", function: "repositoryAdmissionProcess.beginMaterialization", site: "go#1", callee: "process.watchRepositoryAdmissionLease", disposition: bounded, reason: "per-materialization lease watchdog expires at its lease deadline or is canceled and joined by materialization cleanup"}
-  - {file: "internal/cli/serve/workspacemgr/repository_admission_lease.go", function: "repositoryAdmissionProcess.renewActiveRepositoryAdmissions", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "renewal workers carry pass and per-attempt timeouts and are WaitGroup-joined before the renewal pass returns"}
   - {file: "internal/cli/workspace/status.go", function: "runStatus", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "workspace status fan-out is channel-joined before command return"}
   - {file: "internal/cli/workspace/status.go", function: "runStatus", site: "go#2", callee: "<anonymous>", disposition: bounded, reason: "workspace status fan-out is channel-joined before command return"}
   - {file: "internal/cli/worktree_resolve.go", function: "Resolver.agentWorktreeInfos", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "worktree inspection fan-out is WaitGroup-joined before resolution returns"}
@@ -90,8 +91,7 @@ goroutine_launches:
   - {file: "internal/webui/server/realtime/terminal_auth.go", function: "NewTerminalAuth", site: "go#1", callee: "ta.cleanupLoop", disposition: component, component_ids: [terminal-token-nonce-cleanup]}
   - {file: "internal/webui/subscription/multi.go", function: "MultiWorkspaceSubscriber.Start", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [workspace-subscriber-idle-deactivation]}
   - {file: "internal/webui/subscription/workitem_mutation_subscriber.go", function: "WorkItemMutationSubscriber.Start", site: "go#1", callee: "s.loop", disposition: component, component_ids: [workitem-mutation-long-poll]}
-  - {file: "internal/webui/workspacecoord/job_store.go", function: "NewWorkspaceJobRegistry", site: "go#1", callee: "s.cleanupLoop", disposition: component, component_ids: [workspace-job-cleanup]}
-  - {file: "internal/webui/workspacecoord/job_store.go", function: "WorkspaceJobRegistry.start", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "workspace mutation job carries a five-minute context and persists terminal completion"}
+
 components:
   # Bounded command and startup polling.
   - id: fleet-dependency-state-wait
@@ -384,8 +384,8 @@ components:
 
   - id: workspace-repository-admission-recovery
     kind: component
-    file: internal/cli/serve/workspacemgr/workspace_admission_operations.go
-    function: StoreBackedWorkspaceAdmissionOperations.RuntimeRegistrations
+    file: internal/app/repositoryadmission/workspace_admission_operations.go
+    function: Workflow.RuntimeRegistrations
     site: "component:workspace-repository-admission-recovery-registration"
     capability: workspace
     owner: Workspace repository-admission recovery hosted by platform runtime
@@ -397,8 +397,8 @@ components:
 
   - id: workspace-repository-admission-lease-renewal
     kind: component
-    file: internal/cli/serve/workspacemgr/workspace_admission_operations.go
-    function: StoreBackedWorkspaceAdmissionOperations.RuntimeRegistrations
+    file: internal/app/repositoryadmission/workspace_admission_operations.go
+    function: Workflow.RuntimeRegistrations
     site: "component:workspace-repository-admission-lease-renewal-registration"
     capability: workspace
     owner: Workspace repository-admission lease renewal hosted by platform runtime
@@ -406,6 +406,19 @@ components:
     cancellation: "platform runtime host cancellation, a 10s pass timeout, and bounded Stop join"
     readiness_health: "runtime host records each pass; renewal scans only process-active exact durable admission coordinates and serializes local mutations"
     retry_backoff: "host exponential backoff from 5s to 15s; each 60s Fleet lease renewal is fenced by owner ID, owner generation, spec fingerprint, and expected version"
+    classification: managed
+
+  - id: workspace-repository-admission-immediate-runner
+    kind: component
+    file: internal/app/repositoryadmission/workspace_admission_operations.go
+    function: Workflow.launchAcceptedAdmission
+    site: "component:workspace-repository-admission-immediate-runner"
+    capability: workspace
+    owner: Repository Admission application workflow
+    cadence: "once per durably accepted create or add-repositories command"
+    cancellation: "six-minute execution deadline plus owner-scoped materialization cancellation during Stop"
+    readiness_health: "FleetDB admission state is authoritative; failure or process loss remains recoverable by the managed recovery component"
+    retry_backoff: "no in-memory retry; durable recovery performs fenced replay after interruption"
     classification: managed
 
   - id: serve-await-event-notifications
@@ -812,19 +825,6 @@ components:
     retry_backoff: "fixed scan cadence"
     classification: managed
 
-  - id: workspace-job-cleanup
-    kind: ticker
-    file: internal/webui/workspacecoord/job_store.go
-    function: WorkspaceJobRegistry.cleanupLoop
-    site: "time.NewTicker#1"
-    capability: workspace
-    owner: workspace service adapter
-    cadence: "1m"
-    cancellation: "WorkspaceJobRegistry done channel"
-    readiness_health: "not readiness-bearing; evicts terminal jobs after the 5m retention window"
-    retry_backoff: "fixed cleanup cadence"
-    classification: managed
-
   - id: terminal-idle-reaper
     kind: ticker
     file: internal/infra/pty/pty_manager.go
@@ -841,7 +841,7 @@ components:
   # Boot-only repairs and long-lived components that do not use time.NewTicker.
   - id: builtin-role-prompt-boot-repair
     kind: component
-    file: internal/cli/serve/workspacemgr/workspace_store.go
+    file: internal/infra/repositoryadmission/local_store.go
     function: EnsureBuiltinRolePrompts
     site: component:boot-repair
     capability: agents

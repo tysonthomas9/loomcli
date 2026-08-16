@@ -282,10 +282,6 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	app.wrappedCreateFn = wrapWorkspaceCreateFn(config.WorkspaceCreateFn, app.registry)
 	app.wrappedDeleteCleanupFn = wrapWorkspaceDeleteCleanupFn(config.WorkspaceDeleteCleanupFn, app.registry)
 
-	// Async job store for clone workspace creation (202 + polling).
-	app.jobStore = workspacecoord.NewWorkspaceJobRegistry()
-	cleanups = append(cleanups, func() { app.jobStore.Stop() })
-
 	// Workspace-existence checker. Subscriber activation is deliberately not
 	// part of existence resolution: only workspace SSE token/stream routes start
 	// FleetDB mutation long-polls.
@@ -335,7 +331,6 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		CreateFn:             app.wrappedCreateFn,
 		AddReposFn:           config.WorkspaceAddReposFn,
 		DeleteCleanupFn:      app.wrappedDeleteCleanupFn,
-		JobStore:             app.jobStore,
 		AdmissionCoordinator: config.WorkspaceAdmissions,
 		AgentDirectory:       workspaceAgents,
 	})

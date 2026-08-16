@@ -23,9 +23,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/metricscmd"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/opsimpl"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
-	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
-	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	webuiapp "github.com/tysonthomas9/loomcli/internal/webui/app"
@@ -248,10 +246,12 @@ func runServe(cmd *cobra.Command, args []string) {
 	// Backfill TS-contract prompt bodies only after the Agents capability has
 	// been composed. Workspace management receives owner commands, never the
 	// horizontal Role or Agent stores.
-	if err := workspacemgr.EnsureBuiltinRolePrompts(
-		ctx, storeHandle.Store, capabilities.agents,
-	); err != nil {
-		slog.Warn("builtin role prompt backfill failed", "err", err)
+	if capabilities.workspaceAdmissions != nil {
+		if err := capabilities.workspaceAdmissions.EnsureBuiltinRolePrompts(
+			ctx, &cfg, capabilities.agents,
+		); err != nil {
+			slog.Warn("builtin role prompt backfill failed", "err", err)
+		}
 	}
 	if cfg.AgentsCapability == nil || cfg.AgentsCapability.AgentsAPI() == nil {
 		log.Fatal("failed to compose monitor: canonical Agents directory is required")
@@ -655,7 +655,7 @@ type serveCapabilitySet struct {
 	automation          *serveadapter.AutomationCapability
 	agents              *serveadapter.AgentsCapability
 	interaction         *serveadapter.InteractionCapability
-	workspaceAdmissions *workspacemgr.StoreBackedWorkspaceAdmissionOperations
+	workspaceAdmissions *opsimpl.RepositoryAdmission
 	runtime             []serveadapter.RuntimeContributor
 }
 
@@ -699,7 +699,7 @@ func buildServerConfig(
 	}
 	capabilities := serveCapabilitySet{}
 	var automationCapability *serveadapter.AutomationCapability
-	var repositoryAdmissionJournal *workspacemgr.RepositoryAdmissionJournal
+	var repositoryAdmissionComposition *opsimpl.RepositoryAdmission
 	if module != nil {
 		capabilities.workflowCatalog = module
 		cfg.WorkflowCatalogModule = module
@@ -715,12 +715,14 @@ func buildServerConfig(
 		}
 	}
 	if storeHandle != nil {
-		var journalErr error
-		repositoryAdmissionJournal, journalErr = workspacemgr.NewRepositoryAdmissionJournal()
-		if journalErr != nil {
+		var admissionErr error
+		repositoryAdmissionComposition, admissionErr = opsimpl.NewRepositoryAdmission(
+			bootstrap.LoomDir(),
+		)
+		if admissionErr != nil {
 			return webui.ServerConfig{}, serveCapabilitySet{}, fmt.Errorf(
-				"compose repository admission journal: %w",
-				journalErr,
+				"compose repository admission: %w",
+				admissionErr,
 			)
 		}
 		agentsCapability, agentsErr := serveadapter.BuildAgentsCapability(serveadapter.AgentsConfig{
@@ -728,7 +730,7 @@ func buildServerConfig(
 			WorkflowCatalogModule: module, LocalSettingsDir: cfg.LocalSettingsDir,
 			Workspace:             driverAutomationWorkspaceScope(),
 			WorkspaceRoleResolver: cfg.WorkspaceRoleResolver,
-			RepositoryAdmissions:  repositoryAdmissionJournal,
+			RepositoryAdmissions:  repositoryAdmissionComposition.LocalResolver(),
 		})
 		if agentsErr != nil {
 			return webui.ServerConfig{}, serveCapabilitySet{}, agentsErr
@@ -785,15 +787,11 @@ func buildServerConfig(
 	// Store-backed operation remains available for local worktree attachment,
 	// while remote clone requests fail closed if capability composition did not
 	// provide this owner port.
-	workspaceAdmissions := applyWorkspaceConfigWithAdmission(
-		&cfg,
-		storeHandle,
-		repositoryAdmissionJournal,
-		capabilities.agents,
-	)
-	if workspaceAdmissions != nil {
-		capabilities.workspaceAdmissions = workspaceAdmissions
-		capabilities.runtime = append(capabilities.runtime, workspaceAdmissions)
+	if repositoryAdmissionComposition != nil && repositoryAdmissionComposition.Configure(
+		&cfg, storeHandle, capabilities.agents,
+	) {
+		capabilities.workspaceAdmissions = repositoryAdmissionComposition
+		capabilities.runtime = append(capabilities.runtime, repositoryAdmissionComposition)
 	}
 	applyCORSConfig(&cfg)
 	return cfg, capabilities, nil
@@ -877,52 +875,6 @@ func applyFleetConfig(cfg *webui.ServerConfig, fs fleetState) {
 	// external cloud. In both shapes there is no local issue daemon for the
 	// web UI to probe.
 	cfg.FleetClient = fs.modeDetected || cfg.Store != nil
-}
-
-// applyWorkspaceConfig wires store-backed workspace operations into the webui
-// server. Nil-store serve leaves workspace management unavailable.
-func applyWorkspaceConfig(
-	cfg *webui.ServerConfig,
-	agentsCommands workspacemgr.ManagedAgentsCommands,
-) {
-	_ = applyWorkspaceConfigWithAdmission(cfg, nil, nil, agentsCommands)
-}
-
-func applyWorkspaceConfigWithAdmission(
-	cfg *webui.ServerConfig,
-	storeHandle *bootstrap.StoreHandle,
-	journal *workspacemgr.RepositoryAdmissionJournal,
-	agentsCommands workspacemgr.ManagedAgentsCommands,
-) *workspacemgr.StoreBackedWorkspaceAdmissionOperations {
-	if cfg.Store == nil {
-		return nil
-	}
-	cfg.WorkspaceIDResolverFn = serveadapter.BuildWorkspaceIDResolverFn(cfg.Store)
-	cfg.InitialWorkspaceID = serveadapter.ResolveInitialWorkspaceID(cfg.Store)
-	cfg.WorkspaceDeleteCleanupFn = serveadapter.BuildWorkspaceDeleteCleanupFn()
-	var admissions infrafleetdb.RepositoryAdmissionTransport
-	if storeHandle != nil && storeHandle.FleetDBClient() != nil {
-		admissions = storeHandle.FleetDBClient().RepositoryAdmissions()
-	}
-	operations := workspacemgr.NewStoreBackedWorkspaceAdmissionOperations(
-		cfg.WorkspaceCatalog,
-		agentsCommands,
-		admissions,
-		journal,
-		cfg.WorkspaceSourceControl,
-	)
-	if operations == nil {
-		return nil
-	}
-	cfg.WorkspaceCreateFn = operations.CreateWorkspace
-	cfg.WorkspaceAddReposFn = operations.AddWorkspaceRepos
-	if len(operations.RuntimeRegistrations()) > 0 {
-		cfg.WorkspaceAdmissions = operations
-	}
-	if cfg.WorkspaceAdmissions == nil {
-		return nil
-	}
-	return operations
 }
 
 func applyCORSConfig(cfg *webui.ServerConfig) {

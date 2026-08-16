@@ -317,14 +317,20 @@ func TestAddWorkspaceReposNormalizesCloneURLInput(t *testing.T) {
 }
 
 func TestStartAsyncAddReposNormalizesAndSchedulesWithoutRunningInline(t *testing.T) {
-	jobStore := &recordingWorkspaceJobRegistry{}
 	addCalled := false
+	var started WorkspaceAddReposRequest
+	coordinator := &testWorkspaceAdmissionCoordinator{
+		startAddRepos: func(_ context.Context, req WorkspaceAddReposRequest) (string, error) {
+			started = req
+			return "durable-add-repos-admission", nil
+		},
+	}
 	svc := NewWorkspaceService(WorkspaceServiceConfig{
 		AddReposFn: func(_ context.Context, req WorkspaceAddReposRequest) (WorkspaceCreateResult, error) {
 			addCalled = true
 			return WorkspaceCreateResult{WorkspaceID: req.WorkspaceID}, nil
 		},
-		JobStore: jobStore,
+		AdmissionCoordinator: coordinator,
 	})
 
 	jobID, err := svc.StartAsyncAddRepos(context.Background(), WorkspaceAddReposRequest{
@@ -334,41 +340,34 @@ func TestStartAsyncAddReposNormalizesAndSchedulesWithoutRunningInline(t *testing
 	if err != nil {
 		t.Fatalf("StartAsyncAddRepos returned error: %v", err)
 	}
-	if jobID != "add-repos-job" {
-		t.Fatalf("job ID = %q, want add-repos-job", jobID)
+	if jobID != "durable-add-repos-admission" {
+		t.Fatalf("job ID = %q, want durable admission ID", jobID)
 	}
 	if addCalled {
 		t.Fatal("add function ran before the async job store started it")
 	}
-	if len(jobStore.addReq.Repos) != 0 {
-		t.Fatalf("repos = %#v, want normalized empty local list", jobStore.addReq.Repos)
+	if len(started.Repos) != 0 {
+		t.Fatalf("repos = %#v, want normalized empty local list", started.Repos)
 	}
-	if len(jobStore.addReq.CloneURLs) != 1 || jobStore.addReq.CloneURLs[0] != "https://github.com/acme/slow.git" {
-		t.Fatalf("clone URLs = %#v", jobStore.addReq.CloneURLs)
-	}
-	if jobStore.addFn == nil {
-		t.Fatal("expected async add function to be scheduled")
+	if len(started.CloneURLs) != 1 || started.CloneURLs[0] != "https://github.com/acme/slow.git" {
+		t.Fatalf("clone URLs = %#v", started.CloneURLs)
 	}
 }
 
-func TestStartAsyncCreatePreparesAdmissionInlineAndUsesExactJobID(t *testing.T) {
-	prepareEntered := make(chan WorkspaceCreateRequest, 1)
-	releasePrepare := make(chan struct{})
+func TestStartAsyncCreateWaitsForDurableStartAndUsesExactAdmissionID(t *testing.T) {
+	startEntered := make(chan WorkspaceCreateRequest, 1)
+	releaseStart := make(chan struct{})
 	coordinator := &testWorkspaceAdmissionCoordinator{
-		prepareCreate: func(_ context.Context, req WorkspaceCreateRequest) (string, error) {
-			prepareEntered <- req
-			<-releasePrepare
+		startCreate: func(_ context.Context, req WorkspaceCreateRequest) (string, error) {
+			startEntered <- req
+			<-releaseStart
 			return "durable-create-admission", nil
 		},
-	}
-	jobStore := &recordingWorkspaceJobRegistry{
-		preparedCreateStarted: make(chan string, 1),
 	}
 	svc := NewWorkspaceService(WorkspaceServiceConfig{
 		CreateFn: func(context.Context, WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
 			return WorkspaceCreateResult{WorkspaceID: "CLONE-WS"}, nil
 		},
-		JobStore:             jobStore,
 		AdmissionCoordinator: coordinator,
 	})
 
@@ -387,25 +386,20 @@ func TestStartAsyncCreatePreparesAdmissionInlineAndUsesExactJobID(t *testing.T) 
 	}()
 
 	select {
-	case req := <-prepareEntered:
+	case req := <-startEntered:
 		if req.Name != "clone_ws" {
-			t.Fatalf("prepare request name = %q, want clone_ws", req.Name)
+			t.Fatalf("start request name = %q, want clone_ws", req.Name)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("durable prepare was not called")
+		t.Fatal("durable start was not called")
 	}
 	select {
 	case got := <-result:
-		t.Fatalf("StartAsyncCreate returned before durable prepare completed: %+v", got)
-	default:
-	}
-	select {
-	case id := <-jobStore.preparedCreateStarted:
-		t.Fatalf("runner was scheduled before durable prepare completed with ID %q", id)
+		t.Fatalf("StartAsyncCreate returned before durable start completed: %+v", got)
 	default:
 	}
 
-	close(releasePrepare)
+	close(releaseStart)
 	select {
 	case got := <-result:
 		if got.err != nil {
@@ -415,32 +409,22 @@ func TestStartAsyncCreatePreparesAdmissionInlineAndUsesExactJobID(t *testing.T) 
 			t.Fatalf("job ID = %q, want exact durable admission ID", got.id)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("StartAsyncCreate did not return after durable prepare")
-	}
-	select {
-	case id := <-jobStore.preparedCreateStarted:
-		if id != "durable-create-admission" {
-			t.Fatalf("scheduled job ID = %q, want exact durable admission ID", id)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("prepared create runner was not scheduled")
+		t.Fatal("StartAsyncCreate did not return after durable start")
 	}
 }
 
 func TestStartAsyncAddReposPreparesNormalizedAdmissionAndUsesExactJobID(t *testing.T) {
 	var prepared WorkspaceAddReposRequest
 	coordinator := &testWorkspaceAdmissionCoordinator{
-		prepareAddRepos: func(_ context.Context, req WorkspaceAddReposRequest) (string, error) {
+		startAddRepos: func(_ context.Context, req WorkspaceAddReposRequest) (string, error) {
 			prepared = req
 			return "durable-add-repos-admission", nil
 		},
 	}
-	jobStore := &recordingWorkspaceJobRegistry{}
 	svc := NewWorkspaceService(WorkspaceServiceConfig{
 		AddReposFn: func(context.Context, WorkspaceAddReposRequest) (WorkspaceCreateResult, error) {
 			return WorkspaceCreateResult{WorkspaceID: "ALPHA"}, nil
 		},
-		JobStore:             jobStore,
 		AdmissionCoordinator: coordinator,
 	})
 
@@ -454,9 +438,6 @@ func TestStartAsyncAddReposPreparesNormalizedAdmissionAndUsesExactJobID(t *testi
 	if jobID != "durable-add-repos-admission" {
 		t.Fatalf("job ID = %q, want exact durable admission ID", jobID)
 	}
-	if jobStore.preparedAddReposID != jobID {
-		t.Fatalf("scheduled job ID = %q, want %q", jobStore.preparedAddReposID, jobID)
-	}
 	if len(prepared.Repos) != 0 {
 		t.Fatalf("prepared repos = %#v, want normalized empty local list", prepared.Repos)
 	}
@@ -467,7 +448,7 @@ func TestStartAsyncAddReposPreparesNormalizedAdmissionAndUsesExactJobID(t *testi
 
 func TestStartAsyncCreateClassifiesAdmissionConflict(t *testing.T) {
 	coordinator := &testWorkspaceAdmissionCoordinator{
-		prepareCreate: func(context.Context, WorkspaceCreateRequest) (string, error) {
+		startCreate: func(context.Context, WorkspaceCreateRequest) (string, error) {
 			return "", workspacemodule.NewCreateError(
 				workspacemodule.AlreadyExists,
 				"workspace already exists",
@@ -479,7 +460,6 @@ func TestStartAsyncCreateClassifiesAdmissionConflict(t *testing.T) {
 		CreateFn: func(context.Context, WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
 			return WorkspaceCreateResult{}, nil
 		},
-		JobStore:             &recordingWorkspaceJobRegistry{},
 		AdmissionCoordinator: coordinator,
 	})
 
@@ -495,7 +475,7 @@ func TestStartAsyncCreateClassifiesAdmissionConflict(t *testing.T) {
 
 func TestStartAsyncAddReposClassifiesAdmissionConflict(t *testing.T) {
 	coordinator := &testWorkspaceAdmissionCoordinator{
-		prepareAddRepos: func(context.Context, WorkspaceAddReposRequest) (string, error) {
+		startAddRepos: func(context.Context, WorkspaceAddReposRequest) (string, error) {
 			return "", workspacemodule.NewCreateError(
 				workspacemodule.AlreadyExists,
 				"repository already exists in workspace",
@@ -507,7 +487,6 @@ func TestStartAsyncAddReposClassifiesAdmissionConflict(t *testing.T) {
 		AddReposFn: func(context.Context, WorkspaceAddReposRequest) (WorkspaceCreateResult, error) {
 			return WorkspaceCreateResult{}, nil
 		},
-		JobStore:             &recordingWorkspaceJobRegistry{},
 		AdmissionCoordinator: coordinator,
 	})
 
@@ -526,7 +505,6 @@ func TestStartAsyncAddReposRejectsLocalOnlyRequest(t *testing.T) {
 		AddReposFn: func(context.Context, WorkspaceAddReposRequest) (WorkspaceCreateResult, error) {
 			return WorkspaceCreateResult{}, nil
 		},
-		JobStore: &recordingWorkspaceJobRegistry{},
 	})
 
 	_, err := svc.StartAsyncAddRepos(context.Background(), WorkspaceAddReposRequest{
@@ -692,7 +670,7 @@ func TestPatchWorkspaceBackend_WritesLocalNodeConfig(t *testing.T) {
 	}
 }
 
-func TestGetWorkspaceJob_StoreFallbackSurvivesJobStoreLoss(t *testing.T) {
+func TestGetWorkspaceJobDoesNotInferAdmissionFromWorkspaceLifecycle(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "CLONE-WS", Name: "clone-ws"}); err != nil {
@@ -704,50 +682,14 @@ func TestGetWorkspaceJob_StoreFallbackSurvivesJobStoreLoss(t *testing.T) {
 	}
 
 	svc := NewWorkspaceService(WorkspaceServiceConfig{Topology: st})
-	job, err := svc.GetWorkspaceJob(ctx, "CLONE-WS")
-	if err != nil {
-		t.Fatalf("GetWorkspaceJob returned error: %v", err)
-	}
-	if job.Status != JobStatusRunning {
-		t.Fatalf("status = %q, want running", job.Status)
-	}
-	if job.Progress != "cloning repository..." {
-		t.Fatalf("progress = %q", job.Progress)
-	}
-	if job.WorkspaceID != "CLONE-WS" {
-		t.Fatalf("workspace_id = %q, want CLONE-WS", job.WorkspaceID)
+	_, err := svc.GetWorkspaceJob(ctx, "CLONE-WS")
+	var serviceErr *ServiceError
+	if !errors.As(err, &serviceErr) || serviceErr.Kind != KindNotFound {
+		t.Fatalf("error = %v, want durable-admission not found", err)
 	}
 }
 
-func TestGetWorkspaceJob_StoreFallbackReturnsFailedForErrorWorkspace(t *testing.T) {
-	ctx := context.Background()
-	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "CLONE-WS", Name: "clone-ws"}); err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
-	failed := workspacemodule.StateError
-	msg := "git clone failed"
-	if _, err := st.Workspaces().Update(ctx, "CLONE-WS", store.WorkspaceUpdate{
-		State:        &failed,
-		ErrorMessage: &msg,
-	}); err != nil {
-		t.Fatalf("mark error: %v", err)
-	}
-
-	svc := NewWorkspaceService(WorkspaceServiceConfig{Topology: st})
-	job, err := svc.GetWorkspaceJob(ctx, "CLONE-WS")
-	if err != nil {
-		t.Fatalf("GetWorkspaceJob returned error: %v", err)
-	}
-	if job.Status != JobStatusFailed {
-		t.Fatalf("status = %q, want failed", job.Status)
-	}
-	if job.Error != msg {
-		t.Fatalf("error = %q, want %q", job.Error, msg)
-	}
-}
-
-func TestGetWorkspaceJob_AdmissionLookupFallbackAfterInMemoryMiss(t *testing.T) {
+func TestGetWorkspaceJobUsesDurableAdmissionSnapshot(t *testing.T) {
 	want := &WorkspaceJob{
 		ID:          "durable-add-repos-admission",
 		Status:      JobStatusRunning,
@@ -763,7 +705,6 @@ func TestGetWorkspaceJob_AdmissionLookupFallbackAfterInMemoryMiss(t *testing.T) 
 		},
 	}
 	svc := NewWorkspaceService(WorkspaceServiceConfig{
-		JobStore:             &recordingWorkspaceJobRegistry{},
 		AdmissionCoordinator: coordinator,
 	})
 
@@ -776,71 +717,30 @@ func TestGetWorkspaceJob_AdmissionLookupFallbackAfterInMemoryMiss(t *testing.T) 
 	}
 }
 
-type recordingWorkspaceJobRegistry struct {
-	addReq                WorkspaceAddReposRequest
-	addFn                 WorkspaceAddReposFn
-	preparedCreateID      string
-	preparedCreateStarted chan string
-	preparedAddReposID    string
-}
-
-func (*recordingWorkspaceJobRegistry) Start(WorkspaceCreateRequest, WorkspaceCreateFn) string {
-	return "create-job"
-}
-
-func (s *recordingWorkspaceJobRegistry) StartPrepared(id string, _ WorkspaceCreateRequest, _ WorkspaceCreateFn) string {
-	s.preparedCreateID = id
-	if s.preparedCreateStarted != nil {
-		s.preparedCreateStarted <- id
-	}
-	return id
-}
-
-func (s *recordingWorkspaceJobRegistry) StartAddRepos(req WorkspaceAddReposRequest, fn WorkspaceAddReposFn) string {
-	s.addReq = req
-	s.addFn = fn
-	return "add-repos-job"
-}
-
-func (s *recordingWorkspaceJobRegistry) StartPreparedAddRepos(
-	id string,
-	req WorkspaceAddReposRequest,
-	fn WorkspaceAddReposFn,
-) string {
-	s.preparedAddReposID = id
-	s.addReq = req
-	s.addFn = fn
-	return id
-}
-
-func (*recordingWorkspaceJobRegistry) Get(string) *WorkspaceJob {
-	return nil
-}
-
 type testWorkspaceAdmissionCoordinator struct {
-	prepareCreate   func(context.Context, WorkspaceCreateRequest) (string, error)
-	prepareAddRepos func(context.Context, WorkspaceAddReposRequest) (string, error)
-	lookupJob       func(context.Context, string) (*WorkspaceJob, bool, error)
+	startCreate   func(context.Context, WorkspaceCreateRequest) (string, error)
+	startAddRepos func(context.Context, WorkspaceAddReposRequest) (string, error)
+	lookupJob     func(context.Context, string) (*WorkspaceJob, bool, error)
 }
 
-func (c *testWorkspaceAdmissionCoordinator) PrepareCreate(
+func (c *testWorkspaceAdmissionCoordinator) StartCreate(
 	ctx context.Context,
 	req WorkspaceCreateRequest,
 ) (string, error) {
-	if c.prepareCreate == nil {
-		return "", errors.New("unexpected PrepareCreate call")
+	if c.startCreate == nil {
+		return "", errors.New("unexpected StartCreate call")
 	}
-	return c.prepareCreate(ctx, req)
+	return c.startCreate(ctx, req)
 }
 
-func (c *testWorkspaceAdmissionCoordinator) PrepareAddRepos(
+func (c *testWorkspaceAdmissionCoordinator) StartAddRepos(
 	ctx context.Context,
 	req WorkspaceAddReposRequest,
 ) (string, error) {
-	if c.prepareAddRepos == nil {
-		return "", errors.New("unexpected PrepareAddRepos call")
+	if c.startAddRepos == nil {
+		return "", errors.New("unexpected StartAddRepos call")
 	}
-	return c.prepareAddRepos(ctx, req)
+	return c.startAddRepos(ctx, req)
 }
 
 func (c *testWorkspaceAdmissionCoordinator) LookupJob(

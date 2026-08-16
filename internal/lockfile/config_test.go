@@ -1,4 +1,4 @@
-package configlock
+package lockfile
 
 import (
 	"fmt"
@@ -129,11 +129,11 @@ func TestWithLock_ReturnsError(t *testing.T) {
 	dir := t.TempDir()
 	sentinel := fmt.Errorf("intentional error from fn")
 
-	err := WithLock(dir, func() error {
+	err := WithConfigLock(dir, func() error {
 		return sentinel
 	})
 	if err != sentinel {
-		t.Fatalf("WithLock returned %v, want %v", err, sentinel)
+		t.Fatalf("WithConfigLock returned %v, want %v", err, sentinel)
 	}
 }
 
@@ -143,10 +143,10 @@ func TestWithLock_CreatesLockFile(t *testing.T) {
 
 	// Lock file should not exist yet.
 	if _, err := os.Stat(lockPath); err == nil {
-		t.Fatal("lock file should not exist before WithLock")
+		t.Fatal("lock file should not exist before WithConfigLock")
 	}
 
-	err := WithLock(dir, func() error {
+	err := WithConfigLock(dir, func() error {
 		// Inside fn, the lock file should exist.
 		if _, statErr := os.Stat(lockPath); statErr != nil {
 			t.Errorf("lock file should exist inside fn: %v", statErr)
@@ -154,7 +154,7 @@ func TestWithLock_CreatesLockFile(t *testing.T) {
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("WithLock: %v", err)
+		t.Fatalf("WithConfigLock: %v", err)
 	}
 }
 
@@ -162,17 +162,17 @@ func TestWithLock_ReleasesAfterFn(t *testing.T) {
 	dir := t.TempDir()
 
 	// First call should succeed.
-	err := WithLock(dir, func() error { return nil })
+	err := WithConfigLock(dir, func() error { return nil })
 	if err != nil {
-		t.Fatalf("first WithLock: %v", err)
+		t.Fatalf("first WithConfigLock: %v", err)
 	}
 
 	// Second call should succeed because the lock was released.
 	acquired := make(chan struct{})
 	go func() {
-		err := WithLock(dir, func() error { return nil })
+		err := WithConfigLock(dir, func() error { return nil })
 		if err != nil {
-			t.Errorf("second WithLock: %v", err)
+			t.Errorf("second WithConfigLock: %v", err)
 		}
 		close(acquired)
 	}()
@@ -181,6 +181,6 @@ func TestWithLock_ReleasesAfterFn(t *testing.T) {
 	case <-acquired:
 		// success — lock was released
 	case <-time.After(2 * time.Second):
-		t.Fatal("second WithLock did not complete; lock was not released")
+		t.Fatal("second WithConfigLock did not complete; lock was not released")
 	}
 }

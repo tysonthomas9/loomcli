@@ -242,6 +242,7 @@ func (i DirectWriteInventory) validateMetadata() error {
 		"internal/cli",
 		"internal/driver",
 		"internal/infra/localredis",
+		"internal/infra/repositoryadmission",
 		"internal/infra/sourcecontrolstackstore",
 		"internal/infra/workspacecatalog",
 		"internal/modules",

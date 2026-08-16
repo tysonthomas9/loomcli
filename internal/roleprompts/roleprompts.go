@@ -2,7 +2,7 @@
 // the on-disk prompt-file write helper shared across the serve plane.
 //
 // Two callers need this without importing each other:
-//   - workspacemgr seeds the builtin `plan`/`task` role prompts at workspace
+//   - Repository Admission seeds the builtin `plan`/`task` role prompts at workspace
 //     creation and backfills them at serve start;
 //   - the webui roles handler writes operator-edited role prompts.
 //
