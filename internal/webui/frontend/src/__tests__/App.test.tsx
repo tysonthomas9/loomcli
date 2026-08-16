@@ -1999,18 +1999,17 @@ describe("App", () => {
   });
 
   describe("IssueDetailPanel integration", () => {
-    it("renders IssueDetailPanel in closed state by default", () => {
+    it("does not mount IssueDetailPanel in its closed state by default", () => {
       const mockReturn = createMockUseIssuesReturn({});
       mockStoreState = mockReturn;
 
       const { container } = render(<App />);
 
-      // Panel should be rendered but closed (isOpen=false)
+      // A closed panel must not leave a viewport-covering overlay in the DOM.
       const panel = container.querySelector(
         '[data-testid="issue-detail-panel"]',
       );
-      expect(panel).toBeInTheDocument();
-      expect(panel).toHaveAttribute("data-state", "closed");
+      expect(panel).not.toBeInTheDocument();
     });
 
     it("opens issue panel via usePanelManager when issue is clicked in SwimLaneBoard", () => {
@@ -2163,6 +2162,13 @@ describe("App", () => {
           fetchIssue,
         }),
       );
+      mockUsePanelManager.mockReturnValue({
+        activePanel: { type: "issue", id: "issue-1" },
+        pendingPanel: null,
+        openPanel: mockOpenPanel,
+        closePanel: mockClosePanel,
+        isOpen: mockIsOpen,
+      });
 
       const { container } = render(<App />);
 
@@ -2202,6 +2208,13 @@ describe("App", () => {
           isLoading: false,
         }),
       );
+      mockUsePanelManager.mockReturnValue({
+        activePanel: { type: "issue", id: "issue-1" },
+        pendingPanel: null,
+        openPanel: mockOpenPanel,
+        closePanel: mockClosePanel,
+        isOpen: mockIsOpen,
+      });
 
       render(<App />);
 
@@ -2260,6 +2273,13 @@ describe("App", () => {
           isLoading: false,
         }),
       );
+      mockUsePanelManager.mockReturnValue({
+        activePanel: { type: "issue", id: "issue-1" },
+        pendingPanel: null,
+        openPanel: mockOpenPanel,
+        closePanel: mockClosePanel,
+        isOpen: mockIsOpen,
+      });
 
       const { container } = render(<App />);
 

@@ -219,6 +219,33 @@
   color: var(--color-text-muted);
 }
 
+.blessButton {
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--color-success) 55%, transparent);
+  border-radius: var(--radius-full);
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 10%, transparent);
+  font: inherit;
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.blessButton:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-success) 18%, transparent);
+}
+
+.blessButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.blessButton:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
 /* ============= Review Action Bar ============= */
 
 .reviewActionBar {

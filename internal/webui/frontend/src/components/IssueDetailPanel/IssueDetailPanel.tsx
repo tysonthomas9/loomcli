@@ -73,6 +73,7 @@ import { ConfirmDialog } from "../ConfirmDialog";
 import { MoveIssueDialog } from "./actions";
 import { SplitDetailSummary } from "./SplitDetailSummary";
 import { EmbeddedTerminal } from "../EmbeddedTerminal";
+import { IssueLabelChips } from "../IssueLabelChips";
 import { ResizeDivider } from "./actions";
 import { ErrorToast } from "../ErrorToast";
 import { useSplitRatio, useToast } from "@/hooks/ui";
@@ -461,6 +462,9 @@ function DefaultContent({
   const [showMoveDialog, setShowMoveDialog] = useState(false);
   const [moveError, setMoveError] = useState<string | null>(null);
   const [isStartingEpicRun, setIsStartingEpicRun] = useState(false);
+  const [isBlessing, setIsBlessing] = useState(false);
+  const [recommendedRemovedLocally, setRecommendedRemovedLocally] =
+    useState(false);
   const { showToast } = useToast();
 
   // Split view state for terminal tabs
@@ -926,6 +930,67 @@ function DefaultContent({
     [issue, onIssueUpdate, workspaceId],
   );
 
+  const handleUndoBless = useCallback(async () => {
+    if (!issue) return;
+
+    setIsBlessing(true);
+    try {
+      const updatedIssue = await updateIssue(workspaceId, issue.id, {
+        add_labels: ["recommended"],
+      });
+      setRecommendedRemovedLocally(false);
+      onIssueUpdate?.(updatedIssue);
+    } catch (err) {
+      showToast(
+        `Unable to restore recommendation quarantine: ${formatUnknownError(err, "Update failed")}`,
+        { type: "error" },
+      );
+    } finally {
+      setIsBlessing(false);
+    }
+  }, [issue, onIssueUpdate, showToast, workspaceId]);
+
+  const handleBless = useCallback(async () => {
+    if (
+      !issue?.labels?.includes("recommended") ||
+      recommendedRemovedLocally ||
+      isBlessing
+    ) {
+      return;
+    }
+
+    setIsBlessing(true);
+    try {
+      const updatedIssue = await updateIssue(workspaceId, issue.id, {
+        remove_labels: ["recommended"],
+      });
+      setRecommendedRemovedLocally(true);
+      onIssueUpdate?.(updatedIssue);
+      showToast("Blessed", {
+        type: "success",
+        duration: 5000,
+        onUndo: () => {
+          void handleUndoBless();
+        },
+      });
+    } catch (err) {
+      showToast(
+        `Unable to bless issue: ${formatUnknownError(err, "Update failed")}`,
+        { type: "error" },
+      );
+    } finally {
+      setIsBlessing(false);
+    }
+  }, [
+    handleUndoBless,
+    isBlessing,
+    issue,
+    onIssueUpdate,
+    recommendedRemovedLocally,
+    showToast,
+    workspaceId,
+  ]);
+
   const handleRunEpicWorkflow = useCallback(async () => {
     if (!issue || issue.issue_type !== "epic" || isStartingEpicRun) return;
 
@@ -1105,6 +1170,8 @@ function DefaultContent({
     setShowMoveDialog(false);
     setMoveError(null);
     setIsStartingEpicRun(false);
+    setIsBlessing(false);
+    setRecommendedRemovedLocally(false);
   }, [issue?.id]);
 
   // Loading state
@@ -1141,6 +1208,9 @@ function DefaultContent({
   }
 
   const issueHasDetails = isIssueDetails(issue);
+  const displayedLabels = recommendedRemovedLocally
+    ? (issue.labels ?? []).filter((label) => label !== "recommended")
+    : issue.labels;
   const dependencies = issueHasDetails ? issue.dependencies : undefined;
   const dependents = issueHasDetails ? issue.dependents : undefined;
   // "Blocks" should list genuine blocking relations only. Parent-child edges
@@ -1227,6 +1297,20 @@ function DefaultContent({
               isSaving={isSavingRepo}
             />
           )}
+          <IssueLabelChips
+            labels={displayedLabels}
+            recommendedAction={
+              <button
+                type="button"
+                className={styles.blessButton}
+                onClick={() => void handleBless()}
+                disabled={isBlessing}
+                title="Remove the recommended quarantine so agents can pick this task up"
+              >
+                {isBlessing ? "Blessing…" : "Bless"}
+              </button>
+            }
+          />
           {issue.created_at && (
             <span
               className={styles.metadataItem}
@@ -1607,7 +1691,7 @@ export function IssueDetailPanel({
   onCopyLink,
   onNavigateToIssue,
   inline = false,
-}: IssueDetailPanelProps): JSX.Element {
+}: IssueDetailPanelProps): JSX.Element | null {
   const panelRef = useRef<HTMLElement>(null);
 
   // Full-page maximize toggle for the slide-over.
@@ -1641,6 +1725,11 @@ export function IssueDetailPanel({
   // Focus management: only meaningful for the slide-out overlay.
   useFocusReturn(isOpen && !inline, { focusTarget: panelRef });
   useFocusTrap(panelRef, isOpen && !inline);
+
+  // A closed slide-out must not leave a full-viewport element behind. Hidden
+  // overlays still intercept automation click guards and can confuse assistive
+  // technology even when CSS visibility suppresses normal pointer events.
+  if (!isOpen && !inline) return null;
 
   // Determine content: children override default, otherwise render default content
   const content = children ?? (

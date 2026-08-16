@@ -1,0 +1,47 @@
+.chips {
+  display: inline-flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.recommendedGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.chip {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  padding: 2px 6px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-subtle);
+  font-size: 10px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recommended {
+  border-color: color-mix(
+    in srgb,
+    var(--color-warning) 55%,
+    var(--color-border)
+  );
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.02em;
+}
+
+.overflow {
+  color: var(--color-text-tertiary);
+  background: transparent;
+}

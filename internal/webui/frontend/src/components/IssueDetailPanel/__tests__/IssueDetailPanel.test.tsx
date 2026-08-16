@@ -379,6 +379,14 @@ describe("IssueDetailPanel", () => {
     >;
     mockDeleteWorkspaceAgent.mockReset();
     mockDeleteWorkspaceAgent.mockResolvedValue(undefined);
+    const mockUpdateIssue = updateIssue as ReturnType<typeof vi.fn>;
+    mockUpdateIssue.mockReset();
+    mockUpdateIssue.mockImplementation(
+      async (_workspaceId: string, _issueId: string, patch: object) => ({
+        ...createTestIssueDetails(),
+        ...patch,
+      }),
+    );
   });
 
   // Reset body overflow after each test
@@ -472,20 +480,31 @@ describe("IssueDetailPanel", () => {
       expect(overlay.className).toMatch(/open/i);
     });
 
-    it("does not apply open class when isOpen is false", () => {
+    it("does not mount the viewport overlay when isOpen is false", () => {
       render(
         <IssueDetailPanel isOpen={false} issue={null} onClose={() => {}} />,
       );
-      const overlay = screen.getByTestId("issue-detail-overlay");
-      // CSS modules mangle class names, so check that 'open' pattern is not present
-      expect(overlay.className).not.toMatch(/_open_/);
+      expect(
+        screen.queryByTestId("issue-detail-overlay"),
+      ).not.toBeInTheDocument();
     });
 
-    it("renders even when closed (for animation)", () => {
-      render(
+    it("unmounts the overlay after the panel closes", () => {
+      const issue = createTestIssue();
+      const { rerender } = render(
+        <IssueDetailPanel isOpen={true} issue={issue} onClose={() => {}} />,
+      );
+      expect(screen.getByTestId("issue-detail-overlay")).toBeInTheDocument();
+
+      rerender(
         <IssueDetailPanel isOpen={false} issue={null} onClose={() => {}} />,
       );
-      expect(screen.getByTestId("issue-detail-panel")).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("issue-detail-overlay"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("issue-detail-panel"),
+      ).not.toBeInTheDocument();
     });
   });
 
@@ -569,12 +588,13 @@ describe("IssueDetailPanel", () => {
       expect(panel).toHaveAttribute("aria-label", "Issue details");
     });
 
-    it("sets aria-hidden on overlay when closed", () => {
+    it("leaves no hidden overlay in the accessibility tree when closed", () => {
       render(
         <IssueDetailPanel isOpen={false} issue={null} onClose={() => {}} />,
       );
-      const overlay = screen.getByTestId("issue-detail-overlay");
-      expect(overlay).toHaveAttribute("aria-hidden", "true");
+      expect(
+        screen.queryByTestId("issue-detail-overlay"),
+      ).not.toBeInTheDocument();
     });
 
     it("clears aria-hidden on overlay when open", () => {
@@ -984,6 +1004,79 @@ describe("IssueDetailPanel", () => {
         expect(screen.getByTestId("metadata-type")).toHaveTextContent(expected);
         unmount();
       }
+    });
+
+    it("shows all non-repo labels and accents Recommended", () => {
+      const mockIssue = createTestIssueDetails({
+        labels: ["recommended", "repo:loomcli", "frontend", "ux", "review"],
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      expect(screen.getByText("Recommended")).toHaveAttribute(
+        "data-variant",
+        "recommended",
+      );
+      expect(screen.getByText("frontend")).toBeInTheDocument();
+      expect(screen.getByText("ux")).toBeInTheDocument();
+      expect(screen.getByText("review")).toBeInTheDocument();
+      expect(screen.queryByText("repo:loomcli")).not.toBeInTheDocument();
+    });
+
+    it("blesses a recommended issue and exposes an Undo mutation", async () => {
+      const mockUpdateIssue = updateIssue as ReturnType<typeof vi.fn>;
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({ workspaceId: "DESKTOP-QA" }),
+      );
+      const issue = createTestIssueDetails({ labels: ["recommended", "ux"] });
+      const blessedIssue = { ...issue, labels: ["ux"] };
+      mockUpdateIssue
+        .mockResolvedValueOnce(blessedIssue)
+        .mockResolvedValueOnce(issue);
+      const onIssueUpdate = vi.fn();
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={issue}
+          onClose={() => {}}
+          onIssueUpdate={onIssueUpdate}
+        />,
+      );
+
+      const blessButton = screen.getByRole("button", { name: "Bless" });
+      expect(blessButton).toHaveAttribute(
+        "title",
+        "Remove the recommended quarantine so agents can pick this task up",
+      );
+      fireEvent.click(blessButton);
+
+      await waitFor(() => {
+        expect(mockUpdateIssue).toHaveBeenCalledWith("DESKTOP-QA", issue.id, {
+          remove_labels: ["recommended"],
+        });
+      });
+      expect(onIssueUpdate).toHaveBeenCalledWith(blessedIssue);
+      expect(mockShowToast).toHaveBeenCalledWith("Blessed", {
+        type: "success",
+        duration: 5000,
+        onUndo: expect.any(Function),
+      });
+      expect(screen.queryByText("Recommended")).not.toBeInTheDocument();
+
+      const toastOptions = mockShowToast.mock.calls.find(
+        ([message]) => message === "Blessed",
+      )?.[1] as { onUndo?: () => void } | undefined;
+      toastOptions?.onUndo?.();
+
+      await waitFor(() => {
+        expect(mockUpdateIssue).toHaveBeenLastCalledWith(
+          "DESKTOP-QA",
+          issue.id,
+          { add_labels: ["recommended"] },
+        );
+      });
+      expect(onIssueUpdate).toHaveBeenLastCalledWith(issue);
     });
   });
 

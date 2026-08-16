@@ -9,6 +9,7 @@ import { useStoreWithEqualityFn } from "zustand/traditional";
 
 import { BlockedBadge } from "@/components/BlockedBadge";
 import { HighlightText } from "@/components/HighlightText";
+import { IssueLabelChips } from "@/components/IssueLabelChips";
 import { RepoBadge } from "@/components/RepoBadge";
 import { useHasActiveSession } from "@/contexts/IssueSessionContext";
 import { useSearchTerm } from "@/contexts/SearchTermContext";
@@ -322,6 +323,11 @@ export const IssueCard = memo(function IssueCard({
       <h3 className={styles.title}>
         <HighlightText text={displayTitle} searchTerm={searchTerm} />
       </h3>
+      <IssueLabelChips
+        labels={issue.labels}
+        maxVisible={3}
+        className={styles.labels}
+      />
       {showFooter && (
         <footer className={styles.footer}>
           <div className={styles.footerLeft}>

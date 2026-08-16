@@ -247,6 +247,11 @@
   word-break: break-word;
 }
 
+.labels {
+  display: flex;
+  margin: -5px 0 10px;
+}
+
 /* =================================
  * Blocked issue styling
  * ================================= */
