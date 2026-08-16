@@ -81,7 +81,7 @@ Examples:
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		lf, _ := cmd.Flags().GetString("log-format")
 		lo, _ := cmd.Flags().GetString("log-output")
-		return cli.InitLogger(lf, lo)
+		return cli.InitLogger(lf, lo, "")
 	},
 }
 
