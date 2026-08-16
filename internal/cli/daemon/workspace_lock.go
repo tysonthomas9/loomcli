@@ -146,25 +146,44 @@ func detectWorkspaceDaemonRuntime() cli.DaemonRuntimeInfo {
 		return cli.DaemonRuntimeInfo{}
 	}
 
-	pid := readWorkspacePID(pidPath)
-	if pid > 0 && lockfile.IsProcessRunning(pid) {
-		return cli.DaemonRuntimeInfo{Running: true, PID: pid, Source: "workspace-lock"}
+	// wsDir is the provenance: the live workspace supervisor keeps its
+	// daemon-agents.json, daemon.lock and daemon.sock under <wsDir>/.loom,
+	// which is generally NOT the caller's cwd.
+	info := readWorkspacePIDFile(pidPath)
+	if info.PID > 0 && lockfile.IsProcessRunning(info.PID) {
+		return cli.DaemonRuntimeInfo{
+			Running:   true,
+			PID:       info.PID,
+			Source:    "workspace-lock",
+			StartedAt: info.StartedAt,
+			Dir:       wsDir,
+		}
 	}
-	return cli.DaemonRuntimeInfo{Running: true, Source: "workspace-lock"}
+	// Lock held but the PID sidecar is missing, unreadable or dead: the
+	// daemon is running, but nothing here identifies it. StartedAt stays
+	// zero (unknown) rather than borrowing an unverified timestamp.
+	return cli.DaemonRuntimeInfo{Running: true, Source: "workspace-lock", Dir: wsDir}
 }
 
 // readWorkspacePID best-effort reads the existing daemon's PID from
 // the sidecar file. Returns 0 when the file is missing or unreadable.
 func readWorkspacePID(path string) int {
+	return readWorkspacePIDFile(path).PID
+}
+
+// readWorkspacePIDFile best-effort reads the whole daemon PID sidecar. It is
+// the single parser for the file; a missing or unparseable file yields the
+// zero value (PID 0, zero StartedAt).
+func readWorkspacePIDFile(path string) workspacePIDFile {
 	data, err := os.ReadFile(path) //nolint:gosec // user-private sidecar
 	if err != nil {
-		return 0
+		return workspacePIDFile{}
 	}
 	var info workspacePIDFile
-	if err := json.Unmarshal(data, &info); err == nil {
-		return info.PID
+	if err := json.Unmarshal(data, &info); err != nil {
+		return workspacePIDFile{}
 	}
-	return 0
+	return info
 }
 
 // writeWorkspacePID stores the daemon PID as JSON so the format is

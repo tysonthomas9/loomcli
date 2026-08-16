@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
@@ -22,10 +23,25 @@ func resolvePath(baseDir, path string) string {
 // multiple sources (lock file, state file). All daemon lifecycle
 // commands should derive liveness from this struct instead of checking
 // individual files directly.
+//
+// Provenance contract: Dir is the ONLY directory callers may use to locate
+// this daemon's sidecar files (state file, control socket). Detection may
+// resolve a daemon that does not live under the caller's cwd — notably the
+// LOOM_WORKSPACE fallback — so re-deriving those paths from os.Getwd()
+// describes a different daemon than the one whose liveness was proved.
+//
+// StartedAt is zero when unknown and MUST be rendered as such ("unknown"),
+// never formatted as the zero time.
 type DaemonRuntimeInfo struct {
 	Running bool   // true if a live daemon process was confirmed
 	PID     int    // PID of the daemon (0 if unknown)
-	Source  string // which source confirmed liveness: "lock", "state", ""
+	Source  string // which source confirmed liveness: "lock", "state", "workspace-lock", ""
+	// StartedAt is the daemon start time as recorded by the same evidence
+	// that proved liveness. Zero means unknown.
+	StartedAt time.Time
+	// Dir is the directory the evidence came from. State file and control
+	// socket paths must be derived from this, not from the cwd.
+	Dir string
 }
 
 // DetectDaemonRuntime resolves daemon liveness from authoritative sources in
@@ -43,12 +59,14 @@ func DetectDaemonRuntime(projectDir string) DaemonRuntimeInfo {
 	// --- 1. Lock file ---
 	lockPath := filepath.Join(loomDir, "daemon.lock")
 	if info, ok := detectFromLockFile(lockPath); ok {
+		info.Dir = projectDir
 		return info
 	}
 
 	// --- 2. State file ---
 	stateFilePath := config.ResolveDaemonStatePath(projectDir)
 	if info, ok := detectFromStateFile(stateFilePath); ok {
+		info.Dir = projectDir
 		return info
 	}
 
@@ -92,7 +110,10 @@ func detectFromLockFile(lockPath string) (DaemonRuntimeInfo, bool) {
 	var li lockfile.LockInfo
 	if err := json.Unmarshal(data[:n], &li); err == nil && li.PID > 0 {
 		if lockfile.IsProcessRunning(li.PID) {
-			return DaemonRuntimeInfo{Running: true, PID: li.PID, Source: "lock"}, true
+			// StartedAt comes from the record written by the very process we
+			// just proved alive while it holds the flock, so it is bound to
+			// this daemon's identity.
+			return DaemonRuntimeInfo{Running: true, PID: li.PID, Source: "lock", StartedAt: li.StartedAt}, true
 		}
 		// Lock held but PID is dead — stale lock, treat as not running
 		return DaemonRuntimeInfo{}, false
@@ -105,7 +126,8 @@ func detectFromLockFile(lockPath string) (DaemonRuntimeInfo, bool) {
 // daemonStateMinimal is a minimal struct for reading the daemon state file
 // without importing the daemon package (avoids import cycle).
 type daemonStateMinimal struct {
-	PID int `json:"pid"`
+	PID       int       `json:"pid"`
+	StartedAt time.Time `json:"started_at"`
 }
 
 // detectFromStateFile checks the daemon state file for a live PID.
@@ -119,7 +141,9 @@ func detectFromStateFile(stateFilePath string) (DaemonRuntimeInfo, bool) {
 		return DaemonRuntimeInfo{}, false
 	}
 	if state.PID > 0 && lockfile.IsProcessRunning(state.PID) {
-		return DaemonRuntimeInfo{Running: true, PID: state.PID, Source: "state"}, true
+		// This branch is already PID-verified, so started_at belongs to the
+		// live daemon rather than a leftover snapshot.
+		return DaemonRuntimeInfo{Running: true, PID: state.PID, Source: "state", StartedAt: state.StartedAt}, true
 	}
 	return DaemonRuntimeInfo{}, false
 }
