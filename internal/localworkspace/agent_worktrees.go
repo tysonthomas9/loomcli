@@ -148,6 +148,13 @@ func (m AgentWorktreeMaterializer) Materialize(ctx context.Context, agent domain
 	return nil
 }
 
+// AgentBranchName returns the git branch an agent's worktrees are created on.
+// Namespacing by workspace key keeps two workspaces that share a source repo
+// from colliding on the same checked-out branch name.
+func AgentBranchName(workspaceKey, agentName string) string {
+	return workspaceKey + "/" + agentName
+}
+
 // addAgentWorktrees creates one worktree per selected repo under root and
 // returns the repo-name keyed worktree paths.
 func addAgentWorktrees(root string, repos []Repo, agent domain.Agent) (map[string]string, error) {
@@ -157,7 +164,7 @@ func addAgentWorktrees(root string, repos []Repo, agent domain.Agent) (map[strin
 			return nil, materializeErr(agent, MaterializeRepoPathMissing, repo.Name, nil)
 		}
 		target := AgentWorktreePath(root, repo.Name, agent.Name)
-		if err := EnsureGitWorktree(repo.Path, target, agent.Name); err != nil {
+		if err := EnsureGitWorktree(repo.Path, target, AgentBranchName(agent.WorkspaceKey, agent.Name)); err != nil {
 			return nil, materializeErr(agent, MaterializeWorktreeCreate, repo.Name, err)
 		}
 		created[repo.Name] = target

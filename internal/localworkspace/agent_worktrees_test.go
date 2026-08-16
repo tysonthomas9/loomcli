@@ -187,3 +187,55 @@ func TestMaterializeCreatesWorktreePerRepo(t *testing.T) {
 		t.Fatalf("Materialize() second run: %v", err)
 	}
 }
+
+func TestAgentBranchName(t *testing.T) {
+	if got, want := AgentBranchName("WSA", "dev-1"), "WSA/dev-1"; got != want {
+		t.Fatalf("AgentBranchName() = %q, want %q", got, want)
+	}
+}
+
+func TestMaterializeSharedRepoAcrossWorkspaces(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	repo := filepath.Join(t.TempDir(), "shared")
+	git(t, "", "init", "-b", "master", repo)
+	git(t, repo, "config", "user.name", "Test User")
+	git(t, repo, "config", "user.email", "test@example.test")
+	writeFile(t, filepath.Join(repo, "base.txt"), "v1\n")
+	git(t, repo, "add", "base.txt")
+	git(t, repo, "commit", "-m", "base")
+
+	rootA := t.TempDir()
+	rootB := t.TempDir()
+	sharedRepo := Repo{Name: "shared", Path: repo}
+	materializerA := AgentWorktreeMaterializer{
+		ResolveWorkspace: staticWorkspace(LocalWorkspaceView{Root: rootA, Repos: []Repo{sharedRepo}}),
+	}
+	materializerB := AgentWorktreeMaterializer{
+		ResolveWorkspace: staticWorkspace(LocalWorkspaceView{Root: rootB, Repos: []Repo{sharedRepo}}),
+	}
+	agentA := domain.Agent{WorkspaceKey: "WSA", Name: "dev-1"}
+	agentB := domain.Agent{WorkspaceKey: "WSB", Name: "dev-1"}
+
+	if err := materializerA.Materialize(context.Background(), agentA); err != nil {
+		t.Fatalf("Materialize() WSA: %v", err)
+	}
+	if err := materializerB.Materialize(context.Background(), agentB); err != nil {
+		t.Fatalf("Materialize() WSB: %v", err)
+	}
+
+	worktreeA := AgentWorktreePath(rootA, sharedRepo.Name, agentA.Name)
+	worktreeB := AgentWorktreePath(rootB, sharedRepo.Name, agentB.Name)
+	if err := materializerA.Materialize(context.Background(), agentA); err != nil {
+		t.Fatalf("Materialize() WSA second run: %v", err)
+	}
+	if got, want := gitOut(t, worktreeA, "rev-parse", "--abbrev-ref", "HEAD"), "WSA/dev-1"; got != want {
+		t.Fatalf("WSA worktree branch = %q, want %q", got, want)
+	}
+	if got, want := gitOut(t, worktreeB, "rev-parse", "--abbrev-ref", "HEAD"), "WSB/dev-1"; got != want {
+		t.Fatalf("WSB worktree branch = %q, want %q", got, want)
+	}
+}
