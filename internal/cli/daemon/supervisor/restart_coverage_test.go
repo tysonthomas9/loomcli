@@ -683,3 +683,134 @@ func TestSupervisor_SleepBeforeRestart_RealRestartStillAnnounced(t *testing.T) {
 		t.Errorf("AgentRestarted events = %d, want 1 for a real restart", got)
 	}
 }
+
+func TestNoWorkPollInterval(t *testing.T) {
+	tests := []struct {
+		name        string
+		base, ceil  int
+		noWorkCount int
+		want        time.Duration
+	}{
+		// The shipped default: base == ceil == 30 disables growth entirely, so
+		// no_work_backoff behavior is unchanged until a workspace opts in.
+		{"default flat n=0", 30, 30, 0, 30 * time.Second},
+		{"default flat n=1", 30, 30, 1, 30 * time.Second},
+		{"default flat n=5", 30, 30, 5, 30 * time.Second},
+		{"default flat n=1000", 30, 30, 1000, 30 * time.Second},
+
+		// Opt-in growth: doubles per consecutive NoWork, clamped at the ceiling.
+		{"growth n=1", 30, 300, 1, 30 * time.Second},
+		{"growth n=2", 30, 300, 2, 60 * time.Second},
+		{"growth n=3", 30, 300, 3, 120 * time.Second},
+		{"growth n=4", 30, 300, 4, 240 * time.Second},
+		{"growth n=5 clamps", 30, 300, 5, 300 * time.Second},
+		{"growth n=6 stays clamped", 30, 300, 6, 300 * time.Second},
+
+		// Degenerate inputs stay safe.
+		{"ceil below base", 60, 30, 5, 60 * time.Second},
+		{"base zero falls back to 30", 0, 300, 1, 30 * time.Second},
+		{"negative base falls back to 30", -5, 300, 1, 30 * time.Second},
+		{"zero count", 30, 300, 0, 30 * time.Second},
+		{"negative count", 30, 300, -3, 30 * time.Second},
+		{"huge count clamps, never negative", 30, 300, 1 << 20, 300 * time.Second},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := noWorkPollInterval(tt.base, tt.ceil, tt.noWorkCount)
+			if got != tt.want {
+				t.Errorf("noWorkPollInterval(%d, %d, %d) = %s, want %s",
+					tt.base, tt.ceil, tt.noWorkCount, got, tt.want)
+			}
+			if got <= 0 {
+				t.Errorf("noWorkPollInterval(%d, %d, %d) = %s, must always be positive",
+					tt.base, tt.ceil, tt.noWorkCount, got)
+			}
+		})
+	}
+}
+
+func TestShouldRetryPrimaryAfterNoWork(t *testing.T) {
+	now := time.Now()
+	tests := []struct {
+		name        string
+		idleSince   time.Time
+		noWorkCount int
+		want        bool
+	}{
+		// A zero IdleSince means "streak start unknown" — an agent restored from
+		// a status file or built in a test. Never read it as multi-decade idle.
+		{"zero IdleSince", time.Time{}, 5, false},
+		{"zero noWorkCount", now.Add(-5 * time.Minute), 0, false},
+		{"negative noWorkCount", now.Add(-5 * time.Minute), -1, false},
+		// First idle cycle is ~0 elapsed, matching the old 1 x 30s < 60s.
+		{"just went idle", now, 1, false},
+		{"idle 30s, under cooldown", now.Add(-30 * time.Second), 1, false},
+		{"idle 61s, over cooldown", now.Add(-61 * time.Second), 2, true},
+		{"idle 13m on a relaxed poll", now.Add(-13 * time.Minute), 6, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldRetryPrimaryAfterNoWork(tt.idleSince, tt.noWorkCount); got != tt.want {
+				t.Errorf("shouldRetryPrimaryAfterNoWork(%v, %d) = %v, want %v",
+					tt.idleSince, tt.noWorkCount, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestApplyNoWorkRestart_PrimaryRetryUsesIdleSince(t *testing.T) {
+	t.Run("long-idle fallback agent returns to primary", func(t *testing.T) {
+		s := newTestSupervisorWithConfig(&config.DaemonConfig{})
+		ap := &AgentProcess{
+			CurrentBackendIdx: 1,
+			NoWorkCount:       4,
+			IdleSince:         time.Now().Add(-2 * time.Minute),
+		}
+
+		ap.Mu.Lock()
+		s.applyNoWorkRestart(ap)
+		ap.Mu.Unlock()
+
+		if ap.CurrentBackendIdx != 0 {
+			t.Errorf("CurrentBackendIdx = %d, want 0 after 2m idle on a fallback backend", ap.CurrentBackendIdx)
+		}
+	})
+
+	t.Run("freshly idle fallback agent stays put", func(t *testing.T) {
+		s := newTestSupervisorWithConfig(&config.DaemonConfig{})
+		ap := &AgentProcess{
+			CurrentBackendIdx: 1,
+			NoWorkCount:       4,
+			IdleSince:         time.Now(),
+		}
+
+		ap.Mu.Lock()
+		s.applyNoWorkRestart(ap)
+		ap.Mu.Unlock()
+
+		if ap.CurrentBackendIdx != 1 {
+			t.Errorf("CurrentBackendIdx = %d, want 1 — not idle long enough to retry the primary", ap.CurrentBackendIdx)
+		}
+	})
+
+	t.Run("first idle cycle stamps IdleSince and does not retry", func(t *testing.T) {
+		s := newTestSupervisorWithConfig(&config.DaemonConfig{})
+		ap := &AgentProcess{CurrentBackendIdx: 1}
+
+		ap.Mu.Lock()
+		s.applyNoWorkRestart(ap)
+		ap.Mu.Unlock()
+
+		if ap.NoWorkCount != 1 {
+			t.Errorf("NoWorkCount = %d, want 1", ap.NoWorkCount)
+		}
+		if ap.IdleSince.IsZero() {
+			t.Error("IdleSince must be stamped on the 0->1 transition")
+		}
+		if ap.CurrentBackendIdx != 1 {
+			t.Errorf("CurrentBackendIdx = %d, want 1 on the first idle cycle", ap.CurrentBackendIdx)
+		}
+	})
+}

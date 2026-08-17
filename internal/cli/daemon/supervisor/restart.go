@@ -260,7 +260,7 @@ func (s *Supervisor) applyNoWorkRestart(ap *AgentProcess) {
 	if ap.NoWorkCount == 1 {
 		ap.IdleSince = time.Now()
 	}
-	if ap.CurrentBackendIdx > 0 && shouldRetryPrimaryAfterNoWork(ap.NoWorkCount, s.getNoWorkBackoff()) {
+	if ap.CurrentBackendIdx > 0 && shouldRetryPrimaryAfterNoWork(ap.IdleSince, ap.NoWorkCount) {
 		ap.CurrentBackendIdx = 0
 	}
 	ap.StopReason = ""
@@ -299,6 +299,7 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 	lastErr := ap.LastError
 	count := ap.RestartCount
 	rateCount := ap.RateRetryCount
+	noWorkCount := ap.NoWorkCount
 	blocked := ap.StopReason == StopReasonMaxRetriesBlocked
 	ap.Mu.Unlock()
 
@@ -318,8 +319,10 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 	var retryN int
 	switch d.Backoff {
 	case agentpolicy.BPNoWork:
-		// Fixed poll: task availability is not a backend-health signal.
-		return time.Duration(s.getNoWorkBackoff()) * time.Second
+		// Task availability is not a backend-health signal, so this is not the
+		// exponential retry curve - it is a poll that relaxes while the board stays
+		// empty and snaps back to no_work_backoff the moment anything is claimed.
+		return noWorkPollInterval(s.getNoWorkBackoff(), s.GetIdlePollInterval(), noWorkCount)
 	case agentpolicy.BPBackendUnavailable:
 		// Fixed recheck: waiting for the backend CLI to reappear, not
 		// backing off a flaky run.
@@ -367,11 +370,45 @@ func exponentialBackoff(initial, retryN, maxBackoff int, hint time.Duration) tim
 	return backoff
 }
 
-func shouldRetryPrimaryAfterNoWork(noWorkCount, noWorkBackoffSeconds int) bool {
-	if noWorkCount <= 0 || noWorkBackoffSeconds <= 0 {
+// noWorkPollInterval doubles the base poll per consecutive NoWork observation,
+// clamped to ceil. ceil <= base disables growth (the default: both are 30s), so
+// the relaxed poll is opt-in per workspace via restart_policy.idle_poll_interval.
+//
+// Growth is opt-in deliberately: there is no wake-on-new-work path
+// (sleepBeforeRestart selects only on Shutdown and ap.StopCh), so a longer idle
+// poll is strictly a pickup-latency trade.
+func noWorkPollInterval(base, ceil, noWorkCount int) time.Duration {
+	if base <= 0 {
+		base = 30
+	}
+	if ceil <= base {
+		return time.Duration(base) * time.Second
+	}
+	if noWorkCount <= 1 {
+		return time.Duration(base) * time.Second
+	}
+	// Same shift-overflow guard exponentialBackoff uses, so a week-long idle
+	// agent cannot wrap to a negative duration.
+	shift := noWorkCount - 1
+	if shift > 30 {
+		shift = 30
+	}
+	sec := base << shift
+	if sec > ceil || sec < 0 {
+		sec = ceil
+	}
+	return time.Duration(sec) * time.Second
+}
+
+// shouldRetryPrimaryAfterNoWork reports whether an agent parked on a fallback
+// backend has been idle long enough to retry its primary. Measured from
+// IdleSince rather than noWorkCount x poll, because the poll interval is no
+// longer fixed (see noWorkPollInterval).
+func shouldRetryPrimaryAfterNoWork(idleSince time.Time, noWorkCount int) bool {
+	if noWorkCount <= 0 || idleSince.IsZero() {
 		return false
 	}
-	return time.Duration(noWorkCount)*time.Duration(noWorkBackoffSeconds)*time.Second >= primaryBackendRetryCooldown
+	return time.Since(idleSince) >= primaryBackendRetryCooldown
 }
 
 // Helper functions to safely access config.RestartPolicy fields with defaults.
