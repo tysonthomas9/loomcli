@@ -42,6 +42,7 @@ import {
   useTabActions,
   useTabInit,
   useUnreadTracking,
+  useWaitingTracking,
   useWorkspaceTabState,
 } from "./tabs";
 import styles from "./TerminalView.module.css";
@@ -299,6 +300,20 @@ export function TerminalView({
     isActive,
     onUnreadChange,
   });
+
+  // Read connection state through a ref: the waiting hook's interval must not
+  // be torn down and restarted every time a tab's state object changes.
+  const getConnectionState = useCallback(
+    (tabId: string) =>
+      tabsRef.current.find((t) => t.id === tabId)?.connectionState,
+    [],
+  );
+  const {
+    tabWaiting,
+    noteOutput,
+    noteInput,
+    clearTab: clearTabWaiting,
+  } = useWaitingTracking({ instanceRefs, getConnectionState });
   const hasPendingCliSetupRequest =
     !hideTabs && readPendingCliSetupRequest() != null;
 
@@ -416,11 +431,12 @@ export function TerminalView({
           connectionState: tab.connectionState,
           ...(color != null && { brandColor: color }),
           ...(tabUnread.get(tab.id) && { hasUnread: true }),
+          ...(tabWaiting.get(tab.id) && { isWaitingForInput: true }),
           ...(tab.pinned && { isPinned: true }),
           ...(replacedAt ? { replacedAt } : {}),
         };
       }),
-    [tabUnread, metaBySession],
+    [tabUnread, tabWaiting, metaBySession],
   );
 
   const handleDismissRestartNotice = useCallback(
@@ -445,18 +461,30 @@ export function TerminalView({
     [visibleTabs],
   );
 
-  const { handleTabClose, handleDuplicateTab, handleTabRename } = useTabActions(
-    {
-      workspaceId,
-      tabs,
-      setTabs,
-      setActiveTabId,
-      activeTabIdRef,
-      instanceRefs,
-      createTab,
-      updateLabel,
-      deleteTab,
+  const {
+    handleTabClose: closeTab,
+    handleDuplicateTab,
+    handleTabRename,
+  } = useTabActions({
+    workspaceId,
+    tabs,
+    setTabs,
+    setActiveTabId,
+    activeTabIdRef,
+    instanceRefs,
+    createTab,
+    updateLabel,
+    deleteTab,
+  });
+
+  // Drop the activity record with the tab so a reused id cannot inherit a
+  // stale badge, and so closed tabs are not re-evaluated forever.
+  const handleTabClose = useCallback(
+    (tabId: string) => {
+      clearTabWaiting(tabId);
+      closeTab(tabId);
     },
+    [clearTabWaiting, closeTab],
   );
 
   const { handleTabPin, handleCloseOthers, handleReorderTabs } = useTabOrdering(
@@ -881,7 +909,11 @@ export function TerminalView({
           onReconnectStateChange={(state) =>
             handleReconnectStateChange(tab.id, state)
           }
-          onOutput={() => handleOutput(tab.id)}
+          onOutput={() => {
+            handleOutput(tab.id);
+            noteOutput(tab.id);
+          }}
+          onInput={() => noteInput(tab.id)}
           onBackendCrash={(reason) => handleBackendCrash(tab.id, reason)}
           onCrashRestart={() => handleCrashRestart(tab.id, tab.sessionName)}
           onCloseTab={() => handleTabClose(tab.id)}
@@ -906,6 +938,8 @@ export function TerminalView({
       handleConnectionStateChange,
       handleReconnectStateChange,
       handleOutput,
+      noteOutput,
+      noteInput,
       handleBackendCrash,
       handleCrashRestart,
       handleTabClose,

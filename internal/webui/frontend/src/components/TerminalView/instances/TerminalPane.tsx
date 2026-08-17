@@ -21,6 +21,8 @@ export interface TerminalPaneProps {
   ) => void;
   onReconnectStateChange: (state: ReconnectOverlayState) => void;
   onOutput: () => void;
+  /** User input was actually delivered to the PTY. */
+  onInput: () => void;
   onBackendCrash: (reason: string) => void;
   onCrashRestart: () => void;
   onCloseTab: () => void;
@@ -55,6 +57,7 @@ export function TerminalPane({
   onConnectionStateChange,
   onReconnectStateChange,
   onOutput,
+  onInput,
   onBackendCrash,
   onCrashRestart,
   onCloseTab,
@@ -93,6 +96,7 @@ export function TerminalPane({
         onConnectionStateChange={onConnectionStateChange}
         onReconnectStateChange={onReconnectStateChange}
         onOutput={onOutput}
+        onInput={onInput}
         onBackendCrash={onBackendCrash}
         onTerminalFocus={onTerminalFocus}
         writable={tab.writable}

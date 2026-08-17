@@ -29,6 +29,7 @@ import {
   type ReconnectState,
 } from "@/utils/reconnectBackoff";
 
+import type { CursorProbe } from "../tabs/waitingState";
 import type { ReconnectOverlayState } from "./ReconnectingOverlay";
 import { connectWebSocket, encodeResize } from "./terminalConnection";
 import type { TerminalAttachFrame } from "./terminalControlFrame";
@@ -111,6 +112,8 @@ export interface TerminalInstanceProps {
   ) => void;
   onReconnectStateChange?: (state: ReconnectOverlayState) => void;
   onOutput?: () => void;
+  /** User input was actually delivered to the PTY (not merely typed). */
+  onInput?: (() => void) | undefined;
   onBackendCrash?: (reason: string) => void;
   onTerminalFocus?: (() => void) | undefined;
   /** Whether user input should be forwarded to the backing PTY. */
@@ -146,6 +149,11 @@ export interface TerminalInstanceHandle {
   focus: () => void;
   /** Send arbitrary text over the WebSocket (e.g. for programmatic paste). */
   pasteText: (text: string) => void;
+  /**
+   * Cursor facts from the emulator, or null before the renderer is mounted.
+   * Callers must treat null as "unknown" rather than guessing.
+   */
+  probeActivity: () => CursorProbe | null;
 }
 
 export const TerminalInstance = forwardRef<
@@ -158,6 +166,7 @@ export const TerminalInstance = forwardRef<
     onConnectionStateChange,
     onReconnectStateChange,
     onOutput,
+    onInput,
     onBackendCrash,
     onTerminalFocus,
     writable = true,
@@ -234,6 +243,8 @@ export const TerminalInstance = forwardRef<
   onReconnectStateChangeRef.current = onReconnectStateChange;
   const onOutputRef = useRef(onOutput);
   onOutputRef.current = onOutput;
+  const onInputRef = useRef(onInput);
+  onInputRef.current = onInput;
   const onBackendCrashRef = useRef(onBackendCrash);
   onBackendCrashRef.current = onBackendCrash;
   const onTerminalFocusRef = useRef(onTerminalFocus);
@@ -497,12 +508,16 @@ export const TerminalInstance = forwardRef<
     readyVersion,
   ]);
 
+  // onInput fires only when the keystroke actually reached the PTY: input a
+  // read-only tab dropped, or that died on a closed socket, must not retire a
+  // waiting-for-input badge the user has not in fact answered.
   const handleData = useCallback(
     (data: string) => {
       if (!writable) return;
       const ws = wsRef.current;
       if (ws?.readyState === WebSocket.OPEN) {
         ws.send(data);
+        onInputRef.current?.();
       }
     },
     [writable],
@@ -514,6 +529,7 @@ export const TerminalInstance = forwardRef<
       const ws = wsRef.current;
       if (ws?.readyState === WebSocket.OPEN) {
         ws.send(data);
+        onInputRef.current?.();
       }
     },
     [writable],
@@ -630,6 +646,7 @@ export const TerminalInstance = forwardRef<
           ws.send(text);
         }
       },
+      probeActivity: () => xtermInstanceRef.current?.probeActivity() ?? null,
     }),
     [focus, clearReconnectTimers, writable],
   );
