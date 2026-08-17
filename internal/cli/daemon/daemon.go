@@ -63,6 +63,16 @@ type Daemon struct {
 	// inputs holds each agent's outstanding interactive prompt so an operator
 	// can see and answer it (see daemon_input.go).
 	inputs *inputRegistry
+
+	// unavailable holds configured agents the daemon could not construct
+	// (unresolvable worktree or role). They are deliberately NOT in sup.Agents
+	// — there is no process to supervise — so they are carried here to stay
+	// visible in the state file and `loom daemon status`, and to be retried on
+	// the config-poll tick. Guarded by unavailableMu: boot writes it, the
+	// reconciler goroutine mutates it every 30s, the state-file writer reads it.
+	unavailable           []UnavailableAgent
+	unavailableReportTick int
+	unavailableMu         sync.Mutex
 }
 
 // configSnapshot returns a snapshot of the current config pointer under RLock.
@@ -115,9 +125,7 @@ func NewDaemon(config *cfgpkg.DaemonConfig, projectDir string, eventBus events.E
 	wireSupervisorCallbacks(sup, issueBackend)
 	loadSupervisorWorkspace(sup)
 
-	if err := initSupervisorAgents(sup, config.Agents, config.Roles); err != nil {
-		return nil, err
-	}
+	d.unavailable = initSupervisorAgents(sup, config.Agents, config.Roles)
 
 	d.sup = sup
 
@@ -310,8 +318,13 @@ func loadSupervisorWorkspace(sup *supervisor.Supervisor) {
 	}
 }
 
-// initSupervisorAgents creates agent processes from config entries.
-func initSupervisorAgents(sup *supervisor.Supervisor, agents []cfgpkg.AgentEntry, roles map[string]cfgpkg.RoleConfig) error {
+// initSupervisorAgents creates agent processes from config entries and returns
+// the entries it could not construct. A per-agent misconfiguration must never
+// fail the daemon: on 2026-08-17 one agent whose worktree was missing crashed
+// boot outright and PM2 restarted it fifteen times, with every other agent in
+// the workspace dead alongside it.
+func initSupervisorAgents(sup *supervisor.Supervisor, agents []cfgpkg.AgentEntry, roles map[string]cfgpkg.RoleConfig) []UnavailableAgent {
+	var unavailable []UnavailableAgent
 	for i, entry := range agents {
 		if !entry.ShouldSuperviseWithRoles(roles) {
 			slog.Info("skipping agent with non-running desired state", "worktree", entry.Worktree, "desired_state", entry.DesiredState)
@@ -319,9 +332,13 @@ func initSupervisorAgents(sup *supervisor.Supervisor, agents []cfgpkg.AgentEntry
 		}
 		ap, err := sup.NewAgent(entry, i)
 		if err != nil {
-			return err
+			u := newUnavailableAgent(entry, err)
+			unavailable = append(unavailable, u)
+			slog.Error("agent unavailable: not supervised",
+				"worktree", entry.Worktree, "role", entry.Role, "err", err, "hint", u.Hint)
+			continue
 		}
 		sup.Agents = append(sup.Agents, ap)
 	}
-	return nil
+	return unavailable
 }
