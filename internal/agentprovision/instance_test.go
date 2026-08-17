@@ -176,9 +176,10 @@ func TestEnsureAgentInstancePreservesOperatorScheduleEdits(t *testing.T) {
 	}
 
 	schedule := "@hourly"
+	timezone := "America/Los_Angeles"
 	enabled := false
 	if _, err := st.TriggerBindings().Update(ctx, "SCOUT", spec.DefaultInstance.Binding.BindingID, store.TriggerBindingUpdate{
-		Schedule: &schedule, Enabled: &enabled,
+		Schedule: &schedule, ScheduleTimezone: &timezone, Enabled: &enabled,
 	}); err != nil {
 		t.Fatalf("operator schedule edit: %v", err)
 	}
@@ -190,8 +191,8 @@ func TestEnsureAgentInstancePreservesOperatorScheduleEdits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get binding: %v", err)
 	}
-	if binding.Schedule != "@hourly" || binding.Enabled {
-		t.Fatalf("ensure clobbered operator edit: schedule=%q enabled=%v", binding.Schedule, binding.Enabled)
+	if binding.Schedule != "@hourly" || binding.ScheduleTimezone != "America/Los_Angeles" || binding.Enabled {
+		t.Fatalf("ensure clobbered operator edit: schedule=%q tz=%q enabled=%v", binding.Schedule, binding.ScheduleTimezone, binding.Enabled)
 	}
 }
 

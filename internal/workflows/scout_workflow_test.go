@@ -108,6 +108,7 @@ func TestScoutTaskRunnerSourceContract(t *testing.T) {
 		{name: "backlog is four", want: "4 = P4 backlog"},
 		{name: "acceptance criteria folded into description", want: `"## Acceptance Criteria" section`},
 		{name: "quarantine label forced", want: `labels.push("recommended")`},
+		{name: "failed-create journal entries re-proposed", want: `"journaled without issue creation" are NOT`},
 		{name: "per-instance fence marker grammar", want: "<!-- loom:agent:"},
 		{name: "legacy fence migration", want: "LEGACY_SCOUT_FENCE_BEGIN"},
 		{name: "service id validation", want: "SERVICE_ID_PATTERN"},

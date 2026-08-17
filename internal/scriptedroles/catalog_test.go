@@ -15,6 +15,12 @@ func TestCatalogRows(t *testing.T) {
 	if scout.DefaultRole.Kind != domain.RoleKindWorker || !strings.Contains(scout.DefaultRole.Prompt, "You are the Scout") {
 		t.Fatalf("scout role seed = %+v", scout.DefaultRole)
 	}
+	// The journal writer records failed creates under "journaled without issue
+	// creation"; the prompt must keep re-proposal wording for that phrase or
+	// those recommendations are silently lost to dedupe.
+	if !strings.Contains(scout.DefaultRole.Prompt, `"journaled without issue creation" are NOT`) {
+		t.Fatalf("scout prompt template lost the failed-create re-proposal rule")
+	}
 	if scout.DefaultInstance.Binding.TargetEntrypoint != "run" || scout.DefaultInstance.Binding.Schedule != "@weekly" {
 		t.Fatalf("scout instance = %+v", scout.DefaultInstance)
 	}
