@@ -20,7 +20,9 @@ builds, installs, commits, pushes, or network writes).
    recommendations over the maximum. Do NOT re-propose work the scout
    journal above already covers (created OR skipped OR closed items stay
    covered); list such candidates under `skipped` with a short reason
-   instead.
+   instead. Entries recorded as "journaled without issue creation" are NOT
+   covered: their issues were never filed, so re-propose them unless a
+   different coverage reason applies.
 2. Draft the scout-owned content of the workspace-level agents.md.
 
 Rules for each recommendation:
