@@ -2,6 +2,7 @@ package git
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -113,7 +114,9 @@ func TestSyncSingleWorkspace_EmptyWorktrees(t *testing.T) {
 		t.Fatalf("failed to set workspace: %v", err)
 	}
 
-	syncSingleWorkspace(deps, resolver, false, false)
+	if err := syncSingleWorkspace(deps, resolver, false, false); err != nil {
+		t.Errorf("expected nil error for a workspace with no repos, got %v", err)
+	}
 }
 
 func TestSyncCmd_ShorthandFlags(t *testing.T) {
@@ -126,5 +129,72 @@ func TestSyncCmd_ShorthandFlags(t *testing.T) {
 	}
 	if pullOnlyFlag := syncCmd.Flags().Lookup("pull-only"); pullOnlyFlag == nil {
 		t.Error("expected --pull-only flag to be registered")
+	}
+}
+
+// A repo that is still behind after the pull phase must fail the workspace, so
+// "Full sync complete!" cannot print over the incident and the command exits
+// non-zero.
+func TestRunWorkspaceSync_BehindRepoFailsAndWithholdsBanner(t *testing.T) {
+	// not parallel: mock.Install() and os.Stdout swap touch global state
+	tmpDir := t.TempDir()
+	wsDir := tmpDir + "/ws"
+	repo := wsDir + "/api"
+	if err := os.MkdirAll(repo+"/.git", 0755); err != nil {
+		t.Fatalf("failed to create repo dir: %v", err)
+	}
+
+	setupWorkspaceConfig(t, &LoomConfig{
+		DefaultWorkspace: "ws1",
+		Workspaces: map[string]WorkspaceConfig{
+			"ws1": {
+				Path:  wsDir,
+				Repos: []RepoConfig{{Name: "api", Path: repo, DefaultBranch: "main"}},
+			},
+		},
+	})
+
+	origResolver := defaultResolver
+	defaultResolver = nil
+	t.Cleanup(func() { defaultResolver = origResolver })
+
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		// No push stub: this is a --pull-only sync, and pull-only suppresses the
+		// pull path's push too, so fetch+merge is the whole remote interaction.
+	})
+
+	stubs := []CommandStub{
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "api-branch\n"},
+	}
+	// The merge reported success; git says the checkout is still 8 behind.
+	stubs = append(stubs, verifyStubs("origin", "main", "aaaaaaaaaaaa", "bbbbbbbbbbbb", 8)...)
+	cmdMock := NewCommandMock(t, stubs)
+	cmdMock.Install()
+	outputMock.Install()
+
+	origAgent := defaultDeps.Agent
+	defaultDeps.Agent = &MockAgentInvoker{
+		InteractiveFunc: func(workDir, prompt, agentName string) error {
+			t.Error("unexpected claude invocation")
+			return nil
+		},
+	}
+	t.Cleanup(func() { defaultDeps.Agent = origAgent })
+
+	var syncErr error
+	out := captureStdout(t, func() {
+		syncErr = runWorkspaceSync(defaultDeps, false, true, "")
+	})
+
+	if syncErr == nil {
+		t.Fatal("expected a non-nil error when a repo is still behind after the pull")
+	}
+	if strings.Contains(out, "Full sync complete!") {
+		t.Errorf("banner must be withheld when a repo is not in sync:\n%s", out)
+	}
+	if !strings.Contains(out, "still 8 commit(s) behind origin/main") {
+		t.Errorf("expected the measurement in the summary:\n%s", out)
 	}
 }
