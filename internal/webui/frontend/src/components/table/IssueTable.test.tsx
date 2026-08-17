@@ -286,6 +286,25 @@ describe("columns.ts helpers", () => {
 // Simple mock for React rendering in node environment
 // We test the component logic, not actual DOM rendering
 describe("IssueTable", () => {
+  it("renders issue labels in list rows without duplicating repo labels", () => {
+    render(
+      <IssueTable
+        issues={[
+          createMockIssue({
+            labels: ["recommended", "repo:loomcli", "frontend"],
+          }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("Recommended")).toHaveAttribute(
+      "data-variant",
+      "recommended",
+    );
+    expect(screen.getByText("frontend")).toBeInTheDocument();
+    expect(screen.queryByText("repo:loomcli")).not.toBeInTheDocument();
+  });
+
   describe("props and configuration", () => {
     it("exports IssueTable function", () => {
       expect(typeof IssueTable).toBe("function");

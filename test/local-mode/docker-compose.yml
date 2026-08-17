@@ -55,6 +55,12 @@ services:
       - ":8080"
       - "--auth-dev-mode"
       - "--authz-enabled=false"
+      # The default rate limiter keys by client IP, and the whole stack talks
+      # through the loom container's single IP: serve polling, driver-run
+      # heartbeats, and the proxied web UI drain one 100 req/s bucket, so
+      # driver runs die on 429'd heartbeats (internal_error /
+      # stale_driver_run). A dogfood stack has no untrusted callers.
+      - "--rate-limit-enabled=false"
     networks: [local-mode]
     ports:
       - "${LOCAL_MODE_FLEETDB_PORT:-8280}:8080"

@@ -1999,18 +1999,17 @@ describe("App", () => {
   });
 
   describe("IssueDetailPanel integration", () => {
-    it("renders IssueDetailPanel in closed state by default", () => {
+    it("does not mount IssueDetailPanel in its closed state by default", () => {
       const mockReturn = createMockUseIssuesReturn({});
       mockStoreState = mockReturn;
 
       const { container } = render(<App />);
 
-      // Panel should be rendered but closed (isOpen=false)
+      // A closed panel must not leave a viewport-covering overlay in the DOM.
       const panel = container.querySelector(
         '[data-testid="issue-detail-panel"]',
       );
-      expect(panel).toBeInTheDocument();
-      expect(panel).toHaveAttribute("data-state", "closed");
+      expect(panel).not.toBeInTheDocument();
     });
 
     it("opens issue panel via usePanelManager when issue is clicked in SwimLaneBoard", () => {
@@ -2163,6 +2162,13 @@ describe("App", () => {
           fetchIssue,
         }),
       );
+      mockUsePanelManager.mockReturnValue({
+        activePanel: { type: "issue", id: "issue-1" },
+        pendingPanel: null,
+        openPanel: mockOpenPanel,
+        closePanel: mockClosePanel,
+        isOpen: mockIsOpen,
+      });
 
       const { container } = render(<App />);
 
@@ -2202,6 +2208,13 @@ describe("App", () => {
           isLoading: false,
         }),
       );
+      mockUsePanelManager.mockReturnValue({
+        activePanel: { type: "issue", id: "issue-1" },
+        pendingPanel: null,
+        openPanel: mockOpenPanel,
+        closePanel: mockClosePanel,
+        isOpen: mockIsOpen,
+      });
 
       render(<App />);
 
@@ -2260,6 +2273,13 @@ describe("App", () => {
           isLoading: false,
         }),
       );
+      mockUsePanelManager.mockReturnValue({
+        activePanel: { type: "issue", id: "issue-1" },
+        pendingPanel: null,
+        openPanel: mockOpenPanel,
+        closePanel: mockClosePanel,
+        isOpen: mockIsOpen,
+      });
 
       const { container } = render(<App />);
 
@@ -3464,6 +3484,114 @@ describe("App", () => {
           "code-reject-issue",
           "CODE REVIEW: Fix the lint errors",
         );
+      });
+    });
+
+    it("recommendation approve releases the quarantine in one atomic update", async () => {
+      const updateIssueStatus = vi.fn().mockResolvedValue(undefined);
+      const refetch = vi.fn().mockResolvedValue(undefined);
+      const mockReturn = createMockUseIssuesReturn({
+        updateIssueStatus,
+        refetch,
+      });
+      mockStoreState = mockReturn;
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          issueDetails: {
+            id: "rec-issue",
+            title: "Scout Recommendation",
+            priority: 2,
+            status: "review",
+            labels: ["recommended", "repo:loomcli"],
+            issue_type: "task",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
+          },
+        }),
+      );
+      vi.mocked(useRouteView).mockReturnValue(
+        createViewStateReturn("issue-detail"),
+      );
+
+      render(<App />);
+
+      const approveButton = screen.getByTestId("detail-approve-button");
+      fireEvent.click(approveButton);
+
+      await waitFor(() => {
+        expect(mockUpdateIssue).toHaveBeenCalledTimes(1);
+        expect(mockUpdateIssue).toHaveBeenCalledWith("test-ws-id", "rec-issue", {
+          status: "open",
+          remove_labels: ["recommended"],
+        });
+      });
+      await waitFor(() => {
+        expect(refetch).toHaveBeenCalledTimes(1);
+      });
+
+      expect(updateIssueStatus).not.toHaveBeenCalled();
+      expect(mockCloseIssue).not.toHaveBeenCalled();
+    });
+
+    it("recommendation reject dismisses: DISMISSED comment, closed, label kept", async () => {
+      const updateIssueStatus = vi.fn().mockResolvedValue(undefined);
+      const refetch = vi.fn().mockResolvedValue(undefined);
+      const mockReturn = createMockUseIssuesReturn({
+        updateIssueStatus,
+        refetch,
+      });
+      mockStoreState = mockReturn;
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          issueDetails: {
+            id: "rec-dismiss-issue",
+            title: "Scout Recommendation",
+            priority: 2,
+            status: "review",
+            labels: ["recommended"],
+            issue_type: "task",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
+          },
+        }),
+      );
+      vi.mocked(useRouteView).mockReturnValue(
+        createViewStateReturn("issue-detail"),
+      );
+
+      render(<App />);
+
+      const rejectButton = screen.getByTestId("detail-reject-button");
+      fireEvent.click(rejectButton);
+
+      const textarea = screen.getByTestId("detail-reject-comment");
+      fireEvent.change(textarea, {
+        target: { value: "Already covered by the bridge rewrite" },
+      });
+
+      const submitButton = screen.getByTestId("detail-reject-submit");
+      fireEvent.click(submitButton);
+
+      await waitFor(() => {
+        expect(mockAddComment).toHaveBeenCalledTimes(1);
+        expect(mockAddComment).toHaveBeenCalledWith(
+          "test-ws-id",
+          "rec-dismiss-issue",
+          "DISMISSED: Already covered by the bridge rewrite",
+        );
+      });
+
+      await waitFor(() => {
+        expect(mockUpdateIssue).toHaveBeenCalledTimes(1);
+        expect(mockUpdateIssue).toHaveBeenCalledWith(
+          "test-ws-id",
+          "rec-dismiss-issue",
+          { status: "closed" },
+        );
+      });
+
+      await waitFor(() => {
+        expect(refetch).toHaveBeenCalledTimes(1);
       });
     });
 

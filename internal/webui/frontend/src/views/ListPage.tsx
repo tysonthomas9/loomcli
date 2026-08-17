@@ -13,6 +13,7 @@ import {
   sortLanes,
   type LaneGroup,
 } from "@/components/SwimLaneBoard/groupingUtils";
+import { IssueLabelChips } from "@/components/IssueLabelChips";
 import laneStyles from "@/components/SwimLane/SwimLane.module.css";
 import {
   useWorkspaceViewData,
@@ -306,6 +307,7 @@ export function ListPage(): JSX.Element {
                             {formatIssueId(issue.id)}
                           </code>
                           <span className={styles.rowTitle}>{issue.title}</span>
+                          <IssueLabelChips labels={issue.labels} maxVisible={2} />
                           <span className={styles.spacer} />
                           <span
                             className={styles.statusChip}

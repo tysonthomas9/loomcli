@@ -6,6 +6,7 @@
 import type { ReactNode } from "react";
 
 import { HighlightText } from "@/components/HighlightText";
+import { IssueLabelChips } from "@/components/IssueLabelChips";
 import type { BlockedInfo } from "@/types/issue";
 import type { Issue, Priority, Status, IssueType } from "@/types";
 
@@ -38,7 +39,7 @@ export interface RenderCellOptions {
 export function renderCellContent(
   columnId: string,
   value: unknown,
-  _issue: Issue,
+  issue: Issue,
   options?: RenderCellOptions,
 ): ReactNode {
   switch (columnId) {
@@ -59,12 +60,15 @@ export function renderCellContent(
 
     case "title":
       return (
-        <span className="issue-table__title" title={String(value)}>
-          <HighlightText
-            text={String(value)}
-            searchTerm={options?.searchTerm ?? ""}
-          />
-        </span>
+        <div className="issue-table__title-content">
+          <span className="issue-table__title" title={String(value)}>
+            <HighlightText
+              text={String(value)}
+              searchTerm={options?.searchTerm ?? ""}
+            />
+          </span>
+          <IssueLabelChips labels={issue.labels} />
+        </div>
       );
 
     case "status": {

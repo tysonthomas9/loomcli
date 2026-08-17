@@ -173,9 +173,11 @@ function parseAnalysis(raw) {
 
 // createRecommendedIssues turns the capped recommendations into real fleet-db
 // issues through the create-issue driver op. Every created issue is
-// quarantined by construction: the "recommended" label (canonical lowercase —
-// fleet-db compares labels case-sensitively) plus repo:<name> are re-asserted
-// here so the guarantee does not rest on prompt adherence. Rationale and
+// quarantined by construction: created in review status (so it lands in the
+// human review queue, not the ready set) with the "recommended" label
+// (canonical lowercase — fleet-db compares labels case-sensitively) plus
+// repo:<name> re-asserted here so the guarantee does not rest on prompt
+// adherence. Rationale and
 // anchors fold into the description (the create path has no field for them).
 async function createRecommendedIssues(loom, analysis, cap) {
   const created = [];
@@ -212,6 +214,9 @@ async function createRecommendedIssues(loom, analysis, cap) {
         labels,
         repo,
         priority: clampInt(rec.priority, 0, 4, 2),
+        // review status parks the recommendation in the human review queue;
+        // the label is the enforcement backstop if the status ever flips.
+        status: "review",
       });
       created.push({ id: stringValue(issue && issue.id), title });
     } catch (err) {
