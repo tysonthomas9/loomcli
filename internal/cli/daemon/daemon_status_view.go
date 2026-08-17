@@ -54,8 +54,11 @@ type daemonStatusView struct {
 	Dir        string
 	StartedAt  time.Time // zero => unknown
 	AgentCount int       // agentCountUnknown => unknown
-	Trusted    bool      // state file matched the detected daemon and is fresh
-	Warnings   []string
+	// AgentSuffix qualifies a trusted AgentCount, e.g. " (1 unavailable)"
+	// for agents the daemon could not construct (PUPPET-91).
+	AgentSuffix string
+	Trusted     bool // state file matched the detected daemon and is fresh
+	Warnings    []string
 }
 
 // buildDaemonStatusView decides what the status header may assert.
@@ -83,6 +86,7 @@ func buildDaemonStatusView(in daemonStatusInputs) daemonStatusView {
 			v.StartedAt = in.State.StartedAt
 		}
 		v.AgentCount = len(in.State.Agents)
+		v.AgentSuffix = unavailableSuffix(in.State.Agents)
 		return v
 	}
 
@@ -146,7 +150,7 @@ func (v daemonStatusView) HeaderLines() []string {
 	if v.AgentCount == agentCountUnknown {
 		lines = append(lines, "Agents: unknown")
 	} else {
-		lines = append(lines, fmt.Sprintf("Agents: %d", v.AgentCount))
+		lines = append(lines, fmt.Sprintf("Agents: %d%s", v.AgentCount, v.AgentSuffix))
 	}
 
 	for _, w := range v.Warnings {

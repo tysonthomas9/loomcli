@@ -10,10 +10,40 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 )
 
+// unavailableSuffix renders the " (N unavailable)" qualifier on the agent count
+// so an operator sees at a glance that part of the fleet never started.
+func unavailableSuffix(agents []DaemonAgentStatus) string {
+	n := 0
+	for _, a := range agents {
+		if a.Status == "unavailable" {
+			n++
+		}
+	}
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (%d unavailable)", n)
+}
+
+// printUnavailableAgentStatus prints the two lines that matter for an agent the
+// daemon could not construct. Nothing else applies: it has no PID, no run
+// history, and no branch.
+func printUnavailableAgentStatus(agent DaemonAgentStatus) {
+	fmt.Printf("      unavailable — %s\n", agent.Detail)
+	if agent.Hint != "" {
+		fmt.Printf("      fix: %s\n", agent.Hint)
+	}
+}
+
 // printAgentStatus prints the detailed status for a single agent.
 func printAgentStatus(agent DaemonAgentStatus) {
 	statusIcon := statusToIcon(agent.Status)
 	fmt.Printf("  %s %s (%s)\n", statusIcon, agent.Worktree, agent.Role)
+
+	if agent.Status == "unavailable" {
+		printUnavailableAgentStatus(agent)
+		return
+	}
 
 	// PID line with uptime for running agents
 	if agent.PID > 0 {
