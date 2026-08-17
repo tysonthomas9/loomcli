@@ -51,6 +51,9 @@ func (d *Daemon) reloadAndReconcile() {
 
 	newHash := computeConfigHash(newConfig)
 
+	fleetMode := cli.IsFleetMode(newConfig)
+	d.tickUnavailableAgents(fleetMode)
+
 	// Acquire reconcileMu for the diff+mutate phase to prevent overlapping reconciliations.
 	d.reconcileMu.Lock()
 
@@ -72,7 +75,7 @@ func (d *Daemon) reloadAndReconcile() {
 	}
 
 	// In fleet mode, store updated config but skip local drain/add.
-	if cli.IsFleetMode(newConfig) {
+	if fleetMode {
 		d.config = newConfig
 		d.configHash = newHash
 		d.reconcileMu.Unlock()
@@ -262,6 +265,9 @@ func (d *Daemon) addNewAgents(entries []config.AgentEntry, label string) {
 			continue
 		}
 		if err := d.sup.AddAgent(entry); err != nil {
+			// Record it as well as logging: an agent that cannot be added is
+			// unavailable, not absent, and the retry loop will pick it up.
+			d.recordUnavailableAgent(entry, err)
 			slog.Error("failed to "+label+" agent", "worktree", entry.Worktree, "err", err)
 		}
 	}
