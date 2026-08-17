@@ -568,8 +568,16 @@ func applyRole(ctx context.Context, h *bootstrap.StoreHandle, ws, name string, r
 			return fmt.Errorf("create role %s: %w", name, cerr)
 		}
 	}
-	// Only what the spec named. An omitted key means "leave it alone", never
-	// "clear it" — see specPresence.
+	if _, err := h.Store.Roles().Update(ctx, ws, name, rolePatch(name, kind, rc, presence)); err != nil {
+		return fmt.Errorf("update role %s: %w", name, err)
+	}
+	fmt.Printf("  role %s applied\n", name)
+	return nil
+}
+
+// rolePatch builds the update from only what the spec named. An omitted key
+// means "leave it alone", never "clear it" — see specPresence.
+func rolePatch(name, kind string, rc cfgpkg.RoleConfig, presence specPresence) store.RoleUpdate {
 	patch := store.RoleUpdate{}
 	if presence.roleHas(name, "kind") {
 		patch.Kind = &kind
@@ -604,11 +612,7 @@ func applyRole(ctx context.Context, h *bootstrap.StoreHandle, ws, name string, r
 		d := rc.MaxRunDuration
 		patch.MaxRunDuration = &d
 	}
-	if _, err := h.Store.Roles().Update(ctx, ws, name, patch); err != nil {
-		return fmt.Errorf("update role %s: %w", name, err)
-	}
-	fmt.Printf("  role %s applied\n", name)
-	return nil
+	return patch
 }
 
 func applyAgent(ctx context.Context, h *bootstrap.StoreHandle, ws string, a cfgpkg.AgentEntry, presence specPresence) error {
