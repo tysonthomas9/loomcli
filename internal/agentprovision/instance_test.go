@@ -154,7 +154,46 @@ func TestEnsureAgentInstanceRepairsRouteKeyCollisionThroughAlternateLookup(t *te
 	if err != nil {
 		t.Fatalf("get alternate binding: %v", err)
 	}
-	assertCatalogBinding(t, binding, svc, spec)
+	template := spec.DefaultInstance.Binding
+	if binding.Name != template.Name || binding.TargetEntrypoint != template.TargetEntrypoint ||
+		binding.TargetAgentServiceID != svc.ServiceID {
+		t.Fatalf("structural repair missed: %#v", binding)
+	}
+	// Schedule and enabled are user-owned tuning: repair converges structure
+	// but must not stomp them back to the catalog template.
+	if binding.Schedule != "@daily" || binding.Enabled {
+		t.Fatalf("user-owned binding fields clobbered: %#v", binding)
+	}
+}
+
+func TestEnsureAgentInstancePreservesOperatorScheduleEdits(t *testing.T) {
+	st, workspaceDir := newProvisionStore(t)
+	ctx := t.Context()
+	spec, _ := scriptedroles.ForRole(scriptedroles.ScoutRoleName)
+	seedWorkflow(t, st, "SCOUT", spec.WorkflowName)
+	if _, err := EnsureAgentInstance(ctx, st, "SCOUT", workspaceDir, spec.RoleName); err != nil {
+		t.Fatalf("first ensure: %v", err)
+	}
+
+	schedule := "@hourly"
+	timezone := "America/Los_Angeles"
+	enabled := false
+	if _, err := st.TriggerBindings().Update(ctx, "SCOUT", spec.DefaultInstance.Binding.BindingID, store.TriggerBindingUpdate{
+		Schedule: &schedule, ScheduleTimezone: &timezone, Enabled: &enabled,
+	}); err != nil {
+		t.Fatalf("operator schedule edit: %v", err)
+	}
+
+	if _, err := EnsureAgentInstance(ctx, st, "SCOUT", workspaceDir, spec.RoleName); err != nil {
+		t.Fatalf("repeat ensure: %v", err)
+	}
+	binding, err := st.TriggerBindings().Get(ctx, "SCOUT", spec.DefaultInstance.Binding.BindingID)
+	if err != nil {
+		t.Fatalf("get binding: %v", err)
+	}
+	if binding.Schedule != "@hourly" || binding.ScheduleTimezone != "America/Los_Angeles" || binding.Enabled {
+		t.Fatalf("ensure clobbered operator edit: schedule=%q tz=%q enabled=%v", binding.Schedule, binding.ScheduleTimezone, binding.Enabled)
+	}
 }
 
 func TestEnsureAgentInstanceRejectsArchivedTombstone(t *testing.T) {

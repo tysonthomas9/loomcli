@@ -257,13 +257,12 @@ func ensureBinding(ctx context.Context, st store.Store, workspaceKey string, spe
 			setStringPatch(binding.DriverVersionID, versionID, &patch.DriverVersionID)
 			setStringPatch(binding.TargetEntrypoint, template.TargetEntrypoint, &patch.TargetEntrypoint)
 			setStringPatch(binding.TargetAgentServiceID, svc.ServiceID, &patch.TargetAgentServiceID)
-			setStringPatch(binding.Schedule, template.Schedule, &patch.Schedule)
-			setStringPatch(binding.ScheduleTimezone, template.ScheduleTimezone, &patch.ScheduleTimezone)
+			// Schedule, timezone, and enabled are user-owned tuning: the
+			// template only seeds them at create. Reconciling them here would
+			// clobber an operator's edit on the next ensure (every manual
+			// workflow trigger runs ensure).
 			if binding.ConcurrencyPolicy != template.ConcurrencyPolicy {
 				patch.ConcurrencyPolicy = &template.ConcurrencyPolicy
-			}
-			if binding.Enabled != template.Enabled {
-				patch.Enabled = &template.Enabled
 			}
 			if binding.ActorFilter == nil || !slices.Equal(binding.ActorFilter.ExcludeActorKinds, template.ExcludedActors) || len(binding.ActorFilter.AllowActors) != 0 {
 				patch.ActorFilter = &domain.TriggerActorFilter{ExcludeActorKinds: append([]string(nil), template.ExcludedActors...)}
