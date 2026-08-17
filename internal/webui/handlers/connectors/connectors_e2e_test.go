@@ -205,10 +205,10 @@ type e2eHarness struct {
 // connector proof does not recreate those behaviors.
 type connectorE2EAdmission struct {
 	mu       sync.Mutex
-	commands []automation.AdmitEventCommand
+	commands []automation.WebhookEvent
 }
 
-func (adapter *connectorE2EAdmission) AdmitEvent(_ context.Context, _ automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+func (adapter *connectorE2EAdmission) AdmitWebhookEvent(_ context.Context, _ authority.WebhookAuthority, command automation.WebhookEvent) (*automation.AdmissionResult, error) {
 	adapter.mu.Lock()
 	adapter.commands = append(adapter.commands, command)
 	adapter.mu.Unlock()

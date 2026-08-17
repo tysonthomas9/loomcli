@@ -35,7 +35,9 @@ type API interface {
 	BindingQueries
 	EventQueries
 	DeliveryQueries
-	EventAdmission
+	WebhookEventAdmission
+	WorkflowEventAdmission
+	SystemEventAdmission
 	ApprovalJournal
 	ManualDispatch
 	RuntimeCommands
@@ -100,8 +102,23 @@ type DeliveryQueries interface {
 	ListDeliveries(ctx context.Context, workspace string, filter DeliveryFilter) ([]*Delivery, error)
 }
 
-type EventAdmission interface {
-	AdmitEvent(ctx context.Context, auth EventAuthority, command AdmitEventCommand) (*AdmissionResult, error)
+// WebhookEventAdmission is the only Automation entry point for an externally
+// verified webhook. Its authority and input cannot be exchanged with either
+// workflow or system provenance.
+type WebhookEventAdmission interface {
+	AdmitWebhookEvent(context.Context, authority.WebhookAuthority, WebhookEvent) (*AdmissionResult, error)
+}
+
+// WorkflowEventAdmission accepts event content from one fenced, running
+// Execution owner. Automation re-derives the durable parent before admission.
+type WorkflowEventAdmission interface {
+	AdmitWorkflowEvent(context.Context, authority.ExecutionAuthority, WorkflowEvent) (*AdmissionResult, error)
+}
+
+// SystemEventAdmission accepts event content from one registered internal
+// producer through an action-scoped system authority.
+type SystemEventAdmission interface {
+	AdmitSystemEvent(context.Context, authority.SystemAuthority, SystemEvent) (*AdmissionResult, error)
 }
 
 // ApprovalJournal is the narrow, operator-authorized command used by the
@@ -267,47 +284,53 @@ type DeliveryFilter struct {
 	Limit     int            `json:"limit,omitempty"`
 }
 
-// EventAuthority is a sealed sum of the only authority classes allowed to
-// enter trigger admission. Its zero value fails closed.
-type EventAuthority struct {
-	value  authority.Authority
-	origin EventOrigin
+// WebhookEvent contains only verified external event content. Origin, hop
+// depth, idempotency, and signature status are owned by Automation.
+type WebhookEvent struct {
+	WorkspaceKey     string            `json:"workspace_key"`
+	SourceKind       string            `json:"source_kind,omitempty"`
+	SourceRef        string            `json:"source_ref,omitempty"`
+	RouteKey         string            `json:"route_key,omitempty"`
+	SourceEventID    string            `json:"source_event_id"`
+	EventType        string            `json:"event_type"`
+	SubjectRef       string            `json:"subject_ref,omitempty"`
+	ActorRef         string            `json:"actor_ref,omitempty"`
+	OccurredAt       time.Time         `json:"occurred_at,omitempty"`
+	RawPayloadRef    string            `json:"raw_payload_ref,omitempty"`
+	RawPayloadDigest string            `json:"raw_payload_digest,omitempty"`
+	Payload          json.RawMessage   `json:"payload,omitempty"`
+	SubjectAttrs     map[string]string `json:"subject_attrs,omitempty"`
 }
 
-func NewWebhookEventAuthority(auth authority.WebhookAuthority) EventAuthority {
-	return EventAuthority{value: auth, origin: EventOriginExternal}
-}
-
-func NewExecutionEventAuthority(auth authority.ExecutionAuthority) EventAuthority {
-	return EventAuthority{value: auth, origin: EventOriginWorkflow}
-}
-
-func NewSystemEventAuthority(auth authority.SystemAuthority) EventAuthority {
-	return EventAuthority{value: auth, origin: EventOriginSystem}
-}
-
-// AdmitEventCommand intentionally omits origin, hop depth, idempotency key,
-// signature status, and actor credentials. The service derives those values
-// from EventAuthority and ExecutionPort.EmissionContext.
-type AdmitEventCommand struct {
+// WorkflowEvent contains caller-controlled event content plus the exact
+// execution fence observed by the application adapter. The durable run,
+// parent event, actor, epic, source, and route are re-derived by Automation.
+type WorkflowEvent struct {
 	WorkspaceKey          string            `json:"workspace_key"`
-	SourceKind            string            `json:"source_kind,omitempty"`
-	SourceRef             string            `json:"source_ref,omitempty"`
-	RouteKey              string            `json:"route_key,omitempty"`
 	SourceEventID         string            `json:"source_event_id"`
 	EventType             string            `json:"event_type"`
 	SubjectRef            string            `json:"subject_ref,omitempty"`
-	ActorRef              string            `json:"actor_ref,omitempty"`
-	ParentEventID         string            `json:"parent_event_id,omitempty"`
-	EpicID                string            `json:"epic_id,omitempty"`
-	ExecutionNodeID       string            `json:"execution_node_id,omitempty"`
-	ExecutionLeaseID      string            `json:"execution_lease_id,omitempty"`
-	ExecutionFencingToken int64             `json:"execution_fencing_token,omitempty"`
-	OccurredAt            time.Time         `json:"occurred_at,omitempty"`
-	RawPayloadRef         string            `json:"raw_payload_ref,omitempty"`
-	RawPayloadDigest      string            `json:"raw_payload_digest,omitempty"`
+	ExecutionNodeID       string            `json:"execution_node_id"`
+	ExecutionLeaseID      string            `json:"execution_lease_id"`
+	ExecutionFencingToken int64             `json:"execution_fencing_token"`
 	Payload               json.RawMessage   `json:"payload,omitempty"`
 	SubjectAttrs          map[string]string `json:"subject_attrs,omitempty"`
+}
+
+// SystemEvent contains event content for a registered internal producer.
+// Source kind, route, actor, origin, signature status, and idempotency are
+// derived by Automation and cannot be chosen by the producer.
+type SystemEvent struct {
+	WorkspaceKey  string            `json:"workspace_key"`
+	SourceEventID string            `json:"source_event_id"`
+	EventType     string            `json:"event_type"`
+	SourceRef     string            `json:"source_ref,omitempty"`
+	SubjectRef    string            `json:"subject_ref,omitempty"`
+	ParentEventID string            `json:"parent_event_id,omitempty"`
+	EpicID        string            `json:"epic_id,omitempty"`
+	OccurredAt    time.Time         `json:"occurred_at,omitempty"`
+	Payload       json.RawMessage   `json:"payload,omitempty"`
+	SubjectAttrs  map[string]string `json:"subject_attrs,omitempty"`
 }
 
 type AdmissionResult struct {

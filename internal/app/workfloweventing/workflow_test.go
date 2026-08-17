@@ -17,9 +17,9 @@ func (function authorityProviderFunc) AuthorityForVerifiedRun(ctx context.Contex
 	return function(ctx, parent)
 }
 
-type admissionFunc func(context.Context, automation.EventAuthority, automation.AdmitEventCommand) (*automation.AdmissionResult, error)
+type admissionFunc func(context.Context, authority.ExecutionAuthority, automation.WorkflowEvent) (*automation.AdmissionResult, error)
 
-func (function admissionFunc) AdmitEvent(ctx context.Context, auth automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+func (function admissionFunc) AdmitWorkflowEvent(ctx context.Context, auth authority.ExecutionAuthority, command automation.WorkflowEvent) (*automation.AdmissionResult, error) {
 	return function(ctx, auth, command)
 }
 
@@ -40,7 +40,7 @@ func TestEmitDerivesAuthorityThenAdmitsOnlyEventContent(t *testing.T) {
 	request := validRequest()
 	order := make([]string, 0, 2)
 	var gotParent VerifiedRun
-	var gotCommand automation.AdmitEventCommand
+	var gotCommand automation.WorkflowEvent
 	wantResult := &automation.AdmissionResult{Event: &automation.Event{EventID: "event-1"}}
 	workflow, err := New(
 		authorityProviderFunc(func(_ context.Context, verified VerifiedRun) (authority.ExecutionAuthority, error) {
@@ -48,7 +48,7 @@ func TestEmitDerivesAuthorityThenAdmitsOnlyEventContent(t *testing.T) {
 			gotParent = verified
 			return authority.ExecutionAuthority{}, nil
 		}),
-		admissionFunc(func(_ context.Context, _ automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+		admissionFunc(func(_ context.Context, _ authority.ExecutionAuthority, command automation.WorkflowEvent) (*automation.AdmissionResult, error) {
 			order = append(order, "admission")
 			gotCommand = command
 			return wantResult, nil
@@ -64,7 +64,7 @@ func TestEmitDerivesAuthorityThenAdmitsOnlyEventContent(t *testing.T) {
 	if !reflect.DeepEqual(order, []string{"authority", "admission"}) || !reflect.DeepEqual(gotParent, parent) {
 		t.Fatalf("order/parent = %v/%+v", order, gotParent)
 	}
-	wantCommand := automation.AdmitEventCommand{
+	wantCommand := automation.WorkflowEvent{
 		WorkspaceKey: "WS", SourceEventID: "emission-1", EventType: "issue.create",
 		SubjectRef: "issue#42", ExecutionNodeID: parent.NodeID, ExecutionLeaseID: parent.LeaseID,
 		ExecutionFencingToken: parent.FencingToken, Payload: request.Payload, SubjectAttrs: request.SubjectAttrs,
@@ -73,9 +73,8 @@ func TestEmitDerivesAuthorityThenAdmitsOnlyEventContent(t *testing.T) {
 		t.Fatalf("admission command = %#v, want %#v", gotCommand, wantCommand)
 	}
 	for _, field := range []string{"SourceKind", "SourceRef", "RouteKey", "ActorRef", "ParentEventID", "EpicID", "OccurredAt", "RawPayloadRef", "RawPayloadDigest"} {
-		value := reflect.ValueOf(gotCommand).FieldByName(field)
-		if !value.IsZero() {
-			t.Errorf("caller-controlled provenance field %s reached admission: %v", field, value.Interface())
+		if _, exists := reflect.TypeOf(gotCommand).FieldByName(field); exists {
+			t.Errorf("WorkflowEvent exposes caller-controlled provenance field %s", field)
 		}
 	}
 	for _, forbidden := range []string{"Origin", "HopDepth", "SignatureStatus", "IdempotencyKey", "ParentEventID", "EpicID", "RunID", "ActorRef", "Authority"} {
@@ -92,7 +91,7 @@ func TestEmitAuthorityFailureStopsAdmission(t *testing.T) {
 		authorityProviderFunc(func(context.Context, VerifiedRun) (authority.ExecutionAuthority, error) {
 			return authority.ExecutionAuthority{}, denied
 		}),
-		admissionFunc(func(context.Context, automation.EventAuthority, automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+		admissionFunc(func(context.Context, authority.ExecutionAuthority, automation.WorkflowEvent) (*automation.AdmissionResult, error) {
 			calls++
 			return nil, nil
 		}),
@@ -115,7 +114,7 @@ func TestEmitPreservesAdmissionResultWithError(t *testing.T) {
 		authorityProviderFunc(func(context.Context, VerifiedRun) (authority.ExecutionAuthority, error) {
 			return authority.ExecutionAuthority{}, nil
 		}),
-		admissionFunc(func(context.Context, automation.EventAuthority, automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+		admissionFunc(func(context.Context, authority.ExecutionAuthority, automation.WorkflowEvent) (*automation.AdmissionResult, error) {
 			return wantResult, wantErr
 		}),
 	)
@@ -132,7 +131,7 @@ func TestEmitFailsClosedOnInvalidCompositionAndRequest(t *testing.T) {
 	noopAuthority := authorityProviderFunc(func(context.Context, VerifiedRun) (authority.ExecutionAuthority, error) {
 		return authority.ExecutionAuthority{}, nil
 	})
-	noopAdmission := admissionFunc(func(context.Context, automation.EventAuthority, automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+	noopAdmission := admissionFunc(func(context.Context, authority.ExecutionAuthority, automation.WorkflowEvent) (*automation.AdmissionResult, error) {
 		return &automation.AdmissionResult{}, nil
 	})
 	if _, err := New(nil, noopAdmission); !errors.Is(err, ErrUnavailable) {
@@ -150,7 +149,6 @@ func TestEmitFailsClosedOnInvalidCompositionAndRequest(t *testing.T) {
 		parent  VerifiedRun
 		request EmitRequest
 	}{
-		{name: "missing event id", parent: validParent(), request: func() EmitRequest { value := validRequest(); value.EventID = ""; return value }()},
 		{name: "foreign workspace", parent: validParent(), request: func() EmitRequest { value := validRequest(); value.WorkspaceKey = "OTHER"; return value }()},
 		{name: "unverified parent", parent: VerifiedRun{}, request: validRequest()},
 		{name: "terminal parent", parent: func() VerifiedRun {
@@ -168,7 +166,7 @@ func TestEmitFailsClosedOnInvalidCompositionAndRequest(t *testing.T) {
 	}
 }
 
-func TestEmitDefensivelyCopiesPayloadAndAttributes(t *testing.T) {
+func TestEmitMapsPayloadAndAttributesWithoutAddingProvenance(t *testing.T) {
 	request := validRequest()
 	wantPayload := append(json.RawMessage(nil), request.Payload...)
 	wantAttrs := map[string]string{"issue_id": "42"}
@@ -176,9 +174,10 @@ func TestEmitDefensivelyCopiesPayloadAndAttributes(t *testing.T) {
 		authorityProviderFunc(func(context.Context, VerifiedRun) (authority.ExecutionAuthority, error) {
 			return authority.ExecutionAuthority{}, nil
 		}),
-		admissionFunc(func(_ context.Context, _ automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
-			command.Payload[0] = '['
-			command.SubjectAttrs["issue_id"] = "mutated"
+		admissionFunc(func(_ context.Context, _ authority.ExecutionAuthority, command automation.WorkflowEvent) (*automation.AdmissionResult, error) {
+			if !reflect.DeepEqual(command.Payload, wantPayload) || !reflect.DeepEqual(command.SubjectAttrs, wantAttrs) {
+				t.Fatalf("mapped payload/attrs = %s/%v", command.Payload, command.SubjectAttrs)
+			}
 			return &automation.AdmissionResult{}, nil
 		}),
 	)
@@ -187,8 +186,5 @@ func TestEmitDefensivelyCopiesPayloadAndAttributes(t *testing.T) {
 	}
 	if _, err := workflow.Emit(t.Context(), validParent(), request); err != nil {
 		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(request.Payload, wantPayload) || !reflect.DeepEqual(request.SubjectAttrs, wantAttrs) {
-		t.Fatalf("caller input mutated: payload=%s attrs=%v", request.Payload, request.SubjectAttrs)
 	}
 }

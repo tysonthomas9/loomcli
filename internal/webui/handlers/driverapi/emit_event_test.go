@@ -28,9 +28,9 @@ func (function driverEventAuthorityProviderFunc) AuthorityForVerifiedRun(ctx con
 	return function(ctx, parent)
 }
 
-type driverEventAdmissionFunc func(context.Context, automation.EventAuthority, automation.AdmitEventCommand) (*automation.AdmissionResult, error)
+type driverEventAdmissionFunc func(context.Context, authority.ExecutionAuthority, automation.WorkflowEvent) (*automation.AdmissionResult, error)
 
-func (function driverEventAdmissionFunc) AdmitEvent(ctx context.Context, eventAuthority automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+func (function driverEventAdmissionFunc) AdmitWorkflowEvent(ctx context.Context, eventAuthority authority.ExecutionAuthority, command automation.WorkflowEvent) (*automation.AdmissionResult, error) {
 	return function(ctx, eventAuthority, command)
 }
 
@@ -48,7 +48,7 @@ func (dispatcher *recordingWorkflowEventAwaits) Dispatch(_ context.Context, work
 	return &trigger.AwaitDispatchResult{}, dispatcher.err
 }
 
-func mustWorkflowEventing(t *testing.T, provider workfloweventing.ExecutionAuthorityProvider, admission automation.EventAdmission) *workfloweventing.Workflow {
+func mustWorkflowEventing(t *testing.T, provider workfloweventing.ExecutionAuthorityProvider, admission automation.WorkflowEventAdmission) *workfloweventing.Workflow {
 	t.Helper()
 	workflow, err := workfloweventing.New(provider, admission)
 	if err != nil {
@@ -90,7 +90,7 @@ func TestDriverAPIEmitEventUsesNamedWorkflowAndPreservesCamelCaseWire(t *testing
 		providerCalls  int
 		admissionCalls int
 		gotParent      workfloweventing.VerifiedRun
-		gotCommand     automation.AdmitEventCommand
+		gotCommand     automation.WorkflowEvent
 	)
 	h.module.workflowEventing = mustWorkflowEventing(t,
 		driverEventAuthorityProviderFunc(func(_ context.Context, parent workfloweventing.VerifiedRun) (authority.ExecutionAuthority, error) {
@@ -98,7 +98,7 @@ func TestDriverAPIEmitEventUsesNamedWorkflowAndPreservesCamelCaseWire(t *testing
 			gotParent = parent
 			return authority.ExecutionAuthority{}, nil
 		}),
-		driverEventAdmissionFunc(func(_ context.Context, _ automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+		driverEventAdmissionFunc(func(_ context.Context, _ authority.ExecutionAuthority, command automation.WorkflowEvent) (*automation.AdmissionResult, error) {
 			admissionCalls++
 			gotCommand = command
 			return &automation.AdmissionResult{
@@ -159,10 +159,10 @@ func TestDriverAPIEmitEventUsesNamedWorkflowAndPreservesCamelCaseWire(t *testing
 		t.Fatalf("admission command content = %+v", gotCommand)
 	}
 	assertSameJSON(t, gotCommand.Payload, `{"issueId":"42"}`)
-	if gotCommand.SourceKind != "" || gotCommand.SourceRef != "" || gotCommand.RouteKey != "" || gotCommand.ActorRef != "" ||
-		gotCommand.ParentEventID != "" || gotCommand.EpicID != "" || !gotCommand.OccurredAt.IsZero() ||
-		gotCommand.RawPayloadRef != "" || gotCommand.RawPayloadDigest != "" {
-		t.Fatalf("caller provenance reached admission: %+v", gotCommand)
+	for _, field := range []string{"SourceKind", "SourceRef", "RouteKey", "ActorRef", "ParentEventID", "EpicID", "OccurredAt", "RawPayloadRef", "RawPayloadDigest"} {
+		if _, exists := reflect.TypeOf(gotCommand).FieldByName(field); exists {
+			t.Fatalf("WorkflowEvent exposes caller provenance field %q", field)
+		}
 	}
 	if awaits.calls != 1 || awaits.workspace != "WS" || awaits.event.EventID != "wf-emit-authority" ||
 		awaits.event.EventType != "issue.created" || awaits.event.SubjectRef != "issue#42" ||
@@ -178,7 +178,7 @@ func TestDriverAPIEmitEventDropHasNoDeliveryOrAwait(t *testing.T) {
 		driverEventAuthorityProviderFunc(func(context.Context, workfloweventing.VerifiedRun) (authority.ExecutionAuthority, error) {
 			return authority.ExecutionAuthority{}, nil
 		}),
-		driverEventAdmissionFunc(func(context.Context, automation.EventAuthority, automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+		driverEventAdmissionFunc(func(context.Context, authority.ExecutionAuthority, automation.WorkflowEvent) (*automation.AdmissionResult, error) {
 			return &automation.AdmissionResult{
 				Dropped: true, DropReason: "hop_limit", EventType: "issue.created",
 				RouteKey: "internal.issue.created", Origin: automation.EventOriginWorkflow, HopDepth: 9,
@@ -266,7 +266,7 @@ func TestDriverAPIEmitEventRequiresRunOwnership(t *testing.T) {
 					providerCalls++
 					return authority.ExecutionAuthority{}, nil
 				}),
-				driverEventAdmissionFunc(func(context.Context, automation.EventAuthority, automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+				driverEventAdmissionFunc(func(context.Context, authority.ExecutionAuthority, automation.WorkflowEvent) (*automation.AdmissionResult, error) {
 					t.Fatal("admission called for unverified owner")
 					return nil, nil
 				}),
@@ -292,6 +292,14 @@ func TestDriverAPIEmitEventRequiresRunOwnership(t *testing.T) {
 
 func TestDriverAPIEmitEventValidatesParams(t *testing.T) {
 	h := newTestHarness(t)
+	h.module.workflowEventing = mustWorkflowEventing(t,
+		driverEventAuthorityProviderFunc(func(context.Context, workfloweventing.VerifiedRun) (authority.ExecutionAuthority, error) {
+			return authority.ExecutionAuthority{}, nil
+		}),
+		driverEventAdmissionFunc(func(context.Context, authority.ExecutionAuthority, automation.WorkflowEvent) (*automation.AdmissionResult, error) {
+			return nil, automation.ErrInvalid
+		}),
+	)
 	resp, decoded := h.do(t, opRequest{
 		op:      "emit-event",
 		headers: h.ownerHeaders(t),

@@ -352,7 +352,12 @@ func (s *Service) admitCronOccurrence(ctx context.Context, auth authority.System
 		completion.ErrorClass = cronAdmissionErrorClass
 		return completion, cronFailed, fmt.Errorf("encode cron occurrence %q: %w", occurrence.OccurrenceID, err)
 	}
-	admission, admissionErr := s.admitEventAuthorized(ctx, NewSystemEventAuthority(auth), cronAdmissionCommand(occurrence, payload))
+	derived, deriveErr := deriveCronAdmission(auth, occurrence, payload)
+	if deriveErr != nil {
+		completion.ErrorClass = cronAdmissionErrorClass
+		return completion, cronFailed, fmt.Errorf("derive cron occurrence %q: %w", occurrence.OccurrenceID, deriveErr)
+	}
+	admission, admissionErr := s.admitEventAuthorized(ctx, derived)
 	if admission == nil {
 		completion.ErrorClass = cronAdmissionErrorClass
 		if admissionErr == nil {
@@ -416,15 +421,6 @@ func wrapCronError(action, occurrenceID string, err error) error {
 		return nil
 	}
 	return fmt.Errorf("%s cron occurrence %q: %w", action, occurrenceID, err)
-}
-
-func cronAdmissionCommand(occurrence CronOccurrence, payload json.RawMessage) AdmitEventCommand {
-	return AdmitEventCommand{
-		WorkspaceKey: occurrence.WorkspaceKey, SourceKind: SourceKindCron,
-		SourceRef: occurrence.BindingID, RouteKey: occurrence.RouteKey,
-		SourceEventID: occurrence.OccurrenceID, EventType: CronEventType,
-		SubjectRef: occurrence.BindingID, OccurredAt: occurrence.OccurredAt, Payload: payload,
-	}
 }
 
 func recordCronOutcome(result *SweepCronResult, outcome cronOutcome) {

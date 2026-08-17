@@ -37,14 +37,14 @@ func (function runOutcomeRuntimeAuthorityProviderFunc) AuthorityForVerifiedSourc
 
 type runOutcomeRuntimeAdmissionFunc func(
 	context.Context,
-	automation.EventAuthority,
-	automation.AdmitEventCommand,
+	authority.SystemAuthority,
+	automation.SystemEvent,
 ) (*automation.AdmissionResult, error)
 
-func (function runOutcomeRuntimeAdmissionFunc) AdmitEvent(
+func (function runOutcomeRuntimeAdmissionFunc) AdmitSystemEvent(
 	ctx context.Context,
-	eventAuthority automation.EventAuthority,
-	command automation.AdmitEventCommand,
+	eventAuthority authority.SystemAuthority,
+	command automation.SystemEvent,
 ) (*automation.AdmissionResult, error) {
 	return function(ctx, eventAuthority, command)
 }
@@ -142,12 +142,12 @@ func TestRunOutcomeRuntimePublishesOpaqueRunIDThroughAutomationAdmission(t *test
 		t.Fatal(err)
 	}
 
-	var got automation.AdmitEventCommand
+	var got automation.SystemEvent
 	workflow, err := systemeventing.New(
 		runOutcomeRuntimeAuthorityProviderFunc(func(context.Context, systemeventing.VerifiedSource) (authority.SystemAuthority, error) {
 			return authority.SystemAuthority{}, nil
 		}),
-		runOutcomeRuntimeAdmissionFunc(func(_ context.Context, _ automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+		runOutcomeRuntimeAdmissionFunc(func(_ context.Context, _ authority.SystemAuthority, command automation.SystemEvent) (*automation.AdmissionResult, error) {
 			got = command
 			return &automation.AdmissionResult{}, nil
 		}),

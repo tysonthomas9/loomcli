@@ -12,9 +12,6 @@ import (
 )
 
 const (
-	// MaxPayloadBytes retains the established inbound webhook limit while
-	// protecting non-HTTP callers of the application workflow as well.
-	MaxPayloadBytes = 8 << 20
 	// MaxPresentedSignatureBytes bounds untrusted proof material passed to a
 	// connector verifier. Real webhook signatures are far smaller than this.
 	MaxPresentedSignatureBytes = 8 << 10
@@ -51,12 +48,12 @@ type IngestRequest struct {
 type Workflow struct {
 	verifier  Verifier
 	authority AuthorityProvider
-	admission automation.EventAdmission
+	admission automation.WebhookEventAdmission
 }
 
 // New constructs a webhook ingestion workflow. Every dependency is required;
 // an incomplete composition fails closed before it can receive traffic.
-func New(verifier Verifier, authorityProvider AuthorityProvider, admission automation.EventAdmission) (*Workflow, error) {
+func New(verifier Verifier, authorityProvider AuthorityProvider, admission automation.WebhookEventAdmission) (*Workflow, error) {
 	switch {
 	case verifier == nil:
 		return nil, fmt.Errorf("%w: verifier is required", ErrUnavailable)
@@ -79,7 +76,7 @@ func (w *Workflow) Ingest(ctx context.Context, request IngestRequest) (*automati
 		return nil, ErrUnavailable
 	}
 
-	request, err := validateRequest(request)
+	request, err := validateProvenance(request)
 	if err != nil {
 		return nil, err
 	}
@@ -96,18 +93,6 @@ func (w *Workflow) Ingest(ctx context.Context, request IngestRequest) (*automati
 		return nil, fmt.Errorf("verify webhook: %w", err)
 	}
 
-	// Preserve the established transport contract: verification covers the
-	// exact bytes received, then an empty body is admitted as an empty JSON
-	// object and malformed JSON is rejected before authority derivation or
-	// durable admission. In particular, an invalid unsigned request remains a
-	// verification denial rather than becoming a payload-validation oracle.
-	payload := strings.TrimSpace(string(request.Payload))
-	if payload == "" {
-		request.Payload = json.RawMessage(`{}`)
-	} else if !json.Valid(request.Payload) {
-		return nil, fmt.Errorf("%w: webhook payload must be valid JSON", ErrInvalidRequest)
-	}
-
 	webhookAuthority, err := w.authority.AuthorityForVerifiedWebhook(ctx, AuthorityRequest{
 		WorkspaceKey: request.WorkspaceKey,
 		SourceKind:   request.SourceKind,
@@ -118,15 +103,15 @@ func (w *Workflow) Ingest(ctx context.Context, request IngestRequest) (*automati
 		return nil, fmt.Errorf("derive webhook authority: %w", err)
 	}
 
-	result, err := w.admission.AdmitEvent(ctx, automation.NewWebhookEventAuthority(webhookAuthority), admissionCommand(request))
+	result, err := w.admission.AdmitWebhookEvent(ctx, webhookAuthority, admissionEvent(request))
 	if err != nil {
 		return result, fmt.Errorf("admit webhook event: %w", err)
 	}
 	return result, nil
 }
 
-func admissionCommand(request IngestRequest) automation.AdmitEventCommand {
-	return automation.AdmitEventCommand{
+func admissionEvent(request IngestRequest) automation.WebhookEvent {
+	return automation.WebhookEvent{
 		WorkspaceKey:     request.WorkspaceKey,
 		SourceKind:       request.SourceKind,
 		SourceRef:        request.SourceRef,
@@ -138,12 +123,15 @@ func admissionCommand(request IngestRequest) automation.AdmitEventCommand {
 		OccurredAt:       request.OccurredAt,
 		RawPayloadRef:    request.RawPayloadRef,
 		RawPayloadDigest: request.RawPayloadDigest,
-		Payload:          cloneRawMessage(request.Payload),
-		SubjectAttrs:     cloneStringMap(request.SubjectAttrs),
+		Payload:          request.Payload,
+		SubjectAttrs:     request.SubjectAttrs,
 	}
 }
 
-func validateRequest(request IngestRequest) (IngestRequest, error) {
+// validateProvenance validates only the fields needed to verify and authorize
+// this external origin. Canonical event-content validation belongs to
+// Automation and deliberately happens after exact-byte verification.
+func validateProvenance(request IngestRequest) (IngestRequest, error) {
 	var err error
 	request.WorkspaceKey, err = required("workspace", request.WorkspaceKey)
 	if err != nil {
@@ -165,27 +153,9 @@ func validateRequest(request IngestRequest) (IngestRequest, error) {
 	if err != nil {
 		return IngestRequest{}, err
 	}
-	request.SourceEventID, err = required("source event id", request.SourceEventID)
-	if err != nil {
-		return IngestRequest{}, err
-	}
-	request.EventType, err = required("event type", request.EventType)
-	if err != nil {
-		return IngestRequest{}, err
-	}
-
-	request.SubjectRef = strings.TrimSpace(request.SubjectRef)
-	request.ActorRef = strings.TrimSpace(request.ActorRef)
-	request.RawPayloadRef = strings.TrimSpace(request.RawPayloadRef)
-	request.RawPayloadDigest = strings.TrimSpace(request.RawPayloadDigest)
-	if len(request.Payload) > MaxPayloadBytes {
-		return IngestRequest{}, fmt.Errorf("%w: payload exceeds %d bytes", ErrInvalidRequest, MaxPayloadBytes)
-	}
 	if len(request.PresentedSignature) > MaxPresentedSignatureBytes {
 		return IngestRequest{}, fmt.Errorf("%w: presented signature exceeds %d bytes", ErrInvalidRequest, MaxPresentedSignatureBytes)
 	}
-	request.Payload = cloneRawMessage(request.Payload)
-	request.SubjectAttrs = cloneStringMap(request.SubjectAttrs)
 	return request, nil
 }
 
@@ -202,15 +172,4 @@ func cloneRawMessage(value json.RawMessage) json.RawMessage {
 		return nil
 	}
 	return append(json.RawMessage(nil), value...)
-}
-
-func cloneStringMap(value map[string]string) map[string]string {
-	if value == nil {
-		return nil
-	}
-	clone := make(map[string]string, len(value))
-	for key, item := range value {
-		clone[key] = item
-	}
-	return clone
 }

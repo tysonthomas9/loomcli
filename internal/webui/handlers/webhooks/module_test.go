@@ -92,12 +92,12 @@ func (queries testBindingQueries) ListBindings(ctx context.Context, workspace st
 // deliberately does not reproduce matching, reservation, persistence,
 // idempotency, or dispatch; those behaviors belong to Automation's tests.
 type testAdmission struct {
-	commands []automation.AdmitEventCommand
+	commands []automation.WebhookEvent
 	result   *automation.AdmissionResult
 	err      error
 }
 
-func (adapter *testAdmission) AdmitEvent(_ context.Context, _ automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+func (adapter *testAdmission) AdmitWebhookEvent(_ context.Context, _ authority.WebhookAuthority, command automation.WebhookEvent) (*automation.AdmissionResult, error) {
 	adapter.commands = append(adapter.commands, command)
 	if adapter.result == nil && adapter.err == nil {
 		return &automation.AdmissionResult{Deliveries: []*automation.Delivery{{
@@ -172,7 +172,7 @@ func newServer(st webhookFixture) *http.ServeMux {
 	return newServerWithPorts(st, &testAdmission{}, testAutomationQueries{})
 }
 
-func newServerWithPorts(st webhookFixture, admission automation.EventAdmission, queries AutomationQueries) *http.ServeMux {
+func newServerWithPorts(st webhookFixture, admission automation.WebhookEventAdmission, queries AutomationQueries) *http.ServeMux {
 	mux := http.NewServeMux()
 	resolver, ok := st.Awaits().(execution.AtomicAwaitStore)
 	if !ok {

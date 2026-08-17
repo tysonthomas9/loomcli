@@ -297,7 +297,7 @@ func TestWebhookAdmissionMatchesDeterministicallyFiltersActorsAndSnapshotsActive
 
 	payload := []byte(`{"issue":7}`)
 	attrs := map[string]string{"repo": "loom"}
-	result, err := h.service.AdmitEvent(context.Background(), NewWebhookEventAuthority(h.issueWebhook(ActionAdmitEvent)), AdmitEventCommand{
+	result, err := admitTestEvent(h.service, context.Background(), webhookTestAuthority(h.issueWebhook(ActionAdmitEvent)), testAdmissionCommand{
 		WorkspaceKey: "ws", SourceKind: "github", RouteKey: "github.issue.opened",
 		SourceEventID: "delivery-7", EventType: "issue.opened", SubjectRef: "issue-7", ActorRef: "octocat",
 		Payload: payload, SubjectAttrs: attrs,
@@ -442,7 +442,7 @@ func TestTaskReadyRepositoryRequirementDeduplicatesOnlyPromptAgentFanout(t *test
 	}
 	admitTaskReady := func(t *testing.T, h *testHarness, sourceEventID string, payload json.RawMessage) *AdmissionResult {
 		t.Helper()
-		result, err := h.service.AdmitEvent(t.Context(), NewSystemEventAuthority(h.issueSystem(ActionAdmitEvent)), AdmitEventCommand{
+		result, err := admitTestEvent(h.service, t.Context(), systemTestAuthority(h.issueSystem(ActionAdmitEvent)), testAdmissionCommand{
 			WorkspaceKey: "ws", SourceKind: SourceKindInternal, SourceEventID: sourceEventID,
 			EventType: taskReadyEventType, SubjectRef: "issue:TASK-1", Payload: payload,
 		})
@@ -788,10 +788,10 @@ func TestTaskReadyRepositoryRequirementDeduplicatesOnlyPromptAgentFanout(t *test
 			go func(index int) {
 				defer wg.Done()
 				<-start
-				results[index], errs[index] = h.service.AdmitEvent(
+				results[index], errs[index] = admitTestEvent(h.service,
 					ctx,
-					NewSystemEventAuthority(h.issueSystem(ActionAdmitEvent)),
-					AdmitEventCommand{
+					systemTestAuthority(h.issueSystem(ActionAdmitEvent)),
+					testAdmissionCommand{
 						WorkspaceKey: "ws", SourceKind: SourceKindInternal, SourceEventID: sourceEventID,
 						EventType: taskReadyEventType, SubjectRef: "issue:TASK-1", Payload: payload,
 					},
@@ -964,7 +964,7 @@ func TestAdmissionReservesRunFinishedForTrustedSystemProvenance(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			h := newTestHarness(t)
-			_, err := h.service.AdmitEvent(t.Context(), NewWebhookEventAuthority(h.issueWebhook(ActionAdmitEvent)), AdmitEventCommand{
+			_, err := admitTestEvent(h.service, t.Context(), webhookTestAuthority(h.issueWebhook(ActionAdmitEvent)), testAdmissionCommand{
 				WorkspaceKey: "ws", SourceKind: "github", RouteKey: "github." + test.eventType,
 				SourceEventID: testRunFinishedSourceEventIDPrefix + "child:completed",
 				EventType:     test.eventType, SubjectRef: "child", ActorRef: test.actorRef,
@@ -983,7 +983,7 @@ func TestAdmissionReservesRunFinishedForTrustedSystemProvenance(t *testing.T) {
 			WorkspaceKey: "ws", RunID: "run-emitter", NodeID: "node-1",
 			LeaseID: "lease-1", FencingToken: 1, ActorRef: "driver-run:run-emitter",
 		}
-		_, err := h.service.AdmitEvent(t.Context(), NewExecutionEventAuthority(h.issueExecution(ActionAdmitEvent)), AdmitEventCommand{
+		_, err := admitTestEvent(h.service, t.Context(), workflowTestAuthority(h.issueExecution(ActionAdmitEvent)), testAdmissionCommand{
 			WorkspaceKey: "ws", SourceEventID: testRunFinishedSourceEventIDPrefix + "child:completed",
 			EventType: testRunFinishedEventType, SubjectRef: "child",
 			ExecutionNodeID: "node-1", ExecutionLeaseID: "lease-1", ExecutionFencingToken: 1,
@@ -1000,7 +1000,7 @@ func TestAdmissionReservesRunFinishedForTrustedSystemProvenance(t *testing.T) {
 			WorkspaceKey: "ws", RunID: "run-emitter", NodeID: "node-1",
 			LeaseID: "lease-1", FencingToken: 1, ActorRef: "system:cron",
 		}
-		_, err := h.service.AdmitEvent(t.Context(), NewExecutionEventAuthority(h.issueExecution(ActionAdmitEvent)), AdmitEventCommand{
+		_, err := admitTestEvent(h.service, t.Context(), workflowTestAuthority(h.issueExecution(ActionAdmitEvent)), testAdmissionCommand{
 			WorkspaceKey: "ws", SourceEventID: "event-workflow-system-actor",
 			EventType: "issue.created", SubjectRef: "issue-1",
 			ExecutionNodeID: "node-1", ExecutionLeaseID: "lease-1", ExecutionFencingToken: 1,
@@ -1027,7 +1027,7 @@ func TestAdmissionReservesRunFinishedForTrustedSystemProvenance(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, err := h.service.AdmitEvent(t.Context(), NewSystemEventAuthority(auth), AdmitEventCommand{
+		result, err := admitTestEvent(h.service, t.Context(), systemTestAuthority(auth), testAdmissionCommand{
 			WorkspaceKey: "ws", SourceKind: SourceKindInternal,
 			SourceEventID: testRunFinishedSourceEventIDPrefix + "child:completed",
 			EventType:     testRunFinishedEventType, SubjectRef: "child",
@@ -1046,10 +1046,10 @@ func TestAdmissionWithoutEventTrustPolicyFailsClosedBeforeAnySideEffect(t *testi
 	h.service.eventTrustPolicy = nil
 	h.persistence.seedBinding(seedBinding("binding-a", "github.issue.opened"))
 
-	result, err := h.service.AdmitEvent(
+	result, err := admitTestEvent(h.service,
 		t.Context(),
-		NewWebhookEventAuthority(h.issueWebhook(ActionAdmitEvent)),
-		AdmitEventCommand{
+		webhookTestAuthority(h.issueWebhook(ActionAdmitEvent)),
+		testAdmissionCommand{
 			WorkspaceKey: "ws", SourceKind: "github", RouteKey: "github.issue.opened",
 			SourceEventID: "delivery-1", EventType: "issue.opened", SubjectRef: "issue-1",
 		},
@@ -1091,7 +1091,7 @@ func TestSystemIssueJournalAdmissionClassifiesDurableRunActorsAsWorkflow(t *test
 			}
 			h.persistence.seedBinding(binding)
 
-			result, err := h.service.AdmitEvent(t.Context(), NewSystemEventAuthority(issueSystemAuthority(t, h, actor)), AdmitEventCommand{
+			result, err := admitTestEvent(h.service, t.Context(), systemTestAuthority(issueSystemAuthority(t, h, actor)), testAdmissionCommand{
 				WorkspaceKey: "ws", SourceKind: SourceKindInternal,
 				SourceEventID: "fleet-journal-1", EventType: "issue.create", SubjectRef: "issue:WS-1",
 			})
@@ -1117,7 +1117,7 @@ func TestSystemIssueJournalAdmissionClassifiesDurableRunActorsAsWorkflow(t *test
 		binding.ActorFilter = nil // persisted before the create/update invariant
 		h.persistence.seedBinding(binding)
 
-		result, err := h.service.AdmitEvent(t.Context(), NewSystemEventAuthority(issueSystemAuthority(t, h, "driver-run:legacy")), AdmitEventCommand{
+		result, err := admitTestEvent(h.service, t.Context(), systemTestAuthority(issueSystemAuthority(t, h, "driver-run:legacy")), testAdmissionCommand{
 			WorkspaceKey: "ws", SourceKind: SourceKindInternal,
 			SourceEventID: "fleet-journal-legacy", EventType: "issue.create", SubjectRef: "issue:WS-LEGACY",
 		})
@@ -1141,7 +1141,7 @@ func TestSystemIssueJournalAdmissionClassifiesDurableRunActorsAsWorkflow(t *test
 		binding.ActorFilter = &ActorFilter{ExcludeActorKinds: []string{"workflow"}}
 		h.persistence.seedBinding(binding)
 
-		result, err := h.service.AdmitEvent(t.Context(), NewSystemEventAuthority(issueSystemAuthority(t, h, "user:alice")), AdmitEventCommand{
+		result, err := admitTestEvent(h.service, t.Context(), systemTestAuthority(issueSystemAuthority(t, h, "user:alice")), testAdmissionCommand{
 			WorkspaceKey: "ws", SourceKind: SourceKindInternal,
 			SourceEventID: "fleet-journal-human", EventType: "issue.create", SubjectRef: "issue:WS-2",
 		})
@@ -1159,7 +1159,7 @@ func TestAdmissionRejectsBindingSetEditBetweenSnapshotAndReservation(t *testing.
 	h := newTestHarness(t)
 	h.persistence.seedBinding(seedBinding("binding-a", "github.issue.opened"))
 	h.persistence.bumpRevisionAfterMatch = true
-	_, err := h.service.AdmitEvent(context.Background(), NewWebhookEventAuthority(h.issueWebhook(ActionAdmitEvent)), AdmitEventCommand{
+	_, err := admitTestEvent(h.service, context.Background(), webhookTestAuthority(h.issueWebhook(ActionAdmitEvent)), testAdmissionCommand{
 		WorkspaceKey: "ws", SourceKind: "github", RouteKey: "github.issue.opened",
 		SourceEventID: "binding-race", EventType: "issue.opened",
 	})
@@ -1175,20 +1175,20 @@ func TestAdmissionReplayHealsLostReservationResponseWithAdvancingClock(t *testin
 	current := h.now
 	h.service.now = func() time.Time { return current }
 	h.persistence.commitThenError = true
-	auth := NewWebhookEventAuthority(h.issueWebhook(ActionAdmitEvent))
-	command := AdmitEventCommand{
+	auth := webhookTestAuthority(h.issueWebhook(ActionAdmitEvent))
+	command := testAdmissionCommand{
 		WorkspaceKey: "ws", SourceKind: "github", RouteKey: "github.issue.opened",
 		SourceEventID: "delivery-retry", EventType: "issue.opened", Payload: []byte(`{"same":true}`),
 	}
 
-	if _, err := h.service.AdmitEvent(context.Background(), auth, command); err == nil {
+	if _, err := admitTestEvent(h.service, context.Background(), auth, command); err == nil {
 		t.Fatal("first call should lose its committed reservation response")
 	}
 	if len(h.execution.calls) != 0 {
 		t.Fatal("dispatch occurred without a reservation response")
 	}
 	current = current.Add(3 * time.Minute)
-	result, err := h.service.AdmitEvent(context.Background(), auth, command)
+	result, err := admitTestEvent(h.service, context.Background(), auth, command)
 	if err != nil {
 		t.Fatalf("replayed AdmitEvent: %v", err)
 	}
@@ -1207,7 +1207,7 @@ func TestAdmissionReplayHealsLostReservationResponseWithAdvancingClock(t *testin
 	}
 
 	current = current.Add(3 * time.Minute)
-	result, err = h.service.AdmitEvent(context.Background(), auth, command)
+	result, err = admitTestEvent(h.service, context.Background(), auth, command)
 	if err != nil || !result.Replayed {
 		t.Fatalf("settled replay = %+v, %v", result, err)
 	}
@@ -1221,13 +1221,13 @@ func TestAdmissionReplayRefreshesCurrentDeliveryProgress(t *testing.T) {
 		h := newTestHarness(t)
 		h.persistence.seedBinding(seedBinding("binding-a", "github.issue.opened"))
 		h.execution.outcomes["binding-a"] = []fakeDispatchOutcome{{err: errors.New("initial dispatch rejected")}}
-		auth := NewWebhookEventAuthority(h.issueWebhook(ActionAdmitEvent))
-		command := AdmitEventCommand{
+		auth := webhookTestAuthority(h.issueWebhook(ActionAdmitEvent))
+		command := testAdmissionCommand{
 			WorkspaceKey: "ws", SourceKind: "github", RouteKey: "github.issue.opened",
 			SourceEventID: "failed-current-replay", EventType: "issue.opened",
 		}
 
-		first, err := h.service.AdmitEvent(t.Context(), auth, command)
+		first, err := admitTestEvent(h.service, t.Context(), auth, command)
 		if err == nil || first == nil || first.Deliveries[0].Status != DeliveryFailed {
 			t.Fatalf("initial failed admission = %+v, %v", first, err)
 		}
@@ -1242,7 +1242,7 @@ func TestAdmissionReplayRefreshesCurrentDeliveryProgress(t *testing.T) {
 		record.result.Deliveries[0].Delivery = receipt
 		h.persistence.mu.Unlock()
 
-		replayed, err := h.service.AdmitEvent(t.Context(), auth, command)
+		replayed, err := admitTestEvent(h.service, t.Context(), auth, command)
 		if err != nil || replayed == nil || !replayed.Replayed || replayed.Deliveries[0].Status != DeliveryFailed {
 			t.Fatalf("refreshed replay = %+v, %v", replayed, err)
 		}
@@ -1255,12 +1255,12 @@ func TestAdmissionReplayRefreshesCurrentDeliveryProgress(t *testing.T) {
 	t.Run("current target identity drift fails closed", func(t *testing.T) {
 		h := newTestHarness(t)
 		h.persistence.seedBinding(seedBinding("binding-a", "github.issue.opened"))
-		auth := NewWebhookEventAuthority(h.issueWebhook(ActionAdmitEvent))
-		command := AdmitEventCommand{
+		auth := webhookTestAuthority(h.issueWebhook(ActionAdmitEvent))
+		command := testAdmissionCommand{
 			WorkspaceKey: "ws", SourceKind: "github", RouteKey: "github.issue.opened",
 			SourceEventID: "current-target-drift", EventType: "issue.opened",
 		}
-		first, err := h.service.AdmitEvent(t.Context(), auth, command)
+		first, err := admitTestEvent(h.service, t.Context(), auth, command)
 		if err != nil {
 			t.Fatalf("first AdmitEvent: %v", err)
 		}
@@ -1273,7 +1273,7 @@ func TestAdmissionReplayRefreshesCurrentDeliveryProgress(t *testing.T) {
 		stored.DriverVersionID = "corrupt-version"
 		h.persistence.mu.Unlock()
 
-		_, err = h.service.AdmitEvent(t.Context(), auth, command)
+		_, err = admitTestEvent(h.service, t.Context(), auth, command)
 		assertErrorIs(t, err, ErrInvalidPersistedState)
 		if len(h.execution.calls) != 1 {
 			t.Fatalf("identity drift reached redispatch: %d", len(h.execution.calls))
@@ -1314,12 +1314,12 @@ func TestAdmissionReplayFirstBypassesBindingAndCatalogDriftAcrossRestart(t *test
 		t.Run(test.name, func(t *testing.T) {
 			h := newTestHarness(t)
 			h.persistence.seedBinding(seedBinding("binding-a", "github.issue.opened"))
-			auth := NewWebhookEventAuthority(h.issueWebhook(ActionAdmitEvent))
-			command := AdmitEventCommand{
+			auth := webhookTestAuthority(h.issueWebhook(ActionAdmitEvent))
+			command := testAdmissionCommand{
 				WorkspaceKey: "ws", SourceKind: "github", RouteKey: "github.issue.opened",
 				SourceEventID: "replay-drift", EventType: "issue.opened", Payload: []byte(`{"stable":true}`),
 			}
-			first, err := h.service.AdmitEvent(t.Context(), auth, command)
+			first, err := admitTestEvent(h.service, t.Context(), auth, command)
 			if err != nil {
 				t.Fatalf("first AdmitEvent: %v", err)
 			}
@@ -1328,7 +1328,7 @@ func TestAdmissionReplayFirstBypassesBindingAndCatalogDriftAcrossRestart(t *test
 			if test.restart {
 				h.restartService()
 			}
-			replayed, err := h.service.AdmitEvent(t.Context(), auth, command)
+			replayed, err := admitTestEvent(h.service, t.Context(), auth, command)
 			if err != nil || replayed == nil || !replayed.Replayed || replayed.Event.EventID != first.Event.EventID {
 				t.Fatalf("replayed AdmitEvent = %#v, %v", replayed, err)
 			}
@@ -1348,12 +1348,12 @@ func TestAdmissionReplayFirstBypassesBindingAndCatalogDriftAcrossRestart(t *test
 func TestAdmissionReplayFirstPreservesFingerprintConflictAfterBindingDeletion(t *testing.T) {
 	h := newTestHarness(t)
 	h.persistence.seedBinding(seedBinding("binding-a", "github.issue.opened"))
-	auth := NewWebhookEventAuthority(h.issueWebhook(ActionAdmitEvent))
-	command := AdmitEventCommand{
+	auth := webhookTestAuthority(h.issueWebhook(ActionAdmitEvent))
+	command := testAdmissionCommand{
 		WorkspaceKey: "ws", SourceKind: "github", RouteKey: "github.issue.opened",
 		SourceEventID: "replay-conflict", EventType: "issue.opened", Payload: []byte(`{"n":1}`),
 	}
-	if _, err := h.service.AdmitEvent(t.Context(), auth, command); err != nil {
+	if _, err := admitTestEvent(h.service, t.Context(), auth, command); err != nil {
 		t.Fatalf("first AdmitEvent: %v", err)
 	}
 	h.persistence.mu.Lock()
@@ -1362,7 +1362,7 @@ func TestAdmissionReplayFirstPreservesFingerprintConflictAfterBindingDeletion(t 
 	h.persistence.mu.Unlock()
 	matchCalls, catalogCalls := h.persistence.matchCalls, len(h.catalog.calls)
 	command.Payload = []byte(`{"n":2}`)
-	_, err := h.service.AdmitEvent(t.Context(), auth, command)
+	_, err := admitTestEvent(h.service, t.Context(), auth, command)
 	assertErrorIs(t, err, ErrConflict)
 	if h.persistence.matchCalls != matchCalls || len(h.catalog.calls) != catalogCalls {
 		t.Fatal("changed replay fingerprint reached binding or Catalog preflight")
@@ -1373,19 +1373,19 @@ func TestAdmissionRejectsCorruptCommittedEventAndFreshDeliverySnapshots(t *testi
 	t.Run("replayed immutable event", func(t *testing.T) {
 		h := newTestHarness(t)
 		h.persistence.seedBinding(seedBinding("binding-a", "github.issue.opened"))
-		auth := NewWebhookEventAuthority(h.issueWebhook(ActionAdmitEvent))
-		command := AdmitEventCommand{
+		auth := webhookTestAuthority(h.issueWebhook(ActionAdmitEvent))
+		command := testAdmissionCommand{
 			WorkspaceKey: "ws", SourceKind: "github", RouteKey: "github.issue.opened",
 			SourceEventID: "corrupt-replay", EventType: "issue.opened", Payload: []byte(`{"stable":true}`),
 		}
-		if _, err := h.service.AdmitEvent(t.Context(), auth, command); err != nil {
+		if _, err := admitTestEvent(h.service, t.Context(), auth, command); err != nil {
 			t.Fatalf("first AdmitEvent: %v", err)
 		}
 		dispatchCalls := len(h.execution.calls)
 		h.persistence.mutateReserveResult = func(result *ReservationResult) {
 			result.Event.EventType = "issue.deleted"
 		}
-		_, err := h.service.AdmitEvent(t.Context(), auth, command)
+		_, err := admitTestEvent(h.service, t.Context(), auth, command)
 		assertErrorIs(t, err, ErrInvalidPersistedState)
 		if len(h.execution.calls) != dispatchCalls {
 			t.Fatal("corrupt replay reached execution")
@@ -1408,7 +1408,7 @@ func TestAdmissionRejectsCorruptCommittedEventAndFreshDeliverySnapshots(t *testi
 			h := newTestHarness(t)
 			h.persistence.seedBinding(seedBinding("binding-a", "github.issue.opened"))
 			h.persistence.mutateReserveResult = test.mutate
-			_, err := h.service.AdmitEvent(t.Context(), NewWebhookEventAuthority(h.issueWebhook(ActionAdmitEvent)), AdmitEventCommand{
+			_, err := admitTestEvent(h.service, t.Context(), webhookTestAuthority(h.issueWebhook(ActionAdmitEvent)), testAdmissionCommand{
 				WorkspaceKey: "ws", SourceKind: "github", RouteKey: "github.issue.opened",
 				SourceEventID: "corrupt-fresh-" + test.id, EventType: "issue.opened",
 			})
@@ -1423,7 +1423,7 @@ func TestAdmissionRejectsCorruptCommittedEventAndFreshDeliverySnapshots(t *testi
 func TestAdmissionReplayMissIsReadOnlyAndPreflightErrorsRecheckCommittedReplay(t *testing.T) {
 	t.Run("miss", func(t *testing.T) {
 		h := newTestHarness(t)
-		_, err := h.service.AdmitEvent(t.Context(), NewWebhookEventAuthority(h.issueWebhook(ActionAdmitEvent)), AdmitEventCommand{
+		_, err := admitTestEvent(h.service, t.Context(), webhookTestAuthority(h.issueWebhook(ActionAdmitEvent)), testAdmissionCommand{
 			WorkspaceKey: "ws", SourceKind: "github", RouteKey: "github.issue.opened",
 			SourceEventID: "missing-replay", EventType: "issue.opened",
 		})
@@ -1454,19 +1454,19 @@ func TestAdmissionReplayMissIsReadOnlyAndPreflightErrorsRecheckCommittedReplay(t
 		t.Run(test.name, func(t *testing.T) {
 			h := newTestHarness(t)
 			h.persistence.seedBinding(seedBinding("binding-a", "github.issue.opened"))
-			auth := NewWebhookEventAuthority(h.issueWebhook(ActionAdmitEvent))
-			command := AdmitEventCommand{
+			auth := webhookTestAuthority(h.issueWebhook(ActionAdmitEvent))
+			command := testAdmissionCommand{
 				WorkspaceKey: "ws", SourceKind: "github", RouteKey: "github.issue.opened",
 				SourceEventID: "concurrent-replay", EventType: "issue.opened",
 			}
-			first, err := h.service.AdmitEvent(t.Context(), auth, command)
+			first, err := admitTestEvent(h.service, t.Context(), auth, command)
 			if err != nil {
 				t.Fatalf("first AdmitEvent: %v", err)
 			}
 			matches, catalogCalls := h.persistence.matchCalls, len(h.catalog.calls)
 			h.persistence.replayMisses = 1
 			test.preflight(h)
-			replayed, err := h.service.AdmitEvent(t.Context(), auth, command)
+			replayed, err := admitTestEvent(h.service, t.Context(), auth, command)
 			if err != nil || replayed == nil || !replayed.Replayed || replayed.Event.EventID != first.Event.EventID {
 				t.Fatalf("rechecked replay = %#v, %v", replayed, err)
 			}
@@ -1480,32 +1480,32 @@ func TestAdmissionReplayMissIsReadOnlyAndPreflightErrorsRecheckCommittedReplay(t
 func TestAdmissionIdempotencyRejectsChangedPayload(t *testing.T) {
 	h := newTestHarness(t)
 	h.persistence.seedBinding(seedBinding("binding-a", "github.issue.opened"))
-	auth := NewWebhookEventAuthority(h.issueWebhook(ActionAdmitEvent))
-	base := AdmitEventCommand{
+	auth := webhookTestAuthority(h.issueWebhook(ActionAdmitEvent))
+	base := testAdmissionCommand{
 		WorkspaceKey: "ws", SourceKind: "github", RouteKey: "github.issue.opened",
 		SourceEventID: "same-id", EventType: "issue.opened", Payload: []byte(`{"n":1}`),
 	}
-	if _, err := h.service.AdmitEvent(context.Background(), auth, base); err != nil {
+	if _, err := admitTestEvent(h.service, context.Background(), auth, base); err != nil {
 		t.Fatalf("first AdmitEvent: %v", err)
 	}
 	base.Payload = []byte(`{"n":2}`)
-	_, err := h.service.AdmitEvent(context.Background(), auth, base)
+	_, err := admitTestEvent(h.service, context.Background(), auth, base)
 	assertErrorIs(t, err, ErrConflict)
 }
 
 func TestAdmissionIdempotencyRejectsChangedExplicitOccurrenceTime(t *testing.T) {
 	h := newTestHarness(t)
 	h.persistence.seedBinding(seedBinding("binding-a", "github.issue.opened"))
-	auth := NewWebhookEventAuthority(h.issueWebhook(ActionAdmitEvent))
-	command := AdmitEventCommand{
+	auth := webhookTestAuthority(h.issueWebhook(ActionAdmitEvent))
+	command := testAdmissionCommand{
 		WorkspaceKey: "ws", SourceKind: "github", RouteKey: "github.issue.opened",
 		SourceEventID: "same-explicit-time-id", EventType: "issue.opened", OccurredAt: h.now.Add(-time.Hour),
 	}
-	if _, err := h.service.AdmitEvent(context.Background(), auth, command); err != nil {
+	if _, err := admitTestEvent(h.service, context.Background(), auth, command); err != nil {
 		t.Fatalf("first AdmitEvent: %v", err)
 	}
 	command.OccurredAt = command.OccurredAt.Add(time.Second)
-	_, err := h.service.AdmitEvent(context.Background(), auth, command)
+	_, err := admitTestEvent(h.service, context.Background(), auth, command)
 	assertErrorIs(t, err, ErrConflict)
 }
 
@@ -1523,7 +1523,7 @@ func TestWorkflowAdmissionDerivesRunActorParentHopAndIgnoresForgedFields(t *test
 		WorkspaceKey: "ws", RunID: "run-trusted", ParentEventID: "parent-1",
 		NodeID: "node-9", LeaseID: "lease-9", ActorRef: "agent-trusted", EpicID: "epic-trusted", FencingToken: 9,
 	}
-	result, err := h.service.AdmitEvent(context.Background(), NewExecutionEventAuthority(h.issueExecution(ActionAdmitEvent)), AdmitEventCommand{
+	result, err := admitTestEvent(h.service, context.Background(), workflowTestAuthority(h.issueExecution(ActionAdmitEvent)), testAdmissionCommand{
 		WorkspaceKey: "ws", SourceKind: "github", RouteKey: "attacker.route",
 		SourceRef: "run-attacker", SourceEventID: "emission-1", EventType: "issue.create",
 		ActorRef: "attacker", ParentEventID: "attacker-parent", EpicID: "epic-attacker",
@@ -1562,7 +1562,7 @@ func TestWorkflowHopCapDropsBeforeMatchingOrReservation(t *testing.T) {
 		WorkspaceKey: "ws", RunID: "run-cap", ParentEventID: "parent-cap", ActorRef: "agent",
 		NodeID: "node-cap", LeaseID: "lease-cap", FencingToken: 10,
 	}
-	result, err := h.service.AdmitEvent(context.Background(), NewExecutionEventAuthority(h.issueExecution(ActionAdmitEvent)), AdmitEventCommand{
+	result, err := admitTestEvent(h.service, context.Background(), workflowTestAuthority(h.issueExecution(ActionAdmitEvent)), testAdmissionCommand{
 		WorkspaceKey: "ws", SourceEventID: "emission-cap", EventType: "issue.created",
 		ExecutionNodeID: "node-cap", ExecutionLeaseID: "lease-cap", ExecutionFencingToken: 10,
 	})
@@ -1585,7 +1585,7 @@ func TestWorkflowAdmissionRejectsMissingParentAndInvalidAuthority(t *testing.T) 
 		WorkspaceKey: "ws", RunID: "run", ParentEventID: "missing", ActorRef: "agent",
 		NodeID: "node", LeaseID: "lease", FencingToken: 11,
 	}
-	_, err := h.service.AdmitEvent(context.Background(), NewExecutionEventAuthority(h.issueExecution(ActionAdmitEvent)), AdmitEventCommand{
+	_, err := admitTestEvent(h.service, context.Background(), workflowTestAuthority(h.issueExecution(ActionAdmitEvent)), testAdmissionCommand{
 		WorkspaceKey: "ws", SourceEventID: "event", EventType: "issue.created",
 		ExecutionNodeID: "node", ExecutionLeaseID: "lease", ExecutionFencingToken: 11,
 	})
@@ -1594,7 +1594,7 @@ func TestWorkflowAdmissionRejectsMissingParentAndInvalidAuthority(t *testing.T) 
 		t.Fatal("missing parent reached reservation")
 	}
 
-	_, err = h.service.AdmitEvent(context.Background(), EventAuthority{}, AdmitEventCommand{
+	_, err = admitTestEvent(h.service, context.Background(), testEventAuthority{}, testAdmissionCommand{
 		WorkspaceKey: "ws", SourceEventID: "event", EventType: "issue.created",
 	})
 	assertErrorIs(t, err, authority.ErrAdmissionDenied)
@@ -1605,18 +1605,18 @@ func TestWorkflowAdmissionRejectsExecutionOwnerTupleDrift(t *testing.T) {
 	h.execution.emission = &ExecutionEmissionContext{
 		WorkspaceKey: "ws", RunID: "run", NodeID: "node-current", LeaseID: "lease-current", FencingToken: 12,
 	}
-	base := AdmitEventCommand{
+	base := testAdmissionCommand{
 		WorkspaceKey: "ws", SourceEventID: "event", EventType: "issue.created",
 		ExecutionNodeID: "node-current", ExecutionLeaseID: "lease-current", ExecutionFencingToken: 12,
 	}
 	tests := []struct {
 		name   string
-		mutate func(*AdmitEventCommand)
+		mutate func(*testAdmissionCommand)
 	}{
-		{name: "node handoff", mutate: func(command *AdmitEventCommand) { command.ExecutionNodeID = "node-stale" }},
-		{name: "lease handoff", mutate: func(command *AdmitEventCommand) { command.ExecutionLeaseID = "lease-stale" }},
-		{name: "fence handoff", mutate: func(command *AdmitEventCommand) { command.ExecutionFencingToken-- }},
-		{name: "missing tuple", mutate: func(command *AdmitEventCommand) {
+		{name: "node handoff", mutate: func(command *testAdmissionCommand) { command.ExecutionNodeID = "node-stale" }},
+		{name: "lease handoff", mutate: func(command *testAdmissionCommand) { command.ExecutionLeaseID = "lease-stale" }},
+		{name: "fence handoff", mutate: func(command *testAdmissionCommand) { command.ExecutionFencingToken-- }},
+		{name: "missing tuple", mutate: func(command *testAdmissionCommand) {
 			command.ExecutionNodeID, command.ExecutionLeaseID, command.ExecutionFencingToken = "", "", 0
 		}},
 	}
@@ -1624,7 +1624,7 @@ func TestWorkflowAdmissionRejectsExecutionOwnerTupleDrift(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			command := base
 			test.mutate(&command)
-			_, err := h.service.AdmitEvent(t.Context(), NewExecutionEventAuthority(h.issueExecution(ActionAdmitEvent)), command)
+			_, err := admitTestEvent(h.service, t.Context(), workflowTestAuthority(h.issueExecution(ActionAdmitEvent)), command)
 			assertErrorIs(t, err, ErrConflict)
 			if h.persistence.reserveCalls != 0 {
 				t.Fatalf("owner tuple drift reached reservation %d times", h.persistence.reserveCalls)
@@ -1642,13 +1642,13 @@ func TestWorkflowAdmissionReplaySurvivesOwnerHandoff(t *testing.T) {
 		WorkspaceKey: "ws", RunID: "run-1", ActorRef: "agent-1",
 		NodeID: "node-a", LeaseID: "lease-a", FencingToken: 7,
 	}
-	auth := NewExecutionEventAuthority(h.issueExecution(ActionAdmitEvent))
-	command := AdmitEventCommand{
+	auth := workflowTestAuthority(h.issueExecution(ActionAdmitEvent))
+	command := testAdmissionCommand{
 		WorkspaceKey: "ws", SourceEventID: "handoff-emission", EventType: "deploy.requested",
 		ExecutionNodeID: "node-a", ExecutionLeaseID: "lease-a", ExecutionFencingToken: 7,
 		Payload: []byte(`{"issue":"LOOM-1"}`),
 	}
-	first, err := h.service.AdmitEvent(t.Context(), auth, command)
+	first, err := admitTestEvent(h.service, t.Context(), auth, command)
 	if err != nil || first == nil || first.Replayed {
 		t.Fatalf("first AdmitEvent = %#v, %v", first, err)
 	}
@@ -1661,7 +1661,7 @@ func TestWorkflowAdmissionReplaySurvivesOwnerHandoff(t *testing.T) {
 	replay.ExecutionLeaseID = "lease-b"
 	replay.ExecutionFencingToken = 8
 	matchCalls, catalogCalls := h.persistence.matchCalls, len(h.catalog.calls)
-	replayed, err := h.service.AdmitEvent(t.Context(), auth, replay)
+	replayed, err := admitTestEvent(h.service, t.Context(), auth, replay)
 	if err != nil || replayed == nil || !replayed.Replayed || replayed.Event.EventID != first.Event.EventID {
 		t.Fatalf("B replay after owner handoff = %#v, %v", replayed, err)
 	}
@@ -1676,13 +1676,13 @@ func TestWorkflowAdmissionReplaySurvivesOwnerHandoff(t *testing.T) {
 
 	changed := replay
 	changed.Payload = []byte(`{"issue":"LOOM-2"}`)
-	_, err = h.service.AdmitEvent(t.Context(), auth, changed)
+	_, err = admitTestEvent(h.service, t.Context(), auth, changed)
 	assertErrorIs(t, err, ErrConflict)
 
 	reserveCalls := h.persistence.reserveCalls
 	staleFresh := command
 	staleFresh.SourceEventID = "stale-owner-fresh-key"
-	_, err = h.service.AdmitEvent(t.Context(), auth, staleFresh)
+	_, err = admitTestEvent(h.service, t.Context(), auth, staleFresh)
 	assertErrorIs(t, err, ErrConflict)
 	if h.persistence.reserveCalls != reserveCalls {
 		t.Fatalf("stale A fresh event reached reservation: calls %d->%d", reserveCalls, h.persistence.reserveCalls)
@@ -1695,7 +1695,7 @@ func TestAdmissionDispatchFailureContinuesOtherLegAndSchedulesRetry(t *testing.T
 	h.persistence.seedBinding(seedBinding("b-pattern", "other", "github.*.*"))
 	h.execution.outcomes["a-exact"] = []fakeDispatchOutcome{{err: errors.New("execution unavailable")}}
 
-	result, err := h.service.AdmitEvent(context.Background(), NewWebhookEventAuthority(h.issueWebhook(ActionAdmitEvent)), AdmitEventCommand{
+	result, err := admitTestEvent(h.service, context.Background(), webhookTestAuthority(h.issueWebhook(ActionAdmitEvent)), testAdmissionCommand{
 		WorkspaceKey: "ws", SourceKind: "github", RouteKey: "github.issue.opened",
 		SourceEventID: "failure-fanout", EventType: "issue.opened",
 	})
@@ -1723,7 +1723,7 @@ func TestAdmissionQueueBusyBecomesHeldWithoutAdvancingAttempt(t *testing.T) {
 	h.execution.outcomes["queue"] = []fakeDispatchOutcome{{
 		result: &ExecutionDispatchResult{Busy: true, BusyRunID: "run-active"}, committedStatus: DeliveryHeld,
 	}}
-	result, err := h.service.AdmitEvent(context.Background(), NewWebhookEventAuthority(h.issueWebhook(ActionAdmitEvent)), AdmitEventCommand{
+	result, err := admitTestEvent(h.service, context.Background(), webhookTestAuthority(h.issueWebhook(ActionAdmitEvent)), testAdmissionCommand{
 		WorkspaceKey: "ws", SourceKind: "github", RouteKey: "github.issue.opened",
 		SourceEventID: "queue-1", EventType: "issue.opened",
 	})
@@ -1746,19 +1746,19 @@ func TestAdmissionReplayObservesCommittedDispatchAfterLostResponse(t *testing.T)
 		result: &ExecutionDispatchResult{RunID: "run-binding-a"}, committedStatus: DeliveryDispatched,
 		err: errors.New("simulated lost dispatch response"),
 	}}
-	auth := NewWebhookEventAuthority(h.issueWebhook(ActionAdmitEvent))
-	command := AdmitEventCommand{
+	auth := webhookTestAuthority(h.issueWebhook(ActionAdmitEvent))
+	command := testAdmissionCommand{
 		WorkspaceKey: "ws", SourceKind: "github", RouteKey: "github.issue.opened",
 		SourceEventID: "lost-transition", EventType: "issue.opened",
 	}
-	first, err := h.service.AdmitEvent(context.Background(), auth, command)
+	first, err := admitTestEvent(h.service, context.Background(), auth, command)
 	if err == nil || first.Deliveries[0].Status != DeliveryAccepted {
 		t.Fatalf("first = %+v, %v", first, err)
 	}
 	if len(h.execution.calls) != 1 {
 		t.Fatalf("dispatch calls = %d", len(h.execution.calls))
 	}
-	second, err := h.service.AdmitEvent(context.Background(), auth, command)
+	second, err := admitTestEvent(h.service, context.Background(), auth, command)
 	if err != nil || !second.Replayed || second.Deliveries[0].Status != DeliveryDispatched {
 		t.Fatalf("replay = %+v, %v", second, err)
 	}
@@ -1791,7 +1791,7 @@ func TestAdmissionRejectsMissingOrMismatchedCommittedDispatch(t *testing.T) {
 			h := newTestHarness(t)
 			h.persistence.seedBinding(seedBinding("binding-a", "github.issue.opened"))
 			h.execution.outcomes["binding-a"] = []fakeDispatchOutcome{test.outcome}
-			result, err := h.service.AdmitEvent(context.Background(), NewWebhookEventAuthority(h.issueWebhook(ActionAdmitEvent)), AdmitEventCommand{
+			result, err := admitTestEvent(h.service, context.Background(), webhookTestAuthority(h.issueWebhook(ActionAdmitEvent)), testAdmissionCommand{
 				WorkspaceKey: "ws", SourceKind: "github", RouteKey: "github.issue.opened",
 				SourceEventID: "invalid-committed", EventType: "issue.opened",
 			})
