@@ -1,6 +1,9 @@
 package supervisor
 
 import (
+	"log/slog"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -8,6 +11,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/events"
 )
 
 func newTestSupervisorWithConfig(cfg *config.DaemonConfig) *Supervisor {
@@ -482,5 +486,200 @@ func TestSupervisor_ResolveRoleConfig_UnknownRole(t *testing.T) {
 	_, err := s.resolveRoleConfig("nonexistent", 0)
 	if err == nil {
 		t.Error("expected error for unknown role, got nil")
+	}
+}
+
+// captureSlogDebug is captureSlog with the handler level lowered to Debug:
+// the default TextHandler starts at Info, which would drop exactly the
+// records the idle-state behavior is made of.
+func captureSlogDebug(t *testing.T) *syncBuffer {
+	t.Helper()
+	buf := &syncBuffer{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return buf
+}
+
+// idleTestHarness drives sleepBeforeRestart without waiting out a real
+// backoff: the call is run on its own goroutine, the test waits for
+// BackoffUntil to be published, then releases the sleep through StopCh.
+type idleTestHarness struct {
+	s      *Supervisor
+	events *capturedEvents
+}
+
+type capturedEvents struct {
+	mu   sync.Mutex
+	list []events.Event
+}
+
+func (c *capturedEvents) add(e events.Event) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.list = append(c.list, e)
+}
+
+func (c *capturedEvents) countOf(t events.EventType) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := 0
+	for _, e := range c.list {
+		if e.Type == t {
+			n++
+		}
+	}
+	return n
+}
+
+func newIdleTestHarness(t *testing.T, noWorkBackoff, maxRetries int) (*idleTestHarness, *AgentProcess) {
+	t.Helper()
+	s := newTestSupervisorWithConfig(&config.DaemonConfig{
+		Daemon: config.DaemonSettings{
+			RestartPolicy: config.RestartPolicy{
+				MaxRetries:    &maxRetries,
+				NoWorkBackoff: &noWorkBackoff,
+			},
+		},
+	})
+	captured := &capturedEvents{}
+	s.EmitEvent = captured.add
+
+	ap := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "alpha", Role: "worker"},
+		LastExitCode: 1,
+		LastStart:    time.Now(),
+	}
+	return &idleTestHarness{s: s, events: captured}, ap
+}
+
+// runCycle runs one sleepBeforeRestart and reports whether BackoffUntil was
+// set while the agent was waiting.
+func (h *idleTestHarness) runCycle(t *testing.T, ap *AgentProcess) bool {
+	t.Helper()
+	ap.StopCh = make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.s.sleepBeforeRestart(ap)
+	}()
+
+	backoffSet := false
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		ap.Mu.Lock()
+		set := !ap.BackoffUntil.IsZero()
+		ap.Mu.Unlock()
+		if set {
+			backoffSet = true
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(ap.StopCh)
+	<-done
+	return backoffSet
+}
+
+func TestSupervisor_SleepBeforeRestart_IdleIsAStateNotARestart(t *testing.T) {
+	h, ap := newIdleTestHarness(t, 10, 3)
+	logs := captureSlogDebug(t)
+
+	noWork := func() {
+		ap.LastExitCode = 1
+		ap.LastError = &agenterr.AgentError{
+			Class:   agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome),
+			Message: "no claimable tasks",
+		}
+	}
+
+	// Three consecutive idle polls.
+	for i := 1; i <= 3; i++ {
+		noWork()
+		if !h.s.shouldRestart(ap) {
+			t.Fatalf("shouldRestart = false on NoWork cycle %d, want true", i)
+		}
+		if !h.runCycle(t, ap) {
+			t.Errorf("BackoffUntil was not set during idle cycle %d", i)
+		}
+	}
+
+	out := logs.String()
+	if got := strings.Count(out, "agent idle"); got != 1 {
+		t.Errorf("Info \"agent idle\" count = %d, want 1\nlogs:\n%s", got, out)
+	}
+	if got := strings.Count(out, "agent still idle"); got != 2 {
+		t.Errorf("Debug \"agent still idle\" count = %d, want 2\nlogs:\n%s", got, out)
+	}
+	if strings.Contains(out, "waiting before restart") {
+		t.Errorf("idle polls must not log \"waiting before restart\"\nlogs:\n%s", out)
+	}
+	if got := h.events.countOf(events.AgentRestarted); got != 1 {
+		t.Errorf("AgentRestarted events = %d, want 1 for one idle streak", got)
+	}
+
+	// A successful run ends the streak; the next idle poll starts a new one
+	// and must announce itself again.
+	ap.LastExitCode = 0
+	ap.LastError = nil
+	h.s.shouldRestart(ap)
+	ap.Mu.Lock()
+	streakReset := ap.NoWorkCount == 0 && ap.IdleSince.IsZero()
+	ap.Mu.Unlock()
+	if !streakReset {
+		t.Fatal("NoWorkCount and IdleSince must both reset after a successful run")
+	}
+
+	noWork()
+	if !h.s.shouldRestart(ap) {
+		t.Fatal("shouldRestart = false on the second streak's first NoWork, want true")
+	}
+	if !h.runCycle(t, ap) {
+		t.Error("BackoffUntil was not set on the second streak's first idle cycle")
+	}
+
+	out = logs.String()
+	if got := strings.Count(out, "agent idle"); got != 2 {
+		t.Errorf("Info \"agent idle\" count = %d after second streak, want 2\nlogs:\n%s", got, out)
+	}
+	if got := h.events.countOf(events.AgentRestarted); got != 2 {
+		t.Errorf("AgentRestarted events = %d after second streak, want 2", got)
+	}
+}
+
+// A genuine failure restart must keep its Info line, its event and its span:
+// the idle branch must not swallow real restarts.
+func TestSupervisor_SleepBeforeRestart_RealRestartStillAnnounced(t *testing.T) {
+	h, ap := newIdleTestHarness(t, 10, 3)
+	logs := captureSlogDebug(t)
+
+	ap.LastExitCode = 1
+	ap.LastError = &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrTimeout)}
+	if !h.s.shouldRestart(ap) {
+		t.Fatal("shouldRestart = false for a retryable timeout, want true")
+	}
+	ap.Mu.Lock()
+	attempt := ap.RestartCount
+	ap.Mu.Unlock()
+	if attempt == 0 {
+		t.Fatalf("RestartCount = %d, want non-zero for a genuine failure", attempt)
+	}
+
+	if !h.runCycle(t, ap) {
+		t.Error("BackoffUntil was not set during a genuine failure restart")
+	}
+
+	out := logs.String()
+	if !strings.Contains(out, "waiting before restart") {
+		t.Errorf("a genuine failure must log \"waiting before restart\"\nlogs:\n%s", out)
+	}
+	if !strings.Contains(out, "attempt=1") {
+		t.Errorf("restart line should carry a non-zero attempt\nlogs:\n%s", out)
+	}
+	if strings.Contains(out, "agent idle") {
+		t.Errorf("a genuine failure must not be logged as idle\nlogs:\n%s", out)
+	}
+	if got := h.events.countOf(events.AgentRestarted); got != 1 {
+		t.Errorf("AgentRestarted events = %d, want 1 for a real restart", got)
 	}
 }
