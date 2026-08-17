@@ -145,7 +145,10 @@ describe("AgentSection Autonomous group", () => {
       "Autonomous",
     );
     expect(
-      screen.getByRole("button", { name: "Add autonomous agent" }),
+      screen.getByRole("button", { name: "+ Add autonomous agent" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "+ Add agent" }),
     ).toBeInTheDocument();
   });
 

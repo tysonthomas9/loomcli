@@ -352,7 +352,9 @@ export function AgentServiceDetail({
               </div>
               <div>
                 <dt>Next fire</dt>
-                <dd>{nextFire || "Not scheduled"}</dd>
+                <dd>
+                  {service.enabled ? nextFire || "Not scheduled" : "Paused"}
+                </dd>
               </div>
               {service.behavior.roleName ? (
                 <div>
@@ -397,9 +399,11 @@ export function AgentServiceDetail({
                     <div className={styles.rowMeta}>
                       <span>{binding.enabled ? "Enabled" : "Disabled"}</span>
                       <span>
-                        {binding.id === nextFireBinding?.id && nextFire
-                          ? `Next ${nextFire}`
-                          : "No next fire"}
+                        {!service.enabled
+                          ? "Paused"
+                          : binding.id === nextFireBinding?.id && nextFire
+                            ? `Next ${nextFire}`
+                            : "No next fire"}
                       </span>
                     </div>
                   </article>

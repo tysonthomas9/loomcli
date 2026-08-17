@@ -12,6 +12,7 @@ import {
   scheduleError,
   serviceIDError,
 } from "@/utils/agentServiceForm";
+import { ApiError } from "@/types/common";
 
 import styles from "./CreateAgentServiceModal.module.css";
 
@@ -100,10 +101,12 @@ export function CreateAgentServiceModal({
       onClose();
     } catch (cause) {
       setError(
-        agentServiceMutationError(
-          cause,
-          "The autonomous agent could not be created.",
-        ),
+        cause instanceof ApiError && cause.status === 409
+          ? `An agent with ID "${id.trim()}" already exists.`
+          : agentServiceMutationError(
+              cause,
+              "The autonomous agent could not be created.",
+            ),
       );
     } finally {
       setSubmitting(false);
@@ -185,6 +188,7 @@ export function CreateAgentServiceModal({
             onChange={(event) => {
               setID(event.target.value);
               setIDTouched(true);
+              setError(null);
             }}
             onBlur={() => setIDTouched(true)}
             placeholder="scout-west"

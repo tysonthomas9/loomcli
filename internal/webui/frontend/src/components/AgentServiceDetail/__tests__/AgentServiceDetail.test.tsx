@@ -44,6 +44,7 @@ const mocks = vi.hoisted(() => ({
   getTaskRunLog: vi.fn(),
   getTaskRunTranscript: vi.fn(),
   getDriverRunLog: vi.fn(),
+  getIssue: vi.fn(),
   patchAgentService: vi.fn(),
   removeAgentService: vi.fn(),
 }));
@@ -79,6 +80,14 @@ vi.mock("@/api/agentServices", async (importOriginal) => {
     getTaskRunLog: mocks.getTaskRunLog,
     getTaskRunTranscript: mocks.getTaskRunTranscript,
     getDriverRunLog: mocks.getDriverRunLog,
+  };
+});
+
+vi.mock("@/api/issues", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/api/issues")>();
+  return {
+    ...actual,
+    getIssue: mocks.getIssue,
   };
 });
 
@@ -180,6 +189,9 @@ describe("AgentServiceDetail", () => {
         error: "run log is not available yet",
       }),
     );
+    mocks.getIssue.mockRejectedValue(
+      new ApiError(404, "Not Found", { error: "issue not found" }),
+    );
     mocks.patchAgentService.mockImplementation(
       async (
         _id: string,
@@ -273,7 +285,47 @@ describe("AgentServiceDetail", () => {
     );
   });
 
-  it("expands a run with full details, stdout tail, logs reference, and newest-last events", async () => {
+  it("shows paused instead of next-fire times while the service is disabled", () => {
+    render(
+      <AgentServiceDetail
+        workspaceId="WS"
+        service={{
+          ...service,
+          enabled: false,
+          nextFireAt: "2026-08-17T00:00:00Z",
+          bindings: [
+            {
+              id: "binding-1",
+              sourceKind: "cron",
+              schedule: "@daily",
+              enabled: true,
+              routeKey: "scout",
+            },
+          ],
+        }}
+      />,
+    );
+
+    const record = screen
+      .getByRole("heading", { name: "Record" })
+      .closest("section");
+    const bindings = screen
+      .getByRole("heading", { name: "Bindings" })
+      .closest("section");
+    expect(record).not.toBeNull();
+    expect(bindings).not.toBeNull();
+    expect(
+      within(record as HTMLElement).getByText("Paused"),
+    ).toBeInTheDocument();
+    expect(
+      within(bindings as HTMLElement).getByText("Paused"),
+    ).toBeInTheDocument();
+    expect(
+      within(bindings as HTMLElement).queryByText(/^Next /),
+    ).not.toBeInTheDocument();
+  });
+
+  it("expands a run with full details, stdout tail, harness disclosure, and newest-last events", async () => {
     mocks.runs = [
       completedRun({
         output: {
@@ -321,7 +373,13 @@ describe("AgentServiceDetail", () => {
       detail.getByRole("heading", { name: "Output (tail)" }),
     ).toBeInTheDocument();
     expect(panel?.querySelector("pre")?.textContent).toBe("line one\nline two");
-    expect(detail.getByText(/runtime\/scout\/run-1\.log/)).toBeInTheDocument();
+    expect(
+      detail.queryByText(/runtime\/scout\/run-1\.log/),
+    ).not.toBeInTheDocument();
+    fireEvent.click(detail.getByRole("button", { name: "Harness log" }));
+    expect(
+      await detail.findByText("No harness log content."),
+    ).toBeInTheDocument();
 
     await waitFor(() => {
       expect(detail.getByText("driver_run.finish")).toBeInTheDocument();
@@ -348,7 +406,14 @@ describe("AgentServiceDetail", () => {
     await waitFor(() => expect(mocks.listRunEvents).toHaveBeenCalledOnce());
   });
 
-  it("renders task runs with runner, status, and duration", async () => {
+  it("renders the issue title as primary and runner as the task-run subtitle", async () => {
+    mocks.getIssue.mockResolvedValueOnce({
+      id: "WS-1",
+      title: "Review the suggested dependency cleanup",
+      priority: 2,
+      created_at: "2026-08-14T00:00:00Z",
+      updated_at: "2026-08-14T00:00:00Z",
+    });
     mocks.listAgentServiceRunTasks.mockResolvedValueOnce({
       data: [taskRun({ transcriptAvailable: false })],
       total: 1,
@@ -357,6 +422,11 @@ describe("AgentServiceDetail", () => {
     expandRun();
 
     const section = await screen.findByTestId("task-logs-section");
+    expect(
+      await within(section).findByText(
+        "Review the suggested dependency cleanup",
+      ),
+    ).toBeInTheDocument();
     expect(within(section).getByText("scout-task-runner")).toBeInTheDocument();
     expect(within(section).getByText("Completed")).toBeInTheDocument();
     expect(within(section).getByText("30s")).toBeInTheDocument();
@@ -591,6 +661,29 @@ describe("AgentServiceDetail", () => {
       screen.queryByText(/driver-run:\/\/run-1\/flue-local/),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("last 1 MiB");
+  });
+
+  it("shows a friendly empty harness state without leaking its artifact URI", async () => {
+    mocks.runs = [
+      completedRun({
+        output: { logs_ref: "artifact://driver-runs/run-1/empty" },
+      }),
+    ];
+    mocks.getDriverRunLog.mockResolvedValueOnce({
+      content: "",
+      modifiedAt: "2026-08-14T10:01:30Z",
+      truncated: false,
+    });
+    render(<AgentServiceDetail workspaceId="WS" service={service} />);
+    expandRun();
+
+    expect(screen.queryByText(/artifact:\/\//)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Harness log" }));
+
+    expect(
+      await screen.findByText("No harness log content."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/artifact:\/\//)).not.toBeInTheDocument();
   });
 
   it("refreshes a live task list and its expanded AI log every five seconds", async () => {
