@@ -28,6 +28,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -107,6 +108,11 @@ The whole spec is VALIDATED BEFORE ANYTHING IS WRITTEN, because a half-applied
 pipeline still starts and looks healthy while routing differently than you
 described. Run with --dry-run to validate and print the plan without writing.
 
+Each worker agent's local git worktree is PROVISIONED before the first store
+write, on machines that have the workspace checked out. An agent recorded
+without a worktree is a fatal daemon boot error, and on a headless deployment
+nothing creates one later.
+
 The daemon resolves role config once, at creation. Apply with the supervisor
 STOPPED, then start it — a running daemon will not pick these changes up.
 
@@ -119,7 +125,8 @@ Example:
 
 func init() {
 	workspaceApplyCmd.Flags().StringVarP(&applySpecFile, "file", "f", "", "Path to the workspace spec (YAML)")
-	workspaceApplyCmd.Flags().BoolVar(&applyDryRun, "dry-run", false, "Validate and print the plan; write nothing")
+	workspaceApplyCmd.Flags().BoolVar(&applyDryRun, "dry-run", false,
+		"Validate and print the plan; write nothing. Reads the store (that is where the workspace's repos live) so it can report agent worktrees too")
 	_ = workspaceApplyCmd.MarkFlagRequired("file")
 	workspaceCmd.AddCommand(workspaceApplyCmd)
 }
@@ -165,14 +172,164 @@ func runWorkspaceApply(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("refusing to apply: a partially applied pipeline starts and routes wrongly")
 	}
 
-	if applyDryRun {
-		printPlan(&spec)
-		return nil
-	}
 	presence := parsePresence(raw)
 	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+		if applyDryRun {
+			printPlan(&spec)
+			return reportWorktreePlan(ctx, h, ws, &spec)
+		}
+		// Provision BEFORE the first store write: a provisioning failure must
+		// abort with nothing written, which is the invariant this command's doc
+		// comment promises.
+		if err := ensureSpecWorktrees(ctx, h, ws, &spec); err != nil {
+			return err
+		}
 		return applySpec(ctx, h, ws, &spec, presence)
 	})
+}
+
+// noLocalCheckoutNote is not an error. A distributed or headless workspace is
+// legitimately managed from a machine with no checkout; the agent records are
+// still valid fleet-db state, and worktrees are created only where the
+// workspace actually lives.
+const noLocalCheckoutNote = "note: workspace has no local checkout on this machine; agent worktrees will not be provisioned here"
+
+// ensureSpecWorktrees creates every worktree the spec's agents need. It runs
+// before applySpec because an agent stored without a worktree is a FATAL daemon
+// boot error on this node, and nothing provisions one later on a headless
+// deployment — the window between the store write and the next restart is
+// exactly when the outage happens.
+func ensureSpecWorktrees(ctx context.Context, h *bootstrap.StoreHandle, ws string, spec *cfgpkg.DaemonConfig) error {
+	wsPath, repos, err := specWorktreeTargets(ctx, h, ws)
+	if err != nil {
+		return err
+	}
+	if wsPath == "" {
+		fmt.Println(noLocalCheckoutNote)
+		return nil
+	}
+	for _, a := range spec.Agents {
+		if specAgentIsInteractive(spec, a) {
+			continue
+		}
+		created, err := localworkspace.EnsureAgentWorktrees(wsPath, repos, specAgent(ws, a))
+		if err != nil {
+			return fmt.Errorf("agent %q: cannot provision worktree: %w\nrefusing to apply: an agent whose worktree does not exist fails supervision on this node", a.Worktree, err)
+		}
+		fmt.Printf("  agent %-10s worktrees ready (%d repo(s))\n", a.Worktree, len(created))
+	}
+	return nil
+}
+
+// reportWorktreePlan is the dry-run half: it touches no files and writes
+// nothing, and aggregates every hard problem rather than stopping at the first,
+// matching validateSpec's philosophy — an operator fixing a pipeline wants the
+// whole list, not one round-trip per problem.
+func reportWorktreePlan(ctx context.Context, h *bootstrap.StoreHandle, ws string, spec *cfgpkg.DaemonConfig) error {
+	wsPath, repos, err := specWorktreeTargets(ctx, h, ws)
+	if err != nil {
+		return err
+	}
+	if wsPath == "" {
+		fmt.Println(noLocalCheckoutNote)
+		return nil
+	}
+	var problems []string
+	for _, a := range spec.Agents {
+		if specAgentIsInteractive(spec, a) {
+			continue
+		}
+		plan, perr := localworkspace.PlanAgentWorktrees(wsPath, repos, specAgent(ws, a))
+		if perr != nil {
+			problems = append(problems, fmt.Sprintf("agent %q: cannot provision worktree: %v", a.Worktree, perr))
+			continue
+		}
+		fmt.Printf("  agent %-10s worktrees: %d present, %d to create%s\n",
+			a.Worktree, len(plan.Existing), len(plan.ToCreate), formatWorktreePaths(wsPath, plan.ToCreate))
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	sort.Strings(problems)
+	fmt.Fprintf(os.Stderr, "agent worktrees are not provisionable (%d problem(s)):\n", len(problems))
+	for _, p := range problems {
+		fmt.Fprintf(os.Stderr, "  - %s\n", p)
+	}
+	return fmt.Errorf("refusing to apply: an agent whose worktree does not exist fails supervision on this node")
+}
+
+// formatWorktreePaths renders the to-create paths relative to the workspace
+// root, so the line stays readable on a deep checkout.
+func formatWorktreePaths(wsPath string, paths map[string]string) string {
+	if len(paths) == 0 {
+		return ""
+	}
+	rel := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if r, err := filepath.Rel(wsPath, p); err == nil {
+			rel = append(rel, r)
+			continue
+		}
+		rel = append(rel, p)
+	}
+	sort.Strings(rel)
+	return " (" + strings.Join(rel, ", ") + ")"
+}
+
+// specWorktreeTargets loads the workspace's repos from the store and their
+// local paths from the state cache. An empty workspace path is returned as ""
+// and is not an error — see noLocalCheckoutNote.
+func specWorktreeTargets(ctx context.Context, h *bootstrap.StoreHandle, ws string) (string, []localworkspace.Repo, error) {
+	sc, err := bootstrap.LoadStateCache()
+	if err != nil {
+		return "", nil, fmt.Errorf("load local workspace state: %w", err)
+	}
+	local := sc.Workspaces[ws]
+	if local.Path == "" {
+		return "", nil, nil
+	}
+	repos, err := h.Store.Repos().List(ctx, ws)
+	if err != nil {
+		return "", nil, fmt.Errorf("list workspace repos: %w", err)
+	}
+	localRepos := make([]localworkspace.Repo, 0, len(repos))
+	for _, repo := range repos {
+		if repo == nil {
+			continue
+		}
+		localRepos = append(localRepos, localworkspace.Repo{
+			Name:   repo.Name,
+			Path:   localworkspace.RepoPath(local, repo.Name),
+			Groups: append([]string(nil), repo.Groups...),
+		})
+	}
+	return local.Path, localRepos, nil
+}
+
+// specAgent builds the domain.Agent a spec entry implies. Only the fields
+// SelectAgentRepos and the worktree path derivation read are populated — this
+// is a projection for provisioning, not the record applyAgent writes.
+func specAgent(ws string, a cfgpkg.AgentEntry) domain.Agent {
+	return domain.Agent{
+		WorkspaceKey: ws,
+		Name:         a.Worktree,
+		RoleName:     a.Role,
+		Repos:        a.Repos,
+		RepoGroups:   a.RepoGroups,
+		CrossRepo:    a.CrossRepo,
+	}
+}
+
+// specAgentIsInteractive reports whether the agent's role is interactive: a
+// lead/terminal agent gets no worktree, so demanding one would refuse specs
+// that are perfectly valid. The spec's own roles map plus builtInRoleNames
+// resolves the kind with no store read.
+func specAgentIsInteractive(spec *cfgpkg.DaemonConfig, a cfgpkg.AgentEntry) bool {
+	var role *domain.Role
+	if rc, ok := spec.Roles[a.Role]; ok {
+		role = &domain.Role{Name: a.Role, Kind: domain.RoleKind(rc.Kind)}
+	}
+	return domain.ResolveRoleKind(role, a.Role) == domain.RoleKindInteractive
 }
 
 // validateSpec returns every problem it can find, rather than the first: an
