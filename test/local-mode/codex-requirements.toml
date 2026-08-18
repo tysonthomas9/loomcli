@@ -17,6 +17,11 @@ type = "command"
 # Absolute path: the hook runs via $SHELL -lc with the session's cwd, so it
 # must not depend on PATH. The command self-bounds at 10s; the codex-side
 # timeout (seconds) is a backstop.
+#
+# Same command as hookcfg.EnsureSkillMaterializeHook installs on host sessions
+# (internal/hookcfg/hookcfg.go). Go cannot share a constant with this file, so
+# the two move together by hand; TestEnsureSkillMaterializeHookInstallsTheOneCommand
+# pins the Go side.
 command = "/usr/local/bin/loom skill materialize"
 timeout = 30
 statusMessage = "Materializing loom skills"

@@ -114,6 +114,46 @@ func TestEnsureRejectsUnusableInput(t *testing.T) {
 	}
 }
 
+// The hook command has copies outside Go that cannot share this constant:
+// test/local-mode/codex-requirements.toml and the local-mode verify scripts.
+// Pinning the string here makes a change to it show up as a failing test next
+// to the comment naming those copies.
+func TestEnsureSkillMaterializeHookInstallsTheOneCommand(t *testing.T) {
+	t.Parallel()
+
+	for _, backend := range []string{"claude", "codex"} {
+		t.Run(backend, func(t *testing.T) {
+			t.Parallel()
+			workDir := t.TempDir()
+			if err := EnsureSkillMaterializeHook(workDir, backend); err != nil {
+				t.Fatalf("EnsureSkillMaterializeHook() error = %v", err)
+			}
+			data, err := os.ReadFile(configPath(workDir, backend))
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertManagedCommands(t, data, map[string][]string{
+				"UserPromptSubmit": {"loom skill materialize"},
+			})
+		})
+	}
+
+	t.Run("unsupported backend is a silent no-op", func(t *testing.T) {
+		t.Parallel()
+		workDir := t.TempDir()
+		if err := EnsureSkillMaterializeHook(workDir, "opencode"); err != nil {
+			t.Fatalf("EnsureSkillMaterializeHook() error = %v, want nil", err)
+		}
+		entries, err := os.ReadDir(workDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) != 0 {
+			t.Fatalf("unsupported backend wrote %d entries", len(entries))
+		}
+	})
+}
+
 func TestSupportsBackend(t *testing.T) {
 	t.Parallel()
 

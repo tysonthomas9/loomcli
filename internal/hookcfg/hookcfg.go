@@ -51,6 +51,25 @@ func SupportsBackend(backend string) bool {
 	return ok
 }
 
+// EnsureSkillMaterializeHook installs the pre-turn skill materialization hook
+// in workDir, and is a no-op for a backend with no native hook adapter.
+//
+// Every launch path — lead, supervisor spawn, interactive terminal — installs
+// this one hook with this one command, so the command string lives here rather
+// than being repeated at each site. Two copies necessarily live outside Go and
+// must move with it: test/local-mode/codex-requirements.toml, which bakes the
+// managed policy into the container image, and the local-mode verify scripts
+// that assert against it.
+func EnsureSkillMaterializeHook(workDir, backend string) error {
+	if !SupportsBackend(backend) {
+		return nil
+	}
+	return Ensure(workDir, backend, []HookSpec{{
+		Event:   UserPromptSubmit,
+		Command: "loom skill materialize",
+	}})
+}
+
 // Ensure reconciles Loom-managed hooks for backend in workDir. Commands owned
 // by Loom are self-identifying: their command string begins with "loom ".
 //

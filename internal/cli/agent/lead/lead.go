@@ -160,12 +160,7 @@ func runLead(cmd *cobra.Command, args []string) {
 }
 
 func ensureLeadHookConfig(workDir, backend string) {
-	if !hookcfg.SupportsBackend(backend) {
-		return
-	}
-	if err := hookcfg.Ensure(workDir, backend, []hookcfg.HookSpec{{
-		Event: hookcfg.UserPromptSubmit, Command: "loom skill materialize",
-	}}); err != nil {
+	if err := hookcfg.EnsureSkillMaterializeHook(workDir, backend); err != nil {
 		slog.Warn("lead hook configuration failed; continuing without raw-PTY pre-turn hook",
 			"target", workDir, "backend", backend, "err", err)
 	}

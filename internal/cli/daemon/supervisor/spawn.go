@@ -313,12 +313,7 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 
 func (s *Supervisor) ensureHookConfig(ap *AgentProcess) {
 	backend := s.GetEffectiveBackend(ap)
-	if !hookcfg.SupportsBackend(backend) {
-		return
-	}
-	if err := hookcfg.Ensure(ap.WorktreePath, backend, []hookcfg.HookSpec{{
-		Event: hookcfg.UserPromptSubmit, Command: "loom skill materialize",
-	}}); err != nil {
+	if err := hookcfg.EnsureSkillMaterializeHook(ap.WorktreePath, backend); err != nil {
 		slog.Warn("agent hook configuration failed; continuing without raw-PTY pre-turn hook",
 			"worktree", ap.Entry.Worktree, "backend", backend, "err", err)
 	}

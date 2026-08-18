@@ -163,12 +163,7 @@ func materializeInteractiveSkills(ctx context.Context, st store.Store, workspace
 }
 
 func ensureInteractiveHookConfig(targetDir, backend string) {
-	if !hookcfg.SupportsBackend(backend) {
-		return
-	}
-	if err := hookcfg.Ensure(targetDir, backend, []hookcfg.HookSpec{{
-		Event: hookcfg.UserPromptSubmit, Command: "loom skill materialize",
-	}}); err != nil {
+	if err := hookcfg.EnsureSkillMaterializeHook(targetDir, backend); err != nil {
 		slog.Warn("interactive terminal hook configuration failed; continuing without raw-PTY pre-turn hook",
 			"target", targetDir, "backend", backend, "err", err)
 	}
