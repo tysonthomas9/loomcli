@@ -214,6 +214,19 @@ describe("NavRail", () => {
 
       expect(onChange).toHaveBeenCalledWith("kanban");
     });
+
+    // PUPPET-94: the review detail view is a query-param sub-state of "prs",
+    // so returning to the list depends on the active item still firing
+    // onChange. Suppressing the redundant click here would resurrect the bug.
+    it('calls onChange with "prs" when the active Pull Requests button is clicked', () => {
+      const onChange = vi.fn();
+      render(<NavRail activeView="prs" onChange={onChange} />);
+
+      fireEvent.click(screen.getByLabelText("Pull Requests"));
+
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(onChange).toHaveBeenCalledWith("prs");
+    });
   });
 
   describe("session badge", () => {
