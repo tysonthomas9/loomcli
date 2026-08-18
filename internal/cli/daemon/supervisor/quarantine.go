@@ -2,10 +2,12 @@ package supervisor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,6 +19,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
 // Task quarantine: a supervisor-scoped, task-ID-keyed ledger of repeated
@@ -39,20 +42,31 @@ const (
 	quarantineWriteTimeout     = 10 * time.Second
 	maxTrackedQuarantineTasks  = 512 // defensive cap on ledger size; oldest evicted
 	maxKillEventsRetained      = 10  // kill-timeline cap per task
+
+	// The ledger is persisted next to daemon-agents.json so a daemon restart
+	// does not reset the counter. That mattered concretely: the failure mode
+	// that produces boomeranging tasks (a wedged daemon that PM2 restarts) was
+	// exactly the one that wiped the evidence, so the threshold could never be
+	// reached on a host where the daemon crash-loops.
+	quarantineStateFileName = "daemon-quarantine.json"
+	quarantineStateVersion  = 1
+	// quarantineRecordTTL drops records not touched within this window at load
+	// time. A task still genuinely boomeranging re-accumulates immediately.
+	quarantineRecordTTL = 24 * time.Hour
 )
 
 // killEvent is one observed kill of a task-holding agent, captured at exit
 // time (after classifyAgentExit, before finalize/recovery clear the session
 // and lock state it reads).
 type killEvent struct {
-	At              time.Time
-	Agent           string // ap.Entry.Worktree
-	StopReason      string // e.g. "watchdog"; empty for a bare crash / ownership kill
-	ErrClass        string // classified outcome (Unknown | Timeout | Transient | ContextOverflow)
-	ExitCode        int
-	FleetSessionID  string // ap.AgentSessionID — captured before finalize clears it
-	ClaudeSessionID string // lock ClaudeSessionID (best-effort; empty if absent)
-	RunID           string // lock RunID (best-effort)
+	At              time.Time `json:"at"`
+	Agent           string    `json:"agent"`             // ap.Entry.Worktree
+	StopReason      string    `json:"stop_reason"`       // e.g. "watchdog"; empty for a bare crash / ownership kill
+	ErrClass        string    `json:"err_class"`         // classified outcome (Unknown | Timeout | Transient | ContextOverflow)
+	ExitCode        int       `json:"exit_code"`         //
+	FleetSessionID  string    `json:"fleet_session_id"`  // ap.AgentSessionID — captured before finalize clears it
+	ClaudeSessionID string    `json:"claude_session_id"` // lock ClaudeSessionID (best-effort; empty if absent)
+	RunID           string    `json:"run_id"`            // lock RunID (best-effort)
 }
 
 // reason renders a compact kill descriptor for status output, e.g.
@@ -69,32 +83,36 @@ func (ev killEvent) reason() string {
 }
 
 // taskFailureRecord accumulates consecutive no-progress kills for one task.
+// Every persisted field is exported and tagged: the record round-trips through
+// encoding/json into daemon-quarantine.json with no shadow struct. inFlight is
+// deliberately unexported — it is a live-process guard, not durable state, and
+// is force-cleared on load.
 type taskFailureRecord struct {
-	Count int         // consecutive eligible no-progress kills since last reset/quarantine
-	Kills []killEvent // capped timeline (last maxKillEventsRetained)
+	Count int         `json:"count"` // consecutive eligible no-progress kills since last reset/quarantine
+	Kills []killEvent `json:"kills"` // capped timeline (last maxKillEventsRetained)
 
 	// QuarantinedAt latches once the record is resolved: the daemon wrote
 	// blocked, OR the read-back guard found the task already terminal/
 	// blocked/deferred. Count is zeroed at latch time; the first fresh
 	// eligible kill clears the latch (re-arm), so N fresh kills are needed
 	// to re-quarantine after a human release.
-	QuarantinedAt time.Time
-	DaemonWrote   bool // true only when WE performed the blocked-write (only these surface in daemon status)
-	WriteFailed   bool // informational: last write attempt failed (retry is driven by the sweep predicate, not this flag)
-	inFlight      bool // an agent's supervise loop is mid-write right now (guards concurrent sweeps)
+	QuarantinedAt time.Time `json:"quarantined_at,omitzero"`
+	DaemonWrote   bool      `json:"daemon_wrote,omitempty"` // true only when WE performed the blocked-write (only these surface in daemon status)
+	WriteFailed   bool      `json:"write_failed,omitempty"` // informational: last write attempt failed (retry is driven by the sweep predicate, not this flag)
+	inFlight      bool      // an agent's supervise loop is mid-write right now (guards concurrent sweeps); never persisted
 
-	LastUpdated time.Time // touched on create/increment/latch/write-attempt — the eviction key
+	LastUpdated time.Time `json:"last_updated"` // touched on create/increment/latch/write-attempt — the eviction key
 
 	// Field-delta progress baseline (covers plan-role agents, whose artifact
 	// is a fleet-db design/notes write rather than a commit). Populated by
 	// the first successful issue GET; comparisons apply ONLY when known —
 	// "unknown" is never progress, and zero-value hashes are never compared.
-	BaselineKnown      bool
-	BaselineDesignHash uint64
-	BaselineNotesHash  uint64
+	BaselineKnown      bool   `json:"baseline_known,omitempty"`
+	BaselineDesignHash uint64 `json:"baseline_design_hash,omitempty"`
+	BaselineNotesHash  uint64 `json:"baseline_notes_hash,omitempty"`
 
-	LastKillReason  string
-	QuarantineKills int // Count captured at latch time (display-only; Count itself zeroes as the re-arm baseline)
+	LastKillReason  string `json:"last_kill_reason,omitempty"`
+	QuarantineKills int    `json:"quarantine_kills,omitempty"` // Count captured at latch time (display-only; Count itself zeroes as the re-arm baseline)
 }
 
 // taskQuarantine is the daemon-wide ledger. One shared map per supervisor:
@@ -103,6 +121,20 @@ type taskFailureRecord struct {
 type taskQuarantine struct {
 	mu  sync.Mutex
 	rec map[string]*taskFailureRecord
+
+	// persist writes the ledger to disk after a mutation. Wired once in qrec
+	// (before the ledger is published), nil when persistence is disabled — an
+	// embedded Supervisor with no ProjectDir, which is every unit test that
+	// does not opt in. Always invoked with mu released.
+	persist func()
+}
+
+// persistAfter invokes the save hook if one is wired. MUST be called with
+// q.mu released: the hook re-takes the mutex to snapshot the ledger.
+func (q *taskQuarantine) persistAfter() {
+	if q.persist != nil {
+		q.persist()
+	}
 }
 
 // qrec lazily initializes the quarantine ledger. The Supervisor is built as a
@@ -110,9 +142,132 @@ type taskQuarantine struct {
 // every construction site.
 func (s *Supervisor) qrec() *taskQuarantine {
 	s.quarantineOnce.Do(func() {
-		s.quarantine = &taskQuarantine{rec: make(map[string]*taskFailureRecord)}
+		if s.quarantineStatePathCache == "" {
+			s.quarantineStatePathCache = s.quarantineStatePath()
+		}
+		q := &taskQuarantine{rec: s.loadQuarantineState()}
+		q.persist = func() { s.saveQuarantineState(q) }
+		s.quarantine = q
 	})
 	return s.quarantine
+}
+
+// ---------------------------------------------------------------------------
+// Persistence: daemon-quarantine.json
+// ---------------------------------------------------------------------------
+
+// quarantineStateFile is the on-disk envelope. Version gates forward
+// compatibility: an unknown version starts from an empty ledger rather than
+// guessing at a shape, so no migration code is ever needed.
+type quarantineStateFile struct {
+	Version int                           `json:"version"`
+	Records map[string]*taskFailureRecord `json:"records"`
+}
+
+// quarantineStatePath resolves daemon-quarantine.json next to
+// daemon-agents.json. An empty ProjectDir (embedded uses, unit tests) returns
+// "", which disables persistence entirely — load and save then no-op.
+func (s *Supervisor) quarantineStatePath() string {
+	if s.ProjectDir == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(config.ResolveDaemonStatePath(s.ProjectDir)), quarantineStateFileName)
+}
+
+// loadQuarantineState hydrates the ledger from disk. It never fails: a
+// missing, corrupt, truncated or future-versioned file yields an empty ledger,
+// because a bad ledger must not stop the daemon from supervising agents.
+//
+// Two load-time-only transforms are applied; in-memory semantics are untouched:
+// records not touched within quarantineRecordTTL are dropped, and inFlight is
+// force-cleared (a process that died mid-write left it set, and a set flag
+// would permanently exclude the record from takeDue).
+func (s *Supervisor) loadQuarantineState() map[string]*taskFailureRecord {
+	rec := make(map[string]*taskFailureRecord)
+	path := s.quarantineStatePathCache
+	if path == "" {
+		return rec
+	}
+	data, err := os.ReadFile(path) //nolint:gosec // path derived from the daemon state directory
+	if err != nil {
+		if os.IsNotExist(err) {
+			slog.Debug("no persisted task quarantine ledger, starting empty", "path", path)
+		} else {
+			slog.Warn("task quarantine ledger unreadable, starting empty", "path", path, "err", err)
+		}
+		return rec
+	}
+	var state quarantineStateFile
+	if err := json.Unmarshal(data, &state); err != nil {
+		slog.Warn("task quarantine ledger corrupt, starting empty", "path", path, "err", err)
+		return rec
+	}
+	if state.Version != quarantineStateVersion {
+		slog.Warn("task quarantine ledger version unsupported, starting empty",
+			"path", path, "version", state.Version, "supported", quarantineStateVersion)
+		return rec
+	}
+	cutoff := time.Now().Add(-quarantineRecordTTL)
+	for id, r := range state.Records {
+		if id == "" || r == nil || r.LastUpdated.IsZero() || r.LastUpdated.Before(cutoff) {
+			continue
+		}
+		r.inFlight = false
+		rec[id] = r
+	}
+	if len(rec) > 0 {
+		slog.Info("restored task quarantine ledger across daemon restart",
+			"path", path, "records", len(rec))
+	}
+	return rec
+}
+
+// snapshot deep-copies the ledger under the mutex so the marshal and the file
+// write run without holding it.
+func (q *taskQuarantine) snapshot() quarantineStateFile {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	out := quarantineStateFile{
+		Version: quarantineStateVersion,
+		Records: make(map[string]*taskFailureRecord, len(q.rec)),
+	}
+	for id, rec := range q.rec {
+		cp := *rec
+		cp.Kills = append([]killEvent(nil), rec.Kills...)
+		out.Records[id] = &cp
+	}
+	return out
+}
+
+// saveQuarantineState writes the ledger atomically (PID-tagged temp + rename,
+// the pattern writeStateFile already uses). Best-effort throughout: an
+// unwritable directory logs one warning and leaves the in-memory ledger
+// working exactly as before. Synchronous by design — one small write per agent
+// exit, and no spawned goroutines.
+func (s *Supervisor) saveQuarantineState(q *taskQuarantine) {
+	path := s.quarantineStatePathCache
+	if path == "" {
+		return
+	}
+	data, err := json.MarshalIndent(q.snapshot(), "", "  ")
+	if err != nil {
+		slog.Warn("task quarantine ledger marshal failed", "path", path, "err", err)
+		return
+	}
+	// The daemon state directory may not exist yet on a first run.
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		slog.Warn("task quarantine ledger directory unavailable", "path", path, "err", err)
+		return
+	}
+	tempFile := fmt.Sprintf("%s.%d.tmp", path, os.Getpid())
+	if err := os.WriteFile(tempFile, data, 0o600); err != nil {
+		slog.Warn("task quarantine ledger write failed", "path", tempFile, "err", err)
+		return
+	}
+	if err := os.Rename(tempFile, path); err != nil {
+		slog.Warn("task quarantine ledger rename failed", "path", path, "err", err)
+		os.Remove(tempFile)
+	}
 }
 
 // quarantineThreshold is the consecutive no-progress-kill count at which a
@@ -157,6 +312,17 @@ func (s *Supervisor) recordTaskExitForQuarantine(ap *AgentProcess, exitCode int)
 		q.evict(taskID)
 		return
 	}
+	// A daemon-initiated stop is not task evidence. It is placed AFTER the
+	// clean/commit-progress eviction (a drained agent that DID commit still
+	// clears its record) and BEFORE the outcome check, because a drain that
+	// escalates to SIGTERM classifies as Timeout, which QuarantineEligible
+	// accepts — that is how a config-churn loop manufactured quarantine credit
+	// against tasks that were never at fault.
+	if !stopReasonQuarantineEligible(StopReason(snap.event.StopReason)) {
+		slog.Debug("skipping quarantine record for daemon-initiated stop",
+			"task", taskID, "agent", ap.Entry.Worktree, "stop_reason", snap.event.StopReason)
+		return
+	}
 	if !agentpolicy.QuarantineEligible(snap.outcome) {
 		return
 	}
@@ -170,6 +336,33 @@ func (s *Supervisor) recordTaskExitForQuarantine(ap *AgentProcess, exitCode int)
 	slog.Info("recorded no-progress kill for task",
 		"task", taskID, "agent", ap.Entry.Worktree, "kill", snap.event.reason(),
 		"count", count, "threshold", s.quarantineThreshold())
+}
+
+// stopReasonQuarantineEligible reports whether a kill carrying this stop
+// reason counts as evidence that the TASK is stalling.
+//
+// Lifecycle stops do not: a drain (config change, shutdown, an operator's
+// stop) is a decision the daemon made about the AGENT, and the run it
+// interrupted carries no evidence in either direction. The gate is therefore a
+// skip, not an evict — an accumulated count survives a drain and the next
+// genuine kill continues from where it left off.
+//
+// The behavioral consequence is worth stating plainly: a task that only ever
+// dies during drains is never quarantined. That is correct — such a task is
+// being killed by the daemon, not by its own stall.
+//
+// Everything else stays eligible, notably watchdog (the signal the whole
+// mechanism was built for), run_duration_exceeded, fatal_error, fast_fail and
+// a bare crash (empty reason). backend_unavailable and rate_limited are
+// already filtered out by the outcome class.
+func stopReasonQuarantineEligible(r StopReason) bool {
+	switch r {
+	case StopReasonConfigRemoved, StopReasonShutdown, StopReasonManualStop,
+		StopReasonYielded, StopReasonEphemeralDone:
+		return false
+	default:
+		return true
+	}
 }
 
 // taskExitSnapshot is the per-exit state the ledger consumes, read under
@@ -254,6 +447,7 @@ func (q *taskQuarantine) evict(taskID string) {
 	q.mu.Lock()
 	delete(q.rec, taskID)
 	q.mu.Unlock()
+	q.persistAfter()
 }
 
 // recordEligibleKill folds one quarantine-eligible kill into the ledger and
@@ -261,6 +455,9 @@ func (q *taskQuarantine) evict(taskID string) {
 // Design/Notes hash against a known baseline) evicts the record instead of
 // incrementing — the task IS moving, just not via commits.
 func (q *taskQuarantine) recordEligibleKill(taskID string, ev killEvent, designHash, notesHash uint64, baselineKnown bool) (count int, progressed bool) {
+	// LIFO: the unlock runs first, so the save sees a consistent ledger and
+	// never re-enters the mutex while it is held.
+	defer q.persistAfter()
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -341,6 +538,7 @@ type dueTask struct {
 // inFlight so a concurrently-exiting agent's sweep cannot double-write. The
 // caller MUST resolve each returned task (latch / release / evict).
 func (q *taskQuarantine) takeDue(threshold int) []dueTask {
+	defer q.persistAfter()
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	var due []dueTask
@@ -533,6 +731,7 @@ func (q *taskQuarantine) release(taskID string) {
 		rec.LastUpdated = time.Now()
 	}
 	q.mu.Unlock()
+	q.persistAfter()
 }
 
 // markWriteFailed clears inFlight and flags the failed attempt. Informational
@@ -546,6 +745,7 @@ func (q *taskQuarantine) markWriteFailed(taskID string) {
 		rec.LastUpdated = time.Now()
 	}
 	q.mu.Unlock()
+	q.persistAfter()
 }
 
 // latch marks a record resolved: Count zeroed (the re-arm baseline) and
@@ -565,6 +765,7 @@ func (q *taskQuarantine) latch(taskID string, daemonWrote bool) {
 		rec.LastUpdated = time.Now()
 	}
 	q.mu.Unlock()
+	q.persistAfter()
 }
 
 // evictOldestLocked makes room when the ledger is at capacity by dropping the
