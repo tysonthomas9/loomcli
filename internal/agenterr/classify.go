@@ -127,6 +127,22 @@ const RunTurnDeadlineMarker = "loom: run-turn deadline exceeded"
 // runTurnDeadlineRe is the precompiled matcher used by classifyHarnessMarkers.
 var runTurnDeadlineRe = regexp.MustCompile(regexp.QuoteMeta(RunTurnDeadlineMarker))
 
+// BillingWallMarker is the stable log marker the inner backend subprocess emits
+// when loom itself detected the harness parked on a billing / credit wall —
+// the case harness-wrapper does NOT model, so no turn reason ever names it.
+//
+// It is the one wall that is neither blameless nor retryable: a spent quota
+// window lifts on its own and an expired login is one command away, but an
+// account with no credits cannot run a turn again until a human pays. Mapping
+// it to ErrBilling is what makes agentpolicy stop the supervisor fatally
+// instead of spending the restart budget on turns that cannot succeed.
+//
+// Stable string contract: changing it requires updating the emitter
+// (internal/cli/backends.wallInvocationError).
+const BillingWallMarker = "loom: harness billing or credit wall reached"
+
+var billingWallRe = regexp.MustCompile(regexp.QuoteMeta(BillingWallMarker))
+
 // timeoutHintRe recognizes timeout-worded errors. The wrapper refines its
 // retry hits by the matched phrase; loom additionally upgrades a Transient
 // whose surrounding text names a timeout, preserving the distinct Timeout
@@ -206,6 +222,33 @@ func ClassifyFromOutput(output string, exitCode int, backend string) *AgentError
 	return classifyFromText(output, exitCode, backend)
 }
 
+// ClassifyMarker classifies text that carries one of the explicit, categorical
+// harness markers, and ONLY those. ok=false means no marker was present — it
+// never falls through to pattern matching, which is the whole point: callers
+// use it where a categorical statement may override a verdict they already
+// hold, and a guess must not.
+func ClassifyMarker(text string) (*AgentError, bool) {
+	result := classifyHarnessMarkers(text)
+	if result == nil {
+		return nil, false
+	}
+	return &AgentError{
+		Class:      result.Class,
+		Message:    result.Message,
+		RetryAfter: result.RetryAfter,
+		RawOutput:  text,
+		Timestamp:  time.Now(),
+	}, true
+}
+
+// ClassifyMarkerFromLog is ClassifyMarker over the tail of an agent log file,
+// using the same bounded read as ClassifyFromLog. It exists because the
+// supervisor has no access to the unexported tail reader.
+func ClassifyMarkerFromLog(logPath string) (*AgentError, bool) {
+	logTail, _ := readLogTail(logPath, 100)
+	return ClassifyMarker(logTail)
+}
+
 // classifyHarnessMarkers matches the explicit, categorical markers that
 // outrank every pattern-based inference: the loom-side backend-missing
 // marker, a wrapper launch failure, loom's own per-turn deadline expiry, and
@@ -251,6 +294,15 @@ func classifyHarnessMarkers(text string) *classifyResult {
 	// blameless — see the marker docs — so returning here rather than falling
 	// through to the residual table is what keeps a quota window from
 	// consuming an agent's restart budget.
+	// A billing wall outranks the auth arm below: a screen showing both an
+	// empty credit balance and a stale logged-out banner is a billing problem,
+	// and renewing the login would not change that.
+	if billingWallRe.MatchString(text) {
+		return &classifyResult{
+			Class:   OutcomeFromHarness(wrapper.ErrBilling),
+			Message: "harness billing or credit wall reached — the account cannot run turns until billing is resolved",
+		}
+	}
 	if authRequiredRe.MatchString(text) {
 		return &classifyResult{
 			// The Message stays byte-for-byte as it was: it is operator-facing
