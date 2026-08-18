@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -136,10 +137,7 @@ func Materialize(ctx context.Context, st store.Store, workspace, roleName, targe
 		}
 		return fmt.Errorf("load skills: %w", err)
 	}
-	entries, err := desiredEntries(domain.ResolveSkillChainDetail(skills, roleName))
-	if err != nil {
-		return err
-	}
+	entries := desiredEntries(domain.ResolveSkillChainDetail(skills, roleName))
 	projectionHash, err := hashEntries(entries)
 	if err != nil {
 		return fmt.Errorf("hash skill projection: %w", err)
@@ -343,61 +341,87 @@ func isUnavailableStoreError(err error) bool {
 	return fleetDBServerErrorPattern.MatchString(err.Error())
 }
 
-//nolint:funlen // One skill's projection entries are derived in one pass.
-func desiredEntries(resolved []domain.ResolvedSkill) ([]desiredEntry, error) {
+// desiredEntries derives the whole projection, skipping any single skill it
+// cannot project rather than failing.
+//
+// The skip is deliberate and load-bearing. Every caller of Materialize treats a
+// non-StoreUnavailable error as fatal — worker spawn aborts, lead turn delivery
+// is refused, the pre-turn hook exits 2 — so returning an error here would let
+// one malformed stored record stop skills for every agent in the workspace
+// until someone deleted it. fleet-db rejects these shapes at write time, so a
+// record that fails validation here is already an anomaly; dropping it and
+// warning keeps the rest of the workspace working. The dropped skill is left
+// out of the catalog index too, so the index never advertises a skill that was
+// not written.
+func desiredEntries(resolved []domain.ResolvedSkill) []desiredEntry {
 	entries := make([]desiredEntry, 0, len(resolved)*2+3)
+	projected := make([]domain.ResolvedSkill, 0, len(resolved))
 	for _, item := range resolved {
-		skill := item.Skill
-		if skill == nil {
+		if item.Skill == nil {
 			continue
 		}
-		if err := domain.ValidateSkillName(skill.Name); err != nil {
-			return nil, fmt.Errorf("materialize skill %q: %w", skill.Name, err)
-		}
-		frontmatter, err := yaml.Marshal(struct {
-			Name        string `yaml:"name"`
-			Description string `yaml:"description"`
-		}{Name: skill.Name, Description: skill.Description})
+		skillEntries, err := entriesForSkill(item.Skill)
 		if err != nil {
-			return nil, fmt.Errorf("render skill %q frontmatter: %w", skill.Name, err)
+			slog.Warn("skipping skill that cannot be materialized",
+				"skill", item.Skill.Name, "scope", item.Skill.Scope, "error", err)
+			continue
 		}
-		skillDir := path.Join(AgentsSkillsDir, skill.Name)
+		entries = append(entries, skillEntries...)
+		projected = append(projected, item)
+	}
+	entries = append(entries, catalogEntries(projected)...)
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
+	return entries
+}
+
+// entriesForSkill derives the projection entries for one skill: its SKILL.md,
+// one entry per bundled file, and the .claude symlink that points at the
+// directory. An error means the skill is unprojectable as stored.
+func entriesForSkill(skill *domain.Skill) ([]desiredEntry, error) {
+	if err := domain.ValidateSkillName(skill.Name); err != nil {
+		return nil, fmt.Errorf("skill name: %w", err)
+	}
+	frontmatter, err := yaml.Marshal(struct {
+		Name        string `yaml:"name"`
+		Description string `yaml:"description"`
+	}{Name: skill.Name, Description: skill.Description})
+	if err != nil {
+		return nil, fmt.Errorf("render frontmatter: %w", err)
+	}
+	skillDir := path.Join(AgentsSkillsDir, skill.Name)
+	entries := make([]desiredEntry, 0, len(skill.Files)+2)
+	entries = append(entries, desiredEntry{
+		Path:       path.Join(skillDir, domain.SkillFileNameSKILLMD),
+		Kind:       entryFile,
+		Content:    []byte("---\n" + string(frontmatter) + "---\n" + skill.Content),
+		Mode:       0o644,
+		Skill:      skill.Name,
+		SourcePath: domain.SkillFileNameSKILLMD,
+	})
+	for _, file := range skill.Files {
+		if err := validateBundledPath(file.Path); err != nil {
+			return nil, fmt.Errorf("bundled file %q: %w", file.Path, err)
+		}
+		mode := os.FileMode(0o644)
+		if file.Executable {
+			mode = 0o755
+		}
 		entries = append(entries, desiredEntry{
-			Path:       path.Join(skillDir, domain.SkillFileNameSKILLMD),
+			Path:       path.Join(skillDir, file.Path),
 			Kind:       entryFile,
-			Content:    []byte("---\n" + string(frontmatter) + "---\n" + skill.Content),
-			Mode:       0o644,
+			Content:    []byte(file.Content),
+			Mode:       mode,
 			Skill:      skill.Name,
-			SourcePath: domain.SkillFileNameSKILLMD,
-		})
-		for _, file := range skill.Files {
-			if err := validateBundledPath(file.Path); err != nil {
-				return nil, fmt.Errorf("materialize skill %q file %q: %w", skill.Name, file.Path, err)
-			}
-			mode := os.FileMode(0o644)
-			if file.Executable {
-				mode = 0o755
-			}
-			entries = append(entries, desiredEntry{
-				Path:       path.Join(skillDir, file.Path),
-				Kind:       entryFile,
-				Content:    []byte(file.Content),
-				Mode:       mode,
-				Skill:      skill.Name,
-				SourcePath: file.Path,
-			})
-		}
-		entries = append(entries, desiredEntry{
-			Path:       path.Join(ClaudeSkillsDir, skill.Name),
-			Kind:       entrySymlink,
-			LinkTarget: "../../.agents/skills/" + skill.Name,
-			Skill:      skill.Name,
-			SourcePath: skill.Name,
+			SourcePath: file.Path,
 		})
 	}
-	entries = append(entries, catalogEntries(resolved)...)
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
-	return entries, nil
+	return append(entries, desiredEntry{
+		Path:       path.Join(ClaudeSkillsDir, skill.Name),
+		Kind:       entrySymlink,
+		LinkTarget: "../../.agents/skills/" + skill.Name,
+		Skill:      skill.Name,
+		SourcePath: skill.Name,
+	}), nil
 }
 
 func catalogEntries(resolved []domain.ResolvedSkill) []desiredEntry {

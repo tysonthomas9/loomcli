@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
 	"os/exec"
@@ -344,6 +345,62 @@ func TestMaterializeMatchingHashIsNoOp(t *testing.T) {
 	}
 	if string(got) != "agent-authored working copy\n" {
 		t.Fatalf("matching hash rewrote SKILL.md: %q", got)
+	}
+}
+
+// A stored skill fleet-db should have refused at write time must not be able to
+// stop materialization for the whole workspace: every Materialize caller treats
+// a non-StoreUnavailable error as fatal, so one bad record would take skills
+// down for every agent until it was deleted.
+func TestMaterializeSkipsUnprojectableSkillsWithoutFailing(t *testing.T) {
+	tests := []struct {
+		name string
+		bad  *domain.Skill
+	}{
+		{
+			name: "name reserved for the catalog pointer",
+			bad: &domain.Skill{
+				Name: CatalogSkillName, Scope: domain.SkillScopeWorkspace,
+				Description: "smuggled past write-time validation", Content: "body\n",
+			},
+		},
+		{
+			name: "bundled path escapes the skill directory",
+			bad: &domain.Skill{
+				Name: "beta", Scope: domain.SkillScopeWorkspace, Description: "beta", Content: "body\n",
+				Files: []domain.SkillFile{{Path: "../escape.md", Content: "nope\n"}},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			target := t.TempDir()
+			good := &domain.Skill{
+				Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body\n",
+			}
+			st := materializeStore{skills: staticSkillStore{skills: []*domain.Skill{tt.bad, good}}}
+			if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+				t.Fatalf("Materialize with one unprojectable skill: %v", err)
+			}
+
+			if _, err := os.Stat(filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "alpha", "SKILL.md")); err != nil {
+				t.Fatalf("healthy skill was not materialized: %v", err)
+			}
+			index, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(IndexPath)))
+			if err != nil {
+				t.Fatalf("read catalog index: %v", err)
+			}
+			if !strings.Contains(string(index), "**alpha**") {
+				t.Fatalf("catalog index omits the healthy skill:\n%s", index)
+			}
+			// The index must not advertise a skill that was never written.
+			if strings.Contains(string(index), "**beta**") {
+				t.Fatalf("catalog index advertises a skipped skill:\n%s", index)
+			}
+			if _, err := os.Stat(filepath.Join(target, "escape.md")); !errors.Is(err, fs.ErrNotExist) {
+				t.Fatalf("bundled path escaped the target: stat err = %v", err)
+			}
+		})
 	}
 }
 
@@ -708,10 +765,7 @@ func TestMaterializeRecoversExactPartialProjectionWithoutMarker(t *testing.T) {
 		Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body\n",
 		Files: []domain.SkillFile{{Path: "run.sh", Content: "#!/bin/sh\n", Executable: true}},
 	}
-	entries, err := desiredEntries(domain.ResolveSkillChainDetail([]*domain.Skill{skill}, "lead"))
-	if err != nil {
-		t.Fatalf("desiredEntries: %v", err)
-	}
+	entries := desiredEntries(domain.ResolveSkillChainDetail([]*domain.Skill{skill}, "lead"))
 	partial := entries[0]
 	partialPath := filepath.Join(target, filepath.FromSlash(partial.Path))
 	if err := os.MkdirAll(filepath.Dir(partialPath), 0o755); err != nil {
