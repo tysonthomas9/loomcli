@@ -18,14 +18,8 @@ import (
 // Clients send it as X-API-Key and X-Fleet-API-Key. Optional in dev mode.
 const EnvFleetDBAPIKey = "LOOM_FLEET_DB_API_KEY" //nolint:gosec // env var name, not a credential
 
-// EnvFleetDBActor is the env var holding the X-Actor header value.
-// Defaults to the current agent name, then $USER. Canonically defined in
-// fleethttp alongside the actor context plumbing; aliased here for the
-// many bootstrap-level callers.
-const EnvFleetDBActor = fleethttp.EnvFleetDBActor
-
-// EnvAgentName is the env var used to identify the current agent process.
-const EnvAgentName = fleethttp.EnvAgentName
+// The X-Actor env vars and the resolver that reads them live in
+// internal/fleethttp, beside the transport that sends the header.
 
 // StoreHandle bundles a Store with the cleanup function for any
 // subprocess (embedded fleet-db) the bootstrap had to start. Callers
@@ -96,7 +90,7 @@ func OpenStore(ctx context.Context, dataDir string, logger *slog.Logger) (*Store
 	// See internal/backend/fleet/transport.go for the rationale.
 	cfg := fleetdb.Config{
 		APIKey:     os.Getenv(EnvFleetDBAPIKey),
-		Actor:      ResolveFleetDBActor(""),
+		Actor:      fleethttp.ResolveFleetDBActor(""),
 		HTTPClient: fleet.SharedHTTPClient(),
 	}
 
@@ -174,19 +168,4 @@ func waitAndOpenLocalStore(ctx context.Context, fleetDir string, cfg fleetdb.Con
 	}
 	logger.Info("opened existing embedded fleet-db client after startup wait", "url", cfg.BaseURL)
 	return &StoreHandle{Store: client, mode: ModeLocal, url: cfg.BaseURL}, nil
-}
-
-// ResolveFleetDBActor returns the X-Actor identity, preferring worker-specific
-// environment over the configured process actor and OS user fallback.
-func ResolveFleetDBActor(configuredActor string) string {
-	if v := os.Getenv(EnvFleetDBActor); v != "" {
-		return v
-	}
-	if v := os.Getenv(EnvAgentName); v != "" {
-		return v
-	}
-	if configuredActor != "" {
-		return configuredActor
-	}
-	return os.Getenv("USER")
 }

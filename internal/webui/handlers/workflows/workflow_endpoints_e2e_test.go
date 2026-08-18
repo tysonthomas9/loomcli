@@ -28,6 +28,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/netutil"
@@ -503,7 +504,7 @@ func (e *workflowEndpointE2E) startLoomServe() {
 		"LOOM_ISSUE_BACKEND":               "",
 		bootstrap.EnvFleetDBBin:            e.fleetDBBin,
 		bootstrap.EnvFleetDBAPIKey:         "",
-		bootstrap.EnvFleetDBActor:          e.actor,
+		fleethttp.EnvFleetDBActor:          e.actor,
 	})
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -544,7 +545,7 @@ func (e *workflowEndpointE2E) loomEnv() []string {
 		"DAYTONA_SDK_ROOT":         e.daytonaSDKRoot(),
 		bootstrap.EnvFleetDBBin:    e.fleetDBBin,
 		bootstrap.EnvFleetDBAPIKey: "",
-		bootstrap.EnvFleetDBActor:  e.actor,
+		fleethttp.EnvFleetDBActor:  e.actor,
 	})
 }
 

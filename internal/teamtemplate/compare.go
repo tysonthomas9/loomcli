@@ -69,20 +69,6 @@ func compareAgent(tpl TemplateAgent, existing *domain.Agent) []string {
 	})
 }
 
-// HasRoutingField reports whether a divergence touches a field that changes
-// which issues an agent role claims. A renderer uses it to tell a routing
-// divergence apart from a cosmetic one — a changed label set is not a wording
-// difference, it is a re-routing.
-func HasRoutingField(fields []string) bool {
-	for _, field := range fields {
-		switch field {
-		case "labels", "exclude_labels", "task_filter":
-			return true
-		}
-	}
-	return false
-}
-
 func stringDiff(name, bundle, existing string) fieldCheck {
 	return fieldCheck{name: name, diverged: bundle != "" && bundle != existing}
 }

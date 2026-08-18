@@ -8,7 +8,19 @@
 # work. Ratchet these back down (or remove the entries) when coupling is paid
 # down; do not raise them without recording why here.
 internal/cli/daemon/supervisor 21
-internal/cli 19
+# Moving ResolveFleetDBActor out of internal/bootstrap and into internal/fleethttp
+# cost internal/cli and internal/cli/serve one direct import each: both already
+# imported bootstrap for other reasons, so they now name fleethttp as well. The
+# trade is deliberate — internal/httpclient called that resolver as its ONLY use
+# of bootstrap, and dropping that single edge took it from 20 transitive internal
+# packages to 3 (bootstrap pulls in the embedded fleet-db launcher, infra/fleetdb,
+# backend/fleet, connector/providers and webui/localredis). This gate counts
+# direct edges, so it cannot see that fleethttp is a stdlib-only leaf: the two
+# edges added here carry no transitive weight, and the one removed carried 17.
+# Remove these two entries by giving each package the actor it needs from
+# something it already imports, not by restoring the bootstrap alias.
+internal/cli 20
+internal/cli/serve 19
 # The webui service layer and route wiring each grew two seams for the Team
 # Templates + audit-trail work: svcimpl consumes internal/events (merging daemon
 # lifecycle events into the workspace audit feed) and internal/teamtemplate (the

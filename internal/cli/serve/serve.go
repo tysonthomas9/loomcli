@@ -29,6 +29,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/usagecmd"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	webuiapp "github.com/tysonthomas9/loomcli/internal/webui/app"
@@ -486,8 +487,8 @@ func ensureFleetStoreEnv(cfg config.FleetClientConfig) {
 	if os.Getenv(bootstrap.EnvFleetDBURL) == "" && cfg.URL != "" {
 		_ = os.Setenv(bootstrap.EnvFleetDBURL, cfg.URL)
 	}
-	if os.Getenv(bootstrap.EnvFleetDBActor) == "" && cfg.Actor != "" {
-		_ = os.Setenv(bootstrap.EnvFleetDBActor, cfg.Actor)
+	if os.Getenv(fleethttp.EnvFleetDBActor) == "" && cfg.Actor != "" {
+		_ = os.Setenv(fleethttp.EnvFleetDBActor, cfg.Actor)
 	}
 }
 
@@ -532,7 +533,7 @@ func resolveFleetState(ctx context.Context) fleetState {
 		fs.clientCfg.URL = os.Getenv(bootstrap.EnvFleetDBURL)
 	}
 	if fs.clientCfg.Actor == "" {
-		fs.clientCfg.Actor = bootstrap.ResolveFleetDBActor("")
+		fs.clientCfg.Actor = fleethttp.ResolveFleetDBActor("")
 	}
 
 	fs.jwtKey, fs.redisConfig = daemonwire.ResolveFleetJWTKey(ctx, serveRedisAddr, serveRedisPassword)

@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 )
 
 // fakeAuthConfigServer returns an httptest.Server whose /api/config endpoint
@@ -209,7 +209,7 @@ func TestGetIssueBackend_ServerMutationCarriesResolvedActor(t *testing.T) {
 		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 		t.Setenv("LOOM_SERVER_URL", srv.URL)
 		t.Setenv("LOOM_WORKSPACE", "WS")
-		t.Setenv(bootstrap.EnvFleetDBActor, "worker-caller")
+		t.Setenv(fleethttp.EnvFleetDBActor, "worker-caller")
 		serverURL = ""
 
 		ib, err := getIssueBackend(t.Context())

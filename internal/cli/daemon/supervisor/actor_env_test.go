@@ -4,14 +4,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 )
 
 func TestBuildCommandWorkerActorOverridesParentActor(t *testing.T) {
-	t.Setenv(bootstrap.EnvFleetDBActor, "local-mode-harness@fixture.local")
-	t.Setenv(bootstrap.EnvAgentName, "parent-agent")
+	t.Setenv(fleethttp.EnvFleetDBActor, "local-mode-harness@fixture.local")
+	t.Setenv(fleethttp.EnvAgentName, "parent-agent")
 	worktree := t.TempDir()
 	s := &Supervisor{
 		ConfigSnapshot: func() *cfgpkg.DaemonConfig {
@@ -33,9 +33,9 @@ func TestBuildCommandWorkerActorOverridesParentActor(t *testing.T) {
 	}
 	actorCount := 0
 	for _, entry := range cmd.Env {
-		if strings.HasPrefix(entry, bootstrap.EnvFleetDBActor+"=") {
+		if strings.HasPrefix(entry, fleethttp.EnvFleetDBActor+"=") {
 			actorCount++
-			if entry != bootstrap.EnvFleetDBActor+"=api-architect-1" {
+			if entry != fleethttp.EnvFleetDBActor+"=api-architect-1" {
 				t.Fatalf("worker actor env = %q", entry)
 			}
 		}

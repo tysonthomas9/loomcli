@@ -3,7 +3,7 @@ package config
 import (
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 )
 
 func clearFleetEnv(t *testing.T) {
@@ -12,7 +12,7 @@ func clearFleetEnv(t *testing.T) {
 	t.Setenv("LOOM_WORKSPACE", "")
 	t.Setenv("LOOM_FLEET_API_KEY", "")
 	t.Setenv("LOOM_FLEET_ACTOR", "")
-	t.Setenv(bootstrap.EnvFleetDBActor, "")
+	t.Setenv(fleethttp.EnvFleetDBActor, "")
 	t.Setenv("LOOM_AGENT_NAME", "")
 	t.Setenv("USER", "")
 }
@@ -73,7 +73,7 @@ func TestResolveFleetConfig_AgentNameOverridesConfiguredActor(t *testing.T) {
 func TestResolveFleetConfig_FleetDBActorOverridesConfiguredActor(t *testing.T) {
 	clearFleetEnv(t)
 	t.Setenv("LOOM_FLEET_ACTOR", "config-actor")
-	t.Setenv(bootstrap.EnvFleetDBActor, "agent-x")
+	t.Setenv(fleethttp.EnvFleetDBActor, "agent-x")
 
 	cfg := ResolveFleetConfig(nil)
 

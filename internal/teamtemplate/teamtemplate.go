@@ -15,6 +15,7 @@ import (
 	"bytes"
 	"embed"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -31,50 +32,50 @@ const SchemaVersion = 1
 // TeamTemplate is one bundle: an ordered set of agent roles and the agents that
 // take them.
 type TeamTemplate struct {
-	SchemaVersion int             `yaml:"schema_version"`
-	ID            string          `yaml:"id"`
-	Label         string          `yaml:"label"`
-	Description   string          `yaml:"description"`
-	Revision      int             `yaml:"revision"` // CONTENT version, bumped on roster edits
-	Roles         []TemplateRole  `yaml:"roles"`
-	Agents        []TemplateAgent `yaml:"agents"`
+	SchemaVersion int             `yaml:"schema_version" json:"schema_version"`
+	ID            string          `yaml:"id" json:"id"`
+	Label         string          `yaml:"label" json:"label"`
+	Description   string          `yaml:"description" json:"description"`
+	Revision      int             `yaml:"revision" json:"revision"` // CONTENT version, bumped on roster edits
+	Roles         []TemplateRole  `yaml:"roles" json:"roles"`
+	Agents        []TemplateAgent `yaml:"agents" json:"agents"`
 }
 
 // TemplateRole maps 1:1 onto store.RoleCreate. The agent-role entity survives
 // the worker-profile migration untouched, so this half of the schema is
 // migration-safe by construction.
 type TemplateRole struct {
-	Name        string `yaml:"name"`
-	Kind        string `yaml:"kind"` // ALWAYS explicit: "worker" | "interactive"
-	Description string `yaml:"description"`
-	PromptFile  string `yaml:"prompt_file"` // "builtin:<id>" only
-	Model       string `yaml:"model"`
-	TaskFilter  string `yaml:"task_filter"` // "has_design" | "any" | "" — never needs_plan/needs_design
-	Effort      string `yaml:"effort"`
+	Name        string `yaml:"name" json:"name"`
+	Kind        string `yaml:"kind" json:"kind"` // ALWAYS explicit: "worker" | "interactive"
+	Description string `yaml:"description" json:"description"`
+	PromptFile  string `yaml:"prompt_file" json:"prompt_file"` // "builtin:<id>" only
+	Model       string `yaml:"model" json:"model"`
+	TaskFilter  string `yaml:"task_filter" json:"task_filter"` // "has_design" | "any" | "" — never needs_plan/needs_design
+	Effort      string `yaml:"effort" json:"effort"`
 
 	// Skills score a candidate agent role, they never gate it: with skills set
 	// and no overlap the issue still scores as a fallback match.
-	Skills []string `yaml:"skills"`
+	Skills []string `yaml:"skills" json:"skills"`
 
 	// Labels / ExcludeLabels are the HARD routing gate. Labels is AND-required;
 	// ExcludeLabels is OR-rejecting and evaluated first. These are NOT the
 	// presentation DisplayLabel below and NOT Skills: they are issue-label
 	// semantics, which fleet-db's role model already defines.
-	Labels        []string `yaml:"labels"`
-	ExcludeLabels []string `yaml:"exclude_labels"`
+	Labels        []string `yaml:"labels" json:"labels"`
+	ExcludeLabels []string `yaml:"exclude_labels" json:"exclude_labels"`
 
-	ReadOnly       bool     `yaml:"read_only"`     // false in every v1 bundle
-	AllowedTools   []string `yaml:"allowed_tools"` // empty in every v1 bundle
-	DeniedTools    []string `yaml:"denied_tools"`  // empty in every v1 bundle
-	MaxConcurrency *int     `yaml:"max_concurrency"`
-	MaxBudgetUSD   *float64 `yaml:"max_budget_usd"`
-	MaxRunDuration *int     `yaml:"max_run_duration"`
+	ReadOnly       bool     `yaml:"read_only" json:"read_only"`         // false in every v1 bundle
+	AllowedTools   []string `yaml:"allowed_tools" json:"allowed_tools"` // empty in every v1 bundle
+	DeniedTools    []string `yaml:"denied_tools" json:"denied_tools"`   // empty in every v1 bundle
+	MaxConcurrency *int     `yaml:"max_concurrency" json:"max_concurrency"`
+	MaxBudgetUSD   *float64 `yaml:"max_budget_usd" json:"max_budget_usd"`
+	MaxRunDuration *int     `yaml:"max_run_duration" json:"max_run_duration"`
 
 	// DisplayLabel is presentation-only and NOT persisted: domain.Role has no
 	// display-label field, and Role.Labels (above) means issue-filter labels — a
 	// genuinely different thing. Consumed by the picker cards and by
 	// `loom template show`.
-	DisplayLabel string `yaml:"display_label"` // "Developer" | "QA" | "Architecture"
+	DisplayLabel string `yaml:"display_label" json:"display_label"` // "Developer" | "QA" | "Architecture"
 }
 
 // TemplateAgent stays inside the store.AgentCreate ∩ worker-profile
@@ -84,15 +85,15 @@ type TemplateRole struct {
 // migration mapping is lossy by construction. v1 is unaffected: every bundle
 // agent is auto + desired_state running.
 type TemplateAgent struct {
-	Name         string `yaml:"name"`
-	RoleName     string `yaml:"role_name"`
-	Auto         bool   `yaml:"auto"`
-	DesiredState string `yaml:"desired_state"` // INTENT, not observed state
+	Name         string `yaml:"name" json:"name"`
+	RoleName     string `yaml:"role_name" json:"role_name"`
+	Auto         bool   `yaml:"auto" json:"auto"`
+	DesiredState string `yaml:"desired_state" json:"desired_state"` // INTENT, not observed state
 
 	// CrossRepo is true in every v1 bundle. Without it, empty repo affinity
 	// materializes only the first repo while routing reads empty affinity as
 	// "all repos" — one checkout, issues from everywhere.
-	CrossRepo bool `yaml:"cross_repo"`
+	CrossRepo bool `yaml:"cross_repo" json:"cross_repo"`
 }
 
 //go:embed bundles/*.yaml
@@ -169,7 +170,44 @@ func loadBundles() ([]TeamTemplate, error) {
 		seen[tpl.ID] = true
 		out = append(out, tpl)
 	}
+	if err := checkSharedRoles(out); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+// checkSharedRoles enforces the cross-bundle invariant: a role name that appears
+// in more than one bundle must be defined identically in every bundle that
+// declares it.
+//
+// This is load-bearing, not tidiness. Apply compares an existing agent role
+// against the bundle's definition field by field and reports any difference as
+// diverged, refusing to overwrite it. Two bundles that spell the same role name
+// differently would therefore make apply order significant: a workspace that
+// applied one bundle first would see the second report a divergence it never
+// asked for. Prose comments used to be the only thing holding this together,
+// and one of them had already drifted out of sync with the file it described.
+func checkSharedRoles(templates []TeamTemplate) error {
+	type origin struct {
+		templateID string
+		role       TemplateRole
+	}
+	first := make(map[string]origin)
+	for _, tpl := range templates {
+		for _, role := range tpl.Roles {
+			prior, ok := first[role.Name]
+			if !ok {
+				first[role.Name] = origin{templateID: tpl.ID, role: role}
+				continue
+			}
+			if !reflect.DeepEqual(prior.role, role) {
+				return fmt.Errorf(
+					"agent role %q is defined differently in bundles %q and %q: shared role names must be identical in every bundle that declares them",
+					role.Name, prior.templateID, tpl.ID)
+			}
+		}
+	}
+	return nil
 }
 
 func readBundle(name string) (TeamTemplate, error) {

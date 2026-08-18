@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/authmode"
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
@@ -49,7 +49,7 @@ func New(cfg Config) (*Client, error) {
 
 	c := &Client{
 		serverURL: serverURL,
-		actor:     bootstrap.ResolveFleetDBActor(cfg.Actor),
+		actor:     fleethttp.ResolveFleetDBActor(cfg.Actor),
 		httpClient: &http.Client{
 			Transport: otelhttp.NewTransport(http.DefaultTransport),
 			Timeout:   30 * time.Second,

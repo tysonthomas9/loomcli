@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
@@ -41,6 +42,46 @@ type AgentWorktreeMaterializer struct {
 	// SkipAgent short-circuits materialization for agents that need no
 	// worktrees. Optional; nil means every agent is materialized.
 	SkipAgent SkipAgentFunc
+}
+
+// RepoLister lists the repos registered in a workspace. Both CLI callers pass
+// store.Store's repo-service List; taking the method rather than the store
+// keeps this package free of a dependency on store.
+type RepoLister func(ctx context.Context, workspaceKey string) ([]*domain.Repo, error)
+
+// StateCacheMaterializer builds the materializer the CLI surfaces use: the
+// per-machine state cache supplies the workspace root and each repo's on-disk
+// path, listRepos supplies the roster. SkipAgent is left unset — every caller
+// owns its own policy for which agents to skip, so it sets that field itself.
+func StateCacheMaterializer(listRepos RepoLister) AgentWorktreeMaterializer {
+	return AgentWorktreeMaterializer{
+		ResolveWorkspace: func(ctx context.Context, workspaceKey string) (LocalWorkspaceView, error) {
+			cache, err := bootstrap.LoadStateCache()
+			if err != nil {
+				return LocalWorkspaceView{}, fmt.Errorf("load local workspace state: %w", err)
+			}
+			local := cache.Workspaces[workspaceKey]
+			if local.Path == "" {
+				return LocalWorkspaceView{}, nil
+			}
+			repos, err := listRepos(ctx, workspaceKey)
+			if err != nil {
+				return LocalWorkspaceView{}, fmt.Errorf("list workspace repos: %w", err)
+			}
+			localRepos := make([]Repo, 0, len(repos))
+			for _, repo := range repos {
+				if repo == nil {
+					continue
+				}
+				localRepos = append(localRepos, Repo{
+					Name:   repo.Name,
+					Path:   RepoPath(local, repo.Name),
+					Groups: append([]string(nil), repo.Groups...),
+				})
+			}
+			return LocalWorkspaceView{Root: local.Path, Repos: localRepos}, nil
+		},
+	}
 }
 
 // MaterializeErrorKind classifies an agent worktree materialization failure so

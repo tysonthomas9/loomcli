@@ -192,9 +192,6 @@ func TestApplyReportsDivergenceWithoutOverwriting(t *testing.T) {
 	if got := strings.Join(step.Fields, ","); got != "description,labels" {
 		t.Fatalf("fields = %q, want \"description,labels\" (skills compare as sets)", got)
 	}
-	if !HasRoutingField(step.Fields) {
-		t.Error("a labels divergence must be reported as a routing change")
-	}
 	role, err := st.Roles().Get(ctx, testWorkspace, "app-architect")
 	if err != nil {
 		t.Fatalf("get agent role: %v", err)
@@ -609,17 +606,6 @@ func TestCompareRoleTreatsLegacyBlankKindAsWorker(t *testing.T) {
 	}
 	if fields := compareRole(frontend, existing); len(fields) != 0 {
 		t.Fatalf("a blank stored kind was reported as divergence: %v", fields)
-	}
-}
-
-func TestHasRoutingField(t *testing.T) {
-	if HasRoutingField([]string{"description", "effort"}) {
-		t.Error("description/effort is not a routing change")
-	}
-	for _, field := range []string{"labels", "exclude_labels", "task_filter"} {
-		if !HasRoutingField([]string{"description", field}) {
-			t.Errorf("%s must count as a routing change", field)
-		}
 	}
 }
 

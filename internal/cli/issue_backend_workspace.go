@@ -9,6 +9,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -19,7 +20,7 @@ import (
 // instead of the process-global default backend. Falls back to
 // DefaultIssueBackend when ctx has no workspace or the env var is unset.
 func WorkspaceAwareIssueBackend() func(ctx context.Context) backend.IssueBackend {
-	return WorkspaceAwareIssueBackendForURL(os.Getenv(bootstrap.EnvFleetDBURL), os.Getenv(bootstrap.EnvFleetDBActor))
+	return WorkspaceAwareIssueBackendForURL(os.Getenv(bootstrap.EnvFleetDBURL), os.Getenv(fleethttp.EnvFleetDBActor))
 }
 
 // WorkspaceAwareIssueBackendForURL returns an IssueBackend factory scoped to a
@@ -34,7 +35,7 @@ func WorkspaceAwareIssueBackendForURL(fleetURL, actor string) func(ctx context.C
 	}
 
 	if actor == "" {
-		actor = os.Getenv(bootstrap.EnvFleetDBActor)
+		actor = os.Getenv(fleethttp.EnvFleetDBActor)
 	}
 	if actor == "" {
 		actor = os.Getenv("USER")

@@ -23,6 +23,7 @@ import (
 	"io"
 	"math/rand/v2"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -43,6 +44,23 @@ const EnvFleetDBActor = "LOOM_FLEET_DB_ACTOR"
 
 // EnvAgentName is the env var used to identify the current agent process.
 const EnvAgentName = "LOOM_AGENT_NAME"
+
+// ResolveFleetDBActor returns the X-Actor identity, preferring worker-specific
+// environment over the configured process actor and OS user fallback. It lives
+// here rather than in bootstrap so that transport-level callers can resolve an
+// actor without taking a dependency on store construction.
+func ResolveFleetDBActor(configuredActor string) string {
+	if v := os.Getenv(EnvFleetDBActor); v != "" {
+		return v
+	}
+	if v := os.Getenv(EnvAgentName); v != "" {
+		return v
+	}
+	if configuredActor != "" {
+		return configuredActor
+	}
+	return os.Getenv("USER")
+}
 
 // Doer is the subset of http.Client used by Do.
 type Doer interface {

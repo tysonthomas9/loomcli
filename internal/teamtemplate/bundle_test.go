@@ -314,3 +314,61 @@ func TestBundlesCarryNoLocalPathsOrSecrets(t *testing.T) {
 		}
 	}
 }
+
+// TestCheckSharedRoles_RejectsDivergentDuplicate is the guard that replaces the
+// prose comments: two bundles declaring the same role name with different
+// content must fail to load rather than make apply order significant.
+func TestCheckSharedRoles_RejectsDivergentDuplicate(t *testing.T) {
+	base := TemplateRole{Name: "code-reviewer", Kind: "worker", Effort: "medium"}
+	divergent := base
+	divergent.Effort = "high"
+
+	err := checkSharedRoles([]TeamTemplate{
+		{ID: "alpha", Roles: []TemplateRole{base}},
+		{ID: "beta", Roles: []TemplateRole{divergent}},
+	})
+	if err == nil {
+		t.Fatal("checkSharedRoles = nil for a divergent duplicate role, want an error")
+	}
+	for _, want := range []string{"code-reviewer", "alpha", "beta"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not name %q", err, want)
+		}
+	}
+}
+
+// TestCheckSharedRoles_AllowsIdenticalDuplicate keeps the check from rejecting
+// the shared roles the shipped bundles actually rely on.
+func TestCheckSharedRoles_AllowsIdenticalDuplicate(t *testing.T) {
+	role := TemplateRole{Name: "code-reviewer", Kind: "worker", Skills: []string{"review"}}
+	if err := checkSharedRoles([]TeamTemplate{
+		{ID: "alpha", Roles: []TemplateRole{role}},
+		{ID: "beta", Roles: []TemplateRole{role}},
+	}); err != nil {
+		t.Fatalf("checkSharedRoles = %v for an identical duplicate role, want nil", err)
+	}
+}
+
+// TestShippedBundlesShareRolesVerbatim proves the invariant holds across the
+// bundles as shipped, and that at least one role really is shared (so the check
+// is not vacuously passing).
+func TestShippedBundlesShareRolesVerbatim(t *testing.T) {
+	counts := map[string]int{}
+	for _, tpl := range All() {
+		for _, role := range tpl.Roles {
+			counts[role.Name]++
+		}
+	}
+	shared := 0
+	for _, n := range counts {
+		if n > 1 {
+			shared++
+		}
+	}
+	if shared == 0 {
+		t.Fatal("no role name is shared across bundles; checkSharedRoles guards nothing")
+	}
+	if err := checkSharedRoles(All()); err != nil {
+		t.Fatalf("shipped bundles violate the shared-role invariant: %v", err)
+	}
+}

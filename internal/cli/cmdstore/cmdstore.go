@@ -17,6 +17,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 	"github.com/tysonthomas9/loomcli/internal/runtimectx"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -48,9 +49,9 @@ func ensureFleetDBEnvFromFleetEnv() {
 			_ = os.Setenv(bootstrap.EnvFleetDBURL, v)
 		}
 	}
-	if os.Getenv(bootstrap.EnvFleetDBActor) == "" {
+	if os.Getenv(fleethttp.EnvFleetDBActor) == "" {
 		if v := os.Getenv("LOOM_FLEET_ACTOR"); v != "" {
-			_ = os.Setenv(bootstrap.EnvFleetDBActor, v)
+			_ = os.Setenv(fleethttp.EnvFleetDBActor, v)
 		}
 	}
 }

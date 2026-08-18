@@ -45,9 +45,10 @@ roles:
     skills: [data, migration]
     denied_tools: []
 
-  # Same name as the fullstack-app bundle's QA agent role but a different lens
-  # (integration/contract rather than unit/e2e), so a workspace that applied
-  # fullstack-app first reports this one as diverged rather than matched.
+  # Defined identically to the fullstack-app bundle's qa-engineer, so a workspace
+  # that applied fullstack-app first reports this one as matched and leaves it
+  # untouched. checkSharedRoles enforces that byte-identity at load time; edit
+  # both bundles together or the package fails to load.
   - name: qa-engineer
     kind: worker
     display_label: QA

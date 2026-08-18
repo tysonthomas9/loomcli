@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -275,7 +276,7 @@ func (b *fleetDBIssueBackend) withBackend(ctx context.Context, op string, fn fun
 		BaseURL:     handle.URL(),
 		WorkspaceID: ws,
 		APIKey:      os.Getenv(bootstrap.EnvFleetDBAPIKey),
-		Actor:       bootstrap.ResolveFleetDBActor(""),
+		Actor:       fleethttp.ResolveFleetDBActor(""),
 	})
 	if err != nil {
 		return backend.ErrUnavailable(op, "create fleet-db issue backend", err)

@@ -10,7 +10,11 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
-func TestWithWorktree_EmptyBackendMirrorsCodexRollout(t *testing.T) {
+// newSessionWithCodexRollout stands up a session on the given backend next to a
+// codex rollout that names the session's worktree, so a test can assert only on
+// whether WithWorktree chose to probe for it.
+func newSessionWithCodexRollout(t *testing.T, backend string) (*sessions.Store, *sessions.Session, string) {
+	t.Helper()
 	runtimeDir := t.TempDir()
 	store, err := sessions.NewStore(runtimeDir)
 	if err != nil {
@@ -18,7 +22,7 @@ func TestWithWorktree_EmptyBackendMirrorsCodexRollout(t *testing.T) {
 	}
 	sess, err := store.CreateSession(sessions.CreateOptions{
 		AgentName: "worker",
-		Backend:   "",
+		Backend:   backend,
 	})
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
@@ -50,6 +54,14 @@ func TestWithWorktree_EmptyBackendMirrorsCodexRollout(t *testing.T) {
 		t.Fatalf("write rollout: %v", err)
 	}
 
+	return store, sess, worktreeDir
+}
+
+// TestWithWorktree_EmptyBackendMirrorsCodexRollout pins the migration shim: a
+// session persisted by a pre-backend binary still gets its transcript mirrored.
+func TestWithWorktree_EmptyBackendMirrorsCodexRollout(t *testing.T) {
+	store, sess, worktreeDir := newSessionWithCodexRollout(t, "")
+
 	if _, err := WithWorktree(sess, WithWorktreeOptions{WorktreePath: worktreeDir}); err != nil {
 		t.Fatalf("WithWorktree: %v", err)
 	}
@@ -60,5 +72,25 @@ func TestWithWorktree_EmptyBackendMirrorsCodexRollout(t *testing.T) {
 	}
 	if len(transcript) == 0 {
 		t.Fatal("native transcript is empty")
+	}
+}
+
+// TestWithWorktree_UnhandledBackendIsNotProbed guards the boundary the shim must
+// not cross: gemini is a registered backend with neither a codex rollout nor a
+// claude transcript, so finalize must mirror nothing rather than attribute
+// another backend's transcript to it.
+func TestWithWorktree_UnhandledBackendIsNotProbed(t *testing.T) {
+	store, sess, worktreeDir := newSessionWithCodexRollout(t, "gemini")
+
+	if _, err := WithWorktree(sess, WithWorktreeOptions{WorktreePath: worktreeDir}); err != nil {
+		t.Fatalf("WithWorktree: %v", err)
+	}
+
+	transcript, err := os.ReadFile(store.NativeTranscriptPath(sess.SessionID()))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read native transcript: %v", err)
+	}
+	if len(transcript) != 0 {
+		t.Fatalf("gemini session was probed for a codex rollout; mirrored %d bytes", len(transcript))
 	}
 }

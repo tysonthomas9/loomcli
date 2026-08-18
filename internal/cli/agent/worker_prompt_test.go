@@ -28,6 +28,13 @@ func fullWorkerPromptData() PromptData {
 	}
 }
 
+// generateWorkerPrompt renders a worker prompt with a fixed context. Production
+// goes through generateWorkerPromptWith, which builds the context lazily from
+// the fields the body references; the tests below supply it eagerly instead.
+func generateWorkerPrompt(id string, data PromptData) (string, error) {
+	return generateWorkerPromptWith(id, func(promptFieldRefs) PromptData { return data })
+}
+
 // TestGenerateWorkerPromptRendersEveryRegisteredPrompt is the guard §10.8 asks
 // for: every embedded team-*.md must EXECUTE against PromptData, not merely
 // parse. A body copied from planning.md would reference a promptTemplateData
@@ -39,19 +46,19 @@ func TestGenerateWorkerPromptRendersEveryRegisteredPrompt(t *testing.T) {
 
 	for _, p := range domain.BuiltinWorkerPrompts() {
 		t.Run(p.ID, func(t *testing.T) {
-			prompt, err := GenerateWorkerPrompt(p.ID, fullWorkerPromptData())
+			prompt, err := generateWorkerPrompt(p.ID, fullWorkerPromptData())
 			if err != nil {
-				t.Fatalf("GenerateWorkerPrompt(%q) error = %v", p.ID, err)
+				t.Fatalf("generateWorkerPrompt(%q) error = %v", p.ID, err)
 			}
 			if strings.TrimSpace(prompt) == "" {
-				t.Fatalf("GenerateWorkerPrompt(%q) rendered empty", p.ID)
+				t.Fatalf("generateWorkerPrompt(%q) rendered empty", p.ID)
 			}
 			if strings.Contains(prompt, "{{") || strings.Contains(prompt, "}}") {
-				t.Errorf("GenerateWorkerPrompt(%q) left an unrendered template action", p.ID)
+				t.Errorf("generateWorkerPrompt(%q) left an unrendered template action", p.ID)
 			}
 			for _, want := range []string{"falcon", "SAFETY-BLOCK", "loom complete"} {
 				if !strings.Contains(prompt, want) {
-					t.Errorf("GenerateWorkerPrompt(%q) missing %q", p.ID, want)
+					t.Errorf("generateWorkerPrompt(%q) missing %q", p.ID, want)
 				}
 			}
 		})
@@ -67,13 +74,13 @@ func TestWorkerPromptsCarryWorkerContext(t *testing.T) {
 
 	for _, p := range domain.BuiltinWorkerPrompts() {
 		t.Run(p.ID, func(t *testing.T) {
-			prompt, err := GenerateWorkerPrompt(p.ID, fullWorkerPromptData())
+			prompt, err := generateWorkerPrompt(p.ID, fullWorkerPromptData())
 			if err != nil {
-				t.Fatalf("GenerateWorkerPrompt(%q) error = %v", p.ID, err)
+				t.Fatalf("generateWorkerPrompt(%q) error = %v", p.ID, err)
 			}
 			for _, want := range []string{"proj-abc.5", "TASK-DETAIL", "CHECKPOINT-BLOCK", "WORKSPACE-BLOCK"} {
 				if !strings.Contains(prompt, want) {
-					t.Errorf("GenerateWorkerPrompt(%q) dropped worker context %q", p.ID, want)
+					t.Errorf("generateWorkerPrompt(%q) dropped worker context %q", p.ID, want)
 				}
 			}
 		})
@@ -92,12 +99,12 @@ func TestWorkerPromptsWithoutPreClaimedTask(t *testing.T) {
 
 	for _, p := range domain.BuiltinWorkerPrompts() {
 		t.Run(p.ID, func(t *testing.T) {
-			prompt, err := GenerateWorkerPrompt(p.ID, data)
+			prompt, err := generateWorkerPrompt(p.ID, data)
 			if err != nil {
-				t.Fatalf("GenerateWorkerPrompt(%q) error = %v", p.ID, err)
+				t.Fatalf("generateWorkerPrompt(%q) error = %v", p.ID, err)
 			}
 			if !strings.Contains(prompt, "loom data claim") {
-				t.Errorf("GenerateWorkerPrompt(%q) has no claim instructions for an unclaimed run", p.ID)
+				t.Errorf("generateWorkerPrompt(%q) has no claim instructions for an unclaimed run", p.ID)
 			}
 		})
 	}
@@ -113,9 +120,9 @@ func TestDesignPromptsUseWorkspaceDesignFormat(t *testing.T) {
 		t.Run(id, func(t *testing.T) {
 			data := fullWorkerPromptData()
 			data.DesignFormat = "html"
-			prompt, err := GenerateWorkerPrompt(id, data)
+			prompt, err := generateWorkerPrompt(id, data)
 			if err != nil {
-				t.Fatalf("GenerateWorkerPrompt(%q) error = %v", id, err)
+				t.Fatalf("generateWorkerPrompt(%q) error = %v", id, err)
 			}
 			if !strings.Contains(prompt, "--design-format=html") {
 				t.Errorf("%s did not pass the workspace design format to loom data update", id)
@@ -150,9 +157,9 @@ func TestWorkerPromptRoleLens(t *testing.T) {
 		t.Run(tt.id+"/"+tt.role, func(t *testing.T) {
 			data := fullWorkerPromptData()
 			data.Role = tt.role
-			prompt, err := GenerateWorkerPrompt(tt.id, data)
+			prompt, err := generateWorkerPrompt(tt.id, data)
 			if err != nil {
-				t.Fatalf("GenerateWorkerPrompt(%q) error = %v", tt.id, err)
+				t.Fatalf("generateWorkerPrompt(%q) error = %v", tt.id, err)
 			}
 			if !strings.Contains(prompt, tt.want) {
 				t.Errorf("%s as %s: missing lens text %q", tt.id, tt.role, tt.want)
@@ -170,9 +177,9 @@ func TestWorkerPromptRoleLens(t *testing.T) {
 func TestGenerateWorkerPromptUnknownID(t *testing.T) {
 	isolatePromptOverrides(t)
 
-	_, err := GenerateWorkerPrompt("team-nope", fullWorkerPromptData())
+	_, err := generateWorkerPrompt("team-nope", fullWorkerPromptData())
 	if err == nil {
-		t.Fatal("GenerateWorkerPrompt(\"team-nope\") error = nil, want unknown-prompt error")
+		t.Fatal("generateWorkerPrompt(\"team-nope\") error = nil, want unknown-prompt error")
 	}
 	if !strings.Contains(err.Error(), "team-nope") {
 		t.Errorf("error %q does not name the unknown prompt", err)
@@ -189,8 +196,8 @@ func TestGenerateWorkerPromptUnknownID(t *testing.T) {
 func TestGenerateWorkerPromptRejectsInteractiveID(t *testing.T) {
 	isolatePromptOverrides(t)
 
-	if _, err := GenerateWorkerPrompt("lead", fullWorkerPromptData()); err == nil {
-		t.Fatal("GenerateWorkerPrompt(\"lead\") error = nil, want rejection of an interactive prompt ID")
+	if _, err := generateWorkerPrompt("lead", fullWorkerPromptData()); err == nil {
+		t.Fatal("generateWorkerPrompt(\"lead\") error = nil, want rejection of an interactive prompt ID")
 	}
 }
 
@@ -210,9 +217,9 @@ func TestGenerateWorkerPromptOverrideFallback(t *testing.T) {
 	promptOverrideDir = overrideDir
 	t.Cleanup(func() { promptOverrideDir = "" })
 
-	prompt, err := GenerateWorkerPrompt("team-qa", fullWorkerPromptData())
+	prompt, err := generateWorkerPrompt("team-qa", fullWorkerPromptData())
 	if err != nil {
-		t.Fatalf("GenerateWorkerPrompt(\"team-qa\") error = %v, want fallback to the embedded body", err)
+		t.Fatalf("generateWorkerPrompt(\"team-qa\") error = %v, want fallback to the embedded body", err)
 	}
 	if !strings.Contains(prompt, "WORKFLOW: QA Task") {
 		t.Errorf("expected the embedded QA body after the override failed, got: %q", truncateForError(prompt))
@@ -231,9 +238,9 @@ func TestGenerateWorkerPromptUsesValidOverride(t *testing.T) {
 	promptOverrideDir = overrideDir
 	t.Cleanup(func() { promptOverrideDir = "" })
 
-	prompt, err := GenerateWorkerPrompt("team-qa", fullWorkerPromptData())
+	prompt, err := generateWorkerPrompt("team-qa", fullWorkerPromptData())
 	if err != nil {
-		t.Fatalf("GenerateWorkerPrompt(\"team-qa\") error = %v", err)
+		t.Fatalf("generateWorkerPrompt(\"team-qa\") error = %v", err)
 	}
 	if prompt != "QA override for falcon" {
 		t.Errorf("prompt = %q, want the rendered override", prompt)

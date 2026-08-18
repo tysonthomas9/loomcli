@@ -8,17 +8,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
-// BuiltinWorkerPrompt is a built-in prompt an autonomous agent role can name in
-// its prompt_file.
-type BuiltinWorkerPrompt = domain.BuiltinWorkerPrompt
-
-// BuiltinWorkerPrompts returns the built-in worker agent-role prompts.
-func BuiltinWorkerPrompts() []BuiltinWorkerPrompt {
-	return domain.BuiltinWorkerPrompts()
-}
-
-// GenerateWorkerPrompt renders the built-in worker agent-role prompt named by
-// id with the given context.
+// generateWorkerPromptWith renders the built-in worker agent-role prompt named
+// by id. build is handed the fields the body actually references, so a team
+// prompt that never names {{.TaskDetail}} never pays for the issue-backend
+// round trip it would have cost.
 //
 // This is the worker counterpart of GenerateTerminalPrompt, and the difference
 // between them is the whole point: a terminal prompt renders with
@@ -28,14 +21,6 @@ func BuiltinWorkerPrompts() []BuiltinWorkerPrompt {
 // CheckpointBlock and EpicID. Rendering a worker body through the terminal
 // renderer would silently drop all four, so the two renderers stay separate and
 // the embedded team-*.md bodies reference PromptData fields only.
-func GenerateWorkerPrompt(id string, data PromptData) (string, error) {
-	return generateWorkerPromptWith(id, func(promptFieldRefs) PromptData { return data })
-}
-
-// generateWorkerPromptWith is GenerateWorkerPrompt with the lazy context build
-// the custom-prompt loader uses: build is handed the fields the body actually
-// references, so a team prompt that never names {{.TaskDetail}} never pays for
-// the issue-backend round trip it would have cost.
 func generateWorkerPromptWith(id string, build func(promptFieldRefs) PromptData) (string, error) {
 	id = strings.TrimSpace(id)
 	if !domain.IsBuiltinWorkerPrompt(id) {

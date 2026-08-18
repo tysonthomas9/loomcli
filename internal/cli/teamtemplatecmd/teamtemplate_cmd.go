@@ -32,7 +32,7 @@ func productionCommandDeps() commandDeps {
 		withActiveWorkspace: cmdstore.WithActiveWorkspace,
 		loadStateCache:      bootstrap.LoadStateCache,
 		localMaterializer: func(st store.Store) teamtemplate.LocalMaterializer {
-			return cliAgentWorktreeMaterializer(st).Materialize
+			return localworkspace.StateCacheMaterializer(st.Repos().List).Materialize
 		},
 		writeJSON: cmdstore.WriteJSON,
 	}
@@ -122,7 +122,7 @@ func newTemplateShowCommand(deps commandDeps) *cobra.Command {
 				return fmt.Errorf("template %q not found (run 'loom template list')", args[0])
 			}
 			if jsonOutput {
-				return deps.writeJSON(templateJSONFrom(tpl))
+				return deps.writeJSON(tpl)
 			}
 			renderTemplate(cmd.OutOrStdout(), tpl)
 			return nil
@@ -444,40 +444,6 @@ func runnableAgentCount(ctx context.Context, st store.Store, workspaceKey string
 	return runnable
 }
 
-// cliAgentWorktreeMaterializer binds the CLI's local state and store-backed
-// repository list to the shared materializer. Apply owns the interactive-agent
-// decision, so SkipAgent is deliberately unset.
-func cliAgentWorktreeMaterializer(st store.Store) localworkspace.AgentWorktreeMaterializer {
-	return localworkspace.AgentWorktreeMaterializer{
-		ResolveWorkspace: func(ctx context.Context, workspaceKey string) (localworkspace.LocalWorkspaceView, error) {
-			state, err := bootstrap.LoadStateCache()
-			if err != nil {
-				return localworkspace.LocalWorkspaceView{}, fmt.Errorf("load local workspace state: %w", err)
-			}
-			local := state.Workspaces[workspaceKey]
-			if local.Path == "" {
-				return localworkspace.LocalWorkspaceView{}, nil
-			}
-			repos, err := st.Repos().List(ctx, workspaceKey)
-			if err != nil {
-				return localworkspace.LocalWorkspaceView{}, fmt.Errorf("list workspace repos: %w", err)
-			}
-			localRepos := make([]localworkspace.Repo, 0, len(repos))
-			for _, repo := range repos {
-				if repo == nil {
-					continue
-				}
-				localRepos = append(localRepos, localworkspace.Repo{
-					Name:   repo.Name,
-					Path:   localworkspace.RepoPath(local, repo.Name),
-					Groups: append([]string(nil), repo.Groups...),
-				})
-			}
-			return localworkspace.LocalWorkspaceView{Root: local.Path, Repos: localRepos}, nil
-		},
-	}
-}
-
 func completeTemplateIDs(_ *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
@@ -489,85 +455,4 @@ func completeTemplateIDs(_ *cobra.Command, args []string, toComplete string) ([]
 		}
 	}
 	return ids, cobra.ShellCompDirectiveNoFileComp
-}
-
-type templateJSON struct {
-	SchemaVersion int                 `json:"schema_version"`
-	ID            string              `json:"id"`
-	Label         string              `json:"label"`
-	Description   string              `json:"description"`
-	Revision      int                 `json:"revision"`
-	Roles         []templateRoleJSON  `json:"roles"`
-	Agents        []templateAgentJSON `json:"agents"`
-}
-
-type templateRoleJSON struct {
-	Name           string   `json:"name"`
-	Kind           string   `json:"kind"`
-	Description    string   `json:"description"`
-	PromptFile     string   `json:"prompt_file"`
-	Model          string   `json:"model"`
-	TaskFilter     string   `json:"task_filter"`
-	Effort         string   `json:"effort"`
-	Skills         []string `json:"skills"`
-	Labels         []string `json:"labels"`
-	ExcludeLabels  []string `json:"exclude_labels"`
-	ReadOnly       bool     `json:"read_only"`
-	AllowedTools   []string `json:"allowed_tools"`
-	DeniedTools    []string `json:"denied_tools"`
-	MaxConcurrency *int     `json:"max_concurrency"`
-	MaxBudgetUSD   *float64 `json:"max_budget_usd"`
-	MaxRunDuration *int     `json:"max_run_duration"`
-	DisplayLabel   string   `json:"display_label"`
-}
-
-type templateAgentJSON struct {
-	Name         string `json:"name"`
-	RoleName     string `json:"role_name"`
-	Auto         bool   `json:"auto"`
-	DesiredState string `json:"desired_state"`
-	CrossRepo    bool   `json:"cross_repo"`
-}
-
-func templateJSONFrom(tpl teamtemplate.TeamTemplate) templateJSON {
-	out := templateJSON{
-		SchemaVersion: tpl.SchemaVersion,
-		ID:            tpl.ID,
-		Label:         tpl.Label,
-		Description:   tpl.Description,
-		Revision:      tpl.Revision,
-		Roles:         make([]templateRoleJSON, 0, len(tpl.Roles)),
-		Agents:        make([]templateAgentJSON, 0, len(tpl.Agents)),
-	}
-	for _, role := range tpl.Roles {
-		out.Roles = append(out.Roles, templateRoleJSON{
-			Name:           role.Name,
-			Kind:           role.Kind,
-			Description:    role.Description,
-			PromptFile:     role.PromptFile,
-			Model:          role.Model,
-			TaskFilter:     role.TaskFilter,
-			Effort:         role.Effort,
-			Skills:         role.Skills,
-			Labels:         role.Labels,
-			ExcludeLabels:  role.ExcludeLabels,
-			ReadOnly:       role.ReadOnly,
-			AllowedTools:   role.AllowedTools,
-			DeniedTools:    role.DeniedTools,
-			MaxConcurrency: role.MaxConcurrency,
-			MaxBudgetUSD:   role.MaxBudgetUSD,
-			MaxRunDuration: role.MaxRunDuration,
-			DisplayLabel:   role.DisplayLabel,
-		})
-	}
-	for _, agent := range tpl.Agents {
-		out.Agents = append(out.Agents, templateAgentJSON{
-			Name:         agent.Name,
-			RoleName:     agent.RoleName,
-			Auto:         agent.Auto,
-			DesiredState: agent.DesiredState,
-			CrossRepo:    agent.CrossRepo,
-		})
-	}
-	return out
 }

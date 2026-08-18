@@ -12,7 +12,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -624,25 +623,6 @@ func TestUnavailableIssueBackend_AllMethodsFailClosed(t *testing.T) {
 	assertUnavailable("GetMutations", err)
 	_, err = ib.WaitForMutations(ctx, 0, 1)
 	assertUnavailable("WaitForMutations", err)
-}
-
-func TestFleetDBActorPreference(t *testing.T) {
-	t.Setenv("LOOM_FLEET_DB_ACTOR", "fleet-actor")
-	t.Setenv("LOOM_AGENT_NAME", "agent-name")
-	t.Setenv("USER", "user-name")
-	if got := bootstrap.ResolveFleetDBActor(""); got != "fleet-actor" {
-		t.Fatalf("ResolveFleetDBActor() = %q, want fleet-actor", got)
-	}
-
-	t.Setenv("LOOM_FLEET_DB_ACTOR", "")
-	if got := bootstrap.ResolveFleetDBActor(""); got != "agent-name" {
-		t.Fatalf("ResolveFleetDBActor() = %q, want agent-name", got)
-	}
-
-	t.Setenv("LOOM_AGENT_NAME", "")
-	if got := bootstrap.ResolveFleetDBActor(""); got != "user-name" {
-		t.Fatalf("ResolveFleetDBActor() = %q, want user-name", got)
-	}
 }
 
 func TestFleetDBIssueBackend_FailsClosedWhenStoreUnavailable(t *testing.T) {

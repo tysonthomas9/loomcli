@@ -221,3 +221,30 @@ func TestRetryDelay_HonorsRetryAfterSeconds(t *testing.T) {
 		t.Fatalf("retryDelay = %v, want 3s Retry-After", got)
 	}
 }
+
+func TestResolveFleetDBActor_Precedence(t *testing.T) {
+	tests := []struct {
+		name       string
+		fleetActor string
+		agentName  string
+		configured string
+		user       string
+		want       string
+	}{
+		{name: "fleet actor env wins", fleetActor: "fleet-actor", agentName: "agent-name", configured: "configured", user: "user-name", want: "fleet-actor"},
+		{name: "agent name beats configured", agentName: "agent-name", configured: "configured", user: "user-name", want: "agent-name"},
+		{name: "configured beats user", configured: "configured", user: "user-name", want: "configured"},
+		{name: "user is the fallback", user: "user-name", want: "user-name"},
+		{name: "all empty", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(EnvFleetDBActor, tt.fleetActor)
+			t.Setenv(EnvAgentName, tt.agentName)
+			t.Setenv("USER", tt.user)
+			if got := ResolveFleetDBActor(tt.configured); got != tt.want {
+				t.Fatalf("ResolveFleetDBActor(%q) = %q, want %q", tt.configured, got, tt.want)
+			}
+		})
+	}
+}

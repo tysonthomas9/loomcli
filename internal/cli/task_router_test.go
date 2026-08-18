@@ -785,6 +785,45 @@ func TestBuildRouterTaskCheck_NoConstraints(t *testing.T) {
 	}
 }
 
+// TestBuildRouterTaskCheck_NonNilWithSkills verifies non-nil returned when role has skills.
+func TestBuildRouterTaskCheck_NonNilWithSkills(t *testing.T) {
+	rc := RoleConfig{Description: "security specialist", Skills: []string{"security", "auth"}}
+	ae := AgentEntry{Worktree: "falcon", Role: "task"}
+
+	check := BuildRouterTaskCheck(rc, ae, "")
+	if check == nil {
+		t.Error("BuildRouterTaskCheck() should return non-nil for role with skills")
+	}
+}
+
+// TestBuildRouterTaskCheck_NonNilWithMaxPriority verifies non-nil returned when role has max priority.
+func TestBuildRouterTaskCheck_NonNilWithMaxPriority(t *testing.T) {
+	maxP := 2
+	rc := RoleConfig{Description: "p0-p2 only", MaxPriority: &maxP}
+	ae := AgentEntry{Worktree: "falcon", Role: "task"}
+
+	check := BuildRouterTaskCheck(rc, ae, "")
+	if check == nil {
+		t.Error("BuildRouterTaskCheck() should return non-nil for role with max priority")
+	}
+}
+
+// TestBuildRouterTaskCheck_NilWithOnlyPathPatterns verifies PathPatterns alone does NOT activate the
+// router: path patterns pick which files an agent works on, not which issues it claims.
+func TestBuildRouterTaskCheck_NilWithOnlyPathPatterns(t *testing.T) {
+	rc := RoleConfig{Description: "frontend specialist", PathPatterns: []string{"src/components/**"}}
+	ae := AgentEntry{Worktree: "falcon", Role: "task"}
+	if check := BuildRouterTaskCheck(rc, ae, ""); check != nil {
+		t.Error("BuildRouterTaskCheck() should return nil when only RoleConfig.PathPatterns is set (not a routing constraint)")
+	}
+
+	rc2 := RoleConfig{Description: "frontend specialist"}
+	ae2 := AgentEntry{Worktree: "falcon", Role: "task", PathPatterns: []string{"internal/**"}}
+	if check := BuildRouterTaskCheck(rc2, ae2, ""); check != nil {
+		t.Error("BuildRouterTaskCheck() should return nil when only AgentEntry.PathPatterns is set (not a routing constraint)")
+	}
+}
+
 // --- Repo affinity tests ---
 
 func TestMatchTask_RepoAffinityMatch(t *testing.T) {
