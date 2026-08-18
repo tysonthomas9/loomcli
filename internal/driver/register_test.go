@@ -133,6 +133,101 @@ func TestStageFlueDriverBundleIsPersistenceFreeAndPromotesIdempotently(t *testin
 	}
 }
 
+func TestStagedFlueBundleUsesDeterministicPendingPathAndFailsClosedOnDrift(t *testing.T) {
+	root := t.TempDir()
+	writeFlueDist(t, root, "custom-flow", "staged")
+	options := RegisterFlueOptions{
+		WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "custom-flow",
+		SourceDigest: "sha256:07ba20a2ad84dcc940d3a7adeb55288a8b76f5a5c97aeb12fe783d44567380b5",
+		Trust:        workflowcatalog.DriverTrustUntrusted,
+	}
+	staged, err := StageFlueDriverBundle(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(root, ".loom", "drivers", ".pending", staged.VersionID); staged.PendingRoot() != want {
+		t.Fatalf("pending root=%q, want %q", staged.PendingRoot(), want)
+	}
+	if err := staged.Promote(); err != nil {
+		t.Fatal(err)
+	}
+	if err := staged.Verify(); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(staged.Bundle.Root, "dist", "server.mjs"), []byte("drift"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := staged.Verify(); !errors.Is(err, persistence.ErrInvalid) {
+		t.Fatalf("drift Verify err=%v, want invalid", err)
+	}
+
+	retry, err := StageFlueDriverBundle(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(retry.Cleanup)
+	if err := retry.Promote(); !errors.Is(err, persistence.ErrInvalid) {
+		t.Fatalf("promotion over drift err=%v, want invalid", err)
+	}
+	got, err := os.ReadFile(filepath.Join(staged.Bundle.Root, "dist", "server.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "drift" {
+		t.Fatalf("drifted predecessor was destructively replaced: %q", got)
+	}
+}
+
+func TestRecoverStagedFlueRegistrationResumesPendingAndPromotedBundle(t *testing.T) {
+	root := t.TempDir()
+	writeFlueDist(t, root, "recoverable", "staged")
+	staged, err := StageFlueDriverBundle(RegisterFlueOptions{
+		WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "recoverable",
+		Trust: workflowcatalog.DriverTrustUntrusted,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	version := &workflowcatalog.DriverVersion{
+		WorkspaceKey: "TEST", DriverID: staged.DriverID, VersionID: staged.VersionID,
+		SourceRef: staged.SourceRef, SourceDigest: staged.SourceDigest,
+		BundleRef: staged.BundleRef, BundleDigest: staged.BundleDigest,
+		Runtime: staged.Runtime, Manifest: staged.CatalogManifest,
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityPending,
+	}
+	recovered, err := RecoverStagedFlueRegistration(root, version)
+	if err != nil {
+		t.Fatalf("recover pending: %v", err)
+	}
+	if recovered.PendingRoot() != staged.PendingRoot() {
+		t.Fatalf("pending roots=%q/%q", recovered.PendingRoot(), staged.PendingRoot())
+	}
+	if err := recovered.Promote(); err != nil {
+		t.Fatalf("promote recovered: %v", err)
+	}
+	if err := recovered.Verify(); err != nil {
+		t.Fatalf("verify recovered: %v", err)
+	}
+
+	recoveredFinal, err := RecoverStagedFlueRegistration(root, version)
+	if err != nil {
+		t.Fatalf("recover final: %v", err)
+	}
+	if recoveredFinal.PendingRoot() != "" {
+		t.Fatalf("final recovery pending root=%q", recoveredFinal.PendingRoot())
+	}
+	if err := recoveredFinal.Verify(); err != nil {
+		t.Fatalf("verify final recovery: %v", err)
+	}
+
+	bad := *version
+	bad.BundleRef = "../escape"
+	if _, err := RecoverStagedFlueRegistration(root, &bad); !errors.Is(err, persistence.ErrInvalid) {
+		t.Fatalf("containment err=%v, want invalid", err)
+	}
+}
+
 func TestSeedFlueDriverFixtureNewDigestCreatesNewVersion(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

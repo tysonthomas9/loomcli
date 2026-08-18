@@ -89,6 +89,7 @@ type workflowCatalogFleetDBTransport struct {
 
 var _ catalogfleetdb.Transport = (*workflowCatalogFleetDBTransport)(nil)
 var _ catalogfleetdb.AuthoringTransport = (*workflowCatalogFleetDBTransport)(nil)
+var _ catalogfleetdb.AvailabilityTransport = (*workflowCatalogFleetDBTransport)(nil)
 
 func newWorkflowCatalogFleetDBTransport(client *infrafleetdb.Client) *workflowCatalogFleetDBTransport {
 	if client == nil {
@@ -156,13 +157,7 @@ func (t *workflowCatalogFleetDBTransport) AuthorVersion(
 		err    error
 	)
 	if mutation.Managed {
-		result, err = t.transport.AuthorManagedDriverVersion(
-			ctx,
-			infrafleetdb.WorkflowCatalogAuthorManagedVersionInput{
-				WorkflowCatalogAuthorVersionInput: input,
-				Activate:                          mutation.Activate,
-			},
-		)
+		result, err = t.transport.AuthorManagedDriverVersion(ctx, input)
 	} else {
 		result, err = t.transport.AuthorDriverVersion(ctx, input)
 	}
@@ -198,9 +193,31 @@ func translateWorkflowCatalogFleetDBAuthoringResult(
 	return &catalogfleetdb.TransportAuthoringResult{
 		Driver: result.Driver, Version: result.Version,
 		CreatedDriver: result.CreatedDriver, CreatedVersion: result.CreatedVersion,
-		ReusedVersion: result.ReusedVersion, Activated: result.Activated,
-		Replayed: result.Replayed, CommittedRevision: result.CommittedRevision,
+		ReusedVersion: result.ReusedVersion,
+		Replayed:      result.Replayed, CommittedRevision: result.CommittedRevision,
 		SemanticImpact: result.SemanticImpact,
+	}, nil
+}
+
+func (t *workflowCatalogFleetDBTransport) RecordVersionAvailability(
+	ctx context.Context,
+	mutation workflowcatalog.AvailabilityMutation,
+) (*catalogfleetdb.TransportAvailabilityResult, error) {
+	result, err := t.transport.RecordVersionAvailability(ctx, infrafleetdb.WorkflowCatalogAvailabilityInput{
+		WorkspaceKey: mutation.WorkspaceKey, DriverID: mutation.DriverID, VersionID: mutation.VersionID,
+		DelegatedActor: mutation.AuditActor, RequestID: mutation.RequestID,
+		ExpectedRevision: mutation.ExpectedRevision, SourceDigest: mutation.SourceDigest,
+		BundleDigest: mutation.BundleDigest, Outcome: mutation.Outcome, Failure: mutation.Failure,
+	})
+	if err != nil {
+		return nil, translateWorkflowCatalogFleetDBError(err)
+	}
+	if result == nil {
+		return nil, nil
+	}
+	return &catalogfleetdb.TransportAvailabilityResult{
+		Driver: result.Driver, Version: result.Version, Replayed: result.Replayed,
+		CommittedRevision: result.CommittedRevision, SemanticImpact: result.SemanticImpact,
 	}, nil
 }
 
@@ -218,10 +235,14 @@ func translateWorkflowCatalogFleetDBError(err error) error {
 		translated = catalogfleetdb.ErrTransportVersionOwnership
 	case errors.Is(err, infrafleetdb.ErrWorkflowCatalogVersionNotValidated):
 		translated = catalogfleetdb.ErrTransportVersionNotValidated
+	case errors.Is(err, infrafleetdb.ErrWorkflowCatalogVersionNotAvailable):
+		translated = catalogfleetdb.ErrTransportVersionNotAvailable
 	case errors.Is(err, infrafleetdb.ErrWorkflowCatalogVersionNotApproved):
 		translated = catalogfleetdb.ErrTransportVersionNotApproved
 	case errors.Is(err, infrafleetdb.ErrWorkflowCatalogAuthoringConflict):
 		translated = catalogfleetdb.ErrTransportAuthoringConflict
+	case errors.Is(err, infrafleetdb.ErrWorkflowCatalogAvailabilityConflict):
+		translated = catalogfleetdb.ErrTransportAvailabilityConflict
 	case errors.Is(err, infrafleetdb.ErrWorkflowCatalogInvalid):
 		translated = catalogfleetdb.ErrTransportInvalid
 	default:

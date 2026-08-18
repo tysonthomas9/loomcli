@@ -14,7 +14,7 @@ import (
 
 	appworkflowauthoring "github.com/tysonthomas9/loomcli/internal/app/workflowauthoring"
 	"github.com/tysonthomas9/loomcli/internal/driver/nativearchive"
-	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
+	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
@@ -120,6 +120,7 @@ func (m *Module) registerNativeDriver(w http.ResponseWriter, r *http.Request) {
 	coordinator, err := appworkflowauthoring.NewWithNative(
 		workflowdefs.NewBundleStager(),
 		workflowdefs.NewNativeBundleStager(),
+		m.distributionAuthorities,
 	)
 	if err != nil {
 		writeDomainError(w, err, "initialize native driver authoring failed")

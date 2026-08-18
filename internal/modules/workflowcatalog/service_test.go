@@ -179,8 +179,8 @@ func newCatalogFixture(t *testing.T) *catalogFixture {
 		},
 		names: map[string]string{"demo": "driver-1"},
 		versions: map[string]*DriverVersion{
-			"v1": {WorkspaceKey: "TEST", DriverID: "driver-1", VersionID: "v1", Version: 1, SourceDigest: "digest-v1", Manifest: map[string]string{ManifestTrustLevelKey: "untrusted"}, ValidationStatus: DriverVersionValidationPassed},
-			"v2": {WorkspaceKey: "TEST", DriverID: "driver-1", VersionID: "v2", Version: 2, SourceDigest: "digest-v2", Manifest: map[string]string{ManifestTrustLevelKey: "untrusted"}, ValidationStatus: DriverVersionValidationPassed},
+			"v1": {WorkspaceKey: "TEST", DriverID: "driver-1", VersionID: "v1", Version: 1, SourceDigest: "digest-v1", Manifest: map[string]string{ManifestTrustLevelKey: "untrusted"}, ValidationStatus: DriverVersionValidationPassed, AvailabilityStatus: DriverVersionAvailabilityAvailable},
+			"v2": {WorkspaceKey: "TEST", DriverID: "driver-1", VersionID: "v2", Version: 2, SourceDigest: "digest-v2", Manifest: map[string]string{ManifestTrustLevelKey: "untrusted"}, ValidationStatus: DriverVersionValidationPassed, AvailabilityStatus: DriverVersionAvailabilityAvailable},
 		},
 		driverOrder:  []string{"driver-1"},
 		versionOrder: map[string][]string{"driver-1": {"v2", "v1"}},

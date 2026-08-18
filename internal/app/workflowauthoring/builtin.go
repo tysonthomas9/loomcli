@@ -19,7 +19,7 @@ var managedBuiltinMu sync.Mutex
 func (coordinator *Coordinator) EnsureBuiltin(
 	ctx context.Context,
 	catalog workflowcatalog.API,
-	authoring workflowcatalog.VersionAuthoringAPI,
+	authoring CatalogCommands,
 	authorities ManagedBuiltinAuthorityProvider,
 	support BuiltinSupport,
 	workspace,
@@ -41,7 +41,7 @@ func (coordinator *Coordinator) EnsureBuiltin(
 func (coordinator *Coordinator) ensureBuiltin(
 	ctx context.Context,
 	catalog workflowcatalog.API,
-	authoring workflowcatalog.VersionAuthoringAPI,
+	authoring CatalogCommands,
 	authorities ManagedBuiltinAuthorityProvider,
 	support BuiltinSupport,
 	workspace,
@@ -117,7 +117,7 @@ func (coordinator *Coordinator) RefreshBoundPromptAgentWorkflows(
 	ctx context.Context,
 	index BoundPromptAgentIndex,
 	catalog workflowcatalog.API,
-	authoring workflowcatalog.VersionAuthoringAPI,
+	authoring CatalogCommands,
 	authorities ManagedBuiltinAuthorityProvider,
 	support BuiltinSupport,
 ) error {

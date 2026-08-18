@@ -62,14 +62,15 @@ func TestListActiveTaskRunsReturnsQueuedAndRunningOnly(t *testing.T) {
 		t.Fatalf("Create driver: %v", err)
 	}
 	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
-		WorkspaceKey:     "WS",
-		VersionID:        "version-1",
-		DriverID:         "driver-1",
-		Version:          1,
-		SourceDigest:     "sha256:source",
-		BundleDigest:     "sha256:bundle",
-		Runtime:          RuntimeFlueNode,
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+		WorkspaceKey:       "WS",
+		VersionID:          "version-1",
+		DriverID:           "driver-1",
+		Version:            1,
+		SourceDigest:       "sha256:source",
+		BundleDigest:       "sha256:bundle",
+		Runtime:            RuntimeFlueNode,
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}

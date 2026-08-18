@@ -15,7 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
-	workflows "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
+	workflows "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )

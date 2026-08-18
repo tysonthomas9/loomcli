@@ -19,7 +19,7 @@ import (
 
 	appworkflowauthoring "github.com/tysonthomas9/loomcli/internal/app/workflowauthoring"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
+	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
@@ -777,7 +777,9 @@ func testWorkflowTargetPreparation(
 			if digestErr != nil {
 				return nil, digestErr
 			}
-			coordinator, coordinatorErr := appworkflowauthoring.New(workflowdefs.NewBundleStager())
+			coordinator, coordinatorErr := appworkflowauthoring.New(
+				workflowdefs.NewBundleStager(), testUnexpectedDistributionAuthorities{},
+			)
 			if coordinatorErr != nil {
 				return nil, coordinatorErr
 			}
@@ -820,13 +822,27 @@ func testWorkflowTargetPreparation(
 }
 
 type testUnexpectedManagedAuthoring struct {
-	workflowcatalog.VersionAuthoringAPI
+	appworkflowauthoring.CatalogCommands
 }
 
 func (testUnexpectedManagedAuthoring) AuthorManagedVersion(
 	context.Context,
 	authority.SystemAuthority,
-	workflowcatalog.AuthorManagedVersionCommand,
+	workflowcatalog.AuthorVersionCommand,
 ) (*workflowcatalog.AuthorVersionResult, error) {
 	return nil, errors.New("test managed builtin reached authoring after a successful build")
+}
+
+type testUnexpectedDistributionAuthorities struct{}
+
+func (testUnexpectedDistributionAuthorities) AuthorityForVersionAvailability(
+	context.Context, string, string,
+) (authority.SystemAuthority, error) {
+	return authority.SystemAuthority{}, nil
+}
+
+func (testUnexpectedDistributionAuthorities) AuthorityForManagedVersionLifecycle(
+	context.Context, string, authority.Action, string,
+) (authority.SystemAuthority, error) {
+	return authority.SystemAuthority{}, nil
 }

@@ -135,14 +135,15 @@ func (app *Server) unifiedAgentModuleDeps() UnifiedAgentModuleDeps {
 		DriverRunTokenKey: app.config.DriverRunTokenKey,
 		DaytonaProvider:   app.config.DaytonaProvider,
 		LocalSettingsDir:  app.config.LocalSettingsDir, Dispatcher: app.connectorDispatcher,
-		ConnectorBindingGrantLifecycle: app.connectorManagement,
-		WorkflowCatalog:                app.config.WorkflowCatalogAPI,
-		WorkflowCatalogAuthoring:       app.config.WorkflowCatalogAuthoring,
-		WorkflowCatalogOperator:        app.config.WorkflowCatalogOperator,
-		WorkflowTargetPreparation:      app.config.WorkflowTargetPreparation,
-		SourceControl:                  app.config.SourceControl,
-		TaskStackBindings:              app.config.TaskStackBindings,
-		TaskOutcomes:                   app.config.TaskOutcomes,
+		ConnectorBindingGrantLifecycle:  app.connectorManagement,
+		WorkflowCatalog:                 app.config.WorkflowCatalogAPI,
+		WorkflowCatalogAuthoring:        app.config.WorkflowCatalogAuthoring,
+		WorkflowDistributionAuthorities: app.config.WorkflowDistributionAuthorities,
+		WorkflowCatalogOperator:         app.config.WorkflowCatalogOperator,
+		WorkflowTargetPreparation:       app.config.WorkflowTargetPreparation,
+		SourceControl:                   app.config.SourceControl,
+		TaskStackBindings:               app.config.TaskStackBindings,
+		TaskOutcomes:                    app.config.TaskOutcomes,
 	}
 	if records := app.config.ProjectionRecords; records != nil {
 		deps.WorkspaceTopology = records

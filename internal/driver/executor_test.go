@@ -24,6 +24,21 @@ import (
 
 const testWorkflowRunToken = "test-run-scoped-token"
 
+func TestValidateRuntimeVersionRequiresExplicitAvailability(t *testing.T) {
+	version := &workflowcatalog.DriverVersion{
+		VersionID: "version-1", ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityPending,
+	}
+	err := validateRuntimeVersion(version)
+	if !errors.Is(err, workflowcatalog.ErrVersionNotAvailable) {
+		t.Fatalf("pending availability err = %v, want ErrVersionNotAvailable", err)
+	}
+	version.AvailabilityStatus = workflowcatalog.DriverVersionAvailabilityAvailable
+	if err := validateRuntimeVersion(version); err != nil {
+		t.Fatalf("available version: %v", err)
+	}
+}
+
 func TestExecutorRunOnceClaimsVerifiesAndFinishes(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

@@ -82,18 +82,19 @@ func (catalog *nativeHandlerCatalog) AuthorVersion(
 		Revision:     1,
 	}
 	catalog.version = &workflowcatalog.DriverVersion{
-		WorkspaceKey:     command.WorkspaceKey,
-		DriverID:         command.DriverID,
-		VersionID:        command.VersionID,
-		Version:          1,
-		SourceRef:        command.SourceRef,
-		SourceDigest:     command.SourceDigest,
-		BundleRef:        command.BundleRef,
-		BundleDigest:     command.BundleDigest,
-		Runtime:          command.Runtime,
-		Manifest:         cloneNativeHandlerMap(command.Manifest),
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
-		CreatedBy:        auth.Subject(),
+		WorkspaceKey:       command.WorkspaceKey,
+		DriverID:           command.DriverID,
+		VersionID:          command.VersionID,
+		Version:            1,
+		SourceRef:          command.SourceRef,
+		SourceDigest:       command.SourceDigest,
+		BundleRef:          command.BundleRef,
+		BundleDigest:       command.BundleDigest,
+		Runtime:            command.Runtime,
+		Manifest:           cloneNativeHandlerMap(command.Manifest),
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityPending,
+		CreatedBy:          auth.Subject(),
 	}
 	catalog.version.Manifest[workflowcatalog.ManifestTrustLevelKey] = string(workflowcatalog.DriverTrustUntrusted)
 	return &workflowcatalog.AuthorVersionResult{
@@ -110,9 +111,31 @@ func (catalog *nativeHandlerCatalog) AuthorVersion(
 func (*nativeHandlerCatalog) AuthorManagedVersion(
 	context.Context,
 	authority.SystemAuthority,
-	workflowcatalog.AuthorManagedVersionCommand,
+	workflowcatalog.AuthorVersionCommand,
 ) (*workflowcatalog.AuthorVersionResult, error) {
 	return nil, errors.New("unexpected managed authoring")
+}
+
+func (catalog *nativeHandlerCatalog) RecordVersionAvailability(
+	_ context.Context, _ authority.SystemAuthority, command workflowcatalog.AvailabilityCommand,
+) (*workflowcatalog.AvailabilityResult, error) {
+	if catalog.driver == nil || catalog.version == nil || command.ExpectedRevision != catalog.driver.Revision {
+		return nil, workflowcatalog.ErrStaleRevision
+	}
+	catalog.version.AvailabilityStatus = workflowcatalog.DriverVersionAvailabilityAvailable
+	catalog.driver.Revision++
+	return &workflowcatalog.AvailabilityResult{
+		Driver: cloneNativeHandlerDriver(catalog.driver), Version: cloneNativeHandlerVersion(catalog.version),
+		CommittedRevision: catalog.driver.Revision,
+	}, nil
+}
+
+func (*nativeHandlerCatalog) ApproveManagedVersion(context.Context, authority.SystemAuthority, workflowcatalog.VersionCommand) (*workflowcatalog.VersionResult, error) {
+	return nil, errors.New("unexpected managed approval")
+}
+
+func (*nativeHandlerCatalog) ActivateManagedVersion(context.Context, authority.SystemAuthority, workflowcatalog.VersionCommand) (*workflowcatalog.VersionResult, error) {
+	return nil, errors.New("unexpected managed activation")
 }
 
 func (catalog *nativeHandlerCatalog) ApproveVersion(
@@ -421,6 +444,7 @@ func nativeDriverHandler(
 	mux := http.NewServeMux()
 	NewModule(Config{
 		Catalog: catalog, Authoring: catalog, CatalogOperatorAuthority: resolver,
+		DistributionAuthorities: workflowDistributionAuthorityStub{},
 	}).Register(mux)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ref := middleware.WorkspaceRef{RequestedID: requested, CanonicalID: canonical}

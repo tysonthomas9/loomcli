@@ -16,7 +16,7 @@ import (
 func (coordinator *Coordinator) ResolveGlobalBuiltinRunner(
 	ctx context.Context,
 	catalog workflowcatalog.API,
-	authoring workflowcatalog.VersionAuthoringAPI,
+	authoring CatalogCommands,
 	authorities ManagedBuiltinAuthorityProvider,
 	support BuiltinSupport,
 	workspace,

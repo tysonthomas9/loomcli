@@ -61,14 +61,24 @@ type StagedBundle interface {
 	Metadata() StagedMetadata
 	Bundle() *Bundle
 	Promote() error
-	Cleanup()
+	Verify() error
+	ClassifyFailure(error) FailureDisposition
+	Discard()
 }
+
+type FailureDisposition string
+
+const (
+	FailureRetryable FailureDisposition = "retryable"
+	FailurePermanent FailureDisposition = "permanent"
+)
 
 // BundleStager is the outbound infrastructure port. Implementations may build
 // source, extract archives, and write content-addressed bundle trees, but they
 // return only owned metadata to the application coordinator.
 type BundleStager interface {
 	BuildAndStage(context.Context, BuildOptions) (StagedBundle, string, error)
+	RecoverPending(context.Context, *workflowcatalog.DriverVersion) (StagedBundle, FailureDisposition, error)
 }
 
 type NativeOptions struct {
@@ -96,6 +106,23 @@ type NativeBundleStager interface {
 // ActionAuthorManagedVersion for the requested canonical workspace.
 type ManagedBuiltinAuthorityProvider interface {
 	AuthorityForManagedBuiltin(context.Context, string, string) (authority.SystemAuthority, error)
+}
+
+// DistributionAuthorityProvider issues only the system commands owned by the
+// Workflow Distribution handoff. Implementations live in process composition;
+// request handlers and filesystem adapters cannot mint these authorities.
+type DistributionAuthorityProvider interface {
+	AuthorityForVersionAvailability(context.Context, string, string) (authority.SystemAuthority, error)
+	AuthorityForManagedVersionLifecycle(context.Context, string, authority.Action, string) (authority.SystemAuthority, error)
+}
+
+// CatalogCommands is the complete catalog command surface needed by one
+// authoring lifecycle. Keeping it explicit makes partial production
+// composition fail closed.
+type CatalogCommands interface {
+	workflowcatalog.VersionAuthoringAPI
+	workflowcatalog.VersionAvailabilityAPI
+	workflowcatalog.ManagedVersionLifecycleAPI
 }
 
 type BuiltinSpec struct {
@@ -128,6 +155,21 @@ type BuiltinSupport interface {
 type BoundPromptAgentIndex interface {
 	ListWorkspaceKeys(context.Context) ([]string, error)
 	HasEnabledPromptAgentBinding(context.Context, string) (bool, error)
+}
+
+// PendingVersionIndex is the workspace discovery subset required by restart
+// reconciliation. BoundPromptAgentIndex satisfies it without exposing stores.
+type PendingVersionIndex interface {
+	ListWorkspaceKeys(context.Context) ([]string, error)
+}
+
+// PendingCatalog is the read subset needed to locate and revalidate durable
+// pending versions during restart reconciliation.
+type PendingCatalog interface {
+	ListDrivers(context.Context, string) ([]*workflowcatalog.Driver, error)
+	ListVersions(context.Context, string, string) (*workflowcatalog.VersionSet, error)
+	GetDriver(context.Context, string, string) (*workflowcatalog.Driver, error)
+	GetVersion(context.Context, string, string) (*workflowcatalog.DriverVersion, error)
 }
 
 type GlobalRunnerResolution struct {

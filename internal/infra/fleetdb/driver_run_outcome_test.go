@@ -30,11 +30,11 @@ func TestDriverRunOutcomeTransportClaimCompleteAndRetry(t *testing.T) {
 				!request.ClaimUntil.Equal(now.Add(time.Minute)) || request.Limit != 7 {
 				t.Fatalf("claim request = %+v", request)
 			}
-			writeJSON(t, w, map[string]any{"outcomes": []execution.DriverRunOutcome{{
+			writeJSON(t, w, map[string]any{"outcomes": []driverRunOutcomeWire{{
 				WorkspaceKey: "WS", RunID: "run-1", Status: execution.DriverRunFailed,
 				Summary: "failed", ErrorClass: "driver_runtime", ParentRunID: "parent-run",
 				ParentEventID: "parent-event", EpicID: "WS-1", OccurredAt: now, Attempt: 2,
-			}}})
+			}}, "count": 1})
 		case r.Method == http.MethodPost && r.URL.EscapedPath() == "/api/v1/WS/driver-run-outcomes/complete":
 			var request struct {
 				RunID       string    `json:"run_id"`
@@ -121,6 +121,33 @@ func TestDriverRunOutcomeTransportNormalizesNilClaimList(t *testing.T) {
 	}
 }
 
+func TestDriverRunOutcomeTransportDecodesCanonicalClaimResponse(t *testing.T) {
+	now := time.Date(2026, 8, 17, 17, 34, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"outcomes":[{"workspace_key":"WS","run_id":"run-1","status":"completed","summary":"done","error_class":"","parent_run_id":"parent-1","parent_event_id":"event-1","epic_id":"WS-1","occurred_at":"2026-08-17T17:34:00Z","attempt":2}],"count":1}`))
+	}))
+	defer server.Close()
+
+	client, err := New(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outbox := client.DriverRuns().(execution.DriverRunOutcomeStore)
+	values, err := outbox.ClaimDriverRunOutcomes(t.Context(), execution.DriverRunOutcomeLease{
+		WorkspaceKey: "WS", ClaimID: "publisher-1", Before: now, ClaimUntil: now.Add(time.Minute), Limit: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(values) != 1 || values[0].WorkspaceKey != "WS" || values[0].RunID != "run-1" ||
+		values[0].Status != execution.DriverRunCompleted || !values[0].OccurredAt.Equal(now) || values[0].Attempt != 2 ||
+		values[0].Summary != "done" || values[0].ParentRunID != "parent-1" ||
+		values[0].ParentEventID != "event-1" || values[0].EpicID != "WS-1" {
+		t.Fatalf("values = %+v, want canonical run outcome snapshot", values)
+	}
+}
+
 func TestTerminalDriverRunWorkRecoveryQueueTransportClaimCompleteAndRetry(t *testing.T) {
 	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
 	opaqueRunID := " run/1 " + strings.Repeat("x", 300)
@@ -140,7 +167,7 @@ func TestTerminalDriverRunWorkRecoveryQueueTransportClaimCompleteAndRetry(t *tes
 				!request.ClaimUntil.Equal(now.Add(time.Minute)) || request.Limit != 7 {
 				t.Fatalf("claim request = %+v", request)
 			}
-			writeJSON(t, w, map[string]any{"outcomes": []execution.DriverRunOutcome{{
+			writeJSON(t, w, map[string]any{"outcomes": []driverRunOutcomeWire{{
 				WorkspaceKey: "WS", RunID: opaqueRunID, Status: execution.DriverRunFailed,
 				Summary: "failed", ErrorClass: "driver_runtime", ParentRunID: "parent-run",
 				ParentEventID: "parent-event", EpicID: "WS-1", OccurredAt: now, Attempt: 2,
@@ -206,6 +233,33 @@ func TestTerminalDriverRunWorkRecoveryQueueTransportClaimCompleteAndRetry(t *tes
 	}
 	if requests != 3 {
 		t.Fatalf("requests = %d, want 3", requests)
+	}
+}
+
+func TestTerminalDriverRunWorkRecoveryQueueTransportDecodesCanonicalClaimResponse(t *testing.T) {
+	now := time.Date(2026, 8, 17, 17, 34, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"outcomes":[{"workspace_key":"WS","run_id":"run-1","status":"completed","summary":"done","error_class":"","parent_run_id":"parent-1","parent_event_id":"event-1","epic_id":"WS-1","occurred_at":"2026-08-17T17:34:00Z","attempt":2}],"count":1}`))
+	}))
+	defer server.Close()
+
+	client, err := New(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	queue := client.DriverRuns().(execution.TerminalDriverRunWorkRecoveryQueueStore)
+	values, err := queue.ClaimTerminalDriverRunWorkRecoveries(t.Context(), execution.TerminalDriverRunWorkRecoveryLease{
+		WorkspaceKey: "WS", ClaimID: "recovery-1", Before: now, ClaimUntil: now.Add(time.Minute), Limit: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(values) != 1 || values[0].WorkspaceKey != "WS" || values[0].RunID != "run-1" ||
+		values[0].Status != execution.DriverRunCompleted || !values[0].OccurredAt.Equal(now) || values[0].Attempt != 2 ||
+		values[0].Summary != "done" || values[0].ParentRunID != "parent-1" ||
+		values[0].ParentEventID != "event-1" || values[0].EpicID != "WS-1" {
+		t.Fatalf("values = %+v, want canonical terminal recovery snapshot", values)
 	}
 }
 

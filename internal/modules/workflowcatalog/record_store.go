@@ -50,19 +50,20 @@ type DriverStore interface {
 }
 
 type DriverVersionCreate struct {
-	WorkspaceKey     string
-	VersionID        string
-	DriverID         string
-	Version          int
-	SourceRef        string
-	SourceDigest     string
-	BundleRef        string
-	BundleDigest     string
-	Runtime          string
-	Manifest         map[string]string
-	BuildDiagnostics string
-	ValidationStatus DriverVersionValidationStatus
-	CreatedBy        string
+	WorkspaceKey       string
+	VersionID          string
+	DriverID           string
+	Version            int
+	SourceRef          string
+	SourceDigest       string
+	BundleRef          string
+	BundleDigest       string
+	Runtime            string
+	Manifest           map[string]string
+	BuildDiagnostics   string
+	ValidationStatus   DriverVersionValidationStatus
+	AvailabilityStatus DriverVersionAvailabilityStatus
+	CreatedBy          string
 }
 
 type DriverVersionFilter struct {

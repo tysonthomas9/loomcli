@@ -53,6 +53,7 @@ func newWorkspaceModules(deps Deps, automationModules automationRouteModules) []
 		onboardingModule,
 		workflows.NewModule(workflows.Config{
 			Catalog: deps.WorkflowCatalog, Authoring: deps.WorkflowCatalogAuthoring,
+			DistributionAuthorities:  deps.WorkflowDistributionAuthorities,
 			CatalogOperatorAuthority: deps.WorkflowCatalogOperator,
 			PrepareWorkflowTarget:    deps.WorkflowTargetPreparation,
 			Execution:                deps.ExecutionDriverRuns, TaskRuns: deps.ExecutionTaskRunQueries,

@@ -32,19 +32,12 @@ func (fake *authoringFake) AuthorVersion(_ context.Context, mutation AuthoringMu
 		manifest = map[string]string{}
 	}
 	manifest[ManifestTrustLevelKey] = string(trust)
-	status := DriverStatusDraft
-	activeVersionID := ""
-	if mutation.Activate {
-		status = DriverStatusActive
-		activeVersionID = mutation.VersionID
-	}
 	return &AuthoringResult{
 		Driver: &Driver{
 			WorkspaceKey: mutation.WorkspaceKey,
 			DriverID:     mutation.DriverID, Name: mutation.DriverName,
-			Status: status, TrustLevel: trust,
-			ActiveVersionID: activeVersionID,
-			Revision:        mutation.ExpectedRevision + 1,
+			Status: DriverStatusDraft, TrustLevel: trust,
+			Revision: mutation.ExpectedRevision + 1,
 		},
 		Version: &DriverVersion{
 			WorkspaceKey: mutation.WorkspaceKey,
@@ -52,12 +45,12 @@ func (fake *authoringFake) AuthorVersion(_ context.Context, mutation AuthoringMu
 			Version: 1, SourceRef: mutation.SourceRef, SourceDigest: mutation.SourceDigest,
 			BundleRef: mutation.BundleRef, BundleDigest: mutation.BundleDigest,
 			Runtime: mutation.Runtime, Manifest: manifest,
-			BuildDiagnostics: mutation.BuildDiagnostics,
-			ValidationStatus: DriverVersionValidationPassed,
-			CreatedBy:        mutation.AuditActor,
+			BuildDiagnostics:   mutation.BuildDiagnostics,
+			ValidationStatus:   DriverVersionValidationPassed,
+			AvailabilityStatus: DriverVersionAvailabilityPending,
+			CreatedBy:          mutation.AuditActor,
 		},
 		CreatedDriver: true, CreatedVersion: true,
-		Activated:         mutation.Activate,
 		CommittedRevision: mutation.ExpectedRevision + 1,
 		SemanticImpact:    SemanticImpactVersionAuthored,
 	}, nil
@@ -173,14 +166,14 @@ func TestAuthorVersionForcesOperatorLaneUntrustedAndInactive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AuthorVersion: %v", err)
 	}
-	if result.Action != ActionAuthorVersion || result.Activated {
+	if result.Action != ActionAuthorVersion || result.Version.AvailabilityStatus != DriverVersionAvailabilityPending {
 		t.Fatalf("result = %+v", result)
 	}
 	if len(fixture.store.mutations) != 1 {
 		t.Fatalf("mutations = %d, want 1", len(fixture.store.mutations))
 	}
 	mutation := fixture.store.mutations[0]
-	if mutation.Managed || mutation.Activate {
+	if mutation.Managed {
 		t.Fatalf("operator mutation elevated: %+v", mutation)
 	}
 	if mutation.AuditActor != "operator" || result.Version.CreatedBy != "operator" {
@@ -202,25 +195,26 @@ func TestAuthorVersionForcesOperatorLaneUntrustedAndInactive(t *testing.T) {
 	}
 }
 
-func TestAuthorManagedVersionSelectsTrustedAtomicActivation(t *testing.T) {
+func TestAuthorManagedVersionSelectsTrustedPendingVersion(t *testing.T) {
 	fixture := newAuthoringFixture(t, true)
 	result, err := fixture.service.AuthorManagedVersion(
 		context.Background(),
 		fixture.system(t, ActionAuthorManagedVersion, "TEST"),
-		AuthorManagedVersionCommand{AuthorVersionCommand: validManagedAuthorVersionCommand(), Activate: true},
+		validManagedAuthorVersionCommand(),
 	)
 	if err != nil {
 		t.Fatalf("AuthorManagedVersion: %v", err)
 	}
 	mutation := fixture.store.mutations[0]
-	if !mutation.Managed || !mutation.Activate {
+	if !mutation.Managed {
 		t.Fatalf("managed mutation = %+v", mutation)
 	}
 	if mutation.AuditActor != "builtin-distribution" {
 		t.Fatalf("managed audit actor = %q, want authority subject", mutation.AuditActor)
 	}
-	if result.Action != ActionAuthorManagedVersion || !result.Activated ||
-		result.Driver.ActiveVersionID != result.Version.VersionID ||
+	if result.Action != ActionAuthorManagedVersion ||
+		result.Driver.ActiveVersionID != "" ||
+		result.Version.AvailabilityStatus != DriverVersionAvailabilityPending ||
 		result.Version.Manifest[ManifestTrustLevelKey] != string(DriverTrustTrusted) {
 		t.Fatalf("managed result = %+v", result)
 	}
@@ -247,7 +241,7 @@ func TestAuthorManagedVersionRejectsNonBuiltinIdentityAndProvenance(t *testing.T
 			_, err := fixture.service.AuthorManagedVersion(
 				context.Background(),
 				fixture.system(t, ActionAuthorManagedVersion, "TEST"),
-				AuthorManagedVersionCommand{AuthorVersionCommand: command, Activate: true},
+				command,
 			)
 			if !errors.Is(err, ErrInvalid) {
 				t.Fatalf("AuthorManagedVersion err = %v, want ErrInvalid", err)

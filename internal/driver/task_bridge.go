@@ -781,7 +781,7 @@ func (e HostBridgeTaskExecutor) taskRunnerBundleEnv(req TaskExecRequest) []strin
 	}
 	ctx := context.Background()
 	version, err := e.Store.DriverVersions().Get(ctx, req.WorkspaceKey, req.RunnerVersionID)
-	if err != nil || version.BundleRef == "" {
+	if err != nil || version.BundleRef == "" || !workflowcatalog.VersionAvailable(version) {
 		return nil
 	}
 	// The bundle is staged at registration under <driver-base>/.loom/drivers/<version>. Try the

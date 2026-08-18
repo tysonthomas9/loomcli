@@ -20,11 +20,13 @@ var (
 	ErrWorkflowCatalogInvalid = persistence.ErrInvalid
 	// These transport sentinels preserve FleetDB's machine-readable lifecycle
 	// failures until the capability adapter maps them to catalog-owned errors.
-	ErrWorkflowCatalogRevisionConflict    = errFleetRevisionConflict
-	ErrWorkflowCatalogVersionOwnership    = errors.New("fleetdb: workflow catalog version ownership mismatch")
-	ErrWorkflowCatalogVersionNotValidated = errors.New("fleetdb: workflow catalog version not validated")
-	ErrWorkflowCatalogVersionNotApproved  = errors.New("fleetdb: workflow catalog version not approved")
-	ErrWorkflowCatalogAuthoringConflict   = errors.New("fleetdb: workflow catalog authoring conflict")
+	ErrWorkflowCatalogRevisionConflict     = errFleetRevisionConflict
+	ErrWorkflowCatalogVersionOwnership     = errors.New("fleetdb: workflow catalog version ownership mismatch")
+	ErrWorkflowCatalogVersionNotValidated  = errors.New("fleetdb: workflow catalog version not validated")
+	ErrWorkflowCatalogVersionNotAvailable  = errors.New("fleetdb: workflow catalog version not available")
+	ErrWorkflowCatalogVersionNotApproved   = errors.New("fleetdb: workflow catalog version not approved")
+	ErrWorkflowCatalogAuthoringConflict    = errors.New("fleetdb: workflow catalog authoring conflict")
+	ErrWorkflowCatalogAvailabilityConflict = errors.New("fleetdb: workflow catalog availability conflict")
 )
 
 // WorkflowCatalogLifecycleResult is FleetDB's authoritative response to one
@@ -58,13 +60,6 @@ type WorkflowCatalogAuthorVersionInput struct {
 	BuildDiagnostics string
 }
 
-// WorkflowCatalogAuthorManagedVersionInput adds only the server-selected
-// activation intent admitted by Workflow Catalog's SystemAuthority lane.
-type WorkflowCatalogAuthorManagedVersionInput struct {
-	WorkflowCatalogAuthorVersionInput
-	Activate bool
-}
-
 // WorkflowCatalogAuthorVersionResult is FleetDB's authoritative response from
 // either atomic authoring route.
 type WorkflowCatalogAuthorVersionResult struct {
@@ -73,7 +68,6 @@ type WorkflowCatalogAuthorVersionResult struct {
 	CreatedDriver     bool                           `json:"created_driver"`
 	CreatedVersion    bool                           `json:"created_version"`
 	ReusedVersion     bool                           `json:"reused_version"`
-	Activated         bool                           `json:"activated"`
 	Replayed          bool                           `json:"replayed"`
 	CommittedRevision uint64                         `json:"committed_revision"`
 	SemanticImpact    string                         `json:"semantic_impact"`
@@ -93,7 +87,8 @@ type WorkflowCatalogTransport interface {
 	UnapproveVersion(ctx context.Context, workspace, driverID, versionID string, expectedRevision uint64) (*WorkflowCatalogLifecycleResult, error)
 	ActivateVersion(ctx context.Context, workspace, driverID, versionID string, expectedRevision uint64) (*WorkflowCatalogLifecycleResult, error)
 	AuthorDriverVersion(context.Context, WorkflowCatalogAuthorVersionInput) (*WorkflowCatalogAuthorVersionResult, error)
-	AuthorManagedDriverVersion(context.Context, WorkflowCatalogAuthorManagedVersionInput) (*WorkflowCatalogAuthorVersionResult, error)
+	AuthorManagedDriverVersion(context.Context, WorkflowCatalogAuthorVersionInput) (*WorkflowCatalogAuthorVersionResult, error)
+	RecordVersionAvailability(context.Context, WorkflowCatalogAvailabilityInput) (*WorkflowCatalogAvailabilityResult, error)
 }
 
 type workflowCatalogStore struct{ client *Client }
@@ -145,14 +140,14 @@ func (s *workflowCatalogStore) AuthorDriverVersion(
 	ctx context.Context,
 	input WorkflowCatalogAuthorVersionInput,
 ) (*WorkflowCatalogAuthorVersionResult, error) {
-	return s.author(ctx, input, false, false)
+	return s.author(ctx, input, false)
 }
 
 func (s *workflowCatalogStore) AuthorManagedDriverVersion(
 	ctx context.Context,
-	input WorkflowCatalogAuthorManagedVersionInput,
+	input WorkflowCatalogAuthorVersionInput,
 ) (*WorkflowCatalogAuthorVersionResult, error) {
-	return s.author(ctx, input.WorkflowCatalogAuthorVersionInput, true, input.Activate)
+	return s.author(ctx, input, true)
 }
 
 type workflowCatalogAuthorVersionBody struct {
@@ -172,7 +167,7 @@ type workflowCatalogAuthorVersionBody struct {
 func (s *workflowCatalogStore) author(
 	ctx context.Context,
 	input WorkflowCatalogAuthorVersionInput,
-	managed, activate bool,
+	managed bool,
 ) (*WorkflowCatalogAuthorVersionResult, error) {
 	if input.ExpectedRevision >= uint64(math.MaxInt64) {
 		return nil, fmt.Errorf("workflow catalog expected revision cannot advance within FleetDB's signed persistence range: %w", ErrWorkflowCatalogInvalid)
@@ -191,16 +186,64 @@ func (s *workflowCatalogStore) author(
 	}
 	path := "/api/v1/" + pathEscape(input.WorkspaceKey) + "/drivers/" +
 		pathEscape(input.DriverID) + "/versions/author"
-	requestBody := any(body)
 	if managed {
 		path += "-managed"
-		requestBody = struct {
-			workflowCatalogAuthorVersionBody
-			Activate bool `json:"activate"`
-		}{workflowCatalogAuthorVersionBody: body, Activate: activate}
 	}
 	var out WorkflowCatalogAuthorVersionResult
-	if err := s.client.doWithHeaders(ctx, http.MethodPost, path, requestBody, &out, headers); err != nil {
+	if err := s.client.doWithHeaders(ctx, http.MethodPost, path, body, &out, headers); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+type WorkflowCatalogAvailabilityInput struct {
+	WorkspaceKey     string
+	DriverID         string
+	VersionID        string
+	DelegatedActor   string
+	RequestID        string
+	ExpectedRevision uint64
+	SourceDigest     string
+	BundleDigest     string
+	Outcome          workflowcatalog.AvailabilityOutcome
+	Failure          string
+}
+
+type WorkflowCatalogAvailabilityResult struct {
+	Driver            *workflowcatalog.Driver        `json:"driver"`
+	Version           *workflowcatalog.DriverVersion `json:"version"`
+	CommittedRevision uint64                         `json:"committed_revision"`
+	SemanticImpact    string                         `json:"semantic_impact"`
+	Replayed          bool                           `json:"replayed"`
+}
+
+func (s *workflowCatalogStore) RecordVersionAvailability(
+	ctx context.Context,
+	input WorkflowCatalogAvailabilityInput,
+) (*WorkflowCatalogAvailabilityResult, error) {
+	if input.ExpectedRevision == 0 || input.ExpectedRevision >= uint64(math.MaxInt64) {
+		return nil, fmt.Errorf("workflow catalog availability expected revision is invalid: %w", ErrWorkflowCatalogInvalid)
+	}
+	headers, err := delegatedActorHeaders(input.DelegatedActor)
+	if err != nil {
+		return nil, fmt.Errorf("workflow catalog availability delegated actor is invalid: %w", ErrWorkflowCatalogInvalid)
+	}
+	body := struct {
+		RequestID        string                              `json:"request_id"`
+		ExpectedRevision uint64                              `json:"expected_revision"`
+		SourceDigest     string                              `json:"source_digest"`
+		BundleDigest     string                              `json:"bundle_digest"`
+		Outcome          workflowcatalog.AvailabilityOutcome `json:"outcome"`
+		Failure          string                              `json:"failure,omitempty"`
+	}{
+		RequestID: input.RequestID, ExpectedRevision: input.ExpectedRevision,
+		SourceDigest: input.SourceDigest, BundleDigest: input.BundleDigest,
+		Outcome: input.Outcome, Failure: input.Failure,
+	}
+	requestPath := "/api/v1/" + pathEscape(input.WorkspaceKey) + "/drivers/" +
+		pathEscape(input.DriverID) + "/versions/" + pathEscape(input.VersionID) + "/availability"
+	var out WorkflowCatalogAvailabilityResult
+	if err := s.client.doWithHeaders(ctx, http.MethodPost, requestPath, body, &out, headers); err != nil {
 		return nil, err
 	}
 	return &out, nil

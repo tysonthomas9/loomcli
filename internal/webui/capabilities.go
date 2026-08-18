@@ -138,10 +138,20 @@ type RepositoryAdmissionMaterializer interface {
 	PrepareRepositoryAdmissionCheckout(context.Context, sourcecontrol.RepositoryAdmissionCheckoutCommand) (*sourcecontrol.PreparedRepositoryCheckout, error)
 }
 
+type WorkflowCatalogVersionAuthoringAPI interface {
+	workflowcatalog.VersionAuthoringAPI
+	workflowcatalog.VersionAvailabilityAPI
+	workflowcatalog.ManagedVersionLifecycleAPI
+}
+
+type WorkflowDistributionAuthorityProvider interface {
+	AuthorityForVersionAvailability(context.Context, string, string) (authority.SystemAuthority, error)
+	AuthorityForManagedVersionLifecycle(context.Context, string, authority.Action, string) (authority.SystemAuthority, error)
+}
+
 type (
 	DaytonaProviderBroker                    = execution.DaytonaProviderBroker
 	WorkflowCatalogAPI                       = workflowcatalog.API
-	WorkflowCatalogVersionAuthoringAPI       = workflowcatalog.VersionAuthoringAPI
 	WorkflowCatalogDriver                    = workflowcatalog.Driver
 	WorkflowCatalogOperatorAuthorityResolver = workflowcataloghttp.OperatorAuthorityResolver
 	WorkspaceAPI                             = workspace.API

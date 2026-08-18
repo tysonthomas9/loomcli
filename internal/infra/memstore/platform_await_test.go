@@ -95,13 +95,14 @@ func createAwaitRunCatalog(t testing.TB, ctx context.Context, s *Store, ws strin
 		t.Fatalf("Create driver: %v", err)
 	}
 	if _, err := s.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
-		WorkspaceKey:     ws,
-		VersionID:        "version-await",
-		DriverID:         "driver-await",
-		Version:          1,
-		SourceDigest:     "sha256:source-v1",
-		BundleDigest:     "sha256:bundle-v1",
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+		WorkspaceKey:       ws,
+		VersionID:          "version-await",
+		DriverID:           "driver-await",
+		Version:            1,
+		SourceDigest:       "sha256:source-v1",
+		BundleDigest:       "sha256:bundle-v1",
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}

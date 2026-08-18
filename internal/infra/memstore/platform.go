@@ -165,6 +165,9 @@ func (s *Store) ApproveDriverVersionForTest(
 	if version.ValidationStatus != workflowcatalog.DriverVersionValidationPassed {
 		return nil, fmt.Errorf("version %q has not passed validation: %w", versionID, persistence.ErrInvalid)
 	}
+	if !workflowcatalog.VersionAvailable(version) {
+		return nil, fmt.Errorf("version %q is not available: %w", versionID, persistence.ErrInvalid)
+	}
 
 	s.drivers.mu.Lock()
 	defer s.drivers.mu.Unlock()
@@ -223,6 +226,9 @@ func (s *Store) ActivateDriverVersionForTest(
 	}
 	if version.ValidationStatus != workflowcatalog.DriverVersionValidationPassed {
 		return nil, fmt.Errorf("version %q has not passed validation: %w", versionID, persistence.ErrInvalid)
+	}
+	if !workflowcatalog.VersionAvailable(version) {
+		return nil, fmt.Errorf("version %q is not available: %w", versionID, persistence.ErrInvalid)
 	}
 
 	s.drivers.mu.Lock()
@@ -307,20 +313,21 @@ func (s *driverVersionStore) Create(_ context.Context, in workflowcatalog.Driver
 		status = workflowcatalog.DriverVersionValidationPending
 	}
 	version := &workflowcatalog.DriverVersion{
-		WorkspaceKey:     in.WorkspaceKey,
-		VersionID:        in.VersionID,
-		DriverID:         in.DriverID,
-		Version:          in.Version,
-		SourceRef:        in.SourceRef,
-		SourceDigest:     in.SourceDigest,
-		BundleRef:        in.BundleRef,
-		BundleDigest:     in.BundleDigest,
-		Runtime:          in.Runtime,
-		Manifest:         cloneMap(in.Manifest),
-		BuildDiagnostics: in.BuildDiagnostics,
-		ValidationStatus: status,
-		CreatedBy:        in.CreatedBy,
-		CreatedAt:        time.Now().UTC(),
+		WorkspaceKey:       in.WorkspaceKey,
+		VersionID:          in.VersionID,
+		DriverID:           in.DriverID,
+		Version:            in.Version,
+		SourceRef:          in.SourceRef,
+		SourceDigest:       in.SourceDigest,
+		BundleRef:          in.BundleRef,
+		BundleDigest:       in.BundleDigest,
+		Runtime:            in.Runtime,
+		Manifest:           cloneMap(in.Manifest),
+		BuildDiagnostics:   in.BuildDiagnostics,
+		ValidationStatus:   status,
+		AvailabilityStatus: in.AvailabilityStatus,
+		CreatedBy:          in.CreatedBy,
+		CreatedAt:          time.Now().UTC(),
 	}
 	s.items[in.WorkspaceKey][in.VersionID] = version
 	return cloneDriverVersion(version), nil

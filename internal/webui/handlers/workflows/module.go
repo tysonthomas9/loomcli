@@ -17,7 +17,7 @@ import (
 
 	appworkflowauthoring "github.com/tysonthomas9/loomcli/internal/app/workflowauthoring"
 	"github.com/tysonthomas9/loomcli/internal/driver"
-	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
+	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
@@ -30,23 +30,27 @@ import (
 
 const maxRunPayloadBytes = 4 << 20
 
+type CatalogCommands = appworkflowauthoring.CatalogCommands
+type DistributionAuthorityProvider = appworkflowauthoring.DistributionAuthorityProvider
+
 const (
 	defaultRunsLimit = handler.DefaultRunsLimit
 	maxRunsLimit     = handler.MaxRunsLimit
 )
 
 type Module struct {
-	catalog           workflowcatalog.API
-	catalogRead       workflowCatalogDriverReader
-	authoring         workflowcatalog.VersionAuthoringAPI
-	catalogAuthority  workflowcataloghttp.OperatorAuthorityResolver
-	prepareTarget     func(context.Context, string, string) (*workflowcatalog.Driver, error)
-	execution         execution.DriverRunAPI
-	taskRuns          execution.TaskRunQueries
-	bindings          automation.BindingQueries
-	operatorAuthority workflowcataloghttp.OperatorAuthorityResolver
-	taskWorkflowRuns  readprojection.TaskWorkflowRunReader
-	backendHealth     BackendHealthQuery
+	catalog                 workflowcatalog.API
+	catalogRead             workflowCatalogDriverReader
+	authoring               CatalogCommands
+	distributionAuthorities DistributionAuthorityProvider
+	catalogAuthority        workflowcataloghttp.OperatorAuthorityResolver
+	prepareTarget           func(context.Context, string, string) (*workflowcatalog.Driver, error)
+	execution               execution.DriverRunAPI
+	taskRuns                execution.TaskRunQueries
+	bindings                automation.BindingQueries
+	operatorAuthority       workflowcataloghttp.OperatorAuthorityResolver
+	taskWorkflowRuns        readprojection.TaskWorkflowRunReader
+	backendHealth           BackendHealthQuery
 }
 
 type workflowCatalogDriverReader interface {
@@ -55,7 +59,8 @@ type workflowCatalogDriverReader interface {
 
 type Config struct {
 	Catalog                  workflowcatalog.API
-	Authoring                workflowcatalog.VersionAuthoringAPI
+	Authoring                CatalogCommands
+	DistributionAuthorities  DistributionAuthorityProvider
 	CatalogOperatorAuthority workflowcataloghttp.OperatorAuthorityResolver
 	PrepareWorkflowTarget    func(context.Context, string, string) (*workflowcatalog.Driver, error)
 	Execution                execution.DriverRunAPI
@@ -69,7 +74,8 @@ type Config struct {
 func NewModule(config Config) *Module {
 	return &Module{
 		catalog: config.Catalog, catalogRead: config.Catalog, authoring: config.Authoring,
-		catalogAuthority: config.CatalogOperatorAuthority, prepareTarget: config.PrepareWorkflowTarget,
+		distributionAuthorities: config.DistributionAuthorities,
+		catalogAuthority:        config.CatalogOperatorAuthority, prepareTarget: config.PrepareWorkflowTarget,
 		execution: config.Execution, taskRuns: config.TaskRuns, bindings: config.Bindings,
 		operatorAuthority: config.OperatorAuthority, taskWorkflowRuns: config.TaskWorkflowRuns,
 		backendHealth: config.BackendHealth,
@@ -301,8 +307,9 @@ func (m *Module) resolveDriverRunSubmissionTarget(
 		}
 	}
 	if version == nil || version.DriverID != driverTarget.DriverID ||
-		version.ValidationStatus != workflowcatalog.DriverVersionValidationPassed {
-		writeDomainError(w, persistence.ErrInvalid, "DriverRun version is not a passed version for the target driver")
+		version.ValidationStatus != workflowcatalog.DriverVersionValidationPassed ||
+		!workflowcatalog.VersionAvailable(version) {
+		writeDomainError(w, persistence.ErrInvalid, "DriverRun version is not a passed and available version for the target driver")
 		return nil, nil, false
 	}
 	return driverTarget, version, true
@@ -582,7 +589,7 @@ func (m *Module) createWorkflowVersion(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	coordinator, err := appworkflowauthoring.New(workflowdefs.NewBundleStager())
+	coordinator, err := appworkflowauthoring.New(workflowdefs.NewBundleStager(), m.distributionAuthorities)
 	if err != nil {
 		writeDomainError(w, err, "compose workflow authoring failed")
 		return

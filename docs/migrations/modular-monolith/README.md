@@ -103,6 +103,7 @@ one-file packages, and 60 one-or-two-file packages.
 | [27-phase-10-7-atomic-work-item-move-evidence.md](27-phase-10-7-atomic-work-item-move-evidence.md) | Stack 10.7 implementation and proof for the paired FleetDB atomic move command, Loom application/delivery seam, replay/conflict/concurrency and immutable-source contracts, clickable UI history, and packaged restart durability. |
 | [28-phase-10-8-agents-reviewer-convergence-evidence.md](28-phase-10-8-agents-reviewer-convergence-evidence.md) | Stack 10.8 implementation and proof for the paired managed-reviewer convergence command, versioned preset, fail-closed ownership conflict, managed archive/reactivation, Interaction session retirement, live Codex transcript attribution, and packaged Desktop journeys. |
 | [29-phase-10-9-automation-admission-evidence.md](29-phase-10-9-automation-admission-evidence.md) | Stack 10.9 implementation and proof for distinct webhook, workflow, and system trust origins entering one private Automation admission policy, exact-byte verification, typed authority, shared content invariants, and packaged Desktop system-event journey. |
+| [30-phase-10-10-workflow-availability-evidence.md](30-phase-10-10-workflow-availability-evidence.md) | Stack 10.10 implementation and proof for durable Workflow Catalog availability, staged Workflow Distribution promotion and restart recovery, fail-closed lifecycle and execution, paired FleetDB transitions, and retirement of the nested authoring package. |
 
 ## Scope boundaries
 

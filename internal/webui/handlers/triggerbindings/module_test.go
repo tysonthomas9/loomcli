@@ -50,13 +50,14 @@ func seededMux(t *testing.T) (*http.ServeMux, *memstore.Store) {
 		t.Fatalf("create driver: %v", err)
 	}
 	if _, err := s.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
-		WorkspaceKey:     "WS",
-		VersionID:        "version-1",
-		DriverID:         "driver-1",
-		Version:          1,
-		SourceDigest:     "sha256:source",
-		BundleDigest:     "sha256:bundle",
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+		WorkspaceKey:       "WS",
+		VersionID:          "version-1",
+		DriverID:           "driver-1",
+		Version:            1,
+		SourceDigest:       "sha256:source",
+		BundleDigest:       "sha256:bundle",
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
 	}); err != nil {
 		t.Fatalf("create driver version: %v", err)
 	}
@@ -774,7 +775,8 @@ func TestCreateBinding_WorkflowTargetFreshStoreReturns201Then200(t *testing.T) {
 			_, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 				WorkspaceKey: workspace, VersionID: "builtin-review-v1", DriverID: "builtin-review",
 				Version: 1, SourceDigest: "sha256:builtin", BundleDigest: "sha256:bundle",
-				ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+				ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+				AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
 			})
 			if err == nil {
 				if _, err = st.ApproveDriverVersionForTest(ctx, workspace, "builtin-review", "builtin-review-v1"); err == nil {

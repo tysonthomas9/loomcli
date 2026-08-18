@@ -336,6 +336,12 @@ Stack 10.6 is documented in
 [Phase 10.6 owner-plane deletion and query evidence](26-phase-10-6-owner-plane-query-evidence.md).
 Stack 10.7 is documented in
 [Phase 10.7 atomic Work Item move evidence](27-phase-10-7-atomic-work-item-move-evidence.md).
+Stack 10.8 is documented in
+[Phase 10.8 Agents reviewer convergence evidence](28-phase-10-8-agents-reviewer-convergence-evidence.md).
+Stack 10.9 is documented in
+[Phase 10.9 Automation admission evidence](29-phase-10-9-automation-admission-evidence.md).
+Stack 10.10 is documented in
+[Phase 10.10 Workflow Distribution and durable availability evidence](30-phase-10-10-workflow-availability-evidence.md).
 
 ## Superseded decisions and alternatives
 

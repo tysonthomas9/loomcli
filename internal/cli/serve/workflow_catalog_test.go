@@ -27,6 +27,7 @@ func phase5RequiredCapabilities(catalog, automation bool) []string {
 			required,
 			fleetdb.WorkflowCatalogVersionLifecycleCapability,
 			fleetdb.WorkflowCatalogVersionAuthoringCapability,
+			fleetdb.WorkflowCatalogVersionAvailabilityCapability,
 			fleetdb.AgentsProvisioningProgressCapability,
 		)
 	}
@@ -311,6 +312,7 @@ func TestOpenServeStoreRejectsMissingAutomationCapabilityWithoutFallback(t *test
 func TestOpenServeStoreRejectsMissingWorkflowCatalogAuthoringCapabilitiesWithoutFallback(t *testing.T) {
 	for _, missing := range []string{
 		fleetdb.WorkflowCatalogVersionAuthoringCapability,
+		fleetdb.WorkflowCatalogVersionAvailabilityCapability,
 		fleetdb.AgentsProvisioningProgressCapability,
 	} {
 		t.Run(missing, func(t *testing.T) {

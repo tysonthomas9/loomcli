@@ -15,7 +15,7 @@ import (
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 
 	"github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
-	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
+	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"

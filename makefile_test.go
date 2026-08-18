@@ -158,7 +158,7 @@ func TestDesktopSidecarChecksPackagedBuiltinsAtPhase5Owner(t *testing.T) {
 	script := string(contents)
 	if !strings.Contains(
 		script,
-		"./internal/infra/workflowdistribution/authoring",
+		"./internal/infra/workflowdistribution",
 	) {
 		t.Fatal("desktop sidecar does not test packaged builtins at the Phase 5 workflow-distribution owner")
 	}

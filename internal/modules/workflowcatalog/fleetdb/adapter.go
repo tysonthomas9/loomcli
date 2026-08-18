@@ -15,13 +15,15 @@ var (
 	// These sentinels are the adapter-owned vocabulary accepted from its
 	// transport. The composition root translates low-level FleetDB failures to
 	// this vocabulary so no infrastructure type crosses the adapter API.
-	ErrTransportNotFound            = errors.New("workflow catalog fleetdb transport: not found")
-	ErrTransportInvalid             = errors.New("workflow catalog fleetdb transport: invalid request")
-	ErrTransportRevisionConflict    = errors.New("workflow catalog fleetdb transport: revision conflict")
-	ErrTransportVersionOwnership    = errors.New("workflow catalog fleetdb transport: version ownership mismatch")
-	ErrTransportVersionNotValidated = errors.New("workflow catalog fleetdb transport: version not validated")
-	ErrTransportVersionNotApproved  = errors.New("workflow catalog fleetdb transport: version not approved")
-	ErrTransportAuthoringConflict   = errors.New("workflow catalog fleetdb transport: authoring conflict")
+	ErrTransportNotFound             = errors.New("workflow catalog fleetdb transport: not found")
+	ErrTransportInvalid              = errors.New("workflow catalog fleetdb transport: invalid request")
+	ErrTransportRevisionConflict     = errors.New("workflow catalog fleetdb transport: revision conflict")
+	ErrTransportVersionOwnership     = errors.New("workflow catalog fleetdb transport: version ownership mismatch")
+	ErrTransportVersionNotValidated  = errors.New("workflow catalog fleetdb transport: version not validated")
+	ErrTransportVersionNotAvailable  = errors.New("workflow catalog fleetdb transport: version not available")
+	ErrTransportVersionNotApproved   = errors.New("workflow catalog fleetdb transport: version not approved")
+	ErrTransportAuthoringConflict    = errors.New("workflow catalog fleetdb transport: authoring conflict")
+	ErrTransportAvailabilityConflict = errors.New("workflow catalog fleetdb transport: availability conflict")
 )
 
 // TransportLifecycleResult is the narrow adapter-owned representation of one
@@ -56,7 +58,6 @@ type TransportAuthoringResult struct {
 	CreatedDriver     bool
 	CreatedVersion    bool
 	ReusedVersion     bool
-	Activated         bool
 	Replayed          bool
 	CommittedRevision uint64
 	SemanticImpact    string
@@ -69,18 +70,37 @@ type AuthoringTransport interface {
 	AuthorVersion(context.Context, workflowcatalog.AuthoringMutation) (*TransportAuthoringResult, error)
 }
 
+// TransportAvailabilityResult is the narrow response from FleetDB's atomic
+// availability command.
+type TransportAvailabilityResult struct {
+	Driver            *workflowcatalog.Driver
+	Version           *workflowcatalog.DriverVersion
+	Replayed          bool
+	CommittedRevision uint64
+	SemanticImpact    string
+}
+
+// AvailabilityTransport is separate so the complete production constructor
+// can reject a partially upgraded FleetDB bridge without a compatibility
+// fallback.
+type AvailabilityTransport interface {
+	RecordVersionAvailability(context.Context, workflowcatalog.AvailabilityMutation) (*TransportAvailabilityResult, error)
+}
+
 // Adapter implements both catalog-owned persistence ports over one injected
 // transport. The transport is obtained from the composition root's existing
 // FleetDB Client and must not be constructed here.
 type Adapter struct {
-	transport Transport
-	authoring AuthoringTransport
+	transport    Transport
+	authoring    AuthoringTransport
+	availability AvailabilityTransport
 }
 
 var (
 	_ workflowcatalog.Reader                = (*Adapter)(nil)
 	_ workflowcatalog.VersionLifecycleStore = (*Adapter)(nil)
 	_ workflowcatalog.AuthoringStore        = (*Adapter)(nil)
+	_ workflowcatalog.AvailabilityStore     = (*Adapter)(nil)
 )
 
 // New accepts the narrow adapter-owned transport supplied by the composition
@@ -92,8 +112,10 @@ func New(transport Transport) (*Adapter, error) {
 	return &Adapter{transport: transport}, nil
 }
 
-// NewWithAuthoring composes the complete Phase 5 persistence adapter.
-func NewWithAuthoring(transport Transport, authoring AuthoringTransport) (*Adapter, error) {
+// NewComplete composes the complete production persistence adapter. Both
+// atomic command transports are indivisible: production cannot silently run
+// the former author-and-activate behavior when availability is absent.
+func NewComplete(transport Transport, authoring AuthoringTransport, availability AvailabilityTransport) (*Adapter, error) {
 	adapter, err := New(transport)
 	if err != nil {
 		return nil, err
@@ -101,7 +123,11 @@ func NewWithAuthoring(transport Transport, authoring AuthoringTransport) (*Adapt
 	if authoring == nil {
 		return nil, fmt.Errorf("workflow catalog fleetdb adapter: nil authoring transport: %w", workflowcatalog.ErrUnavailable)
 	}
+	if availability == nil {
+		return nil, fmt.Errorf("workflow catalog fleetdb adapter: nil availability transport: %w", workflowcatalog.ErrUnavailable)
+	}
 	adapter.authoring = authoring
+	adapter.availability = availability
 	return adapter, nil
 }
 
@@ -159,9 +185,26 @@ func (a *Adapter) AuthorVersion(ctx context.Context, mutation workflowcatalog.Au
 	return &workflowcatalog.AuthoringResult{
 		Driver: result.Driver, Version: result.Version,
 		CreatedDriver: result.CreatedDriver, CreatedVersion: result.CreatedVersion,
-		ReusedVersion: result.ReusedVersion, Activated: result.Activated,
-		Replayed: result.Replayed, CommittedRevision: result.CommittedRevision,
+		ReusedVersion: result.ReusedVersion,
+		Replayed:      result.Replayed, CommittedRevision: result.CommittedRevision,
 		SemanticImpact: result.SemanticImpact,
+	}, nil
+}
+
+func (a *Adapter) RecordVersionAvailability(ctx context.Context, mutation workflowcatalog.AvailabilityMutation) (*workflowcatalog.AvailabilityResult, error) {
+	if a == nil || a.availability == nil {
+		return nil, workflowcatalog.ErrUnavailable
+	}
+	result, err := a.availability.RecordVersionAvailability(ctx, mutation)
+	if err != nil {
+		return nil, mapError("record version availability", err)
+	}
+	if result == nil {
+		return nil, fmt.Errorf("record version availability: empty FleetDB response: %w", workflowcatalog.ErrInvalidPersistedState)
+	}
+	return &workflowcatalog.AvailabilityResult{
+		Driver: result.Driver, Version: result.Version, Replayed: result.Replayed,
+		CommittedRevision: result.CommittedRevision, SemanticImpact: result.SemanticImpact,
 	}, nil
 }
 
@@ -195,10 +238,14 @@ func mapError(operation string, err error) error {
 		mapped = workflowcatalog.ErrVersionOwnership
 	case errors.Is(err, ErrTransportVersionNotValidated):
 		mapped = workflowcatalog.ErrVersionNotValidated
+	case errors.Is(err, ErrTransportVersionNotAvailable):
+		mapped = workflowcatalog.ErrVersionNotAvailable
 	case errors.Is(err, ErrTransportVersionNotApproved):
 		mapped = workflowcatalog.ErrVersionNotApproved
 	case errors.Is(err, ErrTransportAuthoringConflict):
 		mapped = workflowcatalog.ErrAuthoringConflict
+	case errors.Is(err, ErrTransportAvailabilityConflict):
+		mapped = workflowcatalog.ErrAvailabilityConflict
 	case errors.Is(err, ErrTransportInvalid):
 		mapped = workflowcatalog.ErrInvalid
 	default:

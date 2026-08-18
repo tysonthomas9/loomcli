@@ -1,4 +1,4 @@
-package authoring
+package workflowdistribution
 
 import (
 	"context"
@@ -12,7 +12,6 @@ import (
 
 	appworkflowauthoring "github.com/tysonthomas9/loomcli/internal/app/workflowauthoring"
 	"github.com/tysonthomas9/loomcli/internal/driver"
-	workflowdistribution "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 )
 
@@ -23,11 +22,11 @@ func NewBuiltinSupport() appworkflowauthoring.BuiltinSupport {
 }
 
 func (builtinSupport) BuiltinNames() []string {
-	return workflowdistribution.BuiltinWorkflowNames()
+	return BuiltinWorkflowNames()
 }
 
 func (builtinSupport) Builtin(name string) (appworkflowauthoring.BuiltinSpec, bool) {
-	spec, ok := workflowdistribution.BuiltinWorkflow(name)
+	spec, ok := BuiltinWorkflow(name)
 	if !ok {
 		return appworkflowauthoring.BuiltinSpec{}, false
 	}
@@ -35,13 +34,13 @@ func (builtinSupport) Builtin(name string) (appworkflowauthoring.BuiltinSpec, bo
 		Entrypoint: spec.Entrypoint,
 		Files:      cloneWorkflowManifest(spec.Files),
 		Runners: applicationRunnerSpecs(
-			workflowdistribution.DeriveWorkflowRunnerSpecs(spec.Entrypoint, spec.Files),
+			DeriveWorkflowRunnerSpecs(spec.Entrypoint, spec.Files),
 		),
 	}, true
 }
 
 func (builtinSupport) SourceDigest(files map[string]string) (string, error) {
-	return workflowdistribution.SourceDigest(files)
+	return SourceDigest(files)
 }
 
 func (builtinSupport) AssessVersion(
@@ -56,11 +55,11 @@ func (builtinSupport) AssessVersion(
 	}
 	return appworkflowauthoring.BuiltinVersionAssessment{
 		BundleAvailable: builtInWorkflowBundleAvailable(version),
-		RunnerListStale: workflowdistribution.ActiveManifestRunnersAreStale(
+		RunnerListStale: ActiveManifestRunnersAreStale(
 			versionManifest(version),
 			freshNames,
 		),
-		MissingRunners: workflowdistribution.ManifestMissingFreshRunners(
+		MissingRunners: ManifestMissingFreshRunners(
 			versionManifest(version),
 			freshNames,
 		),

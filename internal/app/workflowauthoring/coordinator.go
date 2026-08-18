@@ -2,7 +2,9 @@ package workflowauthoring
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
@@ -12,20 +14,22 @@ import (
 type Coordinator struct {
 	stager       BundleStager
 	nativeStager NativeBundleStager
+	authorities  DistributionAuthorityProvider
 }
 
-func New(stager BundleStager) (*Coordinator, error) {
-	if stager == nil {
+func New(stager BundleStager, authorities DistributionAuthorityProvider) (*Coordinator, error) {
+	if stager == nil || authorities == nil {
 		return nil, workflowcatalog.ErrUnavailable
 	}
-	return &Coordinator{stager: stager}, nil
+	return &Coordinator{stager: stager, authorities: authorities}, nil
 }
 
 func NewWithNative(
 	stager BundleStager,
 	nativeStager NativeBundleStager,
+	authorities DistributionAuthorityProvider,
 ) (*Coordinator, error) {
-	coordinator, err := New(stager)
+	coordinator, err := New(stager, authorities)
 	if err != nil {
 		return nil, err
 	}
@@ -38,7 +42,7 @@ func NewWithNative(
 
 func (coordinator *Coordinator) AuthorOperator(
 	ctx context.Context,
-	api workflowcatalog.VersionAuthoringAPI,
+	api CatalogCommands,
 	auth authority.OperatorAuthority,
 	options BuildOptions,
 ) (*Result, string, error) {
@@ -54,7 +58,7 @@ func (coordinator *Coordinator) AuthorOperator(
 
 func (coordinator *Coordinator) AuthorManaged(
 	ctx context.Context,
-	api workflowcatalog.VersionAuthoringAPI,
+	api CatalogCommands,
 	auth authority.SystemAuthority,
 	options BuildOptions,
 ) (*Result, string, error) {
@@ -73,13 +77,13 @@ func (coordinator *Coordinator) AuthorManaged(
 
 func (coordinator *Coordinator) author(
 	ctx context.Context,
-	api workflowcatalog.VersionAuthoringAPI,
+	api CatalogCommands,
 	operatorAuth authority.OperatorAuthority,
 	systemAuth authority.SystemAuthority,
 	options BuildOptions,
 	managed bool,
 ) (*Result, string, error) {
-	if coordinator == nil || coordinator.stager == nil || api == nil {
+	if coordinator == nil || coordinator.stager == nil || coordinator.authorities == nil || api == nil {
 		return nil, "", workflowcatalog.ErrUnavailable
 	}
 	staged, diagnostics, err := coordinator.stager.BuildAndStage(ctx, options)
@@ -88,10 +92,6 @@ func (coordinator *Coordinator) author(
 	}
 	if staged == nil {
 		return nil, diagnostics, workflowcatalog.ErrInvalidPersistedState
-	}
-	defer staged.Cleanup()
-	if err := staged.Promote(); err != nil {
-		return nil, diagnostics, err
 	}
 	result, err := coordinator.authorStaged(
 		ctx,
@@ -102,12 +102,23 @@ func (coordinator *Coordinator) author(
 		staged,
 		managed,
 	)
+	if err != nil {
+		staged.Discard()
+		return nil, diagnostics, err
+	}
+	result, err = coordinator.distributeAuthoredVersion(ctx, api, result, staged)
+	if err != nil {
+		return nil, diagnostics, err
+	}
+	if managed && options.Activate {
+		result, err = coordinator.activateManagedVersion(ctx, api, result)
+	}
 	return result, diagnostics, err
 }
 
 func (coordinator *Coordinator) authorStaged(
 	ctx context.Context,
-	api workflowcatalog.VersionAuthoringAPI,
+	api CatalogCommands,
 	operatorAuth authority.OperatorAuthority,
 	systemAuth authority.SystemAuthority,
 	options BuildOptions,
@@ -132,10 +143,7 @@ func (coordinator *Coordinator) authorStaged(
 	var authored *workflowcatalog.AuthorVersionResult
 	var err error
 	if managed {
-		authored, err = api.AuthorManagedVersion(ctx, systemAuth, workflowcatalog.AuthorManagedVersionCommand{
-			AuthorVersionCommand: command,
-			Activate:             options.Activate,
-		})
+		authored, err = api.AuthorManagedVersion(ctx, systemAuth, command)
 	} else {
 		authored, err = api.AuthorVersion(ctx, operatorAuth, command)
 	}
@@ -148,8 +156,130 @@ func (coordinator *Coordinator) authorStaged(
 	return &Result{
 		Driver: authored.Driver, Version: authored.Version, Bundle: staged.Bundle(),
 		CreatedDriver: authored.CreatedDriver, CreatedVersion: authored.CreatedVersion,
-		ReusedVersion: authored.ReusedVersion, Activated: authored.Activated,
+		ReusedVersion: authored.ReusedVersion,
 	}, nil
+}
+
+func (coordinator *Coordinator) distributeAuthoredVersion(
+	ctx context.Context,
+	api CatalogCommands,
+	result *Result,
+	staged StagedBundle,
+) (*Result, error) {
+	if result == nil || result.Driver == nil || result.Version == nil {
+		staged.Discard()
+		return nil, workflowcatalog.ErrInvalidPersistedState
+	}
+	if err := staged.Promote(); err != nil {
+		return nil, coordinator.recordDistributionFailure(ctx, api, result, staged, err, "bundle_promotion_failed")
+	}
+	if err := staged.Verify(); err != nil {
+		return nil, coordinator.recordDistributionFailure(ctx, api, result, staged, err, "bundle_verification_failed")
+	}
+	if workflowcatalog.VersionAvailable(result.Version) {
+		staged.Discard()
+		return result, nil
+	}
+	available, err := coordinator.recordAvailability(ctx, api, result, workflowcatalog.AvailabilityOutcomeAvailable, "")
+	if err != nil {
+		return nil, err
+	}
+	result.Driver, result.Version = available.Driver, available.Version
+	staged.Discard()
+	return result, nil
+}
+
+func (coordinator *Coordinator) recordDistributionFailure(
+	ctx context.Context,
+	api CatalogCommands,
+	result *Result,
+	staged StagedBundle,
+	cause error,
+	failure string,
+) error {
+	outcome := workflowcatalog.AvailabilityOutcomePermanentFailure
+	if staged.ClassifyFailure(cause) == FailureRetryable {
+		outcome = workflowcatalog.AvailabilityOutcomeRetryableFailure
+	}
+	_, err := coordinator.recordAvailability(ctx, api, result, outcome, failure)
+	if err != nil {
+		return errors.Join(cause, err)
+	}
+	if outcome == workflowcatalog.AvailabilityOutcomePermanentFailure {
+		staged.Discard()
+	}
+	return cause
+}
+
+func (coordinator *Coordinator) recordAvailability(
+	ctx context.Context,
+	api CatalogCommands,
+	result *Result,
+	outcome workflowcatalog.AvailabilityOutcome,
+	failure string,
+) (*workflowcatalog.AvailabilityResult, error) {
+	revision := result.Driver.Revision
+	auth, err := coordinator.authorities.AuthorityForVersionAvailability(
+		ctx,
+		result.Driver.WorkspaceKey,
+		"record immutable workflow bundle availability",
+	)
+	if err != nil {
+		return nil, err
+	}
+	return api.RecordVersionAvailability(ctx, auth, workflowcatalog.AvailabilityCommand{
+		WorkspaceKey: result.Driver.WorkspaceKey,
+		RequestID: "workflow-availability:" + result.Version.VersionID + ":" +
+			strconv.FormatUint(revision, 10) + ":" + string(outcome),
+		ExpectedRevision: revision,
+		DriverID:         result.Driver.DriverID,
+		VersionID:        result.Version.VersionID,
+		SourceDigest:     result.Version.SourceDigest,
+		BundleDigest:     result.Version.BundleDigest,
+		Outcome:          outcome,
+		Failure:          failure,
+	})
+}
+
+func (coordinator *Coordinator) activateManagedVersion(
+	ctx context.Context,
+	api CatalogCommands,
+	result *Result,
+) (*Result, error) {
+	auth, err := coordinator.authorities.AuthorityForManagedVersionLifecycle(
+		ctx,
+		result.Driver.WorkspaceKey,
+		workflowcatalog.ActionApproveManagedVersion,
+		"approve available managed workflow version",
+	)
+	if err != nil {
+		return nil, err
+	}
+	approved, err := api.ApproveManagedVersion(ctx, auth, workflowcatalog.VersionCommand{
+		WorkspaceKey: result.Driver.WorkspaceKey, DriverID: result.Driver.DriverID,
+		VersionID: result.Version.VersionID, ExpectedRevision: result.Driver.Revision,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("approve managed workflow version: %w", err)
+	}
+	auth, err = coordinator.authorities.AuthorityForManagedVersionLifecycle(
+		ctx,
+		result.Driver.WorkspaceKey,
+		workflowcatalog.ActionActivateManagedVersion,
+		"activate available managed workflow version",
+	)
+	if err != nil {
+		return nil, err
+	}
+	activated, err := api.ActivateManagedVersion(ctx, auth, workflowcatalog.VersionCommand{
+		WorkspaceKey: result.Driver.WorkspaceKey, DriverID: result.Driver.DriverID,
+		VersionID: result.Version.VersionID, ExpectedRevision: approved.Driver.Revision,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("activate managed workflow version: %w", err)
+	}
+	result.Driver, result.Version, result.Activated = activated.Driver, activated.Version, true
+	return result, nil
 }
 
 func cloneManifest(input map[string]string) map[string]string {

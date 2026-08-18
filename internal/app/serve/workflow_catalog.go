@@ -34,6 +34,12 @@ type RouteModule interface {
 	Register(*http.ServeMux)
 }
 
+type workflowCatalogCommands interface {
+	workflowcatalog.VersionAuthoringAPI
+	workflowcatalog.VersionAvailabilityAPI
+	workflowcatalog.ManagedVersionLifecycleAPI
+}
+
 // NewWorkItemMove composes the atomic cross-owner workflow from the shared
 // FleetDB client already owned by process composition. It lives beside the
 // other serve-hosted owner graphs so the CLI receives only the application
@@ -60,6 +66,8 @@ type WorkflowCatalogCapability struct {
 	routes           RouteModule
 	catalog          workflowcatalog.API
 	authoring        workflowcatalog.VersionAuthoringAPI
+	availability     workflowcatalog.VersionAvailabilityAPI
+	commands         workflowCatalogCommands
 	issuer           *authority.Issuer
 	operatorResolver httpapi.OperatorAuthorityResolver
 	automation       *AutomationCapability
@@ -106,6 +114,24 @@ func (catalog *WorkflowCatalogCapability) VersionAuthoringAPI() workflowcatalog.
 		return nil
 	}
 	return catalog.authoring
+}
+
+// VersionAvailabilityAPI exposes only the authority-gated distribution
+// outcome command to the workflow-authoring coordinator.
+func (catalog *WorkflowCatalogCapability) VersionAvailabilityAPI() workflowcatalog.VersionAvailabilityAPI {
+	if catalog == nil {
+		return nil
+	}
+	return catalog.availability
+}
+
+// CatalogCommands returns the indivisible authoring/distribution command
+// surface. Production callers must not compose only the legacy authoring half.
+func (catalog *WorkflowCatalogCapability) CatalogCommands() workflowCatalogCommands {
+	if catalog == nil {
+		return nil
+	}
+	return catalog.commands
 }
 
 // OperatorAuthorityResolver exposes only the request-scoped operator resolver
@@ -207,6 +233,53 @@ func (catalog *WorkflowCatalogCapability) ManagedBuiltinAuthoringAuthority(
 	)
 }
 
+func (catalog *WorkflowCatalogCapability) AuthorityForVersionAvailability(
+	_ context.Context,
+	workspace, reason string,
+) (authority.SystemAuthority, error) {
+	return catalog.issueWorkflowDistributionAuthority(
+		workspace,
+		workflowcatalog.ActionRecordVersionAvailability,
+		reason,
+	)
+}
+
+func (catalog *WorkflowCatalogCapability) AuthorityForManagedVersionLifecycle(
+	_ context.Context,
+	workspace string,
+	action authority.Action,
+	reason string,
+) (authority.SystemAuthority, error) {
+	if action != workflowcatalog.ActionApproveManagedVersion &&
+		action != workflowcatalog.ActionActivateManagedVersion {
+		return authority.SystemAuthority{}, authority.ErrActionNotAllowed
+	}
+	return catalog.issueWorkflowDistributionAuthority(workspace, action, reason)
+}
+
+func (catalog *WorkflowCatalogCapability) issueWorkflowDistributionAuthority(
+	workspace string,
+	action authority.Action,
+	reason string,
+) (authority.SystemAuthority, error) {
+	if catalog == nil || catalog.issuer == nil {
+		return authority.SystemAuthority{}, authority.ErrInvalidIssuer
+	}
+	workspace, reason = strings.TrimSpace(workspace), strings.TrimSpace(reason)
+	if workspace == "" || reason == "" {
+		return authority.SystemAuthority{}, authority.ErrInvalidScope
+	}
+	principal, err := catalog.issuer.DeriveVerifiedPrincipal(authority.PrincipalClaims{
+		Subject: string(workflowCatalogBuiltinDistributionComponent), Class: authority.ClassSystem,
+		Workspace: workspace, Actions: []authority.Action{action},
+		ExpiresAt: time.Now().Add(externalOperatorAuthorityTTL),
+	})
+	if err != nil {
+		return authority.SystemAuthority{}, err
+	}
+	return catalog.issuer.IssueSystem(principal, workspace, action, reason)
+}
+
 // issueAutomationEffectiveVersionAuthority is the composition-only seam used
 // by Automation's narrow EffectiveVersionAuthorityProvider. Automation is a
 // request-driven capability consumer as well as a runtime contributor, so it
@@ -274,7 +347,7 @@ func NewWorkflowCatalogModule(config WorkflowCatalogConfig) (*WorkflowCatalogCap
 	if transport == nil {
 		return nil, fmt.Errorf("compose workflow catalog adapter: shared FleetDB client is required: %w", workflowcatalog.ErrUnavailable)
 	}
-	adapter, err := catalogfleetdb.NewWithAuthoring(transport, transport)
+	adapter, err := catalogfleetdb.NewComplete(transport, transport, transport)
 	if err != nil {
 		return nil, fmt.Errorf("compose workflow catalog adapter: %w", err)
 	}
@@ -285,11 +358,12 @@ func NewWorkflowCatalogModule(config WorkflowCatalogConfig) (*WorkflowCatalogCap
 		return nil, err
 	}
 
-	catalog := workflowcatalog.NewWithAuthoring(adapter, adapter, adapter, admission)
+	catalog := workflowcatalog.NewComplete(adapter, adapter, adapter, adapter, admission)
 	catalogHTTP := httpapi.New(catalog, resolver, config.WorkspaceFromContext, config.BuiltinWorkflow)
 	capability := &WorkflowCatalogCapability{
-		routes: catalogHTTP, catalog: catalog, authoring: catalog, issuer: issuer,
+		routes: catalogHTTP, catalog: catalog, authoring: catalog, availability: catalog, issuer: issuer,
 		operatorResolver: resolver,
+		commands:         catalog,
 	}
 	if !config.AutomationEnabled {
 		return capability, nil
@@ -384,6 +458,9 @@ func workflowCatalogOperationRules() []authority.OperationRule {
 	return []authority.OperationRule{
 		authority.Allow(workflowcatalog.ActionResolveEffectiveVersion, authority.ClassSystem),
 		authority.Allow(workflowcatalog.ActionAuthorManagedVersion, authority.ClassSystem),
+		authority.Allow(workflowcatalog.ActionRecordVersionAvailability, authority.ClassSystem),
+		authority.Allow(workflowcatalog.ActionApproveManagedVersion, authority.ClassSystem),
+		authority.Allow(workflowcatalog.ActionActivateManagedVersion, authority.ClassSystem),
 		authority.OperatorOnly(workflowcatalog.ActionResolveRequestedVersion),
 		authority.OperatorOnly(workflowcatalog.ActionAuthorVersion),
 		authority.OperatorOnly(workflowcatalog.ActionApproveVersion),

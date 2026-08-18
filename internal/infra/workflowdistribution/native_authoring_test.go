@@ -1,4 +1,4 @@
-package authoring
+package workflowdistribution
 
 import (
 	"context"
@@ -94,18 +94,19 @@ func (fake *nativeAuthoringStateFake) AuthorVersion(
 			Revision:     1,
 		}
 		fake.version = &workflowcatalog.DriverVersion{
-			WorkspaceKey:     command.WorkspaceKey,
-			DriverID:         command.DriverID,
-			VersionID:        command.VersionID,
-			Version:          1,
-			SourceRef:        command.SourceRef,
-			SourceDigest:     command.SourceDigest,
-			BundleRef:        command.BundleRef,
-			BundleDigest:     command.BundleDigest,
-			Runtime:          command.Runtime,
-			Manifest:         cloneNativeMap(command.Manifest),
-			ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
-			CreatedBy:        auth.Subject(),
+			WorkspaceKey:       command.WorkspaceKey,
+			DriverID:           command.DriverID,
+			VersionID:          command.VersionID,
+			Version:            1,
+			SourceRef:          command.SourceRef,
+			SourceDigest:       command.SourceDigest,
+			BundleRef:          command.BundleRef,
+			BundleDigest:       command.BundleDigest,
+			Runtime:            command.Runtime,
+			Manifest:           cloneNativeMap(command.Manifest),
+			ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+			AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityPending,
+			CreatedBy:          auth.Subject(),
 		}
 		fake.version.Manifest[workflowcatalog.ManifestTrustLevelKey] = string(workflowcatalog.DriverTrustUntrusted)
 		fake.receipt = cloneNativeDriver(fake.driver)
@@ -135,9 +136,40 @@ func (fake *nativeAuthoringStateFake) AuthorVersion(
 func (*nativeAuthoringStateFake) AuthorManagedVersion(
 	context.Context,
 	authority.SystemAuthority,
-	workflowcatalog.AuthorManagedVersionCommand,
+	workflowcatalog.AuthorVersionCommand,
 ) (*workflowcatalog.AuthorVersionResult, error) {
 	return nil, errors.New("unexpected managed authoring")
+}
+
+func (fake *nativeAuthoringStateFake) RecordVersionAvailability(
+	_ context.Context,
+	_ authority.SystemAuthority,
+	command workflowcatalog.AvailabilityCommand,
+) (*workflowcatalog.AvailabilityResult, error) {
+	if command.ExpectedRevision != fake.driver.Revision {
+		return nil, workflowcatalog.ErrStaleRevision
+	}
+	if command.Outcome != workflowcatalog.AvailabilityOutcomeAvailable {
+		return nil, errors.New("unexpected availability failure")
+	}
+	fake.version.AvailabilityStatus = workflowcatalog.DriverVersionAvailabilityAvailable
+	fake.driver.Revision++
+	return &workflowcatalog.AvailabilityResult{
+		Driver: cloneNativeDriver(fake.driver), Version: cloneNativeVersion(fake.version),
+		CommittedRevision: fake.driver.Revision,
+	}, nil
+}
+
+func (*nativeAuthoringStateFake) ApproveManagedVersion(
+	context.Context, authority.SystemAuthority, workflowcatalog.VersionCommand,
+) (*workflowcatalog.VersionResult, error) {
+	return nil, errors.New("unexpected managed approval")
+}
+
+func (*nativeAuthoringStateFake) ActivateManagedVersion(
+	context.Context, authority.SystemAuthority, workflowcatalog.VersionCommand,
+) (*workflowcatalog.VersionResult, error) {
+	return nil, errors.New("unexpected managed activation")
 }
 
 func (fake *nativeAuthoringStateFake) ApproveVersion(
@@ -302,10 +334,10 @@ func TestAuthorNativeFlueDriverReReadsDurableRevisionAfterOlderAuthorReceipt(t *
 	if err != nil {
 		t.Fatalf("AuthorNativeFlueDriver: %v", err)
 	}
-	if len(fake.approveCAS) != 1 || fake.approveCAS[0] != 2 {
-		t.Fatalf("approve CAS = %v, want durable revision 2 instead of author receipt revision 1", fake.approveCAS)
+	if len(fake.approveCAS) != 1 || fake.approveCAS[0] != 3 {
+		t.Fatalf("approve CAS = %v, want post-availability revision 3 instead of author receipt revision 1", fake.approveCAS)
 	}
-	if result.Driver.Revision != 3 || !workflowcatalog.VersionApproved(result.Driver, result.Version) {
+	if result.Driver.Revision != 4 || !workflowcatalog.VersionApproved(result.Driver, result.Version) {
 		t.Fatalf("result = %+v version=%+v", result.Driver, result.Version)
 	}
 }
@@ -411,11 +443,13 @@ func nativeTestAuthorities(t *testing.T, workspace, subject string) appworkflowa
 func authorNativeForTest(
 	ctx context.Context,
 	catalog workflowcatalog.API,
-	authoring workflowcatalog.VersionAuthoringAPI,
+	authoring appworkflowauthoring.CatalogCommands,
 	authorities appworkflowauthoring.NativeAuthoringAuthorities,
 	options appworkflowauthoring.NativeOptions,
 ) (*appworkflowauthoring.Result, error) {
-	coordinator, err := appworkflowauthoring.NewWithNative(NewBundleStager(), NewNativeBundleStager())
+	coordinator, err := appworkflowauthoring.NewWithNative(
+		NewBundleStager(), NewNativeBundleStager(), &managedBuiltinAuthoritySpy{},
+	)
 	if err != nil {
 		return nil, err
 	}

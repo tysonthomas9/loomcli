@@ -51,9 +51,10 @@ func registerUntrustedCaller(t *testing.T, st *memstore.Store) *execution.Driver
 	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey: "WS", VersionID: "custom-agent-v1", DriverID: "custom-agent", Version: 1,
 		SourceDigest: "sha256:custom", BundleDigest: "sha256:custom",
-		Runtime:          RuntimeFlueNode,
-		Manifest:         map[string]string{ManifestTrustLevelKey: string(workflowcatalog.DriverTrustUntrusted)}, // declares no runners
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+		Runtime:            RuntimeFlueNode,
+		Manifest:           map[string]string{ManifestTrustLevelKey: string(workflowcatalog.DriverTrustUntrusted)}, // declares no runners
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
 	}); err != nil {
 		t.Fatalf("create caller version: %v", err)
 	}

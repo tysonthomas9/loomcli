@@ -38,8 +38,9 @@ func activeDriverVersion(ctx context.Context, s driverRunReadStore, workspaceKey
 	if err != nil {
 		return nil, nil, fmt.Errorf("get active driver version: %w", err)
 	}
-	if version.DriverID != driver.DriverID || version.ValidationStatus != workflowcatalog.DriverVersionValidationPassed {
-		return nil, nil, fmt.Errorf("driver %q active version %q is not a passed version: %w", driver.DriverID, driver.ActiveVersionID, persistence.ErrInvalid)
+	if version.DriverID != driver.DriverID || version.ValidationStatus != workflowcatalog.DriverVersionValidationPassed ||
+		!workflowcatalog.VersionAvailable(version) {
+		return nil, nil, fmt.Errorf("driver %q active version %q is not passed and available: %w", driver.DriverID, driver.ActiveVersionID, persistence.ErrInvalid)
 	}
 	return driver, version, nil
 }

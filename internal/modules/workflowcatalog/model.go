@@ -65,22 +65,43 @@ const (
 	DriverVersionValidationFailed  DriverVersionValidationStatus = "failed"
 )
 
+// DriverVersionAvailabilityStatus records whether the immutable bundle bytes
+// named by a validated version are executable at their digest-addressed
+// location. Validation and availability are deliberately separate.
+type DriverVersionAvailabilityStatus string
+
+const (
+	DriverVersionAvailabilityPending   DriverVersionAvailabilityStatus = "pending"
+	DriverVersionAvailabilityAvailable DriverVersionAvailabilityStatus = "available"
+	DriverVersionAvailabilityFailed    DriverVersionAvailabilityStatus = "failed"
+)
+
 // DriverVersion is an immutable built workflow version owned by the catalog.
 type DriverVersion struct {
-	WorkspaceKey     string                        `json:"workspace_key"`
-	VersionID        string                        `json:"version_id"`
-	DriverID         string                        `json:"driver_id"`
-	Version          int                           `json:"version"`
-	SourceRef        string                        `json:"source_ref"`
-	SourceDigest     string                        `json:"source_digest"`
-	BundleRef        string                        `json:"bundle_ref"`
-	BundleDigest     string                        `json:"bundle_digest"`
-	Runtime          string                        `json:"runtime,omitempty"`
-	Manifest         map[string]string             `json:"manifest,omitempty"`
-	BuildDiagnostics string                        `json:"build_diagnostics,omitempty"`
-	ValidationStatus DriverVersionValidationStatus `json:"validation_status"`
-	CreatedBy        string                        `json:"created_by,omitempty"`
-	CreatedAt        time.Time                     `json:"created_at"`
+	WorkspaceKey          string                          `json:"workspace_key"`
+	VersionID             string                          `json:"version_id"`
+	DriverID              string                          `json:"driver_id"`
+	Version               int                             `json:"version"`
+	SourceRef             string                          `json:"source_ref"`
+	SourceDigest          string                          `json:"source_digest"`
+	BundleRef             string                          `json:"bundle_ref"`
+	BundleDigest          string                          `json:"bundle_digest"`
+	Runtime               string                          `json:"runtime,omitempty"`
+	Manifest              map[string]string               `json:"manifest,omitempty"`
+	BuildDiagnostics      string                          `json:"build_diagnostics,omitempty"`
+	ValidationStatus      DriverVersionValidationStatus   `json:"validation_status"`
+	AvailabilityStatus    DriverVersionAvailabilityStatus `json:"availability_status"`
+	AvailabilityAttempts  int                             `json:"availability_attempts"`
+	AvailabilityFailure   string                          `json:"availability_failure,omitempty"`
+	AvailabilityUpdatedAt time.Time                       `json:"availability_updated_at"`
+	CreatedBy             string                          `json:"created_by,omitempty"`
+	CreatedAt             time.Time                       `json:"created_at"`
+}
+
+// VersionAvailable returns true only for the explicit durable available
+// state. Missing, unknown, pending, and failed states all fail closed.
+func VersionAvailable(version *DriverVersion) bool {
+	return version != nil && version.AvailabilityStatus == DriverVersionAvailabilityAvailable
 }
 
 const (

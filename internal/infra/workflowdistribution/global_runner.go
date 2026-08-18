@@ -1,4 +1,4 @@
-package authoring
+package workflowdistribution
 
 import (
 	"context"
@@ -10,35 +10,41 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
+type globalBuiltinAuthorities interface {
+	appworkflowauthoring.ManagedBuiltinAuthorityProvider
+	appworkflowauthoring.DistributionAuthorityProvider
+}
+
 // NewGlobalBuiltinRunnerResolver adapts the app-owned builtin resolution
 // workflow to the driver runtime callback type.
 func NewGlobalBuiltinRunnerResolver(
 	catalog workflowcatalog.API,
-	authoring workflowcatalog.VersionAuthoringAPI,
-	authorities appworkflowauthoring.ManagedBuiltinAuthorityProvider,
+	authoring appworkflowauthoring.CatalogCommands,
+	authorities globalBuiltinAuthorities,
 ) driver.GlobalRunnerResolver {
 	if catalog == nil || authoring == nil || authorities == nil {
 		return nil
 	}
-	coordinator, err := appworkflowauthoring.New(NewBundleStager())
+	coordinator, err := appworkflowauthoring.New(NewBundleStager(), authorities)
 	if err != nil {
 		return nil
 	}
-	support := NewBuiltinSupport()
+	return globalBuiltinRunnerResolver(coordinator, catalog, authoring, authorities, NewBuiltinSupport())
+}
+
+func globalBuiltinRunnerResolver(
+	coordinator *appworkflowauthoring.Coordinator,
+	catalog workflowcatalog.API,
+	authoring appworkflowauthoring.CatalogCommands,
+	authorities globalBuiltinAuthorities,
+	support appworkflowauthoring.BuiltinSupport,
+) driver.GlobalRunnerResolver {
 	return func(
 		ctx context.Context,
 		workspace,
 		runnerName string,
 	) (*driver.GlobalRunnerResolution, error) {
-		result, err := coordinator.ResolveGlobalBuiltinRunner(
-			ctx,
-			catalog,
-			authoring,
-			authorities,
-			support,
-			workspace,
-			runnerName,
-		)
+		result, err := coordinator.ResolveGlobalBuiltinRunner(ctx, catalog, authoring, authorities, support, workspace, runnerName)
 		if errors.Is(err, workflowcatalog.ErrNotFound) {
 			return nil, persistence.ErrNotFound
 		}

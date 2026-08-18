@@ -688,6 +688,8 @@ func classifyConflictHTTPError(prefix, code string) error {
 		sentinel = ErrWorkflowCatalogRevisionConflict
 	case "workflow_catalog_authoring_conflict":
 		sentinel = ErrWorkflowCatalogAuthoringConflict
+	case "workflow_catalog_availability_conflict":
+		sentinel = ErrWorkflowCatalogAvailabilityConflict
 	case "agent_service_revision_conflict":
 		sentinel = ErrAgentServiceRevisionConflict
 	case "agent_role_revision_conflict":
@@ -740,6 +742,8 @@ func classifyInvalidHTTPError(prefix, code string) error {
 		sentinel = ErrWorkflowCatalogVersionOwnership
 	case "workflow_catalog_version_not_validated":
 		sentinel = ErrWorkflowCatalogVersionNotValidated
+	case "workflow_catalog_version_not_available":
+		sentinel = ErrWorkflowCatalogVersionNotAvailable
 	case "workflow_catalog_version_not_approved":
 		sentinel = ErrWorkflowCatalogVersionNotApproved
 	default:

@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -91,10 +92,9 @@ func TestWorkflowCatalogTransportUsesExactAtomicAuthoringRoutesAndDelegatedActor
 		name       string
 		pathSuffix string
 		managed    bool
-		activate   bool
 	}{
 		{name: "operator", pathSuffix: "author"},
-		{name: "managed", pathSuffix: "author-managed", managed: true, activate: true},
+		{name: "managed", pathSuffix: "author-managed", managed: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -116,9 +116,6 @@ func TestWorkflowCatalogTransportUsesExactAtomicAuthoringRoutesAndDelegatedActor
 					"request_id", "expected_revision", "driver_name", "version_id",
 					"source_ref", "source_digest", "bundle_ref", "bundle_digest",
 					"runtime", "manifest", "build_diagnostics",
-				}
-				if test.managed {
-					wantKeys = append(wantKeys, "activate")
 				}
 				if len(body) != len(wantKeys) {
 					t.Errorf("body keys = %v, want exactly %v", body, wantKeys)
@@ -144,9 +141,6 @@ func TestWorkflowCatalogTransportUsesExactAtomicAuthoringRoutesAndDelegatedActor
 					"runtime": baseInput.Runtime, "manifest": baseInput.Manifest,
 					"build_diagnostics": baseInput.BuildDiagnostics,
 				}
-				if test.managed {
-					wantValues["activate"] = test.activate
-				}
 				for key, want := range wantValues {
 					wantJSON, err := json.Marshal(want)
 					if err != nil {
@@ -156,14 +150,8 @@ func TestWorkflowCatalogTransportUsesExactAtomicAuthoringRoutesAndDelegatedActor
 						t.Errorf("body[%q] = %s, want %s", key, got, wantJSON)
 					}
 				}
-				var activate bool
-				if raw, ok := body["activate"]; ok {
-					if err := json.Unmarshal(raw, &activate); err != nil {
-						t.Errorf("decode activate: %v", err)
-					}
-				}
-				if activate != test.activate {
-					t.Errorf("activate = %v, want %v", activate, test.activate)
+				if _, ok := body["activate"]; ok {
+					t.Errorf("managed authoring body retained retired activate field: %v", body)
 				}
 				_ = json.NewEncoder(w).Encode(WorkflowCatalogAuthorVersionResult{
 					Driver: &workflowcatalog.Driver{
@@ -173,7 +161,7 @@ func TestWorkflowCatalogTransportUsesExactAtomicAuthoringRoutesAndDelegatedActor
 						WorkspaceKey: baseInput.WorkspaceKey, DriverID: baseInput.DriverID,
 						VersionID: baseInput.VersionID,
 					},
-					CreatedDriver: true, CreatedVersion: true, Activated: test.activate,
+					CreatedDriver: true, CreatedVersion: true,
 					Replayed: true, CommittedRevision: 8,
 					SemanticImpact: "workflow_catalog.version_authored.v1",
 				})
@@ -185,13 +173,7 @@ func TestWorkflowCatalogTransportUsesExactAtomicAuthoringRoutesAndDelegatedActor
 			}
 			var result *WorkflowCatalogAuthorVersionResult
 			if test.managed {
-				result, err = client.WorkflowCatalog().AuthorManagedDriverVersion(
-					context.Background(),
-					WorkflowCatalogAuthorManagedVersionInput{
-						WorkflowCatalogAuthorVersionInput: baseInput,
-						Activate:                          test.activate,
-					},
-				)
+				result, err = client.WorkflowCatalog().AuthorManagedDriverVersion(context.Background(), baseInput)
 			} else {
 				result, err = client.WorkflowCatalog().AuthorDriverVersion(context.Background(), baseInput)
 			}
@@ -199,12 +181,60 @@ func TestWorkflowCatalogTransportUsesExactAtomicAuthoringRoutesAndDelegatedActor
 				t.Fatalf("author version: %v", err)
 			}
 			if result == nil || !result.CreatedDriver || !result.CreatedVersion ||
-				!result.Replayed || result.Activated != test.activate ||
+				!result.Replayed ||
 				result.CommittedRevision != 8 ||
 				result.SemanticImpact != "workflow_catalog.version_authored.v1" {
 				t.Fatalf("result = %+v", result)
 			}
 		})
+	}
+}
+
+func TestWorkflowCatalogTransportRecordsAvailabilityWithExactBodyAndDelegatedActor(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		wantPath := "/api/v1/TEST/drivers/driver%2Fone/versions/version%20one/availability"
+		if r.Method != http.MethodPost || r.URL.EscapedPath() != wantPath {
+			t.Errorf("request = %s %s, want POST %s", r.Method, r.URL.EscapedPath(), wantPath)
+		}
+		if got := r.Header.Get(FleetDelegatedActorHeader); got != "builtin-distribution" {
+			t.Errorf("delegated actor = %q", got)
+		}
+		var body map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		wantKeys := []string{"request_id", "expected_revision", "source_digest", "bundle_digest", "outcome"}
+		if len(body) != len(wantKeys) {
+			t.Fatalf("body = %v, want exactly %v", body, wantKeys)
+		}
+		for _, key := range wantKeys {
+			if _, ok := body[key]; !ok {
+				t.Errorf("body missing %q: %v", key, body)
+			}
+		}
+		_ = json.NewEncoder(w).Encode(WorkflowCatalogAvailabilityResult{
+			Driver: &workflowcatalog.Driver{WorkspaceKey: "TEST", DriverID: "driver/one", Revision: 8},
+			Version: &workflowcatalog.DriverVersion{
+				WorkspaceKey: "TEST", DriverID: "driver/one", VersionID: "version one",
+				AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
+			},
+			CommittedRevision: 8, SemanticImpact: "workflow_catalog.version_availability_changed.v1",
+		})
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL, Actor: "loom-service"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.WorkflowCatalog().RecordVersionAvailability(context.Background(), WorkflowCatalogAvailabilityInput{
+		WorkspaceKey: "TEST", DriverID: "driver/one", VersionID: "version one",
+		DelegatedActor: "builtin-distribution", RequestID: "availability-1", ExpectedRevision: 7,
+		SourceDigest: "sha256:" + strings.Repeat("a", 64),
+		BundleDigest: "sha256:" + strings.Repeat("b", 64),
+		Outcome:      workflowcatalog.AvailabilityOutcomeAvailable,
+	})
+	if err != nil || result == nil || result.CommittedRevision != 8 {
+		t.Fatalf("RecordVersionAvailability result=%+v err=%v", result, err)
 	}
 }
 

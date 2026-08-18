@@ -53,7 +53,8 @@ func newAwaitSweepStore(t *testing.T, workspaces ...string) *memstore.Store {
 		if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 			WorkspaceKey: ws, VersionID: "v1", DriverID: "awaiter", Version: 1,
 			SourceDigest: "sha256:s", BundleDigest: "sha256:b",
-			ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+			ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+			AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
 		}); err != nil {
 			t.Fatalf("Create driver version in %s: %v", ws, err)
 		}

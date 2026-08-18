@@ -28,6 +28,10 @@ const (
 	// service-only atomic author-version routes. New Loom never falls back to
 	// generic Driver or DriverVersion CRUD when it is absent.
 	WorkflowCatalogVersionAuthoringCapability = "workflow_catalog.version_authoring.v1"
+	// WorkflowCatalogVersionAvailabilityCapability certifies the service-only
+	// atomic distribution outcome command. Loom does not treat validation or a
+	// legacy bundle_ref as proof that an immutable bundle is available.
+	WorkflowCatalogVersionAvailabilityCapability = "workflow_catalog.version_availability.v1"
 	// AutomationTriggerAdmissionCapability is required when Loom composes the
 	// Phase 3 Automation core, ingress workflows, and runtime components. The
 	// running FleetDB advertises it only for a backend with full contract parity.
