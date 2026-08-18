@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify local-mode-skills-verify local-mode-skill-pointer-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -303,6 +303,20 @@ local-mode-routing-verify:
 # `make local-mode-up` stack plus curl, openssl, and python3.
 local-mode-webhook-verify:
 	@test/local-mode/verify-webhook.sh
+
+# Deterministic end-to-end verification of the skills vertical (fleet-db CRUD
+# -> CLI -> materializer -> INDEX.md/catalog projection -> baked backend
+# hook/pointer config) against a running local-mode stack. No model calls.
+local-mode-skills-verify:
+	@test/local-mode/verify-skills.sh
+
+# Live-model smoke: a long-lived codex session must learn about skills
+# added/removed after its session-start snapshot, via the managed
+# UserPromptSubmit hook (files) and the loom-skill-catalog/INDEX.md pointer
+# (awareness). Burns real model tokens; needs make local-mode-codex-up.
+# On-demand only — keep out of CI.
+local-mode-skill-pointer-verify:
+	@test/local-mode/verify-skill-pointer.sh
 
 local-mode-codex-verify:
 	@LOOM_LOCAL_MODE_PLAN_TASK_ID="$${LOOM_LOCAL_MODE_PLAN_TASK_ID:-LOCALMODE-2}" \
@@ -727,6 +741,8 @@ help:
 	@echo "  make local-mode-codex-up - Run local-mode stack with Codex agents"
 	@echo "  make local-mode-verify  - Verify deterministic local-mode stack"
 	@echo "  make local-mode-codex-verify - Verify Codex local-mode stack"
+	@echo "  make local-mode-skills-verify - Verify the skills vertical e2e (no model)"
+	@echo "  make local-mode-skill-pointer-verify - Live-model smoke of the skill catalog pointer"
 	@echo "  make local-mode-logs    - Tail selected local-mode stack logs"
 	@echo "  make local-mode-down    - Stop selected local-mode stack and volumes"
 	@echo "    LOCAL_MODE_COMPOSE='docker compose' LOCAL_MODE_COMPOSE_PROJECT=name LOCAL_MODE_UI_PORT=8383 LOCAL_MODE_API_PORT=8382 LOCAL_MODE_FLEETDB_PORT=8380"
