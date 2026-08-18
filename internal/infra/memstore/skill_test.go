@@ -537,3 +537,49 @@ func TestSkillStore_AcceptsEveryRevisionFormACallerHolds(t *testing.T) {
 		t.Errorf("multi-tag If-Match = %v, want ErrInvalid", err)
 	}
 }
+
+// memstore stands in for fleet-db in tests, so a write it accepts that the real
+// server refuses is a test passing on data production cannot produce. These
+// pin the bundled-path rules on both write routes.
+func TestSkillStoreRejectsBundledPathsFleetDBRefuses(t *testing.T) {
+	ctx := t.Context()
+	unsafe := []string{"../escape.md", "/absolute.md", "nested/../../escape.md", "skill.md"}
+
+	for _, badPath := range unsafe {
+		t.Run("create "+badPath, func(t *testing.T) {
+			st := New()
+			if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "WS"}); err != nil {
+				t.Fatalf("create workspace: %v", err)
+			}
+			_, err := st.Skills().Create(ctx, store.SkillCreate{
+				WorkspaceKey: "WS",
+				Ref:          domain.WorkspaceSkillRef("alpha"),
+				Description:  "alpha",
+				Content:      "body\n",
+				Files:        []domain.SkillFile{{Path: badPath, Content: "x"}},
+			})
+			if !errors.Is(err, domain.ErrInvalid) {
+				t.Fatalf("Create with bundled path %q = %v, want ErrInvalid", badPath, err)
+			}
+		})
+
+		t.Run("put file "+badPath, func(t *testing.T) {
+			st := New()
+			if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "WS"}); err != nil {
+				t.Fatalf("create workspace: %v", err)
+			}
+			ref := domain.WorkspaceSkillRef("alpha")
+			if _, err := st.Skills().Create(ctx, store.SkillCreate{
+				WorkspaceKey: "WS", Ref: ref, Description: "alpha", Content: "body\n",
+			}); err != nil {
+				t.Fatalf("create skill: %v", err)
+			}
+			_, err := st.Skills().PutFile(ctx, "WS", ref, store.SkillFileWrite{
+				Path: badPath, Content: "x", IfNoneMatchAny: true,
+			})
+			if !errors.Is(err, domain.ErrInvalid) {
+				t.Fatalf("PutFile at %q = %v, want ErrInvalid", badPath, err)
+			}
+		})
+	}
+}

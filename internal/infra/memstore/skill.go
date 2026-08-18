@@ -119,7 +119,7 @@ func (s *skillStore) checkProvenance(existing *domain.Skill, source string, forc
 // --- SkillStore ---
 
 func (s *skillStore) Create(_ context.Context, in store.SkillCreate) (*domain.Skill, error) {
-	if err := s.validateTarget(in.WorkspaceKey, in.Ref); err != nil {
+	if err := s.validateWrite(in.WorkspaceKey, in.Ref, in.Files); err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
@@ -153,6 +153,28 @@ func (s *skillStore) newSkill(in store.SkillCreate) *domain.Skill {
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
+}
+
+// validateWrite rejects the record shapes fleet-db rejects at write time.
+//
+// This double stands in for the server in tests, so anything it accepts that
+// the server would refuse is a test that passes on data production cannot
+// produce. The bundled-file rules are the ones worth mirroring: a path fleet-db
+// refuses is a path the materializer would then have to defend against.
+func (s *skillStore) validateWrite(ws string, ref domain.SkillRef, files []domain.SkillFile) error {
+	if err := s.validateTarget(ws, ref); err != nil {
+		return err
+	}
+	return validateSkillFiles(files)
+}
+
+func validateSkillFiles(files []domain.SkillFile) error {
+	for _, file := range files {
+		if err := domain.ValidateSkillFilePath(file.Path); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // validateTarget rejects what fleet-db rejects before the record exists: a
@@ -216,7 +238,7 @@ func (s *skillStore) List(_ context.Context, ws string, filter store.SkillFilter
 }
 
 func (s *skillStore) Upsert(_ context.Context, in store.SkillUpsert) (*domain.Skill, bool, error) {
-	if err := s.validateTarget(in.Skill.WorkspaceKey, in.Skill.Ref); err != nil {
+	if err := s.validateWrite(in.Skill.WorkspaceKey, in.Skill.Ref, in.Skill.Files); err != nil {
 		return nil, false, err
 	}
 	s.mu.Lock()
@@ -361,6 +383,13 @@ func skillDocument(sk *domain.Skill, filePath string) (*domain.SkillDocument, bo
 func (s *skillStore) PutFile(_ context.Context, ws string, ref domain.SkillRef, write store.SkillFileWrite) (*domain.SkillDocument, error) {
 	if err := ref.Validate(); err != nil {
 		return nil, err
+	}
+	// SKILL.md is the body, addressed by name on this route; every other path
+	// is a bundled file and has to survive the same rules fleet-db applies.
+	if write.Path != domain.SkillFileNameSKILLMD {
+		if err := domain.ValidateSkillFilePath(write.Path); err != nil {
+			return nil, err
+		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
