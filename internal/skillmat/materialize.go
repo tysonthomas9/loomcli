@@ -112,7 +112,7 @@ func IsStoreUnavailable(err error) bool {
 	return errors.As(err, &unavailable)
 }
 
-// Materialize resolves workspace and role skills and reconciles targetDir's
+// materialize resolves workspace and role skills and reconciles targetDir's
 // Loom-managed skill projection. A matching marker is a no-op. Store read
 // failures are returned as StoreUnavailableError before the filesystem is
 // touched; every other error is a fail-closed local preparation failure.
@@ -156,17 +156,12 @@ func materialize(ctx context.Context, st store.Store, workspace, roleName, targe
 	if err := sweepTemporaryFiles(root); err != nil {
 		return fmt.Errorf("sweep skill materialization temporaries: %w", err)
 	}
-	if previous != nil && previous.Hash == projectionHash {
-		if !slices.Equal(previous.Paths, paths) {
-			return fmt.Errorf("skill marker hash matches but recorded paths differ; refusing cleanup")
-		}
-		matches, err := projectionMatches(root, entries)
-		if err != nil {
-			return fmt.Errorf("verify materialized skill projection: %w", err)
-		}
-		if matches {
-			return ensureGitExcludes(ctx, targetDir)
-		}
+	current, err := projectionIsCurrent(root, previous, projectionHash, paths, entries)
+	if err != nil {
+		return err
+	}
+	if current {
+		return ensureSkillGitExcludes(ctx, targetDir)
 	}
 
 	if err := detectDesiredCollisions(entries); err != nil {
@@ -197,10 +192,36 @@ func materialize(ctx context.Context, st store.Store, workspace, roleName, targe
 	if err := writeMarkerAtomically(root, markerBytes); err != nil {
 		return fmt.Errorf("write skill marker: %w", err)
 	}
+	return ensureSkillGitExcludes(ctx, targetDir)
+}
+
+func ensureSkillGitExcludes(ctx context.Context, targetDir string) error {
 	if err := ensureGitExcludes(ctx, targetDir); err != nil {
 		return fmt.Errorf("ensure skill git excludes: %w", err)
 	}
 	return nil
+}
+
+// projectionIsCurrent reports whether the projection already on disk is the one
+// entries describes, so materialization can stop without touching anything.
+//
+// A recorded marker whose hash matches but whose path list does not is refused
+// rather than reconciled: the paths are what cleanup deletes from, and acting on
+// a list that disagrees with the hash would delete from the wrong set.
+func projectionIsCurrent(
+	root secureRoot, previous *marker, projectionHash string, paths []string, entries []desiredEntry,
+) (bool, error) {
+	if previous == nil || previous.Hash != projectionHash {
+		return false, nil
+	}
+	if !slices.Equal(previous.Paths, paths) {
+		return false, fmt.Errorf("skill marker hash matches but recorded paths differ; refusing cleanup")
+	}
+	matches, err := projectionMatches(root, entries)
+	if err != nil {
+		return false, fmt.Errorf("verify materialized skill projection: %w", err)
+	}
+	return matches, nil
 }
 
 func findStalePaths(previous *marker, desiredPaths []string) []string {
@@ -726,6 +747,19 @@ func removeEmptyParents(root secureRoot, names []string) {
 
 func pathDepth(name string) int { return strings.Count(name, "/") }
 
+// projectionMatches checks that every managed path still exists with the right
+// shape — regular file with the right mode, or symlink to the right target.
+//
+// It deliberately does NOT compare file contents, and that asymmetry with
+// entryExactlyMatches is the point. This runs on the fast path, where the
+// marker hash already says the projection is the one Loom wrote. An agent may
+// have edited its own working copy of a SKILL.md since then, and that edit has
+// to survive: re-materializing on every turn must not overwrite the agent's
+// work. Structural drift is still repaired, because it means the projection is
+// no longer the thing the marker describes.
+//
+// Locked by TestMaterializeMatchingHashIsNoOp. Adding a content comparison here
+// would make that test fail, and it would be the right test to believe.
 func projectionMatches(root secureRoot, entries []desiredEntry) (bool, error) {
 	for _, entry := range entries {
 		info, err := root.Lstat(entry.Path)

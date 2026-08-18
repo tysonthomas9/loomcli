@@ -239,7 +239,101 @@ func runSkillSync(cmd *cobra.Command, packName string) error {
 	})
 }
 
-//nolint:funlen // The sync decision table (create/update/skip/conflict) stays in one place.
+// packSkillOutcome is what one skill in a pack sync ended up as. Skipped is not
+// a failure: a name owned by another source, or by another actor, is left alone
+// deliberately, and a pack whose skills are all skipped still syncs OK.
+type packSkillOutcome int
+
+const (
+	packSkillSkipped packSkillOutcome = iota
+	packSkillFailed
+	packSkillWritten
+)
+
+// reportUpsertFailure prints why one skill could not be written and classifies
+// it. A provenance conflict is a skip, not a failure: the name belongs to
+// another actor and leaving it alone is the correct outcome, so it must not
+// count towards the every-skill-failed check that fails the whole pack.
+func (r packSyncRun) reportUpsertFailure(name string, err error) packSkillOutcome {
+	out := r.cmd.OutOrStdout()
+	var conflict *domain.SkillProvenanceConflictError
+	if errors.As(err, &conflict) || errors.Is(err, domain.ErrSkillProvenanceConflict) {
+		owner, existingSource := "(unknown)", "(unknown)"
+		if conflict != nil {
+			owner = valueOrUnknown(conflict.ExistingCreatedBy)
+			existingSource = valueOrUnknown(conflict.ExistingSource)
+		}
+		_, _ = fmt.Fprintf(out, "pack %s: %s: skipped: provenance belongs to %s from source %s\n",
+			r.pack.Name, name, owner, existingSource)
+		return packSkillSkipped
+	}
+	_, _ = fmt.Fprintf(out, "pack %s: %s: failed: %v\n", r.pack.Name, name, err)
+	return packSkillFailed
+}
+
+// packSyncRun is the invariant half of one pack sync: everything the per-skill
+// step needs that does not change between skills.
+type packSyncRun struct {
+	cmd    *cobra.Command
+	h      *bootstrap.StoreHandle
+	ws     string
+	pack   *domain.SkillPack
+	source string
+	commit string
+}
+
+// syncSkill writes one discovered skill and reports what happened, printing its
+// line as it goes. Callers iterate in discovery order and the lines must stay in
+// that order — the pack sync output is read top to bottom.
+func (r packSyncRun) syncSkill(ctx context.Context, candidate fetchedGitHubSkillResult) (packSkillOutcome, string) {
+	out := r.cmd.OutOrStdout()
+	if candidate.Err != nil {
+		label := candidate.Directory
+		if label == "" {
+			label = "."
+		}
+		_, _ = fmt.Fprintf(out, "pack %s: %s: failed: %v\n", r.pack.Name, label, candidate.Err)
+		return packSkillFailed, ""
+	}
+	name := candidate.Skill.Name
+	if len(candidate.Skill.SkippedHiddenPaths) > 0 {
+		_, _ = fmt.Fprintf(r.cmd.ErrOrStderr(), "Notice: pack %s skill %s skipped hidden skill paths: %s\n",
+			r.pack.Name, name, strings.Join(candidate.Skill.SkippedHiddenPaths, ", "))
+	}
+
+	ref := domain.WorkspaceSkillRef(name)
+	existing, err := r.h.Store.Skills().Get(ctx, r.ws, ref)
+	if err == nil && existing.Source != r.source {
+		_, _ = fmt.Fprintf(out, "pack %s: %s: skipped: exists with source %s (not this pack)\n",
+			r.pack.Name, name, valueOrUnknown(existing.Source))
+		return packSkillSkipped, ""
+	}
+	if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		_, _ = fmt.Fprintf(out, "pack %s: %s: failed: get existing skill: %v\n", r.pack.Name, name, err)
+		return packSkillFailed, ""
+	}
+
+	_, created, err := r.h.Store.Skills().Upsert(ctx, store.SkillUpsert{Skill: store.SkillCreate{
+		WorkspaceKey: r.ws,
+		Ref:          ref,
+		Description:  candidate.Skill.Description,
+		Content:      candidate.Skill.Content,
+		Files:        candidate.Skill.Files,
+		Source:       r.source,
+		SourceRef:    r.commit,
+	}})
+	if err != nil {
+		return r.reportUpsertFailure(name, err), ""
+	}
+
+	outcome := "updated"
+	if created {
+		outcome = "created"
+	}
+	_, _ = fmt.Fprintf(out, "pack %s: %s: %s\n", r.pack.Name, name, outcome)
+	return packSkillWritten, name
+}
+
 func syncSkillPack(ctx context.Context, cmd *cobra.Command, h *bootstrap.StoreHandle, ws string, pack *domain.SkillPack) error {
 	source, err := sourceForSkillPack(pack)
 	if err != nil {
@@ -257,66 +351,17 @@ func syncSkillPack(ctx context.Context, cmd *cobra.Command, h *bootstrap.StoreHa
 		return recordFailedSkillPackSync(ctx, h, ws, pack.Name, err)
 	}
 
+	run := packSyncRun{cmd: cmd, h: h, ws: ws, pack: pack, source: pack.Source(), commit: fetched.Commit}
 	written := make([]string, 0, len(fetched.Skills))
 	failed := 0
-	packSource := pack.Source()
 	for _, candidate := range fetched.Skills {
-		label := candidate.Directory
-		if label == "" {
-			label = "."
-		}
-		if candidate.Err != nil {
+		switch outcome, name := run.syncSkill(ctx, candidate); outcome {
+		case packSkillFailed:
 			failed++
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "pack %s: %s: failed: %v\n", pack.Name, label, candidate.Err)
-			continue
+		case packSkillWritten:
+			written = append(written, name)
+		case packSkillSkipped:
 		}
-		if len(candidate.Skill.SkippedHiddenPaths) > 0 {
-			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Notice: pack %s skill %s skipped hidden skill paths: %s\n",
-				pack.Name, candidate.Skill.Name, strings.Join(candidate.Skill.SkippedHiddenPaths, ", "))
-		}
-		ref := domain.WorkspaceSkillRef(candidate.Skill.Name)
-		existing, err := h.Store.Skills().Get(ctx, ws, ref)
-		if err == nil && existing.Source != packSource {
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "pack %s: %s: skipped: exists with source %s (not this pack)\n",
-				pack.Name, candidate.Skill.Name, valueOrUnknown(existing.Source))
-			continue
-		}
-		if err != nil && !errors.Is(err, domain.ErrNotFound) {
-			failed++
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "pack %s: %s: failed: get existing skill: %v\n", pack.Name, candidate.Skill.Name, err)
-			continue
-		}
-		_, created, err := h.Store.Skills().Upsert(ctx, store.SkillUpsert{Skill: store.SkillCreate{
-			WorkspaceKey: ws,
-			Ref:          ref,
-			Description:  candidate.Skill.Description,
-			Content:      candidate.Skill.Content,
-			Files:        candidate.Skill.Files,
-			Source:       packSource,
-			SourceRef:    fetched.Commit,
-		}})
-		if err != nil {
-			var conflict *domain.SkillProvenanceConflictError
-			if errors.As(err, &conflict) || errors.Is(err, domain.ErrSkillProvenanceConflict) {
-				owner, existingSource := "(unknown)", "(unknown)"
-				if conflict != nil {
-					owner = valueOrUnknown(conflict.ExistingCreatedBy)
-					existingSource = valueOrUnknown(conflict.ExistingSource)
-				}
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "pack %s: %s: skipped: provenance belongs to %s from source %s\n",
-					pack.Name, candidate.Skill.Name, owner, existingSource)
-				continue
-			}
-			failed++
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "pack %s: %s: failed: %v\n", pack.Name, candidate.Skill.Name, err)
-			continue
-		}
-		outcome := "updated"
-		if created {
-			outcome = "created"
-		}
-		written = append(written, candidate.Skill.Name)
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "pack %s: %s: %s\n", pack.Name, candidate.Skill.Name, outcome)
 	}
 
 	if failed == len(fetched.Skills) {
