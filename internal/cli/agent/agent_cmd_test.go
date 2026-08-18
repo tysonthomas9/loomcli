@@ -510,7 +510,7 @@ func TestMakeCustomPromptGen_OptInBlocks(t *testing.T) {
 		{
 			name:      "WorkspaceNotes",
 			body:      "{{.WorkspaceNotes}}",
-			wantParts: []string{"Workspace Notes (Maintained by Scout)", "Use the scout-approved workflow."},
+			wantParts: []string{"Workspace Notes", "Use the scout-approved workflow."},
 		},
 		{
 			name:      "EpicScope",

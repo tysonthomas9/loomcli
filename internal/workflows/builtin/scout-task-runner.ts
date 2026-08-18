@@ -680,9 +680,11 @@ async function writePhase(root, state, input, taskRunId, request, logs) {
 }
 
 // stageAgentsMd preserves the first-generation auto-apply contract when there
-// is no shared agents.md. Every later generation writes a full proposed
-// candidate under this instance's state directory; approve extracts and merges
-// only this instance's fence so concurrent instances cannot clobber each other.
+// is no shared agents.md. Every later generation stages only this instance's
+// fenced block; `loom scout approve` merges it into the shared file through
+// agentstate.MergePendingFence — the single merge implementation. agents.md is
+// user-authored, so a second copy of the merge in a second language is a way
+// to silently eat or duplicate human bytes.
 function stageAgentsMd(root, state, content) {
   const target = path.join(root, "agents.md");
   const existing = readTextSafe(target);
@@ -691,7 +693,7 @@ function stageAgentsMd(root, state, content) {
     return "created";
   }
   fs.mkdirSync(state.instanceDir, { recursive: true });
-  writeFileAtomic(state.pendingAgentsPath, rewriteAgentFence(existing, state.serviceID, content));
+  writeFileAtomic(state.pendingAgentsPath, agentFenceBlock(state.serviceID, content) + "\n");
   return "pending";
 }
 
@@ -705,49 +707,6 @@ function agentFenceMarkers(serviceID) {
 function agentFenceBlock(serviceID, content) {
   const markers = agentFenceMarkers(serviceID);
   return markers.begin + "\n" + SCOUT_FENCE_NOTE + "\n\n" + content.trim() + "\n" + markers.end;
-}
-
-// rewriteAgentFence replaces the first complete pair for serviceID and removes
-// later duplicate pairs/begin markers. Bytes outside this instance's regions,
-// including every other instance's region, pass through unchanged.
-export function rewriteAgentFence(existing, serviceID, content) {
-  const markers = agentFenceMarkers(serviceID);
-  const block = agentFenceBlock(serviceID, content);
-  const begin = existing.indexOf(markers.begin);
-  if (begin < 0) {
-    return appendFence(existing, block);
-  }
-  const end = existing.indexOf(markers.end, begin + markers.begin.length);
-  if (end < 0) {
-    const suffix = existing.slice(begin + markers.begin.length);
-    return existing.slice(0, begin) + block + removeExtraAgentFencePairs(suffix, markers);
-  }
-  const suffix = existing.slice(end + markers.end.length);
-  return existing.slice(0, begin) + block + removeExtraAgentFencePairs(suffix, markers);
-}
-
-function removeExtraAgentFencePairs(text, markers) {
-  let remaining = text;
-  for (;;) {
-    const begin = remaining.indexOf(markers.begin);
-    if (begin < 0) {
-      return remaining;
-    }
-    const end = remaining.indexOf(markers.end, begin + markers.begin.length);
-    if (end < 0) {
-      remaining = remaining.slice(0, begin) + remaining.slice(begin + markers.begin.length);
-      continue;
-    }
-    remaining = remaining.slice(0, begin) + remaining.slice(end + markers.end.length);
-  }
-}
-
-function appendFence(existing, block) {
-  if (!existing) {
-    return block + "\n";
-  }
-  const separator = existing.endsWith("\n\n") ? "" : existing.endsWith("\n") ? "\n" : "\n\n";
-  return existing + separator + block + "\n";
 }
 
 function migrateLegacyScoutFence(existing) {

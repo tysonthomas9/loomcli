@@ -15,6 +15,12 @@ const (
 	MaxTitleLength  = 500
 	MaxLabels       = 50
 	MaxDependencies = 100
+
+	// MinPriority and MaxPriority bound the Loom priority passthrough. Named
+	// so the driver API validates against the same range this package
+	// enforces instead of respelling the literals.
+	MinPriority = 0
+	MaxPriority = 4
 )
 
 // ValidationError holds multiple field-level validation errors collected in

@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"strings"
+
+	"github.com/tysonthomas9/loomcli/internal/entity"
 	"testing"
 	"time"
 
@@ -170,6 +172,27 @@ func TestDriverAPICreateIssueValidatesParams(t *testing.T) {
 	}
 	if len(h.backend.created) != 0 {
 		t.Fatalf("backend creates = %d, want none for invalid params", len(h.backend.created))
+	}
+}
+
+// The scout files its own recommendations through this op, so a locally-stale
+// issue-type list would reject valid work as 400. Walk entity's vocabulary
+// rather than a copy of it.
+func TestDriverAPICreateIssueAcceptsEveryValidIssueType(t *testing.T) {
+	for _, issueType := range []entity.IssueType{
+		entity.TypeTask, entity.TypeBug, entity.TypeFeature, entity.TypeEpic, entity.TypeChore,
+	} {
+		h := newTestHarness(t, "")
+		h.backend.createResult = &backend.IssueData{
+			ID: "ISSUE-1", Title: "t", Status: "open", IssueType: string(issueType),
+		}
+		resp, decoded := h.do(t, opRequest{
+			op: "create-issue", headers: h.ownerHeaders(),
+			body: map[string]any{"title": "t", "issueType": string(issueType)},
+		})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("issueType %q: status = %d (%v), want 200", issueType, resp.StatusCode, decoded)
+		}
 	}
 }
 

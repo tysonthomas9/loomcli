@@ -62,25 +62,43 @@ func runScoutDiff(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	currentPath := filepath.Join(root, "agents.md")
+	currentPath := agentstate.AgentsPath(root)
 	pendingPath := agentstate.PendingAgentsPath(root, serviceID)
-	if _, err := os.Stat(pendingPath); err != nil {
+	pending, err := os.ReadFile(pendingPath) //nolint:gosec // grammar-validated service ID under the resolved workspace
+	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("agent %q has no pending agents.md", serviceID)
 		}
-		return fmt.Errorf("stat pending agents.md: %w", err)
+		return fmt.Errorf("read pending agents.md: %w", err)
 	}
-	if _, err := os.Stat(currentPath); err != nil {
+	current, err := os.ReadFile(currentPath) //nolint:gosec // fixed filename under the resolved workspace
+	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("workspace has no approved agents.md")
 		}
-		return fmt.Errorf("stat approved agents.md: %w", err)
+		return fmt.Errorf("read approved agents.md: %w", err)
+	}
+	// The staged file is this instance's fenced block, not a whole candidate,
+	// so diff against the merge approve would perform — same function, so what
+	// you review is exactly what you get.
+	merged, err := agentstate.MergePendingFence(string(current), string(pending), serviceID)
+	if err != nil {
+		return err
+	}
+	mergedDir, err := os.MkdirTemp("", "loom-scout-diff-")
+	if err != nil {
+		return fmt.Errorf("stage merged agents.md: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(mergedDir) }()
+	mergedPath := filepath.Join(mergedDir, agentstate.AgentsFilename)
+	if err := os.WriteFile(mergedPath, []byte(merged), 0o600); err != nil {
+		return fmt.Errorf("stage merged agents.md: %w", err)
 	}
 	ctx := context.Background()
 	if cmd != nil && cmd.Context() != nil {
 		ctx = cmd.Context()
 	}
-	diff := exec.CommandContext(ctx, "git", "diff", "--no-index", "--no-ext-diff", "--no-color", "--", currentPath, pendingPath) //nolint:gosec,norawexec // fixed git argv; both paths are rooted under the resolved workspace
+	diff := exec.CommandContext(ctx, "git", "diff", "--no-index", "--no-ext-diff", "--no-color", "--", currentPath, mergedPath) //nolint:gosec,norawexec // fixed git argv; both paths are rooted under the resolved workspace
 	out, diffErr := diff.CombinedOutput()
 	if diffErr != nil {
 		var exitErr *exec.ExitError
@@ -109,7 +127,7 @@ func runScoutApprove(_ *cobra.Command, _ []string) error {
 		}
 		return fmt.Errorf("read pending agents.md: %w", err)
 	}
-	currentPath := filepath.Join(root, "agents.md")
+	currentPath := agentstate.AgentsPath(root)
 	current, err := os.ReadFile(currentPath) //nolint:gosec // fixed filename under the resolved workspace
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("read approved agents.md: %w", err)
