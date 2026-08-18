@@ -131,8 +131,20 @@ func runConversationTurn(ctx context.Context, conv *chat.Conversation, prompt st
 		defer cancel()
 	}
 
+	// Same terminal-wall net as the one-shot path, over the screen surface
+	// instead of a byte stream: a harness parked on a billing banner never
+	// transitions the turn, so without this the loop below waits on Events()
+	// until the run's own cap. A zero settle window disables it entirely.
+	turnCtx, cancelTurn := context.WithCancel(ctx)
+	defer cancelTurn()
+	watcher := startConversationWallWatch(turnCtx, conv, cancelTurn)
+	ctx = turnCtx
+
 	turnID, err := conv.Send(ctx, prompt)
 	if err != nil {
+		if we := wallResultError(watcher); we != nil {
+			return chat.Turn{}, we
+		}
 		return chat.Turn{}, wrapInvocationError(fmt.Errorf("send prompt: %w", err), "")
 	}
 
@@ -140,30 +152,91 @@ func runConversationTurn(ctx context.Context, conv *chat.Conversation, prompt st
 	for {
 		select {
 		case <-ctx.Done():
+			// Our own cancel looks exactly like the caller's, so the wall
+			// verdict is read first or it would be reported as a bare
+			// context error.
+			if we := wallResultError(watcher); we != nil {
+				return chat.Turn{}, we
+			}
 			return chat.Turn{}, wrapInvocationError(ctx.Err(), "")
 		case ev, ok := <-events:
 			if !ok {
+				// A harness that exits ON the banner closes the channel
+				// rather than erroring the turn.
+				if we := wallResultError(watcher); we != nil {
+					return chat.Turn{}, we
+				}
 				return chat.Turn{}, wrapInvocationError(errors.New("conversation ended before the turn completed"), "")
 			}
-			switch ev.Type {
-			case chat.EventInputRequest:
-				if ev.Input != nil {
-					// The human wait runs beside the pump, not inside it.
-					go answerSurfacedRequest(ctx, conv, *ev.Input)
-				}
-			case chat.EventTurn:
-				if ev.Turn.Role != chat.RoleAssistant {
-					continue
-				}
-				switch ev.Turn.State {
-				case chat.TurnStateComplete:
-					if ev.Turn.ID == turnID || turnID == "" {
-						return ev.Turn, nil
-					}
-				case chat.TurnStateErrored:
-					return ev.Turn, conversationTurnError(ev.Turn)
-				}
+			if turn, done, err := handleConversationEvent(ctx, conv, ev, turnID); done {
+				return turn, err
 			}
+		}
+	}
+}
+
+// handleConversationEvent applies one event. done=false means the turn is
+// still running and the pump should keep breathing.
+func handleConversationEvent(ctx context.Context, conv *chat.Conversation, ev chat.ConversationEvent, turnID string) (chat.Turn, bool, error) {
+	switch ev.Type {
+	case chat.EventInputRequest:
+		if ev.Input != nil {
+			// The human wait runs beside the pump, not inside it.
+			go answerSurfacedRequest(ctx, conv, *ev.Input)
+		}
+	case chat.EventTurn:
+		if ev.Turn.Role != chat.RoleAssistant {
+			return chat.Turn{}, false, nil
+		}
+		switch ev.Turn.State {
+		case chat.TurnStateComplete:
+			if ev.Turn.ID == turnID || turnID == "" {
+				return ev.Turn, true, nil
+			}
+		case chat.TurnStateErrored:
+			return ev.Turn, true, conversationTurnError(ev.Turn)
+		}
+	}
+	return chat.Turn{}, false, nil
+}
+
+// startConversationWallWatch arms the wall watcher over the conversation's
+// screen, or returns nil when the detector is switched off.
+func startConversationWallWatch(ctx context.Context, conv *chat.Conversation, cancel context.CancelFunc) *wallWatcher {
+	settle := wallSettleWindow()
+	if settle <= 0 {
+		return nil
+	}
+	watcher := newWallWatcher(settle, cancel)
+	go pollConversationScreen(ctx, conv, watcher)
+	return watcher
+}
+
+// wallResultError returns the watcher's verdict as an error, or nil when it
+// never fired. Nil-safe: a disabled detector has no watcher.
+func wallResultError(watcher *wallWatcher) error {
+	kind, line, ok := watcher.result()
+	if !ok {
+		return nil
+	}
+	return wallInvocationError(kind, line, "")
+}
+
+// pollConversationScreen feeds the rendered screen to the wall watcher. The
+// conversation exposes no write stream, so quiescence is measured by the
+// screen's own generation counter: an unchanged generation is a repaint, not
+// the harness doing work.
+func pollConversationScreen(ctx context.Context, conv *chat.Conversation, watcher *wallWatcher) {
+	t := time.NewTicker(wallCheckInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			snap := conv.ScreenSnapshot()
+			watcher.observeScreen(snap.Text, snap.Generation)
+			watcher.check()
 		}
 	}
 }
@@ -249,6 +322,12 @@ func conversationTurnError(turn chat.Turn) error {
 	}
 	if ie := terminalTurnInvocationError(reason, turn.Text); ie != nil {
 		return ie
+	}
+	// The fast path for a wall the harness errored on WITHOUT naming one of
+	// its two canonical reasons — today's billing case. It classifies here
+	// with no watchdog wait at all; the watcher is only the net behind it.
+	if kind, line := detectTerminalWall(turn.Text + "\n" + reason); kind != wallNone {
+		return wallInvocationError(kind, line, turn.Text)
 	}
 	return &InvocationError{Err: errors.New(reason), OutputTail: turn.Text, ExitCode: 1}
 }
