@@ -103,31 +103,32 @@ type ServerConfig struct {
 	// WorkflowCatalogModule is the already-composed capability-owned route
 	// module. Web UI composition only registers it; it never receives the
 	// capability's persistence adapter or low-level FleetDB client.
-	WorkflowCatalogModule     interface{ Register(*http.ServeMux) }
-	WorkflowCatalogAPI        WorkflowCatalogAPI
-	WorkflowCatalogAuthoring  WorkflowCatalogVersionAuthoringAPI
-	WorkflowCatalogOperator   WorkflowCatalogOperatorAuthorityResolver
-	WorkflowTargetPreparation func(context.Context, string, string) (*WorkflowCatalogDriver, error)
-	AutomationCapability      AutomationCapability
-	AgentsCapability          AgentsCapability
-	AgentProvisioning         AgentProvisioningCapability
-	SourceControl             SourceControlMaterializer
-	SourceControlBrowse       sourcecontrol.Browse
-	SourceControlMutate       sourcecontrol.Mutate
-	SourceControlCheckout     sourcecontrol.Checkout
-	SourceControlAccessGrants sourcecontrol.AccessGrantIssuer
-	TaskStackBindings         SourceControlStackBindingResolver
-	TaskOutcomes              SourceControlTaskOutcomeRecorder
-	WorkspaceSourceControl    RepositoryAdmissionMaterializer
-	WorkspaceCatalog          WorkspaceAPI
-	InteractionCapability     InteractionCapability
-	MonitorHandlers           MonitorHandlers                    // Pre-built handlers for monitor/metrics endpoints (injected by cli)
-	WorkspaceDeleteCleanupFn  func(key string) error             // Machine-local cleanup after an owner-command deletion.
-	WorkspaceCreateFn         workspacecoord.WorkspaceCreateFn   // Workspace creation function; nil = creation unavailable
-	WorkspaceAddReposFn       workspacecoord.WorkspaceAddReposFn // Attach local repos to an existing workspace; nil = unavailable
-	WorkspaceAdmissions       workspacecoord.WorkspaceAdmissionCoordinator
-	InitialWorkspaceID        string                // Stable key of the initial workspace
-	WorkspaceIDResolverFn     WorkspaceIDResolverFn // Resolves workspace name → UUID; nil = no resolution available
+	WorkflowCatalogModule           interface{ Register(*http.ServeMux) }
+	WorkflowCatalogAPI              WorkflowCatalogAPI
+	WorkflowCatalogAuthoring        WorkflowCatalogVersionAuthoringAPI
+	WorkflowDistributionAuthorities WorkflowDistributionAuthorityProvider
+	WorkflowCatalogOperator         WorkflowCatalogOperatorAuthorityResolver
+	WorkflowTargetPreparation       func(context.Context, string, string) (*WorkflowCatalogDriver, error)
+	AutomationCapability            AutomationCapability
+	AgentsCapability                AgentsCapability
+	AgentProvisioning               AgentProvisioningCapability
+	SourceControl                   SourceControlMaterializer
+	SourceControlBrowse             sourcecontrol.Browse
+	SourceControlMutate             sourcecontrol.Mutate
+	SourceControlCheckout           sourcecontrol.Checkout
+	SourceControlAccessGrants       sourcecontrol.AccessGrantIssuer
+	TaskStackBindings               SourceControlStackBindingResolver
+	TaskOutcomes                    SourceControlTaskOutcomeRecorder
+	WorkspaceSourceControl          RepositoryAdmissionMaterializer
+	WorkspaceCatalog                WorkspaceAPI
+	InteractionCapability           InteractionCapability
+	MonitorHandlers                 MonitorHandlers                    // Pre-built handlers for monitor/metrics endpoints (injected by cli)
+	WorkspaceDeleteCleanupFn        func(key string) error             // Machine-local cleanup after an owner-command deletion.
+	WorkspaceCreateFn               workspacecoord.WorkspaceCreateFn   // Workspace creation function; nil = creation unavailable
+	WorkspaceAddReposFn             workspacecoord.WorkspaceAddReposFn // Attach local repos to an existing workspace; nil = unavailable
+	WorkspaceAdmissions             workspacecoord.WorkspaceAdmissionCoordinator
+	InitialWorkspaceID              string                // Stable key of the initial workspace
+	WorkspaceIDResolverFn           WorkspaceIDResolverFn // Resolves workspace name → UUID; nil = no resolution available
 	// ProjectionRecords is the composition-only source for legacy WebUI read
 	// projections whose owner APIs have not yet replaced record-level joins.
 	ProjectionRecords    ProjectionRecordSources

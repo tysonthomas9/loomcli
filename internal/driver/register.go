@@ -128,6 +128,56 @@ func StageFlueDriverBundle(opts RegisterFlueOptions) (*StagedFlueRegistration, e
 	}, nil
 }
 
+// RecoverStagedFlueRegistration reconstructs the distribution handle from a
+// durable pending catalog version. It accepts only the exact final bundle or
+// deterministic pending path and never scans or guesses filesystem state.
+func RecoverStagedFlueRegistration(workDir string, version *workflowcatalog.DriverVersion) (*StagedFlueRegistration, error) {
+	if version == nil || version.ValidationStatus != workflowcatalog.DriverVersionValidationPassed ||
+		version.AvailabilityStatus != workflowcatalog.DriverVersionAvailabilityPending ||
+		strings.TrimSpace(version.VersionID) == "" || strings.TrimSpace(version.DriverID) == "" ||
+		strings.TrimSpace(version.SourceDigest) == "" || strings.TrimSpace(version.BundleDigest) == "" {
+		return nil, fmt.Errorf("pending driver version metadata is invalid: %w", persistence.ErrInvalid)
+	}
+	if filepath.Base(version.VersionID) != version.VersionID || strings.ContainsAny(version.VersionID, `/\\`) {
+		return nil, fmt.Errorf("pending driver version id is not a path-safe segment: %w", persistence.ErrInvalid)
+	}
+	workDir, err := filepath.Abs(strings.TrimSpace(workDir))
+	if err != nil || strings.TrimSpace(workDir) == "" {
+		return nil, fmt.Errorf("resolve workflow runtime directory: %w", errors.Join(err, persistence.ErrInvalid))
+	}
+	finalRoot, err := safeBundleRoot(workDir, version.BundleRef)
+	if err != nil {
+		return nil, err
+	}
+	pendingRoot := filepath.Join(workDir, ".loom", "drivers", ".pending", version.VersionID)
+	tmpRoot := ""
+	if _, err := os.Stat(finalRoot); err == nil {
+		if _, _, err := verifyBundleManifest(finalRoot, version.BundleDigest); err != nil {
+			return nil, err
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("inspect promoted workflow bundle: %w", err)
+	} else if _, pendingErr := os.Stat(pendingRoot); pendingErr == nil {
+		if _, _, err := verifyBundleManifest(pendingRoot, version.BundleDigest); err != nil {
+			return nil, err
+		}
+		tmpRoot = pendingRoot
+	} else if !errors.Is(pendingErr, os.ErrNotExist) {
+		return nil, fmt.Errorf("inspect pending workflow bundle: %w", pendingErr)
+	} else {
+		return nil, fmt.Errorf("workflow bundle is absent from final and pending locations: %w", os.ErrNotExist)
+	}
+	manifest := cloneStringMap(version.Manifest)
+	return &StagedFlueRegistration{
+		DriverName: version.DriverID, DriverID: version.DriverID, VersionID: version.VersionID,
+		SourceRef: version.SourceRef, SourceDigest: version.SourceDigest,
+		BundleRef: version.BundleRef, BundleDigest: version.BundleDigest,
+		Runtime: version.Runtime, CatalogManifest: manifest,
+		Bundle: &Bundle{Root: finalRoot, BundleRef: version.BundleRef, SourceRef: version.SourceRef, SourceDigest: version.SourceDigest, BundleDigest: version.BundleDigest, Manifest: manifest},
+		staged: &stagedFlueBundle{tmpRoot: tmpRoot, finalRoot: finalRoot, versionID: version.VersionID, bundleRef: version.BundleRef, bundleDigest: version.BundleDigest, manifest: manifest},
+	}, nil
+}
+
 // Promote makes the staged content available at its durable relative
 // BundleRef. It is idempotent for a successfully promoted instance.
 func (staged *StagedFlueRegistration) Promote() error {
@@ -135,13 +185,32 @@ func (staged *StagedFlueRegistration) Promote() error {
 		return fmt.Errorf("staged Flue registration is required: %w", persistence.ErrInvalid)
 	}
 	if staged.staged.tmpRoot == "" {
-		return nil
+		return staged.Verify()
 	}
-	if err := promoteFlueBundle(staged.staged.tmpRoot, staged.staged.finalRoot); err != nil {
+	if err := promoteFlueBundle(staged.staged.tmpRoot, staged.staged.finalRoot, staged.staged.bundleDigest); err != nil {
 		return err
 	}
 	staged.staged.tmpRoot = ""
-	return nil
+	return staged.Verify()
+}
+
+// Verify proves the promoted immutable bundle still matches the cataloged
+// digest and contains a valid, contained runtime entrypoint.
+func (staged *StagedFlueRegistration) Verify() error {
+	if staged == nil || staged.staged == nil {
+		return fmt.Errorf("staged Flue registration is required: %w", persistence.ErrInvalid)
+	}
+	_, _, err := verifyBundleManifest(staged.staged.finalRoot, staged.staged.bundleDigest)
+	return err
+}
+
+// PendingRoot exposes the deterministic restart-recovery location to the
+// Workflow Distribution adapter without exposing mutation of internal state.
+func (staged *StagedFlueRegistration) PendingRoot() string {
+	if staged == nil || staged.staged == nil {
+		return ""
+	}
+	return staged.staged.tmpRoot
 }
 
 // Cleanup removes only an unpromoted temporary bundle.
@@ -498,7 +567,34 @@ func stageFlueBundle(reg *flueRegistrationInput) (*stagedFlueBundle, error) {
 	staged.versionID = reg.driverID + "-v-" + digestShort(staged.bundleDigest)
 	staged.bundleRef = filepath.ToSlash(filepath.Join(".loom", "drivers", reg.driverID, staged.versionID))
 	staged.finalRoot = filepath.Join(reg.absWorkDir, filepath.FromSlash(staged.bundleRef))
+	if err := stageDeterministicPendingFlueBundle(driverRoot, staged); err != nil {
+		return staged, err
+	}
 	return staged, nil
+}
+
+func stageDeterministicPendingFlueBundle(driverRoot string, staged *stagedFlueBundle) error {
+	pendingRoot := filepath.Join(driverRoot, ".pending", staged.versionID)
+	if err := os.MkdirAll(filepath.Dir(pendingRoot), 0o755); err != nil {
+		return fmt.Errorf("create pending driver bundle root: %w", err)
+	}
+	if _, err := os.Stat(pendingRoot); err == nil {
+		if _, _, verifyErr := verifyBundleManifest(pendingRoot, staged.bundleDigest); verifyErr != nil {
+			return fmt.Errorf("existing pending driver bundle %q conflicts: %w", staged.versionID, verifyErr)
+		}
+		if err := os.RemoveAll(staged.tmpRoot); err != nil {
+			return fmt.Errorf("discard duplicate pending driver bundle: %w", err)
+		}
+		staged.tmpRoot = pendingRoot
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect pending driver bundle: %w", err)
+	}
+	if err := os.Rename(staged.tmpRoot, pendingRoot); err != nil {
+		return fmt.Errorf("stage deterministic pending driver bundle: %w", err)
+	}
+	staged.tmpRoot = pendingRoot
+	return nil
 }
 
 func writeFlueBundleManifest(tmpRoot string, manifest map[string]string) ([]byte, error) {
@@ -523,12 +619,20 @@ func registeredBundleMissing(root string) bool {
 	return false
 }
 
-func promoteFlueBundle(tmpRoot, finalRoot string) error {
+func promoteFlueBundle(tmpRoot, finalRoot, bundleDigest string) error {
 	if tmpRoot == "" {
 		return nil
 	}
-	if err := os.RemoveAll(finalRoot); err != nil {
-		return fmt.Errorf("reset native Flue bundle root: %w", err)
+	if _, err := os.Stat(finalRoot); err == nil {
+		if _, _, verifyErr := verifyBundleManifest(finalRoot, bundleDigest); verifyErr != nil {
+			return fmt.Errorf("refuse to replace drifted immutable Flue bundle: %w", verifyErr)
+		}
+		if err := os.RemoveAll(tmpRoot); err != nil {
+			return fmt.Errorf("discard duplicate native Flue bundle: %w", err)
+		}
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect native Flue bundle root: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(finalRoot), 0o755); err != nil {
 		return fmt.Errorf("create native Flue bundle parent: %w", err)

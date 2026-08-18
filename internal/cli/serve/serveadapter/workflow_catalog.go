@@ -16,7 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
-	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
+	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
@@ -101,6 +101,7 @@ func RequiredFleetDBCapabilities(externalAuth, workspaceRoleResolverAvailable bo
 		required,
 		fleetdb.WorkflowCatalogVersionLifecycleCapability,
 		fleetdb.WorkflowCatalogVersionAuthoringCapability,
+		fleetdb.WorkflowCatalogVersionAvailabilityCapability,
 		fleetdb.AgentsProvisioningProgressCapability,
 	)
 	if automationEnabled {
@@ -135,15 +136,24 @@ func RefreshBoundPromptAgentWorkflows(
 	if module == nil {
 		return fmt.Errorf("refresh bound prompt-agent workflows: Workflow Catalog capability is required")
 	}
-	coordinator, err := appworkflowauthoring.New(workflowdefs.NewBundleStager())
+	coordinator, err := appworkflowauthoring.New(workflowdefs.NewBundleStager(), module)
 	if err != nil {
 		return err
 	}
+	index := workflowdefs.NewBoundPromptAgentIndex(handle.Store.Workspaces(), handle.Store.TriggerBindings())
+	if err := coordinator.ReconcilePendingVersions(
+		ctx,
+		index,
+		module.CatalogAPI(),
+		module.CatalogCommands(),
+	); err != nil {
+		return fmt.Errorf("reconcile pending workflow versions: %w", err)
+	}
 	return coordinator.RefreshBoundPromptAgentWorkflows(
 		ctx,
-		workflowdefs.NewBoundPromptAgentIndex(handle.Store.Workspaces(), handle.Store.TriggerBindings()),
+		index,
 		module.CatalogAPI(),
-		module.VersionAuthoringAPI(),
+		module.CatalogCommands(),
 		module,
 		workflowdefs.NewBuiltinSupport(),
 	)
@@ -208,8 +218,13 @@ func (resolver *externalOperatorResolver) ResolveOperatorAuthority(
 
 type workflowTargetAuthoringPorts struct {
 	catalog     workflowcatalog.API
-	authoring   workflowcatalog.VersionAuthoringAPI
-	authorities appworkflowauthoring.ManagedBuiltinAuthorityProvider
+	authoring   appworkflowauthoring.CatalogCommands
+	authorities workflowDistributionAuthorities
+}
+
+type workflowDistributionAuthorities interface {
+	appworkflowauthoring.ManagedBuiltinAuthorityProvider
+	appworkflowauthoring.DistributionAuthorityProvider
 }
 
 type workflowTargetAuthoringPortsResolver func() workflowTargetAuthoringPorts
@@ -247,7 +262,7 @@ func prepareWorkflowCatalogTarget(
 		return nil, workflowcatalog.ErrUnavailable
 	}
 	if workflowcatalog.IsBuiltinWorkflowName(strings.TrimSpace(workflow)) {
-		coordinator, err := appworkflowauthoring.New(workflowdefs.NewBundleStager())
+		coordinator, err := appworkflowauthoring.New(workflowdefs.NewBundleStager(), ports.authorities)
 		if err != nil {
 			return nil, err
 		}
@@ -334,6 +349,13 @@ func (module *WorkflowCatalogModule) VersionAuthoringAPI() workflowcatalog.Versi
 	return module.capability.VersionAuthoringAPI()
 }
 
+func (module *WorkflowCatalogModule) CatalogCommands() appworkflowauthoring.CatalogCommands {
+	if module == nil || module.capability == nil {
+		return nil
+	}
+	return module.capability.CatalogCommands()
+}
+
 func (module *WorkflowCatalogModule) OperatorAuthorityResolver() appserve.OperatorAuthorityResolver {
 	if module == nil || module.capability == nil {
 		return nil
@@ -351,6 +373,28 @@ func (module *WorkflowCatalogModule) AuthorityForManagedBuiltin(
 	return module.capability.ManagedBuiltinAuthoringAuthority(workspace, reason)
 }
 
+func (module *WorkflowCatalogModule) AuthorityForVersionAvailability(
+	ctx context.Context,
+	workspace, reason string,
+) (authority.SystemAuthority, error) {
+	if module == nil || module.capability == nil {
+		return authority.SystemAuthority{}, workflowcatalog.ErrUnavailable
+	}
+	return module.capability.AuthorityForVersionAvailability(ctx, workspace, reason)
+}
+
+func (module *WorkflowCatalogModule) AuthorityForManagedVersionLifecycle(
+	ctx context.Context,
+	workspace string,
+	action authority.Action,
+	reason string,
+) (authority.SystemAuthority, error) {
+	if module == nil || module.capability == nil {
+		return authority.SystemAuthority{}, workflowcatalog.ErrUnavailable
+	}
+	return module.capability.AuthorityForManagedVersionLifecycle(ctx, workspace, action, reason)
+}
+
 func (module *WorkflowCatalogModule) PrepareWorkflowTarget(
 	ctx context.Context,
 	workspace, workflow string,
@@ -359,7 +403,7 @@ func (module *WorkflowCatalogModule) PrepareWorkflowTarget(
 		return nil, workflowcatalog.ErrUnavailable
 	}
 	return prepareWorkflowCatalogTarget(ctx, workflowTargetAuthoringPorts{
-		catalog: module.CatalogAPI(), authoring: module.VersionAuthoringAPI(), authorities: module,
+		catalog: module.CatalogAPI(), authoring: module.CatalogCommands(), authorities: module,
 	}, workspace, workflow)
 }
 
@@ -486,7 +530,7 @@ func BuildWorkflowCatalogModule(config WorkflowCatalogConfig) (*WorkflowCatalogM
 				return workflowTargetAuthoringPorts{}
 			}
 			return workflowTargetAuthoringPorts{
-				catalog: composed.CatalogAPI(), authoring: composed.VersionAuthoringAPI(), authorities: composed,
+				catalog: composed.CatalogAPI(), authoring: composed.CatalogCommands(), authorities: composed,
 			}
 		}),
 	}
@@ -519,7 +563,7 @@ func BuildWorkflowCatalogModule(config WorkflowCatalogConfig) (*WorkflowCatalogM
 	composed = &WorkflowCatalogModule{module: module, capability: module, automation: automationCapability}
 	driver.SetGlobalRunnerResolver(newGlobalBuiltinRunnerResolver(
 		composed.CatalogAPI(),
-		composed.VersionAuthoringAPI(),
+		composed.CatalogCommands(),
 		composed,
 	))
 	return composed, nil
@@ -527,10 +571,10 @@ func BuildWorkflowCatalogModule(config WorkflowCatalogConfig) (*WorkflowCatalogM
 
 func newGlobalBuiltinRunnerResolver(
 	catalog workflowcatalog.API,
-	authoring workflowcatalog.VersionAuthoringAPI,
-	authorities appworkflowauthoring.ManagedBuiltinAuthorityProvider,
+	authoring appworkflowauthoring.CatalogCommands,
+	authorities workflowDistributionAuthorities,
 ) driver.GlobalRunnerResolver {
-	coordinator, err := appworkflowauthoring.New(workflowdefs.NewBundleStager())
+	coordinator, err := appworkflowauthoring.New(workflowdefs.NewBundleStager(), authorities)
 	if err != nil {
 		return nil
 	}

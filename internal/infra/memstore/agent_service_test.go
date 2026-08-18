@@ -178,13 +178,14 @@ func TestAgentServiceMemstoreScriptedBehaviorParity(t *testing.T) {
 	}
 
 	if _, err := s.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
-		WorkspaceKey:     "WS",
-		VersionID:        "version-2",
-		DriverID:         "driver-1",
-		Version:          2,
-		SourceDigest:     "sha256:source-2",
-		BundleDigest:     "sha256:bundle-2",
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+		WorkspaceKey:       "WS",
+		VersionID:          "version-2",
+		DriverID:           "driver-1",
+		Version:            2,
+		SourceDigest:       "sha256:source-2",
+		BundleDigest:       "sha256:bundle-2",
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
 	}); err != nil {
 		t.Fatalf("Create second driver version: %v", err)
 	}
@@ -246,13 +247,14 @@ func TestAgentServiceMemstoreReferenceValidation(t *testing.T) {
 		t.Fatalf("Create driver: %v", err)
 	}
 	if _, err := s.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
-		WorkspaceKey:     "WS",
-		VersionID:        "version-1",
-		DriverID:         "driver-1",
-		Version:          1,
-		SourceDigest:     "sha256:source",
-		BundleDigest:     "sha256:bundle",
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+		WorkspaceKey:       "WS",
+		VersionID:          "version-1",
+		DriverID:           "driver-1",
+		Version:            1,
+		SourceDigest:       "sha256:source",
+		BundleDigest:       "sha256:bundle",
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
@@ -345,13 +347,14 @@ func seedAgentServiceRefs(t *testing.T, s *Store) {
 		t.Fatalf("Create driver: %v", err)
 	}
 	if _, err := s.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
-		WorkspaceKey:     "WS",
-		VersionID:        "version-1",
-		DriverID:         "driver-1",
-		Version:          1,
-		SourceDigest:     "sha256:source",
-		BundleDigest:     "sha256:bundle",
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+		WorkspaceKey:       "WS",
+		VersionID:          "version-1",
+		DriverID:           "driver-1",
+		Version:            1,
+		SourceDigest:       "sha256:source",
+		BundleDigest:       "sha256:bundle",
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}

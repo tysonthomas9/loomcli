@@ -8,17 +8,21 @@ import (
 )
 
 const (
-	ActionResolveEffectiveVersion authority.Action = "workflowcatalog.resolve-effective-version"
-	ActionResolveRequestedVersion authority.Action = "workflowcatalog.resolve-requested-version"
-	ActionApproveVersion          authority.Action = "workflowcatalog.approve-version"
-	ActionUnapproveVersion        authority.Action = "workflowcatalog.unapprove-version"
-	ActionActivateVersion         authority.Action = "workflowcatalog.activate-version"
-	ActionAuthorVersion           authority.Action = "workflowcatalog.author-version"
-	ActionAuthorManagedVersion    authority.Action = "workflowcatalog.author-managed-version"
+	ActionResolveEffectiveVersion   authority.Action = "workflowcatalog.resolve-effective-version"
+	ActionResolveRequestedVersion   authority.Action = "workflowcatalog.resolve-requested-version"
+	ActionApproveVersion            authority.Action = "workflowcatalog.approve-version"
+	ActionUnapproveVersion          authority.Action = "workflowcatalog.unapprove-version"
+	ActionActivateVersion           authority.Action = "workflowcatalog.activate-version"
+	ActionAuthorVersion             authority.Action = "workflowcatalog.author-version"
+	ActionAuthorManagedVersion      authority.Action = "workflowcatalog.author-managed-version"
+	ActionRecordVersionAvailability authority.Action = "workflowcatalog.record-version-availability"
+	ActionApproveManagedVersion     authority.Action = "workflowcatalog.approve-managed-version"
+	ActionActivateManagedVersion    authority.Action = "workflowcatalog.activate-managed-version"
 
-	SemanticImpactVersionTrustChanged     = "workflow_catalog.version_trust_changed.v1"
-	SemanticImpactEffectiveVersionChanged = "workflow_catalog.effective_version_changed.v1"
-	SemanticImpactVersionAuthored         = "workflow_catalog.version_authored.v1"
+	SemanticImpactVersionTrustChanged        = "workflow_catalog.version_trust_changed.v1"
+	SemanticImpactEffectiveVersionChanged    = "workflow_catalog.effective_version_changed.v1"
+	SemanticImpactVersionAuthored            = "workflow_catalog.version_authored.v1"
+	SemanticImpactVersionAvailabilityChanged = "workflow_catalog.version_availability_changed.v1"
 
 	// MaxExpectedRevision leaves room for FleetDB to advance a successful
 	// lifecycle command by one within Redis HINCRBY and PostgreSQL BIGINT.
@@ -64,9 +68,24 @@ type VersionAuthoringAPI interface {
 	// activation remain explicit lifecycle commands.
 	AuthorVersion(context.Context, authority.OperatorAuthority, AuthorVersionCommand) (*AuthorVersionResult, error)
 	// AuthorManagedVersion is the system-only lane for embedded, Loom-managed
-	// builtins. Managed trust and optional activation are selected by this
-	// method, not by caller-controlled fields in AuthorVersionCommand.
-	AuthorManagedVersion(context.Context, authority.SystemAuthority, AuthorManagedVersionCommand) (*AuthorVersionResult, error)
+	// builtins. It selects managed trust but still persists a pending inactive
+	// version; availability and activation are later explicit transitions.
+	AuthorManagedVersion(context.Context, authority.SystemAuthority, AuthorVersionCommand) (*AuthorVersionResult, error)
+}
+
+// VersionAvailabilityAPI is the system-only handoff from Workflow Authoring
+// to Workflow Catalog after Workflow Distribution has promoted or rejected
+// the immutable digest-addressed bundle.
+type VersionAvailabilityAPI interface {
+	RecordVersionAvailability(context.Context, authority.SystemAuthority, AvailabilityCommand) (*AvailabilityResult, error)
+}
+
+// ManagedVersionLifecycleAPI is the service-only completion lane for a
+// Loom-managed version after distribution recorded it available. It is
+// distinct from operator lifecycle authority and cannot unapprove a version.
+type ManagedVersionLifecycleAPI interface {
+	ApproveManagedVersion(context.Context, authority.SystemAuthority, VersionCommand) (*VersionResult, error)
+	ActivateManagedVersion(context.Context, authority.SystemAuthority, VersionCommand) (*VersionResult, error)
 }
 
 // VersionSet is a driver and its versions, in the persistence-defined stable
@@ -145,13 +164,6 @@ type AuthorVersionCommand struct {
 	BuildDiagnostics string            `json:"build_diagnostics,omitempty"`
 }
 
-// AuthorManagedVersionCommand adds only the system-owned activation choice.
-// Its embedded authoring command still cannot choose trust.
-type AuthorManagedVersionCommand struct {
-	AuthorVersionCommand
-	Activate bool `json:"activate"`
-}
-
 // AuthorVersionResult is the authoritative atomic FleetDB outcome. Driver and
 // Version are post-command snapshots; CommittedRevision identifies the
 // original durable commit even when a later read has advanced Driver.Revision.
@@ -162,7 +174,6 @@ type AuthorVersionResult struct {
 	CreatedDriver     bool             `json:"created_driver"`
 	CreatedVersion    bool             `json:"created_version"`
 	ReusedVersion     bool             `json:"reused_version"`
-	Activated         bool             `json:"activated"`
 	Replayed          bool             `json:"replayed,omitempty"`
 	CommittedRevision uint64           `json:"committed_revision"`
 	SemanticImpact    string           `json:"semantic_impact"`

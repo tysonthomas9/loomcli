@@ -812,8 +812,8 @@ func loadRunRequest(ctx context.Context, workDir string, run *execution.DriverRu
 	if version.DriverID != run.DriverID {
 		return RunRequest{}, fmt.Errorf("pinned version %q belongs to driver %q, run wants %q: %w", version.VersionID, version.DriverID, run.DriverID, persistence.ErrInvalid)
 	}
-	if version.ValidationStatus != workflowcatalog.DriverVersionValidationPassed {
-		return RunRequest{}, fmt.Errorf("pinned version %q is not passed: %w", version.VersionID, persistence.ErrInvalid)
+	if err := validateRuntimeVersion(version); err != nil {
+		return RunRequest{}, err
 	}
 	if version.BundleRef == "" {
 		return RunRequest{}, fmt.Errorf("pinned version %q has no bundle_ref: %w", version.VersionID, persistence.ErrInvalid)
@@ -838,6 +838,24 @@ func loadRunRequest(ctx context.Context, workDir string, run *execution.DriverRu
 		Manifest:   manifest,
 		TrustLevel: trust,
 	}, nil
+}
+
+func validateRuntimeVersion(version *workflowcatalog.DriverVersion) error {
+	if version == nil {
+		return fmt.Errorf("pinned version is missing: %w", persistence.ErrInvalid)
+	}
+	if version.ValidationStatus != workflowcatalog.DriverVersionValidationPassed {
+		return fmt.Errorf("pinned version %q is not passed: %w", version.VersionID, persistence.ErrInvalid)
+	}
+	if !workflowcatalog.VersionAvailable(version) {
+		return fmt.Errorf(
+			"pinned version %q availability is %q: %w",
+			version.VersionID,
+			version.AvailabilityStatus,
+			workflowcatalog.ErrVersionNotAvailable,
+		)
+	}
+	return nil
 }
 
 // verifyBundleManifest reads the staged bundle's manifest, resolves the built

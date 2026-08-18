@@ -88,6 +88,9 @@ func loadDriverVersionForOperatorAction(ctx context.Context, drivers workflowcat
 	if version.ValidationStatus != workflowcatalog.DriverVersionValidationPassed {
 		return nil, nil, fmt.Errorf("driver version %q is not passed: %w", version.VersionID, persistence.ErrInvalid)
 	}
+	if !workflowcatalog.VersionAvailable(version) {
+		return nil, nil, fmt.Errorf("driver version %q is not available: %w", version.VersionID, persistence.ErrInvalid)
+	}
 	return driver, version, nil
 }
 

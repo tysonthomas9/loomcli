@@ -1,4 +1,4 @@
-package authoring
+package workflowdistribution
 
 import (
 	"errors"
@@ -9,12 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 )
-
-type absentPackagedBuiltinFS struct{}
-
-func (absentPackagedBuiltinFS) Open(name string) (fs.File, error) {
-	return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
-}
 
 func packagedBuiltinDigestMatches(source fs.FS, distPath, digest string) (bool, error) {
 	markerPath := filepath.ToSlash(filepath.Join(distPath, "source-digest.txt"))

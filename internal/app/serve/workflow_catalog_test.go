@@ -218,7 +218,9 @@ func TestWorkflowCatalogFleetDBBridgeOwnsItsDTOAndErrorVocabulary(t *testing.T) 
 		{name: "ownership", in: infrafleetdb.ErrWorkflowCatalogVersionOwnership, want: catalogfleetdb.ErrTransportVersionOwnership},
 		{name: "validation", in: infrafleetdb.ErrWorkflowCatalogVersionNotValidated, want: catalogfleetdb.ErrTransportVersionNotValidated},
 		{name: "approval", in: infrafleetdb.ErrWorkflowCatalogVersionNotApproved, want: catalogfleetdb.ErrTransportVersionNotApproved},
+		{name: "availability", in: infrafleetdb.ErrWorkflowCatalogVersionNotAvailable, want: catalogfleetdb.ErrTransportVersionNotAvailable},
 		{name: "authoring conflict", in: infrafleetdb.ErrWorkflowCatalogAuthoringConflict, want: catalogfleetdb.ErrTransportAuthoringConflict},
+		{name: "availability conflict", in: infrafleetdb.ErrWorkflowCatalogAvailabilityConflict, want: catalogfleetdb.ErrTransportAvailabilityConflict},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got := translateWorkflowCatalogFleetDBError(test.in)
@@ -244,7 +246,7 @@ func TestWorkflowCatalogFleetDBBridgeOwnsItsDTOAndErrorVocabulary(t *testing.T) 
 	authored, err := translateWorkflowCatalogFleetDBAuthoringResult(&infrafleetdb.WorkflowCatalogAuthorVersionResult{
 		Driver: driver, Version: version,
 		CreatedDriver: true, CreatedVersion: true, ReusedVersion: false,
-		Activated: true, Replayed: true, CommittedRevision: 4,
+		Replayed: true, CommittedRevision: 4,
 		SemanticImpact: workflowcatalog.SemanticImpactVersionAuthored,
 	}, nil)
 	if err != nil {
@@ -252,7 +254,7 @@ func TestWorkflowCatalogFleetDBBridgeOwnsItsDTOAndErrorVocabulary(t *testing.T) 
 	}
 	if authored.Driver != driver || authored.Version != version ||
 		!authored.CreatedDriver || !authored.CreatedVersion || authored.ReusedVersion ||
-		!authored.Activated || !authored.Replayed || authored.CommittedRevision != 4 ||
+		!authored.Replayed || authored.CommittedRevision != 4 ||
 		authored.SemanticImpact != workflowcatalog.SemanticImpactVersionAuthored {
 		t.Fatalf("translated authoring result = %#v", authored)
 	}
@@ -330,7 +332,7 @@ func TestWorkflowCatalogCompositionUsesAtomicAuthoringAndAuthorityDerivedAuditAc
 	}
 	if operatorResult.Version.CreatedBy != localOpenOperatorSubject ||
 		operatorResult.Version.Manifest[workflowcatalog.ManifestTrustLevelKey] != string(workflowcatalog.DriverTrustUntrusted) ||
-		operatorResult.Activated {
+		operatorResult.Version.AvailabilityStatus != workflowcatalog.DriverVersionAvailabilityPending {
 		t.Fatalf("operator result = %+v", operatorResult)
 	}
 
@@ -368,17 +370,15 @@ func TestWorkflowCatalogCompositionUsesAtomicAuthoringAndAuthorityDerivedAuditAc
 	managedResult, err := authoring.AuthorManagedVersion(
 		t.Context(),
 		systemAuth,
-		workflowcatalog.AuthorManagedVersionCommand{
-			AuthorVersionCommand: managedCommand,
-			Activate:             true,
-		},
+		managedCommand,
 	)
 	if err != nil {
 		t.Fatalf("AuthorManagedVersion: %v", err)
 	}
 	if managedResult.Version.CreatedBy != "builtin-distribution" ||
 		managedResult.Version.Manifest[workflowcatalog.ManifestTrustLevelKey] != string(workflowcatalog.DriverTrustTrusted) ||
-		!managedResult.Activated {
+		managedResult.Version.AvailabilityStatus != workflowcatalog.DriverVersionAvailabilityPending ||
+		managedResult.Driver.ActiveVersionID != "" {
 		t.Fatalf("managed result = %+v", managedResult)
 	}
 
@@ -615,15 +615,16 @@ func (s *catalogFleetStub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Revision:        1,
 	}
 	version := &workflowcatalog.DriverVersion{
-		WorkspaceKey:     "TEST",
-		DriverID:         "demo",
-		VersionID:        "v1",
-		Version:          1,
-		SourceRef:        "src/demo.ts",
-		SourceDigest:     "sha256:source",
-		BundleRef:        "bundle/demo-v1.tgz",
-		BundleDigest:     "sha256:bundle",
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+		WorkspaceKey:       "TEST",
+		DriverID:           "demo",
+		VersionID:          "v1",
+		Version:            1,
+		SourceRef:          "src/demo.ts",
+		SourceDigest:       "sha256:source",
+		BundleRef:          "bundle/demo-v1.tgz",
+		BundleDigest:       "sha256:bundle",
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
 	}
 
 	switch {
@@ -675,7 +676,6 @@ func (s *catalogFleetStub) serveAuthorVersion(w http.ResponseWriter, r *http.Req
 		Runtime          string            `json:"runtime"`
 		Manifest         map[string]string `json:"manifest"`
 		BuildDiagnostics string            `json:"build_diagnostics"`
-		Activate         bool              `json:"activate"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		s.t.Errorf("decode author-version request: %v", err)
@@ -683,8 +683,7 @@ func (s *catalogFleetStub) serveAuthorVersion(w http.ResponseWriter, r *http.Req
 		return
 	}
 	managed := strings.HasSuffix(r.URL.Path, "/author-managed")
-	if body.RequestID == "" || body.VersionID == "" || body.DriverName == "" ||
-		body.Activate != managed {
+	if body.RequestID == "" || body.VersionID == "" || body.DriverName == "" {
 		s.t.Errorf("author-version body = %+v, managed=%v", body, managed)
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
@@ -699,20 +698,17 @@ func (s *catalogFleetStub) serveAuthorVersion(w http.ResponseWriter, r *http.Req
 	trust := workflowcatalog.DriverTrustUntrusted
 	ownerType := workflowcatalog.DriverOwnerUser
 	status := workflowcatalog.DriverStatusDraft
-	activeVersionID := ""
 	if managed {
 		driverID = workflowcatalog.BuiltinEpicRunnerWorkflowName
 		trust = workflowcatalog.DriverTrustTrusted
 		ownerType = workflowcatalog.DriverOwnerSystem
-		status = workflowcatalog.DriverStatusActive
-		activeVersionID = body.VersionID
 	}
 	manifest := cloneWorkflowCatalogBridgeMap(body.Manifest)
 	manifest[workflowcatalog.ManifestTrustLevelKey] = string(trust)
 	writeCatalogFleetJSON(w, infrafleetdb.WorkflowCatalogAuthorVersionResult{
 		Driver: &workflowcatalog.Driver{
 			WorkspaceKey: "TEST", DriverID: driverID, Name: body.DriverName,
-			OwnerType: ownerType, Status: status, ActiveVersionID: activeVersionID,
+			OwnerType: ownerType, Status: status,
 			TrustLevel: trust, Revision: body.ExpectedRevision + 1,
 		},
 		Version: &workflowcatalog.DriverVersion{
@@ -720,9 +716,10 @@ func (s *catalogFleetStub) serveAuthorVersion(w http.ResponseWriter, r *http.Req
 			Version: 1, SourceRef: body.SourceRef, SourceDigest: body.SourceDigest,
 			BundleRef: body.BundleRef, BundleDigest: body.BundleDigest,
 			Runtime: body.Runtime, Manifest: manifest, BuildDiagnostics: body.BuildDiagnostics,
-			ValidationStatus: workflowcatalog.DriverVersionValidationPassed, CreatedBy: actor,
+			ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+			AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityPending, CreatedBy: actor,
 		},
-		CreatedDriver: true, CreatedVersion: true, Activated: body.Activate,
+		CreatedDriver: true, CreatedVersion: true,
 		CommittedRevision: body.ExpectedRevision + 1,
 		SemanticImpact:    workflowcatalog.SemanticImpactVersionAuthored,
 	})

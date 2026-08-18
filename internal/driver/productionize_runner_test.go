@@ -299,7 +299,8 @@ func TestLocalTaskRunnerBackendEnvResolution(t *testing.T) {
 		if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 			WorkspaceKey: "WS", VersionID: "prompt-agent-v1", DriverID: "prompt-agent", Version: 1,
 			SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
-			ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+			ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+			AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
 		}); err != nil {
 			t.Fatalf("create driver version: %v", err)
 		}
@@ -494,18 +495,19 @@ setInterval(() => {}, 1000);
 		t.Fatalf("digest bundle: %v", err)
 	}
 	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
-		WorkspaceKey:     "WS",
-		VersionID:        "driver-version-1",
-		DriverID:         "epic-runner",
-		Version:          1,
-		SourceRef:        "test://driver",
-		SourceDigest:     "sha256:source",
-		BundleRef:        filepath.ToSlash(filepath.Join(".loom", "drivers", "epic-runner", "driver-version-1")),
-		BundleDigest:     bundleDigest,
-		Runtime:          RuntimeFlueNode,
-		Manifest:         manifest,
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
-		CreatedBy:        "tester",
+		WorkspaceKey:       "WS",
+		VersionID:          "driver-version-1",
+		DriverID:           "epic-runner",
+		Version:            1,
+		SourceRef:          "test://driver",
+		SourceDigest:       "sha256:source",
+		BundleRef:          filepath.ToSlash(filepath.Join(".loom", "drivers", "epic-runner", "driver-version-1")),
+		BundleDigest:       bundleDigest,
+		Runtime:            RuntimeFlueNode,
+		Manifest:           manifest,
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
+		CreatedBy:          "tester",
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
@@ -584,18 +586,19 @@ setInterval(() => {}, 1000);
 		t.Fatalf("digest bundle: %v", err)
 	}
 	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
-		WorkspaceKey:     "WS",
-		VersionID:        "driver-version-1",
-		DriverID:         "epic-runner",
-		Version:          1,
-		SourceRef:        "test://driver",
-		SourceDigest:     "sha256:source",
-		BundleRef:        filepath.ToSlash(filepath.Join(".loom", "drivers", "epic-runner", "driver-version-1")),
-		BundleDigest:     bundleDigest,
-		Runtime:          RuntimeFlueNode,
-		Manifest:         manifest,
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
-		CreatedBy:        "tester",
+		WorkspaceKey:       "WS",
+		VersionID:          "driver-version-1",
+		DriverID:           "epic-runner",
+		Version:            1,
+		SourceRef:          "test://driver",
+		SourceDigest:       "sha256:source",
+		BundleRef:          filepath.ToSlash(filepath.Join(".loom", "drivers", "epic-runner", "driver-version-1")),
+		BundleDigest:       bundleDigest,
+		Runtime:            RuntimeFlueNode,
+		Manifest:           manifest,
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
+		CreatedBy:          "tester",
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}

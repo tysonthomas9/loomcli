@@ -718,7 +718,8 @@ func buildServerConfig(
 		capabilities.workflowCatalog = module
 		cfg.WorkflowCatalogModule = module
 		cfg.WorkflowCatalogAPI = module.CatalogAPI()
-		cfg.WorkflowCatalogAuthoring = module.VersionAuthoringAPI()
+		cfg.WorkflowCatalogAuthoring = module.CatalogCommands()
+		cfg.WorkflowDistributionAuthorities = module
 		cfg.WorkflowCatalogOperator = module.OperatorAuthorityResolver()
 		cfg.WorkflowTargetPreparation = module.PrepareWorkflowTarget
 		automationCapability = module.AutomationCapability()

@@ -36,7 +36,8 @@ func TestDriverGenericLifecycleFieldsRetired(t *testing.T) {
 	if _, err := s.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey: "WS", DriverID: "driver-1", VersionID: "version-1", Version: 1,
 		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
 	}); err != nil {
 		t.Fatalf("Create version: %v", err)
 	}
@@ -110,13 +111,14 @@ func TestPlatformRegisteredEpicRunViaTriggerBinding(t *testing.T) {
 		t.Fatalf("Create driver: %v", err)
 	}
 	if _, err := s.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
-		WorkspaceKey:     "WS",
-		VersionID:        "version-1",
-		DriverID:         "driver-1",
-		Version:          1,
-		SourceDigest:     "sha256:source-v1",
-		BundleDigest:     "sha256:bundle-v1",
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+		WorkspaceKey:       "WS",
+		VersionID:          "version-1",
+		DriverID:           "driver-1",
+		Version:            1,
+		SourceDigest:       "sha256:source-v1",
+		BundleDigest:       "sha256:bundle-v1",
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
@@ -140,13 +142,14 @@ func TestPlatformRegisteredEpicRunViaTriggerBinding(t *testing.T) {
 		t.Fatalf("Create trigger binding: %v", err)
 	}
 	if _, err := s.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
-		WorkspaceKey:     "WS",
-		VersionID:        "version-2",
-		DriverID:         "driver-1",
-		Version:          2,
-		SourceDigest:     "sha256:source-v2",
-		BundleDigest:     "sha256:bundle-v2",
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+		WorkspaceKey:       "WS",
+		VersionID:          "version-2",
+		DriverID:           "driver-1",
+		Version:            2,
+		SourceDigest:       "sha256:source-v2",
+		BundleDigest:       "sha256:bundle-v2",
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
 	}); err != nil {
 		t.Fatalf("Create driver version 2: %v", err)
 	}
@@ -397,13 +400,14 @@ func TestPlatformRecoverStaleDriverRunsFailsStaleRunsAndReleasesAdmission(t *tes
 		t.Fatalf("Create driver: %v", err)
 	}
 	if _, err := s.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
-		WorkspaceKey:     "WS",
-		VersionID:        "version-1",
-		DriverID:         "driver-1",
-		Version:          1,
-		SourceDigest:     "sha256:source",
-		BundleDigest:     "sha256:bundle",
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+		WorkspaceKey:       "WS",
+		VersionID:          "version-1",
+		DriverID:           "driver-1",
+		Version:            1,
+		SourceDigest:       "sha256:source",
+		BundleDigest:       "sha256:bundle",
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
@@ -489,13 +493,14 @@ func TestPlatformDriverRunAndTaskRunLifecycle(t *testing.T) {
 	}
 
 	if _, err := s.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
-		WorkspaceKey:     "WS",
-		VersionID:        "version-1",
-		DriverID:         "driver-1",
-		Version:          1,
-		SourceDigest:     "sha256:source",
-		BundleDigest:     "sha256:bundle",
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+		WorkspaceKey:       "WS",
+		VersionID:          "version-1",
+		DriverID:           "driver-1",
+		Version:            1,
+		SourceDigest:       "sha256:source",
+		BundleDigest:       "sha256:bundle",
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
@@ -1243,13 +1248,14 @@ func TestPlatformDriverStepLifecycle(t *testing.T) {
 		t.Fatalf("Create driver: %v", err)
 	}
 	if _, err := s.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
-		WorkspaceKey:     "WS",
-		VersionID:        "version-1",
-		DriverID:         "driver-1",
-		Version:          1,
-		SourceDigest:     "sha256:source",
-		BundleDigest:     "sha256:bundle",
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+		WorkspaceKey:       "WS",
+		VersionID:          "version-1",
+		DriverID:           "driver-1",
+		Version:            1,
+		SourceDigest:       "sha256:source",
+		BundleDigest:       "sha256:bundle",
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
@@ -1466,13 +1472,14 @@ func TestPlatformRecoverStaleTaskRunsFailsStaleRunsAndSteps(t *testing.T) {
 		t.Fatalf("Create driver: %v", err)
 	}
 	if _, err := s.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
-		WorkspaceKey:     "WS",
-		VersionID:        "version-1",
-		DriverID:         "driver-1",
-		Version:          1,
-		SourceDigest:     "sha256:source",
-		BundleDigest:     "sha256:bundle",
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+		WorkspaceKey:       "WS",
+		VersionID:          "version-1",
+		DriverID:           "driver-1",
+		Version:            1,
+		SourceDigest:       "sha256:source",
+		BundleDigest:       "sha256:bundle",
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}

@@ -1,6 +1,6 @@
 //go:build loom_packaged_builtins
 
-package authoring
+package workflowdistribution
 
 import (
 	"io/fs"

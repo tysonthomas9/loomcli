@@ -45,30 +45,26 @@ type VersionLifecycleStore interface {
 }
 
 // AuthoringMutation is the transport-neutral, server-derived durable command.
-// Managed and Activate are never decoded from an operator request: the
-// Workflow Catalog service selects them from the typed authority lane.
+// Managed is never decoded from an operator request: the Workflow Catalog
+// service selects it from the typed authority lane.
 // AuditActor is the admitted authority subject, never request payload data.
 type AuthoringMutation struct {
 	AuthorVersionCommand
 	AuditActor string
 	Managed    bool
-	Activate   bool
 }
 
 // AuthoringResult is returned by one atomic aggregate command. Implementations
 // must ensure/reuse the Driver, ensure/reuse exactly one immutable version,
 // allocate a new version's positive monotonic sequence number, apply trust
-// demotion, and (for managed commands only) optionally activate in the same
-// transaction/Lua script and under ExpectedRevision. Activated reports that
-// the command's activation intent was satisfied, so an exact replay of an
-// activating command returns true even when the version is already active.
+// demotion, and persist availability pending without changing the active
+// predecessor.
 type AuthoringResult struct {
 	Driver            *Driver
 	Version           *DriverVersion
 	CreatedDriver     bool
 	CreatedVersion    bool
 	ReusedVersion     bool
-	Activated         bool
 	Replayed          bool
 	CommittedRevision uint64
 	SemanticImpact    string
@@ -80,4 +76,16 @@ type AuthoringResult struct {
 // implementation of this port.
 type AuthoringStore interface {
 	AuthorVersion(context.Context, AuthoringMutation) (*AuthoringResult, error)
+}
+
+// AvailabilityMutation is the transport-neutral durable transition. The
+// service derives AuditActor from the admitted SystemAuthority.
+type AvailabilityMutation struct {
+	AvailabilityCommand
+	AuditActor string
+}
+
+// AvailabilityStore owns the one atomic availability transition.
+type AvailabilityStore interface {
+	RecordVersionAvailability(context.Context, AvailabilityMutation) (*AvailabilityResult, error)
 }

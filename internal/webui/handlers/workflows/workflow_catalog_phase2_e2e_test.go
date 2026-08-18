@@ -292,18 +292,19 @@ func (e *workflowCatalogPhase2E2E) seedPrerequisites() {
 		e.t.Fatalf("seed driver revision = %d, want 1", driver.Revision)
 	}
 	version, err := e.fleetClient.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
-		WorkspaceKey:     e.workspace,
-		DriverID:         e.driverID,
-		VersionID:        e.versionID,
-		Version:          1,
-		SourceRef:        "fixture://phase2/source",
-		SourceDigest:     "sha256:phase2-source",
-		BundleRef:        "fixture://phase2/bundle",
-		BundleDigest:     "sha256:phase2-bundle",
-		Runtime:          "node",
-		Manifest:         map[string]string{workflowcatalog.ManifestTrustLevelKey: string(workflowcatalog.DriverTrustUntrusted)},
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
-		CreatedBy:        e.actor,
+		WorkspaceKey:       e.workspace,
+		DriverID:           e.driverID,
+		VersionID:          e.versionID,
+		Version:            1,
+		SourceRef:          "fixture://phase2/source",
+		SourceDigest:       "sha256:phase2-source",
+		BundleRef:          "fixture://phase2/bundle",
+		BundleDigest:       "sha256:phase2-bundle",
+		Runtime:            "node",
+		Manifest:           map[string]string{workflowcatalog.ManifestTrustLevelKey: string(workflowcatalog.DriverTrustUntrusted)},
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
+		CreatedBy:          e.actor,
 	})
 	if err != nil {
 		e.t.Fatalf("seed validated driver version: %v", err)

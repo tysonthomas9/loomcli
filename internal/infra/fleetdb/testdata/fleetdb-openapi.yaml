@@ -2596,6 +2596,10 @@ paths:
           in: query
           schema:
             $ref: "#/components/schemas/DriverVersionValidationStatus"
+        - name: availability_status
+          in: query
+          schema:
+            $ref: "#/components/schemas/DriverVersionAvailabilityStatus"
         - name: limit
           in: query
           schema:
@@ -2657,7 +2661,7 @@ paths:
         Service-only operator lane. FleetDB atomically creates or reuses the
         Driver, creates or exactly reuses one immutable version, allocates its
         positive per-Driver sequence, demotes legacy Driver trust, advances the
-        Driver revision, and persists lost-response replay. Trust, activation,
+        Driver revision, and persists lost-response replay. Trust, availability,
         validation status, sequence, timestamps, and audit actor are not body
         controlled.
       requestBody:
@@ -2701,15 +2705,15 @@ paths:
       operationId: authorManagedDriverVersion
       description: |
         Service-only managed lane. It applies the same atomic immutable
-        authoring and replay contract as authorDriverVersion, server-stamps
-        trusted provenance, and may approve and activate the version in the
-        same Driver aggregate commit.
+        authoring and replay contract as authorDriverVersion and server-stamps
+        trusted provenance. The version remains pending until Workflow
+        Distribution proves the promoted bundle through the availability API.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/DriverVersionManagedAuthoringRequest"
+              $ref: "#/components/schemas/DriverVersionAuthoringRequest"
       responses:
         "200":
           description: Newly committed or replayed atomic managed-authoring outcome
@@ -2728,6 +2732,48 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/drivers/{driver_id}/versions/{version_id}/availability:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/DriverID"
+      - $ref: "#/components/parameters/DriverVersionID"
+      - name: X-Fleet-Delegated-Actor
+        in: header
+        required: true
+        description: Admitted Workflow Authoring audit subject delegated by the authenticated Fleet service.
+        schema: { type: string, minLength: 1, maxLength: 256 }
+    post:
+      tags: [Workflow Catalog]
+      summary: Atomically record one bundle availability outcome
+      operationId: advanceDriverVersionAvailability
+      description: |
+        Service-only command. It fences the immutable source and bundle
+        digests, records an available, retryable-failure, or permanent-failure
+        outcome, bounds retryable failures at three attempts, advances Driver
+        aggregate CAS, and persists exact replay. It never changes the active
+        version.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DriverVersionAvailabilityRequest"
+      responses:
+        "200":
+          description: Newly committed or replayed availability outcome
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverVersionAvailabilityResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "422": { $ref: "#/components/responses/WorkflowCatalogLifecyclePreconditionFailed" }
         "500": { $ref: "#/components/responses/InternalError" }
 
   /api/v1/{workspace}/drivers/{driver_id}/versions/{version_id}/unapprove:
@@ -2806,6 +2852,10 @@ paths:
           in: query
           schema:
             $ref: "#/components/schemas/DriverVersionValidationStatus"
+        - name: availability_status
+          in: query
+          schema:
+            $ref: "#/components/schemas/DriverVersionAvailabilityStatus"
         - name: limit
           in: query
           schema:
@@ -11555,7 +11605,7 @@ components:
 
     DriverVersion:
       type: object
-      required: [workspace_key, version_id, driver_id, version, source_digest, bundle_digest, validation_status, created_at]
+      required: [workspace_key, version_id, driver_id, version, source_digest, bundle_digest, validation_status, availability_status, availability_attempts, availability_updated_at, created_at]
       properties:
         workspace_key: { type: string }
         version_id:
@@ -11579,6 +11629,11 @@ components:
         build_diagnostics: { type: string }
         validation_status:
           $ref: "#/components/schemas/DriverVersionValidationStatus"
+        availability_status:
+          $ref: "#/components/schemas/DriverVersionAvailabilityStatus"
+        availability_attempts: { type: integer, minimum: 0, maximum: 3 }
+        availability_failure: { type: string, maxLength: 128 }
+        availability_updated_at: { type: string, format: date-time }
         created_by: { type: string }
         created_at: { type: string, format: date-time }
 
@@ -11629,7 +11684,7 @@ components:
         capabilities:
           type: array
           items: { type: string }
-          example: [agents.agent_service_commands.v1, agents.managed_reviewer_convergence.v1, agents.ownership_lease_commands.v1, agents.provisioning_progress.v1, artifacts.owner_fenced_lifecycle.v1, automation.trigger_admission.v1, execution.await_atomic_resume.v1, execution.driver_run_child_cascade.v1, execution.driver_run_child_start.v1, execution.driver_run_lease_fencing.v1, execution.driver_run_review_work_item_handoff.v1, execution.driver_run_review_work_item_handoff.v2, execution.driver_run_work_item_claim.v1, execution.driver_step_terminal_repair.v1, execution.issue_claim_next_task_run_start.v1, execution.issue_claim_task_run_start.v1, execution.task_run_lease_fencing.v1, execution.task_run_log_idempotency.v1, execution.task_run_request.v1, execution.task_run_requeue.v1, execution.task_run_retry_exhaustion.v1, execution.task_run_terminal_convergence.v1, execution.task_run_work_item_design.v1, execution.terminal_driver_run_work_recovery.v1, execution.terminal_driver_run_work_recovery_queue.v1, interaction.session_commands.v1, work_items.repository_requirement.v1, workflow_catalog.version_authoring.v1, workflow_catalog.version_lifecycle.v1]
+          example: [agents.agent_service_commands.v1, agents.managed_reviewer_convergence.v1, agents.ownership_lease_commands.v1, agents.provisioning_progress.v1, artifacts.owner_fenced_lifecycle.v1, automation.trigger_admission.v1, execution.await_atomic_resume.v1, execution.driver_run_child_cascade.v1, execution.driver_run_child_start.v1, execution.driver_run_lease_fencing.v1, execution.driver_run_review_work_item_handoff.v1, execution.driver_run_review_work_item_handoff.v2, execution.driver_run_work_item_claim.v1, execution.driver_step_terminal_repair.v1, execution.issue_claim_next_task_run_start.v1, execution.issue_claim_task_run_start.v1, execution.task_run_lease_fencing.v1, execution.task_run_log_idempotency.v1, execution.task_run_request.v1, execution.task_run_requeue.v1, execution.task_run_retry_exhaustion.v1, execution.task_run_terminal_convergence.v1, execution.task_run_work_item_design.v1, execution.terminal_driver_run_work_recovery.v1, execution.terminal_driver_run_work_recovery_queue.v1, interaction.session_commands.v1, work_items.repository_requirement.v1, workflow_catalog.version_authoring.v1, workflow_catalog.version_availability.v1, workflow_catalog.version_lifecycle.v1]
 
     AutomationErrorResponse:
       type: object
@@ -11725,53 +11780,6 @@ components:
           description: Caller manifest; trust_level and approved_version-prefixed keys are rejected and server-owned.
         build_diagnostics: { type: string }
 
-    DriverVersionManagedAuthoringRequest:
-      type: object
-      additionalProperties: false
-      required:
-        - request_id
-        - expected_revision
-        - driver_name
-        - version_id
-        - source_ref
-        - source_digest
-        - bundle_ref
-        - bundle_digest
-        - runtime
-        - activate
-      properties:
-        request_id: { type: string, minLength: 1, maxLength: 256 }
-        expected_revision:
-          type: integer
-          format: int64
-          minimum: 0
-          maximum: 9223372036854775806
-        driver_name: { type: string, minLength: 1 }
-        version_id:
-          type: string
-          minLength: 1
-          pattern: '^\S(?:.*\S)?$'
-        source_ref: { type: string, minLength: 1 }
-        source_digest:
-          type: string
-          pattern: '^sha256:[0-9a-f]{64}$'
-        bundle_ref:
-          type: string
-          minLength: 1
-          description: Canonical contained relative bundle reference.
-        bundle_digest:
-          type: string
-          pattern: '^sha256:[0-9a-f]{64}$'
-        runtime: { type: string, minLength: 1 }
-        manifest:
-          allOf:
-            - $ref: "#/components/schemas/StringMap"
-          description: Caller manifest; trust_level and approved_version-prefixed keys are rejected and server-owned.
-        build_diagnostics: { type: string }
-        activate:
-          type: boolean
-          description: System-owned managed activation intent.
-
     DriverVersionAuthoringResponse:
       type: object
       additionalProperties: false
@@ -11781,7 +11789,6 @@ components:
         - created_driver
         - created_version
         - reused_version
-        - activated
         - replayed
         - committed_revision
         - semantic_impact
@@ -11793,7 +11800,6 @@ components:
         created_driver: { type: boolean }
         created_version: { type: boolean }
         reused_version: { type: boolean }
-        activated: { type: boolean }
         replayed: { type: boolean }
         committed_revision:
           type: integer
@@ -11802,6 +11808,37 @@ components:
         semantic_impact:
           type: string
           enum: [workflow_catalog.version_authored.v1]
+
+    DriverVersionAvailabilityStatus:
+      type: string
+      enum: [pending, available, failed]
+
+    DriverVersionAvailabilityRequest:
+      type: object
+      additionalProperties: false
+      required: [request_id, expected_revision, source_digest, bundle_digest, outcome]
+      properties:
+        request_id: { type: string, minLength: 1, maxLength: 256 }
+        expected_revision: { type: integer, format: int64, minimum: 1, maximum: 9223372036854775806 }
+        source_digest: { type: string, pattern: '^sha256:[0-9a-f]{64}$' }
+        bundle_digest: { type: string, pattern: '^sha256:[0-9a-f]{64}$' }
+        outcome:
+          type: string
+          enum: [available, retryable_failure, permanent_failure]
+        failure: { type: string, maxLength: 128 }
+
+    DriverVersionAvailabilityResponse:
+      type: object
+      additionalProperties: false
+      required: [driver, version, replayed, committed_revision, semantic_impact]
+      properties:
+        driver: { $ref: "#/components/schemas/Driver" }
+        version: { $ref: "#/components/schemas/DriverVersion" }
+        replayed: { type: boolean }
+        committed_revision: { type: integer, format: int64, minimum: 1 }
+        semantic_impact:
+          type: string
+          enum: [workflow_catalog.version_availability_changed.v1]
 
     DriverVersionLifecycleResponse:
       type: object
@@ -11842,7 +11879,8 @@ components:
               description: |
                 Stable lifecycle codes include revision_conflict,
                 workflow_catalog_version_ownership,
-                workflow_catalog_version_not_validated, and
+                workflow_catalog_version_not_validated,
+                workflow_catalog_version_not_available, and
                 workflow_catalog_version_not_approved. Generic transport and
                 resource failures retain their existing API codes.
               example: revision_conflict
@@ -17474,7 +17512,7 @@ components:
             $ref: "#/components/schemas/WorkflowCatalogLifecycleErrorResponse"
 
     WorkflowCatalogLifecyclePreconditionFailed:
-      description: Version validation or approval precondition failed
+      description: Version validation, availability, or approval precondition failed
       content:
         application/json:
           schema:

@@ -75,7 +75,8 @@ func newConnectorHarness(t *testing.T) *connectorHarness {
 	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey: "WS", VersionID: "version-1", DriverID: "driver-1", Version: 1,
 		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}

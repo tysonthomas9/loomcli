@@ -1,4 +1,4 @@
-package authoring
+package workflowdistribution
 
 import (
 	"context"
@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
-	workflowdistribution "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution"
 )
 
 func TestBuiltinEpicRunnerWorkflowSourceIncludesReconcilePrimitives(t *testing.T) {
@@ -345,7 +344,7 @@ func TestFlueRuntimeRootHonorsLoomPrefixedEnv(t *testing.T) {
 	t.Setenv("FLUE_RUNTIME_ROOT", "")
 	t.Setenv("FLUE_REPO", "")
 
-	got, err := workflowdistribution.FlueRuntimeRoot()
+	got, err := FlueRuntimeRoot()
 	if err != nil {
 		t.Fatalf("flueRuntimeRoot returned error: %v", err)
 	}
@@ -369,7 +368,7 @@ func TestDaytonaSDKRootDerivesFromResolvedFlueRuntimeRoot(t *testing.T) {
 	t.Setenv("DAYTONA_SDK_ROOT", "")
 	t.Setenv("FLUE_REPO", "")
 
-	got, err := workflowdistribution.DaytonaSDKRoot(runtimeRoot)
+	got, err := DaytonaSDKRoot(runtimeRoot)
 	if err != nil {
 		t.Fatalf("daytonaSDKRoot returned error: %v", err)
 	}
@@ -400,7 +399,7 @@ func TestLinkFlueBuildDependenciesLinksRequiredRuntimeDependencies(t *testing.T)
 	t.Setenv("DAYTONA_SDK_ROOT", "")
 
 	buildRoot := t.TempDir()
-	if err := workflowdistribution.LinkFlueBuildDependencies(buildRoot); err != nil {
+	if err := LinkFlueBuildDependencies(buildRoot); err != nil {
 		t.Fatalf("linkFlueBuildDependencies returned error: %v", err)
 	}
 	link := filepath.Join(buildRoot, "node_modules", "valibot")
@@ -439,7 +438,7 @@ func TestLinkFlueBuildDependenciesDoesNotResolveDaytonaSDK(t *testing.T) {
 	t.Setenv("DAYTONA_SDK_ROOT", missingDaytonaRoot)
 
 	buildRoot := t.TempDir()
-	if err := workflowdistribution.LinkFlueBuildDependencies(buildRoot); err != nil {
+	if err := LinkFlueBuildDependencies(buildRoot); err != nil {
 		t.Fatalf("linkFlueBuildDependencies consulted unused DAYTONA_SDK_ROOT: %v", err)
 	}
 	if _, err := os.Lstat(filepath.Join(buildRoot, "node_modules", "@daytona")); !errors.Is(err, os.ErrNotExist) {

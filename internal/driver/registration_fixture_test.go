@@ -78,19 +78,20 @@ func SeedFlueDriverFixture(
 			return nil, listErr
 		}
 		versionRecord, err = state.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
-			WorkspaceKey:     options.WorkspaceKey,
-			VersionID:        staged.VersionID,
-			DriverID:         staged.DriverID,
-			Version:          len(versions) + 1,
-			SourceRef:        staged.SourceRef,
-			SourceDigest:     staged.SourceDigest,
-			BundleRef:        staged.BundleRef,
-			BundleDigest:     staged.BundleDigest,
-			Runtime:          staged.Runtime,
-			Manifest:         staged.Bundle.Manifest,
-			BuildDiagnostics: staged.BuildDiagnostics,
-			ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
-			CreatedBy:        options.CreatedBy,
+			WorkspaceKey:       options.WorkspaceKey,
+			VersionID:          staged.VersionID,
+			DriverID:           staged.DriverID,
+			Version:            len(versions) + 1,
+			SourceRef:          staged.SourceRef,
+			SourceDigest:       staged.SourceDigest,
+			BundleRef:          staged.BundleRef,
+			BundleDigest:       staged.BundleDigest,
+			Runtime:            staged.Runtime,
+			Manifest:           staged.Bundle.Manifest,
+			BuildDiagnostics:   staged.BuildDiagnostics,
+			ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+			AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
+			CreatedBy:          options.CreatedBy,
 		})
 	}
 	if err != nil {

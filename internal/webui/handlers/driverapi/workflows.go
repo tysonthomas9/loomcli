@@ -152,8 +152,9 @@ func (m *Module) resolveWorkflowStartTarget(
 	if err != nil {
 		return nil, nil, err
 	}
-	if version == nil || version.DriverID != target.DriverID || version.ValidationStatus != workflowcatalog.DriverVersionValidationPassed {
-		return nil, nil, fmt.Errorf("workflow %q active version %q is not passed: %w", workflowName, target.ActiveVersionID, persistence.ErrInvalid)
+	if version == nil || version.DriverID != target.DriverID || version.ValidationStatus != workflowcatalog.DriverVersionValidationPassed ||
+		!workflowcatalog.VersionAvailable(version) {
+		return nil, nil, fmt.Errorf("workflow %q active version %q is not passed and available: %w", workflowName, target.ActiveVersionID, persistence.ErrInvalid)
 	}
 	return target, version, nil
 }

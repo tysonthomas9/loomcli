@@ -26,13 +26,14 @@ func setupBlockTestStore(t *testing.T) (context.Context, *Store) {
 		t.Fatalf("Create driver: %v", err)
 	}
 	if _, err := s.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
-		WorkspaceKey:     "WS",
-		VersionID:        "version-1",
-		DriverID:         "driver-1",
-		Version:          1,
-		SourceDigest:     "sha256:source",
-		BundleDigest:     "sha256:bundle",
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+		WorkspaceKey:       "WS",
+		VersionID:          "version-1",
+		DriverID:           "driver-1",
+		Version:            1,
+		SourceDigest:       "sha256:source",
+		BundleDigest:       "sha256:bundle",
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}

@@ -1,10 +1,11 @@
-// Package authoring adapts local source build/staging to
-// Workflow Catalog's atomic authoring API. Static sources, validation, and
-// filesystem distribution remain in internal/infra/workflowdistribution.
-package authoring
+// Workflow authoring adapters connect the application-owned lifecycle to
+// Workflow Distribution's source, build, staging, promotion, and verification
+// mechanics without a nested forwarding package.
+package workflowdistribution
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,80 +13,19 @@ import (
 
 	appworkflowauthoring "github.com/tysonthomas9/loomcli/internal/app/workflowauthoring"
 	"github.com/tysonthomas9/loomcli/internal/driver"
-	workflowdistribution "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
-
-const (
-	BuiltinEpicRunnerWorkflowName        = workflowcatalog.BuiltinEpicRunnerWorkflowName
-	BuiltinGitHubReviewAgentWorkflowName = workflowcatalog.BuiltinGitHubReviewAgentWorkflowName
-	BuiltinGitHubReviewTaskRunnerName    = workflowcatalog.BuiltinGitHubReviewTaskRunnerName
-	BuiltinBugFixAgentWorkflowName       = workflowcatalog.BuiltinBugFixAgentWorkflowName
-	BuiltinReviewLoopAgentWorkflowName   = workflowcatalog.BuiltinReviewLoopAgentWorkflowName
-	BuiltinLocalReviewAgentWorkflowName  = workflowcatalog.BuiltinLocalReviewAgentWorkflowName
-	BuiltinPromptAgentWorkflowName       = workflowcatalog.BuiltinPromptAgentWorkflowName
-	WorkflowSourceSchemaVersion          = workflowdistribution.WorkflowSourceSchemaVersion
-)
-
-var ErrBuildToolchainUnavailable = workflowdistribution.ErrBuildToolchainUnavailable
-
-type Spec = workflowdistribution.Spec
-type SourceManifest = workflowdistribution.SourceManifest
-type LocalSource = workflowdistribution.LocalSource
-
-func BuiltinWorkflowNames() []string {
-	return workflowdistribution.BuiltinWorkflowNames()
-}
-
-func BuiltinWorkflow(name string) (Spec, bool) {
-	return workflowdistribution.BuiltinWorkflow(name)
-}
-
-func IsBuiltinWorkflow(name string) bool {
-	return workflowcatalog.IsBuiltinWorkflowName(strings.TrimSpace(name))
-}
-
-func BuildBuiltinBundle(ctx context.Context, name, destDir string) (string, string, error) {
-	return workflowdistribution.BuildBuiltinBundle(ctx, name, destDir)
-}
 
 // ResolveDaytonaSDKRoot resolves the provider SDK shipped with the active Flue
 // runtime. Keeping runtime-layout discovery in the distribution adapter lets
 // host adapters consume one cohesive authoring and staging boundary.
 func ResolveDaytonaSDKRoot() (string, error) {
-	runtimeRoot, err := workflowdistribution.FlueRuntimeRoot()
+	runtimeRoot, err := FlueRuntimeRoot()
 	if err != nil {
 		return "", fmt.Errorf("resolve Flue runtime: %w", err)
 	}
-	return workflowdistribution.DaytonaSDKRoot(runtimeRoot)
-}
-
-func SourceDigest(files map[string]string) (string, error) {
-	return workflowdistribution.SourceDigest(files)
-}
-
-func CloneBuiltinSource(name, outDir string) (*SourceManifest, error) {
-	return workflowdistribution.CloneBuiltinSource(name, outDir)
-}
-
-func ReadLocalSource(workflow, sourceDir string) (*LocalSource, error) {
-	return workflowdistribution.ReadLocalSource(workflow, sourceDir)
-}
-
-func SourceManifestProvenance(manifest SourceManifest) map[string]string {
-	return workflowdistribution.SourceManifestProvenance(manifest)
-}
-
-func ValidateWorkflowEntrypoint(name, entrypoint string) error {
-	return workflowdistribution.ValidateWorkflowEntrypoint(name, entrypoint)
-}
-
-func ValidateWorkflowFiles(in map[string]string) (map[string]string, error) {
-	return workflowdistribution.ValidateWorkflowFiles(in)
-}
-
-func RedactBuildDiagnostics(input string) string {
-	return workflowdistribution.RedactBuildDiagnostics(input)
+	return DaytonaSDKRoot(runtimeRoot)
 }
 
 type bundleStager struct{}
@@ -98,17 +38,32 @@ func NewNativeBundleStager() appworkflowauthoring.NativeBundleStager {
 	return bundleStager{}
 }
 
+func (bundleStager) RecoverPending(
+	_ context.Context,
+	version *workflowcatalog.DriverVersion,
+) (appworkflowauthoring.StagedBundle, appworkflowauthoring.FailureDisposition, error) {
+	staged, err := driver.RecoverStagedFlueRegistration(builtinWorkflowWorkDir(), version)
+	if err != nil {
+		disposition := appworkflowauthoring.FailureRetryable
+		if errors.Is(err, persistence.ErrInvalid) {
+			disposition = appworkflowauthoring.FailurePermanent
+		}
+		return nil, disposition, err
+	}
+	return &stagedBundle{staged: staged}, appworkflowauthoring.FailureRetryable, nil
+}
+
 func (bundleStager) BuildAndStage(
 	ctx context.Context,
 	options appworkflowauthoring.BuildOptions,
 ) (appworkflowauthoring.StagedBundle, string, error) {
-	files, err := workflowdistribution.ValidateWorkflowFiles(options.Files)
+	files, err := ValidateWorkflowFiles(options.Files)
 	if err != nil {
 		return nil, "", err
 	}
 	options.Files = files
 	if options.SourceDigest == "" {
-		options.SourceDigest, err = workflowdistribution.SourceDigest(options.Files)
+		options.SourceDigest, err = SourceDigest(options.Files)
 		if err != nil {
 			return nil, "", err
 		}
@@ -119,7 +74,7 @@ func (bundleStager) BuildAndStage(
 	if staged, found, err := stagePackagedBuiltin(options, packagedBuiltinFS); found || err != nil {
 		return staged, "", err
 	}
-	built, output, err := workflowdistribution.Build(ctx, workflowdistribution.BuildOptions{
+	built, output, err := Build(ctx, BuildOptions{
 		Name: options.Name, Files: options.Files, WorkDir: options.WorkDir,
 	})
 	if err != nil {
@@ -204,7 +159,21 @@ func (bundle *stagedBundle) Promote() error {
 	return bundle.staged.Promote()
 }
 
-func (bundle *stagedBundle) Cleanup() {
+func (bundle *stagedBundle) Verify() error {
+	if bundle == nil || bundle.staged == nil {
+		return workflowcatalog.ErrInvalidPersistedState
+	}
+	return bundle.staged.Verify()
+}
+
+func (bundle *stagedBundle) ClassifyFailure(err error) appworkflowauthoring.FailureDisposition {
+	if errors.Is(err, persistence.ErrInvalid) {
+		return appworkflowauthoring.FailurePermanent
+	}
+	return appworkflowauthoring.FailureRetryable
+}
+
+func (bundle *stagedBundle) Discard() {
 	if bundle == nil {
 		return
 	}
@@ -246,17 +215,17 @@ func cloneWorkflowManifest(in map[string]string) map[string]string {
 }
 
 func deriveWorkflowRunnerSpecs(entrypoint string, files map[string]string) []driver.DriverRunnerSpec {
-	return workflowdistribution.DeriveWorkflowRunnerSpecs(entrypoint, files)
+	return DeriveWorkflowRunnerSpecs(entrypoint, files)
 }
 
 func workflowRunnerNameSet(spec Spec) map[string]struct{} {
-	return workflowdistribution.RunnerNameSet(spec)
+	return RunnerNameSet(spec)
 }
 
 func activeManifestRunnersAreStale(manifest map[string]string, fresh map[string]struct{}) bool {
-	return workflowdistribution.ActiveManifestRunnersAreStale(manifest, fresh)
+	return ActiveManifestRunnersAreStale(manifest, fresh)
 }
 
 func manifestMissingFreshRunners(manifest map[string]string, fresh map[string]struct{}) []string {
-	return workflowdistribution.ManifestMissingFreshRunners(manifest, fresh)
+	return ManifestMissingFreshRunners(manifest, fresh)
 }

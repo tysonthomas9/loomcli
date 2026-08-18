@@ -12,10 +12,11 @@ import (
 // Service implements the public Workflow Catalog API over catalog-owned
 // persistence ports and a default-deny operation registry.
 type Service struct {
-	reader    Reader
-	lifecycle VersionLifecycleStore
-	authoring AuthoringStore
-	admission *authority.Admission
+	reader       Reader
+	lifecycle    VersionLifecycleStore
+	authoring    AuthoringStore
+	availability AvailabilityStore
+	admission    *authority.Admission
 }
 
 var _ API = (*Service)(nil)
@@ -31,6 +32,23 @@ func New(reader Reader, lifecycle VersionLifecycleStore, admission *authority.Ad
 // profiles and makes authoring fail closed.
 func NewWithAuthoring(reader Reader, lifecycle VersionLifecycleStore, authoring AuthoringStore, admission *authority.Admission) *Service {
 	return &Service{reader: reader, lifecycle: lifecycle, authoring: authoring, admission: admission}
+}
+
+// NewComplete constructs the production Workflow Catalog command surface.
+// Keeping availability explicit prevents composition from silently equating a
+// validation-passed version with a distributable bundle.
+func NewComplete(reader Reader, lifecycle VersionLifecycleStore, authoring AuthoringStore, availability AvailabilityStore, admission *authority.Admission) *Service {
+	return &Service{
+		reader: reader, lifecycle: lifecycle, authoring: authoring,
+		availability: availability, admission: admission,
+	}
+}
+
+// NewWithAvailability constructs the narrow availability command surface for
+// focused compositions and tests. Production composition supplies all catalog
+// ports together.
+func NewWithAvailability(reader Reader, availability AvailabilityStore, admission *authority.Admission) *Service {
+	return &Service{reader: reader, availability: availability, admission: admission}
 }
 
 // GetDriver resolves an exact driver ID first, then a driver name for legacy
@@ -223,6 +241,9 @@ func (s *Service) loadPassedVersion(ctx context.Context, driver *Driver, version
 	if version.ValidationStatus != DriverVersionValidationPassed {
 		return nil, fmt.Errorf("version %q validation is %q: %w", version.VersionID, version.ValidationStatus, ErrVersionNotValidated)
 	}
+	if !VersionAvailable(version) {
+		return nil, fmt.Errorf("version %q availability is %q: %w", version.VersionID, version.AvailabilityStatus, ErrVersionNotAvailable)
+	}
 	return version, nil
 }
 
@@ -238,6 +259,14 @@ func (s *Service) ActivateVersion(ctx context.Context, auth authority.OperatorAu
 	return s.executeLifecycle(ctx, auth, ActionActivateVersion, command)
 }
 
+func (s *Service) ApproveManagedVersion(ctx context.Context, auth authority.SystemAuthority, command VersionCommand) (*VersionResult, error) {
+	return s.executeManagedLifecycle(ctx, auth, ActionApproveManagedVersion, command)
+}
+
+func (s *Service) ActivateManagedVersion(ctx context.Context, auth authority.SystemAuthority, command VersionCommand) (*VersionResult, error) {
+	return s.executeManagedLifecycle(ctx, auth, ActionActivateManagedVersion, command)
+}
+
 func (s *Service) executeLifecycle(ctx context.Context, auth authority.OperatorAuthority, action authority.Action, command VersionCommand) (*VersionResult, error) {
 	command, err := normalizeVersionCommand(command)
 	if err != nil {
@@ -249,18 +278,40 @@ func (s *Service) executeLifecycle(ctx context.Context, auth authority.OperatorA
 	if err := s.admission.RequireOperator(action, command.WorkspaceKey, auth); err != nil {
 		return nil, err
 	}
+	return s.executeAdmittedLifecycle(ctx, action, command)
+}
+
+func (s *Service) executeManagedLifecycle(ctx context.Context, auth authority.SystemAuthority, action authority.Action, command VersionCommand) (*VersionResult, error) {
+	command, err := normalizeVersionCommand(command)
+	if err != nil {
+		return nil, err
+	}
+	if s == nil || s.admission == nil {
+		return nil, authority.ErrAdmissionDenied
+	}
+	if err := s.admission.RequireSystem(action, command.WorkspaceKey, auth); err != nil {
+		return nil, err
+	}
+	return s.executeAdmittedLifecycle(ctx, action, command)
+}
+
+func (s *Service) executeAdmittedLifecycle(ctx context.Context, action authority.Action, command VersionCommand) (*VersionResult, error) {
 	if s.reader == nil || s.lifecycle == nil {
 		return nil, ErrUnavailable
 	}
 
-	driver, version, err := s.loadCommandState(ctx, action, command)
+	storeAction := lifecycleStoreAction(action)
+	if storeAction == "" {
+		return nil, authority.ErrAdmissionDenied
+	}
+	driver, version, err := s.loadCommandState(ctx, storeAction, command)
 	if err != nil {
 		return nil, err
 	}
 
 	mutation := LifecycleMutation(command)
 	var persisted *LifecycleResult
-	switch action {
+	switch storeAction {
 	case ActionApproveVersion:
 		persisted, err = s.lifecycle.ApproveVersion(ctx, mutation)
 	case ActionUnapproveVersion:
@@ -273,7 +324,25 @@ func (s *Service) executeLifecycle(ctx context.Context, auth authority.OperatorA
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", action, err)
 	}
-	return validateLifecycleResult(action, command, driver, version, persisted)
+	result, err := validateLifecycleResult(storeAction, command, driver, version, persisted)
+	if err != nil {
+		return nil, err
+	}
+	result.Action = action
+	return result, nil
+}
+
+func lifecycleStoreAction(action authority.Action) authority.Action {
+	switch action {
+	case ActionApproveVersion, ActionUnapproveVersion, ActionActivateVersion:
+		return action
+	case ActionApproveManagedVersion:
+		return ActionApproveVersion
+	case ActionActivateManagedVersion:
+		return ActionActivateVersion
+	default:
+		return ""
+	}
 }
 
 func (s *Service) loadCommandState(ctx context.Context, action authority.Action, command VersionCommand) (*Driver, *DriverVersion, error) {
@@ -293,6 +362,9 @@ func (s *Service) loadCommandState(ctx context.Context, action authority.Action,
 	}
 	if (action == ActionApproveVersion || action == ActionActivateVersion) && version.ValidationStatus != DriverVersionValidationPassed {
 		return nil, nil, fmt.Errorf("version %q validation is %q: %w", version.VersionID, version.ValidationStatus, ErrVersionNotValidated)
+	}
+	if (action == ActionApproveVersion || action == ActionActivateVersion) && !VersionAvailable(version) {
+		return nil, nil, fmt.Errorf("version %q availability is %q: %w", version.VersionID, version.AvailabilityStatus, ErrVersionNotAvailable)
 	}
 	return cloneDriver(driver), cloneVersion(version), nil
 }

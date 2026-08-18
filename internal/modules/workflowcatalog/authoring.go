@@ -28,18 +28,18 @@ func (s *Service) AuthorVersion(
 	if err := s.admission.RequireOperator(ActionAuthorVersion, normalized.WorkspaceKey, auth); err != nil {
 		return nil, err
 	}
-	return s.author(ctx, ActionAuthorVersion, normalized, auth.Subject(), false, false)
+	return s.author(ctx, ActionAuthorVersion, normalized, auth.Subject(), false)
 }
 
-// AuthorManagedVersion creates or reuses a trusted Loom-managed builtin and
-// may activate it atomically. Only a SystemAuthority for the exact action and
+// AuthorManagedVersion creates or reuses a trusted Loom-managed builtin in the
+// pending inactive state. Only a SystemAuthority for the exact action and
 // workspace can enter this lane.
 func (s *Service) AuthorManagedVersion(
 	ctx context.Context,
 	auth authority.SystemAuthority,
-	command AuthorManagedVersionCommand,
+	command AuthorVersionCommand,
 ) (*AuthorVersionResult, error) {
-	normalized, err := normalizeAuthorVersionCommand(command.AuthorVersionCommand)
+	normalized, err := normalizeAuthorVersionCommand(command)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +52,7 @@ func (s *Service) AuthorManagedVersion(
 	if err := validateManagedBuiltinIntent(normalized); err != nil {
 		return nil, err
 	}
-	return s.author(ctx, ActionAuthorManagedVersion, normalized, auth.Subject(), true, command.Activate)
+	return s.author(ctx, ActionAuthorManagedVersion, normalized, auth.Subject(), true)
 }
 
 func (s *Service) author(
@@ -60,7 +60,7 @@ func (s *Service) author(
 	action authority.Action,
 	command AuthorVersionCommand,
 	auditActor string,
-	managed, activate bool,
+	managed bool,
 ) (*AuthorVersionResult, error) {
 	if s.authoring == nil {
 		return nil, ErrUnavailable
@@ -69,12 +69,11 @@ func (s *Service) author(
 		AuthorVersionCommand: command,
 		AuditActor:           auditActor,
 		Managed:              managed,
-		Activate:             activate,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", action, err)
 	}
-	return validateAuthoringResult(action, command, auditActor, managed, activate, result)
+	return validateAuthoringResult(action, command, auditActor, managed, result)
 }
 
 //nolint:funlen // Normalization validates every immutable source, trust, digest, and lifecycle coordinate together.
@@ -209,7 +208,7 @@ func validateAuthoringResult(
 	action authority.Action,
 	command AuthorVersionCommand,
 	auditActor string,
-	managed, activate bool,
+	managed bool,
 	result *AuthoringResult,
 ) (*AuthorVersionResult, error) {
 	if result == nil {
@@ -236,7 +235,9 @@ func validateAuthoringResult(
 		version.BundleRef != command.BundleRef ||
 		version.BundleDigest != command.BundleDigest ||
 		version.Runtime != command.Runtime ||
-		version.ValidationStatus != DriverVersionValidationPassed {
+		version.ValidationStatus != DriverVersionValidationPassed ||
+		version.AvailabilityStatus != DriverVersionAvailabilityPending ||
+		version.AvailabilityAttempts != 0 || version.AvailabilityFailure != "" {
 		return nil, ErrInvalidPersistedState
 	}
 	wantTrust := DriverTrustUntrusted
@@ -263,17 +264,11 @@ func validateAuthoringResult(
 		// it must not rewrite either field to the current caller.
 		return nil, ErrInvalidPersistedState
 	}
-	if result.Activated != activate {
-		return nil, ErrInvalidPersistedState
-	}
 	// Like lifecycle commands, FleetDB may return a post-commit aggregate read
 	// that has already advanced beyond this command's commit. Enforce mutable
 	// Driver postconditions only for the exact committed revision; immutable
 	// version fields above are safe to validate at every later revision.
 	if result.Driver.Revision == result.CommittedRevision {
-		if activate && (result.Driver.ActiveVersionID != version.VersionID || result.Driver.Status != DriverStatusActive) {
-			return nil, ErrInvalidPersistedState
-		}
 		if !managed && result.Driver.TrustLevel.Trusted() {
 			return nil, ErrInvalidPersistedState
 		}
@@ -285,7 +280,6 @@ func validateAuthoringResult(
 		CreatedDriver:     result.CreatedDriver,
 		CreatedVersion:    result.CreatedVersion,
 		ReusedVersion:     result.ReusedVersion,
-		Activated:         result.Activated,
 		Replayed:          result.Replayed,
 		CommittedRevision: result.CommittedRevision,
 		SemanticImpact:    result.SemanticImpact,

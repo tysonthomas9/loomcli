@@ -19,7 +19,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/managementapi"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
-	workflows "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
+	workflows "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution"
 )
 
 var (

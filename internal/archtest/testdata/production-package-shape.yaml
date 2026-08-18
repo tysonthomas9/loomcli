@@ -14,9 +14,9 @@ semantics:
     - vendor
     - worktrees
 ceilings:
-  total_packages: 152
+  total_packages: 151
   module_packages: 18
-  outside_module_packages: 134
+  outside_module_packages: 133
   one_file_packages: 36
   one_or_two_file_packages: 54
 packages:
@@ -98,7 +98,6 @@ packages:
   - internal/infra/sourcecontrolpublisher
   - internal/infra/sourcecontrolstackstore
   - internal/infra/workflowdistribution
-  - internal/infra/workflowdistribution/authoring
   - internal/kv
   - internal/localsettings
   - internal/localworkspace

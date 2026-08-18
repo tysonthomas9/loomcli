@@ -56,7 +56,7 @@ const (
 // package tree's non-test sources.
 // When you add/remove/move a client call, update clientRoutes below FIRST, then
 // bump this constant.
-const expectedClientCallSites = 238
+const expectedClientCallSites = 239
 
 // clientRoute is one method+path template the client issues. Path params are
 // written as {} (already normalized).
@@ -242,6 +242,7 @@ var clientRoutes = []clientRoute{
 	{"POST", "/api/v1/{}/drivers/{}/versions/{}/activate"},
 	{"POST", "/api/v1/{}/drivers/{}/versions/author"},
 	{"POST", "/api/v1/{}/drivers/{}/versions/author-managed"},
+	{"POST", "/api/v1/{}/drivers/{}/versions/{}/availability"},
 
 	// driver_run_outcome.go — durable terminal-outcome reconciliation.
 	{"POST", "/api/v1/{}/driver-run-outcomes/claim"},

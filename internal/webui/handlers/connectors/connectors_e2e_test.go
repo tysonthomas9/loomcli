@@ -387,7 +387,8 @@ func (h *e2eHarness) provisionWorkspace(t *testing.T) {
 	if _, err := h.store.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey: e2eWorkspace, VersionID: "version-1", DriverID: "driver-1", Version: 1,
 		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}

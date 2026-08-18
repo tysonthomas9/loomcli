@@ -1,4 +1,4 @@
-package authoring
+package workflowdistribution
 
 import (
 	"context"

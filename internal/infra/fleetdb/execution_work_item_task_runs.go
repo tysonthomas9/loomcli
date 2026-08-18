@@ -833,16 +833,20 @@ func (s *driverRunStore) ClaimDriverRunOutcomes(ctx context.Context, claim execu
 		"claim_id": claim.ClaimID, "before": claim.Before, "claim_until": claim.ClaimUntil, "limit": claim.Limit,
 	}
 	var response struct {
-		Outcomes []execution.DriverRunOutcome `json:"outcomes"`
+		Outcomes []driverRunOutcomeWire `json:"outcomes"`
 	}
 	path := "/api/v1/" + pathEscape(claim.WorkspaceKey) + "/driver-run-outcomes/claim"
 	if err := s.client.do(ctx, "POST", path, body, &response); err != nil {
 		return nil, err
 	}
 	if response.Outcomes == nil {
-		response.Outcomes = []execution.DriverRunOutcome{}
+		return []execution.DriverRunOutcome{}, nil
 	}
-	return response.Outcomes, nil
+	values := make([]execution.DriverRunOutcome, 0, len(response.Outcomes))
+	for _, wire := range response.Outcomes {
+		values = append(values, wire.executionRecord())
+	}
+	return values, nil
 }
 
 func (s *driverRunStore) CompleteDriverRunOutcome(ctx context.Context, completion execution.DriverRunOutcomeCompletion) error {
@@ -869,8 +873,8 @@ func (s *driverRunStore) ClaimTerminalDriverRunWorkRecoveries(
 		"claim_id": claim.ClaimID, "before": claim.Before, "claim_until": claim.ClaimUntil, "limit": claim.Limit,
 	}
 	var response struct {
-		Outcomes []execution.DriverRunOutcome `json:"outcomes"`
-		Count    *int                         `json:"count"`
+		Outcomes []driverRunOutcomeWire `json:"outcomes"`
+		Count    *int                   `json:"count"`
 	}
 	path := "/api/v1/" + pathEscape(claim.WorkspaceKey) + "/driver-run-outcomes/terminal-work/claim"
 	if err := s.client.do(ctx, http.MethodPost, path, body, &response); err != nil {
@@ -879,8 +883,10 @@ func (s *driverRunStore) ClaimTerminalDriverRunWorkRecoveries(
 	if response.Count == nil || *response.Count != len(response.Outcomes) {
 		return nil, fmt.Errorf("terminal DriverRun work recovery claim returned divergent count: %w", ErrExecutionUnavailable)
 	}
+	values := make([]execution.DriverRunOutcome, 0, len(response.Outcomes))
 	seen := make(map[string]struct{}, len(response.Outcomes))
-	for _, outcome := range response.Outcomes {
+	for _, wire := range response.Outcomes {
+		outcome := wire.executionRecord()
 		if outcome.WorkspaceKey != claim.WorkspaceKey || strings.TrimSpace(outcome.RunID) == "" ||
 			!outcome.Status.IsTerminal() || outcome.OccurredAt.IsZero() || outcome.Attempt < 1 {
 			return nil, fmt.Errorf("terminal DriverRun work recovery claim returned invalid snapshot: %w", ErrExecutionUnavailable)
@@ -889,11 +895,12 @@ func (s *driverRunStore) ClaimTerminalDriverRunWorkRecoveries(
 			return nil, fmt.Errorf("terminal DriverRun work recovery claim returned duplicate snapshot: %w", ErrExecutionUnavailable)
 		}
 		seen[outcome.RunID] = struct{}{}
+		values = append(values, outcome)
 	}
 	if response.Outcomes == nil {
 		return []execution.DriverRunOutcome{}, nil
 	}
-	return response.Outcomes, nil
+	return values, nil
 }
 
 func (s *driverRunStore) CompleteTerminalDriverRunWorkRecovery(

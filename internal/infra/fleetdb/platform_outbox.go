@@ -94,6 +94,31 @@ func outboxKindFromWire(s string) execution.OutboxKind {
 
 // --- wire DTOs (fleet-db snake_case responses) ---
 
+// driverRunOutcomeWire is the canonical FleetDB HTTP representation. Keep
+// transport field names private to this adapter instead of teaching the
+// Execution owner record how FleetDB serializes its OpenAPI contract.
+type driverRunOutcomeWire struct {
+	WorkspaceKey  string                    `json:"workspace_key"`
+	RunID         string                    `json:"run_id"`
+	Status        execution.DriverRunStatus `json:"status"`
+	Summary       string                    `json:"summary"`
+	ErrorClass    string                    `json:"error_class"`
+	ParentRunID   string                    `json:"parent_run_id"`
+	ParentEventID string                    `json:"parent_event_id"`
+	EpicID        string                    `json:"epic_id"`
+	OccurredAt    time.Time                 `json:"occurred_at"`
+	Attempt       int                       `json:"attempt"`
+}
+
+func (wire driverRunOutcomeWire) executionRecord() execution.DriverRunOutcome {
+	return execution.DriverRunOutcome{
+		WorkspaceKey: wire.WorkspaceKey, RunID: wire.RunID, Status: wire.Status,
+		Summary: wire.Summary, ErrorClass: wire.ErrorClass, ParentRunID: wire.ParentRunID,
+		ParentEventID: wire.ParentEventID, EpicID: wire.EpicID, OccurredAt: wire.OccurredAt,
+		Attempt: wire.Attempt,
+	}
+}
+
 // taskRunEventWire mirrors fleet-db's models.TaskRunEvent JSON shape.
 // TaskRunStatus and OutboxStatus enum values are identical on both wires
 // ("queued", "pending", ...) so those pass through untranslated.

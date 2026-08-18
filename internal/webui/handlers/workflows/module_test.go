@@ -23,7 +23,7 @@ import (
 	appworkflowauthoring "github.com/tysonthomas9/loomcli/internal/app/workflowauthoring"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
+	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution"
 	agentsowner "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
@@ -239,9 +239,9 @@ func (adapter workflowRunStoreTestCatalog) AuthorVersion(
 func (adapter workflowRunStoreTestCatalog) AuthorManagedVersion(
 	ctx context.Context,
 	_ authority.SystemAuthority,
-	command workflowcatalog.AuthorManagedVersionCommand,
+	command workflowcatalog.AuthorVersionCommand,
 ) (*workflowcatalog.AuthorVersionResult, error) {
-	intent := command.AuthorVersionCommand
+	intent := command
 	driverRecord, err := adapter.store.Drivers().Get(ctx, intent.WorkspaceKey, intent.DriverID)
 	createdDriver := false
 	if errors.Is(err, persistence.ErrNotFound) {
@@ -282,19 +282,20 @@ func (adapter workflowRunStoreTestCatalog) AuthorManagedVersion(
 		}
 		manifest[workflowcatalog.ManifestTrustLevelKey] = string(workflowcatalog.DriverTrustTrusted)
 		versionRecord, err = adapter.store.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
-			WorkspaceKey:     intent.WorkspaceKey,
-			VersionID:        intent.VersionID,
-			DriverID:         intent.DriverID,
-			Version:          nextVersion,
-			SourceRef:        intent.SourceRef,
-			SourceDigest:     intent.SourceDigest,
-			BundleRef:        intent.BundleRef,
-			BundleDigest:     intent.BundleDigest,
-			Runtime:          intent.Runtime,
-			Manifest:         manifest,
-			BuildDiagnostics: intent.BuildDiagnostics,
-			ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
-			CreatedBy:        "system",
+			WorkspaceKey:       intent.WorkspaceKey,
+			VersionID:          intent.VersionID,
+			DriverID:           intent.DriverID,
+			Version:            nextVersion,
+			SourceRef:          intent.SourceRef,
+			SourceDigest:       intent.SourceDigest,
+			BundleRef:          intent.BundleRef,
+			BundleDigest:       intent.BundleDigest,
+			Runtime:            intent.Runtime,
+			Manifest:           manifest,
+			BuildDiagnostics:   intent.BuildDiagnostics,
+			ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+			AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
+			CreatedBy:          "system",
 		})
 		createdVersion = err == nil
 	} else if err == nil {
@@ -309,28 +310,6 @@ func (adapter workflowRunStoreTestCatalog) AuthorManagedVersion(
 		return nil, err
 	}
 
-	activated := false
-	if command.Activate {
-		trusted := workflowcatalog.DriverTrustTrusted
-		driverRecord, err = adapter.store.Drivers().Update(ctx, intent.WorkspaceKey, intent.DriverID, workflowcatalog.DriverUpdate{
-			TrustLevel: &trusted,
-		})
-		if err != nil {
-			return nil, err
-		}
-		if _, err = adapter.store.ApproveDriverVersionForTest(ctx, intent.WorkspaceKey, intent.DriverID, versionRecord.VersionID); err != nil {
-			return nil, err
-		}
-		driverRecord, err = adapter.store.ActivateDriverVersionForTest(ctx, intent.WorkspaceKey, intent.DriverID, versionRecord.VersionID)
-		if err != nil {
-			return nil, err
-		}
-		driverRecord, err = adapter.store.UnapproveDriverVersionForTest(ctx, intent.WorkspaceKey, intent.DriverID, versionRecord.VersionID)
-		if err != nil {
-			return nil, err
-		}
-		activated = true
-	}
 	if driverRecord.Revision == 0 {
 		driverRecord.Revision = 1
 	}
@@ -341,10 +320,43 @@ func (adapter workflowRunStoreTestCatalog) AuthorManagedVersion(
 		CreatedDriver:     createdDriver,
 		CreatedVersion:    createdVersion,
 		ReusedVersion:     reusedVersion,
-		Activated:         activated,
 		CommittedRevision: driverRecord.Revision,
 		SemanticImpact:    workflowcatalog.SemanticImpactVersionAuthored,
 	}, nil
+}
+
+func (adapter workflowRunStoreTestCatalog) RecordVersionAvailability(
+	context.Context, authority.SystemAuthority, workflowcatalog.AvailabilityCommand,
+) (*workflowcatalog.AvailabilityResult, error) {
+	return nil, errors.New("unexpected availability command for explicitly available test fixture")
+}
+
+func (adapter workflowRunStoreTestCatalog) ApproveManagedVersion(
+	ctx context.Context, _ authority.SystemAuthority, command workflowcatalog.VersionCommand,
+) (*workflowcatalog.VersionResult, error) {
+	driverRecord, err := adapter.store.ApproveDriverVersionForTest(ctx, command.WorkspaceKey, command.DriverID, command.VersionID)
+	if err != nil {
+		return nil, err
+	}
+	version, err := adapter.store.DriverVersions().Get(ctx, command.WorkspaceKey, command.VersionID)
+	if err != nil {
+		return nil, err
+	}
+	return &workflowcatalog.VersionResult{Action: workflowcatalog.ActionApproveManagedVersion, Driver: driverRecord, Version: version, Approved: true, CommittedRevision: driverRecord.Revision}, nil
+}
+
+func (adapter workflowRunStoreTestCatalog) ActivateManagedVersion(
+	ctx context.Context, _ authority.SystemAuthority, command workflowcatalog.VersionCommand,
+) (*workflowcatalog.VersionResult, error) {
+	driverRecord, err := adapter.store.ActivateDriverVersionForTest(ctx, command.WorkspaceKey, command.DriverID, command.VersionID)
+	if err != nil {
+		return nil, err
+	}
+	version, err := adapter.store.DriverVersions().Get(ctx, command.WorkspaceKey, command.VersionID)
+	if err != nil {
+		return nil, err
+	}
+	return &workflowcatalog.VersionResult{Action: workflowcatalog.ActionActivateManagedVersion, Driver: driverRecord, Version: version, Active: true, Approved: true, CommittedRevision: driverRecord.Revision}, nil
 }
 
 type workflowRunManagedBuiltinAuthority struct{}
@@ -353,6 +365,18 @@ func (workflowRunManagedBuiltinAuthority) AuthorityForManagedBuiltin(
 	context.Context,
 	string,
 	string,
+) (authority.SystemAuthority, error) {
+	return authority.SystemAuthority{}, nil
+}
+
+func (workflowRunManagedBuiltinAuthority) AuthorityForVersionAvailability(
+	context.Context, string, string,
+) (authority.SystemAuthority, error) {
+	return authority.SystemAuthority{}, nil
+}
+
+func (workflowRunManagedBuiltinAuthority) AuthorityForManagedVersionLifecycle(
+	context.Context, string, authority.Action, string,
 ) (authority.SystemAuthority, error) {
 	return authority.SystemAuthority{}, nil
 }
@@ -402,11 +426,12 @@ func newWorkflowTestModule(st *memstore.Store) *Module {
 	executionAdapter := workflowRunStoreTestExecution{store: st}
 	return NewModule(Config{
 		Catalog: catalog, Authoring: catalog,
-		Execution: executionAdapter, TaskRuns: executionAdapter, Bindings: workflowBindingQueries{store: st.TriggerBindings()},
+		DistributionAuthorities: workflowRunManagedBuiltinAuthority{},
+		Execution:               executionAdapter, TaskRuns: executionAdapter, Bindings: workflowBindingQueries{store: st.TriggerBindings()},
 		OperatorAuthority: workflowOperatorAuthorityStub{},
 		PrepareWorkflowTarget: func(ctx context.Context, workspace, workflow string) (*workflowcatalog.Driver, error) {
 			if workflowdefs.IsBuiltinWorkflow(workflow) {
-				coordinator, err := appworkflowauthoring.New(workflowdefs.NewBundleStager())
+				coordinator, err := appworkflowauthoring.New(workflowdefs.NewBundleStager(), workflowRunManagedBuiltinAuthority{})
 				if err != nil {
 					return nil, err
 				}
@@ -472,6 +497,20 @@ func (workflowOperatorAuthorityStub) ResolveOperatorAuthority(
 	return authority.OperatorAuthority{}, nil
 }
 
+type workflowDistributionAuthorityStub struct{}
+
+func (workflowDistributionAuthorityStub) AuthorityForVersionAvailability(
+	context.Context, string, string,
+) (authority.SystemAuthority, error) {
+	return authority.SystemAuthority{}, nil
+}
+
+func (workflowDistributionAuthorityStub) AuthorityForManagedVersionLifecycle(
+	context.Context, string, authority.Action, string,
+) (authority.SystemAuthority, error) {
+	return authority.SystemAuthority{}, nil
+}
+
 type workflowVersionAuthoringStub struct {
 	operatorCommand workflowcatalog.AuthorVersionCommand
 	operatorCalls   int
@@ -488,26 +527,45 @@ func (stub *workflowVersionAuthoringStub) AuthorVersion(
 	return &workflowcatalog.AuthorVersionResult{
 		Driver: &workflowcatalog.Driver{
 			WorkspaceKey: command.WorkspaceKey, DriverID: command.DriverID,
-			Name: command.DriverName, Status: workflowcatalog.DriverStatusDraft,
+			Name: command.DriverName, Status: workflowcatalog.DriverStatusDraft, Revision: 1,
 		},
 		Version: &workflowcatalog.DriverVersion{
 			WorkspaceKey: command.WorkspaceKey, DriverID: command.DriverID, VersionID: command.VersionID,
 			SourceRef: command.SourceRef, SourceDigest: command.SourceDigest,
 			BundleRef: command.BundleRef, BundleDigest: command.BundleDigest,
 			Runtime: command.Runtime, Manifest: command.Manifest, BuildDiagnostics: command.BuildDiagnostics,
-			ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+			ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+			AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityPending,
 		},
-		CreatedDriver: true, CreatedVersion: true,
+		CreatedDriver: true, CreatedVersion: true, CommittedRevision: 1,
 	}, nil
 }
 
 func (stub *workflowVersionAuthoringStub) AuthorManagedVersion(
 	context.Context,
 	authority.SystemAuthority,
-	workflowcatalog.AuthorManagedVersionCommand,
+	workflowcatalog.AuthorVersionCommand,
 ) (*workflowcatalog.AuthorVersionResult, error) {
 	stub.managedCalls++
 	return nil, errors.New("unexpected managed authoring call")
+}
+
+func (stub *workflowVersionAuthoringStub) RecordVersionAvailability(
+	_ context.Context, _ authority.SystemAuthority, command workflowcatalog.AvailabilityCommand,
+) (*workflowcatalog.AvailabilityResult, error) {
+	return &workflowcatalog.AvailabilityResult{
+		Driver:            &workflowcatalog.Driver{WorkspaceKey: command.WorkspaceKey, DriverID: command.DriverID, Revision: command.ExpectedRevision + 1},
+		Version:           &workflowcatalog.DriverVersion{WorkspaceKey: command.WorkspaceKey, DriverID: command.DriverID, VersionID: command.VersionID, SourceDigest: command.SourceDigest, BundleDigest: command.BundleDigest, ValidationStatus: workflowcatalog.DriverVersionValidationPassed, AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable},
+		CommittedRevision: command.ExpectedRevision + 1,
+	}, nil
+}
+
+func (*workflowVersionAuthoringStub) ApproveManagedVersion(context.Context, authority.SystemAuthority, workflowcatalog.VersionCommand) (*workflowcatalog.VersionResult, error) {
+	return nil, errors.New("unexpected managed approval")
+}
+
+func (*workflowVersionAuthoringStub) ActivateManagedVersion(context.Context, authority.SystemAuthority, workflowcatalog.VersionCommand) (*workflowcatalog.VersionResult, error) {
+	return nil, errors.New("unexpected managed activation")
 }
 
 type workflowRecordingOperatorAuthorityStub struct {
@@ -543,7 +601,8 @@ func TestCreateDriverRunDelegatesResolvedSubmissionToExecution(t *testing.T) {
 		},
 		version: &workflowcatalog.DriverVersion{
 			WorkspaceKey: "TEST", DriverID: "driver-demo", VersionID: "version-preview",
-			ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+			ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+			AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
 		},
 	}
 	resolver := &workflowRecordingOperatorAuthorityStub{}
@@ -619,7 +678,8 @@ func TestCreateDriverRunDeniesWrongWorkspaceOrActionAuthority(t *testing.T) {
 				},
 				version: &workflowcatalog.DriverVersion{
 					WorkspaceKey: "TEST", DriverID: "driver-demo", VersionID: "version-active",
-					ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+					ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+					AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
 				},
 			}
 			resolver := &workflowRecordingOperatorAuthorityStub{err: test.err}
@@ -656,7 +716,8 @@ func TestCreateDriverRunServerStampsWorkflowBindingSourceRef(t *testing.T) {
 	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey: workspace, DriverID: driverID, VersionID: versionID, Version: 1,
 		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
 	}); err != nil {
 		t.Fatalf("create driver version: %v", err)
 	}
@@ -680,7 +741,8 @@ func TestCreateDriverRunServerStampsWorkflowBindingSourceRef(t *testing.T) {
 		},
 		version: &workflowcatalog.DriverVersion{
 			WorkspaceKey: workspace, DriverID: driverID, VersionID: versionID,
-			ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+			ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+			AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
 		},
 	}
 	submissions := &workflowRunCaptureExecution{}
@@ -893,17 +955,18 @@ func TestCreateWorkflowRunRefreshesStaleBuiltinRunnerManifest(t *testing.T) {
 		t.Fatalf("create stale built-in driver: %v", err)
 	}
 	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
-		WorkspaceKey:     "TEST",
-		VersionID:        "stale-version",
-		DriverID:         BuiltinEpicRunnerWorkflowName,
-		Version:          1,
-		SourceRef:        "builtin://workflows/" + BuiltinEpicRunnerWorkflowName + "/versions/" + digest,
-		SourceDigest:     digest,
-		BundleDigest:     "sha256:stale",
-		Runtime:          driver.RuntimeFlueNode,
-		Manifest:         map[string]string{"workflow_name": BuiltinEpicRunnerWorkflowName},
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
-		CreatedBy:        "system",
+		WorkspaceKey:       "TEST",
+		VersionID:          "stale-version",
+		DriverID:           BuiltinEpicRunnerWorkflowName,
+		Version:            1,
+		SourceRef:          "builtin://workflows/" + BuiltinEpicRunnerWorkflowName + "/versions/" + digest,
+		SourceDigest:       digest,
+		BundleDigest:       "sha256:stale",
+		Runtime:            driver.RuntimeFlueNode,
+		Manifest:           map[string]string{"workflow_name": BuiltinEpicRunnerWorkflowName},
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
+		CreatedBy:          "system",
 	}); err != nil {
 		t.Fatalf("create stale built-in version: %v", err)
 	}
@@ -1383,6 +1446,7 @@ func TestCreateWorkflowVersionRegistersWithoutActivation(t *testing.T) {
 	NewModule(Config{
 		Catalog: catalog, Authoring: authoring,
 		CatalogOperatorAuthority: workflowOperatorAuthorityStub{},
+		DistributionAuthorities:  workflowDistributionAuthorityStub{},
 	}).Register(mux)
 
 	body := `{"files":{"workflows/demo.ts":"export async function run(){ return {}; }"}}`
@@ -1434,13 +1498,14 @@ func seededWorkflowStore(t *testing.T, ctx context.Context) *memstore.Store {
 		t.Fatalf("create driver: %v", err)
 	}
 	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
-		WorkspaceKey:     "TEST",
-		VersionID:        "version-1",
-		DriverID:         "demo",
-		Version:          1,
-		SourceDigest:     "sha256:source",
-		BundleDigest:     "sha256:bundle",
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+		WorkspaceKey:       "TEST",
+		VersionID:          "version-1",
+		DriverID:           "demo",
+		Version:            1,
+		SourceDigest:       "sha256:source",
+		BundleDigest:       "sha256:bundle",
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
 	}); err != nil {
 		t.Fatalf("create driver version: %v", err)
 	}

@@ -340,6 +340,9 @@ method_sets:
   - name: workflowcatalog_authoring
     read_only: []
     mutating: [AuthorVersion]
+  - name: workflowcatalog_availability
+    read_only: []
+    mutating: [RecordVersionAvailability]
   - name: workitems_port
     read_only: [Blocked, Deferred, Get, List, ListComments, ListDependencies, ListEvents, Ready, RequireRepositoryAdmission, Search, Stats]
     mutating: [AddComment, AddDependency, AssignRepository, BlockRepositoryRequired, Claim, Close, Create, Delete, Patch, RemoveDependency, Reopen]
@@ -685,6 +688,10 @@ receiver_surfaces:
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog.AuthoringStore
     package: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
     method_set: workflowcatalog_authoring
+    capability_owner: workflowcatalog
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog.AvailabilityStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
+    method_set: workflowcatalog_availability
     capability_owner: workflowcatalog
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog.DriverStore
     package: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog

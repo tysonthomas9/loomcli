@@ -1159,7 +1159,8 @@ func seedDriverVersion(t *testing.T, st *memstore.Store, driverID, versionID str
 	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey: agentRecordTestWS, VersionID: versionID, DriverID: driverID, Version: 1,
 		SourceDigest: "src-" + versionID, BundleDigest: "bundle-" + versionID,
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
 	}); err != nil {
 		t.Fatalf("create driver version: %v", err)
 	}

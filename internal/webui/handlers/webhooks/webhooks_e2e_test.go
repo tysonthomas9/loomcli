@@ -34,7 +34,7 @@ import (
 	appworkflowauthoring "github.com/tysonthomas9/loomcli/internal/app/workflowauthoring"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
-	workflowauthoring "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
+	workflowauthoring "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/netutil"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
@@ -368,18 +368,19 @@ func (e *githubWebhookE2E) registerGitHubDriver() *automation.Binding {
 		e.t.Fatalf("created driver revision = %d, want 1", driver.Revision)
 	}
 	_, err = e.fleetClient.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
-		WorkspaceKey:     e.workspace,
-		VersionID:        version,
-		DriverID:         driverID,
-		Version:          1,
-		SourceRef:        "e2e://github-pr-review",
-		SourceDigest:     "sha256:e2e-src",
-		BundleRef:        ".loom/drivers/github-pr-review/github-pr-review-v1",
-		BundleDigest:     "sha256:e2e-bundle",
-		Runtime:          "flue-node",
-		Manifest:         map[string]string{workflowcatalog.ManifestTrustLevelKey: string(workflowcatalog.DriverTrustUntrusted)},
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
-		CreatedBy:        e.actor,
+		WorkspaceKey:       e.workspace,
+		VersionID:          version,
+		DriverID:           driverID,
+		Version:            1,
+		SourceRef:          "e2e://github-pr-review",
+		SourceDigest:       "sha256:e2e-src",
+		BundleRef:          ".loom/drivers/github-pr-review/github-pr-review-v1",
+		BundleDigest:       "sha256:e2e-bundle",
+		Runtime:            "flue-node",
+		Manifest:           map[string]string{workflowcatalog.ManifestTrustLevelKey: string(workflowcatalog.DriverTrustUntrusted)},
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
+		CreatedBy:          e.actor,
 	})
 	if err != nil {
 		e.t.Fatalf("create driver version: %v", err)
@@ -619,6 +620,7 @@ func (e *githubWebhookE2E) registerLiveGitHubDriver(live liveGitHubPR) *automati
 	coordinator, err := appworkflowauthoring.NewWithNative(
 		workflowauthoring.NewBundleStager(),
 		workflowauthoring.NewNativeBundleStager(),
+		catalog,
 	)
 	if err != nil {
 		e.t.Fatalf("compose live GitHub driver authoring: %v", err)
@@ -626,7 +628,7 @@ func (e *githubWebhookE2E) registerLiveGitHubDriver(live liveGitHubPR) *automati
 	registered, err := coordinator.AuthorNative(
 		ctx,
 		catalog.CatalogAPI(),
-		catalog.VersionAuthoringAPI(),
+		catalog.CatalogCommands(),
 		appworkflowauthoring.NativeAuthoringAuthorities{
 			Author:   author,
 			Approve:  &approve,

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	appworkflowauthoring "github.com/tysonthomas9/loomcli/internal/app/workflowauthoring"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -27,7 +28,19 @@ func (stub targetPreparationCatalogStub) GetDriver(
 }
 
 type targetPreparationAuthoringStub struct {
-	workflowcatalog.VersionAuthoringAPI
+	appworkflowauthoring.CatalogCommands
+}
+
+func (targetPreparationAuthorityStub) AuthorityForVersionAvailability(
+	context.Context, string, string,
+) (authority.SystemAuthority, error) {
+	return authority.SystemAuthority{}, nil
+}
+
+func (targetPreparationAuthorityStub) AuthorityForManagedVersionLifecycle(
+	context.Context, string, authority.Action, string,
+) (authority.SystemAuthority, error) {
+	return authority.SystemAuthority{}, nil
 }
 
 type targetPreparationAuthorityStub struct{}

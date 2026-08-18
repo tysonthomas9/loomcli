@@ -1,4 +1,4 @@
-package authoring
+package workflowdistribution
 
 import (
 	"context"
@@ -15,9 +15,11 @@ import (
 )
 
 type authoringAPISpy struct {
-	operatorCommand *workflowcatalog.AuthorVersionCommand
-	managedCommand  *workflowcatalog.AuthorManagedVersionCommand
-	managedCommands []workflowcatalog.AuthorManagedVersionCommand
+	operatorCommand      *workflowcatalog.AuthorVersionCommand
+	managedCommand       *workflowcatalog.AuthorVersionCommand
+	managedCommands      []workflowcatalog.AuthorVersionCommand
+	availabilityCommands []workflowcatalog.AvailabilityCommand
+	managedLifecycle     []authority.Action
 }
 
 type builtinCatalogStub struct {
@@ -60,23 +62,70 @@ func (spy *managedBuiltinAuthoritySpy) AuthorityForManagedBuiltin(
 	return authority.SystemAuthority{}, nil
 }
 
+func (spy *managedBuiltinAuthoritySpy) AuthorityForVersionAvailability(
+	_ context.Context, workspace, reason string,
+) (authority.SystemAuthority, error) {
+	spy.workspace, spy.reason = workspace, reason
+	return authority.SystemAuthority{}, nil
+}
+
+func (spy *managedBuiltinAuthoritySpy) AuthorityForManagedVersionLifecycle(
+	_ context.Context, workspace string, _ authority.Action, reason string,
+) (authority.SystemAuthority, error) {
+	spy.workspace, spy.reason = workspace, reason
+	return authority.SystemAuthority{}, nil
+}
+
 func (spy *authoringAPISpy) AuthorVersion(
 	_ context.Context,
 	_ authority.OperatorAuthority,
 	command workflowcatalog.AuthorVersionCommand,
 ) (*workflowcatalog.AuthorVersionResult, error) {
 	spy.operatorCommand = &command
-	return authoredResult(command, false), nil
+	return authoredResult(command), nil
 }
 
 func (spy *authoringAPISpy) AuthorManagedVersion(
 	_ context.Context,
 	_ authority.SystemAuthority,
-	command workflowcatalog.AuthorManagedVersionCommand,
+	command workflowcatalog.AuthorVersionCommand,
 ) (*workflowcatalog.AuthorVersionResult, error) {
 	spy.managedCommand = &command
 	spy.managedCommands = append(spy.managedCommands, command)
-	return authoredResult(command.AuthorVersionCommand, command.Activate), nil
+	return authoredResult(command), nil
+}
+
+func (spy *authoringAPISpy) RecordVersionAvailability(
+	_ context.Context, _ authority.SystemAuthority, command workflowcatalog.AvailabilityCommand,
+) (*workflowcatalog.AvailabilityResult, error) {
+	spy.availabilityCommands = append(spy.availabilityCommands, command)
+	status := workflowcatalog.DriverVersionAvailabilityPending
+	if command.Outcome == workflowcatalog.AvailabilityOutcomeAvailable {
+		status = workflowcatalog.DriverVersionAvailabilityAvailable
+	}
+	return &workflowcatalog.AvailabilityResult{
+		Driver: &workflowcatalog.Driver{WorkspaceKey: command.WorkspaceKey, DriverID: command.DriverID, Revision: command.ExpectedRevision + 1},
+		Version: &workflowcatalog.DriverVersion{
+			WorkspaceKey: command.WorkspaceKey, DriverID: command.DriverID, VersionID: command.VersionID,
+			SourceDigest: command.SourceDigest, BundleDigest: command.BundleDigest,
+			ValidationStatus: workflowcatalog.DriverVersionValidationPassed, AvailabilityStatus: status,
+		},
+		CommittedRevision: command.ExpectedRevision + 1,
+	}, nil
+}
+
+func (spy *authoringAPISpy) ApproveManagedVersion(
+	_ context.Context, _ authority.SystemAuthority, command workflowcatalog.VersionCommand,
+) (*workflowcatalog.VersionResult, error) {
+	spy.managedLifecycle = append(spy.managedLifecycle, workflowcatalog.ActionApproveManagedVersion)
+	return managedLifecycleResult(command, false), nil
+}
+
+func (spy *authoringAPISpy) ActivateManagedVersion(
+	_ context.Context, _ authority.SystemAuthority, command workflowcatalog.VersionCommand,
+) (*workflowcatalog.VersionResult, error) {
+	spy.managedLifecycle = append(spy.managedLifecycle, workflowcatalog.ActionActivateManagedVersion)
+	return managedLifecycleResult(command, true), nil
 }
 
 type boundPromptAgentIndexStub struct {
@@ -92,26 +141,38 @@ func (stub boundPromptAgentIndexStub) HasEnabledPromptAgentBinding(_ context.Con
 	return stub.enabled[workspace], nil
 }
 
-func authoredResult(command workflowcatalog.AuthorVersionCommand, activated bool) *workflowcatalog.AuthorVersionResult {
+func authoredResult(command workflowcatalog.AuthorVersionCommand) *workflowcatalog.AuthorVersionResult {
+	revision := command.ExpectedRevision + 1
 	return &workflowcatalog.AuthorVersionResult{
 		Driver: &workflowcatalog.Driver{
 			WorkspaceKey: command.WorkspaceKey,
 			DriverID:     command.DriverID,
 			Name:         command.DriverName,
+			Revision:     revision,
 		},
 		Version: &workflowcatalog.DriverVersion{
-			WorkspaceKey:     command.WorkspaceKey,
-			DriverID:         command.DriverID,
-			VersionID:        command.VersionID,
-			SourceRef:        command.SourceRef,
-			SourceDigest:     command.SourceDigest,
-			BundleRef:        command.BundleRef,
-			BundleDigest:     command.BundleDigest,
-			Runtime:          command.Runtime,
-			Manifest:         command.Manifest,
-			BuildDiagnostics: command.BuildDiagnostics,
+			WorkspaceKey:       command.WorkspaceKey,
+			DriverID:           command.DriverID,
+			VersionID:          command.VersionID,
+			SourceRef:          command.SourceRef,
+			SourceDigest:       command.SourceDigest,
+			BundleRef:          command.BundleRef,
+			BundleDigest:       command.BundleDigest,
+			Runtime:            command.Runtime,
+			Manifest:           command.Manifest,
+			BuildDiagnostics:   command.BuildDiagnostics,
+			ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+			AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityPending,
 		},
-		CreatedDriver: true, CreatedVersion: true, Activated: activated,
+		CreatedDriver: true, CreatedVersion: true, CommittedRevision: revision,
+	}
+}
+
+func managedLifecycleResult(command workflowcatalog.VersionCommand, active bool) *workflowcatalog.VersionResult {
+	return &workflowcatalog.VersionResult{
+		Driver:  &workflowcatalog.Driver{WorkspaceKey: command.WorkspaceKey, DriverID: command.DriverID, Revision: command.ExpectedRevision + 1, ActiveVersionID: map[bool]string{true: command.VersionID}[active]},
+		Version: &workflowcatalog.DriverVersion{WorkspaceKey: command.WorkspaceKey, DriverID: command.DriverID, VersionID: command.VersionID, AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable},
+		Active:  active, CommittedRevision: command.ExpectedRevision + 1,
 	}
 }
 
@@ -120,7 +181,8 @@ func TestBuildAndAuthorSubmitsOneUntrustedInactiveCatalogCommand(t *testing.T) {
 	api := &authoringAPISpy{}
 	workDir := t.TempDir()
 
-	coordinator, err := appworkflowauthoring.New(NewBundleStager())
+	authorities := &managedBuiltinAuthoritySpy{}
+	coordinator, err := appworkflowauthoring.New(NewBundleStager(), authorities)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +234,8 @@ func TestBuildAndAuthorManagedStampsCanonicalProvenance(t *testing.T) {
 		t.Fatal("local-review builtin missing")
 	}
 
-	coordinator, err := appworkflowauthoring.New(NewBundleStager())
+	authorities := &managedBuiltinAuthoritySpy{}
+	coordinator, err := appworkflowauthoring.New(NewBundleStager(), authorities)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,8 +259,8 @@ func TestBuildAndAuthorManagedStampsCanonicalProvenance(t *testing.T) {
 	if api.managedCommand == nil || api.operatorCommand != nil {
 		t.Fatalf("authoring calls = operator:%+v managed:%+v, want one managed call", api.operatorCommand, api.managedCommand)
 	}
-	if !api.managedCommand.Activate ||
-		api.managedCommand.Manifest["provenance"] != workflowcatalog.ManagedBuiltinProvenance {
+	if api.managedCommand.Manifest["provenance"] != workflowcatalog.ManagedBuiltinProvenance ||
+		!result.Activated || len(api.managedLifecycle) != 2 {
 		t.Fatalf("managed command = %+v", api.managedCommand)
 	}
 	if got := result.Bundle.Manifest[driverpkg.ManifestTrustLevelKey]; got != string(workflowcatalog.DriverTrustTrusted) {
@@ -212,7 +275,8 @@ func TestBuildAndAuthorRejectsOperatorTrustAndActivationSelection(t *testing.T) 
 	} {
 		t.Run(name, func(t *testing.T) {
 			api := &authoringAPISpy{}
-			coordinator, err := appworkflowauthoring.New(NewBundleStager())
+			authorities := &managedBuiltinAuthoritySpy{}
+			coordinator, err := appworkflowauthoring.New(NewBundleStager(), authorities)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -274,7 +338,7 @@ func TestEnsureBuiltinRefreshesCurrentDigestWithRetiredRunnerThroughManagedAutho
 	}
 	api := &authoringAPISpy{}
 	authorities := &managedBuiltinAuthoritySpy{}
-	coordinator, err := appworkflowauthoring.New(NewBundleStager())
+	coordinator, err := appworkflowauthoring.New(NewBundleStager(), authorities)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +347,7 @@ func TestEnsureBuiltinRefreshesCurrentDigestWithRetiredRunnerThroughManagedAutho
 	); err != nil {
 		t.Fatal(err)
 	}
-	if api.managedCommand == nil || api.managedCommand.ExpectedRevision != 7 || !api.managedCommand.Activate {
+	if api.managedCommand == nil || api.managedCommand.ExpectedRevision != 7 || len(api.managedLifecycle) != 2 {
 		t.Fatalf("managed refresh command = %+v", api.managedCommand)
 	}
 	if authorities.calls != 1 || authorities.workspace != "TEST" {
@@ -298,7 +362,7 @@ func TestRefreshBoundPromptAgentWorkflowsUsesCurrentIndexAndManagedInterface(t *
 	installFakeWorkflowBuildDeps(t)
 	api := &authoringAPISpy{}
 	authorities := &managedBuiltinAuthoritySpy{}
-	coordinator, err := appworkflowauthoring.New(NewBundleStager())
+	coordinator, err := appworkflowauthoring.New(NewBundleStager(), authorities)
 	if err != nil {
 		t.Fatal(err)
 	}

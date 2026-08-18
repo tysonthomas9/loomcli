@@ -229,18 +229,19 @@ func (e *githubWebhookE2E) seedAutomationPhase3Target() {
 		e.t.Fatalf("seed Phase 3 driver revision = %d, want 1", driver.Revision)
 	}
 	version, err := e.fleetClient.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
-		WorkspaceKey:     e.workspace,
-		VersionID:        automationPhase3VersionID,
-		DriverID:         automationPhase3DriverID,
-		Version:          1,
-		SourceRef:        "e2e://automation-phase3-source",
-		SourceDigest:     "sha256:automation-phase3-source",
-		BundleRef:        "e2e://automation-phase3-bundle",
-		BundleDigest:     "sha256:automation-phase3-bundle",
-		Runtime:          "flue-node",
-		Manifest:         map[string]string{workflowcatalog.ManifestTrustLevelKey: string(workflowcatalog.DriverTrustUntrusted)},
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
-		CreatedBy:        e.actor,
+		WorkspaceKey:       e.workspace,
+		VersionID:          automationPhase3VersionID,
+		DriverID:           automationPhase3DriverID,
+		Version:            1,
+		SourceRef:          "e2e://automation-phase3-source",
+		SourceDigest:       "sha256:automation-phase3-source",
+		BundleRef:          "e2e://automation-phase3-bundle",
+		BundleDigest:       "sha256:automation-phase3-bundle",
+		Runtime:            "flue-node",
+		Manifest:           map[string]string{workflowcatalog.ManifestTrustLevelKey: string(workflowcatalog.DriverTrustUntrusted)},
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
+		CreatedBy:          e.actor,
 	})
 	if err != nil {
 		e.t.Fatalf("seed Phase 3 driver version: %v", err)

@@ -23,7 +23,7 @@ type NativeAuthoringAuthorities struct {
 func (coordinator *Coordinator) AuthorNative(
 	ctx context.Context,
 	catalog workflowcatalog.API,
-	authoring workflowcatalog.VersionAuthoringAPI,
+	authoring CatalogCommands,
 	authorities NativeAuthoringAuthorities,
 	options NativeOptions,
 ) (*Result, error) {
@@ -49,7 +49,6 @@ func (coordinator *Coordinator) AuthorNative(
 	if staged == nil {
 		return nil, workflowcatalog.ErrInvalidPersistedState
 	}
-	defer staged.Cleanup()
 
 	metadata := staged.Metadata()
 	expectedRevision := uint64(0)
@@ -64,9 +63,6 @@ func (coordinator *Coordinator) AuthorNative(
 	default:
 		return nil, fmt.Errorf("resolve native driver %q: %w", metadata.DriverID, err)
 	}
-	if err := staged.Promote(); err != nil {
-		return nil, err
-	}
 	result, err := coordinator.authorStaged(
 		ctx,
 		authoring,
@@ -79,6 +75,17 @@ func (coordinator *Coordinator) AuthorNative(
 		staged,
 		false,
 	)
+	if err != nil {
+		staged.Discard()
+		return nil, err
+	}
+	result.Driver, result.Version, err = refreshNativeVersion(
+		ctx, catalog, options.WorkspaceKey, result.Driver.DriverID, result.Version.VersionID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	result, err = coordinator.distributeAuthoredVersion(ctx, authoring, result, staged)
 	if err != nil {
 		return nil, err
 	}

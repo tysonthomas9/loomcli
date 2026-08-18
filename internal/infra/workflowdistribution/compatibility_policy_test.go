@@ -1,4 +1,4 @@
-package authoring
+package workflowdistribution
 
 import (
 	"os"
@@ -9,9 +9,9 @@ import (
 
 func TestMigratedWorkflowAuthoringCallersCannotRegressToGenericPersistence(t *testing.T) {
 	for _, rel := range []string{
-		"../../../cli/serve/serveadapter/workflow_catalog.go",
-		"../../../cli/workflow/workflow_cmd.go",
-		"../../../webui/handlers/workflows/module.go",
+		"../../cli/serve/serveadapter/workflow_catalog.go",
+		"../../cli/workflow/workflow_cmd.go",
+		"../../webui/handlers/workflows/module.go",
 	} {
 		content, err := os.ReadFile(filepath.Clean(rel))
 		if err != nil {
@@ -35,7 +35,7 @@ func TestMigratedWorkflowAuthoringCallersCannotRegressToGenericPersistence(t *te
 }
 
 func TestNativeDriverRegisterUsesTheManagementBoundary(t *testing.T) {
-	content, err := os.ReadFile(filepath.Clean("../../../cli/driver/driver_cmd.go"))
+	content, err := os.ReadFile(filepath.Clean("../../cli/driver/driver_cmd.go"))
 	if err != nil {
 		t.Fatalf("read native driver command: %v", err)
 	}

@@ -75,18 +75,19 @@ func seedExecutablePromptAgentDriver(t *testing.T, st *memstore.Store) {
 		t.Fatalf("create prompt-agent driver fixture: %v", err)
 	}
 	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
-		WorkspaceKey:     agentRecordTestWS,
-		VersionID:        promptAgentDriverTestVersion,
-		DriverID:         workflowdefs.BuiltinPromptAgentWorkflowName,
-		Version:          1,
-		SourceRef:        "builtin://workflows/prompt-agent/versions/" + digest,
-		SourceDigest:     digest,
-		BundleRef:        bundleRef,
-		BundleDigest:     "sha256:prompt-agent-test-bundle",
-		Runtime:          "node",
-		Manifest:         map[string]string{"runners": string(runners)},
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
-		CreatedBy:        "system",
+		WorkspaceKey:       agentRecordTestWS,
+		VersionID:          promptAgentDriverTestVersion,
+		DriverID:           workflowdefs.BuiltinPromptAgentWorkflowName,
+		Version:            1,
+		SourceRef:          "builtin://workflows/prompt-agent/versions/" + digest,
+		SourceDigest:       digest,
+		BundleRef:          bundleRef,
+		BundleDigest:       "sha256:prompt-agent-test-bundle",
+		Runtime:            "node",
+		Manifest:           map[string]string{"runners": string(runners)},
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
+		CreatedBy:          "system",
 	}); err != nil {
 		t.Fatalf("create prompt-agent driver version fixture: %v", err)
 	}

@@ -42,7 +42,8 @@ func seedStoreWithoutConnector(t *testing.T, enabled bool) *memstore.Store {
 	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey: testWS, VersionID: "v1", DriverID: "github-pr-review", Version: 1,
 		SourceDigest: "sha256:src", BundleDigest: "sha256:bundle",
-		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+		ValidationStatus:   workflowcatalog.DriverVersionValidationPassed,
+		AvailabilityStatus: workflowcatalog.DriverVersionAvailabilityAvailable,
 	}); err != nil {
 		t.Fatalf("seed version: %v", err)
 	}

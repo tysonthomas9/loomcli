@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"github.com/tysonthomas9/loomcli/internal/driver"
-	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
+	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution"
 	"github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
