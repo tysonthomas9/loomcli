@@ -49,6 +49,8 @@ func TestScoutWorkflowSourceContract(t *testing.T) {
 		{name: "default scout runner", want: `"scout-task-runner"`},
 		{name: "analyze phase enqueued", want: `"scout-analyze"`},
 		{name: "write phase enqueued", want: `"scout-write"`},
+		{name: "analyze phase declares its own row title", want: `title: "Analyze repositories"`},
+		{name: "write phase declares its own row title", want: `title: "Write journal and agents.md"`},
 		{name: "deterministic leaf run ids", want: "deterministicTaskRunId(loom.driverRunId, label)"},
 		{name: "leaf awaited", want: "loom.taskRuns.await({ taskRunId })"},
 		{name: "hard cap of five", want: "const MAX_RECOMMENDATIONS = 5;"},

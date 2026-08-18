@@ -88,7 +88,6 @@ describe("agent-services API", () => {
       {
         roleName: "scout",
         displayName: "Scout",
-        allowedBindingKinds: ["cron"],
       },
     ]);
 

@@ -18,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
 var (
@@ -82,7 +83,8 @@ func runAgentsAdd(_ *cobra.Command, args []string) error {
 		svc, binding, err := agentprovision.CreateAgentInstance(ctx, h.Store, ws, agentsWorkspaceDir(ws), agentprovision.AgentInstanceCreate{
 			ServiceID: args[0], Name: agentsAddName, RoleName: agentsAddRole, CreatedBy: "cli",
 			Binding: agentprovision.AgentInstanceBinding{
-				Kind: "cron", Schedule: agentsAddSchedule, Timezone: agentsAddTimezone, Enabled: true,
+				Kind: trigger.CronSourceKind, Schedule: agentsAddSchedule,
+				Timezone: agentsAddTimezone, Enabled: true,
 			},
 		})
 		if err != nil {

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
 
@@ -65,20 +64,20 @@ func CreateAgentInstance(ctx context.Context, st store.Store, workspaceKey, work
 	if !ok {
 		return nil, nil, fmt.Errorf("role %q is not a scripted role and cannot be instantiated: %w", in.RoleName, domain.ErrInvalid)
 	}
-	if !slices.Contains(spec.AllowedBindingKinds, in.Binding.Kind) {
-		return nil, nil, fmt.Errorf("scripted role %q does not allow %q trigger bindings: %w", in.RoleName, in.Binding.Kind, domain.ErrInvalid)
+	// The binding template is the whole answer to "is this role instantiable
+	// as this kind": without one there is no binding id, route key, or
+	// concurrency policy to build the binding from.
+	template, ok := spec.BindingTemplate(in.Binding.Kind)
+	if !ok {
+		return nil, nil, fmt.Errorf("scripted role %q has no %q binding shape and cannot be instantiated: %w", in.RoleName, in.Binding.Kind, domain.ErrInvalid)
 	}
-	if in.Binding.Kind != "cron" {
-		return nil, nil, fmt.Errorf("trigger binding kind %q is not supported by instance CRUD: %w", in.Binding.Kind, domain.ErrInvalid)
-	}
-	if spec.DefaultInstance == nil || spec.DefaultInstance.Binding.SourceKind != in.Binding.Kind {
-		return nil, nil, fmt.Errorf("scripted role %q has no %q binding shape: %w", in.RoleName, in.Binding.Kind, domain.ErrInvalid)
-	}
-	if in.Binding.Schedule == "" {
-		return nil, nil, fmt.Errorf("binding schedule is required: %w", domain.ErrInvalid)
-	}
-	if _, err := trigger.NextFire(in.Binding.Schedule, in.Binding.Timezone, time.Now().UTC()); err != nil {
-		return nil, nil, fmt.Errorf("invalid binding schedule: %w", errors.Join(domain.ErrInvalid, err))
+	if template.SourceKind == trigger.CronSourceKind {
+		if in.Binding.Schedule == "" {
+			return nil, nil, fmt.Errorf("binding schedule is required: %w", domain.ErrInvalid)
+		}
+		if _, err := trigger.NextFire(in.Binding.Schedule, in.Binding.Timezone, time.Now().UTC()); err != nil {
+			return nil, nil, fmt.Errorf("invalid binding schedule: %w", errors.Join(domain.ErrInvalid, err))
+		}
 	}
 	if existing, err := findAgentServiceRecord(ctx, st, workspaceKey, in.ServiceID); err == nil {
 		if existing.DeletedAt != nil {
@@ -103,15 +102,14 @@ func CreateAgentInstance(ctx context.Context, st store.Store, workspaceKey, work
 	}
 	svc, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
 		WorkspaceKey: workspaceKey, ServiceID: in.ServiceID, Name: in.Name,
-		TriggerKind: domain.AgentServiceTriggerKindCron, DesiredState: domain.AgentServiceDesiredRunning,
+		TriggerKind: spec.DefaultInstance.TriggerKind, DesiredState: domain.AgentServiceDesiredRunning,
 		RoleName: spec.RoleName, CreatedBy: in.CreatedBy,
 	})
 	if err != nil {
 		return nil, nil, err
 	}
-	template := spec.DefaultInstance.Binding
-	bindingID, routeKey := instanceBindingIdentity(spec, in.ServiceID)
-	bindingName := in.Name + " cron"
+	bindingID, routeKey := bindingIdentity(spec, template.SourceKind, in.ServiceID)
+	bindingName := in.Name + " " + template.SourceKind
 	if in.ServiceID == spec.DefaultInstance.ServiceID {
 		bindingName = template.Name
 	}
@@ -147,11 +145,14 @@ func findAgentServiceRecord(ctx context.Context, st store.Store, workspaceKey, s
 	return nil, domain.ErrNotFound
 }
 
-func instanceBindingIdentity(spec scriptedroles.ScriptedRole, serviceID string) (string, string) {
+// bindingIdentity returns the binding id and route key for one instance.
+// The default instance keeps the catalog's declared identity; every other
+// instance derives one from its trigger kind and service id.
+func bindingIdentity(spec scriptedroles.ScriptedRole, kind, serviceID string) (string, string) {
 	if spec.DefaultInstance != nil && serviceID == spec.DefaultInstance.ServiceID {
 		return spec.DefaultInstance.Binding.BindingID, spec.DefaultInstance.Binding.RouteKey
 	}
-	return "binding-cron-" + serviceID, "cron." + serviceID
+	return "binding-" + kind + "-" + serviceID, kind + "." + serviceID
 }
 
 // SetAgentInstanceDesiredState enables or disables one live scripted-role

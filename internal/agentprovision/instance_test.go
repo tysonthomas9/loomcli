@@ -271,14 +271,25 @@ func TestCreateAgentInstancePreservesDefaultScoutBindingIdentity(t *testing.T) {
 	}
 }
 
-func TestCreateAgentInstanceRejectsDisallowedBindingKind(t *testing.T) {
+// A role is instantiable in a kind exactly when the catalog gives it a binding
+// template for that kind — the missing template is the only rejection, so an
+// unknown kind and a role with no template for a known kind fail the same way.
+func TestCreateAgentInstanceRejectsKindsWithNoBindingTemplate(t *testing.T) {
 	st, workspaceDir := newProvisionStore(t)
-	_, _, err := CreateAgentInstance(t.Context(), st, "SCOUT", workspaceDir, AgentInstanceCreate{
-		ServiceID: "epic-cron", RoleName: scriptedroles.EpicRunnerRoleName,
-		Binding: AgentInstanceBinding{Kind: "cron", Schedule: "@daily", Enabled: true},
-	})
-	if !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), "does not allow") {
-		t.Fatalf("CreateAgentInstance err = %v, want clear ErrInvalid", err)
+	for name, in := range map[string]AgentInstanceCreate{
+		"role has no template for this kind": {
+			ServiceID: "epic-cron", RoleName: scriptedroles.EpicRunnerRoleName,
+			Binding: AgentInstanceBinding{Kind: "cron", Schedule: "@daily", Enabled: true},
+		},
+		"kind the catalog templates nothing for": {
+			ServiceID: "scout-event", RoleName: scriptedroles.ScoutRoleName,
+			Binding: AgentInstanceBinding{Kind: "event", Enabled: true},
+		},
+	} {
+		_, _, err := CreateAgentInstance(t.Context(), st, "SCOUT", workspaceDir, in)
+		if !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), "has no") {
+			t.Fatalf("%s: CreateAgentInstance err = %v, want clear ErrInvalid", name, err)
+		}
 	}
 }
 

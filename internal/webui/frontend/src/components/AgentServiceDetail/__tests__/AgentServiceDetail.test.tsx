@@ -437,6 +437,29 @@ describe("AgentServiceDetail", () => {
     );
   });
 
+  it("renders a declared task title without resolving the taskId as an issue", async () => {
+    mocks.listAgentServiceRunTasks.mockResolvedValueOnce({
+      data: [
+        taskRun({
+          taskId: "scout-analyze",
+          taskTitle: "Analyze repositories",
+          transcriptAvailable: false,
+        }),
+      ],
+      total: 1,
+    });
+    render(<AgentServiceDetail workspaceId="WS" service={service} />);
+    expandRun();
+
+    const section = await screen.findByTestId("task-logs-section");
+    expect(
+      await within(section).findByText("Analyze repositories"),
+    ).toBeInTheDocument();
+    // The scout's taskIds are phase labels, so an issue lookup is a guaranteed
+    // 404 — a declared title means it is never attempted.
+    expect(mocks.getIssue).not.toHaveBeenCalled();
+  });
+
   it("lazily loads and displays a truncated task AI log", async () => {
     mocks.listAgentServiceRunTasks.mockResolvedValueOnce({
       data: [taskRun({ transcriptAvailable: false })],

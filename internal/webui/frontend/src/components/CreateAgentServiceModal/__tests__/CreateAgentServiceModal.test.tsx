@@ -19,7 +19,6 @@ vi.mock("@/hooks/workspace", () => ({
       {
         roleName: "scout",
         displayName: "Scout",
-        allowedBindingKinds: ["cron"],
       },
     ],
     loading: false,
