@@ -71,6 +71,15 @@ func wrapInvocationError(err error, outputTail string) error {
 		return agentLaunchFailedInvocationError(err.Error(), outputTail)
 	}
 
+	// chat.ErrAuthRequired is the send-time login wall: pkg/chat refuses to
+	// type a prompt into an onboarding screen and returns this instead. Its
+	// text matches none of the residual auth patterns, so without an arm here
+	// it classified as Unknown and burned the restart budget on a turn that
+	// could not succeed.
+	if errors.Is(err, chat.ErrAuthRequired) {
+		return wallInvocationError(wallAuth, err.Error(), outputTail)
+	}
+
 	exitCode := 1
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
@@ -204,6 +213,10 @@ func runTurnDeadlineInvocationError(reason, outputTail string) *InvocationError 
 // claudeTerminalEvidence). Passing only the reason yields a recorded
 // Screen.Scanned=false, which is a finding rather than a failure, but a
 // needless one.
+//
+// Its sibling wallInvocationError (terminal_wall.go) covers the other
+// direction: a wall loom detected itself because the harness named no reason
+// at all.
 func terminalTurnInvocationError(reason, outputTail string) *InvocationError {
 	var marker string
 	switch {
