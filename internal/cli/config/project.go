@@ -62,6 +62,9 @@ type RestartPolicy struct {
 	IdlePollInterval *int  `yaml:"idle_poll_interval,omitempty"`  // seconds (default 30); polling interval for task availability
 	YieldTimeout     *int  `yaml:"yield_timeout,omitempty"`       // seconds; how long to wait for agent to yield before SIGTERM (default 60)
 	SigtermTimeout   *int  `yaml:"sigterm_timeout,omitempty"`     // seconds; SIGTERM→SIGKILL window (default 300)
+	// AccountWallCooldown pauses new runs fleet-wide after an account-level
+	// auth/billing/usage wall (0 = disabled).
+	AccountWallCooldown *int `yaml:"account_wall_cooldown,omitempty"` // seconds (default 900)
 }
 
 // RoleConfig defines an agent role (built-in like "plan"/"task", or custom).

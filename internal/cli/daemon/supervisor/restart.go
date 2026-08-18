@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
+
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/agentpolicy"
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -27,6 +29,17 @@ const backendUnavailableRecheckInterval = 30 * time.Second
 // a flaky dependency recovering) lets it self-resume.
 const defaultMaxRetriesBlockInterval = 60 * time.Second
 
+// defaultAccountWallCooldown is how long the fleet stays parked after an
+// account-level wall (auth, billing, usage limit) is observed. It is the
+// compromise between resuming quickly once a human fixes billing and burning
+// a run per agent per poll against a wall that is not going to move.
+const defaultAccountWallCooldown = 15 * time.Minute
+
+// maxAccountWallCooldown caps the recorded wall regardless of what the backend
+// suggested. A harness that answers "retry after 86400" must not be able to
+// park the whole fleet for a day.
+const maxAccountWallCooldown = 1 * time.Hour
+
 // shouldRestart determines if the agent should restart by consulting the
 // policy disposition for the classified outcome of the most recent exit
 // (agentpolicy.Decide). The table owns the per-class verdict; this layer
@@ -40,6 +53,13 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 
 	if stopAfterEphemeralTask(ap) {
 		return false
+	}
+
+	// Parked by the fleet-wide account wall: a block, not a failure (see
+	// gateAccountWall). Every counter stays intact and the agent resumes by
+	// itself at expiry.
+	if ap.StopReason == StopReasonAccountWall {
+		return true
 	}
 
 	// Clean success (exit 0, no error): always restart, reset counters —
@@ -74,18 +94,7 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 		return false
 
 	case agentpolicy.RetryUncounted:
-		if outcome.Is(agenterr.NoWorkOutcome) {
-			s.applyNoWorkRestart(ap)
-			return true
-		}
-		// Rate limits: unlimited uncounted retries by default; the
-		// rate_limit_no_count config opt-out routes them through the
-		// counted budget instead (the layer's config wins, pt7).
-		if s.getRateLimitNoCount() {
-			s.applyRateLimitedRestart(ap)
-			return true
-		}
-		return s.applyCountedRestart(ap, d, maxRetries)
+		return s.applyUncountedRestart(ap, d, outcome, maxRetries)
 
 	default: // Retry
 		return s.applyCountedRestart(ap, d, maxRetries)
@@ -114,6 +123,10 @@ func (s *Supervisor) applyFatalStop(ap *AgentProcess, outcome agenterr.Outcome) 
 		ap.Entry.Worktree, outcome)
 	ap.NoWorkCount = 0
 	ap.StopReason = StopReasonFatalError
+	// The wall is an account fact, not an agent fact: record it once so the
+	// pre-spawn gate parks the rest of the fleet. Takes only s.WallMu and
+	// touches no ap field — this runs with ap.Mu held.
+	s.recordAccountWall(outcome, ap.LastError)
 }
 
 // applyFastFailStop stops for deterministic errors retrying cannot fix.
@@ -156,6 +169,29 @@ func (s *Supervisor) applyRateLimitedRestart(ap *AgentProcess) {
 	ap.StopReason = ""
 	log.Printf("[daemon] Agent %s: rate limited (retry %d, not counted toward max_retries)",
 		ap.Entry.Worktree, ap.RateRetryCount)
+}
+
+// applyUncountedRestart handles the policy classes that retry without eroding
+// max_retries: NoWork (task availability is not a health signal) and rate
+// limits. Caller holds ap.Mu.
+//
+// A usage-limit wall arrives here as a rate limit and retries forever, per
+// agent, by design — so it is also recorded as a fleet-wide wall, parking the
+// other agents while this one keeps its uncounted retry loop.
+func (s *Supervisor) applyUncountedRestart(ap *AgentProcess, d agentpolicy.Disposition, outcome agenterr.Outcome, maxRetries int) bool {
+	if outcome.Is(agenterr.NoWorkOutcome) {
+		s.applyNoWorkRestart(ap)
+		return true
+	}
+	s.recordAccountWall(outcome, ap.LastError)
+	// Rate limits: unlimited uncounted retries by default; the
+	// rate_limit_no_count config opt-out routes them through the counted
+	// budget instead (the layer's config wins, pt7).
+	if s.getRateLimitNoCount() {
+		s.applyRateLimitedRestart(ap)
+		return true
+	}
+	return s.applyCountedRestart(ap, d, maxRetries)
 }
 
 // applyCountedRestart handles a counted retry (policy Decision Retry or
@@ -264,6 +300,100 @@ func (s *Supervisor) backendRecheckBackoff() time.Duration {
 	return backendUnavailableRecheckInterval
 }
 
+// isAccountWallClass reports whether an outcome is an ACCOUNT-level wall —
+// one that no other agent on the same account can get past either. Every other
+// class (transient, timeout, spawn failure, model-not-found…) is agent-local
+// and must never park the fleet.
+func isAccountWallClass(o agenterr.Outcome) bool {
+	return o.IsClass(wrapper.ErrAuth) ||
+		o.IsClass(wrapper.ErrBilling) ||
+		o.IsClass(wrapper.ErrRateLimited)
+}
+
+// recordAccountWall arms (or extends) the fleet-wide account wall. It takes
+// only s.WallMu and reads no AgentProcess field, because its callers hold
+// ap.Mu. The wall never shortens: a live wall is only ever pushed further out,
+// so a second, smaller observation cannot release the fleet early.
+//
+// Deliberately in-memory only. A daemon restart drops the wall, which is the
+// right trade: a restart is an operator action, the first agent to hit the
+// wall re-arms it within one run, and a stale on-disk wall outliving a fixed
+// account would be worse than the bug this closes.
+func (s *Supervisor) recordAccountWall(outcome agenterr.Outcome, ae *agenterr.AgentError) {
+	if !isAccountWallClass(outcome) {
+		return
+	}
+	cooldown := s.getAccountWallCooldown()
+	if cooldown <= 0 {
+		return // gate disabled: classify and stop the agent, but park nobody
+	}
+	// A wall that stated its own reset time knows better than the default.
+	if ae != nil && ae.RetryAfter > 0 {
+		cooldown = ae.RetryAfter
+	}
+	if cooldown > maxAccountWallCooldown {
+		cooldown = maxAccountWallCooldown
+	}
+	var message string
+	if ae != nil {
+		message = ae.Message
+	}
+	until := time.Now().Add(cooldown)
+
+	s.WallMu.Lock()
+	defer s.WallMu.Unlock()
+	if !until.After(s.WallUntil) {
+		return
+	}
+	s.WallUntil = until
+	s.WallClass = outcome
+	s.WallMessage = message
+}
+
+// accountWallActive reports the time remaining on a live account wall and the
+// message recorded with it. Returns ok=false once the wall has expired (or was
+// never armed) — expiry is purely time-based, so the fleet resumes on its own.
+func (s *Supervisor) accountWallActive() (time.Duration, string, bool) {
+	s.WallMu.Lock()
+	defer s.WallMu.Unlock()
+	if s.WallUntil.IsZero() {
+		return 0, "", false
+	}
+	remaining := time.Until(s.WallUntil)
+	if remaining <= 0 {
+		return 0, "", false
+	}
+	return remaining, s.WallMessage, true
+}
+
+// getAccountWallCooldown returns the configured fleet-wide wall cooldown.
+// 0 disables the gate entirely: walls still classify and still stop their own
+// agent, but no other agent is parked. The env override exists so integration
+// tests can arm and expire a wall without waiting fifteen minutes.
+func (s *Supervisor) getAccountWallCooldown() time.Duration {
+	if v := os.Getenv("LOOM_DAEMON_ACCOUNT_WALL_COOLDOWN_SECONDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			return time.Duration(n) * time.Second
+		}
+	}
+	cfg := s.ConfigSnapshot()
+	if cfg != nil && cfg.Daemon.RestartPolicy.AccountWallCooldown != nil {
+		return time.Duration(*cfg.Daemon.RestartPolicy.AccountWallCooldown) * time.Second
+	}
+	return defaultAccountWallCooldown
+}
+
+// accountWallBackoff is how long a parked agent sleeps before re-checking the
+// gate: exactly what the wall has left to run (itself capped at
+// maxAccountWallCooldown), or zero when the wall lifted under us.
+func (s *Supervisor) accountWallBackoff() time.Duration {
+	remaining, _, ok := s.accountWallActive()
+	if !ok {
+		return 0
+	}
+	return remaining
+}
+
 // computeBackoff returns the sleep duration before the next restart. The
 // policy disposition names the configured bucket (BackoffProfile); this
 // layer applies its restart_policy values and counters.
@@ -275,7 +405,12 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 	count := ap.RestartCount
 	rateCount := ap.RateRetryCount
 	blocked := ap.StopReason == StopReasonMaxRetriesBlocked
+	walled := ap.StopReason == StopReasonAccountWall
 	ap.Mu.Unlock()
+
+	if walled {
+		return s.accountWallBackoff()
+	}
 
 	// A blocked agent sleeps the fixed block interval — keyed on StopReason,
 	// not error class, because any counted class can exhaust the budget.
