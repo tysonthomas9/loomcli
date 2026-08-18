@@ -72,6 +72,7 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	}
 
 	cmd.Env = s.appendDaemonEnv(cmd.Env)
+	cmd.Env = appendProfileEnv(cmd.Env, s.ProjectDir, ap.Entry.Worktree)
 	cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_YIELD_FILE=%s", filepath.Join(ap.WorktreePath, YieldFileName)))
 	cmd.Env = appendSessionEnv(cmd.Env, ap)
 
@@ -546,4 +547,35 @@ func (s *Supervisor) appendDaemonEnv(env []string) []string {
 		env = append(env, fmt.Sprintf("LOOM_DAEMON_SOCKET=%s", s.IpcSocketPath))
 	}
 	return env
+}
+
+// AgentProfilesDirName is the workspace-relative root holding per-agent
+// harness profile directories: .loom/agent-profiles/<worktree>/{claude,codex}.
+// When a backend subdirectory exists for an agent, the supervisor exports the
+// matching harness config-root variable (CLAUDE_CONFIG_DIR / CODEX_HOME) into
+// the agent process. envfilter allowlists both names, so the value flows
+// unchanged through cli.FilteredEnv() into the harness child built by the
+// backends layer — no change is needed there.
+//
+// Directory existence is the whole contract: there is no config key and no
+// flag, so the same layout works unchanged inside a container image.
+const AgentProfilesDirName = "agent-profiles"
+
+// appendProfileEnv injects per-agent harness profile roots when they exist on
+// disk. Absent directories leave the environment untouched, preserving the
+// legacy behavior of inheriting the operator's ~/.claude and ~/.codex.
+func appendProfileEnv(env []string, projectDir, worktree string) []string {
+	root := filepath.Join(projectDir, ".loom", AgentProfilesDirName, worktree)
+	if dir := filepath.Join(root, "claude"); dirExists(dir) {
+		env = append(env, fmt.Sprintf("CLAUDE_CONFIG_DIR=%s", dir))
+	}
+	if dir := filepath.Join(root, "codex"); dirExists(dir) {
+		env = append(env, fmt.Sprintf("CODEX_HOME=%s", dir))
+	}
+	return env
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
