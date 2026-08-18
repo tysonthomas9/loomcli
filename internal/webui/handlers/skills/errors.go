@@ -11,14 +11,27 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
-//nolint:funlen // The domain-error → HTTP mapping is one exhaustive table.
+// writeSkillError renders one skill-handler failure.
+//
+// Errors this package maps itself are all 4xx — the client asked for something
+// it may not have — so they are logged once at Debug. Everything else is handed
+// to handler.HandleServiceError, which logs every error it writes at Error
+// level; logging here as well would put the same failure in the log twice.
 func writeSkillError(w http.ResponseWriter, err error) {
-	if isExpectedSkillClientError(err) {
-		slog.Debug("skill handler client error", "err", err)
-	} else {
-		slog.Error("skill handler error", "err", err)
+	status, body := mapSkillError(err)
+	if body == nil {
+		handler.HandleServiceError(w, err)
+		return
 	}
+	slog.Debug("skill handler client error", "status", status, "err", err)
+	handler.WriteJSON(w, status, body)
+}
 
+// mapSkillError translates a skill failure into the status and body this
+// package answers with, or a nil body when it has no mapping for it.
+//
+//nolint:funlen // The domain-error → HTTP mapping is one exhaustive table.
+func mapSkillError(err error) (int, map[string]string) {
 	var stale *domain.SkillPreconditionError
 	if errors.As(err, &stale) || errors.Is(err, domain.ErrSkillPreconditionFailed) {
 		response := map[string]string{
@@ -28,16 +41,14 @@ func writeSkillError(w http.ResponseWriter, err error) {
 		if stale != nil && stale.Stored != "" {
 			response["revision"] = stale.Stored
 		}
-		handler.WriteJSON(w, http.StatusPreconditionFailed, response)
-		return
+		return http.StatusPreconditionFailed, response
 	}
 
 	var pathErr *skillRequestPathError
 	if errors.As(err, &pathErr) {
-		handler.WriteJSON(w, http.StatusBadRequest, map[string]string{
+		return http.StatusBadRequest, map[string]string{
 			"code": "skill_validation_failed", "error": "invalid skill request path", "detail": pathErr.Error(),
-		})
-		return
+		}
 	}
 
 	var conflict *domain.SkillProvenanceConflictError
@@ -52,59 +63,51 @@ func writeSkillError(w http.ResponseWriter, err error) {
 			response["owner"] = conflict.ExistingCreatedBy
 			response["source"] = conflict.ExistingSource
 		}
-		handler.WriteJSON(w, http.StatusConflict, response)
-		return
+		return http.StatusConflict, response
 	}
 
 	if errors.Is(err, domain.ErrSkillForbidden) {
-		handler.WriteJSON(w, http.StatusForbidden, map[string]string{
+		return http.StatusForbidden, map[string]string{
 			"code":   "skill_forbidden",
 			"error":  "the backing skill service refused this operation",
 			"detail": err.Error(),
-		})
-		return
+		}
 	}
 
 	if errors.Is(err, domain.ErrNotFound) {
-		handler.WriteJSON(w, http.StatusNotFound, map[string]string{
+		return http.StatusNotFound, map[string]string{
 			"code":  "skill_not_found",
 			"error": "skill or skill file not found",
-		})
-		return
+		}
 	}
 
 	if errors.Is(err, domain.ErrInvalid) {
-		writeSkillValidationError(w, err.Error())
-		return
+		return skillValidationError(err.Error())
 	}
 	if errors.Is(err, domain.ErrAlreadyExists) || errors.Is(err, domain.ErrConflict) {
-		handler.WriteJSON(w, http.StatusConflict, map[string]string{
+		return http.StatusConflict, map[string]string{
 			"code":  "skill_conflict",
 			"error": "skill operation conflicted with current state",
-		})
-		return
+		}
 	}
 
 	var svcErr *service.ServiceError
 	if errors.As(err, &svcErr) {
 		switch svcErr.Kind {
 		case service.KindValidation:
-			writeSkillValidationError(w, svcErr.Message)
-			return
+			return skillValidationError(svcErr.Message)
 		case service.KindForbidden:
-			handler.WriteJSON(w, http.StatusForbidden, map[string]string{
+			return http.StatusForbidden, map[string]string{
 				"code": "skill_forbidden", "error": svcErr.Message,
-			})
-			return
+			}
 		case service.KindNotFound:
-			handler.WriteJSON(w, http.StatusNotFound, map[string]string{
+			return http.StatusNotFound, map[string]string{
 				"code": "skill_not_found", "error": svcErr.Message,
-			})
-			return
+			}
 		}
 	}
 
-	handler.HandleServiceError(w, err)
+	return 0, nil
 }
 
 type skillRequestPathError struct{ err error }
@@ -116,28 +119,14 @@ func invalidSkillRequestPath(err error) error {
 	return &skillRequestPathError{err: err}
 }
 
-func isExpectedSkillClientError(err error) bool {
-	if errors.Is(err, domain.ErrSkillPreconditionFailed) ||
-		errors.Is(err, domain.ErrSkillProvenanceConflict) ||
-		errors.Is(err, domain.ErrSkillForbidden) ||
-		errors.Is(err, domain.ErrNotFound) ||
-		errors.Is(err, domain.ErrInvalid) ||
-		errors.Is(err, domain.ErrAlreadyExists) ||
-		errors.Is(err, domain.ErrConflict) {
-		return true
-	}
-	var svcErr *service.ServiceError
-	return errors.As(err, &svcErr) && svcErr.Kind != service.KindInternal
-}
-
 func invalidSkillf(format string, args ...any) error {
 	return fmt.Errorf(format+": %w", append(args, domain.ErrInvalid)...)
 }
 
-func writeSkillValidationError(w http.ResponseWriter, detail string) {
-	handler.WriteJSON(w, http.StatusUnprocessableEntity, map[string]string{
+func skillValidationError(detail string) (int, map[string]string) {
+	return http.StatusUnprocessableEntity, map[string]string{
 		"code":   "skill_validation_failed",
 		"error":  "skill validation failed",
 		"detail": detail,
-	})
+	}
 }
