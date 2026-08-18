@@ -19,6 +19,12 @@ const primaryBackendRetryCooldown = time.Minute
 // than an exponential backoff, and never count these retries toward max_retries.
 const backendUnavailableRecheckInterval = 30 * time.Second
 
+// defaultClaimHoldRecheckInterval is the fixed delay between re-checks while a
+// workspace-level claim hold is active. The hold is released by an operator (or
+// expires), so we poll on a fixed interval and never count these re-checks
+// toward max_retries — a quiesce is not an agent failure.
+const defaultClaimHoldRecheckInterval = 15 * time.Second
+
 // defaultMaxRetriesBlockInterval is the fixed delay between re-attempts after
 // an agent has exhausted its restart budget and blocked (policy OnExhaustion
 // Block). Rather than abandoning the agent (silent loss until a daemon
@@ -74,22 +80,34 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 		return false
 
 	case agentpolicy.RetryUncounted:
-		if outcome.Is(agenterr.NoWorkOutcome) {
-			s.applyNoWorkRestart(ap)
-			return true
-		}
-		// Rate limits: unlimited uncounted retries by default; the
-		// rate_limit_no_count config opt-out routes them through the
-		// counted budget instead (the layer's config wins, pt7).
-		if s.getRateLimitNoCount() {
-			s.applyRateLimitedRestart(ap)
-			return true
-		}
-		return s.applyCountedRestart(ap, d, maxRetries)
+		return s.applyUncountedRestart(ap, outcome, d, maxRetries)
 
 	default: // Retry
 		return s.applyCountedRestart(ap, d, maxRetries)
 	}
+}
+
+// applyUncountedRestart handles the RetryUncounted dispositions — a claim
+// hold, no work, and rate limiting — each of which restarts without eroding
+// the retry budget for its own reason. Caller holds ap.Mu.
+func (s *Supervisor) applyUncountedRestart(ap *AgentProcess, outcome agenterr.Outcome,
+	d agentpolicy.Disposition, maxRetries int) bool {
+	if outcome.Is(agenterr.ClaimsHeldOutcome) {
+		s.applyClaimsHeldRestart(ap)
+		return true
+	}
+	if outcome.Is(agenterr.NoWorkOutcome) {
+		s.applyNoWorkRestart(ap)
+		return true
+	}
+	// Rate limits: unlimited uncounted retries by default; the
+	// rate_limit_no_count config opt-out routes them through the
+	// counted budget instead (the layer's config wins, pt7).
+	if s.getRateLimitNoCount() {
+		s.applyRateLimitedRestart(ap)
+		return true
+	}
+	return s.applyCountedRestart(ap, d, maxRetries)
 }
 
 // stopAfterEphemeralTask stops the supervisor once an ephemeral agent has
@@ -255,6 +273,25 @@ func (s *Supervisor) applyBackendUnavailableRestart(ap *AgentProcess) {
 		ap.Entry.Worktree, s.backendRecheckBackoff())
 }
 
+// applyClaimsHeldRestart keeps an agent cycling while a claim hold is active.
+// Caller holds ap.Mu. It resets nothing and increments nothing: every counter
+// stays frozen at its pre-hold value so releasing the hold resumes exactly
+// where the fleet left off. StopReason is deliberately NOT set — the agent is
+// not stopped, only gated.
+func (s *Supervisor) applyClaimsHeldRestart(ap *AgentProcess) {
+	log.Printf("[daemon] Agent %s: claims held, will recheck in %s (not counted toward max_retries)",
+		ap.Entry.Worktree, s.claimHoldRecheckBackoff())
+}
+
+// claimHoldRecheckBackoff is the fixed delay between claim-hold re-checks
+// (configurable via claimHoldRecheckInterval; package default otherwise).
+func (s *Supervisor) claimHoldRecheckBackoff() time.Duration {
+	if s.claimHoldRecheckInterval > 0 {
+		return s.claimHoldRecheckInterval
+	}
+	return defaultClaimHoldRecheckInterval
+}
+
 // backendRecheckBackoff is the fixed delay between BackendUnavailable re-checks
 // (configurable via backendRecheckInterval; package default otherwise).
 func (s *Supervisor) backendRecheckBackoff() time.Duration {
@@ -299,6 +336,10 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 		// Fixed recheck: waiting for the backend CLI to reappear, not
 		// backing off a flaky run.
 		return s.backendRecheckBackoff()
+	case agentpolicy.BPClaimsHeld:
+		// Fixed recheck: waiting for an operator to release a hold, not
+		// backing off a flaky run.
+		return s.claimHoldRecheckBackoff()
 	case agentpolicy.BPBlock:
 		return s.maxRetriesBlockBackoff()
 	case agentpolicy.BPRateLimit:

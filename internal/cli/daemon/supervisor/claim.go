@@ -337,3 +337,208 @@ func (s *Supervisor) releaseAssignedTaskClaim(ap *AgentProcess, taskID string) {
 		slog.Debug("agent task claim release skipped", "worktree", ap.Entry.Worktree, "task_id", taskID, "err", err)
 	}
 }
+
+// claimHoldStillHeldLogInterval rate-limits the "still held" INFO line emitted
+// from gateClaimsHeld. Agents cycle every claimHoldRecheckInterval, so without
+// this a held fleet would write one line per agent per re-check.
+const claimHoldStillHeldLogInterval = 5 * time.Minute
+
+// ClaimHold is a workspace-level, explicitly-owned refusal to START new work.
+//
+// It gates the claim path ONLY: no yield file is written, no signal is sent,
+// and no deadline is imposed on a run that is already in flight. It performs
+// zero fleet-db calls by design — its whole purpose is to quiesce a workspace
+// while fleet-db itself is being redeployed.
+type ClaimHold struct {
+	Held      bool      `json:"held"`
+	Actor     string    `json:"actor"`
+	Reason    string    `json:"reason"`
+	Since     time.Time `json:"since"`
+	ExpiresAt time.Time `json:"expires_at,omitempty"` // zero = indefinite
+}
+
+// Active reports whether the hold should gate work at the given instant.
+// Nil-safe: a nil hold is never active. A hold with a zero ExpiresAt is
+// indefinite.
+func (h *ClaimHold) Active(now time.Time) bool {
+	if h == nil || !h.Held {
+		return false
+	}
+	if h.ExpiresAt.IsZero() {
+		return true
+	}
+	return now.Before(h.ExpiresAt)
+}
+
+// clone returns a copy so callers never hold a pointer into the supervisor's
+// mutex-guarded state.
+func (h *ClaimHold) clone() *ClaimHold {
+	if h == nil {
+		return nil
+	}
+	c := *h
+	return &c
+}
+
+// SetClaimHold applies a claim hold (or clears it when h is nil / not held)
+// and persists it through the injected PersistClaimHold hook. A persist
+// failure is returned to the caller AND logged: the in-memory hold is still
+// applied, so the operator learns the hold will not survive a daemon restart
+// rather than silently losing it.
+func (s *Supervisor) SetClaimHold(h *ClaimHold) error {
+	stored := h.clone()
+	if stored != nil && !stored.Held {
+		stored = nil
+	}
+	s.claimHoldMu.Lock()
+	s.claimHold = stored
+	s.claimHoldExpiryLogged = false
+	s.claimHoldLastHeldLog = time.Time{}
+	persist := s.PersistClaimHold
+	s.claimHoldMu.Unlock()
+
+	if persist == nil {
+		return nil
+	}
+	// File I/O deliberately outside the lock.
+	if err := persist(stored); err != nil {
+		slog.Error("failed to persist claim hold; it will not survive a daemon restart", "err", err)
+		return err
+	}
+	return nil
+}
+
+// ReleaseClaimHold clears an active hold. Releasing a hold owned by a
+// DIFFERENT actor requires force — an operator must not silently undo another
+// operator's (or a deploy script's) quiesce.
+func (s *Supervisor) ReleaseClaimHold(actor string, force bool) error {
+	s.claimHoldMu.RLock()
+	current := s.claimHold.clone()
+	s.claimHoldMu.RUnlock()
+
+	if !current.Active(time.Now()) {
+		return s.SetClaimHold(nil)
+	}
+	if !force && current.Actor != actor {
+		slog.Warn("refusing foreign claim-hold release", "holder", current.Actor, "requester", actor)
+		return fmt.Errorf("claims held by %s since %s; use --force to release",
+			current.Actor, current.Since.Format(time.RFC3339))
+	}
+	return s.SetClaimHold(nil)
+}
+
+// ClaimHoldSnapshot returns a copy of the current hold, evaluating expiry on
+// read. On the first observation of an expired hold it clears the in-memory
+// hold, clears the persisted file, and logs one WARN — so an expiry is visible
+// exactly once rather than per agent per cycle.
+func (s *Supervisor) ClaimHoldSnapshot() *ClaimHold {
+	now := time.Now()
+
+	s.claimHoldMu.Lock()
+	held := s.claimHold
+	if held == nil {
+		s.claimHoldMu.Unlock()
+		return nil
+	}
+	if held.Active(now) {
+		snap := held.clone()
+		s.claimHoldMu.Unlock()
+		return snap
+	}
+	expired := held.clone()
+	s.claimHold = nil
+	first := !s.claimHoldExpiryLogged
+	s.claimHoldExpiryLogged = true
+	persist := s.PersistClaimHold
+	s.claimHoldMu.Unlock()
+
+	if first {
+		slog.Warn("claim hold expired; agents will resume claiming",
+			"actor", expired.Actor, "reason", expired.Reason,
+			"since", expired.Since, "expires_at", expired.ExpiresAt)
+		if persist != nil {
+			if err := persist(nil); err != nil {
+				slog.Error("failed to clear expired claim-hold file", "err", err)
+			}
+		}
+	}
+	return nil
+}
+
+// LoadClaimHold hydrates the in-memory hold at daemon startup. It deliberately
+// does NOT persist — the value came from the file in the first place.
+func (s *Supervisor) LoadClaimHold(h *ClaimHold) {
+	stored := h.clone()
+	if stored != nil && !stored.Held {
+		stored = nil
+	}
+	s.claimHoldMu.Lock()
+	s.claimHold = stored
+	s.claimHoldExpiryLogged = false
+	s.claimHoldLastHeldLog = time.Time{}
+	s.claimHoldMu.Unlock()
+}
+
+// gateClaimsHeld is the FIRST gate in preFlightSetup: an active hold stops the
+// agent before any backend query, any recovery and any session creation.
+// Returns false when the agent must not start.
+func (s *Supervisor) gateClaimsHeld(ap *AgentProcess) bool {
+	h := s.ClaimHoldSnapshot()
+	if !h.Active(time.Now()) {
+		return true
+	}
+	s.logStillHeld(h)
+	s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.ClaimsHeldOutcome),
+		fmt.Sprintf("claims held by %s since %s (%s)", h.Actor, h.Since.Format(time.RFC3339), h.Reason))
+	return false
+}
+
+// logStillHeld emits the rate-limited "still held" INFO line. Rate limiting
+// lives here rather than in a ticker goroutine: there is no lifecycle to
+// manage, and it only logs while agents are actually cycling.
+func (s *Supervisor) logStillHeld(h *ClaimHold) {
+	now := time.Now()
+	s.claimHoldMu.Lock()
+	if !s.claimHoldLastHeldLog.IsZero() && now.Sub(s.claimHoldLastHeldLog) < claimHoldStillHeldLogInterval {
+		s.claimHoldMu.Unlock()
+		return
+	}
+	s.claimHoldLastHeldLog = now
+	s.claimHoldMu.Unlock()
+
+	gated, running := s.claimHoldGateCounts()
+	slog.Info("claims held", "actor", h.Actor, "reason", h.Reason,
+		"since", h.Since.Format(time.RFC3339), "expires", claimHoldExpiryLabel(h),
+		"gated_agents", gated, "running", running)
+}
+
+// claimHoldExpiryLabel renders a hold's expiry for logs and status output.
+func claimHoldExpiryLabel(h *ClaimHold) string {
+	if h == nil || h.ExpiresAt.IsZero() {
+		return "never"
+	}
+	return h.ExpiresAt.Format(time.RFC3339)
+}
+
+// claimHoldGateCounts counts, in one pass, the agents currently gated by a
+// claim hold and those still running a process. It walks the agent list
+// directly rather than going through GetAgents: this runs on the pre-flight
+// path, and GetAgents resolves per-agent backend config it does not need.
+func (s *Supervisor) claimHoldGateCounts() (gated, running int) {
+	s.AgentsMu.RLock()
+	snapshot := make([]*AgentProcess, len(s.Agents))
+	copy(snapshot, s.Agents)
+	s.AgentsMu.RUnlock()
+
+	for _, ap := range snapshot {
+		ap.Mu.Lock()
+		if ap.LastError != nil && ap.LastError.Class.Is(agenterr.ClaimsHeldOutcome) {
+			gated++
+		}
+		if ap.Pid > 0 {
+			running++
+		}
+		ap.Mu.Unlock()
+	}
+	return gated, running
+}
