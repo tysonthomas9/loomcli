@@ -100,7 +100,7 @@ func (r *unixSecureRoot) Lstat(name string) (securePathInfo, error) {
 	if err := unix.Fstatat(parent, base, &stat, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 		return securePathInfo{}, securePathError(name, err)
 	}
-	info := securePathInfo{Mode: fileModeFromUnixStat(stat)}
+	info := securePathInfo{Mode: fileModeFromUnixStat(stat), Size: stat.Size}
 	if info.Mode&os.ModeSymlink != 0 {
 		target, err := readlinkAt(parent, base)
 		if err != nil {

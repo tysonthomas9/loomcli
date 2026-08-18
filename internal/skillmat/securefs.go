@@ -21,5 +21,6 @@ type secureRoot interface {
 
 type securePathInfo struct {
 	Mode       os.FileMode
+	Size       int64
 	LinkTarget string
 }

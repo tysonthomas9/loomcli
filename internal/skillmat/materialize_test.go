@@ -121,15 +121,203 @@ func TestMaterializeResolvesRoleSkillAndWritesAgentLayout(t *testing.T) {
 		t.Fatalf("decode marker: %v", err)
 	}
 	wantPaths := []string{
+		".agents/skills/INDEX.md",
 		".agents/skills/alpha/SKILL.md",
 		".agents/skills/alpha/scripts/run.sh",
+		".agents/skills/loom-skill-catalog/SKILL.md",
 		".claude/skills/alpha",
+		".claude/skills/loom-skill-catalog",
 	}
 	if !reflect.DeepEqual(gotMarker.Paths, wantPaths) {
 		t.Fatalf("marker paths = %#v, want %#v", gotMarker.Paths, wantPaths)
 	}
 	if gotMarker.Hash == "" {
 		t.Fatal("marker hash is empty")
+	}
+}
+
+//nolint:funlen // The test verifies the complete synthetic catalog projection in one fixture.
+func TestMaterializeWritesLiveSkillCatalog(t *testing.T) {
+	target := t.TempDir()
+	st := materializeStore{skills: staticSkillStore{skills: []*domain.Skill{
+		{Name: "zulu", Scope: domain.SkillScopeWorkspace, Description: "Zulu skill", Content: "zulu\n"},
+		{Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "Alpha skill", Content: "alpha\n"},
+	}}}
+
+	if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+		t.Fatalf("Materialize: %v", err)
+	}
+
+	index, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(IndexPath)))
+	if err != nil {
+		t.Fatalf("read INDEX.md: %v", err)
+	}
+	wantIndex := "# Loom skills — live catalog\n" +
+		"\n" +
+		"Current as of the last turn boundary. Loom rewrites this file when skills\n" +
+		"change; it supersedes any skill list captured at session start.\n" +
+		"\n" +
+		"- **alpha** — Alpha skill → read `.agents/skills/alpha/SKILL.md`\n" +
+		"- **loom-skill-catalog** — Read this before listing or choosing skills. Loom adds/removes skills between turns; a session-start skill list may be stale. The live catalog is .agents/skills/INDEX.md. → read `.agents/skills/loom-skill-catalog/SKILL.md`\n" +
+		"- **zulu** — Zulu skill → read `.agents/skills/zulu/SKILL.md`\n"
+	if string(index) != wantIndex {
+		t.Fatalf("INDEX.md = %q, want %q", index, wantIndex)
+	}
+
+	catalogPath := filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), CatalogSkillName, domain.SkillFileNameSKILLMD)
+	catalog, err := os.ReadFile(catalogPath)
+	if err != nil {
+		t.Fatalf("read catalog SKILL.md: %v", err)
+	}
+	wantCatalog := "---\n" +
+		"name: loom-skill-catalog\n" +
+		"description: Read this before listing or choosing skills. Loom adds/removes skills between turns; a session-start skill list may be stale. The live catalog is .agents/skills/INDEX.md.\n" +
+		"---\n" +
+		"Loom manages the skills in this directory centrally. The set can change\n" +
+		"between your turns: skills are added, updated, and removed while your\n" +
+		"session is running.\n" +
+		"\n" +
+		"- The authoritative, always-current catalog: `.agents/skills/INDEX.md`.\n" +
+		"- Any skill list captured at session start may be stale; prefer INDEX.md.\n" +
+		"- To use a skill, read `.agents/skills/<name>/SKILL.md` and follow it.\n"
+	if string(catalog) != wantCatalog {
+		t.Fatalf("catalog SKILL.md = %q, want %q", catalog, wantCatalog)
+	}
+	info, err := os.Stat(catalogPath)
+	if err != nil {
+		t.Fatalf("stat catalog SKILL.md: %v", err)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Fatalf("catalog SKILL.md mode = %o, want 644", info.Mode().Perm())
+	}
+	linkTarget, err := os.Readlink(filepath.Join(target, filepath.FromSlash(ClaudeSkillsDir), CatalogSkillName))
+	if err != nil {
+		t.Fatalf("read catalog compatibility link: %v", err)
+	}
+	if linkTarget != "../../.agents/skills/loom-skill-catalog" {
+		t.Fatalf("catalog compatibility link = %q", linkTarget)
+	}
+}
+
+func TestMaterializeCatalogAnnotatesShadowedSkill(t *testing.T) {
+	target := t.TempDir()
+	st := materializeStore{skills: staticSkillStore{skills: []*domain.Skill{
+		{Name: "review", Scope: domain.SkillScopeWorkspace, Description: "workspace review", Content: "workspace\n"},
+		{Name: "review", Scope: domain.SkillScopeRole, RoleName: "lead", Description: "lead review", Content: "lead\n"},
+	}}}
+
+	if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+		t.Fatalf("Materialize: %v", err)
+	}
+	index, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(IndexPath)))
+	if err != nil {
+		t.Fatalf("read INDEX.md: %v", err)
+	}
+	wantLine := "- **review** — lead review (overrides the workspace skill of the same name) → read `.agents/skills/review/SKILL.md`\n"
+	if !strings.Contains(string(index), wantLine) {
+		t.Fatalf("INDEX.md = %q, want shadow annotation %q", index, wantLine)
+	}
+	if strings.Contains(string(index), "workspace review") {
+		t.Fatalf("INDEX.md includes shadowed workspace description: %q", index)
+	}
+}
+
+func TestMaterializeRewritesCatalogAfterSkillRemoval(t *testing.T) {
+	target := t.TempDir()
+	alpha := &domain.Skill{Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "Alpha skill", Content: "alpha\n"}
+	beta := &domain.Skill{Name: "beta", Scope: domain.SkillScopeWorkspace, Description: "Beta skill", Content: "beta\n"}
+	skills := &staticSkillStore{skills: []*domain.Skill{alpha, beta}}
+	st := materializeStore{skills: skills}
+	if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+		t.Fatalf("initial Materialize: %v", err)
+	}
+
+	skills.skills = []*domain.Skill{alpha}
+	if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+		t.Fatalf("Materialize after removal: %v", err)
+	}
+	index, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(IndexPath)))
+	if err != nil {
+		t.Fatalf("read rewritten INDEX.md: %v", err)
+	}
+	if strings.Contains(string(index), "**beta**") || !strings.Contains(string(index), "**alpha**") {
+		t.Fatalf("rewritten INDEX.md = %q, want alpha without beta", index)
+	}
+	for _, removed := range []string{
+		filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "beta"),
+		filepath.Join(target, filepath.FromSlash(ClaudeSkillsDir), "beta"),
+	} {
+		if _, err := os.Lstat(removed); !os.IsNotExist(err) {
+			t.Fatalf("removed skill path %q still exists or failed unexpectedly: %v", removed, err)
+		}
+	}
+}
+
+func TestMaterializeZeroSkillsWritesCatalogOnly(t *testing.T) {
+	target := t.TempDir()
+	if err := Materialize(t.Context(), materializeStore{skills: staticSkillStore{}}, "WS", "lead", target); err != nil {
+		t.Fatalf("Materialize: %v", err)
+	}
+
+	index, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(IndexPath)))
+	if err != nil {
+		t.Fatalf("read INDEX.md: %v", err)
+	}
+	wantIndex := skillIndexPreamble +
+		"- **loom-skill-catalog** — " + catalogSkillDescription + " → read `.agents/skills/loom-skill-catalog/SKILL.md`\n"
+	if string(index) != wantIndex {
+		t.Fatalf("INDEX.md = %q, want catalog-only index %q", index, wantIndex)
+	}
+	if _, err := os.Stat(filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), CatalogSkillName, domain.SkillFileNameSKILLMD)); err != nil {
+		t.Fatalf("stat catalog SKILL.md: %v", err)
+	}
+	if _, err := os.Readlink(filepath.Join(target, filepath.FromSlash(ClaudeSkillsDir), CatalogSkillName)); err != nil {
+		t.Fatalf("read catalog compatibility link: %v", err)
+	}
+
+	markerBytes, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(MarkerPath)))
+	if err != nil {
+		t.Fatalf("read marker: %v", err)
+	}
+	var gotMarker marker
+	if err := json.Unmarshal(markerBytes, &gotMarker); err != nil {
+		t.Fatalf("decode marker: %v", err)
+	}
+	wantPaths := []string{
+		IndexPath,
+		path.Join(AgentsSkillsDir, CatalogSkillName, domain.SkillFileNameSKILLMD),
+		path.Join(ClaudeSkillsDir, CatalogSkillName),
+	}
+	if !reflect.DeepEqual(gotMarker.Paths, wantPaths) {
+		t.Fatalf("marker paths = %#v, want %#v", gotMarker.Paths, wantPaths)
+	}
+	for _, managedPath := range wantPaths {
+		if !validManagedPath(managedPath) {
+			t.Fatalf("synthetic marker path %q is not valid", managedPath)
+		}
+	}
+}
+
+func TestMaterializeRejectsUnmanagedSkillIndex(t *testing.T) {
+	target := t.TempDir()
+	indexPath := filepath.Join(target, filepath.FromSlash(IndexPath))
+	if err := os.MkdirAll(filepath.Dir(indexPath), 0o755); err != nil {
+		t.Fatalf("create skill directory: %v", err)
+	}
+	if err := os.WriteFile(indexPath, []byte("user-managed index\n"), 0o644); err != nil {
+		t.Fatalf("write unmanaged INDEX.md: %v", err)
+	}
+
+	err := Materialize(t.Context(), materializeStore{skills: staticSkillStore{}}, "WS", "lead", target)
+	if err == nil || !strings.Contains(err.Error(), "INDEX.md") || !strings.Contains(err.Error(), "unrecorded") {
+		t.Fatalf("Materialize error = %v, want unmanaged INDEX.md collision", err)
+	}
+	got, readErr := os.ReadFile(indexPath)
+	if readErr != nil || string(got) != "user-managed index\n" {
+		t.Fatalf("unmanaged INDEX.md changed: content=%q err=%v", got, readErr)
+	}
+	if _, statErr := os.Lstat(filepath.Join(target, filepath.FromSlash(MarkerPath))); !os.IsNotExist(statErr) {
+		t.Fatalf("marker exists after collision: %v", statErr)
 	}
 }
 
@@ -604,8 +792,13 @@ func TestMaterializeRemovalPreservesUnrecordedFiles(t *testing.T) {
 	if err := json.Unmarshal(markerBytes, &gotMarker); err != nil {
 		t.Fatalf("decode marker: %v", err)
 	}
-	if len(gotMarker.Paths) != 0 {
-		t.Fatalf("marker paths after removal = %#v, want empty", gotMarker.Paths)
+	wantPaths := []string{
+		IndexPath,
+		path.Join(AgentsSkillsDir, CatalogSkillName, domain.SkillFileNameSKILLMD),
+		path.Join(ClaudeSkillsDir, CatalogSkillName),
+	}
+	if !reflect.DeepEqual(gotMarker.Paths, wantPaths) {
+		t.Fatalf("marker paths after removal = %#v, want %#v", gotMarker.Paths, wantPaths)
 	}
 }
 

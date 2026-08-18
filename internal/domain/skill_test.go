@@ -345,6 +345,7 @@ func TestValidateSkillName(t *testing.T) {
 		{name: "../escape", ok: false},
 		{name: "claude", ok: false},
 		{name: "anthropic", ok: false},
+		{name: "loom-skill-catalog", ok: false},
 		{name: "con", ok: false},
 		{name: "nul", ok: false},
 		{name: "com1", ok: false},

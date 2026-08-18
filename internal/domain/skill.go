@@ -68,9 +68,13 @@ var skillNamePattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 // security boundary.
 var roleNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9._-]{0,98}[a-z0-9])?$`)
 
-// skillReservedNames are the names the Agent Skills spec reserves; the
-// packaging tooling that consumes a materialized directory rejects them.
-var skillReservedNames = map[string]bool{"anthropic": true, "claude": true}
+// skillReservedNames are the names the Agent Skills spec or Loom's synthetic
+// skill catalog reserves; the materialized directory owns these names.
+var skillReservedNames = map[string]bool{
+	"anthropic":          true,
+	"claude":             true,
+	"loom-skill-catalog": true,
+}
 
 // skillDeviceNames are the DOS device names Windows resolves in every
 // directory, so a skill named "con" is one that materializes everywhere except

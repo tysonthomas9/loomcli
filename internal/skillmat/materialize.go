@@ -37,11 +37,33 @@ const (
 	ClaudeSkillsDir = ".claude/skills"
 	// MarkerPath records the projection hash and every managed file or link.
 	MarkerPath = AgentsSkillsDir + "/.loom-skills-marker.json"
+	// IndexPath is the live catalog of skills in the current projection.
+	IndexPath = AgentsSkillsDir + "/INDEX.md"
+	// CatalogSkillName is the synthetic skill that points agents at IndexPath.
+	CatalogSkillName = "loom-skill-catalog"
 
 	markerVersion  = 1
 	maxMarkerBytes = 1 << 20
 
 	projectionTempPrefix = ".loom-skill-tmp-"
+
+	catalogSkillDescription = "Read this before listing or choosing skills. Loom adds/removes skills between turns; a session-start skill list may be stale. The live catalog is .agents/skills/INDEX.md."
+	catalogSkillDocument    = "---\n" +
+		"name: loom-skill-catalog\n" +
+		"description: " + catalogSkillDescription + "\n" +
+		"---\n" +
+		"Loom manages the skills in this directory centrally. The set can change\n" +
+		"between your turns: skills are added, updated, and removed while your\n" +
+		"session is running.\n" +
+		"\n" +
+		"- The authoritative, always-current catalog: `.agents/skills/INDEX.md`.\n" +
+		"- Any skill list captured at session start may be stale; prefer INDEX.md.\n" +
+		"- To use a skill, read `.agents/skills/<name>/SKILL.md` and follow it.\n"
+	skillIndexPreamble = "# Loom skills — live catalog\n" +
+		"\n" +
+		"Current as of the last turn boundary. Loom rewrites this file when skills\n" +
+		"change; it supersedes any skill list captured at session start.\n" +
+		"\n"
 )
 
 type marker struct {
@@ -323,7 +345,7 @@ func isUnavailableStoreError(err error) bool {
 
 //nolint:funlen // One skill's projection entries are derived in one pass.
 func desiredEntries(resolved []domain.ResolvedSkill) ([]desiredEntry, error) {
-	entries := make([]desiredEntry, 0, len(resolved)*2)
+	entries := make([]desiredEntry, 0, len(resolved)*2+3)
 	for _, item := range resolved {
 		skill := item.Skill
 		if skill == nil {
@@ -373,8 +395,71 @@ func desiredEntries(resolved []domain.ResolvedSkill) ([]desiredEntry, error) {
 			SourcePath: skill.Name,
 		})
 	}
+	entries = append(entries, catalogEntries(resolved)...)
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
 	return entries, nil
+}
+
+func catalogEntries(resolved []domain.ResolvedSkill) []desiredEntry {
+	catalogDir := path.Join(AgentsSkillsDir, CatalogSkillName)
+	return []desiredEntry{
+		{
+			Path:       IndexPath,
+			Kind:       entryFile,
+			Content:    renderSkillIndex(resolved),
+			Mode:       0o644,
+			Skill:      CatalogSkillName,
+			SourcePath: path.Base(IndexPath),
+		},
+		{
+			Path:       path.Join(catalogDir, domain.SkillFileNameSKILLMD),
+			Kind:       entryFile,
+			Content:    []byte(catalogSkillDocument),
+			Mode:       0o644,
+			Skill:      CatalogSkillName,
+			SourcePath: domain.SkillFileNameSKILLMD,
+		},
+		{
+			Path:       path.Join(ClaudeSkillsDir, CatalogSkillName),
+			Kind:       entrySymlink,
+			LinkTarget: "../../.agents/skills/" + CatalogSkillName,
+			Skill:      CatalogSkillName,
+			SourcePath: CatalogSkillName,
+		},
+	}
+}
+
+func renderSkillIndex(resolved []domain.ResolvedSkill) []byte {
+	var content strings.Builder
+	content.WriteString(skillIndexPreamble)
+	catalogWritten := false
+	for _, item := range resolved {
+		if item.Skill == nil {
+			continue
+		}
+		if !catalogWritten && CatalogSkillName < item.Skill.Name {
+			writeSkillIndexLine(&content, CatalogSkillName, catalogSkillDescription, false)
+			catalogWritten = true
+		}
+		writeSkillIndexLine(&content, item.Skill.Name, item.Skill.Description, item.Shadowed != nil)
+	}
+	if !catalogWritten {
+		writeSkillIndexLine(&content, CatalogSkillName, catalogSkillDescription, false)
+	}
+	return []byte(content.String())
+}
+
+func writeSkillIndexLine(content *strings.Builder, name, description string, shadowed bool) {
+	content.WriteString("- **")
+	content.WriteString(name)
+	content.WriteString("** — ")
+	content.WriteString(description)
+	if shadowed {
+		content.WriteString(" (overrides the workspace skill of the same name)")
+	}
+	content.WriteString(" → read `")
+	content.WriteString(path.Join(AgentsSkillsDir, name, domain.SkillFileNameSKILLMD))
+	content.WriteString("`\n")
 }
 
 func validateBundledPath(name string) error {
@@ -654,6 +739,9 @@ func entryExactlyMatches(root secureRoot, entry desiredEntry) (bool, error) {
 			return false, err
 		}
 		if !info.Mode.IsRegular() || info.Mode.Perm() != entry.Mode.Perm() {
+			return false, nil
+		}
+		if info.Size != int64(len(entry.Content)) {
 			return false, nil
 		}
 		content, mode, err := root.ReadFile(entry.Path, int64(len(entry.Content))+1)
