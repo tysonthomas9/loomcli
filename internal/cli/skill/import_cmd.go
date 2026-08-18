@@ -54,16 +54,8 @@ func newSkillImportCommand() *cobra.Command {
 }
 
 func runSkillImport(cmd *cobra.Command, directory string, flags skillImportFlags) error {
-	if err := refuseAgentSkillWrite("loom skill import"); err != nil {
+	if err := checkSkillIngestFlags(cmd, "loom skill import", flags.scope, flags.name); err != nil {
 		return err
-	}
-	if _, _, err := parseSkillScope(flags.scope); err != nil {
-		return err
-	}
-	if cmd.Flags().Changed("name") {
-		if err := domain.ValidateSkillName(flags.name); err != nil {
-			return err
-		}
 	}
 	local, err := readLocalSkillDirectory(directory, flags.name)
 	if err != nil {

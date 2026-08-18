@@ -162,10 +162,8 @@ func (s *skillStore) validateTarget(ws string, ref domain.SkillRef) error {
 	if ws == "" {
 		return fmt.Errorf("workspace_key required: %w", domain.ErrInvalid)
 	}
+	// SkillRef.Validate ends with ValidateSkillName, so the name is covered.
 	if err := ref.Validate(); err != nil {
-		return err
-	}
-	if err := domain.ValidateSkillName(ref.Name); err != nil {
 		return err
 	}
 	if ref.Scope == domain.SkillScopeRole && s.roles != nil && !s.roles.exists(ws, ref.RoleName) {

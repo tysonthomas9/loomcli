@@ -135,10 +135,6 @@ func (h *Handler) getSkill(w http.ResponseWriter, r *http.Request, scope domain.
 	writeSkillDetail(w, http.StatusOK, skill)
 }
 
-func (h *Handler) createWorkspaceSkill(w http.ResponseWriter, _ *http.Request) {
-	writeWorkspaceScopeReadonly(w)
-}
-
 func (h *Handler) createRoleSkill(w http.ResponseWriter, r *http.Request) {
 	roleName := r.PathValue("role")
 	if err := domain.ValidateRoleName(roleName); err != nil {
@@ -168,10 +164,6 @@ func (h *Handler) createRoleSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeSkillDetail(w, http.StatusCreated, skill)
-}
-
-func (h *Handler) patchWorkspaceSkill(w http.ResponseWriter, _ *http.Request) {
-	writeWorkspaceScopeReadonly(w)
 }
 
 func (h *Handler) patchRoleSkill(w http.ResponseWriter, r *http.Request) {
@@ -217,10 +209,6 @@ func (h *Handler) patchRoleSkill(w http.ResponseWriter, r *http.Request) {
 	writeSkillDetail(w, http.StatusOK, skill)
 }
 
-func (h *Handler) deleteWorkspaceSkill(w http.ResponseWriter, _ *http.Request) {
-	writeWorkspaceScopeReadonly(w)
-}
-
 func (h *Handler) deleteRoleSkill(w http.ResponseWriter, r *http.Request) {
 	ref, err := requestSkillRef(r, domain.SkillScopeRole)
 	if err != nil {
@@ -263,20 +251,8 @@ func (h *Handler) getSkillFile(w http.ResponseWriter, r *http.Request, scope dom
 	writeSkillFile(w, http.StatusOK, doc)
 }
 
-func (h *Handler) putWorkspaceSkillFile(w http.ResponseWriter, r *http.Request) {
-	h.putSkillFile(w, r, domain.SkillScopeWorkspace)
-}
-
 func (h *Handler) putRoleSkillFile(w http.ResponseWriter, r *http.Request) {
-	h.putSkillFile(w, r, domain.SkillScopeRole)
-}
-
-func (h *Handler) putSkillFile(w http.ResponseWriter, r *http.Request, scope domain.SkillScope) {
-	if scope == domain.SkillScopeWorkspace {
-		writeWorkspaceScopeReadonly(w)
-		return
-	}
-	ref, filePath, err := requestSkillFile(r, scope)
+	ref, filePath, err := requestSkillFile(r, domain.SkillScopeRole)
 	if err != nil {
 		writeSkillError(w, err)
 		return
@@ -313,20 +289,8 @@ func (h *Handler) putSkillFile(w http.ResponseWriter, r *http.Request, scope dom
 	writeSkillFile(w, status, doc)
 }
 
-func (h *Handler) deleteWorkspaceSkillFile(w http.ResponseWriter, r *http.Request) {
-	h.deleteSkillFile(w, r, domain.SkillScopeWorkspace)
-}
-
 func (h *Handler) deleteRoleSkillFile(w http.ResponseWriter, r *http.Request) {
-	h.deleteSkillFile(w, r, domain.SkillScopeRole)
-}
-
-func (h *Handler) deleteSkillFile(w http.ResponseWriter, r *http.Request, scope domain.SkillScope) {
-	if scope == domain.SkillScopeWorkspace {
-		writeWorkspaceScopeReadonly(w)
-		return
-	}
-	ref, filePath, err := requestSkillFile(r, scope)
+	ref, filePath, err := requestSkillFile(r, domain.SkillScopeRole)
 	if err != nil {
 		writeSkillError(w, err)
 		return
@@ -497,6 +461,14 @@ func (h *Handler) requireSkillRevision(w http.ResponseWriter, r *http.Request, r
 		return false
 	}
 	return true
+}
+
+// workspaceScopeReadonly answers every workspace-scoped mutation route. The
+// refusal is registered as the route's whole handler rather than checked inside
+// a shared one: nothing about the request is read, so no path, precondition or
+// body can ever be interpreted on a lane that has no writes.
+func workspaceScopeReadonly(w http.ResponseWriter, _ *http.Request) {
+	writeWorkspaceScopeReadonly(w)
 }
 
 func writeWorkspaceScopeReadonly(w http.ResponseWriter) {

@@ -42,19 +42,27 @@ func (m *Module) Register(mux *http.ServeMux) {
 
 	handle("GET /api/workspaces/{ws}/skill-capabilities", m.handler.getCapabilities)
 	handle("GET /api/workspaces/{ws}/skills", m.handler.getCatalog)
-	handle("POST /api/workspaces/{ws}/skills", m.handler.createWorkspaceSkill)
 	handle("GET /api/workspaces/{ws}/skills/{name}", m.handler.getWorkspaceSkill)
-	handle("PATCH /api/workspaces/{ws}/skills/{name}", m.handler.patchWorkspaceSkill)
-	handle("DELETE /api/workspaces/{ws}/skills/{name}", m.handler.deleteWorkspaceSkill)
 	handle("POST /api/workspaces/{ws}/roles/{role}/skills", m.handler.createRoleSkill)
 	handle("GET /api/workspaces/{ws}/roles/{role}/skills/{name}", m.handler.getRoleSkill)
 	handle("PATCH /api/workspaces/{ws}/roles/{role}/skills/{name}", m.handler.patchRoleSkill)
 	handle("DELETE /api/workspaces/{ws}/roles/{role}/skills/{name}", m.handler.deleteRoleSkill)
 
 	handle("GET /api/workspaces/{ws}/skills/{name}/files/{path...}", m.handler.getWorkspaceSkillFile)
-	handle("PUT /api/workspaces/{ws}/skills/{name}/files/{path...}", m.handler.putWorkspaceSkillFile)
-	handle("DELETE /api/workspaces/{ws}/skills/{name}/files/{path...}", m.handler.deleteWorkspaceSkillFile)
 	handle("GET /api/workspaces/{ws}/roles/{role}/skills/{name}/files/{path...}", m.handler.getRoleSkillFile)
 	handle("PUT /api/workspaces/{ws}/roles/{role}/skills/{name}/files/{path...}", m.handler.putRoleSkillFile)
 	handle("DELETE /api/workspaces/{ws}/roles/{role}/skills/{name}/files/{path...}", m.handler.deleteRoleSkillFile)
+
+	// Workspace-scoped skills are read-only through this API: they are owned by
+	// the pack sync, not by a user. Every mutation route on that lane is
+	// registered as a flat refusal, so no request on it is ever parsed.
+	for _, pattern := range []string{
+		"POST /api/workspaces/{ws}/skills",
+		"PATCH /api/workspaces/{ws}/skills/{name}",
+		"DELETE /api/workspaces/{ws}/skills/{name}",
+		"PUT /api/workspaces/{ws}/skills/{name}/files/{path...}",
+		"DELETE /api/workspaces/{ws}/skills/{name}/files/{path...}",
+	} {
+		handle(pattern, workspaceScopeReadonly)
+	}
 }

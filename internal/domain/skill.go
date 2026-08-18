@@ -409,15 +409,20 @@ const (
 // unit. The fields describe one event, so they are written together: a record
 // asserting a status with no time and no commit behind it is not a record of
 // anything.
+// The fields carry fleet-db's JSON tags and travel to the server as this
+// struct, the way SkillFile does. They describe one event and are only ever
+// written together — a record asserting a status with no time and no commit
+// behind it is not a record of anything — so a separate wire mirror would only
+// be this type spelled twice.
 type SkillPackSync struct {
 	// Status is SkillPackSyncOK or SkillPackSyncFailed.
-	Status string
+	Status string `json:"status"`
 	// Commit is the commit the run resolved Ref to, on success.
-	Commit string
+	Commit string `json:"commit,omitempty"`
 	// Error is the failure message, on failure.
-	Error string
+	Error string `json:"error,omitempty"`
 	// Skills are the skill names a successful run wrote.
-	Skills []string
+	Skills []string `json:"skills,omitempty"`
 }
 
 // SkillPack is a git repository a workspace pulls Skills from.
@@ -640,14 +645,8 @@ func ResolveSkillChainDetail(skills []*Skill, roleName string) []ResolvedSkill {
 // round-tripping to find out. Source of truth: fleet-db
 // internal/models/skill.go ValidateSkillName.
 func ValidateSkillName(name string) error {
-	if strings.TrimSpace(name) == "" {
-		return fmt.Errorf("skill name is required: %w", ErrInvalid)
-	}
-	if len(name) > MaxSkillNameLength {
-		return fmt.Errorf("skill name %q must be at most %d characters: %w", name, MaxSkillNameLength, ErrInvalid)
-	}
-	if !skillNamePattern.MatchString(name) {
-		return fmt.Errorf("skill name %q must be lowercase letters, digits and internal hyphens only: %w", name, ErrInvalid)
+	if err := validateAgentSkillsName("skill", name); err != nil {
+		return err
 	}
 	if skillReservedNames[name] {
 		return fmt.Errorf("skill name %q is reserved: %w", name, ErrInvalid)
@@ -779,15 +778,27 @@ func ValidateSkillFilePath(filePath string) error {
 // ValidateSkillPackName checks a pack name: the same character rules as a
 // skill name, since the name is also the `pack:<name>` source label every
 // skill the pack syncs carries.
+// A pack name deliberately stops at the character rules. It is a source label,
+// never a directory name, so the reserved-name and DOS-device checks that
+// ValidateSkillName adds do not apply: a pack called "claude" or "con" is
+// legal. Do not "finish" this by delegating to ValidateSkillName.
 func ValidateSkillPackName(name string) error {
+	return validateAgentSkillsName("skill_pack", name)
+}
+
+// validateAgentSkillsName checks the character rules shared by skill and pack
+// names: required, bounded, and lowercase letters, digits and internal hyphens
+// only. label names the field in the error so each caller keeps the message
+// fleet-db returns for it.
+func validateAgentSkillsName(label, name string) error {
 	if strings.TrimSpace(name) == "" {
-		return fmt.Errorf("skill_pack name is required: %w", ErrInvalid)
+		return fmt.Errorf("%s name is required: %w", label, ErrInvalid)
 	}
 	if len(name) > MaxSkillNameLength {
-		return fmt.Errorf("skill_pack name %q must be at most %d characters: %w", name, MaxSkillNameLength, ErrInvalid)
+		return fmt.Errorf("%s name %q must be at most %d characters: %w", label, name, MaxSkillNameLength, ErrInvalid)
 	}
 	if !skillNamePattern.MatchString(name) {
-		return fmt.Errorf("skill_pack name %q must be lowercase letters, digits and internal hyphens only: %w", name, ErrInvalid)
+		return fmt.Errorf("%s name %q must be lowercase letters, digits and internal hyphens only: %w", label, name, ErrInvalid)
 	}
 	return nil
 }

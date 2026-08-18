@@ -200,6 +200,24 @@ func ifMatchHeaderValue(revision string) (string, error) {
 	return strconv.Quote(normalized), nil
 }
 
+// conditionalWriteHeaders builds the precondition headers for one document
+// write. An empty ifMatch sends no If-Match at all — the caller asserting no
+// precondition — which fleet-db answers 428 for a mutation, deliberately.
+func conditionalWriteHeaders(ifMatch string, ifNoneMatchAny bool) (map[string]string, error) {
+	headers := map[string]string{}
+	if ifMatch != "" {
+		value, err := ifMatchHeaderValue(ifMatch)
+		if err != nil {
+			return nil, err
+		}
+		headers[ifMatchHeader] = value
+	}
+	if ifNoneMatchAny {
+		headers[ifNoneMatchHeader] = "*"
+	}
+	return headers, nil
+}
+
 // parseETag turns an ETag response header into the bare revision. Weak tags
 // are accepted per RFC 9110 §8.8.3: these revisions hash exact bytes, so weak
 // and strong comparison give the same answer.
@@ -384,16 +402,9 @@ func (s *skillStore) PutFile(ctx context.Context, ws string, ref domain.SkillRef
 	if err := validateSkillDocumentRoute(ws, ref, write.Path); err != nil {
 		return nil, err
 	}
-	headers := map[string]string{}
-	if write.IfMatch != "" {
-		value, err := ifMatchHeaderValue(write.IfMatch)
-		if err != nil {
-			return nil, err
-		}
-		headers[ifMatchHeader] = value
-	}
-	if write.IfNoneMatchAny {
-		headers[ifNoneMatchHeader] = "*"
+	headers, err := conditionalWriteHeaders(write.IfMatch, write.IfNoneMatchAny)
+	if err != nil {
+		return nil, err
 	}
 	body := putSkillFileBody{Content: write.Content, Executable: write.Executable, Source: write.Source}
 	var resp skillDocumentWire
@@ -409,17 +420,13 @@ func (s *skillStore) DeleteFile(ctx context.Context, ws string, ref domain.Skill
 	if err := validateSkillDocumentRoute(ws, ref, del.Path); err != nil {
 		return err
 	}
-	headers := map[string]string{}
-	if del.IfMatch != "" {
-		value, err := ifMatchHeaderValue(del.IfMatch)
-		if err != nil {
-			return err
-		}
-		headers[ifMatchHeader] = value
+	headers, err := conditionalWriteHeaders(del.IfMatch, false)
+	if err != nil {
+		return err
 	}
 	// Source travels as a query parameter because DELETE carries no body.
 	path := withQuery(skillDocumentPath(ws, ref, del.Path), sourceQuery(del.Source))
-	_, _, err := s.client.doWithResponseNoRedirect(ctx, http.MethodDelete, path, nil, nil, headers)
+	_, _, err = s.client.doWithResponseNoRedirect(ctx, http.MethodDelete, path, nil, nil, headers)
 	return err
 }
 
@@ -598,31 +605,16 @@ func (s *skillPackStore) List(ctx context.Context, ws string) ([]*domain.SkillPa
 	return out, nil
 }
 
-// recordSyncBody is the last-sync block. The fields travel together because
-// they describe one event: a record asserting a status with no time and no
-// commit behind it is not a record of anything.
-type recordSyncBody struct {
-	Status string   `json:"status"`
-	Commit string   `json:"commit,omitempty"`
-	Error  string   `json:"error,omitempty"`
-	Skills []string `json:"skills,omitempty"`
-}
-
 func (s *skillPackStore) Update(ctx context.Context, ws, name string, patch store.SkillPackUpdate) (*domain.SkillPack, error) {
 	body := struct {
-		RepoURL     *string         `json:"repo_url,omitempty"`
-		Ref         *string         `json:"ref,omitempty"`
-		Path        *string         `json:"path,omitempty"`
-		Description *string         `json:"description,omitempty"`
-		RecordSync  *recordSyncBody `json:"record_sync,omitempty"`
-	}{RepoURL: patch.RepoURL, Ref: patch.Ref, Path: patch.Path, Description: patch.Description}
-	if patch.RecordSync != nil {
-		body.RecordSync = &recordSyncBody{
-			Status: patch.RecordSync.Status,
-			Commit: patch.RecordSync.Commit,
-			Error:  patch.RecordSync.Error,
-			Skills: patch.RecordSync.Skills,
-		}
+		RepoURL     *string               `json:"repo_url,omitempty"`
+		Ref         *string               `json:"ref,omitempty"`
+		Path        *string               `json:"path,omitempty"`
+		Description *string               `json:"description,omitempty"`
+		RecordSync  *domain.SkillPackSync `json:"record_sync,omitempty"`
+	}{
+		RepoURL: patch.RepoURL, Ref: patch.Ref, Path: patch.Path,
+		Description: patch.Description, RecordSync: patch.RecordSync,
 	}
 	var resp skillPackWire
 	path := skillPacksPath(ws) + "/" + pathEscape(name)

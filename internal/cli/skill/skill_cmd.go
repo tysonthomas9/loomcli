@@ -230,16 +230,8 @@ func runSkillCreate(cmd *cobra.Command, name string, flags skillCreateFlags) err
 }
 
 func runSkillInstall(cmd *cobra.Command, source string, flags skillInstallFlags) error {
-	if err := refuseAgentSkillWrite("loom skill install"); err != nil {
+	if err := checkSkillIngestFlags(cmd, "loom skill install", flags.scope, flags.name); err != nil {
 		return err
-	}
-	if _, _, err := parseSkillScope(flags.scope); err != nil {
-		return err
-	}
-	if cmd.Flags().Changed("name") {
-		if err := domain.ValidateSkillName(flags.name); err != nil {
-			return err
-		}
 	}
 	fetched, err := skillGitHubInstaller.Fetch(cmd.Context(), source, flags.name)
 	if err != nil {
@@ -384,6 +376,23 @@ func runSkillDelete(cmd *cobra.Command, name string, flags skillDeleteFlags) err
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Deleted skill %s/%s\n", ws, ref)
 		return nil
 	})
+}
+
+// checkSkillIngestFlags runs the gates every ingest command shares, in the
+// order the user meets them: agents may not write skills at all, then the
+// scope, then an explicitly supplied --name. The name is checked only when the
+// flag was set, so the per-source fallbacks stay in charge otherwise.
+func checkSkillIngestFlags(cmd *cobra.Command, command, scope, name string) error {
+	if err := refuseAgentSkillWrite(command); err != nil {
+		return err
+	}
+	if _, _, err := parseSkillScope(scope); err != nil {
+		return err
+	}
+	if cmd.Flags().Changed("name") {
+		return domain.ValidateSkillName(name)
+	}
+	return nil
 }
 
 func refuseAgentSkillWrite(command string) error {
