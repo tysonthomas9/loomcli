@@ -137,3 +137,43 @@ func TestResolvedConfigForDisplay_DoesNotMutateOriginal(t *testing.T) {
 		t.Error("Original NoWorkBackoff should still be nil")
 	}
 }
+
+// TestAccountWallCooldown_RoundTrip covers the fleet-wide account-wall knob
+// end to end: it parses from YAML, defaults to 900 seconds when unset, and
+// survives the deep copy the config display makes (an aliased pointer here
+// would let a display call mutate the live daemon config).
+func TestAccountWallCooldown_RoundTrip(t *testing.T) {
+	var rp RestartPolicy
+	if err := yaml.Unmarshal([]byte("account_wall_cooldown: 120\n"), &rp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if rp.AccountWallCooldown == nil || *rp.AccountWallCooldown != 120 {
+		t.Fatalf("AccountWallCooldown = %v, want 120", rp.AccountWallCooldown)
+	}
+
+	out, err := yaml.Marshal(&rp)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var back RestartPolicy
+	if err := yaml.Unmarshal(out, &back); err != nil {
+		t.Fatalf("re-unmarshal: %v", err)
+	}
+	if back.AccountWallCooldown == nil || *back.AccountWallCooldown != 120 {
+		t.Errorf("round-tripped AccountWallCooldown = %v, want 120", back.AccountWallCooldown)
+	}
+
+	copied := deepCopyRestartPolicy(&rp)
+	if copied.AccountWallCooldown == rp.AccountWallCooldown {
+		t.Error("deepCopyRestartPolicy must clone AccountWallCooldown, not alias it")
+	}
+	if *copied.AccountWallCooldown != 120 {
+		t.Errorf("copied AccountWallCooldown = %d, want 120", *copied.AccountWallCooldown)
+	}
+
+	var unset RestartPolicy
+	applyRestartPolicyDefaults(&unset)
+	if unset.AccountWallCooldown == nil || *unset.AccountWallCooldown != 900 {
+		t.Errorf("default AccountWallCooldown = %v, want 900", unset.AccountWallCooldown)
+	}
+}
