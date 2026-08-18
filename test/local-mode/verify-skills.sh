@@ -8,28 +8,11 @@
 #   LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode make local-mode-skills-verify
 set -euo pipefail
 
-PROJECT="${LOCAL_MODE_COMPOSE_PROJECT:-loomcli-local-mode}"
-CONTAINER="${LOCAL_MODE_LOOM_CONTAINER:-${PROJECT}-loom-local-1}"
+VERIFY_LABEL="verify-skills"
+# shellcheck source=test/local-mode/verify-lib.sh
+. "$(dirname "$0")/verify-lib.sh"
 
-log() { echo "[verify-skills] $*"; }
-fatal() {
-  echo "[verify-skills] FATAL: $*" >&2
-  exit 1
-}
-
-ENGINE=""
-for candidate in podman docker; do
-  if command -v "$candidate" >/dev/null 2>&1; then
-    ENGINE="$candidate"
-    break
-  fi
-done
-[ -n "$ENGINE" ] || fatal "podman or docker is required"
-
-cexec() { "$ENGINE" exec "$CONTAINER" sh -c "$1"; }
-
-"$ENGINE" inspect --format '{{.State.Running}}' "$CONTAINER" 2>/dev/null | grep -q true \
-  || fatal "container ${CONTAINER} is not running (set LOCAL_MODE_COMPOSE_PROJECT)"
+require_running
 
 RUN_ID="$(date +%s)-$$"
 NAME_A="vs-${RUN_ID}-a"

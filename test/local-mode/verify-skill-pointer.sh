@@ -11,31 +11,15 @@
 #   LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode make local-mode-skill-pointer-verify
 set -euo pipefail
 
-PROJECT="${LOCAL_MODE_COMPOSE_PROJECT:-loomcli-local-mode}"
-CONTAINER="${LOCAL_MODE_LOOM_CONTAINER:-${PROJECT}-loom-local-1}"
+VERIFY_LABEL="verify-skill-pointer"
+# shellcheck source=test/local-mode/verify-lib.sh
+. "$(dirname "$0")/verify-lib.sh"
+
 TURN_TIMEOUT="${SKILL_POINTER_TURN_TIMEOUT:-180}"
 
-log() { echo "[verify-skill-pointer] $*"; }
-fatal() {
-  echo "[verify-skill-pointer] FATAL: $*" >&2
-  exit 1
-}
-
-ENGINE=""
-for candidate in podman docker; do
-  if command -v "$candidate" >/dev/null 2>&1; then
-    ENGINE="$candidate"
-    break
-  fi
-done
-[ -n "$ENGINE" ] || fatal "podman or docker is required"
-
-cexec() { "$ENGINE" exec "$CONTAINER" sh -c "$1"; }
-
-"$ENGINE" inspect --format '{{.State.Running}}' "$CONTAINER" 2>/dev/null | grep -q true \
-  || fatal "container ${CONTAINER} is not running (set LOCAL_MODE_COMPOSE_PROJECT)"
-cexec "command -v codex >/dev/null 2>&1" || fatal "codex is not installed in ${CONTAINER}; bring the stack up with make local-mode-codex-up"
-cexec "command -v tmux >/dev/null 2>&1" || fatal "tmux is not installed in ${CONTAINER}"
+require_running
+require_in_container codex "bring the stack up with make local-mode-codex-up"
+require_in_container tmux
 
 RUN_ID="$(date +%s)-$$"
 SEED="vsp-${RUN_ID}-seed"
@@ -67,7 +51,7 @@ wait_for_pane() {
       return 0
     fi
     if [ "$SECONDS" -ge "$deadline" ]; then
-      echo "[verify-skill-pointer] pane at timeout:" >&2
+      log "pane at timeout:" >&2
       cexec "tmux capture-pane -t ${TMUX_SESSION} -p -S -40" | grep -v '^$' | tail -25 >&2 || true
       fatal "timed out waiting for: $label"
     fi
