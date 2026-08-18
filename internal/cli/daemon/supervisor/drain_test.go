@@ -365,3 +365,104 @@ func TestGetSigtermTimeout_One(t *testing.T) {
 		t.Errorf("GetSigtermTimeout(1) = %v, want %v", got, want)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// DrainWithGrace stop-reason stamping
+// ---------------------------------------------------------------------------
+
+// drainStopReasonAgent spawns a process that exits as soon as the yield file
+// appears, and returns an AgentProcess wired to it plus the goroutine that
+// clears Pid on exit.
+func drainStopReasonAgent(t *testing.T) (*Supervisor, *AgentProcess, func()) {
+	t.Helper()
+	s := newDrainTestSupervisor(&config.DaemonConfig{})
+	dir := t.TempDir()
+
+	cmd := exec.Command("bash", "-c", //nolint:norawexec
+		`while [ ! -f "`+filepath.Join(dir, YieldFileName)+`" ]; do sleep 0.05; done; exit 0`)
+	cmd.Dir = dir
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start test process: %v", err)
+	}
+
+	ap := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "test"},
+		Cmd:          cmd,
+		Pid:          cmd.Process.Pid,
+		WorktreePath: dir,
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.waitForAgent(ap)
+	}()
+
+	t.Cleanup(func() {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		wg.Wait()
+	})
+	return s, ap, wg.Wait
+}
+
+// TestDrainWithGrace_StampsStopReasonForShutdown covers the shutdown-drain
+// mislabelling: drainAllWithGrace calls DrainWithGrace(ap, "shutdown", ...)
+// and setShutdownStopReason only runs on the NEXT supervise-loop iteration,
+// i.e. after the exit hooks have already read an empty StopReason — so those
+// kills used to log as "crash".
+func TestDrainWithGrace_StampsStopReasonForShutdown(t *testing.T) {
+	s, ap, wait := drainStopReasonAgent(t)
+
+	s.DrainWithGrace(ap, string(StopReasonShutdown), 10*time.Second, 5*time.Second)
+	wait()
+
+	ap.Mu.Lock()
+	got := ap.StopReason
+	ap.Mu.Unlock()
+	if got != StopReasonShutdown {
+		t.Errorf("StopReason = %q, want %q", got, StopReasonShutdown)
+	}
+}
+
+// An already-stamped reason must survive: DrainAgent/DrainAgentWithReason set
+// the reason explicitly before calling in, so the added write is default-only.
+func TestDrainWithGrace_DoesNotOverwriteExistingStopReason(t *testing.T) {
+	s, ap, wait := drainStopReasonAgent(t)
+
+	ap.Mu.Lock()
+	ap.StopReason = StopReasonManualStop
+	ap.Mu.Unlock()
+
+	s.DrainWithGrace(ap, string(StopReasonShutdown), 10*time.Second, 5*time.Second)
+	wait()
+
+	ap.Mu.Lock()
+	got := ap.StopReason
+	ap.Mu.Unlock()
+	if got != StopReasonManualStop {
+		t.Errorf("StopReason = %q, want %q (must not be overwritten)", got, StopReasonManualStop)
+	}
+}
+
+// The stamp sits AFTER the already-stopped early return: there is no live
+// process to attribute a stop to, and stamping there would relabel an agent
+// that had already exited for its own reasons.
+func TestDrainWithGrace_PIDZeroDoesNotStampStopReason(t *testing.T) {
+	s := newDrainTestSupervisor(&config.DaemonConfig{})
+	ap := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "test"},
+		Pid:          0,
+		WorktreePath: t.TempDir(),
+	}
+
+	s.DrainWithGrace(ap, string(StopReasonShutdown), 10*time.Second, 5*time.Second)
+
+	ap.Mu.Lock()
+	got := ap.StopReason
+	ap.Mu.Unlock()
+	if got != "" {
+		t.Errorf("StopReason = %q, want empty (already-stopped agent must not be stamped)", got)
+	}
+}
