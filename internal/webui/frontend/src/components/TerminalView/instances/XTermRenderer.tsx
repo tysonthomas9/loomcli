@@ -6,10 +6,9 @@ import { useEffect, useRef } from "react";
 import {
   DEFAULT_FONT_FAMILY,
   DEFAULT_FONT_SIZE,
-  TERMINAL_FONT_CHANGE_EVENT,
   TERMINAL_FONT_FAMILY_VAR,
   TERMINAL_FONT_SIZE_VAR,
-  type TerminalFontChangeDetail,
+  type UseTerminalFontReturn,
 } from "@/hooks/terminal/useTerminalFont";
 
 export interface XTermRendererHandle {
@@ -50,7 +49,7 @@ function readTheme() {
   };
 }
 
-function readFont(): TerminalFontChangeDetail {
+function readFont(): UseTerminalFontReturn {
   const root = getComputedStyle(document.documentElement);
   const fontFamily =
     root.getPropertyValue(TERMINAL_FONT_FAMILY_VAR).trim() ||
@@ -179,15 +178,6 @@ export function XTermRenderer({
           });
     resizeObserver?.observe(host);
 
-    const handleFontChange = (event: Event) => {
-      const detail = (event as CustomEvent<TerminalFontChangeDetail>).detail;
-      if (!detail) return;
-      terminal.options.fontFamily = detail.fontFamily;
-      terminal.options.fontSize = detail.fontSize;
-      fit();
-    };
-    window.addEventListener(TERMINAL_FONT_CHANGE_EVENT, handleFontChange);
-
     const themeObserver = new MutationObserver(() => {
       terminal.options.theme = readTheme();
     });
@@ -203,7 +193,6 @@ export function XTermRenderer({
       if (resizeTimer) clearTimeout(resizeTimer);
       resizeObserver?.disconnect();
       themeObserver.disconnect();
-      window.removeEventListener(TERMINAL_FONT_CHANGE_EVENT, handleFontChange);
       textarea?.removeEventListener("focus", handleFocus);
       dataDisposable.dispose();
       binaryDisposable.dispose();

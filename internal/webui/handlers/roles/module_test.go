@@ -65,29 +65,10 @@ func TestGetRoleSourceMatrix(t *testing.T) {
 			if !strings.Contains(strings.ToLower(got.SourceBody), strings.ToLower(tc.wantBody)) {
 				t.Fatalf("sourceBody does not contain %q: %q", tc.wantBody, got.SourceBody)
 			}
-			if got.Role.SourceKind != got.SourceKind || got.Role.Editable != got.Editable || got.Revision == "" {
-				t.Fatalf("metadata/detail drift: %#v", got)
+			if got.Revision == "" {
+				t.Fatalf("detail is missing its revision: %#v", got)
 			}
 		})
-	}
-}
-
-func TestListRolesReturnsMetadataWithoutBodies(t *testing.T) {
-	st := memstore.New()
-	createRole(t, st, store.RoleCreate{WorkspaceKey: "WS", Name: "lead", Kind: string(domain.RoleKindInteractive), Prompt: "secret body"})
-	rec := serveRoleRequest(testMux(t, st, t.TempDir()), http.MethodGet, "/api/workspaces/WS/roles", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	if strings.Contains(rec.Body.String(), "secret body") || strings.Contains(rec.Body.String(), "sourceBody") {
-		t.Fatalf("list leaked a prompt body: %s", rec.Body.String())
-	}
-	var response struct {
-		Success bool              `json:"success"`
-		Data    []roleMetadataDTO `json:"data"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil || !response.Success || len(response.Data) != 1 {
-		t.Fatalf("response = %#v, err=%v", response, err)
 	}
 }
 

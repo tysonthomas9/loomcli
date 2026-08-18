@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { get, patch } from "@/api/common";
 
-import { getRole, listRoles, updateRolePrompt } from "../roles";
+import { getRole, updateRolePrompt } from "../roles";
 
 vi.mock("@/api/common", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api/common")>();
@@ -12,18 +12,7 @@ vi.mock("@/api/common", async (importOriginal) => {
 const mockGet = vi.mocked(get);
 const mockPatch = vi.mocked(patch);
 
-const role = {
-  name: "reviewer",
-  description: "Reviews changes",
-  kind: "worker" as const,
-  sourceKind: "file" as const,
-  editable: true,
-  editableReason: "" as const,
-  updatedAt: "2026-08-14T12:00:00Z",
-};
-
 const detail = {
-  role,
   sourceKind: "file" as const,
   sourceBody: "Review carefully.",
   editable: true,
@@ -35,19 +24,11 @@ const detail = {
 describe("roles API", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("lists and gets roles with encoded workspace and role names", async () => {
-    mockGet
-      .mockResolvedValueOnce({ success: true, data: [role], total: 1 })
-      .mockResolvedValueOnce({ success: true, data: detail });
+  it("gets a role with encoded workspace and role names", async () => {
+    mockGet.mockResolvedValueOnce({ success: true, data: detail });
 
-    expect(await listRoles("Workspace A")).toEqual([role]);
     expect(await getRole("Workspace A", "reviewer/custom")).toEqual(detail);
-    expect(mockGet).toHaveBeenNthCalledWith(
-      1,
-      "/api/workspaces/Workspace%20A/roles",
-    );
-    expect(mockGet).toHaveBeenNthCalledWith(
-      2,
+    expect(mockGet).toHaveBeenCalledWith(
       "/api/workspaces/Workspace%20A/roles/reviewer%2Fcustom",
     );
   });

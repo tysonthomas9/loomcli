@@ -68,30 +68,18 @@ func (m *Module) Register(mux *http.ServeMux) {
 	if m == nil || m.store == nil {
 		return
 	}
-	mux.HandleFunc("GET /api/workspaces/{ws}/roles", m.listRoles)
 	mux.HandleFunc("GET /api/workspaces/{ws}/roles/{name}", m.getRole)
 	mux.Handle("PATCH /api/workspaces/{ws}/roles/{name}", m.patchAccess(http.HandlerFunc(m.updateRolePrompt)))
 }
 
-type roleMetadataDTO struct {
-	Name           string `json:"name"`
-	Description    string `json:"description"`
-	Kind           string `json:"kind"`
+type roleDetailDTO struct {
 	SourceKind     string `json:"sourceKind"`
+	SourceBody     string `json:"sourceBody"`
+	SourceError    string `json:"sourceError,omitempty"`
 	Editable       bool   `json:"editable"`
 	EditableReason string `json:"editableReason"`
-	UpdatedAt      string `json:"updatedAt"`
-}
-
-type roleDetailDTO struct {
-	Role           roleMetadataDTO `json:"role"`
-	SourceKind     string          `json:"sourceKind"`
-	SourceBody     string          `json:"sourceBody"`
-	SourceError    string          `json:"sourceError,omitempty"`
-	Editable       bool            `json:"editable"`
-	EditableReason string          `json:"editableReason"`
-	Revision       string          `json:"revision"`
-	ActivationNote string          `json:"activationNote"`
+	Revision       string `json:"revision"`
+	ActivationNote string `json:"activationNote"`
 }
 
 type itemResponse[T any] struct {
@@ -111,32 +99,6 @@ type roleProjection struct {
 	editable       bool
 	editableReason string
 	activationNote string
-}
-
-func (m *Module) listRoles(w http.ResponseWriter, r *http.Request) {
-	ws, ok := canonicalWorkspace(w, r)
-	if !ok {
-		return
-	}
-	values, err := m.store.Roles().List(r.Context(), ws)
-	if err != nil {
-		writeStoreError(w, err, "list roles failed")
-		return
-	}
-	workspaceDir := strings.TrimSpace(m.workspaceDir(r.Context(), m.store, ws))
-	items := make([]roleMetadataDTO, 0, len(values))
-	for _, role := range values {
-		if role == nil {
-			continue
-		}
-		projection, err := projectRole(workspaceDir, role)
-		if err != nil {
-			handler.RespondError(w, http.StatusInternalServerError, "resolve role prompt metadata failed")
-			return
-		}
-		items = append(items, metadataDTO(role, projection))
-	}
-	handler.WriteJSON(w, http.StatusOK, dto.NewListResponse(items, len(items)))
 }
 
 func (m *Module) getRole(w http.ResponseWriter, r *http.Request) {
@@ -243,9 +205,8 @@ func (m *Module) writeRoleDetail(w http.ResponseWriter, r *http.Request, ws stri
 		handler.RespondError(w, http.StatusInternalServerError, "resolve role prompt failed")
 		return
 	}
-	metadata := metadataDTO(role, projection)
 	detail := roleDetailDTO{
-		Role: metadata, SourceKind: projection.sourceKind, SourceBody: projection.sourceBody,
+		SourceKind: projection.sourceKind, SourceBody: projection.sourceBody,
 		SourceError: projection.sourceError, Editable: projection.editable,
 		EditableReason: projection.editableReason, Revision: revisionString(role.UpdatedAt),
 		ActivationNote: projection.activationNote,
@@ -302,15 +263,6 @@ func projectRole(workspaceDir string, role *domain.Role) (roleProjection, error)
 		return roleProjection{sourceKind: sourceInline, sourceBody: role.Prompt, editable: true, activationNote: activationNote}, nil
 	}
 	return roleProjection{sourceKind: sourceFile, sourceError: "Prompt file is not configured.", editableReason: reasonUnreadable, activationNote: activationNote}, nil
-}
-
-func metadataDTO(role *domain.Role, projection roleProjection) roleMetadataDTO {
-	return roleMetadataDTO{
-		Name: role.Name, Description: role.Description,
-		Kind: string(domain.ResolveRoleKind(role, role.Name)), SourceKind: projection.sourceKind,
-		Editable: projection.editable, EditableReason: projection.editableReason,
-		UpdatedAt: revisionString(role.UpdatedAt),
-	}
 }
 
 func revisionString(value time.Time) string { return value.UTC().Format(time.RFC3339Nano) }
