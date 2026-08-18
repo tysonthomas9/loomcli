@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -47,7 +46,7 @@ func MaterializeLeased(ctx context.Context, st store.Store, workspace, roleName,
 		hostname:    os.Hostname,
 		pid:         os.Getpid,
 		sleep:       sleepMaterializationLeaseBackoff,
-		materialize: Materialize,
+		materialize: materialize,
 	})
 }
 
@@ -100,7 +99,7 @@ func materializeLeasedWith(
 			break
 		}
 		if !errors.As(err, &conflict) {
-			if errors.Is(err, domain.ErrSkillMaterializationLeaseStoreUnavailable) || isLeaseTransportError(err) {
+			if errors.Is(err, domain.ErrSkillMaterializationLeaseStoreUnavailable) || isTransportError(err) {
 				slog.Warn("skill materialization lease unavailable; continuing without lease",
 					"workspace", workspace, "role", roleName, "target", absoluteTarget, "err", err)
 				return deps.materialize(ctx, st, workspace, roleName, targetDir)
@@ -127,17 +126,6 @@ func materializeLeasedWith(
 			"workspace", workspace, "role", roleName, "target", absoluteTarget, "err", err)
 	}
 	return materializeErr
-}
-
-func isLeaseTransportError(err error) bool {
-	if errors.Is(err, context.Canceled) {
-		return false
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return true
-	}
-	var networkError net.Error
-	return errors.As(err, &networkError)
 }
 
 // skillMaterializationTargetKey is hex(sha256(hostname + "\x00" +

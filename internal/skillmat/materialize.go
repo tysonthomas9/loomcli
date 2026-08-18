@@ -18,10 +18,9 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"golang.org/x/text/cases"
 	"golang.org/x/text/unicode/norm"
@@ -36,12 +35,12 @@ const (
 	AgentsSkillsDir = ".agents/skills"
 	// ClaudeSkillsDir contains relative compatibility links to AgentsSkillsDir.
 	ClaudeSkillsDir = ".claude/skills"
-	// MarkerPath records the projection hash and every managed file or link.
-	MarkerPath = AgentsSkillsDir + "/.loom-skills-marker.json"
-	// IndexPath is the live catalog of skills in the current projection.
-	IndexPath = AgentsSkillsDir + "/INDEX.md"
-	// CatalogSkillName is the synthetic skill that points agents at IndexPath.
-	CatalogSkillName = "loom-skill-catalog"
+	// markerPath records the projection hash and every managed file or link.
+	markerPath = AgentsSkillsDir + "/.loom-skills-marker.json"
+	// indexPath is the live catalog of skills in the current projection.
+	indexPath = AgentsSkillsDir + "/INDEX.md"
+	// catalogSkillName is the synthetic skill that points agents at indexPath.
+	catalogSkillName = "loom-skill-catalog"
 
 	markerVersion  = 1
 	maxMarkerBytes = 1 << 20
@@ -119,7 +118,7 @@ func IsStoreUnavailable(err error) bool {
 // touched; every other error is a fail-closed local preparation failure.
 //
 //nolint:cyclop,funlen // The reconcile pipeline reads as one ordered sequence of gates.
-func Materialize(ctx context.Context, st store.Store, workspace, roleName, targetDir string) error {
+func materialize(ctx context.Context, st store.Store, workspace, roleName, targetDir string) error {
 	if err := ensurePlatformSupported(); err != nil {
 		return err
 	}
@@ -158,7 +157,7 @@ func Materialize(ctx context.Context, st store.Store, workspace, roleName, targe
 		return fmt.Errorf("sweep skill materialization temporaries: %w", err)
 	}
 	if previous != nil && previous.Hash == projectionHash {
-		if !equalStrings(previous.Paths, paths) {
+		if !slices.Equal(previous.Paths, paths) {
 			return fmt.Errorf("skill marker hash matches but recorded paths differ; refusing cleanup")
 		}
 		matches, err := projectionMatches(root, entries)
@@ -284,12 +283,24 @@ func writeProjection(root secureRoot, entries []desiredEntry, stalePaths []strin
 	return nil
 }
 
-func writeEntryAtomically(root secureRoot, entry desiredEntry) (retErr error) {
+// randomTempSuffix returns the unpredictable tail of an atomic write's
+// temporary name. Unpredictable rather than merely unique: the temporary is
+// created inside a directory the agent can write to, so a guessable name is a
+// name someone can occupy first.
+func randomTempSuffix() (string, error) {
 	var nonce [12]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(nonce[:]), nil
+}
+
+func writeEntryAtomically(root secureRoot, entry desiredEntry) (retErr error) {
+	suffix, err := randomTempSuffix()
+	if err != nil {
 		return fmt.Errorf("generate projection temporary name: %w", err)
 	}
-	temporary := path.Join(path.Dir(entry.Path), projectionTempPrefix+hex.EncodeToString(nonce[:]))
+	temporary := path.Join(path.Dir(entry.Path), projectionTempPrefix+suffix)
 	switch entry.Kind {
 	case entryFile:
 		if err := root.CreateFile(temporary, entry.Content, entry.Mode); err != nil {
@@ -327,7 +338,11 @@ func writeEntryAtomically(root secureRoot, entry desiredEntry) (retErr error) {
 
 var fleetDBServerErrorPattern = regexp.MustCompile(`\bHTTP 5[0-9][0-9]\b`)
 
-func isUnavailableStoreError(err error) bool {
+// isTransportError reports whether err is the call failing to complete rather
+// than fleet-db answering. A cancelled context is excluded deliberately: that
+// is the caller giving up, not the store being unreachable, and treating it as
+// unavailable would turn a shutdown into a spurious degraded-mode warning.
+func isTransportError(err error) bool {
 	if errors.Is(err, context.Canceled) {
 		return false
 	}
@@ -335,10 +350,17 @@ func isUnavailableStoreError(err error) bool {
 		return true
 	}
 	var networkError net.Error
-	if errors.As(err, &networkError) {
-		return true
+	return errors.As(err, &networkError)
+}
+
+func isUnavailableStoreError(err error) bool {
+	// The Canceled short-circuit inside isTransportError has to stay ahead of
+	// the 5xx match: a cancelled request whose error text happens to quote an
+	// earlier "HTTP 503" must still read as cancelled.
+	if errors.Is(err, context.Canceled) {
+		return false
 	}
-	return fleetDBServerErrorPattern.MatchString(err.Error())
+	return isTransportError(err) || fleetDBServerErrorPattern.MatchString(err.Error())
 }
 
 // desiredEntries derives the whole projection, skipping any single skill it
@@ -399,7 +421,10 @@ func entriesForSkill(skill *domain.Skill) ([]desiredEntry, error) {
 		SourcePath: domain.SkillFileNameSKILLMD,
 	})
 	for _, file := range skill.Files {
-		if err := validateBundledPath(file.Path); err != nil {
+		// The stronger domain rule, not a local subset: this is the filesystem
+		// boundary, and it also catches the length caps, DOS device names and
+		// the SKILL.md reservation that a stored record could carry.
+		if err := domain.ValidateSkillFilePath(file.Path); err != nil {
 			return nil, fmt.Errorf("bundled file %q: %w", file.Path, err)
 		}
 		mode := os.FileMode(0o644)
@@ -415,40 +440,49 @@ func entriesForSkill(skill *domain.Skill) ([]desiredEntry, error) {
 			SourcePath: file.Path,
 		})
 	}
-	return append(entries, desiredEntry{
+	entries = append(entries, desiredEntry{
 		Path:       path.Join(ClaudeSkillsDir, skill.Name),
 		Kind:       entrySymlink,
 		LinkTarget: "../../.agents/skills/" + skill.Name,
 		Skill:      skill.Name,
 		SourcePath: skill.Name,
-	}), nil
+	})
+	// Paths that collide when written are a property of this skill's own file
+	// list, so catching them here makes a colliding skill skippable like any
+	// other unprojectable one. detectDesiredCollisions still runs over the whole
+	// projection afterwards; that pass now only has cross-skill collisions left
+	// to find, which would be a bug in the projection rather than in one record.
+	if err := detectDesiredCollisions(entries); err != nil {
+		return nil, err
+	}
+	return entries, nil
 }
 
 func catalogEntries(resolved []domain.ResolvedSkill) []desiredEntry {
-	catalogDir := path.Join(AgentsSkillsDir, CatalogSkillName)
+	catalogDir := path.Join(AgentsSkillsDir, catalogSkillName)
 	return []desiredEntry{
 		{
-			Path:       IndexPath,
+			Path:       indexPath,
 			Kind:       entryFile,
 			Content:    renderSkillIndex(resolved),
 			Mode:       0o644,
-			Skill:      CatalogSkillName,
-			SourcePath: path.Base(IndexPath),
+			Skill:      catalogSkillName,
+			SourcePath: path.Base(indexPath),
 		},
 		{
 			Path:       path.Join(catalogDir, domain.SkillFileNameSKILLMD),
 			Kind:       entryFile,
 			Content:    []byte(catalogSkillDocument),
 			Mode:       0o644,
-			Skill:      CatalogSkillName,
+			Skill:      catalogSkillName,
 			SourcePath: domain.SkillFileNameSKILLMD,
 		},
 		{
-			Path:       path.Join(ClaudeSkillsDir, CatalogSkillName),
+			Path:       path.Join(ClaudeSkillsDir, catalogSkillName),
 			Kind:       entrySymlink,
-			LinkTarget: "../../.agents/skills/" + CatalogSkillName,
-			Skill:      CatalogSkillName,
-			SourcePath: CatalogSkillName,
+			LinkTarget: "../../.agents/skills/" + catalogSkillName,
+			Skill:      catalogSkillName,
+			SourcePath: catalogSkillName,
 		},
 	}
 }
@@ -461,14 +495,14 @@ func renderSkillIndex(resolved []domain.ResolvedSkill) []byte {
 		if item.Skill == nil {
 			continue
 		}
-		if !catalogWritten && CatalogSkillName < item.Skill.Name {
-			writeSkillIndexLine(&content, CatalogSkillName, catalogSkillDescription, false)
+		if !catalogWritten && catalogSkillName < item.Skill.Name {
+			writeSkillIndexLine(&content, catalogSkillName, catalogSkillDescription, false)
 			catalogWritten = true
 		}
 		writeSkillIndexLine(&content, item.Skill.Name, item.Skill.Description, item.Shadowed != nil)
 	}
 	if !catalogWritten {
-		writeSkillIndexLine(&content, CatalogSkillName, catalogSkillDescription, false)
+		writeSkillIndexLine(&content, catalogSkillName, catalogSkillDescription, false)
 	}
 	return []byte(content.String())
 }
@@ -484,29 +518,6 @@ func writeSkillIndexLine(content *strings.Builder, name, description string, sha
 	content.WriteString(" → read `")
 	content.WriteString(path.Join(AgentsSkillsDir, name, domain.SkillFileNameSKILLMD))
 	content.WriteString("`\n")
-}
-
-func validateBundledPath(name string) error {
-	if name == "" || !utf8.ValidString(name) {
-		return fmt.Errorf("path must be non-empty valid UTF-8")
-	}
-	if strings.Contains(name, `\`) || strings.HasPrefix(name, "/") || strings.HasPrefix(name, "~") || strings.Contains(name, ":") {
-		return fmt.Errorf("path %q must be a normalized relative path", name)
-	}
-	for _, r := range name {
-		if unicode.IsControl(r) {
-			return fmt.Errorf("path %q contains a control character", name)
-		}
-	}
-	for _, part := range strings.Split(name, "/") {
-		if part == "" || part == "." || part == ".." {
-			return fmt.Errorf("path %q contains an unsafe component", name)
-		}
-	}
-	if path.Clean(name) != name {
-		return fmt.Errorf("path %q is not normalized", name)
-	}
-	return nil
 }
 
 func hashEntries(entries []desiredEntry) (string, error) {
@@ -544,7 +555,7 @@ func entryPaths(entries []desiredEntry) []string {
 }
 
 func readMarker(root secureRoot) (*marker, error) {
-	b, _, err := root.ReadFile(MarkerPath, maxMarkerBytes)
+	b, _, err := root.ReadFile(markerPath, maxMarkerBytes)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
@@ -578,7 +589,7 @@ func validManagedPath(name string) bool {
 	if name == "" || strings.ContainsRune(name, '\\') || path.Clean(name) != name || strings.HasPrefix(name, "/") {
 		return false
 	}
-	if name == MarkerPath {
+	if name == markerPath {
 		return false
 	}
 	if strings.HasPrefix(name, AgentsSkillsDir+"/") || strings.HasPrefix(name, ClaudeSkillsDir+"/") {
@@ -593,7 +604,7 @@ func validManagedPath(name string) bool {
 }
 
 func isTemporaryBase(base string) bool {
-	return strings.HasPrefix(base, projectionTempPrefix) || strings.HasPrefix(base, path.Base(MarkerPath)+".tmp-")
+	return strings.HasPrefix(base, projectionTempPrefix) || strings.HasPrefix(base, path.Base(markerPath)+".tmp-")
 }
 
 // sweepTemporaryFiles removes only names from Loom's reserved temporary
@@ -677,11 +688,11 @@ func collisionError(skill, first, second string) error {
 }
 
 func writeMarkerAtomically(root secureRoot, markerBytes []byte) (retErr error) {
-	var nonce [12]byte
-	if _, err := rand.Read(nonce[:]); err != nil {
+	suffix, err := randomTempSuffix()
+	if err != nil {
 		return fmt.Errorf("generate marker temporary name: %w", err)
 	}
-	temporary := MarkerPath + ".tmp-" + hex.EncodeToString(nonce[:])
+	temporary := markerPath + ".tmp-" + suffix
 	if err := root.CreateFile(temporary, markerBytes, 0o644); err != nil {
 		return err
 	}
@@ -690,7 +701,7 @@ func writeMarkerAtomically(root secureRoot, markerBytes []byte) (retErr error) {
 			_ = root.Remove(temporary)
 		}
 	}()
-	if err := root.Rename(temporary, MarkerPath); err != nil {
+	if err := root.Rename(temporary, markerPath); err != nil {
 		return err
 	}
 	return nil
@@ -714,18 +725,6 @@ func removeEmptyParents(root secureRoot, names []string) {
 }
 
 func pathDepth(name string) int { return strings.Count(name, "/") }
-
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
 
 func projectionMatches(root secureRoot, entries []desiredEntry) (bool, error) {
 	for _, entry := range entries {

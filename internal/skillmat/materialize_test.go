@@ -81,7 +81,7 @@ func TestMaterializeResolvesRoleSkillAndWritesAgentLayout(t *testing.T) {
 		},
 	}}}
 
-	if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 		t.Fatalf("Materialize: %v", err)
 	}
 
@@ -113,7 +113,7 @@ func TestMaterializeResolvesRoleSkillAndWritesAgentLayout(t *testing.T) {
 		t.Fatalf("Claude skill link = %q, want relative canonical target", linkTarget)
 	}
 
-	markerBytes, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(MarkerPath)))
+	markerBytes, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(markerPath)))
 	if err != nil {
 		t.Fatalf("read marker: %v", err)
 	}
@@ -145,11 +145,11 @@ func TestMaterializeWritesLiveSkillCatalog(t *testing.T) {
 		{Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "Alpha skill", Content: "alpha\n"},
 	}}}
 
-	if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 		t.Fatalf("Materialize: %v", err)
 	}
 
-	index, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(IndexPath)))
+	index, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(indexPath)))
 	if err != nil {
 		t.Fatalf("read INDEX.md: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestMaterializeWritesLiveSkillCatalog(t *testing.T) {
 		t.Fatalf("INDEX.md = %q, want %q", index, wantIndex)
 	}
 
-	catalogPath := filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), CatalogSkillName, domain.SkillFileNameSKILLMD)
+	catalogPath := filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), catalogSkillName, domain.SkillFileNameSKILLMD)
 	catalog, err := os.ReadFile(catalogPath)
 	if err != nil {
 		t.Fatalf("read catalog SKILL.md: %v", err)
@@ -191,7 +191,7 @@ func TestMaterializeWritesLiveSkillCatalog(t *testing.T) {
 	if info.Mode().Perm() != 0o644 {
 		t.Fatalf("catalog SKILL.md mode = %o, want 644", info.Mode().Perm())
 	}
-	linkTarget, err := os.Readlink(filepath.Join(target, filepath.FromSlash(ClaudeSkillsDir), CatalogSkillName))
+	linkTarget, err := os.Readlink(filepath.Join(target, filepath.FromSlash(ClaudeSkillsDir), catalogSkillName))
 	if err != nil {
 		t.Fatalf("read catalog compatibility link: %v", err)
 	}
@@ -207,10 +207,10 @@ func TestMaterializeCatalogAnnotatesShadowedSkill(t *testing.T) {
 		{Name: "review", Scope: domain.SkillScopeRole, RoleName: "lead", Description: "lead review", Content: "lead\n"},
 	}}}
 
-	if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 		t.Fatalf("Materialize: %v", err)
 	}
-	index, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(IndexPath)))
+	index, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(indexPath)))
 	if err != nil {
 		t.Fatalf("read INDEX.md: %v", err)
 	}
@@ -229,15 +229,15 @@ func TestMaterializeRewritesCatalogAfterSkillRemoval(t *testing.T) {
 	beta := &domain.Skill{Name: "beta", Scope: domain.SkillScopeWorkspace, Description: "Beta skill", Content: "beta\n"}
 	skills := &staticSkillStore{skills: []*domain.Skill{alpha, beta}}
 	st := materializeStore{skills: skills}
-	if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 		t.Fatalf("initial Materialize: %v", err)
 	}
 
 	skills.skills = []*domain.Skill{alpha}
-	if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 		t.Fatalf("Materialize after removal: %v", err)
 	}
-	index, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(IndexPath)))
+	index, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(indexPath)))
 	if err != nil {
 		t.Fatalf("read rewritten INDEX.md: %v", err)
 	}
@@ -256,11 +256,11 @@ func TestMaterializeRewritesCatalogAfterSkillRemoval(t *testing.T) {
 
 func TestMaterializeZeroSkillsWritesCatalogOnly(t *testing.T) {
 	target := t.TempDir()
-	if err := Materialize(t.Context(), materializeStore{skills: staticSkillStore{}}, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), materializeStore{skills: staticSkillStore{}}, "WS", "lead", target); err != nil {
 		t.Fatalf("Materialize: %v", err)
 	}
 
-	index, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(IndexPath)))
+	index, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(indexPath)))
 	if err != nil {
 		t.Fatalf("read INDEX.md: %v", err)
 	}
@@ -269,14 +269,14 @@ func TestMaterializeZeroSkillsWritesCatalogOnly(t *testing.T) {
 	if string(index) != wantIndex {
 		t.Fatalf("INDEX.md = %q, want catalog-only index %q", index, wantIndex)
 	}
-	if _, err := os.Stat(filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), CatalogSkillName, domain.SkillFileNameSKILLMD)); err != nil {
+	if _, err := os.Stat(filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), catalogSkillName, domain.SkillFileNameSKILLMD)); err != nil {
 		t.Fatalf("stat catalog SKILL.md: %v", err)
 	}
-	if _, err := os.Readlink(filepath.Join(target, filepath.FromSlash(ClaudeSkillsDir), CatalogSkillName)); err != nil {
+	if _, err := os.Readlink(filepath.Join(target, filepath.FromSlash(ClaudeSkillsDir), catalogSkillName)); err != nil {
 		t.Fatalf("read catalog compatibility link: %v", err)
 	}
 
-	markerBytes, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(MarkerPath)))
+	markerBytes, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(markerPath)))
 	if err != nil {
 		t.Fatalf("read marker: %v", err)
 	}
@@ -285,9 +285,9 @@ func TestMaterializeZeroSkillsWritesCatalogOnly(t *testing.T) {
 		t.Fatalf("decode marker: %v", err)
 	}
 	wantPaths := []string{
-		IndexPath,
-		path.Join(AgentsSkillsDir, CatalogSkillName, domain.SkillFileNameSKILLMD),
-		path.Join(ClaudeSkillsDir, CatalogSkillName),
+		indexPath,
+		path.Join(AgentsSkillsDir, catalogSkillName, domain.SkillFileNameSKILLMD),
+		path.Join(ClaudeSkillsDir, catalogSkillName),
 	}
 	if !reflect.DeepEqual(gotMarker.Paths, wantPaths) {
 		t.Fatalf("marker paths = %#v, want %#v", gotMarker.Paths, wantPaths)
@@ -301,7 +301,7 @@ func TestMaterializeZeroSkillsWritesCatalogOnly(t *testing.T) {
 
 func TestMaterializeRejectsUnmanagedSkillIndex(t *testing.T) {
 	target := t.TempDir()
-	indexPath := filepath.Join(target, filepath.FromSlash(IndexPath))
+	indexPath := filepath.Join(target, filepath.FromSlash(indexPath))
 	if err := os.MkdirAll(filepath.Dir(indexPath), 0o755); err != nil {
 		t.Fatalf("create skill directory: %v", err)
 	}
@@ -309,7 +309,7 @@ func TestMaterializeRejectsUnmanagedSkillIndex(t *testing.T) {
 		t.Fatalf("write unmanaged INDEX.md: %v", err)
 	}
 
-	err := Materialize(t.Context(), materializeStore{skills: staticSkillStore{}}, "WS", "lead", target)
+	err := materialize(t.Context(), materializeStore{skills: staticSkillStore{}}, "WS", "lead", target)
 	if err == nil || !strings.Contains(err.Error(), "INDEX.md") || !strings.Contains(err.Error(), "unrecorded") {
 		t.Fatalf("Materialize error = %v, want unmanaged INDEX.md collision", err)
 	}
@@ -317,7 +317,7 @@ func TestMaterializeRejectsUnmanagedSkillIndex(t *testing.T) {
 	if readErr != nil || string(got) != "user-managed index\n" {
 		t.Fatalf("unmanaged INDEX.md changed: content=%q err=%v", got, readErr)
 	}
-	if _, statErr := os.Lstat(filepath.Join(target, filepath.FromSlash(MarkerPath))); !os.IsNotExist(statErr) {
+	if _, statErr := os.Lstat(filepath.Join(target, filepath.FromSlash(markerPath))); !os.IsNotExist(statErr) {
 		t.Fatalf("marker exists after collision: %v", statErr)
 	}
 }
@@ -328,7 +328,7 @@ func TestMaterializeMatchingHashIsNoOp(t *testing.T) {
 		Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "database body\n",
 	}}}
 	st := materializeStore{skills: skills}
-	if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 		t.Fatalf("first Materialize: %v", err)
 	}
 	skillMD := filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "alpha", "SKILL.md")
@@ -336,7 +336,7 @@ func TestMaterializeMatchingHashIsNoOp(t *testing.T) {
 		t.Fatalf("edit materialized copy: %v", err)
 	}
 
-	if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 		t.Fatalf("second Materialize: %v", err)
 	}
 	got, err := os.ReadFile(skillMD)
@@ -360,7 +360,7 @@ func TestMaterializeSkipsUnprojectableSkillsWithoutFailing(t *testing.T) {
 		{
 			name: "name reserved for the catalog pointer",
 			bad: &domain.Skill{
-				Name: CatalogSkillName, Scope: domain.SkillScopeWorkspace,
+				Name: catalogSkillName, Scope: domain.SkillScopeWorkspace,
 				Description: "smuggled past write-time validation", Content: "body\n",
 			},
 		},
@@ -379,14 +379,14 @@ func TestMaterializeSkipsUnprojectableSkillsWithoutFailing(t *testing.T) {
 				Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body\n",
 			}
 			st := materializeStore{skills: staticSkillStore{skills: []*domain.Skill{tt.bad, good}}}
-			if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+			if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 				t.Fatalf("Materialize with one unprojectable skill: %v", err)
 			}
 
 			if _, err := os.Stat(filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "alpha", "SKILL.md")); err != nil {
 				t.Fatalf("healthy skill was not materialized: %v", err)
 			}
-			index, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(IndexPath)))
+			index, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(indexPath)))
 			if err != nil {
 				t.Fatalf("read catalog index: %v", err)
 			}
@@ -466,12 +466,12 @@ func TestMaterializeMatchingHashReconcilesProjectionDrift(t *testing.T) {
 				Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body\n",
 				Files: []domain.SkillFile{{Path: "run.sh", Content: "#!/bin/sh\n", Executable: true}},
 			}}}}
-			if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+			if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 				t.Fatalf("first Materialize: %v", err)
 			}
 			tt.mutate(t, target)
 
-			if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+			if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 				t.Fatalf("second Materialize: %v", err)
 			}
 			skillMD := filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "alpha", "SKILL.md")
@@ -505,7 +505,7 @@ func TestMaterializeRestoresManagedFileReplacedByEmptyDirectory(t *testing.T) {
 	st := materializeStore{skills: staticSkillStore{skills: []*domain.Skill{{
 		Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body\n",
 	}}}}
-	if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 		t.Fatalf("initial Materialize: %v", err)
 	}
 	skillMD := filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "alpha", "SKILL.md")
@@ -516,7 +516,7 @@ func TestMaterializeRestoresManagedFileReplacedByEmptyDirectory(t *testing.T) {
 		t.Fatalf("replace managed SKILL.md with directory: %v", err)
 	}
 
-	if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 		t.Fatalf("reconcile Materialize: %v", err)
 	}
 	body, err := os.ReadFile(skillMD)
@@ -551,7 +551,7 @@ func TestMaterializeKeepsPersistingSkillsReadableWhileUpdatingAndDeleting(t *tes
 	deleted := &domain.Skill{Name: "deleted", Scope: domain.SkillScopeWorkspace, Description: "deleted", Content: "remove me\n"}
 	skills := &staticSkillStore{skills: []*domain.Skill{alphaA, beta, deleted}}
 	st := materializeStore{skills: skills}
-	if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 		t.Fatalf("initial Materialize: %v", err)
 	}
 
@@ -612,7 +612,7 @@ func TestMaterializeKeepsPersistingSkillsReadableWhileUpdatingAndDeleting(t *tes
 			alpha = alphaB
 		}
 		skills.skills = []*domain.Skill{alpha, beta}
-		if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+		if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 			close(stop)
 			<-readerDone
 			t.Fatalf("Materialize pass %d: %v", i+1, err)
@@ -649,12 +649,12 @@ func TestMaterializeAtomicallyUpdatesContentAndExecutableMode(t *testing.T) {
 	}
 	skills := &staticSkillStore{skills: []*domain.Skill{skill}}
 	st := materializeStore{skills: skills}
-	if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 		t.Fatalf("initial Materialize: %v", err)
 	}
 
 	skill.Files = []domain.SkillFile{{Path: "scripts/run.sh", Content: "#!/bin/sh\necho new\n", Executable: true}}
-	if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 		t.Fatalf("updated Materialize: %v", err)
 	}
 
@@ -683,12 +683,12 @@ func TestMaterializeTransitionsCaseFoldCollidingManagedPath(t *testing.T) {
 	}
 	skills := &staticSkillStore{skills: []*domain.Skill{skill}}
 	st := materializeStore{skills: skills}
-	if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 		t.Fatalf("initial Materialize: %v", err)
 	}
 
 	skill.Files = []domain.SkillFile{{Path: "docs/A.md", Content: "new\n"}}
-	if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 		t.Fatalf("transition Materialize: %v", err)
 	}
 
@@ -726,7 +726,7 @@ func TestMaterializeSweepsCrashOrphanedProjectionTemporary(t *testing.T) {
 	st := materializeStore{skills: staticSkillStore{skills: []*domain.Skill{{
 		Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body\n",
 	}}}}
-	if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 		t.Fatalf("initial Materialize: %v", err)
 	}
 	orphanName := projectionTempPrefix + "crash-orphan"
@@ -735,13 +735,13 @@ func TestMaterializeSweepsCrashOrphanedProjectionTemporary(t *testing.T) {
 		t.Fatalf("plant crash orphan: %v", err)
 	}
 
-	if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 		t.Fatalf("reconcile after crash orphan: %v", err)
 	}
 	if _, err := os.Lstat(orphanPath); !os.IsNotExist(err) {
 		t.Fatalf("crash-orphaned temporary still exists or failed unexpectedly: %v", err)
 	}
-	markerBytes, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(MarkerPath)))
+	markerBytes, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(markerPath)))
 	if err != nil {
 		t.Fatalf("read marker: %v", err)
 	}
@@ -779,10 +779,10 @@ func TestMaterializeRecoversExactPartialProjectionWithoutMarker(t *testing.T) {
 	}
 
 	st := materializeStore{skills: staticSkillStore{skills: []*domain.Skill{skill}}}
-	if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 		t.Fatalf("Materialize after partial write: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(target, filepath.FromSlash(MarkerPath))); err != nil {
+	if _, err := os.Stat(filepath.Join(target, filepath.FromSlash(markerPath))); err != nil {
 		t.Fatalf("stat recovered marker: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "alpha", "run.sh")); err != nil {
@@ -795,10 +795,10 @@ func TestWriteMarkerAtomicallyRenamesCompletedTemporaryFile(t *testing.T) {
 	if err := writeMarkerAtomically(root, []byte("complete marker\n")); err != nil {
 		t.Fatalf("writeMarkerAtomically: %v", err)
 	}
-	if len(root.created) != 1 || root.created[0] == MarkerPath || !strings.HasPrefix(root.created[0], MarkerPath+".tmp-") {
+	if len(root.created) != 1 || root.created[0] == markerPath || !strings.HasPrefix(root.created[0], markerPath+".tmp-") {
 		t.Fatalf("created paths = %#v, want one marker temporary", root.created)
 	}
-	if len(root.renamed) != 1 || root.renamed[0] != [2]string{root.created[0], MarkerPath} {
+	if len(root.renamed) != 1 || root.renamed[0] != [2]string{root.created[0], markerPath} {
 		t.Fatalf("renames = %#v, want temporary -> marker", root.renamed)
 	}
 }
@@ -810,7 +810,7 @@ func TestMaterializeRemovalPreservesUnrecordedFiles(t *testing.T) {
 		Files: []domain.SkillFile{{Path: "references/managed.md", Content: "managed\n"}},
 	}}}
 	st := materializeStore{skills: skills}
-	if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 		t.Fatalf("first Materialize: %v", err)
 	}
 	unrecorded := filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "alpha", "notes.user")
@@ -819,7 +819,7 @@ func TestMaterializeRemovalPreservesUnrecordedFiles(t *testing.T) {
 	}
 
 	skills.skills = nil
-	if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 		t.Fatalf("remove Materialize: %v", err)
 	}
 	got, err := os.ReadFile(unrecorded)
@@ -838,7 +838,7 @@ func TestMaterializeRemovalPreservesUnrecordedFiles(t *testing.T) {
 			t.Fatalf("recorded path %q still exists or failed unexpectedly: %v", removed, err)
 		}
 	}
-	markerBytes, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(MarkerPath)))
+	markerBytes, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(markerPath)))
 	if err != nil {
 		t.Fatalf("read marker: %v", err)
 	}
@@ -847,9 +847,9 @@ func TestMaterializeRemovalPreservesUnrecordedFiles(t *testing.T) {
 		t.Fatalf("decode marker: %v", err)
 	}
 	wantPaths := []string{
-		IndexPath,
-		path.Join(AgentsSkillsDir, CatalogSkillName, domain.SkillFileNameSKILLMD),
-		path.Join(ClaudeSkillsDir, CatalogSkillName),
+		indexPath,
+		path.Join(AgentsSkillsDir, catalogSkillName, domain.SkillFileNameSKILLMD),
+		path.Join(ClaudeSkillsDir, catalogSkillName),
 	}
 	if !reflect.DeepEqual(gotMarker.Paths, wantPaths) {
 		t.Fatalf("marker paths after removal = %#v, want %#v", gotMarker.Paths, wantPaths)
@@ -866,12 +866,12 @@ func TestMaterializeRoleDeletionUnshadowsWorkspaceSkill(t *testing.T) {
 		{Name: "alpha", Scope: domain.SkillScopeRole, RoleName: "lead", Description: "role", Content: "role body\n"},
 	}}
 	st := materializeStore{skills: skills}
-	if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 		t.Fatalf("shadowed Materialize: %v", err)
 	}
 
 	skills.skills = []*domain.Skill{workspaceSkill}
-	if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 		t.Fatalf("unshadowed Materialize: %v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "alpha", "SKILL.md"))
@@ -883,18 +883,21 @@ func TestMaterializeRoleDeletionUnshadowsWorkspaceSkill(t *testing.T) {
 	}
 }
 
-func TestMaterializeRejectsInSkillPathCollisions(t *testing.T) {
+// Paths that would collide when written must never both be materialized. The
+// skill carrying them is dropped rather than the projection failing, for the
+// same reason as any other unprojectable record: one malformed skill must not
+// stop every agent in the workspace.
+func TestMaterializeRefusesToWriteInSkillPathCollisions(t *testing.T) {
 	tests := []struct {
 		name  string
 		files []domain.SkillFile
-		wantA string
-		wantB string
+		// paths that must not exist under the skill directory afterwards
+		unwritten []string
 	}{
 		{
-			name:  "reserved body name under different case",
-			files: []domain.SkillFile{{Path: "skill.md", Content: "collision"}},
-			wantA: "SKILL.md",
-			wantB: "skill.md",
+			name:      "reserved body name under different case",
+			files:     []domain.SkillFile{{Path: "skill.md", Content: "collision"}},
+			unwritten: []string{"skill.md"},
 		},
 		{
 			name: "unicode normalization",
@@ -902,8 +905,7 @@ func TestMaterializeRejectsInSkillPathCollisions(t *testing.T) {
 				{Path: "references/caf\u00e9.md", Content: "NFC"},
 				{Path: "references/cafe\u0301.md", Content: "NFD"},
 			},
-			wantA: "references/caf\u00e9.md",
-			wantB: "references/cafe\u0301.md",
+			unwritten: []string{"references/caf\u00e9.md", "references/cafe\u0301.md"},
 		},
 		{
 			name: "file versus directory",
@@ -911,25 +913,41 @@ func TestMaterializeRejectsInSkillPathCollisions(t *testing.T) {
 				{Path: "a/b", Content: "file"},
 				{Path: "a/b/c", Content: "child"},
 			},
-			wantA: "a/b",
-			wantB: "a/b/c",
+			unwritten: []string{"a/b", "a/b/c"},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			target := t.TempDir()
+			healthy := &domain.Skill{
+				Name: "beta", Scope: domain.SkillScopeWorkspace, Description: "beta", Content: "beta body\n",
+			}
 			st := materializeStore{skills: staticSkillStore{skills: []*domain.Skill{{
 				Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body", Files: tt.files,
-			}}}}
-			err := Materialize(t.Context(), st, "WS", "lead", target)
-			if err == nil {
-				t.Fatal("Materialize error = nil, want collision")
+			}, healthy}}}
+			if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
+				t.Fatalf("Materialize with a colliding skill: %v", err)
 			}
-			if !strings.Contains(err.Error(), tt.wantA) || !strings.Contains(err.Error(), tt.wantB) {
-				t.Fatalf("Materialize error = %q, want both %q and %q", err, tt.wantA, tt.wantB)
+
+			skillDir := filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "alpha")
+			if _, statErr := os.Lstat(skillDir); !os.IsNotExist(statErr) {
+				t.Fatalf("colliding skill was materialized: stat err = %v", statErr)
 			}
-			if _, statErr := os.Lstat(filepath.Join(target, filepath.FromSlash(MarkerPath))); !os.IsNotExist(statErr) {
-				t.Fatalf("marker exists after collision: %v", statErr)
+			for _, unwritten := range tt.unwritten {
+				if _, statErr := os.Lstat(filepath.Join(skillDir, filepath.FromSlash(unwritten))); !os.IsNotExist(statErr) {
+					t.Fatalf("colliding path %q was written: stat err = %v", unwritten, statErr)
+				}
+			}
+			// The rest of the workspace still materializes.
+			if _, err := os.Stat(filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "beta", "SKILL.md")); err != nil {
+				t.Fatalf("healthy skill was not materialized: %v", err)
+			}
+			index, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(indexPath)))
+			if err != nil {
+				t.Fatalf("read catalog index: %v", err)
+			}
+			if strings.Contains(string(index), "**alpha**") {
+				t.Fatalf("catalog index advertises the skipped skill:\n%s", index)
 			}
 		})
 	}
@@ -950,7 +968,7 @@ func TestMaterializeRejectsExistingCaseFoldCollision(t *testing.T) {
 		Files: []domain.SkillFile{{Path: "readme.md", Content: "managed"}},
 	}}}}
 
-	err := Materialize(t.Context(), st, "WS", "lead", target)
+	err := materialize(t.Context(), st, "WS", "lead", target)
 	if err == nil {
 		t.Fatal("Materialize error = nil, want collision")
 	}
@@ -984,7 +1002,7 @@ func TestMaterializeRefusesSymlinkEscape(t *testing.T) {
 		Files: []domain.SkillFile{{Path: "link/pre-commit", Content: "#!/bin/sh\n", Executable: true}},
 	}}}}
 
-	err := Materialize(t.Context(), st, "WS", "lead", target)
+	err := materialize(t.Context(), st, "WS", "lead", target)
 	if err == nil {
 		t.Fatal("Materialize error = nil, want planted symlink refusal")
 	}
@@ -1007,7 +1025,7 @@ func TestMaterializeRelativeClaudeLinkSurvivesTargetMove(t *testing.T) {
 	st := materializeStore{skills: staticSkillStore{skills: []*domain.Skill{{
 		Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body\n",
 	}}}}
-	if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 		t.Fatalf("Materialize: %v", err)
 	}
 	moved := filepath.Join(base, "after")
@@ -1029,7 +1047,7 @@ func TestMaterializeStoreOutageLeavesProjectionUntouched(t *testing.T) {
 	available := materializeStore{skills: staticSkillStore{skills: []*domain.Skill{{
 		Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "old body\n",
 	}}}}
-	if err := Materialize(t.Context(), available, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), available, "WS", "lead", target); err != nil {
 		t.Fatalf("initial Materialize: %v", err)
 	}
 	skillMD := filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "alpha", "SKILL.md")
@@ -1039,7 +1057,7 @@ func TestMaterializeStoreOutageLeavesProjectionUntouched(t *testing.T) {
 	}
 	outage := &url.Error{Op: "GET", URL: "http://fleet-db/skills", Err: syscall.ECONNREFUSED}
 	unavailable := materializeStore{skills: staticSkillStore{err: outage}}
-	err = Materialize(t.Context(), unavailable, "WS", "lead", target)
+	err = materialize(t.Context(), unavailable, "WS", "lead", target)
 	if !IsStoreUnavailable(err) || !errors.Is(err, outage) {
 		t.Fatalf("Materialize error = %v, want store-unavailable wrapper", err)
 	}
@@ -1056,7 +1074,7 @@ func TestMaterializeDoesNotDegradeOnNonOutageStoreError(t *testing.T) {
 	target := t.TempDir()
 	denied := fmt.Errorf("skill list forbidden: %w", domain.ErrConflict)
 	st := materializeStore{skills: staticSkillStore{err: denied}}
-	err := Materialize(t.Context(), st, "WS", "lead", target)
+	err := materialize(t.Context(), st, "WS", "lead", target)
 	if err == nil || !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("Materialize error = %v, want store error", err)
 	}
@@ -1068,7 +1086,7 @@ func TestMaterializeDoesNotDegradeOnNonOutageStoreError(t *testing.T) {
 func TestMaterializeDoesNotClassifyCancellationAsStoreOutage(t *testing.T) {
 	target := t.TempDir()
 	st := materializeStore{skills: staticSkillStore{err: context.Canceled}}
-	err := Materialize(t.Context(), st, "WS", "lead", target)
+	err := materialize(t.Context(), st, "WS", "lead", target)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Materialize error = %v, want context.Canceled", err)
 	}
@@ -1089,7 +1107,7 @@ func TestMaterializeRejectsOversizedAndPartialMarkersWithoutCleanup(t *testing.T
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			target := t.TempDir()
-			markerPath := filepath.Join(target, filepath.FromSlash(MarkerPath))
+			markerPath := filepath.Join(target, filepath.FromSlash(markerPath))
 			if err := os.MkdirAll(filepath.Dir(markerPath), 0o755); err != nil {
 				t.Fatalf("create marker parent: %v", err)
 			}
@@ -1101,7 +1119,7 @@ func TestMaterializeRejectsOversizedAndPartialMarkersWithoutCleanup(t *testing.T
 				t.Fatalf("write sentinel: %v", err)
 			}
 
-			err := Materialize(t.Context(), materializeStore{skills: staticSkillStore{}}, "WS", "lead", target)
+			err := materialize(t.Context(), materializeStore{skills: staticSkillStore{}}, "WS", "lead", target)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("Materialize error = %v, want %q", err, tt.want)
 			}
@@ -1146,7 +1164,7 @@ func TestMaterializeEnsuresGitExcludeViaGitPath(t *testing.T) {
 
 	st := materializeStore{skills: staticSkillStore{}}
 	for i := 0; i < 2; i++ {
-		if err := Materialize(t.Context(), st, "WS", "lead", linked); err != nil {
+		if err := materialize(t.Context(), st, "WS", "lead", linked); err != nil {
 			t.Fatalf("Materialize pass %d: %v", i+1, err)
 		}
 	}
@@ -1183,7 +1201,7 @@ func TestMaterializeGitExcludeIgnoresPoisonedGitEnvironment(t *testing.T) {
 	t.Setenv("GIT_WORK_TREE", attacker)
 	t.Setenv("GIT_INDEX_FILE", filepath.Join(attacker, ".git", "index"))
 
-	if err := Materialize(t.Context(), materializeStore{skills: staticSkillStore{}}, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), materializeStore{skills: staticSkillStore{}}, "WS", "lead", target); err != nil {
 		t.Fatalf("Materialize: %v", err)
 	}
 	targetBody, err := os.ReadFile(targetExclude)
@@ -1216,7 +1234,7 @@ func TestMaterializeGitExcludeRefusesSymlinkedInfoParent(t *testing.T) {
 		t.Fatalf("plant git info symlink: %v", err)
 	}
 
-	err := Materialize(t.Context(), materializeStore{skills: staticSkillStore{}}, "WS", "lead", repo)
+	err := materialize(t.Context(), materializeStore{skills: staticSkillStore{}}, "WS", "lead", repo)
 	if err == nil || !strings.Contains(err.Error(), "symlink") {
 		t.Fatalf("Materialize error = %v, want symlink refusal", err)
 	}
@@ -1251,11 +1269,11 @@ func TestMaterializeReconcilesManagedFileDirectoryTransitions(t *testing.T) {
 			skill := &domain.Skill{Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body", Files: tt.before}
 			skills := &staticSkillStore{skills: []*domain.Skill{skill}}
 			st := materializeStore{skills: skills}
-			if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+			if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 				t.Fatalf("initial Materialize: %v", err)
 			}
 			skill.Files = tt.after
-			if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+			if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 				t.Fatalf("transition Materialize: %v", err)
 			}
 			got, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "alpha", filepath.FromSlash(tt.want)))
@@ -1274,7 +1292,7 @@ func TestMaterializeRefusesDirectoryToFileTransitionWithUnrecordedChild(t *testi
 	}
 	skills := &staticSkillStore{skills: []*domain.Skill{skill}}
 	st := materializeStore{skills: skills}
-	if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 		t.Fatalf("initial Materialize: %v", err)
 	}
 	unrecorded := filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "alpha", "node", "user")
@@ -1283,7 +1301,7 @@ func TestMaterializeRefusesDirectoryToFileTransitionWithUnrecordedChild(t *testi
 	}
 	skill.Files = []domain.SkillFile{{Path: "node", Content: "new"}}
 
-	err := Materialize(t.Context(), st, "WS", "lead", target)
+	err := materialize(t.Context(), st, "WS", "lead", target)
 	if err == nil || !strings.Contains(err.Error(), "node") || !strings.Contains(err.Error(), "user") {
 		t.Fatalf("Materialize error = %v, want node/user collision", err)
 	}
@@ -1300,7 +1318,7 @@ func TestMaterializeRefusesManagedFileToNonemptyDirectoryBeforeCleanup(t *testin
 	}
 	skills := &staticSkillStore{skills: []*domain.Skill{skill}}
 	st := materializeStore{skills: skills}
-	if err := Materialize(t.Context(), st, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 		t.Fatalf("initial Materialize: %v", err)
 	}
 	node := filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "alpha", "node")
@@ -1316,7 +1334,7 @@ func TestMaterializeRefusesManagedFileToNonemptyDirectoryBeforeCleanup(t *testin
 	}
 	skill.Files = []domain.SkillFile{{Path: "node/child", Content: "new"}, {Path: "zzz", Content: "updated"}}
 
-	err := Materialize(t.Context(), st, "WS", "lead", target)
+	err := materialize(t.Context(), st, "WS", "lead", target)
 	if err == nil || !strings.Contains(err.Error(), "node") {
 		t.Fatalf("Materialize error = %v, want managed file-to-directory drift", err)
 	}

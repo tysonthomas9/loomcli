@@ -70,11 +70,11 @@ func TestUnixSecureRootReadDirRefusesSymlinkedDirectory(t *testing.T) {
 
 func TestUnixSecureRootRejectsFIFOMarkerWithoutBlocking(t *testing.T) {
 	target := t.TempDir()
-	markerPath := filepath.Join(target, filepath.FromSlash(MarkerPath))
-	if err := os.MkdirAll(filepath.Dir(markerPath), 0o755); err != nil {
+	absoluteMarker := filepath.Join(target, filepath.FromSlash(markerPath))
+	if err := os.MkdirAll(filepath.Dir(absoluteMarker), 0o755); err != nil {
 		t.Fatalf("create marker parent: %v", err)
 	}
-	if err := unix.Mkfifo(markerPath, 0o600); err != nil {
+	if err := unix.Mkfifo(absoluteMarker, 0o600); err != nil {
 		t.Fatalf("create marker FIFO: %v", err)
 	}
 	root, err := openSecureRoot(target)
@@ -85,7 +85,7 @@ func TestUnixSecureRootRejectsFIFOMarkerWithoutBlocking(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, _, readErr := root.ReadFile(MarkerPath, maxMarkerBytes)
+		_, _, readErr := root.ReadFile(markerPath, maxMarkerBytes)
 		done <- readErr
 	}()
 	select {

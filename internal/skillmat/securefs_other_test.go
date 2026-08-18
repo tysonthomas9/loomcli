@@ -19,7 +19,7 @@ func TestOpenSecureRootFailsClosedOnUnsupportedPlatform(t *testing.T) {
 }
 
 func TestMaterializeFailsClosedOnUnsupportedPlatform(t *testing.T) {
-	err := Materialize(t.Context(), nil, "WS", "lead", t.TempDir())
+	err := materialize(t.Context(), nil, "WS", "lead", t.TempDir())
 	if err == nil || !strings.Contains(err.Error(), "skill materialization is not supported on this platform") {
 		t.Fatalf("Materialize error = %v, want unsupported-platform refusal", err)
 	}
