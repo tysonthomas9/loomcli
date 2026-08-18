@@ -95,6 +95,36 @@ describe("activity event identity", () => {
 
     expect(mergeActivityEvents([first], [second])).toHaveLength(2);
   });
+
+  it("dedupes a cursor-backed event against a cursor-less one already kept", () => {
+    const live = event({ cursor: "" });
+    const history = event({ cursor: "100-0" });
+
+    // The cursor-less event is kept first, so the cursor-backed duplicate must
+    // still be recognised through the fallback identity rather than admitted
+    // because it happens to carry a cursor.
+    expect(mergeActivityEvents([live], [history])).toEqual([live]);
+  });
+
+  it("merges a large history without dropping or duplicating events", () => {
+    const page = (offset: number) =>
+      Array.from({ length: 500 }, (_, index) =>
+        event({
+          cursor: `${offset + index}-0`,
+          entity_id: `TEAMBACKEND-${offset + index}`,
+          timestamp: new Date(
+            Date.UTC(2026, 7, 14, 0, 0, offset + index),
+          ).toISOString(),
+        }),
+      );
+    const first = page(0);
+    const second = page(400); // overlaps the first page by 100 events
+
+    const merged = mergeActivityEvents(first, second);
+
+    expect(merged).toHaveLength(900);
+    expect(new Set(merged.map((entry) => entry.cursor)).size).toBe(900);
+  });
 });
 
 describe("filterActivityEvents", () => {

@@ -45,7 +45,6 @@ export function TeamTemplateModal({
   const [report, setReport] = useState<TeamTemplateApplyReport | null>(null);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [isApplying, setIsApplying] = useState(false);
-  const [runningJobId, setRunningJobId] = useState<string | null>(null);
   const [retryFocusNames, setRetryFocusNames] = useState<ReadonlySet<string>>();
   const wasOpenRef = useRef(false);
 
@@ -73,7 +72,6 @@ export function TeamTemplateModal({
     setReport(null);
     setApplyError(null);
     setIsApplying(false);
-    setRunningJobId(null);
     setRetryFocusNames(undefined);
   }, [isOpen]);
 
@@ -97,14 +95,9 @@ export function TeamTemplateModal({
     }
     setIsApplying(true);
     setApplyError(null);
-    setRunningJobId(null);
     onApplyStateChange?.(true);
     try {
       const response = await apply(teamTemplate.id);
-      if (response.status === "running") {
-        setRunningJobId(response.job_id);
-        return;
-      }
       setReport(response.report);
       writeTeamTemplateBreadcrumb(
         workspaceId,
@@ -145,14 +138,6 @@ export function TeamTemplateModal({
           Done
         </button>
       </div>
-    ) : runningJobId ? (
-      <button
-        type="button"
-        className={aetherModalStyles.primaryButton}
-        onClick={handleClose}
-      >
-        Close
-      </button>
     ) : (
       <div className={styles.pickerFooter}>
         <button
@@ -201,11 +186,6 @@ export function TeamTemplateModal({
               {applyError}
             </p>
           ) : null}
-        </div>
-      ) : runningJobId ? (
-        <div className={styles.progressBlock} role="status">
-          <strong>Team setup is still in progress</strong>
-          <span>Background job {runningJobId} was accepted.</span>
         </div>
       ) : (
         <div className={styles.picker}>

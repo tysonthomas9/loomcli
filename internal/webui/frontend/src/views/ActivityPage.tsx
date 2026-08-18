@@ -11,7 +11,7 @@ import {
   describeActivityEvent,
   EMPTY_ACTIVITY_TIMELINE,
   mergeActivityEvents,
-  selectActivityEvents,
+  filterActivityEvents,
   toAuditEvent,
 } from "@/utils/activityTimeline";
 
@@ -160,8 +160,8 @@ export function ActivityPage(): JSX.Element {
     [state.history, state.live],
   );
   const visibleEvents = useMemo(
-    () => selectActivityEvents(state, filters),
-    [filters, state],
+    () => filterActivityEvents(allEvents, filters),
+    [allEvents, filters],
   );
   const agentNames = useMemo(
     () => new Set(agents.map((agent) => agent.name)),

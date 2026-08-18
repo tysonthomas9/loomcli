@@ -50,7 +50,7 @@ type TemplateRole struct {
 	Description string `yaml:"description" json:"description"`
 	PromptFile  string `yaml:"prompt_file" json:"prompt_file"` // "builtin:<id>" only
 	Model       string `yaml:"model" json:"model"`
-	TaskFilter  string `yaml:"task_filter" json:"task_filter"` // "has_design" | "any" | "" — never needs_plan/needs_design
+	TaskFilter  string `yaml:"task_filter" json:"task_filter"` // "has_design" | "any" | "" — see validTaskFilters
 	Effort      string `yaml:"effort" json:"effort"`
 
 	// Skills score a candidate agent role, they never gate it: with skills set

@@ -45,9 +45,14 @@ var seededRoleNames = map[string]bool{"plan": true, "task": true, "lead": true}
 
 var (
 	validDisplayLabels = map[string]bool{"Developer": true, "QA": true, "Architecture": true}
-	// validTaskFilters deliberately omits needs_plan and needs_design: the
-	// worker CLI refuses the first at spawn and mis-routes the second into the
-	// ready-to-implement branch. Neither works end to end.
+	// validTaskFilters deliberately omits needs_plan and needs_design. The CLI
+	// does handle both (mapTaskFilter and applyTaskFilter each route them to the
+	// planning branch, as synonyms), so this is a bundle-schema rule, not a
+	// missing implementation. A bundle routes design work by the architect
+	// label — the architect role takes task_filter: any plus labels:
+	// [architect], and every implementer excludes that label — so a planning
+	// filter here would be a second, competing routing mechanism for work the
+	// label already claims.
 	validTaskFilters   = map[string]bool{"": true, "any": true, "has_design": true}
 	validEfforts       = map[string]bool{"": true, "low": true, "medium": true, "high": true, "max": true}
 	validDesiredStates = map[string]bool{"running": true, "idle": true, "stopped": true}
@@ -152,7 +157,7 @@ func validateRolePrompt(role TemplateRole) error {
 
 func validateRoleRouting(role TemplateRole) error {
 	if !validTaskFilters[role.TaskFilter] {
-		return fmt.Errorf("agent role %q: task_filter %q must be has_design, any or empty (needs_plan dies at spawn and needs_design mis-routes)", role.Name, role.TaskFilter)
+		return fmt.Errorf("agent role %q: task_filter %q must be has_design, any or empty (route design work with the architect label, not a planning filter)", role.Name, role.TaskFilter)
 	}
 	if !validEfforts[role.Effort] {
 		return fmt.Errorf("agent role %q: effort %q must be low, medium, high, max or empty", role.Name, role.Effort)

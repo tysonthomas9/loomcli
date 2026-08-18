@@ -113,15 +113,35 @@ function newestFirst(a: AuditEvent, b: AuditEvent): number {
   return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
 }
 
-/** Merge history/live collections, preserving the first copy of each event. */
+/**
+ * Merge history/live collections, preserving the first copy of each event.
+ *
+ * Kept events are indexed rather than rescanned, so merging stays linear as the
+ * history grows page by page. The index mirrors activityEventsMatch exactly:
+ * two cursor-backed events match only on cursor, while any comparison involving
+ * a cursor-less event (the shape the live SSE feed produces) falls back to
+ * action/entity/timestamp identity.
+ */
 export function mergeActivityEvents(
   ...collections: readonly AuditEvent[][]
 ): AuditEvent[] {
   const merged: AuditEvent[] = [];
+  const keptCursors = new Set<string>();
+  const keptFallbacks = new Set<string>();
+  const keptCursorlessFallbacks = new Set<string>();
+
   for (const candidate of collections.flat()) {
-    if (!merged.some((current) => activityEventsMatch(current, candidate))) {
-      merged.push(candidate);
-    }
+    const fallback = fallbackIdentity(candidate);
+    const duplicate = candidate.cursor
+      ? keptCursors.has(candidate.cursor) ||
+        keptCursorlessFallbacks.has(fallback)
+      : keptFallbacks.has(fallback);
+    if (duplicate) continue;
+
+    merged.push(candidate);
+    keptFallbacks.add(fallback);
+    if (candidate.cursor) keptCursors.add(candidate.cursor);
+    else keptCursorlessFallbacks.add(fallback);
   }
   return merged.sort(newestFirst);
 }

@@ -61,9 +61,12 @@ export interface TeamTemplateApplyReport {
   materialized: number;
 }
 
-export type TeamTemplateApplyResponse =
-  | { status: "done"; report: TeamTemplateApplyReport }
-  | { status: "running"; job_id: string };
+// The apply endpoint is synchronous: TeamTemplateApplyResponse in
+// api/openapi.yaml declares status as const "done" and requires report.
+export interface TeamTemplateApplyResponse {
+  status: "done";
+  report: TeamTemplateApplyReport;
+}
 
 export interface TeamTemplateApplyCounts {
   created: number;

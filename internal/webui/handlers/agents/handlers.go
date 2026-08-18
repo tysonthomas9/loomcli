@@ -9,6 +9,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/dto"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -82,7 +83,7 @@ func HandleCreate(agentSvc service.AgentService, hub *realtime.Hub) http.Handler
 			handler.HandleServiceError(w, err)
 			return
 		}
-		broadcastAgentRefresh(hub, ws, created.Name, r.Header.Get("X-Actor"))
+		broadcastAgentRefresh(hub, ws, created.Name, requestActor(r))
 		handler.WriteJSON(w, http.StatusCreated, created)
 	}
 }
@@ -108,7 +109,7 @@ func HandleUpdate(agentSvc service.AgentService, hub *realtime.Hub) http.Handler
 			handler.HandleServiceError(w, err)
 			return
 		}
-		broadcastAgentRefresh(hub, ws, updated.Name, r.Header.Get("X-Actor"))
+		broadcastAgentRefresh(hub, ws, updated.Name, requestActor(r))
 		handler.WriteJSON(w, http.StatusOK, updated)
 	}
 }
@@ -121,7 +122,7 @@ func HandleDelete(agentSvc service.AgentService, hub *realtime.Hub) http.Handler
 			handler.HandleServiceError(w, err)
 			return
 		}
-		broadcastAgentRefresh(hub, ws, name, r.Header.Get("X-Actor"))
+		broadcastAgentRefresh(hub, ws, name, requestActor(r))
 		handler.WriteJSON(w, http.StatusOK, dto.NewMessageResponse("agent deleted"))
 	}
 }
@@ -221,7 +222,7 @@ func handleLifecycle(agentSvc service.AgentService, hub *realtime.Hub, patch lif
 			handler.HandleServiceError(w, err)
 			return
 		}
-		broadcastAgentRefresh(hub, ws, updated.Name, r.Header.Get("X-Actor"))
+		broadcastAgentRefresh(hub, ws, updated.Name, requestActor(r))
 		handler.WriteJSON(w, patch.status, dto.NewMessageResponse(fmt.Sprintf("agent %q %s", updated.Name, patch.message)))
 	}
 }
@@ -231,6 +232,16 @@ func requestWorkspaceID(r *http.Request) string {
 		return ws
 	}
 	return r.PathValue("ws")
+}
+
+// requestActor returns the actor the trust boundary vetted for this request.
+// Handlers must not read X-Actor off the request: middleware.WorkspaceMutationActor
+// owns the decision about whether an inbound header is trustworthy at all, and
+// publishes the answer on the context. Reading the header here would bypass that
+// decision and re-admit a client-controlled identity under external auth.
+func requestActor(r *http.Request) string {
+	actor, _ := fleethttp.ActorFromContext(r.Context())
+	return actor
 }
 
 func broadcastAgentRefresh(hub *realtime.Hub, workspace, agentName, actor string) {
