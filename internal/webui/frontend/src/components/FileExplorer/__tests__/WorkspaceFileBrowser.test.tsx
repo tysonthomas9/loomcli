@@ -340,6 +340,16 @@ vi.mock("@/hooks", async () => {
       invalidate: mocks.invalidateSkills,
     }),
     useSkillsActions: () => skillActions,
+    // Real implementation, not a stub: the component depends on this holding a
+    // reference steady across renders, and a pass-through would make the tests
+    // exercise a component that re-fetches on every render.
+    useStableByKey: <T,>(key: string, value: T): T => {
+      const held = React.useRef<{ key: string; value: T } | null>(null);
+      if (held.current === null || held.current.key !== key) {
+        held.current = { key, value };
+      }
+      return held.current.value;
+    },
     useSkillsTree: (
       _workspaceId: string,
       group: { kind: string; role?: string },

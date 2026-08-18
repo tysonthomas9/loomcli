@@ -41,6 +41,7 @@ import {
   useFileBrowserStoreInstance,
   useSkillsActions,
   useSkillsCatalog,
+  useStableByKey,
   type FileBrowserTab,
 } from "@/hooks";
 import {
@@ -339,20 +340,10 @@ function FileBrowserInner({
     () => existingExplorerRefs(sections),
     [sections],
   );
-  const visibleRefsKey = computedVisibleExplorerRefs
-    .map(explorerRefKey)
-    .join("|");
-  const visibleRefsRef = useRef<{ key: string; refs: ExplorerRef[] }>({
-    key: "",
-    refs: [],
-  });
-  if (visibleRefsRef.current.key !== visibleRefsKey) {
-    visibleRefsRef.current = {
-      key: visibleRefsKey,
-      refs: computedVisibleExplorerRefs,
-    };
-  }
-  const visibleExplorerRefs = visibleRefsRef.current.refs;
+  const visibleExplorerRefs = useStableByKey(
+    computedVisibleExplorerRefs.map(explorerRefKey).join("|"),
+    computedVisibleExplorerRefs,
+  );
   const visibleCheckoutRefs = useMemo(
     () => gitStatusRefs(sections),
     [sections],
@@ -368,20 +359,10 @@ function FileBrowserInner({
     () => existingExplorerRefs(allSections),
     [allSections],
   );
-  const storeValidRefsKey = computedStoreValidRefs
-    .map(explorerRefKey)
-    .join("|");
-  const storeValidRefsRef = useRef<{ key: string; refs: ExplorerRef[] }>({
-    key: "",
-    refs: [],
-  });
-  if (storeValidRefsRef.current.key !== storeValidRefsKey) {
-    storeValidRefsRef.current = {
-      key: storeValidRefsKey,
-      refs: computedStoreValidRefs,
-    };
-  }
-  const storeValidRefs = storeValidRefsRef.current.refs;
+  const storeValidRefs = useStableByKey(
+    computedStoreValidRefs.map(explorerRefKey).join("|"),
+    computedStoreValidRefs,
+  );
   const knownRefs = useMemo(() => gitStatusRefs(allSections), [allSections]);
   const checkoutChangeCount = useMemo(
     () =>
@@ -414,20 +395,12 @@ function FileBrowserInner({
         return true;
       });
   }, [visibleCheckouts]);
-  const branchDiffRequestsKey = branchDiffRequests
-    .map((request) => `${request.key}:${request.agent}`)
-    .join("|");
-  const stableBranchDiffRequestsRef = useRef<{
-    key: string;
-    requests: BranchDiffRequest[];
-  }>({ key: "", requests: [] });
-  if (stableBranchDiffRequestsRef.current.key !== branchDiffRequestsKey) {
-    stableBranchDiffRequestsRef.current = {
-      key: branchDiffRequestsKey,
-      requests: branchDiffRequests,
-    };
-  }
-  const stableBranchDiffRequests = stableBranchDiffRequestsRef.current.requests;
+  const stableBranchDiffRequests = useStableByKey(
+    branchDiffRequests
+      .map((request) => `${request.key}:${request.agent}`)
+      .join("|"),
+    branchDiffRequests,
+  );
   const unavailableChangeCheckoutLabels = useMemo(
     () => unavailableCheckoutLabels(visibleCheckouts),
     [visibleCheckouts],
@@ -448,15 +421,10 @@ function FileBrowserInner({
       });
   }, [visibleCheckouts]);
   const statusRefs = lens === "changes" ? changesRefs : visibleCheckoutRefs;
-  const statusRefsKey = statusRefs.map(checkoutRefKey).join("|");
-  const stableStatusRefsRef = useRef<{
-    key: string;
-    refs: CheckoutRef[];
-  }>({ key: "", refs: [] });
-  if (stableStatusRefsRef.current.key !== statusRefsKey) {
-    stableStatusRefsRef.current = { key: statusRefsKey, refs: statusRefs };
-  }
-  const stableStatusRefs = stableStatusRefsRef.current.refs;
+  const stableStatusRefs = useStableByKey(
+    statusRefs.map(checkoutRefKey).join("|"),
+    statusRefs,
+  );
   const changeGroups = useMemo(
     () => buildChangeGroups(visibleCheckouts, gitStatusByRef),
     [visibleCheckouts, gitStatusByRef],

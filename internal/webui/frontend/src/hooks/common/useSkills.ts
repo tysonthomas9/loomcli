@@ -86,6 +86,15 @@ export function useSkillCapabilities(workspaceId: string) {
 }
 
 export function useSkillsActions(workspaceId: string) {
+  // Both subscriptions discard their snapshot on purpose. This hook returns
+  // callbacks, not data, but canEdit reads catalog and capability state at call
+  // time — so a consumer that never re-rendered after a load would keep asking
+  // a stale question. Subscribing here is what re-renders it.
+  //
+  // Deliberately the raw store rather than useSkillsCatalog/useSkillCapabilities:
+  // those also trigger the load, and this hook is mounted in places that only
+  // want to act on skills, not fetch them. Swapping them in would add fetches
+  // wherever it is used without a sibling already loading.
   useSyncExternalStore(
     skillsStore.subscribe,
     () => skillsStore.catalog(workspaceId),

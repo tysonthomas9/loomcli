@@ -72,6 +72,8 @@ export type {
   SortDirection,
 } from "./useSort";
 
+export { useStableByKey } from "./useStableByKey";
+
 export {
   useSkill,
   useSkillCapabilities,
