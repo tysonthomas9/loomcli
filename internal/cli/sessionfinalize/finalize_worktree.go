@@ -12,6 +12,7 @@ type WithWorktreeOptions struct {
 	TaskID       string
 	ExitCode     int
 	ErrorClass   string
+	ErrorMessage string
 
 	// ClaudeSessionID is the Claude Code session UUID captured from the run's
 	// stream output. Used to resolve the native transcript exactly; empty
@@ -66,6 +67,7 @@ func WithWorktree(sess *sessions.Session, opts WithWorktreeOptions) (WithWorktre
 		TaskID:       opts.TaskID,
 		ExitCode:     opts.ExitCode,
 		ErrorClass:   opts.ErrorClass,
+		ErrorMessage: opts.ErrorMessage,
 		FilesTouched: result.FilesTouched,
 		DiffPatch:    diffPatch,
 		DiffStats:    result.DiffStats,
