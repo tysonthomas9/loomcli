@@ -57,8 +57,13 @@ func extractLeafUsage(data []byte) leafUsage {
 func (s *Supervisor) completeBackendUnavailableCleanup(ap *AgentProcess) {
 	state := takeAgentSessionForFinalize(ap)
 	taskID := s.taskIDForLifecycle(ap, nil)
+	const backendUnavailableMsg = "backend binary unavailable at spawn time"
 	if state.session != nil {
-		_ = state.session.Finalize(sessions.FinalizeOptions{ExitCode: -1, ErrorClass: "backend_unavailable"})
+		_ = state.session.Finalize(sessions.FinalizeOptions{
+			ExitCode:     -1,
+			ErrorClass:   "backend_unavailable",
+			ErrorMessage: backendUnavailableMsg,
+		})
 	}
 	if state.sessionID != "" {
 		s.completeControlPlaneAgentSession(ap, agentSessionCompletionInput{
@@ -67,6 +72,7 @@ func (s *Supervisor) completeBackendUnavailableCleanup(ap *AgentProcess) {
 			leaseToken: state.leaseToken,
 			exitCode:   -1,
 			errClass:   "backend_unavailable",
+			errMessage: backendUnavailableMsg,
 			taskID:     taskID,
 		})
 		return
@@ -94,12 +100,14 @@ func (s *Supervisor) finalizeAgentSession(ap *AgentProcess, exitCode int) {
 	}
 	taskID := s.taskIDForFinalize(ap)
 	errClass := agentErrorClass(ap)
+	errMessage := agentErrorMessage(ap)
 	// Read the leaf transcript once: it feeds both the on-disk token backfill (via
 	// finalizeLocalSession) and the control-plane transcript_ref artifact upload.
 	// Read before finalizeLocalSession, whose codex/claude re-sync can rewrite the
 	// on-disk file — this captures the TS leaf's canonical transcript verbatim.
 	transcriptData, leafTokens, _ := s.readLeafTranscript(state.sessionID)
-	diffResult := finalizeLocalSession(state.session, ap, state.beforeRef, taskID, exitCode, errClass, leafTokens)
+	diffResult := finalizeLocalSession(state.session, ap, state.beforeRef, taskID, exitCode,
+		errClass, errMessage, leafTokens)
 	// KNOWN GAP — local session only. leafTokens lands on the on-disk session
 	// record; it does NOT reach the control plane, because store.AgentSessionUpdate
 	// has no token or cost fields (only Status/TaskID/FinishedAt/ErrorClass/
@@ -114,6 +122,7 @@ func (s *Supervisor) finalizeAgentSession(ap *AgentProcess, exitCode int) {
 		leaseToken:     state.leaseToken,
 		exitCode:       exitCode,
 		errClass:       errClass,
+		errMessage:     errMessage,
 		taskID:         taskID,
 		diffResult:     diffResult,
 		transcriptData: transcriptData,
@@ -158,6 +167,28 @@ func agentErrorClass(ap *AgentProcess) string {
 	return errClass
 }
 
+// agentErrorMessage returns the classified failure message from the agent's most
+// recent exit, or "" when the run ended cleanly (LastError nil).
+func agentErrorMessage(ap *AgentProcess) string {
+	ap.Mu.Lock()
+	msg := ""
+	if ap.LastError != nil {
+		msg = ap.LastError.Message
+	}
+	ap.Mu.Unlock()
+	return msg
+}
+
+// agentSessionSummary returns the control-plane summary pointer for a completing
+// session: the classified message on a failed status, nil otherwise (a clean run
+// must not publish a stale LastError).
+func agentSessionSummary(status domain.AgentSessionStatus, msg string) *string {
+	if msg == "" || status != domain.AgentSessionFailed {
+		return nil
+	}
+	return &msg
+}
+
 func finalizeLocalSession(
 	sess *sessions.Session,
 	ap *AgentProcess,
@@ -165,6 +196,7 @@ func finalizeLocalSession(
 	taskID string,
 	exitCode int,
 	errClass string,
+	errMessage string,
 	leafTokens leafUsage,
 ) sessionfinalize.WithWorktreeResult {
 	result, err := sessionfinalize.WithWorktree(sess, sessionfinalize.WithWorktreeOptions{
@@ -173,6 +205,7 @@ func finalizeLocalSession(
 		TaskID:       taskID,
 		ExitCode:     exitCode,
 		ErrorClass:   errClass,
+		ErrorMessage: errMessage,
 		// Carry the leaf's reported usage so the supervisor's collector-less finalize
 		// records non-zero tokens on the session (otherwise the reaped worker's
 		// collector-aware finalize never runs and tokens land 0). Sourced from the

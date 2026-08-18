@@ -121,6 +121,10 @@ type FinalizeOptions struct {
 
 	// Error context
 	ErrorClass string `json:"error_class,omitempty"`
+	// ErrorMessage is the classified human-readable failure message. Finalize
+	// stores it on SessionMetadata.LastError (truncated); empty leaves the field
+	// absent from metadata.json.
+	ErrorMessage string `json:"error_message,omitempty"`
 }
 
 // DiffStats summarizes the git diff for a session.
