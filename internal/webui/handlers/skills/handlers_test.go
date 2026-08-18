@@ -571,6 +571,58 @@ func TestSkillErrorBridgePreservesBackingForbidden(t *testing.T) {
 	}
 }
 
+// The 404 lane had no coverage at all: every other status the module can return
+// is asserted somewhere in this file, but nothing reached skill_not_found, so a
+// regression in the ErrNotFound mapping would have surfaced only in the UI.
+func TestMissingSkillsAndFilesMapToNotFound(t *testing.T) {
+	h := newSkillsHarness(t)
+	etag := h.request(t, http.MethodGet,
+		"/api/workspaces/SKILLS/roles/reviewer/skills/review-code", "", nil).Header().Get("ETag")
+
+	tests := []struct {
+		name    string
+		method  string
+		path    string
+		body    string
+		headers map[string]string
+	}{
+		{
+			name:   "get unknown role skill",
+			method: http.MethodGet,
+			path:   "/api/workspaces/SKILLS/roles/reviewer/skills/no-such-skill",
+		},
+		{
+			name:   "get unknown workspace skill",
+			method: http.MethodGet,
+			path:   "/api/workspaces/SKILLS/skills/no-such-skill",
+		},
+		{
+			name:   "get unknown bundled file on a known skill",
+			method: http.MethodGet,
+			path:   "/api/workspaces/SKILLS/roles/reviewer/skills/review-code/files/scripts/missing.sh",
+		},
+		{
+			name:    "patch unknown role skill",
+			method:  http.MethodPatch,
+			path:    "/api/workspaces/SKILLS/roles/reviewer/skills/no-such-skill",
+			body:    `{"description":"Edited"}`,
+			headers: map[string]string{"If-Match": etag},
+		},
+		{
+			name:    "delete unknown role skill",
+			method:  http.MethodDelete,
+			path:    "/api/workspaces/SKILLS/roles/reviewer/skills/no-such-skill",
+			headers: map[string]string{"If-Match": etag},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rr := h.request(t, tt.method, tt.path, tt.body, tt.headers)
+			assertErrorCode(t, rr, http.StatusNotFound, "skill_not_found")
+		})
+	}
+}
+
 func decodeResponse(t *testing.T, rr *httptest.ResponseRecorder, dst any) {
 	t.Helper()
 	if err := json.Unmarshal(rr.Body.Bytes(), dst); err != nil {

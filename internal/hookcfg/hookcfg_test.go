@@ -42,6 +42,93 @@ func TestEnsureCreatesFreshBackendFiles(t *testing.T) {
 	}
 }
 
+// Every other test in this file hands Ensure one valid spec for a supported
+// backend, so its own guards were never executed. They are the guards that keep
+// a caller from writing a hook Loom cannot recognize as its own later — silent
+// ownership loss, not a crash — so they are worth pinning.
+func TestEnsureRejectsUnusableInput(t *testing.T) {
+	t.Parallel()
+
+	valid := HookSpec{Event: UserPromptSubmit, Command: "loom skill materialize"}
+	tests := []struct {
+		name    string
+		workDir string
+		backend string
+		specs   []HookSpec
+		wantErr string
+	}{
+		{
+			name:    "unsupported backend",
+			backend: "opencode",
+			specs:   []HookSpec{valid},
+			wantErr: "unsupported hook backend",
+		},
+		{
+			name:    "empty workdir",
+			workDir: "-",
+			backend: "claude",
+			specs:   []HookSpec{valid},
+			wantErr: "hook workdir is empty",
+		},
+		{
+			name:    "empty event",
+			backend: "claude",
+			specs:   []HookSpec{{Command: "loom skill materialize"}},
+			wantErr: "hook event is empty",
+		},
+		{
+			// Loom identifies the hooks it owns by this prefix, so a command
+			// without it would be written once and then never reconciled or
+			// removed again.
+			name:    "command is not self-identifying",
+			backend: "claude",
+			specs:   []HookSpec{{Event: UserPromptSubmit, Command: "/usr/local/bin/loom skill materialize"}},
+			wantErr: "must begin with",
+		},
+		{
+			name:    "duplicate spec",
+			backend: "claude",
+			specs:   []HookSpec{valid, valid},
+			wantErr: "duplicate hook spec",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			workDir := t.TempDir()
+			if tt.workDir == "-" {
+				workDir = ""
+			}
+			err := Ensure(workDir, tt.backend, tt.specs)
+			if err == nil {
+				t.Fatal("Ensure() = nil, want error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Ensure() error = %q, want it to contain %q", err, tt.wantErr)
+			}
+			// A rejected call must not have written anything.
+			if entries, readErr := os.ReadDir(workDir); workDir != "" && readErr == nil && len(entries) != 0 {
+				t.Fatalf("rejected Ensure() wrote %d entries into the workdir", len(entries))
+			}
+		})
+	}
+}
+
+func TestSupportsBackend(t *testing.T) {
+	t.Parallel()
+
+	for _, backend := range []string{"claude", "codex"} {
+		if !SupportsBackend(backend) {
+			t.Fatalf("SupportsBackend(%q) = false, want true", backend)
+		}
+	}
+	for _, backend := range []string{"opencode", "cursor", ""} {
+		if SupportsBackend(backend) {
+			t.Fatalf("SupportsBackend(%q) = true, want false", backend)
+		}
+	}
+}
+
 func TestEnsureMergesUserHooksAndPreservesUnrelatedSettings(t *testing.T) {
 	t.Parallel()
 

@@ -112,7 +112,58 @@ func TestLeadTurnDeliversWhenSkillStoreIsUnavailable(t *testing.T) {
 	}
 }
 
+// Sessions written before lead_role was recorded in metadata, and any session
+// whose registration did not resolve a role, take the fallback path instead.
+// The fixture above always stamps lead_role, so without this the fallback is
+// never reached from a delivery.
+func TestLeadTurnResolvesRoleFromTheAgentWhenMetadataOmitsIt(t *testing.T) {
+	tests := []struct {
+		name     string
+		agent    string
+		wantRole string
+	}{
+		{name: "registered agent supplies its role", agent: "nova", wantRole: "operator"},
+		{name: "unregistered agent falls back to lead", agent: "ghost", wantRole: "lead"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := t.Context()
+			st := memstore.New()
+			session, _ := createMaterializingDeliveryFixtureWithMetadata(t, st, tt.agent, map[string]string{
+				MetadataLeadWorkDir: "/repo",
+			})
+			var events []string
+			d := &materializingTurnDeliverer{events: &events}
+			var gotRole string
+			installLeadTurnMaterializer(t, func(_ context.Context, _ store.Store, _, roleName, _ string) error {
+				gotRole = roleName
+				events = append(events, "materialize")
+				return nil
+			})
+
+			if _, err := deliverNextLeadInboxMessage(
+				ctx, st, "WS", tt.agent, session, d, &DeliveryResult{State: DeliveryStatePending},
+			); err != nil {
+				t.Fatalf("deliverNextLeadInboxMessage: %v", err)
+			}
+			if gotRole != tt.wantRole {
+				t.Fatalf("materialized for role %q, want %q", gotRole, tt.wantRole)
+			}
+		})
+	}
+}
+
 func createMaterializingDeliveryFixture(t *testing.T, st store.Store) (*domain.AgentSession, *domain.AgentInboxMessage) {
+	t.Helper()
+	return createMaterializingDeliveryFixtureWithMetadata(t, st, "nova", map[string]string{
+		MetadataLeadWorkDir: "/repo",
+		MetadataLeadRole:    "operator",
+	})
+}
+
+func createMaterializingDeliveryFixtureWithMetadata(
+	t *testing.T, st store.Store, agentID string, metadata map[string]string,
+) (*domain.AgentSession, *domain.AgentInboxMessage) {
 	t.Helper()
 	ctx := t.Context()
 	if _, err := st.Agents().Create(ctx, store.AgentCreate{
@@ -123,18 +174,15 @@ func createMaterializingDeliveryFixture(t *testing.T, st store.Store) (*domain.A
 	session, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
 		WorkspaceKey: "WS",
 		SessionID:    "lead-session",
-		AgentID:      "nova",
+		AgentID:      agentID,
 		Kind:         domain.AgentSessionKindOrchestration,
 		Status:       domain.AgentSessionRunning,
-		Metadata: map[string]string{
-			MetadataLeadWorkDir: "/repo",
-			MetadataLeadRole:    "operator",
-		},
+		Metadata:     metadata,
 	})
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	inbox, err := createLeadInboxMessage(ctx, st, "WS", "nova", session.SessionID, "next turn", LeadMessageDeliveryOptions{})
+	inbox, err := createLeadInboxMessage(ctx, st, "WS", agentID, session.SessionID, "next turn", LeadMessageDeliveryOptions{})
 	if err != nil {
 		t.Fatalf("create inbox: %v", err)
 	}

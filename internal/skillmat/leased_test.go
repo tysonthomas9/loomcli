@@ -124,6 +124,44 @@ func TestMaterializeLeasedSkipsAfterBoundedConflictBackoff(t *testing.T) {
 	}
 }
 
+// The case the retry loop exists for: contention that clears. The always-wins
+// and always-conflicts tests around this one both take the loop's edges, so
+// without this the retry-then-succeed path — acquire, back off, acquire again,
+// then materialize under the lease — is never executed.
+func TestMaterializeLeasedRetriesUntilContentionClears(t *testing.T) {
+	if len(materializationLeaseBackoff) < 2 {
+		t.Skipf("backoff schedule has %d steps, need 2", len(materializationLeaseBackoff))
+	}
+	var calls []string
+	conflict := &domain.SkillMaterializationLeaseConflictError{
+		Holder: "other@test-host#9", ExpiresAt: time.Now().UTC().Add(time.Second),
+	}
+	leases := &fakeSkillMaterializationLeaseStore{
+		acquireErrs: []error{conflict, conflict, nil},
+		lease:       &domain.SkillMaterializationLease{Token: "token-after-wait"},
+		calls:       &calls,
+	}
+	st := leasedMaterializeStore{leases: leases}
+	deps := testLeasedMaterializeDeps(&calls)
+	var delays []time.Duration
+	deps.sleep = func(_ context.Context, delay time.Duration) error {
+		delays = append(delays, delay)
+		return nil
+	}
+
+	if err := materializeLeasedWith(t.Context(), st, "WS", "reviewer", t.TempDir(), deps); err != nil {
+		t.Fatalf("materializeLeasedWith: %v", err)
+	}
+	want := []string{"acquire", "acquire", "acquire", "materialize", "release"}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("calls = %v, want %v", calls, want)
+	}
+	// Each retry waits the step for the attempt that failed, in order.
+	if wantDelays := materializationLeaseBackoff[:2]; !reflect.DeepEqual(delays, wantDelays) {
+		t.Fatalf("backoff delays = %v, want %v", delays, wantDelays)
+	}
+}
+
 func TestMaterializeLeasedDegradesWhenLeaseStoreIsUnavailable(t *testing.T) {
 	var calls []string
 	leases := &fakeSkillMaterializationLeaseStore{

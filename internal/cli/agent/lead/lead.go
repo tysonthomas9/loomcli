@@ -316,14 +316,7 @@ func materializeLeadSkillsWith(ctx context.Context, registration leadSessionRegi
 	opCtx, cancel := context.WithTimeout(ctx, leadStoreOpTimeout)
 	defer cancel()
 
-	roleName := "lead"
-	agentID := strings.TrimSpace(registration.AgentID)
-	if agentID != "" && st.Agents() != nil {
-		registeredAgent, err := st.Agents().Get(opCtx, workspace, agentID)
-		if err == nil && registeredAgent != nil && strings.TrimSpace(registeredAgent.RoleName) != "" {
-			roleName = strings.TrimSpace(registeredAgent.RoleName)
-		}
-	}
+	roleName := leadcontrol.SessionRoleName(opCtx, st, workspace, registration.AgentID)
 
 	if err := materialize(opCtx, st, workspace, roleName, workDir); err != nil {
 		if skillmat.IsStoreUnavailable(err) {

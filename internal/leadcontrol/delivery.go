@@ -341,7 +341,7 @@ func materializeLeadTurnSkills(ctx context.Context, st store.Store, workspace st
 	}
 	roleName := strings.TrimSpace(session.Metadata[MetadataLeadRole])
 	if roleName == "" {
-		roleName = leadSessionRoleName(ctx, st, workspace, session.AgentID)
+		roleName = SessionRoleName(ctx, st, workspace, session.AgentID)
 	}
 	if err := materializeLeadSkillsBeforeTurn(ctx, st, workspace, roleName, targetDir); err != nil {
 		if skillmat.IsStoreUnavailable(err) {
@@ -354,7 +354,15 @@ func materializeLeadTurnSkills(ctx context.Context, st store.Store, workspace st
 	return nil
 }
 
-func leadSessionRoleName(ctx context.Context, st store.Store, workspace, agentID string) string {
+// SessionRoleName resolves the role a lead session's skills materialize for.
+//
+// It falls back to "lead" — the role a lead orchestrator runs as when nothing
+// registered a more specific one — so callers that materialize *for a lead*
+// share one answer. A worker resolving its own role must not use this: an
+// unregistered worker has no role, and defaulting it to "lead" would hand it
+// the lead's skill chain. That caller (loom skill materialize) falls back to
+// the empty string and gets the workspace chain alone.
+func SessionRoleName(ctx context.Context, st store.Store, workspace, agentID string) string {
 	if st != nil && st.Agents() != nil && strings.TrimSpace(agentID) != "" {
 		agent, err := st.Agents().Get(ctx, workspace, strings.TrimSpace(agentID))
 		if err == nil && agent != nil && strings.TrimSpace(agent.RoleName) != "" {
