@@ -1,0 +1,84 @@
+schema_version: 1
+id: website
+label: Website Development
+description: Designer-led team for marketing and content sites, with a frontend implementer, a copy writer and a QA and review pair.
+revision: 1
+
+roles:
+  # Design role: task_filter "any" + a required label. NEVER needs_plan/needs_design —
+  # the worker CLI rejects the first and mis-routes the second.
+  - name: web-designer
+    kind: worker
+    display_label: Architecture
+    description: Turns page and site tasks into implementable designs with layout, component structure, responsive breakpoints and content slots.
+    prompt_file: builtin:team-web-designer
+    task_filter: any
+    labels: [architect]
+    effort: high
+    skills: [design, ux]
+    read_only: false
+
+  # Shared verbatim with the fullstack-app bundle so applying both templates
+  # converges on one agent role instead of reporting a divergence.
+  - name: frontend-dev
+    kind: worker
+    display_label: Developer
+    description: Implements UI tasks against an approved design spec; verifies loading/empty/error states and accessibility basics.
+    prompt_file: builtin:team-frontend-dev
+    task_filter: has_design
+    exclude_labels: [architect]
+    effort: medium
+    skills: [frontend, ui]
+
+  - name: content-writer
+    kind: worker
+    display_label: Developer
+    description: Writes and revises site copy against an approved design spec, including page metadata and calls to action.
+    prompt_file: builtin:team-content-writer
+    task_filter: has_design
+    exclude_labels: [architect]
+    effort: low
+    skills: [content, copy]
+
+  # denied_tools stays EMPTY: only claude enforces tool lists and a non-empty list is a
+  # hard error on every other backend. Intended-but-unshipped deny patterns:
+  # push/deploy-shaped Bash. The restraint is stated in builtin:team-qa's prose instead.
+  - name: site-qa
+    kind: worker
+    display_label: QA
+    description: Checks pages against acceptance criteria across browsers and viewports, including accessibility basics, and files defects as follow-up tasks.
+    prompt_file: builtin:team-qa
+    task_filter: has_design
+    exclude_labels: [architect]
+    effort: medium
+    skills: [qa, a11y]
+    denied_tools: []
+
+  - name: code-reviewer
+    kind: interactive
+    display_label: QA
+    description: Human-driven PR review terminal; reads diffs and asks before any GitHub mutation.
+    prompt_file: builtin:pr-review
+    effort: high
+
+agents:
+  - name: web-designer-1
+    role_name: web-designer
+    auto: true
+    desired_state: running
+    cross_repo: true
+  - name: frontend-dev-1
+    role_name: frontend-dev
+    auto: true
+    desired_state: running
+    cross_repo: true
+  - name: content-writer-1
+    role_name: content-writer
+    auto: true
+    desired_state: running
+    cross_repo: true
+  - name: site-qa-1
+    role_name: site-qa
+    auto: true
+    desired_state: running
+    cross_repo: true

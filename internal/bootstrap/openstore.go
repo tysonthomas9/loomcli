@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -17,12 +18,8 @@ import (
 // Clients send it as X-API-Key and X-Fleet-API-Key. Optional in dev mode.
 const EnvFleetDBAPIKey = "LOOM_FLEET_DB_API_KEY" //nolint:gosec // env var name, not a credential
 
-// EnvFleetDBActor is the env var holding the X-Actor header value.
-// Defaults to the current agent name, then $USER.
-const EnvFleetDBActor = "LOOM_FLEET_DB_ACTOR"
-
-// EnvAgentName is the env var used to identify the current agent process.
-const EnvAgentName = "LOOM_AGENT_NAME"
+// The X-Actor env vars and the resolver that reads them live in
+// internal/fleethttp, beside the transport that sends the header.
 
 // StoreHandle bundles a Store with the cleanup function for any
 // subprocess (embedded fleet-db) the bootstrap had to start. Callers
@@ -93,7 +90,7 @@ func OpenStore(ctx context.Context, dataDir string, logger *slog.Logger) (*Store
 	// See internal/backend/fleet/transport.go for the rationale.
 	cfg := fleetdb.Config{
 		APIKey:     os.Getenv(EnvFleetDBAPIKey),
-		Actor:      resolveActor(),
+		Actor:      fleethttp.ResolveFleetDBActor(""),
 		HTTPClient: fleet.SharedHTTPClient(),
 	}
 
@@ -171,15 +168,4 @@ func waitAndOpenLocalStore(ctx context.Context, fleetDir string, cfg fleetdb.Con
 	}
 	logger.Info("opened existing embedded fleet-db client after startup wait", "url", cfg.BaseURL)
 	return &StoreHandle{Store: client, mode: ModeLocal, url: cfg.BaseURL}, nil
-}
-
-// resolveActor returns the X-Actor identity.
-func resolveActor() string {
-	if v := os.Getenv(EnvFleetDBActor); v != "" {
-		return v
-	}
-	if v := os.Getenv(EnvAgentName); v != "" {
-		return v
-	}
-	return os.Getenv("USER")
 }

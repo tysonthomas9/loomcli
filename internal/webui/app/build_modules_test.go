@@ -21,8 +21,14 @@ func TestServer_BuildModules_ZeroValue(t *testing.T) {
 	var app Server
 	app.buildModules()
 
-	if got := len(app.wsModules); got != 5 {
-		t.Fatalf("len(wsModules) = %d, want 5", got)
+	if got := len(app.apiModules); got != 1 {
+		t.Fatalf("len(apiModules) = %d, want 1", got)
+	}
+	if got := fmt.Sprintf("%T", app.apiModules[0]); got != "*teamtemplates.Module" {
+		t.Fatalf("apiModules[0] type = %s, want *teamtemplates.Module", got)
+	}
+	if got := len(app.wsModules); got != 6 {
+		t.Fatalf("len(wsModules) = %d, want 6", got)
 	}
 
 	// Verify concrete types in order. The gh-backed PR list fallback is
@@ -30,6 +36,7 @@ func TestServer_BuildModules_ZeroValue(t *testing.T) {
 	// agent service).
 	wantTypes := []string{
 		"*handlermux.WorkspaceOpsModule",
+		"*audit.Module",
 		"*issues.IssueModule",
 		"*issues.SessionModule",
 		"*log.Module",
@@ -65,8 +72,8 @@ func TestServer_BuildModules_AllDeps(t *testing.T) {
 	// 4 always + SSE(hub) + TerminalTab(termSvc) + IssueTab(issueTabStore) +
 	// Terminal(termSvc) + Fleet(fleetRegistry) + Git(diffSvc) + File(fileSvc) +
 	// gh-backed PR list fallback (non-store) = 12
-	if got := len(app.wsModules); got != 12 {
-		t.Fatalf("len(wsModules) = %d, want 12", got)
+	if got := len(app.wsModules); got != 13 {
+		t.Fatalf("len(wsModules) = %d, want 13", got)
 	}
 }
 
@@ -76,11 +83,12 @@ func TestServer_BuildModules_StoreBacked(t *testing.T) {
 
 	app.buildModules()
 
-	if got := len(app.wsModules); got != 12 {
-		t.Fatalf("len(wsModules) = %d, want 12", got)
+	if got := len(app.wsModules); got != 13 {
+		t.Fatalf("len(wsModules) = %d, want 13", got)
 	}
 	wantTypes := []string{
 		"*handlermux.WorkspaceOpsModule",
+		"*audit.Module",
 		"*issues.IssueModule",
 		"*issues.SessionModule",
 		"*log.Module",

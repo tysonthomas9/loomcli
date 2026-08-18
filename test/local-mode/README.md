@@ -95,11 +95,16 @@ LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-b \
 LOCAL_MODE_FLEETDB_PORT=8380 \
 LOCAL_MODE_API_PORT=8382 \
 LOCAL_MODE_UI_PORT=8383 \
+LOCAL_MODE_MAX_AGENTS=12 \
 LOCAL_MODE_COMPOSE_UP_FLAGS="--build -d" \
 make local-mode-up
 
 LOCAL_MODE_API_PORT=8382 make local-mode-verify
 ```
+
+`LOCAL_MODE_MAX_AGENTS` sets the workspace daemon profile's `max_agents`
+limit and defaults to 2. Raise it before restarting a stack whose workspace
+has more than two runnable agent assignments.
 
 Use the same project name for logs and teardown:
 

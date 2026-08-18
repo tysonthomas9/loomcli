@@ -50,6 +50,8 @@ func (s *roleStore) Create(_ context.Context, in store.RoleCreate) (*domain.Role
 		Effort:         in.Effort,
 		PathPatterns:   append([]string(nil), in.PathPatterns...),
 		Skills:         append([]string(nil), in.Skills...),
+		Labels:         append([]string(nil), in.Labels...),
+		ExcludeLabels:  append([]string(nil), in.ExcludeLabels...),
 		InputPolicy:    in.InputPolicy.Clone(),
 		MaxPriority:    clonePtr(in.MaxPriority),
 		MaxConcurrency: clonePtr(in.MaxConcurrency),
@@ -141,6 +143,12 @@ func applyRoleDefinitionPatch(r *domain.Role, patch store.RoleUpdate) {
 // applyRoleControlPatch applies the routing and safety half of the patch:
 // label constraints, input policy, and the run/spend bounds.
 func applyRoleControlPatch(r *domain.Role, patch store.RoleUpdate) {
+	if patch.Labels != nil {
+		r.Labels = append([]string(nil), (*patch.Labels)...)
+	}
+	if patch.ExcludeLabels != nil {
+		r.ExcludeLabels = append([]string(nil), (*patch.ExcludeLabels)...)
+	}
 	if patch.InputPolicy != nil {
 		// Deep-copied on the way in as well as on the way out: the caller keeps
 		// a reference to the Kinds map it built, and a shared map would let it
@@ -194,6 +202,8 @@ func cloneRole(r *domain.Role) *domain.Role {
 	out := *r
 	out.PathPatterns = append([]string(nil), r.PathPatterns...)
 	out.Skills = append([]string(nil), r.Skills...)
+	out.Labels = append([]string(nil), r.Labels...)
+	out.ExcludeLabels = append([]string(nil), r.ExcludeLabels...)
 	out.AllowedTools = append([]string(nil), r.AllowedTools...)
 	out.DeniedTools = append([]string(nil), r.DeniedTools...)
 	out.InputPolicy = r.InputPolicy.Clone()

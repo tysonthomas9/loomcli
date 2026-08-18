@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/testutil"
 	"github.com/tysonthomas9/loomcli/internal/webui"
@@ -341,7 +342,7 @@ func TestResolveFleetStateResolvesClientConfigOutsideFleetMode(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	t.Setenv(bootstrap.EnvWorkspace, "")
 	t.Setenv(bootstrap.EnvFleetDBURL, "")
-	t.Setenv(bootstrap.EnvFleetDBActor, "")
+	t.Setenv(fleethttp.EnvFleetDBActor, "")
 	t.Setenv("LOOM_ISSUE_BACKEND", "fleetdb")
 	t.Setenv("LOOM_FLEET_URL", "http://fleet-db:8080")
 	t.Setenv("LOOM_FLEET_ACTOR", "local-mode-harness")
@@ -368,8 +369,8 @@ func TestResolveFleetStateUsesLocalActorFallback(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	t.Setenv(bootstrap.EnvWorkspace, "")
 	t.Setenv(bootstrap.EnvFleetDBURL, "")
-	t.Setenv(bootstrap.EnvFleetDBActor, "")
-	t.Setenv(bootstrap.EnvAgentName, "")
+	t.Setenv(fleethttp.EnvFleetDBActor, "")
+	t.Setenv(fleethttp.EnvAgentName, "")
 	t.Setenv("LOOM_FLEET_ACTOR", "")
 	t.Setenv("USER", "local-user")
 	oldRedisAddr, oldRedisPassword := serveRedisAddr, serveRedisPassword
@@ -387,7 +388,7 @@ func TestResolveFleetStateUsesLocalActorFallback(t *testing.T) {
 
 func TestEnsureFleetStoreEnv_UsesFleetClientConfig(t *testing.T) {
 	t.Setenv(bootstrap.EnvFleetDBURL, "")
-	t.Setenv(bootstrap.EnvFleetDBActor, "")
+	t.Setenv(fleethttp.EnvFleetDBActor, "")
 
 	ensureFleetStoreEnv(config.FleetClientConfig{
 		URL:   "http://fleet-db:8080",
@@ -397,8 +398,8 @@ func TestEnsureFleetStoreEnv_UsesFleetClientConfig(t *testing.T) {
 	if got := os.Getenv(bootstrap.EnvFleetDBURL); got != "http://fleet-db:8080" {
 		t.Fatalf("%s = %q, want %q", bootstrap.EnvFleetDBURL, got, "http://fleet-db:8080")
 	}
-	if got := os.Getenv(bootstrap.EnvFleetDBActor); got != "parity-harness" {
-		t.Fatalf("%s = %q, want %q", bootstrap.EnvFleetDBActor, got, "parity-harness")
+	if got := os.Getenv(fleethttp.EnvFleetDBActor); got != "parity-harness" {
+		t.Fatalf("%s = %q, want %q", fleethttp.EnvFleetDBActor, got, "parity-harness")
 	}
 }
 

@@ -29,6 +29,10 @@ import type { IssueContext } from "@/api/terminal";
 import { buildShareUrl } from "@/utils/buildShareUrl";
 import { getReviewType, NEEDS_REVISION_LABEL } from "@/utils/issue";
 import { resolvePRReviewRef } from "@/utils/agentDisplay";
+import {
+  detectTeamTemplate,
+  findTemplateArchitectAgentName,
+} from "@/utils/agentRole";
 import { ViewSubSwitcher } from "@/components/ViewSubSwitcher/ViewSubSwitcher";
 import {
   isOnboardingRepo,
@@ -64,6 +68,7 @@ import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher/WorkspaceSwitc
 import { CreateIssueModal } from "@/components/CreateIssueModal/CreateIssueModal";
 import { CreateWorkspaceModal } from "@/components/CreateWorkspaceModal/CreateWorkspaceModal";
 import { CreateAgentModal } from "@/components/CreateAgentModal/CreateAgentModal";
+import { TeamTemplateModal } from "@/components/TeamTemplateModal";
 import {
   OnboardingFlow,
   type OnboardingStep,
@@ -107,6 +112,12 @@ import { useBackends } from "@/hooks/workspace/useBackends";
 import { useBackendConfig } from "@/hooks/workspace/useBackendConfig";
 import type { BackendInfo } from "@/utils/workspace";
 import type { Issue, Status } from "@/types";
+import type { TeamTemplateApplyReport } from "@/types/teamTemplate";
+import {
+  deriveFirstIssueStepStatus,
+  deriveTeamSetupStepStatus,
+  readTeamTemplateBreadcrumb,
+} from "@/utils/teamTemplateState";
 
 import styles from "./App.module.css";
 
@@ -118,7 +129,10 @@ const TerminalView = lazy(() =>
   })),
 );
 
-type OnboardingAction = "confirming-agent" | "running-first-task";
+type OnboardingAction =
+  | "confirming-agent"
+  | "applying-team"
+  | "running-first-task";
 
 function isOnboardingPlannerAgent(agent: WorkspaceAgentInfo): boolean {
   const roleName = agent.role_name?.trim();
@@ -141,12 +155,11 @@ function getOnboardingPlannerName(
   );
 }
 
-function getSingleRepoSourceRepo(
-  repos: readonly { name?: string; source_repo_id?: string }[],
-): string | undefined {
-  if (repos.length !== 1) return undefined;
-  const repo = repos[0];
-  return repo?.source_repo_id || repo?.name || undefined;
+function getRepoSourceRepo(repo: {
+  name?: string;
+  source_repo_id?: string;
+}): string | undefined {
+  return repo.source_repo_id || repo.name || undefined;
 }
 
 function App() {
@@ -249,9 +262,54 @@ function App() {
     () => workspaceRepos.some((repo) => isOnboardingRepo(repo)),
     [workspaceRepos],
   );
+  const onboardingRepoOptions = useMemo(
+    () =>
+      workspaceRepos.flatMap((repo) => {
+        const value = getRepoSourceRepo(repo);
+        return value ? [{ value, label: repo.name || value }] : [];
+      }),
+    [workspaceRepos],
+  );
+  const firstOnboardingSourceRepo = onboardingRepoOptions[0]?.value ?? "";
+  const onboardingRepoOptionsKey = onboardingRepoOptions
+    .map((repo) => repo.value)
+    .join("\n");
+  const [showTeamTemplate, setShowTeamTemplate] = useState(false);
+  const [teamTemplateApplyReport, setTeamTemplateApplyReport] =
+    useState<TeamTemplateApplyReport | null>(null);
+  useEffect(() => {
+    setShowTeamTemplate(false);
+    setTeamTemplateApplyReport(null);
+  }, [workspaceId]);
+  const teamTemplateBreadcrumb = useMemo(
+    () => readTeamTemplateBreadcrumb(workspaceId),
+    [workspaceId],
+  );
+  const detectedTeamTemplate = useMemo(
+    () =>
+      detectTeamTemplate({
+        roleNames: (workspace?.agents ?? []).flatMap((agent) =>
+          agent.role_name ? [agent.role_name] : [],
+        ),
+        applyReport: teamTemplateApplyReport,
+        breadcrumb: teamTemplateBreadcrumb,
+      }),
+    [workspace?.agents, teamTemplateApplyReport, teamTemplateBreadcrumb],
+  );
+  const templateArchitectAgentName = useMemo(
+    () =>
+      findTemplateArchitectAgentName({
+        teamTemplateId: detectedTeamTemplate?.id,
+        agents: workspace?.agents ?? [],
+        applyReport: teamTemplateApplyReport,
+      }),
+    [detectedTeamTemplate?.id, workspace?.agents, teamTemplateApplyReport],
+  );
   const shouldPrefillOnboardingIssue = hasOnboardingRepo && issues.length === 0;
   const shouldPrefillOnboardingAgent =
-    hasOnboardingRepo && !getOnboardingPlannerName(workspace?.agents);
+    hasOnboardingRepo &&
+    !getOnboardingPlannerName(workspace?.agents) &&
+    !detectedTeamTemplate;
   const onboardingWorkspaceInitialValues = useMemo(
     () => ({
       name: ONBOARDING_WORKSPACE_NAME,
@@ -526,6 +584,26 @@ function App() {
   const [onboardingActionError, setOnboardingActionError] = useState<
     string | null
   >(null);
+  const [onboardingIssueTitle, setOnboardingIssueTitle] = useState(() =>
+    hasOnboardingRepo ? ONBOARDING_ISSUE_TITLE : "",
+  );
+  const [onboardingIssueDescription, setOnboardingIssueDescription] = useState(
+    () => (hasOnboardingRepo ? ONBOARDING_ISSUE_DESCRIPTION : ""),
+  );
+  const [onboardingIssueSourceRepo, setOnboardingIssueSourceRepo] = useState(
+    () => firstOnboardingSourceRepo,
+  );
+
+  useEffect(() => {
+    setOnboardingIssueTitle(hasOnboardingRepo ? ONBOARDING_ISSUE_TITLE : "");
+    setOnboardingIssueDescription(
+      hasOnboardingRepo ? ONBOARDING_ISSUE_DESCRIPTION : "",
+    );
+  }, [workspaceId, hasOnboardingRepo]);
+
+  useEffect(() => {
+    setOnboardingIssueSourceRepo(firstOnboardingSourceRepo);
+  }, [workspaceId, firstOnboardingSourceRepo, onboardingRepoOptionsKey]);
 
   // Track mount state for async operations.
   useEffect(() => {
@@ -856,14 +934,12 @@ function App() {
 
   const hasWorkspaceRepo = workspaceRepos.length > 0;
   const onboardingPlannerName = getOnboardingPlannerName(workspace?.agents);
-  // The "create agent" step is satisfied by ANY agent, but running the first
-  // task needs the planner specifically (handleRunFirstOnboardingTask assigns
-  // it). Track them separately so a workspace with only a non-planner agent
-  // (e.g. a Lead) marks create-agent complete yet keeps "Create & Run" disabled
-  // — instead of offering it and then dead-ending with "Planner agent is not
-  // available yet."
+  // Team-step completion remains server-derived from any configured agent.
+  // First-issue creation is stricter: it needs either the legacy planner path
+  // or an architect from a detected Team Template.
   const hasWorkspaceAgent = (workspace?.agents?.length ?? 0) > 0;
   const hasOnboardingPlanner = Boolean(onboardingPlannerName);
+  const hasTemplateArchitect = Boolean(templateArchitectAgentName);
   const hasWorkspaceIssue = issues.length > 0 || (agentStats?.total ?? 0) > 0;
   const defaultBackend = onboardingBackendConfig?.backend;
   const defaultBackendStatus = aiBackends.find(
@@ -878,7 +954,6 @@ function App() {
   const shouldShowWorkspaceOnboarding =
     !onboardingDismissed &&
     !isWorkspaceOnboardingComplete &&
-    (workspaceRepos.length === 0 || hasOnboardingRepo) &&
     (!hasWorkspaceRepo || !hasWorkspaceAgent || !hasWorkspaceIssue);
   const handleOnboardingDismiss = useCallback(() => {
     dismissOnboarding(workspaceId);
@@ -908,40 +983,72 @@ function App() {
 
   const handleRunFirstOnboardingTask = useCallback(async () => {
     if (onboardingAction !== null) return;
+    const title = onboardingIssueTitle.trim();
+    if (!title) {
+      setOnboardingActionError("Issue title is required.");
+      return;
+    }
 
     setOnboardingAction("running-first-task");
     setOnboardingActionError(null);
     try {
-      let onboardingAgent = onboardingPlannerName;
+      let latestAgents = workspace?.agents ?? [];
       try {
         const latestWorkspace = await fetchWorkspaceApi(workspaceId);
-        onboardingAgent = getOnboardingPlannerName(latestWorkspace.agents);
+        latestAgents = latestWorkspace.agents;
       } catch {
         // Fall back to the already-rendered workspace snapshot.
       }
 
+      const latestDetectedTeamTemplate = detectTeamTemplate({
+        roleNames: latestAgents.flatMap((agent) =>
+          agent.role_name ? [agent.role_name] : [],
+        ),
+        applyReport: teamTemplateApplyReport,
+        breadcrumb: teamTemplateBreadcrumb,
+      });
+      const latestArchitectAgentName = findTemplateArchitectAgentName({
+        teamTemplateId: latestDetectedTeamTemplate?.id,
+        agents: latestAgents,
+        applyReport: teamTemplateApplyReport,
+      });
+      const onboardingAgent =
+        latestArchitectAgentName ?? getOnboardingPlannerName(latestAgents);
+
       if (!onboardingAgent) {
-        throw new Error("Planner agent is not available yet.");
+        throw new Error("Planner or template architect is not available yet.");
       }
 
-      const sourceRepo = getSingleRepoSourceRepo(workspaceRepos);
+      const description = onboardingIssueDescription.trim();
       const result = await runOnboardingFirstTask(workspaceId, {
         agent_name: onboardingAgent,
-        title: ONBOARDING_ISSUE_TITLE,
-        description: ONBOARDING_ISSUE_DESCRIPTION,
+        title,
+        ...(description ? { description } : {}),
         issue_type: "task",
         priority: 2,
-        ...(sourceRepo ? { source_repo: sourceRepo } : {}),
+        ...(onboardingIssueSourceRepo
+          ? { source_repo: onboardingIssueSourceRepo }
+          : {}),
+        ...(latestArchitectAgentName
+          ? { labels: ["architect"], pin_agent: false }
+          : {}),
       });
 
       closeAllPanels();
       navigateToView("kanban");
       await refetch();
       refetchWorkspace();
-      const actionVerb = result.started ? "Started" : "Queued";
-      showToast(`${actionVerb} ${onboardingAgent} on ${result.issue.id}`, {
-        type: "success",
-      });
+      if (latestArchitectAgentName) {
+        showToast(
+          "Created your first issue and labeled it architect. Your architect picks it up on the next poll.",
+          { type: "success" },
+        );
+      } else {
+        const actionVerb = result.started ? "Started" : "Queued";
+        showToast(`${actionVerb} ${onboardingAgent} on ${result.issue.id}`, {
+          type: "success",
+        });
+      }
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "failed to start first task";
@@ -954,13 +1061,16 @@ function App() {
     closeAllPanels,
     navigateToView,
     onboardingAction,
+    onboardingIssueDescription,
+    onboardingIssueSourceRepo,
+    onboardingIssueTitle,
     refetch,
     refetchWorkspace,
     showToast,
     workspace?.agents,
-    onboardingPlannerName,
+    teamTemplateApplyReport,
+    teamTemplateBreadcrumb,
     workspaceId,
-    workspaceRepos,
   ]);
 
   const handleCreateIssueSuccess = useCallback(
@@ -984,6 +1094,7 @@ function App() {
           <AIBackendSetupList
             backends={aiBackends}
             defaultBackend={defaultBackend}
+            registrableBackends={onboardingBackendConfig?.available ?? []}
             isLoading={aiBackendsLoading || onboardingBackendConfigLoading}
             error={aiBackendsError}
             isSavingDefault={isSavingOnboardingBackend}
@@ -995,7 +1106,9 @@ function App() {
         id: "workspace-repo",
         title: "Create workspace with repo",
         description: hasWorkspaceRepo
-          ? "The sample repo is attached to this workspace."
+          ? hasOnboardingRepo
+            ? "The sample repo is attached to this workspace."
+            : "A repo is attached to this workspace."
           : "Add the sample repo from the workspace tree; the URL is prefilled for first-run setup.",
         status: hasWorkspaceRepo ? "complete" : "current",
       },
@@ -1008,69 +1121,145 @@ function App() {
         status: hasWorkspaceRepo ? "complete" : "blocked",
       },
       {
-        id: "create-agent",
-        title: "Create agent",
+        id: "set-up-team",
+        title: "Set up your team",
         description:
-          onboardingAction === "confirming-agent"
-            ? "Confirming the planner agent is visible to the workspace."
+          onboardingAction === "applying-team"
+            ? "Setting up agent roles and agents for this workspace."
             : hasWorkspaceAgent
-              ? "The first agent definition exists for this workspace."
-              : "Create a prefilled planner agent for the sample repo.",
-        status:
-          onboardingAction === "confirming-agent"
-            ? "pending"
-            : hasWorkspaceAgent
-              ? "complete"
-              : hasWorkspaceRepo && isDefaultBackendReady
-                ? "current"
-                : "blocked",
+              ? "This workspace has an agent team or a single agent."
+              : "Provision an agent team from a Team Template, or start with one agent.",
+        status: deriveTeamSetupStepStatus({
+          isApplying: onboardingAction === "applying-team",
+          hasWorkspaceAgent,
+          hasWorkspaceRepo,
+          isDefaultBackendReady,
+        }),
         actionLabel:
-          onboardingAction === "confirming-agent"
-            ? "Confirming..."
-            : "Create Agent",
+          onboardingAction === "applying-team"
+            ? "Applying…"
+            : "Choose Template",
         actionDisabled: onboardingAction !== null,
         onAction: () => {
           setOnboardingActionError(null);
-          setShowCreateAgent(true);
+          setShowTeamTemplate(true);
         },
+        detail: teamTemplateApplyReport ? (
+          <p className={styles.onboardingTeamDetail}>
+            {detectedTeamTemplate?.label ?? "Team Template"} applied —{" "}
+            {teamTemplateApplyReport.created} created.
+          </p>
+        ) : detectedTeamTemplate ? (
+          <p className={styles.onboardingTeamDetail}>
+            This workspace matches the {detectedTeamTemplate.label} Team
+            Template.
+          </p>
+        ) : !hasWorkspaceAgent ? (
+          <button
+            type="button"
+            className={styles.onboardingSkipLink}
+            onClick={() => {
+              setOnboardingActionError(null);
+              setShowCreateAgent(true);
+            }}
+            disabled={onboardingAction !== null}
+          >
+            Skip — create a single agent instead
+          </button>
+        ) : undefined,
       },
       {
         id: "create-issue",
         title: "Create first issue",
         description:
           onboardingAction === "running-first-task"
-            ? "Creating the task, assigning the planner, and starting work."
+            ? hasTemplateArchitect
+              ? "Creating the task and labeling it for the architect."
+              : "Creating the task, assigning the planner, and starting work."
             : hasWorkspaceIssue
               ? "The first issue is ready for agent work."
-              : "Create and run the prefilled sample task.",
-        status:
-          onboardingAction === "running-first-task"
-            ? "pending"
-            : hasWorkspaceIssue
-              ? "complete"
-              : hasOnboardingPlanner && isDefaultBackendReady
-                ? "current"
-                : "blocked",
+              : hasOnboardingRepo
+                ? "Create and run the prefilled sample task."
+                : "Describe the first task for this workspace.",
+        status: deriveFirstIssueStepStatus({
+          isRunning: onboardingAction === "running-first-task",
+          hasWorkspaceIssue,
+          hasOnboardingPlanner,
+          hasTemplateArchitect,
+          isDefaultBackendReady,
+        }),
         actionLabel:
           onboardingAction === "running-first-task"
-            ? "Starting..."
-            : "Create & Run",
-        actionDisabled: onboardingAction !== null,
+            ? "Creating…"
+            : "Create first issue",
+        actionDisabled:
+          onboardingAction !== null || onboardingIssueTitle.trim() === "",
         onAction: handleRunFirstOnboardingTask,
-        detail: onboardingActionError ? (
-          <p role="alert">{onboardingActionError}</p>
+        detail: !hasWorkspaceIssue ? (
+          <div className={styles.onboardingIssueForm}>
+            <label htmlFor="onboarding-issue-title">Issue title</label>
+            <input
+              id="onboarding-issue-title"
+              type="text"
+              required
+              value={onboardingIssueTitle}
+              placeholder={
+                hasOnboardingRepo ? undefined : "Plan the first useful change"
+              }
+              onChange={(event) => setOnboardingIssueTitle(event.target.value)}
+              disabled={onboardingAction !== null}
+            />
+            {onboardingRepoOptions.length > 1 ? (
+              <>
+                <label htmlFor="onboarding-issue-repo">Repository</label>
+                <select
+                  id="onboarding-issue-repo"
+                  value={onboardingIssueSourceRepo}
+                  onChange={(event) =>
+                    setOnboardingIssueSourceRepo(event.target.value)
+                  }
+                  disabled={onboardingAction !== null}
+                >
+                  {onboardingRepoOptions.map((repo) => (
+                    <option key={repo.value} value={repo.value}>
+                      {repo.label}
+                    </option>
+                  ))}
+                </select>
+              </>
+            ) : null}
+            <label htmlFor="onboarding-issue-description">
+              Description (optional)
+            </label>
+            <textarea
+              id="onboarding-issue-description"
+              value={onboardingIssueDescription}
+              placeholder="Add context, acceptance criteria, and testing notes"
+              rows={3}
+              onChange={(event) =>
+                setOnboardingIssueDescription(event.target.value)
+              }
+              disabled={onboardingAction !== null}
+            />
+            {onboardingActionError ? (
+              <p role="alert">{onboardingActionError}</p>
+            ) : null}
+          </div>
         ) : undefined,
       },
     ],
     [
       hasWorkspaceAgent,
       hasOnboardingPlanner,
+      hasTemplateArchitect,
       hasWorkspaceIssue,
       hasWorkspaceRepo,
+      hasOnboardingRepo,
       isDefaultBackendReady,
       defaultBackendStatus,
       aiBackends,
       defaultBackend,
+      onboardingBackendConfig?.available,
       aiBackendsLoading,
       onboardingBackendConfigLoading,
       aiBackendsError,
@@ -1079,6 +1268,12 @@ function App() {
       handleRunFirstOnboardingTask,
       onboardingAction,
       onboardingActionError,
+      onboardingIssueDescription,
+      onboardingIssueSourceRepo,
+      onboardingIssueTitle,
+      onboardingRepoOptions,
+      teamTemplateApplyReport,
+      detectedTeamTemplate,
     ],
   );
 
@@ -1376,6 +1571,7 @@ function App() {
       selectedAgentName={sidebarSelectedAgentName}
       agentTasks={agentTasks}
       onAddClick={() => setShowCreateAgent(true)}
+      onAddTeamClick={() => setShowTeamTemplate(true)}
       onAddWorkspaceClick={() => setShowCreateWorkspace(true)}
       connectionState={connectionState}
       connectionLost={isConnectionLost}
@@ -1545,6 +1741,22 @@ function App() {
               { type: "warning" },
             );
           }
+        }}
+      />
+      <TeamTemplateModal
+        isOpen={showTeamTemplate}
+        workspaceId={workspaceId}
+        workspaceName={activeWorkspaceName ?? workspace?.name ?? workspaceId}
+        {...(detectedTeamTemplate
+          ? { detectedTeamTemplateId: detectedTeamTemplate.id }
+          : {})}
+        onClose={() => setShowTeamTemplate(false)}
+        onApplyStateChange={(applying) => {
+          setOnboardingAction(applying ? "applying-team" : null);
+        }}
+        onApplied={(report) => {
+          setTeamTemplateApplyReport(report);
+          refetchWorkspace();
         }}
       />
       <CreateAgentModal

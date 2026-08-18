@@ -11,7 +11,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
-	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
 // useFixedPolling allows reverting to fixed 200ms polling via environment variable
@@ -178,24 +177,4 @@ func HasAnyAvailableTasks(parentID string, repoLabel string) (bool, error) {
 		return false, err
 	}
 	return len(tasks) > 0, nil
-}
-
-// BuildRouterTaskCheck creates a CustomTaskCheck function that uses the task router's
-// SelectBestTask instead of the generic Has*Tasks functions. Returns nil if the role
-// has no routing constraints (Skills, MaxPriority, and TaskFilter all unset), signaling
-// the caller to use default task checking.
-func BuildRouterTaskCheck(rc config.RoleConfig, ae config.AgentEntry, parentID string) func() (bool, error) {
-	constraints := cli.MergeRoleConstraints(rc, ae)
-	repoLabel := ae.Repo
-	if len(constraints.Skills) == 0 && constraints.MaxPriority == nil && constraints.TaskFilter == "" && repoLabel == "" && len(constraints.SourceRepos) == 0 {
-		return nil
-	}
-	return func() (bool, error) {
-		issues, err := fetchReadyIssues(parentID, repoLabel)
-		if err != nil {
-			return false, err
-		}
-		match := cli.SelectBestTask(issues, constraints)
-		return match != nil, nil
-	}
 }

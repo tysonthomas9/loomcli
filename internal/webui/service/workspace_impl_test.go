@@ -7,6 +7,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
@@ -178,6 +179,23 @@ func TestCreateWorkspace_StoreBackedReturnsCreatedWorkspaceData(t *testing.T) {
 	}
 	if len(data.Workspaces) != 2 {
 		t.Fatalf("workspace summary count = %d, want 2", len(data.Workspaces))
+	}
+}
+
+func TestCreateWorkspace_RateLimitedFleetDBError(t *testing.T) {
+	svc := NewWorkspaceService(WorkspaceServiceConfig{
+		CreateFn: func(context.Context, WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
+			return WorkspaceCreateResult{}, fleethttp.ErrRateLimited
+		},
+	})
+
+	_, _, err := svc.CreateWorkspace(t.Context(), WorkspaceCreateRequest{Name: "limited", Type: "empty"})
+	var serviceErr *ServiceError
+	if !errors.As(err, &serviceErr) {
+		t.Fatalf("CreateWorkspace error = %v, want *ServiceError", err)
+	}
+	if serviceErr.Kind != KindRateLimited {
+		t.Fatalf("CreateWorkspace error kind = %q, want %q", serviceErr.Kind, KindRateLimited)
 	}
 }
 

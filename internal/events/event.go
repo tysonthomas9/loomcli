@@ -46,6 +46,7 @@ const (
 	ConfigReloaded   EventType = "system.config_reloaded"
 	CircuitOpened    EventType = "circuit.opened"
 	CircuitClosed    EventType = "circuit.closed"
+	DaemonStarted    EventType = "daemon.started"
 )
 
 // Event is the envelope written to JSONL files. Data is stored as json.RawMessage
@@ -95,7 +96,7 @@ func NewEvent(eventType EventType, agent, role, epicID string, v interface{}) (E
 
 // DecodeData unmarshals the Data field into the correct typed struct based on Event.Type.
 // Returns nil if Data is empty.
-func (e *Event) DecodeData() (interface{}, error) {
+func (e *Event) DecodeData() (interface{}, error) { //nolint:cyclop // Exhaustive event-type decoding is intentionally centralized here.
 	if len(e.Data) == 0 {
 		return nil, nil
 	}
@@ -133,6 +134,8 @@ func (e *Event) DecodeData() (interface{}, error) {
 		target = &CircuitOpenedData{}
 	case CircuitClosed:
 		target = &CircuitClosedData{}
+	case DaemonStarted:
+		target = &DaemonStartedData{}
 	default:
 		return nil, fmt.Errorf("unknown event type: %s", e.Type)
 	}
@@ -234,4 +237,12 @@ type CircuitOpenedData struct {
 // a successful probe invocation.
 type CircuitClosedData struct {
 	Reason string `json:"reason,omitempty"`
+}
+
+// DaemonStartedData identifies one daemon process lifetime. Each successful
+// daemon Start writes a new record, so restarts are visible without inferring
+// them from PID/state files that are removed on shutdown.
+type DaemonStartedData struct {
+	PID         int    `json:"pid"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
 }

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -191,4 +192,23 @@ func waitForAgentHubClients(t *testing.T, hub *realtime.Hub, want int) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("hub ClientCount() = %d, want %d", hub.ClientCount(), want)
+}
+
+// TestRequestActorIgnoresRawHeader pins the trust boundary: the actor a handler
+// broadcasts comes from the context that middleware.WorkspaceMutationActor
+// populates, never from the inbound header. Under external auth that middleware
+// strips X-Actor, so a handler that still read the header directly would
+// re-admit a spoofed identity into the audit feed.
+func TestRequestActorIgnoresRawHeader(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/agents", nil)
+	req.Header.Set("X-Actor", "spoofed")
+
+	if got := requestActor(req); got != "" {
+		t.Fatalf("requestActor = %q for an unvetted header, want empty", got)
+	}
+
+	vetted := req.WithContext(fleethttp.WithActor(req.Context(), "trusted"))
+	if got := requestActor(vetted); got != "trusted" {
+		t.Fatalf("requestActor = %q, want the context actor %q", got, "trusted")
+	}
 }

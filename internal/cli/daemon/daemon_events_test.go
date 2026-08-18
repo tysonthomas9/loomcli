@@ -88,6 +88,31 @@ func TestDaemon_NewDaemon_NilBusDefaultsToNop(t *testing.T) {
 	}
 }
 
+func TestDaemonStartEmitsStructuredDaemonStartedEvent(t *testing.T) {
+	spy := &SpyEmitter{}
+	config := makeDaemonConfig(nil, nil)
+	daemon, err := NewDaemon(config, t.TempDir(), spy, nil, nil)
+	if err != nil {
+		t.Fatalf("NewDaemon: %v", err)
+	}
+	if err := daemon.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	daemon.Stop()
+	started := spy.EventsByType(events.DaemonStarted)
+	if len(started) != 1 {
+		t.Fatalf("daemon.started events = %+v", started)
+	}
+	decoded, err := started[0].DecodeData()
+	if err != nil {
+		t.Fatalf("DecodeData: %v", err)
+	}
+	data := decoded.(*events.DaemonStartedData)
+	if data.PID <= 0 {
+		t.Fatalf("daemon started data = %+v", data)
+	}
+}
+
 func TestDaemon_NewDaemon_DoesNotPublishAgentIPCSocketPathBeforeBind(t *testing.T) {
 	tmpDir, wtDir := setupTestWorktree(t, "falcon")
 	agents := []AgentEntry{{Worktree: wtDir, Role: "plan"}}

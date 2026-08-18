@@ -72,6 +72,9 @@ func TestStoreBackedCreateEmptyWorkspaceCreatesStoreAndLocalState(t *testing.T) 
 	if roleByName["plan"].TaskFilter != "needs_plan" {
 		t.Fatalf("plan task filter = %q, want needs_plan", roleByName["plan"].TaskFilter)
 	}
+	if got := roleByName["plan"].ExcludeLabels; len(got) != 1 || got[0] != "architect" {
+		t.Fatalf("plan exclude labels = %v, want [architect]", got)
+	}
 	if roleByName["task"].TaskFilter != "has_design" {
 		t.Fatalf("task task filter = %q, want has_design", roleByName["task"].TaskFilter)
 	}

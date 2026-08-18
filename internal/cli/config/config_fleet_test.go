@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
+)
 
 func clearFleetEnv(t *testing.T) {
 	t.Helper()
@@ -8,7 +12,9 @@ func clearFleetEnv(t *testing.T) {
 	t.Setenv("LOOM_WORKSPACE", "")
 	t.Setenv("LOOM_FLEET_API_KEY", "")
 	t.Setenv("LOOM_FLEET_ACTOR", "")
+	t.Setenv(fleethttp.EnvFleetDBActor, "")
 	t.Setenv("LOOM_AGENT_NAME", "")
+	t.Setenv("USER", "")
 }
 
 func TestResolveFleetConfig_Defaults(t *testing.T) {
@@ -52,13 +58,38 @@ func TestResolveFleetConfig_Env(t *testing.T) {
 	}
 }
 
-func TestResolveFleetConfig_AgentNameActorFallback(t *testing.T) {
+func TestResolveFleetConfig_AgentNameOverridesConfiguredActor(t *testing.T) {
 	clearFleetEnv(t)
+	t.Setenv("LOOM_FLEET_ACTOR", "config-actor")
 	t.Setenv("LOOM_AGENT_NAME", "nova")
 
 	cfg := ResolveFleetConfig(nil)
 
 	if cfg.Actor != "nova" {
-		t.Errorf("Actor = %q, want LOOM_AGENT_NAME fallback", cfg.Actor)
+		t.Errorf("Actor = %q, want LOOM_AGENT_NAME override", cfg.Actor)
+	}
+}
+
+func TestResolveFleetConfig_FleetDBActorOverridesConfiguredActor(t *testing.T) {
+	clearFleetEnv(t)
+	t.Setenv("LOOM_FLEET_ACTOR", "config-actor")
+	t.Setenv(fleethttp.EnvFleetDBActor, "agent-x")
+
+	cfg := ResolveFleetConfig(nil)
+
+	if cfg.Actor != "agent-x" {
+		t.Errorf("Actor = %q, want daemon-stamped actor %q", cfg.Actor, "agent-x")
+	}
+}
+
+func TestResolveFleetConfig_ConfiguredActorFallbackWithoutWorkerEnv(t *testing.T) {
+	clearFleetEnv(t)
+	t.Setenv("LOOM_FLEET_ACTOR", "config-actor")
+	t.Setenv("USER", "os-user")
+
+	cfg := ResolveFleetConfig(nil)
+
+	if cfg.Actor != "config-actor" {
+		t.Errorf("Actor = %q, want configured actor %q", cfg.Actor, "config-actor")
 	}
 }

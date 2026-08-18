@@ -1,5 +1,5 @@
 /**
- * CreateWorkspaceModal — clone-only workspace creation dialog.
+ * CreateWorkspaceModal — workspace creation from a clone URL or local repo.
  * Renders via AetherModal portal above all other content.
  */
 
@@ -12,7 +12,7 @@ import { useRegisterEscapeLayer, LAYER_MODAL, useJobPolling } from "@/hooks";
 import { useFocusTrap, useFocusReturn } from "@/hooks/ui";
 import styles from "./CreateWorkspaceModal.module.css";
 
-export type WorkspaceType = "clone";
+export type RepositorySource = "clone" | "local";
 
 export interface CreateWorkspaceModalProps {
   isOpen: boolean;
@@ -26,6 +26,7 @@ export interface CreateWorkspaceModalProps {
     name?: string;
     cloneUrls?: string[];
     urlInput?: string;
+    branch?: string;
   };
 }
 
@@ -58,8 +59,12 @@ export function CreateWorkspaceModal({
   const [name, setName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [repositorySource, setRepositorySource] =
+    useState<RepositorySource>("clone");
   const [cloneUrls, setCloneUrls] = useState<string[]>([]);
   const [urlInput, setUrlInput] = useState("");
+  const [localPath, setLocalPath] = useState("");
+  const [branch, setBranch] = useState("");
 
   const {
     isPolling,
@@ -89,14 +94,18 @@ export function CreateWorkspaceModal({
     setName(initialValues?.name ?? "");
     setIsSubmitting(false);
     setError("");
+    setRepositorySource("clone");
     setCloneUrls(initialValues?.cloneUrls ?? []);
     setUrlInput(initialValues?.urlInput ?? "");
+    setLocalPath("");
+    setBranch(initialValues?.branch ?? "");
     resetJob();
   }, [
     isOpen,
     initialValues?.name,
     initialValues?.cloneUrls,
     initialValues?.urlInput,
+    initialValues?.branch,
     resetJob,
   ]);
 
@@ -123,6 +132,7 @@ export function CreateWorkspaceModal({
   };
 
   const hasPendingUrl = urlInput.trim() !== "";
+  const hasLocalPath = localPath.trim() !== "";
   const nameError =
     name.trim() !== "" && !WORKSPACE_NAME_RE.test(name.trim())
       ? "Use letters, numbers, hyphens, or underscores."
@@ -131,7 +141,9 @@ export function CreateWorkspaceModal({
     name.trim() !== "" &&
     nameError === "" &&
     !isSubmitting &&
-    (cloneUrls.length > 0 || hasPendingUrl);
+    (repositorySource === "clone"
+      ? cloneUrls.length > 0 || hasPendingUrl
+      : hasLocalPath);
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -141,17 +153,28 @@ export function CreateWorkspaceModal({
       setIsSubmitting(true);
       setError("");
 
-      let finalCloneUrls = cloneUrls;
-      if (urlInput.trim()) {
-        finalCloneUrls = appendUnique(cloneUrls, splitLineInput(urlInput));
-        setUrlInput("");
+      const trimmedBranch = branch.trim();
+      let req: CreateWorkspaceRequest;
+      if (repositorySource === "clone") {
+        let finalCloneUrls = cloneUrls;
+        if (urlInput.trim()) {
+          finalCloneUrls = appendUnique(cloneUrls, splitLineInput(urlInput));
+          setUrlInput("");
+        }
+        req = {
+          name: name.trim(),
+          type: "clone",
+          clone_urls: finalCloneUrls,
+          ...(trimmedBranch ? { branch: trimmedBranch } : {}),
+        };
+      } else {
+        req = {
+          name: name.trim(),
+          type: "empty",
+          repos: [localPath.trim()],
+          ...(trimmedBranch ? { branch: trimmedBranch } : {}),
+        };
       }
-
-      const req: CreateWorkspaceRequest = {
-        name: name.trim(),
-        type: "clone",
-        clone_urls: finalCloneUrls,
-      };
 
       try {
         const result = await createWorkspace(req);
@@ -184,7 +207,18 @@ export function CreateWorkspaceModal({
         }
       }
     },
-    [canSubmit, name, cloneUrls, urlInput, onSuccess, onClose, startJob],
+    [
+      canSubmit,
+      name,
+      repositorySource,
+      cloneUrls,
+      urlInput,
+      localPath,
+      branch,
+      onSuccess,
+      onClose,
+      startJob,
+    ],
   );
 
   const modalFooter = isPolling ? undefined : (
@@ -260,52 +294,124 @@ export function CreateWorkspaceModal({
           </div>
 
           <div className={styles.fieldGroup}>
-            <label className={styles.label} htmlFor="ws-clone-url">
-              Repository URL
-            </label>
-            <div className={styles.addRow}>
-              <textarea
-                id="ws-clone-url"
-                className={styles.input}
-                value={urlInput}
-                onChange={(e) => setUrlInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    addCloneUrl();
-                  }
-                }}
-                placeholder="https://github.com/... or git@..."
-                rows={2}
-                disabled={isSubmitting}
-                data-testid="create-workspace-clone-url"
-              />
-              <button
-                type="button"
-                className={styles.addButton}
-                onClick={addCloneUrl}
-                disabled={isSubmitting || !urlInput.trim()}
-              >
-                Add
-              </button>
-            </div>
-            {cloneUrls.length > 0 && (
-              <div className={styles.chipList}>
-                {cloneUrls.map((url) => (
-                  <span key={url} className={styles.chip}>
-                    <span className={styles.chipText}>{url}</span>
-                    <button
-                      type="button"
-                      className={styles.chipRemove}
-                      onClick={() => removeCloneUrl(url)}
-                      aria-label={`Remove ${url}`}
-                    >
-                      &times;
-                    </button>
-                  </span>
-                ))}
+            <fieldset className={styles.sourceSelector}>
+              <legend className={styles.label}>Repository source</legend>
+              <div className={styles.sourceOptions}>
+                <label
+                  className={`${styles.sourceOption}${repositorySource === "clone" ? ` ${styles.sourceOptionSelected}` : ""}`}
+                >
+                  <input
+                    type="radio"
+                    name="workspace-source"
+                    value="clone"
+                    checked={repositorySource === "clone"}
+                    onChange={() => setRepositorySource("clone")}
+                    disabled={isSubmitting}
+                  />
+                  Clone from Git URL
+                </label>
+                <label
+                  className={`${styles.sourceOption}${repositorySource === "local" ? ` ${styles.sourceOptionSelected}` : ""}`}
+                >
+                  <input
+                    type="radio"
+                    name="workspace-source"
+                    value="local"
+                    checked={repositorySource === "local"}
+                    onChange={() => setRepositorySource("local")}
+                    disabled={isSubmitting}
+                  />
+                  Use local path
+                </label>
               </div>
-            )}
+            </fieldset>
+          </div>
+
+          {repositorySource === "clone" ? (
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="ws-clone-url">
+                Repository URL
+              </label>
+              <div className={styles.addRow}>
+                <textarea
+                  id="ws-clone-url"
+                  className={styles.input}
+                  value={urlInput}
+                  onChange={(e) => setUrlInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addCloneUrl();
+                    }
+                  }}
+                  placeholder="https://github.com/... or git@..."
+                  rows={2}
+                  disabled={isSubmitting}
+                  data-testid="create-workspace-clone-url"
+                />
+                <button
+                  type="button"
+                  className={styles.addButton}
+                  onClick={addCloneUrl}
+                  disabled={isSubmitting || !urlInput.trim()}
+                >
+                  Add
+                </button>
+              </div>
+              {cloneUrls.length > 0 && (
+                <div className={styles.chipList}>
+                  {cloneUrls.map((url) => (
+                    <span key={url} className={styles.chip}>
+                      <span className={styles.chipText}>{url}</span>
+                      <button
+                        type="button"
+                        className={styles.chipRemove}
+                        onClick={() => removeCloneUrl(url)}
+                        aria-label={`Remove ${url}`}
+                      >
+                        &times;
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="ws-local-path">
+                Local repository path
+              </label>
+              <input
+                id="ws-local-path"
+                className={`${styles.input} ${styles.mono}`}
+                type="text"
+                value={localPath}
+                onChange={(e) => setLocalPath(e.target.value)}
+                placeholder="/Users/you/code/my-repo"
+                disabled={isSubmitting}
+                data-testid="create-workspace-repo-path"
+              />
+            </div>
+          )}
+
+          <div className={styles.fieldGroup}>
+            <label className={styles.label} htmlFor="ws-branch">
+              Branch (optional)
+            </label>
+            <input
+              id="ws-branch"
+              className={`${styles.input} ${styles.mono}`}
+              type="text"
+              value={branch}
+              onChange={(e) => setBranch(e.target.value)}
+              placeholder={
+                repositorySource === "clone"
+                  ? "main"
+                  : name.trim() || "workspace-name"
+              }
+              disabled={isSubmitting}
+              data-testid="create-workspace-branch"
+            />
           </div>
 
           {(error || jobError) && (

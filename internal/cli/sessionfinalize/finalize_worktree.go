@@ -56,6 +56,20 @@ func WithWorktree(sess *sessions.Session, opts WithWorktreeOptions) (WithWorktre
 		_, _ = sess.SyncLatestCodexRollout(opts.WorktreePath, sess.Meta.StartedAt)
 	case backendnames.Claude:
 		_, _ = sess.SyncLatestClaudeTranscript(opts.WorktreePath, opts.ClaudeSessionID, sess.Meta.StartedAt)
+	case "":
+		// Migration shim. Sessions persisted by binaries older than the backend
+		// field have no backend recorded, so the only way to find their native
+		// transcript is to probe. No live path writes an empty backend any more:
+		// every CreateSession site passes cli.ResolveBackendName(), which falls
+		// back to codex, and the supervisor guards the empty case explicitly.
+		// Remove this case once no pre-backend session can still be finalized.
+		//
+		// Backends that are registered but handled by neither case above (gemini,
+		// cursor, opencode, echo) deliberately fall through to no mirroring:
+		// probing them would attribute another backend's transcript to them.
+		if path, _ := sess.SyncLatestCodexRollout(opts.WorktreePath, sess.Meta.StartedAt); path == "" {
+			_, _ = sess.SyncLatestClaudeTranscript(opts.WorktreePath, opts.ClaudeSessionID, sess.Meta.StartedAt)
+		}
 	}
 	// Go-leaf daemon finalize often arrives with zeros because the worker was
 	// reaped before collector finalize. Recover usage from the synced native

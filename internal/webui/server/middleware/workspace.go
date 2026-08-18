@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"strings"
+
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 )
 
 // workspaceContextKey is the unexported key type for storing the workspace ID
@@ -102,5 +104,45 @@ func WorkspaceResolved(resolve WorkspaceResolveFn) Middleware {
 			ctx := WithWorkspaceRef(r.Context(), ref)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
+	}
+}
+
+// WorkspaceMutationActor scopes a caller-supplied actor to downstream
+// FleetDB requests for workspace mutations. trustInbound must only be true
+// when the server runs without external auth (open/dev mode), where the
+// trust model intentionally matches fleet-db --auth-dev-mode: with no
+// authentication at all, X-Actor spoofing grants nothing the caller could
+// not already do. Under external auth, identity belongs to the auth layer,
+// so the header is stripped rather than honored — attribution then falls
+// back to the serve process's configured actor.
+func WorkspaceMutationActor(trustInbound bool) Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !trustInbound {
+				r.Header.Del("X-Actor")
+				next.ServeHTTP(w, r)
+				return
+			}
+			if !isMutationMethod(r.Method) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			actor := strings.TrimSpace(r.Header.Get("X-Actor"))
+			if actor == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			ctx := fleethttp.WithActor(r.Context(), actor)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+func isMutationMethod(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	default:
+		return false
 	}
 }

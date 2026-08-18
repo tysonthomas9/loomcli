@@ -10,3 +10,4 @@ export { SettingsPage } from "./SettingsPage";
 export { WorkspacePage } from "./WorkspacePage";
 export { FilesPage } from "./FilesPage";
 export { IssueDetailPage } from "./IssueDetailPage";
+export { ActivityPage } from "./ActivityPage";

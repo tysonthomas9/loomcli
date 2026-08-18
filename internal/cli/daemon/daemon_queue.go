@@ -19,7 +19,7 @@ var daemonQueueCmd = &cobra.Command{
 	Short: "Preview an agent's filtered work queue",
 	Long: `Show what tasks a specific agent would pick up next.
 
-This command loads daemon configuration from FleetDB, resolves the named agent's role constraints
+This command loads daemon configuration from FleetDB, resolves the named agent's agent role constraints
 (task filter, skills, max priority, source repos), fetches ready issues,
 scores them through the task router, and displays the results.
 
@@ -78,7 +78,7 @@ func runDaemonQueue(cmd *cobra.Command, args []string) {
 
 	rc, err := ResolveRoleConfigStatic(agent.Role, config, projectDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: resolving role %q: %v\n", agent.Role, err)
+		fmt.Fprintf(os.Stderr, "Error: resolving agent role %q: %v\n", agent.Role, err)
 		os.Exit(1)
 	}
 
@@ -185,7 +185,7 @@ func printQueueResults(matched []cli.TaskMatch, rejections map[string]int) {
 
 func printQueueHeader(agentName string, agent *cfgpkg.AgentEntry, constraints cli.RoleConstraints) {
 	fmt.Printf("Agent: %s\n", agentName)
-	fmt.Printf("Role:  %s\n", agent.Role)
+	fmt.Printf("Agent role: %s\n", agent.Role)
 
 	taskFilter := constraints.TaskFilter
 	if taskFilter == "" {
@@ -195,6 +195,12 @@ func printQueueHeader(agentName string, agent *cfgpkg.AgentEntry, constraints cl
 
 	if len(constraints.Skills) > 0 {
 		fmt.Printf("Skills: %s\n", strings.Join(constraints.Skills, ", "))
+	}
+	if len(constraints.Labels) > 0 {
+		fmt.Printf("Labels: %s\n", strings.Join(constraints.Labels, ", "))
+	}
+	if len(constraints.ExcludeLabels) > 0 {
+		fmt.Printf("Exclude labels: %s\n", strings.Join(constraints.ExcludeLabels, ", "))
 	}
 	if constraints.MaxPriority != nil {
 		fmt.Printf("Max priority: P%d\n", *constraints.MaxPriority)

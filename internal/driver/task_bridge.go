@@ -367,10 +367,7 @@ func (e HostBridgeTaskExecutor) runBuiltInFlueWorkflow(ctx context.Context, req 
 	if worktree := strings.TrimSpace(e.WorktreePath); worktree != "" {
 		cmd.Dir = worktree
 	}
-	baseEnv := taskRunnerBaseEnvForRequest(req, os.Environ())
-	env := append([]string{}, baseEnv...)
-	env = append(env, e.taskRunnerEnv(req, string(input), baseEnv)...)
-	cmd.Env = env
+	cmd.Env = e.taskRunnerProcessEnv(req, string(input), os.Environ())
 	cmd.Stdin = bytes.NewReader(input)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -427,10 +424,7 @@ func (e HostBridgeTaskExecutor) runCommand(ctx context.Context, req TaskExecRequ
 	if worktree := strings.TrimSpace(e.WorktreePath); worktree != "" {
 		cmd.Dir = worktree
 	}
-	baseEnv := taskRunnerBaseEnvForRequest(req, os.Environ())
-	env := append([]string{}, baseEnv...)
-	env = append(env, e.taskRunnerEnv(req, string(input), baseEnv)...)
-	cmd.Env = env
+	cmd.Env = e.taskRunnerProcessEnv(req, string(input), os.Environ())
 	cmd.Stdin = bytes.NewReader(input)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -658,6 +652,26 @@ process.once('SIGTERM', () => {
 });
 `
 
+func (e HostBridgeTaskExecutor) taskRunnerProcessEnv(req TaskExecRequest, requestJSON string, inherited []string) []string {
+	base := taskRunnerBaseEnvForRequest(req, inherited)
+	if worker := strings.TrimSpace(req.WorkerProfileID); worker != "" {
+		base = removeEnvVariable(base, "LOOM_FLEET_DB_ACTOR")
+	}
+	env := append([]string{}, base...)
+	return append(env, e.taskRunnerEnv(req, requestJSON, base)...)
+}
+
+func removeEnvVariable(env []string, name string) []string {
+	prefix := name + "="
+	out := make([]string, 0, len(env))
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, prefix) {
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
 func (e HostBridgeTaskExecutor) taskRunnerEnv(req TaskExecRequest, requestJSON string, inherited ...[]string) []string {
 	env := []string{
 		"LOOM_TASK_RUN_REQUEST_JSON=" + requestJSON,
@@ -683,6 +697,12 @@ func (e HostBridgeTaskExecutor) taskRunnerEnv(req TaskExecRequest, requestJSON s
 		fmt.Sprintf("LOOM_TASK_RUN_FENCING_TOKEN=%d", req.FencingToken),
 		"LOOM_TASK_RUN_RUNNER_PLACEMENT_JSON=" + taskRunPlacementJSON(req.RunnerPlacement),
 		"LOOM_TASK_RUN_SANDBOX_PLACEMENT_JSON=" + taskRunPlacementJSON(req.SandboxPlacement),
+	}
+	if agentName := strings.TrimSpace(req.WorkerProfileID); agentName != "" {
+		// The serve/driver process may itself carry a harness actor. The worker
+		// profile identifies the agent executing this task run, so its explicit
+		// value must win in the spawned worker environment.
+		env = append(env, "LOOM_FLEET_DB_ACTOR="+agentName)
 	}
 	if apiBaseURL := strings.TrimSpace(e.APIBaseURL); apiBaseURL != "" {
 		env = append(env, "LOOM_TASK_RUN_API_URL="+apiBaseURL)

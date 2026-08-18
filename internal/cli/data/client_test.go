@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 )
 
 // fakeAuthConfigServer returns an httptest.Server whose /api/config endpoint
@@ -187,4 +188,41 @@ func TestGetIssueBackend_FromServerURL(t *testing.T) {
 			t.Fatalf("BackendName = %q, want api", got)
 		}
 	})
+}
+
+func TestGetIssueBackend_ServerMutationCarriesResolvedActor(t *testing.T) {
+	var gotActor string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/config", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"mode": "open"})
+	})
+	mux.HandleFunc("PATCH /api/workspaces/WS/issues/ISSUE-1", func(w http.ResponseWriter, r *http.Request) {
+		gotActor = r.Header.Get("X-Actor")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	withDataClientState(t, func() {
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+		t.Setenv("LOOM_SERVER_URL", srv.URL)
+		t.Setenv("LOOM_WORKSPACE", "WS")
+		t.Setenv(fleethttp.EnvFleetDBActor, "worker-caller")
+		serverURL = ""
+
+		ib, err := getIssueBackend(t.Context())
+		if err != nil {
+			t.Fatalf("getIssueBackend: %v", err)
+		}
+		title := "updated through serve"
+		if err := ib.Update(t.Context(), "ISSUE-1", backend.UpdateParams{Title: &title}); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+	})
+
+	if gotActor != "worker-caller" {
+		t.Fatalf("X-Actor = %q, want worker-caller", gotActor)
+	}
 }

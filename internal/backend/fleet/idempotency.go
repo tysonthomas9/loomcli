@@ -31,7 +31,7 @@ func (b *FleetBackend) doRequestHeaders(ctx context.Context, method, path string
 		req.Header.Set(k, v)
 	}
 
-	resp, err := b.client.Do(req)
+	resp, err := fleethttp.Do(b.client, req)
 	if err != nil {
 		return nil, 0, nil, err
 	}

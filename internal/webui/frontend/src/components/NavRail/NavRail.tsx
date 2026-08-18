@@ -134,6 +134,24 @@ const TOP_ITEMS: NavItem[] = [
     ),
   },
   {
+    id: "activity",
+    label: "Activity",
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path
+          d="M7 5h12M7 12h12M7 19h12"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+        <circle cx="3.5" cy="5" r="1.5" fill="currentColor" />
+        <circle cx="3.5" cy="12" r="1.5" fill="currentColor" />
+        <circle cx="3.5" cy="19" r="1.5" fill="currentColor" />
+      </svg>
+    ),
+  },
+  {
     id: "terminal",
     label: "Terminal",
     icon: (

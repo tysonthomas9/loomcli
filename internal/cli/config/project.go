@@ -77,6 +77,12 @@ type RoleConfig struct {
 	Effort       string   `yaml:"effort,omitempty"`
 	PathPatterns []string `yaml:"path_patterns,omitempty"`
 	Skills       []string `yaml:"skills,omitempty"`
+	// Labels restricts the role to issues carrying ALL of these labels (AND);
+	// ExcludeLabels rejects an issue carrying ANY of them (OR) and is evaluated
+	// first. Both are exact and case-sensitive. Empty means no requirement /
+	// no exclusion. See task_router.MatchTask for the gate itself.
+	Labels        []string `yaml:"labels,omitempty"`
+	ExcludeLabels []string `yaml:"exclude_labels,omitempty"`
 	// InputPolicy governs which harness prompts an agent in this role may
 	// auto-answer. Nil denies every prompt — see domain.RoleInputPolicy for
 	// why the unset case has to be the restrictive one.
@@ -322,6 +328,8 @@ func roleConfigFromDomain(r *domain.Role) RoleConfig {
 		Effort:         r.Effort,
 		PathPatterns:   append([]string(nil), r.PathPatterns...),
 		Skills:         append([]string(nil), r.Skills...),
+		Labels:         append([]string(nil), r.Labels...),
+		ExcludeLabels:  append([]string(nil), r.ExcludeLabels...),
 		InputPolicy:    r.InputPolicy.Clone(),
 		MaxPriority:    cloneIntPtr(r.MaxPriority),
 		MaxConcurrency: cloneIntPtr(r.MaxConcurrency),

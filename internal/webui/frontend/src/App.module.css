@@ -247,3 +247,79 @@
     line-height: 1;
   }
 }
+.onboardingTeamDetail {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+}
+
+.onboardingSkipLink {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-primary);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  text-align: left;
+}
+
+.onboardingSkipLink:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.onboardingSkipLink:disabled {
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+}
+
+.onboardingIssueForm {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.onboardingIssueForm label {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+}
+
+.onboardingIssueForm input,
+.onboardingIssueForm textarea,
+.onboardingIssueForm select {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--font-size-xs);
+}
+
+.onboardingIssueForm textarea {
+  resize: vertical;
+}
+
+.onboardingIssueForm input:focus,
+.onboardingIssueForm textarea:focus,
+.onboardingIssueForm select:focus {
+  border-color: var(--color-primary);
+  outline: 2px solid color-mix(in srgb, var(--color-primary) 20%, transparent);
+  outline-offset: 1px;
+}
+
+.onboardingIssueForm input:disabled,
+.onboardingIssueForm textarea:disabled,
+.onboardingIssueForm select:disabled {
+  background: var(--color-bg-secondary);
+  color: var(--color-text-muted);
+}
+
+.onboardingIssueForm [role="alert"] {
+  margin: 0;
+  color: var(--color-error);
+  font-size: var(--font-size-xs);
+}

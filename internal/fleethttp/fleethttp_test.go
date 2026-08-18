@@ -2,10 +2,13 @@ package fleethttp
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestAuth_Apply(t *testing.T) {
@@ -82,6 +85,16 @@ func TestBuildJSONRequest(t *testing.T) {
 			t.Errorf("body = %q, want JSON with k:v", got)
 		}
 	})
+	t.Run("request actor overrides configured actor", func(t *testing.T) {
+		ctx := WithActor(context.Background(), "connected-agent")
+		req, err := BuildJSONRequest(ctx, http.MethodPatch, "http://x/api", Auth{Actor: "daemon-operator"}, map[string]string{"k": "v"})
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if got := req.Header.Get("X-Actor"); got != "connected-agent" {
+			t.Errorf("X-Actor = %q, want connected-agent", got)
+		}
+	})
 }
 
 func TestExtractErrorMessage(t *testing.T) {
@@ -103,6 +116,134 @@ func TestExtractErrorMessage(t *testing.T) {
 			got := ExtractErrorMessage([]byte(tt.body))
 			if got != tt.want {
 				t.Errorf("ExtractErrorMessage(%q) = %q, want %q", tt.body, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDo_RetriesRateLimitUntilSuccess(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil || string(body) != `{"name":"test"}` {
+			http.Error(w, "bad request body", http.StatusBadRequest)
+			return
+		}
+		attempt := attempts.Add(1)
+		if attempt < 3 {
+			w.Header().Set("Retry-After", "0")
+			http.Error(w, "rate limited", http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"success":true}`))
+	}))
+	t.Cleanup(server.Close)
+
+	req, err := BuildJSONRequest(t.Context(), http.MethodPost, server.URL, Auth{}, map[string]string{"name": "test"})
+	if err != nil {
+		t.Fatalf("BuildJSONRequest: %v", err)
+	}
+	resp, err := Do(server.Client(), req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if got := attempts.Load(); got != 3 {
+		t.Fatalf("attempts = %d, want 3", got)
+	}
+}
+
+func TestDo_ExhaustedRateLimitReturnsFinalResponse(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
+		w.Header().Set("Retry-After", "0")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":"still limited"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	req, err := BuildJSONRequest(t.Context(), http.MethodGet, server.URL, Auth{}, nil)
+	if err != nil {
+		t.Fatalf("BuildJSONRequest: %v", err)
+	}
+	resp, err := Do(server.Client(), req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusTooManyRequests)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if got := string(body); got != `{"error":"still limited"}` {
+		t.Fatalf("body = %q, want final 429 body", got)
+	}
+	if got := attempts.Load(); got != maxAttempts {
+		t.Fatalf("attempts = %d, want %d", got, maxAttempts)
+	}
+}
+
+func TestDo_DoesNotRetryOtherStatuses(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(server.Close)
+
+	req, err := BuildJSONRequest(t.Context(), http.MethodGet, server.URL, Auth{}, nil)
+	if err != nil {
+		t.Fatalf("BuildJSONRequest: %v", err)
+	}
+	resp, err := Do(server.Client(), req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	}
+	if got := attempts.Load(); got != 1 {
+		t.Fatalf("attempts = %d, want 1", got)
+	}
+}
+
+func TestRetryDelay_HonorsRetryAfterSeconds(t *testing.T) {
+	if got := retryDelay("3", 2); got != 3*time.Second {
+		t.Fatalf("retryDelay = %v, want 3s Retry-After", got)
+	}
+}
+
+func TestResolveFleetDBActor_Precedence(t *testing.T) {
+	tests := []struct {
+		name       string
+		fleetActor string
+		agentName  string
+		configured string
+		user       string
+		want       string
+	}{
+		{name: "fleet actor env wins", fleetActor: "fleet-actor", agentName: "agent-name", configured: "configured", user: "user-name", want: "fleet-actor"},
+		{name: "agent name beats configured", agentName: "agent-name", configured: "configured", user: "user-name", want: "agent-name"},
+		{name: "configured beats user", configured: "configured", user: "user-name", want: "configured"},
+		{name: "user is the fallback", user: "user-name", want: "user-name"},
+		{name: "all empty", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(EnvFleetDBActor, tt.fleetActor)
+			t.Setenv(EnvAgentName, tt.agentName)
+			t.Setenv("USER", tt.user)
+			if got := ResolveFleetDBActor(tt.configured); got != tt.want {
+				t.Fatalf("ResolveFleetDBActor(%q) = %q, want %q", tt.configured, got, tt.want)
 			}
 		})
 	}

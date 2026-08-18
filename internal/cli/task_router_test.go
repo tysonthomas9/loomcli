@@ -366,8 +366,8 @@ func TestMatchTask_PriorityBonus(t *testing.T) {
 func TestMatchTask_TaskFilterNeedsPlan(t *testing.T) {
 	c := RoleConstraints{TaskFilter: "needs_plan"}
 
-	// Issue without design should match
-	noDesign := backend.IssueData{ID: "T-1", Status: "open", IssueType: "task"}
+	// An open feature without a design is in the built-in planning pool.
+	noDesign := backend.IssueData{ID: "T-1", Status: "open", IssueType: "feature"}
 	got := MatchTask(noDesign, c)
 	if got.Score == 0 {
 		t.Error("no-design issue rejected by needs_plan filter, want accepted")
@@ -391,6 +391,22 @@ func TestMatchTask_TaskFilterNeedsPlan(t *testing.T) {
 	got = MatchTask(hasDesign, c)
 	if got.Score != 0 {
 		t.Errorf("has-design issue passed needs_plan filter, want rejected (Score=%d)", got.Score)
+	}
+}
+
+func TestMatchTask_TaskFilterNeedsDesign(t *testing.T) {
+	c := RoleConstraints{TaskFilter: "needs_design"}
+
+	noDesign := backend.IssueData{ID: "T-1", Status: "open", IssueType: "feature"}
+	if got := MatchTask(noDesign, c); got.Score == 0 {
+		t.Fatalf("no-design feature rejected by needs_design filter: %s", got.Reason)
+	}
+
+	ready := backend.IssueData{
+		ID: "T-2", Status: "open", IssueType: "feature", Design: "approved design",
+	}
+	if got := MatchTask(ready, c); got.Score != 0 {
+		t.Fatalf("ready-to-implement feature passed needs_design filter with score %d", got.Score)
 	}
 }
 
@@ -766,6 +782,45 @@ func TestBuildRouterTaskCheck_NoConstraints(t *testing.T) {
 	check := BuildRouterTaskCheck(rc, ae, "")
 	if check != nil {
 		t.Error("BuildRouterTaskCheck() should return nil for completely empty RoleConfig and AgentEntry")
+	}
+}
+
+// TestBuildRouterTaskCheck_NonNilWithSkills verifies non-nil returned when role has skills.
+func TestBuildRouterTaskCheck_NonNilWithSkills(t *testing.T) {
+	rc := RoleConfig{Description: "security specialist", Skills: []string{"security", "auth"}}
+	ae := AgentEntry{Worktree: "falcon", Role: "task"}
+
+	check := BuildRouterTaskCheck(rc, ae, "")
+	if check == nil {
+		t.Error("BuildRouterTaskCheck() should return non-nil for role with skills")
+	}
+}
+
+// TestBuildRouterTaskCheck_NonNilWithMaxPriority verifies non-nil returned when role has max priority.
+func TestBuildRouterTaskCheck_NonNilWithMaxPriority(t *testing.T) {
+	maxP := 2
+	rc := RoleConfig{Description: "p0-p2 only", MaxPriority: &maxP}
+	ae := AgentEntry{Worktree: "falcon", Role: "task"}
+
+	check := BuildRouterTaskCheck(rc, ae, "")
+	if check == nil {
+		t.Error("BuildRouterTaskCheck() should return non-nil for role with max priority")
+	}
+}
+
+// TestBuildRouterTaskCheck_NilWithOnlyPathPatterns verifies PathPatterns alone does NOT activate the
+// router: path patterns pick which files an agent works on, not which issues it claims.
+func TestBuildRouterTaskCheck_NilWithOnlyPathPatterns(t *testing.T) {
+	rc := RoleConfig{Description: "frontend specialist", PathPatterns: []string{"src/components/**"}}
+	ae := AgentEntry{Worktree: "falcon", Role: "task"}
+	if check := BuildRouterTaskCheck(rc, ae, ""); check != nil {
+		t.Error("BuildRouterTaskCheck() should return nil when only RoleConfig.PathPatterns is set (not a routing constraint)")
+	}
+
+	rc2 := RoleConfig{Description: "frontend specialist"}
+	ae2 := AgentEntry{Worktree: "falcon", Role: "task", PathPatterns: []string{"internal/**"}}
+	if check := BuildRouterTaskCheck(rc2, ae2, ""); check != nil {
+		t.Error("BuildRouterTaskCheck() should return nil when only AgentEntry.PathPatterns is set (not a routing constraint)")
 	}
 }
 

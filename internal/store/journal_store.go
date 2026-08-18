@@ -32,6 +32,44 @@ type JournalEvent struct {
 	Metadata  map[string]string
 }
 
+// AuditEvent is the complete fleet-db mutation event exposed by the audit
+// read path. Before and After intentionally retain fleet-db's JSON-encoded
+// snapshot strings so `loom audit --output json` can emit the server's raw
+// event shape without inventing a second wire representation.
+//
+// Details is populated only for synthetic local daemon events. It is excluded
+// from raw JSON output; the web UI audit handler folds it into its locked
+// details object alongside fleet-db Before/After/Metadata fields.
+type AuditEvent struct {
+	ID          string            `json:"id"`
+	Timestamp   time.Time         `json:"timestamp"`
+	Actor       string            `json:"actor"`
+	Action      string            `json:"action"`
+	EntityType  string            `json:"entity_type"`
+	EntityID    string            `json:"entity_id"`
+	WorkspaceID string            `json:"workspace_id"`
+	Before      string            `json:"before,omitempty"`
+	After       string            `json:"after,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+	Details     map[string]any    `json:"-"`
+}
+
+// AuditEventFilter narrows both historical reads and live subscriptions.
+// Empty fields match every audit event.
+type AuditEventFilter struct {
+	EntityID string
+	Actor    string
+}
+
+// AuditJournalReader is an OPTIONAL TriggerEventStore capability implemented
+// by the fleet-db HTTP store. ListAuditEvents reads events strictly after the
+// cursor, oldest first. SubscribeAuditEvents attaches to fleet-db's SSE event
+// stream at the supplied cursor; cancellation is owned by ctx.
+type AuditJournalReader interface {
+	ListAuditEvents(ctx context.Context, workspaceKey, afterCursor string, limit int, filter AuditEventFilter) (events []AuditEvent, nextCursor string, hasMore bool, err error)
+	SubscribeAuditEvents(ctx context.Context, workspaceKey, afterCursor string, filter AuditEventFilter) (<-chan AuditEvent, <-chan error)
+}
+
 // IssueJournalReader is an OPTIONAL store capability (detected by type
 // assertion on the TriggerEventStore, like TriggerEventAppender): a forward,
 // since-cursor read over fleet-db's issue event journal so the A4 bridge can

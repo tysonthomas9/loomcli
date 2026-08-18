@@ -36,7 +36,8 @@ export interface AgentSectionProps {
   selectedAgentName?: string | null | undefined;
   agentTasks?: Record<string, { title: string }> | undefined;
   onAddClick?: (() => void) | undefined;
-  /** When "prs", only PR review agents are shown and Add agent is hidden. */
+  onAddTeamClick?: (() => void) | undefined;
+  /** When "prs", only PR review agents are shown and add actions are hidden. */
   activeView?: string | undefined;
 }
 
@@ -51,6 +52,7 @@ export function AgentSection({
   selectedAgentName = null,
   agentTasks,
   onAddClick,
+  onAddTeamClick,
   activeView,
 }: AgentSectionProps): JSX.Element {
   const agentStore = useAgentStoreInstance();
@@ -67,6 +69,7 @@ export function AgentSection({
   const [contextMenu, setContextMenu] = useState<AgentMenuState | null>(null);
   const prsView = activeView === "prs";
   const addClick = prsView ? undefined : onAddClick;
+  const addTeamClick = prsView ? undefined : onAddTeamClick;
 
   // Merge fleet agents with workspace config agents.
   // Config agents that aren't yet running appear as "configured" placeholders.
@@ -162,7 +165,7 @@ export function AgentSection({
     setContextMenu(null);
   }, []);
 
-  if (agents.length === 0 && !addClick) return <></>;
+  if (agents.length === 0 && !addClick && !addTeamClick) return <></>;
 
   const listProps = {
     fullOrder: agentOrder,
@@ -207,11 +210,28 @@ export function AgentSection({
           />
         )}
       </div>
-      {addClick && (
-        <button type="button" className={styles.addButton} onClick={addClick}>
-          + Add agent
-        </button>
-      )}
+      {addClick || addTeamClick ? (
+        <div className={styles.addActions}>
+          {addClick ? (
+            <button
+              type="button"
+              className={styles.addButton}
+              onClick={addClick}
+            >
+              + Add agent
+            </button>
+          ) : null}
+          {addTeamClick ? (
+            <button
+              type="button"
+              className={styles.addButton}
+              onClick={addTeamClick}
+            >
+              + Add team
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       <AgentContextMenu
         isOpen={contextMenu != null}
         position={{

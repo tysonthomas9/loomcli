@@ -41,6 +41,32 @@ func TestTaskRunnerEnvAPIBaseURL(t *testing.T) {
 	}
 }
 
+func TestTaskRunnerEnvWorkerActorOverridesParentActor(t *testing.T) {
+	req := hostBridgeTaskExecRequest()
+	req.RunnerEntrypoint = LocalTaskRunnerEntrypoint
+	req.WorkerProfileID = "api-architect-1"
+	env := HostBridgeTaskExecutor{}.taskRunnerProcessEnv(req, "{}", []string{
+		"PATH=/bin",
+		"LOOM_FLEET_DB_ACTOR=local-mode-harness@fixture.local",
+	})
+	got := envMap(env)
+	if got["LOOM_FLEET_DB_ACTOR"] != "api-architect-1" {
+		t.Fatalf("LOOM_FLEET_DB_ACTOR = %q, want worker agent name; env=%v", got["LOOM_FLEET_DB_ACTOR"], env)
+	}
+	if strings.Contains(strings.Join(env, "\n"), "local-mode-harness@fixture.local") {
+		t.Fatalf("parent harness actor leaked into worker env: %v", env)
+	}
+	actorCount := 0
+	for _, entry := range env {
+		if strings.HasPrefix(entry, "LOOM_FLEET_DB_ACTOR=") {
+			actorCount++
+		}
+	}
+	if actorCount != 1 {
+		t.Fatalf("worker actor env count = %d, want exactly 1; env=%v", actorCount, env)
+	}
+}
+
 func TestLocalTaskRunnerSettingsDoNotOverrideInheritedGitHubToken(t *testing.T) {
 	settingsDir := t.TempDir()
 	credential, err := runtimesettings.SealRuntimeCredential(settingsDir, runtimesettings.RuntimeCredentialProviderGitHub, "settings-token", time.Now())

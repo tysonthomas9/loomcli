@@ -1,0 +1,356 @@
+.dialog {
+  width: min(760px, 92vw);
+  max-width: 760px;
+}
+
+.picker,
+.report,
+.reportResultView {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-bottom: 4px;
+}
+
+.intro,
+.matchCopy,
+.catalogStatus,
+.applyError,
+.retryGuidance,
+.successGuidance {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+
+.matchCopy {
+  padding: 9px 11px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+}
+
+.cardGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 248px;
+  padding: 14px;
+  text-align: left;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-panel-bg);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    background-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.card:hover,
+.card[data-selected="true"] {
+  border-color: var(--color-primary);
+  background: color-mix(
+    in srgb,
+    var(--color-primary) 6%,
+    var(--color-panel-bg)
+  );
+}
+
+.card[data-selected="true"] {
+  box-shadow: inset 3px 0 0 var(--color-primary);
+}
+
+.card:focus-visible,
+.errorBlock button:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.cardTitle {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.cardDescription {
+  min-height: 54px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+}
+
+.agentRoleGroups {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agentRoleGroup {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr);
+  gap: 7px;
+  align-items: start;
+}
+
+.agentRoleGroupLabel {
+  padding-top: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+}
+
+.agentRoleChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.agentRoleChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono, monospace);
+  font-size: 9px;
+  line-height: 1.25;
+}
+
+.terminalMark {
+  font-family: inherit;
+  color: var(--color-text-tertiary);
+}
+
+.cardCounts {
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border-light);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.pickerFooter,
+.footerActions {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.footerActions {
+  justify-content: flex-end;
+}
+
+.pickerFooter {
+  justify-content: flex-end;
+}
+
+.progressBlock {
+  display: flex;
+  min-height: 260px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.progressBlock strong {
+  color: var(--color-text-primary);
+  font-size: 14px;
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.errorBlock,
+.warningBlock {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid
+    color-mix(in srgb, var(--color-danger) 35%, var(--color-border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-danger) 8%, transparent);
+  color: var(--color-text-primary);
+  font-size: 11px;
+}
+
+.errorBlock {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.errorBlock button {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--color-primary);
+  cursor: pointer;
+}
+
+.applyError {
+  color: var(--color-danger);
+}
+
+.resultHeading h3 {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: 14px;
+}
+
+.resultHeading p {
+  margin: 4px 0 0;
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.warningBlock {
+  flex-direction: column;
+  border-color: color-mix(
+    in srgb,
+    var(--color-warning) 42%,
+    var(--color-border)
+  );
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+}
+
+.warningBlock ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.reportDetails,
+.retrySuccesses {
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+}
+
+.reportDetails > summary,
+.retrySuccesses > summary {
+  padding: 9px 11px;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.reportList {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--color-border-light);
+}
+
+.reportRow {
+  display: grid;
+  grid-template-columns: 18px 70px minmax(0, 1fr);
+  gap: 7px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--color-border-light);
+  font-size: 11px;
+}
+
+.reportRow:last-child {
+  border-bottom: 0;
+}
+
+.reportIcon {
+  color: var(--color-success);
+  font-weight: 700;
+}
+
+.reportRow[data-action="failed"] .reportIcon,
+.reportRow[data-action="skipped_diverged"] .reportIcon {
+  color: var(--color-danger);
+}
+
+.reportEntity {
+  color: var(--color-text-tertiary);
+}
+
+.reportResult {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--color-text-muted);
+}
+
+.reportResult strong {
+  color: var(--color-text-primary);
+  font-family: var(--font-mono, monospace);
+  font-weight: 600;
+}
+
+.fieldList {
+  margin: 4px 0 0;
+  padding-left: 16px;
+}
+
+.fieldList code {
+  color: var(--color-text-secondary);
+}
+
+.retrySuccesses {
+  margin: 0 10px 8px;
+}
+
+.retryGuidance {
+  color: var(--color-danger);
+}
+
+.successGuidance {
+  color: var(--color-text-secondary);
+}
+
+@media (width <= 720px) {
+  .cardGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .card {
+    min-height: 0;
+  }
+
+  .cardDescription {
+    min-height: 0;
+  }
+
+  .pickerFooter {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+}

@@ -479,11 +479,12 @@ func updateStoreWorkspaceState(ctx context.Context, s storepkg.Store, key string
 func seedBuiltInRoles(ctx context.Context, s storepkg.Store, key string) error {
 	roles := []storepkg.RoleCreate{
 		{
-			WorkspaceKey: key,
-			Name:         "plan",
-			Description:  "Planning agent",
-			TaskFilter:   "needs_plan",
-			ReadOnly:     true,
+			WorkspaceKey:  key,
+			Name:          "plan",
+			Description:   "Planning agent",
+			TaskFilter:    "needs_plan",
+			ExcludeLabels: []string{"architect"},
+			ReadOnly:      true,
 		},
 		{
 			WorkspaceKey: key,

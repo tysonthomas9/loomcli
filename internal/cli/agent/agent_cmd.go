@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -43,10 +44,11 @@ Arguments:
   worktree    Worktree/workspace name (e.g., falcon) or path (required)
 
 Required Flags:
-  -p, --prompt    Path to prompt template file
+  -p, --prompt    Path to a prompt template file, or builtin:<id> to use a
+                  prompt that ships with loom (see 'Built-in prompts' below)
 
 Optional Flags:
-  -f, --task-filter   Task filter: needs_design, has_design, or any (default: any)
+  -f, --task-filter   Task filter: needs_plan, needs_design, has_design, or any (default: any)
   -a, --auto          Enable continuous mode (process multiple tasks)
   -i, --interval      Polling interval in seconds when no tasks (default: 30)
   -m, --max-tasks     Maximum tasks to process before exiting (0 = unlimited)
@@ -55,7 +57,7 @@ Optional Flags:
 Template Variables (all optional — reference only what you want):
   {{.AgentName}}        Agent name (derived from worktree)
   {{.WorktreeName}}     Worktree name
-  {{.Role}}             Real role name, or "custom" outside the daemon
+  {{.Role}}             Real agent role name, or "custom" outside the daemon
   {{.TaskID}}           Pre-claimed task ID (daemon mode; empty otherwise)
   {{.EpicID}}           Epic this agent is scoped to (--parent), or empty
 
@@ -67,9 +69,19 @@ Template Variables (all optional — reference only what you want):
                         description, design, acceptance criteria, notes,
                         dependencies). Fetching this costs an issue-backend
                         call, so it only happens when the template names it.
+  {{.DesignFormat}}     Design output format for this workspace: markdown or
+                        html. Pass it to 'loom data update --design-format'.
+
+Built-in prompts:
+  --prompt builtin:<id> runs a prompt shipped inside loom instead of a file.
+  The team-* ids cover the specialist agent roles (architect, web-designer,
+  frontend-dev, backend-dev, content-writer, researcher, agent-dev,
+  eval-engineer, qa, data-engineer). An unrecognized id is rejected with the
+  full list.
 
 Examples:
   loom agent falcon --prompt ./prompts/reviewer.txt
+  loom agent falcon --prompt builtin:team-backend-dev --auto
   loom agent falcon --prompt ./prompts/reviewer.txt --task-filter needs_design
   loom agent falcon --prompt ./prompts/reviewer.txt --auto --idle-timeout 30`,
 	Args: cobra.ExactArgs(1),
@@ -79,7 +91,7 @@ Examples:
 func init() {
 	agentCmd.Flags().StringVarP(&agentPromptFile, "prompt", "p", "", "Path to prompt template file")
 	_ = agentCmd.MarkFlagRequired("prompt")
-	agentCmd.Flags().StringVarP(&agentTaskFilter, "task-filter", "f", "any", "Task filter: needs_design, has_design, or any")
+	agentCmd.Flags().StringVarP(&agentTaskFilter, "task-filter", "f", "any", "Task filter: needs_plan, needs_design, has_design, or any")
 	agentCmd.Flags().BoolVarP(&agentAutoMode, "auto", "a", false, "Enable continuous mode (process multiple tasks)")
 	agentCmd.Flags().BoolVar(&agentDaemonMode, "daemon-mode", false, "Internal: single task mode for daemon")
 	_ = agentCmd.Flags().MarkHidden("daemon-mode")
@@ -134,17 +146,37 @@ func runAgent(cmd *cobra.Command, args []string) {
 	runAgentSingleTask(worktreePath, agentName, promptGen, taskCheckFn)
 }
 
-// validatePromptFile ensures the prompt path exists and is a regular file.
+// validatePromptFile rejects an unusable --prompt value before anything is
+// spawned, then exits. The check itself lives in validatePromptRef so it can be
+// tested without taking the process down.
 func validatePromptFile(path string) {
+	if err := validatePromptRef(path); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		cli.ExitWithFlush(1)
+	}
+}
+
+// validatePromptRef accepts either a built-in prompt reference
+// (builtin:<id>) or a path to an existing regular file.
+//
+// The built-in branch has to come first: a reference is not a path, so
+// stat-ing it is guaranteed to fail and would reject every agent role whose
+// prompt ships inside loom.
+func validatePromptRef(path string) error {
+	if id, ok := domain.ParseBuiltinPromptRef(path); ok {
+		if !domain.IsBuiltinWorkerPrompt(id) {
+			return fmt.Errorf("unknown built-in agent-role prompt %q (known: %s)", id, strings.Join(builtinWorkerPromptIDs(), ", "))
+		}
+		return nil
+	}
 	info, err := os.Stat(path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: cannot access prompt file %s: %v\n", path, err)
-		cli.ExitWithFlush(1)
+		return fmt.Errorf("cannot access prompt file %s: %w", path, err)
 	}
 	if info.IsDir() {
-		fmt.Fprintf(os.Stderr, "Error: prompt path is a directory, not a file: %s\n", path)
-		cli.ExitWithFlush(1)
+		return fmt.Errorf("prompt path is a directory, not a file: %s", path)
 	}
+	return nil
 }
 
 // runAgentDaemon handles daemon mode: single task execution inside a tmux session.
@@ -280,14 +312,14 @@ func runAgentSingleTask(worktreePath, agentName string, promptGen func(string, *
 func mapTaskFilter(filter, parentID string) (func() (bool, error), error) {
 	repoLabel := os.Getenv("LOOM_AGENT_REPO")
 	switch filter {
-	case "needs_design":
+	case "needs_plan", "needs_design":
 		return func() (bool, error) { return automode.HasAvailablePlanningTasks(parentID, repoLabel) }, nil
 	case "has_design":
 		return func() (bool, error) { return automode.HasAvailableImplementationTasks(parentID, repoLabel) }, nil
 	case "any", "":
 		return func() (bool, error) { return automode.HasAnyAvailableTasks(parentID, repoLabel) }, nil
 	default:
-		return nil, fmt.Errorf("invalid task filter: %s (must be needs_design, has_design, or any)", filter)
+		return nil, fmt.Errorf("invalid task filter: %s (must be needs_plan, needs_design, has_design, or any)", filter)
 	}
 }
 
@@ -301,6 +333,14 @@ func mapTaskFilter(filter, parentID string) (func() (bool, error), error) {
 // gets total prompt control, and the template variables are how it opts pieces
 // of the built-in context back in.
 func makeCustomPromptGen(promptFile string) func(string, *config.WorkspaceConfig) string {
+	// A builtin: reference names a body that ships inside loom, so there is no
+	// file to read. Resolving it here (and not only in validatePromptRef) is
+	// what keeps validation and loading from disagreeing: a value that passed
+	// the flag check must also be loadable, or the agent role starts and then
+	// fails to build a prompt.
+	if id, ok := domain.ParseBuiltinPromptRef(promptFile); ok {
+		return makeBuiltinWorkerPromptGen(id)
+	}
 	return func(agentName string, workspace *config.WorkspaceConfig) string {
 		prompt, err := loadPromptTemplateWith(promptFile, func(refs promptFieldRefs) PromptData {
 			return buildCustomPromptData(agentName, workspace, refs)
@@ -313,6 +353,23 @@ func makeCustomPromptGen(promptFile string) func(string, *config.WorkspaceConfig
 				return fmt.Sprintf("Error: could not load prompt file %s: %v", promptFile, err)
 			}
 			return withReadOnlyPreamble(string(content))
+		}
+		return withReadOnlyPreamble(prompt)
+	}
+}
+
+// makeBuiltinWorkerPromptGen creates a prompt generator for a built-in worker
+// agent-role prompt. It builds the SAME PromptData context a custom prompt file
+// gets — identity plus the lazily-gated blocks — so a team prompt and a
+// hand-written one see one context type, not two.
+func makeBuiltinWorkerPromptGen(id string) func(string, *config.WorkspaceConfig) string {
+	return func(agentName string, workspace *config.WorkspaceConfig) string {
+		prompt, err := generateWorkerPromptWith(id, func(refs promptFieldRefs) PromptData {
+			return buildCustomPromptData(agentName, workspace, refs)
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not render built-in agent-role prompt %s: %v\n", id, err)
+			return fmt.Sprintf("Error: could not load built-in agent-role prompt %s: %v", id, err)
 		}
 		return withReadOnlyPreamble(prompt)
 	}
@@ -347,6 +404,10 @@ func buildCustomPromptData(agentName string, workspace *config.WorkspaceConfig, 
 		Role:         customRoleName(),
 		TaskID:       taskID,
 		EpicID:       agentParentID,
+		// One struct-field read off the workspace config, so it is ungated like
+		// the rest of the identity tier. A prompt that writes a design needs it
+		// to pass the right --design-format.
+		DesignFormat: resolveDesignFormat(workspace),
 	}
 
 	if refs.has("WorkspaceBlock") {

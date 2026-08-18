@@ -625,25 +625,6 @@ func TestUnavailableIssueBackend_AllMethodsFailClosed(t *testing.T) {
 	assertUnavailable("WaitForMutations", err)
 }
 
-func TestFleetDBActorPreference(t *testing.T) {
-	t.Setenv("LOOM_FLEET_DB_ACTOR", "fleet-actor")
-	t.Setenv("LOOM_AGENT_NAME", "agent-name")
-	t.Setenv("USER", "user-name")
-	if got := fleetDBActor(); got != "fleet-actor" {
-		t.Fatalf("fleetDBActor() = %q, want fleet-actor", got)
-	}
-
-	t.Setenv("LOOM_FLEET_DB_ACTOR", "")
-	if got := fleetDBActor(); got != "agent-name" {
-		t.Fatalf("fleetDBActor() = %q, want agent-name", got)
-	}
-
-	t.Setenv("LOOM_AGENT_NAME", "")
-	if got := fleetDBActor(); got != "user-name" {
-		t.Fatalf("fleetDBActor() = %q, want user-name", got)
-	}
-}
-
 func TestFleetDBIssueBackend_FailsClosedWhenStoreUnavailable(t *testing.T) {
 	t.Setenv("FLEET_DB_BIN", "/missing/fleet-db")
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())

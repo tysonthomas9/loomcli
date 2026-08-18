@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
@@ -113,8 +113,11 @@ describe("AgentSection PR view filter", () => {
     });
   });
 
-  it("shows all agents and Add agent outside the PRs view", () => {
-    render(<AgentSection onAddClick={vi.fn()} />);
+  it("shows all agents and both add actions outside the PRs view", () => {
+    const onAddTeamClick = vi.fn();
+    render(
+      <AgentSection onAddClick={vi.fn()} onAddTeamClick={onAddTeamClick} />,
+    );
 
     expect(screen.getByText(/loomcli#222/)).toBeInTheDocument();
     expect(screen.getByTestId("agent-card-codex-coder")).toBeInTheDocument();
@@ -122,10 +125,18 @@ describe("AgentSection PR view filter", () => {
     expect(
       screen.getByRole("button", { name: "+ Add agent" }),
     ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "+ Add team" }));
+    expect(onAddTeamClick).toHaveBeenCalledOnce();
   });
 
-  it("keeps only pr-reviewer agents and hides Add agent on the PRs view", () => {
-    render(<AgentSection activeView="prs" onAddClick={vi.fn()} />);
+  it("keeps only pr-reviewer agents and hides add actions on the PRs view", () => {
+    render(
+      <AgentSection
+        activeView="prs"
+        onAddClick={vi.fn()}
+        onAddTeamClick={vi.fn()}
+      />,
+    );
 
     expect(screen.getByText(/loomcli#222/)).toBeInTheDocument();
     expect(screen.getByText(/Review/)).toBeInTheDocument();
@@ -137,6 +148,9 @@ describe("AgentSection PR view filter", () => {
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "+ Add agent" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "+ Add team" }),
     ).not.toBeInTheDocument();
   });
 });

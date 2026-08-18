@@ -1,4 +1,5 @@
 export * from "./backends";
+export * from "./audit";
 export * from "./editors";
 export * from "./files";
 export * from "./git";

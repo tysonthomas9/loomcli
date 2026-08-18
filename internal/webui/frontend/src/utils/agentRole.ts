@@ -3,6 +3,15 @@
  */
 
 import type { LoomAgentStatus } from "@/types";
+import type {
+  BuiltInTeamTemplate,
+  TeamTemplateApplyReport,
+  TeamTemplateBreadcrumb,
+} from "@/types/teamTemplate";
+import {
+  BUILT_IN_TEAM_TEMPLATES,
+  builtInTeamTemplateById,
+} from "@/utils/teamTemplates";
 
 /** True when the role string denotes a lead/orchestrator agent. */
 export function isLeadRole(role: string | undefined): boolean {
@@ -89,4 +98,70 @@ export function buildEpicLeadClaims(
     claims.set(agent.parent, agent.name);
   }
   return claims;
+}
+
+export interface DetectTeamTemplateInput {
+  roleNames: readonly string[];
+  applyReport?: TeamTemplateApplyReport | null;
+  breadcrumb?: TeamTemplateBreadcrumb | null;
+}
+
+/**
+ * Detect the best-matching built-in team from live configured worker agent
+ * role names, OR from an authoritative apply report in this browser session.
+ * The breadcrumb can choose between multiple live matches, but never creates a
+ * match on its own.
+ */
+export function detectTeamTemplate({
+  roleNames,
+  applyReport,
+  breadcrumb,
+}: DetectTeamTemplateInput): BuiltInTeamTemplate | null {
+  if (applyReport) {
+    return builtInTeamTemplateById(applyReport.template_id) ?? null;
+  }
+
+  const liveRoleNames = new Set(roleNames.filter(Boolean));
+  const matches = BUILT_IN_TEAM_TEMPLATES.filter((teamTemplate) =>
+    teamTemplate.roles
+      .filter((agentRole) => agentRole.kind === "worker")
+      .every((agentRole) => liveRoleNames.has(agentRole.name)),
+  );
+  if (matches.length === 0) return null;
+  if (matches.length === 1) return matches[0] ?? null;
+
+  if (breadcrumb) {
+    const breadcrumbMatch = matches.find(
+      (teamTemplate) => teamTemplate.id === breadcrumb.templateId,
+    );
+    if (breadcrumbMatch) return breadcrumbMatch;
+  }
+  return matches[0] ?? null;
+}
+
+export function findTemplateArchitectAgentName(input: {
+  teamTemplateId: string | undefined;
+  agents: readonly { name: string; role_name?: string }[];
+  applyReport?: TeamTemplateApplyReport | null;
+}): string | undefined {
+  if (!input.teamTemplateId) return undefined;
+  const teamTemplate = builtInTeamTemplateById(input.teamTemplateId);
+  if (!teamTemplate) return undefined;
+
+  const liveArchitect = input.agents.find(
+    (agent) => agent.role_name === teamTemplate.architectRoleName,
+  );
+  if (liveArchitect) return liveArchitect.name;
+
+  if (input.applyReport?.template_id !== teamTemplate.id) return undefined;
+  const architectAgentName = teamTemplate.agents.find(
+    (agent) => agent.role_name === teamTemplate.architectRoleName,
+  )?.name;
+  if (!architectAgentName) return undefined;
+  const reportStep = input.applyReport.steps.find(
+    (step) => step.entity === "agent" && step.name === architectAgentName,
+  );
+  return reportStep && reportStep.action !== "failed"
+    ? architectAgentName
+    : undefined;
 }

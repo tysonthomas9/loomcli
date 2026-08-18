@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
@@ -47,6 +49,61 @@ func setupTestRoutes(t *testing.T, app *Server) {
 			}
 		}
 	})
+}
+
+func TestTeamTemplateCatalogRouteWorksWithoutStore(t *testing.T) {
+	var app Server
+	setupTestRoutes(t, &app)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/team-templates", nil)
+	rec := httptest.NewRecorder()
+	app.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		TeamTemplates []json.RawMessage `json:"templates"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(body.TeamTemplates) != 4 {
+		t.Fatalf("templates = %d, want 4", len(body.TeamTemplates))
+	}
+}
+
+func TestTeamTemplateApplyRouteUsesStore(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(t.Context(), store.WorkspaceCreate{Key: "WS", Name: "Workspace"}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	app := Server{
+		config:     webui.ServerConfig{Store: st},
+		wsExistsFn: func(id string) bool { return id == "WS" },
+	}
+	setupTestRoutes(t, &app)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/WS/team-templates/fullstack-app/apply", nil)
+	rec := httptest.NewRecorder()
+	app.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Status string `json:"status"`
+		Report struct {
+			Created int `json:"created"`
+		} `json:"report"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Status != "done" || body.Report.Created != 9 {
+		t.Fatalf("apply response = %+v", body)
+	}
 }
 
 // TestHandleStats_NilPool verifies that handleStats returns 503 when pool is nil.

@@ -380,6 +380,7 @@ export function SettingsView({
           <AIBackendSetupList
             backends={backends}
             defaultBackend={config.backend}
+            registrableBackends={config.available}
             variant="matrix"
             isLoading={isLoadingBackends}
             error={backendsError}

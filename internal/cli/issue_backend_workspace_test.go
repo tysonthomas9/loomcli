@@ -5,12 +5,13 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 func TestWorkspaceAwareIssueBackendForURL_UsesConcreteURLWhenEnvUnset(t *testing.T) {
 	t.Setenv(bootstrap.EnvFleetDBURL, "")
-	t.Setenv(bootstrap.EnvFleetDBActor, "")
+	t.Setenv(fleethttp.EnvFleetDBActor, "")
 
 	fn := WorkspaceAwareIssueBackendForURL("http://127.0.0.1:12345", "tester")
 	be := fn(middleware.WithWorkspace(context.Background(), "CLEAN"))

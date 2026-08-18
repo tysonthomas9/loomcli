@@ -25,6 +25,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/netutil"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -298,7 +299,7 @@ func (e *githubWebhookE2E) startLoomServe() {
 		"LOOM_ISSUE_BACKEND":           "",
 		bootstrap.EnvFleetDBBin:        e.fleetDBBin,
 		bootstrap.EnvFleetDBAPIKey:     "",
-		bootstrap.EnvFleetDBActor:      e.actor,
+		fleethttp.EnvFleetDBActor:      e.actor,
 	})
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

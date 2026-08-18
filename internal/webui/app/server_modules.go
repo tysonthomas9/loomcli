@@ -10,9 +10,11 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agents"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/audit"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/driverapi"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/onboarding"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/teamtemplates"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/webhooks"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/workflows"
 	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder"
@@ -21,11 +23,14 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
 )
 
-// buildModules conditionally constructs workspace-scoped route modules
-// and assigns them to app.wsModules.
+// buildModules constructs outer API modules and conditionally constructs
+// workspace-scoped route modules.
 func (app *Server) buildModules() {
 	storeBacked := app.config.Store != nil
 	poollessIssueBackend := app.config.FleetClient || storeBacked
+	app.apiModules = append(app.apiModules,
+		teamtemplates.NewModule(svcimpl.NewTeamTemplateService(app.config.Store)).
+			WithWorkspaceMiddleware(app.workspaceMiddleware()))
 
 	var agentQueueH http.HandlerFunc
 	if app.config.AgentQueueFn != nil && !storeBacked && !app.config.FleetClient {
@@ -52,7 +57,10 @@ func (app *Server) buildModules() {
 			return storeadapter.ResolveOrHealWorkspacePath(context.Background(), store, wsKey)
 		})
 	}
-	app.wsModules = append(app.wsModules, opsModule)
+	app.wsModules = append(app.wsModules,
+		opsModule,
+		audit.NewModule(svcimpl.NewAuditService(app.config.Store)),
+	)
 
 	// Issue + session modules
 	app.wsModules = append(app.wsModules,

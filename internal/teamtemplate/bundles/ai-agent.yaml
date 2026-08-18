@@ -1,0 +1,90 @@
+schema_version: 1
+id: ai-agent
+label: AI Agent Development
+description: Architect-and-researcher pair over an agent implementer, with an eval engineer and a review terminal.
+revision: 1
+
+roles:
+  # The two Architecture agent roles are made mutually disjoint by their labels:
+  # architect excludes research and vice versa. Without that, either could claim
+  # an unlabeled issue, because skills only score and never gate.
+  - name: agent-architect
+    kind: worker
+    display_label: Architecture
+    description: Turns agent-system tasks into implementable designs covering tool boundaries, prompt contracts, state and failure handling.
+    prompt_file: builtin:team-architect
+    task_filter: any
+    labels: [architect]
+    exclude_labels: [research]
+    effort: high
+    skills: [design, architecture]
+    read_only: false
+
+  - name: researcher
+    kind: worker
+    display_label: Architecture
+    description: Investigates open questions and produces written findings with sources and a recommendation; never implements the result.
+    prompt_file: builtin:team-researcher
+    task_filter: any
+    labels: [research]
+    exclude_labels: [architect]
+    effort: medium
+    skills: [research]
+    read_only: false
+
+  - name: agent-dev
+    kind: worker
+    display_label: Developer
+    description: Implements agent and tool-integration tasks against an approved design; extends harness tests for changed behavior.
+    prompt_file: builtin:team-agent-dev
+    task_filter: has_design
+    exclude_labels: [architect, research]
+    effort: medium
+    skills: [agent, sdk]
+
+  # denied_tools stays EMPTY: only claude enforces tool lists and a non-empty list is a
+  # hard error on every other backend. Intended-but-unshipped deny patterns:
+  # push/deploy-shaped Bash. The restraint is stated in the prompt's prose instead.
+  # max_budget_usd / max_run_duration are the only non-null limits in any v1 bundle:
+  # eval suites are long and spendy.
+  - name: eval-engineer
+    kind: worker
+    display_label: QA
+    description: Builds and runs evaluation suites against a task's acceptance criteria and reports regressions as follow-up tasks.
+    prompt_file: builtin:team-eval-engineer
+    task_filter: has_design
+    exclude_labels: [architect, research]
+    effort: medium
+    skills: [eval, testing]
+    denied_tools: []
+    max_budget_usd: 25.0
+    max_run_duration: 7200
+
+  - name: code-reviewer
+    kind: interactive
+    display_label: QA
+    description: Human-driven PR review terminal; reads diffs and asks before any GitHub mutation.
+    prompt_file: builtin:pr-review
+    effort: high
+
+agents:
+  - name: agent-architect-1
+    role_name: agent-architect
+    auto: true
+    desired_state: running
+    cross_repo: true
+  - name: researcher-1
+    role_name: researcher
+    auto: true
+    desired_state: running
+    cross_repo: true
+  - name: agent-dev-1
+    role_name: agent-dev
+    auto: true
+    desired_state: running
+    cross_repo: true
+  - name: eval-engineer-1
+    role_name: eval-engineer
+    auto: true
+    desired_state: running
+    cross_repo: true

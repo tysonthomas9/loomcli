@@ -32,6 +32,8 @@ type roleWire struct {
 	Effort         string                  `json:"effort,omitempty"`
 	PathPatterns   []string                `json:"path_patterns,omitempty"`
 	Skills         []string                `json:"skills,omitempty"`
+	Labels         []string                `json:"labels,omitempty"`
+	ExcludeLabels  []string                `json:"exclude_labels,omitempty"`
 	InputPolicy    *domain.RoleInputPolicy `json:"input_policy,omitempty"`
 	MaxPriority    *int                    `json:"max_priority,omitempty"`
 	MaxConcurrency *int                    `json:"max_concurrency,omitempty"`
@@ -59,6 +61,8 @@ func (r roleWire) toDomain() *domain.Role {
 		Effort:         r.Effort,
 		PathPatterns:   r.PathPatterns,
 		Skills:         r.Skills,
+		Labels:         r.Labels,
+		ExcludeLabels:  r.ExcludeLabels,
 		InputPolicy:    r.InputPolicy.Clone(),
 		MaxPriority:    r.MaxPriority,
 		MaxConcurrency: r.MaxConcurrency,
@@ -72,6 +76,7 @@ func (r roleWire) toDomain() *domain.Role {
 	}
 }
 
+//nolint:funlen // Body serialization mirrors the store.RoleCreate surface area.
 func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Role, error) {
 	body := struct {
 		Name           string                  `json:"name"`
@@ -86,6 +91,8 @@ func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Ro
 		Effort         string                  `json:"effort,omitempty"`
 		PathPatterns   []string                `json:"path_patterns,omitempty"`
 		Skills         []string                `json:"skills,omitempty"`
+		Labels         []string                `json:"labels,omitempty"`
+		ExcludeLabels  []string                `json:"exclude_labels,omitempty"`
 		InputPolicy    *domain.RoleInputPolicy `json:"input_policy,omitempty"`
 		MaxPriority    *int                    `json:"max_priority,omitempty"`
 		MaxConcurrency *int                    `json:"max_concurrency,omitempty"`
@@ -107,6 +114,8 @@ func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Ro
 		Effort:         in.Effort,
 		PathPatterns:   in.PathPatterns,
 		Skills:         in.Skills,
+		Labels:         in.Labels,
+		ExcludeLabels:  in.ExcludeLabels,
 		InputPolicy:    in.InputPolicy,
 		MaxPriority:    in.MaxPriority,
 		MaxConcurrency: in.MaxConcurrency,
@@ -164,6 +173,8 @@ func (s *roleStore) Update(ctx context.Context, ws, name string, patch store.Rol
 		Effort              *string                 `json:"effort,omitempty"`
 		PathPatterns        *[]string               `json:"path_patterns,omitempty"`
 		Skills              *[]string               `json:"skills,omitempty"`
+		Labels              *[]string               `json:"labels,omitempty"`
+		ExcludeLabels       *[]string               `json:"exclude_labels,omitempty"`
 		InputPolicy         *domain.RoleInputPolicy `json:"input_policy,omitempty"`
 		ClearInputPolicy    bool                    `json:"clear_input_policy,omitempty"`
 		MaxPriority         *int                    `json:"max_priority,omitempty"`
@@ -178,20 +189,22 @@ func (s *roleStore) Update(ctx context.Context, ws, name string, patch store.Rol
 		MaxRunDuration      *int                    `json:"max_run_duration,omitempty"`
 		ClearMaxRunDuration bool                    `json:"clear_max_run_duration,omitempty"`
 	}{
-		Description:  patch.Description,
-		Kind:         patch.Kind,
-		Prompt:       patch.Prompt,
-		PromptFile:   patch.PromptFile,
-		Model:        patch.Model,
-		TaskFilter:   patch.TaskFilter,
-		Executor:     patch.Executor,
-		Backend:      patch.Backend,
-		Effort:       patch.Effort,
-		PathPatterns: patch.PathPatterns,
-		Skills:       patch.Skills,
-		ReadOnly:     patch.ReadOnly,
-		AllowedTools: patch.AllowedTools,
-		DeniedTools:  patch.DeniedTools,
+		Description:   patch.Description,
+		Kind:          patch.Kind,
+		Prompt:        patch.Prompt,
+		PromptFile:    patch.PromptFile,
+		Model:         patch.Model,
+		TaskFilter:    patch.TaskFilter,
+		Executor:      patch.Executor,
+		Backend:       patch.Backend,
+		Effort:        patch.Effort,
+		PathPatterns:  patch.PathPatterns,
+		Skills:        patch.Skills,
+		Labels:        patch.Labels,
+		ExcludeLabels: patch.ExcludeLabels,
+		ReadOnly:      patch.ReadOnly,
+		AllowedTools:  patch.AllowedTools,
+		DeniedTools:   patch.DeniedTools,
 	}
 	// input_policy is `omitempty` on a pointer, so a &nil patch would serialize
 	// to nothing at all and read on the server as "leave it alone" — silently

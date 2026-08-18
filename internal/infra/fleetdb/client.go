@@ -267,6 +267,7 @@ func (c *Client) SetAPIKey(key string) {
 //   - 409 already_claimed → domain.ErrAlreadyClaimed
 //   - 409 invalid_transition → domain.ErrInvalidTransition
 //   - 400/422 → domain.ErrInvalid
+//   - 429 → fleethttp.ErrRateLimited after shared retries are exhausted
 //   - 4xx other → domain.ErrConflict (best fit; callers can inspect msg)
 //   - 5xx → fmt.Errorf wrapping the body
 //
@@ -321,7 +322,7 @@ func (c *Client) doBytes(ctx context.Context, method, path string) ([]byte, erro
 	req.Header.Set("Accept", "*/*")
 	auth.Apply(req)
 
-	resp, err := c.http.Do(req)
+	resp, err := fleethttp.Do(c.http, req)
 	if err != nil {
 		return nil, fmt.Errorf("fleetdb: %s %s: %w", method, path, err)
 	}
@@ -345,7 +346,7 @@ func (c *Client) doBytes(ctx context.Context, method, path string) ([]byte, erro
 }
 
 func (c *Client) doRequest(req *http.Request, method, path string, out any) error {
-	resp, err := c.http.Do(req)
+	resp, err := fleethttp.Do(c.http, req)
 	if err != nil {
 		return fmt.Errorf("fleetdb: %s %s: %w", method, path, err)
 	}
@@ -385,6 +386,8 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 		prefix += ": " + msg
 	}
 	switch status {
+	case http.StatusTooManyRequests:
+		return fmt.Errorf("%s: %w", prefix, fleethttp.ErrRateLimited)
 	case http.StatusNotFound:
 		return fmt.Errorf("%s: %w", prefix, domain.ErrNotFound)
 	case http.StatusConflict:

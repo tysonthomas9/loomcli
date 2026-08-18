@@ -18,6 +18,9 @@ func (app *Server) registerRoutes() {
 	app.registerMonitorHandlers()
 	app.registerEditorAndNotifyRoutes(h)
 	app.registerAuthProxy()
+	for _, module := range app.apiModules {
+		module.Register(app.mux)
+	}
 
 	// Workspace management and workspace-scoped API routes
 	if app.multiPool != nil {
@@ -200,10 +203,19 @@ func (app *Server) registerWorkspaceRoutes() {
 }
 
 func (app *Server) workspaceMiddleware() middleware.Middleware {
+	var workspaceMW middleware.Middleware
 	if app.wsResolveFn != nil {
-		return middleware.WorkspaceResolved(app.wsResolveFn)
+		workspaceMW = middleware.WorkspaceResolved(app.wsResolveFn)
+	} else {
+		workspaceMW = middleware.Workspace(func(id string) bool {
+			return app.wsExistsFn != nil && app.wsExistsFn(id)
+		})
 	}
-	return middleware.Workspace(func(id string) bool {
-		return app.wsExistsFn != nil && app.wsExistsFn(id)
-	})
+	// Inbound X-Actor is only trusted in open mode (no external auth) —
+	// the same trust model as fleet-db --auth-dev-mode. With auth enabled,
+	// a client-controlled header must not choose the audited identity.
+	actorMW := middleware.WorkspaceMutationActor(app.extAuthMiddleware == nil)
+	return func(next http.Handler) http.Handler {
+		return workspaceMW(actorMW(next))
+	}
 }

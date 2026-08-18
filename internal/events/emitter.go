@@ -54,6 +54,12 @@ func (b *Bus) Emit(e Event) error {
 	if err := b.writer.Write(e); err != nil {
 		return err
 	}
+	// The web UI audit service reads this file from a separate process. Flush
+	// each low-volume lifecycle event so it is visible immediately rather than
+	// waiting for the writer buffer to fill or the daemon to exit.
+	if err := b.writer.Flush(); err != nil {
+		return err
+	}
 
 	// Snapshot listeners under lock to avoid holding it during callbacks
 	b.mu.Lock()

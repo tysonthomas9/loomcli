@@ -1,13 +1,16 @@
 package daemon
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
@@ -145,5 +148,75 @@ func TestDetectDaemonRuntimeForCommandFallsBackToWorkspaceLock(t *testing.T) {
 	}
 	if rt.PID != os.Getpid() {
 		t.Fatalf("runtime PID = %d, want %d", rt.PID, os.Getpid())
+	}
+}
+
+func TestDaemonStatusReadsWorkspaceSnapshotWhenRunFromElsewhere(t *testing.T) {
+	loomDir := t.TempDir()
+	workspaceDir := filepath.Join(t.TempDir(), "workspace")
+	elsewhere := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+	t.Setenv("LOOM_WORKSPACE", "playground")
+
+	if err := bootstrap.MutateWorkspaceLocalState("playground", func(local *bootstrap.WorkspaceLocalState) error {
+		local.Path = workspaceDir
+		return nil
+	}); err != nil {
+		t.Fatalf("record workspace path: %v", err)
+	}
+	stateDir := filepath.Join(workspaceDir, ".loom")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatalf("create workspace state dir: %v", err)
+	}
+	statePath := filepath.Join(stateDir, "daemon-agents.json")
+	startedAt := time.Date(2026, time.August, 14, 12, 0, 0, 0, time.UTC)
+	if err := writeStateFile(statePath, startedAt, nil, nil, 3); err != nil {
+		t.Fatalf("write workspace daemon state: %v", err)
+	}
+
+	lock, err := acquireWorkspaceDaemonLock()
+	if err != nil {
+		t.Fatalf("workspace lock: %v", err)
+	}
+	defer lock.Release()
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	if err := os.Chdir(elsewhere); err != nil {
+		t.Fatalf("chdir elsewhere: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(originalDir) })
+
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe stdout: %v", err)
+	}
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = oldStdout })
+	runDaemonStatus(nil, nil)
+	if err := w.Close(); err != nil {
+		t.Fatalf("close stdout writer: %v", err)
+	}
+	os.Stdout = oldStdout
+
+	var output bytes.Buffer
+	if _, err := output.ReadFrom(r); err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatalf("close stdout reader: %v", err)
+	}
+	got := output.String()
+	if !strings.Contains(got, "Daemon: running (PID "+strconv.Itoa(os.Getpid())+")") {
+		t.Fatalf("status did not detect workspace daemon:\n%s", got)
+	}
+	if !strings.Contains(got, "Started: "+startedAt.Format(time.RFC3339)) || !strings.Contains(got, "Agents: 0") {
+		t.Fatalf("status did not read workspace snapshot:\n%s", got)
+	}
+	if strings.Contains(got, "no agent status available") || strings.Contains(got, elsewhere) {
+		t.Fatalf("status still resolved snapshot from caller cwd:\n%s", got)
 	}
 }

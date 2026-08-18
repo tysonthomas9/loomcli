@@ -17,15 +17,22 @@ import (
 // RoleConstraints holds the resolved routing constraints from a config.RoleConfig
 // merged with any per-agent config.AgentEntry overrides.
 type RoleConstraints struct {
-	TaskFilter   string   // "needs_plan", "has_design", "any", or "" (defaults to "has_design")
+	TaskFilter   string   // "needs_plan", "needs_design", "has_design", "any", or "" (defaults to "has_design")
 	Backend      string   // resolved backend name
 	PathPatterns []string // not used in routing decisions; carried through for subprocess env var propagation
 	Skills       []string // skill labels this role handles
-	MaxPriority  *int     // reject tasks with priority > this value (nil = no cap)
-	SourceRepos  []string // resolved source repo IDs for affinity scoring
-	ReadOnly     bool     // informational, carried through for downstream use
-	AllowedTools []string // informational, carried through for downstream use
-	DeniedTools  []string // informational, carried through for downstream use
+	// Labels and ExcludeLabels are ROUTING inputs, not carried-through
+	// informational fields: MatchTask rejects on them outright (Score=0).
+	// Labels require ALL of the listed labels (AND); ExcludeLabels rejects on
+	// ANY (OR) and is evaluated first, so a label in both lists excludes.
+	// Comparison is exact and case-sensitive. Empty lists gate nothing.
+	Labels        []string
+	ExcludeLabels []string
+	MaxPriority   *int     // reject tasks with priority > this value (nil = no cap)
+	SourceRepos   []string // resolved source repo IDs for affinity scoring
+	ReadOnly      bool     // informational, carried through for downstream use
+	AllowedTools  []string // informational, carried through for downstream use
+	DeniedTools   []string // informational, carried through for downstream use
 	// InputPolicy is informational here too — the leaf reads the policy off
 	// the env directly at invocation time. Nil means deny every prompt.
 	InputPolicy *domain.RoleInputPolicy
@@ -44,15 +51,17 @@ type TaskMatch struct {
 // when non-empty.
 func MergeRoleConstraints(rc config.RoleConfig, ae config.AgentEntry) RoleConstraints {
 	c := RoleConstraints{
-		TaskFilter:   rc.TaskFilter,
-		Backend:      rc.Backend,
-		PathPatterns: rc.PathPatterns,
-		Skills:       rc.Skills,
-		MaxPriority:  rc.MaxPriority,
-		ReadOnly:     rc.ReadOnly,
-		AllowedTools: rc.AllowedTools,
-		DeniedTools:  rc.DeniedTools,
-		InputPolicy:  rc.InputPolicy,
+		TaskFilter:    rc.TaskFilter,
+		Backend:       rc.Backend,
+		PathPatterns:  rc.PathPatterns,
+		Skills:        rc.Skills,
+		Labels:        rc.Labels,
+		ExcludeLabels: rc.ExcludeLabels,
+		MaxPriority:   rc.MaxPriority,
+		ReadOnly:      rc.ReadOnly,
+		AllowedTools:  rc.AllowedTools,
+		DeniedTools:   rc.DeniedTools,
+		InputPolicy:   rc.InputPolicy,
 	}
 
 	// config.AgentEntry overrides
@@ -85,6 +94,20 @@ func MatchTask(issue backend.IssueData, constraints RoleConstraints) TaskMatch {
 	// Reject non-open
 	if !IsOpen(issue) {
 		return TaskMatch{Issue: issue, Score: 0, Reason: "not open"}
+	}
+
+	// ExcludeLabels: OR-reject. Evaluated before Labels — if a label appears in
+	// both lists, exclusion wins (fleet-db/internal/models/role.go:200-211).
+	for _, ex := range constraints.ExcludeLabels {
+		if hasLabel(issue.Labels, ex) {
+			return TaskMatch{Issue: issue, Score: 0, Reason: "excluded label: " + ex}
+		}
+	}
+	// Labels: AND-require. Empty means no requirement.
+	for _, req := range constraints.Labels {
+		if !hasLabel(issue.Labels, req) {
+			return TaskMatch{Issue: issue, Score: 0, Reason: "missing required label: " + req}
+		}
 	}
 
 	// Apply TaskFilter
@@ -196,6 +219,15 @@ func RoleConfigFromEnv() config.RoleConfig {
 	if v := os.Getenv("LOOM_ROLE_PATH_PATTERNS"); v != "" {
 		rc.PathPatterns = strings.Split(v, ",")
 	}
+	// The label gate lives in MatchTask, and the in-worker router rebuilds its
+	// constraints from here — without these two the gate would only ever be
+	// enforced on the daemon's claim path, never inside the worker.
+	if v := os.Getenv("LOOM_ROLE_LABELS"); v != "" {
+		rc.Labels = strings.Split(v, ",")
+	}
+	if v := os.Getenv("LOOM_ROLE_EXCLUDE_LABELS"); v != "" {
+		rc.ExcludeLabels = strings.Split(v, ",")
+	}
 	if v := os.Getenv("LOOM_ROLE_MAX_PRIORITY"); v != "" {
 		if p, err := strconv.Atoi(v); err == nil {
 			rc.MaxPriority = &p
@@ -250,9 +282,9 @@ func applyTaskFilter(issue backend.IssueData, filter string) string {
 		filter = "has_design"
 	}
 	switch filter {
-	case "needs_plan":
+	case "needs_plan", "needs_design":
 		if !NeedsPlan(issue) {
-			return "filter: has design (needs_plan filter)"
+			return fmt.Sprintf("filter: has design (%s filter)", filter)
 		}
 	case "has_design":
 		if !ReadyToImplement(issue) {
@@ -272,6 +304,18 @@ func applyTaskFilter(issue backend.IssueData, filter string) string {
 func matchesRepo(repos []string, repo string) bool {
 	for _, r := range repos {
 		if r == repo {
+			return true
+		}
+	}
+	return false
+}
+
+// hasLabel reports whether label appears in labels. The comparison is exact and
+// case-sensitive: fleet-db stores role label constraints verbatim and never
+// normalises them, so neither does the gate that reads them.
+func hasLabel(labels []string, label string) bool {
+	for _, l := range labels {
+		if l == label {
 			return true
 		}
 	}
@@ -321,7 +365,12 @@ func FetchReadyIssues(parentID string, repoLabel string) ([]backend.IssueData, e
 func BuildRouterTaskCheck(rc config.RoleConfig, ae config.AgentEntry, parentID string) func() (bool, error) {
 	constraints := MergeRoleConstraints(rc, ae)
 	repoLabel := ae.Repo
-	if len(constraints.Skills) == 0 && constraints.MaxPriority == nil && constraints.TaskFilter == "" && repoLabel == "" && len(constraints.SourceRepos) == 0 {
+	// A label-gated role has something to filter on even with no skills, no
+	// priority cap and no task filter, so the gate has to count here too —
+	// otherwise the role falls back to the unfiltered availability check and
+	// the gate is silently skipped on this path.
+	if len(constraints.Skills) == 0 && len(constraints.Labels) == 0 && len(constraints.ExcludeLabels) == 0 &&
+		constraints.MaxPriority == nil && constraints.TaskFilter == "" && repoLabel == "" && len(constraints.SourceRepos) == 0 {
 		return nil
 	}
 	return func() (bool, error) {

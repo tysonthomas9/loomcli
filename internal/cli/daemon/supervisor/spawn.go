@@ -17,6 +17,7 @@ import (
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 	"github.com/tysonthomas9/loomcli/internal/observability/tracing"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -39,8 +40,13 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	cmd.Dir = ap.WorktreePath
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	cmd.Env = append(cli.FilteredEnv(),
-		fmt.Sprintf("LOOM_AGENT_NAME=%s", ap.Entry.Worktree),
+	cmd.Env = appendEnvOverride(cli.FilteredEnv(), fleethttp.EnvAgentName, ap.Entry.Worktree)
+	// The daemon itself may have inherited a harness/operator actor. A worker
+	// is a distinct fleet-db actor, so stamp its agent name after inheritance
+	// and replace any inherited value instead of relying on duplicate-env
+	// ordering in the child runtime.
+	cmd.Env = appendEnvOverride(cmd.Env, fleethttp.EnvFleetDBActor, ap.Entry.Worktree)
+	cmd.Env = append(cmd.Env,
 		fmt.Sprintf("LOOM_WORKTREE_PATH=%s", ap.WorktreePath),
 		fmt.Sprintf("LOOM_EVENTS_DIR=%s", ResolveDaemonPath(s.ProjectDir, cfg.Daemon.EventsDir)),
 	)
@@ -79,6 +85,18 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	}
 
 	return cmd, nil
+}
+
+func appendEnvOverride(env []string, name, value string) []string {
+	prefix := name + "="
+	out := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return append(out, prefix+value)
 }
 
 // buildAgentExecCmd creates the exec.Cmd with the correct arguments for the agent role.
@@ -172,13 +190,20 @@ func appendRoleEnv(env []string, ap *AgentProcess) []string {
 	return env
 }
 
-// appendRoutingEnv adds routing constraint env vars (skills, path patterns, priority, role).
+// appendRoutingEnv adds routing constraint env vars (skills, path patterns,
+// label gate, priority, role).
 func appendRoutingEnv(env []string, ap *AgentProcess) []string {
 	if len(ap.RoleConfig.Skills) > 0 {
 		env = append(env, fmt.Sprintf("LOOM_ROLE_SKILLS=%s", strings.Join(ap.RoleConfig.Skills, ",")))
 	}
 	if len(ap.RoleConfig.PathPatterns) > 0 {
 		env = append(env, fmt.Sprintf("LOOM_ROLE_PATH_PATTERNS=%s", strings.Join(ap.RoleConfig.PathPatterns, ",")))
+	}
+	if len(ap.RoleConfig.Labels) > 0 {
+		env = append(env, fmt.Sprintf("LOOM_ROLE_LABELS=%s", strings.Join(ap.RoleConfig.Labels, ",")))
+	}
+	if len(ap.RoleConfig.ExcludeLabels) > 0 {
+		env = append(env, fmt.Sprintf("LOOM_ROLE_EXCLUDE_LABELS=%s", strings.Join(ap.RoleConfig.ExcludeLabels, ",")))
 	}
 	if ap.RoleConfig.MaxPriority != nil {
 		env = append(env, fmt.Sprintf("LOOM_ROLE_MAX_PRIORITY=%d", *ap.RoleConfig.MaxPriority))
