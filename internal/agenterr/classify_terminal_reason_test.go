@@ -1,6 +1,8 @@
 package agenterr
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -75,5 +77,54 @@ func TestClassify_MarkerBeatsResidualPatterns(t *testing.T) {
 	ae := ClassifyFromOutput(text, 1, "claude")
 	if ae == nil || !ae.Class.IsClass(wrapper.ErrRateLimited) {
 		t.Fatalf("Class = %v, want RateLimited from the marker rather than the prose", ae)
+	}
+}
+
+// The billing wall is loom's own detection, not a harness verdict: no turn
+// reason ever names it, which is exactly why the leaf has to mark it.
+func TestClassify_BillingWallMarker(t *testing.T) {
+	ae := ClassifyFromOutput(BillingWallMarker+": Your credit balance is too low.", 0, "claude")
+	if ae.Class != OutcomeFromHarness(wrapper.ErrBilling) {
+		t.Fatalf("Class = %v, want ErrBilling", ae.Class)
+	}
+	// Exit code is irrelevant: the marker is categorical.
+	if ae2 := ClassifyFromOutput(BillingWallMarker+": broke", 137, "claude"); ae2.Class != OutcomeFromHarness(wrapper.ErrBilling) {
+		t.Fatalf("Class (exit 137) = %v, want ErrBilling", ae2.Class)
+	}
+}
+
+func TestClassify_BillingWallBeatsResidualAndAuth(t *testing.T) {
+	text := "rate limit exceeded\n" + AuthRequiredMarker + ": stale banner\n" + BillingWallMarker + ": credit balance is too low"
+	ae := ClassifyFromOutput(text, 1, "claude")
+	if ae.Class != OutcomeFromHarness(wrapper.ErrBilling) {
+		t.Fatalf("Class = %v, want ErrBilling — a billing wall outranks both a stale auth banner and the residual table", ae.Class)
+	}
+}
+
+func TestClassifyMarker_OnlyMarkers(t *testing.T) {
+	if _, ok := ClassifyMarker("the agent rambled about a 429 rate limit"); ok {
+		t.Fatal("ClassifyMarker matched text with no marker; it must never guess")
+	}
+	ae, ok := ClassifyMarker(UsageLimitedMarker + ": you've hit your session limit, retry-after: 600")
+	if !ok {
+		t.Fatal("ClassifyMarker missed a usage-limit marker")
+	}
+	if ae.RetryAfter != 600*time.Second {
+		t.Fatalf("RetryAfter = %v, want 10m", ae.RetryAfter)
+	}
+}
+
+func TestClassifyMarkerFromLog(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.log")
+	if err := os.WriteFile(path, []byte("building\ntesting\n"+BillingWallMarker+": credit balance is too low\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ae, ok := ClassifyMarkerFromLog(path)
+	if !ok || ae.Class != OutcomeFromHarness(wrapper.ErrBilling) {
+		t.Fatalf("ClassifyMarkerFromLog = (%v, %v), want a billing classification", ae, ok)
+	}
+	if _, ok := ClassifyMarkerFromLog(filepath.Join(dir, "missing.log")); ok {
+		t.Fatal("a missing log must not classify")
 	}
 }
