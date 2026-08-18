@@ -380,6 +380,8 @@ func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 	ap.AssignedTaskID = ""
 	ap.ResumeTaskID = ""          // per-cycle; re-detected in preFlightSetup (ResumeFailures persists)
 	ap.RecoveryMode = recoverCold // per-cycle; re-classified in preFlightSetup
+	ap.YieldRequested = false     // per-cycle; re-set by RequestYield
+	ap.YieldEscalated = false     // per-cycle; re-set by DrainWithGrace
 	ap.LastActivity = time.Time{}
 	// A child that died while parked on an interactive prompt never sends its
 	// "end", so the in-flight count must not survive into the next cycle: a
@@ -421,8 +423,14 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 		ap.ResumeFailures = 0 // cold-starting ⇒ let a future interruption recover again
 		ap.Mu.Unlock()
 		// Cold start: nothing here is being continued, so recovery takes its
-		// fully destructive form (incomplete=false).
-		if err := s.recoverAgent(ap, 0, false); err != nil {
+		// fully destructive form (incomplete=false). After a daemon restart the
+		// in-memory AssignedTaskID is gone and the lock may carry no task, so
+		// the checkpoint is the surviving record of the claim to release.
+		recTask, recExit := s.taskIDForLifecycle(ap, nil), 0
+		if recTask == "" {
+			recTask, recExit = checkpointRecoveryTask(ap)
+		}
+		if err := s.recoverAgentForTask(ap, recTask, recExit, false); err != nil {
 			slog.Warn("pre-flight recovery failed", "worktree", ap.Entry.Worktree, "err", err)
 		}
 	}
@@ -816,9 +824,11 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 	s.handleEpicTransition(ap)
 }
 
-// postMortemRecovery runs recovery after agent exit, skipping for yield exits.
+// postMortemRecovery runs recovery after agent exit, skipping for GRACEFUL
+// yield exits only — an escalated (timed-out, SIGTERMed) yield is a kill and
+// must go through recovery so its fleet-db claim is released.
 func (s *Supervisor) postMortemRecovery(ap *AgentProcess, exitCode int) {
-	if IsYieldRequested(ap.WorktreePath) {
+	if s.isGracefulYieldExit(ap) {
 		slog.Info("skipping post-mortem recovery for yield exit", "worktree", ap.Entry.Worktree)
 		return
 	}

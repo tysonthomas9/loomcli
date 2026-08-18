@@ -30,6 +30,12 @@ func (s *Supervisor) RequestYield(ap *AgentProcess, reason string) error {
 	if err := WriteYieldFile(ap.WorktreePath, req); err != nil {
 		return fmt.Errorf("request yield for %s: %w", ap.Entry.Worktree, err)
 	}
+	// Record the request in memory as well as on disk: DrainWithGrace deletes
+	// the file in a defer that races the post-exit chain, so the file alone
+	// cannot tell the exit path whether a yield was ever asked for.
+	ap.Mu.Lock()
+	ap.YieldRequested = true
+	ap.Mu.Unlock()
 	slog.Info("yield requested", "worktree", ap.Entry.Worktree, "reason", reason)
 	return nil
 }
