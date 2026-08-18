@@ -1,8 +1,17 @@
 export const SKILL_MD = "SKILL.md";
-export const SKILL_NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-export const ROLE_NAME_RE = /^[a-z0-9](?:[a-z0-9._-]{0,98}[a-z0-9])?$/;
 
-const RESERVED_SKILL_NAMES = new Set(["anthropic", "claude"]);
+const SKILL_NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const ROLE_NAME_RE = /^[a-z0-9](?:[a-z0-9._-]{0,98}[a-z0-9])?$/;
+
+// Mirrors domain.skillReservedNames in Go and models.skillReservedNames in
+// fleet-db. "loom-skill-catalog" is the synthetic catalog pointer the
+// materializer writes; a stored skill by that name is skipped, so catching it
+// here turns a silent drop into an inline error.
+const RESERVED_SKILL_NAMES = new Set([
+  "anthropic",
+  "claude",
+  "loom-skill-catalog",
+]);
 const WINDOWS_DEVICE_NAMES = new Set([
   "con",
   "prn",
@@ -39,6 +48,11 @@ export function validateSkillDescription(description: string): string | null {
   }
   if (/[<>]/.test(description)) {
     return "Description must not contain angle brackets";
+  }
+  // The materializer writes each description as one line of the skill index, so
+  // a newline there would split one skill across two entries.
+  if (/\p{Cc}/u.test(description)) {
+    return "Description must not contain control characters";
   }
   return null;
 }
@@ -86,10 +100,6 @@ export function parseSkillPath(
   if (validateSkillName(skill)) return null;
   if (file !== SKILL_MD && validateSkillFilePath(file)) return null;
   return { skill, file };
-}
-
-export function skillFolderPath(skill: string): string {
-  return skill;
 }
 
 export function skillPathKey(path: string): string {

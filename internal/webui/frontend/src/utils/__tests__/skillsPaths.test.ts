@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseSkillPath,
   validateRoleName,
+  validateSkillDescription,
   validateSkillFilePath,
   validateSkillName,
 } from "../skillsPaths";
@@ -13,9 +14,34 @@ describe("skillsPaths", () => {
     (name) => expect(validateSkillName(name)).toBeNull(),
   );
 
-  it.each(["Claude", "anthropic", "con", "bad--name", "bad_name"])(
-    "rejects reserved or malformed skill name %s",
-    (name) => expect(validateSkillName(name)).not.toBeNull(),
+  // The reserved names mirror Go's domain.skillReservedNames, which mirrors
+  // fleet-db's models.skillReservedNames. "loom-skill-catalog" is the synthetic
+  // catalog pointer the materializer owns; a stored skill by that name is
+  // skipped at materialization, so catching it here keeps the failure inline
+  // instead of a generic 422.
+  it.each([
+    "Claude",
+    "anthropic",
+    "loom-skill-catalog",
+    "con",
+    "bad--name",
+    "bad_name",
+  ])("rejects reserved or malformed skill name %s", (name) =>
+    expect(validateSkillName(name)).not.toBeNull(),
+  );
+
+  it("accepts a one-line description", () => {
+    expect(
+      validateSkillDescription("Review a PR. Use before approving."),
+    ).toBeNull();
+  });
+
+  // Each description becomes one line of the materialized skill index, so a
+  // newline would split a single skill across two entries.
+  it.each(["does <thing>", "line one\nline two", "tabbed\tsummary"])(
+    "rejects description %j",
+    (description) =>
+      expect(validateSkillDescription(description)).not.toBeNull(),
   );
 
   it.each([
