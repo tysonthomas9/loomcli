@@ -255,28 +255,11 @@ func readLocalSkillDirectoryWithHook(directory, nameOverride string, beforeRead 
 	if !ok {
 		return assembledLocalSkill{}, fmt.Errorf("skill directory must contain %s", domain.SkillFileNameSKILLMD)
 	}
-	metadata, body, err := parseSkillDocument(document)
+	// The directory the user pointed at is the only fallback here: a local
+	// import has no repository to borrow a name from.
+	identity, err := resolveSkillIdentity(document, filepath.Base(absolute), nameOverride)
 	if err != nil {
 		return assembledLocalSkill{}, err
-	}
-	if err := validateFrontmatterText("name", metadata.Name, false); err != nil {
-		return assembledLocalSkill{}, err
-	}
-	if err := validateFrontmatterText("description", metadata.Description, true); err != nil {
-		return assembledLocalSkill{}, err
-	}
-	name := metadata.Name
-	if name == "" {
-		name = filepath.Base(absolute)
-	}
-	if nameOverride != "" {
-		name = nameOverride
-	}
-	if err := domain.ValidateSkillName(name); err != nil {
-		return assembledLocalSkill{}, err
-	}
-	if strings.TrimSpace(metadata.Description) == "" {
-		return assembledLocalSkill{}, fmt.Errorf("skill description in %s must not be empty", domain.SkillFileNameSKILLMD)
 	}
 
 	bundled := make([]domain.SkillFile, 0, len(files)-1)
@@ -292,12 +275,12 @@ func readLocalSkillDirectoryWithHook(directory, nameOverride string, beforeRead 
 	}
 	skippedHidden = uniqueSortedStrings(skippedHidden)
 	return assembledLocalSkill{
-		Name:                   name,
-		Description:            metadata.Description,
-		Content:                string(body),
+		Name:                   identity.Name,
+		Description:            identity.Description,
+		Content:                identity.Content,
 		Files:                  bundled,
 		CanonicalRoot:          canonicalRoot,
-		DroppedFrontmatterKeys: append([]string(nil), metadata.DroppedKeys...),
+		DroppedFrontmatterKeys: identity.DroppedFrontmatterKeys,
 		SkippedHiddenPaths:     skippedHidden,
 	}, nil
 }

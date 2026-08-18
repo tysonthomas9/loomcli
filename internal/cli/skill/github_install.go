@@ -748,36 +748,8 @@ func (a githubArchive) rejectUnsafeSelectedEntries(skillDir string) error {
 	return nil
 }
 
-//nolint:funlen,gocognit,cyclop // Selection, frontmatter parse, and bundling stay one auditable unit.
 func (a githubArchive) toSkill(source githubSource, skillDir, nameOverride string) (fetchedGitHubSkill, error) {
-	selected := make(map[string]githubArchiveFile)
-	hiddenPaths := make(map[string]struct{})
-	for filePath, file := range a.files {
-		if isWithinSkillDir(skillDir, filePath) {
-			relative := relativeSkillPath(skillDir, filePath)
-			if hidden, ok := hiddenSkillPath(relative); ok {
-				hiddenPaths[hidden] = struct{}{}
-				continue
-			}
-			selected[relative] = file
-		}
-	}
-	for entryPath := range a.links {
-		if !isWithinSkillDir(skillDir, entryPath) {
-			continue
-		}
-		if hidden, ok := hiddenSkillPath(relativeSkillPath(skillDir, entryPath)); ok {
-			hiddenPaths[hidden] = struct{}{}
-		}
-	}
-	for entryPath := range a.unsupported {
-		if !isWithinSkillDir(skillDir, entryPath) {
-			continue
-		}
-		if hidden, ok := hiddenSkillPath(relativeSkillPath(skillDir, entryPath)); ok {
-			hiddenPaths[hidden] = struct{}{}
-		}
-	}
+	selected, hiddenPaths := a.selectSkillDirEntries(skillDir)
 	var binaryPaths []string
 	for filePath, file := range selected {
 		if !isSkillText(file.content) {
@@ -793,48 +765,22 @@ func (a githubArchive) toSkill(source githubSource, skillDir, nameOverride strin
 	if !ok {
 		return fetchedGitHubSkill{}, fmt.Errorf("selected skill directory does not contain %s", domain.SkillFileNameSKILLMD)
 	}
-	metadata, body, err := parseSkillDocument(document.content)
+	// Two levels of fallback here, not one: the skill's own subdirectory, then
+	// the repository name when the skill sits at the archive root and has no
+	// directory of its own to be named after.
+	fallbackName := path.Base(skillDir)
+	if skillDir == "" || fallbackName == "." {
+		fallbackName = source.Repo
+	}
+	identity, err := resolveSkillIdentity(document.content, fallbackName, nameOverride)
 	if err != nil {
 		return fetchedGitHubSkill{}, err
 	}
-	if err := validateFrontmatterText("name", metadata.Name, false); err != nil {
-		return fetchedGitHubSkill{}, err
-	}
-	if err := validateFrontmatterText("description", metadata.Description, true); err != nil {
-		return fetchedGitHubSkill{}, err
-	}
-	name := metadata.Name
-	if name == "" {
-		name = path.Base(skillDir)
-		if skillDir == "" || name == "." {
-			name = source.Repo
-		}
-	}
-	if nameOverride != "" {
-		name = nameOverride
-	}
-	if err := domain.ValidateSkillName(name); err != nil {
-		return fetchedGitHubSkill{}, err
-	}
-	if strings.TrimSpace(metadata.Description) == "" {
-		return fetchedGitHubSkill{}, fmt.Errorf("skill description in %s must not be empty", domain.SkillFileNameSKILLMD)
-	}
 
-	files := make([]domain.SkillFile, 0, len(selected)-1)
-	for filePath, file := range selected {
-		if filePath == domain.SkillFileNameSKILLMD {
-			continue
-		}
-		if err := domain.ValidateSkillFilePath(filePath); err != nil {
-			return fetchedGitHubSkill{}, fmt.Errorf("bundled skill file %q: %w", filePath, err)
-		}
-		files = append(files, domain.SkillFile{
-			Path:       filePath,
-			Content:    string(file.content),
-			Executable: file.executable,
-		})
+	files, err := bundledSkillFiles(selected)
+	if err != nil {
+		return fetchedGitHubSkill{}, err
 	}
-	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	skippedHidden := make([]string, 0, len(hiddenPaths))
 	for hidden := range hiddenPaths {
 		skippedHidden = append(skippedHidden, hidden)
@@ -848,13 +794,123 @@ func (a githubArchive) toSkill(source githubSource, skillDir, nameOverride strin
 	}
 	provenance += "@" + source.Ref
 	return fetchedGitHubSkill{
+		Name:                   identity.Name,
+		Description:            identity.Description,
+		Content:                identity.Content,
+		Files:                  files,
+		Source:                 provenance,
+		DroppedFrontmatterKeys: identity.DroppedFrontmatterKeys,
+		SkippedHiddenPaths:     skippedHidden,
+	}, nil
+}
+
+// selectSkillDirEntries splits the archive entries under skillDir into the
+// files that become the skill and the hidden paths that are reported as
+// skipped. Links and unsupported entries can only ever be skipped — they are
+// never carried into a skill — but a hidden one is still worth telling the user
+// about, which is why all three entry classes are swept for them.
+func (a githubArchive) selectSkillDirEntries(skillDir string) (map[string]githubArchiveFile, map[string]struct{}) {
+	selected := make(map[string]githubArchiveFile)
+	hiddenPaths := make(map[string]struct{})
+	for filePath, file := range a.files {
+		if !isWithinSkillDir(skillDir, filePath) {
+			continue
+		}
+		relative := relativeSkillPath(skillDir, filePath)
+		if hidden, ok := hiddenSkillPath(relative); ok {
+			hiddenPaths[hidden] = struct{}{}
+			continue
+		}
+		selected[relative] = file
+	}
+	for _, entries := range []map[string]string{a.links, a.unsupported} {
+		for entryPath := range entries {
+			if !isWithinSkillDir(skillDir, entryPath) {
+				continue
+			}
+			if hidden, ok := hiddenSkillPath(relativeSkillPath(skillDir, entryPath)); ok {
+				hiddenPaths[hidden] = struct{}{}
+			}
+		}
+	}
+	return selected, hiddenPaths
+}
+
+// bundledSkillFiles turns the selected archive entries into the skill's sorted
+// bundled file list. SKILL.md is excluded: it is the body, not a bundled file.
+//
+// Path validation happens here and stops at the first bad path, unlike the
+// local import route, which collects every invalid path during its walk and
+// reports them together. That difference is deliberate: an import is a user
+// pointing at their own directory and wanting the full list to fix, while an
+// install is someone else's repository, where the first bad path is already
+// reason enough to stop.
+func bundledSkillFiles(selected map[string]githubArchiveFile) ([]domain.SkillFile, error) {
+	files := make([]domain.SkillFile, 0, len(selected))
+	for filePath, file := range selected {
+		if filePath == domain.SkillFileNameSKILLMD {
+			continue
+		}
+		if err := domain.ValidateSkillFilePath(filePath); err != nil {
+			return nil, fmt.Errorf("bundled skill file %q: %w", filePath, err)
+		}
+		files = append(files, domain.SkillFile{
+			Path:       filePath,
+			Content:    string(file.content),
+			Executable: file.executable,
+		})
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	return files, nil
+}
+
+// skillIdentity is what a SKILL.md decides about the skill it describes,
+// independent of whether the file came from a GitHub archive or a local
+// directory.
+type skillIdentity struct {
+	Name                   string
+	Description            string
+	Content                string
+	DroppedFrontmatterKeys []string
+}
+
+// resolveSkillIdentity parses a SKILL.md and settles the skill's name,
+// description and body. Both ingest routes run exactly this sequence.
+//
+// fallbackName is used when the frontmatter omits a name; each route computes
+// its own, because they disagree about what to fall back to — a local import
+// uses the directory it was pointed at, while a GitHub install uses the skill
+// subdirectory and then the repository name at the archive root. nameOverride,
+// when non-empty, beats both: it is what the user typed on --name.
+func resolveSkillIdentity(document []byte, fallbackName, nameOverride string) (skillIdentity, error) {
+	metadata, body, err := parseSkillDocument(document)
+	if err != nil {
+		return skillIdentity{}, err
+	}
+	if err := validateFrontmatterText("name", metadata.Name, false); err != nil {
+		return skillIdentity{}, err
+	}
+	if err := validateFrontmatterText("description", metadata.Description, true); err != nil {
+		return skillIdentity{}, err
+	}
+	name := metadata.Name
+	if name == "" {
+		name = fallbackName
+	}
+	if nameOverride != "" {
+		name = nameOverride
+	}
+	if err := domain.ValidateSkillName(name); err != nil {
+		return skillIdentity{}, err
+	}
+	if strings.TrimSpace(metadata.Description) == "" {
+		return skillIdentity{}, fmt.Errorf("skill description in %s must not be empty", domain.SkillFileNameSKILLMD)
+	}
+	return skillIdentity{
 		Name:                   name,
 		Description:            metadata.Description,
 		Content:                string(body),
-		Files:                  files,
-		Source:                 provenance,
 		DroppedFrontmatterKeys: append([]string(nil), metadata.DroppedKeys...),
-		SkippedHiddenPaths:     skippedHidden,
 	}, nil
 }
 
