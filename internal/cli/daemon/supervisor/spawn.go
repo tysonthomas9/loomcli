@@ -1,6 +1,11 @@
 package supervisor
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -14,6 +19,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/agent"
+	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -68,10 +74,9 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_ASSIGNED_TASK_ID=%s", assignedTaskID))
 	}
 
-	cmd.Env = s.appendDaemonEnv(cmd.Env)
-	cmd.Env = appendProfileEnv(cmd.Env, s.ProjectDir, ap.Entry.Worktree)
-	cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_YIELD_FILE=%s", filepath.Join(ap.WorktreePath, YieldFileName)))
-	cmd.Env = appendSessionEnv(cmd.Env, ap)
+	if cmd.Env, err = s.appendRuntimeEnv(cmd.Env, ap); err != nil {
+		return nil, err
+	}
 
 	// Propagate the active trace context so the agent subprocess's bootstrap
 	// span and per-request spans inherit the daemon's trace tree.
@@ -663,18 +668,202 @@ func (s *Supervisor) appendDaemonEnv(env []string) []string {
 // flag, so the same layout works unchanged inside a container image.
 const AgentProfilesDirName = "agent-profiles"
 
+// appendRuntimeEnv appends the per-run environment an agent subprocess needs:
+// the daemon's control-plane wiring, its verified harness profile roots, the
+// yield file it watches, and its session identity. It is the one step of
+// buildCommand that can fail, because an agent whose profile does not verify
+// must not boot at all — see appendProfileEnv.
+func (s *Supervisor) appendRuntimeEnv(env []string, ap *AgentProcess) ([]string, error) {
+	env = s.appendDaemonEnv(env)
+	env, err := appendProfileEnv(env, s.ProjectDir, ap.Entry.Worktree)
+	if err != nil {
+		return nil, fmt.Errorf("agent %s profile: %w", ap.Entry.Worktree, err)
+	}
+	env = append(env, fmt.Sprintf("LOOM_YIELD_FILE=%s", filepath.Join(ap.WorktreePath, YieldFileName)))
+	return appendSessionEnv(env, ap), nil
+}
+
+// ProfileManifestName is the launch-verification manifest a provisioned
+// profile root carries. Format is fixed by the Agent Home Profiles design and
+// written by the operator's provision-profile script:
+//
+//	{"files": [...sorted relative paths...],
+//	 "fingerprint": "<sha256 hex>",
+//	 "harness_version": "<claude|codex --version, first line trimmed>"}
+//
+// fingerprint = sha256 over the concatenation, in listed order, of
+// (relative path + NUL + file bytes). The list is an ALLOWLIST: files not
+// named in it are ignored entirely, because the harness owns them and mutates
+// them at runtime by design (.credentials.json, .claude.json, sessions/).
+const ProfileManifestName = ".manifest.json"
+
+// profileHarnessBinary maps a profile harness root to the binary whose
+// --version output the manifest pins. Resolution is by bare name on PATH,
+// exactly as the backends layer launches them.
+var profileHarnessBinary = map[string]string{
+	"claude": "claude",
+	"codex":  "codex",
+}
+
+// Boot-refusal reasons, distinguished so an operator reading the agent's
+// failure knows which repair applies: re-provision (stale fingerprint),
+// re-bless the upgrade (version drift), or provision at all (no manifest).
+var (
+	ErrProfileManifestMissing     = errors.New("profile manifest missing")
+	ErrProfileManifestUnreadable  = errors.New("profile manifest unreadable")
+	ErrProfileFingerprintMismatch = errors.New("profile fingerprint mismatch")
+	ErrProfileVersionDrift        = errors.New("profile harness version drift")
+	ErrProfileVersionUnknown      = errors.New("profile harness version unknown")
+)
+
+type profileManifest struct {
+	Files          []string `json:"files"`
+	Fingerprint    string   `json:"fingerprint"`
+	HarnessVersion string   `json:"harness_version"`
+}
+
 // appendProfileEnv injects per-agent harness profile roots when they exist on
-// disk. Absent directories leave the environment untouched, preserving the
-// legacy behavior of inheriting the operator's ~/.claude and ~/.codex.
-func appendProfileEnv(env []string, projectDir, worktree string) []string {
+// disk, after verifying each one against its manifest. Absent directories
+// leave the environment untouched, preserving the legacy behavior of
+// inheriting the operator's ~/.claude and ~/.codex.
+//
+// An existing but unverifiable profile is a BOOT FAILURE, never a fallback to
+// legacy env: silently running the agent against the operator's full ~/.claude
+// is the exact leak per-agent profiles close. Per-agent boot degradation
+// contains the failure to the one agent whose profile is broken.
+func appendProfileEnv(env []string, projectDir, worktree string) ([]string, error) {
 	root := filepath.Join(projectDir, ".loom", AgentProfilesDirName, worktree)
-	if dir := filepath.Join(root, "claude"); dirExists(dir) {
-		env = append(env, fmt.Sprintf("CLAUDE_CONFIG_DIR=%s", dir))
+	for _, harness := range []string{"claude", "codex"} {
+		dir := filepath.Join(root, harness)
+		if !dirExists(dir) {
+			continue
+		}
+		if err := verifyProfileManifest(dir, profileHarnessBinary[harness]); err != nil {
+			return nil, err
+		}
+		switch harness {
+		case "claude":
+			env = append(env, fmt.Sprintf("CLAUDE_CONFIG_DIR=%s", dir))
+		case "codex":
+			env = append(env, fmt.Sprintf("CODEX_HOME=%s", dir))
+		}
 	}
-	if dir := filepath.Join(root, "codex"); dirExists(dir) {
-		env = append(env, fmt.Sprintf("CODEX_HOME=%s", dir))
+	return env, nil
+}
+
+// verifyProfileManifest recomputes dir's fingerprint from the files the
+// manifest lists and compares the pinned harness version against what the
+// resolved binary reports now. Every error names the profile directory, so the
+// spawn failure an operator reads points at the thing to repair.
+func verifyProfileManifest(dir, binary string) error {
+	raw, err := os.ReadFile(filepath.Join(dir, ProfileManifestName)) //nolint:gosec // G304: path derived from the workspace profile layout, not user input
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%w: %s (profile dir exists but was never provisioned)", ErrProfileManifestMissing, dir)
+		}
+		return fmt.Errorf("%w: %s: %v", ErrProfileManifestUnreadable, dir, err)
 	}
-	return env
+	var m profileManifest
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return fmt.Errorf("%w: %s: %v", ErrProfileManifestUnreadable, dir, err)
+	}
+
+	sum, err := profileFingerprint(dir, m.Files)
+	if err != nil {
+		return fmt.Errorf("%w: %s: %v", ErrProfileManifestUnreadable, dir, err)
+	}
+	if sum != m.Fingerprint {
+		return fmt.Errorf("%w: %s: manifest %s, on disk %s (re-provision the profile)",
+			ErrProfileFingerprintMismatch, dir, shortSum(m.Fingerprint), shortSum(sum))
+	}
+
+	version := harnessVersion(binary)
+	if version == "" {
+		return fmt.Errorf("%w: %s: %s --version produced nothing", ErrProfileVersionUnknown, dir, binary)
+	}
+	if version != m.HarnessVersion {
+		return fmt.Errorf("%w: %s: manifest pins %q, %s reports %q (re-provision to bless the upgrade)",
+			ErrProfileVersionDrift, dir, m.HarnessVersion, binary, version)
+	}
+	return nil
+}
+
+// profileFingerprint hashes the listed files in listed order. Files present in
+// dir but absent from the list are not read at all — the manifest is an
+// allowlist, and the harness-owned remainder legitimately changes underfoot.
+func profileFingerprint(dir string, files []string) (string, error) {
+	h := sha256.New()
+	for _, rel := range files {
+		data, err := os.ReadFile(filepath.Join(dir, rel)) //nolint:gosec // G304: rel comes from the profile's own manifest
+		if err != nil {
+			return "", fmt.Errorf("manifested file %q: %w", rel, err)
+		}
+		h.Write([]byte(rel))
+		h.Write([]byte{0})
+		h.Write(data)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func shortSum(s string) string {
+	if len(s) > 12 {
+		return s[:12] + "…"
+	}
+	if s == "" {
+		return "(empty)"
+	}
+	return s
+}
+
+// harnessVersionTTL bounds how long a probed --version string is reused. It is
+// deliberately coarse: the point is that one spawn cycle — every agent the
+// supervisor brings up in a burst — costs a single probe per binary rather
+// than one per agent, each of which forks a node CLI and can cost seconds.
+// A harness upgrade lands within a TTL, and the next boot re-probes.
+const harnessVersionTTL = 2 * time.Minute
+
+var (
+	harnessVersionMu    sync.Mutex
+	harnessVersionCache = map[string]harnessVersionEntry{}
+)
+
+type harnessVersionEntry struct {
+	version string
+	probed  time.Time
+}
+
+// harnessVersion returns the cached "<binary> --version" first line, probing
+// at most once per binary per TTL. Failures are NOT cached: a probe killed
+// under load would otherwise refuse every agent boot for the whole TTL.
+func harnessVersion(binary string) string {
+	harnessVersionMu.Lock()
+	if e, ok := harnessVersionCache[binary]; ok && time.Since(e.probed) < harnessVersionTTL {
+		harnessVersionMu.Unlock()
+		return e.version
+	}
+	harnessVersionMu.Unlock()
+
+	version := probeHarnessVersion(binary)
+	if version == "" {
+		return ""
+	}
+	harnessVersionMu.Lock()
+	harnessVersionCache[binary] = harnessVersionEntry{version: version, probed: time.Now()}
+	harnessVersionMu.Unlock()
+	return version
+}
+
+// probeHarnessVersion is a seam for tests; production runs the real binary.
+var probeHarnessVersion = func(binary string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), backends.VersionProbeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, binary, "--version") //nolint:gosec // G204: binary is one of the fixed harness names above
+	cmd.WaitDelay = 2 * time.Second
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
 }
 
 func dirExists(path string) bool {
