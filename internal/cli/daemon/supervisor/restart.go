@@ -424,9 +424,9 @@ func (s *Supervisor) getBackoffMax() int {
 // GetOutputTimeout returns the configured output timeout in seconds.
 // LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS env var is honored when set — useful
 // for integration tests that need to trip the watchdog quickly (e.g.
-// test/playground/scenarios/). The env var wins over fleet-db config
-// because fleet-db's wire schema does not currently persist this field
-// (see internal/infra/fleetdb/daemon.go).
+// test/playground/scenarios/). fleet-db does persist this field now
+// (see internal/infra/fleetdb/daemon.go), so the env var is a deliberate
+// test override of the stored config, not a workaround for a wire gap.
 func (s *Supervisor) GetOutputTimeout() int {
 	if v := os.Getenv("LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
