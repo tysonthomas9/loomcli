@@ -71,6 +71,9 @@ export async function run(ctx) {
   const analysisRun = await runScoutTask(loom, runner, "scout-analyze", agentServiceID, {
     kind: "scout_analyze",
     phase: "analyze",
+    // taskId is a phase label, not an issue id. Declaring the title here keeps
+    // the run panel from resolving it through the issue API and 404ing.
+    title: "Analyze repositories",
     maxRecommendations,
   });
   if (!analysisRun.ok) {
@@ -86,6 +89,7 @@ export async function run(ctx) {
   const writeRun = await runScoutTask(loom, runner, "scout-write", agentServiceID, {
     kind: "scout_write",
     phase: "write",
+    title: "Write journal and agents.md",
     agentsMd: analysis.value.agentsMd || "",
     historyEntry: historyEntry(loom, analysis.value, outcome),
   });

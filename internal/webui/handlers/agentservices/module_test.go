@@ -10,7 +10,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -22,7 +21,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/taskrunlogs"
-	"github.com/tysonthomas9/loomcli/internal/trigger"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 )
 
@@ -46,9 +44,6 @@ func TestListInstantiableScriptedRolesUsesLiteralRouteAndFiltersToCron(t *testin
 	}
 	if len(roles) != 1 || roles[0].RoleName != scriptedroles.ScoutRoleName || roles[0].DisplayName != "Scout" {
 		t.Fatalf("roles = %#v, want only the cron-instantiable scout role", roles)
-	}
-	if !slices.Equal(roles[0].AllowedBindingKinds, []string{trigger.CronSourceKind}) {
-		t.Fatalf("allowedBindingKinds = %#v", roles[0].AllowedBindingKinds)
 	}
 }
 
@@ -283,6 +278,11 @@ func TestListAgentServiceRunTasksFiltersByDriverRunAndReportsLogAvailability(t *
 			WorkspaceKey: "WS", TaskRunID: "task-no-log", DriverRunID: run.RunID, TaskID: "WS-3",
 			Runner: "scout-task-runner", Status: domain.TaskRunRunning,
 		},
+		{
+			WorkspaceKey: "WS", TaskRunID: "task-phase", DriverRunID: run.RunID, TaskID: "scout-analyze",
+			Runner: "scout-task-runner", Status: domain.TaskRunRunning,
+			Input: json.RawMessage(`{"phase":"analyze","title":"  Analyze repositories  "}`),
+		},
 	} {
 		if _, err := st.TaskRuns().Create(t.Context(), task); err != nil {
 			t.Fatalf("create task run %s: %v", task.TaskRunID, err)
@@ -309,8 +309,8 @@ func TestListAgentServiceRunTasksFiltersByDriverRunAndReportsLogAvailability(t *
 	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if !raw.Success || raw.Total != 2 || len(raw.Data) != 2 {
-		t.Fatalf("response = %#v, want two filtered tasks", raw)
+	if !raw.Success || raw.Total != 3 || len(raw.Data) != 3 {
+		t.Fatalf("response = %#v, want three filtered tasks", raw)
 	}
 	items := make(map[string]map[string]interface{}, len(raw.Data))
 	for _, item := range raw.Data {
@@ -330,6 +330,38 @@ func TestListAgentServiceRunTasksFiltersByDriverRunAndReportsLogAvailability(t *
 	}
 	if item := items["task-no-log"]; item["transcriptAvailable"] != false {
 		t.Fatalf("task without transcript_ref = %#v, want transcriptAvailable false", item)
+	}
+	// A phase-label taskId carries its own title so the run panel never
+	// resolves it through the issue API.
+	if item := items["task-phase"]; item["taskTitle"] != "Analyze repositories" {
+		t.Fatalf("declared-title task DTO = %#v, want trimmed taskTitle", item)
+	}
+	if _, exists := items["task-1"]["taskTitle"]; exists {
+		t.Fatalf("issue-backed task DTO = %#v, want taskTitle omitted", items["task-1"])
+	}
+}
+
+func TestTaskRunDeclaredTitleIgnoresMalformedAndBoundsLength(t *testing.T) {
+	if got := taskRunDeclaredTitle(nil); got != "" {
+		t.Fatalf("nil run title = %q, want empty", got)
+	}
+	for name, input := range map[string]string{
+		"not json":      `not json`,
+		"no title":      `{"phase":"analyze"}`,
+		"blank title":   `{"title":"   "}`,
+		"wrong type":    `{"title":42}`,
+		"array payload": `["title"]`,
+	} {
+		if got := taskRunDeclaredTitle(&domain.TaskRun{Input: json.RawMessage(input)}); got != "" {
+			t.Fatalf("%s title = %q, want empty", name, got)
+		}
+	}
+	long := strings.Repeat("x", maxDeclaredTaskTitleLen+50)
+	got := taskRunDeclaredTitle(&domain.TaskRun{
+		Input: json.RawMessage(`{"title":"` + long + `"}`),
+	})
+	if len(got) != maxDeclaredTaskTitleLen {
+		t.Fatalf("long title len = %d, want %d", len(got), maxDeclaredTaskTitleLen)
 	}
 }
 

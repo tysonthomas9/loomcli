@@ -11,6 +11,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/entity"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/dto"
 )
 
 // create-issue lets a running workflow (the scout lane) mint a fleet-db issue
@@ -21,12 +23,12 @@ import (
 // or the soft-duplicate guard) is transparent: fleet-db returns the existing
 // issue and the workflow just receives its fields.
 
-// Create-time limits mirrored from fleet-db so bad requests fail here as 400
-// invalid instead of a translated backend error.
-const (
-	maxCreateIssueTitleLen          = 500
-	maxCreateIssueIdempotencyKeyLen = 128
-)
+// maxCreateIssueIdempotencyKeyLen is the one create-time limit with no
+// existing owner in this repo. Title length, issue type, and priority range
+// are validated against dto/entity so this op cannot fail closed on a stale
+// private copy: it is the lane the scout files its own recommendations
+// through, and a locally-missing issue type would reject valid work as 400.
+const maxCreateIssueIdempotencyKeyLen = 128
 
 // createIssueParams is the camelCase driver-op request wire. Fields on the
 // contract's not-accepted list (actor, assignee/owner, metadata,
@@ -77,21 +79,22 @@ func (p createIssueParams) validate() error {
 	if strings.TrimSpace(p.Title) == "" {
 		return fmt.Errorf("title required: %w", domain.ErrInvalid)
 	}
-	if len(p.Title) > maxCreateIssueTitleLen {
-		return fmt.Errorf("title exceeds maximum length of %d characters: %w", maxCreateIssueTitleLen, domain.ErrInvalid)
+	if len(p.Title) > dto.MaxTitleLength {
+		return fmt.Errorf("title exceeds maximum length of %d characters: %w", dto.MaxTitleLength, domain.ErrInvalid)
 	}
-	switch p.IssueType {
-	case "", "task", "bug", "feature", "epic", "chore":
-	default:
+	if !entity.IssueType(p.IssueType).IsValid() {
 		return fmt.Errorf("invalid issueType %q: %w", p.IssueType, domain.ErrInvalid)
 	}
-	if p.Priority < 0 || p.Priority > 4 {
-		return fmt.Errorf("invalid priority %d: must be between 0 and 4: %w", p.Priority, domain.ErrInvalid)
+	if p.Priority < dto.MinPriority || p.Priority > dto.MaxPriority {
+		return fmt.Errorf("invalid priority %d: must be between %d and %d: %w", p.Priority, dto.MinPriority, dto.MaxPriority, domain.ErrInvalid)
 	}
-	switch p.Status {
-	case "", "open", "deferred", "review":
+	// Which statuses may be set at create is this op's policy; the spelling
+	// comes from the canonical vocabulary.
+	switch entity.IssueStatus(p.Status) {
+	case "", entity.StatusOpen, entity.StatusDeferred, entity.StatusReview:
 	default:
-		return fmt.Errorf("invalid status %q: only open, deferred, or review can be set on create: %w", p.Status, domain.ErrInvalid)
+		return fmt.Errorf("invalid status %q: only %s, %s, or %s can be set on create: %w",
+			p.Status, entity.StatusOpen, entity.StatusDeferred, entity.StatusReview, domain.ErrInvalid)
 	}
 	if p.IdempotencyKey != "" {
 		if len(p.IdempotencyKey) > maxCreateIssueIdempotencyKeyLen {

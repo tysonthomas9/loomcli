@@ -176,7 +176,7 @@ func buildWorkspaceNotesBlock(workspace *config.WorkspaceConfig) string {
 		return ""
 	}
 
-	path := filepath.Join(workspace.Path, "agents.md")
+	path := agentstate.AgentsPath(workspace.Path)
 	data, err := os.ReadFile(path) //nolint:gosec // G304: workspace root comes from the active workspace config
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -191,8 +191,10 @@ func buildWorkspaceNotesBlock(workspace *config.WorkspaceConfig) string {
 	}
 	notes = truncateUTF8SafeWithMarker(notes, maxWorkspaceNotesBytes, workspaceNotesMarker)
 
-	return "\n### Workspace Notes (Maintained by Scout)\n\n" +
-		"These workspace notes are maintained by the scout agent and are advisory context for this worker.\n\n" +
+	// agents.md is multi-writer by design — human bytes plus one fenced region
+	// per agent instance — so the block names no single maintainer.
+	return "\n### Workspace Notes\n\n" +
+		"These workspace notes are maintained by this workspace's agents and are advisory context for this worker.\n\n" +
 		notes + "\n\n"
 }
 

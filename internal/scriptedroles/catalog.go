@@ -70,16 +70,30 @@ type InstanceTemplate struct {
 // ScriptedRole binds a durable role name to the workflow machinery that role
 // runs. Role content remains ordinary editable data; this binding does not.
 type ScriptedRole struct {
-	RoleName            string
-	DisplayName         string
-	WorkflowName        string
-	LeafRunners         []string
-	TrustedLocalCLI     bool
-	Preflight           PreflightPolicy
-	JournalFilename     string
-	AllowedBindingKinds []string
-	DefaultRole         RoleSeed
-	DefaultInstance     *InstanceTemplate
+	RoleName        string
+	DisplayName     string
+	WorkflowName    string
+	LeafRunners     []string
+	TrustedLocalCLI bool
+	Preflight       PreflightPolicy
+	JournalFilename string
+	DefaultRole     RoleSeed
+	DefaultInstance *InstanceTemplate
+}
+
+// BindingTemplate returns the binding shape this role is instantiable with for
+// the given trigger source kind.
+//
+// The template is the single answer to "can this role be instantiated as a K
+// binding": a role without a template for K has no binding id, route key, or
+// concurrency policy to create one from, so there is nothing for a separate
+// allow-list to add. Callers report the missing template as the rejection.
+func (r ScriptedRole) BindingTemplate(kind string) (TriggerBindingTemplate, bool) {
+	kind = strings.TrimSpace(kind)
+	if kind == "" || r.DefaultInstance == nil || r.DefaultInstance.Binding.SourceKind != kind {
+		return TriggerBindingTemplate{}, false
+	}
+	return r.DefaultInstance.Binding, true
 }
 
 //go:embed prompts/scout.md
@@ -87,14 +101,13 @@ var scoutPrompt string
 
 var catalog = map[string]ScriptedRole{
 	ScoutRoleName: {
-		RoleName:            ScoutRoleName,
-		DisplayName:         "Scout",
-		WorkflowName:        ScoutWorkflowName,
-		LeafRunners:         []string{ScoutTaskRunnerEntrypoint},
-		TrustedLocalCLI:     true,
-		Preflight:           Always,
-		JournalFilename:     "history.md",
-		AllowedBindingKinds: []string{"cron"},
+		RoleName:        ScoutRoleName,
+		DisplayName:     "Scout",
+		WorkflowName:    ScoutWorkflowName,
+		LeafRunners:     []string{ScoutTaskRunnerEntrypoint},
+		TrustedLocalCLI: true,
+		Preflight:       Always,
+		JournalFilename: "history.md",
 		DefaultRole: RoleSeed{
 			Kind:   domain.RoleKindWorker,
 			Prompt: scoutPrompt,
@@ -119,13 +132,12 @@ var catalog = map[string]ScriptedRole{
 		},
 	},
 	EpicRunnerRoleName: {
-		RoleName:            EpicRunnerRoleName,
-		DisplayName:         "Epic runner",
-		WorkflowName:        EpicRunnerWorkflowName,
-		LeafRunners:         []string{LocalTaskRunnerEntrypoint, DaytonaTaskRunnerEntrypoint},
-		TrustedLocalCLI:     true,
-		Preflight:           PayloadRunner,
-		AllowedBindingKinds: []string{"event"},
+		RoleName:        EpicRunnerRoleName,
+		DisplayName:     "Epic runner",
+		WorkflowName:    EpicRunnerWorkflowName,
+		LeafRunners:     []string{LocalTaskRunnerEntrypoint, DaytonaTaskRunnerEntrypoint},
+		TrustedLocalCLI: true,
+		Preflight:       PayloadRunner,
 		DefaultRole: RoleSeed{
 			Kind: domain.RoleKindWorker,
 		},
@@ -207,7 +219,6 @@ func IsTrustedLocalCLIRunner(entrypoint string) bool {
 
 func clone(role ScriptedRole) ScriptedRole {
 	role.LeafRunners = append([]string(nil), role.LeafRunners...)
-	role.AllowedBindingKinds = append([]string(nil), role.AllowedBindingKinds...)
 	if role.DefaultInstance != nil {
 		instance := *role.DefaultInstance
 		instance.Binding.ExcludedActors = append([]string(nil), role.DefaultInstance.Binding.ExcludedActors...)

@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -159,9 +158,8 @@ type agentServiceResponse struct {
 }
 
 type instantiableScriptedRoleDTO struct {
-	RoleName            string   `json:"roleName"`
-	DisplayName         string   `json:"displayName"`
-	AllowedBindingKinds []string `json:"allowedBindingKinds"`
+	RoleName    string `json:"roleName"`
+	DisplayName string `json:"displayName"`
 }
 
 func (m *Module) listInstantiableScriptedRoles(w http.ResponseWriter, r *http.Request) {
@@ -171,13 +169,14 @@ func (m *Module) listInstantiableScriptedRoles(w http.ResponseWriter, r *http.Re
 	}
 	roles := make([]instantiableScriptedRoleDTO, 0)
 	for _, role := range scriptedroles.All() {
-		if !slices.Contains(role.AllowedBindingKinds, trigger.CronSourceKind) {
+		// This endpoint offers roles the cron create path can actually build,
+		// so having a cron binding template is the whole membership test.
+		if _, ok := role.BindingTemplate(trigger.CronSourceKind); !ok {
 			continue
 		}
 		roles = append(roles, instantiableScriptedRoleDTO{
-			RoleName:            role.RoleName,
-			DisplayName:         role.DisplayName,
-			AllowedBindingKinds: role.AllowedBindingKinds,
+			RoleName:    role.RoleName,
+			DisplayName: role.DisplayName,
 		})
 	}
 	handler.WriteJSON(w, http.StatusOK, roles)
@@ -204,7 +203,8 @@ func (m *Module) createAgentService(w http.ResponseWriter, r *http.Request) {
 	svc, _, err := agentprovision.CreateAgentInstance(r.Context(), m.store, ws, m.workspaceDir(r.Context(), m.store, ws), agentprovision.AgentInstanceCreate{
 		ServiceID: req.ID, Name: req.Name, RoleName: req.Role, CreatedBy: "user",
 		Binding: agentprovision.AgentInstanceBinding{
-			Kind: "cron", Schedule: req.Binding.Schedule, Timezone: req.Binding.Timezone, Enabled: enabled,
+			Kind: trigger.CronSourceKind, Schedule: req.Binding.Schedule,
+			Timezone: req.Binding.Timezone, Enabled: enabled,
 		},
 	})
 	if err != nil {
@@ -391,6 +391,7 @@ type agentServiceJournalResponse struct {
 type taskRunDTO struct {
 	TaskRunID           string               `json:"taskRunId"`
 	TaskID              string               `json:"taskId"`
+	TaskTitle           string               `json:"taskTitle,omitempty"`
 	Status              domain.TaskRunStatus `json:"status"`
 	Runner              string               `json:"runner"`
 	ErrorClass          string               `json:"errorClass,omitempty"`
@@ -564,7 +565,8 @@ func (m *Module) listAgentServiceRunTasks(w http.ResponseWriter, r *http.Request
 			continue
 		}
 		items = append(items, taskRunDTO{
-			TaskRunID: taskRun.TaskRunID, TaskID: taskRun.TaskID, Status: taskRun.Status,
+			TaskRunID: taskRun.TaskRunID, TaskID: taskRun.TaskID,
+			TaskTitle: taskRunDeclaredTitle(taskRun), Status: taskRun.Status,
 			Runner: taskRunRunnerLabel(taskRun), ErrorClass: taskRun.ErrorClass,
 			StartedAt: taskRun.StartedAt, FinishedAt: taskRun.FinishedAt,
 			LogsAvailable:       taskRun.LogsRef != "",
@@ -572,6 +574,36 @@ func (m *Module) listAgentServiceRunTasks(w http.ResponseWriter, r *http.Request
 		})
 	}
 	handler.WriteJSON(w, http.StatusOK, dto.NewListResponse(items, len(items)))
+}
+
+// maxDeclaredTaskTitleLen bounds a runner-supplied title so a malformed input
+// payload cannot push an unbounded string into every run-panel row.
+const maxDeclaredTaskTitleLen = 200
+
+// taskRunDeclaredTitle returns the display title a requester put in the task
+// input, if any.
+//
+// TaskID is overloaded: issue-driven runs set it to the issue id, while
+// scripted-role runs (the scout's "scout-analyze"/"scout-write") set it to a
+// phase label. The run panel used to resolve every TaskID through the issue
+// API to find a title, which meant a guaranteed 404 per phase row. A requester
+// that knows its own phase names declares them here instead, and the client
+// only falls back to an issue lookup when no title was declared.
+func taskRunDeclaredTitle(run *domain.TaskRun) string {
+	if run == nil || len(run.Input) == 0 {
+		return ""
+	}
+	var input struct {
+		Title string `json:"title"`
+	}
+	if err := json.Unmarshal(run.Input, &input); err != nil {
+		return ""
+	}
+	title := strings.TrimSpace(input.Title)
+	if len(title) > maxDeclaredTaskTitleLen {
+		return title[:maxDeclaredTaskTitleLen]
+	}
+	return title
 }
 
 func taskRunRunnerLabel(run *domain.TaskRun) string {

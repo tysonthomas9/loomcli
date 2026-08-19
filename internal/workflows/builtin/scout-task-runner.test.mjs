@@ -35,7 +35,6 @@ const {
   resolveBackend,
   resolveAgentServiceID,
   resolveWorkspaceRoot,
-  rewriteAgentFence,
   run,
   scoutFencedContent,
 } = await import(pathToFileURL(stagedSource).href);
@@ -233,7 +232,10 @@ describe("write phase", () => {
     assert.ok(history.includes("Warnings:\n- none"));
   });
 
-  it("stages regeneration while preserving human edits byte-identically", async () => {
+  // The leaf stages only its own fenced block; agentstate.MergePendingFence
+  // (Go) is the single merge implementation, so the shared file is untouched
+  // until approve runs.
+  it("stages only this instance's block and never touches the approved file", async () => {
     const root = makeDir("ws");
     await writeRun(root, { agentsMd: "first generation", historyEntry: {} });
     const generated = fs.readFileSync(path.join(root, "agents.md"), "utf8");
@@ -246,10 +248,11 @@ describe("write phase", () => {
     assert.equal(write.agentsMdMode, "pending");
     assert.equal(fs.readFileSync(path.join(root, "agents.md"), "utf8"), humanTop + generated + humanBottom);
     const pending = fs.readFileSync(path.join(root, ".loom", "agents", "scout", "agents.md.pending"), "utf8");
-    assert.ok(pending.startsWith(humanTop));
-    assert.ok(pending.endsWith(humanBottom));
+    assert.ok(pending.startsWith("<!-- loom:agent:scout:begin -->"));
+    assert.ok(pending.trimEnd().endsWith("<!-- loom:agent:scout:end -->"));
     assert.ok(pending.includes("second generation"));
     assert.equal(pending.includes("first generation"), false);
+    assert.equal(pending.includes(humanTop), false);
   });
 
   it("stages a namespaced fence beside a human-owned file", async () => {
@@ -265,8 +268,8 @@ describe("write phase", () => {
     const pending = fs.readFileSync(pendingPath, "utf8");
     assert.equal(write.pendingAgentsMdPath, pendingPath);
     assert.equal(write.historyPath, path.join(root, ".loom", "agents", "scout-west", "history.md"));
-    assert.ok(pending.startsWith(approved));
-    assert.ok(pending.includes("<!-- loom:agent:scout-west:begin -->"));
+    assert.ok(pending.startsWith("<!-- loom:agent:scout-west:begin -->"));
+    assert.equal(pending.includes(approved), false);
     assert.ok(pending.includes("west content"));
     assert.equal(fs.existsSync(write.historyPath), true);
     assert.equal(fs.existsSync(path.join(root, ".loom", "agents", "scout", "agents.md.pending")), false);
@@ -281,16 +284,6 @@ describe("write phase", () => {
     assert.equal(fs.existsSync(path.join(root, ".loom", "agents")), false);
   });
 
-  it("rewrites one instance fence while byte-preserving another instance region", () => {
-    const other = "<!-- loom:agent:scout-east:begin -->\nEAST\r\nbytes\n<!-- loom:agent:scout-east:end -->";
-    const before = "human-prefix\n" + other + "\nhuman-middle\n<!-- loom:agent:scout-west:begin -->\nold\n<!-- loom:agent:scout-west:end -->\nhuman-suffix";
-    const rewritten = rewriteAgentFence(before, "scout-west", "new west");
-    assert.ok(rewritten.includes("new west"));
-    assert.equal(rewritten.includes("\nold\n"), false);
-    assert.equal(rewritten.slice(rewritten.indexOf(other), rewritten.indexOf(other) + other.length), other);
-    assert.ok(rewritten.startsWith("human-prefix\n"));
-    assert.ok(rewritten.endsWith("\nhuman-suffix"));
-  });
 
   it("renames the legacy default fence on first write and stages the new generation", async () => {
     const root = makeDir("ws-legacy");
@@ -318,17 +311,6 @@ describe("write phase", () => {
     assert.equal(fs.existsSync(path.join(root, ".loom", "agents", "scout", "agents.md.pending")), false);
   });
 
-  it("keeps the first fence pair and removes duplicate begin regions on rewrite", () => {
-    const begin = "<!-- loom:agent:scout-west:begin -->";
-    const end = "<!-- loom:agent:scout-west:end -->";
-    const other = "<!-- loom:agent:scout-east:begin -->\neast exact\n<!-- loom:agent:scout-east:end -->";
-    const existing = "head\n" + begin + "\nfirst old\n" + end + "\nbetween\n" + begin + "\nduplicate old\n" + end + "\n" + other + "\ntail";
-    const rewritten = rewriteAgentFence(existing, "scout-west", "winner");
-    assert.equal(rewritten.split(begin).length - 1, 1);
-    assert.equal(rewritten.includes("first old"), false);
-    assert.equal(rewritten.includes("duplicate old"), false);
-    assert.ok(rewritten.includes(other));
-  });
 
   it("appends run sections and journals zero-repo runs", async () => {
     const root = makeDir("ws");

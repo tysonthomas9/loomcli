@@ -14,18 +14,7 @@ export type RoleEditableReason =
   | "unreadable"
   | "external";
 
-export interface RoleMetadataDTO {
-  name: string;
-  description: string;
-  kind: "worker" | "interactive";
-  sourceKind: RoleSourceKind;
-  editable: boolean;
-  editableReason: RoleEditableReason;
-  updatedAt: string;
-}
-
 export interface RolePromptDTO {
-  role: RoleMetadataDTO;
   sourceKind: RoleSourceKind;
   sourceBody: string;
   sourceError?: string;
@@ -40,12 +29,6 @@ export interface UpdateRolePromptRequest {
   expectedRevision: string;
 }
 
-interface ListSuccess {
-  success: true;
-  data: RoleMetadataDTO[];
-  total: number;
-}
-
 interface ItemSuccess {
   success: true;
   data: RolePromptDTO;
@@ -57,17 +40,6 @@ interface Failure {
   code?: string;
 }
 
-export async function listRoles(
-  workspaceId: string,
-): Promise<RoleMetadataDTO[]> {
-  const response = await get<ListSuccess | Failure>(
-    wsUrl(workspaceId, "/roles"),
-  );
-  if (!response.success) {
-    throw new ApiError(0, response.error, response);
-  }
-  return response.data;
-}
 
 export async function getRole(
   workspaceId: string,

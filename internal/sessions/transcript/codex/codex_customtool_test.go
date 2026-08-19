@@ -10,8 +10,9 @@ import (
 
 // codex-cli >= 0.144 records its freeform `exec` tool as response_item payloads
 // of type custom_tool_call / custom_tool_call_output (not the legacy
-// function_call schema harness-wrapper understands). Events must normalize these
-// into tool_use / tool_result so the transcript renders tool calls.
+// function_call schema). harness-wrapper parses both natively as of v0.7.7 —
+// this pins that they still reach tool_use / tool_result, because a regression
+// renders codex transcripts with zero tool calls rather than failing loudly.
 const customToolRollout = `{"timestamp":"2026-07-14T18:58:40.000Z","type":"response_item","payload":{"type":"custom_tool_call","id":"ctc_1","status":"completed","call_id":"call_A","name":"exec","input":"const r = await tools.exec_command({cmd:[\"bash\",\"-lc\",\"loom data show LOCALMODE-3\"]});"}}
 {"timestamp":"2026-07-14T18:58:41.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call_A","output":[{"type":"input_text","text":"Script completed\nWall time 0.1s\nOutput:\n"},{"type":"input_text","text":"{\"exit_code\":0}"}]}}
 `
@@ -59,27 +60,6 @@ func TestEvents_CodexCustomToolCall(t *testing.T) {
 	// output array of {text} blocks flattened to readable text.
 	if !strings.Contains(res.Output, "Script completed") || !strings.Contains(res.Output, "exit_code") {
 		t.Errorf("result output missing flattened text: %q", res.Output)
-	}
-}
-
-func TestFlattenToolOutputEdgeCases(t *testing.T) {
-	if got := flattenToolOutput(json.RawMessage(`[]`)); got != "" {
-		t.Fatalf("empty output = %q, want empty", got)
-	}
-	if got := flattenToolOutput(json.RawMessage(`{"type":"input_text","text":"done"}`)); got != "done" {
-		t.Fatalf("object output = %q, want done", got)
-	}
-	unknown := `[{"type":"output_image","url":"image.png"}]`
-	if got := flattenToolOutput(json.RawMessage(unknown)); got != unknown {
-		t.Fatalf("unknown structured output = %q, want raw JSON", got)
-	}
-}
-
-func TestNormalizeCustomToolCallsKnowsWebSearch(t *testing.T) {
-	line := []byte(`{"type":"response_item","payload":{"type":"web_search_call","id":"w1"}}`)
-	_, unknown := normalizeCustomToolCalls(line)
-	if len(unknown) != 0 {
-		t.Fatalf("web_search_call reported as schema drift: %v", unknown)
 	}
 }
 

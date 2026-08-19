@@ -36,8 +36,8 @@ func validateCreateIssueCore(b *validationBuilder, r *CreateIssueRequest) {
 	} else if !entity.IssueType(r.IssueType).IsValid() {
 		b.add("issue_type", "must be one of: bug, feature, task, epic, chore")
 	}
-	if r.Priority < 0 || r.Priority > 4 {
-		b.add("priority", fmt.Sprintf("must be between 0 and 4 (got %d)", r.Priority))
+	if r.Priority < MinPriority || r.Priority > MaxPriority {
+		b.add("priority", fmt.Sprintf("must be between %d and %d (got %d)", MinPriority, MaxPriority, r.Priority))
 	}
 	if r.Status != "" && r.Status != "open" && r.Status != "deferred" {
 		b.add("status", "must be open or deferred")
@@ -99,8 +99,8 @@ func (r *PatchIssueRequest) Validate() error {
 
 	// priority: if set, must be 0-4
 	if r.Priority != nil {
-		if *r.Priority < 0 || *r.Priority > 4 {
-			b.add("priority", fmt.Sprintf("must be between 0 and 4 (got %d)", *r.Priority))
+		if *r.Priority < MinPriority || *r.Priority > MaxPriority {
+			b.add("priority", fmt.Sprintf("must be between %d and %d (got %d)", MinPriority, MaxPriority, *r.Priority))
 		}
 	}
 

@@ -85,16 +85,20 @@ function TaskLogRow({
     enabled: expanded && transcriptCouldExist && selectedView === "pretty",
   });
   const taskDuration = duration(task.startedAt, task.finishedAt);
+  const declaredTitle = task.taskTitle?.trim() ?? "";
   const taskTitle =
+    declaredTitle ||
     cachedTaskTitle?.trim() ||
     fetchedTaskTitle.trim() ||
     task.taskId ||
     task.taskRunId;
   const runnerName = task.runner || "Unknown runner";
 
+  // Only issue-driven runs set taskId to an issue id. A run that declared its
+  // own title, or whose issue is already in the store, needs no lookup.
   useEffect(() => {
     setFetchedTaskTitle("");
-    if (!task.taskId || cachedTaskTitle?.trim()) return;
+    if (!task.taskId || declaredTitle || cachedTaskTitle?.trim()) return;
 
     let cancelled = false;
     getIssue(workspaceId, task.taskId)
@@ -107,7 +111,7 @@ function TaskLogRow({
     return () => {
       cancelled = true;
     };
-  }, [cachedTaskTitle, task.taskId, workspaceId]);
+  }, [cachedTaskTitle, declaredTitle, task.taskId, workspaceId]);
 
   useEffect(() => {
     if (expanded && liveRefreshTick > 0 && live) {

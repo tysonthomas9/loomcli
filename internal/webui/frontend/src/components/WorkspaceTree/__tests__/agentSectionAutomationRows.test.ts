@@ -4,7 +4,6 @@ import type { AgentServiceDTO } from "@/api/agentServices";
 import type { LoomAgentStatus } from "@/types";
 
 import {
-  buildAgentAutomationRows,
   withoutDurableAgentProjections,
 } from "../agentSectionAutomationRows";
 
@@ -39,19 +38,6 @@ function service(id: string, name: string): AgentServiceDTO {
 }
 
 describe("agent-section autonomous rows", () => {
-  it("constructs each row from the DTO's embedded bindings", () => {
-    const scout = service("scout", "Scout");
-
-    expect(buildAgentAutomationRows([scout])).toEqual({
-      durableRecords: [
-        {
-          id: "scout",
-          record: scout,
-          bindings: scout.bindings,
-        },
-      ],
-    });
-  });
 
   it("removes roster projections matching durable record ids or names", () => {
     const agents = [

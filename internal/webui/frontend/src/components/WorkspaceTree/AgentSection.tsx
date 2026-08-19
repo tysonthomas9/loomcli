@@ -36,7 +36,6 @@ import { wsGet, wsSet } from "@/utils/scopedStorage";
 
 import styles from "./AgentSection.module.css";
 import {
-  buildAgentAutomationRows,
   withoutDurableAgentProjections,
 } from "./agentSectionAutomationRows";
 import { AgentContextMenu } from "./menus/AgentContextMenu";
@@ -89,10 +88,6 @@ export function AgentSection({
     [allAgentServices, prsView],
   );
   const showAutonomousGroup = !prsView && Boolean(workspaceId);
-  const { durableRecords } = useMemo(
-    () => buildAgentAutomationRows(agentServices),
-    [agentServices],
-  );
 
   // Merge fleet agents with workspace config agents.
   // Config agents that aren't yet running appear as "configured" placeholders.
@@ -197,7 +192,7 @@ export function AgentSection({
 
   if (
     agents.length === 0 &&
-    durableRecords.length === 0 &&
+    agentServices.length === 0 &&
     !addClick &&
     !showAutonomousGroup
   )
@@ -250,24 +245,24 @@ export function AgentSection({
             <div className={styles.groupHeader}>
               <span>Autonomous</span>
             </div>
-            {durableRecords.map((row) => {
-              const name = row.record.name.trim() || row.id;
-              const cadence = agentServiceCadenceLabel(row.record);
-              const tooltip = agentServiceDotTooltip(row.record);
+            {agentServices.map((record) => {
+              const name = record.name.trim() || record.id;
+              const cadence = agentServiceCadenceLabel(record);
+              const tooltip = agentServiceDotTooltip(record);
               return (
                 <button
                   type="button"
-                  key={row.id}
+                  key={record.id}
                   className={styles.workflowRow}
-                  data-testid={`autonomous-agent-${row.id}`}
-                  data-selected={selectedAgentName === row.id || undefined}
+                  data-testid={`autonomous-agent-${record.id}`}
+                  data-selected={selectedAgentName === record.id || undefined}
                   aria-label={`${name}, ${cadence}, ${tooltip}`}
-                  onClick={() => onAgentClick?.(row.id)}
+                  onClick={() => onAgentClick?.(record.id)}
                   title={tooltip}
                 >
                   <span
                     className={styles.workflowDot}
-                    data-state={agentServiceDotState(row.record)}
+                    data-state={agentServiceDotState(record)}
                     aria-hidden="true"
                   />
                   <span className={styles.workflowText}>

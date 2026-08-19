@@ -27,19 +27,12 @@ export type { UseTaskSessionsResult } from "./useTaskSessions";
 export {
   useTerminalFont,
   applyTerminalFont,
-  TERMINAL_FONT_CHANGE_EVENT,
   TERMINAL_FONT_FAMILY_VAR,
   TERMINAL_FONT_SIZE_VAR,
   DEFAULT_FONT_FAMILY,
   DEFAULT_FONT_SIZE,
-  FONT_FAMILY_OPTIONS,
-  FONT_SIZE_OPTIONS,
-  CUSTOM_FONT_SENTINEL,
 } from "./useTerminalFont";
-export type {
-  UseTerminalFontReturn,
-  TerminalFontChangeDetail,
-} from "./useTerminalFont";
+export type { UseTerminalFontReturn } from "./useTerminalFont";
 
 export { useTerminalMetadata } from "./useTerminalMetadata";
 export type { UseTerminalMetadataReturn } from "./useTerminalMetadata";

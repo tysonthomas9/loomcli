@@ -22,7 +22,6 @@ export interface AgentServiceBindingDTO {
 export interface InstantiableScriptedRoleDTO {
   roleName: string;
   displayName: string;
-  allowedBindingKinds: string[];
 }
 
 export interface CreateAgentServiceRequest {
@@ -135,6 +134,8 @@ export type TaskRunStatus =
 export interface TaskRunDTO {
   taskRunId: string;
   taskId: string;
+  /** Display title declared by the requester when taskId is not an issue id. */
+  taskTitle?: string;
   status: TaskRunStatus;
   runner: string;
   errorClass?: string;

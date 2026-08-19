@@ -143,8 +143,8 @@ describe("UsageDashboard", () => {
 
     // Total cost
     expect(screen.getByText("$12.50")).toBeInTheDocument();
-    // Total tokens: 50000 + 30000 = 80000 => 80K
-    expect(screen.getByText("80K")).toBeInTheDocument();
+    // Total tokens: 50000 + 30000 = 80000 => 80.0K (shared formatTokens)
+    expect(screen.getByText("80.0K")).toBeInTheDocument();
     // Session count
     expect(screen.getByText("5")).toBeInTheDocument();
     // Avg cost: 12.5 / 5 = 2.50

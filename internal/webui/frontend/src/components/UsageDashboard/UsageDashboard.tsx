@@ -9,6 +9,7 @@ import { useState, useMemo } from "react";
 
 import { useUsage } from "@/hooks";
 import type { UsageResponse, UsageParams } from "@/types";
+import { formatCost, formatTokens } from "@/utils/sessionUsage";
 
 import styles from "./UsageDashboard.module.css";
 
@@ -27,16 +28,6 @@ function formatDate(iso: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-function formatCost(cost: number): string {
-  return `$${cost.toFixed(2)}`;
-}
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${Math.round(n / 1_000)}K`;
-  return String(n);
 }
 
 function dateRangeToParams(range: DateRange): UsageParams {

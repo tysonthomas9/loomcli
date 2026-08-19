@@ -579,7 +579,7 @@ func TestBuildWorkspaceNotesBlock(t *testing.T) {
 		}
 		got := buildWorkspaceNotesBlock(&WorkspaceConfig{Path: root})
 		for _, want := range []string{
-			"### Workspace Notes (Maintained by Scout)",
+			"### Workspace Notes",
 			"advisory context for this worker",
 			"Use the shared staging environment.",
 		} {
@@ -658,7 +658,7 @@ func TestGenerateWorkerPrompts_WorkspaceNotes(t *testing.T) {
 	}
 	for name, prompt := range withNotes {
 		t.Run(name+" includes notes", func(t *testing.T) {
-			for _, want := range []string{"Workspace Notes (Maintained by Scout)", "Prefer the shared integration harness."} {
+			for _, want := range []string{"Workspace Notes", "Prefer the shared integration harness."} {
 				if !strings.Contains(prompt, want) {
 					t.Errorf("prompt missing workspace notes %q:\n%s", want, prompt)
 				}

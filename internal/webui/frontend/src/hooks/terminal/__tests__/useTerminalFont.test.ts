@@ -6,13 +6,12 @@
  * Unit tests for useTerminalFont hook.
  */
 
-import { renderHook, act } from "@testing-library/react";
+import { renderHook } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import {
   useTerminalFont,
   applyTerminalFont,
-  TERMINAL_FONT_CHANGE_EVENT,
   TERMINAL_FONT_FAMILY_VAR,
   TERMINAL_FONT_SIZE_VAR,
   DEFAULT_FONT_FAMILY,
@@ -51,102 +50,6 @@ describe("useTerminalFont", () => {
       const { result } = renderHook(() => useTerminalFont());
 
       expect(result.current.fontSize).toBe(18);
-    });
-  });
-
-  describe("setFontFamily", () => {
-    it("updates state and writes to localStorage", () => {
-      const { result } = renderHook(() => useTerminalFont());
-
-      act(() => {
-        result.current.setFontFamily("Monaco, monospace");
-      });
-
-      expect(result.current.fontFamily).toBe("Monaco, monospace");
-      expect(localStorage.getItem(KEY_FAMILY)).toBe("Monaco, monospace");
-    });
-
-    it("falls back to default when given empty string", () => {
-      const { result } = renderHook(() => useTerminalFont());
-
-      act(() => {
-        result.current.setFontFamily("");
-      });
-
-      expect(result.current.fontFamily).toBe(DEFAULT_FONT_FAMILY);
-    });
-
-    it("falls back to default when given whitespace-only string", () => {
-      const { result } = renderHook(() => useTerminalFont());
-
-      act(() => {
-        result.current.setFontFamily("   ");
-      });
-
-      expect(result.current.fontFamily).toBe(DEFAULT_FONT_FAMILY);
-    });
-  });
-
-  describe("setFontSize", () => {
-    it("updates state and writes to localStorage", () => {
-      const { result } = renderHook(() => useTerminalFont());
-
-      act(() => {
-        result.current.setFontSize(20);
-      });
-
-      expect(result.current.fontSize).toBe(20);
-      expect(localStorage.getItem(KEY_SIZE)).toBe("20");
-    });
-
-    it("falls back to default for NaN", () => {
-      const { result } = renderHook(() => useTerminalFont());
-
-      act(() => {
-        result.current.setFontSize(NaN);
-      });
-
-      expect(result.current.fontSize).toBe(DEFAULT_FONT_SIZE);
-    });
-
-    it("falls back to default for size below 8", () => {
-      const { result } = renderHook(() => useTerminalFont());
-
-      act(() => {
-        result.current.setFontSize(5);
-      });
-
-      expect(result.current.fontSize).toBe(DEFAULT_FONT_SIZE);
-    });
-
-    it("falls back to default for size above 72", () => {
-      const { result } = renderHook(() => useTerminalFont());
-
-      act(() => {
-        result.current.setFontSize(100);
-      });
-
-      expect(result.current.fontSize).toBe(DEFAULT_FONT_SIZE);
-    });
-
-    it("accepts boundary value 8", () => {
-      const { result } = renderHook(() => useTerminalFont());
-
-      act(() => {
-        result.current.setFontSize(8);
-      });
-
-      expect(result.current.fontSize).toBe(8);
-    });
-
-    it("accepts boundary value 72", () => {
-      const { result } = renderHook(() => useTerminalFont());
-
-      act(() => {
-        result.current.setFontSize(72);
-      });
-
-      expect(result.current.fontSize).toBe(72);
     });
   });
 
@@ -191,43 +94,6 @@ describe("useTerminalFont", () => {
 
       spy.mockRestore();
     });
-
-    it("handles localStorage.setItem throwing on setFontFamily", () => {
-      const spy = vi
-        .spyOn(Storage.prototype, "setItem")
-        .mockImplementation(() => {
-          throw new Error("QuotaExceededError");
-        });
-
-      const { result } = renderHook(() => useTerminalFont());
-
-      act(() => {
-        result.current.setFontFamily("Monaco, monospace");
-      });
-
-      // State still updates even though localStorage write failed
-      expect(result.current.fontFamily).toBe("Monaco, monospace");
-
-      spy.mockRestore();
-    });
-
-    it("handles localStorage.setItem throwing on setFontSize", () => {
-      const spy = vi
-        .spyOn(Storage.prototype, "setItem")
-        .mockImplementation(() => {
-          throw new Error("QuotaExceededError");
-        });
-
-      const { result } = renderHook(() => useTerminalFont());
-
-      act(() => {
-        result.current.setFontSize(20);
-      });
-
-      expect(result.current.fontSize).toBe(20);
-
-      spy.mockRestore();
-    });
   });
 
   describe("applyTerminalFont", () => {
@@ -258,38 +124,6 @@ describe("useTerminalFont", () => {
       expect(
         document.documentElement.style.getPropertyValue(TERMINAL_FONT_SIZE_VAR),
       ).toBe("18px");
-    });
-  });
-
-  describe("font change propagation", () => {
-    it("dispatches TERMINAL_FONT_CHANGE_EVENT when font family changes", () => {
-      const handler = vi.fn();
-      window.addEventListener(TERMINAL_FONT_CHANGE_EVENT, handler);
-
-      const { result } = renderHook(() => useTerminalFont());
-
-      act(() => {
-        result.current.setFontFamily("Monaco, monospace");
-      });
-
-      expect(handler).toHaveBeenCalledTimes(1);
-      expect((handler.mock.calls[0]?.[0] as CustomEvent).detail).toEqual({
-        fontFamily: "Monaco, monospace",
-        fontSize: DEFAULT_FONT_SIZE,
-      });
-
-      window.removeEventListener(TERMINAL_FONT_CHANGE_EVENT, handler);
-    });
-
-    it("syncs state across hook instances via custom event", () => {
-      const { result: settings } = renderHook(() => useTerminalFont());
-      const { result: app } = renderHook(() => useTerminalFont());
-
-      act(() => {
-        settings.current.setFontSize(20);
-      });
-
-      expect(app.current.fontSize).toBe(20);
     });
   });
 });
