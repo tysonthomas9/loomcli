@@ -21,6 +21,18 @@ type DaemonSupervisorData struct {
 	StartedAt     time.Time          `json:"started_at"`
 	UptimeSeconds float64            `json:"uptime_seconds"`
 	Agents        []DaemonAgentEntry `json:"agents"`
+	// ClaimHold is the workspace-level refusal to START new work, when one is
+	// active. Carried here so the FE banner costs no extra socket round trip.
+	ClaimHold *ClaimHoldEntry `json:"claim_hold,omitempty"`
+}
+
+// ClaimHoldEntry mirrors cli/daemon/supervisor.ClaimHold without importing cli.
+type ClaimHoldEntry struct {
+	Held      bool      `json:"held"`
+	Actor     string    `json:"actor"`
+	Reason    string    `json:"reason"`
+	Since     time.Time `json:"since"`
+	ExpiresAt time.Time `json:"expires_at,omitempty"`
 }
 
 // DaemonAgentEntry represents a single supervised agent in the supervisor response.
@@ -45,6 +57,7 @@ type DaemonAgentEntry struct {
 	NoWorkCount    int       `json:"no_work_count,omitempty"`
 	BackoffUntil   time.Time `json:"backoff_until,omitempty"`
 	RemoteBranch   string    `json:"remote_branch,omitempty"`
+	ClaimsGated    bool      `json:"claims_gated,omitempty"` // cycling but gated by an active claim hold
 }
 
 // AgentQueueEntry represents a single scored issue in the agent queue response.

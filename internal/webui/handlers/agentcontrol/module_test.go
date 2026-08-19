@@ -19,7 +19,10 @@ func TestModule_RegisterRoutes(t *testing.T) {
 	mockInputFn := func(op, agentName string, args json.RawMessage) (*AgentControlResult, error) {
 		return &AgentControlResult{Success: true, Data: json.RawMessage("[]")}, nil
 	}
-	mod := NewModule(mockFn, mockInputFn)
+	mockHoldFn := func(op string, args json.RawMessage) (*AgentControlResult, error) {
+		return &AgentControlResult{Success: true, Data: json.RawMessage(`{"hold":null,"running":[],"gated":0}`)}, nil
+	}
+	mod := NewModule(mockFn, mockInputFn, mockHoldFn)
 
 	mux := http.NewServeMux()
 	mod.Register(mux)
@@ -35,6 +38,9 @@ func TestModule_RegisterRoutes(t *testing.T) {
 		{"GET", "/api/workspaces/test-ws/pending-inputs"},
 		{"GET", "/api/workspaces/test-ws/agents/falcon/input"},
 		{"GET", "/api/workspaces/test-ws/agents"},
+		{"GET", "/api/workspaces/test-ws/claims/hold"},
+		{"POST", "/api/workspaces/test-ws/claims/hold"},
+		{"DELETE", "/api/workspaces/test-ws/claims/hold"},
 	}
 
 	for _, rt := range routes {
@@ -58,7 +64,10 @@ func TestModule_WrongMethod_Returns405(t *testing.T) {
 	mockInputFn := func(op, agentName string, args json.RawMessage) (*AgentControlResult, error) {
 		return &AgentControlResult{Success: true, Data: json.RawMessage("[]")}, nil
 	}
-	mod := NewModule(mockFn, mockInputFn)
+	mockHoldFn := func(op string, args json.RawMessage) (*AgentControlResult, error) {
+		return &AgentControlResult{Success: true, Data: json.RawMessage(`{"hold":null,"running":[],"gated":0}`)}, nil
+	}
+	mod := NewModule(mockFn, mockInputFn, mockHoldFn)
 
 	mux := http.NewServeMux()
 	mod.Register(mux)

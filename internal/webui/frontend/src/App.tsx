@@ -51,6 +51,7 @@ import { AppLayout } from "@/components/AppLayout/AppLayout";
 import { WorkspaceBreadcrumb } from "@/components/WorkspaceBreadcrumb/WorkspaceBreadcrumb";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton/LoadingSkeleton";
 import { StaleDataBanner } from "@/components/StaleDataBanner/StaleDataBanner";
+import { ClaimHoldBanner } from "@/components/ClaimHoldBanner";
 import { ToastContainer } from "@/components/Toast/ToastContainer";
 import { SearchInput } from "@/components/search/SearchInput";
 import { SearchScopeIndicator } from "@/components/search/SearchScopeIndicator";
@@ -1405,6 +1406,7 @@ function App() {
     >
       <SearchTermProvider value={activeSearchTerm}>
         <AppLayout
+          banner={<ClaimHoldBanner />}
           title={headerTitle}
           onTitleClick={() => navigateToView("kanban")}
           actions={headerActions}
