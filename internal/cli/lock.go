@@ -424,6 +424,30 @@ func ClearStaleLockClaudeSessionID(worktreePath string) error {
 	return err
 }
 
+// ClearStaleLockTaskID clears the interrupted-task remnant from a dead-PID lock.
+// Used by daemon recovery when the remnant task can no longer be claimed (its
+// status left the claimable set, or it was deleted): without this the next
+// supervise cycle re-derives the same task id from the same lock and retries the
+// same doomed claim forever. The carried Claude session id is cleared with it —
+// that session belongs to the abandoned task, and resuming it under a different
+// task would continue the wrong conversation.
+func ClearStaleLockTaskID(worktreePath string) error {
+	err := UpdateLock(worktreePath, func(info *LockInfo) error {
+		if lockfile.IsProcessRunning(info.PID) {
+			return fmt.Errorf("lock belongs to running process (PID %d)", info.PID)
+		}
+		info.TaskID = ""
+		info.TaskTitle = ""
+		info.TaskStartedAt = time.Time{}
+		info.ClaudeSessionID = ""
+		return nil
+	})
+	if os.IsNotExist(err) {
+		return nil // lock already released, nothing to clear
+	}
+	return err
+}
+
 // GetLockStatus returns a human-readable status for a worktree's lock
 // Uses explicit state words: planning, working, done, review, idle
 func GetLockStatus(worktreePath string) string {
