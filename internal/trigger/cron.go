@@ -71,6 +71,20 @@ func loadScheduleLocation(tz string) (*time.Location, error) {
 	return loc, nil
 }
 
+// NextFire returns the first schedule instant strictly after after, evaluated
+// in the schedule timezone. Empty timezone means UTC.
+func NextFire(schedule, timezone string, after time.Time) (time.Time, error) {
+	sched, err := parseCronSchedule(schedule)
+	if err != nil {
+		return time.Time{}, err
+	}
+	loc, err := loadScheduleLocation(timezone)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return sched.Next(after.In(loc)), nil
+}
+
 // CronScheduler is the built-in cron event source for `loom serve`. Each
 // RunOnce sweep lists enabled source_kind=cron bindings and, per binding,
 // fires at most one due tick from the window (lastTick, now] into the normal

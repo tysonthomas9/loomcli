@@ -66,7 +66,7 @@ func New() *Store {
 	drivers, versions, profiles, roles, services, bindings := newCatalogGraph()
 	nodes := newNodeStore()
 	artifacts := newArtifactStore()
-	runs := newDriverRunStore(versions, bindings)
+	runs := newDriverRunStore(versions, bindings, services)
 	steps := newDriverStepStore(runs)
 	taskRuns := newTaskRunStore(runs, steps, artifacts, profiles, nodes)
 	runs.steps = steps
@@ -122,7 +122,7 @@ func newCatalogGraph() (*driverStore, *driverVersionStore, *workerProfileStore, 
 	versions := newDriverVersionStore(drivers)
 	profiles := newWorkerProfileStore()
 	roles := newRoleStore()
-	services := newAgentServiceStore(roles, profiles)
+	services := newAgentServiceStore(roles, profiles, drivers, versions)
 	bindings := newTriggerBindingStore(versions, services)
 	services.bindings = bindings
 	roles.services = services

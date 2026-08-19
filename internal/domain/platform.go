@@ -151,6 +151,8 @@ type AgentService struct {
 	Kind            AgentServiceKind         `json:"kind"`
 	DesiredState    AgentServiceDesiredState `json:"desired_state"`
 	RoleName        string                   `json:"role_name"`
+	DriverID        string                   `json:"driver_id,omitempty"`
+	DriverVersionID string                   `json:"driver_version_id,omitempty"`
 	ProfileName     string                   `json:"profile_name,omitempty"`
 	ScheduleID      string                   `json:"schedule_id,omitempty"`
 	EventSources    []string                 `json:"event_sources,omitempty"`
@@ -163,6 +165,8 @@ type AgentService struct {
 	BudgetPolicy    string                   `json:"budget_policy,omitempty"`
 	StateRef        string                   `json:"state_ref,omitempty"`
 	Metadata        map[string]string        `json:"metadata,omitempty"`
+	CreatedBy       string                   `json:"created_by,omitempty"`
+	DeletedAt       *time.Time               `json:"deleted_at,omitempty"`
 	CreatedAt       time.Time                `json:"created_at"`
 	UpdatedAt       time.Time                `json:"updated_at"`
 }
@@ -394,26 +398,28 @@ func (s DriverRunStatus) IsTerminal() bool {
 }
 
 type DriverRun struct {
-	WorkspaceKey    string            `json:"workspace_key"`
-	RunID           string            `json:"run_id"`
-	DriverID        string            `json:"driver_id"`
-	DriverVersionID string            `json:"driver_version_id"`
-	Entrypoint      string            `json:"entrypoint,omitempty"`
-	SourceKind      string            `json:"source_kind,omitempty"`
-	SourceRef       string            `json:"source_ref,omitempty"`
-	EpicID          string            `json:"epic_id,omitempty"`
-	Status          DriverRunStatus   `json:"status"`
-	NodeID          string            `json:"node_id,omitempty"`
-	LeaseID         string            `json:"lease_id,omitempty"`
-	FencingToken    int64             `json:"fencing_token,omitempty"`
-	IdempotencyKey  string            `json:"idempotency_key,omitempty"`
-	Payload         json.RawMessage   `json:"payload,omitempty"`
-	Output          map[string]string `json:"output,omitempty"`
-	Summary         string            `json:"summary,omitempty"`
-	ErrorClass      string            `json:"error_class,omitempty"`
-	StartedAt       time.Time         `json:"started_at,omitempty"`
-	LastHeartbeat   time.Time         `json:"last_heartbeat,omitempty"`
-	FinishedAt      *time.Time        `json:"finished_at,omitempty"`
+	WorkspaceKey     string            `json:"workspace_key"`
+	RunID            string            `json:"run_id"`
+	DriverID         string            `json:"driver_id"`
+	DriverVersionID  string            `json:"driver_version_id"`
+	Entrypoint       string            `json:"entrypoint,omitempty"`
+	SourceKind       string            `json:"source_kind,omitempty"`
+	SourceRef        string            `json:"source_ref,omitempty"`
+	EpicID           string            `json:"epic_id,omitempty"`
+	TriggerBindingID string            `json:"trigger_binding_id,omitempty"`
+	AgentServiceID   string            `json:"agent_service_id,omitempty"`
+	Status           DriverRunStatus   `json:"status"`
+	NodeID           string            `json:"node_id,omitempty"`
+	LeaseID          string            `json:"lease_id,omitempty"`
+	FencingToken     int64             `json:"fencing_token,omitempty"`
+	IdempotencyKey   string            `json:"idempotency_key,omitempty"`
+	Payload          json.RawMessage   `json:"payload,omitempty"`
+	Output           map[string]string `json:"output,omitempty"`
+	Summary          string            `json:"summary,omitempty"`
+	ErrorClass       string            `json:"error_class,omitempty"`
+	StartedAt        time.Time         `json:"started_at,omitempty"`
+	LastHeartbeat    time.Time         `json:"last_heartbeat,omitempty"`
+	FinishedAt       *time.Time        `json:"finished_at,omitempty"`
 	// Composition + await fields (Phase D). snake_case tags like the rest
 	// of this struct: the fleet-db client decodes v1 responses directly
 	// into DriverRun (tag-identical round-trip, AW5); the driver/watch wire

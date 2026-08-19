@@ -14,12 +14,16 @@ type agentServiceStore struct{ client *Client }
 var _ store.AgentServiceStore = (*agentServiceStore)(nil)
 
 func (s *agentServiceStore) Create(ctx context.Context, in store.AgentServiceCreate) (*domain.AgentService, error) {
+	// FleetDB owns CreatedBy and stamps it from the authenticated request actor;
+	// including created_by here would be rejected by its strict create schema.
 	body := struct {
 		ServiceID       string                          `json:"service_id"`
 		Name            string                          `json:"name,omitempty"`
 		Kind            domain.AgentServiceKind         `json:"kind"`
 		DesiredState    domain.AgentServiceDesiredState `json:"desired_state,omitempty"`
-		RoleName        string                          `json:"role_name"`
+		RoleName        string                          `json:"role_name,omitempty"`
+		DriverID        string                          `json:"driver_id,omitempty"`
+		DriverVersionID string                          `json:"driver_version_id,omitempty"`
 		ProfileName     string                          `json:"profile_name,omitempty"`
 		ScheduleID      string                          `json:"schedule_id,omitempty"`
 		EventSources    []string                        `json:"event_sources,omitempty"`
@@ -38,6 +42,8 @@ func (s *agentServiceStore) Create(ctx context.Context, in store.AgentServiceCre
 		Kind:            in.Kind,
 		DesiredState:    in.DesiredState,
 		RoleName:        in.RoleName,
+		DriverID:        in.DriverID,
+		DriverVersionID: in.DriverVersionID,
 		ProfileName:     in.ProfileName,
 		ScheduleID:      in.ScheduleID,
 		EventSources:    in.EventSources,
@@ -81,6 +87,9 @@ func (s *agentServiceStore) List(ctx context.Context, ws string, filter store.Ag
 	if filter.ProfileName != "" {
 		q.Set("profile_name", filter.ProfileName)
 	}
+	if filter.IncludeDeleted {
+		q.Set("include_deleted", "true")
+	}
 	if filter.Limit > 0 {
 		q.Set("limit", strconv.Itoa(filter.Limit))
 	}
@@ -103,6 +112,8 @@ func (s *agentServiceStore) Update(ctx context.Context, ws, serviceID string, pa
 		Kind            *domain.AgentServiceKind         `json:"kind,omitempty"`
 		DesiredState    *domain.AgentServiceDesiredState `json:"desired_state,omitempty"`
 		RoleName        *string                          `json:"role_name,omitempty"`
+		DriverID        *string                          `json:"driver_id,omitempty"`
+		DriverVersionID *string                          `json:"driver_version_id,omitempty"`
 		ProfileName     *string                          `json:"profile_name,omitempty"`
 		ScheduleID      *string                          `json:"schedule_id,omitempty"`
 		EventSources    *[]string                        `json:"event_sources,omitempty"`
@@ -120,6 +131,8 @@ func (s *agentServiceStore) Update(ctx context.Context, ws, serviceID string, pa
 		Kind:            patch.Kind,
 		DesiredState:    patch.DesiredState,
 		RoleName:        patch.RoleName,
+		DriverID:        patch.DriverID,
+		DriverVersionID: patch.DriverVersionID,
 		ProfileName:     patch.ProfileName,
 		ScheduleID:      patch.ScheduleID,
 		EventSources:    patch.EventSources,

@@ -131,7 +131,18 @@ func (m *Module) createWorkflowRun(w http.ResponseWriter, r *http.Request) {
 	}
 	ws := r.PathValue("ws")
 	name := strings.TrimSpace(r.PathValue("name"))
-	driverID, err := m.resolveWorkflowDriverID(r.Context(), ws, name)
+	driverID := ""
+	agentServiceID := ""
+	if name == workflowdefs.BuiltinScoutWorkflowName {
+		svc, ensureErr := workflowdefs.EnsureScoutAgent(r.Context(), m.store, ws)
+		if ensureErr == nil {
+			driverID = svc.DriverID
+			agentServiceID = svc.ServiceID
+		}
+		err = ensureErr
+	} else {
+		driverID, err = m.resolveWorkflowDriverID(r.Context(), ws, name)
+	}
 	if err != nil {
 		slog.Error("createWorkflowRun: resolveWorkflowDriverID failed", "ws", ws, "workflow", name, "err", err.Error())
 		// A genuine not-found is the ONLY case that is a 404 "workflow not found".
@@ -160,6 +171,7 @@ func (m *Module) createWorkflowRun(w http.ResponseWriter, r *http.Request) {
 		IdempotencyKey: strings.TrimSpace(r.Header.Get("Idempotency-Key")),
 		SourceKind:     "api",
 		SourceRef:      r.URL.Path,
+		AgentServiceID: agentServiceID,
 		Payload:        payload,
 	})
 	if err != nil {

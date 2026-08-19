@@ -10,6 +10,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agents"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentservices"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/driverapi"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/onboarding"
@@ -125,6 +126,7 @@ func (app *Server) buildInfraModules() {
 	if storeBacked {
 		app.connectorDispatcher = app.buildConnectorDispatcher()
 		app.wsModules = append(app.wsModules, agents.NewModule(app.agentSvc, app.hub))
+		app.wsModules = append(app.wsModules, agentservices.NewModule(app.config.Store, app.config.SessionRuntimeDir))
 		app.wsModules = append(app.wsModules, onboarding.NewModule(app.issueSvc, app.agentSvc))
 		app.wsModules = append(app.wsModules, workflows.NewModule(app.config.Store))
 		app.wsModules = append(app.wsModules, webhooks.NewModule(app.config.Store))

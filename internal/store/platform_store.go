@@ -134,6 +134,8 @@ type AgentServiceCreate struct {
 	Kind            domain.AgentServiceKind
 	DesiredState    domain.AgentServiceDesiredState
 	RoleName        string
+	DriverID        string
+	DriverVersionID string
 	ProfileName     string
 	ScheduleID      string
 	EventSources    []string
@@ -146,14 +148,16 @@ type AgentServiceCreate struct {
 	BudgetPolicy    string
 	StateRef        string
 	Metadata        map[string]string
+	CreatedBy       string
 }
 
 type AgentServiceFilter struct {
-	Kind         domain.AgentServiceKind
-	DesiredState domain.AgentServiceDesiredState
-	RoleName     string
-	ProfileName  string
-	Limit        int
+	Kind           domain.AgentServiceKind
+	DesiredState   domain.AgentServiceDesiredState
+	RoleName       string
+	ProfileName    string
+	IncludeDeleted bool
+	Limit          int
 }
 
 type AgentServiceUpdate struct {
@@ -161,6 +165,8 @@ type AgentServiceUpdate struct {
 	Kind            *domain.AgentServiceKind
 	DesiredState    *domain.AgentServiceDesiredState
 	RoleName        *string
+	DriverID        *string
+	DriverVersionID *string
 	ProfileName     *string
 	ScheduleID      *string
 	EventSources    *[]string
@@ -439,18 +445,25 @@ type DriverRunCreate struct {
 	// (Phase D composition). Empty means detached/root — no cancel cascade.
 	// Orthogonal to EpicID: a run may carry an epic, a parent, both, or
 	// neither.
-	ParentRunID    string
-	IdempotencyKey string
-	Payload        json.RawMessage
+	ParentRunID string
+	// TriggerBindingID and AgentServiceID attribute the run to the durable
+	// trigger and agent identities that admitted it. Both are optional for
+	// ordinary manual runs.
+	TriggerBindingID string
+	AgentServiceID   string
+	IdempotencyKey   string
+	Payload          json.RawMessage
 }
 
 type DriverRunFilter struct {
-	DriverID        string
-	DriverVersionID string
-	EpicID          string
-	NodeID          string
-	Status          domain.DriverRunStatus
-	Limit           int
+	DriverID         string
+	DriverVersionID  string
+	EpicID           string
+	NodeID           string
+	TriggerBindingID string
+	AgentServiceID   string
+	Status           domain.DriverRunStatus
+	Limit            int
 }
 
 type DriverRunFinish struct {

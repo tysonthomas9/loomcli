@@ -34,6 +34,7 @@ import { useStore } from "zustand";
 import { ErrorBoundary, LoadingSkeleton } from "@/components";
 import { AgentDetailMain } from "@/components/AgentDetailMain/AgentDetailMain";
 import { GitTab } from "@/components/AgentDetailPanel";
+import { AgentServiceDetail } from "@/components/AgentServiceDetail";
 import { AgentWorkPanel } from "@/components/AgentWorkPanel/AgentWorkPanel";
 import { PanelWidthResizeHandle } from "@/components/AgentWorkPanel/PanelWidthResizeHandle";
 import {
@@ -52,7 +53,11 @@ import {
   useWorkspaceViewData,
 } from "@/contexts/WorkspaceViewContext";
 import { useAgentStoreInstance } from "@/hooks";
-import { useLocalSettings, useWorkspaceContext } from "@/hooks/workspace";
+import {
+  useAgentServices,
+  useLocalSettings,
+  useWorkspaceContext,
+} from "@/hooks/workspace";
 import {
   OPEN_QUEUE_PANEL_MAX_WIDTH,
   OPEN_QUEUE_PANEL_MIN_WIDTH,
@@ -119,6 +124,11 @@ function AgentsPageInner(): JSX.Element {
     handleCopyLink,
   } = useWorkspaceViewActions();
   const { repos } = useWorkspaceContext();
+  const {
+    services: agentServices,
+    initialized: agentServicesInitialized,
+    error: agentServicesError,
+  } = useAgentServices(workspaceId);
   const { settings: localSettings } = useLocalSettings();
   const { showToast } = useToast();
   const {
@@ -131,8 +141,10 @@ function AgentsPageInner(): JSX.Element {
   // ?agent=<name> deep link first, else fall back to the first rail agent.
   const queryAgent = searchParams.get("agent");
   const firstAgentName = useMemo(
-    () => orderAgentsForEpicRunner(agents).find(isLiveAgentRailVisible)?.name,
-    [agents],
+    () =>
+      orderAgentsForEpicRunner(agents).find(isLiveAgentRailVisible)?.name ??
+      agentServices[0]?.id,
+    [agentServices, agents],
   );
   useEffect(() => {
     if (agentName) return;
@@ -144,9 +156,24 @@ function AgentsPageInner(): JSX.Element {
     }
   }, [agentName, queryAgent, firstAgentName, navigate, workspaceId]);
 
+  const selectedAgentService = useMemo(
+    () =>
+      agentName
+        ? agentServices.find((service) => service.id === agentName)
+        : undefined,
+    [agentName, agentServices],
+  );
+  // Durable identity wins when the live roster contains a compatibility
+  // projection with the same id/name.
   const selected = useMemo(
-    () => (agentName ? agents.find((a) => a.name === agentName) : undefined),
-    [agents, agentName],
+    () =>
+      agentServicesInitialized && agentName && !selectedAgentService
+        ? agents.find((agent) => agent.name === agentName)
+        : undefined,
+    [agentName, agentServicesInitialized, agents, selectedAgentService],
+  );
+  const unresolvedAgentRoute = Boolean(
+    agentName && !selectedAgentService && !selected,
   );
 
   // Inline task-detail selection, restored per agent from scoped storage.
@@ -170,7 +197,7 @@ function AgentsPageInner(): JSX.Element {
 
   useEffect(() => {
     clearIssue();
-    if (!agentName) {
+    if (!agentName || selectedAgentService) {
       setSelectedTask(null);
       return;
     }
@@ -181,7 +208,7 @@ function AgentsPageInner(): JSX.Element {
     }
     const match = issues.find((issue) => issue.id === selectedTaskId);
     setSelectedTask(match ?? null);
-  }, [agentName, workspaceId, issues, clearIssue]);
+  }, [agentName, workspaceId, issues, clearIssue, selectedAgentService]);
   useEffect(() => {
     if (!selectedTask) return;
     void fetchIssue(selectedTask.id);
@@ -542,11 +569,29 @@ function AgentsPageInner(): JSX.Element {
     <div className={styles.page} data-testid="agents-page">
       {/* Main panel: Aether tab strip over the live agent surfaces */}
       <section className={styles.main} aria-label="Agent details">
-        <AgentEditorGroups resetKey={agentName} renderPane={renderAgentPane} />
+        {selectedAgentService ? (
+          <AgentServiceDetail
+            workspaceId={workspaceId}
+            service={selectedAgentService}
+          />
+        ) : unresolvedAgentRoute && !agentServicesInitialized ? (
+          <div className={styles.tabFallback}>Loading agent…</div>
+        ) : unresolvedAgentRoute ? (
+          <div className={styles.emptyPage} data-testid="agent-not-found">
+            {agentServicesError
+              ? `Unable to resolve agent: ${agentServicesError.message}`
+              : "This agent no longer exists."}
+          </div>
+        ) : (
+          <AgentEditorGroups
+            resetKey={agentName}
+            renderPane={renderAgentPane}
+          />
+        )}
       </section>
 
       {/* Right column: epic-runner Open Queue or inline task detail */}
-      {selectedTask ? (
+      {selectedAgentService || unresolvedAgentRoute ? null : selectedTask ? (
         <div className={styles.inlineDetail} style={{ width: openQueueWidth }}>
           <PanelWidthResizeHandle
             width={openQueueWidth}

@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import "@testing-library/jest-dom";
 import { existsSync } from "node:fs";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { startWorkflowRun } from "@/api";
+import type { AgentServiceDTO, DriverRunDTO } from "@/api/agentServices";
 
 import { AgentsPage } from "../AgentsPage";
 
@@ -17,8 +19,15 @@ const mocks = vi.hoisted(() => {
     showToast: vi.fn(),
     getWorkflowRun: vi.fn(),
     startWorkflowRun: vi.fn(),
+    routeAgentName: "lead-1",
     localSettings: { settings: null },
     workspaceContext: { repos: [] },
+    agentServices: [] as AgentServiceDTO[],
+    agentServicesInitialized: true,
+    agentServicesError: null as Error | null,
+    serviceRuns: [] as DriverRunDTO[],
+    serviceRunsNotFound: false,
+    serviceRunsError: null as Error | null,
     agents: [] as Array<{
       name: string;
       role?: string;
@@ -38,7 +47,10 @@ vi.mock("react-router-dom", async (importOriginal) => {
   return {
     ...actual,
     useNavigate: () => mocks.navigate,
-    useParams: () => ({ workspaceId: "DESKTOP-QA", agentName: "lead-1" }),
+    useParams: () => ({
+      workspaceId: "DESKTOP-QA",
+      agentName: mocks.routeAgentName,
+    }),
     useSearchParams: () => [new URLSearchParams(), vi.fn()],
   };
 });
@@ -68,6 +80,37 @@ vi.mock("@/hooks", () => ({
 vi.mock("@/hooks/workspace", () => ({
   useLocalSettings: () => mocks.localSettings,
   useWorkspaceContext: () => mocks.workspaceContext,
+  useAgentServices: () => ({
+    services: mocks.agentServices,
+    total: mocks.agentServices.length,
+    loading: false,
+    initialized: mocks.agentServicesInitialized,
+    error: mocks.agentServicesError,
+    refresh: vi.fn(),
+  }),
+  useAgentServiceRuns: () => ({
+    runs: mocks.serviceRuns,
+    total: mocks.serviceRuns.length,
+    loading: false,
+    initialized: true,
+    error: mocks.serviceRunsError,
+    notFound: mocks.serviceRunsNotFound,
+    refresh: vi.fn(),
+  }),
+  useAgentServiceRunEvents: () => ({
+    events: [],
+    loading: false,
+    initialized: true,
+    error: null,
+    refresh: vi.fn(),
+  }),
+  useAgentServiceJournal: () => ({
+    journal: null,
+    loading: false,
+    initialized: false,
+    error: null,
+    refresh: vi.fn(),
+  }),
 }));
 
 vi.mock("@/hooks/ui/useToast", () => ({
@@ -144,7 +187,22 @@ describe("AgentsPage", () => {
     vi.clearAllMocks();
     mocks.localSettings = { settings: null };
     mocks.workspaceContext = { repos: [] };
-    mocks.agents = [];
+    mocks.routeAgentName = "lead-1";
+    mocks.agentServices = [];
+    mocks.agentServicesInitialized = true;
+    mocks.agentServicesError = null;
+    mocks.serviceRuns = [];
+    mocks.serviceRunsNotFound = false;
+    mocks.serviceRunsError = null;
+    mocks.agents = [
+      {
+        name: "lead-1",
+        role: "lead",
+        repo: "loomcli",
+        status: "ready",
+        branch: "agent/lead-1",
+      },
+    ];
     mocks.startWorkflowRun.mockResolvedValue({
       run_id: "run-1",
       status: "queued",
@@ -292,6 +350,109 @@ describe("AgentsPage", () => {
           .getAttribute("data-active"),
       ).toBe("true");
     });
+  });
+
+  it("resolves a durable service id before a matching live projection and renders its runs", async () => {
+    mocks.routeAgentName = "scout";
+    mocks.agents = [
+      {
+        name: "scout",
+        role: "task",
+        status: "ready",
+        branch: "agent/scout",
+      },
+    ];
+    mocks.agentServices = [
+      {
+        id: "scout",
+        name: "Scout",
+        kind: "scripted",
+        enabled: true,
+        behavior: {
+          driverId: "scout-driver",
+          driverVersionId: "scout-v1",
+        },
+        bindings: [
+          {
+            id: "binding-scout-weekly",
+            sourceKind: "cron",
+            schedule: "@weekly",
+            enabled: true,
+            routeKey: "cron.scout.weekly",
+          },
+        ],
+        nextFireAt: "2026-08-17T00:00:00Z",
+        lastRunStatus: "completed",
+        consecutiveFailures: 0,
+        errors: [],
+        createdAt: "2026-08-14T00:00:00Z",
+        updatedAt: "2026-08-14T00:00:00Z",
+      },
+    ];
+    mocks.serviceRuns = [
+      {
+        workspaceKey: "DESKTOP-QA",
+        runId: "run-scout-1",
+        driverId: "scout-driver",
+        driverVersionId: "scout-v1",
+        agentServiceId: "scout",
+        status: "completed",
+        summary: "Reviewed 3 backlog tickets",
+        startedAt: "2026-08-14T10:00:00Z",
+        finishedAt: "2026-08-14T10:01:00Z",
+        createdAt: "2026-08-14T10:00:00Z",
+        updatedAt: "2026-08-14T10:01:00Z",
+      },
+    ];
+
+    render(<AgentsPage />);
+
+    expect(await screen.findByTestId("agent-service-detail")).toHaveTextContent(
+      "Scout",
+    );
+    expect(screen.getByTestId("agent-service-detail")).toHaveTextContent(
+      "scout-driver",
+    );
+    expect(screen.getByTestId("agent-service-detail")).toHaveTextContent(
+      "Weekly",
+    );
+    expect(
+      screen.getByTestId("agent-service-run-run-scout-1"),
+    ).toHaveTextContent("Completed");
+    expect(
+      screen.getByTestId("agent-service-run-run-scout-1"),
+    ).toHaveTextContent("Reviewed 3 backlog tickets");
+    expect(screen.queryByTestId("agent-editor-groups")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Run lead epic" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("handles a service deleted between resolution and run-history loading", () => {
+    mocks.routeAgentName = "scout";
+    mocks.agentServices = [
+      {
+        id: "scout",
+        name: "Scout",
+        kind: "scripted",
+        enabled: true,
+        behavior: { driverId: "scout", driverVersionId: "v1" },
+        bindings: [],
+        nextFireAt: null,
+        lastRunStatus: "",
+        consecutiveFailures: 0,
+        errors: [],
+        createdAt: "2026-08-14T00:00:00Z",
+        updatedAt: "2026-08-14T00:00:00Z",
+      },
+    ];
+    mocks.serviceRunsNotFound = true;
+
+    render(<AgentsPage />);
+
+    expect(screen.getByTestId("agent-service-not-found")).toHaveTextContent(
+      "no longer exists",
+    );
   });
 
   it("does not leave the retired legacy file editor module in source", () => {

@@ -9,6 +9,7 @@ import { useStore } from "zustand";
 
 import {
   useAgentStoreInstance,
+  useAgentServices,
   useDeleteWorkspaceAgent,
   useWorkspaceContext,
 } from "@/hooks";
@@ -25,9 +26,18 @@ import {
   splitAgentsByRuntime,
 } from "@/utils/agentRole";
 import { isPRReviewerAgent } from "@/utils/agentDisplay";
+import {
+  agentServiceCadenceLabel,
+  agentServiceDotState,
+  agentServiceDotTooltip,
+} from "@/utils/bindingDisplay";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 
 import styles from "./AgentSection.module.css";
+import {
+  buildAgentAutomationRows,
+  withoutDurableAgentProjections,
+} from "./agentSectionAutomationRows";
 import { AgentContextMenu } from "./menus/AgentContextMenu";
 import { SortableAgentList } from "./SortableAgentList";
 
@@ -67,6 +77,19 @@ export function AgentSection({
   const [contextMenu, setContextMenu] = useState<AgentMenuState | null>(null);
   const prsView = activeView === "prs";
   const addClick = prsView ? undefined : onAddClick;
+  const { services: allAgentServices } = useAgentServices(workspaceId, {
+    enabled: Boolean(workspaceId),
+  });
+  // The PR view's established contract is "PR-review roster agents only".
+  // Durable background services belong to the normal workspace Agents view.
+  const agentServices = useMemo(
+    () => (prsView ? [] : allAgentServices),
+    [allAgentServices, prsView],
+  );
+  const { durableRecords } = useMemo(
+    () => buildAgentAutomationRows(agentServices),
+    [agentServices],
+  );
 
   // Merge fleet agents with workspace config agents.
   // Config agents that aren't yet running appear as "configured" placeholders.
@@ -95,9 +118,16 @@ export function AgentSection({
         });
       merged = [...orderedFleetAgents, ...configPlaceholders];
     }
+    merged = withoutDurableAgentProjections(merged, agentServices);
     if (!prsView) return merged;
     return merged.filter(isPRReviewerAgent);
-  }, [fleetAgents, workspaceConfigAgents, workspace?.name, prsView]);
+  }, [
+    agentServices,
+    fleetAgents,
+    workspaceConfigAgents,
+    workspace?.name,
+    prsView,
+  ]);
 
   const agentNames = useMemo(() => agents.map((agent) => agent.name), [agents]);
   const agentNamesKey = agentNames.join("\0");
@@ -162,7 +192,8 @@ export function AgentSection({
     setContextMenu(null);
   }, []);
 
-  if (agents.length === 0 && !addClick) return <></>;
+  if (agents.length === 0 && durableRecords.length === 0 && !addClick)
+    return <></>;
 
   const listProps = {
     fullOrder: agentOrder,
@@ -206,6 +237,40 @@ export function AgentSection({
             {...listProps}
           />
         )}
+        {durableRecords.length > 0 ? (
+          <div data-testid="agent-section-autonomous">
+            <div className={styles.groupHeader}>
+              <span>Autonomous</span>
+            </div>
+            {durableRecords.map((row) => {
+              const name = row.record.name.trim() || row.id;
+              const cadence = agentServiceCadenceLabel(row.record);
+              const tooltip = agentServiceDotTooltip(row.record);
+              return (
+                <button
+                  type="button"
+                  key={row.id}
+                  className={styles.workflowRow}
+                  data-testid={`autonomous-agent-${row.id}`}
+                  data-selected={selectedAgentName === row.id || undefined}
+                  aria-label={`${name}, ${cadence}, ${tooltip}`}
+                  onClick={() => onAgentClick?.(row.id)}
+                  title={tooltip}
+                >
+                  <span
+                    className={styles.workflowDot}
+                    data-state={agentServiceDotState(row.record)}
+                    aria-hidden="true"
+                  />
+                  <span className={styles.workflowText}>
+                    <span className={styles.workflowName}>{name}</span>
+                    <span className={styles.workflowMeta}>{cadence}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
       </div>
       {addClick && (
         <button type="button" className={styles.addButton} onClick={addClick}>

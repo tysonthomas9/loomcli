@@ -81,6 +81,50 @@ func TestCreateWorkflowRunRegistersBuiltinEpicRunner(t *testing.T) {
 	}
 }
 
+func TestCreateScoutWorkflowRunProvisionsAndAttributesAgentService(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	installFakeFlueBuild(t)
+	t.Chdir(t.TempDir())
+
+	mux := http.NewServeMux()
+	NewModule(st).Register(mux)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/"+BuiltinScoutWorkflowName, stringsReader(`{"requestedBy":"ui"}`))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d body=%s, want 202", rec.Code, rec.Body.String())
+	}
+	var run domain.DriverRun
+	if err := json.Unmarshal(rec.Body.Bytes(), &run); err != nil {
+		t.Fatalf("decode run: %v", err)
+	}
+	if run.AgentServiceID != "scout" || run.DriverID != BuiltinScoutWorkflowName {
+		t.Fatalf("run = %#v, want scout service attribution", run)
+	}
+	stored, err := st.DriverRuns().Get(ctx, "TEST", run.RunID)
+	if err != nil {
+		t.Fatalf("get stored run: %v", err)
+	}
+	if stored.AgentServiceID != "scout" {
+		t.Fatalf("stored AgentServiceID = %q, want scout", stored.AgentServiceID)
+	}
+	svc, err := st.AgentServices().Get(ctx, "TEST", "scout")
+	if err != nil {
+		t.Fatalf("get scout service: %v", err)
+	}
+	if svc.DriverID != run.DriverID || svc.DriverVersionID != run.DriverVersionID {
+		t.Fatalf("service = %#v run = %#v, want matching driver ref", svc, run)
+	}
+	binding, err := st.TriggerBindings().Get(ctx, "TEST", "binding-cron-scout-weekly")
+	if err != nil {
+		t.Fatalf("get scout binding: %v", err)
+	}
+	if binding.TargetAgentServiceID != "scout" || binding.RouteKey != "cron.scout.weekly" {
+		t.Fatalf("binding = %#v, want attached scout cron", binding)
+	}
+}
+
 func TestCreateWorkflowRunRefreshesStaleBuiltinRunnerManifest(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
