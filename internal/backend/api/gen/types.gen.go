@@ -2330,17 +2330,17 @@ type MonitorAgentStatus struct {
 	OrchestratorSessionId *string `json:"orchestrator_session_id,omitempty"`
 
 	// Parent Active epic assignment for lead/workers.
-	Parent           *string                     `json:"parent,omitempty"`
-	Repo             *string                     `json:"repo,omitempty"`
-	Role             *string                     `json:"role,omitempty"`
-	RoleKind         *MonitorAgentStatusRoleKind `json:"role_kind,omitempty"`
-	RuntimePlacement *MonitorRuntimePlacement    `json:"runtime_placement,omitempty"`
+	Parent   *string                     `json:"parent,omitempty"`
+	Repo     *string                     `json:"repo,omitempty"`
+	Role     *string                     `json:"role,omitempty"`
+	RoleKind *MonitorAgentStatusRoleKind `json:"role_kind,omitempty"`
+
+	// RoleLabel Optional short UI role label. When present, clients prefer this over capitalizing role (e.g. pr-reviewer → "Review").
+	RoleLabel        *string                  `json:"role_label,omitempty"`
+	RuntimePlacement *MonitorRuntimePlacement `json:"runtime_placement,omitempty"`
 
 	// RuntimeProvider Effective provider for interactive remote runtimes.
 	RuntimeProvider *MonitorAgentStatusRuntimeProvider `json:"runtime_provider,omitempty"`
-
-	// RoleLabel Optional short UI role label. When present, clients prefer this over capitalizing role (e.g. pr-reviewer → "Review").
-	RoleLabel *string `json:"role_label,omitempty"`
 
 	// SessionId Latest control-plane session associated with this agent.
 	SessionId *string `json:"session_id,omitempty"`
