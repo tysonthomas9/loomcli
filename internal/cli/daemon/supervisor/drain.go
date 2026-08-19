@@ -45,6 +45,14 @@ func (s *Supervisor) DrainWithGrace(ap *AgentProcess, reason string, yieldTimeou
 		return outcome(DrainPhaseAlreadyStopped)
 	}
 
+	// Stamp the reason before signaling. The exit hooks
+	// (recordTaskExitForQuarantine, daemon-agents.json) read ap.StopReason at
+	// process exit, which is BEFORE the supervise loop's own shutdown check
+	// runs — so drainAllWithGrace's kills used to label themselves "crash".
+	// DrainAgent/DrainAgentWithReason already set the reason explicitly, so
+	// this default-only write is a no-op on those paths.
+	s.setStopReasonDefault(ap, StopReason(reason))
+
 	// Phase 1: Write yield file
 	if err := s.RequestYield(ap, reason); err != nil {
 		slog.Warn("yield file write failed, falling back to SIGTERM", "worktree", ap.Entry.Worktree, "err", err)
