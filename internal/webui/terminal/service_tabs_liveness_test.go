@@ -488,7 +488,7 @@ func TestListTabs_ResurfacesLivePTYWithoutMetadata(t *testing.T) {
 		t.Errorf("second ListTabs returned %d tabs, want %d (metadata should persist)", len(again), len(tabs))
 	}
 	for _, tb := range again {
-		if tb.SessionName == "orphan" && !tb.PTYAlive {
+		if tb.SessionName == "orphan" && !tb.Attachable {
 			t.Errorf("resurfaced orphan tab: pty_alive=false, want true")
 		}
 	}
@@ -545,7 +545,7 @@ func TestListTabs_SourceWithoutSessionListerIsUnchanged(t *testing.T) {
 	if len(tabs) != 1 || tabs[0].SessionName != "has-metadata" {
 		t.Fatalf("tabs = %+v, want only has-metadata", tabs)
 	}
-	if !tabs[0].PTYAlive {
+	if !tabs[0].Attachable {
 		t.Errorf("has-metadata: pty_alive=false, want true")
 	}
 }

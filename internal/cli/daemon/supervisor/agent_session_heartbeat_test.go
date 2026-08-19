@@ -13,11 +13,11 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-// countingAgentSessionStore is a store.AgentSessionStore that counts Heartbeat
+// heartbeatCountingSessionStore is a store.AgentSessionStore that counts Heartbeat
 // calls and records the arguments of the last one. Only Heartbeat is
 // overridden; every other method comes from the embedded interface and must not
 // be called by the heartbeat loop.
-type countingAgentSessionStore struct {
+type heartbeatCountingSessionStore struct {
 	store.AgentSessionStore
 
 	heartbeats atomic.Int64
@@ -28,7 +28,7 @@ type countingAgentSessionStore struct {
 	err    error // when non-nil, every Heartbeat fails
 }
 
-func (c *countingAgentSessionStore) Heartbeat(_ context.Context, ws, id string) (*domain.AgentSession, error) {
+func (c *heartbeatCountingSessionStore) Heartbeat(_ context.Context, ws, id string) (*domain.AgentSession, error) {
 	c.mu.Lock()
 	c.lastWS, c.lastID = ws, id
 	err := c.err
@@ -40,13 +40,13 @@ func (c *countingAgentSessionStore) Heartbeat(_ context.Context, ws, id string) 
 	return &domain.AgentSession{}, nil
 }
 
-func (c *countingAgentSessionStore) last() (string, string) {
+func (c *heartbeatCountingSessionStore) last() (string, string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.lastWS, c.lastID
 }
 
-func (c *countingAgentSessionStore) setErr(err error) {
+func (c *heartbeatCountingSessionStore) setErr(err error) {
 	c.mu.Lock()
 	c.err = err
 	c.mu.Unlock()
@@ -57,13 +57,13 @@ func (c *countingAgentSessionStore) setErr(err error) {
 // calls are observed.
 type sessionCountingStore struct {
 	store.Store
-	sessions *countingAgentSessionStore
+	sessions *heartbeatCountingSessionStore
 }
 
 func (s *sessionCountingStore) AgentSessions() store.AgentSessionStore { return s.sessions }
 
-func newAgentSessionHeartbeatSupervisor() (*Supervisor, *countingAgentSessionStore) {
-	cs := &countingAgentSessionStore{}
+func newAgentSessionHeartbeatSupervisor() (*Supervisor, *heartbeatCountingSessionStore) {
+	cs := &heartbeatCountingSessionStore{}
 	return &Supervisor{
 		ControlStore: &sessionCountingStore{Store: memstore.New(), sessions: cs},
 		WorkspaceID:  "WS",
