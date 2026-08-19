@@ -84,6 +84,13 @@ export function agentFileBrowserTabsStorageKey(agentName: string): string {
   return `${FILE_BROWSER_TABS_STORAGE_KEY}:agent:${agentName}`;
 }
 
+// The Skills section keeps its own tab set: it is a separate destination in the
+// nav rail, so a file opened there must not appear in the Files section's tabs
+// (or be pruned by it) just because both browsers share a store shape.
+export function skillsFileBrowserTabsStorageKey(): string {
+  return `${FILE_BROWSER_TABS_STORAGE_KEY}:skills`;
+}
+
 function tabKey(tab: FileBrowserTab): string {
   return tabIdentityKey(tab);
 }

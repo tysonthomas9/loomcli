@@ -314,6 +314,42 @@ describe("treeRoots", () => {
     ]);
   });
 
+  it("skills mode emits only the skills section", () => {
+    const sections = buildFileTreeSections({
+      mode: "skills",
+      agents: [agent({ name: "atlas", role_name: "reviewer" })],
+      repos: [repo("source-repo")],
+      checkouts: [],
+      skills: skillGroups(),
+    });
+
+    // No agents, no repos, no workspace root — the dedicated section shows
+    // skills and nothing else.
+    expect(sections.map((section) => section.id)).toEqual(["skills"]);
+    expect(sections[0]?.roots).toEqual([
+      expect.objectContaining({ kind: "skills", label: "Workspace" }),
+      expect.objectContaining({ kind: "skills", label: "reviewer" }),
+    ]);
+  });
+
+  it("skills mode unions catalog roles with agent roles", () => {
+    const sections = buildFileTreeSections({
+      mode: "skills",
+      // "planner" has an agent but no skills yet; "reviewer" comes from the
+      // catalog. A role missing from either source must still get a root.
+      agents: [agent({ name: "atlas", role_name: "planner" })],
+      repos: [],
+      checkouts: [],
+      skills: skillGroups(),
+    });
+
+    expect(sections[0]?.roots.map((root) => root.label)).toEqual([
+      "Workspace",
+      "planner",
+      "reviewer",
+    ]);
+  });
+
   it("limits agent mode to workspace plus that agent role and excludes skills from git", () => {
     const sections = buildFileTreeSections({
       mode: "agent",

@@ -37,6 +37,7 @@ function createRouterWrapper(initialPath = "/ws/test-ws/kanban") {
             { path: "files", element: children },
             { path: "prs", element: children },
             { path: "agents", element: children },
+            { path: "skills", element: children },
             { path: "issues/:issueId", element: children },
           ],
         },
@@ -91,6 +92,7 @@ function createLocationProbeWrapper(initialPath: string) {
             { path: "files", element },
             { path: "prs", element },
             { path: "agents", element },
+            { path: "skills", element },
             { path: "issues/:issueId", element },
           ],
         },
@@ -180,6 +182,14 @@ describe("useRouteView", () => {
       });
 
       expect(result.current.view).toBe("files");
+    });
+
+    it("returns skills for /ws/:id/skills", () => {
+      const { result } = renderHook(() => useRouteView(), {
+        wrapper: createRouterWrapper("/ws/test-ws/skills"),
+      });
+
+      expect(result.current.view).toBe("skills");
     });
   });
 

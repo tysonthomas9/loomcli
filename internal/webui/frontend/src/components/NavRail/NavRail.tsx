@@ -191,6 +191,36 @@ const TOP_ITEMS: NavItem[] = [
       </svg>
     ),
   },
+  {
+    id: "skills",
+    label: "Skills",
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path
+          d="M12 4L2 8.5 12 13l10-4.5L12 4z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M6 11v4.5c0 1.66 2.69 3 6 3s6-1.34 6-3V11"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M22 8.5v5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+      </svg>
+    ),
+  },
 ];
 
 const BOTTOM_ITEMS: NavItem[] = [

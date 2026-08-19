@@ -35,6 +35,7 @@ import {
   FileCapabilitiesProvider,
   FileBrowserStoreProvider,
   fileBrowserTabsStorageKey,
+  skillsFileBrowserTabsStorageKey,
   useFileDocumentRegistry,
   useFileDocumentRegistryRevision,
   useFileCapabilities,
@@ -1943,7 +1944,9 @@ export function WorkspaceFileBrowser({
   const storageKey =
     mode === "agent" && agentName
       ? agentFileBrowserTabsStorageKey(agentName)
-      : fileBrowserTabsStorageKey();
+      : mode === "skills"
+        ? skillsFileBrowserTabsStorageKey()
+        : fileBrowserTabsStorageKey();
   return (
     <FileCapabilitiesProvider workspaceId={workspaceId}>
       <FileDocumentRegistryProvider>

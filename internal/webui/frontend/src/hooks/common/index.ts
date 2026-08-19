@@ -95,6 +95,7 @@ export {
   agentFileBrowserTabsStorageKey,
   FileBrowserStoreProvider,
   fileBrowserTabsStorageKey,
+  skillsFileBrowserTabsStorageKey,
   useFileBrowserStore,
   useFileBrowserStoreInstance,
 } from "@/stores";

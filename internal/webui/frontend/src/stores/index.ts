@@ -61,6 +61,7 @@ export {
   agentFileBrowserTabsStorageKey,
   createFileBrowserStore,
   fileBrowserTabsStorageKey,
+  skillsFileBrowserTabsStorageKey,
   FileBrowserStoreProvider,
   useFileBrowserStore,
   useFileBrowserStoreInstance,

@@ -15,7 +15,11 @@ import {
 
 import { checkoutChangeCount } from "./checkoutAvailability";
 
-export type FileBrowserMode = "workspace" | "agent";
+// "skills" is the dedicated Skills section: the same browser, showing only the
+// skills roots. It is a filter on which sections are emitted, not a second
+// implementation — the tree, editor, tabs and dialogs are shared with the
+// Files section, so the two can never drift apart.
+export type FileBrowserMode = "workspace" | "agent" | "skills";
 
 export interface CheckoutTreeRoot {
   id: string;
@@ -234,18 +238,23 @@ export function buildFileTreeSections({
         )
       : [];
 
-  const sections: FileTreeSection[] = [
-    { id: "agents", title: "Agents", roots: agentRoots },
-  ];
+  // The Skills section shows skills and nothing else — no agents, no repos, no
+  // workspace root. Every other mode keeps the tree it already had.
+  const sections: FileTreeSection[] =
+    mode === "skills"
+      ? []
+      : [{ id: "agents", title: "Agents", roots: agentRoots }];
   const catalogRoles = skills
     .filter((group) => group.scope === "role" && group.role)
     .map((group) => group.role!);
   const visibleRoles = visibleAgents
     .map((agent) => agent.role_name)
     .filter((role): role is string => Boolean(role));
+  // Agent mode narrows to the one agent's role; every other mode takes the
+  // union, so a role with a skill but no agent (and vice versa) still appears.
   const roleNames = [
     ...new Set(
-      mode === "workspace" ? [...catalogRoles, ...visibleRoles] : visibleRoles,
+      mode === "agent" ? visibleRoles : [...catalogRoles, ...visibleRoles],
     ),
   ].sort();
   const skillGroups = [

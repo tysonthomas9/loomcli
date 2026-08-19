@@ -129,6 +129,7 @@ describe("WorkspaceBreadcrumb", () => {
       workspace: "Workspace",
       settings: "Settings",
       files: "Files",
+      skills: "Skills",
       "issue-detail": "Issue",
     };
 
