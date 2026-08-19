@@ -92,12 +92,18 @@ func ReadStateFile(path string) (*DaemonState, error) {
 }
 
 // writeStateFile writes the daemon-agents.json state file.
-func writeStateFile(path string, startedAt time.Time, agents []supervisor.SupervisedAgentStatus, parked []ParkedAgent, quarantined []supervisor.QuarantinedTaskInfo, maxRetries int) error {
+//
+// hold is variadic to carry 0 or 1 claim-hold snapshots without disturbing the
+// existing positional signature (and its call sites).
+func writeStateFile(path string, startedAt time.Time, agents []supervisor.SupervisedAgentStatus, parked []ParkedAgent, quarantined []supervisor.QuarantinedTaskInfo, maxRetries int, hold ...*supervisor.ClaimHold) error {
 	state := DaemonState{
 		PID:              os.Getpid(),
 		StartedAt:        startedAt,
 		Agents:           make([]DaemonAgentStatus, len(agents), len(agents)+len(parked)),
 		QuarantinedTasks: quarantined,
+	}
+	if len(hold) > 0 {
+		state.ClaimHold = hold[0]
 	}
 	for i, ap := range agents {
 		state.Agents[i] = toDaemonAgentStatus(ap, maxRetries)
@@ -153,6 +159,7 @@ func toDaemonAgentStatus(ap supervisor.SupervisedAgentStatus, maxRetries int) Da
 		OwnershipFencingToken:  ap.OwnershipFencingToken,
 		OwnershipLastHeartbeat: ap.OwnershipLastHeartbeat,
 		LastActivity:           ap.LastActivity,
+		ClaimsGated:            ap.ClaimsGated,
 	}
 	if ap.StopReason != "" && ap.PID == 0 {
 		if !ap.LastExit.IsZero() {

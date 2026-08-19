@@ -34,6 +34,12 @@ const backendUnavailableRecheckInterval = 30 * time.Second
 // because the two set the cadence of the same recheck loop.
 const backendStateReassertInterval = 5 * time.Minute
 
+// defaultClaimHoldRecheckInterval is the fixed delay between re-checks while a
+// workspace-level claim hold is active. The hold is released by an operator (or
+// expires), so we poll on a fixed interval and never count these re-checks
+// toward max_retries — a quiesce is not an agent failure.
+const defaultClaimHoldRecheckInterval = 15 * time.Second
+
 // defaultMaxRetriesBlockInterval is the fixed delay between re-attempts after
 // an agent has exhausted its restart budget and blocked (policy OnExhaustion
 // Block). Rather than abandoning the agent (silent loss until a daemon
@@ -194,13 +200,20 @@ func (s *Supervisor) applyRateLimitedRestart(ap *AgentProcess) {
 }
 
 // applyUncountedRestart handles the policy classes that retry without eroding
-// max_retries: NoWork (task availability is not a health signal) and rate
-// limits. Caller holds ap.Mu.
+// max_retries: a claim hold (an operator quiesce is not an agent failure),
+// NoWork (task availability is not a health signal) and rate limits. Caller
+// holds ap.Mu.
 //
 // A usage-limit wall arrives here as a rate limit and retries forever, per
 // agent, by design — so it is also recorded as a fleet-wide wall, parking the
-// other agents while this one keeps its uncounted retry loop.
+// other agents while this one keeps its uncounted retry loop. The claim-hold
+// check must stay ahead of that recording: a hold is not an account fact and
+// must not arm the fleet-wide wall.
 func (s *Supervisor) applyUncountedRestart(ap *AgentProcess, d agentpolicy.Disposition, outcome agenterr.Outcome, maxRetries int) bool {
+	if outcome.Is(agenterr.ClaimsHeldOutcome) {
+		s.applyClaimsHeldRestart(ap)
+		return true
+	}
 	if outcome.Is(agenterr.NoWorkOutcome) {
 		s.applyNoWorkRestart(ap)
 		return true
@@ -314,6 +327,25 @@ func (s *Supervisor) applyBackendUnavailableRestart(ap *AgentProcess) {
 	ap.StopReason = StopReasonBackendUnavailable
 	log.Printf("[daemon] Agent %s: backend unavailable, will recheck in %s (not counted toward max_retries)",
 		ap.Entry.Worktree, s.backendRecheckBackoff())
+}
+
+// applyClaimsHeldRestart keeps an agent cycling while a claim hold is active.
+// Caller holds ap.Mu. It resets nothing and increments nothing: every counter
+// stays frozen at its pre-hold value so releasing the hold resumes exactly
+// where the fleet left off. StopReason is deliberately NOT set — the agent is
+// not stopped, only gated.
+func (s *Supervisor) applyClaimsHeldRestart(ap *AgentProcess) {
+	log.Printf("[daemon] Agent %s: claims held, will recheck in %s (not counted toward max_retries)",
+		ap.Entry.Worktree, s.claimHoldRecheckBackoff())
+}
+
+// claimHoldRecheckBackoff is the fixed delay between claim-hold re-checks
+// (configurable via claimHoldRecheckInterval; package default otherwise).
+func (s *Supervisor) claimHoldRecheckBackoff() time.Duration {
+	if s.claimHoldRecheckInterval > 0 {
+		return s.claimHoldRecheckInterval
+	}
+	return defaultClaimHoldRecheckInterval
 }
 
 // backendRecheckBackoff is the fixed delay between BackendUnavailable re-checks
@@ -462,6 +494,10 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 		// Fixed recheck: waiting for the backend CLI to reappear, not
 		// backing off a flaky run.
 		return s.backendRecheckBackoff()
+	case agentpolicy.BPClaimsHeld:
+		// Fixed recheck: waiting for an operator to release a hold, not
+		// backing off a flaky run.
+		return s.claimHoldRecheckBackoff()
 	case agentpolicy.BPBlock:
 		return s.maxRetriesBlockBackoff()
 	case agentpolicy.BPRateLimit:

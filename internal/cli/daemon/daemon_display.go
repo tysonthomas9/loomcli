@@ -75,6 +75,9 @@ func printAgentDiagnostics(agent DaemonAgentStatus) {
 	if agent.LastErrorClass != "" {
 		fmt.Printf("      Last error: %s\n", agent.LastErrorClass)
 	}
+	if agent.ClaimsGated {
+		fmt.Printf("      gated (claims held)\n")
+	}
 	if agent.NoWorkCount > 0 {
 		fmt.Printf("      NoWork: %d\n", agent.NoWorkCount)
 	}

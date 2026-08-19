@@ -151,6 +151,16 @@ type Supervisor struct {
 	// set a short value to exercise the re-assert without waiting 5m.
 	backendStateReassert time.Duration
 
+	// claimHold is the workspace-level refusal to START new work (see claim.go).
+	// Nil means no hold. Guarded by claimHoldMu; PersistClaimHold is injected by
+	// the daemon package so path resolution stays out of the supervisor.
+	claimHold                *ClaimHold
+	claimHoldMu              sync.RWMutex
+	claimHoldExpiryLogged    bool
+	claimHoldLastHeldLog     time.Time
+	claimHoldRecheckInterval time.Duration          // test override; 0 ⇒ package default
+	PersistClaimHold         func(*ClaimHold) error // injected by the daemon package
+
 	// maxRetriesBlockInterval is the fixed delay computeBackoff returns once an
 	// agent has exhausted its restart budget and blocked (StopReasonMaxRetriesBlocked).
 	// Zero means use the package default (defaultMaxRetriesBlockInterval). Tests set
@@ -426,6 +436,11 @@ func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 // attempt's diff injected) before finally cold-starting a fresh task. See
 // detectRecovery.
 func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
+	// FIRST gate: a held workspace issues no Ready query, no ClaimIssue, runs
+	// no recovery and creates no session.
+	if !s.gateClaimsHeld(ap) {
+		return false
+	}
 	if err := s.gateBackendAvailable(ap); err != nil {
 		return false
 	}
@@ -974,6 +989,9 @@ func (s *Supervisor) GetAgents() []SupervisedAgentStatus {
 		}
 		if ap.LastError != nil {
 			result[i].LastErrorClass = ap.LastError.Class.String()
+			// Derived, not stored: the agent's last transition was a claim-hold
+			// gate. Clears itself on the next successful pre-flight.
+			result[i].ClaimsGated = ap.LastError.Class.Is(agenterr.ClaimsHeldOutcome)
 		}
 		ap.Mu.Unlock()
 		// Resolve backend name outside the lock (GetEffectiveBackend acquires ap.Mu)
