@@ -19,6 +19,10 @@ import { checkoutChangeCount } from "./checkoutAvailability";
 // skills roots. It is a filter on which sections are emitted, not a second
 // implementation — the tree, editor, tabs and dialogs are shared with the
 // Files section, so the two can never drift apart.
+//
+// Skills live in exactly one place. "workspace" (the Files section) and "agent"
+// (an agent's files) emit git checkouts and nothing else; "skills" emits skill
+// roots and nothing else. Nothing emits both.
 export type FileBrowserMode = "workspace" | "agent" | "skills";
 
 export interface CheckoutTreeRoot {
@@ -160,6 +164,43 @@ function checkoutRoot(
   };
 }
 
+// One root per skill scope: the workspace scope plus every role that either has
+// a skill in the catalog or an agent wearing it — so a role with a skill but no
+// agent (and vice versa) still gets a root.
+function skillsRoots(
+  agents: WorkspaceAgentInfo[],
+  skills: SkillCatalogGroup[],
+): SkillsTreeRoot[] {
+  const catalogRoles = skills
+    .filter((group) => group.scope === "role" && group.role)
+    .map((group) => group.role!);
+  const agentRoles = agents
+    .map((agent) => agent.role_name)
+    .filter((role): role is string => Boolean(role));
+  const roleNames = [...new Set([...catalogRoles, ...agentRoles])].sort();
+  const groups = [
+    { kind: "workspace" as const },
+    ...roleNames.map((role) => ({ kind: "role" as const, role })),
+  ];
+  return groups.map((group) => {
+    const count =
+      skills.find((candidate) =>
+        group.kind === "workspace"
+          ? candidate.scope === "workspace"
+          : candidate.scope === "role" && candidate.role === group.role,
+      )?.skills.length ?? 0;
+    const ref = skillsExplorerRef(group);
+    return {
+      id: explorerRefKey(ref),
+      kind: "skills",
+      ref,
+      label: group.kind === "workspace" ? "Workspace" : group.role,
+      secondary: `${count} ${count === 1 ? "skill" : "skills"}`,
+      skillCount: count,
+    };
+  });
+}
+
 export function buildFileTreeSections({
   mode,
   agentName,
@@ -168,6 +209,15 @@ export function buildFileTreeSections({
   checkouts,
   skills = [],
 }: BuildFileTreeSectionsInput): FileTreeSection[] {
+  // The Skills section is the only place skills appear. It shows skills and
+  // nothing else — no agents, no repos, no workspace root — so it short-circuits
+  // before any checkout work happens.
+  if (mode === "skills") {
+    return [
+      { id: "skills", title: "Skills", roots: skillsRoots(agents, skills) },
+    ];
+  }
+
   const visibleAgents =
     mode === "agent" && agentName
       ? agents.filter((agent) => agent.name === agentName)
@@ -238,47 +288,9 @@ export function buildFileTreeSections({
         )
       : [];
 
-  // The Skills section shows skills and nothing else — no agents, no repos, no
-  // workspace root. Every other mode keeps the tree it already had.
-  const sections: FileTreeSection[] =
-    mode === "skills"
-      ? []
-      : [{ id: "agents", title: "Agents", roots: agentRoots }];
-  const catalogRoles = skills
-    .filter((group) => group.scope === "role" && group.role)
-    .map((group) => group.role!);
-  const visibleRoles = visibleAgents
-    .map((agent) => agent.role_name)
-    .filter((role): role is string => Boolean(role));
-  // Agent mode narrows to the one agent's role; every other mode takes the
-  // union, so a role with a skill but no agent (and vice versa) still appears.
-  const roleNames = [
-    ...new Set(
-      mode === "agent" ? visibleRoles : [...catalogRoles, ...visibleRoles],
-    ),
-  ].sort();
-  const skillGroups = [
-    { kind: "workspace" as const },
-    ...roleNames.map((role) => ({ kind: "role" as const, role })),
+  const sections: FileTreeSection[] = [
+    { id: "agents", title: "Agents", roots: agentRoots },
   ];
-  const skillRoots: SkillsTreeRoot[] = skillGroups.map((group) => {
-    const count =
-      skills.find((candidate) =>
-        group.kind === "workspace"
-          ? candidate.scope === "workspace"
-          : candidate.scope === "role" && candidate.role === group.role,
-      )?.skills.length ?? 0;
-    const ref = skillsExplorerRef(group);
-    return {
-      id: explorerRefKey(ref),
-      kind: "skills",
-      ref,
-      label: group.kind === "workspace" ? "Workspace" : group.role,
-      secondary: `${count} ${count === 1 ? "skill" : "skills"}`,
-      skillCount: count,
-    };
-  });
-  sections.push({ id: "skills", title: "Skills", roots: skillRoots });
   if (mode === "workspace") {
     sections.push({ id: "repos", title: "Repos", roots: repoRoots });
     sections.push({

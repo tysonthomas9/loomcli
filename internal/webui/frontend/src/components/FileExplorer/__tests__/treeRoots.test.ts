@@ -226,7 +226,6 @@ describe("treeRoots", () => {
 
     expect(sections.map((section) => section.id)).toEqual([
       "agents",
-      "skills",
       "repos",
       "workspace",
     ]);
@@ -234,7 +233,7 @@ describe("treeRoots", () => {
       kind: "agent",
       secondary: "docs-repo",
     });
-    expect(sections[2]?.roots[0]).toMatchObject({
+    expect(sections[1]?.roots[0]).toMatchObject({
       kind: "checkout",
       label: "docs-repo",
       changeCount: 2,
@@ -275,7 +274,7 @@ describe("treeRoots", () => {
       ],
     });
 
-    expect(sections.map((section) => section.id)).toEqual(["agents", "skills"]);
+    expect(sections.map((section) => section.id)).toEqual(["agents"]);
     expect(sections[0]?.roots).toHaveLength(1);
     expect(sections[0]?.roots[0]).toMatchObject({
       kind: "agent",
@@ -285,7 +284,10 @@ describe("treeRoots", () => {
     });
   });
 
-  it("places workspace and role skill groups after agents and before repos", () => {
+  it("workspace mode emits no skills section", () => {
+    // Skills were a root row in the Files explorer; they now live only in the
+    // Skills section, so the Files tree must not mention them even when the
+    // catalog is populated.
     const sections = buildFileTreeSections({
       mode: "workspace",
       agents: [agent({ name: "atlas", role_name: "reviewer" })],
@@ -296,25 +298,18 @@ describe("treeRoots", () => {
 
     expect(sections.map((section) => section.id)).toEqual([
       "agents",
-      "skills",
       "repos",
       "workspace",
     ]);
-    expect(sections[1]?.roots).toEqual([
-      expect.objectContaining({
-        kind: "skills",
-        label: "Workspace",
-        secondary: "1 skill",
-      }),
-      expect.objectContaining({
-        kind: "skills",
-        label: "reviewer",
-        secondary: "1 skill",
-      }),
-    ]);
+    expect(
+      sections.flatMap((section) => section.roots).map((root) => root.kind),
+    ).not.toContain("skills");
+    expect(existingExplorerRefs(sections)).not.toContainEqual(
+      expect.objectContaining({ kind: "skills" }),
+    );
   });
 
-  it("skills mode emits only the skills section", () => {
+  it("skills mode emits only the skills section, workspace group first", () => {
     const sections = buildFileTreeSections({
       mode: "skills",
       agents: [agent({ name: "atlas", role_name: "reviewer" })],
@@ -327,8 +322,18 @@ describe("treeRoots", () => {
     // skills and nothing else.
     expect(sections.map((section) => section.id)).toEqual(["skills"]);
     expect(sections[0]?.roots).toEqual([
-      expect.objectContaining({ kind: "skills", label: "Workspace" }),
-      expect.objectContaining({ kind: "skills", label: "reviewer" }),
+      expect.objectContaining({
+        kind: "skills",
+        label: "Workspace",
+        secondary: "1 skill",
+        skillCount: 1,
+      }),
+      expect.objectContaining({
+        kind: "skills",
+        label: "reviewer",
+        secondary: "1 skill",
+        skillCount: 1,
+      }),
     ]);
   });
 
@@ -350,7 +355,7 @@ describe("treeRoots", () => {
     ]);
   });
 
-  it("limits agent mode to workspace plus that agent role and excludes skills from git", () => {
+  it("agent mode emits no skills section and keeps its git refs", () => {
     const sections = buildFileTreeSections({
       mode: "agent",
       agentName: "atlas",
@@ -363,18 +368,41 @@ describe("treeRoots", () => {
       skills: skillGroups(),
     });
 
-    expect(sections[1]?.roots.map((root) => root.label)).toEqual([
-      "Workspace",
-      "reviewer",
-    ]);
-    expect(existingExplorerRefs(sections)).toEqual(
-      expect.arrayContaining([
-        { kind: "skills", group: { kind: "workspace" } },
-        { kind: "skills", group: { kind: "role", role: "reviewer" } },
-      ]),
+    expect(sections.map((section) => section.id)).toEqual(["agents"]);
+    expect(existingExplorerRefs(sections)).not.toContainEqual(
+      expect.objectContaining({ kind: "skills" }),
     );
     expect(gitStatusRefs(sections)).toEqual([
       { scope: "agent", target: "atlas" },
     ]);
+  });
+
+  it("skills mode exposes skill refs and no git refs", () => {
+    const sections = buildFileTreeSections({
+      mode: "skills",
+      agents: [
+        agent({ name: "atlas", role_name: "reviewer" }),
+        agent({ name: "nova", role_name: "planner" }),
+      ],
+      repos: [repo("source-repo")],
+      checkouts: [
+        checkout({
+          kind: "agent",
+          agent: "atlas",
+          repo: "source-repo",
+          exists: true,
+          change_count: 4,
+        }),
+      ],
+      skills: skillGroups(),
+    });
+
+    expect(existingExplorerRefs(sections)).toEqual([
+      { kind: "skills", group: { kind: "workspace" } },
+      { kind: "skills", group: { kind: "role", role: "planner" } },
+      { kind: "skills", group: { kind: "role", role: "reviewer" } },
+    ]);
+    // Skills have no checkout behind them, so nothing here asks git for status.
+    expect(gitStatusRefs(sections)).toEqual([]);
   });
 });

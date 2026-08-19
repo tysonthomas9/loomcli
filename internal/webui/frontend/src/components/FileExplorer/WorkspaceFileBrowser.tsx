@@ -155,6 +155,11 @@ interface BranchDiffRequest {
   agent: string;
 }
 
+interface ScopedFileIndex {
+  ref: CheckoutRef;
+  index: Awaited<ReturnType<typeof indexScopedFiles>>;
+}
+
 function FileBrowserInner({
   mode = "workspace",
   agentName,
@@ -326,16 +331,21 @@ function FileBrowserInner({
       }),
     [mode, agentName, agents, repos, skillsCatalog.groups, visibleCheckouts],
   );
+  // Everything this browser's tab set may legitimately hold, ignoring the
+  // current mode's visibility filter (agent mode narrows the tree but keeps
+  // every checkout tab valid). Skills mode is its own universe: its tab set may
+  // only hold skill refs, and the Files section's may only hold checkout refs —
+  // which is what retires a skills tab saved by the old Files explorer.
   const allSections = useMemo(
     () =>
       buildFileTreeSections({
-        mode: "workspace",
+        mode: mode === "skills" ? "skills" : "workspace",
         agents,
         repos,
         checkouts,
         skills: skillsCatalog.groups,
       }),
-    [agents, repos, checkouts, skillsCatalog.groups],
+    [mode, agents, repos, checkouts, skillsCatalog.groups],
   );
   const computedVisibleExplorerRefs = useMemo(
     () => existingExplorerRefs(sections),
@@ -622,22 +632,27 @@ function FileBrowserInner({
       setQuickOpenLoading(true);
       setQuickOpenError(null);
       try {
-        const indexes =
-          mode === "agent"
-            ? await Promise.all(
-                quickOpenIndexRefs.map(async (ref) => ({
-                  ref,
-                  index: await indexScopedFiles(workspaceId, ref),
-                })),
-              )
-            : [
-                {
-                  ref: { scope: "workspace" } as CheckoutRef,
-                  index: await indexScopedFiles(workspaceId, {
-                    scope: "workspace",
-                  }),
-                },
-              ];
+        // The Skills section has no checkout behind it, so Quick Open there
+        // offers skills only. Indexing the workspace would offer files this
+        // browser's tab set is not allowed to hold.
+        const indexes: ScopedFileIndex[] =
+          mode === "skills"
+            ? []
+            : mode === "agent"
+              ? await Promise.all(
+                  quickOpenIndexRefs.map(async (ref) => ({
+                    ref,
+                    index: await indexScopedFiles(workspaceId, ref),
+                  })),
+                )
+              : [
+                  {
+                    ref: { scope: "workspace" } as CheckoutRef,
+                    index: await indexScopedFiles(workspaceId, {
+                      scope: "workspace",
+                    }),
+                  },
+                ];
         const checkoutItems = indexes.flatMap(({ ref, index }) =>
           index.paths.map((rawPath) => {
             const mapped =
@@ -777,14 +792,15 @@ function FileBrowserInner({
       if (mod && !event.shiftKey && key === "p") {
         event.preventDefault();
         setQuickOpenOpen(true);
-      } else if (mod && event.shiftKey && key === "f") {
+      } else if (mod && event.shiftKey && key === "f" && mode !== "skills") {
+        // Search/replace runs over a checkout scope; the Skills section has none.
         event.preventDefault();
         setSearchPanelOpen(true);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isActive]);
+  }, [isActive, mode]);
 
   const expandForRef = useCallback((ref: ExplorerRef) => {
     setExpandedRoots((prev) => {

@@ -9,7 +9,7 @@ import { expect, test, type APIRequestContext } from "@playwright/test";
 // rejected in the loomcli handler before the store is touched) plus the
 // capability/catalog/CORS surface.
 //
-// The role-scoped tests (CRUD + the FileExplorer UI) require a role that
+// The role-scoped tests (CRUD + the Skills section UI) require a role that
 // EXISTS in fleet-db: `checkScopeTarget` refuses a role-scoped skill whose
 // role is not projected (the same referential-integrity wiring AgentService
 // uses). `task` is one of the built-in roles seeded for every workspace
@@ -218,7 +218,8 @@ test.describe("Skills tree", () => {
     test.skip(!available, ROLE_SCOPE_UNAVAILABLE);
 
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto(`/ws/${WORKSPACE_ID}/files`);
+    // Skills live in their own nav section, not inside the Files explorer.
+    await page.goto(`/ws/${WORKSPACE_ID}/skills`);
 
     // The Workspace skills root exists but its create affordance is disabled —
     // the A3 read-only line in the UI.
@@ -227,6 +228,19 @@ test.describe("Skills tree", () => {
     });
     await expect(workspaceAdd).toBeVisible();
     await expect(workspaceAdd).toBeDisabled();
+
+    // The Skills section shows skill roots and nothing else: no Agents, no
+    // Repos, no Workspace-files root borrowed from the Files explorer. Tree
+    // section headings are <h2>; level 2 keeps this off the <h1> breadcrumb,
+    // which also reads "Skills".
+    await expect(
+      page.getByRole("heading", { level: 2, name: "Skills", exact: true }),
+    ).toBeVisible();
+    for (const absent of ["Agents", "Repos", "Workspace files"]) {
+      await expect(
+        page.getByRole("heading", { level: 2, name: absent, exact: true }),
+      ).toHaveCount(0);
+    }
 
     // Expand the role group, then the seeded skill folder. The toggle button's
     // accessible name starts with the role label ("task …"), distinguishing it

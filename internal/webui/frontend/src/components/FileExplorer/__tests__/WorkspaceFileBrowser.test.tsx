@@ -299,6 +299,7 @@ vi.mock("@/hooks", async () => {
     FileBrowserStoreProvider: stores.FileBrowserStoreProvider,
     agentFileBrowserTabsStorageKey: stores.agentFileBrowserTabsStorageKey,
     fileBrowserTabsStorageKey: stores.fileBrowserTabsStorageKey,
+    skillsFileBrowserTabsStorageKey: stores.skillsFileBrowserTabsStorageKey,
     useFileBrowserStore: stores.useFileBrowserStore,
     useFileBrowserStoreInstance: stores.useFileBrowserStoreInstance,
     useFileDocumentRegistry: () => documentRegistry,
@@ -808,25 +809,101 @@ describe("WorkspaceFileBrowser", () => {
     ).toBeInTheDocument();
   });
 
-  it("rebuilds Quick Open when a catalog loaded after a checkout-only index", async () => {
+  it("rebuilds the Skills section Quick Open when the catalog loads", async () => {
+    // Was a workspace-mode test back when skills hung off the Files explorer.
+    // Skills only exist in the Skills section now, so the same rebuild-on-load
+    // behaviour is pinned there.
     mocks.skillsCatalogStatus = "loading";
-    const view = render(<WorkspaceFileBrowser mode="workspace" />);
+    const view = render(<WorkspaceFileBrowser mode="skills" />);
     fireEvent.keyDown(window, { key: "p", metaKey: true });
     await screen.findByRole("dialog", { name: "Quick open" });
-    await waitFor(() =>
-      expect(mocks.indexScopedFiles).toHaveBeenCalledTimes(1),
-    );
     expect(screen.queryByText("SKILL.md")).toBeNull();
 
     mocks.skillsCatalogStatus = "loaded";
     mocks.skillsCatalogRevision = 2;
     mocks.skillIndexPaths = ["audit/SKILL.md"];
-    view.rerender(<WorkspaceFileBrowser mode="workspace" />);
+    view.rerender(<WorkspaceFileBrowser mode="skills" />);
 
-    await waitFor(() =>
-      expect(mocks.indexScopedFiles).toHaveBeenCalledTimes(2),
-    );
     expect(await screen.findByText("SKILL.md")).toBeInTheDocument();
+    // No checkout sits behind the Skills section, so Quick Open never indexes
+    // one — offering workspace files here would open tabs this browser's tab
+    // set is not allowed to keep.
+    expect(mocks.indexScopedFiles).not.toHaveBeenCalled();
+  });
+
+  it("drops a skills tab saved by the old Files explorer", async () => {
+    // A Files-section tab set written while skills still lived in this tree can
+    // hold a skills ref. Skills are not reachable here any more, so the stale
+    // tab is dropped — not silently re-homed into the Skills section's own tab
+    // set, which the Files section has no business writing to.
+    //
+    // The catalog really does carry this role — so the tab is dropped because
+    // the Files tree no longer admits skill refs, not because the role is gone.
+    mocks.skillGroups = [
+      {
+        scope: "role",
+        role: "reviewer",
+        skills: [
+          {
+            name: "audit",
+            scope: "role",
+            role: "reviewer",
+            description: "Audit the implementation",
+            content_revision: "skill-v1",
+            files: [],
+            created_at: "2026-08-14T00:00:00Z",
+            updated_at: "2026-08-14T00:00:00Z",
+          },
+        ],
+      },
+    ];
+    localStorage.setItem(
+      "loom:ws-1:file-browser-tabs:v3",
+      JSON.stringify({
+        v: 4,
+        groups: [
+          {
+            tabs: [
+              {
+                ref: { kind: "checkout", checkout: { scope: "workspace" } },
+                path: "main.ts",
+              },
+              {
+                ref: {
+                  kind: "skills",
+                  group: { kind: "role", role: "reviewer" },
+                },
+                path: "audit/SKILL.md",
+              },
+            ],
+            active: null,
+          },
+        ],
+        mru: [],
+      }),
+    );
+
+    render(<WorkspaceFileBrowser mode="workspace" />);
+
+    const tabs = await screen.findByRole("tablist", { name: /Open files/ });
+    expect(within(tabs).getByText("main.ts")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(tabs).queryByText("SKILL.md")).toBeNull(),
+    );
+  });
+
+  it("never offers skills in the Files section Quick Open", async () => {
+    mocks.skillIndexPaths = ["audit/SKILL.md"];
+    render(<WorkspaceFileBrowser mode="workspace" />);
+
+    fireEvent.keyDown(window, { key: "p", metaKey: true });
+    await screen.findByRole("dialog", { name: "Quick open" });
+    await waitFor(() =>
+      expect(mocks.indexScopedFiles).toHaveBeenCalledTimes(1),
+    );
+
+    expect(await screen.findByText("other.ts")).toBeInTheDocument();
+    expect(screen.queryByText("SKILL.md")).toBeNull();
   });
 
   it("opens, edits, saves, and guards discarding a dirty file", async () => {
@@ -2394,12 +2471,9 @@ describe("WorkspaceFileBrowser", () => {
       binary: false,
       version: "skill-v1",
     };
-    render(<WorkspaceFileBrowser mode="workspace" />);
+    render(<WorkspaceFileBrowser mode="skills" />);
     const skillsRoot = (await screen.findByText("Workspace")).closest("button");
     expect(skillsRoot).not.toBeNull();
-    await waitFor(() => expect(mocks.gitStatusScoped).toHaveBeenCalled());
-    const readsBefore = mocks.readScopedFile.mock.calls.length;
-    const listsBefore = mocks.listScopedDir.mock.calls.length;
 
     fireEvent.click(skillsRoot!);
     fireEvent.click(await screen.findByLabelText("SKILL.md"));
@@ -2410,11 +2484,13 @@ describe("WorkspaceFileBrowser", () => {
     expect(screen.getByText("Audit the implementation")).toBeVisible();
     expect(screen.getByText(/Read-only.*loom skill update/)).toBeVisible();
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
-    expect(mocks.readScopedFile).toHaveBeenCalledTimes(readsBefore);
-    expect(mocks.listScopedDir).toHaveBeenCalledTimes(listsBefore);
+    // The Skills section touches no checkout API at all — not even git status.
+    expect(mocks.readScopedFile).not.toHaveBeenCalled();
+    expect(mocks.listScopedDir).not.toHaveBeenCalled();
+    expect(mocks.gitStatusScoped).not.toHaveBeenCalled();
   });
 
-  it("does not render checkout History after switching to a skills tab", async () => {
+  it("offers no checkout History for a skills tab", async () => {
     mocks.skillGroups = [
       {
         scope: "role",
@@ -2440,18 +2516,20 @@ describe("WorkspaceFileBrowser", () => {
       binary: false,
       version: "skill-v1",
     };
-    render(<WorkspaceFileBrowser mode="workspace" />);
-    await expandWorkspaceFiles();
-    fireEvent.click(screen.getByLabelText("main.ts"));
-    fireEvent.click(await screen.findByRole("button", { name: "History" }));
-    expect(await screen.findByLabelText("File history")).toBeInTheDocument();
+    // Previously this switched from a checkout tab to a skills tab inside one
+    // browser. That mix is unreachable now that each section keeps its own
+    // roots and tab set, so what survives is the invariant it was really
+    // guarding: a skills tab never grows checkout history affordances.
+    render(<WorkspaceFileBrowser mode="skills" />);
 
     fireEvent.click((await screen.findByText("reviewer")).closest("button")!);
     fireEvent.click(await screen.findByLabelText("SKILL.md"));
 
-    await waitFor(() => {
-      expect(screen.queryByLabelText("File history")).not.toBeInTheDocument();
-    });
+    expect(
+      await screen.findByDisplayValue("Review every changed seam."),
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: "History" })).toBeNull();
+    expect(screen.queryByLabelText("File history")).not.toBeInTheDocument();
     expect(screen.queryByText("No file selected.")).toBeNull();
   });
 });
