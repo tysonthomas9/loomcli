@@ -3,8 +3,12 @@
  */
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { createMemoryRouter, RouterProvider } from "react-router-dom";
-import { createElement, type ReactNode } from "react";
+import {
+  createMemoryRouter,
+  RouterProvider,
+  useLocation,
+} from "react-router-dom";
+import { createElement, Fragment, type ReactNode } from "react";
 
 import { DEFAULT_VIEW } from "@/types";
 
@@ -31,6 +35,8 @@ function createRouterWrapper(initialPath = "/ws/test-ws/kanban") {
             { path: "workspace", element: children },
             { path: "settings", element: children },
             { path: "files", element: children },
+            { path: "prs", element: children },
+            { path: "agents", element: children },
             { path: "issues/:issueId", element: children },
           ],
         },
@@ -40,6 +46,62 @@ function createRouterWrapper(initialPath = "/ws/test-ws/kanban") {
 
     return createElement(RouterProvider, { router });
   };
+}
+
+/**
+ * Same wrapper, plus a probe that records the router's current location so a
+ * test can assert the URL that was actually navigated to — not just the derived
+ * view. The existing view-only assertions cannot fail on a buildViewPath that
+ * copies the search string verbatim, which is exactly how PUPPET-94 survived.
+ */
+function createLocationProbeWrapper(initialPath: string) {
+  const seen: { pathname: string; search: string } = {
+    pathname: "",
+    search: "",
+  };
+
+  function LocationProbe(): null {
+    const location = useLocation();
+    seen.pathname = location.pathname;
+    seen.search = location.search;
+    return null;
+  }
+
+  const wrapper = function Wrapper({ children }: { children: ReactNode }) {
+    const element = createElement(
+      Fragment,
+      null,
+      children,
+      createElement(LocationProbe),
+    );
+    const router = createMemoryRouter(
+      [
+        {
+          path: "/ws/:workspaceId",
+          children: [
+            { index: true, element },
+            { path: "kanban", element },
+            { path: "table", element },
+            { path: "graph", element },
+            { path: "monitor", element },
+            { path: "observability", element },
+            { path: "terminal", element },
+            { path: "workspace", element },
+            { path: "settings", element },
+            { path: "files", element },
+            { path: "prs", element },
+            { path: "agents", element },
+            { path: "issues/:issueId", element },
+          ],
+        },
+      ],
+      { initialEntries: [initialPath] },
+    );
+
+    return createElement(RouterProvider, { router });
+  };
+
+  return { wrapper, location: seen };
 }
 
 describe("useRouteView", () => {
@@ -288,6 +350,117 @@ describe("useRouteView", () => {
       });
 
       expect(result.current.view).toBe("graph");
+    });
+  });
+
+  describe("view-scoped detail params (PUPPET-94)", () => {
+    it("clears ?review= when navigating to the already-active prs view", () => {
+      const { wrapper, location } = createLocationProbeWrapper(
+        "/ws/test-ws/prs?review=LOCALMODE-5",
+      );
+      const { result } = renderHook(() => useRouteView(), { wrapper });
+
+      act(() => {
+        result.current.navigateToView("prs");
+      });
+
+      expect(location.pathname).toBe("/ws/test-ws/prs");
+      expect(location.search).toBe("");
+    });
+
+    it("clears ?review-pr=", () => {
+      const { wrapper, location } = createLocationProbeWrapper(
+        "/ws/test-ws/prs?review-pr=owner%2Frepo%2312",
+      );
+      const { result } = renderHook(() => useRouteView(), { wrapper });
+
+      act(() => {
+        result.current.navigateToView("prs");
+      });
+
+      expect(location.pathname).toBe("/ws/test-ws/prs");
+      expect(location.search).toBe("");
+    });
+
+    it("clears review and discuss together", () => {
+      const { wrapper, location } = createLocationProbeWrapper(
+        "/ws/test-ws/prs?review=LOCALMODE-5&discuss=1",
+      );
+      const { result } = renderHook(() => useRouteView(), { wrapper });
+
+      act(() => {
+        result.current.navigateToView("prs");
+      });
+
+      expect(location.search).toBe("");
+    });
+
+    it("keeps workspace-scoped params while dropping the detail param", () => {
+      const { wrapper, location } = createLocationProbeWrapper(
+        "/ws/test-ws/prs?review=LOCALMODE-5&repoFilter=my-repo",
+      );
+      const { result } = renderHook(() => useRouteView(), { wrapper });
+
+      act(() => {
+        result.current.navigateToView("prs");
+      });
+
+      expect(location.pathname).toBe("/ws/test-ws/prs");
+      expect(location.search).toBe("?repoFilter=my-repo");
+    });
+
+    it("does not leak the detail param into another view", () => {
+      const { wrapper, location } = createLocationProbeWrapper(
+        "/ws/test-ws/prs?review=LOCALMODE-5",
+      );
+      const { result } = renderHook(() => useRouteView(), { wrapper });
+
+      act(() => {
+        result.current.navigateToView("terminal");
+      });
+
+      expect(location.pathname).toBe("/ws/test-ws/terminal");
+      expect(location.search).toBe("");
+    });
+
+    it("strips identically under setView (replace semantics)", () => {
+      const { wrapper, location } = createLocationProbeWrapper(
+        "/ws/test-ws/prs?review=LOCALMODE-5&repoFilter=my-repo",
+      );
+      const { result } = renderHook(() => useRouteView(), { wrapper });
+
+      act(() => {
+        result.current.setView("prs");
+      });
+
+      expect(location.pathname).toBe("/ws/test-ws/prs");
+      expect(location.search).toBe("?repoFilter=my-repo");
+    });
+
+    it("emits no trailing ? for an empty or malformed search string", () => {
+      const { wrapper, location } =
+        createLocationProbeWrapper("/ws/test-ws/prs?&&");
+      const { result } = renderHook(() => useRouteView(), { wrapper });
+
+      act(() => {
+        result.current.navigateToView("files");
+      });
+
+      expect(location.pathname).toBe("/ws/test-ws/files");
+      expect(location.search).toBe("");
+    });
+
+    it("still navigates from another view to the prs list", () => {
+      const { wrapper, location } =
+        createLocationProbeWrapper("/ws/test-ws/files");
+      const { result } = renderHook(() => useRouteView(), { wrapper });
+
+      act(() => {
+        result.current.navigateToView("prs");
+      });
+
+      expect(location.pathname).toBe("/ws/test-ws/prs");
+      expect(location.search).toBe("");
     });
   });
 });
