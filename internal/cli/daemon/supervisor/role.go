@@ -71,6 +71,13 @@ func builtInRoleConfig(roleName string) cfgpkg.RoleConfig {
 // Description falls back to base when overlay has none.
 // PromptFile is NOT merged (built-in roles don't use prompt files).
 func MergeRoleConfig(base, overlay cfgpkg.RoleConfig) cfgpkg.RoleConfig {
+	base = mergeRoleIdentity(base, overlay)
+	return mergeRoleExecution(base, overlay)
+}
+
+// mergeRoleIdentity overlays the identity and routing half of the config:
+// what the role is and which tasks it may claim.
+func mergeRoleIdentity(base, overlay cfgpkg.RoleConfig) cfgpkg.RoleConfig {
 	if overlay.Kind != "" {
 		base.Kind = overlay.Kind
 	}
@@ -89,11 +96,26 @@ func MergeRoleConfig(base, overlay cfgpkg.RoleConfig) cfgpkg.RoleConfig {
 	if overlay.TaskFilter != "" {
 		base.TaskFilter = overlay.TaskFilter
 	}
+	if overlay.Executor != "" {
+		base.Executor = overlay.Executor
+	}
 	if overlay.MaxConcurrency != nil {
 		base.MaxConcurrency = overlay.MaxConcurrency
 	}
+	return base
+}
+
+// mergeRoleExecution overlays the execution half of the config: backend
+// selection, spend and duration bounds, and the safety knobs.
+func mergeRoleExecution(base, overlay cfgpkg.RoleConfig) cfgpkg.RoleConfig {
 	if overlay.MaxBudgetUSD != nil {
 		base.MaxBudgetUSD = overlay.MaxBudgetUSD
+	}
+	// A pointer, so an explicit 0 survives the merge: "this role opts out of the
+	// run-duration cap" has to be expressible, and a plain int could not tell it
+	// apart from "unset, inherit the daemon default".
+	if overlay.MaxRunDuration != nil {
+		base.MaxRunDuration = overlay.MaxRunDuration
 	}
 	if overlay.Backend != "" {
 		base.Backend = overlay.Backend
@@ -112,6 +134,13 @@ func MergeRoleConfig(base, overlay cfgpkg.RoleConfig) cfgpkg.RoleConfig {
 	}
 	if len(overlay.DeniedTools) > 0 {
 		base.DeniedTools = overlay.DeniedTools
+	}
+	// A non-nil overlay policy replaces the base wholesale rather than merging
+	// the Kinds maps. Merging would let a base entry the overlay deliberately
+	// dropped survive, and for a policy whose entries grant permission that
+	// resolves the wrong way: the surviving entry could be the permissive one.
+	if overlay.InputPolicy != nil {
+		base.InputPolicy = overlay.InputPolicy
 	}
 	// PromptFile intentionally NOT merged for built-in roles
 	return base

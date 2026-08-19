@@ -2,7 +2,9 @@
 // These types represent the JSON wire format for API requests and responses.
 //
 // DTOs are a leaf package: they import only internal/entity (for domain
-// enums and value types) and the Go standard library.
+// enums and value types), internal/types (for the canonical status vocabulary,
+// which the request validators check against rather than re-listing) and the Go
+// standard library. The two are peers in depguard's sdk-leaf layer.
 // They do NOT import service, handler, or any infrastructure packages.
 //
 // Request DTOs (CreateIssueRequest, PatchIssueRequest) represent incoming

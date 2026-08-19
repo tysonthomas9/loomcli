@@ -291,9 +291,10 @@ func decodeParams[T any](body []byte) (T, error) {
 
 func (m *Module) claimReady(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
 	params, err := decodeParams[struct {
-		EpicID string `json:"epicId"`
-		Actor  string `json:"actor"`
-		Limit  int    `json:"limit"`
+		EpicID        string   `json:"epicId"`
+		Actor         string   `json:"actor"`
+		Limit         int      `json:"limit"`
+		ExcludeLabels []string `json:"excludeLabels"`
 	}](body)
 	if err != nil {
 		return nil, err
@@ -310,9 +311,10 @@ func (m *Module) claimReady(ctx context.Context, ws string, id driverIdentity, b
 	}
 	// ClaimReadyTask defaults a non-positive limit itself.
 	claimed, err := driverpkg.ClaimReadyTask(ctx, issueBackend, driverpkg.TaskClaimOptions{
-		EpicID: epicID,
-		Actor:  actor,
-		Limit:  params.Limit,
+		EpicID:        epicID,
+		Actor:         actor,
+		Limit:         params.Limit,
+		ExcludeLabels: params.ExcludeLabels,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claim ready task: %w", err)

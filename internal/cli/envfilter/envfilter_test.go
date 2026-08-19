@@ -65,6 +65,25 @@ func TestFilterEnv_AllowsCodexE2EStubControls(t *testing.T) {
 	}
 }
 
+func TestFilterEnv_AllowsBackendConfigDirOverrides(t *testing.T) {
+	// Both backends resolve their credentials through a config-dir override,
+	// and both health checks honor it. Filtering either one out makes preflight
+	// and the spawned CLI disagree about where auth lives.
+	input := []string{
+		"CODEX_HOME=/custom/codex",
+		"CLAUDE_CONFIG_DIR=/custom/claude",
+	}
+	got := FilterEnv(input)
+	if len(got) != len(input) {
+		t.Fatalf("FilterEnv() returned %d entries, want %d; got %v", len(got), len(input), got)
+	}
+	for i := range input {
+		if got[i] != input[i] {
+			t.Errorf("got[%d] = %q, want %q", i, got[i], input[i])
+		}
+	}
+}
+
 func TestFilterEnv_MixedInput(t *testing.T) {
 	input := []string{
 		"PATH=/usr/bin",

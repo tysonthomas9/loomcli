@@ -162,6 +162,46 @@ func DaemonActivityObserver() func(wrapper.Snapshot) {
 	}
 }
 
+// BeginDaemonInputWait announces to the daemon that this agent has parked on an
+// interactive prompt, and returns the function that announces its resolution.
+// Use it as `defer BeginDaemonInputWait()()` around the wait itself, so the
+// second edge is delivered even on a panic path.
+//
+// The daemon counts these edges per agent and suspends ONLY its output-timeout
+// idle kill while the count is above zero. An agent sitting at a dialog emits no
+// PTY output — harness-wrapper's pkg/chat will not idle-complete a turn while a
+// request is surfaced — so without this the watchdog cannot tell a legitimate
+// wait from a hang and kills it. Everything else still applies: shutdown, drain
+// and manual stop ignore the count entirely, and the daemon bounds how long any
+// one wait may hold the kill off.
+//
+// Outside daemon supervision (no LOOM_DAEMON_SOCKET, fleet mode) there is no
+// watchdog to suspend, so both halves are no-ops. A failed announcement is
+// logged and swallowed rather than surfaced: losing the "begin" costs only the
+// suspension, leaving today's behavior exactly as it is, and losing the "end" is
+// what the daemon-side bound exists to cover. Neither is worth failing a prompt
+// over.
+//
+// The returned function is idempotent, so a caller that releases explicitly and
+// also defers cannot double-decrement.
+func BeginDaemonInputWait() func() {
+	client := agentIPCClientFromDefaultBackend()
+	if client == nil {
+		return func() {}
+	}
+	if err := client.InputWait(IPCInputWaitBegin); err != nil {
+		slog.Debug("agent IPC input-wait begin failed", "err", err)
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			if err := client.InputWait(IPCInputWaitEnd); err != nil {
+				slog.Debug("agent IPC input-wait end failed", "err", err)
+			}
+		})
+	}
+}
+
 // agentIPCClientFromDefaultBackend returns the active AgentIPCClient when the
 // global issue backend is an ipcIssueBackend wrapping one, else nil.
 func agentIPCClientFromDefaultBackend() *AgentIPCClient {

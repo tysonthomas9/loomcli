@@ -1309,7 +1309,7 @@ Workspace-scoped variants of all fleet endpoints are also available at `/api/wor
 
 ### Prerequisites
 
-Fleet endpoints are only registered when `fleetEnabled` is true — this requires Redis to be configured (`--fleet-redis`) and a fleet API key (`--fleet-api-key`). When these flags are not set, all fleet routes return `404` (not registered).
+Fleet endpoints are only registered when fleet mode is enabled — `--fleet-mode` (or `LOOM_FLEET_MODE=true`) with Redis configured via `--redis-addr` (or `LOOM_REDIS_ADDR`) and a fleet API key (`--fleet-api-key`). There is no `--fleet-redis` flag. When fleet mode is not enabled, all fleet routes return `404` (not registered).
 
 ### Authentication Model
 

@@ -18,25 +18,26 @@ var _ store.AgentStore = (*agentStore)(nil)
 // the lead-to-orchestration AgentSession join. AgentSession is the
 // single source of truth; readers use store.OrchestrationSessionIDFor.
 type agentWire struct {
-	WorkspaceKey     string    `json:"workspace_key"`
-	Name             string    `json:"name"`
-	RoleName         string    `json:"role_name"`
-	Auto             bool      `json:"auto,omitempty"`
-	Backend          string    `json:"backend,omitempty"`
-	FallbackBackends []string  `json:"fallback_backends,omitempty"`
-	RuntimeProvider  string    `json:"runtime_provider,omitempty"`
-	Repos            []string  `json:"repos,omitempty"`
-	RepoGroups       []string  `json:"repo_groups,omitempty"`
-	CrossRepo        bool      `json:"cross_repo,omitempty"`
-	Parent           string    `json:"parent,omitempty"`
-	State            string    `json:"state"`
-	Mode             string    `json:"mode,omitempty"`
-	TaskFilter       string    `json:"task_filter,omitempty"`
-	MaxConcurrency   int       `json:"max_concurrency,omitempty"`
-	BudgetPolicy     string    `json:"budget_policy,omitempty"`
-	DesiredState     string    `json:"desired_state,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	WorkspaceKey     string             `json:"workspace_key"`
+	Name             string             `json:"name"`
+	RoleName         string             `json:"role_name"`
+	Auto             bool               `json:"auto,omitempty"`
+	Backend          string             `json:"backend,omitempty"`
+	FallbackBackends []string           `json:"fallback_backends,omitempty"`
+	RuntimeProvider  string             `json:"runtime_provider,omitempty"`
+	Repos            []string           `json:"repos,omitempty"`
+	RepoGroups       []string           `json:"repo_groups,omitempty"`
+	CrossRepo        bool               `json:"cross_repo,omitempty"`
+	Parent           string             `json:"parent,omitempty"`
+	State            string             `json:"state"`
+	Mode             string             `json:"mode,omitempty"`
+	TaskFilter       string             `json:"task_filter,omitempty"`
+	MaxConcurrency   int                `json:"max_concurrency,omitempty"`
+	BudgetPolicy     string             `json:"budget_policy,omitempty"`
+	DesiredState     string             `json:"desired_state,omitempty"`
+	Hooks            *domain.AgentHooks `json:"hooks,omitempty"`
+	CreatedAt        time.Time          `json:"created_at"`
+	UpdatedAt        time.Time          `json:"updated_at"`
 	// Derived, read-only liveness fields fleet-db computes from the
 	// session+lease join; passed through to domain.Agent, never sent on writes.
 	LiveStatus   string `json:"live_status,omitempty"`
@@ -67,6 +68,7 @@ func (a agentWire) toDomain() *domain.Agent {
 		MaxConcurrency:   a.MaxConcurrency,
 		BudgetPolicy:     a.BudgetPolicy,
 		DesiredState:     domain.AgentDesiredState(a.DesiredState),
+		Hooks:            a.Hooks.Clone(),
 		CreatedAt:        a.CreatedAt,
 		UpdatedAt:        a.UpdatedAt,
 		LiveStatus:       domain.AgentLiveStatus(a.LiveStatus),
@@ -78,21 +80,22 @@ func (a agentWire) toDomain() *domain.Agent {
 
 func (s *agentStore) Create(ctx context.Context, in store.AgentCreate) (*domain.Agent, error) {
 	body := struct {
-		Name             string   `json:"name"`
-		RoleName         string   `json:"role_name"`
-		Auto             bool     `json:"auto,omitempty"`
-		Backend          string   `json:"backend,omitempty"`
-		FallbackBackends []string `json:"fallback_backends,omitempty"`
-		RuntimeProvider  string   `json:"runtime_provider,omitempty"`
-		Repos            []string `json:"repos,omitempty"`
-		RepoGroups       []string `json:"repo_groups,omitempty"`
-		CrossRepo        bool     `json:"cross_repo,omitempty"`
-		Parent           string   `json:"parent,omitempty"`
-		Mode             string   `json:"mode,omitempty"`
-		TaskFilter       string   `json:"task_filter,omitempty"`
-		MaxConcurrency   int      `json:"max_concurrency,omitempty"`
-		BudgetPolicy     string   `json:"budget_policy,omitempty"`
-		DesiredState     string   `json:"desired_state,omitempty"`
+		Name             string             `json:"name"`
+		RoleName         string             `json:"role_name"`
+		Auto             bool               `json:"auto,omitempty"`
+		Backend          string             `json:"backend,omitempty"`
+		FallbackBackends []string           `json:"fallback_backends,omitempty"`
+		RuntimeProvider  string             `json:"runtime_provider,omitempty"`
+		Repos            []string           `json:"repos,omitempty"`
+		RepoGroups       []string           `json:"repo_groups,omitempty"`
+		CrossRepo        bool               `json:"cross_repo,omitempty"`
+		Parent           string             `json:"parent,omitempty"`
+		Mode             string             `json:"mode,omitempty"`
+		TaskFilter       string             `json:"task_filter,omitempty"`
+		MaxConcurrency   int                `json:"max_concurrency,omitempty"`
+		BudgetPolicy     string             `json:"budget_policy,omitempty"`
+		DesiredState     string             `json:"desired_state,omitempty"`
+		Hooks            *domain.AgentHooks `json:"hooks,omitempty"`
 	}{
 		Name:             in.Name,
 		RoleName:         in.RoleName,
@@ -109,6 +112,7 @@ func (s *agentStore) Create(ctx context.Context, in store.AgentCreate) (*domain.
 		MaxConcurrency:   in.MaxConcurrency,
 		BudgetPolicy:     in.BudgetPolicy,
 		DesiredState:     string(in.DesiredState),
+		Hooks:            in.Hooks.Clone(),
 	}
 	var resp agentWire
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/agents", body, &resp); err != nil {
@@ -199,6 +203,11 @@ func agentUpdateBody(patch store.AgentUpdate) map[string]any {
 	if patch.DesiredState != nil {
 		body["desired_state"] = string(*patch.DesiredState)
 	}
+	// A non-nil empty pipeline is the explicit clear marker; only a nil patch
+	// leaves hooks untouched, so {} must still reach fleet-db.
+	if hooks := patch.Hooks.Clone(); hooks != nil {
+		body["hooks"] = hooks
+	}
 	return body
 }
 
@@ -222,7 +231,8 @@ func agentUpdateHasFleetDBFields(patch store.AgentUpdate) bool {
 		patch.TaskFilter != nil ||
 		patch.MaxConcurrency != nil ||
 		patch.BudgetPolicy != nil ||
-		patch.DesiredState != nil
+		patch.DesiredState != nil ||
+		patch.Hooks != nil
 }
 
 func (s *agentStore) Delete(ctx context.Context, ws, name string) error {

@@ -771,6 +771,7 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		FrontendDir:           serveFrontendDir,
 		MonitorHandlers:       monitorHandlers,
 		AgentControlFn:        daemonwire.BuildAgentControlFn(),
+		AgentInputFn:          daemonwire.BuildAgentInputFn(),
 		DaemonSupervisorFn:    daemonwire.BuildDaemonSupervisorFn(),
 		DaemonConfigFn:        daemonwire.BuildDaemonConfigFn(),
 		AgentQueueFn:          daemonwire.BuildAgentQueueFn(),
@@ -780,6 +781,7 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		ExtAuthIssuer:         serveAuthIssuer,
 		ExtAuthAudience:       serveAuthAudience,
 		ExtAuthAllowInsecure:  serveAuthAllowInsecure,
+		WorkspaceRoleResolver: buildFileBrowserRoleResolver(),
 		LeadDataAllowOpenAuth: leadDataAllowOpenAuth,
 		GitOps:                gitOps,
 		FileOps:               gitOps,
@@ -801,6 +803,30 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		// /api/workspaces/{ws}/issues stays scoped. Local mode uses the
 		// process-global fleet-db backend.
 		IssueBackendFn: cli.WorkspaceAwareIssueBackend(),
+	}
+}
+
+// buildFileBrowserRoleResolver returns a WorkspaceRoleResolver that grants every
+// authenticated identity a single fixed role for REMOTE file-browser access,
+// controlled by LOOM_FILE_BROWSER_DEFAULT_ROLE ("viewer" = read-only, "editor"
+// = read/write+sensitive). Unset/empty returns nil, preserving the fail-closed
+// default (remote file access denied). This is a coarse deployment-level policy
+// with NO per-user/per-workspace membership — pair a restrictive role (viewer)
+// with a trusted-auth deployment. An unrecognized role fails closed (remote
+// file access denied) and says so at startup, rather than looking enabled in
+// the logs while every file request 403s.
+func buildFileBrowserRoleResolver() middleware.WorkspaceRoleResolver {
+	role := strings.ToLower(strings.TrimSpace(os.Getenv("LOOM_FILE_BROWSER_DEFAULT_ROLE")))
+	if role == "" {
+		return nil
+	}
+	if !middleware.KnownFileRole(role) {
+		slog.Default().Error("LOOM_FILE_BROWSER_DEFAULT_ROLE is not a recognized role; remote file access stays disabled", "role", role)
+		return nil
+	}
+	slog.Default().Warn("file-browser default role enabled: EVERY authenticated user gets this role for remote file access (no per-workspace membership)", "role", role)
+	return func(_ context.Context, _ string, _ middleware.UserIdentity) (string, error) {
+		return role, nil
 	}
 }
 

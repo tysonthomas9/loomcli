@@ -1944,6 +1944,51 @@ func TestParseGitHubOwnerRepo(t *testing.T) {
 	}
 }
 
+func TestFlattenReviewerMessagesIncludesCodexTools(t *testing.T) {
+	thread := &leadcontrol.CodexThread{
+		Turns: []leadcontrol.CodexTurn{{
+			ID: "turn-1",
+			Items: []leadcontrol.CodexTurnItem{
+				{
+					Type:    "userMessage",
+					ID:      "item-user",
+					Content: []leadcontrol.CodexContentBlock{{Type: "text", Text: reviewerPromptMarker + "\nbody"}},
+				},
+				{
+					Type:             "commandExecution",
+					ID:               "cmd-1",
+					Command:          "rg risk",
+					AggregatedOutput: "foo.go:12",
+					Status:           "completed",
+				},
+				{
+					Type:      "mcpToolCall",
+					ID:        "mcp-1",
+					Server:    "github",
+					Tool:      "get_diff",
+					Arguments: json.RawMessage(`{"number":7}`),
+					Result:    json.RawMessage(`{"ok":true}`),
+				},
+				{Type: "agentMessage", ID: "item-agent", Text: "looks good", Phase: "final_answer"},
+				{Type: "reasoning", ID: "reason-1", Text: "skipped"},
+			},
+		}},
+	}
+	msgs := flattenReviewerMessages(thread)
+	if len(msgs) != 3 {
+		t.Fatalf("messages = %+v, want tool + mcp + agent (prompt trimmed, reasoning skipped)", msgs)
+	}
+	if msgs[0].Kind != "tool_use" || msgs[0].ToolName != "exec" || msgs[0].ToolInput != "rg risk" || msgs[0].ToolResult != "foo.go:12" {
+		t.Fatalf("exec tool = %+v", msgs[0])
+	}
+	if msgs[1].Kind != "tool_use" || msgs[1].ToolName != "github/get_diff" {
+		t.Fatalf("mcp tool = %+v", msgs[1])
+	}
+	if msgs[2].Text != "looks good" || msgs[2].Kind != "" {
+		t.Fatalf("agent = %+v", msgs[2])
+	}
+}
+
 func TestTrimReviewerPreamble(t *testing.T) {
 	msgs := []reviewerStreamMessage{
 		{Role: "user", ItemID: "p", Text: "## READ-ONLY PR REVIEWER\n\nYou are a reviewer…"},
@@ -1955,12 +2000,14 @@ func TestTrimReviewerPreamble(t *testing.T) {
 	if len(got) != 3 || got[0].ItemID != "r" || got[1].ItemID != "q" || got[2].ItemID != "a" {
 		t.Fatalf("trim = %+v, want [r,q,a] (prompt bubble dropped, real user msg kept)", got)
 	}
-	// Nothing is trimmed once the conversation has started.
+	// Nothing is trimmed once the conversation has started (no prompt in the slice).
 	if len(trimReviewerPreamble(msgs[1:])) != 3 {
 		t.Fatal("must not trim once the conversation has started")
 	}
-	// A user message is never hidden, even one that looks like the prompt topic.
+	// Codex rollouts inject AGENTS.md / environment context before the prompt —
+	// drop through the prompt bubble inclusive.
 	typed := []reviewerStreamMessage{
+		{Role: "user", ItemID: "agents", Text: "# AGENTS.md instructions"},
 		{Role: "user", ItemID: "p", Text: "## READ-ONLY PR REVIEWER\n…"},
 		{Role: "user", ItemID: "u", Text: "what does the readonly reviewer rule mean?"},
 	}

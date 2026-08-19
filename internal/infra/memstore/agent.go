@@ -56,6 +56,9 @@ func (s *agentStore) Create(_ context.Context, in store.AgentCreate) (*domain.Ag
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
+	if !in.Hooks.IsEmpty() {
+		a.Hooks = in.Hooks.Clone()
+	}
 	s.items[in.WorkspaceKey][in.Name] = a
 	return cloneAgent(a), nil
 }
@@ -148,6 +151,14 @@ func applyAgentRuntimePatch(a *domain.Agent, patch store.AgentUpdate) {
 	if patch.DesiredState != nil {
 		a.DesiredState = *patch.DesiredState
 	}
+	if patch.Hooks != nil {
+		// A non-nil empty pipeline is the explicit clear marker.
+		if patch.Hooks.IsEmpty() {
+			a.Hooks = nil
+		} else {
+			a.Hooks = patch.Hooks.Clone()
+		}
+	}
 }
 
 func (s *agentStore) Delete(_ context.Context, ws, name string) error {
@@ -165,5 +176,6 @@ func cloneAgent(a *domain.Agent) *domain.Agent {
 	out.FallbackBackends = append([]string(nil), a.FallbackBackends...)
 	out.Repos = append([]string(nil), a.Repos...)
 	out.RepoGroups = append([]string(nil), a.RepoGroups...)
+	out.Hooks = a.Hooks.Clone()
 	return &out
 }

@@ -122,7 +122,7 @@ func (e *backendTestEnv) agentBackend(t *testing.T, agentName string) string {
 
 func TestEnsureReviewerAgentUsesWorkspaceBackend(t *testing.T) {
 	env := newBackendTestEnv(t, "claude")
-	if err := env.module.ensureReviewerAgent(context.Background(), prReviewTestWorkspace, "review-hello-pr-7"); err != nil {
+	if err := env.module.ensureReviewerAgent(context.Background(), prReviewTestWorkspace, "review-hello-pr-7", "hello"); err != nil {
 		t.Fatalf("ensureReviewerAgent: %v", err)
 	}
 	if got := env.agentBackend(t, "review-hello-pr-7"); got != "claude" {
@@ -143,7 +143,7 @@ func TestEnsureReviewerAgentUsesWorkspaceBackend(t *testing.T) {
 func TestEnsureReviewerAgentDefaultsToCodex(t *testing.T) {
 	for _, workspaceBackend := range []string{"", "not-a-real-backend"} {
 		env := newBackendTestEnv(t, workspaceBackend)
-		if err := env.module.ensureReviewerAgent(context.Background(), prReviewTestWorkspace, "review-hello-pr-7"); err != nil {
+		if err := env.module.ensureReviewerAgent(context.Background(), prReviewTestWorkspace, "review-hello-pr-7", "hello"); err != nil {
 			t.Fatalf("ensureReviewerAgent(%q): %v", workspaceBackend, err)
 		}
 		if got := env.agentBackend(t, "review-hello-pr-7"); got != "codex" {
@@ -184,7 +184,7 @@ func TestEnsureReviewerAgentMigratesExistingBackend(t *testing.T) {
 		{SessionName: "shell-1", Kind: "shell"},
 	}
 
-	if err := env.module.ensureReviewerAgent(ctx, prReviewTestWorkspace, agentName); err != nil {
+	if err := env.module.ensureReviewerAgent(ctx, prReviewTestWorkspace, agentName, "hello"); err != nil {
 		t.Fatalf("ensureReviewerAgent: %v", err)
 	}
 
@@ -235,7 +235,7 @@ func TestEnsureReviewerAgentMigratesExistingLeadRole(t *testing.T) {
 		{SessionName: "agent-review-hello-pr-7", Kind: terminalKindAgent, AgentID: agentName, PTYAlive: true},
 	}
 
-	if err := env.module.ensureReviewerAgent(ctx, prReviewTestWorkspace, agentName); err != nil {
+	if err := env.module.ensureReviewerAgent(ctx, prReviewTestWorkspace, agentName, "hello"); err != nil {
 		t.Fatalf("ensureReviewerAgent: %v", err)
 	}
 
@@ -364,7 +364,7 @@ func TestEnsureReviewerAgentSameBackendIsNoop(t *testing.T) {
 	env := newBackendTestEnv(t, "claude")
 	env.seedCurrentReviewer(t, agentName, "claude")
 
-	if err := env.module.ensureReviewerAgent(context.Background(), prReviewTestWorkspace, agentName); err != nil {
+	if err := env.module.ensureReviewerAgent(context.Background(), prReviewTestWorkspace, agentName, "hello"); err != nil {
 		t.Fatalf("ensureReviewerAgent: %v", err)
 	}
 	if env.term.listCalled || env.term.deleteCalls != 0 {
@@ -378,7 +378,7 @@ func TestMigrateReviewerBackendRefusesWhenTabsUnknown(t *testing.T) {
 	env.seedLegacyReviewer(t, agentName, "codex")
 	env.term.listErr = errors.New("redis down")
 
-	err := env.module.ensureReviewerAgent(context.Background(), prReviewTestWorkspace, agentName)
+	err := env.module.ensureReviewerAgent(context.Background(), prReviewTestWorkspace, agentName, "hello")
 	if err == nil {
 		t.Fatal("expected migration to refuse when live terminals cannot be enumerated")
 	}
@@ -403,7 +403,7 @@ func TestEnsureReviewerAgentReconcilesDriftedRole(t *testing.T) {
 		t.Fatalf("create drifted reviewer role: %v", err)
 	}
 
-	if err := env.module.ensureReviewerAgent(ctx, prReviewTestWorkspace, "review-hello-pr-7"); err != nil {
+	if err := env.module.ensureReviewerAgent(ctx, prReviewTestWorkspace, "review-hello-pr-7", "hello"); err != nil {
 		t.Fatalf("ensureReviewerAgent: %v", err)
 	}
 

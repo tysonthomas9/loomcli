@@ -522,7 +522,7 @@ test.describe("Session Detail View - Transcript and Diff Tabs", () => {
       await expect(page.getByTestId("session-transcript")).toBeVisible();
 
       // Two assistant turns: asst-1 (text + Read tool, same uuid → one turn)
-      // and asst-2 (Bash tool). First user text → prompt (masthead), not a turn.
+      // and asst-2 (Bash tool). Kickoff user text is omitted from the worklog.
       // Tool results render inline inside their tool_use when expanded, not
       // as their own turn.
       const turns = page
@@ -531,7 +531,7 @@ test.describe("Session Detail View - Transcript and Diff Tabs", () => {
       await expect(turns).toHaveCount(2);
     });
 
-    test("first user text surfaces as Prompt in the masthead", async ({
+    test("omits kickoff user text from the masthead and transcript", async ({
       page,
     }) => {
       await installIssuesMock(page, [MOCK_ISSUE]);
@@ -540,10 +540,8 @@ test.describe("Session Detail View - Transcript and Diff Tabs", () => {
       await navigateToSessionDetail(page);
 
       const detail = page.getByTestId("session-detail-view");
-      // Label is in the masthead, above the transcript region
-      await expect(detail).toContainText("Prompt");
-      await expect(detail).toContainText("Please fix the login bug");
-      // And NOT duplicated inside the transcript body
+      await expect(detail).not.toContainText("Prompt");
+      await expect(detail).not.toContainText("Please fix the login bug");
       await expect(page.getByTestId("session-transcript")).not.toContainText(
         "Please fix the login bug",
       );
@@ -613,15 +611,17 @@ test.describe("Session Detail View - Transcript and Diff Tabs", () => {
       await expect(transcript).toContainText("1 tool call");
     });
 
-    test("long prompts do not push the transcript out of the runs panel", async ({
+    test("long assistant logs keep the transcript scrollable inside the runs panel", async ({
       page,
     }) => {
-      const longPrompt = Array.from(
-        { length: 120 },
-        (_, i) => `Workflow line ${i + 1}`,
-      ).join("\n");
       const longTranscript = [
-        { ...MOCK_TRANSCRIPT[0], text: longPrompt },
+        {
+          seq: 1,
+          timestamp: "2026-01-20T10:00:00Z",
+          role: "user",
+          type: "text",
+          text: "kickoff",
+        },
         ...Array.from({ length: 24 }, (_, i) => ({
           seq: i + 2,
           timestamp: "2026-01-20T10:00:05Z",

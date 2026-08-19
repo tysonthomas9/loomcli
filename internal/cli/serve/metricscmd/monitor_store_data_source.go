@@ -171,58 +171,88 @@ func monitorAgentStatuses(
 		if assignment == nil {
 			continue
 		}
-		var taskID, sessionID string
-		if session := latestSessions[assignment.Name]; session != nil {
-			taskID = session.TaskID
-			sessionID = session.SessionID
-		}
-		var orchID string
-		if sess := orchestrationByAgent[assignment.Name]; sess != nil {
-			orchID = sess.SessionID
-		}
-		inboxSummary := inboxByAgent[assignment.Name]
-		roleKind := domain.ResolveRoleKind(rolesByName[assignment.RoleName], assignment.RoleName)
-		status := monitor.AgentStatus{
-			Name:                  assignment.Name,
-			Branch:                monitorBranchFromAgent(workspaceData, assignment),
-			Status:                monitorStatusFromAgentState(assignment.State),
-			Role:                  assignment.RoleName,
-			RoleKind:              string(roleKind),
-			Repo:                  monitorRepoFromAgent(assignment),
-			Workspace:             wsName,
-			DaemonManaged:         assignment.Auto,
-			Parent:                assignment.Parent,
-			DeliveryState:         monitorLeadDeliveryState(assignment, orchestrationByAgent[assignment.Name]),
-			InboxQueuedCount:      inboxSummary.QueuedCount,
-			InboxFailedCount:      inboxSummary.FailedCount,
-			InboxLatestMessage:    inboxSummary.LatestMessage,
-			OrchestratorSessionID: orchID,
-			TaskID:                taskID,
-			SessionID:             sessionID,
-			Mode:                  string(assignment.Mode),
-			DesiredState:          string(assignment.DesiredState),
-			// Carry fleet-db's derived liveness through unchanged. The lock-derived
-			// Status above never advances to "working" on the store-only serve path,
-			// so the UI reads live_status to flip a provably-working agent off "idle".
-			LiveStatus:     string(assignment.LiveStatus),
-			ActiveTaskID:   assignment.ActiveTaskID,
-			ActivePhase:    assignment.ActivePhase,
-			LastErrorClass: assignment.LastErrorClass,
-		}
-		if roleKind == domain.RoleKindInteractive && domain.ResolveRuntimeProvider(assignment, profile) == domain.RuntimeProviderDaytona {
-			status.RuntimeProvider = string(domain.RuntimeProviderDaytona)
-			if node := latestDaytonaPlacementForMonitor(nodes, assignment.Name); node != nil {
-				status.RuntimePlacement = &monitor.RuntimePlacement{
-					SandboxID:   node.Placement.SandboxID,
-					PlacementID: node.NodeID,
-					State:       string(node.Placement.State),
-					Generation:  node.Placement.Generation,
-				}
-			}
-		}
+		status := monitorAgentStatus(
+			assignment, rolesByName, workspaceData,
+			latestSessions[assignment.Name], orchestrationByAgent,
+			inboxByAgent[assignment.Name], wsName,
+		)
+		applyMonitorRuntimePlacement(&status, assignment, profile, nodes)
 		agents = append(agents, status)
 	}
 	return agents
+}
+
+func monitorAgentStatus(
+	assignment *domain.Agent,
+	rolesByName map[string]*domain.Role,
+	workspaceData *ops.WorkspaceData,
+	latestSession *domain.AgentSession,
+	orchestrationByAgent map[string]*domain.AgentSession,
+	inboxSummary agentInboxSummary,
+	wsName string,
+) monitor.AgentStatus {
+	var taskID, sessionID string
+	if latestSession != nil {
+		taskID = latestSession.TaskID
+		sessionID = latestSession.SessionID
+	}
+	var orchID string
+	if sess := orchestrationByAgent[assignment.Name]; sess != nil {
+		orchID = sess.SessionID
+	}
+	displayName, roleLabel := prReviewerDisplayFields(assignment)
+	return monitor.AgentStatus{
+		Name:                  assignment.Name,
+		Branch:                monitorBranchFromAgent(workspaceData, assignment),
+		Status:                monitorStatusFromAgentState(assignment.State),
+		Role:                  assignment.RoleName,
+		RoleKind:              string(domain.ResolveRoleKind(rolesByName[assignment.RoleName], assignment.RoleName)),
+		RoleLabel:             roleLabel,
+		DisplayName:           displayName,
+		Repo:                  monitorRepoFromAgent(assignment),
+		Workspace:             wsName,
+		DaemonManaged:         assignment.Auto,
+		Parent:                assignment.Parent,
+		DeliveryState:         monitorLeadDeliveryState(assignment, orchestrationByAgent[assignment.Name]),
+		InboxQueuedCount:      inboxSummary.QueuedCount,
+		InboxFailedCount:      inboxSummary.FailedCount,
+		InboxLatestMessage:    inboxSummary.LatestMessage,
+		OrchestratorSessionID: orchID,
+		TaskID:                taskID,
+		SessionID:             sessionID,
+		Mode:                  string(assignment.Mode),
+		DesiredState:          string(assignment.DesiredState),
+		// Carry fleet-db's derived liveness through unchanged. The lock-derived
+		// Status above never advances to "working" on the store-only serve path,
+		// so the UI reads live_status to flip a provably-working agent off "idle".
+		LiveStatus:     string(assignment.LiveStatus),
+		ActiveTaskID:   assignment.ActiveTaskID,
+		ActivePhase:    assignment.ActivePhase,
+		LastErrorClass: assignment.LastErrorClass,
+	}
+}
+
+func applyMonitorRuntimePlacement(
+	status *monitor.AgentStatus,
+	assignment *domain.Agent,
+	profile *domain.DaemonProfile,
+	nodes []*domain.Node,
+) {
+	if domain.RoleKind(status.RoleKind) != domain.RoleKindInteractive ||
+		domain.ResolveRuntimeProvider(assignment, profile) != domain.RuntimeProviderDaytona {
+		return
+	}
+	status.RuntimeProvider = string(domain.RuntimeProviderDaytona)
+	node := latestDaytonaPlacementForMonitor(nodes, assignment.Name)
+	if node == nil {
+		return
+	}
+	status.RuntimePlacement = &monitor.RuntimePlacement{
+		SandboxID:   node.Placement.SandboxID,
+		PlacementID: node.NodeID,
+		State:       string(node.Placement.State),
+		Generation:  node.Placement.Generation,
+	}
 }
 
 func latestDaytonaPlacementForMonitor(nodes []*domain.Node, agentName string) *domain.Node {

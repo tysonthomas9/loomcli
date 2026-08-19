@@ -22,6 +22,7 @@ var sandboxSupportedEpicRunFlags = map[string]struct{}{
 
 var sandboxRejectedEpicRunFlags = map[string]string{
 	"dry-run":               "the epic-runner payload is built server-side",
+	"exclude-label":         "the epic-runner payload is built server-side",
 	"stacked-pull-requests": "stacked pull requests need the host stack store and a local git checkout",
 	"workflow":              "the occupant dispatch surface only runs the built-in epic-runner workflow",
 	"worker-prefix":         "the epic-runner payload is built server-side",

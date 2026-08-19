@@ -27,7 +27,8 @@ import {
 } from "@/api/workspace";
 import type { IssueContext } from "@/api/terminal";
 import { buildShareUrl } from "@/utils/buildShareUrl";
-import { getReviewType } from "@/utils/issue";
+import { getReviewType, NEEDS_REVISION_LABEL } from "@/utils/issue";
+import { resolvePRReviewRef } from "@/utils/agentDisplay";
 import { ViewSubSwitcher } from "@/components/ViewSubSwitcher/ViewSubSwitcher";
 import {
   isOnboardingRepo,
@@ -175,6 +176,7 @@ function App() {
     sourceReposFilter,
     refetch: refetchWorkspace,
     upsertAgent: upsertWorkspaceAgent,
+    agents: workspaceConfigAgents,
   } = useWorkspaceContext();
   const {
     backends: aiBackends,
@@ -716,8 +718,26 @@ function App() {
           );
           await refetch();
         } else if (reviewType === "plan") {
-          // Plan review: Move to open (ready for implementation)
-          await updateIssueStatus(issue.id, "open");
+          // Plan review: move to open AND clear the rejection marker.
+          //
+          // Removing the label is what makes the review workflow terminate.
+          // Reject stamps `needs-revision`; the planner selects on it
+          // (taskfilter.go: NeedsPlan = !HasDesign || HasNeedsRevision) and the
+          // worker is excluded by it (ReadyToImplement = HasDesign &&
+          // !HasNeedsRevision). Approving status-only leaves the label on, so
+          // the planner immediately re-claims the issue and the human is asked
+          // to approve the same plan again, forever — independent of how good
+          // the plan is.
+          //
+          // Uses updateIssue + refetch rather than the optimistic
+          // updateIssueStatus path (which carries status only), mirroring
+          // handleReject below. Removal is unconditional and idempotent, so
+          // approving a never-rejected issue is a no-op server-side.
+          await updateIssue(workspaceId, issue.id, {
+            status: "open",
+            remove_labels: [NEEDS_REVISION_LABEL],
+          });
+          await refetch();
         } else if (reviewType === "help") {
           // Needs help: Move to in_progress (unblock)
           await updateIssueStatus(issue.id, "in_progress");
@@ -726,11 +746,13 @@ function App() {
         // Close the detail panel and clean up after successful approve
         handlePanelClose();
       } catch (err) {
-        // updateIssueStatus errors are handled by useOptimisticUpdate rollback
-        // Only show toast for non-updateIssueStatus errors (e.g., closeIssue)
+        // updateIssueStatus errors are handled by useOptimisticUpdate rollback,
+        // so the "help" branch stays silent here. The "code" (closeIssue) and
+        // "plan" (updateIssue) branches do NOT go through that path, so without
+        // a toast a failed approve would look identical to a successful one.
         if (!mountedRef.current) return;
         const reviewType = getReviewType(issue);
-        if (reviewType === "code") {
+        if (reviewType === "code" || reviewType === "plan") {
           const message =
             err instanceof Error ? err.message : "Failed to approve";
           showToast(message, { type: "error" });
@@ -753,7 +775,7 @@ function App() {
         // Add needs-revision label and set status to open
         await updateIssue(workspaceId, issue.id, {
           status: "open",
-          add_labels: ["needs-revision"],
+          add_labels: [NEEDS_REVISION_LABEL],
         });
 
         // Refetch to reflect label/status changes and close panel
@@ -774,17 +796,32 @@ function App() {
     clearIssue();
   }, [closePanel, clearIssue]);
 
-  // Handle agent click (sidebar, monitor, etc.) — one consistent destination:
-  // the agents view with that agent selected (/agents/<name>), instead of the
-  // legacy minimal AgentDetailPanel slide-over.
+  // Handle agent click (sidebar, monitor, etc.). PR reviewers open that PR's
+  // review workspace with the Discuss panel; everyone else goes to /agents/<name>.
   const handleAgentClick = useCallback(
     (agentName: string) => {
       closeAllPanels();
+      // Resolve from the live store first, then the workspace-config agents so a
+      // configured-but-not-running PR reviewer still deep-links to its PR.
+      const reviewRef = resolvePRReviewRef(
+        agentName,
+        agents,
+        workspaceConfigAgents,
+      );
+      if (reviewRef) {
+        navigate(
+          `/ws/${encodeURIComponent(workspaceId)}/prs?${new URLSearchParams({
+            "review-pr": reviewRef,
+            discuss: "1",
+          }).toString()}`,
+        );
+        return;
+      }
       navigate(
         `/ws/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(agentName)}`,
       );
     },
-    [navigate, workspaceId, closeAllPanels],
+    [navigate, workspaceId, closeAllPanels, agents, workspaceConfigAgents],
   );
 
   // Handle agent panel close

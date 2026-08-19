@@ -3210,7 +3210,11 @@ describe("App", () => {
       mockAddComment.mockResolvedValue(undefined);
     });
 
-    it("plan approve calls updateIssueStatus with open status", async () => {
+    // Plan approve must reopen the issue AND clear needs-revision in one call.
+    // Reopening alone leaves the planner's selection predicate satisfied
+    // (NeedsPlan matches on that label), so the issue is re-claimed and comes
+    // straight back to review — the non-terminating loop this asserts against.
+    it("plan approve reopens the issue and clears needs-revision", async () => {
       const updateIssueStatus = vi.fn().mockResolvedValue(undefined);
       const refetch = vi.fn().mockResolvedValue(undefined);
       const mockReturn = createMockUseIssuesReturn({
@@ -3243,14 +3247,17 @@ describe("App", () => {
       fireEvent.click(approveButton);
 
       await waitFor(() => {
-        expect(updateIssueStatus).toHaveBeenCalledTimes(1);
-        expect(updateIssueStatus).toHaveBeenCalledWith(
-          "plan-issue",
-          "open",
+        expect(mockUpdateIssue).toHaveBeenCalledTimes(1);
+        expect(mockUpdateIssue).toHaveBeenCalledWith(
           "test-ws-id",
+          "plan-issue",
+          { status: "open", remove_labels: ["needs-revision"] },
         );
       });
 
+      // The optimistic status-only path must NOT be used for plan approve —
+      // it cannot carry the label delta.
+      expect(updateIssueStatus).not.toHaveBeenCalled();
       expect(mockCloseIssue).not.toHaveBeenCalled();
     });
 
@@ -3513,10 +3520,13 @@ describe("App", () => {
       mockCloseIssueFn.mockReset();
     });
 
-    it("approve does not show toast for plan review failures (handled by optimistic rollback)", async () => {
-      const updateIssueStatus = vi
-        .fn()
-        .mockRejectedValue(new Error("Network error"));
+    // Plan approve no longer goes through the optimistic path (it has to carry
+    // a label delta), so nothing rolls back or surfaces the error for it.
+    // Without a toast a failed approve is indistinguishable from a successful
+    // one — and the issue silently stays in review carrying needs-revision.
+    it("approve shows error toast on failure for plan review type", async () => {
+      mockUpdateIssue.mockRejectedValueOnce(new Error("Network error"));
+      const updateIssueStatus = vi.fn();
       const showToast = vi.fn();
       mockUseToast.mockReturnValue({
         toasts: [],
@@ -3554,11 +3564,16 @@ describe("App", () => {
 
       // Wait for the async handler to complete
       await waitFor(() => {
-        expect(updateIssueStatus).toHaveBeenCalled();
+        expect(mockUpdateIssue).toHaveBeenCalled();
       });
 
-      // showToast should NOT be called — error is handled by useOptimisticUpdate rollback
-      expect(showToast).not.toHaveBeenCalled();
+      // The failure must surface: nothing else reports it for this branch.
+      await waitFor(() => {
+        expect(showToast).toHaveBeenCalledWith("Network error", {
+          type: "error",
+        });
+      });
+      expect(updateIssueStatus).not.toHaveBeenCalled();
     });
   });
 

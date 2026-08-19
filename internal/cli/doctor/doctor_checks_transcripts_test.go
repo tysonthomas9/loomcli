@@ -95,8 +95,8 @@ func TestCheckOrphanedTranscripts_Backfills(t *testing.T) {
 		t.Errorf("tokens = in%d/out%d/cr%d/cw%d, want 100/50/10/5",
 			meta.InputTokens, meta.OutputTokens, meta.CacheReadTokens, meta.CacheWriteTokens)
 	}
-	if meta.EstimatedCostUSD <= 0 {
-		t.Errorf("estimated cost = %v, want > 0", meta.EstimatedCostUSD)
+	if meta.EstimatedCostUSD != 0 {
+		t.Errorf("estimated cost = %v, want 0 (no token-based estimate)", meta.EstimatedCostUSD)
 	}
 }
 
