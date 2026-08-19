@@ -40,19 +40,36 @@ send_turn() {
   cexec "tmux send-keys -t ${TMUX_SESSION} Enter" >/dev/null
 }
 
+dump_pane() {
+  cexec "tmux capture-pane -t ${TMUX_SESSION} -p -S -40" | grep -v '^$' | tail -25 >&2 || true
+}
+
 # Poll the pane until a pattern appears (or time out).
+#
+# An exhausted codex account renders as an ordinary pane line, so without the
+# usage-limit probe the run looks identical to a hung model: it burns the full
+# TURN_TIMEOUT and then blames the turn. Bail on it immediately instead — the
+# environment is at fault, not the skills vertical under test.
 wait_for_pane() {
   pattern="$1"
   label="$2"
   deadline=$((SECONDS + TURN_TIMEOUT))
   while true; do
-    if cexec "tmux capture-pane -t ${TMUX_SESSION} -p -S -80" | grep -q "$pattern"; then
+    # Tolerate a failed capture: the pane is polled, and a session that has not
+    # come up yet (or a blipped exec) must not abort the run through set -e.
+    pane="$(cexec "tmux capture-pane -t ${TMUX_SESSION} -p -S -80" 2>/dev/null || true)"
+    if printf '%s\n' "$pane" | grep -q "$pattern"; then
       log "ok: $label"
       return 0
     fi
+    if printf '%s\n' "$pane" | grep -qiE "hit your usage limit|rate limit reached|purchase more credits"; then
+      log "pane at usage limit:" >&2
+      dump_pane
+      fatal "codex account is out of credits — rerun when the quota resets (this is an environment limit, not a skills failure)"
+    fi
     if [ "$SECONDS" -ge "$deadline" ]; then
       log "pane at timeout:" >&2
-      cexec "tmux capture-pane -t ${TMUX_SESSION} -p -S -40" | grep -v '^$' | tail -25 >&2 || true
+      dump_pane
       fatal "timed out waiting for: $label"
     fi
     sleep 3
