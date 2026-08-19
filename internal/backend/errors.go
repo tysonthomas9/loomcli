@@ -152,3 +152,41 @@ func ErrInternal(op, msg string, cause error) *BackendError {
 func ErrCanceled(op, msg string, cause error) *BackendError {
 	return &BackendError{Kind: KindCanceled, Op: op, Message: msg, Cause: cause}
 }
+
+// MetaErrorCode is the BackendError.Meta key under which backends record the
+// server's machine-readable error code. Kind alone is lossy: fleet-db's
+// "not_claimable" and "already_claimed" both classify as KindConflict, but only
+// the latter is worth retrying.
+const MetaErrorCode = "error_code"
+
+// ErrorCode returns the server error code recorded on err, or "".
+func ErrorCode(err error) string {
+	var be *BackendError
+	if errors.As(err, &be) && be != nil {
+		return be.Meta[MetaErrorCode]
+	}
+	return ""
+}
+
+// ClaimRejectedPermanently reports whether a failed claim can never succeed
+// while the issue stays in its current state — as opposed to a lock held by
+// another actor, or a transient transport failure. Retrying a permanent
+// rejection produces an error loop with no progress.
+//
+// Deliberately narrow: a bare KindConflict is NOT permanent, because that is
+// the legitimate "someone else holds the claim" case the retry logic depends on.
+func ClaimRejectedPermanently(err error) bool {
+	if err == nil {
+		return false
+	}
+	switch ErrorCode(err) {
+	case "not_claimable", "invalid_transition":
+		return true
+	}
+	if IsKind(err, KindNotFound) {
+		return true // the issue is gone (deleted / tombstoned)
+	}
+	// Fallback for backends that do not carry a code (agentipc, api) and for
+	// older fleet-db builds: match the server's stable message.
+	return strings.Contains(strings.ToLower(err.Error()), "not claimable")
+}
