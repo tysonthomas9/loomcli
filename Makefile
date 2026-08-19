@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-claim-guard local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -248,19 +248,57 @@ fleetdb-regression-down:
 # manager, a deterministic planner/coder backend, and the Web UI.
 local-mode-frontend-dist: ensure-frontend-dist
 
-local-mode-up: local-mode-frontend-dist
+# Guard for every target that mutates a local-mode compose stack. These stacks
+# share one podman/docker host between the human operator and any number of
+# agents, and `up --build` against an existing project name silently recreates
+# that project's containers with the caller's images — data volumes survive,
+# but images and LOCALMODE workspace state are swapped out from under whoever
+# owns the stack. Two rules:
+#   1. The default project (loomcli-local-mode, ports 8280/8282/8283) is the
+#      operator's long-lived dogfood stack; touching it requires an explicit
+#      LOCAL_MODE_ALLOW_DEFAULT=1 opt-in.
+#   2. A project with no containers yet must not start on host ports another
+#      stack already holds. Re-running `up` on your own existing project is
+#      fine (compose reconciles in place), so the port check only applies when
+#      the project is empty, and only to *-up goals.
+# See AGENTS.md "Shared Local-Mode Stacks" for the claim protocol. Emergency
+# bypass for a wrongly blocked run: LOCAL_MODE_SKIP_CLAIM_GUARD=1.
+local-mode-claim-guard:
+	@if [ "$${LOCAL_MODE_SKIP_CLAIM_GUARD:-}" = "1" ]; then exit 0; fi; \
+	if [ "$(LOCAL_MODE_COMPOSE_PROJECT)" = "loomcli-local-mode" ] && [ "$${LOCAL_MODE_ALLOW_DEFAULT:-}" != "1" ]; then \
+	  echo "local-mode: refusing to touch the default compose project 'loomcli-local-mode' — that is the operator's dogfood stack." >&2; \
+	  echo "Claim your own stack instead (run 'podman ps' first and pick a port block no other stack holds):" >&2; \
+	  echo "  LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-<runname> LOCAL_MODE_FLEETDB_PORT=8580 LOCAL_MODE_API_PORT=8582 LOCAL_MODE_UI_PORT=8583 make $(MAKECMDGOALS)" >&2; \
+	  echo "Operators only: LOCAL_MODE_ALLOW_DEFAULT=1 make $(MAKECMDGOALS)" >&2; \
+	  exit 2; \
+	fi; \
+	case " $(MAKECMDGOALS) " in *-up*) ;; *) exit 0 ;; esac; \
+	set -e; \
+	$(LOCAL_MODE_COMPOSE_SELECT); \
+	existing="$$($$compose $(LOCAL_MODE_COMPOSE_ARGS) ps -q 2>/dev/null || true)"; \
+	if [ -n "$$existing" ]; then exit 0; fi; \
+	command -v nc >/dev/null 2>&1 || exit 0; \
+	for port in $${LOCAL_MODE_FLEETDB_PORT:-8280} $${LOCAL_MODE_API_PORT:-8282} $${LOCAL_MODE_UI_PORT:-8283}; do \
+	  if nc -z -w 1 127.0.0.1 $$port >/dev/null 2>&1; then \
+	    echo "local-mode: host port $$port is already in use and project '$(LOCAL_MODE_COMPOSE_PROJECT)' has no containers yet — another stack owns that port." >&2; \
+	    echo "Run 'podman ps' and pick an unclaimed port block: LOCAL_MODE_FLEETDB_PORT=8x80 LOCAL_MODE_API_PORT=8x82 LOCAL_MODE_UI_PORT=8x83." >&2; \
+	    exit 2; \
+	  fi; \
+	done
+
+local-mode-up: local-mode-claim-guard local-mode-frontend-dist
 	@echo "Starting local-mode dogfood stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/ws/LOCALMODE/kanban..."
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
 	$$compose $(LOCAL_MODE_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
 
-local-mode-codex-up: local-mode-frontend-dist
+local-mode-codex-up: local-mode-claim-guard local-mode-frontend-dist
 	@echo "Starting local-mode Codex dogfood stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/ws/LOCALMODE/kanban..."
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
 	$$compose $(LOCAL_MODE_CODEX_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
 
-local-mode-claude-up: local-mode-frontend-dist
+local-mode-claude-up: local-mode-claim-guard local-mode-frontend-dist
 	@echo "Starting local-mode Claude dogfood stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/ws/LOCALMODE/kanban..."
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
@@ -270,13 +308,13 @@ local-mode-claude-up: local-mode-frontend-dist
 # sandbox. Requires DAYTONA_API_KEY on the host; DAYTONA_REPO_URL must be a
 # network-reachable git URL. e.g.:
 #   DAYTONA_API_KEY=... LOOM_DAEMON_LEAF=ts make local-mode-daytona-up
-local-mode-daytona-up: local-mode-frontend-dist
+local-mode-daytona-up: local-mode-claim-guard local-mode-frontend-dist
 	@echo "Starting local-mode Daytona dogfood stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/ws/LOCALMODE/kanban..."
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
 	$$compose $(LOCAL_MODE_DAYTONA_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
 
-local-mode-down:
+local-mode-down: local-mode-claim-guard
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
 	$$compose $(LOCAL_MODE_COMPOSE_ARGS) down -v --remove-orphans

@@ -39,37 +39,63 @@ Do not add ad-hoc sandbox wrappers or toy repositories for runtime evidence. If 
 
 ## Local-Mode Stack
 
-Run from the PR worktree:
+The stack shares one podman host with other agents and with the operator's own
+dogfood stack. NEVER touch the default compose project `loomcli-local-mode`
+(ports 8280/8282/8283) — it is the operator's; `make` refuses it without an
+operator-only override. Claim your own project and port block for every run.
+
+Claim first, from the PR worktree — every stack in `podman ps` is someone
+else's; pick a `8x8y` block (x = 3, 4, 5, …) with no bound ports. The ports
+below are an example, not a reserved default:
 
 ```bash
+podman ps
+RUN_NAME=<review-or-branch-name>
+FLEETDB_PORT=8580 API_PORT=8582 UI_PORT=8583
+```
+
+Run:
+
+```bash
+LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-$RUN_NAME \
+LOCAL_MODE_FLEETDB_PORT=$FLEETDB_PORT \
+LOCAL_MODE_API_PORT=$API_PORT \
+LOCAL_MODE_UI_PORT=$UI_PORT \
 make local-mode-up
 ```
+
+Image tags derive from the project name, so builds stay isolated too.
 
 Open:
 
 ```text
-http://localhost:8283/ws/LOCALMODE/kanban
+http://localhost:$UI_PORT/ws/LOCALMODE/kanban
 ```
 
 Verify:
 
 ```bash
-make local-mode-verify
+LOCAL_MODE_API_URL=http://127.0.0.1:$API_PORT make local-mode-verify
 ```
 
-Stop:
+Stop (only your own project — never `down` a project you did not create):
 
 ```bash
-make local-mode-down
+LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-$RUN_NAME make local-mode-down
 ```
 
 The standard stack exercises real Loom services, daemon supervision, FleetDB, API routes, session recording, transcript recording, diff recording, and the Web UI. If the stack uses a deterministic local backend, treat that as stack validation only. Do not use it as proof of real AI backend behavior.
 
 ## Real Codex Stack
 
-Use this when the claim depends on a real Codex CLI process:
+Use this when the claim depends on a real Codex CLI process. All `*-up`
+variants take the same claimed project and port variables as above:
 
 ```bash
+LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-$RUN_NAME \
+LOCAL_MODE_FLEETDB_PORT=$FLEETDB_PORT \
+LOCAL_MODE_API_PORT=$API_PORT \
+LOCAL_MODE_UI_PORT=$UI_PORT \
 make local-mode-codex-up
 ```
 
@@ -93,7 +119,10 @@ If auth is missing, do not fake the result. Report the missing auth as a blocker
 
 ## Parallel Stacks
 
-Use separate Compose projects and ports. Keep the same project name for logs and teardown.
+Every stack you start is a parallel stack — the claim protocol above already
+isolates projects, ports, and image tags. For a second stack in the same
+review, claim a second project name and a second unclaimed port block. Keep
+the same project name for logs and teardown.
 
 ```bash
 LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-b \
@@ -170,20 +199,20 @@ Useful checks:
 podman ps
 podman logs --tail 120 <fleet-db-container>
 podman logs --tail 120 <loom-container>
-curl -sS http://127.0.0.1:8282/api/config
-curl -sS 'http://127.0.0.1:8282/api/monitor/agents?workspace=LOCALMODE'
+curl -sS http://127.0.0.1:$API_PORT/api/config
+curl -sS "http://127.0.0.1:$API_PORT/api/monitor/agents?workspace=LOCALMODE"
 ```
 
 ## Browser Validation
 
-Use `agent-browser` after the stack is up. Always pass a dedicated profile path so cookies, storage, tabs, and browser state do not bleed between reviews or stacks. Use one profile per stack and include a unique run name.
+Use `agent-browser` after the stack is up. Always pass a dedicated profile path so cookies, storage, tabs, and browser state do not bleed between reviews or stacks. Use one profile per stack and include a unique run name. Browser sessions on this host belong to multiple agents: never run `agent-browser close --all` — close only sessions you opened, by name/profile.
 
 ```bash
 RUN_NAME=<review-or-branch-name>
 PROFILE=/tmp/loom-agent-browser/$RUN_NAME/default
 mkdir -p "$PROFILE"
 
-agent-browser --profile "$PROFILE" open http://localhost:8283/ws/LOCALMODE/kanban
+agent-browser --profile "$PROFILE" open http://localhost:$UI_PORT/ws/LOCALMODE/kanban
 agent-browser --profile "$PROFILE" wait
 agent-browser --profile "$PROFILE" get text body
 agent-browser --profile "$PROFILE" screenshot
@@ -195,15 +224,16 @@ For parallel stacks, use distinct profiles and session names:
 RUN_NAME=<review-or-branch-name>
 PROFILE_A=/tmp/loom-agent-browser/$RUN_NAME/stack-a
 PROFILE_B=/tmp/loom-agent-browser/$RUN_NAME/stack-b
+UI_PORT_A=<stack A UI port> UI_PORT_B=<stack B UI port>
 mkdir -p "$PROFILE_A" "$PROFILE_B"
 
 agent-browser --profile "$PROFILE_A" \
-  --session localmode-a open http://localhost:8283/ws/LOCALMODE/kanban
+  --session localmode-a open http://localhost:$UI_PORT_A/ws/LOCALMODE/kanban
 agent-browser --profile "$PROFILE_A" \
   --session localmode-a get text body
 
 agent-browser --profile "$PROFILE_B" \
-  --session localmode-b open http://localhost:8383/ws/LOCALMODE/kanban
+  --session localmode-b open http://localhost:$UI_PORT_B/ws/LOCALMODE/kanban
 agent-browser --profile "$PROFILE_B" \
   --session localmode-b get text body
 ```
@@ -215,9 +245,9 @@ Verify the rendered UI and the API state agree. If they disagree, collect both p
 Use APIs and daemon commands; do not read or edit backing stores directly.
 
 ```bash
-curl -sS http://127.0.0.1:8282/api/workspaces/LOCALMODE
-curl -sS http://127.0.0.1:8282/api/workspaces/LOCALMODE/issues/<TASK_ID>
-curl -sS http://127.0.0.1:8282/api/workspaces/LOCALMODE/tasks/<TASK_ID>/sessions
+curl -sS http://127.0.0.1:$API_PORT/api/workspaces/LOCALMODE
+curl -sS http://127.0.0.1:$API_PORT/api/workspaces/LOCALMODE/issues/<TASK_ID>
+curl -sS http://127.0.0.1:$API_PORT/api/workspaces/LOCALMODE/tasks/<TASK_ID>/sessions
 ```
 
 Inside the Loom container:
@@ -247,13 +277,8 @@ Do not overclaim. If the run used a deterministic backend, say it validated stac
 
 Before finishing, clean up anything you started unless the user explicitly asks to leave it running.
 
-Default local-mode stack:
-
-```bash
-make local-mode-down
-```
-
-Parallel or named stack:
+Tear down only the stack you claimed — never the default project or any other
+project you did not create:
 
 ```bash
 LOCAL_MODE_COMPOSE_PROJECT=<project-name> make local-mode-down
@@ -268,7 +293,7 @@ LOCAL_MODE_COMPOSE_FILES=/tmp/fleetdb-review.yml \
 make local-mode-down
 ```
 
-Browser profiles:
+Browser profiles (never `close --all` — other agents' sessions share this host):
 
 ```bash
 agent-browser --profile /tmp/loom-agent-browser/<run-name>/<stack-name> close
