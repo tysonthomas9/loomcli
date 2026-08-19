@@ -98,8 +98,17 @@ func (s *Supervisor) finalizeAgentSession(ap *AgentProcess, exitCode int) {
 	// finalizeLocalSession) and the control-plane transcript_ref artifact upload.
 	// Read before finalizeLocalSession, whose codex/claude re-sync can rewrite the
 	// on-disk file — this captures the TS leaf's canonical transcript verbatim.
-	transcriptData, leafTokens, _ := s.readLeafTranscript(state.sessionID)
+	transcriptData, leafTokens, ok := s.readLeafTranscript(state.sessionID)
 	diffResult := finalizeLocalSession(state.session, ap, state.beforeRef, taskID, exitCode, errClass, leafTokens)
+	if !ok {
+		// The Go execution leaf writes nothing before finalize — the backend
+		// re-sync inside finalizeLocalSession is what produces the transcript.
+		// Without this second read the upload is skipped and transcript_ref is
+		// never set, so a serve node that does not own the session locally can
+		// never surface the transcript. The pre-read still wins when it found
+		// something, keeping the TS leaf's canonical transcript authoritative.
+		transcriptData, _, _ = s.readLeafTranscript(state.sessionID)
+	}
 	// KNOWN GAP — local session only. leafTokens lands on the on-disk session
 	// record; it does NOT reach the control plane, because store.AgentSessionUpdate
 	// has no token or cost fields (only Status/TaskID/FinishedAt/ErrorClass/

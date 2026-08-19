@@ -323,7 +323,8 @@ func (c *Client) doBytes(ctx context.Context, method, path string) ([]byte, erro
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("fleetdb: %s %s: %w", method, path, err)
+		// Unreachable fleet-db: same retryable class as a 5xx answer.
+		return nil, fmt.Errorf("fleetdb: %s %s: %w: %w", method, path, domain.ErrUnavailable, err)
 	}
 	defer resp.Body.Close()
 
@@ -347,7 +348,8 @@ func (c *Client) doBytes(ctx context.Context, method, path string) ([]byte, erro
 func (c *Client) doRequest(req *http.Request, method, path string, out any) error {
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("fleetdb: %s %s: %w", method, path, err)
+		// Unreachable fleet-db: same retryable class as a 5xx answer.
+		return fmt.Errorf("fleetdb: %s %s: %w: %w", method, path, domain.ErrUnavailable, err)
 	}
 	defer func() {
 		// Drain so the underlying connection can be returned to the
@@ -423,6 +425,11 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 	}
 	if status >= 400 && status < 500 {
 		return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
+	}
+	if status >= 500 {
+		// fleet-db is failing, not the caller. Typed so callers can answer 503
+		// (retryable) instead of collapsing it into an opaque 500.
+		return fmt.Errorf("%s: %w", prefix, domain.ErrUnavailable)
 	}
 	return errors.New(prefix)
 }

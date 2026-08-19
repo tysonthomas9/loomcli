@@ -1414,7 +1414,9 @@ paths:
                         items:
                           $ref: "#/components/schemas/TranscriptEntry"
         "404":
-          description: Session not found
+          description: Session not found, or the referenced transcript content no longer exists
+        "503":
+          description: Transcript store unavailable (retryable)
 
   /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/diff:
     get:
