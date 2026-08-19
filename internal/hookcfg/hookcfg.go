@@ -58,8 +58,10 @@ func SupportsBackend(backend string) bool {
 // this one hook with this one command, so the command string lives here rather
 // than being repeated at each site. Two copies necessarily live outside Go and
 // must move with it: test/local-mode/codex-requirements.toml, which bakes the
-// managed policy into the container image, and the local-mode verify scripts
-// that assert against it.
+// managed policy into the container image, and
+// test/local-mode/verify-skill-pointer.sh, which asserts against that policy on
+// the codex branch and hand-writes the equivalent claude settings.json on the
+// claude branch (its smoke has no loom-launched session to install one).
 func EnsureSkillMaterializeHook(workDir, backend string) error {
 	if !SupportsBackend(backend) {
 		return nil

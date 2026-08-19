@@ -310,11 +310,12 @@ local-mode-webhook-verify:
 local-mode-skills-verify:
 	@test/local-mode/verify-skills.sh
 
-# Live-model smoke: a long-lived codex session must learn about skills
+# Live-model smoke: a long-lived agent session must learn about skills
 # added/removed after its session-start snapshot, via the managed
 # UserPromptSubmit hook (files) and the loom-skill-catalog/INDEX.md pointer
-# (awareness). Burns real model tokens; needs make local-mode-codex-up.
-# On-demand only — keep out of CI.
+# (awareness). Backend is autodetected from the running stack (codex or claude,
+# override with SKILL_POINTER_BACKEND); needs make local-mode-codex-up or
+# make local-mode-claude-up. Burns real model tokens — keep out of CI.
 local-mode-skill-pointer-verify:
 	@test/local-mode/verify-skill-pointer.sh
 
