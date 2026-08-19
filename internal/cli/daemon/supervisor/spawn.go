@@ -594,9 +594,15 @@ func (s *Supervisor) waitForAgent(ap *AgentProcess) int {
 	// Renew the agent's fleet-db worker-registration lease for the same window,
 	// so a live agent is not reaped by the server-side TTL while it runs.
 	stopWorkerHeartbeat := s.startWorkerHeartbeat(ap)
+	// Keep the control-plane agent session heartbeating for the same window, so
+	// heartbeat age is a liveness signal a server-side sweeper can trust. It is
+	// stopped before waitForAgent returns, and therefore before the session is
+	// finalized, so no late beat can land on an already-terminal row.
+	stopSessionHeartbeat := s.startAgentSessionHeartbeat(ap)
 	err := cmd.Wait()
 	stopHeartbeat()
 	stopWorkerHeartbeat()
+	stopSessionHeartbeat()
 
 	ap.Mu.Lock()
 	ap.LastExit = time.Now()

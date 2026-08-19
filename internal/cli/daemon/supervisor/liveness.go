@@ -427,3 +427,73 @@ func (s *Supervisor) startWorkerHeartbeatEvery(ap *AgentProcess, interval time.D
 		<-done
 	}
 }
+
+// agentSessionHeartbeatInterval is how often the supervisor refreshes the
+// control-plane agent-session heartbeat of a running agent. It matches the
+// worker-registration cadence (and the lead / task-bridge session cadence) so a
+// server-side sweeper can use one threshold for every session kind. It is a var
+// (not const) so tests can drive it without a real-time wait; production never
+// reassigns it.
+var agentSessionHeartbeatInterval = 30 * time.Second
+
+// startAgentSessionHeartbeat keeps the agent's control-plane session heartbeat
+// fresh for as long as the supervise goroutine is blocked in cmd.Wait().
+// Without it, LastHeartbeat is stamped once at the starting -> running
+// transition and then never again, so heartbeat age says nothing about whether
+// a kind=task session belongs to a live process.
+//
+// Renewal is driven purely by process liveness — a plain ticker that runs only
+// while the PID is alive — NOT by agent output or agent IPC. A healthy agent
+// that is quietly thinking or compiling emits nothing but is alive, and must
+// keep its session. The output-timeout watchdog remains the independent
+// mechanism for a genuinely hung agent.
+func (s *Supervisor) startAgentSessionHeartbeat(ap *AgentProcess) func() {
+	return s.startAgentSessionHeartbeatEvery(ap, agentSessionHeartbeatInterval)
+}
+
+// startAgentSessionHeartbeatEvery is startAgentSessionHeartbeat with an
+// explicit interval, allowing tests to drive the heartbeat without real-time
+// waits. It is a no-op (returns a no-op stop) when the control plane is not
+// wired.
+func (s *Supervisor) startAgentSessionHeartbeatEvery(ap *AgentProcess, interval time.Duration) func() {
+	if s.ControlStore == nil || s.WorkspaceID == "" {
+		return func() {}
+	}
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-s.Shutdown:
+				return
+			case <-ticker.C:
+				// Re-read every tick: a restart can rotate or clear the
+				// session id under a live AgentProcess.
+				ap.Mu.Lock()
+				sessionID := ap.AgentSessionID
+				ap.Mu.Unlock()
+				if sessionID == "" {
+					continue
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
+				_, err := s.ControlStore.AgentSessions().Heartbeat(ctx, s.WorkspaceID, sessionID)
+				cancel()
+				if err != nil {
+					// Debug, not Warn: a fleet-db outage would otherwise emit
+					// one line per agent every interval for its whole duration.
+					slog.Debug("supervisor agent session heartbeat failed",
+						"workspace", s.WorkspaceID, "session_id", sessionID, "err", err)
+				}
+			}
+		}
+	}()
+	return func() {
+		close(stop)
+		<-done
+	}
+}
