@@ -2,46 +2,140 @@
 #
 # This file is NOT the day-to-day dev loop. For day-to-day development use
 # `make dev` (native air + Vite, faster startup, instant HMR). This compose
-# file exists for two narrower use cases:
-#   (a) Smoke-testing the full containerized stack end-to-end against the
-#       same Dockerfiles the production deploy uses (deploy/server,
-#       deploy/frontend), exercising CORS the way a real cross-origin
-#       deployment will.
-#   (b) Running the optional fleet/Redis path locally without a native
-#       Redis install (gated behind the `fleet` profile).
+# file exists to smoke-test the full containerized stack end-to-end against
+# the same Dockerfiles the production deploy uses (deploy/server,
+# deploy/frontend), exercising CORS the way a real cross-origin deployment
+# will.
+#
+# Four services: redis → fleet-db → server → frontend. `loom serve` hard-
+# requires an issue backend; pointing LOOM_FLEET_DB_URL at the fleet-db
+# service is what keeps the server from crash-looping on a missing embedded
+# fleet-db binary. (LOOM_ISSUE_BACKEND alone does NOT do this — it only picks
+# the adapter.)
+#
+# PREREQUISITE: a sibling fleet-db checkout at ../fleet-db (relative to this
+# repo root), like the other stacks in test/. Clone it with:
+#   git clone https://github.com/BrowserOperator/fleet-db ../fleet-db
+#
+# Usage:
+#   make compose-smoke                                   # build, run, assert
+#   docker compose -f docker-compose.dev.yml up --build -d
+#   docker compose -f docker-compose.dev.yml exec -T server bash -s < scripts/compose-dev-seed.sh
+#   open http://localhost:3000/ws/SMOKE/
+#   docker compose -f docker-compose.dev.yml down -v     # -v also drops tabs
+#
+# The seed step is not optional if you want the terminal: the Web UI resolves
+# a workspace to a LOCAL CHECKOUT before it will spawn a PTY, and a fleet-db
+# workspace record alone is not one. Without it the tab shows "Disconnected".
 #
 # Differences vs. deploy/docker-compose.yml (the production reference):
 #   - Frontend is exposed on :3000 (distinct from the API on :8080), so
 #     the browser exercises real cross-origin requests instead of going
 #     through nginx same-origin proxying.
-#   - VITE_API_BASE_URL is hard-baked to http://localhost:8080 so the
-#     bundled SPA issues absolute URLs to the API container.
-#   - LOOM_FRONTEND_URL is set to http://localhost:3000 so the Go server
-#     allows the dev frontend origin in CORS preflights.
-#   - Optional Redis under the `fleet` profile.
+#   - The server uses the `runtime-terminal` image target (Debian + bash), so
+#     the terminal can spawn a PTY and the healthcheck can run. The production
+#     compose stays on the hardened distroless `runtime` target and is
+#     API-only.
+#   - --auth-dev-mode on fleet-db: dev-only posture, accepts the X-Actor
+#     header with no API key. Never ship this.
 #
-# Usage:
-#   docker compose -f docker-compose.dev.yml up --build
-#   docker compose -f docker-compose.dev.yml --profile fleet up --build
+# Host ports are overridable (DEV_API_PORT, DEV_UI_PORT) for collisions with
+# the other stacks in test/. CAVEAT: VITE_API_BASE_URL is a BUILD ARG baked
+# into the SPA bundle — if you override DEV_API_PORT you must rebuild the
+# frontend, or it will call the wrong origin.
 #
 # Note: image rebuilds are slow (deploy/frontend/Dockerfile runs `npm ci`
 # from scratch every time). That's intentional — this is a smoke test, not
 # an interactive dev loop. Use `make dev` for fast iteration.
 
+# Pinned so this stack cannot collide with the containers (or the volume
+# names) of test/local-mode, test/testenv or test/fleetdb. scripts/
+# compose-smoke.sh derives the volume name `<name>_loom-data` from it.
+name: ${DEV_COMPOSE_PROJECT:-loomcli-dev}
+
+volumes:
+  loom-data:
+    driver: local
+
 services:
+  redis:
+    image: redis:7-alpine
+    # No longer behind the `fleet` profile: fleet-db requires redis, and
+    # fleet-db is now unconditional. Disposable config — nothing here should
+    # outlive the stack, and the port is not published because nothing off
+    # the compose network needs it.
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 1s
+      retries: 20
+    restart: unless-stopped
+
+  fleet-db:
+    image: ${DEV_FLEETDB_IMAGE:-loomcli-dev-fleet-db:latest}
+    build:
+      context: ../fleet-db
+      dockerfile: deploy/docker/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      # Not optional: without an explicit artifact content backend fleet-db
+      # exits on startup (v5 DYNAMIC-WORKFLOWS-18).
+      FLEETDB_ARTIFACT_CONTENT_BACKEND: local
+      FLEETDB_ARTIFACT_CONTENT_DIR: /tmp/fleet-db-artifacts
+    command:
+      - "--redis-addr"
+      - "redis:6379"
+      - "--addr"
+      - ":8080"
+      - "--auth-dev-mode"
+      - "--authz-enabled=false"
+    # No healthcheck: fleet-db's image is distroless — no shell, no wget — so
+    # an in-container probe is not viable. Dependents gate on service_started
+    # and the smoke script polls /healthz from the host, per the precedent in
+    # test/testenv/docker-compose.yml.
+    restart: unless-stopped
+
   server:
     build:
       context: .
       dockerfile: deploy/server/Dockerfile
+      # Shell-bearing variant: required for the PTY and for this healthcheck.
+      target: runtime-terminal
+    depends_on:
+      fleet-db:
+        condition: service_started
     environment:
-      LOOM_FRONTEND_URL: "http://localhost:3000"
+      LOOM_FRONTEND_URL: "http://localhost:${DEV_UI_PORT:-3000}"
+      LOOM_ISSUE_BACKEND: fleetdb
+      # THE crash-loop fix: non-empty here selects cloud mode (pure HTTP
+      # client). Empty means local mode, which tries to spawn an embedded
+      # fleet-db binary that is not in this image, and that failure is fatal.
+      LOOM_FLEET_DB_URL: "http://fleet-db:8080"
+      LOOM_FLEET_DB_ACTOR: "dev-compose@local"
+      # Both HOME and the config dir land on the mounted volume, so the
+      # terminal snapshot, state.json and the seeded workspace checkout all
+      # survive `docker compose rm -sf server && up -d server`.
+      LOOM_CONFIG_DIR: /var/lib/loom
+      # Convenience only — lets `docker compose exec server loom data …` run
+      # without --workspace. It is NOT what makes the terminal work; the {ws}
+      # URL path segment is. Do not "simplify" the seed away on its strength.
+      LOOM_WORKSPACE: SMOKE
     ports:
-      - "8080:8080"
+      - "${DEV_API_PORT:-8080}:8080"
+    volumes:
+      - loom-data:/var/lib/loom
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      # /health, never /api/health: the latter returns 503 "degraded" when a
+      # daemon is expected, which is exactly this configuration.
+      # CMD (not CMD-SHELL) so it does not depend on shell semantics.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
       interval: 10s
       timeout: 3s
       retries: 5
+      start_period: 15s
     restart: unless-stopped
 
   frontend:
@@ -49,22 +143,11 @@ services:
       context: .
       dockerfile: deploy/frontend/Dockerfile
       args:
-        VITE_API_BASE_URL: "http://localhost:8080"
+        VITE_API_BASE_URL: "http://localhost:${DEV_API_PORT:-8080}"
     ports:
-      - "3000:80"
+      - "${DEV_UI_PORT:-3000}:80"
     depends_on:
       server:
+        # Legitimate again: the server healthcheck finally works.
         condition: service_healthy
-    restart: unless-stopped
-
-  redis:
-    image: redis:7-alpine
-    profiles: ["fleet"]
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
     restart: unless-stopped
