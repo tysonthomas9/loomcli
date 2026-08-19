@@ -110,7 +110,11 @@ func TestSupervisor_ComputeBackoff(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		ap := &AgentProcess{RestartCount: tc.restartCount}
+		// Exponential arm requires the classified failure a crash always carries.
+		ap := &AgentProcess{
+			RestartCount: tc.restartCount,
+			LastError:    &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrUnknown)},
+		}
 		got := s.computeBackoff(ap)
 		// For large restart counts, result is capped at maxBackoff
 		if tc.restartCount >= 8 {
@@ -139,7 +143,10 @@ func TestSupervisor_ComputeBackoff_OverflowProtection(t *testing.T) {
 	})
 
 	// Very high restart count should be capped and not overflow
-	ap := &AgentProcess{RestartCount: 100}
+	ap := &AgentProcess{
+		RestartCount: 100,
+		LastError:    &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrUnknown)},
+	}
 	got := s.computeBackoff(ap)
 	if got != 300*time.Second {
 		t.Errorf("computeBackoff(restart=100) = %v, want %v (capped)", got, 300*time.Second)

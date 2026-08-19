@@ -170,6 +170,34 @@ trust_codex_local_mode_paths() {
   trust_codex_project_path "${WORKSPACE_ROOT}/worktrees/source-repo/${CODE_AGENT}"
 }
 
+# allow_harness_prompts lets an agent answer the interactive prompts a TUI
+# harness raises before it will accept any input — the folder-trust dialog above
+# all. A role with no input_policy denies every prompt, and a denied trust
+# dialog is never dismissed: the harness sits on it, the composer never becomes
+# ready, and the run hangs at "Launching Claude agent (non-interactive)..."
+# until the watchdog kills it. The session then records zero assistant turns and
+# zero tokens, which reads as a silent no-op rather than a failure.
+#
+# Only TUI-driven backends need this. The deterministic localdogfood backend is
+# a shell script with no prompts, which is exactly why this stack looked healthy
+# on it and stalled the moment a real harness was selected.
+allow_harness_prompts() {
+  case "$AGENT_BACKEND" in
+    claude | codex | gemini | cursor) ;;
+    *) return 0 ;;
+  esac
+  role=""
+  for role in "$@"; do
+    if ! loom role set "$role" input_policy \
+      "default=deny,trust_prompt=allow,approval_prompt=allow" >/dev/null 2>&1; then
+      echo "[local-mode] FATAL: could not grant harness-prompt permissions to role ${role};" \
+        "a TUI backend would hang on the trust dialog" >&2
+      return 1
+    fi
+  done
+  echo "[local-mode] harness prompts allowed for: $*"
+}
+
 register_agents() {
   loom daemon profile set issue_backend fleetdb
   loom daemon profile set log_dir "${WORKSPACE_ROOT}/.loom/daemon-logs"
@@ -186,6 +214,9 @@ register_agents() {
   loom agentdef remove "$CODE_AGENT" >/dev/null 2>&1 || true
   loom agentdef add "$PLAN_AGENT" --role plan --auto --backend "$AGENT_BACKEND" --repos source-repo
   loom agentdef add "$CODE_AGENT" --role task --auto --backend "$AGENT_BACKEND" --repos source-repo
+  # After the roles exist, before the daemon starts: role config is resolved
+  # once, at daemon creation, so a policy applied later is inert until a bounce.
+  allow_harness_prompts plan task
 }
 
 prepare_codex_credentials() {
