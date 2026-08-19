@@ -131,3 +131,63 @@ func TestClearLockClaudeSessionID_NoLockIsNil(t *testing.T) {
 		t.Fatalf("ClearLockClaudeSessionID on missing lock = %v, want nil", err)
 	}
 }
+
+// --- ClearStaleLockTaskID (PUPPET-127) ---
+
+func TestClearStaleLockTaskID_ClearsTaskAndSession(t *testing.T) {
+	dir := t.TempDir()
+	writeStaleLock(t, dir, LockInfo{
+		PID:             deadPID,
+		Command:         "task",
+		AgentName:       "falcon",
+		RunID:           "run-1",
+		TaskID:          "PUPPET-101",
+		TaskTitle:       "an interrupted task",
+		TaskStartedAt:   time.Now().Add(-time.Hour),
+		ClaudeSessionID: "sess-abc",
+	})
+
+	if err := ClearStaleLockTaskID(dir); err != nil {
+		t.Fatalf("ClearStaleLockTaskID: %v", err)
+	}
+
+	info, err := ReadLockFile(dir)
+	if err != nil {
+		t.Fatalf("ReadLockFile: %v", err)
+	}
+	if info.TaskID != "" || info.TaskTitle != "" || !info.TaskStartedAt.IsZero() {
+		t.Errorf("task remnant survived: id=%q title=%q started=%v", info.TaskID, info.TaskTitle, info.TaskStartedAt)
+	}
+	if info.ClaudeSessionID != "" {
+		t.Errorf("ClaudeSessionID = %q, want cleared", info.ClaudeSessionID)
+	}
+	// Everything identifying the lock itself must survive.
+	if info.PID != deadPID || info.AgentName != "falcon" || info.RunID != "run-1" || info.Command != "task" {
+		t.Errorf("lock identity mutated: %+v", info)
+	}
+}
+
+func TestClearStaleLockTaskID_LivePIDRefuses(t *testing.T) {
+	dir := t.TempDir()
+	writeStaleLock(t, dir, LockInfo{
+		PID:    os.Getpid(), // alive
+		TaskID: "PUPPET-101",
+	})
+
+	if err := ClearStaleLockTaskID(dir); err == nil {
+		t.Fatal("expected an error for a live-PID lock, got nil")
+	}
+	info, err := ReadLockFile(dir)
+	if err != nil {
+		t.Fatalf("ReadLockFile: %v", err)
+	}
+	if info.TaskID != "PUPPET-101" {
+		t.Errorf("TaskID = %q, want it left untouched", info.TaskID)
+	}
+}
+
+func TestClearStaleLockTaskID_MissingLockIsNoOp(t *testing.T) {
+	if err := ClearStaleLockTaskID(t.TempDir()); err != nil {
+		t.Fatalf("ClearStaleLockTaskID on a missing lock: %v", err)
+	}
+}
