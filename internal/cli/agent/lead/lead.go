@@ -41,6 +41,12 @@ const leadStoreOpTimeout = 10 * time.Second
 var leadMessage string
 var leadPromptFile string
 
+// leadPrintPrompt makes `loom lead` print the resolved STATIC prompt and exit
+// without starting a session. It is how the lead profile's CLAUDE.md is
+// generated, so it must never emit the per-session sections that
+// applyLeadPromptContext appends.
+var leadPrintPrompt bool
+
 var leadCmd = &cobra.Command{
 	Use:     "lead",
 	Short:   "Run the interactive terminal-agent runtime",
@@ -63,7 +69,18 @@ repository or any worktree.
 
 Use --message to seed the session with an initial user request. The message
 is appended to the lead system prompt, so the agent performs its normal
-lead-mode startup and then addresses the request using lead-mode conventions.`,
+lead-mode startup and then addresses the request using lead-mode conventions.
+
+Use --print-prompt to print the resolved static lead prompt and exit without
+starting a session. It prints only the static half - no backend assignment and
+no --message request - which is exactly what belongs in an agent profile's
+CLAUDE.md. Generate one with:
+
+  loom lead --print-prompt > "$WORKSPACE/profiles/lead/claude/CLAUDE.md"
+
+A session whose profile carries that CLAUDE.md should then be launched with
+--prompt builtin:lead-profile, a minimal pointer prompt that leaves the role
+instructions to the profile instead of repeating them every session.`,
 	Args: cobra.NoArgs,
 	Run:  runLead,
 }
@@ -72,6 +89,7 @@ func init() {
 	cli.RegisterCommand(leadCmd)
 	leadCmd.Flags().StringVar(&leadMessage, "message", "", "Initial user request to address in lead mode")
 	leadCmd.Flags().StringVar(&leadPromptFile, "prompt", "", "Path to terminal-agent prompt template")
+	leadCmd.Flags().BoolVar(&leadPrintPrompt, "print-prompt", false, "Print the resolved static lead prompt and exit (no session, no dynamic sections)")
 }
 
 // leadStartupPrompt picks the lead runtime's boot prompt. A role prompt_file
@@ -86,20 +104,16 @@ func leadStartupPrompt(ctx context.Context, registration leadSessionRegistration
 }
 
 func runLead(cmd *cobra.Command, args []string) {
-	// Get current working directory
-	workDir, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error getting working directory: %v\n", err)
-		os.Exit(1)
+	// Print-and-exit runs before the health check and before session
+	// registration: generating a profile file must not touch the backend, write
+	// an orchestrator session row, or mark an epic assignment delivered.
+	if leadPrintPrompt {
+		printLeadPrompt()
+		return
 	}
 
-	// Check backend health before invoking. If the binary isn't installed,
-	// show a helpful error and drop into a shell so the user can fix it.
-	backendName := cli.GetBackendName()
-	if hs, ok := backends.CheckBackendHealth(backendName); ok && !hs.Installed {
-		fmt.Fprintf(os.Stderr, "Error: %s backend is not installed (%s)\n\n", backendName, hs.Message)
-		fmt.Fprintf(os.Stderr, "Install it and try again. Dropping into a shell so you can fix this.\n\n")
-		execShell(workDir)
+	workDir, backendName, ok := leadRuntimePreflight()
+	if !ok {
 		return
 	}
 
@@ -145,6 +159,39 @@ func runLead(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stderr, "\nDropping into a shell. Fix the issue and run 'loom lead' to retry.\n\n")
 		execShell(workDir)
 	}
+}
+
+// leadRuntimePreflight resolves the working directory and the backend, dropping
+// into a shell (and reporting !ok) when the backend binary is not installed so
+// the user can fix it in place.
+func leadRuntimePreflight() (workDir, backendName string, ok bool) {
+	workDir, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting working directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	backendName = cli.GetBackendName()
+	if hs, healthy := backends.CheckBackendHealth(backendName); healthy && !hs.Installed {
+		fmt.Fprintf(os.Stderr, "Error: %s backend is not installed (%s)\n\n", backendName, hs.Message)
+		fmt.Fprintf(os.Stderr, "Install it and try again. Dropping into a shell so you can fix this.\n\n")
+		execShell(workDir)
+		return "", "", false
+	}
+	return workDir, backendName, true
+}
+
+// printLeadPrompt writes the static lead prompt to stdout. The zero
+// registration is deliberate: loadLeadRolePrompt then opens its own short-lived
+// read-only store handle, or returns "" when there is no workspace, so this
+// works outside a workspace and with fleet-db down.
+func printLeadPrompt() {
+	prompt, err := generateLeadTerminalPrompt(context.Background(), leadSessionRegistration{})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading terminal prompt: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println(prompt)
 }
 
 func generateLeadTerminalPrompt(ctx context.Context, registration leadSessionRegistration) (string, error) {
