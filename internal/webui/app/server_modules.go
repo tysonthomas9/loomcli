@@ -61,6 +61,10 @@ func (app *Server) buildModules() {
 	// Log module (always added — handles nil agentSvc gracefully)
 	app.wsModules = append(app.wsModules, svcimpl.NewLogModule(app.agentSvc))
 
+	// Stacks module (always added — modbuilder constructs the default
+	// stack service; app deliberately avoids the stacksvc import fanout).
+	app.wsModules = append(app.wsModules, modbuilder.NewStackModule(nil))
+
 	// SSE subscription
 	if app.hub != nil {
 		app.wsModules = append(app.wsModules,

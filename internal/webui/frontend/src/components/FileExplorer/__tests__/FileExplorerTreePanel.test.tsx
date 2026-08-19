@@ -71,7 +71,9 @@ function renderPanel(
     changeGroups: ChangeCheckoutGroup[];
     sections: FileTreeSection[];
     branchChangeCount: number;
+    taskChangeCount: number;
     workingChangeCount: number;
+    showTaskCompareMode: boolean;
     branchBaseName: string;
     onCompareModeChange: (compareMode: CompareMode) => void;
     onOpenDiff: (request: HistoryOpenDiffRequest) => void;
@@ -83,8 +85,10 @@ function renderPanel(
       changeCount={0}
       compareMode={overrides.compareMode ?? "branch"}
       branchChangeCount={overrides.branchChangeCount ?? 2}
+      taskChangeCount={overrides.taskChangeCount ?? 0}
       workingChangeCount={overrides.workingChangeCount ?? 3}
       branchBaseName={overrides.branchBaseName}
+      showTaskCompareMode={overrides.showTaskCompareMode ?? false}
       checkoutError={null}
       repairError={null}
       sections={overrides.sections ?? []}
@@ -140,7 +144,9 @@ describe("FileExplorerTreePanel", () => {
         changeCount={7}
         compareMode="branch"
         branchChangeCount={4}
+        taskChangeCount={0}
         workingChangeCount={7}
+        showTaskCompareMode={false}
         checkoutError={null}
         repairError={null}
         sections={[]}
@@ -184,6 +190,62 @@ describe("FileExplorerTreePanel", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Working tree · 3" }));
 
     expect(onCompareModeChange).toHaveBeenCalledWith("working");
+  });
+
+  it("renders and selects the task compare segment when available", () => {
+    const onCompareModeChange = vi.fn();
+    renderPanel({
+      compareMode: "branch",
+      taskChangeCount: 5,
+      showTaskCompareMode: true,
+      onCompareModeChange,
+    });
+
+    expect(screen.getByRole("tab", { name: "By task · 5" })).toHaveAttribute(
+      "title",
+      "Each task's committed increment: its stack base branch diffed against its output branch.",
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "By task · 5" }));
+
+    expect(onCompareModeChange).toHaveBeenCalledWith("tasks");
+  });
+
+  it("opens task rows with repo-scoped explicit refs", () => {
+    const onOpenDiff = vi.fn();
+    renderPanel({
+      compareMode: "tasks",
+      showTaskCompareMode: true,
+      taskChangeCount: 1,
+      changeGroups: [
+        changeGroup(
+          { scope: "repo", target: "loomcli" },
+          {
+            id: "epic:E/T1",
+            label: "T1 · loomcli · 1",
+            diffFrom: "main",
+            diffTo: "task/T1",
+            diffTitle: "T1",
+          },
+        ),
+      ],
+      onOpenDiff,
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Open diff for src/main.ts (Modified)",
+      }),
+    );
+
+    expect(onOpenDiff).toHaveBeenCalledWith({
+      ref: { scope: "repo", target: "loomcli" },
+      path: "src/main.ts",
+      from: "main",
+      to: "task/T1",
+      title: "T1",
+      canOpenFile: false,
+    });
   });
 
   it("folds a known base name into the branch segment", () => {
@@ -293,7 +355,9 @@ describe("FileExplorerTreePanel", () => {
         changeCount={0}
         compareMode="working"
         branchChangeCount={0}
+        taskChangeCount={0}
         workingChangeCount={0}
+        showTaskCompareMode={false}
         checkoutError={null}
         repairError={null}
         sections={[]}
@@ -327,6 +391,50 @@ describe("FileExplorerTreePanel", () => {
 
     expect(
       screen.getByText("No uncommitted changes across this workspace."),
+    ).toBeInTheDocument();
+
+    rerender(
+      <FileExplorerTreePanel
+        lens="changes"
+        changeCount={0}
+        compareMode="tasks"
+        branchChangeCount={0}
+        taskChangeCount={0}
+        workingChangeCount={0}
+        showTaskCompareMode
+        checkoutError={null}
+        repairError={null}
+        sections={[]}
+        changeGroups={[]}
+        unavailableCheckoutLabels={[]}
+        expandedRoots={new Set()}
+        repairingCheckoutKey={null}
+        canWrite={true}
+        selectedTab={null}
+        inlineEdit={null}
+        gitStatusByRef={{}}
+        treeRevealRequests={{}}
+        treeRefreshRequests={{}}
+        hideAgentSectionHeading={false}
+        onLensChange={vi.fn()}
+        onCompareModeChange={vi.fn()}
+        onQuickOpen={vi.fn()}
+        onOpenDiff={vi.fn()}
+        onToggleRoot={vi.fn()}
+        onRepairCheckout={vi.fn()}
+        onCheckoutContextMenu={vi.fn()}
+        onOpenFile={vi.fn()}
+        onContextMenu={vi.fn()}
+        onRequestRename={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onInlineEditChange={vi.fn()}
+        onInlineEditCommit={vi.fn()}
+        onInlineEditCancel={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText("No task increments found in this workspace's stacks."),
     ).toBeInTheDocument();
   });
 });

@@ -167,6 +167,44 @@ func HandleScopedFileDiff(svc service.FileService) http.HandlerFunc {
 	}
 }
 
+type scopedDiffFilesResponse struct {
+	Success bool                         `json:"success"`
+	Data    *service.FileDiffFilesResult `json:"data,omitempty"`
+	Error   string                       `json:"error,omitempty"`
+}
+
+func writeScopedDiffFilesError(w http.ResponseWriter, err error) {
+	var svcErr *service.ServiceError
+	if errors.As(err, &svcErr) {
+		handler.WriteJSON(w, handler.StatusForKind(svcErr.Kind), scopedDiffFilesResponse{
+			Success: false,
+			Error:   svcErr.Message,
+		})
+		return
+	}
+	handler.WriteJSON(w, http.StatusInternalServerError, scopedDiffFilesResponse{
+		Success: false,
+		Error:   "internal server error",
+	})
+}
+
+// HandleScopedDiffFiles handles GET /api/workspaces/{ws}/files/diff-files?scope=&target=&from=&to=.
+func HandleScopedDiffFiles(svc service.FileService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		scope, target, repo := scopeFromQuery(r)
+		from := r.URL.Query().Get("from")
+		to := r.URL.Query().Get("to")
+
+		result, err := svc.DiffFilesScoped(r.Context(), wsID, scope, target, repo, from, to)
+		if err != nil {
+			writeScopedDiffFilesError(w, err)
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, scopedDiffFilesResponse{Success: true, Data: result})
+	}
+}
+
 // HandleScopedFileHistory handles GET /api/workspaces/{ws}/files/history?scope=&target=&path=.
 func HandleScopedFileHistory(svc service.FileService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

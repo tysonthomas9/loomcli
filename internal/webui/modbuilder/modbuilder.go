@@ -15,12 +15,14 @@ import (
 	locsettings "github.com/tysonthomas9/loomcli/internal/webui/handlers/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/prreview"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/stacks"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/taskrunapi"
 	hterminal "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl/stacksvc"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
@@ -99,6 +101,14 @@ func NewDiffModule(agentSvc service.AgentService, diffSvc service.DiffService) i
 // NewFileModule creates the file operations module.
 func NewFileModule(fileSvc service.FileService, accessCfg ...middleware.FileAccessConfig) interface{ Register(*http.ServeMux) } {
 	return misc.NewModule(fileSvc, accessCfg...)
+}
+
+// NewStackModule creates the read-only stack lineage module.
+func NewStackModule(stackSvc service.StackService) interface{ Register(*http.ServeMux) } {
+	if stackSvc == nil {
+		stackSvc = stacksvc.New()
+	}
+	return stacks.NewModule(stackSvc)
 }
 
 // NewApprovalsModule creates the await approval-resolution module

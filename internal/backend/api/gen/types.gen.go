@@ -206,6 +206,30 @@ func (e CreateIssueRequestStatus) Valid() bool {
 	}
 }
 
+// Defines values for DiffFileSummaryStatus.
+const (
+	A DiffFileSummaryStatus = "A"
+	D DiffFileSummaryStatus = "D"
+	M DiffFileSummaryStatus = "M"
+	R DiffFileSummaryStatus = "R"
+)
+
+// Valid indicates whether the value is a known member of the DiffFileSummaryStatus enum.
+func (e DiffFileSummaryStatus) Valid() bool {
+	switch e {
+	case A:
+		return true
+	case D:
+		return true
+	case M:
+		return true
+	case R:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ErrorResponseSuccess.
 const (
 	False ErrorResponseSuccess = false
@@ -1202,6 +1226,24 @@ func (e GetScopedFileDiffParamsScope) Valid() bool {
 	}
 }
 
+// Defines values for GetScopedDiffFilesParamsScope.
+const (
+	GetScopedDiffFilesParamsScopeAgent GetScopedDiffFilesParamsScope = "agent"
+	GetScopedDiffFilesParamsScopeRepo  GetScopedDiffFilesParamsScope = "repo"
+)
+
+// Valid indicates whether the value is a known member of the GetScopedDiffFilesParamsScope enum.
+func (e GetScopedDiffFilesParamsScope) Valid() bool {
+	switch e {
+	case GetScopedDiffFilesParamsScopeAgent:
+		return true
+	case GetScopedDiffFilesParamsScopeRepo:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetScopedFileGitStatusParamsScope.
 const (
 	GetScopedFileGitStatusParamsScopeAgent     GetScopedFileGitStatusParamsScope = "agent"
@@ -1351,19 +1393,19 @@ func (e StatScopedFileParamsScope) Valid() bool {
 
 // Defines values for GetScopedFileTreeParamsScope.
 const (
-	GetScopedFileTreeParamsScopeAgent     GetScopedFileTreeParamsScope = "agent"
-	GetScopedFileTreeParamsScopeRepo      GetScopedFileTreeParamsScope = "repo"
-	GetScopedFileTreeParamsScopeWorkspace GetScopedFileTreeParamsScope = "workspace"
+	Agent     GetScopedFileTreeParamsScope = "agent"
+	Repo      GetScopedFileTreeParamsScope = "repo"
+	Workspace GetScopedFileTreeParamsScope = "workspace"
 )
 
 // Valid indicates whether the value is a known member of the GetScopedFileTreeParamsScope enum.
 func (e GetScopedFileTreeParamsScope) Valid() bool {
 	switch e {
-	case GetScopedFileTreeParamsScopeAgent:
+	case Agent:
 		return true
-	case GetScopedFileTreeParamsScopeRepo:
+	case Repo:
 		return true
-	case GetScopedFileTreeParamsScopeWorkspace:
+	case Workspace:
 		return true
 	default:
 		return false
@@ -1750,6 +1792,18 @@ type DependencyRef struct {
 	Type string `json:"type"`
 }
 
+// DiffFileSummary defines model for DiffFileSummary.
+type DiffFileSummary struct {
+	Additions int                   `json:"additions"`
+	Deletions int                   `json:"deletions"`
+	OldPath   *string               `json:"old_path,omitempty"`
+	Path      string                `json:"path"`
+	Status    DiffFileSummaryStatus `json:"status"`
+}
+
+// DiffFileSummaryStatus defines model for DiffFileSummary.Status.
+type DiffFileSummaryStatus string
+
 // EditorInfo defines model for EditorInfo.
 type EditorInfo struct {
 	Detected    bool   `json:"detected"`
@@ -1863,6 +1917,18 @@ type FileCheckoutsResponse struct {
 	Errors    []FileCheckoutError `json:"errors"`
 	LimitHit  bool                `json:"limit_hit"`
 	Partial   bool                `json:"partial"`
+}
+
+// FileDiffFilesEnvelope defines model for FileDiffFilesEnvelope.
+type FileDiffFilesEnvelope struct {
+	Data    FileDiffFilesResponse `json:"data"`
+	Error   *string               `json:"error,omitempty"`
+	Success bool                  `json:"success"`
+}
+
+// FileDiffFilesResponse defines model for FileDiffFilesResponse.
+type FileDiffFilesResponse struct {
+	Files []DiffFileSummary `json:"files"`
 }
 
 // FileDiffResponse defines model for FileDiffResponse.
@@ -2995,6 +3061,35 @@ type WorkspaceResponse struct {
 // WorkspaceResponseDesignFormat defines model for WorkspaceResponse.DesignFormat.
 type WorkspaceResponseDesignFormat string
 
+// WorkspaceStack defines model for WorkspaceStack.
+type WorkspaceStack struct {
+	Id       string               `json:"id"`
+	Nodes    []WorkspaceStackNode `json:"nodes"`
+	Repo     string               `json:"repo"`
+	RootBase string               `json:"root_base"`
+}
+
+// WorkspaceStackNode defines model for WorkspaceStackNode.
+type WorkspaceStackNode struct {
+	BaseRef      *string `json:"base_ref,omitempty"`
+	BaseTaskId   *string `json:"base_task_id,omitempty"`
+	OutputBranch string  `json:"output_branch"`
+	Position     int     `json:"position"`
+	TaskId       string  `json:"task_id"`
+}
+
+// WorkspaceStacksEnvelope defines model for WorkspaceStacksEnvelope.
+type WorkspaceStacksEnvelope struct {
+	Data    WorkspaceStacksResponse `json:"data"`
+	Error   *string                 `json:"error,omitempty"`
+	Success bool                    `json:"success"`
+}
+
+// WorkspaceStacksResponse defines model for WorkspaceStacksResponse.
+type WorkspaceStacksResponse struct {
+	Stacks []WorkspaceStack `json:"stacks"`
+}
+
 // WorkspaceSummary defines model for WorkspaceSummary.
 type WorkspaceSummary struct {
 	Active    bool    `json:"active"`
@@ -3233,6 +3328,20 @@ type GetScopedFileDiffParams struct {
 
 // GetScopedFileDiffParamsScope defines parameters for GetScopedFileDiff.
 type GetScopedFileDiffParamsScope string
+
+// GetScopedDiffFilesParams defines parameters for GetScopedDiffFiles.
+type GetScopedDiffFilesParams struct {
+	Scope  GetScopedDiffFilesParamsScope `form:"scope" json:"scope"`
+	Target string                        `form:"target" json:"target"`
+
+	// Repo Optional repo qualifier, valid only when scope=agent.
+	Repo *string `form:"repo,omitempty" json:"repo,omitempty"`
+	From string  `form:"from" json:"from"`
+	To   string  `form:"to" json:"to"`
+}
+
+// GetScopedDiffFilesParamsScope defines parameters for GetScopedDiffFiles.
+type GetScopedDiffFilesParamsScope string
 
 // GetScopedFileGitStatusParams defines parameters for GetScopedFileGitStatus.
 type GetScopedFileGitStatusParams struct {

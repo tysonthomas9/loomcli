@@ -323,6 +323,24 @@ func (s *testFileServiceImpl) DiffFileScoped(_ context.Context, _ string, _ serv
 	return &service.FileDiffResult{}, nil
 }
 
+func (s *testFileServiceImpl) DiffFilesScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, from, to string) (*service.FileDiffFilesResult, error) {
+	if strings.TrimSpace(from) == "" {
+		return nil, service.ErrValidation("missing required parameter: from")
+	}
+	if strings.TrimSpace(to) == "" {
+		return nil, service.ErrValidation("missing required parameter: to")
+	}
+	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
+	if err != nil {
+		return nil, err
+	}
+	files, err := s.fileOps.GitDiffFiles(ctx, root, from, to)
+	if err != nil {
+		return nil, service.ErrInternal("failed to list diff files", err)
+	}
+	return &service.FileDiffFilesResult{Files: files}, nil
+}
+
 func (s *testFileServiceImpl) BlameFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileBlameResult, error) {
 	return &service.FileBlameResult{}, nil
 }
@@ -714,6 +732,9 @@ func (s *stubFileService) RepairCheckout(_ context.Context, _ string, _ service.
 }
 func (s *stubFileService) DiffFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _, _ string) (*service.FileDiffResult, error) {
 	return &service.FileDiffResult{}, nil
+}
+func (s *stubFileService) DiffFilesScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string) (*service.FileDiffFilesResult, error) {
+	return &service.FileDiffFilesResult{Files: []ops.DiffFileResult{}}, nil
 }
 func (s *stubFileService) BlameFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileBlameResult, error) {
 	return &service.FileBlameResult{}, nil

@@ -1550,6 +1550,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/stacks": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List task stack lineage for a workspace */
+    get: operations["getWorkspaceStacks"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/agents/{name}/git/diff-stat": {
     parameters: {
       query?: never;
@@ -1763,6 +1780,23 @@ export interface paths {
     };
     /** Get unified diff for a file in a scoped file browser root */
     get: operations["getScopedFileDiff"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/diff-files": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List changed files between two refs in a scoped file browser checkout */
+    get: operations["getScopedDiffFiles"];
     put?: never;
     post?: never;
     delete?: never;
@@ -2434,6 +2468,43 @@ export interface components {
       patch: string;
       partial: boolean;
       limit_hit: boolean;
+    };
+    DiffFileSummary: {
+      path: string;
+      /** @enum {string} */
+      status: "M" | "A" | "D" | "R";
+      old_path?: string;
+      additions: number;
+      deletions: number;
+    };
+    FileDiffFilesResponse: {
+      files: components["schemas"]["DiffFileSummary"][];
+    };
+    FileDiffFilesEnvelope: {
+      success: boolean;
+      data: components["schemas"]["FileDiffFilesResponse"];
+      error?: string;
+    };
+    WorkspaceStackNode: {
+      task_id: string;
+      base_task_id?: string;
+      output_branch: string;
+      base_ref?: string;
+      position: number;
+    };
+    WorkspaceStack: {
+      id: string;
+      repo: string;
+      root_base: string;
+      nodes: components["schemas"]["WorkspaceStackNode"][];
+    };
+    WorkspaceStacksResponse: {
+      stacks: components["schemas"]["WorkspaceStack"][];
+    };
+    WorkspaceStacksEnvelope: {
+      success: boolean;
+      data: components["schemas"]["WorkspaceStacksResponse"];
+      error?: string;
     };
     FileBlameLine: {
       line: number;
@@ -6872,6 +6943,38 @@ export interface operations {
       };
     };
   };
+  getWorkspaceStacks: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Workspace stack lineage */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WorkspaceStacksEnvelope"];
+        };
+      };
+      /** @description Stack lineage could not be read */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
   getAgentDiffStat: {
     parameters: {
       query?: never;
@@ -7228,6 +7331,63 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["FileDiffResponse"];
+        };
+      };
+    };
+  };
+  getScopedDiffFiles: {
+    parameters: {
+      query: {
+        scope: "repo" | "agent";
+        target: string;
+        /** @description Optional repo qualifier, valid only when scope=agent. */
+        repo?: string;
+        from: string;
+        to: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Changed files */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileDiffFilesEnvelope"];
+        };
+      };
+      /** @description Missing or invalid refs */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description File browser access denied */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Checkout or ref not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
         };
       };
     };

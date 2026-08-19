@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -70,6 +71,40 @@ func (s *fileServiceImpl) DiffFileScoped(ctx context.Context, wsID string, scope
 		return nil, mapGitInspectionError("failed to run git diff", err)
 	}
 	return &service.FileDiffResult{Path: cleanPath, Patch: patch.Output, Partial: patch.Partial, LimitHit: patch.LimitHit}, nil
+}
+
+func (s *fileServiceImpl) DiffFilesScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, from, to string) (*service.FileDiffFilesResult, error) {
+	from = strings.TrimSpace(from)
+	to = strings.TrimSpace(to)
+	if from == "" {
+		return nil, service.ErrValidation("missing required parameter: from")
+	}
+	if to == "" {
+		return nil, service.ErrValidation("missing required parameter: to")
+	}
+	if err := validateDiffListRef(from); err != nil {
+		return nil, err
+	}
+	if err := validateDiffListRef(to); err != nil {
+		return nil, err
+	}
+	root, checkout, err := s.resolveScopedCheckoutRoot(wsID, scope, target, repo)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	gitCtx, err := withGitCheckoutIdentity(ctx, checkout.root, root)
+	if err != nil {
+		return nil, err
+	}
+	files, err := s.fileOps.GitDiffFiles(gitCtx, checkout.root, from, to)
+	if err != nil {
+		return nil, mapGitDiffFilesError(gitCtx, err)
+	}
+	if files == nil {
+		files = []ops.DiffFileResult{}
+	}
+	return &service.FileDiffFilesResult{Files: files}, nil
 }
 
 func (s *fileServiceImpl) BlameFileScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, path string) (*service.FileBlameResult, error) {
@@ -151,6 +186,27 @@ func mapGitInspectionError(operation string, err error) error {
 	return service.ErrInternal(operation, err)
 }
 
+func validateDiffListRef(ref string) error {
+	if !validGitRef.MatchString(ref) || strings.Contains(ref, "..") {
+		return service.ErrValidation("invalid git ref")
+	}
+	return nil
+}
+
+func mapGitDiffFilesError(ctx context.Context, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return service.ErrTimeout("failed to list diff files")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "resolve from ref") || strings.Contains(msg, "resolve to ref") {
+		return service.ErrNotFound("git ref not found")
+	}
+	if strings.Contains(msg, "invalid git ref") {
+		return service.ErrValidation("invalid git ref")
+	}
+	return service.ErrInternal("failed to list diff files", err)
+}
+
 func blameSkipped(path, reason, message string) *service.FileBlameResult {
 	return &service.FileBlameResult{
 		Path:    path,
@@ -199,6 +255,24 @@ func (s *fileServiceImpl) resolveScopedContainingCheckout(wsID string, scope ser
 		return nil, "", fileCheckoutRef{}, service.ErrValidation("unsupported scope " + string(scope))
 	}
 	return root, cleanPath, checkout, nil
+}
+
+func (s *fileServiceImpl) resolveScopedCheckoutRoot(wsID string, scope service.FileScope, target, repo string) (*scopedRoot, fileCheckoutRef, error) {
+	root, err := s.resolveScopedRoot(wsID, scope, target, repo)
+	if err != nil {
+		return nil, fileCheckoutRef{}, err
+	}
+	switch scope {
+	case service.ScopeRepo, service.ScopeAgent:
+		if err := validateGitCheckoutRoot(root.path); err != nil {
+			root.Close()
+			return nil, fileCheckoutRef{}, err
+		}
+		return root, fileCheckoutRef{root: root.path}, nil
+	default:
+		root.Close()
+		return nil, fileCheckoutRef{}, service.ErrValidation("unsupported scope " + string(scope))
+	}
 }
 
 func resolveContainingCheckout(root *scopedRoot, relPath string) (fileCheckoutRef, error) {

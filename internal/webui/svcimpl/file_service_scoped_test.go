@@ -31,6 +31,7 @@ type scopedMockFileOps struct {
 	wsErr         error
 	gitStatusFunc func(context.Context, string) (ops.GitFileStatusResult, error)
 	gitShowFunc   func(context.Context, string, string, string, int64) (*ops.GitFileContentAtRev, error)
+	gitDiffFiles  func(context.Context, string, string, string) ([]ops.DiffFileResult, error)
 	branchFunc    func(context.Context, string) (string, error)
 }
 
@@ -135,6 +136,13 @@ func (m scopedMockFileOps) GitDiffFile(_ context.Context, worktreePath, path, fr
 	args = append(args, "--", path)
 	out, err := exec.Command("git", args...).CombinedOutput() //nolint:norawexec // Test mock runs fixed git command.
 	return ops.GitBoundedTextResult{Output: string(out)}, err
+}
+
+func (m scopedMockFileOps) GitDiffFiles(ctx context.Context, worktreePath, from, to string) ([]ops.DiffFileResult, error) {
+	if m.gitDiffFiles != nil {
+		return m.gitDiffFiles(ctx, worktreePath, from, to)
+	}
+	return nil, errors.New("GitDiffFiles not implemented")
 }
 
 func (m scopedMockFileOps) GitLogFile(_ context.Context, worktreePath, path string, limit int) (ops.GitBoundedTextResult, error) {
@@ -1048,6 +1056,62 @@ func TestFileServiceImpl_DiffFileScoped(t *testing.T) {
 	if !strings.Contains(res.Patch, "-one") || !strings.Contains(res.Patch, "+two") {
 		t.Fatalf("rev diff missing expected lines:\n%s", res.Patch)
 	}
+}
+
+func TestFileServiceImpl_DiffFilesScoped(t *testing.T) {
+	svc, scopes := setupScopedService(t)
+	repo := scopes[1]
+	initGitRepo(t, repo.root)
+	var gotRoot string
+	var gotFrom string
+	var gotTo string
+	svc = NewFileService(scopedMockFileOps{
+		wsRoot:   filepath.Dir(repo.root),
+		repoRoot: repo.root,
+		gitDiffFiles: func(_ context.Context, worktreePath, from, to string) ([]ops.DiffFileResult, error) {
+			gotRoot, gotFrom, gotTo = worktreePath, from, to
+			return []ops.DiffFileResult{{Path: "file.txt", Status: "M", Additions: 1, Deletions: 2}}, nil
+		},
+	})
+
+	res, err := svc.DiffFilesScoped(context.Background(), "ws", repo.scope, repo.target, "", "main", "task/T1")
+	if err != nil {
+		t.Fatalf("DiffFilesScoped: %v", err)
+	}
+	if gotRoot != repo.root || gotFrom != "main" || gotTo != "task/T1" {
+		t.Fatalf("git args root=%q from=%q to=%q", gotRoot, gotFrom, gotTo)
+	}
+	if len(res.Files) != 1 || res.Files[0].Path != "file.txt" {
+		t.Fatalf("files = %+v", res.Files)
+	}
+}
+
+func TestFileServiceImpl_DiffFilesScopedValidation(t *testing.T) {
+	svc := NewFileService(scopedMockFileOps{})
+	_, err := svc.DiffFilesScoped(context.Background(), "ws", service.ScopeRepo, "repo-a", "", "", "HEAD")
+	wantKind(t, err, service.KindValidation)
+	_, err = svc.DiffFilesScoped(context.Background(), "ws", service.ScopeRepo, "repo-a", "", "HEAD", "")
+	wantKind(t, err, service.KindValidation)
+	_, err = svc.DiffFilesScoped(context.Background(), "ws", service.ScopeRepo, "repo-a", "", "../bad", "HEAD")
+	wantKind(t, err, service.KindValidation)
+	_, err = svc.DiffFilesScoped(context.Background(), "ws", service.ScopeWorkspace, "", "", "HEAD", "main")
+	wantKind(t, err, service.KindValidation)
+}
+
+func TestFileServiceImpl_DiffFilesScopedMissingRefIs4xx(t *testing.T) {
+	svc, scopes := setupScopedService(t)
+	repo := scopes[1]
+	initGitRepo(t, repo.root)
+	svc = NewFileService(scopedMockFileOps{
+		wsRoot:   filepath.Dir(repo.root),
+		repoRoot: repo.root,
+		gitDiffFiles: func(context.Context, string, string, string) ([]ops.DiffFileResult, error) {
+			return nil, fmt.Errorf("resolve from ref %q", "missing")
+		},
+	})
+
+	_, err := svc.DiffFilesScoped(context.Background(), "ws", repo.scope, repo.target, "", "missing", "HEAD")
+	wantKind(t, err, service.KindNotFound)
 }
 
 func TestFileServiceImpl_BlameFileScoped(t *testing.T) {

@@ -57,6 +57,10 @@ func (m *mockFileOps) GitDiffFile(context.Context, string, string, string, strin
 	return ops.GitBoundedTextResult{}, nil
 }
 
+func (m *mockFileOps) GitDiffFiles(context.Context, string, string, string) ([]ops.DiffFileResult, error) {
+	return []ops.DiffFileResult{}, nil
+}
+
 func (m *mockFileOps) GitLogFile(context.Context, string, string, int) (ops.GitBoundedTextResult, error) {
 	return ops.GitBoundedTextResult{}, nil
 }
@@ -99,6 +103,22 @@ func TestHandleFileCheckoutRepair_DisallowedRepoReturns400(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+}
+
+func TestHandleScopedDiffFiles_MissingRefsReturns400(t *testing.T) {
+	svc := NewFileService(&mockFileOps{})
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/ws-1/files/diff-files?scope=repo&target=repo-a&to=HEAD", nil)
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "ws-1"))
+	rec := httptest.NewRecorder()
+
+	HandleScopedDiffFiles(svc).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s, want 400", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"success":false`) {
+		t.Fatalf("body=%s, want success false envelope", rec.Body.String())
 	}
 }
 

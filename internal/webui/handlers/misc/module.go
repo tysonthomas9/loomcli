@@ -40,6 +40,7 @@ func (m *Module) Register(mux *http.ServeMux) {
 	handle("GET /api/workspaces/{ws}/files/checkouts", HandleFileCheckouts(m.fileSvc))
 	handle("POST /api/workspaces/{ws}/files/checkouts/repair", HandleFileCheckoutRepair(m.fileSvc))
 	handle("GET /api/workspaces/{ws}/files/diff", HandleScopedFileDiff(m.fileSvc))
+	handle("GET /api/workspaces/{ws}/files/diff-files", HandleScopedDiffFiles(m.fileSvc))
 	handle("GET /api/workspaces/{ws}/files/history", HandleScopedFileHistory(m.fileSvc))
 	handle("GET /api/workspaces/{ws}/files/blame", HandleScopedFileBlame(m.fileSvc))
 	handle("GET /api/workspaces/{ws}/files", HandleScopedFileRead(m.fileSvc))

@@ -1,4 +1,5 @@
 import type { FileCheckout } from "@/api/workspace";
+import type { WorkspaceStack } from "@/api/workspace";
 import type { DiffFile } from "@/api/issues";
 import { checkoutRefKey, type CheckoutRef } from "@/utils/fileExplorerRefs";
 
@@ -27,6 +28,10 @@ export interface ChangeCheckoutGroup {
   changeCount: number;
   loaded: boolean;
   items: ChangeListItem[];
+  diffFrom?: string;
+  diffTo?: string;
+  diffTitle?: string;
+  unavailable?: boolean;
 }
 
 export function checkoutRefFromCheckout(checkout: FileCheckout): CheckoutRef {
@@ -168,4 +173,49 @@ export function buildBranchChangeGroups(
         },
       ];
     });
+}
+
+export function buildTaskChangeGroups(
+  stacks: WorkspaceStack[],
+  diffFilesByNode: Record<string, DiffFile[] | null | undefined>,
+): ChangeCheckoutGroup[] {
+  return stacks.flatMap((stack) =>
+    stack.nodes.flatMap((node) => {
+      if (!node.base_ref || !node.output_branch) return [];
+      const id = `${stack.id}/${node.task_id}`;
+      const diffFiles = diffFilesByNode[id];
+      const loaded = diffFiles !== undefined;
+      const unavailable = diffFiles === null;
+      const count = unavailable ? 0 : (diffFiles?.length ?? 0);
+      if (loaded && !unavailable && count === 0) return [];
+      const items = (diffFiles ?? [])
+        .slice()
+        .sort((a, b) => a.path.localeCompare(b.path))
+        .map((file) => {
+          const { name, parentPath } = splitChangePath(file.path);
+          return {
+            path: file.path,
+            name,
+            parentPath,
+            status: changeStatusFromDiffStatus(file.status),
+            additions: file.additions,
+            deletions: file.deletions,
+          };
+        });
+      return [
+        {
+          id,
+          ref: { scope: "repo", target: stack.repo },
+          label: `${node.task_id} · ${stack.repo} · ${count}`,
+          changeCount: count,
+          loaded,
+          items,
+          diffFrom: node.base_ref,
+          diffTo: node.output_branch,
+          diffTitle: node.task_id,
+          unavailable,
+        },
+      ];
+    }),
+  );
 }
