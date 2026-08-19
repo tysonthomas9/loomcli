@@ -131,6 +131,14 @@ var ProtectedRuntimePaths = []string{
 	".loom",
 	"sessions",
 	"AGENTS.md",
+	// Scout-owned workspace files (lowercase agents.md is deliberate and
+	// distinct from a repo AGENTS.md). They live at the workspace root, but the
+	// workspace runtime dir's "." fallback can land them in a repo checkout —
+	// protecting them here means agent recovery's `git clean` can never destroy
+	// them (spec: File placement and guards).
+	"agents.md",
+	"agents.md.pending",
+	"history.md",
 }
 
 // IsProtectedRuntimePath returns true if relPath (relative to the repo root)

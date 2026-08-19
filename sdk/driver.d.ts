@@ -161,6 +161,50 @@ export interface LoomTaskRunActiveInput extends LoomEpicInput {
   limit?: number;
 }
 
+/**
+ * Input for loom.issues.create (run-scoped "create-issue" op). The server
+ * stamps created_by from the verified run identity (driver-run:{runId}):
+ * there is no actor/owner/assignee override on this surface, and unknown
+ * fields are rejected server-side.
+ */
+export interface LoomIssueCreateInput {
+  /** Required, <=500 characters. */
+  title: string;
+  /** Fold acceptance criteria in as a "## Acceptance Criteria" section. */
+  description?: string;
+  /** task | bug | feature | epic | chore; empty defaults to task server-side. */
+  issueType?: string;
+  /** 0-4; omitted/0 lets fleet-db default P2. */
+  priority?: number;
+  labels?: string[];
+  /** Source repo (fleet-db "repo"). */
+  repo?: string;
+  /** Parent issue id — create-time only; it cannot be set later. */
+  parent?: string;
+  design?: string;
+  /** "open" | "deferred" (the only create-time statuses). */
+  status?: string;
+  /**
+   * <=128 printable ASCII. Omitted, the server defaults it per run+day+body
+   * so retries within a run dedupe while a later run always mints.
+   */
+  idempotencyKey?: string;
+}
+
+/** The created (or transparently deduplicated) issue on the camelCase wire. */
+export interface LoomIssueCreateResult {
+  id: string;
+  title: string;
+  status: string;
+  priority: number;
+  issueType?: string;
+  labels?: string[];
+  sourceRepo?: string;
+  parent?: string;
+  createdBy?: string;
+  createdAt: string;
+}
+
 export interface LoomTaskRunRecoverStaleInput {
   staleBefore?: string;
   maxAgeSeconds?: number;
@@ -422,6 +466,9 @@ export declare class LoomDriverClient {
     complete(input?: LoomTaskSelector | string): Promise<Record<string, unknown> | null>;
     release(input?: LoomTaskSelector | string): Promise<Record<string, unknown> | null>;
   };
+  readonly issues: {
+    create(input: LoomIssueCreateInput): Promise<LoomIssueCreateResult>;
+  };
   readonly taskRuns: {
     request(input?: LoomTaskRunRequest): Promise<Record<string, unknown>>;
     get(input?: LoomTaskRunGetInput): Promise<Record<string, unknown> | null>;
@@ -473,6 +520,7 @@ export declare class LoomDriverClient {
   recoverStaleTaskRuns(input?: LoomTaskRunRecoverStaleInput): Promise<Record<string, unknown> | null>;
   completeTask(input?: LoomTaskSelector | string): Promise<Record<string, unknown> | null>;
   releaseTask(input?: LoomTaskSelector | string): Promise<Record<string, unknown> | null>;
+  createIssue(input: LoomIssueCreateInput): Promise<LoomIssueCreateResult>;
   /**
    * Generic connector egress; throws SYNCHRONOUSLY (DriverApiError
    * precondition_required, before any network call) when a registered
