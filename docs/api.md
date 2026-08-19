@@ -3538,6 +3538,100 @@ Remove the tab state for an issue.
 - **Response `400`:** Invalid issue ID (empty or contains disallowed characters)
 - **Response `500`:** Redis delete failure
 
+## Claim Hold
+
+A **claim hold** is a persistent, workspace-level, explicitly-owned refusal to
+START new work. While one is active the daemon claims no tasks and spawns no
+agents, and every run already in flight continues completely untouched — no
+yield file, no signal, no deadline. It exists so an operator (or a deploy
+script) can quiesce a workspace before redeploying loom itself.
+
+These routes are registered only in local daemon mode (`ServerConfig.ClaimHoldFn`
+non-nil) and sit behind the same authz boundary as the agent lifecycle routes:
+quiescing the whole workspace is at least as consequential as stopping one agent.
+
+A hold is **owned**. Replacing or releasing a hold taken by a different actor is
+refused with `409` unless `force` is set, so one operator cannot silently undo
+another's (or the deploy script's) quiesce.
+
+**Actor resolution**, most explicit source first: the request body's `actor` >
+the `X-Actor` header > the `LOOM_ACTOR` environment variable > the OS user.
+
+The current hold is also mirrored onto `GET /api/daemon/supervisor` as
+`data.claim_hold` (omitted when claims are free), and each gated agent carries
+`claims_gated: true` — so a dashboard can render the state without an extra
+socket round trip.
+
+### Data Model: ClaimHoldStatus
+
+All three routes answer with the same payload.
+
+```json
+{
+  "hold": {
+    "held": true,
+    "actor": "deployer",
+    "reason": "loom redeploy",
+    "since": "2026-08-19T01:00:00Z",
+    "expires_at": "2026-08-19T02:00:00Z"
+  },
+  "running": [
+    {"agent": "falcon", "task_id": "PUPPET-1", "pid": 4242, "started_at": "2026-08-19T00:41:00Z"}
+  ],
+  "gated": 6
+}
+```
+
+- `hold` is `null` when claims are free.
+- `expires_at` is omitted for an indefinite hold.
+- `running` lists agents whose runs were already in flight; a hold never touches
+  them, so this is what a quiesce is still waiting on.
+- `gated` counts agents that are cycling but refused at the claim gate.
+
+### `GET /api/workspaces/{ws}/claims/hold`
+
+- **Response `200 OK`:** `ClaimHoldStatus` (`hold: null` when free)
+- **Response `503`:** the agent supervisor is not running (no control socket)
+- **Response `504`:** the supervisor did not answer in time
+
+### `POST /api/workspaces/{ws}/claims/hold`
+
+Take, or idempotently refresh, the hold. A refresh by the same actor preserves
+the original `since` while updating `reason` and `expires_at`.
+
+- **Request body:**
+
+```json
+{"reason": "loom redeploy", "ttl_seconds": 3600, "actor": "deployer", "force": false}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `reason` | yes | Why the workspace is quiesced; shown in the UI banner and the daemon log |
+| `ttl_seconds` | no | Self-release after this many seconds (daemon default 3600, clamped to 60…86400). Omit for indefinite |
+| `actor` | no | Overrides the resolved actor |
+| `force` | no | Replace a hold owned by a different actor |
+
+- **Response `200 OK`:** `ClaimHoldStatus`
+- **Response `400`:** missing `reason`, negative `ttl_seconds`, or a malformed body
+- **Response `409`:** another actor holds the claims and `force` was not set
+- **Response `503` / `504`:** supervisor unreachable / did not answer in time
+
+### `DELETE /api/workspaces/{ws}/claims/hold`
+
+Release the hold. Releasing a hold when none is active succeeds (it is a no-op).
+
+`actor` and `force` may be given either as a JSON body or as query parameters
+(`?actor=alice&force=true`) — the web client's shared fetch helper cannot attach
+a body to a `DELETE`, and a release must not be the one operation the web UI
+cannot perform.
+
+- **Response `200 OK`:** `ClaimHoldStatus` (with `hold: null`)
+- **Response `409`:** the hold belongs to a different actor and `force` was not
+  set. The body carries the daemon's own wording, e.g.
+  `{"error": "claims held by deployer since 2026-08-19T01:00:00Z; use --force to release", "code": "claim_hold_conflict"}`
+- **Response `503` / `504`:** supervisor unreachable / did not answer in time
+
 ## Monitor Endpoints
 
 Monitor endpoints serve daemon-collected data (agent status, task distribution, metrics). They are injected from the cli package via `ServerConfig.MonitorHandlers`.

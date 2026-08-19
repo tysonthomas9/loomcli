@@ -1,0 +1,83 @@
+/**
+ * ClaimHoldBanner styles.
+ * A quiesced workspace is a warning state; a forgotten one is a danger state.
+ */
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  background-color: var(--color-warning-bg);
+  border-bottom: 1px solid var(--color-warning);
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+}
+
+.banner[data-stale="true"] {
+  background-color: var(--color-danger-bg);
+  border-bottom-color: var(--color-danger);
+}
+
+.icon {
+  flex-shrink: 0;
+  font-size: var(--font-size-base);
+}
+
+.message {
+  flex: 1;
+  min-width: 0;
+}
+
+.escalated {
+  margin-right: var(--space-2);
+  color: var(--color-danger);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.gated {
+  color: var(--color-text-muted);
+}
+
+.error {
+  flex-shrink: 0;
+  color: var(--color-danger);
+}
+
+.releaseButton {
+  flex-shrink: 0;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.releaseButton:hover:not(:disabled) {
+  background: var(--color-warning-bg);
+}
+
+.releaseButton:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.releaseButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .banner {
+    animation: none !important;
+  }
+}
