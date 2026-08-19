@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
@@ -39,6 +40,16 @@ type Supervisor struct {
 
 	Agents   []*AgentProcess
 	AgentsMu sync.RWMutex // protects the agents slice for concurrent read/write access
+
+	// Account-level wall, recorded once for the whole fleet. Auth, billing and
+	// usage walls are facts about the ACCOUNT, not about one agent, so the
+	// pre-spawn gate parks every agent until WallUntil passes rather than
+	// letting each one march into the same wall. In-memory only, deliberately:
+	// see recordAccountWall/gateAccountWall.
+	WallMu      sync.Mutex
+	WallUntil   time.Time
+	WallClass   agenterr.Outcome
+	WallMessage string
 
 	Shutdown     chan struct{}  // closed to signal shutdown
 	ShutdownOnce sync.Once      // protects shutdown channel from double-close
@@ -410,6 +421,9 @@ func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 // detectRecovery.
 func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 	if err := s.gateBackendAvailable(ap); err != nil {
+		return false
+	}
+	if err := s.gateAccountWall(ap); err != nil {
 		return false
 	}
 	if err := s.gateSafetyKnobsEnforceable(ap); err != nil {

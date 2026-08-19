@@ -128,6 +128,70 @@ func (s *Supervisor) backendStateReassertBackoff() time.Duration {
 	return backendStateReassertInterval
 }
 
+// ErrAccountWall is the sentinel returned by gateAccountWall when an
+// account-level wall (auth, billing, usage limit) recorded by ANOTHER agent is
+// still live. Like ErrBackendUnavailable it is a clean block: the restart
+// budget is preserved and no backoff is set, because the supervise loop
+// re-checks each iteration and the agent self-recovers at expiry.
+var ErrAccountWall = errors.New("supervisor: account-level wall active")
+
+// gateAccountWall is the pre-spawn fleet-wide wall check. An auth, billing or
+// usage wall is a fact about the ACCOUNT: without this gate every agent claims
+// a task, spawns, hits the same wall and fails, all within seconds — and a
+// usage-limit wall retries uncounted, so it does that forever. The wall is
+// recorded once (see recordAccountWall) and this gate parks the rest of the
+// fleet until it expires.
+//
+// It runs before claimTask so a walled fleet stops TAKING work rather than
+// claiming it and immediately failing it. It parks; it never kills a running
+// agent and never erodes a restart budget.
+func (s *Supervisor) gateAccountWall(ap *AgentProcess) error {
+	remaining, message, walled := s.accountWallActive()
+
+	if !walled {
+		// Recovery branch: the wall expired, so an agent parked by it is
+		// cleared before the spawn proceeds — same shape as the
+		// backend-unavailable recovery above.
+		ap.Mu.Lock()
+		wasWalled := ap.StopReason == StopReasonAccountWall
+		if wasWalled {
+			ap.StopReason = ""
+			ap.LastError = nil
+		}
+		worktree := ap.Entry.Worktree
+		ap.Mu.Unlock()
+		if wasWalled {
+			s.markControlPlaneAgentState(ap, domain.AgentStateActive)
+			slog.Info("account wall lifted — resuming spawn", "worktree", worktree)
+		}
+		return nil
+	}
+
+	s.WallMu.Lock()
+	class := s.WallClass
+	s.WallMu.Unlock()
+
+	ap.Mu.Lock()
+	wasWalled := ap.StopReason == StopReasonAccountWall
+	ap.StopReason = StopReasonAccountWall
+	ap.LastError = &agenterr.AgentError{
+		Class:     class,
+		Message:   message,
+		Timestamp: time.Now(),
+	}
+	worktree := ap.Entry.Worktree
+	ap.Mu.Unlock()
+
+	s.markControlPlaneAgentState(ap, domain.AgentStateIdle)
+	// One line per wall transition, not one per agent per poll cycle.
+	if !wasWalled {
+		slog.Warn("account-level wall active — parking agent",
+			"worktree", worktree, "class", class.String(),
+			"remaining", remaining.Round(time.Second), "detail", message)
+	}
+	return ErrAccountWall
+}
+
 // gateSafetyKnobsEnforceable fails closed when the role carries safety knobs
 // the resolved backend cannot enforce, and warns when a knob is in force only
 // softly. Spawning under a dropped restriction would be the exact
