@@ -366,6 +366,55 @@ When a new talk-to-lead session is created, the server injects a context banner 
 - `TalkToLeadButton`: `SessionBadge` inside the FAB
 - Both update `aria-label` for screen reader announcement
 
+### Profile-Scoped Lead Prompt
+
+`loom lead` normally passes the whole lead role prompt (`internal/cli/agent/prompts/lead.md`
+plus the safety guardrails) as the positional prompt of every session. That content is
+static — the template's only variable is `{{ .SafetyBlock }}` — so a session that runs
+under its own `CLAUDE_CONFIG_DIR` (an agent profile) can load it once from the profile's
+`CLAUDE.md` instead of re-sending it each time.
+
+The split:
+
+| Half | Where it lives | Why |
+|---|---|---|
+| Static role instructions | the profile's `CLAUDE.md`, loaded automatically by claude from the relocated config root | identical every session |
+| `## Loom Backend Assignment`, `## User's Initial Request` | the positional prompt (`applyLeadPromptContext`) | per session; does not exist at provisioning time |
+
+Two pieces make that work:
+
+- `--prompt builtin:lead-profile` (`internal/cli/agent/prompts/lead-profile.md`) — a hidden
+  built-in prompt that only points at the profile's `CLAUDE.md` and tells the agent to stop
+  and report if those instructions are missing. It is hidden the same way
+  `pr-review-checkout` is: registered in `internal/domain/interactive_prompt.go`, excluded
+  from the webui launcher list.
+- `loom lead --print-prompt` — prints the resolved *static* prompt (a role prompt from
+  fleet-db if one exists, otherwise the built-in lead prompt) and exits. It never appends
+  the dynamic sections, never registers an orchestrator session, and never marks an epic
+  assignment delivered, so it is safe to run anywhere.
+
+Regenerate a profile's `CLAUDE.md` from a clean environment (no read-only knob, no
+`LOOM_AGENT_ROLE` override, so neither the read-only preamble nor an unintended identity is
+baked into the file):
+
+```sh
+loom lead --print-prompt > "$WORKSPACE/profiles/lead/claude/CLAUDE.md"
+scripts/provision-profile.sh lead        # copies into the profile and re-manifests
+```
+
+Never hand-write that file: it is generated from `prompts/lead.md`, and editing the copy is
+how the two drift apart.
+
+Caveats:
+
+- A plain `loom lead` (no `--prompt`) is unchanged and still carries the full role prompt
+  positionally, so non-isolated sessions and the webui lead terminal — which does not set
+  `CLAUDE_CONFIG_DIR` — behave exactly as before. Every new behavior is opt-in behind a flag.
+- The `loom lead` path does **not** verify a profile's manifest (verification is
+  supervisor-only, `spawn.go` `appendProfileEnv`), so a stale or missing profile `CLAUDE.md`
+  takes effect silently. The only mitigation today is the pointer prompt's instruction to
+  stop and report when the role instructions are absent.
+
 ---
 
 ## 9. Crash Recovery and Staleness Detection
