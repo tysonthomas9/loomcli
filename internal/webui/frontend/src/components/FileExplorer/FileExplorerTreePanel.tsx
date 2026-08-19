@@ -746,6 +746,7 @@ function CheckoutTreeBlock({
 
 export function FileExplorerTreePanel({
   workspaceId,
+  hasCheckouts,
   lens,
   changeCount,
   compareMode,
@@ -785,6 +786,7 @@ export function FileExplorerTreePanel({
   onInlineEditCancel,
 }: {
   workspaceId: string;
+  hasCheckouts: boolean;
   lens: ExplorerLens;
   changeCount: number;
   compareMode: CompareMode;
@@ -1065,11 +1067,16 @@ export function FileExplorerTreePanel({
   return (
     <>
       <div className={styles.toolbar}>
-        <LensToggle
-          lens={lens}
-          changeCount={changeCount}
-          onChange={onLensChange}
-        />
+        {/* Files vs Changes is a choice between two views of a checkout. A
+            section without checkouts has only the one, so the toggle is not
+            offered rather than shown with a dead half. */}
+        {hasCheckouts && (
+          <LensToggle
+            lens={lens}
+            changeCount={changeCount}
+            onChange={onLensChange}
+          />
+        )}
         {lens === "changes" && (
           <CompareToggle
             compareMode={compareMode}

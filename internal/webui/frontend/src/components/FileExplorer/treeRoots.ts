@@ -25,6 +25,19 @@ import { checkoutChangeCount } from "./checkoutAvailability";
 // roots and nothing else. Nothing emits both.
 export type FileBrowserMode = "workspace" | "agent" | "skills";
 
+// The one capability that separates the sections: a section either sits on git
+// checkouts or it does not. "workspace" and "agent" browse a checkout; "skills"
+// browses the catalog and has nothing checked out behind it, so everything
+// checkout-shaped is off there — the Files/Changes lens (there is no second
+// lens to switch to), the checkout listing, branch diffs, git status,
+// search/replace and Quick Open indexing.
+//
+// The browser derives this once and branches on the capability, never on the
+// mode, so a future section without checkouts needs no new conditionals.
+export function modeHasCheckouts(mode: FileBrowserMode): boolean {
+  return mode !== "skills";
+}
+
 export interface CheckoutTreeRoot {
   id: string;
   kind: "checkout";

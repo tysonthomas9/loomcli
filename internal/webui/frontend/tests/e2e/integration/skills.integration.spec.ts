@@ -242,6 +242,13 @@ test.describe("Skills tree", () => {
       ).toHaveCount(0);
     }
 
+    // Nor the Files/Changes lens: Changes is a second view of a checkout, and
+    // no checkout sits behind this section.
+    await expect(
+      page.getByRole("tablist", { name: "File explorer lens" }),
+    ).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: /^Changes/ })).toHaveCount(0);
+
     // Expand the role group, then the seeded skill folder. The toggle button's
     // accessible name starts with the role label ("task …"), distinguishing it
     // from the "New skill in task" add button.

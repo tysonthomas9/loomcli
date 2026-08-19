@@ -11,6 +11,7 @@ import {
   buildFileTreeSections,
   existingExplorerRefs,
   gitStatusRefs,
+  modeHasCheckouts,
 } from "../treeRoots";
 
 function repo(name: string, groups: string[] = []): RepoInfo {
@@ -404,5 +405,14 @@ describe("treeRoots", () => {
     ]);
     // Skills have no checkout behind them, so nothing here asks git for status.
     expect(gitStatusRefs(sections)).toEqual([]);
+  });
+
+  it("reports which modes sit on a checkout", () => {
+    // The browser derives this once and then branches on the capability, so a
+    // future checkout-less section is a single entry here, not a hunt for
+    // scattered `mode === "skills"` tests.
+    expect(modeHasCheckouts("workspace")).toBe(true);
+    expect(modeHasCheckouts("agent")).toBe(true);
+    expect(modeHasCheckouts("skills")).toBe(false);
   });
 });

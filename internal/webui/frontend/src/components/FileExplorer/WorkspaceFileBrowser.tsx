@@ -122,6 +122,7 @@ import {
   buildFileTreeSections,
   existingExplorerRefs,
   gitStatusRefs,
+  modeHasCheckouts,
 } from "./treeRoots";
 import {
   buildBranchChangeGroups,
@@ -166,6 +167,7 @@ function FileBrowserInner({
   isActive = true,
 }: FileBrowserProps) {
   const { workspaceId, agents, repos } = useWorkspaceContext();
+  const hasCheckouts = modeHasCheckouts(mode);
   const eventContext = useEventContext();
   const { showToast } = useToast();
   const store = useFileBrowserStoreInstance();
@@ -206,9 +208,13 @@ function FileBrowserInner({
   }, [documentRegistry, documentRevision, groups, store, workspaceId]);
 
   const [treeWidth, setTreeWidth] = useState<number>(getStoredTreeWidth);
-  const [lens, setLens] = useState<ExplorerLens>(() =>
+  const [selectedLens, setLens] = useState<ExplorerLens>(() =>
     getStoredLens(workspaceId),
   );
+  // The lens preference is one per workspace, owned by the sections that have
+  // checkouts. A section without them is pinned to Files and never offers the
+  // toggle, so it reads the preference harmlessly and never writes it back.
+  const lens: ExplorerLens = hasCheckouts ? selectedLens : "files";
   const [compareMode, setCompareMode] = useState<CompareMode>(() =>
     getStoredCompareMode(workspaceId),
   );
@@ -297,13 +303,15 @@ function FileBrowserInner({
 
   const visibleCheckouts = useMemo(
     () =>
-      mode === "agent" && agentName
-        ? checkouts.filter(
-            (checkout) =>
-              checkout.kind === "agent" && checkout.agent === agentName,
-          )
-        : checkouts,
-    [mode, agentName, checkouts],
+      !hasCheckouts
+        ? []
+        : mode === "agent" && agentName
+          ? checkouts.filter(
+              (checkout) =>
+                checkout.kind === "agent" && checkout.agent === agentName,
+            )
+          : checkouts,
+    [hasCheckouts, mode, agentName, checkouts],
   );
   const branchBaseName = useMemo(() => {
     const defaultBranches = new Set<string>();
@@ -563,6 +571,7 @@ function FileBrowserInner({
   }, []);
 
   const refreshCheckouts = useCallback(async () => {
+    if (!hasCheckouts) return;
     try {
       const data = await listFileCheckouts(workspaceId);
       setCheckouts(data.checkouts);
@@ -570,7 +579,7 @@ function FileBrowserInner({
     } catch (err) {
       setCheckoutError(err instanceof Error ? err.message : String(err));
     }
-  }, [workspaceId]);
+  }, [hasCheckouts, workspaceId]);
 
   const refreshGitStatus = useCallback(async () => {
     const next: Record<string, Record<string, string>> = {};
@@ -635,24 +644,23 @@ function FileBrowserInner({
         // The Skills section has no checkout behind it, so Quick Open there
         // offers skills only. Indexing the workspace would offer files this
         // browser's tab set is not allowed to hold.
-        const indexes: ScopedFileIndex[] =
-          mode === "skills"
-            ? []
-            : mode === "agent"
-              ? await Promise.all(
-                  quickOpenIndexRefs.map(async (ref) => ({
-                    ref,
-                    index: await indexScopedFiles(workspaceId, ref),
-                  })),
-                )
-              : [
-                  {
-                    ref: { scope: "workspace" } as CheckoutRef,
-                    index: await indexScopedFiles(workspaceId, {
-                      scope: "workspace",
-                    }),
-                  },
-                ];
+        const indexes: ScopedFileIndex[] = !hasCheckouts
+          ? []
+          : mode === "agent"
+            ? await Promise.all(
+                quickOpenIndexRefs.map(async (ref) => ({
+                  ref,
+                  index: await indexScopedFiles(workspaceId, ref),
+                })),
+              )
+            : [
+                {
+                  ref: { scope: "workspace" } as CheckoutRef,
+                  index: await indexScopedFiles(workspaceId, {
+                    scope: "workspace",
+                  }),
+                },
+              ];
         const checkoutItems = indexes.flatMap(({ ref, index }) =>
           index.paths.map((rawPath) => {
             const mapped =
@@ -696,6 +704,7 @@ function FileBrowserInner({
       }
     },
     [
+      hasCheckouts,
       knownRefs,
       mode,
       quickOpenIndexRefs,
@@ -792,7 +801,7 @@ function FileBrowserInner({
       if (mod && !event.shiftKey && key === "p") {
         event.preventDefault();
         setQuickOpenOpen(true);
-      } else if (mod && event.shiftKey && key === "f" && mode !== "skills") {
+      } else if (mod && event.shiftKey && key === "f" && hasCheckouts) {
         // Search/replace runs over a checkout scope; the Skills section has none.
         event.preventDefault();
         setSearchPanelOpen(true);
@@ -800,7 +809,7 @@ function FileBrowserInner({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isActive, mode]);
+  }, [hasCheckouts, isActive]);
 
   const expandForRef = useCallback((ref: ExplorerRef) => {
     setExpandedRoots((prev) => {
@@ -1697,6 +1706,7 @@ function FileBrowserInner({
         ) : (
           <FileExplorerTreePanel
             workspaceId={workspaceId}
+            hasCheckouts={hasCheckouts}
             lens={lens}
             changeCount={activeChangeCount}
             compareMode={compareMode}

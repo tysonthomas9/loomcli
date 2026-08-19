@@ -540,6 +540,27 @@ function storeWorkingCompareMode(): void {
   localStorage.setItem("loom:ws-1:file-explorer-compare-mode", "working");
 }
 
+function reviewerSkillGroups(): SkillCatalogGroup[] {
+  return [
+    {
+      scope: "role",
+      role: "reviewer",
+      skills: [
+        {
+          name: "audit",
+          scope: "role",
+          role: "reviewer",
+          description: "Audit the implementation",
+          content_revision: "skill-v1",
+          files: [],
+          created_at: "2026-08-14T00:00:00Z",
+          updated_at: "2026-08-14T00:00:00Z",
+        },
+      ],
+    },
+  ];
+}
+
 describe("WorkspaceFileBrowser", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -2531,5 +2552,71 @@ describe("WorkspaceFileBrowser", () => {
     expect(screen.queryByRole("button", { name: "History" })).toBeNull();
     expect(screen.queryByLabelText("File history")).not.toBeInTheDocument();
     expect(screen.queryByText("No file selected.")).toBeNull();
+  });
+
+  it("offers no lens in the Skills section and asks for no checkouts", async () => {
+    // Files vs Changes is a choice between two views of a checkout. The Skills
+    // section has none, so the toggle is not offered — and nothing behind it is
+    // fetched either: no checkout listing, no branch diffs, no git status.
+    mocks.skillGroups = reviewerSkillGroups();
+    render(<WorkspaceFileBrowser mode="skills" />);
+
+    expect(await screen.findByText("reviewer")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("tablist", { name: "File explorer lens" }),
+    ).toBeNull();
+    expect(screen.queryByRole("tab", { name: /^Changes/ })).toBeNull();
+    expect(screen.queryByRole("tablist", { name: "Compare mode" })).toBeNull();
+
+    await waitFor(() => expect(mocks.listFileCheckouts).not.toHaveBeenCalled());
+    expect(mocks.fetchDiffFiles).not.toHaveBeenCalled();
+    expect(mocks.gitStatusScoped).not.toHaveBeenCalled();
+  });
+
+  it("pins the Skills section to Files even when Changes is the stored lens", async () => {
+    // The stored lens is shared per workspace. A Skills section that honoured it
+    // would open on a Changes list of checkouts it cannot reach.
+    localStorage.setItem("loom:ws-1:file-explorer-lens", "changes");
+    mocks.skillGroups = reviewerSkillGroups();
+    render(<WorkspaceFileBrowser mode="skills" />);
+
+    expect(await screen.findByText("reviewer")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Workspace changes")).toBeNull();
+    expect(screen.queryByText(/No (committed|uncommitted) changes/)).toBeNull();
+  });
+
+  it("leaves the Files section lens preference intact across a Skills visit", async () => {
+    storeWorkingCompareMode();
+    localStorage.setItem("loom:ws-1:file-explorer-lens", "changes");
+    mocks.skillGroups = reviewerSkillGroups();
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 2,
+        },
+      ],
+    });
+
+    const files = render(<WorkspaceFileBrowser mode="workspace" />);
+    expect(await screen.findByText("atlas · loomcli · 2")).toBeInTheDocument();
+    files.unmount();
+
+    const skills = render(<WorkspaceFileBrowser mode="skills" />);
+    expect(await screen.findByText("reviewer")).toBeInTheDocument();
+    skills.unmount();
+
+    // Visiting Skills must not clobber the preference the Files section owns.
+    expect(localStorage.getItem("loom:ws-1:file-explorer-lens")).toBe(
+      "changes",
+    );
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    expect(await screen.findByText("atlas · loomcli · 2")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("tab", { name: /Changes\s+2/ }),
+    ).toHaveAttribute("aria-selected", "true");
   });
 });
