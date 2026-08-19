@@ -18,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/daemonregistry"
 	"github.com/tysonthomas9/loomcli/internal/cli/local"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/leadoccupant"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -216,6 +217,16 @@ func withWorkspaceOpsStatus(args []string, fn func(*WorkspaceOpsStatus) error) e
 }
 
 func workspaceOpsStatusForArgs(args []string) (*WorkspaceOpsStatus, error) {
+	// A Daytona sandbox occupant has no local fleet-db store, daemon, or desktop
+	// runtime — its issue data is served over the occupant mount. Opening the local
+	// store here would fail with "fleet-db binary not found". Report an
+	// occupant-appropriate status instead so `loom workspace ops diagnose` (the
+	// lead's startup readiness check) succeeds rather than erroring. Gated on the
+	// same StateComplete signal the issue-backend resolver uses to select the
+	// occupant backend, so host leads are entirely unaffected.
+	if _, state := leadoccupant.FromEnv(); state == leadoccupant.StateComplete {
+		return occupantWorkspaceOpsStatus(), nil
+	}
 	var loaded *WorkspaceOpsStatus
 	err := cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
 		key, err := pickWorkspaceKey(ctx, h.Store, args)
@@ -243,6 +254,36 @@ func workspaceOpsStatusForArgs(args []string) (*WorkspaceOpsStatus, error) {
 		return nil, fmt.Errorf("load workspace ops status: no status returned")
 	}
 	return loaded, nil
+}
+
+// occupantWorkspaceOpsStatus builds the readiness report for a sandbox lead
+// running against the occupant mount. There is no local store/daemon/runtime to
+// inspect, so LocalRuntime is marked not-applicable (which also makes
+// shouldEnsureLocalRuntime a no-op) and the sole "problem" is an informational
+// note. OK stays true — the sandbox is a valid, healthy deployment shape.
+func occupantWorkspaceOpsStatus() *WorkspaceOpsStatus {
+	env, _ := leadoccupant.FromEnv()
+	mount := env.BaseURL + leadoccupant.DataPathPrefix
+	return &WorkspaceOpsStatus{
+		OK: true,
+		Workspace: WorkspaceOpsWorkspace{
+			Key:   env.Workspace,
+			State: "active",
+		},
+		LocalRuntime: &WorkspaceOpsLocalRuntime{
+			Applicable: false,
+			Reason:     "Daytona sandbox occupant: no local desktop runtime or fleet-db store — issue data is served over the occupant mount at " + mount,
+		},
+		Daemon: WorkspaceOpsDaemon{},
+		Repos:  []WorkspaceOpsRepo{},
+		Agents: []WorkspaceOpsAgent{},
+		Problems: []WorkspaceOpsProblem{{
+			Severity: "info",
+			Code:     "occupant_mode",
+			Message:  "sandbox occupant: local runtime, daemon, and store diagnosis are not applicable here",
+			Fix:      "verify issue-data access with `loom data list`",
+		}},
+	}
 }
 
 func loadWorkspaceOpsStatus(ctx context.Context, key string) (*WorkspaceOpsStatus, error) {

@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/local"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/leadoccupant"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -23,6 +24,41 @@ func clearRuntimeRoutingEnv(t *testing.T) {
 	t.Setenv("LOOM_SERVER_URL", "")
 	t.Setenv("LOOM_FLEET_DB_URL", "")
 	t.Setenv(envLocalRuntimeMode, "")
+}
+
+// A Daytona sandbox occupant has no local fleet-db store. Before the occupant
+// short-circuit, `loom workspace ops diagnose` opened the local store and died
+// with "fleet-db binary not found" — the error the lead's startup check hit.
+// With a complete occupant environment, status resolution must skip the store
+// entirely and report a healthy, occupant-shaped status.
+func TestWorkspaceOpsStatusForArgsOccupantSkipsLocalStore(t *testing.T) {
+	clearRuntimeRoutingEnv(t)
+	t.Setenv(leadoccupant.EnvOccupantToken, "occupant-token-xyz")
+	t.Setenv(leadoccupant.EnvLeadAPIURL, "http://serve.example:8080")
+	t.Setenv(leadoccupant.EnvWorkspace, "LEADPOC")
+	t.Setenv(leadoccupant.EnvPlacementID, "lead-placement-abc123")
+
+	status, err := workspaceOpsStatusForArgs(nil)
+	if err != nil {
+		t.Fatalf("expected occupant short-circuit to succeed without a local store, got error: %v", err)
+	}
+	if status == nil {
+		t.Fatal("expected a status, got nil")
+	}
+	if !status.OK {
+		t.Errorf("expected OK=true for a healthy occupant, got false (problems: %+v)", status.Problems)
+	}
+	if status.Workspace.Key != "LEADPOC" {
+		t.Errorf("workspace key = %q, want LEADPOC", status.Workspace.Key)
+	}
+	if status.LocalRuntime == nil || status.LocalRuntime.Applicable {
+		t.Errorf("expected LocalRuntime.Applicable=false in a sandbox, got %+v", status.LocalRuntime)
+	}
+	for _, p := range status.Problems {
+		if p.Severity == "error" {
+			t.Errorf("unexpected error-severity problem in occupant status: %+v", p)
+		}
+	}
 }
 
 func TestWaitForWorkspaceOpsDaemonUsesCallerContext(t *testing.T) {
