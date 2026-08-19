@@ -50,19 +50,9 @@ type CodexLeadRuntimeConfig struct {
 
 func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error {
 	cfg = normalizeCodexLeadRuntimeConfig(cfg)
-	priorRuntime, err := snapshotCodexRuntime(ctx, cfg)
+	priorRuntime, err := preflightCodexLeadRuntime(ctx, cfg)
 	if err != nil {
-		cfg.Logger.Warn("failed to read prior codex runtime metadata; launching fresh", "err", err)
-		priorRuntime = CodexRuntimeMetadata{}
-	}
-	if priorCodexRuntimeLooksLive(ctx, priorRuntime) {
-		return fmt.Errorf(
-			"controlled Codex runtime already appears live for session %s (pid %d, endpoint %s, status %s); refusing duplicate launch",
-			cfg.SessionID,
-			priorRuntime.PID,
-			priorRuntime.Endpoint,
-			priorRuntime.Status,
-		)
+		return err
 	}
 
 	runtimeHome, sqliteHome := codexLeadRuntimeDirs(cfg)
@@ -92,15 +82,7 @@ func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error 
 		return err
 	}
 
-	resumeDecision := decideCodexResume(ctx, cfg, priorRuntime, func(readCtx context.Context, threadID string) (*CodexThread, error) {
-		return readCodexThreadForResume(readCtx, endpoint, threadID)
-	})
-	if resumeDecision.Attempted && !resumeDecision.Resume {
-		cfg.Logger.Warn("codex thread resume unavailable; launching fresh", "thread", priorRuntime.ThreadID, "reason", resumeDecision.Reason)
-	}
-	if resumeDecision.ClearThreadID {
-		clearCodexThreadMetadata(ctx, cfg, runtime)
-	}
+	resumeDecision := resolveCodexResume(ctx, cfg, priorRuntime, runtime, endpoint)
 
 	tuiErr := runCodexTUIWithOptionalResume(ctx, cfg, endpoint, runtime, priorRuntime.ThreadID, resumeDecision, runtimeStartedAt)
 
@@ -110,6 +92,49 @@ func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error 
 	runtime.Status = RuntimeStatusDisconnected
 	_ = UpdateCodexRuntimeMetadata(context.Background(), cfg.Store, cfg.Workspace, cfg.SessionID, runtime)
 	return tuiErr
+}
+
+// preflightCodexLeadRuntime reads the prior runtime metadata for the session
+// and refuses the launch when that runtime still looks live. Unreadable
+// metadata is not fatal — it degrades to a fresh launch.
+func preflightCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) (CodexRuntimeMetadata, error) {
+	prior, err := snapshotCodexRuntime(ctx, cfg)
+	if err != nil {
+		cfg.Logger.Warn("failed to read prior codex runtime metadata; launching fresh", "err", err)
+		prior = CodexRuntimeMetadata{}
+	}
+	if priorCodexRuntimeLooksLive(ctx, prior) {
+		return CodexRuntimeMetadata{}, fmt.Errorf(
+			"controlled Codex runtime already appears live for session %s (pid %d, endpoint %s, status %s); refusing duplicate launch",
+			cfg.SessionID,
+			prior.PID,
+			prior.Endpoint,
+			prior.Status,
+		)
+	}
+	return prior, nil
+}
+
+// resolveCodexResume decides whether the prior codex thread can be resumed
+// against the freshly started app server, reporting an unavailable resume and
+// clearing thread metadata the decision found stale.
+func resolveCodexResume(
+	ctx context.Context,
+	cfg CodexLeadRuntimeConfig,
+	priorRuntime CodexRuntimeMetadata,
+	runtime CodexRuntimeMetadata,
+	endpoint string,
+) codexResumeDecision {
+	decision := decideCodexResume(ctx, cfg, priorRuntime, func(readCtx context.Context, threadID string) (*CodexThread, error) {
+		return readCodexThreadForResume(readCtx, endpoint, threadID)
+	})
+	if decision.Attempted && !decision.Resume {
+		cfg.Logger.Warn("codex thread resume unavailable; launching fresh", "thread", priorRuntime.ThreadID, "reason", decision.Reason)
+	}
+	if decision.ClearThreadID {
+		clearCodexThreadMetadata(ctx, cfg, runtime)
+	}
+	return decision
 }
 
 // persistStartingCodexRuntime builds the starting runtime metadata for a
