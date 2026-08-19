@@ -11,8 +11,34 @@ import (
 
 // classifyHTTPError maps an HTTP status code and response body to a
 // *backend.BackendError. For 2xx responses with success=false, the error
-// string in the body is matched against known patterns.
+// string in the body is matched against known patterns. Every non-nil result
+// carries the server's machine-readable code in Meta — see attachCode.
 func classifyHTTPError(op string, statusCode int, body apiResponse) error {
+	return attachCode(classifyHTTPErrorKind(op, statusCode, body), body.Code)
+}
+
+// attachCode records the server's machine-readable error code on the
+// BackendError so callers can distinguish semantics that collapse into one
+// Kind (e.g. "not_claimable" vs "already_claimed", both KindConflict).
+func attachCode(err error, code string) error {
+	if err == nil || code == "" {
+		return err
+	}
+	var be *backend.BackendError
+	if !errors.As(err, &be) {
+		return err
+	}
+	if be.Meta == nil {
+		be.Meta = make(map[string]string, 1)
+	}
+	be.Meta[backend.MetaErrorCode] = code
+	return err
+}
+
+// classifyHTTPErrorKind carries the Kind-mapping logic. It is kept separate
+// from classifyHTTPError so the many return paths below all flow through the
+// single attachCode seam.
+func classifyHTTPErrorKind(op string, statusCode int, body apiResponse) error {
 	// 2xx with success=true: no error.
 	if statusCode >= 200 && statusCode < 300 && body.Success {
 		return nil
