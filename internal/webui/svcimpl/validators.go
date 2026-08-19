@@ -67,6 +67,12 @@ func classifyStoreError(op string, err error) error {
 		return service.ErrConflict(op + ": " + err.Error())
 	case errors.Is(err, domain.ErrInvalid):
 		return service.ErrValidation(op + ": " + err.Error())
+	case errors.Is(err, domain.ErrRateLimited):
+		// Before the shared status table, a 429 arrived here as ErrConflict
+		// (the Store client mapped every unmatched 4xx to conflict), so
+		// backpressure presented as a lost race. Checked before ErrConflict
+		// because a RateLimitError must never fall into that arm again.
+		return service.ErrRateLimited(op + ": " + err.Error())
 	case errors.Is(err, domain.ErrConflict):
 		return service.ErrConflict(op + ": " + err.Error())
 	default:

@@ -28,7 +28,9 @@ func TestClassifyHTTPError_StatusCodes(t *testing.T) {
 		{"403 forbidden", 403, apiResponse{Error: "forbidden"}, backend.KindUnavailable},
 		{"404 not found", 404, apiResponse{Error: "issue not found"}, backend.KindNotFound},
 		{"409 conflict", 409, apiResponse{Error: "already claimed"}, backend.KindConflict},
-		{"429 rate limit", 429, apiResponse{Error: "too many requests"}, backend.KindUnavailable},
+		// Was KindUnavailable — the pre-D-50 4xx conflation. See
+		// ratelimit_parity_test.go for why 429 is its own class now.
+		{"429 rate limit", 429, apiResponse{Error: "too many requests"}, backend.KindRateLimited},
 		{"500 internal", 500, apiResponse{Error: "server error"}, backend.KindInternal},
 		{"503 unavailable", 503, apiResponse{Error: "maintenance"}, backend.KindUnavailable},
 		{"504 timeout", 504, apiResponse{Error: "gateway timeout"}, backend.KindTimeout},

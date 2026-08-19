@@ -46,11 +46,15 @@ var _ backend.ClaimReleaser = (*FleetBackend)(nil)
 
 // apiResponse is the generic JSON envelope returned by fleet server endpoints.
 type apiResponse struct {
-	Success bool              `json:"success"`
-	Data    json.RawMessage   `json:"data,omitempty"`
-	Error   string            `json:"error,omitempty"`
-	Code    string            `json:"code,omitempty"`
-	Meta    map[string]string `json:"-"` // populated from native dialect error.meta
+	// RetryAfter carries the response's Retry-After hint so the classifier
+	// can attach it to a rate-limit error without threading headers through
+	// every request helper.
+	RetryAfter time.Duration     `json:"-"`
+	Success    bool              `json:"success"`
+	Data       json.RawMessage   `json:"data,omitempty"`
+	Error      string            `json:"error,omitempty"`
+	Code       string            `json:"code,omitempty"`
+	Meta       map[string]string `json:"-"` // populated from native dialect error.meta
 }
 
 // New creates a FleetBackend with the given configuration.
@@ -105,6 +109,9 @@ func (b *FleetBackend) doRequestURL(ctx context.Context, method, rawURL string, 
 	}
 
 	apiResp, err := parseFleetResponse(respBody, resp.StatusCode)
+	if apiResp != nil {
+		apiResp.RetryAfter = fleethttp.RetryAfter(resp.Header, time.Now())
+	}
 	if err != nil {
 		return nil, resp.StatusCode, err
 	}
@@ -152,6 +159,9 @@ func (b *FleetBackend) doRequest(ctx context.Context, method, path string, body 
 	}
 
 	apiResp, err := parseFleetResponse(respBody, resp.StatusCode)
+	if apiResp != nil {
+		apiResp.RetryAfter = fleethttp.RetryAfter(resp.Header, time.Now())
+	}
 	if err != nil {
 		return nil, resp.StatusCode, err
 	}
@@ -185,6 +195,9 @@ func (b *FleetBackend) doRequestAsActor(ctx context.Context, path string, body i
 	}
 
 	apiResp, err := parseFleetResponse(respBody, resp.StatusCode)
+	if apiResp != nil {
+		apiResp.RetryAfter = fleethttp.RetryAfter(resp.Header, time.Now())
+	}
 	if err != nil {
 		return nil, resp.StatusCode, err
 	}
