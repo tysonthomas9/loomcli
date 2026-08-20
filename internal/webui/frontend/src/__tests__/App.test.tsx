@@ -3383,7 +3383,7 @@ describe("App", () => {
       expect(mockCloseIssue).not.toHaveBeenCalled();
     });
 
-    it("help approve calls updateIssueStatus with in_progress status", async () => {
+    it("help approve un-parks the blocked issue to open, never in_progress", async () => {
       const updateIssueStatus = vi.fn().mockResolvedValue(undefined);
       const refetch = vi.fn().mockResolvedValue(undefined);
       const mockReturn = createMockUseIssuesReturn({
@@ -3420,11 +3420,19 @@ describe("App", () => {
         expect(updateIssueStatus).toHaveBeenCalledTimes(1);
         expect(updateIssueStatus).toHaveBeenCalledWith(
           "help-issue",
-          "in_progress",
+          "open",
           "test-ws-id",
         );
       });
 
+      // Regression guard (PUPPET-156): requesting in_progress here is a claim
+      // on a blocked issue, which the server refuses — a guaranteed 409
+      // "issue is not claimable" and a permanently disabled Approve button.
+      expect(updateIssueStatus).not.toHaveBeenCalledWith(
+        "help-issue",
+        "in_progress",
+        "test-ws-id",
+      );
       expect(mockCloseIssue).not.toHaveBeenCalled();
     });
 

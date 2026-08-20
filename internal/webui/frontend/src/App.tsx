@@ -769,8 +769,20 @@ function App() {
           });
           await refetch();
         } else if (reviewType === "help") {
-          // Needs help: Move to in_progress (unblock)
-          await updateIssueStatus(issue.id, "in_progress");
+          // Needs help: un-park the issue back to `open`.
+          //
+          // NOT in_progress. A PATCH to in_progress is not a field write: the
+          // fleet backend translates it into POST /issues/{id}/claim
+          // (internal/backend/fleet/fleet.go applyStatusUpdate), and fleet-db
+          // refuses to claim a blocked issue — blocked means "parked for a
+          // human, un-park first" — so the request 409s with "issue is not
+          // claimable" every time.
+          //
+          // `open` is the deliberate un-park the server model asks for. It also
+          // clears the stuck agent's assignee server-side (transitionToOpen's
+          // clearAssigneeOnOpen, which applies precisely because this path
+          // sends status only), so the ticket is re-dispatchable.
+          await updateIssueStatus(issue.id, "open");
         }
 
         // Close the detail panel and clean up after successful approve
