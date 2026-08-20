@@ -99,6 +99,60 @@ describe("foldJourney", () => {
     expect(spans.map(({ stage }) => stage)).not.toContain("Blocked");
   });
 
+  it.each(["issue.defer", "issue.deferred"])(
+    "folds an action-only %s and undefer round trip without changing owner",
+    (deferAction) => {
+      const spans = foldJourney(
+        [
+          event(0, "issue.create"),
+          event(5, "issue.claim", { actor: "worker-1" }),
+          event(10, deferAction, { actor: "scheduler" }),
+          event(20, "issue.undefer", { actor: "scheduler" }),
+        ],
+        BASE_MS + 30_000,
+      );
+
+      expect(
+        spans.map(({ stage, owner, durationMs }) => ({
+          stage,
+          owner,
+          durationMs,
+        })),
+      ).toEqual([
+        { stage: "Open", owner: "alice", durationMs: 5_000 },
+        { stage: "In progress", owner: "worker-1", durationMs: 5_000 },
+        { stage: "Deferred", owner: "worker-1", durationMs: 10_000 },
+        { stage: "Open", owner: "worker-1", durationMs: 10_000 },
+      ]);
+    },
+  );
+
+  it.each(["issue.reopen", "issue.reopened"])(
+    "clears the owner when %s begins an Open stage",
+    (reopenAction) => {
+      const spans = foldJourney(
+        [
+          event(0, "issue.create"),
+          event(5, "issue.assign", {
+            actor: "dispatcher",
+            metadata: { assignee: "worker-2" },
+          }),
+          event(10, "issue.close", { actor: "closer" }),
+          event(20, reopenAction, { actor: "reopener" }),
+        ],
+        BASE_MS + 30_000,
+      );
+
+      expect(spans.at(-1)).toEqual({
+        stage: "Open",
+        owner: null,
+        start: "2026-08-20T12:00:20.000Z",
+        end: null,
+        durationMs: 10_000,
+      });
+    },
+  );
+
   it("sorts out-of-order events and ignores labels and unknown actions", () => {
     const spans = foldJourney(
       [
@@ -131,13 +185,13 @@ describe("foldJourney", () => {
     ]);
   });
 
-  it("ignores an empty assignment that does not change the owner", () => {
+  it("treats an empty assignment as unassigned", () => {
     const spans = foldJourney(
       [
         event(0, "issue.create"),
         event(10, "issue.claim", { actor: "worker-1" }),
         event(39, "issue.assign", {
-          actor: "worker-1",
+          actor: "dispatcher",
           metadata: { assignee: "" },
         }),
         event(40, "issue.close", { actor: "worker-1" }),
@@ -153,7 +207,8 @@ describe("foldJourney", () => {
       })),
     ).toEqual([
       { stage: "Open", owner: "alice", durationMs: 10_000 },
-      { stage: "In progress", owner: "worker-1", durationMs: 30_000 },
+      { stage: "In progress", owner: "worker-1", durationMs: 29_000 },
+      { stage: "In progress", owner: null, durationMs: 1_000 },
       { stage: "Closed", owner: "worker-1", durationMs: 0 },
     ]);
   });

@@ -65,9 +65,9 @@ function statusAfter(event: Event): string | null {
   return null;
 }
 
-function assignmentAfter(event: Event): string | undefined {
+function assignmentAfter(event: Event): string | null | undefined {
   if (event.metadata && "assignee" in event.metadata) {
-    return ownerName(event.metadata.assignee) ?? undefined;
+    return ownerName(event.metadata.assignee);
   }
   return undefined;
 }
@@ -157,9 +157,18 @@ export function foldJourney(
         beginStage("Open", event.created_at, atMs, owner);
         break;
 
+      case "issue.defer":
+      case "issue.deferred":
+        beginStage("Deferred", event.created_at, atMs, owner);
+        break;
+
+      case "issue.undefer":
+        beginStage("Open", event.created_at, atMs, owner);
+        break;
+
       case "issue.assign": {
         const nextOwner = assignmentAfter(event);
-        if (!nextOwner || nextOwner === owner) break;
+        if (nextOwner === undefined || nextOwner === owner) break;
         owner = nextOwner;
         const stage =
           state.current?.stage === "Closed"
@@ -176,7 +185,7 @@ export function foldJourney(
 
       case "issue.reopen":
       case "issue.reopened":
-        owner = ownerName(event.actor);
+        owner = null;
         beginStage("Open", event.created_at, atMs, owner);
         break;
 
