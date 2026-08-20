@@ -64,6 +64,21 @@
   color: var(--color-text-secondary);
 }
 
+/* Operator-parked: open and human-workable, but excluded from agent selection. */
+.operatorBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+}
+
 .statusBadge[data-status="open"] {
   background-color: var(--color-info-bg);
   color: var(--color-info-text);

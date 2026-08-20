@@ -26,6 +26,7 @@ var (
 	updateRemoveDeps   []string
 	updateAddLabels    []string
 	updateRemoveLabels []string
+	updateForce        bool
 )
 
 var updateCmd = &cobra.Command{
@@ -152,6 +153,13 @@ func applyLabelFlags(cmd *cobra.Command, params *backend.UpdateParams) bool {
 		params.RemoveLabels = updateRemoveLabels
 		changed = true
 	}
+	// --force is a modifier on the label deltas, not a field of its own: it
+	// never counts as a change, so `update <id> --force` alone still reaches
+	// the backend's "no fields" validation error instead of silently
+	// succeeding.
+	if cmd.Flags().Changed("force") {
+		params.Force = updateForce
+	}
 	return changed
 }
 
@@ -235,7 +243,8 @@ func init() {
 	updateCmd.Flags().StringArrayVar(&updateAddDeps, "depends-on", nil, "Add dependency on issue ID (repeatable)")
 	updateCmd.Flags().StringArrayVar(&updateRemoveDeps, "remove-depends-on", nil, "Remove dependency on issue ID (repeatable)")
 	updateCmd.Flags().StringArrayVar(&updateAddLabels, "add-label", nil, "Add label (repeatable); other labels are preserved")
-	updateCmd.Flags().StringArrayVar(&updateRemoveLabels, "remove-label", nil, "Remove label (repeatable); other labels are preserved")
+	updateCmd.Flags().StringArrayVar(&updateRemoveLabels, "remove-label", nil, "Remove label (repeatable); other labels are preserved. Reserved labels (e.g. \"operator\") also need --force")
+	updateCmd.Flags().BoolVar(&updateForce, "force", false, "Allow --remove-label to remove a reserved label such as \"operator\", which parks an issue for a human")
 }
 
 func readDescriptionFile(path string, stdin io.Reader) (string, error) {
