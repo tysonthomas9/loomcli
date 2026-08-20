@@ -469,11 +469,17 @@ type UpdateParams struct {
 	AddLabels          []string `json:"add_labels,omitempty"`
 	RemoveLabels       []string `json:"remove_labels,omitempty"`
 	SetLabels          []string `json:"set_labels,omitempty"`
-	Parent             *string  `json:"parent,omitempty"`
-	AgentState         *string  `json:"agent_state,omitempty"`
-	DueAt              *string  `json:"due_at,omitempty"`
-	DeferUntil         *string  `json:"defer_until,omitempty"`
-	Claim              bool     `json:"claim,omitempty"`
+	// ForceLabelRemoval applies only to RemoveLabels and to the removals
+	// implied by SetLabels. It asks the backend to remove a label its server
+	// treats as reserved (fleet-db refuses to drop "operator" without it).
+	// Only backends whose removal endpoint accepts a force override honor it;
+	// the rest reject the combination rather than dropping it silently.
+	ForceLabelRemoval bool    `json:"force_label_removal,omitempty"`
+	Parent            *string `json:"parent,omitempty"`
+	AgentState        *string `json:"agent_state,omitempty"`
+	DueAt             *string `json:"due_at,omitempty"`
+	DeferUntil        *string `json:"defer_until,omitempty"`
+	Claim             bool    `json:"claim,omitempty"`
 }
 
 // CloseParams contains fields for closing an issue.

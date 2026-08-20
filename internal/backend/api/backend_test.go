@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -1251,6 +1252,30 @@ func TestRemoveLabel_HappyPath(t *testing.T) {
 	}
 	if body.RemoveLabels == nil || len(*body.RemoveLabels) != 1 || (*body.RemoveLabels)[0] != "stale" {
 		t.Errorf("RemoveLabels = %v", body.RemoveLabels)
+	}
+}
+
+// TestUpdate_ForceLabelRemoval_Rejected: the api backend folds removals into
+// PATCH /issues/{id}, which has no force override, so the combination is
+// refused rather than sent with the flag silently dropped.
+func TestUpdate_ForceLabelRemoval_Rejected(t *testing.T) {
+	var called bool
+	ab, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		respondOK(w, map[string]interface{}{"ok": true})
+	})
+	defer ts.Close()
+
+	err := ab.Update(context.Background(), "loom-1", backend.UpdateParams{
+		RemoveLabels:      []string{"operator"},
+		ForceLabelRemoval: true,
+	})
+	var berr *backend.BackendError
+	if !errors.As(err, &berr) || berr.Kind != backend.KindNotImplemented {
+		t.Fatalf("Update err = %v, want KindNotImplemented", err)
+	}
+	if called {
+		t.Errorf("api backend issued a request despite rejecting forced removal")
 	}
 }
 
