@@ -131,6 +131,33 @@ describe("foldJourney", () => {
     ]);
   });
 
+  it("ignores an empty assignment that does not change the owner", () => {
+    const spans = foldJourney(
+      [
+        event(0, "issue.create"),
+        event(10, "issue.claim", { actor: "worker-1" }),
+        event(39, "issue.assign", {
+          actor: "worker-1",
+          metadata: { assignee: "" },
+        }),
+        event(40, "issue.close", { actor: "worker-1" }),
+      ],
+      BASE_MS + 60_000,
+    );
+
+    expect(
+      spans.map(({ stage, owner, durationMs }) => ({
+        stage,
+        owner,
+        durationMs,
+      })),
+    ).toEqual([
+      { stage: "Open", owner: "alice", durationMs: 10_000 },
+      { stage: "In progress", owner: "worker-1", durationMs: 30_000 },
+      { stage: "Closed", owner: "worker-1", durationMs: 0 },
+    ]);
+  });
+
   it("returns an empty list for an empty event window", () => {
     expect(foldJourney([], BASE_MS)).toEqual([]);
   });

@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -67,5 +67,38 @@ describe("Journey", () => {
     expect(screen.getByTestId("journey-window-note")).toHaveTextContent(
       "most recent 0 events returned",
     );
+  });
+
+  it("renders unequal durations as a uniform sequence with duration text", () => {
+    render(
+      <Journey
+        events={[
+          event(),
+          event({
+            id: "1787248860000-0",
+            event_type: "issue.update",
+            actor: "worker-1",
+            created_at: "2026-08-20T12:01:00.000Z",
+            changes: [
+              { field: "status", before: "open", after: "in_progress" },
+            ],
+          }),
+          event({
+            id: "1787331600000-0",
+            event_type: "issue.close",
+            actor: "worker-1",
+            created_at: "2026-08-21T11:00:00.000Z",
+          }),
+        ]}
+      />,
+    );
+
+    const spans = screen.getAllByTestId("journey-span");
+    expect(spans).toHaveLength(3);
+    expect(new Set(spans.map((span) => span.style.flexGrow))).toHaveLength(1);
+    expect(spans[0].style.flexGrow).toBe("");
+    expect(within(spans[0]).getByText("1m")).toBeInTheDocument();
+    expect(within(spans[1]).getByText("22h 59m")).toBeInTheDocument();
+    expect(within(spans[2]).getByText("0s")).toBeInTheDocument();
   });
 });

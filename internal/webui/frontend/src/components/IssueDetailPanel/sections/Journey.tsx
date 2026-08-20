@@ -4,7 +4,6 @@ import type { Event } from "@/types";
 
 import {
   foldJourney,
-  type JourneySpan,
   type JourneyStage,
 } from "./journeyFold";
 import styles from "./Journey.module.css";
@@ -37,12 +36,6 @@ function stageToken(stage: JourneyStage): string {
   return stage.toLowerCase().replace(/\s+/g, "-");
 }
 
-function spanWeight(span: JourneySpan): number {
-  // Keep terminal and very short stages visible without letting them dominate
-  // a long-running journey.
-  return Math.max(span.durationMs, 60_000);
-}
-
 export function Journey({ events }: JourneyProps): JSX.Element {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const spans = useMemo(() => foldJourney(events, nowMs), [events, nowMs]);
@@ -70,7 +63,6 @@ export function Journey({ events }: JourneyProps): JSX.Element {
               className={styles.span}
               data-stage={stageToken(span.stage)}
               data-testid="journey-span"
-              style={{ flexGrow: spanWeight(span) }}
               title={`${span.stage} · ${span.owner ?? "Unassigned"} · ${formatDuration(span.durationMs)}`}
             >
               <span className={styles.stage}>{span.stage}</span>

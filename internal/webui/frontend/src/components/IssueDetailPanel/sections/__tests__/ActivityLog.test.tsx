@@ -223,6 +223,26 @@ describe("ActivityLog", () => {
   });
 
   describe("event description text", () => {
+    it("uses the server-provided summary when present", () => {
+      const events = [
+        createTestEvent({
+          id: 1,
+          event_type: "issue.claim" as EventType,
+          actor: "local-planner",
+          summary: "Claimed by local-planner",
+        }),
+      ];
+      render(
+        <ActivityLog comments={[]} events={events} issueId="test-issue" />,
+      );
+      expect(
+        screen.getByText("Claimed by local-planner"),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText("local-planner performed an action"),
+      ).not.toBeInTheDocument();
+    });
+
     it("describes 'created' events", () => {
       const events = [
         createTestEvent({ id: 1, event_type: "issue.created", actor: "alice" }),

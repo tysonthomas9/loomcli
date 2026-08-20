@@ -23,8 +23,7 @@
 
 .span {
   display: flex;
-  min-width: 104px;
-  flex-basis: 0;
+  flex: 1 0 104px;
   flex-direction: column;
   gap: var(--space-1);
   padding: 14px 12px 11px;

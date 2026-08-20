@@ -23,6 +23,9 @@ function getTimestamp(item: ActivityItem): number {
 
 /** Human-readable description for system events. */
 function describeEvent(event: Event): string {
+  const summary = event.summary?.trim();
+  if (summary) return summary;
+
   const { event_type, actor, old_value, new_value } = event;
   const who = actor || "Someone";
 

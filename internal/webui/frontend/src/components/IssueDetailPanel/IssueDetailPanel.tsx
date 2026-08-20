@@ -765,6 +765,7 @@ function DefaultContent({
 
   // Local state for events (activity log)
   const [events, setEvents] = useState<Event[]>([]);
+  const eventsRequestIdRef = useRef(0);
 
   // Sync local comments when issue changes (e.g., different issue selected)
   useEffect(() => {
@@ -775,26 +776,31 @@ function DefaultContent({
     }
   }, [issue]);
 
-  // Fetch events when issue changes
+  // Fetch one shared event list for Journey and Activity. The parent merges
+  // live issue mutations into this prop, including updated_at, so the revision
+  // is the same signal that refreshes the status pill.
   const eventIssueId = issue?.id;
+  const eventIssueRevision = issue?.updated_at;
   useEffect(() => {
+    const requestId = ++eventsRequestIdRef.current;
     if (!eventIssueId) {
       setEvents([]);
       return;
     }
-    let cancelled = false;
-    getIssueEvents(workspaceId, eventIssueId).then(
+    getIssueEvents(workspaceId, eventIssueId, 200).then(
       (data) => {
-        if (!cancelled) setEvents(data ?? []);
+        if (requestId === eventsRequestIdRef.current) setEvents(data ?? []);
       },
       () => {
-        if (!cancelled) setEvents([]);
+        if (requestId === eventsRequestIdRef.current) setEvents([]);
       },
     );
     return () => {
-      cancelled = true;
+      if (requestId === eventsRequestIdRef.current) {
+        eventsRequestIdRef.current += 1;
+      }
     };
-  }, [eventIssueId, workspaceId]);
+  }, [eventIssueId, eventIssueRevision, workspaceId]);
 
   // Handler for when a new comment is added
   const handleCommentAdded = useCallback((newComment: Comment) => {

@@ -65,11 +65,11 @@ function statusAfter(event: Event): string | null {
   return null;
 }
 
-function assignmentAfter(event: Event): string | null {
+function assignmentAfter(event: Event): string | undefined {
   if (event.metadata && "assignee" in event.metadata) {
-    return ownerName(event.metadata.assignee);
+    return ownerName(event.metadata.assignee) ?? undefined;
   }
-  return null;
+  return undefined;
 }
 
 function orderedEvents(events: readonly Event[]): OrderedEvent[] {
@@ -158,7 +158,9 @@ export function foldJourney(
         break;
 
       case "issue.assign": {
-        owner = assignmentAfter(event);
+        const nextOwner = assignmentAfter(event);
+        if (!nextOwner || nextOwner === owner) break;
+        owner = nextOwner;
         const stage =
           state.current?.stage === "Closed"
             ? "Open"
