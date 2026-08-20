@@ -48,6 +48,9 @@ type DaemonAgentStatus struct {
 	OwnershipFencingToken  int64     `json:"ownership_fencing_token,omitempty"`
 	OwnershipLastHeartbeat time.Time `json:"ownership_last_heartbeat,omitempty"`
 	LastActivity           time.Time `json:"last_activity,omitempty"`
+	// ProfileError is the harness-profile refusal that is keeping this agent
+	// out of the claim loop. omitempty: a healthy fleet's JSON is unchanged.
+	ProfileError string `json:"profile_error,omitempty"`
 }
 
 // DaemonState represents the complete daemon state in daemon-agents.json
@@ -523,6 +526,7 @@ func runDaemonStatus(cmd *cobra.Command, args []string) {
 		}
 	}
 
+	printProfileBlockedBanner(state.Agents)
 	printQuarantinedTasks(state.QuarantinedTasks)
 }
 

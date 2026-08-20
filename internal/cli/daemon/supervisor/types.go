@@ -55,6 +55,15 @@ type AgentProcess struct {
 
 	SoftKnobWarning string // last soft-enforcement warning logged by gateSafetyKnobsEnforceable; deduplicates a per-poll-cycle line down to one per change
 
+	// ProfileError holds the harness-profile refusal raised by
+	// gateProfileVerified, cleared on the first verify that passes. It is a
+	// SEPARATE slot from LastError on purpose: setPreflightError overwrites
+	// LastError unconditionally on every cycle (correct for transient
+	// outcomes like NoWork), which is exactly how a profile refusal used to
+	// vanish from the board within one poll interval while the agent stayed
+	// dead. A sticky, operator-actionable fault needs a sticky slot.
+	ProfileError *agenterr.AgentError
+
 	LastError      *agenterr.AgentError // classified error from most recent exit (nil on clean exit)
 	RateRetryCount int                  // consecutive rate-limit retries (separate from RestartCount)
 	LastNoWork     bool                 // true if last exit was due to no claimable tasks
@@ -70,7 +79,7 @@ type AgentProcess struct {
 
 	StopReason StopReason // why the agent was stopped (set at decision site, empty while running)
 
-	Mu sync.Mutex // protects Cmd, Pid, LogFile, SoftKnobWarning, restart tracking, AssignedEpicID, AssignedTaskID, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, LastActivity, InputWaitPending, InputWaitSince
+	Mu sync.Mutex // protects Cmd, Pid, LogFile, SoftKnobWarning, ProfileError, restart tracking, AssignedEpicID, AssignedTaskID, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, LastActivity, InputWaitPending, InputWaitSince
 }
 
 // StopReason identifies why an agent was stopped.
@@ -110,6 +119,13 @@ const (
 	// a watchdog stop with no task is read as idle NoWork, which is the one
 	// verdict a four-hour run must never get.
 	StopReasonRunDurationExceeded StopReason = "run_duration_exceeded"
+	// StopReasonProfileInvalid marks an agent whose harness profile failed
+	// manifest verification in pre-flight. The agent never spawned and never
+	// claimed a task, so this is a configuration fault an operator must
+	// repair, not a run failure: it renders as "blocked" (like
+	// StopReasonMaxRetriesBlocked), the supervise goroutine stays alive, and
+	// the agent self-resumes on the first cycle whose profile verifies.
+	StopReasonProfileInvalid StopReason = "profile_invalid"
 )
 
 // resolveRemote returns the git remote name for this agent.
@@ -164,6 +180,7 @@ type SupervisedAgentStatus struct {
 	OwnershipLastHeartbeat time.Time
 	AssignedTaskID         string    // task currently claimed by this agent (empty when between tasks)
 	LastActivity           time.Time // most recent PTY output observed by the wrapper; zero if no observation yet
+	ProfileError           string    // harness-profile refusal message (empty when the profile verifies or none is configured)
 }
 
 // BuiltInRoles defines the built-in role names that use loom <role> command.
