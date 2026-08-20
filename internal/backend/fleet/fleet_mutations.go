@@ -98,11 +98,19 @@ func (b *FleetBackend) addLabel(ctx context.Context, id string, label string, ac
 }
 
 func (b *FleetBackend) RemoveLabel(ctx context.Context, id string, label string) error {
-	return b.removeLabel(ctx, id, label, "")
+	return b.removeLabel(ctx, id, label, "", false)
 }
 
-func (b *FleetBackend) removeLabel(ctx context.Context, id string, label string, actor string) error {
-	return b.execAsActor(ctx, "RemoveLabel", "DELETE", "/issues/"+url.PathEscape(id)+"/labels/"+url.PathEscape(label), nil, actor)
+// removeLabel deletes a label as actor, optionally asking fleet-db to override
+// its reserved-label protection. Reserved labels (currently "operator") are
+// refused by the server unless force is set, which is what makes the un-park
+// an explicit act rather than an accident.
+func (b *FleetBackend) removeLabel(ctx context.Context, id, label, actor string, force bool) error {
+	path := "/issues/" + url.PathEscape(id) + "/labels/" + url.PathEscape(label)
+	if force {
+		path += "?force=true"
+	}
+	return b.execAsActor(ctx, "RemoveLabel", "DELETE", path, nil, actor)
 }
 
 // --- Comment operations ---

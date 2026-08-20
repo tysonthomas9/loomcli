@@ -7,7 +7,7 @@ import type { Issue, IssueDetails } from "@/types";
 import type { Status } from "@/types/issue";
 
 import { EditableTitle } from "@/components/EditableTitle";
-import { formatStatusLabel } from "@/utils/issue";
+import { formatStatusLabel, hasOperatorLabel } from "@/utils/issue";
 import { StatusDropdown } from "@/components/StatusDropdown";
 import styles from "./IssueHeader.module.css";
 
@@ -109,6 +109,16 @@ export function IssueHeader({
               data-testid="issue-status-badge"
             >
               {formatStatus(issue.status)}
+            </span>
+          )}
+          {hasOperatorLabel(issue) && (
+            <span
+              className={styles.operatorBadge}
+              title="Parked for an operator — agents will not pick this up until the operator label is removed"
+              aria-label="Parked for an operator"
+              data-testid="issue-operator-badge"
+            >
+              Operator
             </span>
           )}
         </div>
