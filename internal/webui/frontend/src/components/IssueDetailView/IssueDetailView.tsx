@@ -361,6 +361,12 @@ export function IssueDetailView({
   const dependents = issueHasDetails ? issue.dependents : undefined;
   const reviewType = getReviewType(issue);
   const isReviewItem = reviewType !== null;
+  // A "help" card is parked (blocked + notes); approving it un-parks the issue
+  // back to `open` rather than accepting a result, so name the action for what
+  // it does. The data-testid stays stable — tests select on it.
+  const isHelpReview = reviewType === "help";
+  const approveLabel = isHelpReview ? "Unblock" : "Approve";
+  const approveGlyph = isHelpReview ? "\u2191" : "\u2713";
 
   return (
     <div className={styles.container} data-testid="issue-detail-view">
@@ -543,10 +549,10 @@ export function IssueDetailView({
               className={styles.reviewApproveButton}
               onClick={handleApprove}
               disabled={isApproving}
-              aria-label="Approve"
+              aria-label={approveLabel}
               data-testid="detail-approve-button"
             >
-              {isApproving ? "..." : "\u2713"} Approve
+              {isApproving ? "..." : approveGlyph} {approveLabel}
             </button>
             <button
               type="button"
