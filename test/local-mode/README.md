@@ -79,7 +79,17 @@ defaults the verifier to the Codex stack's seeded `LOCALMODE-2` and
 `LOCALMODE-3` tasks.
 
 The stack uses Docker/Podman volumes, so sessions and workspace files survive
-container restarts until `make local-mode-down` removes the stack volumes.
+container restarts until `make local-mode-down` removes the stack volumes. That
+includes everything in Redis: the fleet-db issue store and the terminal tab
+metadata (`internal/webui/tabmeta`), because Redis runs with AOF persistence
+(`--appendonly yes`) into the `redis-data` volume.
+
+Resetting state:
+
+`make local-mode-down` runs `compose down -v`, which removes the stack volumes
+and is the way to get a clean, freshly seeded board. A plain `restart` or a
+`down`/`up` without `-v` deliberately preserves state — the entrypoint is
+idempotent and reuses the existing workspace, epic, and seeded issues.
 
 Codex variant knobs:
 
@@ -131,3 +141,9 @@ Troubleshooting:
   errors. This is a Podman machine boot failure, not a local-mode app failure.
   Recreate or downgrade/fix the Podman machine before running
   `make local-mode-up`, or use Docker Compose when available.
+- All terminal tabs gone after a host or Docker/Podman restart: on a stack
+  created before Redis persistence was enabled, Redis ran with `--appendonly no
+  --save ""` and came back empty after every container restart. Recreate the
+  stack (`make local-mode-down && make local-mode-up`) so Redis starts with AOF
+  enabled. The same reset is the recovery if Redis ever fails to start from a
+  damaged AOF.
