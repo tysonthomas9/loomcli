@@ -175,12 +175,17 @@ func ErrorCode(err error) string {
 //
 // Deliberately narrow: a bare KindConflict is NOT permanent, because that is
 // the legitimate "someone else holds the claim" case the retry logic depends on.
+//
+// operator_only is fleet-db's refusal to hand an operator-parked issue to any
+// agent (reserved "operator" label). It is permanent for as long as the label
+// is present, including for the same-actor resume re-claim, so the resume
+// target must be abandoned rather than retried every cycle.
 func ClaimRejectedPermanently(err error) bool {
 	if err == nil {
 		return false
 	}
 	switch ErrorCode(err) {
-	case "not_claimable", "invalid_transition":
+	case "not_claimable", "invalid_transition", "operator_only":
 		return true
 	}
 	if IsKind(err, KindNotFound) {
