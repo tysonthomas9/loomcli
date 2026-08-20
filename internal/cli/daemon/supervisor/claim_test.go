@@ -369,6 +369,39 @@ func TestClaimResumeTask_PermanentRejectionBreaksTheLoop(t *testing.T) {
 	}
 }
 
+// An operator-parked resume target (fleet-db 422 / operator_only) must be
+// abandoned, not retried every restart interval.
+func TestClaimResumeTask_OperatorOnlyAbandonsTarget(t *testing.T) {
+	wt := t.TempDir()
+	seedResumeLock(t, wt, "task-parked")
+
+	mock := clitest.NewMockIssueBackend()
+	mock.ClaimIssueErr = &backend.BackendError{
+		Kind: backend.KindValidation, Op: "ClaimIssue",
+		Message: "issue is operator-only and cannot be claimed by an agent: task-parked",
+		Meta:    map[string]string{backend.MetaErrorCode: "operator_only"},
+	}
+	s := &Supervisor{IssueBackend: mock}
+	ap := &AgentProcess{
+		Entry:        cfgpkg.AgentEntry{Worktree: "falcon", Role: "task"},
+		WorktreePath: wt,
+	}
+
+	if s.claimResumeTask(ap, "task-parked") {
+		t.Fatal("claimResumeTask returned true for an operator-parked target")
+	}
+	info, err := cli.ReadLockFile(wt)
+	if err != nil {
+		t.Fatalf("ReadLockFile: %v", err)
+	}
+	if info.TaskID != "" {
+		t.Fatalf("lock still names the abandoned task: %q", info.TaskID)
+	}
+	if gotTask, gotMode := s.detectRecovery(ap); gotTask != "" || gotMode != recoverCold {
+		t.Fatalf("next detectRecovery = (%q, %s), want (\"\", cold)", gotTask, modeName(gotMode))
+	}
+}
+
 func TestClaimResumeTask_SelfHeldConflictResumes(t *testing.T) {
 	wt := t.TempDir()
 	seedResumeLock(t, wt, "task-mine")
