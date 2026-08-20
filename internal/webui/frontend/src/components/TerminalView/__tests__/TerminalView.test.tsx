@@ -120,6 +120,13 @@ const mockBackendsHook = vi.hoisted(() => ({
   refetch: vi.fn(),
 }));
 
+// PUPPET-125: lets a test drive a real workspace switch. Defaults are empty,
+// i.e. exactly the unresolved-workspace context every other test sees today.
+const mockWorkspaceCtx = vi.hoisted(() => ({
+  workspaceId: "",
+  activeWorkspaceName: null as string | null,
+}));
+
 vi.mock("@/hooks/workspace", async () => {
   const actual =
     await vi.importActual<typeof import("@/hooks/workspace")>(
@@ -127,6 +134,14 @@ vi.mock("@/hooks/workspace", async () => {
     );
   return {
     ...actual,
+    useWorkspaceContext: () => ({
+      ...actual.NO_WORKSPACE_CONTEXT,
+      workspaceId: mockWorkspaceCtx.workspaceId,
+      activeWorkspaceName: mockWorkspaceCtx.activeWorkspaceName,
+      workspace: mockWorkspaceCtx.workspaceId
+        ? ({ id: mockWorkspaceCtx.workspaceId } as never)
+        : null,
+    }),
     useBackendConfig: () => mockBackendConfigHook,
     useBackends: () => mockBackendsHook,
   };
@@ -271,6 +286,8 @@ describe("TerminalView", () => {
     mockMetadataHook.isLoading = true;
     mockMetadataHook.error = null;
     mockMetadataHook.createTab = vi.fn().mockResolvedValue(undefined);
+    mockWorkspaceCtx.workspaceId = "";
+    mockWorkspaceCtx.activeWorkspaceName = null;
     mockTerminalApi.patchTerminalState.mockResolvedValue(undefined);
     mockTerminalApi.ensureAgentTerminalSession.mockImplementation(
       async (_workspaceId: string, agentName: string) => ({
@@ -625,6 +642,43 @@ describe("TerminalView", () => {
         "lead-claude-1",
       );
       expect(mockMetadataHook.createTab).toHaveBeenCalledTimes(1);
+    });
+
+    // PUPPET-125: the view never unmounts, so re-entering Terminal after a
+    // workspace switch re-arms init. useTerminalMetadata now reports
+    // isLoading === true for the not-yet-fetched workspace, and the view must
+    // defer instead of auto-creating a tab for a session whose PTY is alive
+    // (the PUT that followed was rejected with 409).
+    it("re-entering Terminal after a workspace switch restores tabs without creating one", () => {
+      // Workspace A, Terminal open: one live tab restored, nothing created.
+      mockWorkspaceCtx.workspaceId = "ws-a";
+      mockWorkspaceCtx.activeWorkspaceName = "WSA";
+      setMetadata([{ session_name: "ws-a-lead", label: "WS A lead" }]);
+      const { rerender } = render(<TerminalView isActive />);
+      expect(screen.getByTestId("tab-ws-a-lead")).toBeInTheDocument();
+      expect(mockMetadataHook.createTab).not.toHaveBeenCalled();
+
+      // Navigate away (Kanban) and switch workspace. useWorkspaceTabState wipes
+      // the tab set and re-arms init; the metadata hook is disabled and holds
+      // no workspace-fresh data.
+      rerender(<TerminalView isActive={false} />);
+      mockWorkspaceCtx.workspaceId = "ws-b";
+      mockWorkspaceCtx.activeWorkspaceName = "WSB";
+      setMetadata([]);
+      rerender(<TerminalView isActive={false} />);
+      expect(screen.queryByTestId("tab-ws-a-lead")).not.toBeInTheDocument();
+
+      // Click "Terminal": the new workspace's metadata is still in flight.
+      setMetadata([], true);
+      rerender(<TerminalView isActive />);
+      expect(mockMetadataHook.createTab).not.toHaveBeenCalled();
+
+      // The fetch lands with workspace B's existing live tab: restore, no PUT.
+      setMetadata([{ session_name: "ws-b-lead", label: "WS B lead" }]);
+      rerender(<TerminalView isActive />);
+
+      expect(mockMetadataHook.createTab).not.toHaveBeenCalled();
+      expect(screen.getByTestId("tab-ws-b-lead")).toBeInTheDocument();
     });
 
     it("propagates route activity to the selected terminal pane", async () => {

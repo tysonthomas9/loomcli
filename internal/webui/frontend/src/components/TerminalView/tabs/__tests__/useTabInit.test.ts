@@ -694,6 +694,74 @@ describe("useTabInit", () => {
     expect(createTab).toHaveBeenCalledTimes(1);
   });
 
+  // PUPPET-125: re-entering the Terminal view after a workspace switch must
+  // not auto-create the default tab off a not-yet-fetched metadata list — the
+  // PUT that follows is rejected 409 by the still-live PTY. useTerminalMetadata
+  // guarantees metaLoading is true in that window; this pins the consumer half.
+  it("does not auto-create when metadata is still loading after the view activates", () => {
+    const setTabs = vi.fn();
+    const setActiveTabId = vi.fn();
+    const createTab = vi.fn().mockResolvedValue(undefined);
+    const initializedRef = {
+      current: false,
+    } as React.MutableRefObject<boolean>;
+
+    const args = createArgs({
+      config: {
+        backend: "claude",
+        source: "config",
+        available: ["claude"],
+        agents: [],
+      },
+      setTabs: setTabs as unknown as React.Dispatch<
+        React.SetStateAction<TabState[]>
+      >,
+      setActiveTabId: setActiveTabId as unknown as React.Dispatch<
+        React.SetStateAction<string>
+      >,
+      createTab,
+      initializedRef,
+      isViewActive: false,
+      metaLoading: false,
+      tabMetadata: [] as TabMetadata[],
+    });
+
+    const { rerender } = renderHook((a) => useTabInit(a), {
+      initialProps: args,
+    });
+
+    // The view activates while the new workspace's metadata is still in flight.
+    rerender({ ...args, isViewActive: true, metaLoading: true });
+
+    expect(initializedRef.current).toBe(false);
+    expect(createTab).not.toHaveBeenCalled();
+    expect(setTabs).not.toHaveBeenCalled();
+
+    // The fetch lands with the workspace's real tab: restore, never create.
+    const metadata: TabMetadata[] = [
+      {
+        session_name: "lead-claude-1",
+        label: "Claude 1",
+        notes: "",
+        sort_order: 0,
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
+      },
+    ];
+    rerender({
+      ...args,
+      isViewActive: true,
+      metaLoading: false,
+      tabMetadata: metadata,
+    });
+
+    expect(initializedRef.current).toBe(true);
+    expect(createTab).not.toHaveBeenCalled();
+    const tabs = setTabs.mock.calls[0][0] as TabState[];
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0].sessionName).toBe("lead-claude-1");
+  });
+
   it("extracts backend name from session name pattern", () => {
     const metadata: TabMetadata[] = [
       {

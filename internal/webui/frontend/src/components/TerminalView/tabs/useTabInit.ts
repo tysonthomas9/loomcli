@@ -102,6 +102,14 @@ export function useTabInit(args: TabInitArgs) {
 
     const initMetadata = metadataForInit(tabMetadata, excludeAgentTabs);
 
+    // Contract this fork depends on (PUPPET-125): `metaLoading === false`
+    // means `tabMetadata` is authoritative FOR THE CURRENT WORKSPACE. If a
+    // consumer is ever handed another workspace's (or a stale, emptied) list
+    // while metaLoading is false, the else-branch below auto-creates a default
+    // tab for a session whose PTY is already alive, and the PUT it issues is
+    // rejected with 409. `useTerminalMetadata` guarantees the invariant by
+    // stamping its data with the workspace it was fetched for; do not weaken
+    // it there without revisiting this fork.
     if (initMetadata.length > 0) {
       initializedMetadataRef.current = tabMetadata;
       const defaultBackend = config?.backend;
