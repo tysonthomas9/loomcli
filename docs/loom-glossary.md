@@ -104,6 +104,43 @@ isolation-*shaped* features are not isolation:
 mechanisms, the Daytona remote-isolation path, and an explicit list of what is
 not isolation.
 
+## Blocked, Stuck, and Stage
+
+Three of these words collided before any of them were written down. The issue
+status literal is unchanged in all of the below — only the display name and the
+concept boundary are settled here.
+
+- **Blocked** (dependency sense): an issue that cannot start because issues it
+  depends on are still open. `BlockedBadge` renders "Blocked by N issues" on
+  Kanban cards, and bottleneck views derive from the same dependency edges.
+  This sense keeps the word "Blocked".
+- **Stuck** (agent-declared sense): a worker parked the task and declared a
+  blocker of its own — a person or another system has to act. This is the issue
+  status literal `blocked`, and it stays `blocked` in the API, in fleet-db, and
+  in `PatchIssueRequest`. It reads **Stuck** on screen, which is where Journey
+  names the stage. Nothing renames the dependency sense.
+- **`task.stuck`** (`internal/events`, `TaskStuckData`): a daemon event for a
+  task that failed repeatedly across consecutive auto-mode invocations and was
+  skipped so the loop could make progress elsewhere. Same word, different
+  trigger: the loop gave up, the agent declared nothing. It is not an issue
+  status, and it does not set one.
+
+The rate-limit circuit breaker emits `circuit.opened` / `circuit.closed`, not a
+third kind of "blocked".
+
+### Stage vs phase
+
+- **Stage**: UI-local vocabulary, not a loom domain object. Nothing stores a
+  stage; the Journey section on the issue detail panel derives them from the
+  issue's event history — a stage is a contiguous run of that history with the
+  same status and the same owner. Because it is derived from a bounded event
+  window, a Journey shows the stages that window can support, not necessarily
+  the whole life of the issue.
+- **Phase**: a runtime concept with storage behind it — the log of one stretch
+  of agent work, `planning` or `implementation`, written to
+  `tasks/<id>/<phase>.log` and surfaced as its own tab. A phase is something an
+  agent ran; a stage is something the issue was.
+
 ## Other Overloaded Names
 
 - **fleet / fleet-db**: The control-plane data service that stores Loom state.
