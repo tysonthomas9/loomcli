@@ -221,6 +221,40 @@ describe("IssueDetailView", () => {
     });
   });
 
+  describe("review action bar", () => {
+    it("labels the action Approve for a review item and Unblock for a help item", () => {
+      // A help card (blocked + notes) is parked: the action un-parks it to
+      // `open` rather than accepting a result (PUPPET-156).
+      const { rerender } = render(
+        <IssueDetailView
+          {...createDefaultProps({
+            issue: createTestIssue({ status: "review" }),
+          })}
+        />,
+      );
+      expect(screen.getByTestId("detail-approve-button")).toHaveAttribute(
+        "aria-label",
+        "Approve",
+      );
+
+      rerender(
+        <IssueDetailView
+          {...createDefaultProps({
+            issue: createTestIssue({
+              status: "blocked",
+              notes: "I need help with this task",
+            }),
+          })}
+        />,
+      );
+      // The testid is unchanged — only the human-facing name moves.
+      expect(screen.getByTestId("detail-approve-button")).toHaveAttribute(
+        "aria-label",
+        "Unblock",
+      );
+    });
+  });
+
   describe("StatusDropdown integration", () => {
     it("renders StatusDropdown with current issue status", () => {
       const issue = createTestIssue({ status: "in_progress" });
