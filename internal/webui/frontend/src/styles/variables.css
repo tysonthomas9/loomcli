@@ -45,6 +45,15 @@
   --color-status-in-progress: #f59e0b; /* amber-500 */
   --color-status-closed: #10b981; /* emerald-500 */
 
+  /* Task journey stages */
+  --color-journey-open: #60a5fa;
+  --color-journey-in-progress: #f59e0b;
+  --color-journey-stuck: #f97316;
+  --color-journey-deferred: #a78bfa;
+  --color-journey-review: #818cf8;
+  --color-journey-closed: #34d399;
+  --color-journey-now: #f0f0f0;
+
   /* ===========================
    * Colors - State
    * =========================== */
@@ -303,6 +312,15 @@
   --color-panel-bg: #ffffff;
   --color-primary: #2563eb;
   --color-primary-hover: #1d4ed8;
+
+  /* Task journey stages */
+  --color-journey-open: #2563eb;
+  --color-journey-in-progress: #b45309;
+  --color-journey-stuck: #c2410c;
+  --color-journey-deferred: #7c3aed;
+  --color-journey-review: #4f46e5;
+  --color-journey-closed: #047857;
+  --color-journey-now: #1a1a1a;
 
   /* Semantic background colors (light variants) */
   --color-primary-bg: #eff6ff;

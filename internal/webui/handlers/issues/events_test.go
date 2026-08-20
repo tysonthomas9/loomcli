@@ -22,8 +22,8 @@ func TestHandleGetIssueEvents_Success(t *testing.T) {
 				t.Errorf("ListEvents called with Limit = %d, want %d", params.Limit, 100)
 			}
 			return []*types.Event{
-				{ID: 1, IssueID: "test-123", EventType: types.EventCreated, Actor: "alice"},
-				{ID: 2, IssueID: "test-123", EventType: types.EventStatusChanged, Actor: "bob"},
+				{ID: "1787177211116-0", IssueID: "test-123", EventType: types.EventCreated, Actor: "alice"},
+				{ID: "1787177211117-0", IssueID: "test-123", EventType: types.EventStatusChanged, Actor: "bob"},
 			}, nil
 		},
 	}
@@ -168,7 +168,7 @@ func TestHandleGetIssueEvents_LimitParameter(t *testing.T) {
 	}
 }
 
-// TestHandleGetIssueEvents_LimitCap verifies limit is capped at 500
+// TestHandleGetIssueEvents_LimitCap verifies limit is capped at fleet-db's ceiling.
 func TestHandleGetIssueEvents_LimitCap(t *testing.T) {
 	var capturedLimit int
 
@@ -191,8 +191,8 @@ func TestHandleGetIssueEvents_LimitCap(t *testing.T) {
 		t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 	}
 
-	if capturedLimit != 500 {
-		t.Errorf("expected limit capped to 500, got %d", capturedLimit)
+	if capturedLimit != 200 {
+		t.Errorf("expected limit capped to 200, got %d", capturedLimit)
 	}
 }
 

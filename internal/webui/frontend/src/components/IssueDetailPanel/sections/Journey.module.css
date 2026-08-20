@@ -1,0 +1,125 @@
+.section {
+  margin-bottom: 28px;
+}
+
+.sectionTitle {
+  margin: 0 0 12px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.rail {
+  position: relative;
+  display: flex;
+  min-height: 82px;
+  overflow-x: auto;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+}
+
+.span {
+  display: flex;
+  min-width: 104px;
+  flex-basis: 0;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: 14px 12px 11px;
+  border-top: 3px solid var(--journey-stage-color);
+  border-right: 1px solid var(--color-border-light);
+  background: color-mix(in srgb, var(--journey-stage-color) 7%, transparent);
+}
+
+.span:last-of-type {
+  border-right: 0;
+}
+
+.span[data-stage="open"] {
+  --journey-stage-color: var(--color-journey-open);
+}
+
+.span[data-stage="in-progress"] {
+  --journey-stage-color: var(--color-journey-in-progress);
+}
+
+.span[data-stage="stuck"] {
+  --journey-stage-color: var(--color-journey-stuck);
+}
+
+.span[data-stage="deferred"] {
+  --journey-stage-color: var(--color-journey-deferred);
+}
+
+.span[data-stage="review"] {
+  --journey-stage-color: var(--color-journey-review);
+}
+
+.span[data-stage="closed"] {
+  --journey-stage-color: var(--color-journey-closed);
+}
+
+.stage {
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.owner,
+.duration {
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.duration {
+  margin-top: auto;
+  color: var(--color-text-secondary);
+  font-family: var(--font-family-mono);
+}
+
+.nowLine {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  width: 0;
+  flex: 0 0 0;
+  border-right: 2px solid var(--color-journey-now);
+  pointer-events: none;
+}
+
+.nowLine span {
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  color: var(--color-journey-now);
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.emptyState {
+  margin: 0;
+  padding: 12px 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-base);
+  text-align: center;
+}
+
+.windowNote {
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+}

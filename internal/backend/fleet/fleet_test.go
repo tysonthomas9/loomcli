@@ -1504,10 +1504,16 @@ func TestListEvents_HappyPath(t *testing.T) {
 		respondOK(w, map[string]any{
 			"history": []map[string]any{
 				{
-					"id":        "1",
+					"id":        "1787177211116-0",
 					"timestamp": now,
 					"actor":     "user",
-					"action":    "issue.created",
+					"action":    "issue.update",
+					"category":  "field_change",
+					"summary":   "Updated status",
+					"changes": []map[string]string{
+						{"field": "status", "before": "open", "after": "in_progress"},
+					},
+					"metadata": map[string]string{"source": "test"},
 				},
 			},
 		})
@@ -1521,8 +1527,18 @@ func TestListEvents_HappyPath(t *testing.T) {
 	if len(result) != 1 {
 		t.Fatalf("len = %d, want 1", len(result))
 	}
-	if result[0].Kind != "issue.created" {
-		t.Errorf("Kind = %q, want %q", result[0].Kind, "issue.created")
+	got := result[0]
+	if got.ID != "1787177211116-0" {
+		t.Errorf("ID = %q, want stream ID", got.ID)
+	}
+	if got.Kind != "issue.update" || got.Category != "field_change" || got.Summary != "Updated status" {
+		t.Errorf("event fields = %+v", got)
+	}
+	if len(got.Changes) != 1 || got.Changes[0] != (backend.FieldChange{Field: "status", Before: "open", After: "in_progress"}) {
+		t.Errorf("Changes = %+v", got.Changes)
+	}
+	if got.Metadata["source"] != "test" {
+		t.Errorf("Metadata = %+v", got.Metadata)
 	}
 }
 

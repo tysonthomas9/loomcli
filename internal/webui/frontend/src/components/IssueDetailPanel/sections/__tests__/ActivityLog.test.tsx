@@ -31,14 +31,19 @@ function createTestComment(overrides: Partial<Comment> = {}): Comment {
 /**
  * Create a test event with default values.
  */
-function createTestEvent(overrides: Partial<Event> = {}): Event {
+type EventOverrides = Omit<Partial<Event>, "id"> & {
+  id?: string | number;
+};
+
+function createTestEvent(overrides: EventOverrides = {}): Event {
+  const { id = "1-0", ...rest } = overrides;
   return {
-    id: 1,
+    id: String(id),
     issue_id: "test-issue",
     event_type: "issue.created" as EventType,
     actor: "alice",
     created_at: "2026-01-20T10:00:00Z",
-    ...overrides,
+    ...rest,
   };
 }
 

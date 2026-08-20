@@ -244,7 +244,12 @@ func TestListEvents_Backend_Success(t *testing.T) {
 	now := time.Now().UTC()
 	fb := &fakeIssueBackend{
 		listEventsResult: []backend.EventData{
-			{ID: "1", IssueID: "test-1", Kind: "issue.created", Actor: "alice", CreatedAt: now},
+			{
+				ID: "1787177211116-0", IssueID: "test-1", Kind: "issue.update", Actor: "alice",
+				Target: "test-1", Payload: `{"status":"in_progress"}`, Category: "field_change",
+				Summary: "Updated status", Changes: []backend.FieldChange{{Field: "status", Before: "open", After: "in_progress"}},
+				Metadata: map[string]string{"source": "test"}, CreatedAt: now,
+			},
 			{ID: "2", IssueID: "test-1", Kind: "issue.status_changed", Actor: "bob", CreatedAt: now},
 		},
 	}
@@ -257,11 +262,20 @@ func TestListEvents_Backend_Success(t *testing.T) {
 	if len(events) != 2 {
 		t.Fatalf("expected 2 events, got %d", len(events))
 	}
-	if events[0].ID != 1 {
-		t.Errorf("event[0].ID = %d, want 1", events[0].ID)
+	if events[0].ID != "1787177211116-0" {
+		t.Errorf("event[0].ID = %q, want stream ID", events[0].ID)
 	}
-	if events[0].EventType != types.EventCreated {
-		t.Errorf("event[0].EventType = %q, want %q", events[0].EventType, types.EventCreated)
+	if events[0].EventType != types.EventType("issue.update") {
+		t.Errorf("event[0].EventType = %q, want issue.update", events[0].EventType)
+	}
+	if events[0].Target != "test-1" || events[0].Payload != `{"status":"in_progress"}` || events[0].Category != "field_change" || events[0].Summary != "Updated status" {
+		t.Errorf("event[0] widened fields = %+v", events[0])
+	}
+	if len(events[0].Changes) != 1 || events[0].Changes[0] != (types.FieldChange{Field: "status", Before: "open", After: "in_progress"}) {
+		t.Errorf("event[0].Changes = %+v", events[0].Changes)
+	}
+	if events[0].Metadata["source"] != "test" {
+		t.Errorf("event[0].Metadata = %+v", events[0].Metadata)
 	}
 	if len(fb.listEventsCalls) != 1 {
 		t.Fatalf("expected 1 backend call, got %d", len(fb.listEventsCalls))

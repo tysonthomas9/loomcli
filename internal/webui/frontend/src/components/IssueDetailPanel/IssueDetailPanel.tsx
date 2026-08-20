@@ -58,6 +58,7 @@ import type { SessionRecord } from "@/types/agent";
 
 import {
   ActivityLog,
+  Journey,
   CommentForm,
   DependencySection,
   EditableDescription,
@@ -793,7 +794,7 @@ function DefaultContent({
     return () => {
       cancelled = true;
     };
-  }, [eventIssueId]);
+  }, [eventIssueId, workspaceId]);
 
   // Handler for when a new comment is added
   const handleCommentAdded = useCallback((newComment: Comment) => {
@@ -1518,6 +1519,8 @@ function DefaultContent({
                 </ul>
               </section>
             )}
+
+            <Journey events={events} />
 
             {/* Activity Log (comments + events) */}
             <ActivityLog
