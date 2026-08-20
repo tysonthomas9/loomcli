@@ -430,6 +430,12 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 	if err := s.gateSafetyKnobsEnforceable(ap); err != nil {
 		return false
 	}
+	// Before claimTask, deliberately: a drifted profile that is only caught at
+	// spawn time claims a task and immediately releases it, and the release
+	// erases the diagnosis. See gateProfileVerified.
+	if err := s.gateProfileVerified(ap); err != nil {
+		return false
+	}
 
 	taskID, mode := s.detectRecovery(ap)
 	switch mode {
@@ -970,6 +976,12 @@ func (s *Supervisor) GetAgents() []SupervisedAgentStatus {
 		}
 		if ap.LastError != nil {
 			result[i].LastErrorClass = ap.LastError.Class.String()
+		}
+		// Projected as its own field, not folded into LastErrorClass: the
+		// message names the drifted version and the profile directory, which
+		// is the entire actionable content of the failure.
+		if ap.ProfileError != nil {
+			result[i].ProfileError = ap.ProfileError.Message
 		}
 		ap.Mu.Unlock()
 		// Resolve backend name outside the lock (GetEffectiveBackend acquires ap.Mu)
