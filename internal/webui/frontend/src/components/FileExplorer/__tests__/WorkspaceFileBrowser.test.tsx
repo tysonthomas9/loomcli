@@ -71,6 +71,16 @@ const mocks = vi.hoisted(() => ({
     Promise.resolve({ results: [], limitHit: false }),
   ),
   scrollApplied: vi.fn(),
+  workspaceDataId: "ws-1",
+  repos: [
+    {
+      name: "loomcli",
+      path: "/tmp/loomcli",
+      default_branch: "main",
+      remote: "origin",
+      groups: [] as string[],
+    },
+  ],
   agents: [
     {
       name: "atlas",
@@ -415,15 +425,10 @@ vi.mock("@/hooks", async () => {
     }),
     useWorkspaceContext: () => ({
       workspaceId: "ws-1",
-      repos: [
-        {
-          name: "loomcli",
-          path: "/tmp/loomcli",
-          default_branch: "main",
-          remote: "origin",
-          groups: [],
-        },
-      ],
+      // `workspace` is the polled payload the repo and agent lists come out of,
+      // so its id is what says which workspace they describe.
+      workspace: { id: mocks.workspaceDataId, repos: mocks.repos },
+      repos: mocks.repos,
       agents: mocks.agents,
     }),
     useEventContext: () => ({
@@ -584,6 +589,16 @@ describe("WorkspaceFileBrowser", () => {
     mocks.registryDirtyKeys.clear();
     mocks.registryListeners.clear();
     mocks.registryRevision = 0;
+    mocks.workspaceDataId = "ws-1";
+    mocks.repos = [
+      {
+        name: "loomcli",
+        path: "/tmp/loomcli",
+        default_branch: "main",
+        remote: "origin",
+        groups: [],
+      },
+    ];
     mocks.agents = [
       {
         name: "atlas",
@@ -1076,6 +1091,58 @@ describe("WorkspaceFileBrowser", () => {
     await act(async () => {});
 
     expect(within(tabs).getByText("reference.md")).toBeInTheDocument();
+  });
+
+  it("keeps tabs while the workspace context still describes the previous workspace", async () => {
+    // A workspace switch changes workspaceId at once, but the repo and agent
+    // lists keep describing the workspace just left until the next poll lands.
+    // The checkout listing settles on the new workspace long before that, so
+    // pruning on it alone would close the new workspace's tabs against the old
+    // one's ref universe — and persist it.
+    mocks.workspaceDataId = "ws-0";
+    mocks.repos = [];
+    mocks.agents = [];
+    localStorage.setItem(
+      "loom:ws-1:file-browser-tabs:v3",
+      JSON.stringify({
+        v: 4,
+        groups: [
+          {
+            tabs: [
+              {
+                ref: {
+                  kind: "checkout",
+                  checkout: { scope: "repo", target: "loomcli" },
+                },
+                path: "main.ts",
+              },
+            ],
+            active: null,
+          },
+        ],
+        mru: [],
+      }),
+    );
+
+    const { rerender } = render(<WorkspaceFileBrowser mode="workspace" />);
+    const tabs = await screen.findByRole("tablist", { name: /Open files/ });
+    await act(async () => {});
+    expect(within(tabs).getByText("main.ts")).toBeInTheDocument();
+
+    mocks.workspaceDataId = "ws-1";
+    mocks.repos = [
+      {
+        name: "loomcli",
+        path: "/tmp/loomcli",
+        default_branch: "main",
+        remote: "origin",
+        groups: [],
+      },
+    ];
+    rerender(<WorkspaceFileBrowser mode="workspace" />);
+    await act(async () => {});
+
+    expect(within(tabs).getByText("main.ts")).toBeInTheDocument();
   });
 
   it("never offers skills in the Files section Quick Open", async () => {

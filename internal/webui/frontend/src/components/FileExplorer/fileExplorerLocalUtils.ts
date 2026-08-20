@@ -1,4 +1,4 @@
-import type { FileEntry } from "@/api/workspace";
+import type { FileCheckout, FileEntry, RepoInfo } from "@/api/workspace";
 import {
   agentFileBrowserTabsStorageKey,
   fileBrowserTabsStorageKey,
@@ -36,6 +36,25 @@ export function modeTabsStorageKey(
   return mode === "skills"
     ? skillsFileBrowserTabsStorageKey()
     : fileBrowserTabsStorageKey();
+}
+
+// The branch the "compare against branch" lens diffs against. Only meaningful
+// when every agent checkout on screen shares one default branch: with two, the
+// single label at the top of the lens would be wrong for one of them.
+export function resolveBranchBaseName(
+  repos: RepoInfo[],
+  checkouts: FileCheckout[],
+): string | undefined {
+  const repoByName = new Map(repos.map((repo) => [repo.name, repo]));
+  const defaultBranches = new Set<string>();
+  for (const checkout of checkouts) {
+    if (checkout.kind !== "agent" || !checkout.repo) continue;
+    const defaultBranch = repoByName.get(checkout.repo)?.default_branch.trim();
+    if (defaultBranch) defaultBranches.add(defaultBranch);
+  }
+  return defaultBranches.size === 1
+    ? defaultBranches.values().next().value
+    : undefined;
 }
 
 export function clampTreeWidth(w: number): number {

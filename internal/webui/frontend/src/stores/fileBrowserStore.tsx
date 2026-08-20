@@ -58,7 +58,22 @@ export interface FileBrowserStoreActions {
   splitRight: (tab?: FileBrowserTab | null) => void;
   setDirty: (tabKey: string, dirty: boolean) => void;
   retargetPathPrefix: (ref: ExplorerRef, from: string, to: string) => void;
-  pruneUnavailableRefs: (validRefs: ExplorerRef[]) => void;
+  /**
+   * Close every tab whose ref no longer exists, and persist that.
+   *
+   * `refsWorkspaceId` names the workspace `validRefs` was derived from. The
+   * caller's own sources of truth switch at different times — the route's
+   * workspace id changes the instant the user switches, while the agent and
+   * repo lists behind the ref universe still describe the workspace they just
+   * left — so a universe is only trustworthy once it says which workspace it
+   * belongs to and that answer matches this store's. Anything else (a mismatch,
+   * or a caller that cannot say) is treated as "not known yet" and prunes
+   * nothing: a destructive, persisted close is not a safe default.
+   */
+  pruneUnavailableRefs: (
+    validRefs: ExplorerRef[],
+    refsWorkspaceId: string | null | undefined,
+  ) => void;
   reset: () => void;
 }
 
@@ -154,39 +169,65 @@ function normalizeLegacyTab(raw: unknown): FileBrowserTab | null {
   };
 }
 
-function validRefSet(
-  validRefs?: ExplorerRef[] | undefined,
-): Set<string> | null {
-  if (!validRefs) return null;
+/**
+ * Which tabs survive a rebuild of the persisted state. `refs` is the universe
+ * of explorer refs that currently exist; `retain` holds tab keys that survive
+ * whether or not their ref is in that universe. A null filter accepts every
+ * tab — the shape used when a caller is normalizing rather than pruning.
+ */
+interface TabFilter {
+  refs: Set<string>;
+  retain: Set<string>;
+}
+
+function refKeySet(validRefs: ExplorerRef[]): Set<string> {
   return new Set(validRefs.map((ref) => explorerRefKey(ref)));
+}
+
+function tabFilter(
+  validRefs?: ExplorerRef[] | undefined,
+  retain: Iterable<string> = [],
+): TabFilter | null {
+  if (!validRefs) return null;
+  return { refs: refKeySet(validRefs), retain: new Set(retain) };
 }
 
 function coerceTabToValidRef(
   tab: FileBrowserTab,
   validRefs: ExplorerRef[],
 ): FileBrowserTab {
-  const refs = validRefSet(validRefs);
-  if (refs?.has(explorerRefKey(tab.ref))) return tab;
+  if (refKeySet(validRefs).has(explorerRefKey(tab.ref))) return tab;
   if (
-    tab.ref.kind === "checkout" &&
-    tab.ref.checkout.scope === "agent" &&
-    tab.ref.checkout.target &&
-    !tab.ref.checkout.repo
+    tab.ref.kind !== "checkout" ||
+    tab.ref.checkout.scope !== "agent" ||
+    !tab.ref.checkout.target ||
+    tab.ref.checkout.repo
   ) {
-    const target = tab.ref.checkout.target;
-    const fallback = validRefs.find(
-      (ref) =>
-        ref.kind === "checkout" &&
-        ref.checkout.scope === "agent" &&
-        ref.checkout.target === target,
-    );
-    if (fallback) return { ...tab, ref: fallback };
+    return tab;
   }
-  return tab;
+  // A repo-less agent ref is a tab saved while the agent had a single,
+  // flattened checkout. Re-homing it is only unambiguous when the agent still
+  // has exactly one: with two or more, "whichever comes first" silently points
+  // the path the user opened at a different repo's file, and every tie-break
+  // rule picks a wrong file just as confidently. One candidate coerces; more
+  // than one leaves the tab alone, which closes it — honest, and recoverable
+  // by reopening from the tree.
+  const target = tab.ref.checkout.target;
+  const candidates = validRefs.filter(
+    (ref) =>
+      ref.kind === "checkout" &&
+      ref.checkout.scope === "agent" &&
+      ref.checkout.target === target,
+  );
+  const only = candidates.length === 1 ? candidates[0] : undefined;
+  return only ? { ...tab, ref: only } : tab;
 }
 
-function isValidTab(tab: FileBrowserTab, refs: Set<string> | null): boolean {
-  return !refs || refs.has(explorerRefKey(tab.ref));
+function isValidTab(tab: FileBrowserTab, filter: TabFilter | null): boolean {
+  if (!filter) return true;
+  return (
+    filter.retain.has(tabKey(tab)) || filter.refs.has(explorerRefKey(tab.ref))
+  );
 }
 
 function matchesPathPrefix(
@@ -211,12 +252,12 @@ function retargetPath(path: string, from: string, to: string): string {
 
 function uniqueTabs(
   tabs: FileBrowserTab[],
-  refs: Set<string> | null,
+  filter: TabFilter | null,
 ): FileBrowserTab[] {
   const seen = new Set<string>();
   const out: FileBrowserTab[] = [];
   for (const tab of tabs) {
-    if (!isValidTab(tab, refs)) continue;
+    if (!isValidTab(tab, filter)) continue;
     const key = tabKey(tab);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -227,7 +268,7 @@ function uniqueTabs(
 
 function normalizeGroups(
   rawGroups: unknown,
-  refs: Set<string> | null,
+  filter: TabFilter | null,
   normalizer: (raw: unknown) => FileBrowserTab | null = normalizeTab,
 ): FileBrowserGroup[] {
   const source = Array.isArray(rawGroups) ? rawGroups : [];
@@ -239,7 +280,7 @@ function normalizeGroups(
             .map(normalizer)
             .filter((tab): tab is FileBrowserTab => tab !== null)
         : [],
-      refs,
+      filter,
     );
     const active =
       typeof group.active === "string" &&
@@ -263,7 +304,7 @@ function normalizeGroups(
 function normalizeMru(
   rawMru: unknown,
   groups: FileBrowserGroup[],
-  refs: Set<string> | null,
+  filter: TabFilter | null,
   normalizer: (raw: unknown) => FileBrowserTab | null = normalizeTab,
 ): FileBrowserTab[] {
   const open = new Map<string, FileBrowserTab>();
@@ -277,7 +318,7 @@ function normalizeMru(
   if (Array.isArray(rawMru)) {
     for (const raw of rawMru) {
       const tab = normalizer(raw);
-      if (!tab || !isValidTab(tab, refs)) continue;
+      if (!tab || !isValidTab(tab, filter)) continue;
       const key = tabKey(tab);
       const openTab = open.get(key);
       if (openTab && !seen.has(key)) {
@@ -305,20 +346,20 @@ function normalizeMru(
 function persistedFromGroups(
   groups: unknown,
   mru: unknown,
-  refs: Set<string> | null,
+  filter: TabFilter | null,
   normalizer: (raw: unknown) => FileBrowserTab | null = normalizeTab,
 ): PersistedFileBrowserTabsV4 {
-  const normalizedGroups = normalizeGroups(groups, refs, normalizer);
+  const normalizedGroups = normalizeGroups(groups, filter, normalizer);
   return {
     v: 4,
     groups: normalizedGroups,
-    mru: normalizeMru(mru, normalizedGroups, refs, normalizer),
+    mru: normalizeMru(mru, normalizedGroups, filter, normalizer),
   };
 }
 
 function parsePersistedV4(
   raw: string | null,
-  refs: Set<string> | null,
+  filter: TabFilter | null,
 ): PersistedFileBrowserTabsV4 | null {
   if (!raw) return null;
   try {
@@ -328,13 +369,13 @@ function parsePersistedV4(
       mru?: unknown;
     };
     if (parsed?.v === 4) {
-      return persistedFromGroups(parsed.groups, parsed.mru, refs);
+      return persistedFromGroups(parsed.groups, parsed.mru, filter);
     }
     if (parsed?.v === 3) {
       return persistedFromGroups(
         parsed.groups,
         parsed.mru,
-        refs,
+        filter,
         normalizeLegacyTab,
       );
     }
@@ -349,8 +390,10 @@ function loadFileBrowserTabs(
   validRefs?: ExplorerRef[] | undefined,
   storageKey = FILE_BROWSER_TABS_STORAGE_KEY,
 ): PersistedFileBrowserTabsV4 {
-  const refs = validRefSet(validRefs);
-  const loaded = parsePersistedV4(wsGet(workspaceId, storageKey), refs);
+  const loaded = parsePersistedV4(
+    wsGet(workspaceId, storageKey),
+    tabFilter(validRefs),
+  );
   if (loaded) return loaded;
   return EMPTY_FILE_BROWSER_STATE;
 }
@@ -589,15 +632,35 @@ export function createFileBrowserStore(
       set({ ...persisted, dirty });
     },
 
-    pruneUnavailableRefs: (validRefs) => {
-      const refs = validRefSet(validRefs);
+    pruneUnavailableRefs: (validRefs, refsWorkspaceId) => {
+      if (!refsWorkspaceId || refsWorkspaceId !== workspaceId) return;
       const state = get();
+      // A tab holding unsaved edits is user data, and a ref being absent from
+      // the universe is usually transient — a checkout mid-rebuild, a role
+      // scope the catalog has not listed yet. Closing such a tab would discard
+      // the draft with no warning and persist that, so dirty tabs survive
+      // pruning. They are recognised by tabKey, the same key `dirty` is keyed
+      // by, and they are also left un-coerced: retargeting a tab's ref changes
+      // its identity, which would strand the draft the editor holds under the
+      // old one. Once the edits are saved the tab is ordinary again and the
+      // next prune closes it if the ref is still gone.
+      const dirtyKeys = new Set(
+        Object.entries(state.dirty)
+          .filter(([, isDirty]) => isDirty)
+          .map(([key]) => key),
+      );
+      const settle = (tab: FileBrowserTab): FileBrowserTab =>
+        dirtyKeys.has(tabKey(tab)) ? tab : coerceTabToValidRef(tab, validRefs);
       const groups = state.groups.map((group) => ({
         ...group,
-        tabs: group.tabs.map((tab) => coerceTabToValidRef(tab, validRefs)),
+        tabs: group.tabs.map(settle),
       }));
-      const mru = state.mru.map((tab) => coerceTabToValidRef(tab, validRefs));
-      const persisted = persistedFromGroups(groups, mru, refs);
+      const mru = state.mru.map(settle);
+      const persisted = persistedFromGroups(
+        groups,
+        mru,
+        tabFilter(validRefs, dirtyKeys),
+      );
       const open = new Set(
         persisted.groups.flatMap((group) =>
           group.tabs.map((tab) => tabKey(tab)),
@@ -642,9 +705,9 @@ export function FileBrowserStoreProvider({
 
   useEffect(() => {
     if (validRefs) {
-      store.getState().pruneUnavailableRefs(validRefs);
+      store.getState().pruneUnavailableRefs(validRefs, workspaceId);
     }
-  }, [store, validRefs]);
+  }, [store, validRefs, workspaceId]);
 
   return (
     <FileBrowserStoreContext.Provider value={store}>

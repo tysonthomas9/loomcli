@@ -33,6 +33,7 @@ vi.mock("@/hooks", async (importOriginal) => {
     ...actual,
     useWorkspaceContext: () => ({
       workspaceId: mocks.workspaceId,
+      workspace: { id: mocks.workspaceId },
       repos: [
         {
           name: "loomcli",

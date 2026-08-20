@@ -109,6 +109,7 @@ import {
   modeTabsStorageKey,
   pathMatchesPrefix,
   QUICK_OPEN_STALE_MS,
+  resolveBranchBaseName,
   resolveMoveToTarget,
   shallowRecordEqual,
   sortedEntries,
@@ -156,7 +157,7 @@ function FileBrowserInner({
   agentName,
   isActive = true,
 }: FileBrowserProps) {
-  const { workspaceId, agents, repos } = useWorkspaceContext();
+  const { workspaceId, agents, repos, workspace } = useWorkspaceContext();
   const caps = modeCapabilities(mode);
   const hasCheckouts = caps.checkouts;
   const eventContext = useEventContext();
@@ -305,20 +306,10 @@ function FileBrowserInner({
           : checkouts,
     [hasCheckouts, mode, agentName, checkouts],
   );
-  const branchBaseName = useMemo(() => {
-    const defaultBranches = new Set<string>();
-    const repoByName = new Map(repos.map((repo) => [repo.name, repo]));
-    for (const checkout of visibleCheckouts) {
-      if (checkout.kind !== "agent" || !checkout.repo) continue;
-      const defaultBranch = repoByName
-        .get(checkout.repo)
-        ?.default_branch.trim();
-      if (defaultBranch) defaultBranches.add(defaultBranch);
-    }
-    return defaultBranches.size === 1
-      ? defaultBranches.values().next().value
-      : undefined;
-  }, [repos, visibleCheckouts]);
+  const branchBaseName = useMemo(
+    () => resolveBranchBaseName(repos, visibleCheckouts),
+    [repos, visibleCheckouts],
+  );
   const sections = useMemo(
     () =>
       buildFileTreeSections({
@@ -518,9 +509,16 @@ function FileBrowserInner({
   const validRefsReady = hasCheckouts
     ? checkoutsSettled
     : skillsCatalog.status === "loaded";
+  // The other half of the universe — the agent and repo lists — comes from the
+  // workspace context, which serves the workspace it last polled while
+  // workspaceId already names the one being switched to. So the refs carry the
+  // id of the workspace they actually describe, and the store discards them
+  // unless it is that workspace's store.
   useEffect(() => {
-    if (validRefsReady) store.getState().pruneUnavailableRefs(storeValidRefs);
-  }, [store, storeValidRefs, validRefsReady]);
+    if (validRefsReady) {
+      store.getState().pruneUnavailableRefs(storeValidRefs, workspace?.id);
+    }
+  }, [store, storeValidRefs, validRefsReady, workspace?.id]);
 
   useEffect(() => {
     const node = containerRef.current;
