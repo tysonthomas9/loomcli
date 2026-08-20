@@ -596,6 +596,15 @@ func appendProfileEnv(env []string, projectDir, worktree string) ([]string, erro
 	return env, nil
 }
 
+// VerifyProfileManifest applies the spawn path's verify-or-refuse rule to a
+// profile root for a caller outside the daemon. `loom lead` is the one agent
+// the supervisor does not spawn — the workspace launcher exports
+// CLAUDE_CONFIG_DIR itself — so it must reuse this check rather than grow a
+// second, weaker policy alongside it.
+func VerifyProfileManifest(dir, binary string) error {
+	return verifyProfileManifest(dir, binary)
+}
+
 // verifyProfileManifest recomputes dir's fingerprint from the files the
 // manifest lists and compares the pinned harness version against what the
 // resolved binary reports now. Every error names the profile directory, so the

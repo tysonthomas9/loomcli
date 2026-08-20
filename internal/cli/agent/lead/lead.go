@@ -86,6 +86,8 @@ func leadStartupPrompt(ctx context.Context, registration leadSessionRegistration
 }
 
 func runLead(cmd *cobra.Command, args []string) {
+	enforceLeadProfile()
+
 	// Get current working directory
 	workDir, err := os.Getwd()
 	if err != nil {
