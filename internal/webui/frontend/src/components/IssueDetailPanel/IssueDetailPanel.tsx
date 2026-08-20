@@ -278,6 +278,8 @@ const SESSIONS_TAB: DetailTab = {
   closable: false,
 };
 
+const ISSUE_EVENT_LIMIT = 200;
+
 function latestFailedRun(sessions: SessionRecord[]): SessionRecord | null {
   const sorted = [...sessions].sort(
     (a, b) =>
@@ -787,7 +789,7 @@ function DefaultContent({
       setEvents([]);
       return;
     }
-    getIssueEvents(workspaceId, eventIssueId, 200).then(
+    getIssueEvents(workspaceId, eventIssueId, ISSUE_EVENT_LIMIT).then(
       (data) => {
         if (requestId === eventsRequestIdRef.current) setEvents(data ?? []);
       },
@@ -1526,7 +1528,7 @@ function DefaultContent({
               </section>
             )}
 
-            <Journey events={events} />
+            <Journey events={events} eventLimit={ISSUE_EVENT_LIMIT} />
 
             {/* Activity Log (comments + events) */}
             <ActivityLog

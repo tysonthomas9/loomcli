@@ -93,7 +93,9 @@ export function foldJourney(
 ): JourneySpan[] {
   const spans: MutableSpan[] = [];
   const state: { current: MutableSpan | null } = { current: null };
-  let owner: string | null = null;
+  // Undefined means the bounded event window has not established ownership;
+  // null means an event explicitly established that the issue is unassigned.
+  let owner: string | null | undefined;
 
   const finishCurrent = (end: string, endMs: number) => {
     if (!state.current) return;
@@ -128,7 +130,7 @@ export function foldJourney(
     finishCurrent(event.created_at, atMs);
     spans.push({
       stage: "Closed",
-      owner: owner ?? ownerName(event.actor),
+      owner: owner === undefined ? ownerName(event.actor) : owner,
       start: event.created_at,
       end: event.created_at,
       durationMs: 0,
@@ -159,11 +161,11 @@ export function foldJourney(
 
       case "issue.defer":
       case "issue.deferred":
-        beginStage("Deferred", event.created_at, atMs, owner);
+        beginStage("Deferred", event.created_at, atMs, owner ?? null);
         break;
 
       case "issue.undefer":
-        beginStage("Open", event.created_at, atMs, owner);
+        beginStage("Open", event.created_at, atMs, owner ?? null);
         break;
 
       case "issue.assign": {
@@ -198,7 +200,7 @@ export function foldJourney(
           closeJourney(event, atMs);
           break;
         }
-        owner = owner ?? ownerName(event.actor);
+        if (owner === undefined) owner = ownerName(event.actor);
         beginStage(stage, event.created_at, atMs, owner);
         break;
       }
@@ -223,5 +225,13 @@ export function foldJourney(
     openSpan.durationMs = Math.max(0, nowMs - openSpan.startMs);
   }
 
-  return spans.map(({ startMs: _startMs, ...span }) => span);
+  // Filter only after every event has updated the fold. An instantaneous stage
+  // remains state.current while later same-millisecond events are processed,
+  // and its ownership changes remain available to the Closed marker.
+  return spans
+    .filter(
+      (span) =>
+        span.stage === "Closed" || span.end === null || span.durationMs > 0,
+    )
+    .map(({ startMs: _startMs, ...span }) => span);
 }

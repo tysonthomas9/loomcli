@@ -22,13 +22,15 @@
 }
 
 .span {
+  position: relative;
   display: flex;
   flex: 1 0 104px;
+  min-width: 0;
   flex-direction: column;
   gap: var(--space-1);
   padding: 14px 12px 11px;
   border-top: 3px solid var(--journey-stage-color);
-  border-right: 1px solid var(--color-border-light);
+  border-right: 2px solid var(--color-bg-secondary);
   background: color-mix(in srgb, var(--journey-stage-color) 7%, transparent);
 }
 
@@ -72,7 +74,7 @@
 .owner,
 .duration {
   overflow: hidden;
-  color: var(--color-text-muted);
+  color: var(--color-journey-supporting-text);
   font-size: var(--font-size-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -85,11 +87,12 @@
 }
 
 .nowLine {
-  position: sticky;
+  position: absolute;
+  top: 0;
   right: 0;
+  bottom: 0;
   z-index: 1;
   width: 0;
-  flex: 0 0 0;
   border-right: 2px solid var(--color-journey-now);
   pointer-events: none;
 }
@@ -118,7 +121,7 @@
 
 .windowNote {
   margin: var(--space-2) 0 0;
-  color: var(--color-text-muted);
+  color: var(--color-journey-supporting-text);
   font-size: var(--font-size-xs);
   line-height: var(--line-height-normal);
 }

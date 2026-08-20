@@ -75,6 +75,25 @@ describe("foldJourney", () => {
     });
   });
 
+  it("keeps an in-flight span whose start is later than now", () => {
+    const spans = foldJourney(
+      [
+        event(0, "issue.create"),
+        event(10, "issue.close", { actor: "closer" }),
+        event(20, "issue.reopen", { actor: "reopener" }),
+      ],
+      BASE_MS + 15_000,
+    );
+
+    expect(spans.at(-1)).toEqual({
+      stage: "Open",
+      owner: null,
+      start: "2026-08-20T12:00:20.000Z",
+      end: null,
+      durationMs: 0,
+    });
+  });
+
   it("labels an agent-declared blocked status as Stuck", () => {
     const spans = foldJourney(
       [
@@ -181,7 +200,7 @@ describe("foldJourney", () => {
       { stage: "Open", owner: "alice", durationMs: 10_000 },
       { stage: "Open", owner: "worker-2", durationMs: 10_000 },
       { stage: "Open", owner: null, durationMs: 10_000 },
-      { stage: "Closed", owner: "closer", durationMs: 0 },
+      { stage: "Closed", owner: null, durationMs: 0 },
     ]);
   });
 
@@ -209,7 +228,100 @@ describe("foldJourney", () => {
       { stage: "Open", owner: "alice", durationMs: 10_000 },
       { stage: "In progress", owner: "worker-1", durationMs: 29_000 },
       { stage: "In progress", owner: null, durationMs: 1_000 },
-      { stage: "Closed", owner: "worker-1", durationMs: 0 },
+      { stage: "Closed", owner: null, durationMs: 0 },
+    ]);
+  });
+
+  it("drops a zero-duration unassigned span but carries it into Closed", () => {
+    const spans = foldJourney(
+      [
+        event(0, "issue.create"),
+        event(10, "issue.claim", { actor: "worker-1" }),
+        event(40, "issue.assign", {
+          actor: "dispatcher",
+          metadata: { assignee: "" },
+        }),
+        event(40, "issue.close", { actor: "worker-1" }),
+      ],
+      BASE_MS + 60_000,
+    );
+
+    expect(spans).toEqual([
+      {
+        stage: "Open",
+        owner: "alice",
+        start: "2026-08-20T12:00:00.000Z",
+        end: "2026-08-20T12:00:10.000Z",
+        durationMs: 10_000,
+      },
+      {
+        stage: "In progress",
+        owner: "worker-1",
+        start: "2026-08-20T12:00:10.000Z",
+        end: "2026-08-20T12:00:40.000Z",
+        durationMs: 30_000,
+      },
+      {
+        stage: "Closed",
+        owner: null,
+        start: "2026-08-20T12:00:40.000Z",
+        end: "2026-08-20T12:00:40.000Z",
+        durationMs: 0,
+      },
+    ]);
+  });
+
+  it("drops an instantaneous stage without merging its surrounding spans", () => {
+    const spans = foldJourney(
+      [
+        event(0, "issue.create"),
+        event(10, "issue.claim", { actor: "worker-1" }),
+        event(20, "issue.update", {
+          actor: "worker-1",
+          changes: [
+            { field: "status", before: "in_progress", after: "review" },
+          ],
+        }),
+        event(20, "issue.update", {
+          actor: "worker-1",
+          changes: [
+            { field: "status", before: "review", after: "in_progress" },
+          ],
+        }),
+        event(30, "issue.close", { actor: "worker-1" }),
+      ],
+      BASE_MS + 40_000,
+    );
+
+    expect(spans).toEqual([
+      {
+        stage: "Open",
+        owner: "alice",
+        start: "2026-08-20T12:00:00.000Z",
+        end: "2026-08-20T12:00:10.000Z",
+        durationMs: 10_000,
+      },
+      {
+        stage: "In progress",
+        owner: "worker-1",
+        start: "2026-08-20T12:00:10.000Z",
+        end: "2026-08-20T12:00:20.000Z",
+        durationMs: 10_000,
+      },
+      {
+        stage: "In progress",
+        owner: "worker-1",
+        start: "2026-08-20T12:00:20.000Z",
+        end: "2026-08-20T12:00:30.000Z",
+        durationMs: 10_000,
+      },
+      {
+        stage: "Closed",
+        owner: "worker-1",
+        start: "2026-08-20T12:00:30.000Z",
+        end: "2026-08-20T12:00:30.000Z",
+        durationMs: 0,
+      },
     ]);
   });
 

@@ -243,6 +243,70 @@ describe("ActivityLog", () => {
       ).not.toBeInTheDocument();
     });
 
+    it("describes a structured status update ahead of its generic summary", () => {
+      const events = [
+        createTestEvent({
+          id: 1,
+          event_type: "issue.update",
+          actor: "alice",
+          summary: "Updated status and updated_at",
+          changes: [
+            { field: "status", before: "open", after: "in_progress" },
+            {
+              field: "updated_at",
+              before: "2026-01-20T09:00:00Z",
+              after: "2026-01-20T10:00:00Z",
+            },
+          ],
+        }),
+      ];
+      render(
+        <ActivityLog comments={[]} events={events} issueId="test-issue" />,
+      );
+
+      expect(
+        screen.getByText("alice changed status from Open to In Progress"),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText("Updated status and updated_at"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("describes an empty assignment as an unassignment", () => {
+      const events = [
+        createTestEvent({
+          id: 1,
+          event_type: "issue.assign",
+          actor: "dispatcher",
+          summary: "Assigned issue",
+          metadata: { assignee: "" },
+        }),
+      ];
+      render(
+        <ActivityLog comments={[]} events={events} issueId="test-issue" />,
+      );
+
+      expect(screen.getByText("Unassigned issue")).toBeInTheDocument();
+      expect(screen.queryByText("Assigned issue")).not.toBeInTheDocument();
+    });
+
+    it("keeps a specific assignment summary for a non-empty assignee", () => {
+      const events = [
+        createTestEvent({
+          id: 1,
+          event_type: "issue.assign",
+          actor: "dispatcher",
+          summary: "Assigned to worker-2",
+          metadata: { assignee: "worker-2" },
+        }),
+      ];
+      render(
+        <ActivityLog comments={[]} events={events} issueId="test-issue" />,
+      );
+
+      expect(screen.getByText("Assigned to worker-2")).toBeInTheDocument();
+    });
+
     it("describes 'created' events", () => {
       const events = [
         createTestEvent({ id: 1, event_type: "issue.created", actor: "alice" }),

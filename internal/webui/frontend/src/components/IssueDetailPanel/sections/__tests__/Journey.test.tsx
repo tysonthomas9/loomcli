@@ -31,9 +31,10 @@ describe("Journey", () => {
     vi.useRealTimers();
   });
 
-  it("renders spans, a live now-line, and the bounded-window disclosure", () => {
+  it("renders spans and anchors the live now-line inside the live span", () => {
     render(
       <Journey
+        eventLimit={200}
         events={[
           event(),
           event({
@@ -48,9 +49,16 @@ describe("Journey", () => {
 
     expect(screen.getAllByTestId("journey-span")).toHaveLength(2);
     expect(screen.getByText("Stuck")).toBeInTheDocument();
-    expect(screen.getByTestId("journey-now-line")).toHaveAccessibleName("Now");
+    const liveSpan = screen.getAllByTestId("journey-span").at(-1);
+    expect(liveSpan).toHaveAttribute("data-live", "true");
+    expect(
+      within(liveSpan as HTMLElement).getByTestId("journey-now-line"),
+    ).toHaveAccessibleName("Now");
     expect(screen.getByTestId("journey-window-note")).toHaveTextContent(
-      "most recent 2 events returned",
+      "Stages derived from 2 events returned.",
+    );
+    expect(screen.getByTestId("journey-window-note")).not.toHaveTextContent(
+      "Earlier history may not be included",
     );
 
     act(() => vi.advanceTimersByTime(5_000));
@@ -58,20 +66,41 @@ describe("Journey", () => {
   });
 
   it("renders an honest empty-window state without a now-line", () => {
-    render(<Journey events={[]} />);
+    render(<Journey events={[]} eventLimit={200} />);
 
     expect(
       screen.getByText("No journey stages in this window."),
     ).toBeInTheDocument();
     expect(screen.queryByTestId("journey-now-line")).not.toBeInTheDocument();
     expect(screen.getByTestId("journey-window-note")).toHaveTextContent(
-      "most recent 0 events returned",
+      "Stages derived from 0 events returned.",
+    );
+  });
+
+  it("warns about earlier history only when the response fills its limit", () => {
+    render(
+      <Journey
+        events={[
+          event(),
+          event({
+            id: "1787248805000-0",
+            event_type: "issue.claim",
+            created_at: "2026-08-20T12:00:05.000Z",
+          }),
+        ]}
+        eventLimit={2}
+      />,
+    );
+
+    expect(screen.getByTestId("journey-window-note")).toHaveTextContent(
+      "Stages derived from the most recent 2 events returned. Earlier history may not be included.",
     );
   });
 
   it("renders unequal durations as a uniform sequence with duration text", () => {
     render(
       <Journey
+        eventLimit={200}
         events={[
           event(),
           event({

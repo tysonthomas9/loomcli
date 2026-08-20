@@ -8,6 +8,7 @@ import { useMemo } from "react";
 
 import { formatDate } from "@/components/table";
 import type { Comment, Event, EventType } from "@/types";
+import { formatStatusLabel } from "@/utils/issue";
 
 import { AuthorAvatar } from "./AuthorAvatar";
 import { MarkdownRenderer } from "./MarkdownRenderer";
@@ -23,13 +24,36 @@ function getTimestamp(item: ActivityItem): number {
 
 /** Human-readable description for system events. */
 function describeEvent(event: Event): string {
-  const summary = event.summary?.trim();
-  if (summary) return summary;
-
   const { event_type, actor, old_value, new_value } = event;
   const who = actor || "Someone";
 
-  switch (event_type as EventType) {
+  if (event_type === "issue.update" || event_type === "issue.updated") {
+    const statusChange = event.changes?.find(
+      ({ field }) => field.trim().toLowerCase() === "status",
+    );
+    const before = statusChange?.before?.trim();
+    const after = statusChange?.after?.trim();
+    if (after) {
+      const destination = formatStatusLabel(after);
+      return before
+        ? `${who} changed status from ${formatStatusLabel(before)} to ${destination}`
+        : `${who} changed status to ${destination}`;
+    }
+  }
+
+  if (
+    event_type === "issue.assign" &&
+    event.metadata &&
+    "assignee" in event.metadata &&
+    event.metadata.assignee.trim() === ""
+  ) {
+    return "Unassigned issue";
+  }
+
+  const summary = event.summary?.trim();
+  if (summary) return summary;
+
+  switch (event_type) {
     case "issue.created":
       return `${who} created this issue`;
     case "issue.status_changed":
@@ -41,6 +65,7 @@ function describeEvent(event: Event): string {
       return `${who} closed this issue`;
     case "issue.reopened":
       return `${who} reopened this issue`;
+    case "issue.update":
     case "issue.updated":
       if (old_value && new_value) {
         return `${who} updated ${old_value} to ${new_value}`;
