@@ -338,3 +338,85 @@ func TestIsAvailableForAny(t *testing.T) {
 		})
 	}
 }
+
+// --- operator label (mirrors fleet-db's reserved-label parking) ---
+
+func TestHasOperatorLabel(t *testing.T) {
+	tests := []struct {
+		name   string
+		labels []string
+		want   bool
+	}{
+		{"exact label", []string{"operator"}, true},
+		{"among others", []string{"needs-revision", "operator", "backend"}, true},
+		{"no labels", nil, false},
+		{"empty label set", []string{}, false},
+		{"unrelated label", []string{"backend"}, false},
+		// No prefix matching and no case folding: fleet-db compares the exact
+		// lowercase string, so these are ordinary labels on both sides.
+		{"prefix is not the label", []string{"operator-notes"}, false},
+		{"suffix is not the label", []string{"human-operator"}, false},
+		{"capitalized is not the label", []string{"Operator"}, false},
+		{"uppercase is not the label", []string{"OPERATOR"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			issue := backend.IssueData{Labels: tt.labels}
+			if got := HasOperatorLabel(issue); got != tt.want {
+				t.Errorf("HasOperatorLabel() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsWorkableTask_OperatorLabel(t *testing.T) {
+	tests := []struct {
+		name  string
+		issue backend.IssueData
+		want  bool
+	}{
+		{"open task without the label", backend.IssueData{Status: "open", IssueType: "task"}, true},
+		{"open task parked for an operator", backend.IssueData{Status: "open", IssueType: "task", Labels: []string{"operator"}}, false},
+		{"operator-notes is a different label", backend.IssueData{Status: "open", IssueType: "task", Labels: []string{"operator-notes"}}, true},
+		{"Operator is a different label", backend.IssueData{Status: "open", IssueType: "task", Labels: []string{"Operator"}}, true},
+		// Combined with each other exclusion: still not workable, and the
+		// operator label alone is enough on an otherwise workable issue.
+		{"epic with the label", backend.IssueData{Status: "open", IssueType: "epic", Labels: []string{"operator"}}, false},
+		{"non-work type with the label", backend.IssueData{Status: "open", IssueType: "gate", Labels: []string{"operator"}}, false},
+		{"closed with the label", backend.IssueData{Status: "closed", IssueType: "task", Labels: []string{"operator"}}, false},
+		{"needs-revision plus the label", backend.IssueData{Status: "open", IssueType: "task", Labels: []string{"needs-revision", "operator"}}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsWorkableTask(tt.issue); got != tt.want {
+				t.Errorf("IsWorkableTask() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// The operator label parks a task for every selection path, whether the task
+// still needs a plan or is ready to implement.
+func TestIsAvailableFor_OperatorLabelParksTask(t *testing.T) {
+	needsPlan := backend.IssueData{ID: "T-1", Status: "open", IssueType: "task", Labels: []string{"operator"}}
+	ready := backend.IssueData{ID: "T-2", Status: "open", IssueType: "task", Design: "plan", Labels: []string{"operator"}}
+
+	if IsAvailableForPlanning(needsPlan) {
+		t.Error("IsAvailableForPlanning() = true for an operator-parked task, want false")
+	}
+	if IsAvailableForImplementation(ready) {
+		t.Error("IsAvailableForImplementation() = true for an operator-parked task, want false")
+	}
+	if IsAvailableForAny(needsPlan) || IsAvailableForAny(ready) {
+		t.Error("IsAvailableForAny() = true for an operator-parked task, want false")
+	}
+
+	// The near-miss spellings stay selectable.
+	nearMiss := backend.IssueData{ID: "T-3", Status: "open", IssueType: "task", Design: "plan", Labels: []string{"operator-notes", "Operator"}}
+	if !IsAvailableForImplementation(nearMiss) {
+		t.Error("IsAvailableForImplementation() = false for near-miss label spellings, want true")
+	}
+	if !IsAvailableForAny(nearMiss) {
+		t.Error("IsAvailableForAny() = false for near-miss label spellings, want true")
+	}
+}

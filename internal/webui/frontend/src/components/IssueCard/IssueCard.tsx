@@ -20,6 +20,7 @@ import type { BlockerRef, Issue } from "@/types";
 import {
   formatIssueId,
   getReviewType,
+  hasOperatorLabel,
   isPRUrl,
   type ReviewType,
 } from "@/utils/issue";
@@ -180,6 +181,7 @@ export const IssueCard = memo(function IssueCard({
   const isBlocked = (blockedByCount ?? 0) > 0;
   const isDeferred = issue.is_deferred === true || issue.status === "deferred";
   const reviewType = getReviewType(issue);
+  const isOperatorParked = hasOperatorLabel(issue);
   const agentStore = useAgentStoreInstance();
   // Subscribe with a value-equality selector so an agent poll only re-renders
   // this card when ITS badge actually changes — not every card on every poll.
@@ -240,7 +242,8 @@ export const IssueCard = memo(function IssueCard({
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       tabIndex={onClick ? 0 : undefined}
-      aria-label={`Issue: ${displayTitle}${isBlocked ? " (blocked)" : ""}${isBacklog ? " (backlog)" : ""}`}
+      data-operator-parked={isOperatorParked ? "true" : undefined}
+      aria-label={`Issue: ${displayTitle}${isBlocked ? " (blocked)" : ""}${isBacklog ? " (backlog)" : ""}${isOperatorParked ? " (operator only)" : ""}`}
       {...attributes}
       {...dragListeners}
     >
@@ -305,6 +308,16 @@ export const IssueCard = memo(function IssueCard({
           {isDeferred && (
             <span className={styles.deferredBadge} aria-label="Deferred">
               Deferred
+            </span>
+          )}
+          {isOperatorParked && (
+            <span
+              className={styles.operatorBadge}
+              title="Parked for an operator — agents will not pick this up until the operator label is removed"
+              aria-label="Parked for an operator"
+              data-testid="issue-card-operator-badge"
+            >
+              Operator
             </span>
           )}
           {issue.status === "blocked" &&

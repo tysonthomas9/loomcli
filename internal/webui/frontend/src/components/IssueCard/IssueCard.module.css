@@ -324,6 +324,22 @@
  * distinguishes a daemon-quarantined card from a dependency-blocked one
  * ================================= */
 
+/* Operator-parked: open and human-workable, but excluded from agent selection. */
+.operatorBadge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  line-height: 1;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+}
+
 .quarantinedBadge {
   flex-shrink: 0;
   display: inline-flex;

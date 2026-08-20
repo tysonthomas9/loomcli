@@ -329,3 +329,39 @@ describe("IssueHeader", () => {
     });
   });
 });
+
+// The reserved "operator" label parks an issue for a human; the detail header
+// says so, so an operator opening the issue sees why no agent has taken it.
+describe("IssueHeader operator badge", () => {
+  it("renders the badge when the issue carries the operator label", () => {
+    render(
+      <IssueHeader
+        issue={{ ...mockIssue, labels: ["operator"] }}
+        onClose={() => {}}
+      />,
+    );
+    const badge = screen.getByTestId("issue-operator-badge");
+    expect(badge).toHaveTextContent("Operator");
+    expect(badge).toHaveAccessibleName("Parked for an operator");
+  });
+
+  it("does not render the badge without the label", () => {
+    render(<IssueHeader issue={mockIssue} onClose={() => {}} />);
+    expect(
+      screen.queryByTestId("issue-operator-badge"),
+    ).not.toBeInTheDocument();
+  });
+
+  // Exact spelling only, matching fleet-db and taskfilter.go.
+  it("does not render the badge for near-miss label spellings", () => {
+    render(
+      <IssueHeader
+        issue={{ ...mockIssue, labels: ["Operator", "operator-notes"] }}
+        onClose={() => {}}
+      />,
+    );
+    expect(
+      screen.queryByTestId("issue-operator-badge"),
+    ).not.toBeInTheDocument();
+  });
+});

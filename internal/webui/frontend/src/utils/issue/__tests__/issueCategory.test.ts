@@ -10,7 +10,9 @@ import { describe, it, expect } from "vitest";
 
 import {
   NEEDS_REVISION_LABEL,
+  OPERATOR_LABEL,
   hasNeedsRevision,
+  hasOperatorLabel,
   getOpenStatus,
   isPRUrl,
   getReviewType,
@@ -333,5 +335,43 @@ describe("getReviewType", () => {
 describe("constants", () => {
   it("NEEDS_REVISION_LABEL matches expected value", () => {
     expect(NEEDS_REVISION_LABEL).toBe("needs-revision");
+  });
+});
+
+// --- hasOperatorLabel ---
+
+describe("hasOperatorLabel", () => {
+  it("exports the exact reserved label spelling", () => {
+    expect(OPERATOR_LABEL).toBe("operator");
+  });
+
+  it("returns true when labels include operator", () => {
+    expect(hasOperatorLabel({ labels: ["operator"] })).toBe(true);
+  });
+
+  it("returns true when operator is among other labels", () => {
+    expect(
+      hasOperatorLabel({ labels: ["bug", "operator", "needs-revision"] }),
+    ).toBe(true);
+  });
+
+  it("returns false when labels are absent or empty", () => {
+    expect(hasOperatorLabel({})).toBe(false);
+    expect(hasOperatorLabel({ labels: [] })).toBe(false);
+  });
+
+  it("returns false for unrelated labels", () => {
+    expect(hasOperatorLabel({ labels: ["backend", "urgent"] })).toBe(false);
+  });
+
+  // Exact string equality, matching fleet-db, which normalizes nothing.
+  it("does not prefix-match", () => {
+    expect(hasOperatorLabel({ labels: ["operator-notes"] })).toBe(false);
+    expect(hasOperatorLabel({ labels: ["human-operator"] })).toBe(false);
+  });
+
+  it("does not case-fold", () => {
+    expect(hasOperatorLabel({ labels: ["Operator"] })).toBe(false);
+    expect(hasOperatorLabel({ labels: ["OPERATOR"] })).toBe(false);
   });
 });

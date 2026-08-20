@@ -192,7 +192,7 @@ func resetUpdateFieldFlags(t *testing.T) {
 	for _, name := range []string{
 		"status", "assignee", "notes", "design", "priority",
 		"title", "description", "description-from-file",
-		"add-label", "remove-label",
+		"add-label", "remove-label", "force",
 	} {
 		setTestFlagChanged(t, updateCmd.Flags(), name, false)
 	}
@@ -285,11 +285,13 @@ func resetUpdateLabelFlagVars(t *testing.T) {
 	updateRemoveLabels = nil
 	updateAddDeps = nil
 	updateRemoveDeps = nil
+	updateForce = false
 	t.Cleanup(func() {
 		updateAddLabels = nil
 		updateRemoveLabels = nil
 		updateAddDeps = nil
 		updateRemoveDeps = nil
+		updateForce = false
 	})
 }
 
@@ -579,4 +581,80 @@ func TestDataUpdate_UpdateErrorPropagates(t *testing.T) {
 			t.Fatalf("calls = %#v, want only the failed Update (dependency calls must not run)", stub.calls)
 		}
 	})
+}
+
+// --force is the operator's un-park path: fleet-db protects reserved labels
+// (currently "operator") and refuses to remove one without it. The CLI's job is
+// only to carry the flag through to the backend, and to carry nothing when it
+// is absent.
+func TestDataUpdate_RemoveLabelForce(t *testing.T) {
+	stub := &localBackendStub{}
+	withLocalBackend(t, stub, func() {
+		resetUpdateFieldFlags(t)
+		resetUpdateLabelFlagVars(t)
+		outputFormat = "text"
+		updateRemoveLabels = []string{"operator"}
+		updateForce = true
+		setTestFlagChanged(t, updateCmd.Flags(), "remove-label", true)
+		setTestFlagChanged(t, updateCmd.Flags(), "force", true)
+
+		if _, err := captureDataStdout(t, func() error {
+			return updateCmd.RunE(updateCmd, []string{"loom-43"})
+		}); err != nil {
+			t.Fatalf("update: %v", err)
+		}
+		if len(stub.calls) != 1 || stub.calls[0].method != "Update" {
+			t.Fatalf("calls = %#v, want one Update call", stub.calls)
+		}
+		params := stub.calls[0].args.(backend.UpdateParams)
+		if want := []string{"operator"}; !reflect.DeepEqual(params.RemoveLabels, want) {
+			t.Fatalf("Update RemoveLabels = %#v, want %#v", params.RemoveLabels, want)
+		}
+		if !params.Force {
+			t.Error("Update Force = false, want true when --force is given")
+		}
+	})
+}
+
+func TestDataUpdate_RemoveLabelWithoutForce(t *testing.T) {
+	stub := &localBackendStub{}
+	withLocalBackend(t, stub, func() {
+		resetUpdateFieldFlags(t)
+		resetUpdateLabelFlagVars(t)
+		outputFormat = "text"
+		updateRemoveLabels = []string{"operator"}
+		setTestFlagChanged(t, updateCmd.Flags(), "remove-label", true)
+
+		if _, err := captureDataStdout(t, func() error {
+			return updateCmd.RunE(updateCmd, []string{"loom-44"})
+		}); err != nil {
+			t.Fatalf("update: %v", err)
+		}
+		params := stub.calls[0].args.(backend.UpdateParams)
+		if params.Force {
+			t.Error("Update Force = true, want false when --force is absent")
+		}
+	})
+}
+
+// --force is a modifier on the label deltas, not a field: on its own it must
+// not make the command look like a field update, so the backend's canonical
+// "no fields" validation still surfaces.
+func TestDataUpdate_ForceAloneIsNotAFieldChange(t *testing.T) {
+	cmd := updateCmd
+	resetUpdateFieldFlags(t)
+	resetUpdateLabelFlagVars(t)
+	updateForce = true
+	setTestFlagChanged(t, cmd.Flags(), "force", true)
+
+	params, changed, err := updateParamsFromFlags(cmd)
+	if err != nil {
+		t.Fatalf("updateParamsFromFlags: %v", err)
+	}
+	if changed {
+		t.Error("changed = true for --force alone, want false")
+	}
+	if !params.Force {
+		t.Error("params.Force = false, want true")
+	}
 }
