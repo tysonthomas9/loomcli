@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/agentprofile"
 )
 
 // stubHarnessVersion replaces the --version probe and clears the cache on both
@@ -65,7 +67,7 @@ func writeProfile(t *testing.T, projectDir, worktree, version string, files map[
 		h.Write([]byte{0})
 		h.Write([]byte(files[name]))
 	}
-	m := profileManifest{Files: names, Fingerprint: hex.EncodeToString(h.Sum(nil)), HarnessVersion: version}
+	m := agentprofile.Manifest{Files: names, Fingerprint: hex.EncodeToString(h.Sum(nil)), HarnessVersion: version}
 	raw, err := json.Marshal(m)
 	if err != nil {
 		t.Fatal(err)
@@ -95,15 +97,11 @@ func TestAppendProfileEnv_InjectsVerifiedProfileRoots(t *testing.T) {
 		"settings.json": `{"model":"opus"}`,
 		"CLAUDE.md":     "house rules\n",
 	})
-	// Harness-owned files are not in the manifest and must not be hashed.
-	if err := os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), []byte("{}"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	codexDir := filepath.Join(projectDir, ".loom", AgentProfilesDirName, "worker", "codex")
 	if err := os.MkdirAll(filepath.Join(codexDir, "sessions"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := json.Marshal(profileManifest{
+	raw, err := json.Marshal(agentprofile.Manifest{
 		Files:          []string{},
 		Fingerprint:    hex.EncodeToString(sha256.New().Sum(nil)),
 		HarnessVersion: "codex-cli 0.147.0",
@@ -270,5 +268,21 @@ func TestHarnessVersionFailureNotCached(t *testing.T) {
 	}
 	if got := harnessVersion("claude"); got != "2.1.234 (Claude Code)" {
 		t.Errorf("second probe should re-run, got %q", got)
+	}
+}
+
+// An agent name agentprofile.Dir refuses resolves to no profile root at all,
+// which is the same situation as an absent directory: legacy env, no error.
+func TestAppendProfileEnv_UnresolvableAgentNameLeavesEnvUntouched(t *testing.T) {
+	stubHarnessVersion(t, map[string]string{"claude": "2.1.234 (Claude Code)"})
+	projectDir := t.TempDir()
+	for _, name := range []string{"", "..", filepath.Join("a", "b")} {
+		env, err := appendProfileEnv([]string{"A=1"}, projectDir, name)
+		if err != nil {
+			t.Fatalf("worktree %q: want legacy env, got %v", name, err)
+		}
+		if len(env) != 1 || env[0] != "A=1" {
+			t.Errorf("worktree %q: expected env untouched, got %v", name, env)
+		}
 	}
 }
