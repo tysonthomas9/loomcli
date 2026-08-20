@@ -30,12 +30,9 @@ import {
   useToast,
   useWorkspaceContext,
   useEventContext,
-  agentFileBrowserTabsStorageKey,
   FileDocumentRegistryProvider,
   FileCapabilitiesProvider,
   FileBrowserStoreProvider,
-  fileBrowserTabsStorageKey,
-  skillsFileBrowserTabsStorageKey,
   useFileDocumentRegistry,
   useFileDocumentRegistryRevision,
   useFileCapabilities,
@@ -109,6 +106,7 @@ import {
   MAX_TREE_WIDTH,
   MIN_GROUP_WIDTH,
   MIN_TREE_WIDTH,
+  modeTabsStorageKey,
   pathMatchesPrefix,
   QUICK_OPEN_STALE_MS,
   resolveMoveToTarget,
@@ -122,7 +120,7 @@ import {
   buildFileTreeSections,
   existingExplorerRefs,
   gitStatusRefs,
-  modeHasCheckouts,
+  modeCapabilities,
 } from "./treeRoots";
 import {
   buildBranchChangeGroups,
@@ -133,6 +131,7 @@ import {
 import type { QuickOpenItem } from "./quickOpen";
 import styles from "./FileExplorer.module.css";
 import type {
+  BranchDiffRequest,
   ContextMenuState,
   CheckoutRepairMenuState,
   CompareMode,
@@ -145,21 +144,12 @@ import type {
   MoveDialogState,
   RepairConfirmState,
   RevisionViewState,
+  ScopedFileIndex,
   ScopedInlineEdit,
   SkillGroupMenuState,
   TreeRefreshRequest,
   TreeRevealRequest,
 } from "./workspaceFileBrowserTypes";
-
-interface BranchDiffRequest {
-  key: string;
-  agent: string;
-}
-
-interface ScopedFileIndex {
-  ref: CheckoutRef;
-  index: Awaited<ReturnType<typeof indexScopedFiles>>;
-}
 
 function FileBrowserInner({
   mode = "workspace",
@@ -167,7 +157,8 @@ function FileBrowserInner({
   isActive = true,
 }: FileBrowserProps) {
   const { workspaceId, agents, repos } = useWorkspaceContext();
-  const hasCheckouts = modeHasCheckouts(mode);
+  const caps = modeCapabilities(mode);
+  const hasCheckouts = caps.checkouts;
   const eventContext = useEventContext();
   const { showToast } = useToast();
   const store = useFileBrowserStoreInstance();
@@ -180,7 +171,7 @@ function FileBrowserInner({
     retry: retryCapabilities,
   } = useFileCapabilities();
   const canWrite = capabilities?.write === true;
-  const skillsCatalog = useSkillsCatalog(workspaceId);
+  const skillsCatalog = useSkillsCatalog(workspaceId, caps.skills);
   const invalidateSkillsCatalog = skillsCatalog.invalidate;
   const skillActions = useSkillsActions(workspaceId);
   const canEditExplorer = useCallback(
@@ -241,6 +232,7 @@ function FileBrowserInner({
     Record<string, DiffFile[] | undefined>
   >({});
   const [checkouts, setCheckouts] = useState<FileCheckout[]>([]);
+  const [checkoutsSettled, setCheckoutsSettled] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [repairError, setRepairError] = useState<string | null>(null);
   const [repairingCheckoutKey, setRepairingCheckoutKey] = useState<
@@ -517,11 +509,18 @@ function FileBrowserInner({
     }
   }, [visibleChangeGroups]);
 
+  // Pruning closes tabs and persists that, so it must wait for the load that
+  // defines the valid refs — and each section waits on its own. A section with
+  // checkouts derives them from the checkout listing (the catalog contributes
+  // nothing there); the Skills section derives them from the catalog, whose
+  // role scopes it cannot know before it loads. Gating on the other section's
+  // load would either prune a half-built universe or never prune at all.
+  const validRefsReady = hasCheckouts
+    ? checkoutsSettled
+    : skillsCatalog.status === "loaded";
   useEffect(() => {
-    if (skillsCatalog.status === "loaded") {
-      store.getState().pruneUnavailableRefs(storeValidRefs);
-    }
-  }, [skillsCatalog.status, store, storeValidRefs]);
+    if (validRefsReady) store.getState().pruneUnavailableRefs(storeValidRefs);
+  }, [store, storeValidRefs, validRefsReady]);
 
   useEffect(() => {
     const node = containerRef.current;
@@ -547,6 +546,7 @@ function FileBrowserInner({
     setLens(getStoredLens(workspaceId));
     setCompareMode(getStoredCompareMode(workspaceId));
     setBranchDiffsByRef({});
+    setCheckoutsSettled(false);
     branchDiffsInFlightRef.current.clear();
   }, [workspaceId]);
 
@@ -579,6 +579,7 @@ function FileBrowserInner({
     } catch (err) {
       setCheckoutError(err instanceof Error ? err.message : String(err));
     }
+    setCheckoutsSettled(true);
   }, [hasCheckouts, workspaceId]);
 
   const refreshGitStatus = useCallback(async () => {
@@ -626,9 +627,13 @@ function FileBrowserInner({
   const fetchQuickOpenIndex = useCallback(
     async (force = false) => {
       const now = Date.now();
+      // A section without skills has no catalog revision to go stale against,
+      // so its index cache turns on the timestamp alone. Demanding a loaded
+      // catalog there would re-index the workspace on every Quick Open.
       const skillsCacheIsCurrent =
-        skillsCatalog.status === "loaded" &&
-        quickOpenSkillsRevisionRef.current === skillsCatalog.revision;
+        !caps.skills ||
+        (skillsCatalog.status === "loaded" &&
+          quickOpenSkillsRevisionRef.current === skillsCatalog.revision);
       if (
         !force &&
         quickOpenFetchedAtRef.current > 0 &&
@@ -704,6 +709,7 @@ function FileBrowserInner({
       }
     },
     [
+      caps.skills,
       hasCheckouts,
       knownRefs,
       mode,
@@ -1669,6 +1675,7 @@ function FileBrowserInner({
       >
         <CapabilityNotices
           workspaceId={workspaceId}
+          capabilities={caps}
           filesLoading={capabilitiesLoading}
           filesError={capabilitiesError}
           retryFiles={retryCapabilities}
@@ -1967,14 +1974,12 @@ export function WorkspaceFileBrowser({
   isActive = true,
 }: FileBrowserProps) {
   const { workspaceId } = useWorkspaceContext();
-  const storageKey =
-    mode === "agent" && agentName
-      ? agentFileBrowserTabsStorageKey(agentName)
-      : mode === "skills"
-        ? skillsFileBrowserTabsStorageKey()
-        : fileBrowserTabsStorageKey();
+  const storageKey = modeTabsStorageKey(mode, agentName);
   return (
-    <FileCapabilitiesProvider workspaceId={workspaceId}>
+    <FileCapabilitiesProvider
+      workspaceId={workspaceId}
+      enabled={modeCapabilities(mode).checkouts}
+    >
       <FileDocumentRegistryProvider>
         <FileBrowserStoreProvider
           key={`${workspaceId}:${storageKey}`}

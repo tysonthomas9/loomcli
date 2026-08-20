@@ -913,6 +913,171 @@ describe("WorkspaceFileBrowser", () => {
     );
   });
 
+  // Tab pruning is the one thing that must survive scoping the skills catalog
+  // out of the checkout sections: it closes tabs and persists that, so a
+  // readiness gate wired to the wrong load either never fires or fires too
+  // early. The four tests below pin both halves in all three modes.
+  it("prunes stale Files tabs without waiting on the skills catalog", async () => {
+    // The Files section's valid refs come from the checkout listing; the
+    // catalog contributes nothing to them and is never loaded here.
+    mocks.skillsCatalogStatus = "idle";
+    localStorage.setItem(
+      "loom:ws-1:file-browser-tabs:v3",
+      JSON.stringify({
+        v: 4,
+        groups: [
+          {
+            tabs: [
+              {
+                ref: { kind: "checkout", checkout: { scope: "workspace" } },
+                path: "main.ts",
+              },
+              {
+                ref: {
+                  kind: "checkout",
+                  checkout: { scope: "repo", target: "ghost" },
+                },
+                path: "ghost.ts",
+              },
+            ],
+            active: null,
+          },
+        ],
+        mru: [],
+      }),
+    );
+
+    render(<WorkspaceFileBrowser mode="workspace" />);
+
+    const tabs = await screen.findByRole("tablist", { name: /Open files/ });
+    await waitFor(() =>
+      expect(within(tabs).queryByText("ghost.ts")).toBeNull(),
+    );
+    expect(within(tabs).getByText("main.ts")).toBeInTheDocument();
+  });
+
+  it("prunes stale agent tabs without waiting on the skills catalog", async () => {
+    mocks.skillsCatalogStatus = "idle";
+    localStorage.setItem(
+      "loom:ws-1:file-browser-tabs:v3:agent:atlas",
+      JSON.stringify({
+        v: 4,
+        groups: [
+          {
+            tabs: [
+              {
+                ref: {
+                  kind: "checkout",
+                  checkout: {
+                    scope: "agent",
+                    target: "atlas",
+                    repo: "loomcli",
+                  },
+                },
+                path: "main.ts",
+              },
+              {
+                ref: {
+                  kind: "checkout",
+                  checkout: { scope: "repo", target: "ghost" },
+                },
+                path: "ghost.ts",
+              },
+            ],
+            active: null,
+          },
+        ],
+        mru: [],
+      }),
+    );
+
+    render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
+
+    const tabs = await screen.findByRole("tablist", { name: /Open files/ });
+    await waitFor(() =>
+      expect(within(tabs).queryByText("ghost.ts")).toBeNull(),
+    );
+    expect(within(tabs).getByText("main.ts")).toBeInTheDocument();
+  });
+
+  it("prunes a Skills tab whose scope the loaded catalog does not have", async () => {
+    mocks.skillsCatalogStatus = "loaded";
+    mocks.skillGroups = [];
+    localStorage.setItem(
+      "loom:ws-1:file-browser-tabs:v3:skills",
+      JSON.stringify({
+        v: 4,
+        groups: [
+          {
+            tabs: [
+              {
+                ref: { kind: "skills", group: { kind: "workspace" } },
+                path: "audit/SKILL.md",
+              },
+              {
+                ref: {
+                  kind: "skills",
+                  group: { kind: "role", role: "ghost" },
+                },
+                path: "stale/reference.md",
+              },
+            ],
+            active: null,
+          },
+        ],
+        mru: [],
+      }),
+    );
+
+    render(<WorkspaceFileBrowser mode="skills" />);
+
+    const tabs = await screen.findByRole("tablist", { name: /Open files/ });
+    await waitFor(() =>
+      expect(within(tabs).queryByText("reference.md")).toBeNull(),
+    );
+    expect(within(tabs).getByText("SKILL.md")).toBeInTheDocument();
+  });
+
+  it("keeps a Skills tab while the catalog is still loading", async () => {
+    // A role scope the catalog has not reported yet is not a missing scope.
+    // Pruning before it loads would close a live tab and persist that.
+    mocks.skillsCatalogStatus = "loading";
+    mocks.skillGroups = [];
+    localStorage.setItem(
+      "loom:ws-1:file-browser-tabs:v3:skills",
+      JSON.stringify({
+        v: 4,
+        groups: [
+          {
+            tabs: [
+              {
+                ref: {
+                  kind: "skills",
+                  group: { kind: "role", role: "reviewer" },
+                },
+                path: "audit/reference.md",
+              },
+            ],
+            active: null,
+          },
+        ],
+        mru: [],
+      }),
+    );
+
+    const { rerender } = render(<WorkspaceFileBrowser mode="skills" />);
+    const tabs = await screen.findByRole("tablist", { name: /Open files/ });
+    await act(async () => {});
+    expect(within(tabs).getByText("reference.md")).toBeInTheDocument();
+
+    mocks.skillsCatalogStatus = "loaded";
+    mocks.skillGroups = [{ scope: "role", role: "reviewer", skills: [] }];
+    rerender(<WorkspaceFileBrowser mode="skills" />);
+    await act(async () => {});
+
+    expect(within(tabs).getByText("reference.md")).toBeInTheDocument();
+  });
+
   it("never offers skills in the Files section Quick Open", async () => {
     mocks.skillIndexPaths = ["audit/SKILL.md"];
     render(<WorkspaceFileBrowser mode="workspace" />);
@@ -925,6 +1090,33 @@ describe("WorkspaceFileBrowser", () => {
 
     expect(await screen.findByText("other.ts")).toBeInTheDocument();
     expect(screen.queryByText("SKILL.md")).toBeNull();
+  });
+
+  it("reuses the Files section Quick Open index while the catalog stays unloaded", async () => {
+    // The index cache used to require a loaded skills catalog to count as
+    // current. The Files section no longer loads one, so a cache keyed on it
+    // would re-index the whole workspace on every Cmd+P.
+    mocks.skillsCatalogStatus = "idle";
+    render(<WorkspaceFileBrowser mode="workspace" />);
+
+    fireEvent.keyDown(window, { key: "p", metaKey: true });
+    await screen.findByRole("dialog", { name: "Quick open" });
+    await waitFor(() =>
+      expect(mocks.indexScopedFiles).toHaveBeenCalledTimes(1),
+    );
+
+    fireEvent.keyDown(screen.getByLabelText("Quick open file"), {
+      key: "Escape",
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Quick open" })).toBeNull(),
+    );
+
+    fireEvent.keyDown(window, { key: "p", metaKey: true });
+    await screen.findByRole("dialog", { name: "Quick open" });
+    await act(async () => {});
+
+    expect(mocks.indexScopedFiles).toHaveBeenCalledTimes(1);
   });
 
   it("opens, edits, saves, and guards discarding a dirty file", async () => {

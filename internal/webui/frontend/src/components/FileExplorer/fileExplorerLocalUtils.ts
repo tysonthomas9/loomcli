@@ -1,7 +1,13 @@
 import type { FileEntry } from "@/api/workspace";
+import {
+  agentFileBrowserTabsStorageKey,
+  fileBrowserTabsStorageKey,
+  skillsFileBrowserTabsStorageKey,
+} from "@/hooks";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 
 import { resolveTreeDropMove } from "./gitDecorations";
+import type { FileBrowserMode } from "./treeRoots";
 import type { CompareMode, ExplorerLens } from "./workspaceFileBrowserTypes";
 
 export const TREE_WIDTH_KEY = "loom:file-browser:tree-width";
@@ -16,6 +22,21 @@ export const DEFAULT_GROUP_WIDTH = 560;
 export const MIN_GROUP_WIDTH = 320;
 export const MAX_GROUP_WIDTH = 1100;
 export const QUICK_OPEN_STALE_MS = 10_000;
+
+// Each section persists its own tab set: an agent's browser is per agent, the
+// Skills section is a separate nav destination, and the Files section keeps the
+// original key. Mode picks the destination; nothing else about tabs varies.
+export function modeTabsStorageKey(
+  mode: FileBrowserMode,
+  agentName: string | undefined,
+): string {
+  if (mode === "agent" && agentName) {
+    return agentFileBrowserTabsStorageKey(agentName);
+  }
+  return mode === "skills"
+    ? skillsFileBrowserTabsStorageKey()
+    : fileBrowserTabsStorageKey();
+}
 
 export function clampTreeWidth(w: number): number {
   return Math.min(MAX_TREE_WIDTH, Math.max(MIN_TREE_WIDTH, w));

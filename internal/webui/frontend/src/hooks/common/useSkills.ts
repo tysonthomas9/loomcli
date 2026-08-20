@@ -4,7 +4,13 @@ import type { SkillsScopeGroup } from "@/api/workspace";
 import { skillsStore } from "@/stores/skillsStore";
 import { explorerRefKey, type SkillsExplorerRef } from "@/utils/explorerRefs";
 
-export function useSkillsCatalog(workspaceId: string) {
+/**
+ * @param enabled false for a consumer that reads the catalog only if something
+ *   else already loaded it. Same split as useSkillsActions: subscribing is
+ *   cheap, commanding the load is a request, and a section that cannot display
+ *   skills must not issue it.
+ */
+export function useSkillsCatalog(workspaceId: string, enabled = true) {
   const snapshot = useSyncExternalStore(
     skillsStore.subscribe,
     () => skillsStore.catalog(workspaceId),
@@ -12,8 +18,10 @@ export function useSkillsCatalog(workspaceId: string) {
   );
 
   useEffect(() => {
-    if (snapshot.status === "idle") void skillsStore.loadCatalog(workspaceId);
-  }, [snapshot.revision, snapshot.status, workspaceId]);
+    if (enabled && snapshot.status === "idle") {
+      void skillsStore.loadCatalog(workspaceId);
+    }
+  }, [enabled, snapshot.revision, snapshot.status, workspaceId]);
 
   const retry = useCallback(
     () => skillsStore.loadCatalog(workspaceId, true),

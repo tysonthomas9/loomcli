@@ -1,6 +1,7 @@
 import type { FileTreeInlineEdit, FileTreeNodeInfo } from "./FileTree";
 import type { RevisionViewState } from "./FileRevisionPane";
 import type { FileBrowserMode } from "./treeRoots";
+import type { FileIndexData } from "@/api/workspace";
 import type { CheckoutRef } from "@/utils/fileExplorerRefs";
 import type { ExplorerRef, SkillsExplorerRef } from "@/utils/explorerRefs";
 
@@ -92,6 +93,16 @@ export interface SkillGroupMenuState {
 export interface DeleteSkillState {
   ref: SkillsExplorerRef;
   name: string;
+}
+
+export interface BranchDiffRequest {
+  key: string;
+  agent: string;
+}
+
+export interface ScopedFileIndex {
+  ref: CheckoutRef;
+  index: FileIndexData;
 }
 
 export type { RevisionViewState };

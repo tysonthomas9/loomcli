@@ -15,10 +15,17 @@
  * `buildFileTreeSections` (treeRoots.ts) is the single owner of ONE decision —
  * which roots a section sees. It is not the only place that consults the mode,
  * and claiming otherwise would be a contract this file cannot keep: the browser
- * also branches on mode to pick the tab-storage key and the valid-ref universe.
- * Everything checkout-shaped instead goes through `modeHasCheckouts`, so a
- * future section declares what it has rather than being enumerated at each
- * site. Prefer adding a capability there over testing the mode inline.
+ * also branches on mode to pick the valid-ref universe, and `modeTabsStorageKey`
+ * (fileExplorerLocalUtils.ts) owns the tab-storage key.
+ *
+ * Everything else the mode implies goes through `modeCapabilities` (treeRoots.ts),
+ * a descriptor the browser derives once. `checkouts` covers everything
+ * checkout-shaped — the lens, the checkout listing, branch diffs, git status,
+ * search/replace, Quick Open indexing, and the /files/capabilities fetch that
+ * gates writing to a checkout. `skills` covers the catalog and the skill
+ * capabilities. A section loads and warns about exactly what it declares, so a
+ * failure in one section's API cannot raise a notice in another's. Prefer
+ * adding a capability there over testing the mode inline.
  *
  * Skills no longer appear in "workspace" or "agent" mode; they live only in the
  * Skills section. SkillsPage importing this barrel is therefore an import of a

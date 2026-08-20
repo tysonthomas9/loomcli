@@ -25,17 +25,40 @@ import { checkoutChangeCount } from "./checkoutAvailability";
 // roots and nothing else. Nothing emits both.
 export type FileBrowserMode = "workspace" | "agent" | "skills";
 
-// The one capability that separates the sections: a section either sits on git
-// checkouts or it does not. "workspace" and "agent" browse a checkout; "skills"
-// browses the catalog and has nothing checked out behind it, so everything
-// checkout-shaped is off there — the Files/Changes lens (there is no second
-// lens to switch to), the checkout listing, branch diffs, git status,
-// search/replace and Quick Open indexing.
-//
-// The browser derives this once and branches on the capability, never on the
-// mode, so a future section without checkouts needs no new conditionals.
+// What a section is made of, declared once per mode. The browser derives this
+// once and branches on the capabilities, never on the mode, so a future section
+// declares what it has instead of being enumerated at every call site.
+export interface FileBrowserModeCapabilities {
+  // The section sits on git checkouts. "workspace" and "agent" browse one;
+  // "skills" browses the catalog and has nothing checked out behind it, so
+  // everything checkout-shaped is off there — the Files/Changes lens (there is
+  // no second lens to switch to), the checkout listing, branch diffs, git
+  // status, search/replace and Quick Open indexing. File capabilities
+  // (/files/capabilities) describe writes to a checkout, so they ride here too:
+  // a section without checkouts neither fetches them nor gates on them.
+  checkouts: boolean;
+  // The section shows skills, so it needs the skills catalog and the skill
+  // capabilities that gate editing them. Only the Skills section does; loading
+  // them elsewhere fetches data that section cannot display and lets a skills
+  // API failure raise a notice on a page that has no skills on it.
+  skills: boolean;
+}
+
+const MODE_CAPABILITIES: Record<FileBrowserMode, FileBrowserModeCapabilities> =
+  {
+    workspace: { checkouts: true, skills: false },
+    agent: { checkouts: true, skills: false },
+    skills: { checkouts: false, skills: true },
+  };
+
+export function modeCapabilities(
+  mode: FileBrowserMode,
+): FileBrowserModeCapabilities {
+  return MODE_CAPABILITIES[mode];
+}
+
 export function modeHasCheckouts(mode: FileBrowserMode): boolean {
-  return mode !== "skills";
+  return modeCapabilities(mode).checkouts;
 }
 
 export interface CheckoutTreeRoot {

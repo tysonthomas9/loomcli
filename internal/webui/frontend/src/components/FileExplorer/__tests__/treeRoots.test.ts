@@ -11,6 +11,7 @@ import {
   buildFileTreeSections,
   existingExplorerRefs,
   gitStatusRefs,
+  modeCapabilities,
   modeHasCheckouts,
 } from "../treeRoots";
 
@@ -414,5 +415,23 @@ describe("treeRoots", () => {
     expect(modeHasCheckouts("workspace")).toBe(true);
     expect(modeHasCheckouts("agent")).toBe(true);
     expect(modeHasCheckouts("skills")).toBe(false);
+  });
+
+  it("declares what data each mode needs, not just which roots it shows", () => {
+    // Loading is scoped by these flags: a section fetches file capabilities
+    // only where it has checkouts, and the skills catalog and skill
+    // capabilities only where it shows skills. No mode needs both.
+    expect(modeCapabilities("workspace")).toEqual({
+      checkouts: true,
+      skills: false,
+    });
+    expect(modeCapabilities("agent")).toEqual({
+      checkouts: true,
+      skills: false,
+    });
+    expect(modeCapabilities("skills")).toEqual({
+      checkouts: false,
+      skills: true,
+    });
   });
 });
