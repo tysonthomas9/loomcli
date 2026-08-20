@@ -268,6 +268,14 @@ func TestHandleStatus_DaytonaRuntimePlacementVisibility(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	failedOutcome := domain.LeadProvisionOutcomeFailed
+	failedError := "codex runtime credential not configured"
+	if _, err := st.Agents().Update(ctx, "WS1", "unplaced-lead", store.AgentUpdate{
+		LastProvisionOutcome: &failedOutcome,
+		LastProvisionError:   &failedError,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	for _, in := range []store.NodeCreate{
 		{
 			WorkspaceKey:    "WS1",
@@ -332,6 +340,9 @@ func TestHandleStatus_DaytonaRuntimePlacementVisibility(t *testing.T) {
 	if got := placed["runtime_provider"]; got != "daytona" {
 		t.Fatalf("placed runtime_provider = %v, want daytona", got)
 	}
+	if got := placed["runtime_status"]; got != "released" {
+		t.Fatalf("placed runtime_status = %v, want released", got)
+	}
 	placement, ok := placed["runtime_placement"].(map[string]any)
 	if !ok {
 		t.Fatalf("placed runtime_placement = %#v, want object", placed["runtime_placement"])
@@ -343,6 +354,12 @@ func TestHandleStatus_DaytonaRuntimePlacementVisibility(t *testing.T) {
 	unplaced := byName["unplaced-lead"]
 	if got := unplaced["runtime_provider"]; got != "daytona" {
 		t.Fatalf("unplaced runtime_provider = %v, want daytona", got)
+	}
+	if got := unplaced["runtime_status"]; got != "not_provisioned" {
+		t.Fatalf("unplaced runtime_status = %v, want not_provisioned", got)
+	}
+	if got := unplaced["runtime_error"]; got != failedError {
+		t.Fatalf("unplaced runtime_error = %v, want %q", got, failedError)
 	}
 	if _, ok := unplaced["runtime_placement"]; ok {
 		t.Fatalf("unplaced runtime_placement = %#v, want omitted", unplaced["runtime_placement"])

@@ -69,6 +69,8 @@ type AgentStatus struct {
 	LastActivityAt        *time.Time        `json:"last_activity_at,omitempty"`        // most recent PTY-output observation from the agent's supervised backend; nil when not reported (a zero time.Time would serialize as "0001-01-01T00:00:00Z" and the UI would render it as a bogus "last seen" age)
 	RuntimeProvider       string            `json:"runtime_provider,omitempty"`
 	RuntimePlacement      *RuntimePlacement `json:"runtime_placement,omitempty"`
+	RuntimeStatus         string            `json:"runtime_status,omitempty"`
+	RuntimeError          string            `json:"runtime_error,omitempty"`
 	// LiveStatus/ActiveTaskID/ActivePhase are fleet-db's DERIVED liveness signal
 	// (computed there from the running-session+fresh-lease join), carried through
 	// from the store agent record — never re-derived here. LiveStatus is "working"

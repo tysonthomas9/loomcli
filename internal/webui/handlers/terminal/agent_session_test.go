@@ -481,6 +481,62 @@ func TestLatestActiveDaytonaLeadPlacementReportsFailedLatestState(t *testing.T) 
 	}
 }
 
+func TestLatestActiveDaytonaLeadPlacementRejectsDegradedPlacement(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Nodes().Create(ctx, store.NodeCreate{
+		WorkspaceKey:    "E2E",
+		NodeID:          "placement-1",
+		OwnerActor:      "agent:nova",
+		RuntimeProvider: domain.RuntimeProviderDaytona,
+		Placement: &domain.NodePlacement{
+			SandboxID:  "sandbox-1",
+			Generation: 1,
+			State:      domain.PlacementStateActive,
+		},
+	}); err != nil {
+		t.Fatalf("create degraded placement: %v", err)
+	}
+
+	_, err := latestActiveDaytonaLeadPlacement(ctx, st, "E2E", "nova")
+	var svcErr *service.ServiceError
+	if !errors.As(err, &svcErr) || svcErr.Kind != service.KindValidation {
+		t.Fatalf("latestActiveDaytonaLeadPlacement = %v, want validation-kind degraded error", err)
+	}
+	if !strings.Contains(svcErr.Error(), "no durable lead-boot evidence") {
+		t.Fatalf("degraded error message = %q, want durable lead-boot evidence", svcErr.Error())
+	}
+}
+
+func TestLatestActiveDaytonaLeadPlacementReportsNoPlacementAttemptFailure(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "E2E",
+		Name:         "nova",
+		RoleName:     "lead",
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	outcome := domain.LeadProvisionOutcomeFailed
+	attemptError := "codex runtime credential not configured"
+	if _, err := st.Agents().Update(ctx, "E2E", "nova", store.AgentUpdate{
+		LastProvisionOutcome: &outcome,
+		LastProvisionError:   &attemptError,
+	}); err != nil {
+		t.Fatalf("record failed attempt: %v", err)
+	}
+
+	_, err := latestActiveDaytonaLeadPlacement(ctx, st, "E2E", "nova")
+	var svcErr *service.ServiceError
+	if !errors.As(err, &svcErr) || svcErr.Kind != service.KindValidation {
+		t.Fatalf("latestActiveDaytonaLeadPlacement = %v, want validation-kind attempt error", err)
+	}
+	if !strings.Contains(svcErr.Error(), attemptError) {
+		t.Fatalf("attempt error message = %q, want %q", svcErr.Error(), attemptError)
+	}
+}
+
 func TestLatestActiveDaytonaLeadPlacementKeepsOriginalMessageWithoutPlacement(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()

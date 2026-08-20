@@ -134,7 +134,8 @@ export interface ParsedLoomStatus {
     | "idle"
     | "error"
     | "dirty"
-    | "changes";
+    | "changes"
+    | "unknown";
   /** Task ID if working on a task */
   taskId?: string;
   /** Duration string (e.g., "5m", "2h30m") */
@@ -258,8 +259,8 @@ export function parseLoomStatus(status: string): ParsedLoomStatus {
     return { type: typeMatch[1] as ParsedLoomStatus["type"] };
   }
 
-  // Unknown status - treat as ready
-  return { type: "ready" };
+  // Unknown status must remain neutral; it is not evidence of readiness.
+  return { type: "unknown" };
 }
 
 /**
@@ -292,13 +293,14 @@ export function effectiveAgentStatus(agent: LoomAgentStatus): string {
 }
 
 /**
- * Whether a lock-derived status is "idle-like" — only idle/ready (and the
- * empty/unknown string, which parseLoomStatus maps to "ready"). These are the
+ * Whether a lock-derived status is "idle-like" — only idle/ready (plus an
+ * absent status). These are the
  * statuses the fleet-db live_status override is allowed to replace; anything more
  * specific (done/review/error/dirty/N changes) is left untouched so a meaningful
  * badge is never masked by a (possibly stale) "working" liveness signal.
  */
 function isIdleLikeStatus(raw: string): boolean {
+  if (raw.trim() === "") return true;
   const { type } = parseLoomStatus(raw);
   return type === "idle" || type === "ready";
 }

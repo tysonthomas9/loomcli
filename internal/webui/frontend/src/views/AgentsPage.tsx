@@ -478,10 +478,12 @@ function AgentsPageInner(): JSX.Element {
               <section className={styles.card}>
                 <h2 className={styles.cardLabel}>Agent Info</h2>
                 <dl className={styles.configGrid}>
-                  <div>
-                    <dt>Status</dt>
-                    <dd>{formatStatusLabel(statusType)}</dd>
-                  </div>
+                  {selected.runtime_provider !== "daytona" ? (
+                    <div>
+                      <dt>Status</dt>
+                      <dd>{formatStatusLabel(statusType)}</dd>
+                    </div>
+                  ) : null}
                   <div>
                     <dt>Role</dt>
                     <dd>{formatStatusLabel(roleName)}</dd>
@@ -520,6 +522,20 @@ function AgentsPageInner(): JSX.Element {
                       <dt>Runtime provider</dt>
                       <dd>Daytona sandbox</dd>
                     </div>
+                    <div>
+                      <dt>Runtime status</dt>
+                      <dd>
+                        {formatStatusLabel(
+                          selected.runtime_status ?? "unknown",
+                        )}
+                      </dd>
+                    </div>
+                    {selected.runtime_error ? (
+                      <div>
+                        <dt>Runtime error</dt>
+                        <dd>{selected.runtime_error}</dd>
+                      </div>
+                    ) : null}
                     {selected.runtime_placement ? (
                       <>
                         <div>

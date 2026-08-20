@@ -271,7 +271,7 @@ func (b *Broker) resolveResumeSandbox(ctx context.Context, node *domain.Node) (*
 		if !b.provisioningDeadlineExpired(node) {
 			return nil, "", false, fmt.Errorf("placement %q has no sandbox id and provisioning deadline has not elapsed: %w", node.NodeID, domain.ErrConflict)
 		}
-		if _, err := b.markReleased(ctx, node.WorkspaceKey, node.NodeID, ReleaseFence{Generation: node.Placement.Generation}); err != nil {
+		if _, err := b.markReleased(ctx, node.WorkspaceKey, node.NodeID, ReleaseFence{Generation: node.Placement.Generation}, domain.PlacementReleaseReasonUnspecified); err != nil {
 			return nil, "", false, err
 		}
 		return nil, "", true, nil

@@ -17,8 +17,18 @@ type leadBootPlan struct {
 	agentRole string
 }
 
+const (
+	// leadBootstrapBinaryDest is the in-sandbox install path for the
+	// download-at-boot loom binary. It matches the PATH entry the snapshot's
+	// boot hook resolves `loom` through, so overwriting it before the PTY
+	// starts makes the lead boot the freshly served binary.
+	leadBootstrapBinaryDest = "/usr/local/bin/loom"
+	// leadBootstrapBinaryMode makes the installed binary executable.
+	leadBootstrapBinaryMode = "0755"
+)
+
 func (p leadBootPlan) needsPrep() bool {
-	return p.prep.Repo != nil || p.prep.PromptText != "" || len(p.prep.Files) > 0
+	return p.prep.Repo != nil || p.prep.PromptText != "" || len(p.prep.Files) > 0 || p.prep.BootstrapBinary != nil
 }
 
 func (b *Broker) resolveLeadBootPlan(ctx context.Context, req ProvisionRequest, logEmptyRepo bool) (leadBootPlan, error) {
@@ -29,6 +39,7 @@ func (b *Broker) resolveLeadBootPlan(ctx context.Context, req ProvisionRequest, 
 	}
 	plan.prep.Timeout = b.effectiveLeadBootPrepTimeout()
 	plan.prep.Files = append([]SandboxFile(nil), req.SeedFiles...)
+	plan.prep.BootstrapBinary = b.leadBootstrapBinarySpec()
 	if req.PromptText != "" {
 		promptPath := promptPathFromCommand(effectiveLeadCommand(req))
 		if promptPath == "" {
@@ -65,6 +76,21 @@ func (b *Broker) resolveLeadBootPlan(ctx context.Context, req ProvisionRequest, 
 	}
 	plan.prep.GitToken = req.GitToken
 	return plan, nil
+}
+
+// leadBootstrapBinarySpec returns the download-at-boot install request, or nil
+// when the feature is off or no public serve origin is configured to serve the
+// binary from. A missing base URL disables it rather than emitting a relative
+// URL the sandbox could never resolve.
+func (b *Broker) leadBootstrapBinarySpec() *BootstrapBinarySpec {
+	if !b.leadBootstrapEnabled || b.leadAPIBaseURL == "" {
+		return nil
+	}
+	return &BootstrapBinarySpec{
+		URL:  strings.TrimRight(b.leadAPIBaseURL, "/") + BootstrapLoomPath,
+		Dest: leadBootstrapBinaryDest,
+		Mode: leadBootstrapBinaryMode,
+	}
 }
 
 func (b *Broker) resolveLeadEnvValues(ctx context.Context, req ProvisionRequest) (backend string, agentRole string) {

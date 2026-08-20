@@ -2916,6 +2916,18 @@ export interface components {
       /** @default [] */
       repo_groups: string[];
       cross_repo: boolean;
+      /**
+       * @description Latest eager Daytona lead provision-attempt outcome.
+       * @enum {string}
+       */
+      last_provision_outcome?: "in_progress" | "succeeded" | "failed";
+      /** @description Bounded error from the latest failed provision attempt. */
+      last_provision_error?: string;
+      /**
+       * Format: date-time
+       * @description Time the latest provision-attempt outcome was recorded.
+       */
+      last_provision_at?: string;
     };
     WorkspaceRenameRequest: {
       new_name: string;
@@ -2948,6 +2960,11 @@ export interface components {
       title: string;
       description?: string;
       status?: string;
+      /** @enum {string} */
+      last_provision_outcome?: "in_progress" | "succeeded" | "failed";
+      last_provision_error?: string;
+      /** Format: date-time */
+      last_provision_at?: string;
       /** @enum {string} */
       agent_state?:
         | "idle"
@@ -3286,6 +3303,15 @@ export interface components {
       /** Format: int64 */
       generation: number;
     };
+    /** @enum {string} */
+    LeadRuntimeStatus:
+      | "not_provisioned"
+      | "provisioning"
+      | "ready"
+      | "degraded"
+      | "releasing"
+      | "released"
+      | "lost";
     MonitorAgentStatus: {
       name: string;
       branch: string;
@@ -3336,6 +3362,10 @@ export interface components {
         | "other";
       /** @description Newest matching store placement by generation, then update time. */
       runtime_placement?: components["schemas"]["MonitorRuntimePlacement"];
+      /** @description Daytona interactive lead runtime readiness projected from placement, durable lead-boot evidence, and the latest provision attempt. */
+      runtime_status?: components["schemas"]["LeadRuntimeStatus"];
+      /** @description Human-readable detail when the projected runtime is degraded or failed. */
+      runtime_error?: string;
       /** @description Fleet-db's DERIVED liveness signal ("working" or "idle"), computed server-side from the running-session + fresh-lease join (never re-derived by loom). "working" means the agent has a live session right now. Absent when liveness was not computed (no fleet-db store). The UI prefers this over the lock-derived status, which stays "idle" for a provably-working agent on serve-only deployments. */
       live_status?: string;
       /** @description Task id of the agent's live session, set only when live_status == "working". */

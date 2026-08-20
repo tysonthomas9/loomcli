@@ -289,8 +289,10 @@ func startPlacementReaper(ctx context.Context, broker *placement.Broker, interva
 		interval = placementReaperInterval()
 	}
 	reaper := placement.NewPlacementReaper(broker, placement.ReaperConfig{
-		Enforce: enforce,
-		Grace:   2 * interval,
+		Enforce:                      enforce,
+		Grace:                        2 * interval,
+		LostReleaseGrace:             leadLostReleaseGrace(),
+		LostAbsenceReconfirmInterval: interval,
 	})
 	slog.Info("Placement reaper enabled", "interval", interval, "enforce", enforce)
 	go func() {

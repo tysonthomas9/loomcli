@@ -27,6 +27,8 @@ const mocks = vi.hoisted(() => {
       branch?: string;
       cross_repo?: boolean;
       runtime_provider?: string;
+      runtime_status?: string;
+      runtime_error?: string;
       runtime_placement?: {
         sandbox_id: string;
         placement_id: string;
@@ -310,6 +312,9 @@ describe("AgentsPage", () => {
         status: "ready",
         branch: "agent/lead-1",
         runtime_provider: "daytona",
+        runtime_status: "degraded",
+        runtime_error:
+          "lead sandbox active placement has no durable lead-boot evidence",
         runtime_placement: {
           sandbox_id: "sandbox-123",
           placement_id: "placement-456",
@@ -325,6 +330,36 @@ describe("AgentsPage", () => {
 
     expect(await screen.findByText("Sandbox ID")).toBeTruthy();
     expect(screen.getByText("sandbox-123")).toBeTruthy();
+    expect(screen.getByText("Degraded")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "lead sandbox active placement has no durable lead-boot evidence",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("shows a truthful runtime status alongside a missing Daytona placement", async () => {
+    mocks.agents = [
+      {
+        name: "lead-1",
+        role: "lead",
+        status: "ready",
+        branch: "agent/lead-1",
+        runtime_provider: "daytona",
+        runtime_status: "not_provisioned",
+        runtime_error: "codex runtime credential not configured",
+      },
+    ];
+
+    render(<AgentsPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+
+    expect(await screen.findByText("Not Provisioned")).toBeTruthy();
+    expect(screen.getByText("No placement")).toBeTruthy();
+    expect(
+      screen.getByText("codex runtime credential not configured"),
+    ).toBeTruthy();
   });
 
   it("does not leave the retired legacy file editor module in source", () => {

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -67,5 +68,23 @@ func TestAgentUpdateBodyRuntimeProvider(t *testing.T) {
 	body = agentUpdateBody(store.AgentUpdate{})
 	if _, ok := body["runtime_provider"]; ok {
 		t.Fatalf("empty patch contains runtime_provider: %#v", body)
+	}
+}
+
+func TestAgentUpdateBodyProvisionAttempt(t *testing.T) {
+	outcome := domain.LeadProvisionOutcomeFailed
+	attemptError := "credentials rejected"
+	at := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	patch := store.AgentUpdate{
+		LastProvisionOutcome: &outcome,
+		LastProvisionError:   &attemptError,
+		LastProvisionAt:      &at,
+	}
+	body := agentUpdateBody(patch)
+	if body["last_provision_outcome"] != outcome || body["last_provision_error"] != attemptError || body["last_provision_at"] != at {
+		t.Fatalf("provision attempt body = %#v", body)
+	}
+	if !agentUpdateHasFleetDBFields(patch) {
+		t.Fatal("provision-attempt-only patch is not recognized as a fleet-db field")
 	}
 }

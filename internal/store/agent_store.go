@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
@@ -44,12 +45,15 @@ type AgentUpdate struct {
 	CrossRepo        *bool
 	Parent           *string
 	// OrchestratorSessionID removed; see comment on AgentCreate.
-	State          *domain.AgentState
-	Mode           *domain.AgentMode
-	TaskFilter     *string
-	MaxConcurrency *int
-	BudgetPolicy   *string
-	DesiredState   *domain.AgentDesiredState
+	State                *domain.AgentState
+	Mode                 *domain.AgentMode
+	TaskFilter           *string
+	MaxConcurrency       *int
+	BudgetPolicy         *string
+	DesiredState         *domain.AgentDesiredState
+	LastProvisionOutcome *string
+	LastProvisionError   *string
+	LastProvisionAt      *time.Time
 	// Hooks replaces the whole completion pipeline. Nil leaves it untouched;
 	// a non-nil empty value clears it.
 	Hooks *domain.AgentHooks

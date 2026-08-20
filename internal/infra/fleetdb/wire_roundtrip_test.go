@@ -10,11 +10,15 @@ import (
 )
 
 func TestAgentWireRuntimeProviderRoundTrip(t *testing.T) {
+	at := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
 	raw, err := json.Marshal(agentWire{
-		WorkspaceKey:    "WS",
-		Name:            "nova",
-		RoleName:        "lead",
-		RuntimeProvider: string(domain.RuntimeProviderDaytona),
+		WorkspaceKey:         "WS",
+		Name:                 "nova",
+		RoleName:             "lead",
+		RuntimeProvider:      string(domain.RuntimeProviderDaytona),
+		LastProvisionOutcome: domain.LeadProvisionOutcomeFailed,
+		LastProvisionError:   "credentials rejected",
+		LastProvisionAt:      &at,
 	})
 	if err != nil {
 		t.Fatalf("marshal agentWire: %v", err)
@@ -24,8 +28,12 @@ func TestAgentWireRuntimeProviderRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(raw, &out); err != nil {
 		t.Fatalf("unmarshal agentWire: %v", err)
 	}
-	if got := out.toDomain().RuntimeProvider; got != domain.RuntimeProviderDaytona {
+	agent := out.toDomain()
+	if got := agent.RuntimeProvider; got != domain.RuntimeProviderDaytona {
 		t.Fatalf("RuntimeProvider = %q, want daytona", got)
+	}
+	if agent.LastProvisionOutcome != domain.LeadProvisionOutcomeFailed || agent.LastProvisionError != "credentials rejected" || agent.LastProvisionAt == nil || !agent.LastProvisionAt.Equal(at) {
+		t.Fatalf("provision attempt = %q/%q/%v, want failed/credentials rejected/%v", agent.LastProvisionOutcome, agent.LastProvisionError, agent.LastProvisionAt, at)
 	}
 }
 

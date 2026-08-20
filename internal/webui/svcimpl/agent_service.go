@@ -538,16 +538,19 @@ func (s *agentServiceImpl) UpdateAgent(ctx context.Context, wsKey, name string, 
 		return nil, err
 	}
 	updated, err := s.store.Agents().Update(ctx, wsKey, name, store.AgentUpdate{
-		RoleName:         patch.RoleName,
-		Auto:             patch.Auto,
-		Backend:          patch.Backend,
-		FallbackBackends: patch.FallbackBackends,
-		Repos:            patch.Repos,
-		RepoGroups:       patch.RepoGroups,
-		CrossRepo:        patch.CrossRepo,
-		Parent:           patch.Parent,
-		State:            patch.State,
-		DesiredState:     patch.DesiredState,
+		RoleName:             patch.RoleName,
+		Auto:                 patch.Auto,
+		Backend:              patch.Backend,
+		FallbackBackends:     patch.FallbackBackends,
+		Repos:                patch.Repos,
+		RepoGroups:           patch.RepoGroups,
+		CrossRepo:            patch.CrossRepo,
+		Parent:               patch.Parent,
+		State:                patch.State,
+		DesiredState:         patch.DesiredState,
+		LastProvisionOutcome: patch.LastProvisionOutcome,
+		LastProvisionError:   patch.LastProvisionError,
+		LastProvisionAt:      patch.LastProvisionAt,
 	})
 	if err != nil {
 		return nil, classifyStoreError("update agent", err)

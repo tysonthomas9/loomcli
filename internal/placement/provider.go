@@ -30,6 +30,13 @@ const (
 	// "session not found".
 	LeadPTYSessionID = "lead"
 
+	// BootstrapLoomPath is the serve route that streams serve's own loom
+	// binary to a booting lead sandbox. The broker builds the download URL by
+	// appending this to the public serve origin; the leadapi module registers
+	// the same literal as its route. Both reference this const so the two never
+	// drift into a silent 404.
+	BootstrapLoomPath = "/api/lead/bootstrap/loom"
+
 	// OccupantTokenEnv is the sandbox environment variable carrying the lead
 	// API occupant bearer token.
 	OccupantTokenEnv = "LOOM_LEAD_OCCUPANT_TOKEN" //nolint:gosec // env var name, not a credential
@@ -106,8 +113,27 @@ type LeadBootPrep struct {
 	// the codex auth.json drop rides this). Contents may be credentials and
 	// must never appear in logs or errors.
 	Files []SandboxFile
+	// BootstrapBinary, when set, is downloaded and atomically installed into
+	// the sandbox before any other prep step so the lead PTY boots the freshly
+	// served binary instead of the one baked into the snapshot. Nil leaves the
+	// baked binary in place (behavior byte-identical to no bootstrap). The URL
+	// and paths are serve-supplied config, never sandbox-influenced.
+	BootstrapBinary *BootstrapBinarySpec
 	// Timeout bounds each prep exec command. Zero uses the provider default.
 	Timeout time.Duration
+}
+
+// BootstrapBinarySpec instructs the provider to download a binary over HTTP and
+// atomically install it at an absolute in-sandbox path before the lead PTY
+// starts. Every field is serve-supplied config; none is derived from
+// sandbox-resident or occupant input.
+type BootstrapBinarySpec struct {
+	// URL is the http(s) source served by loom serve (BootstrapLoomPath).
+	URL string
+	// Dest is the absolute in-sandbox install path (e.g. /usr/local/bin/loom).
+	Dest string
+	// Mode is an octal chmod string applied to the installed file (e.g. "0755").
+	Mode string
 }
 
 // SandboxFile is a file seeded into the sandbox during lead-boot prep.

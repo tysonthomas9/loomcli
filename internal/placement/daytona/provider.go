@@ -468,11 +468,24 @@ func (p *Provider) PrepareLeadBoot(ctx context.Context, sandboxID string, prep p
 			return err
 		}
 	}
+	if prep.BootstrapBinary != nil {
+		if err := validateBootstrapBinarySpec(*prep.BootstrapBinary); err != nil {
+			return err
+		}
+	}
 	sandbox, err := p.getSandbox(ctx, sandboxID)
 	if err != nil {
 		return err
 	}
 
+	// Install the served binary first: it is the cheapest step to fail on, and
+	// a fail-hard here (deliberate: never fall back to the baked binary) should
+	// bail before the more expensive checkout.
+	if prep.BootstrapBinary != nil {
+		if err := p.installBootstrapBinary(ctx, sandbox, *prep.BootstrapBinary); err != nil {
+			return err
+		}
+	}
 	if prep.Repo != nil {
 		if err := p.prepareLeadCheckout(ctx, sandbox, prep); err != nil {
 			return err

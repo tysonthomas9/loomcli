@@ -444,37 +444,34 @@ func latestActiveDaytonaLeadPlacement(ctx context.Context, st store.Store, works
 	if err != nil {
 		return nil, service.ErrInternal("failed to list lead placements", err)
 	}
-	var best *domain.Node
-	var latestAnyState *domain.Node
+	var latest *domain.Node
 	for _, node := range nodes {
 		if !terminalNodeMatchesDaytonaLeadAnyState(node, agentName) {
 			continue
 		}
-		if latestAnyState == nil || newerPlacement(node, latestAnyState) {
-			latestAnyState = node
-		}
-		if terminalNodeMatchesDaytonaLead(node, agentName) && (best == nil || newerPlacement(node, best)) {
-			best = node
+		if latest == nil || newerPlacement(node, latest) {
+			latest = node
 		}
 	}
-	if best == nil {
-		// Attach-time revive only applies to active placements. Replacement
-		// provisioning remains owned by agent-create, so surface the latest state.
-		if latestAnyState != nil {
-			msg := daytonaLeadPlacementAttachError(latestAnyState)
-			// A still-provisioning placement is transient: report it as "starting"
-			// so the client waits and retries (and the UI shows a waking state)
-			// rather than treating it as a hard failure — which is what leaves a
-			// different lead's terminal attached. Terminal states (released/lost/
-			// releasing) stay validation errors so the UI shows the failure.
-			if latestAnyState.Placement != nil && latestAnyState.Placement.State == domain.PlacementStateProvisioning {
-				return nil, service.ErrStarting(msg)
-			}
-			return nil, service.ErrValidation(msg)
+	attempt := domain.LeadProvisionAttempt{}
+	if agent, getErr := st.Agents().Get(ctx, strings.TrimSpace(workspace), agentName); getErr == nil && agent != nil {
+		attempt = domain.LeadProvisionAttempt{
+			Outcome: agent.LastProvisionOutcome,
+			Error:   agent.LastProvisionError,
+			At:      agent.LastProvisionAt,
 		}
-		return nil, service.ErrValidation("Daytona lead has no active placement to attach")
 	}
-	return best, nil
+	runtimeStatus, runtimeError := domain.LeadRuntimeStatusFor(latest, attempt)
+	if runtimeStatus == domain.LeadRuntimeReady {
+		return latest, nil
+	}
+	message := domain.LeadRuntimeAttachError(runtimeStatus, runtimeError)
+	// Provisioning is transient, so clients wait and retry. Terminal and
+	// degraded states remain validation errors and visibly fail attachment.
+	if runtimeStatus == domain.LeadRuntimeProvisioning {
+		return nil, service.ErrStarting(message)
+	}
+	return nil, service.ErrValidation(message)
 }
 
 func newerPlacement(candidate, current *domain.Node) bool {
@@ -488,14 +485,6 @@ func newerPlacement(candidate, current *domain.Node) bool {
 		(candidate.Placement.Generation == current.Placement.Generation && candidate.UpdatedAt.After(current.UpdatedAt))
 }
 
-func terminalNodeMatchesDaytonaLead(node *domain.Node, agentName string) bool {
-	if !terminalNodeMatchesDaytonaLeadAnyState(node, agentName) {
-		return false
-	}
-	return node.Placement.State == domain.PlacementStateActive &&
-		strings.TrimSpace(node.Placement.SandboxID) != ""
-}
-
 func terminalNodeMatchesDaytonaLeadAnyState(node *domain.Node, agentName string) bool {
 	if node == nil || node.Placement == nil {
 		return false
@@ -507,27 +496,6 @@ func terminalNodeMatchesDaytonaLeadAnyState(node *domain.Node, agentName string)
 		return true
 	}
 	return slices.Contains(node.Labels, "loom-agent="+agentName)
-}
-
-func daytonaLeadPlacementAttachError(node *domain.Node) string {
-	if node == nil || node.Placement == nil {
-		return "Daytona lead has no active placement to attach"
-	}
-	switch node.Placement.State {
-	case domain.PlacementStateProvisioning:
-		return "lead sandbox is still provisioning"
-	case domain.PlacementStateReleased, domain.PlacementStateLost:
-		if detail := strings.TrimSpace(node.Placement.LastDeleteError); detail != "" {
-			return "lead sandbox provisioning failed: " + detail
-		}
-		return fmt.Sprintf("lead sandbox provisioning failed: placement state %q", node.Placement.State)
-	case domain.PlacementStateReleasing:
-		return "lead sandbox is releasing"
-	case domain.PlacementStateActive:
-		return "lead sandbox active placement has no sandbox id"
-	default:
-		return fmt.Sprintf("lead sandbox state %q is not attachable", node.Placement.State)
-	}
 }
 
 func agentLaunchCwd(workspace string, agent *domain.Agent) string {

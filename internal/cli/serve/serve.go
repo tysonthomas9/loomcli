@@ -53,11 +53,13 @@ const envLoomIssueBridgeStatePath = "LOOM_ISSUE_BRIDGE_STATE_PATH"
 const envLoomPlacementReaperInterval = "LOOM_PLACEMENT_REAPER_INTERVAL"
 const envLoomPlacementReaperEnforce = "LOOM_PLACEMENT_REAPER_ENFORCE"
 const envLoomLeadMaxVCPU = "LOOM_LEAD_MAX_VCPU"
+const envLoomLeadLostReleaseGrace = "LOOM_LEAD_LOST_RELEASE_GRACE"
 const envLoomLeadMaxMemGiB = "LOOM_LEAD_MAX_MEM_GIB"
 const envLoomLeadAllowlist = "LOOM_LEAD_ALLOWLIST"
 const envLoomLeadAPIBaseURL = "LOOM_LEAD_API_BASE_URL"
 const envLoomLeadDataAllowOpenAuth = "LOOM_LEAD_DATA_ALLOW_OPEN_AUTH"
 const envLoomLeadSnapshot = "LOOM_LEAD_SNAPSHOT"
+const envLoomLeadBootstrap = "LOOM_LEAD_BOOTSTRAP"
 
 const monitorCollectionCacheTTL = 10 * time.Second
 
@@ -501,16 +503,33 @@ func newServePlacementBroker(st store.Store, provider placement.Provider, tokenK
 	// small default MaxLive (about four 2/4 leads) bounds this shared-OAuth
 	// blast radius; the real fix (post-POC, ticket 08 §2) is per-lead
 	// short-lived tokens. Revoke the codex + claude creds at POC close.
+	if leadBootstrapEnabled() && leadAPIBaseURL() == "" {
+		slog.Warn("LOOM_LEAD_BOOTSTRAP enabled but LOOM_LEAD_API_BASE_URL unset; leads will boot the snapshot-baked binary")
+	}
 	return placement.NewBroker(placement.Config{
-		Store:          st,
-		Provider:       provider,
-		TokenKey:       tokenKey,
-		LeadAPIBaseURL: leadAPIBaseURL(),
+		Store:                st,
+		Provider:             provider,
+		TokenKey:             tokenKey,
+		LeadAPIBaseURL:       leadAPIBaseURL(),
+		LeadBootstrapEnabled: leadBootstrapEnabled(),
 		MaxLive: placement.ResourceSize{
 			VCPU:   leadMaxVCPU(),
 			MemGiB: leadMaxMemGiB(),
 		},
 	})
+}
+
+// leadBootstrapEnabled is the single kill-switch for download-at-boot: it gates
+// both the serve endpoint that streams serve's own binary and the provider step
+// that installs it into each lead sandbox. Default off (fail-hard downloads
+// make it opt-in). Accepts strconv.ParseBool truthy values ("1", "true", ...).
+func leadBootstrapEnabled() bool {
+	raw := strings.TrimSpace(os.Getenv(envLoomLeadBootstrap))
+	if raw == "" {
+		return false
+	}
+	enabled, err := strconv.ParseBool(raw)
+	return err == nil && enabled
 }
 
 // leadAPIBaseURL is the public serve origin injected into Daytona lead
@@ -550,6 +569,10 @@ func buildLeadProvisioner(st store.Store, broker *placement.Broker) *leadprovisi
 
 func leadMaxVCPU() int {
 	return boundedIntEnv(envLoomLeadMaxVCPU, 8, 64)
+}
+
+func leadLostReleaseGrace() time.Duration {
+	return boundedDurationEnv(envLoomLeadLostReleaseGrace, 30*time.Minute)
 }
 
 func leadMaxMemGiB() int {
@@ -612,6 +635,20 @@ func boundedIntEnv(name string, def, max int) int {
 		return max
 	}
 	return n
+}
+
+// boundedDurationEnv reads a Go duration env var, falling back to def when
+// unset, unparseable, or outside the positive-duration domain.
+func boundedDurationEnv(name string, def time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return def
+	}
+	duration, err := time.ParseDuration(raw)
+	if err != nil || duration <= 0 {
+		return def
+	}
+	return duration
 }
 
 func ensureFleetStoreEnv(cfg config.FleetClientConfig) {
@@ -783,6 +820,7 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		ExtAuthAllowInsecure:  serveAuthAllowInsecure,
 		WorkspaceRoleResolver: buildFileBrowserRoleResolver(),
 		LeadDataAllowOpenAuth: leadDataAllowOpenAuth,
+		LeadBootstrapEnabled:  leadBootstrapEnabled(),
 		GitOps:                gitOps,
 		FileOps:               gitOps,
 		BackendOps:            opsimpl.NewBackendOps(),

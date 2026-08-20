@@ -244,6 +244,13 @@ func applyMonitorRuntimePlacement(
 	}
 	status.RuntimeProvider = string(domain.RuntimeProviderDaytona)
 	node := latestDaytonaPlacementForMonitor(nodes, assignment.Name)
+	runtimeStatus, runtimeError := domain.LeadRuntimeStatusFor(node, domain.LeadProvisionAttempt{
+		Outcome: assignment.LastProvisionOutcome,
+		Error:   assignment.LastProvisionError,
+		At:      assignment.LastProvisionAt,
+	})
+	status.RuntimeStatus = string(runtimeStatus)
+	status.RuntimeError = runtimeError
 	if node == nil {
 		return
 	}

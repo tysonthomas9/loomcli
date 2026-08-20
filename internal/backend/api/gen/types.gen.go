@@ -50,6 +50,27 @@ func (e AgentStatusResponseAgentState) Valid() bool {
 	}
 }
 
+// Defines values for AgentStatusResponseLastProvisionOutcome.
+const (
+	AgentStatusResponseLastProvisionOutcomeFailed     AgentStatusResponseLastProvisionOutcome = "failed"
+	AgentStatusResponseLastProvisionOutcomeInProgress AgentStatusResponseLastProvisionOutcome = "in_progress"
+	AgentStatusResponseLastProvisionOutcomeSucceeded  AgentStatusResponseLastProvisionOutcome = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the AgentStatusResponseLastProvisionOutcome enum.
+func (e AgentStatusResponseLastProvisionOutcome) Valid() bool {
+	switch e {
+	case AgentStatusResponseLastProvisionOutcomeFailed:
+		return true
+	case AgentStatusResponseLastProvisionOutcomeInProgress:
+		return true
+	case AgentStatusResponseLastProvisionOutcomeSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BlockedIssueAgentState.
 const (
 	BlockedIssueAgentStateDead     BlockedIssueAgentState = "dead"
@@ -554,6 +575,39 @@ func (e IssueTabType) Valid() bool {
 	}
 }
 
+// Defines values for LeadRuntimeStatus.
+const (
+	LeadRuntimeStatusDegraded       LeadRuntimeStatus = "degraded"
+	LeadRuntimeStatusLost           LeadRuntimeStatus = "lost"
+	LeadRuntimeStatusNotProvisioned LeadRuntimeStatus = "not_provisioned"
+	LeadRuntimeStatusProvisioning   LeadRuntimeStatus = "provisioning"
+	LeadRuntimeStatusReady          LeadRuntimeStatus = "ready"
+	LeadRuntimeStatusReleased       LeadRuntimeStatus = "released"
+	LeadRuntimeStatusReleasing      LeadRuntimeStatus = "releasing"
+)
+
+// Valid indicates whether the value is a known member of the LeadRuntimeStatus enum.
+func (e LeadRuntimeStatus) Valid() bool {
+	switch e {
+	case LeadRuntimeStatusDegraded:
+		return true
+	case LeadRuntimeStatusLost:
+		return true
+	case LeadRuntimeStatusNotProvisioned:
+		return true
+	case LeadRuntimeStatusProvisioning:
+		return true
+	case LeadRuntimeStatusReady:
+		return true
+	case LeadRuntimeStatusReleased:
+		return true
+	case LeadRuntimeStatusReleasing:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MessageResponseSuccess.
 const (
 	True MessageResponseSuccess = true
@@ -919,16 +973,16 @@ func (e SessionHistoryRecordLauncher) Valid() bool {
 
 // Defines values for SessionHistoryRecordStatus.
 const (
-	SessionHistoryRecordStatusActive    SessionHistoryRecordStatus = "active"
-	SessionHistoryRecordStatusCompleted SessionHistoryRecordStatus = "completed"
+	Active    SessionHistoryRecordStatus = "active"
+	Completed SessionHistoryRecordStatus = "completed"
 )
 
 // Valid indicates whether the value is a known member of the SessionHistoryRecordStatus enum.
 func (e SessionHistoryRecordStatus) Valid() bool {
 	switch e {
-	case SessionHistoryRecordStatusActive:
+	case Active:
 		return true
-	case SessionHistoryRecordStatusCompleted:
+	case Completed:
 		return true
 	default:
 		return false
@@ -1085,6 +1139,27 @@ func (e TreeNodeStatus) Valid() bool {
 	case TreeNodeStatusOpen:
 		return true
 	case TreeNodeStatusReview:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WorkspaceAgentInfoLastProvisionOutcome.
+const (
+	WorkspaceAgentInfoLastProvisionOutcomeFailed     WorkspaceAgentInfoLastProvisionOutcome = "failed"
+	WorkspaceAgentInfoLastProvisionOutcomeInProgress WorkspaceAgentInfoLastProvisionOutcome = "in_progress"
+	WorkspaceAgentInfoLastProvisionOutcomeSucceeded  WorkspaceAgentInfoLastProvisionOutcome = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the WorkspaceAgentInfoLastProvisionOutcome enum.
+func (e WorkspaceAgentInfoLastProvisionOutcome) Valid() bool {
+	switch e {
+	case WorkspaceAgentInfoLastProvisionOutcomeFailed:
+		return true
+	case WorkspaceAgentInfoLastProvisionOutcomeInProgress:
+		return true
+	case WorkspaceAgentInfoLastProvisionOutcomeSucceeded:
 		return true
 	default:
 		return false
@@ -1650,21 +1725,27 @@ type AgentControlEntry struct {
 
 // AgentStatusResponse Agent entity from dto.AgentStatusResponse
 type AgentStatusResponse struct {
-	AgentState   *AgentStatusResponseAgentState `json:"agent_state,omitempty"`
-	CreatedAt    time.Time                      `json:"created_at"`
-	Description  *string                        `json:"description,omitempty"`
-	Id           string                         `json:"id"`
-	Labels       []string                       `json:"labels"`
-	LastActivity *time.Time                     `json:"last_activity,omitempty"`
-	Rig          *string                        `json:"rig,omitempty"`
-	RoleType     *string                        `json:"role_type,omitempty"`
-	Status       *string                        `json:"status,omitempty"`
-	Title        string                         `json:"title"`
-	UpdatedAt    time.Time                      `json:"updated_at"`
+	AgentState           *AgentStatusResponseAgentState           `json:"agent_state,omitempty"`
+	CreatedAt            time.Time                                `json:"created_at"`
+	Description          *string                                  `json:"description,omitempty"`
+	Id                   string                                   `json:"id"`
+	Labels               []string                                 `json:"labels"`
+	LastActivity         *time.Time                               `json:"last_activity,omitempty"`
+	LastProvisionAt      *time.Time                               `json:"last_provision_at,omitempty"`
+	LastProvisionError   *string                                  `json:"last_provision_error,omitempty"`
+	LastProvisionOutcome *AgentStatusResponseLastProvisionOutcome `json:"last_provision_outcome,omitempty"`
+	Rig                  *string                                  `json:"rig,omitempty"`
+	RoleType             *string                                  `json:"role_type,omitempty"`
+	Status               *string                                  `json:"status,omitempty"`
+	Title                string                                   `json:"title"`
+	UpdatedAt            time.Time                                `json:"updated_at"`
 }
 
 // AgentStatusResponseAgentState defines model for AgentStatusResponse.AgentState.
 type AgentStatusResponseAgentState string
+
+// AgentStatusResponseLastProvisionOutcome defines model for AgentStatusResponse.LastProvisionOutcome.
+type AgentStatusResponseLastProvisionOutcome string
 
 // BackendConfigResponse defines model for BackendConfigResponse.
 type BackendConfigResponse struct {
@@ -2261,6 +2342,9 @@ type IssueTabState struct {
 	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
+// LeadRuntimeStatus defines model for LeadRuntimeStatus.
+type LeadRuntimeStatus string
+
 // MessageResponse defines model for MessageResponse.
 type MessageResponse struct {
 	Message string                 `json:"message"`
@@ -2336,11 +2420,15 @@ type MonitorAgentStatus struct {
 	RoleKind *MonitorAgentStatusRoleKind `json:"role_kind,omitempty"`
 
 	// RoleLabel Optional short UI role label. When present, clients prefer this over capitalizing role (e.g. pr-reviewer → "Review").
-	RoleLabel        *string                  `json:"role_label,omitempty"`
+	RoleLabel *string `json:"role_label,omitempty"`
+
+	// RuntimeError Human-readable detail when the projected runtime is degraded or failed.
+	RuntimeError     *string                  `json:"runtime_error,omitempty"`
 	RuntimePlacement *MonitorRuntimePlacement `json:"runtime_placement,omitempty"`
 
 	// RuntimeProvider Effective provider for interactive remote runtimes.
 	RuntimeProvider *MonitorAgentStatusRuntimeProvider `json:"runtime_provider,omitempty"`
+	RuntimeStatus   *LeadRuntimeStatus                 `json:"runtime_status,omitempty"`
 
 	// SessionId Latest control-plane session associated with this agent.
 	SessionId *string `json:"session_id,omitempty"`
@@ -3049,11 +3137,23 @@ type WorkerStateRequest struct {
 
 // WorkspaceAgentInfo defines model for WorkspaceAgentInfo.
 type WorkspaceAgentInfo struct {
-	CrossRepo  bool     `json:"cross_repo"`
-	Name       string   `json:"name"`
-	RepoGroups []string `json:"repo_groups"`
-	Repos      []string `json:"repos"`
+	CrossRepo bool `json:"cross_repo"`
+
+	// LastProvisionAt Time the latest provision-attempt outcome was recorded.
+	LastProvisionAt *time.Time `json:"last_provision_at,omitempty"`
+
+	// LastProvisionError Bounded error from the latest failed provision attempt.
+	LastProvisionError *string `json:"last_provision_error,omitempty"`
+
+	// LastProvisionOutcome Latest eager Daytona lead provision-attempt outcome.
+	LastProvisionOutcome *WorkspaceAgentInfoLastProvisionOutcome `json:"last_provision_outcome,omitempty"`
+	Name                 string                                  `json:"name"`
+	RepoGroups           []string                                `json:"repo_groups"`
+	Repos                []string                                `json:"repos"`
 }
+
+// WorkspaceAgentInfoLastProvisionOutcome Latest eager Daytona lead provision-attempt outcome.
+type WorkspaceAgentInfoLastProvisionOutcome string
 
 // WorkspaceBackendPatchRequest defines model for WorkspaceBackendPatchRequest.
 type WorkspaceBackendPatchRequest struct {

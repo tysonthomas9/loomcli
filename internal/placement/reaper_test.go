@@ -162,10 +162,12 @@ func TestPlacementReaperActiveRows(t *testing.T) {
 	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	t.Run("R9 active Get 404 marks lost", func(t *testing.T) {
 		st, provider, broker := reaperFixture(t, now)
+		staleAbsence := now.Add(-time.Hour)
 		node := createPlacementNode(t, st, "WS", "placement-1", "nova", domain.NodePlacement{
-			Generation: 1,
-			State:      domain.PlacementStateActive,
-			SandboxID:  "sandbox-missing",
+			Generation:         1,
+			State:              domain.PlacementStateActive,
+			SandboxID:          "sandbox-missing",
+			AbsenceConfirmedAt: &staleAbsence,
 		})
 		reaper := NewPlacementReaper(broker, ReaperConfig{Enforce: true, Now: func() time.Time { return now }})
 
@@ -175,6 +177,12 @@ func TestPlacementReaperActiveRows(t *testing.T) {
 		}
 		got := getNode(t, st, "WS", node.NodeID)
 		assertPlacement(t, got, domain.PlacementStateLost, "sandbox-missing")
+		if got.Placement.LostAt == nil || !got.Placement.LostAt.Equal(now) {
+			t.Fatalf("LostAt = %v, want %s", got.Placement.LostAt, now)
+		}
+		if got.Placement.AbsenceConfirmedAt != nil {
+			t.Fatalf("AbsenceConfirmedAt = %v, want nil", got.Placement.AbsenceConfirmedAt)
+		}
 		assertReaperAction(t, result, reaperActionMarkLost, node.NodeID)
 		if provider.deleteCallCount() != 0 {
 			t.Fatalf("Delete calls = %d, want 0", provider.deleteCallCount())
@@ -571,10 +579,12 @@ func TestPlacementReaperReleasedAndLostRows(t *testing.T) {
 
 	t.Run("R13 lost reappears is kept lost and dead-lettered", func(t *testing.T) {
 		st, provider, broker := reaperFixture(t, now)
+		lostAt := now.Add(-time.Hour)
 		node := createPlacementNode(t, st, "WS", "placement-1", "nova", domain.NodePlacement{
 			Generation: 1,
 			State:      domain.PlacementStateLost,
 			SandboxID:  "sandbox-1",
+			LostAt:     &lostAt,
 		})
 		provider.addSandbox(reaperSandbox("sandbox-1", node.NodeID, "WS", "nova", ProviderSandboxRunning, now.Add(-5*time.Minute)))
 		reaper := NewPlacementReaper(broker, ReaperConfig{Enforce: true, Now: func() time.Time { return now }})
@@ -592,6 +602,438 @@ func TestPlacementReaperReleasedAndLostRows(t *testing.T) {
 			t.Fatalf("Delete calls = %d, want 0", provider.deleteCallCount())
 		}
 	})
+}
+
+func TestPlacementReaperLostFirstConfirmedAbsenceStartsReconfirmationWindow(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	lostAt := now.Add(-31 * time.Minute)
+	st, provider, broker := reaperFixture(t, now)
+	node := createPlacementNode(t, st, "WS", "placement-1", "nova", domain.NodePlacement{
+		Generation: 7,
+		State:      domain.PlacementStateLost,
+		SandboxID:  "sandbox-missing",
+		LostAt:     &lostAt,
+	})
+	reaper := NewPlacementReaper(broker, ReaperConfig{
+		Enforce:                      true,
+		LostReleaseGrace:             30 * time.Minute,
+		LostAbsenceReconfirmInterval: 2 * time.Minute,
+		Now:                          func() time.Time { return now },
+	})
+
+	result, err := reaper.RunOnce(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	got := getNode(t, st, "WS", node.NodeID)
+	assertPlacement(t, got, domain.PlacementStateLost, "sandbox-missing")
+	if got.Placement.AbsenceConfirmedAt == nil || !got.Placement.AbsenceConfirmedAt.Equal(now) {
+		t.Fatalf("AbsenceConfirmedAt = %v, want %s", got.Placement.AbsenceConfirmedAt, now)
+	}
+	if got.Placement.ReleaseReason != domain.PlacementReleaseReasonUnspecified {
+		t.Fatalf("ReleaseReason = %q, want unspecified", got.Placement.ReleaseReason)
+	}
+	if result.Acted != 0 {
+		t.Fatalf("Acted = %d, want 0 before second confirmation", result.Acted)
+	}
+	if provider.deleteCallCount() != 0 {
+		t.Fatalf("Delete calls = %d, want 0", provider.deleteCallCount())
+	}
+}
+
+func TestPlacementReaperLostSecondConfirmedAbsenceReleasesReservation(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	lostAt := now.Add(-31 * time.Minute)
+	absenceConfirmedAt := now.Add(-3 * time.Minute)
+	leadProcessStartedAt := now.Add(-time.Hour)
+	provisioningDeadlineAt := now.Add(-45 * time.Minute)
+	st, provider, broker := reaperFixture(t, now)
+	node := createPlacementNode(t, st, "WS", "placement-1", "nova", domain.NodePlacement{
+		Generation:             7,
+		State:                  domain.PlacementStateLost,
+		SandboxID:              "sandbox-missing",
+		LostAt:                 &lostAt,
+		AbsenceConfirmedAt:     &absenceConfirmedAt,
+		LeadProcessStartedAt:   &leadProcessStartedAt,
+		ProvisioningDeadlineAt: &provisioningDeadlineAt,
+	})
+	reaper := NewPlacementReaper(broker, ReaperConfig{
+		Enforce:                      true,
+		LostReleaseGrace:             30 * time.Minute,
+		LostAbsenceReconfirmInterval: 2 * time.Minute,
+		Now:                          func() time.Time { return now },
+	})
+
+	result, err := reaper.RunOnce(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	got := getNode(t, st, "WS", node.NodeID)
+	assertPlacement(t, got, domain.PlacementStateReleased, "sandbox-missing")
+	if got.Placement.Generation != 7 {
+		t.Fatalf("Generation = %d, want fenced generation 7", got.Placement.Generation)
+	}
+	if got.Placement.ReleaseReason != domain.PlacementReleaseReasonLostConfirmedAbsent {
+		t.Fatalf("ReleaseReason = %q, want %q", got.Placement.ReleaseReason, domain.PlacementReleaseReasonLostConfirmedAbsent)
+	}
+	if got.Placement.LeadProcessStartedAt != nil || got.Placement.ProvisioningDeadlineAt != nil {
+		t.Fatalf("released placement retained process timestamps: lead=%v deadline=%v", got.Placement.LeadProcessStartedAt, got.Placement.ProvisioningDeadlineAt)
+	}
+	if result.Acted != 1 {
+		t.Fatalf("Acted = %d, want 1", result.Acted)
+	}
+	assertReaperAction(t, result, reaperActionReleaseLost, node.NodeID)
+	if provider.deleteCallCount() != 0 {
+		t.Fatalf("Delete calls = %d, want 0", provider.deleteCallCount())
+	}
+}
+
+func TestPlacementReaperLostReleaseConfigDefaults(t *testing.T) {
+	reaper := NewPlacementReaper(nil, ReaperConfig{})
+	if reaper.lostReleaseGrace != 30*time.Minute {
+		t.Fatalf("lostReleaseGrace = %v, want 30m", reaper.lostReleaseGrace)
+	}
+	if reaper.lostAbsenceReconfirmInterval != defaultReaperGrace {
+		t.Fatalf("lostAbsenceReconfirmInterval = %v, want %v", reaper.lostAbsenceReconfirmInterval, defaultReaperGrace)
+	}
+}
+
+func TestPlacementReaperLostEligibilityGuards(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	recentLostAt := now.Add(-29 * time.Minute)
+	oldLostAt := now.Add(-31 * time.Minute)
+	recentConfirmation := now.Add(-time.Minute)
+	tests := []struct {
+		name                 string
+		sandboxID            string
+		lostAt               *time.Time
+		absenceConfirmedAt   *time.Time
+		wantProviderGetCalls int
+	}{
+		{
+			name:      "lost less than grace is observed",
+			sandboxID: "sandbox-missing",
+			lostAt:    &recentLostAt,
+		},
+		{
+			name:      "lost without timestamp is ineligible",
+			sandboxID: "sandbox-missing",
+		},
+		{
+			name:   "empty recorded sandbox id cannot be confirmed absent",
+			lostAt: &oldLostAt,
+		},
+		{
+			name:                 "second confirmation before interval is observed",
+			sandboxID:            "sandbox-missing",
+			lostAt:               &oldLostAt,
+			absenceConfirmedAt:   &recentConfirmation,
+			wantProviderGetCalls: 1,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			st, provider, broker := reaperFixture(t, now)
+			node := createPlacementNode(t, st, "WS", "placement-1", "nova", domain.NodePlacement{
+				Generation:         7,
+				State:              domain.PlacementStateLost,
+				SandboxID:          tc.sandboxID,
+				LostAt:             tc.lostAt,
+				AbsenceConfirmedAt: tc.absenceConfirmedAt,
+			})
+			reaper := NewPlacementReaper(broker, ReaperConfig{
+				Enforce:                      true,
+				LostReleaseGrace:             30 * time.Minute,
+				LostAbsenceReconfirmInterval: 2 * time.Minute,
+				Now:                          func() time.Time { return now },
+			})
+
+			result, err := reaper.RunOnce(context.Background())
+			if err != nil {
+				t.Fatalf("RunOnce: %v", err)
+			}
+			got := getNode(t, st, "WS", node.NodeID)
+			assertPlacement(t, got, domain.PlacementStateLost, tc.sandboxID)
+			if result.Acted != 0 {
+				t.Fatalf("Acted = %d, want 0", result.Acted)
+			}
+			if calls := provider.getCallCount(); calls != tc.wantProviderGetCalls {
+				t.Fatalf("Get calls = %d, want %d", calls, tc.wantProviderGetCalls)
+			}
+			if tc.absenceConfirmedAt == nil {
+				if got.Placement.AbsenceConfirmedAt != nil {
+					t.Fatalf("AbsenceConfirmedAt = %v, want nil", got.Placement.AbsenceConfirmedAt)
+				}
+			} else if got.Placement.AbsenceConfirmedAt == nil || !got.Placement.AbsenceConfirmedAt.Equal(*tc.absenceConfirmedAt) {
+				t.Fatalf("AbsenceConfirmedAt = %v, want unchanged %s", got.Placement.AbsenceConfirmedAt, *tc.absenceConfirmedAt)
+			}
+		})
+	}
+}
+
+func TestPlacementReaperLostTransientGetDoesNotAdvanceConfirmation(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	lostAt := now.Add(-time.Hour)
+	absenceConfirmedAt := now.Add(-10 * time.Minute)
+	st, provider, broker := reaperFixture(t, now)
+	provider.getErr = errors.New("daytona get: 500 internal server error")
+	node := createPlacementNode(t, st, "WS", "placement-1", "nova", domain.NodePlacement{
+		Generation:         7,
+		State:              domain.PlacementStateLost,
+		SandboxID:          "sandbox-missing",
+		LostAt:             &lostAt,
+		AbsenceConfirmedAt: &absenceConfirmedAt,
+	})
+	reaper := NewPlacementReaper(broker, ReaperConfig{Enforce: true, Now: func() time.Time { return now }})
+
+	result, err := reaper.RunOnce(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "500 internal server error") {
+		t.Fatalf("RunOnce error = %v, want transient provider error", err)
+	}
+	got := getNode(t, st, "WS", node.NodeID)
+	assertPlacement(t, got, domain.PlacementStateLost, "sandbox-missing")
+	if got.Placement.AbsenceConfirmedAt == nil || !got.Placement.AbsenceConfirmedAt.Equal(absenceConfirmedAt) {
+		t.Fatalf("AbsenceConfirmedAt = %v, want unchanged %s", got.Placement.AbsenceConfirmedAt, absenceConfirmedAt)
+	}
+	if result.Acted != 0 || result.DeadLettered != 0 {
+		t.Fatalf("result = %+v, want no action or dead letter", result)
+	}
+}
+
+func TestPlacementReaperLostPointGetPresenceDeadLetters(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	tests := []struct {
+		name    string
+		sandbox ProviderSandbox
+	}{
+		{
+			name:    "running sandbox reappears after list miss",
+			sandbox: reaperSandbox("sandbox-1", "placement-1", "WS", "nova", ProviderSandboxRunning, now.Add(-time.Hour)),
+		},
+		{
+			name:    "stopped sandbox is present and never auto-released",
+			sandbox: reaperSandbox("sandbox-1", "placement-1", "WS", "nova", ProviderSandboxStopped, now.Add(-time.Hour)),
+		},
+		{
+			name: "label mismatch conflicts",
+			sandbox: ProviderSandbox{
+				ID: "sandbox-1",
+				Labels: map[string]string{
+					EnvironmentLabelKey: testDeploymentID,
+					"loom-workspace":    "WS",
+					"loom-agent":        "nova",
+				},
+				State:     ProviderSandboxRunning,
+				CreatedAt: now.Add(-time.Hour),
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			lostAt := now.Add(-time.Hour)
+			st, provider, broker := reaperFixture(t, now)
+			node := createPlacementNode(t, st, "WS", "placement-1", "nova", domain.NodePlacement{
+				Generation: 7,
+				State:      domain.PlacementStateLost,
+				SandboxID:  "sandbox-1",
+				LostAt:     &lostAt,
+			})
+			reaper := NewPlacementReaper(broker, ReaperConfig{Enforce: true, Now: func() time.Time { return now }})
+
+			unlock := broker.lockPlacement("WS", "nova")
+			resultCh := make(chan ReaperResult, 1)
+			errCh := make(chan error, 1)
+			go func() {
+				result, err := reaper.RunOnce(context.Background())
+				resultCh <- result
+				errCh <- err
+			}()
+			waitForProviderListCall(t, provider)
+			provider.addSandbox(tc.sandbox)
+			unlock()
+
+			result, err := waitForReaperRun(t, resultCh, errCh)
+			if !errors.Is(err, domain.ErrConflict) {
+				t.Fatalf("RunOnce error = %v, want ErrConflict", err)
+			}
+			got := getNode(t, st, "WS", node.NodeID)
+			assertPlacement(t, got, domain.PlacementStateLost, "sandbox-1")
+			if got.Placement.AbsenceConfirmedAt != nil {
+				t.Fatalf("AbsenceConfirmedAt = %v, want nil", got.Placement.AbsenceConfirmedAt)
+			}
+			if result.DeadLettered != 1 || result.Acted != 0 {
+				t.Fatalf("result = %+v, want one dead letter and no release action", result)
+			}
+		})
+	}
+}
+
+func TestPlacementReaperLostRechecksCandidateUnderLock(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	tests := []struct {
+		name   string
+		mutate func(*domain.NodePlacement)
+	}{
+		{
+			name: "generation changed before locked refetch",
+			mutate: func(placement *domain.NodePlacement) {
+				placement.Generation++
+			},
+		},
+		{
+			name: "sandbox id changed before locked refetch",
+			mutate: func(placement *domain.NodePlacement) {
+				placement.SandboxID = "sandbox-replaced"
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			lostAt := now.Add(-time.Hour)
+			absenceConfirmedAt := now.Add(-10 * time.Minute)
+			st, provider, broker := reaperFixture(t, now)
+			node := createPlacementNode(t, st, "WS", "placement-1", "nova", domain.NodePlacement{
+				Generation:         7,
+				State:              domain.PlacementStateLost,
+				SandboxID:          "sandbox-missing",
+				LostAt:             &lostAt,
+				AbsenceConfirmedAt: &absenceConfirmedAt,
+			})
+			reaper := NewPlacementReaper(broker, ReaperConfig{Enforce: true, Now: func() time.Time { return now }})
+
+			unlock := broker.lockPlacement("WS", "nova")
+			resultCh := make(chan ReaperResult, 1)
+			errCh := make(chan error, 1)
+			go func() {
+				result, err := reaper.RunOnce(context.Background())
+				resultCh <- result
+				errCh <- err
+			}()
+			waitForProviderListCall(t, provider)
+			current := getNode(t, st, "WS", node.NodeID)
+			placement := clonePlacement(current.Placement)
+			tc.mutate(&placement)
+			placementPtr := &placement
+			if _, err := st.Nodes().Update(context.Background(), "WS", node.NodeID, store.NodeUpdate{Placement: &placementPtr}); err != nil {
+				t.Fatalf("mutate placement before locked refetch: %v", err)
+			}
+			unlock()
+
+			result, err := waitForReaperRun(t, resultCh, errCh)
+			if err != nil {
+				t.Fatalf("RunOnce: %v", err)
+			}
+			got := getNode(t, st, "WS", node.NodeID)
+			if got.Placement.State != domain.PlacementStateLost {
+				t.Fatalf("State = %q, want lost", got.Placement.State)
+			}
+			if result.Acted != 0 || result.DeadLettered != 0 {
+				t.Fatalf("result = %+v, want changed candidate observed only", result)
+			}
+			if calls := provider.getCallCount(); calls != 0 {
+				t.Fatalf("Get calls = %d, want 0 after locked candidate changed", calls)
+			}
+		})
+	}
+}
+
+func TestPlacementReaperLostAlternateSameLabelSandboxStopsSecondPass(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	lostAt := now.Add(-time.Hour)
+	st, provider, broker := reaperFixture(t, now)
+	node := createPlacementNode(t, st, "WS", "placement-1", "nova", domain.NodePlacement{
+		Generation: 7,
+		State:      domain.PlacementStateLost,
+		SandboxID:  "sandbox-original",
+		LostAt:     &lostAt,
+	})
+	currentNow := now
+	reaper := NewPlacementReaper(broker, ReaperConfig{
+		Enforce:                      true,
+		LostReleaseGrace:             30 * time.Minute,
+		LostAbsenceReconfirmInterval: 2 * time.Minute,
+		Now:                          func() time.Time { return currentNow },
+	})
+
+	if _, err := reaper.RunOnce(context.Background()); err != nil {
+		t.Fatalf("first RunOnce: %v", err)
+	}
+	first := getNode(t, st, "WS", node.NodeID)
+	if first.Placement.AbsenceConfirmedAt == nil {
+		t.Fatal("first RunOnce did not record absence confirmation")
+	}
+	provider.addSandbox(reaperSandbox("sandbox-alternate", node.NodeID, "WS", "nova", ProviderSandboxRunning, now))
+	currentNow = now.Add(3 * time.Minute)
+
+	result, err := reaper.RunOnce(context.Background())
+	if !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("second RunOnce error = %v, want ErrConflict", err)
+	}
+	assertPlacement(t, getNode(t, st, "WS", node.NodeID), domain.PlacementStateLost, "sandbox-original")
+	if result.DeadLettered != 1 || result.Acted != 0 {
+		t.Fatalf("result = %+v, want alternate sandbox dead-lettered without release", result)
+	}
+}
+
+func TestPlacementReaperLostReleaseFenceRejectsConcurrentPlacementChange(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	tests := []struct {
+		name   string
+		mutate func(*domain.NodePlacement)
+	}{
+		{
+			name: "generation changed under lock",
+			mutate: func(placement *domain.NodePlacement) {
+				placement.Generation++
+			},
+		},
+		{
+			name: "sandbox id changed under lock",
+			mutate: func(placement *domain.NodePlacement) {
+				placement.SandboxID = "sandbox-replaced"
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			lostAt := now.Add(-time.Hour)
+			absenceConfirmedAt := now.Add(-10 * time.Minute)
+			st, provider, broker := reaperFixture(t, now)
+			node := createPlacementNode(t, st, "WS", "placement-1", "nova", domain.NodePlacement{
+				Generation:         7,
+				State:              domain.PlacementStateLost,
+				SandboxID:          "sandbox-missing",
+				LostAt:             &lostAt,
+				AbsenceConfirmedAt: &absenceConfirmedAt,
+			})
+			provider.getHook = func(_ string, call int) {
+				if call != 1 {
+					return
+				}
+				current := getNode(t, st, "WS", node.NodeID)
+				placement := clonePlacement(current.Placement)
+				tc.mutate(&placement)
+				placementPtr := &placement
+				if _, err := st.Nodes().Update(context.Background(), "WS", node.NodeID, store.NodeUpdate{Placement: &placementPtr}); err != nil {
+					t.Fatalf("mutate placement during point Get: %v", err)
+				}
+			}
+			reaper := NewPlacementReaper(broker, ReaperConfig{Enforce: true, Now: func() time.Time { return now }})
+
+			result, err := reaper.RunOnce(context.Background())
+			if !errors.Is(err, domain.ErrConflict) {
+				t.Fatalf("RunOnce error = %v, want release fence conflict", err)
+			}
+			got := getNode(t, st, "WS", node.NodeID)
+			if got.Placement.State != domain.PlacementStateLost {
+				t.Fatalf("State = %q, want lost", got.Placement.State)
+			}
+			if got.Placement.ReleaseReason != domain.PlacementReleaseReasonUnspecified {
+				t.Fatalf("ReleaseReason = %q, want unspecified", got.Placement.ReleaseReason)
+			}
+			assertReaperAction(t, result, reaperActionReleaseLost, node.NodeID)
+		})
+	}
 }
 
 func TestPlacementReaperDryRunDoesNotWrite(t *testing.T) {
@@ -802,6 +1244,35 @@ func reaperOrphanLabels(env, placementID, workspaceKey, agentName string) map[st
 		EnvironmentLabelKey: env,
 		"loom-workspace":    workspaceKey,
 		"loom-agent":        agentName,
+	}
+}
+
+func waitForProviderListCall(t *testing.T, provider *fakeProvider) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if provider.listCallCount() > 0 {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("timed out waiting for provider ListManaged call")
+}
+
+func waitForReaperRun(t *testing.T, resultCh <-chan ReaperResult, errCh <-chan error) (ReaperResult, error) {
+	t.Helper()
+	var result ReaperResult
+	select {
+	case result = <-resultCh:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for placement reaper result")
+	}
+	select {
+	case err := <-errCh:
+		return result, err
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for placement reaper error")
+		return ReaperResult{}, nil
 	}
 }
 

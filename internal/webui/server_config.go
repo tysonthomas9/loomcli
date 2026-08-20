@@ -75,6 +75,7 @@ type ServerConfig struct {
 	ExtAuthAudience         string                           // Expected JWT audience (validated against "aud" claim; defaults to "loom")
 	ExtAuthAllowInsecure    bool                             // Allow HTTP for non-loopback --auth-url (escape hatch for Docker networks)
 	LeadDataAllowOpenAuth   bool                             // POC-only override for the occupant data mount in open auth mode
+	LeadBootstrapEnabled    bool                             // Enables GET /api/lead/bootstrap/loom (serves serve's own binary) and the provider download-at-boot step (LOOM_LEAD_BOOTSTRAP)
 	WorkspaceRoleResolver   middleware.WorkspaceRoleResolver // Authorizes an identity for one canonical workspace; required for remote file access
 	MonitorHandlers         MonitorHandlers                  // Pre-built handlers for monitor/metrics endpoints (injected by cli)
 	GitOps                  ops.GitOps                       // Git operations interface (optional; nil disables git endpoints)

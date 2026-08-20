@@ -14,6 +14,7 @@ import (
 
 const (
 	defaultReaperGrace         = 2 * time.Minute
+	defaultLostReleaseGrace    = 30 * time.Minute
 	reaperDeadLetterThreshold  = 5
 	reaperDeleteBackoffBase    = 30 * time.Second
 	reaperDeleteBackoffMax     = 10 * time.Minute
@@ -23,6 +24,7 @@ const (
 	reaperActionMarkReleased   = "mark_released"
 	reaperActionAdoptDelete    = "adopt_delete_mark_released"
 	reaperActionMarkLost       = "mark_lost"
+	reaperActionReleaseLost    = "release_lost"
 	reaperActionDeleteReleased = "delete_mark_released"
 	reaperActionDeleteRetry    = "delete_retry"
 	reaperActionDeleteOrphan   = "delete_orphan"
@@ -32,17 +34,21 @@ const (
 
 // PlacementReaper reconciles Daytona placement records with provider state.
 type PlacementReaper struct {
-	broker  *Broker
-	enforce bool
-	grace   time.Duration
-	now     func() time.Time
+	broker                       *Broker
+	enforce                      bool
+	grace                        time.Duration
+	lostReleaseGrace             time.Duration
+	lostAbsenceReconfirmInterval time.Duration
+	now                          func() time.Time
 }
 
 // ReaperConfig configures a PlacementReaper.
 type ReaperConfig struct {
-	Enforce bool
-	Grace   time.Duration
-	Now     func() time.Time
+	Enforce                      bool
+	Grace                        time.Duration
+	LostReleaseGrace             time.Duration
+	LostAbsenceReconfirmInterval time.Duration
+	Now                          func() time.Time
 }
 
 // ReaperResult is the structured diff produced by one reaper pass.
@@ -76,11 +82,21 @@ func NewPlacementReaper(b *Broker, cfg ReaperConfig) *PlacementReaper {
 	if grace <= 0 {
 		grace = defaultReaperGrace
 	}
+	lostReleaseGrace := cfg.LostReleaseGrace
+	if lostReleaseGrace <= 0 {
+		lostReleaseGrace = defaultLostReleaseGrace
+	}
+	lostAbsenceReconfirmInterval := cfg.LostAbsenceReconfirmInterval
+	if lostAbsenceReconfirmInterval <= 0 {
+		lostAbsenceReconfirmInterval = defaultReaperGrace
+	}
 	return &PlacementReaper{
-		broker:  b,
-		enforce: cfg.Enforce,
-		grace:   grace,
-		now:     now,
+		broker:                       b,
+		enforce:                      cfg.Enforce,
+		grace:                        grace,
+		lostReleaseGrace:             lostReleaseGrace,
+		lostAbsenceReconfirmInterval: lostAbsenceReconfirmInterval,
+		now:                          now,
 	}
 }
 
@@ -189,7 +205,7 @@ func (r *PlacementReaper) reapProvisioningMatchedSandbox(ctx context.Context, no
 		_, err = r.broker.markReleased(ctx, adopted.WorkspaceKey, adopted.NodeID, ReleaseFence{
 			Generation: adopted.Placement.Generation,
 			SandboxID:  sandboxID,
-		})
+		}, domain.PlacementReleaseReasonUnspecified)
 		return err
 	})
 }
@@ -207,7 +223,7 @@ func (r *PlacementReaper) reapProvisioningWithoutSandbox(ctx context.Context, no
 	}, func(current *domain.Node) error {
 		_, err := r.broker.markReleased(ctx, current.WorkspaceKey, current.NodeID, ReleaseFence{
 			Generation: current.Placement.Generation,
-		})
+		}, domain.PlacementReleaseReasonUnspecified)
 		return err
 	})
 }
@@ -239,7 +255,7 @@ func (r *PlacementReaper) releaseAbsentProvisioningSandbox(ctx context.Context, 
 		_, err := r.broker.markReleased(ctx, current.WorkspaceKey, current.NodeID, ReleaseFence{
 			Generation: current.Placement.Generation,
 			SandboxID:  sandboxID,
-		})
+		}, domain.PlacementReleaseReasonUnspecified)
 		return err
 	})
 }
@@ -348,7 +364,7 @@ func (r *PlacementReaper) reapReleasing(ctx context.Context, node *domain.Node, 
 		_, err := r.broker.markReleased(ctx, current.WorkspaceKey, current.NodeID, ReleaseFence{
 			Generation: current.Placement.Generation,
 			SandboxID:  sandboxID,
-		})
+		}, domain.PlacementReleaseReasonUnspecified)
 		return err
 	})
 }
@@ -383,7 +399,81 @@ func (r *PlacementReaper) reapLost(ctx context.Context, node *domain.Node, resul
 	for _, sandbox := range matches {
 		return r.deadLetterNode(ctx, result, node, sandbox.ID, fmt.Errorf("lost placement %q reappeared as sandbox %q: %w", node.NodeID, sandbox.ID, domain.ErrConflict))
 	}
-	return nil
+	return r.releaseLostIfConfirmedAbsent(ctx, result, node)
+}
+
+func (r *PlacementReaper) releaseLostIfConfirmedAbsent(ctx context.Context, result *ReaperResult, candidate *domain.Node) error {
+	sandboxID := strings.TrimSpace(candidate.Placement.SandboxID)
+	if sandboxID == "" || !r.lostPastReleaseGrace(candidate) {
+		return nil
+	}
+	agentName := placementAgentName(candidate)
+	if agentName == "" {
+		return r.deadLetterNode(ctx, result, candidate, sandboxID, fmt.Errorf("placement %q agent missing: %w", candidate.NodeID, domain.ErrInvalid))
+	}
+	unlock := r.broker.lockPlacement(candidate.WorkspaceKey, agentName)
+	defer unlock()
+	current, err := r.broker.Get(ctx, candidate.WorkspaceKey, candidate.NodeID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("fresh get placement %q/%q: %w", candidate.WorkspaceKey, candidate.NodeID, err)
+	}
+	if !samePlacementCandidate(current, candidate) ||
+		current.Placement.State != domain.PlacementStateLost ||
+		strings.TrimSpace(current.Placement.SandboxID) != sandboxID ||
+		!r.lostPastReleaseGrace(current) {
+		r.logObserve(ctx, current, sandboxID, "placement candidate changed before reaper mutation")
+		return nil
+	}
+	_, confirmErr := r.broker.confirmRecordedSandbox(ctx, current, sandboxID)
+	if confirmErr == nil {
+		return r.deadLetterNode(ctx, result, current, sandboxID, fmt.Errorf("lost placement %q reappeared as sandbox %q: %w", current.NodeID, sandboxID, domain.ErrConflict))
+	}
+	if errors.Is(confirmErr, domain.ErrConflict) {
+		return r.deadLetterNode(ctx, result, current, sandboxID, confirmErr)
+	}
+	if !errors.Is(confirmErr, ErrSandboxNotFound) {
+		return fmt.Errorf("re-confirm lost sandbox %q before releasing placement %q: %w", sandboxID, current.NodeID, confirmErr)
+	}
+	return r.advanceLostAbsenceRelease(ctx, result, current, sandboxID)
+}
+
+// advanceLostAbsenceRelease performs the two-pass absence confirmation for a
+// lost placement whose sandbox has been re-confirmed absent, releasing its
+// quota reservation only after a second confirmation separated by the reconfirm
+// interval. current must be the freshly-fetched, still-Lost placement, held
+// under the per-agent lock by the caller.
+func (r *PlacementReaper) advanceLostAbsenceRelease(ctx context.Context, result *ReaperResult, current *domain.Node, sandboxID string) error {
+	if current.Placement.AbsenceConfirmedAt == nil {
+		if !r.enforce {
+			return nil
+		}
+		return r.broker.markLostAbsenceConfirmed(ctx, current)
+	}
+	if r.now().UTC().Sub(current.Placement.AbsenceConfirmedAt.UTC()) < r.lostAbsenceReconfirmInterval {
+		return nil
+	}
+	action := reaperActionFromNode(current, sandboxID, reaperActionReleaseLost, string(current.Placement.State), string(domain.PlacementStateReleased))
+	result.Acted++
+	result.Actions = append(result.Actions, action)
+	r.logAction(ctx, action, slog.LevelInfo)
+	if !r.enforce {
+		return nil
+	}
+	_, err := r.broker.markReleased(ctx, current.WorkspaceKey, current.NodeID, ReleaseFence{
+		Generation: current.Placement.Generation,
+		SandboxID:  sandboxID,
+	}, domain.PlacementReleaseReasonLostConfirmedAbsent)
+	return err
+}
+
+func (r *PlacementReaper) lostPastReleaseGrace(node *domain.Node) bool {
+	return node != nil &&
+		node.Placement != nil &&
+		node.Placement.LostAt != nil &&
+		r.now().UTC().Sub(node.Placement.LostAt.UTC()) >= r.lostReleaseGrace
 }
 
 func (r *PlacementReaper) reapProviderOrphans(ctx context.Context, result *ReaperResult) error {

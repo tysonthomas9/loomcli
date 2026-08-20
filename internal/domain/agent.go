@@ -524,6 +524,12 @@ type Agent struct {
 	CreatedAt time.Time   `json:"created_at"`
 	UpdatedAt time.Time   `json:"updated_at"`
 
+	// LastProvision* records the latest eager Daytona lead provision attempt.
+	// It makes failures that occur before a placement row exists observable.
+	LastProvisionOutcome string     `json:"last_provision_outcome,omitempty"`
+	LastProvisionError   string     `json:"last_provision_error,omitempty"`
+	LastProvisionAt      *time.Time `json:"last_provision_at,omitempty"`
+
 	// LiveStatus, ActiveTaskID, and ActivePhase are DERIVED, read-only fields
 	// carried from fleet-db's agent response (computed there from the live
 	// session+lease join). They are never persisted; ActiveTaskID/ActivePhase

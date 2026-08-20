@@ -5572,6 +5572,17 @@ components:
           default: []
         cross_repo:
           type: boolean
+        last_provision_outcome:
+          type: string
+          enum: [in_progress, succeeded, failed]
+          description: Latest eager Daytona lead provision-attempt outcome.
+        last_provision_error:
+          type: string
+          description: Bounded error from the latest failed provision attempt.
+        last_provision_at:
+          type: string
+          format: date-time
+          description: Time the latest provision-attempt outcome was recorded.
 
     WorkspaceRenameRequest:
       type: object
@@ -5645,6 +5656,14 @@ components:
           type: string
         status:
           type: string
+        last_provision_outcome:
+          type: string
+          enum: [in_progress, succeeded, failed]
+        last_provision_error:
+          type: string
+        last_provision_at:
+          type: string
+          format: date-time
         agent_state:
           type: string
           enum: [idle, spawning, running, working, stuck, done, stopped, dead]
@@ -6296,6 +6315,17 @@ components:
           type: integer
           format: int64
 
+    LeadRuntimeStatus:
+      type: string
+      enum:
+        - not_provisioned
+        - provisioning
+        - ready
+        - degraded
+        - releasing
+        - released
+        - lost
+
     MonitorAgentStatus:
       type: object
       required: [name, branch, status, ahead, behind, workspace]
@@ -6379,6 +6409,14 @@ components:
           $ref: "#/components/schemas/MonitorRuntimePlacement"
           description: >-
             Newest matching store placement by generation, then update time.
+        runtime_status:
+          $ref: "#/components/schemas/LeadRuntimeStatus"
+          description: >-
+            Daytona interactive lead runtime readiness projected from placement,
+            durable lead-boot evidence, and the latest provision attempt.
+        runtime_error:
+          type: string
+          description: Human-readable detail when the projected runtime is degraded or failed.
         live_status:
           type: string
           description: >-

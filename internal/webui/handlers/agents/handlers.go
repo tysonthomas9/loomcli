@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -86,17 +87,7 @@ func HandleCreate(agentSvc service.AgentService, hub *realtime.Hub, provisioner 
 			return
 		}
 		broadcastAgentRefresh(hub, ws, created.Name, actor)
-		if provisioner != nil {
-			go func(ws, name, actor string) {
-				pctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
-				defer cancel()
-				if err := provisioner.ProvisionForAgent(pctx, ws, name); err != nil {
-					slog.Error("eager lead provisioning failed", "ws", ws, "agent", name, "err", err)
-					return
-				}
-				broadcastAgentRefresh(hub, ws, name, actor)
-			}(ws, created.Name, actor)
-		}
+		kickLeadProvision(agentSvc, provisioner, hub, ws, created.Name, actor)
 		handler.WriteJSON(w, http.StatusCreated, created)
 	}
 }
@@ -140,8 +131,13 @@ func HandleDelete(agentSvc service.AgentService, hub *realtime.Hub) http.Handler
 	}
 }
 
-func HandleStart(agentSvc service.AgentService, hub *realtime.Hub) http.HandlerFunc {
-	return handleLifecycle(agentSvc, hub, lifecyclePatch{
+// HandleStart and HandleRestart re-drive lead provisioning so a lead stranded
+// by a transient create-time provision failure (quota, provider 5xx, expired
+// key) recovers on the next start instead of being wedged at desired=running
+// with no placement. kickLeadProvision is idempotent, so a healthy running lead
+// is resumed, never duplicated.
+func HandleStart(agentSvc service.AgentService, hub *realtime.Hub, provisioner leadProvisioner) http.HandlerFunc {
+	return handleLifecycle(agentSvc, hub, provisioner, lifecyclePatch{
 		state:       domain.AgentStateActive,
 		desired:     domain.AgentDesiredRunning,
 		commandType: "start",
@@ -151,7 +147,7 @@ func HandleStart(agentSvc service.AgentService, hub *realtime.Hub) http.HandlerF
 }
 
 func HandleStop(agentSvc service.AgentService, hub *realtime.Hub) http.HandlerFunc {
-	return handleLifecycle(agentSvc, hub, lifecyclePatch{
+	return handleLifecycle(agentSvc, hub, nil, lifecyclePatch{
 		state:       domain.AgentStateStopped,
 		desired:     domain.AgentDesiredStopped,
 		commandType: "stop",
@@ -160,8 +156,8 @@ func HandleStop(agentSvc service.AgentService, hub *realtime.Hub) http.HandlerFu
 	})
 }
 
-func HandleRestart(agentSvc service.AgentService, hub *realtime.Hub) http.HandlerFunc {
-	return handleLifecycle(agentSvc, hub, lifecyclePatch{
+func HandleRestart(agentSvc service.AgentService, hub *realtime.Hub, provisioner leadProvisioner) http.HandlerFunc {
+	return handleLifecycle(agentSvc, hub, provisioner, lifecyclePatch{
 		state:       domain.AgentStateActive,
 		desired:     domain.AgentDesiredRunning,
 		commandType: "restart",
@@ -171,7 +167,7 @@ func HandleRestart(agentSvc service.AgentService, hub *realtime.Hub) http.Handle
 }
 
 func HandleYield(agentSvc service.AgentService, hub *realtime.Hub) http.HandlerFunc {
-	return handleLifecycle(agentSvc, hub, lifecyclePatch{
+	return handleLifecycle(agentSvc, hub, nil, lifecyclePatch{
 		state:       domain.AgentStateIdle,
 		desired:     domain.AgentDesiredDraining,
 		commandType: "yield",
@@ -198,7 +194,7 @@ type lifecycleRequest struct {
 	TaskID  string            `json:"task_id,omitempty"`
 }
 
-func handleLifecycle(agentSvc service.AgentService, hub *realtime.Hub, patch lifecyclePatch) http.HandlerFunc {
+func handleLifecycle(agentSvc service.AgentService, hub *realtime.Hub, provisioner leadProvisioner, patch lifecyclePatch) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ws := requestWorkspaceID(r)
 		name := r.PathValue("name")
@@ -235,9 +231,66 @@ func handleLifecycle(agentSvc service.AgentService, hub *realtime.Hub, patch lif
 			handler.HandleServiceError(w, err)
 			return
 		}
-		broadcastAgentRefresh(hub, ws, updated.Name, r.Header.Get("X-Actor"))
+		actor := r.Header.Get("X-Actor")
+		broadcastAgentRefresh(hub, ws, updated.Name, actor)
+		if patch.desired == domain.AgentDesiredRunning {
+			kickLeadProvision(agentSvc, provisioner, hub, ws, updated.Name, actor)
+		}
 		handler.WriteJSON(w, patch.status, dto.NewMessageResponse(fmt.Sprintf("agent %q %s", updated.Name, patch.message)))
 	}
+}
+
+// kickLeadProvision eagerly (re)drives Daytona lead provisioning in the
+// background. ProvisionForAgent self-filters to interactive Daytona leads and
+// is idempotent: an already-live placement is resumed, never duplicated, so it
+// is safe to call on both create and every start/restart. This is the only
+// recovery path when a create-time provision fails transiently (quota, provider
+// 5xx, expired key) and would otherwise strand the lead at desired=running with
+// no placement and nothing to re-trigger it.
+const provisionAttemptErrorMaxLen = 500
+
+func kickLeadProvision(agentSvc service.AgentService, provisioner leadProvisioner, hub *realtime.Hub, ws, name, actor string) {
+	if provisioner == nil {
+		return
+	}
+	go func() {
+		persistLeadProvisionAttempt(agentSvc, ws, name, domain.LeadProvisionOutcomeInProgress, "", time.Now().UTC())
+		broadcastAgentRefresh(hub, ws, name, actor)
+
+		pctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
+		defer cancel()
+		if err := provisioner.ProvisionForAgent(pctx, ws, name); err != nil {
+			persistLeadProvisionAttempt(agentSvc, ws, name, domain.LeadProvisionOutcomeFailed, truncateProvisionAttemptError(err.Error()), time.Now().UTC())
+			slog.Error("eager lead provisioning failed", "ws", ws, "agent", name, "err", err)
+			broadcastAgentRefresh(hub, ws, name, actor)
+			return
+		}
+		persistLeadProvisionAttempt(agentSvc, ws, name, domain.LeadProvisionOutcomeSucceeded, "", time.Now().UTC())
+		broadcastAgentRefresh(hub, ws, name, actor)
+	}()
+}
+
+func persistLeadProvisionAttempt(agentSvc service.AgentService, ws, name, outcome, attemptError string, at time.Time) {
+	if agentSvc == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := agentSvc.UpdateAgent(ctx, ws, name, service.AgentUpdateInput{
+		LastProvisionOutcome: &outcome,
+		LastProvisionError:   &attemptError,
+		LastProvisionAt:      &at,
+	}); err != nil {
+		slog.Warn("persist eager lead provision attempt failed", "ws", ws, "agent", name, "outcome", outcome, "err", err)
+	}
+}
+
+func truncateProvisionAttemptError(message string) string {
+	message = strings.TrimSpace(message)
+	if len(message) <= provisionAttemptErrorMaxLen {
+		return message
+	}
+	return message[:provisionAttemptErrorMaxLen] + "…"
 }
 
 func requestWorkspaceID(r *http.Request) string {

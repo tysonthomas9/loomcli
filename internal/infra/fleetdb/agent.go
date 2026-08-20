@@ -18,26 +18,29 @@ var _ store.AgentStore = (*agentStore)(nil)
 // the lead-to-orchestration AgentSession join. AgentSession is the
 // single source of truth; readers use store.OrchestrationSessionIDFor.
 type agentWire struct {
-	WorkspaceKey     string             `json:"workspace_key"`
-	Name             string             `json:"name"`
-	RoleName         string             `json:"role_name"`
-	Auto             bool               `json:"auto,omitempty"`
-	Backend          string             `json:"backend,omitempty"`
-	FallbackBackends []string           `json:"fallback_backends,omitempty"`
-	RuntimeProvider  string             `json:"runtime_provider,omitempty"`
-	Repos            []string           `json:"repos,omitempty"`
-	RepoGroups       []string           `json:"repo_groups,omitempty"`
-	CrossRepo        bool               `json:"cross_repo,omitempty"`
-	Parent           string             `json:"parent,omitempty"`
-	State            string             `json:"state"`
-	Mode             string             `json:"mode,omitempty"`
-	TaskFilter       string             `json:"task_filter,omitempty"`
-	MaxConcurrency   int                `json:"max_concurrency,omitempty"`
-	BudgetPolicy     string             `json:"budget_policy,omitempty"`
-	DesiredState     string             `json:"desired_state,omitempty"`
-	Hooks            *domain.AgentHooks `json:"hooks,omitempty"`
-	CreatedAt        time.Time          `json:"created_at"`
-	UpdatedAt        time.Time          `json:"updated_at"`
+	WorkspaceKey         string             `json:"workspace_key"`
+	Name                 string             `json:"name"`
+	RoleName             string             `json:"role_name"`
+	Auto                 bool               `json:"auto,omitempty"`
+	Backend              string             `json:"backend,omitempty"`
+	FallbackBackends     []string           `json:"fallback_backends,omitempty"`
+	RuntimeProvider      string             `json:"runtime_provider,omitempty"`
+	Repos                []string           `json:"repos,omitempty"`
+	RepoGroups           []string           `json:"repo_groups,omitempty"`
+	CrossRepo            bool               `json:"cross_repo,omitempty"`
+	Parent               string             `json:"parent,omitempty"`
+	State                string             `json:"state"`
+	Mode                 string             `json:"mode,omitempty"`
+	TaskFilter           string             `json:"task_filter,omitempty"`
+	MaxConcurrency       int                `json:"max_concurrency,omitempty"`
+	BudgetPolicy         string             `json:"budget_policy,omitempty"`
+	DesiredState         string             `json:"desired_state,omitempty"`
+	Hooks                *domain.AgentHooks `json:"hooks,omitempty"`
+	LastProvisionOutcome string             `json:"last_provision_outcome,omitempty"`
+	LastProvisionError   string             `json:"last_provision_error,omitempty"`
+	LastProvisionAt      *time.Time         `json:"last_provision_at,omitempty"`
+	CreatedAt            time.Time          `json:"created_at"`
+	UpdatedAt            time.Time          `json:"updated_at"`
 	// Derived, read-only liveness fields fleet-db computes from the
 	// session+lease join; passed through to domain.Agent, never sent on writes.
 	LiveStatus   string `json:"live_status,omitempty"`
@@ -51,30 +54,33 @@ type agentWire struct {
 
 func (a agentWire) toDomain() *domain.Agent {
 	return &domain.Agent{
-		WorkspaceKey:     a.WorkspaceKey,
-		Name:             a.Name,
-		RoleName:         a.RoleName,
-		Auto:             a.Auto,
-		Backend:          a.Backend,
-		FallbackBackends: a.FallbackBackends,
-		RuntimeProvider:  domain.RuntimeProvider(a.RuntimeProvider),
-		Repos:            a.Repos,
-		RepoGroups:       a.RepoGroups,
-		CrossRepo:        a.CrossRepo,
-		Parent:           a.Parent,
-		State:            domain.AgentState(a.State),
-		Mode:             domain.AgentMode(a.Mode),
-		TaskFilter:       a.TaskFilter,
-		MaxConcurrency:   a.MaxConcurrency,
-		BudgetPolicy:     a.BudgetPolicy,
-		DesiredState:     domain.AgentDesiredState(a.DesiredState),
-		Hooks:            a.Hooks.Clone(),
-		CreatedAt:        a.CreatedAt,
-		UpdatedAt:        a.UpdatedAt,
-		LiveStatus:       domain.AgentLiveStatus(a.LiveStatus),
-		ActiveTaskID:     a.ActiveTaskID,
-		ActivePhase:      a.ActivePhase,
-		LastErrorClass:   a.LastErrorClass,
+		WorkspaceKey:         a.WorkspaceKey,
+		Name:                 a.Name,
+		RoleName:             a.RoleName,
+		Auto:                 a.Auto,
+		Backend:              a.Backend,
+		FallbackBackends:     a.FallbackBackends,
+		RuntimeProvider:      domain.RuntimeProvider(a.RuntimeProvider),
+		Repos:                a.Repos,
+		RepoGroups:           a.RepoGroups,
+		CrossRepo:            a.CrossRepo,
+		Parent:               a.Parent,
+		State:                domain.AgentState(a.State),
+		Mode:                 domain.AgentMode(a.Mode),
+		TaskFilter:           a.TaskFilter,
+		MaxConcurrency:       a.MaxConcurrency,
+		BudgetPolicy:         a.BudgetPolicy,
+		DesiredState:         domain.AgentDesiredState(a.DesiredState),
+		Hooks:                a.Hooks.Clone(),
+		LastProvisionOutcome: a.LastProvisionOutcome,
+		LastProvisionError:   a.LastProvisionError,
+		LastProvisionAt:      cloneTimePointer(a.LastProvisionAt),
+		CreatedAt:            a.CreatedAt,
+		UpdatedAt:            a.UpdatedAt,
+		LiveStatus:           domain.AgentLiveStatus(a.LiveStatus),
+		ActiveTaskID:         a.ActiveTaskID,
+		ActivePhase:          a.ActivePhase,
+		LastErrorClass:       a.LastErrorClass,
 	}
 }
 
@@ -203,6 +209,15 @@ func agentUpdateBody(patch store.AgentUpdate) map[string]any {
 	if patch.DesiredState != nil {
 		body["desired_state"] = string(*patch.DesiredState)
 	}
+	if patch.LastProvisionOutcome != nil {
+		body["last_provision_outcome"] = *patch.LastProvisionOutcome
+	}
+	if patch.LastProvisionError != nil {
+		body["last_provision_error"] = *patch.LastProvisionError
+	}
+	if patch.LastProvisionAt != nil {
+		body["last_provision_at"] = *patch.LastProvisionAt
+	}
 	// A non-nil empty pipeline is the explicit clear marker; only a nil patch
 	// leaves hooks untouched, so {} must still reach fleet-db.
 	if hooks := patch.Hooks.Clone(); hooks != nil {
@@ -232,7 +247,18 @@ func agentUpdateHasFleetDBFields(patch store.AgentUpdate) bool {
 		patch.MaxConcurrency != nil ||
 		patch.BudgetPolicy != nil ||
 		patch.DesiredState != nil ||
+		patch.LastProvisionOutcome != nil ||
+		patch.LastProvisionError != nil ||
+		patch.LastProvisionAt != nil ||
 		patch.Hooks != nil
+}
+
+func cloneTimePointer(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 func (s *agentStore) Delete(ctx context.Context, ws, name string) error {

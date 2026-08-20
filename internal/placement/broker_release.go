@@ -43,7 +43,7 @@ func (b *Broker) releaseLocked(ctx context.Context, workspaceKey, placementID st
 	if err := b.deleteAndConfirmSandbox(releaseCtx, sandboxID); err != nil {
 		return staged, err
 	}
-	return b.markReleased(releaseCtx, workspaceKey, placementID, fence)
+	return b.markReleased(releaseCtx, workspaceKey, placementID, fence, domain.PlacementReleaseReasonUnspecified)
 }
 
 func validateReleaseFence(node *domain.Node, fence ReleaseFence) error {
@@ -79,7 +79,7 @@ func (b *Broker) markReleasing(ctx context.Context, node *domain.Node) (*domain.
 	return updated, nil
 }
 
-func (b *Broker) markReleased(ctx context.Context, workspaceKey, placementID string, fence ReleaseFence) (*domain.Node, error) {
+func (b *Broker) markReleased(ctx context.Context, workspaceKey, placementID string, fence ReleaseFence, reason domain.PlacementReleaseReason) (*domain.Node, error) {
 	node, err := b.Get(ctx, workspaceKey, placementID)
 	if err != nil {
 		return nil, err
@@ -92,6 +92,7 @@ func (b *Broker) markReleased(ctx context.Context, workspaceKey, placementID str
 	}
 	placement := clonePlacement(node.Placement)
 	placement.State = domain.PlacementStateReleased
+	placement.ReleaseReason = reason
 	placement.LeadProcessStartedAt = nil
 	placement.ProvisioningDeadlineAt = nil
 	placementPtr := &placement
@@ -111,6 +112,9 @@ func (b *Broker) markLost(ctx context.Context, node *domain.Node) error {
 	}
 	placement := clonePlacement(node.Placement)
 	placement.State = domain.PlacementStateLost
+	now := b.now().UTC()
+	placement.LostAt = &now
+	placement.AbsenceConfirmedAt = nil
 	placement.LeadProcessStartedAt = nil
 	placement.ProvisioningDeadlineAt = nil
 	placementPtr := &placement
@@ -122,6 +126,26 @@ func (b *Broker) markLost(ctx context.Context, node *domain.Node) error {
 	}
 	if updated == nil || updated.Placement == nil {
 		return fmt.Errorf("mark lost placement %q returned no placement: %w", node.NodeID, domain.ErrInvalid)
+	}
+	return nil
+}
+
+func (b *Broker) markLostAbsenceConfirmed(ctx context.Context, node *domain.Node) error {
+	if node == nil || node.Placement == nil {
+		return fmt.Errorf("placement record required: %w", domain.ErrInvalid)
+	}
+	placement := clonePlacement(node.Placement)
+	now := b.now().UTC()
+	placement.AbsenceConfirmedAt = &now
+	placementPtr := &placement
+	writeCtx, cancel := detachedTimeout(ctx, detachedStoreWriteTimeout)
+	defer cancel()
+	updated, err := b.store.Nodes().Update(writeCtx, node.WorkspaceKey, node.NodeID, store.NodeUpdate{Placement: &placementPtr})
+	if err != nil {
+		return err
+	}
+	if updated == nil || updated.Placement == nil {
+		return fmt.Errorf("mark lost absence confirmed for placement %q returned no placement: %w", node.NodeID, domain.ErrInvalid)
 	}
 	return nil
 }
@@ -256,7 +280,7 @@ func (b *Broker) forceReleasePlacement(ctx context.Context, node *domain.Node) (
 	return b.markReleased(ctx, ledgered.WorkspaceKey, ledgered.NodeID, ReleaseFence{
 		Generation: ledgered.Placement.Generation,
 		SandboxID:  sandboxID,
-	})
+	}, domain.PlacementReleaseReasonUnspecified)
 }
 
 func (b *Broker) releaseUnknownSandboxID(ctx context.Context, node *domain.Node, fence ReleaseFence, forceClean bool) (*domain.Node, error) {
@@ -286,12 +310,12 @@ func (b *Broker) releaseUnknownSandboxID(ctx context.Context, node *domain.Node,
 		if err := b.deleteAndConfirmSandbox(ctx, sandboxID); err != nil {
 			return adopted, err
 		}
-		return b.markReleased(ctx, node.WorkspaceKey, node.NodeID, fence)
+		return b.markReleased(ctx, node.WorkspaceKey, node.NodeID, fence, domain.PlacementReleaseReasonUnspecified)
 	}
 	if !forceClean && !b.provisioningDeadlineExpired(node) {
 		return node, fmt.Errorf("placement %q has no sandbox id and provider list has no positive match before provisioning deadline: %w", node.NodeID, domain.ErrConflict)
 	}
-	return b.markReleased(ctx, node.WorkspaceKey, node.NodeID, fence)
+	return b.markReleased(ctx, node.WorkspaceKey, node.NodeID, fence, domain.PlacementReleaseReasonUnspecified)
 }
 
 func (b *Broker) deleteSandbox(ctx context.Context, sandboxID string) error {

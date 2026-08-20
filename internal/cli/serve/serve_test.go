@@ -113,6 +113,28 @@ func TestNewServePlacementBrokerSetsMaxLive(t *testing.T) {
 	}
 }
 
+func TestLeadLostReleaseGrace(t *testing.T) {
+	tests := []struct {
+		value string
+		want  time.Duration
+	}{
+		{value: "", want: 30 * time.Minute},
+		{value: "45m", want: 45 * time.Minute},
+		{value: "2h30m", want: 2*time.Hour + 30*time.Minute},
+		{value: "invalid", want: 30 * time.Minute},
+		{value: "0", want: 30 * time.Minute},
+		{value: "-5m", want: 30 * time.Minute},
+	}
+	for _, tc := range tests {
+		t.Run(tc.value, func(t *testing.T) {
+			t.Setenv(envLoomLeadLostReleaseGrace, tc.value)
+			if got := leadLostReleaseGrace(); got != tc.want {
+				t.Fatalf("leadLostReleaseGrace() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestNewServePlacementBrokerInjectsLeadAPIBaseURL(t *testing.T) {
 	t.Setenv("LOOM_DEPLOYMENT_ID", "test-deployment")
 	t.Setenv(envLoomLeadAPIBaseURL, "https://serve.example.com")

@@ -15,8 +15,90 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
 )
+
+// seedLifecycleAgent creates a workspace + one lead agent so lifecycle handlers
+// have a real target to transition.
+func seedLifecycleAgent(t *testing.T, ctx context.Context, st store.Store, agentSvc service.AgentService, ws, name string) {
+	t.Helper()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key: ws, Name: ws, DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := agentSvc.CreateAgent(ctx, service.AgentCreateInput{
+		WorkspaceKey:    ws,
+		Name:            name,
+		RoleName:        "lead",
+		RuntimeProvider: domain.RuntimeProviderDaytona,
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+}
+
+// TestHandleStartRedrivesProvisioning locks the fix for the stranded-lead bug:
+// a start must re-drive provisioning so a lead orphaned by a transient
+// create-time provision failure recovers instead of wedging at desired=running.
+func TestHandleStartRedrivesProvisioning(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	agentSvc := svcimpl.NewAgentService(nil, nil, nil, st)
+	seedLifecycleAgent(t, ctx, st, agentSvc, "TEST2", "lead-nova")
+	provisioner := &fakeLeadProvisioner{calls: make(chan provisionCall, 1)}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST2/agents/lead-nova/start", nil)
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "TEST2"))
+	req.SetPathValue("name", "lead-nova")
+	rr := httptest.NewRecorder()
+
+	HandleStart(agentSvc, nil, provisioner).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s, want 200", rr.Code, rr.Body.String())
+	}
+	select {
+	case got := <-provisioner.calls:
+		if got.ws != "TEST2" || got.name != "lead-nova" {
+			t.Fatalf("provision call = %+v, want TEST2/lead-nova", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("start did not re-drive provisioning")
+	}
+}
+
+// TestHandleLifecycleStopDoesNotProvision guards the desired==running gate: a
+// stop transition must never provision, even with a provisioner wired.
+func TestHandleLifecycleStopDoesNotProvision(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	agentSvc := svcimpl.NewAgentService(nil, nil, nil, st)
+	seedLifecycleAgent(t, ctx, st, agentSvc, "TEST2", "lead-nova")
+	provisioner := &fakeLeadProvisioner{calls: make(chan provisionCall, 1)}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST2/agents/lead-nova/stop", nil)
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "TEST2"))
+	req.SetPathValue("name", "lead-nova")
+	rr := httptest.NewRecorder()
+
+	handleLifecycle(agentSvc, nil, provisioner, lifecyclePatch{
+		state:       domain.AgentStateStopped,
+		desired:     domain.AgentDesiredStopped,
+		commandType: "stop",
+		status:      http.StatusOK,
+		message:     "stopped",
+	}).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s, want 200", rr.Code, rr.Body.String())
+	}
+	select {
+	case got := <-provisioner.calls:
+		t.Fatalf("stop transition provisioned: %+v", got)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
 
 func TestHandleInteractivePromptsListsBuiltins(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/TEST2/interactive-prompts", nil)
@@ -256,6 +338,26 @@ func TestHandleCreateProvisionerErrorStillReturnsCreated(t *testing.T) {
 	case <-provisioner.calls:
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for async provisioning call")
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		agent, err := st.Agents().Get(ctx, "TEST2", "review-nova")
+		if err != nil {
+			t.Fatalf("get provisioned agent: %v", err)
+		}
+		if agent.LastProvisionOutcome == domain.LeadProvisionOutcomeFailed {
+			if agent.LastProvisionError != "provision failed" {
+				t.Fatalf("LastProvisionError = %q, want provision failed", agent.LastProvisionError)
+			}
+			if agent.LastProvisionAt == nil {
+				t.Fatal("LastProvisionAt = nil, want failed-at timestamp")
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("LastProvisionOutcome = %q, want failed", agent.LastProvisionOutcome)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 

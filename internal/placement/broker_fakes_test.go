@@ -483,6 +483,10 @@ func cloneLeadBootPrep(in LeadBootPrep) LeadBootPrep {
 		repo := *in.Repo
 		out.Repo = &repo
 	}
+	if in.BootstrapBinary != nil {
+		spec := *in.BootstrapBinary
+		out.BootstrapBinary = &spec
+	}
 	return out
 }
 

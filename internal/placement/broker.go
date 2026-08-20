@@ -47,6 +47,11 @@ type Config struct {
 	LeadBootPrepTimeout     time.Duration
 	DeploymentID            string
 	LeadAPIBaseURL          string
+	// LeadBootstrapEnabled turns on download-at-boot: every lead sandbox
+	// downloads and installs serve's own loom binary (from LeadAPIBaseURL +
+	// BootstrapLoomPath) before the PTY starts. Off leaves leads booting the
+	// snapshot-baked binary. Requires LeadAPIBaseURL to be set to have effect.
+	LeadBootstrapEnabled bool
 	// DeleteConfirmBackoff is the first delay in the poll that proves a
 	// delete completed; it doubles per attempt. Exposed so tests do not sleep
 	// for seconds. Zero uses the default.
@@ -68,6 +73,7 @@ type Broker struct {
 	leadBootPrepTimeout     time.Duration
 	deploymentID            string
 	leadAPIBaseURL          string
+	leadBootstrapEnabled    bool
 	deleteConfirmBackoff    time.Duration
 	now                     func() time.Time
 
@@ -172,6 +178,7 @@ func NewBroker(cfg Config) (*Broker, error) {
 		leadBootPrepTimeout:     leadBootPrepTimeout,
 		deploymentID:            deploymentID,
 		leadAPIBaseURL:          strings.TrimSpace(cfg.LeadAPIBaseURL),
+		leadBootstrapEnabled:    cfg.LeadBootstrapEnabled,
 		deleteConfirmBackoff:    confirmBackoff,
 		now:                     now,
 		locks:                   make(map[placementLockKey]*sync.Mutex),
