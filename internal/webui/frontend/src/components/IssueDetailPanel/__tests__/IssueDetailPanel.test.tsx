@@ -16,6 +16,7 @@ import {
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 
+import { ApiError } from "@/types";
 import type { Issue, IssueDetails, IssueWithDependencyMetadata } from "@/types";
 import type { SessionRecord } from "@/types/agent";
 import {
@@ -1163,6 +1164,160 @@ describe("IssueDetailPanel", () => {
         expect(onApprove).toHaveBeenCalledTimes(1);
         expect(onApprove).toHaveBeenCalledWith(mockIssue);
       });
+    });
+
+    // PUPPET-146. The panel is the same review UI reached from kanban / list /
+    // agents, and had the identical swallowed-error defect as IssueDetailView:
+    // no message and an Approve button stuck on "..." until reload.
+    it("shows the server message verbatim when approve fails", async () => {
+      const mockIssue = createTestIssueDetails({
+        title: "Some task",
+        status: "review",
+      });
+      const onApprove = vi
+        .fn()
+        .mockRejectedValue(
+          new ApiError(409, "Conflict", { error: "issue is not claimable" }),
+        );
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={mockIssue}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("panel-approve-button"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("action-error-toast")).toHaveTextContent(
+          "issue is not claimable",
+        );
+      });
+      // Spinner released.
+      expect(screen.getByTestId("panel-approve-button")).not.toHaveTextContent(
+        "...",
+      );
+    });
+
+    it("disables both review buttons with the reason after a 409", async () => {
+      const mockIssue = createTestIssueDetails({
+        title: "Some task",
+        status: "review",
+      });
+      const onApprove = vi
+        .fn()
+        .mockRejectedValue(
+          new ApiError(409, "Conflict", { error: "issue is not claimable" }),
+        );
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={mockIssue}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("panel-approve-button"));
+
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("panel-approve-blocked-reason"),
+        ).toHaveTextContent("issue is not claimable");
+      });
+      const approve = screen.getByTestId("panel-approve-button");
+      const reject = screen.getByTestId("panel-reject-button");
+      expect(approve).toBeDisabled();
+      expect(reject).toBeDisabled();
+      expect(approve).toHaveAttribute("title", "issue is not claimable");
+      expect(reject).toHaveAttribute("title", "issue is not claimable");
+    });
+
+    // A network error is not the server refusing: retrying is legitimate.
+    it("leaves the buttons enabled after a non-409 failure", async () => {
+      const mockIssue = createTestIssueDetails({
+        title: "Some task",
+        status: "review",
+      });
+      const onApprove = vi
+        .fn()
+        .mockRejectedValue(new ApiError(0, "Network error"));
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={mockIssue}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("panel-approve-button"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("action-error-toast")).toBeInTheDocument();
+      });
+      expect(screen.getByTestId("panel-approve-button")).not.toBeDisabled();
+      expect(screen.getByTestId("panel-reject-button")).not.toBeDisabled();
+      expect(
+        screen.queryByTestId("panel-approve-blocked-reason"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("clears the error and the blocked latch when the issue changes", async () => {
+      const mockIssue = createTestIssueDetails({
+        title: "Some task",
+        status: "review",
+      });
+      const onApprove = vi
+        .fn()
+        .mockRejectedValue(
+          new ApiError(409, "Conflict", { error: "issue is not claimable" }),
+        );
+      const { rerender } = render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={mockIssue}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("panel-approve-button"));
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("panel-approve-blocked-reason"),
+        ).toBeInTheDocument();
+      });
+
+      rerender(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={createTestIssueDetails({
+            id: "other-issue",
+            title: "Another task",
+            status: "review",
+          })}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={vi.fn()}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId("panel-approve-blocked-reason"),
+        ).not.toBeInTheDocument();
+      });
+      expect(
+        screen.queryByTestId("action-error-toast"),
+      ).not.toBeInTheDocument();
+      expect(screen.getByTestId("panel-approve-button")).not.toBeDisabled();
     });
 
     it("clicking Reject button shows the reject comment form", () => {

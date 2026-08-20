@@ -41,6 +41,7 @@ import type {
   Comment,
   Event,
 } from "@/types";
+import { ApiError } from "@/types";
 import type { Status } from "@/types/issue";
 import { formatStatusLabel, getReviewType, isPRUrl } from "@/utils/issue";
 import {
@@ -458,6 +459,12 @@ function DefaultContent({
   const [isApproving, setIsApproving] = useState(false);
   const [isRejecting, setIsRejecting] = useState(false);
   const [rejectError, setRejectError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  // Latched from a server 409: the issue is not claimable, so approving it will
+  // keep failing until it is re-fetched. Cleared on issue change (PUPPET-146).
+  const [approveBlockedReason, setApproveBlockedReason] = useState<
+    string | null
+  >(null);
   const [showMoveDialog, setShowMoveDialog] = useState(false);
   const [moveError, setMoveError] = useState<string | null>(null);
   const [isStartingEpicRun, setIsStartingEpicRun] = useState(false);
@@ -1038,14 +1045,23 @@ function DefaultContent({
 
   // Approve handler
   const handleApprove = useCallback(async () => {
-    if (!issue || !onApprove || isApproving) return;
+    if (!issue || !onApprove || isApproving || approveBlockedReason !== null)
+      return;
     setIsApproving(true);
+    setActionError(null);
     try {
       await onApprove(issue as Issue);
-    } catch {
+    } catch (err) {
       setIsApproving(false);
+      const message = err instanceof Error ? err.message : "Failed to approve";
+      setActionError(message);
+      // A 409 means the server refuses to claim this issue; retrying without a
+      // re-fetch can only fail the same way, so latch the reason and disable.
+      if (err instanceof ApiError && err.status === 409) {
+        setApproveBlockedReason(message);
+      }
     }
-  }, [issue, onApprove, isApproving]);
+  }, [issue, onApprove, isApproving, approveBlockedReason]);
 
   // Reject button click - show form
   const handleRejectClick = useCallback(() => {
@@ -1102,6 +1118,8 @@ function DefaultContent({
     setIsApproving(false);
     setIsRejecting(false);
     setRejectError(null);
+    setActionError(null);
+    setApproveBlockedReason(null);
     setShowMoveDialog(false);
     setMoveError(null);
     setIsStartingEpicRun(false);
@@ -1264,7 +1282,8 @@ function DefaultContent({
             type="button"
             className={styles.reviewApproveButton}
             onClick={handleApprove}
-            disabled={isApproving}
+            disabled={isApproving || approveBlockedReason !== null}
+            title={approveBlockedReason ?? undefined}
             aria-label="Approve"
             data-testid="panel-approve-button"
           >
@@ -1274,11 +1293,22 @@ function DefaultContent({
             type="button"
             className={styles.reviewRejectButton}
             onClick={handleRejectClick}
+            disabled={approveBlockedReason !== null}
+            title={approveBlockedReason ?? undefined}
             aria-label="Reject"
             data-testid="panel-reject-button"
           >
             {"\u2717"} Reject
           </button>
+          {/* Inline so the reason outlives the toast's auto-dismiss. */}
+          {approveBlockedReason && (
+            <span
+              className={styles.reviewBlockedReason}
+              data-testid="panel-approve-blocked-reason"
+            >
+              {approveBlockedReason}
+            </span>
+          )}
         </div>
       )}
 
@@ -1558,6 +1588,15 @@ function DefaultContent({
           message={statusError}
           onDismiss={() => setStatusError(null)}
           testId="status-error-toast"
+        />
+      )}
+
+      {/* Error toast for approve/reject failures */}
+      {actionError && (
+        <ErrorToast
+          message={actionError}
+          onDismiss={() => setActionError(null)}
+          testId="action-error-toast"
         />
       )}
 
