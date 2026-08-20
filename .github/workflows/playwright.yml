@@ -2,15 +2,52 @@ name: Playwright E2E
 
 on:
   push:
-    branches: [main]
+    branches: [main, v5]
+  # No branch filter: this repo's trunk moved to v5 and stacked PRs target each
+  # other, so a base-branch allowlist silently skips almost every pull request.
   pull_request:
-    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
   group: playwright-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  browser-tests:
+    name: Browser E2E Tests (mocked)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: internal/webui/frontend/package-lock.json
+
+      - name: Install frontend deps
+        run: cd internal/webui/frontend && npm ci
+
+      - name: Install Chromium
+        run: cd internal/webui/frontend && npx playwright install --with-deps chromium
+
+      # The chromium project mocks every API route, so this job needs no loom
+      # serve, no fleet-db checkout and no repository secret.
+      - name: Run mocked browser E2E tests
+        run: make test-e2e-ci
+        env:
+          CI: "true"
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report-browser
+          path: internal/webui/frontend/playwright-report/
+          retention-days: 7
+
   api-tests:
     name: API E2E Tests
     runs-on: ubuntu-latest
@@ -46,6 +83,6 @@ jobs:
         uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: playwright-report
+          name: playwright-report-api
           path: internal/webui/frontend/playwright-report/
           retention-days: 7

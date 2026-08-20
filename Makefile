@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify local-mode-skills-verify local-mode-skill-pointer-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-ci test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify local-mode-skills-verify local-mode-skill-pointer-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -449,6 +449,18 @@ test-e2e: ensure-frontend-deps
 	@cd $(FRONTEND_DIR) && npx playwright test --project=chromium --workers=1
 
 # Run Playwright API e2e tests (self-contained: builds loom, starts server, runs tests)
+# Run the browser e2e suite exactly as CI does: the chromium-ci project, which
+# is the mocked chromium suite minus the quarantined specs listed in
+# playwright.config.ts. --ignore-snapshots because the committed PNGs were
+# generated on the author's machine and snapshotPathTemplate omits {platform},
+# so they cannot match another OS's font rendering; the specs still run.
+# --workers=2 overrides the config's blanket workers:1-under-CI: that setting
+# suits the small API tier, but serialising 360+ browser tests takes hours.
+test-e2e-ci: ensure-frontend-deps
+	@echo "Running Playwright browser e2e tests (mocked, CI selection)..."
+	@cd $(FRONTEND_DIR) && npx playwright install --with-deps chromium 2>/dev/null || true
+	@cd $(FRONTEND_DIR) && npx playwright test --project=chromium-ci --workers=2 --ignore-snapshots
+
 test-e2e-api: ensure-frontend-deps
 	@echo "Running Playwright API e2e tests (self-contained)..."
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 npx playwright test --project=api
