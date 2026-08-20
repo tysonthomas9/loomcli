@@ -7,6 +7,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 
+import { ApiError } from "@/types";
 import type { Issue, IssueDetails, IssueWithDependencyMetadata } from "@/types";
 import type { ViewMode } from "@/types";
 import type { Status } from "@/types/issue";
@@ -182,6 +183,12 @@ export function IssueDetailView({
   const [isRejecting, setIsRejecting] = useState(false);
   const [isSavingStatus, setIsSavingStatus] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  // Latched from a server 409: the issue is not claimable, so approving it will
+  // keep failing until it is re-fetched. Cleared on issue change (PUPPET-146).
+  const [approveBlockedReason, setApproveBlockedReason] = useState<
+    string | null
+  >(null);
 
   // Reset state when issue changes
   useEffect(() => {
@@ -191,6 +198,8 @@ export function IssueDetailView({
     setIsRejecting(false);
     setIsSavingStatus(false);
     setStatusError(null);
+    setActionError(null);
+    setApproveBlockedReason(null);
   }, [issue?.id]);
 
   // Escape key handler via global shortcut layer system.
@@ -206,22 +215,33 @@ export function IssueDetailView({
   useRegisterEscapeLayer(LAYER_ISSUE_PANEL, handleEscapeBack, true);
 
   const handleApprove = useCallback(async () => {
-    if (!issue || isApproving) return;
+    if (!issue || isApproving || approveBlockedReason !== null) return;
     setIsApproving(true);
+    setActionError(null);
     try {
       await onApprove(issue as Issue);
-    } catch {
+    } catch (err) {
       setIsApproving(false);
+      const message = err instanceof Error ? err.message : "Failed to approve";
+      setActionError(message);
+      // A 409 means the server refuses to claim this issue; retrying without a
+      // re-fetch can only fail the same way, so latch the reason and disable.
+      if (err instanceof ApiError && err.status === 409) {
+        setApproveBlockedReason(message);
+      }
     }
-  }, [issue, onApprove, isApproving]);
+  }, [issue, onApprove, isApproving, approveBlockedReason]);
 
   const handleRejectSubmit = useCallback(async () => {
     if (!issue || isRejecting || !rejectComment.trim()) return;
     setIsRejecting(true);
+    setActionError(null);
     try {
       await onReject(issue as Issue, rejectComment.trim());
-    } catch {
+    } catch (err) {
       setIsRejecting(false);
+      const message = err instanceof Error ? err.message : "Failed to reject";
+      setActionError(message);
     }
   }, [issue, onReject, isRejecting, rejectComment]);
 
@@ -542,7 +562,8 @@ export function IssueDetailView({
               type="button"
               className={styles.reviewApproveButton}
               onClick={handleApprove}
-              disabled={isApproving}
+              disabled={isApproving || approveBlockedReason !== null}
+              title={approveBlockedReason ?? undefined}
               aria-label="Approve"
               data-testid="detail-approve-button"
             >
@@ -552,11 +573,22 @@ export function IssueDetailView({
               type="button"
               className={styles.reviewRejectButton}
               onClick={() => setShowRejectForm(true)}
+              disabled={approveBlockedReason !== null}
+              title={approveBlockedReason ?? undefined}
               aria-label="Reject"
               data-testid="detail-reject-button"
             >
               {"\u2717"} Reject
             </button>
+            {/* Inline so the reason outlives the toast's auto-dismiss. */}
+            {approveBlockedReason && (
+              <span
+                className={styles.reviewBlockedReason}
+                data-testid="detail-approve-blocked-reason"
+              >
+                {approveBlockedReason}
+              </span>
+            )}
           </div>
         )}
 
@@ -689,6 +721,14 @@ export function IssueDetailView({
           message={statusError}
           onDismiss={() => setStatusError(null)}
           testId="status-error-toast"
+        />
+      )}
+
+      {actionError && (
+        <ErrorToast
+          message={actionError}
+          onDismiss={() => setActionError(null)}
+          testId="action-error-toast"
         />
       )}
     </div>

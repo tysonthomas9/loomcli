@@ -610,6 +610,35 @@ function App() {
     }
   }, [issueDetails, issuesMap, updateIssueDetails]);
 
+  // Force-resync the open detail surface when an optimistic update SETTLES.
+  //
+  // The effect above intentionally refuses staler data via its `updated_at`
+  // guard, which is right for SSE races but wrong here: `updateIssueStatus`
+  // stamps its optimistic issue with a fabricated `updated_at: now`, and a
+  // rollback restores the snapshot's ORIGINAL (older) timestamp. The guard
+  // therefore filters the revert out and the detail view keeps showing a
+  // status the server rejected until a full reload (PUPPET-146).
+  //
+  // Keyed on the pending -> settled edge instead of on timestamps. This relies
+  // on the store writing `issuesMap` BEFORE it clears `pendingIds` (both the
+  // rollback and the auto-rollback-timeout paths in issueStore.ts do); if that
+  // order is ever swapped, an intermediate render would see the settle edge
+  // while the map still holds the optimistic value and this would silently
+  // become a no-op.
+  const prevPendingIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const prev = prevPendingIdsRef.current;
+    prevPendingIdsRef.current = new Set(pendingIds);
+    if (!issueDetails) return;
+    const id = issueDetails.id;
+    // Still pending, or never was pending — nothing settled for this issue.
+    if (!prev.has(id) || pendingIds.has(id)) return;
+    const latest = issuesMap.get(id);
+    if (!latest) return;
+    // Status only: widening this would churn against the effect above.
+    if (latest.status !== issueDetails.status) updateIssueDetails(latest);
+  }, [pendingIds, issuesMap, issueDetails, updateIssueDetails]);
+
   // Deep-link error: toast + navigate away when a deep-linked issue fails to load
   useEffect(() => {
     if (!detailError || activeView !== "issue-detail" || !selectedIssueId)
@@ -746,10 +775,18 @@ function App() {
         // Close the detail panel and clean up after successful approve
         handlePanelClose();
       } catch (err) {
-        // updateIssueStatus errors are handled by useOptimisticUpdate rollback,
-        // so the "help" branch stays silent here. The "code" (closeIssue) and
-        // "plan" (updateIssue) branches do NOT go through that path, so without
-        // a toast a failed approve would look identical to a successful one.
+        // The "help" branch stays silent here because the store's optimistic
+        // rollback already toasts. That toast is a SUPPLEMENTARY surface, not
+        // the only one, and it does not cover the store's pre-flight throws
+        // ("not found", "already has a pending update"). The "code" (closeIssue)
+        // and "plan" (updateIssue) branches do not go through that path at all,
+        // so without a toast a failed approve would look identical to a
+        // successful one.
+        //
+        // Either way the error is RE-THROWN: callers own their own UI (inline
+        // error, spinner release, disabled-with-reason). Swallowing it here
+        // made the returned promise resolve on failure, which left the detail
+        // surfaces silent and their Approve buttons stuck on "..." (PUPPET-146).
         if (!mountedRef.current) return;
         const reviewType = getReviewType(issue);
         if (reviewType === "code" || reviewType === "plan") {
@@ -757,6 +794,7 @@ function App() {
             err instanceof Error ? err.message : "Failed to approve";
           showToast(message, { type: "error" });
         }
+        throw err;
       }
     },
     [workspaceId, updateIssueStatus, refetch, handlePanelClose, showToast],
@@ -785,6 +823,9 @@ function App() {
         if (!mountedRef.current) return;
         const message = err instanceof Error ? err.message : "Failed to reject";
         showToast(message, { type: "error" });
+        // Re-thrown for the same reason as handleApprove above: the callers
+        // release their own spinner and render the message inline.
+        throw err;
       }
     },
     [workspaceId, refetch, handlePanelClose, showToast],
