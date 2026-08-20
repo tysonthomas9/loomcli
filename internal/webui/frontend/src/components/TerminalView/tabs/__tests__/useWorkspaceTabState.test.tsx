@@ -4,7 +4,7 @@
 
 /**
  * Unit tests for useWorkspaceTabState hook.
- * Validates that tab state is keyed by stable workspace UUID (not name),
+ * Validates that tab state is keyed by the route workspace id (not the name),
  * so workspace renames do NOT clear tabs.
  */
 
@@ -19,7 +19,7 @@ import type { TabState } from "../terminalTabUtils";
 
 let mockContextValue = {
   activeWorkspaceName: "my-workspace" as string | null,
-  workspace: { id: "uuid-A" } as { id: string } | null,
+  workspaceId: "uuid-A",
 };
 
 vi.mock("@/hooks", () => ({
@@ -58,7 +58,7 @@ describe("useWorkspaceTabState", () => {
     vi.clearAllMocks();
     mockContextValue = {
       activeWorkspaceName: "my-workspace",
-      workspace: { id: "uuid-A" },
+      workspaceId: "uuid-A",
     };
   });
 
@@ -66,7 +66,7 @@ describe("useWorkspaceTabState", () => {
     it("returns name and id from workspace context", () => {
       mockContextValue = {
         activeWorkspaceName: "production",
-        workspace: { id: "uuid-prod" },
+        workspaceId: "uuid-prod",
       };
       const args = createArgs();
 
@@ -79,7 +79,7 @@ describe("useWorkspaceTabState", () => {
     it("returns 'default' for name when activeWorkspaceName is null", () => {
       mockContextValue = {
         activeWorkspaceName: null,
-        workspace: { id: "uuid-A" },
+        workspaceId: "uuid-A",
       };
       const args = createArgs();
 
@@ -89,10 +89,10 @@ describe("useWorkspaceTabState", () => {
       expect(result.current.id).toBe("uuid-A");
     });
 
-    it("returns empty string for id when workspace is null", () => {
+    it("returns empty string for id when the route workspace id is empty", () => {
       mockContextValue = {
         activeWorkspaceName: "ws",
-        workspace: null,
+        workspaceId: "",
       };
       const args = createArgs();
 
@@ -106,7 +106,7 @@ describe("useWorkspaceTabState", () => {
     it("does not call setTabs or setActiveTabId when name changes but UUID stays the same", () => {
       mockContextValue = {
         activeWorkspaceName: "old-name",
-        workspace: { id: "uuid-A" },
+        workspaceId: "uuid-A",
       };
       const args = createArgs({
         tabs: [makeTab("1")],
@@ -118,7 +118,7 @@ describe("useWorkspaceTabState", () => {
       // Rename workspace — UUID unchanged
       mockContextValue = {
         activeWorkspaceName: "new-name",
-        workspace: { id: "uuid-A" },
+        workspaceId: "uuid-A",
       };
       args.setTabs.mockClear();
       args.setActiveTabId.mockClear();
@@ -134,7 +134,7 @@ describe("useWorkspaceTabState", () => {
     it("saves tabs for old workspace and clears for new workspace", () => {
       mockContextValue = {
         activeWorkspaceName: "ws-A",
-        workspace: { id: "uuid-A" },
+        workspaceId: "uuid-A",
       };
       const tabA = makeTab("a1");
       const args = createArgs({
@@ -147,7 +147,7 @@ describe("useWorkspaceTabState", () => {
       // Switch to workspace B (never visited)
       mockContextValue = {
         activeWorkspaceName: "ws-B",
-        workspace: { id: "uuid-B" },
+        workspaceId: "uuid-B",
       };
 
       rerender();
@@ -161,7 +161,7 @@ describe("useWorkspaceTabState", () => {
     it("restores previously saved tabs when switching back", () => {
       mockContextValue = {
         activeWorkspaceName: "ws-A",
-        workspace: { id: "uuid-A" },
+        workspaceId: "uuid-A",
       };
       const tabA = makeTab("a1");
       const args = createArgs({
@@ -174,7 +174,7 @@ describe("useWorkspaceTabState", () => {
       // Switch to workspace B
       mockContextValue = {
         activeWorkspaceName: "ws-B",
-        workspace: { id: "uuid-B" },
+        workspaceId: "uuid-B",
       };
       rerender();
 
@@ -188,7 +188,7 @@ describe("useWorkspaceTabState", () => {
       // Switch back to workspace A
       mockContextValue = {
         activeWorkspaceName: "ws-A",
-        workspace: { id: "uuid-A" },
+        workspaceId: "uuid-A",
       };
       rerender();
 
@@ -199,10 +199,10 @@ describe("useWorkspaceTabState", () => {
   });
 
   describe("missing workspace data uses __unresolved__", () => {
-    it("starts with __unresolved__ when wsData is null, then transitions when resolved", () => {
+    it("starts with __unresolved__ when the route id is empty, then transitions when it resolves", () => {
       mockContextValue = {
         activeWorkspaceName: "ws",
-        workspace: null,
+        workspaceId: "",
       };
       const args = createArgs();
 
@@ -214,7 +214,7 @@ describe("useWorkspaceTabState", () => {
       // Now workspace data arrives
       mockContextValue = {
         activeWorkspaceName: "ws",
-        workspace: { id: "uuid-A" },
+        workspaceId: "uuid-A",
       };
 
       rerender();
@@ -228,7 +228,7 @@ describe("useWorkspaceTabState", () => {
     it("does not save tabs under __unresolved__ when UUID resolves", () => {
       mockContextValue = {
         activeWorkspaceName: "ws",
-        workspace: null,
+        workspaceId: "",
       };
       const args = createArgs({
         tabs: [makeTab("1")],
@@ -240,7 +240,7 @@ describe("useWorkspaceTabState", () => {
       // UUID resolves
       mockContextValue = {
         activeWorkspaceName: "ws",
-        workspace: { id: "uuid-A" },
+        workspaceId: "uuid-A",
       };
       rerender();
 
@@ -248,7 +248,7 @@ describe("useWorkspaceTabState", () => {
       // to __unresolved__ would restore stale tabs
       mockContextValue = {
         activeWorkspaceName: "other",
-        workspace: null,
+        workspaceId: "",
       };
       args.setTabs.mockClear();
       args.setActiveTabId.mockClear();
@@ -264,7 +264,7 @@ describe("useWorkspaceTabState", () => {
     it("does not fire effect on re-render with same UUID", () => {
       mockContextValue = {
         activeWorkspaceName: "ws-A",
-        workspace: { id: "uuid-A" },
+        workspaceId: "uuid-A",
       };
       const args = createArgs({
         tabs: [makeTab("1")],

@@ -1,7 +1,8 @@
 /**
  * Hook to manage workspace-scoped tab state.
  * Resolves the active workspace from WorkspaceContext, saves/restores tab sets
- * when switching workspaces (keyed by stable workspace UUID), and returns
+ * when switching workspaces (keyed by the route workspace id, so there is no
+ * transient "__unresolved__" hop while polled workspace data catches up), and returns
  * the resolved workspace name and ID.
  */
 
@@ -30,9 +31,8 @@ export function useWorkspaceTabState(
   args: WorkspaceTabStateArgs,
 ): WorkspaceTabStateReturn {
   const { tabs, activeTabId, setTabs, setActiveTabId, initializedRef } = args;
-  const { activeWorkspaceName, workspace: wsData } = useWorkspaceContext();
+  const { activeWorkspaceName, workspaceId } = useWorkspaceContext();
   const workspace = activeWorkspaceName || "default";
-  const workspaceId = wsData?.id || "";
 
   const stateMapRef = useRef<
     Map<string, { tabs: TabState[]; activeTabId: string }>
