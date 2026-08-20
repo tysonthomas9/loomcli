@@ -218,3 +218,22 @@ func TestClassifyHTTPError_NoCodeLeavesMetaUntouched(t *testing.T) {
 		}
 	}
 }
+
+// The operator-parked claim refusal (fleet-db PUPPET-148) must survive the
+// three-hop classifier as KindValidation WITH its code intact, because the
+// permanence predicate keys off the code, not the Kind.
+func TestClassifyHTTPError_OperatorOnlyClaimRefusal(t *testing.T) {
+	err := classifyHTTPError("ClaimIssue", 422, apiResponse{
+		Code:  "operator_only",
+		Error: "issue is operator-only and cannot be claimed by an agent: PUPPET-1",
+	})
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("kind = %v, want KindValidation", err)
+	}
+	if got := backend.ErrorCode(err); got != "operator_only" {
+		t.Errorf("ErrorCode = %q, want operator_only", got)
+	}
+	if !backend.ClaimRejectedPermanently(err) {
+		t.Error("ClaimRejectedPermanently = false, want true")
+	}
+}
