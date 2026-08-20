@@ -138,11 +138,16 @@ export function agentAllowedRepoNames(
   agent: WorkspaceAgentInfo,
   repos: RepoInfo[],
 ): string[] {
-  if (agent.repos.length === 0 && agent.repo_groups.length === 0) {
+  // Defend against a missing/undefined field: the create-agent response can
+  // omit empty repos/repo_groups, so an optimistically-inserted fresh agent may
+  // reach here before the normalized workspace refetch. Treat absent as empty.
+  const agentRepos = agent.repos ?? [];
+  const agentRepoGroups = agent.repo_groups ?? [];
+  if (agentRepos.length === 0 && agentRepoGroups.length === 0) {
     return repos.map((repo) => repo.name);
   }
-  const allowed = new Set(agent.repos);
-  for (const group of agent.repo_groups) {
+  const allowed = new Set(agentRepos);
+  for (const group of agentRepoGroups) {
     for (const repo of repos) {
       if (repo.groups?.includes(group)) {
         allowed.add(repo.name);
