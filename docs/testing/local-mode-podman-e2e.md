@@ -100,7 +100,7 @@ The Compose project is `loomcli-local-mode`.
 
 | Service      | Responsibility                                                                                                                                                                                        | Host port |
 | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
-| `redis`      | FleetDB backing store for the dogfood stack.                                                                                                                                                          | none      |
+| `redis`      | FleetDB backing store for the dogfood stack. Holds the issue store and terminal tab metadata (`internal/webui/tabmeta`), AOF-persisted to the `redis-data` volume so both survive a container restart. | none      |
 | `fleet-db`   | Shared issue store and control-plane API. Loom talks to this through the same FleetDB client used by distributed mode.                                                                                | `8280`    |
 | `loom-local` | Builds and runs `loom`, creates the `LOCALMODE` workspace, creates fixture repos and worktrees, registers planner/coder agent definitions, seeds tasks, starts `loom serve`, then runs `loom daemon`. | `8282`    |
 | `ui-local`   | Caddy serving `internal/webui/frontend/dist` and proxying API/WebSocket traffic to `loom-local`.                                                                                                      | `8283`    |
