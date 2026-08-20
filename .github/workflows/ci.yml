@@ -29,7 +29,11 @@ jobs:
       - name: Install golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          # Pinned: v2.13.0 bundles honnef.co/go/tools v0.8.0-rc.1, whose nilness
+          # analyzer panics on getsentry/sentry-go ("unhandled builtin recover",
+          # https://github.com/dominikh/go-tools/issues/1725). Unpin once a
+          # release with the fix ships.
+          version: v2.12.2
           install-only: true
 
       - name: Configure Git

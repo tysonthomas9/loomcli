@@ -39,7 +39,9 @@ CI/CD pipelines, scripts, configuration files, coverage, and tooling.
 
 #### Lint
 
-- **Tool**: `golangci-lint-action@v9` (latest version)
+- **Tool**: `golangci-lint-action@v9`, pinned to `v2.12.2` (not `latest`) —
+  see PUPPET-161. Bumping is a deliberate, reviewed change; keep the pin in
+  step with the version developers install locally.
 - **Timeout**: 5 minutes
 
 #### Coverage Upload
