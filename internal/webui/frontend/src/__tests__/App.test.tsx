@@ -28,6 +28,7 @@ import {
   ONBOARDING_ISSUE_DESCRIPTION,
   ONBOARDING_ISSUE_TITLE,
 } from "@/utils/onboardingDefaults";
+import { ApiError } from "@/types";
 import type { Issue, Status } from "@/types";
 
 import App from "../App";
@@ -2244,6 +2245,127 @@ describe("App", () => {
       });
     });
 
+    // PUPPET-146 regression. `updateIssueStatus` stamps its optimistic issue
+    // with a fabricated fresh `updated_at`, but a rollback restores the
+    // snapshot's ORIGINAL (older) one — so the sync effect above filters the
+    // revert out and the detail surface keeps a status the server rejected.
+    // The settle-sync effect keys on the pending -> settled edge instead.
+    it("reverts loaded issue details when an optimistic update rolls back", async () => {
+      const updateIssueDetails = vi.fn();
+      const snapshot = createMockIssue({
+        id: "issue-1",
+        title: "Blocked Issue",
+        status: "blocked",
+        updated_at: "2024-01-01T00:00:00Z",
+      });
+      // Mid-flight: the map holds the optimistic value with a fresher stamp.
+      const optimistic = createMockIssue({
+        id: "issue-1",
+        title: "Blocked Issue",
+        status: "in_progress",
+        updated_at: "2024-01-01T00:05:00Z",
+      });
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [optimistic],
+        pendingIds: new Set(["issue-1"]),
+      });
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          issueDetails: {
+            id: "issue-1",
+            title: "Blocked Issue",
+            priority: 2,
+            status: "blocked",
+            issue_type: "task",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
+          },
+          updateIssueDetails,
+        }),
+      );
+
+      const { rerender } = render(<App />);
+
+      // The optimistic flip reaches the detail surface (fresher timestamp).
+      await waitFor(() => {
+        expect(updateIssueDetails).toHaveBeenCalledWith(optimistic);
+      });
+      updateIssueDetails.mockClear();
+
+      // Settle: the store rolls the map back to the snapshot (older stamp)
+      // and clears pendingIds in the same synchronous block. `issueDetails`
+      // now carries the optimistic value the flip above wrote into it — which
+      // is exactly the state the user is looking at when the 409 lands.
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          issueDetails: {
+            id: "issue-1",
+            title: "Blocked Issue",
+            priority: 2,
+            status: "in_progress",
+            issue_type: "task",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:05:00Z",
+          },
+          updateIssueDetails,
+        }),
+      );
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [snapshot],
+        pendingIds: new Set<string>(),
+      });
+      rerender(<App />);
+
+      await waitFor(() => {
+        expect(updateIssueDetails).toHaveBeenCalledWith(snapshot);
+      });
+    });
+
+    // The settle edge is the only signal, so it does not matter WHY the entry
+    // left pendingIds: the store's auto-rollback timeout restores the same
+    // snapshot and clears the same set (asserted against the real store in
+    // issueStore.test.ts), and the detail surface reverts identically.
+    it("does not resync details when the settled issue's status is unchanged", async () => {
+      const updateIssueDetails = vi.fn();
+      const settled = createMockIssue({
+        id: "issue-1",
+        title: "Blocked Issue",
+        status: "blocked",
+        updated_at: "2024-01-01T00:00:00Z",
+      });
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [settled],
+        pendingIds: new Set(["issue-1"]),
+      });
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          issueDetails: {
+            id: "issue-1",
+            title: "Blocked Issue",
+            priority: 2,
+            status: "blocked",
+            issue_type: "task",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
+          },
+          updateIssueDetails,
+        }),
+      );
+
+      const { rerender } = render(<App />);
+      updateIssueDetails.mockClear();
+
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [settled],
+        pendingIds: new Set<string>(),
+      });
+      rerender(<App />);
+
+      await waitFor(() => {
+        expect(updateIssueDetails).not.toHaveBeenCalled();
+      });
+    });
+
     it("passes error state to IssueDetailPanel when fetch fails", () => {
       const issues = [
         createMockIssue({
@@ -3547,6 +3669,52 @@ describe("App", () => {
         });
       });
       mockCloseIssueFn.mockReset();
+    });
+
+    // PUPPET-146: the "help" branch delegates its toast to the store's
+    // rollback, but it used to SWALLOW the error too — so the promise
+    // handleApprove returns resolved on failure, the caller's catch never
+    // ran, and the detail view stayed silent with its Approve button stuck
+    // on the "..." spinner. The re-throw is what makes both observable.
+    it("help approve re-throws so the detail view surfaces the failure", async () => {
+      const updateIssueStatus = vi
+        .fn()
+        .mockRejectedValue(
+          new ApiError(409, "Conflict", { error: "issue is not claimable" }),
+        );
+      mockStoreState = createMockUseIssuesReturn({ updateIssueStatus });
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          issueDetails: {
+            id: "help-issue",
+            title: "Help Review Issue",
+            priority: 2,
+            status: "blocked",
+            notes: "I need help with this task",
+            issue_type: "task",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
+          },
+        }),
+      );
+      vi.mocked(useRouteView).mockReturnValue(
+        createViewStateReturn("issue-detail"),
+      );
+
+      render(<App />);
+
+      fireEvent.click(screen.getByTestId("detail-approve-button"));
+
+      // The component's own error surface only appears if the promise rejected.
+      await waitFor(() => {
+        expect(screen.getByTestId("action-error-toast")).toHaveTextContent(
+          "issue is not claimable",
+        );
+      });
+      // ...and the spinner was released rather than latched forever.
+      expect(screen.getByTestId("detail-approve-button")).not.toHaveTextContent(
+        "...",
+      );
     });
 
     // Plan approve no longer goes through the optimistic path (it has to carry

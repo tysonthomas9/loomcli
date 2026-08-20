@@ -17,6 +17,7 @@ import {
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
+import { ApiError } from "@/types";
 import type { Issue } from "@/types";
 import { updateIssue } from "@/api";
 
@@ -327,6 +328,179 @@ describe("IssueDetailView", () => {
 
       // Dropdown should be re-enabled after error
       expect(dropdown).not.toBeDisabled();
+    });
+  });
+
+  // PUPPET-146. `onApprove` used to swallow its error, so none of this was
+  // reachable: no message, and `isApproving` never cleared.
+  describe("review action failures", () => {
+    /** A review item: `blocked` + notes is the "help" review type. */
+    function createReviewIssue(overrides: Partial<Issue> = {}): Issue {
+      return createTestIssue({
+        status: "blocked",
+        notes: "I need help with this task",
+        ...overrides,
+      });
+    }
+
+    it("shows the server message verbatim when approve fails", async () => {
+      const onApprove = vi
+        .fn()
+        .mockRejectedValue(
+          new ApiError(409, "Conflict", { error: "issue is not claimable" }),
+        );
+      render(
+        <IssueDetailView
+          {...createDefaultProps({ issue: createReviewIssue(), onApprove })}
+        />,
+      );
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("detail-approve-button"));
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("action-error-toast")).toHaveTextContent(
+          "issue is not claimable",
+        );
+      });
+    });
+
+    it("releases the approve spinner after a failure", async () => {
+      const onApprove = vi.fn().mockRejectedValue(new Error("Network error"));
+      render(
+        <IssueDetailView
+          {...createDefaultProps({ issue: createReviewIssue(), onApprove })}
+        />,
+      );
+
+      const approve = screen.getByTestId("detail-approve-button");
+      await act(async () => {
+        fireEvent.click(approve);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("action-error-toast")).toBeInTheDocument();
+      });
+      expect(approve).not.toHaveTextContent("...");
+    });
+
+    it("disables both review buttons with the reason after a 409", async () => {
+      const onApprove = vi
+        .fn()
+        .mockRejectedValue(
+          new ApiError(409, "Conflict", { error: "issue is not claimable" }),
+        );
+      render(
+        <IssueDetailView
+          {...createDefaultProps({ issue: createReviewIssue(), onApprove })}
+        />,
+      );
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("detail-approve-button"));
+      });
+
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("detail-approve-blocked-reason"),
+        ).toHaveTextContent("issue is not claimable");
+      });
+      const approve = screen.getByTestId("detail-approve-button");
+      const reject = screen.getByTestId("detail-reject-button");
+      expect(approve).toBeDisabled();
+      expect(reject).toBeDisabled();
+      expect(approve).toHaveAttribute("title", "issue is not claimable");
+      expect(reject).toHaveAttribute("title", "issue is not claimable");
+    });
+
+    // A network error is not the server refusing: retrying is legitimate.
+    it("leaves the buttons enabled after a non-409 failure", async () => {
+      const onApprove = vi
+        .fn()
+        .mockRejectedValue(new ApiError(0, "Network error"));
+      render(
+        <IssueDetailView
+          {...createDefaultProps({ issue: createReviewIssue(), onApprove })}
+        />,
+      );
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("detail-approve-button"));
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("action-error-toast")).toBeInTheDocument();
+      });
+      expect(screen.getByTestId("detail-approve-button")).not.toBeDisabled();
+      expect(screen.getByTestId("detail-reject-button")).not.toBeDisabled();
+      expect(
+        screen.queryByTestId("detail-approve-blocked-reason"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("clears the error and the blocked latch when the issue changes", async () => {
+      const onApprove = vi
+        .fn()
+        .mockRejectedValue(
+          new ApiError(409, "Conflict", { error: "issue is not claimable" }),
+        );
+      const props = createDefaultProps({
+        issue: createReviewIssue(),
+        onApprove,
+      });
+      const { rerender } = render(<IssueDetailView {...props} />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("detail-approve-button"));
+      });
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("detail-approve-blocked-reason"),
+        ).toBeInTheDocument();
+      });
+
+      rerender(
+        <IssueDetailView
+          {...props}
+          issue={createReviewIssue({ id: "other-issue" })}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId("detail-approve-blocked-reason"),
+        ).not.toBeInTheDocument();
+      });
+      expect(
+        screen.queryByTestId("action-error-toast"),
+      ).not.toBeInTheDocument();
+      expect(screen.getByTestId("detail-approve-button")).not.toBeDisabled();
+    });
+
+    it("shows the error and releases the spinner when reject fails", async () => {
+      const onReject = vi
+        .fn()
+        .mockRejectedValue(new Error("Failed to add comment"));
+      render(
+        <IssueDetailView
+          {...createDefaultProps({ issue: createReviewIssue(), onReject })}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("detail-reject-button"));
+      fireEvent.change(screen.getByTestId("detail-reject-comment"), {
+        target: { value: "not good enough" },
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("detail-reject-submit"));
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("action-error-toast")).toHaveTextContent(
+          "Failed to add comment",
+        );
+      });
     });
   });
 });
