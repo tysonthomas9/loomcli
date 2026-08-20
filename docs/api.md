@@ -4216,3 +4216,51 @@ Error codes appear in the `code` field of error responses on issue-related endpo
 | `429` | Rate limit exceeded |
 | `503` | Service unavailable (daemon down, fleet not configured) |
 | `504` | Gateway timeout (daemon connection timeout) |
+
+## Doctor Checks (CLI)
+
+`loom doctor` runs local health checks and exits non-zero when any check fails.
+`--json` renders the same results as `{"checks": [...], "summary": {...}}`.
+
+### `agent_profiles`
+
+Verifies every provisioned per-agent harness profile under
+`<workspace runtime dir>/.loom/agent-profiles/<agent>/{claude,codex}` against the
+harness binary on `PATH`. Each profile carries a `.manifest.json` pinning both a
+content fingerprint and an exact harness version; a harness auto-update leaves
+the pin stale, and a stale pin refuses the agent's next spawn.
+
+The check walks the profile directory rather than the daemon's agent roster, so
+it also covers `lead`, which is not supervisor-spawned and which no
+daemon-driven check can see. The harness binary is probed once per distinct
+harness, not once per profile.
+
+| Condition | Status | Summary |
+|-----------|--------|---------|
+| Every profile verifies | `pass` | `N agent profile(s) verified against <version>` |
+| Version drift, no `--fix` | `fail` | `N of M agent profile(s) pin a stale harness version` |
+| Fingerprint mismatch, missing or unreadable manifest | `fail` | `N of M agent profile(s) failed verification` |
+| Harness binary produced no version | `warn` | `cannot verify: <binary> --version produced nothing` |
+| No `.loom/agent-profiles` at all | *(no output)* | the check is skipped entirely |
+
+`Detail` names each failing profile: the agent, its directory, both version
+strings (for drift) or both fingerprints (for a mismatch), and the exact repair
+command.
+
+### `loom doctor --fix` for `agent_profiles`
+
+`--fix` re-blesses every profile whose *only* fault is version drift: it rewrites
+the manifest's `harness_version` field and re-verifies. The result is `warn`, not
+`pass` — something was written and the operator should see it — so the command
+exits 0. Re-blessing a running agent needs no restart: the manifest is read once
+per spawn and no provisioned content is touched, so the agent's next spawn
+succeeds.
+
+Two limits are structural:
+
+- A fingerprint mismatch, a missing manifest and an unreadable manifest are
+  reported **unfixed** and keep the check at `fail`, even under `--fix`. Blessing
+  would launder unverified content past the check the manifest exists to make;
+  the repair there is the operator's provisioner.
+- Nothing in the daemon ever re-blesses. `--fix` is reachable only from an
+  operator-typed command, so a harness upgrade always passes through a human.
