@@ -18,13 +18,22 @@ import (
 // Loom session as agent_transcript.jsonl. It is best-effort and returns an
 // empty path when no matching rollout is available.
 func (s *Store) SyncLatestCodexRollout(sessionID, workDir string, since time.Time) (string, error) {
+	return s.syncLatestCodexRolloutFor("", sessionID, workDir, since)
+}
+
+// syncLatestCodexRolloutFor is SyncLatestCodexRollout scoped to an agent: when
+// that agent has a harness profile directory, rollouts are read from there
+// instead of from this process's own CODEX_HOME. The daemon finalizes after
+// the agent is reaped and so has none of the agent's injected environment; an
+// empty agent resolves exactly as before.
+func (s *Store) syncLatestCodexRolloutFor(agent, sessionID, workDir string, since time.Time) (string, error) {
 	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.SyncLatestCodexRollout",
 		attrLoomSessionID(sessionID),
 		attrLoomBackend("codex"),
 	)
 	defer span.End()
 
-	root := CodexSessionsRoot()
+	root := CodexSessionsRootFor(s.RootDir(), agent)
 	if root == "" {
 		return "", nil
 	}
