@@ -27,6 +27,7 @@ export function getStatusDotColor(type: ParsedLoomStatus["type"]): string {
       return "var(--color-status-review, #3b82f6)";
     case "idle":
     case "ready":
+    case "unknown":
     default:
       return "var(--color-status-idle, #9ca3af)";
   }
@@ -54,7 +55,9 @@ export function getStatusLabel(parsed: ParsedLoomStatus): string {
     case "changes":
       return `${parsed.changeCount ?? 0} change${parsed.changeCount === 1 ? "" : "s"}`;
     case "ready":
-    default:
       return "Ready";
+    case "unknown":
+    default:
+      return "Unknown";
   }
 }

@@ -1,6 +1,11 @@
-import { useEffect, useCallback, useRef } from "react";
+import { useEffect, useCallback, useRef, useState } from "react";
 
-import { ensureAgentTerminalSession, type IssueContext } from "@/hooks/api";
+import {
+  ensureAgentTerminalSession,
+  isStartingTerminalSessionError,
+  type IssueContext,
+} from "@/hooks/api";
+import { calculateBackoffDelay } from "@/utils/reconnectBackoff";
 
 import type { ConnectionState } from "./TerminalInstance";
 import {
@@ -30,7 +35,16 @@ interface UseSessionSeedingOptions {
 
 interface UseSessionSeedingReturn {
   trySeedOnConnect: (tabId: string) => void;
+  agentResolutionState: "idle" | "waking" | "failed";
+  agentResolutionError: string | null;
 }
+
+const AGENT_ENSURE_RETRY_CONFIG = {
+  baseDelay: 1000,
+  maxDelay: 30000,
+  maxAttempts: 10,
+  jitterFactor: 0,
+};
 
 /**
  * Manages pending issue / agent context delivery into the terminal tab
@@ -52,6 +66,7 @@ export function useSessionSeeding({
   createTab,
   config,
   initializedRef,
+  tabsRef,
   workspaceIdRef,
 }: UseSessionSeedingOptions): UseSessionSeedingReturn {
   const agentResolutionRef = useRef<{
@@ -59,6 +74,16 @@ export function useSessionSeeding({
     promise: ReturnType<typeof ensureAgentTerminalSession>;
   } | null>(null);
   const consumedAgentKeyRef = useRef<string | null>(null);
+  const agentRetryRef = useRef({ key: "", attempt: 0 });
+  const onAgentNameConsumedRef = useRef(onAgentNameConsumed);
+  onAgentNameConsumedRef.current = onAgentNameConsumed;
+  const [readyAgentKey, setReadyAgentKey] = useState<string | null>(null);
+  const [agentResolutionState, setAgentResolutionState] = useState<
+    "idle" | "waking" | "failed"
+  >("idle");
+  const [agentResolutionError, setAgentResolutionError] = useState<
+    string | null
+  >(null);
 
   const mergeExistingAgentTab = useCallback(
     (existing: TabState, metadataTab: TabState): TabState => {
@@ -78,6 +103,10 @@ export function useSessionSeeding({
   useEffect(() => {
     if (!pendingAgentName) {
       consumedAgentKeyRef.current = null;
+      agentRetryRef.current = { key: "", attempt: 0 };
+      setAgentResolutionState("idle");
+      setAgentResolutionError(null);
+      setReadyAgentKey(null);
     }
   }, [pendingAgentName]);
 
@@ -120,97 +149,163 @@ export function useSessionSeeding({
     config,
   ]);
 
-  // Handle pending agent name: resolve or switch to the agent's PTY terminal.
+  // Preserve the pre-feature initialization gate without coupling the retry
+  // lifecycle to tab changes. Tab initialization may change `tabs`; once the
+  // key is ready, subsequent churn only reassigns the same state value.
   useEffect(() => {
     if (!pendingAgentName || !initializedRef.current) return;
+    setReadyAgentKey(`${workspaceIdRef.current}:${pendingAgentName}`);
+  }, [pendingAgentName, tabs, initializedRef, workspaceIdRef]);
 
-    const existingTab = tabs.find((t) => t.agentName === pendingAgentName);
-    if (!existingTab && tabs.length >= MAX_TABS) {
-      onAgentNameConsumed?.();
+  // Handle pending agent name: resolve or switch to the agent's PTY terminal.
+  useEffect(() => {
+    if (!pendingAgentName) return;
+    const requestKey = `${workspaceIdRef.current}:${pendingAgentName}`;
+    if (readyAgentKey !== requestKey) return;
+
+    const currentTabs = tabsRef.current;
+    const existingTab = currentTabs.find(
+      (tab) => tab.agentName === pendingAgentName,
+    );
+    if (!existingTab && currentTabs.length >= MAX_TABS) {
+      onAgentNameConsumedRef.current?.();
       return;
     }
 
     let cancelled = false;
-    const requestKey = `${workspaceIdRef.current}:${pendingAgentName}`;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
     if (consumedAgentKeyRef.current === requestKey) return;
 
-    let request = agentResolutionRef.current;
-    if (!request || request.key !== requestKey) {
-      request = {
-        key: requestKey,
-        promise: ensureAgentTerminalSession(
-          workspaceIdRef.current,
-          pendingAgentName,
-        ),
-      };
-      agentResolutionRef.current = request;
+    if (agentRetryRef.current.key !== requestKey) {
+      agentRetryRef.current = { key: requestKey, attempt: 0 };
+      setAgentResolutionState("idle");
+      setAgentResolutionError(null);
     }
 
-    request.promise
-      .then((meta) => {
-        if (cancelled) return;
-        const agentName = meta.agent_id ?? pendingAgentName;
-        const newTab: TabState = {
-          id: meta.session_name,
-          label: meta.label,
-          sessionName: meta.session_name,
-          connectionState: "disconnected" as ConnectionState,
-          backendName: meta.backend ?? "agent",
-          kind: meta.kind ?? "agent",
-          agentName,
-          writable: meta.writable ?? true,
-          pinned: meta.pinned,
-          ...(meta.role ? { role: meta.role } : {}),
+    const consumeFailure = (err: unknown) => {
+      console.error(
+        `Failed to resolve agent terminal ${pendingAgentName}:`,
+        err,
+      );
+      // A non-transient resolve failure must NOT silently revert to idle: doing
+      // so leaves the previously-selected agent's live terminal mounted, so
+      // keystrokes land on the wrong lead. Surface it as a failed resolution
+      // (with the server's reason) and keep pendingAgentName so the failure
+      // overlay renders in place of any other agent's terminal. Mirrors the
+      // retry-exhaustion branch below; selecting another agent clears it.
+      const message =
+        err instanceof Error && err.message.trim()
+          ? err.message
+          : "Lead terminal could not be opened. Try opening the agent again.";
+      setAgentResolutionState("failed");
+      setAgentResolutionError(message);
+      consumedAgentKeyRef.current = requestKey;
+    };
+
+    const resolveAgent = () => {
+      if (cancelled) return;
+      let request = agentResolutionRef.current;
+      if (!request || request.key !== requestKey) {
+        request = {
+          key: requestKey,
+          promise: ensureAgentTerminalSession(
+            workspaceIdRef.current,
+            pendingAgentName,
+          ),
         };
-        setTabs((prev) => {
-          if (prev.some((tab) => tab.id === newTab.id)) {
-            return prev.map((tab) =>
-              tab.id === newTab.id ? mergeExistingAgentTab(tab, newTab) : tab,
+        agentResolutionRef.current = request;
+      }
+
+      request.promise
+        .then((meta) => {
+          if (cancelled) return;
+          const agentName = meta.agent_id ?? pendingAgentName;
+          const newTab: TabState = {
+            id: meta.session_name,
+            label: meta.label,
+            sessionName: meta.session_name,
+            connectionState: "disconnected" as ConnectionState,
+            backendName: meta.backend ?? "agent",
+            kind: meta.kind ?? "agent",
+            agentName,
+            writable: meta.writable ?? true,
+            pinned: meta.pinned,
+            ...(meta.role ? { role: meta.role } : {}),
+          };
+          setTabs((prev) => {
+            if (prev.some((tab) => tab.id === newTab.id)) {
+              return prev.map((tab) =>
+                tab.id === newTab.id ? mergeExistingAgentTab(tab, newTab) : tab,
+              );
+            }
+            if (prev.some((tab) => tab.agentName === agentName)) {
+              let replaced = false;
+              return prev.flatMap((tab) => {
+                if (tab.agentName !== agentName) return [tab];
+                if (replaced) return [];
+                replaced = true;
+                return [{ ...tab, ...newTab }];
+              });
+            }
+            if (prev.length >= MAX_TABS) return prev;
+            return [...prev, newTab];
+          });
+          setActiveTabId(newTab.id);
+          setAgentResolutionState("idle");
+          setAgentResolutionError(null);
+          agentRetryRef.current = { key: requestKey, attempt: 0 };
+          consumedAgentKeyRef.current = requestKey;
+          onAgentNameConsumedRef.current?.();
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          if (isStartingTerminalSessionError(err)) {
+            setAgentResolutionState("waking");
+            setAgentResolutionError(null);
+            const retry = agentRetryRef.current;
+            if (retry.attempt < AGENT_ENSURE_RETRY_CONFIG.maxAttempts) {
+              const delay = calculateBackoffDelay(
+                retry.attempt,
+                AGENT_ENSURE_RETRY_CONFIG,
+              );
+              retry.attempt += 1;
+              retryTimer = setTimeout(resolveAgent, delay);
+              return;
+            }
+            const message =
+              "Lead sandbox did not become ready. Try opening the agent again.";
+            console.error(
+              `Failed to resolve agent terminal ${pendingAgentName}:`,
+              err,
             );
+            setAgentResolutionState("failed");
+            setAgentResolutionError(message);
+            consumedAgentKeyRef.current = requestKey;
+            return;
           }
-          if (existingTab) {
-            let replaced = false;
-            return prev.flatMap((tab) => {
-              if (tab.agentName !== agentName) return [tab];
-              if (replaced) return [];
-              replaced = true;
-              return [{ ...tab, ...newTab }];
-            });
+          consumeFailure(err);
+        })
+        .finally(() => {
+          if (agentResolutionRef.current?.key === requestKey) {
+            agentResolutionRef.current = null;
           }
-          if (prev.length >= MAX_TABS) return prev;
-          return [...prev, newTab];
         });
-        setActiveTabId(newTab.id);
-        consumedAgentKeyRef.current = requestKey;
-        onAgentNameConsumed?.();
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        console.error(
-          `Failed to resolve agent terminal ${pendingAgentName}:`,
-          err,
-        );
-        consumedAgentKeyRef.current = requestKey;
-        onAgentNameConsumed?.();
-      })
-      .finally(() => {
-        if (agentResolutionRef.current?.key === requestKey) {
-          agentResolutionRef.current = null;
-        }
-      });
+    };
+
+    resolveAgent();
 
     return () => {
       cancelled = true;
+      if (retryTimer !== null) clearTimeout(retryTimer);
     };
   }, [
     pendingAgentName,
-    tabs,
-    onAgentNameConsumed,
-    initializedRef,
-    setTabs,
-    setActiveTabId,
-    workspaceIdRef,
+    readyAgentKey,
     mergeExistingAgentTab,
+    setActiveTabId,
+    setTabs,
+    tabsRef,
+    workspaceIdRef,
   ]);
 
   const trySeedOnConnect = useCallback((_tabId: string) => {
@@ -218,5 +313,9 @@ export function useSessionSeeding({
     // Extension point for future client-side prompt injection.
   }, []);
 
-  return { trySeedOnConnect };
+  return {
+    trySeedOnConnect,
+    agentResolutionState,
+    agentResolutionError,
+  };
 }

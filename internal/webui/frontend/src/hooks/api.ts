@@ -36,6 +36,7 @@ export {
   patchTerminalState,
   deleteTabMetadata,
   ensureAgentTerminalSession,
+  isStartingTerminalSessionError,
   startTerminalSetup,
 } from "@/api/terminal";
 export type {

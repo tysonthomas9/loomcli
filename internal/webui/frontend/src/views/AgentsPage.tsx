@@ -89,6 +89,43 @@ const WorkspaceFileBrowser = lazy(() =>
   })),
 );
 
+function CopyableRuntimeID({
+  label,
+  value,
+  onCopy,
+}: {
+  label: string;
+  value: string;
+  onCopy: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      className={styles.runtimeIdButton}
+      onClick={onCopy}
+      aria-label={`Copy ${label} ${value}`}
+      title={`Copy ${label}`}
+    >
+      <code>{value}</code>
+      <svg
+        className={styles.runtimeCopyIcon}
+        width={15}
+        height={15}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+      </svg>
+    </button>
+  );
+}
+
 export function AgentsPage(): JSX.Element {
   return (
     <ErrorBoundary>
@@ -121,6 +158,18 @@ function AgentsPageInner(): JSX.Element {
   const { repos } = useWorkspaceContext();
   const { settings: localSettings } = useLocalSettings();
   const { showToast } = useToast();
+
+  const copyRuntimeID = useCallback(
+    async (label: string, value: string) => {
+      try {
+        await navigator.clipboard.writeText(value);
+        showToast(`${label} copied`, { type: "success" });
+      } catch {
+        showToast(`Failed to copy ${label}`, { type: "error" });
+      }
+    },
+    [showToast],
+  );
   const {
     width: openQueueWidth,
     applyDelta: applyOpenQueueWidthDelta,
@@ -429,10 +478,12 @@ function AgentsPageInner(): JSX.Element {
               <section className={styles.card}>
                 <h2 className={styles.cardLabel}>Agent Info</h2>
                 <dl className={styles.configGrid}>
-                  <div>
-                    <dt>Status</dt>
-                    <dd>{formatStatusLabel(statusType)}</dd>
-                  </div>
+                  {selected.runtime_provider !== "daytona" ? (
+                    <div>
+                      <dt>Status</dt>
+                      <dd>{formatStatusLabel(statusType)}</dd>
+                    </div>
+                  ) : null}
                   <div>
                     <dt>Role</dt>
                     <dd>{formatStatusLabel(roleName)}</dd>
@@ -463,6 +514,86 @@ function AgentsPageInner(): JSX.Element {
                   ) : null}
                 </dl>
               </section>
+              {selected.runtime_provider === "daytona" ? (
+                <section className={styles.card}>
+                  <h2 className={styles.cardLabel}>Runtime</h2>
+                  <dl className={styles.configGrid}>
+                    <div>
+                      <dt>Runtime provider</dt>
+                      <dd>Daytona sandbox</dd>
+                    </div>
+                    <div>
+                      <dt>Runtime status</dt>
+                      <dd>
+                        {formatStatusLabel(
+                          selected.runtime_status ?? "unknown",
+                        )}
+                      </dd>
+                    </div>
+                    {selected.runtime_error ? (
+                      <div>
+                        <dt>Runtime error</dt>
+                        <dd>{selected.runtime_error}</dd>
+                      </div>
+                    ) : null}
+                    {selected.runtime_placement ? (
+                      <>
+                        <div>
+                          <dt>Sandbox ID</dt>
+                          <dd>
+                            {selected.runtime_placement.sandbox_id ? (
+                              <CopyableRuntimeID
+                                label="Sandbox ID"
+                                value={selected.runtime_placement.sandbox_id}
+                                onCopy={() =>
+                                  void copyRuntimeID(
+                                    "Sandbox ID",
+                                    selected.runtime_placement!.sandbox_id,
+                                  )
+                                }
+                              />
+                            ) : (
+                              "—"
+                            )}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Placement ID</dt>
+                          <dd>
+                            <CopyableRuntimeID
+                              label="Placement ID"
+                              value={selected.runtime_placement.placement_id}
+                              onCopy={() =>
+                                void copyRuntimeID(
+                                  "Placement ID",
+                                  selected.runtime_placement!.placement_id,
+                                )
+                              }
+                            />
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Placement state</dt>
+                          <dd>
+                            {formatStatusLabel(
+                              selected.runtime_placement.state,
+                            )}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Placement generation</dt>
+                          <dd>{selected.runtime_placement.generation}</dd>
+                        </div>
+                      </>
+                    ) : (
+                      <div>
+                        <dt>Placement</dt>
+                        <dd>No placement</dd>
+                      </div>
+                    )}
+                  </dl>
+                </section>
+              ) : null}
             </div>
           );
         case "git":
@@ -535,6 +666,7 @@ function AgentsPageInner(): JSX.Element {
       roleName,
       infoStats,
       statusType,
+      copyRuntimeID,
     ],
   );
 

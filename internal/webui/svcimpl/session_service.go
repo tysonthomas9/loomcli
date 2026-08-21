@@ -281,6 +281,7 @@ func (s *sessionServiceImpl) controlPlaneTaskSessions(ctx context.Context, wsID,
 		item := service.SessionListItem{
 			SessionRecord: sessionRecordFromAgentSession(rec),
 			IsActive:      isActiveAgentSession(rec.Status),
+			GitHubPRURL:   rec.Metadata["github_pr_url"],
 		}
 		fillControlPlaneArtifactFlags(&item, stores, rec)
 		items = append(items, item)

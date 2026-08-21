@@ -11,13 +11,15 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/api"
 	"github.com/tysonthomas9/loomcli/internal/httpclient"
+	"github.com/tysonthomas9/loomcli/internal/leadoccupant"
 )
 
 // Issue backend type constants.
 const (
-	IssueBackendFleetDB = "fleetdb"
-	IssueBackendFleet   = "fleet"
-	IssueBackendAPI     = "api"
+	IssueBackendFleetDB  = "fleetdb"
+	IssueBackendFleet    = "fleet"
+	IssueBackendAPI      = "api"
+	issueBackendOccupant = "lead-occupant"
 )
 
 // validIssueBackends is the set of accepted values for daemon.issue_backend.
@@ -41,6 +43,9 @@ func ResolveIssueBackendType() string {
 // resolveIssueBackendFromEnv checks environment variables for issue backend selection.
 // Returns "" if no env var determines the backend.
 func resolveIssueBackendFromEnv() string {
+	if _, state := leadoccupant.FromEnv(); state != leadoccupant.StateAbsent {
+		return issueBackendOccupant
+	}
 	// 1. LOOM_ISSUE_BACKEND env var (highest precedence)
 	if v, ok := os.LookupEnv("LOOM_ISSUE_BACKEND"); ok && v != "" {
 		if validIssueBackends[v] {
@@ -73,6 +78,12 @@ func IsFleetDBActive() bool {
 // (i.e., --server or LOOM_SERVER_URL is set).
 func IsAPIActive() bool {
 	return ResolveIssueBackendType() == IssueBackendAPI
+}
+
+// IsLeadOccupantActive reports whether this process is a sandboxed lead
+// occupant. Partial environments count so callers fail closed on that path.
+func IsLeadOccupantActive() bool {
+	return ResolveIssueBackendType() == issueBackendOccupant
 }
 
 // --- Package-level IssueBackend state (merged from issue_backend.go) ---

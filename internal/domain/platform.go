@@ -368,6 +368,10 @@ type TriggerDelivery struct {
 
 type DriverRunStatus string
 
+// DriverRunSourceLeadOccupant identifies runs created by the authenticated
+// sandbox-lead dispatch surface.
+const DriverRunSourceLeadOccupant = "lead-occupant"
+
 const (
 	DriverRunQueued      DriverRunStatus = "queued"
 	DriverRunRunning     DriverRunStatus = "running"

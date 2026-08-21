@@ -45,9 +45,10 @@ type SessionResponse struct {
 	ErrorClass string `json:"error_class,omitempty"`
 
 	// Computed fields (populated by handlers)
-	IsActive      bool `json:"is_active"`
-	HasTranscript bool `json:"has_transcript"`
-	HasDiff       bool `json:"has_diff"`
+	IsActive      bool   `json:"is_active"`
+	HasTranscript bool   `json:"has_transcript"`
+	HasDiff       bool   `json:"has_diff"`
+	GitHubPRURL   string `json:"github_pr_url,omitempty"`
 
 	// Detail-only field — omitted in list view
 	LastError string `json:"last_error,omitempty"`

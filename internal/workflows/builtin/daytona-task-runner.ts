@@ -134,8 +134,14 @@ export async function run(ctx = {}) {
     }
 
     const client = new Daytona(daytonaConfig);
+    const sandboxLabels = inputValue(request, "sandboxLabels");
+    // Caller labels must not reach the loom-* namespace: the placement broker
+    // matches lead sandboxes on loom-placement (and the reaper on loom-env /
+    // loom-workspace / loom-agent), so a forged key could bind or reap a live
+    // lead placement. Request input is untrusted here.
     sandbox = await client.create({
       labels: {
+        ...Object.fromEntries(Object.entries(sandboxLabels && typeof sandboxLabels === "object" && !Array.isArray(sandboxLabels) ? sandboxLabels : {}).filter(([key, value]) => typeof value === "string" && !key.toLowerCase().startsWith("loom"))),
         loom: "epic-runner",
         runner: "daytona-task-runner",
         task_run_id: taskRunId,

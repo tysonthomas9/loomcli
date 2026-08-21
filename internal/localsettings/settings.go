@@ -29,6 +29,7 @@ const (
 
 	RuntimeCredentialProviderDaytona = "daytona"
 	RuntimeCredentialProviderGitHub  = "github"
+	RuntimeCredentialProviderCodex   = "codex"
 
 	EnvFleetDBRedisAddr     = "LOOM_FLEET_DB_REDIS_ADDR"
 	EnvFleetDBRedisPassword = "LOOM_FLEET_DB_REDIS_PASSWORD" //nolint:gosec // env var name, not a credential
@@ -68,6 +69,7 @@ type LocalTaskRunnerConfig struct {
 type RuntimeCredentialSetConfig struct {
 	Daytona RuntimeCredentialConfig `json:"daytona,omitempty"`
 	GitHub  RuntimeCredentialConfig `json:"github,omitempty"`
+	Codex   RuntimeCredentialConfig `json:"codex,omitempty"`
 }
 
 // RuntimeCredentialConfig is ciphertext-only credential metadata.
@@ -108,6 +110,7 @@ type SanitizedLocalTaskRunnerConfig struct {
 type SanitizedRuntimeCredentialSet struct {
 	Daytona SanitizedRuntimeCredential `json:"daytona"`
 	GitHub  SanitizedRuntimeCredential `json:"github"`
+	Codex   SanitizedRuntimeCredential `json:"codex"`
 }
 
 // SanitizedRuntimeCredential is safe to return to the browser.
@@ -232,6 +235,7 @@ func Sanitize(settings Settings) SanitizedSettings {
 		RuntimeCredentials: SanitizedRuntimeCredentialSet{
 			Daytona: sanitizeRuntimeCredential(settings.RuntimeCredentials.Daytona),
 			GitHub:  sanitizeRuntimeCredential(settings.RuntimeCredentials.GitHub),
+			Codex:   sanitizeRuntimeCredential(settings.RuntimeCredentials.Codex),
 		},
 	}
 }
@@ -274,7 +278,7 @@ func sanitizeRuntimeCredential(credential RuntimeCredentialConfig) SanitizedRunt
 func SealRuntimeCredential(dataDir, provider, plaintext string, now time.Time) (RuntimeCredentialConfig, error) {
 	provider = normalizeRuntimeCredentialProvider(provider)
 	switch provider {
-	case RuntimeCredentialProviderDaytona, RuntimeCredentialProviderGitHub:
+	case RuntimeCredentialProviderDaytona, RuntimeCredentialProviderGitHub, RuntimeCredentialProviderCodex:
 	case "":
 		return RuntimeCredentialConfig{}, errors.New("runtime credential provider required")
 	default:
@@ -310,6 +314,8 @@ func UnsealRuntimeCredential(dataDir string, settings Settings, provider string)
 		credential = settings.RuntimeCredentials.Daytona
 	case RuntimeCredentialProviderGitHub:
 		credential = settings.RuntimeCredentials.GitHub
+	case RuntimeCredentialProviderCodex:
+		credential = settings.RuntimeCredentials.Codex
 	default:
 		return "", fmt.Errorf("runtime credential provider %q is not supported", provider)
 	}
@@ -337,6 +343,8 @@ func normalizeRuntimeCredentialProvider(provider string) string {
 		return RuntimeCredentialProviderDaytona
 	case RuntimeCredentialProviderGitHub, "gh":
 		return RuntimeCredentialProviderGitHub
+	case RuntimeCredentialProviderCodex:
+		return RuntimeCredentialProviderCodex
 	default:
 		return strings.ToLower(strings.TrimSpace(provider))
 	}

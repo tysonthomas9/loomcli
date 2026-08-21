@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -22,6 +23,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
+	"github.com/tysonthomas9/loomcli/internal/leadclient"
+	"github.com/tysonthomas9/loomcli/internal/leadoccupant"
+	"github.com/tysonthomas9/loomcli/internal/placement"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -31,6 +35,7 @@ import (
 const envOrchestratorSessionID = "LOOM_ORCHESTRATOR_SESSION_ID"
 const envAgentName = "LOOM_AGENT_NAME"
 const envAgentTerminalID = "LOOM_AGENT_TERMINAL_ID"
+const envLeadAPIURL = "LOOM_LEAD_API_URL"
 
 const leadHeartbeatInterval = 30 * time.Second
 const leadStoreOpTimeout = 10 * time.Second
@@ -40,6 +45,9 @@ const leadStoreOpTimeout = 10 * time.Second
 // --message flag.
 var leadMessage string
 var leadPromptFile string
+
+var openLeadFleetStore = cmdstore.OpenStore
+var writeLeadOccupantToken = leadoccupant.WriteToken
 
 var leadCmd = &cobra.Command{
 	Use:     "lead",
@@ -78,14 +86,21 @@ func init() {
 // supplied via --prompt wins, otherwise inline role prompt and default lead
 // prompt resolution happen in that order.
 func leadStartupPrompt(ctx context.Context, registration leadSessionRegistration) (string, error) {
+	return leadStartupPromptForRuntime(ctx, registration, false)
+}
+
+func leadStartupPromptForRuntime(ctx context.Context, registration leadSessionRegistration, resumeEligible bool) (string, error) {
 	prompt, err := generateLeadTerminalPrompt(ctx, registration)
 	if err != nil {
 		return "", err
 	}
-	return applyLeadPromptContext(prompt), nil
+	return applyLeadPromptContext(prompt, resumeEligible), nil
 }
 
 func runLead(cmd *cobra.Command, args []string) {
+	inheritedOrchestratorSession := strings.TrimSpace(os.Getenv(envOrchestratorSessionID)) != ""
+	resumeEligible := leadResumeEligible(sandboxLeadStoreRequired(), inheritedOrchestratorSession)
+
 	// Get current working directory
 	workDir, err := os.Getwd()
 	if err != nil {
@@ -115,7 +130,11 @@ func runLead(cmd *cobra.Command, args []string) {
 	defer registration.Finalize()
 
 	// Generate the terminal-agent prompt and append the user's initial request if provided.
-	prompt, err := leadStartupPrompt(context.Background(), registration)
+	prompt, err := leadStartupPromptForRuntime(
+		context.Background(),
+		registration,
+		resumeEligible && strings.EqualFold(strings.TrimSpace(backendName), backends.NameCodex),
+	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading terminal prompt: %v\n", err)
 		fmt.Fprintf(os.Stderr, "\nDropping into a shell. Fix the prompt file and run 'loom lead' to retry.\n\n")
@@ -123,10 +142,21 @@ func runLead(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	// Invoke agent interactively (no agent name needed - lead mode doesn't claim tasks).
-	// Backends with a controlled runtime (codex app-server, harness-wrapper PTY
-	// supervision for claude and others) get queued message delivery; anything
-	// else falls back to a plain interactive launch.
+	invokeLeadAgent(registration, workDir, prompt, backendName, resumeEligible)
+}
+
+// invokeLeadAgent runs the agent interactively (no agent name needed — lead mode
+// doesn't claim tasks). Backends with a controlled runtime (codex app-server,
+// harness-wrapper PTY supervision for claude and others) get queued message
+// delivery; anything else falls back to a plain interactive launch. A failing
+// launch drops the user into a shell rather than exiting.
+func invokeLeadAgent(
+	registration leadSessionRegistration,
+	workDir string,
+	prompt string,
+	backendName string,
+	resumeEligible bool,
+) {
 	handled, invokeErr := backends.RunControlledLeadRuntime(
 		context.Background(),
 		registration.Store(),
@@ -136,6 +166,7 @@ func runLead(cmd *cobra.Command, args []string) {
 		workDir,
 		prompt,
 		backendName,
+		resumeEligible,
 	)
 	if !handled {
 		invokeErr = cli.InvokeAgent(workDir, prompt, "")
@@ -169,9 +200,10 @@ func loadLeadRolePrompt(ctx context.Context, registration leadSessionRegistratio
 	if st == nil || ws == "" {
 		openCtx, cancel := context.WithTimeout(ctx, leadStoreOpTimeout)
 		defer cancel()
-		var ok bool
-		handle, ws, ok = openLeadSessionStore(openCtx)
-		if !ok {
+		var err error
+		handle, ws, err = openLeadSessionStore(openCtx)
+		if err != nil {
+			slog.Warn("lead inline prompt lookup: store unavailable", "err", err)
 			return ""
 		}
 		defer func() { _ = handle.Close() }()
@@ -199,9 +231,17 @@ func loadLeadRolePrompt(ctx context.Context, registration leadSessionRegistratio
 
 // applyLeadPromptContext appends the backend assignment context and the
 // optional --message initial request onto the base terminal-agent prompt.
-func applyLeadPromptContext(prompt string) string {
-	if assignment := currentLeadAssignmentPrompt(context.Background()); assignment != "" {
-		prompt += "\n\n## Loom Backend Assignment\n\n" + assignment
+//
+// Resume-eligible leads never embed the assignment here: their assignment is
+// delivered as an inbox turn (the delivered-mark stays unset so the server
+// re-enqueues it). Embedding it as well would deliver the assignment twice on
+// any fresh path such leads still take (first boot, resume-validation failure,
+// or the fail-safe fresh relaunch), which all reuse this prompt.
+func applyLeadPromptContext(prompt string, resumeEligible bool) string {
+	if !resumeEligible {
+		if assignment := currentLeadAssignmentPrompt(context.Background(), true); assignment != "" {
+			prompt += "\n\n## Loom Backend Assignment\n\n" + assignment
+		}
 	}
 	if leadMessage != "" {
 		prompt += "\n\n## User's Initial Request\n\n" + leadMessage +
@@ -210,9 +250,10 @@ func applyLeadPromptContext(prompt string) string {
 	return prompt
 }
 
-func currentLeadAssignmentPrompt(ctx context.Context) string {
-	handle, ws, ok := openLeadSessionStore(ctx)
-	if !ok {
+func currentLeadAssignmentPrompt(ctx context.Context, markDelivered bool) string {
+	handle, ws, err := openLeadSessionStore(ctx)
+	if err != nil {
+		slog.Warn("lead assignment context: store unavailable", "err", err)
 		return ""
 	}
 	defer func() { _ = handle.Close() }()
@@ -223,10 +264,16 @@ func currentLeadAssignmentPrompt(ctx context.Context) string {
 	if err != nil || assignment == nil {
 		return ""
 	}
-	if err := markLeadAssignmentDelivered(loadCtx, handle.Store, ws, assignment); err != nil {
-		slog.Debug("lead assignment delivery marker failed", "err", err)
+	if markDelivered {
+		if err := markLeadAssignmentDelivered(loadCtx, handle.Store, ws, assignment); err != nil {
+			slog.Debug("lead assignment delivery marker failed", "err", err)
+		}
 	}
 	return epicrunner.FormatLeadAssignmentContext(assignment)
+}
+
+func leadResumeEligible(isSandboxLead, inheritedOrchestratorSession bool) bool {
+	return isSandboxLead && !inheritedOrchestratorSession
 }
 
 func markLeadAssignmentDelivered(ctx context.Context, st store.Store, ws string, assignment *epicrunner.LeadAssignmentContext) error {
@@ -285,50 +332,94 @@ func (r leadSessionRegistration) Store() store.Store {
 func registerLeadOrchestratorSession(ctx context.Context, workDir string) leadSessionRegistration {
 	noop := func() {}
 	empty := leadSessionRegistration{finalize: noop}
-	handle, ws, ok := openLeadSessionStore(ctx)
-	if !ok {
+	handle, ws, err := openLeadSessionStore(ctx)
+	if err != nil {
+		if sandboxLeadStoreRequired() {
+			fmt.Fprintf(os.Stderr, "Error opening sandbox lead store: %v\n", err)
+			os.Exit(1)
+		}
+		slog.Debug("lead orchestrator session: store unavailable, continuing without registration", "err", err)
 		return empty
 	}
 
 	sid := resolveLeadOrchestratorSessionID()
 	agentID := resolveLeadAgentID()
-	if err := createLeadSession(ctx, handle, ws, sid, agentID, workDir); err != nil {
+	// createLeadSession returns the effective session id: on the host this
+	// echoes sid, but in a sandbox session-ensure adopts-or-mints its own
+	// server-side SessionID, and descendants must inherit that one.
+	effectiveSID, err := createLeadSession(ctx, handle, ws, sid, agentID, workDir)
+	if err != nil {
 		_ = handle.Close()
+		if sandboxLeadStoreRequired() {
+			fmt.Fprintf(os.Stderr, "Error registering sandbox lead session: %v\n", err)
+			os.Exit(1)
+		}
 		slog.Warn("lead orchestrator session: create failed, continuing without registration", "err", err)
 		return empty
 	}
 
-	activateLeadSessionEnv(sid)
-	fmt.Printf("Lead session: %s (orchestrator linkage active)\n\n", sid)
-	stopHB, wg := startLeadSessionHeartbeat(handle, ws, sid)
+	activateLeadSessionEnv(effectiveSID)
+	fmt.Printf("Lead session: %s (orchestrator linkage active)\n\n", effectiveSID)
+	stopHB, wg := startLeadSessionHeartbeat(handle, ws, effectiveSID)
 	return leadSessionRegistration{
 		handle:    handle,
 		Workspace: ws,
-		SessionID: sid,
+		SessionID: effectiveSID,
 		AgentID:   agentID,
-		finalize:  leadSessionFinalizer(handle, ws, sid, stopHB, wg),
+		finalize:  leadSessionFinalizer(handle, ws, effectiveSID, stopHB, wg),
 	}
 }
 
-func openLeadSessionStore(ctx context.Context) (*bootstrap.StoreHandle, string, bool) {
-	handle, err := cmdstore.OpenStore(ctx)
+func openLeadSessionStore(ctx context.Context) (*bootstrap.StoreHandle, string, error) {
+	if token := strings.TrimSpace(os.Getenv(placement.OccupantTokenEnv)); token != "" {
+		baseURL := strings.TrimSpace(os.Getenv(envLeadAPIURL))
+		if baseURL == "" {
+			return nil, "", fmt.Errorf("%s is required for sandbox lead store", envLeadAPIURL)
+		}
+		ws := strings.TrimSpace(os.Getenv("LOOM_WORKSPACE"))
+		if ws == "" {
+			return nil, "", fmt.Errorf("LOOM_WORKSPACE is required for sandbox lead store")
+		}
+		if err := writeLeadOccupantToken(token); err != nil {
+			return nil, "", fmt.Errorf("persist initial occupant token: %w", err)
+		}
+		shim, err := leadclient.New(leadclient.Config{
+			BaseURL:       baseURL,
+			WorkspaceKey:  ws,
+			OccupantToken: token,
+			PersistToken:  writeLeadOccupantToken,
+		})
+		if err != nil {
+			return nil, "", err
+		}
+		return &bootstrap.StoreHandle{Store: shim}, ws, nil
+	}
+
+	handle, err := openLeadFleetStore(ctx)
 	if err != nil {
-		slog.Debug("lead orchestrator session: store unavailable, continuing without registration", "err", err)
-		return nil, "", false
+		return nil, "", err
 	}
 	ws, err := bootstrap.ResolveActiveWorkspaceKey(ctx, handle.Store.Workspaces())
 	if err != nil {
 		_ = handle.Close()
-		slog.Debug("lead orchestrator session: no active workspace, continuing without registration", "err", err)
-		return nil, "", false
+		return nil, "", err
 	}
-	return handle, ws, true
+	return handle, ws, nil
 }
 
-func createLeadSession(ctx context.Context, handle *bootstrap.StoreHandle, ws, sid, agentID, workDir string) error {
+func sandboxLeadStoreRequired() bool {
+	return strings.TrimSpace(os.Getenv(placement.OccupantTokenEnv)) != ""
+}
+
+// createLeadSession creates (or, in a sandbox, adopts via session-ensure) the
+// lead's orchestration session and returns the effective session id. On the
+// host Create echoes sid; in a sandbox the server mints/adopts its own
+// SessionID, which the caller must propagate so descendants attribute to the
+// real session. On the host's already-exists path the id is the requested sid.
+func createLeadSession(ctx context.Context, handle *bootstrap.StoreHandle, ws, sid, agentID, workDir string) (string, error) {
 	createCtx, createCancel := context.WithTimeout(ctx, leadStoreOpTimeout)
 	defer createCancel()
-	_, err := handle.Store.AgentSessions().Create(createCtx, store.AgentSessionCreate{
+	created, err := handle.Store.AgentSessions().Create(createCtx, store.AgentSessionCreate{
 		WorkspaceKey: ws,
 		SessionID:    sid,
 		AgentID:      agentID,
@@ -341,9 +432,15 @@ func createLeadSession(ctx context.Context, handle *bootstrap.StoreHandle, ws, s
 		},
 	})
 	if errors.Is(err, domain.ErrAlreadyExists) {
-		return nil
+		return sid, nil
 	}
-	return err
+	if err != nil {
+		return "", err
+	}
+	if created != nil && strings.TrimSpace(created.SessionID) != "" {
+		return created.SessionID, nil
+	}
+	return sid, nil
 }
 
 func leadSessionActor() string {
@@ -422,9 +519,24 @@ func heartbeatLeadSession(handle *bootstrap.StoreHandle, ws, sid string, stopHB 
 	}
 }
 
+// refuseSandboxShell reports whether this process is a sandboxed lead
+// placement occupant (ticket 14): dropping to an interactive shell there is a
+// billed zombie that also defeats the placement PTY-exit discriminator, so
+// the lead must exit non-zero instead.
+func refuseSandboxShell(w io.Writer) bool {
+	if os.Getenv(placement.OccupantTokenEnv) == "" {
+		return false
+	}
+	_, _ = fmt.Fprintln(w, "refusing to drop to an interactive shell in a sandboxed lead placement")
+	return true
+}
+
 // execShell replaces the current process with an interactive shell.
 // Falls back to running the shell as a subprocess if exec fails.
 func execShell(workDir string) {
+	if refuseSandboxShell(os.Stderr) {
+		os.Exit(1)
+	}
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/bash"

@@ -498,16 +498,17 @@ func validateCycleAction(i int, a AgentHookAction) error {
 // WorkspaceKey, typically used as the tmux session + worktree dir name).
 // Empty Repos means "all repos in the workspace".
 type Agent struct {
-	WorkspaceKey     string   `json:"workspace_key"`
-	Name             string   `json:"name"`
-	RoleName         string   `json:"role_name"`
-	Auto             bool     `json:"auto,omitempty"`
-	Backend          string   `json:"backend,omitempty"`
-	FallbackBackends []string `json:"fallback_backends,omitempty"`
-	Repos            []string `json:"repos,omitempty"`
-	RepoGroups       []string `json:"repo_groups,omitempty"`
-	CrossRepo        bool     `json:"cross_repo,omitempty"`
-	Parent           string   `json:"parent,omitempty"`
+	WorkspaceKey     string          `json:"workspace_key"`
+	Name             string          `json:"name"`
+	RoleName         string          `json:"role_name"`
+	Auto             bool            `json:"auto,omitempty"`
+	Backend          string          `json:"backend,omitempty"`
+	FallbackBackends []string        `json:"fallback_backends,omitempty"`
+	RuntimeProvider  RuntimeProvider `json:"runtime_provider,omitempty"`
+	Repos            []string        `json:"repos,omitempty"`
+	RepoGroups       []string        `json:"repo_groups,omitempty"`
+	CrossRepo        bool            `json:"cross_repo,omitempty"`
+	Parent           string          `json:"parent,omitempty"`
 	// OrchestratorSessionID was here historically as a cache of the
 	// lead-to-orchestration AgentSession join. AgentSession is the
 	// single source of truth; use store.OrchestrationSessionIDFor.
@@ -522,6 +523,12 @@ type Agent struct {
 	Hooks     *AgentHooks `json:"hooks,omitempty"`
 	CreatedAt time.Time   `json:"created_at"`
 	UpdatedAt time.Time   `json:"updated_at"`
+
+	// LastProvision* records the latest eager Daytona lead provision attempt.
+	// It makes failures that occur before a placement row exists observable.
+	LastProvisionOutcome string     `json:"last_provision_outcome,omitempty"`
+	LastProvisionError   string     `json:"last_provision_error,omitempty"`
+	LastProvisionAt      *time.Time `json:"last_provision_at,omitempty"`
 
 	// LiveStatus, ActiveTaskID, and ActivePhase are DERIVED, read-only fields
 	// carried from fleet-db's agent response (computed there from the live

@@ -662,15 +662,15 @@ describe("AgentCard", () => {
       expect(avatar).toBeInTheDocument();
     });
 
-    it("handles unknown status string as ready", () => {
+    it("handles unknown status string as neutral unknown", () => {
       const { container } = render(
         <AgentCard
           agent={makeAgent({ status: "something_unknown", branch: "b" })}
         />,
       );
 
-      expect(container.firstChild).toHaveAttribute("data-status", "ready");
-      expect(screen.getByText("Ready")).toBeInTheDocument();
+      expect(container.firstChild).toHaveAttribute("data-status", "unknown");
+      expect(screen.getByText("Unknown")).toBeInTheDocument();
     });
   });
 });

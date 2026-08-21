@@ -8,7 +8,11 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/netbase"
 )
+
+var notifyHTTPClient = &http.Client{Transport: netbase.Transport()}
 
 // NotifyPath is the API route path for session change notifications.
 // Used by both the client (sessions.NotifyWebUI) and server (webui routes + auth middleware).
@@ -64,7 +68,7 @@ func NotifyWebUI(ctx context.Context, serverURL, taskID, sessionID string, statu
 		req.Header.Set("Authorization", "Bearer "+notifyToken)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := notifyHTTPClient.Do(req)
 	if err != nil {
 		recordErr(span, err)
 		log.Printf("sessions.NotifyWebUI: POST %s failed: %v", url, err)

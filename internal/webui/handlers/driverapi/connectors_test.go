@@ -282,6 +282,85 @@ func TestConnectorDispatchHappyPath(t *testing.T) {
 	}
 }
 
+func TestConnectorDispatch_OccupantSourceNeverResolvesCollidingRouteKey(t *testing.T) {
+	t.Run("occupant source denied", func(t *testing.T) {
+		h := newConnectorHarness(t)
+		seedCollidingOccupantBinding(t, h)
+		run, err := h.store.DriverRuns().Create(context.Background(), store.DriverRunCreate{
+			WorkspaceKey: "WS", RunID: "run-occupant", DriverID: "driver-1", DriverVersionID: "version-1",
+			SourceKind: domain.DriverRunSourceLeadOccupant, SourceRef: "lead-occupant:p1",
+			Payload: json.RawMessage(`{}`),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		setConnectorHarnessRun(t, h, run.RunID)
+		status, raw := h.doRaw(t, h.dispatchBody("github.issues.comment"), h.ownerHeaders())
+		if status != http.StatusForbidden || errorCodeFromRaw(t, raw) != "grant_denied" {
+			t.Fatalf("status/body = %d/%s, want 403 grant_denied", status, raw)
+		}
+		if len(h.provider.calls) != 0 || len(h.auditRecords(t)) != 0 {
+			t.Fatalf("provider/audit calls = %d/%d, want 0/0", len(h.provider.calls), len(h.auditRecords(t)))
+		}
+	})
+
+	t.Run("trigger source with same route key resolves", func(t *testing.T) {
+		h := newConnectorHarness(t)
+		seedCollidingOccupantBinding(t, h)
+		run, err := h.store.TriggerRoutes().DispatchTriggerRoute(context.Background(), "WS", "lead-occupant:p1", store.TriggerRouteDispatch{
+			IdempotencyKey: "collision-trigger", EventType: "test", SubjectRef: "repo:octocat/hello",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		setConnectorHarnessRun(t, h, run.RunID)
+		status, raw := h.doRaw(t, h.dispatchBody("github.issues.comment"), h.ownerHeaders())
+		if status != http.StatusOK {
+			t.Fatalf("status/body = %d/%s, want 200", status, raw)
+		}
+	})
+}
+
+func seedCollidingOccupantBinding(t *testing.T, h *connectorHarness) {
+	t.Helper()
+	if _, err := h.store.TriggerBindings().Create(context.Background(), store.TriggerBindingCreate{
+		WorkspaceKey: "WS", BindingID: "binding-collision", Name: "collision",
+		SourceKind: "test", RouteKey: "lead-occupant:p1", DriverID: "driver-1",
+		DriverVersionID: "version-1", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.store.ConnectorGrants().Create(context.Background(), store.ConnectorGrantCreate{
+		WorkspaceKey: "WS", GrantID: "grant-collision", ConnectorID: "gh-main",
+		BindingID: "binding-collision", Action: "github.issues.comment", ResourcePattern: "repo:octocat/hello",
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func setConnectorHarnessRun(t *testing.T, h *connectorHarness, runID string) {
+	t.Helper()
+	claimed, err := h.store.DriverRuns().Claim(context.Background(), "WS", runID, "node-collision", "lease-collision")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.runID = claimed.RunID
+	h.nodeID = claimed.NodeID
+	h.leaseID = claimed.LeaseID
+	h.fence = claimed.FencingToken
+}
+
+func errorCodeFromRaw(t *testing.T, raw []byte) string {
+	t.Helper()
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	errorObject, _ := decoded["error"].(map[string]any)
+	code, _ := errorObject["code"].(string)
+	return code
+}
+
 func TestConnectorDispatchGrantDenied(t *testing.T) {
 	h := newConnectorHarness(t)
 	status, raw := h.doRaw(t, h.dispatchBody("github.branch.create"), h.ownerHeaders())

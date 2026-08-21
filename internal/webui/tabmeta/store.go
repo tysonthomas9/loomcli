@@ -57,9 +57,18 @@ type TabMetadata struct {
 // tabs persist this instead of deriving behavior from the human-facing tab
 // name.
 type LaunchSpec struct {
-	Argv []string          `json:"argv,omitempty"`
-	Env  map[string]string `json:"env,omitempty"`
-	Cwd  string            `json:"cwd,omitempty"`
+	Argv   []string          `json:"argv,omitempty"`
+	Env    map[string]string `json:"env,omitempty"`
+	Cwd    string            `json:"cwd,omitempty"`
+	Remote *RemoteLaunchSpec `json:"remote,omitempty"`
+}
+
+// RemoteLaunchSpec identifies a durable provider-owned PTY that the web
+// terminal should attach to instead of spawning a process locally.
+type RemoteLaunchSpec struct {
+	Provider     string `json:"provider,omitempty"`
+	SandboxID    string `json:"sandbox_id,omitempty"`
+	PTYSessionID string `json:"pty_session_id,omitempty"`
 }
 
 // Store provides Redis-backed persistence for terminal tab metadata.

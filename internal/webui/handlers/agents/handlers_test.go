@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -14,8 +15,90 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
 )
+
+// seedLifecycleAgent creates a workspace + one lead agent so lifecycle handlers
+// have a real target to transition.
+func seedLifecycleAgent(t *testing.T, ctx context.Context, st store.Store, agentSvc service.AgentService, ws, name string) {
+	t.Helper()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key: ws, Name: ws, DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := agentSvc.CreateAgent(ctx, service.AgentCreateInput{
+		WorkspaceKey:    ws,
+		Name:            name,
+		RoleName:        "lead",
+		RuntimeProvider: domain.RuntimeProviderDaytona,
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+}
+
+// TestHandleStartRedrivesProvisioning locks the fix for the stranded-lead bug:
+// a start must re-drive provisioning so a lead orphaned by a transient
+// create-time provision failure recovers instead of wedging at desired=running.
+func TestHandleStartRedrivesProvisioning(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	agentSvc := svcimpl.NewAgentService(nil, nil, nil, st)
+	seedLifecycleAgent(t, ctx, st, agentSvc, "TEST2", "lead-nova")
+	provisioner := &fakeLeadProvisioner{calls: make(chan provisionCall, 1)}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST2/agents/lead-nova/start", nil)
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "TEST2"))
+	req.SetPathValue("name", "lead-nova")
+	rr := httptest.NewRecorder()
+
+	HandleStart(agentSvc, nil, provisioner).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s, want 200", rr.Code, rr.Body.String())
+	}
+	select {
+	case got := <-provisioner.calls:
+		if got.ws != "TEST2" || got.name != "lead-nova" {
+			t.Fatalf("provision call = %+v, want TEST2/lead-nova", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("start did not re-drive provisioning")
+	}
+}
+
+// TestHandleLifecycleStopDoesNotProvision guards the desired==running gate: a
+// stop transition must never provision, even with a provisioner wired.
+func TestHandleLifecycleStopDoesNotProvision(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	agentSvc := svcimpl.NewAgentService(nil, nil, nil, st)
+	seedLifecycleAgent(t, ctx, st, agentSvc, "TEST2", "lead-nova")
+	provisioner := &fakeLeadProvisioner{calls: make(chan provisionCall, 1)}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST2/agents/lead-nova/stop", nil)
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "TEST2"))
+	req.SetPathValue("name", "lead-nova")
+	rr := httptest.NewRecorder()
+
+	handleLifecycle(agentSvc, nil, provisioner, lifecyclePatch{
+		state:       domain.AgentStateStopped,
+		desired:     domain.AgentDesiredStopped,
+		commandType: "stop",
+		status:      http.StatusOK,
+		message:     "stopped",
+	}).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s, want 200", rr.Code, rr.Body.String())
+	}
+	select {
+	case got := <-provisioner.calls:
+		t.Fatalf("stop transition provisioned: %+v", got)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
 
 func TestHandleInteractivePromptsListsBuiltins(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/TEST2/interactive-prompts", nil)
@@ -73,7 +156,7 @@ func TestHandleCreateCarriesInteractiveKindAndPromptFile(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "TEST2"))
 	rr := httptest.NewRecorder()
 
-	HandleCreate(agentSvc, nil).ServeHTTP(rr, req)
+	HandleCreate(agentSvc, nil, nil).ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("status = %d body = %s, want 201", rr.Code, rr.Body.String())
@@ -114,7 +197,7 @@ func TestHandleCreateCarriesInlinePrompt(t *testing.T) {
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "TEST2"))
 	rr := httptest.NewRecorder()
 
-	HandleCreate(agentSvc, nil).ServeHTTP(rr, req)
+	HandleCreate(agentSvc, nil, nil).ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("status = %d body = %s, want 201", rr.Code, rr.Body.String())
@@ -125,6 +208,156 @@ func TestHandleCreateCarriesInlinePrompt(t *testing.T) {
 	}
 	if role.Prompt != "Literal {{ marker }}" {
 		t.Fatalf("role prompt = %q, want literal transport value", role.Prompt)
+	}
+}
+
+func TestHandleCreateRuntimeProvider(t *testing.T) {
+	tests := []struct {
+		name         string
+		body         string
+		wantStatus   int
+		wantProvider domain.RuntimeProvider
+	}{
+		{
+			name:         "daytona",
+			body:         `{"name":"lead-daytona","role_name":"lead","runtime_provider":"daytona"}`,
+			wantStatus:   http.StatusCreated,
+			wantProvider: domain.RuntimeProviderDaytona,
+		},
+		{
+			name:       "workspace default",
+			body:       `{"name":"lead-default","role_name":"lead","runtime_provider":""}`,
+			wantStatus: http.StatusCreated,
+		},
+		{
+			name:       "invalid",
+			body:       `{"name":"lead-invalid","role_name":"lead","runtime_provider":"unknown"}`,
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			st := memstore.New()
+			if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+				Key: "TEST2", Name: "Test 2", DefaultBranch: "main",
+			}); err != nil {
+				t.Fatalf("create workspace: %v", err)
+			}
+			agentSvc := svcimpl.NewAgentService(nil, nil, nil, st)
+			req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST2/agents", bytes.NewBufferString(tt.body))
+			req = req.WithContext(middleware.WithWorkspace(req.Context(), "TEST2"))
+			rr := httptest.NewRecorder()
+
+			HandleCreate(agentSvc, nil, nil).ServeHTTP(rr, req)
+
+			if rr.Code != tt.wantStatus {
+				t.Fatalf("status = %d body = %s, want %d", rr.Code, rr.Body.String(), tt.wantStatus)
+			}
+			if tt.wantStatus != http.StatusCreated {
+				return
+			}
+			var created domain.Agent
+			if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+				t.Fatalf("decode created agent: %v", err)
+			}
+			if created.RuntimeProvider != tt.wantProvider {
+				t.Fatalf("created.RuntimeProvider = %q, want %q", created.RuntimeProvider, tt.wantProvider)
+			}
+		})
+	}
+}
+
+func TestHandleCreateStartsProvisioningAsync(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key: "TEST2", Name: "Test 2", DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	agentSvc := svcimpl.NewAgentService(nil, nil, nil, st)
+	provisioner := &fakeLeadProvisioner{calls: make(chan provisionCall, 1)}
+	body := []byte(`{
+		"name":"review-nova",
+		"role_name":"pr-review",
+		"kind":"interactive",
+		"prompt_file":"builtin:pr-review",
+		"backend":"codex"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST2/agents", bytes.NewReader(body))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "TEST2"))
+	req.Header.Set("X-Actor", "tester")
+	rr := httptest.NewRecorder()
+
+	HandleCreate(agentSvc, nil, provisioner).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d body = %s, want 201", rr.Code, rr.Body.String())
+	}
+	select {
+	case got := <-provisioner.calls:
+		if got.ws != "TEST2" || got.name != "review-nova" {
+			t.Fatalf("provision call = %+v, want TEST2/review-nova", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for async provisioning call")
+	}
+}
+
+func TestHandleCreateProvisionerErrorStillReturnsCreated(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key: "TEST2", Name: "Test 2", DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	agentSvc := svcimpl.NewAgentService(nil, nil, nil, st)
+	provisioner := &fakeLeadProvisioner{
+		calls: make(chan provisionCall, 1),
+		err:   errors.New("provision failed"),
+	}
+	body := []byte(`{
+		"name":"review-nova",
+		"role_name":"pr-review",
+		"kind":"interactive",
+		"prompt_file":"builtin:pr-review",
+		"backend":"codex"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST2/agents", bytes.NewReader(body))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "TEST2"))
+	rr := httptest.NewRecorder()
+
+	HandleCreate(agentSvc, nil, provisioner).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d body = %s, want 201", rr.Code, rr.Body.String())
+	}
+	select {
+	case <-provisioner.calls:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for async provisioning call")
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		agent, err := st.Agents().Get(ctx, "TEST2", "review-nova")
+		if err != nil {
+			t.Fatalf("get provisioned agent: %v", err)
+		}
+		if agent.LastProvisionOutcome == domain.LeadProvisionOutcomeFailed {
+			if agent.LastProvisionError != "provision failed" {
+				t.Fatalf("LastProvisionError = %q, want provision failed", agent.LastProvisionError)
+			}
+			if agent.LastProvisionAt == nil {
+				t.Fatal("LastProvisionAt = nil, want failed-at timestamp")
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("LastProvisionOutcome = %q, want failed", agent.LastProvisionOutcome)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
@@ -191,4 +424,19 @@ func waitForAgentHubClients(t *testing.T, hub *realtime.Hub, want int) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("hub ClientCount() = %d, want %d", hub.ClientCount(), want)
+}
+
+type provisionCall struct {
+	ws   string
+	name string
+}
+
+type fakeLeadProvisioner struct {
+	calls chan provisionCall
+	err   error
+}
+
+func (f *fakeLeadProvisioner) ProvisionForAgent(_ context.Context, ws, name string) error {
+	f.calls <- provisionCall{ws: ws, name: name}
+	return f.err
 }

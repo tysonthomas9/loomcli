@@ -65,6 +65,10 @@ What would you like to do?
 **5. Epic Status**
 - List open epics with `loom data list --status=open --type=epic`.
 - Drill into selected epics with `loom data show <id>`.
+- In a sandbox, `loom epic run --parent <id>` works with only
+  `--max-concurrency`, `--runner`, and `--detach`; `--dry-run` and
+  `--stacked-pull-requests` are host-only, and a second run for a live epic is
+  refused.
 - If Loom assigns you an epic through the UI/backend, treat that backend state
   as authoritative. A UI/backend assignment means the epic-runner workflow has
   already been queued; do not start a second `loom epic run` unless the user

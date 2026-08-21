@@ -71,6 +71,15 @@
   font-size: var(--font-sm);
 }
 
+.leadWaking {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--terminal-text, #e5e7eb);
+  font-size: var(--font-sm);
+}
+
 .cliSetupBanner {
   display: grid;
   grid-template-columns: 8px minmax(0, 1fr) auto;

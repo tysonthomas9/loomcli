@@ -16,6 +16,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/leadoccupant"
+	"github.com/tysonthomas9/loomcli/internal/placement"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
@@ -264,6 +266,109 @@ func TestResolveLeadAgentIDDefaultsToLead(t *testing.T) {
 
 	if got := resolveLeadAgentID(); got != "lead" {
 		t.Fatalf("resolveLeadAgentID() = %q, want lead", got)
+	}
+}
+
+func TestOpenLeadSessionStoreSandboxRequiresAPIURL(t *testing.T) {
+	t.Setenv(placement.OccupantTokenEnv, "occupant-token")
+	t.Setenv(bootstrap.EnvWorkspace, "WS")
+	t.Setenv(envLeadAPIURL, "")
+
+	called := false
+	orig := openLeadFleetStore
+	openLeadFleetStore = func(ctx context.Context) (*bootstrap.StoreHandle, error) {
+		called = true
+		return nil, errors.New("should not be called")
+	}
+	t.Cleanup(func() { openLeadFleetStore = orig })
+
+	handle, ws, err := openLeadSessionStore(context.Background())
+	if err == nil {
+		t.Fatal("openLeadSessionStore() succeeded, want preflight error")
+	}
+	if handle != nil || ws != "" {
+		t.Fatalf("handle/ws = %#v/%q, want nil/empty", handle, ws)
+	}
+	if !strings.Contains(err.Error(), envLeadAPIURL) {
+		t.Fatalf("error = %v, want %s guidance", err, envLeadAPIURL)
+	}
+	if called {
+		t.Fatal("sandbox preflight called fleet store opener")
+	}
+}
+
+func TestOpenLeadSessionStorePersistsInitialOccupantToken(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Setenv(placement.OccupantTokenEnv, "initial-token")
+	t.Setenv(bootstrap.EnvWorkspace, "WS")
+	t.Setenv(envLeadAPIURL, "https://loom.test")
+
+	handle, ws, err := openLeadSessionStore(context.Background())
+	if err != nil {
+		t.Fatalf("openLeadSessionStore: %v", err)
+	}
+	defer handle.Close()
+	if ws != "WS" {
+		t.Fatalf("workspace = %q, want WS", ws)
+	}
+	if got := leadoccupant.ReadToken(); got != "initial-token" {
+		t.Fatalf("persisted initial token = %q, want initial-token", got)
+	}
+}
+
+func TestOpenLeadSessionStoreInitialTokenWriteFailureIsFatal(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	if err := leadoccupant.WriteToken("stale-token"); err != nil {
+		t.Fatalf("seed stale token: %v", err)
+	}
+	t.Setenv(placement.OccupantTokenEnv, "fresh-token")
+	t.Setenv(bootstrap.EnvWorkspace, "WS")
+	t.Setenv(envLeadAPIURL, "https://loom.test")
+
+	original := writeLeadOccupantToken
+	writeLeadOccupantToken = func(string) error { return errors.New("disk full") }
+	t.Cleanup(func() { writeLeadOccupantToken = original })
+	handle, ws, err := openLeadSessionStore(context.Background())
+	if err == nil {
+		t.Fatal("openLeadSessionStore succeeded after initial token write failure")
+	}
+	if handle != nil || ws != "" || !strings.Contains(err.Error(), "persist initial occupant token") {
+		t.Fatalf("handle/ws/error = %#v/%q/%v", handle, ws, err)
+	}
+	if got := leadoccupant.ReadToken(); got != "stale-token" {
+		t.Fatalf("stale token changed to %q after failed overwrite", got)
+	}
+}
+
+func TestOpenLeadSessionStoreHostPathUsesFleetStore(t *testing.T) {
+	t.Setenv(placement.OccupantTokenEnv, "")
+	t.Setenv(bootstrap.EnvWorkspace, "WS")
+
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(context.Background(), store.WorkspaceCreate{
+		Key:  "WS",
+		Name: "Workspace",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	called := false
+	orig := openLeadFleetStore
+	openLeadFleetStore = func(ctx context.Context) (*bootstrap.StoreHandle, error) {
+		called = true
+		return &bootstrap.StoreHandle{Store: st}, nil
+	}
+	t.Cleanup(func() { openLeadFleetStore = orig })
+
+	handle, ws, err := openLeadSessionStore(context.Background())
+	if err != nil {
+		t.Fatalf("openLeadSessionStore(): %v", err)
+	}
+	if !called {
+		t.Fatal("host path did not call fleet store opener")
+	}
+	if handle == nil || handle.Store != st || ws != "WS" {
+		t.Fatalf("handle/ws = %#v/%q, want memstore/WS", handle, ws)
 	}
 }
 

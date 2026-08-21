@@ -29,6 +29,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/usagecmd"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/leadprovision"
+	"github.com/tysonthomas9/loomcli/internal/placement"
+	"github.com/tysonthomas9/loomcli/internal/placement/daytona"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	webuiapp "github.com/tysonthomas9/loomcli/internal/webui/app"
@@ -47,6 +50,16 @@ const envLoomTriggerCronInterval = "LOOM_TRIGGER_CRON_INTERVAL"
 const envLoomIssueBridgeInterval = "LOOM_ISSUE_BRIDGE_INTERVAL"
 const envLoomIssueBridgeDisabled = "LOOM_ISSUE_BRIDGE_DISABLED"
 const envLoomIssueBridgeStatePath = "LOOM_ISSUE_BRIDGE_STATE_PATH"
+const envLoomPlacementReaperInterval = "LOOM_PLACEMENT_REAPER_INTERVAL"
+const envLoomPlacementReaperEnforce = "LOOM_PLACEMENT_REAPER_ENFORCE"
+const envLoomLeadMaxVCPU = "LOOM_LEAD_MAX_VCPU"
+const envLoomLeadLostReleaseGrace = "LOOM_LEAD_LOST_RELEASE_GRACE"
+const envLoomLeadMaxMemGiB = "LOOM_LEAD_MAX_MEM_GIB"
+const envLoomLeadAllowlist = "LOOM_LEAD_ALLOWLIST"
+const envLoomLeadAPIBaseURL = "LOOM_LEAD_API_BASE_URL"
+const envLoomLeadDataAllowOpenAuth = "LOOM_LEAD_DATA_ALLOW_OPEN_AUTH"
+const envLoomLeadSnapshot = "LOOM_LEAD_SNAPSHOT"
+const envLoomLeadBootstrap = "LOOM_LEAD_BOOTSTRAP"
 
 const monitorCollectionCacheTTL = 10 * time.Second
 
@@ -232,6 +245,12 @@ func runServe(cmd *cobra.Command, args []string) {
 	startTriggerDeliverySweeper(ctx, storeHandle.Store)
 	startAwaitTimeoutSweeper(ctx, storeHandle.Store)
 	startIssueJournalBridge(ctx, storeHandle.Store)
+	// The reaper needs the same broker that will drive provisioning (5c-4b).
+	// buildPlacementBroker returns nil unless Daytona creds + a deployment id
+	// + an occupant-token key are all configured, so this is a no-op on
+	// deployments that do not place leads in sandboxes.
+	placementBroker, placementProvider := buildPlacementBroker(storeHandle.Store)
+	startPlacementReaper(ctx, placementBroker, placementReaperInterval(), placementReaperEnforce())
 
 	issueBackendFn := cli.WorkspaceAwareIssueBackendForURL(storeHandle.URL(), fleetState.clientCfg.Actor)
 	monitorDefaultWorkspace := resolveMonitorCollectorWorkspace(storeHandle.Store, fleetState.clientCfg.Workspace)
@@ -240,7 +259,7 @@ func runServe(cmd *cobra.Command, args []string) {
 
 	webuiErr := make(chan error, 1)
 	go func() {
-		cfg := buildServerConfig(monitorHandlers, fleetState, storeHandle)
+		cfg := buildServerConfig(monitorHandlers, fleetState, storeHandle, placementBroker, placementProvider)
 		webuiErr <- webuiapp.StartServer(ctx, cfg)
 	}()
 
@@ -445,6 +464,142 @@ func driverRunTokenKey() []byte {
 	return key
 }
 
+// buildPlacementBroker constructs the Daytona placement broker when this
+// deployment is configured to place leads in sandboxes. It returns nil (and
+// logs once) unless DAYTONA_API_KEY, LOOM_DEPLOYMENT_ID, and an occupant-token
+// signing key are all present -- the broker mints occupant tokens with the same
+// key the leadapi module verifies (DriverRunTokenKey), so a mismatch would make
+// every sandboxed lead's API call fail. Callers treat nil as "sandbox placement
+// disabled".
+func buildPlacementBroker(st store.Store) (*placement.Broker, placement.Provider) {
+	if strings.TrimSpace(os.Getenv(daytona.APIKeyEnv)) == "" {
+		return nil, nil
+	}
+	tokenKey := driverRunTokenKey()
+	if len(tokenKey) == 0 {
+		slog.Warn("placement broker disabled: no occupant-token signing key (set LOOM_RUN_TOKEN_SIGNING_KEY)")
+		return nil, nil
+	}
+	provider, err := daytona.New(daytona.Config{})
+	if err != nil {
+		slog.Error("placement broker disabled: construct Daytona provider", "err", err)
+		return nil, nil
+	}
+	broker, err := newServePlacementBroker(st, provider, tokenKey)
+	if err != nil {
+		// Most commonly a missing LOOM_DEPLOYMENT_ID (required so provider
+		// sandboxes carry the loom-env label the reaper scopes to).
+		slog.Error("placement broker disabled: construct broker", "err", err)
+		return nil, nil
+	}
+	slog.Info("Placement broker enabled (Daytona lead sandboxes)")
+	return broker, provider
+}
+
+func newServePlacementBroker(st store.Store, provider placement.Provider, tokenKey []byte) (*placement.Broker, error) {
+	// POC operating note: one Codex auth.json (ChatGPT OAuth, including a
+	// refresh token) is seeded into every lead sandbox. If OpenAI rotates the
+	// refresh token, concurrent leads can invalidate each other's token. The
+	// small default MaxLive (about four 2/4 leads) bounds this shared-OAuth
+	// blast radius; the real fix (post-POC, ticket 08 §2) is per-lead
+	// short-lived tokens. Revoke the codex + claude creds at POC close.
+	if leadBootstrapEnabled() && leadAPIBaseURL() == "" {
+		slog.Warn("LOOM_LEAD_BOOTSTRAP enabled but LOOM_LEAD_API_BASE_URL unset; leads will boot the snapshot-baked binary")
+	}
+	return placement.NewBroker(placement.Config{
+		Store:                st,
+		Provider:             provider,
+		TokenKey:             tokenKey,
+		LeadAPIBaseURL:       leadAPIBaseURL(),
+		LeadBootstrapEnabled: leadBootstrapEnabled(),
+		MaxLive: placement.ResourceSize{
+			VCPU:   leadMaxVCPU(),
+			MemGiB: leadMaxMemGiB(),
+		},
+	})
+}
+
+// leadBootstrapEnabled is the single kill-switch for download-at-boot: it gates
+// both the serve endpoint that streams serve's own binary and the provider step
+// that installs it into each lead sandbox. Default off (fail-hard downloads
+// make it opt-in). Accepts strconv.ParseBool truthy values ("1", "true", ...).
+func leadBootstrapEnabled() bool {
+	raw := strings.TrimSpace(os.Getenv(envLoomLeadBootstrap))
+	if raw == "" {
+		return false
+	}
+	enabled, err := strconv.ParseBool(raw)
+	return err == nil && enabled
+}
+
+// leadAPIBaseURL is the public serve origin injected into Daytona lead
+// sandboxes as LOOM_LEAD_API_URL. It must be reachable from inside the
+// sandbox; behind a proxy, set LOOM_LEAD_API_BASE_URL to that public origin.
+// When unset, the broker injects no URL and sandbox leads fail their
+// preflight loudly instead of falling back to a local fleet-db.
+func leadAPIBaseURL() string {
+	return strings.TrimSpace(os.Getenv(envLoomLeadAPIBaseURL))
+}
+
+// leadSnapshotRef resolves the snapshot every brokered lead sandbox boots
+// from. LOOM_LEAD_SNAPSHOT accepts a Daytona snapshot name or ID and lets an
+// operator switch to a rebuilt snapshot without a code change; unset falls
+// back to the pinned default. The ref rides ProvisionRequest.SnapshotRef, so
+// it need not touch the provider's own name/ID pin.
+func leadSnapshotRef() string {
+	if ref := strings.TrimSpace(os.Getenv(envLoomLeadSnapshot)); ref != "" {
+		return ref
+	}
+	return daytona.DefaultSnapshotName
+}
+
+func buildLeadProvisioner(st store.Store, broker *placement.Broker) *leadprovision.Provisioner {
+	if st == nil || broker == nil {
+		return nil
+	}
+	return leadprovision.New(
+		broker,
+		st,
+		bootstrap.LoomDir(),
+		leadAllowlist(),
+		leadSnapshotRef(),
+		leadprovision.DefaultResource(),
+	)
+}
+
+func leadMaxVCPU() int {
+	return boundedIntEnv(envLoomLeadMaxVCPU, 8, 64)
+}
+
+func leadLostReleaseGrace() time.Duration {
+	return boundedDurationEnv(envLoomLeadLostReleaseGrace, 30*time.Minute)
+}
+
+func leadMaxMemGiB() int {
+	return boundedIntEnv(envLoomLeadMaxMemGiB, 16, 128)
+}
+
+// leadAllowlist resolves the network domain allowlist for lead sandboxes.
+// Daytona applies the allowlist at create time only, so a change here affects
+// only newly provisioned sandboxes -- never a lead already running.
+func leadAllowlist() []string {
+	raw := strings.TrimSpace(os.Getenv(envLoomLeadAllowlist))
+	if raw == "" {
+		return leadprovision.DefaultAllowlist()
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	if len(out) == 0 {
+		return leadprovision.DefaultAllowlist()
+	}
+	return out
+}
+
 func driverExecutorEnabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(envLoomDriverExecutor))) {
 	case "0", "false", "off", "no":
@@ -480,6 +635,20 @@ func boundedIntEnv(name string, def, max int) int {
 		return max
 	}
 	return n
+}
+
+// boundedDurationEnv reads a Go duration env var, falling back to def when
+// unset, unparseable, or outside the positive-duration domain.
+func boundedDurationEnv(name string, def time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return def
+	}
+	duration, err := time.ParseDuration(raw)
+	if err != nil || duration <= 0 {
+		return def
+	}
+	return duration
 }
 
 func ensureFleetStoreEnv(cfg config.FleetClientConfig) {
@@ -595,7 +764,7 @@ func buildMonitorHandlers(collectDataFn metricscmd.CollectDataFn, staleDetectorH
 	}
 }
 
-func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, storeHandle *bootstrap.StoreHandle) webui.ServerConfig {
+func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, storeHandle *bootstrap.StoreHandle, placementBroker *placement.Broker, placementProvider placement.Provider) webui.ServerConfig {
 	gitOps := opsimpl.NewGitOps()
 	resolvedBackend := cli.ResolveBackendName()
 	log.Printf("Terminal backend: %s", resolvedBackend)
@@ -612,6 +781,10 @@ func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, sto
 		cfg.DriverAPIToken = driverAPIToken()
 		cfg.DriverAPIBaseURL = driverAPIBaseURL()
 		cfg.DriverRunTokenKey = driverRunTokenKey()
+		cfg.LeadProvisioner = buildLeadProvisioner(storeHandle.Store, placementBroker)
+		if cfg.LeadProvisioner != nil && placementProvider != nil {
+			cfg.LeadReviveCoordinator = leadprovision.NewReviveCoordinator(placementProvider, cfg.LeadProvisioner)
+		}
 	}
 	applyFleetConfig(&cfg, fs)
 	applyWorkspaceConfig(&cfg)
@@ -620,6 +793,14 @@ func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, sto
 }
 
 func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimpl.GitOpsImpl, backend string) webui.ServerConfig {
+	leadDataAllowOpenAuth := strings.TrimSpace(os.Getenv(envLoomLeadDataAllowOpenAuth)) == "1"
+	if leadDataAllowOpenAuth {
+		if serveAuthURL == "" {
+			slog.Error("lead data mount enabled in OPEN AUTH MODE (LOOM_LEAD_DATA_ALLOW_OPEN_AUTH=1) — POC-only posture, see .scratch/lead-in-daytona/issues/27-lead-origin-isolation.md")
+		} else {
+			slog.Warn("lead data mount open-auth override armed but inert (ext auth configured)")
+		}
+	}
 	return webui.ServerConfig{
 		Port:                  servePort,
 		BindAddress:           serveBindAddr,
@@ -638,6 +819,8 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		ExtAuthAudience:       serveAuthAudience,
 		ExtAuthAllowInsecure:  serveAuthAllowInsecure,
 		WorkspaceRoleResolver: buildFileBrowserRoleResolver(),
+		LeadDataAllowOpenAuth: leadDataAllowOpenAuth,
+		LeadBootstrapEnabled:  leadBootstrapEnabled(),
 		GitOps:                gitOps,
 		FileOps:               gitOps,
 		BackendOps:            opsimpl.NewBackendOps(),

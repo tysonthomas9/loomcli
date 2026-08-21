@@ -89,6 +89,7 @@ func (app *Server) buildTerminalModules() {
 				TabMetaStore:    app.tabMetaStore,
 				Hub:             app.hub,
 				ServerStartedAt: app.startedAt,
+				LeadReviver:     app.config.LeadReviveCoordinator,
 			})...)
 	}
 
@@ -101,8 +102,6 @@ func (app *Server) buildTerminalModules() {
 // buildInfraModules adds fleet, diff, file, and agent control modules
 // when their dependencies are available.
 func (app *Server) buildInfraModules() {
-	storeBacked := app.config.Store != nil
-
 	if app.fleetRegistry != nil {
 		app.wsModules = append(app.wsModules,
 			appinfra.NewFleetModule(app.fleetRegistry, app.tokenCfg,
@@ -122,34 +121,50 @@ func (app *Server) buildInfraModules() {
 		}))
 	}
 
-	if storeBacked {
-		app.connectorDispatcher = app.buildConnectorDispatcher()
-		app.wsModules = append(app.wsModules, agents.NewModule(app.agentSvc, app.hub))
-		app.wsModules = append(app.wsModules, onboarding.NewModule(app.issueSvc, app.agentSvc))
-		app.wsModules = append(app.wsModules, workflows.NewModule(app.config.Store))
-		app.wsModules = append(app.wsModules, webhooks.NewModule(app.config.Store))
-		prReviewModule := modbuilder.NewPRReviewModule(
-			app.config.Store, app.connectorDispatcher, app.agentSvc, app.termSvc, app.config.LocalSettingsDir,
-		)
-		app.prReviewCredentialSeeds = prReviewModule
-		app.wsModules = append(app.wsModules, prReviewModule)
-		app.wsModules = append(app.wsModules, modbuilder.NewApprovalsModule(app.config.Store))
-		app.wsModules = append(app.wsModules, modbuilder.NewTaskRunAPIModule(app.config.Store, app.config.FleetDBBaseURL, app.config.LocalSettingsDir))
-		app.wsModules = append(app.wsModules, driverapi.NewModule(driverapi.Config{
-			Store:            app.config.Store,
-			FleetBaseURL:     app.config.FleetDBBaseURL,
-			APIBaseURL:       app.config.DriverAPIBaseURL,
-			APIToken:         app.config.DriverAPIToken,
-			RunTokenKey:      app.config.DriverRunTokenKey,
-			LocalSettingsDir: app.config.LocalSettingsDir,
-			Dispatcher:       app.connectorDispatcher,
-		}))
-	} else {
-		// Without a store there is no connector-backed prreview module, so
-		// keep the gh-backed pull-request list route available.
-		app.wsModules = append(app.wsModules, githandlers.NewPullRequestListModule(app.agentSvc))
-		if app.config.AgentControlFn != nil {
-			app.wsModules = append(app.wsModules, webui.NewAgentControlModule(app.config.AgentControlFn, app.config.AgentInputFn))
-		}
+	if app.config.Store != nil {
+		app.buildStoreBackedModules()
+		return
 	}
+	// Without a store there is no connector-backed prreview module, so
+	// keep the gh-backed pull-request list route available.
+	app.wsModules = append(app.wsModules, githandlers.NewPullRequestListModule(app.agentSvc))
+	if app.config.AgentControlFn != nil {
+		app.wsModules = append(app.wsModules, webui.NewAgentControlModule(app.config.AgentControlFn, app.config.AgentInputFn))
+	}
+}
+
+// buildStoreBackedModules adds the modules that need a fleet store behind them.
+func (app *Server) buildStoreBackedModules() {
+	app.connectorDispatcher = app.buildConnectorDispatcher()
+	agentModule := agents.NewModule(app.agentSvc, app.hub, nil)
+	if app.config.LeadProvisioner != nil {
+		agentModule = agents.NewModule(app.agentSvc, app.hub, app.config.LeadProvisioner)
+	}
+	app.wsModules = append(app.wsModules, agentModule)
+	app.wsModules = append(app.wsModules, onboarding.NewModule(app.issueSvc, app.agentSvc))
+	app.wsModules = append(app.wsModules, workflows.NewModule(app.config.Store))
+	app.wsModules = append(app.wsModules, webhooks.NewModule(app.config.Store))
+	prReviewModule := modbuilder.NewPRReviewModule(
+		app.config.Store, app.connectorDispatcher, app.agentSvc, app.termSvc, app.config.LocalSettingsDir,
+	)
+	app.prReviewCredentialSeeds = prReviewModule
+	app.wsModules = append(app.wsModules, prReviewModule)
+	app.wsModules = append(app.wsModules, modbuilder.NewApprovalsModule(app.config.Store))
+	app.wsModules = append(app.wsModules, modbuilder.NewLeadAPIModule(modbuilder.LeadAPIDeps{
+		Store:             app.config.Store,
+		TokenKey:          app.config.DriverRunTokenKey,
+		IssueBackendFn:    app.config.IssueBackendFn,
+		OpenAuthMode:      app.config.ExtAuthURL == "",
+		AllowOpenAuthMode: app.config.LeadDataAllowOpenAuth,
+	}))
+	app.wsModules = append(app.wsModules, modbuilder.NewTaskRunAPIModule(app.config.Store, app.config.FleetDBBaseURL, app.config.LocalSettingsDir))
+	app.wsModules = append(app.wsModules, driverapi.NewModule(driverapi.Config{
+		Store:            app.config.Store,
+		FleetBaseURL:     app.config.FleetDBBaseURL,
+		APIBaseURL:       app.config.DriverAPIBaseURL,
+		APIToken:         app.config.DriverAPIToken,
+		RunTokenKey:      app.config.DriverRunTokenKey,
+		LocalSettingsDir: app.config.LocalSettingsDir,
+		Dispatcher:       app.connectorDispatcher,
+	}))
 }

@@ -25,6 +25,8 @@ func TestGeneratedEnumValidMethods(t *testing.T) {
 		{"IssueResponseStatus", IssueResponseStatusBlocked, IssueResponseStatus("invalid")},
 		{"IssueTabType", Sessions, IssueTabType("invalid")},
 		{"MessageResponseSuccess", True, MessageResponseSuccess(false)},
+		{"MonitorAgentStatusRuntimeProvider", MonitorAgentStatusRuntimeProviderDaytona, MonitorAgentStatusRuntimeProvider("invalid")},
+		{"MonitorRuntimePlacementState", MonitorRuntimePlacementStateActive, MonitorRuntimePlacementState("invalid")},
 		{"MonitorWorkspaceInfoMode", MonitorWorkspaceInfoModeWorkspace, MonitorWorkspaceInfoMode("invalid")},
 		{"MonitorWorkspacesResponseMode", MonitorWorkspacesResponseModeWorkspace, MonitorWorkspacesResponseMode("invalid")},
 		{"MutationPayloadType", MutationPayloadTypeCreate, MutationPayloadType("invalid")},

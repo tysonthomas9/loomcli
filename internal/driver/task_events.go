@@ -132,7 +132,7 @@ func createLeadTaskOutbox(ctx context.Context, s store.Store, run *domain.TaskRu
 		DriverRunID:  run.DriverRunID,
 		TaskRunID:    run.TaskRunID,
 		TargetAgent:  lead,
-		Body:         buildLeadTaskMessage(epicID, run.TaskID, "", run.TaskRunID, run.LogsRef, run.ArtifactsRef, run.Status),
+		Body:         buildLeadTaskMessage(epicID, run.TaskID, "", run.TaskRunID, run.LogsRef, run.ArtifactsRef, run.RuntimeMetadata["github_pr_url"], run.Status),
 		DedupeKey:    "lead-task-message:" + epicID + ":" + run.TaskRunID + ":" + string(run.Status),
 	})
 	if err != nil {
@@ -179,7 +179,7 @@ func isLeadRole(roleName string) bool {
 // formatTaskCompleteLeadMessage, including the "Do not start another
 // epic runner" guardrail. A failed status swaps the headline and the
 // acknowledgement subject; the rest of the template is shared.
-func buildLeadTaskMessage(epicID, taskID, title, taskRunID, logsRef, artifactsRef string, status domain.TaskRunStatus) string {
+func buildLeadTaskMessage(epicID, taskID, title, taskRunID, logsRef, artifactsRef, githubPRURL string, status domain.TaskRunStatus) string {
 	headline := "Loom completed a child task under the active epic-runner workflow."
 	subject := "completion"
 	if status != domain.TaskRunCompleted {
@@ -202,6 +202,11 @@ func buildLeadTaskMessage(epicID, taskID, title, taskRunID, logsRef, artifactsRe
 	}
 	if artifactsRef != "" {
 		lines = append(lines, "artifacts: "+artifactsRef)
+	}
+	// The URL comes from runner-written runtime metadata; the lead follows
+	// links in its inbox, so gate on scheme like the UI does.
+	if strings.HasPrefix(githubPRURL, "https://") {
+		lines = append(lines, "pr: "+githubPRURL)
 	}
 	lines = append(lines, "",
 		"Acknowledge this "+subject+" in the visible conversation, update your epic status summary, and continue monitoring the remaining child tasks. Do not start another epic runner.")

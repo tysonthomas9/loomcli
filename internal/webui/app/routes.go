@@ -41,6 +41,19 @@ func (app *Server) registerRoutes() {
 func (app *Server) registerCoreAPIRoutes(h *handlermux.Handlers) {
 	app.mux.HandleFunc("GET /health", h.Health)
 	app.mux.HandleFunc("GET /api/health", h.APIHealth)
+	// Download-at-boot: a booting lead sandbox fetches serve's own loom binary
+	// from this UNAUTHENTICATED, workspace-independent route BEFORE its lead PTY
+	// starts. It must live on the root app.mux (not the workspace sub-mux) or the
+	// broker-built URL LOOM_LEAD_API_BASE_URL + /api/lead/bootstrap/loom is
+	// unreachable. The /api/lead/ prefix is public per middleware.hasOwnAuthPrefix,
+	// so no auth/workspace middleware wraps it. Registered only when enabled, so
+	// the disabled path falls through to the /api/ JSON-404 catch-all.
+	// Path literal must equal placement.BootstrapLoomPath (guarded by the
+	// bootstrap integration test); app cannot import placement without exceeding
+	// its import-fanout ceiling.
+	if app.config.LeadBootstrapEnabled {
+		app.mux.HandleFunc("GET /api/lead/bootstrap/loom", app.handleLeadBootstrapLoom)
+	}
 	app.mux.HandleFunc("POST /api/client-errors", h.ClientErrors)
 	app.mux.HandleFunc("GET /api/config", h.AuthConfig)
 	app.mux.HandleFunc("GET /api/metrics", h.Metrics)

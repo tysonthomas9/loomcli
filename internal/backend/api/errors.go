@@ -13,6 +13,10 @@ import (
 // *backend.BackendError. For 2xx responses with success=false, the error
 // string in the body is matched against known patterns.
 func classifyHTTPError(op string, statusCode int, body apiResponse) error {
+	return classifyHTTPErrorWithMessage(op, statusCode, body, "")
+}
+
+func classifyHTTPErrorWithMessage(op string, statusCode int, body apiResponse, unauthorizedMessage string) error {
 	// 2xx with success=true: no error.
 	if statusCode >= 200 && statusCode < 300 && body.Success {
 		return nil
@@ -31,7 +35,15 @@ func classifyHTTPError(op string, statusCode int, body apiResponse) error {
 	switch statusCode {
 	case 400:
 		return backend.ErrValidation(op, msg)
+	case 413:
+		if unauthorizedMessage != "" {
+			return backend.ErrValidation(op, msg)
+		}
+		return backend.ErrInternal(op, msg, nil)
 	case 401, 403:
+		if unauthorizedMessage != "" {
+			return backend.ErrUnavailable(op, unauthorizedMessage, nil)
+		}
 		return backend.ErrUnavailable(op, "authentication failed: "+msg, nil)
 	case 404:
 		return backend.ErrNotFound(op, msg)

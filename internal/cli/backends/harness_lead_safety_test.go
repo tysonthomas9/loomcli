@@ -17,7 +17,7 @@ func TestControlledLead_ClaudeCarriesTheToolKnobs(t *testing.T) {
 	t.Setenv("LOOM_DENIED_TOOLS", "WebSearch")
 	captured := installFakeHarnessLead(t)
 
-	handled, err := RunControlledLeadRuntime(context.Background(), nil, "WS", "nova", "lead-session", "/repo", "prompt", "claude")
+	handled, err := RunControlledLeadRuntime(context.Background(), nil, "WS", "nova", "lead-session", "/repo", "prompt", "claude", false)
 	if err != nil || !handled {
 		t.Fatalf("handled=%v err=%v, want a handled launch", handled, err)
 	}
@@ -35,7 +35,7 @@ func TestControlledLead_ClaudeReadOnlyDeniesTheWriteTools(t *testing.T) {
 	t.Setenv("LOOM_READ_ONLY", "1")
 	captured := installFakeHarnessLead(t)
 
-	if _, err := RunControlledLeadRuntime(context.Background(), nil, "WS", "nova", "s", "/repo", "prompt", "claude"); err != nil {
+	if _, err := RunControlledLeadRuntime(context.Background(), nil, "WS", "nova", "s", "/repo", "prompt", "claude", false); err != nil {
 		t.Fatalf("RunControlledLeadRuntime: %v", err)
 	}
 	if joined := strings.Join(captured.Args, " "); !strings.Contains(joined, "--disallowedTools Write,Edit,NotebookEdit,Bash") {
@@ -49,7 +49,7 @@ func TestControlledLead_ClaudeReadOnlyDeniesTheWriteTools(t *testing.T) {
 func TestControlledLead_GeminiReadOnlySelectsPlanMode(t *testing.T) {
 	clearSafetyEnv(t)
 	captured := installFakeHarnessLead(t)
-	if _, err := RunControlledLeadRuntime(context.Background(), nil, "WS", "nova", "s", "/repo", "prompt", "gemini"); err != nil {
+	if _, err := RunControlledLeadRuntime(context.Background(), nil, "WS", "nova", "s", "/repo", "prompt", "gemini", false); err != nil {
 		t.Fatalf("RunControlledLeadRuntime: %v", err)
 	}
 	if joined := strings.Join(captured.Args, " "); joined != "--approval-mode=yolo" {
@@ -58,7 +58,7 @@ func TestControlledLead_GeminiReadOnlySelectsPlanMode(t *testing.T) {
 
 	t.Setenv("LOOM_READ_ONLY", "1")
 	captured = installFakeHarnessLead(t)
-	if _, err := RunControlledLeadRuntime(context.Background(), nil, "WS", "nova", "s", "/repo", "prompt", "gemini"); err != nil {
+	if _, err := RunControlledLeadRuntime(context.Background(), nil, "WS", "nova", "s", "/repo", "prompt", "gemini", false); err != nil {
 		t.Fatalf("RunControlledLeadRuntime: %v", err)
 	}
 	if joined := strings.Join(captured.Args, " "); joined != "--approval-mode=plan" {
@@ -75,7 +75,7 @@ func TestControlledLead_UnenforceableKnobRefusesWithoutFallback(t *testing.T) {
 	t.Setenv("LOOM_DENIED_TOOLS", "Bash")
 	installFakeHarnessLead(t)
 
-	handled, err := RunControlledLeadRuntime(context.Background(), nil, "WS", "nova", "s", "/repo", "prompt", "cursor")
+	handled, err := RunControlledLeadRuntime(context.Background(), nil, "WS", "nova", "s", "/repo", "prompt", "cursor", false)
 	if err == nil {
 		t.Fatal("denied_tools on cursor must refuse the launch")
 	}
@@ -94,7 +94,7 @@ func TestControlledLead_SoftReadOnlyStillLaunches(t *testing.T) {
 	t.Setenv("LOOM_READ_ONLY", "1")
 	captured := installFakeHarnessLead(t)
 
-	handled, err := RunControlledLeadRuntime(context.Background(), nil, "WS", "nova", "s", "/repo", "prompt", "cursor")
+	handled, err := RunControlledLeadRuntime(context.Background(), nil, "WS", "nova", "s", "/repo", "prompt", "cursor", false)
 	if err != nil || !handled {
 		t.Fatalf("handled=%v err=%v, want a handled launch", handled, err)
 	}

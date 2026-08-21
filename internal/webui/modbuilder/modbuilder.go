@@ -4,14 +4,19 @@
 package modbuilder
 
 import (
+	"context"
 	"net/http"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/connector"
+	"github.com/tysonthomas9/loomcli/internal/leadprovision"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/approvals"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
+	healthhandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/health"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/leadapi"
 	locsettings "github.com/tysonthomas9/loomcli/internal/webui/handlers/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/prreview"
@@ -72,17 +77,28 @@ type TerminalModuleDeps struct {
 	TabMetaStore    *tabmeta.Store
 	Hub             *realtime.Hub
 	ServerStartedAt time.Time
+	LeadReviver     *leadprovision.ReviveCoordinator
 }
 
 // NewTerminalModules creates the terminal tab and main terminal modules.
 func NewTerminalModules(deps TerminalModuleDeps) []interface{ Register(*http.ServeMux) } {
-	return []interface{ Register(*http.ServeMux) }{
-		hterminal.NewTabModule(deps.TermSvc),
-		hterminal.NewModule(
+	var terminalModule interface{ Register(*http.ServeMux) }
+	if deps.LeadReviver == nil {
+		terminalModule = hterminal.NewModule(
 			deps.TermSvc, deps.AgentSvc, deps.PTYMgr, deps.AgentTmuxMgr,
 			deps.TermAuth, deps.CORSOrigins,
 			deps.SelfURL, deps.Store,
-			deps.TabMetaStore, deps.Hub, deps.ServerStartedAt),
+			deps.TabMetaStore, deps.Hub, deps.ServerStartedAt)
+	} else {
+		terminalModule = hterminal.NewModule(
+			deps.TermSvc, deps.AgentSvc, deps.PTYMgr, deps.AgentTmuxMgr,
+			deps.TermAuth, deps.CORSOrigins,
+			deps.SelfURL, deps.Store,
+			deps.TabMetaStore, deps.Hub, deps.ServerStartedAt, deps.LeadReviver)
+	}
+	return []interface{ Register(*http.ServeMux) }{
+		hterminal.NewTabModule(deps.TermSvc),
+		terminalModule,
 	}
 }
 
@@ -134,4 +150,44 @@ func NewLocalSettingsHandlers(dataDir string, invalidator CredentialSeedInvalida
 // processes talk to serve instead of holding fleet-db credentials.
 func NewTaskRunAPIModule(st store.Store, fleetBaseURL string, localSettingsDir string) interface{ Register(*http.ServeMux) } {
 	return taskrunapi.NewModule(taskrunapi.Config{Store: st, FleetBaseURL: fleetBaseURL, LocalSettingsDir: localSettingsDir})
+}
+
+// LeadAPIDeps wires the sandboxed-lead control and issue-data surfaces.
+type LeadAPIDeps struct {
+	Store             store.Store
+	TokenKey          []byte
+	IssueBackendFn    func(context.Context) backend.IssueBackend
+	OpenAuthMode      bool
+	AllowOpenAuthMode bool
+}
+
+// NewLeadAPIModule creates the occupant-authenticated sandboxed-lead module.
+func NewLeadAPIModule(deps LeadAPIDeps) interface{ Register(*http.ServeMux) } {
+	var data *leadapi.DataRoutes
+	if deps.IssueBackendFn != nil {
+		backendProvider := service.IssueBackendProvider(deps.IssueBackendFn)
+		issueSvc := service.NewIssueServiceWithBackend(nil, nil, middleware.WithWorkspace, backendProvider)
+		data = &leadapi.DataRoutes{
+			ListIssues:       issues.HandleListIssues(issueSvc),
+			CreateIssue:      issues.HandleCreateIssue(issueSvc),
+			GetIssue:         issues.HandleGetIssue(issueSvc),
+			PatchIssue:       issues.HandlePatchIssue(issueSvc),
+			CloseIssue:       issues.HandleCloseIssue(issueSvc),
+			ClaimIssue:       issues.HandleClaimIssue(issueSvc),
+			AddComment:       issues.HandleAddComment(issueSvc),
+			AddDependency:    issues.HandleAddDependency(issueSvc),
+			RemoveDependency: issues.HandleRemoveDependency(issueSvc),
+			Ready:            issues.HandleReadyWithBackend(nil, issues.IssueBackendFn(deps.IssueBackendFn)),
+			Blocked:          githandlers.HandleBlockedWithBackend(nil, githandlers.IssueBackendFn(deps.IssueBackendFn)),
+			Stats:            healthhandlers.HandleStatsWithBackend(nil, healthhandlers.IssueBackendFn(deps.IssueBackendFn)),
+		}
+	}
+	return leadapi.NewModule(leadapi.Config{
+		Store:             deps.Store,
+		TokenKey:          deps.TokenKey,
+		Data:              data,
+		IssueBackend:      leadapi.IssueBackendFn(deps.IssueBackendFn),
+		OpenAuthMode:      deps.OpenAuthMode,
+		AllowOpenAuthMode: deps.AllowOpenAuthMode,
+	})
 }

@@ -72,6 +72,8 @@ export function encodeResize(cols: number, rows: number): string {
 const WS_CLOSE_BACKEND_EXITED = 4001;
 /** WebSocket close code sent by the backend when user kills the session. */
 const WS_CLOSE_SESSION_KILLED = 4002;
+/** WebSocket close code sent when the remote Daytona sandbox is gone. */
+const WS_CLOSE_SANDBOX_GONE = 4003;
 /** Standard WebSocket close code used for a clean server-side close. */
 const WS_CLOSE_NORMAL = 1000;
 /** Standard WebSocket close code used when the workspace runtime is unavailable. */
@@ -236,6 +238,11 @@ export function connectWebSocket(
           return;
         }
         if (event.code === WS_CLOSE_SESSION_KILLED) {
+          setConnectionState("session_ended");
+          onSessionKilled?.();
+          return;
+        }
+        if (event.code === WS_CLOSE_SANDBOX_GONE) {
           setConnectionState("session_ended");
           onSessionKilled?.();
           return;

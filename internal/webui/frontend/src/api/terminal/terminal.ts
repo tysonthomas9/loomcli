@@ -116,6 +116,18 @@ export async function ensureAgentTerminalSession(
   return response.data;
 }
 
+export function isStartingTerminalSessionError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const body = (error as { body?: unknown }).body;
+  const kind =
+    body && typeof body === "object" && "kind" in body
+      ? (body as { kind?: unknown }).kind
+      : undefined;
+  return kind === "starting";
+}
+
 export interface TerminalSetupResult {
   session_name: string;
   label: string;

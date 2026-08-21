@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"regexp"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/ops"
@@ -84,6 +85,7 @@ type AgentCreateInput struct {
 	Auto             bool                     `json:"auto"`
 	Backend          string                   `json:"backend,omitempty"`
 	FallbackBackends []string                 `json:"fallback_backends,omitempty"`
+	RuntimeProvider  domain.RuntimeProvider   `json:"runtime_provider,omitempty"`
 	Repos            []string                 `json:"repos,omitempty"`
 	RepoGroups       []string                 `json:"repo_groups,omitempty"`
 	CrossRepo        bool                     `json:"cross_repo,omitempty"`
@@ -103,6 +105,12 @@ type AgentUpdateInput struct {
 	Parent           *string                   `json:"parent,omitempty"`
 	State            *domain.AgentState        `json:"state,omitempty"`
 	DesiredState     *domain.AgentDesiredState `json:"desired_state,omitempty"`
+	// Provision-attempt evidence is server-owned and never accepted from the
+	// public PATCH payload. The eager provision kicker uses these fields through
+	// the same service/store update path.
+	LastProvisionOutcome *string    `json:"-"`
+	LastProvisionError   *string    `json:"-"`
+	LastProvisionAt      *time.Time `json:"-"`
 }
 
 // AgentLifecycleInput describes an agent lifecycle request that should be

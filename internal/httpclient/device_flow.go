@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/netbase"
+
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
@@ -25,7 +27,7 @@ var (
 func getDeviceFlowClient() *http.Client {
 	deviceFlowClientOnce.Do(func() {
 		deviceFlowClient = &http.Client{
-			Transport: otelhttp.NewTransport(http.DefaultTransport),
+			Transport: otelhttp.NewTransport(netbase.Transport()),
 		}
 	})
 	return deviceFlowClient

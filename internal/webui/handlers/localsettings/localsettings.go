@@ -46,14 +46,17 @@ type localTaskRunnerPatch struct {
 type runtimeCredentialsPatch struct {
 	Daytona *runtimeCredentialPatch `json:"daytona,omitempty"`
 	GitHub  *runtimeCredentialPatch `json:"github,omitempty"`
+	Codex   *runtimeCredentialPatch `json:"codex,omitempty"`
 }
 
 type runtimeCredentialPatch struct {
-	// #nosec G117 -- this is a credential-input PATCH DTO; carrying the api_key
-	// the operator is setting is the field's purpose, not an accidental leak.
+	// #nosec G117 -- this is a credential-input PATCH DTO; carrying the api_key the operator is setting is the field's purpose.
 	APIKey *string `json:"api_key,omitempty"`
-	Token  *string `json:"token,omitempty"`
-	Clear  bool    `json:"clear,omitempty"`
+	// #nosec G117 -- this is a credential-input PATCH DTO; carrying the token the operator is setting is the field's purpose.
+	Token *string `json:"token,omitempty"`
+	// #nosec G117 -- this is a credential-input PATCH DTO; carrying the auth_json the operator is setting is the field's purpose.
+	AuthJSON *string `json:"auth_json,omitempty"`
+	Clear    bool    `json:"clear,omitempty"`
 }
 
 // PatchOptions configures post-save notifications for local settings changes.
@@ -226,6 +229,17 @@ func applyRuntimeCredentialsPatch(dataDir string, settings *runtimesettings.Sett
 			settings.RuntimeCredentials.GitHub = credential
 		}
 	}
+	if patch.Codex != nil {
+		credential, clear, err := runtimeCredentialFromPatch(dataDir, runtimesettings.RuntimeCredentialProviderCodex, *patch.Codex, now)
+		if err != nil {
+			return false, err
+		}
+		if clear {
+			settings.RuntimeCredentials.Codex = runtimesettings.RuntimeCredentialConfig{}
+		} else if credential.Sealed != "" {
+			settings.RuntimeCredentials.Codex = credential
+		}
+	}
 	return settings.RuntimeCredentials.GitHub != githubBefore, nil
 }
 
@@ -239,6 +253,8 @@ func runtimeCredentialFromPatch(dataDir, provider string, patch runtimeCredentia
 		value = firstNonEmptyStringPtr(patch.APIKey, patch.Token)
 	case runtimesettings.RuntimeCredentialProviderGitHub:
 		value = firstNonEmptyStringPtr(patch.Token, patch.APIKey)
+	case runtimesettings.RuntimeCredentialProviderCodex:
+		value = firstNonEmptyStringPtr(patch.AuthJSON, patch.Token)
 	}
 	if strings.TrimSpace(value) == "" {
 		return runtimesettings.RuntimeCredentialConfig{}, false, nil

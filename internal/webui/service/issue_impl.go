@@ -42,9 +42,8 @@ const (
 // return by treating the backend as unavailable. The returned backend is
 // expected to be safe for concurrent use across goroutines.
 //
-// The ctx carries the per-request workspace ID; cloud-mode providers use it
-// to build a fleet-db backend scoped to the request's workspace. Local
-// providers may ignore ctx.
+// The ctx carries the per-request workspace ID and may carry a request
+// principal; cloud-mode providers use both to resolve a scoped backend.
 type IssueBackendProvider func(ctx context.Context) backend.IssueBackend
 
 type issueServiceImpl struct {

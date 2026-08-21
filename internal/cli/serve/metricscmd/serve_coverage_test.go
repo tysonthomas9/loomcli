@@ -246,6 +246,134 @@ func TestHandleStatus_ActiveStoreAgentWithoutWorkIsReady(t *testing.T) {
 	}
 }
 
+func TestHandleStatus_DaytonaRuntimePlacementVisibility(t *testing.T) {
+	t.Setenv("LOOM_WORKSPACE", "WS1")
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Test"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Daemon().Upsert(ctx, &domain.DaemonProfile{
+		WorkspaceKey:    "WS1",
+		RuntimeProvider: domain.RuntimeProviderDaytona,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, in := range []store.AgentCreate{
+		{WorkspaceKey: "WS1", Name: "placed-lead", RoleName: "lead", RuntimeProvider: domain.RuntimeProviderDaytona},
+		{WorkspaceKey: "WS1", Name: "unplaced-lead", RoleName: "lead"},
+		{WorkspaceKey: "WS1", Name: "local-lead", RoleName: "lead", RuntimeProvider: domain.RuntimeProviderLocal},
+	} {
+		if _, err := st.Agents().Create(ctx, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	failedOutcome := domain.LeadProvisionOutcomeFailed
+	failedError := "codex runtime credential not configured"
+	if _, err := st.Agents().Update(ctx, "WS1", "unplaced-lead", store.AgentUpdate{
+		LastProvisionOutcome: &failedOutcome,
+		LastProvisionError:   &failedError,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, in := range []store.NodeCreate{
+		{
+			WorkspaceKey:    "WS1",
+			NodeID:          "placement-old",
+			OwnerActor:      "agent:placed-lead",
+			RuntimeProvider: domain.RuntimeProviderDaytona,
+			Placement: &domain.NodePlacement{
+				SandboxID:  "sandbox-old",
+				Generation: 3,
+				State:      domain.PlacementStateActive,
+			},
+		},
+		{
+			WorkspaceKey:    "WS1",
+			NodeID:          "placement-new",
+			OwnerActor:      "agent:placed-lead",
+			RuntimeProvider: domain.RuntimeProviderDaytona,
+			Placement: &domain.NodePlacement{
+				SandboxID:  "sandbox-new",
+				Generation: 4,
+				State:      domain.PlacementStateReleased,
+			},
+		},
+		{
+			WorkspaceKey:    "WS1",
+			NodeID:          "placement-local",
+			OwnerActor:      "agent:local-lead",
+			RuntimeProvider: domain.RuntimeProviderDaytona,
+			Placement: &domain.NodePlacement{
+				SandboxID:  "sandbox-local",
+				Generation: 8,
+				State:      domain.PlacementStateActive,
+			},
+		},
+	} {
+		if _, err := st.Nodes().Create(ctx, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/monitor/status", nil)
+	rr := httptest.NewRecorder()
+	HandleStatus(func() *monitor.MonitorData {
+		return &monitor.MonitorData{Timestamp: time.Unix(1, 0).UTC()}
+	}, st).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var response struct {
+		Agents []map[string]any `json:"agents"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+		t.Fatalf("json unmarshal: %v", err)
+	}
+	byName := make(map[string]map[string]any, len(response.Agents))
+	for _, agent := range response.Agents {
+		byName[agent["name"].(string)] = agent
+	}
+
+	placed := byName["placed-lead"]
+	if got := placed["runtime_provider"]; got != "daytona" {
+		t.Fatalf("placed runtime_provider = %v, want daytona", got)
+	}
+	if got := placed["runtime_status"]; got != "released" {
+		t.Fatalf("placed runtime_status = %v, want released", got)
+	}
+	placement, ok := placed["runtime_placement"].(map[string]any)
+	if !ok {
+		t.Fatalf("placed runtime_placement = %#v, want object", placed["runtime_placement"])
+	}
+	if placement["sandbox_id"] != "sandbox-new" || placement["placement_id"] != "placement-new" || placement["state"] != "released" || placement["generation"] != float64(4) {
+		t.Fatalf("placed runtime_placement = %#v, want newest released placement", placement)
+	}
+
+	unplaced := byName["unplaced-lead"]
+	if got := unplaced["runtime_provider"]; got != "daytona" {
+		t.Fatalf("unplaced runtime_provider = %v, want daytona", got)
+	}
+	if got := unplaced["runtime_status"]; got != "not_provisioned" {
+		t.Fatalf("unplaced runtime_status = %v, want not_provisioned", got)
+	}
+	if got := unplaced["runtime_error"]; got != failedError {
+		t.Fatalf("unplaced runtime_error = %v, want %q", got, failedError)
+	}
+	if _, ok := unplaced["runtime_placement"]; ok {
+		t.Fatalf("unplaced runtime_placement = %#v, want omitted", unplaced["runtime_placement"])
+	}
+
+	local := byName["local-lead"]
+	if _, ok := local["runtime_provider"]; ok {
+		t.Fatalf("local runtime_provider = %#v, want omitted", local["runtime_provider"])
+	}
+	if _, ok := local["runtime_placement"]; ok {
+		t.Fatalf("local runtime_placement = %#v, want omitted", local["runtime_placement"])
+	}
+}
+
 func TestHandleStatus_DerivesPlanningFromInProgressTaskWithoutRuntimeAgent(t *testing.T) {
 	t.Setenv("LOOM_WORKSPACE", "WS1")
 	ctx := context.Background()
@@ -572,8 +700,8 @@ func TestMonitorStoreDataSource_CachesWorkspaceMetadataAcrossEndpoints(t *testin
 	if got := counted.repos.listByWorkspace["WS2"]; got != 1 {
 		t.Fatalf("WS2 repo List calls = %d, want 1", got)
 	}
-	if got := counted.daemon.getCalls; got != 0 {
-		t.Fatalf("daemon Get calls = %d, want no workspace summary daemon reads", got)
+	if got := counted.daemon.getCalls; got != 1 {
+		t.Fatalf("daemon Get calls = %d, want 1 cached effective-runtime profile read", got)
 	}
 }
 

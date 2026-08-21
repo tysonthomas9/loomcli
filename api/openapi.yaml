@@ -2325,6 +2325,9 @@ paths:
                   type: array
                   items:
                     type: string
+                runtime_provider:
+                  type: string
+                  enum: [local, e2b, kubernetes, daytona, ci, other]
                 repos:
                   type: array
                   items:
@@ -5569,6 +5572,17 @@ components:
           default: []
         cross_repo:
           type: boolean
+        last_provision_outcome:
+          type: string
+          enum: [in_progress, succeeded, failed]
+          description: Latest eager Daytona lead provision-attempt outcome.
+        last_provision_error:
+          type: string
+          description: Bounded error from the latest failed provision attempt.
+        last_provision_at:
+          type: string
+          format: date-time
+          description: Time the latest provision-attempt outcome was recorded.
 
     WorkspaceRenameRequest:
       type: object
@@ -5642,6 +5656,14 @@ components:
           type: string
         status:
           type: string
+        last_provision_outcome:
+          type: string
+          enum: [in_progress, succeeded, failed]
+        last_provision_error:
+          type: string
+        last_provision_at:
+          type: string
+          format: date-time
         agent_state:
           type: string
           enum: [idle, spawning, running, working, stuck, done, stopped, dead]
@@ -5763,6 +5785,8 @@ components:
           type: boolean
         has_diff:
           type: boolean
+        github_pr_url:
+          type: string
         last_error:
           type: string
 
@@ -6276,6 +6300,32 @@ components:
           items:
             type: string
 
+    MonitorRuntimePlacement:
+      type: object
+      required: [sandbox_id, placement_id, state, generation]
+      properties:
+        sandbox_id:
+          type: string
+        placement_id:
+          type: string
+        state:
+          type: string
+          enum: [provisioning, active, releasing, released, lost]
+        generation:
+          type: integer
+          format: int64
+
+    LeadRuntimeStatus:
+      type: string
+      enum:
+        - not_provisioned
+        - provisioning
+        - ready
+        - degraded
+        - releasing
+        - released
+        - lost
+
     MonitorAgentStatus:
       type: object
       required: [name, branch, status, ahead, behind, workspace]
@@ -6351,6 +6401,22 @@ components:
             backend (claude/codex/gemini), forwarded over IPC. Compare to
             "now" to detect stuck agents. Zero/absent when no observation
             yet or agent isn't daemon-managed.
+        runtime_provider:
+          type: string
+          enum: [local, e2b, kubernetes, daytona, ci, other]
+          description: Effective provider for interactive remote runtimes.
+        runtime_placement:
+          $ref: "#/components/schemas/MonitorRuntimePlacement"
+          description: >-
+            Newest matching store placement by generation, then update time.
+        runtime_status:
+          $ref: "#/components/schemas/LeadRuntimeStatus"
+          description: >-
+            Daytona interactive lead runtime readiness projected from placement,
+            durable lead-boot evidence, and the latest provision attempt.
+        runtime_error:
+          type: string
+          description: Human-readable detail when the projected runtime is degraded or failed.
         live_status:
           type: string
           description: >-

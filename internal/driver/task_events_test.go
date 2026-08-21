@@ -62,9 +62,10 @@ func TestClaimAndExecuteTaskRunEmitsLifecycleEvents(t *testing.T) {
 		{
 			name: "complete with lead creates outbox row",
 			execResult: TaskExecResult{
-				Status:       domain.TaskRunCompleted,
-				LogsRef:      "logs://evt",
-				ArtifactsRef: "artifacts://evt",
+				Status:          domain.TaskRunCompleted,
+				LogsRef:         "logs://evt",
+				ArtifactsRef:    "artifacts://evt",
+				RuntimeMetadata: map[string]string{"github_pr_url": "https://github.com/acme/widgets/pull/7"},
 			},
 			maxAttempts:     1,
 			bindLead:        true,
@@ -190,6 +191,13 @@ func TestClaimAndExecuteTaskRunEmitsLifecycleEvents(t *testing.T) {
 			if !strings.Contains(row.Body, "task_run: "+taskRunID) {
 				t.Fatalf("outbox body = %q, want task_run reference", row.Body)
 			}
+			// Wiring guard: the pr: line must survive the full claim → execute →
+			// persist → outbox path, not just the formatter (which has its own test).
+			if wantPR := tc.execResult.RuntimeMetadata["github_pr_url"]; wantPR != "" {
+				if !strings.Contains(row.Body, "pr: "+wantPR) {
+					t.Fatalf("outbox body = %q, want pr line %q", row.Body, wantPR)
+				}
+			}
 		})
 	}
 }
@@ -234,6 +242,7 @@ func TestBuildLeadTaskMessage(t *testing.T) {
 		title        string
 		logsRef      string
 		artifactsRef string
+		githubPRURL  string
 		status       domain.TaskRunStatus
 		wantContains []string
 		wantOmits    []string
@@ -243,6 +252,7 @@ func TestBuildLeadTaskMessage(t *testing.T) {
 			title:        "Wire emission hooks",
 			logsRef:      "logs://run",
 			artifactsRef: "artifacts://run",
+			githubPRURL:  "https://github.com/acme/widgets/pull/42",
 			status:       domain.TaskRunCompleted,
 			wantContains: []string{
 				"Loom completed a child task",
@@ -251,6 +261,7 @@ func TestBuildLeadTaskMessage(t *testing.T) {
 				"task_run: run-1",
 				"logs: logs://run",
 				"artifacts: artifacts://run",
+				"pr: https://github.com/acme/widgets/pull/42",
 				"Do not start another epic runner.",
 			},
 		},
@@ -262,12 +273,12 @@ func TestBuildLeadTaskMessage(t *testing.T) {
 				"task: TASK-1",
 				"Do not start another epic runner.",
 			},
-			wantOmits: []string{"logs:", "artifacts:"},
+			wantOmits: []string{"logs:", "artifacts:", "pr:"},
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			body := buildLeadTaskMessage("EPIC-1", "TASK-1", tc.title, "run-1", tc.logsRef, tc.artifactsRef, tc.status)
+			body := buildLeadTaskMessage("EPIC-1", "TASK-1", tc.title, "run-1", tc.logsRef, tc.artifactsRef, tc.githubPRURL, tc.status)
 			for _, want := range tc.wantContains {
 				if !strings.Contains(body, want) {
 					t.Fatalf("body = %q, want substring %q", body, want)

@@ -42,6 +42,7 @@ func (s *agentStore) Create(_ context.Context, in store.AgentCreate) (*domain.Ag
 		Auto:             in.Auto,
 		Backend:          in.Backend,
 		FallbackBackends: append([]string(nil), in.FallbackBackends...),
+		RuntimeProvider:  in.RuntimeProvider,
 		Repos:            append([]string(nil), in.Repos...),
 		RepoGroups:       append([]string(nil), in.RepoGroups...),
 		CrossRepo:        in.CrossRepo,
@@ -114,6 +115,9 @@ func applyAgentRoutingPatch(a *domain.Agent, patch store.AgentUpdate) {
 	if patch.FallbackBackends != nil {
 		a.FallbackBackends = append([]string(nil), (*patch.FallbackBackends)...)
 	}
+	if patch.RuntimeProvider != nil {
+		a.RuntimeProvider = *patch.RuntimeProvider
+	}
 	if patch.Repos != nil {
 		a.Repos = append([]string(nil), (*patch.Repos)...)
 	}
@@ -147,6 +151,16 @@ func applyAgentRuntimePatch(a *domain.Agent, patch store.AgentUpdate) {
 	if patch.DesiredState != nil {
 		a.DesiredState = *patch.DesiredState
 	}
+	if patch.LastProvisionOutcome != nil {
+		a.LastProvisionOutcome = *patch.LastProvisionOutcome
+	}
+	if patch.LastProvisionError != nil {
+		a.LastProvisionError = *patch.LastProvisionError
+	}
+	if patch.LastProvisionAt != nil {
+		lastProvisionAt := *patch.LastProvisionAt
+		a.LastProvisionAt = &lastProvisionAt
+	}
 	if patch.Hooks != nil {
 		// A non-nil empty pipeline is the explicit clear marker.
 		if patch.Hooks.IsEmpty() {
@@ -173,5 +187,9 @@ func cloneAgent(a *domain.Agent) *domain.Agent {
 	out.Repos = append([]string(nil), a.Repos...)
 	out.RepoGroups = append([]string(nil), a.RepoGroups...)
 	out.Hooks = a.Hooks.Clone()
+	if a.LastProvisionAt != nil {
+		lastProvisionAt := *a.LastProvisionAt
+		out.LastProvisionAt = &lastProvisionAt
+	}
 	return &out
 }

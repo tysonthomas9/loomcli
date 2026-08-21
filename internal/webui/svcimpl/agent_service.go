@@ -370,6 +370,7 @@ func (s *agentServiceImpl) CreateAgent(ctx context.Context, in service.AgentCrea
 		Auto:             in.Auto,
 		Backend:          in.Backend,
 		FallbackBackends: in.FallbackBackends,
+		RuntimeProvider:  in.RuntimeProvider,
 		Repos:            in.Repos,
 		RepoGroups:       in.RepoGroups,
 		CrossRepo:        in.CrossRepo,
@@ -537,16 +538,19 @@ func (s *agentServiceImpl) UpdateAgent(ctx context.Context, wsKey, name string, 
 		return nil, err
 	}
 	updated, err := s.store.Agents().Update(ctx, wsKey, name, store.AgentUpdate{
-		RoleName:         patch.RoleName,
-		Auto:             patch.Auto,
-		Backend:          patch.Backend,
-		FallbackBackends: patch.FallbackBackends,
-		Repos:            patch.Repos,
-		RepoGroups:       patch.RepoGroups,
-		CrossRepo:        patch.CrossRepo,
-		Parent:           patch.Parent,
-		State:            patch.State,
-		DesiredState:     patch.DesiredState,
+		RoleName:             patch.RoleName,
+		Auto:                 patch.Auto,
+		Backend:              patch.Backend,
+		FallbackBackends:     patch.FallbackBackends,
+		Repos:                patch.Repos,
+		RepoGroups:           patch.RepoGroups,
+		CrossRepo:            patch.CrossRepo,
+		Parent:               patch.Parent,
+		State:                patch.State,
+		DesiredState:         patch.DesiredState,
+		LastProvisionOutcome: patch.LastProvisionOutcome,
+		LastProvisionError:   patch.LastProvisionError,
+		LastProvisionAt:      patch.LastProvisionAt,
 	})
 	if err != nil {
 		return nil, classifyStoreError("update agent", err)
@@ -625,9 +629,20 @@ func validateAgentCreateInput(in service.AgentCreateInput) error {
 	}
 	switch in.Kind {
 	case "", string(domain.RoleKindInteractive), string(domain.RoleKindWorker):
-		return nil
 	default:
 		return service.ErrValidation("invalid role kind")
+	}
+	switch in.RuntimeProvider {
+	case "",
+		domain.RuntimeProviderLocal,
+		domain.RuntimeProviderE2B,
+		domain.RuntimeProviderKubernetes,
+		domain.RuntimeProviderDaytona,
+		domain.RuntimeProviderCI,
+		domain.RuntimeProviderOther:
+		return nil
+	default:
+		return service.ErrValidation("invalid runtime provider")
 	}
 }
 

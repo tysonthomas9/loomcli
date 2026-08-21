@@ -18,6 +18,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/placement"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
@@ -276,6 +277,43 @@ func startIssueJournalBridge(ctx context.Context, st store.Store) {
 	}()
 }
 
+// startPlacementReaper launches the Daytona placement reconciler. The broker is
+// nil until runServe owns placement provider construction (TODO(5c-4)), so this
+// helper currently logs once and starts no goroutine in that case.
+func startPlacementReaper(ctx context.Context, broker *placement.Broker, interval time.Duration, enforce bool) {
+	if broker == nil {
+		slog.Info("placement reaper disabled: placement broker not configured")
+		return
+	}
+	if interval <= 0 {
+		interval = placementReaperInterval()
+	}
+	reaper := placement.NewPlacementReaper(broker, placement.ReaperConfig{
+		Enforce:                      enforce,
+		Grace:                        2 * interval,
+		LostReleaseGrace:             leadLostReleaseGrace(),
+		LostAbsenceReconfirmInterval: interval,
+	})
+	slog.Info("Placement reaper enabled", "interval", interval, "enforce", enforce)
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			result, err := reaper.RunOnce(ctx)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				slog.Error("placement reaper pass failed", "err", err, "examined", result.Examined, "acted", result.Acted, "dead_lettered", result.DeadLettered)
+			} else if result.Acted > 0 || result.DeadLettered > 0 {
+				slog.Info("placement reaper pass", "examined", result.Examined, "acted", result.Acted, "dead_lettered", result.DeadLettered)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+}
+
 // triggerCronInterval reads the cron sweep interval in seconds from
 // LOOM_TRIGGER_CRON_INTERVAL (default 30s, capped at one hour).
 func triggerCronInterval() time.Duration {
@@ -303,6 +341,16 @@ func driverStaleTaskMaxAge() time.Duration {
 // one hour).
 func issueBridgeInterval() time.Duration {
 	return time.Duration(boundedIntEnv(envLoomIssueBridgeInterval, 2, 3600)) * time.Second
+}
+
+// placementReaperInterval reads the placement reconciler cadence in seconds
+// from LOOM_PLACEMENT_REAPER_INTERVAL (default 60s, capped at one hour).
+func placementReaperInterval() time.Duration {
+	return time.Duration(boundedIntEnv(envLoomPlacementReaperInterval, 60, 3600)) * time.Second
+}
+
+func placementReaperEnforce() bool {
+	return strings.TrimSpace(os.Getenv(envLoomPlacementReaperEnforce)) == "1"
 }
 
 // issueBridgeDisabled reports whether LOOM_ISSUE_BRIDGE_DISABLED opts the bridge

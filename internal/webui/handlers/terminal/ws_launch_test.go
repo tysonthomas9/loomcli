@@ -60,6 +60,36 @@ func TestLaunchSpecKeepsLegacyNamedLeadTabs(t *testing.T) {
 	}
 }
 
+func TestLaunchSpecAcceptsRemoteAgentMetadataWithoutArgv(t *testing.T) {
+	ctx := context.Background()
+	store := newTabMetaStoreForWSTest(t)
+	if err := store.Set(ctx, &tabmeta.TabMetadata{
+		SessionName: "term_remote",
+		Workspace:   "E2E",
+		Label:       "agent-nova",
+		Kind:        "agent",
+		AgentID:     "nova",
+		Launch: &tabmeta.LaunchSpec{
+			Remote: &tabmeta.RemoteLaunchSpec{
+				Provider:     "daytona",
+				SandboxID:    "sandbox-1",
+				PTYSessionID: webuterminal.DefaultDaytonaLeadPTYSessionID,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed tab metadata: %v", err)
+	}
+	p := &terminalWSParams{tabMetaStore: store}
+
+	launch, err := launchSpecForTerminalSession(ctx, p, "E2E", "term_remote")
+	if err != nil {
+		t.Fatalf("launchSpecForTerminalSession: %v", err)
+	}
+	if launch == nil || launch.Remote == nil || launch.Remote.SandboxID != "sandbox-1" {
+		t.Fatalf("launch = %#v, want remote sandbox launch", launch)
+	}
+}
+
 func TestEnsureWorkspacePTYRegisteredUsesLocalState(t *testing.T) {
 	stateDir := t.TempDir()
 	wsDir := t.TempDir()

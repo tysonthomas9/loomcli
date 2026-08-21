@@ -28,17 +28,18 @@ var _ store.DaemonProfileStore = (*daemonStore)(nil)
 // Future work: extend fleet-db's models.OTelSettings to cover the full
 // set, or split per-host-only fields out of the domain type.
 type daemonProfileWire struct {
-	WorkspaceKey   string                  `json:"workspace_key"`
-	PIDFile        string                  `json:"pid_file,omitempty"`
-	LogDir         string                  `json:"log_dir,omitempty"`
-	EventsDir      string                  `json:"events_dir,omitempty"`
-	RestartPolicy  *fleetRestartPolicyWire `json:"restart_policy,omitempty"`
-	MaxAgents      *int                    `json:"max_agents,omitempty"`
-	IssueBackend   string                  `json:"issue_backend,omitempty"`
-	AgentBackend   string                  `json:"agent_backend,omitempty"`
-	StartupTimeout *int                    `json:"startup_timeout,omitempty"`
-	OTel           *fleetOTelWire          `json:"otel,omitempty"`
-	UpdatedAt      time.Time               `json:"updated_at"`
+	WorkspaceKey    string                  `json:"workspace_key"`
+	PIDFile         string                  `json:"pid_file,omitempty"`
+	LogDir          string                  `json:"log_dir,omitempty"`
+	EventsDir       string                  `json:"events_dir,omitempty"`
+	RestartPolicy   *fleetRestartPolicyWire `json:"restart_policy,omitempty"`
+	MaxAgents       *int                    `json:"max_agents,omitempty"`
+	IssueBackend    string                  `json:"issue_backend,omitempty"`
+	AgentBackend    string                  `json:"agent_backend,omitempty"`
+	RuntimeProvider domain.RuntimeProvider  `json:"runtime_provider,omitempty"`
+	StartupTimeout  *int                    `json:"startup_timeout,omitempty"`
+	OTel            *fleetOTelWire          `json:"otel,omitempty"`
+	UpdatedAt       time.Time               `json:"updated_at"`
 }
 
 // fleetRestartPolicyWire holds the fields fleet-db understands. Tags are
@@ -72,15 +73,16 @@ type fleetOTelWire struct {
 
 func (w daemonProfileWire) toDomain() *domain.DaemonProfile {
 	out := &domain.DaemonProfile{
-		WorkspaceKey:   w.WorkspaceKey,
-		PIDFile:        w.PIDFile,
-		LogDir:         w.LogDir,
-		EventsDir:      w.EventsDir,
-		MaxAgents:      w.MaxAgents,
-		IssueBackend:   w.IssueBackend,
-		AgentBackend:   w.AgentBackend,
-		StartupTimeout: w.StartupTimeout,
-		UpdatedAt:      w.UpdatedAt,
+		WorkspaceKey:    w.WorkspaceKey,
+		PIDFile:         w.PIDFile,
+		LogDir:          w.LogDir,
+		EventsDir:       w.EventsDir,
+		MaxAgents:       w.MaxAgents,
+		IssueBackend:    w.IssueBackend,
+		AgentBackend:    w.AgentBackend,
+		RuntimeProvider: w.RuntimeProvider,
+		StartupTimeout:  w.StartupTimeout,
+		UpdatedAt:       w.UpdatedAt,
 	}
 	if w.RestartPolicy != nil {
 		out.RestartPolicy = domain.RestartPolicy{
@@ -119,26 +121,28 @@ func (w daemonProfileWire) toDomain() *domain.DaemonProfile {
 // unknown fields (WorkspaceKey/UpdatedAt) since the workspace is in the
 // URL path and the timestamp is server-managed.
 type daemonProfileUpsertWire struct {
-	PIDFile        string                  `json:"pid_file,omitempty"`
-	LogDir         string                  `json:"log_dir,omitempty"`
-	EventsDir      string                  `json:"events_dir,omitempty"`
-	IssueBackend   string                  `json:"issue_backend,omitempty"`
-	AgentBackend   string                  `json:"agent_backend,omitempty"`
-	MaxAgents      *int                    `json:"max_agents,omitempty"`
-	StartupTimeout *int                    `json:"startup_timeout,omitempty"`
-	RestartPolicy  *fleetRestartPolicyWire `json:"restart_policy,omitempty"`
-	OTel           *fleetOTelWire          `json:"otel,omitempty"`
+	PIDFile         string                  `json:"pid_file,omitempty"`
+	LogDir          string                  `json:"log_dir,omitempty"`
+	EventsDir       string                  `json:"events_dir,omitempty"`
+	IssueBackend    string                  `json:"issue_backend,omitempty"`
+	AgentBackend    string                  `json:"agent_backend,omitempty"`
+	RuntimeProvider domain.RuntimeProvider  `json:"runtime_provider,omitempty"`
+	MaxAgents       *int                    `json:"max_agents,omitempty"`
+	StartupTimeout  *int                    `json:"startup_timeout,omitempty"`
+	RestartPolicy   *fleetRestartPolicyWire `json:"restart_policy,omitempty"`
+	OTel            *fleetOTelWire          `json:"otel,omitempty"`
 }
 
 func domainToUpsertWire(p *domain.DaemonProfile) daemonProfileUpsertWire {
 	out := daemonProfileUpsertWire{
-		PIDFile:        p.PIDFile,
-		LogDir:         p.LogDir,
-		EventsDir:      p.EventsDir,
-		MaxAgents:      p.MaxAgents,
-		IssueBackend:   p.IssueBackend,
-		AgentBackend:   p.AgentBackend,
-		StartupTimeout: p.StartupTimeout,
+		PIDFile:         p.PIDFile,
+		LogDir:          p.LogDir,
+		EventsDir:       p.EventsDir,
+		MaxAgents:       p.MaxAgents,
+		IssueBackend:    p.IssueBackend,
+		AgentBackend:    p.AgentBackend,
+		RuntimeProvider: p.RuntimeProvider,
+		StartupTimeout:  p.StartupTimeout,
 	}
 	if hasRestartPolicy(p.RestartPolicy) {
 		out.RestartPolicy = &fleetRestartPolicyWire{

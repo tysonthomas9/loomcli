@@ -15,7 +15,10 @@ import (
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 	"github.com/tysonthomas9/loomcli/internal/kv"
+	"github.com/tysonthomas9/loomcli/internal/netbase"
 )
+
+var fleetHealthHTTPClient = &http.Client{Transport: netbase.Transport()}
 
 // checkOrphanedFleetLocks scans all in_progress issues and warns when the
 // recorded assignee is not currently a running daemon-managed agent. This
@@ -83,7 +86,7 @@ func defaultFleetHealthProbe(ctx context.Context, baseURL string) error {
 	if err != nil {
 		return err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := fleetHealthHTTPClient.Do(req)
 	if err != nil {
 		return err
 	}

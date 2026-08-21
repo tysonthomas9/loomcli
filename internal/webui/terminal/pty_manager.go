@@ -22,6 +22,7 @@
 package terminal
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -52,9 +53,10 @@ const (
 	// per server, so leaking a few PTYs is cheaper than surprising the
 	// user with a killed shell. Remote `loom-agentd` (Firecracker) sets
 	// non-zero values.
-	defaultGracePeriod = 0
-	defaultIdleTimeout = 0
-	defaultReaperTick  = 60 * time.Second
+	defaultGracePeriod   = 0
+	defaultIdleTimeout   = 0
+	defaultReaperTick    = 60 * time.Second
+	daytonaAttachTimeout = 30 * time.Second
 )
 
 // termEnv is the TERM environment value injected for every PTY-backed
@@ -275,7 +277,7 @@ func (m *PTYManager) AttachSession(key SessionKey, cols, rows uint16, launch *ta
 		m.mu.Unlock()
 
 		if existed {
-			_ = pty.Setsize(sess.pty, &pty.Winsize{Cols: cols, Rows: rows})
+			_ = sess.resize(context.Background(), cols, rows)
 		}
 
 		sess.cancelKillTimer()
@@ -326,7 +328,7 @@ func (m *PTYManager) EnsureSession(key SessionKey, cols, rows uint16, argv []str
 	}
 	m.mu.Unlock()
 
-	_ = pty.Setsize(sess.pty, &pty.Winsize{Cols: cols, Rows: rows})
+	_ = sess.resize(context.Background(), cols, rows)
 	sess.cancelKillTimer()
 	return false, nil
 }
@@ -341,12 +343,16 @@ func (m *PTYManager) WriteToSession(key SessionKey, p []byte) error {
 	if sess == nil {
 		return ErrPTYSessionNotFound
 	}
-	_, err := sess.pty.Write(p)
+	_, err := sess.writeInput(p)
 	return err
 }
 
 // spawnSession must be called with m.mu held.
 func (m *PTYManager) spawnSession(key SessionKey, cols, rows uint16, launch *tabmeta.LaunchSpec) (*ptySession, error) {
+	if launch != nil && launch.Remote != nil {
+		return m.attachRemoteSession(key, cols, rows, launch.Remote)
+	}
+
 	var useArgv []string
 	if launch != nil {
 		useArgv = launch.Argv
@@ -370,8 +376,37 @@ func (m *PTYManager) spawnSession(key SessionKey, cols, rows uint16, launch *tab
 		return nil, fmt.Errorf("pty.StartWithSize: %w", err)
 	}
 
-	sess := newPtySession(key, ptmx, cmd)
-	go sess.drain(m)
+	sess := newPtySession(key, newHostUpstream(ptmx, cmd), m.onSessionExited)
+	go sess.drain()
+	return sess, nil
+}
+
+func (m *PTYManager) attachRemoteSession(key SessionKey, cols, rows uint16, remote *tabmeta.RemoteLaunchSpec) (*ptySession, error) {
+	if remote == nil {
+		return nil, fmt.Errorf("remote terminal launch spec required")
+	}
+	provider := strings.TrimSpace(remote.Provider)
+	switch provider {
+	case "daytona":
+		return m.attachDaytonaSession(key, cols, rows, remote)
+	default:
+		return nil, fmt.Errorf("unsupported remote terminal provider %q", provider)
+	}
+}
+
+func (m *PTYManager) attachDaytonaSession(key SessionKey, cols, rows uint16, remote *tabmeta.RemoteLaunchSpec) (*ptySession, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), daytonaAttachTimeout)
+	defer cancel()
+	upstream, err := newDaytonaPTYUpstreamForManager(ctx, remote.SandboxID, remote.PTYSessionID, DaytonaPTYConfig{})
+	if err != nil {
+		return nil, err
+	}
+	if err := upstream.Resize(ctx, cols, rows); err != nil {
+		_ = upstream.Close()
+		return nil, fmt.Errorf("resize daytona pty %q in sandbox %q: %w", remote.PTYSessionID, remote.SandboxID, err)
+	}
+	sess := newPtySession(key, upstream, m.onSessionExited)
+	go sess.drain()
 	return sess, nil
 }
 

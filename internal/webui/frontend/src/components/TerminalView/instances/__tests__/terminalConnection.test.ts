@@ -540,6 +540,36 @@ describe("connectWebSocket", () => {
     expect(m.onBackendCrash).not.toHaveBeenCalled();
   });
 
+  it("does not auto-retry when the Daytona sandbox is gone", async () => {
+    const m = makeMocks();
+    connectWebSocket(
+      "ws1",
+      "session1",
+      m.write,
+      m.wsRef,
+      m.setConnectionState,
+      undefined,
+      m.onDisconnected,
+      undefined,
+      m.onBackendCrash,
+      m.onSessionKilled,
+    );
+
+    shared.resolveToken!({ token: "tok" });
+    await vi.waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+
+    const ws = MockWebSocket.instances[0];
+    ws.simulateOpen();
+    ws.simulateClose(4003, "sandbox no longer exists");
+
+    expect(m.setConnectionState).toHaveBeenCalledWith("session_ended");
+    expect(m.onSessionKilled).toHaveBeenCalledTimes(1);
+    expect(m.onDisconnected).not.toHaveBeenCalled();
+    expect(m.onBackendCrash).not.toHaveBeenCalled();
+  });
+
   it("double cleanup is idempotent", async () => {
     const m = makeMocks();
     const cleanup = connectWebSocket(

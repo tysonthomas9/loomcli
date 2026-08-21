@@ -81,6 +81,44 @@ func TestSetAndGet(t *testing.T) {
 	}
 }
 
+func TestSetAndGet_RemoteLaunchSpec(t *testing.T) {
+	store, _ := setupTest(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	meta := &TabMetadata{
+		SessionName: "remote-session",
+		Workspace:   testWorkspace,
+		Label:       "Remote",
+		Launch: &LaunchSpec{
+			Remote: &RemoteLaunchSpec{
+				Provider:     "daytona",
+				SandboxID:    "sandbox-1",
+				PTYSessionID: "lead",
+			},
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := store.Set(ctx, meta); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	got, err := store.Get(ctx, testWorkspace, "remote-session")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got == nil || got.Launch == nil || got.Launch.Remote == nil {
+		t.Fatalf("Launch.Remote = %#v, want persisted remote spec", got)
+	}
+	if got.Launch.Remote.Provider != "daytona" ||
+		got.Launch.Remote.SandboxID != "sandbox-1" ||
+		got.Launch.Remote.PTYSessionID != "lead" {
+		t.Fatalf("remote spec = %#v, want daytona sandbox-1 lead", got.Launch.Remote)
+	}
+}
+
 func TestList_Empty(t *testing.T) {
 	store, _ := setupTest(t)
 	tabs, err := store.List(context.Background(), testWorkspace)

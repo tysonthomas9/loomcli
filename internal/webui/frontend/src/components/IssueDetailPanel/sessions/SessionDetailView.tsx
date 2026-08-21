@@ -13,7 +13,7 @@ import { CodeMirrorEditor } from "@/components/CodeMirrorEditor";
 import { ToolPill } from "@/components/ToolPill";
 import { useSessionTranscript, useSessionDiff } from "@/hooks/terminal";
 import type { SessionRecord, TranscriptEntry } from "@/types/agent";
-import { formatStatusLabel } from "@/utils/issue";
+import { formatStatusLabel, isPRUrl } from "@/utils/issue";
 import { formatTokens, sessionTotalTokens } from "@/utils/sessionUsage";
 import { argPreview } from "@/utils/toolPreview";
 
@@ -285,6 +285,17 @@ export function SessionDetailView({
           {session.is_active && (
             <span className={styles.activeBadge}>active</span>
           )}
+          {session.github_pr_url?.startsWith("https://") &&
+            isPRUrl(session.github_pr_url) && (
+              <a
+                className={styles.prLink}
+                href={session.github_pr_url}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                View PR ↗
+              </a>
+            )}
         </div>
 
         {runError && (

@@ -71,6 +71,8 @@ func isPublicRoute(method, path string) bool {
 //   - /api/webhooks/: per-binding signature (e.g. GitHub X-Hub-Signature-256)
 //   - /api/driver/: run-scoped DriverRun credentials (X-Loom-Driver-* headers,
 //     fenced heartbeat) plus an optional shared bearer token
+//   - /api/lead/: occupant-token bearer auth verified against node placement
+//     generation fencing (leadapi)
 //   - /api/task-run/: per-task-run lease-token bearer auth verified through
 //     the store's fenced task-run checks (taskrunapi)
 //   - /api/auth/: proxied to the BetterAuth service, which handles its own
@@ -81,6 +83,7 @@ func hasOwnAuthPrefix(normalizedPath string) bool {
 		"/api/internal/workers/",
 		"/api/webhooks/",
 		"/api/driver/",
+		"/api/lead/",
 		"/api/task-run/",
 		"/api/auth/",
 	} {

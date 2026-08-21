@@ -11,16 +11,17 @@ import "time"
 // Truly per-host bootstrap config (where loom finds fleet-db, OTLP
 // endpoint) goes in env vars, never here.
 type DaemonProfile struct {
-	WorkspaceKey   string        `json:"workspace_key"`
-	PIDFile        string        `json:"pid_file,omitempty"`
-	LogDir         string        `json:"log_dir,omitempty"`
-	EventsDir      string        `json:"events_dir,omitempty"`
-	RestartPolicy  RestartPolicy `json:"restart_policy"`
-	MaxAgents      *int          `json:"max_agents,omitempty"`
-	IssueBackend   string        `json:"issue_backend,omitempty"`
-	AgentBackend   string        `json:"agent_backend,omitempty"`
-	StartupTimeout *int          `json:"startup_timeout,omitempty"`
-	OTel           *OTelSettings `json:"otel,omitempty"`
+	WorkspaceKey    string          `json:"workspace_key"`
+	PIDFile         string          `json:"pid_file,omitempty"`
+	LogDir          string          `json:"log_dir,omitempty"`
+	EventsDir       string          `json:"events_dir,omitempty"`
+	RestartPolicy   RestartPolicy   `json:"restart_policy"`
+	MaxAgents       *int            `json:"max_agents,omitempty"`
+	IssueBackend    string          `json:"issue_backend,omitempty"`
+	AgentBackend    string          `json:"agent_backend,omitempty"`
+	RuntimeProvider RuntimeProvider `json:"runtime_provider,omitempty"`
+	StartupTimeout  *int            `json:"startup_timeout,omitempty"`
+	OTel            *OTelSettings   `json:"otel,omitempty"`
 
 	UpdatedAt time.Time `json:"updated_at"`
 }

@@ -406,6 +406,18 @@
   font-size: 12px;
 }
 
+.prLink {
+  margin-left: auto;
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.prLink:hover {
+  text-decoration: underline;
+}
+
 .runErrorBanner {
   margin: 0 0 10px;
   padding: 9px 12px;

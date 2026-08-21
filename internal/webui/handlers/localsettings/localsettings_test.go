@@ -74,7 +74,8 @@ func TestHandlePatch_SavesRuntimeSettingsWithoutReturningCredentials(t *testing.
 		"agent_runtime": {"default": "daytona"},
 		"runtime_credentials": {
 			"daytona": {"api_key": "dtn-secret"},
-			"github": {"token": "gh-secret"}
+			"github": {"token": "gh-secret"},
+			"codex": {"auth_json": "{\"tokens\":{\"access\":\"codex-secret\"}}"}
 		}
 	}`))
 	rec := httptest.NewRecorder()
@@ -91,17 +92,23 @@ func TestHandlePatch_SavesRuntimeSettingsWithoutReturningCredentials(t *testing.
 	if resp.Data == nil || resp.Data.AgentRuntime.Default != "daytona" {
 		t.Fatalf("agent runtime response = %+v", resp.Data)
 	}
-	if !resp.Data.RuntimeCredentials.Daytona.Configured || !resp.Data.RuntimeCredentials.GitHub.Configured {
+	if !resp.Data.RuntimeCredentials.Daytona.Configured ||
+		!resp.Data.RuntimeCredentials.GitHub.Configured ||
+		!resp.Data.RuntimeCredentials.Codex.Configured {
 		t.Fatalf("runtime credentials response = %+v", resp.Data.RuntimeCredentials)
 	}
-	if strings.Contains(rec.Body.String(), "dtn-secret") || strings.Contains(rec.Body.String(), "gh-secret") {
+	if strings.Contains(rec.Body.String(), "dtn-secret") ||
+		strings.Contains(rec.Body.String(), "gh-secret") ||
+		strings.Contains(rec.Body.String(), "codex-secret") {
 		t.Fatalf("response leaked credentials: %s", rec.Body.String())
 	}
 	data, err := os.ReadFile(runtimesettings.Path(dir))
 	if err != nil {
 		t.Fatalf("read settings file: %v", err)
 	}
-	if strings.Contains(string(data), "dtn-secret") || strings.Contains(string(data), "gh-secret") {
+	if strings.Contains(string(data), "dtn-secret") ||
+		strings.Contains(string(data), "gh-secret") ||
+		strings.Contains(string(data), "codex-secret") {
 		t.Fatalf("settings file leaked credentials: %s", data)
 	}
 
@@ -112,6 +119,10 @@ func TestHandlePatch_SavesRuntimeSettingsWithoutReturningCredentials(t *testing.
 	got, err := runtimesettings.UnsealRuntimeCredential(dir, settings, runtimesettings.RuntimeCredentialProviderDaytona)
 	if err != nil || got != "dtn-secret" {
 		t.Fatalf("unseal Daytona credential = %q, %v", got, err)
+	}
+	got, err = runtimesettings.UnsealRuntimeCredential(dir, settings, runtimesettings.RuntimeCredentialProviderCodex)
+	if err != nil || got != `{"tokens":{"access":"codex-secret"}}` {
+		t.Fatalf("unseal Codex credential = %q, %v", got, err)
 	}
 }
 
@@ -132,6 +143,7 @@ func TestHandlePatch_NotifiesOnlyActualGitHubCredentialChanges(t *testing.T) {
 	}
 
 	patch(`{"runtime_credentials":{"daytona":{"api_key":"dtn-secret"}}}`)
+	patch(`{"runtime_credentials":{"codex":{"auth_json":"{\"tokens\":{\"access\":\"codex-secret\"}}"}}}`)
 	patch(`{"runtime_credentials":{"github":{}}}`)
 	patch(`{"runtime_credentials":{"github":{"clear":true}}}`)
 	if notifications != 0 {

@@ -3,7 +3,9 @@ package localsettings
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestRedisFromURL_ParsesRedisCLIUpstashCommand(t *testing.T) {
@@ -92,5 +94,44 @@ func TestSaveCreatesPrivateSettingsDir(t *testing.T) {
 	}
 	if got := info.Mode().Perm(); got != 0700 {
 		t.Fatalf("settings dir mode = %#o, want 0700", got)
+	}
+}
+
+func TestCodexRuntimeCredentialRoundTripsAndSanitizes(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 8, 7, 12, 30, 0, 0, time.UTC)
+	authJSON := `{"tokens":{"access":"secret"},"last_refresh":"2026-08-07T12:30:00Z"}`
+
+	credential, err := SealRuntimeCredential(dir, RuntimeCredentialProviderCodex, authJSON, now)
+	if err != nil {
+		t.Fatalf("SealRuntimeCredential(codex): %v", err)
+	}
+	settings := Default()
+	settings.RuntimeCredentials.Codex = credential
+
+	got, err := UnsealRuntimeCredential(dir, settings, RuntimeCredentialProviderCodex)
+	if err != nil {
+		t.Fatalf("UnsealRuntimeCredential(codex): %v", err)
+	}
+	if got != authJSON {
+		t.Fatalf("unsealed codex credential = %q, want auth JSON", got)
+	}
+
+	safe := Sanitize(settings)
+	if !safe.RuntimeCredentials.Codex.Configured {
+		t.Fatal("expected sanitized codex credential to report configured")
+	}
+	if safe.RuntimeCredentials.Codex.UpdatedAt != now.Format(time.RFC3339) {
+		t.Fatalf("codex UpdatedAt = %q, want %q", safe.RuntimeCredentials.Codex.UpdatedAt, now.Format(time.RFC3339))
+	}
+	if strings.Contains(safe.RuntimeCredentials.Codex.UpdatedAt, "secret") {
+		t.Fatalf("sanitized credential leaked auth JSON: %+v", safe.RuntimeCredentials.Codex)
+	}
+}
+
+func TestUnconfiguredCodexRuntimeCredentialErrors(t *testing.T) {
+	_, err := UnsealRuntimeCredential(t.TempDir(), Default(), RuntimeCredentialProviderCodex)
+	if err == nil || !strings.Contains(err.Error(), "codex runtime credential is not configured") {
+		t.Fatalf("UnsealRuntimeCredential(codex unconfigured) = %v, want unconfigured error", err)
 	}
 }

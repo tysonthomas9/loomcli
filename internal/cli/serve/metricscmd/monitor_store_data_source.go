@@ -142,7 +142,16 @@ func collectMonitorStoreData(ctx context.Context, st store.Store, workspaceHint 
 	latestSessions := latestAgentSessionsForMonitor(ctx, st, wsKey)
 	orchestrationByAgent := latestOrchestrationSessionsForMonitor(ctx, st, wsKey)
 	inboxByAgent := agentInboxSummariesForMonitor(ctx, st, wsKey)
-	data.Agents = monitorAgentStatuses(assignments, rolesByName, workspaceData, latestSessions, orchestrationByAgent, inboxByAgent, wsName)
+	profile, err := st.Daemon().Get(ctx, wsKey)
+	if err != nil {
+		slog.Warn("monitor: get daemon profile failed", "workspace", wsKey, "err", err)
+	}
+	nodes, err := st.Nodes().List(ctx, wsKey)
+	if err != nil {
+		slog.Warn("monitor: list placement nodes failed", "workspace", wsKey, "err", err)
+		nodes = nil
+	}
+	data.Agents = monitorAgentStatuses(assignments, rolesByName, workspaceData, latestSessions, orchestrationByAgent, inboxByAgent, profile, nodes, wsName)
 	return data
 }
 
@@ -153,6 +162,8 @@ func monitorAgentStatuses(
 	latestSessions map[string]*domain.AgentSession,
 	orchestrationByAgent map[string]*domain.AgentSession,
 	inboxByAgent map[string]agentInboxSummary,
+	profile *domain.DaemonProfile,
+	nodes []*domain.Node,
 	wsName string,
 ) []monitor.AgentStatus {
 	agents := []monitor.AgentStatus{}
@@ -160,11 +171,13 @@ func monitorAgentStatuses(
 		if assignment == nil {
 			continue
 		}
-		agents = append(agents, monitorAgentStatus(
+		status := monitorAgentStatus(
 			assignment, rolesByName, workspaceData,
 			latestSessions[assignment.Name], orchestrationByAgent,
 			inboxByAgent[assignment.Name], wsName,
-		))
+		)
+		applyMonitorRuntimePlacement(&status, assignment, profile, nodes)
+		agents = append(agents, status)
 	}
 	return agents
 }
@@ -217,6 +230,75 @@ func monitorAgentStatus(
 		ActivePhase:    assignment.ActivePhase,
 		LastErrorClass: assignment.LastErrorClass,
 	}
+}
+
+func applyMonitorRuntimePlacement(
+	status *monitor.AgentStatus,
+	assignment *domain.Agent,
+	profile *domain.DaemonProfile,
+	nodes []*domain.Node,
+) {
+	if domain.RoleKind(status.RoleKind) != domain.RoleKindInteractive ||
+		domain.ResolveRuntimeProvider(assignment, profile) != domain.RuntimeProviderDaytona {
+		return
+	}
+	status.RuntimeProvider = string(domain.RuntimeProviderDaytona)
+	node := latestDaytonaPlacementForMonitor(nodes, assignment.Name)
+	runtimeStatus, runtimeError := domain.LeadRuntimeStatusFor(node, domain.LeadProvisionAttempt{
+		Outcome: assignment.LastProvisionOutcome,
+		Error:   assignment.LastProvisionError,
+		At:      assignment.LastProvisionAt,
+	})
+	status.RuntimeStatus = string(runtimeStatus)
+	status.RuntimeError = runtimeError
+	if node == nil {
+		return
+	}
+	status.RuntimePlacement = &monitor.RuntimePlacement{
+		SandboxID:   node.Placement.SandboxID,
+		PlacementID: node.NodeID,
+		State:       string(node.Placement.State),
+		Generation:  node.Placement.Generation,
+	}
+}
+
+func latestDaytonaPlacementForMonitor(nodes []*domain.Node, agentName string) *domain.Node {
+	var latest *domain.Node
+	for _, node := range nodes {
+		if !daytonaPlacementMatchesAgent(node, agentName) {
+			continue
+		}
+		if latest == nil || newerMonitorPlacement(node, latest) {
+			latest = node
+		}
+	}
+	return latest
+}
+
+func daytonaPlacementMatchesAgent(node *domain.Node, agentName string) bool {
+	if node == nil || node.Placement == nil || node.RuntimeProvider != domain.RuntimeProviderDaytona {
+		return false
+	}
+	if node.OwnerActor == "agent:"+agentName {
+		return true
+	}
+	for _, label := range node.Labels {
+		if label == "loom-agent="+agentName {
+			return true
+		}
+	}
+	return false
+}
+
+func newerMonitorPlacement(candidate, current *domain.Node) bool {
+	if current == nil || current.Placement == nil {
+		return true
+	}
+	if candidate == nil || candidate.Placement == nil {
+		return false
+	}
+	return candidate.Placement.Generation > current.Placement.Generation ||
+		(candidate.Placement.Generation == current.Placement.Generation && candidate.UpdatedAt.After(current.UpdatedAt))
 }
 
 func monitorRolesByName(ctx context.Context, st store.Store, wsKey string) map[string]*domain.Role {

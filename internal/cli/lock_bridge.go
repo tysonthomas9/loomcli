@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/netbase"
 )
 
 // LockBridge abstracts agent lock file operations.
@@ -76,7 +78,7 @@ func (b *HTTPLockBridge) client() *http.Client {
 	if b.HTTPClient != nil {
 		return b.HTTPClient
 	}
-	return &http.Client{Timeout: 10 * time.Second}
+	return &http.Client{Transport: netbase.Transport(), Timeout: 10 * time.Second}
 }
 
 func (b *HTTPLockBridge) doRequest(body lockStateRequest) (*http.Response, error) {

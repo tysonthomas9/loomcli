@@ -2,6 +2,7 @@ package svcimpl
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -383,6 +384,61 @@ func TestCreateAgentRejectsInvalidKind(t *testing.T) {
 		Kind:         "daemon",
 	}); err == nil {
 		t.Fatal("CreateAgent invalid kind error = nil, want error")
+	}
+}
+
+func TestCreateAgentRuntimeProvider(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	tests := []struct {
+		name     string
+		provider domain.RuntimeProvider
+		wantErr  bool
+	}{
+		{name: "workspace default", provider: ""},
+		{name: "local", provider: domain.RuntimeProviderLocal},
+		{name: "e2b", provider: domain.RuntimeProviderE2B},
+		{name: "kubernetes", provider: domain.RuntimeProviderKubernetes},
+		{name: "daytona", provider: domain.RuntimeProviderDaytona},
+		{name: "ci", provider: domain.RuntimeProviderCI},
+		{name: "other", provider: domain.RuntimeProviderOther},
+		{name: "invalid", provider: domain.RuntimeProvider("unknown"), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			st := memstore.New()
+			if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+				Key: "TEST2", Name: "Test 2", DefaultBranch: "main",
+			}); err != nil {
+				t.Fatalf("create workspace: %v", err)
+			}
+
+			svc := NewAgentService(nil, nil, nil, st)
+			created, err := svc.CreateAgent(ctx, service.AgentCreateInput{
+				WorkspaceKey:    "TEST2",
+				Name:            "runtime-agent",
+				RoleName:        "lead",
+				Backend:         "codex",
+				RuntimeProvider: tt.provider,
+			})
+			if tt.wantErr {
+				var serviceErr *service.ServiceError
+				if !errors.As(err, &serviceErr) || serviceErr.Kind != service.KindValidation {
+					t.Fatalf("CreateAgent error = %v, want validation error", err)
+				}
+				if serviceErr.Message != "invalid runtime provider" {
+					t.Fatalf("CreateAgent error message = %q, want invalid runtime provider", serviceErr.Message)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("CreateAgent returned error: %v", err)
+			}
+			if created.RuntimeProvider != tt.provider {
+				t.Fatalf("created.RuntimeProvider = %q, want %q", created.RuntimeProvider, tt.provider)
+			}
+		})
 	}
 }
 

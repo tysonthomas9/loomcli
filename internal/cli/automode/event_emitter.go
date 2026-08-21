@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/netbase"
 )
 
 // EventEmitter abstracts domain event emission.
@@ -50,7 +51,7 @@ func (e *HTTPEventEmitter) client() *http.Client {
 	if e.HTTPClient != nil {
 		return e.HTTPClient
 	}
-	return &http.Client{Timeout: 10 * time.Second}
+	return &http.Client{Transport: netbase.Transport(), Timeout: 10 * time.Second}
 }
 
 func (e *HTTPEventEmitter) Emit(event events.Event) error {

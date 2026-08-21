@@ -215,6 +215,42 @@ func TestRoleStoreKindCreatePatchClear(t *testing.T) {
 	}
 }
 
+func TestAgentRuntimeProviderCreatePatchClear(t *testing.T) {
+	ctx := context.Background()
+	s := New()
+
+	created, err := s.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey:    "WS",
+		Name:            "nova",
+		RoleName:        "lead",
+		RuntimeProvider: domain.RuntimeProviderDaytona,
+	})
+	if err != nil {
+		t.Fatalf("Create agent: %v", err)
+	}
+	if created.RuntimeProvider != domain.RuntimeProviderDaytona {
+		t.Fatalf("created RuntimeProvider = %q, want daytona", created.RuntimeProvider)
+	}
+
+	next := domain.RuntimeProviderKubernetes
+	updated, err := s.Agents().Update(ctx, "WS", "nova", store.AgentUpdate{RuntimeProvider: &next})
+	if err != nil {
+		t.Fatalf("Update runtime_provider: %v", err)
+	}
+	if updated.RuntimeProvider != domain.RuntimeProviderKubernetes {
+		t.Fatalf("updated RuntimeProvider = %q, want kubernetes", updated.RuntimeProvider)
+	}
+
+	clear := domain.RuntimeProvider("")
+	updated, err = s.Agents().Update(ctx, "WS", "nova", store.AgentUpdate{RuntimeProvider: &clear})
+	if err != nil {
+		t.Fatalf("Clear runtime_provider: %v", err)
+	}
+	if updated.RuntimeProvider != "" {
+		t.Fatalf("cleared RuntimeProvider = %q, want empty", updated.RuntimeProvider)
+	}
+}
+
 // TestDaemonProfileGetReturnsDefaults verifies that Get on a workspace
 // with no explicit Upsert returns sensible defaults rather than
 // ErrNotFound — the API contract is "every workspace has a profile".
