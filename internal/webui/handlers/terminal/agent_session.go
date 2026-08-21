@@ -87,6 +87,15 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 		return nil, err
 	}
 	roleKind := domain.ResolveRoleKind(role, agent.RoleName)
+	backend := ""
+	backendResolved := false
+	resolveBackend := func(forAgent *domain.Agent) string {
+		if !backendResolved {
+			backend = agentLaunchBackend(ctx, st, workspace, forAgent, role)
+			backendResolved = true
+		}
+		return backend
+	}
 
 	if isDaemonOwnedEphemeralWorker(agent, roleKind) {
 		return nil, service.ErrValidation("daemon-owned ephemeral worker terminals cannot be started from the agents page; use worker logs or task session history")
@@ -106,7 +115,11 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 		// spec and compare argv; if they differ, fall through to the
 		// rebuild path which will issue a fresh tab metadata. The stale
 		// PTY is killed by svc.PutTab → reattach when the user reloads.
-		if !agentTerminalLaunchSpecStale(ctx, st, workspace, existing, agent) {
+		stale := existing.Launch == nil
+		if !stale {
+			stale = agentTerminalLaunchSpecStaleResolved(workspace, existing, agent, role, resolveBackend(agent))
+		}
+		if !stale {
 			return existing, nil
 		}
 	}
@@ -119,7 +132,7 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 	if err != nil {
 		return nil, err
 	}
-	launch, backend, err := buildAgentLaunchSpec(ctx, st, workspace, sessionName, &agentForLaunch, orchestratorID)
+	launch, backend, err := buildAgentLaunchSpecResolved(workspace, sessionName, &agentForLaunch, orchestratorID, role, resolveBackend(&agentForLaunch))
 	if err != nil {
 		return nil, err
 	}
@@ -132,18 +145,18 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 	return svc.GetTab(ctx, workspace, sessionName)
 }
 
-// agentTerminalLaunchSpecStale returns true when the existing tab's cached
+// agentTerminalLaunchSpecStaleResolved returns true when the existing tab's cached
 // launch spec no longer matches what would be built for the current agent
 // state. Common trigger: agent.backend was patched after the terminal
 // session was created, so the cached argv has no --backend flag but the
 // next render would include it. Without this check, the stale spec is
 // returned indefinitely and the running PTY never picks up the change.
-func agentTerminalLaunchSpecStale(
-	ctx context.Context,
-	st store.Store,
+func agentTerminalLaunchSpecStaleResolved(
 	workspace string,
 	existing *tabmeta.TabMetadata,
 	agent *domain.Agent,
+	role *domain.Role,
+	backend string,
 ) bool {
 	if existing == nil || existing.Launch == nil {
 		return true
@@ -153,7 +166,7 @@ func agentTerminalLaunchSpecStale(
 	// per-session ids that legitimately differ and shouldn't trigger churn.
 	// Pass empty orchestratorID — the argv doesn't include it (it's an env
 	// var only), so the stale-check is unaffected by the orchestrator.
-	candidate, _, err := buildAgentLaunchSpec(ctx, st, workspace, existing.SessionName, agent, "")
+	candidate, _, err := buildAgentLaunchSpecResolved(workspace, existing.SessionName, agent, "", role, backend)
 	if err != nil || candidate == nil {
 		return false
 	}
@@ -312,17 +325,12 @@ func pruneStaleAgentTerminalTabs(ctx context.Context, svc service.TerminalServic
 	}
 }
 
-// buildAgentLaunchSpec constructs the PTY launch spec for an agent terminal.
+// buildAgentLaunchSpecResolved constructs the PTY launch spec for an agent terminal.
 // orchestratorID is the lead → orchestration session id resolved by
 // ensureTerminalOrchestratorLink. It is passed in rather than read off the
 // agent struct because AgentSession is the single source of truth.
-func buildAgentLaunchSpec(ctx context.Context, st store.Store, workspace, sessionName string, agent *domain.Agent, orchestratorID string) (*tabmeta.LaunchSpec, string, error) {
-	role, err := loadAgentLaunchRole(ctx, st, workspace, agent.RoleName)
-	if err != nil {
-		return nil, "", err
-	}
+func buildAgentLaunchSpecResolved(workspace, sessionName string, agent *domain.Agent, orchestratorID string, role *domain.Role, backend string) (*tabmeta.LaunchSpec, string, error) {
 	roleKind := domain.ResolveRoleKind(role, agent.RoleName)
-	backend := agentLaunchBackend(ctx, st, workspace, agent, role)
 	commandArgs, err := agentLaunchCommandArgs(roleKind, agent, role)
 	if err != nil {
 		return nil, "", err

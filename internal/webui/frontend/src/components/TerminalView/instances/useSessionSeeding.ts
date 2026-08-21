@@ -1,6 +1,7 @@
-import { useEffect, useCallback, useRef } from "react";
+import { useEffect, useCallback, useRef, useState } from "react";
 
 import { ensureAgentTerminalSession, type IssueContext } from "@/hooks/api";
+import { useToast } from "@/hooks/ui";
 
 import type { ConnectionState } from "./TerminalInstance";
 import {
@@ -32,6 +33,17 @@ interface UseSessionSeedingReturn {
   trySeedOnConnect: (tabId: string) => void;
 }
 
+function getHttpStatus(err: unknown): number | null {
+  if (!err || typeof err !== "object" || !("status" in err)) return null;
+  const status = (err as { status?: unknown }).status;
+  return typeof status === "number" ? status : null;
+}
+
+function isRetryableAgentResolutionError(err: unknown): boolean {
+  const status = getHttpStatus(err);
+  return status === 0 || status === 429 || (status !== null && status >= 500);
+}
+
 /**
  * Manages pending issue / agent context delivery into the terminal tab
  * system. The backend "seed" flow that used to inject issue prompts via
@@ -54,11 +66,17 @@ export function useSessionSeeding({
   initializedRef,
   workspaceIdRef,
 }: UseSessionSeedingOptions): UseSessionSeedingReturn {
+  const { showToast, dismissToast } = useToast();
+  const [agentResolutionRetry, setAgentResolutionRetry] = useState(0);
   const agentResolutionRef = useRef<{
     key: string;
     promise: ReturnType<typeof ensureAgentTerminalSession>;
   } | null>(null);
   const consumedAgentKeyRef = useRef<string | null>(null);
+  const retryableFailedAgentKeyRef = useRef<string | null>(null);
+  // Tracks the persistent "could not open terminal" error toast so it can be
+  // dismissed when the pending agent changes or resolution later succeeds.
+  const retryToastRef = useRef<{ key: string; id: string } | null>(null);
 
   const mergeExistingAgentTab = useCallback(
     (existing: TabState, metadataTab: TabState): TabState => {
@@ -76,10 +94,36 @@ export function useSessionSeeding({
   );
 
   useEffect(() => {
+    const currentKey = pendingAgentName
+      ? `${workspaceIdRef.current}:${pendingAgentName}`
+      : null;
+
+    // A pending-agent change — including a direct agent-A -> agent-B switch, not
+    // just a clear — invalidates any outstanding retryable-failure state that
+    // belongs to a *different* agent. Dismiss its lingering error toast and drop
+    // the block so navigating back to that agent re-attempts resolution instead
+    // of staying silently stranded.
+    if (
+      retryableFailedAgentKeyRef.current &&
+      retryableFailedAgentKeyRef.current !== currentKey
+    ) {
+      retryableFailedAgentKeyRef.current = null;
+    }
+    if (retryToastRef.current && retryToastRef.current.key !== currentKey) {
+      if (retryToastRef.current.id) dismissToast(retryToastRef.current.id);
+      retryToastRef.current = null;
+    }
     if (!pendingAgentName) {
       consumedAgentKeyRef.current = null;
     }
-  }, [pendingAgentName]);
+  }, [pendingAgentName, workspaceIdRef, dismissToast]);
+
+  const retryAgentResolution = useCallback((requestKey: string) => {
+    if (agentResolutionRef.current?.key === requestKey) return;
+    consumedAgentKeyRef.current = null;
+    retryableFailedAgentKeyRef.current = null;
+    setAgentResolutionRetry((retry) => retry + 1);
+  }, []);
 
   // Handle pending issue context: create or switch to issue tab.
   useEffect(() => {
@@ -133,6 +177,7 @@ export function useSessionSeeding({
     let cancelled = false;
     const requestKey = `${workspaceIdRef.current}:${pendingAgentName}`;
     if (consumedAgentKeyRef.current === requestKey) return;
+    if (retryableFailedAgentKeyRef.current === requestKey) return;
 
     let request = agentResolutionRef.current;
     if (!request || request.key !== requestKey) {
@@ -182,6 +227,11 @@ export function useSessionSeeding({
         });
         setActiveTabId(newTab.id);
         consumedAgentKeyRef.current = requestKey;
+        retryableFailedAgentKeyRef.current = null;
+        if (retryToastRef.current?.key === requestKey) {
+          if (retryToastRef.current.id) dismissToast(retryToastRef.current.id);
+          retryToastRef.current = null;
+        }
         onAgentNameConsumed?.();
       })
       .catch((err) => {
@@ -190,8 +240,29 @@ export function useSessionSeeding({
           `Failed to resolve agent terminal ${pendingAgentName}:`,
           err,
         );
-        consumedAgentKeyRef.current = requestKey;
-        onAgentNameConsumed?.();
+        const retryable = isRetryableAgentResolutionError(err);
+        const toastId = showToast(
+          `Could not open terminal for agent "${pendingAgentName}".`,
+          {
+            type: "error",
+            ...(retryable
+              ? {
+                  duration: 0,
+                  actionLabel: "Retry",
+                  onUndo: () => retryAgentResolution(requestKey),
+                }
+              : {}),
+          },
+        );
+        if (retryable) {
+          retryableFailedAgentKeyRef.current = requestKey;
+          retryToastRef.current = toastId
+            ? { key: requestKey, id: toastId }
+            : null;
+        } else {
+          consumedAgentKeyRef.current = requestKey;
+          onAgentNameConsumed?.();
+        }
       })
       .finally(() => {
         if (agentResolutionRef.current?.key === requestKey) {
@@ -211,6 +282,10 @@ export function useSessionSeeding({
     setActiveTabId,
     workspaceIdRef,
     mergeExistingAgentTab,
+    agentResolutionRetry,
+    retryAgentResolution,
+    showToast,
+    dismissToast,
   ]);
 
   const trySeedOnConnect = useCallback((_tabId: string) => {

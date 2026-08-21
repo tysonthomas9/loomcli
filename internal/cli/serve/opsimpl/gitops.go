@@ -76,6 +76,7 @@ func scopeResolverToWorkspace(resolver *cli.Resolver, workspaceID string) error 
 
 func (g *GitOpsImpl) ResolveAgentWorktree(workspaceID, name string) (*ops.AgentWorktree, error) {
 	if g != nil && g.store != nil {
+		// TODO(ctx): ops.FileOps agent worktree resolution does not currently accept a request context.
 		return g.resolveAgentWorktreeFromStore(context.Background(), workspaceID, name)
 	}
 
@@ -106,6 +107,7 @@ func (g *GitOpsImpl) ResolveAgentWorktreeForRepo(workspaceID, name, repoName str
 		return g.ResolveAgentWorktree(workspaceID, name)
 	}
 	if g != nil && g.store != nil {
+		// TODO(ctx): ops.FileOps agent+repo worktree resolution does not currently accept a request context.
 		ws, err := g.loadStoreWorkspace(context.Background(), workspaceID, name)
 		if err != nil {
 			return nil, err
@@ -150,7 +152,7 @@ func (g *GitOpsImpl) loadStoreWorkspace(ctx context.Context, workspaceID, name s
 	if g == nil || g.store == nil || workspaceID == "" || name == "" {
 		return nil, domain.ErrNotFound
 	}
-	ws, err := storeadapter.BuildWorkspaceDataForKey(ctx, g.store, workspaceID)
+	ws, err := storeadapter.BuildWorkspaceTopologyForKey(ctx, g.store, workspaceID)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			return nil, err
@@ -263,7 +265,8 @@ func (g *GitOpsImpl) ResolveWorkspaceData(workspaceID string) (*ops.WorkspaceDat
 	}
 
 	if g != nil && g.store != nil {
-		return storeadapter.BuildWorkspaceDataForKey(context.Background(), g.store, workspaceID)
+		// TODO(ctx): ops.FileOps does not currently accept a request context.
+		return storeadapter.BuildWorkspaceTopologyForKey(context.Background(), g.store, workspaceID)
 	}
 
 	return resolveConfigWorkspaceData(workspaceID)
@@ -631,7 +634,8 @@ func filterPullRequestsByState(all []ops.GitPullRequest, state string) []ops.Git
 
 func (g *GitOpsImpl) listWorkspaceRepos(workspaceID string) ([]ops.WorkspaceRepo, error) {
 	if g != nil && g.store != nil {
-		ws, err := storeadapter.BuildWorkspaceDataForKey(context.Background(), g.store, workspaceID)
+		// TODO(ctx): ops.GitOps PR listing does not currently accept a request context.
+		ws, err := storeadapter.BuildWorkspaceTopologyForKey(context.Background(), g.store, workspaceID)
 		if err != nil {
 			return nil, fmt.Errorf("load fleet-db workspace %q: %w", workspaceID, err)
 		}
@@ -797,6 +801,7 @@ func (g *GitOpsImpl) SetRepoDefaultBranch(workspaceID, repoName, branch string) 
 
 func (g *GitOpsImpl) ListAgentWorktrees(workspaceID string) ([]ops.AgentWorktree, error) {
 	if g != nil && g.store != nil {
+		// TODO(ctx): ops.GitOps ListAgentWorktrees does not currently accept a request context.
 		return g.listAgentWorktreesFromStore(context.Background(), workspaceID)
 	}
 
@@ -822,7 +827,7 @@ func (g *GitOpsImpl) ListAgentWorktrees(workspaceID string) ([]ops.AgentWorktree
 }
 
 func (g *GitOpsImpl) listAgentWorktreesFromStore(ctx context.Context, workspaceID string) ([]ops.AgentWorktree, error) {
-	ws, err := storeadapter.BuildWorkspaceDataForKey(ctx, g.store, workspaceID)
+	ws, err := storeadapter.BuildWorkspaceTopologyForKey(ctx, g.store, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("load fleet-db workspace %q: %w", workspaceID, err)
 	}

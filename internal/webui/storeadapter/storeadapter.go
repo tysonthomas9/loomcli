@@ -47,6 +47,17 @@ func BuildActiveWorkspaceData(ctx context.Context, s store.Store) (*ops.Workspac
 //
 // Returns ErrNotFound (wrapped) if the workspace key does not exist.
 func BuildWorkspaceDataForKey(ctx context.Context, s store.Store, key string) (*ops.WorkspaceData, error) {
+	return buildWorkspaceDataForKey(ctx, s, key, true)
+}
+
+// BuildWorkspaceTopologyForKey materializes the workspace topology needed by
+// file/git/agent-worktree paths. It deliberately omits the workspace-switcher
+// summaries because those callers only consume the active workspace fields.
+func BuildWorkspaceTopologyForKey(ctx context.Context, s store.Store, key string) (*ops.WorkspaceData, error) {
+	return buildWorkspaceDataForKey(ctx, s, key, false)
+}
+
+func buildWorkspaceDataForKey(ctx context.Context, s store.Store, key string, includeSummaries bool) (*ops.WorkspaceData, error) {
 	if s == nil {
 		return nil, errors.New("storeadapter: nil store")
 	}
@@ -62,9 +73,12 @@ func BuildWorkspaceDataForKey(ctx context.Context, s store.Store, key string) (*
 	if err != nil {
 		return nil, err
 	}
-	summaries, err := loadSummaries(ctx, s, ws.Key)
-	if err != nil {
-		return nil, err
+	var summaries []ops.WorkspaceSummary
+	if includeSummaries {
+		summaries, err = loadSummaries(ctx, s, ws.Key)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	wsPath := resolveWorkspacePath(ws.Key)

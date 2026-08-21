@@ -45,6 +45,113 @@ func (s slowListTerminalService) ListTabs(ctx context.Context, wsID string) ([]t
 	return tabs, nil
 }
 
+type staleTabTerminalService struct {
+	service.TerminalService
+	tabs []tabmeta.TabMetadata
+	put  *tabmeta.TabMetadata
+}
+
+func (s *staleTabTerminalService) ListTabs(context.Context, string) ([]tabmeta.TabMetadata, error) {
+	out := make([]tabmeta.TabMetadata, len(s.tabs))
+	copy(out, s.tabs)
+	return out, nil
+}
+
+func (s *staleTabTerminalService) PutTab(_ context.Context, _ string, meta *tabmeta.TabMetadata) error {
+	cp := *meta
+	s.put = &cp
+	return nil
+}
+
+func (s *staleTabTerminalService) GetTab(_ context.Context, _ string, session string) (*tabmeta.TabMetadata, error) {
+	if s.put != nil && s.put.SessionName == session {
+		cp := *s.put
+		return &cp, nil
+	}
+	for i := range s.tabs {
+		if s.tabs[i].SessionName == session {
+			cp := s.tabs[i]
+			return &cp, nil
+		}
+	}
+	return nil, service.ErrNotFound("tab metadata not found")
+}
+
+func (s *staleTabTerminalService) DeleteTab(context.Context, string, string) error {
+	return nil
+}
+
+type countingAgentLaunchStore struct {
+	store.Store
+	roles  *countingLaunchRoleStore
+	daemon *countingLaunchDaemonStore
+}
+
+func newCountingAgentLaunchStore(base store.Store) *countingAgentLaunchStore {
+	return &countingAgentLaunchStore{
+		Store:  base,
+		roles:  &countingLaunchRoleStore{RoleStore: base.Roles()},
+		daemon: &countingLaunchDaemonStore{DaemonProfileStore: base.Daemon()},
+	}
+}
+
+func (s *countingAgentLaunchStore) Roles() store.RoleStore           { return s.roles }
+func (s *countingAgentLaunchStore) Daemon() store.DaemonProfileStore { return s.daemon }
+
+type countingLaunchRoleStore struct {
+	store.RoleStore
+	get int
+}
+
+func (s *countingLaunchRoleStore) Get(ctx context.Context, workspaceKey, name string) (*domain.Role, error) {
+	s.get++
+	return s.RoleStore.Get(ctx, workspaceKey, name)
+}
+
+type countingLaunchDaemonStore struct {
+	store.DaemonProfileStore
+	get int
+}
+
+func (s *countingLaunchDaemonStore) Get(ctx context.Context, workspaceKey string) (*domain.DaemonProfile, error) {
+	s.get++
+	return s.DaemonProfileStore.Get(ctx, workspaceKey)
+}
+
+func buildResolvedAgentLaunchSpecForTest(
+	t *testing.T,
+	ctx context.Context,
+	st store.Store,
+	workspace, sessionName string,
+	agent *domain.Agent,
+	orchestratorID string,
+) (*tabmeta.LaunchSpec, string, error) {
+	t.Helper()
+	role, err := loadAgentLaunchRole(ctx, st, workspace, agent.RoleName)
+	if err != nil {
+		return nil, "", err
+	}
+	backend := agentLaunchBackend(ctx, st, workspace, agent, role)
+	return buildAgentLaunchSpecResolved(workspace, sessionName, agent, orchestratorID, role, backend)
+}
+
+func agentTerminalLaunchSpecStaleResolvedForTest(
+	t *testing.T,
+	ctx context.Context,
+	st store.Store,
+	workspace string,
+	existing *tabmeta.TabMetadata,
+	agent *domain.Agent,
+) bool {
+	t.Helper()
+	role, err := loadAgentLaunchRole(ctx, st, workspace, agent.RoleName)
+	if err != nil {
+		t.Fatalf("load launch role: %v", err)
+	}
+	backend := agentLaunchBackend(ctx, st, workspace, agent, role)
+	return agentTerminalLaunchSpecStaleResolved(workspace, existing, agent, role, backend)
+}
+
 func TestEnsureAgentTerminalSessionCreatesLeadLaunchSpec(t *testing.T) {
 	ctx := context.Background()
 	st, tabStore, rdb := newAgentSessionTestDeps(t)
@@ -119,7 +226,7 @@ func TestEnsureAgentTerminalSessionCreatesLeadLaunchSpec(t *testing.T) {
 	}
 }
 
-func TestBuildAgentLaunchSpecIncludesPromptForInteractiveRole(t *testing.T) {
+func TestBuildAgentLaunchSpecResolvedIncludesPromptForInteractiveRole(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{
@@ -132,9 +239,9 @@ func TestBuildAgentLaunchSpecIncludesPromptForInteractiveRole(t *testing.T) {
 	}
 	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "nova", RoleName: "lead"}
 
-	launch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_nova", agent, "lead-1")
+	launch, _, err := buildResolvedAgentLaunchSpecForTest(t, ctx, st, "E2E", "term_nova", agent, "lead-1")
 	if err != nil {
-		t.Fatalf("buildAgentLaunchSpec: %v", err)
+		t.Fatalf("buildAgentLaunchSpecResolved: %v", err)
 	}
 	cmd := strings.Join(launch.Argv, " ")
 	for _, want := range []string{"'lead'", "'--prompt' 'prompts/lead.md'"} {
@@ -144,7 +251,7 @@ func TestBuildAgentLaunchSpecIncludesPromptForInteractiveRole(t *testing.T) {
 	}
 }
 
-func TestBuildAgentLaunchSpecIncludesBuiltinPromptForInteractiveRole(t *testing.T) {
+func TestBuildAgentLaunchSpecResolvedIncludesBuiltinPromptForInteractiveRole(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{
@@ -157,9 +264,9 @@ func TestBuildAgentLaunchSpecIncludesBuiltinPromptForInteractiveRole(t *testing.
 	}
 	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "review-nova", RoleName: "pr-review"}
 
-	launch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_review", agent, "lead-1")
+	launch, _, err := buildResolvedAgentLaunchSpecForTest(t, ctx, st, "E2E", "term_review", agent, "lead-1")
 	if err != nil {
-		t.Fatalf("buildAgentLaunchSpec: %v", err)
+		t.Fatalf("buildAgentLaunchSpecResolved: %v", err)
 	}
 	cmd := strings.Join(launch.Argv, " ")
 	for _, want := range []string{"'lead'", "'--prompt' 'builtin:pr-review'"} {
@@ -169,7 +276,7 @@ func TestBuildAgentLaunchSpecIncludesBuiltinPromptForInteractiveRole(t *testing.
 	}
 }
 
-func TestBuildAgentLaunchSpecIncludesCheckoutPromptForPRReviewerRole(t *testing.T) {
+func TestBuildAgentLaunchSpecResolvedIncludesCheckoutPromptForPRReviewerRole(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{
@@ -182,9 +289,9 @@ func TestBuildAgentLaunchSpecIncludesCheckoutPromptForPRReviewerRole(t *testing.
 	}
 	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "review-nova-pr-7", RoleName: "pr-reviewer"}
 
-	launch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_review", agent, "lead-1")
+	launch, _, err := buildResolvedAgentLaunchSpecForTest(t, ctx, st, "E2E", "term_review", agent, "lead-1")
 	if err != nil {
-		t.Fatalf("buildAgentLaunchSpec: %v", err)
+		t.Fatalf("buildAgentLaunchSpecResolved: %v", err)
 	}
 	cmd := strings.Join(launch.Argv, " ")
 	for _, want := range []string{"'lead'", "'--prompt' 'builtin:pr-review-checkout'"} {
@@ -194,7 +301,7 @@ func TestBuildAgentLaunchSpecIncludesCheckoutPromptForPRReviewerRole(t *testing.
 	}
 }
 
-func TestBuildAgentLaunchSpecInlinePromptOmitsRolePromptFile(t *testing.T) {
+func TestBuildAgentLaunchSpecResolvedInlinePromptOmitsRolePromptFile(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{
@@ -208,9 +315,9 @@ func TestBuildAgentLaunchSpecInlinePromptOmitsRolePromptFile(t *testing.T) {
 	}
 	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "operator-a", RoleName: "operator"}
 
-	launch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_operator", agent, "lead-1")
+	launch, _, err := buildResolvedAgentLaunchSpecForTest(t, ctx, st, "E2E", "term_operator", agent, "lead-1")
 	if err != nil {
-		t.Fatalf("buildAgentLaunchSpec: %v", err)
+		t.Fatalf("buildAgentLaunchSpecResolved: %v", err)
 	}
 	cmd := strings.Join(launch.Argv, " ")
 	if !strings.Contains(cmd, "'lead'") {
@@ -221,7 +328,7 @@ func TestBuildAgentLaunchSpecInlinePromptOmitsRolePromptFile(t *testing.T) {
 	}
 }
 
-func TestBuildAgentLaunchSpecCustomInteractiveRoleUsesLeadRuntime(t *testing.T) {
+func TestBuildAgentLaunchSpecResolvedCustomInteractiveRoleUsesLeadRuntime(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{
@@ -234,9 +341,9 @@ func TestBuildAgentLaunchSpecCustomInteractiveRoleUsesLeadRuntime(t *testing.T) 
 	}
 	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "operator-a", RoleName: "operator"}
 
-	launch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_operator", agent, "lead-1")
+	launch, _, err := buildResolvedAgentLaunchSpecForTest(t, ctx, st, "E2E", "term_operator", agent, "lead-1")
 	if err != nil {
-		t.Fatalf("buildAgentLaunchSpec: %v", err)
+		t.Fatalf("buildAgentLaunchSpecResolved: %v", err)
 	}
 	cmd := strings.Join(launch.Argv, " ")
 	for _, want := range []string{"'lead'", "'--prompt' 'prompts/operator.md'"} {
@@ -251,7 +358,7 @@ func TestBuildAgentLaunchSpecCustomInteractiveRoleUsesLeadRuntime(t *testing.T) 
 	}
 }
 
-func TestBuildAgentLaunchSpecCustomWorkerRoleUnchanged(t *testing.T) {
+func TestBuildAgentLaunchSpecResolvedCustomWorkerRoleUnchanged(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{
@@ -265,9 +372,9 @@ func TestBuildAgentLaunchSpecCustomWorkerRoleUnchanged(t *testing.T) {
 	}
 	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "review-a", RoleName: "reviewer", Parent: "EPIC-1"}
 
-	launch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_review", agent, "")
+	launch, _, err := buildResolvedAgentLaunchSpecForTest(t, ctx, st, "E2E", "term_review", agent, "")
 	if err != nil {
-		t.Fatalf("buildAgentLaunchSpec: %v", err)
+		t.Fatalf("buildAgentLaunchSpecResolved: %v", err)
 	}
 	cmd := strings.Join(launch.Argv, " ")
 	for _, want := range []string{"'agent' 'review-a'", "'--prompt' 'prompts/reviewer.md'", "'--auto'", "'--daemon-mode'", "'--task-filter' 'review'", "'--parent' 'EPIC-1'"} {
@@ -337,7 +444,7 @@ func TestEnsureAgentTerminalSessionLaunchesLeadInConfiguredWorktree(t *testing.T
 	}
 }
 
-func TestBuildAgentLaunchSpecFallsBackWhenConfiguredWorktreeMissing(t *testing.T) {
+func TestBuildAgentLaunchSpecResolvedFallsBackWhenConfiguredWorktreeMissing(t *testing.T) {
 	ctx := context.Background()
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	st := memstore.New()
@@ -354,9 +461,9 @@ func TestBuildAgentLaunchSpecFallsBackWhenConfiguredWorktreeMissing(t *testing.T
 	}
 	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "nova", RoleName: "lead"}
 
-	launch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_nova", agent, "lead-1")
+	launch, _, err := buildResolvedAgentLaunchSpecForTest(t, ctx, st, "E2E", "term_nova", agent, "lead-1")
 	if err != nil {
-		t.Fatalf("buildAgentLaunchSpec: %v", err)
+		t.Fatalf("buildAgentLaunchSpecResolved: %v", err)
 	}
 	if launch.Cwd != "" {
 		t.Fatalf("Launch.Cwd = %q, want empty fallback for missing worktree", launch.Cwd)
@@ -382,13 +489,13 @@ func TestAgentTerminalLaunchSpecStale_DetectsBackendChange(t *testing.T) {
 	// Build the "previous" cached spec via the same builder so the only
 	// thing that changes between the two states is the workspace's daemon
 	// profile (which contributes the --backend fallback).
-	cachedLaunch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_old", agent, "")
+	cachedLaunch, _, err := buildResolvedAgentLaunchSpecForTest(t, ctx, st, "E2E", "term_old", agent, "")
 	if err != nil {
 		t.Fatalf("build cached launch: %v", err)
 	}
 	existing := &tabmeta.TabMetadata{SessionName: "term_old", Launch: cachedLaunch}
 
-	if agentTerminalLaunchSpecStale(ctx, st, "E2E", existing, agent) {
+	if agentTerminalLaunchSpecStaleResolvedForTest(t, ctx, st, "E2E", existing, agent) {
 		t.Fatal("with no workspace default backend, the cached spec matches what would be built — spec is fresh")
 	}
 
@@ -399,8 +506,71 @@ func TestAgentTerminalLaunchSpecStale_DetectsBackendChange(t *testing.T) {
 		t.Fatalf("upsert daemon profile: %v", err)
 	}
 
-	if !agentTerminalLaunchSpecStale(ctx, st, "E2E", existing, agent) {
+	if !agentTerminalLaunchSpecStaleResolvedForTest(t, ctx, st, "E2E", existing, agent) {
 		t.Fatal("expected staleness after workspace default backend was set; ensure() would return the cached spec")
+	}
+}
+
+func TestEnsureAgentTerminalSessionStaleTabLoadsLaunchDefaultsOnce(t *testing.T) {
+	ctx := context.Background()
+	base := memstore.New()
+	if _, err := base.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "E2E", Name: "E2E"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := base.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "E2E", Name: "lead"}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := base.Agents().Create(ctx, store.AgentCreate{WorkspaceKey: "E2E", Name: "nova", RoleName: "lead"}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "nova", RoleName: "lead"}
+	cachedLaunch, _, err := buildResolvedAgentLaunchSpecForTest(t, ctx, base, "E2E", "term_old", agent, "")
+	if err != nil {
+		t.Fatalf("build cached launch: %v", err)
+	}
+	if _, err := base.Daemon().Upsert(ctx, &domain.DaemonProfile{
+		WorkspaceKey: "E2E",
+		AgentBackend: "codex",
+	}); err != nil {
+		t.Fatalf("upsert daemon profile: %v", err)
+	}
+
+	counted := newCountingAgentLaunchStore(base)
+	svc := &staleTabTerminalService{
+		tabs: []tabmeta.TabMetadata{{
+			SessionName: "term_old",
+			Workspace:   "E2E",
+			Label:       "agent-nova",
+			SortOrder:   4,
+			Kind:        terminalKindAgent,
+			AgentID:     "nova",
+			Role:        "lead",
+			Writable:    true,
+			Launch:      cachedLaunch,
+			PTYAlive:    true,
+			CreatedAt:   time.Now().UTC().Add(-time.Hour),
+			UpdatedAt:   time.Now().UTC().Add(-time.Hour),
+		}},
+	}
+
+	meta, err := ensureAgentTerminalSession(ctx, svc, counted, "E2E", "nova")
+	if err != nil {
+		t.Fatalf("ensureAgentTerminalSession: %v", err)
+	}
+	if meta.SessionName == "term_old" {
+		t.Fatal("expected stale live tab to be rebuilt with a fresh session")
+	}
+	if counted.roles.get != 1 {
+		t.Fatalf("Roles.Get count = %d, want 1", counted.roles.get)
+	}
+	if counted.daemon.get != 1 {
+		t.Fatalf("Daemon.Get count = %d, want 1", counted.daemon.get)
+	}
+	if meta.Launch == nil {
+		t.Fatal("launch spec = nil, want rebuilt launch")
+	}
+	if cmd := strings.Join(meta.Launch.Argv, " "); !strings.Contains(cmd, "--backend") || !strings.Contains(cmd, "codex") {
+		t.Fatalf("launch argv %q missing daemon backend", cmd)
 	}
 }
 
@@ -416,12 +586,12 @@ func TestAgentTerminalLaunchSpecStaleDetectsInteractivePromptFileChange(t *testi
 		t.Fatalf("create role: %v", err)
 	}
 	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "operator-a", RoleName: "operator"}
-	cachedLaunch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_old", agent, "lead-1")
+	cachedLaunch, _, err := buildResolvedAgentLaunchSpecForTest(t, ctx, st, "E2E", "term_old", agent, "lead-1")
 	if err != nil {
 		t.Fatalf("build cached launch: %v", err)
 	}
 	existing := &tabmeta.TabMetadata{SessionName: "term_old", Launch: cachedLaunch}
-	if agentTerminalLaunchSpecStale(ctx, st, "E2E", existing, agent) {
+	if agentTerminalLaunchSpecStaleResolvedForTest(t, ctx, st, "E2E", existing, agent) {
 		t.Fatal("unchanged terminal prompt_file should not be stale")
 	}
 
@@ -429,7 +599,7 @@ func TestAgentTerminalLaunchSpecStaleDetectsInteractivePromptFileChange(t *testi
 	if _, err := st.Roles().Update(ctx, "E2E", "operator", store.RoleUpdate{PromptFile: &nextPrompt}); err != nil {
 		t.Fatalf("update role prompt: %v", err)
 	}
-	if !agentTerminalLaunchSpecStale(ctx, st, "E2E", existing, agent) {
+	if !agentTerminalLaunchSpecStaleResolvedForTest(t, ctx, st, "E2E", existing, agent) {
 		t.Fatal("interactive role prompt_file change should invalidate cached launch spec")
 	}
 }
@@ -443,7 +613,7 @@ func TestAgentTerminalLaunchSpecStale_NilLaunchTreatedStale(t *testing.T) {
 	st := memstore.New()
 	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "nova", RoleName: "lead"}
 	existing := &tabmeta.TabMetadata{SessionName: "term_old", Launch: nil}
-	if !agentTerminalLaunchSpecStale(ctx, st, "E2E", existing, agent) {
+	if !agentTerminalLaunchSpecStaleResolvedForTest(t, ctx, st, "E2E", existing, agent) {
 		t.Fatal("existing tab with nil Launch should be treated as stale")
 	}
 }
@@ -992,7 +1162,7 @@ func TestEnsureAgentTerminalSessionCreatesFreshTabForStaleRunningAgentTab(t *tes
 	}
 }
 
-func TestBuildAgentLaunchSpecRejectsUnknownRoleWithoutPrompt(t *testing.T) {
+func TestBuildAgentLaunchSpecResolvedRejectsUnknownRoleWithoutPrompt(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	agent := &domain.Agent{
@@ -1001,17 +1171,17 @@ func TestBuildAgentLaunchSpecRejectsUnknownRoleWithoutPrompt(t *testing.T) {
 		RoleName:     "reviewer",
 	}
 
-	if _, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_1", agent, ""); err == nil {
-		t.Fatal("buildAgentLaunchSpec error = nil, want missing launch spec error")
+	if _, _, err := buildResolvedAgentLaunchSpecForTest(t, ctx, st, "E2E", "term_1", agent, ""); err == nil {
+		t.Fatal("buildAgentLaunchSpecResolved error = nil, want missing launch spec error")
 	}
 }
 
-// TestBuildAgentLaunchSpecFallsBackToWorkspaceBackend asserts that when the
+// TestBuildAgentLaunchSpecResolvedFallsBackToWorkspaceBackend asserts that when the
 // agent and role both have no backend, the launch spec picks up the
 // workspace's daemon-profile backend. Without this fallback, `loom agentdef
 // add nova --role lead` (no --backend) produced a launch command of
 // `loom lead` with no --backend flag, so the terminal never started codex.
-func TestBuildAgentLaunchSpecFallsBackToWorkspaceBackend(t *testing.T) {
+func TestBuildAgentLaunchSpecResolvedFallsBackToWorkspaceBackend(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "E2E", Name: "E2E"}); err != nil {
@@ -1030,9 +1200,9 @@ func TestBuildAgentLaunchSpecFallsBackToWorkspaceBackend(t *testing.T) {
 		// No Backend set on the agent itself
 	}
 
-	launch, backend, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_1", agent, "")
+	launch, backend, err := buildResolvedAgentLaunchSpecForTest(t, ctx, st, "E2E", "term_1", agent, "")
 	if err != nil {
-		t.Fatalf("buildAgentLaunchSpec: %v", err)
+		t.Fatalf("buildAgentLaunchSpecResolved: %v", err)
 	}
 	if backend != "codex" {
 		t.Fatalf("backend = %q, want %q (workspace daemon profile default)", backend, "codex")

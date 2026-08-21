@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { RouterProvider } from "react-router-dom";
+import { QueryClientProvider } from "@tanstack/react-query";
 
 import "@/styles/index.css";
 import { migrateLocalStorage } from "@/utils/migrateLocalStorage";
@@ -18,6 +19,7 @@ import {
 import { initExternalAuth } from "@/api/common/authClient";
 import { ExternalAuthProvider, NoAuthProvider } from "@/contexts/AuthContext";
 import { AuthGate } from "@/components/AuthGate";
+import { createAppQueryClient } from "@/hooks/queryClient";
 
 // Run localStorage migration before anything reads storage.
 migrateLocalStorage();
@@ -32,6 +34,7 @@ if (!rootElement) {
 
 // Reuse root across retries — React errors if createRoot is called twice on the same element.
 let root: Root | null = null;
+const queryClient = createAppQueryClient();
 
 function getRoot(): Root {
   if (!root) root = createRoot(rootElement!);
@@ -67,7 +70,9 @@ function renderApp(config: AppConfig): void {
           });
         }}
       >
-        <ToastProvider>{authWrapped}</ToastProvider>
+        <QueryClientProvider client={queryClient}>
+          <ToastProvider>{authWrapped}</ToastProvider>
+        </QueryClientProvider>
       </ErrorBoundary>
     </StrictMode>,
   );

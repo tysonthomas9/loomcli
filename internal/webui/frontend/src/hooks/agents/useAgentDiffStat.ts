@@ -4,11 +4,13 @@
  * an agent's worktree, resolved directly by agent name.
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 import { fetchAgentDiffStat } from "@/api";
 import type { IssueDiffStat } from "@/api";
 
+import { agentQueryKeys } from "@/hooks/queryKeys";
 import { useWorkspaceContext } from "@/hooks/workspace";
 
 /** Options for the useAgentDiffStat hook. */
@@ -33,63 +35,35 @@ export interface UseAgentDiffStatReturn {
   refetch: () => Promise<void>;
 }
 
+function toError(error: unknown): Error | null {
+  if (error == null) return null;
+  return error instanceof Error ? error : new Error(String(error));
+}
+
 export function useAgentDiffStat(
   options: UseAgentDiffStatOptions,
 ): UseAgentDiffStatReturn {
   const { workspaceId } = useWorkspaceContext();
   const { agentName, enabled = true, pollInterval = 60000 } = options;
+  const canFetch = enabled && !!agentName;
 
-  const [data, setData] = useState<IssueDiffStat | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
-
-  const mountedRef = useRef(true);
-  const fetchInProgressRef = useRef(false);
-
-  const fetchData = useCallback(async () => {
-    if (fetchInProgressRef.current || !agentName) return;
-    fetchInProgressRef.current = true;
-    setIsLoading(true);
-
-    try {
-      const result = await fetchAgentDiffStat(workspaceId, agentName);
-      if (mountedRef.current) {
-        setData(result);
-        setError(null);
-      }
-    } catch (err) {
-      if (mountedRef.current) {
-        setError(err instanceof Error ? err : new Error(String(err)));
-      }
-    } finally {
-      if (mountedRef.current) {
-        setIsLoading(false);
-      }
-      fetchInProgressRef.current = false;
-    }
-  }, [workspaceId, agentName]);
+  const diffStatQuery = useQuery({
+    queryKey: agentQueryKeys.diffStat(workspaceId, agentName),
+    queryFn: () => fetchAgentDiffStat(workspaceId, agentName),
+    enabled: canFetch,
+    refetchInterval: canFetch && pollInterval > 0 ? pollInterval : false,
+  });
+  const { refetch: refetchDiffStat } = diffStatQuery;
 
   const refetch = useCallback(async () => {
-    await fetchData();
-  }, [fetchData]);
+    if (!agentName) return;
+    await refetchDiffStat();
+  }, [agentName, refetchDiffStat]);
 
-  useEffect(() => {
-    if (!enabled || !agentName) return;
-
-    void fetchData();
-
-    let intervalId: ReturnType<typeof setInterval> | null = null;
-    if (pollInterval > 0) {
-      intervalId = setInterval(() => {
-        void fetchData();
-      }, pollInterval);
-    }
-
-    return () => {
-      mountedRef.current = false;
-      if (intervalId) clearInterval(intervalId);
-    };
-  }, [enabled, agentName, pollInterval, fetchData]);
-
-  return { data, isLoading, error, refetch };
+  return {
+    data: diffStatQuery.data ?? null,
+    isLoading: diffStatQuery.isFetching,
+    error: toError(diffStatQuery.error),
+    refetch,
+  };
 }

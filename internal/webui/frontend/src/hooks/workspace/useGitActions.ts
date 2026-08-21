@@ -4,6 +4,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from "react";
+import { useQueryClient, type QueryKey } from "@tanstack/react-query";
 
 import { ApiError } from "@/api/common";
 import { getIssue, updateIssue } from "@/api/issues/issues";
@@ -17,6 +18,7 @@ import {
 } from "@/api/workspace";
 import type { GitResetLockedResponse } from "@/api/workspace";
 import { useToast } from "@/hooks/ui";
+import { agentQueryKeys, fileQueryKeys } from "@/hooks/queryKeys";
 import { useWorkspaceContext } from "./useWorkspaceContext";
 
 export interface UseGitActionsOptions {
@@ -65,12 +67,39 @@ function extractErrorMessage(err: unknown): string {
   return String(err);
 }
 
+function queryKeyStartsWith(queryKey: QueryKey, prefix: QueryKey): boolean {
+  return (
+    queryKey.length >= prefix.length &&
+    prefix.every((part, index) => Object.is(queryKey[index], part))
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isAgentFileGitStatusQuery(
+  queryKey: QueryKey,
+  workspaceId: string,
+  agentName: string,
+): boolean {
+  const prefix = fileQueryKeys.gitStatusPrefix(workspaceId);
+  if (!queryKeyStartsWith(queryKey, prefix)) return false;
+  const ref = queryKey[prefix.length];
+  return (
+    isRecord(ref) &&
+    ref.scope === "agent" &&
+    ref.target === agentName.trim()
+  );
+}
+
 export function useGitActions({
   agentName,
   taskId,
   onStatusChange,
 }: UseGitActionsOptions): UseGitActionsReturn {
   const { workspaceId } = useWorkspaceContext();
+  const queryClient = useQueryClient();
   const { showToast } = useToast();
   const mountedRef = useRef(true);
   const onStatusChangeRef = useRef(onStatusChange);
@@ -130,6 +159,42 @@ export function useGitActions({
     [showToast],
   );
 
+  const invalidateAgentGitQueries = useCallback(
+    (name: string) => {
+      const trimmedName = name.trim();
+      if (!trimmedName) return;
+
+      void queryClient.invalidateQueries({
+        queryKey: agentQueryKeys.diffFiles(workspaceId, trimmedName, "HEAD"),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: agentQueryKeys.diffCommits(workspaceId, trimmedName),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: agentQueryKeys.agentGitStatus(workspaceId, trimmedName),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: agentQueryKeys.diffStat(workspaceId, trimmedName),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: fileQueryKeys.checkouts(workspaceId),
+      });
+      void queryClient.invalidateQueries({
+        predicate: (query) =>
+          isAgentFileGitStatusQuery(query.queryKey, workspaceId, trimmedName),
+      });
+    },
+    [queryClient, workspaceId],
+  );
+
+  const notifyGitStateChanged = useCallback(
+    (name: string) => {
+      invalidateAgentGitQueries(name);
+      onStatusChangeRef.current?.();
+    },
+    [invalidateAgentGitQueries],
+  );
+
   const push = useCallback(
     async (target?: string) => {
       if (!agentName) return;
@@ -139,17 +204,17 @@ export function useGitActions({
         if (mountedRef.current) {
           setPushState({ isLoading: false, error: null });
           showToast(result.message || "Push successful", { type: "success" });
-          onStatusChangeRef.current?.();
+          notifyGitStateChanged(agentName);
         }
       } catch (err) {
         if (mountedRef.current) {
           const msg = handleApiError(err, "Push");
           setPushState({ isLoading: false, error: msg });
-          onStatusChangeRef.current?.();
+          notifyGitStateChanged(agentName);
         }
       }
     },
-    [workspaceId, agentName, showToast, handleApiError],
+    [workspaceId, agentName, showToast, handleApiError, notifyGitStateChanged],
   );
 
   const pull = useCallback(
@@ -161,17 +226,17 @@ export function useGitActions({
         if (mountedRef.current) {
           setPullState({ isLoading: false, error: null });
           showToast(result.message || "Pull successful", { type: "success" });
-          onStatusChangeRef.current?.();
+          notifyGitStateChanged(agentName);
         }
       } catch (err) {
         if (mountedRef.current) {
           const msg = handleApiError(err, "Pull");
           setPullState({ isLoading: false, error: msg });
-          onStatusChangeRef.current?.();
+          notifyGitStateChanged(agentName);
         }
       }
     },
-    [workspaceId, agentName, showToast, handleApiError],
+    [workspaceId, agentName, showToast, handleApiError, notifyGitStateChanged],
   );
 
   const sync = useCallback(async () => {
@@ -182,16 +247,22 @@ export function useGitActions({
       if (mountedRef.current) {
         setSyncState({ isLoading: false, error: null });
         showToast("Sync successful", { type: "success" });
-        onStatusChangeRef.current?.();
+        notifyGitStateChanged(agentName);
       }
     } catch (err) {
       if (mountedRef.current) {
         const msg = handleApiError(err, "Sync");
         setSyncState({ isLoading: false, error: msg });
-        onStatusChangeRef.current?.();
+        notifyGitStateChanged(agentName);
       }
     }
-  }, [workspaceId, agentName, showToast, handleApiError]);
+  }, [
+    workspaceId,
+    agentName,
+    showToast,
+    handleApiError,
+    notifyGitStateChanged,
+  ]);
 
   const createPR = useCallback(
     async (target?: string) => {
@@ -238,7 +309,7 @@ export function useGitActions({
               type: "success",
             });
           }
-          onStatusChangeRef.current?.();
+          notifyGitStateChanged(agentName);
         }
       } catch (err) {
         if (mountedRef.current) {
@@ -247,7 +318,14 @@ export function useGitActions({
         }
       }
     },
-    [workspaceId, agentName, taskId, showToast, handleApiError],
+    [
+      workspaceId,
+      agentName,
+      taskId,
+      showToast,
+      handleApiError,
+      notifyGitStateChanged,
+    ],
   );
 
   const reset = useCallback(
@@ -259,17 +337,17 @@ export function useGitActions({
         if (mountedRef.current) {
           setResetState({ isLoading: false, error: null });
           showToast(result.message || "Reset successful", { type: "success" });
-          onStatusChangeRef.current?.();
+          notifyGitStateChanged(agentName);
         }
       } catch (err) {
         if (mountedRef.current) {
           const msg = handleApiError(err, "Reset");
           setResetState({ isLoading: false, error: msg });
-          onStatusChangeRef.current?.();
+          notifyGitStateChanged(agentName);
         }
       }
     },
-    [workspaceId, agentName, showToast, handleApiError],
+    [workspaceId, agentName, showToast, handleApiError, notifyGitStateChanged],
   );
 
   const updateTarget = useCallback(
@@ -281,7 +359,7 @@ export function useGitActions({
         if (mountedRef.current) {
           setTargetState({ isLoading: false, error: null });
           showToast(`Target branch updated to ${branch}`, { type: "success" });
-          onStatusChangeRef.current?.();
+          notifyGitStateChanged(agentName);
         }
       } catch (err) {
         if (mountedRef.current) {
@@ -290,7 +368,7 @@ export function useGitActions({
         }
       }
     },
-    [workspaceId, agentName, showToast, handleApiError],
+    [workspaceId, agentName, showToast, handleApiError, notifyGitStateChanged],
   );
 
   const anyLoading =

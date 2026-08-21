@@ -41,6 +41,15 @@ function manualChunks(id: string): string | undefined {
     return "dnd-kit";
   }
 
+  if (
+    includesAny(normalizedId, [
+      "/node_modules/@tanstack/react-query/",
+      "/node_modules/@tanstack/query-core/",
+    ])
+  ) {
+    return "react-query";
+  }
+
   if (normalizedId.includes("/node_modules/@tanstack/")) {
     return "virtual-list";
   }

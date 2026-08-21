@@ -63,6 +63,7 @@ export function ToastContainer({
           type={toast.type}
           onDismiss={onDismiss}
           {...(toast.onUndo ? { onUndo: toast.onUndo } : {})}
+          {...(toast.actionLabel ? { actionLabel: toast.actionLabel } : {})}
         />
       ))}
     </div>

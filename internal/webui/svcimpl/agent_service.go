@@ -394,7 +394,7 @@ func (s *agentServiceImpl) ensureLocalAgentWorktrees(ctx context.Context, agent 
 	if domain.ResolveRoleKind(role, agent.RoleName) == domain.RoleKindInteractive {
 		return nil
 	}
-	ws, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, agent.WorkspaceKey)
+	ws, err := storeadapter.BuildWorkspaceTopologyForKey(ctx, s.store, agent.WorkspaceKey)
 	if err != nil {
 		return service.ErrInternal("load workspace for agent worktree", err)
 	}

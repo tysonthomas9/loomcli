@@ -4,3 +4,4 @@ export {
   createAuthenticatedAuth,
   createNoAuth,
 } from "./mockAuthContext";
+export { createTestQueryClient, renderWithQueryClient } from "./queryClient";

@@ -36,8 +36,10 @@ export interface ToastOptions {
   type?: ToastType;
   /** Auto-dismiss duration in ms (default: type-specific, 0 = no auto-dismiss) */
   duration?: number;
-  /** Callback for undo action on destructive toasts */
+  /** Callback for toast action button */
   onUndo?: () => void;
+  /** Toast action button label (default: 'Undo') */
+  actionLabel?: string;
 }
 
 /**
@@ -49,6 +51,7 @@ export interface Toast {
   type: ToastType;
   duration: number;
   onUndo?: () => void;
+  actionLabel?: string;
 }
 
 /**
@@ -172,6 +175,7 @@ export function ToastProvider({
       const toast: Toast = { id, message, type, duration };
       if (options?.onUndo) {
         toast.onUndo = options.onUndo;
+        toast.actionLabel = options.actionLabel ?? "Undo";
       }
 
       dispatch({ type: "ADD", payload: toast });
