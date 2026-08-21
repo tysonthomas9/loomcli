@@ -96,9 +96,13 @@ export function Journey({ events, eventLimit }: JourneyProps): JSX.Element {
       ),
     [foldedSpans],
   );
-  const liveSpanStart =
-    spans.find((span) => span.end === null)?.start ?? null;
-  const isLive = liveSpanStart !== null;
+  const liveSpan = spans.find((span) => span.end === null) ?? null;
+  const liveSpanStart = liveSpan?.start ?? null;
+  const liveSpanStartMs = useMemo(
+    () => (liveSpanStart === null ? null : Date.parse(liveSpanStart)),
+    [liveSpanStart],
+  );
+  const isLive = liveSpan !== null;
   const journeyIdentity = events[0]?.issue_id ?? null;
   const latestSpan = spans[spans.length - 1] ?? null;
   const latestStage = latestSpan?.stage ?? null;
@@ -110,11 +114,26 @@ export function Journey({ events, eventLimit }: JourneyProps): JSX.Element {
     eventLimit > 0 && events.length >= eventLimit;
 
   useEffect(() => {
-    if (liveSpanStart === null) return undefined;
-    setNowMs(Date.now());
-    const interval = setInterval(() => setNowMs(Date.now()), LIVE_TICK_MS);
-    return () => clearInterval(interval);
-  }, [liveSpanStart]);
+    if (liveSpanStartMs === null || !Number.isFinite(liveSpanStartMs)) {
+      return undefined;
+    }
+
+    const tickerStartedAtMs = Date.now();
+    setNowMs(tickerStartedAtMs);
+    const elapsedMs = Math.max(0, tickerStartedAtMs - liveSpanStartMs);
+    const nextTickDelayMs =
+      LIVE_TICK_MS - (elapsedMs % LIVE_TICK_MS);
+    let interval: ReturnType<typeof setInterval> | undefined;
+    const timeout = setTimeout(() => {
+      setNowMs(Date.now());
+      interval = setInterval(() => setNowMs(Date.now()), LIVE_TICK_MS);
+    }, nextTickDelayMs);
+
+    return () => {
+      clearTimeout(timeout);
+      if (interval !== undefined) clearInterval(interval);
+    };
+  }, [liveSpanStartMs]);
 
   useLayoutEffect(() => {
     const rail = railRef.current;

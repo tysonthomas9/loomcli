@@ -218,7 +218,7 @@ describe("Journey", () => {
     );
   });
 
-  it("re-phases the live clock when a new stage begins", () => {
+  it("aligns a late-observed live stage to its own clock boundary", () => {
     const { rerender } = render(
       <Journey eventLimit={200} events={[event()]} />,
     );
@@ -230,9 +230,9 @@ describe("Journey", () => {
         events={[
           event(),
           event({
-            id: "1787248810800-0",
+            id: "1787248810000-0",
             event_type: "issue.update",
-            created_at: "2026-08-20T12:00:10.800Z",
+            created_at: "2026-08-20T12:00:10.000Z",
             changes: [{ field: "status", before: "open", after: "review" }],
           }),
         ]}
@@ -242,11 +242,19 @@ describe("Journey", () => {
     const liveSpan = screen.getAllByTestId("journey-span").at(-1);
     expect(within(liveSpan as HTMLElement).getByText("0s")).toBeInTheDocument();
 
-    act(() => vi.advanceTimersByTime(999));
+    act(() => vi.advanceTimersByTime(199));
     expect(within(liveSpan as HTMLElement).getByText("0s")).toBeInTheDocument();
 
     act(() => vi.advanceTimersByTime(1));
     expect(within(liveSpan as HTMLElement).getByText("1s")).toBeInTheDocument();
+
+    // The aligned timeout updates once at the boundary; its replacement
+    // interval must not immediately fire a second time.
+    act(() => vi.advanceTimersByTime(1));
+    expect(within(liveSpan as HTMLElement).getByText("1s")).toBeInTheDocument();
+
+    act(() => vi.advanceTimersByTime(4_999));
+    expect(within(liveSpan as HTMLElement).getByText("6s")).toBeInTheDocument();
   });
 
   it("warns about earlier history only when the response fills its limit", () => {
