@@ -2761,16 +2761,29 @@ export interface components {
     };
     /** @description Audit trail entry for an issue */
     IssueEvent: {
-      /** Format: int64 */
-      id: number;
+      id: string;
       issue_id: string;
       event_type: string;
       actor: string;
+      target?: string;
+      payload?: string;
+      category?: string;
+      summary?: string;
+      changes?: components["schemas"]["IssueEventFieldChange"][];
+      metadata?: {
+        [key: string]: string;
+      };
       old_value?: string | null;
       new_value?: string | null;
       comment?: string | null;
       /** Format: date-time */
       created_at: string;
+    };
+    /** @description Before and after values for one field changed by an issue event */
+    IssueEventFieldChange: {
+      field: string;
+      before?: string;
+      after?: string;
     };
     Statistics: {
       total_issues: number;
@@ -4521,7 +4534,10 @@ export interface operations {
   };
   getIssueEvents: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of recent events to return */
+        limit?: number;
+      };
       header?: never;
       path: {
         /** @description Workspace identifier */

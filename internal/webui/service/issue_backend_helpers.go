@@ -1,8 +1,6 @@
 package service
 
 import (
-	"strconv"
-
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/types"
 )
@@ -318,18 +316,27 @@ func commentDataToTypesComment(d *backend.CommentData) *types.Comment {
 
 // eventDataToTypesEvent maps backend.EventData onto the strongly typed
 // types.Event used by the ListEvents handler response shape.
-//
-// backend.EventData.ID is a string but types.Event.ID is int64 (matching
-// the SQLite primary key). We parse-through to preserve the previous wire
-// shape; non-numeric IDs degrade to 0 because no caller currently relies on
-// the ID being valid for string-ID backends.
 func eventDataToTypesEvent(d backend.EventData) *types.Event {
-	id, _ := strconv.ParseInt(d.ID, 10, 64)
+	changes := make([]types.FieldChange, 0, len(d.Changes))
+	for _, change := range d.Changes {
+		changes = append(changes, types.FieldChange{
+			Field:  change.Field,
+			Before: change.Before,
+			After:  change.After,
+		})
+	}
+
 	return &types.Event{
-		ID:        id,
+		ID:        d.ID,
 		IssueID:   d.IssueID,
 		EventType: types.EventType(d.Kind),
 		Actor:     d.Actor,
+		Target:    d.Target,
+		Payload:   d.Payload,
+		Category:  d.Category,
+		Summary:   d.Summary,
+		Changes:   changes,
+		Metadata:  d.Metadata,
 		CreatedAt: d.CreatedAt,
 	}
 }
