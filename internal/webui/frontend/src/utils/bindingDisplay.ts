@@ -70,6 +70,24 @@ export function firstEnabledCronBinding(
   );
 }
 
+/**
+ * A schedule is paused when the service is disabled, or when the service has
+ * cron bindings but none of them are enabled. The second case is invisible to
+ * `service.enabled`: disabling the binding is what actually stops the schedule
+ * firing, and reporting it as "Not scheduled" made a deliberate pause
+ * indistinguishable from a service that is armed but has no computed fire time
+ * yet — with no control anywhere naming the flag that was holding it.
+ */
+export function agentServiceSchedulePaused(service: AgentServiceDTO): boolean {
+  if (!service.enabled) return true;
+  const cronBindings = service.bindings.filter(
+    (binding) => binding.sourceKind.trim().toLowerCase() === "cron",
+  );
+  return (
+    cronBindings.length > 0 && !cronBindings.some((binding) => binding.enabled)
+  );
+}
+
 export function agentServiceCadenceLabel(service: AgentServiceDTO): string {
   const binding = firstEnabledCronBinding(service);
   return binding ? bindingCadenceLabel(binding) : "No enabled schedule";

@@ -246,12 +246,17 @@ type TriggerBinding struct {
 	// Schedule is a standard 5-field cron expression (or @descriptor);
 	// required when SourceKind is "cron". ScheduleTimezone is an IANA zone
 	// name evaluated against Schedule (UTC when empty).
-	Schedule         string    `json:"schedule,omitempty"`
-	ScheduleTimezone string    `json:"schedule_timezone,omitempty"`
-	Permissions      []string  `json:"permissions,omitempty"`
-	Enabled          bool      `json:"enabled"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	Schedule         string   `json:"schedule,omitempty"`
+	ScheduleTimezone string   `json:"schedule_timezone,omitempty"`
+	Permissions      []string `json:"permissions,omitempty"`
+	Enabled          bool     `json:"enabled"`
+	// CreatedBy and UpdatedBy carry fleet-db's server-stamped attribution. A
+	// schedule edit has outsized blast radius, so the actor who made it must
+	// survive the round trip rather than being dropped at this boundary.
+	CreatedBy string    `json:"created_by,omitempty"`
+	UpdatedBy string    `json:"updated_by,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // TriggerEventOrigin mirrors fleet-db's structural event provenance: every

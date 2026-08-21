@@ -18,6 +18,7 @@ import { ApiError } from "@/types/common";
 import {
   agentServiceDotState,
   agentServiceHealthLabel,
+  agentServiceSchedulePaused,
   bindingCadenceLabel,
   firstEnabledCronBinding,
   formatFireTime,
@@ -194,6 +195,7 @@ export function AgentServiceDetail({
   const events = oldestFirst(unsortedEvents);
   const nextFire = formatFireTime(service.nextFireAt);
   const nextFireBinding = firstEnabledCronBinding(service);
+  const schedulePaused = agentServiceSchedulePaused(service);
   const healthLabel = agentServiceHealthLabel(service);
   const expandedRun = expandedRunId
     ? (runs.find((run) => run.runId === expandedRunId) ?? null)
@@ -353,7 +355,7 @@ export function AgentServiceDetail({
               <div>
                 <dt>Next fire</dt>
                 <dd>
-                  {service.enabled ? nextFire || "Not scheduled" : "Paused"}
+                  {schedulePaused ? "Paused" : nextFire || "Not scheduled"}
                 </dd>
               </div>
               {service.behavior.roleName ? (
@@ -398,8 +400,13 @@ export function AgentServiceDetail({
                     </div>
                     <div className={styles.rowMeta}>
                       <span>{binding.enabled ? "Enabled" : "Disabled"}</span>
+                      {binding.updatedBy ? (
+                        <span data-testid={`binding-updated-by-${binding.id}`}>
+                          {`Last changed by ${binding.updatedBy}`}
+                        </span>
+                      ) : null}
                       <span>
-                        {!service.enabled
+                        {!service.enabled || !binding.enabled
                           ? "Paused"
                           : binding.id === nextFireBinding?.id && nextFire
                             ? `Next ${nextFire}`

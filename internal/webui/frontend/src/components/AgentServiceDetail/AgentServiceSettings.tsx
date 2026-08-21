@@ -33,7 +33,7 @@ export function AgentServiceSettings({
   const [schedule, setSchedule] = useState(cronBinding?.schedule ?? "");
   const [scheduleTouched, setScheduleTouched] = useState(false);
   const [busy, setBusy] = useState<
-    "name" | "state" | "schedule" | "remove" | null
+    "name" | "state" | "schedule" | "schedule-enabled" | "remove" | null
   >(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,6 +80,32 @@ export function AgentServiceSettings({
         agentServiceMutationError(
           cause,
           "The agent state could not be changed.",
+        ),
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // Enablement lives at two levels: the service's desiredState (above) and the
+  // cron binding's own `enabled`. Disabling the binding is what actually stops
+  // the schedule firing, and before this it was writable only via API/CLI — an
+  // operator who paused it that way could not resume from the panel at all.
+  const toggleScheduleEnabled = async (): Promise<void> => {
+    if (busy || !cronBinding) return;
+    setBusy("schedule-enabled");
+    setError(null);
+    try {
+      onChange(
+        await mutations.patch(service.id, {
+          binding: { enabled: !cronBinding.enabled },
+        }),
+      );
+    } catch (cause) {
+      setError(
+        agentServiceMutationError(
+          cause,
+          "The schedule could not be paused or resumed.",
         ),
       );
     } finally {
@@ -189,6 +215,20 @@ export function AgentServiceSettings({
           <button type="submit" disabled={!scheduleDirty || busy !== null}>
             {busy === "schedule" ? "Saving…" : "Save schedule"}
           </button>
+          {cronBinding ? (
+            <button
+              type="button"
+              data-testid="agent-service-toggle-schedule"
+              onClick={() => void toggleScheduleEnabled()}
+              disabled={busy !== null}
+            >
+              {busy === "schedule-enabled"
+                ? "Saving…"
+                : cronBinding.enabled
+                  ? "Pause schedule"
+                  : "Resume schedule"}
+            </button>
+          ) : null}
         </div>
         <div className={styles.schedulePresets} aria-label="Schedule presets">
           {SCHEDULE_PRESETS.map((preset) => (
