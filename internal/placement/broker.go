@@ -31,6 +31,10 @@ const (
 	detachedCreateTimeout            = 5 * time.Minute
 	detachedStoreWriteTimeout        = 10 * time.Second
 	detachedProviderOperationTimeout = 30 * time.Second
+	// defaultCreateAbsenceReconfirm separates the two absence confirmations
+	// required before an empty-sandbox-id provisioning row may be released.
+	// It must comfortably exceed the provider's list-consistency flap window.
+	defaultCreateAbsenceReconfirm = 2 * time.Minute
 )
 
 // Config wires Broker dependencies.
@@ -56,7 +60,11 @@ type Config struct {
 	// delete completed; it doubles per attempt. Exposed so tests do not sleep
 	// for seconds. Zero uses the default.
 	DeleteConfirmBackoff time.Duration
-	Now                  func() time.Time
+	// CreateAbsenceReconfirmInterval separates the two absence confirmations
+	// required before an empty-sandbox-id provisioning row may be released.
+	// Zero uses the default.
+	CreateAbsenceReconfirmInterval time.Duration
+	Now                            func() time.Time
 }
 
 // Broker creates, reads, lists, and releases lead placements.
@@ -75,6 +83,7 @@ type Broker struct {
 	leadAPIBaseURL          string
 	leadBootstrapEnabled    bool
 	deleteConfirmBackoff    time.Duration
+	createAbsenceReconfirm  time.Duration
 	now                     func() time.Time
 
 	// Deployed loom serve is a single process today. These per-key locks are
@@ -180,6 +189,7 @@ func NewBroker(cfg Config) (*Broker, error) {
 		leadAPIBaseURL:          strings.TrimSpace(cfg.LeadAPIBaseURL),
 		leadBootstrapEnabled:    cfg.LeadBootstrapEnabled,
 		deleteConfirmBackoff:    confirmBackoff,
+		createAbsenceReconfirm:  orDefaultDuration(cfg.CreateAbsenceReconfirmInterval, defaultCreateAbsenceReconfirm),
 		now:                     now,
 		locks:                   make(map[placementLockKey]*sync.Mutex),
 	}, nil
@@ -265,9 +275,14 @@ func (b *Broker) Provision(ctx context.Context, req ProvisionRequest) (*Provisio
 			return result, nil
 		}
 		existing := latestPlacement(nodes)
-		predecessor, err := b.preparePredecessorForSuccessor(existing)
+		predecessor, adopted, err := b.preparePredecessorForSuccessor(ctx, existing)
 		if err != nil {
 			return nil, err
+		}
+		if adopted {
+			// The predecessor's sandbox turned out to be alive and was adopted
+			// back onto its row; resume it instead of admitting a successor.
+			continue
 		}
 		bootPlan, err := b.resolveLeadBootPlan(ctx, req, true)
 		if err != nil {
@@ -277,7 +292,16 @@ func (b *Broker) Provision(ctx context.Context, req ProvisionRequest) (*Provisio
 		if err != nil {
 			return nil, err
 		}
-		return b.createSandbox(ctx, req, node, bootPlan)
+		result, adopted, err := b.createSandbox(ctx, req, node, bootPlan)
+		if err != nil {
+			return nil, err
+		}
+		if adopted {
+			// An ambiguous create was reconciled to an existing sandbox;
+			// resume the now-active placement through the live path.
+			continue
+		}
+		return result, nil
 	}
 }
 

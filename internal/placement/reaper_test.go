@@ -23,11 +23,11 @@ func TestPlacementReaperProvisioningMissingSandboxRows(t *testing.T) {
 		wantAction string
 	}{
 		{
-			name:       "R2 deadline past empty sandbox id releases reservation",
-			deadline:   now.Add(-time.Minute),
-			wantState:  domain.PlacementStateReleased,
-			wantActed:  1,
-			wantAction: reaperActionMarkReleased,
+			// One confirmed zero never releases an empty-id row; the first
+			// pass records the absence confirmation for the two-pass protocol.
+			name:      "R2 deadline past empty sandbox id records first absence",
+			deadline:  now.Add(-time.Minute),
+			wantState: domain.PlacementStateProvisioning,
 		},
 		{
 			name:      "R2 within deadline observes only",
@@ -78,6 +78,126 @@ func TestPlacementReaperProvisioningMissingSandboxRows(t *testing.T) {
 				t.Fatalf("Delete calls = %d, want 0", provider.deleteCallCount())
 			}
 		})
+	}
+}
+
+func TestPlacementReaperProvisioningEmptyIDTwoPassRelease(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	st, provider, broker := reaperFixture(t, now)
+	deadline := now.Add(-time.Minute)
+	node := createPlacementNode(t, st, "WS", "placement-1", "nova", domain.NodePlacement{
+		Generation:             7,
+		State:                  domain.PlacementStateProvisioning,
+		ProvisioningDeadlineAt: &deadline,
+	})
+	reaper := NewPlacementReaper(broker, ReaperConfig{Enforce: true, Now: func() time.Time { return now }})
+
+	// Pass 1: the first confirmed zero records the absence, never releases.
+	result, err := reaper.RunOnce(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnce pass 1: %v", err)
+	}
+	got := getNode(t, st, "WS", node.NodeID)
+	if got.Placement.State != domain.PlacementStateProvisioning {
+		t.Fatalf("state after pass 1 = %q, want provisioning", got.Placement.State)
+	}
+	if got.Placement.CreateAbsenceConfirmedAt == nil {
+		t.Fatal("CreateAbsenceConfirmedAt = nil after pass 1, want recorded")
+	}
+	if result.Acted != 0 {
+		t.Fatalf("Acted pass 1 = %d, want 0", result.Acted)
+	}
+
+	// Pass 2 inside the reconfirm interval: still no release.
+	if _, err := reaper.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce pass 2: %v", err)
+	}
+	got = getNode(t, st, "WS", node.NodeID)
+	if got.Placement.State != domain.PlacementStateProvisioning {
+		t.Fatalf("state after pass 2 = %q, want provisioning", got.Placement.State)
+	}
+
+	// Pass 3 after the reconfirm interval: the second confirmed zero releases.
+	later := now.Add(defaultCreateAbsenceReconfirm + time.Second)
+	lateReaper := NewPlacementReaper(broker, ReaperConfig{Enforce: true, Now: func() time.Time { return later }})
+	result, err = lateReaper.RunOnce(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnce pass 3: %v", err)
+	}
+	got = getNode(t, st, "WS", node.NodeID)
+	if got.Placement.State != domain.PlacementStateReleased {
+		t.Fatalf("state after pass 3 = %q, want released", got.Placement.State)
+	}
+	if got.Placement.ReleaseReason != domain.PlacementReleaseReasonCreateConfirmedAbsent {
+		t.Fatalf("ReleaseReason = %q, want %q", got.Placement.ReleaseReason, domain.PlacementReleaseReasonCreateConfirmedAbsent)
+	}
+	if result.Acted != 1 {
+		t.Fatalf("Acted pass 3 = %d, want 1", result.Acted)
+	}
+	assertReaperAction(t, result, reaperActionMarkReleased, node.NodeID)
+	if provider.deleteCallCount() != 0 {
+		t.Fatalf("Delete calls = %d, want 0", provider.deleteCallCount())
+	}
+}
+
+func TestPlacementReaperProvisioningEmptyIDDryRunWritesNothing(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	st, _, broker := reaperFixture(t, now)
+	deadline := now.Add(-time.Minute)
+	node := createPlacementNode(t, st, "WS", "placement-1", "nova", domain.NodePlacement{
+		Generation:             7,
+		State:                  domain.PlacementStateProvisioning,
+		ProvisioningDeadlineAt: &deadline,
+	})
+	reaper := NewPlacementReaper(broker, ReaperConfig{Enforce: false, Now: func() time.Time { return now }})
+
+	if _, err := reaper.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	got := getNode(t, st, "WS", node.NodeID)
+	if got.Placement.CreateAbsenceConfirmedAt != nil {
+		t.Fatal("CreateAbsenceConfirmedAt recorded in dry-run, want no writes")
+	}
+	if got.Placement.State != domain.PlacementStateProvisioning {
+		t.Fatalf("state = %q, want provisioning untouched in dry-run", got.Placement.State)
+	}
+}
+
+func TestPlacementReaperProvisioningNamedSandboxFoundByPointRead(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	st, provider, broker := reaperFixture(t, now)
+	deadline := now.Add(-time.Minute)
+	node := createPlacementNode(t, st, "WS", "placement-1", "nova", domain.NodePlacement{
+		Generation:             7,
+		State:                  domain.PlacementStateProvisioning,
+		ProvisioningDeadlineAt: &deadline,
+	})
+	// The sandbox exists under the placement's deterministic name but the
+	// eventually-consistent label list does not return it. The authoritative
+	// point read must find it, so the row is treated as having a sandbox —
+	// adopt-and-release, not silent absence release.
+	provider.addListInvisibleSandbox(ProviderSandbox{
+		ID: "sandbox-hidden",
+		Labels: map[string]string{
+			PlacementLabelKey:   node.NodeID,
+			EnvironmentLabelKey: testDeploymentID,
+		},
+		State: ProviderSandboxRunning,
+	})
+	provider.setSandboxName(sandboxNameForPlacement(node.NodeID), "sandbox-hidden")
+	reaper := NewPlacementReaper(broker, ReaperConfig{Enforce: true, Now: func() time.Time { return now }})
+
+	result, err := reaper.RunOnce(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	got := getNode(t, st, "WS", node.NodeID)
+	if got.Placement.CreateAbsenceConfirmedAt != nil {
+		t.Fatal("CreateAbsenceConfirmedAt recorded despite a name-visible sandbox")
+	}
+	assertReaperAction(t, result, reaperActionAdoptDelete, node.NodeID)
+	if provider.deleteCallCount() != 1 {
+		t.Fatalf("Delete calls = %d, want 1 adopt-delete of the found sandbox", provider.deleteCallCount())
 	}
 }
 

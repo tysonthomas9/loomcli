@@ -287,15 +287,12 @@ func (b *Broker) releaseUnknownSandboxID(ctx context.Context, node *domain.Node,
 	if node == nil || node.Placement == nil {
 		return nil, fmt.Errorf("placement record required: %w", domain.ErrInvalid)
 	}
-	matches, err := b.providerSandboxesForPlacement(ctx, node.NodeID)
+	sandbox, found, err := b.reconcileProviderIdentity(ctx, node)
 	if err != nil {
 		return nil, err
 	}
-	if len(matches) > 1 {
-		return nil, fmt.Errorf("placement %q has %d provider sandboxes with label %s: %w", node.NodeID, len(matches), PlacementLabelKey, domain.ErrConflict)
-	}
-	if len(matches) == 1 {
-		sandboxID := strings.TrimSpace(matches[0].ID)
+	if found {
+		sandboxID := strings.TrimSpace(sandbox.ID)
 		if sandboxID == "" {
 			return nil, fmt.Errorf("provider sandbox labeled for placement %q has empty id: %w", node.NodeID, domain.ErrInvalid)
 		}
@@ -312,8 +309,21 @@ func (b *Broker) releaseUnknownSandboxID(ctx context.Context, node *domain.Node,
 		}
 		return b.markReleased(ctx, node.WorkspaceKey, node.NodeID, fence, domain.PlacementReleaseReasonUnspecified)
 	}
-	if !forceClean && !b.provisioningDeadlineExpired(node) {
-		return node, fmt.Errorf("placement %q has no sandbox id and provider list has no positive match before provisioning deadline: %w", node.NodeID, domain.ErrConflict)
+	// A confirmed zero is still only one observation, and this row's create may
+	// have made a sandbox whose response was lost. Except under an explicit
+	// force, release requires the deadline plus the two-pass absence protocol.
+	if !forceClean {
+		if !b.provisioningDeadlineExpired(node) {
+			return node, fmt.Errorf("placement %q has no sandbox id and provider list has no positive match before provisioning deadline: %w", node.NodeID, domain.ErrConflict)
+		}
+		authorized, err := b.advanceCreateAbsence(ctx, node)
+		if err != nil {
+			return nil, err
+		}
+		if !authorized {
+			return node, errCreateAbsenceAwaitingReconfirm(node.NodeID)
+		}
+		return b.markReleased(ctx, node.WorkspaceKey, node.NodeID, fence, domain.PlacementReleaseReasonCreateConfirmedAbsent)
 	}
 	return b.markReleased(ctx, node.WorkspaceKey, node.NodeID, fence, domain.PlacementReleaseReasonUnspecified)
 }

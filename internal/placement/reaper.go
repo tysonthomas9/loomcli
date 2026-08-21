@@ -179,6 +179,22 @@ func (r *PlacementReaper) reapProvisioning(ctx context.Context, node *domain.Nod
 
 	sandboxID := strings.TrimSpace(node.Placement.SandboxID)
 	if sandboxID == "" {
+		// The eventually-consistent label list found nothing; the
+		// deterministic-name point read is authoritative and may still find the
+		// sandbox an ambiguous create left behind.
+		named, err := r.broker.findSandboxByPlacementName(ctx, node.NodeID)
+		if err == nil {
+			if !providerSandboxMatchesPlacement(named, node.NodeID) {
+				return r.deadLetterNode(ctx, result, node, named.ID, fmt.Errorf(
+					"sandbox %q holds placement %q's name but its %s label does not match: %w",
+					named.ID, node.NodeID, PlacementLabelKey, domain.ErrConflict))
+			}
+			return r.reapProvisioningMatchedSandbox(ctx, node, named, result)
+		}
+		if !errors.Is(err, ErrSandboxNotFound) {
+			logActionError(ctx, "placement reaper name lookup failed", reaperActionFromNode(node, "", reaperActionObserve, string(node.Placement.State), ""), err)
+			return fmt.Errorf("find sandbox by name for provisioning placement %q: %w", node.NodeID, err)
+		}
 		return r.reapProvisioningWithoutSandbox(ctx, node, result)
 	}
 	return r.reapProvisioningRecordedSandbox(ctx, node, sandboxID, result)
@@ -210,20 +226,39 @@ func (r *PlacementReaper) reapProvisioningMatchedSandbox(ctx context.Context, no
 	})
 }
 
+// reapProvisioningWithoutSandbox drives the two-pass absence protocol for an
+// empty-sandbox-id provisioning row: the first confirmed zero past the
+// deadline durably records CreateAbsenceConfirmedAt; only a second confirmed
+// zero at least the reconfirm interval later releases the row. One
+// observation is never enough — the create that left the row id-less may have
+// made a sandbox whose response was lost, and the provider list is eventually
+// consistent.
 func (r *PlacementReaper) reapProvisioningWithoutSandbox(ctx context.Context, node *domain.Node, result *ReaperResult) error {
 	if !r.broker.provisioningDeadlineExpired(node) {
 		r.logObserve(ctx, node, "", "provisioning without sandbox before deadline")
+		return nil
+	}
+	if node.Placement.CreateAbsenceConfirmedAt == nil {
+		r.logObserve(ctx, node, "", "provisioning without sandbox past deadline; recording first absence confirmation")
+		if !r.enforce {
+			return nil
+		}
+		return r.broker.markCreateAbsenceConfirmed(ctx, node)
+	}
+	if r.now().UTC().Sub(node.Placement.CreateAbsenceConfirmedAt.UTC()) < r.broker.createAbsenceReconfirm {
+		r.logObserve(ctx, node, "", "provisioning without sandbox awaiting absence reconfirmation")
 		return nil
 	}
 	return r.withFreshNodeAction(ctx, result, node, "", reaperActionMarkReleased, func(current *domain.Node) bool {
 		return samePlacementCandidate(current, node) &&
 			current.Placement.State == domain.PlacementStateProvisioning &&
 			strings.TrimSpace(current.Placement.SandboxID) == "" &&
+			current.Placement.CreateAbsenceConfirmedAt != nil &&
 			r.broker.provisioningDeadlineExpired(current)
 	}, func(current *domain.Node) error {
 		_, err := r.broker.markReleased(ctx, current.WorkspaceKey, current.NodeID, ReleaseFence{
 			Generation: current.Placement.Generation,
-		}, domain.PlacementReleaseReasonUnspecified)
+		}, domain.PlacementReleaseReasonCreateConfirmedAbsent)
 		return err
 	})
 }
@@ -730,5 +765,6 @@ func PlacementNeedsAttention(node *domain.Node) bool {
 	return node != nil &&
 		node.Placement != nil &&
 		(node.Placement.DeleteAttempts >= reaperDeadLetterThreshold ||
-			node.Placement.State == domain.PlacementStateLost)
+			node.Placement.State == domain.PlacementStateLost ||
+			node.Placement.AttentionReason != "")
 }

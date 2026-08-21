@@ -12,10 +12,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-func (b *Broker) createSandbox(ctx context.Context, req ProvisionRequest, node *domain.Node, bootPlan leadBootPlan) (*ProvisionResult, error) {
+func (b *Broker) createSandbox(ctx context.Context, req ProvisionRequest, node *domain.Node, bootPlan leadBootPlan) (result *ProvisionResult, adopted bool, err error) {
 	token, caps, err := b.mintToken(node, req.Caps)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	// Detaching here covers caller cancellation only: if the tab closes after
 	// the durable provisioning reservation, Create, id recording, and
@@ -27,37 +27,18 @@ func (b *Broker) createSandbox(ctx context.Context, req ProvisionRequest, node *
 	created, err := b.provider.Create(createCtx, providerCreateRequest(req, node.NodeID, token, b.deploymentID, b.leadAPIBaseURL, bootPlan))
 	sandboxID := strings.TrimSpace(created.SandboxID)
 	if err != nil {
-		if sandboxID != "" {
-			node = b.appendAbandonedSandboxIDBestEffort(createCtx, node, sandboxID)
-			if deleteErr := b.deleteSandbox(createCtx, sandboxID); deleteErr != nil {
-				return nil, fmt.Errorf("create sandbox for placement %q returned sandbox %q but failed: %v; compensating delete failed, leaked sandbox id %q: %w", node.NodeID, sandboxID, err, sandboxID, deleteErr)
-			}
-		} else {
-			// Create produced no sandbox at all: this placement can never boot, so
-			// flip it out of provisioning to a terminal released state with the
-			// cause recorded, rather than leaving it stuck until the reaper's
-			// deadline (which would also leak the MaxLive reservation). Only the
-			// no-sandbox case is safe to release here; a returned-then-deleted
-			// sandbox stays provisioning so the reaper confirm-deletes it. Best
-			// effort: never mask the original create error.
-			if markErr := b.markProvisionFailed(createCtx, node, err.Error()); markErr != nil {
-				slog.WarnContext(createCtx, "mark lead placement provision-failed failed",
-					"workspace", node.WorkspaceKey,
-					"placement", node.NodeID,
-					"error", markErr)
-			}
-		}
-		return nil, fmt.Errorf("create sandbox for placement %q: %w", node.NodeID, err)
+		adopted, failErr := b.handleCreateFailure(createCtx, node, created, err)
+		return nil, adopted, failErr
 	}
 	recorded, err := b.recordSandboxID(createCtx, node, sandboxID)
 	if err != nil {
 		if sandboxID != "" {
 			node = b.appendAbandonedSandboxIDBestEffort(createCtx, node, sandboxID)
 			if deleteErr := b.deleteSandbox(createCtx, sandboxID); deleteErr != nil {
-				return nil, fmt.Errorf("record sandbox id %q for placement %q: %v; compensating delete failed, leaked sandbox id %q: %w", sandboxID, node.NodeID, err, sandboxID, deleteErr)
+				return nil, false, fmt.Errorf("record sandbox id %q for placement %q: %v; compensating delete failed, leaked sandbox id %q: %w", sandboxID, node.NodeID, err, sandboxID, deleteErr)
 			}
 		}
-		return nil, err
+		return nil, false, err
 	}
 	if bootPlan.needsPrep() {
 		prepCtx, prepCancel := detachedTimeout(ctx, b.effectiveLeadBootPrepTimeout())
@@ -65,14 +46,14 @@ func (b *Broker) createSandbox(ctx context.Context, req ProvisionRequest, node *
 		prepCancel()
 		if prepErr != nil {
 			if err := b.compensateLeadBootPrepFailure(createCtx, recorded, sandboxID, prepErr); err != nil {
-				return nil, err
+				return nil, false, err
 			}
-			return nil, prepErr
+			return nil, false, prepErr
 		}
 	}
-	result := &ProvisionResult{Node: recorded, Token: token, Caps: caps, Created: true}
+	result = &ProvisionResult{Node: recorded, Token: token, Caps: caps, Created: true}
 	b.populateLeadBootResult(ctx, req, result, token, bootPlan)
-	return result, nil
+	return result, false, nil
 }
 
 func (b *Broker) effectiveLeadBootPrepTimeout() time.Duration {
@@ -109,17 +90,35 @@ func (b *Broker) compensateLeadBootPrepFailure(ctx context.Context, node *domain
 	return fmt.Errorf("prepare lead boot for placement %q in sandbox %q: %w", node.NodeID, sandboxID, cause)
 }
 
-func (b *Broker) preparePredecessorForSuccessor(existing *domain.Node) (*domain.Node, error) {
+// preparePredecessorForSuccessor gates admission of a new generation on the
+// predecessor's true provider state. adopted=true means the predecessor's
+// sandbox is alive and was adopted back onto its row — the caller must resume
+// it instead of admitting a successor, or the account ends up paying for two
+// sandboxes under one agent.
+func (b *Broker) preparePredecessorForSuccessor(ctx context.Context, existing *domain.Node) (node *domain.Node, adopted bool, err error) {
 	if existing == nil || existing.Placement == nil {
-		return existing, nil
+		return existing, false, nil
 	}
 	switch existing.Placement.State {
 	case domain.PlacementStateReleased:
-		return existing, nil
+		sandbox, found, err := b.reconcileProviderIdentity(ctx, existing)
+		if err != nil {
+			if errors.Is(err, domain.ErrConflict) {
+				b.markAttentionReasonBestEffort(ctx, existing, err.Error())
+			}
+			return nil, false, fmt.Errorf("reconcile released predecessor %q before successor: %w", existing.NodeID, err)
+		}
+		if found {
+			if _, err := b.recordSandboxID(ctx, existing, sandbox.ID); err != nil {
+				return nil, false, fmt.Errorf("adopt sandbox %q onto released predecessor %q: %w", sandbox.ID, existing.NodeID, err)
+			}
+			return nil, true, nil
+		}
+		return existing, false, nil
 	case domain.PlacementStateLost:
-		return nil, fmt.Errorf("placement %q is lost and blocks reprovision; resolve manually with force release before creating a successor: %w", existing.NodeID, domain.ErrConflict)
+		return nil, false, fmt.Errorf("placement %q is lost and blocks reprovision; resolve manually with force release before creating a successor: %w", existing.NodeID, domain.ErrConflict)
 	default:
-		return nil, fmt.Errorf("placement %q state %q is not terminal for successor: %w", existing.NodeID, existing.Placement.State, domain.ErrConflict)
+		return nil, false, fmt.Errorf("placement %q state %q is not terminal for successor: %w", existing.NodeID, existing.Placement.State, domain.ErrConflict)
 	}
 }
 
@@ -159,15 +158,35 @@ func (b *Broker) recordSandboxID(ctx context.Context, node *domain.Node, sandbox
 	if current.Placement.Generation != node.Placement.Generation {
 		return nil, fmt.Errorf("placement %q generation changed from %d to %d before sandbox id write: %w", node.NodeID, node.Placement.Generation, current.Placement.Generation, domain.ErrConflict)
 	}
+	// Only provisioning (the create path), active (idempotent re-record), and
+	// released (reconcile adoption of a sandbox that outlived its record) may
+	// become active. Releasing and lost rows are mid-protocol; activating them
+	// would bypass delete confirmation or the lost-release consent gate.
+	switch current.Placement.State {
+	case domain.PlacementStateProvisioning, domain.PlacementStateActive, domain.PlacementStateReleased:
+	default:
+		return nil, fmt.Errorf("placement %q state %q cannot record a sandbox id: %w", node.NodeID, current.Placement.State, domain.ErrConflict)
+	}
 	currentSandboxID := strings.TrimSpace(current.Placement.SandboxID)
 	if currentSandboxID != "" && currentSandboxID != sandboxID {
 		return nil, fmt.Errorf("placement %q sandbox id is write-once: existing %q new %q: %w", node.NodeID, currentSandboxID, sandboxID, domain.ErrConflict)
+	}
+	// A newer generation may have been admitted by another path (or another
+	// serve instance) while this row sat ambiguous or released; activating the
+	// older row then would put two live placements under one agent.
+	if err := b.ensureNoNewerPlacement(ctx, current); err != nil {
+		return nil, err
 	}
 	placement := clonePlacement(current.Placement)
 	placement.SandboxID = sandboxID
 	placement.State = domain.PlacementStateActive
 	placement.LeadProcessStartedAt = nil
 	placement.ProvisioningDeadlineAt = nil
+	placement.ProvisionAmbiguousAt = nil
+	placement.ProvisionAmbiguityDetail = ""
+	placement.CreateAbsenceConfirmedAt = nil
+	placement.AttentionReason = ""
+	placement.ReleaseReason = domain.PlacementReleaseReasonUnspecified
 	placementPtr := &placement
 	updated, err := b.store.Nodes().Update(ctx, current.WorkspaceKey, current.NodeID, store.NodeUpdate{Placement: &placementPtr})
 	if err != nil {
@@ -255,32 +274,42 @@ func (b *Broker) restoreParkingAfterResume(ctx context.Context, node *domain.Nod
 	return err
 }
 
-// resolveResumeSandbox recovers a missing recorded sandbox id from provider
-// labels. retry=true means the deadline-expired placement was released and the
-// caller should re-admit from scratch.
+// resolveResumeSandbox recovers a missing recorded sandbox id via the
+// deterministic-name point read, then provider labels. retry=true means the
+// placement completed the two-pass absence protocol, was released, and the
+// caller should re-admit from scratch. A single zero observation never
+// releases: the create that left this row id-less may have made a sandbox
+// whose response was lost.
 func (b *Broker) resolveResumeSandbox(ctx context.Context, node *domain.Node) (*domain.Node, string, bool, error) {
 	sandboxID := strings.TrimSpace(node.Placement.SandboxID)
 	if sandboxID != "" {
 		return node, sandboxID, false, nil
 	}
-	recoveredID, err := b.providerSandboxIDForPlacement(ctx, node.NodeID)
+	sandbox, found, err := b.reconcileProviderIdentity(ctx, node)
 	if err != nil {
 		return nil, "", false, err
 	}
-	if recoveredID == "" {
+	if !found {
 		if !b.provisioningDeadlineExpired(node) {
 			return nil, "", false, fmt.Errorf("placement %q has no sandbox id and provisioning deadline has not elapsed: %w", node.NodeID, domain.ErrConflict)
 		}
-		if _, err := b.markReleased(ctx, node.WorkspaceKey, node.NodeID, ReleaseFence{Generation: node.Placement.Generation}, domain.PlacementReleaseReasonUnspecified); err != nil {
+		authorized, err := b.advanceCreateAbsence(ctx, node)
+		if err != nil {
+			return nil, "", false, err
+		}
+		if !authorized {
+			return nil, "", false, errCreateAbsenceAwaitingReconfirm(node.NodeID)
+		}
+		if _, err := b.markReleased(ctx, node.WorkspaceKey, node.NodeID, ReleaseFence{Generation: node.Placement.Generation}, domain.PlacementReleaseReasonCreateConfirmedAbsent); err != nil {
 			return nil, "", false, err
 		}
 		return nil, "", true, nil
 	}
-	recorded, err := b.recordSandboxID(ctx, node, recoveredID)
+	recorded, err := b.recordSandboxID(ctx, node, sandbox.ID)
 	if err != nil {
-		return nil, "", false, fmt.Errorf("record recovered sandbox id %q for placement %q: %w", recoveredID, node.NodeID, err)
+		return nil, "", false, fmt.Errorf("record recovered sandbox id %q for placement %q: %w", sandbox.ID, node.NodeID, err)
 	}
-	return recorded, recoveredID, false, nil
+	return recorded, sandbox.ID, false, nil
 }
 
 // markLostResumeAbsent marks the placement lost after a resume step confirmed

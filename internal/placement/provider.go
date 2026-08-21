@@ -63,6 +63,10 @@ var ErrPtySessionAlreadyExists = errors.New("placement: pty session already exis
 type Provider interface {
 	Create(context.Context, CreateRequest) (CreateResult, error)
 	Get(context.Context, string) (ProviderSandbox, error)
+	// FindByName resolves a sandbox by the caller-supplied CreateRequest.Name
+	// via an authoritative point read (never an eventually-consistent list).
+	// Providers return ErrSandboxNotFound when no sandbox has the name.
+	FindByName(context.Context, string) (ProviderSandbox, error)
 	EnsureRunning(context.Context, string) (bool, error)
 	ListManaged(context.Context, map[string]string) ([]ProviderSandbox, error)
 	Delete(context.Context, string) error
@@ -86,18 +90,53 @@ type ResourceSize struct {
 
 // CreateRequest is the provider-neutral sandbox creation request.
 type CreateRequest struct {
-	WorkspaceKey           string
-	AgentName              string
-	SnapshotRef            string
+	WorkspaceKey string
+	AgentName    string
+	SnapshotRef  string
+	// Name is a stable, collision-resistant provider-side sandbox name derived
+	// from the placement identity. Providers that support caller-supplied names
+	// must send it so an ambiguous create can later be reconciled with an
+	// authoritative FindByName point read instead of an eventually-consistent
+	// label list.
+	Name                   string
 	Labels                 map[string]string
 	Env                    map[string]string
 	Resource               ResourceSize
 	NetworkDomainAllowlist []string
 }
 
-// CreateResult returns the provider's sandbox identity.
+// CreateOutcome classifies how far a Create call provably got. It exists so
+// the broker can distinguish "no sandbox can exist" from "a sandbox may exist
+// even though the call errored" — releasing a placement in the second case
+// severs the only record of a possibly-billing sandbox.
+type CreateOutcome string
+
+const (
+	// CreateOutcomeUnknown is the fail-closed default: the request may have
+	// reached the provider, so a sandbox may exist. The zero value ("") must
+	// be treated exactly like CreateOutcomeUnknown everywhere.
+	CreateOutcomeUnknown CreateOutcome = "unknown"
+	// CreateOutcomeNotDispatched asserts the request provably never left the
+	// process (for example local payload validation failed), so no sandbox can
+	// exist. Providers must only return it for failures before any network I/O.
+	CreateOutcomeNotDispatched CreateOutcome = "not_dispatched"
+	// CreateOutcomeCreated asserts the provider acknowledged the sandbox and
+	// returned its identity.
+	CreateOutcomeCreated CreateOutcome = "created"
+)
+
+// CreateResult returns the provider's sandbox identity and how far the create
+// provably got.
 type CreateResult struct {
 	SandboxID string
+	Outcome   CreateOutcome
+}
+
+// ProvablyNotDispatched reports whether the provider asserted no sandbox can
+// exist. Every other outcome — including the zero value — is ambiguous and
+// must be treated as "a sandbox may exist".
+func (r CreateResult) ProvablyNotDispatched() bool {
+	return r.Outcome == CreateOutcomeNotDispatched
 }
 
 // LeadBootPrep is the purpose-scoped pre-PTY materialization request for an

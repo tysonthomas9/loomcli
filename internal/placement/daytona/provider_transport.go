@@ -22,6 +22,12 @@ func (p *Provider) createPayload(req placement.CreateRequest) (*apiclient.Create
 	payload.SetSnapshot(p.snapshotLookupName(req.SnapshotRef))
 	payload.SetLabels(cleanMap(req.Labels))
 	payload.SetEnv(sandboxEnv(req.Env))
+	// The caller-supplied name is Daytona's uniqueness anchor: it persists
+	// atomically with the create, so an ambiguous create can be reconciled by
+	// an authoritative GetSandbox-by-name point read.
+	if name := strings.TrimSpace(req.Name); name != "" {
+		payload.SetName(name)
+	}
 	if p.target != "" {
 		payload.SetTarget(p.target)
 	}

@@ -193,13 +193,19 @@ func prepHTTPClient(base *http.Client) *http.Client {
 // Create creates a Daytona sandbox from a snapshot. Labels, resource sizing,
 // environment, and domain allowlist are sent in this create call because Daytona
 // cannot safely apply them afterwards.
+//
+// Outcome classification is fail-closed: only a local payload-validation
+// failure is NotDispatched. Every Execute error is Unknown because the SDK
+// cannot distinguish a request that never reached Daytona from one whose
+// response was lost after the sandbox was created — treating the second as
+// "no sandbox" is exactly the billing leak the broker guards against.
 func (p *Provider) Create(ctx context.Context, req placement.CreateRequest) (placement.CreateResult, error) {
 	ctx, cancel := p.withDefaultTimeout(ctx)
 	defer cancel()
 
 	payload, err := p.createPayload(req)
 	if err != nil {
-		return placement.CreateResult{}, err
+		return placement.CreateResult{Outcome: placement.CreateOutcomeNotDispatched}, err
 	}
 
 	apiReq := p.apiClient.SandboxAPI.CreateSandbox(p.authContext(ctx)).CreateSandbox(*payload)
@@ -208,17 +214,29 @@ func (p *Provider) Create(ctx context.Context, req placement.CreateRequest) (pla
 	}
 	sandbox, httpResp, err := apiReq.Execute()
 	if err != nil {
-		return placement.CreateResult{}, fmt.Errorf("daytona create sandbox: %w", convertAPIError(err, httpResp))
+		return placement.CreateResult{Outcome: placement.CreateOutcomeUnknown}, fmt.Errorf("daytona create sandbox: %w", convertAPIError(err, httpResp))
 	}
 
-	result := placement.CreateResult{SandboxID: strings.TrimSpace(sandbox.GetId())}
+	result := placement.CreateResult{SandboxID: strings.TrimSpace(sandbox.GetId()), Outcome: placement.CreateOutcomeCreated}
 	if result.SandboxID == "" {
+		result.Outcome = placement.CreateOutcomeUnknown
 		return result, fmt.Errorf("daytona create sandbox returned empty id")
 	}
 	if err := p.waitForStarted(ctx, sandbox); err != nil {
 		return result, err
 	}
 	return result, nil
+}
+
+// FindByName resolves a sandbox by its caller-supplied name. Daytona's
+// GetSandbox endpoint accepts an id or a name and performs a direct repository
+// lookup, so this is authoritative — unlike the eventually-consistent list.
+func (p *Provider) FindByName(ctx context.Context, name string) (placement.ProviderSandbox, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return placement.ProviderSandbox{}, fmt.Errorf("daytona sandbox name required")
+	}
+	return p.Get(ctx, name)
 }
 
 // Get performs a Daytona point read. It never falls back to list filtering.
