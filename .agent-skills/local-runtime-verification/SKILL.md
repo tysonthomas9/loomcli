@@ -151,10 +151,23 @@ Every final result must include:
 5. Fixture mutations and verified restoration, if any.
 6. Verifier output, failures, mismatches, and evidence gaps.
 7. Cleanup outcome, including the exact project torn down or an explicit reason
-   it remains running.
+   it remains running, plus the retained evidence-root path.
 
 Never summarize a deterministic run as real-agent proof, a stale bundle as UI
 proof, or an agent narrative as terminal-confirmed evidence.
+
+## Evidence Retention
+
+Runtime cleanup and evidence retention are separate operations. Before teardown,
+write the final ledger, command outcomes, hashes, screenshots, and API/browser
+observations under `/tmp/loom-local-runtime/<RUN_NAME>/`. After teardown, keep
+that evidence root intact and report its path to the user. Do not delete it
+until the user has received the handoff or explicitly asks to discard it.
+
+It is fine to remove only the browser profile and other disposable resources
+created by the run after their paths and relevant artifacts have been recorded
+in the retained ledger. If an artifact is too large or sensitive to retain,
+record its hash, size, reason for removal, and the removal time in the ledger.
 
 ## Cleanup
 
@@ -167,6 +180,7 @@ LOCAL_MODE_COMPOSE_FILES='<same override files>' \
 make local-mode-down
 ```
 
-Then confirm that only containers, listeners, profiles, and temporary files
-created by this run were removed. Never prune globally, remove foreign
-volumes, or terminate an unknown process.
+Then confirm that only containers, listeners, profiles, and disposable runtime
+files created by this run were removed. Retain the evidence root described
+above. Never prune globally, remove foreign volumes, or terminate an unknown
+process.
