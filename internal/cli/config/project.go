@@ -263,7 +263,7 @@ func loadDaemonConfigFromStore(ctx context.Context, st store.Store, wsKey string
 		dc.Agents = append(dc.Agents, agentEntryFromDomain(agent))
 	}
 
-	if err := validateAgents(dc.Agents, dc.Daemon.MaxAgents, dc.Roles); err != nil {
+	if err := validateAgents(dc.Agents, dc.Daemon.MaxAgents); err != nil {
 		return nil, err
 	}
 	if err := ValidateAgentRepos(dc.Agents); err != nil {
@@ -394,7 +394,7 @@ func cloneFloatPtr(v *float64) *float64 {
 }
 
 // validateAgents checks that agent entries and max_agents limits are valid.
-func validateAgents(agents []AgentEntry, maxAgents *int, roles map[string]RoleConfig) error {
+func validateAgents(agents []AgentEntry, maxAgents *int) error {
 	for i, a := range agents {
 		if a.Worktree == "" {
 			return fmt.Errorf("agent[%d]: worktree is required", i)
@@ -411,15 +411,16 @@ func validateAgents(agents []AgentEntry, maxAgents *int, roles map[string]RoleCo
 	if maxAgents != nil && *maxAgents < 0 {
 		return fmt.Errorf("max_agents must be non-negative, got %d", *maxAgents)
 	}
-	runnable := 0
-	for _, a := range agents {
-		if a.ShouldSuperviseWithRoles(roles) {
-			runnable++
-		}
-	}
-	if maxAgents != nil && *maxAgents > 0 && runnable > *maxAgents {
-		return fmt.Errorf("too many runnable agents configured: %d exceeds max_agents limit of %d", runnable, *maxAgents)
-	}
+	// max_agents is deliberately NOT enforced here. This was its only
+	// enforcement, and validating it during config load made the cap a poison
+	// pill for the entire snapshot: the daemon exited at boot, and on a
+	// periodic reload the reconciler kept the stale config and stopped applying
+	// every later change while still reporting healthy. The count also crosses
+	// the threshold from paths no creation-time guard can see — lowering the
+	// cap, changing an agent's desired state or role, or flipping a role from
+	// interactive to worker. Enforcing an aggregate cap belongs at process
+	// admission alongside the per-role limits in supervisor.ConcurrencyTracker,
+	// where exceeding it blocks a start instead of invalidating the config.
 	return nil
 }
 
