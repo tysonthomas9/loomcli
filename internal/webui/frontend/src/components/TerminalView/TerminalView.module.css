@@ -80,6 +80,76 @@
   font-size: var(--font-sm);
 }
 
+/* Clean lead-terminal state card: a status badge over one line of guidance. */
+.leadState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3, 12px);
+  padding: var(--space-6, 24px);
+  max-width: 46ch;
+  text-align: center;
+}
+
+.leadStateBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2, 8px);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--font-sm, 13px);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 5px 14px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+}
+
+.leadStateDetail {
+  color: var(--terminal-text-muted, #9aa4b2);
+  font-size: var(--font-sm, 13px);
+  line-height: 1.5;
+}
+
+.leadStateInfo {
+  background: color-mix(in srgb, #3b82f6 16%, transparent);
+  color: #93c5fd;
+  border-color: color-mix(in srgb, #3b82f6 45%, transparent);
+}
+
+.leadStateWarn {
+  background: color-mix(in srgb, #f59e0b 16%, transparent);
+  color: #fcd34d;
+  border-color: color-mix(in srgb, #f59e0b 45%, transparent);
+}
+
+.leadStateNeutral {
+  background: color-mix(in srgb, #94a3b8 16%, transparent);
+  color: #cbd5e1;
+  border-color: color-mix(in srgb, #94a3b8 40%, transparent);
+}
+
+.leadStateSpinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: leadStateSpin 0.7s linear infinite;
+}
+
+@keyframes leadStateSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .leadStateSpinner {
+    animation: none;
+  }
+}
+
 .cliSetupBanner {
   display: grid;
   grid-template-columns: 8px minmax(0, 1fr) auto;

@@ -1147,9 +1147,38 @@ describe("TerminalView", () => {
       );
 
       expect(
-        await screen.findByText("Lead sandbox is waking up…"),
+        await screen.findByTestId("lead-sandbox-waking"),
       ).toBeInTheDocument();
+      expect(screen.getByTestId("lead-sandbox-state-badge")).toHaveTextContent(
+        "Provisioning",
+      );
       expect(onConsumed).not.toHaveBeenCalled();
+    });
+
+    it("shows the truthful runtime status label instead of the raw error", async () => {
+      setMetadata(DEFAULT_METADATA);
+      const onConsumed = vi.fn();
+      mockTerminalApi.ensureAgentTerminalSession.mockRejectedValueOnce(
+        new ApiError(503, "Service Unavailable", {
+          error: "Lead sandbox is waking up…",
+          kind: "starting",
+        }),
+      );
+
+      render(
+        <TerminalView
+          hideTabs
+          pendingAgentName="fox"
+          onAgentNameConsumed={onConsumed}
+          leadRuntimeStatus="lost"
+        />,
+      );
+
+      // runtime_status wins over the resolution phase: the sandbox is provably
+      // lost, so the card reads "Sandbox lost" — never the backend error string.
+      expect(
+        await screen.findByTestId("lead-sandbox-state-badge"),
+      ).toHaveTextContent("Sandbox lost");
     });
 
     it("shows a failure when the waking retry budget is exhausted", async () => {
@@ -1184,8 +1213,9 @@ describe("TerminalView", () => {
       expect(mockTerminalApi.ensureAgentTerminalSession).toHaveBeenCalledTimes(
         11,
       );
-      expect(screen.getByTestId("lead-sandbox-failed")).toHaveTextContent(
-        "Lead sandbox did not become ready. Try opening the agent again.",
+      expect(screen.getByTestId("lead-sandbox-failed")).toBeInTheDocument();
+      expect(screen.getByTestId("lead-sandbox-state-badge")).toHaveTextContent(
+        "Unavailable",
       );
       expect(onConsumed).not.toHaveBeenCalled();
       backoffSpy.mockRestore();

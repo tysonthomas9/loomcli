@@ -78,6 +78,12 @@ interface TerminalViewProps {
   hideTabs?: boolean;
   /** Called when hideTabs is true so the parent can render split controls. */
   onSplitControlsChange?: (controls: TerminalSplitControls | null) => void;
+  /**
+   * Truthful lead runtime status (from the agent's runtime_status projection).
+   * Drives the clean state card shown while a lead terminal is resolving or
+   * has failed to attach, instead of surfacing the raw backend error string.
+   */
+  leadRuntimeStatus?: string | undefined;
 }
 
 interface CliSetupGuide extends CliSetupRequest {
@@ -122,6 +128,120 @@ function setupInstructionsFromResult(
   return instructions;
 }
 
+type LeadStateTone = "info" | "warn" | "neutral";
+
+/**
+ * Clean, human display for each truthful lead runtime status. The terminal
+ * shows THIS card (a short badge + one line of guidance) while a lead is
+ * resolving or failed to attach — never the raw backend error string.
+ */
+const LEAD_RUNTIME_STATE: Record<
+  string,
+  { label: string; tone: LeadStateTone; detail: string }
+> = {
+  provisioning: {
+    label: "Provisioning",
+    tone: "info",
+    detail: "The lead sandbox is starting up. This can take a moment.",
+  },
+  releasing: {
+    label: "Releasing",
+    tone: "info",
+    detail: "The previous sandbox is being released.",
+  },
+  not_provisioned: {
+    label: "Not provisioned",
+    tone: "neutral",
+    detail: "This lead has no sandbox yet. Start the lead to provision one.",
+  },
+  degraded: {
+    label: "Degraded",
+    tone: "warn",
+    detail: "The sandbox is up but the lead process isn't ready yet.",
+  },
+  lost: {
+    label: "Sandbox lost",
+    tone: "warn",
+    detail:
+      "The sandbox went away and is being released automatically. Start the lead to get a fresh one.",
+  },
+  released: {
+    label: "Released",
+    tone: "warn",
+    detail:
+      "The lead's sandbox was released. Start the lead to provision a fresh one.",
+  },
+};
+
+const LEAD_TONE_CLASS: Record<LeadStateTone, string | undefined> = {
+  info: styles.leadStateInfo,
+  warn: styles.leadStateWarn,
+  neutral: styles.leadStateNeutral,
+};
+
+/**
+ * Resolve the state card to show. A known runtime_status always wins (it is the
+ * truthful signal). When it is absent/unknown, fall back to the resolution
+ * phase: "waking" is an active retry (provisioning-like), "failed" is terminal.
+ */
+function leadRuntimeStateView(
+  resolution: "waking" | "failed",
+  runtimeStatus: string | undefined,
+): { label: string; tone: LeadStateTone; detail: string; busy: boolean } {
+  const busy = resolution === "waking";
+  const known = runtimeStatus ? LEAD_RUNTIME_STATE[runtimeStatus] : undefined;
+  if (known) {
+    return { ...known, busy };
+  }
+  return busy
+    ? {
+        label: "Provisioning",
+        tone: "info",
+        detail: "The lead sandbox is starting up. This can take a moment.",
+        busy,
+      }
+    : {
+        label: "Unavailable",
+        tone: "warn",
+        detail: "The lead sandbox isn't ready. Start the lead and try again.",
+        busy,
+      };
+}
+
+/** Clean lead-terminal state card: a status badge plus one line of guidance. */
+function LeadRuntimeStateCard({
+  resolution,
+  runtimeStatus,
+}: {
+  resolution: "waking" | "failed";
+  runtimeStatus?: string | undefined;
+}): JSX.Element {
+  const view = leadRuntimeStateView(resolution, runtimeStatus);
+  const failed = resolution === "failed";
+  return (
+    <div
+      className={styles.leadWaking}
+      role={failed ? "alert" : "status"}
+      data-testid={failed ? "lead-sandbox-failed" : "lead-sandbox-waking"}
+    >
+      <div className={styles.leadState}>
+        <span
+          className={[styles.leadStateBadge, LEAD_TONE_CLASS[view.tone]]
+            .filter(Boolean)
+            .join(" ")}
+          data-testid="lead-sandbox-state-badge"
+        >
+          {view.busy && (
+            <span className={styles.leadStateSpinner} aria-hidden="true" />
+          )}
+          {view.label}
+        </span>
+        <span className={styles.leadStateDetail}>{view.detail}</span>
+      </div>
+    </div>
+  );
+}
+
 export function TerminalView({
   isActive = true,
   pendingIssueContext,
@@ -136,6 +256,7 @@ export function TerminalView({
   onAgentNameConsumed,
   hideTabs = false,
   onSplitControlsChange,
+  leadRuntimeStatus,
 }: TerminalViewProps): JSX.Element {
   const [tabs, setTabs] = useState<TabState[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>("");
@@ -249,21 +370,20 @@ export function TerminalView({
 
   // Hook ordering: useSessionSeeding before useConnectionState so
   // trySeedOnConnect is available as the onTabConnected callback.
-  const { trySeedOnConnect, agentResolutionState, agentResolutionError } =
-    useSessionSeeding({
-      pendingIssueContext,
-      onIssueContextConsumed,
-      pendingAgentName,
-      onAgentNameConsumed,
-      tabs,
-      setTabs,
-      setActiveTabId,
-      createTab,
-      config: config ?? undefined,
-      initializedRef,
-      tabsRef,
-      workspaceIdRef,
-    });
+  const { trySeedOnConnect, agentResolutionState } = useSessionSeeding({
+    pendingIssueContext,
+    onIssueContextConsumed,
+    pendingAgentName,
+    onAgentNameConsumed,
+    tabs,
+    setTabs,
+    setActiveTabId,
+    createTab,
+    config: config ?? undefined,
+    initializedRef,
+    tabsRef,
+    workspaceIdRef,
+  });
 
   const {
     tabHasConnected,
@@ -841,23 +961,14 @@ export function TerminalView({
   const containerClassName = styles.container;
   return (
     <div className={containerClassName} data-testid="terminal-view">
-      {hideTabs && pendingAgentName && agentResolutionState === "waking" ? (
-        <div
-          className={styles.leadWaking}
-          role="status"
-          data-testid="lead-sandbox-waking"
-        >
-          Lead sandbox is waking up…
-        </div>
-      ) : hideTabs && pendingAgentName && agentResolutionState === "failed" ? (
-        <div
-          className={styles.leadWaking}
-          role="alert"
-          data-testid="lead-sandbox-failed"
-        >
-          {agentResolutionError ??
-            "Lead sandbox did not become ready. Try opening the agent again."}
-        </div>
+      {hideTabs &&
+      pendingAgentName &&
+      (agentResolutionState === "waking" ||
+        agentResolutionState === "failed") ? (
+        <LeadRuntimeStateCard
+          resolution={agentResolutionState}
+          runtimeStatus={leadRuntimeStatus}
+        />
       ) : (metaLoading || configLoading) && visibleTabs.length === 0 ? (
         <LoadingSkeleton.Terminal />
       ) : visibleTabs.length === 0 ? (
