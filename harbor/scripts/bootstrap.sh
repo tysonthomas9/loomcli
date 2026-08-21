@@ -227,7 +227,9 @@ if [ "$TEAM" = "off" ]; then
 else
   while IFS=$'\t' read -r agent role lane prompt_id wt branch; do
     override="${LOOM_MARATHON_PROMPTS_DIR:-$MH/prompts}/${prompt_id}-override.md"
-    [ -f "$override" ] || die "no override for $prompt_id"
+    # Team overrides ship only in prompts-generic; tolerate the default profile.
+    [ -f "$override" ] || override="$MH/prompts-generic/${prompt_id}-override.md"
+    [ -f "$override" ] || die "no override for $prompt_id (looked in ${LOOM_MARATHON_PROMPTS_DIR:-$MH/prompts} and $MH/prompts-generic)"
     mkdir -p "$wt/loom-prompts"
     cp "$override" "$wt/loom-prompts/$prompt_id.md"
     if [ ! -f "$wt/.gitignore" ] || ! grep -q '^loom-prompts/' "$wt/.gitignore" 2>/dev/null; then

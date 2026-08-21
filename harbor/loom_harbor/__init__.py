@@ -83,6 +83,16 @@ class LoomAgent(BaseInstalledAgent):
                 "team mode requires max_agents >= 4; the fullstack bundle has "
                 "4 runnable agents"
             )
+        # The team arm's prompts (lead-persistent-team.md and the four
+        # team-*-override.md worker prompts) live only in prompts-generic;
+        # the default profile would fail bootstrap ("no override for ...").
+        if self._team != "off":
+            if self._prompts_profile == "default":
+                self._prompts_profile = "generic"
+            elif self._prompts_profile != "generic":
+                raise ValueError(
+                    f"team mode requires prompts_profile=generic (got {self._prompts_profile!r})"
+                )
 
     @staticmethod
     @override
