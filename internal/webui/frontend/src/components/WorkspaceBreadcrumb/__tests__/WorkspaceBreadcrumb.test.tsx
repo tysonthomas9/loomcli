@@ -119,6 +119,7 @@ describe("WorkspaceBreadcrumb", () => {
 
   describe("view labels", () => {
     const viewLabelMap: Record<ViewMode, string> = {
+      home: "Home",
       kanban: "Loom Project",
       table: "List",
       graph: "Graph",

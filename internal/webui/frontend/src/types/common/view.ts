@@ -9,6 +9,7 @@
  * Available view modes.
  */
 export type ViewMode =
+  | "home"
   | "kanban"
   | "list"
   | "table"
@@ -27,4 +28,4 @@ export type ViewMode =
 /**
  * Default view when none is specified.
  */
-export const DEFAULT_VIEW: ViewMode = "kanban";
+export const DEFAULT_VIEW: ViewMode = "home";

@@ -73,3 +73,4 @@ export * from "./KeyboardCheatsheet";
 export * from "./LoginPage";
 export * from "./UserMenu";
 export * from "./IssueViewGuard";
+export * from "./OperatorQueue";

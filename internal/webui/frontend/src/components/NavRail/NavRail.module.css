@@ -248,6 +248,27 @@
   animation: badgePop 0.15s ease-out;
 }
 
+.queueBadge {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--color-text-inverse);
+  pointer-events: none;
+  background: var(--color-warning);
+  border-radius: var(--radius-full);
+  box-shadow: 0 0 0 2px var(--color-bg-secondary);
+  animation: badgePop 0.15s ease-out;
+}
+
 .unreadIndicator {
   position: absolute;
   top: -1px;

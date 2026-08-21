@@ -943,7 +943,7 @@ describe("App", () => {
     });
     // Set up default store state for issue store selectors
     mockStoreState = createMockUseIssuesReturn({});
-    // Set up default useRouteView mock (kanban is the default view)
+    // Keep board-focused App tests on Kanban unless a case selects another view.
     mockUseRouteView.mockReturnValue(createViewStateReturn("kanban"));
     vi.mocked(useFilterState).mockReturnValue([
       {},
@@ -2316,6 +2316,17 @@ describe("App", () => {
   });
 
   describe("fetchIssues mode parameter based on activeView", () => {
+    it('calls fetchIssues with mode: "kanban" when activeView is "home"', () => {
+      mockStoreState = createMockUseIssuesReturn({});
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("home"));
+
+      render(<App />);
+
+      expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "kanban" }),
+      );
+    });
+
     it('calls fetchIssues with mode: "kanban" when activeView is "kanban"', () => {
       mockStoreState = createMockUseIssuesReturn({});
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("kanban"));
@@ -2441,6 +2452,24 @@ describe("App", () => {
       expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
         expect.objectContaining({ mode: "ready" }),
       );
+    });
+  });
+
+  describe("operator queue navigation badge", () => {
+    it("derives the Home badge from the shared issue collection", () => {
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [
+          createMockIssue({
+            id: "blocked-1",
+            status: "blocked",
+            notes: "BLOCKED: waiting for access",
+          }),
+        ],
+      });
+
+      render(<App />);
+
+      expect(screen.getByTestId("nav-home-badge")).toHaveTextContent("1");
     });
   });
 
@@ -3910,7 +3939,7 @@ describe("App", () => {
       ).not.toBeInTheDocument();
       expect(
         screen.getByRole("button", {
-          name: "Loom home — return to Kanban board",
+          name: "Loom home",
         }),
       ).toBeInTheDocument();
     });
