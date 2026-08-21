@@ -119,10 +119,7 @@ function GitBranchIcon(): JSX.Element {
 
 export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
   const { workspaceId } = useWorkspaceContext();
-  const {
-    status: gitStatus,
-    error: gitError,
-  } = useGitStatus({
+  const { status: gitStatus, error: gitError } = useGitStatus({
     agentName: agent.name,
     enabled: isActive ?? true,
   });

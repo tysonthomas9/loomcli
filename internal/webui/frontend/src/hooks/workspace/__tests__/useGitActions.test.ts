@@ -228,7 +228,9 @@ describe("useGitActions", () => {
             filters,
           ): filters is {
             predicate: (query: { queryKey: readonly unknown[] }) => boolean;
-          } => typeof (filters as { predicate?: unknown }).predicate === "function",
+          } =>
+            typeof (filters as { predicate?: unknown }).predicate ===
+            "function",
         );
       expect(predicateFilter).toBeDefined();
       if (!predicateFilter) throw new Error("predicate filter not captured");

@@ -121,9 +121,7 @@ describe("Toast", () => {
 
     it("renders a custom action label when provided", () => {
       const onUndo = vi.fn();
-      render(
-        <Toast {...defaultProps} onUndo={onUndo} actionLabel="Retry" />,
-      );
+      render(<Toast {...defaultProps} onUndo={onUndo} actionLabel="Retry" />);
 
       expect(screen.getByLabelText("Retry action")).toHaveTextContent("Retry");
     });

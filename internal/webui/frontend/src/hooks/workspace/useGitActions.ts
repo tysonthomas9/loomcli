@@ -87,9 +87,7 @@ function isAgentFileGitStatusQuery(
   if (!queryKeyStartsWith(queryKey, prefix)) return false;
   const ref = queryKey[prefix.length];
   return (
-    isRecord(ref) &&
-    ref.scope === "agent" &&
-    ref.target === agentName.trim()
+    isRecord(ref) && ref.scope === "agent" && ref.target === agentName.trim()
   );
 }
 

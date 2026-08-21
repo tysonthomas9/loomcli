@@ -106,27 +106,31 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 		return nil, err
 	}
 	existing := selectAgentTerminalTab(tabs, agentName)
-	if existing != nil && existing.PTYAlive {
-		// Cache-validity check: if the agent's effective backend/role has
-		// changed since the existing tab was built, the cached launch spec
-		// is stale (e.g. agent was created with no backend, workspace
-		// default was codex, then user set agent.backend = claude). The
-		// running PTY is still on the old backend. Rebuild a candidate
-		// spec and compare argv; if they differ, fall through to the
-		// rebuild path which will issue a fresh tab metadata. The stale
-		// PTY is killed by svc.PutTab → reattach when the user reloads.
-		stale := existing.Launch == nil
-		if !stale {
-			stale = agentTerminalLaunchSpecStaleResolved(workspace, existing, agent, role, resolveBackend(agent))
-		}
-		if !stale {
-			return existing, nil
-		}
+	if maybeReuseExistingAgentTerminalTab(workspace, existing, agent, role, resolveBackend) {
+		return existing, nil
 	}
 	if !agentTerminalLaunchAllowed(agent, roleKind) {
 		return inactiveAgentTerminalSession(ctx, svc, workspace, existing)
 	}
 
+	return rebuildAgentTerminalTab(ctx, svc, st, workspace, agentName, tabs, existing, agent, roleKind, role, resolveBackend)
+}
+
+// rebuildAgentTerminalTab builds a fresh launch spec for the agent, persists the
+// resulting terminal tab (replacing any stale one), prunes superseded tabs, and
+// returns the persisted metadata.
+func rebuildAgentTerminalTab(
+	ctx context.Context,
+	svc service.TerminalService,
+	st store.Store,
+	workspace, agentName string,
+	tabs []tabmeta.TabMetadata,
+	existing *tabmeta.TabMetadata,
+	agent *domain.Agent,
+	roleKind domain.RoleKind,
+	role *domain.Role,
+	resolveBackend func(*domain.Agent) string,
+) (*tabmeta.TabMetadata, error) {
 	sessionName, label, sortOrder := newAgentTerminalTabPlacement(tabs, existing, agentName)
 	agentForLaunch, orchestratorID, err := ensureTerminalOrchestratorLink(ctx, st, workspace, sessionName, agent, roleKind)
 	if err != nil {
@@ -143,6 +147,26 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 	}
 	pruneStaleAgentTerminalTabs(ctx, svc, workspace, agentName, sessionName, tabs)
 	return svc.GetTab(ctx, workspace, sessionName)
+}
+
+// maybeReuseExistingAgentTerminalTab reports whether the existing live PTY tab
+// can be returned as-is. Cache-validity check: if the agent's effective
+// backend/role has changed since the tab was built (e.g. agent created with no
+// backend, workspace default codex, then user set agent.backend = claude), the
+// cached launch spec is stale and the running PTY is still on the old backend;
+// callers fall through to the rebuild path, which issues fresh tab metadata (the
+// stale PTY is killed by svc.PutTab → reattach when the user reloads).
+func maybeReuseExistingAgentTerminalTab(
+	workspace string,
+	existing *tabmeta.TabMetadata,
+	agent *domain.Agent,
+	role *domain.Role,
+	resolveBackend func(*domain.Agent) string,
+) bool {
+	if existing == nil || !existing.PTYAlive || existing.Launch == nil {
+		return false
+	}
+	return !agentTerminalLaunchSpecStaleResolved(workspace, existing, agent, role, resolveBackend(agent))
 }
 
 // agentTerminalLaunchSpecStaleResolved returns true when the existing tab's cached

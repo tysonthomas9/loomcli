@@ -75,10 +75,7 @@ describe("useExpandedCommits", () => {
         { hash: "abcdef1", message: "Add query cache" },
       ]);
     });
-    expect(mockApi.fetchDiffCommits).toHaveBeenCalledWith(
-      "test-ws-id",
-      "nova",
-    );
+    expect(mockApi.fetchDiffCommits).toHaveBeenCalledWith("test-ws-id", "nova");
   });
 
   it("uses the shared diffCommits query key", async () => {
