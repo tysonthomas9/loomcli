@@ -17,6 +17,8 @@ export interface AgentServiceBindingDTO {
   timezone?: string;
   enabled: boolean;
   routeKey: string;
+  /** Actor behind the binding's last edit, stamped server-side. */
+  updatedBy?: string;
 }
 
 export interface InstantiableScriptedRoleDTO {

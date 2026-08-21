@@ -123,6 +123,10 @@ type agentServiceBindingDTO struct {
 	Timezone   string `json:"timezone"`
 	Enabled    bool   `json:"enabled"`
 	RouteKey   string `json:"routeKey"`
+	// UpdatedBy names the actor behind the binding's last edit, so a changed
+	// schedule or a paused binding is attributable in the panel rather than
+	// only in fleet-db.
+	UpdatedBy string `json:"updatedBy,omitempty"`
 }
 
 type createAgentServiceRequest struct {
@@ -461,6 +465,7 @@ func decorateAgentServiceBindings(out *agentServiceDTO, bindings []*domain.Trigg
 		out.Bindings = append(out.Bindings, agentServiceBindingDTO{
 			ID: binding.BindingID, SourceKind: binding.SourceKind, Schedule: binding.Schedule,
 			Timezone: binding.ScheduleTimezone, Enabled: binding.Enabled, RouteKey: binding.RouteKey,
+			UpdatedBy: binding.UpdatedBy,
 		})
 		if !binding.Enabled || binding.SourceKind != trigger.CronSourceKind || strings.TrimSpace(binding.Schedule) == "" {
 			continue
