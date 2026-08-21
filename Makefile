@@ -609,7 +609,25 @@ check-frontend: ensure-frontend-deps
 # Unified quality gate — runs Go + frontend checks in parallel
 check:
 	@echo "=== Running Go and Frontend checks in parallel ==="
-	@go_log=$$(mktemp); fe_log=$$(mktemp); \
+	@go_log=$$(mktemp); fe_log=$$(mktemp); go_pid=; fe_pid=; \
+	terminate_tree() { \
+		target_pid="$$1"; \
+		for child_pid in $$(pgrep -P "$$target_pid" 2>/dev/null || true); do \
+			terminate_tree "$$child_pid"; \
+		done; \
+		kill -TERM "$$target_pid" 2>/dev/null || true; \
+	}; \
+	cleanup() { \
+		status=$$?; \
+		trap - EXIT HUP INT TERM; \
+		if [ -n "$$go_pid" ]; then terminate_tree "$$go_pid"; fi; \
+		if [ -n "$$fe_pid" ]; then terminate_tree "$$fe_pid"; fi; \
+		wait "$$go_pid" 2>/dev/null || true; \
+		wait "$$fe_pid" 2>/dev/null || true; \
+		rm -f "$$go_log" "$$fe_log"; \
+		exit "$$status"; \
+	}; \
+	trap cleanup EXIT; trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM; \
 	$(MAKE) check-go >"$$go_log" 2>&1 & go_pid=$$!; \
 	$(MAKE) check-frontend >"$$fe_log" 2>&1 & fe_pid=$$!; \
 	go_rc=0; fe_rc=0; \
@@ -622,12 +640,10 @@ check:
 		if [ $$fe_rc -ne 0 ]; then \
 			echo ""; echo "━━━ Frontend output (FAILED) ━━━"; cat "$$fe_log"; \
 		fi; \
-		rm -f "$$go_log" "$$fe_log"; \
 		exit 1; \
 	fi; \
 	echo "=== Go quality gates PASSED ==="; \
-	echo "=== Frontend quality gates PASSED ==="; \
-	rm -f "$$go_log" "$$fe_log"
+	echo "=== Frontend quality gates PASSED ==="
 	@echo "=== All quality gates PASSED ==="
 
 # Backward-compatible alias for 'make check'

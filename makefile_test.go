@@ -508,6 +508,29 @@ func TestMakefileCheckFrontendUsesTestCoverage(t *testing.T) {
 	}
 }
 
+func TestMakefileCheckCleansUpParallelChildren(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(repoRoot(t) + "/Makefile")
+	if err != nil {
+		t.Fatalf("reading Makefile: %v", err)
+	}
+	content := string(data)
+
+	for _, needle := range []string{
+		"terminate_tree()",
+		"pgrep -P",
+		"trap cleanup EXIT",
+		"trap 'exit 129' HUP",
+		"trap 'exit 130' INT",
+		"trap 'exit 143' TERM",
+	} {
+		if !strings.Contains(content, needle) {
+			t.Errorf("Makefile check should clean up parallel children: missing %q", needle)
+		}
+	}
+}
+
 // TestViteConfigCoverageThresholds verifies that vite.config.ts sets all
 // four coverage threshold categories to 60.
 func TestViteConfigCoverageThresholds(t *testing.T) {
