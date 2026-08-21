@@ -557,7 +557,7 @@ func TestCompareRoleIgnoresFieldsTheBundleLeavesZero(t *testing.T) {
 		TaskFilter:    frontend.TaskFilter,
 		Effort:        frontend.Effort,
 		Skills:        []string{"ui", "frontend"},
-		ExcludeLabels: []string{"architect"},
+		ExcludeLabels: []string{"architect", "qa"},
 		// Untouched by the bundle:
 		Backend:      "claude",
 		PathPatterns: []string{"web/**"},
@@ -585,7 +585,7 @@ func TestCompareRoleFieldVocabulary(t *testing.T) {
 		Skills:        []string{"eval"},
 		ExcludeLabels: []string{"architect"},
 	}
-	want := []string{"kind", "description", "prompt_file", "task_filter", "effort", "skills", "exclude_labels", "max_budget_usd", "max_run_duration"}
+	want := []string{"kind", "description", "prompt_file", "effort", "skills", "labels", "exclude_labels", "max_budget_usd", "max_run_duration"}
 	got := compareRole(eval, existing)
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("fields = %v, want %v", got, want)

@@ -86,9 +86,9 @@ Commit meaningful partial work, run 'loom complete', and EXIT. Never proceed aga
 **Step 6b — The design is unviable** (it can proceed, but the data model must change):
 ```
 loom data update <id> --notes "NEEDS-REVISION: <what is wrong with the model + the concrete direction + evidence from the current schema>"
-loom data update <id> --status open --add-label needs-revision --assignee=""
+loom data update <id> --status open --add-label needs-revision --add-label architect --assignee ""
 ```
-Commit salvageable work, run 'loom complete', and EXIT.
+Adding both labels routes the task back to the architect. Commit salvageable work, run 'loom complete', and EXIT.
 
 ### Step 7: Deliver
 

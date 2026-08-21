@@ -85,9 +85,9 @@ Commit meaningful partial work, run 'loom complete', and EXIT.
 **Step 6b — The design is unviable** (it can proceed, but the design must change):
 ```
 loom data update <id> --notes "NEEDS-REVISION: <what is wrong + the concrete direction + evidence, including any eval numbers>"
-loom data update <id> --status open --add-label needs-revision --assignee=""
+loom data update <id> --status open --add-label needs-revision --add-label architect --assignee ""
 ```
-Commit salvageable work with new behavior disabled by default so it can be re-enabled later, run 'loom complete', and EXIT.
+Adding both labels routes the task back to the architect. Commit salvageable work with new behavior disabled by default so it can be re-enabled later, run 'loom complete', and EXIT.
 
 If you cannot tell which applies, prefer 6b.
 

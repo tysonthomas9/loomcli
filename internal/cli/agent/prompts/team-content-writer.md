@@ -83,9 +83,9 @@ Commit meaningful partial work, run 'loom complete', and EXIT.
 **Step 6b — The design is unviable** (the copy cannot work inside the design as specified):
 ```
 loom data update <id> --notes "NEEDS-REVISION: <where the copy and the layout collide + the concrete change needed>"
-loom data update <id> --status open --add-label needs-revision --assignee=""
+loom data update <id> --status open --add-label needs-revision --add-label architect --assignee ""
 ```
-Commit salvageable work, run 'loom complete', and EXIT. The design agent role adjusts the spec; you do not adjust the components.
+Adding both labels routes the task back to the architect. Commit salvageable work, run 'loom complete', and EXIT. The design agent role adjusts the spec; you do not adjust the components.
 
 ### Step 7: Deliver
 
