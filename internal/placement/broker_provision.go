@@ -287,6 +287,9 @@ func (b *Broker) resolveResumeSandbox(ctx context.Context, node *domain.Node) (*
 	}
 	sandbox, found, err := b.reconcileProviderIdentity(ctx, node)
 	if err != nil {
+		if errors.Is(err, domain.ErrConflict) {
+			b.markAttentionReasonBestEffort(ctx, node, err.Error())
+		}
 		return nil, "", false, err
 	}
 	if !found {

@@ -75,21 +75,27 @@ func TestNodeWirePlacementRoundTripAndOmit(t *testing.T) {
 	leadStarted := time.Date(2026, 8, 6, 13, 1, 0, 0, time.UTC)
 	provisioningDeadline := time.Date(2026, 8, 6, 13, 5, 0, 0, time.UTC)
 	nextDelete := time.Date(2026, 8, 6, 13, 10, 0, 0, time.UTC)
+	provisionAmbiguous := time.Date(2026, 8, 6, 13, 6, 0, 0, time.UTC)
+	createAbsence := time.Date(2026, 8, 6, 13, 7, 0, 0, time.UTC)
 	withPlacement := nodeWire{
 		WorkspaceKey:    "WS",
 		NodeID:          "node-1",
 		RuntimeProvider: domain.RuntimeProviderDaytona,
 		Placement: &domain.NodePlacement{
-			Generation:             7,
-			State:                  domain.PlacementStateProvisioning,
-			FirstAttachedAt:        &firstAttached,
-			LeadProcessStartedAt:   &leadStarted,
-			ProvisioningDeadlineAt: &provisioningDeadline,
-			SnapshotRef:            "snapshot-1",
-			AbandonedSandboxIDs:    []string{"abandoned-1"},
-			DeleteAttempts:         3,
-			LastDeleteError:        "still running",
-			NextDeleteAt:           nextDelete,
+			Generation:               7,
+			State:                    domain.PlacementStateProvisioning,
+			FirstAttachedAt:          &firstAttached,
+			LeadProcessStartedAt:     &leadStarted,
+			ProvisioningDeadlineAt:   &provisioningDeadline,
+			ProvisionAmbiguousAt:     &provisionAmbiguous,
+			ProvisionAmbiguityDetail: "connection reset before response",
+			CreateAbsenceConfirmedAt: &createAbsence,
+			AttentionReason:          "two labeled sandboxes",
+			SnapshotRef:              "snapshot-1",
+			AbandonedSandboxIDs:      []string{"abandoned-1"},
+			DeleteAttempts:           3,
+			LastDeleteError:          "still running",
+			NextDeleteAt:             nextDelete,
 		},
 	}
 	raw, err := json.Marshal(withPlacement)
@@ -122,6 +128,18 @@ func TestNodeWirePlacementRoundTripAndOmit(t *testing.T) {
 	if node.Placement.DeleteAttempts != 3 || node.Placement.LastDeleteError != "still running" || !node.Placement.NextDeleteAt.Equal(nextDelete) {
 		t.Fatalf("delete retry fields = %d/%q/%v, want 3/still running/%v",
 			node.Placement.DeleteAttempts, node.Placement.LastDeleteError, node.Placement.NextDeleteAt, nextDelete)
+	}
+	if node.Placement.ProvisionAmbiguousAt == nil || !node.Placement.ProvisionAmbiguousAt.Equal(provisionAmbiguous) {
+		t.Fatalf("ProvisionAmbiguousAt = %v, want %v", node.Placement.ProvisionAmbiguousAt, provisionAmbiguous)
+	}
+	if node.Placement.ProvisionAmbiguityDetail != "connection reset before response" {
+		t.Fatalf("ProvisionAmbiguityDetail = %q, want the create error round-tripped", node.Placement.ProvisionAmbiguityDetail)
+	}
+	if node.Placement.CreateAbsenceConfirmedAt == nil || !node.Placement.CreateAbsenceConfirmedAt.Equal(createAbsence) {
+		t.Fatalf("CreateAbsenceConfirmedAt = %v, want %v", node.Placement.CreateAbsenceConfirmedAt, createAbsence)
+	}
+	if node.Placement.AttentionReason != "two labeled sandboxes" {
+		t.Fatalf("AttentionReason = %q, want round-tripped", node.Placement.AttentionReason)
 	}
 
 	withoutPlacement := nodeWire{
