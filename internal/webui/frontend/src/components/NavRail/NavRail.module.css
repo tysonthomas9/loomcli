@@ -261,7 +261,8 @@
   font-size: 9px;
   font-weight: 700;
   line-height: 1;
-  color: var(--color-text-inverse);
+  /* Dark text on amber reads ≥8:1 in both themes; white reads 2.2:1 in light. */
+  color: #1a1a1a;
   pointer-events: none;
   background: var(--color-warning);
   border-radius: var(--radius-full);

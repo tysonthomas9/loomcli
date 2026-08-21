@@ -64,6 +64,9 @@ export type { UseIssueSearchReturn } from "./useIssueSearch";
 export { deriveOperatorQueue, useOperatorQueue } from "./useOperatorQueue";
 export type { OperatorQueueItem, OperatorQueueKind } from "./useOperatorQueue";
 
+export { derivePipeline, usePipelineCounts } from "./usePipelineCounts";
+export type { PipelineCounts } from "./usePipelineCounts";
+
 export { useIssueTabPersistence } from "./useIssueTabPersistence";
 export type { UseIssueTabPersistenceReturn } from "./useIssueTabPersistence";
 

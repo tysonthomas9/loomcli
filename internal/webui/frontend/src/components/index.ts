@@ -74,3 +74,6 @@ export * from "./LoginPage";
 export * from "./UserMenu";
 export * from "./IssueViewGuard";
 export * from "./OperatorQueue";
+export * from "./HomeRail";
+export * from "./HomeTopStrip";
+export * from "./RunningWithoutYou";

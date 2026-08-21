@@ -25,7 +25,6 @@ const mockActions = {
   refetch: vi.fn(),
   handleIssueClick: vi.fn(),
   showToast: vi.fn(() => "toast-id"),
-  updateIssueStatus: vi.fn().mockResolvedValue(undefined),
 };
 
 vi.mock("@/api", () => ({
@@ -86,7 +85,18 @@ vi.mock("@/components", () => ({
       </button>
     </article>
   ),
+  deriveThisWorkspaceCounts: (issues: Issue[]) => ({
+    closed: issues.filter((issue) => issue.status === "closed").length,
+  }),
+  HomeTopStrip: () => <div data-testid="home-top-strip" />,
+  RunningWithoutYou: () => <div data-testid="running-without-you" />,
+  HomeRail: () => <aside data-testid="home-rail" />,
 }));
+
+vi.mock("@/hooks/workspace", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/workspace")>();
+  return { ...actual, useRecentActivity: () => [] };
+});
 
 vi.mock("@/components/IssueViewGuard", () => ({
   IssueViewGuard: ({
@@ -123,7 +133,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockUpdateIssue.mockResolvedValue({});
   mockActions.refetch.mockResolvedValue(undefined);
-  mockActions.updateIssueStatus.mockResolvedValue(undefined);
   mockData.issues = [];
   mockData.agents = [];
   mockData.isLoading = false;
@@ -152,6 +161,9 @@ describe("HomePage", () => {
     render(<HomePage />);
 
     expect(screen.getByTestId("home-page")).toBeInTheDocument();
+    expect(screen.getByTestId("home-top-strip")).toBeInTheDocument();
+    expect(screen.getByTestId("home-rail")).toBeInTheDocument();
+    expect(screen.getByTestId("running-without-you")).toBeInTheDocument();
     expect(screen.getByTestId("operator-queue")).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Needs you" }),
@@ -181,7 +193,57 @@ describe("HomePage", () => {
     });
   });
 
-  it("uses the existing status update action to unblock", async () => {
+  it("reopens a blocked task and retains its assignee in the same write", async () => {
+    mockData.issues = [
+      issue({
+        id: "BLOCKED-1",
+        status: "blocked",
+        notes: "BLOCKED: waiting for credentials",
+        assignee: "agent-dev-1",
+      }),
+    ];
+    render(<HomePage />);
+
+    fireEvent.click(screen.getByTestId("queue-unblock"));
+
+    await waitFor(() => {
+      expect(mockUpdateIssue).toHaveBeenCalledWith("workspace-1", "BLOCKED-1", {
+        status: "open",
+        assignee: "agent-dev-1",
+      });
+      expect(mockActions.refetch).toHaveBeenCalledTimes(1);
+      expect(mockActions.showToast).toHaveBeenCalledWith(
+        "Unblocked BLOCKED-1",
+        {
+          type: "success",
+        },
+      );
+      expect(screen.queryByTestId("queue-card")).not.toBeInTheDocument();
+    });
+  });
+
+  it("surfaces an unblock failure", async () => {
+    mockData.issues = [
+      issue({
+        id: "BLOCKED-1",
+        status: "blocked",
+        notes: "BLOCKED: waiting for credentials",
+      }),
+    ];
+    mockUpdateIssue.mockRejectedValue(new Error("Could not reopen"));
+    render(<HomePage />);
+
+    fireEvent.click(screen.getByTestId("queue-unblock"));
+
+    await waitFor(() =>
+      expect(mockActions.showToast).toHaveBeenCalledWith("Could not reopen", {
+        type: "error",
+      }),
+    );
+    expect(screen.getByTestId("queue-card")).toBeInTheDocument();
+  });
+
+  it("reopens an unassigned blocked task without fabricating an assignee", async () => {
     mockData.issues = [
       issue({
         id: "BLOCKED-1",
@@ -194,10 +256,9 @@ describe("HomePage", () => {
     fireEvent.click(screen.getByTestId("queue-unblock"));
 
     await waitFor(() =>
-      expect(mockActions.updateIssueStatus).toHaveBeenCalledWith(
-        "BLOCKED-1",
-        "in_progress",
-      ),
+      expect(mockUpdateIssue).toHaveBeenCalledWith("workspace-1", "BLOCKED-1", {
+        status: "open",
+      }),
     );
   });
 

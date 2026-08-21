@@ -63,30 +63,53 @@ function formatClock(value: string): string {
 
 function actorSentence(item: OperatorQueueItem): JSX.Element {
   const { issue, kind } = item;
-  const actor = issue.assignee?.trim() || "An agent";
+  const actor = issue.assignee?.trim();
   const time = formatClock(issue.updated_at);
 
   if (kind === "design-gate") {
     return (
       <>
-        <span className={styles.actor}>{actor}</span> attached a design and
-        moved the task to <strong>review</strong> at {time}. It stays parked
-        until you approve and route it.
+        {actor ? (
+          <>
+            <span className={styles.actor}>{actor}</span> attached a design and
+            moved the task to <strong>review</strong> at {time}.
+          </>
+        ) : (
+          <>
+            A design was attached and the task moved to <strong>review</strong>{" "}
+            at {time}.
+          </>
+        )}{" "}
+        It stays parked until you approve and route it.
       </>
     );
   }
   if (kind === "blocked") {
     return (
       <>
-        <span className={styles.actor}>{actor}</span> declared the task blocked
-        at {time}. It stays parked until the blocker is resolved.
+        {actor ? (
+          <>
+            <span className={styles.actor}>{actor}</span> declared the task
+            blocked at {time}.
+          </>
+        ) : (
+          <>The task was declared blocked at {time}.</>
+        )}{" "}
+        It stays parked until the blocker is resolved.
       </>
     );
   }
   return (
     <>
-      <span className={styles.actor}>{actor}</span> sent the task back for
-      revision at {time}. It is waiting for operator arbitration.
+      {actor ? (
+        <>
+          <span className={styles.actor}>{actor}</span> sent the task back for
+          revision at {time}.
+        </>
+      ) : (
+        <>Sent back for revision at {time}.</>
+      )}{" "}
+      Waiting for operator arbitration.
     </>
   );
 }
@@ -186,6 +209,20 @@ export function OperatorQueueCard({
               <>. No agent is available to route to</>
             )}
             . Nothing else moves until then.
+          </p>
+        )}
+        {kind === "blocked" && (
+          <p className={styles.writeNote}>
+            Unblock is one write: <code>reopen</code>
+            {issue.assignee ? (
+              <>
+                {" "}
+                · <code>assignee = {issue.assignee}</code> — the agent resumes
+                from the ready queue.
+              </>
+            ) : (
+              <> — no agent held it.</>
+            )}
           </p>
         )}
 

@@ -8,10 +8,10 @@
 
 .layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-5);
+  grid-template-columns: minmax(0, 1fr) 372px;
+  gap: 20px;
   width: 100%;
-  padding: var(--space-5) var(--space-6) var(--space-8);
+  padding: 20px var(--space-6) 26px;
 }
 
 .queueColumn {
@@ -43,7 +43,8 @@
   padding: 0 6px;
   font-size: 11px;
   font-weight: 700;
-  color: var(--color-text-inverse);
+  /* Dark text on amber reads ≥8:1 in both themes; white reads 2.2:1 in light. */
+  color: #1a1a1a;
   background: var(--color-warning);
   border-radius: var(--radius-full);
 }
@@ -51,7 +52,7 @@
 .summary {
   margin-left: auto;
   font-size: 12px;
-  color: var(--color-text-muted);
+  color: var(--color-text-tertiary);
 }
 
 .queue {
@@ -61,10 +62,41 @@
 }
 
 .queueEmpty {
-  min-height: 240px;
+  overflow: hidden;
   background: var(--bg-card);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
+}
+
+.queueStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0 var(--space-6) var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border-light);
+}
+
+.queueStats span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+
+.queueStats strong {
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+@media (width <= 1100px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @media (width <= 768px) {
@@ -79,5 +111,11 @@
   .summary {
     width: 100%;
     margin-left: 0;
+  }
+
+  .queueStats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-right: var(--space-3);
+    margin-left: var(--space-3);
   }
 }

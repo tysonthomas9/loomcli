@@ -184,6 +184,9 @@ describe("OperatorQueueCard", () => {
       screen.getByText("“no Go toolchain in the image”"),
     ).toBeInTheDocument();
     expect(screen.queryByText(/BLOCKED:/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Unblock is one write/)).toHaveTextContent(
+      "reopen · assignee = eval-engineer-1 — the agent resumes from the ready queue.",
+    );
 
     fireEvent.click(screen.getByTestId("queue-unblock"));
     await waitFor(() =>
@@ -212,5 +215,25 @@ describe("OperatorQueueCard", () => {
     expect(callbacks.onOpenIssue).toHaveBeenCalledWith(
       expect.objectContaining({ id: "TASK-1" }),
     );
+  });
+
+  it("does not invent an actor for an unassigned revision bounce", () => {
+    const callbacks = handlers();
+    render(
+      <OperatorQueueCard
+        item={item("needs-revision", {
+          status: "open",
+          labels: ["needs-revision"],
+          assignee: undefined,
+        })}
+        agents={[]}
+        {...callbacks}
+      />,
+    );
+
+    expect(screen.getByTestId("queue-card")).toHaveTextContent(
+      /Sent back for revision at .* Waiting for operator arbitration\./,
+    );
+    expect(screen.queryByText(/An agent/)).not.toBeInTheDocument();
   });
 });

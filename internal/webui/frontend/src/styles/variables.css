@@ -58,6 +58,7 @@
   --color-status-working: #3b82f6; /* blue-500, actively working */
   --color-status-done: #10b981; /* emerald-500, completed */
   --color-status-review: #4f46e5; /* indigo-600, awaiting review */
+  --color-status-review-text: #a5b4fc;
   --color-status-idle: #9ca3af; /* gray-400, idle/waiting */
   --color-status-error: #ef4444; /* red-500, error state */
   --color-status-dirty: #f59e0b; /* amber-500, uncommitted changes */
@@ -71,6 +72,8 @@
   --color-success: #22c55e; /* green-500 */
   --color-warning: #f59e0b; /* amber-500 */
   --color-danger: #ef4444; /* red-500 */
+  --color-status-warning-text: #fcd34d;
+  --color-status-danger-text: #fca5a5;
   --color-info: #06b6d4; /* cyan-500 */
 
   /* Semantic Background Colors (darker variants for dark theme) */
@@ -311,6 +314,9 @@
   --color-danger-bg: #fee2e2;
   --color-info-bg: #cffafe;
   --color-bg-warning: #fef3c7;
+  --color-status-review-text: #4338ca;
+  --color-status-warning-text: #92400e;
+  --color-status-danger-text: #b91c1c;
 
   /* Diff colors (light) */
   --color-diff-add: #16a34a;

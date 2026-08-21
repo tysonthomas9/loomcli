@@ -35,26 +35,26 @@
 }
 
 .card[data-kind="design-gate"] .kind {
-  color: var(--color-status-review);
-  background: color-mix(in srgb, var(--color-status-review) 18%, transparent);
+  color: var(--color-status-review-text);
+  background: color-mix(in srgb, var(--color-status-review) 24%, transparent);
   border-color: color-mix(in srgb, var(--color-status-review) 45%, transparent);
 }
 
 .card[data-kind="blocked"] .kind {
-  color: var(--color-danger);
+  color: var(--color-status-danger-text);
   background: var(--color-danger-bg);
   border-color: color-mix(in srgb, var(--color-danger) 40%, transparent);
 }
 
 .card[data-kind="needs-revision"] .kind {
-  color: var(--color-warning);
+  color: var(--color-status-warning-text);
   background: var(--color-warning-bg);
   border-color: color-mix(in srgb, var(--color-warning) 40%, transparent);
 }
 
 .waited {
   font-size: 11px;
-  color: var(--color-text-muted);
+  color: var(--color-text-tertiary);
 }
 
 .issueId {
@@ -119,13 +119,13 @@
 }
 
 .statusPill[data-status="review"] {
-  color: var(--color-status-review);
+  color: var(--color-status-review-text);
   background: color-mix(in srgb, var(--color-status-review) 14%, transparent);
   border-color: color-mix(in srgb, var(--color-status-review) 45%, transparent);
 }
 
 .statusPill[data-status="blocked"] {
-  color: var(--color-danger);
+  color: var(--color-status-danger-text);
   background: var(--color-danger-bg);
   border-color: color-mix(in srgb, var(--color-danger) 40%, transparent);
 }
