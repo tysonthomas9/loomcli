@@ -190,10 +190,13 @@ func (m AgentWorktreeMaterializer) Materialize(ctx context.Context, agent domain
 }
 
 // AgentBranchName returns the git branch an agent's worktrees are created on.
-// Namespacing by workspace key keeps two workspaces that share a source repo
-// from colliding on the same checked-out branch name.
+// A workspace-key-first branch collides with a base branch named after the
+// workspace: exactly on every filesystem, and after case folding when the
+// default --branch value differs from the workspace key only by case. A fixed
+// agents/ prefix sidesteps both collisions while retaining the workspace and
+// agent namespaces for shared source repos.
 func AgentBranchName(workspaceKey, agentName string) string {
-	return workspaceKey + "/" + agentName
+	return "agents/" + workspaceKey + "/" + agentName
 }
 
 // addAgentWorktrees creates one worktree per selected repo under root and
