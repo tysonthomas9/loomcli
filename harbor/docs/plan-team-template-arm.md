@@ -266,3 +266,5 @@ reproduce the existing 8 assertions plus: template-apply.json created=9, ≥1
 `INVARIANT-VIOLATION`.
 
 Go/no-go for a paid run: P1–P5 green and R1/R4 resolved.
+
+Status: spec A + B landed; stub dry-run NOT yet run.

@@ -48,6 +48,47 @@ task_id_from_prompt() {
 
 created_id() { grep -Eo 'CREATED [A-Za-z0-9_]+-[0-9]+' | head -1 | awk '{print $2}'; }
 
+TEAM_MODE=0
+case "${LOOM_MARATHON_TEAM:-off}" in
+  ""|off) ;;
+  *) TEAM_MODE=1 ;;
+esac
+
+# --------------------------------------------------------- team lead seed ----
+if [ "$TEAM_MODE" = "1" ] && [[ "$PROMPT" == *"ROLE-MARKER: lead-seed"* ]]; then
+  existing=$(loom data list --type epic -o json 2>/dev/null \
+    | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))' 2>/dev/null || echo 0)
+  if [ "$existing" != "0" ]; then
+    log "epic already seeded; skipping"
+    echo "SEEDED epic=existing tasks=4"; emit_usage; exit 0
+  fi
+  EPIC=$(loom data create --type epic --title "Stub Slack Clone" \
+    --description "Stub team dry-run epic: validates design routing, independent branches, QA, and the integration gate." | created_id)
+  T1=$(loom data create --type task --parent "$EPIC" --source-repo app --priority 0 \
+    --label architect --label backend \
+    --title "T1 bootstrap start.sh health cluster" \
+    --description "Create start.sh plus a minimal node health server on ports 8000-8002." \
+    --acceptance-criteria "bash -n start.sh passes; node --check server.js passes" | created_id)
+  T2=$(loom data create --type task --parent "$EPIC" --source-repo app --priority 1 --depends-on "$T1" \
+    --label architect --label backend \
+    --title "T2 broken artifact integration-fail probe" \
+    --description "STUB SCENARIO: attempt 1 deliberately commits chaos.sh with invalid bash syntax so the harness integration gate must FAIL and reopen this task; attempt 2 fixes it." \
+    --acceptance-criteria "bash -n chaos.sh passes" | created_id)
+  T3=$(loom data create --type task --parent "$EPIC" --source-repo app --priority 2 --depends-on "$T2" \
+    --label architect --label frontend \
+    --title "T3 docs polish" \
+    --description "Write README.md describing the stub app." \
+    --acceptance-criteria "README.md exists" | created_id)
+  T4=$(loom data create --type task --parent "$EPIC" --source-repo app --priority 1 --depends-on "$T1" \
+    --label qa \
+    --title "T4 verify health endpoints respond on 8000-8002" \
+    --description "Verify the integrated health endpoints respond on ports 8000, 8001, and 8002." \
+    --acceptance-criteria "A committed health probe checks all three ports with short timeouts" | created_id)
+  log "seeded team epic=$EPIC tasks=$T1,$T2,$T3,$T4"
+  echo "SEEDED epic=$EPIC tasks=4"
+  emit_usage; exit 0
+fi
+
 # ------------------------------------------------------------------ lead seed
 if printf '%s' "$PROMPT" | grep -q 'ROLE-MARKER: lead-seed'; then
   existing=$(loom data list --type epic -o json 2>/dev/null \
@@ -72,6 +113,32 @@ if printf '%s' "$PROMPT" | grep -q 'ROLE-MARKER: lead-seed'; then
     --acceptance-criteria "README.md exists" | created_id)
   log "seeded epic=$EPIC tasks=$T1,$T2,$T3"
   echo "SEEDED epic=$EPIC tasks=3"
+  emit_usage; exit 0
+fi
+
+# -------------------------------------------------- team lead orchestrate ----
+if [ "$TEAM_MODE" = "1" ] && [[ "$PROMPT" == *"ROLE-MARKER: lead-orchestrate"* ]]; then
+  approved=0
+  ids=$(loom data list --status review -o json 2>/dev/null \
+    | python3 -c 'import sys,json;print("\n".join(i["id"] for i in json.load(sys.stdin)))' 2>/dev/null)
+  for id in $ids; do
+    design_review=$(loom data show "$id" -o json 2>/dev/null | python3 -c '
+import sys, json, re
+d = json.load(sys.stdin)
+has_impl = any(re.search(r"IMPL-DONE\s+attempt=\d+\s+commit=[0-9a-fA-F]{7,40}", c.get("text") or "") for c in d.get("comments") or [])
+has_architect = "architect" in (d.get("labels") or [])
+has_design = bool((d.get("design") or "").strip() or d.get("design_artifact_id") or d.get("has_design"))
+print(1 if has_architect and has_design and not has_impl else 0)')
+    if [ "$design_review" = "1" ]; then
+      loom data update "$id" --status open --remove-label architect \
+        --remove-label needs-revision --assignee "" >/dev/null
+      log "APPROVED design $id"
+      approved=$((approved + 1))
+    else
+      log "SKIP review $id (harness-owned or not a completed design)"
+    fi
+  done
+  echo "ORCHESTRATED approved=$approved rejected=0 unblocked=0"
   emit_usage; exit 0
 fi
 
@@ -113,6 +180,21 @@ if printf '%s' "$PROMPT" | grep -q 'ROLE-MARKER: critic'; then
   emit_usage; exit 0
 fi
 
+# ---------------------------------------------------------- team architect ---
+if [ "$TEAM_MODE" = "1" ] && [[ "$PROMPT" == *"ROLE-MARKER: team-architect"* ]]; then
+  TID=$(task_id_from_prompt)
+  if [ -z "$TID" ]; then log "team architect: no task id in prompt"; emit_usage; exit 0; fi
+  git merge --no-edit main >/dev/null 2>&1 || true
+  title=$(loom data show "$TID" -o json 2>/dev/null \
+    | python3 -c 'import sys,json;print(json.load(sys.stdin).get("title",""))')
+  loom data update "$TID" \
+    --design "STUB DESIGN for '$title': create the files named in the description; keep it minimal; syntax and specified health checks must pass." \
+    --status review --assignee "" >/dev/null
+  log "team architect designed $TID"
+  loom complete >/dev/null 2>&1
+  emit_usage; exit 0
+fi
+
 # ----------------------------------------------------------------- planner ---
 if printf '%s' "$PROMPT" | grep -Eq 'ONE planning task|planning task|Create the Plan'; then
   TID=$(task_id_from_prompt)
@@ -123,6 +205,117 @@ if printf '%s' "$PROMPT" | grep -Eq 'ONE planning task|planning task|Create the 
     --design "STUB DESIGN for '$title': create the files named in the description; keep it minimal; syntax must pass integration checks." \
     --status review --assignee "" >/dev/null
   log "planner designed $TID"
+  loom complete >/dev/null 2>&1
+  emit_usage; exit 0
+fi
+
+# --------------------------------------------------------------- team dev ---
+if [ "$TEAM_MODE" = "1" ] && [[ "$PROMPT" == *"ROLE-MARKER: team-dev"* ]]; then
+  TID=$(task_id_from_prompt)
+  if [ -z "$TID" ]; then log "team dev: no task id in prompt"; emit_usage; exit 0; fi
+  git merge --no-edit main >/dev/null 2>&1 || true
+  show=$(loom data show "$TID" -o json 2>/dev/null)
+  candidate_shas=$(printf '%s' "$show" | python3 -c '
+import json, re, sys
+d = json.load(sys.stdin)
+for c in d.get("comments") or []:
+    text = c.get("text") or ""
+    if "STALE-BASE" in text or "FEEDBACK" in text:
+        for sha in re.findall(r"(?<![0-9a-fA-F])[0-9a-fA-F]{7,40}(?![0-9a-fA-F])", text):
+            print(sha)')
+  for candidate in $candidate_shas; do
+    if ! git merge-base --is-ancestor "$candidate" HEAD >/dev/null 2>&1; then
+      if ! git cherry-pick "$candidate" >/dev/null 2>&1; then
+        git cherry-pick --abort >/dev/null 2>&1 || true
+        log "team dev could not cherry-pick prior candidate $candidate; continuing"
+      fi
+    fi
+  done
+  show=$(loom data show "$TID" -o json 2>/dev/null)
+  title=$(printf '%s' "$show" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("title",""))')
+  attempt=$(printf '%s' "$show" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+n = sum(1 for c in d.get("comments") or [] if "IMPL-DONE" in (c.get("text") or ""))
+print(n + 1)')
+  log "team dev task=$TID attempt=$attempt title=$title cwd=$(pwd)"
+
+  case "$title" in
+    *bootstrap*)
+      cat > server.js <<'EOF'
+const http = require("http");
+const port = Number(process.env.PORT || 8000);
+http.createServer((req, res) => {
+  if (req.url === "/api/health") { res.end(JSON.stringify({ ok: true, port })); return; }
+  res.statusCode = 404; res.end("not found");
+}).listen(port);
+EOF
+      cat > start.sh <<'EOF'
+#!/usr/bin/env bash
+set -u
+for p in 8000 8001 8002; do
+  PORT=$p node server.js &
+done
+wait
+EOF
+      chmod +x start.sh
+      git add start.sh server.js
+      ;;
+    *broken*)
+      if [ "$attempt" = "1" ]; then
+        printf '#!/usr/bin/env bash\nif true; then\n  echo broken\n' > chaos.sh
+      else
+        printf '#!/usr/bin/env bash\necho "chaos resolved (attempt %s)"\n' "$attempt" > chaos.sh
+      fi
+      chmod +x chaos.sh
+      git add chaos.sh
+      ;;
+    *docs*)
+      printf '# Stub App\n\nBuilt by the loom stub ensemble dry-run.\n' > README.md
+      git add README.md
+      ;;
+    *)
+      printf 'touched by stub team dev\n' > "stub-$TID.txt"
+      git add "stub-$TID.txt"
+      ;;
+  esac
+
+  git commit -q -m "stub team impl for $TID (attempt $attempt)"
+  SHA=$(git rev-parse HEAD)
+  loom data comment "$TID" "IMPL-DONE attempt=$attempt commit=$SHA" >/dev/null
+  loom data update "$TID" --status review --assignee "" >/dev/null
+  log "team dev committed $SHA and signalled review for $TID"
+  loom complete >/dev/null 2>&1
+  emit_usage; exit 0
+fi
+
+# ---------------------------------------------------------------- team qa ---
+if [ "$TEAM_MODE" = "1" ] && [[ "$PROMPT" == *"ROLE-MARKER: team-qa"* ]]; then
+  TID=$(task_id_from_prompt)
+  if [ -z "$TID" ]; then log "team qa: no task id in prompt"; emit_usage; exit 0; fi
+  git merge --no-edit main >/dev/null 2>&1 || true
+  show=$(loom data show "$TID" -o json 2>/dev/null)
+  attempt=$(printf '%s' "$show" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+n = sum(1 for c in d.get("comments") or [] if "IMPL-DONE" in (c.get("text") or ""))
+print(n + 1)')
+  mkdir -p tests
+  cat > tests/health-probe.sh <<'EOF'
+#!/usr/bin/env bash
+set -u
+for port in 8000 8001 8002; do
+  curl --fail --silent --show-error --max-time 2 "http://127.0.0.1:${port}/api/health" >/dev/null || exit 1
+done
+exit 0
+EOF
+  chmod +x tests/health-probe.sh
+  git add tests/health-probe.sh
+  git commit -q -m "tests: stub health probe ($TID)"
+  SHA=$(git rev-parse HEAD)
+  loom data comment "$TID" "IMPL-DONE attempt=$attempt commit=$SHA" >/dev/null
+  loom data update "$TID" --status review --assignee "" >/dev/null
+  log "team qa committed $SHA and signalled review for $TID"
   loom complete >/dev/null 2>&1
   emit_usage; exit 0
 fi
