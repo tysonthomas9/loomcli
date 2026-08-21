@@ -29,7 +29,20 @@ jobs:
       - name: Install golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          # Pinned, not `latest`. v2.13.0 shipped a staticcheck release
+          # candidate (honnef.co/go/tools v0.8.0-rc.1) whose nilness analyzer
+          # panics on one of our dependencies —
+          #
+          #     nilness: internal error: unhandled builtin recover
+          #
+          # which failed every job here from 2026-08-19 with no change on our
+          # side. `latest` means an upstream regression lands in CI unannounced
+          # and cannot be reproduced from the repo alone. v2.13.1 carries
+          # staticcheck v0.8.0 final, which fixes it.
+          #
+          # Bump deliberately: run `make check-go` against the new version
+          # first, since a staticcheck minor can add checks.
+          version: v2.13.1
           install-only: true
 
       - name: Configure Git
