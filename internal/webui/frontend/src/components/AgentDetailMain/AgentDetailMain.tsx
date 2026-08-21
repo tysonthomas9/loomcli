@@ -156,6 +156,7 @@ export function AgentDetailMain({
               onAgentNameConsumed={handleAgentNameConsumed}
               pendingTerminalInput={pendingTerminalInput}
               onTerminalInputConsumed={onTerminalInputConsumed}
+              leadRuntimeStatus={agent?.runtime_status}
               hideTabs
               {...(onTerminalSplitControlsChange != null && {
                 onSplitControlsChange: onTerminalSplitControlsChange,
