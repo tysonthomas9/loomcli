@@ -189,8 +189,32 @@ func TestMaterializeCreatesWorktreePerRepo(t *testing.T) {
 }
 
 func TestAgentBranchName(t *testing.T) {
-	if got, want := AgentBranchName("WSA", "dev-1"), "WSA/dev-1"; got != want {
+	if got, want := AgentBranchName("WSA", "dev-1"), "agents/WSA/dev-1"; got != want {
 		t.Fatalf("AgentBranchName() = %q, want %q", got, want)
+	}
+}
+
+func TestAgentBranchNameDoesNotCollideWithCaseFoldedWorkspaceBaseBranch(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	target := filepath.Join(root, "worktrees", "x")
+	git(t, "", "init", "-b", "teampoc", repo)
+	git(t, repo, "config", "user.name", "Test User")
+	git(t, repo, "config", "user.email", "test@example.test")
+	writeFile(t, filepath.Join(repo, "base.txt"), "v1\n")
+	git(t, repo, "add", "base.txt")
+	git(t, repo, "commit", "-m", "base")
+
+	branch := AgentBranchName("TEAMPOC", "x")
+	if err := EnsureGitWorktree(repo, target, branch); err != nil {
+		t.Fatalf("EnsureGitWorktree() with case-folded workspace base branch: %v", err)
+	}
+	if got := gitOut(t, target, "rev-parse", "--abbrev-ref", "HEAD"); got != branch {
+		t.Fatalf("worktree branch = %q, want %q", got, branch)
 	}
 }
 
@@ -232,10 +256,10 @@ func TestMaterializeSharedRepoAcrossWorkspaces(t *testing.T) {
 	if err := materializerA.Materialize(context.Background(), agentA); err != nil {
 		t.Fatalf("Materialize() WSA second run: %v", err)
 	}
-	if got, want := gitOut(t, worktreeA, "rev-parse", "--abbrev-ref", "HEAD"), "WSA/dev-1"; got != want {
+	if got, want := gitOut(t, worktreeA, "rev-parse", "--abbrev-ref", "HEAD"), "agents/WSA/dev-1"; got != want {
 		t.Fatalf("WSA worktree branch = %q, want %q", got, want)
 	}
-	if got, want := gitOut(t, worktreeB, "rev-parse", "--abbrev-ref", "HEAD"), "WSB/dev-1"; got != want {
+	if got, want := gitOut(t, worktreeB, "rev-parse", "--abbrev-ref", "HEAD"), "agents/WSB/dev-1"; got != want {
 		t.Fatalf("WSB worktree branch = %q, want %q", got, want)
 	}
 }
