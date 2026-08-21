@@ -1,11 +1,20 @@
 /**
  * @vitest-environment jsdom
  */
-import { renderHook, act } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { createElement } from "react";
+import {
+  renderHook as renderHookBase,
+  act,
+  type RenderHookOptions,
+} from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { fetchDiffFiles, fetchDiffFile } from "@/api/issues";
 import type { DiffFile, DiffFilePatch } from "@/api/issues";
+import { agentQueryKeys } from "@/hooks/queryKeys";
+import { createTestQueryClient } from "@/test-utils/queryClient";
 
 import { useDiff } from "../useDiff";
 
@@ -27,6 +36,18 @@ vi.mock("@/hooks/workspace", async () => {
 
 const mockFetchDiffFiles = vi.mocked(fetchDiffFiles);
 const mockFetchDiffFile = vi.mocked(fetchDiffFile);
+let queryClient: ReturnType<typeof createTestQueryClient>;
+
+function wrapper({ children }: { children: ReactNode }) {
+  return createElement(QueryClientProvider, { client: queryClient }, children);
+}
+
+function renderHook<Result, Props>(
+  callback: (initialProps: Props) => Result,
+  options?: Omit<RenderHookOptions<Props>, "wrapper">,
+) {
+  return renderHookBase(callback, { wrapper, ...options });
+}
 
 function createMockFiles(count = 3): DiffFile[] {
   return Array.from({ length: count }, (_, i) => ({
@@ -53,16 +74,22 @@ function createMockPatch(
 async function flushPromises(): Promise<void> {
   await act(async () => {
     await Promise.resolve();
+    await Promise.resolve();
+  });
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
 }
 
 describe("useDiff", () => {
   beforeEach(() => {
+    queryClient = createTestQueryClient();
     mockFetchDiffFiles.mockReset();
     mockFetchDiffFile.mockReset();
   });
 
   afterEach(() => {
+    queryClient.clear();
     vi.restoreAllMocks();
   });
 
@@ -126,6 +153,26 @@ describe("useDiff", () => {
       );
       expect(result.current.files).toEqual(mockFiles);
       expect(result.current.isLoading).toBe(false);
+    });
+
+    it("stores file list under the shared agent diffFiles key", async () => {
+      const mockFiles = createMockFiles();
+      mockFetchDiffFiles.mockResolvedValue(mockFiles);
+
+      renderHook(() =>
+        useDiff({
+          agentName: "agent-1",
+          enabled: true,
+        }),
+      );
+
+      await flushPromises();
+
+      expect(
+        queryClient.getQueryData(
+          agentQueryKeys.diffFiles("test-ws-id", "agent-1", "HEAD"),
+        ),
+      ).toEqual(mockFiles);
     });
 
     it("does not fetch when disabled", () => {
@@ -781,9 +828,8 @@ describe("useDiff", () => {
   });
 
   describe("enabled transition resets fetchInProgressRef", () => {
-    it("re-fetches file list when disabled then re-enabled", async () => {
+    it("does not duplicate an in-flight file list fetch when disabled then re-enabled", async () => {
       const files1 = createMockFiles(2);
-      const files2 = createMockFiles(3);
 
       // First fetch resolves slowly
       let resolveFirst: (value: DiffFile[]) => void;
@@ -804,8 +850,7 @@ describe("useDiff", () => {
       // Disable while fetch is in-flight
       rerender({ enabled: false });
 
-      // Re-enable — fetchInProgressRef should have been reset
-      mockFetchDiffFiles.mockResolvedValueOnce(files2);
+      // Re-enable — React Query should reuse the in-flight request.
       rerender({ enabled: true });
 
       // Resolve original slow fetch
@@ -814,8 +859,7 @@ describe("useDiff", () => {
       });
       await flushPromises();
 
-      // Should have called fetchDiffFiles at least twice
-      expect(mockFetchDiffFiles).toHaveBeenCalledTimes(2);
+      expect(mockFetchDiffFiles).toHaveBeenCalledTimes(1);
     });
 
     it("disabled then re-enabled with same agent triggers fresh file list fetch", async () => {

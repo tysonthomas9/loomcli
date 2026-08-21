@@ -7,11 +7,19 @@
  * Covers polling lifecycle, cleanup on unmount, and error handling.
  */
 
-import { renderHook, act } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { createElement } from "react";
+import {
+  renderHook as renderHookBase,
+  act,
+  type RenderHookOptions,
+} from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { fetchGitStatus } from "@/api/workspace";
 import type { GitStatus } from "@/api/workspace";
+import { createTestQueryClient } from "@/test-utils/queryClient";
 
 import { useGitStatus } from "../useGitStatus";
 
@@ -24,6 +32,18 @@ vi.mock("../useWorkspaceContext", () => ({
 }));
 
 const mockFetchGitStatus = vi.mocked(fetchGitStatus);
+let queryClient: ReturnType<typeof createTestQueryClient>;
+
+function wrapper({ children }: { children: ReactNode }) {
+  return createElement(QueryClientProvider, { client: queryClient }, children);
+}
+
+function renderHook<Result, Props>(
+  callback: (initialProps: Props) => Result,
+  options?: Omit<RenderHookOptions<Props>, "wrapper">,
+) {
+  return renderHookBase(callback, { wrapper, ...options });
+}
 
 function createMockGitStatus(overrides?: Partial<GitStatus>): GitStatus {
   return {
@@ -43,16 +63,23 @@ function createMockGitStatus(overrides?: Partial<GitStatus>): GitStatus {
 async function flushPromises(): Promise<void> {
   await act(async () => {
     await Promise.resolve();
+    await Promise.resolve();
+  });
+  await act(async () => {
+    vi.advanceTimersByTime(0);
+    await Promise.resolve();
   });
 }
 
 describe("useGitStatus", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    queryClient = createTestQueryClient();
     mockFetchGitStatus.mockReset();
   });
 
   afterEach(() => {
+    queryClient.clear();
     vi.useRealTimers();
     vi.restoreAllMocks();
   });

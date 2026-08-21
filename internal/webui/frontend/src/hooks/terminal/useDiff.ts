@@ -9,10 +9,12 @@
  */
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { fetchDiffFiles, fetchDiffFile } from "@/api/issues";
 import type { DiffFile, DiffFilePatch } from "@/api/issues";
 
+import { agentQueryKeys } from "@/hooks/queryKeys";
 import { useWorkspaceContext } from "@/hooks/workspace";
 
 export interface UseDiffOptions {
@@ -39,15 +41,20 @@ export interface UseDiffReturn {
   summaryStats: SummaryStats;
 }
 
+function toError(error: unknown): Error | null {
+  if (error == null) return null;
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+const EMPTY_DIFF_FILES: DiffFile[] = [];
+
 export function useDiff({
   agentName,
   enabled,
   commitSignal,
 }: UseDiffOptions): UseDiffReturn {
   const { workspaceId } = useWorkspaceContext();
-  const [files, setFiles] = useState<DiffFile[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
+  const queryClient = useQueryClient();
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
   const [patchCache, setPatchCache] = useState<Map<string, DiffFilePatch>>(
     new Map(),
@@ -55,10 +62,25 @@ export function useDiff({
   const [patchErrors, setPatchErrors] = useState<Map<string, Error>>(new Map());
 
   const mountedRef = useRef(true);
-  const fetchInProgressRef = useRef(false);
   const patchCacheRef = useRef(patchCache);
   patchCacheRef.current = patchCache;
   const inFlightPatchesRef = useRef(new Set<string>());
+  const previousInputsRef = useRef<{
+    agentName: string | null;
+    commitSignal: number | undefined;
+  } | null>(null);
+  const diffFilesQueryKey = agentQueryKeys.diffFiles(
+    workspaceId,
+    agentName ?? "",
+    "HEAD",
+  );
+  const canFetchDiffFiles = enabled && !!agentName;
+
+  const diffFilesQuery = useQuery({
+    queryKey: diffFilesQueryKey,
+    queryFn: () => fetchDiffFiles(workspaceId, agentName ?? "", "HEAD"),
+    enabled: canFetchDiffFiles,
+  });
 
   // Track mount/unmount independently of fetch logic
   useEffect(() => {
@@ -70,50 +92,24 @@ export function useDiff({
 
   // Reset all state when agent changes
   useEffect(() => {
-    setFiles([]);
     setPatchCache(new Map());
     setPatchErrors(new Map());
     setViewedFiles(new Set());
-    setError(null);
-    setIsLoading(false);
-    fetchInProgressRef.current = false;
     inFlightPatchesRef.current.clear();
-  }, [agentName, commitSignal]);
 
-  // Allow fresh fetch when re-enabled after being disabled while fetch was in-flight
-  useEffect(() => {
-    if (!enabled) {
-      fetchInProgressRef.current = false;
-    }
-  }, [enabled]);
+    const previous = previousInputsRef.current;
+    const commitSignalChanged =
+      previous !== null &&
+      previous.agentName === agentName &&
+      previous.commitSignal !== commitSignal;
+    previousInputsRef.current = { agentName, commitSignal };
 
-  // Fetch file list when enabled with valid agent
-  useEffect(() => {
-    if (!enabled || !agentName) return;
-    if (fetchInProgressRef.current) return;
-
-    fetchInProgressRef.current = true;
-    setIsLoading(true);
-
-    fetchDiffFiles(workspaceId, agentName, "HEAD")
-      .then((result) => {
-        if (mountedRef.current) {
-          setFiles(result);
-          setError(null);
-        }
-      })
-      .catch((err) => {
-        if (mountedRef.current) {
-          setError(err instanceof Error ? err : new Error(String(err)));
-        }
-      })
-      .finally(() => {
-        fetchInProgressRef.current = false;
-        if (mountedRef.current) {
-          setIsLoading(false);
-        }
+    if (commitSignalChanged && agentName) {
+      void queryClient.invalidateQueries({
+        queryKey: agentQueryKeys.diffFiles(workspaceId, agentName, "HEAD"),
       });
-  }, [enabled, agentName, commitSignal]);
+    }
+  }, [agentName, commitSignal, queryClient, workspaceId]);
 
   const fetchPatch = useCallback(
     async (path: string): Promise<void> => {
@@ -162,6 +158,8 @@ export function useDiff({
     });
   }, []);
 
+  const files = diffFilesQuery.data ?? EMPTY_DIFF_FILES;
+  const error = toError(diffFilesQuery.error);
   const summaryStats = useMemo<SummaryStats>(
     () => ({
       filesChanged: files.length,
@@ -173,7 +171,7 @@ export function useDiff({
 
   return {
     files,
-    isLoading,
+    isLoading: diffFilesQuery.isFetching,
     error,
     patchErrors,
     viewedFiles,

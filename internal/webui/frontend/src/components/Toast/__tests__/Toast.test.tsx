@@ -119,6 +119,13 @@ describe("Toast", () => {
       expect(screen.getByLabelText("Undo action")).toBeInTheDocument();
     });
 
+    it("renders a custom action label when provided", () => {
+      const onUndo = vi.fn();
+      render(<Toast {...defaultProps} onUndo={onUndo} actionLabel="Retry" />);
+
+      expect(screen.getByLabelText("Retry action")).toHaveTextContent("Retry");
+    });
+
     it("does not render undo button when onUndo is not provided", () => {
       render(<Toast {...defaultProps} />);
       expect(screen.queryByLabelText("Undo action")).not.toBeInTheDocument();

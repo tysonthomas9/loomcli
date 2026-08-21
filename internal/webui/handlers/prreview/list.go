@@ -47,7 +47,7 @@ func (m *Module) listPullRequests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := storeadapter.BuildWorkspaceDataForKey(r.Context(), m.store, ws)
+	data, err := storeadapter.BuildWorkspaceTopologyForKey(r.Context(), m.store, ws)
 	if err != nil || data == nil || len(data.Repos) == 0 {
 		m.ghListFallback(w, r.Context(), ws, state)
 		return

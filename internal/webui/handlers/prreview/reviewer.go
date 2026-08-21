@@ -127,7 +127,7 @@ func safeAgentSegment(value string) string {
 }
 
 func (m *Module) resolveRepoCheckout(ctx context.Context, ws, owner, repo string) (repoPath, remote, repoName, wsPath string, ok bool, err error) {
-	data, buildErr := storeadapter.BuildWorkspaceDataForKey(ctx, m.store, ws)
+	data, buildErr := storeadapter.BuildWorkspaceTopologyForKey(ctx, m.store, ws)
 	if buildErr != nil {
 		return "", "", "", "", false, buildErr
 	}

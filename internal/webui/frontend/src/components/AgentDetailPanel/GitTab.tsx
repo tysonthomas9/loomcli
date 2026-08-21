@@ -5,9 +5,11 @@
  */
 
 import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 import { fetchDiffCommits } from "@/hooks/api";
 import type { DiffCommit } from "@/api/issues";
+import { agentQueryKeys } from "@/hooks/queryKeys";
 import {
   useGitStatus,
   useGitActions,
@@ -117,11 +119,7 @@ function GitBranchIcon(): JSX.Element {
 
 export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
   const { workspaceId } = useWorkspaceContext();
-  const {
-    status: gitStatus,
-    error: gitError,
-    refetch,
-  } = useGitStatus({
+  const { status: gitStatus, error: gitError } = useGitStatus({
     agentName: agent.name,
     enabled: isActive ?? true,
   });
@@ -131,7 +129,6 @@ export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
   const actions = useGitActions({
     agentName: agent.name,
     taskId: parsedStatus.taskId || agent.task_id || null,
-    onStatusChange: refetch,
   });
 
   // Derive GitHub base URL from agent's monitor commit URLs (e.g., ".../commit/abc123" → "...")
@@ -142,28 +139,19 @@ export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
     return idx > 0 ? url.slice(0, idx) : undefined;
   })();
 
-  // Rich commit data from diff endpoint
-  const [diffCommits, setDiffCommits] = useState<DiffCommit[] | null>(null);
   const [showAllCommits, setShowAllCommits] = useState(false);
 
-  // Fetch rich commit data when agent changes
+  const diffCommitsQuery = useQuery({
+    queryKey: agentQueryKeys.diffCommits(workspaceId, agent.name),
+    queryFn: () => fetchDiffCommits(workspaceId, agent.name),
+    enabled: isActive ?? true,
+  });
+  const diffCommits = diffCommitsQuery.data ?? null;
+
+  // Collapse expanded history when agent changes.
   useEffect(() => {
-    let cancelled = false;
-    setDiffCommits(null);
     setShowAllCommits(false);
-
-    fetchDiffCommits(workspaceId, agent.name)
-      .then((commits) => {
-        if (!cancelled) setDiffCommits(commits);
-      })
-      .catch(() => {
-        // Fall back to agent.commits
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [agent.name, workspaceId]);
+  }, [agent.name]);
 
   // Determine data sources — prefer gitStatus, fall back to agent data
   const branch = gitStatus?.branch ?? agent.branch;

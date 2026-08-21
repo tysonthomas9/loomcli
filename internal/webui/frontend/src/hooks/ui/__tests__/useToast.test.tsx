@@ -366,6 +366,21 @@ describe("useToast", () => {
       expect(result.current.toasts[0].onUndo).toBe(undoFn);
     });
 
+    it("stores a custom action label when provided with onUndo", () => {
+      const { result } = renderHook(() => useToast(), { wrapper });
+      const undoFn = vi.fn();
+
+      act(() => {
+        result.current.showToast("Retryable failure", {
+          type: "error",
+          onUndo: undoFn,
+          actionLabel: "Retry",
+        });
+      });
+
+      expect(result.current.toasts[0].actionLabel).toBe("Retry");
+    });
+
     it("does not include onUndo when not provided", () => {
       const { result } = renderHook(() => useToast(), { wrapper });
 

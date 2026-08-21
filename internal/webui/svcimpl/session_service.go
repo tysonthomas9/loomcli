@@ -72,7 +72,7 @@ func (s *sessionServiceImpl) storesForWorkspace(ctx context.Context, wsID string
 	addStore(s.runtimeDir)
 
 	if s.store != nil {
-		wsData, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, wsID)
+		wsData, err := storeadapter.BuildWorkspaceTopologyForKey(ctx, s.store, wsID)
 		if err != nil || wsData == nil {
 			if len(stores) == 0 {
 				return nil, service.ErrNotFound("workspace not found")

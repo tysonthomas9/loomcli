@@ -11,6 +11,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -452,6 +453,134 @@ func TestResolveAgentWorktree_BrokenGitMetadataReturnsUnknownBranch(t *testing.T
 			t.Fatalf("%s = %+v, want path %q branch unknown repo api", name, got, wtPath)
 		}
 	}
+}
+
+func TestResolveWorkspaceData_StoreBackedUsesTopologyOnly(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	base := memstore.New()
+	for _, ws := range []string{"WS1", "WS2", "WS3"} {
+		if _, err := base.Workspaces().Create(ctx, store.WorkspaceCreate{Key: ws, Name: ws}); err != nil {
+			t.Fatalf("create workspace %s: %v", ws, err)
+		}
+		if _, err := base.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: ws, Name: "api"}); err != nil {
+			t.Fatalf("create repo %s/api: %v", ws, err)
+		}
+		if _, err := base.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: ws, Name: "task"}); err != nil {
+			t.Fatalf("create role %s/task: %v", ws, err)
+		}
+		if _, err := base.Agents().Create(ctx, store.AgentCreate{WorkspaceKey: ws, Name: "nova", RoleName: "task"}); err != nil {
+			t.Fatalf("create agent %s/nova: %v", ws, err)
+		}
+	}
+
+	counted := newCountingTopologyStore(base)
+	got, err := NewGitOps().WithStore(counted).ResolveWorkspaceData("WS1")
+	if err != nil {
+		t.Fatalf("ResolveWorkspaceData: %v", err)
+	}
+	if got.ID != "WS1" || len(got.Workspaces) != 0 {
+		t.Fatalf("workspace data = id:%q summaries:%d, want WS1 with no switcher summaries", got.ID, len(got.Workspaces))
+	}
+	if counted.workspaces.get != 1 {
+		t.Fatalf("Workspaces.Get count = %d, want 1", counted.workspaces.get)
+	}
+	if counted.workspaces.list != 0 {
+		t.Fatalf("Workspaces.List count = %d, want 0", counted.workspaces.list)
+	}
+	if counted.daemon.get != 0 {
+		t.Fatalf("Daemon.Get count = %d, want 0", counted.daemon.get)
+	}
+	if got := counted.repos.listByWorkspace["WS1"]; got != 1 {
+		t.Fatalf("Repos.List[WS1] count = %d, want 1", got)
+	}
+	if got := counted.agents.listByWorkspace["WS1"]; got != 1 {
+		t.Fatalf("Agents.List[WS1] count = %d, want 1", got)
+	}
+	if totalCount(counted.repos.listByWorkspace) != 1 {
+		t.Fatalf("Repos.List counts = %+v, want only active workspace", counted.repos.listByWorkspace)
+	}
+	if totalCount(counted.agents.listByWorkspace) != 1 {
+		t.Fatalf("Agents.List counts = %+v, want only active workspace", counted.agents.listByWorkspace)
+	}
+}
+
+type countingTopologyStore struct {
+	store.Store
+	workspaces *countingWorkspaceStore
+	repos      *countingRepoStore
+	agents     *countingAgentStore
+	daemon     *countingDaemonStore
+}
+
+func newCountingTopologyStore(base store.Store) *countingTopologyStore {
+	return &countingTopologyStore{
+		Store:      base,
+		workspaces: &countingWorkspaceStore{WorkspaceStore: base.Workspaces()},
+		repos:      &countingRepoStore{RepoStore: base.Repos(), listByWorkspace: map[string]int{}},
+		agents:     &countingAgentStore{AgentStore: base.Agents(), listByWorkspace: map[string]int{}},
+		daemon:     &countingDaemonStore{DaemonProfileStore: base.Daemon()},
+	}
+}
+
+func (s *countingTopologyStore) Workspaces() store.WorkspaceStore { return s.workspaces }
+func (s *countingTopologyStore) Repos() store.RepoStore           { return s.repos }
+func (s *countingTopologyStore) Agents() store.AgentStore         { return s.agents }
+func (s *countingTopologyStore) Daemon() store.DaemonProfileStore { return s.daemon }
+
+type countingWorkspaceStore struct {
+	store.WorkspaceStore
+	get  int
+	list int
+}
+
+func (s *countingWorkspaceStore) Get(ctx context.Context, key string) (*domain.Workspace, error) {
+	s.get++
+	return s.WorkspaceStore.Get(ctx, key)
+}
+
+func (s *countingWorkspaceStore) List(ctx context.Context) ([]*domain.Workspace, error) {
+	s.list++
+	return s.WorkspaceStore.List(ctx)
+}
+
+type countingRepoStore struct {
+	store.RepoStore
+	listByWorkspace map[string]int
+}
+
+func (s *countingRepoStore) List(ctx context.Context, workspaceKey string) ([]*domain.Repo, error) {
+	s.listByWorkspace[workspaceKey]++
+	return s.RepoStore.List(ctx, workspaceKey)
+}
+
+type countingAgentStore struct {
+	store.AgentStore
+	listByWorkspace map[string]int
+}
+
+func (s *countingAgentStore) List(ctx context.Context, workspaceKey string) ([]*domain.Agent, error) {
+	s.listByWorkspace[workspaceKey]++
+	return s.AgentStore.List(ctx, workspaceKey)
+}
+
+type countingDaemonStore struct {
+	store.DaemonProfileStore
+	get int
+}
+
+func (s *countingDaemonStore) Get(ctx context.Context, workspaceKey string) (*domain.DaemonProfile, error) {
+	s.get++
+	return s.DaemonProfileStore.Get(ctx, workspaceKey)
+}
+
+func totalCount(counts map[string]int) int {
+	total := 0
+	for _, count := range counts {
+		total += count
+	}
+	return total
 }
 
 func runGit(t *testing.T, dir string, args ...string) error {

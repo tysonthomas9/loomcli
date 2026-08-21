@@ -8,11 +8,13 @@
  * conflict banner, and commit expand button.
  */
 
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { screen, fireEvent, act, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
 import type { GitStatus } from "@/api/workspace";
+import { agentQueryKeys } from "@/hooks/queryKeys";
+import { renderWithQueryClient } from "@/test-utils/queryClient";
 import type { LoomAgentStatus } from "@/types";
 
 import { GitTab } from "./GitTab";
@@ -57,15 +59,25 @@ vi.mock("@/hooks/workspace", async () => {
       return mockGitStatusReturn;
     },
     useGitActions: () => mockActions,
+    useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
   };
 });
 
 // Mock fetchDiffCommits to avoid real API calls
+const mockApi = vi.hoisted(() => ({
+  fetchDiffCommits: vi.fn(),
+}));
+
 let mockDiffCommitsResult: Promise<unknown>;
 
-vi.mock("@/api/issues", () => ({
-  fetchDiffCommits: () => mockDiffCommitsResult,
-}));
+vi.mock("@/hooks/api", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/api")>("@/hooks/api");
+  return {
+    ...actual,
+    fetchDiffCommits: mockApi.fetchDiffCommits,
+  };
+});
 
 /** Helper to build a minimal agent object. */
 function makeAgent(overrides: Partial<LoomAgentStatus> = {}): LoomAgentStatus {
@@ -87,13 +99,20 @@ function resetMocks() {
     refetch: mockRefetch,
   };
   mockDiffCommitsResult = Promise.resolve([]);
+  mockApi.fetchDiffCommits.mockReset();
+  mockApi.fetchDiffCommits.mockImplementation(() => mockDiffCommitsResult);
 }
 
 /** Render GitTab and flush the async fetchDiffCommits effect. */
-async function renderGitTab(agent: LoomAgentStatus) {
-  let result: ReturnType<typeof render>;
+async function renderGitTab(agent: LoomAgentStatus, isActive?: boolean) {
+  let result: ReturnType<typeof renderWithQueryClient>;
   await act(async () => {
-    result = render(<GitTab agent={agent} />);
+    result = renderWithQueryClient(
+      <GitTab
+        agent={agent}
+        {...(isActive === undefined ? {} : { isActive })}
+      />,
+    );
   });
   return result!;
 }
@@ -599,6 +618,57 @@ describe("GitTab", () => {
 
       expect(lastGitStatusOptions.agentName).toBe("nova");
       expect(lastGitStatusOptions.enabled).toBe(true);
+    });
+
+    it("does not fetch diff commits while inactive", async () => {
+      await renderGitTab(makeAgent({ name: "nova" }), false);
+
+      expect(lastGitStatusOptions.agentName).toBe("nova");
+      expect(lastGitStatusOptions.enabled).toBe(false);
+      expect(mockApi.fetchDiffCommits).not.toHaveBeenCalled();
+    });
+
+    it("fetches diff commits once when activated", async () => {
+      const agent = makeAgent({ name: "nova" });
+      let result: ReturnType<typeof renderWithQueryClient>;
+      await act(async () => {
+        result = renderWithQueryClient(
+          <GitTab agent={agent} isActive={false} />,
+        );
+      });
+      expect(mockApi.fetchDiffCommits).not.toHaveBeenCalled();
+
+      await act(async () => {
+        result.rerender(<GitTab agent={agent} isActive={true} />);
+      });
+
+      await waitFor(() => {
+        expect(mockApi.fetchDiffCommits).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it("stores diff commits under the shared diffCommits key", async () => {
+      const diffCommits = [
+        {
+          hash: "abcdef123456",
+          short_hash: "abcdef1",
+          subject: "Add cache key",
+          author: "Nova",
+          email: "nova@example.com",
+          date: "2026-01-01T00:00:00Z",
+        },
+      ];
+      mockDiffCommitsResult = Promise.resolve(diffCommits);
+
+      const result = await renderGitTab(makeAgent({ name: "nova" }));
+
+      await waitFor(() => {
+        expect(
+          result.queryClient.getQueryData(
+            agentQueryKeys.diffCommits("test-ws-id", "nova"),
+          ),
+        ).toEqual(diffCommits);
+      });
     });
   });
 });

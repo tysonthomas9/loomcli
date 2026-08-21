@@ -9,12 +9,15 @@
  */
 
 import { renderHook, act } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ReactNode } from "react";
 import { createElement } from "react";
 
 import { ApiError } from "@/api/common";
+import { agentQueryKeys, fileQueryKeys } from "@/hooks/queryKeys";
 import { ToastProvider } from "@/hooks/ui";
+import { createTestQueryClient } from "@/test-utils/queryClient";
 
 import { useGitActions } from "@/hooks/workspace";
 
@@ -57,13 +60,20 @@ vi.mock("@/hooks/ui/useToast", async () => {
   };
 });
 
+let queryClient: ReturnType<typeof createTestQueryClient>;
+
 /** Wrapper providing ToastProvider context. */
 function wrapper({ children }: { children: ReactNode }) {
-  return createElement(ToastProvider, null, children);
+  return createElement(
+    QueryClientProvider,
+    { client: queryClient },
+    createElement(ToastProvider, null, children),
+  );
 }
 
 describe("useGitActions", () => {
   beforeEach(() => {
+    queryClient = createTestQueryClient();
     vi.clearAllMocks();
   });
 
@@ -175,6 +185,99 @@ describe("useGitActions", () => {
       });
 
       expect(onStatusChange).toHaveBeenCalledTimes(1);
+    });
+
+    it("invalidates only scoped agent git queries after successful push", async () => {
+      mockGitPush.mockResolvedValue({ success: true, message: "Done" });
+      const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+      const { result } = renderHook(
+        () => useGitActions({ agentName: "nova" }),
+        { wrapper },
+      );
+
+      await act(async () => {
+        await result.current.push();
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: agentQueryKeys.diffFiles("test-ws-id", "nova", "HEAD"),
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: agentQueryKeys.diffCommits("test-ws-id", "nova"),
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: agentQueryKeys.agentGitStatus("test-ws-id", "nova"),
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: agentQueryKeys.diffStat("test-ws-id", "nova"),
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: fileQueryKeys.checkouts("test-ws-id"),
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        predicate: expect.any(Function),
+      });
+
+      // Execute the captured predicate to lock the agent-file-git-status match
+      // logic (prefix + scope/target), not just that *a* predicate was passed.
+      const predicateFilter = invalidateSpy.mock.calls
+        .map((call) => call[0])
+        .find(
+          (
+            filters,
+          ): filters is {
+            predicate: (query: { queryKey: readonly unknown[] }) => boolean;
+          } =>
+            typeof (filters as { predicate?: unknown }).predicate ===
+            "function",
+        );
+      expect(predicateFilter).toBeDefined();
+      if (!predicateFilter) throw new Error("predicate filter not captured");
+      const matchesAgentGitStatus = predicateFilter.predicate;
+      const gitStatusPrefix = fileQueryKeys.gitStatusPrefix("test-ws-id");
+      // Matching: an agent-scoped git-status query for "nova".
+      expect(
+        matchesAgentGitStatus({
+          queryKey: [
+            ...gitStatusPrefix,
+            { scope: "agent", target: "nova", repo: null },
+          ],
+        }),
+      ).toBe(true);
+      // Non-matching: different agent target.
+      expect(
+        matchesAgentGitStatus({
+          queryKey: [
+            ...gitStatusPrefix,
+            { scope: "agent", target: "other", repo: null },
+          ],
+        }),
+      ).toBe(false);
+      // Non-matching: non-agent scope.
+      expect(
+        matchesAgentGitStatus({
+          queryKey: [
+            ...gitStatusPrefix,
+            { scope: "workspace", target: null, repo: null },
+          ],
+        }),
+      ).toBe(false);
+      // Non-matching: not a file-git-status query at all.
+      expect(
+        matchesAgentGitStatus({
+          queryKey: agentQueryKeys.diffFiles("test-ws-id", "nova", "HEAD"),
+        }),
+      ).toBe(false);
+
+      expect(
+        invalidateSpy.mock.calls.some(
+          ([filters]) =>
+            "queryKey" in filters &&
+            JSON.stringify(filters.queryKey) ===
+              JSON.stringify(["workspace", "test-ws-id"]),
+        ),
+      ).toBe(false);
     });
 
     it("calls onStatusChange after push error", async () => {

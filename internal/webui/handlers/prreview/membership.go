@@ -75,7 +75,7 @@ func splitGitHubPath(path string) (owner, repo string, ok bool) {
 // request can never seed a grant whose (case-sensitive) pattern fails to match
 // the later canonical dispatch.
 func (m *Module) workspaceHasRepo(ctx context.Context, ws, owner, repo string) (canonOwner, canonRepo string, ok bool, err error) {
-	data, buildErr := storeadapter.BuildWorkspaceDataForKey(ctx, m.store, ws)
+	data, buildErr := storeadapter.BuildWorkspaceTopologyForKey(ctx, m.store, ws)
 	if buildErr != nil {
 		return "", "", false, buildErr
 	}

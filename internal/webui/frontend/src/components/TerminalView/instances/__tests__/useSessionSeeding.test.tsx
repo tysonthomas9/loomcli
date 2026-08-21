@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StrictMode, type ReactNode } from "react";
 import type React from "react";
@@ -13,12 +13,30 @@ const mockHooksApi = vi.hoisted(() => ({
   ensureAgentTerminalSession: vi.fn(),
 }));
 
+const mockUi = vi.hoisted(() => ({
+  showToast: vi.fn(),
+}));
+
 vi.mock("@/hooks/api", async () => {
   const actual =
     await vi.importActual<typeof import("@/hooks/api")>("@/hooks/api");
   return {
     ...actual,
     ensureAgentTerminalSession: mockHooksApi.ensureAgentTerminalSession,
+  };
+});
+
+vi.mock("@/hooks/ui", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/ui")>("@/hooks/ui");
+  return {
+    ...actual,
+    useToast: () => ({
+      toasts: [],
+      showToast: mockUi.showToast,
+      dismissToast: vi.fn(),
+      dismissAll: vi.fn(),
+    }),
   };
 });
 
@@ -41,6 +59,7 @@ function makeArgs(overrides: Partial<Parameters<typeof useSessionSeeding>[0]>) {
 describe("useSessionSeeding", () => {
   beforeEach(() => {
     mockHooksApi.ensureAgentTerminalSession.mockReset();
+    mockUi.showToast.mockReset();
   });
 
   it("resolves pending agent names even when a stale restored tab exists", async () => {
@@ -187,6 +206,89 @@ describe("useSessionSeeding", () => {
       pinned: true,
       role: "lead",
       crashReason: null,
+    });
+    expect(onAgentNameConsumed).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces retryable agent terminal failures without consuming the pending agent", async () => {
+    const activeTab: TabState = {
+      id: "shell-1",
+      label: "Shell",
+      sessionName: "shell-1",
+      connectionState: "connected",
+      backendName: "codex",
+    };
+    const setTabs = vi.fn();
+    const setActiveTabId = vi.fn();
+    const onAgentNameConsumed = vi.fn();
+    const retryableError = Object.assign(new Error("rate limited"), {
+      status: 429,
+    });
+    mockHooksApi.ensureAgentTerminalSession.mockRejectedValueOnce(
+      retryableError,
+    );
+
+    const args = makeArgs({
+      pendingAgentName: "lead-ui-e2e",
+      tabs: [activeTab],
+      setTabs: setTabs as unknown as React.Dispatch<
+        React.SetStateAction<TabState[]>
+      >,
+      setActiveTabId: setActiveTabId as unknown as React.Dispatch<
+        React.SetStateAction<string>
+      >,
+      onAgentNameConsumed,
+    });
+
+    renderHook(() => useSessionSeeding(args));
+
+    await waitFor(() => {
+      expect(mockUi.showToast).toHaveBeenCalledWith(
+        'Could not open terminal for agent "lead-ui-e2e".',
+        expect.objectContaining({
+          type: "error",
+          duration: 0,
+          actionLabel: "Retry",
+          onUndo: expect.any(Function),
+        }),
+      );
+    });
+    expect(setActiveTabId).not.toHaveBeenCalled();
+    expect(setTabs).not.toHaveBeenCalled();
+    expect(onAgentNameConsumed).not.toHaveBeenCalled();
+    expect(mockHooksApi.ensureAgentTerminalSession).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    mockHooksApi.ensureAgentTerminalSession.mockResolvedValueOnce({
+      session_name: "term_456",
+      label: "agent-lead-ui-e2e",
+      notes: "",
+      sort_order: 1,
+      pinned: false,
+      kind: "agent",
+      agent_id: "lead-ui-e2e",
+      role: "lead",
+      backend: "codex",
+      writable: true,
+      pty_alive: true,
+      attached_clients: 0,
+      created_at: "2026-05-11T00:00:00Z",
+      updated_at: "2026-05-11T00:00:00Z",
+    });
+    const toastOptions = mockUi.showToast.mock.calls[0]?.[1] as {
+      onUndo: () => void;
+    };
+
+    act(() => {
+      toastOptions.onUndo();
+    });
+
+    await waitFor(() => {
+      expect(mockHooksApi.ensureAgentTerminalSession).toHaveBeenCalledTimes(2);
+      expect(setActiveTabId).toHaveBeenCalledWith("term_456");
     });
     expect(onAgentNameConsumed).toHaveBeenCalledTimes(1);
   });

@@ -3,10 +3,12 @@
  * Follows a polling pattern with backoff.
  */
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 import type { GitStatus } from "@/api/workspace";
 import { fetchGitStatus } from "@/api/workspace";
+import { agentQueryKeys } from "@/hooks/queryKeys";
 
 import { useWorkspaceContext } from "./useWorkspaceContext";
 
@@ -15,6 +17,13 @@ const POLL_INTERVAL = 5000; // 5 seconds
 export interface UseGitStatusOptions {
   agentName: string | null;
   enabled: boolean;
+  /**
+   * Poll cadence in ms while the query is active. Defaults to 5s. Consumers
+   * that only need coarse freshness (e.g. the PR-link badge) can pass a longer
+   * interval; they still share the same query key, so React Query dedupes their
+   * fetches against any 5s consumer that is mounted at the same time.
+   */
+  pollInterval?: number;
 }
 
 export interface UseGitStatusReturn {
@@ -24,64 +33,35 @@ export interface UseGitStatusReturn {
   refetch: () => Promise<void>;
 }
 
+function toError(error: unknown): Error | null {
+  if (error == null) return null;
+  return error instanceof Error ? error : new Error(String(error));
+}
+
 export function useGitStatus({
   agentName,
   enabled,
+  pollInterval = POLL_INTERVAL,
 }: UseGitStatusOptions): UseGitStatusReturn {
   const { workspaceId } = useWorkspaceContext();
-  const [status, setStatus] = useState<GitStatus | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
-  const fetchInProgressRef = useRef(false);
-  const mountedRef = useRef(true);
+  const canFetch = enabled && !!agentName;
+  const statusQuery = useQuery({
+    queryKey: agentQueryKeys.agentGitStatus(workspaceId, agentName ?? ""),
+    queryFn: () => fetchGitStatus(workspaceId, agentName ?? ""),
+    enabled: canFetch,
+    refetchInterval: canFetch ? pollInterval : false,
+  });
+  const { refetch: refetchStatus } = statusQuery;
 
-  // Reset state when agent changes
-  useEffect(() => {
-    setStatus(null);
-    setError(null);
-    setLoading(false);
-  }, [agentName]);
+  const refetch = useCallback(async () => {
+    if (!agentName) return;
+    await refetchStatus();
+  }, [agentName, refetchStatus]);
 
-  const doFetch = useCallback(async () => {
-    if (!agentName || fetchInProgressRef.current) return;
-
-    fetchInProgressRef.current = true;
-    setLoading((prev) => (prev ? prev : true));
-
-    try {
-      const result = await fetchGitStatus(workspaceId, agentName);
-      if (mountedRef.current) {
-        setStatus(result);
-        setError(null);
-      }
-    } catch (err) {
-      if (mountedRef.current) {
-        setError(err instanceof Error ? err : new Error(String(err)));
-      }
-    } finally {
-      fetchInProgressRef.current = false;
-      if (mountedRef.current) {
-        setLoading(false);
-      }
-    }
-  }, [workspaceId, agentName]);
-
-  useEffect(() => {
-    mountedRef.current = true;
-
-    if (!enabled || !agentName) return;
-
-    // Fetch immediately
-    void doFetch();
-
-    // Poll on interval
-    const intervalId = setInterval(doFetch, POLL_INTERVAL);
-
-    return () => {
-      mountedRef.current = false;
-      clearInterval(intervalId);
-    };
-  }, [enabled, agentName, doFetch]);
-
-  return { status, loading, error, refetch: doFetch };
+  return {
+    status: statusQuery.data ?? null,
+    loading: statusQuery.isFetching,
+    error: toError(statusQuery.error),
+    refetch,
+  };
 }

@@ -6,7 +6,6 @@ import "@testing-library/jest-dom";
 import {
   act,
   fireEvent,
-  render,
   screen,
   waitFor,
   within,
@@ -14,6 +13,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { FileEntry, FileReadData } from "@/api/workspace";
+import { renderWithQueryClient as render } from "@/test-utils";
 
 const mocks = vi.hoisted(() => ({
   showToast: vi.fn(),
@@ -941,6 +941,59 @@ describe("WorkspaceFileBrowser", () => {
     expect(mocks.indexScopedFiles).not.toHaveBeenCalled();
   });
 
+  it("does not refresh checkout, status, or diff data while inactive", async () => {
+    render(
+      <WorkspaceFileBrowser mode="agent" agentName="atlas" isActive={false} />,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.listFileCheckouts).not.toHaveBeenCalled();
+    expect(mocks.gitStatusScoped).not.toHaveBeenCalled();
+    expect(mocks.fetchDiffFiles).not.toHaveBeenCalled();
+  });
+
+  it("refreshes checkout, status, and diff data once when activated", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          exists: true,
+          change_count: 1,
+        },
+      ],
+    });
+
+    const { rerender } = render(
+      <WorkspaceFileBrowser mode="agent" agentName="atlas" isActive={false} />,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    rerender(
+      <WorkspaceFileBrowser mode="agent" agentName="atlas" isActive={true} />,
+    );
+
+    await waitFor(() => {
+      expect(mocks.listFileCheckouts).toHaveBeenCalledTimes(1);
+      expect(mocks.gitStatusScoped).toHaveBeenCalledTimes(1);
+      expect(mocks.fetchDiffFiles).toHaveBeenCalledTimes(1);
+    });
+    expect(mocks.gitStatusScoped).toHaveBeenCalledWith("ws-1", {
+      scope: "agent",
+      target: "atlas",
+      repo: "loomcli",
+    });
+    expect(mocks.fetchDiffFiles).toHaveBeenCalledWith("ws-1", "atlas", "HEAD");
+  });
+
   it("renders in compact layout at narrow embedded widths", async () => {
     const { container } = render(
       <div style={{ width: 500 }}>
@@ -1365,9 +1418,10 @@ describe("WorkspaceFileBrowser", () => {
 
     render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
 
-    fireEvent.contextMenu(
-      await screen.findByRole("button", { name: /^atlas/ }),
-    );
+    const repairButton = await screen.findByRole("button", {
+      name: /Repair checkout for atlas loomcli/,
+    });
+    fireEvent.contextMenu(repairButton.parentElement!);
     fireEvent.click(
       await screen.findByRole("menuitem", { name: "Repair checkout" }),
     );

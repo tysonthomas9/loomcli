@@ -4,13 +4,12 @@
  * Clickable to open the agent's terminal/logs tab.
  */
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useCallback } from "react";
 
-import { fetchGitStatus } from "@/hooks/api";
 import { useStore } from "zustand";
 
 import { useAgentStoreInstance } from "@/hooks/common";
-import { useWorkspaceContext } from "@/hooks/workspace";
+import { useGitStatus } from "@/hooks/workspace";
 import { parseLoomStatus, resolveAgentByName } from "@/types";
 import { getStatusDotColor, getStatusLabel } from "@/utils/agent";
 
@@ -40,44 +39,22 @@ export function AgentStatusBadge({
 }: AgentStatusBadgeProps): JSX.Element | null {
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
-  const { workspaceId } = useWorkspaceContext();
-  const [prBranch, setPrBranch] = useState<string | null>(null);
-  const mountedRef = useRef(true);
 
   // Look up agent by name (returns new ref each poll, so derive a stable boolean)
   const agent = resolveAgentByName(agents, agentName);
   const agentExists = !!agent;
 
-  // Reset PR state when agent changes
-  useEffect(() => {
-    setPrBranch(null);
-  }, [agentName]);
-
-  // Fetch git status for PR link detection
-  useEffect(() => {
-    mountedRef.current = true;
-
-    if (!agentExists) return;
-
-    const fetchPr = async () => {
-      try {
-        const status = await fetchGitStatus(workspaceId, agentName);
-        if (mountedRef.current && status.ahead > 0) {
-          setPrBranch(status.branch);
-        }
-      } catch {
-        // PR link is best-effort
-      }
-    };
-
-    fetchPr();
-    const interval = setInterval(fetchPr, PR_POLL_INTERVAL);
-
-    return () => {
-      mountedRef.current = false;
-      clearInterval(interval);
-    };
-  }, [agentName, agentExists]);
+  // Fetch git status for PR link detection via the shared git-status query.
+  // Polling at PR_POLL_INTERVAL (coarser than the Git tab's 5s) keeps request
+  // volume down, while sharing agentQueryKeys.agentGitStatus means React Query
+  // dedupes this against the Git tab when both are open. The query key is scoped
+  // by agentName, so switching agents resets the derived PR state automatically.
+  const { status } = useGitStatus({
+    agentName,
+    enabled: agentExists,
+    pollInterval: PR_POLL_INTERVAL,
+  });
+  const prBranch = status && status.ahead > 0 ? status.branch : null;
 
   const handleClick = useCallback(() => {
     onOpenTerminal?.(agentName);

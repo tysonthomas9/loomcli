@@ -87,6 +87,15 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 		return nil, err
 	}
 	roleKind := domain.ResolveRoleKind(role, agent.RoleName)
+	backend := ""
+	backendResolved := false
+	resolveBackend := func(forAgent *domain.Agent) string {
+		if !backendResolved {
+			backend = agentLaunchBackend(ctx, st, workspace, forAgent, role)
+			backendResolved = true
+		}
+		return backend
+	}
 
 	if isDaemonOwnedEphemeralWorker(agent, roleKind) {
 		return nil, service.ErrValidation("daemon-owned ephemeral worker terminals cannot be started from the agents page; use worker logs or task session history")
@@ -97,29 +106,37 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 		return nil, err
 	}
 	existing := selectAgentTerminalTab(tabs, agentName)
-	if existing != nil && existing.PTYAlive {
-		// Cache-validity check: if the agent's effective backend/role has
-		// changed since the existing tab was built, the cached launch spec
-		// is stale (e.g. agent was created with no backend, workspace
-		// default was codex, then user set agent.backend = claude). The
-		// running PTY is still on the old backend. Rebuild a candidate
-		// spec and compare argv; if they differ, fall through to the
-		// rebuild path which will issue a fresh tab metadata. The stale
-		// PTY is killed by svc.PutTab → reattach when the user reloads.
-		if !agentTerminalLaunchSpecStale(ctx, st, workspace, existing, agent) {
-			return existing, nil
-		}
+	if maybeReuseExistingAgentTerminalTab(workspace, existing, agent, role, resolveBackend) {
+		return existing, nil
 	}
 	if !agentTerminalLaunchAllowed(agent, roleKind) {
 		return inactiveAgentTerminalSession(ctx, svc, workspace, existing)
 	}
 
+	return rebuildAgentTerminalTab(ctx, svc, st, workspace, agentName, tabs, existing, agent, roleKind, role, resolveBackend)
+}
+
+// rebuildAgentTerminalTab builds a fresh launch spec for the agent, persists the
+// resulting terminal tab (replacing any stale one), prunes superseded tabs, and
+// returns the persisted metadata.
+func rebuildAgentTerminalTab(
+	ctx context.Context,
+	svc service.TerminalService,
+	st store.Store,
+	workspace, agentName string,
+	tabs []tabmeta.TabMetadata,
+	existing *tabmeta.TabMetadata,
+	agent *domain.Agent,
+	roleKind domain.RoleKind,
+	role *domain.Role,
+	resolveBackend func(*domain.Agent) string,
+) (*tabmeta.TabMetadata, error) {
 	sessionName, label, sortOrder := newAgentTerminalTabPlacement(tabs, existing, agentName)
 	agentForLaunch, orchestratorID, err := ensureTerminalOrchestratorLink(ctx, st, workspace, sessionName, agent, roleKind)
 	if err != nil {
 		return nil, err
 	}
-	launch, backend, err := buildAgentLaunchSpec(ctx, st, workspace, sessionName, &agentForLaunch, orchestratorID)
+	launch, backend, err := buildAgentLaunchSpecResolved(workspace, sessionName, &agentForLaunch, orchestratorID, role, resolveBackend(&agentForLaunch))
 	if err != nil {
 		return nil, err
 	}
@@ -132,18 +149,38 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 	return svc.GetTab(ctx, workspace, sessionName)
 }
 
-// agentTerminalLaunchSpecStale returns true when the existing tab's cached
+// maybeReuseExistingAgentTerminalTab reports whether the existing live PTY tab
+// can be returned as-is. Cache-validity check: if the agent's effective
+// backend/role has changed since the tab was built (e.g. agent created with no
+// backend, workspace default codex, then user set agent.backend = claude), the
+// cached launch spec is stale and the running PTY is still on the old backend;
+// callers fall through to the rebuild path, which issues fresh tab metadata (the
+// stale PTY is killed by svc.PutTab → reattach when the user reloads).
+func maybeReuseExistingAgentTerminalTab(
+	workspace string,
+	existing *tabmeta.TabMetadata,
+	agent *domain.Agent,
+	role *domain.Role,
+	resolveBackend func(*domain.Agent) string,
+) bool {
+	if existing == nil || !existing.PTYAlive || existing.Launch == nil {
+		return false
+	}
+	return !agentTerminalLaunchSpecStaleResolved(workspace, existing, agent, role, resolveBackend(agent))
+}
+
+// agentTerminalLaunchSpecStaleResolved returns true when the existing tab's cached
 // launch spec no longer matches what would be built for the current agent
 // state. Common trigger: agent.backend was patched after the terminal
 // session was created, so the cached argv has no --backend flag but the
 // next render would include it. Without this check, the stale spec is
 // returned indefinitely and the running PTY never picks up the change.
-func agentTerminalLaunchSpecStale(
-	ctx context.Context,
-	st store.Store,
+func agentTerminalLaunchSpecStaleResolved(
 	workspace string,
 	existing *tabmeta.TabMetadata,
 	agent *domain.Agent,
+	role *domain.Role,
+	backend string,
 ) bool {
 	if existing == nil || existing.Launch == nil {
 		return true
@@ -153,7 +190,7 @@ func agentTerminalLaunchSpecStale(
 	// per-session ids that legitimately differ and shouldn't trigger churn.
 	// Pass empty orchestratorID — the argv doesn't include it (it's an env
 	// var only), so the stale-check is unaffected by the orchestrator.
-	candidate, _, err := buildAgentLaunchSpec(ctx, st, workspace, existing.SessionName, agent, "")
+	candidate, _, err := buildAgentLaunchSpecResolved(workspace, existing.SessionName, agent, "", role, backend)
 	if err != nil || candidate == nil {
 		return false
 	}
@@ -312,17 +349,12 @@ func pruneStaleAgentTerminalTabs(ctx context.Context, svc service.TerminalServic
 	}
 }
 
-// buildAgentLaunchSpec constructs the PTY launch spec for an agent terminal.
+// buildAgentLaunchSpecResolved constructs the PTY launch spec for an agent terminal.
 // orchestratorID is the lead → orchestration session id resolved by
 // ensureTerminalOrchestratorLink. It is passed in rather than read off the
 // agent struct because AgentSession is the single source of truth.
-func buildAgentLaunchSpec(ctx context.Context, st store.Store, workspace, sessionName string, agent *domain.Agent, orchestratorID string) (*tabmeta.LaunchSpec, string, error) {
-	role, err := loadAgentLaunchRole(ctx, st, workspace, agent.RoleName)
-	if err != nil {
-		return nil, "", err
-	}
+func buildAgentLaunchSpecResolved(workspace, sessionName string, agent *domain.Agent, orchestratorID string, role *domain.Role, backend string) (*tabmeta.LaunchSpec, string, error) {
 	roleKind := domain.ResolveRoleKind(role, agent.RoleName)
-	backend := agentLaunchBackend(ctx, st, workspace, agent, role)
 	commandArgs, err := agentLaunchCommandArgs(roleKind, agent, role)
 	if err != nil {
 		return nil, "", err

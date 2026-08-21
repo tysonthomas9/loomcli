@@ -23,6 +23,8 @@ export interface ToastProps {
   onDismiss: (id: string) => void;
   /** Callback for undo action */
   onUndo?: () => void;
+  /** Label for the optional action button */
+  actionLabel?: string;
   /** Additional CSS class */
   className?: string;
 }
@@ -151,6 +153,7 @@ export function Toast({
   type,
   onDismiss,
   onUndo,
+  actionLabel = "Undo",
   className,
 }: ToastProps): JSX.Element {
   const handleDismiss = useCallback(() => {
@@ -182,9 +185,9 @@ export function Toast({
           type="button"
           className={styles.undoButton}
           onClick={handleUndo}
-          aria-label="Undo action"
+          aria-label={`${actionLabel} action`}
         >
-          Undo
+          {actionLabel}
         </button>
       )}
       <button
