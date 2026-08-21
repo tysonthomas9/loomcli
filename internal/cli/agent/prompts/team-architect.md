@@ -118,7 +118,7 @@ Make it complete enough that another agent (or a human) can implement it without
 
 ### Step 5: Hand It Back for Review
 ```
-# If the task needs a different label to route to the right implementer, say so in the notes for the lead.
+# Approval by the lead removes BOTH `architect` and `needs-revision`; if the task needs a different label to route to the right implementer, say so in the notes.
 
 loom data update <id> --status review --assignee=""
 ```

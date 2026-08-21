@@ -90,9 +90,9 @@ Commit meaningful partial work first, then run 'loom complete' and EXIT. Blocked
 **Step 6b — The design is unviable** (it can move forward, but the spec has to change):
 ```
 loom data update <id> --notes "NEEDS-REVISION: <what is wrong with the design + the concrete direction the next version should take + evidence>"
-loom data update <id> --status open --add-label needs-revision --assignee=""
+loom data update <id> --status open --add-label needs-revision --add-label architect --assignee ""
 ```
-Commit salvageable work, run 'loom complete', and EXIT. The design agent role picks it up from your feedback.
+Adding both labels routes the task back to the architect. Commit salvageable work, run 'loom complete', and EXIT. The design agent role picks it up from your feedback.
 
 If you cannot tell which applies, prefer 6b: it is non-terminal and cheaper than waiting on a human.
 

@@ -2,7 +2,7 @@ schema_version: 1
 id: fullstack-app
 label: Full-Stack App Development
 description: Architect-led team with split frontend/backend implementers plus a QA and review pair.
-revision: 1
+revision: 2
 
 roles:
   # Design role: task_filter "any" + a required label. NEVER needs_plan/needs_design —
@@ -24,7 +24,7 @@ roles:
     description: Implements UI tasks against an approved design spec; verifies loading/empty/error states and accessibility basics.
     prompt_file: builtin:team-frontend-dev
     task_filter: has_design
-    exclude_labels: [architect]
+    exclude_labels: [architect, qa]
     effort: medium
     skills: [frontend, ui]
 
@@ -34,19 +34,21 @@ roles:
     description: Implements server-side tasks against the design's API contract; extends tests for changed behavior.
     prompt_file: builtin:team-backend-dev
     task_filter: has_design
-    exclude_labels: [architect]
+    exclude_labels: [architect, qa]
     effort: medium
     skills: [backend, api]
 
   # denied_tools stays EMPTY: only claude enforces tool lists and a non-empty list is a
   # hard error on every other backend. Intended-but-unshipped deny patterns:
   # push/deploy-shaped Bash. The restraint is stated in builtin:team-qa's prose instead.
+  # QA claims only `qa`-labeled tasks (filed by the lead or by implementers); implementers never claim them.
   - name: qa-engineer
     kind: worker
     display_label: QA
     description: Writes and runs unit, e2e, integration and contract tests against a task's acceptance criteria and files defects as follow-up tasks.
     prompt_file: builtin:team-qa
-    task_filter: has_design
+    task_filter: any
+    labels: [qa]
     exclude_labels: [architect]
     effort: medium
     skills: [qa, testing, integration]

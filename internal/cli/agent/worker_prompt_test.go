@@ -110,6 +110,56 @@ func TestWorkerPromptsWithoutPreClaimedTask(t *testing.T) {
 	}
 }
 
+func TestTeamPromptsRouteDesignRevisionsToArchitect(t *testing.T) {
+	isolatePromptOverrides(t)
+
+	for _, id := range []string{
+		"team-frontend-dev",
+		"team-backend-dev",
+		"team-agent-dev",
+		"team-data-engineer",
+		"team-content-writer",
+		"team-qa",
+		"team-eval-engineer",
+	} {
+		t.Run(id, func(t *testing.T) {
+			prompt, err := generateWorkerPrompt(id, fullWorkerPromptData())
+			if err != nil {
+				t.Fatalf("generateWorkerPrompt(%q) error = %v", id, err)
+			}
+			want := `--status open --add-label needs-revision --add-label architect --assignee ""`
+			if !strings.Contains(prompt, want) {
+				t.Errorf("prompt missing architect revision route %q", want)
+			}
+		})
+	}
+}
+
+func TestTeamQAPromptUsesQALaneForSelfSelectionAndArchitectLaneForDefects(t *testing.T) {
+	isolatePromptOverrides(t)
+
+	data := fullWorkerPromptData()
+	data.TaskID = ""
+	data.TaskDetail = ""
+	prompt, err := generateWorkerPrompt("team-qa", data)
+	if err != nil {
+		t.Fatalf("generateWorkerPrompt(%q) error = %v", "team-qa", err)
+	}
+	for _, want := range []string{
+		"You claim ONLY tasks carrying the `qa` label.",
+		`index("qa")`,
+		`index("architect")) | not`,
+		"--parent <epic-id> --label architect",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("QA prompt missing lane contract %q", want)
+		}
+	}
+	if strings.Contains(prompt, "tasks without a design") {
+		t.Error("QA self-selection still requires a design")
+	}
+}
+
 // TestDesignPromptsUseWorkspaceDesignFormat is the .DesignFormat trap from
 // §10.8, from the other direction: the design-producing bodies DO need the
 // field, which is why PromptData now carries it.

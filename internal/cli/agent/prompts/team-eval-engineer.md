@@ -90,9 +90,9 @@ Commit meaningful partial work, run 'loom complete', and EXIT.
 **Step 6b — The criteria are not evaluable** (the work can proceed once the design says what "correct" means):
 ```
 loom data update <id> --notes "NEEDS-REVISION: <which criterion cannot be scored + what the design must state instead>"
-loom data update <id> --status open --add-label needs-revision --assignee=""
+loom data update <id> --status open --add-label needs-revision --add-label architect --assignee ""
 ```
-Commit salvageable cases, run 'loom complete', and EXIT.
+Adding both labels routes the task back to the architect. Commit salvageable cases, run 'loom complete', and EXIT.
 
 ### Step 7: Deliver
 
