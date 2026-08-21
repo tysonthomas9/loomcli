@@ -17,6 +17,13 @@ const POLL_INTERVAL = 5000; // 5 seconds
 export interface UseGitStatusOptions {
   agentName: string | null;
   enabled: boolean;
+  /**
+   * Poll cadence in ms while the query is active. Defaults to 5s. Consumers
+   * that only need coarse freshness (e.g. the PR-link badge) can pass a longer
+   * interval; they still share the same query key, so React Query dedupes their
+   * fetches against any 5s consumer that is mounted at the same time.
+   */
+  pollInterval?: number;
 }
 
 export interface UseGitStatusReturn {
@@ -34,6 +41,7 @@ function toError(error: unknown): Error | null {
 export function useGitStatus({
   agentName,
   enabled,
+  pollInterval = POLL_INTERVAL,
 }: UseGitStatusOptions): UseGitStatusReturn {
   const { workspaceId } = useWorkspaceContext();
   const canFetch = enabled && !!agentName;
@@ -41,7 +49,7 @@ export function useGitStatus({
     queryKey: agentQueryKeys.agentGitStatus(workspaceId, agentName ?? ""),
     queryFn: () => fetchGitStatus(workspaceId, agentName ?? ""),
     enabled: canFetch,
-    refetchInterval: canFetch ? POLL_INTERVAL : false,
+    refetchInterval: canFetch ? pollInterval : false,
   });
   const { refetch: refetchStatus } = statusQuery;
 

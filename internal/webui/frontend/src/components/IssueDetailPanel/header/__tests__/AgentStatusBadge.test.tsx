@@ -6,12 +6,18 @@
  * Unit tests for AgentStatusBadge component.
  */
 
-import { render, screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import "@testing-library/jest-dom";
 
+// The badge fetches git status through useGitStatus (React Query), so every
+// render must be wrapped in a QueryClientProvider.
+import { renderWithQueryClient as render } from "@/test-utils";
+
 import { AgentStatusBadge } from "../AgentStatusBadge";
+import { fetchGitStatus } from "@/api/workspace";
+import type { GitStatus } from "@/api/workspace";
 import type { LoomAgentStatus } from "@/types";
 
 // Mutable mock agents array — tests configure via mockGetAgentByName helper
@@ -52,6 +58,24 @@ function makeAgent(name: string, status: string): LoomAgentStatus {
     status,
     ahead: 0,
     behind: 0,
+  };
+}
+
+/**
+ * Helper to build a git-status payload for the PR-link (ahead) branch.
+ */
+function makeGitStatus(overrides: Partial<GitStatus> = {}): GitStatus {
+  return {
+    branch: "worktrees/nova",
+    target_branch: "main",
+    is_clean: true,
+    ahead: 0,
+    behind: 0,
+    changed_files: [],
+    conflicted_files: [],
+    has_conflicts: false,
+    stash_count: 0,
+    ...overrides,
   };
 }
 
@@ -137,6 +161,49 @@ describe("AgentStatusBadge", () => {
       // Should not have any duration element
       const badge = screen.getByTestId("agent-status-badge");
       expect(badge.querySelectorAll("[class*='duration']")).toHaveLength(0);
+    });
+  });
+
+  describe("PR link (git status)", () => {
+    it("shows the pushed-commits icon when the agent is ahead", async () => {
+      mockGetAgentByName.mockReturnValue(
+        makeAgent("nova", "working: LOOM-100 (5m)"),
+      );
+      vi.mocked(fetchGitStatus).mockResolvedValueOnce(
+        makeGitStatus({ ahead: 2 }),
+      );
+
+      render(<AgentStatusBadge agentName="nova" />);
+
+      expect(
+        await screen.findByLabelText("Has pushed commits"),
+      ).toBeInTheDocument();
+    });
+
+    it("clears the icon when a later poll reports the agent is no longer ahead", async () => {
+      mockGetAgentByName.mockReturnValue(
+        makeAgent("nova", "working: LOOM-100 (5m)"),
+      );
+      // First fetch reports ahead (icon shows); the refetch reports not-ahead.
+      vi.mocked(fetchGitStatus)
+        .mockResolvedValueOnce(makeGitStatus({ ahead: 2 }))
+        .mockResolvedValueOnce(makeGitStatus({ ahead: 0 }));
+
+      const { queryClient } = render(<AgentStatusBadge agentName="nova" />);
+
+      // Icon appears once the first (ahead) fetch settles — proves the ahead path.
+      expect(
+        await screen.findByLabelText("Has pushed commits"),
+      ).toBeInTheDocument();
+
+      // Force a refetch that reports ahead=0; the derived icon must disappear.
+      // (Guards against a regression that derives prBranch without checking ahead.)
+      await queryClient.invalidateQueries();
+      await waitFor(() =>
+        expect(
+          screen.queryByLabelText("Has pushed commits"),
+        ).not.toBeInTheDocument(),
+      );
     });
   });
 
