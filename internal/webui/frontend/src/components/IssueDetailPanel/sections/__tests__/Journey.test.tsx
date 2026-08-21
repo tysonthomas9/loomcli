@@ -97,6 +97,93 @@ describe("Journey", () => {
     );
   });
 
+  it.each([
+    ["live", [event()]],
+    [
+      "closed",
+      [
+        event(),
+        event({
+          id: "1787248805000-0",
+          event_type: "issue.close",
+          created_at: "2026-08-20T12:00:05.000Z",
+        }),
+      ],
+    ],
+  ] as const)(
+    "does not announce the first %s journey after the panel begins empty",
+    (_kind, events) => {
+      const { rerender } = render(<Journey eventLimit={200} events={[]} />);
+      const liveRegion = screen.getByTestId("journey-stage-announcement");
+
+      rerender(<Journey eventLimit={200} events={events} />);
+
+      expect(liveRegion).toBeEmptyDOMElement();
+    },
+  );
+
+  it("does not announce a previous stage when switching issues in one panel", () => {
+    const { rerender } = render(
+      <Journey eventLimit={200} events={[event()]} />,
+    );
+    const liveRegion = screen.getByTestId("journey-stage-announcement");
+
+    rerender(
+      <Journey
+        eventLimit={200}
+        events={[
+          event(),
+          event({
+            id: "1787248805000-0",
+            event_type: "issue.update",
+            created_at: "2026-08-20T12:00:05.000Z",
+            changes: [{ field: "status", before: "open", after: "blocked" }],
+          }),
+        ]}
+      />,
+    );
+    expect(liveRegion).toHaveTextContent(
+      "Journey updated: Blocked, owned by alice.",
+    );
+
+    rerender(
+      <Journey
+        eventLimit={200}
+        events={[
+          event({ issue_id: "loom-2" }),
+          event({
+            id: "1787248805000-0",
+            issue_id: "loom-2",
+            event_type: "issue.close",
+            created_at: "2026-08-20T12:00:05.000Z",
+          }),
+        ]}
+      />,
+    );
+
+    expect(liveRegion).toBeEmptyDOMElement();
+  });
+
+  it("does not announce a closed journey on mount", () => {
+    render(
+      <Journey
+        eventLimit={200}
+        events={[
+          event(),
+          event({
+            id: "1787248805000-0",
+            event_type: "issue.close",
+            created_at: "2026-08-20T12:00:05.000Z",
+          }),
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByTestId("journey-stage-announcement"),
+    ).toBeEmptyDOMElement();
+  });
+
   it("keeps a newly arrived live 0s span, now-line, and announcement visible", () => {
     const { rerender } = render(
       <Journey eventLimit={200} events={[event()]} />,
@@ -129,6 +216,37 @@ describe("Journey", () => {
     expect(screen.getByTestId("journey-stage-announcement")).toHaveTextContent(
       "Journey updated: Review, owned by alice.",
     );
+  });
+
+  it("re-phases the live clock when a new stage begins", () => {
+    const { rerender } = render(
+      <Journey eventLimit={200} events={[event()]} />,
+    );
+
+    act(() => vi.advanceTimersByTime(800));
+    rerender(
+      <Journey
+        eventLimit={200}
+        events={[
+          event(),
+          event({
+            id: "1787248810800-0",
+            event_type: "issue.update",
+            created_at: "2026-08-20T12:00:10.800Z",
+            changes: [{ field: "status", before: "open", after: "review" }],
+          }),
+        ]}
+      />,
+    );
+
+    const liveSpan = screen.getAllByTestId("journey-span").at(-1);
+    expect(within(liveSpan as HTMLElement).getByText("0s")).toBeInTheDocument();
+
+    act(() => vi.advanceTimersByTime(999));
+    expect(within(liveSpan as HTMLElement).getByText("0s")).toBeInTheDocument();
+
+    act(() => vi.advanceTimersByTime(1));
+    expect(within(liveSpan as HTMLElement).getByText("1s")).toBeInTheDocument();
   });
 
   it("warns about earlier history only when the response fills its limit", () => {
@@ -185,7 +303,7 @@ describe("Journey", () => {
     expect(within(spans[2]).getByText("0s")).toBeInTheDocument();
   });
 
-  it("announces a new stage politely without changing the announcement on ticks", () => {
+  it("does not announce a live journey on mount, then announces a new stage once", () => {
     const { rerender } = render(
       <Journey eventLimit={200} events={[event()]} />,
     );

@@ -81,6 +81,7 @@ export function Journey({ events, eventLimit }: JourneyProps): JSX.Element {
   const liveSpanRef = useRef<HTMLElement>(null);
   const positionedJourneyRef = useRef<string | null>(null);
   const previousStageIdentityRef = useRef<string | null | undefined>(undefined);
+  const shownJourneyIdentityRef = useRef<string | null | undefined>(undefined);
   const foldedSpans = useMemo(
     () => foldJourney(events, nowMs),
     [events, nowMs],
@@ -109,10 +110,11 @@ export function Journey({ events, eventLimit }: JourneyProps): JSX.Element {
     eventLimit > 0 && events.length >= eventLimit;
 
   useEffect(() => {
-    if (!isLive) return undefined;
+    if (liveSpanStart === null) return undefined;
+    setNowMs(Date.now());
     const interval = setInterval(() => setNowMs(Date.now()), LIVE_TICK_MS);
     return () => clearInterval(interval);
-  }, [isLive]);
+  }, [liveSpanStart]);
 
   useLayoutEffect(() => {
     const rail = railRef.current;
@@ -146,17 +148,27 @@ export function Journey({ events, eventLimit }: JourneyProps): JSX.Element {
   }, [isLive, journeyIdentity, liveSpanStart, spans.length]);
 
   useEffect(() => {
+    if (latestStage === null || latestStageIdentity === null) {
+      previousStageIdentityRef.current = latestStageIdentity;
+      shownJourneyIdentityRef.current = undefined;
+      setStageAnnouncement(null);
+      return;
+    }
+
     const previousIdentity = previousStageIdentityRef.current;
     previousStageIdentityRef.current = latestStageIdentity;
 
-    // The initial contents describe existing history. Announce only a stage
-    // that appears after the component is already being observed.
+    // The first non-empty Journey for an issue describes existing history.
+    // Announce only a stage that appears after that baseline is visible.
+    const isFirstShownJourney =
+      shownJourneyIdentityRef.current !== journeyIdentity;
+    shownJourneyIdentityRef.current = journeyIdentity;
     if (
+      isFirstShownJourney ||
       previousIdentity === undefined ||
-      latestStage === null ||
-      latestStageIdentity === null ||
       latestStageIdentity === previousIdentity
     ) {
+      if (isFirstShownJourney) setStageAnnouncement(null);
       return;
     }
 
@@ -165,7 +177,7 @@ export function Journey({ events, eventLimit }: JourneyProps): JSX.Element {
       id: latestStageIdentity,
       message: `Journey updated: ${latestStage}, ${owner}.`,
     });
-  }, [latestOwner, latestStage, latestStageIdentity]);
+  }, [journeyIdentity, latestOwner, latestStage, latestStageIdentity]);
 
   return (
     <section className={styles.section} data-testid="task-journey">
