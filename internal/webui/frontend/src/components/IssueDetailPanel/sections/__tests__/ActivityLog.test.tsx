@@ -270,7 +270,7 @@ describe("ActivityLog", () => {
       ).not.toBeInTheDocument();
     });
 
-    it("uses Journey's Stuck label for an agent-declared blocked status", () => {
+    it("uses the shared Blocked label for an agent-declared blocked status", () => {
       const events = [
         createTestEvent({
           id: 1,
@@ -291,9 +291,8 @@ describe("ActivityLog", () => {
       );
 
       expect(
-        screen.getByText("alice changed status from In Progress to Stuck"),
+        screen.getByText("alice changed status from In Progress to Blocked"),
       ).toBeInTheDocument();
-      expect(screen.queryByText(/to Blocked$/)).not.toBeInTheDocument();
     });
 
     it("describes an empty assignment as an unassignment", () => {

@@ -36,22 +36,6 @@
   min-height: 80px;
 }
 
-.edgeSentinel {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  pointer-events: none;
-}
-
-.edgeSentinelStart {
-  left: 0;
-}
-
-.edgeSentinelEnd {
-  right: 0;
-}
-
 .edgeCue {
   position: absolute;
   top: 1px;
@@ -133,8 +117,8 @@
   --journey-stage-color: var(--color-journey-in-progress);
 }
 
-.span[data-stage="stuck"] {
-  --journey-stage-color: var(--color-journey-stuck);
+.span[data-stage="blocked"] {
+  --journey-stage-color: var(--color-journey-blocked);
 }
 
 .span[data-stage="deferred"] {
@@ -169,7 +153,7 @@
   width: 13px;
   height: 13px;
   flex: 0 0 13px;
-  color: var(--color-journey-stuck);
+  color: var(--color-journey-blocked);
 }
 
 .owner,

@@ -208,8 +208,8 @@ export function foldJourney(
   // remains state.current while later events are processed, and its ownership
   // changes remain available to the Closed marker. Live spans and the explicit
   // zero-length Closed marker are deliberately retained. A live sub-resolution
-  // span is retained here to keep its clock running; Journey withholds it from
-  // the rail until the shared formatter can express its duration.
+  // span is retained so Journey can render the current stage and its running
+  // clock immediately at 0s.
   return spans
     .filter(
       (span) =>

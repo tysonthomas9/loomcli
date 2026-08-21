@@ -8,9 +8,9 @@ import { useMemo } from "react";
 
 import { formatDate } from "@/components/table";
 import type { Comment, Event, EventType } from "@/types";
+import { formatStatusLabel } from "@/utils/issue";
 
 import { AuthorAvatar } from "./AuthorAvatar";
-import { formatJourneyStatusLabel } from "./journeyPresentation";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import styles from "./ActivityLog.module.css";
 
@@ -34,9 +34,9 @@ function describeEvent(event: Event): string {
     const before = statusChange?.before?.trim();
     const after = statusChange?.after?.trim();
     if (after) {
-      const destination = formatJourneyStatusLabel(after);
+      const destination = formatStatusLabel(after);
       return before
-        ? `${who} changed status from ${formatJourneyStatusLabel(before)} to ${destination}`
+        ? `${who} changed status from ${formatStatusLabel(before)} to ${destination}`
         : `${who} changed status to ${destination}`;
     }
   }
@@ -65,7 +65,7 @@ function describeEvent(event: Event): string {
       return `${who} created this issue`;
     case "issue.status_changed":
       if (old_value && new_value) {
-        return `${who} changed status from ${formatJourneyStatusLabel(old_value)} to ${formatJourneyStatusLabel(new_value)}`;
+        return `${who} changed status from ${formatStatusLabel(old_value)} to ${formatStatusLabel(new_value)}`;
       }
       return `${who} changed the status`;
     case "issue.closed":

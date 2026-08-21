@@ -104,29 +104,36 @@ isolation-*shaped* features are not isolation:
 mechanisms, the Daytona remote-isolation path, and an explicit list of what is
 not isolation.
 
-## Blocked, Stuck, and Stage
+## Blocked, and the word "stage"
 
-Three of these words collided before any of them were written down. The issue
-status literal is unchanged in all of the below — only the display name and the
-concept boundary are settled here.
+**"Blocked" means two things, deliberately.** The alternative was considered and
+rejected: for a while the issue-status sense was displayed as "Stuck", and that
+was reversed — one word, told apart by where you are looking.
 
-- **Blocked** (dependency sense): an issue that cannot start because issues it
+- **A task's own status.** The issue status literal `blocked`: a worker parked
+  the task and declared a blocker, so a person or another system has to act.
+  This is what the status pill, the Kanban column and the Journey stage show,
+  and it is `blocked` on the wire, in `PatchIssueRequest`, and in fleet-db.
+- **A dependency relationship.** An issue that cannot start because issues it
   depends on are still open. `BlockedBadge` renders "Blocked by N issues" on
-  Kanban cards, and bottleneck views derive from the same dependency edges.
-  This sense keeps the word "Blocked".
-- **Stuck** (agent-declared sense): a worker parked the task and declared a
-  blocker of its own — a person or another system has to act. This is the issue
-  status literal `blocked`, and it stays `blocked` in the API, in fleet-db, and
-  in `PatchIssueRequest`. It reads **Stuck** on screen, which is where Journey
-  names the stage. Nothing renames the dependency sense.
+  Kanban cards, and bottleneck views derive from the same `blocked_by` edges.
+
+Nothing translates between them, and no UI surface should invent a third word.
+The disambiguator is grammatical: the dependency sense always names what is
+blocking ("Blocked by …"), while the status sense stands alone. The status
+sense also carries an attention marker on the Journey rail, because it is the
+one that needs a human.
+
+A third thing borrows the word without being either:
+
 - **`task.stuck`** (`internal/events`, `TaskStuckData`): a daemon event for a
   task that failed repeatedly across consecutive auto-mode invocations and was
-  skipped so the loop could make progress elsewhere. Same word, different
-  trigger: the loop gave up, the agent declared nothing. It is not an issue
-  status, and it does not set one.
+  skipped so the loop could make progress elsewhere. The loop gave up; the agent
+  declared nothing. It is not an issue status, it does not set one, and
+  `AgentState` `"stuck"` in the web UI is this and not the above.
 
 The rate-limit circuit breaker emits `circuit.opened` / `circuit.closed`, not a
-third kind of "blocked".
+fourth kind of "blocked".
 
 ### Stage vs phase
 

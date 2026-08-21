@@ -94,7 +94,7 @@ describe("foldJourney", () => {
     });
   });
 
-  it("labels an agent-declared blocked status as Stuck", () => {
+  it("labels an agent-declared blocked status as Blocked", () => {
     const spans = foldJourney(
       [
         event(0, "issue.create"),
@@ -110,12 +110,11 @@ describe("foldJourney", () => {
     );
 
     expect(spans.at(-1)).toMatchObject({
-      stage: "Stuck",
+      stage: "Blocked",
       owner: "worker-1",
       end: null,
       durationMs: 15_000,
     });
-    expect(spans.map(({ stage }) => stage)).not.toContain("Blocked");
   });
 
   it.each(["issue.defer", "issue.deferred"])(

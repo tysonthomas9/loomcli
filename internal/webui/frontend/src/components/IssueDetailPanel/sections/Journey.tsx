@@ -78,8 +78,6 @@ export function Journey({ events, eventLimit }: JourneyProps): JSX.Element {
   const [stageAnnouncement, setStageAnnouncement] =
     useState<StageAnnouncement | null>(null);
   const railRef = useRef<HTMLDivElement>(null);
-  const startEdgeRef = useRef<HTMLSpanElement>(null);
-  const endEdgeRef = useRef<HTMLSpanElement>(null);
   const liveSpanRef = useRef<HTMLElement>(null);
   const positionedJourneyRef = useRef<string | null>(null);
   const previousStageIdentityRef = useRef<string | null | undefined>(undefined);
@@ -91,13 +89,14 @@ export function Journey({ events, eventLimit }: JourneyProps): JSX.Element {
     () =>
       foldedSpans.filter(
         (span) =>
+          span.end === null ||
           span.stage === "Closed" ||
           hasDisplayableJourneyDuration(span.durationMs),
       ),
     [foldedSpans],
   );
   const liveSpanStart =
-    foldedSpans.find((span) => span.end === null)?.start ?? null;
+    spans.find((span) => span.end === null)?.start ?? null;
   const isLive = liveSpanStart !== null;
   const journeyIdentity = events[0]?.issue_id ?? null;
   const latestSpan = spans[spans.length - 1] ?? null;
@@ -147,40 +146,6 @@ export function Journey({ events, eventLimit }: JourneyProps): JSX.Element {
   }, [isLive, journeyIdentity, liveSpanStart, spans.length]);
 
   useEffect(() => {
-    const rail = railRef.current;
-    const startEdge = startEdgeRef.current;
-    const endEdge = endEdgeRef.current;
-    if (!rail || !startEdge || !endEdge) return undefined;
-
-    if (typeof IntersectionObserver !== "function") return undefined;
-
-    const visibility = { start: true, end: true };
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.target === startEdge) {
-            visibility.start = entry.isIntersecting;
-          } else if (entry.target === endEdge) {
-            visibility.end = entry.isIntersecting;
-          }
-        }
-
-        const nextEdges = {
-          left: !visibility.start,
-          right: !visibility.end,
-        };
-        setOverflowEdges((current) =>
-          sameOverflowEdges(current, nextEdges) ? current : nextEdges,
-        );
-      },
-      { root: rail, threshold: 1 },
-    );
-    observer.observe(startEdge);
-    observer.observe(endEdge);
-    return () => observer.disconnect();
-  }, [journeyIdentity, spans.length]);
-
-  useEffect(() => {
     const previousIdentity = previousStageIdentityRef.current;
     previousStageIdentityRef.current = latestStageIdentity;
 
@@ -217,18 +182,19 @@ export function Journey({ events, eventLimit }: JourneyProps): JSX.Element {
             role="region"
             aria-label="Task journey stages"
             tabIndex={0}
+            onScroll={(scrollEvent) => {
+              const nextEdges = overflowEdgesFor(scrollEvent.currentTarget);
+              setOverflowEdges((current) =>
+                sameOverflowEdges(current, nextEdges) ? current : nextEdges,
+              );
+            }}
           >
             <div className={styles.track}>
-              <span
-                ref={startEdgeRef}
-                className={`${styles.edgeSentinel} ${styles.edgeSentinelStart}`}
-                aria-hidden="true"
-              />
               {spans.map((span, index) => {
                 const isLiveSpan = span.end === null;
-                const isStuck = span.stage === "Stuck";
+                const isBlocked = span.stage === "Blocked";
                 const duration = formatJourneyDuration(span.durationMs);
-                const accessibleName = `${span.stage}${isStuck ? " · Human action required" : ""} · ${span.owner ?? "Unassigned"} · ${duration}`;
+                const accessibleName = `${span.stage}${isBlocked ? " · Human action required" : ""} · ${span.owner ?? "Unassigned"} · ${duration}`;
                 return (
                   <article
                     // Repeated stages are valid after release/reopen, so
@@ -242,7 +208,7 @@ export function Journey({ events, eventLimit }: JourneyProps): JSX.Element {
                     title={accessibleName}
                   >
                     <span className={styles.stageRow}>
-                      {isStuck && <AttentionIcon />}
+                      {isBlocked && <AttentionIcon />}
                       <span className={styles.stage}>{span.stage}</span>
                     </span>
                     <span className={styles.owner}>
@@ -262,11 +228,6 @@ export function Journey({ events, eventLimit }: JourneyProps): JSX.Element {
                   </article>
                 );
               })}
-              <span
-                ref={endEdgeRef}
-                className={`${styles.edgeSentinel} ${styles.edgeSentinelEnd}`}
-                aria-hidden="true"
-              />
             </div>
           </div>
           <span

@@ -1,9 +1,7 @@
-import { formatStatusLabel } from "@/utils/issue";
-
 export type JourneyStage =
   | "Open"
   | "In progress"
-  | "Stuck"
+  | "Blocked"
   | "Deferred"
   | "Review"
   | "Closed";
@@ -11,7 +9,7 @@ export type JourneyStage =
 const JOURNEY_STAGE_BY_STATUS = {
   open: "Open",
   in_progress: "In progress",
-  blocked: "Stuck",
+  blocked: "Blocked",
   deferred: "Deferred",
   review: "Review",
   closed: "Closed",
@@ -32,17 +30,6 @@ export function journeyStageForStatus(
       normalized as keyof typeof JOURNEY_STAGE_BY_STATUS
     ] ?? null
   );
-}
-
-/**
- * Panel-local status vocabulary. The shared formatter intentionally keeps the
- * dependency-oriented "Blocked" label used by the rest of the product.
- */
-export function formatJourneyStatusLabel(status: string): string {
-  const normalized = normalizedStatus(status);
-  return normalized === "blocked"
-    ? JOURNEY_STAGE_BY_STATUS.blocked
-    : formatStatusLabel(status);
 }
 
 export function formatJourneyDuration(durationMs: number): string {
