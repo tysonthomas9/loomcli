@@ -14,6 +14,10 @@ any of these terms, and confirm the loom meaning before acting on an overloaded 
 Agent-specific skill loaders are optional. All agent CLIs can use the repo
 runbooks directly:
 
+- `.agent-skills/local-runtime-verification/SKILL.md` - isolated local-mode
+  runtime proof with mandatory resource ownership, served-artifact identity,
+  evidence-ledger, mutation-restoration, and cleanup rules. Use it together
+  with `loom-pr-test` whenever a runtime claim needs a local stack.
 - `.agent-skills/loom-pr-test/SKILL.md` - real Loom PR runtime testing with
   local-mode stacks, browser validation, FleetDB compatibility checks, and
   real Codex local-mode checks.
