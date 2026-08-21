@@ -37,6 +37,7 @@ export function SkillsTreeBlock({
   onInlineEditChange,
   onInlineEditCommit,
   onInlineEditCancel,
+  onExitToRoot,
 }: {
   workspaceId: string;
   refInfo: SkillsExplorerRef;
@@ -57,6 +58,7 @@ export function SkillsTreeBlock({
   onInlineEditChange: (value: string) => void;
   onInlineEditCommit: () => void;
   onInlineEditCancel: () => void;
+  onExitToRoot?: (() => void) | undefined;
 }) {
   const catalog = useSkillsTree(workspaceId, refInfo.group);
   const tree = useScopedFileTreeCore(
@@ -172,6 +174,7 @@ export function SkillsTreeBlock({
       scrollToPath={scrollTarget}
       depthOffset={depthOffset}
       idPrefix={`ft-${explorerRefKey(refInfo).replace(/[^a-zA-Z0-9_-]/g, "-")}`}
+      onExitToRoot={onExitToRoot}
     />
   );
 }

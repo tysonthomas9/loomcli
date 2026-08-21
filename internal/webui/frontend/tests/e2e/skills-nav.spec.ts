@@ -314,6 +314,50 @@ test.describe("Skills nav section", () => {
     await expect(sectionHeading(page, "Skills")).toHaveCount(0);
   });
 
+  // Keyboard parity has two halves that meet at the root row: FileTree owns a
+  // roving-focus tree for the files inside one root, and the roots themselves
+  // are a separate set of toggles. This drives the seam between them.
+  test("arrow keys move between scope roots and in and out of a tree", async ({
+    page,
+  }) => {
+    await goto(page, "skills");
+    await expect(sectionHeading(page, "Skills")).toBeVisible();
+
+    // Scoped to the tree panel: the rail's own "Workspaces" button would
+    // otherwise match /^Workspace/ too. The "S" badge is aria-hidden, so a
+    // root's accessible name starts at its label.
+    const treePanel = page.locator("[data-tree-scroll]");
+    const workspaceRoot = treePanel.getByRole("button", { name: /^Workspace/ });
+    const roleRoot = treePanel.getByRole("button", {
+      name: new RegExp(`^${ROLE}`),
+    });
+
+    await expect(workspaceRoot).toHaveAttribute("aria-expanded", "false");
+
+    await workspaceRoot.focus();
+    await page.keyboard.press("ArrowDown");
+    await expect(roleRoot).toBeFocused();
+
+    // ArrowRight on a collapsed root expands it and keeps focus on the row.
+    await page.keyboard.press("ArrowRight");
+    await expect(roleRoot).toHaveAttribute("aria-expanded", "true");
+    await expect(roleRoot).toBeFocused();
+
+    // A second ArrowRight moves into that root's tree, which owns its own
+    // roving focus from here on.
+    await page.keyboard.press("ArrowRight");
+    await expect(page.getByRole("tree")).toBeFocused();
+
+    // ArrowUp at the first node hands focus back to the owning root row,
+    // rather than clamping and stranding the user inside the tree.
+    await page.keyboard.press("ArrowUp");
+    await expect(roleRoot).toBeFocused();
+
+    // ArrowLeft collapses it again, completing the round trip.
+    await page.keyboard.press("ArrowLeft");
+    await expect(roleRoot).toHaveAttribute("aria-expanded", "false");
+  });
+
   test("the two sections keep separate tab sets", async ({ page }) => {
     await goto(page, "skills");
     await expect(sectionHeading(page, "Skills")).toBeVisible();

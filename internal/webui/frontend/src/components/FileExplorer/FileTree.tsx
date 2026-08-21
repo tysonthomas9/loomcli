@@ -58,6 +58,9 @@ interface FileTreeProps {
   depthOffset?: number | undefined;
   /** Stable id prefix to avoid aria-activedescendant collisions across roots. */
   idPrefix?: string | undefined;
+  /** Called when Arrow navigation leaves the top of this tree, so the owning
+   *  root row can take focus back. Omitted = clamp at the first node. */
+  onExitToRoot?: (() => void) | undefined;
 }
 
 /** A single node in the flattened, visible-order tree. */
@@ -457,6 +460,7 @@ export function FileTree({
   scrollToPath,
   depthOffset = 0,
   idPrefix = "ft",
+  onExitToRoot,
 }: FileTreeProps) {
   const treeRef = useRef<HTMLDivElement>(null);
   const [focusedPath, setFocusedPath] = useState<string | null>(null);
@@ -521,7 +525,8 @@ export function FileTree({
           break;
         case "ArrowUp":
           e.preventDefault();
-          focusNode(nodes[Math.max(0, idx - 1)]?.path ?? null);
+          if (idx === 0 && onExitToRoot) onExitToRoot();
+          else focusNode(nodes[Math.max(0, idx - 1)]?.path ?? null);
           break;
         case "Home":
           e.preventDefault();
@@ -543,6 +548,7 @@ export function FileTree({
           else if (cur) {
             const p = parentOf(cur.path);
             if (nodes.some((n) => n.path === p)) focusNode(p);
+            else onExitToRoot?.();
           }
           break;
         case "Enter":
@@ -585,6 +591,7 @@ export function FileTree({
       activate,
       onRequestRename,
       onRequestDelete,
+      onExitToRoot,
     ],
   );
 

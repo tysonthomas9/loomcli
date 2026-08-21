@@ -31,6 +31,12 @@ import { unavailableCheckoutSummary } from "./checkoutAvailability";
 import { dirname } from "./fileExplorerLocalUtils";
 import type { HistoryOpenDiffRequest } from "./FileHistoryPanel";
 import styles from "./FileExplorer.module.css";
+import {
+  focusRootToggle,
+  handleRootToggleKeyDown,
+  ROOT_KEY_ATTR,
+  TREE_SCROLL_ATTR,
+} from "./rootRowKeyboard";
 import type {
   CompareMode,
   ExplorerLens,
@@ -451,6 +457,7 @@ function CheckoutUnavailableState({
 }
 
 function RootRow({
+  rootKey,
   root,
   expanded,
   depth = 0,
@@ -460,6 +467,7 @@ function RootRow({
   onRepairCheckout,
   onCheckoutContextMenu,
 }: {
+  rootKey: string;
   root: GitTreeRoot;
   expanded: boolean;
   depth?: number | undefined;
@@ -509,7 +517,12 @@ function RootRow({
         className={styles.rootRowToggle}
         style={{ paddingLeft: 8 + depth * 16 }}
         disabled={!exists}
+        aria-expanded={expanded}
+        {...{ [ROOT_KEY_ATTR]: rootKey }}
         onClick={onToggle}
+        onKeyDown={(event) =>
+          handleRootToggleKeyDown(event, { expanded, onToggle })
+        }
       >
         <span
           className={`${styles.chevron} ${expanded ? styles.chevronExpanded : ""}`}
@@ -548,6 +561,7 @@ function RootRow({
 }
 
 function SkillsRootRow({
+  rootKey,
   root,
   expanded,
   canEdit,
@@ -555,6 +569,7 @@ function SkillsRootRow({
   onNewSkill,
   onContextMenu,
 }: {
+  rootKey: string;
   root: SkillsTreeRoot;
   expanded: boolean;
   canEdit: boolean;
@@ -579,7 +594,12 @@ function SkillsRootRow({
         type="button"
         className={styles.rootRowToggle}
         style={{ paddingLeft: 8 }}
+        aria-expanded={expanded}
+        {...{ [ROOT_KEY_ATTR]: rootKey }}
         onClick={onToggle}
+        onKeyDown={(event) =>
+          handleRootToggleKeyDown(event, { expanded, onToggle })
+        }
       >
         <span
           className={`${styles.chevron} ${expanded ? styles.chevronExpanded : ""}`}
@@ -640,6 +660,7 @@ function CheckoutTreeBlock({
   onInlineEditChange,
   onInlineEditCommit,
   onInlineEditCancel,
+  onExitToRoot,
 }: {
   refInfo: CheckoutRef;
   depthOffset: number;
@@ -663,6 +684,7 @@ function CheckoutTreeBlock({
   onInlineEditChange: (value: string) => void;
   onInlineEditCommit: () => void;
   onInlineEditCancel: () => void;
+  onExitToRoot?: (() => void) | undefined;
 }) {
   const {
     expanded,
@@ -740,6 +762,7 @@ function CheckoutTreeBlock({
       scrollToPath={scrollTarget}
       depthOffset={depthOffset}
       idPrefix={`ft-${checkoutRefKey(refInfo).replace(/[^a-zA-Z0-9_-]/g, "-")}`}
+      onExitToRoot={onExitToRoot}
     />
   );
 }
@@ -847,6 +870,7 @@ export function FileExplorerTreePanel({
     return (
       <div key={root.id}>
         <RootRow
+          rootKey={key}
           root={root}
           depth={depth}
           expanded={expanded}
@@ -882,6 +906,7 @@ export function FileExplorerTreePanel({
               onInlineEditChange={onInlineEditChange}
               onInlineEditCommit={onInlineEditCommit}
               onInlineEditCancel={onInlineEditCancel}
+              onExitToRoot={() => focusRootToggle(key)}
             />
           ) : (
             <CheckoutUnavailableState depthOffset={depth + 1} />
@@ -898,6 +923,7 @@ export function FileExplorerTreePanel({
       return (
         <div key={root.id}>
           <SkillsRootRow
+            rootKey={key}
             root={root}
             expanded={expanded}
             canEdit={canEdit}
@@ -922,6 +948,7 @@ export function FileExplorerTreePanel({
               onInlineEditChange={onInlineEditChange}
               onInlineEditCommit={onInlineEditCommit}
               onInlineEditCancel={onInlineEditCancel}
+              onExitToRoot={() => focusRootToggle(key)}
             />
           )}
         </div>
@@ -934,6 +961,7 @@ export function FileExplorerTreePanel({
       return (
         <div key={root.id}>
           <RootRow
+            rootKey={key}
             root={root}
             expanded={expanded}
             repairing={repairingCheckoutKey === key}
@@ -968,6 +996,7 @@ export function FileExplorerTreePanel({
                 onInlineEditChange={onInlineEditChange}
                 onInlineEditCommit={onInlineEditCommit}
                 onInlineEditCancel={onInlineEditCancel}
+                onExitToRoot={() => focusRootToggle(key)}
               />
             ) : (
               <CheckoutUnavailableState depthOffset={1} />
@@ -979,6 +1008,7 @@ export function FileExplorerTreePanel({
     return (
       <div key={root.id}>
         <RootRow
+          rootKey={root.id}
           root={root}
           expanded={expanded}
           repairing={repairingCheckoutKey === root.id}
@@ -1009,7 +1039,14 @@ export function FileExplorerTreePanel({
             type="button"
             className={styles.workspaceSectionToggle}
             aria-expanded={expanded}
+            {...{ [ROOT_KEY_ATTR]: key }}
             onClick={() => onToggleRoot(key)}
+            onKeyDown={(event) =>
+              handleRootToggleKeyDown(event, {
+                expanded,
+                onToggle: () => onToggleRoot(key),
+              })
+            }
           >
             <span
               className={`${styles.chevron} ${expanded ? styles.chevronExpanded : ""}`}
@@ -1056,6 +1093,7 @@ export function FileExplorerTreePanel({
               onInlineEditChange={onInlineEditChange}
               onInlineEditCommit={onInlineEditCommit}
               onInlineEditCancel={onInlineEditCancel}
+              onExitToRoot={() => focusRootToggle(key)}
             />
           ) : (
             <CheckoutUnavailableState depthOffset={0} />
@@ -1112,7 +1150,7 @@ export function FileExplorerTreePanel({
           <kbd>Cmd+P</kbd>
         </button>
       </div>
-      <div className={styles.treeScroll}>
+      <div className={styles.treeScroll} {...{ [TREE_SCROLL_ATTR]: "" }}>
         {checkoutError && (
           <div className={styles.checkoutError}>{checkoutError}</div>
         )}
