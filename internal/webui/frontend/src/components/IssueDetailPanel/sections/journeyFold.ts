@@ -1,12 +1,12 @@
 import type { Event } from "@/types";
 
-export type JourneyStage =
-  | "Open"
-  | "In progress"
-  | "Stuck"
-  | "Deferred"
-  | "Review"
-  | "Closed";
+import {
+  hasDisplayableJourneyDuration,
+  journeyStageForStatus,
+  type JourneyStage,
+} from "./journeyPresentation";
+
+export type { JourneyStage } from "./journeyPresentation";
 
 export interface JourneySpan {
   stage: JourneyStage;
@@ -29,27 +29,6 @@ interface OrderedEvent {
 function ownerName(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
-}
-
-function stageForStatus(
-  status: string | null | undefined,
-): JourneyStage | null {
-  switch (status?.trim().toLowerCase()) {
-    case "open":
-      return "Open";
-    case "in_progress":
-      return "In progress";
-    case "blocked":
-      return "Stuck";
-    case "deferred":
-      return "Deferred";
-    case "review":
-      return "Review";
-    case "closed":
-      return "Closed";
-    default:
-      return null;
-  }
 }
 
 function statusAfter(event: Event): string | null {
@@ -194,7 +173,7 @@ export function foldJourney(
       case "issue.update":
       case "issue.updated":
       case "issue.status_changed": {
-        const stage = stageForStatus(statusAfter(event));
+        const stage = journeyStageForStatus(statusAfter(event));
         if (!stage) break;
         if (stage === "Closed") {
           closeJourney(event, atMs);
@@ -225,13 +204,18 @@ export function foldJourney(
     openSpan.durationMs = Math.max(0, nowMs - openSpan.startMs);
   }
 
-  // Filter only after every event has updated the fold. An instantaneous stage
-  // remains state.current while later same-millisecond events are processed,
-  // and its ownership changes remain available to the Closed marker.
+  // Filter only after every event has updated the fold. A sub-resolution stage
+  // remains state.current while later events are processed, and its ownership
+  // changes remain available to the Closed marker. Live spans and the explicit
+  // zero-length Closed marker are deliberately retained. A live sub-resolution
+  // span is retained here to keep its clock running; Journey withholds it from
+  // the rail until the shared formatter can express its duration.
   return spans
     .filter(
       (span) =>
-        span.stage === "Closed" || span.end === null || span.durationMs > 0,
+        span.stage === "Closed" ||
+        span.end === null ||
+        hasDisplayableJourneyDuration(span.durationMs),
     )
     .map(({ startMs: _startMs, ...span }) => span);
 }

@@ -235,9 +235,7 @@ describe("ActivityLog", () => {
       render(
         <ActivityLog comments={[]} events={events} issueId="test-issue" />,
       );
-      expect(
-        screen.getByText("Claimed by local-planner"),
-      ).toBeInTheDocument();
+      expect(screen.getByText("Claimed by local-planner")).toBeInTheDocument();
       expect(
         screen.queryByText("local-planner performed an action"),
       ).not.toBeInTheDocument();
@@ -270,6 +268,32 @@ describe("ActivityLog", () => {
       expect(
         screen.queryByText("Updated status and updated_at"),
       ).not.toBeInTheDocument();
+    });
+
+    it("uses Journey's Stuck label for an agent-declared blocked status", () => {
+      const events = [
+        createTestEvent({
+          id: 1,
+          event_type: "issue.update",
+          actor: "alice",
+          summary: "Updated status and updated_at",
+          changes: [
+            {
+              field: "status",
+              before: "in_progress",
+              after: "blocked",
+            },
+          ],
+        }),
+      ];
+      render(
+        <ActivityLog comments={[]} events={events} issueId="test-issue" />,
+      );
+
+      expect(
+        screen.getByText("alice changed status from In Progress to Stuck"),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/to Blocked$/)).not.toBeInTheDocument();
     });
 
     it("describes an empty assignment as an unassignment", () => {
@@ -331,8 +355,29 @@ describe("ActivityLog", () => {
         <ActivityLog comments={[]} events={events} issueId="test-issue" />,
       );
       expect(
-        screen.getByText("bob changed status from open to in_progress"),
+        screen.getByText("bob changed status from Open to In Progress"),
       ).toBeInTheDocument();
+    });
+
+    it("attributes a reaper release and explains why the task returned", () => {
+      const events = [
+        createTestEvent({
+          id: 1,
+          event_type: "issue.release" as EventType,
+          actor: "system",
+          summary: "Released claim",
+        }),
+      ];
+      render(
+        <ActivityLog comments={[]} events={events} issueId="test-issue" />,
+      );
+
+      expect(
+        screen.getByText(
+          "System released the claim: no active lock or live agent session was vouching for it, so the task returned to the pool",
+        ),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("Released claim")).not.toBeInTheDocument();
     });
 
     it("describes 'status_changed' events without values", () => {

@@ -11,14 +11,101 @@
   text-transform: uppercase;
 }
 
-.rail {
+.railFrame {
   position: relative;
-  display: flex;
+}
+
+.rail {
   min-height: 82px;
   overflow-x: auto;
   border: 1px solid var(--color-border-light);
   border-radius: var(--radius-md);
   background: var(--color-bg-secondary);
+}
+
+.rail:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.track {
+  position: relative;
+  display: flex;
+  width: max-content;
+  min-width: 100%;
+  min-height: 80px;
+}
+
+.edgeSentinel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  pointer-events: none;
+}
+
+.edgeSentinelStart {
+  left: 0;
+}
+
+.edgeSentinelEnd {
+  right: 0;
+}
+
+.edgeCue {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  z-index: 2;
+  display: flex;
+  width: 28px;
+  align-items: center;
+  color: var(--color-text-secondary);
+  font-size: 20px;
+  font-weight: var(--font-weight-bold);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition-fast);
+}
+
+.edgeCue[data-visible="true"] {
+  opacity: 1;
+}
+
+.edgeCue::after {
+  line-height: 1;
+}
+
+.edgeCueLeft {
+  left: 1px;
+  justify-content: flex-start;
+  padding-left: 5px;
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+  background: linear-gradient(
+    to right,
+    var(--color-bg-secondary) 18%,
+    transparent
+  );
+}
+
+.edgeCueLeft::after {
+  content: "‹";
+}
+
+.edgeCueRight {
+  right: 1px;
+  justify-content: flex-end;
+  padding-right: 5px;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background: linear-gradient(
+    to left,
+    var(--color-bg-secondary) 18%,
+    transparent
+  );
+}
+
+.edgeCueRight::after {
+  content: "›";
 }
 
 .span {
@@ -62,6 +149,13 @@
   --journey-stage-color: var(--color-journey-closed);
 }
 
+.stageRow {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-1);
+}
+
 .stage {
   overflow: hidden;
   color: var(--color-text);
@@ -69,6 +163,13 @@
   font-weight: var(--font-weight-semibold);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.attentionIcon {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
+  color: var(--color-journey-stuck);
 }
 
 .owner,
@@ -82,7 +183,6 @@
 
 .duration {
   margin-top: auto;
-  color: var(--color-text-secondary);
   font-family: var(--font-family-mono);
 }
 
@@ -117,6 +217,18 @@
   color: var(--color-text-muted);
   font-size: var(--font-size-base);
   text-align: center;
+}
+
+.stageAnnouncement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+  white-space: nowrap;
 }
 
 .windowNote {

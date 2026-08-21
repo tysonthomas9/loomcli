@@ -271,6 +271,44 @@ describe("foldJourney", () => {
     ]);
   });
 
+  it("drops a 1ms unassigned span that the rail would format as 0s", () => {
+    const spans = foldJourney(
+      [
+        event(0, "issue.create"),
+        event(10, "issue.claim", { actor: "worker-1" }),
+        event(20, "issue.update", {
+          actor: "worker-1",
+          changes: [
+            { field: "status", before: "in_progress", after: "review" },
+          ],
+        }),
+        event(40, "issue.assign", {
+          actor: "dispatcher",
+          created_at: "2026-08-20T12:00:40.419Z",
+          metadata: { assignee: "" },
+        }),
+        event(40, "issue.close", {
+          actor: "worker-1",
+          created_at: "2026-08-20T12:00:40.420Z",
+        }),
+      ],
+      BASE_MS + 60_000,
+    );
+
+    expect(
+      spans.map(({ stage, owner, durationMs }) => ({
+        stage,
+        owner,
+        durationMs,
+      })),
+    ).toEqual([
+      { stage: "Open", owner: "alice", durationMs: 10_000 },
+      { stage: "In progress", owner: "worker-1", durationMs: 10_000 },
+      { stage: "Review", owner: "worker-1", durationMs: 20_419 },
+      { stage: "Closed", owner: null, durationMs: 0 },
+    ]);
+  });
+
   it("drops an instantaneous stage without merging its surrounding spans", () => {
     const spans = foldJourney(
       [
