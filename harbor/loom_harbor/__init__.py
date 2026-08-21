@@ -35,7 +35,12 @@ _ARCH_MAP = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "
 
 
 class LoomAgent(BaseInstalledAgent):
-    """Loom multi-agent ensemble (lead / planner / coder / critic on codex)."""
+    """Loom multi-agent ensemble (lead / planner / coder / critic on codex).
+
+    ``team`` selects a template-backed worker team. The fullstack template has
+    four runnable agents, so team mode requires ``max_agents >= 4``. ``arch``
+    and ``lead_maint`` remain separate, mutually exclusive experiment knobs.
+    """
 
     def __init__(
         self,
@@ -54,6 +59,7 @@ class LoomAgent(BaseInstalledAgent):
         verify_role: str = "off",
         arch: str = "off",
         lead_maint: int | str = 0,
+        team: str = "off",
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -71,6 +77,12 @@ class LoomAgent(BaseInstalledAgent):
         self._verify_role = str(verify_role)
         self._arch = str(arch)
         self._lead_maint = str(lead_maint)
+        self._team = str(team)
+        if self._team != "off" and self._max_agents < 4:
+            raise ValueError(
+                "team mode requires max_agents >= 4; the fullstack bundle has "
+                "4 runnable agents"
+            )
 
     @staticmethod
     @override
@@ -236,6 +248,8 @@ class LoomAgent(BaseInstalledAgent):
             env["LOOM_MARATHON_ARCH"] = self._arch
         if self._lead_maint not in ("0", "", "off"):
             env["LOOM_MARATHON_LEAD_MAINT"] = "1"
+        if self._team != "off":
+            env["LOOM_MARATHON_TEAM"] = self._team
         if self._stub:
             env["LOOM_MARATHON_STUB"] = "1"
         if self.model_name:
@@ -300,6 +314,10 @@ class LoomAgent(BaseInstalledAgent):
                     "integration_failures",
                     "finalize_reason",
                     "stub",
+                    "template_id",
+                    "design_auto_approved",
+                    "orphans_routed",
+                    "integrations_stale",
                 )
                 if k in data
             }

@@ -10,6 +10,7 @@
 # $MARATHON_CODER_WT, loom on PATH. $PASS (current pass number) for pending age.
 
 APP_DIR="${MARATHON_APP_DIR:-/app}"
+TEAM_MODE="${MARATHON_TEAM:-off}"
 # GNU timeout exists in the task image; macOS (host tests) lacks it — degrade
 # to unbounded rather than fail with 127 (codex stage-2-vet portability class).
 if command -v timeout >/dev/null 2>&1; then _tmo() { timeout "$@"; }; else _tmo() { shift; "$@"; }; fi
@@ -39,11 +40,31 @@ if best:
 # Idempotency ledger: only ever act once per (task, attempt). ARCH-GATED is in
 # the set so a pending candidate is not re-gated every pass.
 attempt_handled() {
-  grep -Eq " (VERDICT-REJECTED|INTEGRATED|INTEGRATION-FAILED|GATE-SKIP|ARCH-GATED) task=$1 attempt=$2( |$)" "$INTEG_LOG"
+  grep -Eq " (VERDICT-REJECTED|INTEGRATED|INTEGRATION-FAILED|INTEGRATION-STALE|GATE-SKIP|ARCH-GATED) task=$1 attempt=$2( |$)" "$INTEG_LOG"
+}
+
+reopen_dev() {
+  local tid="$1" attempt="$2" reason="$3" tag="${4:-FEEDBACK}"
+  loom data comment "$tid" "$tag attempt=$attempt: $reason" >/dev/null 2>&1
+  loom data update "$tid" --status open --remove-label architect \
+    --remove-label needs-revision --assignee "" \
+    --notes "$tag attempt=$attempt: $reason" >/dev/null 2>&1
+  arch_strip "$tid"
+}
+
+reopen_arch() {
+  local tid="$1" reason="$2"
+  loom data comment "$tid" "FEEDBACK: $reason" >/dev/null 2>&1
+  loom data update "$tid" --status open --add-label architect \
+    --add-label needs-revision --assignee "" >/dev/null 2>&1
 }
 
 reopen_task() {
   local tid="$1" attempt="$2" reason="$3"
+  if [ "$TEAM_MODE" != "off" ]; then
+    reopen_dev "$tid" "$attempt" "$reason"
+    return
+  fi
   loom data comment "$tid" "FEEDBACK attempt=$attempt: $reason" >/dev/null 2>&1
   loom data update "$tid" --status open --add-label needs-revision \
     --notes "FEEDBACK attempt=$attempt: $reason" >/dev/null 2>&1
@@ -126,6 +147,194 @@ integrate() {
     log "INTEGRATION-FAILED $tid attempt=$attempt (/app untouched at $app_after)"
   fi
   git -C "$APP_DIR" worktree remove --force "$gate_wt" >/dev/null 2>&1
+}
+
+team_delivery_wts() {
+  for wt in ${MARATHON_TEAM_WTS:-}; do
+    printf '%s\n' "$wt"
+  done
+}
+
+# integrate_team TID ATTEMPT SHA — merge a delivered team candidate onto the
+# current integrated head inside the disposable gate checkout. /app advances
+# only after the resulting commit passes the integration check.
+integrate_team() {
+  local tid="$1" attempt="$2" sha="$3"
+  local fresh wt delivered_wt="" delivered_by="" app_before gate_wt
+  local mode gate_head app_now app_after rc=1
+
+  fresh=$(current_marker "$tid")
+  if [ "$fresh" != "$attempt|$sha" ]; then
+    record "GATE-SKIP task=$tid attempt=$attempt reason=stale-resweep fresh=${fresh:-none}"
+    log "integrate_team: $tid attempt=$attempt no longer current (now: ${fresh:-gone}) — resweeping next pass"
+    return 1
+  fi
+
+  while IFS= read -r wt; do
+    [ -n "$wt" ] || continue
+    if git -C "$wt" merge-base --is-ancestor "$sha" HEAD >/dev/null 2>&1; then
+      delivered_wt="$wt"
+      delivered_by=$(basename "$wt")
+      break
+    fi
+  done < <(team_delivery_wts)
+  if [ -z "$delivered_wt" ]; then
+    record "GATE-SKIP task=$tid attempt=$attempt reason=stale-candidate sha=$sha"
+    reopen_dev "$tid" "$attempt" "IMPL-DONE commit $sha is not reachable from any team worktree head; recommit and re-signal"
+    return 1
+  fi
+
+  app_before=$(git -C "$APP_DIR" rev-parse HEAD)
+  gate_wt="/work/gate-$tid-$attempt"
+  [ -w /work ] 2>/dev/null || gate_wt="${TMPDIR:-/tmp}/gate-$tid-$attempt"
+  git -C "$APP_DIR" worktree remove --force "$gate_wt" >/dev/null 2>&1 || true
+  if ! git -C "$APP_DIR" worktree add --detach "$gate_wt" "$app_before" >/dev/null 2>&1; then
+    record "GATE-SKIP task=$tid attempt=$attempt reason=checkout-failed sha=$sha"
+    reopen_dev "$tid" "$attempt" "gate checkout failed at integrated head $app_before; re-signal after the harness recovers"
+    return 1
+  fi
+
+  if git -C "$gate_wt" merge --ff-only "$sha" >/dev/null 2>&1; then
+    mode=ff
+  elif git -C "$gate_wt" merge --no-ff --no-edit "$sha" >/dev/null 2>&1; then
+    mode=merge
+  else
+    git -C "$gate_wt" merge --abort >/dev/null 2>&1 || true
+    record "INTEGRATION-STALE task=$tid attempt=$attempt app=$app_before candidate=$sha"
+    reopen_dev "$tid" "$attempt" "merge of candidate $sha onto integrated head $app_before conflicts; run 'git merge --no-edit main' in your worktree, resolve, re-run tests and re-signal IMPL-DONE with the new commit" STALE-BASE
+    git -C "$APP_DIR" worktree remove --force "$gate_wt" >/dev/null 2>&1 || true
+    return 1
+  fi
+
+  gate_head=$(git -C "$gate_wt" rev-parse HEAD)
+  if _tmo 600 bash "$MH/scripts/integration-check.sh" "$gate_wt" \
+      > "$LOGD/check-$tid-$attempt.log" 2>&1; then
+    app_now=$(git -C "$APP_DIR" rev-parse HEAD)
+    if [ "$app_now" != "$app_before" ]; then
+      record "INVARIANT-VIOLATION task=$tid attempt=$attempt /app moved during gate"
+      log "INVARIANT-VIOLATION: /app moved during gate for $tid"
+    elif git -C "$APP_DIR" merge --ff-only "$gate_head" >/dev/null 2>&1; then
+      app_after=$(git -C "$APP_DIR" rev-parse HEAD)
+      record "INTEGRATED task=$tid attempt=$attempt app_before=$app_before app_after=$app_after check=pass mode=$mode delivered_by=$delivered_by"
+      loom data comment "$tid" "INTEGRATED attempt=$attempt app_before=$app_before app_after=$app_after" >/dev/null 2>&1
+      loom data close "$tid" --reason "integrated into /app by harness gate (attempt=$attempt)" >/dev/null 2>&1
+      git -C "$APP_DIR" push -q origin main >/dev/null 2>&1 || true
+      log "INTEGRATED $tid attempt=$attempt -> /app now $app_after (mode=$mode, delivered_by=$delivered_by)"
+      rc=0
+    else
+      record "GATE-SKIP task=$tid attempt=$attempt reason=ff-failed app=$app_before sha=$gate_head"
+      reopen_dev "$tid" "$attempt" "fast-forward of /app to checked gate commit $gate_head failed"
+    fi
+  else
+    app_after=$(git -C "$APP_DIR" rev-parse HEAD)
+    record "INTEGRATION-FAILED task=$tid attempt=$attempt app_before=$app_before app_after_unchanged=$app_after candidate=$sha"
+    if [ "$app_before" != "$app_after" ]; then
+      record "INVARIANT-VIOLATION task=$tid attempt=$attempt /app moved during a failed check"
+      log "INVARIANT-VIOLATION: /app moved during failed check for $tid"
+    fi
+    reopen_dev "$tid" "$attempt" "integration check failed for candidate $sha: $(tail -3 "$LOGD/check-$tid-$attempt.log" | tr '\n' ' ' | cut -c1-400)"
+    log "INTEGRATION-FAILED $tid attempt=$attempt (/app untouched at $app_after)"
+  fi
+  git -C "$APP_DIR" worktree remove --force "$gate_wt" >/dev/null 2>&1 || true
+  return "$rc"
+}
+
+team_design_fail_open() {
+  local state="$LOGD/.design-pending" next="$LOGD/.design-pending.new"
+  local ids id first waited pass_now="${PASS:-0}"
+  : > "$next"
+  ids=$(loom data list --status review --limit 500 -o json 2>/dev/null \
+    | python3 -c '
+import json, sys
+for i in json.load(sys.stdin):
+    if i.get("issue_type") == "epic":
+        continue
+    if i.get("source_repo") and i.get("source_repo") != "app":
+        continue
+    print(i.get("id") or "")
+' 2>/dev/null) || ids=""
+  for id in $ids; do
+    if ! loom data show "$id" -o json 2>/dev/null | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+labels = set(d.get("labels") or [])
+if d.get("status") != "review" or not d.get("design"):
+    sys.exit(1)
+if "architect" not in labels or "needs-revision" in labels:
+    sys.exit(1)
+if any("IMPL-DONE" in (c.get("text") or "") for c in d.get("comments") or []):
+    sys.exit(1)
+'; then
+      continue
+    fi
+    first=$(awk -v id="$id" '$1 == id { print $2; exit }' "$state" 2>/dev/null)
+    [ -n "$first" ] || first="$pass_now"
+    waited=$((pass_now - first))
+    if [ "$waited" -ge 2 ]; then
+      if loom data update "$id" --status open --remove-label architect \
+          --remove-label needs-revision --assignee "" >/dev/null 2>&1; then
+        loom data comment "$id" "DESIGN-AUTO-APPROVED pass=$pass_now" >/dev/null 2>&1
+        record "DESIGN-AUTO-APPROVED task=$id waited_passes=$waited"
+      else
+        printf '%s %s\n' "$id" "$first" >> "$next"
+      fi
+    else
+      printf '%s %s\n' "$id" "$first" >> "$next"
+    fi
+  done
+  mv "$next" "$state"
+}
+
+team_orphan_sweep() {
+  local ids id route routes="$LOGD/.team-routes"
+  : > "$routes"
+  ids=$(loom data list --status open --limit 500 -o json 2>/dev/null \
+    | python3 -c '
+import json, sys
+for i in json.load(sys.stdin):
+    if i.get("issue_type") == "epic":
+        continue
+    if i.get("source_repo") and i.get("source_repo") != "app":
+        continue
+    print(i.get("id") or "")
+' 2>/dev/null) || ids=""
+  for id in $ids; do
+    route=$(loom data show "$id" -o json 2>/dev/null | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+labels = set(d.get("labels") or [])
+if d.get("status") != "open" or d.get("issue_type") == "epic":
+    sys.exit(0)
+if d.get("source_repo") and d.get("source_repo") != "app":
+    sys.exit(0)
+if not d.get("design") and not labels.intersection(("architect", "qa", "needs-revision")):
+    print("orphan")
+elif d.get("design") and "needs-revision" in labels and "architect" not in labels and "qa" not in labels:
+    print("revision")
+' 2>/dev/null)
+    [ -n "$route" ] && printf '%s|%s\n' "$route" "$id" >> "$routes"
+  done
+  while IFS='|' read -r route id; do
+    [ -n "$id" ] || continue
+    case "$route" in
+      orphan)
+        if loom data update "$id" --add-label architect >/dev/null 2>&1; then
+          record "ORPHAN-ROUTED task=$id"
+        fi
+        ;;
+      revision)
+        if loom data update "$id" --add-label architect >/dev/null 2>&1; then
+          record "REVISION-ROUTED task=$id"
+        fi
+        ;;
+    esac
+  done < "$routes"
 }
 
 # arch_task_state TID -> "status|labels-csv|marker" (one show call).

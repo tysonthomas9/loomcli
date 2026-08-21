@@ -8,6 +8,7 @@
 #   - invoking the CRITIC one-shot per (task, attempt) with a concrete contract
 #   - the ATOMIC integration gate: check candidate in a disposable worktree
 #     BEFORE fast-forwarding /app; a failed check never touches /app
+#   - optional template-backed team arm with N-worktree merge-before-check gates
 #   - the harness is the SOLE closer of implementation tasks
 #   - aggregate spend rail + timer-reserve finalize + port sweep + evidence dump
 set -uo pipefail
@@ -25,16 +26,30 @@ CADENCE="${LOOM_MARATHON_CADENCE_SECS:-360}"
 SPEND_CAP="${LOOM_MARATHON_SPEND_CAP_USD:-90}"
 STUB="${LOOM_MARATHON_STUB:-0}"
 LEAD_MODE="${LOOM_MARATHON_LEAD_MODE:-oneshot}"
+TEAM="${LOOM_MARATHON_TEAM:-off}"
+# Verification-role fork (EXPERIMENTS B2c lead / B2d qa); requires persistence.
+VERIFY_ROLE="${LOOM_MARATHON_VERIFY_ROLE:-off}"
+ARCH_MODE="${LOOM_MARATHON_ARCH:-off}"          # B2j: architect session + gate
+LEAD_MAINT="${LOOM_MARATHON_LEAD_MAINT:-0}"     # B2k: lead maintainability prompt
+
+if [ "$TEAM" != "off" ]; then
+  [ "$ARCH_MODE" = "off" ] || { echo "[orchestrate] FATAL: team=$TEAM requires arch=off" >&2; exit 1; }
+  [ "$LEAD_MAINT" = "0" ] || { echo "[orchestrate] FATAL: team=$TEAM requires lead_maint=0" >&2; exit 1; }
+  [ "$VERIFY_ROLE" = "off" ] || { echo "[orchestrate] FATAL: team=$TEAM requires verify_role=off" >&2; exit 1; }
+  if [ "$STUB" = "1" ]; then
+    echo "[orchestrate] WARN: team arm is running with the oneshot stub lead" >&2
+    LEAD_MODE=oneshot
+  elif [ "$LEAD_MODE" != "persistent" ]; then
+    echo "[orchestrate] FATAL: team=$TEAM requires lead_mode=persistent outside stub mode" >&2
+    exit 1
+  fi
+fi
 # The stub backend has no app-server; persistent mode is real-codex only.
 if [ "$STUB" = "1" ] && [ "$LEAD_MODE" = "persistent" ]; then
   echo "[orchestrate] WARN: stub mode forces lead_mode=oneshot" >&2
   LEAD_MODE=oneshot
 fi
-# Verification-role fork (EXPERIMENTS B2c lead / B2d qa); requires persistence.
-VERIFY_ROLE="${LOOM_MARATHON_VERIFY_ROLE:-off}"
 [ "$STUB" = "1" ] && VERIFY_ROLE=off
-ARCH_MODE="${LOOM_MARATHON_ARCH:-off}"          # B2j: architect session + gate
-LEAD_MAINT="${LOOM_MARATHON_LEAD_MAINT:-0}"     # B2k: lead maintainability prompt
 [ "$STUB" = "1" ] && ARCH_MODE=off
 if [ "$ARCH_MODE" = "on" ] && [ "$LEAD_MAINT" = "1" ]; then
   echo "[orchestrate] FATAL: arch=on and lead_maint=1 are mutually exclusive arms" >&2
@@ -57,7 +72,8 @@ TASKS_SEEDED=0
 
 log() { printf '[orchestrate %s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 record() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >> "$INTEG_LOG"; }
-. "$MH/scripts/gatelib.sh"   # integrate()/current_marker()/arch gate machinery
+MARATHON_TEAM="${MARATHON_TEAM:-$TEAM}"
+. "$MH/scripts/gatelib.sh"   # integrate()/current_marker()/team/arch gate machinery
 
 # ---------------------------------------------------------------- bootstrap --
 if ! bash "$MH/scripts/bootstrap.sh"; then
@@ -91,6 +107,7 @@ QA_TMUX=marathon-qa
 QAB_TMUX=marathon-qab
 persistent_lead_start() {
   local lead_prompt="$PROMPTS/lead-persistent.md"
+  [ "$TEAM" != "off" ] && lead_prompt="$PROMPTS/lead-persistent-team.md"
   [ "$VERIFY_ROLE" = "lead" ] && lead_prompt="$PROMPTS/lead-persistent-verifier.md"
   [ "$VERIFY_ROLE" = "lead-ui" ] && lead_prompt="$PROMPTS/lead-persistent-verifier-ui.md"
   [ "$VERIFY_ROLE" = "tasks" ] && lead_prompt="$PROMPTS/lead-persistent-verifier-tasks.md"
@@ -335,6 +352,40 @@ run_critic() {
   echo "$verdict"
 }
 
+critic_integration_sweep() {
+  local sweep tid attempt sha verdict
+  sweep="$(impl_reviews)"
+  [ -n "$sweep" ] || return 0
+  while IFS='|' read -r tid attempt sha; do
+    [ -n "$tid" ] || continue
+    if attempt_handled "$tid" "$attempt"; then continue; fi
+    if [ "$CRITIC_MODE" = "off" ]; then
+      log "impl-review: $tid attempt=$attempt candidate=$sha — critic=off, gate only"
+      verdict="APPROVED"
+    else
+      log "impl-review: $tid attempt=$attempt candidate=$sha — invoking critic"
+      verdict=$(run_critic "$tid" "$attempt" "$sha")
+    fi
+    if [ "$verdict" = "APPROVED" ]; then
+      if [ "$TEAM" != "off" ]; then
+        integrate_team "$tid" "$attempt" "$sha"
+      elif [ "$ARCH_MODE" = "on" ]; then
+        integrate "$tid" "$attempt" "$sha" gate
+      else
+        integrate "$tid" "$attempt" "$sha"
+      fi
+    else
+      record "VERDICT-REJECTED task=$tid attempt=$attempt sha=$sha"
+      if [ "$(current_marker "$tid")" = "$attempt|$sha" ]; then
+        reopen_task "$tid" "$attempt" "critic requested changes; see CRITIC comment"
+        log "critic rejected $tid attempt=$attempt"
+      else
+        log "critic rejected $tid attempt=$attempt but task moved on — not reopening"
+      fi
+    fi
+  done <<< "$sweep"
+}
+
 # integrate() moved to gatelib.sh (B2j: gains the optional gate mode).
 
 open_task_count() {
@@ -397,7 +448,7 @@ finalize() {
   loom data list --limit 500 -o json > "$LOGD/final-issues-post-quiesce.json" 2>/dev/null
 
   [ -n "$DAEMON_PID" ] && kill -9 "$DAEMON_PID" >/dev/null 2>&1
-  pkill -9 -f 'loom (task|plan|daemon)' >/dev/null 2>&1
+  pkill -9 -f 'loom (task|plan|daemon|agent)' >/dev/null 2>&1
   pkill -9 -f 'codex exec' >/dev/null 2>&1
   sleep 1
   pkill -9 -x fleet-db >/dev/null 2>&1
@@ -486,15 +537,29 @@ PY
     && log "app snapshot: $(du -h "$LOGD/app-snapshot.tar.gz" | cut -f1) -> /logs/agent/app-snapshot.tar.gz"
   git -C /app rev-parse HEAD > "$LOGD/app-final-head.txt" 2>/dev/null
   git -C "$MARATHON_CODER_WT" log --oneline > "$LOGD/coder-git-log.txt" 2>/dev/null
+  if [ "$TEAM" != "off" ] && [ -f "$MARATHON_TEAM_TSV" ]; then
+    while IFS=$'\t' read -r agent role lane prompt_id wt branch; do
+      [ -n "$agent" ] || continue
+      git -C "$wt" log --oneline > "$LOGD/${agent}-git-log.txt" 2>/dev/null
+    done < "$MARATHON_TEAM_TSV"
+  fi
 
   # grep -c prints "0" AND exits 1 on zero matches, so `|| echo 0` would emit a
   # second line; use || true + a default instead. Spend JSON goes via argv, not
   # a pipe (a heredoc program would steal stdin from the pipe).
-  local integrated failures spend_json
+  local integrated failures design_auto orphans stale merges spend_json
   integrated=$(grep -c ' INTEGRATED ' "$INTEG_LOG" 2>/dev/null || true)
   failures=$(grep -c ' INTEGRATION-FAILED ' "$INTEG_LOG" 2>/dev/null || true)
+  design_auto=$(grep -c ' DESIGN-AUTO-APPROVED ' "$INTEG_LOG" 2>/dev/null || true)
+  orphans=$(grep -c ' ORPHAN-ROUTED ' "$INTEG_LOG" 2>/dev/null || true)
+  stale=$(grep -c ' INTEGRATION-STALE ' "$INTEG_LOG" 2>/dev/null || true)
+  merges=$(grep ' INTEGRATED ' "$INTEG_LOG" 2>/dev/null | grep -c ' mode=merge ' || true)
   integrated=${integrated:-0}
   failures=${failures:-0}
+  design_auto=${design_auto:-0}
+  orphans=${orphans:-0}
+  stale=${stale:-0}
+  merges=${merges:-0}
   spend_json=$(bash "$MH/scripts/spend.sh" 2>/dev/null || echo '{}')
   python3 -c '
 import json, sys
@@ -510,9 +575,15 @@ spend.update(
     finalize_reason=sys.argv[4],
     tasks_seeded=int(sys.argv[5]),
     stub=sys.argv[6] == "1",
+    template_id=sys.argv[7],
+    design_auto_approved=int(sys.argv[8]),
+    orphans_routed=int(sys.argv[9]),
+    integrations_stale=int(sys.argv[10]),
+    integrations_merge=int(sys.argv[11]),
 )
 print(json.dumps(spend, indent=1))
-' "$spend_json" "$integrated" "$failures" "$FINALIZE_REASON" "$TASKS_SEEDED" "$STUB" > "$LOGD/usage-summary.json"
+' "$spend_json" "$integrated" "$failures" "$FINALIZE_REASON" "$TASKS_SEEDED" "$STUB" \
+    "$TEAM" "$design_auto" "$orphans" "$stale" "$merges" > "$LOGD/usage-summary.json"
   log "finalize complete: integrated=$integrated failures=$failures spend=\$$(spend_usd)"
 }
 trap 'FINALIZE_REASON=signal; finalize' INT TERM
@@ -576,6 +647,11 @@ if [ "$(epic_count)" = "0" ]; then
   FINALIZE_REASON=seed-failed
   echo "[orchestrate] FATAL: lead seeded no epic after 2 attempts" >&2
   exit 1
+fi
+if [ "$TEAM" != "off" ]; then
+  team_orphan_sweep
+  team_design_fail_open
+  critic_integration_sweep
 fi
 TASKS_SEEDED=$(nonepic_task_count)
 log "seeded: $(epic_count) epic(s), $TASKS_SEEDED tasks"
@@ -648,7 +724,22 @@ while :; do
   # reviews, integration, and closes belong to this script (kills the
   # premature-close race — codex R4).
   REMAIN_MIN=$(( (DEADLINE - NOW) / 60 ))
-  PASS_MSG="Orchestrate pass $PASS. About $REMAIN_MIN minutes of work time remain. Follow your standing rules: handle PLAN-stage reviews (any review task with the needs-revision label, or without an IMPL-DONE marker) and blocked tasks; never close tasks; never touch implementation reviews (review tasks WITHOUT the needs-revision label that carry a valid 'IMPL-DONE attempt=N commit=SHA' marker)."
+  if [ "$TEAM" != "off" ]; then
+    PASS_MSG="Orchestrate pass $PASS. About $REMAIN_MIN minutes remain. Follow your standing rules: review designs awaiting approval (review-status tasks that carry the \`architect\` label and have no IMPL-DONE marker) — approve by \`--status open --remove-label architect --remove-label needs-revision --assignee \"\"\` or reject with FEEDBACK + \`--add-label needs-revision\` (keep \`architect\`); file at most 2 \`qa\`-labeled verification tasks for integrations since the last pass; never close tasks; never touch review tasks that carry an IMPL-DONE marker."
+    integ_delta
+    PASS_MSG="$PASS_MSG Integrated since last pass: ${INTEG_DELTA:-none}. Current integrated head: $(git -C "${MARATHON_APP_DIR:-/app}" rev-parse --short HEAD 2>/dev/null)."
+    QA_OPEN=$(loom data list --status open --limit 500 -o json 2>/dev/null | python3 -c '
+import json, sys
+print(sum(1 for i in json.load(sys.stdin)
+          if i.get("issue_type") != "epic" and "qa" in (i.get("labels") or [])))
+' 2>/dev/null) || QA_OPEN=0
+    if [ "${QA_OPEN:-0}" -gt 8 ]; then
+      PASS_MSG="$PASS_MSG QA backlog: $QA_OPEN open; do not file new verification tasks this pass"
+      record "QA-BACKLOG open=$QA_OPEN"
+    fi
+  else
+    PASS_MSG="Orchestrate pass $PASS. About $REMAIN_MIN minutes of work time remain. Follow your standing rules: handle PLAN-stage reviews (any review task with the needs-revision label, or without an IMPL-DONE marker) and blocked tasks; never close tasks; never touch implementation reviews (review tasks WITHOUT the needs-revision label that carry a valid 'IMPL-DONE attempt=N commit=SHA' marker)."
+  fi
   VERIFY_INFO=""
   if [ "$VERIFY_ROLE" != "off" ]; then
     integ_delta
@@ -737,6 +828,11 @@ for lane in ("qa-verify", "qa-verify-backend"):
     lead_pass "$PROMPTS/lead-orchestrate.md" "$PASS_MSG" 900 "lead-orchestrate.log"
   fi
 
+  if [ "$TEAM" != "off" ]; then
+    team_orphan_sweep
+    team_design_fail_open
+  fi
+
   # Anti-wedge valve (codex vet-B finding 3): a review task with IMPL-DONE
   # text that does NOT parse as a valid marker, and no needs-revision label,
   # has no owner (lead skips it as impl-review, harness can't parse it).
@@ -778,37 +874,7 @@ if has_sub and not has_valid:
   fi
 
   # Deterministic critic + integration sweep.
-  SWEEP="$(impl_reviews)"
-  if [ -n "$SWEEP" ]; then
-    while IFS='|' read -r tid attempt sha; do
-      [ -n "$tid" ] || continue
-      if attempt_handled "$tid" "$attempt"; then continue; fi
-      if [ "$CRITIC_MODE" = "off" ]; then
-        # Generic mode: the per-review LLM critic is an [S] policy; valid
-        # candidates go straight to the deterministic integration gate.
-        log "impl-review: $tid attempt=$attempt candidate=$sha — critic=off, gate only"
-        VERDICT="APPROVED"
-      else
-      log "impl-review: $tid attempt=$attempt candidate=$sha — invoking critic"
-      VERDICT=$(run_critic "$tid" "$attempt" "$sha")
-      fi
-      if [ "$VERDICT" = "APPROVED" ]; then
-        if [ "$ARCH_MODE" = "on" ]; then
-          integrate "$tid" "$attempt" "$sha" gate
-        else
-          integrate "$tid" "$attempt" "$sha"
-        fi
-      else
-        record "VERDICT-REJECTED task=$tid attempt=$attempt sha=$sha"
-        if [ "$(current_marker "$tid")" = "$attempt|$sha" ]; then
-          reopen_task "$tid" "$attempt" "critic requested changes; see CRITIC comment"
-          log "critic rejected $tid attempt=$attempt"
-        else
-          log "critic rejected $tid attempt=$attempt but task moved on — not reopening"
-        fi
-      fi
-    done <<< "$SWEEP"
-  fi
+  critic_integration_sweep
 
   # Continuous durability: mirror /app's FULL history (all refs, incl. agent
   # branches) to the host-mounted bare repo every pass — a hard kill can then
@@ -825,7 +891,7 @@ if has_sub and not has_valid:
   OPEN=$(open_task_count)
   TOTAL=$(nonepic_task_count)
   if [ "$TOTAL" -gt 0 ] && [ "$OPEN" = "0" ]; then
-    if [ "$VERIFY_ROLE" = "lead-ui" ] || [ "$VERIFY_ROLE" = "tasks" ] || [ "$VERIFY_ROLE" = "tasks-dual" ]; then
+    if [ "$TEAM" != "off" ] || [ "$VERIFY_ROLE" = "lead-ui" ] || [ "$VERIFY_ROLE" = "tasks" ] || [ "$VERIFY_ROLE" = "tasks-dual" ]; then
       # B2e/B2f: draining is not the end — the lead keeps verifying (including
       # the UI walk) and refiling until the deadline reserve. B2c finalized
       # here and threw away 43 minutes that the ux half needed.

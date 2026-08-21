@@ -9,6 +9,8 @@ export HOME="${HOME:-/root}"
 
 STUB="${LOOM_MARATHON_STUB:-0}"
 MAX_AGENTS="${LOOM_MARATHON_MAX_AGENTS:-2}"
+TEAM="${LOOM_MARATHON_TEAM:-off}"
+VERIFY_ROLE="${LOOM_MARATHON_VERIFY_ROLE:-off}"
 
 # stubbin (fake codex) must beat everything, then the loom bundle.
 if [ "$STUB" = "1" ]; then
@@ -89,6 +91,11 @@ if [ ! -d "$WS_ROOT" ]; then
 fi
 export LOOM_WORKSPACE="$WS_KEY"
 
+if [ "$TEAM" != "off" ]; then
+  [ "$MAX_AGENTS" -ge 4 ] || die "team mode requires max_agents >= 4 (got $MAX_AGENTS)"
+  [ "$VERIFY_ROLE" = "off" ] || die "team mode forbids verify_role=$VERIFY_ROLE"
+fi
+
 loom daemon profile set issue_backend fleetdb
 # log_dir must resolve INSIDE the project/config dirs or the daemon rejects it;
 # it rides to the host via the per-pass loom-state backup copies.
@@ -99,34 +106,134 @@ loom daemon profile set startup_timeout 60
 
 # planner: built-in plan role (task-filter needs_plan) — designs undesigned/needs-revision tasks
 # coder-1: built-in task role (task-filter has_design) — ONE serialized implementation coder (v1)
-loom agentdef add planner --role plan --auto --backend codex --repos app 2>/dev/null \
-  || log "agentdef planner already registered"
-loom agentdef add coder-1 --role task --auto --backend codex --repos app 2>/dev/null \
-  || log "agentdef coder-1 already registered"
+if [ "$TEAM" = "off" ]; then
+  loom agentdef add planner --role plan --auto --backend codex --repos app 2>/dev/null \
+    || log "agentdef planner already registered"
+  loom agentdef add coder-1 --role task --auto --backend codex --repos app 2>/dev/null \
+    || log "agentdef coder-1 already registered"
 
-PLANNER_WT="$WS_ROOT/worktrees/app/planner"
-CODER_WT="$WS_ROOT/worktrees/app/coder-1"
-[ -d "$PLANNER_WT" ] || die "planner worktree missing at $PLANNER_WT"
-[ -d "$CODER_WT" ]   || die "coder-1 worktree missing at $CODER_WT"
-
-for wt in "$PLANNER_WT" "$CODER_WT" "$WS_ROOT/app"; do
-  [ -d "$wt" ] || continue
-  git -C "$wt" config user.name  "loom-marathon"
-  git -C "$wt" config user.email "loom-marathon@localhost"
-  if ! git -C "$wt" remote get-url origin >/dev/null 2>&1; then
-    git -C "$wt" remote add origin /work/origin.git 2>/dev/null || true
+  PLANNER_WT="$WS_ROOT/worktrees/app/planner"
+  CODER_WT="$WS_ROOT/worktrees/app/coder-1"
+  [ -d "$PLANNER_WT" ] || die "planner worktree missing at $PLANNER_WT"
+  [ -d "$CODER_WT" ]   || die "coder-1 worktree missing at $CODER_WT"
+else
+  apply_json=/logs/agent/template-apply.json
+  apply_rc=0
+  loom template apply "$TEAM" --json > "$apply_json" || apply_rc=$?
+  if ! python3 -c '
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception as e:
+    print(f"template apply report is not valid JSON: {e}", file=sys.stderr)
+    sys.exit(1)
+steps = d.get("steps") or []
+failed = int(d.get("failed") or 0)
+if failed:
+    for step in steps:
+        if step.get("action") == "failed" or step.get("error"):
+            print("failed step: {} {}: {}".format(step.get("entity"), step.get("name"), step.get("error")), file=sys.stderr)
+    sys.exit(1)
+if int(d.get("created") or 0) + int(d.get("skipped") or 0) != len(steps):
+    print("template apply report is incomplete: created+skipped != len(steps)", file=sys.stderr)
+    sys.exit(1)
+' "$apply_json"; then
+    die "template apply $TEAM failed (exit=$apply_rc)"
   fi
-done
+
+  loom template show "$TEAM" --json | python3 -c '
+import json, os, sys
+d = json.load(sys.stdin)
+ws_root = sys.argv[1]
+roles = {r.get("name"): r for r in d.get("roles") or []}
+for agent in d.get("agents") or []:
+    role_name = agent.get("role_name") or agent.get("role") or ""
+    role = roles.get(role_name) or {}
+    if role.get("kind") != "worker":
+        continue
+    labels = set(role.get("labels") or [])
+    lane = "architect" if "architect" in labels else "qa" if "qa" in labels else "impl"
+    prompt = role.get("prompt_file") or ""
+    if prompt.startswith("builtin:"):
+        prompt_id = prompt.split(":", 1)[1]
+    elif lane == "architect":
+        prompt_id = "team-architect"
+    elif lane == "qa":
+        prompt_id = "team-qa"
+    else:
+        prompt_id = "team-" + role_name
+    name = agent.get("name") or ""
+    if not name or not role_name:
+        continue
+    print("\t".join((name, role_name, lane, prompt_id,
+                     os.path.join(ws_root, "worktrees", "app", name))))
+' "$WS_ROOT" > "$MH/.team-agent-defs.tsv"
+  : > "$MH/team-agents.tsv"
+  while IFS=$'\t' read -r agent role lane prompt_id wt; do
+    [ -n "$agent" ] || continue
+    [ -d "$wt" ] || die "team worktree missing at $wt"
+    branch=$(git -C "$wt" rev-parse --abbrev-ref HEAD) \
+      || die "cannot read branch for team worktree $wt"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "$agent" "$role" "$lane" "$prompt_id" "$wt" "$branch" >> "$MH/team-agents.tsv"
+  done < "$MH/.team-agent-defs.tsv"
+  rm -f "$MH/.team-agent-defs.tsv"
+  [ -s "$MH/team-agents.tsv" ] || die "template $TEAM has no runnable worker agents"
+  CODER_WT=$(awk -F '\t' '$3 == "impl" { print $5; exit }' "$MH/team-agents.tsv")
+  PLANNER_WT=$(awk -F '\t' '$3 == "architect" { print $5; exit }' "$MH/team-agents.tsv")
+  [ -n "$CODER_WT" ] || die "template $TEAM has no implementation worktree"
+  [ -n "$PLANNER_WT" ] || die "template $TEAM has no architect worktree"
+fi
+
+team_worktrees() {
+  if [ "$TEAM" != "off" ]; then
+    cut -f5 "$MH/team-agents.tsv"
+  else
+    printf '%s\n%s\n' "$PLANNER_WT" "$CODER_WT"
+  fi
+}
+
+if [ "$TEAM" = "off" ]; then
+  for wt in "$PLANNER_WT" "$CODER_WT" "$WS_ROOT/app"; do
+    [ -d "$wt" ] || continue
+    git -C "$wt" config user.name  "loom-marathon"
+    git -C "$wt" config user.email "loom-marathon@localhost"
+    if ! git -C "$wt" remote get-url origin >/dev/null 2>&1; then
+      git -C "$wt" remote add origin /work/origin.git 2>/dev/null || true
+    fi
+  done
+else
+  while IFS= read -r wt; do
+    [ -d "$wt" ] || continue
+    git -C "$wt" config user.name  "loom-marathon"
+    git -C "$wt" config user.email "loom-marathon@localhost"
+    if ! git -C "$wt" remote get-url origin >/dev/null 2>&1; then
+      git -C "$wt" remote add origin /work/origin.git 2>/dev/null || true
+    fi
+  done < <(team_worktrees; printf '%s\n' "$WS_ROOT/app")
+fi
 
 # ---- coder prompt override ---------------------------------------------------
 # The daemon leaf renders ./loom-prompts/fleet_task.md from the agent worktree cwd
 # (internal/cli/agent/prompts.go). Our fork routes completion to
 # IMPL-DONE comment + status review (never close, never PR-publish).
-mkdir -p "$CODER_WT/loom-prompts"
-cp "${LOOM_MARATHON_PROMPTS_DIR:-$MH/prompts}/fleet_task-override.md" "$CODER_WT/loom-prompts/fleet_task.md"
-# Keep harness files out of the coder's commits (untracked .gitignore ignores itself).
-if [ ! -f "$CODER_WT/.gitignore" ] || ! grep -q '^loom-prompts/' "$CODER_WT/.gitignore" 2>/dev/null; then
-  printf 'loom-prompts/\n.gitignore\nCRITIC-VERDICT.txt\n' >> "$CODER_WT/.gitignore"
+if [ "$TEAM" = "off" ]; then
+  mkdir -p "$CODER_WT/loom-prompts"
+  cp "${LOOM_MARATHON_PROMPTS_DIR:-$MH/prompts}/fleet_task-override.md" "$CODER_WT/loom-prompts/fleet_task.md"
+  # Keep harness files out of the coder's commits (untracked .gitignore ignores itself).
+  if [ ! -f "$CODER_WT/.gitignore" ] || ! grep -q '^loom-prompts/' "$CODER_WT/.gitignore" 2>/dev/null; then
+    printf 'loom-prompts/\n.gitignore\nCRITIC-VERDICT.txt\n' >> "$CODER_WT/.gitignore"
+  fi
+else
+  while IFS=$'\t' read -r agent role lane prompt_id wt branch; do
+    override="${LOOM_MARATHON_PROMPTS_DIR:-$MH/prompts}/${prompt_id}-override.md"
+    [ -f "$override" ] || die "no override for $prompt_id"
+    mkdir -p "$wt/loom-prompts"
+    cp "$override" "$wt/loom-prompts/$prompt_id.md"
+    if [ ! -f "$wt/.gitignore" ] || ! grep -q '^loom-prompts/' "$wt/.gitignore" 2>/dev/null; then
+      printf 'loom-prompts/\n.gitignore\nCRITIC-VERDICT.txt\n' >> "$wt/.gitignore"
+    fi
+  done < "$MH/team-agents.tsv"
 fi
 
 # ---- codex config ------------------------------------------------------------
@@ -145,46 +252,25 @@ trust_codex_project_path() {
   if grep -Fqx "[projects.\"${escaped}\"]" "$config"; then return 0; fi
   { printf '\n[projects."%s"]\n' "$escaped"; printf 'trust_level = "trusted"\n'; } >> "$config"
 }
-for p in /app "$WS_ROOT" "$WS_ROOT/app" "$PLANNER_WT" "$CODER_WT" /work; do
-  trust_codex_project_path "$p"
-done
+if [ "$TEAM" = "off" ]; then
+  for p in /app "$WS_ROOT" "$WS_ROOT/app" "$PLANNER_WT" "$CODER_WT" /work; do
+    trust_codex_project_path "$p"
+  done
+else
+  for p in /app "$WS_ROOT" "$WS_ROOT/app" /work; do
+    trust_codex_project_path "$p"
+  done
+  while IFS= read -r p; do trust_codex_project_path "$p"; done < <(team_worktrees)
+fi
 
 # ---- verification role support (EXPERIMENTS B2c/B2d) -------------------------
 # Shared by both verify arms: a detached checkout the verifier boots the app
 # from (never /app itself), plus marathon-freeports — kills stray listeners on
 # the app's fixed ports EXCEPT harness infrastructure (the MARATHON-9 fix).
-VERIFY_ROLE="${LOOM_MARATHON_VERIFY_ROLE:-off}"
 VERIFY_CHECKOUT=""
 VERIFY_CHECKOUT_BACKEND=""
 VERIFY_CHECKOUT_ARCH=""
-if [ "$VERIFY_ROLE" != "off" ]; then
-  VERIFY_CHECKOUT="$WS_ROOT/verify-checkout"
-  if [ ! -d "$VERIFY_CHECKOUT" ]; then
-    git -C /app worktree add --detach "$VERIFY_CHECKOUT" >/dev/null 2>&1 \
-      || die "verify-checkout worktree creation failed"
-  fi
-  trust_codex_project_path "$VERIFY_CHECKOUT"
-  if [ "${LOOM_MARATHON_ARCH:-off}" = "on" ]; then
-    # B2j architect: its own read-only detached worktree (never runs the app,
-    # so no port coordination needed; shares /app's object store for diffs).
-    VERIFY_CHECKOUT_ARCH="$WS_ROOT/arch-checkout"
-    if [ ! -d "$VERIFY_CHECKOUT_ARCH" ]; then
-      git -C /app worktree add --detach "$VERIFY_CHECKOUT_ARCH" >/dev/null 2>&1 \
-        || die "arch-checkout worktree creation failed"
-    fi
-    trust_codex_project_path "$VERIFY_CHECKOUT_ARCH"
-  fi
-  if [ "$VERIFY_ROLE" = "tasks-dual" ]; then
-    # Second verifier gets its own checkout; the two QA sessions never run
-    # the app simultaneously (orchestrate alternates passes — spec-pinned
-    # ports), but each keeps its own working tree and probe scripts.
-    VERIFY_CHECKOUT_BACKEND="$WS_ROOT/verify-checkout-backend"
-    if [ ! -d "$VERIFY_CHECKOUT_BACKEND" ]; then
-      git -C /app worktree add --detach "$VERIFY_CHECKOUT_BACKEND" >/dev/null 2>&1 \
-        || die "verify-checkout-backend worktree creation failed"
-    fi
-    trust_codex_project_path "$VERIFY_CHECKOUT_BACKEND"
-  fi
+install_freeports() {
   cat > /usr/local/bin/marathon-freeports <<'FPEOF'
 #!/usr/bin/env python3
 """Free the app's fixed ports by killing their listeners, sparing harness
@@ -249,7 +335,49 @@ for _ in range(3):
 print("freeports:", {p: ("BUSY" if busy(p) else "free") for p in PORTS})
 FPEOF
   chmod +x /usr/local/bin/marathon-freeports
+}
+if [ "$VERIFY_ROLE" != "off" ]; then
+  VERIFY_CHECKOUT="$WS_ROOT/verify-checkout"
+  if [ ! -d "$VERIFY_CHECKOUT" ]; then
+    git -C /app worktree add --detach "$VERIFY_CHECKOUT" >/dev/null 2>&1 \
+      || die "verify-checkout worktree creation failed"
+  fi
+  trust_codex_project_path "$VERIFY_CHECKOUT"
+  if [ "${LOOM_MARATHON_ARCH:-off}" = "on" ]; then
+    # B2j architect: its own read-only detached worktree (never runs the app,
+    # so no port coordination needed; shares /app's object store for diffs).
+    VERIFY_CHECKOUT_ARCH="$WS_ROOT/arch-checkout"
+    if [ ! -d "$VERIFY_CHECKOUT_ARCH" ]; then
+      git -C /app worktree add --detach "$VERIFY_CHECKOUT_ARCH" >/dev/null 2>&1 \
+        || die "arch-checkout worktree creation failed"
+    fi
+    trust_codex_project_path "$VERIFY_CHECKOUT_ARCH"
+  fi
+  if [ "$VERIFY_ROLE" = "tasks-dual" ]; then
+    # Second verifier gets its own checkout; the two QA sessions never run
+    # the app simultaneously (orchestrate alternates passes — spec-pinned
+    # ports), but each keeps its own working tree and probe scripts.
+    VERIFY_CHECKOUT_BACKEND="$WS_ROOT/verify-checkout-backend"
+    if [ ! -d "$VERIFY_CHECKOUT_BACKEND" ]; then
+      git -C /app worktree add --detach "$VERIFY_CHECKOUT_BACKEND" >/dev/null 2>&1 \
+        || die "verify-checkout-backend worktree creation failed"
+    fi
+    trust_codex_project_path "$VERIFY_CHECKOUT_BACKEND"
+  fi
+  install_freeports
   log "verify role=$VERIFY_ROLE checkout=$VERIFY_CHECKOUT freeports installed"
+fi
+
+if [ "$TEAM" != "off" ]; then
+  install_freeports
+  cat > /usr/local/bin/marathon-portlock <<'PLEOF'
+#!/usr/bin/env bash
+exec 9>/work/.app-ports.lock
+flock 9
+exec "$@"
+PLEOF
+  chmod +x /usr/local/bin/marathon-portlock
+  log "team portlock and freeports installed"
 fi
 
 if [ "$STUB" != "1" ]; then
@@ -274,11 +402,19 @@ fi
 # Every agent checkout must share /app's git object store (same common dir):
 # guarantees local merges/FF into /app see agent commits with no remote.
 APP_COMMON="$(cd /app && git rev-parse --path-format=absolute --git-common-dir)"
-for wt in "$PLANNER_WT" "$CODER_WT"; do
-  wt_common="$(cd "$wt" && git rev-parse --path-format=absolute --git-common-dir)"
-  [ "$wt_common" = "$APP_COMMON" ] \
-    || die "worktree $wt common-dir $wt_common != /app common-dir $APP_COMMON"
-done
+if [ "$TEAM" = "off" ]; then
+  for wt in "$PLANNER_WT" "$CODER_WT"; do
+    wt_common="$(cd "$wt" && git rev-parse --path-format=absolute --git-common-dir)"
+    [ "$wt_common" = "$APP_COMMON" ] \
+      || die "worktree $wt common-dir $wt_common != /app common-dir $APP_COMMON"
+  done
+else
+  while IFS= read -r wt; do
+    wt_common="$(cd "$wt" && git rev-parse --path-format=absolute --git-common-dir)"
+    [ "$wt_common" = "$APP_COMMON" ] \
+      || die "worktree $wt common-dir $wt_common != /app common-dir $APP_COMMON"
+  done < <(team_worktrees)
+fi
 
 # v1 runs the Go daemon leaf; the ts leaf is the driver/flue path (not this harness).
 case "${LOOM_DAEMON_LEAF:-}" in
@@ -336,6 +472,25 @@ tasks|tasks-dual)
   ;;
 esac
 
+# Team mode hashes the same active prompt profile; verify roles are forbidden,
+# so this never duplicates the legacy tasks/tasks-dual loop above.
+if [ "$TEAM" != "off" ]; then
+  for pf in "${LOOM_MARATHON_PROMPTS_DIR:-$MH/prompts}"/*.md; do
+    log "prompt-hash $(basename "$pf") $( (sha256sum "$pf" 2>/dev/null || shasum -a 256 "$pf" 2>/dev/null) | cut -c1-16)"
+  done
+fi
+
+TEAM_WTS=""
+IMPL_WTS=""
+QA_WT=""
+ARCH_WT=""
+if [ "$TEAM" != "off" ]; then
+  TEAM_WTS=$(cut -f5 "$MH/team-agents.tsv" | paste -sd' ' -)
+  IMPL_WTS=$(awk -F '\t' '$3 == "impl" { print $5 }' "$MH/team-agents.tsv" | paste -sd' ' -)
+  QA_WT=$(awk -F '\t' '$3 == "qa" { print $5; exit }' "$MH/team-agents.tsv")
+  ARCH_WT=$(awk -F '\t' '$3 == "architect" { print $5; exit }' "$MH/team-agents.tsv")
+fi
+
 # ---- env.sh ------------------------------------------------------------------
 cat > "$MH/env.sh" <<EOF
 export HOME="$HOME"
@@ -351,8 +506,14 @@ export MARATHON_APP_DIR=/app
 export MARATHON_WS_ROOT="$WS_ROOT"
 export MARATHON_CODER_WT="$CODER_WT"
 export MARATHON_PLANNER_WT="$PLANNER_WT"
+export MARATHON_TEAM="$TEAM"
+export MARATHON_TEAM_TSV="$MH/team-agents.tsv"
+export MARATHON_TEAM_WTS="$TEAM_WTS"
+export MARATHON_IMPL_WTS="$IMPL_WTS"
+export MARATHON_QA_WT="$QA_WT"
+export MARATHON_ARCH_WT="$ARCH_WT"
 export MARATHON_VERIFY_CHECKOUT="$VERIFY_CHECKOUT"
 export MARATHON_VERIFY_CHECKOUT_BACKEND="$VERIFY_CHECKOUT_BACKEND"
 export MARATHON_ARCH_CHECKOUT="$VERIFY_CHECKOUT_ARCH"
 EOF
-log "bootstrap complete (stub=$STUB, max_agents=$MAX_AGENTS)"
+log "bootstrap complete (stub=$STUB, max_agents=$MAX_AGENTS, team=$TEAM)"
