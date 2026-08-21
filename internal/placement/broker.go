@@ -255,54 +255,67 @@ func (b *Broker) Provision(ctx context.Context, req ProvisionRequest) (*Provisio
 		if err != nil {
 			return nil, err
 		}
+		var result *ProvisionResult
+		var retry bool
 		if live := latestLivePlacement(nodes); live != nil {
-			if live.Placement.State == domain.PlacementStateReleasing {
-				if _, err := b.releaseLocked(ctx, live.WorkspaceKey, live.NodeID, ReleaseFence{
-					Generation: live.Placement.Generation,
-					SandboxID:  live.Placement.SandboxID,
-				}); err != nil {
-					return nil, err
-				}
-				continue
-			}
-			result, retry, err := b.resumeLivePlacement(ctx, req, live)
-			if err != nil {
-				return nil, err
-			}
-			if retry {
-				continue
-			}
-			return result, nil
+			result, retry, err = b.provisionLive(ctx, req, live)
+		} else {
+			result, retry, err = b.provisionSuccessor(ctx, req, latestPlacement(nodes))
 		}
-		existing := latestPlacement(nodes)
-		predecessor, adopted, err := b.preparePredecessorForSuccessor(ctx, existing)
 		if err != nil {
 			return nil, err
 		}
-		if adopted {
-			// The predecessor's sandbox turned out to be alive and was adopted
-			// back onto its row; resume it instead of admitting a successor.
-			continue
-		}
-		bootPlan, err := b.resolveLeadBootPlan(ctx, req, true)
-		if err != nil {
-			return nil, err
-		}
-		node, err := b.admitProvisioningNode(ctx, req, predecessor)
-		if err != nil {
-			return nil, err
-		}
-		result, adopted, err := b.createSandbox(ctx, req, node, bootPlan)
-		if err != nil {
-			return nil, err
-		}
-		if adopted {
-			// An ambiguous create was reconciled to an existing sandbox;
-			// resume the now-active placement through the live path.
+		if retry {
 			continue
 		}
 		return result, nil
 	}
+}
+
+// provisionLive resumes a live placement, first draining a releasing row.
+func (b *Broker) provisionLive(ctx context.Context, req ProvisionRequest, live *domain.Node) (*ProvisionResult, bool, error) {
+	if live.Placement.State == domain.PlacementStateReleasing {
+		if _, err := b.releaseLocked(ctx, live.WorkspaceKey, live.NodeID, ReleaseFence{
+			Generation: live.Placement.Generation,
+			SandboxID:  live.Placement.SandboxID,
+		}); err != nil {
+			return nil, false, err
+		}
+		return nil, true, nil
+	}
+	return b.resumeLivePlacement(ctx, req, live)
+}
+
+// provisionSuccessor admits and creates the next generation for an agent with
+// no live placement, unless reconciliation adopts an existing sandbox first.
+func (b *Broker) provisionSuccessor(ctx context.Context, req ProvisionRequest, existing *domain.Node) (*ProvisionResult, bool, error) {
+	predecessor, adopted, err := b.preparePredecessorForSuccessor(ctx, existing)
+	if err != nil {
+		return nil, false, err
+	}
+	if adopted {
+		// The predecessor's sandbox turned out to be alive and was adopted
+		// back onto its row; resume it instead of admitting a successor.
+		return nil, true, nil
+	}
+	bootPlan, err := b.resolveLeadBootPlan(ctx, req, true)
+	if err != nil {
+		return nil, false, err
+	}
+	node, err := b.admitProvisioningNode(ctx, req, predecessor)
+	if err != nil {
+		return nil, false, err
+	}
+	result, adopted, err := b.createSandbox(ctx, req, node, bootPlan)
+	if err != nil {
+		return nil, false, err
+	}
+	if adopted {
+		// An ambiguous create was reconciled to an existing sandbox;
+		// resume the now-active placement through the live path.
+		return nil, true, nil
+	}
+	return result, false, nil
 }
 
 // Get returns one placement node by placement id.
