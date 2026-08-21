@@ -1,0 +1,197 @@
+#!/usr/bin/env bash
+# Stub "codex" backend for the FREE ensemble dry-run (LOOM_MARATHON_STUB=1).
+#
+# Emulates the codex CLI surface loom invokes (`codex exec --json
+# --dangerously-bypass-approvals-and-sandbox ... <prompt>`) with a scripted,
+# obediently-canned "AI": it detects which ROLE prompt it received and performs
+# that role's actions with real loom/git commands, driving every status hop of
+# the ensemble through real loom + fleet-db at zero model cost.
+#
+# Scripted scenario (3 tasks seeded by the stub lead):
+#   T1 "bootstrap"       -> valid start.sh + server.js  -> integrates
+#   T2 "broken artifact" -> attempt 1 commits INVALID bash (integration gate MUST
+#                           fail, /app MUST stay put, task reopened) ->
+#                           re-design -> attempt 2 fixes it -> integrates
+#   T3 "docs"            -> valid README                -> integrates
+set -uo pipefail
+
+SESS_DIR="${CODEX_HOME:-$HOME/.codex}/sessions"
+mkdir -p "$SESS_DIR"
+
+emit_usage() {
+  # codex --json turn.completed shape (collectCodexStreamUsage-compatible),
+  # mirrored into a per-invocation session file for scripts/spend.sh.
+  local line='{"type":"turn.completed","usage":{"input_tokens":1200,"output_tokens":300}}'
+  echo "$line"
+  echo "$line" > "$SESS_DIR/stub-$$-$(date +%s%N).jsonl"
+}
+
+log() { printf '[stub-codex] %s\n' "$*"; }
+
+case "${1:-}" in
+  --version) echo "codex-cli 0.0.0-stub"; exit 0 ;;
+esac
+
+# ---- prompt = the longest argument (flags are short; prompts are paragraphs)
+PROMPT=""
+for a in "$@"; do
+  if [ "${#a}" -gt "${#PROMPT}" ]; then PROMPT="$a"; fi
+done
+if [ -z "$PROMPT" ]; then
+  log "no prompt argument"; emit_usage; exit 0
+fi
+
+task_id_from_prompt() {
+  printf '%s' "$PROMPT" | grep -Eo 'loom data show [A-Za-z0-9_]+-[0-9]+' \
+    | head -1 | awk '{print $4}'
+}
+
+created_id() { grep -Eo 'CREATED [A-Za-z0-9_]+-[0-9]+' | head -1 | awk '{print $2}'; }
+
+# ------------------------------------------------------------------ lead seed
+if printf '%s' "$PROMPT" | grep -q 'ROLE-MARKER: lead-seed'; then
+  existing=$(loom data list --type epic -o json 2>/dev/null \
+    | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))' 2>/dev/null || echo 0)
+  if [ "$existing" != "0" ]; then
+    log "epic already seeded; skipping"
+    echo "SEEDED epic=existing tasks=3"; emit_usage; exit 0
+  fi
+  EPIC=$(loom data create --type epic --title "Stub Slack Clone" \
+    --description "Stub dry-run epic: validates the full ensemble mechanics." | created_id)
+  T1=$(loom data create --type task --parent "$EPIC" --source-repo app --priority 0 \
+    --title "T1 bootstrap start.sh health cluster" \
+    --description "Create start.sh plus a minimal node health server on ports 8000-8002." \
+    --acceptance-criteria "bash -n start.sh passes; node --check server.js passes" | created_id)
+  T2=$(loom data create --type task --parent "$EPIC" --source-repo app --priority 1 --depends-on "$T1" \
+    --title "T2 broken artifact integration-fail probe" \
+    --description "STUB SCENARIO: attempt 1 deliberately commits chaos.sh with invalid bash syntax so the harness integration gate must FAIL and reopen this task; attempt 2 fixes it." \
+    --acceptance-criteria "bash -n chaos.sh passes" | created_id)
+  T3=$(loom data create --type task --parent "$EPIC" --source-repo app --priority 2 --depends-on "$T2" \
+    --title "T3 docs polish" \
+    --description "Write README.md describing the stub app." \
+    --acceptance-criteria "README.md exists" | created_id)
+  log "seeded epic=$EPIC tasks=$T1,$T2,$T3"
+  echo "SEEDED epic=$EPIC tasks=3"
+  emit_usage; exit 0
+fi
+
+# ----------------------------------------------------------- lead orchestrate
+if printf '%s' "$PROMPT" | grep -q 'ROLE-MARKER: lead-orchestrate'; then
+  approved=0
+  ids=$(loom data list --status review -o json 2>/dev/null \
+    | python3 -c 'import sys,json;print("\n".join(i["id"] for i in json.load(sys.stdin)))' 2>/dev/null)
+  for id in $ids; do
+    # Plan-review iff: needs-revision label present (re-design awaiting
+    # approval) OR no IMPL-DONE comment (fresh design). Otherwise it is an
+    # implementation review — harness-owned.
+    plan_review=$(loom data show "$id" -o json 2>/dev/null | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+import re
+has_impl = any(re.search(r"IMPL-DONE\s+attempt=\d+\s+commit=[0-9a-fA-F]{7,40}", c.get("text") or "") for c in d.get("comments") or [])
+needs_rev = "needs-revision" in (d.get("labels") or [])
+print(1 if (needs_rev or not has_impl) else 0)')
+    if [ "$plan_review" = "1" ]; then
+      loom data update "$id" --status open --remove-label needs-revision --assignee "" >/dev/null
+      log "APPROVED plan review $id"
+      approved=$((approved + 1))
+    else
+      log "SKIP impl review $id (harness-owned)"
+    fi
+  done
+  echo "ORCHESTRATED approved=$approved rejected=0 unblocked=0"
+  emit_usage; exit 0
+fi
+
+# ----------------------------------------------------------------- critic ----
+if printf '%s' "$PROMPT" | grep -q 'ROLE-MARKER: critic'; then
+  attempt=$(printf '%s' "$PROMPT" | grep -Eo 'attempt=[0-9]+' | head -1 | cut -d= -f2)
+  candidate=$(printf '%s' "$PROMPT" | grep -Eo 'candidate=[0-9a-f]{7,40}' | head -1 | cut -d= -f2)
+  printf 'REVIEW attempt=%s commit=%s APPROVED — stub critic: design followed\n' \
+    "${attempt:-1}" "${candidate:-unknown}" > CRITIC-VERDICT.txt
+  log "critic verdict written (attempt=${attempt:-?})"
+  emit_usage; exit 0
+fi
+
+# ----------------------------------------------------------------- planner ---
+if printf '%s' "$PROMPT" | grep -Eq 'ONE planning task|planning task|Create the Plan'; then
+  TID=$(task_id_from_prompt)
+  if [ -z "$TID" ]; then log "planner: no task id in prompt"; emit_usage; exit 0; fi
+  title=$(loom data show "$TID" -o json 2>/dev/null \
+    | python3 -c 'import sys,json;print(json.load(sys.stdin).get("title",""))')
+  loom data update "$TID" \
+    --design "STUB DESIGN for '$title': create the files named in the description; keep it minimal; syntax must pass integration checks." \
+    --status review --assignee "" >/dev/null
+  log "planner designed $TID"
+  loom complete >/dev/null 2>&1
+  emit_usage; exit 0
+fi
+
+# ----------------------------------------------------------------- coder -----
+if printf '%s' "$PROMPT" | grep -Eq 'ROLE-MARKER: coder|IMPL-DONE'; then
+  TID=$(task_id_from_prompt)
+  if [ -z "$TID" ]; then log "coder: no task id in prompt"; emit_usage; exit 0; fi
+  show=$(loom data show "$TID" -o json 2>/dev/null)
+  title=$(printf '%s' "$show" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("title",""))')
+  attempt=$(printf '%s' "$show" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+n = sum(1 for c in d.get("comments") or [] if "IMPL-DONE" in (c.get("text") or ""))
+print(n + 1)')
+  log "coder task=$TID attempt=$attempt title=$title cwd=$(pwd)"
+
+  case "$title" in
+    *bootstrap*)
+      cat > server.js <<'EOF'
+const http = require("http");
+const port = Number(process.env.PORT || 8000);
+http.createServer((req, res) => {
+  if (req.url === "/api/health") { res.end(JSON.stringify({ ok: true, port })); return; }
+  res.statusCode = 404; res.end("not found");
+}).listen(port);
+EOF
+      cat > start.sh <<'EOF'
+#!/usr/bin/env bash
+set -u
+for p in 8000 8001 8002; do
+  PORT=$p node server.js &
+done
+wait
+EOF
+      chmod +x start.sh
+      git add start.sh server.js
+      ;;
+    *broken*)
+      if [ "$attempt" = "1" ]; then
+        # Deliberately PARSE-invalid bash (unclosed if): `bash -n` fails ->
+        # integration gate must fail. (NB `if [ ; then ... fi` is runtime-invalid
+        # but parses fine — bash -n passes it, verified.)
+        printf '#!/usr/bin/env bash\nif true; then\n  echo broken\n' > chaos.sh
+      else
+        printf '#!/usr/bin/env bash\necho "chaos resolved (attempt %s)"\n' "$attempt" > chaos.sh
+      fi
+      chmod +x chaos.sh
+      git add chaos.sh
+      ;;
+    *docs*)
+      printf '# Stub App\n\nBuilt by the loom stub ensemble dry-run.\n' > README.md
+      git add README.md
+      ;;
+    *)
+      printf 'touched by stub coder\n' > "stub-$TID.txt"
+      git add "stub-$TID.txt"
+      ;;
+  esac
+
+  git commit -q -m "stub impl for $TID (attempt $attempt)"
+  SHA=$(git rev-parse HEAD)
+  loom data comment "$TID" "IMPL-DONE attempt=$attempt commit=$SHA" >/dev/null
+  loom data update "$TID" --status review --assignee "" >/dev/null
+  log "coder committed $SHA and signalled review for $TID"
+  loom complete >/dev/null 2>&1
+  emit_usage; exit 0
+fi
+
+log "unrecognized prompt role; doing nothing"
+emit_usage
+exit 0
