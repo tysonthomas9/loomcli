@@ -5,9 +5,10 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/entity"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/entity"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
