@@ -49,6 +49,11 @@ function toHex(value: unknown): string {
   ).join("");
 }
 
+const initialStateForConnection =
+  SERVER_FRAME_VECTORS.initialState.slice(0, 40) +
+  "0000000000000008" +
+  SERVER_FRAME_VECTORS.initialState.slice(56);
+
 class MockWebSocket {
   static CONNECTING = 0 as const;
   static OPEN = 1 as const;
@@ -106,7 +111,9 @@ function makeCallbacks() {
     order,
     callbacks: {
       write: vi.fn(() => order.push("write")),
-      reset: vi.fn(() => order.push("reset")),
+      reset: vi.fn(async () => {
+        order.push("reset");
+      }),
       setConnectionState: vi.fn(),
       onConnected: vi.fn(),
       onDisconnected: vi.fn(),
@@ -168,7 +175,11 @@ describe("connectWebSocket", () => {
     expect(ws.binaryType).toBe("arraybuffer");
 
     ws.simulateOpen();
-    expect(callbacks.setConnectionState).toHaveBeenCalledWith("connected");
+    expect(callbacks.setConnectionState).toHaveBeenLastCalledWith("connecting");
+    expect(callbacks.onConnected).not.toHaveBeenCalled();
+    ws.simulateMessage(initialStateForConnection);
+    await flushMessages();
+    expect(callbacks.setConnectionState).toHaveBeenLastCalledWith("connected");
     expect(callbacks.onConnected).toHaveBeenCalledOnce();
   });
 
@@ -188,7 +199,7 @@ describe("connectWebSocket", () => {
   it("applies initial metadata, reset, then snapshot bytes in order", async () => {
     const { callbacks, order, ws } = await connect();
     ws.simulateOpen();
-    ws.simulateMessage(SERVER_FRAME_VECTORS.initialState);
+    ws.simulateMessage(initialStateForConnection);
     await flushMessages();
 
     expect(callbacks.onInitialState).toHaveBeenCalledWith({
@@ -202,10 +213,44 @@ describe("connectWebSocket", () => {
     );
   });
 
+  it("holds frames received while reset drains until after the snapshot", async () => {
+    const { callbacks, ws } = await connect();
+    let releaseReset!: () => void;
+    callbacks.reset = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseReset = resolve;
+        }),
+    );
+    ws.simulateOpen();
+    ws.simulateMessage(initialStateForConnection);
+    ws.simulateMessage(SERVER_FRAME_VECTORS.output);
+    await flushMessages();
+
+    expect(callbacks.write).not.toHaveBeenCalled();
+    releaseReset();
+    await flushMessages(25);
+
+    expect(callbacks.write).toHaveBeenNthCalledWith(
+      1,
+      new Uint8Array([0x1b, 0x5b, 0x33, 0x31, 0x6d, 0x68, 0x69]),
+    );
+    expect(callbacks.write).toHaveBeenNthCalledWith(
+      2,
+      new Uint8Array([0x68, 0x69, 0x0a]),
+    );
+  });
+
   it("requires initial_state to be the first binary frame", async () => {
     const { callbacks, ws } = await connect();
     ws.simulateOpen();
     ws.simulateMessage(SERVER_FRAME_VECTORS.output);
+    ws.simulateMessage(
+      SERVER_FRAME_VECTORS.output.replace(
+        "0000000000000009",
+        "000000000000000a",
+      ),
+    );
     await flushMessages();
 
     expect(ws.close).toHaveBeenCalledWith(
@@ -218,7 +263,7 @@ describe("connectWebSocket", () => {
   it("rejects an unsupported initial-state encoding", async () => {
     const { callbacks, ws } = await connect();
     ws.simulateOpen();
-    const unsupported = SERVER_FRAME_VECTORS.initialState.replace(
+    const unsupported = initialStateForConnection.replace(
       "787465726d2d76742f31",
       "756e6b6e6f776e2d7674",
     );
@@ -256,16 +301,31 @@ describe("connectWebSocket", () => {
   it("routes output, canonical resize, and notice frames", async () => {
     const { callbacks, order, ws } = await connect();
     ws.simulateOpen();
-    ws.simulateMessage(SERVER_FRAME_VECTORS.initialState);
+    ws.simulateMessage(initialStateForConnection);
     await flushMessages();
     callbacks.write.mockClear();
     callbacks.onOutput.mockClear();
     order.length = 0;
 
     ws.simulateMessage(SERVER_FRAME_VECTORS.output);
-    ws.simulateMessage(SERVER_FRAME_VECTORS.output);
-    ws.simulateMessage(SERVER_FRAME_VECTORS.resize);
-    ws.simulateMessage(SERVER_FRAME_VECTORS.notice);
+    ws.simulateMessage(
+      SERVER_FRAME_VECTORS.output.replace(
+        "0000000000000009",
+        "000000000000000a",
+      ),
+    );
+    ws.simulateMessage(
+      SERVER_FRAME_VECTORS.resize.replace(
+        "000000000000000a",
+        "000000000000000b",
+      ),
+    );
+    ws.simulateMessage(
+      SERVER_FRAME_VECTORS.notice.replace(
+        "000000000000000b",
+        "000000000000000c",
+      ),
+    );
     await flushMessages(25);
 
     expect(callbacks.write).toHaveBeenCalledOnce();
@@ -284,8 +344,13 @@ describe("connectWebSocket", () => {
   it("uses a close frame reason when the WebSocket reason is empty", async () => {
     const { callbacks, ws } = await connect();
     ws.simulateOpen();
-    ws.simulateMessage(SERVER_FRAME_VECTORS.initialState);
-    ws.simulateMessage(SERVER_FRAME_VECTORS.close);
+    ws.simulateMessage(initialStateForConnection);
+    ws.simulateMessage(
+      SERVER_FRAME_VECTORS.close.replace(
+        "000000000000000c",
+        "0000000000000009",
+      ),
+    );
     await flushMessages();
     ws.simulateClose(4001);
 
@@ -295,7 +360,7 @@ describe("connectWebSocket", () => {
   it("closes and requests an immediate reconnect on generation mismatch", async () => {
     const { callbacks, ws } = await connect();
     ws.simulateOpen();
-    ws.simulateMessage(SERVER_FRAME_VECTORS.initialState);
+    ws.simulateMessage(initialStateForConnection);
     await flushMessages();
     const changedGeneration = SERVER_FRAME_VECTORS.output.replace(
       "000102030405060708090a0b0c0d0e0f",
@@ -312,7 +377,7 @@ describe("connectWebSocket", () => {
   it("encodes input, resize_request, and focus with the pinned generation", async () => {
     const { handle, ws } = await connect();
     ws.simulateOpen();
-    ws.simulateMessage(SERVER_FRAME_VECTORS.initialState);
+    ws.simulateMessage(initialStateForConnection);
     await flushMessages();
 
     handle.sendInput("ls\n");
@@ -333,12 +398,46 @@ describe("connectWebSocket", () => {
     handle.sendResizeRequest(120, 40);
     expect(ws.send).not.toHaveBeenCalled();
 
-    ws.simulateMessage(SERVER_FRAME_VECTORS.initialState);
+    ws.simulateMessage(initialStateForConnection);
     await flushMessages();
     expect(ws.send.mock.calls.map(([frame]) => toHex(frame))).toEqual([
       CLIENT_FRAME_VECTORS.resizeRequest,
       CLIENT_FRAME_VECTORS.focus,
     ]);
+  });
+
+  it("queues input sent before initial_state and flushes it after the snapshot", async () => {
+    const { handle, ws } = await connect();
+    ws.simulateOpen();
+    handle.sendInput("typed before snapshot\n");
+    expect(ws.send).not.toHaveBeenCalled();
+
+    ws.simulateMessage(initialStateForConnection);
+    await flushMessages();
+
+    expect(ws.send).toHaveBeenCalledOnce();
+    expect(toHex(ws.send.mock.calls[0]?.[0])).toContain(
+      "7479706564206265666f726520736e617073686f74",
+    );
+  });
+
+  it("treats a sequence gap as an immediate resnapshot reconnect", async () => {
+    const { callbacks, ws } = await connect();
+    ws.simulateOpen();
+    ws.simulateMessage(initialStateForConnection);
+    await flushMessages();
+    const gap = SERVER_FRAME_VECTORS.output.replace(
+      "0000000000000009",
+      "000000000000000b",
+    );
+    ws.simulateMessage(gap);
+    await flushMessages();
+
+    expect(ws.close).toHaveBeenCalledWith(
+      1002,
+      "terminal sequence gap or duplicate",
+    );
+    expect(callbacks.onDisconnected).toHaveBeenCalledWith("immediate");
   });
 
   it.each([
@@ -401,13 +500,17 @@ describe("connectWebSocket", () => {
     expect(ws.url).toContain("token=tok");
   });
 
-  it("connects without a token when token fetching fails", async () => {
+  it("backs off when token fetching fails", async () => {
     const callbacks = makeCallbacks();
     const wsRef = { current: null as WebSocket | null };
     connectWebSocket("ws1", "session1", wsRef, callbacks.callbacks);
     shared.rejectToken?.(new Error("network error"));
-    await vi.waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
-    expect(MockWebSocket.instances[0]?.url).not.toContain("token=");
+    await flushMessages();
+    expect(MockWebSocket.instances).toHaveLength(0);
+    expect(callbacks.callbacks.setConnectionState).toHaveBeenCalledWith(
+      "disconnected",
+    );
+    expect(callbacks.callbacks.onDisconnected).toHaveBeenCalledWith("backoff");
   });
 
   it("disposes idempotently and ignores late token resolution", async () => {

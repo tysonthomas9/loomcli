@@ -14,7 +14,7 @@ import {
 
 export interface XTermRendererHandle {
   write: (data: string | Uint8Array) => void;
-  reset: () => void;
+  reset: () => Promise<void>;
   setSize: (cols: number, rows: number) => void;
   focus: () => void;
   fit: () => { cols: number; rows: number } | null;
@@ -155,7 +155,13 @@ export function XTermRenderer({
     let applyingCanonicalResize = false;
     const handle: XTermRendererHandle = {
       write: (data) => terminal.write(data),
-      reset: () => terminal.reset(),
+      reset: () =>
+        new Promise<void>((resolve) => {
+          terminal.write("", () => {
+            terminal.reset();
+            resolve();
+          });
+        }),
       setSize: (cols, rows) => {
         if (terminal.cols === cols && terminal.rows === rows) return;
         applyingCanonicalResize = true;

@@ -160,9 +160,9 @@ export const TerminalInstance = forwardRef<
       pendingRendererWritesRef.current.push(data);
     }
   }, []);
-  const reset = useCallback(() => {
+  const reset = useCallback((): Promise<void> => {
     pendingRendererWritesRef.current = [];
-    xtermInstanceRef.current?.reset();
+    return xtermInstanceRef.current?.reset() ?? Promise.resolve();
   }, []);
   const focus = useCallback(() => {
     xtermInstanceRef.current?.focus();
@@ -502,9 +502,8 @@ export const TerminalInstance = forwardRef<
     if (last && last.cols === cols && last.rows === rows) return;
     if (connectionRef.current) {
       connectionRef.current.sendResizeRequest(cols, rows);
-      // Record only what actually went out. Marking a resize "sent" while the
-      // socket is still connecting would let a later identical frame be
-      // deduped, stranding the PTY at the connect-time size.
+      // Record the requested size after handing it to the connection. The
+      // connection retains it until initial_state pins the generation.
       lastSentResizeRef.current = { cols, rows };
     }
   }, []);

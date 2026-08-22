@@ -94,6 +94,15 @@ describe("terminalProtocol", () => {
     });
   });
 
+  it("decodes a frame from a non-zero-byte-offset subarray", () => {
+    const frame = fromHex(SERVER_FRAME_VECTORS.output);
+    const backing = new Uint8Array(frame.byteLength + 3);
+    backing.set(frame, 3);
+    expect(decodeServerFrame(backing.subarray(3))).toEqual(
+      decodeServerFrame(frame),
+    );
+  });
+
   it("encodes every client kind with a zero sequence", () => {
     expect(toHex(encodeInput(generation, "ls\n"))).toBe(
       CLIENT_FRAME_VECTORS.input,

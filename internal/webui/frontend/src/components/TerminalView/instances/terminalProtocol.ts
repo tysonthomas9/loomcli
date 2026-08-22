@@ -58,8 +58,8 @@ export type ServerFrame =
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
 
-function copyBytes(buffer: ArrayBuffer, offset: number): Uint8Array {
-  return new Uint8Array(buffer.slice(offset));
+function copyBytes(buffer: Uint8Array, offset: number): Uint8Array {
+  return buffer.slice(offset);
 }
 
 function decodeText(bytes: Uint8Array, description: string): string {
@@ -133,15 +133,16 @@ export function encodeFocus(generation: Uint8Array): ArrayBuffer {
   return encodeClientFrame(ClientFrameKind.Focus, generation);
 }
 
-export function decodeServerFrame(buffer: ArrayBuffer): ServerFrame {
-  if (buffer.byteLength < HEADER_BYTES) {
+export function decodeServerFrame(buffer: ArrayBuffer | Uint8Array): ServerFrame {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  if (bytes.byteLength < HEADER_BYTES) {
     throw new ProtocolError(
       "short_frame",
       `terminal frame requires ${HEADER_BYTES} header bytes`,
     );
   }
 
-  const view = new DataView(buffer);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const magic = view.getUint16(0, false);
   if (magic !== MAGIC) {
     throw new ProtocolError("bad_magic", "invalid terminal frame magic");
@@ -155,9 +156,9 @@ export function decodeServerFrame(buffer: ArrayBuffer): ServerFrame {
   }
 
   const kind = view.getUint8(3);
-  const generation = new Uint8Array(buffer.slice(4, 20));
+  const generation = bytes.slice(4, 20);
   const sequence = view.getBigUint64(20, false);
-  const payloadLength = buffer.byteLength - HEADER_BYTES;
+  const payloadLength = bytes.byteLength - HEADER_BYTES;
 
   switch (kind) {
     case 0x01: {
@@ -174,10 +175,10 @@ export function decodeServerFrame(buffer: ArrayBuffer): ServerFrame {
         rows: view.getUint16(30, false),
         retainedLines: view.getUint32(32, false),
         encoding: decodeText(
-          new Uint8Array(buffer, encodingStart, encodingLength),
+          bytes.subarray(encodingStart, encodingStart + encodingLength),
           "initial_state encoding",
         ),
-        data: copyBytes(buffer, dataStart),
+        data: copyBytes(bytes, dataStart),
       };
     }
     case 0x02:
@@ -185,7 +186,7 @@ export function decodeServerFrame(buffer: ArrayBuffer): ServerFrame {
         kind: "output",
         generation,
         sequence,
-        data: copyBytes(buffer, HEADER_BYTES),
+        data: copyBytes(bytes, HEADER_BYTES),
       };
     case 0x03:
       requirePayloadLength(payloadLength, 4, "resize");
@@ -204,7 +205,7 @@ export function decodeServerFrame(buffer: ArrayBuffer): ServerFrame {
       };
     case 0x04: {
       const text = decodeText(
-        copyBytes(buffer, HEADER_BYTES),
+        copyBytes(bytes, HEADER_BYTES),
         "notice payload",
       );
       let value: unknown;
@@ -240,7 +241,7 @@ export function decodeServerFrame(buffer: ArrayBuffer): ServerFrame {
         kind: "close",
         generation,
         sequence,
-        reason: decodeText(copyBytes(buffer, HEADER_BYTES), "close payload"),
+        reason: decodeText(copyBytes(bytes, HEADER_BYTES), "close payload"),
       };
     default:
       throw new ProtocolError(

@@ -36,7 +36,7 @@ export interface TerminalNotice {
 
 export interface TerminalConnectionCallbacks {
   write: (data: string | Uint8Array) => void;
-  reset: () => void;
+  reset: () => Promise<void>;
   setConnectionState: (state: ConnectionState) => void;
   onConnected?: (() => void) | undefined;
   onDisconnected?: ((policy: ReconnectPolicy) => void) | undefined;
@@ -59,17 +59,13 @@ async function fetchTerminalToken(
   workspaceId: string,
   sessionName: string,
 ): Promise<string | null> {
-  try {
-    const resp = await get<{ token: string }>(
-      wsUrl(
-        workspaceId,
-        "/terminal/token?session=" + encodeURIComponent(sessionName),
-      ),
-    );
-    return resp.token;
-  } catch {
-    return null;
-  }
+  const resp = await get<{ token: string }>(
+    wsUrl(
+      workspaceId,
+      "/terminal/token?session=" + encodeURIComponent(sessionName),
+    ),
+  );
+  return resp.token;
 }
 
 function buildWsUrl(
@@ -109,12 +105,16 @@ export function connectWebSocket(
   let socket: WebSocket | null = null;
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
   let pinnedGeneration: Uint8Array | null = null;
+  let expectedSequence: bigint | null = null;
   let receivedInitialState = false;
   let disconnectedNotified = false;
   let terminalCloseReason = "";
   let pendingFocus = false;
   let pendingResize: { cols: number; rows: number } | null = null;
   const pendingWrites: Uint8Array[] = [];
+  const pendingInputs: Uint8Array[] = [];
+  let pendingInputBytes = 0;
+  const MAX_PENDING_INPUT_BYTES = 64 * 1024;
 
   const cancelPendingFlush = () => {
     if (flushTimer != null) {
@@ -176,6 +176,14 @@ export function connectWebSocket(
     return true;
   };
 
+  const flushPendingInputs = () => {
+    const inputs = pendingInputs.splice(0);
+    pendingInputBytes = 0;
+    for (const input of inputs) {
+      sendWithGeneration((generation) => encodeInput(generation, input));
+    }
+  };
+
   const failProtocol = (ws: WebSocket, message: string) => {
     if (cancelled || disconnectedNotified) return;
     cancelPendingFlush();
@@ -185,14 +193,14 @@ export function connectWebSocket(
     ws.close(WS_CLOSE_PROTOCOL_ERROR, message);
   };
 
-  const reconnectForGenerationChange = (ws: WebSocket) => {
+  const reconnectForResnapshot = (ws: WebSocket, reason: string) => {
     cancelPendingFlush();
     pendingWrites.length = 0;
     notifyDisconnected("immediate");
-    ws.close(WS_CLOSE_PROTOCOL_ERROR, "terminal generation changed");
+    ws.close(WS_CLOSE_PROTOCOL_ERROR, reason);
   };
 
-  const processFrame = (ws: WebSocket, buffer: ArrayBuffer) => {
+  const processFrame = async (ws: WebSocket, buffer: ArrayBuffer) => {
     if (cancelled || disconnectedNotified) return;
     let frame;
     try {
@@ -217,14 +225,19 @@ export function connectWebSocket(
       }
       receivedInitialState = true;
       pinnedGeneration = frame.generation;
+      expectedSequence = frame.sequence + 1n;
       callbacks.onInitialState?.({
         cols: frame.cols,
         rows: frame.rows,
         retainedLines: frame.retainedLines,
       });
-      callbacks.reset();
+      await callbacks.reset();
+      if (cancelled || disconnectedNotified) return;
       callbacks.write(frame.data);
       callbacks.onOutput?.();
+      callbacks.setConnectionState("connected");
+      callbacks.onConnected?.();
+      flushPendingInputs();
       if (pendingResize) {
         const resize = pendingResize;
         pendingResize = null;
@@ -247,9 +260,19 @@ export function connectWebSocket(
       !pinnedGeneration ||
       !generationsEqual(frame.generation, pinnedGeneration)
     ) {
-      reconnectForGenerationChange(ws);
+      reconnectForResnapshot(ws, "terminal generation changed");
       return;
     }
+    if (expectedSequence === null || frame.sequence !== expectedSequence) {
+      console.warn(
+        "terminal sequence gap or duplicate",
+        expectedSequence,
+        frame.sequence,
+      );
+      reconnectForResnapshot(ws, "terminal sequence gap or duplicate");
+      return;
+    }
+    expectedSequence += 1n;
 
     switch (frame.kind) {
       case "output":
@@ -274,49 +297,48 @@ export function connectWebSocket(
     }
   };
 
-  void fetchTerminalToken(workspaceId, sessionName).then((token) => {
-    if (cancelled) return;
-
-    const url = buildWsUrl(workspaceId, sessionName, token, initialSize);
-    const ws = new WebSocket(url, [TERMINAL_SUBPROTOCOL]);
-    socket = ws;
-    wsRef.current = ws;
-    ws.binaryType = "arraybuffer";
-    let messageChain = Promise.resolve();
-
-    if (cancelled) {
-      ws.close(WS_CLOSE_NORMAL);
-      clearCurrentSocket(ws);
-      return;
-    }
-
-    ws.onopen = () => {
+  void fetchTerminalToken(workspaceId, sessionName)
+    .then((token) => {
       if (cancelled) return;
-      if (ws.protocol !== TERMINAL_SUBPROTOCOL) {
-        failProtocol(ws, "terminal subprotocol was not negotiated");
+
+      const url = buildWsUrl(workspaceId, sessionName, token, initialSize);
+      const ws = new WebSocket(url, [TERMINAL_SUBPROTOCOL]);
+      socket = ws;
+      wsRef.current = ws;
+      ws.binaryType = "arraybuffer";
+      let messageChain = Promise.resolve();
+
+      if (cancelled) {
+        ws.close(WS_CLOSE_NORMAL);
+        clearCurrentSocket(ws);
         return;
       }
-      callbacks.setConnectionState("connected");
-      callbacks.onConnected?.();
-    };
 
-    ws.onmessage = (event: MessageEvent) => {
-      if (cancelled || disconnectedNotified) return;
-      messageChain = messageChain
-        .then(async () => {
-          if (cancelled || disconnectedNotified) return;
-          if (event.data instanceof ArrayBuffer) {
-            processFrame(ws, event.data);
-          } else if (event.data instanceof Blob) {
-            processFrame(ws, await event.data.arrayBuffer());
-          } else {
-            failProtocol(ws, "terminal frames must be binary");
-          }
-        })
-        .catch(() => failProtocol(ws, "could not read terminal frame"));
-    };
+      ws.onopen = () => {
+        if (cancelled) return;
+        if (ws.protocol !== TERMINAL_SUBPROTOCOL) {
+          failProtocol(ws, "terminal subprotocol was not negotiated");
+          return;
+        }
+      };
 
-    ws.onclose = (event: CloseEvent) => {
+      ws.onmessage = (event: MessageEvent) => {
+        if (cancelled || disconnectedNotified) return;
+        messageChain = messageChain
+          .then(async () => {
+            if (cancelled || disconnectedNotified) return;
+            if (event.data instanceof ArrayBuffer) {
+              await processFrame(ws, event.data);
+            } else if (event.data instanceof Blob) {
+              await processFrame(ws, await event.data.arrayBuffer());
+            } else {
+              failProtocol(ws, "terminal frames must be binary");
+            }
+          })
+          .catch(() => failProtocol(ws, "could not read terminal frame"));
+      };
+
+      ws.onclose = (event: CloseEvent) => {
       clearCurrentSocket(ws);
       if (cancelled || disconnectedNotified) return;
       cancelPendingFlush();
@@ -349,7 +371,7 @@ export function connectWebSocket(
       notifyDisconnected("backoff");
     };
 
-    ws.onerror = () => {
+      ws.onerror = () => {
       if (cancelled || disconnectedNotified) return;
       if (
         ws.readyState === WebSocket.OPEN ||
@@ -359,14 +381,17 @@ export function connectWebSocket(
       }
       clearCurrentSocket(ws);
       notifyDisconnected("backoff");
-    };
-  });
+      };
+    })
+    .catch(() => notifyDisconnected("backoff"));
 
   const dispose = () => {
     if (cancelled) return;
     cancelled = true;
     cancelPendingFlush();
     pendingWrites.length = 0;
+    pendingInputs.length = 0;
+    pendingInputBytes = 0;
     const ws = socket;
     if (
       ws &&
@@ -381,7 +406,26 @@ export function connectWebSocket(
   return {
     dispose,
     sendInput: (data) => {
-      sendWithGeneration((generation) => encodeInput(generation, data));
+      const bytes =
+        typeof data === "string" ? new TextEncoder().encode(data) : data;
+      if (pinnedGeneration) {
+        sendWithGeneration((generation) => encodeInput(generation, bytes));
+        return;
+      }
+      if (bytes.byteLength >= MAX_PENDING_INPUT_BYTES) {
+        pendingInputs.length = 0;
+        pendingInputBytes = 0;
+        pendingInputs.push(bytes.slice(bytes.byteLength - MAX_PENDING_INPUT_BYTES));
+        pendingInputBytes = MAX_PENDING_INPUT_BYTES;
+        return;
+      }
+      while (pendingInputBytes + bytes.byteLength > MAX_PENDING_INPUT_BYTES) {
+        const removed = pendingInputs.shift();
+        if (!removed) break;
+        pendingInputBytes -= removed.byteLength;
+      }
+      pendingInputs.push(bytes.slice());
+      pendingInputBytes += bytes.byteLength;
     },
     sendResizeRequest: (cols, rows) => {
       pendingResize = { cols, rows };
