@@ -296,9 +296,11 @@ Status: spec A + B landed; stub dry-run NOT yet run.
   same leadmsg `--status`/delivery contract (host-verified: idle in 10s, queued message drained
   in ~2s, memory across turns). Workers are `-p --force` (print mode accepts `-f` for trust).
   cursor-agent installs cleanly in the task image family (ubuntu:24.04 arm64, 2026.08.11).
-  Caveats: spend.sh meters codex only (budget_secs is the bound; per-turn cursor usage is in
-  `lead-pane.log`); the container's cursor config is fresh, so the model is Cursor's default
-  unless a `--model` knob is added (loom's cursor backend has none yet).
+  Spend accounting (46ce57f25): the PATH `cursor-agent` is a shim that tees each turn's
+  `system` (model) + `result` (usage) events into `/logs/agent/cursor-usage/` and spend.sh
+  prices them per model (cursor.com/docs/models table; cap = codex + cursor). `--ak
+  cursor_model=<id>` pins the model (default `auto`, priced opus-class when the served model
+  is unknown). loom's own cursor usage parsing was fixed too (8f434d6a7, camelCase keys).
 - Next: capped all-cursor container trial (`launch-team-cursor.sh`, needs the key file), then
   the full-budget run (`budget_secs=14400`) with the replica judge on the better backend.
 
