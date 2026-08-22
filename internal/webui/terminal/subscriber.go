@@ -82,9 +82,6 @@ func (s *subscriber) closeAfterQueue(reason CloseReason) {
 	if len(s.queue) == 0 {
 		s.closedOnce.Do(func() { close(s.closedCh) })
 	}
-	// If nobody is receiving from output, an unbuffered send can otherwise
-	// park forever after the owner has finished closing the attachment.
-	s.stopOnce.Do(func() { close(s.stopCh) })
 	s.signal()
 }
 
@@ -123,15 +120,8 @@ func (s *subscriber) pump() {
 		select {
 		case s.output <- event:
 			s.consumeHead()
-		default:
-			select {
-			case s.output <- event:
-				s.consumeHead()
-			case <-s.closedCh:
-				return
-			case <-s.stopCh:
-				return
-			}
+		case <-s.closedCh:
+			return
 		}
 	}
 }

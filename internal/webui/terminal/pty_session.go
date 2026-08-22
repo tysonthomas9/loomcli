@@ -119,6 +119,8 @@ type ptySession struct {
 
 	closeOnce sync.Once
 	closeErr  error
+	drainMu   sync.Mutex
+	draining  map[string]*subscriber
 }
 
 func newPtySession(key SessionKey, device terminalPTY, cmd *exec.Cmd, cols, rows uint16) (*ptySession, error) {
@@ -139,6 +141,7 @@ func newPtySession(key SessionKey, device terminalPTY, cmd *exec.Cmd, cols, rows
 		cols:       cols,
 		rows:       rows,
 		subs:       make(map[string]*subscriber),
+		draining:   make(map[string]*subscriber),
 		scrollback: newRingBuffer(defaultRingCapacity),
 	}
 	s.writer = newWriterFIFO(device)
@@ -177,6 +180,13 @@ func (s *ptySession) attachNew(connID string, cols, rows uint16) *localAttachmen
 func (s *ptySession) detach(connID string) bool {
 	reply := make(chan bool, 1)
 	if !s.sendCommand(detachCommand{connID: connID, reason: CloseReplaced, reply: reply}) {
+		s.drainMu.Lock()
+		sub := s.draining[connID]
+		delete(s.draining, connID)
+		s.drainMu.Unlock()
+		if sub != nil {
+			sub.closeImmediate(CloseReplaced)
+		}
 		return true
 	}
 	select {

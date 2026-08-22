@@ -299,7 +299,13 @@ func (s *ptySession) handleClose(reason CloseReason) error {
 	s.emitEvent(TerminalEvent{Kind: EventClose, Data: []byte(reason)})
 	for _, sub := range s.subs {
 		sub.closeAfterQueue(reason)
+		time.AfterFunc(5*time.Second, func() { sub.closeImmediate(reason) })
 	}
+	s.drainMu.Lock()
+	for connID, sub := range s.subs {
+		s.draining[connID] = sub
+	}
+	s.drainMu.Unlock()
 	s.subs = nil
 	s.controller = ""
 	s.attachCount.Store(0)
