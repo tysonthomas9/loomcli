@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"sort"
 	"time"
 
@@ -115,11 +114,7 @@ func resolveControlSocketPath(projectDir string) string {
 			Daemon: config.DaemonSettings{PIDFile: ".loom/daemon.pid"},
 		}
 	}
-	pidFilePath := dc.Daemon.PIDFile
-	if !filepath.IsAbs(pidFilePath) {
-		pidFilePath = filepath.Join(projectDir, pidFilePath)
-	}
-	return filepath.Join(filepath.Dir(pidFilePath), "daemon.sock")
+	return daemon.ResolveDaemonSocketPath(projectDir, dc.Daemon.PIDFile)
 }
 
 // sendControlRequest dials the daemon control socket, sends a JSON request,

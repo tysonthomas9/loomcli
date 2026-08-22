@@ -29,6 +29,13 @@ const MaxUnixSocketPath = 103
 //
 // If the computed .loom/loom.sock path is short enough, it returns that directly.
 func ShortSocketPath(workspacePath string) string {
+	return ShortSocketPathNamed(workspacePath, "loom.sock")
+}
+
+// ShortSocketPathNamed returns a socket path for name, falling back to the
+// workspace's deterministic short socket directory when the natural path is
+// too long for a Unix domain socket.
+func ShortSocketPathNamed(workspacePath, name string) string {
 	// Canonicalize path for consistent hashing across symlinks and case
 	canonical := normalizePathForComparison(workspacePath)
 	if canonical == "" {
@@ -36,7 +43,7 @@ func ShortSocketPath(workspacePath string) string {
 	}
 
 	// Compute the natural socket path in the workspace runtime directory.
-	naturalPath := filepath.Join(workspacePath, ".loom", "loom.sock")
+	naturalPath := filepath.Join(workspacePath, ".loom", name)
 
 	// If natural path is short enough, use it.
 	if len(naturalPath) <= MaxUnixSocketPath {
@@ -44,17 +51,17 @@ func ShortSocketPath(workspacePath string) string {
 	}
 
 	// Path too long - use /tmp with hash
-	return shortSocketDir(canonical)
+	return shortSocketDir(canonical, name)
 }
 
 // shortSocketDir returns a socket path in /tmp/loom-{hash}/.
 // The hash is 16 hex characters derived from SHA256 of the workspace path.
-func shortSocketDir(canonicalPath string) string {
+func shortSocketDir(canonicalPath, name string) string {
 	hash := sha256.Sum256([]byte(canonicalPath))
 	hashStr := hex.EncodeToString(hash[:8]) // 16 hex chars from 8 bytes
 
 	dir := filepath.Join(tmpDir, "loom-"+hashStr)
-	return filepath.Join(dir, "loom.sock")
+	return filepath.Join(dir, name)
 }
 
 // tmpDir returns the temp directory for sockets.

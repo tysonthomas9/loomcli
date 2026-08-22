@@ -10,12 +10,14 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/fleethttp"
+	"github.com/tysonthomas9/loomcli/internal/rpc"
 )
 
 // AgentIPCRequest is sent by an agent subprocess to the daemon IPC socket.
@@ -70,6 +72,11 @@ type ipcClaimArgs struct {
 // The server accepts connections in a goroutine and dispatches to handlers.
 // It closes cleanly when the daemon shuts down.
 func (d *Daemon) startIPCServer(socketPath string) error {
+	var err error
+	socketPath, err = rpc.EnsureSocketDir(socketPath)
+	if err != nil {
+		return fmt.Errorf("agent IPC socket directory: %w", err)
+	}
 	// Remove stale socket from a previous crash (safe because daemon.lock prevents
 	// concurrent startup — any existing socket file is orphaned).
 	os.Remove(socketPath)
@@ -86,6 +93,7 @@ func (d *Daemon) startIPCServer(socketPath string) error {
 	}
 
 	d.ipcListener = ln
+	d.ipcSocket = socketPath
 	slog.Info("agent IPC server started", "socket", socketPath)
 
 	go func() {
@@ -520,7 +528,11 @@ func ipcErrorResponse(err error) AgentIPCResponse {
 // resolveAgentIPCSocketPath returns the IPC socket path adjacent to the PID file.
 func resolveAgentIPCSocketPath(projectDir, pidFile string) string {
 	pidFilePath := supervisor.ResolveDaemonPath(projectDir, pidFile)
-	return filepath.Join(filepath.Dir(pidFilePath), "agent-ipc.sock")
+	natural := filepath.Join(filepath.Dir(pidFilePath), "agent-ipc.sock")
+	if runtime.GOOS != "windows" && len(natural) > rpc.MaxUnixSocketPath {
+		return rpc.ShortSocketPathNamed(projectDir, "agent-ipc.sock")
+	}
+	return natural
 }
 
 // writeIPCResponse writes a JSON response line to the connection.
