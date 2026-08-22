@@ -77,7 +77,7 @@ func encodePayload(frame Frame) ([]byte, error) {
 		binary.BigEndian.PutUint16(p[0:2], frame.Cols)
 		binary.BigEndian.PutUint16(p[2:4], frame.Rows)
 		binary.BigEndian.PutUint32(p[4:8], frame.RetainedLines)
-		p[8] = byte(len(frame.Encoding))
+		p[8] = byte(len(frame.Encoding)) //nolint:gosec // encoding length is bounded to uint8 above
 		copy(p[9:], frame.Encoding)
 		copy(p[9+len(frame.Encoding):], frame.Data)
 		return p, nil
@@ -121,7 +121,11 @@ func Decode(data []byte) (Frame, error) {
 	}
 	f := Frame{Kind: kind, Sequence: binary.BigEndian.Uint64(data[20:28])}
 	copy(f.Generation[:], data[4:20])
-	p := data[HeaderSize:]
+	return decodePayload(f, data[HeaderSize:])
+}
+
+func decodePayload(f Frame, p []byte) (Frame, error) {
+	kind := f.Kind
 	switch kind {
 	case KindInitialState:
 		if len(p) < 9 || len(p) < 9+int(p[8]) {
