@@ -54,12 +54,24 @@ func runTerminalRelayV1(ctx context.Context, conn *websocket.Conn, p *terminalWS
 }
 
 func pumpTerminalV1(ctx context.Context, conn *websocket.Conn, att webuterminal.Attachment, result chan<- relayResult) { //nolint:staticcheck
+	initial := att.InitialState()
+	lastDeliveredSequence := initial.Sequence
+	lastKind := proto.KindInitialState
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case event, ok := <-att.Output():
 			if !ok {
+				if lastKind != proto.KindClose {
+					closeFrame, err := proto.Encode(proto.Frame{
+						Kind: proto.KindClose, Generation: initial.Generation,
+						Sequence: lastDeliveredSequence + 1, Reason: string(att.CloseReason()),
+					})
+					if err == nil {
+						_ = conn.Write(ctx, websocket.MessageBinary, closeFrame) //nolint:staticcheck
+					}
+				}
 				status, reason := terminalCloseStatus(att.CloseReason())
 				result <- relayResult{status: status, reason: reason}
 				return
@@ -73,6 +85,8 @@ func pumpTerminalV1(ctx context.Context, conn *websocket.Conn, att webuterminal.
 				result <- relayResult{status: websocket.StatusInternalError, reason: "terminal write failed"} //nolint:staticcheck
 				return
 			}
+			lastDeliveredSequence = event.Sequence
+			lastKind = frame[3]
 		}
 	}
 }
@@ -89,11 +103,12 @@ func eventFrame(generation webuterminal.Generation, event webuterminal.TerminalE
 		var notice struct {
 			Code    string `json:"code"`
 			Message string `json:"message"`
+			ConnID  string `json:"conn_id"`
 		}
 		if err := json.Unmarshal(event.Data, &notice); err != nil {
 			return nil, err
 		}
-		f.Code, f.Message = notice.Code, notice.Message
+		f.Code, f.Message, f.ConnID = notice.Code, notice.Message, notice.ConnID
 	case webuterminal.EventClose:
 		f.Kind, f.Reason = proto.KindClose, string(event.Data)
 	default:

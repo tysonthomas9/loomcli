@@ -32,6 +32,7 @@ export interface TerminalInitialStateMetadata {
 export interface TerminalNotice {
   code: string;
   message: string;
+  connId?: string;
 }
 
 export interface TerminalConnectionCallbacks {
@@ -113,6 +114,7 @@ export function connectWebSocket(
   let receivedInitialState = false;
   let disconnectedNotified = false;
   let terminalCloseReason = "";
+  let errorFallbackTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingFocus = false;
   let pendingResize: { cols: number; rows: number } | null = null;
   const pendingWrites: Uint8Array[] = [];
@@ -162,6 +164,13 @@ export function connectWebSocket(
   const clearCurrentSocket = (ws: WebSocket) => {
     if (wsRef.current === ws) wsRef.current = null;
     if (socket === ws) socket = null;
+  };
+
+  const cancelErrorFallback = () => {
+    if (errorFallbackTimer !== null) {
+      clearTimeout(errorFallbackTimer);
+      errorFallbackTimer = null;
+    }
   };
 
   const sendWithGeneration = (
@@ -291,7 +300,11 @@ export function connectWebSocket(
       case "notice":
         cancelPendingFlush();
         flushPendingWrites();
-        callbacks.onNotice?.({ code: frame.code, message: frame.message });
+        callbacks.onNotice?.({
+          code: frame.code,
+          message: frame.message,
+          ...(frame.connId ? { connId: frame.connId } : {}),
+        });
         break;
       case "close":
         cancelPendingFlush();
@@ -343,11 +356,35 @@ export function connectWebSocket(
       };
 
       ws.onclose = (event: CloseEvent) => {
+        cancelErrorFallback();
         clearCurrentSocket(ws);
         if (cancelled || disconnectedNotified) return;
         cancelPendingFlush();
         flushPendingWrites();
         const reason = event.reason || terminalCloseReason;
+        if (event.code === 1006 || event.code === 1005) {
+          switch (terminalCloseReason) {
+            case "exited":
+              callbacks.setConnectionState("crashed");
+              callbacks.onBackendCrash?.(terminalCloseReason);
+              return;
+            case "killed":
+            case "replaced":
+              callbacks.setConnectionState("session_ended");
+              callbacks.onSessionKilled?.();
+              return;
+            case "slow_consumer":
+              notifyDisconnected("immediate");
+              return;
+            case "state_rebuilding":
+              notifyDisconnected("backoff");
+              return;
+            case "shutdown":
+              callbacks.setConnectionState("error");
+              callbacks.onSessionKilled?.();
+              return;
+          }
+        }
         switch (event.code) {
           case WS_CLOSE_BACKEND_EXITED:
             callbacks.setConnectionState("crashed");
@@ -384,7 +421,12 @@ export function connectWebSocket(
           ws.close();
         }
         clearCurrentSocket(ws);
-        notifyDisconnected("backoff");
+        cancelErrorFallback();
+        errorFallbackTimer = setTimeout(() => {
+          errorFallbackTimer = null;
+          if (!cancelled && !disconnectedNotified)
+            notifyDisconnected("backoff");
+        }, 100);
       };
     })
     .catch(() => notifyDisconnected("backoff"));
@@ -393,6 +435,7 @@ export function connectWebSocket(
     if (cancelled) return;
     cancelled = true;
     cancelPendingFlush();
+    cancelErrorFallback();
     pendingWrites.length = 0;
     pendingInputs.length = 0;
     pendingInputBytes = 0;

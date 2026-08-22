@@ -155,6 +155,18 @@ func TestRelayV1SendsCloseFrameBeforeCancellingReader(t *testing.T) { //nolint:p
 					t.Fatalf("initial read: %v", err)
 				}
 				close(att.out)
+				_, data, err := conn.Read(context.Background()) //nolint:staticcheck
+				if err != nil {
+					conn.Close(websocket.StatusNormalClosure, "done") //nolint:staticcheck
+					server.Close()
+					t.Fatalf("close frame read: %v", err)
+				}
+				frame, err := proto.Decode(data)
+				if err != nil || frame.Kind != proto.KindClose || frame.Reason != string(tc.reason) {
+					conn.Close(websocket.StatusNormalClosure, "done") //nolint:staticcheck
+					server.Close()
+					t.Fatalf("close frame = %#v, err=%v", frame, err)
+				}
 				_, _, err = conn.Read(context.Background()) //nolint:staticcheck
 				if got := websocket.CloseStatus(err); got != tc.want {
 					conn.Close(websocket.StatusNormalClosure, "done") //nolint:staticcheck

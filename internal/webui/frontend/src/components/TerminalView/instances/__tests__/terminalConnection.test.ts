@@ -514,6 +514,61 @@ describe("connectWebSocket", () => {
     expect(unavailable.callbacks.onDisconnected).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["exited", "crashed", "backend"] as const,
+    ["killed", "session_ended", "killed"] as const,
+    ["replaced", "session_ended", "killed"] as const,
+    ["slow_consumer", "disconnected", "immediate"] as const,
+    ["state_rebuilding", "disconnected", "backoff"] as const,
+    ["shutdown", "error", "killed"] as const,
+  ])(
+    "dispatches in-band reason %s for browser close 1006",
+    async (reason, state, callback) => {
+      const { callbacks, ws } = await connect();
+      ws.simulateOpen();
+      ws.simulateMessage(initialStateForConnection);
+      ws.simulateMessage(
+        SERVER_FRAME_VECTORS.close
+          .replace("000000000000000c", "0000000000000009")
+          .replace(
+            "657869746564",
+            Array.from(new TextEncoder().encode(reason), (byte) =>
+              byte.toString(16).padStart(2, "0"),
+            ).join(""),
+          ),
+      );
+      await flushMessages();
+      ws.simulateClose(1006);
+
+      expect(callbacks.setConnectionState).toHaveBeenCalledWith(state);
+      if (callback === "backend") {
+        expect(callbacks.onBackendCrash).toHaveBeenCalledWith(reason);
+      } else if (callback === "killed") {
+        expect(callbacks.onSessionKilled).toHaveBeenCalledOnce();
+      } else {
+        expect(callbacks.onDisconnected).toHaveBeenCalledWith(callback);
+      }
+    },
+  );
+
+  it("lets onclose classify an error-then-close sequence", async () => {
+    const { callbacks, ws } = await connect();
+    ws.simulateOpen();
+    ws.simulateMessage(initialStateForConnection);
+    ws.simulateMessage(
+      SERVER_FRAME_VECTORS.close.replace(
+        "000000000000000c",
+        "0000000000000009",
+      ),
+    );
+    await flushMessages();
+    ws.simulateError();
+    ws.simulateClose(1006);
+
+    expect(callbacks.onBackendCrash).toHaveBeenCalledWith("exited");
+    expect(callbacks.onDisconnected).not.toHaveBeenCalled();
+  });
+
   it("includes initial size and token in the workspace terminal URL", async () => {
     const { ws } = await connect(makeCallbacks(), { cols: 132, rows: 40 });
     expect(ws.url).toContain("session=session1");
@@ -567,6 +622,8 @@ describe("connectWebSocket", () => {
     const { callbacks, ws, wsRef } = await connect();
     ws.simulateOpen();
     ws.simulateError();
+
+    await flushMessages(150);
 
     expect(ws.close).toHaveBeenCalledOnce();
     expect(wsRef.current).toBeNull();
