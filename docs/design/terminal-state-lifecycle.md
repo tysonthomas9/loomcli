@@ -17,12 +17,12 @@ Line references are pinned to that commit and will drift after edits.
 | D3 | Phase 0 fallbacks, by failure type. **(a) Resource failure** (libghostty restores state correctly but WASM misses a memory/throughput gate): keep the same official `libghostty-vt` C library and link it **natively via cgo** instead of running it as WASM. Attribute the miss first with a native-vs-WASM A/B; adopt cgo only if WASM is demonstrably the cause and the cgo build passes every fidelity, four-target packaging, installed-desktop, and process-failure gate. Cost: the release moves from `CGO_ENABLED=0` to cgo + Zig cross-compile, and a native fault is no longer contained to one session. The Go binding layer is incidental — `mitchellh/go-libghostty` (by Ghostty's author, personal account, API unstable) or a Loom-owned thin shim over the official header. **(b) Fidelity failure** (libghostty cannot restore the corpus): fall back to a packaged **Node worker** (`@xterm/headless` + `@xterm/addon-serialize`); supplementary state must come from supported xterm state or a maintained serializer fork, never a parallel raw-stream parser. tmux is not a fallback for either; it is reserved for restart survival (D11). | **Ratified by owner 2026-08-22** |
 | D4 | Initial state is sent to the browser as **VT output from the libghostty formatter plus the parser continuation suffix**, written into the existing `@xterm/xterm` after an explicit reset. libghostty's binary `GHOSTSNP` snapshot is used **only** for same-version in-process checkpoints, never on the wire or as a durable format (its v1 format carries no compatibility guarantee). | Agreed |
 | D5 | One **owner goroutine per session** serializes PTY output, resize, input, focus/controller changes, attach cuts, snapshots, and synthetic output. `Sequence` increments only for server→browser events (`Output`, `Resize`, `Notice`, `Close`); input, focus, attach, and snapshot are ordered owner commands that do not consume wire sequence numbers. | Agreed |
-| D6 | Canonical geometry and all browser-originated PTY traffic belong to the **most-recently-focused viewer** (the controller); on its disconnect, control passes to the most recently attached remaining viewer, whose stored dimensions are applied immediately. Non-controllers are read-only and render at canonical size. | Agreed |
+| D6 | Canonical geometry and all browser-originated PTY traffic belong to the **most-recently-focused viewer** (the controller); on its disconnect, control passes to the most recently attached remaining viewer, whose stored dimensions are applied immediately. Non-controllers are read-only and render at canonical size. | **Ratified by owner 2026-08-22** |
 | D7 | Slow viewers are **disconnected** with close code 4003 when their byte-accounted live queue exceeds 256 KiB; the browser reconnects and gets a fresh snapshot. Silent frame loss is removed. | Agreed |
 | D8 | The WebSocket protocol becomes a **versioned, directional binary envelope** negotiated as subprotocol `loom-terminal.v1`; a hard cut on the direct-PTY endpoint. | Agreed |
 | D9 | Server-side retention is defined by a **per-session memory budget**, not a line count: libghostty's `GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES` is set from the budget, and the browser's independent 10,000-line cap (`TERMINAL_SCROLLBACK_LINES`) is **removed** so the server is the single source of truth for what a reconnect restores. Budget: ≤ 8 MiB incremental RSS per session at 160×50 and ≤ 16 MiB at 500×200, inclusive of checkpoint and journal; encoded initial state ≤ 8 MiB; restore latency gated separately. Effective retained lines are reported as diagnostics, never promised. | **Ratified by owner 2026-08-22** |
 | D10 | **Archives are cut from v1.** There is no production archive writer today. A v2 sketch is kept in §10. | Agreed |
-| D11 | **Server-restart survival is out of scope** for v1. PTYs die with `loom serve` today. tmux is the documented path if it becomes a hard requirement. | Agreed |
+| D11 | **Server-restart survival is out of scope** for v1. PTYs die with `loom serve` today. tmux is the documented path if it becomes a hard requirement. | **Ratified by owner 2026-08-22** |
 | D12 | The auto-mode agent viewer (`agent_tmux.go`) keeps its separate raw protocol and is **untouched** in v1. | Agreed |
 | D13 | Only **detach/reconnect** and **process end** are v1 lifecycle operations. Freeze-display catch-up and execution suspend/resume are future concepts, not v1 commitments. | Agreed |
 
@@ -573,12 +573,9 @@ conversation continuation.
 
 ## 12. Owner ratification
 
-Reviewer consensus is complete. Before implementation, the owner must ratify
-the product/release choices in D6 (non-controller viewers read-only until
-focused — a visible change from today's any-viewer-can-type behaviour) and D11
-(no server-restart survival in v1). D3 (cgo fallback on attributed resource
-failure) and D9 (memory-budget retention, browser line cap removed) were
-ratified on 2026-08-22. This is authorization, not unresolved technical disagreement.
+Reviewer consensus is complete and the owner ratified D3, D6, D9, and D11 on
+2026-08-22. No product or release decision remains open; implementation may
+begin with Phase 1 and Phase 0 in parallel.
 
 ## Primary references
 
