@@ -61,22 +61,27 @@ func TestNodePlacementCopyIndependence(t *testing.T) {
 	ctx := t.Context()
 	attached := time.Date(2026, 8, 6, 12, 0, 0, 0, time.UTC)
 	nextDelete := time.Date(2026, 8, 6, 12, 5, 0, 0, time.UTC)
+	lostAt := time.Date(2026, 8, 6, 12, 1, 0, 0, time.UTC)
+	ambiguousAt := time.Date(2026, 8, 6, 12, 2, 0, 0, time.UTC)
 
 	created, err := st.Nodes().Create(ctx, store.NodeCreate{
 		WorkspaceKey:    "WS",
 		NodeID:          "node-placed",
 		RuntimeProvider: domain.RuntimeProviderDaytona,
 		Placement: &domain.NodePlacement{
-			SandboxID:       "sandbox-1",
-			Generation:      1,
-			ReservedVCPU:    2,
-			ReservedMemGiB:  4,
-			State:           domain.PlacementStateActive,
-			FirstAttachedAt: &attached,
-			SnapshotRef:     "snapshot-1",
-			DeleteAttempts:  2,
-			LastDeleteError: "delete failed",
-			NextDeleteAt:    nextDelete,
+			SandboxID:                "sandbox-1",
+			Generation:               1,
+			ReservedVCPU:             2,
+			ReservedMemGiB:           4,
+			State:                    domain.PlacementStateActive,
+			FirstAttachedAt:          &attached,
+			LostAt:                   &lostAt,
+			ProvisionAmbiguousAt:     &ambiguousAt,
+			CreateAbsenceConfirmedAt: &ambiguousAt,
+			SnapshotRef:              "snapshot-1",
+			DeleteAttempts:           2,
+			LastDeleteError:          "delete failed",
+			NextDeleteAt:             nextDelete,
 		},
 		TTL: time.Minute,
 	})
@@ -85,6 +90,9 @@ func TestNodePlacementCopyIndependence(t *testing.T) {
 	}
 	created.Placement.SandboxID = "mutated-return"
 	*created.Placement.FirstAttachedAt = attached.Add(time.Hour)
+	*created.Placement.LostAt = lostAt.Add(time.Hour)
+	*created.Placement.ProvisionAmbiguousAt = ambiguousAt.Add(time.Hour)
+	*created.Placement.CreateAbsenceConfirmedAt = ambiguousAt.Add(time.Hour)
 
 	got, err := st.Nodes().Get(ctx, "WS", "node-placed")
 	if err != nil {
@@ -95,6 +103,9 @@ func TestNodePlacementCopyIndependence(t *testing.T) {
 	}
 	if got.Placement.SandboxID != "sandbox-1" ||
 		!got.Placement.FirstAttachedAt.Equal(attached) ||
+		!got.Placement.LostAt.Equal(lostAt) ||
+		!got.Placement.ProvisionAmbiguousAt.Equal(ambiguousAt) ||
+		!got.Placement.CreateAbsenceConfirmedAt.Equal(ambiguousAt) ||
 		got.Placement.DeleteAttempts != 2 ||
 		got.Placement.LastDeleteError != "delete failed" ||
 		!got.Placement.NextDeleteAt.Equal(nextDelete) {

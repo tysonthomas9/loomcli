@@ -33,6 +33,24 @@ func mustBrokerWithMax(t *testing.T, st store.Store, provider *fakeProvider, max
 	return broker
 }
 
+// mustBrokerWithClock builds a broker whose clock follows *clock, so a test
+// can advance time between calls (the two-pass absence protocol needs it).
+func mustBrokerWithClock(t *testing.T, st store.Store, provider *fakeProvider, clock *time.Time) *Broker {
+	t.Helper()
+	broker, err := NewBroker(Config{
+		Store:                st,
+		Provider:             provider,
+		TokenKey:             testTokenKey,
+		DeploymentID:         testDeploymentID,
+		DeleteConfirmBackoff: time.Millisecond,
+		Now:                  func() time.Time { return *clock },
+	})
+	if err != nil {
+		t.Fatalf("NewBroker: %v", err)
+	}
+	return broker
+}
+
 func mustBrokerWithNow(t *testing.T, st store.Store, provider *fakeProvider, now time.Time) *Broker {
 	t.Helper()
 	broker, err := NewBroker(Config{

@@ -52,25 +52,32 @@ type fakeProvider struct {
 	events                 []string
 	sandboxes              map[string]ProviderSandbox
 	listOnlySandboxes      []ProviderSandbox
+	listInvisible          map[string]bool
+	names                  map[string]string
 	ptySessions            map[string]map[string]PtySession
 	createResult           *CreateResult
 	createErr              error
-	createCtxErr           error
-	deleteErr              error
-	prepErr                error
-	getErr                 error
-	getHook                func(string, int)
-	ensureRunningErr       error
-	listErr                error
-	listPtySessionsErr     error
-	setAutostopErr         error
-	startProcessErr        error
-	startProcessErrs       []error
-	createDelay            time.Duration
-	deleteLeavesSandbox    bool
-	dropPtyAfterCreate     bool
-	createHook             func(string)
-	deleteHook             func(string)
+	// createLosesResponse simulates a create whose response is lost after
+	// dispatch: the sandbox is made (with its labels and name) but the call
+	// returns an empty CreateResult alongside createErr.
+	createLosesResponse bool
+	findByNameErr       error
+	createCtxErr        error
+	deleteErr           error
+	prepErr             error
+	getErr              error
+	getHook             func(string, int)
+	ensureRunningErr    error
+	listErr             error
+	listPtySessionsErr  error
+	setAutostopErr      error
+	startProcessErr     error
+	startProcessErrs    []error
+	createDelay         time.Duration
+	deleteLeavesSandbox bool
+	dropPtyAfterCreate  bool
+	createHook          func(string)
+	deleteHook          func(string)
 }
 
 func (f *fakeProvider) Create(ctx context.Context, req CreateRequest) (CreateResult, error) {
@@ -84,21 +91,32 @@ func (f *fakeProvider) Create(ctx context.Context, req CreateRequest) (CreateRes
 		result = *f.createResult
 	} else if f.createErr == nil {
 		result.SandboxID = fmt.Sprintf("sandbox-%d", len(f.createCalls))
+		result.Outcome = CreateOutcomeCreated
 	}
-	if result.SandboxID != "" {
+	made := result.SandboxID
+	if made == "" && f.createLosesResponse {
+		made = fmt.Sprintf("sandbox-%d", len(f.createCalls))
+	}
+	if made != "" {
 		f.ensureSandboxesLocked()
-		f.sandboxes[result.SandboxID] = ProviderSandbox{
-			ID:     result.SandboxID,
+		f.sandboxes[made] = ProviderSandbox{
+			ID:     made,
 			Labels: copyMap(req.Labels),
 			State:  ProviderSandboxRunning,
 		}
-		f.events = append(f.events, "create:"+result.SandboxID)
+		if name := strings.TrimSpace(req.Name); name != "" {
+			if f.names == nil {
+				f.names = make(map[string]string)
+			}
+			f.names[name] = made
+		}
+		f.events = append(f.events, "create:"+made)
 	}
 	hook := f.createHook
 	err := f.createErr
 	f.mu.Unlock()
 	if hook != nil {
-		hook(result.SandboxID)
+		hook(made)
 	}
 	f.mu.Lock()
 	f.createCtxErr = ctx.Err()
@@ -128,6 +146,35 @@ func (f *fakeProvider) Get(_ context.Context, sandboxID string) (ProviderSandbox
 		return ProviderSandbox{}, ErrSandboxNotFound
 	}
 	return cloneProviderSandbox(sandbox), nil
+}
+
+func (f *fakeProvider) FindByName(_ context.Context, name string) (ProviderSandbox, error) {
+	f.mu.Lock()
+	err := f.findByNameErr
+	var sandbox ProviderSandbox
+	ok := false
+	if err == nil {
+		if id, exists := f.names[strings.TrimSpace(name)]; exists {
+			sandbox, ok = f.sandboxes[id]
+		}
+	}
+	f.mu.Unlock()
+	if err != nil {
+		return ProviderSandbox{}, err
+	}
+	if !ok {
+		return ProviderSandbox{}, ErrSandboxNotFound
+	}
+	return cloneProviderSandbox(sandbox), nil
+}
+
+func (f *fakeProvider) setSandboxName(name, sandboxID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.names == nil {
+		f.names = make(map[string]string)
+	}
+	f.names[name] = sandboxID
 }
 
 func (f *fakeProvider) EnsureRunning(_ context.Context, sandboxID string) (bool, error) {
@@ -257,7 +304,7 @@ func (f *fakeProvider) ListManaged(_ context.Context, labels map[string]string) 
 	}
 	out := make([]ProviderSandbox, 0, len(f.sandboxes)+len(f.listOnlySandboxes))
 	for _, sandbox := range f.sandboxes {
-		if !providerSandboxHasLabels(sandbox, labels) {
+		if f.listInvisible[sandbox.ID] || !providerSandboxHasLabels(sandbox, labels) {
 			continue
 		}
 		out = append(out, cloneProviderSandbox(sandbox))
@@ -308,6 +355,20 @@ func (f *fakeProvider) addListOnlySandbox(sandbox ProviderSandbox) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.listOnlySandboxes = append(f.listOnlySandboxes, cloneProviderSandbox(sandbox))
+}
+
+// addListInvisibleSandbox registers a sandbox that point reads (Get,
+// FindByName via setSandboxName) can see but ListManaged omits — the
+// eventually-consistent-list gap the deterministic name closes.
+func (f *fakeProvider) addListInvisibleSandbox(sandbox ProviderSandbox) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ensureSandboxesLocked()
+	f.sandboxes[sandbox.ID] = cloneProviderSandbox(sandbox)
+	if f.listInvisible == nil {
+		f.listInvisible = make(map[string]bool)
+	}
+	f.listInvisible[sandbox.ID] = true
 }
 
 func (f *fakeProvider) addPtySession(sandboxID, sessionID string) {

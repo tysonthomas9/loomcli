@@ -232,12 +232,14 @@ type serveTestPlacementProvider struct {
 	next           int
 	createRequests []placement.CreateRequest
 	sandboxes      map[string]placement.ProviderSandbox
+	names          map[string]string
 	ptys           map[string][]placement.PtySession
 }
 
 func newServeTestPlacementProvider() *serveTestPlacementProvider {
 	return &serveTestPlacementProvider{
 		sandboxes: make(map[string]placement.ProviderSandbox),
+		names:     make(map[string]string),
 		ptys:      make(map[string][]placement.PtySession),
 	}
 }
@@ -254,7 +256,24 @@ func (p *serveTestPlacementProvider) Create(_ context.Context, req placement.Cre
 		State:    placement.ProviderSandboxRunning,
 		RawState: placement.ProviderSandboxRawStarted,
 	}
-	return placement.CreateResult{SandboxID: id}, nil
+	if name := strings.TrimSpace(req.Name); name != "" {
+		p.names[name] = id
+	}
+	return placement.CreateResult{SandboxID: id, Outcome: placement.CreateOutcomeCreated}, nil
+}
+
+func (p *serveTestPlacementProvider) FindByName(_ context.Context, name string) (placement.ProviderSandbox, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	id, ok := p.names[strings.TrimSpace(name)]
+	if !ok {
+		return placement.ProviderSandbox{}, placement.ErrSandboxNotFound
+	}
+	sandbox, ok := p.sandboxes[id]
+	if !ok {
+		return placement.ProviderSandbox{}, placement.ErrSandboxNotFound
+	}
+	return sandbox, nil
 }
 
 func (p *serveTestPlacementProvider) createRequest(t *testing.T, idx int) placement.CreateRequest {

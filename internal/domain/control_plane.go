@@ -52,6 +52,10 @@ type PlacementReleaseReason string
 const (
 	PlacementReleaseReasonUnspecified         PlacementReleaseReason = ""
 	PlacementReleaseReasonLostConfirmedAbsent PlacementReleaseReason = "lost_confirmed_absent"
+	// PlacementReleaseReasonCreateConfirmedAbsent records that an
+	// empty-sandbox-id provisioning row was released only after the two-pass
+	// create-absence protocol confirmed no sandbox exists.
+	PlacementReleaseReasonCreateConfirmedAbsent PlacementReleaseReason = "create_confirmed_absent"
 )
 
 type Node struct {
@@ -84,11 +88,26 @@ type NodePlacement struct {
 	FirstAttachedAt        *time.Time             `json:"first_attached_at,omitempty"`
 	LeadProcessStartedAt   *time.Time             `json:"lead_process_started_at,omitempty"`
 	ProvisioningDeadlineAt *time.Time             `json:"provisioning_deadline_at,omitempty"`
-	SnapshotRef            string                 `json:"snapshot_ref,omitempty"`
-	AbandonedSandboxIDs    []string               `json:"abandoned_sandbox_ids,omitempty"`
-	DeleteAttempts         int                    `json:"delete_attempts,omitempty"`
-	LastDeleteError        string                 `json:"last_delete_error,omitempty"`
-	NextDeleteAt           time.Time              `json:"next_delete_at,omitempty"`
+	// ProvisionAmbiguousAt records that a sandbox create errored without
+	// proving no sandbox exists. While set on a provisioning row with an empty
+	// sandbox id, release requires the two-pass absence protocol.
+	ProvisionAmbiguousAt *time.Time `json:"provision_ambiguous_at,omitempty"`
+	// ProvisionAmbiguityDetail carries the (truncated) create error behind
+	// ProvisionAmbiguousAt for operators and the attach surface.
+	ProvisionAmbiguityDetail string `json:"provision_ambiguity_detail,omitempty"`
+	// CreateAbsenceConfirmedAt is the first provider-confirmed zero-match
+	// observation for an empty-sandbox-id provisioning row past its deadline.
+	// Distinct from AbsenceConfirmedAt, which belongs to the lost protocol.
+	CreateAbsenceConfirmedAt *time.Time `json:"create_absence_confirmed_at,omitempty"`
+	// AttentionReason is a durable operator-facing block reason (for example
+	// multiple provider sandboxes carrying this placement's label). Non-empty
+	// marks the placement as needing attention.
+	AttentionReason     string    `json:"attention_reason,omitempty"`
+	SnapshotRef         string    `json:"snapshot_ref,omitempty"`
+	AbandonedSandboxIDs []string  `json:"abandoned_sandbox_ids,omitempty"`
+	DeleteAttempts      int       `json:"delete_attempts,omitempty"`
+	LastDeleteError     string    `json:"last_delete_error,omitempty"`
+	NextDeleteAt        time.Time `json:"next_delete_at,omitempty"`
 }
 
 func ResolveRuntimeProvider(agent *Agent, profile *DaemonProfile) RuntimeProvider {

@@ -84,7 +84,10 @@ func TestProvisionDifferentAgentsDoNotSerializeProviderCreate(t *testing.T) {
 func TestProvisionRecordBeforeCreateFailure(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	provider := &fakeProvider{createErr: errors.New("provider down")}
+	provider := &fakeProvider{
+		createErr:    errors.New("provider down"),
+		createResult: &CreateResult{Outcome: CreateOutcomeNotDispatched},
+	}
 	broker := mustBroker(t, st, provider)
 
 	_, err := broker.Provision(ctx, testProvisionRequest("nova", 2, 4))
@@ -98,10 +101,11 @@ func TestProvisionRecordBeforeCreateFailure(t *testing.T) {
 	if len(nodes) != 1 {
 		t.Fatalf("nodes = %d, want one placement record", len(nodes))
 	}
-	// A create that produced no sandbox can never boot, so the record is flipped
-	// out of provisioning to released with the cause recorded — it must not hang
-	// in provisioning until the reaper deadline (which would also leak the
-	// MaxLive reservation, since released is not quota-reserved).
+	// A create the provider proved never dispatched can never have made a
+	// sandbox, so the record is flipped out of provisioning to released with
+	// the cause recorded — it must not hang in provisioning until the reaper
+	// deadline (which would also leak the MaxLive reservation, since released
+	// is not quota-reserved).
 	assertPlacement(t, nodes[0], domain.PlacementStateReleased, "")
 	if got := nodes[0].Placement.LastDeleteError; !strings.Contains(got, "provider down") {
 		t.Fatalf("LastDeleteError = %q, want the create error recorded", got)
@@ -111,6 +115,66 @@ func TestProvisionRecordBeforeCreateFailure(t *testing.T) {
 	}
 	if got := provider.deleteCallCount(); got != 0 {
 		t.Fatalf("Delete calls = %d, want 0 when Create returned no id", got)
+	}
+}
+
+func TestProvisionCreateAmbiguousStaysProvisioning(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	// No outcome set: the zero value must fail closed to Unknown. No sandbox
+	// actually exists, so reconcile finds nothing and the row must stay
+	// provisioning — releasing on one errored create is the billing leak.
+	provider := &fakeProvider{createErr: errors.New("client timeout awaiting response")}
+	broker := mustBroker(t, st, provider)
+
+	_, err := broker.Provision(ctx, testProvisionRequest("nova", 2, 4))
+	if err == nil {
+		t.Fatal("Provision succeeded, want create error")
+	}
+	nodes, err := st.Nodes().List(ctx, "WS")
+	if err != nil {
+		t.Fatalf("list nodes: %v", err)
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("nodes = %d, want one placement record", len(nodes))
+	}
+	assertPlacement(t, nodes[0], domain.PlacementStateProvisioning, "")
+	if nodes[0].Placement.ProvisionAmbiguousAt == nil {
+		t.Fatal("ProvisionAmbiguousAt = nil, want the ambiguity stamped durably")
+	}
+	if got := nodes[0].Placement.ProvisionAmbiguityDetail; !strings.Contains(got, "client timeout") {
+		t.Fatalf("ProvisionAmbiguityDetail = %q, want the create error recorded", got)
+	}
+	if got := provider.deleteCallCount(); got != 0 {
+		t.Fatalf("Delete calls = %d, want 0", got)
+	}
+}
+
+func TestProvisionCreateResponseLostAdoptsByName(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	// The create made a real sandbox (labels + deterministic name) but its
+	// response was lost. Provision must adopt that sandbox via the name point
+	// read and heal in the same call — never make a second billable sandbox.
+	provider := &fakeProvider{
+		createErr:           errors.New("connection reset before response"),
+		createLosesResponse: true,
+	}
+	broker := mustBroker(t, st, provider)
+
+	result, err := broker.Provision(ctx, testProvisionRequest("nova", 2, 4))
+	if err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	assertPlacement(t, result.Node, domain.PlacementStateActive, "sandbox-1")
+	if got := provider.createCallCount(); got != 1 {
+		t.Fatalf("Create calls = %d, want 1 — a second create is a second billable sandbox", got)
+	}
+	if result.Node.Placement.ProvisionAmbiguousAt != nil {
+		t.Fatalf("ProvisionAmbiguousAt = %v, want cleared after adoption", result.Node.Placement.ProvisionAmbiguousAt)
+	}
+	if got := provider.deleteCallCount(); got != 0 {
+		t.Fatalf("Delete calls = %d, want 0", got)
 	}
 }
 
@@ -795,10 +859,11 @@ func TestReleaseEmptySandboxIDDeletesLabelledOrphan(t *testing.T) {
 	}
 }
 
-func TestReleaseUnknownSandboxIDAfterDeadlineMarksReleased(t *testing.T) {
+func TestReleaseUnknownSandboxIDAfterDeadlineNeedsTwoAbsencePasses(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	now := time.Date(2026, 8, 6, 14, 0, 0, 0, time.UTC)
+	clock := now
 	past := now.Add(-time.Minute)
 	node := createPlacementNode(t, st, "WS", "lead-placement-lost", "nova", domain.NodePlacement{
 		Generation:             1,
@@ -809,13 +874,33 @@ func TestReleaseUnknownSandboxIDAfterDeadlineMarksReleased(t *testing.T) {
 		SnapshotRef:            "snapshot://lead",
 	})
 	provider := &fakeProvider{}
-	broker := mustBrokerWithNow(t, st, provider, now)
+	broker := mustBrokerWithClock(t, st, provider, &clock)
 
+	// One confirmed zero is a single observation of an eventually-consistent
+	// provider; the first release attempt records it and refuses to release.
+	if _, err := broker.Release(ctx, "WS", node.NodeID, releaseFence(node)); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("first Release = %v, want ErrConflict while absence is unreconfirmed", err)
+	}
+	staged := getNode(t, st, "WS", node.NodeID)
+	assertPlacement(t, staged, domain.PlacementStateProvisioning, "")
+	if staged.Placement.CreateAbsenceConfirmedAt == nil {
+		t.Fatal("CreateAbsenceConfirmedAt = nil, want the first absence confirmation recorded")
+	}
+
+	// Retrying inside the reconfirm interval must not release either.
+	if _, err := broker.Release(ctx, "WS", node.NodeID, releaseFence(node)); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("second Release inside interval = %v, want ErrConflict", err)
+	}
+
+	clock = now.Add(defaultCreateAbsenceReconfirm + time.Second)
 	released, err := broker.Release(ctx, "WS", node.NodeID, releaseFence(node))
 	if err != nil {
-		t.Fatalf("Release: %v", err)
+		t.Fatalf("Release after reconfirm interval: %v", err)
 	}
 	assertPlacement(t, released, domain.PlacementStateReleased, "")
+	if got := released.Placement.ReleaseReason; got != domain.PlacementReleaseReasonCreateConfirmedAbsent {
+		t.Fatalf("ReleaseReason = %q, want %q", got, domain.PlacementReleaseReasonCreateConfirmedAbsent)
+	}
 	if got := provider.deleteCallCount(); got != 0 {
 		t.Fatalf("Delete calls = %d, want 0 for unknown sandbox id", got)
 	}
@@ -1620,6 +1705,7 @@ func TestProvisionStaleUnknownIDReleasesAndReprovisions(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	now := time.Date(2026, 8, 6, 14, 0, 0, 0, time.UTC)
+	clock := now
 	past := now.Add(-time.Minute)
 	node := createPlacementNode(t, st, "WS", "lead-placement-stale", "nova", domain.NodePlacement{
 		Generation:             1,
@@ -1630,14 +1716,29 @@ func TestProvisionStaleUnknownIDReleasesAndReprovisions(t *testing.T) {
 		SnapshotRef:            "snapshot://lead",
 	})
 	provider := &fakeProvider{}
-	broker := mustBrokerWithNow(t, st, provider, now)
+	broker := mustBrokerWithClock(t, st, provider, &clock)
 
+	// The stale row's create may have made a sandbox whose response was lost,
+	// so the first pass only records the absence confirmation.
+	if _, err := broker.Provision(ctx, testProvisionRequest("nova", 2, 4)); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("first Provision = %v, want ErrConflict while absence is unreconfirmed", err)
+	}
+	staged := getNode(t, st, "WS", node.NodeID)
+	assertPlacement(t, staged, domain.PlacementStateProvisioning, "")
+	if staged.Placement.CreateAbsenceConfirmedAt == nil {
+		t.Fatal("CreateAbsenceConfirmedAt = nil, want the first absence confirmation recorded")
+	}
+
+	clock = now.Add(defaultCreateAbsenceReconfirm + time.Second)
 	result, err := broker.Provision(ctx, testProvisionRequest("nova", 2, 4))
 	if err != nil {
-		t.Fatalf("Provision stale unknown id: %v", err)
+		t.Fatalf("Provision stale unknown id after reconfirm: %v", err)
 	}
 	updated := getNode(t, st, "WS", node.NodeID)
 	assertPlacement(t, updated, domain.PlacementStateReleased, "")
+	if got := updated.Placement.ReleaseReason; got != domain.PlacementReleaseReasonCreateConfirmedAbsent {
+		t.Fatalf("ReleaseReason = %q, want %q", got, domain.PlacementReleaseReasonCreateConfirmedAbsent)
+	}
 	assertPlacement(t, result.Node, domain.PlacementStateActive, "sandbox-1")
 	if result.Node.NodeID == node.NodeID {
 		t.Fatalf("node id = %q, want successor row", result.Node.NodeID)

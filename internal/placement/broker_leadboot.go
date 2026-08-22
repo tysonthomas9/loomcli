@@ -196,6 +196,7 @@ func providerCreateRequest(req ProvisionRequest, nodeID, token, deploymentID, le
 		WorkspaceKey:           req.WorkspaceKey,
 		AgentName:              req.AgentName,
 		SnapshotRef:            req.SnapshotRef,
+		Name:                   sandboxNameForPlacement(nodeID),
 		Labels:                 labels,
 		Env:                    env,
 		Resource:               req.Resource,
