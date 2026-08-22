@@ -286,5 +286,19 @@ Status: spec A + B landed; stub dry-run NOT yet run.
   design (17 min) + revision (4 min) + implementation overran the window; no harness failures,
   0 INVARIANT-VIOLATION. Lead bug found and fixed (96d4160e3): it reset a freshly claimed
   in_progress task to open during seeding.
-- Next: full-budget run (`budget_secs=14400`) with the replica judge.
+- **All-cursor arm wired (a34b9b670 + f8074adfa):** `--ak backend=cursor` runs lead AND
+  workers on cursor-agent (`--ak cursor_api_key_path=<file>`; default
+  `~/.cursor/marathon-api-key`; the adapter only uploads the file). The lead cannot run under
+  the harness-wrapper PTY runtime — the wrapper has no cursor turn detector, so a supervised
+  cursor TUI never reports idle (verified: stuck `active` at "Add a follow-up"), and it opens a
+  Workspace Trust dialog first. loom now has a headless controlled lead runtime for cursor:
+  seed turn + one `cursor-agent -p --force --trust --resume <chat>` process per inbox message,
+  same leadmsg `--status`/delivery contract (host-verified: idle in 10s, queued message drained
+  in ~2s, memory across turns). Workers are `-p --force` (print mode accepts `-f` for trust).
+  cursor-agent installs cleanly in the task image family (ubuntu:24.04 arm64, 2026.08.11).
+  Caveats: spend.sh meters codex only (budget_secs is the bound; per-turn cursor usage is in
+  `lead-pane.log`); the container's cursor config is fresh, so the model is Cursor's default
+  unless a `--model` knob is added (loom's cursor backend has none yet).
+- Next: capped all-cursor container trial (`launch-team-cursor.sh`, needs the key file), then
+  the full-budget run (`budget_secs=14400`) with the replica judge on the better backend.
 
