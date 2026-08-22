@@ -30,20 +30,23 @@
 # merged log; usage is parsed from the stdout channel only.
 set -u
 
-# loom_capture FILE MARK: stdin -> stdout passthrough, appending system/result
-# event lines to FILE first (so a dead stdout loses nothing). MARK is created
-# once the result line has been both recorded and forwarded. A failed record
-# is reported two ways, since the disk that failed the append may also refuse
-# a marker file: FILE.err (best effort) and exit status 98 at EOF. Shutdown
-# signals are ignored here: the reader must outlive a TERMed agent long
-# enough to record the result it may still print.
+# loom_capture FILE MARK PARENT: stdin -> stdout passthrough, appending
+# system/result event lines to FILE first (so a dead stdout loses nothing).
+# MARK is created once the result line has been both recorded and forwarded.
+# A failed record is reported to PARENT by SIGUSR1 at once — no disk involved,
+# so a full disk or a reader later SIGKILLed on an orphan-held FIFO cannot
+# lose the signal — plus FILE.err and exit 98 as best-effort evidence.
+# Shutdown signals are ignored here: the reader must outlive a TERMed agent
+# long enough to record the result it may still print.
 loom_capture() {
   trap '' HUP TERM INT
   local line failed=0
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
       *'"type":"system"'*|*'"type":"result"'*)
-        printf '%s\n' "$line" >> "$1" 2>/dev/null || { failed=1; : > "$1.err" 2>/dev/null; } ;;
+        if ! printf '%s\n' "$line" >> "$1" 2>/dev/null; then
+          if [ "$failed" = 0 ]; then failed=1; kill -USR1 "$3" 2>/dev/null; : > "$1.err" 2>/dev/null; fi
+        fi ;;
     esac
     printf '%s\n' "$line" 2>/dev/null || true
     case "$line" in *'"type":"result"'*) : > "$2" ;; esac
@@ -101,8 +104,10 @@ on_signal() {
   fi
 }
 trap on_signal TERM INT HUP
+record_failed=""
+trap 'record_failed=1' USR1
 
-loom_capture "$f" "$mark" < "$fifo" &
+loom_capture "$f" "$mark" "$$" < "$fifo" &
 reader=$!
 "$REAL" ${args[@]+"${args[@]}"} > "$fifo" &
 child=$!
@@ -136,7 +141,7 @@ rm -f "$fifo" "$mark"
 # record could not be written is reported as unaccounted even when the agent
 # failed (its tokens were still billed), and a zero exit additionally needs
 # the result record.
-if [ "$rrc" -eq 98 ] || [ -e "$f.err" ]; then
+if [ -n "$record_failed" ] || [ "$rrc" -eq 98 ] || [ -e "$f.err" ]; then
   echo "cursor-agent shim: spend record write failed for $f (turn not accounted; agent rc=$rc)" >&2
   rc=97
 elif [ "$rc" -eq 0 ] && ! grep -q '"type":"result"' "$f" 2>/dev/null; then

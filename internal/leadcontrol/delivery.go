@@ -298,12 +298,16 @@ func deliverNextLeadInboxMessage(
 		result.Reason = "agent inbox store is not configured"
 		return result, nil
 	}
+	leaseTTL := leadInboxDefaultLeaseTTL
+	if l, ok := d.(interface{ leaseTTL() time.Duration }); ok {
+		leaseTTL = l.leaseTTL()
+	}
 	msg, err := st.AgentInboxMessages().ClaimNext(ctx, store.AgentInboxMessageClaim{
 		WorkspaceKey:  workspace,
 		TargetAgentID: leadName,
 		SessionID:     sessionID,
 		ClaimedBy:     d.claimedBy(sessionID),
-		LeaseTTL:      2 * time.Minute,
+		LeaseTTL:      leaseTTL,
 	})
 	if errors.Is(err, domain.ErrNotFound) {
 		result.State = DeliveryStateNone
@@ -326,7 +330,7 @@ func deliverNextLeadInboxMessage(
 	case DeliveryStateDelivered:
 		return completeLeadInboxDelivered(ctx, st, workspace, sessionID, d, msg, delivered)
 	case DeliveryStateFailed:
-		if msg.Attempt >= leadInboxTurnFailureMaxAttempts {
+		if msg.Attempt >= leadInboxTurnFailureMaxAttempts(msg) {
 			return completeLeadInboxFailed(ctx, st, workspace, sessionID, d, msg, delivered)
 		}
 		return completeLeadInboxRetry(ctx, st, workspace, sessionID, d, msg, delivered)
@@ -335,10 +339,22 @@ func deliverNextLeadInboxMessage(
 	}
 }
 
+// leadInboxDefaultLeaseTTL is the claim lease for deliverers that hand a
+// message to a running runtime and return at once. A deliverer that blocks
+// for the whole turn overrides it via leaseTTL().
+const leadInboxDefaultLeaseTTL = 2 * time.Minute
+
 // leadInboxTurnFailureMaxAttempts bounds how many turns a message whose turn
 // ran and failed may consume before it is marked failed (ClaimNext counts
-// attempts, so 2 = one retry).
-const leadInboxTurnFailureMaxAttempts = 2
+// attempts, so 2 = one retry). Assignment messages get more room: their
+// dedupe key is version-stable, so a failed row has no redrive path, and
+// losing the assignment is worse than a few more failed turns.
+func leadInboxTurnFailureMaxAttempts(msg *domain.AgentInboxMessage) int {
+	if isAssignmentInboxMessage(msg) {
+		return 5
+	}
+	return 2
+}
 
 // completeLeadInboxFailed records the delivery attempt and marks the inbox
 // message failed (terminal) after its turn failed on the last allowed attempt.

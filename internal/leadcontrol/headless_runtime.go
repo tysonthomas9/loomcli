@@ -454,6 +454,15 @@ func (d *headlessTurnDeliverer) pendingReason() string {
 	return ""
 }
 
+// leaseTTL covers the whole turn, since deliverTurn blocks until the turn
+// completes (the stores accept a Complete after lease expiry, but a lapsed
+// lease would let a second claimer — none exists by design — take the
+// message mid-turn).
+func (d *headlessTurnDeliverer) leaseTTL() time.Duration { return headlessTurnLeaseTTL }
+
+// headlessTurnLeaseTTL bounds a single headless lead turn's inbox lease.
+const headlessTurnLeaseTTL = 2 * time.Hour
+
 func (d *headlessTurnDeliverer) deliverTurn(
 	_ context.Context,
 	_ store.Store,
