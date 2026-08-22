@@ -13,7 +13,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
@@ -80,11 +79,11 @@ func (s *Supervisor) claimTask(ap *AgentProcess, epicID string) bool {
 	if ap.Entry.Worktree != "" {
 		assignedOpts := opts
 		assignedOpts.Assignee = ap.Entry.Worktree
-		if claimed, decided := s.tryClaimFromReady(ap, assignedOpts, constraints); decided {
+		if claimed, decided := s.tryClaimFromReady(ap, assignedOpts, constraints, false); decided {
 			return claimed
 		}
 	}
-	if claimed, decided := s.tryClaimFromReady(ap, opts, constraints); decided {
+	if claimed, decided := s.tryClaimFromReady(ap, opts, constraints, true); decided {
 		return claimed
 	}
 	s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome), "no claimable tasks")
@@ -94,19 +93,13 @@ func (s *Supervisor) claimTask(ap *AgentProcess, epicID string) bool {
 // buildClaimOpts assembles the ReadyOpts for an agent's task claim,
 // resolving the agent's source repos and merging role constraints.
 func (s *Supervisor) buildClaimOpts(ap *AgentProcess, epicID string) (backend.ReadyOpts, cli.RoleConstraints) {
-	ae := ap.Entry
-	if sourceRepos, err := config.ResolveAgentRepos(ap.Entry, s.Repos); err == nil {
-		ae.SourceRepos = sourceRepos
-	} else {
-		slog.Warn("failed to resolve agent repos for task claim", "worktree", ap.Entry.Worktree, "err", err)
-	}
-	constraints := cli.MergeRoleConstraints(ap.RoleConfig, ae)
+	constraints := s.buildClaimConstraints(ap)
 	opts := backend.ReadyOpts{Limit: claimReadyLimit, ParentID: epicID}
 	if ap.Entry.Repo != "" {
 		opts.Labels = []string{"repo:" + ap.Entry.Repo}
 	}
-	if len(ae.SourceRepos) > 0 {
-		opts.SourceRepos = ae.SourceRepos
+	if len(constraints.SourceRepos) > 0 {
+		opts.SourceRepos = constraints.SourceRepos
 	}
 	return opts, constraints
 }
@@ -115,11 +108,14 @@ func (s *Supervisor) buildClaimOpts(ap *AgentProcess, epicID string) (backend.Re
 // (claimed, decided): decided=false means "no decision, caller may try
 // another opts variant"; decided=true means we either succeeded or hit a
 // failure we've already recorded.
-func (s *Supervisor) tryClaimFromReady(ap *AgentProcess, opts backend.ReadyOpts, constraints cli.RoleConstraints) (claimed, decided bool) {
+func (s *Supervisor) tryClaimFromReady(ap *AgentProcess, opts backend.ReadyOpts, constraints cli.RoleConstraints, pruneYields bool) (claimed, decided bool) {
 	issues, err := s.readyIssues(opts)
 	if err != nil {
 		s.setPreflightError(ap, agenterr.OutcomeFromHarness(wrapper.ErrUnknown), fmt.Sprintf("ready query failed: %v", err))
 		return false, true
+	}
+	if pruneYields {
+		pruneSkillYields(ap, issues)
 	}
 	claimed, failed := s.tryClaimBestTask(ap, issues, constraints)
 	if claimed {
@@ -197,6 +193,17 @@ func (s *Supervisor) tryClaimBestTask(ap *AgentProcess, issues []backend.IssueDa
 		match := cli.SelectBestTask(issues, constraints)
 		if match == nil {
 			return false, false
+		}
+		if match.IsSkillFallback() {
+			if peer := s.fallbackClaimYieldPeer(ap, *match); peer != nil {
+				slog.Info("yielding fallback claim to better-fit idle peer",
+					"worktree", ap.Entry.Worktree,
+					"task_id", match.Issue.ID,
+					"peer", peer.Entry.Worktree,
+				)
+				issues = removeIssueByID(issues, match.Issue.ID)
+				continue
+			}
 		}
 		if err := s.claimIssueForAgent(ap, match.Issue.ID, match.Reason); err != nil {
 			if backend.IsKind(err, backend.KindConflict) {

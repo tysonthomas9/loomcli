@@ -40,9 +40,16 @@ type RoleConstraints struct {
 
 // TaskMatch represents the result of matching a single issue against role constraints.
 type TaskMatch struct {
-	Issue  backend.IssueData
-	Score  int    // 0 = rejected, 10 = fallback, 100+ = matched
-	Reason string // human-readable explanation of the score
+	Issue        backend.IssueData
+	Score        int    // 0 = rejected, 10 = fallback, 100+ = matched
+	Reason       string // human-readable explanation of the score
+	SkillMatches int    // number of issue labels matched by role skills
+}
+
+// IsSkillFallback reports whether the task passed every hard constraint but
+// received the router's low fallback score because no role skill matched.
+func (m TaskMatch) IsSkillFallback() bool {
+	return strings.HasPrefix(m.Reason, "fallback:")
 }
 
 // MergeRoleConstraints resolves a RoleConstraints from a config.RoleConfig and optional
@@ -79,7 +86,9 @@ func MergeRoleConstraints(rc config.RoleConfig, ae config.AgentEntry) RoleConstr
 
 // MatchTask scores a single issue against the given constraints.
 // Ready issues are pre-filtered by the backend to exclude blocked issues.
-// Returns a TaskMatch with Score=0 for rejected issues.
+// Returns a TaskMatch with Score=0 for rejected issues. Supervisors use the
+// skill-fallback classification to briefly yield a candidate to a better-fit
+// idle peer without changing this scoring contract.
 func MatchTask(issue backend.IssueData, constraints RoleConstraints) TaskMatch {
 	// Reject epics
 	if IsEpic(issue) {
@@ -158,9 +167,10 @@ func MatchTask(issue backend.IssueData, constraints RoleConstraints) TaskMatch {
 	parts = append(parts, fmt.Sprintf("priority:+%d", priorityBonus))
 
 	return TaskMatch{
-		Issue:  issue,
-		Score:  score,
-		Reason: strings.Join(parts, " "),
+		Issue:        issue,
+		Score:        score,
+		Reason:       strings.Join(parts, " "),
+		SkillMatches: skillMatches,
 	}
 }
 
