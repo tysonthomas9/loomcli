@@ -45,11 +45,13 @@ type Frame struct {
 	Data          []byte
 	Reason        string
 	Code, Message string
+	ConnID        string
 }
 
 type noticePayload struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	ConnID  string `json:"conn_id,omitempty"`
 }
 
 func Encode(frame Frame) ([]byte, error) {
@@ -92,7 +94,7 @@ func encodePayload(frame Frame) ([]byte, error) {
 		if !utf8.ValidString(frame.Code) || !utf8.ValidString(frame.Message) {
 			return nil, fmt.Errorf("invalid notice text")
 		}
-		return json.Marshal(noticePayload{Code: frame.Code, Message: frame.Message})
+		return json.Marshal(noticePayload{Code: frame.Code, Message: frame.Message, ConnID: frame.ConnID})
 	case KindClose:
 		if !utf8.ValidString(frame.Reason) {
 			return nil, fmt.Errorf("invalid close reason")
@@ -156,7 +158,7 @@ func decodePayload(f Frame, p []byte) (Frame, error) {
 		if err := json.Unmarshal(p, &n); err != nil {
 			return Frame{}, fmt.Errorf("%w: notice: %v", ErrMalformedPayload, err)
 		}
-		f.Code, f.Message = n.Code, n.Message
+		f.Code, f.Message, f.ConnID = n.Code, n.Message, n.ConnID
 	case KindClose:
 		if !utf8.Valid(p) {
 			return Frame{}, ErrMalformedPayload

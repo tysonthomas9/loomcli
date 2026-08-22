@@ -52,6 +52,7 @@ export type ServerFrame =
       kind: "notice";
       code: string;
       message: string;
+      connId?: string;
     })
   | (ServerFrameBase & { kind: "close"; reason: string });
 
@@ -233,6 +234,10 @@ export function decodeServerFrame(
         sequence,
         code: (value as { code: string }).code,
         message: (value as { message: string }).message,
+        ...((value as { conn_id?: unknown }).conn_id !== undefined &&
+        typeof (value as { conn_id?: unknown }).conn_id === "string"
+          ? { connId: (value as { conn_id: string }).conn_id }
+          : {}),
       };
     }
     case 0x05:
