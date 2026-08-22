@@ -46,8 +46,13 @@ Server → client kinds
                                data bytes (may be empty)
   0x02 output         payload: raw VT bytes
   0x03 resize         payload: cols u16, rows u16   (canonical geometry changed)
-  0x04 notice         payload: UTF-8 JSON {"code":string,"message":string}
-  0x05 close          payload: UTF-8 reason (informational; WS close code is authoritative)
+  0x04 notice         payload: UTF-8 JSON {"code":string,"message":string,"conn_id"?:string}
+                      (conn_id: the attachment whose action the notice concerns, e.g.
+                      whose input was dropped; "" or absent for backend-owned input)
+  0x05 close          payload: UTF-8 reason (CloseReason string). The relay ALWAYS
+                      sends this frame before the WS close, synthesizing it from
+                      CloseReason() if the owner's EventClose could not be queued
+                      (e.g. slow_consumer). Sequence = last delivered + 1.
 
 Client → server kinds
   0x81 input          payload: raw bytes for the PTY
@@ -81,6 +86,13 @@ WebSocket close codes (server-initiated):
 - 1000 normal — only when the session ended benignly (as today).
 - 1002 protocol error — malformed frame, wrong magic/version, or missing
   subprotocol after upgrade.
+
+Client rule: if the WS `CloseEvent.code` is 1006 or 1005 (some browser stacks
+surface every server-initiated close that way) and an in-band `close` frame
+was received on this connection, dispatch on that frame's reason instead:
+`exited` → crashed, `killed`/`replaced` → session_ended, `slow_consumer` →
+immediate resnapshot reconnect, `state_rebuilding` → backoff reconnect,
+`shutdown` → workspace-unavailable handling. Otherwise use the code.
 
 ## Go: `internal/webui/terminal`
 
