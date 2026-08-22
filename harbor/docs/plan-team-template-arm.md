@@ -269,7 +269,7 @@ Go/no-go for a paid run: P1–P5 green and R1/R4 resolved.
 
 Status: spec A + B landed; stub dry-run NOT yet run.
 
-## Status (rev 4, 2026-08-22)
+## Status (rev 5, 2026-08-22)
 
 - Host runs of the template team (real codex and real cursor-agent, tiny stdlib app, 2 tasks
   each): architect → lead approval → implementer (yield rule routed `backend`-labeled work to
@@ -301,6 +301,19 @@ Status: spec A + B landed; stub dry-run NOT yet run.
   prices them per model (cursor.com/docs/models table; cap = codex + cursor). `--ak
   cursor_model=<id>` pins the model (default `auto`, priced opus-class when the served model
   is unknown). loom's own cursor usage parsing was fixed too (8f434d6a7, camelCase keys).
+- **Codex vet of the cursor arm (REVISE, 12 findings) → fixed in d19e24040 + 2a7578b4c.**
+  Real bugs it caught: the shim gated capture on `[ ! -t 1 ]` but workers run under loom's
+  harness PTY, so no worker turn was metered (F1); a cross-process `leadmsg` on a busy
+  headless lead leased the message and handed it back, reordering the queue (F2); a missing
+  binary was reported "delivered" (F4); usage was counted on any event (F11); an all-cursor
+  run still demanded codex auth (F5). Shim is now parent + FIFO + reader (exec + process
+  substitution lost the final `result` line in ~1/6 PTY runs) and refuses unmetered turns
+  (exit 97); bootstrap proves the usage dir writable at $0. Known, pre-existing, NOT fixed:
+  (F3) `internal/cli/root.go` re-raises SIGTERM immediately, so no controlled runtime ever
+  persists `disconnected` on finalize's pkill — mitigated for cursor by Pdeathsig=SIGKILL on
+  every turn (no orphaned paid turn); (F7) runtime metadata updates are full-map writes
+  without CAS — a concurrent `loom lead` vs deliverer write can drop a key (needs fleet-db
+  CAS; rare, status re-persists each turn).
 - Next: capped all-cursor container trial (`launch-team-cursor.sh`, needs the key file), then
   the full-budget run (`budget_secs=14400`) with the replica judge on the better backend.
 
