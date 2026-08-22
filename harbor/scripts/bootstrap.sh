@@ -440,6 +440,11 @@ if [ "$NEED_CURSOR" = 1 ]; then
     && : > "$LOOM_MARATHON_CURSOR_USAGE_DIR/.preflight" \
     && rm -f "$LOOM_MARATHON_CURSOR_USAGE_DIR/.preflight" \
     || die "cursor usage dir not writable: $LOOM_MARATHON_CURSOR_USAGE_DIR"
+  # The shim's FIFO lives in container-local scratch (a bind mount refuses
+  # mkfifo); prove that too, exactly as the shim does it.
+  mkdir -p /tmp/cursor-agent-shim && mkfifo /tmp/cursor-agent-shim/.preflight.fifo \
+    && rm -f /tmp/cursor-agent-shim/.preflight.fifo \
+    || die "cannot mkfifo in /tmp/cursor-agent-shim (cursor shim needs it)"
   # Live credential check at $0: `cursor-agent models` needs Cursor auth and
   # is free. With CURSOR_API_KEY it is also what performs the API-key login
   # and writes the resulting tokens into the (Linux default) file store —

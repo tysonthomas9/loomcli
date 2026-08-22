@@ -74,14 +74,23 @@ if [ "$print" != 1 ]; then
   exec "$REAL" ${args[@]+"${args[@]}"}
 fi
 
+# Only the record file lives in the usage dir: that is a host bind mount in
+# the marathon container, where mkfifo is refused (trial team-cursor-112144:
+# every turn exited 97 with the header written). FIFO and marker go to
+# container-local scratch.
 dir="${LOOM_MARATHON_CURSOR_USAGE_DIR:-/logs/agent/cursor-usage}"
+scratch="${LOOM_MARATHON_CURSOR_SHIM_TMP:-${TMPDIR:-/tmp}/cursor-agent-shim}"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 f="$dir/$stamp.jsonl"
-fifo="$dir/.$stamp.fifo"
-mark="$dir/.$stamp.result"
-if ! mkdir -p "$dir" 2>/dev/null || ! { printf '{"type":"loom_shim","agent":"%s","pid":%d,"cwd":"%s"}\n' \
-    "${LOOM_AGENT_NAME:-}" "$$" "$PWD" > "$f"; } 2>/dev/null || ! mkfifo "$fifo" 2>/dev/null; then
+fifo="$scratch/.$stamp.fifo"
+mark="$scratch/.$stamp.result"
+if ! mkdir -p "$dir" "$scratch" 2>/dev/null || ! { printf '{"type":"loom_shim","agent":"%s","pid":%d,"cwd":"%s"}\n' \
+    "${LOOM_AGENT_NAME:-}" "$$" "$PWD" > "$f"; } 2>/dev/null; then
   echo "cursor-agent shim: spend accounting dir unusable: $dir (refusing to run an unmetered turn)" >&2
+  exit 97
+fi
+if ! mkfifo "$fifo" 2>/dev/null; then
+  echo "cursor-agent shim: cannot create capture FIFO in $scratch (refusing to run an unmetered turn)" >&2
   exit 97
 fi
 rm -f "$mark" "$f.err"
