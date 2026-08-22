@@ -116,10 +116,12 @@ loom daemon profile set startup_timeout 60
 
 # planner: built-in plan role (task-filter needs_plan) — designs undesigned/needs-revision tasks
 # coder-1: built-in task role (task-filter has_design) — ONE serialized implementation coder (v1)
+# Both take the configured worker backend (LOOM_BACKEND): an all-cursor run
+# installs no codex, so a hard-coded `--backend codex` here could never launch.
 if [ "$TEAM" = "off" ]; then
-  loom agentdef add planner --role plan --auto --backend codex --repos app 2>/dev/null \
+  loom agentdef add planner --role plan --auto --backend "$LOOM_BACKEND" --repos app 2>/dev/null \
     || log "agentdef planner already registered"
-  loom agentdef add coder-1 --role task --auto --backend codex --repos app 2>/dev/null \
+  loom agentdef add coder-1 --role task --auto --backend "$LOOM_BACKEND" --repos app 2>/dev/null \
     || log "agentdef coder-1 already registered"
 
   PLANNER_WT="$WS_ROOT/worktrees/app/planner"
