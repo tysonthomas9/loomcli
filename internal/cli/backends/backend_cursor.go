@@ -174,13 +174,35 @@ func init() {
 }
 
 // cursorUsageEvent is the minimal structure for Cursor --output-format stream-json
-// output that contains a usage object.
+// output that contains a usage object. cursor-agent (2026.08) emits the usage
+// on the final "result" event with camelCase keys:
+//
+//	{"type":"result",...,"usage":{"inputTokens":134,"outputTokens":20,
+//	 "cacheReadTokens":19328,"cacheWriteTokens":0}}
+//
+// Older builds used snake_case; both spellings are accepted and the first
+// non-nil one wins, so a usage object is never silently counted as zero.
 type cursorUsageEvent struct {
 	Type  string `json:"type"`
 	Usage *struct {
-		InputTokens  int64 `json:"input_tokens"`
-		OutputTokens int64 `json:"output_tokens"`
+		InputTokens       *int64 `json:"inputTokens"`
+		OutputTokens      *int64 `json:"outputTokens"`
+		CacheReadTokens   *int64 `json:"cacheReadTokens"`
+		CacheWriteTokens  *int64 `json:"cacheWriteTokens"`
+		InputTokensSnake  *int64 `json:"input_tokens"`
+		OutputTokensSnake *int64 `json:"output_tokens"`
+		CacheReadSnake    *int64 `json:"cache_read_tokens"`
+		CacheWriteSnake   *int64 `json:"cache_write_tokens"`
 	} `json:"usage,omitempty"`
+}
+
+func firstInt64(candidates ...*int64) int64 {
+	for _, c := range candidates {
+		if c != nil {
+			return *c
+		}
+	}
+	return 0
 }
 
 // collectCursorStreamUsage is best-effort: Cursor emits stream-json events
@@ -193,6 +215,11 @@ func collectCursorStreamUsage(line string, collector *usage.Collector) {
 	if event.Usage == nil {
 		return
 	}
+	u := event.Usage
 	// No message-level dedup needed for Cursor (one usage per event)
-	collector.Accumulate("", event.Usage.InputTokens, event.Usage.OutputTokens, 0, 0)
+	collector.Accumulate("",
+		firstInt64(u.InputTokens, u.InputTokensSnake),
+		firstInt64(u.OutputTokens, u.OutputTokensSnake),
+		firstInt64(u.CacheReadTokens, u.CacheReadSnake),
+		firstInt64(u.CacheWriteTokens, u.CacheWriteSnake))
 }
