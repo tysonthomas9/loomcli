@@ -36,6 +36,12 @@ export interface StoreContextValue {
 
 export interface StoreProviderProps {
   children: ReactNode;
+  /**
+   * When true, the live event stream is not narrowed to the operator's repo
+   * selection. Home sets this: it is the workspace, never a repo, so a change
+   * to any repo must reach it live.
+   */
+  unscopedEvents?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -204,8 +210,12 @@ function StoreWiring({
 // StoreProvider
 // ---------------------------------------------------------------------------
 
-export function StoreProvider({ children }: StoreProviderProps): JSX.Element {
+export function StoreProvider({
+  children,
+  unscopedEvents = false,
+}: StoreProviderProps): JSX.Element {
   const { sourceReposFilter } = useWorkspaceContext();
+  const eventSourceRepos = unscopedEvents ? undefined : sourceReposFilter;
   const { showToast } = useToast();
 
   // Bridge ref for retryConnection → EventProvider.retryNow
@@ -231,7 +241,7 @@ export function StoreProvider({ children }: StoreProviderProps): JSX.Element {
 
   return (
     <StoreContext.Provider value={contextValue}>
-      <EventProvider sourceRepos={sourceReposFilter}>
+      <EventProvider sourceRepos={eventSourceRepos}>
         <StoreWiring
           issueStore={issueStore}
           agentStore={agentStore}

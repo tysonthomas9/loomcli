@@ -3,13 +3,25 @@
  */
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom";
 
 import type { OperatorQueueItem } from "@/hooks/issues";
 import type { Issue, LoomAgentStatus } from "@/types";
 
 import { OperatorQueueCard, pickDefaultAgentName } from "../OperatorQueueCard";
+
+const mockWorkspaceContext = vi.hoisted(() => ({
+  repos: [] as {
+    name: string;
+    source_repo_id?: string;
+    default_branch: string;
+  }[],
+}));
+
+vi.mock("@/hooks/workspace", () => ({
+  useWorkspaceContext: () => mockWorkspaceContext,
+}));
 
 function issue(overrides: Partial<Issue> = {}): Issue {
   return {
@@ -21,6 +33,7 @@ function issue(overrides: Partial<Issue> = {}): Issue {
     has_design: true,
     labels: ["needs-revision", "frontend"],
     assignee: "architect-1",
+    source_repo: "source-repo",
     created_at: "2026-08-21T15:00:00.000Z",
     updated_at: "2026-08-21T15:48:02.000Z",
     ...overrides,
@@ -47,6 +60,7 @@ function agent(overrides: Partial<LoomAgentStatus>): LoomAgentStatus {
     ahead: 0,
     behind: 0,
     workspace: "test-workspace",
+    repo: "source-repo",
     ...overrides,
   };
 }
@@ -59,6 +73,16 @@ function handlers() {
   };
 }
 
+beforeEach(() => {
+  mockWorkspaceContext.repos = [
+    {
+      name: "source-repo",
+      source_repo_id: "source-repo",
+      default_branch: "main",
+    },
+  ];
+});
+
 describe("pickDefaultAgentName", () => {
   it("prefers an idle implementation agent, then falls back to the first", () => {
     const agents = [
@@ -67,9 +91,12 @@ describe("pickDefaultAgentName", () => {
       agent({ name: "idle-coder", role: "coder", status: "idle" }),
     ];
 
-    expect(pickDefaultAgentName(agents)).toBe("idle-coder");
-    expect(pickDefaultAgentName(agents.slice(0, 2))).toBe("planner");
-    expect(pickDefaultAgentName([])).toBeUndefined();
+    expect(pickDefaultAgentName(agents, "source-repo")).toBe("idle-coder");
+    expect(pickDefaultAgentName(agents.slice(0, 2), "source-repo")).toBe(
+      "planner",
+    );
+    expect(pickDefaultAgentName([], "source-repo")).toBeUndefined();
+    expect(pickDefaultAgentName(agents, "web")).toBeUndefined();
   });
 });
 
@@ -92,6 +119,7 @@ describe("OperatorQueueCard", () => {
     expect(card).toHaveAttribute("data-kind", "design-gate");
     expect(card).toHaveAttribute("data-issue-id", "TASK-1");
     expect(screen.getByText("Design gate")).toBeInTheDocument();
+    expect(screen.getByTestId("queue-repo")).toHaveTextContent("source-repo");
     expect(card).toHaveTextContent("architect-1 attached a design");
     expect(screen.getByText(/design attached/)).toBeInTheDocument();
     expect(screen.getByText(/one atomic write/)).toHaveTextContent(
@@ -139,6 +167,42 @@ describe("OperatorQueueCard", () => {
     );
   });
 
+  it("shows the repo name and only offers agents serving that repo", () => {
+    const callbacks = handlers();
+    mockWorkspaceContext.repos = [
+      {
+        name: "Source repository",
+        source_repo_id: "source-repo",
+        default_branch: "main",
+      },
+      {
+        name: "Web application",
+        source_repo_id: "web",
+        default_branch: "develop",
+      },
+    ];
+    render(
+      <OperatorQueueCard
+        item={item("design-gate")}
+        agents={[
+          agent({ name: "source-agent", role: "dev" }),
+          agent({ name: "web-agent", role: "dev", repo: "web" }),
+        ]}
+        {...callbacks}
+      />,
+    );
+
+    expect(screen.getByTestId("queue-repo")).toHaveTextContent(
+      "Source repository",
+    );
+    expect(
+      screen.getByRole("option", { name: "source-agent" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: "web-agent" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("honestly approves without assignment when the workspace has no agents", async () => {
     const callbacks = handlers();
     render(
@@ -151,7 +215,15 @@ describe("OperatorQueueCard", () => {
 
     expect(screen.queryByTestId("queue-agent-picker")).not.toBeInTheDocument();
     expect(screen.getByTestId("queue-approve")).toHaveTextContent(
-      "Approve — no agent to route to",
+      "Approve without routing — no agent serves source-repo",
+    );
+    expect(screen.getByTestId("queue-no-agent-for-repo")).toHaveTextContent(
+      "No agent serves source-repo, so this is not routed.",
+    );
+    // Not the primary call to action: it cannot route anywhere.
+    expect(screen.getByTestId("queue-approve")).toHaveAttribute(
+      "data-routed",
+      "false",
     );
 
     fireEvent.click(screen.getByTestId("queue-approve"));
@@ -161,6 +233,43 @@ describe("OperatorQueueCard", () => {
         expect.anything(),
         undefined,
       ),
+    );
+  });
+
+  it("does not route a source-repo task to an agent serving another repo", async () => {
+    const callbacks = handlers();
+    render(
+      <OperatorQueueCard
+        item={item("design-gate")}
+        agents={[agent({ name: "web-agent", role: "dev", repo: "web" })]}
+        {...callbacks}
+      />,
+    );
+
+    expect(screen.queryByTestId("queue-agent-picker")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("queue-approve"));
+    await waitFor(() =>
+      expect(callbacks.onApprove).toHaveBeenCalledWith(
+        expect.anything(),
+        undefined,
+      ),
+    );
+  });
+
+  it("marks tasks without a source repo as unclaimable", () => {
+    const callbacks = handlers();
+    render(
+      <OperatorQueueCard
+        item={item("design-gate", { source_repo: undefined })}
+        agents={[agent({ name: "source-agent", role: "dev" })]}
+        {...callbacks}
+      />,
+    );
+
+    expect(screen.getByTestId("queue-repo")).toHaveTextContent("no repo");
+    expect(screen.getByTestId("queue-repo")).toHaveAttribute(
+      "title",
+      "this task has no source_repo; no agent will claim it",
     );
   });
 
@@ -193,6 +302,27 @@ describe("OperatorQueueCard", () => {
       expect(callbacks.onUnblock).toHaveBeenCalledWith(
         expect.objectContaining({ id: "TASK-1" }),
       ),
+    );
+  });
+
+  it("explains when the carried blocked assignee serves another repo", () => {
+    const callbacks = handlers();
+    render(
+      <OperatorQueueCard
+        item={item("blocked", {
+          status: "blocked",
+          notes: "BLOCKED: waiting",
+          has_design: false,
+          labels: [],
+          assignee: "web-agent",
+        })}
+        agents={[agent({ name: "web-agent", repo: "web" })]}
+        {...callbacks}
+      />,
+    );
+
+    expect(screen.getByText(/Unblock is one write/)).toHaveTextContent(
+      "web-agent serves web, so it will not resume this task.",
     );
   });
 

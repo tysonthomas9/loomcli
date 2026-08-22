@@ -17,7 +17,7 @@ import {
 } from "@/contexts/WorkspaceViewContext";
 import { useElapsedTime } from "@/hooks/common";
 import { useOperatorQueue, usePipelineCounts } from "@/hooks/issues";
-import { useRecentActivity } from "@/hooks/workspace";
+import { useRecentActivity, useWorkspaceContext } from "@/hooks/workspace";
 import { isAgentActive } from "@/types";
 import type { Issue, UsageResponse } from "@/types";
 import { NEEDS_REVISION_LABEL } from "@/utils/issue";
@@ -40,6 +40,7 @@ export function HomePage(): JSX.Element {
   } = useWorkspaceViewData();
   const { refetch, handleIssueClick, handleAgentClick, showToast } =
     useWorkspaceViewActions();
+  const { repos } = useWorkspaceContext();
   const queue = useOperatorQueue(issues);
   const [optimisticallyResolvedIds, setOptimisticallyResolvedIds] = useState<
     ReadonlySet<string>
@@ -47,7 +48,7 @@ export function HomePage(): JSX.Element {
   const visibleQueue = queue.filter(
     (item) => !optimisticallyResolvedIds.has(item.issue.id),
   );
-  const pipeline = usePipelineCounts(issues, agents);
+  const pipeline = usePipelineCounts(issues, agents, repos);
   const activity = useRecentActivity(workspaceId, issues, agents);
   const workspaceCounts = deriveThisWorkspaceCounts(issues);
   const idleAgents = agents.filter((agent) => !isAgentActive(agent)).length;

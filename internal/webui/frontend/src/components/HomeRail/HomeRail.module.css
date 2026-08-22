@@ -268,6 +268,20 @@
   border-radius: var(--radius-sm);
 }
 
+.activityRepo {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 5px;
+  padding: 0 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+}
+
 .feedFoot {
   margin: 8px -13px -12px;
   padding: 8px 13px;

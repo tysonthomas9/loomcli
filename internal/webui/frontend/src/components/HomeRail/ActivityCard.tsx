@@ -1,7 +1,8 @@
 import { useElapsedTime } from "@/hooks/common";
-import { SEED_ISSUE_COUNT } from "@/hooks/workspace";
+import { SEED_ISSUE_COUNT, useWorkspaceContext } from "@/hooks/workspace";
 import type { RecentActivityItem } from "@/hooks/workspace";
 import { plural } from "@/utils/plural";
+import { repoNameForSource } from "@/utils/workspace/repoPresentation";
 
 import { RailCard } from "@/components/HomeRail/RailCard";
 
@@ -28,6 +29,7 @@ export interface ActivityCardProps {
 }
 
 export function ActivityCard({ activity }: ActivityCardProps): JSX.Element {
+  const { repos } = useWorkspaceContext();
   const newestTimestamp = activity[0]?.timestamp;
   useElapsedTime(
     newestTimestamp && Number.isFinite(Date.parse(newestTimestamp))
@@ -52,7 +54,16 @@ export function ActivityCard({ activity }: ActivityCardProps): JSX.Element {
                 <strong data-operator={item.isOperator || undefined}>
                   {item.actor}
                 </strong>{" "}
-                {item.issueId && <code>{item.issueId}</code>} {item.text}
+                {item.issueId && <code>{item.issueId}</code>}{" "}
+                {repos.length > 1 && item.sourceRepo && (
+                  <span
+                    className={styles.activityRepo}
+                    data-testid="activity-repo"
+                  >
+                    {repoNameForSource(repos, item.sourceRepo)}
+                  </span>
+                )}{" "}
+                {item.text}
               </span>
             </li>
           ))}

@@ -3946,6 +3946,43 @@ describe("App", () => {
   });
 
   describe("workspace-driven repo filtering", () => {
+    it("never passes sourceRepos on Home, even with a repo subset selected", () => {
+      vi.mocked(useWorkspaceContext).mockReturnValue({
+        workspace: { name: "filtered-workspace" },
+        repos: [{ name: "repo-alpha" }, { name: "repo-beta" }],
+        groups: [],
+        agents: [],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        getRepoByName: vi.fn(),
+        getReposByGroup: vi.fn(() => []),
+        getAgentByName: vi.fn(),
+        activeWorkspaceName: "filtered-workspace",
+        setActiveWorkspace: vi.fn(),
+        selectedRepoNames: new Set(["repo-alpha"]),
+        activeRepos: [{ name: "repo-alpha" }],
+        activeRepoNames: ["repo-alpha"],
+        isAllSelected: false,
+        selectRepos: vi.fn(),
+        selectAll: vi.fn(),
+        toggleRepo: vi.fn(),
+        sourceReposFilter: ["repo-alpha"],
+        isMultiRepo: true,
+      });
+      mockUseRouteView.mockReturnValue(createViewStateReturn("home"));
+      mockStoreState = createMockUseIssuesReturn({});
+
+      render(<App />);
+
+      expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "kanban" }),
+      );
+      expect(mockStoreState.fetchIssues).not.toHaveBeenCalledWith(
+        expect.objectContaining({ sourceRepos: expect.anything() }),
+      );
+    });
+
     it("passes sourceReposFilter from workspace context to fetchIssues", () => {
       const sourceReposFilter = ["repo-alpha", "repo-beta"];
       vi.mocked(useWorkspaceContext).mockReturnValue({

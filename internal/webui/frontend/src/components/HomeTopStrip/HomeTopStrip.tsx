@@ -20,19 +20,16 @@ export function HomeTopStrip({
   workspaceId,
   agents,
 }: HomeTopStripProps): JSX.Element {
-  const { workspace, repos, activeRepoNames, isLoading } =
-    useWorkspaceContext();
+  const { workspace, repos, isLoading } = useWorkspaceContext();
   const [now, setNow] = useState(() => new Date());
-  const activeRepo = activeRepoNames[0];
-  const repo =
-    repos.find((candidate) => candidate.name === activeRepo) ?? repos[0];
-  const repoLabel =
-    repo?.name ??
-    (repos.length > 0
-      ? `${repos.length} repos`
-      : isLoading
-        ? "loading repos…"
-        : "no repos");
+  const [soleRepo] = repos;
+  const repoLabel = isLoading
+    ? "loading repos…"
+    : repos.length === 1
+      ? (soleRepo?.name ?? "no repos")
+      : repos.length > 1
+        ? `${repos.length} repos`
+        : "no repos";
   const liveCount = agents.filter(isAgentActive).length;
 
   useEffect(() => {
@@ -46,17 +43,18 @@ export function HomeTopStrip({
         <span className={styles.workspace}>
           {workspace?.name ?? workspaceId}
         </span>
-        <span className={styles.separator}>/</span>
-        <span className={styles.repo}>{repoLabel}</span>
+        <span className={styles.separator}>·</span>
+        <span className={styles.repo} data-testid="strip-repos">
+          {repoLabel}
+        </span>
       </div>
-      {repo?.default_branch && (
-        <span className={styles.branch}>{repo.default_branch}</span>
-      )}
       <div className={styles.right}>
+        <span className={styles.separator}>·</span>
         <span>
           {agents.length} {plural(agents.length, "agent", "agents")} ·{" "}
           {liveCount} live
         </span>
+        <span className={styles.separator}>·</span>
         <time>{formatClock(now)}</time>
       </div>
     </header>

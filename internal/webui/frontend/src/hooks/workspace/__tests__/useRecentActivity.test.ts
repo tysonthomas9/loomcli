@@ -173,13 +173,14 @@ describe("describeIssueEvent", () => {
 });
 
 describe("useRecentActivity", () => {
-  const issue = (id: string, updatedAt: string): Issue =>
+  const issue = (id: string, updatedAt: string, sourceRepo?: string): Issue =>
     ({
       id,
       title: id,
       status: "open",
       issue_type: "task",
       updated_at: updatedAt,
+      source_repo: sourceRepo,
     }) as unknown as Issue;
   const agent = (name: string): LoomAgentStatus =>
     ({ name, role: "task", ahead: 0 }) as unknown as LoomAgentStatus;
@@ -205,7 +206,7 @@ describe("useRecentActivity", () => {
         }),
     );
 
-    const issues = [issue("TASK-1", "2026-08-21T15:48:02.000Z")];
+    const issues = [issue("TASK-1", "2026-08-21T15:48:02.000Z", "source-repo")];
     const { result, rerender } = renderHook(
       ({ agents }) => useRecentActivity("WS", issues, agents),
       { initialProps: { agents: [] as LoomAgentStatus[] } },
@@ -220,6 +221,7 @@ describe("useRecentActivity", () => {
     expect(result.current[0]).toMatchObject({
       issueId: "TASK-1",
       text: "claimed",
+      sourceRepo: "source-repo",
       // agent-dev-1 is a known agent once agents load, so not an operator.
       marker: "default",
     });

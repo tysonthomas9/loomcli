@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { RepoInfo } from "@/api/workspace";
 import type { Issue, LoomAgentStatus } from "@/types";
 
 import { derivePipeline } from "../usePipelineCounts";
@@ -25,6 +26,18 @@ function agent(overrides: Partial<LoomAgentStatus>): LoomAgentStatus {
     ahead: 0,
     behind: 0,
     workspace: "workspace-1",
+    ...overrides,
+  };
+}
+
+function repo(overrides: Partial<RepoInfo>): RepoInfo {
+  return {
+    name: "source-repo",
+    source_repo_id: "source-repo",
+    default_branch: "main",
+    path: "/repos/source-repo",
+    remote: "origin",
+    groups: [],
     ...overrides,
   };
 }
@@ -60,10 +73,39 @@ describe("derivePipeline", () => {
       awaitingApproval: 1,
       building: 2,
       deferred: 0,
-      awaitingMerge: 1,
+      awaitingMerge: [{ branch: "the target branch", count: 1 }],
       merged: 1,
       taskCount: 5,
     });
+  });
+
+  it("groups branches ahead by the trunk of the repo each agent serves", () => {
+    const counts = derivePipeline(
+      [],
+      [
+        agent({ name: "source-agent", ahead: 1, repo: "source-id" }),
+        agent({ name: "web-agent", ahead: 3, repo: "web-id" }),
+        agent({ name: "unknown-agent", ahead: 1, repo: "missing" }),
+      ],
+      [
+        repo({
+          name: "source-repo",
+          source_repo_id: "source-id",
+          default_branch: "localmode",
+        }),
+        repo({
+          name: "web",
+          source_repo_id: "web-id",
+          default_branch: "develop",
+        }),
+      ],
+    );
+
+    expect(counts.awaitingMerge).toEqual([
+      { branch: "localmode", count: 1 },
+      { branch: "develop", count: 1 },
+      { branch: "the target branch", count: 1 },
+    ]);
   });
 
   it("partitions every non-epic issue, including revision bounces and reviews", () => {
@@ -89,6 +131,7 @@ describe("derivePipeline", () => {
       building: 0,
       deferred: 1,
       merged: 1,
+      awaitingMerge: [],
       taskCount: 5,
     });
     expect(

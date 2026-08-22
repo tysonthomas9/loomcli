@@ -312,6 +312,12 @@ function App() {
   };
   const issueMode = issueModeByView[activeView] ?? ("ready" as const);
 
+  // Home is the workspace, never a repo: it reads the whole collection even
+  // when the operator has narrowed Kanban to a subset of repos. Derived here
+  // (not in the deps) so only crossing the Home boundary refetches.
+  const effectiveSourceRepos =
+    activeView === "home" ? undefined : sourceReposFilter;
+
   useEffect(() => {
     const controller = new AbortController();
     const params: Parameters<typeof fetchIssues>[0] = {
@@ -319,10 +325,10 @@ function App() {
       mode: issueMode,
       signal: controller.signal,
     };
-    if (sourceReposFilter) params.sourceRepos = sourceReposFilter;
+    if (effectiveSourceRepos) params.sourceRepos = effectiveSourceRepos;
     fetchIssues(params);
     return () => controller.abort();
-  }, [fetchIssues, workspaceId, issueMode, sourceReposFilter]);
+  }, [fetchIssues, workspaceId, issueMode, effectiveSourceRepos]);
 
   // Filter state with URL synchronization
   const [filters, filterActions] = useFilterState();

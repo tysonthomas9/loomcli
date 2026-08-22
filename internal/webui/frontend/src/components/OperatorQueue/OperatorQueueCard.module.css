@@ -68,6 +68,20 @@
   border-radius: var(--radius-sm);
 }
 
+.repoChip {
+  padding: 1px 7px;
+  font-family: var(--font-family-mono);
+  font-size: 10.5px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.repoChip[data-no-repo="true"] {
+  color: var(--color-text-tertiary);
+}
+
 .body {
   padding: 6px var(--space-4) 14px;
 }

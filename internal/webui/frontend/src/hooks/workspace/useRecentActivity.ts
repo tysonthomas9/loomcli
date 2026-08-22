@@ -15,6 +15,7 @@ export interface RecentActivityItem {
   timestamp: string;
   actor: string;
   issueId?: string;
+  sourceRepo?: string;
   text: string;
   marker: ActivityMarker;
   /** Status the event moved the issue to, when it did; drives the marker. */
@@ -240,6 +241,10 @@ export function useRecentActivity(
   );
   const knownAgentNamesRef = useRef(knownAgentNames);
   knownAgentNamesRef.current = knownAgentNames;
+  const sourceRepoByIssueId = useMemo(
+    () => new Map(issues.map((issue) => [issue.id, issue.source_repo])),
+    [issues],
+  );
   const seedIssueIds = useMemo(
     () =>
       issues
@@ -319,11 +324,18 @@ export function useRecentActivity(
   // known agent is never shown as an operator just because it raced the fetch.
   return useMemo(
     () =>
-      activity.map((item) => ({
-        ...item,
-        marker: markerFor(item.status, item.actor, knownAgentNames),
-        isOperator: !knownAgentNames.has(item.actor),
-      })),
-    [activity, knownAgentNames],
+      activity.map((item) => {
+        const sourceRepo = item.issueId
+          ? sourceRepoByIssueId.get(item.issueId)
+          : undefined;
+
+        return {
+          ...item,
+          ...(sourceRepo ? { sourceRepo } : {}),
+          marker: markerFor(item.status, item.actor, knownAgentNames),
+          isOperator: !knownAgentNames.has(item.actor),
+        };
+      }),
+    [activity, knownAgentNames, sourceRepoByIssueId],
   );
 }

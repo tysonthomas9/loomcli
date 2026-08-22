@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 
 import { useElapsedTime } from "@/hooks/common";
 import type { OperatorQueueItem } from "@/hooks/issues";
+import { useWorkspaceContext } from "@/hooks/workspace";
 import type { Issue, LoomAgentStatus } from "@/types";
 import { effectiveAgentStatus, parseLoomStatus } from "@/types/agent";
 import { hasDesign, NEEDS_REVISION_LABEL } from "@/utils/issue";
+import { repoNameForSource } from "@/utils/workspace/repoPresentation";
 
 import styles from "./OperatorQueueCard.module.css";
 
@@ -42,8 +44,15 @@ function isIdleImplementationAgent(agent: LoomAgentStatus): boolean {
 
 export function pickDefaultAgentName(
   agents: readonly LoomAgentStatus[],
+  sourceRepo: string | undefined,
 ): string | undefined {
-  return agents.find(isIdleImplementationAgent)?.name ?? agents[0]?.name;
+  const servingAgents = sourceRepo
+    ? agents.filter((agent) => agent.repo === sourceRepo)
+    : [];
+  return (
+    servingAgents.find(isIdleImplementationAgent)?.name ??
+    servingAgents[0]?.name
+  );
 }
 
 function stripBlockedPrefix(notes: string): string {
@@ -122,9 +131,17 @@ export function OperatorQueueCard({
   onOpenIssue,
 }: OperatorQueueCardProps): JSX.Element {
   const { issue, kind, waitingSince } = item;
+  const { repos } = useWorkspaceContext();
+  const sourceRepo = issue.source_repo?.trim() || undefined;
+  const repoLabel = repoNameForSource(repos, sourceRepo);
+  const routingAgents = useMemo(
+    () =>
+      sourceRepo ? agents.filter((agent) => agent.repo === sourceRepo) : [],
+    [agents, sourceRepo],
+  );
   const defaultAgentName = useMemo(
-    () => pickDefaultAgentName(agents),
-    [agents],
+    () => pickDefaultAgentName(agents, sourceRepo),
+    [agents, sourceRepo],
   );
   const [selectedAgentName, setSelectedAgentName] = useState(defaultAgentName);
   const [isActing, setIsActing] = useState(false);
@@ -134,11 +151,11 @@ export function OperatorQueueCard({
 
   useEffect(() => {
     setSelectedAgentName((current) =>
-      current && agents.some((agent) => agent.name === current)
+      current && routingAgents.some((agent) => agent.name === current)
         ? current
         : defaultAgentName,
     );
-  }, [agents, defaultAgentName]);
+  }, [routingAgents, defaultAgentName]);
 
   const runAction = async (action: () => Promise<void>): Promise<void> => {
     setIsActing(true);
@@ -151,6 +168,11 @@ export function OperatorQueueCard({
 
   const status = issue.status ?? "open";
   const labels = issue.labels ?? [];
+  const carriedAssignee = agents.find((agent) => agent.name === issue.assignee);
+  const assigneeServesOtherRepo = Boolean(
+    sourceRepo && carriedAssignee && carriedAssignee.repo !== sourceRepo,
+  );
+  const carriedAssigneeRepo = repoNameForSource(repos, carriedAssignee?.repo);
 
   return (
     <article
@@ -168,6 +190,18 @@ export function OperatorQueueCard({
           waiting ~{age || "unknown"}
         </span>
         <span className={styles.issueId}>{issue.id}</span>
+        <span
+          className={styles.repoChip}
+          data-no-repo={!sourceRepo || undefined}
+          data-testid="queue-repo"
+          title={
+            sourceRepo
+              ? undefined
+              : "this task has no source_repo; no agent will claim it"
+          }
+        >
+          {repoLabel}
+        </span>
       </div>
 
       <div className={styles.body}>
@@ -206,9 +240,14 @@ export function OperatorQueueCard({
                 · <code>assignee = {selectedAgentName}</code>
               </>
             ) : (
-              <>. No agent is available to route to</>
+              <>
+                .{" "}
+                <span data-testid="queue-no-agent-for-repo">
+                  No agent serves {repoLabel}, so this is not routed.
+                </span>
+              </>
             )}
-            . Nothing else moves until then.
+            {selectedAgentName && "."} Nothing else moves until then.
           </p>
         )}
         {kind === "blocked" && (
@@ -219,6 +258,13 @@ export function OperatorQueueCard({
                 {" "}
                 · <code>assignee = {issue.assignee}</code> — the agent resumes
                 from the ready queue.
+                {assigneeServesOtherRepo && (
+                  <>
+                    {" "}
+                    — {issue.assignee} serves {carriedAssigneeRepo}, so it will
+                    not resume this task.
+                  </>
+                )}
               </>
             ) : (
               <> — no agent held it.</>
@@ -232,18 +278,28 @@ export function OperatorQueueCard({
               <div className={styles.splitControl}>
                 <button
                   type="button"
-                  className={styles.primaryButton}
+                  className={
+                    selectedAgentName
+                      ? styles.primaryButton
+                      : styles.secondaryButton
+                  }
                   data-testid="queue-approve"
+                  data-routed={Boolean(selectedAgentName)}
                   disabled={isActing}
+                  title={
+                    selectedAgentName
+                      ? undefined
+                      : `No agent serves ${repoLabel}; the task returns to the backlog unrouted`
+                  }
                   onClick={() =>
                     void runAction(() => onApprove(issue, selectedAgentName))
                   }
                 >
                   {selectedAgentName
                     ? `Approve → ${selectedAgentName}`
-                    : "Approve — no agent to route to"}
+                    : `Approve without routing — no agent serves ${repoLabel}`}
                 </button>
-                {agents.length > 0 && (
+                {routingAgents.length > 0 && (
                   <label className={styles.pickerControl}>
                     <span aria-hidden="true">▾</span>
                     <select
@@ -255,7 +311,7 @@ export function OperatorQueueCard({
                         setSelectedAgentName(event.target.value)
                       }
                     >
-                      {agents.map((agent) => (
+                      {routingAgents.map((agent) => (
                         <option value={agent.name} key={agent.name}>
                           {agent.name}
                         </option>

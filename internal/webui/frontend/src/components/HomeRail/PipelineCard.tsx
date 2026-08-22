@@ -1,6 +1,5 @@
 import { RailCard } from "@/components/HomeRail/RailCard";
 import type { PipelineCounts } from "@/hooks/issues";
-import { useWorkspaceContext } from "@/hooks/workspace";
 import { plural } from "@/utils/plural";
 
 import styles from "./HomeRail.module.css";
@@ -26,8 +25,22 @@ export interface PipelineCardProps {
 }
 
 export function PipelineCard({ counts }: PipelineCardProps): JSX.Element {
-  const { repos } = useWorkspaceContext();
-  const defaultBranch = repos[0]?.default_branch || "the target branch";
+  const awaitingMergeCount = counts.awaitingMerge.reduce(
+    (total, group) => total + group.count,
+    0,
+  );
+  const awaitingMergeLabel =
+    awaitingMergeCount === 0
+      ? "Awaiting merge · nothing ahead"
+      : counts.awaitingMerge.length === 1
+        ? `Awaiting merge · ${awaitingMergeCount} ${plural(
+            awaitingMergeCount,
+            "branch",
+            "branches",
+          )} ahead of ${counts.awaitingMerge[0]?.branch ?? "the target branch"}`
+        : `Awaiting merge · ${counts.awaitingMerge
+            .map((group) => `${group.count} ahead of ${group.branch}`)
+            .join(" · ")}`;
   const taskRows: PipelineRow[] = [
     { id: "backlog", label: "Backlog", count: counts.backlog, muted: true },
     { id: "designing", label: "Designing", count: counts.designing },
@@ -48,13 +61,10 @@ export function PipelineCard({ counts }: PipelineCardProps): JSX.Element {
   ];
   const awaitingMerge: PipelineRow = {
     id: "awaiting-merge",
-    label: `Awaiting merge · ${counts.awaitingMerge} ${plural(
-      counts.awaitingMerge,
-      "branch",
-      "branches",
-    )} ahead of ${defaultBranch}`,
-    count: counts.awaitingMerge,
+    label: awaitingMergeLabel,
+    count: awaitingMergeCount,
     operatorOwned: true,
+    muted: awaitingMergeCount === 0,
   };
 
   const renderRow = (row: PipelineRow): JSX.Element => (

@@ -1,11 +1,18 @@
 import { useMemo } from "react";
 
+import type { RepoInfo } from "@/api/workspace";
 import type { Issue, LoomAgentStatus } from "@/types";
 import {
   effectiveAgentStatus,
   parseLoomStatus,
   resolveAgentForTask,
 } from "@/types";
+import { targetBranchForSource } from "@/utils/workspace/repoPresentation";
+
+export interface AwaitingMergeGroup {
+  branch: string;
+  count: number;
+}
 
 export interface PipelineCounts {
   backlog: number;
@@ -13,7 +20,7 @@ export interface PipelineCounts {
   awaitingApproval: number;
   building: number;
   deferred: number;
-  awaitingMerge: number;
+  awaitingMerge: AwaitingMergeGroup[];
   merged: number;
   taskCount: number;
 }
@@ -36,14 +43,28 @@ function isPlanningAgent(agent: LoomAgentStatus | undefined): boolean {
 export function derivePipeline(
   issues: readonly Issue[],
   agents: readonly LoomAgentStatus[],
+  repos: readonly RepoInfo[] = [],
 ): PipelineCounts {
+  const awaitingMergeByBranch = new Map<string, number>();
+  for (const agent of agents) {
+    if (agent.ahead <= 0) continue;
+    const branch = targetBranchForSource(repos, agent.repo);
+    awaitingMergeByBranch.set(
+      branch,
+      (awaitingMergeByBranch.get(branch) ?? 0) + 1,
+    );
+  }
+
   const counts: PipelineCounts = {
     backlog: 0,
     designing: 0,
     awaitingApproval: 0,
     building: 0,
     deferred: 0,
-    awaitingMerge: agents.filter((agent) => agent.ahead > 0).length,
+    awaitingMerge: [...awaitingMergeByBranch].map(([branch, count]) => ({
+      branch,
+      count,
+    })),
     merged: 0,
     taskCount: 0,
   };
@@ -92,6 +113,10 @@ export function derivePipeline(
 export function usePipelineCounts(
   issues: readonly Issue[],
   agents: readonly LoomAgentStatus[],
+  repos: readonly RepoInfo[],
 ): PipelineCounts {
-  return useMemo(() => derivePipeline(issues, agents), [issues, agents]);
+  return useMemo(
+    () => derivePipeline(issues, agents, repos),
+    [issues, agents, repos],
+  );
 }

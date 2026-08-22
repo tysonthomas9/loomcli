@@ -51,7 +51,7 @@ describe("Home rail cards", () => {
           awaitingApproval: 2,
           building: 3,
           deferred: 0,
-          awaitingMerge: 1,
+          awaitingMerge: [{ branch: "localmode", count: 1 }],
           merged: 4,
           taskCount: 10,
         }}
@@ -60,7 +60,7 @@ describe("Home rail cards", () => {
 
     expect(screen.getAllByTestId("pipeline-row")).toHaveLength(7);
     expect(
-      screen.getByText("Awaiting merge · 1 branch ahead of the target branch"),
+      screen.getByText("Awaiting merge · 1 branch ahead of localmode"),
     ).toBeInTheDocument();
     const building = screen
       .getAllByTestId("pipeline-row")
