@@ -217,6 +217,44 @@ func TestAddWorktreesSkipsUnrecoverableCheckoutWithWarning(t *testing.T) {
 	}
 }
 
+func TestStoreBackedCreateWarnsWhenBranchIsAlreadyCheckedOut(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	src := initTestGitRepo(t, t.TempDir(), "app")
+	runGit(t, src, "branch", "-M", "main")
+	st := memstore.New()
+	createFn := BuildStoreBackedCreateWorkspace(st)
+	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
+	ctx := service.WithCreateWarnings(context.Background())
+
+	result, err := createFn(ctx, service.WorkspaceCreateRequest{
+		Name:   "my-ws",
+		Type:   "empty",
+		Repos:  []string{src},
+		Branch: "main",
+		Path:   wsPath,
+	})
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if result.WorkspaceID != "MY-WS" || result.WorkspacePath != wsPath {
+		t.Fatalf("result = %#v, want MY-WS at %s", result, wsPath)
+	}
+	warnings := service.GetCreateWarnings(ctx)
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %v, want exactly one", warnings)
+	}
+	for _, want := range []string{"app", "already checked out", "pick another --branch"} {
+		if !strings.Contains(warnings[0], want) {
+			t.Fatalf("warning = %q, want it to contain %q", warnings[0], want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(wsPath, "app")); !os.IsNotExist(err) {
+		t.Fatalf("skipped worktree exists or stat returned unexpected error: %v", err)
+	}
+}
+
 func TestStoreBackedAddReposAttachesLocalRepoToEmptyWorkspace(t *testing.T) {
 	loomDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)

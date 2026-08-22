@@ -215,7 +215,7 @@ func createWorkspaceWorktree(repo resolvedRepo, worktreePath, branch string) (cr
 		}
 		baseRef = recovery.BaseSHA
 	}
-	if err := addWorkspaceWorktree(repo.path, worktreePath, branch, baseRef); err != nil {
+	if err := addWorkspaceWorktree(repo.path, worktreePath, branch, baseRef, info.State == gitbranch.StateHealthy); err != nil {
 		return createdWorktree{}, err
 	}
 	return createdWorktree{origRepoPath: repo.path, worktreePath: worktreePath, branch: branch}, nil
@@ -233,13 +233,26 @@ func workspaceWorktreeRecoveryBase(repoPath, targetBranch string) string {
 	return base
 }
 
-func addWorkspaceWorktree(repoPath, worktreePath, branch, baseRef string) error {
-	args := []string{"worktree", "add", worktreePath, "-b", branch}
-	if baseRef != "" {
-		args = append(args, baseRef)
+func addWorkspaceWorktree(repoPath, worktreePath, branch, baseRef string, existingBranch bool) error {
+	args := []string{"worktree", "add", worktreePath}
+	if existingBranch {
+		args = append(args, branch)
+	} else {
+		args = append(args, "-b", branch)
+		if baseRef != "" {
+			args = append(args, baseRef)
+		}
 	}
 	_, err := cli.RunGitCommand(repoPath, args...)
+	if err != nil && isBranchCheckedOutError(err) {
+		return fmt.Errorf("branch is already checked out: %w; pick another --branch (the default is the workspace name)", err)
+	}
 	return err
+}
+
+func isBranchCheckedOutError(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "is already checked out at") || strings.Contains(msg, "already used by worktree")
 }
 
 func warnSkippedWorktree(ctx context.Context, repoName, worktreePath string, err error) {

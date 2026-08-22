@@ -122,6 +122,7 @@ func runWorkspaceCreate(cmd *cobra.Command, args []string) {
 	repoPaths := parseRepoPaths()
 
 	if err := cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+		ctx = service.WithCreateWarnings(ctx)
 		create := workspacemgr.BuildStoreBackedCreateWorkspace(h.Store)
 		result, err := create(ctx, service.WorkspaceCreateRequest{
 			Name:   wsName,
@@ -132,6 +133,14 @@ func runWorkspaceCreate(cmd *cobra.Command, args []string) {
 		})
 		if err != nil {
 			return err
+		}
+		warnings := service.GetCreateWarnings(ctx)
+		for _, warning := range warnings {
+			fmt.Fprintf(os.Stderr, "Warning: %s\n", warning)
+		}
+		if len(warnings) > 0 {
+			fmt.Fprintf(os.Stderr, "Workspace %q created at %s, but %d repo checkout(s) were skipped — the workspace is registered without them. Fix the cause and re-run, or remove it with 'loom workspace remove %s --force'.\n", result.WorkspaceID, result.WorkspacePath, len(warnings), wsName)
+			os.Exit(1)
 		}
 		fmt.Printf("Workspace %q created at %s.\n", result.WorkspaceID, result.WorkspacePath)
 		return nil
