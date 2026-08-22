@@ -1,249 +1,222 @@
 package terminal
 
 import (
-	"os"
+	"errors"
 	"os/exec"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/creack/pty"
-
-	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
-// screenResetSeq clears the terminal and homes the cursor. Emitted at the
-// start of a scrollback replay so the client's grid doesn't render old
-// contents interleaved with the replayed bytes.
+// screenResetSeq clears the terminal and homes the cursor. It follows any
+// ring-buffer mode checkpoint in an interim Phase 1 initial state.
 var screenResetSeq = []byte("\x1b[2J\x1b[H")
 
-// Exit reasons stored on ptySession.closeReason and reported by
-// Attachment.ExitReason() after the output channel closes. The WS handler
-// maps these to WebSocket close codes so the frontend can distinguish an
-// explicit server-side Kill (e.g. DeleteTab) from a backend crash or a
-// benign detach.
-const (
-	ExitReasonKilled   = "killed"   // explicit PTYManager.Kill
-	ExitReasonExited   = "exited"   // child process exited on its own
-	ExitReasonShutdown = "shutdown" // manager-wide Shutdown
-)
+var errAttachmentClosed = errors.New("terminal attachment closed")
 
-// attachBufferSize is the capacity of an Attachment's output channel.
-// Non-blocking sends from the drain goroutine mean a slow WebSocket drops
-// frames rather than back-pressuring the shell. The ring buffer always has
-// the ground truth.
-const attachBufferSize = 64
-
-// localAttachment is the in-process Attachment implementation. It wraps the
-// session's PTY fd directly. An Attachment interface exists in source.go so
-// a future gRPC-backed implementation can plug into the WS handler unchanged.
 type localAttachment struct {
-	connID     string
-	pty        *os.File
-	output     chan []byte
-	scrollback []byte
-	// session is held so ExitReason can report *why* the output channel
-	// closed (the reason is stored on the session). Keeping a pointer after
-	// close() is safe — closeReason is written before the channel is closed,
-	// and the attachment is only consulted by a goroutine that already
-	// observed the close.
+	connID  string
+	initial TerminalInitialState
+	sub     *subscriber
 	session *ptySession
 }
 
-func (a *localAttachment) ConnID() string        { return a.connID }
-func (a *localAttachment) Output() <-chan []byte { return a.output }
+func (a *localAttachment) ConnID() string                     { return a.connID }
+func (a *localAttachment) InitialState() TerminalInitialState { return cloneInitialState(a.initial) }
+func (a *localAttachment) Output() <-chan TerminalEvent       { return a.sub.output }
+func (a *localAttachment) CloseReason() CloseReason           { return a.sub.reason() }
 
-// WriteInput writes keystrokes to the shared PTY fd. Multiple attachments
-// share the same *os.File; POSIX guarantees concurrent write(2) calls up
-// to PIPE_BUF (4096 bytes) are atomic, and terminal keystrokes are far
-// below that, so no mutex is needed on this path.
-func (a *localAttachment) WriteInput(p []byte) (int, error) { return a.pty.Write(p) }
-func (a *localAttachment) Scrollback() []byte               { return a.scrollback }
-func (a *localAttachment) Resize(_ string, cols, rows uint16) error {
-	return pty.Setsize(a.pty, &pty.Winsize{Cols: cols, Rows: rows})
-}
-
-// ExitReason returns the reason the owning session closed, or "" if the
-// session is still live (or was never given a reason). Only meaningful
-// after Output() has been observed closed.
-func (a *localAttachment) ExitReason() string {
-	if a.session == nil {
-		return ""
+func (a *localAttachment) WriteInput(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
 	}
-	if v := a.session.closeReason.Load(); v != nil {
-		if s, ok := v.(string); ok {
-			return s
+	reply := make(chan bool, 1)
+	cmd := inputCommand{connID: a.connID, data: append([]byte(nil), p...), reply: reply}
+	if !a.session.sendCommand(cmd) {
+		return 0, errAttachmentClosed
+	}
+	select {
+	case accepted := <-reply:
+		if !accepted {
+			return 0, nil
 		}
+		return len(p), nil
+	case <-a.session.done:
+		return 0, errAttachmentClosed
 	}
-	return ""
 }
 
-// ptySession owns the PTY fd, child process, scrollback ring, and the set
-// of concurrent attachments (multi-client) for one (workspace, session)
-// pair. Each attachment is a separate WebSocket / viewer that sees the
-// same output and can write input into the shared PTY.
+func (a *localAttachment) RequestResize(cols, rows uint16) error {
+	if cols == 0 || rows == 0 {
+		return errors.New("terminal dimensions must be non-zero")
+	}
+	reply := make(chan error, 1)
+	if !a.session.sendCommand(resizeRequestCommand{
+		connID: a.connID,
+		cols:   cols,
+		rows:   rows,
+		reply:  reply,
+	}) {
+		return errAttachmentClosed
+	}
+	select {
+	case err := <-reply:
+		return err
+	case <-a.session.done:
+		return errAttachmentClosed
+	}
+}
+
+func (a *localAttachment) Focus() error {
+	reply := make(chan error, 1)
+	if !a.session.sendCommand(focusCommand{connID: a.connID, reply: reply}) {
+		return errAttachmentClosed
+	}
+	select {
+	case err := <-reply:
+		return err
+	case <-a.session.done:
+		return errAttachmentClosed
+	}
+}
+
+func cloneInitialState(in TerminalInitialState) TerminalInitialState {
+	out := in
+	out.Data = append([]byte(nil), in.Data...)
+	return out
+}
+
+// ptySession owns all mutable transport state. Only runOwner reads or writes
+// the owner-state fields; atomics below are observation points for manager
+// diagnostics and idle reaping.
 type ptySession struct {
-	key        SessionKey
-	pty        *os.File
-	cmd        *exec.Cmd
-	scrollback *ringBuffer
-	createdAt  int64 // unix nanos
+	key       SessionKey
+	pty       terminalPTY
+	cmd       *exec.Cmd
+	createdAt int64
 
-	lastOutput atomic.Int64 // unix nanos, updated by drain
+	commands   chan ownerCommand
+	done       chan struct{}
+	ownerDone  chan struct{}
+	readerDone chan struct{}
+	writer     *writerFIFO
 
-	attachMu sync.Mutex
-	attaches map[string]*attachmentState // keyed by connID
+	seq         uint64
+	generation  Generation
+	cols        uint16
+	rows        uint16
+	controller  string
+	attachOrder uint64
+	subs        map[string]*subscriber
+	scrollback  *ringBuffer
+
+	lastOutput  atomic.Int64
+	attachCount atomic.Int64
 
 	killMu    sync.Mutex
 	killTimer *time.Timer
 
-	closeOnce   sync.Once
-	closeReason atomic.Value // string; stored before the output channels close
-	done        chan struct{}
+	closeOnce sync.Once
+	closeErr  error
 }
 
-// attachmentState is the internal mutable half of an Attachment.
-//
-// Concurrency: drain fans output to every attachment outside attachMu, so a
-// Detach / Kill can race with an in-flight send. Guard the channel with an
-// RWMutex — RLock per send (multiple senders allowed in parallel for
-// different attachments), Lock to close (waits for any in-flight send,
-// then closes the channel under the flag set). This also replaces the
-// old recover-on-send-to-closed-channel hack, which worked at runtime but
-// tripped the race detector.
-type attachmentState struct {
-	connID  string
-	ch      chan []byte
-	closeMu sync.RWMutex
-	closed  bool // guarded by closeMu
-}
-
-func newPtySession(key SessionKey, f *os.File, cmd *exec.Cmd) *ptySession {
-	return &ptySession{
+func newPtySession(key SessionKey, device terminalPTY, cmd *exec.Cmd, cols, rows uint16) (*ptySession, error) {
+	generation, err := makeGeneration()
+	if err != nil {
+		return nil, err
+	}
+	s := &ptySession{
 		key:        key,
-		pty:        f,
+		pty:        device,
 		cmd:        cmd,
-		scrollback: newRingBuffer(defaultRingCapacity),
 		createdAt:  time.Now().UnixNano(),
-		attaches:   make(map[string]*attachmentState),
+		commands:   make(chan ownerCommand),
 		done:       make(chan struct{}),
+		ownerDone:  make(chan struct{}),
+		readerDone: make(chan struct{}),
+		generation: generation,
+		cols:       cols,
+		rows:       rows,
+		subs:       make(map[string]*subscriber),
+		scrollback: newRingBuffer(defaultRingCapacity),
+	}
+	s.writer = newWriterFIFO(device)
+	return s, nil
+}
+
+func (s *ptySession) start(manager *PTYManager) {
+	go s.writer.run()
+	go s.runOwner()
+	go s.readPTY(manager)
+}
+
+func (s *ptySession) sendCommand(cmd ownerCommand) bool {
+	select {
+	case s.commands <- cmd:
+		return true
+	case <-s.done:
+		return false
 	}
 }
 
-// drain reads from the PTY forever: bytes go into the ring buffer and a
-// best-effort copy is fanned out to every current attachment. Exits when
-// the PTY returns an error (child exit, fd close). On exit it asks the
-// manager to clean up the session unless close() has already marked it
-// done.
-func (s *ptySession) drain(m *PTYManager) {
-	buf := make([]byte, realtime.TerminalReadBufSize)
-	// Reused across iterations to avoid per-chunk allocation. Sized once
-	// to a typical attachment count; grows naturally if needed.
-	snapshot := make([]*attachmentState, 0, 4)
-	for {
-		n, err := s.pty.Read(buf)
-		if n > 0 {
-			chunk := make([]byte, n)
-			copy(chunk, buf[:n])
-			s.scrollback.Append(chunk)
-			s.lastOutput.Store(time.Now().UnixNano())
-
-			// Hold attachMu only for the map copy — sending outside the
-			// lock means a slow client's backed-up channel can never block
-			// the drain goroutine or any other attachment's delivery.
-			s.attachMu.Lock()
-			snapshot = snapshot[:0]
-			for _, st := range s.attaches {
-				snapshot = append(snapshot, st)
-			}
-			s.attachMu.Unlock()
-			for _, st := range snapshot {
-				st.send(chunk)
-			}
-		}
-		if err != nil {
-			select {
-			case <-s.done:
-				// close() already tore the session down.
-			default:
-				m.onSessionExited(s.key)
-			}
-			return
-		}
-	}
-}
-
-// attachNew adds a fresh attachment to the session without disturbing any
-// existing ones (multi-client). Returns a localAttachment preloaded with
-// the replay bytes (reset escape + current scrollback) so the new client
-// starts from the same grid state as the existing ones.
-//
-// Returns nil if the session was closed concurrently (close() nils
-// s.attaches). The caller (PTYManager.AttachSession) is expected to retry
-// the lookup/spawn in that case.
-//
-// connID must be unique; PTYManager generates it from a monotonic counter.
-// A defensive same-connID check closes any prior attachment under that ID
-// — this is guard-rail against a caller bug, not an expected code path.
-func (s *ptySession) attachNew(connID string) *localAttachment {
-	ch := make(chan []byte, attachBufferSize)
-	st := &attachmentState{connID: connID, ch: ch}
-
-	s.attachMu.Lock()
-	if s.attaches == nil {
-		// Session was closed between the manager-level lookup and this
-		// attach. Signal the caller to retry.
-		s.attachMu.Unlock()
-		close(ch)
+func (s *ptySession) attachNew(connID string, cols, rows uint16) *localAttachment {
+	reply := make(chan *localAttachment, 1)
+	if !s.sendCommand(attachCommand{connID: connID, cols: cols, rows: rows, reply: reply}) {
 		return nil
 	}
-	if existing, ok := s.attaches[connID]; ok {
-		existing.close()
+	select {
+	case att := <-reply:
+		return att
+	case <-s.done:
+		return nil
 	}
-	s.attaches[connID] = st
-	s.attachMu.Unlock()
+}
 
-	var replay []byte
-	checkpoint, body := s.scrollback.ReplaySnapshot()
-	if len(checkpoint) > 0 || len(body) > 0 {
-		replay = make([]byte, 0, len(checkpoint)+len(screenResetSeq)+len(body))
-		replay = append(replay, checkpoint...)
-		replay = append(replay, screenResetSeq...)
-		replay = append(replay, body...)
+func (s *ptySession) detach(connID string) bool {
+	reply := make(chan bool, 1)
+	if !s.sendCommand(detachCommand{connID: connID, reason: CloseReplaced, reply: reply}) {
+		return true
 	}
-
-	return &localAttachment{connID: connID, pty: s.pty, output: ch, scrollback: replay, session: s}
-}
-
-// detach releases the attachment identified by connID and reports whether
-// the session has no remaining clients. The caller (PTYManager.Detach)
-// arms the grace-period kill timer only when empty=true.
-func (s *ptySession) detach(connID string) (empty bool) {
-	s.attachMu.Lock()
-	defer s.attachMu.Unlock()
-	if st, ok := s.attaches[connID]; ok {
-		st.close()
-		delete(s.attaches, connID)
+	select {
+	case empty := <-reply:
+		return empty
+	case <-s.done:
+		return true
 	}
-	return len(s.attaches) == 0
 }
 
-// attached reports whether at least one client is currently attached.
-func (s *ptySession) attached() bool {
-	s.attachMu.Lock()
-	defer s.attachMu.Unlock()
-	return len(s.attaches) > 0
+func (s *ptySession) resizeCanonical(cols, rows uint16) error {
+	reply := make(chan error, 1)
+	if !s.sendCommand(canonicalResizeCommand{cols: cols, rows: rows, reply: reply}) {
+		return errAttachmentClosed
+	}
+	select {
+	case err := <-reply:
+		return err
+	case <-s.done:
+		return errAttachmentClosed
+	}
 }
 
-// attachmentCount returns the number of concurrent clients attached to this
-// session. Used by the service layer to expose attached_clients on the tab
-// DTO for multi-viewer UI treatment.
-func (s *ptySession) attachmentCount() int {
-	s.attachMu.Lock()
-	defer s.attachMu.Unlock()
-	return len(s.attaches)
+func (s *ptySession) writeTrusted(p []byte) error {
+	if len(p) == 0 {
+		return nil
+	}
+	reply := make(chan error, 1)
+	cmd := trustedInputCommand{data: append([]byte(nil), p...), reply: reply}
+	if !s.sendCommand(cmd) {
+		return errAttachmentClosed
+	}
+	select {
+	case err := <-reply:
+		return err
+	case <-s.done:
+		return errAttachmentClosed
+	}
 }
 
+func (s *ptySession) attached() bool            { return s.attachCount.Load() > 0 }
+func (s *ptySession) attachmentCount() int      { return int(s.attachCount.Load()) }
 func (s *ptySession) lastOutputUnixNano() int64 { return s.lastOutput.Load() }
 func (s *ptySession) createdUnixNano() int64    { return s.createdAt }
 
@@ -265,64 +238,14 @@ func (s *ptySession) cancelKillTimer() {
 	}
 }
 
-// close tears down the PTY and child process. Idempotent. reason is
-// recorded (first-writer-wins via closeOnce) so attached clients can
-// distinguish an explicit kill from a child exit or shutdown via
-// Attachment.ExitReason().
+// close serializes teardown through the owner. The first reason wins.
 func (s *ptySession) close(reason string) error {
-	var firstErr error
 	s.closeOnce.Do(func() {
-		if reason != "" {
-			s.closeReason.Store(reason)
+		reply := make(chan error, 1)
+		if s.sendCommand(closeCommand{reason: CloseReason(reason), reply: reply}) {
+			s.closeErr = <-reply
 		}
-		close(s.done)
-		s.cancelKillTimer()
-
-		s.attachMu.Lock()
-		for _, st := range s.attaches {
-			st.close()
-		}
-		s.attaches = nil
-		s.attachMu.Unlock()
-
-		if s.pty != nil {
-			if err := s.pty.Close(); err != nil {
-				firstErr = err
-			}
-		}
-		if s.cmd != nil && s.cmd.Process != nil {
-			_ = s.cmd.Process.Kill()
-			_ = s.cmd.Wait()
-		}
+		<-s.ownerDone
 	})
-	return firstErr
-}
-
-// send attempts a non-blocking copy to the attachment's channel. Dropped
-// frames are fine — the scrollback ring always has the ground truth and a
-// reattach will replay it. Holds closeMu.RLock so a concurrent close()
-// sees all in-flight sends complete before the channel is closed.
-func (a *attachmentState) send(data []byte) {
-	a.closeMu.RLock()
-	defer a.closeMu.RUnlock()
-	if a.closed {
-		return
-	}
-	select {
-	case a.ch <- data:
-	default:
-	}
-}
-
-// close closes the attachment's output channel exactly once so a waiting
-// pump goroutine exits. Takes closeMu exclusively, which blocks briefly
-// for any in-flight sends (each is non-blocking, so the wait is bounded).
-func (a *attachmentState) close() {
-	a.closeMu.Lock()
-	defer a.closeMu.Unlock()
-	if a.closed {
-		return
-	}
-	a.closed = true
-	close(a.ch)
+	return s.closeErr
 }

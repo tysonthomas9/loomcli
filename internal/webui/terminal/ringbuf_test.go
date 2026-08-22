@@ -224,15 +224,11 @@ func TestRingBuffer_ReplaySnapshotIgnoresTransientPrivateModes(t *testing.T) {
 }
 
 func TestPtySessionAttachReplayRestoresModesBeforeClearingScreen(t *testing.T) {
-	session := &ptySession{
-		scrollback: newRingBuffer(16),
-		attaches:   make(map[string]*attachmentState),
-		done:       make(chan struct{}),
-	}
-	session.scrollback.Append([]byte("\x1b[?1049h\x1b[?1003;1006h"))
-	session.scrollback.Append(bytes.Repeat([]byte{'x'}, 16))
+	scrollback := newRingBuffer(16)
+	scrollback.Append([]byte("\x1b[?1049h\x1b[?1003;1006h"))
+	scrollback.Append(bytes.Repeat([]byte{'x'}, 16))
 
-	replay := session.attachNew("conn-1").Scrollback()
+	replay := interimInitialStateData(scrollback)
 	modeAt := bytes.Index(replay, []byte("\x1b[?1049h"))
 	clearAt := bytes.Index(replay, screenResetSeq)
 	if modeAt < 0 || clearAt < 0 || modeAt > clearAt {

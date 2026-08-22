@@ -6,7 +6,7 @@ import (
 )
 
 // TestExitReason_KillPropagatesToAttachment verifies that after PTYManager.Kill,
-// an already-attached client can read an ExitReason of "killed" from its
+// an already-attached client can read a CloseReason of "killed" from its
 // Attachment. The WS handler uses this to pick close code 4002.
 func TestExitReason_KillPropagatesToAttachment(t *testing.T) {
 	m := newTestManager(t)
@@ -17,15 +17,15 @@ func TestExitReason_KillPropagatesToAttachment(t *testing.T) {
 		t.Fatalf("AttachSession: %v", err)
 	}
 
-	if got := att.ExitReason(); got != "" {
-		t.Errorf("ExitReason before Kill = %q; want empty", got)
+	if got := att.CloseReason(); got != "" {
+		t.Errorf("CloseReason before Kill = %q; want empty", got)
 	}
 
 	if err := m.Kill(key); err != nil {
 		t.Fatalf("Kill: %v", err)
 	}
 
-	// Drain until the output channel is closed, then read ExitReason.
+	// Drain until the output channel is closed, then read CloseReason.
 	waitUntil(t, func() bool {
 		select {
 		case _, ok := <-att.Output():
@@ -35,8 +35,8 @@ func TestExitReason_KillPropagatesToAttachment(t *testing.T) {
 		}
 	}, 2*time.Second, "output channel to close after Kill")
 
-	if got := att.ExitReason(); got != ExitReasonKilled {
-		t.Errorf("ExitReason after Kill = %q; want %q", got, ExitReasonKilled)
+	if got := att.CloseReason(); got != CloseKilled {
+		t.Errorf("CloseReason after Kill = %q; want %q", got, CloseKilled)
 	}
 }
 
@@ -61,8 +61,8 @@ func TestExitReason_ChildExitIsExited(t *testing.T) {
 		}
 	}, 2*time.Second, "output channel to close after child exit")
 
-	if got := att.ExitReason(); got != ExitReasonExited {
-		t.Errorf("ExitReason after child exit = %q; want %q", got, ExitReasonExited)
+	if got := att.CloseReason(); got != CloseExited {
+		t.Errorf("CloseReason after child exit = %q; want %q", got, CloseExited)
 	}
 	if !m.SessionClosed(key) {
 		t.Errorf("SessionClosed after child exit = false; want true")
@@ -105,10 +105,9 @@ func TestSessionClosedClearsAfterFreshAttach(t *testing.T) {
 	m.Detach(key, next.ConnID())
 }
 
-// TestExitReason_ReplacementIsEmpty verifies that an attachment replaced by a
-// same-connID reconnect (not a session close) reports empty ExitReason. The
-// session itself is still live, so a 1000 normal close is appropriate.
-func TestExitReason_ReplacementIsEmpty(t *testing.T) {
+// TestExitReason_ReplacementIsEmpty verifies that a detached attachment
+// records CloseReplaced while the underlying session remains live.
+func TestCloseReason_DetachIsReplaced(t *testing.T) {
 	m := newTestManager(t)
 	m.SetGracePeriod(5 * time.Second)
 	key := SessionKey{Workspace: "ws1", Name: "sess"}
@@ -119,10 +118,9 @@ func TestExitReason_ReplacementIsEmpty(t *testing.T) {
 	}
 	m.Detach(key, att1.ConnID())
 	// Session remains live in the grace window; the attachment's
-	// output channel closed because it was detached. ExitReason must stay
-	// empty so the handler emits a benign close (1000).
-	if got := att1.ExitReason(); got != "" {
-		t.Errorf("ExitReason on plain detach = %q; want empty", got)
+	// output channel closed because it was detached.
+	if got := att1.CloseReason(); got != CloseReplaced {
+		t.Errorf("CloseReason on plain detach = %q; want %q", got, CloseReplaced)
 	}
 }
 
@@ -186,7 +184,7 @@ func TestAttachNew_ReturnsNilAfterClose(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 
-	if got := sess.attachNew("pty-racy"); got != nil {
+	if got := sess.attachNew("pty-racy", 80, 24); got != nil {
 		t.Errorf("attachNew on closed session = %v; want nil", got)
 	}
 }

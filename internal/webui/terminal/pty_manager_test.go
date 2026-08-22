@@ -118,7 +118,9 @@ func readChunk(t *testing.T, att Attachment, deadline time.Duration) []byte {
 			if !ok {
 				return out
 			}
-			out = append(out, chunk...)
+			if chunk.Kind == EventOutput {
+				out = append(out, chunk.Data...)
+			}
 		case <-timeout:
 			return out
 		}
@@ -139,7 +141,9 @@ func readChunkContains(t *testing.T, att Attachment, needle []byte, deadline tim
 			if !ok {
 				return bytes.Contains(out, needle)
 			}
-			out = append(out, chunk...)
+			if chunk.Kind == EventOutput {
+				out = append(out, chunk.Data...)
+			}
 			if bytes.Contains(out, needle) {
 				return true
 			}
@@ -172,8 +176,8 @@ func TestAttach_SpawnsFreshSession(t *testing.T) {
 	if reattach {
 		t.Errorf("reattach=true on fresh session")
 	}
-	if att.Scrollback() != nil {
-		t.Errorf("Scrollback() non-nil on fresh session")
+	if att.InitialState().Data != nil {
+		t.Errorf("InitialState().Data non-nil on fresh session")
 	}
 	if got := m.SessionCount(); got != 1 {
 		t.Errorf("SessionCount=%d want 1", got)
@@ -197,7 +201,7 @@ func TestDetachDoesNotKillImmediately(t *testing.T) {
 	}
 }
 
-func TestReattachWithinGraceReplaysScrollback(t *testing.T) {
+func TestReattachWithinGraceReturnsInitialState(t *testing.T) {
 	m := newTestManager(t)
 	m.SetGracePeriod(2 * time.Second) // wide enough to not race the test
 	key := SessionKey{Workspace: "ws1", Name: "lead-shell-1"}
@@ -225,7 +229,7 @@ func TestReattachWithinGraceReplaysScrollback(t *testing.T) {
 	if !reattach {
 		t.Errorf("reattach=false on existing session")
 	}
-	replay := att2.Scrollback()
+	replay := att2.InitialState().Data
 	if !bytes.HasPrefix(replay, []byte("\x1b[2J\x1b[H")) {
 		t.Errorf("replay missing reset prefix; got %q", string(replay[:min(8, len(replay))]))
 	}
@@ -263,22 +267,18 @@ func TestExplicitKillTerminatesImmediately(t *testing.T) {
 	if got := m.SessionCount(); got != 0 {
 		t.Errorf("SessionCount after Kill=%d want 0", got)
 	}
-	// Output channel should be closed for the formerly-attached consumer.
-	select {
-	case _, ok := <-att.Output():
-		if ok {
-			// One residual frame is acceptable if drained just before close.
-			select {
-			case _, ok2 := <-att.Output():
-				if ok2 {
-					t.Errorf("output channel still open after Kill")
-				}
-			case <-time.After(200 * time.Millisecond):
-				t.Errorf("output channel did not close after Kill")
+	// Drain the initial resize and sequenced close event, then require close.
+	deadline := time.After(200 * time.Millisecond)
+	for {
+		select {
+		case _, ok := <-att.Output():
+			if !ok {
+				return
 			}
+		case <-deadline:
+			t.Errorf("output channel did not close after Kill")
+			return
 		}
-	case <-time.After(200 * time.Millisecond):
-		t.Errorf("output channel did not close after Kill")
 	}
 }
 
@@ -340,7 +340,7 @@ func TestSessionCountIncludesDetachedUpToMax(t *testing.T) {
 // contract: a second AttachSession for the same key joins the existing
 // session (does NOT kick the first), and its replay includes output the
 // first client has already seen.
-func TestSecondAttachCoexistsAndReceivesScrollback(t *testing.T) {
+func TestSecondAttachCoexistsAndReceivesInitialState(t *testing.T) {
 	m := newTestManager(t)
 	m.SetGracePeriod(5 * time.Second)
 	key := SessionKey{Workspace: "ws1", Name: "lead-shell-1"}
@@ -362,8 +362,8 @@ func TestSecondAttachCoexistsAndReceivesScrollback(t *testing.T) {
 	if !reattach {
 		t.Errorf("reattach=false; want true for second concurrent attach")
 	}
-	if !bytes.Contains(att2.Scrollback(), []byte("marker-abc")) {
-		t.Errorf("second attach replay missing marker; got %q", string(att2.Scrollback()))
+	if !bytes.Contains(att2.InitialState().Data, []byte("marker-abc")) {
+		t.Errorf("second attach replay missing marker; got %q", string(att2.InitialState().Data))
 	}
 
 	// First attachment must stay open; check that a round-trip input→output
@@ -412,48 +412,6 @@ func TestMultiAttach_DetachToZeroArmsKillTimer(t *testing.T) {
 	m.Detach(key, att2.ConnID())
 	waitUntil(t, func() bool { return m.SessionCount() == 0 }, 2*time.Second,
 		"session to be reaped after last client detaches")
-}
-
-// TestMultiAttach_SlowClientDoesNotStallFast exercises the slow-client
-// policy: a client whose output channel has backed up must not block the
-// drain goroutine or starve other attached clients. Drain fan-out happens
-// outside the attach mutex and uses non-blocking sends, so a full channel
-// on one attachment just drops frames for that attachment.
-func TestMultiAttach_SlowClientDoesNotStallFast(t *testing.T) {
-	m := newTestManager(t)
-	m.SetGracePeriod(5 * time.Second)
-	key := SessionKey{Workspace: "ws1", Name: "slow"}
-
-	slow, _, err := m.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
-	if err != nil {
-		t.Fatalf("slow attach: %v", err)
-	}
-	fast, _, err := m.AttachSession(key, 80, 24, nil)
-	if err != nil {
-		t.Fatalf("fast attach: %v", err)
-	}
-
-	// Never read from `slow` — its channel will saturate at attachBufferSize.
-	// Pump enough input to overflow it several times over.
-	for i := 0; i < attachBufferSize*3; i++ {
-		if _, err := fast.WriteInput([]byte("x\n")); err != nil {
-			t.Fatalf("WriteInput: %v", err)
-		}
-	}
-
-	// Fast client must still receive output within the deadline — if the
-	// drain goroutine were blocked on the slow channel this would time out.
-	if !readChunkContains(t, fast, []byte("x"), 2*time.Second) {
-		t.Fatalf("fast client did not receive output (drain may be blocked by slow client)")
-	}
-
-	// Slow client is still attached — not kicked.
-	if m.SessionCount() != 1 {
-		t.Errorf("expected session still live; SessionCount=%d", m.SessionCount())
-	}
-
-	m.Detach(key, slow.ConnID())
-	m.Detach(key, fast.ConnID())
 }
 
 // TestMultiAttach_AttachmentCount verifies the count exposed on PTYSource

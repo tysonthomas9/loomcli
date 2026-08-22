@@ -317,8 +317,9 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 		maybeEmitStaleRestartBanner(reqCtx, conn, p, workspace, session)
 	}
 
-	// Emit scrollback replay (reset escape + ring bytes) before going live.
-	if replay := att.Scrollback(); len(replay) > 0 {
+	// Slice A compatibility: emit the initial-state bytes using the existing
+	// raw relay. Slice B replaces this with a loom-terminal.v1 frame.
+	if replay := webuterminal.InterimInitialStateBytes(att); len(replay) > 0 {
 		if err := conn.Write(reqCtx, websocket.MessageBinary, replay); err != nil { //nolint:staticcheck // SA1019
 			slog.Warn("scrollback replay write failed", "session", session, "err", err)
 		}
@@ -326,18 +327,19 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 
 	ctx, cancel := context.WithCancel(reqCtx)
 	defer cancel()
+	legacyAtt := newInterimAttachmentAdapter(ctx, att)
 
 	crashCh := make(chan realtime.CrashInfo, 1)
 	go func() {
 		// Pump attachment output → WS. Exits when the channel closes
 		// (session killed or replaced) or the context is cancelled.
-		crashCh <- realtime.AttachmentToWS(ctx, cancel, conn, att)
+		crashCh <- realtime.AttachmentToWS(ctx, cancel, conn, legacyAtt)
 	}()
 
 	// WS → PTY until the client disconnects. The attachment satisfies
 	// realtime.Resizer directly so the manager doesn't need a connID → PTY
 	// lookup table.
-	realtime.WSToPTY(ctx, conn, attachmentWriter{att}, att, connID)
+	realtime.WSToPTY(ctx, conn, legacyAtt, legacyAtt, connID)
 
 	// WebSocket gone — detach the attachment. PTY stays alive for the
 	// manager's grace period.
@@ -435,11 +437,6 @@ func mustUint16(n int) uint16 {
 	}
 	return uint16(n)
 }
-
-// attachmentWriter adapts Attachment to realtime.WSToPTY's io.Writer input.
-type attachmentWriter struct{ a webuterminal.Attachment }
-
-func (w attachmentWriter) Write(p []byte) (int, error) { return w.a.WriteInput(p) }
 
 // maybeEmitStaleRestartBanner writes a visible notice to the freshly-spawned
 // shell when the tab's metadata pre-dates the current server process — i.e.

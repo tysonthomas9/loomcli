@@ -233,7 +233,7 @@ func (m *PTYManager) SetIdleTimeout(d time.Duration) {
 //
 // reattached is true when the returned attachment is to a session that
 // existed before this call (typical for page refresh or network blip).
-// Callers should check Attachment.Scrollback() for replay bytes.
+// Attachment.InitialState is the atomic replay/live cut for both cases.
 func (m *PTYManager) AttachSession(key SessionKey, cols, rows uint16, launch *tabmeta.LaunchSpec) (att Attachment, reattached bool, err error) {
 	if cols == 0 {
 		cols = 80
@@ -274,14 +274,10 @@ func (m *PTYManager) AttachSession(key SessionKey, cols, rows uint16, launch *ta
 		}
 		m.mu.Unlock()
 
-		if existed {
-			_ = pty.Setsize(sess.pty, &pty.Winsize{Cols: cols, Rows: rows})
-		}
-
 		sess.cancelKillTimer()
 
 		connID := fmt.Sprintf("pty-%d", m.counter.Add(1))
-		if local := sess.attachNew(connID); local != nil {
+		if local := sess.attachNew(connID, cols, rows); local != nil {
 			return local, existed, nil
 		}
 		// Session was closed between lookup and attach. Retry.
@@ -326,7 +322,7 @@ func (m *PTYManager) EnsureSession(key SessionKey, cols, rows uint16, argv []str
 	}
 	m.mu.Unlock()
 
-	_ = pty.Setsize(sess.pty, &pty.Winsize{Cols: cols, Rows: rows})
+	_ = sess.resizeCanonical(cols, rows)
 	sess.cancelKillTimer()
 	return false, nil
 }
@@ -341,8 +337,7 @@ func (m *PTYManager) WriteToSession(key SessionKey, p []byte) error {
 	if sess == nil {
 		return ErrPTYSessionNotFound
 	}
-	_, err := sess.pty.Write(p)
-	return err
+	return sess.writeTrusted(p)
 }
 
 // spawnSession must be called with m.mu held.
@@ -370,8 +365,16 @@ func (m *PTYManager) spawnSession(key SessionKey, cols, rows uint16, launch *tab
 		return nil, fmt.Errorf("pty.StartWithSize: %w", err)
 	}
 
-	sess := newPtySession(key, ptmx, cmd)
-	go sess.drain(m)
+	sess, err := newPtySession(key, &fileTerminalPTY{file: ptmx}, cmd, cols, rows)
+	if err != nil {
+		_ = ptmx.Close()
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
+		return nil, err
+	}
+	sess.start(m)
 	return sess, nil
 }
 

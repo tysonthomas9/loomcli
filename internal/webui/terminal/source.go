@@ -1,7 +1,6 @@
 package terminal
 
 import (
-	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
@@ -19,7 +18,7 @@ type LaunchSpec = tabmeta.LaunchSpec
 // Kills sessions.
 type PTYSource interface {
 	// AttachSession opens or re-opens a session. reattached is true when an
-	// existing session was joined (scrollback replay expected).
+	// existing session was joined (initial state contains retained output).
 	AttachSession(key SessionKey, cols, rows uint16, launch *tabmeta.LaunchSpec) (att Attachment, reattached bool, err error)
 
 	// Detach releases the attachment identified by connID for the given
@@ -74,37 +73,76 @@ type PTYCommandRunner interface {
 	WriteToSession(key SessionKey, p []byte) error
 }
 
-// Attachment is the handle returned by PTYSource.AttachSession. The WS
-// handler reads output frames from Output() and writes user input via
-// WriteInput(). Callers release the attachment by invoking
-// PTYSource.Detach(key, ConnID()).
+// Generation identifies one PTY process. It remains stable across attaches.
+type Generation [16]byte
+
+type EventKind uint8
+
+const (
+	EventOutput EventKind = 1
+	EventResize EventKind = 2
+	EventNotice EventKind = 3
+	EventClose  EventKind = 4
+)
+
+// TerminalEvent is one owner-sequenced server-to-viewer event.
+type TerminalEvent struct {
+	Sequence uint64
+	Kind     EventKind
+	Data     []byte
+	Cols     uint16
+	Rows     uint16
+}
+
+// TerminalInitialState is the atomic state cut returned by AttachSession.
+// Output begins strictly after Sequence and is contiguous from Sequence+1.
+type TerminalInitialState struct {
+	Generation    Generation
+	Sequence      uint64
+	Cols          uint16
+	Rows          uint16
+	RetainedLines uint32
+	Encoding      string
+	Data          []byte
+}
+
+type CloseReason string
+
+const (
+	CloseExited       CloseReason = "exited"
+	CloseKilled       CloseReason = "killed"
+	CloseShutdown     CloseReason = "shutdown"
+	CloseSlowConsumer CloseReason = "slow_consumer"
+	CloseReplaced     CloseReason = "replaced"
+	CloseStateRebuild CloseReason = "state_rebuilding"
+)
+
+// Keep the service-facing names until the v1 handler slice switches close
+// policy to CloseReason directly.
+const (
+	ExitReasonExited   = string(CloseExited)
+	ExitReasonKilled   = string(CloseKilled)
+	ExitReasonShutdown = string(CloseShutdown)
+)
+
+// Attachment is the handle returned by PTYSource.AttachSession. InitialState
+// and subscriber registration are produced by the same owner operation: if
+// InitialState.Sequence is N, Output is a contiguous stream beginning at N+1.
+// Callers release it through PTYSource.Detach(key, ConnID()).
 type Attachment interface {
-	// ConnID is an opaque identifier unique to this attachment.
 	ConnID() string
-
-	// Output is the channel the handler reads live output from. Closed when
-	// the attachment ends (session killed or replaced by a newer WS).
-	Output() <-chan []byte
-
-	// WriteInput sends user keystrokes (or other raw bytes) toward the
-	// session's PTY / shell.
+	InitialState() TerminalInitialState
+	Output() <-chan TerminalEvent
 	WriteInput(p []byte) (int, error)
+	RequestResize(cols, rows uint16) error
+	Focus() error
+	CloseReason() CloseReason
+}
 
-	// Scrollback returns the reset escape + ring-buffer snapshot to emit
-	// before live output on a reattach. nil on the first attach to a fresh
-	// session.
-	Scrollback() []byte
-
-	// Resize satisfies realtime.Resizer so the WS handler can pass the
-	// Attachment directly to realtime.WSToPTY. Implementations may ignore connID.
-	Resize(connID string, cols, rows uint16) error
-
-	// ExitReason returns the reason the owning session closed. Values are
-	// drawn from the ExitReason* constants in pty_session.go
-	// (ExitReasonKilled, ExitReasonExited, ExitReasonShutdown). Returns
-	// the empty string when the session is still live or no reason was
-	// recorded. Only meaningful after Output() has been observed closed.
-	ExitReason() string
+// InterimInitialStateBytes keeps the pre-v1 handler compiling during Slice A.
+// Slice B replaces this raw replay with an encoded initial_state frame.
+func InterimInitialStateBytes(att Attachment) []byte {
+	return att.InitialState().Data
 }
 
 // Compile-time assertions.
@@ -114,5 +152,4 @@ var (
 	_ PTYCommandRunner = (*PTYManager)(nil)
 	_ PTYCommandRunner = (*MultiPTYManager)(nil)
 	_ Attachment       = (*localAttachment)(nil)
-	_ realtime.Resizer = (*localAttachment)(nil)
 )
