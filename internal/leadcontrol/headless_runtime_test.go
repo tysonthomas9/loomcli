@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // writeFakeHeadlessAgent installs a stand-in for `cursor-agent -p --resume`:
@@ -169,6 +171,61 @@ func TestRunHeadlessLeadRuntimeSeedFailureIsLaunchFailure(t *testing.T) {
 	}
 	if s := getLeadSession(t, st).Metadata[MetadataRuntimeStatus]; s != RuntimeStatusFailed {
 		t.Fatalf("status = %q, want failed", s)
+	}
+}
+
+func TestRunHeadlessLeadRuntimeMissingBinaryIsLaunchFailure(t *testing.T) {
+	st := memstore.New()
+	createHarnessLeadSession(t, st)
+	var out syncBuffer
+	err := RunHeadlessLeadRuntime(context.Background(), HeadlessLeadRuntimeConfig{
+		Store: st, Workspace: "WS", LeadName: "nova", SessionID: "lead-session",
+		WorkDir: t.TempDir(), Prompt: "seed", Backend: "cursor",
+		BinaryPath: filepath.Join(t.TempDir(), "no-such-agent"),
+		Stdout:     &out, Stderr: &out,
+	})
+	if err == nil || !strings.Contains(err.Error(), "start") {
+		t.Fatalf("err = %v, want a process start failure", err)
+	}
+	if lookupHeadlessRuntime("lead-session") != nil {
+		t.Fatal("runtime still registered after a failed launch")
+	}
+}
+
+// A message delivered from another process while the runtime is busy must
+// stay queued (never leased and handed back), so the runtime's own drain
+// always takes the oldest message next.
+func TestHeadlessCrossProcessDeliveryIsEnqueueOnly(t *testing.T) {
+	st := memstore.New()
+	createHarnessLeadSession(t, st)
+	ctx := context.Background()
+	if err := UpdateHarnessRuntimeMetadata(ctx, st, "WS", "lead-session", HarnessRuntimeMetadata{
+		Provider: "cursor", HarnessName: HarnessNameHeadless, ChatSessionID: "chat-1", Controlled: true, Status: RuntimeStatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, msg := range []string{"first", "second"} {
+		res, err := DeliverLeadMessage(ctx, st, "WS", "nova", msg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.State != DeliveryStatePending || res.Reason != harnessRegistryMissReason {
+			t.Fatalf("%s: result = %+v", msg, res)
+		}
+	}
+	// Both messages are still queued, in order, unclaimed.
+	msgs, err := st.AgentInboxMessages().List(ctx, "WS", store.AgentInboxMessageFilter{TargetAgentID: "nova"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var queued []string
+	for _, m := range msgs {
+		if m.Status == domain.AgentInboxMessageQueued && m.ClaimedBy == "" {
+			queued = append(queued, m.Body)
+		}
+	}
+	if len(queued) != 2 || queued[0] != "first" || queued[1] != "second" {
+		t.Fatalf("queued = %q, want [first second]", queued)
 	}
 }
 

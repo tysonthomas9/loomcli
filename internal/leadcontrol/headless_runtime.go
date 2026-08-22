@@ -157,12 +157,27 @@ func (h *headlessLeadRuntime) persist(ctx context.Context, status string) {
 	h.persistLocked(ctx, status)
 }
 
+// headlessPersistAttempts bounds the retry of a status write. Status is what
+// leadmsg --status and the drain gate read, so a transiently failed write of
+// idle/disconnected must not leave the session reported busy forever.
+const headlessPersistAttempts = 3
+
 func (h *headlessLeadRuntime) persistLocked(ctx context.Context, status string) {
 	h.runtime.Status = status
 	h.lastStatus = status
-	if err := UpdateHarnessRuntimeMetadata(ctx, h.cfg.Store, h.cfg.Workspace, h.cfg.SessionID, h.runtime); err != nil {
-		h.cfg.Logger.Debug("failed to persist headless runtime status", "status", status, "err", err)
+	var err error
+	for attempt := 1; attempt <= headlessPersistAttempts; attempt++ {
+		err = UpdateHarnessRuntimeMetadata(ctx, h.cfg.Store, h.cfg.Workspace, h.cfg.SessionID, h.runtime)
+		if err == nil {
+			return
+		}
+		if ctx.Err() != nil {
+			break
+		}
+		time.Sleep(time.Duration(attempt) * 200 * time.Millisecond)
 	}
+	h.cfg.Logger.Warn("failed to persist headless runtime status", "status", status, "err", err)
+	_, _ = fmt.Fprintf(h.cfg.Stdout, "[warning: lead status %q not persisted: %v]\n", status, err)
 }
 
 func (h *headlessLeadRuntime) status() string {
@@ -171,17 +186,24 @@ func (h *headlessLeadRuntime) status() string {
 	return h.lastStatus
 }
 
-// startTurn launches one turn process for message and returns immediately.
-// ErrHeadlessTurnInFlight when a turn is already running.
+// startTurn starts one turn process for message and returns once the process
+// is running (so an exec failure is reported to the caller and the inbox
+// message is retried rather than marked delivered); the turn then completes
+// in the background. ErrHeadlessTurnInFlight when a turn is already running.
 func (h *headlessLeadRuntime) startTurn(message string) error {
 	h.mu.Lock()
 	if h.busy {
 		h.mu.Unlock()
 		return ErrHeadlessTurnInFlight
 	}
+	turn := h.turns + 1
+	cmd, stdout, err := h.spawnTurn(h.turnCtx, turn, message)
+	if err != nil {
+		h.mu.Unlock()
+		return err
+	}
 	h.busy = true
-	h.turns++
-	turn := h.turns
+	h.turns = turn
 	h.done = make(chan struct{})
 	done := h.done
 	h.persistLocked(h.turnCtx, RuntimeStatusActive)
@@ -189,7 +211,7 @@ func (h *headlessLeadRuntime) startTurn(message string) error {
 
 	go func() {
 		defer close(done)
-		err := h.runTurn(h.turnCtx, turn, message)
+		err := h.finishTurn(cmd, stdout, turn)
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		h.busy = false
@@ -226,21 +248,30 @@ func (h *headlessLeadRuntime) turnArgs(message string) []string {
 	return args
 }
 
-// runTurn executes one turn process to completion, echoing assistant text to
-// Stdout and the result summary (usage, duration) to the logger.
-func (h *headlessLeadRuntime) runTurn(ctx context.Context, turn int, message string) error {
+// spawnTurn builds and starts one turn process. The child is killed when ctx
+// is cancelled and, on Linux, when this process dies (parent-death signal) so
+// a lead reaped by SIGKILL cannot leave a billing cursor-agent behind.
+func (h *headlessLeadRuntime) spawnTurn(ctx context.Context, turn int, message string) (*exec.Cmd, io.ReadCloser, error) {
 	cmd := exec.CommandContext(ctx, h.cfg.BinaryPath, h.turnArgs(message)...)
 	cmd.Dir = h.cfg.WorkDir
 	cmd.Env = h.cfg.Env
 	cmd.Stderr = h.cfg.Stderr
+	cmd.WaitDelay = 5 * time.Second
+	setParentDeathSignal(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	_, _ = fmt.Fprintf(h.cfg.Stdout, "\n=== lead turn %d (%s) ===\n", turn, time.Now().UTC().Format(time.RFC3339))
 	if err := cmd.Start(); err != nil {
-		return err
+		return nil, nil, fmt.Errorf("turn %d: start %s: %w", turn, h.cfg.BinaryPath, err)
 	}
+	return cmd, stdout, nil
+}
+
+// finishTurn consumes the turn's stream to completion, echoing assistant text
+// to Stdout and the result summary (usage, duration) to the logger.
+func (h *headlessLeadRuntime) finishTurn(cmd *exec.Cmd, stdout io.Reader, turn int) error {
 	summary := h.consumeTurnStream(stdout, turn)
 	waitErr := cmd.Wait()
 	if summary.isError {
@@ -361,10 +392,36 @@ func lookupHeadlessRuntime(sessionID string) *headlessLeadRuntime {
 // drain goroutine performs the delivery.
 type headlessTurnDeliverer struct {
 	harnessTurnDeliverer
+	sessionID string
 }
 
 func newHeadlessTurnDeliverer(provider string, session *domain.AgentSession) *headlessTurnDeliverer {
-	return &headlessTurnDeliverer{harnessTurnDeliverer: *newHarnessTurnDeliverer(provider, session)}
+	d := &headlessTurnDeliverer{harnessTurnDeliverer: *newHarnessTurnDeliverer(provider, session)}
+	if session != nil {
+		d.sessionID = session.SessionID
+	}
+	return d
+}
+
+func (d *headlessTurnDeliverer) populate(result *DeliveryResult, session *domain.AgentSession) {
+	d.harnessTurnDeliverer.populate(result, session)
+	if session != nil {
+		d.sessionID = session.SessionID
+	}
+}
+
+// pendingReason keeps every process other than the runtime itself
+// enqueue-only: it is consulted before ClaimNext, so a cross-process leadmsg
+// never leases the oldest message only to hand it back — which would let the
+// runtime's drain start a newer message first (order inversion).
+func (d *headlessTurnDeliverer) pendingReason() string {
+	if reason := d.harnessTurnDeliverer.pendingReason(); reason != "" {
+		return reason
+	}
+	if lookupHeadlessRuntime(d.sessionID) == nil {
+		return harnessRegistryMissReason
+	}
+	return ""
 }
 
 func (d *headlessTurnDeliverer) deliverTurn(

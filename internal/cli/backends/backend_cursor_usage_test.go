@@ -13,6 +13,9 @@ func TestCollectCursorStreamUsageAcceptsCamelCaseResult(t *testing.T) {
 	c := usage.NewCollector("cursor", "nova")
 	collectCursorStreamUsage(`{"type":"system","subtype":"init","model":"Composer 2.5","session_id":"s"}`, c)
 	collectCursorStreamUsage(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hi"}]}}`, c)
+	// A non-result event carrying usage must not be counted (it would double
+	// the turn).
+	collectCursorStreamUsage(`{"type":"assistant","usage":{"inputTokens":999,"outputTokens":999}}`, c)
 	collectCursorStreamUsage(`{"type":"result","subtype":"success","is_error":false,"result":"hi","usage":{"inputTokens":134,"outputTokens":20,"cacheReadTokens":19328,"cacheWriteTokens":7}}`, c)
 	in, out, cr, cw := c.Totals()
 	if in != 134 || out != 20 || cr != 19328 || cw != 7 {

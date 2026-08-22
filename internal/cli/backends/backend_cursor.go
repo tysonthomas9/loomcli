@@ -212,7 +212,9 @@ func collectCursorStreamUsage(line string, collector *usage.Collector) {
 	if err := json.Unmarshal([]byte(line), &event); err != nil {
 		return
 	}
-	if event.Usage == nil {
+	// Only the final result event carries the turn's usage; ignore any other
+	// event that happens to embed a usage object so a turn is counted once.
+	if event.Usage == nil || event.Type != "result" {
 		return
 	}
 	u := event.Usage
