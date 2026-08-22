@@ -42,13 +42,25 @@ function isIdleImplementationAgent(agent: LoomAgentStatus): boolean {
   );
 }
 
+/**
+ * The agents that can claim a task, mirroring the supervisor's claim rule:
+ * an agent bound to a repo only sees tasks of that repo; an agent with no
+ * repo binding sees everything — including repo-less work such as research.
+ */
+export function agentsServing(
+  agents: readonly LoomAgentStatus[],
+  sourceRepo: string | undefined,
+): LoomAgentStatus[] {
+  return sourceRepo
+    ? agents.filter((agent) => agent.repo === sourceRepo)
+    : agents.filter((agent) => !agent.repo);
+}
+
 export function pickDefaultAgentName(
   agents: readonly LoomAgentStatus[],
   sourceRepo: string | undefined,
 ): string | undefined {
-  const servingAgents = sourceRepo
-    ? agents.filter((agent) => agent.repo === sourceRepo)
-    : [];
+  const servingAgents = agentsServing(agents, sourceRepo);
   return (
     servingAgents.find(isIdleImplementationAgent)?.name ??
     servingAgents[0]?.name
@@ -135,10 +147,16 @@ export function OperatorQueueCard({
   const sourceRepo = issue.source_repo?.trim() || undefined;
   const repoLabel = repoNameForSource(repos, sourceRepo);
   const routingAgents = useMemo(
-    () =>
-      sourceRepo ? agents.filter((agent) => agent.repo === sourceRepo) : [],
+    () => agentsServing(agents, sourceRepo),
     [agents, sourceRepo],
   );
+  // How the no-agent case reads: a repo's tasks need an agent bound to that
+  // repo; repo-less tasks (research, ops) need an agent with no repo binding.
+  const noAgentReason = sourceRepo
+    ? `no agent serves ${repoLabel}`
+    : "no repo-free agent is available";
+  const noAgentReasonSentence =
+    noAgentReason.charAt(0).toUpperCase() + noAgentReason.slice(1);
   const defaultAgentName = useMemo(
     () => pickDefaultAgentName(agents, sourceRepo),
     [agents, sourceRepo],
@@ -197,7 +215,7 @@ export function OperatorQueueCard({
           title={
             sourceRepo
               ? undefined
-              : "this task has no source_repo; no agent will claim it"
+              : "Not tied to a repo. Claimable by agents without a repo binding."
           }
         >
           {repoLabel}
@@ -243,7 +261,7 @@ export function OperatorQueueCard({
               <>
                 .{" "}
                 <span data-testid="queue-no-agent-for-repo">
-                  No agent serves {repoLabel}, so this is not routed.
+                  {noAgentReasonSentence}, so this is not routed.
                 </span>
               </>
             )}
@@ -289,7 +307,7 @@ export function OperatorQueueCard({
                   title={
                     selectedAgentName
                       ? undefined
-                      : `No agent serves ${repoLabel}; the task returns to the backlog unrouted`
+                      : `${noAgentReasonSentence}; the task returns to the backlog unrouted`
                   }
                   onClick={() =>
                     void runAction(() => onApprove(issue, selectedAgentName))
@@ -297,7 +315,7 @@ export function OperatorQueueCard({
                 >
                   {selectedAgentName
                     ? `Approve → ${selectedAgentName}`
-                    : `Approve without routing — no agent serves ${repoLabel}`}
+                    : `Approve without routing — ${noAgentReason}`}
                 </button>
                 {routingAgents.length > 0 && (
                   <label className={styles.pickerControl}>

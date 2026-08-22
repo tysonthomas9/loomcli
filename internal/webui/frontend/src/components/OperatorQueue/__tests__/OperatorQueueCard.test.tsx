@@ -98,6 +98,16 @@ describe("pickDefaultAgentName", () => {
     expect(pickDefaultAgentName([], "source-repo")).toBeUndefined();
     expect(pickDefaultAgentName(agents, "web")).toBeUndefined();
   });
+
+  it("routes a repo-less task only to agents with no repo binding", () => {
+    const agents = [
+      agent({ name: "bound-coder", role: "coder", status: "idle" }),
+      agent({ name: "researcher", role: "task", status: "idle", repo: "" }),
+    ];
+
+    expect(pickDefaultAgentName(agents, undefined)).toBe("researcher");
+    expect(pickDefaultAgentName([agents[0]], undefined)).toBeUndefined();
+  });
 });
 
 describe("OperatorQueueCard", () => {
@@ -256,7 +266,34 @@ describe("OperatorQueueCard", () => {
     );
   });
 
-  it("marks tasks without a source repo as unclaimable", () => {
+  it("treats a repo-less task as legitimate: chip is neutral, picker offers repo-free agents", () => {
+    const callbacks = handlers();
+    render(
+      <OperatorQueueCard
+        item={item("design-gate", { source_repo: undefined })}
+        agents={[
+          agent({ name: "source-agent", role: "dev" }),
+          agent({ name: "researcher", role: "task", repo: "" }),
+        ]}
+        {...callbacks}
+      />,
+    );
+
+    expect(screen.getByTestId("queue-repo")).toHaveTextContent("no repo");
+    expect(screen.getByTestId("queue-repo")).toHaveAttribute(
+      "title",
+      "Not tied to a repo. Claimable by agents without a repo binding.",
+    );
+    expect(screen.getByTestId("queue-approve")).toHaveTextContent(
+      "Approve → researcher",
+    );
+    const options = screen
+      .getAllByRole("option")
+      .map((option) => option.textContent);
+    expect(options).toEqual(["researcher"]);
+  });
+
+  it("says why a repo-less task cannot be routed when every agent is repo-bound", () => {
     const callbacks = handlers();
     render(
       <OperatorQueueCard
@@ -266,10 +303,11 @@ describe("OperatorQueueCard", () => {
       />,
     );
 
-    expect(screen.getByTestId("queue-repo")).toHaveTextContent("no repo");
-    expect(screen.getByTestId("queue-repo")).toHaveAttribute(
-      "title",
-      "this task has no source_repo; no agent will claim it",
+    expect(screen.getByTestId("queue-approve")).toHaveTextContent(
+      "Approve without routing — no repo-free agent is available",
+    );
+    expect(screen.getByTestId("queue-no-agent-for-repo")).toHaveTextContent(
+      "No repo-free agent is available, so this is not routed.",
     );
   });
 
