@@ -55,6 +55,11 @@ loom_capture() {
 }
 
 REAL="${LOOM_MARATHON_CURSOR_REAL:-/installed-agent/cursor-home/.local/bin/cursor-agent}"
+# Only the record file lives in the usage dir: that is a host bind mount in
+# the marathon container, where mkfifo is refused (trial team-cursor-112144:
+# every turn exited 97 with the header written). FIFO, marker and the stashed
+# prompt go to container-local scratch.
+scratch="${LOOM_MARATHON_CURSOR_SHIM_TMP:-${TMPDIR:-/tmp}/cursor-agent-shim}"
 print=0
 fmt=0
 for a in "$@"; do
@@ -63,23 +68,49 @@ for a in "$@"; do
     --output-format|--output-format=*) fmt=1 ;;
   esac
 done
-args=()
-if [ "$print" = 1 ]; then
-  [ -n "${LOOM_MARATHON_CURSOR_MODEL:-}" ] && args+=(--model "$LOOM_MARATHON_CURSOR_MODEL")
-  [ "$fmt" = 1 ] || args+=(--output-format stream-json)
-fi
-args+=("$@")
 
 if [ "$print" != 1 ]; then
-  exec "$REAL" ${args[@]+"${args[@]}"}
+  exec "$REAL" "$@"
 fi
 
-# Only the record file lives in the usage dir: that is a host bind mount in
-# the marathon container, where mkfifo is refused (trial team-cursor-112144:
-# every turn exited 97 with the header written). FIFO and marker go to
-# container-local scratch.
+# Prompt off the command line. loom passes the turn prompt as the last
+# positional argument, so it sat in this shell's argv and in the agent's — and
+# an agent running `pkill -f <word from its own prompt>` killed itself (trial
+# team-cursor-113455: backend-dev-1 died mid-turn, loom fast-failed the
+# worker). Stage 1 stashes the prompt in a 0600 scratch file and re-execs
+# this script with a clean argv; stage 2 feeds it to the agent on stdin, which
+# print mode reads when no positional prompt is given.
+if [ "${1:-}" != "--loom-shim-stage2" ]; then
+  prompt_file=""
+  if [ "$#" -gt 0 ]; then
+    last="${*: -1}"
+    case "$last" in
+      -*) ;;
+      *)
+        if ! { mkdir -p "$scratch" && chmod 700 "$scratch"; } 2>/dev/null; then
+          echo "cursor-agent shim: scratch dir unusable: $scratch" >&2
+          exit 97
+        fi
+        prompt_file="$scratch/.prompt-$$-$(date -u +%s)"
+        if ! { umask 077; printf '%s' "$last" > "$prompt_file"; } 2>/dev/null; then
+          echo "cursor-agent shim: cannot stash prompt in $scratch" >&2
+          exit 97
+        fi
+        set -- "${@:1:$(($# - 1))}" ;;
+    esac
+  fi
+  LOOM_SHIM_PROMPT_FILE="$prompt_file" exec "$0" --loom-shim-stage2 "$@"
+fi
+shift
+prompt_file="${LOOM_SHIM_PROMPT_FILE:-}"
+unset LOOM_SHIM_PROMPT_FILE
+
+args=()
+[ -n "${LOOM_MARATHON_CURSOR_MODEL:-}" ] && args+=(--model "$LOOM_MARATHON_CURSOR_MODEL")
+[ "$fmt" = 1 ] || args+=(--output-format stream-json)
+args+=("$@")
+
 dir="${LOOM_MARATHON_CURSOR_USAGE_DIR:-/logs/agent/cursor-usage}"
-scratch="${LOOM_MARATHON_CURSOR_SHIM_TMP:-${TMPDIR:-/tmp}/cursor-agent-shim}"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 f="$dir/$stamp.jsonl"
 fifo="$scratch/.$stamp.fifo"
@@ -118,7 +149,11 @@ trap 'record_failed=1' USR1
 
 loom_capture "$f" "$mark" "$$" < "$fifo" &
 reader=$!
-"$REAL" ${args[@]+"${args[@]}"} > "$fifo" &
+if [ -n "$prompt_file" ]; then
+  "$REAL" ${args[@]+"${args[@]}"} < "$prompt_file" > "$fifo" &
+else
+  "$REAL" ${args[@]+"${args[@]}"} > "$fifo" &
+fi
 child=$!
 [ -n "$aborted" ] && on_signal
 wait "$child"; rc=$?
@@ -144,7 +179,7 @@ done
 # record is a single-line write, so nothing half-written can be left behind.
 kill -KILL "$reader" 2>/dev/null
 wait "$reader" 2>/dev/null; rrc=$?
-rm -f "$fifo" "$mark"
+rm -f "$fifo" "$mark" ${prompt_file:+"$prompt_file"}
 
 # Accounting verdict, independent of how the agent exited: a turn whose
 # record could not be written is reported as unaccounted even when the agent
