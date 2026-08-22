@@ -20,7 +20,7 @@ Line references are pinned to that commit and will drift after edits.
 | D6 | Canonical geometry and all browser-originated PTY traffic belong to the **most-recently-focused viewer** (the controller); on its disconnect, control passes to the most recently attached remaining viewer, whose stored dimensions are applied immediately. Non-controllers are read-only and render at canonical size. | Agreed |
 | D7 | Slow viewers are **disconnected** with close code 4003 when their byte-accounted live queue exceeds 256 KiB; the browser reconnects and gets a fresh snapshot. Silent frame loss is removed. | Agreed |
 | D8 | The WebSocket protocol becomes a **versioned, directional binary envelope** negotiated as subprotocol `loom-terminal.v1`; a hard cut on the direct-PTY endpoint. | Agreed |
-| D9 | Target restoration of up to **10,000** logical history lines, matching the browser's configured maximum, without claiming equal line counts alone make restoration invisible. Retention must satisfy the resident-memory, 8 MiB encoded-state, differential-history, and restore-latency gates. If 10,000 fails, test **2,000** as the declared UX floor and surface the effective retention in the UI. If 2,000 fails any gate, D2 fails rather than shrinking further. | Agreed after §8.2 |
+| D9 | Server-side retention is defined by a **per-session memory budget**, not a line count: libghostty's `GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES` is set from the budget, and the browser's independent 10,000-line cap (`TERMINAL_SCROLLBACK_LINES`) is **removed** so the server is the single source of truth for what a reconnect restores. Budget: ≤ 8 MiB incremental RSS per session at 160×50 and ≤ 16 MiB at 500×200, inclusive of checkpoint and journal; encoded initial state ≤ 8 MiB; restore latency gated separately. Effective retained lines are reported as diagnostics, never promised. | **Ratified by owner 2026-08-22** |
 | D10 | **Archives are cut from v1.** There is no production archive writer today. A v2 sketch is kept in §10. | Agreed |
 | D11 | **Server-restart survival is out of scope** for v1. PTYs die with `loom serve` today. tmux is the documented path if it becomes a hard requirement. | Agreed |
 | D12 | The auto-mode agent viewer (`agent_tmux.go`) keeps its separate raw protocol and is **untouched** in v1. | Agreed |
@@ -164,6 +164,7 @@ type TerminalInitialState struct {
     Generation Generation
     Sequence   uint64 // last applied event sequence N
     Cols, Rows uint16 // canonical geometry at N
+    RetainedLines uint32 // history lines in Data at this geometry; sizes browser scrollback (D9)
     Encoding   string // "xterm-vt/1"
     Data       []byte // VT bytes incl. parser continuation; may be empty
 }
@@ -302,7 +303,10 @@ gaining a complete serializer (pure Go first).
 ### 5.1 libghostty-vt facts relied upon (verified 2026-08-22, `main`)
 
 - `terminal.h`: `ghostty_terminal_new/free`, `ghostty_terminal_vt_write`,
-  `ghostty_terminal_resize`, `ghostty_terminal_reset`, `ghostty_terminal_get/set`.
+  `ghostty_terminal_resize`, `ghostty_terminal_reset`, `ghostty_terminal_get/set`;
+  `GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES` ("maximum scrollback allocation
+  in bytes … pruned at page granularity, a page is about 400KB") alongside a
+  physical-line limit; caller-driven scrollback compression for idle sessions.
 - **Safe cuts and continuation** (`terminal.h`): `ghostty_terminal_vt_write_until_ground`
   writes "only the shortest prefix needed to reach ground … the stateless point
   of the stream" and reports bytes consumed. `GHOSTTY_TERMINAL_OPT_CONTINUATION_MAX_BYTES`
@@ -375,8 +379,16 @@ input/resize/focus ► owner: order, apply resize to emulator, write fd (control
   and emit the remaining bytes as a later event. Bound this wait and fail the
   attach retryably on expiry. Phase 0 fails D2 if either active-buffer case
   does not converge after the suffix.
-- **Scrollback:** the emulator retains the D9 target. Phase 0 reports memory
-  at 160×50 and 500×200 (`terminal_relay.go:47-50` bounds).
+- **Scrollback:** retention is a byte budget (D9). The owner sets
+  `GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES` to the session's scrollback share
+  of the budget; libghostty prunes at page granularity (~400 KB), and the
+  budget accounting includes that slack, the checkpoint, and the journal.
+  libghostty's caller-driven scrollback compression is invoked by the owner
+  when the session is idle. `initial_state` carries the server's retained
+  line count at current geometry so the browser sizes its xterm `scrollback`
+  to fit the restore; the browser holds no history the server cannot
+  restore. Phase 0 reports memory at 160×50 and 500×200
+  (`terminal_relay.go:47-50` bounds).
 - **Recovery:** keep one last-good GHOSTSNP checkpoint, its WASM checksum, and
   a bounded Go-owned journal of `Output` and `Resize` events after its
   sequence. Checkpoint at least every 1 MiB of replayable output and never
@@ -418,11 +430,13 @@ Throwaway vertical slice, no production changes. **All eight must pass:**
 5. Prove overflow→4003→resnapshot and trap→checkpoint/journal rebuild
    convergence, including old xterm writes queued when a new generation
    arrives.
-6. Measure peak and post-GC incremental RSS with fully populated 10,000- and
-   2,000-line histories at 160×50 and 500×200, for 1 and 40 sessions,
-   including checkpoint, journal, formatter output, and rebuild transients;
-   enforce the 8 MiB initial-state cap and report encoded size. Budget: ≤ 8 MiB
-   per session at 160×50, ≤ 16 MiB at 500×200.
+6. Measure peak and post-GC incremental RSS with scrollback saturated to the
+   configured byte budget at 160×50 and 500×200, for 1 and 40 sessions,
+   including page-granularity slack, checkpoint, journal, formatter output,
+   and rebuild transients; enforce the 8 MiB initial-state cap and report
+   encoded size and effective retained lines at 80/160/500 columns as
+   documentation, not as pass criteria. Budget: ≤ 8 MiB per session at
+   160×50, ≤ 16 MiB at 500×200.
 7. ≥ 20 MiB/s single-session parsing in 4 KiB chunks; p99 ≤ 2 ms for hot
    owner events; with 40 sessions instantiated and 8 simultaneously parsing,
    aggregate throughput ≥ 80 MiB/s and each active session p99 ≤ 10 ms;
@@ -452,8 +466,9 @@ then cgo per D3. Fidelity failure → Node worker per D3. Never → extend
 - Synthetic banners become `Output` through the owner.
 - Tests: contract test for the invariant; delete the drop-frames test
   (`pty_manager_test.go:417-451`).
-- UX note: reset discards client-only scrollback beyond what the server holds
-  until Phase 2 raises server retention to the D9 target.
+- UX note: during Phase 1 the server still holds only the 256 KiB ring, so a
+  reset-and-restore shows less history than the browser accumulated live.
+  This is transitional; Phase 2 makes the server budget the only retention.
 
 ### Phase 2 — libghostty state owner
 
@@ -466,6 +481,8 @@ then cgo per D3. Fidelity failure → Node worker per D3. Never → extend
   instrumented real-session soak reports no mismatches, traps, budget
   violations, or unavailable snapshots.
 - Remove `ringBuffer` mode parsing after the flip.
+- Remove `TERMINAL_SCROLLBACK_LINES` (`XTermRenderer.tsx:22`); size xterm
+  `scrollback` from the `initial_state` retained-line hint plus live headroom.
 
 ### v2 (not in scope) — archives (§10), freeze/suspend (§4).
 
@@ -482,10 +499,11 @@ then cgo per D3. Fidelity failure → Node worker per D3. Never → extend
    release invariant and trap containment change.
 2. **Server-side scrollback size (D9).** Codex set memory budgets without a
    line count; Claude tied the count to the browser's 10,000 lines so that
-   reset-and-restore is not a visible regression. **Resolved:** 10,000 as the
-   target, 2,000 as the declared UX floor, D2 fails below that; and no claim
-   that equal line counts alone make restoration invisible — encoded size,
-   wrapping semantics, and restore latency are gated separately.
+   reset-and-restore is not a visible regression. **Resolved by the owner:**
+   retention is a memory budget only, the browser's independent line cap is
+   removed, and effective line counts are diagnostics. This also removes the
+   only case in which the browser could hold history the server cannot
+   restore.
 3. **Parser continuation.** Codex: formatter output cannot carry unfinished
    parser input, so a cut mid-sequence could pass the immediate comparison
    and diverge when the suffix arrives. **Resolved by evidence:** libghostty
@@ -551,9 +569,9 @@ conversation continuation.
 Reviewer consensus is complete. Before implementation, the owner must ratify
 the product/release choices in D3 (cgo fallback on attributed resource
 failure), D6 (non-controller viewers read-only until focused — a visible change
-from today's any-viewer-can-type behaviour), D9 (10,000-line target, 2,000
-floor), and D11 (no server-restart survival in v1). This is authorization,
-not unresolved technical disagreement.
+from today's any-viewer-can-type behaviour), and D11 (no server-restart
+survival in v1). D9 was ratified on 2026-08-22 (memory budget, browser line
+cap removed). This is authorization, not unresolved technical disagreement.
 
 ## Primary references
 
