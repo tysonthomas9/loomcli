@@ -2,6 +2,7 @@ package terminal
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -241,8 +242,8 @@ func TestControllerFocusGeometryAndWriterFIFO(t *testing.T) {
 	if err := second.RequestResize(110, 40); err != nil {
 		t.Fatalf("non-controller resize request: %v", err)
 	}
-	if n, err := second.WriteInput([]byte("dropped")); err != nil || n != 0 {
-		t.Fatalf("non-controller WriteInput = (%d, %v), want (0, nil)", n, err)
+	if n, err := second.WriteInput([]byte("dropped")); !errors.Is(err, ErrNotController) || n != 0 {
+		t.Fatalf("non-controller WriteInput = (%d, %v), want (0, ErrNotController)", n, err)
 	}
 	assertNoPTYOperation(t, device)
 
@@ -255,8 +256,8 @@ func TestControllerFocusGeometryAndWriterFIFO(t *testing.T) {
 	assertPTYOperation(t, device, fakePTYOperation{kind: "input", data: []byte("first-input")})
 	assertPTYOperation(t, device, fakePTYOperation{kind: "resize", cols: 110, rows: 40})
 
-	if n, err := first.WriteInput([]byte("also-dropped")); err != nil || n != 0 {
-		t.Fatalf("old controller WriteInput = (%d, %v), want (0, nil)", n, err)
+	if n, err := first.WriteInput([]byte("also-dropped")); !errors.Is(err, ErrNotController) || n != 0 {
+		t.Fatalf("old controller WriteInput = (%d, %v), want (0, ErrNotController)", n, err)
 	}
 	if n, err := second.WriteInput([]byte("second-input")); err != nil || n != len("second-input") {
 		t.Fatalf("focused controller WriteInput = (%d, %v)", n, err)
@@ -302,8 +303,8 @@ func TestWriterFIFOOverflowDropsInputAndEmitsNotice(t *testing.T) {
 	if n, writeErr := att.WriteInput(fill); writeErr != nil || n != len(fill) {
 		t.Fatalf("fill WriteInput = (%d, %v), want (%d, nil)", n, writeErr, len(fill))
 	}
-	if n, writeErr := att.WriteInput([]byte("overflow")); writeErr != nil || n != 0 {
-		t.Fatalf("overflow WriteInput = (%d, %v), want (0, nil)", n, writeErr)
+	if n, writeErr := att.WriteInput([]byte("overflow")); !errors.Is(writeErr, ErrInputDropped) || n != 0 {
+		t.Fatalf("overflow WriteInput = (%d, %v), want (0, ErrInputDropped)", n, writeErr)
 	}
 
 	firstEvent := <-att.Output()

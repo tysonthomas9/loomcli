@@ -17,6 +17,7 @@ type subscriber struct {
 	queue       []TerminalEvent
 	queuedBytes int
 	closed      bool
+	closing     bool
 	closeReason CloseReason
 }
 
@@ -65,6 +66,17 @@ func (s *subscriber) closeImmediate(reason CloseReason) {
 	s.signal()
 }
 
+func (s *subscriber) closeAfterQueue(reason CloseReason) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || s.closing {
+		return
+	}
+	s.closing = true
+	s.closeReason = reason
+	s.signal()
+}
+
 func (s *subscriber) reason() CloseReason {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -106,7 +118,7 @@ func (s *subscriber) pump() {
 func (s *subscriber) head() (TerminalEvent, bool, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed {
+	if s.closed || (s.closing && len(s.queue) == 0) {
 		return TerminalEvent{}, false, true
 	}
 	if len(s.queue) == 0 {

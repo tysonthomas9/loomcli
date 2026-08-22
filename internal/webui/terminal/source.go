@@ -73,6 +73,12 @@ type PTYCommandRunner interface {
 	WriteToSession(key SessionKey, p []byte) error
 }
 
+// OutputInjector appends display-only backend text to the owner-sequenced
+// terminal stream and ring without writing it to the child process.
+type OutputInjector interface {
+	InjectOutput(key SessionKey, p []byte) error
+}
+
 // Generation identifies one PTY process. It remains stable across attaches.
 type Generation [16]byte
 
@@ -151,5 +157,7 @@ var (
 	_ PTYSource        = (*MultiPTYManager)(nil)
 	_ PTYCommandRunner = (*PTYManager)(nil)
 	_ PTYCommandRunner = (*MultiPTYManager)(nil)
+	_ OutputInjector   = (*PTYManager)(nil)
+	_ OutputInjector   = (*MultiPTYManager)(nil)
 	_ Attachment       = (*localAttachment)(nil)
 )

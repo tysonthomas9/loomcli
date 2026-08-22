@@ -29,7 +29,7 @@ type detachCommand struct {
 type inputCommand struct {
 	connID string
 	data   []byte
-	reply  chan bool
+	reply  chan error
 }
 
 type trustedInputCommand struct {
@@ -100,7 +100,7 @@ func (s *ptySession) runOwner() {
 		case inputCommand:
 			command.reply <- s.handleInput(command.connID, command.data)
 		case trustedInputCommand:
-			command.reply <- s.enqueueInput(command.data)
+			command.reply <- s.enqueueInput(command.data, "")
 		case resizeRequestCommand:
 			command.reply <- s.handleResizeRequest(command)
 		case canonicalResizeCommand:
@@ -169,20 +169,24 @@ func interimInitialStateData(scrollback *ringBuffer) []byte {
 	return data
 }
 
-func (s *ptySession) handleInput(connID string, data []byte) bool {
+func (s *ptySession) handleInput(connID string, data []byte) error {
 	if s.subs[connID] == nil || s.controller != connID {
-		return false
+		return ErrNotController
 	}
-	return s.enqueueInput(data) == nil
+	return s.enqueueInput(data, connID)
 }
 
-func (s *ptySession) enqueueInput(data []byte) error {
+func (s *ptySession) enqueueInput(data []byte, noticeConnID string) error {
 	if s.writer.enqueueInput(data) {
 		return nil
 	}
 	notice, _ := json.Marshal(map[string]string{"code": "input_dropped"})
-	s.emitEvent(TerminalEvent{Kind: EventNotice, Data: notice})
-	return errors.New("terminal writer queue full")
+	s.seq++
+	event := TerminalEvent{Sequence: s.seq, Kind: EventNotice, Data: notice}
+	if sub := s.subs[noticeConnID]; sub != nil && !sub.enqueue(event) {
+		s.removeSubscriber(noticeConnID, CloseSlowConsumer)
+	}
+	return ErrInputDropped
 }
 
 func (s *ptySession) handleResizeRequest(command resizeRequestCommand) error {
@@ -277,12 +281,11 @@ func (s *ptySession) handoffController() {
 }
 
 func (s *ptySession) handleClose(reason CloseReason) error {
-	// Close consumes a server-event sequence. A subscriber may be blocked, so
-	// teardown closes it immediately; Slice B uses the authoritative WebSocket
-	// close code when the informational EventClose cannot be delivered.
-	s.seq++
+	// Emit the final event before closing subscribers so clients do not observe
+	// a phantom sequence gap.
+	s.emitEvent(TerminalEvent{Kind: EventClose, Data: []byte(reason)})
 	for _, sub := range s.subs {
-		sub.closeImmediate(reason)
+		sub.closeAfterQueue(reason)
 	}
 	s.subs = nil
 	s.controller = ""
@@ -295,6 +298,9 @@ func (s *ptySession) handleClose(reason CloseReason) error {
 		if err := s.pty.Close(); err != nil && !errors.Is(err, io.ErrClosedPipe) {
 			closeErr = err
 		}
+	}
+	if s.writerDone != nil {
+		<-s.writerDone
 	}
 	if s.cmd != nil && s.cmd.Process != nil {
 		_ = s.cmd.Process.Kill()

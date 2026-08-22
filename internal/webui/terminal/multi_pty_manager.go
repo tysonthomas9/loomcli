@@ -349,6 +349,14 @@ func (mm *MultiPTYManager) WriteToSession(key SessionKey, p []byte) error {
 	return m.WriteToSession(key, p)
 }
 
+func (mm *MultiPTYManager) InjectOutput(key SessionKey, p []byte) error {
+	m := mm.existingManagerForWS(key.Workspace)
+	if m == nil {
+		return fmt.Errorf("%w: %q", ErrWorkspaceNotRegistered, key.Workspace)
+	}
+	return m.InjectOutput(key, p)
+}
+
 // Detach releases the attachment. No-op for unknown workspaces or
 // workspaces whose per-workspace manager has not been created yet.
 func (mm *MultiPTYManager) Detach(key SessionKey, connID string) {

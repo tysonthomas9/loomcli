@@ -44,6 +44,8 @@ var ErrPTYMaxSessionsReached = errors.New("maximum terminal sessions reached")
 // ErrPTYSessionNotFound is returned when backend-owned input targets a
 // session that is not live in this manager.
 var ErrPTYSessionNotFound = errors.New("terminal session not found")
+var ErrInputDropped = errors.New("terminal input dropped")
+var ErrNotController = errors.New("terminal attachment is not the controller")
 
 const (
 	defaultPTYMaxSessions = 40
@@ -338,6 +340,19 @@ func (m *PTYManager) WriteToSession(key SessionKey, p []byte) error {
 		return ErrPTYSessionNotFound
 	}
 	return sess.writeTrusted(p)
+}
+
+func (m *PTYManager) InjectOutput(key SessionKey, p []byte) error {
+	m.mu.Lock()
+	sess := m.sessions[key]
+	m.mu.Unlock()
+	if sess == nil {
+		return ErrPTYSessionNotFound
+	}
+	if !sess.sendCommand(injectOutputCommand{data: append([]byte(nil), p...)}) {
+		return errAttachmentClosed
+	}
+	return nil
 }
 
 // spawnSession must be called with m.mu held.

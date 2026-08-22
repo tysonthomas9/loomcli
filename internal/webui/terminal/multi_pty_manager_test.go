@@ -134,22 +134,19 @@ func TestRegister_ReplacesExisting(t *testing.T) {
 	}
 	// The prior attachment's output channel should close because the old
 	// PTYManager was shut down.
-	select {
-	case _, ok := <-att.Output():
-		if ok {
-			// Drain any residual frames, then expect close.
-			select {
-			case _, ok2 := <-att.Output():
-				if ok2 {
-					t.Errorf("output channel still open after Register-replace")
-				}
-			case <-time.After(500 * time.Millisecond):
-				t.Errorf("output channel did not close after Register-replace")
+	deadline := time.After(500 * time.Millisecond)
+	for {
+		select {
+		case _, ok := <-att.Output():
+			if !ok {
+				goto closed
 			}
+		case <-deadline:
+			t.Errorf("output channel did not close after Register-replace")
+			goto closed
 		}
-	case <-time.After(500 * time.Millisecond):
-		t.Errorf("output channel did not close after Register-replace")
 	}
+closed:
 }
 
 func TestEnsureRegistered_RegistersMissingWorkspace(t *testing.T) {

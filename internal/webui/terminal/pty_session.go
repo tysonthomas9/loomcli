@@ -30,15 +30,15 @@ func (a *localAttachment) WriteInput(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
-	reply := make(chan bool, 1)
+	reply := make(chan error, 1)
 	cmd := inputCommand{connID: a.connID, data: append([]byte(nil), p...), reply: reply}
 	if !a.session.sendCommand(cmd) {
 		return 0, errAttachmentClosed
 	}
 	select {
-	case accepted := <-reply:
-		if !accepted {
-			return 0, nil
+	case err := <-reply:
+		if err != nil {
+			return 0, err
 		}
 		return len(p), nil
 	case <-a.session.done:
@@ -100,6 +100,7 @@ type ptySession struct {
 	ownerDone  chan struct{}
 	readerDone chan struct{}
 	writer     *writerFIFO
+	writerDone chan struct{}
 
 	seq         uint64
 	generation  Generation
@@ -145,7 +146,8 @@ func newPtySession(key SessionKey, device terminalPTY, cmd *exec.Cmd, cols, rows
 }
 
 func (s *ptySession) start(manager *PTYManager) {
-	go s.writer.run()
+	s.writerDone = make(chan struct{})
+	go func() { defer close(s.writerDone); s.writer.run() }()
 	go s.runOwner()
 	go s.readPTY(manager)
 }

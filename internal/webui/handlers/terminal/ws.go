@@ -251,9 +251,14 @@ func upgradeTerminalWS(w http.ResponseWriter, r *http.Request, patterns []string
 
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{ //nolint:staticcheck // SA1019: websocket migration tracked separately
 		OriginPatterns: patterns,
+		Subprotocols:   []string{terminalV1Subprotocol},
 	})
 	if err != nil {
 		slog.Error("failed to accept websocket", "err", err)
+		return nil, false
+	}
+	if conn.Subprotocol() != terminalV1Subprotocol { //nolint:staticcheck
+		_ = conn.Close(websocket.StatusProtocolError, "subprotocol required") //nolint:staticcheck
 		return nil, false
 	}
 	conn.SetReadLimit(realtime.WSReadLimit) //nolint:staticcheck // SA1019: websocket migration tracked separately
@@ -297,55 +302,34 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 		return classifyAttachErr(err, session, workspace)
 	}
 
+	var staleBanner, contextBanner []byte
+	if !p.manager.HasSession(key) {
+		if session == "talk-to-lead" && p.loomServerURL != "" {
+			contextBanner = fetchTerminalContextBanner(p.loomServerURL, workspaceNameFromStore(reqCtx, p.store, workspace))
+		}
+		staleBanner = staleRestartBanner(reqCtx, p, workspace, session)
+	}
 	att, reattach, err := p.manager.AttachSession(key, initialCols, initialRows, launch)
 	if err != nil {
 		return classifyAttachErr(err, session, workspace)
 	}
-	connID := att.ConnID()
-
-	// Freshly spawned "talk-to-lead" sessions get a project-context banner
-	// written before the shell's prompt. On reattach the banner is already
-	// part of the scrollback replay.
-	if !reattach && session == "talk-to-lead" && p.loomServerURL != "" {
-		wsID := middleware.WorkspaceFromContext(reqCtx)
-		injectTerminalContextBanner(att, p.loomServerURL, workspaceNameFromStore(reqCtx, p.store, wsID))
+	if reattach {
+		contextBanner, staleBanner = nil, nil
+	}
+	if injector, ok := p.manager.(webuterminal.OutputInjector); ok {
+		for _, banner := range [][]byte{contextBanner, staleBanner} {
+			if len(banner) == 0 {
+				continue
+			}
+			if err := injector.InjectOutput(key, banner); err != nil {
+				slog.Warn("terminal banner injection failed", "err", err)
+			}
+		}
 	}
 
 	realtime.BroadcastSessionIssueEvent(p.tabMetaStore, p.hub, workspace, session)
 
-	if !reattach {
-		maybeEmitStaleRestartBanner(reqCtx, conn, p, workspace, session)
-	}
-
-	// Slice A compatibility: emit the initial-state bytes using the existing
-	// raw relay. Slice B replaces this with a loom-terminal.v1 frame.
-	if replay := webuterminal.InterimInitialStateBytes(att); len(replay) > 0 {
-		if err := conn.Write(reqCtx, websocket.MessageBinary, replay); err != nil { //nolint:staticcheck // SA1019
-			slog.Warn("scrollback replay write failed", "session", session, "err", err)
-		}
-	}
-
-	ctx, cancel := context.WithCancel(reqCtx)
-	defer cancel()
-	legacyAtt := newInterimAttachmentAdapter(ctx, att)
-
-	crashCh := make(chan realtime.CrashInfo, 1)
-	go func() {
-		// Pump attachment output → WS. Exits when the channel closes
-		// (session killed or replaced) or the context is cancelled.
-		crashCh <- realtime.AttachmentToWS(ctx, cancel, conn, legacyAtt)
-	}()
-
-	// WS → PTY until the client disconnects. The attachment satisfies
-	// realtime.Resizer directly so the manager doesn't need a connID → PTY
-	// lookup table.
-	realtime.WSToPTY(ctx, conn, legacyAtt, legacyAtt, connID)
-
-	// WebSocket gone — detach the attachment. PTY stays alive for the
-	// manager's grace period.
-	p.manager.Detach(key, connID)
-
-	return (<-crashCh).WSClose()
+	return runTerminalRelayV1(reqCtx, conn, p, key, att)
 }
 
 func ensureWorkspacePTYRegistered(ctx context.Context, p *terminalWSParams, workspace string) {
@@ -444,32 +428,26 @@ func mustUint16(n int) uint16 {
 // on the tab DTO is the authoritative block, but browsers drop app-defined
 // WebSocket close codes right after upgrade, so this in-band banner is the
 // reliable fallback for any client that reached this path anyway.
-func maybeEmitStaleRestartBanner(reqCtx context.Context, conn *websocket.Conn, p *terminalWSParams, workspace, session string) { //nolint:staticcheck // SA1019
+func staleRestartBanner(reqCtx context.Context, p *terminalWSParams, workspace, session string) []byte {
 	if p.tabMetaStore == nil {
-		return
+		return nil
 	}
 	meta, err := p.tabMetaStore.Get(reqCtx, workspace, session)
 	if err != nil || meta == nil || !meta.CreatedAt.Before(p.serverStartedAt) {
-		return
+		return nil
 	}
 	slog.Info("terminal session stale across server restart; spawning fresh",
 		"session", session, "workspace", workspace, "created_at", meta.CreatedAt)
-	_ = conn.Write(reqCtx, websocket.MessageBinary, []byte("\r\n\x1b[33m[loom] Previous shell did not survive a server restart. This is a fresh session.\x1b[0m\r\n")) //nolint:staticcheck // SA1019
+	return []byte("\r\n\x1b[33m[loom] Previous shell did not survive a server restart. This is a fresh session.\x1b[0m\r\n")
 }
 
-// injectTerminalContextBanner fetches project context from the loom server
-// and writes a formatted banner to the newly attached session.
-func injectTerminalContextBanner(att webuterminal.Attachment, loomServerURL string, wsName string) {
+func fetchTerminalContextBanner(loomServerURL string, wsName string) []byte {
 	tc, err := webuterminal.FetchTerminalContext(loomServerURL)
 	if err != nil {
 		slog.Error("terminal context fetch failed, skipping banner", "err", err)
-		return
+		return nil
 	}
-
-	banner := webuterminal.FormatContextBanner(tc, wsName)
-	if _, writeErr := att.WriteInput([]byte(banner)); writeErr != nil {
-		slog.Warn("failed to write context banner to pty", "err", writeErr)
-	}
+	return []byte(webuterminal.FormatContextBanner(tc, wsName))
 }
 
 func workspaceNameFromStore(ctx context.Context, st store.Store, wsID string) string {
