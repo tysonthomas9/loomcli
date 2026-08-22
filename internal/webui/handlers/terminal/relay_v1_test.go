@@ -130,15 +130,54 @@ func TestRelayV1InitialStateFirstAndMalformedCloses1002(t *testing.T) { //nolint
 	}
 }
 
+func TestRelayV1SendsCloseFrameBeforeCancellingReader(t *testing.T) { //nolint:paralleltest
+	for _, tc := range []struct {
+		name   string
+		reason webuterminal.CloseReason
+		want   websocket.StatusCode //nolint:staticcheck
+	}{
+		{name: "slow consumer", reason: webuterminal.CloseSlowConsumer, want: 4003},
+		{name: "exited", reason: webuterminal.CloseExited, want: 4001},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for attempt := 0; attempt < 20; attempt++ {
+				att := newRelayTestAttachment()
+				att.reason = tc.reason
+				server := newRelayTestServer(t, att)
+				conn, _, err := websocket.Dial(context.Background(), "ws"+server.URL[4:], &websocket.DialOptions{Subprotocols: []string{terminalV1Subprotocol}}) //nolint:staticcheck
+				if err != nil {
+					server.Close()
+					t.Fatal(err)
+				}
+				if _, _, err := conn.Read(context.Background()); err != nil { //nolint:staticcheck
+					conn.Close(websocket.StatusNormalClosure, "done") //nolint:staticcheck
+					server.Close()
+					t.Fatalf("initial read: %v", err)
+				}
+				close(att.out)
+				_, _, err = conn.Read(context.Background()) //nolint:staticcheck
+				if got := websocket.CloseStatus(err); got != tc.want {
+					conn.Close(websocket.StatusNormalClosure, "done") //nolint:staticcheck
+					server.Close()
+					t.Fatalf("attempt %d close status = %d, err=%v; want %d", attempt, got, err, tc.want)
+				}
+				conn.Close(websocket.StatusNormalClosure, "done") //nolint:staticcheck
+				server.Close()
+			}
+		})
+	}
+}
+
 type relayTestAttachment struct {
 	initial webuterminal.TerminalInitialState
 	out     chan webuterminal.TerminalEvent
+	reason  webuterminal.CloseReason
 	mu      sync.Mutex
 	inputs  [][]byte
 }
 
 func newRelayTestAttachment() *relayTestAttachment {
-	return &relayTestAttachment{out: make(chan webuterminal.TerminalEvent, 4)}
+	return &relayTestAttachment{out: make(chan webuterminal.TerminalEvent, 4), reason: webuterminal.CloseExited}
 }
 func (a *relayTestAttachment) ConnID() string                                  { return "test" }
 func (a *relayTestAttachment) InitialState() webuterminal.TerminalInitialState { return a.initial }
@@ -151,7 +190,7 @@ func (a *relayTestAttachment) WriteInput(p []byte) (int, error) {
 }
 func (a *relayTestAttachment) RequestResize(uint16, uint16) error    { return nil }
 func (a *relayTestAttachment) Focus() error                          { return nil }
-func (a *relayTestAttachment) CloseReason() webuterminal.CloseReason { return webuterminal.CloseExited }
+func (a *relayTestAttachment) CloseReason() webuterminal.CloseReason { return a.reason }
 
 type relayTestSource struct{ att *relayTestAttachment }
 

@@ -7,6 +7,7 @@ import (
 
 	"nhooyr.io/websocket" //nolint:staticcheck // SA1019: websocket migration tracked separately
 
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal/proto"
 )
@@ -22,7 +23,7 @@ func runTerminalRelayV1(ctx context.Context, conn *websocket.Conn, p *terminalWS
 	initial := att.InitialState()
 	frame, err := proto.Encode(proto.Frame{
 		Kind: proto.KindInitialState, Generation: initial.Generation, Sequence: initial.Sequence,
-		Cols: initial.Cols, Rows: initial.Rows, RetainedLines: 0, Encoding: initial.Encoding, Data: initial.Data,
+		Cols: initial.Cols, Rows: initial.Rows, RetainedLines: initial.RetainedLines, Encoding: initial.Encoding, Data: initial.Data,
 	})
 	if err != nil {
 		return websocket.StatusInternalError, "initial state encode failed" //nolint:staticcheck
@@ -42,13 +43,11 @@ func runTerminalRelayV1(ctx context.Context, conn *websocket.Conn, p *terminalWS
 	var result relayResult
 	select {
 	case result = <-pumpResult:
-		cancel()
 		_ = conn.Close(result.status, result.reason) //nolint:staticcheck
-	case result = <-readResult:
 		cancel()
-		if result.status != websocket.StatusNormalClosure { //nolint:staticcheck
-			_ = conn.Close(result.status, result.reason) //nolint:staticcheck
-		}
+	case result = <-readResult:
+		_ = conn.Close(result.status, result.reason) //nolint:staticcheck
+		cancel()
 	}
 	p.manager.Detach(key, att.ConnID())
 	return result.status, result.reason
@@ -126,7 +125,7 @@ func readTerminalV1(ctx context.Context, conn *websocket.Conn, att webuterminal.
 				slog.Debug("terminal input rejected", "err", err)
 			}
 		case proto.KindResizeRequest:
-			if frame.Cols == 0 || frame.Rows == 0 || frame.Cols > 500 || frame.Rows > 200 {
+			if frame.Cols == 0 || frame.Rows == 0 || frame.Cols > realtime.MaxTerminalCols || frame.Rows > realtime.MaxTerminalRows {
 				continue
 			}
 			if err := att.RequestResize(frame.Cols, frame.Rows); err != nil {

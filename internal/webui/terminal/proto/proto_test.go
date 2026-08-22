@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"encoding/hex"
 	"errors"
+	"os"
+	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -47,6 +50,43 @@ func TestVectorsDecodeAndReencode(t *testing.T) {
 			}
 		})
 	}
+	tsNames := map[string]string{
+		"initial_state":  "initialState",
+		"output":         "output",
+		"resize":         "resize",
+		"notice":         "notice",
+		"close":          "close",
+		"input":          "input",
+		"resize_request": "resizeRequest",
+		"focus":          "focus",
+	}
+	tsVectors, err := os.ReadFile("testdata/vectors.ts.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range tests {
+		key := tsNames[tt.name]
+		if got := extractTSHexVector(t, string(tsVectors), key); got != tt.hex {
+			t.Errorf("TS vector %s = %q, want inline %q", key, got, tt.hex)
+		}
+	}
+}
+
+func extractTSHexVector(t *testing.T, source, key string) string {
+	t.Helper()
+	re := regexp.MustCompile(`(?ms)^\s*` + regexp.QuoteMeta(key) + `:\s*((?:"[0-9a-fA-F]+"\s*(?:\+\s*)?)+)`)
+	matches := re.FindStringSubmatch(source)
+	if len(matches) != 2 {
+		t.Fatalf("TS vector %q not found", key)
+	}
+	parts := regexp.MustCompile(`"([0-9a-fA-F]+)"`).FindAllStringSubmatch(matches[1], -1)
+	return strings.Join(func() []string {
+		out := make([]string, 0, len(parts))
+		for _, part := range parts {
+			out = append(out, part[1])
+		}
+		return out
+	}(), "")
 }
 
 func TestMalformedFrames(t *testing.T) {

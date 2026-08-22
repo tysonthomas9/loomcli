@@ -294,32 +294,50 @@ func TestWriterFIFOOverflowDropsInputAndEmitsNotice(t *testing.T) {
 	}
 	// Keep the writer stopped so the test can deterministically fill its FIFO.
 	go session.runOwner()
-	att := session.attachNew("controller", 80, 24)
-	if att == nil {
+	first := session.attachNew("controller", 80, 24)
+	second := session.attachNew("viewer", 80, 24)
+	if first == nil || second == nil {
 		t.Fatal("attach returned nil")
 	}
 
 	fill := bytes.Repeat([]byte{'i'}, writerQueueBytes-2*resizeItemBytes)
-	if n, writeErr := att.WriteInput(fill); writeErr != nil || n != len(fill) {
+	if n, writeErr := first.WriteInput(fill); writeErr != nil || n != len(fill) {
 		t.Fatalf("fill WriteInput = (%d, %v), want (%d, nil)", n, writeErr, len(fill))
 	}
-	if n, writeErr := att.WriteInput([]byte("overflow")); !errors.Is(writeErr, ErrInputDropped) || n != 0 {
+	if n, writeErr := first.WriteInput([]byte("overflow")); !errors.Is(writeErr, ErrInputDropped) || n != 0 {
 		t.Fatalf("overflow WriteInput = (%d, %v), want (0, ErrInputDropped)", n, writeErr)
 	}
 
-	firstEvent := <-att.Output()
-	if firstEvent.Kind != EventResize {
-		t.Fatalf("first event kind = %d, want resize", firstEvent.Kind)
-	}
-	notice := <-att.Output()
-	if notice.Sequence != firstEvent.Sequence+1 || notice.Kind != EventNotice {
-		t.Fatalf("notice = %#v, want sequence %d notice", notice, firstEvent.Sequence+1)
-	}
-	if got, want := string(notice.Data), `{"code":"input_dropped"}`; got != want {
-		t.Fatalf("notice data = %q, want %q", got, want)
+	for _, tc := range []struct {
+		name       string
+		att        *localAttachment
+		priorEvent uint64
+	}{
+		{name: "controller", att: first, priorEvent: first.initial.Sequence},
+		{name: "viewer", att: second, priorEvent: second.initial.Sequence},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			att := tc.att
+			prior := tc.priorEvent
+			if att == first {
+				firstEvent := <-att.Output()
+				if firstEvent.Kind != EventResize || firstEvent.Sequence != prior+1 {
+					t.Fatalf("first event = %#v, want resize sequence %d", firstEvent, prior+1)
+				}
+				prior = firstEvent.Sequence
+			}
+			notice := <-att.Output()
+			if notice.Sequence != prior+1 || notice.Kind != EventNotice {
+				t.Fatalf("notice = %#v, want sequence %d notice", notice, prior+1)
+			}
+			if got, want := string(notice.Data), `{"code":"input_dropped","conn_id":"controller"}`; got != want {
+				t.Fatalf("notice data = %q, want %q", got, want)
+			}
+		})
 	}
 
-	session.detach(att.ConnID())
+	session.detach(first.ConnID())
+	session.detach(second.ConnID())
 	device.closeOutput()
 	if err := session.close(ExitReasonShutdown); err != nil {
 		t.Fatalf("close session: %v", err)

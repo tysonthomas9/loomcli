@@ -12,6 +12,9 @@ type subscriber struct {
 	output     chan TerminalEvent
 	wake       chan struct{}
 	closedCh   chan struct{}
+	stopCh     chan struct{}
+	closedOnce sync.Once
+	stopOnce   sync.Once
 
 	mu          sync.Mutex
 	queue       []TerminalEvent
@@ -30,6 +33,7 @@ func newSubscriber(connID string, cols, rows uint16, attachedAt uint64) *subscri
 		output:     make(chan TerminalEvent),
 		wake:       make(chan struct{}, 1),
 		closedCh:   make(chan struct{}),
+		stopCh:     make(chan struct{}),
 	}
 	go s.pump()
 	return s
@@ -62,7 +66,8 @@ func (s *subscriber) closeImmediate(reason CloseReason) {
 	}
 	s.closed = true
 	s.closeReason = reason
-	close(s.closedCh)
+	s.closedOnce.Do(func() { close(s.closedCh) })
+	s.stopOnce.Do(func() { close(s.stopCh) })
 	s.signal()
 }
 
@@ -74,6 +79,12 @@ func (s *subscriber) closeAfterQueue(reason CloseReason) {
 	}
 	s.closing = true
 	s.closeReason = reason
+	if len(s.queue) == 0 {
+		s.closedOnce.Do(func() { close(s.closedCh) })
+	}
+	// If nobody is receiving from output, an unbuffered send can otherwise
+	// park forever after the owner has finished closing the attachment.
+	s.stopOnce.Do(func() { close(s.stopCh) })
 	s.signal()
 }
 
@@ -91,7 +102,10 @@ func (s *subscriber) signal() {
 }
 
 func (s *subscriber) pump() {
-	defer close(s.output)
+	defer func() {
+		close(s.output)
+		s.closedOnce.Do(func() { close(s.closedCh) })
+	}()
 	for {
 		event, ready, stop := s.head()
 		if stop {
@@ -109,8 +123,15 @@ func (s *subscriber) pump() {
 		select {
 		case s.output <- event:
 			s.consumeHead()
-		case <-s.closedCh:
-			return
+		default:
+			select {
+			case s.output <- event:
+				s.consumeHead()
+			case <-s.closedCh:
+				return
+			case <-s.stopCh:
+				return
+			}
 		}
 	}
 }
@@ -136,4 +157,7 @@ func (s *subscriber) consumeHead() {
 	s.queuedBytes -= len(s.queue[0].Data)
 	s.queue[0] = TerminalEvent{}
 	s.queue = s.queue[1:]
+	if s.closing && len(s.queue) == 0 {
+		s.closedOnce.Do(func() { close(s.closedCh) })
+	}
 }

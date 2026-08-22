@@ -180,11 +180,24 @@ func (s *ptySession) enqueueInput(data []byte, noticeConnID string) error {
 	if s.writer.enqueueInput(data) {
 		return nil
 	}
-	notice, _ := json.Marshal(map[string]string{"code": "input_dropped"})
+	notice, _ := json.Marshal(map[string]string{"code": "input_dropped", "conn_id": noticeConnID})
 	s.seq++
 	event := TerminalEvent{Sequence: s.seq, Kind: EventNotice, Data: notice}
-	if sub := s.subs[noticeConnID]; sub != nil && !sub.enqueue(event) {
-		s.removeSubscriber(noticeConnID, CloseSlowConsumer)
+	controllerLost := false
+	for connID, sub := range s.subs {
+		if sub.enqueue(event) {
+			continue
+		}
+		sub.closeImmediate(CloseSlowConsumer)
+		delete(s.subs, connID)
+		if s.controller == connID {
+			controllerLost = true
+			s.controller = ""
+		}
+	}
+	s.attachCount.Store(int64(len(s.subs)))
+	if controllerLost {
+		s.handoffController()
 	}
 	return ErrInputDropped
 }

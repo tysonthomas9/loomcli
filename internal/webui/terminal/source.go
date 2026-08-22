@@ -145,12 +145,6 @@ type Attachment interface {
 	CloseReason() CloseReason
 }
 
-// InterimInitialStateBytes keeps the pre-v1 handler compiling during Slice A.
-// Slice B replaces this raw replay with an encoded initial_state frame.
-func InterimInitialStateBytes(att Attachment) []byte {
-	return att.InitialState().Data
-}
-
 // Compile-time assertions.
 var (
 	_ PTYSource        = (*PTYManager)(nil)
