@@ -2,129 +2,138 @@
  * @vitest-environment jsdom
  */
 
-/**
- * Unit tests for connectWebSocket — focused on the race condition
- * where cleanup fires before wsCleanupInner is assigned.
- */
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-
-// ── Shared mock state (vi.hoisted runs before vi.mock factories) ─────────────
+import {
+  CLIENT_FRAME_VECTORS,
+  SERVER_FRAME_VECTORS,
+} from "./terminalProtocolVectors";
 
 const shared = vi.hoisted(() => {
-  let _resolveToken: ((v: { token: string }) => void) | null = null;
-  let _rejectToken: ((e: Error) => void) | null = null;
-  const _getMock = vi.fn(
+  let resolveToken: ((value: { token: string }) => void) | null = null;
+  let rejectToken: ((error: Error) => void) | null = null;
+  const getMock = vi.fn(
     () =>
       new Promise<{ token: string }>((resolve, reject) => {
-        _resolveToken = resolve;
-        _rejectToken = reject;
+        resolveToken = resolve;
+        rejectToken = reject;
       }),
   );
-
   return {
-    getMock: _getMock,
+    getMock,
     get resolveToken() {
-      return _resolveToken;
+      return resolveToken;
     },
     get rejectToken() {
-      return _rejectToken;
+      return rejectToken;
     },
   };
 });
 
-// ── Mock @/api/client ────────────────────────────────────────────────────────
-
-vi.mock("@/api/common", () => ({
+vi.mock("@/hooks/api", () => ({
   get: shared.getMock,
   getWsBaseUrl: () => "ws://localhost",
-  // Mirror the real wsUrl helper so terminalConnection.ts builds the same
-  // workspace-scoped path it would in production: "/api/workspaces/<id><path>".
   wsUrl: (workspaceId: string, path: string) =>
-    `/api/workspaces/${encodeURIComponent(workspaceId)}${path}`,
+    "/api/workspaces/" + encodeURIComponent(workspaceId) + path,
 }));
 
-// ── MockWebSocket ────────────────────────────────────────────────────────────
+function bufferFromHex(hex: string): ArrayBuffer {
+  const pairs = hex.match(/../g) ?? [];
+  return Uint8Array.from(pairs, (pair) => Number.parseInt(pair, 16)).buffer;
+}
+
+function toHex(value: unknown): string {
+  if (!(value instanceof ArrayBuffer)) throw new Error("expected ArrayBuffer");
+  return Array.from(new Uint8Array(value), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
+const initialStateForConnection =
+  SERVER_FRAME_VECTORS.initialState.slice(0, 40) +
+  "0000000000000008" +
+  SERVER_FRAME_VECTORS.initialState.slice(56);
 
 class MockWebSocket {
   static CONNECTING = 0 as const;
   static OPEN = 1 as const;
   static CLOSING = 2 as const;
   static CLOSED = 3 as const;
-
   static instances: MockWebSocket[] = [];
+  static throwOnConstruct = false;
 
-  url: string;
+  readonly url: string;
+  readonly requestedProtocols: string[];
+  protocol = "loom-terminal.v1";
   readyState: number = MockWebSocket.CONNECTING;
   binaryType = "blob";
   close = vi.fn(() => {
     this.readyState = MockWebSocket.CLOSED;
   });
   send = vi.fn();
-  onopen: ((ev: Event) => void) | null = null;
-  onmessage: ((ev: MessageEvent) => void) | null = null;
-  onclose: ((ev: CloseEvent) => void) | null = null;
-  onerror: ((ev: Event) => void) | null = null;
+  onopen: ((event: Event) => void) | null = null;
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onclose: ((event: CloseEvent) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
 
-  constructor(url: string) {
+  constructor(url: string, protocols?: string | string[]) {
+    if (MockWebSocket.throwOnConstruct) {
+      throw new Error("WebSocket construction failed");
+    }
     this.url = url;
+    this.requestedProtocols =
+      typeof protocols === "string" ? [protocols] : (protocols ?? []);
     MockWebSocket.instances.push(this);
   }
 
-  /** Simulate server accepting the connection. */
   simulateOpen(): void {
     this.readyState = MockWebSocket.OPEN;
     this.onopen?.(new Event("open"));
   }
 
-  /** Simulate receiving a message. */
-  simulateMessage(data: string | ArrayBuffer): void {
+  simulateMessage(hex: string): void {
+    this.onmessage?.(new MessageEvent("message", { data: bufferFromHex(hex) }));
+  }
+
+  simulateTextMessage(data: string): void {
     this.onmessage?.(new MessageEvent("message", { data }));
   }
 
-  /** Simulate connection close. */
   simulateClose(code = 1000, reason = ""): void {
     this.readyState = MockWebSocket.CLOSED;
     this.onclose?.(new CloseEvent("close", { code, reason }));
   }
 
-  /** Simulate a browser-level socket error without a server close frame. */
   simulateError(): void {
     this.onerror?.(new Event("error"));
   }
 }
 
-// ── Test helpers ─────────────────────────────────────────────────────────────
-
-function makeMocks() {
-  const write = vi.fn();
-  const wsRef = { current: null as WebSocket | null };
-  const setConnectionState = vi.fn();
-  const onConnected = vi.fn();
-  const onDisconnected = vi.fn();
-  const onOutput = vi.fn();
-  const onBackendCrash = vi.fn();
-  const onSessionKilled = vi.fn();
-
+function makeCallbacks() {
+  const order: string[] = [];
   return {
-    write,
-    wsRef,
-    setConnectionState,
-    onConnected,
-    onDisconnected,
-    onOutput,
-    onBackendCrash,
-    onSessionKilled,
+    order,
+    callbacks: {
+      write: vi.fn(() => order.push("write")),
+      reset: vi.fn(async () => {
+        order.push("reset");
+      }),
+      setConnectionState: vi.fn(),
+      onConnected: vi.fn(),
+      onDisconnected: vi.fn(),
+      onOutput: vi.fn(),
+      onBackendCrash: vi.fn(),
+      onSessionKilled: vi.fn(),
+      onInitialState: vi.fn(() => order.push("initial")),
+      onCanonicalResize: vi.fn(() => order.push("resize")),
+      onNotice: vi.fn(() => order.push("notice")),
+    },
   };
 }
 
-async function waitForBufferedFlush(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 25));
+async function flushMessages(delay = 0): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, delay));
 }
-
-// ── Tests ────────────────────────────────────────────────────────────────────
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
 
 describe("connectWebSocket", () => {
   let connectWebSocket: typeof import("../terminalConnection").connectWebSocket;
@@ -133,495 +142,434 @@ describe("connectWebSocket", () => {
   beforeEach(async () => {
     vi.resetModules();
     MockWebSocket.instances = [];
+    MockWebSocket.throwOnConstruct = false;
     shared.getMock.mockClear();
-    // Assign mock WebSocket globally
-    (globalThis as any).WebSocket = MockWebSocket as any;
-    // Dynamic import so mocks are applied
-    const mod = await import("../terminalConnection");
-    connectWebSocket = mod.connectWebSocket;
+    globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket;
+    ({ connectWebSocket } = await import("../terminalConnection"));
   });
 
   afterEach(() => {
-    (globalThis as any).WebSocket = originalWebSocket;
+    globalThis.WebSocket = originalWebSocket;
   });
 
-  it("closes WebSocket when cleanup fires before wsCleanupInner is assigned", async () => {
-    const m = makeMocks();
-    const cleanup = connectWebSocket(
+  async function connect(
+    callbacks = makeCallbacks(),
+    initialSize?: { cols: number; rows: number },
+  ) {
+    const socketIndex = MockWebSocket.instances.length;
+    const wsRef = { current: null as WebSocket | null };
+    const handle = connectWebSocket(
       "ws1",
       "session1",
-      m.write,
-      m.wsRef,
-      m.setConnectionState,
-      m.onConnected,
-      m.onDisconnected,
+      wsRef,
+      callbacks.callbacks,
+      initialSize,
     );
+    shared.resolveToken?.({ token: "tok" });
+    await vi.waitFor(() =>
+      expect(MockWebSocket.instances).toHaveLength(socketIndex + 1),
+    );
+    const ws = MockWebSocket.instances[socketIndex];
+    if (!ws) throw new Error("WebSocket was not created");
+    return { ...callbacks, handle, ws, wsRef };
+  }
 
-    // Resolve token — .then() microtask creates WebSocket
-    shared.resolveToken!({ token: "tok" });
-    await vi.waitFor(() => {
-      expect(MockWebSocket.instances).toHaveLength(1);
-    });
+  it("requests and verifies the loom-terminal.v1 subprotocol", async () => {
+    const { callbacks, ws } = await connect();
+    expect(ws.requestedProtocols).toEqual(["loom-terminal.v1"]);
+    expect(ws.binaryType).toBe("arraybuffer");
 
-    const ws = MockWebSocket.instances[0];
-
-    // After await, wsCleanupInner IS assigned (synchronous .then() callback).
-    // This tests the normal cleanup path via wsCleanupInner.
-    // Call cleanup
-    cleanup();
-
-    expect(ws.close).toHaveBeenCalledWith(1000);
-    expect(m.wsRef.current).toBeNull();
+    ws.simulateOpen();
+    expect(callbacks.setConnectionState).toHaveBeenLastCalledWith("connecting");
+    expect(callbacks.onConnected).not.toHaveBeenCalled();
+    ws.simulateMessage(initialStateForConnection);
+    await flushMessages();
+    expect(callbacks.setConnectionState).toHaveBeenLastCalledWith("connected");
+    expect(callbacks.onConnected).toHaveBeenCalledOnce();
   });
 
-  it("does not create WebSocket when cancelled before token resolves", async () => {
-    const m = makeMocks();
-    const cleanup = connectWebSocket(
-      "ws1",
-      "session1",
-      m.write,
-      m.wsRef,
-      m.setConnectionState,
-    );
-
-    // Call cleanup immediately — before token resolves
-    cleanup();
-
-    // Now resolve token
-    shared.resolveToken!({ token: "tok" });
-    // Flush microtasks
-    await new Promise((r) => setTimeout(r, 0));
-
-    // No WebSocket should have been created
-    expect(MockWebSocket.instances).toHaveLength(0);
-    expect(m.wsRef.current).toBeNull();
-  });
-
-  it("skips onopen callback after cleanup", async () => {
-    const m = makeMocks();
-    const cleanup = connectWebSocket(
-      "ws1",
-      "session1",
-      m.write,
-      m.wsRef,
-      m.setConnectionState,
-      m.onConnected,
-    );
-
-    shared.resolveToken!({ token: "tok" });
-    await vi.waitFor(() => {
-      expect(MockWebSocket.instances).toHaveLength(1);
-    });
-
-    const ws = MockWebSocket.instances[0];
-
-    // Call cleanup first
-    cleanup();
-    m.setConnectionState.mockClear();
-
-    // Now simulate open — should be ignored
+  it("rejects a socket that did not negotiate the subprotocol", async () => {
+    const { callbacks, ws } = await connect();
+    ws.protocol = "";
     ws.simulateOpen();
 
-    expect(m.setConnectionState).not.toHaveBeenCalledWith("connected");
-    expect(m.onConnected).not.toHaveBeenCalled();
+    expect(ws.close).toHaveBeenCalledWith(
+      1002,
+      "terminal subprotocol was not negotiated",
+    );
+    expect(callbacks.setConnectionState).toHaveBeenCalledWith("error");
+    expect(callbacks.onConnected).not.toHaveBeenCalled();
   });
 
-  it("skips onmessage callback after cleanup", async () => {
-    const m = makeMocks();
-    const cleanup = connectWebSocket(
-      "ws1",
-      "session1",
-      m.write,
-      m.wsRef,
-      m.setConnectionState,
-      undefined,
-      undefined,
-      m.onOutput,
-    );
-
-    shared.resolveToken!({ token: "tok" });
-    await vi.waitFor(() => {
-      expect(MockWebSocket.instances).toHaveLength(1);
-    });
-
-    const ws = MockWebSocket.instances[0];
+  it("applies initial metadata, reset, then snapshot bytes in order", async () => {
+    const { callbacks, order, ws } = await connect();
     ws.simulateOpen();
+    ws.simulateMessage(initialStateForConnection);
+    await flushMessages();
 
-    // Call cleanup
-    cleanup();
-    m.write.mockClear();
-
-    // Simulate message after cleanup — should be ignored
-    ws.simulateMessage("hello");
-    await waitForBufferedFlush();
-
-    expect(m.write).not.toHaveBeenCalled();
+    expect(callbacks.onInitialState).toHaveBeenCalledWith({
+      cols: 80,
+      rows: 24,
+      retainedLines: 42,
+    });
+    expect(order).toEqual(["initial", "reset", "write"]);
+    expect(callbacks.write).toHaveBeenCalledWith(
+      new Uint8Array([0x1b, 0x5b, 0x33, 0x31, 0x6d, 0x68, 0x69]),
+    );
   });
 
-  it("normal lifecycle: connects, receives data, and cleans up", async () => {
-    const m = makeMocks();
-    const cleanup = connectWebSocket(
-      "ws1",
-      "session1",
-      m.write,
-      m.wsRef,
-      m.setConnectionState,
-      m.onConnected,
-      m.onDisconnected,
-      m.onOutput,
+  it("holds frames received while reset drains until after the snapshot", async () => {
+    const { callbacks, ws } = await connect();
+    let releaseReset!: () => void;
+    callbacks.reset = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseReset = resolve;
+        }),
     );
-
-    expect(m.setConnectionState).toHaveBeenCalledWith("connecting");
-
-    shared.resolveToken!({ token: "tok" });
-    await vi.waitFor(() => {
-      expect(MockWebSocket.instances).toHaveLength(1);
-    });
-
-    const ws = MockWebSocket.instances[0];
     ws.simulateOpen();
+    ws.simulateMessage(initialStateForConnection);
+    ws.simulateMessage(SERVER_FRAME_VECTORS.output);
+    await flushMessages();
 
-    expect(m.setConnectionState).toHaveBeenCalledWith("connected");
-    expect(m.onConnected).toHaveBeenCalled();
+    expect(callbacks.write).not.toHaveBeenCalled();
+    releaseReset();
+    await flushMessages(25);
 
-    // Receive data
-    ws.simulateMessage("output text");
-    await waitForBufferedFlush();
-    expect(m.write).toHaveBeenCalledWith("output text");
-    expect(m.onOutput).toHaveBeenCalled();
-
-    // Clean up
-    cleanup();
-    expect(ws.close).toHaveBeenCalledWith(1000);
-    expect(m.wsRef.current).toBeNull();
+    expect(callbacks.write).toHaveBeenNthCalledWith(
+      1,
+      new Uint8Array([0x1b, 0x5b, 0x33, 0x31, 0x6d, 0x68, 0x69]),
+    );
+    expect(callbacks.write).toHaveBeenNthCalledWith(
+      2,
+      new Uint8Array([0x68, 0x69, 0x0a]),
+    );
   });
 
-  it("batches adjacent terminal output frames into a single renderer write", async () => {
-    const m = makeMocks();
-    connectWebSocket(
-      "ws1",
-      "session1",
-      m.write,
-      m.wsRef,
-      m.setConnectionState,
-      m.onConnected,
-      m.onDisconnected,
-      m.onOutput,
-    );
-
-    shared.resolveToken!({ token: "tok" });
-    await vi.waitFor(() => {
-      expect(MockWebSocket.instances).toHaveLength(1);
-    });
-
-    const ws = MockWebSocket.instances[0];
+  it("requires initial_state to be the first binary frame", async () => {
+    const { callbacks, ws } = await connect();
     ws.simulateOpen();
+    ws.simulateMessage(SERVER_FRAME_VECTORS.output);
+    ws.simulateMessage(
+      SERVER_FRAME_VECTORS.output.replace(
+        "0000000000000009",
+        "000000000000000a",
+      ),
+    );
+    await flushMessages();
 
-    ws.simulateMessage("hello");
-    ws.simulateMessage(" ");
-    ws.simulateMessage("world");
-    await waitForBufferedFlush();
-
-    expect(m.write).toHaveBeenCalledTimes(1);
-    expect(m.write).toHaveBeenCalledWith("hello world");
-    expect(m.onOutput).toHaveBeenCalledTimes(1);
+    expect(ws.close).toHaveBeenCalledWith(
+      1002,
+      "first terminal frame must be initial_state",
+    );
+    expect(callbacks.setConnectionState).toHaveBeenCalledWith("error");
   });
 
-  it("includes initial terminal size in the first workspace terminal websocket URL", async () => {
-    const m = makeMocks();
-    connectWebSocket(
-      "ws1",
-      "session1",
-      m.write,
-      m.wsRef,
-      m.setConnectionState,
-      m.onConnected,
-      m.onDisconnected,
-      undefined,
-      undefined,
-      undefined,
-      { cols: 132, rows: 40 },
+  it("rejects an unsupported initial-state encoding", async () => {
+    const { callbacks, ws } = await connect();
+    ws.simulateOpen();
+    const unsupported = initialStateForConnection.replace(
+      "787465726d2d76742f31",
+      "756e6b6e6f776e2d7674",
+    );
+    ws.simulateMessage(unsupported);
+    await flushMessages();
+
+    expect(ws.close).toHaveBeenCalledWith(
+      1002,
+      "unsupported terminal state encoding",
+    );
+    expect(callbacks.setConnectionState).toHaveBeenCalledWith("error");
+  });
+
+  it("rejects text and malformed binary frames", async () => {
+    const first = await connect();
+    first.ws.simulateOpen();
+    first.ws.simulateTextMessage("raw output");
+    await flushMessages();
+    expect(first.ws.close).toHaveBeenCalledWith(
+      1002,
+      "terminal frames must be binary",
     );
 
-    shared.resolveToken!({ token: "tok" });
-    await vi.waitFor(() => {
-      expect(MockWebSocket.instances).toHaveLength(1);
-    });
+    first.handle.dispose();
+    const second = await connect();
+    second.ws.simulateOpen();
+    second.ws.simulateMessage("0001");
+    await flushMessages();
+    expect(second.ws.close).toHaveBeenCalledWith(
+      1002,
+      expect.stringContaining("header"),
+    );
+  });
 
-    const ws = MockWebSocket.instances[0];
+  it("routes output, canonical resize, and notice frames", async () => {
+    const { callbacks, order, ws } = await connect();
+    ws.simulateOpen();
+    ws.simulateMessage(initialStateForConnection);
+    await flushMessages();
+    callbacks.write.mockClear();
+    callbacks.onOutput.mockClear();
+    order.length = 0;
+
+    ws.simulateMessage(SERVER_FRAME_VECTORS.output);
+    ws.simulateMessage(
+      SERVER_FRAME_VECTORS.output.replace(
+        "0000000000000009",
+        "000000000000000a",
+      ),
+    );
+    ws.simulateMessage(
+      SERVER_FRAME_VECTORS.resize.replace(
+        "000000000000000a",
+        "000000000000000b",
+      ),
+    );
+    ws.simulateMessage(
+      SERVER_FRAME_VECTORS.notice.replace(
+        "000000000000000b",
+        "000000000000000c",
+      ),
+    );
+    await flushMessages(25);
+
+    expect(callbacks.write).toHaveBeenCalledOnce();
+    expect(callbacks.write).toHaveBeenCalledWith(
+      new Uint8Array([0x68, 0x69, 0x0a, 0x68, 0x69, 0x0a]),
+    );
+    expect(callbacks.onOutput).toHaveBeenCalledOnce();
+    expect(callbacks.onCanonicalResize).toHaveBeenCalledWith(120, 40);
+    expect(callbacks.onNotice).toHaveBeenCalledWith({
+      code: "input_dropped",
+      message: "Input dropped",
+    });
+    expect(order).toEqual(["write", "resize", "notice"]);
+  });
+
+  it("uses a close frame reason when the WebSocket reason is empty", async () => {
+    const { callbacks, ws } = await connect();
+    ws.simulateOpen();
+    ws.simulateMessage(initialStateForConnection);
+    ws.simulateMessage(
+      SERVER_FRAME_VECTORS.close.replace(
+        "000000000000000c",
+        "0000000000000009",
+      ),
+    );
+    await flushMessages();
+    ws.simulateClose(4001);
+
+    expect(callbacks.onBackendCrash).toHaveBeenCalledWith("exited");
+  });
+
+  it("closes and requests an immediate reconnect on generation mismatch", async () => {
+    const { callbacks, ws } = await connect();
+    ws.simulateOpen();
+    ws.simulateMessage(initialStateForConnection);
+    await flushMessages();
+    const changedGeneration = SERVER_FRAME_VECTORS.output.replace(
+      "000102030405060708090a0b0c0d0e0f",
+      "ff0102030405060708090a0b0c0d0e0f",
+    );
+    ws.simulateMessage(changedGeneration);
+    await flushMessages();
+
+    expect(ws.close).toHaveBeenCalledWith(1002, "terminal generation changed");
+    expect(callbacks.setConnectionState).toHaveBeenCalledWith("disconnected");
+    expect(callbacks.onDisconnected).toHaveBeenCalledWith("immediate");
+  });
+
+  it("encodes input, resize_request, and focus with the pinned generation", async () => {
+    const { handle, ws } = await connect();
+    ws.simulateOpen();
+    ws.simulateMessage(initialStateForConnection);
+    await flushMessages();
+
+    handle.sendInput("ls\n");
+    handle.sendResizeRequest(120, 40);
+    handle.sendFocus();
+
+    expect(ws.send.mock.calls.map(([frame]) => toHex(frame))).toEqual([
+      CLIENT_FRAME_VECTORS.input,
+      CLIENT_FRAME_VECTORS.resizeRequest,
+      CLIENT_FRAME_VECTORS.focus,
+    ]);
+  });
+
+  it("holds focus and resize requests until initial_state pins generation", async () => {
+    const { handle, ws } = await connect();
+    ws.simulateOpen();
+    handle.sendFocus();
+    handle.sendResizeRequest(120, 40);
+    expect(ws.send).not.toHaveBeenCalled();
+
+    ws.simulateMessage(initialStateForConnection);
+    await flushMessages();
+    expect(ws.send.mock.calls.map(([frame]) => toHex(frame))).toEqual([
+      CLIENT_FRAME_VECTORS.focus,
+      CLIENT_FRAME_VECTORS.resizeRequest,
+    ]);
+  });
+
+  it("flushes pending focus, resize, then input after initial_state", async () => {
+    const { handle, ws } = await connect();
+    ws.simulateOpen();
+    handle.sendFocus();
+    handle.sendResizeRequest(120, 40);
+    handle.sendInput("typed before snapshot\n");
+
+    ws.simulateMessage(initialStateForConnection);
+    await flushMessages();
+
+    expect(ws.send.mock.calls.map(([frame]) => toHex(frame))).toEqual([
+      CLIENT_FRAME_VECTORS.focus,
+      CLIENT_FRAME_VECTORS.resizeRequest,
+      expect.stringContaining("7479706564206265666f726520736e617073686f74"),
+    ]);
+  });
+
+  it("queues input sent before initial_state and flushes it after the snapshot", async () => {
+    const { handle, ws } = await connect();
+    ws.simulateOpen();
+    handle.sendInput("typed before snapshot\n");
+    expect(ws.send).not.toHaveBeenCalled();
+
+    ws.simulateMessage(initialStateForConnection);
+    await flushMessages();
+
+    expect(ws.send).toHaveBeenCalledOnce();
+    expect(toHex(ws.send.mock.calls[0]?.[0])).toContain(
+      "7479706564206265666f726520736e617073686f74",
+    );
+  });
+
+  it("treats a sequence gap as an immediate resnapshot reconnect", async () => {
+    const { callbacks, ws } = await connect();
+    ws.simulateOpen();
+    ws.simulateMessage(initialStateForConnection);
+    await flushMessages();
+    const gap = SERVER_FRAME_VECTORS.output.replace(
+      "0000000000000009",
+      "000000000000000b",
+    );
+    ws.simulateMessage(gap);
+    await flushMessages();
+
+    expect(ws.close).toHaveBeenCalledWith(
+      1002,
+      "terminal sequence gap or duplicate",
+    );
+    expect(callbacks.onDisconnected).toHaveBeenCalledWith("immediate");
+  });
+
+  it.each([
+    [4003, "immediate"],
+    [4004, "backoff"],
+    [1001, "backoff"],
+    [1008, "backoff"],
+  ] as const)("classifies close %i as %s reconnect", async (code, policy) => {
+    const { callbacks, ws } = await connect();
+    ws.simulateOpen();
+    ws.simulateClose(code, "retry");
+
+    expect(callbacks.setConnectionState).toHaveBeenCalledWith("disconnected");
+    expect(callbacks.onDisconnected).toHaveBeenCalledWith(policy);
+  });
+
+  it.each([
+    [4002, "session killed"],
+    [1000, ""],
+  ] as const)(
+    "keeps close %i as a terminal session end",
+    async (code, reason) => {
+      const { callbacks, ws } = await connect();
+      ws.simulateOpen();
+      ws.simulateClose(code, reason);
+
+      expect(callbacks.setConnectionState).toHaveBeenCalledWith(
+        "session_ended",
+      );
+      expect(callbacks.onSessionKilled).toHaveBeenCalledOnce();
+      expect(callbacks.onDisconnected).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps backend exit and workspace unavailable behavior", async () => {
+    const crash = await connect();
+    crash.ws.simulateOpen();
+    crash.ws.simulateClose(4001, "backend process exited");
+    expect(crash.callbacks.setConnectionState).toHaveBeenCalledWith("crashed");
+    expect(crash.callbacks.onBackendCrash).toHaveBeenCalledWith(
+      "backend process exited",
+    );
+
+    crash.handle.dispose();
+    const unavailable = await connect();
+    unavailable.ws.simulateOpen();
+    unavailable.ws.simulateClose(1001, "workspace unavailable");
+    expect(unavailable.callbacks.setConnectionState).toHaveBeenCalledWith(
+      "error",
+    );
+    expect(unavailable.callbacks.onSessionKilled).toHaveBeenCalledOnce();
+    expect(unavailable.callbacks.onDisconnected).not.toHaveBeenCalled();
+  });
+
+  it("includes initial size and token in the workspace terminal URL", async () => {
+    const { ws } = await connect(makeCallbacks(), { cols: 132, rows: 40 });
     expect(ws.url).toContain("session=session1");
     expect(ws.url).toContain("cols=132");
     expect(ws.url).toContain("rows=40");
+    expect(ws.url).toContain("token=tok");
   });
 
-  it("handles fetchTerminalToken rejection gracefully", async () => {
-    // fetchTerminalToken catches errors internally and returns null,
-    // so the .then() path runs with token=null. The WebSocket is still
-    // created (with no token param) — it connects and works, or fails
-    // at the WS level. We just verify no crash occurs.
-    const m = makeMocks();
-    connectWebSocket(
-      "ws1",
-      "session1",
-      m.write,
-      m.wsRef,
-      m.setConnectionState,
-      undefined,
-      m.onDisconnected,
-    );
-
-    // Reject the underlying get() — fetchTerminalToken catches this and returns null
-    shared.rejectToken!(new Error("network error"));
-    await vi.waitFor(() => {
-      expect(MockWebSocket.instances).toHaveLength(1);
-    });
-
-    // A WebSocket was created with null token (no token param in URL)
-    const ws = MockWebSocket.instances[0];
-    expect(ws.url).not.toContain("token=");
-
-    // Simulate server rejecting the unauthenticated connection
-    ws.simulateClose(1008, "unauthorized");
-    expect(m.setConnectionState).toHaveBeenCalledWith("disconnected");
-    expect(m.onDisconnected).toHaveBeenCalled();
+  it("connects without a token when token fetching fails", async () => {
+    const callbacks = makeCallbacks();
+    const wsRef = { current: null as WebSocket | null };
+    connectWebSocket("ws1", "session1", wsRef, callbacks.callbacks);
+    shared.rejectToken?.(new Error("network error"));
+    await vi.waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    expect(MockWebSocket.instances[0]?.url).not.toContain("token=");
   });
 
-  it("does not auto-retry when the workspace runtime is unavailable", async () => {
-    const m = makeMocks();
-    connectWebSocket(
+  it("backs off when WebSocket construction throws", async () => {
+    const callbacks = makeCallbacks();
+    const wsRef = { current: null as WebSocket | null };
+    MockWebSocket.throwOnConstruct = true;
+    connectWebSocket("ws1", "session1", wsRef, callbacks.callbacks);
+    shared.resolveToken?.({ token: "tok" });
+    await flushMessages();
+    expect(MockWebSocket.instances).toHaveLength(0);
+    expect(callbacks.callbacks.setConnectionState).toHaveBeenCalledWith(
+      "disconnected",
+    );
+    expect(callbacks.callbacks.onDisconnected).toHaveBeenCalledWith("backoff");
+  });
+
+  it("disposes idempotently and ignores late token resolution", async () => {
+    const callbacks = makeCallbacks();
+    const wsRef = { current: null as WebSocket | null };
+    const handle = connectWebSocket(
       "ws1",
       "session1",
-      m.write,
-      m.wsRef,
-      m.setConnectionState,
-      undefined,
-      m.onDisconnected,
-      undefined,
-      undefined,
-      m.onSessionKilled,
+      wsRef,
+      callbacks.callbacks,
     );
+    handle.dispose();
+    handle.dispose();
+    shared.resolveToken?.({ token: "tok" });
+    await flushMessages();
 
-    shared.resolveToken!({ token: "tok" });
-    await vi.waitFor(() => {
-      expect(MockWebSocket.instances).toHaveLength(1);
-    });
+    expect(MockWebSocket.instances).toHaveLength(0);
+    expect(wsRef.current).toBeNull();
+  });
 
-    const ws = MockWebSocket.instances[0];
+  it("closes and clears the socket on browser error", async () => {
+    const { callbacks, ws, wsRef } = await connect();
     ws.simulateOpen();
-    ws.simulateClose(1001, "workspace unavailable");
-
-    expect(m.setConnectionState).toHaveBeenCalledWith("error");
-    expect(m.onSessionKilled).toHaveBeenCalledTimes(1);
-    expect(m.onDisconnected).not.toHaveBeenCalled();
-  });
-
-  it("closes and clears stale sockets on websocket error", async () => {
-    const m = makeMocks();
-    connectWebSocket(
-      "ws1",
-      "session1",
-      m.write,
-      m.wsRef,
-      m.setConnectionState,
-      undefined,
-      m.onDisconnected,
-    );
-
-    shared.resolveToken!({ token: "tok" });
-    await vi.waitFor(() => {
-      expect(MockWebSocket.instances).toHaveLength(1);
-    });
-
-    const ws = MockWebSocket.instances[0];
-    ws.simulateOpen();
-    expect(m.wsRef.current).toBe(ws);
-
     ws.simulateError();
 
-    expect(ws.close).toHaveBeenCalledTimes(1);
-    expect(m.wsRef.current).toBeNull();
-    expect(m.setConnectionState).toHaveBeenCalledWith("disconnected");
-    expect(m.onDisconnected).toHaveBeenCalledTimes(1);
-
-    m.setConnectionState.mockClear();
-    m.onDisconnected.mockClear();
-    ws.simulateClose(1000, "");
-    expect(m.setConnectionState).not.toHaveBeenCalled();
-    expect(m.onDisconnected).not.toHaveBeenCalled();
-  });
-
-  it("does not auto-retry when the backend process exits", async () => {
-    const m = makeMocks();
-    connectWebSocket(
-      "ws1",
-      "session1",
-      m.write,
-      m.wsRef,
-      m.setConnectionState,
-      undefined,
-      m.onDisconnected,
-      undefined,
-      m.onBackendCrash,
-      m.onSessionKilled,
-    );
-
-    shared.resolveToken!({ token: "tok" });
-    await vi.waitFor(() => {
-      expect(MockWebSocket.instances).toHaveLength(1);
-    });
-
-    const ws = MockWebSocket.instances[0];
-    ws.simulateOpen();
-    ws.simulateClose(4001, "backend process exited");
-
-    expect(m.setConnectionState).toHaveBeenCalledWith("crashed");
-    expect(m.onBackendCrash).toHaveBeenCalledWith("backend process exited");
-    expect(m.onDisconnected).not.toHaveBeenCalled();
-    expect(m.onSessionKilled).not.toHaveBeenCalled();
-  });
-
-  it("does not auto-retry when the terminal session exits cleanly", async () => {
-    const m = makeMocks();
-    connectWebSocket(
-      "ws1",
-      "session1",
-      m.write,
-      m.wsRef,
-      m.setConnectionState,
-      undefined,
-      m.onDisconnected,
-      undefined,
-      m.onBackendCrash,
-      m.onSessionKilled,
-    );
-
-    shared.resolveToken!({ token: "tok" });
-    await vi.waitFor(() => {
-      expect(MockWebSocket.instances).toHaveLength(1);
-    });
-
-    const ws = MockWebSocket.instances[0];
-    ws.simulateOpen();
-    ws.simulateClose(1000, "");
-
-    expect(m.setConnectionState).toHaveBeenCalledWith("session_ended");
-    expect(m.onSessionKilled).toHaveBeenCalledTimes(1);
-    expect(m.onDisconnected).not.toHaveBeenCalled();
-    expect(m.onBackendCrash).not.toHaveBeenCalled();
-  });
-
-  it("does not auto-retry when the terminal session is killed", async () => {
-    const m = makeMocks();
-    connectWebSocket(
-      "ws1",
-      "session1",
-      m.write,
-      m.wsRef,
-      m.setConnectionState,
-      undefined,
-      m.onDisconnected,
-      undefined,
-      m.onBackendCrash,
-      m.onSessionKilled,
-    );
-
-    shared.resolveToken!({ token: "tok" });
-    await vi.waitFor(() => {
-      expect(MockWebSocket.instances).toHaveLength(1);
-    });
-
-    const ws = MockWebSocket.instances[0];
-    ws.simulateOpen();
-    ws.simulateClose(4002, "session killed");
-
-    expect(m.setConnectionState).toHaveBeenCalledWith("session_ended");
-    expect(m.onSessionKilled).toHaveBeenCalledTimes(1);
-    expect(m.onDisconnected).not.toHaveBeenCalled();
-    expect(m.onBackendCrash).not.toHaveBeenCalled();
-  });
-
-  it("double cleanup is idempotent", async () => {
-    const m = makeMocks();
-    const cleanup = connectWebSocket(
-      "ws1",
-      "session1",
-      m.write,
-      m.wsRef,
-      m.setConnectionState,
-      m.onConnected,
-    );
-
-    shared.resolveToken!({ token: "tok" });
-    await vi.waitFor(() => {
-      expect(MockWebSocket.instances).toHaveLength(1);
-    });
-
-    const ws = MockWebSocket.instances[0];
-    ws.simulateOpen();
-
-    // Call cleanup twice — should not throw
-    cleanup();
-    cleanup();
-
-    expect(ws.close).toHaveBeenCalledTimes(1);
-    expect(m.wsRef.current).toBeNull();
-  });
-
-  it("skips onclose callback after cleanup", async () => {
-    const m = makeMocks();
-    const cleanup = connectWebSocket(
-      "ws1",
-      "session1",
-      m.write,
-      m.wsRef,
-      m.setConnectionState,
-      undefined,
-      m.onDisconnected,
-    );
-
-    shared.resolveToken!({ token: "tok" });
-    await vi.waitFor(() => {
-      expect(MockWebSocket.instances).toHaveLength(1);
-    });
-
-    const ws = MockWebSocket.instances[0];
-    ws.simulateOpen();
-
-    // Call cleanup
-    cleanup();
-    m.setConnectionState.mockClear();
-    m.onDisconnected.mockClear();
-
-    // Simulate onclose firing after cleanup (triggered by ws.close())
-    ws.simulateClose(1000, "");
-
-    expect(m.setConnectionState).not.toHaveBeenCalled();
-    expect(m.onDisconnected).not.toHaveBeenCalled();
-  });
-
-  it("handles token rejection after cleanup without state updates", async () => {
-    const m = makeMocks();
-    const cleanup = connectWebSocket(
-      "ws1",
-      "session1",
-      m.write,
-      m.wsRef,
-      m.setConnectionState,
-      undefined,
-      m.onDisconnected,
-    );
-
-    // Cleanup before token resolves
-    cleanup();
-    m.setConnectionState.mockClear();
-    m.onDisconnected.mockClear();
-
-    // Reject the token
-    shared.rejectToken!(new Error("network error"));
-    await new Promise((r) => setTimeout(r, 0));
-
-    // Should NOT call setConnectionState after cleanup
-    expect(m.setConnectionState).not.toHaveBeenCalled();
-    expect(m.onDisconnected).not.toHaveBeenCalled();
+    expect(ws.close).toHaveBeenCalledOnce();
+    expect(wsRef.current).toBeNull();
+    expect(callbacks.onDisconnected).toHaveBeenCalledWith("backoff");
   });
 });

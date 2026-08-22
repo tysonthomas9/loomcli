@@ -7,6 +7,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const connectionState = vi.hoisted(() => ({
   writeCallbacks: [] as Array<(data: string | Uint8Array) => void>,
+  callbacks: [] as Array<{
+    reset: () => void;
+    setConnectionState: (state: string) => void;
+    onDisconnected?: (policy: "backoff" | "immediate") => void;
+    onInitialState?: (state: {
+      cols: number;
+      rows: number;
+      retainedLines: number;
+    }) => void;
+    onCanonicalResize?: (cols: number, rows: number) => void;
+  }>,
+  handles: [] as Array<{
+    dispose: ReturnType<typeof vi.fn>;
+    sendInput: ReturnType<typeof vi.fn>;
+    sendResizeRequest: ReturnType<typeof vi.fn>;
+    sendFocus: ReturnType<typeof vi.fn>;
+  }>,
   cleanupCount: 0,
   fitCountsAtConnect: [] as number[],
   terminalSizesAtConnect: [] as Array<{ cols: number; rows: number }>,
@@ -17,8 +34,13 @@ const xtermState = vi.hoisted(() => {
     fitCount: 0,
     onReady: null as null | ((handle: unknown) => void),
     onResize: null as null | ((cols: number, rows: number) => void),
+    onData: null as null | ((data: string) => void),
+    onBinary: null as null | ((data: Uint8Array) => void),
+    onFocus: null as null | (() => void),
     handle: null as unknown as {
       write: ReturnType<typeof vi.fn>;
+      reset: ReturnType<typeof vi.fn>;
+      setSize: ReturnType<typeof vi.fn>;
       focus: ReturnType<typeof vi.fn>;
       fit: () => { cols: number; rows: number };
       scrollToBottom: ReturnType<typeof vi.fn>;
@@ -26,6 +48,8 @@ const xtermState = vi.hoisted(() => {
   };
   state.handle = {
     write: vi.fn(),
+    reset: vi.fn(),
+    setSize: vi.fn(),
     focus: vi.fn(),
     fit: () => {
       state.fitCount += 1;
@@ -42,15 +66,22 @@ vi.mock("../XTermRenderer", async () => {
   function XTermRenderer(props: {
     onReady: (handle: unknown) => void;
     onDispose: (handle: unknown) => void;
+    onData: (data: string) => void;
+    onBinary: (data: Uint8Array) => void;
     onResize: (cols: number, rows: number) => void;
+    onFocus: () => void;
   }) {
+    const { onDispose } = props;
     xtermState.onReady = props.onReady;
     xtermState.onResize = props.onResize;
+    xtermState.onData = props.onData;
+    xtermState.onBinary = props.onBinary;
+    xtermState.onFocus = props.onFocus;
     React.useEffect(
       () => () => {
-        props.onDispose(xtermState.handle);
+        onDispose(xtermState.handle);
       },
-      [props.onDispose],
+      [onDispose],
     );
     return React.createElement("div", { "data-testid": "mock-xterm" });
   }
@@ -63,26 +94,38 @@ vi.mock("../terminalConnection", () => ({
     (
       _workspaceId: string,
       _sessionName: string,
-      write: (data: string | Uint8Array) => void,
       _wsRef: { current: WebSocket | null },
-      setConnState: (state: string) => void,
-      _onConnected: () => void,
-      _onDisconnected: () => void,
-      _onOutput: () => void,
-      _onBackendCrash: (reason: string) => void,
-      _onSessionKilled: () => void,
+      callbacks: {
+        write: (data: string | Uint8Array) => void;
+        reset: () => void;
+        setConnectionState: (state: string) => void;
+        onDisconnected?: (policy: "backoff" | "immediate") => void;
+        onInitialState?: (state: {
+          cols: number;
+          rows: number;
+          retainedLines: number;
+        }) => void;
+        onCanonicalResize?: (cols: number, rows: number) => void;
+      },
       terminalSize: { cols: number; rows: number },
-    ): (() => void) => {
-      connectionState.writeCallbacks.push(write);
+    ) => {
+      connectionState.writeCallbacks.push(callbacks.write);
+      connectionState.callbacks.push(callbacks);
       connectionState.fitCountsAtConnect.push(xtermState.fitCount);
       connectionState.terminalSizesAtConnect.push(terminalSize);
-      setConnState("connecting");
-      return () => {
-        connectionState.cleanupCount += 1;
+      callbacks.setConnectionState("connecting");
+      const handle = {
+        dispose: vi.fn(() => {
+          connectionState.cleanupCount += 1;
+        }),
+        sendInput: vi.fn(),
+        sendResizeRequest: vi.fn(),
+        sendFocus: vi.fn(),
       };
+      connectionState.handles.push(handle);
+      return handle;
     },
   ),
-  encodeResize: (cols: number, rows: number) => `\x1b[RESIZE:${cols};${rows}]`,
 }));
 
 vi.mock("@/hooks/workspace", () => ({
@@ -116,21 +159,35 @@ function latestWriteCallback(): (data: string | Uint8Array) => void {
   return callback;
 }
 
+function latestConnectionHandle() {
+  const handle = connectionState.handles.at(-1);
+  if (!handle) throw new Error("no connection handle captured");
+  return handle;
+}
+
 describe("TerminalInstance", () => {
   beforeEach(() => {
     connectionState.writeCallbacks.length = 0;
+    connectionState.callbacks.length = 0;
+    connectionState.handles.length = 0;
     connectionState.cleanupCount = 0;
     connectionState.fitCountsAtConnect.length = 0;
     connectionState.terminalSizesAtConnect.length = 0;
     xtermState.fitCount = 0;
     xtermState.onReady = null;
     xtermState.onResize = null;
+    xtermState.onData = null;
+    xtermState.onBinary = null;
+    xtermState.onFocus = null;
     xtermState.handle.write.mockClear();
+    xtermState.handle.reset.mockClear();
+    xtermState.handle.setSize.mockClear();
     xtermState.handle.focus.mockClear();
     xtermState.handle.scrollToBottom.mockClear();
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.clearAllMocks();
   });
 
@@ -194,6 +251,91 @@ describe("TerminalInstance", () => {
     act(() => latestWriteCallback()("terminal-output"));
 
     expect(xtermState.handle.write).toHaveBeenCalledWith("terminal-output");
+  });
+
+  it("wires initial reset and canonical geometry to xterm", async () => {
+    render(
+      <TerminalInstance
+        sessionName="codex-alpha"
+        backendName="codex"
+        isActive
+      />,
+    );
+    await waitFor(() => expect(xtermState.onReady).not.toBeNull());
+    readyRenderer();
+    await waitFor(() => expect(connectionState.callbacks).toHaveLength(1));
+    const callbacks = connectionState.callbacks[0];
+    if (!callbacks) throw new Error("no callbacks captured");
+
+    act(() => {
+      callbacks.onInitialState?.({ cols: 100, rows: 30, retainedLines: 42 });
+      callbacks.reset();
+      callbacks.onCanonicalResize?.(120, 40);
+    });
+
+    expect(xtermState.handle.setSize.mock.calls).toEqual([
+      [100, 30],
+      [120, 40],
+    ]);
+    expect(xtermState.handle.reset).toHaveBeenCalledOnce();
+  });
+
+  it("sends framed input, resize requests, and focus through the connection handle", async () => {
+    const onTerminalFocus = vi.fn();
+    render(
+      <TerminalInstance
+        sessionName="codex-alpha"
+        backendName="codex"
+        isActive
+        onTerminalFocus={onTerminalFocus}
+      />,
+    );
+    await waitFor(() => expect(xtermState.onReady).not.toBeNull());
+    readyRenderer();
+    await waitFor(() => expect(connectionState.handles).toHaveLength(1));
+    const handle = latestConnectionHandle();
+
+    act(() => {
+      xtermState.onData?.("hello");
+      xtermState.onBinary?.(new Uint8Array([0, 255]));
+      xtermState.onResize?.(120, 40);
+      xtermState.onFocus?.();
+    });
+
+    expect(handle.sendInput.mock.calls).toEqual([
+      ["hello"],
+      [new Uint8Array([0, 255])],
+    ]);
+    expect(handle.sendResizeRequest).toHaveBeenCalledWith(120, 40);
+    expect(handle.sendFocus).toHaveBeenCalledOnce();
+    expect(onTerminalFocus).toHaveBeenCalledOnce();
+  });
+
+  it("reconnects with at most 250ms jitter for a resnapshot request", async () => {
+    const random = vi.spyOn(Math, "random").mockReturnValue(1);
+    const view = render(
+      <TerminalInstance
+        sessionName="codex-alpha"
+        backendName="codex"
+        isActive
+      />,
+    );
+    await waitFor(() => expect(xtermState.onReady).not.toBeNull());
+    readyRenderer();
+    await waitFor(() => expect(connectionState.handles).toHaveLength(1));
+    const callbacks = connectionState.callbacks[0];
+    if (!callbacks) throw new Error("no callbacks captured");
+
+    vi.useFakeTimers();
+    act(() => callbacks.onDisconnected?.("immediate"));
+    act(() => vi.advanceTimersByTime(249));
+    expect(connectionState.handles).toHaveLength(1);
+    act(() => vi.advanceTimersByTime(1));
+    expect(connectionState.handles).toHaveLength(2);
+
+    view.unmount();
+    vi.useRealTimers();
+    random.mockRestore();
   });
 
   it("does not persist an inactive renderer's sentinel resize", async () => {

@@ -30,7 +30,12 @@ import {
 } from "@/utils/reconnectBackoff";
 
 import type { ReconnectOverlayState } from "./ReconnectingOverlay";
-import { connectWebSocket, encodeResize } from "./terminalConnection";
+import {
+  connectWebSocket,
+  type ReconnectPolicy,
+  type TerminalConnectionHandle,
+  type TerminalNotice,
+} from "./terminalConnection";
 import type { XTermRendererHandle } from "./XTermRenderer";
 import styles from "./TerminalInstance.module.css";
 
@@ -46,6 +51,8 @@ const INITIAL_CONNECT_CONFIG: ReconnectConfig = {
   maxDelay: 15000,
   jitterFactor: 0.5,
 };
+
+const IMMEDIATE_RECONNECT_MAX_DELAY_MS = 250;
 
 /**
  * Wall-clock ceiling: if a reconnect doesn't succeed within this window,
@@ -87,6 +94,7 @@ export interface TerminalInstanceProps {
   onReconnectStateChange?: (state: ReconnectOverlayState) => void;
   onOutput?: () => void;
   onBackendCrash?: (reason: string) => void;
+  onNotice?: ((notice: TerminalNotice) => void) | undefined;
   onTerminalFocus?: (() => void) | undefined;
   /** Whether user input should be forwarded to the backing PTY. */
   writable?: boolean | undefined;
@@ -126,6 +134,7 @@ export const TerminalInstance = forwardRef<
     onReconnectStateChange,
     onOutput,
     onBackendCrash,
+    onNotice,
     onTerminalFocus,
     writable = true,
     ptyAlive,
@@ -150,6 +159,10 @@ export const TerminalInstance = forwardRef<
     } else {
       pendingRendererWritesRef.current.push(data);
     }
+  }, []);
+  const reset = useCallback((): Promise<void> => {
+    pendingRendererWritesRef.current = [];
+    return xtermInstanceRef.current?.reset() ?? Promise.resolve();
   }, []);
   const focus = useCallback(() => {
     xtermInstanceRef.current?.focus();
@@ -178,7 +191,7 @@ export const TerminalInstance = forwardRef<
   }, []);
 
   const wsRef = useRef<WebSocket | null>(null);
-  const wsCleanupRef = useRef<(() => void) | null>(null);
+  const connectionRef = useRef<TerminalConnectionHandle | null>(null);
   const reconnectCancelRef = useRef<(() => void) | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -202,6 +215,8 @@ export const TerminalInstance = forwardRef<
   onOutputRef.current = onOutput;
   const onBackendCrashRef = useRef(onBackendCrash);
   onBackendCrashRef.current = onBackendCrash;
+  const onNoticeRef = useRef(onNotice);
+  onNoticeRef.current = onNotice;
   const onTerminalFocusRef = useRef(onTerminalFocus);
   onTerminalFocusRef.current = onTerminalFocus;
 
@@ -260,6 +275,22 @@ export const TerminalInstance = forwardRef<
     [clearReconnectTimers],
   );
 
+  const scheduleImmediateReconnect = useCallback(() => {
+    clearReconnectTimers();
+    onReconnectStateChangeRef.current?.("reconnecting");
+    reconnectTimeoutRef.current = setTimeout(() => {
+      reconnectCancelRef.current?.();
+      reconnectCancelRef.current = null;
+      onReconnectStateChangeRef.current?.("expired");
+    }, reconnectCeilingMsRef.current);
+
+    const timer = setTimeout(() => {
+      reconnectCancelRef.current = null;
+      doConnectRef.current?.();
+    }, Math.random() * IMMEDIATE_RECONNECT_MAX_DELAY_MS);
+    reconnectCancelRef.current = () => clearTimeout(timer);
+  }, [clearReconnectTimers]);
+
   const doConnect = useCallback(
     (opts?: { onOutcome?: (ok: boolean) => void }) => {
       if (beingKilledRef.current) {
@@ -268,65 +299,72 @@ export const TerminalInstance = forwardRef<
       }
 
       // Tear down any prior connection before opening a new one.
-      wsCleanupRef.current?.();
-      wsCleanupRef.current = null;
+      connectionRef.current?.dispose();
+      connectionRef.current = null;
 
-      const cleanup = connectWebSocket(
+      const connection = connectWebSocket(
         workspaceId,
         sessionName,
-        (data) => write(data),
         wsRef,
-        setConnectionState,
-        // onConnected — the renderer receives the server's durable PTY replay
-        // immediately after this callback.
-        () => {
-          clearReconnectTimers();
-          onReconnectStateChangeRef.current?.(null);
-          if (!initialViewportSyncDoneRef.current) {
-            initialViewportSyncDoneRef.current = true;
-            syncViewportToBottom();
-          }
-          opts?.onOutcome?.(true);
-        },
-        // onDisconnected — schedule a reconnect unless we're being killed.
-        () => {
-          opts?.onOutcome?.(false);
-          if (beingKilledRef.current) return;
-          // Only start a fresh reconnect loop if none is running. If one is
-          // already running, startAutoReconnect's own backoff handles the
-          // retry — we just wait for the next attempt.
-          if (autoReconnect && !reconnectCancelRef.current) {
-            const config = hasConnectedRef.current
-              ? undefined
-              : INITIAL_CONNECT_CONFIG;
-            startReconnectLoop(config);
-          } else if (!autoReconnect) {
+        {
+          write,
+          reset,
+          setConnectionState,
+          onConnected: () => {
             clearReconnectTimers();
             onReconnectStateChangeRef.current?.(null);
-            if (hasConnectedRef.current) {
-              setConnectionState("session_ended");
+            if (!initialViewportSyncDoneRef.current) {
+              initialViewportSyncDoneRef.current = true;
+              syncViewportToBottom();
             }
-          }
-        },
-        () => onOutputRef.current?.(),
-        (reason) => onBackendCrashRef.current?.(reason),
-        // onSessionKilled — server told us the session is gone; do not reconnect.
-        () => {
-          beingKilledRef.current = true;
-          clearReconnectTimers();
-          onReconnectStateChangeRef.current?.(null);
+            opts?.onOutcome?.(true);
+          },
+          onDisconnected: (policy: ReconnectPolicy) => {
+            opts?.onOutcome?.(false);
+            if (beingKilledRef.current) return;
+            if (autoReconnect && policy === "immediate") {
+              scheduleImmediateReconnect();
+            } else if (autoReconnect && !reconnectCancelRef.current) {
+              const config = hasConnectedRef.current
+                ? undefined
+                : INITIAL_CONNECT_CONFIG;
+              startReconnectLoop(config);
+            } else if (!autoReconnect) {
+              clearReconnectTimers();
+              onReconnectStateChangeRef.current?.(null);
+              if (hasConnectedRef.current) {
+                setConnectionState("session_ended");
+              }
+            }
+          },
+          onOutput: () => onOutputRef.current?.(),
+          onBackendCrash: (reason) => onBackendCrashRef.current?.(reason),
+          onSessionKilled: () => {
+            beingKilledRef.current = true;
+            clearReconnectTimers();
+            onReconnectStateChangeRef.current?.(null);
+          },
+          onInitialState: ({ cols, rows }) => {
+            xtermInstanceRef.current?.setSize(cols, rows);
+          },
+          onCanonicalResize: (cols, rows) => {
+            xtermInstanceRef.current?.setSize(cols, rows);
+          },
+          onNotice: (notice) => onNoticeRef.current?.(notice),
         },
         terminalSizeRef.current,
       );
-      wsCleanupRef.current = cleanup;
+      connectionRef.current = connection;
     },
     [
       workspaceId,
       sessionName,
       write,
+      reset,
       clearReconnectTimers,
       syncViewportToBottom,
       startReconnectLoop,
+      scheduleImmediateReconnect,
       autoReconnect,
     ],
   );
@@ -354,8 +392,8 @@ export const TerminalInstance = forwardRef<
       // tab with no path back — no onReady to repopulate the ref, no reconnect.
       pendingRendererWritesRef.current = [];
       clearReconnectTimers();
-      wsCleanupRef.current?.();
-      wsCleanupRef.current = null;
+      connectionRef.current?.dispose();
+      connectionRef.current = null;
     };
   }, [sessionName, clearReconnectTimers, ptyAlive, autoStartStaleSession]);
 
@@ -381,7 +419,7 @@ export const TerminalInstance = forwardRef<
       }
       if (
         isActiveRef.current &&
-        !wsCleanupRef.current &&
+        !connectionRef.current &&
         !isSocketOpenOrConnecting(wsRef.current)
       ) {
         doConnectRef.current?.();
@@ -408,7 +446,7 @@ export const TerminalInstance = forwardRef<
     if (!xtermInstanceRef.current) return;
     if (connectionState !== "disconnected") return;
     if (reconnectCancelRef.current) return;
-    if (wsCleanupRef.current || isSocketOpenOrConnecting(wsRef.current)) {
+    if (connectionRef.current || isSocketOpenOrConnecting(wsRef.current)) {
       return;
     }
 
@@ -416,7 +454,7 @@ export const TerminalInstance = forwardRef<
       if (!xtermInstanceRef.current) return;
       if (connectionState !== "disconnected") return;
       if (reconnectCancelRef.current) return;
-      if (wsCleanupRef.current || isSocketOpenOrConnecting(wsRef.current)) {
+      if (connectionRef.current || isSocketOpenOrConnecting(wsRef.current)) {
         return;
       }
 
@@ -437,10 +475,7 @@ export const TerminalInstance = forwardRef<
   const handleData = useCallback(
     (data: string) => {
       if (!writable) return;
-      const ws = wsRef.current;
-      if (ws?.readyState === WebSocket.OPEN) {
-        ws.send(data);
-      }
+      connectionRef.current?.sendInput(data);
     },
     [writable],
   );
@@ -448,10 +483,7 @@ export const TerminalInstance = forwardRef<
   const handleBinary = useCallback(
     (data: Uint8Array) => {
       if (!writable) return;
-      const ws = wsRef.current;
-      if (ws?.readyState === WebSocket.OPEN) {
-        ws.send(data);
-      }
+      connectionRef.current?.sendInput(data);
     },
     [writable],
   );
@@ -468,12 +500,10 @@ export const TerminalInstance = forwardRef<
     // (SIGWINCH -> prompt redraw) for no reason.
     const last = lastSentResizeRef.current;
     if (last && last.cols === cols && last.rows === rows) return;
-    const ws = wsRef.current;
-    if (ws?.readyState === WebSocket.OPEN) {
-      ws.send(encodeResize(cols, rows));
-      // Record only what actually went out. Marking a resize "sent" while the
-      // socket is still connecting would let a later identical frame be
-      // deduped, stranding the PTY at the connect-time size.
+    if (connectionRef.current) {
+      connectionRef.current.sendResizeRequest(cols, rows);
+      // Record the requested size after handing it to the connection. The
+      // connection retains it until initial_state pins the generation.
       lastSentResizeRef.current = { cols, rows };
     }
   }, []);
@@ -542,11 +572,11 @@ export const TerminalInstance = forwardRef<
               },
               { once: true },
             );
-            wsCleanupRef.current?.();
-            wsCleanupRef.current = null;
+            connectionRef.current?.dispose();
+            connectionRef.current = null;
           } else {
-            wsCleanupRef.current?.();
-            wsCleanupRef.current = null;
+            connectionRef.current?.dispose();
+            connectionRef.current = null;
             resolve();
           }
         }),
@@ -562,10 +592,7 @@ export const TerminalInstance = forwardRef<
       },
       pasteText: (text: string) => {
         if (!writable) return;
-        const ws = wsRef.current;
-        if (ws?.readyState === WebSocket.OPEN) {
-          ws.send(text);
-        }
+        connectionRef.current?.sendInput(text);
       },
     }),
     [focus, clearReconnectTimers, writable],
@@ -590,7 +617,10 @@ export const TerminalInstance = forwardRef<
           onData={handleData}
           onBinary={handleBinary}
           onResize={handleResize}
-          onFocus={() => onTerminalFocusRef.current?.()}
+          onFocus={() => {
+            connectionRef.current?.sendFocus();
+            onTerminalFocusRef.current?.();
+          }}
         />
       </Suspense>
     </div>

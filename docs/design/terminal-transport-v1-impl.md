@@ -238,15 +238,35 @@ through the owner as trusted input (bypasses controller check).
   with the same vectors as the Go tests (copy the hex vectors).
 - `terminalConnection.ts`: `new WebSocket(url, ["loom-terminal.v1"])`;
   verify `ws.protocol === "loom-terminal.v1"` on open else close 1002 and
-  surface `error`. On `initial_state`: call `onInitialState({cols, rows})` →
-  renderer `reset()` then `write(data)` (ordering with xterm's write queue:
-  `terminal.reset()` is synchronous and clears the write queue; then
-  `write`). Pin generation; mismatch → reconnect. `output` → write.
+  surface `error`. On `initial_state`: call `onInitialState({cols, rows})`,
+  then `await renderer.reset()`, then `write(data)`. **`terminal.reset()`
+  does NOT clear xterm's internal write queue** (verified on
+  `@xterm/xterm@6.0.0`: `CoreTerminal.reset()` never touches `_writeBuffer`),
+  so bytes from the previous generation still queued in xterm would be parsed
+  *after* a synchronous reset — exactly on the 4003 path where a backlog
+  exists by construction. Therefore the renderer's `reset()` must be
+  asynchronous: `new Promise(r => terminal.write("", () => { terminal.reset();
+  r(); }))` — the empty write's callback fires only after everything queued
+  before it has been parsed, so the reset discards it. While the reset is
+  pending, the connection must hold every frame received after
+  `initial_state` (in order) and flush them only after the snapshot `write`.
+  Pin generation; mismatch → reconnect. `output` → write. Track
+  `expectedSequence`: a gap or duplicate in server sequence numbers is
+  treated like 4003 (immediate resnapshot reconnect) and logged.
+  Client input sent before `initial_state` must not be dropped: either queue
+  it until the generation is pinned or keep the UI state `connecting` until
+  `initial_state` (and queue). Flush order after `initial_state`: pending
+  `focus` first (so this viewer is the controller), then `resize_request`,
+  then queued input. A throwing `new WebSocket` must transition to
+  `disconnected` with backoff, never hang in `connecting`. A failed token
+  fetch is NOT fatal: the server supports token-less attach when terminal
+  auth is disabled (`ws.go` `auth == nil`), so keep connecting without a
+  token as before.
   `resize` → renderer `setSize(cols, rows)` (non-controller view). `notice`
   → callback. Close 4003/4004 → `disconnected` + immediate jittered reconnect
   (4004 with backoff). Replace `encodeResize` string protocol with
   `resize_request` frames; send `focus` when the xterm gains focus.
-- `XTermRenderer.tsx`: add `reset()` and `setSize(cols, rows)` to the handle.
+- `XTermRenderer.tsx`: add `reset(): Promise<void>` (drain-then-reset, see above) and `setSize(cols, rows)` to the handle.
 - Keep `TERMINAL_SCROLLBACK_LINES` for now (Phase 2 removes it).
 - Update `terminalConnection.test.ts` / `TerminalInstance.test.tsx`.
 
