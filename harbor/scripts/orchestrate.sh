@@ -345,7 +345,10 @@ run_critic() {
   if [ -f "$vfile" ]; then
     cp "$vfile" "$LOGD/critic-verdict-$tid-$attempt.txt" 2>/dev/null
     # The verdict must echo back the same attempt + commit; stale/mismatched -> rejected.
-    if head -1 "$vfile" | grep -Eq "^REVIEW attempt=$attempt commit=$sha APPROVED( |$|—|-)"; then
+    # Here-string, not `head | grep -q`: under pipefail a SIGPIPE'd producer
+    # would silently turn an approval into CHANGES-REQUESTED.
+    vline="$(head -1 "$vfile")"
+    if grep -Eq "^REVIEW attempt=$attempt commit=$sha APPROVED( |$|—|-)" <<<"$vline"; then
       verdict="APPROVED"
     fi
     loom data comment "$tid" "CRITIC $(head -1 "$vfile" | cut -c1-400)" >/dev/null 2>&1
