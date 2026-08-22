@@ -3,11 +3,13 @@ package leadcontrol
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -19,7 +21,7 @@ import (
 // writeFakeHeadlessAgent installs a stand-in for `cursor-agent -p --resume`:
 // it appends "<chat>|<message>" to a log file and emits the stream-json
 // result line the runtime parses. Exits 1 with is_error when the message
-// contains "FAIL-ME".
+// contains "FAIL-ME"; exits 0 without a result event for "NO-RESULT".
 func writeFakeHeadlessAgent(t *testing.T, dir string) (bin, turnLog string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -39,6 +41,7 @@ printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"te
 case "$msg" in *FAIL-ME*)
   printf '{"type":"result","subtype":"error","is_error":true,"result":"boom","session_id":"%s"}\n' "$chat"; exit 1;;
 esac
+case "$msg" in *NO-RESULT*) exit 0;; esac
 printf '{"type":"result","subtype":"success","duration_ms":5,"is_error":false,"result":"ok","session_id":"%s","usage":{"inputTokens":1,"outputTokens":2}}\n' "$chat"
 `
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
@@ -250,4 +253,74 @@ func TestDelivererForSessionPicksHeadless(t *testing.T) {
 	if res.State != DeliveryStatePending || res.Reason != harnessRegistryMissReason {
 		t.Fatalf("result = %+v", res)
 	}
+}
+
+// A turn that exits 0 without the terminal `result` event is a failure: the
+// event is the stream contract's end marker and the only usage record.
+func TestRunHeadlessLeadRuntimeNoResultIsTurnFailure(t *testing.T) {
+	st := memstore.New()
+	createHarnessLeadSession(t, st)
+	dir := t.TempDir()
+	bin, _ := writeFakeHeadlessAgent(t, dir)
+	var out syncBuffer
+	err := RunHeadlessLeadRuntime(context.Background(), HeadlessLeadRuntimeConfig{
+		Store: st, Workspace: "WS", LeadName: "nova", SessionID: "lead-session",
+		WorkDir: dir, Prompt: "NO-RESULT seed", Backend: "cursor", BinaryPath: bin,
+		Stdout: &out, Stderr: &out,
+	})
+	if err == nil || !strings.Contains(err.Error(), "without a result event") {
+		t.Fatalf("err = %v, want missing-result failure", err)
+	}
+}
+
+// Canceling the runtime must reach processes the turn binary forked (the
+// marathon's metering shim forks the real agent): the turn runs in its own
+// process group and cancellation signals the group.
+func TestHeadlessCancelTerminatesWrapperProcessGroup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("process groups need a POSIX shell")
+	}
+	st := memstore.New()
+	createHarnessLeadSession(t, st)
+	dir := t.TempDir()
+	pidFile := filepath.Join(dir, "grandchild.pid")
+	bin := filepath.Join(dir, "wrapper")
+	script := "#!/bin/sh\nsleep 60 &\necho $! > " + pidFile + "\nwait\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var out syncBuffer
+	runtimeErr := make(chan error, 1)
+	go func() {
+		runtimeErr <- RunHeadlessLeadRuntime(ctx, HeadlessLeadRuntimeConfig{
+			Store: st, Workspace: "WS", LeadName: "nova", SessionID: "lead-session",
+			WorkDir: dir, Prompt: "seed", Backend: "cursor", BinaryPath: bin,
+			Stdout: &out, Stderr: &out,
+		})
+	}()
+	var pid int
+	waitForCondition(t, func() bool {
+		b, err := os.ReadFile(pidFile)
+		if err != nil {
+			return false
+		}
+		_, err = fmt.Sscanf(strings.TrimSpace(string(b)), "%d", &pid)
+		return err == nil && pid > 0
+	}, "wrapper never forked its grandchild")
+	cancel()
+	select {
+	case err := <-runtimeErr:
+		if err == nil || !strings.Contains(err.Error(), "seed turn") {
+			t.Fatalf("runtime returned %v, want seed turn failure", err)
+		}
+	case <-time.After(headlessTurnKillDelay + 5*time.Second):
+		t.Fatal("runtime did not exit on cancel")
+	}
+	waitForCondition(t, func() bool {
+		// Signal 0 fails with ESRCH once the grandchild is gone (it was
+		// re-parented, so nobody but the kernel reaps it).
+		return syscall.Kill(pid, 0) != nil
+	}, "grandchild survived runtime cancellation")
 }

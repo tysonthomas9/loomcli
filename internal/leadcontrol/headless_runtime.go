@@ -248,16 +248,23 @@ func (h *headlessLeadRuntime) turnArgs(message string) []string {
 	return args
 }
 
-// spawnTurn builds and starts one turn process. The child is killed when ctx
-// is cancelled and, on Linux, when this process dies (parent-death signal) so
-// a lead reaped by SIGKILL cannot leave a billing cursor-agent behind.
+// spawnTurn builds and starts one turn process in its own process group.
+// The binary may be a wrapper that forks the real agent (the marathon's
+// metering shim), so cancellation sends SIGTERM to the whole group rather
+// than SIGKILL to the direct child only — a wrapper's forwarding trap runs,
+// and the real agent receives the signal either way. cmd.WaitDelay then
+// escalates to SIGKILL. On Linux the direct child also gets SIGTERM when
+// this process dies (parent-death signal), so a lead reaped by SIGKILL
+// cannot leave a billing cursor-agent behind.
 func (h *headlessLeadRuntime) spawnTurn(ctx context.Context, turn int, message string) (*exec.Cmd, io.ReadCloser, error) {
-	cmd := exec.CommandContext(ctx, h.cfg.BinaryPath, h.turnArgs(message)...)
+	cmd := exec.CommandContext(ctx, h.cfg.BinaryPath, h.turnArgs(message)...) //nolint:gosec // G204: binary and args come from the lead-runtime config (operator backend), not untrusted input
 	cmd.Dir = h.cfg.WorkDir
 	cmd.Env = h.cfg.Env
 	cmd.Stderr = h.cfg.Stderr
-	cmd.WaitDelay = 5 * time.Second
+	cmd.WaitDelay = headlessTurnKillDelay
+	setTurnProcessGroup(cmd)
 	setParentDeathSignal(cmd)
+	cmd.Cancel = func() error { return terminateTurnProcessGroup(cmd) }
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, nil, err
@@ -270,7 +277,9 @@ func (h *headlessLeadRuntime) spawnTurn(ctx context.Context, turn int, message s
 }
 
 // finishTurn consumes the turn's stream to completion, echoing assistant text
-// to Stdout and the result summary (usage, duration) to the logger.
+// to Stdout and the result summary (usage, duration) to the logger. A turn
+// that exits 0 without a `result` event is a failure too: the stream
+// contract ends every turn with one, and it is the only usage record.
 func (h *headlessLeadRuntime) finishTurn(cmd *exec.Cmd, stdout io.Reader, turn int) error {
 	summary := h.consumeTurnStream(stdout, turn)
 	waitErr := cmd.Wait()
@@ -280,12 +289,21 @@ func (h *headlessLeadRuntime) finishTurn(cmd *exec.Cmd, stdout io.Reader, turn i
 	if waitErr != nil {
 		return fmt.Errorf("turn %d: %w", turn, waitErr)
 	}
+	if !summary.sawResult {
+		return fmt.Errorf("turn %d: process exited 0 without a result event", turn)
+	}
 	return nil
 }
 
+// headlessTurnKillDelay is how long a cancelled turn gets to exit after
+// SIGTERM before the direct child is SIGKILLed: long enough for the metering
+// shim to escalate to the real agent itself (5s) and flush its reader (5s).
+const headlessTurnKillDelay = 15 * time.Second
+
 type headlessTurnSummary struct {
-	isError bool
-	result  string
+	sawResult bool
+	isError   bool
+	result    string
 }
 
 // headlessStreamEvent is the subset of the stream-json event shape the
@@ -337,6 +355,7 @@ func (h *headlessLeadRuntime) observeStreamLine(line string, turn int, summary *
 			}
 		}
 	case "result":
+		summary.sawResult = true
 		summary.isError = ev.IsError
 		summary.result = ev.Result
 		h.cfg.Logger.Info("headless lead turn complete",
