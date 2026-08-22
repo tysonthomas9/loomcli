@@ -179,6 +179,8 @@ for agent in d.get("agents") or []:
   done < "$MH/.team-agent-defs.tsv"
   rm -f "$MH/.team-agent-defs.tsv"
   [ -s "$MH/team-agents.tsv" ] || die "template $TEAM has no runnable worker agents"
+  # Evidence copy: the dry-run assertions and post-run analysis read it from the mount.
+  cp "$MH/team-agents.tsv" /logs/agent/team-agents.tsv
   CODER_WT=$(awk -F '\t' '$3 == "impl" { print $5; exit }' "$MH/team-agents.tsv")
   PLANNER_WT=$(awk -F '\t' '$3 == "architect" { print $5; exit }' "$MH/team-agents.tsv")
   [ -n "$CODER_WT" ] || die "template $TEAM has no implementation worktree"
