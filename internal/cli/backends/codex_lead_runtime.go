@@ -3,6 +3,7 @@ package backends
 import (
 	"context"
 
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -24,5 +25,6 @@ func RunCodexLeadRuntime(
 		SessionID: sessionID,
 		WorkDir:   workDir,
 		Prompt:    prompt,
+		Env:       cli.FilteredEnv(),
 	})
 }

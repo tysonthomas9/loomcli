@@ -121,52 +121,13 @@ func buildCodexNonInteractiveArgs(prompt string) []string {
 
 // buildBackendEnv constructs the standard environment for backend subprocess invocations.
 func buildBackendEnv(workDir, agentName string) []string {
-	env := appendLoomExecutableDirToPath(cli.FilteredEnv())
+	env := cli.FilteredEnv()
 	env = append(env, "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
 		env = append(env, "LOOM_AGENT_NAME="+agentName)
 	}
 	env = append(env, activeSessionEnvVars()...)
 	return env
-}
-
-func appendLoomExecutableDirToPath(env []string) []string {
-	exe, err := os.Executable()
-	if err != nil || exe == "" {
-		return env
-	}
-	dir := filepath.Dir(exe)
-	if dir == "." || dir == "" {
-		return env
-	}
-
-	pathPrefix := "PATH="
-	for i, entry := range env {
-		if !strings.HasPrefix(entry, pathPrefix) {
-			continue
-		}
-		current := strings.TrimPrefix(entry, pathPrefix)
-		if pathContainsDir(current, dir) {
-			return env
-		}
-		if current == "" {
-			env[i] = pathPrefix + dir
-		} else {
-			env[i] = pathPrefix + dir + string(os.PathListSeparator) + current
-		}
-		return env
-	}
-
-	return append([]string{pathPrefix + dir}, env...)
-}
-
-func pathContainsDir(pathValue, dir string) bool {
-	for _, entry := range filepath.SplitList(pathValue) {
-		if entry == dir {
-			return true
-		}
-	}
-	return false
 }
 
 // pipePromptToCmd attaches the prompt to cmd.Stdin without exposing it in CLI args.

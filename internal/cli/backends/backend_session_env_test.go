@@ -141,6 +141,10 @@ func TestBuildBackendEnvPrependsLoomExecutableDirToPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("os.Executable: %v", err)
 	}
+	exe, err = filepath.EvalSymlinks(exe)
+	if err != nil {
+		t.Fatalf("filepath.EvalSymlinks: %v", err)
+	}
 	wantPrefix := filepath.Dir(exe)
 	parts := filepath.SplitList(got)
 	if len(parts) == 0 || parts[0] != wantPrefix {
