@@ -14,7 +14,7 @@ Line references are pinned to that commit and will drift after edits.
 |---|---|---|
 | D1 | Fix the attach/live ordering bug and slow-viewer loss **first**, as a transport-correctness change against the existing ring (Phase 1). It does not claim the ring is a valid snapshot. | Agreed |
 | D2 | The long-term state owner is **libghostty-vt embedded in-process as WASM under wazero**, one isolated module instance per session. It keeps loom a single `CGO_ENABLED=0` binary. It must pass every Phase 0 gate before production code depends on it. | Agreed, gated |
-| D3 | Phase 0 fallbacks, by failure type. **(a) Resource failure** (libghostty restores state correctly but WASM misses a memory/throughput gate): keep the same official `libghostty-vt` C library and link it **natively via cgo** instead of running it as WASM. Attribute the miss first with a native-vs-WASM A/B; adopt cgo only if WASM is demonstrably the cause and the cgo build passes every fidelity, four-target packaging, installed-desktop, and process-failure gate. Cost: the release moves from `CGO_ENABLED=0` to cgo + Zig cross-compile, and a native fault is no longer contained to one session. The Go binding layer is incidental — `mitchellh/go-libghostty` (by Ghostty's author, personal account, API unstable) or a Loom-owned thin shim over the official header. **(b) Fidelity failure** (libghostty cannot restore the corpus): fall back to a packaged **Node worker** (`@xterm/headless` + `@xterm/addon-serialize`); supplementary state must come from supported xterm state or a maintained serializer fork, never a parallel raw-stream parser. tmux is not a fallback for either; it is reserved for restart survival (D11). | Agreed after §8.1 |
+| D3 | Phase 0 fallbacks, by failure type. **(a) Resource failure** (libghostty restores state correctly but WASM misses a memory/throughput gate): keep the same official `libghostty-vt` C library and link it **natively via cgo** instead of running it as WASM. Attribute the miss first with a native-vs-WASM A/B; adopt cgo only if WASM is demonstrably the cause and the cgo build passes every fidelity, four-target packaging, installed-desktop, and process-failure gate. Cost: the release moves from `CGO_ENABLED=0` to cgo + Zig cross-compile, and a native fault is no longer contained to one session. The Go binding layer is incidental — `mitchellh/go-libghostty` (by Ghostty's author, personal account, API unstable) or a Loom-owned thin shim over the official header. **(b) Fidelity failure** (libghostty cannot restore the corpus): fall back to a packaged **Node worker** (`@xterm/headless` + `@xterm/addon-serialize`); supplementary state must come from supported xterm state or a maintained serializer fork, never a parallel raw-stream parser. tmux is not a fallback for either; it is reserved for restart survival (D11). | **Ratified by owner 2026-08-22** |
 | D4 | Initial state is sent to the browser as **VT output from the libghostty formatter plus the parser continuation suffix**, written into the existing `@xterm/xterm` after an explicit reset. libghostty's binary `GHOSTSNP` snapshot is used **only** for same-version in-process checkpoints, never on the wire or as a durable format (its v1 format carries no compatibility guarantee). | Agreed |
 | D5 | One **owner goroutine per session** serializes PTY output, resize, input, focus/controller changes, attach cuts, snapshots, and synthetic output. `Sequence` increments only for server→browser events (`Output`, `Resize`, `Notice`, `Close`); input, focus, attach, and snapshot are ordered owner commands that do not consume wire sequence numbers. | Agreed |
 | D6 | Canonical geometry and all browser-originated PTY traffic belong to the **most-recently-focused viewer** (the controller); on its disconnect, control passes to the most recently attached remaining viewer, whose stored dimensions are applied immediately. Non-controllers are read-only and render at canonical size. | Agreed |
@@ -574,11 +574,11 @@ conversation continuation.
 ## 12. Owner ratification
 
 Reviewer consensus is complete. Before implementation, the owner must ratify
-the product/release choices in D3 (cgo fallback on attributed resource
-failure), D6 (non-controller viewers read-only until focused — a visible change
-from today's any-viewer-can-type behaviour), and D11 (no server-restart
-survival in v1). D9 was ratified on 2026-08-22 (memory budget, browser line
-cap removed). This is authorization, not unresolved technical disagreement.
+the product/release choices in D6 (non-controller viewers read-only until
+focused — a visible change from today's any-viewer-can-type behaviour) and D11
+(no server-restart survival in v1). D3 (cgo fallback on attributed resource
+failure) and D9 (memory-budget retention, browser line cap removed) were
+ratified on 2026-08-22. This is authorization, not unresolved technical disagreement.
 
 ## Primary references
 
