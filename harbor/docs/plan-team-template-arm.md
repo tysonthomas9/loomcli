@@ -355,7 +355,13 @@ Status: spec A + B landed; stub dry-run NOT yet run.
      unregistered on normal return. Both loom fixes have tests that fail on the old code.
   Cosmetic: spend.sh treats "Auto" as unpriced (fallback rate) — a served-model name would
   let it price exactly.
-- Next: rerun the capped all-cursor trial on the fixed stack (`team-cursor-122710`, launched
-  2026-08-22 19:27Z), then the full-budget run (`budget_secs=14400`) with the replica judge
-  on the better backend.
+- **`team-cursor-122710` (fixed stack, 2026-08-22 19:27–20:01Z): integrated=7 failures=0,
+  $20.66** (MARATHON-2 ff by backend-dev-1 at t+12 min; -24/-25/-26/-27 by qa-engineer-1;
+  -3 on attempt 2 after a critic reject; -21 by frontend-dev-1; finalize at the deadline).
+  42 metered cursor turns (39 with a result line), no `classified error`/fast-fail/liveness/
+  FATAL in daemon.out, no agent killed mid-turn, no prompt text in any argv. Trial 2 → 3:
+  1 → 7 integrations, daemon crash → clean exit. Watched via a Sonnet subagent (README
+  "Watching a trial from an agent session").
+- Next: the full-budget all-cursor run (`budget_secs=14400`, cap sized from $20.66/33 min ≈
+  $38/h → ~$150 for 4 h) with the replica judge; compare against the codex team arm.
 
