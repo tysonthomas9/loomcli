@@ -86,6 +86,9 @@ func delivererForSession(session *domain.AgentSession) leadTurnDeliverer {
 		provider = strings.TrimSpace(session.Metadata[MetadataRuntimeProvider])
 	}
 	if provider != "" && !strings.EqualFold(provider, RuntimeProviderCodex) {
+		if strings.EqualFold(strings.TrimSpace(session.Metadata[MetadataHarnessName]), HarnessNameHeadless) {
+			return newHeadlessTurnDeliverer(provider, session)
+		}
 		return newHarnessTurnDeliverer(provider, session)
 	}
 	return newCodexTurnDeliverer(session)

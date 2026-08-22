@@ -33,6 +33,30 @@ func leadControlDisabled() bool {
 // runHarnessLead is a test seam over the harness lead runtime.
 var runHarnessLead = leadcontrol.RunHarnessLeadRuntime
 
+// runHeadlessLead is a test seam over the headless lead runtime.
+var runHeadlessLead = leadcontrol.RunHeadlessLeadRuntime
+
+// headlessLeadInvocation builds the per-turn command for backends whose
+// controlled lead runs headless (one non-interactive process per turn,
+// resuming a persistent thread) instead of under PTY supervision. cursor:
+// the interactive TUI has no turn-boundary signal the wrapper can read, so a
+// supervised session never reports idle; `cursor-agent -p --resume <chat>`
+// keeps the thread in cursor's own storage and ends the process per turn,
+// which is an exact turn boundary.
+func headlessLeadInvocation(backend, workDir string) (leadcontrol.HeadlessLeadRuntimeConfig, bool) {
+	switch backend {
+	case "cursor":
+		return leadcontrol.HeadlessLeadRuntimeConfig{
+			BinaryPath: "cursor-agent",
+			Args:       []string{"-p", "--force", "--trust", "--output-format", "stream-json"},
+			ResumeFlag: "--resume",
+			Env:        buildBackendEnv(workDir, ""),
+		}, true
+	default:
+		return leadcontrol.HeadlessLeadRuntimeConfig{}, false
+	}
+}
+
 // RunControlledLeadRuntime launches the controlled lead runtime for the given
 // backend: the Codex app-server runtime for codex, the harness-wrapper PTY
 // runtime for the other supported backends. Returns handled=false when the
@@ -54,6 +78,14 @@ func RunControlledLeadRuntime(
 	backend := strings.ToLower(strings.TrimSpace(backendName))
 	if backend == NameCodex {
 		return true, RunCodexLeadRuntime(ctx, st, workspace, leadName, sessionID, workDir, prompt)
+	}
+	if hl, ok := headlessLeadInvocation(backend, workDir); ok {
+		if err := validateSafetyKnobsFromEnv(backend); err != nil {
+			return true, err
+		}
+		hl.Store, hl.Workspace, hl.LeadName, hl.SessionID = st, workspace, leadName, sessionID
+		hl.WorkDir, hl.Prompt, hl.Backend = workDir, prompt, backend
+		return true, runHeadlessLead(ctx, hl)
 	}
 	inv, ok := harnessLeadInvocation(backend, workDir)
 	if !ok {
@@ -138,7 +170,11 @@ func harnessLeadInvocation(backend, workDir string) (harnessLeadLaunch, bool) {
 		// read_only on cursor is the prompt preamble and nothing more, and the
 		// supervisor says so at spawn. A tool list on cursor never reaches
 		// here — ValidateSafetyKnobs refuses the run first.
-		return harnessLeadLaunch{binary: "cursor-agent", args: []string{"--force"}, env: buildBackendEnv(workDir, "")}, true
+		// --trust: without it the interactive TUI opens a "Workspace Trust
+		// Required" dialog before the first turn; the wrapper's classifier
+		// reports that as an active turn, so a supervised lead wedges on it
+		// forever (no human at the PTY to press [a]).
+		return harnessLeadLaunch{binary: "cursor-agent", args: []string{"--force", "--trust"}, env: buildBackendEnv(workDir, "")}, true
 	default:
 		return harnessLeadLaunch{}, false
 	}

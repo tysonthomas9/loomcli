@@ -65,13 +65,52 @@ func TestRunControlledLeadRuntimeDispatchesClaude(t *testing.T) {
 	}
 }
 
+func installFakeHeadlessLead(t *testing.T) *leadcontrol.HeadlessLeadRuntimeConfig {
+	t.Helper()
+	var captured leadcontrol.HeadlessLeadRuntimeConfig
+	orig := runHeadlessLead
+	runHeadlessLead = func(_ context.Context, cfg leadcontrol.HeadlessLeadRuntimeConfig) error {
+		captured = cfg
+		return nil
+	}
+	t.Cleanup(func() { runHeadlessLead = orig })
+	return &captured
+}
+
+func TestRunControlledLeadRuntimeDispatchesCursorHeadless(t *testing.T) {
+	harness := installFakeHarnessLead(t)
+	captured := installFakeHeadlessLead(t)
+	handled, err := RunControlledLeadRuntime(context.Background(), nil, "WS", "nova", "lead-session", "/repo", "prompt", "cursor")
+	if err != nil {
+		t.Fatalf("RunControlledLeadRuntime() error = %v", err)
+	}
+	if !handled {
+		t.Fatal("cursor lead should be handled by the controlled runtime")
+	}
+	if harness.BinaryPath != "" {
+		t.Fatalf("cursor must not launch the PTY harness runtime (no idle signal): %+v", *harness)
+	}
+	wantArgs := []string{"-p", "--force", "--trust", "--output-format", "stream-json"}
+	if captured.Backend != "cursor" || captured.BinaryPath != "cursor-agent" || !slices.Equal(captured.Args, wantArgs) {
+		t.Fatalf("captured headless config = %+v, want cursor-agent %q", captured, wantArgs)
+	}
+	if captured.ResumeFlag != "--resume" {
+		t.Fatalf("ResumeFlag = %q, want --resume", captured.ResumeFlag)
+	}
+	if captured.WorkDir != "/repo" || captured.Prompt != "prompt" || captured.SessionID != "lead-session" || captured.Workspace != "WS" || captured.LeadName != "nova" {
+		t.Fatalf("captured identity fields = %+v", captured)
+	}
+	if !slices.Contains(captured.Env, "LOOM_WORKTREE_PATH=/repo") {
+		t.Fatalf("captured env missing LOOM_WORKTREE_PATH: %#v", captured.Env)
+	}
+}
+
 func TestRunControlledLeadRuntimeDispatchesGenericBackends(t *testing.T) {
 	cases := map[string]struct {
 		args   []string
 		binary string // backend name and exec binary differ for cursor (cursor-agent)
 	}{
 		"gemini":   {[]string{"--approval-mode=yolo"}, "gemini"},
-		"cursor":   {[]string{"--force"}, "cursor-agent"},
 		"opencode": {nil, "opencode"},
 	}
 	for backend, want := range cases {

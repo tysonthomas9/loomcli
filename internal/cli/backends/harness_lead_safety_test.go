@@ -92,7 +92,8 @@ func TestControlledLead_UnenforceableKnobRefusesWithoutFallback(t *testing.T) {
 func TestControlledLead_SoftReadOnlyStillLaunches(t *testing.T) {
 	clearSafetyEnv(t)
 	t.Setenv("LOOM_READ_ONLY", "1")
-	captured := installFakeHarnessLead(t)
+	installFakeHarnessLead(t)
+	captured := installFakeHeadlessLead(t) // cursor leads run headless
 
 	handled, err := RunControlledLeadRuntime(context.Background(), nil, "WS", "nova", "s", "/repo", "prompt", "cursor")
 	if err != nil || !handled {
