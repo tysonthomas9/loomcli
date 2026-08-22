@@ -64,6 +64,7 @@ class LoomAgent(BaseInstalledAgent):
         worker_backend: str | None = None,
         lead_backend: str | None = None,
         cursor_api_key_path: str | None = None,
+        cursor_auth_json_path: str | None = None,
         cursor_install_url: str = "https://cursor.com/install",
         cursor_model: str | None = None,
         **kwargs,
@@ -104,6 +105,7 @@ class LoomAgent(BaseInstalledAgent):
         if self._needs_cursor and self._stub:
             raise ValueError("cursor backends have no stub; drop --ak stub=true")
         self._cursor_api_key_path = cursor_api_key_path
+        self._cursor_auth_json_path = cursor_auth_json_path
         self._cursor_install_url = str(cursor_install_url)
         # Pinned cursor model id (`cursor-agent models`); None = cursor's
         # `auto`. Applied by the shim to every print-mode invocation.
@@ -270,30 +272,52 @@ class LoomAgent(BaseInstalledAgent):
             f"chmod -R a+rX {cursor_home} && cursor-agent --version",
             timeout_sec=600,
         )
-        key_path = self._resolve_cursor_api_key()
+        kind, local_path = self._resolve_cursor_credential()
         remote_dir = "/installed-agent/cursor-auth"
-        await environment.upload_file(key_path, f"{remote_dir}/api-key")
+        remote_name = "auth.json" if kind == "auth" else "api-key"
+        await environment.upload_file(local_path, f"{remote_dir}/{remote_name}")
         chown_user = environment.default_user
         chown = f"chown -R {chown_user} {remote_dir} && " if chown_user else ""
-        await self.exec_as_root(environment, f"{chown}chmod 600 {remote_dir}/api-key")
-
-    def _resolve_cursor_api_key(self) -> str:
-        """Path of a file holding ONE Cursor API key (cursor.com/dashboard ->
-        Integrations -> User API Keys). Only existence/size is checked here;
-        the contents are never read by the adapter."""
-        candidate = self._cursor_api_key_path or self._get_env(
-            "LOOM_MARATHON_CURSOR_API_KEY_FILE"
+        await self.exec_as_root(
+            environment, f"{chown}chmod 700 {remote_dir} && chmod 600 {remote_dir}/{remote_name}"
         )
-        if not candidate:
-            candidate = str(Path.home() / ".cursor" / "marathon-api-key")
-        p = Path(candidate).expanduser()
-        if not p.is_file() or p.stat().st_size == 0:
-            raise RuntimeError(
-                f"cursor API key file not found or empty at {p}; pass "
-                "--ak cursor_api_key_path=... or set LOOM_MARATHON_CURSOR_API_KEY_FILE "
-                "(cursor backends need a Cursor user API key in a file)"
-            )
-        return str(p)
+
+    # Default host locations of the two accepted cursor credentials. The
+    # auth.json is what `cursor-agent login` writes when told to use its file
+    # credential store instead of the macOS Keychain:
+    #   AGENT_CLI_CREDENTIAL_STORE=file HOME=~/.cursor-marathon cursor-agent login
+    # (one browser login; the staging HOME keeps it apart from the host's own
+    # Keychain-backed login). Linux cursor-agent uses the file store by
+    # default, so bootstrap just links it into the container's ~/.config/cursor.
+    CURSOR_AUTH_JSON_DEFAULT = Path.home() / ".cursor-marathon" / ".cursor" / "auth.json"
+    CURSOR_API_KEY_DEFAULT = Path.home() / ".cursor" / "marathon-api-key"
+
+    def _resolve_cursor_credential(self) -> tuple[str, str]:
+        """("auth", path) for a file-store auth.json (host account login) or
+        ("apikey", path) for a file holding ONE Cursor user API key. An explicit
+        knob/env wins and must exist; otherwise the default auth.json, then
+        the default key file. Only existence/size is checked — the adapter
+        never reads either file's contents."""
+        explicit = [
+            ("auth", self._cursor_auth_json_path or self._get_env("LOOM_MARATHON_CURSOR_AUTH_JSON")),
+            ("apikey", self._cursor_api_key_path or self._get_env("LOOM_MARATHON_CURSOR_API_KEY_FILE")),
+        ]
+        for kind, candidate in explicit:
+            if candidate:
+                p = Path(candidate).expanduser()
+                if not p.is_file() or p.stat().st_size == 0:
+                    raise RuntimeError(f"cursor {kind} file not found or empty at {p}")
+                return kind, str(p)
+        for kind, p in (("auth", self.CURSOR_AUTH_JSON_DEFAULT), ("apikey", self.CURSOR_API_KEY_DEFAULT)):
+            if p.is_file() and p.stat().st_size > 0:
+                return kind, str(p)
+        raise RuntimeError(
+            "no cursor credential found. Either log the host account into a file "
+            f"store once — `AGENT_CLI_CREDENTIAL_STORE=file HOME={self.CURSOR_AUTH_JSON_DEFAULT.parents[1]} "
+            f"cursor-agent login` — producing {self.CURSOR_AUTH_JSON_DEFAULT} "
+            "(or pass --ak cursor_auth_json_path=...), or put a Cursor user API key in "
+            f"{self.CURSOR_API_KEY_DEFAULT} (or --ak cursor_api_key_path=...)"
+        )
 
     def _resolve_codex_auth(self) -> str:
         """Sanitized codex credential: auth.json ONLY (never host config/history)."""

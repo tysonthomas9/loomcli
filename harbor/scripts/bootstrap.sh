@@ -405,15 +405,28 @@ if [ "$STUB" != "1" ] && [ "$NEED_CODEX" = 1 ]; then
 fi
 mkdir -p "$CODEX_HOME/sessions"
 
-# cursor workers: key lives only in the container-only 600 file; exported into
-# this process env (the daemon inherits it; loom's envfilter allowlists
-# CURSOR_API_KEY into every agent subprocess). Never echoed, never in env.sh.
+# cursor roles: one of two container-only 600 credentials uploaded by the
+# adapter. auth.json (a host-account login written by cursor-agent's file
+# credential store) is linked to where Linux cursor-agent reads it —
+# $HOME/.config/cursor/auth.json (loom passes HOME/XDG_CONFIG_HOME through to
+# every agent subprocess); it stays a symlink so token refreshes land in the
+# 600 file. Otherwise the API key is exported into this process env (the
+# daemon inherits it; envfilter allowlists CURSOR_API_KEY). Never echoed.
 if [ "$NEED_CURSOR" = 1 ]; then
   [ "$STUB" != "1" ] || die "cursor backends have no stub"
-  [ -s /installed-agent/cursor-auth/api-key ] || die "cursor api-key missing (cursor backend requested)"
-  CURSOR_API_KEY="$(tr -d '[:space:]' < /installed-agent/cursor-auth/api-key)"
-  export CURSOR_API_KEY
-  [ -n "$CURSOR_API_KEY" ] || die "cursor api-key file is empty"
+  if [ -s /installed-agent/cursor-auth/auth.json ]; then
+    mkdir -p "$HOME/.config/cursor" && chmod 700 "$HOME/.config/cursor" \
+      && ln -sf /installed-agent/cursor-auth/auth.json "$HOME/.config/cursor/auth.json" \
+      || die "cannot link cursor auth.json into $HOME/.config/cursor"
+    log "cursor credential: host-account auth.json"
+  elif [ -s /installed-agent/cursor-auth/api-key ]; then
+    CURSOR_API_KEY="$(tr -d '[:space:]' < /installed-agent/cursor-auth/api-key)"
+    export CURSOR_API_KEY
+    [ -n "$CURSOR_API_KEY" ] || die "cursor api-key file is empty"
+    log "cursor credential: user API key"
+  else
+    die "cursor credential missing (cursor backend requested): neither auth.json nor api-key uploaded"
+  fi
 fi
 
 # ---- preflight asserts (fail fast, before any model spend) -------------------
@@ -427,16 +440,27 @@ if [ "$NEED_CURSOR" = 1 ]; then
     && : > "$LOOM_MARATHON_CURSOR_USAGE_DIR/.preflight" \
     && rm -f "$LOOM_MARATHON_CURSOR_USAGE_DIR/.preflight" \
     || die "cursor usage dir not writable: $LOOM_MARATHON_CURSOR_USAGE_DIR"
-  # `cursor-agent status` exits 0 even when unauthenticated. Observed text:
-  # logged out -> "Not logged in"; logged in -> "✓ Logged in as <email>".
-  # Reject the negative forms first, then require the positive one.
-  CURSOR_STATUS=$(timeout 60 cursor-agent status 2>&1 || true)
-  case "$CURSOR_STATUS" in
-    *"Not logged in"*|*"not logged in"*|*"Authentication required"*|*"Error"*)
-      die "cursor-agent not authenticated: ${CURSOR_STATUS}" ;;
-    *"Logged in as"*)
-      log "cursor-agent $(cursor-agent --version 2>/dev/null) authenticated (workers=$LOOM_BACKEND lead=$LEAD_BACKEND)" ;;
-    *) die "cursor-agent status unrecognized: ${CURSOR_STATUS:-<no output>}" ;;
+  # `cursor-agent status` exits 0 whatever the state, and its isAuthenticated
+  # only means "tokens are present" (a stale or bogus auth.json still reports
+  # true with "unable to fetch user details"). Require userInfo, which the
+  # CLI fills only after a successful round-trip to Cursor's API — the same
+  # thing the first paid turn would need.
+  CURSOR_STATUS=$(timeout 60 cursor-agent status --format json 2>&1 || true)
+  CURSOR_WHO=$(printf '%s' "$CURSOR_STATUS" | python3 -c '
+import sys, json
+raw = sys.stdin.read()
+try:
+    d = json.loads(raw[raw.index("{"):])
+except Exception:
+    print("PARSE-ERROR"); sys.exit(0)
+ui = d.get("userInfo") or {}
+who = ui.get("email") or (("user id %s" % ui["userId"]) if ui.get("userId") else "")
+print(who if d.get("isAuthenticated") and who else "UNAUTH:" + str(d.get("message") or d.get("status")))
+' 2>/dev/null || echo PARSE-ERROR)
+  case "$CURSOR_WHO" in
+    PARSE-ERROR) die "cursor-agent status unreadable: ${CURSOR_STATUS:-<no output>}" ;;
+    UNAUTH:*) die "cursor-agent not authenticated (${CURSOR_WHO#UNAUTH:}); status: ${CURSOR_STATUS}" ;;
+    *) log "cursor-agent $(cursor-agent --version 2>/dev/null) authenticated as $CURSOR_WHO (workers=$LOOM_BACKEND lead=$LEAD_BACKEND)" ;;
   esac
 fi
 if [ "$STUB" = "1" ]; then

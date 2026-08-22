@@ -287,8 +287,15 @@ Status: spec A + B landed; stub dry-run NOT yet run.
   0 INVARIANT-VIOLATION. Lead bug found and fixed (96d4160e3): it reset a freshly claimed
   in_progress task to open during seeding.
 - **All-cursor arm wired (a34b9b670 + f8074adfa):** `--ak backend=cursor` runs lead AND
-  workers on cursor-agent (`--ak cursor_api_key_path=<file>`; default
-  `~/.cursor/marathon-api-key`; the adapter only uploads the file). The lead cannot run under
+  workers on cursor-agent. Credential (adapter only uploads the file, never reads it): the
+  host account's own login — cursor-agent on macOS keeps tokens in the Keychain, but
+  `AGENT_CLI_CREDENTIAL_STORE=file HOME=~/.cursor-marathon cursor-agent login` (one browser
+  login) writes a portable `~/.cursor-marathon/.cursor/auth.json`
+  (`{accessToken,refreshToken,apiKey}`), which bootstrap symlinks to
+  `~/.config/cursor/auth.json` where Linux cursor-agent's default file store reads it
+  (podman-verified); or a user API key file (`--ak cursor_api_key_path`, default
+  `~/.cursor/marathon-api-key`). Preflight uses `cursor-agent status --format json` and
+  requires `userInfo` (a stale/bogus auth.json still reports `isAuthenticated: true`). The lead cannot run under
   the harness-wrapper PTY runtime — the wrapper has no cursor turn detector, so a supervised
   cursor TUI never reports idle (verified: stuck `active` at "Add a follow-up"), and it opens a
   Workspace Trust dialog first. loom now has a headless controlled lead runtime for cursor:
