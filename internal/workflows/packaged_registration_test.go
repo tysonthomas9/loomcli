@@ -81,36 +81,63 @@ func installPackagedEpicRunner(t *testing.T) (root, indexDigest string) {
 // server.mjs body, so two calls can stand in for two distinct app builds.
 func installPackagedEpicRunnerBuild(t *testing.T, serverSource string) (root, indexDigest string) {
 	t.Helper()
+	return installPackagedBuiltinsBuild(t, map[string]string{BuiltinEpicRunnerWorkflowName: serverSource})
+}
+
+// installPackagedBuiltins builds one verified packaged tree holding every
+// named built-in (each with its own stub server.mjs, nested @loom/sdk, and
+// the embedded spec's source digest + derived runner set), points
+// LOOM_BUILTIN_ARTIFACTS_DIR at it, and bakes the index digest as if this
+// were a packaged build. Returns the root and the baked index digest.
+func installPackagedBuiltins(t *testing.T, names ...string) (root, indexDigest string) {
+	t.Helper()
+	sources := make(map[string]string, len(names))
+	for _, name := range names {
+		sources[name] = "// " + name + "\nexport {};\n"
+	}
+	return installPackagedBuiltinsBuild(t, sources)
+}
+
+// installPackagedBuiltinsBuild is installPackagedBuiltins with a server.mjs
+// body per name.
+func installPackagedBuiltinsBuild(t *testing.T, sources map[string]string) (root, indexDigest string) {
+	t.Helper()
 	isolatePackagedEnv(t)
 	root = t.TempDir()
-	dist := filepath.Join(root, BuiltinEpicRunnerWorkflowName, "dist")
-	writePackagedDist(t, dist)
-	if err := os.WriteFile(filepath.Join(dist, "server.mjs"), []byte(serverSource), 0o644); err != nil {
-		t.Fatalf("write server.mjs: %v", err)
-	}
-	artifactDigest, err := driverpkg.DigestDirectory(dist)
-	if err != nil {
-		t.Fatalf("digest packaged dist: %v", err)
-	}
-	sourceDigest, runners, ok := BuiltinArtifactExpectation(BuiltinEpicRunnerWorkflowName)
-	if !ok {
-		t.Fatal("epic-runner builtin missing")
-	}
-	raw, err := packaged.EncodeIndex(packaged.Index{
+	idx := packaged.Index{
 		SchemaVersion: packaged.SchemaVersion,
 		FlueCommit:    PinnedFlueCommit,
 		NodeVersion:   PinnedNodeVersion,
 		Target:        packaged.HostTargetTriple(),
-		Builtins: map[string]packaged.Entry{
-			BuiltinEpicRunnerWorkflowName: {
-				Path:           BuiltinEpicRunnerWorkflowName,
-				Entrypoint:     "workflows/epic-runner.ts",
-				SourceDigest:   sourceDigest,
-				ArtifactDigest: artifactDigest,
-				Runners:        runners,
-			},
-		},
-	})
+		Builtins:      map[string]packaged.Entry{},
+	}
+	for name, serverSource := range sources {
+		dist := filepath.Join(root, name, "dist")
+		writePackagedDist(t, dist)
+		if err := os.WriteFile(filepath.Join(dist, "server.mjs"), []byte(serverSource), 0o644); err != nil {
+			t.Fatalf("write server.mjs: %v", err)
+		}
+		artifactDigest, err := driverpkg.DigestDirectory(dist)
+		if err != nil {
+			t.Fatalf("digest packaged dist: %v", err)
+		}
+		spec, ok := BuiltinWorkflow(name)
+		if !ok {
+			t.Fatalf("built-in %q missing", name)
+		}
+		sourceDigest, runners, ok := BuiltinArtifactExpectation(name)
+		if !ok {
+			t.Fatalf("built-in %q has no artifact expectation", name)
+		}
+		idx.Builtins[name] = packaged.Entry{
+			Path:           name,
+			Entrypoint:     spec.Entrypoint,
+			SourceDigest:   sourceDigest,
+			ArtifactDigest: artifactDigest,
+			Runners:        runners,
+		}
+	}
+	raw, err := packaged.EncodeIndex(idx)
 	if err != nil {
 		t.Fatalf("encode index: %v", err)
 	}
@@ -419,9 +446,83 @@ func TestEnsureBuiltinWorkflowTamperedArtifactFailsClosedEverywhere(t *testing.T
 	}
 }
 
+// TestEnsureBuiltinWorkflowUsesPackagedGitHubReviewAgent (DEV-V5-37): with
+// both required built-ins packaged, github-review-agent registers from its
+// own artifact entry WITHOUT the compiler, with packaged provenance, the
+// single derived runner, and its nested @loom/sdk staged.
+func TestEnsureBuiltinWorkflowUsesPackagedGitHubReviewAgent(t *testing.T) {
+	ctx := context.Background()
+	_, indexDigest := installPackagedBuiltins(t, packaged.RequiredBuiltins...)
+	st := newBuiltinStore(t)
+
+	if err := EnsureBuiltinWorkflow(ctx, st, "BUILTIN", BuiltinGitHubReviewAgentWorkflowName); err != nil {
+		t.Fatalf("EnsureBuiltinWorkflow(github-review-agent): %v", err)
+	}
+
+	version := activeBuiltinVersion(t, st, BuiltinGitHubReviewAgentWorkflowName)
+	spec, ok := BuiltinWorkflow(BuiltinGitHubReviewAgentWorkflowName)
+	if !ok {
+		t.Fatal("github-review-agent builtin missing")
+	}
+	want := map[string]string{
+		"provenance":            packaged.ProvenancePackagedBuiltin,
+		"trust_level":           string(domain.DriverTrustTrusted),
+		"source_digest":         SourceDigest(spec.Files),
+		"packaged_index_digest": indexDigest,
+	}
+	for key, value := range want {
+		if got := version.Manifest[key]; got != value {
+			t.Errorf("manifest[%s] = %q, want %q", key, got, value)
+		}
+	}
+	var runners []driverpkg.DriverRunnerSpec
+	if err := json.Unmarshal([]byte(version.Manifest["runners"]), &runners); err != nil {
+		t.Fatalf("decode manifest runners %q: %v", version.Manifest["runners"], err)
+	}
+	wantRunners := []driverpkg.DriverRunnerSpec{{
+		Name: BuiltinGitHubReviewTaskRunnerName, Kind: driverpkg.RunnerKindFlueWorkflow, Entrypoint: BuiltinGitHubReviewTaskRunnerName,
+	}}
+	if !reflect.DeepEqual(runners, wantRunners) {
+		t.Fatalf("manifest runners = %+v, want %+v", runners, wantRunners)
+	}
+	assertStagedBundle(t, version.BundleRef)
+	if !strings.Contains(filepath.ToSlash(version.BundleRef), "/drivers/"+BuiltinGitHubReviewAgentWorkflowName+"/") {
+		t.Fatalf("bundle ref %q must be staged under drivers/github-review-agent", version.BundleRef)
+	}
+}
+
+// TestEnsureBuiltinWorkflowBothPackagedRegisterIndependently (DEV-V5-37):
+// each required built-in registers from its own index entry, in either
+// order, each with its own packaged registration log line.
+func TestEnsureBuiltinWorkflowBothPackagedRegisterIndependently(t *testing.T) {
+	ctx := context.Background()
+	installPackagedBuiltins(t, packaged.RequiredBuiltins...)
+	st := newBuiltinStore(t)
+	logs := captureSlog(t)
+
+	// github-review-agent first: it must not depend on epic-runner having
+	// been registered.
+	for _, name := range []string{BuiltinGitHubReviewAgentWorkflowName, BuiltinEpicRunnerWorkflowName} {
+		if err := EnsureBuiltinWorkflow(ctx, st, "BUILTIN", name); err != nil {
+			t.Fatalf("EnsureBuiltinWorkflow(%s): %v", name, err)
+		}
+		if got := activeBuiltinVersion(t, st, name).Manifest["provenance"]; got != packaged.ProvenancePackagedBuiltin {
+			t.Fatalf("%s manifest[provenance] = %q, want packaged_builtin", name, got)
+		}
+	}
+	out := logs.String()
+	for _, name := range packaged.RequiredBuiltins {
+		if !strings.Contains(out, "registered from packaged artifact") || !strings.Contains(out, "workflow="+name) {
+			t.Fatalf("expected a packaged registration log line for %s, logs:\n%s", name, out)
+		}
+	}
+}
+
 // TestEnsureBuiltinWorkflowGitHubReviewAgentUnpackagedOnDesktopFailsClosed
-// (R1): a built-in absent from the packaged index is "not packaged", and on
-// desktop that fails closed rather than compiling.
+// (R1, now the "required but missing" case after DEV-V5-37 widened the
+// required set): a build that ships only epic-runner fails closed for
+// github-review-agent with operator guidance — never compiles, never leaves
+// a driver row — while epic-runner still registers from its own entry.
 func TestEnsureBuiltinWorkflowGitHubReviewAgentUnpackagedOnDesktopFailsClosed(t *testing.T) {
 	installPackagedEpicRunner(t)
 	t.Setenv("LOOM_LOCAL_RUNTIME", "desktop")
@@ -431,11 +532,17 @@ func TestEnsureBuiltinWorkflowGitHubReviewAgentUnpackagedOnDesktopFailsClosed(t 
 	if err == nil {
 		t.Fatal("EnsureBuiltinWorkflow must fail closed for an unpackaged built-in on desktop")
 	}
-	if !strings.Contains(err.Error(), "builtin_artifact_missing") {
-		t.Fatalf("error must mention builtin_artifact_missing, got: %v", err)
+	for _, marker := range []string{"builtin_artifact_missing", "reinstall Loom"} {
+		if !strings.Contains(err.Error(), marker) {
+			t.Fatalf("error must mention %q, got: %v", marker, err)
+		}
 	}
 	assertNoCompileAttempt(t, err)
 	assertNoBuiltinDriver(t, st, BuiltinGitHubReviewAgentWorkflowName)
+
+	if err := EnsureBuiltinWorkflow(context.Background(), st, "BUILTIN", BuiltinEpicRunnerWorkflowName); err != nil {
+		t.Fatalf("epic-runner must still register from its own entry: %v", err)
+	}
 }
 
 // TestEnsureBuiltinWorkflowPackagedRegistrationErrorDoesNotCompile: a

@@ -29,9 +29,11 @@
   "bundle": {
     "active": true,
     "targets": ["app", "dmg"],
-    "externalBin": ["binaries/loom", "binaries/fleet-db"],
+    "externalBin": ["binaries/loom", "binaries/fleet-db", "binaries/node"],
     "resources": {
       "resources/webui/": "webui/"
+      ,"resources/builtin-workflows/": "builtin-workflows/"
+      ,"resources/licenses/": "licenses/"
     },
     "macOS": {
       "minimumSystemVersion": "12.0"

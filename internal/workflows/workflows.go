@@ -350,13 +350,19 @@ func builtInWorkflowBundleAvailable(version *domain.DriverVersion) bool {
 	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return false
 	}
-	for _, relFile := range []string{"manifest.json", filepath.Join("dist", "server.mjs")} {
+	for _, relFile := range []string{filepath.Join("dist", "server.mjs"), filepath.FromSlash(version.Manifest["server_ref"])} {
+		if strings.TrimSpace(relFile) == "." || strings.TrimSpace(relFile) == "" {
+			continue
+		}
 		info, err := os.Stat(filepath.Join(root, relFile))
-		if err != nil || info.IsDir() {
-			return false
+		if err == nil && !info.IsDir() {
+			return true
 		}
 	}
-	return true
+	// Operator registrations may point at a bundle managed outside the
+	// workspace. A non-empty attested digest is the durable availability marker
+	// in that case; registration has already validated the staged artifact.
+	return strings.TrimSpace(version.Manifest["artifact_digest"]) != ""
 }
 
 func builtinWorkflowWorkDir() string {

@@ -39,6 +39,9 @@ func registerEpicRunnerAt(t *testing.T, st store.Store, workDir, sourceDigest st
 	if err := os.WriteFile(filepath.Join(dist, "server.mjs"), []byte("export {};\n"), 0o644); err != nil {
 		t.Fatalf("write server: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(dist, "manifest.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
 	registered, err := driverpkg.RegisterFlueDriver(context.Background(), st, driverpkg.RegisterFlueOptions{
 		WorkspaceKey: "BUILTIN",
 		WorkDir:      workDir,

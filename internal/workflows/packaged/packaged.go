@@ -37,8 +37,10 @@ var ExpectedIndexDigest string
 
 // RequiredBuiltins are the built-ins a desktop/packaged build must ship for
 // builtin_runtime_ready to be true. String literals: this package must not
-// import workflows. Adding a desktop built-in = append here AND package it.
-var RequiredBuiltins = []string{"epic-runner"}
+// import workflows. Both ship in the desktop app as of DEV-V5-37; keep the
+// list sorted. Adding a desktop built-in = append here AND package it
+// (desktop/scripts/prepare-sidecar.sh enforces the set via --require-all).
+var RequiredBuiltins = []string{"epic-runner", "github-review-agent"}
 
 const (
 	// SchemaVersion is the only index.json schema this binary accepts.
@@ -222,10 +224,18 @@ func Root() (string, error) {
 	return "", ErrNotPackaged
 }
 
+// exeRelativeRoots probes next to the executable and under the app bundle's
+// Resources directory. The executable path is symlink-resolved first: the
+// runbook's `/usr/local/bin/loom -> …/Contents/MacOS/loom` convenience link
+// would otherwise make every probe miss and a packaged build fail closed
+// with a false "reinstall Loom".
 func exeRelativeRoots() []string {
 	exe, err := executablePath()
 	if err != nil || strings.TrimSpace(exe) == "" {
 		return nil
+	}
+	if real, rerr := filepath.EvalSymlinks(exe); rerr == nil {
+		exe = real
 	}
 	exeDir := filepath.Dir(exe)
 	return []string{

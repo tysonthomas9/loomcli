@@ -1,4 +1,34 @@
 import { createLoomDriverClient } from '@loom/sdk/driver';
+import { defineAgent, defineWorkflow } from '@flue/runtime';
+
+// Flue HEAD (durable-streams) requires every workflow module to default-export
+// a defineWorkflow() definition; a bare `export function run` no longer
+// normalizes — the generated server.mjs throws at module load for EVERY
+// module in the bundle, so without this wrapper the packaged built-in cannot
+// even be load-smoked (DEV-V5-37). Same shape as epic-runner: this workflow
+// is not an LLM agent (it orchestrates via the loom driver SDK), so the bound
+// agent is a credential-free stub (model: false) and the invocation payload
+// arrives via env (LOOM_FLUE_INVOKE_PAYLOAD from sandbox/launcher.go).
+export default defineWorkflow({
+  agent: defineAgent(() => ({ model: false })),
+  run: async () => toJsonResult(await run({ payload: builtinInvokePayload() })),
+});
+
+function builtinInvokePayload() {
+  const raw = process.env.LOOM_FLUE_INVOKE_PAYLOAD || process.env.LOOM_TASK_RUN_REQUEST_JSON || '{}';
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+// Flue HEAD validates the workflow return value with a strict JSON check that
+// rejects undefined (json-snapshot.cloneJsonSerializable); round-trip through
+// JSON so optional result fields left undefined never throw.
+function toJsonResult(value) {
+  return value === undefined ? null : JSON.parse(JSON.stringify(value));
+}
 
 // github-review-agent: trigger-driven COMMENT-only PR review.
 //

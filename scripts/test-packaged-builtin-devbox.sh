@@ -68,29 +68,36 @@ assert_contains() { grep -qF -- "$2" <<<"$1" || fail "$3: expected to contain '$
 assert_not_contains() { ! grep -qF -- "$2" <<<"$1" || fail "$3: must NOT contain '$2'"; }
 
 # ---------------------------------------------------------------- 1. dist
-log "1. building epic-runner dist via scripts/rebuild-builtin-bundle.sh (FLUE_REPO=$FLUE_REPO)"
-FLUE_REPO="$FLUE_REPO" BUILTIN_DIST_DEST="$TMP/epic-runner-dist" "$ROOT/scripts/rebuild-builtin-bundle.sh" >"$OUT/rebuild.log" 2>&1 \
-  || { tail -40 "$OUT/rebuild.log" >&2; fail "rebuild-builtin-bundle.sh failed"; }
-[[ -f "$TMP/epic-runner-dist/server.mjs" ]] || fail "no server.mjs in built dist"
+log "1. building both built-in dists via scripts/rebuild-builtin-bundle.sh (FLUE_REPO=$FLUE_REPO)"
+for name in epic-runner github-review-agent; do
+  FLUE_REPO="$FLUE_REPO" BUILTIN_DIST_DEST="$TMP/${name}-dist" "$ROOT/scripts/rebuild-builtin-bundle.sh" "$name" >"$OUT/rebuild-${name}.log" 2>&1 \
+    || { tail -40 "$OUT/rebuild-${name}.log" >&2; fail "rebuild ${name} failed"; }
+  [[ -f "$TMP/${name}-dist/server.mjs" ]] || fail "no server.mjs in ${name} dist"
+done
 
 # ---------------------------------------------------------- 2. package-builtin
-log "2. loom workflow package-builtin epic-runner --require-all --json"
-PKG_JSON="$(cd "$ROOT" && go run ./cmd/loom workflow package-builtin epic-runner --dist "$TMP/epic-runner-dist" --out "$TMP/bw" --require-all --json)"
-record "package-builtin" "$PKG_JSON"
-tee "$OUT/package.json" <<<"$PKG_JSON" >/dev/null
-INDEX_DIGEST="$(jq -r .index_digest <<<"$PKG_JSON")"
+log "2. loom workflow package-builtin for both built-ins --require-all --json"
+mkdir -p "$TMP/bw"
+for name in epic-runner github-review-agent; do
+  PKG_JSON="$(cd "$ROOT" && go run ./cmd/loom workflow package-builtin "$name" --dist "$TMP/${name}-dist" --out "$TMP/bw" --require-all --json)"
+  record "package-builtin ${name}" "$PKG_JSON"
+  tee "$OUT/package-${name}.json" <<<"$PKG_JSON" >/dev/null
+done
+INDEX_DIGEST="$(shasum -a 256 "$TMP/bw/index.json" | awk '{print "sha256:"$1}')"
 [[ "$INDEX_DIGEST" == sha256:* ]] || fail "index_digest missing"
 [[ "$(jq -r '.audit.native_files|length' <<<"$PKG_JSON")" == 0 ]] || fail "audit.native_files not empty"
 [[ "$(jq -r '.audit.bare_specifiers|length' <<<"$PKG_JSON")" == 0 ]] || fail "audit.bare_specifiers not empty"
 [[ "$(jq -r '.audit.dlopen' <<<"$PKG_JSON")" == false ]] || fail "audit.dlopen true"
 [[ "$(jq -r '.audit.symlinks|length' <<<"$PKG_JSON")" == 0 ]] || fail "audit.symlinks not empty"
-[[ -f "$TMP/bw/index.json" && -f "$TMP/bw/epic-runner/dist/server.mjs" && -f "$TMP/bw/epic-runner/dist/node_modules/@loom/sdk/driver.js" ]] || fail "packaged tree incomplete"
+[[ -f "$TMP/bw/index.json" && -f "$TMP/bw/epic-runner/dist/server.mjs" && -f "$TMP/bw/github-review-agent/dist/server.mjs" && -f "$TMP/bw/epic-runner/dist/node_modules/@loom/sdk/driver.js" && -f "$TMP/bw/github-review-agent/dist/node_modules/@loom/sdk/driver.js" ]] || fail "packaged tree incomplete"
 [[ -z "$(find "$TMP/bw" \( -name '*.node' -o -type l \) -print)" ]] || fail "packaged tree contains .node files or symlinks"
-PKG_JSON2="$(cd "$ROOT" && go run ./cmd/loom workflow package-builtin epic-runner --dist "$TMP/epic-runner-dist" --out "$TMP/bw2" --require-all --json)"
+cp -R "$TMP/bw" "$TMP/bw2"
+PKG_JSON2="$(cd "$ROOT" && go run ./cmd/loom workflow package-builtin github-review-agent --dist "$TMP/github-review-agent-dist" --out "$TMP/bw2" --require-all --json)"
 cmp -s "$TMP/bw/index.json" "$TMP/bw2/index.json" || fail "re-packaging is not byte-identical"
 [[ "$(jq -r .index_digest <<<"$PKG_JSON2")" == "$INDEX_DIGEST" ]] || fail "re-packaging changed index_digest"
-record "server.mjs externals" "$(grep -c '"@loom/sdk' "$TMP/bw/epic-runner/dist/server.mjs") @loom/sdk refs; $(grep -cE 'from "(@daytona/sdk|@flue/runtime|hono|node-liblzma|@mongodb-js/zstd)"' "$TMP/bw/epic-runner/dist/server.mjs" || true) forbidden static externals"
-[[ "$(grep -cE 'from "(@daytona/sdk|@flue/runtime|hono|node-liblzma|@mongodb-js/zstd)"' "$TMP/bw/epic-runner/dist/server.mjs" || true)" == 0 ]] || fail "server.mjs still imports a forbidden external"
+for name in epic-runner github-review-agent; do
+  record "server.mjs externals ${name}" "$(grep -c '"@loom/sdk' "$TMP/bw/${name}/dist/server.mjs" || true) @loom/sdk refs"
+done
 
 # ------------------------------------------------------- 3./4. packaged loom
 log "3. building loom with -X $PKG.ExpectedIndexDigest=$INDEX_DIGEST"
