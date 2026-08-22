@@ -9,11 +9,13 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -53,6 +55,11 @@ const (
 // The server accepts connections in a goroutine and dispatches to handlers.
 // It closes cleanly when the daemon shuts down.
 func (d *Daemon) startControlServer(socketPath string) error {
+	var err error
+	socketPath, err = rpc.EnsureSocketDir(socketPath)
+	if err != nil {
+		return fmt.Errorf("control socket directory: %w", err)
+	}
 	// Remove stale socket from a previous crash (safe because daemon.lock prevents
 	// concurrent startup — any existing socket file is orphaned).
 	os.Remove(socketPath)
@@ -63,6 +70,7 @@ func (d *Daemon) startControlServer(socketPath string) error {
 	}
 
 	d.controlListener = ln
+	d.controlSocket = socketPath
 	slog.Info("control server started", "socket", socketPath)
 
 	go func() {
@@ -419,10 +427,20 @@ func (d *Daemon) handleAgentControlYield(name string) DaemonControlResponse {
 	return DaemonControlResponse{Success: true}
 }
 
-// resolveDaemonSocketPath returns the control socket path adjacent to the PID file.
-func resolveDaemonSocketPath(projectDir, pidFile string) string {
+// ResolveDaemonSocketPath returns the control socket path adjacent to the PID
+// file, with a deterministic short-path fallback on Unix.
+func ResolveDaemonSocketPath(projectDir, pidFile string) string {
 	pidFilePath := supervisor.ResolveDaemonPath(projectDir, pidFile)
-	return filepath.Join(filepath.Dir(pidFilePath), "daemon.sock")
+	natural := filepath.Join(filepath.Dir(pidFilePath), "daemon.sock")
+	if runtime.GOOS != "windows" && len(natural) > rpc.MaxUnixSocketPath {
+		return rpc.ShortSocketPathNamed(projectDir, "daemon.sock")
+	}
+	return natural
+}
+
+// resolveDaemonSocketPath is the package-local seam used by daemon commands.
+func resolveDaemonSocketPath(projectDir, pidFile string) string {
+	return ResolveDaemonSocketPath(projectDir, pidFile)
 }
 
 // writeControlResponse writes a JSON response line to the connection.

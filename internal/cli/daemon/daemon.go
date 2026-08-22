@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/notify"
+	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -41,10 +42,12 @@ type Daemon struct {
 	// controlListener is the Unix domain socket listener for the control server.
 	// Set by startControlServer, closed on Stop.
 	controlListener net.Listener
+	controlSocket   string
 
 	// ipcListener is the Unix domain socket listener for the agent IPC server.
 	// Set by startIPCServer, closed on Stop.
 	ipcListener net.Listener
+	ipcSocket   string
 
 	// notifyBus publishes IPC mutation events for real-time consumers.
 	// Defaults to NopPublisher; set to a real Bus in runDaemon().
@@ -157,10 +160,16 @@ func (d *Daemon) Stop() {
 	if d.controlListener != nil {
 		_ = d.controlListener.Close()
 	}
+	if d.controlSocket != "" {
+		_ = rpc.CleanupSocketDir(d.controlSocket)
+	}
 
 	// Close the agent IPC socket listener (if running)
 	if d.ipcListener != nil {
 		_ = d.ipcListener.Close()
+	}
+	if d.ipcSocket != "" {
+		_ = rpc.CleanupSocketDir(d.ipcSocket)
 	}
 
 	// Stop mutation buffer (drains subscription goroutine)

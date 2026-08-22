@@ -50,6 +50,28 @@ func TestShortSocketPath_LongWorkspace(t *testing.T) {
 	}
 }
 
+func TestShortSocketPathNamed(t *testing.T) {
+	t.Parallel()
+
+	shortWorkspace := "/home/user/proj"
+	if got, want := ShortSocketPathNamed(shortWorkspace, "daemon.sock"), filepath.Join(shortWorkspace, ".loom", "daemon.sock"); got != want {
+		t.Fatalf("ShortSocketPathNamed(short) = %q, want %q", got, want)
+	}
+
+	longWorkspace := "/" + strings.Repeat("named-", 30)
+	control := ShortSocketPathNamed(longWorkspace, "daemon.sock")
+	ipc := ShortSocketPathNamed(longWorkspace, "agent-ipc.sock")
+	if !strings.HasPrefix(control, "/tmp/loom-") || len(control) > MaxUnixSocketPath {
+		t.Fatalf("ShortSocketPathNamed(long) = %q, want short /tmp/loom-* path", control)
+	}
+	if filepath.Dir(control) != filepath.Dir(ipc) {
+		t.Fatalf("named sockets use different dirs: %q and %q", control, ipc)
+	}
+	if filepath.Base(control) != "daemon.sock" || filepath.Base(ipc) != "agent-ipc.sock" {
+		t.Fatalf("named socket basenames = %q and %q", filepath.Base(control), filepath.Base(ipc))
+	}
+}
+
 func TestShortSocketPath_Determinism(t *testing.T) {
 	t.Parallel()
 
@@ -239,7 +261,7 @@ func TestShortSocketDir_HashLength(t *testing.T) {
 	t.Parallel()
 
 	// Verify the hash portion is 16 hex chars (8 bytes)
-	result := shortSocketDir("/some/canonical/path")
+	result := shortSocketDir("/some/canonical/path", "loom.sock")
 
 	// Result should be /tmp/loom-{16 hex chars}/loom.sock
 	dir := filepath.Dir(result)
