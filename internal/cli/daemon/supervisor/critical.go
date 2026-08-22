@@ -109,6 +109,13 @@ func (s *Supervisor) supervisedAgentBody(name string, ap *AgentProcess) {
 	defer close(ap.Done)
 	defer s.RecoverAndSignal(name)
 	s.superviseAgent(ap)
+	// A normal return (terminal stop, max retries, config removed) ends the
+	// goroutine, so its tick must stop being watched: left registered, it
+	// froze at the last iteration and the liveness watchdog crashed the whole
+	// daemon ~threshold later for a supervisor that had legitimately exited
+	// (marathon trial team-cursor-113455: one fast-failed worker took the
+	// daemon and three healthy agents down 12 minutes after it stopped).
+	s.UnregisterTick(name)
 }
 
 // RegisterTick allocates a tick slot for a goroutine name and primes it with
@@ -118,6 +125,12 @@ func (s *Supervisor) RegisterTick(name string) {
 	tick := new(atomic.Int64)
 	tick.Store(time.Now().UnixNano())
 	s.Ticks.Store(name, tick)
+}
+
+// UnregisterTick removes a goroutine's tick slot once the goroutine has
+// exited for good, so the watchdog stops evaluating a stamp nobody refreshes.
+func (s *Supervisor) UnregisterTick(name string) {
+	s.Ticks.Delete(name)
 }
 
 // RecordTick stamps the current time on the named goroutine's tick slot. Call

@@ -2,6 +2,7 @@ package agenterr
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -212,6 +213,8 @@ func classifyHarnessMarkers(text string) *classifyResult {
 // loom-specific residual for the distinctions the wrapper does not model.
 func classifyFromText(text string, exitCode int, backend string) *AgentError {
 	now := time.Now()
+	raw := text
+	text = stripStreamContent(text)
 
 	// Explicit markers and the harness's terminal verdict come first.
 	result := classifyHarnessMarkers(text)
@@ -240,11 +243,74 @@ func classifyFromText(text string, exitCode int, backend string) *AgentError {
 		Class:      result.Class,
 		ExitCode:   exitCode,
 		Message:    result.Message,
-		RawOutput:  text,
+		RawOutput:  raw,
 		Backend:    backend,
 		RetryAfter: result.RetryAfter,
 		Timestamp:  now,
 	}
+}
+
+// streamContentTypes are the stream-json / JSONL event types that carry the
+// conversation itself — the prompt echoed back, model prose and thinking,
+// tool-call arguments and results — rather than anything the harness says
+// about the turn. They are the agent's and the task's own words, so matching
+// error regexes against them classifies the work instead of the failure: a
+// cursor worker killed mid-turn (exit 1) was filed as ModelNotFound because
+// its echoed task description contained "SIGKILL model … not …", and the same
+// tail re-read later as Timeout from a tool call's `"timeout":30000` argument
+// (marathon trial team-cursor-113455). Both verdicts are terminal or backoff
+// classes; the real cause was an unclassifiable kill.
+var streamContentTypes = map[string]struct{}{
+	"user": {}, "assistant": {}, "thinking": {},
+	"tool_call": {}, "tool_use": {}, "tool_result": {},
+	"content_block_start": {}, "content_block_delta": {}, "content_block_stop": {},
+	"message_start": {}, "message_delta": {}, "message_stop": {},
+	"item.started": {}, "item.updated": {}, "item.completed": {},
+}
+
+// stripStreamContent drops content-event lines from classifier input. A line
+// is dropped only when it is a whole JSON object whose "type" is a content
+// event AND it carries no error field: claude reports a rejected model as an
+// assistant message with a top-level "error", and those must keep matching.
+// Harness status events (system, result, error, turn.failed) and plain stderr
+// prose are untouched.
+func stripStreamContent(text string) string {
+	if !strings.Contains(text, `"type":`) {
+		return text
+	}
+	lines := strings.Split(text, "\n")
+	kept := lines[:0]
+	for _, line := range lines {
+		if isStreamContentLine(line) {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
+}
+
+// isStreamContentLine reports whether line is a content event with no error
+// payload (see stripStreamContent).
+func isStreamContentLine(line string) bool {
+	t := strings.TrimSpace(line)
+	if !strings.HasPrefix(t, "{") || !strings.HasSuffix(t, "}") {
+		return false
+	}
+	var ev struct {
+		Type    string          `json:"type"`
+		Error   json.RawMessage `json:"error"`
+		IsError bool            `json:"is_error"`
+	}
+	if err := json.Unmarshal([]byte(t), &ev); err != nil {
+		return false
+	}
+	if _, ok := streamContentTypes[ev.Type]; !ok {
+		return false
+	}
+	if ev.IsError || (len(ev.Error) > 0 && string(ev.Error) != "null") {
+		return false
+	}
+	return true
 }
 
 // fromClassification adapts a harness-wrapper Classification. The wrapper now

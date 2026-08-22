@@ -1064,3 +1064,50 @@ func TestClassifyFromOutput_IncompatibleBackendCLIIsTerminalModelFailure(t *test
 		t.Fatalf("message = %q", got.Message)
 	}
 }
+
+// TestClassifyIgnoresStreamContentEvents pins the rule that stream-json
+// content events (echoed prompt, model prose, tool-call arguments) are not
+// classifier input. Shape from marathon trial team-cursor-113455: a cursor
+// worker killed mid-turn exited 1; its log tail held the task description
+// ("… SIGKILL model … not …") and a tool call with "timeout":30000, and the
+// classifier answered ModelNotFound (fast-fail) and later Timeout for what was
+// an unclassifiable kill.
+func TestClassifyIgnoresStreamContentEvents(t *testing.T) {
+	prompt := `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Processes match the grader's SIGKILL model and the 60s restart requirement. Redis is started even though health does not use it; a missing module must not exist twice."}]}}`
+	thinking := `{"type":"thinking","subtype":"delta","text":"the selected model may not exist, retry with a timeout"}`
+	toolCall := `{"type":"tool_call","subtype":"started","tool_call":{"shellToolCall":{"args":{"command":"pytest -q","timeout":30000}}}}`
+	killed := "Error: context canceled: terminated by killed"
+
+	t.Run("content-only tail falls through to the exit code", func(t *testing.T) {
+		ae := ClassifyFromOutput(strings.Join([]string{prompt, thinking, toolCall, killed}, "\n"), 1, "cursor")
+		if ae.Class == ModelNotFound || ae.Class == Timeout || ae.Class == ContextOverflow {
+			t.Fatalf("content events classified the failure as %v (%q); want the exit-code fallback", ae.Class, ae.Message)
+		}
+		if !strings.Contains(ae.RawOutput, "SIGKILL model") {
+			t.Fatal("RawOutput must keep the unfiltered text for display")
+		}
+	})
+
+	t.Run("harness verdicts still classify", func(t *testing.T) {
+		result := `{"type":"result","subtype":"error","is_error":true,"result":"model not found: nope-1"}`
+		ae := ClassifyFromOutput(strings.Join([]string{prompt, toolCall, result}, "\n"), 1, "cursor")
+		if ae.Class != ModelNotFound {
+			t.Fatalf("result event with model error: got %v (%q), want ModelNotFound", ae.Class, ae.Message)
+		}
+	})
+
+	t.Run("content event carrying an error field is kept", func(t *testing.T) {
+		assistantErr := `{"type":"assistant","message":{"content":[{"type":"text","text":"There's an issue with the selected model (nope). It may not exist or you may not have access to it."}]},"error":"invalid_request"}`
+		ae := ClassifyFromOutput(strings.Join([]string{prompt, assistantErr}, "\n"), 1, "claude")
+		if ae.Class != ModelNotFound {
+			t.Fatalf("assistant event with error field: got %v (%q), want ModelNotFound", ae.Class, ae.Message)
+		}
+	})
+
+	t.Run("plain prose is untouched", func(t *testing.T) {
+		ae := ClassifyFromOutput("Error: 404 model claude-99 does not exist", 1, "claude")
+		if ae.Class != ModelNotFound {
+			t.Fatalf("prose: got %v, want ModelNotFound", ae.Class)
+		}
+	})
+}
