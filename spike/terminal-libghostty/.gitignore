@@ -1,0 +1,11 @@
+vendor/
+.zig-cache/
+.go-cache/
+.npm-cache/
+node_modules/
+package-lock.json
+build/
+*.a
+*.dylib
+*.so
+*.wasm
