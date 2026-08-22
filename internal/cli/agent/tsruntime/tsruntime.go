@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -17,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 	"github.com/tysonthomas9/loomcli/internal/workflows"
+	"github.com/tysonthomas9/loomcli/internal/workflows/packaged"
 )
 
 // Phase U — execution-leaf unification. When LOOM_DAEMON_LEAF=ts, the daemon's
@@ -254,14 +256,38 @@ var (
 	taskRunnerBundleErr  error
 )
 
-// taskRunnerBundleServerPath builds the bundled task-runner once per process
-// to a stable per-workspace path and returns its server.mjs.
+// taskRunnerBundleServerPath resolves the bundled task-runner's server.mjs
+// once per process. A verified packaged artifact (DEV-V5-31 B1) is used
+// read-only, never compiled; a packaged build or desktop process without one
+// fails closed. Otherwise the bundle is built to a stable per-workspace path.
 func taskRunnerBundleServerPath() (string, error) {
 	taskRunnerBundleOnce.Do(func() {
+		if digest, runners, ok := workflows.BuiltinArtifactExpectation(workflows.BuiltinEpicRunnerWorkflowName); ok {
+			art, err := packaged.Lookup(workflows.BuiltinEpicRunnerWorkflowName, digest, runners)
+			switch {
+			case err == nil:
+				taskRunnerServerPath = filepath.Join(art.DistPath, "server.mjs")
+				return
+			case !errors.Is(err, packaged.ErrNotPackaged):
+				taskRunnerBundleErr = fmt.Errorf("ts-leaf task runner bundle: %w", err)
+				return
+			case packaged.FailClosed():
+				taskRunnerBundleErr = fmt.Errorf("ts-leaf task runner bundle: %w (%s)", err, packaged.FailClosedGuidance)
+				return
+			}
+		}
 		dest := filepath.Join(cli.GetWorkspaceRuntimeDir(), "ts-runtime-bundle", "dist")
-		taskRunnerServerPath, _, taskRunnerBundleErr = workflows.BuildBuiltinBundle(context.Background(), "epic-runner", dest)
+		taskRunnerServerPath, _, taskRunnerBundleErr = workflows.BuildBuiltinBundle(context.Background(), workflows.BuiltinEpicRunnerWorkflowName, dest)
 	})
 	return taskRunnerServerPath, taskRunnerBundleErr
+}
+
+// resetTaskRunnerBundleForTest clears the once-per-process bundle resolution
+// so tests can exercise each branch of taskRunnerBundleServerPath.
+func resetTaskRunnerBundleForTest() {
+	taskRunnerBundleOnce = sync.Once{}
+	taskRunnerServerPath = ""
+	taskRunnerBundleErr = nil
 }
 
 // contextFromShutdown bridges the daemon leaf's shutdown channel to a context the

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -17,9 +18,11 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/noderuntime"
 	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/workflows"
+	"github.com/tysonthomas9/loomcli/internal/workflows/packaged"
 )
 
 func TestWorkflowCloneJSONWritesSourceLayout(t *testing.T) {
@@ -70,18 +73,38 @@ func TestWorkflowCloneUnknownWorkflowReturnsError(t *testing.T) {
 	}
 }
 
-func TestWorkflowReadyzJSONReportsLocalRoots(t *testing.T) {
-	sdkRoot := packageRoot(t)
-	flueRuntimeRoot := packageRoot(t)
-	t.Setenv("LOOM_REAL_FLUE_CMD", "/bin/echo")
-	t.Setenv("LOOM_REAL_FLUE_CMD_JSON", "")
-	t.Setenv("LOOM_SDK_ROOT", sdkRoot)
-	t.Setenv("LOOM_FLUE_RUNTIME_ROOT", flueRuntimeRoot)
-	t.Setenv("FLUE_RUNTIME_ROOT", "")
-	t.Setenv("FLUE_REPO", "")
-	workflowReadyzJSON = true
-	t.Cleanup(func() { workflowReadyzJSON = false })
+// setupReadyzEnv pins every env var readyz reads (the desktop app exports
+// LOOM_LOCAL_RUNTIME/LOOM_NODE_BIN/... into interactive shells), points
+// LOOM_NODE_BIN at a fake executable and prepends its directory to PATH so
+// neither the runtime nor the authoring "node" check depends on the host,
+// and clears the baked index digest. Authoring inputs start cleared.
+func setupReadyzEnv(t *testing.T) {
+	t.Helper()
+	resetWorkflowCommandGlobals()
+	t.Cleanup(resetWorkflowCommandGlobals)
+	noderuntime.ResetForTest()
+	t.Cleanup(noderuntime.ResetForTest)
+	fakeNode := filepath.Join(t.TempDir(), "node")
+	if err := os.WriteFile(fakeNode, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil { //nolint:gosec // fake executable for tests.
+		t.Fatalf("write fake node: %v", err)
+	}
+	t.Setenv("PATH", filepath.Dir(fakeNode)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	for key, value := range map[string]string{
+		"LOOM_LOCAL_RUNTIME": "", "LOOM_BUILTIN_ARTIFACTS_DIR": "", "LOOM_NODE_BIN": fakeNode,
+		"LOOM_SDK_ROOT": "", "LOOM_REAL_FLUE_CMD": "", "LOOM_REAL_FLUE_CMD_JSON": "",
+		"LOOM_FLUE_RUNTIME_ROOT": "", "FLUE_RUNTIME_ROOT": "", "FLUE_REPO": "", "DAYTONA_SDK_ROOT": "",
+		driverpkg.SandboxModeEnvVar: "",
+	} {
+		t.Setenv(key, value)
+	}
+	origDigest := packaged.ExpectedIndexDigest
+	packaged.ExpectedIndexDigest = ""
+	t.Cleanup(func() { packaged.ExpectedIndexDigest = origDigest })
+}
 
+func runReadyzJSON(t *testing.T) map[string]any {
+	t.Helper()
+	workflowReadyzJSON = true
 	stdout, err := captureWorkflowStdout(t, func() error {
 		return runWorkflowReadyz(&cobra.Command{}, nil)
 	})
@@ -92,13 +115,152 @@ func TestWorkflowReadyzJSONReportsLocalRoots(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
 		t.Fatalf("decode readyz JSON %q: %v", stdout, err)
 	}
-	for _, key := range []string{"ok", "node", "flue", "loom_sdk", "flue_runtime"} {
+	return payload
+}
+
+// nestedMap walks payload[path[0]][path[1]]... and fails unless every hop is
+// a JSON object.
+func nestedMap(t *testing.T, payload map[string]any, path ...string) map[string]any {
+	t.Helper()
+	current := payload
+	for _, key := range path {
+		next, ok := current[key].(map[string]any)
+		if !ok {
+			t.Fatalf("readyz payload %v: %v is not an object: %+v", path, key, current[key])
+		}
+		current = next
+	}
+	return current
+}
+
+func TestWorkflowReadyzJSONReportsLocalRoots(t *testing.T) {
+	setupReadyzEnv(t)
+	t.Setenv("LOOM_REAL_FLUE_CMD", "/bin/echo")
+	t.Setenv("LOOM_SDK_ROOT", packageRoot(t))
+	t.Setenv("LOOM_FLUE_RUNTIME_ROOT", packageRoot(t))
+
+	payload := runReadyzJSON(t)
+	for _, key := range []string{"ok", "authoring_ready", "node", "flue", "loom_sdk", "flue_runtime"} {
 		if payload[key] != true {
 			t.Fatalf("readyz payload[%s] = %v, want true; payload=%+v", key, payload[key], payload)
 		}
 	}
 	if payload["sandbox_mode"] != driverpkg.SandboxProviderProcess || payload["untrusted_execution_possible"] != false {
 		t.Fatalf("readyz payload = %+v, want required checks true", payload)
+	}
+	if node := nestedMap(t, payload, "builtin_runtime", "node"); node["source"] != noderuntime.SourceOverride || node["ok"] != true {
+		t.Fatalf("builtin_runtime.node = %+v, want ok via LOOM_NODE_BIN override", node)
+	}
+	artifacts := nestedMap(t, payload, "builtin_runtime", "artifacts")
+	if epic := nestedMap(t, artifacts, workflows.BuiltinEpicRunnerWorkflowName); epic["required"] != true {
+		t.Fatalf("artifacts.epic-runner = %+v, want required=true", epic)
+	}
+	if review := nestedMap(t, artifacts, workflows.BuiltinGitHubReviewAgentWorkflowName); review["required"] != false {
+		t.Fatalf("artifacts.github-review-agent = %+v, want required=false", review)
+	}
+}
+
+// writePackagedEpicRunnerTree builds a verifiable builtin-workflows root for
+// epic-runner only and returns the root plus its index digest.
+func writePackagedEpicRunnerTree(t *testing.T) (root, indexDigest string) {
+	t.Helper()
+	root = filepath.Join(t.TempDir(), "builtin-workflows")
+	dist := filepath.Join(root, workflows.BuiltinEpicRunnerWorkflowName, "dist")
+	writeTestFile(t, filepath.Join(dist, "server.mjs"), "export {};\n")
+	for _, rel := range packaged.LoomSDKRuntimeFiles {
+		content := "export {};\n"
+		if rel == "package.json" {
+			content = `{"name":"@loom/sdk"}` + "\n"
+		}
+		writeTestFile(t, filepath.Join(dist, "node_modules", "@loom", "sdk", rel), content)
+	}
+	artifactDigest, err := driverpkg.DigestDirectory(dist)
+	if err != nil {
+		t.Fatalf("digest dist: %v", err)
+	}
+	encoded := expectedEpicRunnerIndex(t, artifactDigest)
+	writeTestFile(t, filepath.Join(root, packaged.IndexFileName), string(encoded))
+	return root, packaged.IndexDigest(encoded)
+}
+
+func TestWorkflowReadyzBuiltinRuntimeReadyWithoutAuthoring(t *testing.T) {
+	setupReadyzEnv(t)
+	root, indexDigest := writePackagedEpicRunnerTree(t)
+	packaged.ExpectedIndexDigest = indexDigest
+	t.Setenv("LOOM_BUILTIN_ARTIFACTS_DIR", root)
+	t.Chdir(t.TempDir())
+
+	payload := runReadyzJSON(t)
+	if payload["builtin_runtime_ready"] != true || payload["authoring_ready"] != false || payload["ok"] != false {
+		t.Fatalf("readyz payload = %+v, want builtin_runtime_ready only", payload)
+	}
+	runtime := nestedMap(t, payload, "builtin_runtime")
+	if runtime["packaged_build"] != true || runtime["root"] != root || runtime["index_digest"] != indexDigest {
+		t.Fatalf("builtin_runtime = %+v, want packaged build at %s", runtime, root)
+	}
+	if node := nestedMap(t, runtime, "node"); node["source"] != noderuntime.SourceOverride {
+		t.Fatalf("builtin_runtime.node = %+v, want override source", node)
+	}
+	artifacts := nestedMap(t, runtime, "artifacts")
+	if epic := nestedMap(t, artifacts, workflows.BuiltinEpicRunnerWorkflowName); epic["verified"] != true || epic["error"] != "" {
+		t.Fatalf("artifacts.epic-runner = %+v, want verified", epic)
+	}
+	if review := nestedMap(t, artifacts, workflows.BuiltinGitHubReviewAgentWorkflowName); review["required"] != false || review["verified"] != false {
+		t.Fatalf("artifacts.github-review-agent = %+v, want optional and unverified", review)
+	}
+}
+
+func TestWorkflowReadyzDesktopWithoutArtifactsIsNotReady(t *testing.T) {
+	setupReadyzEnv(t)
+	t.Setenv("LOOM_LOCAL_RUNTIME", "desktop")
+	t.Chdir(t.TempDir())
+
+	payload := runReadyzJSON(t)
+	if payload["builtin_runtime_ready"] != false {
+		t.Fatalf("readyz payload = %+v, want builtin_runtime_ready=false on desktop without artifacts", payload)
+	}
+	runtime := nestedMap(t, payload, "builtin_runtime")
+	if runtime["desktop"] != true || runtime["fail_closed"] != true || runtime["packaged_build"] != false {
+		t.Fatalf("builtin_runtime = %+v, want desktop fail-closed without a packaged build", runtime)
+	}
+	epic := nestedMap(t, runtime, "artifacts", workflows.BuiltinEpicRunnerWorkflowName)
+	errText, _ := epic["error"].(string)
+	if epic["verified"] != false || !strings.Contains(errText, "builtin_artifact_missing") || !strings.Contains(errText, packaged.FailClosedGuidance) {
+		t.Fatalf("artifacts.epic-runner = %+v, want builtin_artifact_missing with fail-closed guidance", epic)
+	}
+}
+
+func TestWorkflowReadyzTextPrintsNestedKeys(t *testing.T) {
+	setupReadyzEnv(t)
+	workflowReadyzJSON = false
+
+	stdout, err := captureWorkflowStdout(t, func() error {
+		return runWorkflowReadyz(&cobra.Command{}, nil)
+	})
+	if err != nil {
+		t.Fatalf("runWorkflowReadyz: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	if !sort.StringsAreSorted(lines) {
+		t.Fatalf("readyz text lines are not sorted:\n%s", stdout)
+	}
+	index := func(prefix string) int {
+		for i, line := range lines {
+			if strings.HasPrefix(line, prefix) {
+				return i
+			}
+		}
+		t.Fatalf("no line starting with %q in:\n%s", prefix, stdout)
+		return -1
+	}
+	if got := lines[index("builtin_runtime.node.source=")]; got != "builtin_runtime.node.source="+noderuntime.SourceOverride {
+		t.Fatalf("node source line = %q, want override", got)
+	}
+	if index("authoring.daytona_sdk=") >= index("authoring.flue=") {
+		t.Fatalf("authoring.daytona_sdk should sort before authoring.flue:\n%s", stdout)
+	}
+	for _, prefix := range []string{"builtin_runtime.artifacts.epic-runner.required=true", "builtin_runtime_ready=", "ok="} {
+		index(prefix)
 	}
 }
 
@@ -412,6 +574,15 @@ func resetWorkflowCommandGlobals() {
 	workflowListJSON = false
 	workflowVersionsJSON = false
 	workflowReadyzJSON = false
+	workflowPackageDist = ""
+	workflowPackageOut = ""
+	workflowPackageLoomSDK = ""
+	workflowPackageFlueCommit = ""
+	workflowPackageNodeVersion = ""
+	workflowPackageTarget = ""
+	workflowPackageAllowDrift = false
+	workflowPackageRequireAll = false
+	workflowPackageJSON = false
 }
 
 func decodeWorkflowVersionOutput(t *testing.T, raw string) workflowVersionOutput {

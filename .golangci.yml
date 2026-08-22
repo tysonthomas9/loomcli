@@ -598,6 +598,12 @@ linters:
         linters:
           - gosec
         text: "G115"
+      # G115: fd <-> uintptr round-trips for the openat-rooted file store
+      # (os.NewFile / unix.Openat / unix.Dup take a valid descriptor, never overflow)
+      - path: 'internal/webui/svcimpl/rooted_file_store_unix\.go'
+        linters:
+          - gosec
+        text: "G115"
       # G204: Subprocess launches for bd commands and tmux
       - path: 'internal/kv/reconcile\.go|internal/webui/terminal\.go'
         linters:

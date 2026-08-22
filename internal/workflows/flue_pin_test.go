@@ -1,13 +1,8 @@
 package workflows
 
 import (
-	_ "embed"
-	"strings"
 	"testing"
 )
-
-//go:embed FLUE_COMMIT
-var pinnedFlueCommit string
 
 // verifiedFlueCommit is the flue commit the builtin workflows are known to run
 // against. It is asserted here — not to freeze the pin forever, but to make a
@@ -25,7 +20,7 @@ var pinnedFlueCommit string
 const verifiedFlueCommit = "492bf47b9f3d6c379d00471523987b8fe9511f7d"
 
 func TestFlueCommitPinIsTheVerifiedOne(t *testing.T) {
-	got := strings.TrimSpace(pinnedFlueCommit)
+	got := PinnedFlueCommit
 	if got != verifiedFlueCommit {
 		t.Fatalf("FLUE_COMMIT = %s, but the builtin workflows were last verified against %s.\n"+
 			"Upstream removed `model: false` (flue 46534e97); all four builtin runners use it and break at agent-init past that commit.\n"+

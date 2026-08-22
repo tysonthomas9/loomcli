@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/noderuntime"
 )
 
 // DaytonaTaskRunnerEntrypoint is the bundled Daytona task runner entrypoint. It
@@ -70,13 +72,17 @@ func RunBundledTaskRunner(ctx context.Context, opts BundledRunnerOptions) (json.
 		stderr = os.Stderr
 	}
 
+	node, err := noderuntime.Resolve()
+	if err != nil {
+		return nil, err
+	}
 	launcherPath, cleanup, err := writeFlueTaskRunnerLauncher()
 	if err != nil {
 		return nil, err
 	}
 	defer cleanup()
 
-	cmd := exec.CommandContext(ctx, "node", launcherPath) //nolint:gosec // fixed local runtime for the bundled Flue runner.
+	cmd := exec.CommandContext(ctx, node.Path, launcherPath) //nolint:gosec // resolved local Node runtime for the bundled Flue runner.
 	if wt := strings.TrimSpace(opts.Worktree); wt != "" {
 		cmd.Dir = wt
 	}

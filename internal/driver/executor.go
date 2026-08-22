@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver/runtypes"
 	"github.com/tysonthomas9/loomcli/internal/driver/sandbox"
+	"github.com/tysonthomas9/loomcli/internal/noderuntime"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
@@ -723,9 +724,13 @@ type NodeRunner struct {
 }
 
 func (r NodeRunner) Run(ctx context.Context, req RunRequest) (RunResult, error) {
-	node := r.NodePath
+	node := strings.TrimSpace(r.NodePath)
 	if node == "" {
-		node = "node"
+		resolved, err := noderuntime.Resolve()
+		if err != nil {
+			return RunResult{Status: domain.DriverRunFailed, Summary: err.Error(), ErrorClass: "node_runtime_missing"}, nil
+		}
+		node = resolved.Path
 	}
 	payload := req.Run.Payload
 	if len(payload) == 0 {

@@ -170,6 +170,10 @@ func TestEnsureBuiltinWorkflowRefreshesDeprecatedRunnerManifest(t *testing.T) {
 
 func installFakeWorkflowBuildDeps(t *testing.T) {
 	t.Helper()
+	// The compile fallback is only reachable off the fail-closed path
+	// (DEV-V5-31): clear the desktop marker a desktop-spawned shell inherits.
+	t.Setenv("LOOM_LOCAL_RUNTIME", "")
+	t.Setenv("LOOM_BUILTIN_ARTIFACTS_DIR", "")
 
 	root := t.TempDir()
 	sdkRoot := filepath.Join(root, "sdk")

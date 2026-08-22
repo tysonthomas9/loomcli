@@ -52,6 +52,13 @@ type RegisterFlueOptions struct {
 	// workflow builds. It is persisted on DriverVersion; failed builds never
 	// reach registration.
 	BuildDiagnostics string
+	// ExpectedArtifactDigest, when set, must equal the digest of the dist
+	// tree as actually staged. Callers that verified DistPath before calling
+	// (the packaged built-in lane) pass it so the bytes copied under
+	// .loom/drivers are the bytes that were verified — closing the window
+	// between verification and the staging re-read. A mismatch fails with
+	// ErrStagedArtifactDigestMismatch and nothing is promoted.
+	ExpectedArtifactDigest string
 	// Trust is the trust level the SERVER stamps on the driver row (§7 step 9
 	// sandbox placement policy) — it is never read from client input or the
 	// bundle manifest, so a submission cannot self-elevate. Empty defaults to
@@ -311,17 +318,24 @@ func RegisterFlueDriver(ctx context.Context, s store.Store, opts RegisterFlueOpt
 }
 
 type flueRegistrationInput struct {
-	absWorkDir   string
-	absDist      string
-	manifest     map[string]string
-	driverName   string
-	driverID     string
-	workflowName string
-	sourceRef    string
-	sourceDigest string
-	runnerSpecs  []DriverRunnerSpec
-	trust        domain.DriverTrustLevel
+	absWorkDir             string
+	absDist                string
+	manifest               map[string]string
+	driverName             string
+	driverID               string
+	workflowName           string
+	sourceRef              string
+	sourceDigest           string
+	expectedArtifactDigest string
+	runnerSpecs            []DriverRunnerSpec
+	trust                  domain.DriverTrustLevel
 }
+
+// ErrStagedArtifactDigestMismatch reports that the dist tree changed between
+// the caller's verification and the staging copy (RegisterFlueOptions.
+// ExpectedArtifactDigest). It is an ErrInvalid so HTTP surfaces report it as a
+// bad artifact rather than a server fault.
+var ErrStagedArtifactDigestMismatch = fmt.Errorf("staged flue dist does not match the verified artifact digest: %w", domain.ErrInvalid)
 
 func resolveFlueRegistrationInput(opts RegisterFlueOptions) (*flueRegistrationInput, error) {
 	absWorkDir, absDist, err := resolveFlueDistPath(opts.WorkDir, opts.DistPath)
@@ -352,16 +366,17 @@ func resolveFlueRegistrationInput(opts RegisterFlueOptions) (*flueRegistrationIn
 		return nil, err
 	}
 	return &flueRegistrationInput{
-		absWorkDir:   absWorkDir,
-		absDist:      absDist,
-		manifest:     externalManifest,
-		driverName:   driverName,
-		driverID:     driverID,
-		workflowName: workflowName,
-		sourceRef:    firstNonEmpty(opts.SourceRef, externalManifest["source_ref"], relativeRef(absWorkDir, absDist)),
-		sourceDigest: firstNonEmpty(opts.SourceDigest, externalManifest["source_digest"]),
-		runnerSpecs:  runnerSpecs,
-		trust:        registrationTrust(opts.Trust),
+		absWorkDir:             absWorkDir,
+		absDist:                absDist,
+		manifest:               externalManifest,
+		driverName:             driverName,
+		driverID:               driverID,
+		workflowName:           workflowName,
+		sourceRef:              firstNonEmpty(opts.SourceRef, externalManifest["source_ref"], relativeRef(absWorkDir, absDist)),
+		sourceDigest:           firstNonEmpty(opts.SourceDigest, externalManifest["source_digest"]),
+		expectedArtifactDigest: strings.TrimSpace(opts.ExpectedArtifactDigest),
+		runnerSpecs:            runnerSpecs,
+		trust:                  registrationTrust(opts.Trust),
 	}, nil
 }
 
@@ -425,6 +440,9 @@ func stageFlueBundle(reg *flueRegistrationInput) (*stagedFlueBundle, error) {
 	artifactDigest, err := digestDirectory(filepath.Join(tmpRoot, "dist"))
 	if err != nil {
 		return staged, err
+	}
+	if reg.expectedArtifactDigest != "" && artifactDigest != reg.expectedArtifactDigest {
+		return staged, fmt.Errorf("%w: want %s, staged %s", ErrStagedArtifactDigestMismatch, reg.expectedArtifactDigest, artifactDigest)
 	}
 	if reg.sourceDigest == "" {
 		reg.sourceDigest = artifactDigest
@@ -735,6 +753,11 @@ func copyTree(src, dst string) error {
 		return out.Close()
 	})
 }
+
+// DigestDirectory is the loom-flue-artifact-v1 digest recipe, exported for the
+// packaged built-in lane (internal/workflows/packaged) so the artifact digest a
+// packager records is byte-for-byte the one registration and every run verify.
+func DigestDirectory(root string) (string, error) { return digestDirectory(root) }
 
 func digestDirectory(root string) (string, error) {
 	h := sha256.New()
