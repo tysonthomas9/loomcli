@@ -37,6 +37,9 @@ export LOOM_CONFIG_DIR=/installed-agent/loom-state
 # budget_secs is the real bound (cursor token usage is in the pane logs).
 export LOOM_BACKEND="${LOOM_MARATHON_WORKER_BACKEND:-codex}"
 LEAD_BACKEND="${LOOM_MARATHON_LEAD_BACKEND:-codex}"
+# cursor spend records (shim-captured per-turn system/result events, priced by
+# spend.sh). Host-mounted: evidence survives teardown.
+export LOOM_MARATHON_CURSOR_USAGE_DIR=/logs/agent/cursor-usage
 NEED_CURSOR=0
 { [ "$LOOM_BACKEND" = cursor ] || [ "$LEAD_BACKEND" = cursor ]; } && NEED_CURSOR=1
 # fleet-db dev-mode auth still needs an identity (X-Actor). The client falls
@@ -532,6 +535,8 @@ export LOOM_WORKSPACE="$WS_KEY"
 export LOOM_FLEET_DB_ACTOR="$LOOM_FLEET_DB_ACTOR"
 export USER="$USER"
 export CODEX_HOME="$CODEX_HOME"
+export LOOM_MARATHON_CURSOR_USAGE_DIR="$LOOM_MARATHON_CURSOR_USAGE_DIR"
+${LOOM_MARATHON_CURSOR_MODEL:+export LOOM_MARATHON_CURSOR_MODEL="$LOOM_MARATHON_CURSOR_MODEL"}
 if [ -s /installed-agent/cursor-auth/api-key ]; then
   CURSOR_API_KEY="\$(tr -d '[:space:]' < /installed-agent/cursor-auth/api-key)"; export CURSOR_API_KEY
 fi

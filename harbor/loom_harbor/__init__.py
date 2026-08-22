@@ -65,6 +65,7 @@ class LoomAgent(BaseInstalledAgent):
         lead_backend: str | None = None,
         cursor_api_key_path: str | None = None,
         cursor_install_url: str = "https://cursor.com/install",
+        cursor_model: str | None = None,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -101,6 +102,9 @@ class LoomAgent(BaseInstalledAgent):
             raise ValueError("cursor backends have no stub; drop --ak stub=true")
         self._cursor_api_key_path = cursor_api_key_path
         self._cursor_install_url = str(cursor_install_url)
+        # Pinned cursor model id (`cursor-agent models`); None = cursor's
+        # `auto`. Applied by the shim to every print-mode invocation.
+        self._cursor_model = str(cursor_model).strip() if cursor_model else None
         if self._team != "off" and self._max_agents < 4:
             raise ValueError(
                 "team mode requires max_agents >= 4; the fullstack bundle has "
@@ -253,7 +257,10 @@ class LoomAgent(BaseInstalledAgent):
             f"mkdir -p {cursor_home} && "
             f"HOME={cursor_home} bash -c "
             f"'curl -fsSL {shlex.quote(self._cursor_install_url)} | bash' && "
-            f"ln -sf {cursor_home}/.local/bin/cursor-agent /usr/local/bin/cursor-agent && "
+            # PATH entry is the harness shim (scripts/cursor-agent-shim.sh): it
+            # execs the real binary, tees each turn's system/result events
+            # into /logs/agent/cursor-usage for spend.sh, and pins --model.
+            f"install -m 0755 {REMOTE_HOME}/scripts/cursor-agent-shim.sh /usr/local/bin/cursor-agent && "
             f"chmod -R a+rX {cursor_home} && cursor-agent --version",
             timeout_sec=600,
         )
@@ -331,6 +338,8 @@ class LoomAgent(BaseInstalledAgent):
             env["LOOM_MARATHON_WORKER_BACKEND"] = self._worker_backend
         if self._lead_backend != "codex":
             env["LOOM_MARATHON_LEAD_BACKEND"] = self._lead_backend
+        if self._cursor_model:
+            env["LOOM_MARATHON_CURSOR_MODEL"] = self._cursor_model
         if self._stub:
             env["LOOM_MARATHON_STUB"] = "1"
         if self.model_name:
