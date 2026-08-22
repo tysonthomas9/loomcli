@@ -31,7 +31,14 @@ fi
 #     auth.json stays a SYMLINK to the container-only credential — the key
 #     itself is never written into the host trial dir.
 export LOOM_CONFIG_DIR=/installed-agent/loom-state
-export LOOM_BACKEND=codex
+# Daemon-worker backend (codex|cursor) and lead backend (codex|cursor; the
+# lead runs loom's headless cursor runtime). spend.sh meters only codex
+# rollouts: with cursor roles the spend cap covers codex roles alone and
+# budget_secs is the real bound (cursor token usage is in the pane logs).
+export LOOM_BACKEND="${LOOM_MARATHON_WORKER_BACKEND:-codex}"
+LEAD_BACKEND="${LOOM_MARATHON_LEAD_BACKEND:-codex}"
+NEED_CURSOR=0
+{ [ "$LOOM_BACKEND" = cursor ] || [ "$LEAD_BACKEND" = cursor ]; } && NEED_CURSOR=1
 # fleet-db dev-mode auth still needs an identity (X-Actor). The client falls
 # back to $USER, which is UNSET inside docker exec → 401 authentication
 # required on every call. Pin an explicit actor (daemon agents override via
@@ -390,9 +397,29 @@ if [ "$STUB" != "1" ]; then
 fi
 mkdir -p "$CODEX_HOME/sessions"
 
+# cursor workers: key lives only in the container-only 600 file; exported into
+# this process env (the daemon inherits it; loom's envfilter allowlists
+# CURSOR_API_KEY into every agent subprocess). Never echoed, never in env.sh.
+if [ "$NEED_CURSOR" = 1 ]; then
+  [ "$STUB" != "1" ] || die "cursor backends have no stub"
+  [ -s /installed-agent/cursor-auth/api-key ] || die "cursor api-key missing (cursor backend requested)"
+  CURSOR_API_KEY="$(tr -d '[:space:]' < /installed-agent/cursor-auth/api-key)"
+  export CURSOR_API_KEY
+  [ -n "$CURSOR_API_KEY" ] || die "cursor api-key file is empty"
+fi
+
 # ---- preflight asserts (fail fast, before any model spend) -------------------
 command -v loom >/dev/null || die "loom not on PATH"
 command -v codex >/dev/null || die "codex not on PATH"
+if [ "$NEED_CURSOR" = 1 ]; then
+  command -v cursor-agent >/dev/null || die "cursor-agent not on PATH (cursor backend requested)"
+  # `cursor-agent status` exits 0 even when unauthenticated — match the text.
+  CURSOR_STATUS=$(timeout 60 cursor-agent status 2>&1 || true)
+  case "$CURSOR_STATUS" in
+    *"Logged in"*) log "cursor-agent $(cursor-agent --version 2>/dev/null) authenticated (workers=$LOOM_BACKEND lead=$LEAD_BACKEND)" ;;
+    *) die "cursor-agent not authenticated: ${CURSOR_STATUS:-<no output>}" ;;
+  esac
+fi
 if [ "$STUB" = "1" ]; then
   case "$(command -v codex)" in
     "$MH/stubbin/codex") : ;;
@@ -500,11 +527,14 @@ cat > "$MH/env.sh" <<EOF
 export HOME="$HOME"
 export PATH="$PATH"
 export LOOM_CONFIG_DIR="$LOOM_CONFIG_DIR"
-export LOOM_BACKEND=codex
+export LOOM_BACKEND="$LOOM_BACKEND"
 export LOOM_WORKSPACE="$WS_KEY"
 export LOOM_FLEET_DB_ACTOR="$LOOM_FLEET_DB_ACTOR"
 export USER="$USER"
 export CODEX_HOME="$CODEX_HOME"
+if [ -s /installed-agent/cursor-auth/api-key ]; then
+  CURSOR_API_KEY="\$(tr -d '[:space:]' < /installed-agent/cursor-auth/api-key)"; export CURSOR_API_KEY
+fi
 export MARATHON_APP_BASE="$APP_BASE"
 export MARATHON_APP_DIR=/app
 export MARATHON_WS_ROOT="$WS_ROOT"

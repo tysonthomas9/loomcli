@@ -26,6 +26,11 @@ CADENCE="${LOOM_MARATHON_CADENCE_SECS:-360}"
 SPEND_CAP="${LOOM_MARATHON_SPEND_CAP_USD:-90}"
 STUB="${LOOM_MARATHON_STUB:-0}"
 LEAD_MODE="${LOOM_MARATHON_LEAD_MODE:-oneshot}"
+# Backend for every `loom lead` session (persistent lead/qa/arch, oneshot
+# passes, critic). codex = app-server runtime; cursor = loom's headless runtime
+# (one `cursor-agent -p --resume <chat>` process per turn — same leadmsg
+# inbox, same idle/active status contract). Workers follow LOOM_BACKEND.
+LEAD_BACKEND="${LOOM_MARATHON_LEAD_BACKEND:-codex}"
 TEAM="${LOOM_MARATHON_TEAM:-off}"
 # Verification-role fork (EXPERIMENTS B2c lead / B2d qa); requires persistence.
 VERIFY_ROLE="${LOOM_MARATHON_VERIFY_ROLE:-off}"
@@ -91,7 +96,7 @@ lead_pass() {
   (
     cd "$cwd" || exit 1
     LOOM_LEAD_CONTROLLED=0 timeout "$tmo" \
-      loom lead --backend codex --prompt "$prompt_file" --message "$message" \
+      loom lead --backend "$LEAD_BACKEND" --prompt "$prompt_file" --message "$message" \
       </dev/null >> "$LOGD/$logfile" 2>&1
   )
 }
@@ -118,7 +123,7 @@ persistent_lead_start() {
 #!/usr/bin/env bash
 . "$MH/env.sh"
 cd "\$MARATHON_WS_ROOT/app" || exit 1
-exec loom lead --backend codex --prompt "$lead_prompt"
+exec loom lead --backend "$LEAD_BACKEND" --prompt "$lead_prompt"
 LEOF
   chmod +x "$LOGD/lead-launch.sh"
   tmux kill-session -t "$LEAD_TMUX" 2>/dev/null
@@ -137,7 +142,7 @@ persistent_qa_start() {
 . "$MH/env.sh"
 export LOOM_AGENT_NAME=qa
 cd "\$MARATHON_WS_ROOT/app" || exit 1
-exec loom lead --backend codex --prompt "$qa_prompt"
+exec loom lead --backend "$LEAD_BACKEND" --prompt "$qa_prompt"
 QEOF
   chmod +x "$LOGD/qa-launch.sh"
   tmux kill-session -t "$QA_TMUX" 2>/dev/null
@@ -154,7 +159,7 @@ persistent_qab_start() {
 . "$MH/env.sh"
 export LOOM_AGENT_NAME=qab
 cd "\$MARATHON_WS_ROOT/app" || exit 1
-exec loom lead --backend codex --prompt "$PROMPTS/qa-backend-persistent-tasks.md"
+exec loom lead --backend "$LEAD_BACKEND" --prompt "$PROMPTS/qa-backend-persistent-tasks.md"
 QBEOF
   chmod +x "$LOGD/qab-launch.sh"
   tmux kill-session -t "$QAB_TMUX" 2>/dev/null
@@ -173,7 +178,7 @@ persistent_arch_start() {
 export LOOM_AGENT_NAME=arch
 export LOOM_FLEET_DB_ACTOR=arch
 cd "\$MARATHON_WS_ROOT/app" || exit 1
-exec loom lead --backend codex --prompt "$PROMPTS/arch-persistent.md"
+exec loom lead --backend "$LEAD_BACKEND" --prompt "$PROMPTS/arch-persistent.md"
 AEOF
   chmod +x "$LOGD/arch-launch.sh"
   tmux kill-session -t "$ARCH_TMUX" 2>/dev/null
@@ -333,7 +338,7 @@ run_critic() {
   msg=$(printf 'REVIEW CONTRACT\ntask=%s\nattempt=%s\nbase=%s\ncandidate=%s\n\nDESIGN:\n%s\n\nYou are cwd-ed into a DISPOSABLE detached checkout of the candidate commit. Review it against the design and acceptance criteria, then write CRITIC-VERDICT.txt in the current directory containing EXACTLY one first line:\nREVIEW attempt=%s commit=%s APPROVED — <reason>\nor\nREVIEW attempt=%s commit=%s CHANGES-REQUESTED — <reason>\n' \
     "$tid" "$attempt" "$(git -C /app rev-parse HEAD)" "$sha" "$design" "$attempt" "$sha" "$attempt" "$sha")
   ( cd "$co" && rm -f CRITIC-VERDICT.txt && \
-    LOOM_LEAD_CONTROLLED=0 timeout 1200 loom lead --backend codex \
+    LOOM_LEAD_CONTROLLED=0 timeout 1200 loom lead --backend "$LEAD_BACKEND" \
       --prompt "$PROMPTS/critic.md" --message "$msg" \
       </dev/null >> "$LOGD/critic-$tid-$attempt.log" 2>&1 )
   vfile="$co/CRITIC-VERDICT.txt"
@@ -450,6 +455,7 @@ finalize() {
   [ -n "$DAEMON_PID" ] && kill -9 "$DAEMON_PID" >/dev/null 2>&1
   pkill -9 -f 'loom (task|plan|daemon|agent)' >/dev/null 2>&1
   pkill -9 -f 'codex exec' >/dev/null 2>&1
+  pkill -9 -f 'cursor-agent' >/dev/null 2>&1
   sleep 1
   pkill -9 -x fleet-db >/dev/null 2>&1
 

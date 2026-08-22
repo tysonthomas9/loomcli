@@ -60,6 +60,11 @@ class LoomAgent(BaseInstalledAgent):
         arch: str = "off",
         lead_maint: int | str = 0,
         team: str = "off",
+        backend: str | None = None,
+        worker_backend: str | None = None,
+        lead_backend: str | None = None,
+        cursor_api_key_path: str | None = None,
+        cursor_install_url: str = "https://cursor.com/install",
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -78,6 +83,24 @@ class LoomAgent(BaseInstalledAgent):
         self._arch = str(arch)
         self._lead_maint = str(lead_maint)
         self._team = str(team)
+        # Backends: `backend` sets both roles; worker_backend (daemon agents:
+        # architect/dev/QA) and lead_backend (every `loom lead` session —
+        # persistent lead/qa/arch, oneshot passes, critic) override it. codex
+        # lead = app-server runtime; cursor lead = loom's headless runtime
+        # (cursor-agent -p --resume per turn). spend.sh only meters codex
+        # rollouts, so with cursor roles the spend cap covers codex roles alone
+        # and budget_secs is the real bound.
+        default_backend = str(backend or "codex")
+        self._worker_backend = str(worker_backend or default_backend)
+        self._lead_backend = str(lead_backend or default_backend)
+        for label, value in (("worker_backend", self._worker_backend), ("lead_backend", self._lead_backend)):
+            if value not in ("codex", "cursor"):
+                raise ValueError(f"{label} must be codex or cursor, got {value!r}")
+        self._needs_cursor = "cursor" in (self._worker_backend, self._lead_backend)
+        if self._needs_cursor and self._stub:
+            raise ValueError("cursor backends have no stub; drop --ak stub=true")
+        self._cursor_api_key_path = cursor_api_key_path
+        self._cursor_install_url = str(cursor_install_url)
         if self._team != "off" and self._max_agents < 4:
             raise ValueError(
                 "team mode requires max_agents >= 4; the fullstack bundle has "
@@ -208,12 +231,56 @@ class LoomAgent(BaseInstalledAgent):
             await self.exec_as_root(
                 environment, f"{chown}chmod 600 {remote_auth_dir}/auth.json"
             )
+            if self._needs_cursor:
+                await self._install_cursor(environment)
 
         if environment.default_user:
             await self.exec_as_root(
                 environment,
                 f"chown -R {environment.default_user} /installed-agent",
             )
+
+    async def _install_cursor(self, environment: BaseEnvironment) -> None:
+        """cursor-agent for cursor roles: official installer into a
+        container-only HOME (verified on ubuntu:24.04 arm64), symlinked onto
+        PATH; API key uploaded as a 600 file that bootstrap exports lazily as
+        CURSOR_API_KEY (the key itself never lands in the host trial dir)."""
+        cursor_home = "/installed-agent/cursor-home"
+        await self.exec_as_root(
+            environment,
+            "command -v curl >/dev/null 2>&1 || "
+            "(apt-get update -qq && apt-get install -y -qq curl ca-certificates) && "
+            f"mkdir -p {cursor_home} && "
+            f"HOME={cursor_home} bash -c "
+            f"'curl -fsSL {shlex.quote(self._cursor_install_url)} | bash' && "
+            f"ln -sf {cursor_home}/.local/bin/cursor-agent /usr/local/bin/cursor-agent && "
+            f"chmod -R a+rX {cursor_home} && cursor-agent --version",
+            timeout_sec=600,
+        )
+        key_path = self._resolve_cursor_api_key()
+        remote_dir = "/installed-agent/cursor-auth"
+        await environment.upload_file(key_path, f"{remote_dir}/api-key")
+        chown_user = environment.default_user
+        chown = f"chown -R {chown_user} {remote_dir} && " if chown_user else ""
+        await self.exec_as_root(environment, f"{chown}chmod 600 {remote_dir}/api-key")
+
+    def _resolve_cursor_api_key(self) -> str:
+        """Path of a file holding ONE Cursor API key (cursor.com/dashboard ->
+        Integrations -> User API Keys). Only existence/size is checked here;
+        the contents are never read by the adapter."""
+        candidate = self._cursor_api_key_path or self._get_env(
+            "LOOM_MARATHON_CURSOR_API_KEY_FILE"
+        )
+        if not candidate:
+            candidate = str(Path.home() / ".cursor" / "marathon-api-key")
+        p = Path(candidate).expanduser()
+        if not p.is_file() or p.stat().st_size == 0:
+            raise RuntimeError(
+                f"cursor API key file not found or empty at {p}; pass "
+                "--ak cursor_api_key_path=... or set LOOM_MARATHON_CURSOR_API_KEY_FILE "
+                "(cursor backends need a Cursor user API key in a file)"
+            )
+        return str(p)
 
     def _resolve_codex_auth(self) -> str:
         """Sanitized codex credential: auth.json ONLY (never host config/history)."""
@@ -260,6 +327,10 @@ class LoomAgent(BaseInstalledAgent):
             env["LOOM_MARATHON_LEAD_MAINT"] = "1"
         if self._team != "off":
             env["LOOM_MARATHON_TEAM"] = self._team
+        if self._worker_backend != "codex":
+            env["LOOM_MARATHON_WORKER_BACKEND"] = self._worker_backend
+        if self._lead_backend != "codex":
+            env["LOOM_MARATHON_LEAD_BACKEND"] = self._lead_backend
         if self._stub:
             env["LOOM_MARATHON_STUB"] = "1"
         if self.model_name:
