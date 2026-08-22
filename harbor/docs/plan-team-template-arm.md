@@ -1,6 +1,6 @@
 # Plan: `team` arm — run the SWE-Marathon harness on loom's first-class Team Templates
 
-Status: rev 2 — codex vet verdict **REVISE** (2026-08-21), POC P1–P3 green, fixes below not yet implemented. No spend.
+Status: rev 3 (2026-08-21) — vet fixes 1–8 IMPLEMENTED (codex, Claude-verified). P1–P5 green: P4 `test-team-gate.sh` 41/41; P5 stub dry-run `run-stub-trial.sh --team` job `stub-ensemble-173242` **11/11 ALL INVARIANTS PROVEN** (4/4 integrated incl. QA delivery, T2 attempt-1 gate failure with /app untouched, attempt 2 landed by the other implementer, 0 invariant violations). Residual risk before a paid run: the persistent `lead-persistent-team.md` path is not stub-testable (stub forces oneshot). No spend so far.
 
 ## POC results (host, free, loom built from `swe-marathon-team` = feature + harness merge, conflict-free)
 
