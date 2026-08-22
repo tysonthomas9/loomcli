@@ -12,9 +12,7 @@ type subscriber struct {
 	output     chan TerminalEvent
 	wake       chan struct{}
 	closedCh   chan struct{}
-	stopCh     chan struct{}
 	closedOnce sync.Once
-	stopOnce   sync.Once
 
 	mu          sync.Mutex
 	queue       []TerminalEvent
@@ -33,7 +31,6 @@ func newSubscriber(connID string, cols, rows uint16, attachedAt uint64) *subscri
 		output:     make(chan TerminalEvent),
 		wake:       make(chan struct{}, 1),
 		closedCh:   make(chan struct{}),
-		stopCh:     make(chan struct{}),
 	}
 	go s.pump()
 	return s
@@ -67,7 +64,6 @@ func (s *subscriber) closeImmediate(reason CloseReason) {
 	s.closed = true
 	s.closeReason = reason
 	s.closedOnce.Do(func() { close(s.closedCh) })
-	s.stopOnce.Do(func() { close(s.stopCh) })
 	s.signal()
 }
 
