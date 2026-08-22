@@ -242,6 +242,13 @@ agent runner:
 
 FleetDB must make the claim atomic. It does not need to pick the task.
 
+Skill labels influence preference without becoming a permanent eligibility
+gate. When an agent's best candidate is the low-scored skill fallback, it
+yields that task for up to 90 seconds if another supervised, idle service agent
+has a real skill match. The yielding agent may claim another candidate in the
+same pass. Busy, stopped, and ephemeral peers never delay a claim, and the
+fallback becomes claimable by the original agent when the grace period ends.
+
 ## Required Data Model
 
 The minimum new concept is an agent ownership lease:
