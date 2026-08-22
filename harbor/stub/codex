@@ -42,8 +42,17 @@ if [ -z "$PROMPT" ]; then
 fi
 
 task_id_from_prompt() {
-  printf '%s' "$PROMPT" | grep -Eo 'loom data show [A-Za-z0-9_]+-[0-9]+' \
-    | head -1 | awk '{print $4}'
+  # Daemon-spawned workers get the pre-claimed task in the environment
+  # (supervisor/spawn.go exports LOOM_ASSIGNED_TASK_ID); the team prompts
+  # render it as "claimed for you: **ID**" rather than a literal
+  # `loom data show ID`, so try env, then both prompt shapes.
+  if [ -n "${LOOM_ASSIGNED_TASK_ID:-}" ]; then printf '%s\n' "$LOOM_ASSIGNED_TASK_ID"; return; fi
+  local id
+  id=$(printf '%s' "$PROMPT" | grep -Eo 'claimed for you: \*\*[A-Za-z0-9_]+-[0-9]+\*\*' \
+    | head -1 | grep -Eo '[A-Za-z0-9_]+-[0-9]+')
+  [ -n "$id" ] || id=$(printf '%s' "$PROMPT" | grep -Eo 'loom data show [A-Za-z0-9_]+-[0-9]+' \
+    | head -1 | awk '{print $4}')
+  printf '%s\n' "$id"
 }
 
 created_id() { grep -Eo 'CREATED [A-Za-z0-9_]+-[0-9]+' | head -1 | awk '{print $2}'; }
