@@ -14,7 +14,12 @@ export type { TerminalPaneProps } from "./TerminalPane";
 
 export { TerminalPaneArea } from "./TerminalPaneArea";
 
-export { connectWebSocket, encodeResize } from "./terminalConnection";
+export { connectWebSocket } from "./terminalConnection";
+export type {
+  TerminalConnectionHandle,
+  TerminalInitialStateMetadata,
+  TerminalNotice,
+} from "./terminalConnection";
 
 export { useConnectionState } from "./useConnectionState";
 export { useSessionSeeding } from "./useSessionSeeding";

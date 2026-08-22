@@ -14,6 +14,8 @@ import {
 
 export interface XTermRendererHandle {
   write: (data: string | Uint8Array) => void;
+  reset: () => void;
+  setSize: (cols: number, rows: number) => void;
   focus: () => void;
   fit: () => { cols: number; rows: number } | null;
   scrollToBottom: () => void;
@@ -150,8 +152,19 @@ export function XTermRenderer({
       return { cols: terminal.cols, rows: terminal.rows };
     };
 
+    let applyingCanonicalResize = false;
     const handle: XTermRendererHandle = {
       write: (data) => terminal.write(data),
+      reset: () => terminal.reset(),
+      setSize: (cols, rows) => {
+        if (terminal.cols === cols && terminal.rows === rows) return;
+        applyingCanonicalResize = true;
+        try {
+          terminal.resize(cols, rows);
+        } finally {
+          applyingCanonicalResize = false;
+        }
+      },
       focus: () => terminal.focus(),
       fit,
       scrollToBottom: () => terminal.scrollToBottom(),
@@ -161,9 +174,9 @@ export function XTermRenderer({
     const binaryDisposable = terminal.onBinary((data) =>
       onBinaryRef.current(binaryStringToBytes(data)),
     );
-    const resizeDisposable = terminal.onResize(({ cols, rows }) =>
-      onResizeRef.current(cols, rows),
-    );
+    const resizeDisposable = terminal.onResize(({ cols, rows }) => {
+      if (!applyingCanonicalResize) onResizeRef.current(cols, rows);
+    });
 
     const textarea = terminal.textarea;
     const handleFocus = () => onFocusRef.current?.();

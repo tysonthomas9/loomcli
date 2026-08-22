@@ -20,7 +20,13 @@ const xtermMocks = vi.hoisted(() => {
     options: Record<string, unknown>;
     textarea: HTMLTextAreaElement | undefined;
     write = vi.fn();
+    reset = vi.fn();
     focus = vi.fn();
+    resize = vi.fn((cols: number, rows: number) => {
+      this.cols = cols;
+      this.rows = rows;
+      this.resizeListener?.({ cols, rows });
+    });
     scrollToBottom = vi.fn();
     scrollToLine = vi.fn();
     buffer = {
@@ -120,9 +126,14 @@ describe("XTermRenderer", () => {
     expect(onResize).toHaveBeenCalledWith(120, 40);
 
     handle.write("output");
+    handle.reset();
+    handle.setSize(100, 30);
     handle.focus();
     handle.scrollToBottom();
     expect(terminal?.write).toHaveBeenCalledWith("output");
+    expect(terminal?.reset).toHaveBeenCalledOnce();
+    expect(terminal?.resize).toHaveBeenCalledWith(100, 30);
+    expect(onResize).toHaveBeenCalledTimes(1);
     expect(terminal?.focus).toHaveBeenCalledOnce();
     expect(terminal?.scrollToBottom).toHaveBeenCalledOnce();
     terminal?.scrollToBottom.mockClear();
