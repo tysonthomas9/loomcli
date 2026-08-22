@@ -59,13 +59,17 @@ async function fetchTerminalToken(
   workspaceId: string,
   sessionName: string,
 ): Promise<string | null> {
-  const resp = await get<{ token: string }>(
-    wsUrl(
-      workspaceId,
-      "/terminal/token?session=" + encodeURIComponent(sessionName),
-    ),
-  );
-  return resp.token;
+  try {
+    const resp = await get<{ token: string }>(
+      wsUrl(
+        workspaceId,
+        "/terminal/token?session=" + encodeURIComponent(sessionName),
+      ),
+    );
+    return resp.token;
+  } catch {
+    return null;
+  }
 }
 
 function buildWsUrl(
@@ -237,7 +241,10 @@ export function connectWebSocket(
       callbacks.onOutput?.();
       callbacks.setConnectionState("connected");
       callbacks.onConnected?.();
-      flushPendingInputs();
+      if (pendingFocus) {
+        pendingFocus = false;
+        sendWithGeneration(encodeFocus);
+      }
       if (pendingResize) {
         const resize = pendingResize;
         pendingResize = null;
@@ -245,10 +252,7 @@ export function connectWebSocket(
           encodeResizeRequest(generation, resize.cols, resize.rows),
         );
       }
-      if (pendingFocus) {
-        pendingFocus = false;
-        sendWithGeneration(encodeFocus);
-      }
+      flushPendingInputs();
       return;
     }
 
@@ -339,48 +343,48 @@ export function connectWebSocket(
       };
 
       ws.onclose = (event: CloseEvent) => {
-      clearCurrentSocket(ws);
-      if (cancelled || disconnectedNotified) return;
-      cancelPendingFlush();
-      flushPendingWrites();
-      const reason = event.reason || terminalCloseReason;
-      switch (event.code) {
-        case WS_CLOSE_BACKEND_EXITED:
-          callbacks.setConnectionState("crashed");
-          callbacks.onBackendCrash?.(reason || "backend process exited");
-          return;
-        case WS_CLOSE_SESSION_KILLED:
-        case WS_CLOSE_NORMAL:
-          callbacks.setConnectionState("session_ended");
-          callbacks.onSessionKilled?.();
-          return;
-        case WS_CLOSE_SLOW_CONSUMER:
-          notifyDisconnected("immediate");
-          return;
-        case WS_CLOSE_STATE_REBUILDING:
-          notifyDisconnected("backoff");
-          return;
-        case WS_CLOSE_GOING_AWAY:
-          if (reason === WORKSPACE_UNAVAILABLE_REASON) {
-            callbacks.setConnectionState("error");
+        clearCurrentSocket(ws);
+        if (cancelled || disconnectedNotified) return;
+        cancelPendingFlush();
+        flushPendingWrites();
+        const reason = event.reason || terminalCloseReason;
+        switch (event.code) {
+          case WS_CLOSE_BACKEND_EXITED:
+            callbacks.setConnectionState("crashed");
+            callbacks.onBackendCrash?.(reason || "backend process exited");
+            return;
+          case WS_CLOSE_SESSION_KILLED:
+          case WS_CLOSE_NORMAL:
+            callbacks.setConnectionState("session_ended");
             callbacks.onSessionKilled?.();
             return;
-          }
-          break;
-      }
-      notifyDisconnected("backoff");
-    };
+          case WS_CLOSE_SLOW_CONSUMER:
+            notifyDisconnected("immediate");
+            return;
+          case WS_CLOSE_STATE_REBUILDING:
+            notifyDisconnected("backoff");
+            return;
+          case WS_CLOSE_GOING_AWAY:
+            if (reason === WORKSPACE_UNAVAILABLE_REASON) {
+              callbacks.setConnectionState("error");
+              callbacks.onSessionKilled?.();
+              return;
+            }
+            break;
+        }
+        notifyDisconnected("backoff");
+      };
 
       ws.onerror = () => {
-      if (cancelled || disconnectedNotified) return;
-      if (
-        ws.readyState === WebSocket.OPEN ||
-        ws.readyState === WebSocket.CONNECTING
-      ) {
-        ws.close();
-      }
-      clearCurrentSocket(ws);
-      notifyDisconnected("backoff");
+        if (cancelled || disconnectedNotified) return;
+        if (
+          ws.readyState === WebSocket.OPEN ||
+          ws.readyState === WebSocket.CONNECTING
+        ) {
+          ws.close();
+        }
+        clearCurrentSocket(ws);
+        notifyDisconnected("backoff");
       };
     })
     .catch(() => notifyDisconnected("backoff"));
@@ -412,10 +416,13 @@ export function connectWebSocket(
         sendWithGeneration((generation) => encodeInput(generation, bytes));
         return;
       }
+      // Drop oldest bytes on overflow; a single >=64 KiB write is truncated to its last 64 KiB.
       if (bytes.byteLength >= MAX_PENDING_INPUT_BYTES) {
         pendingInputs.length = 0;
         pendingInputBytes = 0;
-        pendingInputs.push(bytes.slice(bytes.byteLength - MAX_PENDING_INPUT_BYTES));
+        pendingInputs.push(
+          bytes.slice(bytes.byteLength - MAX_PENDING_INPUT_BYTES),
+        );
         pendingInputBytes = MAX_PENDING_INPUT_BYTES;
         return;
       }

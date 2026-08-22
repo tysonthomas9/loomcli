@@ -133,7 +133,9 @@ export function encodeFocus(generation: Uint8Array): ArrayBuffer {
   return encodeClientFrame(ClientFrameKind.Focus, generation);
 }
 
-export function decodeServerFrame(buffer: ArrayBuffer | Uint8Array): ServerFrame {
+export function decodeServerFrame(
+  buffer: ArrayBuffer | Uint8Array,
+): ServerFrame {
   const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
   if (bytes.byteLength < HEADER_BYTES) {
     throw new ProtocolError(
@@ -204,10 +206,7 @@ export function decodeServerFrame(buffer: ArrayBuffer | Uint8Array): ServerFrame
         rows: view.getUint16(30, false),
       };
     case 0x04: {
-      const text = decodeText(
-        copyBytes(bytes, HEADER_BYTES),
-        "notice payload",
-      );
+      const text = decodeText(copyBytes(bytes, HEADER_BYTES), "notice payload");
       let value: unknown;
       try {
         value = JSON.parse(text);

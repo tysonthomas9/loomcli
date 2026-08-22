@@ -60,6 +60,7 @@ class MockWebSocket {
   static CLOSING = 2 as const;
   static CLOSED = 3 as const;
   static instances: MockWebSocket[] = [];
+  static throwOnConstruct = false;
 
   readonly url: string;
   readonly requestedProtocols: string[];
@@ -76,6 +77,9 @@ class MockWebSocket {
   onerror: ((event: Event) => void) | null = null;
 
   constructor(url: string, protocols?: string | string[]) {
+    if (MockWebSocket.throwOnConstruct) {
+      throw new Error("WebSocket construction failed");
+    }
     this.url = url;
     this.requestedProtocols =
       typeof protocols === "string" ? [protocols] : (protocols ?? []);
@@ -138,6 +142,7 @@ describe("connectWebSocket", () => {
   beforeEach(async () => {
     vi.resetModules();
     MockWebSocket.instances = [];
+    MockWebSocket.throwOnConstruct = false;
     shared.getMock.mockClear();
     globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket;
     ({ connectWebSocket } = await import("../terminalConnection"));
@@ -401,8 +406,25 @@ describe("connectWebSocket", () => {
     ws.simulateMessage(initialStateForConnection);
     await flushMessages();
     expect(ws.send.mock.calls.map(([frame]) => toHex(frame))).toEqual([
-      CLIENT_FRAME_VECTORS.resizeRequest,
       CLIENT_FRAME_VECTORS.focus,
+      CLIENT_FRAME_VECTORS.resizeRequest,
+    ]);
+  });
+
+  it("flushes pending focus, resize, then input after initial_state", async () => {
+    const { handle, ws } = await connect();
+    ws.simulateOpen();
+    handle.sendFocus();
+    handle.sendResizeRequest(120, 40);
+    handle.sendInput("typed before snapshot\n");
+
+    ws.simulateMessage(initialStateForConnection);
+    await flushMessages();
+
+    expect(ws.send.mock.calls.map(([frame]) => toHex(frame))).toEqual([
+      CLIENT_FRAME_VECTORS.focus,
+      CLIENT_FRAME_VECTORS.resizeRequest,
+      expect.stringContaining("7479706564206265666f726520736e617073686f74"),
     ]);
   });
 
@@ -500,11 +522,21 @@ describe("connectWebSocket", () => {
     expect(ws.url).toContain("token=tok");
   });
 
-  it("backs off when token fetching fails", async () => {
+  it("connects without a token when token fetching fails", async () => {
     const callbacks = makeCallbacks();
     const wsRef = { current: null as WebSocket | null };
     connectWebSocket("ws1", "session1", wsRef, callbacks.callbacks);
     shared.rejectToken?.(new Error("network error"));
+    await vi.waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    expect(MockWebSocket.instances[0]?.url).not.toContain("token=");
+  });
+
+  it("backs off when WebSocket construction throws", async () => {
+    const callbacks = makeCallbacks();
+    const wsRef = { current: null as WebSocket | null };
+    MockWebSocket.throwOnConstruct = true;
+    connectWebSocket("ws1", "session1", wsRef, callbacks.callbacks);
+    shared.resolveToken?.({ token: "tok" });
     await flushMessages();
     expect(MockWebSocket.instances).toHaveLength(0);
     expect(callbacks.callbacks.setConnectionState).toHaveBeenCalledWith(
