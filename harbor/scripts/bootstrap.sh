@@ -394,7 +394,10 @@ PLEOF
   log "team portlock and freeports installed"
 fi
 
-if [ "$STUB" != "1" ]; then
+# NEED_CODEX: stub always (fake codex), real mode only when a role uses codex.
+NEED_CODEX=1
+[ "$STUB" != "1" ] && [ "${LOOM_MARATHON_NO_CODEX:-0}" = 1 ] && NEED_CODEX=0
+if [ "$STUB" != "1" ] && [ "$NEED_CODEX" = 1 ]; then
   [ -s /installed-agent/codex-auth/auth.json ] || die "codex auth.json missing (real mode)"
   ln -sf /installed-agent/codex-auth/auth.json "$CODEX_HOME/auth.json"
 fi
@@ -413,14 +416,25 @@ fi
 
 # ---- preflight asserts (fail fast, before any model spend) -------------------
 command -v loom >/dev/null || die "loom not on PATH"
-command -v codex >/dev/null || die "codex not on PATH"
+[ "$NEED_CODEX" = 0 ] || command -v codex >/dev/null || die "codex not on PATH"
 if [ "$NEED_CURSOR" = 1 ]; then
   command -v cursor-agent >/dev/null || die "cursor-agent not on PATH (cursor backend requested)"
-  # `cursor-agent status` exits 0 even when unauthenticated — match the text.
+  # Spend accounting must be writable before any paid turn: the shim refuses
+  # to run an unmetered turn (exit 97), so prove the rail here at \$0.
+  mkdir -p "$LOOM_MARATHON_CURSOR_USAGE_DIR" \
+    && : > "$LOOM_MARATHON_CURSOR_USAGE_DIR/.preflight" \
+    && rm -f "$LOOM_MARATHON_CURSOR_USAGE_DIR/.preflight" \
+    || die "cursor usage dir not writable: $LOOM_MARATHON_CURSOR_USAGE_DIR"
+  # `cursor-agent status` exits 0 even when unauthenticated. Observed text:
+  # logged out -> "Not logged in"; logged in -> "✓ Logged in as <email>".
+  # Reject the negative forms first, then require the positive one.
   CURSOR_STATUS=$(timeout 60 cursor-agent status 2>&1 || true)
   case "$CURSOR_STATUS" in
-    *"Logged in"*) log "cursor-agent $(cursor-agent --version 2>/dev/null) authenticated (workers=$LOOM_BACKEND lead=$LEAD_BACKEND)" ;;
-    *) die "cursor-agent not authenticated: ${CURSOR_STATUS:-<no output>}" ;;
+    *"Not logged in"*|*"not logged in"*|*"Authentication required"*|*"Error"*)
+      die "cursor-agent not authenticated: ${CURSOR_STATUS}" ;;
+    *"Logged in as"*)
+      log "cursor-agent $(cursor-agent --version 2>/dev/null) authenticated (workers=$LOOM_BACKEND lead=$LEAD_BACKEND)" ;;
+    *) die "cursor-agent status unrecognized: ${CURSOR_STATUS:-<no output>}" ;;
   esac
 fi
 if [ "$STUB" = "1" ]; then

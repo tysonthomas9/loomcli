@@ -98,6 +98,9 @@ class LoomAgent(BaseInstalledAgent):
             if value not in ("codex", "cursor"):
                 raise ValueError(f"{label} must be codex or cursor, got {value!r}")
         self._needs_cursor = "cursor" in (self._worker_backend, self._lead_backend)
+        # Stub mode always fakes codex; real mode installs codex only when a
+        # role uses it, so an all-cursor run needs no codex credentials.
+        self._needs_codex = self._stub or "codex" in (self._worker_backend, self._lead_backend)
         if self._needs_cursor and self._stub:
             raise ValueError("cursor backends have no stub; drop --ak stub=true")
         self._cursor_api_key_path = cursor_api_key_path
@@ -209,13 +212,8 @@ class LoomAgent(BaseInstalledAgent):
                 f"chmod +x {REMOTE_HOME}/stubbin/codex",
             )
         else:
-            # Real codex CLI. The task image ships node >= 22 (slack-clone needs npm).
-            await self.exec_as_root(
-                environment,
-                f"npm install -g @openai/codex@{shlex.quote(self._codex_npm_version)} "
-                f"&& codex --version",
-                timeout_sec=600,
-            )
+            if self._needs_codex:
+                await self._install_codex(environment)
             if self._lead_mode == "persistent":
                 # Controlled lead runtime = codex TUI on a tmux pty (same
                 # approach the fractal arm proved in this image family).
@@ -225,16 +223,6 @@ class LoomAgent(BaseInstalledAgent):
                     "(apt-get update -qq && apt-get install -y -qq tmux)",
                     timeout_sec=300,
                 )
-            auth_path = self._resolve_codex_auth()
-            remote_auth_dir = "/installed-agent/codex-auth"
-            await environment.upload_file(auth_path, f"{remote_auth_dir}/auth.json")
-            chown_user = environment.default_user
-            chown = (
-                f"chown -R {chown_user} {remote_auth_dir} && " if chown_user else ""
-            )
-            await self.exec_as_root(
-                environment, f"{chown}chmod 600 {remote_auth_dir}/auth.json"
-            )
             if self._needs_cursor:
                 await self._install_cursor(environment)
 
@@ -243,6 +231,24 @@ class LoomAgent(BaseInstalledAgent):
                 environment,
                 f"chown -R {environment.default_user} /installed-agent",
             )
+
+    async def _install_codex(self, environment: BaseEnvironment) -> None:
+        """Real codex CLI (the task image ships node >= 22) plus the sanitized
+        auth.json as a 600 container-only file."""
+        await self.exec_as_root(
+            environment,
+            f"npm install -g @openai/codex@{shlex.quote(self._codex_npm_version)} "
+            f"&& codex --version",
+            timeout_sec=600,
+        )
+        auth_path = self._resolve_codex_auth()
+        remote_auth_dir = "/installed-agent/codex-auth"
+        await environment.upload_file(auth_path, f"{remote_auth_dir}/auth.json")
+        chown_user = environment.default_user
+        chown = f"chown -R {chown_user} {remote_auth_dir} && " if chown_user else ""
+        await self.exec_as_root(
+            environment, f"{chown}chmod 600 {remote_auth_dir}/auth.json"
+        )
 
     async def _install_cursor(self, environment: BaseEnvironment) -> None:
         """cursor-agent for cursor roles: official installer into a
@@ -338,6 +344,8 @@ class LoomAgent(BaseInstalledAgent):
             env["LOOM_MARATHON_WORKER_BACKEND"] = self._worker_backend
         if self._lead_backend != "codex":
             env["LOOM_MARATHON_LEAD_BACKEND"] = self._lead_backend
+        if not self._needs_codex:
+            env["LOOM_MARATHON_NO_CODEX"] = "1"
         if self._cursor_model:
             env["LOOM_MARATHON_CURSOR_MODEL"] = self._cursor_model
         if self._stub:
@@ -392,8 +400,10 @@ class LoomAgent(BaseInstalledAgent):
             data = json.loads(summaries[-1].read_text())
         except (OSError, json.JSONDecodeError):
             return
-        context.n_input_tokens = data.get("input_tokens")
-        context.n_output_tokens = data.get("output_tokens")
+        # input_tokens/output_tokens stay codex-only for the stub invariants;
+        # Harbor's context gets the combined codex + cursor totals.
+        context.n_input_tokens = data.get("total_input_tokens", data.get("input_tokens"))
+        context.n_output_tokens = data.get("total_output_tokens", data.get("output_tokens"))
         context.cost_usd = data.get("est_cost_usd")
         context.metadata = (context.metadata or {}) | {
             "loom_marathon": {

@@ -172,6 +172,8 @@ print(json.dumps({
     "cursor_est_cost_usd": round(c_cost, 4),
     "cursor_unpriced_turns": unpriced,
     "cursor_by_model": by_model,
+    "total_input_tokens": total_in + c_in,
+    "total_output_tokens": total_out + c_out,
     "est_cost_usd": round(cost + c_cost, 4),
 }))
 PY
