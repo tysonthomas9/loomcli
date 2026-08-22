@@ -255,9 +255,13 @@ through the owner as trusted input (bypasses controller check).
   treated like 4003 (immediate resnapshot reconnect) and logged.
   Client input sent before `initial_state` must not be dropped: either queue
   it until the generation is pinned or keep the UI state `connecting` until
-  `initial_state` (and queue). A rejected token promise or a throwing
-  `new WebSocket` must transition to `disconnected` with backoff, never hang
-  in `connecting`.
+  `initial_state` (and queue). Flush order after `initial_state`: pending
+  `focus` first (so this viewer is the controller), then `resize_request`,
+  then queued input. A throwing `new WebSocket` must transition to
+  `disconnected` with backoff, never hang in `connecting`. A failed token
+  fetch is NOT fatal: the server supports token-less attach when terminal
+  auth is disabled (`ws.go` `auth == nil`), so keep connecting without a
+  token as before.
   `resize` → renderer `setSize(cols, rows)` (non-controller view). `notice`
   → callback. Close 4003/4004 → `disconnected` + immediate jittered reconnect
   (4004 with backoff). Replace `encodeResize` string protocol with
