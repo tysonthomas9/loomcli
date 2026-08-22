@@ -40,6 +40,10 @@ done
 if [ -z "$PROMPT" ]; then
   log "no prompt argument"; emit_usage; exit 0
 fi
+# Role detection greps a here-string, never `printf "$PROMPT" | grep -q`:
+# under `set -o pipefail` grep -q exits on its first match and printf (block
+# buffered on Linux bash for a 24 KB prompt) dies of SIGPIPE, so the pipeline
+# reports failure and every role branch is skipped ("unrecognized prompt").
 
 task_id_from_prompt() {
   # Daemon-spawned workers get the pre-claimed task in the environment
@@ -99,7 +103,7 @@ if [ "$TEAM_MODE" = "1" ] && [[ "$PROMPT" == *"ROLE-MARKER: lead-seed"* ]]; then
 fi
 
 # ------------------------------------------------------------------ lead seed
-if printf '%s' "$PROMPT" | grep -q 'ROLE-MARKER: lead-seed'; then
+if grep -q 'ROLE-MARKER: lead-seed' <<<"$PROMPT"; then
   existing=$(loom data list --type epic -o json 2>/dev/null \
     | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))' 2>/dev/null || echo 0)
   if [ "$existing" != "0" ]; then
@@ -152,7 +156,7 @@ print(1 if has_architect and has_design and not has_impl else 0)')
 fi
 
 # ----------------------------------------------------------- lead orchestrate
-if printf '%s' "$PROMPT" | grep -q 'ROLE-MARKER: lead-orchestrate'; then
+if grep -q 'ROLE-MARKER: lead-orchestrate' <<<"$PROMPT"; then
   approved=0
   ids=$(loom data list --status review -o json 2>/dev/null \
     | python3 -c 'import sys,json;print("\n".join(i["id"] for i in json.load(sys.stdin)))' 2>/dev/null)
@@ -180,7 +184,7 @@ print(1 if (needs_rev or not has_impl) else 0)')
 fi
 
 # ----------------------------------------------------------------- critic ----
-if printf '%s' "$PROMPT" | grep -q 'ROLE-MARKER: critic'; then
+if grep -q 'ROLE-MARKER: critic' <<<"$PROMPT"; then
   attempt=$(printf '%s' "$PROMPT" | grep -Eo 'attempt=[0-9]+' | head -1 | cut -d= -f2)
   candidate=$(printf '%s' "$PROMPT" | grep -Eo 'candidate=[0-9a-f]{7,40}' | head -1 | cut -d= -f2)
   printf 'REVIEW attempt=%s commit=%s APPROVED — stub critic: design followed\n' \
@@ -205,7 +209,7 @@ if [ "$TEAM_MODE" = "1" ] && [[ "$PROMPT" == *"ROLE-MARKER: team-architect"* ]];
 fi
 
 # ----------------------------------------------------------------- planner ---
-if printf '%s' "$PROMPT" | grep -Eq 'ONE planning task|planning task|Create the Plan'; then
+if grep -Eq 'ONE planning task|planning task|Create the Plan' <<<"$PROMPT"; then
   TID=$(task_id_from_prompt)
   if [ -z "$TID" ]; then log "planner: no task id in prompt"; emit_usage; exit 0; fi
   title=$(loom data show "$TID" -o json 2>/dev/null \
@@ -330,7 +334,7 @@ EOF
 fi
 
 # ----------------------------------------------------------------- coder -----
-if printf '%s' "$PROMPT" | grep -Eq 'ROLE-MARKER: coder|IMPL-DONE'; then
+if grep -Eq 'ROLE-MARKER: coder|IMPL-DONE' <<<"$PROMPT"; then
   TID=$(task_id_from_prompt)
   if [ -z "$TID" ]; then log "coder: no task id in prompt"; emit_usage; exit 0; fi
   show=$(loom data show "$TID" -o json 2>/dev/null)
