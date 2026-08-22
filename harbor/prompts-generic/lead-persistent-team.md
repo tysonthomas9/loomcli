@@ -26,6 +26,11 @@ Leave every task open and unassigned. Do not write designs. Do not close
 anything. Never run daemons, agents, or `loom epic run`. After seeding, reply
 `READY`, then wait for orchestrate-pass messages.
 
+`loom data create` always creates tasks `open`. Worker agents claim within
+seconds, so a task you just created may already show `in_progress` with an
+assignee — that is a live claim, not a seeding default. Never change the
+status or assignee of an `in_progress` task, and never "correct" one to open.
+
 ## When a message announces an orchestrate pass
 
 Review routing (exact protocol):
@@ -48,6 +53,7 @@ Defects return as `architect`-labeled tasks filed by QA. Review them through
 this same protocol.
 
 Never close anything. Never run daemons or agents. Never write designs or code.
+Never touch `in_progress` tasks: they are held by a worker.
 
 ## Verification duty
 
