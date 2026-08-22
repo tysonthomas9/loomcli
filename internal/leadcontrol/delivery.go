@@ -298,16 +298,12 @@ func deliverNextLeadInboxMessage(
 		result.Reason = "agent inbox store is not configured"
 		return result, nil
 	}
-	leaseTTL := leadInboxDefaultLeaseTTL
-	if l, ok := d.(interface{ leaseTTL() time.Duration }); ok {
-		leaseTTL = l.leaseTTL()
-	}
 	msg, err := st.AgentInboxMessages().ClaimNext(ctx, store.AgentInboxMessageClaim{
 		WorkspaceKey:  workspace,
 		TargetAgentID: leadName,
 		SessionID:     sessionID,
 		ClaimedBy:     d.claimedBy(sessionID),
-		LeaseTTL:      leaseTTL,
+		LeaseTTL:      delivererLeaseTTL(d),
 	})
 	if errors.Is(err, domain.ErrNotFound) {
 		result.State = DeliveryStateNone
@@ -343,6 +339,13 @@ func deliverNextLeadInboxMessage(
 // message to a running runtime and return at once. A deliverer that blocks
 // for the whole turn overrides it via leaseTTL().
 const leadInboxDefaultLeaseTTL = 2 * time.Minute
+
+func delivererLeaseTTL(d leadTurnDeliverer) time.Duration {
+	if l, ok := d.(interface{ leaseTTL() time.Duration }); ok {
+		return l.leaseTTL()
+	}
+	return leadInboxDefaultLeaseTTL
+}
 
 // leadInboxTurnFailureMaxAttempts bounds how many turns a message whose turn
 // ran and failed may consume before it is marked failed (ClaimNext counts
