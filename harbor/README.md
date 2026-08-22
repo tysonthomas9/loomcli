@@ -81,6 +81,31 @@ Agent kwargs (`--ak k=v`): `stub`, `budget_secs` (14400), `reserve_secs` (2400),
 `cadence_secs` (360), `spend_cap_usd` (90), `max_agents` (2),
 `codex_auth_json_path` (default `~/.codex/auth.json`), `codex_npm_version`.
 
+### Watching a trial from an agent session (cheap)
+
+A trial runs 40 min–4 h and writes `<job>/<trial>/agent/orchestrate.log`. Tailing it from
+the main (expensive) model re-spends the whole cached context on every notification — 27
+`pass N` lines at 90 s cadence cost more than the trial. What worked on `team-cursor-122710`
+(2026-08-22; the watcher's report was checked line-for-line against the logs):
+
+1. Launch harbor **detached** (`subprocess.Popen(..., start_new_session=True, stdin=DEVNULL)`
+   with stdout to a launcher log) so no tool timeout can kill it; the launcher log's final
+   `HARBOR_EXIT=<n>` line is the terminal marker.
+2. Hand the watch to a **Sonnet subagent** (read-only brief): paths of orchestrate.log, the
+   launcher log, the evidence dir; the expected end time; "poll every 2 min, ignore routine
+   `pass N (t+…)` lines, note `seeded:` / `impl-review:` / `INTEGRATED` / rejects / `finalize`;
+   grep `daemon.out` for `classified error|fast-fail|liveness|FATAL`; when `HARBOR_EXIT`
+   appears report ≤25 lines: exit code + finalize lines, every integration (task, attempt,
+   delivered_by) and reject, last spend + `cursor-usage` file/result counts, daemon error
+   lines or `none`, argv prompt-leak check". Forbid reading credential files by name.
+3. **Do not rely on the subagent waking itself.** Its background poll ended its turn and it
+   never re-reported; it produced the correct report only when messaged. So the parent arms
+   one cheap fallback — a background `until grep -q HARBOR_EXIT <launcher.log>; do sleep 60;
+   done` — and on that single wake-up sends the watcher "the trial has finished, report now".
+
+Cost on that run: ~92k Sonnet tokens for the whole 33-minute watch + report, versus one
+main-model turn per log line before.
+
 ## Known deviations / notes
 
 - The plan's optional `SHELL=/bin/false` guard on lead one-shots is intentionally
