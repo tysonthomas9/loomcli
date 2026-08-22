@@ -118,9 +118,10 @@ func TestRunHeadlessLeadRuntimeSeedsThenDrainsInbox(t *testing.T) {
 		t.Fatalf("runtime metadata = %+v", meta)
 	}
 
-	// A message enqueued by another process (leadmsg) is drained into a
-	// resumed turn — and a failing turn still leaves the session idle so the
-	// next message is attempted.
+	// Messages enqueued by another process (leadmsg) are drained into
+	// resumed turns in order. A message whose turn fails is retried once
+	// (same message, oldest first) and then marked failed — never reported
+	// delivered — and the runtime stays idle so the next message flows.
 	for i, msg := range []string{"FAIL-ME please", "second message"} {
 		if _, err := createLeadInboxMessage(ctx, st, "WS", "nova", "lead-session", msg, LeadMessageDeliveryOptions{
 			SourceKind: "user_chat", DedupeKey: "headless-" + string(rune('a'+i)),
@@ -128,9 +129,9 @@ func TestRunHeadlessLeadRuntimeSeedsThenDrainsInbox(t *testing.T) {
 			t.Fatalf("enqueue: %v", err)
 		}
 	}
-	waitForCondition(t, func() bool { return len(readTurnLog(t, turnLog)) == 3 }, "drain never ran both queued turns")
+	waitForCondition(t, func() bool { return len(readTurnLog(t, turnLog)) == 4 }, "drain never ran the retry and the second message")
 	turns = readTurnLog(t, turnLog)
-	if turns[1] != "chat-123|FAIL-ME please" || turns[2] != "chat-123|second message" {
+	if turns[1] != "chat-123|FAIL-ME please" || turns[2] != "chat-123|FAIL-ME please" || turns[3] != "chat-123|second message" {
 		t.Fatalf("turn log = %q", turns)
 	}
 	waitForCondition(t, func() bool {
@@ -140,6 +141,21 @@ func TestRunHeadlessLeadRuntimeSeedsThenDrainsInbox(t *testing.T) {
 	if !strings.Contains(out.String(), "[lead turn 2 failed") {
 		t.Fatalf("stdout missing failure note:\n%s", out.String())
 	}
+	waitForCondition(t, func() bool {
+		msgs, err := st.AgentInboxMessages().List(ctx, "WS", store.AgentInboxMessageFilter{TargetAgentID: "nova"})
+		if err != nil {
+			return false
+		}
+		byBody := map[string]*domain.AgentInboxMessage{}
+		for _, m := range msgs {
+			byBody[m.Body] = m
+		}
+		failed, second := byBody["FAIL-ME please"], byBody["second message"]
+		return failed != nil && second != nil &&
+			failed.Status == domain.AgentInboxMessageFailed && failed.Attempt == 2 &&
+			failed.ErrorClass == "cursor_turn_failed" && strings.Contains(failed.LastError, "is_error") &&
+			second.Status == domain.AgentInboxMessageDelivered
+	}, "inbox outcomes: want FAIL-ME failed after 2 attempts and second delivered")
 
 	cancel()
 	select {

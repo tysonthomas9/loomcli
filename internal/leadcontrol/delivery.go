@@ -17,9 +17,14 @@ import (
 type DeliveryState string
 
 const (
-	DeliveryStateNone        DeliveryState = "none"
-	DeliveryStatePending     DeliveryState = "pending"
-	DeliveryStateDelivered   DeliveryState = "delivered"
+	DeliveryStateNone      DeliveryState = "none"
+	DeliveryStatePending   DeliveryState = "pending"
+	DeliveryStateDelivered DeliveryState = "delivered"
+	// DeliveryStateFailed: the turn carrying the message ran and failed
+	// (as opposed to pending, where it never started). The inbox message is
+	// re-queued once and then marked failed, so a poison message cannot
+	// loop and a transient failure gets a second chance.
+	DeliveryStateFailed      DeliveryState = "failed"
 	DeliveryStateUnsupported DeliveryState = "unsupported"
 )
 
@@ -317,10 +322,50 @@ func deliverNextLeadInboxMessage(
 	if err != nil {
 		return nil, err
 	}
-	if delivered.State != DeliveryStateDelivered {
+	switch delivered.State {
+	case DeliveryStateDelivered:
+		return completeLeadInboxDelivered(ctx, st, workspace, sessionID, d, msg, delivered)
+	case DeliveryStateFailed:
+		if msg.Attempt >= leadInboxTurnFailureMaxAttempts {
+			return completeLeadInboxFailed(ctx, st, workspace, sessionID, d, msg, delivered)
+		}
+		return completeLeadInboxRetry(ctx, st, workspace, sessionID, d, msg, delivered)
+	default:
 		return completeLeadInboxRetry(ctx, st, workspace, sessionID, d, msg, delivered)
 	}
-	return completeLeadInboxDelivered(ctx, st, workspace, sessionID, d, msg, delivered)
+}
+
+// leadInboxTurnFailureMaxAttempts bounds how many turns a message whose turn
+// ran and failed may consume before it is marked failed (ClaimNext counts
+// attempts, so 2 = one retry).
+const leadInboxTurnFailureMaxAttempts = 2
+
+// completeLeadInboxFailed records the delivery attempt and marks the inbox
+// message failed (terminal) after its turn failed on the last allowed attempt.
+func completeLeadInboxFailed(
+	ctx context.Context,
+	st store.Store,
+	workspace string,
+	sessionID string,
+	d leadTurnDeliverer,
+	msg *domain.AgentInboxMessage,
+	delivered *DeliveryResult,
+) (*DeliveryResult, error) {
+	if delivered.Reason != "" {
+		if isAssignmentInboxMessage(msg) {
+			_ = MarkAssignmentDeliveryAttempt(ctx, st, workspace, sessionID, delivered.Reason)
+		} else {
+			_ = MarkLeadMessageDeliveryAttempt(ctx, st, workspace, sessionID, delivered.Reason)
+		}
+	}
+	if _, err := st.AgentInboxMessages().Complete(ctx, workspace, msg.InboxMessageID, store.AgentInboxMessageComplete{
+		Outcome:    "failed",
+		ErrorClass: d.provider() + "_turn_failed",
+		Error:      delivered.Reason,
+	}); err != nil {
+		return nil, err
+	}
+	return delivered, nil
 }
 
 // completeLeadInboxRetry records the delivery attempt and returns the claimed
@@ -394,13 +439,20 @@ func drainLeadMessageQueue(ctx context.Context, st store.Store, workspace, leadN
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			result, err := DeliverPendingLeadMessages(ctx, st, workspace, leadName)
-			if err != nil {
-				logger.Debug("lead message queue drain failed", "err", err)
-				continue
-			}
-			if result != nil && result.State == DeliveryStateDelivered {
-				logger.Debug("lead message queue drained", "lead", leadName, "session", result.SessionID)
+			// Keep delivering while messages complete (delivered, or a
+			// failed turn that was re-queued/terminated) so a backlog does
+			// not pay one tick per message; stop at an empty queue or a
+			// pending (busy / not ready) runtime.
+			for ctx.Err() == nil {
+				result, err := DeliverPendingLeadMessages(ctx, st, workspace, leadName)
+				if err != nil {
+					logger.Debug("lead message queue drain failed", "err", err)
+					break
+				}
+				if result == nil || (result.State != DeliveryStateDelivered && result.State != DeliveryStateFailed) {
+					break
+				}
+				logger.Debug("lead message queue drained", "lead", leadName, "session", result.SessionID, "state", result.State)
 			}
 		}
 	}

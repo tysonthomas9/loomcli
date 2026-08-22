@@ -310,10 +310,17 @@ Status: spec A + B landed; stub dry-run NOT yet run.
   substitution lost the final `result` line in ~1/6 PTY runs) and refuses unmetered turns
   (exit 97); bootstrap proves the usage dir writable at $0. Known, pre-existing, NOT fixed:
   (F3) `internal/cli/root.go` re-raises SIGTERM immediately, so no controlled runtime ever
-  persists `disconnected` on finalize's pkill — mitigated for cursor by Pdeathsig=SIGKILL on
-  every turn (no orphaned paid turn); (F7) runtime metadata updates are full-map writes
-  without CAS — a concurrent `loom lead` vs deliverer write can drop a key (needs fleet-db
-  CAS; rare, status re-persists each turn).
+  persists `disconnected` on finalize's pkill — mitigated for cursor by running each turn in
+  its own process group (cancel = group SIGTERM, SIGKILL after 15s) with Linux
+  Pdeathsig=SIGTERM so the metering shim forwards to the real agent (no orphaned paid turn;
+  test proves a wrapper's grandchild dies); (F7) runtime metadata updates are full-map
+  writes without CAS — a concurrent `loom lead` vs deliverer write can drop a key; (F2
+  residue) fleet-db bde3617 inbox ClaimNext/Complete are read-check-HSET, not atomic — safe
+  here only because every process but the runtime is enqueue-only (needs fleet-db CAS).
+  Rounds 2–3 (05e9c3ca2, 2165115d8, + this commit): shim forks the agent so cancel is a
+  group signal; metering mandatory (stream-json forced, exit 97 when unrecorded); a message
+  counts delivered only when its turn completed — a failed turn re-queues once, then the
+  inbox message is marked `failed` (LastError = the turn error).
 - Next: capped all-cursor container trial (`launch-team-cursor.sh`, needs the key file), then
   the full-budget run (`budget_secs=14400`) with the replica judge on the better backend.
 

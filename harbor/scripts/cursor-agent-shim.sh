@@ -32,20 +32,23 @@ set -u
 
 # loom_capture FILE MARK: stdin -> stdout passthrough, appending system/result
 # event lines to FILE first (so a dead stdout loses nothing). MARK is created
-# once the result line has been both recorded and forwarded; FILE.err marks a
-# failed record. Shutdown signals are ignored here: the reader must outlive a
-# TERMed agent long enough to record the result it may still print.
+# once the result line has been both recorded and forwarded. A failed record
+# is reported two ways, since the disk that failed the append may also refuse
+# a marker file: FILE.err (best effort) and exit status 98 at EOF. Shutdown
+# signals are ignored here: the reader must outlive a TERMed agent long
+# enough to record the result it may still print.
 loom_capture() {
   trap '' HUP TERM INT
-  local line
+  local line failed=0
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
       *'"type":"system"'*|*'"type":"result"'*)
-        printf '%s\n' "$line" >> "$1" 2>/dev/null || : > "$1.err" ;;
+        printf '%s\n' "$line" >> "$1" 2>/dev/null || { failed=1; : > "$1.err" 2>/dev/null; } ;;
     esac
     printf '%s\n' "$line" 2>/dev/null || true
     case "$line" in *'"type":"result"'*) : > "$2" ;; esac
   done
+  [ "$failed" = 0 ] || exit 98
 }
 
 REAL="${LOOM_MARATHON_CURSOR_REAL:-/installed-agent/cursor-home/.local/bin/cursor-agent}"
@@ -82,8 +85,10 @@ rm -f "$mark" "$f.err"
 
 # Signal handling is armed before the agent exists: a signal that lands in the
 # gap sets `aborted` and is acted on right after the spawn. TERM is forwarded,
-# then KILL after 5s if the agent ignores it; the escalation timer is
-# cancelled once the agent has exited so it can never hit a reused PID.
+# then KILL after 5s if the agent ignores it. `child` is cleared the moment
+# the agent is reaped and the escalation timer cancelled, so a late signal
+# (during the flush) only shortens the flush — nothing is ever sent to a PID
+# that could have been reused.
 child=""
 aborted=""
 esc=""
@@ -104,36 +109,39 @@ child=$!
 [ -n "$aborted" ] && on_signal
 wait "$child"; rc=$?
 while [ "$rc" -gt 128 ] && kill -0 "$child" 2>/dev/null; do wait "$child"; rc=$?; done
-[ -n "$esc" ] && { kill "$esc" 2>/dev/null; wait "$esc" 2>/dev/null; }
+child=""
+if [ -n "$esc" ]; then kill "$esc" 2>/dev/null; wait "$esc" 2>/dev/null; esc=""; fi
 
 # Flush the reader. With the result already recorded and forwarded (MARK), or
 # after a shutdown signal (no result is coming), anything still in the FIFO
 # is output from a tool subprocess the agent orphaned, so the wait is short.
 # Otherwise the reader may still be pushing the result through a slow PTY:
-# give it much longer before giving up.
-bound=300
-{ [ -e "$mark" ] || [ -n "$aborted" ]; } && bound=50
+# give it much longer before giving up. Both conditions are re-read every
+# tick so a signal that lands mid-flush takes effect immediately.
 i=0
 while kill -0 "$reader" 2>/dev/null; do
   i=$((i + 1))
-  [ -e "$mark" ] && bound=50
+  bound=300
+  { [ -e "$mark" ] || [ -n "$aborted" ]; } && bound=50
   [ "$i" -ge "$bound" ] && break
   sleep 0.1
 done
 # The reader ignores TERM (see loom_capture), so the give-up kill is KILL; each
 # record is a single-line write, so nothing half-written can be left behind.
 kill -KILL "$reader" 2>/dev/null
-wait "$reader" 2>/dev/null
+wait "$reader" 2>/dev/null; rrc=$?
 rm -f "$fifo" "$mark"
 
-if [ "$rc" -eq 0 ]; then
-  if [ -e "$f.err" ]; then
-    echo "cursor-agent shim: spend record write failed for $f (turn not accounted)" >&2
-    rc=97
-  elif ! grep -q '"type":"result"' "$f" 2>/dev/null; then
-    echo "cursor-agent shim: agent exited 0 without a result event (turn not accounted, see $f)" >&2
-    rc=97
-  fi
+# Accounting verdict, independent of how the agent exited: a turn whose
+# record could not be written is reported as unaccounted even when the agent
+# failed (its tokens were still billed), and a zero exit additionally needs
+# the result record.
+if [ "$rrc" -eq 98 ] || [ -e "$f.err" ]; then
+  echo "cursor-agent shim: spend record write failed for $f (turn not accounted; agent rc=$rc)" >&2
+  rc=97
+elif [ "$rc" -eq 0 ] && ! grep -q '"type":"result"' "$f" 2>/dev/null; then
+  echo "cursor-agent shim: agent exited 0 without a result event (turn not accounted, see $f)" >&2
+  rc=97
 fi
 rm -f "$f.err"
 exit "$rc"

@@ -92,7 +92,9 @@ func RunHeadlessLeadRuntime(ctx context.Context, cfg HeadlessLeadRuntimeConfig) 
 	if err := h.startTurn(cfg.Prompt); err != nil {
 		return err
 	}
-	h.waitTurn()
+	if err := h.waitTurn(); err != nil && h.seedErr == nil {
+		h.seedErr = err
+	}
 	if h.seedErr != nil {
 		h.persist(context.Background(), RuntimeStatusFailed)
 		return fmt.Errorf("headless lead seed turn: %w", h.seedErr)
@@ -105,7 +107,7 @@ func RunHeadlessLeadRuntime(ctx context.Context, cfg HeadlessLeadRuntimeConfig) 
 	<-ctx.Done()
 	cancelDrain()
 	cancelTurns()
-	h.waitTurn()
+	_ = h.waitTurn() // outcome of a cancelled turn is not a runtime error
 	unregister()
 	h.persist(context.Background(), RuntimeStatusDisconnected)
 	return nil
@@ -149,6 +151,10 @@ type headlessLeadRuntime struct {
 	done       chan struct{}
 	turns      int
 	seedErr    error
+	// lastTurnErr is the outcome of the most recently finished turn; read by
+	// deliverTurn after waitTurn so a started-then-failed message is not
+	// reported delivered.
+	lastTurnErr error
 }
 
 func (h *headlessLeadRuntime) persist(ctx context.Context, status string) {
@@ -215,6 +221,7 @@ func (h *headlessLeadRuntime) startTurn(message string) error {
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		h.busy = false
+		h.lastTurnErr = err
 		if turn == 1 {
 			h.seedErr = err
 		}
@@ -232,14 +239,18 @@ func (h *headlessLeadRuntime) startTurn(message string) error {
 	return nil
 }
 
-// waitTurn blocks until the in-flight turn (if any) has finished.
-func (h *headlessLeadRuntime) waitTurn() {
+// waitTurn blocks until the in-flight turn (if any) has finished and
+// returns that turn's outcome.
+func (h *headlessLeadRuntime) waitTurn() error {
 	h.mu.Lock()
 	done := h.done
 	h.mu.Unlock()
 	if done != nil {
 		<-done
 	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.lastTurnErr
 }
 
 func (h *headlessLeadRuntime) turnArgs(message string) []string {
@@ -465,9 +476,17 @@ func (d *headlessTurnDeliverer) deliverTurn(
 		result.Reason = err.Error()
 		return result, nil
 	}
-	// startTurn already persisted "active"; writing it again here would race
-	// a fast turn's "idle" and leave the session reported busy forever.
-	d.runtime.Status = RuntimeStatusActive
+	// A message is delivered only once its turn has completed: the turn
+	// process may be a wrapper that fails before the agent ever sees the
+	// message (exec failure, accounting refusal), and the agent itself
+	// reports is_error. Waiting here is fine — the runtime's drain goroutine
+	// is the only caller, and nothing else could start a turn meanwhile.
+	if err := h.waitTurn(); err != nil {
+		result.State = DeliveryStateFailed
+		result.Reason = err.Error()
+		return result, nil
+	}
+	d.runtime.Status = RuntimeStatusIdle
 	result.HarnessRuntime = d.runtime
 	result.State = DeliveryStateDelivered
 	result.Reason = ""
