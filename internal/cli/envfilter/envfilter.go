@@ -11,7 +11,7 @@ var envAllowlistExact = map[string]bool{
 	// System
 	"PATH": true, "HOME": true, "PWD": true, "TERM": true, "USER": true,
 	"SHELL": true, "LOGNAME": true, "TMPDIR": true, "TZ": true,
-	"COLUMNS": true, "LINES": true,
+	"COLUMNS": true, "LINES": true, "ZDOTDIR": true,
 	// Locale
 	"LANG": true, "LC_ALL": true, "LC_CTYPE": true, "LC_MESSAGES": true,
 	// XDG

@@ -84,7 +84,7 @@ func RunGitCommandWithOutput(dir string, args ...string) error {
 
 // FilteredEnv returns os.Environ() filtered through the subprocess allowlist.
 func FilteredEnv() []string {
-	return SelfBinPathEnv(envfilterpkg.FilteredEnv())
+	return ZshRcShimEnv(SelfBinPathEnv(envfilterpkg.FilteredEnv()))
 }
 
 // FilterEnv filters an environment slice through the subprocess allowlist.

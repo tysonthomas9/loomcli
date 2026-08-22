@@ -6,16 +6,15 @@ import (
 )
 
 func TestFilterEnv_AllowsExactMatches(t *testing.T) {
-	input := []string{"PATH=/usr/bin", "HOME=/root"}
+	input := []string{"PATH=/usr/bin", "HOME=/root", "ZDOTDIR=/custom/zsh"}
 	got := FilterEnv(input)
-	if len(got) != 2 {
-		t.Fatalf("FilterEnv() returned %d entries, want 2", len(got))
+	if len(got) != len(input) {
+		t.Fatalf("FilterEnv() returned %d entries, want %d", len(got), len(input))
 	}
-	if got[0] != "PATH=/usr/bin" {
-		t.Errorf("got[0] = %q, want %q", got[0], "PATH=/usr/bin")
-	}
-	if got[1] != "HOME=/root" {
-		t.Errorf("got[1] = %q, want %q", got[1], "HOME=/root")
+	for i, want := range input {
+		if got[i] != want {
+			t.Errorf("got[%d] = %q, want %q", i, got[i], want)
+		}
 	}
 }
 
