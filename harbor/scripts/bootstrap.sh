@@ -440,6 +440,13 @@ if [ "$NEED_CURSOR" = 1 ]; then
     && : > "$LOOM_MARATHON_CURSOR_USAGE_DIR/.preflight" \
     && rm -f "$LOOM_MARATHON_CURSOR_USAGE_DIR/.preflight" \
     || die "cursor usage dir not writable: $LOOM_MARATHON_CURSOR_USAGE_DIR"
+  # Live credential check at $0: `cursor-agent models` needs Cursor auth and
+  # is free. With CURSOR_API_KEY it is also what performs the API-key login
+  # and writes the resulting tokens into the (Linux default) file store —
+  # `status` never does that on its own and would report "Not logged in" for
+  # a perfectly valid key (host-verified 2026-08-22).
+  timeout 120 cursor-agent models >/dev/null 2>&1 \
+    || die "cursor-agent cannot authenticate with the uploaded credential (\`cursor-agent models\` failed)"
   # `cursor-agent status` exits 0 whatever the state, and its isAuthenticated
   # only means "tokens are present" (a stale or bogus auth.json still reports
   # true with "unable to fetch user details"). Require userInfo, which the
