@@ -268,3 +268,23 @@ reproduce the existing 8 assertions plus: template-apply.json created=9, ≥1
 Go/no-go for a paid run: P1–P5 green and R1/R4 resolved.
 
 Status: spec A + B landed; stub dry-run NOT yet run.
+
+## Status (rev 4, 2026-08-22)
+
+- Host runs of the template team (real codex and real cursor-agent, tiny stdlib app, 2 tasks
+  each): architect → lead approval → implementer (yield rule routed `backend`-labeled work to
+  backend-dev-1) → QA lane, all lanes green on both backends. Cursor was faster (95s/71s/150s).
+- Product fixes found by those runs, on this branch and on `fix/team-template-runtime` (off
+  feat/onboarding-templates-v1, gate green): agent-shell `loom` shadowing (zsh rc shim,
+  eb1f09404 + b3caa4309), `workspace create` silent skipped checkout (9bdca6269), daemon socket
+  path fallback (206336833), cross-agent skill yield (3881c0882).
+- **Paid container run `team-small-002151`** (32 min work window, $6.92, persistent lead,
+  verification off): the persistent-lead path is PROVEN — lead seeded 1 epic + 16 tasks in one
+  turn, rejected the first design with spec-anchored FEEDBACK (`/api/health` contract), the
+  architect revised via the needs-revision+architect route, the lead approved with the exact
+  label stripping, frontend-dev-1 yielded and backend-dev-1 claimed. integrated=0 only because
+  design (17 min) + revision (4 min) + implementation overran the window; no harness failures,
+  0 INVARIANT-VIOLATION. Lead bug found and fixed (96d4160e3): it reset a freshly claimed
+  in_progress task to open during seeding.
+- Next: full-budget run (`budget_secs=14400`) with the replica judge.
+
