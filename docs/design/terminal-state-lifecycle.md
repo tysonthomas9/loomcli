@@ -14,7 +14,7 @@ Line references are pinned to that commit and will drift after edits.
 |---|---|---|
 | D1 | Fix the attach/live ordering bug and slow-viewer loss **first**, as a transport-correctness change against the existing ring (Phase 1). It does not claim the ring is a valid snapshot. | Agreed |
 | D2 | The long-term state owner is **libghostty-vt embedded in-process as WASM under wazero**, one isolated module instance per session. It keeps loom a single `CGO_ENABLED=0` binary. It must pass every Phase 0 gate before production code depends on it. | Agreed, gated |
-| D3 | If WASM passes fidelity but misses a resource gate, first attribute the miss with an A/B native-versus-WASM prototype. Use the same library via **cgo** (`mitchellh/go-libghostty`) only when the excess is demonstrably caused by wazero/WASM rather than libghostty's state model, and only after cgo passes every fidelity, four-target packaging, installed-desktop, and process-failure gate; this changes the `CGO_ENABLED=0` release invariant and loses WASM trap containment. **Fidelity** failure falls back to a packaged **Node worker** (`@xterm/headless` + `@xterm/addon-serialize`); supplementary state must come from supported xterm state or a maintained serializer fork, never a parallel raw-stream parser. tmux is reserved for restart survival (D11), not for this problem. | Agreed after §8.1 |
+| D3 | Phase 0 fallbacks, by failure type. **(a) Resource failure** (libghostty restores state correctly but WASM misses a memory/throughput gate): keep the same official `libghostty-vt` C library and link it **natively via cgo** instead of running it as WASM. Attribute the miss first with a native-vs-WASM A/B; adopt cgo only if WASM is demonstrably the cause and the cgo build passes every fidelity, four-target packaging, installed-desktop, and process-failure gate. Cost: the release moves from `CGO_ENABLED=0` to cgo + Zig cross-compile, and a native fault is no longer contained to one session. The Go binding layer is incidental — `mitchellh/go-libghostty` (by Ghostty's author, personal account, API unstable) or a Loom-owned thin shim over the official header. **(b) Fidelity failure** (libghostty cannot restore the corpus): fall back to a packaged **Node worker** (`@xterm/headless` + `@xterm/addon-serialize`); supplementary state must come from supported xterm state or a maintained serializer fork, never a parallel raw-stream parser. tmux is not a fallback for either; it is reserved for restart survival (D11). | Agreed after §8.1 |
 | D4 | Initial state is sent to the browser as **VT output from the libghostty formatter plus the parser continuation suffix**, written into the existing `@xterm/xterm` after an explicit reset. libghostty's binary `GHOSTSNP` snapshot is used **only** for same-version in-process checkpoints, never on the wire or as a durable format (its v1 format carries no compatibility guarantee). | Agreed |
 | D5 | One **owner goroutine per session** serializes PTY output, resize, input, focus/controller changes, attach cuts, snapshots, and synthetic output. `Sequence` increments only for server→browser events (`Output`, `Resize`, `Notice`, `Close`); input, focus, attach, and snapshot are ordered owner commands that do not consume wire sequence numbers. | Agreed |
 | D6 | Canonical geometry and all browser-originated PTY traffic belong to the **most-recently-focused viewer** (the controller); on its disconnect, control passes to the most recently attached remaining viewer, whose stored dimensions are applied immediately. Non-controllers are read-only and render at canonical size. | Agreed |
@@ -291,7 +291,7 @@ server-restart survival is required (it is not, for v1).
 | Rank | Candidate | Fidelity | Ordering | Release fit | Verdict |
 |---|---|---|---|---|---|
 | 1 | **libghostty-vt, WASM under wazero, in-process** | Formatter emits modes, cursor, hyperlink (OSC 8), scrolling region, tabstops, charsets, kitty keyboard, palette; continuation API exports unfinished parser input as replayable bytes | Same goroutine as PTY owner | Pure Go, single binary, no runtime dep; wasm blob `go:embed`-ed | **Choose, gated by Phase 0** |
-| 2 | libghostty-vt via cgo (`go-libghostty`) | Same | Same | Breaks `CGO_ENABLED=0`; Zig cross-compile in release; loses WASM trap containment | Resource-failure fallback (D3) |
+| 2 | libghostty-vt linked natively via cgo (same official C library; binding = `mitchellh/go-libghostty` or a Loom shim) | Same | Same | Breaks `CGO_ENABLED=0`; Zig cross-compile in release; loses WASM trap containment | Resource-failure fallback (D3) |
 | 3 | `@xterm/headless` + `addon-serialize` in a packaged Node worker | Parser family matches the browser; but `serialize()` at 0.14.0 omits `?25`, `?1005/1006/1015/1016`, OSC 8, DECSCUSR, title, DECSTBM, tabs, charsets — the first two regress vs `ringbuf.go:230,233` | Cross-process IPC; barrier waits for worker ack | Requires bundling a Node runtime in GoReleaser and Tauri, supervision, health checks | Fidelity-failure fallback (D3) |
 | 4 | tmux pane ownership | Redraw is a valid screen, but `capture-pane -e` is not a full state export; TERM/terminfo sit between app and browser | tmux owns the PTY; Loom becomes a client | Host dependency everywhere; geometry last-writer-wins today | Only if D11 flips |
 | — | Pure-Go emulators (`charmbracelet/x/vt`, `vito/midterm`, `hinshun/vt10x`) | None currently demonstrates a complete, versioned full-state serializer for modern TUIs; `charmbracelet/x` is labelled experimental, `vt10x` too limited | In-process | Ideal | Re-evaluate if one gains a complete serializer |
@@ -328,9 +328,16 @@ gaining a complete serializer (pure Go first).
   yet carry a binary-compatibility guarantee."
 - `vt.h`: "WARNING: This is an incomplete, work-in-progress API. It is not yet
   stable and is definitely going to change." MIT licence.
-- Go: `mitchellh/go-libghostty` (cgo, static link, `zig cc` cross-compile;
-  "not promising any API stability yet"). WASM precedent: `seruman/hauntty`
-  (Go session persistence on libghostty-vt WASM), `neurosnap/zmx`.
+- Provenance: `libghostty-vt` is the official C library in
+  `ghostty-org/ghostty`; it is the dependency in both D2 (WASM) and D3(a)
+  (cgo). `mitchellh/go-libghostty` is a Go binding by Ghostty's author under
+  his personal account (`go.mitchellh.com/libghostty`), not `ghostty-org`, not
+  referenced by the official libghostty docs; cgo, static link, `zig cc`
+  cross-compile; "not promising any API stability yet … the underlying
+  functionality is very stable, but the Go API is still being designed." A
+  Loom-owned thin cgo shim over the official header is an equal alternative.
+  WASM precedent: `seruman/hauntty` (Go session persistence on libghostty-vt
+  WASM), `neurosnap/zmx`.
 
 Consequences: pin the ghostty commit, Zig toolchain, WASM bytes, and checksum;
 build the blob in CI and commit it; changing any of these invalidates in-process
@@ -492,8 +499,8 @@ then cgo per D3. Fidelity failure → Node worker per D3. Never → extend
    because it preserves the direct-PTY architecture and cgo violates the
    `CGO_ENABLED=0` constraint. Claude: `CGO_ENABLED=0` is a release setting,
    not a product requirement; if libghostty passes fidelity but fails only on
-   WASM performance/memory, switching the same library to cgo is a build-chain
-   change, whereas Node adds a runtime, IPC, and supervision. **Resolved:**
+   WASM performance/memory, linking the same official C library natively via cgo is a
+   build-chain change, whereas Node adds a runtime, IPC, and supervision. **Resolved:**
    the split rule in D3, with Codex's conditions — attribute the miss with a
    native-vs-WASM A/B first, re-run every gate under cgo, and record that the
    release invariant and trap containment change.
