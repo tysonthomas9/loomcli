@@ -328,6 +328,34 @@ Status: spec A + B landed; stub dry-run NOT yet run.
   group signal; metering mandatory (stream-json forced, exit 97 when unrecorded); a message
   counts delivered only when its turn completed — a failed turn re-queues once, then the
   inbox message is marked `failed` (LastError = the turn error).
-- Next: capped all-cursor container trial (`launch-team-cursor.sh`, needs the key file), then
-  the full-budget run (`budget_secs=14400`) with the replica judge on the better backend.
+- **Capped all-cursor container trials** (`launch-team-cursor.sh`: 40 min wall, $25 cap,
+  API-key route, verification off). `team-cursor-112144`: every turn exited 97 — the usage
+  dir is a host bind mount where mkfifo is refused; FIFO/marker moved to container-local
+  scratch plus a preflight. `team-cursor-113455` (ran to deadline): the all-cursor stack
+  works end to end — headless cursor lead seeded the epic + 20 tasks, workers claimed and
+  built, **MARATHON-2 integrated**, 25 cursor turns metered per agent, **$5.97** (model
+  "Auto" priced via the fallback rate: `cursor_unpriced_turns 20`). Three defects found:
+  1. backend-dev-1 died mid-turn at 18:44:58 with cursor's "context canceled: terminated by
+     killed" 1.2s into `marathon-freeports && pytest`. loom passes the prompt as the last
+     argv entry, so the worker's task text ("start.sh" ×10, "redis-server" ×3) sat in both
+     the shim's and the agent's argv — `pgrep -af 'start.sh|huddle|redis-server'` from the
+     agent's own tool call listed its own shim — and a pattern kill from its start.sh/tests
+     hit it. Fixed in the shim (34f8b8592): stage 1 stashes the prompt in a 0600 scratch
+     file and re-execs with a clean argv, stage 2 feeds it to cursor-agent on stdin (print
+     mode reads the prompt there; verified with the real binary, host PTY loop 30/30).
+  2. loom classified that exit-1 as **ModelNotFound → fast-fail terminal** because the
+     classifier regexes ran over the log tail's echoed task description ("SIGKILL model …
+     not …"); the same tail re-read later matched Timeout from a tool call's
+     `"timeout":30000`. Fixed (1236c55fb): stream-json/JSONL content events (user,
+     assistant, thinking, tool_call, item.*) are dropped from classifier input unless they
+     carry an error field; harness status events and stderr prose still classify.
+  3. 12 minutes after that terminal stop the **liveness watchdog FATAL-exited the daemon**
+     (`agent:backend-dev-1 age=11m59s > 11m30s`), killing the three healthy agents: an
+     exited supervise goroutine left its tick registered. Fixed (1236c55fb): the tick is
+     unregistered on normal return. Both loom fixes have tests that fail on the old code.
+  Cosmetic: spend.sh treats "Auto" as unpriced (fallback rate) — a served-model name would
+  let it price exactly.
+- Next: rerun the capped all-cursor trial on the fixed stack (`team-cursor-122710`, launched
+  2026-08-22 19:27Z), then the full-budget run (`budget_secs=14400`) with the replica judge
+  on the better backend.
 
