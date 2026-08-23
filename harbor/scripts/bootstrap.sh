@@ -286,6 +286,22 @@ fi
 VERIFY_CHECKOUT=""
 VERIFY_CHECKOUT_BACKEND=""
 VERIFY_CHECKOUT_ARCH=""
+# pgrep/pkill wrappers: never match the caller's own ancestry. An agent running
+# `pgrep -f '<pattern>' | head -1` from a tool shell whose argv contains that
+# pattern selects its own shell (lowest PID) and `kill`s it; cursor-agent then
+# aborts the turn (critic MARATHON-2 attempt 1, team-cursor-full-v2-225745: no
+# verdict; same class as the v1 worker self-kill). --ignore-ancestors also keeps
+# the shim, loom daemon and lead out of any agent's pkill. procps-ng >= 4.0.
+install_pgrep_guard() {
+  cat > /usr/local/bin/pgrep <<'PGEOF'
+#!/bin/sh
+# loom-marathon guard: exclude our own ancestors from pgrep/pkill matches.
+exec /usr/bin/"$(basename "$0")" --ignore-ancestors "$@"
+PGEOF
+  chmod +x /usr/local/bin/pgrep
+  ln -sf /usr/local/bin/pgrep /usr/local/bin/pkill
+  /usr/bin/pgrep --help 2>&1 | grep -q -- --ignore-ancestors || die "procps pgrep lacks --ignore-ancestors"
+}
 install_freeports() {
   cat > /usr/local/bin/marathon-freeports <<'FPEOF'
 #!/usr/bin/env python3
@@ -381,11 +397,13 @@ if [ "$VERIFY_ROLE" != "off" ]; then
     trust_codex_project_path "$VERIFY_CHECKOUT_BACKEND"
   fi
   install_freeports
+  install_pgrep_guard
   log "verify role=$VERIFY_ROLE checkout=$VERIFY_CHECKOUT freeports installed"
 fi
 
 if [ "$TEAM" != "off" ]; then
   install_freeports
+  install_pgrep_guard
   cat > /usr/local/bin/marathon-portlock <<'PLEOF'
 #!/usr/bin/env bash
 exec 9>/work/.app-ports.lock
