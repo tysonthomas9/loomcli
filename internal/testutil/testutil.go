@@ -36,6 +36,20 @@ func ClearLoomEnv(t *testing.T) {
 	}
 }
 
+// TempClaudeHome points HOME at a fresh temp dir and neutralizes
+// CLAUDE_CONFIG_DIR, so code that resolves Claude Code's config root
+// (sessions.ClaudeConfigDir) lands inside the fixture. The override is
+// load-bearing in production — it is honored ahead of ~/.claude — so a test
+// that stages ~/.claude under a temp HOME must clear it explicitly or the
+// ambient value of any profiled agent's shell wins and the lookup escapes.
+func TempClaudeHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	return home
+}
+
 // SetupTestEnv sets environment variables and registers cleanup with t.Cleanup().
 func SetupTestEnv(t *testing.T, vars map[string]string) {
 	t.Helper()

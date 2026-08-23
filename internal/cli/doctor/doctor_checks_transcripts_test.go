@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/sessions"
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
 // stageClaudeSession creates a claude session with no captured transcript and,
@@ -67,8 +68,7 @@ func stageClaudeCodeTranscript(t *testing.T, runtimeDir, home, agent string) {
 func TestCheckOrphanedTranscripts_Backfills(t *testing.T) {
 	t.Setenv("LOOM_REDACT_TRANSCRIPTS", "off")
 	runtimeDir := t.TempDir()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := testutil.TempClaudeHome(t)
 	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
 	ResetWorkspaceRuntimeDirCache()
 	t.Cleanup(ResetWorkspaceRuntimeDirCache)
@@ -109,8 +109,7 @@ func TestCheckOrphanedTranscripts_BackfillCaseInsensitiveWorkspaceToken(t *testi
 	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := testutil.TempClaudeHome(t)
 	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
 	ResetWorkspaceRuntimeDirCache()
 	t.Cleanup(ResetWorkspaceRuntimeDirCache)
@@ -153,8 +152,7 @@ func TestCheckOrphanedTranscripts_BackfillCaseInsensitiveWorkspaceToken(t *testi
 
 func TestCheckOrphanedTranscripts_SkipsRunningSessions(t *testing.T) {
 	runtimeDir := t.TempDir()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := testutil.TempClaudeHome(t)
 	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
 	ResetWorkspaceRuntimeDirCache()
 	t.Cleanup(ResetWorkspaceRuntimeDirCache)
@@ -171,8 +169,7 @@ func TestCheckOrphanedTranscripts_SkipsRunningSessions(t *testing.T) {
 func TestCheckOrphanedTranscripts_BackfillReindexesEmptyTranscript(t *testing.T) {
 	t.Setenv("LOOM_REDACT_TRANSCRIPTS", "off")
 	runtimeDir := t.TempDir()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := testutil.TempClaudeHome(t)
 	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
 	ResetWorkspaceRuntimeDirCache()
 	t.Cleanup(ResetWorkspaceRuntimeDirCache)
@@ -225,8 +222,7 @@ func TestCheckOrphanedTranscripts_BackfillReindexesEmptyTranscript(t *testing.T)
 
 func TestCheckOrphanedTranscripts_NoFixWarns(t *testing.T) {
 	runtimeDir := t.TempDir()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := testutil.TempClaudeHome(t)
 	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
 	ResetWorkspaceRuntimeDirCache()
 	t.Cleanup(ResetWorkspaceRuntimeDirCache)
