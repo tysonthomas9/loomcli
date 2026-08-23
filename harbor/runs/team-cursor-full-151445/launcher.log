@@ -1,0 +1,29 @@
+JOB_NAME=team-cursor-full-151445 PROFILE=full budget=14400s reserve=2400s cadence=360s cap=$180
+  1/1 Mean: 0.000 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3:27:34 0:00:00
+
+adhoc • loom-ensemble
+┏━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━┓
+┃ Trials ┃ Exceptions ┃  Mean ┃
+┡━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━┩
+│      0 │          1 │ 0.000 │
+└────────┴────────────┴───────┘
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┓
+┃ Exception               ┃ Count ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━┩
+│ RewardFileNotFoundError │     1 │
+└─────────────────────────┴───────┘
+
+Job Info
+Total runtime: 3h 27m 35s
+Results written to 
+/Users/tyson/codebase/code-agents/loomcli-worktrees/marathon-team/harbor/test/jo
+bs/team-cursor-full-151445/result.json
+Inspect results by running `harbor view 
+/Users/tyson/codebase/code-agents/loomcli-worktrees/marathon-team/harbor/test/jo
+bs`
+Share results by running `harbor upload 
+/Users/tyson/codebase/code-agents/loomcli-worktrees/marathon-team/harbor/test/jo
+bs/team-cursor-full-151445`
+
+HARBOR_EXIT=0

@@ -1,0 +1,27 @@
+dd755ee Add workspace/channel settings SPA and channel add-member API (MARATHON-18)
+d088d3e Implement get-or-create DM channels via POST /api/dms (MARATHON-9)
+071ff20 Implement messages, threads, and reactions REST API (MARATHON-8)
+e2ccc2e migration: add message reactions/files schema v5 (MARATHON-8)
+8176819 Implement user groups and workspace invitations (MARATHON-12)
+af0e0f1 migration: add user_groups and workspace_invitations schema v4 (MARATHON-12)
+7e8e165 Implement channel lifecycle, workspace join, and pins (MARATHON-7)
+24a9766 migration: add messages and channel_pins schema v3 (MARATHON-7)
+de8f475 Merge commit '99237bd3e5b46e7ea5fffde7a55afcce47438b83' into HEAD
+99237bd Implement workspace members, roles, and ownership transfer (MARATHON-6)
+f4cf481 Serve zero-build Huddle SPA with auth, token storage, and workspace shell (MARATHON-16)
+15b3c8e Merge commit '6aefa9a3ac35846fa8443ca6bd3ab2e578864ca6' into HEAD
+a29c103 Merge commit '1a9740f88d66cfd90173bf81f8baa0c69b5aea71' into HEAD
+6aefa9a Implement workspace create/list/detail with auto #general (MARATHON-5)
+f9bc027 Merge commit '21d630ddd96e588e6a63171104f474ac6a212453' into HEAD
+a70de54 migration: add workspaces channels members read_state schema v2 (MARATHON-5)
+1a9740f tests: auth token accepted on all HTTP nodes (MARATHON-22)
+bdbeba7 Implement Profiles GET/PATCH UserObj API (MARATHON-4)
+21d630d tests: auth register/login/me live envelopes (MARATHON-21)
+00d49c6 Merge commit '6762605cf150d3e84a88e6d4fcc7eae51e2ae348' into HEAD
+beae23c Merge commit 'b7abebdfee2f4174b05cab7c8d5641cdcf023189' into HEAD
+6762605 tests: HTTP node and Redis SIGKILL respawn (MARATHON-20)
+eeeb881 Implement Auth API register/login/me with bearer tokens (MARATHON-3)
+b7abebd tests: live cluster boot health Redis and stub GET / (MARATHON-19)
+213fdc3 migration: add users and auth_tokens schema v1 (MARATHON-3)
+fba2eb6 Scaffold Huddle cluster: start.sh, FastAPI nodes, Redis (MARATHON-2)
+5859442 marathon baseline

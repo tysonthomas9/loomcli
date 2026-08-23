@@ -1,0 +1,18 @@
+f4c439b Merge commit '628888f2468a11570f68c14732c72e1d8893260d' into HEAD
+628888f Add SPA shell with auth UI, token storage, and static serving (MARATHON-21)
+c679e58 Merge commit '7dd1f21537fbf514ee1da9ac4c7b8f044e2c0cce' into HEAD
+7dd1f21 tests: verify HTTP and Redis SIGKILL recovery (MARATHON-27)
+a25dd11 Merge main into frontend-dev-1 worktree
+6afbc20 Merge commit 'a4042b2864ed1e19a510697b25e4fc7d8148208f' into HEAD
+045cc7f Merge branch 'main' into agents/MARATHON/qa-engineer-1
+a4042b2 tests: verify health node_id map and Redis-independent health (MARATHON-26)
+1235b17 Merge commit '3a519e59074fb6a1fbe8132f54d00fd76db04b5a' into HEAD
+9d37afc Merge commit '55a11596219f952fc0bb9faca73e86969394be94' into HEAD
+3a519e5 tests: verify start.sh self-contained port topology (MARATHON-25)
+55a1159 test: cover auth register/login/me contract (MARATHON-3)
+e988d3b Implement auth register/login/me with shared SQLite (MARATHON-3)
+3358710 migration: add SQLite users and tokens schema (MARATHON-3)
+7077d7f tests: verify cluster bootstrap health and respawn (MARATHON-24)
+3701b6d Implement cluster auth register/login/me with shared SQLite (MARATHON-3)
+e2704f3 Bootstrap Huddle cluster: start.sh, Redis, 3 HTTP nodes, health (MARATHON-2)
+a152118 marathon baseline

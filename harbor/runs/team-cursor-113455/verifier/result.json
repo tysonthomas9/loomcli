@@ -1,0 +1,125 @@
+{
+    "id": "79f0b9e2-5f18-4a57-8d78-02c5eaf2cfd3",
+    "task_name": "abundant/slack-clone",
+    "trial_name": "slack-clone__xRhMsFX",
+    "trial_uri": "file:///Users/tyson/codebase/code-agents/loomcli-worktrees/marathon-team/harbor/test/jobs/team-cursor-113455/slack-clone__xRhMsFX",
+    "task_id": {
+        "path": "tasks/slack-clone"
+    },
+    "source": null,
+    "task_checksum": "b8518060d5b7f80195ceeb332a186549b858fb7f365c32be49062eab0a8c654e",
+    "config": {
+        "task": {
+            "path": "tasks/slack-clone",
+            "git_url": null,
+            "git_commit_id": null,
+            "name": null,
+            "ref": null,
+            "overwrite": false,
+            "download_dir": null,
+            "source": null
+        },
+        "trial_name": "slack-clone__xRhMsFX",
+        "trials_dir": "/Users/tyson/codebase/code-agents/loomcli-worktrees/marathon-team/harbor/test/jobs/team-cursor-113455",
+        "install_only": false,
+        "timeout_multiplier": 1.0,
+        "agent_timeout_multiplier": null,
+        "verifier_timeout_multiplier": null,
+        "agent_setup_timeout_multiplier": null,
+        "environment_build_timeout_multiplier": null,
+        "agent": {
+            "name": "loom_harbor:LoomAgent",
+            "import_path": null,
+            "model_name": null,
+            "n_concurrent": null,
+            "concurrency_group": null,
+            "skills": [],
+            "override_timeout_sec": null,
+            "override_setup_timeout_sec": null,
+            "max_timeout_sec": null,
+            "resume_trajectory": false,
+            "load_trajectory": null,
+            "extra_allowed_hosts": [],
+            "kwargs": {
+                "team": "fullstack-app",
+                "max_agents": 4,
+                "lead_mode": "persistent",
+                "prompts_profile": "generic",
+                "budget_secs": 2400,
+                "reserve_secs": 480,
+                "cadence_secs": 90,
+                "spend_cap_usd": 25,
+                "backend": "cursor"
+            },
+            "mcp_servers": []
+        },
+        "environment": {
+            "type": "docker",
+            "import_path": null,
+            "force_build": false,
+            "delete": true,
+            "cpu_enforcement_policy": "auto",
+            "memory_enforcement_policy": "auto",
+            "override_cpus": null,
+            "override_memory_mb": null,
+            "override_storage_mb": null,
+            "override_gpus": null,
+            "override_tpu": null,
+            "mounts": null,
+            "extra_docker_compose": [],
+            "kwargs": {},
+            "extra_allowed_hosts": []
+        },
+        "verifier": {
+            "override_timeout_sec": null,
+            "max_timeout_sec": null,
+            "disable": true
+        },
+        "artifacts": [],
+        "extra_instruction_paths": [],
+        "job_id": "533a69f4-6d00-4ef1-8c33-ff0f29b0efc2"
+    },
+    "agent_info": {
+        "name": "loom-ensemble",
+        "version": "loom=49cc3d1fe",
+        "model_info": null
+    },
+    "agent_result": {
+        "n_input_tokens": 572299,
+        "n_cache_tokens": null,
+        "n_output_tokens": 52008,
+        "cost_usd": 5.9705,
+        "rollout_details": null,
+        "metadata": {
+            "loom_marathon": {
+                "tasks_integrated": 1,
+                "tasks_seeded": 0,
+                "integration_failures": 0,
+                "finalize_reason": "deadline",
+                "stub": false,
+                "template_id": "fullstack-app",
+                "design_auto_approved": 0,
+                "orphans_routed": 0,
+                "integrations_stale": 0
+            }
+        }
+    },
+    "verifier_result": null,
+    "exception_info": null,
+    "started_at": "2026-08-22T18:34:56.134657Z",
+    "finished_at": "2026-08-22T19:07:35.674261Z",
+    "environment_setup": {
+        "started_at": "2026-08-22T18:34:56.157465Z",
+        "finished_at": "2026-08-22T18:34:57.865554Z"
+    },
+    "agent_setup": {
+        "started_at": "2026-08-22T18:34:57.865660Z",
+        "finished_at": "2026-08-22T18:35:08.607188Z"
+    },
+    "agent_execution": {
+        "started_at": "2026-08-22T18:35:08.607328Z",
+        "finished_at": "2026-08-22T19:07:15.056255Z"
+    },
+    "verifier": null,
+    "step_results": null
+}

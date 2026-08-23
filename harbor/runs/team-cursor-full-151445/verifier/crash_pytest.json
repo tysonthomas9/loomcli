@@ -1,0 +1,51 @@
+{
+    "results": {
+        "tool": {
+            "name": "pytest",
+            "version": "8.4.1"
+        },
+        "summary": {
+            "tests": 3,
+            "passed": 1,
+            "failed": 2,
+            "skipped": 0,
+            "pending": 0,
+            "other": 0,
+            "start": 1787448999.0569654,
+            "stop": 1787449038.6413383
+        },
+        "tests": [
+            {
+                "name": "test_crash.py::test_surviving_nodes_keep_serving_http_after_one_dies",
+                "status": "passed",
+                "duration": 0.018945191986858845,
+                "start": 1787448999.1139007,
+                "stop": 1787448999.133612,
+                "retries": 0,
+                "file_path": "test_crash.py"
+            },
+            {
+                "name": "test_crash.py::test_writes_through_surviving_node_fanout_to_subscriber_on_other_surviving_node",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 9.276878840988502,
+                "start": 1787448999.1340816,
+                "stop": 1787449008.436877,
+                "retries": 0,
+                "file_path": "test_crash.py",
+                "trace": "/tests/test_crash.py:269: in test_writes_through_surviving_node_fanout_to_subscriber_on_other_surviving_node\n    events = asyncio.run(scenario())\n             ^^^^^^^^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/runners.py:194: in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/runners.py:118: in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/base_events.py:687: in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n/tests/test_crash.py:231: in scenario\n    async with websockets.connect(\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:635: in __aenter__\n    return await self\n           ^^^^^^^^^^\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:656: in __await_impl__\n    await protocol.handshake(\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:322: in handshake\n    raise InvalidStatusCode(status_code, response_headers)\nE   websockets.legacy.exceptions.InvalidStatusCode: server rejected WebSocket connection: HTTP 403",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_crash.py::test_resume_across_a_dead_node_still_replays_missed_events",
+                "status": "failed",
+                "duration": 30.186255967069883,
+                "start": 1787449008.437212,
+                "stop": 1787449038.6406555,
+                "retries": 0,
+                "file_path": "test_crash.py",
+                "trace": "/tests/test_crash.py:187: in kill_node_1\n    pytest.fail(\nE   Failed: node on :8001 did not come back up; either the agent's start.sh does not respawn crashed nodes, or the previous kill is still propagating"
+            }
+        ]
+    }
+}

@@ -1,0 +1,4 @@
+2026-08-22T18:35:23Z PERSISTENT-LEAD started tmux=marathon-lead
+2026-08-22T18:35:43Z PERSISTENT-LEAD ready
+2026-08-22T18:50:47Z INTEGRATED task=MARATHON-2 attempt=1 app_before=adb99cc7cca7c31e6f61695da0471dc55fc3b6c8 app_after=e3282612631ec739f6e31b17e54d731898f7715f check=pass mode=ff delivered_by=frontend-dev-1
+2026-08-22T19:07:08Z PERSISTENT-LEAD stopped

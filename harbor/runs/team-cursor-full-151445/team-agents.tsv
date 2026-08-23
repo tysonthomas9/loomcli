@@ -1,0 +1,4 @@
+app-architect-1	app-architect	architect	team-architect	/work/ws/worktrees/app/app-architect-1	agents/MARATHON/app-architect-1
+frontend-dev-1	frontend-dev	impl	team-frontend-dev	/work/ws/worktrees/app/frontend-dev-1	agents/MARATHON/frontend-dev-1
+backend-dev-1	backend-dev	impl	team-backend-dev	/work/ws/worktrees/app/backend-dev-1	agents/MARATHON/backend-dev-1
+qa-engineer-1	qa-engineer	qa	team-qa	/work/ws/worktrees/app/qa-engineer-1	agents/MARATHON/qa-engineer-1

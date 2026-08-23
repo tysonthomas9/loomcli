@@ -1,0 +1,74 @@
+[
+ {
+  "id": "auth",
+  "label": "Sign up + sign in is a complete, validated flow",
+  "weight": 1.0,
+  "verdict": "PASS",
+  "score": 1.0,
+  "reason": "The CUA reports all three required steps observed in the UI: validation errors visible for a short password (\"password must be at least 8 characters\") and a username with a space (\"invalid username\"); a fresh signup (judgealpha/goodpassword123) dismissed the auth modal and showed \"Judge Alpha\" + Log out, confirming auto-login; and Log out returned the auth modal with the same credentials logging back in to restore the Judge Team workspace with #general. No backend probe was used for any transition."
+ },
+ {
+  "id": "channels",
+  "label": "Channel listing, creation, and switching",
+  "weight": 1.0,
+  "verdict": "FAIL",
+  "score": 0.0,
+  "reason": "The CUA saw #general in the sidebar, but reported no '+' or 'New channel' control anywhere (sidebar has only Settings/Log out; workspace settings modal has only General/Members/Invitations), with `grep -rn \"createChannel|New channel|channel-create\" static/` returning nothing. With creation impossible, channel switching could not be exercised, so requirements 2-4 all fail."
+ },
+ {
+  "id": "messaging",
+  "label": "Messaging is realistic: post + edit + delete + persistence",
+  "weight": 1.0,
+  "verdict": "FAIL",
+  "score": 0.0,
+  "reason": "The CUA reports the message pane renders no message list and no composer (`get count \"textarea\"` = 0 on all three nodes), and typing 'hello from the judge' + Enter produced nothing, with `#message-pane` text showing only '#general / Channel settings'. With no ability to post at all, none of the four required sub-conditions (post, reload persistence, edit with 'edited' indicator, delete) could be demonstrated."
+ },
+ {
+  "id": "threads",
+  "label": "Threaded replies render in a real thread panel",
+  "weight": 0.75,
+  "verdict": "FAIL",
+  "score": 0.0,
+  "reason": "The CUA found no message rows or composer at all (`get count \"textarea\"` = 0 on all nodes), so no hover/icon action to open a thread was reachable; the `<aside id=\"thread-panel\">` exists only as a hidden placeholder that no JS ever unhides. With no reply postable and no 'N replies' indicator possible, the criterion is entirely unmet."
+ },
+ {
+  "id": "reactions",
+  "label": "Emoji reactions via a real picker UI",
+  "weight": 0.75,
+  "verdict": "FAIL",
+  "score": 0.0,
+  "reason": "The CUA reports no message rows exist at all (blank message pane, zero textareas on all three nodes), so no hover toolbar or 'add reaction' affordance is reachable, and no emoji picker markup exists in static/index.html. Reaction endpoints exist in the backend but nothing in static/js/ calls them, so no reaction UI is exposed."
+ },
+ {
+  "id": "validation_feedback",
+  "label": "Forms give immediate, visible validation feedback",
+  "weight": 0.5,
+  "verdict": "FAIL",
+  "score": 0.0,
+  "reason": "Only the focus-styling sub-check passed (green 2px outline on the Username field per `.field input:focus`); the CUA reports no message composer exists at all (`get count \"textarea\"` returns 0 on all three nodes) and no channel-creation control anywhere, so neither the empty-message-submit check nor the duplicate-channel-name error check could be satisfied. With two of the three required conditions unmet, the criterion's PASS definition is not met."
+ },
+ {
+  "id": "polish",
+  "label": "Micro-interactions feel real (hover, loading, empty states)",
+  "weight": 1.0,
+  "verdict": "PARTIAL",
+  "score": 0.5,
+  "reason": "The CUA verified only 2 of the 5 required elements: (b) sidebar hover state on #general confirmed via before/after screenshots and `.channel-list button:hover` at app.css:369, and (c) a visible 'Loading Huddle\u2026' boot placeholder plus 'Loading members\u2026' in the settings modal. (a), (d), and (e) all fail because the messaging surface is absent \u2014 no message rows, no composer, and the empty #general renders a blank pane with no friendly copy \u2014 falling short of the 3-of-5 bar for PASS, but hover feedback does exist so it is not a FAIL."
+ },
+ {
+  "id": "realism",
+  "label": "Visual fidelity to real Slack",
+  "weight": 1.0,
+  "verdict": "PARTIAL",
+  "score": 0.5,
+  "reason": "The CUA confirms cues (1)(2)(3) \u2014 dark saturated green sidebar, workspace identity 'Judge Team (judgeteam)' plus a CHANNELS list, and hashtag-prefixed '#general' \u2014 but reports three of the six missing: no topic/description line in the channel header, no message rows (no avatars/names/timestamps/body), and no composer, leaving an empty cream pane over ~82% of the viewport. The rubric allows PARTIAL only when one cue is missing, and the page is not an unstyled form (coherent theming, focus rings, hover states), so this sits between the bands; I score it PARTIAL-leaning-FAIL, matching the CUA's FAIL call in substance since half the structural cues are absent."
+ },
+ {
+  "id": "layout_structure",
+  "label": "Information architecture is correct",
+  "weight": 1.0,
+  "verdict": "PASS",
+  "score": 1.0,
+  "reason": "At 1280x900 the CUA observed a two-pane shell (240px dark left sidebar + center message pane, which is ~82% of viewport), so it is not single-column, plus a reserved `#thread-panel` aside \u2014 and the rubric treats the right panel as optional. Workspace identity 'Judge Team (judgeteam)' is shown at the sidebar top under the 'Huddle' wordmark and the user's own identity 'Judge Alpha' with Log out is pinned bottom-left, satisfying both identity requirements; the pane's emptiness is a messaging defect scored elsewhere, not a layout/IA failure."
+ }
+]

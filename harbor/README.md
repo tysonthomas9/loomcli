@@ -106,6 +106,18 @@ the main (expensive) model re-spends the whole cached context on every notificat
 Cost on that run: ~92k Sonnet tokens for the whole 33-minute watch + report, versus one
 main-model turn per log line before.
 
+### Keeping run evidence
+
+`harbor/test/jobs/` is gitignored (hundreds of MB per run: fleet-db-noisy `daemon.out`, git
+mirrors, redis snapshots, per-turn usage files). What later analysis needs is exported with
+`harbor/scripts/export-run.sh <job> [--no-raw]` into **`harbor/runs/<job>/`** and committed:
+orchestrate/integration/lead-passes logs, `daemon-filtered.log`, task ledger (`final-issues*.json`),
+critic verdicts, `verifier/` (metrics + pytest JSONs, no screenshots), judge `ux.json`/verdicts/
+driver report, the app snapshot, raw worker transcripts (`transcripts/`, ~25 MB; `--no-raw` skips)
+and readable per-session digests (`digests/`, via `scripts/digest-transcript.py`), plus any
+`analysis/` reports. ~30 MB per run with raw transcripts. The headless cursor lead's own
+transcript is not captured by the runtime yet (known gap) — its work is visible in the ledger.
+
 ## Known deviations / notes
 
 - The plan's optional `SHELL=/bin/false` guard on lead one-shots is intentionally

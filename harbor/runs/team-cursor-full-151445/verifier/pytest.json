@@ -1,0 +1,1340 @@
+{
+    "results": {
+        "tool": {
+            "name": "pytest",
+            "version": "8.4.1"
+        },
+        "summary": {
+            "tests": 129,
+            "passed": 76,
+            "failed": 53,
+            "skipped": 0,
+            "pending": 0,
+            "other": 0,
+            "start": 1787448927.8917606,
+            "stop": 1787448967.5388057
+        },
+        "tests": [
+            {
+                "name": "test_api.py::test_health",
+                "status": "passed",
+                "duration": 0.0072425249963998795,
+                "start": 1787448928.179922,
+                "stop": 1787448928.1883097,
+                "retries": 0,
+                "file_path": "test_api.py"
+            },
+            {
+                "name": "test_api.py::test_register_and_login_roundtrip",
+                "status": "passed",
+                "duration": 0.09374424995621666,
+                "start": 1787448928.18899,
+                "stop": 1787448928.283256,
+                "retries": 0,
+                "file_path": "test_api.py"
+            },
+            {
+                "name": "test_api.py::test_register_rejects_duplicate",
+                "status": "passed",
+                "duration": 0.07234825601335615,
+                "start": 1787448928.283601,
+                "stop": 1787448928.3566914,
+                "retries": 0,
+                "file_path": "test_api.py"
+            },
+            {
+                "name": "test_api.py::test_register_rejects_invalid_username",
+                "status": "passed",
+                "duration": 0.0031744700390845537,
+                "start": 1787448928.3572893,
+                "stop": 1787448928.3609095,
+                "retries": 0,
+                "file_path": "test_api.py"
+            },
+            {
+                "name": "test_api.py::test_register_rejects_short_password",
+                "status": "passed",
+                "duration": 0.0018290890147909522,
+                "start": 1787448928.361277,
+                "stop": 1787448928.3635821,
+                "retries": 0,
+                "file_path": "test_api.py"
+            },
+            {
+                "name": "test_api.py::test_login_wrong_password",
+                "status": "passed",
+                "duration": 0.07541685103205964,
+                "start": 1787448928.3640277,
+                "stop": 1787448928.4401183,
+                "retries": 0,
+                "file_path": "test_api.py"
+            },
+            {
+                "name": "test_api.py::test_me_requires_bearer",
+                "status": "passed",
+                "duration": 0.002347591973375529,
+                "start": 1787448928.4404943,
+                "stop": 1787448928.4432535,
+                "retries": 0,
+                "file_path": "test_api.py"
+            },
+            {
+                "name": "test_api.py::test_workspace_creation_includes_general_channel",
+                "status": "passed",
+                "duration": 0.05066597100812942,
+                "start": 1787448928.4436219,
+                "stop": 1787448928.4947584,
+                "retries": 0,
+                "file_path": "test_api.py"
+            },
+            {
+                "name": "test_api.py::test_workspace_slug_unique",
+                "status": "passed",
+                "duration": 0.049690094019751996,
+                "start": 1787448928.4952588,
+                "stop": 1787448928.5455256,
+                "retries": 0,
+                "file_path": "test_api.py"
+            },
+            {
+                "name": "test_api.py::test_list_workspaces_only_mine",
+                "status": "passed",
+                "duration": 0.10676933702779934,
+                "start": 1787448928.5462298,
+                "stop": 1787448928.653811,
+                "retries": 0,
+                "file_path": "test_api.py"
+            },
+            {
+                "name": "test_api.py::test_channel_creation_rejects_duplicate_name",
+                "status": "passed",
+                "duration": 0.045825163018889725,
+                "start": 1787448928.6543956,
+                "stop": 1787448928.7006562,
+                "retries": 0,
+                "file_path": "test_api.py"
+            },
+            {
+                "name": "test_api.py::test_join_public_channel_grants_membership",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.07096600200748071,
+                "start": 1787448928.7009528,
+                "stop": 1787448928.7913601,
+                "retries": 0,
+                "file_path": "test_api.py",
+                "trace": "/tests/test_api.py:216: in test_join_public_channel_grants_membership\n    assert deny.status_code == 403\nE   assert 404 == 403\nE    +  where 404 = <Response [404]>.status_code",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_api.py::test_private_channel_blocks_join",
+                "status": "passed",
+                "duration": 0.08345375396311283,
+                "start": 1787448928.7921154,
+                "stop": 1787448928.876026,
+                "retries": 0,
+                "file_path": "test_api.py"
+            },
+            {
+                "name": "test_api.py::test_workspace_detail_hides_private_channels_for_non_members",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.07086050102952868,
+                "start": 1787448928.876361,
+                "stop": 1787448928.9532137,
+                "retries": 0,
+                "file_path": "test_api.py",
+                "trace": "/tests/test_api.py:268: in test_workspace_detail_hides_private_channels_for_non_members\n    assert r.status_code == 200\nE   assert 404 == 200\nE    +  where 404 = <Response [404]>.status_code",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_api.py::test_message_pagination_newest_first",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.06423914391780272,
+                "start": 1787448928.9538114,
+                "stop": 1787448929.0259268,
+                "retries": 0,
+                "file_path": "test_api.py",
+                "trace": "/tests/test_api.py:301: in test_message_pagination_newest_first\n    assert [m[\"id\"] for m in msgs] == list(reversed(ids[-3:]))\nE   AssertionError: assert ['acab088b-cd...2d5365c38ef5'] == ['9a06a309-d2...403e90c822be']\nE     \nE     At index 0 diff: 'acab088b-cd2c-4741-a63a-403e90c822be' != '9a06a309-d208-4c75-bc51-2d5365c38ef5'\nE     \nE     Full diff:\nE       [\nE     +     'acab088b-cd2c-4741-a63a-403e90c822be',\nE     +     'a0bc0128-9480-43d2-93fd-05ba68f63a3c',...\nE     \nE     ...Full output truncated (4 lines hidden), use '-vv' to show",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_api.py::test_thread_replies_are_returned_in_order",
+                "status": "passed",
+                "duration": 0.09432308399118483,
+                "start": 1787448929.026373,
+                "stop": 1787448929.1219854,
+                "retries": 0,
+                "file_path": "test_api.py"
+            },
+            {
+                "name": "test_api.py::test_reactions_aggregate_and_are_idempotent",
+                "status": "passed",
+                "duration": 0.11429369798861444,
+                "start": 1787448929.1261966,
+                "stop": 1787448929.2413378,
+                "retries": 0,
+                "file_path": "test_api.py"
+            },
+            {
+                "name": "test_api.py::test_non_member_cannot_read_messages",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.09722130402224138,
+                "start": 1787448929.243813,
+                "stop": 1787448929.350767,
+                "retries": 0,
+                "file_path": "test_api.py",
+                "trace": "/tests/test_api.py:390: in test_non_member_cannot_read_messages\n    assert r.status_code == 403\nE   assert 404 == 403\nE    +  where 404 = <Response [404]>.status_code",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_api.py::test_dm_is_stable_and_bidirectional",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.0811002449481748,
+                "start": 1787448929.3523903,
+                "stop": 1787448929.4400525,
+                "retries": 0,
+                "file_path": "test_api.py",
+                "trace": "/tests/test_api.py:404: in test_dm_is_stable_and_bidirectional\n    assert r1.status_code == 200\nE   assert 400 == 200\nE    +  where 400 = <Response [400]>.status_code",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_api.py::test_search_returns_matching_messages",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.051135890011209995,
+                "start": 1787448929.4405835,
+                "stop": 1787448929.4990041,
+                "retries": 0,
+                "file_path": "test_api.py",
+                "trace": "/tests/test_api.py:431: in test_search_returns_matching_messages\n    assert r.status_code == 200\nE   assert 404 == 200\nE    +  where 404 = <Response [404]>.status_code",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_api.py::test_websocket_broadcasts_new_message_to_second_client",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.101630694931373,
+                "start": 1787448929.499874,
+                "stop": 1787448929.6342611,
+                "retries": 0,
+                "file_path": "test_api.py",
+                "trace": "/tests/test_api.py:502: in test_websocket_broadcasts_new_message_to_second_client\n    events = asyncio.run(scenario())\n             ^^^^^^^^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/runners.py:194: in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/runners.py:118: in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/base_events.py:687: in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n/tests/test_api.py:472: in scenario\n    async with websockets.connect(url) as sock:\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:635: in __aenter__\n    return await self\n           ^^^^^^^^^^\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:656: in __await_impl__\n    await protocol.handshake(\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:322: in handshake\n    raise InvalidStatusCode(status_code, response_headers)\nE   websockets.legacy.exceptions.InvalidStatusCode: server rejected WebSocket connection: HTTP 403",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_api.py::test_websocket_rejects_bad_token",
+                "status": "passed",
+                "duration": 0.0021479660063050687,
+                "start": 1787448929.634714,
+                "stop": 1787448929.6374867,
+                "retries": 0,
+                "file_path": "test_api.py"
+            },
+            {
+                "name": "test_api.py::test_edit_message_updates_body_and_sets_edited_at",
+                "status": "passed",
+                "duration": 0.05764045397518203,
+                "start": 1787448929.637963,
+                "stop": 1787448929.696398,
+                "retries": 0,
+                "file_path": "test_api.py"
+            },
+            {
+                "name": "test_api.py::test_edit_rejected_for_non_author",
+                "status": "passed",
+                "duration": 0.09248449502047151,
+                "start": 1787448929.6968753,
+                "stop": 1787448929.7902367,
+                "retries": 0,
+                "file_path": "test_api.py"
+            },
+            {
+                "name": "test_api.py::test_edit_rejected_after_delete",
+                "status": "passed",
+                "duration": 0.05580394697608426,
+                "start": 1787448929.790784,
+                "stop": 1787448929.847305,
+                "retries": 0,
+                "file_path": "test_api.py"
+            },
+            {
+                "name": "test_api.py::test_delete_message_hides_from_listings",
+                "status": "passed",
+                "duration": 0.08238916704431176,
+                "start": 1787448929.8477514,
+                "stop": 1787448929.9306853,
+                "retries": 0,
+                "file_path": "test_api.py"
+            },
+            {
+                "name": "test_api.py::test_delete_message_is_idempotent",
+                "status": "passed",
+                "duration": 0.05275260395137593,
+                "start": 1787448929.9311724,
+                "stop": 1787448929.9845314,
+                "retries": 0,
+                "file_path": "test_api.py"
+            },
+            {
+                "name": "test_api.py::test_workspace_owner_can_delete_any_message",
+                "status": "passed",
+                "duration": 0.08105295593850315,
+                "start": 1787448929.9851305,
+                "stop": 1787448930.066573,
+                "retries": 0,
+                "file_path": "test_api.py"
+            },
+            {
+                "name": "test_profiles.py::test_default_userobj_has_profile_fields",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.04299527802504599,
+                "start": 1787448930.0668924,
+                "stop": 1787448930.1143212,
+                "retries": 0,
+                "file_path": "test_profiles.py",
+                "trace": "/tests/test_profiles.py:51: in test_default_userobj_has_profile_fields\n    assert user[\"timezone\"] == \"UTC\" or user[\"timezone\"] == \"Etc/UTC\", (\nE   AssertionError: default timezone should be UTC-ish, got None\nE   assert (None == 'UTC' or None == 'Etc/UTC')",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_profiles.py::test_patch_users_me_updates_only_supplied_fields",
+                "status": "passed",
+                "duration": 0.048760089033748955,
+                "start": 1787448930.1148226,
+                "stop": 1787448930.1640596,
+                "retries": 0,
+                "file_path": "test_profiles.py"
+            },
+            {
+                "name": "test_profiles.py::test_patch_users_me_rejects_invalid_timezone",
+                "status": "passed",
+                "duration": 0.03467649902449921,
+                "start": 1787448930.1646197,
+                "stop": 1787448930.1997573,
+                "retries": 0,
+                "file_path": "test_profiles.py"
+            },
+            {
+                "name": "test_profiles.py::test_patch_users_me_rejects_too_long_avatar_url",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.03699396504089236,
+                "start": 1787448930.2000558,
+                "stop": 1787448930.240862,
+                "retries": 0,
+                "file_path": "test_profiles.py",
+                "trace": "/tests/test_profiles.py:106: in test_patch_users_me_rejects_too_long_avatar_url\n    assert r.status_code == 400\nE   assert 200 == 400\nE    +  where 200 = <Response [200]>.status_code",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_profiles.py::test_patch_users_me_rejects_too_long_status_text_and_display_name",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.04422357300063595,
+                "start": 1787448930.2442415,
+                "stop": 1787448930.2924721,
+                "retries": 0,
+                "file_path": "test_profiles.py",
+                "trace": "/tests/test_profiles.py:124: in test_patch_users_me_rejects_too_long_status_text_and_display_name\n    assert r.status_code == 400\nE   assert 200 == 400\nE    +  where 200 = <Response [200]>.status_code",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_profiles.py::test_patch_display_name_is_reflected_in_subsequent_me",
+                "status": "passed",
+                "duration": 0.04334890400059521,
+                "start": 1787448930.2929685,
+                "stop": 1787448930.3371496,
+                "retries": 0,
+                "file_path": "test_profiles.py"
+            },
+            {
+                "name": "test_profiles.py::test_get_user_by_id_returns_profile",
+                "status": "passed",
+                "duration": 0.08122566295787692,
+                "start": 1787448930.3376427,
+                "stop": 1787448930.4197638,
+                "retries": 0,
+                "file_path": "test_profiles.py"
+            },
+            {
+                "name": "test_profiles.py::test_get_user_unknown_id_returns_404",
+                "status": "passed",
+                "duration": 0.04070314601995051,
+                "start": 1787448930.4203825,
+                "stop": 1787448930.461862,
+                "retries": 0,
+                "file_path": "test_profiles.py"
+            },
+            {
+                "name": "test_profiles.py::test_user_updated_broadcast_fires_on_patch",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.07707694004056975,
+                "start": 1787448930.4625218,
+                "stop": 1787448930.5645828,
+                "retries": 0,
+                "file_path": "test_profiles.py",
+                "trace": "/tests/test_profiles.py:211: in test_user_updated_broadcast_fires_on_patch\n    events = asyncio.run(scenario())\n             ^^^^^^^^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/runners.py:194: in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/runners.py:118: in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/base_events.py:687: in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n/tests/test_profiles.py:178: in scenario\n    async with websockets.connect(\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:635: in __aenter__\n    return await self\n           ^^^^^^^^^^\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:656: in __await_impl__\n    await protocol.handshake(\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:322: in handshake\n    raise InvalidStatusCode(status_code, response_headers)\nE   websockets.legacy.exceptions.InvalidStatusCode: server rejected WebSocket connection: HTTP 403",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_read_state.py::test_message_mentions_resolve_to_user_ids",
+                "status": "passed",
+                "duration": 0.16695509298006073,
+                "start": 1787448930.565886,
+                "stop": 1787448930.7346234,
+                "retries": 0,
+                "file_path": "test_read_state.py"
+            },
+            {
+                "name": "test_read_state.py::test_mention_does_not_match_midword_or_email",
+                "status": "passed",
+                "duration": 0.0931891220388934,
+                "start": 1787448930.7353375,
+                "stop": 1787448930.829243,
+                "retries": 0,
+                "file_path": "test_read_state.py"
+            },
+            {
+                "name": "test_read_state.py::test_duplicate_mentions_collapse",
+                "status": "passed",
+                "duration": 0.09287132997997105,
+                "start": 1787448930.8299246,
+                "stop": 1787448930.9235184,
+                "retries": 0,
+                "file_path": "test_read_state.py"
+            },
+            {
+                "name": "test_read_state.py::test_unresolved_username_is_not_a_mention",
+                "status": "passed",
+                "duration": 0.04717345896642655,
+                "start": 1787448930.9242508,
+                "stop": 1787448930.9721694,
+                "retries": 0,
+                "file_path": "test_read_state.py"
+            },
+            {
+                "name": "test_read_state.py::test_author_self_mention_does_not_count",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.05603240692289546,
+                "start": 1787448930.9726784,
+                "stop": 1787448931.032185,
+                "retries": 0,
+                "file_path": "test_read_state.py",
+                "trace": "/tests/test_read_state.py:128: in test_author_self_mention_does_not_count\n    rs = requests.get(\nE   KeyError: 'read_state'",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_read_state.py::test_read_cursor_never_moves_backwards",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.056012864923104644,
+                "start": 1787448931.0329258,
+                "stop": 1787448931.092491,
+                "retries": 0,
+                "file_path": "test_read_state.py",
+                "trace": "/tests/test_read_state.py:144: in test_read_cursor_never_moves_backwards\n    rs = requests.get(\nE   KeyError: 'read_state'",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_read_state.py::test_workspace_detail_exposes_read_state",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.11347669397946447,
+                "start": 1787448931.0931182,
+                "stop": 1787448931.211656,
+                "retries": 0,
+                "file_path": "test_read_state.py",
+                "trace": "/tests/test_read_state.py:195: in test_workspace_detail_exposes_read_state\n    assert bobs_state is not None, payload[\"read_state\"]\nE   AssertionError: []\nE   assert None is not None",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_read_state.py::test_read_marks_channel_as_read",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.08076137100579217,
+                "start": 1787448931.212043,
+                "stop": 1787448931.2954552,
+                "retries": 0,
+                "file_path": "test_read_state.py",
+                "trace": "/tests/test_read_state.py:210: in test_read_marks_channel_as_read\n    before = requests.get(\nE   KeyError: 'read_state'",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_read_state.py::test_non_member_mention_does_not_count",
+                "status": "passed",
+                "duration": 0.11213664902606979,
+                "start": 1787448931.295752,
+                "stop": 1787448931.408508,
+                "retries": 0,
+                "file_path": "test_read_state.py"
+            },
+            {
+                "name": "test_channels_extra.py::test_channelobj_has_topic_and_is_archived_fields",
+                "status": "passed",
+                "duration": 0.044035030936356634,
+                "start": 1787448931.4091065,
+                "stop": 1787448931.4538128,
+                "retries": 0,
+                "file_path": "test_channels_extra.py"
+            },
+            {
+                "name": "test_channels_extra.py::test_patch_topic_persists_and_appears_in_channel",
+                "status": "passed",
+                "duration": 0.048631297948304564,
+                "start": 1787448931.4542444,
+                "stop": 1787448931.503414,
+                "retries": 0,
+                "file_path": "test_channels_extra.py"
+            },
+            {
+                "name": "test_channels_extra.py::test_patch_topic_rejects_too_long",
+                "status": "passed",
+                "duration": 0.052272311004344374,
+                "start": 1787448931.5038362,
+                "stop": 1787448931.5568964,
+                "retries": 0,
+                "file_path": "test_channels_extra.py"
+            },
+            {
+                "name": "test_channels_extra.py::test_archive_hides_from_workspace_detail_but_include_archived_shows_it",
+                "status": "passed",
+                "duration": 0.0633114330121316,
+                "start": 1787448931.557621,
+                "stop": 1787448931.6214712,
+                "retries": 0,
+                "file_path": "test_channels_extra.py"
+            },
+            {
+                "name": "test_channels_extra.py::test_archived_channel_rejects_writes_but_allows_reads",
+                "status": "passed",
+                "duration": 0.06983553897589445,
+                "start": 1787448931.6218867,
+                "stop": 1787448931.6925201,
+                "retries": 0,
+                "file_path": "test_channels_extra.py"
+            },
+            {
+                "name": "test_channels_extra.py::test_non_admin_cannot_archive",
+                "status": "passed",
+                "duration": 0.10000289598247036,
+                "start": 1787448931.6931615,
+                "stop": 1787448931.7940338,
+                "retries": 0,
+                "file_path": "test_channels_extra.py"
+            },
+            {
+                "name": "test_channels_extra.py::test_leave_channel_is_idempotent_and_removes_membership",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.10204577801050618,
+                "start": 1787448931.7989397,
+                "stop": 1787448931.9048536,
+                "retries": 0,
+                "file_path": "test_channels_extra.py",
+                "trace": "/tests/test_channels_extra.py:232: in test_leave_channel_is_idempotent_and_removes_membership\n    assert r.status_code == 403\nE   assert 200 == 403\nE    +  where 200 = <Response [200]>.status_code",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_channels_extra.py::test_unarchive_restores_channel",
+                "status": "passed",
+                "duration": 0.07670085603604093,
+                "start": 1787448931.9055884,
+                "stop": 1787448931.9829905,
+                "retries": 0,
+                "file_path": "test_channels_extra.py"
+            },
+            {
+                "name": "test_channels_extra.py::test_pin_and_unpin_roundtrip",
+                "status": "passed",
+                "duration": 0.07095075096003711,
+                "start": 1787448931.9834657,
+                "stop": 1787448932.055162,
+                "retries": 0,
+                "file_path": "test_channels_extra.py"
+            },
+            {
+                "name": "test_channels_extra.py::test_pin_list_is_newest_first",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.16267828596755862,
+                "start": 1787448932.0559301,
+                "stop": 1787448932.2233167,
+                "retries": 0,
+                "file_path": "test_channels_extra.py",
+                "trace": "/tests/test_channels_extra.py:332: in test_pin_list_is_newest_first\n    assert ids == list(reversed([m[\"id\"] for m in msgs])), f\"pin list should be newest-first, got {ids}\"\nE   AssertionError: pin list should be newest-first, got ['7cbf6792-926f-4752-8de8-8e73a249f6c6', '6bbb4baf-080d-48a2-ab28-4fa1c8267fb3', '45983ae3-6bf0-4927-8be0-869f5a0689e9']\nE   assert ['7cbf6792-92...869f5a0689e9'] == ['45983ae3-6b...8e73a249f6c6']\nE     \nE     At index 0 diff: '7cbf6792-926f-4752-8de8-8e73a249f6c6' != '45983ae3-6bf0-4927-8be0-869f5a0689e9'\nE     \nE     Full diff:\nE       [\nE     +     '7cbf6792-926f-4752-8de8-8e73a249f6c6',\nE     +     '6bbb4baf-080d-48a2-ab28-4fa1c8267fb3',...\nE     \nE     ...Full output truncated (4 lines hidden), use '-vv' to show",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_channels_extra.py::test_non_member_cannot_see_pins",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.09816968103405088,
+                "start": 1787448932.22396,
+                "stop": 1787448932.3265057,
+                "retries": 0,
+                "file_path": "test_channels_extra.py",
+                "trace": "/tests/test_channels_extra.py:353: in test_non_member_cannot_see_pins\n    assert r.status_code == 403\nE   assert 404 == 403\nE    +  where 404 = <Response [404]>.status_code",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_files.py::test_upload_returns_file_obj",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.04110914602642879,
+                "start": 1787448932.3273032,
+                "stop": 1787448932.3728564,
+                "retries": 0,
+                "file_path": "test_files.py",
+                "trace": "/tests/test_files.py:71: in test_upload_returns_file_obj\n    f = _upload(reg[\"token\"], b\"hello world\\n\", \"greeting.txt\", \"text/plain\")\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/tests/test_files.py:65: in _upload\n    assert r.status_code == 201, r.text\nE   AssertionError: {\"detail\":\"Not Found\"}\nE   assert 404 == 201\nE    +  where 404 = <Response [404]>.status_code",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_files.py::test_file_download_roundtrip_is_exact_bytes",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.038967679953202605,
+                "start": 1787448932.373579,
+                "stop": 1787448932.4160874,
+                "retries": 0,
+                "file_path": "test_files.py",
+                "trace": "/tests/test_files.py:83: in test_file_download_roundtrip_is_exact_bytes\n    f = _upload(reg[\"token\"], payload, \"blob.bin\", \"application/octet-stream\")\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/tests/test_files.py:65: in _upload\n    assert r.status_code == 201, r.text\nE   AssertionError: {\"detail\":\"Not Found\"}\nE   assert 404 == 201\nE    +  where 404 = <Response [404]>.status_code",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_files.py::test_file_metadata_endpoint",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.04267515003448352,
+                "start": 1787448932.4166398,
+                "stop": 1787448932.4656591,
+                "retries": 0,
+                "file_path": "test_files.py",
+                "trace": "/tests/test_files.py:98: in test_file_metadata_endpoint\n    f = _upload(reg[\"token\"], b\"hi\", \"x.txt\", \"text/plain\")\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/tests/test_files.py:65: in _upload\n    assert r.status_code == 201, r.text\nE   AssertionError: {\"detail\":\"Not Found\"}\nE   assert 404 == 201\nE    +  where 404 = <Response [404]>.status_code",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_files.py::test_file_download_404_on_unknown",
+                "status": "passed",
+                "duration": 0.03489991504466161,
+                "start": 1787448932.4660864,
+                "stop": 1787448932.5015523,
+                "retries": 0,
+                "file_path": "test_files.py"
+            },
+            {
+                "name": "test_files.py::test_upload_over_10mib_returns_413",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.040552395046688616,
+                "start": 1787448932.5019243,
+                "stop": 1787448932.5446575,
+                "retries": 0,
+                "file_path": "test_files.py",
+                "trace": "/tests/test_files.py:127: in test_upload_over_10mib_returns_413\n    assert r.status_code == 413, r.status_code\nE   AssertionError: 404\nE   assert 404 == 413\nE    +  where 404 = <Response [404]>.status_code",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_files.py::test_attach_file_to_message",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.04336827900260687,
+                "start": 1787448932.5450332,
+                "stop": 1787448932.5921602,
+                "retries": 0,
+                "file_path": "test_files.py",
+                "trace": "/tests/test_files.py:134: in test_attach_file_to_message\n    f = _upload(reg[\"token\"], b\"report contents\\n\", \"report.txt\")\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/tests/test_files.py:65: in _upload\n    assert r.status_code == 201, r.text\nE   AssertionError: {\"detail\":\"Not Found\"}\nE   assert 404 == 201\nE    +  where 404 = <Response [404]>.status_code",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_files.py::test_attach_someone_elses_file_rejected",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.07472126599168405,
+                "start": 1787448932.5924933,
+                "stop": 1787448932.6700525,
+                "retries": 0,
+                "file_path": "test_files.py",
+                "trace": "/tests/test_files.py:162: in test_attach_someone_elses_file_rejected\n    f = _upload(alice[\"token\"], b\"mine\", \"mine.txt\")\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/tests/test_files.py:65: in _upload\n    assert r.status_code == 201, r.text\nE   AssertionError: {\"detail\":\"Not Found\"}\nE   assert 404 == 201\nE    +  where 404 = <Response [404]>.status_code",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_files.py::test_attach_already_attached_file_rejected",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.042519443086348474,
+                "start": 1787448932.6703632,
+                "stop": 1787448932.7162502,
+                "retries": 0,
+                "file_path": "test_files.py",
+                "trace": "/tests/test_files.py:176: in test_attach_already_attached_file_rejected\n    f = _upload(reg[\"token\"], b\"one\", \"a.txt\")\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/tests/test_files.py:65: in _upload\n    assert r.status_code == 201, r.text\nE   AssertionError: {\"detail\":\"Not Found\"}\nE   assert 404 == 201\nE    +  where 404 = <Response [404]>.status_code",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_files.py::test_attach_unknown_file_id_rejected",
+                "status": "passed",
+                "duration": 0.038488761987537146,
+                "start": 1787448932.7165155,
+                "stop": 1787448932.7554395,
+                "retries": 0,
+                "file_path": "test_files.py"
+            },
+            {
+                "name": "test_slash.py::test_slash_me_posts_as_normal_message",
+                "status": "passed",
+                "duration": 0.04704920802032575,
+                "start": 1787448932.7557042,
+                "stop": 1787448932.8037512,
+                "retries": 0,
+                "file_path": "test_slash.py"
+            },
+            {
+                "name": "test_slash.py::test_slash_me_requires_text",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.050511429959442466,
+                "start": 1787448932.8043065,
+                "stop": 1787448932.8577883,
+                "retries": 0,
+                "file_path": "test_slash.py",
+                "trace": "/tests/test_slash.py:74: in test_slash_me_requires_text\n    assert r.status_code == 400\nE   assert 201 == 400\nE    +  where 201 = <Response [201]>.status_code",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_slash.py::test_slash_shrug_appends_emoticon",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.046796125010587275,
+                "start": 1787448932.8584354,
+                "stop": 1787448932.907956,
+                "retries": 0,
+                "file_path": "test_slash.py",
+                "trace": "/tests/test_slash.py:82: in test_slash_shrug_appends_emoticon\n    assert r.json()[\"message\"][\"body\"].endswith(\"\u00af\\\\_(\u30c4)_/\u00af\")\nE   AssertionError: assert False\nE    +  where False = <built-in method endswith of str object at 0xffffafe888b0>('\u00af\\\\_(\u30c4)_/\u00af')\nE    +    where <built-in method endswith of str object at 0xffffafe888b0> = '/shrug no idea'.endswith",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_slash.py::test_slash_shrug_without_text",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.04808321292512119,
+                "start": 1787448932.9083385,
+                "stop": 1787448932.9594972,
+                "retries": 0,
+                "file_path": "test_slash.py",
+                "trace": "/tests/test_slash.py:91: in test_slash_shrug_without_text\n    assert r.json()[\"message\"][\"body\"] == \"\u00af\\\\_(\u30c4)_/\u00af\"\nE   AssertionError: assert '/shrug' == '\u00af\\\\_(\u30c4)_/\u00af'\nE     \nE     - \u00af\\_(\u30c4)_/\u00af\nE     + /shrug",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_slash.py::test_slash_topic_sets_channel_topic",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.053085106948856264,
+                "start": 1787448932.9602692,
+                "stop": 1787448933.0165598,
+                "retries": 0,
+                "file_path": "test_slash.py",
+                "trace": "/tests/test_slash.py:102: in test_slash_topic_sets_channel_topic\n    assert payload[\"message\"] is None\nE   AssertionError: assert {'author': {'avatar_url': None, 'display_name': 'Sle79459', 'id': '8084d4f2-ce06-4de3-a278-7848b4f5879f', 'status_emoji': None, ...}, 'author_id': '8084d4f2-ce06-4de3-a278-7848b4f5879f', 'body': '/topic Weekly product standup', 'channel_id': '492f4010-99a1-4ece-a41b-da27232576d0', ...} is None",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_slash.py::test_slash_invite_adds_user_to_channel",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.12576169602107257,
+                "start": 1787448933.0172377,
+                "stop": 1787448933.1489263,
+                "retries": 0,
+                "file_path": "test_slash.py",
+                "trace": "/tests/test_slash.py:129: in test_slash_invite_adds_user_to_channel\n    assert body[\"message\"] is None\nE   AssertionError: assert {'author': {'avatar_url': None, 'display_name': 'Sl169694', 'id': '41f4d9ff-1012-41ec-84f3-3a68c832c443', 'status_emoji': None, ...}, 'author_id': '41f4d9ff-1012-41ec-84f3-3a68c832c443', 'body': '/invite @sl8b92f9', 'channel_id': '64f9604b-ab19-46a9-a2ee-50872b21e420', ...} is None",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_slash.py::test_slash_invite_unknown_user_returns_404",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.056718492007348686,
+                "start": 1787448933.1495857,
+                "stop": 1787448933.2106266,
+                "retries": 0,
+                "file_path": "test_slash.py",
+                "trace": "/tests/test_slash.py:144: in test_slash_invite_unknown_user_returns_404\n    assert r.status_code == 404\nE   assert 201 == 404\nE    +  where 201 = <Response [201]>.status_code",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_slash.py::test_slash_archive_and_unarchive_as_owner",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.0645126880845055,
+                "start": 1787448933.2111952,
+                "stop": 1787448933.2812939,
+                "retries": 0,
+                "file_path": "test_slash.py",
+                "trace": "/tests/test_slash.py:159: in test_slash_archive_and_unarchive_as_owner\n    assert r.json()[\"channel\"][\"is_archived\"] is True\n           ^^^^^^^^^^^^^^^^^^^\nE   KeyError: 'channel'",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_slash.py::test_slash_archive_non_owner_rejected",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.10488620505202562,
+                "start": 1787448933.283419,
+                "stop": 1787448933.3912544,
+                "retries": 0,
+                "file_path": "test_slash.py",
+                "trace": "/tests/test_slash.py:180: in test_slash_archive_non_owner_rejected\n    assert r.status_code == 403\nE   assert 201 == 403\nE    +  where 201 = <Response [201]>.status_code",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_slash.py::test_unknown_slash_command_returns_400",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.05102680705022067,
+                "start": 1787448933.3916838,
+                "stop": 1787448933.445424,
+                "retries": 0,
+                "file_path": "test_slash.py",
+                "trace": "/tests/test_slash.py:187: in test_unknown_slash_command_returns_400\n    assert r.status_code == 400, r.status_code\nE   AssertionError: 201\nE   assert 201 == 400\nE    +  where 201 = <Response [201]>.status_code",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_slash.py::test_escaped_double_slash_is_a_literal_message",
+                "status": "passed",
+                "duration": 0.04834392201155424,
+                "start": 1787448933.4458954,
+                "stop": 1787448933.494806,
+                "retries": 0,
+                "file_path": "test_slash.py"
+            },
+            {
+                "name": "test_groups.py::test_create_group_then_list_returns_it",
+                "status": "passed",
+                "duration": 0.05565782205667347,
+                "start": 1787448933.4953656,
+                "stop": 1787448933.5520127,
+                "retries": 0,
+                "file_path": "test_groups.py"
+            },
+            {
+                "name": "test_groups.py::test_duplicate_group_handle_rejected",
+                "status": "passed",
+                "duration": 0.04713437601458281,
+                "start": 1787448933.5527205,
+                "stop": 1787448933.6004937,
+                "retries": 0,
+                "file_path": "test_groups.py"
+            },
+            {
+                "name": "test_groups.py::test_invalid_group_handle_rejected",
+                "status": "passed",
+                "duration": 0.05631728301523253,
+                "start": 1787448933.6008985,
+                "stop": 1787448933.6580608,
+                "retries": 0,
+                "file_path": "test_groups.py"
+            },
+            {
+                "name": "test_groups.py::test_update_group_replaces_membership",
+                "status": "passed",
+                "duration": 0.13049584004329517,
+                "start": 1787448933.659002,
+                "stop": 1787448933.7900171,
+                "retries": 0,
+                "file_path": "test_groups.py"
+            },
+            {
+                "name": "test_groups.py::test_non_creator_non_owner_cannot_update_group",
+                "status": "passed",
+                "duration": 0.08649122301721945,
+                "start": 1787448933.7905328,
+                "stop": 1787448933.8780816,
+                "retries": 0,
+                "file_path": "test_groups.py"
+            },
+            {
+                "name": "test_groups.py::test_delete_group_is_idempotent",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.049758718989323825,
+                "start": 1787448933.8788245,
+                "stop": 1787448933.9320247,
+                "retries": 0,
+                "file_path": "test_groups.py",
+                "trace": "/tests/test_groups.py:205: in test_delete_group_is_idempotent\n    assert r2.status_code == 200\nE   assert 404 == 200\nE    +  where 404 = <Response [404]>.status_code",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_groups.py::test_at_group_expands_to_member_user_ids",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.14966298901708797,
+                "start": 1787448933.9323342,
+                "stop": 1787448934.0879135,
+                "retries": 0,
+                "file_path": "test_groups.py",
+                "trace": "/tests/test_groups.py:229: in test_at_group_expands_to_member_user_ids\n    assert set(msg[\"mentions\"]) == {alice[\"user\"][\"id\"], bob[\"user\"][\"id\"]}, msg\nE   AssertionError: {'author': {'avatar_url': None, 'display_name': 'Gpd4652A', 'id': 'd925ee16-3aaf-4e5e-9b62-7c89eb146462', 'status_emoji': None, ...}, 'author_id': 'd925ee16-3aaf-4e5e-9b62-7c89eb146462', 'body': 'hey @backend please review', 'channel_id': '1a83accd-aae9-42fe-b88e-d694b3b61499', ...}\nE   assert set() == {'5d67da08-f6...ef72a7872121'}\nE     \nE     Extra items in the right set:\nE     '5d67da08-f6c1-4d54-9517-e87db9e101d2'\nE     '6c8498b0-2732-44b2-97a4-ef72a7872121'\nE     \nE     Full diff:\nE     + set()...\nE     \nE     ...Full output truncated (4 lines hidden), use '-vv' to show",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_groups.py::test_at_group_excludes_non_channel_members",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.15591409598710015,
+                "start": 1787448934.0886085,
+                "stop": 1787448934.248589,
+                "retries": 0,
+                "file_path": "test_groups.py",
+                "trace": "/tests/test_groups.py:261: in test_at_group_excludes_non_channel_members\n    assert inner[\"user\"][\"id\"] in msg[\"mentions\"]\nE   AssertionError: assert '140ab787-3f9d-46e5-9145-78bd72fc42be' in []",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_groups.py::test_at_group_author_excluded",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.10502420499688014,
+                "start": 1787448934.2490604,
+                "stop": 1787448934.3579588,
+                "retries": 0,
+                "file_path": "test_groups.py",
+                "trace": "/tests/test_groups.py:280: in test_at_group_author_excluded\n    assert bob[\"user\"][\"id\"] in msg[\"mentions\"]\nE   AssertionError: assert '608f8b2e-0715-4d49-aeb5-c1085ba33d87' in []",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_groups.py::test_at_channel_mentions_all_channel_members_except_author",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.1549502169364132,
+                "start": 1787448934.3583162,
+                "stop": 1787448934.5173311,
+                "retries": 0,
+                "file_path": "test_groups.py",
+                "trace": "/tests/test_groups.py:295: in test_at_channel_mentions_all_channel_members_except_author\n    assert set(msg[\"mentions\"]) == {a[\"user\"][\"id\"], b[\"user\"][\"id\"]}, msg\nE   AssertionError: {'author': {'avatar_url': None, 'display_name': 'Gpdc2Fbf', 'id': 'fd58bc44-187d-457b-b3f3-2f2891ee000b', 'status_emoji': None, ...}, 'author_id': 'fd58bc44-187d-457b-b3f3-2f2891ee000b', 'body': '@channel everyone look', 'channel_id': '51004a2a-2a1f-4b05-9284-0fe6c9d72f2a', ...}\nE   assert set() == {'1d59fd3f-eb...77d5d08e02ab'}\nE     \nE     Extra items in the right set:\nE     'e84dda53-9d2b-4bf2-8f96-77d5d08e02ab'\nE     '1d59fd3f-eb7e-496a-8675-fc1d67769c14'\nE     \nE     Full diff:\nE     + set()...\nE     \nE     ...Full output truncated (4 lines hidden), use '-vv' to show",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_groups.py::test_at_here_only_includes_online_members",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.12778774503385648,
+                "start": 1787448934.5186045,
+                "stop": 1787448934.673804,
+                "retries": 0,
+                "file_path": "test_groups.py",
+                "trace": "/tests/test_groups.py:324: in test_at_here_only_includes_online_members\n    msg = asyncio.run(scenario())\n          ^^^^^^^^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/runners.py:194: in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/runners.py:118: in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/base_events.py:687: in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n/tests/test_groups.py:312: in scenario\n    async with websockets.connect(\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:635: in __aenter__\n    return await self\n           ^^^^^^^^^^\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:656: in __await_impl__\n    await protocol.handshake(\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:322: in handshake\n    raise InvalidStatusCode(status_code, response_headers)\nE   websockets.legacy.exceptions.InvalidStatusCode: server rejected WebSocket connection: HTTP 403",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_groups.py::test_mixed_at_group_at_channel_at_username_dedupe",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.13682177709415555,
+                "start": 1787448934.6742868,
+                "stop": 1787448934.8272264,
+                "retries": 0,
+                "file_path": "test_groups.py",
+                "trace": "/tests/test_groups.py:348: in test_mixed_at_group_at_channel_at_username_dedupe\n    assert sorted(ids) == sorted([a[\"user\"][\"id\"], b[\"user\"][\"id\"]])\nE   AssertionError: assert ['dc3e3067-2f...a52b8b79a46a'] == ['275d7e0b-41...a52b8b79a46a']\nE     \nE     At index 0 diff: 'dc3e3067-2f17-4cad-bd40-a52b8b79a46a' != '275d7e0b-41f9-4c69-b470-ecf0e9efc439'\nE     Right contains one more item: 'dc3e3067-2f17-4cad-bd40-a52b8b79a46a'\nE     \nE     Full diff:\nE       [\nE     -     '275d7e0b-41f9-4c69-b470-ecf0e9efc439',\nE           'dc3e3067-2f17-4cad-bd40-a52b8b79a46a',\nE       ]",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_invitations.py::test_default_join_mode_is_open",
+                "status": "passed",
+                "duration": 0.046218663977924734,
+                "start": 1787448934.8278224,
+                "stop": 1787448934.8748453,
+                "retries": 0,
+                "file_path": "test_invitations.py"
+            },
+            {
+                "name": "test_invitations.py::test_patch_switches_to_invite_only",
+                "status": "passed",
+                "duration": 0.04896321496926248,
+                "start": 1787448934.875608,
+                "stop": 1787448934.925123,
+                "retries": 0,
+                "file_path": "test_invitations.py"
+            },
+            {
+                "name": "test_invitations.py::test_patch_updates_workspace_name",
+                "status": "passed",
+                "duration": 0.049536843958776444,
+                "start": 1787448934.9256072,
+                "stop": 1787448934.9758823,
+                "retries": 0,
+                "file_path": "test_invitations.py"
+            },
+            {
+                "name": "test_invitations.py::test_patch_rejects_invalid_join_mode",
+                "status": "passed",
+                "duration": 0.05804633203661069,
+                "start": 1787448934.976415,
+                "stop": 1787448935.0349572,
+                "retries": 0,
+                "file_path": "test_invitations.py"
+            },
+            {
+                "name": "test_invitations.py::test_patch_join_mode_forbidden_for_non_owner",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.07534643495455384,
+                "start": 1787448935.0353878,
+                "stop": 1787448935.113901,
+                "retries": 0,
+                "file_path": "test_invitations.py",
+                "trace": "/tests/test_invitations.py:128: in test_patch_join_mode_forbidden_for_non_owner\n    assert r.status_code == 403\nE   assert 404 == 403\nE    +  where 404 = <Response [404]>.status_code",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_invitations.py::test_invite_only_rejects_open_join",
+                "status": "passed",
+                "duration": 0.07356726098805666,
+                "start": 1787448935.1144185,
+                "stop": 1787448935.188658,
+                "retries": 0,
+                "file_path": "test_invitations.py"
+            },
+            {
+                "name": "test_invitations.py::test_create_invitation_returns_code",
+                "status": "passed",
+                "duration": 0.047114500019233674,
+                "start": 1787448935.1891568,
+                "stop": 1787448935.236593,
+                "retries": 0,
+                "file_path": "test_invitations.py"
+            },
+            {
+                "name": "test_invitations.py::test_accept_invitation_joins_workspace",
+                "status": "passed",
+                "duration": 0.08543530403403565,
+                "start": 1787448935.2368643,
+                "stop": 1787448935.3228383,
+                "retries": 0,
+                "file_path": "test_invitations.py"
+            },
+            {
+                "name": "test_invitations.py::test_accept_consumes_single_use_code",
+                "status": "passed",
+                "duration": 0.10963092994643375,
+                "start": 1787448935.3236258,
+                "stop": 1787448935.4336326,
+                "retries": 0,
+                "file_path": "test_invitations.py"
+            },
+            {
+                "name": "test_invitations.py::test_multi_use_invite_allows_max_uses",
+                "status": "passed",
+                "duration": 0.17527403903659433,
+                "start": 1787448935.433921,
+                "stop": 1787448935.6101499,
+                "retries": 0,
+                "file_path": "test_invitations.py"
+            },
+            {
+                "name": "test_invitations.py::test_targeted_invite_rejects_other_users",
+                "status": "passed",
+                "duration": 0.13620785903185606,
+                "start": 1787448935.6111403,
+                "stop": 1787448935.7480094,
+                "retries": 0,
+                "file_path": "test_invitations.py"
+            },
+            {
+                "name": "test_invitations.py::test_revoke_invitation_prevents_acceptance",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.0866056410013698,
+                "start": 1787448935.748451,
+                "stop": 1787448935.8395069,
+                "retries": 0,
+                "file_path": "test_invitations.py",
+                "trace": "/tests/test_invitations.py:300: in test_revoke_invitation_prevents_acceptance\n    assert r.status_code == 200\nE   assert 404 == 200\nE    +  where 404 = <Response [404]>.status_code",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_invitations.py::test_list_invitations_owner_only",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.08860185707453638,
+                "start": 1787448935.8401423,
+                "stop": 1787448935.9356177,
+                "retries": 0,
+                "file_path": "test_invitations.py",
+                "trace": "/tests/test_invitations.py:333: in test_list_invitations_owner_only\n    assert r.status_code == 403\nE   assert 404 == 403\nE    +  where 404 = <Response [404]>.status_code",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_invitations.py::test_accept_unknown_code_returns_404",
+                "status": "passed",
+                "duration": 0.04061801900388673,
+                "start": 1787448935.936408,
+                "stop": 1787448935.977634,
+                "retries": 0,
+                "file_path": "test_invitations.py"
+            },
+            {
+                "name": "test_roles.py::test_creator_is_owner",
+                "status": "passed",
+                "duration": 0.04593774606473744,
+                "start": 1787448935.9781523,
+                "stop": 1787448936.0248446,
+                "retries": 0,
+                "file_path": "test_roles.py"
+            },
+            {
+                "name": "test_roles.py::test_invited_user_defaults_to_member",
+                "status": "passed",
+                "duration": 0.09836547495797276,
+                "start": 1787448936.0253985,
+                "stop": 1787448936.1244473,
+                "retries": 0,
+                "file_path": "test_roles.py"
+            },
+            {
+                "name": "test_roles.py::test_owner_promotes_member_to_admin",
+                "status": "passed",
+                "duration": 0.10192881996044889,
+                "start": 1787448936.124986,
+                "stop": 1787448936.227399,
+                "retries": 0,
+                "file_path": "test_roles.py"
+            },
+            {
+                "name": "test_roles.py::test_admin_cannot_promote_to_admin",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.14585868298308924,
+                "start": 1787448936.2278888,
+                "stop": 1787448936.3776271,
+                "retries": 0,
+                "file_path": "test_roles.py",
+                "trace": "/tests/test_roles.py:138: in test_admin_cannot_promote_to_admin\n    assert r.status_code == 403, r.status_code\nE   AssertionError: 200\nE   assert 200 == 403\nE    +  where 200 = <Response [200]>.status_code",
+                "message": "The test failed in the call phase due to an assertion error"
+            },
+            {
+                "name": "test_roles.py::test_admin_can_toggle_member_guest",
+                "status": "passed",
+                "duration": 0.15407000499544665,
+                "start": 1787448936.3780484,
+                "stop": 1787448936.5327988,
+                "retries": 0,
+                "file_path": "test_roles.py"
+            },
+            {
+                "name": "test_roles.py::test_admin_cannot_modify_another_admin",
+                "status": "passed",
+                "duration": 0.14780431700637564,
+                "start": 1787448936.5333316,
+                "stop": 1787448936.6816018,
+                "retries": 0,
+                "file_path": "test_roles.py"
+            },
+            {
+                "name": "test_roles.py::test_cannot_change_owner_role_via_patch",
+                "status": "passed",
+                "duration": 0.05159310100134462,
+                "start": 1787448936.6823146,
+                "stop": 1787448936.7368236,
+                "retries": 0,
+                "file_path": "test_roles.py"
+            },
+            {
+                "name": "test_roles.py::test_setting_role_to_owner_rejected",
+                "status": "passed",
+                "duration": 0.10619600204518065,
+                "start": 1787448936.737538,
+                "stop": 1787448936.8446388,
+                "retries": 0,
+                "file_path": "test_roles.py"
+            },
+            {
+                "name": "test_roles.py::test_guest_cannot_join_public_channel",
+                "status": "passed",
+                "duration": 0.11411502899136394,
+                "start": 1787448936.845744,
+                "stop": 1787448936.9606616,
+                "retries": 0,
+                "file_path": "test_roles.py"
+            },
+            {
+                "name": "test_roles.py::test_guest_cannot_create_channel",
+                "status": "passed",
+                "duration": 0.09823738998966292,
+                "start": 1787448936.9614344,
+                "stop": 1787448937.0602062,
+                "retries": 0,
+                "file_path": "test_roles.py"
+            },
+            {
+                "name": "test_roles.py::test_member_cannot_create_private_channel",
+                "status": "passed",
+                "duration": 0.12751195300370455,
+                "start": 1787448937.060561,
+                "stop": 1787448937.1886306,
+                "retries": 0,
+                "file_path": "test_roles.py"
+            },
+            {
+                "name": "test_roles.py::test_admin_can_create_invitations",
+                "status": "passed",
+                "duration": 0.10200669505866244,
+                "start": 1787448937.1891856,
+                "stop": 1787448937.2936606,
+                "retries": 0,
+                "file_path": "test_roles.py"
+            },
+            {
+                "name": "test_roles.py::test_member_cannot_create_invitations",
+                "status": "passed",
+                "duration": 0.09833201701985672,
+                "start": 1787448937.2957914,
+                "stop": 1787448937.3949225,
+                "retries": 0,
+                "file_path": "test_roles.py"
+            },
+            {
+                "name": "test_roles.py::test_transfer_ownership_happy_path",
+                "status": "passed",
+                "duration": 0.10234757099533454,
+                "start": 1787448937.3954053,
+                "stop": 1787448937.4981668,
+                "retries": 0,
+                "file_path": "test_roles.py"
+            },
+            {
+                "name": "test_roles.py::test_transfer_rejects_non_admin_target",
+                "status": "passed",
+                "duration": 0.09064569597830996,
+                "start": 1787448937.4985127,
+                "stop": 1787448937.5897105,
+                "retries": 0,
+                "file_path": "test_roles.py"
+            },
+            {
+                "name": "test_roles.py::test_transfer_only_owner_can_call",
+                "status": "passed",
+                "duration": 0.152333915932104,
+                "start": 1787448937.5901568,
+                "stop": 1787448937.7429378,
+                "retries": 0,
+                "file_path": "test_roles.py"
+            },
+            {
+                "name": "test_cluster.py::test_every_node_identifies_its_node_id",
+                "status": "passed",
+                "duration": 0.00868944707326591,
+                "start": 1787448937.7434459,
+                "stop": 1787448937.7526913,
+                "retries": 0,
+                "file_path": "test_cluster.py"
+            },
+            {
+                "name": "test_cluster.py::test_write_on_node0_is_visible_on_node1_and_node2",
+                "status": "passed",
+                "duration": 0.059750338026788086,
+                "start": 1787448937.7531157,
+                "stop": 1787448937.8137121,
+                "retries": 0,
+                "file_path": "test_cluster.py"
+            },
+            {
+                "name": "test_cluster.py::test_write_on_one_node_broadcasts_over_ws_on_another_node",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.10200806899229065,
+                "start": 1787448937.8144999,
+                "stop": 1787448937.9410653,
+                "retries": 0,
+                "file_path": "test_cluster.py",
+                "trace": "/tests/test_cluster.py:178: in test_write_on_one_node_broadcasts_over_ws_on_another_node\n    events = asyncio.run(scenario())\n             ^^^^^^^^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/runners.py:194: in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/runners.py:118: in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/base_events.py:687: in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n/tests/test_cluster.py:147: in scenario\n    async with websockets.connect(url) as ws:\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:635: in __aenter__\n    return await self\n           ^^^^^^^^^^\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:656: in __await_impl__\n    await protocol.handshake(\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:322: in handshake\n    raise InvalidStatusCode(status_code, response_headers)\nE   websockets.legacy.exceptions.InvalidStatusCode: server rejected WebSocket connection: HTTP 403",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_cluster.py::test_resume_works_across_nodes_after_reconnect",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.08663818304194137,
+                "start": 1787448937.9416192,
+                "stop": 1787448938.0555139,
+                "retries": 0,
+                "file_path": "test_cluster.py",
+                "trace": "/tests/test_cluster.py:261: in test_resume_works_across_nodes_after_reconnect\n    phase1, phase3 = asyncio.run(scenario())\n                     ^^^^^^^^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/runners.py:194: in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/runners.py:118: in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/base_events.py:687: in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n/tests/test_cluster.py:207: in scenario\n    async with websockets.connect(\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:635: in __aenter__\n    return await self\n           ^^^^^^^^^^\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:656: in __await_impl__\n    await protocol.handshake(\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:322: in handshake\n    raise InvalidStatusCode(status_code, response_headers)\nE   websockets.legacy.exceptions.InvalidStatusCode: server rejected WebSocket connection: HTTP 403",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_cluster.py::test_seqs_are_dense_across_parallel_writes_on_different_nodes",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.0947509600664489,
+                "start": 1787448938.0558853,
+                "stop": 1787448938.180261,
+                "retries": 0,
+                "file_path": "test_cluster.py",
+                "trace": "/tests/test_cluster.py:340: in test_seqs_are_dense_across_parallel_writes_on_different_nodes\n    start_head, collected = asyncio.run(scenario())\n                            ^^^^^^^^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/runners.py:194: in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/runners.py:118: in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/base_events.py:687: in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n/tests/test_cluster.py:292: in scenario\n    async with websockets.connect(\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:635: in __aenter__\n    return await self\n           ^^^^^^^^^^\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:656: in __await_impl__\n    await protocol.handshake(\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:322: in handshake\n    raise InvalidStatusCode(status_code, response_headers)\nE   websockets.legacy.exceptions.InvalidStatusCode: server rejected WebSocket connection: HTTP 403",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_ordering.py::test_events_have_dense_monotonic_seq_under_concurrent_writes",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.24616324697853997,
+                "start": 1787448938.1808283,
+                "stop": 1787448938.4540176,
+                "retries": 0,
+                "file_path": "test_ordering.py",
+                "trace": "/tests/test_ordering.py:161: in test_events_have_dense_monotonic_seq_under_concurrent_writes\n    events, start_head = asyncio.run(run())\n                         ^^^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/runners.py:194: in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/runners.py:118: in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/base_events.py:687: in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n/tests/test_ordering.py:124: in run\n    async with websockets.connect(url) as obs:\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:635: in __aenter__\n    return await self\n           ^^^^^^^^^^\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:656: in __await_impl__\n    await protocol.handshake(\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:322: in handshake\n    raise InvalidStatusCode(status_code, response_headers)\nE   websockets.legacy.exceptions.InvalidStatusCode: server rejected WebSocket connection: HTTP 403",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_ordering.py::test_resume_replays_missed_events_in_order_without_gaps",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.15952294098678976,
+                "start": 1787448938.4549344,
+                "stop": 1787448938.6423225,
+                "retries": 0,
+                "file_path": "test_ordering.py",
+                "trace": "/tests/test_ordering.py:217: in test_resume_replays_missed_events_in_order_without_gaps\n    phase1, phase3, last_seen = asyncio.run(scenario())\n                                ^^^^^^^^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/runners.py:194: in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/runners.py:118: in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/base_events.py:687: in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n/tests/test_ordering.py:189: in scenario\n    async with websockets.connect(url) as obs:\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:635: in __aenter__\n    return await self\n           ^^^^^^^^^^\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:656: in __await_impl__\n    await protocol.handshake(\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:322: in handshake\n    raise InvalidStatusCode(status_code, response_headers)\nE   websockets.legacy.exceptions.InvalidStatusCode: server rejected WebSocket connection: HTTP 403",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_ordering.py::test_resume_replays_fully_or_emits_gap_after_long_history",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 6.45031347690383,
+                "start": 1787448938.6427279,
+                "stop": 1787448945.1192327,
+                "retries": 0,
+                "file_path": "test_ordering.py",
+                "trace": "/tests/test_ordering.py:267: in test_resume_replays_fully_or_emits_gap_after_long_history\n    events = asyncio.run(scenario())\n             ^^^^^^^^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/runners.py:194: in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/runners.py:118: in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/base_events.py:687: in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n/tests/test_ordering.py:259: in scenario\n    async with websockets.connect(url) as obs:\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:635: in __aenter__\n    return await self\n           ^^^^^^^^^^\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:656: in __await_impl__\n    await protocol.handshake(\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:322: in handshake\n    raise InvalidStatusCode(status_code, response_headers)\nE   websockets.legacy.exceptions.InvalidStatusCode: server rejected WebSocket connection: HTTP 403",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_ordering.py::test_subscribe_without_resume_gets_only_live_events",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 0.2008545470307581,
+                "start": 1787448945.1200135,
+                "stop": 1787448945.343901,
+                "retries": 0,
+                "file_path": "test_ordering.py",
+                "trace": "/tests/test_ordering.py:318: in test_subscribe_without_resume_gets_only_live_events\n    events = asyncio.run(scenario())\n             ^^^^^^^^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/runners.py:194: in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/runners.py:118: in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/base_events.py:687: in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n/tests/test_ordering.py:305: in scenario\n    async with websockets.connect(url) as obs:\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:635: in __aenter__\n    return await self\n           ^^^^^^^^^^\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:656: in __await_impl__\n    await protocol.handshake(\n/opt/test-venv/lib/python3.12/site-packages/websockets/legacy/client.py:322: in handshake\n    raise InvalidStatusCode(status_code, response_headers)\nE   websockets.legacy.exceptions.InvalidStatusCode: server rejected WebSocket connection: HTTP 403",
+                "message": "The test failed in the call phase"
+            },
+            {
+                "name": "test_load.py::test_concurrent_fanout_stays_within_latency_budget",
+                "status": "failed",
+                "raw_status": "call_failed",
+                "duration": 22.145802013925277,
+                "start": 1787448945.344383,
+                "stop": 1787448967.5384324,
+                "retries": 0,
+                "file_path": "test_load.py",
+                "trace": "/usr/lib/python3.12/asyncio/tasks.py:520: in wait_for\n    return await fut\n           ^^^^^^^^^\n/usr/lib/python3.12/asyncio/locks.py:212: in wait\n    await fut\nE   asyncio.exceptions.CancelledError\n\nThe above exception was the direct cause of the following exception:\n/tests/test_load.py:201: in run\n    await asyncio.wait_for(ready_event.wait(), timeout=20)\n/usr/lib/python3.12/asyncio/tasks.py:519: in wait_for\n    async with timeouts.timeout(timeout):\n/usr/lib/python3.12/asyncio/timeouts.py:115: in __aexit__\n    raise TimeoutError from exc_val\nE   TimeoutError\n\nDuring handling of the above exception, another exception occurred:\n/tests/test_load.py:245: in test_concurrent_fanout_stays_within_latency_budget\n    asyncio.run(run())\n/usr/lib/python3.12/asyncio/runners.py:194: in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/runners.py:118: in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/lib/python3.12/asyncio/base_events.py:687: in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n/tests/test_load.py:205: in run\n    pytest.fail(\"observer clients never finished subscribing\")\nE   Failed: observer clients never finished subscribing",
+                "message": "The test failed in the call phase"
+            }
+        ]
+    }
+}

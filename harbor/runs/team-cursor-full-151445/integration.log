@@ -1,0 +1,28 @@
+2026-08-22T22:15:26Z PERSISTENT-LEAD started tmux=marathon-lead
+2026-08-22T22:15:46Z PERSISTENT-LEAD ready
+2026-08-22T22:30:35Z INTEGRATED task=MARATHON-2 attempt=1 app_before=585944254f44b8b0b4a9b891ea1dafb0d1764f7e app_after=fba2eb628deb2875e1217dab3fbfeaec3179ae24 check=pass mode=ff delivered_by=backend-dev-1
+2026-08-22T22:44:21Z INTEGRATED task=MARATHON-3 attempt=1 app_before=fba2eb628deb2875e1217dab3fbfeaec3179ae24 app_after=eeeb8816dac5a08e6f2039f0d4a9635f9ed75229 check=pass mode=ff delivered_by=backend-dev-1
+2026-08-22T22:45:54Z INTEGRATED task=MARATHON-19 attempt=1 app_before=eeeb8816dac5a08e6f2039f0d4a9635f9ed75229 app_after=beae23ca3b0b7de68ceca570367a13e6c24efd64 check=pass mode=merge delivered_by=qa-engineer-1
+2026-08-22T22:47:14Z INTEGRATED task=MARATHON-20 attempt=1 app_before=beae23ca3b0b7de68ceca570367a13e6c24efd64 app_after=00d49c6d1a4944e978b53fe15e25f713a4180b42 check=pass mode=merge delivered_by=qa-engineer-1
+2026-08-22T22:59:54Z INTEGRATED task=MARATHON-4 attempt=1 app_before=00d49c6d1a4944e978b53fe15e25f713a4180b42 app_after=bdbeba75ad2958ca262fad73f58cc69064e06625 check=pass mode=ff delivered_by=backend-dev-1
+2026-08-22T23:01:10Z INTEGRATED task=MARATHON-21 attempt=1 app_before=bdbeba75ad2958ca262fad73f58cc69064e06625 app_after=f9bc0273ab7094b18a96de2228c81d07ee795af9 check=pass mode=merge delivered_by=qa-engineer-1
+2026-08-22T23:03:22Z INTEGRATED task=MARATHON-22 attempt=1 app_before=f9bc0273ab7094b18a96de2228c81d07ee795af9 app_after=a29c103573950803179cb3f7ac414ccef5da1f55 check=pass mode=merge delivered_by=qa-engineer-1
+2026-08-22T23:11:15Z INTEGRATED task=MARATHON-5 attempt=1 app_before=a29c103573950803179cb3f7ac414ccef5da1f55 app_after=15b3c8e2f4dd0230402628d7fec00fcf1b742be6 check=pass mode=merge delivered_by=backend-dev-1
+2026-08-22T23:29:16Z DESIGN-AUTO-APPROVED task=MARATHON-16 waited_passes=2
+2026-08-22T23:35:17Z DESIGN-AUTO-APPROVED task=MARATHON-6 waited_passes=2
+2026-08-22T23:36:55Z INTEGRATED task=MARATHON-16 attempt=1 app_before=15b3c8e2f4dd0230402628d7fec00fcf1b742be6 app_after=f4cf48192856189c3c1d1231aced023485e76550 check=pass mode=ff delivered_by=frontend-dev-1
+2026-08-22T23:43:57Z INTEGRATED task=MARATHON-6 attempt=1 app_before=f4cf48192856189c3c1d1231aced023485e76550 app_after=de8f4752941296f0e83ecc0dd9d58036d2b99bdc check=pass mode=merge delivered_by=backend-dev-1
+2026-08-23T00:01:59Z DESIGN-AUTO-APPROVED task=MARATHON-7 waited_passes=2
+2026-08-23T00:14:00Z DESIGN-AUTO-APPROVED task=MARATHON-12 waited_passes=2
+2026-08-23T00:15:38Z INTEGRATED task=MARATHON-7 attempt=1 app_before=de8f4752941296f0e83ecc0dd9d58036d2b99bdc app_after=7e8e165bda60d4bc84d665c89ace8752e0e7d6bf check=pass mode=ff delivered_by=backend-dev-1
+2026-08-23T00:28:53Z INTEGRATED task=MARATHON-12 attempt=1 app_before=7e8e165bda60d4bc84d665c89ace8752e0e7d6bf app_after=8176819d1e41f9153dbcce608c0965192b6ac5a3 check=pass mode=ff delivered_by=backend-dev-1
+2026-08-23T00:40:54Z DESIGN-AUTO-APPROVED task=MARATHON-8 waited_passes=2
+2026-08-23T00:46:55Z DESIGN-AUTO-APPROVED task=MARATHON-9 waited_passes=2
+2026-08-23T00:46:55Z DESIGN-AUTO-APPROVED task=MARATHON-18 waited_passes=2
+2026-08-23T01:01:20Z INTEGRATED task=MARATHON-8 attempt=1 app_before=8176819d1e41f9153dbcce608c0965192b6ac5a3 app_after=071ff20f9a9e760d635d24bdd7873160a3471345 check=pass mode=ff delivered_by=backend-dev-1
+2026-08-23T01:08:35Z INTEGRATED task=MARATHON-9 attempt=1 app_before=071ff20f9a9e760d635d24bdd7873160a3471345 app_after=d088d3ef8892588e7089c8b4d20b600d4624cb7a check=pass mode=ff delivered_by=backend-dev-1
+2026-08-23T01:11:25Z VERDICT-REJECTED task=MARATHON-18 attempt=1 sha=6c6170f7b7fb6d4ccb358c5af71c7031f3d20512
+2026-08-23T01:19:44Z INTEGRATED task=MARATHON-18 attempt=2 app_before=d088d3ef8892588e7089c8b4d20b600d4624cb7a app_after=dd755ee3bded705073c452cf0132601e5e8aa2e9 check=pass mode=ff delivered_by=backend-dev-1
+2026-08-23T01:31:46Z DESIGN-AUTO-APPROVED task=MARATHON-13 waited_passes=2
+2026-08-23T01:31:46Z DESIGN-AUTO-APPROVED task=MARATHON-11 waited_passes=2
+2026-08-23T01:35:10Z PERSISTENT-LEAD stopped

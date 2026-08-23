@@ -1,0 +1,34 @@
+I've attempted every workflow in the live UI across all three cluster nodes. Here are my findings.
+
+**What works:** auth (signup validation, auto-login, logout/login round-trip, cross-node session), workspace creation, sidebar with `#general`, workspace/channel settings modals.
+
+**What's missing:** the entire messaging surface. `agent-browser get count "textarea"` returns `0` on all three nodes; the `<main id="message-pane">` in `static/index.html:149-161` contains only a header and a "Select a channel" placeholder, and `setActiveChannel()` in `static/js/shell.js:150-175` only sets the header title — it never fetches or renders messages. The backend is fully built (`server/messages/routes.py` has edit/delete/replies/reactions/pins, plus `tests/test_messages.py`), but no frontend consumes it. There's also no channel-creation control (`grep -rn "createChannel\|New channel" static/` returns nothing).
+
+CRITERION_AUTH: PASS
+CRITERION_AUTH_EVIDENCE: Signing up with password "short" showed a red "password must be at least 8 characters" banner, and username "judge user" showed "invalid username"; signing up judgealpha/goodpassword123 dismissed the auth modal and landed straight in the workspace setup screen showing "Judge Alpha" + Log out (auto-login). Clicking Log out returned the auth modal, and logging back in with the same credentials restored the Judge Team workspace with #general — all visible in the UI, no backend probing.
+
+CRITERION_CHANNELS: FAIL
+CRITERION_CHANNELS_EVIDENCE: #general appears in the sidebar under a CHANNELS heading after workspace creation, but there is no '+' or 'New channel' control anywhere — the sidebar has only Settings/Log out, and the Workspace settings modal exposes only General/Members/Invitations tabs (no channel creation); `grep -rn "createChannel\|New channel\|channel-create" static/` returns nothing, and the SPA never issues a channel-create request. With creation impossible and only one channel existing, channel switching could not be exercised beyond re-selecting #general.
+
+CRITERION_MESSAGING: FAIL
+CRITERION_MESSAGING_EVIDENCE: Opening #general renders a completely blank cream pane with no message list and no composer; `get count "textarea"` returns 0 on 18000/18001/18002, and clicking into the pane and typing "hello from the judge" + Enter produced nothing (`get text "#message-pane"` returned only "#general / Channel settings"). Source confirms it: `static/index.html:149-161` has only a header plus a "Select a channel" paragraph, and `setActiveChannel()` in `static/js/shell.js:150-175` sets the title and nothing else — so post/edit/delete/persistence are all untestable.
+
+CRITERION_THREADS: FAIL
+CRITERION_THREADS_EVIDENCE: A `<aside id="thread-panel">` exists in the DOM but is `hidden aria-hidden="true"` and contains only a "Thread" placeholder (`static/index.html:163-171`); no JS ever unhides it. Since no message can be posted and no message rows exist, there is no hover/icon action to open a thread — I could not reach a thread panel at all.
+
+CRITERION_REACTIONS: FAIL
+CRITERION_REACTIONS_EVIDENCE: There are no message rows, so no hover toolbar or 'add reaction' affordance exists to click; the only buttons in the channel view are "Channel settings" and the sidebar controls. The backend implements reactions (`server/messages/routes.py:236 add_reaction`, `:275 delete_reaction`) but nothing in `static/js/` calls them, and no emoji picker markup exists in `static/index.html`.
+
+CRITERION_VALIDATION_FEEDBACK: PARTIAL
+CRITERION_VALIDATION_FEEDBACK_EVIDENCE: Focus styling is clearly present — clicking the Username field renders a green 2px outline (`.field input:focus` in `static/css/app.css:158`), and the auth form surfaces errors well (short password, invalid username, and a second session signing up as "judgealpha" got "username already taken"). However the two rubric-specific checks could not pass: there is no message composer to submit empty, and no channel-creation form in which to trigger a duplicate-name error.
+
+CRITERION_POLISH: PARTIAL
+CRITERION_POLISH_EVIDENCE: Two of five hold — (b) hovering #general in the sidebar visibly lightens its background (verified by before/after screenshots, `.channel-list button:hover` at `app.css:369`), and (c) a "Loading Huddle…" boot placeholder is genuinely visible during load (`is visible "#boot-placeholder"` → true) plus a "Loading members…" indicator in the settings modal. Missing: (a) no message hover toolbar, (d) opening the empty #general shows a totally blank pane with no friendly copy, and (e) no composer exists to auto-grow.
+
+CRITERION_REALISM: FAIL
+CRITERION_REALISM_EVIDENCE: Three of six structural cues are present — dark saturated green sidebar, workspace identity "Judge Team (judgeteam)" + channels list, and a hashtag-prefixed "#general" — but three are absent: the channel header shows only the name with no topic line (I saved topic "Judging the huddle app" via Channel settings and it persisted across reload, yet never renders in the header), there are no message rows at all (no avatars/names/timestamps/body), and there is no composer. The content area is an empty cream rectangle occupying ~82% of the viewport.
+
+CRITERION_LAYOUT_STRUCTURE: PASS
+CRITERION_LAYOUT_STRUCTURE_EVIDENCE: At 1280x900 the app renders a two-visible-pane shell (240px dark sidebar + center message pane) with a third `#thread-panel` aside reserved in the DOM for on-demand opening, so it is not single-column. Workspace identity "Judge Team (judgeteam)" sits at the sidebar top under the "Huddle" wordmark, and the user's own identity "Judge Alpha" with a Log out button is pinned in the bottom-left corner.
+
+OVERALL_NOTES: This is a well-built auth/workspace/settings shell wrapped around a chat app whose chat is entirely missing from the frontend — the surprising part is that the backend is fully implemented (message CRUD, threads, reactions, pins, DMs, plus `tests/test_messages.py`), so the gap is purely a never-wired UI layer, not missing capability. The styling that does exist is coherent and intentional (aubergine-equivalent green sidebar, focus rings, hover states, error banners), which makes the blank message pane all the more jarring. Six of nine criteria depend on the messaging surface, and all of those fail or half-fail as a direct consequence of that one omission.

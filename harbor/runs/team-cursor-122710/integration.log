@@ -1,0 +1,11 @@
+2026-08-22T19:27:56Z PERSISTENT-LEAD started tmux=marathon-lead
+2026-08-22T19:28:16Z PERSISTENT-LEAD ready
+2026-08-22T19:39:36Z INTEGRATED task=MARATHON-2 attempt=1 app_before=a152118acefde5daa0d42f1edf507de56b34dfec app_after=e2704f33e188e66eba9d4d4225e79b74f8cd9ea1 check=pass mode=ff delivered_by=backend-dev-1
+2026-08-22T19:44:07Z VERDICT-REJECTED task=MARATHON-3 attempt=1 sha=3701b6d0802a1e868de7f96121ea87432d0b8771
+2026-08-22T19:46:41Z INTEGRATED task=MARATHON-24 attempt=1 app_before=e2704f33e188e66eba9d4d4225e79b74f8cd9ea1 app_after=7077d7f36a70d3cf5969335e75c028fdaeb131f6 check=pass mode=ff delivered_by=qa-engineer-1
+2026-08-22T19:51:11Z INTEGRATED task=MARATHON-3 attempt=2 app_before=7077d7f36a70d3cf5969335e75c028fdaeb131f6 app_after=9d37afca65c5c7dd8ce6a47f8bb165aea29d84bc check=pass mode=merge delivered_by=backend-dev-1
+2026-08-22T19:52:19Z INTEGRATED task=MARATHON-25 attempt=1 app_before=9d37afca65c5c7dd8ce6a47f8bb165aea29d84bc app_after=1235b176d18e5aa2ea128f892080237c04a91db6 check=pass mode=merge delivered_by=qa-engineer-1
+2026-08-22T19:55:06Z INTEGRATED task=MARATHON-26 attempt=1 app_before=1235b176d18e5aa2ea128f892080237c04a91db6 app_after=6afbc20859aac84a9c65ca1a5033100402aaf9c1 check=pass mode=merge delivered_by=qa-engineer-1
+2026-08-22T19:57:36Z INTEGRATED task=MARATHON-27 attempt=1 app_before=6afbc20859aac84a9c65ca1a5033100402aaf9c1 app_after=c679e58d418e2151ad037b06057ebf097d26cc87 check=pass mode=merge delivered_by=qa-engineer-1
+2026-08-22T20:00:50Z INTEGRATED task=MARATHON-21 attempt=1 app_before=c679e58d418e2151ad037b06057ebf097d26cc87 app_after=f4c439b5ab1214b24eb6ae4759b89887d02d9c6f check=pass mode=merge delivered_by=frontend-dev-1
+2026-08-22T20:00:50Z PERSISTENT-LEAD stopped

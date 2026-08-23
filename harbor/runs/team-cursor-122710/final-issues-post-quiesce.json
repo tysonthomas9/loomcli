@@ -1,0 +1,569 @@
+[
+  {
+    "id": "MARATHON-2",
+    "title": "Bootstrap cluster: start.sh, 3 HTTP nodes, Redis, health",
+    "status": "closed",
+    "priority": 0,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "design": "## Summary\n\nMARATHON-2 bootstraps the Huddle cluster runtime at `/app`: a foreground `start.sh` that launches local Redis on `127.0.0.1:6379` and three identical HTTP nodes on `127.0.0.1:8000/8001/8002`, keeps them alive under SIGKILL (HTTP respawn ≤60s; Redis respawn after kill), and exposes a stable `GET /api/health` contract returning `{status:\"ok\", node_id}` with `node_id` ∈ `{0,1,2}` matching ports. This is the foundation every later auth, messaging, WS, IRC, and SPA task assumes: process topology, port map, node identity, and local-only Redis.\n\n## Technical Approach\n\n### Decision\n- **Process model:** One bash supervisor (`/app/start.sh`) stays in the foreground and owns child lifetimes. Children: one `redis-server` + three Node.js HTTP workers. The supervisor polls PIDs (≈1s cadence) and respawns any dead child without exiting.\n- **HTTP runtime:** **Node.js** (v24 present in the environment) using the **stdlib `http` module only** for this task—no npm registry dependency for bootstrap. One shared entrypoint, differentiated solely by `NODE_ID` / `PORT` env vars.\n- **Redis:** System `redis-server` (v7 present), bound to `127.0.0.1:6379`, persistence directory under `/app/data/redis`. Started as a non-daemon child of `start.sh` (no `--daemonize yes`) so the supervisor can track its PID.\n- **Bind address:** HTTP listens on `127.0.0.1` (epic: nodes on `127.0.0.1:8000/8001/8002`). Redis on `127.0.0.1:6379`. No Docker, no remote broker, no cloud services.\n\n### Alternatives considered\n| Alternative | Why rejected |\n|-------------|--------------|\n| systemd / supervisord / Docker Compose | Violates self-contained / no Docker-in-Docker; not available as the harness entrypoint |\n| Python HTTP (stdlib) | Viable, but SPA + WS + IRC gateway later fit one Node process better; env has no FastAPI/Flask |\n| Three separate start scripts | Harness expects a single foreground `/app/start.sh` |\n| Health behind a reverse proxy | Extra moving part; epic requires each node to answer directly on its port |\n\n### Trade-off accepted\nSupervisor simplicity (bash PID loop) over a real process manager: enough for marathon verification (kill + respawn windows), but no fancy backoff/jitter. Fixed ports mean `start.sh` must fail loudly if a protected harness process already owns a port rather than silently remapping.\n\n### Stack conventions fixed here (for siblings)\nThese are **authoritative for subsequent MARATHON designs** unless a later design explicitly argues otherwise:\n\n| Convention | Value |\n|------------|--------|\n| Product | Huddle |\n| App root | `/app` (repo working tree = deployment root) |\n| HTTP runtime | Node.js, CommonJS or ESM; entry `server/index.js` |\n| Node identity | Integer `NODE_ID` ∈ {0,1,2}; `PORT = 8000 + NODE_ID` |\n| Redis | `127.0.0.1:6379`, no password, local-only |\n| Durable shared state | Files under `/app/data/` (schema owned by MARATHON-3+; this task only creates dirs) |\n| Pub/sub | Redis when healthy; fallback owned by MARATHON-19 (not implemented here) |\n| API prefix | `/api/...` |\n| JSON | `Content-Type: application/json; charset=utf-8` |\n\n## Interface Contracts\n\n### C1 — `GET /api/health` (each HTTP node)\n\n| Field | Value |\n|-------|--------|\n| Method / path | `GET /api/health` |\n| Auth | None |\n| Query / body | None; body ignored if present |\n| Success status | `200` |\n| Success body | `{\"status\":\"ok\",\"node_id\":\u003cnumber\u003e}` |\n| `status` | Exactly the string `\"ok\"` (lowercase) |\n| `node_id` | JSON number `0`, `1`, or `2` — **not** a string |\n| Mapping | Port `8000` → `0`; `8001` → `1`; `8002` → `2` |\n| Headers | `Content-Type: application/json; charset=utf-8` |\n| Redis dependency | **None.** Health MUST succeed even if Redis is down or restarting (required so MARATHON-19 kill tests do not fail health probes). |\n\n**Owner:** Backend (this task). **Consumer:** QA harness, future load balancer checks, SPA may optionally display node identity later.\n\n**Client behavior while slow/failing:**\n- Health is expected to respond in well under 1s; no loading UI required for this endpoint.\n- Connection refused / reset → node is down or still respawning; client may retry; supervisor must restore listener within 60s of kill.\n- Non-200 or malformed JSON → treat as failure (implementer must not return partial bodies).\n\n**Validation:**\n- Server: derives `node_id` only from its configured `NODE_ID` env (integer parse once at boot); does not trust client input.\n- Client/QA: assert status code, JSON parse, `status === \"ok\"`, `node_id === expected`.\n\n### C2 — Process / port topology (supervisor ↔ OS ↔ clients)\n\n| Process | Address | Identity |\n|---------|---------|----------|\n| Redis | `127.0.0.1:6379` | single shared instance |\n| HTTP node 0 | `127.0.0.1:8000` | `NODE_ID=0` |\n| HTTP node 1 | `127.0.0.1:8001` | `NODE_ID=1` |\n| HTTP node 2 | `127.0.0.1:8002` | `NODE_ID=2` |\n\n`start.sh` remains in the foreground until terminated by signal; killing an HTTP child or Redis must not stop the supervisor or the other children.\n\n### C3 — Frontend/backend seam note (this task)\nNo browser UI in this task. The only cross-seam contract is **C1**, which the SPA (MARATHON-21+) may call later from same-origin `fetch('/api/health')`. Until then, consumers are curl/QA. Unknown paths may return `404` with a small JSON error or plain 404—not part of acceptance beyond not crashing.\n\n## Data Model\n\nNo application database schema in this task.\n\n**Runtime configuration (env, not persisted):**\n\n| Name | Type | Required | Meaning |\n|------|------|----------|---------|\n| `NODE_ID` | integer 0\\|1\\|2 | yes (HTTP workers) | Stable node identity in health + future logs |\n| `PORT` | integer | yes (HTTP workers) | Listen port; must equal `8000 + NODE_ID` |\n| `REDIS_HOST` | string | optional, default `127.0.0.1` | Reserved for later tasks; unused by health |\n| `REDIS_PORT` | integer | optional, default `6379` | Reserved for later tasks |\n\n**On-disk (created by `start.sh` if missing):**\n\n| Path | Purpose | Schema change |\n|------|---------|---------------|\n| `/app/data/redis/` | Redis working dir (`dir` config); RDB/AOF if enabled | New directory only; backward compatible (empty repo) |\n| `/app/data/` | Parent for future durable store (MARATHON-3+) | Reserved; no files required by this task |\n\nNo migration. Greenfield baseline only had `timer.sh` + empty `data/`.\n\n## Files to Create / Files to Modify\n\n### Create\n| File | Change |\n|------|--------|\n| `/app/start.sh` | Executable foreground supervisor: prepare dirs, spawn Redis + 3 nodes, trap signals, poll/respawn loop, log to stdout/stderr |\n| `/app/server/index.js` | HTTP server entry: read `NODE_ID`/`PORT`, bind `127.0.0.1:$PORT`, route `GET /api/health`, reject invalid env at boot with non-zero exit |\n| `/app/server/health.js` | Pure handler building `{status:\"ok\", node_id}` (keeps routing thin for later middleware) |\n| `/app/package.json` | `{ \"name\": \"huddle\", \"private\": true, \"main\": \"server/index.js\" }` — documents Node entry; **no required dependencies** for this task |\n\n### Modify\n| File | Change |\n|------|--------|\n| None required | Do not alter `timer.sh` (harness timer). Do not remove `.gitignore` entries unrelated to this task. |\n\n### Optional (allowed, not required)\n| File | Change |\n|------|--------|\n| `/app/redis.conf` | Minimal conf: `bind 127.0.0.1`, `port 6379`, `dir /app/data/redis`, `protected-mode yes`, `save` optional; if omitted, pass equivalent flags on the `redis-server` CLI |\n\n## Sequencing and Cross-Task Seams\n\n### Build order for this task\n1. `server/health.js` + `server/index.js` (can be verified with a one-off `NODE_ID=0 PORT=8000 node server/index.js` by the implementer—architect does not run the app).\n2. `package.json`\n3. `start.sh` (depends on server entry existing)\n4. Manual/QA: boot via `start.sh`, hit three health URLs, kill tests\n\n### Parallelism\n- All of this task is sequential within one implementer; nothing to split further.\n- Sibling architecture designs (MARATHON-3+) can proceed in parallel **using the conventions table above**; implementation of those tasks **must wait** until this bootstrap lands so ports/processes exist.\n\n### Seams this task owns (downstream dependents)\n| Seam | Contract | Downstream |\n|------|----------|------------|\n| Port/identity map | C2 | All HTTP/WS/SPA/IRC tasks |\n| Health | C1 | QA, optional SPA |\n| Redis listen address | `127.0.0.1:6379` | MARATHON-18/19 pub/sub |\n| Foreground `start.sh` | stays up, respawns | Harness lifecycle; MARATHON-19/20 extend children later |\n| `/app/data/` reservation | durable root | MARATHON-3 shared store |\n\n### Seams NOT owned here (follow-ups)\n| Cut | Owner task |\n|-----|------------|\n| Auth + shared durable store schema | MARATHON-3 |\n| WS `/api/ws` | MARATHON-18 |\n| Redis-down fan-out fallback | MARATHON-19 |\n| IRC `:6667` process under same supervisor | MARATHON-20 (will extend `start.sh` to launch IRC gateway + respawn) |\n| SPA `GET /` | MARATHON-21 |\n\nWhen MARATHON-20/21 land, they **extend** `start.sh` and the HTTP router; they must not replace the health contract or port map.\n\n## Out of Scope (Needs a Separate Task)\n\nNeighborhood scan of `/app` and the architect worktree found:\n\n| Finding | Why excluded |\n|---------|----------------|\n| `timer.sh` | Harness countdown utility; unrelated to cluster bootstrap |\n| Empty `/app/data/` | Reserved; durable schema is MARATHON-3+ |\n| Auth `/api/auth/*` | MARATHON-3 |\n| Profiles, workspaces, channels, messages, … | MARATHON-4…17 |\n| WebSocket subscribe/resume/seq | MARATHON-18 |\n| Cross-node fan-out without Redis | MARATHON-19 |\n| IRC gateway `:6667` | MARATHON-20 |\n| SPA shell and UI | MARATHON-21…23 |\n| npm framework (Express/Fastify), WS libs, SQLite, etc. | Introduce when the owning feature task needs them |\n| TLS, auth on Redis, binding `0.0.0.0` for HTTP | Not required by epic for HTTP nodes |\n\nNo prior `start.sh`, `/api/health`, or `node_id` references exist in-repo to update.\n\n## Edge Cases \u0026 Error Handling\n\n| Situation | Expected behavior |\n|-----------|-------------------|\n| `NODE_ID` missing or not in `{0,1,2}` | Worker prints error to stderr and exits non-zero; supervisor respawns—**implementer must pass valid env from `start.sh` so this is a programming error, not a loop** |\n| `PORT` missing or ≠ `8000+NODE_ID` | Same: fail fast at worker boot |\n| Port already in use at bind | Worker exits non-zero; supervisor retries on next poll. Log clearly. Do not bind a different port. |\n| Redis already running on 6379 (foreign process) | `redis-server` fails; supervisor respawns Redis child. Log bind failure. Do not kill arbitrary PIDs outside children started by this `start.sh` (harness `marathon-freeports` is for verifiers, not the app). |\n| HTTP node SIGKILL | Supervisor detects dead PID within poll interval and restarts that node only; other nodes and Redis keep running. New process must again serve correct `node_id`. Wall-clock from kill to successful health: **≤ 60s** |\n| Redis SIGKILL | Supervisor restarts Redis only; HTTP nodes **must keep serving health** (and later reads/writes per MARATHON-19). No HTTP restart required solely because Redis died |\n| `start.sh` receives SIGINT/SIGTERM | Trap: stop respawn loop, signal/kill tracked children, then exit non-zero or 0 per convention (prefer 0 on clean TERM); do not leave orphaned node/redis children |\n| `GET /api/health` during Redis outage | Still `200` + ok body |\n| Methods other than GET on `/api/health` | `405` or `404`; must not 500 |\n| Concurrent health requests | Safe; handler is pure |\n| Double-start of `start.sh` | Second instance will fail binds; document that only one supervisor should run. No distributed lock required for marathon |\n| Working directory | `start.sh` `cd`s to its own directory (`/app`) so relative paths work regardless of caller cwd |\n| Logging | Prefix child logs with `[redis]`, `[node-0]`, etc., on stdout/stderr of supervisor |\n\n## Acceptance Criteria\n\n1. Running `/app/start.sh` does not daemonize away: the script process remains in the foreground and continues until signaled.\n2. After start, `redis-cli -h 127.0.0.1 -p 6379 PING` returns `PONG` (or equivalent connectivity success).\n3. `curl -sS http://127.0.0.1:8000/api/health` → HTTP 200, body JSON-equal to `{\"status\":\"ok\",\"node_id\":0}` (key order irrelevant; types matter).\n4. Same for `:8001` → `node_id` **1**; `:8002` → `node_id` **2**.\n5. `node_id` is a JSON number, not `\"0\"` string; `status` is exactly `\"ok\"`.\n6. SIGKILL one HTTP node’s PID: within **60 seconds**, that port’s `/api/health` returns 200 again with the **same** `node_id`; the other two ports never permanently go down as a consequence.\n7. SIGKILL Redis: Redis becomes reachable again after restart (supervisor respawn); each HTTP `/api/health` continues to return 200 during and after the outage.\n8. No Docker, no external Redis/host, no Slack SDK, no cloud APIs required to pass the above.\n9. **MUST NOT:** remap ports; change `node_id` mapping; require Redis up for health; exit `start.sh` when a single child dies.\n\n## Testing Strategy\n\n### Automated / scripted (implementer or QA)\n- Boot: `/app/start.sh` in background job **only for the test harness** (script itself still runs as a foreground process in that job).\n- Assert health on 8000/8001/8002.\n- Assert Redis PING.\n- `kill -9` one node PID (from `ss`/`lsof` or supervisor-known PID); poll health until success; assert elapsed ≤ 60s.\n- `kill -9` Redis; assert health still 200; poll until Redis PING succeeds again.\n- Tear down via SIGTERM to `start.sh`; confirm ports free (or document leftover only if trap failed—trap must succeed).\n\n### Manual human verification\n```bash\n/app/start.sh\n# other terminal:\ncurl -s http://127.0.0.1:8000/api/health\ncurl -s http://127.0.0.1:8001/api/health\ncurl -s http://127.0.0.1:8002/api/health\nredis-cli -h 127.0.0.1 ping\n# kill -9 \u003cnode-pid\u003e; wait; curl again\n# kill -9 \u003credis-pid\u003e; curl health; redis-cli ping until PONG\n```\n\n### Out of scope for this task’s tests\nAuth, SPA, WS, IRC, message fan-out, multi-node data consistency.",
+    "design_format": "markdown",
+    "has_design": true,
+    "notes": "Implemented start.sh supervisor (Redis :6379 + nodes :8000/8001/8002 with ~1s respawn), server/index.js + health.js (GET /api/health → {status:ok, node_id} number, Redis-independent), package.json, redis.conf. Verified: unit tests, integration (health map, node SIGKILL respawn ≤60s, Redis SIGKILL with health still 200). No migration.",
+    "created_at": "2026-08-22T19:28:48.968790239Z",
+    "updated_at": "2026-08-22T19:39:36.180843586Z",
+    "created_by": "marathon-harness",
+    "closed_at": "2026-08-22T19:39:36.180843586Z",
+    "close_reason": "integrated into /app by harness gate (attempt=1)"
+  },
+  {
+    "id": "MARATHON-3",
+    "title": "Auth: register, login, me, bearer tokens",
+    "status": "closed",
+    "priority": 0,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "design": "## Summary\n\nMARATHON-3 implements cluster-wide authentication for Huddle: `POST /api/auth/register`, `POST /api/auth/login`, and `GET /api/auth/me`, plus the shared durable user/token store that all three HTTP nodes read and write. It establishes the `UserObj` identity shape, opaque bearer tokens (`Authorization: Bearer …`), password hashing, username slug validation, and a reusable auth middleware that every later authenticated route (workspaces, channels, WS, IRC `PASS`, SPA) will call. Without this seam, no other feature can attribute callers or survive a request to a different node.\n\n## Technical Approach\n\n### Decision\n- **Runtime:** Stay on the MARATHON-2 stack: Node.js stdlib `http` router in `server/index.js`, no Express/Fastify required.\n- **Durable shared store:** One **SQLite** database file at `/app/data/huddle.db`, opened by each HTTP worker via Node’s built-in **`node:sqlite` (`DatabaseSync`)**. Enable **WAL** + a non-zero `busy_timeout` so concurrent register/login from nodes 0/1/2 serialize safely. This is the authoritative store for users and sessions; **Redis is not used for auth durability** (Redis may be killed; users/tokens must survive).\n- **Passwords:** `crypto.scrypt` with a per-user random salt; store only `password_salt` + `password_hash` (never plaintext). Compare with timing-safe equality.\n- **Tokens:** Opaque random strings from `crypto.randomBytes` (≥16 chars when encoded; generate **32 bytes → base64url ≈ 43 chars**). Persist token → `user_id` in SQLite. Each successful register/login **issues a new token** (multiple concurrent sessions allowed). Tokens are looked up as presented; no JWT.\n- **IDs:** Stable cluster-wide `user.id` via `crypto.randomUUID()` (string UUID).\n- **Auth helper:** Export `authenticateRequest(req) → user | null` and/or middleware used by `/api/auth/me` and reserved for MARATHON-4+.\n\n### Alternatives considered\n| Alternative | Why rejected |\n|-------------|--------------|\n| Redis HASH for users/tokens | Not durable across Redis SIGKILL; epic requires cluster to keep working when Redis dies |\n| Per-node in-memory maps | Breaks “shared durable store across all three nodes”; register on :8000 would 401 on :8001 |\n| JWT without server-side session | Harder to revoke; contract only needs opaque bearer length ≥16; SQLite session rows are simpler and match IRC/WS token checks later |\n| npm `better-sqlite3` / Express | Unnecessary dependency; `node:sqlite` is available on Node 24 in this environment |\n| JSON file + flock only | Workable but weaker concurrency and no unique indexes for username race → prefer SQLite UNIQUE |\n\n### Trade-off accepted\nSQLite file locking under three processes is simpler than a real DB server, but write throughput under heavy concurrent register is limited by WAL/busy waits. Acceptable for marathon scale. Using experimental `node:sqlite` avoids npm install in air-gapped/self-contained constraints; if the API shifts, implementer may pin Node flags or swap to an equivalent sync SQLite binding **without changing the HTTP contract**.\n\n### Conventions inherited from MARATHON-2 (authoritative)\n| Convention | Value |\n|------------|--------|\n| App root | `/app` |\n| HTTP entry | `server/index.js`, `NODE_ID` / `PORT` |\n| Durable root | `/app/data/` |\n| API prefix | `/api/...` |\n| JSON | `Content-Type: application/json; charset=utf-8` |\n| Health | Unchanged; still Redis-independent |\n\n### Conventions fixed here (for siblings)\n| Convention | Value |\n|------------|--------|\n| DB path | `/app/data/huddle.db` (create parent dir if missing) |\n| `UserObj` public fields | `{id, username, display_name, timezone, avatar_url, status_text, status_emoji}` — always present on auth responses |\n| Username rules | Regex `^[A-Za-z0-9_]{1,32}$` (letters, digits, underscore only; no spaces/hyphens/dots) |\n| Username uniqueness | Case-insensitive (`LOWER(username)` UNIQUE); store username with original casing from register |\n| Password | UTF-8 string length ≥ 8 (code units / JS `.length`); no other complexity rules |\n| Bearer | Header `Authorization: Bearer \u003ctoken\u003e` (single space); token string length ≥ 16 |\n| Error JSON | `{ \"error\": \"\u003cstring\u003e\" }` for 400/401/409 (message text open; must be non-empty) |\n| No email | Register/login bodies must not require `email`; ignore unknown fields |\n\n## Interface Contracts\n\n### Shared: `UserObj` (public; never include password/hash/salt/token)\n\n```json\n{\n  \"id\": \"\u003cuuid-string\u003e\",\n  \"username\": \"\u003cslug\u003e\",\n  \"display_name\": \"\u003cstring\u003e\",\n  \"timezone\": \"\u003cstring\u003e\",\n  \"avatar_url\": \"\u003cstring\u003e\",\n  \"status_text\": \"\u003cstring\u003e\",\n  \"status_emoji\": \"\u003cstring\u003e\"\n}\n```\n\n| Field | Type | Nullability | Default on register |\n|-------|------|-------------|---------------------|\n| `id` | string (UUID) | required | generated |\n| `username` | string | required | from body |\n| `display_name` | string | required in responses | `display_name` if provided non-empty, else copy of `username` |\n| `timezone` | string | required in responses | `\"UTC\"` |\n| `avatar_url` | string | required in responses | `\"\"` |\n| `status_text` | string | required in responses | `\"\"` |\n| `status_emoji` | string | required in responses | `\"\"` |\n\n**Owner of mutations beyond register defaults:** MARATHON-4 (`PATCH /api/users/me`). This task only sets defaults so envelopes are complete.\n\n---\n\n### C1 — `POST /api/auth/register`\n\n| | |\n|--|--|\n| Auth | None |\n| Request body | JSON `{ \"username\": string, \"password\": string, \"display_name\"?: string }` |\n| Success | `201` `{ \"user\": UserObj, \"token\": string }` |\n| Validation failure | `400` `{ \"error\": string }` — invalid/missing username, password \u0026lt; 8, non-object body, wrong types |\n| Duplicate username | `409` `{ \"error\": string }` |\n| Content-Type in | Prefer `application/json`; empty/malformed JSON → `400` |\n\n**Server validation (authoritative):**\n1. Parse JSON object; missing `username` or `password` → `400`.\n2. `username` must match `^[A-Za-z0-9_]{1,32}$` → else `400` (e.g. space, hyphen, empty).\n3. `password` must be string with `.length \u003e= 8` → else `400`.\n4. Optional `display_name`: if present and not a string → `400`; if string, trim; empty after trim → treat as omitted (fall back to username).\n5. Insert user; UNIQUE conflict on case-insensitive username → `409`.\n6. Create session token; return `201`.\n\n**Client (SPA / MARATHON-21) while slow/failing:**\n- Disable submit / show pending on `auth-submit` until response.\n- On `201`: store `token` in `localStorage` key `huddle.token`; treat as logged-in; may call `GET /api/auth/me` or use returned `user`.\n- On `400`/`409`: show `error` string visibly in the auth form (no silent fail).\n- On network error / 5xx: show generic failure; do not clear unrelated UI state.\n- **MUST NOT** send an `email` field as required.\n\n**Who validates what:** Server is source of truth for slug/password/duplicate. Client may pre-check length for UX but must still handle server `400`/`409`.\n\n---\n\n### C2 — `POST /api/auth/login`\n\n| | |\n|--|--|\n| Auth | None |\n| Request body | JSON `{ \"username\": string, \"password\": string }` |\n| Success | `200` `{ \"user\": UserObj, \"token\": string }` |\n| Bad credentials | `401` `{ \"error\": string }` — wrong password **or** unknown username (same code; do not distinguish) |\n| Malformed body | `400` `{ \"error\": string }` |\n\n**Server:**\n1. Validate types/presence; malformed → `400`.\n2. Look up user by case-insensitive username; missing → `401` (same as bad password).\n3. Verify password with scrypt + stored salt; fail → `401`.\n4. Issue new token; return `200` with full `UserObj` (current profile fields from DB).\n\n**Client:** Same token storage and error surfacing as register. Wrong password must show a visible error, not navigate as success.\n\n---\n\n### C3 — `GET /api/auth/me`\n\n| | |\n|--|--|\n| Auth | Required: `Authorization: Bearer \u003ctoken\u003e` |\n| Body | None |\n| Success | `200` `{ \"user\": UserObj }` |\n| Missing/invalid/unknown token | `401` `{ \"error\": string }` |\n\n**Header parsing:**\n- Require header matching `/^Bearer\\s+(\\S+)$/i` (trim); extract token.\n- Missing header, wrong scheme, empty token, or token not in DB → `401`.\n- Do not accept token via query string on this route (query `?token=` is SPA/WS concern later).\n\n**Client:** On app load, if `huddle.token` set, call `/api/auth/me`; on `401` clear token and show login; while pending, may show a loading shell without claiming a user.\n\n---\n\n### C4 — Cross-node durability (implicit contract)\n\nA user registered or token issued on any of `:8000`/`:8001`/`:8002` must be accepted by the other two within normal SQLite visibility (immediately after the successful response returns). QA will register on one port and `GET /api/auth/me` on another with the same token.\n\n---\n\n### C5 — Auth middleware seam (internal; for implementers of later tasks)\n\n```\nresolveBearerUser(authorizationHeader: string | null) → UserObj | null\nrequireUser(req, res) → UserObj | writes 401 and returns null\n```\n\n- Input: raw `Authorization` header value.\n- Output: public `UserObj` only.\n- Used by MARATHON-4+, MARATHON-5+, MARATHON-18 (`?token=` maps to same session table), MARATHON-20 (IRC `PASS \u003ctoken\u003e`).\n\n## Data Model\n\n### Schema change\n**New** SQLite DB `/app/data/huddle.db` (greenfield; backward compatible with empty `/app/data/`).\n\n#### Table `users`\n| Column | Type | Null | Notes |\n|--------|------|------|-------|\n| `id` | TEXT | NOT NULL PK | UUID |\n| `username` | TEXT | NOT NULL | Original casing |\n| `username_lower` | TEXT | NOT NULL UNIQUE | `lower(username)` for conflict/login |\n| `password_salt` | TEXT | NOT NULL | hex or base64 |\n| `password_hash` | TEXT | NOT NULL | scrypt output encoding |\n| `display_name` | TEXT | NOT NULL | |\n| `timezone` | TEXT | NOT NULL DEFAULT `'UTC'` | |\n| `avatar_url` | TEXT | NOT NULL DEFAULT `''` | |\n| `status_text` | TEXT | NOT NULL DEFAULT `''` | |\n| `status_emoji` | TEXT | NOT NULL DEFAULT `''` | |\n| `created_at` | TEXT | NOT NULL | RFC3339 UTC |\n\n#### Table `tokens`\n| Column | Type | Null | Notes |\n|--------|------|------|-------|\n| `token` | TEXT | NOT NULL PK | Opaque bearer (≥16 chars) |\n| `user_id` | TEXT | NOT NULL | FK → `users.id` |\n| `created_at` | TEXT | NOT NULL | RFC3339 UTC |\n\nIndexes: PK/UNIQUE as above; optional index `tokens(user_id)` for future logout-all (not required this task).\n\n**Migrations:** On worker boot, `CREATE TABLE IF NOT EXISTS` + WAL pragmas. No versioned migration framework required yet; keep DDL in one module (`server/db.js`) so MARATHON-4+ can extend columns carefully.\n\n**Password material and salts never appear in HTTP responses.**\n\n## Files to Create / Files to Modify\n\n### Create\n| File | Change |\n|------|--------|\n| `server/db.js` | Open `/app/data/huddle.db`, ensure `/app/data` exists, set `journal_mode=WAL`, `busy_timeout`, run DDL for `users`/`tokens`, export `getDb()` |\n| `server/auth/passwords.js` | `hashPassword(password) → {salt, hash}`, `verifyPassword(password, salt, hash) → boolean` using `crypto.scrypt` (sync or promisified consistently) |\n| `server/auth/tokens.js` | `issueToken(userId) → string` (insert row); `findUserIdByToken(token) → string \\| null` |\n| `server/auth/users.js` | `createUser(...)`, `findUserByUsername(username)`, `publicUser(row) → UserObj` |\n| `server/auth/middleware.js` | `resolveBearerUser`, `requireUser` |\n| `server/auth/routes.js` | Handlers for register, login, me; JSON parse helper; status codes per contract |\n| `server/httpUtil.js` (optional) | `readJson(req)`, `sendJson(res, status, body)` shared with health — only if not already present from MARATHON-2 |\n\n### Modify\n| File | Change |\n|------|--------|\n| `server/index.js` | Route `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me` before generic 404; keep `GET /api/health` behavior unchanged; initialize DB once at process start (fail boot if DB cannot open) |\n| `package.json` | No new dependencies required; may note Node ≥22 for `node:sqlite` |\n| `start.sh` | **No change required** if it already creates `/app/data` (MARATHON-2). If not yet implemented when this lands, ensure `mkdir -p /app/data` remains. Do not move Redis dir. |\n\n### Do not modify\n| File | Reason |\n|------|--------|\n| `timer.sh` | Harness timer |\n| SPA / static HTML | MARATHON-21 |\n\n## Sequencing and Cross-Task Seams\n\n### Within this task\n1. `db.js` + DDL  \n2. passwords / users / tokens  \n3. middleware  \n4. routes + wire `index.js`  \n5. Cross-node manual check (register :8000 → me :8001)\n\n### Parallelism\n- Backend implementer owns all files above.\n- Frontend MARATHON-21 **architecture** can proceed from contracts C1–C3; **implementation** of SPA auth UI should land after (or against mocked) these endpoints.\n- MARATHON-4 (profiles) extends `users` columns usage and adds routes; must reuse `UserObj` + `requireUser`.\n- MARATHON-5+ all depend on bearer middleware + durable users.\n\n### Seams this task owns\n| Seam | Downstream |\n|------|------------|\n| C1/C2/C3 HTTP auth | MARATHON-21 SPA; QA grader |\n| `UserObj` shape | MARATHON-4, channel members, messages `author`, WS `user.updated` |\n| Session table / `resolveBearerUser` | MARATHON-5…20 authenticated APIs; WS `?token=`; IRC `PASS` |\n| `/app/data/huddle.db` | All durable domain tables (siblings add tables, do not fork a second user DB) |\n\n### Build order vs siblings\n- **Blocked on:** MARATHON-2 bootstrap (ports, `server/index.js`, `/app/data`). If MARATHON-2 is not merged, implementer still codes against its file layout and integrates when bootstrap lands.\n- **Blocks:** MARATHON-5, MARATHON-11, MARATHON-21 (declared dependents), and practically every authenticated task.\n\n### Split follow-ups (do not do here)\n| Cut | Owner |\n|-----|--------|\n| Profile GET/PATCH + field validation | MARATHON-4 |\n| Logout / token revoke endpoint | Not in API contract — SPA clears `huddle.token` only; optional later if needed |\n| WS token query param | MARATHON-18 |\n| IRC PASS | MARATHON-20 |\n\n## Out of Scope (Needs a Separate Task)\n\nNeighborhood scan of architect worktree, `/app`, and repo tree (baseline `timer.sh` only; MARATHON-2 design not yet implemented in tree):\n\n| Finding | Why excluded |\n|---------|----------------|\n| `timer.sh` | Harness utility |\n| `GET /api/health` / `start.sh` / Redis | MARATHON-2 |\n| `GET /api/users/{id}`, `PATCH /api/users/me` | MARATHON-4 |\n| Workspaces / channels / messages / … | MARATHON-5+ |\n| SPA auth form, `huddle.token`, testids | MARATHON-21 (consumes C1–C3 only) |\n| WS `/api/ws?token=` | MARATHON-18 (reuse token table) |\n| IRC `PASS` / 464 | MARATHON-20 |\n| Redis pub/sub fan-out | MARATHON-18/19 |\n| Explicit logout API / token expiry TTL | Not in grader auth contract |\n| Email verification, OAuth, Slack SDK | Prohibited / not specified |\n| Rate limiting / CAPTCHA | Not required |\n\nNo existing `/api/auth` code or username references in-repo to update.\n\n## Edge Cases \u0026 Error Handling\n\n| Situation | Expected behavior |\n|-----------|-------------------|\n| Username `\"alice\"` then `\"Alice\"` | Second register → `409` (case-insensitive unique) |\n| Login with different casing than stored | Succeed if password matches (`username_lower` lookup) |\n| Password length 7 | `400` on register; login of such user impossible if never created |\n| Password exactly 8 | Allowed |\n| `display_name` omitted | `user.display_name === username` |\n| Extra body fields (`email`, etc.) | Ignore; do not `400` solely for unknown keys |\n| Duplicate concurrent registers same username | One `201`, other `409` (UNIQUE + handle constraint error) |\n| SQLite `SQLITE_BUSY` | Retry within `busy_timeout`; if still failing → `500` `{error}` (log stderr); do not corrupt partial user without token |\n| DB file missing/unwritable at boot | Process exit non-zero; supervisor respawns — fix permissions/`mkdir` in start path |\n| Token length | Generated tokens always ≥16; reject lookup of empty token as `401` |\n| `Authorization: bearer \u003ctoken\u003e` | Accept case-insensitive `Bearer` scheme |\n| `Authorization: Bearer` with no token | `401` |\n| Method wrong (e.g. `GET /api/auth/register`) | `405` or `404`; must not `500` |\n| Non-JSON Content-Type with JSON body | Best-effort parse; fail → `400` |\n| Redis down | Auth **unaffected** (no Redis dependency) |\n| Node killed mid-request | Client retries; durable commit is atomic per statement/transaction — use a transaction wrapping `INSERT user` + `INSERT token` on register so a crash does not leave user without usable session or orphan inconsistently (prefer: commit user first then token; if token insert fails after user commit, return `500` and allow login to mint a token) |\n| Register success transaction | Prefer single transaction: insert user + insert token; on success return `201` |\n| `/api/auth/me` with valid token after profile defaults | Returns current DB fields (same shape MARATHON-4 will later mutate) |\n| Leading/trailing spaces in username | **Reject** (`400`) — must match regex exactly; do not auto-trim to accept `\" alice\"` |\n| Unicode passwords | Allowed; length is JS string length ≥ 8 |\n\n## Acceptance Criteria\n\n1. `POST /api/auth/register` with valid `{username,password}` → `201`, body has `user` and `token`, `token.length \u003e= 16`, `user` includes all seven `UserObj` fields.\n2. Same username again (any casing) → `409` with JSON `error`.\n3. Username containing a space (or hyphen/other special) → `400`.\n4. Password length 7 → `400`.\n5. No `email` required: body without email succeeds when username/password valid.\n6. `POST /api/auth/login` with correct credentials → `200` `{user,token}`; new token usable on `/me`.\n7. Wrong password → `401`; unknown username → `401` (not `404`).\n8. `GET /api/auth/me` with `Authorization: Bearer \u003ctoken\u003e` → `200` `{user}` matching the registered user id/username.\n9. Missing header, garbage token, or malformed Authorization → `401`.\n10. Register on `127.0.0.1:8000`, then `GET /api/auth/me` on `:8001` and `:8002` with the same token → `200` (shared durable store).\n11. Kill Redis; register/login/me still succeed on any node.\n12. **MUST NOT:** put `password`, `password_hash`, or `password_salt` in any response body.\n13. **MUST NOT:** change `GET /api/health` semantics or port/`node_id` mapping.\n14. Responses use `Content-Type: application/json` (charset utf-8 preferred).\n\n## Testing Strategy\n\n### Scripted (implementer / QA)\n```bash\n# assume cluster up via start.sh\ncurl -sS -D- -X POST http://127.0.0.1:8000/api/auth/register \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"username\":\"alice\",\"password\":\"password1\"}'\n# expect 201; capture token\ncurl -sS -H \"Authorization: Bearer $TOKEN\" http://127.0.0.1:8001/api/auth/me\n# expect 200 same user\ncurl -sS -X POST http://127.0.0.1:8002/api/auth/login \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"username\":\"Alice\",\"password\":\"password1\"}'\n# negative cases: short password, space username, dup, bad login, me without token\n```\n\n### Scenarios that matter\n- Cross-node token acceptance (criterion 10).\n- Case-insensitive duplicate + case-insensitive login.\n- Redis-down auth still works.\n- Concurrent double-register race → one 201 one 409.\n\n### Manual human verification\nBoot cluster, run the curls above against all three ports, confirm `/app/data/huddle.db` exists and contains rows (`sqlite3 /app/data/huddle.db 'SELECT username FROM users;'`). Confirm health still ok during auth tests.\n\n### Out of scope for this task’s tests\nSPA form, logout UI, profile PATCH, workspace creation, WS/IRC token use.",
+    "design_format": "markdown",
+    "has_design": true,
+    "notes": "Addressed FEEDBACK attempt=1: rebased auth onto MARATHON-2 head so start.sh, redis.conf, and bootstrap tests remain; DDL in server/db.js; register/login/me + cross-node SQLite verified; Redis-down auth verified.",
+    "created_at": "2026-08-22T19:28:48.996953698Z",
+    "updated_at": "2026-08-22T19:51:11.508470188Z",
+    "created_by": "marathon-harness",
+    "closed_at": "2026-08-22T19:51:11.508470188Z",
+    "close_reason": "integrated into /app by harness gate (attempt=2)"
+  },
+  {
+    "id": "MARATHON-5",
+    "title": "Workspaces: create, list, detail, members, roles, ownership",
+    "status": "in_progress",
+    "priority": 0,
+    "issue_type": "task",
+    "assignee": "app-architect-1",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T19:28:56.935475141Z",
+    "updated_at": "2026-08-22T19:28:56.935475141Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-6",
+    "title": "Channels: create, join, leave, topic, archive, members",
+    "status": "open",
+    "priority": 0,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T19:28:56.952860818Z",
+    "updated_at": "2026-08-22T19:28:56.952860818Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-7",
+    "title": "Messages: post, list, edit, delete with pagination",
+    "status": "open",
+    "priority": 0,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T19:28:56.971572248Z",
+    "updated_at": "2026-08-22T19:28:56.971572248Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-18",
+    "title": "WebSocket subscribe, resume, dense per-channel seq",
+    "status": "open",
+    "priority": 0,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T19:29:25.419151991Z",
+    "updated_at": "2026-08-22T19:29:25.419151991Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-19",
+    "title": "Cluster fan-out resilience without Redis",
+    "status": "open",
+    "priority": 0,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T19:29:25.487083775Z",
+    "updated_at": "2026-08-22T19:29:25.487083775Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-20",
+    "title": "IRC gateway on :6667 with web bridging",
+    "status": "open",
+    "priority": 0,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T19:29:38.121841446Z",
+    "updated_at": "2026-08-22T19:29:38.121841446Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-21",
+    "title": "SPA shell: auth UI, token storage, logout/login",
+    "status": "review",
+    "priority": 0,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "frontend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "design": "## Summary\n\nMARATHON-21 delivers the Huddle browser shell: every HTTP node serves a same-origin SPA at `GET /`, and that SPA owns sign-up/login UI, visible validation errors, auto-login after success, session restore via `localStorage` key `huddle.token`, and logout that returns the user to the auth modal. It consumes the already-landed MARATHON-3 contracts (`POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me`) without adding auth APIs, and leaves a documented authenticated-shell mount point for MARATHON-22 (workspaces/channels/messages) and MARATHON-23 (threads/settings). Pinned DOM hooks (`data-testid` / `id`) make the auth flow automatable at **1280×900**.\n\n## Technical Approach\n\n### Decision\n1. **Static SPA assets under `/app/public/`**, served by each Node worker with stdlib `fs` + `http` (no Express, no bundler, no npm frontend deps). Entry document is `public/index.html`; client logic in `public/js/auth.js` + `public/js/app.js`; styles in `public/css/app.css`. Scripts load as classic or deferred `\u003cscript src=\"…\"\u003e` (no build step in `start.sh`).\n2. **Same-origin `fetch`** to `/api/auth/*` with `Content-Type: application/json`. Token persistence **only** at `localStorage['huddle.token']` (exact key per MARATHON-3). Authenticated calls send `Authorization: Bearer \u003ctoken\u003e`.\n3. **Client-owned logout:** clear `huddle.token`, clear in-memory session/user, show `#auth-modal`. No `POST /api/auth/logout` (explicitly out of MARATHON-3; server tokens may remain until a future revoke task).\n4. **Two UI phases in this task only:**\n   - **Unauthenticated:** `#auth-modal` visible with sign-up **or** login form (toggled by `auth-toggle`).\n   - **Authenticated shell:** modal hidden; chrome shows `current-user` + `logout-btn`; a `#app-shell` placeholder hosts future MARATHON-22 content (empty or minimal “signed in” copy is fine; **must not** invent workspace/channel APIs here).\n5. **Boot sequence:** on `DOMContentLoaded`, if `huddle.token` is set → `GET /api/auth/me` → success enters shell with returned `user`; `401`/network failure clears token and shows auth modal. Register/login success writes token then enters shell using the response `user` (auto-login; optional immediate `/me` is allowed but not required).\n\n### Alternatives considered\n| Alternative | Why rejected |\n|-------------|--------------|\n| React/Vite/Webpack SPA | Needs install + build; epic requires self-contained `/app` with no remote services; MARATHON-2/3 used zero npm deps |\n| Server-rendered login forms | Task asks for SPA shell and client `localStorage`; SSR would fight MARATHON-22 client routing |\n| Cookie/`HttpOnly` sessions | MARATHON-3 fixed opaque Bearer + `huddle.token`; changing storage breaks the declared SPA/WS/IRC token story |\n| Serve SPA only from node 0 | Task: “on any node”; QA may hit `:8000`/`:8001`/`:8002` interchangeably |\n| Implement workspace restore UI here | Belongs to MARATHON-22; this task only restores **auth session** and clears shell state so 22 can reload domain data after re-login |\n\n### Trade-off accepted\nA vanilla multi-file SPA is less ergonomic than a framework, but keeps the cluster zero-dependency and matches the existing Node stdlib style. Client-only logout leaves orphaned token rows in SQLite; acceptable until an explicit revoke endpoint is tasked.\n\n### Conventions inherited (authoritative)\n| Source | Convention |\n|--------|------------|\n| MARATHON-2 | App root `/app`; HTTP `server/index.js`; ports `8000+NODE_ID`; API under `/api/...`; JSON `Content-Type: application/json; charset=utf-8`; browser UI at **`GET /`** (disk path `/app` ≠ URL path) |\n| MARATHON-3 | `UserObj` seven string fields; register/login/me envelopes; errors `{ \"error\": string }`; username `^[A-Za-z0-9_]{1,32}$`; password length ≥ 8; `huddle.token`; Bearer header; no email required |\n| MARATHON-4 (design only) | Future profile PATCH; on `401` clear `huddle.token` and show login — same logout path this shell owns |\n\n### Conventions fixed here (for siblings)\n| Convention | Value |\n|------------|--------|\n| Static root | `/app/public/` (repo path `public/`) |\n| Token storage key | `localStorage` key **`huddle.token`** exactly (string token only; do not store full `UserObj` as the session source of truth) |\n| Auth modal | Element **`id=\"auth-modal\"`** |\n| Pinned testids | `auth-form`, `auth-submit`, `auth-toggle`, `current-user`, `logout-btn` |\n| Auth mode toggle | `auth-toggle` switches register ↔ login **without** navigation |\n| Display identity | `current-user` text content = `user.display_name` (fallback `user.username` if empty) |\n| Shell mount | `#app-shell` (or equivalent stable id) — MARATHON-22 attaches three-pane UI here; must exist when authenticated |\n| Viewport | Primary layout usable at **1280×900** without requiring horizontal scroll for auth chrome |\n| Asset URLs | Absolute-from-root paths `/css/...`, `/js/...` so any node origin works |\n\n## Interface Contracts\n\n### C-SPA-1 — `GET /` (and static assets) — **Backend owns serve; Frontend owns behavior**\n\n| | |\n|--|--|\n| Method / path | `GET /` |\n| Auth | None |\n| Success | `200`, `Content-Type: text/html; charset=utf-8`, body = SPA document that loads CSS/JS |\n| Other methods on `/` | `405` `{ \"error\": \"method_not_allowed\" }` **or** `404` JSON; must not `500` |\n\n**Also serve (same task):**\n| Path | Type | Notes |\n|------|------|-------|\n| `GET /css/app.css` | `text/css; charset=utf-8` | From `public/css/app.css` |\n| `GET /js/app.js`, `GET /js/auth.js` (and any other files under `public/js/`) | `application/javascript; charset=utf-8` | Path traversal forbidden |\n| `GET /` only as HTML entry | — | Do **not** require `/index.html` for acceptance; optional redirect/`index.html` alias is allowed |\n\n**Routing order in `server/index.js` (must preserve API contracts):**\n1. `GET /api/health` (unchanged)\n2. Auth API via `handleAuthRoutes` (unchanged)\n3. Static / SPA handler for safe paths under `public/`\n4. Else `404` `{ \"error\": \"not_found\" }`\n\n**Path safety:** resolve files under `path.join(__dirname, '..', 'public')` (or `/app/public`); reject `..` segments; never serve outside `public/`. Missing file → `404` JSON (same envelope as today) or plain 404 — not `500`.\n\n**Client while slow:** N/A for document fetch beyond browser load; if CSS/JS 404, auth UI may be unstyled but HTML structure with testids must still be present in the HTML (prefer embedding critical hooks in `index.html`).\n\n---\n\n### C-SPA-2 — Client → `POST /api/auth/register` (consume MARATHON-3 C1)\n\n| Client sends | `{ \"username\": string, \"password\": string, \"display_name\"?: string }` |\n| Success | `201` `{ \"user\": UserObj, \"token\": string }` |\n| Errors | `400` / `409` / `5xx` with `{ \"error\": string }` when provided |\n\n**Client ownership:**\n- Serialize JSON; **MUST NOT** require or gate on `email`.\n- On submit: disable `auth-submit` (or equivalent pending state) until response settles.\n- On `201`: `localStorage.setItem('huddle.token', token)`; set current user from `user`; hide `#auth-modal`; show authenticated chrome (**auto-login**).\n- On `400`/`409`: show `error` string **visibly** inside the auth form (dedicated error element adjacent to the form; must be readable without opening DevTools).\n- On network failure / `5xx`: show a visible generic message (e.g. “Something went wrong”); do not clear an existing valid token unless this was not a logged-in flow.\n- Optional client pre-check (username regex / password length) may run before fetch; **server remains authoritative** — still handle server errors.\n\n---\n\n### C-SPA-3 — Client → `POST /api/auth/login` (consume MARATHON-3 C2)\n\nSame as register for storage and error visibility; success status is `200`. Wrong password / unknown user → `401` → visible error; **MUST NOT** enter authenticated shell.\n\n---\n\n### C-SPA-4 — Client → `GET /api/auth/me` (consume MARATHON-3 C3)\n\n| When | App boot if `huddle.token` present; optionally after login |\n| Header | `Authorization: Bearer \u003ctoken\u003e` |\n| Success `200` | Enter shell with `user`; keep token |\n| `401` | `localStorage.removeItem('huddle.token')`; show `#auth-modal`; clear `current-user` |\n| Network / `5xx` while booting with a token | Show auth modal **or** a non-claiming loading state, then fall back to auth modal; **MUST NOT** leave a forged `current-user` without a successful `/me` or prior successful register/login in this page life. Prefer: treat boot failure like logged-out after clear-or-keep policy — **decision: on boot network/`5xx`, keep token in storage but show a visible retry/error in the modal region and do not mark user logged-in; user can retry or clear via attempting login. On `401`, always clear token.** |\n\n---\n\n### C-SPA-5 — Logout / re-login (client-only)\n\n| Action | Behavior |\n|--------|----------|\n| Click `logout-btn` | Remove `huddle.token`; clear in-memory `user` and any shell selection state this task owns; hide authenticated chrome; show `#auth-modal` in **login** mode; clear password fields |\n| Login again (same or other user) | On `200`, store new token, show shell with new `user` |\n| “Restores workspace” meaning for **this** task | Re-entering the authenticated shell after logout→login (and after hard reload with valid token). **Domain** workspace/channel/message tree reload is **MARATHON-22**: this task exposes a stable “session became authenticated” / “session cleared” seam (e.g. `window.dispatchEvent(new CustomEvent('huddle:auth', { detail: { user } }))` and `huddle:logout`) so 22 can refetch. Until 22 lands, shell may be empty — that is success for 21 |\n\n**MUST NOT:** call a non-existent logout API; leave `huddle.token` set after logout; show `current-user` while modal is the active unauthenticated UI.\n\n---\n\n### C-SPA-6 — DOM contract (QA / Playwright)\n\nExact attributes (implementer must not rename):\n\n| Hook | Requirement |\n|------|-------------|\n| `#auth-modal` | Present in DOM; visible when logged out; not the primary interactive surface when logged in (hidden via CSS `display:none` / `hidden` attribute / equivalent) |\n| `[data-testid=\"auth-form\"]` | The sign-up/login `\u003cform\u003e` inside the modal |\n| `[data-testid=\"auth-submit\"]` | Submit control (button or input) |\n| `[data-testid=\"auth-toggle\"]` | Control that switches between Sign up and Log in modes |\n| `[data-testid=\"current-user\"]` | Visible when authenticated; text identifies the user (`display_name`) |\n| `[data-testid=\"logout-btn\"]` | Visible when authenticated; triggers C-SPA-5 |\n\nForm fields (recommended stable hooks for typing; if not testid-pinned by task, use `name` attributes):\n- `name=\"username\"`, `name=\"password\"`\n- Optional `name=\"display_name\"` visible **only** in sign-up mode\n\nError surface: an element inside `#auth-modal` / `auth-form` that displays the latest error string (e.g. `data-testid=\"auth-error\"` is **recommended** for clarity but **not** required by the task text — if omitted, error text must still be visible in the modal).\n\n## Data Model\n\n### Server schema\n**No SQLite / API schema changes.** Reuses MARATHON-3 `users` / `tokens` and `UserObj`.\n\n### Browser persistence\n| Key | Type | Nullability | Notes |\n|-----|------|-------------|-------|\n| `localStorage['huddle.token']` | string | absent when logged out | Opaque bearer ≥16 chars from API; never store password |\n| In-memory `currentUser` | `UserObj` \\| null | null when logged out | Rebuilt from register/login/`/me`; not the durability source |\n\n### Backward compatibility\nAdding `GET /` HTML where unknown paths previously returned JSON `404` is an intentional behavior change for `/` and static paths only. All `/api/*` contracts remain unchanged.\n\n## Files to Create / Files to Modify\n\n### Create\n| File | Change |\n|------|--------|\n| `public/index.html` | SPA shell: `#auth-modal`, form with pinned testids, `#app-shell`, links to CSS/JS |\n| `public/css/app.css` | Layout for auth modal + minimal authenticated chrome; usable at 1280×900 |\n| `public/js/auth.js` | Token get/set/clear; `register` / `login` / `me` fetch helpers; Bearer header helper |\n| `public/js/app.js` | Boot, mode toggle, submit handlers, logout, show/hide modal vs shell, populate `current-user` |\n| `server/static.js` | `handleStatic(req, res, pathname) → boolean`: map `/` → `index.html`, safe file serve under `public/`, correct Content-Types |\n\n### Modify\n| File | Change |\n|------|--------|\n| `server/index.js` | After health + auth routes, call `handleStatic`; only then JSON 404. Do not alter health/auth status codes |\n| `server/httpUtil.js` | Optional: add `sendText(res, status, body, contentType)` used by static handler — keep `sendJson`/`readJson` behavior identical |\n| `test/server.test.js` (optional but recommended) | Assert `GET /` returns `200` and `text/html` containing `auth-modal` / `data-testid=\"auth-form\"`; assert `/api/health` still JSON |\n\n### Do not modify\n| File | Reason |\n|------|--------|\n| `server/auth/*`, `server/db.js` | Auth API owned by MARATHON-3; no logout endpoint in this task |\n| `start.sh`, `redis.conf` | Cluster bootstrap unchanged; static files need no extra process |\n| `timer.sh` | Harness |\n| Workspace/channel/message UI | MARATHON-22 / 23 |\n\n## Sequencing and Cross-Task Seams\n\n### Within this task\n1. `public/index.html` + CSS skeleton with pinned hooks  \n2. `server/static.js` + wire `index.js` so `GET /` works on any node  \n3. `auth.js` API helpers  \n4. `app.js` boot / submit / logout flows  \n5. Manual check: register → token in localStorage → reload → still logged in → logout → login  \n\n### Parallelism\n- Frontend implementer owns `public/**` + static routing.\n- Backend auth already closed (MARATHON-3); do not block on MARATHON-4/5.\n- MARATHON-22 **architecture/implementation** depends on: authenticated shell mount, `huddle.token`, `huddle:auth` / `huddle:logout` events (or equivalent documented callbacks), and existing testids remaining stable.\n\n### Seams this task owns\n| Seam | Downstream |\n|------|------------|\n| `GET /` HTML + static assets | QA; all SPA tasks |\n| `huddle.token` read/write/clear | MARATHON-22/23 fetch; MARATHON-18 WS `?token=` can read same key |\n| DOM testids / `#auth-modal` | QA automation |\n| Auth session events / `#app-shell` | MARATHON-22 three-pane; MARATHON-23 modals |\n\n### Build order\n- **Requires:** MARATHON-3 endpoints on the integrated head (present).\n- **Blocks:** Meaningful MARATHON-22 UI (declared dependent).\n- **Does not block:** MARATHON-4/5 backend work.\n\n### Split follow-ups (do not do here)\n| Cut | Owner |\n|-----|--------|\n| Workspaces, channels, three-pane, messages, their testids | MARATHON-22 |\n| Threads, reactions, settings modals | MARATHON-23 |\n| Profile PATCH UI | MARATHON-23 (API MARATHON-4) |\n| Server token revoke / logout API | New task if ever required |\n| Client-side router for deep links beyond `/` | MARATHON-22 if needed |\n\n## Out of Scope (Needs a Separate Task)\n\nNeighborhood scan (`server/`, `server/auth/`, `test/`, repo greps for `localStorage`, `auth-form`, `SPA`, `static`, `index.html`):\n\n| Finding | Why excluded |\n|---------|----------------|\n| `server/auth/routes.js` register/login/me | Already implemented (MARATHON-3); consume only |\n| `server/auth/middleware.js` / tokens / users / passwords | No change |\n| `GET /api/health`, `start.sh`, Redis | MARATHON-2 |\n| `test/auth.test.js` API contract tests | Remain backend-focused; optional SPA smoke is this task only if added under Files to Modify |\n| `GET /api/users/{id}`, `PATCH /api/users/me` | MARATHON-4 |\n| Workspaces / channels / messages UI + testids | MARATHON-22 |\n| Threads / reactions / settings modals | MARATHON-23 |\n| WS subscribe / `?token=` | MARATHON-18 |\n| IRC gateway | MARATHON-20 |\n| Server-side logout / token TTL | Explicitly deferred in MARATHON-3 |\n| Email, OAuth, Slack SDK | Prohibited / unspecified |\n\nNo existing `public/` tree or `huddle.token` client code was found — greenfield SPA.\n\n## Edge Cases \u0026 Error Handling\n\n| Situation | Expected behavior |\n|-----------|-------------------|\n| Empty username/password submit | Client may block with visible validation **or** send and show server `400`; either way user sees an error; no silent no-op |\n| Password length \u0026lt; 8 on register | Visible error (client and/or server `400`) |\n| Duplicate username | Show server `409` `error` text in form |\n| Invalid credentials on login | Show error; stay on modal; token unset |\n| Double-click submit | Ignore second submit while request in flight (disable button) |\n| `localStorage` unavailable / throws | Show visible error that auth cannot persist; do not pretend success |\n| Stale token on boot (`401` from `/me`) | Clear `huddle.token`; show modal; no shell |\n| Boot with token, network down | Do not show a fake user; show modal or retry UI; keep token until `401` or explicit logout |\n| Logout | Token removed synchronously before UI switches; `current-user` cleared |\n| Login as user B after user A | Shell shows B’s `display_name`; no leftover A identity in chrome |\n| Hard reload while logged in | Token survives; `/me` restores shell |\n| `GET /` on `:8000`, `:8001`, `:8002` | Identical SPA (any node) |\n| Request `GET /../../etc/passwd` style path | Rejected; `404`; no file leak |\n| `POST /` | Not an API; `405` or `404`; not `500` |\n| Auth API still JSON | Static handler must not intercept `/api/*` |\n| Toggle sign-up ↔ login | Clears or retains username per UX choice; **must** clear visible error; password field cleared on toggle **recommended** |\n| Viewport 1280×900 | Auth modal and chrome fully usable; no reliance on hover-only controls for submit/logout/toggle |\n\n## Acceptance Criteria\n\n1. `GET http://127.0.0.1:8000/` (and `:8001`, `:8002`) returns **200** HTML for the SPA (not JSON `not_found`).\n2. HTML includes `#auth-modal` and elements with `data-testid` values **`auth-form`**, **`auth-submit`**, **`auth-toggle`**, **`current-user`**, **`logout-btn`**.\n3. From a logged-out state, user can **sign up** with valid username/password; on success they are **immediately authenticated** (modal dismissed; `current-user` shows identity) without a separate manual login step.\n4. After sign-up/login success, `localStorage.getItem('huddle.token')` is a non-empty string (length ≥ 16).\n5. Invalid register (short password, bad username) shows a **visible** error in the auth UI; user remains logged out; token **MUST NOT** be set.\n6. Login with wrong password shows a **visible** error; token **MUST NOT** be set; shell **MUST NOT** appear.\n7. `auth-toggle` switches the form between sign-up and login modes without full page navigation.\n8. Clicking `logout-btn` clears `huddle.token`, hides authenticated chrome, and shows `#auth-modal` again.\n9. After logout, logging in again returns the user to the authenticated shell (session restored for SPA purposes).\n10. Hard reload with a valid token still logged-in (via `/api/auth/me`); hard reload after logout stays logged-out.\n11. Layout is operable at **1280×900**.\n12. **MUST NOT** change `GET /api/health` or `/api/auth/*` response shapes/status codes.\n13. **MUST NOT** require `email` in the form as a mandatory field.\n14. **MUST NOT** introduce remote CDNs, Slack SDK, or a frontend build that `start.sh` must run.\n\n## Testing Strategy\n\n### Automated (implementer)\n- Unit/integration: `GET /` → 200 + `text/html` + substring `auth-modal` / `data-testid=\"auth-form\"`.\n- Existing `test/auth.test.js` still passes (API unchanged).\n- Optional: static path traversal attempt returns 404.\n\n### Manual / browser (human or QA)\n1. Start cluster (`./start.sh`); open `http://127.0.0.1:8000/` at 1280×900.\n2. Sign up `alice` / `password1` → see `current-user`, DevTools Application → `huddle.token` set.\n3. Reload → still logged in.\n4. Logout → token gone, modal visible.\n5. Login → shell returns.\n6. Toggle to sign-up, try password `short` → visible error.\n7. Repeat smoke on `:8001` (register on 8000, open 8001 with same origin storage is per-port — use login on 8001 with same credentials to prove API; note **localStorage is origin-scoped per port**, so cross-port auto-session is **not** required; cross-node token validity remains a backend property).\n\n### Explicit non-goals for verification\nWorkspace lists, messages, threads, WS — verify only auth shell + token lifecycle here.",
+    "design_format": "markdown",
+    "has_design": true,
+    "notes": "SPA shell served from GET / on any node via public/ + server/static.js. Auth uses huddle.token, pinned testids, client-only logout, huddle:auth/huddle:logout events + #app-shell for MARATHON-22. Verified unit tests + Playwright at 1280x900 (register/login/logout/reload/validation).",
+    "created_at": "2026-08-22T19:29:38.142443715Z",
+    "updated_at": "2026-08-22T19:58:35.262638318Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-22",
+    "title": "SPA: workspaces, channels, three-pane layout, messages",
+    "status": "open",
+    "priority": 0,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "frontend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T19:29:38.161435938Z",
+    "updated_at": "2026-08-22T19:29:38.161435938Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-4",
+    "title": "Profiles: GET user and PATCH /api/users/me",
+    "status": "blocked",
+    "priority": 1,
+    "issue_type": "task",
+    "assignee": "backend-dev-1",
+    "owner": "marathon-harness",
+    "labels": [
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "design": "## Summary\n\nMARATHON-4 adds authenticated profile read and self-update on top of the MARATHON-3 `UserObj` / `users` table: `GET /api/users/{id}` returns a public profile (`200` / `404`), and `PATCH /api/users/me` mutates a validated subset of profile fields (`400` on bad timezone or over-length strings). Successful patches persist in the shared SQLite store (visible on every node) and emit a cluster-wide `user.updated` event through a no-op-safe broadcast hook that MARATHON-18 wires to WebSocket fan-out. This closes the gap between register-time profile defaults and live profile editing the SPA/settings flows need.\n\n## Technical Approach\n\n### Decision\n- **Reuse MARATHON-3 identity stack:** Same `/app/data/huddle.db` `users` row, same `publicUser(row) → UserObj`, same `requireUser` / bearer middleware. No second user store.\n- **Routes live under `/api/users`:** New module `server/users/routes.js` (HTTP only). Persistence helpers (`findUserById`, `updateUserProfile`) extend `server/auth/users.js` so DDL ownership stays with auth.\n- **Mutable PATCH subset only:** `display_name`, `timezone`, `avatar_url`, `status_text`, `status_emoji`. **Never** allow `id`, `username`, password fields, or token mutation via this route.\n- **Timezone validation:** Accept only IANA time zone names. Prefer `Intl.supportedValuesOf('timeZone')` when available (Node 20+); otherwise validate by constructing `new Intl.DateTimeFormat('en-US', { timeZone })` and rejecting on throw. `\"UTC\"` remains valid. Do **not** invent offset-only strings like `\"UTC+1\"` as valid unless they appear in the IANA list.\n- **Length caps (authoritative):** enforce on the server with JS string `.length` (same length model as MARATHON-3 passwords).\n- **WS hook, not WS implementation:** After a successful DB commit, call `emitUserUpdated(userObj)` from `server/events/userUpdated.js`. Default export is a no-op (or in-process listener list). MARATHON-18 replaces/registers the real global WS broadcast. HTTP success **must not** depend on Redis or WS being up.\n\n### Alternatives considered\n| Alternative | Why rejected |\n|-------------|--------------|\n| Return bare `UserObj` without `{ \"user\": ... }` wrapper | Breaks symmetry with `GET /api/auth/me` and register/login envelopes fixed in MARATHON-3 |\n| Allow PATCH to rename `username` | Username is the durable login identity (case-insensitive unique); renaming needs a separate task and migration story |\n| Require workspace membership to GET a user | Workspaces are MARATHON-5; until then any authenticated user may resolve any `user.id` (global directory) |\n| Put profile columns in a separate `profiles` table | Unnecessary join; MARATHON-3 already defined columns on `users` |\n| Block PATCH until MARATHON-18 ships | Task explicitly says hook up when WS exists; profile REST must work without WS |\n| Soft-validate timezone (accept any string) | Task requires timezone validation → `400` |\n\n### Trade-off accepted\nGlobal directory lookup (any authed user → any user id) is simpler than workspace-scoped visibility but leaks existence of all accounts by UUID. Acceptable for this marathon; MARATHON-5+ may tighten visibility later without changing `UserObj` shape.\n\n### Conventions inherited (authoritative)\n| Source | Convention |\n|--------|------------|\n| MARATHON-2 | `/app`, `server/index.js`, `/api/...`, JSON `Content-Type: application/json; charset=utf-8`, three nodes, `/app/data/` |\n| MARATHON-3 | `UserObj` seven fields; error `{ \"error\": string }`; bearer `Authorization: Bearer \u003ctoken\u003e`; SQLite `/app/data/huddle.db`; `requireUser`; ignore unknown JSON keys on write |\n\n## Interface Contracts\n\n### Shared: `UserObj` (unchanged from MARATHON-3)\n\n```json\n{\n  \"id\": \"\u003cuuid-string\u003e\",\n  \"username\": \"\u003cslug\u003e\",\n  \"display_name\": \"\u003cstring\u003e\",\n  \"timezone\": \"\u003cstring\u003e\",\n  \"avatar_url\": \"\u003cstring\u003e\",\n  \"status_text\": \"\u003cstring\u003e\",\n  \"status_emoji\": \"\u003cstring\u003e\"\n}\n```\n\nAll seven keys always present in responses. Never include password, hash, salt, or token.\n\n### Patchable field limits (server-authoritative)\n\n| Field | Type | Max `.length` | Empty string | Notes |\n|-------|------|---------------|--------------|-------|\n| `display_name` | string | 64 | allowed | Trim leading/trailing whitespace before length check and store; empty after trim → store `\"\"` |\n| `timezone` | string | 64 (and IANA-valid) | **not** allowed | Must be non-empty IANA name (e.g. `UTC`, `America/New_York`) |\n| `avatar_url` | string | 2048 | allowed | No scheme check required; store as given after type check (do not trim interior spaces) |\n| `status_text` | string | 100 | allowed | Trim ends; empty → `\"\"` |\n| `status_emoji` | string | 32 | allowed | Trim ends; empty → `\"\"`; multi-codepoint emoji OK within length |\n\n**Partial update semantics:** Only keys **present** in the JSON object are updated. Omitted keys stay unchanged. Wrong type (`null`, number, object, array) for a present key → `400`. Empty object `{}` → `200` with unchanged `UserObj` (no WS emit if nothing changed).\n\n**Forbidden keys if present with any value:** `id`, `username`, `password`, `password_hash`, `password_salt`, `token` → `400` `{ \"error\": string }` (do not silently ignore identity/credential fields).\n\nOther unknown keys → ignore (same as MARATHON-3 register).\n\n---\n\n### C1 — `GET /api/users/{id}`\n\n| | |\n|--|--|\n| Auth | Required (`requireUser`) |\n| Path param | `id` — opaque user UUID string (exact match to `users.id`) |\n| Success | `200` `{ \"user\": UserObj }` |\n| Not found | `404` `{ \"error\": string }` |\n| Unauthenticated | `401` `{ \"error\": string }` |\n| Wrong method | `405` or `404`; must not `500` |\n\n**Server:**\n1. Resolve bearer → user or `401`.\n2. If path is exactly `/api/users/me` on GET: treat `id` as the literal string `me` → **404** (self profile remains `GET /api/auth/me`). Do not special-case.\n3. Look up `users.id = id`; missing → `404`.\n4. Return `publicUser` envelope.\n\n**Who validates:** Server owns UUID existence. Client must not assume every id from messages still exists.\n\n**Client (SPA / MARATHON-21–23) while slow/failing:**\n- While pending: keep prior cached profile or show a neutral placeholder; do not flash logged-out.\n- On `200`: render `user.display_name` (fallback UX: `username` if display_name empty).\n- On `404`: show “user not found”; do not clear session.\n- On `401`: clear `huddle.token`, show login (same as `/api/auth/me`).\n- On network/5xx: show transient error; retry allowed.\n\n---\n\n### C2 — `PATCH /api/users/me`\n\n| | |\n|--|--|\n| Auth | Required (`requireUser`) — updates **only** the authenticated user |\n| Body | JSON object; subset of patchable fields above |\n| Success | `200` `{ \"user\": UserObj }` (post-update row) |\n| Validation failure | `400` `{ \"error\": string }` |\n| Unauthenticated | `401` `{ \"error\": string }` |\n| Malformed JSON / non-object | `400` |\n\n**Server algorithm:**\n1. `requireUser` or `401`.\n2. `readJson` → must be a plain object.\n3. Validate each present key per table; collect updates.\n4. If any forbidden key present → `400` before writes.\n5. If updates non-empty: `UPDATE users SET ... WHERE id = ?` in SQLite; re-read row; `publicUser`.\n6. If at least one field actually changed: call `emitUserUpdated(userObj)` (best-effort; errors logged, HTTP still `200`).\n7. If no fields changed: return `200` with current user; **do not** emit.\n\n**Who validates:** Server is source of truth for IANA timezone and lengths. Client may pre-check for UX but must handle `400`.\n\n**Client while slow/failing:**\n- Disable save control / show pending on profile form until response.\n- Optimistic UI optional; on `400` revert fields and show `error` string.\n- On `200`: replace local current-user state with returned `user`; also expect eventual `user.updated` WS (when MARATHON-18 exists) and reconcile by `user.id`.\n- On `401`: logout flow.\n- On network/5xx: keep form dirty state; show retry; **MUST NOT** assume server applied the patch.\n\n---\n\n### C3 — `user.updated` broadcast seam (owned here; delivered by MARATHON-18)\n\n**Event name:** `user.updated`  \n**Scope:** Global — all authenticated WS connections on all nodes (when hub exists), not channel-scoped.  \n**Payload (WS frame / hub message body):**\n\n```json\n{\n  \"type\": \"user.updated\",\n  \"user\": {\n    \"id\": \"\u003cuuid\u003e\",\n    \"username\": \"\u003cslug\u003e\",\n    \"display_name\": \"\u003cstring\u003e\",\n    \"timezone\": \"\u003cstring\u003e\",\n    \"avatar_url\": \"\u003cstring\u003e\",\n    \"status_text\": \"\u003cstring\u003e\",\n    \"status_emoji\": \"\u003cstring\u003e\"\n  }\n}\n```\n\n**Module contract:**\n\n```\n// server/events/userUpdated.js\nemitUserUpdated(user: UserObj): void\nregisterUserUpdatedListener(fn: (user: UserObj) =\u003e void): void  // optional helper for tests / WS hub\n```\n\n- MARATHON-4 always calls `emitUserUpdated` after a mutating PATCH.\n- Until MARATHON-18 registers a listener / Redis publish, emit is a no-op (in-process listeners only if registered).\n- MARATHON-18/19 own cross-node fan-out; this task does **not** publish to Redis directly (avoids inventing the pub/sub envelope twice). If implementer prefers a tiny in-process EventEmitter only, that is enough for C3.\n\n**Client when WS exists:** On `user.updated`, update any rendered profile/message author chrome for matching `user.id`. If WS is down, HTTP GET/PATCH remain correct; stale UI until refresh is acceptable.\n\n## Data Model\n\n### Schema change\n**None required** if MARATHON-3 DDL already created:\n\n| Column | Type | Null | Notes |\n|--------|------|------|-------|\n| `id` | TEXT PK | NOT NULL | Immutable via PATCH |\n| `username` / `username_lower` | TEXT | NOT NULL | Immutable via PATCH |\n| `display_name` | TEXT | NOT NULL | Mutable |\n| `timezone` | TEXT | NOT NULL DEFAULT `'UTC'` | Mutable; IANA |\n| `avatar_url` | TEXT | NOT NULL DEFAULT `''` | Mutable |\n| `status_text` | TEXT | NOT NULL DEFAULT `''` | Mutable |\n| `status_emoji` | TEXT | NOT NULL DEFAULT `''` | Mutable |\n| password / salt / `created_at` | — | — | Untouched |\n\n**Backward compatibility:** Additive routes only. Existing auth responses keep working. No column drops/renames.\n\n**If MARATHON-3 columns are somehow missing** (partial implement): implementer adds the same `ALTER TABLE` / DDL defaults as MARATHON-3 — do not invent alternate names.\n\nNo new tables.\n\n## Files to Create / Files to Modify\n\n### Create\n| File | Change |\n|------|--------|\n| `server/users/routes.js` | Handlers: `GET /api/users/:id`, `PATCH /api/users/me`; path parse; status codes per C1/C2; call validation + store + `emitUserUpdated` |\n| `server/users/validate.js` | `assertPatchBody(obj) → { updates } \\| { error }` — length, type, IANA timezone, forbidden keys |\n| `server/events/userUpdated.js` | `emitUserUpdated`, optional `registerUserUpdatedListener`; default no-op fan-out |\n\n### Modify\n| File | Change |\n|------|--------|\n| `server/auth/users.js` | Add `findUserById(id) → row \\| null`, `updateUserProfile(id, updates) → row` (UPDATE only provided columns); keep `publicUser` as single serializer |\n| `server/index.js` | After auth routes: dispatch `PATCH` `/api/users/me` and `GET` `/api/users/*` before generic 404; keep health + auth behavior unchanged |\n| `server/httpUtil.js` | Reuse `readJson` / `sendJson` if MARATHON-3 added them; otherwise use the same helpers auth routes use (do not duplicate divergent JSON error shapes) |\n\n### Do not modify\n| File | Reason |\n|------|--------|\n| `start.sh` / `redis.conf` / health | MARATHON-2 |\n| `server/auth/routes.js` register/login/me contracts | Unchanged; PATCH is not `/api/auth/me` |\n| SPA / static UI | MARATHON-21–23 |\n| WS router / Redis pubsub | MARATHON-18/19 |\n\n## Sequencing and Cross-Task Seams\n\n### Within this task\n1. `findUserById` / `updateUserProfile` + validator  \n2. `userUpdated` event stub  \n3. HTTP routes + `index.js` wiring  \n4. Cross-node check: PATCH on :8000 → GET user on :8001  \n\n### Parallelism\n- Backend-only implementation.\n- Frontend settings UI (MARATHON-23) can be designed against C2; implement against live API after this lands.\n- MARATHON-18 can implement WS listen/subscribe in parallel using C3 payload; must call `registerUserUpdatedListener` or equivalent from the hub boot.\n\n### Seams this task owns\n| Seam | Downstream |\n|------|------------|\n| C1 GET user by id | Messages/members UIs; mentions; SPA profile popovers |\n| C2 PATCH `/api/users/me` | SPA settings (MARATHON-23); any client editing status/timezone |\n| C3 `user.updated` payload + `emitUserUpdated` | MARATHON-18 WS global broadcast; MARATHON-19 fan-out must carry this event type when Redis is down |\n| Length/IANA rules | All writers of profile fields (no other writer should bypass validator) |\n\n### Build order vs siblings\n- **Blocked on:** MARATHON-3 (`users` table, `requireUser`, `publicUser`). MARATHON-2 for process topology.\n- **Soft-blocked on WS delivery:** none for HTTP acceptance; WS delivery blocked on MARATHON-18.\n- **Does not block:** workspace/channel CRUD can proceed; they should embed `UserObj` via `publicUser` when returning members.\n\n### Split follow-ups (do not do here)\n| Cut | Owner |\n|-----|--------|\n| Actual WS subscribe + global emit over Redis | MARATHON-18 / MARATHON-19 |\n| SPA profile/settings forms + testids | MARATHON-21 / MARATHON-23 |\n| Username change / password change APIs | New task if ever required |\n| Workspace-scoped profile visibility | Optional later under MARATHON-5+ |\n| Avatar file upload | MARATHON-11 (files); this task only stores URL string |\n\n## Out of Scope (Needs a Separate Task)\n\nNeighborhood scan (architect worktree = baseline `timer.sh` only; sibling `backend-dev-1` has MARATHON-2 `server/index.js`, `server/health.js`, `start.sh`, tests — **no** `/api/users` or auth modules yet; `/app` same baseline; grep for `UserObj` / `timezone` / `user.updated` / `/api/users` → no implementation hits):\n\n| Finding | Why excluded |\n|---------|----------------|\n| `server/health.js`, `GET /api/health`, `start.sh`, Redis | MARATHON-2 |\n| `POST /api/auth/*`, `GET /api/auth/me`, token/password DDL | MARATHON-3 (prerequisite; do not re-specify) |\n| `timer.sh` | Harness |\n| WS `/api/ws`, dense seq, resume | MARATHON-18 |\n| Redis-down fan-out | MARATHON-19 |\n| IRC nick/profile bridging | MARATHON-20 |\n| SPA auth + settings UI | MARATHON-21–23 |\n| File upload for avatars | MARATHON-11 |\n| Workspaces/members embedding users | MARATHON-5 |\n| Rate limiting profile writes | Not required |\n\n## Edge Cases \u0026 Error Handling\n\n| Situation | Expected behavior |\n|-----------|-------------------|\n| GET unknown UUID | `404` `{error}` |\n| GET valid id without auth | `401` |\n| GET `/api/users/me` | `404` (literal id `me`); use `/api/auth/me` |\n| PATCH without auth | `401` |\n| PATCH `timezone: \"Not/AZone\"` | `400` |\n| PATCH `timezone: \"\"` | `400` |\n| PATCH `display_name` length 65 | `400` |\n| PATCH `status_text` length 101 | `400` |\n| PATCH `status_emoji` length 33 | `400` |\n| PATCH `avatar_url` length 2049 | `400` |\n| PATCH includes `username` | `400` (forbidden key) |\n| PATCH includes only unknown keys | Treat as `{}` → `200`, no emit |\n| PATCH `display_name: \"  Alice  \"` | Store `\"Alice\"` (trimmed) |\n| PATCH `display_name: \"   \"` | Store `\"\"` |\n| PATCH `status_emoji: \"🚀\"` | `200` if `.length ≤ 32` |\n| Concurrent PATCH same user on two nodes | Last writer wins per field set; both may emit `user.updated`; acceptable |\n| SQLITE_BUSY | Respect `busy_timeout`; if still failing → `500` `{error}`; no partial HTTP success |\n| `emitUserUpdated` throws | Log stderr; still return `200` with saved user |\n| Redis down | PATCH/GET unaffected |\n| User deleted (future) while GET | N/A now (no delete API); if row missing → `404` |\n| Non-JSON PATCH body | `400` |\n| `Content-Type` missing but body is JSON | Best-effort parse; fail → `400` |\n| Method `PUT`/`POST` on `/api/users/me` | `405` or `404`; must not apply updates |\n| Extra whitespace in IANA zone `\" America/New_York\"` | `400` (do not auto-trim timezone; must match IANA exactly) |\n\n## Acceptance Criteria\n\n1. Authenticated `GET /api/users/{id}` for an existing user → `200` `{user}` with all seven `UserObj` fields matching DB.\n2. Authenticated GET for unknown id → `404` with JSON `error`.\n3. GET without bearer (or bad token) → `401`.\n4. `PATCH /api/users/me` with valid `{ \"display_name\": \"Ada\", \"timezone\": \"America/New_York\" }` → `200`; subsequent `GET /api/auth/me` and `GET /api/users/{id}` on **another node** reflect updates.\n5. PATCH with invalid timezone → `400`; DB row unchanged.\n6. PATCH with over-length `status_text` / `display_name` / `avatar_url` / `status_emoji` → `400`; DB unchanged.\n7. PATCH body attempting `username` or `id` change → `400`; username unchanged.\n8. PATCH `{}` → `200`; user unchanged.\n9. After a mutating PATCH, `emitUserUpdated` is invoked with the new `UserObj` (verifiable via test listener); HTTP still `200` if no WS hub registered.\n10. **MUST NOT** include password/hash/salt/token in GET/PATCH responses.\n11. **MUST NOT** require Redis or WS for GET/PATCH success.\n12. **MUST NOT** change `GET /api/health` or auth register/login/me success contracts.\n13. Responses use `Content-Type: application/json` (charset utf-8 preferred).\n\n## Testing Strategy\n\n### Scripted (implementer / QA)\n```bash\n# cluster up; TOKEN from register on :8000; USER_ID from response\ncurl -sS -H \"Authorization: Bearer $TOKEN\" \\\n  http://127.0.0.1:8001/api/users/$USER_ID\n# expect 200\n\ncurl -sS -H \"Authorization: Bearer $TOKEN\" \\\n  http://127.0.0.1:8000/api/users/$(uuidgen)\n# expect 404\n\ncurl -sS -X PATCH http://127.0.0.1:8000/api/users/me \\\n  -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' \\\n  -d '{\"display_name\":\"Ada\",\"timezone\":\"America/New_York\",\"status_text\":\"ship it\",\"status_emoji\":\"🚀\"}'\n# expect 200\n\ncurl -sS -H \"Authorization: Bearer $TOKEN\" http://127.0.0.1:8002/api/auth/me\n# expect updated fields\n\ncurl -sS -X PATCH http://127.0.0.1:8000/api/users/me \\\n  -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' \\\n  -d '{\"timezone\":\"Not/A_Real_Zone\"}'\n# expect 400\n\ncurl -sS -X PATCH http://127.0.0.1:8000/api/users/me \\\n  -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' \\\n  -d '{\"status_text\":\"'\"$(python3 -c 'print(\"x\"*101)\"')\"'\"}'\n# expect 400\n```\n\n### Scenarios that matter\n- Cross-node read-after-write for profile fields.\n- Forbidden username patch.\n- IANA reject vs `UTC` / `Europe/London` accept.\n- Emit hook called only when a field changes.\n- Redis killed: PATCH still `200`.\n\n### Manual human verification\nRegister a user, PATCH status/timezone, confirm GET on another port, confirm `/api/auth/me` matches. Optionally register a temporary listener in a REPL/unit test to assert `user.updated` payload shape.\n\n### Out of scope for this task’s tests\nSPA forms, actual WS client receipt, IRC, workspace member lists.",
+    "design_format": "markdown",
+    "has_design": true,
+    "notes": "BLOCKED: Depends on MARATHON-3 (users table, requireUser, publicUser, auth middleware). MARATHON-3 is still in_progress and has not landed on main/harness-integrated head; this worktree only has MARATHON-2 bootstrap (no server/auth). Re-claim after MARATHON-3 merges.",
+    "created_at": "2026-08-22T19:28:49.02437807Z",
+    "updated_at": "2026-08-22T19:42:16.516897176Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-8",
+    "title": "Threads: replies endpoint and reply_count",
+    "status": "open",
+    "priority": 1,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T19:29:08.591947668Z",
+    "updated_at": "2026-08-22T19:29:08.591947668Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-9",
+    "title": "Reactions and pins on messages",
+    "status": "open",
+    "priority": 1,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T19:29:08.705261753Z",
+    "updated_at": "2026-08-22T19:29:08.705261753Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-10",
+    "title": "DMs: get-or-create pairwise channel",
+    "status": "open",
+    "priority": 1,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T19:29:08.808998976Z",
+    "updated_at": "2026-08-22T19:29:08.808998976Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-11",
+    "title": "Files: upload, metadata, download, attach to messages",
+    "status": "open",
+    "priority": 1,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T19:29:08.871230869Z",
+    "updated_at": "2026-08-22T19:29:08.871230869Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-12",
+    "title": "Search across accessible channels",
+    "status": "open",
+    "priority": 1,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T19:29:16.60312666Z",
+    "updated_at": "2026-08-22T19:29:16.60312666Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-13",
+    "title": "Slash commands: me, shrug, topic, invite, archive",
+    "status": "open",
+    "priority": 1,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T19:29:16.626578687Z",
+    "updated_at": "2026-08-22T19:29:16.626578687Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-14",
+    "title": "Mentions resolution including group channel here",
+    "status": "open",
+    "priority": 1,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T19:29:16.660213495Z",
+    "updated_at": "2026-08-22T19:29:16.660213495Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-15",
+    "title": "Read state GET/POST and workspace embed",
+    "status": "open",
+    "priority": 1,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T19:29:16.689020455Z",
+    "updated_at": "2026-08-22T19:29:16.689020455Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-16",
+    "title": "User groups CRUD in workspaces",
+    "status": "open",
+    "priority": 1,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T19:29:25.340216966Z",
+    "updated_at": "2026-08-22T19:29:25.340216966Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-17",
+    "title": "Workspace invitations create, accept, revoke",
+    "status": "open",
+    "priority": 1,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T19:29:25.377051158Z",
+    "updated_at": "2026-08-22T19:29:25.377051158Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-23",
+    "title": "SPA: threads panel, emoji reactions, settings modals",
+    "status": "open",
+    "priority": 1,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "frontend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T19:29:38.181957832Z",
+    "updated_at": "2026-08-22T19:29:38.181957832Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-1",
+    "title": "Huddle: Slack-like team chat cluster",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "epic",
+    "owner": "marathon-harness",
+    "has_design": false,
+    "created_at": "2026-08-22T19:28:40.099650334Z",
+    "updated_at": "2026-08-22T19:28:40.099650334Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-24",
+    "title": "Verify: cluster bootstrap health and respawn",
+    "status": "closed",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "qa"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T19:41:32.029300129Z",
+    "updated_at": "2026-08-22T19:46:41.266724208Z",
+    "created_by": "marathon-harness",
+    "closed_at": "2026-08-22T19:46:41.266724208Z",
+    "close_reason": "integrated into /app by harness gate (attempt=1)"
+  },
+  {
+    "id": "MARATHON-25",
+    "title": "Verify: start.sh self-contained port topology",
+    "status": "closed",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "qa"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T19:41:32.04476087Z",
+    "updated_at": "2026-08-22T19:52:19.210486371Z",
+    "created_by": "marathon-harness",
+    "closed_at": "2026-08-22T19:52:19.210486371Z",
+    "close_reason": "integrated into /app by harness gate (attempt=1)"
+  },
+  {
+    "id": "MARATHON-26",
+    "title": "Verify: health node_id map on head 7077d7f",
+    "status": "closed",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "qa"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T19:48:49.531504067Z",
+    "updated_at": "2026-08-22T19:55:06.104371144Z",
+    "created_by": "marathon-harness",
+    "closed_at": "2026-08-22T19:55:06.104371144Z",
+    "close_reason": "integrated into /app by harness gate (attempt=1)"
+  },
+  {
+    "id": "MARATHON-27",
+    "title": "Verify: HTTP and Redis kill recovery on 7077d7f",
+    "status": "closed",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "qa"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T19:48:49.547054691Z",
+    "updated_at": "2026-08-22T19:57:36.484116274Z",
+    "created_by": "marathon-harness",
+    "closed_at": "2026-08-22T19:57:36.484116274Z",
+    "close_reason": "integrated into /app by harness gate (attempt=1)"
+  },
+  {
+    "id": "MARATHON-28",
+    "title": "Verify: auth register login me on head 1235b17",
+    "status": "review",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "qa"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T19:54:13.776826087Z",
+    "updated_at": "2026-08-22T19:59:45.922830808Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-29",
+    "title": "Verify: auth survives Redis-down; ports stay mapped",
+    "status": "in_progress",
+    "priority": 2,
+    "issue_type": "task",
+    "assignee": "qa-engineer-1",
+    "owner": "marathon-harness",
+    "labels": [
+      "qa"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T19:54:13.796164386Z",
+    "updated_at": "2026-08-22T19:54:13.796164386Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-30",
+    "title": "Verify: health node_id on head 6afbc20",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "qa"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T19:56:54.857706852Z",
+    "updated_at": "2026-08-22T19:56:54.857706852Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-31",
+    "title": "Verify: start.sh still owns cluster on 6afbc20",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "qa"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T19:56:54.886364717Z",
+    "updated_at": "2026-08-22T19:56:54.886364717Z",
+    "created_by": "marathon-harness"
+  }
+]

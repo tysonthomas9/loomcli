@@ -1,0 +1,59 @@
+{
+  "template_id": "fullstack-app",
+  "revision": 2,
+  "schema_version": 1,
+  "workspace_key": "MARATHON",
+  "dry_run": false,
+  "steps": [
+    {
+      "entity": "role",
+      "name": "app-architect",
+      "action": "created"
+    },
+    {
+      "entity": "role",
+      "name": "frontend-dev",
+      "action": "created"
+    },
+    {
+      "entity": "role",
+      "name": "backend-dev",
+      "action": "created"
+    },
+    {
+      "entity": "role",
+      "name": "qa-engineer",
+      "action": "created"
+    },
+    {
+      "entity": "role",
+      "name": "code-reviewer",
+      "action": "created"
+    },
+    {
+      "entity": "agent",
+      "name": "app-architect-1",
+      "action": "created"
+    },
+    {
+      "entity": "agent",
+      "name": "frontend-dev-1",
+      "action": "created"
+    },
+    {
+      "entity": "agent",
+      "name": "backend-dev-1",
+      "action": "created"
+    },
+    {
+      "entity": "agent",
+      "name": "qa-engineer-1",
+      "action": "created"
+    }
+  ],
+  "created": 9,
+  "skipped": 0,
+  "diverged": 0,
+  "failed": 0,
+  "materialized": 4
+}

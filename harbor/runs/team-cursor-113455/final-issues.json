@@ -1,0 +1,508 @@
+[
+  {
+    "id": "MARATHON-2",
+    "title": "Cluster scaffold: start.sh, 3 HTTP nodes, Redis, health",
+    "status": "closed",
+    "priority": 0,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "design": "## Summary\n\nDeliver a bootable Huddle cluster skeleton at `/app`: a foreground `/app/start.sh` that launches local Redis on `127.0.0.1:6379` and three identical HTTP nodes on `127.0.0.1:8000/8001/8002`, plus `GET /api/health` returning `200 {\"status\":\"ok\",\"node_id\":\u003c0|1|2\u003e}` with port→id mapping `8000→0`, `8001→1`, `8002→2`. This is the foundation every later API/realtime/SPA task mounts onto. No remote services and no Docker-in-Docker. Auth, workspaces, SPA, IRC, WebSocket fan-out, and durable schemas are out of scope here; this task only creates process supervision, shared config conventions, and a stub API router that subsequent tasks extend.\n\n## Technical Approach\n\n**Decision:** One Python 3.12 process image, three OS processes, FastAPI + Uvicorn, supervised by bash `start.sh`, with local `redis-server` as a fourth supervised child.\n\n**Why this shape**\n- The product requires three distinct HTTP listeners and node-kill resilience; three OS processes (not one multi-bind process, not threads-only) match the grader’s SIGKILL model and the 60s auto-restart requirement.\n- FastAPI gives a single mountable `APIRouter` tree under `/api` so MARATHON-3+ can add modules without rewriting the HTTP entrypoint.\n- Redis is started now even though health does not use it, because later fan-out and the Redis-outage tests assume the daemon is owned by `start.sh`.\n- Language/framework are unspecified by the product instruction; Python 3.12 is present in the harness and fits REST + later WebSocket work.\n\n**Alternatives considered**\n1. **Node.js `http` / Express** — viable (Node is installed), but the rest of the epic’s backend tasks are naturally one shared Python package with SQLite; splitting runtimes would complicate shared state.\n2. **Python stdlib only** — avoids deps, but forces every later task to reinvent routing, JSON validation, multipart, and WebSockets; rejected for velocity and consistency.\n3. **One process binding all three ports** — fails the “kill one HTTP node” resilience model; rejected.\n4. **Docker Compose / containers** — prohibited (no DinD / no remote orchestration).\n\n**Trade-off accepted:** `start.sh` must ensure FastAPI/Uvicorn (and `redis` client later) are available via a local venv + pinned `requirements.txt`, preferably with wheels under `vendor/` so boot does not depend on live PyPI. Cold start is slightly heavier than stdlib, but the router seam for sibling tasks is far cleaner.\n\n**Conventions this design locks for the epic (no sibling designs exist yet)**\n- Product name: **Huddle**; repo root is `/app` at runtime.\n- HTTP bind: `127.0.0.1` only; ports `8000/8001/8002`.\n- `node_id` ∈ `{0,1,2}` derived solely from port (never from startup order).\n- API prefix: `/api/...`; JSON only for API responses.\n- Primary durable store (for later tasks): SQLite file at `/app/data/huddle.db` shared by all nodes via the local filesystem. Redis is **not** the source of truth for users/messages — it is for pub/sub fan-out (and optional caches) in later tasks.\n- Env contract for each node process:\n  - `HUDDLE_NODE_ID` — integer `0|1|2`\n  - `HUDDLE_PORT` — integer `8000|8001|8002`\n  - `HUDDLE_HOST` — `127.0.0.1`\n  - `HUDDLE_REDIS_URL` — `redis://127.0.0.1:6379/0`\n  - `HUDDLE_DATA_DIR` — `/app/data` (or `$APP_ROOT/data`)\n- Error bodies for unspecified errors: FastAPI default `{\"detail\": ...}` until a later design overrides.\n- Health **must not** check Redis or SQLite liveness; a live HTTP process alone is enough for `200`.\n\n## Interface Contracts\n\n### Process / ops seam (verifier ↔ `start.sh`)\n\n| Concern | Contract |\n|---|---|\n| Entrypoint | Verifier runs `/app/start.sh` (executable). |\n| Lifetime | `start.sh` stays in the **foreground** until killed; while it is alive the cluster serves. |\n| Children | Exactly three HTTP node processes + one `redis-server` (plus any short-lived helpers). |\n| Ports | HTTP: `127.0.0.1:8000`, `:8001`, `:8002`. Redis: `127.0.0.1:6379`. |\n| Restart | If an HTTP child exits for any reason (including SIGKILL), `start.sh` respawns that node with the same `HUDDLE_NODE_ID`/`HUDDLE_PORT` so it is healthy again **within 60s** (target: a few seconds). If Redis exits, `start.sh` respawns it promptly so pub/sub can resume after later tasks exist. |\n| Shutdown | On SIGINT/SIGTERM to `start.sh`, terminate children and exit non-zero only on fatal setup failure. |\n| Isolation | No remote URLs, no Docker, no external managed Redis. |\n\n### HTTP seam — `GET /api/health`\n\n**Ownership:** Backend only for this task. No frontend consumer yet; when the SPA exists it may probe health but must not block login on it.\n\n**Request**\n- Method/path: `GET /api/health`\n- Auth: none\n- Query/body: none\n\n**Success response**\n- Status: `200`\n- Headers: `Content-Type: application/json`\n- Body (exact keys; `node_id` is JSON number, not string):\n\n```json\n{\"status\": \"ok\", \"node_id\": 0}\n```\n\n| Port | `node_id` |\n|------|-----------|\n| 8000 | `0` |\n| 8001 | `1` |\n| 8002 | `2` |\n\n**Validation**\n- Server: derive `node_id` from `HUDDLE_NODE_ID` (set by `start.sh` to match the port table). Reject process start if env `HUDDLE_NODE_ID`/`HUDDLE_PORT` disagree with the table.\n- Client (future SPA / grader): treat non-200 or missing keys as unhealthy; while slow, show no hard dependency in UI for this task.\n\n**Failure / slow behavior**\n- If the node process is down: TCP connection refused / timeout — client retries; `start.sh` is responsible for respawn.\n- Health handler itself never waits on Redis/SQLite/network; latency should be trivial (ms).\n- Unknown methods on `/api/health` (e.g. `POST`): `405` or FastAPI default — not required by grader; implementer may leave framework default.\n\n### Stub routing seam (this task ↔ later API tasks)\n\n- Mount a top-level FastAPI app with `app.include_router(..., prefix=\"/api\")`.\n- This task registers only the health router.\n- Later tasks add sibling modules (e.g. `huddle/api/auth.py`) and `include_router` them from `huddle/api/__init__.py` — **no** second HTTP server.\n- Unregistered `/api/*` paths return `404 {\"detail\": ...}` (framework default).\n- `GET /` is **not** implemented here (SPA is a later task). Returning framework `404` is acceptable until the frontend task adds static hosting.\n\n### Cross-node identity seam\n\n- All three nodes run the **same code** and same DB file path; only `HUDDLE_NODE_ID` / `HUDDLE_PORT` differ.\n- Resource ids created in later tasks must be stable cluster-wide (SQLite shared file supports this). This task does not mint resource ids.\n\n## Data Model\n\nNo application schema in this task.\n\n| Store | Role now | Later |\n|---|---|---|\n| `/app/data/` directory | Created/owned by `start.sh` or first boot | SQLite `huddle.db`, uploads, redis working dir |\n| Redis @ `127.0.0.1:6379` | Process up; unused by health | Pub/sub fan-out; must survive kill+respawn |\n| In-process | `node_id`, port from env | Connection pools, WS subscribers |\n\n**Schema changes:** none. Backward compatible by vacuity (empty repo → first schema arrives in MARATHON-3+).\n\n**Redis config expectations (no ACL/password):**\n- `bind 127.0.0.1`\n- `port 6379`\n- `dir` under `/app/data/redis` (or equivalent local path)\n- protected-mode as needed for local-only bind\n- not daemonized by Redis itself — `start.sh` is the supervisor (`--daemonize no`)\n\n## Files to Create / Files to Modify\n\n### Create\n\n| File | Purpose |\n|---|---|\n| `start.sh` | Executable foreground supervisor: deps/venv, Redis, three nodes, restart loop, signal handling. |\n| `requirements.txt` | Pin `fastapi`, `uvicorn[standard]` (and leave room for `redis`, etc. later or add `redis` now unused). Prefer exact pins. |\n| `vendor/` (optional but recommended) | Bundled wheels so `pip install --no-index` works offline. |\n| `huddle/__init__.py` | Package marker; version string optional. |\n| `huddle/config.py` | Read/validate `HUDDLE_*` env; expose `settings.node_id`, `settings.port`, `settings.host`, `settings.redis_url`, `settings.data_dir`. |\n| `huddle/app.py` | `create_app()` → FastAPI instance; include API router; no business routes beyond what’s included. |\n| `huddle/api/__init__.py` | Aggregate `api_router`; include health; comment/marker for sibling routers. |\n| `huddle/api/health.py` | `GET /health` → `{status, node_id}` (mounted under `/api`). |\n| `huddle/__main__.py` | `uvicorn` entry: `python -m huddle` reads settings and serves `huddle.app:create_app`. |\n\n### Modify\n\n| File | Change |\n|---|---|\n| `.gitignore` | Ignore `.venv/`, `__pycache__/`, `data/*` runtime artifacts (keep `data/.gitkeep` if added), `.timer_start`; do **not** ignore `start.sh` or `huddle/`. |\n| (optional) `data/.gitkeep` | Ensure `/app/data` exists in the tree. |\n\n### Do not modify\n\n| File | Reason |\n|---|---|\n| `timer.sh` | Harness timer; unrelated. |\n| `loom-prompts/` | Agent prompts; not product. |\n\n## Sequencing and Cross-Task Seams\n\n**This task is the root dependency.** MARATHON-3 (auth), MARATHON-4 (profiles), MARATHON-5 (workspaces), and all later backend tasks `depends_on` this scaffold.\n\n**Build order inside this task**\n1. Package layout + `config` + `health` + `create_app`\n2. `requirements.txt` (+ vendor if used)\n3. `start.sh` supervision last (needs a runnable module)\n\n**Parallelism**\n- Nothing else in the epic can meaningfully implement against live ports until this lands.\n- Design work for MARATHON-3+ can proceed in parallel against the contracts below.\n\n**Seams owned here that dependents rely on**\n\n| Seam | Owner | Consumers |\n|---|---|---|\n| `start.sh` lifecycle + port map + restart | MARATHON-2 | All runtime tasks, QA, grader |\n| `GET /api/health` shape | MARATHON-2 | Grader; ops checks |\n| `huddle.api` router aggregation | MARATHON-2 | MARATHON-3+ route modules |\n| `HUDDLE_*` env + `/app/data` + Redis URL | MARATHON-2 | Auth persistence, files, WS fan-out |\n| SQLite path convention `/app/data/huddle.db` | MARATHON-2 (convention only; no schema) | MARATHON-3+ |\n\n**Explicitly not split:** do not defer HTTP auto-restart to a later “resilience” task — the product grades restart via `start.sh`, and rewriting supervision later is wasteful. Full Redis-outage **fan-out fallback** logic stays in a future realtime task; this task only respawns Redis.\n\n## Out of Scope (Needs a Separate Task)\n\nNeighborhood scan of the repo found only `timer.sh`, empty `data/`, and agent prompt/gitignore files — no existing HTTP/Redis/SPA code. From the product instruction / epic, the following are **intentionally excluded** from MARATHON-2:\n\n| Item | Why excluded |\n|---|---|\n| `GET /` SPA / static assets / `data-testid` hooks | Frontend tasks; not in this task description |\n| Auth register/login/me (MARATHON-3) | Separate task; needs DB schema |\n| Profiles, workspaces, channels, messages, files, search, etc. | Later epic children |\n| WebSocket `/api/ws` + dense `seq` + cross-node fan-out | Realtime task(s); needs Redis pub/sub usage + fallback |\n| IRC gateway `:6667` | Separate protocol task |\n| Redis-outage application-level fan-out fallback (direct peer push) | Requires message pipeline; only process respawn is in scope here |\n| Dependency on Slack SDK / remote APIs | Prohibited entirely |\n\nIf the neighborhood later gains half-built servers on these ports, implementers must replace/integrate with this layout rather than run a second cluster.\n\n## Edge Cases \u0026 Error Handling\n\n| Situation | Expected behavior |\n|---|---|\n| Port 8000/8001/8002 already bound at start | Fail fast with a clear stderr message; exit non-zero. Do not silently bind another port. (QA uses `marathon-freeports` / `marathon-portlock`.) |\n| Port 6379 already bound by an alien process | Fail fast if it is not our Redis; if a previous Huddle Redis is healthy, either adopt it or kill-and-replace — **prefer**: if `PING` works on `127.0.0.1:6379`, reuse; otherwise abort with error. |\n| `redis-server` binary missing | Exit non-zero with message; do not pretend health is enough. |\n| HTTP child SIGKILL’d | Supervisor restarts that node only; other nodes keep serving without interruption. |\n| Redis SIGKILL’d | Supervisor restarts Redis; HTTP nodes keep answering `/api/health` (and later writes once those exist). Do **not** crash nodes when Redis drops. |\n| `HUDDLE_NODE_ID` missing/invalid | Node process exits immediately with error; supervisor may restart — ensure `start.sh` always exports valid env so this is a developer mistake, not steady state. |\n| `start.sh` killed (SIGTERM/SIGINT) | Tear down children; do not leave orphaned redis/node processes. |\n| `start.sh` killed (SIGKILL) | Best-effort only; orphans possible — acceptable for grader stop. |\n| Duplicate start of `start.sh` | Second instance should fail on bind; do not require a pidfile unless implementer wants one under `/app/data`. |\n| Health called during Redis outage | Still `200 {\"status\":\"ok\",\"node_id\":N}`. |\n| Extra JSON fields on health | Avoid; stick to exact two fields so graders using exact match do not flake. |\n| `status` value other than `\"ok\"` | Not used on success path. |\n| Pip/venv install failure | Exit non-zero before binding ports; log the pip error. |\n| Working directory | `start.sh` `cd`s to its own directory (`APP_ROOT`) so paths work regardless of caller cwd. |\n\n## Acceptance Criteria\n\n1. `test -x /app/start.sh` (or `./start.sh` in repo root) succeeds.\n2. After starting `./start.sh` (under `marathon-portlock` when ports might be contested) and waiting for readiness:\n   - `curl -s http://127.0.0.1:8000/api/health` → HTTP 200, JSON `status==\"ok\"`, `node_id==0`\n   - same for `:8001` → `node_id==1`\n   - same for `:8002` → `node_id==2`\n3. `redis-cli -h 127.0.0.1 -p 6379 PING` → `PONG`.\n4. `start.sh` remains in the foreground (does not daemonize itself and return immediately).\n5. `node_id` values are JSON numbers; response contains no requirement for other keys.\n6. Killing one node’s PID (SIGKILL) does **not** take down the other two health endpoints; within 60s the killed port serves health again with the **same** `node_id`.\n7. Killing `redis-server` does **not** cause health endpoints to fail; Redis accepts `PING` again after `start.sh` respawns it.\n8. No Docker socket usage; no calls to external network services required for health.\n9. A clear module path exists for adding routes (e.g. empty aggregation point in `huddle/api/__init__.py`) so MARATHON-3 can attach `/api/auth/*` without changing `start.sh`.\n10. Negative: binding must **not** use `0.0.0.0` for the three HTTP nodes (must be `127.0.0.1`).\n11. Negative: `/api/health` must **not** return `5xx` solely because Redis is down.\n12. Negative: `node_id` for port 8000 must **not** be `1` or `2` under any restart ordering.\n\n## Testing Strategy\n\n**Automated / implementer**\n- Unit: config mapping port↔`node_id`; reject mismatched env.\n- Unit: health handler returns exact payload for each injected `node_id`.\n- Integration (script or pytest): boot via `start.sh` (or invoke three modules + redis in a test harness), assert three health payloads + Redis PING.\n- Chaos smoke: SIGKILL one uvicorn PID and Redis PID; assert criteria 6–7.\n- Always free ports first: `marathon-freeports`; wrap long-lived servers with `marathon-portlock`. Kill all started processes before finishing.\n\n**Human / QA verification**\n```bash\nmarathon-freeports\nmarathon-portlock /app/start.sh   # or ./start.sh from repo root\n# in another shell:\ncurl -s http://127.0.0.1:8000/api/health\ncurl -s http://127.0.0.1:8001/api/health\ncurl -s http://127.0.0.1:8002/api/health\nredis-cli -h 127.0.0.1 -p 6379 PING\n# SIGKILL one node PID; re-curl within 60s\n# SIGKILL redis; confirm health still 200; wait for PING\n```\n\n**Out of test scope for this task:** auth flows, SPA, IRC, WebSocket seq denseness, Redis fan-out fallback semantics beyond process respawn.",
+    "design_format": "markdown",
+    "has_design": true,
+    "notes": "Implemented cluster scaffold per design: start.sh supervises Redis+3 FastAPI/Uvicorn nodes; GET /api/health returns {status,node_id}; vendor wheels for offline pip; verified health on :8000/1/2, Redis PING, SIGKILL node+redis restart within ~2s.",
+    "created_at": "2026-08-22T18:36:36.074640642Z",
+    "updated_at": "2026-08-22T18:50:47.107089503Z",
+    "created_by": "marathon-harness",
+    "closed_at": "2026-08-22T18:50:47.107089503Z",
+    "close_reason": "integrated into /app by harness gate (attempt=1)"
+  },
+  {
+    "id": "MARATHON-3",
+    "title": "Auth: register, login, me, bearer tokens",
+    "status": "in_progress",
+    "priority": 0,
+    "issue_type": "task",
+    "assignee": "app-architect-1",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T18:36:49.09157312Z",
+    "updated_at": "2026-08-22T18:36:49.09157312Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-5",
+    "title": "Workspaces: create, list, get with #general",
+    "status": "open",
+    "priority": 0,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T18:36:49.137123754Z",
+    "updated_at": "2026-08-22T18:36:49.137123754Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-7",
+    "title": "Channels: create, join, leave, topic, archive, pins list ACL",
+    "status": "open",
+    "priority": 0,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T18:37:04.760178827Z",
+    "updated_at": "2026-08-22T18:37:04.760178827Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-8",
+    "title": "Messages: post, list, edit, delete",
+    "status": "open",
+    "priority": 0,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T18:37:18.592697241Z",
+    "updated_at": "2026-08-22T18:37:18.592697241Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-11",
+    "title": "Threads: replies endpoint and reply_count",
+    "status": "open",
+    "priority": 0,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T18:37:37.613284457Z",
+    "updated_at": "2026-08-22T18:37:37.613284457Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-20",
+    "title": "WebSocket subscribe resume dense per-channel seq",
+    "status": "open",
+    "priority": 0,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T18:37:57.4943732Z",
+    "updated_at": "2026-08-22T18:37:57.4943732Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-21",
+    "title": "HTTP node auto-restart within 60s",
+    "status": "in_progress",
+    "priority": 0,
+    "issue_type": "task",
+    "assignee": "frontend-dev-1",
+    "owner": "marathon-harness",
+    "labels": [
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "design": "## Summary\n\nGuarantee that `/app/start.sh` (repo-root `start.sh`) automatically respawns any HTTP node that exits for any reason—including SIGKILL—so that `127.0.0.1:8000`, `:8001`, and `:8002` each answer `GET /api/health` again within **60 seconds wall-clock**, with **no external action**. Surviving nodes must keep serving throughout. MARATHON-2 already shipped a foreground supervisor and a 1s poll loop; this task owns the **hard 60s SLA**, death-detection/reap correctness, bind-retry behavior, and acceptance criteria for HTTP-only chaos. Redis respawn remains as designed in MARATHON-2 and must not regress, but is not the graded focus here.\n\n## Technical Approach\n\n**Decision:** Harden the existing bash supervisor in `start.sh`—do not introduce systemd, supervisord, Docker, a second process manager, or an in-Python watchdog. Detection stays PID-based (children started by `start.sh`); readiness for the SLA is HTTP-based (`GET /api/health` → 200 on that port).\n\n**Why**\n- The product and MARATHON-2 already lock three OS processes + bash ownership of lifecycle; rewriting supervision would break the epic’s ops seam.\n- A poll interval of ~1s (or event-driven `wait -n` plus a short sleep) easily meets a 60s budget if death is detected and respawn does not abort the supervisor.\n- Health readiness (not merely “PID exists”) matches how the grader and clients observe recovery.\n\n**Alternatives considered**\n1. **Leave MARATHON-2 loop unchanged** — notes claim ~2s recovery, but this P0 task exists as a dedicated graded slice; without explicit reap, bind-retry, and “supervisor must not exit on child death” rules, implementers can leave latent races. Rejected as “design = no-op.”\n2. **External process manager (systemd user unit, supervisord)** — violates self-contained `/app/start.sh` foreground contract. Rejected.\n3. **In-process multi-port single OS process** — fails SIGKILL-one-node model. Rejected (already rejected in MARATHON-2).\n4. **Health-only probing without PID tracking** — can false-positive during slow starts and does not reap zombies; usable only as a secondary signal. Rejected as primary detector.\n\n**Trade-off accepted:** Brief connection failures on the killed port during the outage window are expected; clients must retry (SPA/WebSocket reconnect owned by later tasks). The supervisor optimizes for simple, local PID+poll reliability rather than zero-downtime migrate.\n\n**Consistency with MARATHON-2 (authoritative sibling)**\n- Keep port↔`node_id` map: `8000→0`, `8001→1`, `8002→2`.\n- Keep env: `HUDDLE_NODE_ID`, `HUDDLE_PORT`, `HUDDLE_HOST`, `HUDDLE_REDIS_URL`, `HUDDLE_DATA_DIR`.\n- Keep `GET /api/health` body `{\"status\":\"ok\",\"node_id\":N}` unchanged.\n- MARATHON-2 text said “do not defer HTTP auto-restart to a later task”; the harness nonetheless created MARATHON-21. **This design does not diverge on mechanism**—it narrows ownership: MARATHON-21 is the SLA/hardening of the HTTP restart path already sketched in MARATHON-2, not a second supervisor.\n\n## Interface Contracts\n\n### Ops seam (verifier / QA ↔ `start.sh`) — **primary contract for this task**\n\n| Concern | Contract |\n|---|---|\n| Entrypoint | Executable `start.sh` at app root (`/app/start.sh` in runtime layout). |\n| Lifetime | Stays in the **foreground** until SIGINT/SIGTERM (or equivalent stop). |\n| HTTP children | Exactly three node processes on `127.0.0.1:8000/8001/8002` with stable `HUDDLE_NODE_ID`/`HUDDLE_PORT`. |\n| Auto-restart | If any HTTP child exits (SIGKILL, SIGTERM, crash, bind failure exit), `start.sh` respawns **that** node only, same id/port, without operator intervention. |\n| SLA | From the moment the process is gone, wall-clock time until `curl`/`GET http://127.0.0.1:\u003cport\u003e/api/health` returns **200** with correct `node_id` is **≤ 60s**. Target remains a few seconds. |\n| Survivors | While one port is down, the other two must continue to return 200 health (and any later APIs already mounted). |\n| Shutdown | SIGINT/SIGTERM to `start.sh` still tears down children (MARATHON-2); restart loop must not treat intentional shutdown as a respawn storm after trap runs. |\n\n**Ownership:** Backend / ops only. No frontend change in this task.\n\n### HTTP seam — `GET /api/health` (unchanged from MARATHON-2)\n\n| Side | Responsibility |\n|---|---|\n| Server (each node) | Return `200` `{\"status\":\"ok\",\"node_id\":\u003c0\\|1\\|2\u003e}` when the process is listening; do not probe Redis/SQLite. |\n| Client (grader, future SPA) | Treat TCP refuse / timeout / non-200 as “this node down”; **retry**. Do not require all three nodes for reads that can hit a live peer. |\n| While killed node is down | Clients using that port see connection errors; clients on surviving ports are unaffected. |\n| After respawn | Same port, same `node_id`; no session stickiness invented here. |\n\n**Validation:** Server validates `HUDDLE_*` at process start (existing `huddle/config.py`). Client validates HTTP status + JSON keys for health checks.\n\n**Slow / fail behavior:** No new API errors. Outage is a transport failure, not an application error body.\n\n### Frontend / realtime seam (informational; not implemented here)\n\n| Consumer | Expected behavior during single-node kill |\n|---|---|\n| Future SPA (MARATHON-24+) | If its API base URL points at the dead port, show retry/reconnect; do not assume cluster-wide outage. |\n| WebSocket (MARATHON-20) | Connection on dead node drops; resume/subscribe against a live node is that task’s problem. Restart only restores a peer process. |\n| Cross-node fan-out (MARATHON-22) | May see a peer gap until respawn; must not require this task to change pub/sub code. |\n\nPayload shapes crossing the FE/BE JSON seam are **unchanged** by this task.\n\n## Data Model\n\nNo schema changes. No new entities, files under `data/`, or Redis key formats.\n\n| Store | Role for this task |\n|---|---|\n| In-supervisor state | Associative map `node_id → child PID` (existing `NODE_PIDS`); optional generation/restart counters for logs only. |\n| SQLite / Redis data | Untouched; shared durable state must remain valid across respawn (already implied by shared `HUDDLE_DATA_DIR`). |\n\n**Backward compatible:** yes (behavior-only change to `start.sh`).\n\n## Files to Create / Files to Modify\n\n### Modify\n\n| File | Change |\n|---|---|\n| `start.sh` | Harden HTTP supervisor path: (1) **reap** exited node PIDs with non-blocking/`wait \"$pid\"` before clearing/`start_node`; (2) detect down via `kill -0` failure **after** reap attempt (and treat missing PID as down); (3) respawn only the dead `node_id`/`port` via existing `start_node`; (4) ensure child exit or failed bind **never** causes `set -e` to tear down the whole cluster—restart loop must continue until 60s SLA is met on retry; (5) keep poll cadence ≤ ~2s (current `sleep 1` is acceptable); (6) on post-kill port still busy, skip/fail that spawn attempt, log, retry next iteration—do not `die`; (7) preserve Redis supervision and INT/TERM trap from MARATHON-2; (8) log restart events with `node_id`, port, old/new PID. |\n\n### Do not create (unless implementer finds a tiny helper unavoidable)\n\n| File | Reason |\n|---|---|\n| New Python modules | No app-level restart API. |\n| systemd / compose / Procfile | Forbidden pattern for this epic. |\n| Changes to `huddle/api/health.py`, `huddle/config.py`, `huddle/app.py` | Contracts already correct; only touch if a proven bug blocks restart identity (unexpected). |\n\n### Create\n\nNone required.\n\n## Sequencing and Cross-Task Seams\n\n| Order | Dependency |\n|---|---|\n| Prerequisite | **MARATHON-2** (closed): cluster scaffold, health, basic supervisor — **done**. |\n| This task | Can implement immediately; no dependency on auth/SPA/WS. |\n| Parallel | Any API/SPA task may proceed; they must tolerate transient single-port refuse. |\n| Downstream | MARATHON-20/22/23 assume peers can disappear and return; they consume the ops seam this task hardens but do not own it. |\n\n**Seams this task owns**\n- Contract name: **HTTP node auto-restart SLA** (ops ↔ `start.sh`).\n- Consumers: QA/grader, MARATHON-20 (WS), MARATHON-22 (fan-out), MARATHON-23 (IRC may be separate process—out of scope here).\n\n**Seams this task consumes**\n- MARATHON-2: port map, `start_node` env contract, `GET /api/health`.\n\n**Split follow-ups?** No. Do not split Redis restart (already MARATHON-2) or hang detection (not required) into this ticket.\n\n## Out of Scope (Needs a Separate Task)\n\nNeighborhood scan (`start.sh`, `huddle/**`, `*.sh`, restart/supervisor greps):\n\n| Item | Why excluded |\n|---|---|\n| `timer.sh` | Harness countdown helper; unrelated to cluster supervision. |\n| Redis auto-restart path in `start.sh` | Owned/graded under MARATHON-2; do not remove, but do not expand Redis semantics here. |\n| `huddle/api/health.py` / config / app factory | Stable; no change required for restart. |\n| IRC process on `:6667` (MARATHON-23) | Not an HTTP node; separate supervisor rules when that task lands. |\n| WebSocket resume after peer death (MARATHON-20) | Client/protocol concern. |\n| Redis-outage fan-out fallback (MARATHON-22) | Application messaging path, not process respawn. |\n| SPA reconnect UX (MARATHON-24+) | Frontend. |\n| Detecting hung-but-alive nodes (event loop deadlock) | Task specifies SIGKILL/exit respawn, not liveness beyond process death. |\n| Load balancer / multi-host failover | Single-host three-port model only. |\n| `loom-prompts/` | Agent prompts; not product code. |\n\n## Edge Cases \u0026 Error Handling\n\n| Situation | Expected behavior |\n|---|---|\n| One HTTP child SIGKILL’d | Reap PID; restart that `node_id`/`port` only; other nodes uninterrupted; health on killed port back within ≤60s with same `node_id`. |\n| All three SIGKILL’d in sequence | Restart each as detected; all three healthy again within 60s of each respective kill (not “60s for the batch only” as an excuse to delay the first). |\n| Child exits immediately (bad env, import error) | Log error; retry on poll interval; **do not** exit `start.sh` after initial successful cluster start. (Fatal `die` remains allowed only during initial `ensure_deps` / first bind checks before the supervisor loop.) |\n| Port still in `TIME_WAIT` / briefly busy after kill | Log; do not `die`; retry next loop iteration until bind succeeds; still meet 60s if OS releases promptly (typical). |\n| Respawn gets a new PID | Update `NODE_PIDS[node_id]`; never reuse a stale PID for liveness. |\n| Zombie / unreaped child | Always `wait` the recorded PID when down or after detected exit so the process table cannot fool later checks. |\n| `kill -0` race (PID reused by unrelated process) | Prefer wait/reap bookkeeping; only start one child per `node_id`; optional sanity: if PID alive but port not listening for multiple polls, kill and restart **that** child only (implementer may add if needed to meet SLA; not required if PID tracking is correct). |\n| Supervisor receives SIGINT/SIGTERM | Trap runs `stop_children`; exit; **no** respawn after shutdown begins. |\n| Supervisor receives SIGKILL | Orphans possible; acceptable (MARATHON-2). |\n| Redis down during HTTP restart | HTTP restart still proceeds; health must not depend on Redis (MARATHON-2). |\n| Duplicate `start.sh` | Still fail fast on ports in use at initial start; out of scope to soft-adopt alien node PIDs. |\n| Logging | Restarts go to stderr via existing `[huddle]` logger; no new log file required. |\n| `set -euo pipefail` | Conditionals around `kill`/`wait`/`port` checks must be written so a down child cannot abort the loop. |\n\n## Acceptance Criteria\n\n1. With cluster up via `./start.sh`, SIGKILL the PID of **one** HTTP node (the process serving one of 8000/8001/8002).\n2. Continuously, the **other two** ports return `GET /api/health` → 200 with their correct `node_id` throughout the outage (sample at least once during the down window).\n3. Within **60 seconds** of the kill, the killed port returns `GET /api/health` → 200 with the **same** `node_id` as before (8000→0, 8001→1, 8002→2).\n4. No manual restart, no second terminal intervention, no re-running `start.sh`—the original foreground supervisor performs the respawn.\n5. Repeat criteria 1–4 for each of the three ports (can be sequential).\n6. Negative: killing one node must **not** cause `start.sh` to exit.\n7. Negative: killing one node must **not** restart or kill the other two node PIDs as a side effect.\n8. Negative: after respawn, `node_id` on port 8000 must **not** become 1 or 2 (identity stays port-derived).\n9. Negative: recovery must **not** require Docker, remote services, or editing config mid-test.\n10. `start.sh` remains foreground for the whole test; Redis PING still works unless Redis was also killed (Redis kill+respawn may be smoke-checked but is not the primary AC of this task).\n\n## Testing Strategy\n\n**Implementer**\n- Chaos script: boot under `marathon-portlock` / free ports; record PIDs (e.g. from `ss`/`lsof` on each port or supervisor logs); `kill -9` one PID; poll health on all three ports every ~1s; assert survivors always 200; assert victim 200 by t≤60 with correct `node_id`.\n- Repeat for each port; optionally double-kill two nodes and confirm both recover without killing the third intentionally.\n- Regression: SIGINT to `start.sh` still shuts down children (no infinite respawn after trap).\n- Confirm supervisor loop does not exit when a child returns non-zero.\n\n**Human / QA**\n```bash\nmarathon-freeports\nmarathon-portlock ./start.sh\n# other shell:\ncurl -s http://127.0.0.1:8000/api/health\ncurl -s http://127.0.0.1:8001/api/health\ncurl -s http://127.0.0.1:8002/api/health\n# identify PID listening on 8001; kill -9 $PID\n# while true; do date; curl -s -o /dev/null -w '%{http_code}\\n' http://127.0.0.1:8000/api/health; \\\n#   curl -s http://127.0.0.1:8001/api/health; sleep 1; done\n# expect 8000/8002 healthy throughout; 8001 healthy again within 60s with node_id=1\n```\n\n**Out of test scope:** SPA behavior, WS resume, IRC, auth, Redis fan-out fallback logic beyond “HTTP nodes stay up / return.”",
+    "design_format": "markdown",
+    "has_design": true,
+    "notes": "Design complete for HTTP node auto-restart SLA. Builds on MARATHON-2 supervisor; hardens start.sh only (reap, bind-retry, set -e safety, ≤60s health recovery, survivors untouched). No app/API schema changes. Route to backend implementer after lead removes `architect` (label `backend` already present).",
+    "created_at": "2026-08-22T18:37:57.516496742Z",
+    "updated_at": "2026-08-22T18:55:50.005182784Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-22",
+    "title": "Cross-node fan-out with Redis-outage fallback",
+    "status": "open",
+    "priority": 0,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T18:38:20.673316727Z",
+    "updated_at": "2026-08-22T18:38:20.673316727Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-23",
+    "title": "IRC gateway on :6667 with web bridge",
+    "status": "open",
+    "priority": 0,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T18:38:20.689356068Z",
+    "updated_at": "2026-08-22T18:38:20.689356068Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-24",
+    "title": "SPA auth: signup login logout token hooks",
+    "status": "open",
+    "priority": 0,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "frontend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T18:38:20.707587964Z",
+    "updated_at": "2026-08-22T18:38:20.707587964Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-25",
+    "title": "SPA shell: three-pane layout workspace channels",
+    "status": "open",
+    "priority": 0,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "frontend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T18:38:20.722167505Z",
+    "updated_at": "2026-08-22T18:38:20.722167505Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-26",
+    "title": "SPA messages threads reactions UI flows",
+    "status": "open",
+    "priority": 0,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "frontend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T18:38:20.736226627Z",
+    "updated_at": "2026-08-22T18:38:20.736226627Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-4",
+    "title": "User profiles: GET user and PATCH me",
+    "status": "open",
+    "priority": 1,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T18:36:49.11847094Z",
+    "updated_at": "2026-08-22T18:36:49.11847094Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-6",
+    "title": "Workspace members, roles, transfer, join_mode",
+    "status": "open",
+    "priority": 1,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T18:37:04.742312516Z",
+    "updated_at": "2026-08-22T18:37:04.742312516Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-9",
+    "title": "DMs: get-or-create pairwise DM channel",
+    "status": "open",
+    "priority": 1,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T18:37:18.606944448Z",
+    "updated_at": "2026-08-22T18:37:18.606944448Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-10",
+    "title": "Files: upload, metadata, download",
+    "status": "open",
+    "priority": 1,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T18:37:18.622116201Z",
+    "updated_at": "2026-08-22T18:37:18.622116201Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-12",
+    "title": "Reactions and message pins",
+    "status": "open",
+    "priority": 1,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T18:37:37.632172732Z",
+    "updated_at": "2026-08-22T18:37:37.632172732Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-14",
+    "title": "Mentions resolution including groups channel here",
+    "status": "open",
+    "priority": 1,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T18:37:37.665465088Z",
+    "updated_at": "2026-08-22T18:37:37.665465088Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-15",
+    "title": "Slash commands: me shrug topic invite archive",
+    "status": "open",
+    "priority": 1,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T18:37:37.679391292Z",
+    "updated_at": "2026-08-22T18:37:37.679391292Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-17",
+    "title": "Per-channel read state and unread/mentions",
+    "status": "open",
+    "priority": 1,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T18:37:37.706301195Z",
+    "updated_at": "2026-08-22T18:37:37.706301195Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-18",
+    "title": "User groups CRUD under workspaces",
+    "status": "open",
+    "priority": 1,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T18:37:57.441677316Z",
+    "updated_at": "2026-08-22T18:37:57.441677316Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-19",
+    "title": "Workspace invitations create list accept revoke",
+    "status": "open",
+    "priority": 1,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T18:37:57.46919814Z",
+    "updated_at": "2026-08-22T18:37:57.46919814Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-27",
+    "title": "SPA workspace and channel settings invitations",
+    "status": "open",
+    "priority": 1,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "frontend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T18:38:20.754658315Z",
+    "updated_at": "2026-08-22T18:38:20.754658315Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-28",
+    "title": "Verify: cluster scaffold health Redis start.sh",
+    "status": "in_progress",
+    "priority": 1,
+    "issue_type": "task",
+    "assignee": "qa-engineer-1",
+    "owner": "marathon-harness",
+    "labels": [
+      "qa"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T18:52:45.706687488Z",
+    "updated_at": "2026-08-22T18:52:45.706687488Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-1",
+    "title": "Huddle: Slack-like team chat cluster",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "epic",
+    "owner": "marathon-harness",
+    "has_design": false,
+    "created_at": "2026-08-22T18:36:21.860919015Z",
+    "updated_at": "2026-08-22T18:36:21.860919015Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-13",
+    "title": "Attach uploaded files to messages via file_ids",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T18:37:37.647511611Z",
+    "updated_at": "2026-08-22T18:37:37.647511611Z",
+    "created_by": "marathon-harness"
+  },
+  {
+    "id": "MARATHON-16",
+    "title": "Search messages in accessible channels",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "marathon-harness",
+    "labels": [
+      "architect",
+      "backend"
+    ],
+    "source_repo": "app",
+    "parent": "MARATHON-1",
+    "has_design": false,
+    "created_at": "2026-08-22T18:37:37.692954244Z",
+    "updated_at": "2026-08-22T18:37:37.692954244Z",
+    "created_by": "marathon-harness"
+  }
+]

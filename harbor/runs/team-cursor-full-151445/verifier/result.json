@@ -1,0 +1,133 @@
+{
+    "id": "15ee8c2d-4a64-45eb-95f6-cca46e4731f8",
+    "task_name": "abundant/slack-clone",
+    "trial_name": "slack-clone__rQeQxeb",
+    "trial_uri": "file:///Users/tyson/codebase/code-agents/loomcli-worktrees/marathon-team/harbor/test/jobs/team-cursor-full-151445/slack-clone__rQeQxeb",
+    "task_id": {
+        "path": "tasks/slack-clone"
+    },
+    "source": null,
+    "task_checksum": "b8518060d5b7f80195ceeb332a186549b858fb7f365c32be49062eab0a8c654e",
+    "config": {
+        "task": {
+            "path": "tasks/slack-clone",
+            "git_url": null,
+            "git_commit_id": null,
+            "name": null,
+            "ref": null,
+            "overwrite": false,
+            "download_dir": null,
+            "source": null
+        },
+        "trial_name": "slack-clone__rQeQxeb",
+        "trials_dir": "/Users/tyson/codebase/code-agents/loomcli-worktrees/marathon-team/harbor/test/jobs/team-cursor-full-151445",
+        "install_only": false,
+        "timeout_multiplier": 1.0,
+        "agent_timeout_multiplier": null,
+        "verifier_timeout_multiplier": null,
+        "agent_setup_timeout_multiplier": null,
+        "environment_build_timeout_multiplier": null,
+        "agent": {
+            "name": "loom_harbor:LoomAgent",
+            "import_path": null,
+            "model_name": null,
+            "n_concurrent": null,
+            "concurrency_group": null,
+            "skills": [],
+            "override_timeout_sec": null,
+            "override_setup_timeout_sec": null,
+            "max_timeout_sec": null,
+            "resume_trajectory": false,
+            "load_trajectory": null,
+            "extra_allowed_hosts": [],
+            "kwargs": {
+                "team": "fullstack-app",
+                "max_agents": 4,
+                "lead_mode": "persistent",
+                "prompts_profile": "generic",
+                "budget_secs": 14400,
+                "reserve_secs": 2400,
+                "cadence_secs": 360,
+                "spend_cap_usd": 180,
+                "backend": "cursor"
+            },
+            "mcp_servers": []
+        },
+        "environment": {
+            "type": "docker",
+            "import_path": null,
+            "force_build": false,
+            "delete": true,
+            "cpu_enforcement_policy": "auto",
+            "memory_enforcement_policy": "auto",
+            "override_cpus": null,
+            "override_memory_mb": null,
+            "override_storage_mb": null,
+            "override_gpus": null,
+            "override_tpu": null,
+            "mounts": null,
+            "extra_docker_compose": [],
+            "kwargs": {},
+            "extra_allowed_hosts": []
+        },
+        "verifier": {
+            "override_timeout_sec": null,
+            "max_timeout_sec": null,
+            "disable": false
+        },
+        "artifacts": [],
+        "extra_instruction_paths": [],
+        "job_id": "a4a96f9a-e21e-4986-ad74-56286aebf24e"
+    },
+    "agent_info": {
+        "name": "loom-ensemble",
+        "version": "loom=1236c55fb",
+        "model_info": null
+    },
+    "agent_result": {
+        "n_input_tokens": 5651431,
+        "n_cache_tokens": null,
+        "n_output_tokens": 674029,
+        "cost_usd": 65.3113,
+        "rollout_details": null,
+        "metadata": {
+            "loom_marathon": {
+                "tasks_integrated": 15,
+                "tasks_seeded": 0,
+                "integration_failures": 0,
+                "finalize_reason": "deadline",
+                "stub": false,
+                "template_id": "fullstack-app",
+                "design_auto_approved": 9,
+                "orphans_routed": 0,
+                "integrations_stale": 0
+            }
+        }
+    },
+    "verifier_result": null,
+    "exception_info": {
+        "exception_type": "RewardFileNotFoundError",
+        "exception_message": "No reward file found at /Users/tyson/codebase/code-agents/loomcli-worktrees/marathon-team/harbor/test/jobs/team-cursor-full-151445/slack-clone__rQeQxeb/verifier/reward.txt or /Users/tyson/codebase/code-agents/loomcli-worktrees/marathon-team/harbor/test/jobs/team-cursor-full-151445/slack-clone__rQeQxeb/verifier/reward.json",
+        "exception_traceback": "Traceback (most recent call last):\n  File \"/Users/tyson/.local/share/uv/tools/harbor/lib/python3.12/site-packages/harbor/trial/trial.py\", line 354, in run\n    await self._run()\n  File \"/Users/tyson/.local/share/uv/tools/harbor/lib/python3.12/site-packages/harbor/trial/single_step.py\", line 52, in _run\n    await self._run_verifier()\n  File \"/Users/tyson/.local/share/uv/tools/harbor/lib/python3.12/site-packages/harbor/trial/single_step.py\", line 105, in _run_verifier\n    self.result.verifier_result = await self._run_shared_verifier(\n                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/tyson/.local/share/uv/tools/harbor/lib/python3.12/site-packages/harbor/trial/trial.py\", line 535, in _run_shared_verifier\n    return await asyncio.wait_for(\n           ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/tyson/.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/asyncio/tasks.py\", line 520, in wait_for\n    return await fut\n           ^^^^^^^^^\n  File \"/Users/tyson/.local/share/uv/tools/harbor/lib/python3.12/site-packages/harbor/verifier/verifier.py\", line 232, in verify\n    raise RewardFileNotFoundError(\nharbor.verifier.verifier.RewardFileNotFoundError: No reward file found at /Users/tyson/codebase/code-agents/loomcli-worktrees/marathon-team/harbor/test/jobs/team-cursor-full-151445/slack-clone__rQeQxeb/verifier/reward.txt or /Users/tyson/codebase/code-agents/loomcli-worktrees/marathon-team/harbor/test/jobs/team-cursor-full-151445/slack-clone__rQeQxeb/verifier/reward.json\n",
+        "occurred_at": "2026-08-22T18:42:09.349218"
+    },
+    "started_at": "2026-08-22T22:14:46.503345Z",
+    "finished_at": "2026-08-23T01:42:21.326224Z",
+    "environment_setup": {
+        "started_at": "2026-08-22T22:14:46.528372Z",
+        "finished_at": "2026-08-22T22:14:48.873841Z"
+    },
+    "agent_setup": {
+        "started_at": "2026-08-22T22:14:48.873981Z",
+        "finished_at": "2026-08-22T22:15:10.289743Z"
+    },
+    "agent_execution": {
+        "started_at": "2026-08-22T22:15:10.290164Z",
+        "finished_at": "2026-08-23T01:35:15.375191Z"
+    },
+    "verifier": {
+        "started_at": "2026-08-23T01:35:16.246032Z",
+        "finished_at": "2026-08-23T01:42:09.326602Z"
+    },
+    "step_results": null
+}
