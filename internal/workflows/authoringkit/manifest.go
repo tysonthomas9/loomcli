@@ -2,6 +2,7 @@ package authoringkit
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -77,6 +78,24 @@ func CanonicalBytes(m Manifest) ([]byte, error) {
 }
 func DigestBytes(b []byte) string { s := sha256.Sum256(b); return "sha256:" + hex.EncodeToString(s[:]) }
 
+// IsMachO reports whether data begins with a Mach-O (thin or universal) magic.
+// A false positive (e.g. a 0xCAFEBABE Java class, which the kit never ships) is
+// harmless: it only routes the file through the stricter macho verification,
+// and the classification is deterministic so packager and verifier agree.
+func IsMachO(data []byte) bool {
+	if len(data) < 4 {
+		return false
+	}
+	switch binary.BigEndian.Uint32(data[:4]) {
+	case 0xFEEDFACE, 0xFEEDFACF, // thin, big-endian 32/64
+		0xCEFAEDFE, 0xCFFAEDFE, // thin, little-endian 32/64
+		0xCAFEBABE, 0xCAFEBABF, // universal (fat), 32/64
+		0xBEBAFECA, 0xBFBAFECA: // universal (fat), byte-swapped
+		return true
+	}
+	return false
+}
+
 //nolint:cyclop,gocognit,funlen // Verification is intentionally a linear fail-closed audit.
 func verify(root string) (*Kit, error) {
 	if root == "" {
@@ -126,9 +145,33 @@ func verify(root string) (*Kit, error) {
 		if e != nil {
 			return nil, e
 		}
-		s := sha256.Sum256(b)
-		if x.Kind == "data" && strings.TrimPrefix(strings.ToLower(x.SHA256), "sha256:") != hex.EncodeToString(s[:]) {
-			return nil, fmt.Errorf("%w: sha256", ErrInvalid)
+		switch x.Kind {
+		case "data":
+			s := sha256.Sum256(b)
+			if strings.TrimPrefix(strings.ToLower(x.SHA256), "sha256:") != hex.EncodeToString(s[:]) {
+				return nil, fmt.Errorf("%w: sha256", ErrInvalid)
+			}
+		case "macho":
+			// A declared Team ID means the Mach-O is code-signed: deep-signing
+			// the app rewrites its bytes, so a baked content hash would be stale.
+			// Bind identity to the signature's Team ID, which survives
+			// notarization. An unsigned Mach-O (developer/CI kit) has no Team ID
+			// and is bound by content hash like any data file. The choice is
+			// itself covered by kit_digest, so it cannot be silently downgraded.
+			if x.TeamID != "" {
+				team, err := MachOTeamID(p)
+				if err != nil {
+					return nil, fmt.Errorf("%w: macho signature: %v", ErrInvalid, err)
+				}
+				if team != x.TeamID {
+					return nil, fmt.Errorf("%w: team_id", ErrInvalid)
+				}
+			} else {
+				s := sha256.Sum256(b)
+				if strings.TrimPrefix(strings.ToLower(x.SHA256), "sha256:") != hex.EncodeToString(s[:]) {
+					return nil, fmt.Errorf("%w: sha256", ErrInvalid)
+				}
+			}
 		}
 	}
 	if e = filepath.WalkDir(root, func(p string, d fs.DirEntry, e error) error {

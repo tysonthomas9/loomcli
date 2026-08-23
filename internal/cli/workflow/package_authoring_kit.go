@@ -115,6 +115,10 @@ func copyKitTree(src, dst, prefix string, entries *[]authoringkit.FileEntry) err
 		if d.IsDir() {
 			return os.MkdirAll(out, 0o755)
 		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
 		data, err := os.ReadFile(path) //nolint:gosec // path is produced by Walk under the explicit source root.
 		if err != nil {
 			return err
@@ -122,11 +126,33 @@ func copyKitTree(src, dst, prefix string, entries *[]authoringkit.FileEntry) err
 		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(out, data, 0o644); err != nil {
+		// Preserve the executable bit so a bundled Node/Mach-O binary stays
+		// runnable; data files stay 0o644.
+		perm := os.FileMode(0o644)
+		if info.Mode().Perm()&0o111 != 0 {
+			perm = 0o755
+		}
+		if err := os.WriteFile(out, data, perm); err != nil {
 			return err
 		}
-		sum := sha256.Sum256(data)
-		*entries = append(*entries, authoringkit.FileEntry{Path: filepath.ToSlash(filepath.Join(prefix, rel)), Kind: "data", SHA256: "sha256:" + hex.EncodeToString(sum[:])})
+		entry := authoringkit.FileEntry{Path: filepath.ToSlash(filepath.Join(prefix, rel))}
+		if authoringkit.IsMachO(data) {
+			// A signed Mach-O binds by Team ID (survives notarization
+			// re-signing); an unsigned one — a developer/CI kit, or a kit
+			// packaged before the app is signed — binds by content hash.
+			entry.Kind = "macho"
+			if team, teamErr := authoringkit.MachOTeamID(out); teamErr == nil {
+				entry.TeamID = team
+			} else {
+				sum := sha256.Sum256(data)
+				entry.SHA256 = "sha256:" + hex.EncodeToString(sum[:])
+			}
+		} else {
+			entry.Kind = "data"
+			sum := sha256.Sum256(data)
+			entry.SHA256 = "sha256:" + hex.EncodeToString(sum[:])
+		}
+		*entries = append(*entries, entry)
 		return nil
 	})
 }

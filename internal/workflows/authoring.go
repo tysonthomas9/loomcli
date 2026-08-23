@@ -13,6 +13,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/noderuntime"
 	"github.com/tysonthomas9/loomcli/internal/workflows/authoringkit"
+	"github.com/tysonthomas9/loomcli/internal/workflows/buildsandbox"
+	"github.com/tysonthomas9/loomcli/internal/workflows/packaged"
 )
 
 type AuthoringToolchain struct {
@@ -30,15 +32,15 @@ func ResolveAuthoringToolchain() (AuthoringToolchain, error) {
 	}
 	if kit, err := authoringkit.Lookup(); err == nil {
 		return resolveKitToolchain(kit)
-	} else if packagedBuildMode() {
+	} else if packaged.FailClosed() {
+		// Packaged builds (desktop runtime or a baked index digest) never fall
+		// through to a developer PATH toolchain: if the verified kit is missing
+		// or invalid, authoring fails closed with the kit's own error.
 		return AuthoringToolchain{}, err
 	}
 	return resolveDeveloperToolchain()
 }
 
-func packagedBuildMode() bool {
-	return os.Getenv("LOOM_LOCAL_RUNTIME") == "desktop" || os.Getenv("LOOM_AUTHORING_PACKAGE_MODE") == "1"
-}
 func hasAuthoringOverride() bool {
 	for _, k := range []string{"LOOM_REAL_FLUE_CMD_JSON", "LOOM_REAL_FLUE_CMD", "LOOM_SDK_ROOT", "LOOM_FLUE_RUNTIME_ROOT", "FLUE_RUNTIME_ROOT", "FLUE_REPO", "DAYTONA_SDK_ROOT"} {
 		if strings.TrimSpace(os.Getenv(k)) != "" {
@@ -50,7 +52,7 @@ func hasAuthoringOverride() bool {
 func resolveOverrideToolchain() (AuthoringToolchain, error) {
 	node, err := noderuntime.Resolve()
 	if err != nil {
-		return AuthoringToolchain{}, err
+		return AuthoringToolchain{}, fmt.Errorf("node_runtime_missing: %w", err)
 	}
 	cmd, err := flueCommand()
 	if err != nil {
@@ -70,7 +72,7 @@ func resolveOverrideToolchain() (AuthoringToolchain, error) {
 func resolveDeveloperToolchain() (AuthoringToolchain, error) {
 	node, err := noderuntime.Resolve()
 	if err != nil {
-		return AuthoringToolchain{}, err
+		return AuthoringToolchain{}, fmt.Errorf("node_runtime_missing: %w", err)
 	}
 	cmd, err := flueCommand()
 	if err != nil {
@@ -120,7 +122,11 @@ func (t AuthoringToolchain) Description() map[string]any {
 
 func authoringReadyDescription() map[string]any {
 	kit, err := authoringkit.Lookup()
-	result := map[string]any{"source": "missing", "sandbox": "none", "ready": false}
+	sandbox := "unavailable"
+	if mode, e := buildsandbox.Mode(packaged.FailClosed()); e == nil {
+		sandbox = mode
+	}
+	result := map[string]any{"source": "missing", "sandbox": sandbox, "ready": false}
 	if kit != nil {
 		result["source"] = "kit"
 		result["digest"] = kit.Digest
