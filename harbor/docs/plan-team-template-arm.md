@@ -362,6 +362,20 @@ Status: spec A + B landed; stub dry-run NOT yet run.
   FATAL in daemon.out, no agent killed mid-turn, no prompt text in any argv. Trial 2 → 3:
   1 → 7 integrations, daemon crash → clean exit. Watched via a Sonnet subagent (README
   "Watching a trial from an agent session").
-- Next: the full-budget all-cursor run (`budget_secs=14400`, cap sized from $20.66/33 min ≈
-  $38/h → ~$150 for 4 h) with the replica judge; compare against the codex team arm.
+- **Full-budget all-cursor run `team-cursor-full-151445`** (2026-08-22 22:15 → 23 01:35Z,
+  3h20m work, $180 cap, `harbor/test/launch-team-cursor.sh PROFILE=full`): `HARBOR_EXIT=0`,
+  **integrated=15, 1 critic reject** (MARATHON-18 attempt 1 deleted shipped DM code → attempt 2
+  approved), **$65.31** / 62 metered turns (~$20/h; the $38/h estimate from the short trial
+  was setup-heavy). Health: one real cursor `Error: usage limit` on the architect (single
+  uncounted retry), one loom silence-watchdog kill on frontend-dev (restarted); no crashes, no
+  argv kills, no classifier false positives. Delivery split: backend-dev-1 10, qa-engineer-1
+  4, frontend-dev-1 1. **Score: correctness 0 (gates 0/5 — health ✓ anti-cheat ✓, api/chaos/
+  crash/frontend/irc ✗; pytest 76/129, IRC 0/11, journey 0/1); replica-ux 0.375** (auth +
+  layout PASS, polish/realism PARTIAL, channels/messaging/threads/reactions FAIL — the SPA has
+  no channel-create control, no message list and no composer) → **partial 0.1875
+  (replica-ux)**. Official CUA hard-failed on the dummy key as policy intends. Reading: the
+  harness ran a real task unattended end to end; the product lost on prioritization — the team
+  spent the window on the API core and never reached the grader's hard gates (IRC gateway,
+  crash/chaos recovery, frontend journey) or the message UI. Next lever is the lead prompt
+  (gate-first ordering, frontend weight), not the runtime.
 
