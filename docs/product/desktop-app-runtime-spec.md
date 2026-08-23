@@ -194,8 +194,20 @@ Updates happen at the app bundle level. A single app update includes:
 - embedded web UI
 - bundled `loom` sidecar
 - embedded FleetDB/local runtime code
+- the packaged **built-in workflow** artifacts (`epic-runner`, `github-review-agent`)
 
 Local data remains in the app data directory and survives bundle replacement.
+
+A bundle update can also change a **built-in workflow**. On the default **`auto`**
+track the running version follows the app: after the sidecar restarts, the new
+packaged version is registered and activated automatically (and an app
+*downgrade* symmetrically re-activates the older packaged version). A built-in an
+operator has **pinned** — by explicitly activating or rolling back a version, or
+by running a custom authored build — is left untouched; the newer packaged
+version is surfaced as an available update the operator can adopt. Versions are
+identified by bundle digest, are immutable, and their staged bundles are retained
+so an operator can roll back a bad update. See
+`docs/design/2026-08-22-workflow-versioning-rollback.md`.
 
 The update flow must coordinate with the LaunchAgent:
 

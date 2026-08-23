@@ -633,6 +633,27 @@ func verifyBundleManifest(bundleRoot, wantDigest string) (map[string]string, str
 	return manifest, serverPath, nil
 }
 
+// VerifyStagedBundle re-verifies a version's staged bundle on disk without
+// running it: the bundle_ref must resolve under workDir, the manifest must be
+// present and name a built server, and the on-disk tree digest must equal the
+// pinned BundleDigest. It is the read-only check built-in sync uses to decide
+// whether to repair a packaged bundle and the versions listing uses for
+// bundle_verified. Runs perform the equivalent verification inline via
+// loadRunRequest (error class bundle_verification).
+func VerifyStagedBundle(workDir string, version *domain.DriverVersion) error {
+	if version == nil {
+		return fmt.Errorf("driver version required: %w", domain.ErrInvalid)
+	}
+	root, err := safeBundleRoot(workDir, version.BundleRef)
+	if err != nil {
+		return err
+	}
+	if _, _, err := verifyBundleManifest(root, version.BundleDigest); err != nil {
+		return err
+	}
+	return nil
+}
+
 func safeBundleRoot(workDir, bundleRef string) (string, error) {
 	if filepath.IsAbs(bundleRef) {
 		return "", fmt.Errorf("bundle_ref must be relative: %w", domain.ErrInvalid)

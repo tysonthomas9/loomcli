@@ -103,6 +103,17 @@ func installPackagedBuiltins(t *testing.T, names ...string) (root, indexDigest s
 func installPackagedBuiltinsBuild(t *testing.T, sources map[string]string) (root, indexDigest string) {
 	t.Helper()
 	isolatePackagedEnv(t)
+	return writePackagedTree(t, sources)
+}
+
+// writePackagedTree builds one verified packaged tree (index + per-name dist),
+// points LOOM_BUILTIN_ARTIFACTS_DIR at it, and bakes the index digest — WITHOUT
+// resetting the isolated env. Callers that must keep one data dir
+// (LOOM_WORKSPACE_RUNTIME_DIR) stable across successive tree installs call
+// isolatePackagedEnv once and then writePackagedTree per tree (DEV-V5-33 sync
+// tests exercise one data dir across app-build swaps).
+func writePackagedTree(t *testing.T, sources map[string]string) (root, indexDigest string) {
+	t.Helper()
 	root = t.TempDir()
 	idx := packaged.Index{
 		SchemaVersion: packaged.SchemaVersion,
@@ -309,6 +320,23 @@ func TestEnsureBuiltinWorkflowUsesPackagedArtifact(t *testing.T) {
 	}
 	assertManifestRunners(t, version.Manifest)
 	assertStagedBundle(t, version.BundleRef)
+
+	// DEV-V5-33: the packaged lane activates through SyncBuiltinWorkflow, which
+	// records a {system, builtin_sync, auto} activation on the driver.
+	drv, err := st.Drivers().Get(ctx, "BUILTIN", BuiltinEpicRunnerWorkflowName)
+	if err != nil {
+		t.Fatalf("get driver: %v", err)
+	}
+	wantMeta := map[string]string{
+		driverpkg.MetadataKeyActivationActor:  "system",
+		driverpkg.MetadataKeyActivationReason: "builtin_sync",
+		driverpkg.MetadataKeyBuiltinTrack:     "auto",
+	}
+	for key, value := range wantMeta {
+		if got := drv.Metadata[key]; got != value {
+			t.Errorf("driver metadata[%s] = %q, want %q", key, got, value)
+		}
+	}
 }
 
 // TestEnsureBuiltinWorkflowPackagedIsIdempotent: once registered from the
@@ -493,7 +521,8 @@ func TestEnsureBuiltinWorkflowUsesPackagedGitHubReviewAgent(t *testing.T) {
 
 // TestEnsureBuiltinWorkflowBothPackagedRegisterIndependently (DEV-V5-37):
 // each required built-in registers from its own index entry, in either
-// order, each with its own packaged registration log line.
+// order, each with its own packaged sync log line (DEV-V5-33: the packaged
+// lane registers + activates through SyncBuiltinWorkflow).
 func TestEnsureBuiltinWorkflowBothPackagedRegisterIndependently(t *testing.T) {
 	ctx := context.Background()
 	installPackagedBuiltins(t, packaged.RequiredBuiltins...)
@@ -512,8 +541,8 @@ func TestEnsureBuiltinWorkflowBothPackagedRegisterIndependently(t *testing.T) {
 	}
 	out := logs.String()
 	for _, name := range packaged.RequiredBuiltins {
-		if !strings.Contains(out, "registered from packaged artifact") || !strings.Contains(out, "workflow="+name) {
-			t.Fatalf("expected a packaged registration log line for %s, logs:\n%s", name, out)
+		if !strings.Contains(out, `msg="builtin workflow synced"`) || !strings.Contains(out, "workflow="+name) {
+			t.Fatalf("expected a packaged sync log line for %s, logs:\n%s", name, out)
 		}
 	}
 }

@@ -315,8 +315,10 @@ submit_untrusted_workflow() {
   log_step "submitting workflow through the untrusted HTTP submission path"
   write_step9_workflow
   local files_json response trust
+  # DEV-V5-33 D5: POST …/versions defaults to activate=false; this flow triggers
+  # a run against the submitted version immediately, so it activates explicitly.
   files_json="$(jq -nc --rawfile src "$TMP_ROOT/step9-workflow.ts" \
-    '{files: {("workflows/" + "'"$WORKFLOW_NAME"'" + ".ts"): $src}}')"
+    '{files: {("workflows/" + "'"$WORKFLOW_NAME"'" + ".ts"): $src}, activate: true}')"
   response="$(curl -fsS -X POST -H 'Content-Type: application/json' \
     --data "$files_json" \
     "$LOOM_URL/api/workspaces/${WORKSPACE}/workflows/${WORKFLOW_NAME}/versions")"

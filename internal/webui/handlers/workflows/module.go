@@ -32,10 +32,26 @@ func NewModule(st store.Store) *Module {
 
 func (m *Module) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/workspaces/{ws}/workflows/{name}/versions", m.createWorkflowVersion)
+	mux.HandleFunc("GET /api/workspaces/{ws}/workflows/{name}/versions", m.listWorkflowVersions)
+	mux.HandleFunc("POST /api/workspaces/{ws}/workflows/{name}/versions/{versionId}/activate", m.activateWorkflowVersion)
+	mux.HandleFunc("POST /api/workspaces/{ws}/workflows/{name}/builtin/sync", m.syncBuiltinWorkflow)
+	mux.HandleFunc("POST /api/workspaces/{ws}/workflows/{name}/rollback", m.rollbackWorkflow)
 	mux.HandleFunc("POST /api/workspaces/{ws}/workflows/{name}", m.createWorkflowRun)
 	mux.HandleFunc("GET /api/workspaces/{ws}/runs/{runId}", m.getRun)
 	mux.HandleFunc("GET /api/workspaces/{ws}/runs/{runId}/events", m.getRunEvents)
 	mux.HandleFunc("GET /api/workspaces/{ws}/runs/{runId}/stream", m.streamRunEvents)
+}
+
+// reservedWorkflowName reports whether name is reserved as a path literal and
+// so may not be a workflow name (DEV-V5-33 §3c: "builtin", like 32's
+// "readiness"). Callers reject it with 400 before resolving a driver.
+func reservedWorkflowName(name string) bool {
+	switch name {
+	case "builtin", "readiness":
+		return true
+	default:
+		return false
+	}
 }
 
 type createWorkflowVersionRequest struct {
@@ -82,7 +98,10 @@ func parseCreateWorkflowVersionRequest(w http.ResponseWriter, r *http.Request, n
 		return in, false
 	}
 	in.files = files
-	in.activate = true
+	// DEV-V5-33 D5: a custom build registers an immutable INACTIVE version by
+	// default; approve and activate remain separate explicit steps. Callers that
+	// want the old behavior pass "activate": true.
+	in.activate = false
 	if req.Activate != nil {
 		in.activate = *req.Activate
 	}
@@ -94,6 +113,10 @@ func (m *Module) createWorkflowVersion(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.PathValue("name"))
 	if name == "" {
 		writeError(w, http.StatusBadRequest, "workflow name is required")
+		return
+	}
+	if reservedWorkflowName(name) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("%q is a reserved workflow name", name))
 		return
 	}
 	in, ok := parseCreateWorkflowVersionRequest(w, r, name)
@@ -131,6 +154,10 @@ func (m *Module) createWorkflowRun(w http.ResponseWriter, r *http.Request) {
 	}
 	ws := r.PathValue("ws")
 	name := strings.TrimSpace(r.PathValue("name"))
+	if reservedWorkflowName(name) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("%q is a reserved workflow name", name))
+		return
+	}
 	driverID, err := m.resolveWorkflowDriverID(r.Context(), ws, name)
 	if err != nil {
 		slog.Error("createWorkflowRun: resolveWorkflowDriverID failed", "ws", ws, "workflow", name, "err", err.Error())

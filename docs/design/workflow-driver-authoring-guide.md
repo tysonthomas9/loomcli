@@ -72,8 +72,41 @@ bundle as a `DriverVersion`, and activates it when requested. A later run uses
 the active version at run creation time. Editing source after registration does
 not change an already registered version.
 
+`activate` **defaults to `false`**: registering a version no longer silently
+switches the active one. Activate explicitly, in a separate step:
+
+```text
+POST /api/workspaces/{ws}/workflows/{name}/versions/{id}/activate
+loom workflow activate <name> --version <id>
+```
+
 Built-in workflows, such as `epic-runner`, are registered lazily the first time
 they are invoked if no user-registered workflow with that name exists.
+
+### Built-in versioning, update & rollback
+
+A **built-in** workflow (`epic-runner`, `github-review-agent`) is versioned by
+its packaged bundle and follows an **update track**. See
+`docs/design/2026-08-22-workflow-versioning-rollback.md` for the full model
+(decisions D1–D7); the operator surface:
+
+```text
+loom workflow sync <name>                  # register this build's packaged version
+                                           # + apply track policy (auto by default)
+loom workflow activate <name> --builtin    # adopt packaged version + follow updates (auto)
+loom workflow activate <name> --version V [--track auto|pinned]  # --track auto only if V is packaged
+loom workflow rollback <name> [--version V]# default target: recorded previous active; pins the track
+loom workflow versions <name> [--json]     # newest-first; provenance / selected_by /
+                                           # bundle_verified per version + built-in update block
+```
+
+On the **`auto`** track an app update (or downgrade) re-activates the newly
+packaged version automatically. On the **`pinned`** track — set by an explicit
+`activate`/`rollback`, or implied by an active *custom* (authored) version — the
+active version is preserved and the packaged one is surfaced as
+`update_available`. The same operations exist over HTTP under
+`/api/workspaces/{ws}/workflows/{name}/` (`builtin/sync`, `rollback`,
+`versions/{id}/activate`).
 
 ## Platform-Owned Implicit Logic
 

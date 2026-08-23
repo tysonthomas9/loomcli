@@ -166,6 +166,19 @@ func TestEnsureBuiltinWorkflowRefreshesDeprecatedRunnerManifest(t *testing.T) {
 			t.Fatalf("refreshed manifest still declares openshell-task-runner: %+v", runners)
 		}
 	}
+
+	// DEV-V5-33: the legacy compile lane records {system, registration, auto} so
+	// a later packaged build reads the auto track.
+	wantMeta := map[string]string{
+		driverpkg.MetadataKeyActivationActor:  "system",
+		driverpkg.MetadataKeyActivationReason: "registration",
+		driverpkg.MetadataKeyBuiltinTrack:     "auto",
+	}
+	for key, value := range wantMeta {
+		if got := driver.Metadata[key]; got != value {
+			t.Errorf("compile-path driver metadata[%s] = %q, want %q", key, got, value)
+		}
+	}
 }
 
 func installFakeWorkflowBuildDeps(t *testing.T) {

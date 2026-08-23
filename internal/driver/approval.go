@@ -47,23 +47,16 @@ func UnapproveDriverVersion(ctx context.Context, s store.Store, ws, driverID, ve
 	return updated, version, nil
 }
 
+// ActivateDriverVersion is the explicit operator activation path. It records
+// {user, operator, pinned}: a human chose this version, which pins a built-in
+// driver off the auto track. Programmatic activations (registration side
+// effects, built-in sync) call ActivateDriverVersionWithOptions directly.
 func ActivateDriverVersion(ctx context.Context, s store.Store, ws, driverID, versionID string) (*domain.Driver, *domain.DriverVersion, error) {
-	driver, version, err := loadDriverVersionForOperatorAction(ctx, s, ws, driverID, versionID)
-	if err != nil {
-		return nil, nil, err
-	}
-	active := version.VersionID
-	status := domain.DriverStatusActive
-	metadata := activationMetadata(driver.Metadata, version.Manifest)
-	updated, err := s.Drivers().Update(ctx, ws, driver.DriverID, store.DriverUpdate{
-		ActiveVersionID: &active,
-		Status:          &status,
-		Metadata:        &metadata,
+	return ActivateDriverVersionWithOptions(ctx, s, ws, driverID, versionID, ActivationOptions{
+		Actor:  ActivationActorUser,
+		Reason: ActivationReasonOperator,
+		Track:  BuiltinTrackPinned,
 	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("activate driver version: %w", err)
-	}
-	return updated, version, nil
 }
 
 func DriverVersionApproved(driver *domain.Driver, version *domain.DriverVersion) bool {

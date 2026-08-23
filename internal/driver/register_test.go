@@ -41,6 +41,17 @@ func TestRegisterFlueDriverStagesNativeArtifactAndActivates(t *testing.T) {
 	if result.Driver.Status != domain.DriverStatusActive || result.Driver.ActiveVersionID != result.Version.VersionID {
 		t.Fatalf("driver = %+v, want active pinned version", result.Driver)
 	}
+	// DEV-V5-33: a bare `loom driver register --activate` (zero Activation)
+	// records {user, registration} and never stamps a built-in track.
+	if got := result.Driver.Metadata[MetadataKeyActivationActor]; got != "user" {
+		t.Fatalf("activation_actor = %q, want user", got)
+	}
+	if got := result.Driver.Metadata[MetadataKeyActivationReason]; got != "registration" {
+		t.Fatalf("activation_reason = %q, want registration", got)
+	}
+	if got, ok := result.Driver.Metadata[MetadataKeyBuiltinTrack]; ok {
+		t.Fatalf("builtin_track must not be set on an operator registration, got %q", got)
+	}
 	if result.Version.Runtime != RuntimeFlueNode || result.Version.ValidationStatus != domain.DriverVersionValidationPassed {
 		t.Fatalf("version = %+v, want passed flue-node version", result.Version)
 	}

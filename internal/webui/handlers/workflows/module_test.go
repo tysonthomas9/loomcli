@@ -411,4 +411,12 @@ EOF
 	t.Setenv("LOOM_FLUE_RUNTIME_ROOT", runtimeRoot)
 	t.Setenv("FLUE_RUNTIME_ROOT", "")
 	t.Setenv("FLUE_REPO", "")
+	// These tests exercise the compile fallback, which is only reachable off the
+	// fail-closed path (DEV-V5-31/33): clear the desktop marker and any packaged
+	// artifacts dir a desktop-spawned shell inherits, so the suite is hermetic
+	// when run inside a Loom workspace. Reset the packaged-artifact cache so a
+	// prior lookup under a different env never leaks in.
+	t.Setenv("LOOM_LOCAL_RUNTIME", "")
+	t.Setenv("LOOM_BUILTIN_ARTIFACTS_DIR", "")
+	workflowdefs.ResetPackagedCacheForTest()
 }

@@ -151,8 +151,12 @@ func init() {
 
 	for _, cmd := range []*cobra.Command{workflowApproveCmd, workflowUnapproveCmd, workflowActivateCmd} {
 		cmd.Flags().StringVar(&workflowVersionID, "version", "", "DriverVersion id")
-		_ = cmd.MarkFlagRequired("version")
 	}
+	// approve/unapprove always need --version; activate accepts --version OR
+	// --builtin (mutual exclusion + one-required enforced in runWorkflowActivate,
+	// flags registered in workflow_version_cmds.go).
+	_ = workflowApproveCmd.MarkFlagRequired("version")
+	_ = workflowUnapproveCmd.MarkFlagRequired("version")
 	workflowApproveCmd.Flags().BoolVar(&workflowApproveJSON, "json", false, "JSON output")
 	workflowUnapproveCmd.Flags().BoolVar(&workflowApproveJSON, "json", false, "JSON output")
 	workflowActivateCmd.Flags().BoolVar(&workflowActivateJSON, "json", false, "JSON output")
@@ -191,6 +195,16 @@ type workflowVersionOutput struct {
 	Active         bool                    `json:"active"`
 	Approved       bool                    `json:"approved"`
 	EffectiveTrust domain.DriverTrustLevel `json:"effective_trust"`
+}
+
+// workflowVersionListItem is one row of `loom workflow versions`: the shared
+// version output plus per-version provenance, who selected it (activation actor,
+// only on the active row), and whether its staged bundle verifies.
+type workflowVersionListItem struct {
+	workflowVersionOutput
+	Provenance     string `json:"provenance,omitempty"`
+	SelectedBy     string `json:"selected_by,omitempty"`
+	BundleVerified bool   `json:"bundle_verified"`
 }
 
 func runWorkflowClone(_ *cobra.Command, args []string) error {
@@ -274,24 +288,29 @@ func runWorkflowBuild(_ *cobra.Command, args []string) error {
 }
 
 func runWorkflowApprove(_ *cobra.Command, args []string) error {
-	return workflowVersionAction(args[0], workflowVersionID, workflowApproveJSON, "approved", driverpkg.ApproveDriverVersion)
+	versionID := workflowVersionID
+	return workflowVersionAction(args[0], workflowApproveJSON, "approved", func(ctx context.Context, s store.Store, ws, driverID string) (*domain.Driver, *domain.DriverVersion, error) {
+		return driverpkg.ApproveDriverVersion(ctx, s, ws, driverID, versionID)
+	})
 }
 
 func runWorkflowUnapprove(_ *cobra.Command, args []string) error {
-	return workflowVersionAction(args[0], workflowVersionID, workflowApproveJSON, "unapproved", driverpkg.UnapproveDriverVersion)
+	versionID := workflowVersionID
+	return workflowVersionAction(args[0], workflowApproveJSON, "unapproved", func(ctx context.Context, s store.Store, ws, driverID string) (*domain.Driver, *domain.DriverVersion, error) {
+		return driverpkg.UnapproveDriverVersion(ctx, s, ws, driverID, versionID)
+	})
 }
 
-func runWorkflowActivate(_ *cobra.Command, args []string) error {
-	return workflowVersionAction(args[0], workflowVersionID, workflowActivateJSON, "activated", driverpkg.ActivateDriverVersion)
-}
-
-func workflowVersionAction(workflow, versionID string, jsonOut bool, action string, fn func(context.Context, store.Store, string, string, string) (*domain.Driver, *domain.DriverVersion, error)) error {
+// workflowVersionAction resolves the workflow driver, runs fn (which captures
+// the version id and any activation options), and renders the shared version
+// output. runWorkflowActivate/Sync/Rollback live in workflow_version_cmds.go.
+func workflowVersionAction(workflow string, jsonOut bool, action string, fn func(ctx context.Context, s store.Store, ws, driverID string) (*domain.Driver, *domain.DriverVersion, error)) error {
 	return workflowWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		driverID, err := workflows.ResolveDriverID(ctx, h.Store, ws, workflow)
 		if err != nil {
 			return fmt.Errorf("resolve workflow driver: %w", err)
 		}
-		driver, version, err := fn(ctx, h.Store, ws, driverID, versionID)
+		driver, version, err := fn(ctx, h.Store, ws, driverID)
 		if err != nil {
 			return err
 		}
@@ -388,8 +407,9 @@ func runWorkflowList(_ *cobra.Command, _ []string) error {
 }
 
 func runWorkflowVersions(_ *cobra.Command, args []string) error {
+	name := args[0]
 	return workflowWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		driverID, err := workflows.ResolveDriverID(ctx, h.Store, ws, args[0])
+		driverID, err := workflows.ResolveDriverID(ctx, h.Store, ws, name)
 		if err != nil {
 			return fmt.Errorf("resolve workflow driver: %w", err)
 		}
@@ -401,24 +421,60 @@ func runWorkflowVersions(_ *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		out := make([]workflowVersionOutput, 0, len(versions))
+		// Newest first (Version desc).
+		sort.SliceStable(versions, func(i, j int) bool {
+			return versions[i].Version > versions[j].Version
+		})
+		workDir := workflows.BuiltinWorkflowWorkDir()
+		selectedBy := strings.TrimSpace(driver.Metadata[driverpkg.MetadataKeyActivationActor])
+		out := make([]workflowVersionListItem, 0, len(versions))
 		for _, version := range versions {
-			out = append(out, workflowVersionOutput{
-				Version:        version,
-				Active:         driver.ActiveVersionID == version.VersionID,
-				Approved:       driverpkg.DriverVersionApproved(driver, version),
-				EffectiveTrust: driverpkg.DriverVersionEffectiveTrust(driver, version),
-			})
+			active := driver.ActiveVersionID == version.VersionID
+			item := workflowVersionListItem{
+				workflowVersionOutput: workflowVersionOutput{
+					Version:        version,
+					Active:         active,
+					Approved:       driverpkg.DriverVersionApproved(driver, version),
+					EffectiveTrust: driverpkg.DriverVersionEffectiveTrust(driver, version),
+				},
+				Provenance:     version.Manifest["provenance"],
+				BundleVerified: driverpkg.VerifyStagedBundle(workDir, version) == nil,
+			}
+			if active {
+				item.SelectedBy = selectedBy
+			}
+			out = append(out, item)
 		}
+
+		payload := map[string]any{"driver_id": driverID, "versions": out}
+		var builtin *workflows.BuiltinVersionsInfo
+		if isBuiltinWorkflow(name) {
+			// Read-only: never mutates, never fails the listing on a packaging
+			// problem (packaged_error carries the reason instead).
+			builtin, err = workflows.DescribeBuiltinVersions(ctx, h.Store, ws, name)
+			if err != nil {
+				return err
+			}
+			payload["builtin"] = builtin
+		}
+
 		if workflowVersionsJSON {
-			return cmdstore.WriteJSON(map[string]any{"driver_id": driverID, "versions": out})
+			return cmdstore.WriteJSON(payload)
 		}
 		for _, item := range out {
 			active := ""
 			if item.Active {
 				active = "active"
 			}
-			fmt.Printf("%s\t%s\tapproved=%t\ttrust=%s\n", item.Version.VersionID, active, item.Approved, item.EffectiveTrust)
+			fmt.Printf("%s\t%s\tapproved=%t\ttrust=%s\tprovenance=%s\tbundle_verified=%t\n",
+				item.Version.VersionID, active, item.Approved, item.EffectiveTrust, item.Provenance, item.BundleVerified)
+		}
+		if builtin != nil {
+			if builtin.PackagedError != "" {
+				fmt.Printf("built-in: track=%s packaged_error=%s\n", builtin.Track, builtin.PackagedError)
+			} else if builtin.UpdateAvailable {
+				fmt.Printf("update available: packaged %s (source %s)\n", builtin.PackagedVersionID, builtin.PackagedSourceDigest)
+			}
 		}
 		return nil
 	})

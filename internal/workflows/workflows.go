@@ -74,6 +74,10 @@ type BuildAndRegisterOptions struct {
 	// fail closed; only EnsureBuiltinWorkflow passes trusted for the embedded
 	// source-tree workflows.
 	Trust domain.DriverTrustLevel
+	// Activation records who activated and why when Activate is true (the
+	// legacy compile lane passes {system, registration, auto}). Ignored when
+	// Activate is false; the zero value records {user, registration, ""}.
+	Activation driver.ActivationOptions
 }
 
 var builtinMu sync.Mutex
@@ -145,6 +149,27 @@ func EnsureBuiltinWorkflow(ctx context.Context, st store.Store, ws, name string)
 	digest := SourceDigest(spec.Files)
 	sourceRef := "builtin://workflows/" + name + "/versions/" + digest
 	freshRunners := workflowRunnerNameSet(spec)
+
+	// Packaged path (DEV-V5-31/33): when this binary ships a verified artifact,
+	// sync owns registration and activation (builtin_sync.go) — it registers the
+	// packaged artifact as a new immutable version, applies the track policy, and
+	// repairs a tampered/missing packaged bundle. A verification failure is fatal
+	// in every mode and never falls through to compiling.
+	wantRunners := deriveWorkflowRunnerSpecs(spec.Entrypoint, spec.Files)
+	_, lookupErr := lookupPackagedArtifact(name, digest, wantRunners)
+	switch {
+	case lookupErr == nil:
+		return syncPackagedBuiltin(ctx, st, ws, name, spec, freshRunners)
+	case !errors.Is(lookupErr, packaged.ErrNotPackaged):
+		return fmt.Errorf("register built-in workflow %q: %w", name, lookupErr)
+	}
+
+	// No packaged artifact for this workflow in this binary. Reuse the durable
+	// staged bundle if it is still usable: D3 keeps the data-dir bundle across
+	// resource-tree replacement, so a downgrade to a built-in the new app no
+	// longer ships reuses the version already staged here. Only when nothing
+	// usable is registered do we fail closed (packaged/desktop) or fall back to
+	// compiling (a dev binary with the authoring toolchain on disk).
 	reuse, current, reuseMissingRunners, err := builtinReuseDecision(ctx, st, ws, name, freshRunners)
 	if err != nil {
 		return err
@@ -165,9 +190,8 @@ func EnsureBuiltinWorkflow(ctx context.Context, st store.Store, ws, name string)
 		}
 		return nil
 	}
-
-	if handled, err := ensureBuiltinFromPackaged(ctx, st, ws, name, sourceRef, digest, spec); handled {
-		return err
+	if packaged.FailClosed() {
+		return fmt.Errorf("register built-in workflow %q: %w (desktop packaging error: this Loom build ships no built-in workflow artifact for %s; reinstall Loom)", name, lookupErr, name)
 	}
 	return compileAndRegisterBuiltin(ctx, st, ws, name, sourceRef, digest, spec, reuseMissingRunners)
 }
@@ -188,6 +212,14 @@ func compileAndRegisterBuiltin(ctx context.Context, st store.Store, ws, name, so
 		WorkDir:       builtinWorkflowWorkDir(),
 		DeriveRunners: true,
 		Trust:         domain.DriverTrustTrusted,
+		// The compile lane records the auto track so a later packaged build reads
+		// the right track (the toolchain-less-serve concern that motivated
+		// reuse-at-different-digest does not exist on the packaged path).
+		Activation: driver.ActivationOptions{
+			Actor:  driver.ActivationActorSystem,
+			Reason: driver.ActivationReasonRegistration,
+			Track:  driver.BuiltinTrackAuto,
+		},
 	}); err != nil {
 		if len(reuseMissingRunners) > 0 {
 			slog.Warn("builtin runner manifest is missing runners and re-register failed; reusing the registered version",
@@ -202,64 +234,30 @@ func compileAndRegisterBuiltin(ctx context.Context, st store.Store, ws, name, so
 	return nil
 }
 
-// ensureBuiltinFromPackaged runs the packaged lane (DEV-V5-31): a verified
-// pre-built artifact registers WITHOUT the compiler. handled=true means the
-// caller returns err as-is (registered, or failed closed — verification
-// failures are fatal in every mode, and a packaged build or desktop process
-// never falls through to compiling); handled=false means the legacy compile
-// lane is the next step.
-func ensureBuiltinFromPackaged(ctx context.Context, st store.Store, ws, name, sourceRef, digest string, spec Spec) (bool, error) {
-	wantRunners := deriveWorkflowRunnerSpecs(spec.Entrypoint, spec.Files)
-	art, lookupErr := packaged.Lookup(name, digest, wantRunners)
-	switch {
-	case lookupErr == nil:
-		return true, registerPackagedBuiltin(ctx, st, ws, name, sourceRef, digest, art)
-	case errors.Is(lookupErr, packaged.ErrNotPackaged):
-		if packaged.FailClosed() {
-			return true, fmt.Errorf("register built-in workflow %q: %w (desktop packaging error: this Loom build ships no built-in workflow artifact for %s; reinstall Loom)", name, lookupErr, name)
-		}
-		slog.Debug("builtin workflow not packaged; using compile fallback", "workflow", name)
-		return false, nil
-	default:
-		return true, fmt.Errorf("register built-in workflow %q: %w", name, lookupErr)
+// syncPackagedBuiltin runs the sync (register + track-policy activation + bundle
+// repair) and enforces the run-time invariants: the active version must have a
+// bundle on disk (edge #8: never auto-switch the user's selection), and a pinned
+// active version with a stale runner set is a warning — the packaged path never
+// re-registers under the user's pin.
+func syncPackagedBuiltin(ctx context.Context, st store.Store, ws, name string, spec Spec, freshRunners map[string]struct{}) error {
+	result, err := syncBuiltinLocked(ctx, st, ws, name, spec, BuiltinSyncOptions{})
+	if err != nil {
+		return fmt.Errorf("register built-in workflow %q: %w", name, err)
 	}
-}
-
-// registerPackagedBuiltin registers a verified packaged artifact through the
-// existing no-compile RegisterFlueDriver path as TRUSTED with packaged
-// provenance. A registration failure here is returned as-is: there is no
-// compile fallback and no reuseMissingRunners fail-open on this lane.
-func registerPackagedBuiltin(ctx context.Context, st store.Store, ws, name, sourceRef, digest string, art *packaged.Artifact) error {
-	if _, err := driver.RegisterFlueDriver(ctx, st, driver.RegisterFlueOptions{
-		WorkspaceKey: ws,
-		WorkDir:      builtinWorkflowWorkDir(),
-		DistPath:     art.DistPath,
-		DriverName:   name,
-		DriverID:     name,
-		WorkflowName: name,
-		SourceRef:    sourceRef,
-		SourceDigest: digest,
-		CreatedBy:    "system",
-		Activate:     true,
-		RunnerSpecs:  art.Runners,
-		Manifest:     packagedProvenance(art),
-		Trust:        domain.DriverTrustTrusted,
-		// Re-checked against the staged copy so a tree swapped between
-		// Lookup's verification and the staging read is never promoted.
-		ExpectedArtifactDigest: art.ArtifactDigest,
-	}); err != nil {
-		if errors.Is(err, driver.ErrStagedArtifactDigestMismatch) {
-			return fmt.Errorf("register packaged built-in workflow %q: %w", name, &packaged.VerificationError{
-				Name: name, Field: "artifact_digest", Want: art.ArtifactDigest, Got: "changed during staging",
-			})
-		}
-		return fmt.Errorf("register packaged built-in workflow %q: %w", name, err)
+	if !result.ActiveBundleAvailable {
+		return fmt.Errorf("builtin_active_version_unavailable: workflow %q active version %s has no bundle on disk; run 'loom workflow activate %s --builtin' or roll back to another version: %w", name, result.ActiveVersionID, name, domain.ErrInvalid)
 	}
-	slog.Info("builtin workflow registered from packaged artifact",
-		"workflow", name,
-		"workspace", ws,
-		"artifact_digest", art.ArtifactDigest,
-		"index_digest", art.IndexDigest)
+	if result.ActiveVersionID != "" {
+		if active, err := st.DriverVersions().Get(ctx, ws, result.ActiveVersionID); err == nil {
+			if missing := manifestMissingFreshRunners(active.Manifest, freshRunners); len(missing) > 0 {
+				slog.Warn("builtin active version is pinned to a stale runner set",
+					"workflow", name,
+					"workspace", ws,
+					"active_version", result.ActiveVersionID,
+					"missing_runners", strings.Join(missing, ","))
+			}
+		}
+	}
 	return nil
 }
 
@@ -371,6 +369,12 @@ func builtinWorkflowWorkDir() string {
 	return workDir
 }
 
+// BuiltinWorkflowWorkDir returns the directory under which built-in workflow
+// bundles are staged (LOOM_WORKSPACE_RUNTIME_DIR, else the current directory).
+// CLI/HTTP surfaces use it to verify a staged bundle (driver.VerifyStagedBundle)
+// against the same root serve stages into.
+func BuiltinWorkflowWorkDir() string { return builtinWorkflowWorkDir() }
+
 // BuildBuiltinBundle builds a builtin workflow source tree into destDir and
 // returns the generated server.mjs path plus redacted Flue diagnostics. It lets
 // host-side callers obtain a runnable builtin task runner without committing
@@ -471,6 +475,7 @@ func BuildAndRegister(ctx context.Context, st store.Store, opts BuildAndRegister
 		SourceDigest:     opts.SourceDigest,
 		CreatedBy:        opts.CreatedBy,
 		Activate:         opts.Activate,
+		Activation:       opts.Activation,
 		RunnerSpecs:      workflowRunnerSpecs(opts),
 		Manifest:         opts.Manifest,
 		BuildDiagnostics: output,

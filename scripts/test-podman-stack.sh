@@ -658,7 +658,9 @@ EOF
 submit_workflow() {
   local name="$1" src="$2"
   local files_json
-  files_json="$(jq -nc --arg path "workflows/${name}.ts" --rawfile src "$src" '{files: {($path): $src}}')"
+  # DEV-V5-33 D5: POST …/versions defaults to activate=false; this stack triggers
+  # the workflow right after submitting, so it activates explicitly.
+  files_json="$(jq -nc --arg path "workflows/${name}.ts" --rawfile src "$src" '{files: {($path): $src}, activate: true}')"
   curl -fsS --max-time 240 -X POST -H @"$TMP_ROOT/serve-headers" \
     -H 'Content-Type: application/json' --data "$files_json" \
     "$SERVE_URL/api/workspaces/${WS}/workflows/${name}/versions"
