@@ -304,6 +304,24 @@ Then verify:
 - Reopening the app restores or opens a workspace window.
 - Opening another workspace window does not start a second runtime.
 
+Verify the embedded built-in workflow runtime (both artifacts present, verified,
+and running from the bundled Node — no dev checkout, no compile):
+
+```sh
+APP="desktop/src-tauri/target/release/bundle/macos/Loom Agents.app"
+
+# Expect builtin_runtime_ready: true, node.source: bundled, and both
+# artifacts (epic-runner, github-review-agent) verified: true.
+"$APP/Contents/MacOS/loom" workflow readyz --json | jq '.builtin_runtime'
+
+# Full Definition-of-Done: starts the app runtime under `env -i`, runs both
+# built-ins from the embedded artifacts, and proves tamper fails closed.
+bash scripts/test-packaged-builtin-app.sh "$APP"   # → PASS
+```
+
+The bundle carries the runtime alongside `loom`: `Contents/MacOS/node` (the pinned
+Node sidecar), `Contents/MacOS/fleet-db`, and `Contents/Resources/builtin-workflows/`.
+
 Useful status commands:
 
 ```sh

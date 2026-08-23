@@ -118,10 +118,20 @@ not isolation.
   `authoring_ready`, separately from `builtin_runtime_ready`.
 - **Node resolver**: The single place every host-side Flue exec site obtains
   its `node` executable (`internal/noderuntime`): `LOOM_NODE_BIN` override →
-  bundled sibling next to the `loom` binary → PATH.
+  bundled sibling next to the (symlink-resolved) `loom` binary → PATH.
+- **Embedded Node runtime**: The pinned `node` the desktop app ships at
+  `Contents/MacOS/node` (version = `internal/workflows/NODE_VERSION`, staged and
+  SHA-verified by `desktop/scripts/prepare-node-runtime.sh`). The Node resolver
+  reports it as `source=bundled`; it runs the built-in workflow bundles with no
+  `node` on `PATH`.
+- **Load smoke**: `desktop/scripts/smoke-load-server.mjs` — forks a packaged
+  `server.mjs` under a given `node` exactly the way the production launcher does
+  and waits for Flue's one-shot `{type:'ready'}` handshake, proving that Node
+  loads the whole module graph (including the nested `@loom/sdk` external). Run at
+  build time and in CI over both built-ins.
 - **Required built-in set**: `packaged.RequiredBuiltins` — the built-ins a
   desktop/packaged build must ship for `builtin_runtime_ready` to roll up
-  true (today `epic-runner`).
+  true (`epic-runner` and `github-review-agent`).
 
 ## Other Overloaded Names
 

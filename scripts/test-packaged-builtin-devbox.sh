@@ -68,29 +68,43 @@ assert_contains() { grep -qF -- "$2" <<<"$1" || fail "$3: expected to contain '$
 assert_not_contains() { ! grep -qF -- "$2" <<<"$1" || fail "$3: must NOT contain '$2'"; }
 
 # ---------------------------------------------------------------- 1. dist
-log "1. building epic-runner dist via scripts/rebuild-builtin-bundle.sh (FLUE_REPO=$FLUE_REPO)"
-FLUE_REPO="$FLUE_REPO" BUILTIN_DIST_DEST="$TMP/epic-runner-dist" "$ROOT/scripts/rebuild-builtin-bundle.sh" >"$OUT/rebuild.log" 2>&1 \
-  || { tail -40 "$OUT/rebuild.log" >&2; fail "rebuild-builtin-bundle.sh failed"; }
-[[ -f "$TMP/epic-runner-dist/server.mjs" ]] || fail "no server.mjs in built dist"
+log "1. building both built-in dists via scripts/rebuild-builtin-bundle.sh (FLUE_REPO=$FLUE_REPO)"
+for name in epic-runner github-review-agent; do
+  FLUE_REPO="$FLUE_REPO" BUILTIN_DIST_DEST="$TMP/${name}-dist" "$ROOT/scripts/rebuild-builtin-bundle.sh" "$name" >"$OUT/rebuild-${name}.log" 2>&1 \
+    || { tail -40 "$OUT/rebuild-${name}.log" >&2; fail "rebuild ${name} failed"; }
+  [[ -f "$TMP/${name}-dist/server.mjs" ]] || fail "no server.mjs in ${name} dist"
+done
 
 # ---------------------------------------------------------- 2. package-builtin
-log "2. loom workflow package-builtin epic-runner --require-all --json"
-PKG_JSON="$(cd "$ROOT" && go run ./cmd/loom workflow package-builtin epic-runner --dist "$TMP/epic-runner-dist" --out "$TMP/bw" --require-all --json)"
-record "package-builtin" "$PKG_JSON"
-tee "$OUT/package.json" <<<"$PKG_JSON" >/dev/null
-INDEX_DIGEST="$(jq -r .index_digest <<<"$PKG_JSON")"
+log "2. loom workflow package-builtin for both built-ins (--require-all on the last)"
+mkdir -p "$TMP/bw"
+# --require-all requires EVERY RequiredBuiltins entry to already be in the index,
+# so it can only go on the final built-in (epic-runner alone would fail it).
+BUILTINS=(epic-runner github-review-agent)
+for i in "${!BUILTINS[@]}"; do
+  name="${BUILTINS[$i]}"
+  REQ=(); [[ "$i" -eq $((${#BUILTINS[@]} - 1)) ]] && REQ=(--require-all)
+  # "${REQ[@]+"${REQ[@]}"}" — expand safely on macOS bash 3.2, where an empty
+  # "${REQ[@]}" trips `set -u` ("unbound variable"; fixed only in bash 4.4+).
+  PKG_JSON="$(cd "$ROOT" && go run ./cmd/loom workflow package-builtin "$name" --dist "$TMP/${name}-dist" --out "$TMP/bw" "${REQ[@]+"${REQ[@]}"}" --json)"
+  record "package-builtin ${name}" "$PKG_JSON"
+  tee "$OUT/package-${name}.json" <<<"$PKG_JSON" >/dev/null
+done
+INDEX_DIGEST="$(shasum -a 256 "$TMP/bw/index.json" | awk '{print "sha256:"$1}')"
 [[ "$INDEX_DIGEST" == sha256:* ]] || fail "index_digest missing"
 [[ "$(jq -r '.audit.native_files|length' <<<"$PKG_JSON")" == 0 ]] || fail "audit.native_files not empty"
 [[ "$(jq -r '.audit.bare_specifiers|length' <<<"$PKG_JSON")" == 0 ]] || fail "audit.bare_specifiers not empty"
 [[ "$(jq -r '.audit.dlopen' <<<"$PKG_JSON")" == false ]] || fail "audit.dlopen true"
 [[ "$(jq -r '.audit.symlinks|length' <<<"$PKG_JSON")" == 0 ]] || fail "audit.symlinks not empty"
-[[ -f "$TMP/bw/index.json" && -f "$TMP/bw/epic-runner/dist/server.mjs" && -f "$TMP/bw/epic-runner/dist/node_modules/@loom/sdk/driver.js" ]] || fail "packaged tree incomplete"
+[[ -f "$TMP/bw/index.json" && -f "$TMP/bw/epic-runner/dist/server.mjs" && -f "$TMP/bw/github-review-agent/dist/server.mjs" && -f "$TMP/bw/epic-runner/dist/node_modules/@loom/sdk/driver.js" && -f "$TMP/bw/github-review-agent/dist/node_modules/@loom/sdk/driver.js" ]] || fail "packaged tree incomplete"
 [[ -z "$(find "$TMP/bw" \( -name '*.node' -o -type l \) -print)" ]] || fail "packaged tree contains .node files or symlinks"
-PKG_JSON2="$(cd "$ROOT" && go run ./cmd/loom workflow package-builtin epic-runner --dist "$TMP/epic-runner-dist" --out "$TMP/bw2" --require-all --json)"
+cp -R "$TMP/bw" "$TMP/bw2"
+PKG_JSON2="$(cd "$ROOT" && go run ./cmd/loom workflow package-builtin github-review-agent --dist "$TMP/github-review-agent-dist" --out "$TMP/bw2" --require-all --json)"
 cmp -s "$TMP/bw/index.json" "$TMP/bw2/index.json" || fail "re-packaging is not byte-identical"
 [[ "$(jq -r .index_digest <<<"$PKG_JSON2")" == "$INDEX_DIGEST" ]] || fail "re-packaging changed index_digest"
-record "server.mjs externals" "$(grep -c '"@loom/sdk' "$TMP/bw/epic-runner/dist/server.mjs") @loom/sdk refs; $(grep -cE 'from "(@daytona/sdk|@flue/runtime|hono|node-liblzma|@mongodb-js/zstd)"' "$TMP/bw/epic-runner/dist/server.mjs" || true) forbidden static externals"
-[[ "$(grep -cE 'from "(@daytona/sdk|@flue/runtime|hono|node-liblzma|@mongodb-js/zstd)"' "$TMP/bw/epic-runner/dist/server.mjs" || true)" == 0 ]] || fail "server.mjs still imports a forbidden external"
+for name in epic-runner github-review-agent; do
+  record "server.mjs externals ${name}" "$(grep -c '"@loom/sdk' "$TMP/bw/${name}/dist/server.mjs" || true) @loom/sdk refs"
+done
 
 # ------------------------------------------------------- 3./4. packaged loom
 log "3. building loom with -X $PKG.ExpectedIndexDigest=$INDEX_DIGEST"
@@ -194,7 +208,10 @@ record "readyz" "$READYZ"
 [[ "$(jq -r .builtin_runtime_ready <<<"$READYZ")" == true ]] || fail "builtin_runtime_ready != true"
 [[ "$(jq -r .builtin_runtime.node.source <<<"$READYZ")" == bundled ]] || fail "builtin_runtime.node.source != bundled"
 [[ "$(jq -r '.builtin_runtime.artifacts."epic-runner".verified' <<<"$READYZ")" == true ]] || fail "epic-runner not verified"
-[[ "$(jq -r '.builtin_runtime.artifacts."github-review-agent".required' <<<"$READYZ")" == false ]] || fail "github-review-agent must be required=false"
+# DEV-V5-37: github-review-agent is now a REQUIRED built-in (packaged.RequiredBuiltins),
+# and this desktop-mode tree ships it, so readyz must report both required AND verified.
+[[ "$(jq -r '.builtin_runtime.artifacts."github-review-agent".required' <<<"$READYZ")" == true ]] || fail "github-review-agent must be required=true"
+[[ "$(jq -r '.builtin_runtime.artifacts."github-review-agent".verified' <<<"$READYZ")" == true ]] || fail "github-review-agent not verified"
 [[ "$(jq -r .authoring_ready <<<"$READYZ")" == false ]] || fail "authoring_ready should be false (no toolchain)"
 [[ "$(jq -r .ok <<<"$READYZ")" == false ]] || fail "ok should equal authoring_ready=false"
 
@@ -211,6 +228,22 @@ record "DriverRun $RUN_ID" "$RUN"
 [[ "$(jq -r .status <<<"$RUN")" == completed ]] || fail "run status: $(jq -r .status <<<"$RUN") summary: $(jq -r .summary <<<"$RUN")"
 assert_contains "$(jq -r .summary <<<"$RUN")" "Dry-run validated epic" "run summary"
 
+# ------------------------------------------------------- 7b. gh draft run
+# The packaged github-review-agent bundle must load and reach `completed` on the
+# offline draft short-circuit (github-review-agent.ts) BEFORE any connector call.
+# DEFECT-1: the SDK/executor drop `output.skipped` (sdk/driver.js + executor.go),
+# so the proof is status==completed AND the persisted draft summary substring.
+log "7b. POST workflows/github-review-agent (draft) → completed + draft summary"
+GH_RESP="$(api_status POST "/api/workspaces/$WS_KEY/workflows/github-review-agent" \
+  "$(jq -nc '{repo:"octo/demo",prNumber:1,headSha:"0123456789abcdef0123456789abcdef01234567",draft:true,requestedBy:"devbox-script"}')")"
+GH_CODE="${GH_RESP%%$'\n'*}"; GH_BODY="${GH_RESP#*$'\n'}"
+record "POST github-review-agent (draft)" "HTTP $GH_CODE $GH_BODY"
+[[ "$GH_CODE" == 202 ]] || fail "POST github-review-agent: HTTP $GH_CODE $GH_BODY"
+GH_RUN="$(wait_run "$(jq -r .run_id <<<"$GH_BODY")")"
+record "DriverRun (gh draft)" "$GH_RUN"
+[[ "$(jq -r .status <<<"$GH_RUN")" == completed ]] || fail "gh draft status: $(jq -r .status <<<"$GH_RUN") summary: $(jq -r .summary <<<"$GH_RUN")"
+assert_contains "$(jq -r .summary <<<"$GH_RUN")" "is a draft; deferring review" "gh draft summary"
+
 # ---------------------------------------------------------- 8. versions
 log "8. loom workflow versions epic-runner --json"
 VERSIONS="$(run_env "$DATA" desktop env LOOM_WORKSPACE="$WS_KEY" "$TMP/bin/loom" workflow versions epic-runner --json)"
@@ -219,29 +252,51 @@ record "versions" "$VERSIONS"
 [[ "$(jq -r '.versions[] | select(.active) | .version.manifest.trust_level' <<<"$VERSIONS")" == trusted ]] || fail "active version trust_level != trusted"
 [[ "$(jq -r '.versions[] | select(.active) | .version.manifest.packaged_index_digest' <<<"$VERSIONS")" == "$INDEX_DIGEST" ]] || fail "packaged_index_digest mismatch"
 
+# ------------------------------------------------------- 8b. gh versions
+log "8b. loom workflow versions github-review-agent --json → packaged_builtin"
+GH_VERSIONS="$(run_env "$DATA" desktop env LOOM_WORKSPACE="$WS_KEY" "$TMP/bin/loom" workflow versions github-review-agent --json)"
+record "versions github-review-agent" "$GH_VERSIONS"
+[[ "$(jq -r '.versions[] | select(.active) | .version.manifest.provenance' <<<"$GH_VERSIONS")" == packaged_builtin ]] || fail "gh active provenance != packaged_builtin"
+[[ "$(jq -r '.versions[] | select(.active) | .version.manifest.trust_level' <<<"$GH_VERSIONS")" == trusted ]] || fail "gh active trust_level != trusted"
+[[ "$(jq -r '.versions[] | select(.active) | .version.manifest.packaged_index_digest' <<<"$GH_VERSIONS")" == "$INDEX_DIGEST" ]] || fail "gh packaged_index_digest mismatch"
+
 # ---------------------------------------------------------- 9. serve log
 log "9. serve log assertions"
 stop_serve
 SERVE_TEXT="$(cat "$SERVE_LOG")"
 assert_contains "$SERVE_TEXT" "builtin workflow registered from packaged artifact" "serve log"
+# Both built-ins registered from packaged artifacts (slog attrs matched separately
+# from the message per G4): the epic dry-run and the gh draft each lazily registered.
+assert_contains "$SERVE_TEXT" "workflow=epic-runner" "serve log epic-runner registration"
+assert_contains "$SERVE_TEXT" "workflow=github-review-agent" "serve log github-review-agent registration"
 assert_contains "$SERVE_TEXT" "node runtime resolved" "serve log"
 assert_contains "$SERVE_TEXT" "source=bundled" "serve log"
-assert_contains "$SERVE_TEXT" "path=$TMP/bin/node" "serve log"
+# The resolver logs the symlink-resolved path; on macOS $TMP under /var is really
+# /private/var, so compare against the physical path of the sibling node.
+assert_contains "$SERVE_TEXT" "path=$(cd "$TMP/bin" && pwd -P)/node" "serve log"
 for bad in "flue build" "workflow-builds" "local @loom/sdk" "LOOM_SDK_ROOT"; do assert_not_contains "$SERVE_TEXT" "$bad" "serve log"; done
 record "serve log (phase 1, grep)" "$(grep -E 'packaged artifact|node runtime resolved' "$SERVE_LOG" || true)"
 
 # ---------------------------------------------------------- 10. tamper
-tamper_case() { # tamper_case <label> <file> <want-field>
-  local label="$1" file="$2" field="$3" backup="$TMP/backup-$RANDOM"
-  log "10. tamper $label → expect builtin_artifact_invalid/$field, then restore"
+post_wf() { # post_wf <workflow> → "<code>\n<body>" (dispatches the payload shape)
+  case "$1" in
+    github-review-agent)
+      api_status POST "/api/workspaces/$WS_KEY/workflows/github-review-agent" \
+        "$(jq -nc '{repo:"octo/demo",prNumber:1,headSha:"0123456789abcdef0123456789abcdef01234567",draft:true,requestedBy:"devbox-script"}')" ;;
+    *) post_run "$EPIC" ;;
+  esac
+}
+tamper_case() { # tamper_case <label> <file> <want-field> [workflow=epic-runner]
+  local label="$1" file="$2" field="$3" wf="${4:-epic-runner}" backup="$TMP/backup-$RANDOM"
+  log "10. tamper $label ($wf) → expect builtin_artifact_invalid/$field, then restore"
   cp "$file" "$backup"
   printf 'x' | dd of="$file" bs=1 seek=$(( $(wc -c <"$file") - 2 )) conv=notrunc 2>/dev/null
   local data="$TMP/data-$label"
-  : > "$SERVE_LOG.tmp"; start_serve "$data"
+  start_serve "$data"
   seed_workspace
   local resp code body
-  resp="$(post_run "$EPIC")"; code="${resp%%$'\n'*}"; body="${resp#*$'\n'}"
-  record "POST epic-runner (tampered $label)" "HTTP $code $body"
+  resp="$(post_wf "$wf")"; code="${resp%%$'\n'*}"; body="${resp#*$'\n'}"
+  record "POST $wf (tampered $label)" "HTTP $code $body"
   # VerificationError wraps domain.ErrInvalid (DEV-V5-31 §3c) → 400; the one
   # thing it must never be is a 404 "workflow not found" that hides the cause.
   [[ "$code" =~ ^4|^5 && "$code" != 404 ]] || fail "tampered $label: want non-2xx and never 404, got $code $body"
@@ -253,13 +308,14 @@ tamper_case() { # tamper_case <label> <file> <want-field>
   data="$TMP/data-$label-restored"
   start_serve "$data"
   seed_workspace
-  resp="$(post_run "$EPIC")"; code="${resp%%$'\n'*}"; body="${resp#*$'\n'}"
-  record "POST epic-runner (restored $label)" "HTTP $code $body"
+  resp="$(post_wf "$wf")"; code="${resp%%$'\n'*}"; body="${resp#*$'\n'}"
+  record "POST $wf (restored $label)" "HTTP $code $body"
   [[ "$code" == 202 ]] || fail "restored $label: HTTP $code $body"
   [[ "$(wait_run "$(jq -r .run_id <<<"$body")" | jq -r .status)" == completed ]] || fail "restored $label run did not complete"
   stop_serve
 }
 tamper_case server-mjs "$TMP/bin/builtin-workflows/epic-runner/dist/server.mjs" artifact_digest
+tamper_case gh-server-mjs "$TMP/bin/builtin-workflows/github-review-agent/dist/server.mjs" artifact_digest github-review-agent
 tamper_case index-json "$TMP/bin/builtin-workflows/index.json" index_digest
 
 # ---------------------------------------------------------- 11. B4

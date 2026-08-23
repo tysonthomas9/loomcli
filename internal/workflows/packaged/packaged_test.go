@@ -26,6 +26,16 @@ func testRunners() []driver.DriverRunnerSpec {
 	}
 }
 
+// testGHSourceDigest/testGHRunners are the github-review-agent fixture
+// expectations (one derived runner, its own source digest).
+const testGHSourceDigest = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+
+func testGHRunners() []driver.DriverRunnerSpec {
+	return []driver.DriverRunnerSpec{
+		{Name: "github-review-task-runner", Kind: "flue-workflow", Entrypoint: "github-review-task-runner"},
+	}
+}
+
 // setup pins the env inputs and saves/restores the baked digest and the
 // executablePath seam. Tests start in "not packaged, not desktop" mode.
 func setup(t *testing.T) {
@@ -90,9 +100,25 @@ func rewriteIndex(t *testing.T, root string, mutate func(*Index)) string {
 	return writeIndex(t, root, idx)
 }
 
-// writeFakeTree writes a packaged dist for name under root plus a canonical
-// index.json, and returns the raw index digest a build would bake.
-func writeFakeTree(t *testing.T, root, name, serverBody, sourceDigest string, runners []driver.DriverRunnerSpec) string {
+// fakeBuiltin is one packaged built-in fixture for writeFakeTreeWith.
+type fakeBuiltin struct {
+	name         string
+	serverBody   string
+	sourceDigest string
+	runners      []driver.DriverRunnerSpec
+}
+
+func fakeEpicRunner() fakeBuiltin {
+	return fakeBuiltin{name: "epic-runner", serverBody: testServerBody, sourceDigest: testSourceDigest, runners: testRunners()}
+}
+
+func fakeGitHubReviewAgent() fakeBuiltin {
+	return fakeBuiltin{name: "github-review-agent", serverBody: "export const review = true;\n", sourceDigest: testGHSourceDigest, runners: testGHRunners()}
+}
+
+// writeFakeDist writes <root>/<name>/dist (server.mjs + nested @loom/sdk)
+// and returns its artifact digest.
+func writeFakeDist(t *testing.T, root, name, serverBody string) string {
 	t.Helper()
 	dist := filepath.Join(root, name, "dist")
 	writeFile(t, filepath.Join(dist, "server.mjs"), []byte(serverBody))
@@ -107,26 +133,52 @@ func writeFakeTree(t *testing.T, root, name, serverBody, sourceDigest string, ru
 	if err != nil {
 		t.Fatalf("DigestDirectory(%s): %v", dist, err)
 	}
-	return writeIndex(t, root, Index{
+	return artifactDigest
+}
+
+// writeFakeTreeWith writes a packaged dist per built-in under root plus a
+// canonical index.json listing all of them, and returns the raw index digest
+// a build would bake.
+func writeFakeTreeWith(t *testing.T, root string, builtins ...fakeBuiltin) string {
+	t.Helper()
+	idx := Index{
 		SchemaVersion: SchemaVersion,
 		FlueCommit:    testFlueCommit,
 		NodeVersion:   "22.20.0",
 		Target:        HostTargetTriple(),
-		Builtins: map[string]Entry{name: {
-			Path:           name,
-			Entrypoint:     "workflows/" + name + ".ts",
-			SourceDigest:   sourceDigest,
-			ArtifactDigest: artifactDigest,
-			Runners:        runners,
-		}},
-	})
+		Builtins:      map[string]Entry{},
+	}
+	for _, b := range builtins {
+		idx.Builtins[b.name] = Entry{
+			Path:           b.name,
+			Entrypoint:     "workflows/" + b.name + ".ts",
+			SourceDigest:   b.sourceDigest,
+			ArtifactDigest: writeFakeDist(t, root, b.name, b.serverBody),
+			Runners:        b.runners,
+		}
+	}
+	return writeIndex(t, root, idx)
 }
 
-// packagedTree writes a verified epic-runner tree and points the binary at it.
+// writeFakeTree writes a single packaged built-in tree (see writeFakeTreeWith).
+func writeFakeTree(t *testing.T, root, name, serverBody, sourceDigest string, runners []driver.DriverRunnerSpec) string {
+	t.Helper()
+	return writeFakeTreeWith(t, root, fakeBuiltin{name: name, serverBody: serverBody, sourceDigest: sourceDigest, runners: runners})
+}
+
+// packagedTree writes a verified epic-runner-only tree and points the binary
+// at it (the Slice 1 shape; github-review-agent is absent on purpose).
 func packagedTree(t *testing.T) string {
 	t.Helper()
+	return packagedTreeWith(t, fakeEpicRunner())
+}
+
+// packagedTreeWith writes a verified tree holding the given built-ins and
+// points the binary at it.
+func packagedTreeWith(t *testing.T, builtins ...fakeBuiltin) string {
+	t.Helper()
 	root := t.TempDir()
-	ExpectedIndexDigest = writeFakeTree(t, root, "epic-runner", testServerBody, testSourceDigest, testRunners())
+	ExpectedIndexDigest = writeFakeTreeWith(t, root, builtins...)
 	t.Setenv(EnvArtifactsDir, root)
 	return root
 }
@@ -456,13 +508,13 @@ func TestFailClosedTruthTable(t *testing.T) {
 func describeWant() map[string]Want {
 	return map[string]Want{
 		"epic-runner":         {SourceDigest: testSourceDigest, Runners: testRunners()},
-		"github-review-agent": {SourceDigest: "sha256:" + strings.Repeat("c", 64), Runners: testRunners()},
+		"github-review-agent": {SourceDigest: testGHSourceDigest, Runners: testGHRunners()},
 	}
 }
 
 func TestDescribeRequiredAndUnknown(t *testing.T) {
 	setup(t)
-	root := packagedTree(t)
+	root := packagedTreeWith(t, fakeEpicRunner(), fakeGitHubReviewAgent())
 	ExpectedIndexDigest = rewriteIndex(t, root, func(idx *Index) {
 		idx.Builtins["mystery"] = Entry{Path: "mystery", SourceDigest: "sha256:m", ArtifactDigest: "sha256:a"}
 	})
@@ -474,13 +526,16 @@ func TestDescribeRequiredAndUnknown(t *testing.T) {
 	if report.FlueCommit != testFlueCommit || report.NodeVersion != "22.20.0" || report.Target != HostTargetTriple() {
 		t.Fatalf("Report metadata = %+v", report)
 	}
+	if strings.Join(report.Required, ",") != "epic-runner,github-review-agent" {
+		t.Fatalf("Report.Required = %v, want both built-ins in sorted order", report.Required)
+	}
 	epic := report.Artifacts["epic-runner"]
 	if !epic.Required || !epic.Packaged || !epic.Verified || epic.Error != "" || epic.ExpectedSourceDigest != testSourceDigest {
 		t.Fatalf("epic-runner status = %+v, want required+packaged+verified", epic)
 	}
 	gh := report.Artifacts["github-review-agent"]
-	if gh.Required || gh.Packaged || gh.Verified || !strings.Contains(gh.Error, "builtin_artifact_missing") {
-		t.Fatalf("github-review-agent status = %+v, want not required/packaged/verified with missing error", gh)
+	if !gh.Required || !gh.Packaged || !gh.Verified || gh.Error != "" || gh.ExpectedSourceDigest != testGHSourceDigest {
+		t.Fatalf("github-review-agent status = %+v, want required+packaged+verified", gh)
 	}
 	mystery := report.Artifacts["mystery"]
 	if mystery.Error != "unknown built-in" || !mystery.Packaged || mystery.Verified || mystery.SourceDigest != "sha256:m" {
@@ -489,6 +544,53 @@ func TestDescribeRequiredAndUnknown(t *testing.T) {
 	if !report.AllRequiredVerified() {
 		t.Fatalf("AllRequiredVerified() = false, report = %+v", report)
 	}
+}
+
+// TestDescribeOnlyEpicRunnerPackagedIsNotReady (R1 after widening): an
+// index that ships only epic-runner leaves github-review-agent required but
+// unverified, so the roll-up is false even though epic-runner verifies.
+func TestDescribeOnlyEpicRunnerPackagedIsNotReady(t *testing.T) {
+	setup(t)
+	packagedTree(t)
+
+	report := Describe([]string{"epic-runner", "github-review-agent"}, describeWant())
+	epic := report.Artifacts["epic-runner"]
+	if !epic.Required || !epic.Verified {
+		t.Fatalf("epic-runner status = %+v, want required+verified", epic)
+	}
+	gh := report.Artifacts["github-review-agent"]
+	if !gh.Required || gh.Packaged || gh.Verified || !strings.Contains(gh.Error, "builtin_artifact_missing") {
+		t.Fatalf("github-review-agent status = %+v, want required, not packaged, missing error", gh)
+	}
+	if !strings.Contains(gh.Error, FailClosedGuidance) {
+		t.Fatalf("github-review-agent error %q must carry the fail-closed guidance on a packaged build", gh.Error)
+	}
+	if report.AllRequiredVerified() {
+		t.Fatal("AllRequiredVerified() = true with github-review-agent missing")
+	}
+}
+
+// TestLookupGitHubReviewAgentIndependentOfEpicRunner: each entry verifies on
+// its own — a tampered epic-runner does not block github-review-agent and
+// vice versa.
+func TestLookupGitHubReviewAgentIndependentOfEpicRunner(t *testing.T) {
+	setup(t)
+	root := packagedTreeWith(t, fakeEpicRunner(), fakeGitHubReviewAgent())
+
+	art, err := Lookup("github-review-agent", testGHSourceDigest, testGHRunners())
+	if err != nil {
+		t.Fatalf("Lookup(github-review-agent): %v", err)
+	}
+	if art.DistPath != filepath.Join(root, "github-review-agent", "dist") || len(art.Runners) != 1 || art.Runners[0].Name != "github-review-task-runner" {
+		t.Fatalf("Artifact = %+v, want gh dist with its single runner", art)
+	}
+
+	flipFirstByte(t, filepath.Join(root, "epic-runner", "dist", "server.mjs"))
+	if _, err := Lookup("github-review-agent", testGHSourceDigest, testGHRunners()); err != nil {
+		t.Fatalf("Lookup(github-review-agent) after tampering epic-runner: %v", err)
+	}
+	_, err = lookupEpicRunner()
+	assertVerification(t, err, "artifact_digest")
 }
 
 func TestDescribeTamperedArtifact(t *testing.T) {
@@ -526,7 +628,7 @@ func TestDescribeFailClosedWithoutTree(t *testing.T) {
 	if report.AllRequiredVerified() {
 		t.Fatal("AllRequiredVerified() = true with nothing packaged")
 	}
-	if len(report.Required) != len(RequiredBuiltins) || report.Required[0] != "epic-runner" {
+	if strings.Join(report.Required, ",") != "epic-runner,github-review-agent" || len(report.Required) != len(RequiredBuiltins) {
 		t.Fatalf("Report.Required = %v, want %v", report.Required, RequiredBuiltins)
 	}
 }

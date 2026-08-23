@@ -57,7 +57,9 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # DEV-V5-37: >= 22.18 for the Flue build, and the same major the
+          # desktop app embeds (internal/workflows/NODE_VERSION).
+          node-version-file: internal/workflows/NODE_VERSION
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -75,6 +77,38 @@ jobs:
       - name: Install desktop deps
         run: cd desktop && npm ci
 
+      # DEV-V5-37: prepare-sidecar.sh builds both embedded built-in workflow
+      # artifacts from Flue at the pinned commit (internal/workflows/FLUE_COMMIT),
+      # mirroring ci.yml's builtin-bundle-pin checkout. NOTE: notarization of the
+      # embedded Node is DEV-V5-38; until it lands this job fails at the notary
+      # (the nodejs.org Node is not yet hardened-runtime signed/entitled by us).
+      - name: Read pinned flue commit
+        id: pin
+        run: |
+          set -euo pipefail
+          sha="$(tr -d '[:space:]' < internal/workflows/FLUE_COMMIT)"
+          if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "ERROR: FLUE_COMMIT is not a 40-char hex SHA: '$sha'" >&2
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Check out flue
+        uses: actions/checkout@v4
+        with:
+          # Override via the FLUE_REPOSITORY repo variable if the source moves.
+          repository: ${{ vars.FLUE_REPOSITORY || 'withastro/flue' }}
+          ref: ${{ steps.pin.outputs.sha }}
+          path: flue
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: '11.1.1'
+
+      - name: Build flue
+        run: cd flue && pnpm install --frozen-lockfile && pnpm --filter @flue/runtime --filter @flue/cli build
+
       - name: Write App Store Connect API key
         env:
           APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
@@ -88,6 +122,9 @@ jobs:
         env:
           # Sidecar build: point prepare-sidecar.sh at the fleet-db checkout.
           FLEET_DB_REPO: ${{ github.workspace }}/fleet-db
+          # DEV-V5-37: point prepare-sidecar.sh at the pinned Flue checkout so it
+          # can build + embed both built-in workflow artifacts.
+          FLUE_REPO: ${{ github.workspace }}/flue
           # Code signing (imported into a temp keychain by tauri-action).
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}

@@ -2,12 +2,19 @@
 // to run Flue bundles. It is a stdlib-only leaf so internal/driver and
 // internal/driver/sandbox can depend on it without widening their fan-out.
 //
-// Resolution order (DEV-V5-31 §3c):
+// Resolution order (DEV-V5-31 §3c, extended by DEV-V5-37):
 //  1. LOOM_NODE_BIN — developer escape hatch; an invalid value is an error
 //     with NO fallback so a typo never silently runs a different node.
 //  2. A bundled sibling next to the running executable (`node`, `node.exe`,
-//     or `node-<triple>`), the desktop sidecar shape.
-//  3. `node` on PATH.
+//     `node-<triple>`, or `node-<triple>.exe`), the desktop sidecar shape
+//     (Tauri externalBin → Contents/MacOS/node). The executable path is
+//     symlink-resolved first so `/usr/local/bin/loom -> …/Contents/MacOS/loom`
+//     still finds the bundle.
+//  3. The reserved full-distribution location under the app bundle's
+//     Resources: `<exeDir>/../Resources/node-runtime/bin/node` (and the
+//     `Resources/resources/` variant). Nothing ships there today; it is
+//     probed after the siblings and reported as "bundled" too.
+//  4. `node` on PATH.
 package noderuntime
 
 import (
@@ -105,11 +112,10 @@ func resolve(override string) (Resolved, error) {
 		}
 		return Resolved{Path: override, Source: SourceOverride}, nil
 	}
-	exeDir := ""
-	if exe := executablePath(); exe != "" {
-		exeDir = filepath.Dir(exe)
-		if sibling := bundledSibling(exeDir); sibling != "" {
-			return Resolved{Path: sibling, Source: SourceBundled}, nil
+	exeDir := resolveExecutableDir()
+	if exeDir != "" {
+		if bundled := bundledNode(exeDir); bundled != "" {
+			return Resolved{Path: bundled, Source: SourceBundled}, nil
 		}
 	}
 	if path, err := lookPath("node"); err == nil && strings.TrimSpace(path) != "" {
@@ -122,15 +128,39 @@ func resolve(override string) (Resolved, error) {
 	return Resolved{}, fmt.Errorf("%w: no bundled Node next to %s and none on PATH; set %s to override", ErrNodeRuntimeMissing, where, EnvNodeBin)
 }
 
-// bundledSibling looks for the desktop sidecar next to the executable:
-// `node`, `node.exe`, or the Tauri sidecar shape `node-<host triple>`
-// (optionally `.exe`). The name is exact on purpose — this runs on every
-// Flue exec, including plain CLI installs, where a `/usr/local/bin/node-gyp`
-// next to loom must never be mistaken for Node.
-func bundledSibling(dir string) string {
+// resolveExecutableDir returns the directory of the running executable with
+// symlinks resolved ("" when the executable is unknown). A link that cannot
+// be resolved (dangling) falls back to the raw path's directory.
+func resolveExecutableDir() string {
+	exe := executablePath()
+	if exe == "" {
+		return ""
+	}
+	if real, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = real
+	}
+	return filepath.Dir(exe)
+}
+
+// bundledNode looks for the desktop sidecar, in order: next to the
+// executable as `node`, `node.exe`, or the Tauri sidecar shape
+// `node-<host triple>` (optionally `.exe`); then the reserved full
+// distribution location `<exeDir>/../Resources/node-runtime/bin/node` (and
+// its `Resources/resources/` variant). The sibling names are exact on
+// purpose — this runs on every Flue exec, including plain CLI installs,
+// where a `/usr/local/bin/node-gyp` next to loom must never be mistaken
+// for Node.
+func bundledNode(dir string) string {
 	triple := hostTargetTriple()
-	for _, name := range []string{"node", "node.exe", "node-" + triple, "node-" + triple + ".exe"} {
-		candidate := filepath.Join(dir, name)
+	candidates := []string{
+		filepath.Join(dir, "node"),
+		filepath.Join(dir, "node.exe"),
+		filepath.Join(dir, "node-"+triple),
+		filepath.Join(dir, "node-"+triple+".exe"),
+		filepath.Join(dir, "..", "Resources", "node-runtime", "bin", "node"),
+		filepath.Join(dir, "..", "Resources", "resources", "node-runtime", "bin", "node"),
+	}
+	for _, candidate := range candidates {
 		if executableFileProblem(candidate) == "" {
 			return candidate
 		}

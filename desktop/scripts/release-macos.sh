@@ -53,11 +53,11 @@ stop_running_app() {
     log "stopping any running ${APP_NAME}.app before rebuild"
     osascript -e "tell application \"${APP_NAME}\" to quit" >/dev/null 2>&1 || true
     sleep 2
-    for name in loom fleet-db loom-desktop; do
+    for name in loom fleet-db loom-desktop node; do
       pkill -TERM -f "${APP_BUNDLE}/Contents/MacOS/${name}" >/dev/null 2>&1 || true
     done
     sleep 1
-    for name in loom fleet-db loom-desktop; do
+    for name in loom fleet-db loom-desktop node; do
       pkill -KILL -f "${APP_BUNDLE}/Contents/MacOS/${name}" >/dev/null 2>&1 || true
     done
   fi
@@ -116,6 +116,8 @@ fi
 # ---------------------------------------------------------------------------
 
 log "re-signing nested binaries with hardened runtime"
+# node re-sign + entitlements: DEV-V5-38 (the embedded Node sidecar needs its
+# own hardened-runtime re-sign and entitlements before it can notarize).
 for nested in fleet-db loom loom-desktop; do
   bin="${APP_BUNDLE}/Contents/MacOS/${nested}"
   [[ -f "${bin}" ]] || continue

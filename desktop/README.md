@@ -17,7 +17,12 @@ Prerequisites:
 
 - Go toolchain for the sidecar
 - Rust toolchain for Tauri
-- Node.js/npm for the shell frontend
+- Node.js/npm for the shell frontend (Node ≥ 22.18 — required by the Flue build)
+- A Flue checkout at the pinned commit (`internal/workflows/FLUE_COMMIT`), located
+  via `FLUE_REPO` (default `../flue`), built once with:
+  `pnpm install && pnpm --filter @flue/runtime --filter @flue/cli build`
+- Network access — or `LOOM_NODE_TARBALL` + `LOOM_NODE_SHASUMS` — for the pinned
+  Node tarball (`internal/workflows/NODE_VERSION`), SHA-verified at build time
 
 ```sh
 cd desktop
@@ -70,6 +75,42 @@ available, builds `src-tauri/binaries/fleet-db-<target-triple>`. The
 `loom local service` entrypoint discovers the bundled FleetDB sibling and web UI
 resources, then sets `FLEET_DB_BIN` and `LOOM_FRONTEND_DIR` for the local
 `loom serve` process.
+
+## Embedded runtime
+
+`prepare-sidecar.sh` also embeds a self-contained Flue runtime so the app runs the
+built-in workflows with no dev checkout and no `node` on `PATH`:
+
+- **Pinned Node** (`internal/workflows/NODE_VERSION`) → `Contents/MacOS/node`, plus
+  its licence → `Contents/Resources/licenses/node-LICENSE`. Downloaded and
+  SHA-verified from nodejs.org (or `LOOM_NODE_TARBALL`) by `prepare-node-runtime.sh`.
+- **Both built-in artifacts** (`epic-runner`, `github-review-agent`) built from
+  `FLUE_REPO` at the pin, packaged with `loom workflow package-builtin`
+  (`--require-all` on the last), and staged into
+  `Contents/Resources/builtin-workflows/` (each `dist/` with its nested
+  `@loom/sdk`). Each `server.mjs` is load-smoked under the embedded `node`.
+- **Digest bake:** the resulting `index_digest` is baked into the sidecar `loom`
+  (`-ldflags -X …packaged.ExpectedIndexDigest=…`), which is what makes the build
+  fail closed on a missing or tampered artifact.
+
+Build-time escape hatches:
+
+- `LOOM_SKIP_BUILTIN_ARTIFACTS=1` — embed Node only, no artifacts. The app is then
+  **not** a packaged build and fails closed on desktop; useful for a quick shell build.
+- `LOOM_BUILTIN_PREBUILT_DIST_DIR=<dir>` — reuse a prebuilt `<name>/dist/` instead
+  of rebuilding it from Flue.
+
+Prove a built app end to end (both built-ins register + run from embedded artifacts,
+tamper fails closed) with the Definition-of-Done harness:
+
+```sh
+bash scripts/test-packaged-builtin-app.sh \
+  "desktop/src-tauri/target/release/bundle/macos/Loom Agents.app"
+# → PASS; observed output under desktop/dist-app-test/observed-output.txt
+```
+
+For the fast loop with no app build, `scripts/test-packaged-builtin-devbox.sh`
+proves the same lane against a hand-laid tree.
 
 ## Current Slice
 

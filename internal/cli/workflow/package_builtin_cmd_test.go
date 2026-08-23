@@ -494,21 +494,99 @@ func packagedDistDigest(out, name string) (string, error) {
 	return driver.DigestDirectory(filepath.Join(out, name, "dist"))
 }
 
+// fakeGHServerMJS is a github-review-agent-shaped dist: its only bare import
+// is @loom/sdk/driver (audit rule iii allows @loom/sdk and @loom/sdk/*).
+const fakeGHServerMJS = "import { createLoomDriverClient } from \"@loom/sdk/driver\";\nimport { readFile } from \"node:fs/promises\";\nexport const review = true;\n"
+
+// TestWorkflowPackageBuiltinRequireAll: --require-all enforces the full
+// RequiredBuiltins set (epic-runner + github-review-agent) in BOTH orders,
+// committing nothing on failure; the last name packaged with --require-all
+// succeeds once the other is already in the index.
 func TestWorkflowPackageBuiltinRequireAll(t *testing.T) {
+	t.Run("github-review-agent first", func(t *testing.T) {
+		fx := setupPackageBuiltin(t, workflows.BuiltinGitHubReviewAgentWorkflowName)
+		workflowPackageRequireAll = true
+
+		_, err := runPackageBuiltin(t, workflows.BuiltinGitHubReviewAgentWorkflowName, fx)
+		if err == nil || !strings.Contains(err.Error(), "required built-in epic-runner is not packaged") {
+			t.Fatalf("err = %v, want required built-in epic-runner missing", err)
+		}
+		assertNothingCommitted(t, fx.out, workflows.BuiltinGitHubReviewAgentWorkflowName)
+	})
+	t.Run("epic-runner first", func(t *testing.T) {
+		fx := setupPackageBuiltin(t, workflows.BuiltinEpicRunnerWorkflowName)
+		workflowPackageRequireAll = true
+
+		_, err := runPackageBuiltin(t, workflows.BuiltinEpicRunnerWorkflowName, fx)
+		if err == nil || !strings.Contains(err.Error(), "required built-in github-review-agent is not packaged") {
+			t.Fatalf("err = %v, want required built-in github-review-agent missing", err)
+		}
+		assertNothingCommitted(t, fx.out, workflows.BuiltinEpicRunnerWorkflowName)
+	})
+	t.Run("both packaged, --require-all on the last", func(t *testing.T) {
+		fx := setupPackageBuiltin(t, workflows.BuiltinEpicRunnerWorkflowName)
+		workflowPackageRequireAll = false
+		mustRunPackageBuiltin(t, workflows.BuiltinEpicRunnerWorkflowName, fx)
+
+		fx.dist = writeFakeDist(t, workflows.BuiltinGitHubReviewAgentWorkflowName, fakeGHServerMJS)
+		workflowPackageRequireAll = true
+		out := mustRunPackageBuiltin(t, workflows.BuiltinGitHubReviewAgentWorkflowName, fx)
+		if out.Name != workflows.BuiltinGitHubReviewAgentWorkflowName {
+			t.Fatalf("output = %+v, want github-review-agent", out)
+		}
+		_, idx := readIndexFile(t, fx.out)
+		for _, name := range packaged.RequiredBuiltins {
+			if _, ok := idx.Builtins[name]; !ok {
+				t.Fatalf("index builtins = %v, want %s", idx.Builtins, name)
+			}
+		}
+		gh := idx.Builtins[workflows.BuiltinGitHubReviewAgentWorkflowName]
+		if gh.Entrypoint != "workflows/github-review-agent.ts" || gh.Path != workflows.BuiltinGitHubReviewAgentWorkflowName {
+			t.Fatalf("gh entry = %+v, want entrypoint workflows/github-review-agent.ts", gh)
+		}
+		if len(gh.Runners) != 1 || gh.Runners[0].Name != workflows.BuiltinGitHubReviewTaskRunnerName || gh.Runners[0].Kind != "flue-workflow" {
+			t.Fatalf("gh runners = %+v, want [github-review-task-runner]", gh.Runners)
+		}
+		for _, rel := range []string{
+			"github-review-agent/dist/server.mjs",
+			"github-review-agent/dist/node_modules/@loom/sdk/driver.js",
+			"github-review-agent/source-digest.txt",
+			"epic-runner/dist/server.mjs",
+		} {
+			if info, err := os.Lstat(filepath.Join(fx.out, filepath.FromSlash(rel))); err != nil || !info.Mode().IsRegular() {
+				t.Fatalf("expected regular file %s in out: err=%v", rel, err)
+			}
+		}
+	})
+}
+
+// TestWorkflowPackageBuiltinGitHubReviewAgentRoundTrip: a gh-shaped dist
+// (only @loom/sdk/driver + node:* imports) packages with an empty audit and
+// round-trips through packaged.Lookup with the printed digests.
+func TestWorkflowPackageBuiltinGitHubReviewAgentRoundTrip(t *testing.T) {
 	fx := setupPackageBuiltin(t, workflows.BuiltinGitHubReviewAgentWorkflowName)
-	workflowPackageRequireAll = true
+	fx.dist = writeFakeDist(t, workflows.BuiltinGitHubReviewAgentWorkflowName, fakeGHServerMJS)
 
-	_, err := runPackageBuiltin(t, workflows.BuiltinGitHubReviewAgentWorkflowName, fx)
-	if err == nil || !strings.Contains(err.Error(), "required built-in epic-runner is not packaged") {
-		t.Fatalf("err = %v, want required built-in epic-runner missing", err)
+	out := mustRunPackageBuiltin(t, workflows.BuiltinGitHubReviewAgentWorkflowName, fx)
+	if len(out.Audit.NativeFiles) != 0 || len(out.Audit.BareSpecifiers) != 0 || len(out.Audit.DynamicBareSpecifiers) != 0 || out.Audit.Dlopen || len(out.Audit.Symlinks) != 0 {
+		t.Fatalf("audit = %+v, want empty (only @loom/sdk/driver + node:* imports)", out.Audit)
 	}
-	assertNothingCommitted(t, fx.out, workflows.BuiltinGitHubReviewAgentWorkflowName)
+	if !out.SourceDigestAttested {
+		t.Fatalf("output = %+v, want source_digest_attested", out)
+	}
 
-	fx.dist = writeFakeDist(t, workflows.BuiltinEpicRunnerWorkflowName, fakeServerMJS)
-	out := mustRunPackageBuiltin(t, workflows.BuiltinEpicRunnerWorkflowName, fx)
-	_, idx := readIndexFile(t, fx.out)
-	if _, ok := idx.Builtins[workflows.BuiltinEpicRunnerWorkflowName]; !ok || out.Name != workflows.BuiltinEpicRunnerWorkflowName {
-		t.Fatalf("index builtins = %v, want epic-runner after --require-all success", idx.Builtins)
+	packaged.ExpectedIndexDigest = out.IndexDigest
+	t.Setenv("LOOM_BUILTIN_ARTIFACTS_DIR", fx.out)
+	sourceDigest, runners, _ := workflows.BuiltinArtifactExpectation(workflows.BuiltinGitHubReviewAgentWorkflowName)
+	art, err := packaged.Lookup(workflows.BuiltinGitHubReviewAgentWorkflowName, sourceDigest, runners)
+	if err != nil {
+		t.Fatalf("packaged.Lookup(github-review-agent): %v", err)
+	}
+	if art.ArtifactDigest != out.ArtifactDigest || art.IndexDigest != out.IndexDigest || art.SourceDigest != out.SourceDigest {
+		t.Fatalf("lookup = %+v, want digests from packager output %+v", art, out)
+	}
+	if art.DistPath != filepath.Join(fx.out, "github-review-agent", "dist") || len(art.Runners) != 1 || art.Runners[0].Name != workflows.BuiltinGitHubReviewTaskRunnerName {
+		t.Fatalf("lookup = %+v, want gh dist with the single derived runner", art)
 	}
 }
 

@@ -2,6 +2,32 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { defineAgent, defineWorkflow } from "@flue/runtime";
+
+// Flue HEAD (durable-streams) requires every workflow module to default-export a
+// defineWorkflow() definition; a bare `export function run` no longer normalizes
+// and the bundle refuses to load at all (DEV-V5-37). This runner is not an LLM
+// agent (it execFileSyncs the codex CLI), so the bound agent is a
+// credential-free stub (model: false). The request arrives via env — the
+// task-runner host-bridge sets LOOM_TASK_RUN_REQUEST_JSON (driver/task_bridge.go)
+// — which requestPayload() already reads, so the inner run() body is unchanged.
+export default defineWorkflow({
+  agent: defineAgent(() => ({ model: false })),
+  run: async () => toJsonResult(await run({ payload: builtinInvokePayload() })),
+});
+
+function builtinInvokePayload() {
+  const raw = process.env.LOOM_FLUE_INVOKE_PAYLOAD || process.env.LOOM_TASK_RUN_REQUEST_JSON || "{}";
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+function toJsonResult(value) {
+  return value === undefined ? null : JSON.parse(JSON.stringify(value));
+}
 
 const CODEX = process.env.LOOM_CODEX_BIN || "codex";
 

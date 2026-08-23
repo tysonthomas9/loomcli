@@ -27,6 +27,7 @@ if [[ "${RESTART}" == "1" && -d "${APP_BUNDLE}" ]]; then
   sleep 2
   stop_sidecar "loom"
   stop_sidecar "fleet-db"
+  stop_sidecar "node"
 fi
 
 echo "[desktop] building app bundle"
