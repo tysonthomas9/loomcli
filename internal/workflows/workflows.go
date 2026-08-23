@@ -18,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/workflows/buildsandbox"
 	"github.com/tysonthomas9/loomcli/internal/workflows/packaged"
 )
 
@@ -701,15 +702,20 @@ func writeWorkflowBuildProject(root string, files map[string]string) error {
 	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"type":"module","dependencies":{"@loom/sdk":"file:./node_modules/@loom/sdk","@flue/runtime":"file:./node_modules/@flue/runtime"}}`+"\n"), 0o644); err != nil {
 		return fmt.Errorf("write generated package.json: %w", err)
 	}
-	sdkRoot, err := loomSDKRoot()
+	toolchain, err := ResolveAuthoringToolchain()
 	if err != nil {
 		return err
 	}
+	sdkRoot := toolchain.SDKRoot
 	loomScope := filepath.Join(root, "node_modules", "@loom")
 	if err := os.MkdirAll(loomScope, 0o755); err != nil {
 		return fmt.Errorf("create generated node_modules: %w", err)
 	}
-	if err := os.Symlink(sdkRoot, filepath.Join(loomScope, "sdk")); err != nil {
+	if toolchain.Source == "kit" {
+		if err := copyAuthoringTree(sdkRoot, filepath.Join(loomScope, "sdk")); err != nil {
+			return fmt.Errorf("stage @loom/sdk: %w", err)
+		}
+	} else if err := os.Symlink(sdkRoot, filepath.Join(loomScope, "sdk")); err != nil {
 		return fmt.Errorf("link @loom/sdk: %w", err)
 	}
 	if err := linkFlueBuildDependencies(root); err != nil {
@@ -727,11 +733,43 @@ func writeWorkflowBuildProject(root string, files map[string]string) error {
 	return nil
 }
 
-func linkFlueBuildDependencies(root string) error {
-	runtimeRoot, err := flueRuntimeRoot()
+func copyAuthoringTree(src, dst string) error {
+	info, err := os.Stat(src)
 	if err != nil {
 		return err
 	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s is not a directory", src)
+	}
+	return filepath.Walk(src, func(path string, i os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		out := filepath.Join(dst, rel)
+		if i.IsDir() {
+			return os.MkdirAll(out, 0o755)
+		}
+		if i.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("symlink in authoring kit: %s", rel)
+		}
+		data, err := os.ReadFile(path) //nolint:gosec // path is produced by Walk under the explicit kit source root.
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(out, data, i.Mode().Perm())
+	})
+}
+
+func linkFlueBuildDependencies(root string) error {
+	toolchain, err := ResolveAuthoringToolchain()
+	if err != nil {
+		return err
+	}
+	runtimeRoot := toolchain.RuntimeRoot
 	links := map[string]string{
 		filepath.Join("node_modules", "@flue", "runtime"):     runtimeRoot,
 		filepath.Join("node_modules", "@hono", "node-server"): filepath.Join(runtimeRoot, "node_modules", "@hono", "node-server"),
@@ -750,7 +788,11 @@ func linkFlueBuildDependencies(root string) error {
 		if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
 			return fmt.Errorf("create Flue build dependency parent: %w", err)
 		}
-		if err := os.Symlink(target, link); err != nil {
+		if toolchain.Source == "kit" {
+			if err := copyAuthoringTree(target, link); err != nil {
+				return fmt.Errorf("stage Flue build dependency %s: %w", rel, err)
+			}
+		} else if err := os.Symlink(target, link); err != nil {
 			return fmt.Errorf("link Flue build dependency %s: %w", rel, err)
 		}
 	}
@@ -816,20 +858,21 @@ func daytonaSDKRoot() (string, error) {
 }
 
 func runFlueBuild(ctx context.Context, root, outputDir string) (string, error) {
-	command, err := flueCommand()
+	toolchain, err := ResolveAuthoringToolchain()
+	if err != nil {
+		return "", err
+	}
+	slog.Info("authoring toolchain resolved", "source", toolchain.Source, "build_id", toolchain.BuildID)
+	command, err := toolchain.Command()
 	if err != nil {
 		return "", err
 	}
 	args := append(append([]string{}, command[1:]...), "build", "--target", "node", "--root", root, "--output", outputDir)
-	cmd := exec.CommandContext(ctx, command[0], args...) //nolint:gosec // command is deployment/operator configuration.
-	cmd.Dir = root
-	out, err := cmd.CombinedOutput()
-	output := strings.TrimSpace(string(out))
-	if err != nil {
-		if output == "" {
-			output = err.Error()
-		}
-		return output, fmt.Errorf("flue build failed: %s", output)
+	env := map[string]string{"PATH": os.Getenv("PATH"), "HOME": os.Getenv("HOME"), "TMPDIR": os.Getenv("TMPDIR"), "CI": os.Getenv("CI"), "LANG": os.Getenv("LANG"), "TZ": os.Getenv("TZ")}
+	result := buildsandbox.Run(ctx, buildsandbox.Request{Command: append([]string{command[0]}, args...), Dir: root, Env: env})
+	output := strings.TrimSpace(result.Output)
+	if result.Err != nil {
+		return output, result.Err
 	}
 	if _, err := os.Stat(filepath.Join(outputDir, "server.mjs")); err != nil {
 		return output, fmt.Errorf("flue build missing dist/server.mjs: %w", err)

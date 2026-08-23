@@ -10,6 +10,7 @@ WEBUI_FRONTEND_DIR="${REPO_ROOT}/internal/webui/frontend"
 WEBUI_DIST_DIR="${WEBUI_FRONTEND_DIR}/dist"
 WEBUI_RESOURCE_DIR="${DESKTOP_DIR}/src-tauri/resources/webui"
 BUILTIN_RESOURCE_DIR="${DESKTOP_DIR}/src-tauri/resources/builtin-workflows"
+AUTHORING_RESOURCE_DIR="${DESKTOP_DIR}/src-tauri/resources/authoring-kit"
 
 if ! command -v rustc >/dev/null 2>&1; then
   echo "rustc is required to prepare the Tauri sidecar" >&2
@@ -30,13 +31,16 @@ mkdir -p "${BIN_DIR}"
 # shellcheck source=desktop/scripts/prepare-node-runtime.sh
 source "${SCRIPT_DIR}/prepare-node-runtime.sh"
 
+# Custom workflow compilation has its own audited, offline dependency kit.
+"${SCRIPT_DIR}/prepare-authoring-kit.sh"
+
 rm -rf "${BUILTIN_RESOURCE_DIR}"
 mkdir -p "${BUILTIN_RESOURCE_DIR}"
 
 BUILTINS=(epic-runner github-review-agent)
 if [ "${LOOM_SKIP_BUILTIN_ARTIFACTS:-0}" = "1" ]; then
   echo "[desktop] warning: LOOM_SKIP_BUILTIN_ARTIFACTS=1; built-in artifacts are not packaged" >&2
-  INDEX_DIGEST=""
+INDEX_DIGEST=""
 else
   FLUE_REPO="${FLUE_REPO:-${REPO_ROOT}/../flue}"
   for i in "${!BUILTINS[@]}"; do
@@ -66,6 +70,11 @@ else
   INDEX_DIGEST="$(node -e 'const fs=require("fs"),c=require("crypto");const b=fs.readFileSync(process.argv[1]);console.log("sha256:"+c.createHash("sha256").update(b).digest("hex"))' "${BUILTIN_RESOURCE_DIR}/index.json")"
 fi
 
+AUTHORING_DIGEST=""
+if [ -f "${AUTHORING_RESOURCE_DIR}/kit-manifest.json" ]; then
+  AUTHORING_DIGEST="$(jq -r .kit_digest "${AUTHORING_RESOURCE_DIR}/kit-manifest.json")"
+fi
+
 if command -v npm >/dev/null 2>&1; then
   echo "[desktop] building web UI assets"
   (
@@ -91,7 +100,7 @@ echo "[desktop] building loom sidecar: ${OUT}"
 (
   cd "${REPO_ROOT}"
   go build \
-    -ldflags="-X github.com/tysonthomas9/loomcli/internal/cli.Build=${BUILD} -X github.com/tysonthomas9/loomcli/internal/workflows/packaged.ExpectedIndexDigest=${INDEX_DIGEST}" \
+    -ldflags="-X github.com/tysonthomas9/loomcli/internal/cli.Build=${BUILD} -X github.com/tysonthomas9/loomcli/internal/workflows/packaged.ExpectedIndexDigest=${INDEX_DIGEST} -X github.com/tysonthomas9/loomcli/internal/workflows/authoringkit.ExpectedKitDigest=${AUTHORING_DIGEST}" \
     -o "${OUT}" \
     ./cmd/loom
 )

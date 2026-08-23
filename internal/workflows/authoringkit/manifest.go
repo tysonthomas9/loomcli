@@ -16,6 +16,11 @@ import (
 
 const SchemaVersion = "1"
 
+const (
+	ExpectedFlueCommit  = "492bf47b9f3d6c379d00471523987b8fe9511f7d"
+	ExpectedNodeVersion = "22.20.0"
+)
+
 var ExpectedKitDigest string
 var (
 	ErrMissing = errors.New("authoring_kit_missing")
@@ -71,12 +76,14 @@ func CanonicalBytes(m Manifest) ([]byte, error) {
 	return append(b, '\n'), nil
 }
 func DigestBytes(b []byte) string { s := sha256.Sum256(b); return "sha256:" + hex.EncodeToString(s[:]) }
+
+//nolint:cyclop,gocognit,funlen // Verification is intentionally a linear fail-closed audit.
 func verify(root string) (*Kit, error) {
 	if root == "" {
 		return nil, fmt.Errorf("%w: resource root is empty", ErrMissing)
 	}
 	mp := filepath.Join(root, "kit-manifest.json")
-	raw, e := os.ReadFile(mp)
+	raw, e := os.ReadFile(mp) //nolint:gosec // root is resolved by the kit locator and the manifest name is fixed.
 	if e != nil {
 		return nil, fmt.Errorf("%w: %v", ErrMissing, e)
 	}
@@ -86,6 +93,9 @@ func verify(root string) (*Kit, error) {
 	}
 	if m.SchemaVersion != SchemaVersion {
 		return nil, fmt.Errorf("%w: schema_version", ErrInvalid)
+	}
+	if m.FlueCommit != ExpectedFlueCommit || m.NodeVersion != ExpectedNodeVersion {
+		return nil, fmt.Errorf("%w: pin", ErrInvalid)
 	}
 	decl := m.KitDigest
 	m.KitDigest = ""
@@ -112,7 +122,7 @@ func verify(root string) (*Kit, error) {
 		if e != nil || i.Mode()&os.ModeSymlink != 0 || i.IsDir() {
 			return nil, fmt.Errorf("%w: file %s", ErrInvalid, x.Path)
 		}
-		b, e := os.ReadFile(p)
+		b, e := os.ReadFile(p) //nolint:gosec // p is joined from a validated manifest-relative path.
 		if e != nil {
 			return nil, e
 		}

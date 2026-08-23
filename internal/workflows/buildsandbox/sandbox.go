@@ -1,11 +1,13 @@
 package buildsandbox
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -40,10 +42,25 @@ func Run(ctx context.Context, r Request) Result {
 	}
 	ctx, c := context.WithTimeout(ctx, r.Timeout)
 	defer c()
-	cmd := exec.CommandContext(ctx, r.Command[0], r.Command[1:]...)
+	cmd := exec.Command(r.Command[0], r.Command[1:]...) //nolint:gosec // command is the resolved authoring toolchain, not workflow source.
 	cmd.Dir = r.Dir
 	cmd.Env = cleanEnv(r.Env)
-	out, e := cmd.CombinedOutput()
+	prepareCommand(cmd)
+	var buf bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &buf, &buf
+	if e := cmd.Start(); e != nil {
+		return Result{Err: fmt.Errorf("flue_build_failed: %w", e)}
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	var e error
+	select {
+	case e = <-done:
+	case <-ctx.Done():
+		killProcessGroup(cmd.Process.Pid)
+		e = <-done
+	}
+	out := buf.Bytes()
 	text := Redact(string(out))
 	if len(text) > 32768 {
 		text = text[len(text)-32768:]
@@ -58,12 +75,29 @@ func Run(ctx context.Context, r Request) Result {
 }
 func cleanEnv(v map[string]string) []string {
 	r := []string{}
-	for k, x := range v {
-		if k == "PATH" || k == "HOME" || k == "TMPDIR" || k == "NODE_OPTIONS" || k == "NODE_ENV" || k == "CI" || k == "NO_COLOR" || k == "FORCE_COLOR" || k == "LANG" || k == "TZ" || strings.HasPrefix(k, "LC_") {
+	keys := make([]string, 0, len(v))
+	for k := range v {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		x := v[k]
+		if allowed(k) {
 			r = append(r, k+"="+x)
 		}
 	}
-	return append(r, "NODE_OPTIONS=--max-old-space-size=2048")
+	// NODE_OPTIONS is controlled by Loom even when a caller supplied a value.
+	// This prevents a workflow source tree from smuggling arbitrary Node flags.
+	// Replace a caller-provided value rather than inheriting it.
+	for i := range r {
+		if strings.HasPrefix(r[i], "NODE_OPTIONS=") {
+			r[i] = "NODE_OPTIONS=--max-old-space-size=2048"
+		}
+	}
+	return r
+}
+func allowed(k string) bool {
+	return k == "PATH" || k == "HOME" || k == "TMPDIR" || k == "NODE_OPTIONS" || k == "NODE_ENV" || k == "CI" || k == "NO_COLOR" || k == "FORCE_COLOR" || k == "LANG" || k == "TZ" || strings.HasPrefix(k, "LC_") || (k == "DEBUG" && os.Getenv("LOOM_WORKFLOW_BUILD_DEBUG") == "1")
 }
 func Redact(v string) string {
 	for _, x := range os.Environ() {
