@@ -201,7 +201,10 @@ record "readyz" "$READYZ"
 [[ "$(jq -r .builtin_runtime_ready <<<"$READYZ")" == true ]] || fail "builtin_runtime_ready != true"
 [[ "$(jq -r .builtin_runtime.node.source <<<"$READYZ")" == bundled ]] || fail "builtin_runtime.node.source != bundled"
 [[ "$(jq -r '.builtin_runtime.artifacts."epic-runner".verified' <<<"$READYZ")" == true ]] || fail "epic-runner not verified"
-[[ "$(jq -r '.builtin_runtime.artifacts."github-review-agent".required' <<<"$READYZ")" == false ]] || fail "github-review-agent must be required=false"
+# DEV-V5-37: github-review-agent is now a REQUIRED built-in (packaged.RequiredBuiltins),
+# and this desktop-mode tree ships it, so readyz must report both required AND verified.
+[[ "$(jq -r '.builtin_runtime.artifacts."github-review-agent".required' <<<"$READYZ")" == true ]] || fail "github-review-agent must be required=true"
+[[ "$(jq -r '.builtin_runtime.artifacts."github-review-agent".verified' <<<"$READYZ")" == true ]] || fail "github-review-agent not verified"
 [[ "$(jq -r .authoring_ready <<<"$READYZ")" == false ]] || fail "authoring_ready should be false (no toolchain)"
 [[ "$(jq -r .ok <<<"$READYZ")" == false ]] || fail "ok should equal authoring_ready=false"
 
@@ -218,6 +221,22 @@ record "DriverRun $RUN_ID" "$RUN"
 [[ "$(jq -r .status <<<"$RUN")" == completed ]] || fail "run status: $(jq -r .status <<<"$RUN") summary: $(jq -r .summary <<<"$RUN")"
 assert_contains "$(jq -r .summary <<<"$RUN")" "Dry-run validated epic" "run summary"
 
+# ------------------------------------------------------- 7b. gh draft run
+# The packaged github-review-agent bundle must load and reach `completed` on the
+# offline draft short-circuit (github-review-agent.ts) BEFORE any connector call.
+# DEFECT-1: the SDK/executor drop `output.skipped` (sdk/driver.js + executor.go),
+# so the proof is status==completed AND the persisted draft summary substring.
+log "7b. POST workflows/github-review-agent (draft) → completed + draft summary"
+GH_RESP="$(api_status POST "/api/workspaces/$WS_KEY/workflows/github-review-agent" \
+  "$(jq -nc '{repo:"octo/demo",prNumber:1,headSha:"0123456789abcdef0123456789abcdef01234567",draft:true,requestedBy:"devbox-script"}')")"
+GH_CODE="${GH_RESP%%$'\n'*}"; GH_BODY="${GH_RESP#*$'\n'}"
+record "POST github-review-agent (draft)" "HTTP $GH_CODE $GH_BODY"
+[[ "$GH_CODE" == 202 ]] || fail "POST github-review-agent: HTTP $GH_CODE $GH_BODY"
+GH_RUN="$(wait_run "$(jq -r .run_id <<<"$GH_BODY")")"
+record "DriverRun (gh draft)" "$GH_RUN"
+[[ "$(jq -r .status <<<"$GH_RUN")" == completed ]] || fail "gh draft status: $(jq -r .status <<<"$GH_RUN") summary: $(jq -r .summary <<<"$GH_RUN")"
+assert_contains "$(jq -r .summary <<<"$GH_RUN")" "is a draft; deferring review" "gh draft summary"
+
 # ---------------------------------------------------------- 8. versions
 log "8. loom workflow versions epic-runner --json"
 VERSIONS="$(run_env "$DATA" desktop env LOOM_WORKSPACE="$WS_KEY" "$TMP/bin/loom" workflow versions epic-runner --json)"
@@ -226,11 +245,23 @@ record "versions" "$VERSIONS"
 [[ "$(jq -r '.versions[] | select(.active) | .version.manifest.trust_level' <<<"$VERSIONS")" == trusted ]] || fail "active version trust_level != trusted"
 [[ "$(jq -r '.versions[] | select(.active) | .version.manifest.packaged_index_digest' <<<"$VERSIONS")" == "$INDEX_DIGEST" ]] || fail "packaged_index_digest mismatch"
 
+# ------------------------------------------------------- 8b. gh versions
+log "8b. loom workflow versions github-review-agent --json → packaged_builtin"
+GH_VERSIONS="$(run_env "$DATA" desktop env LOOM_WORKSPACE="$WS_KEY" "$TMP/bin/loom" workflow versions github-review-agent --json)"
+record "versions github-review-agent" "$GH_VERSIONS"
+[[ "$(jq -r '.versions[] | select(.active) | .version.manifest.provenance' <<<"$GH_VERSIONS")" == packaged_builtin ]] || fail "gh active provenance != packaged_builtin"
+[[ "$(jq -r '.versions[] | select(.active) | .version.manifest.trust_level' <<<"$GH_VERSIONS")" == trusted ]] || fail "gh active trust_level != trusted"
+[[ "$(jq -r '.versions[] | select(.active) | .version.manifest.packaged_index_digest' <<<"$GH_VERSIONS")" == "$INDEX_DIGEST" ]] || fail "gh packaged_index_digest mismatch"
+
 # ---------------------------------------------------------- 9. serve log
 log "9. serve log assertions"
 stop_serve
 SERVE_TEXT="$(cat "$SERVE_LOG")"
 assert_contains "$SERVE_TEXT" "builtin workflow registered from packaged artifact" "serve log"
+# Both built-ins registered from packaged artifacts (slog attrs matched separately
+# from the message per G4): the epic dry-run and the gh draft each lazily registered.
+assert_contains "$SERVE_TEXT" "workflow=epic-runner" "serve log epic-runner registration"
+assert_contains "$SERVE_TEXT" "workflow=github-review-agent" "serve log github-review-agent registration"
 assert_contains "$SERVE_TEXT" "node runtime resolved" "serve log"
 assert_contains "$SERVE_TEXT" "source=bundled" "serve log"
 assert_contains "$SERVE_TEXT" "path=$TMP/bin/node" "serve log"
@@ -238,17 +269,25 @@ for bad in "flue build" "workflow-builds" "local @loom/sdk" "LOOM_SDK_ROOT"; do 
 record "serve log (phase 1, grep)" "$(grep -E 'packaged artifact|node runtime resolved' "$SERVE_LOG" || true)"
 
 # ---------------------------------------------------------- 10. tamper
-tamper_case() { # tamper_case <label> <file> <want-field>
-  local label="$1" file="$2" field="$3" backup="$TMP/backup-$RANDOM"
-  log "10. tamper $label → expect builtin_artifact_invalid/$field, then restore"
+post_wf() { # post_wf <workflow> → "<code>\n<body>" (dispatches the payload shape)
+  case "$1" in
+    github-review-agent)
+      api_status POST "/api/workspaces/$WS_KEY/workflows/github-review-agent" \
+        "$(jq -nc '{repo:"octo/demo",prNumber:1,headSha:"0123456789abcdef0123456789abcdef01234567",draft:true,requestedBy:"devbox-script"}')" ;;
+    *) post_run "$EPIC" ;;
+  esac
+}
+tamper_case() { # tamper_case <label> <file> <want-field> [workflow=epic-runner]
+  local label="$1" file="$2" field="$3" wf="${4:-epic-runner}" backup="$TMP/backup-$RANDOM"
+  log "10. tamper $label ($wf) → expect builtin_artifact_invalid/$field, then restore"
   cp "$file" "$backup"
   printf 'x' | dd of="$file" bs=1 seek=$(( $(wc -c <"$file") - 2 )) conv=notrunc 2>/dev/null
   local data="$TMP/data-$label"
-  : > "$SERVE_LOG.tmp"; start_serve "$data"
+  start_serve "$data"
   seed_workspace
   local resp code body
-  resp="$(post_run "$EPIC")"; code="${resp%%$'\n'*}"; body="${resp#*$'\n'}"
-  record "POST epic-runner (tampered $label)" "HTTP $code $body"
+  resp="$(post_wf "$wf")"; code="${resp%%$'\n'*}"; body="${resp#*$'\n'}"
+  record "POST $wf (tampered $label)" "HTTP $code $body"
   # VerificationError wraps domain.ErrInvalid (DEV-V5-31 §3c) → 400; the one
   # thing it must never be is a 404 "workflow not found" that hides the cause.
   [[ "$code" =~ ^4|^5 && "$code" != 404 ]] || fail "tampered $label: want non-2xx and never 404, got $code $body"
@@ -260,13 +299,14 @@ tamper_case() { # tamper_case <label> <file> <want-field>
   data="$TMP/data-$label-restored"
   start_serve "$data"
   seed_workspace
-  resp="$(post_run "$EPIC")"; code="${resp%%$'\n'*}"; body="${resp#*$'\n'}"
-  record "POST epic-runner (restored $label)" "HTTP $code $body"
+  resp="$(post_wf "$wf")"; code="${resp%%$'\n'*}"; body="${resp#*$'\n'}"
+  record "POST $wf (restored $label)" "HTTP $code $body"
   [[ "$code" == 202 ]] || fail "restored $label: HTTP $code $body"
   [[ "$(wait_run "$(jq -r .run_id <<<"$body")" | jq -r .status)" == completed ]] || fail "restored $label run did not complete"
   stop_serve
 }
 tamper_case server-mjs "$TMP/bin/builtin-workflows/epic-runner/dist/server.mjs" artifact_digest
+tamper_case gh-server-mjs "$TMP/bin/builtin-workflows/github-review-agent/dist/server.mjs" artifact_digest github-review-agent
 tamper_case index-json "$TMP/bin/builtin-workflows/index.json" index_digest
 
 # ---------------------------------------------------------- 11. B4

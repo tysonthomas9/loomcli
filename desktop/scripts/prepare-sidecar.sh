@@ -27,6 +27,7 @@ mkdir -p "${BIN_DIR}"
 # Node is always embedded, including when artifact generation is skipped. This
 # keeps the escape hatch useful for a cached/prebuilt artifact build without
 # allowing a desktop bundle to silently depend on PATH Node.
+# shellcheck source=desktop/scripts/prepare-node-runtime.sh
 source "${SCRIPT_DIR}/prepare-node-runtime.sh"
 
 rm -rf "${BUILTIN_RESOURCE_DIR}"

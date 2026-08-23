@@ -209,14 +209,49 @@ jobs:
         with:
           version: '11.1.1'
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
       - name: Build flue
         run: cd flue && pnpm install --frozen-lockfile && pnpm --filter @flue/runtime --filter @flue/cli build
 
-      - name: Build builtin workflow bundle from source
+      # DEV-V5-37: both desktop built-ins (packaged.RequiredBuiltins) must build,
+      # package, and load-smoke under the pinned runtime Node.
+      - name: Build builtin workflow bundles from source
         env:
           FLUE_REPO: ${{ github.workspace }}/flue
-          BUILTIN_DIST_DEST: ${{ runner.temp }}/bundle-dist
-        run: scripts/rebuild-builtin-bundle.sh
+        run: |
+          set -euo pipefail
+          for name in epic-runner github-review-agent; do
+            BUILTIN_DIST_DEST="${RUNNER_TEMP}/dist-${name}" scripts/rebuild-builtin-bundle.sh "$name"
+          done
+
+      - name: Package built-in artifacts (static audit)
+        run: |
+          set -euo pipefail
+          # epic-runner first, then github-review-agent with --require-all so the
+          # index must contain BOTH required built-ins (fails otherwise).
+          go run ./cmd/loom workflow package-builtin epic-runner \
+            --dist "${RUNNER_TEMP}/dist-epic-runner" --out "${RUNNER_TEMP}/bw" --loom-sdk sdk --json
+          go run ./cmd/loom workflow package-builtin github-review-agent \
+            --dist "${RUNNER_TEMP}/dist-github-review-agent" --out "${RUNNER_TEMP}/bw" --loom-sdk sdk --require-all --json
+
+      - name: Set up pinned runtime Node (for the load smoke)
+        uses: actions/setup-node@v4
+        with:
+          # Second toolcache: the flue build above used Node 24; the load smoke
+          # runs under the Node major the desktop app actually ships.
+          node-version-file: internal/workflows/NODE_VERSION
+
+      - name: Load smoke both built-ins under the pinned Node
+        run: |
+          set -euo pipefail
+          node --version
+          for name in epic-runner github-review-agent; do
+            node desktop/scripts/smoke-load-server.mjs "${RUNNER_TEMP}/bw/${name}/dist/server.mjs" "$name"
+          done
 
       - name: Builtin workflow node tests
         env:
