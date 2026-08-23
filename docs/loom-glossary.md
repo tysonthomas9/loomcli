@@ -132,6 +132,30 @@ not isolation.
 - **Required built-in set**: `packaged.RequiredBuiltins` — the built-ins a
   desktop/packaged build must ship for `builtin_runtime_ready` to roll up
   true (`epic-runner` and `github-review-agent`).
+- **Packaged version**: One immutable `DriverVersion` minted from a packaged
+  built-in artifact. Its identity is its **bundle digest**
+  (`manifest.artifact_digest`); built-in sync dedups by that digest, so an app
+  update that only churns the `index.json` digest or a runner set never mints a
+  new version. Its staged bundle is retained indefinitely (enables rollback and
+  downgrade — see `docs/design/2026-08-22-workflow-versioning-rollback.md`).
+- **Built-in track**: A driver-metadata flag (`builtin_track`) that decides what
+  an app update does to an already-registered built-in. **`auto`** (the default
+  for a fresh built-in) follows updates *and downgrades* — the newly packaged
+  version is activated. **`pinned`** (set by an explicit `activate`/`rollback`,
+  or implied by an active custom version) preserves the operator's choice and
+  surfaces the packaged version as `update_available`. `loom workflow activate
+  --builtin` returns a driver to `auto`.
+- **Activation record**: The five driver-metadata keys rewritten atomically on
+  every activation (`activation_actor` user|system, `activation_reason`
+  registration|builtin_sync|operator|rollback, `activation_at`,
+  `activation_previous_version_id`, `builtin_track`), preserving
+  `approved_version:*`. `activation_previous_version_id` is the default rollback
+  target; `activation_actor` surfaces as `selected_by` in `workflow versions`.
+- **Rollback**: `loom workflow rollback <name>` re-activates the recorded
+  previous-active version (or an explicit `--version`) and **pins** the track,
+  writing a fresh activation record with `reason=rollback`. The target's staged
+  bundle must still verify (D3 retention guarantees it for a version this
+  machine activated).
 
 ## Other Overloaded Names
 

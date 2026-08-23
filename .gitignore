@@ -68,3 +68,5 @@ desktop/dist-devbox/
 desktop/src-tauri/resources/licenses/
 # DoD app-test observed output (scripts/test-packaged-builtin-app.sh)
 desktop/dist-app-test/
+# Built-in update/rollback demo output (scripts/test-builtin-update-rollback.sh)
+desktop/dist-skeleton/

@@ -42,8 +42,16 @@ type RegisterFlueOptions struct {
 	SourceRef    string
 	SourceDigest string
 	CreatedBy    string
-	Activate     bool
-	RunnerSpecs  []DriverRunnerSpec
+	// Activate promotes the registered version to active. It is the
+	// operator/dev registration path (CLI `loom driver register`, the legacy
+	// compile lane); built-in sync registers inactive and activates via the
+	// track policy (SyncBuiltinWorkflow), never through this flag.
+	Activate bool
+	// Activation records who activated and why when Activate is true. The zero
+	// value records {user, registration, ""} (no track) — an operator/dev
+	// registration side effect. Ignored when Activate is false.
+	Activation  ActivationOptions
+	RunnerSpecs []DriverRunnerSpec
 	// Manifest adds server-side provenance fields to the generated native
 	// manifest. Values are merged before generated runtime fields are stamped;
 	// generated fields and server-stamped trust still win.
@@ -488,7 +496,7 @@ func reuseRegisteredFlueVersion(ctx context.Context, s store.Store, opts Registe
 		staged.tmpRoot = ""
 	}
 	if opts.Activate && result.Driver.ActiveVersionID != existing.VersionID {
-		if err := activateRegisteredDriver(ctx, s, result, opts.WorkspaceKey, driverID, existing.VersionID, staged.manifest); err != nil {
+		if err := activateRegisteredDriver(ctx, s, result, opts.WorkspaceKey, driverID, existing.VersionID, opts.Activation); err != nil {
 			return err
 		}
 	}
@@ -545,7 +553,7 @@ func persistRegisteredFlueVersion(ctx context.Context, s store.Store, opts Regis
 	result.CreatedVersion = true
 	result.Bundle = &Bundle{Root: staged.finalRoot, BundleRef: staged.bundleRef, SourceRef: reg.sourceRef, SourceDigest: reg.sourceDigest, BundleDigest: staged.bundleDigest, Manifest: staged.manifest}
 	if opts.Activate {
-		return activateRegisteredDriver(ctx, s, result, opts.WorkspaceKey, reg.driverID, staged.versionID, staged.manifest)
+		return activateRegisteredDriver(ctx, s, result, opts.WorkspaceKey, reg.driverID, staged.versionID, opts.Activation)
 	}
 	return nil
 }
@@ -606,8 +614,8 @@ func demoteReregisteredDriver(ctx context.Context, s store.Store, driver *domain
 	return updated, false, nil
 }
 
-func activateRegisteredDriver(ctx context.Context, s store.Store, result *RegisterFlueResult, ws, driverID, versionID string, _ map[string]string) error {
-	driver, version, err := ActivateDriverVersion(ctx, s, ws, driverID, versionID)
+func activateRegisteredDriver(ctx context.Context, s store.Store, result *RegisterFlueResult, ws, driverID, versionID string, activation ActivationOptions) error {
+	driver, version, err := ActivateDriverVersionWithOptions(ctx, s, ws, driverID, versionID, registrationActivation(activation))
 	if err != nil {
 		return fmt.Errorf("activate native Flue driver version: %w", err)
 	}

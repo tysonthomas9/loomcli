@@ -644,6 +644,11 @@ func resetWorkflowCommandGlobals() {
 	workflowListJSON = false
 	workflowVersionsJSON = false
 	workflowReadyzJSON = false
+	workflowActivateBuiltin = false
+	workflowActivateTrack = "pinned"
+	workflowSyncJSON = false
+	workflowRollbackVersion = ""
+	workflowRollbackJSON = false
 	workflowPackageDist = ""
 	workflowPackageOut = ""
 	workflowPackageLoomSDK = ""
