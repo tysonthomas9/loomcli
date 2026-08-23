@@ -267,7 +267,10 @@ assert_contains "$SLOG" "workflow=epic-runner" "serve log epic-runner registrati
 assert_contains "$SLOG" "workflow=github-review-agent" "serve log github-review-agent registration"
 assert_contains "$SLOG" "node runtime resolved" "serve log resolver"
 assert_contains "$SLOG" "source=bundled" "serve log resolver source"
-assert_contains "$SLOG" "path=$NODE_REAL" "serve log resolver path"
+# Match the node path itself, not a "path=" prefix: slog quotes values that
+# contain spaces, and the bundle name "Loom Agents.app" has one, so the line
+# reads path="…/node". The full node path is unique to the resolver line.
+assert_contains "$SLOG" "$NODE_REAL" "serve log resolver path"
 for bad in "source=path" "source=override" "flue build" "workflow-builds" "BuildAndRegister" "local @loom/sdk" "LOOM_SDK_ROOT"; do
   assert_not_contains "$SLOG" "$bad" "serve log forbidden token"
 done
