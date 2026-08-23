@@ -74,6 +74,10 @@ func TestEnsureBuiltinWorkflowWarnsOnDigestDrift(t *testing.T) {
 	}
 	workDir := t.TempDir()
 	t.Chdir(workDir)
+	// builtinWorkflowWorkDir honors LOOM_WORKSPACE_RUNTIME_DIR before cwd; clear
+	// the ambient value (this suite may run inside a Loom workspace) so the reuse
+	// lookup finds the bundle registered under this test's workdir.
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", "")
 
 	const driftedDigest = "sha256:00000000000000000000000000000000000000000000000000000000000000aa"
 	versionID := registerEpicRunnerAt(t, st, workDir, driftedDigest)
@@ -114,6 +118,9 @@ func TestEnsureBuiltinWorkflowMatchingDigestIsSilent(t *testing.T) {
 	}
 	workDir := t.TempDir()
 	t.Chdir(workDir)
+	// See the note in TestEnsureBuiltinWorkflowWarnsOnDigestDrift: clear the
+	// ambient desktop workspace runtime dir so reuse resolves against this cwd.
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", "")
 
 	spec, ok := BuiltinWorkflow(BuiltinEpicRunnerWorkflowName)
 	if !ok {

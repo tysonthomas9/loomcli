@@ -18,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/workflows/buildsandbox"
 	"github.com/tysonthomas9/loomcli/internal/workflows/packaged"
 )
 
@@ -701,14 +702,24 @@ func writeWorkflowBuildProject(root string, files map[string]string) error {
 	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"type":"module","dependencies":{"@loom/sdk":"file:./node_modules/@loom/sdk","@flue/runtime":"file:./node_modules/@flue/runtime"}}`+"\n"), 0o644); err != nil {
 		return fmt.Errorf("write generated package.json: %w", err)
 	}
-	sdkRoot, err := loomSDKRoot()
+	toolchain, err := ResolveAuthoringToolchain()
 	if err != nil {
 		return err
 	}
+	sdkRoot := toolchain.SDKRoot
 	loomScope := filepath.Join(root, "node_modules", "@loom")
 	if err := os.MkdirAll(loomScope, 0o755); err != nil {
 		return fmt.Errorf("create generated node_modules: %w", err)
 	}
+	// Symlink @loom/sdk into the build's node_modules (kit and developer alike).
+	// The build package.json declares @flue/runtime and @loom/sdk as deps, so
+	// rolldown would externalize a *real* copy but BUNDLES a symlinked one — and
+	// RegisterFlueDriver copies only the dist tree, so anything left external must
+	// be re-staged into dist. Symlinking makes the runtime + SDK inline into
+	// server.mjs exactly as the shipping builtin (developer/override) builds do,
+	// keeping the dist self-contained. The kit itself is symlink-free; only this
+	// ephemeral build tree points back into it, and its files are read (not
+	// written) under the Seatbelt profile, which allows reads by default.
 	if err := os.Symlink(sdkRoot, filepath.Join(loomScope, "sdk")); err != nil {
 		return fmt.Errorf("link @loom/sdk: %w", err)
 	}
@@ -728,16 +739,34 @@ func writeWorkflowBuildProject(root string, files map[string]string) error {
 }
 
 func linkFlueBuildDependencies(root string) error {
-	runtimeRoot, err := flueRuntimeRoot()
+	toolchain, err := ResolveAuthoringToolchain()
 	if err != nil {
 		return err
 	}
+	return stageFlueBuildDependencies(root, toolchain)
+}
+
+// stageFlueBuildDependencies places the Flue runtime deps a workflow build needs
+// into root/node_modules: staged as real copies for a self-contained kit, or
+// symlinked to the developer/override checkout otherwise. Split out from
+// linkFlueBuildDependencies so the kit-vs-developer resolution — in particular
+// that @daytona/sdk comes from the kit and not the environment — is unit-testable
+// without a real toolchain on disk.
+func stageFlueBuildDependencies(root string, toolchain AuthoringToolchain) error {
+	runtimeRoot := toolchain.RuntimeRoot
 	links := map[string]string{
 		filepath.Join("node_modules", "@flue", "runtime"):     runtimeRoot,
 		filepath.Join("node_modules", "@hono", "node-server"): filepath.Join(runtimeRoot, "node_modules", "@hono", "node-server"),
 		filepath.Join("node_modules", "hono"):                 filepath.Join(runtimeRoot, "node_modules", "hono"),
 	}
-	if daytonaRoot, err := daytonaSDKRoot(); err == nil {
+	// @daytona/sdk: in kit mode the kit ships a self-contained daytona tree (its
+	// full transitive closure nested under node_modules), so resolve it from the
+	// toolchain — a real kit/desktop install has no DAYTONA_SDK_ROOT/FLUE_REPO to
+	// fall back on, and setting one would flip the resolver into override mode.
+	// Override/developer builds keep using daytonaSDKRoot().
+	if toolchain.Source == "kit" {
+		links[filepath.Join("node_modules", "@daytona", "sdk")] = toolchain.DaytonaRoot
+	} else if daytonaRoot, err := daytonaSDKRoot(); err == nil {
 		links[filepath.Join("node_modules", "@daytona", "sdk")] = daytonaRoot
 	} else if strings.TrimSpace(os.Getenv("DAYTONA_SDK_ROOT")) != "" {
 		return err
@@ -750,6 +779,10 @@ func linkFlueBuildDependencies(root string) error {
 		if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
 			return fmt.Errorf("create Flue build dependency parent: %w", err)
 		}
+		// Symlink (kit and developer alike) so rolldown bundles @flue/runtime and
+		// its deps into server.mjs instead of externalizing a real copy — see the
+		// note on the @loom/sdk link in writeWorkflowBuildProject. The kit stays
+		// symlink-free; only this ephemeral build tree links back into it.
 		if err := os.Symlink(target, link); err != nil {
 			return fmt.Errorf("link Flue build dependency %s: %w", rel, err)
 		}
@@ -816,25 +849,84 @@ func daytonaSDKRoot() (string, error) {
 }
 
 func runFlueBuild(ctx context.Context, root, outputDir string) (string, error) {
-	command, err := flueCommand()
+	toolchain, err := ResolveAuthoringToolchain()
+	if err != nil {
+		return "", err
+	}
+	slog.Info("authoring toolchain resolved", "source", toolchain.Source, "build_id", toolchain.BuildID)
+	command, err := toolchain.Command()
+	if err != nil {
+		return "", err
+	}
+	// Resolve the sandbox mode first: a packaged build with no sandbox-exec fails
+	// closed (authoring_sandbox_unavailable) rather than running unconfined.
+	mode, err := buildsandbox.Mode(packaged.FailClosed())
 	if err != nil {
 		return "", err
 	}
 	args := append(append([]string{}, command[1:]...), "build", "--target", "node", "--root", root, "--output", outputDir)
-	cmd := exec.CommandContext(ctx, command[0], args...) //nolint:gosec // command is deployment/operator configuration.
-	cmd.Dir = root
-	out, err := cmd.CombinedOutput()
-	output := strings.TrimSpace(string(out))
-	if err != nil {
-		if output == "" {
-			output = err.Error()
-		}
-		return output, fmt.Errorf("flue build failed: %s", output)
+	env := map[string]string{"PATH": os.Getenv("PATH"), "HOME": os.Getenv("HOME"), "TMPDIR": os.Getenv("TMPDIR"), "CI": os.Getenv("CI"), "LANG": os.Getenv("LANG"), "TZ": os.Getenv("TZ")}
+	var profile string
+	if mode == "seatbelt" {
+		profile = buildsandbox.Profile(buildsandbox.ProfileSpec{
+			BuildRoot:  root,
+			OutputRoot: outputDir,
+			TmpDir:     os.Getenv("TMPDIR"),
+			Home:       os.Getenv("HOME"),
+		})
+	}
+	result := buildsandbox.Run(ctx, buildsandbox.Request{Command: append([]string{command[0]}, args...), Dir: root, Env: env, Profile: profile})
+	output := strings.TrimSpace(result.Output)
+	if result.Err != nil {
+		return output, result.Err
 	}
 	if _, err := os.Stat(filepath.Join(outputDir, "server.mjs")); err != nil {
 		return output, fmt.Errorf("flue build missing dist/server.mjs: %w", err)
 	}
+	// server.mjs imports @loom/sdk as an external; RegisterFlueDriver copies only
+	// the dist tree, so the SDK runtime must live inside it or the built workflow
+	// cannot resolve it at run time.
+	if err := stageLoomSDKRuntime(toolchain.SDKRoot, outputDir); err != nil {
+		return output, err
+	}
 	return output, nil
+}
+
+// stageLoomSDKRuntime writes the @loom/sdk runtime files into
+// <dist>/node_modules/@loom/sdk so the built server.mjs resolves its external
+// @loom/sdk import at run time. It mirrors the trusted package-builtin lane:
+// exactly packaged.LoomSDKRuntimeFiles, as real files, replacing any tree Flue
+// may have emitted.
+func stageLoomSDKRuntime(sdkRoot, distDir string) error {
+	if strings.TrimSpace(sdkRoot) == "" {
+		return fmt.Errorf("stage @loom/sdk: empty sdk root")
+	}
+	dest := filepath.Join(distDir, "node_modules", "@loom", "sdk")
+	if err := os.RemoveAll(dest); err != nil {
+		return fmt.Errorf("replace nested @loom/sdk: %w", err)
+	}
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		return fmt.Errorf("create nested @loom/sdk: %w", err)
+	}
+	for _, rel := range packaged.LoomSDKRuntimeFiles {
+		data, err := os.ReadFile(filepath.Join(sdkRoot, filepath.FromSlash(rel))) //nolint:gosec // rel is a fixed allowlist, sdkRoot is the resolved toolchain SDK.
+		if err != nil {
+			if os.IsNotExist(err) {
+				// A verified kit and the committed developer SDK always ship every
+				// runtime file; a minimal or misconfigured override SDK may not.
+				// Stage what the SDK provides rather than failing the build — the
+				// dist just won't resolve the missing export at run time — and warn
+				// so the gap is visible.
+				slog.Warn("authoring SDK runtime file absent; not staged into dist", "file", rel, "sdk_root", sdkRoot)
+				continue
+			}
+			return fmt.Errorf("read @loom/sdk %s: %w", rel, err)
+		}
+		if err := os.WriteFile(filepath.Join(dest, filepath.FromSlash(rel)), data, 0o644); err != nil {
+			return fmt.Errorf("write @loom/sdk %s: %w", rel, err)
+		}
+	}
+	return nil
 }
 
 func flueCommand() ([]string, error) {

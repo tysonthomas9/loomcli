@@ -140,6 +140,10 @@ func TestEnsureBuiltinWorkflowSubsetManifestReusedWhenRebuildUnavailable(t *test
 	// Fail-open is a compile-lane behavior; on the fail-closed path
 	// (desktop/packaged) the packaged lane's error wins instead.
 	t.Setenv("LOOM_LOCAL_RUNTIME", "")
+	// builtinWorkflowWorkDir honors LOOM_WORKSPACE_RUNTIME_DIR before cwd; clear
+	// the ambient value so the registered subset bundle is found under this cwd
+	// and the fail-open-onto-reuse path is exercised (not a bundle-missing miss).
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", "")
 
 	versionID := registerEpicRunnerWithRunners(t, st, workDir, subsetRunnerSpecs())
 

@@ -53,6 +53,9 @@ func configureFakeBuiltinBundleBuild(t *testing.T) {
 			t.Fatalf("write package.json for %s: %v", path, err)
 		}
 	}
+	// The SDK root must carry the runtime files stageLoomSDKRuntime copies into
+	// the built dist, as a real @loom/sdk checkout does.
+	writeStubLoomSDKRuntime(t, sdkRoot)
 
 	flue := filepath.Join(root, "fake-flue.sh")
 	script := `#!/usr/bin/env bash

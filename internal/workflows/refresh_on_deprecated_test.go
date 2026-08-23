@@ -174,15 +174,19 @@ func installFakeWorkflowBuildDeps(t *testing.T) {
 	// (DEV-V5-31): clear the desktop marker a desktop-spawned shell inherits.
 	t.Setenv("LOOM_LOCAL_RUNTIME", "")
 	t.Setenv("LOOM_BUILTIN_ARTIFACTS_DIR", "")
+	// Also clear the desktop workspace runtime dir: builtinWorkflowWorkDir honors
+	// it before cwd, so an ambient value (this suite may run inside a Loom
+	// workspace) would send builds/bundle lookups to the real data dir instead of
+	// the test's t.Chdir workdir.
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", "")
 
 	root := t.TempDir()
 	sdkRoot := filepath.Join(root, "sdk")
 	if err := os.MkdirAll(sdkRoot, 0o755); err != nil {
 		t.Fatalf("create fake sdk root: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(sdkRoot, "package.json"), []byte(`{"name":"@loom/sdk"}`+"\n"), 0o644); err != nil {
-		t.Fatalf("write fake sdk package: %v", err)
-	}
+	// Include the runtime files stageLoomSDKRuntime copies into the built dist.
+	writeStubLoomSDKRuntime(t, sdkRoot)
 
 	runtimeRoot := filepath.Join(root, "runtime")
 	for _, dir := range []string{

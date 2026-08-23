@@ -34,6 +34,7 @@
       "resources/webui/": "webui/"
       ,"resources/builtin-workflows/": "builtin-workflows/"
       ,"resources/licenses/": "licenses/"
+      ,"resources/authoring-kit/": "authoring-kit/"
     },
     "macOS": {
       "minimumSystemVersion": "12.0"

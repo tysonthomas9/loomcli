@@ -491,6 +491,8 @@ func structToMap(value any) map[string]any {
 // built-in runtime (a resolvable Node plus verified packaged artifacts for
 // every required built-in — or, off the fail-closed path, authoring as the
 // compile fallback).
+//
+//nolint:funlen // Readiness preserves a stable, flat compatibility payload.
 func workflowReadinessStatus() map[string]any {
 	sandboxMode := workflowSandboxMode()
 	nodeDesc := noderuntime.Describe()
@@ -506,12 +508,19 @@ func workflowReadinessStatus() map[string]any {
 		"daytona_sdk":  packageRootAvailable(os.Getenv("DAYTONA_SDK_ROOT"), filepath.Join("..", "flue", "node_modules", ".pnpm", "node_modules", "@daytona", "sdk")),
 	}
 	authoringReady := nodeOnPath && authoring["flue"].(bool) && authoring["loom_sdk"].(bool) && authoring["flue_runtime"].(bool)
+	// The detailed resolver result is shared by CLI and HTTP builds. Keep the
+	// legacy flat booleans above for compatibility with existing scripts.
+	detail := workflows.AuthoringReadiness()
+	if ready, ok := detail["ready"].(bool); ok && (os.Getenv("LOOM_LOCAL_RUNTIME") == "desktop" || os.Getenv("LOOM_AUTHORING_PACKAGE_MODE") == "1") {
+		authoringReady = ready
+	}
 	status := map[string]any{
 		"sandbox_mode":                 sandboxMode,
 		"untrusted_execution_possible": sandboxMode == driverpkg.SandboxModeContainer,
 		"authoring":                    authoring,
 		"authoring_ready":              authoringReady,
 		"ok":                           authoringReady,
+		"detail":                       detail,
 	}
 	for key, value := range authoring {
 		status[key] = value
