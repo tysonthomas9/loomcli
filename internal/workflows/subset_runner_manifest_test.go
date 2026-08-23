@@ -39,9 +39,6 @@ func registerEpicRunnerWithRunners(t *testing.T, st store.Store, workDir string,
 	if err := os.WriteFile(filepath.Join(dist, "server.mjs"), []byte("export {};\n"), 0o644); err != nil {
 		t.Fatalf("write server: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dist, "manifest.json"), []byte("{}\n"), 0o644); err != nil {
-		t.Fatalf("write manifest: %v", err)
-	}
 	spec, ok := BuiltinWorkflow(BuiltinEpicRunnerWorkflowName)
 	if !ok {
 		t.Fatal("epic-runner builtin missing")
