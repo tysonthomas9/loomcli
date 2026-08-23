@@ -74,6 +74,7 @@ Then exercise the UI, do not read it:
 - Before starting a command that binds the app's fixed ports, run `marathon-freeports` if a port is busy, then wrap the command as `marathon-portlock <cmd>`. Four workers share the ports and the lock serializes them.
 - Start the app and open the pages you changed in a real browser
 - Walk each state the design specifies: **loading**, **empty**, **error**, and the happy path. Force them — delay the request, empty the data, break the endpoint. A state you never saw is a state you did not implement.
+- For any change to what a signed-in user sees: the main thing the product is for must be reachable with visible controls — get to the primary view, create or post the primary item, reload, see it rendered, open its detail view and its quick actions — and you must perform that walk in the browser and list each step with what you saw in your completion note. A header and an empty pane is not done. Never remove shipped UI to make your change fit; extend it.
 - Check the responsive behavior at each breakpoint the design names
 - Check the accessibility basics: heading order, every control reachable and operable by keyboard, a visible focus style, labels on form controls, alt text on images, and text contrast that meets the project's requirement
 - Watch the browser console: warnings and errors count as failures

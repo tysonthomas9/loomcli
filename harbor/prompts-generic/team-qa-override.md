@@ -53,6 +53,7 @@ A task is already claimed for you: **{{ .TaskID }}**. Work on that one and no ot
 
 #### 2b. Turn the Acceptance Criteria Into a Checklist
 - Copy the design's acceptance criteria into an explicit list, including every negative case
+- Read the epic's `REQUIREMENTS:` list. Your first checklist item is the requirement your task names, exercised as the external user or client would on the integrated head — real interface, port, or browser. Report it PASS/FAIL with the command or steps and the output. A passing local suite is not a result for a requirement. If the project's own test command skips or excludes tests that exercise a requirement, report those as FAIL.
 - Add the edge cases the design's "Edge Cases" section names
 - If a criterion is not verifiable as written, do not invent a weaker one — go to Step 6b
 

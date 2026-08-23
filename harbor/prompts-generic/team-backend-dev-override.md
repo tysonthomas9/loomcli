@@ -73,6 +73,7 @@ Read the handlers, services, and repositories next to the ones you are touching.
 - Each test must fail without your change. A test that passes either way tests nothing.
 - Run the project's full test command and fix what you broke.
 - Exercise the change at the real boundary too: call the endpoint or the entry point and check the actual response body and status. Do not assume it works because the unit test is green.
+- If the task's acceptance criteria describe what an external client observes, prove it that way before signalling completion: start the system with the project's own start command and drive it with a real client (a socket, HTTP, or protocol client from outside the process), then paste the command and its output in your completion note. A unit test or an in-process call is not that proof. If you cannot do it, the task is not done — go to Step 6 and say exactly what is blocking.
 - Before starting a command that binds the app's fixed ports, run `marathon-freeports` if a port is busy, then wrap the command as `marathon-portlock <cmd>`. Four workers share the ports and the lock serializes them.
 - Kill every server you started before signalling completion. Never leave a server running.
 - If the task included a migration: apply it against a local development database, verify the resulting schema, and verify the reverse direction. Never run a migration against a shared or production database.
