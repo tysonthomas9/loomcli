@@ -76,10 +76,17 @@ for name in epic-runner github-review-agent; do
 done
 
 # ---------------------------------------------------------- 2. package-builtin
-log "2. loom workflow package-builtin for both built-ins --require-all --json"
+log "2. loom workflow package-builtin for both built-ins (--require-all on the last)"
 mkdir -p "$TMP/bw"
-for name in epic-runner github-review-agent; do
-  PKG_JSON="$(cd "$ROOT" && go run ./cmd/loom workflow package-builtin "$name" --dist "$TMP/${name}-dist" --out "$TMP/bw" --require-all --json)"
+# --require-all requires EVERY RequiredBuiltins entry to already be in the index,
+# so it can only go on the final built-in (epic-runner alone would fail it).
+BUILTINS=(epic-runner github-review-agent)
+for i in "${!BUILTINS[@]}"; do
+  name="${BUILTINS[$i]}"
+  REQ=(); [[ "$i" -eq $((${#BUILTINS[@]} - 1)) ]] && REQ=(--require-all)
+  # "${REQ[@]+"${REQ[@]}"}" — expand safely on macOS bash 3.2, where an empty
+  # "${REQ[@]}" trips `set -u` ("unbound variable"; fixed only in bash 4.4+).
+  PKG_JSON="$(cd "$ROOT" && go run ./cmd/loom workflow package-builtin "$name" --dist "$TMP/${name}-dist" --out "$TMP/bw" "${REQ[@]+"${REQ[@]}"}" --json)"
   record "package-builtin ${name}" "$PKG_JSON"
   tee "$OUT/package-${name}.json" <<<"$PKG_JSON" >/dev/null
 done
@@ -264,7 +271,9 @@ assert_contains "$SERVE_TEXT" "workflow=epic-runner" "serve log epic-runner regi
 assert_contains "$SERVE_TEXT" "workflow=github-review-agent" "serve log github-review-agent registration"
 assert_contains "$SERVE_TEXT" "node runtime resolved" "serve log"
 assert_contains "$SERVE_TEXT" "source=bundled" "serve log"
-assert_contains "$SERVE_TEXT" "path=$TMP/bin/node" "serve log"
+# The resolver logs the symlink-resolved path; on macOS $TMP under /var is really
+# /private/var, so compare against the physical path of the sibling node.
+assert_contains "$SERVE_TEXT" "path=$(cd "$TMP/bin" && pwd -P)/node" "serve log"
 for bad in "flue build" "workflow-builds" "local @loom/sdk" "LOOM_SDK_ROOT"; do assert_not_contains "$SERVE_TEXT" "$bad" "serve log"; done
 record "serve log (phase 1, grep)" "$(grep -E 'packaged artifact|node runtime resolved' "$SERVE_LOG" || true)"
 

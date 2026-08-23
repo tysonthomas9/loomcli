@@ -39,7 +39,8 @@ if [ "${LOOM_SKIP_BUILTIN_ARTIFACTS:-0}" = "1" ]; then
   INDEX_DIGEST=""
 else
   FLUE_REPO="${FLUE_REPO:-${REPO_ROOT}/../flue}"
-  for name in "${BUILTINS[@]}"; do
+  for i in "${!BUILTINS[@]}"; do
+    name="${BUILTINS[$i]}"
     dist="${DESKTOP_DIR}/.loom-builtin-dist/${name}"
     mkdir -p "${dist}"
     if [ -n "${LOOM_BUILTIN_PREBUILT_DIST_DIR:-}" ]; then
@@ -50,9 +51,15 @@ else
       BUILTIN_DIST_DEST="${dist}" FLUE_REPO="${FLUE_REPO}" \
         "${REPO_ROOT}/scripts/rebuild-builtin-bundle.sh" "${name}"
     fi
+    # --require-all requires EVERY RequiredBuiltins entry to already be in the
+    # index, so it can only go on the final built-in (epic-runner alone would
+    # fail it). "${REQ[@]+"${REQ[@]}"}" expands safely under macOS bash 3.2's
+    # `set -u`, where an empty "${REQ[@]}" is an "unbound variable".
+    REQ=()
+    [ "$i" -eq $(( ${#BUILTINS[@]} - 1 )) ] && REQ=(--require-all)
     (cd "${REPO_ROOT}" && go run ./cmd/loom workflow package-builtin "${name}" \
       --dist "${dist}" --out "${BUILTIN_RESOURCE_DIR}" --loom-sdk "${REPO_ROOT}/sdk" \
-      --require-all --json > "${DESKTOP_DIR}/.loom-builtin-${name}.json")
+      "${REQ[@]+"${REQ[@]}"}" --json > "${DESKTOP_DIR}/.loom-builtin-${name}.json")
     "${NODE_SIDECAR}" "${REPO_ROOT}/desktop/scripts/smoke-load-server.mjs" \
       "${BUILTIN_RESOURCE_DIR}/${name}/dist/server.mjs" "${name}"
   done
