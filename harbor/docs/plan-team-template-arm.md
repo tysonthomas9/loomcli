@@ -378,4 +378,16 @@ Status: spec A + B landed; stub dry-run NOT yet run.
   spent the window on the API core and never reached the grader's hard gates (IRC gateway,
   crash/chaos recovery, frontend journey) or the message UI. Next lever is the lead prompt
   (gate-first ordering, frontend weight), not the runtime.
+- **Codex post-mortem of that run** (six lens analysts — lead, architect, backend, frontend, QA,
+  grader-gap — plus an evidence-checked synthesis): `harbor/runs/team-cursor-full-151445/analysis/
+  SYNTHESIS.md`. Top causes: no gate-first scheduling or finalization barrier (all 5 gates
+  unowned at the end); MARATHON-17 (chat UI) routed to the design-only architect near the
+  deadline so the SPA shipped with no message list/composer; WebSocket/events designed too late
+  and never wired (costs API + crash + chaos); IRC never started; QA + devs used task-local
+  suites as "full" and never ran the official gates; architect consumed ~76 of 200 minutes.
+  Smallest change first: lead must write a five-row gate matrix (owner + command per gate)
+  before any non-gate task is claimed and refuse to finalize with an unrun/unowned gate row.
+  Harness items: scheduler eligibility invariant (design-only role can't claim implementation
+  tasks), serialized official-verifier run after critical merges, per-worker port/data
+  isolation, capture the headless lead's transcript.
 
