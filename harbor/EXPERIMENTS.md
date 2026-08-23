@@ -700,6 +700,69 @@ uniform retry/eval_loop; explicitly NO lesson-informed reordering). The
 derivation rule ships in the manifest. A separate arm, never conflated with
 B4a (vet-A #10).
 
+### T-series. team-template arm on all-cursor (2026-08-22 →) — ACTIVE
+
+Separate family from B2–B4 (different runtime: `loom template apply`, headless
+cursor lead, cursor workers; metered spend via the cursor shim). Replica judge
+by policy; scores always labeled `replica-ux`. Launcher:
+`harbor/test/launch-team-cursor.sh PROFILE=full`. Evidence per run under
+`harbor/runs/<job>/` (export-run.sh). Plan doc: `docs/plan-team-template-arm.md`.
+
+| id | run | team | prompts | result |
+|---|---|---|---|---|
+| T1 | `team-cursor-full-151445` (2026-08-22) | lead + architect + backend-dev + frontend-dev + qa (fullstack-app) | team v1 | 15 integrated, $65.31; correctness 0 (gates 0/5, pytest 76/129), replica-ux 0.375 → **0.1875**. Post-mortem: `runs/team-cursor-full-151445/analysis/SYNTHESIS.md` |
+| T2 | `team-cursor-full-v2-225745` (2026-08-23, RUNNING) | same | team v2 (`48f8e5f0c`): requirements coverage ledger, deadline mode, external-client DoD, thin designs | — . Mid-run hotfix 06:16Z: pgrep/pkill `--ignore-ancestors` guard hot-installed after the critic self-killed on MARATHON-2 attempt 1 (`dbd1bc301`); disclosed, affects critic/worker survival only, not prompts |
+| T3 | planned | lead + architect + 3 × implementer (new template `hv-app`) | team v3: horizontal/vertical split | — |
+| T4 | planned | T3 + qa + bugbot | team v3 + e2e-QA/bugbot prompts | — |
+
+**T2 hypothesis.** T1 lost on prioritization, not runtime: nothing owned the
+instruction's observable requirements end to end and nobody verified on the
+integrated head. v2 prompts are grader-blind (leakage rule: the rejected
+"gate matrix" rev 1 is kept in `docs/proposed-prompt-changes-gate-matrix.md`
+as the record). Predicts: ≥1 correctness gate, journey reachable, replica-ux
+> 0.375, fewer architect sessions. Same seats/cost as T1 for a clean compare.
+
+**T3 design (horizontal/vertical team, operator design 2026-08-23).**
+- Lead seeds from the `REQUIREMENTS:` list and splits tasks into two kinds by
+  label: `horizontal` — framework/skeleton, shared plumbing, e2e harness +
+  fixtures, conventions, extension points, dev tooling; `vertical` — ONE
+  requirement end to end (API + UI + tests + an e2e scenario). Verticals
+  `--depends-on` the skeleton. Every task starts with `architect`.
+- Architect VETS AND REFINES tasks (scope, observable acceptance criteria,
+  contract/extension-point notes, split/merge, dependencies) and APPROVES BY
+  REMOVING THE `architect` LABEL ITSELF — no design document, no lead review
+  round-trip (T1: designs cost ~76/200 min and starved claims). Decision
+  2026-08-23: architect-approves; the coverage ledger is the check against
+  rubber-stamping. No task may be covered only by a design.
+- Implementer: ONE generic role, N=3 copies, one prompt with two workflows
+  chosen by the task label. Horizontal: build what others plug into, no
+  feature logic, document the extension points, per-worker port/data config.
+  Vertical: own the requirement through every layer; definition of done = its
+  e2e scenario passes against the project's own start command; paste the run.
+- Codex critic stays as the integration gate. Coverage ledger + deadline mode
+  from v2 stay. Team = 4 worker seats (architect + 3 impl), ~$20/h, same as
+  T1/T2 so the comparison is seat-for-seat.
+- Build list: template bundle `internal/teamtemplate/bundles/hv-app.yaml`
+  (architect + implementer×3; skills so implementers claim both labels);
+  prompts `team-implementer-override.md` (two workflows), architect variant
+  (vet/refine/approve), lead variant (H/V split, no design-review protocol);
+  verify claim/yield + `depends-on` gating with a single impl role; headless
+  lead transcript capture; pgrep guard (done).
+
+**T4 design.** T3 + `qa` (runs each integrated vertical's e2e + exploratory
+pass on the integrated head, files follow-up tasks; defects get `bug`) +
+`bugbot` (claims `bug`, fixes, delivers through the same gate). 6 seats.
+Decision pending: bugbot fixes directly vs files only (start: fix ≤ small
+bounded diff, file the rest).
+
+**Harness defects found by this series and fixed:** prompt in argv → agent
+self-kill (shim stash+stdin, `34f8b8592`); classifier read stream-json
+content (`1236c55fb`); exited supervisor's liveness tick crashed the daemon
+(`1236c55fb`); `pgrep -f` self-match of the tool shell (`dbd1bc301`). Known
+open: headless lead transcript not captured; fallback claims cross lanes
+(T1 MARATHON-17); per-worker port/data isolation; root.go SIGTERM re-raise;
+fleet-db inbox CAS.
+
 ### Bias-ledger + manifest template
 
 ```
