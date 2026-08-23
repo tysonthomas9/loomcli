@@ -64,3 +64,7 @@ node_modules/
 # / scripts/test-packaged-builtin-devbox.sh; never committed)
 desktop/src-tauri/resources/builtin-workflows/
 desktop/dist-devbox/
+# Embedded Node runtime licence (staged from the tarball by prepare-node-runtime.sh)
+desktop/src-tauri/resources/licenses/
+# DoD app-test observed output (scripts/test-packaged-builtin-app.sh)
+desktop/dist-app-test/

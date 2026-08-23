@@ -16,6 +16,11 @@
           "name": "binaries/loom",
           "sidecar": true,
           "args": true
+        },
+        {
+          "name": "binaries/node",
+          "sidecar": true,
+          "args": true
         }
       ]
     }
