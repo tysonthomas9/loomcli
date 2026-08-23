@@ -31,6 +31,7 @@ ux.json,judges-raw/}
 """
 
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -38,13 +39,21 @@ import subprocess
 import sys
 import time
 
-IMAGE = "docker.io/library/slack-clone__geyvx7k__env-main:latest"
+# The task env image (harbor tags it per job; `podman images | grep slack-clone`)
+# and the output root are overridable: the defaults were a since-pruned image
+# tag and a per-session scratchpad that gets wiped.
+IMAGE = os.environ.get(
+    "JUDGE_IMAGE", "docker.io/library/slack-clone__geyvx7k__env-main:latest"
+)
 RUBRIC = pathlib.Path(
     "/Users/tyson/codebase/code-agents/swe-marathon/tasks/slack-clone/tests/rubric.json"
 )
 OUTBASE = pathlib.Path(
-    "/private/tmp/claude-501/-Users-tyson-codebase-code-agents-loomcli/"
-    "50f0f885-3d1d-4acd-b427-65a26ca2e269/scratchpad/claude-judge"
+    os.environ.get(
+        "JUDGE_OUTBASE",
+        "/private/tmp/claude-501/-Users-tyson-codebase-code-agents-loomcli/"
+        "50f0f885-3d1d-4acd-b427-65a26ca2e269/scratchpad/claude-judge",
+    )
 )
 CLAUDE = "/Users/tyson/.local/bin/claude"
 START_URL = "http://127.0.0.1:18000/"
