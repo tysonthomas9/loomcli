@@ -749,6 +749,26 @@ as the record). Predicts: ≥1 correctness gate, journey reachable, replica-ux
   verify claim/yield + `depends-on` gating with a single impl role; headless
   lead transcript capture; pgrep guard (done).
 
+**T3 pre-flight gate (operator requirement 2026-08-23: the new team must be
+shown to work before the full run).** In order, each must be green:
+1. template unit test (free): `hv-app.yaml` + teamtemplate test — implementer
+   claims `horizontal`/`vertical`, never `architect`-labeled; architect claims
+   only `architect`. Mechanic: implementers use `task_filter: any` +
+   `exclude_labels: [architect, qa]` (not `has_design`), so removing the
+   label IS the approval.
+2. stub trial (free, real Harbor/image/fake agents): stub `team-architect-vet`
+   removes the label; stub hv lead seeds H + V(depends-on H). Asserts: no
+   vertical claimed before the skeleton integrates; every task passed through
+   the architect; architect never commits; coverage comment present;
+   critic/integration counts consistent.
+3. host POC on real cursor (~$1–2, tiny app): lead seeds REQUIREMENTS + H/V;
+   architect vets+approves one H and one V; one implementer does H (skeleton +
+   e2e harness) then V (feature + e2e scenario as DoD). Only rung that tests
+   prompt semantics.
+4. capped container trial ($25, 40 min, verification off) with the real
+   prompts + pgrep guard.
+5. full run T3.
+
 **T4 design.** T3 + `qa` (runs each integrated vertical's e2e + exploratory
 pass on the integrated head, files follow-up tasks; defects get `bug`) +
 `bugbot` (claims `bug`, fixes, delivers through the same gate). 6 seats.
