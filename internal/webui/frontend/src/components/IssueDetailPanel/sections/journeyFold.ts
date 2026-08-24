@@ -6,7 +6,6 @@ import {
   type JourneyActorKind,
 } from "./eventDescription";
 import {
-  hasDisplayableJourneyDuration,
   journeyStageForStatus,
   type JourneyStage,
 } from "./journeyPresentation";
@@ -518,52 +517,9 @@ export function foldJourney(
     pendingEvents = [];
   }
 
-  const retainedIndexes = new Set<number>();
-  spans.forEach((span, index) => {
-    // The creation event establishes the task's initial queued state. Keep
-    // that first Open/unassigned span even when an agent claims the task in
-    // under a second; otherwise the UI presents creation as if it occurred
-    // during In progress and loses a real lifecycle transition.
-    const isInitialUnclaimedOpen =
-      index === 0 && span.stage === "Open" && span.owner === null;
-    if (
-      isInitialUnclaimedOpen ||
-      span.stage === "Closed" ||
-      span.end === null ||
-      hasDisplayableJourneyDuration(span.durationMs)
-    ) {
-      retainedIndexes.add(index);
-    }
-  });
-
-  spans.forEach((span, index) => {
-    if (retainedIndexes.has(index)) return;
-
-    let targetIndex = spans.findIndex(
-      (_candidate, candidateIndex) =>
-        candidateIndex > index && retainedIndexes.has(candidateIndex),
-    );
-    if (targetIndex < 0) {
-      for (
-        let candidateIndex = index - 1;
-        candidateIndex >= 0;
-        candidateIndex -= 1
-      ) {
-        if (retainedIndexes.has(candidateIndex)) {
-          targetIndex = candidateIndex;
-          break;
-        }
-      }
-    }
-    const target = targetIndex >= 0 ? spans[targetIndex] : undefined;
-    if (!target) return;
-    target.events.push(...span.events);
-    target.halts.push(...span.halts);
-  });
-
-  return spans
-    .filter((_span, index) => retainedIndexes.has(index))
-    .map((span): JourneySpan => {
+  // Journey is an audit trace: retain every semantic stage or ownership
+  // transition, even when its displayed duration rounds to 0s.
+  return spans.map((span): JourneySpan => {
       span.events.sort((a, b) => auditTime(a) - auditTime(b));
       span.halts.sort((a, b) => a.startMs - b.startMs);
 

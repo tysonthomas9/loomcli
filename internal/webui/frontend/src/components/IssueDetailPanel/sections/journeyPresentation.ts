@@ -54,10 +54,6 @@ export function formatJourneyDuration(durationMs: number): string {
   return `${days}d ${String(hours).padStart(2, "0")}h ${String(minutes).padStart(2, "0")}m`;
 }
 
-export function hasDisplayableJourneyDuration(durationMs: number): boolean {
-  return formatJourneyDuration(durationMs) !== "0s";
-}
-
 export function formatJourneyClock(iso: string): string {
   const parsed = Date.parse(iso);
   if (!Number.isFinite(parsed)) return "";

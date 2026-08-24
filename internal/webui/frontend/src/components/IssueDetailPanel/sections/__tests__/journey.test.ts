@@ -6,7 +6,6 @@ import { foldJourney } from "../journeyFold";
 import {
   formatJourneyClock,
   formatJourneyDuration,
-  hasDisplayableJourneyDuration,
   journeyStageForStatus,
 } from "../journeyPresentation";
 
@@ -40,11 +39,6 @@ describe("journey presentation", () => {
     [2 * 86_400_000 + 3 * 3_600_000 + 41 * 60_000 + 59_000, "2d 03h 41m"],
   ])("formats %i milliseconds as %s", (durationMs, expected) => {
     expect(formatJourneyDuration(durationMs)).toBe(expected);
-  });
-
-  it("uses the formatter's one-second resolution for displayability", () => {
-    expect(hasDisplayableJourneyDuration(999)).toBe(false);
-    expect(hasDisplayableJourneyDuration(1_000)).toBe(true);
   });
 
   it("formats local clocks and rejects unparseable input", () => {
@@ -305,7 +299,7 @@ describe("foldJourney", () => {
     );
   });
 
-  it("re-parents a dropped sub-resolution span without losing audit rows", () => {
+  it("preserves a sub-second ownership transition as its own stage", () => {
     const source = [
       event(0, "issue.create"),
       event(10, "issue.claim", { actor: "agent-dev-1" }),
@@ -322,10 +316,15 @@ describe("foldJourney", () => {
 
     const spans = foldJourney(source, BASE_MS + 30_000);
     const reviews = spans.filter((span) => span.stage === "Review");
-    expect(reviews).toHaveLength(1);
-    expect(reviews[0]?.owner).toBe("agent-review-1");
+    expect(reviews).toHaveLength(2);
+    expect(reviews.map(({ owner }) => owner)).toEqual([
+      "agent-dev-1",
+      "agent-review-1",
+    ]);
     expect(reviews[0]?.events.map(({ id }) => id)).toEqual([
       `${BASE_MS + 20_000}-0`,
+    ]);
+    expect(reviews[1]?.events.map(({ id }) => id)).toEqual([
       `${BASE_MS + 20_400}-0`,
     ]);
 
