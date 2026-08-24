@@ -26,6 +26,7 @@ const VIEWS: ViewConfig[] = [
   { id: "graph", label: "Graph" },
   { id: "monitor", label: "Monitor" },
   { id: "observability", label: "Observability" },
+  { id: "workflows", label: "Workflows" },
 ];
 
 /**

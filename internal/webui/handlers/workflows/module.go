@@ -31,9 +31,12 @@ func NewModule(st store.Store) *Module {
 }
 
 func (m *Module) Register(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/workspaces/{ws}/workflows", m.listWorkflows)
 	mux.HandleFunc("POST /api/workspaces/{ws}/workflows/{name}/versions", m.createWorkflowVersion)
 	mux.HandleFunc("GET /api/workspaces/{ws}/workflows/{name}/versions", m.listWorkflowVersions)
 	mux.HandleFunc("POST /api/workspaces/{ws}/workflows/{name}/versions/{versionId}/activate", m.activateWorkflowVersion)
+	mux.HandleFunc("POST /api/workspaces/{ws}/workflows/{name}/versions/{versionId}/approve", m.approveWorkflowVersion)
+	mux.HandleFunc("POST /api/workspaces/{ws}/workflows/{name}/versions/{versionId}/unapprove", m.unapproveWorkflowVersion)
 	mux.HandleFunc("POST /api/workspaces/{ws}/workflows/{name}/builtin/sync", m.syncBuiltinWorkflow)
 	mux.HandleFunc("POST /api/workspaces/{ws}/workflows/{name}/rollback", m.rollbackWorkflow)
 	mux.HandleFunc("POST /api/workspaces/{ws}/workflows/{name}", m.createWorkflowRun)

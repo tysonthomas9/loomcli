@@ -191,6 +191,45 @@ const TOP_ITEMS: NavItem[] = [
       </svg>
     ),
   },
+  {
+    id: "workflows",
+    label: "Workflows",
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle
+          cx="6"
+          cy="6"
+          r="2.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+        <circle
+          cx="6"
+          cy="18"
+          r="2.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+        <circle
+          cx="18"
+          cy="12"
+          r="2.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+        <path
+          d="M8.5 6H13a2 2 0 012 2v1.5M8.5 18H13a2 2 0 002-2v-1.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+      </svg>
+    ),
+  },
 ];
 
 const BOTTOM_ITEMS: NavItem[] = [
