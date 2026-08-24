@@ -158,6 +158,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/audit": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List workspace mutation and daemon lifecycle activity */
+    get: operations["listWorkspaceAuditEvents"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}": {
     parameters: {
       query?: never;
@@ -2406,6 +2423,26 @@ export interface components {
       fields?: string[];
       error?: string;
     };
+    AuditEventListResponse: {
+      /** @constant */
+      success: true;
+      data: {
+        events: components["schemas"]["AuditEvent"][];
+        next_cursor: string;
+      };
+    };
+    AuditEvent: {
+      cursor: string;
+      /** Format: date-time */
+      timestamp: string;
+      actor: string;
+      action: string;
+      entity_type: string;
+      entity_id: string;
+      details?: {
+        [key: string]: unknown;
+      };
+    };
     FileMutationResponse: {
       success: boolean;
       version: string;
@@ -2978,6 +3015,12 @@ export interface components {
       dep_type?: string;
     };
     WorkspaceResponse: {
+      /** @constant */
+      success: true;
+      data: components["schemas"]["WorkspaceData"];
+      warnings?: string[];
+    };
+    WorkspaceData: {
       id: string;
       name: string;
       path: string;
@@ -3871,12 +3914,26 @@ export interface operations {
       content: {
         "application/json": {
           name: string;
-          path: string;
+          /** @enum {string} */
+          type: "empty" | "clone" | "template";
+          path?: string;
+          repos?: string[];
+          clone_urls?: string[];
+          branch?: string;
         };
       };
     };
     responses: {
-      /** @description Workspace creation started (async job) */
+      /** @description Empty workspace created synchronously */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WorkspaceResponse"];
+        };
+      };
+      /** @description Clone workspace creation started asynchronously */
       202: {
         headers: {
           [name: string]: unknown;
@@ -3895,6 +3952,52 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  listWorkspaceAuditEvents: {
+    parameters: {
+      query?: {
+        since?: string;
+        limit?: number;
+        entity?: string;
+        actor?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Newest-first activity page */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AuditEventListResponse"];
+        };
+      };
+      /** @description Invalid query parameter */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ServiceErrorResponse"];
+        };
+      };
+      /** @description Workspace not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ServiceErrorResponse"];
         };
       };
     };

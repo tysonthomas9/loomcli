@@ -74,6 +74,7 @@ func builtInRoleConfig(roleName string) cfgpkg.RoleConfig {
 	switch roleName {
 	case "plan":
 		rc.TaskFilter = "needs_plan"
+		rc.ExcludeLabels = []string{"architect"}
 	case "task":
 		rc.TaskFilter = "has_design"
 	}

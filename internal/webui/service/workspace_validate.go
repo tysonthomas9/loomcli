@@ -14,6 +14,12 @@ import (
 
 const maxWorkspaceNameLen = 64
 
+// IsFleetRateLimited reports whether a store-facing operation exhausted its
+// shared FleetDB 429 retry policy.
+func IsFleetRateLimited(err error) bool {
+	return errors.Is(err, fleethttp.ErrRateLimited)
+}
+
 var cloneURLPattern = regexp.MustCompile(`^(https://|git@)`)
 
 // IsCloneURL reports whether a value uses one of Loom's supported git clone

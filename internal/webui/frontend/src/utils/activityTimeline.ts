@@ -169,7 +169,7 @@ export function activityTimelineReducer(
     ) {
       return state;
     }
-    return { ...state, live: [action.event, ...state.live] };
+    return { ...state, live: [action.event, ...state.live].slice(0, 200) };
   }
 
   return {
@@ -193,6 +193,7 @@ export function selectActivityEvents(
 
 /** Convert only complete audit-shaped mutation payloads from the shared SSE. */
 export function toAuditEvent(mutation: MutationPayload): AuditEvent | null {
+  if (mutation.action === "agent.refresh") return null;
   if (
     !mutation.action ||
     !mutation.entity_type ||

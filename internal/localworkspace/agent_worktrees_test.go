@@ -189,7 +189,7 @@ func TestMaterializeCreatesWorktreePerRepo(t *testing.T) {
 }
 
 func TestAgentBranchName(t *testing.T) {
-	if got, want := AgentBranchName("WSA", "dev-1"), "WSA/dev-1"; got != want {
+	if got, want := AgentBranchName("WSA", "dev-1"), "WSA--dev-1"; got != want {
 		t.Fatalf("AgentBranchName() = %q, want %q", got, want)
 	}
 }
@@ -232,10 +232,10 @@ func TestMaterializeSharedRepoAcrossWorkspaces(t *testing.T) {
 	if err := materializerA.Materialize(context.Background(), agentA); err != nil {
 		t.Fatalf("Materialize() WSA second run: %v", err)
 	}
-	if got, want := gitOut(t, worktreeA, "rev-parse", "--abbrev-ref", "HEAD"), "WSA/dev-1"; got != want {
+	if got, want := gitOut(t, worktreeA, "rev-parse", "--abbrev-ref", "HEAD"), "WSA--dev-1"; got != want {
 		t.Fatalf("WSA worktree branch = %q, want %q", got, want)
 	}
-	if got, want := gitOut(t, worktreeB, "rev-parse", "--abbrev-ref", "HEAD"), "WSB/dev-1"; got != want {
+	if got, want := gitOut(t, worktreeB, "rev-parse", "--abbrev-ref", "HEAD"), "WSB--dev-1"; got != want {
 		t.Fatalf("WSB worktree branch = %q, want %q", got, want)
 	}
 }

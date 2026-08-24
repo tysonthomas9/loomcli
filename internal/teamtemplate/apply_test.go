@@ -234,9 +234,10 @@ func TestApplyDivergedAgent(t *testing.T) {
 	if got := strings.Join(step.Fields, ","); got != "desired_state,cross_repo" {
 		t.Fatalf("fields = %q", got)
 	}
-	// The three untouched agents materialize; the diverged one does not.
-	if calls != 3 || report.Materialized != 3 {
-		t.Errorf("materializer calls %d, report %d, want 3", calls, report.Materialized)
+	// Store divergence is preserved, while the existing worker's checkout is
+	// still repaired along with the three untouched agents.
+	if calls != 4 || report.Materialized != 4 {
+		t.Errorf("materializer calls %d, report %d, want 4", calls, report.Materialized)
 	}
 }
 
@@ -539,6 +540,24 @@ func TestPreflightMaxAgentsUnknownIsSilent(t *testing.T) {
 	}
 	if len(report.Warnings) != 0 {
 		t.Fatalf("an unknown max_agents raised a false alarm: %v", report.Warnings)
+	}
+}
+
+func TestPreflightMaxAgentsReapplyCountsOnlyNewAgents(t *testing.T) {
+	st := newStore(t)
+	tpl := fullstack(t)
+	if _, err := Apply(context.Background(), localDeps(st), testWorkspace, tpl); err != nil {
+		t.Fatalf("first Apply: %v", err)
+	}
+	deps := localDeps(st)
+	deps.RunnableAgentCount = len(tpl.Agents)
+	deps.MaxAgents = len(tpl.Agents)
+	report, err := Apply(context.Background(), deps, testWorkspace, tpl)
+	if err != nil {
+		t.Fatalf("re-apply: %v", err)
+	}
+	if len(report.Warnings) != 0 {
+		t.Fatalf("re-apply raised false max_agents warning: %v", report.Warnings)
 	}
 }
 

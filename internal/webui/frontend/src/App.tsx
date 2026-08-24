@@ -349,6 +349,7 @@ function App() {
   const issueModeByView: Partial<Record<ViewMode, "graph" | "kanban">> = {
     graph: "graph",
     kanban: "kanban",
+    activity: "kanban",
     list: "kanban",
     table: "kanban",
     "issue-detail": "kanban",
@@ -1080,7 +1081,7 @@ function App() {
           <AIBackendSetupList
             backends={aiBackends}
             defaultBackend={defaultBackend}
-            registrableBackends={onboardingBackendConfig?.available ?? []}
+            registrableBackends={onboardingBackendConfig?.available}
             isLoading={aiBackendsLoading || onboardingBackendConfigLoading}
             error={aiBackendsError}
             isSavingDefault={isSavingOnboardingBackend}

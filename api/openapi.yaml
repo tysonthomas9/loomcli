@@ -251,15 +251,34 @@ paths:
           application/json:
             schema:
               type: object
-              required: [name, path]
+              required: [name, type]
               properties:
                 name:
                   type: string
+                type:
+                  type: string
+                  enum: [empty, clone, template]
                 path:
                   type: string
+                repos:
+                  type: array
+                  items:
+                    type: string
+                clone_urls:
+                  type: array
+                  items:
+                    type: string
+                branch:
+                  type: string
       responses:
+        "201":
+          description: Empty workspace created synchronously
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceResponse"
         "202":
-          description: Workspace creation started (async job)
+          description: Clone workspace creation started asynchronously
           content:
             application/json:
               schema:
@@ -275,6 +294,52 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/audit:
+    get:
+      operationId: listWorkspaceAuditEvents
+      tags: [workspaces]
+      summary: List workspace mutation and daemon lifecycle activity
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: since
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+        - name: entity
+          in: query
+          schema:
+            type: string
+        - name: actor
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Newest-first activity page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditEventListResponse"
+        "400":
+          description: Invalid query parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceErrorResponse"
+        "404":
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceErrorResponse"
 
   /api/workspaces/{ws}:
     get:
@@ -4559,6 +4624,45 @@ components:
         error:
           type: string
 
+    AuditEventListResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          type: object
+          required: [events, next_cursor]
+          properties:
+            events:
+              type: array
+              items:
+                $ref: "#/components/schemas/AuditEvent"
+            next_cursor:
+              type: string
+
+    AuditEvent:
+      type: object
+      required: [cursor, timestamp, actor, action, entity_type, entity_id]
+      properties:
+        cursor:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        actor:
+          type: string
+        action:
+          type: string
+        entity_type:
+          type: string
+        entity_id:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+
     FileMutationResponse:
       type: object
       required: [success, version]
@@ -5683,6 +5787,20 @@ components:
 
     # ── Workspace Schemas ───────────────────────────────────────────────
     WorkspaceResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/WorkspaceData"
+        warnings:
+          type: array
+          items:
+            type: string
+
+    WorkspaceData:
       type: object
       required: [id, name, path, repos, groups, agents, workspaces, default_workspace]
       properties:

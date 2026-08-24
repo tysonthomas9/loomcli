@@ -32,6 +32,16 @@ func TestResolveRoleConfigStaticBuiltinPreservesLabelGates(t *testing.T) {
 	}
 }
 
+func TestResolveRoleConfigStaticPlanBackfillsArchitectExclusion(t *testing.T) {
+	got, err := ResolveRoleConfigStatic("plan", &cfgpkg.DaemonConfig{}, t.TempDir())
+	if err != nil {
+		t.Fatalf("ResolveRoleConfigStatic: %v", err)
+	}
+	if !reflect.DeepEqual(got.ExcludeLabels, []string{"architect"}) {
+		t.Fatalf("ExcludeLabels = %v, want [architect]", got.ExcludeLabels)
+	}
+}
+
 // TestMergeRoleConfig_MaxBudgetUSD guards the per-role budget override: a role's
 // max_budget_usd must survive MergeRoleConfig so it reaches the spawned worker's
 // LOOM_MAX_BUDGET_USD env (see appendRoleEnv in spawn.go), and a nil overlay must

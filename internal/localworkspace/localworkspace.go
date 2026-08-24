@@ -341,6 +341,9 @@ func addBranchWorktree(repoPath, targetPath, branchName, baseRef string) error {
 		return err
 	}
 	if _, err := runGit(context.Background(), repoPath, "worktree", "add", targetPath, branchName); err != nil {
+		if _, statErr := os.Stat(filepath.Join(targetPath, ".git")); statErr == nil {
+			return nil
+		}
 		return err
 	}
 	return nil

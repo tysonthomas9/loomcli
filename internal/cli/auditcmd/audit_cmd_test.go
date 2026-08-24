@@ -112,8 +112,8 @@ func TestAuditJSONModeKeepsStdoutPureAndDecorationOnStderr(t *testing.T) {
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
 	cmd.SetArgs([]string{"--output", "json", "--follow"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("audit command: %v", err)
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "stream closed") {
+		t.Fatalf("audit command error = %v, want stream closed", err)
 	}
 	if strings.Contains(stdout.String(), "Following") {
 		t.Fatalf("stdout contains decoration: %q", stdout.String())

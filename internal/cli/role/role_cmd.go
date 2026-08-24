@@ -27,6 +27,8 @@ var (
 	roleAddBackend        string
 	roleAddEffort         string
 	roleAddSkills         []string
+	roleAddLabels         []string
+	roleAddExcludeLabels  []string
 	roleAddMaxConc        int
 	roleAddReadOnly       bool
 	roleAddInputPolicy    []string
@@ -89,6 +91,8 @@ var roleSetCmd = &cobra.Command{
   max_budget_usd  float
   max_run_duration integer (seconds; 0 disables the run-duration cap)
   skills          comma-separated list
+  labels          comma-separated required labels
+  exclude_labels  comma-separated rejected labels
   path_patterns   comma-separated list
   allowed_tools   comma-separated list
   denied_tools    comma-separated list
@@ -115,7 +119,7 @@ var roleUnsetCmd = &cobra.Command{
   max_run_duration *int    (clear — the role falls back to the daemon default)
   input_policy    (clear — the role then auto-answers no harness prompt)
   description / kind / prompt / prompt_file / model / task_filter / backend / effort  (set to "")
-  skills / path_patterns / allowed_tools / denied_tools      (set to empty list)
+  skills / labels / exclude_labels / path_patterns / allowed_tools / denied_tools (set to empty list)
   read_only                                                 (set to false)`,
 	Args: cobra.ExactArgs(2),
 	RunE: runRoleUnset,
@@ -130,6 +134,8 @@ func init() {
 	roleAddCmd.Flags().StringVar(&roleAddBackend, "backend", "", "AI backend (e.g., claude, codex)")
 	roleAddCmd.Flags().StringVar(&roleAddEffort, "effort", "", "Agent effort (low, medium, high, xhigh, max)")
 	roleAddCmd.Flags().StringSliceVar(&roleAddSkills, "skills", nil, "Skills (comma-separated or repeat flag)")
+	roleAddCmd.Flags().StringSliceVar(&roleAddLabels, "label", nil, "Required routing label (comma-separated or repeat flag)")
+	roleAddCmd.Flags().StringSliceVar(&roleAddExcludeLabels, "exclude-label", nil, "Rejected routing label (comma-separated or repeat flag)")
 	roleAddCmd.Flags().IntVar(&roleAddMaxConc, "max-concurrency", 0, "Max concurrent agents (0 = unlimited)")
 	roleAddCmd.Flags().BoolVar(&roleAddReadOnly, "read-only", false, "Read-only role (hard on claude/codex/gemini; prompt-only elsewhere, and the daemon logs which one you get)")
 	roleAddCmd.Flags().StringSliceVar(&roleAddInputPolicy, "input-policy", nil, "Auto-answer disposition per harness prompt kind, KIND=deny|allow|ask (comma-separated or repeat flag)")
@@ -152,18 +158,20 @@ func runRoleAdd(_ *cobra.Command, args []string) error {
 	}
 	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		in := store.RoleCreate{
-			WorkspaceKey: ws,
-			Name:         args[0],
-			Kind:         normalizeRoleKindValue(roleAddKind),
-			Description:  roleAddDescription,
-			Prompt:       roleAddPrompt,
-			PromptFile:   roleAddPromptFile,
-			Model:        roleAddModel,
-			Backend:      roleAddBackend,
-			Effort:       roleAddEffort,
-			Skills:       roleAddSkills,
-			ReadOnly:     roleAddReadOnly,
-			InputPolicy:  inputPolicy,
+			WorkspaceKey:  ws,
+			Name:          args[0],
+			Kind:          normalizeRoleKindValue(roleAddKind),
+			Description:   roleAddDescription,
+			Prompt:        roleAddPrompt,
+			PromptFile:    roleAddPromptFile,
+			Model:         roleAddModel,
+			Backend:       roleAddBackend,
+			Effort:        roleAddEffort,
+			Skills:        roleAddSkills,
+			Labels:        roleAddLabels,
+			ExcludeLabels: roleAddExcludeLabels,
+			ReadOnly:      roleAddReadOnly,
+			InputPolicy:   inputPolicy,
 		}
 		if roleAddMaxConc > 0 {
 			v := roleAddMaxConc
@@ -240,6 +248,7 @@ func runRoleShow(_ *cobra.Command, args []string) error {
 		if len(r.Skills) > 0 {
 			fmt.Printf("Skills:       %s\n", strings.Join(r.Skills, ", "))
 		}
+		printRoleRoutingLabels(r)
 		if r.MaxConcurrency != nil {
 			fmt.Printf("Max concurrency: %d\n", *r.MaxConcurrency)
 		}
@@ -255,6 +264,15 @@ func runRoleShow(_ *cobra.Command, args []string) error {
 		}
 		return nil
 	})
+}
+
+func printRoleRoutingLabels(role *domain.Role) {
+	if len(role.Labels) > 0 {
+		fmt.Printf("Labels:       %s\n", strings.Join(role.Labels, ", "))
+	}
+	if len(role.ExcludeLabels) > 0 {
+		fmt.Printf("Exclude labels: %s\n", strings.Join(role.ExcludeLabels, ", "))
+	}
 }
 
 func runRoleRemove(_ *cobra.Command, args []string) error {
@@ -396,6 +414,10 @@ func buildRolePatch(key, value string, unset bool) (store.RoleUpdate, error) {
 		patch.MaxRunDuration = &ptr
 	case "skills":
 		patch.Skills = sliceCSVPtr(value)
+	case "labels":
+		patch.Labels = sliceCSVPtr(value)
+	case "exclude_labels":
+		patch.ExcludeLabels = sliceCSVPtr(value)
 	case "path_patterns":
 		patch.PathPatterns = sliceCSVPtr(value)
 	case "allowed_tools":

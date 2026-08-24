@@ -189,6 +189,31 @@ func TestAddWorktreesRecoversCorruptBranchRef(t *testing.T) {
 	}
 }
 
+func TestAddWorktreesChecksOutExistingBranch(t *testing.T) {
+	src := initTestGitRepo(t, t.TempDir(), "app")
+	baseBranch := strings.TrimSpace(gitOutput(t, src, "branch", "--show-current"))
+	runGit(t, src, "checkout", "-b", "existing-work")
+	if err := os.WriteFile(filepath.Join(src, "existing.txt"), []byte("existing\n"), 0o644); err != nil {
+		t.Fatalf("write existing file: %v", err)
+	}
+	runGit(t, src, "add", "existing.txt")
+	runGit(t, src, "commit", "-m", "existing branch")
+	wantSHA := strings.TrimSpace(gitOutput(t, src, "rev-parse", "HEAD"))
+	runGit(t, src, "checkout", baseBranch)
+
+	wsDir := filepath.Join(t.TempDir(), "workspace")
+	created, repos, err := addWorktrees(context.Background(), []resolvedRepo{{path: src, name: "app"}}, wsDir, "existing-work")
+	if err != nil {
+		t.Fatalf("addWorktrees: %v", err)
+	}
+	if len(created) != 1 || len(repos) != 1 {
+		t.Fatalf("created=%d repos=%d, want one each", len(created), len(repos))
+	}
+	if got := strings.TrimSpace(gitOutput(t, filepath.Join(wsDir, "app"), "rev-parse", "HEAD")); got != wantSHA {
+		t.Fatalf("worktree HEAD = %s, want existing branch %s", got, wantSHA)
+	}
+}
+
 func TestAddWorktreesSkipsUnrecoverableCheckoutWithWarning(t *testing.T) {
 	src := initTestGitRepo(t, t.TempDir(), "app")
 	wsDir := filepath.Join(t.TempDir(), "workspace")

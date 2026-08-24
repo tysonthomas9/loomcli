@@ -55,7 +55,7 @@ func HandleServiceError(w http.ResponseWriter, err error) {
 			"msg", svcErr.Message,
 			"err", err,
 		)
-		if svcErr.Kind == service.KindStarting {
+		if svcErr.Kind == service.KindStarting || svcErr.Kind == service.KindRateLimited {
 			w.Header().Set("Retry-After", "5")
 		}
 		// Include the kind in the body so frontends can branch on a

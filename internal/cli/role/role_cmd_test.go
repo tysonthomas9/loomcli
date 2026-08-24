@@ -46,6 +46,17 @@ func TestBuildRolePatchKindInvalid(t *testing.T) {
 	}
 }
 
+func TestBuildRolePatchLabelGates(t *testing.T) {
+	labels, err := buildRolePatch("labels", "ready, designed", false)
+	if err != nil || labels.Labels == nil || strings.Join(*labels.Labels, ",") != "ready,designed" {
+		t.Fatalf("labels patch = %+v, err = %v", labels, err)
+	}
+	excluded, err := buildRolePatch("exclude_labels", "blocked, architect", false)
+	if err != nil || excluded.ExcludeLabels == nil || strings.Join(*excluded.ExcludeLabels, ",") != "blocked,architect" {
+		t.Fatalf("exclude_labels patch = %+v, err = %v", excluded, err)
+	}
+}
+
 // A disposition outside the closed vocabulary must fail locally, with the same
 // wording the server would have returned, rather than round-tripping to find
 // out. The failure must also leave the patch untouched — a partially-applied

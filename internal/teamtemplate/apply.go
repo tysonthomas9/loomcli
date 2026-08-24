@@ -21,6 +21,10 @@ const (
 // warning still fires.
 const DefaultMaxAgents = 20
 
+// ErrNoRepositories identifies the preflight refusal for a local workspace
+// that cannot materialize any agent worktrees.
+var ErrNoRepositories = errors.New("team template preflight refused")
+
 // LocalMaterializer creates the local git worktrees an agent needs on this
 // machine. It is injected because materialization is surface- and
 // machine-specific; nil for cloud/path-less workspaces and for pure-store
@@ -154,11 +158,27 @@ func preflight(ctx context.Context, deps ApplyDeps, workspaceKey string, tpl Tea
 		}
 		if len(repos) == 0 {
 			return warnings, fmt.Errorf(
-				"workspace %q has no repositories — add a repo first (loom repo add), then apply the template",
-				workspaceKey)
+				"%w: workspace %q has no repositories — add a repo first (loom repo add), then apply the template",
+				ErrNoRepositories, workspaceKey)
 		}
 	}
-	return append(warnings, maxAgentsWarning(deps, len(tpl.Agents))...), nil
+	agents, err := deps.Store.Agents().List(ctx, workspaceKey)
+	if err != nil {
+		return warnings, fmt.Errorf("list agents in workspace %q: %w", workspaceKey, err)
+	}
+	existing := make(map[string]struct{}, len(agents))
+	for _, agent := range agents {
+		if agent != nil {
+			existing[agent.Name] = struct{}{}
+		}
+	}
+	adding := 0
+	for _, agent := range tpl.Agents {
+		if _, ok := existing[agent.Name]; !ok {
+			adding++
+		}
+	}
+	return append(warnings, maxAgentsWarning(deps, adding)...), nil
 }
 
 // maxAgentsWarning warns rather than refuses: the limit is a daemon-config
@@ -339,7 +359,13 @@ func (r *applyRun) createTeamMember(ctx context.Context, spec TemplateAgent, rol
 func (r *applyRun) existingMemberStep(ctx context.Context, spec TemplateAgent, existing *domain.Agent, roleKind domain.RoleKind) StepResult {
 	fields := compareAgent(spec, existing)
 	if len(fields) > 0 {
-		return StepResult{Entity: entityAgent, Name: spec.Name, Action: StepSkippedDiverged, Fields: fields}
+		step := StepResult{Entity: entityAgent, Name: spec.Name, Action: StepSkippedDiverged, Fields: fields}
+		for _, field := range fields {
+			if field == "role_name" {
+				return step
+			}
+		}
+		return r.withMaterialization(ctx, step, *existing, roleKind)
 	}
 	step := StepResult{Entity: entityAgent, Name: spec.Name, Action: StepSkippedMatch}
 	return r.withMaterialization(ctx, step, *existing, roleKind)
