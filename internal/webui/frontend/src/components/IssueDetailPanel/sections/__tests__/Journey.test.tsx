@@ -126,7 +126,11 @@ describe("Journey", () => {
     expect(screen.queryByText("Updated notes")).not.toBeInTheDocument();
     expect(within(halt).getAllByTestId("journey-audit-event")).toHaveLength(2);
 
-    const railStyle = screen
+    const inProgressSpan = screen
+      .getAllByTestId("journey-span")
+      .find((span) => span.getAttribute("data-stage") === "in-progress");
+    expect(inProgressSpan).toBeDefined();
+    const railStyle = within(inProgressSpan as HTMLElement)
       .getByTestId("journey-spine-rail")
       .getAttribute("style");
     expect(railStyle).toContain("linear-gradient");

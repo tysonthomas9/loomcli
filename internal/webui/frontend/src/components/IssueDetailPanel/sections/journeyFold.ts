@@ -520,7 +520,14 @@ export function foldJourney(
 
   const retainedIndexes = new Set<number>();
   spans.forEach((span, index) => {
+    // The creation event establishes the task's initial queued state. Keep
+    // that first Open/unassigned span even when an agent claims the task in
+    // under a second; otherwise the UI presents creation as if it occurred
+    // during In progress and loses a real lifecycle transition.
+    const isInitialUnclaimedOpen =
+      index === 0 && span.stage === "Open" && span.owner === null;
     if (
+      isInitialUnclaimedOpen ||
       span.stage === "Closed" ||
       span.end === null ||
       hasDisplayableJourneyDuration(span.durationMs)

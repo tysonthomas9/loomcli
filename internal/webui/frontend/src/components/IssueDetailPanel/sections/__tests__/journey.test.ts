@@ -100,6 +100,35 @@ describe("foldJourney", () => {
     });
   });
 
+  it("retains the initial Open span when a task is claimed within one second", () => {
+    const spans = foldJourney(
+      [
+        event(0, "issue.create"),
+        event(0.434, "issue.claim", { actor: "agent-dev-1" }),
+      ],
+      BASE_MS + 10_000,
+    );
+
+    expect(
+      spans.map(({ stage, owner, events }) => ({
+        stage,
+        owner,
+        events: events.map(({ id }) => id),
+      })),
+    ).toEqual([
+      {
+        stage: "Open",
+        owner: null,
+        events: [`${BASE_MS}-0`],
+      },
+      {
+        stage: "In progress",
+        owner: "agent-dev-1",
+        events: [`${BASE_MS + 434}-0`],
+      },
+    ]);
+  });
+
   it("treats the creator as separate from the initial assignee", () => {
     const neverAssigned = foldJourney(
       [
