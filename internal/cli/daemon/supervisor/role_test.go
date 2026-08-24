@@ -1,12 +1,36 @@
 package supervisor
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
+
+func TestResolveRoleConfigStaticBuiltinPreservesLabelGates(t *testing.T) {
+	wantLabels := []string{"planning"}
+	wantExclude := []string{"architect"}
+	cfg := &cfgpkg.DaemonConfig{Roles: map[string]cfgpkg.RoleConfig{
+		"plan": {
+			TaskFilter:    "needs_plan",
+			Labels:        wantLabels,
+			ExcludeLabels: wantExclude,
+		},
+	}}
+
+	got, err := ResolveRoleConfigStatic("plan", cfg, t.TempDir())
+	if err != nil {
+		t.Fatalf("ResolveRoleConfigStatic: %v", err)
+	}
+	if !reflect.DeepEqual(got.Labels, wantLabels) {
+		t.Errorf("Labels = %v, want %v", got.Labels, wantLabels)
+	}
+	if !reflect.DeepEqual(got.ExcludeLabels, wantExclude) {
+		t.Errorf("ExcludeLabels = %v, want %v", got.ExcludeLabels, wantExclude)
+	}
+}
 
 // TestMergeRoleConfig_MaxBudgetUSD guards the per-role budget override: a role's
 // max_budget_usd must survive MergeRoleConfig so it reaches the spawned worker's

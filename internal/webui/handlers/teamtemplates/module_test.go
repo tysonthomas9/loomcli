@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -17,6 +18,32 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/teamtemplate"
 	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
 )
+
+func TestApplyClearsServerWriteDeadline(t *testing.T) {
+	service := stubTeamTemplateService{apply: func(context.Context, string, string, bool) (teamtemplate.ApplyReport, error) {
+		return teamtemplate.ApplyReport{}, nil
+	}}
+	w := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/WS/team-templates/fullstack-app/apply", nil)
+	req.SetPathValue("ws", "WS")
+	req.SetPathValue("id", "fullstack-app")
+
+	HandleApply(service).ServeHTTP(w, req)
+
+	if len(w.deadlines) != 1 || !w.deadlines[0].IsZero() {
+		t.Fatalf("write deadlines = %v, want one cleared deadline", w.deadlines)
+	}
+}
+
+type deadlineRecorder struct {
+	*httptest.ResponseRecorder
+	deadlines []time.Time
+}
+
+func (w *deadlineRecorder) SetWriteDeadline(deadline time.Time) error {
+	w.deadlines = append(w.deadlines, deadline)
+	return nil
+}
 
 func TestCatalogReturnsPickerShape(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
@@ -44,7 +71,7 @@ func TestCatalogReturnsPickerShape(t *testing.T) {
 	if first["id"] != "fullstack-app" || first["label"] != "Full-Stack App Development" {
 		t.Fatalf("first template identity = %q / %q", first["id"], first["label"])
 	}
-	if first["revision"] != float64(1) || first["schema_version"] != float64(teamtemplate.SchemaVersion) {
+	if first["revision"] != float64(2) || first["schema_version"] != float64(teamtemplate.SchemaVersion) {
 		t.Fatalf("first template versions = revision %v / schema %v", first["revision"], first["schema_version"])
 	}
 

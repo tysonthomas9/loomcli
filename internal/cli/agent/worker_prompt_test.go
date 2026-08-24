@@ -110,6 +110,32 @@ func TestWorkerPromptsWithoutPreClaimedTask(t *testing.T) {
 	}
 }
 
+func TestImplementationPromptsHandOffToQA(t *testing.T) {
+	isolatePromptOverrides(t)
+	for _, id := range []string{"team-frontend-dev", "team-backend-dev", "team-content-writer", "team-agent-dev", "team-data-engineer"} {
+		t.Run(id, func(t *testing.T) {
+			prompt, err := generateWorkerPrompt(id, fullWorkerPromptData())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(prompt, "--add-label ready-for-qa") || !strings.Contains(prompt, "--status open") {
+				t.Fatalf("%s has no ready-for-qa handoff", id)
+			}
+		})
+	}
+}
+
+func TestQAPromptRoutesFiledDefectsToArchitect(t *testing.T) {
+	isolatePromptOverrides(t)
+	prompt, err := generateWorkerPrompt("team-qa", fullWorkerPromptData())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt, "--label architect") {
+		t.Fatal("team-qa defect command does not route defects to an architect")
+	}
+}
+
 // TestDesignPromptsUseWorkspaceDesignFormat is the .DesignFormat trap from
 // §10.8, from the other direction: the design-producing bodies DO need the
 // field, which is why PromptData now carries it.

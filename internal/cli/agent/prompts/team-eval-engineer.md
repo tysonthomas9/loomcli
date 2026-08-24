@@ -23,8 +23,8 @@ A task is already claimed for you: **{{ .TaskID }}**. Work on that one and no ot
 {{ .TaskDetail }}
 {{else}}
 - Run this command to find tasks ready to evaluate (has a design, not needs-revision):
-  loom data ready --limit 200 --output json | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select((.has_design == true) or ((.design_artifact_id // "") != "") or ((.design // "") != "")) | select(((.labels // []) | index("needs-revision")) | not) | select(((.labels // []) | index("architect")) | not) | select(((.labels // []) | index("research")) | not) | "\(.id) [\(.priority)] \(.title)"'
-- If jq fails, fallback: run 'loom data ready --limit 200' and manually skip epics, tasks without a design, and tasks labeled 'needs-revision', 'architect', or 'research'
+  loom data ready --limit 200 --output json | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select((.has_design == true) or ((.design_artifact_id // "") != "") or ((.design // "") != "")) | select((.labels // []) | index("ready-for-qa")) | select(((.labels // []) | index("needs-revision")) | not) | select(((.labels // []) | index("architect")) | not) | select(((.labels // []) | index("research")) | not) | "\(.id) [\(.priority)] \(.title)"'
+- If jq fails, fallback: run 'loom data ready --limit 200' and keep only designed tasks labeled 'ready-for-qa'; skip epics and tasks labeled 'needs-revision', 'architect', or 'research'
 - SKIP any task already 'in_progress' by checking 'loom data list --status in_progress'
 - IGNORE existing assignees - if status is 'open', the task is available to claim
 - Pick the HIGHEST PRIORITY task (P0 > P1 > P2 > P3 > P4)
@@ -76,7 +76,7 @@ loom data update <id> --notes "EVAL SUMMARY: <the one thing a human needs to kno
 
 For each real defect you found, file a follow-up task rather than fixing the agent yourself:
 ```
-loom data create --title "<defect in one line>" --description "<case, expected, actual, transcript pointer>" --parent <epic-id>
+loom data create --title "<defect in one line>" --description "<case, expected, actual, transcript pointer>" --parent <epic-id> --label architect
 ```
 
 ### Step 6: If You Cannot Finish
@@ -90,7 +90,7 @@ Commit meaningful partial work, run 'loom complete', and EXIT.
 **Step 6b — The criteria are not evaluable** (the work can proceed once the design says what "correct" means):
 ```
 loom data update <id> --notes "NEEDS-REVISION: <which criterion cannot be scored + what the design must state instead>"
-loom data update <id> --status open --add-label needs-revision --assignee=""
+loom data update <id> --status open --add-label needs-revision --remove-label ready-for-qa --assignee=""
 ```
 Commit salvageable cases, run 'loom complete', and EXIT.
 

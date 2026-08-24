@@ -21,8 +21,8 @@ A task is already claimed for you: **{{ .TaskID }}**. Work on that one and no ot
 {{ .TaskDetail }}
 {{else}}
 - Run this command to find tasks ready to write (has a design, not needs-revision):
-  loom data ready --limit 200 --output json | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select((.has_design == true) or ((.design_artifact_id // "") != "") or ((.design // "") != "")) | select(((.labels // []) | index("needs-revision")) | not) | select(((.labels // []) | index("architect")) | not) | "\(.id) [\(.priority)] \(.title)"'
-- If jq fails, fallback: run 'loom data ready --limit 200' and manually skip epics, tasks without a design, and tasks labeled 'needs-revision' or 'architect'
+  loom data ready --limit 200 --output json | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select((.has_design == true) or ((.design_artifact_id // "") != "") or ((.design // "") != "")) | select(((.labels // []) | index("needs-revision")) | not) | select(((.labels // []) | index("architect")) | not) | select(((.labels // []) | index("ready-for-qa")) | not) | "\(.id) [\(.priority)] \(.title)"'
+- If jq fails, fallback: run 'loom data ready --limit 200' and manually skip epics, tasks without a design, and tasks labeled 'needs-revision', 'architect', or 'ready-for-qa'
 - SKIP any task already 'in_progress' by checking 'loom data list --status in_progress'
 - IGNORE existing assignees - if status is 'open', the task is available to claim
 - Pick the HIGHEST PRIORITY task (P0 > P1 > P2 > P3 > P4)
@@ -93,9 +93,9 @@ Commit salvageable work, run 'loom complete', and EXIT. The design agent role ad
 - Stage only the content files you touched and commit: `git add <files> && git commit -m "<brief description> (<task-id>)"`
 - Never `git add -A` or `git add .`
 - Note anything you flagged as unverified in the task notes so a human can confirm it
-- Close and signal:
+- Hand the completed content to QA and signal. Do not close the task; QA owns the final verification and close:
 ```
-loom data close <id> --reason "<which pages changed, and that the build passes>"
+loom data update <id> --status open --add-label ready-for-qa --assignee="" --notes "IMPLEMENTED: <which pages changed, and that the build passes>"
 loom complete
 ```
 

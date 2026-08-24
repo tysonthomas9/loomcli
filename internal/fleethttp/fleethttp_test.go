@@ -222,6 +222,12 @@ func TestRetryDelay_HonorsRetryAfterSeconds(t *testing.T) {
 	}
 }
 
+func TestRetryDelayCapsRetryAfter(t *testing.T) {
+	if got := retryDelay("3600", 0); got != maxRetryDelay {
+		t.Fatalf("retryDelay = %v, want cap %v", got, maxRetryDelay)
+	}
+}
+
 func TestResolveFleetDBActor_Precedence(t *testing.T) {
 	tests := []struct {
 		name       string

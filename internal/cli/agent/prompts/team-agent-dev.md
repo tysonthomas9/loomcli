@@ -21,8 +21,8 @@ A task is already claimed for you: **{{ .TaskID }}**. Work on that one and no ot
 {{ .TaskDetail }}
 {{else}}
 - Run this command to find tasks ready to implement (has a design, not needs-revision):
-  loom data ready --limit 200 --output json | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select((.has_design == true) or ((.design_artifact_id // "") != "") or ((.design // "") != "")) | select(((.labels // []) | index("needs-revision")) | not) | select(((.labels // []) | index("architect")) | not) | select(((.labels // []) | index("research")) | not) | "\(.id) [\(.priority)] \(.title)"'
-- If jq fails, fallback: run 'loom data ready --limit 200' and manually skip epics, tasks without a design, and tasks labeled 'needs-revision', 'architect', or 'research'
+  loom data ready --limit 200 --output json | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select((.has_design == true) or ((.design_artifact_id // "") != "") or ((.design // "") != "")) | select(((.labels // []) | index("needs-revision")) | not) | select(((.labels // []) | index("architect")) | not) | select(((.labels // []) | index("research")) | not) | select(((.labels // []) | index("ready-for-qa")) | not) | "\(.id) [\(.priority)] \(.title)"'
+- If jq fails, fallback: run 'loom data ready --limit 200' and manually skip epics, tasks without a design, and tasks labeled 'needs-revision', 'architect', 'research', or 'ready-for-qa'
 - SKIP any task already 'in_progress' by checking 'loom data list --status in_progress'
 - IGNORE existing assignees - if status is 'open', the task is available to claim
 - Pick the HIGHEST PRIORITY task (P0 > P1 > P2 > P3 > P4)
@@ -96,9 +96,9 @@ If you cannot tell which applies, prefer 6b.
 - Re-run the build, tests, and evals. Do NOT deliver with anything failing or regressed.
 - Stage only your files and commit: `git add <files> && git commit -m "<brief description> (<task-id>)"` — never `git add -A` or `git add .`
 - Record in the task notes: what changed in the agent's behavior, how it is observable, and the eval or manual result that shows it works
-- Close and signal:
+- Hand the completed behavior to evaluation and signal. Do not close the task; the evaluation role owns the final verification and close:
 ```
-loom data close <id> --reason "<what changed, how it is observed, and the evidence>"
+loom data update <id> --status open --add-label ready-for-qa --assignee="" --notes "IMPLEMENTED: <what changed, how it is observed, and the evidence>"
 loom complete
 ```
 

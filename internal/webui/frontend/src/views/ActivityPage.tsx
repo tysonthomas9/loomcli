@@ -203,7 +203,8 @@ export function ActivityPage(): JSX.Element {
       dispatch({
         type: "history",
         events: result.events,
-        nextCursor: result.next_cursor,
+        nextCursor:
+          result.next_cursor === state.nextCursor ? "" : result.next_cursor,
         append: true,
       });
     } catch (reason: unknown) {

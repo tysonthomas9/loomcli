@@ -3479,7 +3479,7 @@ describe("App", () => {
       mockAddComment.mockResolvedValue(undefined);
     });
 
-    it("plan approve calls updateIssueStatus with open status", async () => {
+    it("plan approval atomically opens the task and removes architect routing", async () => {
       const updateIssueStatus = vi.fn().mockResolvedValue(undefined);
       const refetch = vi.fn().mockResolvedValue(undefined);
       const mockReturn = createMockUseIssuesReturn({
@@ -3512,14 +3512,15 @@ describe("App", () => {
       fireEvent.click(approveButton);
 
       await waitFor(() => {
-        expect(updateIssueStatus).toHaveBeenCalledTimes(1);
-        expect(updateIssueStatus).toHaveBeenCalledWith(
-          "plan-issue",
-          "open",
+        expect(mockUpdateIssue).toHaveBeenCalledWith(
           "test-ws-id",
+          "plan-issue",
+          { status: "open", remove_labels: ["architect"] },
         );
       });
 
+      expect(updateIssueStatus).not.toHaveBeenCalled();
+      expect(refetch).toHaveBeenCalled();
       expect(mockCloseIssue).not.toHaveBeenCalled();
     });
 
@@ -3782,10 +3783,9 @@ describe("App", () => {
       mockCloseIssueFn.mockReset();
     });
 
-    it("approve does not show toast for plan review failures (handled by optimistic rollback)", async () => {
-      const updateIssueStatus = vi
-        .fn()
-        .mockRejectedValue(new Error("Network error"));
+    it("shows a toast when the atomic plan approval fails", async () => {
+      const updateIssueStatus = vi.fn();
+      mockUpdateIssue.mockRejectedValueOnce(new Error("Network error"));
       const showToast = vi.fn();
       mockUseToast.mockReturnValue({
         toasts: [],
@@ -3821,13 +3821,12 @@ describe("App", () => {
       const approveButton = screen.getByTestId("detail-approve-button");
       fireEvent.click(approveButton);
 
-      // Wait for the async handler to complete
       await waitFor(() => {
-        expect(updateIssueStatus).toHaveBeenCalled();
+        expect(showToast).toHaveBeenCalledWith("Network error", {
+          type: "error",
+        });
       });
-
-      // showToast should NOT be called — error is handled by useOptimisticUpdate rollback
-      expect(showToast).not.toHaveBeenCalled();
+      expect(updateIssueStatus).not.toHaveBeenCalled();
     });
   });
 

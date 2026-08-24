@@ -32,7 +32,7 @@ What would you like to do?
 - Let the user pick one.
 - Show details with `loom data show <id>`.
 - Ask: "Approve this plan, request changes, or skip?"
-- If approved, run `loom data update <id> --status open`.
+- If approved, run `loom data update <id> --status open --remove-label architect` so template work leaves the architect lane atomically (removing a missing label is harmless for built-in planning tasks).
 - If changes are needed, add focused feedback with `loom data comment <id> "FEEDBACK: ..."` and move it back to open with `loom data update <id> --status open`.
 
 **2. Create Tickets**
