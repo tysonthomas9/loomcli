@@ -45,37 +45,79 @@ func (w fleetCommentWire) toTypesComment() types.Comment {
 // --- Event operations ---
 
 func (b *FleetBackend) ListEvents(ctx context.Context, id string, limit int) ([]backend.EventData, error) {
-	path := "/issues/" + url.PathEscape(id) + "/history"
-	if limit > 0 {
-		path += "?limit=" + strconv.Itoa(limit)
+	const (
+		historyPageLimit    = 200
+		defaultHistoryLimit = 50
+	)
+	if limit <= 0 {
+		limit = defaultHistoryLimit
 	}
-	resp, err := b.exec(ctx, "ListEvents", "GET", path, nil)
-	if err != nil {
-		return nil, err
+
+	// fleet-db's history endpoint pages forward from the start of the issue
+	// stream. ListEvents promises the most recent entries, so follow its cursor
+	// to the end and retain only the requested tail.
+	result := make([]backend.EventData, 0, limit)
+	cursor := ""
+	for {
+		query := url.Values{}
+		query.Set("limit", strconv.Itoa(historyPageLimit))
+		if cursor != "" {
+			query.Set("since", cursor)
+		}
+		path := "/issues/" + url.PathEscape(id) + "/history?" + query.Encode()
+		resp, err := b.exec(ctx, "ListEvents", "GET", path, nil)
+		if err != nil {
+			return nil, err
+		}
+		if !hasData(resp) {
+			return []backend.EventData{}, nil
+		}
+
+		var history struct {
+			History []struct {
+				ID        string                `json:"id"`
+				Timestamp time.Time             `json:"timestamp"`
+				Actor     string                `json:"actor"`
+				Action    string                `json:"action"`
+				Category  string                `json:"category"`
+				Summary   string                `json:"summary"`
+				Changes   []backend.FieldChange `json:"changes"`
+				Metadata  map[string]string     `json:"metadata"`
+			} `json:"history"`
+			Cursor  string `json:"cursor"`
+			HasMore bool   `json:"has_more"`
+		}
+		if err := json.Unmarshal(resp.Data, &history); err != nil {
+			return nil, backend.ErrInternal("ListEvents", "unmarshal response", err)
+		}
+		for _, e := range history.History {
+			result = append(result, backend.EventData{
+				ID:        e.ID,
+				IssueID:   id,
+				Kind:      e.Action,
+				Actor:     e.Actor,
+				Category:  e.Category,
+				Summary:   e.Summary,
+				Changes:   e.Changes,
+				Metadata:  e.Metadata,
+				CreatedAt: e.Timestamp,
+			})
+		}
+		if !history.HasMore {
+			break
+		}
+		if history.Cursor == "" || history.Cursor == cursor {
+			return nil, backend.ErrInternal(
+				"ListEvents",
+				"history response has_more without a new cursor",
+				nil,
+			)
+		}
+		cursor = history.Cursor
 	}
-	if !hasData(resp) {
-		return []backend.EventData{}, nil
-	}
-	var history struct {
-		History []struct {
-			ID        string    `json:"id"`
-			Timestamp time.Time `json:"timestamp"`
-			Actor     string    `json:"actor"`
-			Action    string    `json:"action"`
-		} `json:"history"`
-	}
-	if err := json.Unmarshal(resp.Data, &history); err != nil {
-		return nil, backend.ErrInternal("ListEvents", "unmarshal response", err)
-	}
-	result := make([]backend.EventData, 0, len(history.History))
-	for _, e := range history.History {
-		result = append(result, backend.EventData{
-			ID:        e.ID,
-			IssueID:   id,
-			Kind:      e.Action,
-			Actor:     e.Actor,
-			CreatedAt: e.Timestamp,
-		})
+
+	if len(result) > limit {
+		result = result[len(result)-limit:]
 	}
 	return result, nil
 }

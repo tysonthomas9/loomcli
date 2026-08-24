@@ -7,6 +7,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1498,8 +1500,8 @@ func TestListEvents_HappyPath(t *testing.T) {
 		if !strings.HasSuffix(r.URL.Path, "/issues/test-1/history") {
 			t.Errorf("path = %q, want suffix /issues/test-1/history", r.URL.Path)
 		}
-		if r.URL.Query().Get("limit") != "10" {
-			t.Errorf("limit = %q, want %q", r.URL.Query().Get("limit"), "10")
+		if r.URL.Query().Get("limit") != "200" {
+			t.Errorf("limit = %q, want %q", r.URL.Query().Get("limit"), "200")
 		}
 		respondOK(w, map[string]any{
 			"history": []map[string]any{
@@ -1523,6 +1525,68 @@ func TestListEvents_HappyPath(t *testing.T) {
 	}
 	if result[0].Kind != "issue.created" {
 		t.Errorf("Kind = %q, want %q", result[0].Kind, "issue.created")
+	}
+}
+
+func TestListEvents_ReturnsMostRecentPageAcrossHistoryPagination(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	var requests int
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if got := r.URL.Query().Get("limit"); got != "200" {
+			t.Errorf("request %d limit = %q, want 200", requests, got)
+		}
+
+		switch requests {
+		case 1:
+			if got := r.URL.Query().Get("since"); got != "" {
+				t.Errorf("first request since = %q, want empty", got)
+			}
+			history := make([]map[string]any, 200)
+			for index := range history {
+				history[index] = map[string]any{
+					"id":        strconv.Itoa(index+1) + "-0",
+					"timestamp": now.Add(time.Duration(index) * time.Second),
+					"actor":     "agent",
+					"action":    "issue.update",
+				}
+			}
+			respondOK(w, map[string]any{
+				"history":  history,
+				"cursor":   "200-0",
+				"has_more": true,
+			})
+		case 2:
+			if got := r.URL.Query().Get("since"); got != "200-0" {
+				t.Errorf("second request since = %q, want 200-0", got)
+			}
+			respondOK(w, map[string]any{
+				"history": []map[string]any{
+					{"id": "201-0", "timestamp": now.Add(200 * time.Second), "actor": "agent", "action": "issue.update"},
+					{"id": "202-0", "timestamp": now.Add(201 * time.Second), "actor": "agent", "action": "issue.update"},
+					{"id": "203-0", "timestamp": now.Add(202 * time.Second), "actor": "agent", "action": "issue.update"},
+				},
+				"cursor":   "203-0",
+				"has_more": false,
+			})
+		default:
+			t.Errorf("unexpected request %d", requests)
+		}
+	})
+	defer ts.Close()
+
+	result, err := fb.ListEvents(context.Background(), "test-1", 3)
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	if requests != 2 {
+		t.Errorf("requests = %d, want 2", requests)
+	}
+	if len(result) != 3 {
+		t.Fatalf("result length = %d, want 3", len(result))
+	}
+	if got := []string{result[0].ID, result[1].ID, result[2].ID}; !reflect.DeepEqual(got, []string{"201-0", "202-0", "203-0"}) {
+		t.Errorf("IDs = %v, want [201-0 202-0 203-0]", got)
 	}
 }
 
