@@ -422,7 +422,7 @@ func TestCommentToData(t *testing.T) {
 func TestEventToData(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	e := gen.IssueEvent{
-		Id:        123,
+		Id:        "123",
 		IssueId:   "loom-1",
 		EventType: "status_change",
 		Actor:     "alice",

@@ -102,6 +102,15 @@ export function describeMutation(
   };
 }
 
+/**
+ * Use the source event cursor when present so an SSE delivery and its
+ * subsequently seeded issue-history entry have one stable Activity identity.
+ */
+export function activityIdForMutation(mutation: MutationPayload): string {
+  if (mutation.cursor) return `event-${mutation.cursor}`;
+  return `mutation-${mutation.entity_id ?? mutation.issue_id ?? "workspace"}-${mutation.timestamp}-${mutation.action ?? mutation.type}`;
+}
+
 export function describeIssueEvent(
   event: Event,
   knownAgentNames: ReadonlySet<string>,
@@ -275,7 +284,7 @@ export function useRecentActivity(
         const description = describeMutation(mutation, knownAgentNames);
         appendActivity([
           {
-            id: `mutation-${mutation.entity_id ?? mutation.issue_id ?? "workspace"}-${mutation.timestamp}-${mutation.action ?? mutation.type}`,
+            id: activityIdForMutation(mutation),
             timestamp: mutation.timestamp,
             actor: mutation.actor?.trim() || "Someone",
             ...(mutation.issue_id || mutation.entity_id

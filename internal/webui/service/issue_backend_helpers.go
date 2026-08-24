@@ -1,8 +1,6 @@
 package service
 
 import (
-	"strconv"
-
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/types"
 )
@@ -319,14 +317,11 @@ func commentDataToTypesComment(d *backend.CommentData) *types.Comment {
 // eventDataToTypesEvent maps backend.EventData onto the strongly typed
 // types.Event used by the ListEvents handler response shape.
 //
-// backend.EventData.ID is a string but types.Event.ID is int64 (matching
-// the SQLite primary key). We parse-through to preserve the previous wire
-// shape; non-numeric IDs degrade to 0 because no caller currently relies on
-// the ID being valid for string-ID backends.
+// Event IDs are opaque durable source cursors. Preserving them avoids
+// collapsing FleetDB stream IDs and lets REST history deduplicate with SSE.
 func eventDataToTypesEvent(d backend.EventData) *types.Event {
-	id, _ := strconv.ParseInt(d.ID, 10, 64)
 	return &types.Event{
-		ID:        id,
+		ID:        d.ID,
 		IssueID:   d.IssueID,
 		EventType: types.EventType(d.Kind),
 		Actor:     d.Actor,

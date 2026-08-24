@@ -257,8 +257,8 @@ func TestListEvents_Backend_Success(t *testing.T) {
 	if len(events) != 2 {
 		t.Fatalf("expected 2 events, got %d", len(events))
 	}
-	if events[0].ID != 1 {
-		t.Errorf("event[0].ID = %d, want 1", events[0].ID)
+	if events[0].ID != "1" {
+		t.Errorf("event[0].ID = %q, want 1", events[0].ID)
 	}
 	if events[0].EventType != types.EventCreated {
 		t.Errorf("event[0].EventType = %q, want %q", events[0].EventType, types.EventCreated)

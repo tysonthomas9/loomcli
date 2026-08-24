@@ -75,14 +75,10 @@ func (b *FleetBackend) ListEvents(ctx context.Context, id string, limit int) ([]
 
 		var history struct {
 			History []struct {
-				ID        string                `json:"id"`
-				Timestamp time.Time             `json:"timestamp"`
-				Actor     string                `json:"actor"`
-				Action    string                `json:"action"`
-				Category  string                `json:"category"`
-				Summary   string                `json:"summary"`
-				Changes   []backend.FieldChange `json:"changes"`
-				Metadata  map[string]string     `json:"metadata"`
+				ID        string    `json:"id"`
+				Timestamp time.Time `json:"timestamp"`
+				Actor     string    `json:"actor"`
+				Action    string    `json:"action"`
 			} `json:"history"`
 			Cursor  string `json:"cursor"`
 			HasMore bool   `json:"has_more"`
@@ -96,10 +92,6 @@ func (b *FleetBackend) ListEvents(ctx context.Context, id string, limit int) ([]
 				IssueID:   id,
 				Kind:      e.Action,
 				Actor:     e.Actor,
-				Category:  e.Category,
-				Summary:   e.Summary,
-				Changes:   e.Changes,
-				Metadata:  e.Metadata,
 				CreatedAt: e.Timestamp,
 			})
 		}

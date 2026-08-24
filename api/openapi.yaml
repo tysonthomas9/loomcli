@@ -870,6 +870,13 @@ paths:
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/IssueId"
+        - name: limit
+          in: query
+          description: Maximum number of most recent events to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
       responses:
         "200":
           description: Issue events
@@ -5252,12 +5259,11 @@ components:
 
     IssueEvent:
       type: object
-      description: Audit trail entry for an issue
+      description: Audit trail entry for an issue. ID is an opaque durable source event ID.
       required: [id, issue_id, event_type, actor, created_at]
       properties:
         id:
-          type: integer
-          format: int64
+          type: string
         issue_id:
           type: string
         event_type:
@@ -6052,6 +6058,9 @@ components:
         because the SSE stream is not validated by generated clients.
       required: [type, timestamp]
       properties:
+        cursor:
+          type: string
+          description: Durable source event ID for reconnect and cross-surface deduplication.
         type:
           type: string
           enum:

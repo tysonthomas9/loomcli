@@ -2,7 +2,6 @@ package fleet
 
 import (
 	"encoding/json"
-	"strconv"
 	"strings"
 	"time"
 
@@ -341,7 +340,7 @@ func commentToData(c *types.Comment) backend.CommentData {
 // eventToData converts types.Event to backend.EventData.
 func eventToData(e *types.Event) backend.EventData {
 	return backend.EventData{
-		ID:        strconv.FormatInt(e.ID, 10),
+		ID:        e.ID,
 		IssueID:   e.IssueID,
 		Kind:      string(e.EventType),
 		Actor:     e.Actor,

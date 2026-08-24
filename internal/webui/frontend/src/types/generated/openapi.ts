@@ -2759,10 +2759,9 @@ export interface components {
       parent_id: string;
       truncated: boolean;
     };
-    /** @description Audit trail entry for an issue */
+    /** @description Audit trail entry for an issue. ID is an opaque durable source event ID. */
     IssueEvent: {
-      /** Format: int64 */
-      id: number;
+      id: string;
       issue_id: string;
       event_type: string;
       actor: string;
@@ -3169,6 +3168,8 @@ export interface components {
      *     because the SSE stream is not validated by generated clients.
      */
     MutationPayload: {
+      /** @description Durable source event ID for reconnect and cross-surface deduplication. */
+      cursor?: string;
       /** @enum {string} */
       type:
         | "create"
@@ -4521,7 +4522,10 @@ export interface operations {
   };
   getIssueEvents: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of most recent events to return */
+        limit?: number;
+      };
       header?: never;
       path: {
         /** @description Workspace identifier */

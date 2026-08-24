@@ -2085,13 +2085,13 @@ type IssueIssueType string
 // are not settable via the API and excluded from this enum.
 type IssueStatus string
 
-// IssueEvent Audit trail entry for an issue
+// IssueEvent Audit trail entry for an issue. ID is an opaque durable source event ID.
 type IssueEvent struct {
 	Actor     string    `json:"actor"`
 	Comment   *string   `json:"comment,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	EventType string    `json:"event_type"`
-	Id        int64     `json:"id"`
+	Id        string    `json:"id"`
 	IssueId   string    `json:"issue_id"`
 	NewValue  *string   `json:"new_value,omitempty"`
 	OldValue  *string   `json:"old_value,omitempty"`
@@ -2427,6 +2427,9 @@ type MutationPayload struct {
 	Action   *string `json:"action,omitempty"`
 	Actor    *string `json:"actor,omitempty"`
 	Assignee *string `json:"assignee,omitempty"`
+
+	// Cursor Durable source event ID for reconnect and cross-surface deduplication.
+	Cursor *string `json:"cursor,omitempty"`
 
 	// EntityId Generic changed entity identifier.
 	EntityId *string `json:"entity_id,omitempty"`
@@ -3389,6 +3392,12 @@ type GetGraphParams struct {
 
 // GetGraphParamsStatus defines parameters for GetGraph.
 type GetGraphParamsStatus string
+
+// GetIssueEventsParams defines parameters for GetIssueEvents.
+type GetIssueEventsParams struct {
+	// Limit Maximum number of most recent events to return
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
 
 // SaveIssueTabsJSONBody defines parameters for SaveIssueTabs.
 type SaveIssueTabsJSONBody struct {

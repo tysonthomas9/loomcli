@@ -11,6 +11,7 @@ import type { Event, Issue, LoomAgentStatus, MutationPayload } from "@/types";
 import {
   describeIssueEvent,
   describeMutation,
+  activityIdForMutation,
   mergeRecentActivity,
   useRecentActivity,
 } from "../useRecentActivity";
@@ -108,6 +109,48 @@ describe("mergeRecentActivity", () => {
     );
 
     expect(rows.map((row) => row.id)).toEqual(["two", "three", "one"]);
+  });
+});
+
+describe("activityIdForMutation", () => {
+  it("uses the durable cursor shared with issue history", () => {
+    expect(
+      activityIdForMutation({
+        cursor: "1787591234567-0",
+        type: "update",
+        issue_id: "TASK-1",
+        timestamp: "2026-08-21T15:48:02.000Z",
+      }),
+    ).toBe("event-1787591234567-0");
+  });
+
+  it("deduplicates an SSE delivery against the same seeded history event", () => {
+    const cursor = "1787591234567-0";
+    const seeded = describeIssueEvent(
+      fleetEvent({ id: cursor }),
+      new Set(),
+    );
+    const live = {
+      ...seeded,
+      id: activityIdForMutation({
+        cursor,
+        type: "update",
+        issue_id: "TASK-1",
+        timestamp: seeded.timestamp,
+      }),
+    };
+
+    expect(mergeRecentActivity([live], [seeded])).toHaveLength(1);
+  });
+
+  it("retains a stable fallback when a mutation has no cursor", () => {
+    expect(
+      activityIdForMutation({
+        type: "update",
+        issue_id: "TASK-1",
+        timestamp: "2026-08-21T15:48:02.000Z",
+      }),
+    ).toBe("mutation-TASK-1-2026-08-21T15:48:02.000Z-update");
   });
 });
 
@@ -212,6 +255,7 @@ describe("useRecentActivity", () => {
       { initialProps: { agents: [] as LoomAgentStatus[] } },
     );
     await waitFor(() => expect(mockGetIssueEvents).toHaveBeenCalledTimes(1));
+    expect(mockGetIssueEvents).toHaveBeenCalledWith("WS", "TASK-1", 5);
 
     // Agents load while the seed is still in flight: must not abort it.
     rerender({ agents: [agent("agent-dev-1")] });
