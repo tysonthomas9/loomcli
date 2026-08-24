@@ -70,11 +70,16 @@ describe("NavRail", () => {
       expect(screen.getByLabelText("Files")).toBeInTheDocument();
     });
 
-    it("renders exactly five navigation buttons", () => {
+    it("renders a Workflows navigation button", () => {
+      render(<NavRail activeView="kanban" onChange={() => {}} />);
+      expect(screen.getByLabelText("Workflows")).toBeInTheDocument();
+    });
+
+    it("renders exactly six navigation buttons", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       const buttons = screen.getAllByRole("button");
-      expect(buttons).toHaveLength(5);
+      expect(buttons).toHaveLength(6);
     });
 
     it("renders tooltips for each button", () => {
@@ -107,7 +112,7 @@ describe("NavRail", () => {
       ).toBeInTheDocument();
     });
 
-    it("renders buttons in correct order: Workspaces, Pull Requests, Terminal, Files, Settings", () => {
+    it("renders buttons in correct order: Workspaces, Pull Requests, Terminal, Files, Workflows, Settings", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       const buttons = screen.getAllByRole("button");
@@ -115,7 +120,8 @@ describe("NavRail", () => {
       expect(buttons[1]).toHaveAccessibleName("Pull Requests");
       expect(buttons[2]).toHaveAccessibleName("Terminal");
       expect(buttons[3]).toHaveAccessibleName("Files");
-      expect(buttons[4]).toHaveAccessibleName("Settings");
+      expect(buttons[4]).toHaveAccessibleName("Workflows");
+      expect(buttons[5]).toHaveAccessibleName("Settings");
     });
 
     it("has navigation landmark with aria-label", () => {

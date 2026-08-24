@@ -124,6 +124,7 @@ describe("WorkspaceBreadcrumb", () => {
       graph: "Graph",
       monitor: "Monitor",
       observability: "Observability",
+      workflows: "Workflows",
       terminal: "Monitor",
       agents: "Agents",
       workspace: "Workspace",

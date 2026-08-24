@@ -119,6 +119,13 @@ const viewRoutes = [
       })),
   },
   {
+    path: "workflows",
+    lazy: () =>
+      import("@/views/WorkflowsPage").then((m) => ({
+        Component: m.WorkflowsPage,
+      })),
+  },
+  {
     path: "terminal",
     Component: () => null,
   },
