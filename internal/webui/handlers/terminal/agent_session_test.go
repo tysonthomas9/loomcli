@@ -368,6 +368,83 @@ func TestBuildAgentLaunchSpecFallsBackWhenConfiguredWorktreeMissing(t *testing.T
 // --backend is stale once the workspace default is set, because the next
 // build would include the flag. ensure() relies on this check to know
 // when to emit a fresh tab instead of returning the cached one.
+// A WebUI-launched lead with no remembered worktree used to get an empty Cwd,
+// which makes the PTY inherit the server's own cwd - the workspace root. It now
+// lands in the same <ws>/lead the terminal launch computes, via the shared
+// localworkspace.LeadWorkdir.
+func TestBuildAgentLaunchSpecLeadFallsBackToLeadWorkdir(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Setenv(localworkspace.EnvLeadWorkdir, "")
+	st := memstore.New()
+	workspacePath := t.TempDir()
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		sc.Workspaces["E2E"] = bootstrap.WorkspaceLocalState{Path: workspacePath}
+		return nil
+	}); err != nil {
+		t.Fatalf("save state cache: %v", err)
+	}
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "E2E",
+		Name:         "lead",
+		Backend:      "codex",
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "nova", RoleName: "lead"}
+
+	launch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_nova", agent, "lead-1")
+	if err != nil {
+		t.Fatalf("buildAgentLaunchSpec: %v", err)
+	}
+	want, ok := localworkspace.LeadWorkdir("E2E")
+	if !ok {
+		t.Fatal("LeadWorkdir: ok = false, want the workspace lead directory")
+	}
+	if launch.Cwd != want {
+		t.Fatalf("Launch.Cwd = %q, want lead workdir %q", launch.Cwd, want)
+	}
+	if launch.Cwd != filepath.Join(workspacePath, "lead") {
+		t.Fatalf("Launch.Cwd = %q, want <ws>/lead", launch.Cwd)
+	}
+	// A Cwd the PTY cannot chdir into fails the spawn outright, so the launch
+	// path creates the directory rather than merely naming it.
+	if info, statErr := os.Stat(launch.Cwd); statErr != nil || !info.IsDir() {
+		t.Fatalf("lead workdir not created at %q: %v", launch.Cwd, statErr)
+	}
+}
+
+// A worker agent keeps the empty-Cwd fallback: only the interactive lead has a
+// workspace-root directory of its own.
+func TestBuildAgentLaunchSpecWorkerKeepsEmptyCwdFallback(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Setenv(localworkspace.EnvLeadWorkdir, "")
+	st := memstore.New()
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		sc.Workspaces["E2E"] = bootstrap.WorkspaceLocalState{Path: t.TempDir()}
+		return nil
+	}); err != nil {
+		t.Fatalf("save state cache: %v", err)
+	}
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "E2E",
+		Name:         "plan",
+		Backend:      "codex",
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "planner", RoleName: "plan"}
+
+	launch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_planner", agent, "")
+	if err != nil {
+		t.Fatalf("buildAgentLaunchSpec: %v", err)
+	}
+	if launch.Cwd != "" {
+		t.Fatalf("Launch.Cwd = %q, want empty fallback for a worker agent", launch.Cwd)
+	}
+}
+
 func TestAgentTerminalLaunchSpecStale_DetectsBackendChange(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
