@@ -77,22 +77,23 @@ func init() {
 // leadStartupPrompt picks the lead runtime's boot prompt. A role prompt_file
 // supplied via --prompt wins, otherwise inline role prompt and default lead
 // prompt resolution happen in that order.
-func leadStartupPrompt(ctx context.Context, registration leadSessionRegistration) (string, error) {
-	prompt, err := generateLeadTerminalPrompt(ctx, registration)
+//
+// The second return value is the seed-and-shrink predicate: true only when the
+// workdir is dedicated to lead AND the built-in lead prompt is the one in play.
+// It gates BOTH halves of this feature, so they can never disagree - see
+// generateLeadTerminalPrompt.
+func leadStartupPrompt(ctx context.Context, registration leadSessionRegistration, dedicated bool) (string, bool, error) {
+	prompt, seedAndShrink, err := generateLeadTerminalPrompt(ctx, registration, dedicated)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	return applyLeadPromptContext(prompt), nil
+	return applyLeadPromptContext(prompt), seedAndShrink, nil
 }
 
-func runLead(cmd *cobra.Command, args []string) {
-	// Get current working directory
-	workDir, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error getting working directory: %v\n", err)
-		os.Exit(1)
-	}
-
+// prepareLeadBackend resolves the backend to launch and prints the mode banner.
+// An uninstalled backend is not fatal: the operator is dropped into a shell in
+// the lead workdir so they can fix it, and ok is false.
+func prepareLeadBackend(workDir string) (string, bool) {
 	// Check backend health before invoking. If the binary isn't installed,
 	// show a helpful error and drop into a shell so the user can fix it.
 	backendName := cli.GetBackendName()
@@ -100,13 +101,29 @@ func runLead(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stderr, "Error: %s backend is not installed (%s)\n\n", backendName, hs.Message)
 		fmt.Fprintf(os.Stderr, "Install it and try again. Dropping into a shell so you can fix this.\n\n")
 		execShell(workDir)
-		return
+		return "", false
 	}
 
 	fmt.Println("=========================================")
 	fmt.Println("Starting LEAD mode (Interactive)")
 	fmt.Println("=========================================")
 	fmt.Println()
+	return backendName, true
+}
+
+func runLead(cmd *cobra.Command, args []string) {
+	// Resolve lead's own working directory (<ws>/lead, or LOOM_LEAD_WORKDIR),
+	// falling back to the current directory outside a workspace.
+	workDir, dedicated, err := resolveLeadWorkdir(context.Background())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting working directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	backendName, ok := prepareLeadBackend(workDir)
+	if !ok {
+		return
+	}
 
 	// Best-effort: register this lead as an orchestrator session so workers
 	// the AI spawns via `loom agentdef add` are attributed back to it. Skips
@@ -115,12 +132,17 @@ func runLead(cmd *cobra.Command, args []string) {
 	defer registration.Finalize()
 
 	// Generate the terminal-agent prompt and append the user's initial request if provided.
-	prompt, err := leadStartupPrompt(context.Background(), registration)
+	prompt, seedAndShrink, err := leadStartupPrompt(context.Background(), registration, dedicated)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading terminal prompt: %v\n", err)
 		fmt.Fprintf(os.Stderr, "\nDropping into a shell. Fix the prompt file and run 'loom lead' to retry.\n\n")
 		execShell(workDir)
 		return
+	}
+
+	// The persona left argv, so it has to be on disk before the harness starts.
+	if seedAndShrink {
+		seedLeadWorkdirFiles(workDir)
 	}
 
 	// Invoke agent interactively (no agent name needed - lead mode doesn't claim tasks).
@@ -147,14 +169,31 @@ func runLead(cmd *cobra.Command, args []string) {
 	}
 }
 
-func generateLeadTerminalPrompt(ctx context.Context, registration leadSessionRegistration) (string, error) {
+// generateLeadTerminalPrompt resolves the argv prompt and reports whether this
+// launch seeds ambient instruction files and shrinks argv to the safety block.
+//
+// Both an explicit --prompt file and an inline role prompt keep today's
+// behavior verbatim and clear the predicate: they are the operator asking for a
+// specific persona on argv, and neither belongs in a seeded AGENTS.md.
+//
+// The built-in lead prompt shrinks to the safety guardrails ONLY in a dedicated
+// workdir. Shrinking in the os.Getwd fallback would boot a lead with no persona
+// at all, or - worse, since seeding never overwrites - let it silently adopt an
+// unrelated AGENTS.md that happened to be sitting in that directory.
+func generateLeadTerminalPrompt(ctx context.Context, registration leadSessionRegistration, dedicated bool) (string, bool, error) {
 	if strings.TrimSpace(leadPromptFile) != "" {
-		return agent.GenerateTerminalPrompt(leadPromptFile)
+		prompt, err := agent.GenerateTerminalPrompt(leadPromptFile)
+		return prompt, false, err
 	}
 	if prompt := loadLeadRolePrompt(ctx, registration); strings.TrimSpace(prompt) != "" {
-		return agent.GenerateTerminalPromptText(prompt)
+		prompt, err := agent.GenerateTerminalPromptText(prompt)
+		return prompt, false, err
 	}
-	return agent.GenerateTerminalPrompt("")
+	if dedicated {
+		return agent.LeadSafetyPrompt(), true, nil
+	}
+	prompt, err := agent.GenerateTerminalPrompt("")
+	return prompt, false, err
 }
 
 func loadLeadRolePrompt(ctx context.Context, registration leadSessionRegistration) string {
