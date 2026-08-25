@@ -397,8 +397,12 @@ The current repository can build and manually install a development `.app`, and
 can produce a Developer ID–signed, notarized, stapled DMG (see
 [Signed Release Build](#signed-release-build)). Before shipping to users, finish:
 
-- ~~code signing and notarization~~ — done (local `release:macos` + CI workflow)
-- ~~signed DMG packaging~~ — done (notarized + stapled DMG)
+- ~~code signing and notarization~~ — implemented (local `release:macos` + CI
+  workflow); the embedded `node`'s hardened-runtime JIT entitlements landed in
+  Slice 3 (DEV-V5-38). **Not yet proven end-to-end:** a credentialed run on a
+  clean Mac (Developer ID cert + notary profile) must confirm Gatekeeper accepts
+  the stapled DMG — that is DEV-V5-38's final DoD step.
+- ~~signed DMG packaging~~ — done (notarized + stapled DMG pipeline)
 - universal (Intel + ARM) build; current builds are arm64 only
 - update metadata generation and hosting
 - updater UI and rollback behavior
