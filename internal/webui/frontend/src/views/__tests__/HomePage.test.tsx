@@ -88,8 +88,6 @@ vi.mock("@/components", () => ({
   deriveThisWorkspaceCounts: (issues: Issue[]) => ({
     closed: issues.filter((issue) => issue.status === "closed").length,
   }),
-  HomeTopStrip: () => <div data-testid="home-top-strip" />,
-  RunningWithoutYou: () => <div data-testid="running-without-you" />,
   HomeRail: () => <aside data-testid="home-rail" />,
 }));
 
@@ -161,9 +159,7 @@ describe("HomePage", () => {
     render(<HomePage />);
 
     expect(screen.getByTestId("home-page")).toBeInTheDocument();
-    expect(screen.getByTestId("home-top-strip")).toBeInTheDocument();
     expect(screen.getByTestId("home-rail")).toBeInTheDocument();
-    expect(screen.getByTestId("running-without-you")).toBeInTheDocument();
     expect(screen.getByTestId("operator-queue")).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Needs you" }),

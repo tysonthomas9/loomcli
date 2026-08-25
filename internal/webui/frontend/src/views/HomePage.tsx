@@ -6,16 +6,13 @@ import {
   EmptyState,
   ErrorBoundary,
   HomeRail,
-  HomeTopStrip,
   OperatorQueueCard,
-  RunningWithoutYou,
 } from "@/components";
 import { IssueViewGuard } from "@/components/IssueViewGuard";
 import {
   useWorkspaceViewActions,
   useWorkspaceViewData,
 } from "@/contexts/WorkspaceViewContext";
-import { useElapsedTime } from "@/hooks/common";
 import { useOperatorQueue } from "@/hooks/issues";
 import { useRecentActivity } from "@/hooks/workspace";
 import { isAgentActive } from "@/types";
@@ -38,8 +35,7 @@ export function HomePage(): JSX.Element {
     workspaceId,
     agents,
   } = useWorkspaceViewData();
-  const { refetch, handleIssueClick, handleAgentClick, showToast } =
-    useWorkspaceViewActions();
+  const { refetch, handleIssueClick, showToast } = useWorkspaceViewActions();
   const queue = useOperatorQueue(issues);
   const [optimisticallyResolvedIds, setOptimisticallyResolvedIds] = useState<
     ReadonlySet<string>
@@ -51,12 +47,6 @@ export function HomePage(): JSX.Element {
   const workspaceCounts = deriveThisWorkspaceCounts(issues);
   const idleAgents = agents.filter((agent) => !isAgentActive(agent)).length;
   const [usage, setUsage] = useState<UsageResponse | null>(null);
-  const oldestWaitingSince = visibleQueue[0]?.waitingSince;
-  const oldestAge = useElapsedTime(
-    oldestWaitingSince !== undefined && Number.isFinite(oldestWaitingSince)
-      ? oldestWaitingSince
-      : null,
-  );
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -140,17 +130,11 @@ export function HomePage(): JSX.Element {
         showEmptyState={false}
       >
         <div className={styles.page} data-testid="home-page">
-          <HomeTopStrip agents={agents} workspaceId={workspaceId} />
           <div className={styles.layout}>
             <section className={styles.queueColumn}>
               <header className={styles.header}>
                 <h2>Needs you</h2>
                 <span className={styles.count}>{visibleQueue.length}</span>
-                <span className={styles.summary}>
-                  {visibleQueue.length > 0
-                    ? `Oldest waiting ~${oldestAge || "unknown"} · measured from last update`
-                    : "No design gates, blocked declarations, or revision bounces"}
-                </span>
               </header>
 
               {visibleQueue.length > 0 ? (
@@ -192,11 +176,6 @@ export function HomePage(): JSX.Element {
                   </div>
                 </div>
               )}
-              <RunningWithoutYou
-                agents={agents}
-                issues={issues}
-                onWatch={handleAgentClick}
-              />
             </section>
             <HomeRail
               activity={activity}

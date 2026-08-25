@@ -132,9 +132,6 @@ describe("OperatorQueueCard", () => {
     expect(screen.getByTestId("queue-repo")).toHaveTextContent("source-repo");
     expect(card).toHaveTextContent("architect-1 attached a design");
     expect(screen.getByText(/design attached/)).toBeInTheDocument();
-    expect(screen.getByText(/one atomic write/)).toHaveTextContent(
-      "reopen · -label needs-revision · assignee = agent-dev-1",
-    );
     expect(screen.getByTitle("coming later")).toBeDisabled();
 
     fireEvent.click(screen.getByTestId("queue-approve"));
@@ -227,9 +224,6 @@ describe("OperatorQueueCard", () => {
     expect(screen.getByTestId("queue-approve")).toHaveTextContent(
       "Approve without routing — no agent serves source-repo",
     );
-    expect(screen.getByTestId("queue-no-agent-for-repo")).toHaveTextContent(
-      "No agent serves source-repo, so this is not routed.",
-    );
     // Not the primary call to action: it cannot route anywhere.
     expect(screen.getByTestId("queue-approve")).toHaveAttribute(
       "data-routed",
@@ -306,9 +300,6 @@ describe("OperatorQueueCard", () => {
     expect(screen.getByTestId("queue-approve")).toHaveTextContent(
       "Approve without routing — no repo-free agent is available",
     );
-    expect(screen.getByTestId("queue-no-agent-for-repo")).toHaveTextContent(
-      "No repo-free agent is available, so this is not routed.",
-    );
   });
 
   it("quotes a blocked declaration without its BLOCKED prefix and can unblock", async () => {
@@ -331,36 +322,11 @@ describe("OperatorQueueCard", () => {
       screen.getByText("“no Go toolchain in the image”"),
     ).toBeInTheDocument();
     expect(screen.queryByText(/BLOCKED:/)).not.toBeInTheDocument();
-    expect(screen.getByText(/Unblock is one write/)).toHaveTextContent(
-      "reopen · assignee = eval-engineer-1 — the agent resumes from the ready queue.",
-    );
-
     fireEvent.click(screen.getByTestId("queue-unblock"));
     await waitFor(() =>
       expect(callbacks.onUnblock).toHaveBeenCalledWith(
         expect.objectContaining({ id: "TASK-1" }),
       ),
-    );
-  });
-
-  it("explains when the carried blocked assignee serves another repo", () => {
-    const callbacks = handlers();
-    render(
-      <OperatorQueueCard
-        item={item("blocked", {
-          status: "blocked",
-          notes: "BLOCKED: waiting",
-          has_design: false,
-          labels: [],
-          assignee: "web-agent",
-        })}
-        agents={[agent({ name: "web-agent", repo: "web" })]}
-        {...callbacks}
-      />,
-    );
-
-    expect(screen.getByText(/Unblock is one write/)).toHaveTextContent(
-      "web-agent serves web, so it will not resume this task.",
     );
   });
 

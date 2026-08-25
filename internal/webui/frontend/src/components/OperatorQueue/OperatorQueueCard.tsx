@@ -5,7 +5,7 @@ import type { OperatorQueueItem } from "@/hooks/issues";
 import { useWorkspaceContext } from "@/hooks/workspace";
 import type { Issue, LoomAgentStatus } from "@/types";
 import { effectiveAgentStatus, parseLoomStatus } from "@/types/agent";
-import { hasDesign, NEEDS_REVISION_LABEL } from "@/utils/issue";
+import { hasDesign } from "@/utils/issue";
 import { repoNameForSource } from "@/utils/workspace/repoPresentation";
 
 import styles from "./OperatorQueueCard.module.css";
@@ -186,12 +186,6 @@ export function OperatorQueueCard({
 
   const status = issue.status ?? "open";
   const labels = issue.labels ?? [];
-  const carriedAssignee = agents.find((agent) => agent.name === issue.assignee);
-  const assigneeServesOtherRepo = Boolean(
-    sourceRepo && carriedAssignee && carriedAssignee.repo !== sourceRepo,
-  );
-  const carriedAssigneeRepo = repoNameForSource(repos, carriedAssignee?.repo);
-
   return (
     <article
       className={styles.card}
@@ -248,48 +242,6 @@ export function OperatorQueueCard({
       </div>
 
       <footer className={styles.footer}>
-        {kind === "design-gate" && (
-          <p className={styles.writeNote}>
-            Approve is one atomic write: <code>reopen</code> ·{" "}
-            <code>-label {NEEDS_REVISION_LABEL}</code>
-            {selectedAgentName ? (
-              <>
-                {" "}
-                · <code>assignee = {selectedAgentName}</code>
-              </>
-            ) : (
-              <>
-                .{" "}
-                <span data-testid="queue-no-agent-for-repo">
-                  {noAgentReasonSentence}, so this is not routed.
-                </span>
-              </>
-            )}
-            {selectedAgentName && "."} Nothing else moves until then.
-          </p>
-        )}
-        {kind === "blocked" && (
-          <p className={styles.writeNote}>
-            Unblock is one write: <code>reopen</code>
-            {issue.assignee ? (
-              <>
-                {" "}
-                · <code>assignee = {issue.assignee}</code> — the agent resumes
-                from the ready queue.
-                {assigneeServesOtherRepo && (
-                  <>
-                    {" "}
-                    — {issue.assignee} serves {carriedAssigneeRepo}, so it will
-                    not resume this task.
-                  </>
-                )}
-              </>
-            ) : (
-              <> — no agent held it.</>
-            )}
-          </p>
-        )}
-
         <div className={styles.actions}>
           {kind === "design-gate" && (
             <>
