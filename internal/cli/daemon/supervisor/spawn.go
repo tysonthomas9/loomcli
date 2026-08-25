@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/agentprofile"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/agent"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
@@ -511,16 +512,19 @@ func (s *Supervisor) appendDaemonEnv(env []string) []string {
 //
 // Directory existence is the whole contract: there is no config key and no
 // flag, so the same layout works unchanged inside a container image.
-const AgentProfilesDirName = "agent-profiles"
+//
+// It is an alias, not a second literal: agentprofile owns the layout, and the
+// readers (transcript mirroring, `loom doctor`) resolve it from there.
+const AgentProfilesDirName = agentprofile.DirName
 
 // appendRuntimeEnv appends the per-run environment an agent subprocess needs:
 // the daemon's control-plane wiring, its verified harness profile roots, the
 // yield file it watches, and its session identity. It is the one step of
 // buildCommand that can fail, because an agent whose profile does not verify
-// must not boot at all — see appendProfileEnv.
+// must not boot at all — see AppendProfileEnv.
 func (s *Supervisor) appendRuntimeEnv(env []string, ap *AgentProcess) ([]string, error) {
 	env = s.appendDaemonEnv(env)
-	env, err := appendProfileEnv(env, s.ProjectDir, ap.Entry.Worktree)
+	env, err := AppendProfileEnv(env, s.ProjectDir, ap.Entry.Worktree)
 	if err != nil {
 		return nil, fmt.Errorf("agent %s profile: %w", ap.Entry.Worktree, err)
 	}
@@ -567,30 +571,86 @@ type profileManifest struct {
 	HarnessVersion string   `json:"harness_version"`
 }
 
-// appendProfileEnv injects per-agent harness profile roots when they exist on
-// disk, after verifying each one against its manifest. Absent directories
-// leave the environment untouched, preserving the legacy behavior of
-// inheriting the operator's ~/.claude and ~/.codex.
+// profileHarnessEnvVar maps a profile harness root to the environment variable
+// that points the harness at it. Together with profileHarnessBinary this is the
+// whole export vocabulary; a new harness is one entry in each map.
+var profileHarnessEnvVar = map[string]string{
+	"claude": "CLAUDE_CONFIG_DIR",
+	"codex":  "CODEX_HOME",
+}
+
+// profileHarnesses is the fixed order profile roots are resolved in, so an
+// agent's environment is byte-identical from one boot to the next.
+var profileHarnesses = []string{"claude", "codex"}
+
+// ProfileHarnesses returns the harnesses a profile root can be provisioned
+// for. Callers that inject one harness at a time (`loom lead`) iterate this
+// rather than writing their own list, which is how the two would drift.
+func ProfileHarnesses() []string {
+	return append([]string(nil), profileHarnesses...)
+}
+
+// ProfileHarnessBinary returns the binary whose --version output a harness
+// profile's manifest pins, or "" for an unknown harness. Exported so a caller
+// verifying a root outside the spawn path resolves the same binary the spawn
+// path would, and so the provisioner's pin can be asserted against it.
+func ProfileHarnessBinary(harness string) string {
+	return profileHarnessBinary[harness]
+}
+
+// ProfileEnvVar returns the environment variable a harness profile root is
+// exported as, or "" for an unknown harness. It is exported so a caller can
+// tell whether a variable is ALREADY set before paying for verification —
+// `loom lead` must leave an inherited value alone, including an operator's own
+// config root that no manifest here could ever verify.
+func ProfileEnvVar(harness string) string {
+	return profileHarnessEnvVar[harness]
+}
+
+// ProfileHarnessEnv resolves one harness profile root for an agent, verifies
+// it, and returns the KEY=VALUE assignment that exports it — or "" when the
+// agent has no such root on disk.
+//
+// This is the single implementation of the resolve-verify-export policy. The
+// supervisor reaches it through AppendProfileEnv at spawn; `loom lead`, the one
+// agent the supervisor does not spawn, calls it per harness so it can skip the
+// ones whose variable it inherited. Neither may grow a second, weaker copy.
 //
 // An existing but unverifiable profile is a BOOT FAILURE, never a fallback to
 // legacy env: silently running the agent against the operator's full ~/.claude
 // is the exact leak per-agent profiles close. Per-agent boot degradation
 // contains the failure to the one agent whose profile is broken.
-func appendProfileEnv(env []string, projectDir, worktree string) ([]string, error) {
-	root := filepath.Join(projectDir, ".loom", AgentProfilesDirName, worktree)
-	for _, harness := range []string{"claude", "codex"} {
-		dir := filepath.Join(root, harness)
-		if !dirExists(dir) {
-			continue
-		}
-		if err := verifyProfileManifest(dir, profileHarnessBinary[harness]); err != nil {
+func ProfileHarnessEnv(projectDir, agent, harness string) (string, error) {
+	root := agentprofile.Dir(projectDir, agent)
+	if root == "" {
+		return "", nil
+	}
+	envVar := profileHarnessEnvVar[harness]
+	if envVar == "" {
+		return "", nil
+	}
+	dir := filepath.Join(root, harness)
+	if !dirExists(dir) {
+		return "", nil
+	}
+	if err := verifyProfileManifest(dir, profileHarnessBinary[harness]); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s=%s", envVar, dir), nil
+}
+
+// AppendProfileEnv injects every per-agent harness profile root that exists on
+// disk, after verifying each one against its manifest. Absent directories leave
+// the environment untouched, preserving the legacy behavior of inheriting the
+// operator's ~/.claude and ~/.codex.
+func AppendProfileEnv(env []string, projectDir, agent string) ([]string, error) {
+	for _, harness := range profileHarnesses {
+		assignment, err := ProfileHarnessEnv(projectDir, agent, harness)
+		if err != nil {
 			return nil, err
 		}
-		switch harness {
-		case "claude":
-			env = append(env, fmt.Sprintf("CLAUDE_CONFIG_DIR=%s", dir))
-		case "codex":
-			env = append(env, fmt.Sprintf("CODEX_HOME=%s", dir))
+		if assignment != "" {
+			env = append(env, assignment)
 		}
 	}
 	return env, nil
@@ -705,6 +765,16 @@ func harnessVersion(binary string) string {
 	harnessVersionCache[binary] = harnessVersionEntry{version: version, probed: time.Now()}
 	harnessVersionMu.Unlock()
 	return version
+}
+
+// ResetHarnessVersionCache drops every cached probe. For testing only: a test
+// that shims a harness on PATH must not inherit a version another test — or
+// the enforcement `loom lead` now runs at startup — already probed off the
+// real binary.
+func ResetHarnessVersionCache() {
+	harnessVersionMu.Lock()
+	harnessVersionCache = map[string]harnessVersionEntry{}
+	harnessVersionMu.Unlock()
 }
 
 // probeHarnessVersion is a seam for tests; production runs the real binary.

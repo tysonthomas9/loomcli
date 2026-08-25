@@ -14,11 +14,11 @@ before, which is why the feature can be rolled out — and rolled back — one
 agent at a time by renaming a directory.
 
 Path resolution lives in `internal/agentprofile`, deliberately stdlib-only, so
-the half that *injects* the paths (the supervisor, at spawn) and the halves that
-*discover* them from outside the process (transcript mirroring, `loom doctor`)
-cannot drift apart. A duplicated `filepath.Join` on each side is precisely how
-the writer ends up in one directory and every reader in another, and that drift
-is silent.
+the halves that *inject* the paths (the supervisor at spawn, `loom lead` at
+startup) and the halves that *discover* them from outside the process
+(transcript mirroring, `loom doctor`) cannot drift apart. A duplicated
+`filepath.Join` on each side is precisely how the writer ends up in one
+directory and every reader in another, and that drift is silent.
 
 ## The manifest
 
@@ -70,7 +70,7 @@ is an operator-typed command, because it is the moment the claim above is made.
 ## Verify or refuse
 
 The supervisor verifies a profile root *before* it exports the variable
-(`appendProfileEnv` in `internal/cli/daemon/supervisor/spawn.go`). Verification
+(`AppendProfileEnv` in `internal/cli/daemon/supervisor/spawn.go`). Verification
 failure is a **boot failure for that one agent**, never a fallback to the
 legacy roots — silently running an agent against the operator's full `~/.claude`
 is the exact leak per-agent profiles exist to close. Degrading per agent keeps
@@ -127,23 +127,69 @@ fingerprint, and the next spawn refuses.
 `loom lead` is the one agent the supervisor does **not** spawn. The workspace
 launcher (`scripts/lead-isolated.sh`) exports `CLAUDE_CONFIG_DIR` itself, and
 `lead` inherits it because the variable is on the envfilter allowlist — so
-`appendProfileEnv`'s verification never ran on it. Measured 2026-08-20: the
+`AppendProfileEnv`'s verification never ran on it. Measured 2026-08-20: the
 `lead` profile sat two harness versions behind every other profile and took
 effect anyway, on the one agent that runs interactively in the operator's own
 terminal.
 
-`runLead` now applies the same rule before any backend work
-(`internal/cli/agent/lead/profile.go`):
+Verifying an inherited value only ever closed half the hole: it checks what
+somebody else exported. A `lead` started any other way — bare `loom lead`, or
+the WebUI terminal path — exported nothing, and the codex lead runtime handed
+its app-server and TUI a bare `os.Environ()`, so `CODEX_HOME` was never set at
+all. Measured 2026-08-24: lead PID 84020 running on the operator's `~/.claude`.
 
-1. `CLAUDE_CONFIG_DIR` unset — nothing to verify. An unprofiled `lead` is a
-   supported configuration and stays completely silent.
-2. Set to a directory *outside* `<workspace>/.loom/agent-profiles/` — nothing to
-   verify. An operator pointing `lead` at their own alternate config root is
-   not this check's business; nothing here provisioned it and nothing here can
-   repair it.
-3. Otherwise verify, and on failure print the reason and the repair to stderr
-   and exit non-zero.
+So `runLead` both **injects and verifies**, before any backend work
+(`internal/cli/agent/lead/profile.go`, one harness at a time):
+
+1. The variable is **already set** — the inherited value wins and is only
+   verified. Two configurations stay deliberately silent: unset-with-no-profile
+   below, and a value pointing *outside*
+   `<workspace>/.loom/agent-profiles/`, which is an operator's own config root.
+   Nothing here provisioned it and nothing here can repair it, so it is neither
+   verified nor overwritten.
+2. The variable is **unset** and a profile root exists — resolve it, verify it,
+   and export it. This is what makes a bare `loom lead` carry
+   `CLAUDE_CONFIG_DIR=<ws>/.loom/agent-profiles/lead/claude` and
+   `CODEX_HOME=<ws>/.loom/agent-profiles/lead/codex`.
+3. The variable is unset and there is no profile root — silent. An unprofiled
+   `lead` inherits the operator's roots exactly as before.
+4. Anything that does not verify prints the reason and the repair to stderr and
+   exits non-zero.
 
 It refuses rather than unsetting the variable and continuing, for the same
 reason the spawn path does. The launcher script needs no change: it is
-workspace-owned, and the check belongs where the guarantee is, in the binary.
+workspace-owned, and the check belongs where the guarantee is, in the binary —
+its manual `export CLAUDE_CONFIG_DIR` is now redundant rather than load-bearing.
+
+### Where lead differs from a supervised agent
+
+* **The workspace root** comes from the resolved workspace
+  (`cli.GetWorkspaceRuntimeDir()`), never from `os.Getwd()`. `lead` runs from
+  wherever the operator invoked it, and a cwd-derived profile root would move
+  with it.
+* **The agent name** is `resolveLeadAgentID()` — `LOOM_AGENT_NAME`, else
+  `lead`. A supervised agent has an entry's worktree name; `lead` has an
+  environment variable, which is the one input that can be junk.
+  `agentprofile.Dir` rejects anything that is not a single path segment, so an
+  empty or path-bearing name degrades to legacy env instead of resolving a
+  config root outside the workspace.
+* **Injection is per harness**, because `lead` may inherit one variable and not
+  the other — the exact state the launcher script left behind.
+* **The codex session directory is untouched.** `-c sqlite_home=…` points at
+  `<UserCacheDir>/loom/codex-leads/<ws>/<lead>/<session>` and is orthogonal to
+  the config root: `CODEX_HOME` says which *configuration* codex reads,
+  `sqlite_home` says where this *session*'s state lives.
+
+The policy itself is not duplicated. `supervisor.ProfileHarnessEnv` resolves,
+verifies and formats one harness's assignment; the supervisor reaches it
+through `AppendProfileEnv` at spawn, and `lead` calls it per harness so it can
+skip the ones it inherited. The harness vocabulary — which harnesses exist,
+which variable each exports, which binary pins each version — lives in one set
+of tables next to it (`ProfileHarnesses`, `ProfileEnvVar`,
+`ProfileHarnessBinary`), so a new harness is one entry per table and no caller
+grows a second, weaker copy.
+
+Binaries are resolved by **bare name on PATH**, exactly as the backends layer
+launches them, which is also what the provisioner pins its manifest version
+from. A pin taken from an absolute path while the agent runs whatever PATH
+resolves to would refuse every boot on a machine with two installs.

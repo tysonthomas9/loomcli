@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/agentprofile"
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 )
 
@@ -24,10 +25,25 @@ const fakeHarnessVersion = "9.9.9 (Claude Code)"
 // runs against a known version instead of whatever the machine has installed.
 func stubClaudeOnPath(t *testing.T) {
 	t.Helper()
+	stubHarnessesOnPath(t, "claude")
+}
+
+// stubHarnessesOnPath shims every named harness binary to report
+// fakeHarnessVersion. They deliberately share one version string: the
+// supervisor caches a probe per binary for a couple of minutes, so tests that
+// disagreed about the installed version would pass or fail by order.
+func stubHarnessesOnPath(t *testing.T, binaries ...string) {
+	t.Helper()
 	bin := t.TempDir()
 	script := "#!/bin/sh\necho '" + fakeHarnessVersion + "'\n"
-	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte(script), 0o700); err != nil { //nolint:gosec // G306: test fixture must be executable
-		t.Fatal(err)
+	// Startup enforcement probes the real binaries, so a cached version from
+	// an earlier test would decide this one's outcome.
+	supervisor.ResetHarnessVersionCache()
+	t.Cleanup(supervisor.ResetHarnessVersionCache)
+	for _, name := range binaries {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o700); err != nil { //nolint:gosec // G306: test fixture must be executable
+			t.Fatal(err)
+		}
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
@@ -36,7 +52,13 @@ func stubClaudeOnPath(t *testing.T) {
 // agent-profiles tree and writes a manifest matching it.
 func writeLeadProfile(t *testing.T, runtimeDir, agent, version string, files map[string]string) string {
 	t.Helper()
-	dir := filepath.Join(runtimeDir, ".loom", agentprofile.DirName, agent, "claude")
+	return writeLeadHarnessProfile(t, runtimeDir, agent, "claude", version, files)
+}
+
+// writeLeadHarnessProfile is writeLeadProfile for a named harness root.
+func writeLeadHarnessProfile(t *testing.T, runtimeDir, agent, harness, version string, files map[string]string) string {
+	t.Helper()
+	dir := filepath.Join(runtimeDir, ".loom", agentprofile.DirName, agent, harness)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		t.Fatal(err)
 	}
@@ -78,9 +100,22 @@ func sortStrings(s []string) {
 	}
 }
 
+// isolateLeadWorkspace points the resolved workspace at an empty tree, so a
+// test that runs the lead startup path enforces against nothing instead of
+// against the operator's live profiles — which it could refuse, taking the
+// whole test binary down with os.Exit(1).
+func isolateLeadWorkspace(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", dir)
+	cli.ResetWorkspaceRuntimeDirCache()
+	t.Cleanup(cli.ResetWorkspaceRuntimeDirCache)
+	return dir
+}
+
 func TestVerifyLeadProfile_UnsetConfigDirIsNotVerified(t *testing.T) {
 	// No stub on PATH: an unprofiled lead must not even probe the harness.
-	if err := verifyLeadProfile(t.TempDir(), ""); err != nil {
+	if err := verifyLeadProfile(t.TempDir(), "", "claude"); err != nil {
 		t.Fatalf("unprofiled lead must stay silent, got %v", err)
 	}
 }
@@ -92,12 +127,12 @@ func TestVerifyLeadProfile_ConfigDirOutsideProfileRootIsNotVerified(t *testing.T
 	if err := os.MkdirAll(outside, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if err := verifyLeadProfile(runtimeDir, outside); err != nil {
+	if err := verifyLeadProfile(runtimeDir, outside, "claude"); err != nil {
 		t.Fatalf("config dir outside the profile root must stay silent, got %v", err)
 	}
 	// The agent-profiles root itself is not a profile either.
 	root := filepath.Join(runtimeDir, ".loom", agentprofile.DirName)
-	if err := verifyLeadProfile(runtimeDir, root); err != nil {
+	if err := verifyLeadProfile(runtimeDir, root, "claude"); err != nil {
 		t.Fatalf("profile root itself must stay silent, got %v", err)
 	}
 }
@@ -109,7 +144,7 @@ func TestVerifyLeadProfile_DriftedProfileRefusesWithDoctorRepair(t *testing.T) {
 		"settings.json": `{"model":"opus"}`,
 	})
 
-	err := verifyLeadProfile(runtimeDir, dir)
+	err := verifyLeadProfile(runtimeDir, dir, "claude")
 	if !errors.Is(err, supervisor.ErrProfileVersionDrift) {
 		t.Fatalf("want version drift, got %v", err)
 	}
@@ -131,7 +166,7 @@ func TestVerifyLeadProfile_TamperedProfileRefusesWithProvisionRepair(t *testing.
 		t.Fatal(err)
 	}
 
-	err := verifyLeadProfile(runtimeDir, dir)
+	err := verifyLeadProfile(runtimeDir, dir, "claude")
 	if !errors.Is(err, supervisor.ErrProfileFingerprintMismatch) {
 		t.Fatalf("want fingerprint mismatch, got %v", err)
 	}
@@ -153,7 +188,7 @@ func TestVerifyLeadProfile_VerifyingProfileProceeds(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := verifyLeadProfile(runtimeDir, dir); err != nil {
+	if err := verifyLeadProfile(runtimeDir, dir, "claude"); err != nil {
 		t.Fatalf("verifying profile must proceed, got %v", err)
 	}
 }
@@ -166,7 +201,7 @@ func TestVerifyLeadProfile_UnprovisionedProfileRefuses(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := verifyLeadProfile(runtimeDir, dir)
+	err := verifyLeadProfile(runtimeDir, dir, "claude")
 	if !errors.Is(err, supervisor.ErrProfileManifestMissing) {
 		t.Fatalf("want missing manifest, got %v", err)
 	}
@@ -176,7 +211,241 @@ func TestVerifyLeadProfile_UnprovisionedProfileRefuses(t *testing.T) {
 }
 
 func TestVerifyLeadProfile_EmptyRuntimeDirVerifiesNothing(t *testing.T) {
-	if err := verifyLeadProfile("", "/somewhere/.loom/agent-profiles/lead/claude"); err != nil {
+	if err := verifyLeadProfile("", "/somewhere/.loom/agent-profiles/lead/claude", "claude"); err != nil {
 		t.Fatalf("unresolvable workspace root must stay silent, got %v", err)
+	}
+}
+
+// --- injection -------------------------------------------------------------
+//
+// Verification alone only ever closed half the hole: it checks a value someone
+// else exported. These cover the half that makes `loom lead` carry a profile
+// no matter how it was started.
+
+// clearProfileEnv unsets both harness config roots so a test starts from the
+// bare `loom lead` case regardless of the operator environment running it.
+func clearProfileEnv(t *testing.T) {
+	t.Helper()
+	for _, harness := range supervisor.ProfileHarnesses() {
+		t.Setenv(supervisor.ProfileEnvVar(harness), "")
+		if err := os.Unsetenv(supervisor.ProfileEnvVar(harness)); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestApplyLeadProfile_InjectsClaudeConfigDirWhenUnset(t *testing.T) {
+	clearProfileEnv(t)
+	stubClaudeOnPath(t)
+	runtimeDir := t.TempDir()
+	dir := writeLeadProfile(t, runtimeDir, "lead", fakeHarnessVersion, map[string]string{
+		"settings.json": `{"model":"opus"}`,
+	})
+
+	if _, err := applyLeadProfile(runtimeDir, "lead", "claude"); err != nil {
+		t.Fatalf("injection must succeed, got %v", err)
+	}
+	if got := os.Getenv("CLAUDE_CONFIG_DIR"); got != dir {
+		t.Fatalf("CLAUDE_CONFIG_DIR = %q, want %q", got, dir)
+	}
+}
+
+// The codex half is the reason injection exists at all: the codex lead runtime
+// hands its app-server and TUI a bare os.Environ(), so a CODEX_HOME that is
+// never set is a lead running on the operator's own ~/.codex.
+func TestApplyLeadProfile_InjectsCodexHomeWhenUnset(t *testing.T) {
+	clearProfileEnv(t)
+	stubHarnessesOnPath(t, "codex")
+	runtimeDir := t.TempDir()
+	dir := writeLeadHarnessProfile(t, runtimeDir, "lead", "codex", fakeHarnessVersion, map[string]string{
+		"config.toml": "model = \"gpt-5\"\n",
+	})
+
+	if _, err := applyLeadProfile(runtimeDir, "lead", "codex"); err != nil {
+		t.Fatalf("injection must succeed, got %v", err)
+	}
+	if got := os.Getenv("CODEX_HOME"); got != dir {
+		t.Fatalf("CODEX_HOME = %q, want %q", got, dir)
+	}
+}
+
+// Both roots at once, through the loop enforceLeadProfile runs: the failure
+// this task fixes was a lead that had one and not the other.
+func TestApplyLeadProfile_InjectsBothHarnessRoots(t *testing.T) {
+	clearProfileEnv(t)
+	stubHarnessesOnPath(t, "claude", "codex")
+	runtimeDir := t.TempDir()
+	claudeDir := writeLeadProfile(t, runtimeDir, "lead", fakeHarnessVersion, map[string]string{
+		"settings.json": `{"model":"opus"}`,
+	})
+	codexDir := writeLeadHarnessProfile(t, runtimeDir, "lead", "codex", fakeHarnessVersion, map[string]string{
+		"config.toml": "model = \"gpt-5\"\n",
+	})
+
+	for _, harness := range supervisor.ProfileHarnesses() {
+		if _, err := applyLeadProfile(runtimeDir, "lead", harness); err != nil {
+			t.Fatalf("%s: %v", harness, err)
+		}
+	}
+	if got := os.Getenv("CLAUDE_CONFIG_DIR"); got != claudeDir {
+		t.Errorf("CLAUDE_CONFIG_DIR = %q, want %q", got, claudeDir)
+	}
+	if got := os.Getenv("CODEX_HOME"); got != codexDir {
+		t.Errorf("CODEX_HOME = %q, want %q", got, codexDir)
+	}
+}
+
+// No profile on disk is the supported unprofiled lead: silent, and nothing set,
+// so the harness falls back to the operator's roots exactly as before.
+func TestApplyLeadProfile_NoProfileOnDiskLeavesEnvUnset(t *testing.T) {
+	clearProfileEnv(t)
+	// No stub on PATH: an unprofiled lead must not even probe the harness.
+	runtimeDir := t.TempDir()
+
+	for _, harness := range supervisor.ProfileHarnesses() {
+		if _, err := applyLeadProfile(runtimeDir, "lead", harness); err != nil {
+			t.Fatalf("%s: unprofiled lead must stay silent, got %v", harness, err)
+		}
+		if got := os.Getenv(supervisor.ProfileEnvVar(harness)); got != "" {
+			t.Fatalf("%s = %q, want unset", supervisor.ProfileEnvVar(harness), got)
+		}
+	}
+}
+
+// An unprovisioned profile root refuses the launch and names the provisioner —
+// it must never degrade to the operator's ~/.claude, which is the leak the
+// whole feature closes.
+func TestApplyLeadProfile_UnverifiableProfileRefusesInjection(t *testing.T) {
+	clearProfileEnv(t)
+	stubClaudeOnPath(t)
+	runtimeDir := t.TempDir()
+	dir := filepath.Join(runtimeDir, ".loom", agentprofile.DirName, "lead", "claude")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	failed, err := applyLeadProfile(runtimeDir, "lead", "claude")
+	if !errors.Is(err, supervisor.ErrProfileManifestMissing) {
+		t.Fatalf("want missing manifest, got %v", err)
+	}
+	if failed != dir {
+		t.Fatalf("failure names %q, want the profile root %q", failed, dir)
+	}
+	if got := leadProfileRepair(err, failed); got != "scripts/provision-profile.sh lead" {
+		t.Fatalf("repair = %q, want the provisioner named for this agent", got)
+	}
+	if got := os.Getenv("CLAUDE_CONFIG_DIR"); got != "" {
+		t.Fatalf("a refused launch must not export a profile, got %q", got)
+	}
+}
+
+// An inherited value that verifies is preserved byte for byte: re-resolving it
+// from the workspace would silently move a lead an operator pointed somewhere
+// on purpose.
+func TestApplyLeadProfile_ValidInheritedValueIsPreserved(t *testing.T) {
+	clearProfileEnv(t)
+	stubClaudeOnPath(t)
+	runtimeDir := t.TempDir()
+	inherited := writeLeadProfile(t, runtimeDir, "nova", fakeHarnessVersion, map[string]string{
+		"settings.json": `{"model":"opus"}`,
+	})
+	writeLeadProfile(t, runtimeDir, "lead", fakeHarnessVersion, map[string]string{
+		"settings.json": `{"model":"other"}`,
+	})
+	t.Setenv("CLAUDE_CONFIG_DIR", inherited)
+
+	if _, err := applyLeadProfile(runtimeDir, "lead", "claude"); err != nil {
+		t.Fatalf("valid inherited profile must proceed, got %v", err)
+	}
+	if got := os.Getenv("CLAUDE_CONFIG_DIR"); got != inherited {
+		t.Fatalf("CLAUDE_CONFIG_DIR = %q, want the inherited %q", got, inherited)
+	}
+}
+
+func TestApplyLeadProfile_InvalidInheritedValueRefuses(t *testing.T) {
+	clearProfileEnv(t)
+	stubClaudeOnPath(t)
+	runtimeDir := t.TempDir()
+	inherited := writeLeadProfile(t, runtimeDir, "lead", "2.1.235 (Claude Code)", map[string]string{
+		"settings.json": `{"model":"opus"}`,
+	})
+	t.Setenv("CLAUDE_CONFIG_DIR", inherited)
+
+	dir, err := applyLeadProfile(runtimeDir, "lead", "claude")
+	if !errors.Is(err, supervisor.ErrProfileVersionDrift) {
+		t.Fatalf("want version drift, got %v", err)
+	}
+	if got := leadProfileRepair(err, dir); got != "loom doctor --fix" {
+		t.Fatalf("drift repair = %q, want the doctor re-bless", got)
+	}
+}
+
+// An operator's own config root is outside the agent-profiles tree: not
+// verified (nothing here provisioned it) and not overwritten (they chose it).
+func TestApplyLeadProfile_OutsideConfigRootIsLeftAlone(t *testing.T) {
+	clearProfileEnv(t)
+	stubClaudeOnPath(t)
+	runtimeDir := t.TempDir()
+	// A workspace profile exists AND is drifted: it must not be consulted at
+	// all, or an operator running against their own root gets a refusal for a
+	// profile they are not using.
+	writeLeadProfile(t, runtimeDir, "lead", "2.1.235 (Claude Code)", map[string]string{
+		"settings.json": `{"model":"opus"}`,
+	})
+	outside := filepath.Join(t.TempDir(), ".claude")
+	if err := os.MkdirAll(outside, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", outside)
+
+	if _, err := applyLeadProfile(runtimeDir, "lead", "claude"); err != nil {
+		t.Fatalf("an operator's own config root must stay silent, got %v", err)
+	}
+	if got := os.Getenv("CLAUDE_CONFIG_DIR"); got != outside {
+		t.Fatalf("CLAUDE_CONFIG_DIR = %q, want the operator's %q", got, outside)
+	}
+}
+
+// The agent name comes from the environment, so it is the one input that can
+// be junk. agentprofile.Dir rejects anything that is not a single segment, and
+// the lead must then degrade to legacy env rather than resolve a profile
+// outside the workspace.
+func TestApplyLeadProfile_UnusableAgentNameDegradesToLegacyEnv(t *testing.T) {
+	clearProfileEnv(t)
+	runtimeDir := t.TempDir()
+	for _, agent := range []string{"", "..", "../escape", "a/b"} {
+		dir, err := applyLeadProfile(runtimeDir, agent, "claude")
+		if err != nil || dir != "" {
+			t.Fatalf("agent %q: dir=%q err=%v, want a silent no-op", agent, dir, err)
+		}
+		if got := os.Getenv("CLAUDE_CONFIG_DIR"); got != "" {
+			t.Fatalf("agent %q exported %q", agent, got)
+		}
+	}
+}
+
+// The workspace root must come from the resolved workspace, not os.Getwd():
+// lead's cwd is not fixed, and a cwd-derived profile root would move with it.
+func TestApplyLeadProfile_UnresolvableWorkspaceRootInjectsNothing(t *testing.T) {
+	clearProfileEnv(t)
+	if dir, err := applyLeadProfile("", "lead", "claude"); err != nil || dir != "" {
+		t.Fatalf("dir=%q err=%v, want a silent no-op", dir, err)
+	}
+	if got := os.Getenv("CLAUDE_CONFIG_DIR"); got != "" {
+		t.Fatalf("CLAUDE_CONFIG_DIR = %q, want unset", got)
+	}
+}
+
+// Lead resolves the version-pin binary through the supervisor rather than
+// assuming the harness name doubles as the binary name. If the provisioner's
+// Step 0 pin ever moves off PATH resolution, this is the assertion that fails.
+func TestLeadVerifiesAgainstTheSupervisorsHarnessBinary(t *testing.T) {
+	for _, harness := range supervisor.ProfileHarnesses() {
+		if got := supervisor.ProfileHarnessBinary(harness); got == "" {
+			t.Errorf("harness %q has no version-pin binary", harness)
+		}
+		if got := supervisor.ProfileEnvVar(harness); got == "" {
+			t.Errorf("harness %q has no config-root variable", harness)
+		}
 	}
 }
