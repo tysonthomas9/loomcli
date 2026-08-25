@@ -108,7 +108,7 @@ func TestTemplateShowRegistryPure(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Template:     fullstack-app",
-		"Revision:     2 (schema 1)",
+		"Revision:     3 (schema 1)",
 		"Agent roles (5):",
 		"KIND", "LABEL", "PROMPT", "TASK FILTER", "LABELS/EXCLUDE",
 		"app-architect", "builtin:team-architect", "architect",
@@ -139,7 +139,7 @@ func TestTemplateApplyCreated(t *testing.T) {
 		t.Fatalf("apply: %v\n%s", err, output.String())
 	}
 	for _, want := range []string{
-		`Applying Team Template "Backend Development" (backend rev 2) to workspace TEST`,
+		`Applying Team Template "Backend Development" (backend rev 3) to workspace TEST`,
 		"Created agent role TEST/api-architect",
 		"Created agent TEST/api-architect-1 (agent role=api-architect)",
 		"Applied backend to TEST: 9 created, 0 skipped, 0 failed",
@@ -264,7 +264,7 @@ func TestTemplateApplyDryRun(t *testing.T) {
 		t.Fatalf("dry-run: %v\n%s", err, output.String())
 	}
 	for _, want := range []string{
-		`Plan for Team Template "Backend Development" (backend rev 2) on workspace TEST`,
+		`Plan for Team Template "Backend Development" (backend rev 3) on workspace TEST`,
 		"Would create agent role TEST/api-architect",
 		"Would create agent TEST/api-architect-1 (agent role=api-architect)",
 		"Plan: 9 to create, 0 skipped. No changes made.",

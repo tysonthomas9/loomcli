@@ -2,7 +2,7 @@ schema_version: 1
 id: fullstack-app
 label: Full-Stack App Development
 description: Architect-led team with split frontend/backend implementers plus a QA and review pair.
-revision: 2
+revision: 3
 
 roles:
   # Design role: task_filter "any" + a required label. NEVER needs_plan/needs_design —
@@ -24,6 +24,7 @@ roles:
     description: Implements UI tasks against an approved design spec; verifies loading/empty/error states and accessibility basics.
     prompt_file: builtin:team-frontend-dev
     task_filter: has_design
+    labels: [frontend]
     exclude_labels: [architect, ready-for-qa]
     effort: medium
     skills: [frontend, ui]
@@ -34,6 +35,7 @@ roles:
     description: Implements server-side tasks against the design's API contract; extends tests for changed behavior.
     prompt_file: builtin:team-backend-dev
     task_filter: has_design
+    labels: [backend]
     exclude_labels: [architect, ready-for-qa]
     effort: medium
     skills: [backend, api]

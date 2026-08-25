@@ -582,7 +582,7 @@ func TestCompareRoleIgnoresFieldsTheBundleLeavesZero(t *testing.T) {
 		PathPatterns: []string{"web/**"},
 		MaxPriority:  &maxPriority,
 		Executor:     "conversation",
-		Labels:       []string{"anything"},
+		Labels:       frontend.Labels,
 		ReadOnly:     true,
 		DeniedTools:  []string{"Bash"},
 	}
@@ -642,6 +642,7 @@ func TestCompareRoleTreatsLegacyBlankKindAsWorker(t *testing.T) {
 		TaskFilter:    frontend.TaskFilter,
 		Effort:        frontend.Effort,
 		Skills:        frontend.Skills,
+		Labels:        frontend.Labels,
 		ExcludeLabels: frontend.ExcludeLabels,
 	}
 	if fields := compareRole(frontend, existing); len(fields) != 0 {

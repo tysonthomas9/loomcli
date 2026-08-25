@@ -2,7 +2,7 @@ schema_version: 1
 id: website
 label: Website Development
 description: Designer-led team for marketing and content sites, with a frontend implementer, a copy writer and a QA and review pair.
-revision: 2
+revision: 3
 
 roles:
   # Design role: task_filter "any" + a required label. NEVER needs_plan/needs_design —
@@ -26,6 +26,7 @@ roles:
     description: Implements UI tasks against an approved design spec; verifies loading/empty/error states and accessibility basics.
     prompt_file: builtin:team-frontend-dev
     task_filter: has_design
+    labels: [frontend]
     exclude_labels: [architect, ready-for-qa]
     effort: medium
     skills: [frontend, ui]
@@ -36,6 +37,7 @@ roles:
     description: Writes and revises site copy against an approved design spec, including page metadata and calls to action.
     prompt_file: builtin:team-content-writer
     task_filter: has_design
+    labels: [content]
     exclude_labels: [architect, ready-for-qa]
     effort: low
     skills: [content, copy]
