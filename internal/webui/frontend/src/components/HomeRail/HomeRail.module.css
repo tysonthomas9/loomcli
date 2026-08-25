@@ -145,6 +145,20 @@
   list-style: none;
 }
 
+.feedScroll {
+  max-height: 420px;
+  margin-right: -6px;
+  padding-right: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.feedScroll:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
 .feed li {
   display: grid;
   grid-template-columns: 56px 10px minmax(0, 1fr);

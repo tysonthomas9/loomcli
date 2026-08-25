@@ -22,7 +22,7 @@ export function HomeRail({
   return (
     <aside className={styles.rail} data-testid="home-rail">
       <ThisWorkspaceCard issues={issues} workspaceId={workspaceId} />
-      <ActivityCard activity={activity} />
+      <ActivityCard activity={activity} key={workspaceId} />
       <BudgetCard onUsageChange={onUsageChange} />
     </aside>
   );

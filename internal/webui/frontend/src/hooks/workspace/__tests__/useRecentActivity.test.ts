@@ -126,10 +126,7 @@ describe("activityIdForMutation", () => {
 
   it("deduplicates an SSE delivery against the same seeded history event", () => {
     const cursor = "1787591234567-0";
-    const seeded = describeIssueEvent(
-      fleetEvent({ id: cursor }),
-      new Set(),
-    );
+    const seeded = describeIssueEvent(fleetEvent({ id: cursor }), new Set());
     const live = {
       ...seeded,
       id: activityIdForMutation({
@@ -255,7 +252,7 @@ describe("useRecentActivity", () => {
       { initialProps: { agents: [] as LoomAgentStatus[] } },
     );
     await waitFor(() => expect(mockGetIssueEvents).toHaveBeenCalledTimes(1));
-    expect(mockGetIssueEvents).toHaveBeenCalledWith("WS", "TASK-1", 5);
+    expect(mockGetIssueEvents).toHaveBeenCalledWith("WS", "TASK-1", 15);
 
     // Agents load while the seed is still in flight: must not abort it.
     rerender({ agents: [agent("agent-dev-1")] });

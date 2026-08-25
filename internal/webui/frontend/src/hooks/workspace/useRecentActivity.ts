@@ -4,9 +4,11 @@ import { getIssueEvents } from "@/api";
 import { useEventSubscription } from "@/hooks/common";
 import type { Event, Issue, LoomAgentStatus, MutationPayload } from "@/types";
 
-const ACTIVITY_BUFFER_SIZE = 50;
+const ACTIVITY_BUFFER_SIZE = 150;
 /** How many of the most recently updated tasks seed the feed on load. */
 export const SEED_ISSUE_COUNT = 5;
+/** How many events each recent task contributes to the initial feed buffer. */
+export const SEED_EVENTS_PER_ISSUE = 15;
 
 export type ActivityMarker = "op" | "ok" | "bad" | "rev" | "default";
 
@@ -311,7 +313,11 @@ export function useRecentActivity(
       const seeded: RecentActivityItem[] = [];
       for (const issueId of seedIssueIds) {
         try {
-          const events = await getIssueEvents(workspaceId, issueId, 5);
+          const events = await getIssueEvents(
+            workspaceId,
+            issueId,
+            SEED_EVENTS_PER_ISSUE,
+          );
           seeded.push(
             ...events.map((event) =>
               describeIssueEvent(event, knownAgentNamesRef.current),
