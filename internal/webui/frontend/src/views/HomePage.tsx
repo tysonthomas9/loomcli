@@ -35,7 +35,8 @@ export function HomePage(): JSX.Element {
     workspaceId,
     agents,
   } = useWorkspaceViewData();
-  const { refetch, handleIssueClick, showToast } = useWorkspaceViewActions();
+  const { refetch, handleIssueClick, handleReject, showToast } =
+    useWorkspaceViewActions();
   const queue = useOperatorQueue(issues);
   const [optimisticallyResolvedIds, setOptimisticallyResolvedIds] = useState<
     ReadonlySet<string>
@@ -144,6 +145,7 @@ export function HomePage(): JSX.Element {
                       item={item}
                       agents={agents}
                       onApprove={handleApproveAndRoute}
+                      onReject={handleReject}
                       onUnblock={handleUnblock}
                       onOpenIssue={handleIssueClick}
                       key={item.issue.id}

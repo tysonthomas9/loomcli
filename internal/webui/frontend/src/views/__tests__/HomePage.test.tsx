@@ -24,6 +24,7 @@ const mockActions = {
   ...NO_WORKSPACE_VIEW_ACTIONS,
   refetch: vi.fn(),
   handleIssueClick: vi.fn(),
+  handleReject: vi.fn().mockResolvedValue(undefined),
   showToast: vi.fn(() => "toast-id"),
 };
 
@@ -53,6 +54,7 @@ vi.mock("@/components", () => ({
   OperatorQueueCard: ({
     item,
     onApprove,
+    onReject,
     onUnblock,
     onOpenIssue,
   }: OperatorQueueCardProps) => (
@@ -63,13 +65,22 @@ vi.mock("@/components", () => ({
     >
       {item.issue.title}
       {item.kind === "design-gate" && (
-        <button
-          type="button"
-          data-testid="queue-approve"
-          onClick={() => void onApprove(item.issue, "agent-dev-1")}
-        >
-          Approve
-        </button>
+        <>
+          <button
+            type="button"
+            data-testid="queue-approve"
+            onClick={() => void onApprove(item.issue, "agent-dev-1")}
+          >
+            Approve
+          </button>
+          <button
+            type="button"
+            data-testid="queue-reject"
+            onClick={() => void onReject(item.issue, "Needs revision")}
+          >
+            Send back
+          </button>
+        </>
       )}
       {item.kind === "blocked" && (
         <button
@@ -187,6 +198,22 @@ describe("HomePage", () => {
       });
       expect(mockActions.refetch).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it("delegates send-back feedback to the canonical rejection action", async () => {
+    mockData.issues = [
+      issue({ id: "DESIGN-1", status: "review", has_design: true }),
+    ];
+    render(<HomePage />);
+
+    fireEvent.click(screen.getByTestId("queue-reject"));
+
+    await waitFor(() =>
+      expect(mockActions.handleReject).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "DESIGN-1" }),
+        "Needs revision",
+      ),
+    );
   });
 
   it("reopens a blocked task and retains its assignee in the same write", async () => {

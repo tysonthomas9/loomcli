@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useElapsedTime } from "@/hooks/common";
 import type { OperatorQueueItem } from "@/hooks/issues";
 import { useWorkspaceContext } from "@/hooks/workspace";
+import { RejectCommentForm } from "@/components/IssueDetailPanel";
 import type { Issue, LoomAgentStatus } from "@/types";
 import { effectiveAgentStatus, parseLoomStatus } from "@/types/agent";
 import { hasDesign } from "@/utils/issue";
@@ -30,6 +31,7 @@ export interface OperatorQueueCardProps {
   item: OperatorQueueItem;
   agents: readonly LoomAgentStatus[];
   onApprove: (issue: Issue, assignee?: string) => Promise<void>;
+  onReject: (issue: Issue, comment: string) => Promise<void>;
   onUnblock: (issue: Issue) => Promise<void>;
   onOpenIssue: (issue: Issue) => void;
 }
@@ -139,6 +141,7 @@ export function OperatorQueueCard({
   item,
   agents,
   onApprove,
+  onReject,
   onUnblock,
   onOpenIssue,
 }: OperatorQueueCardProps): JSX.Element {
@@ -163,6 +166,7 @@ export function OperatorQueueCard({
   );
   const [selectedAgentName, setSelectedAgentName] = useState(defaultAgentName);
   const [isActing, setIsActing] = useState(false);
+  const [showRejectForm, setShowRejectForm] = useState(false);
   const age = useElapsedTime(
     Number.isFinite(waitingSince) ? waitingSince : null,
   );
@@ -242,7 +246,10 @@ export function OperatorQueueCard({
       </div>
 
       <footer className={styles.footer}>
-        <div className={styles.actions}>
+        <div
+          className={styles.actions}
+          hidden={kind === "design-gate" && showRejectForm}
+        >
           {kind === "design-gate" && (
             <>
               <div className={styles.splitControl}>
@@ -300,8 +307,9 @@ export function OperatorQueueCard({
               <button
                 type="button"
                 className={styles.ghostButton}
-                title="coming later"
-                disabled
+                data-testid="queue-reject"
+                disabled={isActing}
+                onClick={() => setShowRejectForm(true)}
               >
                 Send back with note
               </button>
@@ -339,6 +347,16 @@ export function OperatorQueueCard({
             </button>
           )}
         </div>
+        {kind === "design-gate" && showRejectForm && (
+          <RejectCommentForm
+            issueId={issue.id}
+            onSubmit={(comment) =>
+              void runAction(() => onReject(issue, comment))
+            }
+            onCancel={() => setShowRejectForm(false)}
+            isSubmitting={isActing}
+          />
+        )}
       </footer>
     </article>
   );

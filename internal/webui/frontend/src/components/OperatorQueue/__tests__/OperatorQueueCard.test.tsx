@@ -68,6 +68,7 @@ function agent(overrides: Partial<LoomAgentStatus>): LoomAgentStatus {
 function handlers() {
   return {
     onApprove: vi.fn().mockResolvedValue(undefined),
+    onReject: vi.fn().mockResolvedValue(undefined),
     onUnblock: vi.fn().mockResolvedValue(undefined),
     onOpenIssue: vi.fn(),
   };
@@ -132,7 +133,7 @@ describe("OperatorQueueCard", () => {
     expect(screen.getByTestId("queue-repo")).toHaveTextContent("source-repo");
     expect(card).toHaveTextContent("architect-1 attached a design");
     expect(screen.getByText(/design attached/)).toBeInTheDocument();
-    expect(screen.getByTitle("coming later")).toBeDisabled();
+    expect(screen.getByTestId("queue-reject")).toBeEnabled();
 
     fireEvent.click(screen.getByTestId("queue-approve"));
 
@@ -142,6 +143,51 @@ describe("OperatorQueueCard", () => {
         "agent-dev-1",
       );
     });
+  });
+
+  it("uses the shared rejection form to send a design back with feedback", async () => {
+    const callbacks = handlers();
+    render(
+      <OperatorQueueCard
+        item={item("design-gate")}
+        agents={[]}
+        {...callbacks}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("queue-reject"));
+
+    expect(screen.getByTestId("queue-approve")).not.toBeVisible();
+    expect(screen.getByTestId("reject-comment-form")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId("reject-textarea"), {
+      target: { value: "Clarify the rollback strategy" },
+    });
+    fireEvent.click(screen.getByTestId("reject-submit"));
+
+    await waitFor(() =>
+      expect(callbacks.onReject).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "TASK-1" }),
+        "Clarify the rollback strategy",
+      ),
+    );
+  });
+
+  it("returns to the queue actions when rejection is cancelled", () => {
+    const callbacks = handlers();
+    render(
+      <OperatorQueueCard
+        item={item("design-gate")}
+        agents={[]}
+        {...callbacks}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("queue-reject"));
+    fireEvent.click(screen.getByTestId("reject-cancel"));
+
+    expect(screen.queryByTestId("reject-comment-form")).not.toBeInTheDocument();
+    expect(screen.getByTestId("queue-approve")).toBeInTheDocument();
   });
 
   it("uses the picker to change the route without splitting approval", async () => {
