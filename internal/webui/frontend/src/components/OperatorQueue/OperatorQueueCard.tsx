@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { useElapsedTime } from "@/hooks/common";
 import type { OperatorQueueItem } from "@/hooks/issues";
@@ -103,7 +103,7 @@ function actorSentence(item: OperatorQueueItem): JSX.Element {
             at {time}.
           </>
         )}{" "}
-        It stays parked until you approve and route it.
+        It stays parked until you approve it.
       </>
     );
   }
@@ -149,10 +149,6 @@ export function OperatorQueueCard({
   const { repos } = useWorkspaceContext();
   const sourceRepo = issue.source_repo?.trim() || undefined;
   const repoLabel = repoNameForSource(repos, sourceRepo);
-  const routingAgents = useMemo(
-    () => agentsServing(agents, sourceRepo),
-    [agents, sourceRepo],
-  );
   // How the no-agent case reads: a repo's tasks need an agent bound to that
   // repo; repo-less tasks (research, ops) need an agent with no repo binding.
   const noAgentReason = sourceRepo
@@ -164,20 +160,11 @@ export function OperatorQueueCard({
     () => pickDefaultAgentName(agents, sourceRepo),
     [agents, sourceRepo],
   );
-  const [selectedAgentName, setSelectedAgentName] = useState(defaultAgentName);
   const [isActing, setIsActing] = useState(false);
   const [showRejectForm, setShowRejectForm] = useState(false);
   const age = useElapsedTime(
     Number.isFinite(waitingSince) ? waitingSince : null,
   );
-
-  useEffect(() => {
-    setSelectedAgentName((current) =>
-      current && routingAgents.some((agent) => agent.name === current)
-        ? current
-        : defaultAgentName,
-    );
-  }, [routingAgents, defaultAgentName]);
 
   const runAction = async (action: () => Promise<void>): Promise<void> => {
     setIsActing(true);
@@ -252,51 +239,29 @@ export function OperatorQueueCard({
         >
           {kind === "design-gate" && (
             <>
-              <div className={styles.splitControl}>
-                <button
-                  type="button"
-                  className={
-                    selectedAgentName
-                      ? styles.primaryButton
-                      : styles.secondaryButton
-                  }
-                  data-testid="queue-approve"
-                  data-routed={Boolean(selectedAgentName)}
-                  disabled={isActing}
-                  title={
-                    selectedAgentName
-                      ? undefined
-                      : `${noAgentReasonSentence}; the task returns to the backlog unrouted`
-                  }
-                  onClick={() =>
-                    void runAction(() => onApprove(issue, selectedAgentName))
-                  }
-                >
-                  {selectedAgentName
-                    ? `Approve → ${selectedAgentName}`
-                    : `Approve without routing — ${noAgentReason}`}
-                </button>
-                {routingAgents.length > 0 && (
-                  <label className={styles.pickerControl}>
-                    <span aria-hidden="true">▾</span>
-                    <select
-                      value={selectedAgentName ?? ""}
-                      data-testid="queue-agent-picker"
-                      aria-label={`Route ${issue.id} to agent`}
-                      disabled={isActing}
-                      onChange={(event) =>
-                        setSelectedAgentName(event.target.value)
-                      }
-                    >
-                      {routingAgents.map((agent) => (
-                        <option value={agent.name} key={agent.name}>
-                          {agent.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-              </div>
+              <button
+                type="button"
+                className={
+                  defaultAgentName
+                    ? styles.primaryButton
+                    : styles.secondaryButton
+                }
+                data-testid="queue-approve"
+                data-routed={Boolean(defaultAgentName)}
+                disabled={isActing}
+                title={
+                  defaultAgentName
+                    ? undefined
+                    : `${noAgentReasonSentence}; the task returns to the backlog unrouted`
+                }
+                onClick={() =>
+                  void runAction(() => onApprove(issue, defaultAgentName))
+                }
+              >
+                {defaultAgentName
+                  ? `Approve → ${defaultAgentName}`
+                  : `Approve without routing — ${noAgentReason}`}
+              </button>
               <button
                 type="button"
                 className={styles.secondaryButton}

@@ -112,7 +112,7 @@ describe("pickDefaultAgentName", () => {
 });
 
 describe("OperatorQueueCard", () => {
-  it("renders the design-gate anatomy and routes to the selected agent", async () => {
+  it("renders the design-gate anatomy and routes to the default agent", async () => {
     const callbacks = handlers();
     const agents = [
       agent({ name: "architect-1", role: "plan" }),
@@ -190,7 +190,7 @@ describe("OperatorQueueCard", () => {
     expect(screen.getByTestId("queue-approve")).toBeInTheDocument();
   });
 
-  it("uses the picker to change the route without splitting approval", async () => {
+  it("shows one approval action with its deterministic route", async () => {
     const callbacks = handlers();
     render(
       <OperatorQueueCard
@@ -203,11 +203,9 @@ describe("OperatorQueueCard", () => {
       />,
     );
 
-    fireEvent.change(screen.getByTestId("queue-agent-picker"), {
-      target: { value: "agent-dev-2" },
-    });
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
     expect(screen.getByTestId("queue-approve")).toHaveTextContent(
-      "Approve → agent-dev-2",
+      "Approve → agent-dev-1",
     );
 
     fireEvent.click(screen.getByTestId("queue-approve"));
@@ -215,12 +213,12 @@ describe("OperatorQueueCard", () => {
     await waitFor(() =>
       expect(callbacks.onApprove).toHaveBeenCalledWith(
         expect.anything(),
-        "agent-dev-2",
+        "agent-dev-1",
       ),
     );
   });
 
-  it("shows the repo name and only offers agents serving that repo", () => {
+  it("shows the repo name and routes only to an agent serving that repo", () => {
     const callbacks = handlers();
     mockWorkspaceContext.repos = [
       {
@@ -248,12 +246,12 @@ describe("OperatorQueueCard", () => {
     expect(screen.getByTestId("queue-repo")).toHaveTextContent(
       "Source repository",
     );
-    expect(
-      screen.getByRole("option", { name: "source-agent" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("option", { name: "web-agent" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("queue-approve")).toHaveTextContent(
+      "Approve → source-agent",
+    );
+    expect(screen.getByTestId("queue-approve")).not.toHaveTextContent(
+      "web-agent",
+    );
   });
 
   it("honestly approves without assignment when the workspace has no agents", async () => {
@@ -306,7 +304,7 @@ describe("OperatorQueueCard", () => {
     );
   });
 
-  it("treats a repo-less task as legitimate: chip is neutral, picker offers repo-free agents", () => {
+  it("treats a repo-less task as legitimate and routes to a repo-free agent", () => {
     const callbacks = handlers();
     render(
       <OperatorQueueCard
@@ -327,10 +325,7 @@ describe("OperatorQueueCard", () => {
     expect(screen.getByTestId("queue-approve")).toHaveTextContent(
       "Approve → researcher",
     );
-    const options = screen
-      .getAllByRole("option")
-      .map((option) => option.textContent);
-    expect(options).toEqual(["researcher"]);
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
   });
 
   it("says why a repo-less task cannot be routed when every agent is repo-bound", () => {
