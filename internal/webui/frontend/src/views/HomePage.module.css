@@ -57,7 +57,7 @@
 
 .queueEmpty {
   overflow: hidden;
-  background: var(--bg-card);
+  background: var(--color-bg-card);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
 }

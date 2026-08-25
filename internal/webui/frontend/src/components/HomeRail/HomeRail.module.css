@@ -22,7 +22,7 @@
      or they clip their own rows instead of letting the rail scroll. */
   flex-shrink: 0;
   overflow: hidden;
-  background: var(--bg-card);
+  background: var(--color-bg-card);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
 }
@@ -180,7 +180,7 @@
   width: 7px;
   height: 7px;
   margin-top: 4px;
-  background: var(--bg-card);
+  background: var(--color-bg-card);
   border: 2px solid var(--color-text-muted);
   border-radius: var(--radius-full);
 }
