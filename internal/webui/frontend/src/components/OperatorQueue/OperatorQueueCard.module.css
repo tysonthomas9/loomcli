@@ -176,6 +176,7 @@
 .primaryButton,
 .secondaryButton,
 .ghostButton,
+.dangerButton,
 .pickerControl {
   min-height: 32px;
   padding: 6px 12px;
@@ -189,7 +190,8 @@
 
 .primaryButton,
 .secondaryButton,
-.ghostButton {
+.ghostButton,
+.dangerButton {
   cursor: pointer;
 }
 
@@ -210,16 +212,30 @@
   background: transparent;
 }
 
+.dangerButton {
+  font-weight: 600;
+  color: white;
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+.dangerButton:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-danger) 85%, black);
+  border-color: color-mix(in srgb, var(--color-danger) 85%, black);
+}
+
 .primaryButton:focus-visible,
 .secondaryButton:focus-visible,
 .ghostButton:focus-visible,
+.dangerButton:focus-visible,
 .pickerControl:focus-within {
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
 }
 
 .primaryButton:disabled,
-.ghostButton:disabled {
+.ghostButton:disabled,
+.dangerButton:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -263,7 +279,8 @@
   .splitControl,
   .primaryButton,
   .secondaryButton,
-  .ghostButton {
+  .ghostButton,
+  .dangerButton {
     width: 100%;
   }
 

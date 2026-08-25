@@ -306,7 +306,7 @@ export function OperatorQueueCard({
               </button>
               <button
                 type="button"
-                className={styles.ghostButton}
+                className={styles.dangerButton}
                 data-testid="queue-reject"
                 disabled={isActing}
                 onClick={() => setShowRejectForm(true)}
