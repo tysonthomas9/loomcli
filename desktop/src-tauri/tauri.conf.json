@@ -37,7 +37,8 @@
       ,"resources/authoring-kit/": "authoring-kit/"
     },
     "macOS": {
-      "minimumSystemVersion": "12.0"
+      "minimumSystemVersion": "12.0",
+      "entitlements": "entitlements/loom-agents.entitlements"
     }
   }
 }

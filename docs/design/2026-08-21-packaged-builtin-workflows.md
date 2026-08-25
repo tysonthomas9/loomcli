@@ -158,12 +158,19 @@ entitlements in the *same* change — never weaken the audit silently.
   the build machine; blocked by Gatekeeper elsewhere. Sufficient to prove the
   runtime because Mach-O signatures are content-based and the test never uses
   LaunchServices/`open`.
-- **Slice 3 (DEV-V5-38):** Developer-ID signing of every nested binary
-  **including `node`**, hardened-runtime entitlements, and notarization. Until it
-  lands, `desktop-release.yml` builds and signs but fails at the notary (the
-  nodejs.org `node` is not yet hardened-runtime signed/entitled by us) — the
-  re-sign loop in `release-macos.sh` is marked `# node re-sign + entitlements:
-  DEV-V5-38`.
+- **Slice 3 (DEV-V5-38) — landed:** Developer-ID signing of every nested binary
+  **including `node`**, hardened-runtime entitlements, and notarization.
+  `desktop/src-tauri/entitlements/loom-agents.entitlements` grants
+  `com.apple.security.cs.allow-jit` + `allow-unsigned-executable-memory` (no
+  `disable-library-validation`, no `get-task-allow`); it is applied bundle-wide
+  via `tauri.conf.json`'s `bundle.macOS.entitlements` (CI's `tauri-action`) and
+  re-applied to every Mach-O — `node` included — by `release-macos.sh`'s
+  hardened re-sign. `desktop/scripts/verify-signing.sh` (sourced by
+  `release-macos.sh`, reused by the Slice 7 harness) asserts the SIG-* invariants:
+  `node` carries `allow-jit`, has no `get-task-allow`, and is hardened-runtime
+  signed. **Still requires a credentialed run** (Developer ID cert + notary
+  profile / App Store Connect key) on a clean Mac to prove Gatekeeper acceptance
+  end-to-end — the DoD's final step.
 
 ## Build-host environment
 
@@ -199,7 +206,9 @@ numbers are left for the first real build to fill in.
   to `PATH` — the reason DEV-V5-34 mandates tripwires. **Slice 7 / DEV-V5-34.**
 - **Authoring readiness** (`commandAvailable("node")` for the Flue CLI) is
   intentionally separate from the runtime resolver. **Slice 4 (DEV-V5-39).**
-- **Notarization + `node` entitlements.** **Slice 3 (DEV-V5-38).**
+- **Notarization + `node` entitlements.** **Slice 3 (DEV-V5-38) — landed** (see
+  the Signing section); the credentialed clean-Mac notarized run is the remaining
+  DoD step.
 - **Reuse/upgrade** of an already-registered built-in at an older digest.
   **Slice 6 (DEV-V5-41).** The app test always uses fresh data dirs.
 - **`scripts/test-runner-pr-e2e.sh:33`** still references the removed

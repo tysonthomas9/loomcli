@@ -23,10 +23,20 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DESKTOP_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+# DEV-V5-38 SIG-* assertions (verify_node_entitlements) live in a sourceable
+# helper the Slice 7 acceptance harness reuses.
+# shellcheck source=desktop/scripts/verify-signing.sh
+source "${SCRIPT_DIR}/verify-signing.sh"
+
 SIGNING_IDENTITY="${SIGNING_IDENTITY:-Developer ID Application: Tyson Kuthur Thomas (BN879H59CY)}"
 APP_NAME="Loom Agents"
 APP_BUNDLE="${DESKTOP_DIR}/src-tauri/target/release/bundle/macos/${APP_NAME}.app"
 RELEASE_DIR="${DESKTOP_DIR}/dist-release"
+# Hardened-runtime entitlements (DEV-V5-38): the embedded Node's V8 needs
+# allow-jit / allow-unsigned-executable-memory, and re-signing with this file
+# (which omits get-task-allow) strips the get-task-allow the nodejs.org build
+# ships — the notary rejects that. Same file tauri.conf.json applies bundle-wide.
+ENTITLEMENTS="${DESKTOP_DIR}/src-tauri/entitlements/loom-agents.entitlements"
 
 log() { echo "[release] $*"; }
 die() { echo "[release] error: $*" >&2; exit 1; }
@@ -39,6 +49,8 @@ fi
 if ! security find-identity -v -p codesigning | grep -qF "${SIGNING_IDENTITY}"; then
   die "signing identity not found in keychain: ${SIGNING_IDENTITY}"
 fi
+
+[[ -f "${ENTITLEMENTS}" ]] || die "entitlements file not found: ${ENTITLEMENTS}"
 
 APP_VERSION="${APP_VERSION:-$(node -p "require('${DESKTOP_DIR}/src-tauri/tauri.conf.json').version" 2>/dev/null || echo "0.0.0")}"
 OUT_DMG="${RELEASE_DIR}/Loom-Agents-${APP_VERSION}-aarch64.dmg"
@@ -115,19 +127,31 @@ fi
 #    nested binary, then re-seal the bundle. (No-op if Tauri already did it.)
 # ---------------------------------------------------------------------------
 
-log "re-signing nested binaries with hardened runtime"
-# node re-sign + entitlements: DEV-V5-38 (the embedded Node sidecar needs its
-# own hardened-runtime re-sign and entitlements before it can notarize).
-for nested in fleet-db loom loom-desktop; do
+log "re-signing nested binaries with hardened runtime + entitlements"
+# DEV-V5-38: re-sign EVERY nested Mach-O — including the embedded `node`, which
+# Tauri leaves without the JIT entitlements the notary requires — with the same
+# entitlements file, hardened runtime, and a secure timestamp. Inner-to-outer:
+# nested binaries first, then re-seal the bundle. Granting the JIT exceptions to
+# the Go binaries is harmless (they never JIT) and keeps this identical to the
+# CI path, where tauri.conf.json applies the same file bundle-wide.
+for nested in fleet-db loom loom-desktop node; do
   bin="${APP_BUNDLE}/Contents/MacOS/${nested}"
   [[ -f "${bin}" ]] || continue
   codesign --force --options runtime --timestamp \
+    --entitlements "${ENTITLEMENTS}" \
     --sign "${SIGNING_IDENTITY}" "${bin}"
 done
 log "re-sealing app bundle"
 codesign --force --options runtime --timestamp \
+  --entitlements "${ENTITLEMENTS}" \
   --sign "${SIGNING_IDENTITY}" "${APP_BUNDLE}"
 codesign --verify --deep --strict --verbose=2 "${APP_BUNDLE}"
+
+# DEV-V5-38 SIG-* gate: the embedded node MUST carry allow-jit and MUST NOT
+# carry get-task-allow, or the notary will reject the bundle. Assert both here,
+# up front, so a bad re-sign fails fast (before the multi-minute notary round
+# trip) rather than deep inside notarization.
+verify_node_entitlements "${APP_BUNDLE}/Contents/MacOS/node"
 
 # ---------------------------------------------------------------------------
 # 3. Notarize + staple the .app (so the app is offline-valid inside the DMG)
@@ -190,6 +214,9 @@ log "verifying signed/notarized artifacts"
 xcrun stapler validate "${OUT_DMG}"
 spctl -a -t open --context context:primary-signature -vvv "${OUT_DMG}"
 codesign --verify --deep --strict --verbose=2 "${APP_BUNDLE}"
+# Re-assert the node SIG-* invariants on the final stapled bundle (nothing in
+# notarize/staple should have altered them, but prove it end-to-end).
+verify_node_entitlements "${APP_BUNDLE}/Contents/MacOS/node"
 
 # ---------------------------------------------------------------------------
 # 7. Done — print upload command

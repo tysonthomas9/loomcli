@@ -79,9 +79,17 @@ jobs:
 
       # DEV-V5-37: prepare-sidecar.sh builds both embedded built-in workflow
       # artifacts from Flue at the pinned commit (internal/workflows/FLUE_COMMIT),
-      # mirroring ci.yml's builtin-bundle-pin checkout. NOTE: notarization of the
-      # embedded Node is DEV-V5-38; until it lands this job fails at the notary
-      # (the nodejs.org Node is not yet hardened-runtime signed/entitled by us).
+      # mirroring ci.yml's builtin-bundle-pin checkout.
+      #
+      # DEV-V5-38: the embedded Node's hardened-runtime entitlements (allow-jit,
+      # no get-task-allow) are now wired via tauri.conf.json's
+      # bundle.macOS.entitlements, which tauri-action applies to the bundle's
+      # Mach-Os when it codesigns. The first tagged run must confirm the notary
+      # accepts the entitled node; if tauri-action does not apply the file to the
+      # `node` sidecar, add an explicit `codesign --entitlements` re-sign of
+      # Contents/MacOS/node before notarization (as release-macos.sh does).
+      # The job stays a draft release (releaseDraft: true) and fails on any
+      # notarization/verify error.
       - name: Read pinned flue commit
         id: pin
         run: |

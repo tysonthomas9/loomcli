@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for the "Loom Agents" desktop app (DEV-V5-38).
+
+  Applied bundle-wide: Tauri signs every nested Mach-O (the loom-desktop app
+  binary and the loom / fleet-db / node sidecars) with the entitlements file
+  named by bundle.macOS.entitlements in tauri.conf.json, and release-macos.sh
+  re-applies this same file in its defensive hardened re-sign.
+
+  The load-bearing pair is for the embedded Node's V8 engine:
+    - allow-jit: V8 maps MAP_JIT pages and flips them W^X for the JIT.
+    - allow-unsigned-executable-memory: belt-and-suspenders for V8 code paths
+      that write executable memory without the MAP_JIT dance.
+  These were locked by the DEV-V5-31 native-addon audit, which proved the Flue
+  node bundle + its dependency closure at the pinned commit contain no native
+  (.node) addons, so we deliberately DO NOT grant
+  com.apple.security.cs.disable-library-validation (audit gate: if a native
+  addon is ever introduced, revisit this file in the same change).
+
+  Granting the JIT exceptions to the Go binaries too is harmless (they never
+  JIT) and keeps the local and CI signing paths identical. get-task-allow is
+  intentionally absent — the nodejs.org build ships it and the notary rejects
+  it, so re-signing with this file (which omits it) strips it.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+</dict>
+</plist>
