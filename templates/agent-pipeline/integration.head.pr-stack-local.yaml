@@ -1,0 +1,145 @@
+# PUPPET integration contract.
+#
+# These are the DEVELOPMENT REPOS THEMSELVES — the loom CLI, its issue store,
+# the harness wrapper and its TypeScript twin. That single fact sets everything
+# below.
+#
+#   repo             trunk   remote                            gate
+#   loomcli          v5      github tysonthomas9/loomcli        make check
+#   fleet-db         main    github BrowserOperator/fleet-db    make gate
+#   harness-wrapper  main    github olesho/harness-wrapper      veracity lint + test
+#   meta-harness     main    github olesho/meta-harness         npm test
+#
+# ── THE HARD RULE ────────────────────────────────────────────────────────────
+#
+# Every repo here is PR-ONLY *to its shared trunk*. Owner rule, stated
+# 2026-08-05 after twenty PRs were landed on a fleet-db main that had to be
+# fully reverted: this account may CREATE pull requests and may NEVER merge
+# anything into a branch other people pull from, in any repo. Landing is the
+# owner's click.
+#
+# That is why every entry below is `push: branch` + `require_pr: always` and why
+# none of them names a trunk in `push`. The exception granted for the WEB
+# workspace's personal repos does NOT extend here — WEB is someone's own
+# project; this is shared infrastructure other people's work depends on.
+#
+# A green gate is not permission. The integrator proposes; a human disposes.
+#
+# SCOPE OF THAT RULE, stated 2026-08-15 because it was read too widely and the
+# local deployment starved: it binds branches that LEAVE THIS MACHINE. It says
+# nothing about a purely local branch, and never did. See below.
+#
+# ── THE LOCAL INTEGRATION BRANCH ─────────────────────────────────────────────
+#
+# Every repo also has `local_integration`: a `local/union` branch that exists
+# ONLY on this machine and is what the local PM2 stack is actually built from.
+# The integrator MAY merge delivered work into it, in any repo. That is not an
+# exception to the hard rule — it is the other side of it. A PR proves the work
+# to a human; the union branch makes the work usable here while the PR waits.
+#
+# Without it the pipeline had a measured hole: PUPPET-11 and PUPPET-19 were both
+# delivered as PRs against `v5` on 2026-08-15 and neither reached the running
+# stack — their branches were never even fetched into the deploy clone. The
+# board read "delivered" over a deployment that had never seen the code.
+#
+# The two rules meet at one line, and it is the line that matters:
+#
+#   `local/union` IS NEVER PUSHED. It has no upstream, deliberately, in all
+#   four repos (`git branch --unset-upstream`), so a stray `git push` cannot
+#   resolve to a trunk. If you ever find one with an upstream, that is a bug.
+#
+# ── NOTE ON loomcli's TRUNK ──────────────────────────────────────────────────
+#
+# It is `v5`, not `main`. A contract that defaulted to main would open every PR
+# against a branch nobody develops on, and the diffs would be nonsense.
+
+defaults:
+  target_branch: main
+  merge_mode: ff-only
+  allow_merge_commit: true
+
+  # Never the trunk. See THE HARD RULE above.
+  push: branch
+  require_pr: always
+
+  # ── STACKED PULL REQUESTS ──────────────────────────────────────────────────
+  #
+  # `target_branch` is the DEFAULT base, not the only legal one. When a task's
+  # branch depends on a sibling's work that is not yet on the trunk, open its PR
+  # against THAT SIBLING'S BRANCH. GitHub retargets the PR to the trunk by itself
+  # once the parent lands, so this costs nothing later.
+  #
+  # Stated 2026-08-15 by the owner ("we can stack PRs, it's allowed") after the
+  # alternative was tried and was worse. PUPPET-26 and PUPPET-28 were written
+  # against v5's `pty_alive` while PUPPET-11 renamed it to `attachable`; the
+  # first instinct was to make them WAIT for PUPPET-11's PR to land. That is an
+  # unbounded wait on someone outside this pipeline: every open PR on loomcli is
+  # BLOCKED / REVIEW_REQUIRED pending a third-party review, including the repo
+  # owner's own. Stacking removes the dependency on anyone's review schedule.
+  #
+  # It also makes the PR SMALLER: based on its dependency, the diff shows only
+  # the task's own work instead of its dependency's changes restated.
+  stacked_pr: allowed
+  stack_base: dependency_branch    # only when the dependency is genuinely unlanded
+  #
+  # HOW a stack is built is not a free choice. MERGE the parent branch in and
+  # retarget with `gh pr edit --base`. Never rebase: these branches are published
+  # and a PR points at each one, so rebasing means force-pushing, which the rule
+  # below forbids outright. A merge reaches the same stack with an ordinary push.
+  stack_method: merge              # never rebase; never force-push
+
+  gate_command: null
+  gate_timeout: 1800
+
+  branch_pattern: "loom/{task_id}"
+  commit_trailer: "Task: {task_id}"
+  require_clean_target: true
+  explicit_staging: true
+
+  max_integration_attempts: 2
+  on_gate_failure: hand_back
+  on_attempts_exhausted: escalate
+
+  # Keep the branch: the PR points at it, so deleting it would close the PR by
+  # removing its head. It is the owner's to delete once landed.
+  delete_branch_after: never
+
+  # ── local_integration ──────────────────────────────────────────────────────
+  #
+  # Every field is per repo below; these defaults exist so the shape is one
+  # place and a repo that omits a field still reads sensibly.
+  #
+  #   branch     always `local/union`. Never pushed, no upstream.
+  #   base       the remote-tracking trunk it follows (origin/v5, origin/main).
+  #   clone      the repo that OWNS the branch. For loomcli and fleet-db this is
+  #              the DEPLOY clone under ~/Work/loom, because `loom-stack`
+  #              resolves deploy refs there and a branch it cannot see cannot be
+  #              deployed. The other two have no deploy clone, so the workspace
+  #              clone owns theirs.
+  #   worktree   a DEDICATED checkout, so the agent never writes into a working
+  #              tree a human might be using. Before 2026-08-15 `local/union`
+  #              was checked out in ~/Work/loom/loomcli itself — a conflict
+  #              there left the clone dirty, and `loom-stack deploy` then
+  #              refuses without --force.
+  #   build      the cheap sanity build run on the merged union tree. NOT the
+  #              full gate: that already ran on the PR tree in the same session,
+  #              and loomcli's `make check` is 10+ minutes against a 3600s run
+  #              budget — a second one gets the agent killed mid-run, which
+  #              strands the task with no error.
+  #   deployed   true when the local PM2 stack builds from this branch. Purely
+  #              informational: it does NOT license the agent to deploy.
+  #              Merging and deploying are different acts with different blast
+  #              radii, and the integrator only ever does the first.
+  local_integration:
+    branch: local/union
+    push: never                 # not a mode to choose from. There is no other.
+    merge_mode: no-ff           # one merge commit per task, so it can be reverted alone
+    build_command: null         # per repo
+    on_conflict: skip           # abort, report, leave the branch untouched — see
+                                # `on_failure_is_not_a_handback` below
+    on_build_failure: revert    # reset the branch to its pre-merge sha
+    # The union merge happens AFTER the PR exists and is a convenience, not a
+    # delivery condition. If it fails, the task is still DELIVERED — handing an
+    # already-shipped task back to the coder because a local branch conflicted
+    # would reopen work that is sitting in an open PR.
+    on_failure_is_not_a_handback: true
