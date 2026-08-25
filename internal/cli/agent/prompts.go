@@ -382,6 +382,29 @@ func GenerateLeadPrompt() string {
 	})
 }
 
+// LeadAgentsFileText renders the built-in lead prompt with an EMPTY safety
+// block. It is the text seeded into <leadWorkdir>/AGENTS.md, where the harness
+// picks it up as ambient project instructions instead of as the session's
+// first user turn (which ages and is the first thing lost to compaction).
+//
+// The safety block is deliberately left out: it is rendered per-run per-backend
+// by buildSafetyGuardrailsBlock and must not become a static file that silently
+// goes stale. It travels on argv instead - see LeadSafetyPrompt.
+func LeadAgentsFileText() string {
+	return renderPrompt("lead", promptTemplateData{})
+}
+
+// LeadSafetyPrompt returns the multi-agent safety guardrails block alone: the
+// argv prompt for a lead whose persona already lives in a seeded AGENTS.md.
+//
+// Exported because buildSafetyGuardrailsBlock is unexported and package lead
+// cannot reach it. GenerateLeadPrompt and GenerateTerminalPrompt are
+// deliberately left byte-identical - the split happens at the call site, not
+// inside them.
+func LeadSafetyPrompt() string {
+	return buildSafetyGuardrailsBlock()
+}
+
 // GenerateTerminalPrompt creates the base prompt for the interactive terminal
 // agent runtime. Empty promptFile preserves the built-in lead prompt; a custom
 // prompt file replaces that base and still receives the terminal safety rules.
