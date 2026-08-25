@@ -136,63 +136,6 @@
   border-radius: var(--radius-sm);
 }
 
-.pipelineBody {
-  padding-top: 4px;
-  padding-bottom: 6px;
-}
-
-.pipelineRow {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 6px 0;
-  font-size: 12px;
-  border-bottom: 1px solid var(--color-border-light);
-}
-
-.pipelineRow:last-child {
-  border-bottom: 0;
-}
-
-.pipelineRow[data-muted="true"] .pipelineName {
-  color: var(--color-text-tertiary);
-}
-
-.pipelineRow[data-muted="true"] .pipelineCount {
-  color: var(--color-text-tertiary);
-}
-
-.pipelineName {
-  color: var(--text-secondary);
-}
-
-.operatorFlag {
-  padding: 0 5px;
-  font-size: 10px;
-  color: var(--color-status-warning-text);
-  background: var(--color-warning-bg);
-  border: 1px solid color-mix(in srgb, var(--color-warning) 30%, transparent);
-  border-radius: var(--radius-sm);
-}
-
-.pipelineCount {
-  margin-left: auto;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-primary);
-}
-
-.pipelineCount[data-zero="true"] {
-  color: var(--color-text-tertiary);
-}
-
-.pipelineDivider {
-  height: 1px;
-  margin: var(--space-1) 0;
-  background: var(--color-border);
-}
-
 .feed {
   display: flex;
   flex-direction: column;
