@@ -235,6 +235,13 @@ func TestHandleServiceError_KindStarting(t *testing.T) {
 			wantMsg:        "workspace is loading",
 		},
 		{
+			name:           "KindRateLimited returns 429 with Retry-After header",
+			err:            service.ErrRateLimited("slow down"),
+			wantStatus:     http.StatusTooManyRequests,
+			wantRetryAfter: "5",
+			wantMsg:        "slow down",
+		},
+		{
 			name:           "KindUnavailable does NOT set Retry-After header",
 			err:            service.ErrUnavailable("service down"),
 			wantStatus:     http.StatusServiceUnavailable,

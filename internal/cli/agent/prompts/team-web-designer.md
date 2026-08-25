@@ -20,8 +20,8 @@ A task is already claimed for you: **{{ .TaskID }}**. Work on that one and no ot
 {{ .TaskDetail }}
 {{else}}
 - Run this command to find tasks waiting on design:
-  loom data ready --limit 200 --output json | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select((.labels // []) | index("architect")) | "\(.id) [\(.priority)] \(.title)"'
-- If jq fails, fallback: run 'loom data ready --limit 200', open the candidates with 'loom data show <id>', and keep only the ones carrying the `architect` label
+  loom data ready --limit 10000 --output json | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select((.labels // []) | index("architect")) | "\(.id) [\(.priority)] \(.title)"'
+- If jq fails, fallback: run 'loom data ready --limit 10000', open the candidates with 'loom data show <id>', and keep only the ones carrying the `architect` label
 - SKIP any task already 'in_progress' by checking 'loom data list --status in_progress'
 - IGNORE existing assignees - if status is 'open', the task is available to claim
 - Pick the HIGHEST PRIORITY task (P0 > P1 > P2 > P3 > P4)
@@ -109,6 +109,13 @@ loom data update <id> --design="<your complete spec here>" --design-format={{ .D
 Saving is YOUR job — nothing else records it for you. An unsaved spec is lost work.
 
 ### Step 5: Hand It Back for Review
+
+Choose exactly one canonical implementation label before review:
+- `frontend` for layout, components, styling, interactions, and browser behavior
+- `content` for copy, metadata, and calls to action
+
+Apply it atomically and remove the other lane, for example `loom data update <id> --add-label frontend --remove-label content` (or the inverse). The chosen result must carry exactly one of the two labels. Retain `architect` until a human approves the design; never self-approve it. If the work genuinely needs both lanes, split it into separately owned implementation tasks.
+
 ```
 loom data update <id> --status review --assignee=""
 ```

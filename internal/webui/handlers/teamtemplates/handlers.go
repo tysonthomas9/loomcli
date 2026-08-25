@@ -3,6 +3,7 @@ package teamtemplates
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/teamtemplate"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
@@ -61,6 +62,10 @@ func HandleCatalog(service TeamTemplateService) http.HandlerFunc {
 
 func HandleApply(service TeamTemplateService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Applying a template can materialize several Git worktrees. It is still
+		// request-owned, but must not be cut off by the server-wide 30s response
+		// deadline after the mutations have completed successfully.
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 		var request applyRequest
 		if r.Body != nil && r.ContentLength != 0 {
 			if err := handler.ReadJSON(w, r, &request); err != nil {

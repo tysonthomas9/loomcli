@@ -14,6 +14,12 @@ for ONE task.
 - The design's voice guidance is binding: tone, reading level, person, and terminology. Where the design is silent, follow the voice already used across the existing pages.
 - Say what is true. Do not invent features, statistics, testimonials, prices, dates, or claims about what the product does. If a fact is missing, mark it and ask in the task notes — placeholder text is better than a confident fabrication.
 
+### Authoritative Approval Contract
+
+Loom routing state is the authoritative approval contract. A task is approved for this lane when it has a saved design, carries `content`, does not carry `architect` or `needs-revision`, and its status is `open` before Loom claims it (the pre-claimed task is now `in_progress` and assigned to you). Implement it even if older description, design, notes, or comments say that human approval was previously pending: the UI Approve action is the transition that removes `architect` and reopens the task.
+
+Do not require a separate approval marker; do not re-add `architect`, return an eligible task to design review, or reinterpret stale prose as current workflow state. Use Step 6b only when the approved design is technically unviable against the current code.
+
 ### Step 1: Select ONE Task
 {{if .TaskID}}
 A task is already claimed for you: **{{ .TaskID }}**. Work on that one and no other.
@@ -21,8 +27,8 @@ A task is already claimed for you: **{{ .TaskID }}**. Work on that one and no ot
 {{ .TaskDetail }}
 {{else}}
 - Run this command to find tasks ready to write (has a design, not needs-revision):
-  loom data ready --limit 200 --output json | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select((.has_design == true) or ((.design_artifact_id // "") != "") or ((.design // "") != "")) | select(((.labels // []) | index("needs-revision")) | not) | select(((.labels // []) | index("architect")) | not) | "\(.id) [\(.priority)] \(.title)"'
-- If jq fails, fallback: run 'loom data ready --limit 200' and manually skip epics, tasks without a design, and tasks labeled 'needs-revision' or 'architect'
+  loom data ready --limit 10000 --output json | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select((.has_design == true) or ((.design_artifact_id // "") != "") or ((.design // "") != "")) | select((.labels // []) | index("content")) | select(((.labels // []) | index("needs-revision")) | not) | select(((.labels // []) | index("architect")) | not) | select(((.labels // []) | index("ready-for-qa")) | not) | "\(.id) [\(.priority)] \(.title)"'
+- If jq fails, fallback: run 'loom data ready --limit 10000' and manually keep only `content`-labeled tasks with a design; skip epics and tasks labeled 'needs-revision', 'architect', or 'ready-for-qa'
 - SKIP any task already 'in_progress' by checking 'loom data list --status in_progress'
 - IGNORE existing assignees - if status is 'open', the task is available to claim
 - Pick the HIGHEST PRIORITY task (P0 > P1 > P2 > P3 > P4)
@@ -93,9 +99,9 @@ Commit salvageable work, run 'loom complete', and EXIT. The design agent role ad
 - Stage only the content files you touched and commit: `git add <files> && git commit -m "<brief description> (<task-id>)"`
 - Never `git add -A` or `git add .`
 - Note anything you flagged as unverified in the task notes so a human can confirm it
-- Close and signal:
+- Hand the completed content to QA and signal. Do not close the task; QA owns the final verification and close:
 ```
-loom data close <id> --reason "<which pages changed, and that the build passes>"
+loom data update <id> --status open --add-label ready-for-qa --assignee="" --notes "IMPLEMENTED: <which pages changed, and that the build passes>"
 loom complete
 ```
 

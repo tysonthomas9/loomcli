@@ -207,6 +207,12 @@ func createWorkspaceWorktree(repo resolvedRepo, worktreePath, branch string) (cr
 		return createdWorktree{}, err
 	}
 	baseRef := ""
+	if info.State == gitbranch.StateHealthy {
+		if _, err := cli.RunGitCommand(repo.path, "worktree", "add", worktreePath, branch); err != nil {
+			return createdWorktree{}, err
+		}
+		return createdWorktree{origRepoPath: repo.path, worktreePath: worktreePath, branch: branch}, nil
+	}
 	if info.State == gitbranch.StateBroken {
 		recoveryBase := workspaceWorktreeRecoveryBase(repo.path, branch)
 		recovery, err := gitbranch.Recover(repo.path, branch, recoveryBase, info)

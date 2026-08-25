@@ -3,7 +3,9 @@ package events
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -27,19 +29,22 @@ func ReadJSONLDir(dir string) ([]Event, error) {
 		if err != nil {
 			return nil, fmt.Errorf("open daemon event file: %w", err)
 		}
-		scanner := bufio.NewScanner(file)
-		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-		for scanner.Scan() {
+		reader := bufio.NewReader(file)
+		for {
+			line, readErr := reader.ReadBytes('\n')
 			var event Event
-			if err := json.Unmarshal(scanner.Bytes(), &event); err == nil {
+			if err := json.Unmarshal(line, &event); err == nil {
 				out = append(out, event)
 			}
+			if errors.Is(readErr, io.EOF) {
+				break
+			}
+			if readErr != nil {
+				_ = file.Close()
+				return nil, fmt.Errorf("read daemon event file: %w", readErr)
+			}
 		}
-		scanErr := scanner.Err()
 		closeErr := file.Close()
-		if scanErr != nil {
-			return nil, fmt.Errorf("read daemon event file: %w", scanErr)
-		}
 		if closeErr != nil {
 			return nil, fmt.Errorf("close daemon event file: %w", closeErr)
 		}

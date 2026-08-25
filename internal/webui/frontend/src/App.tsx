@@ -349,6 +349,7 @@ function App() {
   const issueModeByView: Partial<Record<ViewMode, "graph" | "kanban">> = {
     graph: "graph",
     kanban: "kanban",
+    activity: "kanban",
     list: "kanban",
     table: "kanban",
     "issue-detail": "kanban",
@@ -796,8 +797,14 @@ function App() {
           );
           await refetch();
         } else if (reviewType === "plan") {
-          // Plan review: Move to open (ready for implementation)
-          await updateIssueStatus(issue.id, "open");
+          // Plan review: atomically leave the architect lane and reopen for
+          // implementation. Keeping the label would route it back to the
+          // architect and exclude every implementation role.
+          await updateIssue(workspaceId, issue.id, {
+            status: "open",
+            remove_labels: ["architect"],
+          });
+          await refetch();
         } else if (reviewType === "help") {
           // Needs help: Move to in_progress (unblock)
           await updateIssueStatus(issue.id, "in_progress");
@@ -806,11 +813,11 @@ function App() {
         // Close the detail panel and clean up after successful approve
         handlePanelClose();
       } catch (err) {
-        // updateIssueStatus errors are handled by useOptimisticUpdate rollback
-        // Only show toast for non-updateIssueStatus errors (e.g., closeIssue)
+        // updateIssueStatus errors are handled by useOptimisticUpdate rollback.
+        // Direct API calls for code/plan approval need their own toast.
         if (!mountedRef.current) return;
         const reviewType = getReviewType(issue);
-        if (reviewType === "code") {
+        if (reviewType !== "help") {
           const message =
             err instanceof Error ? err.message : "Failed to approve";
           showToast(message, { type: "error" });
@@ -1074,7 +1081,7 @@ function App() {
           <AIBackendSetupList
             backends={aiBackends}
             defaultBackend={defaultBackend}
-            registrableBackends={onboardingBackendConfig?.available ?? []}
+            registrableBackends={onboardingBackendConfig?.available}
             isLoading={aiBackendsLoading || onboardingBackendConfigLoading}
             error={aiBackendsError}
             isSavingDefault={isSavingOnboardingBackend}

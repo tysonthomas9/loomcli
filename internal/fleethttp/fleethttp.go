@@ -32,6 +32,7 @@ import (
 const (
 	maxAttempts       = 4
 	initialBackoff    = 250 * time.Millisecond
+	maxRetryDelay     = 15 * time.Second
 	maxErrorBodyDrain = 64 << 10
 )
 
@@ -177,7 +178,7 @@ func Do(client Doer, req *http.Request) (*http.Response, error) {
 
 func retryDelay(retryAfter string, retry int) time.Duration {
 	if delay, ok := parseRetryAfter(retryAfter); ok {
-		return delay
+		return min(delay, maxRetryDelay)
 	}
 	backoff := initialBackoff << retry
 	// Retry jitter is not security-sensitive. Keep the delay within

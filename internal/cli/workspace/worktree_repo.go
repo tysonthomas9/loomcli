@@ -113,7 +113,8 @@ func resolveRepoWorktreeTarget(resolver *cli.Resolver, wsConfig config.Workspace
 		return ResolvedTarget{}, fmt.Errorf("repo %q: %w", repo, err)
 	}
 	worktreePath := filepath.Join(wsConfig.Path, "worktrees", repo, name)
-	if err := ensureRepoWorktree(repoPath, worktreePath, name); err != nil {
+	branchName := localworkspace.AgentBranchName(resolver.Workspace, name)
+	if err := ensureRepoWorktree(repoPath, worktreePath, branchName); err != nil {
 		return ResolvedTarget{}, fmt.Errorf("repo %q worktree: %w", repo, err)
 	}
 	return ResolvedTarget{

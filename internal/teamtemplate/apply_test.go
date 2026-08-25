@@ -234,9 +234,10 @@ func TestApplyDivergedAgent(t *testing.T) {
 	if got := strings.Join(step.Fields, ","); got != "desired_state,cross_repo" {
 		t.Fatalf("fields = %q", got)
 	}
-	// The three untouched agents materialize; the diverged one does not.
-	if calls != 3 || report.Materialized != 3 {
-		t.Errorf("materializer calls %d, report %d, want 3", calls, report.Materialized)
+	// Store divergence is preserved, while the existing worker's checkout is
+	// still repaired along with the three untouched agents.
+	if calls != 4 || report.Materialized != 4 {
+		t.Errorf("materializer calls %d, report %d, want 4", calls, report.Materialized)
 	}
 }
 
@@ -542,8 +543,26 @@ func TestPreflightMaxAgentsUnknownIsSilent(t *testing.T) {
 	}
 }
 
-// The comparison looks only at the fields the bundle sets, so a user's own
-// customization of an untouched field is never reported as divergence.
+func TestPreflightMaxAgentsReapplyCountsOnlyNewAgents(t *testing.T) {
+	st := newStore(t)
+	tpl := fullstack(t)
+	if _, err := Apply(context.Background(), localDeps(st), testWorkspace, tpl); err != nil {
+		t.Fatalf("first Apply: %v", err)
+	}
+	deps := localDeps(st)
+	deps.RunnableAgentCount = len(tpl.Agents)
+	deps.MaxAgents = len(tpl.Agents)
+	report, err := Apply(context.Background(), deps, testWorkspace, tpl)
+	if err != nil {
+		t.Fatalf("re-apply: %v", err)
+	}
+	if len(report.Warnings) != 0 {
+		t.Fatalf("re-apply raised false max_agents warning: %v", report.Warnings)
+	}
+}
+
+// The comparison ignores genuinely optional fields the bundle leaves zero,
+// but policy zero values are requirements and must still report drift.
 func TestCompareRoleIgnoresFieldsTheBundleLeavesZero(t *testing.T) {
 	tpl := fullstack(t)
 	frontend := tpl.Roles[1]
@@ -557,18 +576,39 @@ func TestCompareRoleIgnoresFieldsTheBundleLeavesZero(t *testing.T) {
 		TaskFilter:    frontend.TaskFilter,
 		Effort:        frontend.Effort,
 		Skills:        []string{"ui", "frontend"},
-		ExcludeLabels: []string{"architect"},
+		ExcludeLabels: frontend.ExcludeLabels,
 		// Untouched by the bundle:
 		Backend:      "claude",
 		PathPatterns: []string{"web/**"},
 		MaxPriority:  &maxPriority,
 		Executor:     "conversation",
-		Labels:       []string{"anything"},
+		Labels:       frontend.Labels,
 		ReadOnly:     true,
 		DeniedTools:  []string{"Bash"},
 	}
-	if fields := compareRole(frontend, existing); len(fields) != 0 {
-		t.Fatalf("fields = %v, want none", fields)
+	want := []string{"read_only", "denied_tools"}
+	if fields := compareRole(frontend, existing); strings.Join(fields, ",") != strings.Join(want, ",") {
+		t.Fatalf("fields = %v, want %v", fields, want)
+	}
+}
+
+func TestCompareRoleReportsRequiredEmptyToolPolicy(t *testing.T) {
+	role := fullstack(t).Roles[0]
+	existing := &domain.Role{
+		Name:         role.Name,
+		Kind:         domain.RoleKindWorker,
+		Description:  role.Description,
+		PromptFile:   role.PromptFile,
+		TaskFilter:   role.TaskFilter,
+		Effort:       role.Effort,
+		Skills:       role.Skills,
+		Labels:       role.Labels,
+		AllowedTools: []string{"Read"},
+		DeniedTools:  []string{"Bash"},
+	}
+	want := []string{"denied_tools", "allowed_tools"}
+	if fields := compareRole(role, existing); strings.Join(fields, ",") != strings.Join(want, ",") {
+		t.Fatalf("fields = %v, want %v", fields, want)
 	}
 }
 
@@ -585,7 +625,7 @@ func TestCompareRoleFieldVocabulary(t *testing.T) {
 		Skills:        []string{"eval"},
 		ExcludeLabels: []string{"architect"},
 	}
-	want := []string{"kind", "description", "prompt_file", "task_filter", "effort", "skills", "exclude_labels", "max_budget_usd", "max_run_duration"}
+	want := []string{"kind", "description", "prompt_file", "task_filter", "effort", "skills", "labels", "exclude_labels", "max_budget_usd", "max_run_duration"}
 	got := compareRole(eval, existing)
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("fields = %v, want %v", got, want)
@@ -602,6 +642,7 @@ func TestCompareRoleTreatsLegacyBlankKindAsWorker(t *testing.T) {
 		TaskFilter:    frontend.TaskFilter,
 		Effort:        frontend.Effort,
 		Skills:        frontend.Skills,
+		Labels:        frontend.Labels,
 		ExcludeLabels: frontend.ExcludeLabels,
 	}
 	if fields := compareRole(frontend, existing); len(fields) != 0 {

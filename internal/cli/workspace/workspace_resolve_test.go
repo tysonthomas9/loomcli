@@ -9,6 +9,24 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 )
 
+func TestResolveRepoWorktreeTargetNamespacesBranchByWorkspace(t *testing.T) {
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "source")
+	createGitRepo(t, repoPath)
+	cfg := &LoomConfig{Workspaces: map[string]WorkspaceConfig{
+		"WSA": {Path: filepath.Join(root, "wsa"), Repos: []RepoConfig{{Name: "shared", Path: repoPath}}},
+		"WSB": {Path: filepath.Join(root, "wsb"), Repos: []RepoConfig{{Name: "shared", Path: repoPath}}},
+	}}
+	for _, workspaceKey := range []string{"WSA", "WSB"} {
+		if err := os.MkdirAll(cfg.Workspaces[workspaceKey].Path, 0o755); err != nil {
+			t.Fatalf("mkdir workspace %s: %v", workspaceKey, err)
+		}
+		if _, err := resolveRepoWorktreeTarget(testResolver(cfg, workspaceKey), cfg.Workspaces[workspaceKey], "worker-1", "shared"); err != nil {
+			t.Fatalf("resolve workspace %s: %v", workspaceKey, err)
+		}
+	}
+}
+
 func testResolver(cfg *LoomConfig, ws string) *cli.Resolver {
 	return &cli.Resolver{Mode: cli.ModeWorkspace, Config: cfg, Workspace: ws}
 }

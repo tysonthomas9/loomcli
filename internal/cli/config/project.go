@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
@@ -246,16 +247,11 @@ func loadDaemonConfigFromStore(ctx context.Context, st store.Store, wsKey string
 		dc.Daemon.IssueBackend = "fleetdb"
 	}
 
-	roles, err := st.Roles().List(ctx, wsKey)
+	roles, err := loadDaemonRoles(ctx, st, wsKey)
 	if err != nil {
-		return nil, fmt.Errorf("list roles: %w", err)
+		return nil, err
 	}
-	for _, role := range roles {
-		if role == nil {
-			continue
-		}
-		dc.Roles[role.Name] = roleConfigFromDomain(role)
-	}
+	dc.Roles = roles
 
 	agents, err := st.Agents().List(ctx, wsKey)
 	if err != nil {
@@ -277,6 +273,36 @@ func loadDaemonConfigFromStore(ctx context.Context, st store.Store, wsKey string
 	}
 	_ = projectDir
 	return dc, nil
+}
+
+func loadDaemonRoles(ctx context.Context, st store.Store, wsKey string) (map[string]RoleConfig, error) {
+	stored, err := st.Roles().List(ctx, wsKey)
+	if err != nil {
+		return nil, fmt.Errorf("list roles: %w", err)
+	}
+	roles := make(map[string]RoleConfig, len(stored))
+	for _, role := range stored {
+		if role != nil {
+			roles[role.Name] = roleConfigFromDomain(role)
+		}
+	}
+	if err := validateRoleLabelEnv(roles); err != nil {
+		return nil, err
+	}
+	return roles, nil
+}
+
+func validateRoleLabelEnv(roles map[string]RoleConfig) error {
+	for name, role := range roles {
+		for field, labels := range map[string][]string{"labels": role.Labels, "exclude_labels": role.ExcludeLabels} {
+			for _, label := range labels {
+				if strings.TrimSpace(label) == "" || strings.Contains(label, ",") {
+					return fmt.Errorf("role %q %s entry %q cannot be encoded in the comma-separated worker environment", name, field, label)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func daemonSettingsFromDomain(p *domain.DaemonProfile) *DaemonSettings {

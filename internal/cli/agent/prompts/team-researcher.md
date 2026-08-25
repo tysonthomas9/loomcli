@@ -22,8 +22,8 @@ A task is already claimed for you: **{{ .TaskID }}**. Work on that one and no ot
 {{ .TaskDetail }}
 {{else}}
 - Run this command to find research work:
-  loom data ready --limit 200 --output json | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select((.labels // []) | index("research")) | "\(.id) [\(.priority)] \(.title)"'
-- If jq fails, fallback: run 'loom data ready --limit 200', open the candidates with 'loom data show <id>', and keep only the ones carrying the `research` label
+  loom data ready --limit 10000 --output json | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select((.labels // []) | index("research")) | "\(.id) [\(.priority)] \(.title)"'
+- If jq fails, fallback: run 'loom data ready --limit 10000', open the candidates with 'loom data show <id>', and keep only the ones carrying the `research` label
 - SKIP any task already 'in_progress' by checking 'loom data list --status in_progress'
 - IGNORE existing assignees - if status is 'open', the task is available to claim
 - Pick the HIGHEST PRIORITY task (P0 > P1 > P2 > P3 > P4)

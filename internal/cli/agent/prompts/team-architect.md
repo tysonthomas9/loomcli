@@ -24,8 +24,8 @@ A task is already claimed for you: **{{ .TaskID }}**. Work on that one and no ot
 {{ .TaskDetail }}
 {{else}}
 - Run this command to find tasks waiting on design:
-  loom data ready --limit 200 --output json | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select((.labels // []) | index("architect")) | "\(.id) [\(.priority)] \(.title)"'
-- If jq fails, fallback: run 'loom data ready --limit 200', open the candidates with 'loom data show <id>', and keep only the ones carrying the `architect` label
+  loom data ready --limit 10000 --output json | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select((.labels // []) | index("architect")) | "\(.id) [\(.priority)] \(.title)"'
+- If jq fails, fallback: run 'loom data ready --limit 10000', open the candidates with 'loom data show <id>', and keep only the ones carrying the `architect` label
 - SKIP any task already 'in_progress' by checking 'loom data list --status in_progress'
 - IGNORE existing assignees - if status is 'open', the task is available to claim
 - Pick the HIGHEST PRIORITY task (P0 > P1 > P2 > P3 > P4)
@@ -117,9 +117,23 @@ Saving is YOUR job — nothing else records it for you. A design you reasoned ou
 Make it complete enough that another agent (or a human) can implement it without asking you a single question.
 
 ### Step 5: Hand It Back for Review
-```
-# If the task needs a different label to route to the right implementer, say so in the notes for the lead.
 
+Classify the implementation lane before review. The routing label is a hard gate, not a suggestion, and the `architect` label remains in place until a human approves the design.
+
+{{if eq .Role "api-architect"}}Choose exactly one canonical implementation label:
+- `backend` for server behavior, APIs, services, and application code
+- `data` for schemas, migrations, backfills, seeds, and data pipelines
+
+Apply it atomically and remove the other lane, for example `loom data update <id> --add-label backend --remove-label data` (or the inverse). The chosen result must carry exactly one of the two labels. `api` and `migration` are skills, not routing labels.
+{{else if eq .Role "app-architect"}}Choose exactly one canonical implementation label:
+- `frontend` for client UI and browser behavior
+- `backend` for server behavior, APIs, services, and application code
+
+Apply it atomically and remove the other lane, for example `loom data update <id> --add-label frontend --remove-label backend` (or the inverse). The chosen result must carry exactly one of the two labels. For a genuinely cross-lane design, split it into separately owned implementation tasks instead of making two agents race for one task.
+{{else}}If the applied team defines a canonical implementer label, add exactly one with `loom data update <id> --add-label <label>`. Retain `architect`; never self-approve the design.
+{{end}}
+
+```
 loom data update <id> --status review --assignee=""
 ```
 

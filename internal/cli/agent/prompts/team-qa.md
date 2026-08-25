@@ -25,8 +25,8 @@ A task is already claimed for you: **{{ .TaskID }}**. Work on that one and no ot
 {{ .TaskDetail }}
 {{else}}
 - Run this command to find tasks ready to verify (has a design, not needs-revision):
-  loom data ready --limit 200 --output json | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select((.has_design == true) or ((.design_artifact_id // "") != "") or ((.design // "") != "")) | select(((.labels // []) | index("needs-revision")) | not) | select(((.labels // []) | index("architect")) | not) | "\(.id) [\(.priority)] \(.title)"'
-- If jq fails, fallback: run 'loom data ready --limit 200' and manually skip epics, tasks without a design, and tasks labeled 'needs-revision' or 'architect'
+  loom data ready --limit 10000 --output json | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select((.has_design == true) or ((.design_artifact_id // "") != "") or ((.design // "") != "")) | select((.labels // []) | index("ready-for-qa")) | select(((.labels // []) | index("needs-revision")) | not) | select(((.labels // []) | index("architect")) | not) | "\(.id) [\(.priority)] \(.title)"'
+- If jq fails, fallback: run 'loom data ready --limit 10000' and keep only designed tasks labeled 'ready-for-qa'; skip epics and tasks labeled 'needs-revision' or 'architect'
 - SKIP any task already 'in_progress' by checking 'loom data list --status in_progress'
 - IGNORE existing assignees - if status is 'open', the task is available to claim
 - Pick the HIGHEST PRIORITY task (P0 > P1 > P2 > P3 > P4)
@@ -77,7 +77,7 @@ A task is already claimed for you: **{{ .TaskID }}**. Work on that one and no ot
 
 Do NOT fix application code. File each defect as its own task with enough for someone else to reproduce it:
 ```
-loom data create --title "<defect in one line>" --description "Steps: <how to reproduce> | Expected: <criterion> | Actual: <observed> | Environment: <where you ran it>" --parent <epic-id>
+loom data create --title "<defect in one line>" --description "Steps: <how to reproduce> | Expected: <criterion> | Actual: <observed> | Environment: <where you ran it>" --parent <epic-id> --label architect
 ```
 
 Then record the run on the task you are working:
@@ -96,7 +96,7 @@ Commit meaningful partial work, run 'loom complete', and EXIT.
 **Step 6b — The criteria are not testable** (the work can proceed once the design says what "correct" means):
 ```
 loom data update <id> --notes "NEEDS-REVISION: <which criterion cannot be verified + what the design must state instead>"
-loom data update <id> --status open --add-label needs-revision --assignee=""
+loom data update <id> --status open --add-label needs-revision --remove-label ready-for-qa --assignee=""
 ```
 Commit salvageable tests, run 'loom complete', and EXIT.
 

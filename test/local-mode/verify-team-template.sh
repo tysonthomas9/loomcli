@@ -22,10 +22,8 @@ set -euo pipefail
 # serve-host PATH PREFIX: each team uses ${LOCAL_MODE_TEAM_VERIFY_REPO}-<team-id>
 # as its sole repo. The caller must pre-create all requested per-team paths as
 # git repos on the serve host. Separate repos are required because template
-# agents use role-derived branches (for example app-architect-1), which collide
-# when multiple workspaces share one repo. If the variable is unset, the request
-# carries no repos and the verifier fails loudly because the server does not
-# provision a repo for an empty workspace.
+# agents use workspace-scoped branches, but separate fixtures keep each
+# template's proof isolated and make cleanup deterministic.
 
 API_URL="${LOCAL_MODE_API_URL:-http://localhost:${LOCAL_MODE_API_PORT:-8282}}"
 TIMEOUT_SECONDS="${LOCAL_MODE_TEAM_VERIFY_TIMEOUT:-240}"
@@ -33,7 +31,7 @@ POLL_SECONDS="${LOCAL_MODE_TEAM_VERIFY_POLL_SECONDS:-2}"
 REQUEST_TIMEOUT_SECONDS="${LOCAL_MODE_TEAM_REQUEST_TIMEOUT:-120}"
 API_RETRY_SECONDS="${LOCAL_MODE_TEAM_API_RETRY_SECONDS:-60}"
 IDEMPOTENCY_RETRY_SECONDS="${LOCAL_MODE_TEAM_IDEMPOTENCY_RETRY_SECONDS:-30}"
-TEAM_VERIFY_REPO="${LOCAL_MODE_TEAM_VERIFY_REPO:-}"
+TEAM_VERIFY_REPO="${LOCAL_MODE_TEAM_VERIFY_REPO:-/workspace/team-template-repo}"
 WAIT_OUT="/tmp/loom-team-template-verify-$$.out"
 WAIT_ERR="/tmp/loom-team-template-verify-$$.err"
 HTTP_BODY="${WAIT_OUT}.http"
@@ -569,6 +567,17 @@ daemon_adoption_probe() {
   }
 
   audit_json="$(api_get "api/workspaces/${WORKSPACE}/audit?limit=500")" || return 1
+  if printf '%s' "$audit_json" | jq -e '
+    any(.data.events[]?;
+      .action == "agent.session_start" and
+      .details.agent_role == "code-reviewer"
+    )
+  ' >/dev/null; then
+    echo "interactive code-reviewer appeared in the daemon audit trail" >&2
+    echo "[verify-team-template] actual response JSON:" >&2
+    printf '%s\n' "$audit_json" >&2
+    return 2
+  fi
   if ! printf '%s' "$audit_json" | jq -e --arg workspace "$WORKSPACE" '
     .success == true and
     any(.data.events[]?;
@@ -576,11 +585,7 @@ daemon_adoption_probe() {
       .entity_type == "daemon_profile" and
       .entity_id == $workspace and
       .details.source == "daemon"
-    ) and
-    (all(.data.events[]?;
-      (.action != "agent.session_start") or
-      (.details.agent_role != "code-reviewer")
-    ))
+    )
   ' >/dev/null; then
     echo "daemon audit evidence has not converged" >&2
     echo "[verify-team-template] actual response JSON:" >&2

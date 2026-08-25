@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 
 import { fetchAuditEvents } from "@/api/workspace";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
@@ -107,6 +114,16 @@ export function ActivityPage(): JSX.Element {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [retryKey, setRetryKey] = useState(0);
+  const requestGeneration = useRef(0);
+  const [, setClockTick] = useState(0);
+
+  useEffect(() => {
+    const interval = window.setInterval(
+      () => setClockTick((tick) => tick + 1),
+      30_000,
+    );
+    return () => window.clearInterval(interval);
+  }, []);
 
   const filters = useMemo<ActivityFilters>(
     () => ({
@@ -117,13 +134,14 @@ export function ActivityPage(): JSX.Element {
   );
 
   useEffect(() => {
+    const generation = ++requestGeneration.current;
     let cancelled = false;
     setLoading(true);
     setError(null);
 
     fetchAuditEvents(workspaceId, fetchOptions(filters))
       .then((result) => {
-        if (cancelled) return;
+        if (cancelled || generation !== requestGeneration.current) return;
         dispatch({
           type: "history",
           events: result.events,
@@ -132,7 +150,7 @@ export function ActivityPage(): JSX.Element {
         });
       })
       .catch((reason: unknown) => {
-        if (cancelled) return;
+        if (cancelled || generation !== requestGeneration.current) return;
         setError(
           reason instanceof Error
             ? reason
@@ -140,7 +158,8 @@ export function ActivityPage(): JSX.Element {
         );
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && generation === requestGeneration.current)
+          setLoading(false);
       });
 
     return () => {
@@ -150,6 +169,13 @@ export function ActivityPage(): JSX.Element {
 
   useEventSubscription(
     useCallback((mutation) => {
+      if (
+        mutation.action === "label.add" ||
+        mutation.action === "label.remove"
+      ) {
+        setRetryKey((key) => key + 1);
+        return;
+      }
       const auditEvent = toAuditEvent(mutation);
       if (auditEvent) dispatch({ type: "live", event: auditEvent });
     }, []),
@@ -193,6 +219,7 @@ export function ActivityPage(): JSX.Element {
 
   const loadMore = useCallback(async () => {
     if (!state.nextCursor || loadingMore) return;
+    const generation = requestGeneration.current;
     setLoadingMore(true);
     setError(null);
     try {
@@ -200,20 +227,23 @@ export function ActivityPage(): JSX.Element {
         workspaceId,
         fetchOptions(filters, state.nextCursor),
       );
+      if (generation !== requestGeneration.current) return;
       dispatch({
         type: "history",
         events: result.events,
-        nextCursor: result.next_cursor,
+        nextCursor:
+          result.next_cursor === state.nextCursor ? "" : result.next_cursor,
         append: true,
       });
     } catch (reason: unknown) {
+      if (generation !== requestGeneration.current) return;
       setError(
         reason instanceof Error
           ? reason
           : new Error("Failed to load more workspace activity"),
       );
     } finally {
-      setLoadingMore(false);
+      if (generation === requestGeneration.current) setLoadingMore(false);
     }
   }, [filters, loadingMore, state.nextCursor, workspaceId]);
 

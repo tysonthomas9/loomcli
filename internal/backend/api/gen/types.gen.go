@@ -50,6 +50,21 @@ func (e AgentStatusResponseAgentState) Valid() bool {
 	}
 }
 
+// Defines values for AuditEventListResponseSuccess.
+const (
+	AuditEventListResponseSuccessTrue AuditEventListResponseSuccess = true
+)
+
+// Valid indicates whether the value is a known member of the AuditEventListResponseSuccess enum.
+func (e AuditEventListResponseSuccess) Valid() bool {
+	switch e {
+	case AuditEventListResponseSuccessTrue:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BlockedIssueAgentState.
 const (
 	BlockedIssueAgentStateDead     BlockedIssueAgentState = "dead"
@@ -556,13 +571,13 @@ func (e IssueTabType) Valid() bool {
 
 // Defines values for MessageResponseSuccess.
 const (
-	True MessageResponseSuccess = true
+	MessageResponseSuccessTrue MessageResponseSuccess = true
 )
 
 // Valid indicates whether the value is a known member of the MessageResponseSuccess enum.
 func (e MessageResponseSuccess) Valid() bool {
 	switch e {
-	case True:
+	case MessageResponseSuccessTrue:
 		return true
 	default:
 		return false
@@ -1130,36 +1145,72 @@ func (e TreeNodeStatus) Valid() bool {
 	}
 }
 
-// Defines values for WorkspaceDesignFormatPatchRequestDesignFormat.
+// Defines values for WorkspaceDataDesignFormat.
 const (
-	WorkspaceDesignFormatPatchRequestDesignFormatHtml     WorkspaceDesignFormatPatchRequestDesignFormat = "html"
-	WorkspaceDesignFormatPatchRequestDesignFormatMarkdown WorkspaceDesignFormatPatchRequestDesignFormat = "markdown"
+	WorkspaceDataDesignFormatHtml     WorkspaceDataDesignFormat = "html"
+	WorkspaceDataDesignFormatMarkdown WorkspaceDataDesignFormat = "markdown"
 )
 
-// Valid indicates whether the value is a known member of the WorkspaceDesignFormatPatchRequestDesignFormat enum.
-func (e WorkspaceDesignFormatPatchRequestDesignFormat) Valid() bool {
+// Valid indicates whether the value is a known member of the WorkspaceDataDesignFormat enum.
+func (e WorkspaceDataDesignFormat) Valid() bool {
 	switch e {
-	case WorkspaceDesignFormatPatchRequestDesignFormatHtml:
+	case WorkspaceDataDesignFormatHtml:
 		return true
-	case WorkspaceDesignFormatPatchRequestDesignFormatMarkdown:
+	case WorkspaceDataDesignFormatMarkdown:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for WorkspaceResponseDesignFormat.
+// Defines values for WorkspaceDesignFormatPatchRequestDesignFormat.
 const (
-	Html     WorkspaceResponseDesignFormat = "html"
-	Markdown WorkspaceResponseDesignFormat = "markdown"
+	Html     WorkspaceDesignFormatPatchRequestDesignFormat = "html"
+	Markdown WorkspaceDesignFormatPatchRequestDesignFormat = "markdown"
 )
 
-// Valid indicates whether the value is a known member of the WorkspaceResponseDesignFormat enum.
-func (e WorkspaceResponseDesignFormat) Valid() bool {
+// Valid indicates whether the value is a known member of the WorkspaceDesignFormatPatchRequestDesignFormat enum.
+func (e WorkspaceDesignFormatPatchRequestDesignFormat) Valid() bool {
 	switch e {
 	case Html:
 		return true
 	case Markdown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WorkspaceResponseSuccess.
+const (
+	True WorkspaceResponseSuccess = true
+)
+
+// Valid indicates whether the value is a known member of the WorkspaceResponseSuccess enum.
+func (e WorkspaceResponseSuccess) Valid() bool {
+	switch e {
+	case True:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateWorkspaceJSONBodyType.
+const (
+	Clone    CreateWorkspaceJSONBodyType = "clone"
+	Empty    CreateWorkspaceJSONBodyType = "empty"
+	Template CreateWorkspaceJSONBodyType = "template"
+)
+
+// Valid indicates whether the value is a known member of the CreateWorkspaceJSONBodyType enum.
+func (e CreateWorkspaceJSONBodyType) Valid() bool {
+	switch e {
+	case Clone:
+		return true
+	case Empty:
+		return true
+	case Template:
 		return true
 	default:
 		return false
@@ -1674,6 +1725,29 @@ type AgentStatusResponse struct {
 
 // AgentStatusResponseAgentState defines model for AgentStatusResponse.AgentState.
 type AgentStatusResponseAgentState string
+
+// AuditEvent defines model for AuditEvent.
+type AuditEvent struct {
+	Action     string                  `json:"action"`
+	Actor      string                  `json:"actor"`
+	Cursor     string                  `json:"cursor"`
+	Details    *map[string]interface{} `json:"details,omitempty"`
+	EntityId   string                  `json:"entity_id"`
+	EntityType string                  `json:"entity_type"`
+	Timestamp  time.Time               `json:"timestamp"`
+}
+
+// AuditEventListResponse defines model for AuditEventListResponse.
+type AuditEventListResponse struct {
+	Data struct {
+		Events     []AuditEvent `json:"events"`
+		NextCursor string       `json:"next_cursor"`
+	} `json:"data"`
+	Success AuditEventListResponseSuccess `json:"success"`
+}
+
+// AuditEventListResponseSuccess defines model for AuditEventListResponse.Success.
+type AuditEventListResponseSuccess bool
 
 // BackendConfigResponse defines model for BackendConfigResponse.
 type BackendConfigResponse struct {
@@ -3139,6 +3213,23 @@ type WorkspaceBackendPatchRequest struct {
 	Backend string `json:"backend"`
 }
 
+// WorkspaceData defines model for WorkspaceData.
+type WorkspaceData struct {
+	Agents           []WorkspaceAgentInfo       `json:"agents"`
+	DefaultWorkspace string                     `json:"default_workspace"`
+	DesignFormat     *WorkspaceDataDesignFormat `json:"design_format,omitempty"`
+	Groups           []string                   `json:"groups"`
+	Id               string                     `json:"id"`
+	Name             string                     `json:"name"`
+	Path             string                     `json:"path"`
+	Repos            []WorkspaceRepo            `json:"repos"`
+	WorkspaceOrder   *[]string                  `json:"workspace_order,omitempty"`
+	Workspaces       []WorkspaceSummary         `json:"workspaces"`
+}
+
+// WorkspaceDataDesignFormat defines model for WorkspaceData.DesignFormat.
+type WorkspaceDataDesignFormat string
+
 // WorkspaceDesignFormatPatchRequest defines model for WorkspaceDesignFormatPatchRequest.
 type WorkspaceDesignFormatPatchRequest struct {
 	DesignFormat WorkspaceDesignFormatPatchRequestDesignFormat `json:"design_format"`
@@ -3165,20 +3256,13 @@ type WorkspaceRepo struct {
 
 // WorkspaceResponse defines model for WorkspaceResponse.
 type WorkspaceResponse struct {
-	Agents           []WorkspaceAgentInfo           `json:"agents"`
-	DefaultWorkspace string                         `json:"default_workspace"`
-	DesignFormat     *WorkspaceResponseDesignFormat `json:"design_format,omitempty"`
-	Groups           []string                       `json:"groups"`
-	Id               string                         `json:"id"`
-	Name             string                         `json:"name"`
-	Path             string                         `json:"path"`
-	Repos            []WorkspaceRepo                `json:"repos"`
-	WorkspaceOrder   *[]string                      `json:"workspace_order,omitempty"`
-	Workspaces       []WorkspaceSummary             `json:"workspaces"`
+	Data     WorkspaceData            `json:"data"`
+	Success  WorkspaceResponseSuccess `json:"success"`
+	Warnings *[]string                `json:"warnings,omitempty"`
 }
 
-// WorkspaceResponseDesignFormat defines model for WorkspaceResponse.DesignFormat.
-type WorkspaceResponseDesignFormat string
+// WorkspaceResponseSuccess defines model for WorkspaceResponse.Success.
+type WorkspaceResponseSuccess bool
 
 // WorkspaceSummary defines model for WorkspaceSummary.
 type WorkspaceSummary struct {
@@ -3247,9 +3331,16 @@ type NotifySessionChangeJSONBody struct {
 
 // CreateWorkspaceJSONBody defines parameters for CreateWorkspace.
 type CreateWorkspaceJSONBody struct {
-	Name string `json:"name"`
-	Path string `json:"path"`
+	Branch    *string                     `json:"branch,omitempty"`
+	CloneUrls *[]string                   `json:"clone_urls,omitempty"`
+	Name      string                      `json:"name"`
+	Path      *string                     `json:"path,omitempty"`
+	Repos     *[]string                   `json:"repos,omitempty"`
+	Type      CreateWorkspaceJSONBodyType `json:"type"`
 }
+
+// CreateWorkspaceJSONBodyType defines parameters for CreateWorkspace.
+type CreateWorkspaceJSONBodyType string
 
 // SetDefaultWorkspaceJSONBody defines parameters for SetDefaultWorkspace.
 type SetDefaultWorkspaceJSONBody struct {
@@ -3324,6 +3415,14 @@ type StopAgentJSONBody struct {
 // ConnectAgentTerminalWSParams defines parameters for ConnectAgentTerminalWS.
 type ConnectAgentTerminalWSParams struct {
 	Token string `form:"token" json:"token"`
+}
+
+// ListWorkspaceAuditEventsParams defines parameters for ListWorkspaceAuditEvents.
+type ListWorkspaceAuditEventsParams struct {
+	Since  *string `form:"since,omitempty" json:"since,omitempty"`
+	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	Entity *string `form:"entity,omitempty" json:"entity,omitempty"`
+	Actor  *string `form:"actor,omitempty" json:"actor,omitempty"`
 }
 
 // ListBlockedParams defines parameters for ListBlocked.

@@ -3,6 +3,7 @@ package events
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -26,6 +27,23 @@ func TestReadJSONLDirIncludesRotatedBackupsChronologically(t *testing.T) {
 		t.Fatalf("ReadJSONLDir: %v", err)
 	}
 	if len(got) != 2 || got[0].Type != AgentStarted || got[1].Type != AgentStopped {
+		t.Fatalf("events = %+v", got)
+	}
+}
+
+func TestReadJSONLDirSkipsOversizedMalformedLineAndContinues(t *testing.T) {
+	dir := t.TempDir()
+	timestamp := time.Date(2026, time.August, 14, 10, 0, 0, 0, time.UTC)
+	content := strings.Repeat("x", 2<<20) + "\n" +
+		`{"type":"agent.started","timestamp":"` + timestamp.Format(time.RFC3339Nano) + `","agent":"agent-1"}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "events-2026-08-14.jsonl"), []byte(content), 0600); err != nil {
+		t.Fatalf("write events: %v", err)
+	}
+	got, err := ReadJSONLDir(dir)
+	if err != nil {
+		t.Fatalf("ReadJSONLDir: %v", err)
+	}
+	if len(got) != 1 || got[0].Type != AgentStarted {
 		t.Fatalf("events = %+v", got)
 	}
 }

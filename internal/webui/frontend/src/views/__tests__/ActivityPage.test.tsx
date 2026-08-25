@@ -176,9 +176,12 @@ describe("ActivityPage", () => {
       .mockReturnValueOnce(olderPage);
 
     render(<ActivityPage />);
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Load more activity" }),
-    );
+    const loadMore = await screen.findByRole("button", {
+      name: "Load more activity",
+    });
+    await act(async () => {
+      fireEvent.click(loadMore);
+    });
     await act(async () => {
       resolveOlder(
         page([
@@ -205,6 +208,30 @@ describe("ActivityPage", () => {
         name: "operator created TEAM-0",
       }),
     ).toBeInTheDocument();
+    await vi.waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: "Load more activity" }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it("treats a non-advancing history cursor as terminal", async () => {
+    mocks.fetchAuditEvents
+      .mockResolvedValueOnce(
+        page([event({ cursor: "101-0" })], "stalled-cursor"),
+      )
+      .mockResolvedValueOnce(
+        page([event({ cursor: "99-0" })], "stalled-cursor"),
+      );
+
+    render(<ActivityPage />);
+    const loadMore = await screen.findByRole("button", {
+      name: "Load more activity",
+    });
+    await act(async () => {
+      fireEvent.click(loadMore);
+    });
+
     await vi.waitFor(() => {
       expect(
         screen.queryByRole("button", { name: "Load more activity" }),

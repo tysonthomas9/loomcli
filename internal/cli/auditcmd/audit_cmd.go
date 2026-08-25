@@ -119,13 +119,8 @@ func readAuditHistory(
 	limit int,
 	filter store.AuditEventFilter,
 ) ([]store.AuditEvent, string, error) {
-	if since != "" {
-		events, cursor, _, err := reader.ListAuditEvents(ctx, workspaceKey, since, limit, filter)
-		return events, cursor, err
-	}
-
 	var recent []store.AuditEvent
-	cursor := ""
+	cursor := since
 	for {
 		events, nextCursor, hasMore, err := reader.ListAuditEvents(ctx, workspaceKey, cursor, auditPageLimit, filter)
 		if err != nil {
@@ -178,7 +173,7 @@ func consumeAuditStream(
 			}
 		}
 	}
-	return nil
+	return fmt.Errorf("follow audit events: stream closed")
 }
 
 func auditEventMatches(event store.AuditEvent, filter store.AuditEventFilter) bool {

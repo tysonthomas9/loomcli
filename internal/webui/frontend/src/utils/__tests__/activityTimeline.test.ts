@@ -193,6 +193,21 @@ describe("activityTimelineReducer", () => {
 
     expect(next.history).toEqual([current, older]);
   });
+
+  it("bounds live-only activity", () => {
+    let state = {
+      history: [] as AuditEvent[],
+      live: [] as AuditEvent[],
+      nextCursor: "",
+    };
+    for (let index = 0; index < 250; index += 1) {
+      state = activityTimelineReducer(state, {
+        type: "live",
+        event: event({ cursor: `${index}-0`, entity_id: `TEAM-${index}` }),
+      });
+    }
+    expect(state.live).toHaveLength(200);
+  });
 });
 
 describe("toAuditEvent", () => {
@@ -222,6 +237,19 @@ describe("toAuditEvent", () => {
   it("ignores non-audit mutation payloads", () => {
     expect(
       toAuditEvent({ type: "refresh", timestamp: "2026-08-14T18:01:00Z" }),
+    ).toBeNull();
+  });
+
+  it("ignores daemon refresh bookkeeping", () => {
+    expect(
+      toAuditEvent({
+        type: "agent",
+        action: "agent.refresh",
+        entity_type: "agent",
+        entity_id: "worker-1",
+        actor: "daemon",
+        timestamp: "2026-08-14T18:01:00Z",
+      }),
     ).toBeNull();
   });
 });

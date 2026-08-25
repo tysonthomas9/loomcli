@@ -113,6 +113,22 @@ EOF
   push_current_branch "$SOURCE_REPO"
 }
 
+create_team_template_repos() {
+  for team in fullstack-app website ai-agent backend; do
+    path="/workspace/team-template-repo-${team}"
+    if [ -d "${path}/.git" ]; then
+      continue
+    fi
+    mkdir -p "$path"
+    git -C "$path" init -q -b main
+    git -C "$path" config user.email "local-mode@fixture.local"
+    git -C "$path" config user.name "local-mode"
+    printf '# Team Template %s Fixture\n' "$team" > "${path}/README.md"
+    git -C "$path" add README.md
+    git -C "$path" commit -q -m "Initial team template fixture"
+  done
+}
+
 create_workspace() {
   mkdir -p "$(dirname "$WORKSPACE_ROOT")"
   if [ ! -e "${WORKSPACE_REPO}/.git" ]; then
@@ -522,6 +538,7 @@ prepare_codex_credentials
 prepare_claude_credentials
 prepare_daytona_credentials
 create_source_repo
+create_team_template_repos
 create_workspace
 create_agent_worktree "$PLAN_AGENT"
 create_agent_worktree "$CODE_AGENT"

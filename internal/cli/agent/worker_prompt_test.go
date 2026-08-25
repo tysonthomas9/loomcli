@@ -110,6 +110,95 @@ func TestWorkerPromptsWithoutPreClaimedTask(t *testing.T) {
 	}
 }
 
+func TestImplementationPromptsHandOffToQA(t *testing.T) {
+	isolatePromptOverrides(t)
+	for _, id := range []string{"team-frontend-dev", "team-backend-dev", "team-content-writer", "team-agent-dev", "team-data-engineer"} {
+		t.Run(id, func(t *testing.T) {
+			prompt, err := generateWorkerPrompt(id, fullWorkerPromptData())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(prompt, "--add-label ready-for-qa") || !strings.Contains(prompt, "--status open") {
+				t.Fatalf("%s has no ready-for-qa handoff", id)
+			}
+		})
+	}
+}
+
+func TestImplementationPromptsTreatRoutingStateAsApproval(t *testing.T) {
+	isolatePromptOverrides(t)
+	tests := []struct {
+		id    string
+		label string
+	}{
+		{id: "team-frontend-dev", label: "frontend"},
+		{id: "team-backend-dev", label: "backend"},
+		{id: "team-content-writer", label: "content"},
+		{id: "team-data-engineer", label: "data"},
+	}
+	for _, tt := range tests {
+		id := tt.id
+		t.Run(id, func(t *testing.T) {
+			prompt, err := generateWorkerPrompt(id, fullWorkerPromptData())
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{
+				"authoritative approval contract",
+				"status is `open`",
+				"does not carry `architect`",
+				"do not re-add `architect`",
+				"carries `" + tt.label + "`",
+			} {
+				if !strings.Contains(prompt, want) {
+					t.Fatalf("%s missing approval rule %q", id, want)
+				}
+			}
+		})
+	}
+}
+
+func TestDesignPromptsClassifyImplementationLane(t *testing.T) {
+	isolatePromptOverrides(t)
+
+	tests := []struct {
+		id   string
+		role string
+		want []string
+	}{
+		{id: "team-architect", role: "api-architect", want: []string{"exactly one", "`backend`", "`data`", "--add-label", "--remove-label"}},
+		{id: "team-architect", role: "app-architect", want: []string{"exactly one", "`frontend`", "`backend`", "--add-label", "--remove-label"}},
+		{id: "team-web-designer", role: "web-designer", want: []string{"exactly one", "`frontend`", "`content`", "--add-label", "--remove-label"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.id+"/"+tt.role, func(t *testing.T) {
+			data := fullWorkerPromptData()
+			data.Role = tt.role
+			prompt, err := generateWorkerPrompt(tt.id, data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(prompt, want) {
+					t.Fatalf("%s as %s missing lane-classification rule %q", tt.id, tt.role, want)
+				}
+			}
+		})
+	}
+}
+
+func TestQAPromptRoutesFiledDefectsToArchitect(t *testing.T) {
+	isolatePromptOverrides(t)
+	prompt, err := generateWorkerPrompt("team-qa", fullWorkerPromptData())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt, "--label architect") {
+		t.Fatal("team-qa defect command does not route defects to an architect")
+	}
+}
+
 // TestDesignPromptsUseWorkspaceDesignFormat is the .DesignFormat trap from
 // §10.8, from the other direction: the design-producing bodies DO need the
 // field, which is why PromptData now carries it.

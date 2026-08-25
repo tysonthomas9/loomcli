@@ -65,6 +65,25 @@ func TestRunGitHonorsCanceledContext(t *testing.T) {
 	}
 }
 
+func TestAddBranchWorktreeTreatsConcurrentWinnerAsSuccess(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "repo")
+	target := filepath.Join(t.TempDir(), "worktrees", "worker")
+	git(t, "", "init", "-b", "main", repo)
+	git(t, repo, "config", "user.name", "Test User")
+	git(t, repo, "config", "user.email", "test@example.test")
+	writeFile(t, filepath.Join(repo, "base.txt"), "main\n")
+	git(t, repo, "add", "base.txt")
+	git(t, repo, "commit", "-m", "base")
+	if err := addBranchWorktree(repo, target, "worker", ""); err != nil {
+		t.Fatalf("first addBranchWorktree: %v", err)
+	}
+	// Deterministically model a loser that observed the target as absent before
+	// another materializer completed it.
+	if err := addBranchWorktree(repo, target, "worker", ""); err != nil {
+		t.Fatalf("concurrent loser returned winner's target as an error: %v", err)
+	}
+}
+
 func TestEnsureGitWorktreeFromBranchFallsBackToLocalDefaultBranch(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")

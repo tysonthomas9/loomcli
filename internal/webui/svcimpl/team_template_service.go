@@ -67,10 +67,7 @@ func (s *teamTemplateService) ApplyTeamTemplate(
 	if err == nil {
 		return report, nil
 	}
-	// Apply's landed API does not expose a typed preflight-refusal error. The
-	// workspace view already loaded for ApplyDeps gives us the same condition
-	// without parsing the error message or duplicating a store mutation.
-	if workspace.Path != "" && len(workspace.Repos) == 0 {
+	if errors.Is(err, teamtemplate.ErrNoRepositories) {
 		return report, service.ErrValidation(err.Error())
 	}
 	if errors.Is(err, domain.ErrNotFound) {

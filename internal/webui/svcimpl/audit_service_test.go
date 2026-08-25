@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,7 +41,7 @@ func TestAuditServiceMergesFleetAndDaemonEventsChronologically(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("events = %+v", got)
 	}
-	if got[0].Action != "daemon.start" || got[0].ID != "" || got[0].Details["source"] != "daemon" {
+	if got[0].Action != "daemon.start" || !strings.HasPrefix(got[0].ID, "daemon:") || got[0].Details["source"] != "daemon" {
 		t.Fatalf("first synthetic event = %+v", got[0])
 	}
 	if got[1].Action != "issue.claim" || got[1].ID == "" {
@@ -49,8 +50,55 @@ func TestAuditServiceMergesFleetAndDaemonEventsChronologically(t *testing.T) {
 	if got[2].Action != "agent.session_start" || got[2].Actor != "agent-1" || got[2].EntityID != "agent-1" {
 		t.Fatalf("session event = %+v", got[2])
 	}
-	if next != reader.cursor {
-		t.Fatalf("next cursor = %q, want %q", next, reader.cursor)
+	if next != "" {
+		t.Fatalf("next cursor = %q, want end of trail", next)
+	}
+}
+
+func TestAuditServiceInitialPageReturnsNewestWindow(t *testing.T) {
+	t0 := time.Date(2026, time.August, 1, 0, 0, 0, 0, time.UTC)
+	history := make([]store.AuditEvent, 51)
+	for i := range history {
+		ts := t0.Add(time.Duration(i) * time.Minute)
+		history[i] = store.AuditEvent{
+			ID: fmt.Sprintf("%d-0", ts.UnixMilli()), Timestamp: ts,
+			Action: fmt.Sprintf("event-%02d", i), WorkspaceID: "WS",
+		}
+	}
+	service := newAuditServiceHarness(t, &auditReaderStub{history: history}, nil)
+
+	got, next, err := service.ListAuditEvents(t.Context(), "WS", "", 50, "", "")
+	if err != nil {
+		t.Fatalf("ListAuditEvents: %v", err)
+	}
+	if len(got) != 50 || got[0].Action != "event-01" || got[49].Action != "event-50" {
+		t.Fatalf("event window = %q..%q (%d), want event-01..event-50", got[0].Action, got[len(got)-1].Action, len(got))
+	}
+	if next != got[0].ID {
+		t.Fatalf("next cursor = %q, want oldest returned event %q", next, got[0].ID)
+	}
+}
+
+func TestAuditServiceDaemonOnlyPagesAdvanceAndTerminate(t *testing.T) {
+	t0 := time.Date(2026, time.August, 14, 10, 0, 0, 0, time.UTC)
+	service := newAuditServiceHarness(t, &auditReaderStub{}, []events.Event{
+		mustRuntimeEvent(t, events.AgentStarted, t0, "agent-1", events.AgentStartedData{PID: 1}),
+		mustRuntimeEvent(t, events.AgentStopped, t0.Add(time.Second), "agent-1", events.AgentStoppedData{PID: 1, ExitCode: 0}),
+	})
+
+	newest, cursor, err := service.ListAuditEvents(t.Context(), "WS", "", 1, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	older, terminal, err := service.ListAuditEvents(t.Context(), "WS", cursor, 1, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newest[0].Action != "agent.session_exit" || older[0].Action != "agent.session_start" {
+		t.Fatalf("pages = %q then %q", newest[0].Action, older[0].Action)
+	}
+	if cursor == "" || terminal != "" {
+		t.Fatalf("cursors = %q then %q, want advancing cursor then terminal empty cursor", cursor, terminal)
 	}
 }
 
@@ -102,28 +150,31 @@ func TestDaemonAuditEventAttributesCircuitBlockToAgent(t *testing.T) {
 	}
 }
 
-func TestAuditServiceSinceCursorExcludesOlderDaemonEvents(t *testing.T) {
+func TestAuditServiceCursorPagesTowardOlderDaemonEvents(t *testing.T) {
 	t.Parallel()
 	sinceTime := time.Date(2026, time.August, 14, 10, 0, 0, 0, time.UTC)
-	service := newAuditServiceHarness(t, &auditReaderStub{cursor: fmt.Sprintf("%d-0", sinceTime.UnixMilli())}, []events.Event{
+	service := newAuditServiceHarness(t, &auditReaderStub{}, []events.Event{
 		mustRuntimeEvent(t, events.AgentStarted, sinceTime, "agent-1", events.AgentStartedData{PID: 1}),
 		mustRuntimeEvent(t, events.AgentStopped, sinceTime.Add(time.Second), "agent-1", events.AgentStoppedData{PID: 1, ExitCode: 0}),
 	})
-	got, _, err := service.ListAuditEvents(t.Context(), "WS", fmt.Sprintf("%d-0", sinceTime.UnixMilli()), 10, "", "")
+	newest, cursor, err := service.ListAuditEvents(t.Context(), "WS", "", 1, "", "")
 	if err != nil {
 		t.Fatalf("ListAuditEvents: %v", err)
 	}
-	if len(got) != 1 || got[0].Action != "agent.session_exit" {
-		t.Fatalf("events after cursor = %+v", got)
+	got, _, err := service.ListAuditEvents(t.Context(), "WS", cursor, 1, "", "")
+	if err != nil {
+		t.Fatalf("ListAuditEvents older page: %v", err)
+	}
+	if len(newest) != 1 || newest[0].Action != "agent.session_exit" || len(got) != 1 || got[0].Action != "agent.session_start" {
+		t.Fatalf("newest = %+v, older = %+v", newest, got)
 	}
 }
 
-func TestAuditServiceTruncatedDaemonPageDoesNotSkipFleetCursor(t *testing.T) {
+func TestAuditServiceMixedPagesDoNotSkipFleetEvents(t *testing.T) {
 	t.Parallel()
 	t0 := time.Date(2026, time.August, 14, 9, 59, 0, 0, time.UTC)
 	t1 := t0.Add(time.Minute)
 	t2 := t1.Add(time.Minute)
-	since := fmt.Sprintf("%d-0", t0.UnixMilli())
 	reader := &auditReaderStub{
 		events: []store.AuditEvent{{
 			ID: fmt.Sprintf("%d-0", t2.UnixMilli()), Timestamp: t2, Actor: "agent-1", Action: "issue.claim",
@@ -135,15 +186,19 @@ func TestAuditServiceTruncatedDaemonPageDoesNotSkipFleetCursor(t *testing.T) {
 		mustRuntimeEvent(t, events.AgentStarted, t1, "agent-1", events.AgentStartedData{PID: 99}),
 	})
 
-	got, next, err := service.ListAuditEvents(t.Context(), "WS", since, 1, "", "")
+	got, next, err := service.ListAuditEvents(t.Context(), "WS", "", 1, "", "")
 	if err != nil {
 		t.Fatalf("ListAuditEvents: %v", err)
 	}
-	if len(got) != 1 || got[0].Action != "agent.session_start" {
+	if len(got) != 1 || got[0].Action != "issue.claim" {
 		t.Fatalf("truncated page = %+v", got)
 	}
-	if next != since {
-		t.Fatalf("next cursor = %q, want unchanged %q so unseen fleet event is not skipped", next, since)
+	older, terminal, err := service.ListAuditEvents(t.Context(), "WS", next, 1, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(older) != 1 || older[0].Action != "agent.session_start" || terminal != "" {
+		t.Fatalf("older page = %+v, terminal cursor = %q", older, terminal)
 	}
 }
 
@@ -217,9 +272,10 @@ type auditServiceStore struct {
 func (s auditServiceStore) TriggerEvents() store.TriggerEventStore { return s.trigger }
 
 type auditReaderStub struct {
-	events []store.AuditEvent
-	cursor string
-	filter store.AuditEventFilter
+	events  []store.AuditEvent
+	history []store.AuditEvent
+	cursor  string
+	filter  store.AuditEventFilter
 }
 
 func (*auditReaderStub) Get(context.Context, string, string) (*domain.TriggerEvent, error) {
@@ -233,11 +289,30 @@ func (*auditReaderStub) List(context.Context, string, store.TriggerEventFilter) 
 func (s *auditReaderStub) ListAuditEvents(
 	_ context.Context,
 	_ string,
-	_ string,
-	_ int,
+	after string,
+	limit int,
 	filter store.AuditEventFilter,
 ) ([]store.AuditEvent, string, bool, error) {
 	s.filter = filter
+	if s.history != nil {
+		start := 0
+		for i, event := range s.history {
+			if event.ID == after {
+				start = i + 1
+				break
+			}
+		}
+		end := len(s.history)
+		if limit > 0 && start+limit < end {
+			end = start + limit
+		}
+		events := append([]store.AuditEvent(nil), s.history[start:end]...)
+		cursor := after
+		if len(events) > 0 {
+			cursor = events[len(events)-1].ID
+		}
+		return events, cursor, end < len(s.history), nil
+	}
 	return append([]store.AuditEvent(nil), s.events...), s.cursor, false, nil
 }
 

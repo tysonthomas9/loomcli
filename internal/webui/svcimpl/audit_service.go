@@ -3,6 +3,7 @@ package svcimpl
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"path/filepath"
 	"sort"
@@ -15,6 +16,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
+
+const auditReadPageLimit = 500
 
 type auditService struct {
 	store            store.Store
@@ -29,8 +32,9 @@ func NewAuditService(st store.Store) *auditService {
 }
 
 // ListAuditEvents reads fleet-db's canonical mutation trail and merges the
-// daemon's structured local lifecycle events (D4 option b). Synthetic events
-// are intentionally cursor-less; nextCursor remains a fleet-db resume token.
+// daemon's structured local lifecycle events (D4 option b). The web timeline
+// pages newest-to-oldest: an empty cursor returns the newest window, and the
+// returned cursor identifies the oldest event in that window for the next page.
 func (s *auditService) ListAuditEvents(
 	ctx context.Context,
 	workspaceKey, since string,
@@ -48,7 +52,7 @@ func (s *auditService) ListAuditEvents(
 		return nil, "", service.ErrUnavailable("audit trail store unavailable")
 	}
 	filter := store.AuditEventFilter{EntityID: entityID, Actor: actor}
-	fleetEvents, nextCursor, _, err := reader.ListAuditEvents(ctx, workspaceKey, since, limit, filter)
+	fleetEvents, err := readAllFleetAuditEvents(ctx, reader, workspaceKey, filter)
 	if err != nil {
 		return nil, "", classifyStoreError("read audit trail", err)
 	}
@@ -59,29 +63,75 @@ func (s *auditService) ListAuditEvents(
 			merged = append(merged, event)
 		}
 	}
-	merged = append(merged, s.localDaemonAuditEvents(ctx, workspaceKey, since, filter)...)
+	merged = append(merged, s.localDaemonAuditEvents(ctx, workspaceKey, filter)...)
 	sort.SliceStable(merged, func(i, j int) bool {
 		if merged[i].Timestamp.Equal(merged[j].Timestamp) {
 			return merged[i].ID < merged[j].ID
 		}
 		return merged[i].Timestamp.Before(merged[j].Timestamp)
 	})
-	truncated := limit > 0 && len(merged) > limit
-	if truncated {
-		merged = merged[:limit]
+	for i := range merged {
+		if merged[i].ID == "" {
+			merged[i].ID = fmt.Sprintf("event:%020d:%08d", merged[i].Timestamp.UnixNano(), i)
+		}
 	}
-	// When local events consume page slots, resume after the last fleet event
-	// actually returned instead of skipping a fetched-but-truncated mutation.
-	if truncated {
-		nextCursor = since
-		for i := len(merged) - 1; i >= 0; i-- {
-			if merged[i].ID != "" {
-				nextCursor = merged[i].ID
+	page, nextCursor := newestAuditPage(merged, strings.TrimSpace(since), limit)
+	return page, nextCursor, nil
+}
+
+func readAllFleetAuditEvents(
+	ctx context.Context,
+	reader store.AuditJournalReader,
+	workspaceKey string,
+	filter store.AuditEventFilter,
+) ([]store.AuditEvent, error) {
+	var all []store.AuditEvent
+	cursor := ""
+	for {
+		events, nextCursor, hasMore, err := reader.ListAuditEvents(ctx, workspaceKey, cursor, auditReadPageLimit, filter)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, events...)
+		if !hasMore {
+			return all, nil
+		}
+		if nextCursor == "" || nextCursor == cursor {
+			return nil, fmt.Errorf("audit history cursor did not advance")
+		}
+		cursor = nextCursor
+	}
+}
+
+func newestAuditPage(events []store.AuditEvent, before string, limit int) ([]store.AuditEvent, string) {
+	end := len(events)
+	if before != "" {
+		end = 0
+		for i := range events {
+			if events[i].ID == before {
+				end = i
 				break
 			}
 		}
+		// Accept an old fleet cursor during the contract transition. It still
+		// denotes a time boundary even when its exact event has been retained out.
+		if end == 0 {
+			if boundary := auditCursorTime(before); !boundary.IsZero() {
+				end = sort.Search(len(events), func(i int) bool {
+					return !events[i].Timestamp.Before(boundary)
+				})
+			}
+		}
 	}
-	return merged, nextCursor, nil
+	start := 0
+	if limit > 0 && end > limit {
+		start = end - limit
+	}
+	page := append([]store.AuditEvent(nil), events[start:end]...)
+	if start == 0 || len(page) == 0 {
+		return page, ""
+	}
+	return page, page[0].ID
 }
 
 func (s *auditService) daemonEventsDir(ctx context.Context, workspaceKey string) string {
@@ -101,7 +151,7 @@ func (s *auditService) daemonEventsDir(ctx context.Context, workspaceKey string)
 
 func (s *auditService) localDaemonAuditEvents(
 	ctx context.Context,
-	workspaceKey, since string,
+	workspaceKey string,
 	filter store.AuditEventFilter,
 ) []store.AuditEvent {
 	if s.resolveEventsDir == nil || s.readDaemonEvents == nil {
@@ -118,14 +168,14 @@ func (s *auditService) localDaemonAuditEvents(
 		slog.Warn("daemon audit events unavailable", "workspace", workspaceKey, "events_dir", dir, "err", err)
 		return nil
 	}
-	sinceTime := auditCursorTime(since)
 	out := make([]store.AuditEvent, 0, len(runtimeEvents))
-	for _, event := range runtimeEvents {
-		if !sinceTime.IsZero() && !event.Timestamp.After(sinceTime) {
+	for i, event := range runtimeEvents {
+		synthetic, ok := daemonAuditEvent(workspaceKey, event)
+		if !ok {
 			continue
 		}
-		synthetic, ok := daemonAuditEvent(workspaceKey, event)
-		if ok && auditStoreEventMatches(synthetic, filter) {
+		synthetic.ID = fmt.Sprintf("daemon:%020d:%08d", event.Timestamp.UnixNano(), i)
+		if auditStoreEventMatches(synthetic, filter) {
 			out = append(out, synthetic)
 		}
 	}

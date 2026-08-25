@@ -61,6 +61,8 @@ func classifyStoreError(op string, err error) error {
 		return nil
 	}
 	switch {
+	case service.IsFleetRateLimited(err):
+		return service.ErrRateLimited(op + ": " + err.Error())
 	case errors.Is(err, domain.ErrNotFound):
 		return service.ErrNotFound(op + ": " + err.Error())
 	case errors.Is(err, domain.ErrAlreadyExists):

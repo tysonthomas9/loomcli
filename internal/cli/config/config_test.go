@@ -205,3 +205,12 @@ func TestLoadConfigFromStoreCopiesDesignFormat(t *testing.T) {
 		t.Errorf("WSPLAIN DesignFormat = %q, want empty", got)
 	}
 }
+
+func TestValidateRoleLabelEnvRejectsAmbiguousComma(t *testing.T) {
+	err := validateRoleLabelEnv(map[string]RoleConfig{
+		"worker": {Labels: []string{"ready,blocked"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "comma-separated worker environment") {
+		t.Fatalf("error = %v, want ambiguous label rejection", err)
+	}
+}
