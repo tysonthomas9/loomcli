@@ -12,31 +12,67 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 )
 
-// leadProfileHarness is the harness whose profile root `loom lead` can be
-// pointed at. Only Claude has an interactive launcher today; CODEX_HOME is not
-// on the envfilter allowlist, so it never reaches an interactive lead.
-const leadProfileHarness = "claude"
-
-// enforceLeadProfile refuses to start when CLAUDE_CONFIG_DIR points at a
-// workspace agent profile that no longer verifies, and is silent otherwise.
+// enforceLeadProfile points `loom lead` at its per-agent harness profiles and
+// refuses to start when one it is about to use does not verify.
 //
-// The supervisor verifies a profile before it exports the variable to an agent
-// it spawns (see appendProfileEnv). `loom lead` is the one agent that does not
-// come from the supervisor: the workspace launcher exports CLAUDE_CONFIG_DIR
-// itself and lead inherits it through the envfilter allowlist, so without this
-// call a drifted or tampered profile takes effect silently — on the agent that
-// runs in the operator's own terminal.
+// The supervisor resolves, verifies and exports a profile root before it hands
+// the environment to an agent it spawns (see supervisor.AppendProfileEnv).
+// `loom lead` is the one agent that does not come from the supervisor, so
+// without this call it gets a profile only when something outside loom exports
+// one — the workspace launcher script did, and every other way of starting a
+// lead (bare `loom lead`, the WebUI terminal) silently ran the operator's own
+// ~/.claude and ~/.codex. So lead injects what it inherited nothing for, and
+// verifies what it did inherit.
 //
 // It refuses rather than falling back: unsetting the variable and continuing
 // against the operator's ~/.claude is the exact leak per-agent profiles close.
 func enforceLeadProfile() {
-	err := verifyLeadProfile(cli.GetWorkspaceRuntimeDir(), os.Getenv("CLAUDE_CONFIG_DIR"))
-	if err == nil {
-		return
+	runtimeDir := cli.GetWorkspaceRuntimeDir()
+	agent := resolveLeadAgentID()
+	for _, harness := range supervisor.ProfileHarnesses() {
+		if dir, err := applyLeadProfile(runtimeDir, agent, harness); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Repair: %s\n", leadProfileRepair(err, dir))
+			os.Exit(1)
+		}
 	}
-	fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-	fmt.Fprintf(os.Stderr, "Repair: %s\n", leadProfileRepair(err, os.Getenv("CLAUDE_CONFIG_DIR")))
-	os.Exit(1)
+}
+
+// applyLeadProfile settles one harness's config root for this lead, returning
+// the profile directory the failure is about so the caller can name a repair.
+//
+// An inherited value wins and is only verified. That is deliberate: an operator
+// who exported a config root of their own has made a choice nothing here
+// provisioned, and the injection below must not override it — verifyLeadProfile
+// then leaves anything outside the workspace's agent-profiles tree alone.
+func applyLeadProfile(runtimeDir, agent, harness string) (string, error) {
+	envVar := supervisor.ProfileEnvVar(harness)
+	if envVar == "" {
+		return "", nil
+	}
+	if inherited := os.Getenv(envVar); inherited != "" {
+		return inherited, verifyLeadProfile(runtimeDir, inherited, harness)
+	}
+	assignment, err := supervisor.ProfileHarnessEnv(runtimeDir, agent, harness)
+	if err != nil {
+		return leadProfileDir(runtimeDir, agent, harness), err
+	}
+	if assignment == "" {
+		return "", nil
+	}
+	_, dir, _ := strings.Cut(assignment, "=")
+	return dir, os.Setenv(envVar, dir)
+}
+
+// leadProfileDir names the root a failed injection was about. Resolution goes
+// through agentprofile so the repair line points at the directory the injector
+// actually looked at, not a second guess at the layout.
+func leadProfileDir(runtimeDir, agent, harness string) string {
+	root := agentprofile.Dir(runtimeDir, agent)
+	if root == "" {
+		return ""
+	}
+	return filepath.Join(root, harness)
 }
 
 // verifyLeadProfile reports why the profile in configDir must not be used, or
@@ -47,11 +83,11 @@ func enforceLeadProfile() {
 // and a configDir outside the workspace's agent-profiles root (an operator
 // pointing lead at their own alternate config root is not this check's
 // business — nothing here provisioned it and nothing here can repair it).
-func verifyLeadProfile(runtimeDir, configDir string) error {
+func verifyLeadProfile(runtimeDir, configDir, harness string) error {
 	if configDir == "" || !underAgentProfiles(runtimeDir, configDir) {
 		return nil
 	}
-	return supervisor.VerifyProfileManifest(configDir, leadProfileHarness)
+	return supervisor.VerifyProfileManifest(configDir, supervisor.ProfileHarnessBinary(harness))
 }
 
 // underAgentProfiles reports whether configDir sits inside

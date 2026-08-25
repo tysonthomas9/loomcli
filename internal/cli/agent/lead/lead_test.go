@@ -60,6 +60,8 @@ func TestRunLead_InvokesClaude(t *testing.T) {
 	// back to the backend registry and hits the mock instead of launching a
 	// real claude process under PTY supervision.
 	t.Setenv("LOOM_LEAD_CONTROLLED", "0")
+	clearProfileEnv(t)
+	isolateLeadWorkspace(t)
 
 	// Setup temp directory as working directory
 	tmpDir := t.TempDir()
@@ -122,6 +124,8 @@ func TestRunLead_InvokesClaude(t *testing.T) {
 
 func TestRunLeadUsesCustomTerminalPrompt(t *testing.T) {
 	t.Setenv("LOOM_LEAD_CONTROLLED", "0")
+	clearProfileEnv(t)
+	isolateLeadWorkspace(t)
 	t.Setenv(envAgentName, "nova")
 	t.Setenv("LOOM_AGENT_ROLE", "operator")
 
