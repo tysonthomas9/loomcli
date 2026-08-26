@@ -10,5 +10,3 @@ export type {
 } from "./ThisWorkspaceCard";
 export { ActivityCard, activityMeta } from "./ActivityCard";
 export type { ActivityCardProps } from "./ActivityCard";
-export { BudgetCard } from "./BudgetCard";
-export type { BudgetCardProps } from "./BudgetCard";

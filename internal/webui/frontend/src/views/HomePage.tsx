@@ -16,10 +16,9 @@ import {
 import { useOperatorQueue } from "@/hooks/issues";
 import { useRecentActivity } from "@/hooks/workspace";
 import { isAgentActive } from "@/types";
-import type { Issue, UsageResponse } from "@/types";
+import type { Issue } from "@/types";
 import { NEEDS_REVISION_LABEL } from "@/utils/issue";
 import { plural } from "@/utils/plural";
-import { formatCost } from "@/utils/sessionUsage";
 
 import styles from "./HomePage.module.css";
 
@@ -47,7 +46,6 @@ export function HomePage(): JSX.Element {
   const activity = useRecentActivity(workspaceId, issues, agents);
   const workspaceCounts = deriveThisWorkspaceCounts(issues);
   const idleAgents = agents.filter((agent) => !isAgentActive(agent)).length;
-  const [usage, setUsage] = useState<UsageResponse | null>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -169,12 +167,6 @@ export function HomePage(): JSX.Element {
                       </strong>
                       idle
                     </span>
-                    {usage && (
-                      <span data-stat="budget" data-testid="queue-stat">
-                        <strong>{formatCost(usage.total_cost)}</strong>
-                        spent · no cap set
-                      </span>
-                    )}
                   </div>
                 </div>
               )}
@@ -182,7 +174,6 @@ export function HomePage(): JSX.Element {
             <HomeRail
               activity={activity}
               issues={issues}
-              onUsageChange={setUsage}
               workspaceId={workspaceId}
             />
           </div>

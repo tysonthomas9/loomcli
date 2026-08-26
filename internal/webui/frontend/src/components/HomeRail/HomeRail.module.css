@@ -254,29 +254,6 @@
   color: var(--color-text-tertiary);
 }
 
-.budget {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.budget strong {
-  font-family: var(--font-mono);
-  font-size: 15px;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-primary);
-}
-
-.budgetMeta {
-  display: flex;
-  gap: var(--space-3);
-  margin-top: 7px;
-  font-size: 11px;
-  color: var(--color-text-tertiary);
-}
-
 @media (width <= 1100px) {
   .rail {
     position: static;
