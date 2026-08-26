@@ -98,9 +98,14 @@ If you cannot tell which applies, prefer 6b.
 - Record in the task notes: what changed in the agent's behavior, how it is observable, and the eval or manual result that shows it works
 - Hand the completed behavior to evaluation and signal. Do not close the task; the evaluation role owns the final verification and close:
 ```
-loom data update <id> --status open --add-label ready-for-qa --assignee="" --notes "IMPLEMENTED: <what changed, how it is observed, and the evidence>"
+loom data update <id> --add-label delivery-pending --notes "IMPLEMENTED: <what changed, how it is observed, and the evidence>"
 loom complete
 ```
+
+`delivery-pending` makes the task unclaimable while this process exits. The
+supervisor publishes the exact committed revision, then adds `ready-for-qa`
+and reopens the task after this process exits. Do not route or unassign the task
+yourself on the success path.
 
 ### CRITICAL: STOP
 

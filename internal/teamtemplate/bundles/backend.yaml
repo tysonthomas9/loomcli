@@ -2,7 +2,7 @@ schema_version: 1
 id: backend
 label: Backend Development
 description: Architect-led service team with a backend implementer, a data engineer and a QA and review pair.
-revision: 3
+revision: 4
 
 roles:
   # Design role: task_filter "any" + a required label. NEVER needs_plan/needs_design —
@@ -27,7 +27,7 @@ roles:
     prompt_file: builtin:team-backend-dev
     task_filter: has_design
     labels: [backend]
-    exclude_labels: [architect, ready-for-qa]
+    exclude_labels: [architect, ready-for-qa, delivery-pending]
     effort: medium
     skills: [backend, api]
 
@@ -42,7 +42,7 @@ roles:
     prompt_file: builtin:team-data-engineer
     task_filter: has_design
     labels: [data]
-    exclude_labels: [architect, ready-for-qa]
+    exclude_labels: [architect, ready-for-qa, delivery-pending]
     effort: medium
     skills: [data, migration]
     denied_tools: []
@@ -81,11 +81,17 @@ agents:
     auto: true
     desired_state: running
     cross_repo: true
+    hooks: &qa_handoff
+      on_complete:
+        - {type: remove_label, value: delivery-pending}
+        - {type: add_label, value: ready-for-qa}
+        - {type: set_status, value: open}
   - name: data-engineer-1
     role_name: data-engineer
     auto: true
     desired_state: running
     cross_repo: true
+    hooks: *qa_handoff
   - name: qa-engineer-1
     role_name: qa-engineer
     auto: true

@@ -105,9 +105,14 @@ If you cannot tell which applies, prefer 6b.
 - Record anything the reviewer needs (a deviation, a discovered gap) in the task notes
 - Hand the completed implementation to QA and signal. Do not close the task; QA owns the final verification and close:
 ```
-loom data update <id> --status open --add-label ready-for-qa --assignee="" --notes "IMPLEMENTED: <what shipped, which tests cover it, how it was verified>"
+loom data update <id> --add-label delivery-pending --notes "IMPLEMENTED: <what shipped, which tests cover it, how it was verified>"
 loom complete
 ```
+
+`delivery-pending` makes the task unclaimable while this process exits. The
+supervisor publishes the exact committed revision, then adds `ready-for-qa`
+and reopens the task after this process exits. Do not route or unassign the task
+yourself on the success path.
 
 ### CRITICAL: STOP
 

@@ -404,6 +404,24 @@ func TestRunCompletionHooks_DemotesOnFailureAndPreservesOnSkip(t *testing.T) {
 	})
 }
 
+func TestDeliveryHandoffHooksRequireSuccessFence(t *testing.T) {
+	hooks := &domain.AgentHooks{OnComplete: []domain.AgentHookAction{
+		{Type: domain.AgentHookActionRemoveLabel, Value: "delivery-pending"},
+		{Type: domain.AgentHookActionAddLabel, Value: "ready-for-qa"},
+	}}
+	ap := newHookAgentProcess(t, "T-1", hooks)
+	rb := newRecordingBackend(nil, nil)
+	rb.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "T-1", Status: "blocked", Labels: []string{"backend"}}}
+	s := &Supervisor{IssueBackend: rb}
+
+	if got := s.runCompletionHooks(ap, 0); got != 0 {
+		t.Fatalf("exit code = %d, want clean skip", got)
+	}
+	if got := rb.seq(); len(got) != 0 {
+		t.Fatalf("blocked task was routed despite missing delivery fence: %v", got)
+	}
+}
+
 func TestFinalAssistantReply_RequiresSessionID(t *testing.T) {
 	s := &Supervisor{}
 	ap := newHookAgentProcess(t, "T-1", hookPipeline())

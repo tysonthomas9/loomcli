@@ -15,6 +15,7 @@ import (
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/notify"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -111,6 +112,7 @@ func NewDaemon(config *cfgpkg.DaemonConfig, projectDir string, eventBus events.E
 		Agents:         make([]*supervisor.AgentProcess, 0, len(config.Agents)),
 		ControlStore:   st,
 		IssueBackend:   issueBackend,
+		TaskWorktrees:  taskWorktreeAdapter{},
 	}
 
 	wireSupervisorCallbacks(sup, issueBackend)
@@ -123,6 +125,48 @@ func NewDaemon(config *cfgpkg.DaemonConfig, projectDir string, eventBus events.E
 	d.sup = sup
 
 	return d, nil
+}
+
+// taskWorktreeAdapter keeps filesystem/Git implementation types at the daemon
+// composition root; the supervisor depends only on its task-worktree port.
+type taskWorktreeAdapter struct {
+	manager localworkspace.TaskWorktreeManager
+}
+
+func (a taskWorktreeAdapter) Prepare(ctx context.Context, req supervisor.TaskWorktreeRequest) (supervisor.TaskWorktree, error) {
+	prepared, err := a.manager.Prepare(ctx, localworkspace.TaskWorktreeRequest{
+		WorkspacePath:     req.WorkspacePath,
+		WorkspaceKey:      req.WorkspaceKey,
+		RepoName:          req.RepoName,
+		RepoPath:          req.RepoPath,
+		TaskID:            req.TaskID,
+		Remote:            req.Remote,
+		DefaultBranch:     req.DefaultBranch,
+		DependencyTaskIDs: req.DependencyTaskIDs,
+		AllowDirtyResume:  req.AllowDirtyResume,
+	})
+	if err != nil {
+		return supervisor.TaskWorktree{}, err
+	}
+	return supervisor.TaskWorktree{
+		Path: prepared.Path, Branch: prepared.Branch, InputSHA: prepared.InputSHA,
+		TreeSHA: prepared.TreeSHA, Lease: prepared.Lease,
+	}, nil
+}
+
+func (a taskWorktreeAdapter) Publish(ctx context.Context, req supervisor.TaskWorktreePublishRequest) (supervisor.TaskWorktreeRevision, error) {
+	revision, err := a.manager.Publish(ctx, localworkspace.TaskWorktreePublishRequest{
+		WorkspaceKey: req.WorkspaceKey,
+		RepoPath:     req.RepoPath,
+		TaskID:       req.TaskID,
+		Path:         req.Path,
+		Branch:       req.Branch,
+		InputSHA:     req.InputSHA,
+	})
+	if err != nil {
+		return supervisor.TaskWorktreeRevision{}, err
+	}
+	return supervisor.TaskWorktreeRevision{HeadSHA: revision.HeadSHA, TreeSHA: revision.TreeSHA}, nil
 }
 
 // Start launches the supervisor.
@@ -291,7 +335,7 @@ func wireSupervisorCallbacks(sup *supervisor.Supervisor, issueBackend backend.Is
 			return nil
 		}
 		for i := range sup.Repos {
-			if sup.Repos[i].Name == repoName {
+			if sup.Repos[i].Name == repoName || sup.Repos[i].SourceRepoID == repoName {
 				return &sup.Repos[i]
 			}
 		}

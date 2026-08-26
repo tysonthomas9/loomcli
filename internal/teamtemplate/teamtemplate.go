@@ -94,6 +94,11 @@ type TemplateAgent struct {
 	// materializes only the first repo while routing reads empty affinity as
 	// "all repos" — one checkout, issues from everywhere.
 	CrossRepo bool `yaml:"cross_repo" json:"cross_repo"`
+
+	// Hooks are supervisor-owned completion transitions. Team members may write
+	// notes while they run, but downstream routing is stamped only after the
+	// supervisor has captured and verified the task delivery.
+	Hooks *domain.AgentHooks `yaml:"hooks,omitempty" json:"hooks,omitempty"`
 }
 
 //go:embed bundles/*.yaml
@@ -277,6 +282,7 @@ func (a TemplateAgent) agentCreate(workspaceKey string) store.AgentCreate {
 		Auto:         a.Auto,
 		CrossRepo:    a.CrossRepo,
 		DesiredState: domain.AgentDesiredState(a.DesiredState),
+		Hooks:        a.Hooks.Clone(),
 	}
 }
 
@@ -297,6 +303,9 @@ func (t TeamTemplate) clone() TeamTemplate {
 		out.Roles = append(out.Roles, role)
 	}
 	out.Agents = append([]TemplateAgent(nil), t.Agents...)
+	for i := range out.Agents {
+		out.Agents[i].Hooks = out.Agents[i].Hooks.Clone()
+	}
 	return out
 }
 

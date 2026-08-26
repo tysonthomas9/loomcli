@@ -71,7 +71,7 @@ func TestCatalogReturnsPickerShape(t *testing.T) {
 	if first["id"] != "fullstack-app" || first["label"] != "Full-Stack App Development" {
 		t.Fatalf("first template identity = %q / %q", first["id"], first["label"])
 	}
-	if first["revision"] != float64(3) || first["schema_version"] != float64(teamtemplate.SchemaVersion) {
+	if first["revision"] != float64(4) || first["schema_version"] != float64(teamtemplate.SchemaVersion) {
 		t.Fatalf("first template versions = revision %v / schema %v", first["revision"], first["schema_version"])
 	}
 

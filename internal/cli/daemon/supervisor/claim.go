@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
 // actorClaimBackend is the optional richer claim API: when the issue backend
@@ -22,6 +23,243 @@ import (
 // rather than the generic process actor.
 type actorClaimBackend interface {
 	ClaimIssueAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error
+}
+
+// deregisterWorker removes the worker registration on graceful exit. The
+// server-side TTL remains the backstop for non-graceful death.
+func (s *Supervisor) deregisterWorker(ap *AgentProcess) {
+	if s.ControlStore == nil || s.WorkspaceID == "" || ap.Entry.Worktree == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
+	defer cancel()
+	if err := s.ControlStore.Workers().Deregister(ctx, s.WorkspaceID, ap.Entry.Worktree); err != nil {
+		slog.Debug("supervisor worker deregister failed",
+			"workspace", s.WorkspaceID, "worker_id", ap.Entry.Worktree, "err", err)
+	}
+}
+
+// handleSpawnError unwinds state created before a subprocess failed to start.
+// Keeping this cleanup out of spawnAndWait makes its single lifecycle path
+// visible without obscuring the pre-exec rollback boundary.
+func (s *Supervisor) handleSpawnError(ap *AgentProcess, spawnErr error) {
+	if errors.Is(spawnErr, ErrBackendUnavailable) {
+		// This is a race guard for the backend disappearing after claim and
+		// before exec. Release all acquired state so the task is claimable again.
+		s.completeBackendUnavailableCleanup(ap)
+		s.Concurrency.Release(ap.Entry.Role)
+		return
+	}
+	slog.Warn("spawn failed", "worktree", ap.Entry.Worktree, "err", spawnErr)
+	ap.Mu.Lock()
+	orphanSess := ap.Session
+	ap.Session = nil
+	orphanSessionID := ap.AgentSessionID
+	ap.AgentSessionID = ""
+	orphanLeaseID := ap.AgentLeaseID
+	orphanLeaseToken := ap.AgentLeaseToken
+	ap.AgentLeaseID = ""
+	ap.AgentLeaseToken = ""
+	ap.Mu.Unlock()
+	if orphanSess != nil {
+		_ = orphanSess.Finalize(sessions.FinalizeOptions{ExitCode: -1, ErrorClass: "spawn_failure"})
+	}
+	s.completeControlPlaneAgentSession(ap, agentSessionCompletionInput{
+		sessionID:  orphanSessionID,
+		leaseID:    orphanLeaseID,
+		leaseToken: orphanLeaseToken,
+		exitCode:   -1,
+		errClass:   "spawn_failure",
+		taskID:     s.taskIDForLifecycle(ap, nil),
+	})
+	s.Concurrency.Release(ap.Entry.Role)
+	s.markSpawnFailure(ap, spawnErr)
+}
+
+// postMortemRecovery runs recovery after agent exit, skipping yield exits.
+func (s *Supervisor) postMortemRecovery(ap *AgentProcess, exitCode int) {
+	if IsYieldRequested(ap.WorktreePath) {
+		slog.Info("skipping post-mortem recovery for yield exit", "worktree", ap.Entry.Worktree)
+		return
+	}
+	if err := s.recoverAgent(ap, exitCode, isIncompleteRun(ap)); err != nil {
+		slog.Warn("post-mortem recovery failed", "worktree", ap.Entry.Worktree, "err", err)
+	}
+}
+
+// postExitCleanup is the hook point for future cleanup after spawnAndWait.
+func (s *Supervisor) postExitCleanup(_ *AgentProcess) {}
+
+// TaskWorktreeManager is the supervisor's preparation seam. Its implementation
+// owns task branch naming, dependency ancestry and checkout materialization.
+type TaskWorktreeManager interface {
+	Prepare(context.Context, TaskWorktreeRequest) (TaskWorktree, error)
+	Publish(context.Context, TaskWorktreePublishRequest) (TaskWorktreeRevision, error)
+}
+
+type TaskWorktreeLease interface{ Release() error }
+
+type TaskWorktreeRequest struct {
+	WorkspacePath     string
+	WorkspaceKey      string
+	RepoName          string
+	RepoPath          string
+	TaskID            string
+	Remote            string
+	DefaultBranch     string
+	DependencyTaskIDs []string
+	AllowDirtyResume  bool
+}
+
+type TaskWorktree struct {
+	Path, Branch, InputSHA, TreeSHA string
+	Lease                           TaskWorktreeLease
+}
+
+type TaskWorktreePublishRequest struct {
+	WorkspaceKey, RepoPath, TaskID, Path, Branch, InputSHA string
+}
+
+type TaskWorktreeRevision struct{ HeadSHA, TreeSHA string }
+
+func (s *Supervisor) prepareClaimedTaskWorktree(ctx context.Context, ap *AgentProcess) error {
+	if s.TaskWorktrees == nil || ap.AssignedTaskID == "" {
+		return nil
+	}
+	repo := ap.RepoConfig
+	var requiredDependencies []string
+	if s.IssueBackend != nil {
+		issue, err := s.IssueBackend.Get(ctx, ap.AssignedTaskID)
+		if err != nil {
+			return fmt.Errorf("read task %q dependencies: %w", ap.AssignedTaskID, err)
+		}
+		requiredDependencies = dependencyTaskIDs(issue)
+		repo, err = resolveTaskRepo(repo, issue.SourceRepo, s.FindRepoConfig)
+		if err != nil {
+			return err
+		}
+	}
+	if repo == nil {
+		return fmt.Errorf("task %q has no resolved repository for its worktree", ap.AssignedTaskID)
+	}
+	prepared, err := s.TaskWorktrees.Prepare(ctx, TaskWorktreeRequest{
+		WorkspacePath:     s.ProjectDir,
+		WorkspaceKey:      s.WorkspaceID,
+		RepoName:          repo.Name,
+		RepoPath:          repo.ResolveAbsPath(s.ProjectDir),
+		TaskID:            ap.AssignedTaskID,
+		Remote:            repo.Remote,
+		DefaultBranch:     repo.DefaultBranch,
+		DependencyTaskIDs: requiredDependencies,
+		AllowDirtyResume:  ap.RecoveryMode == recoverResume || ap.RecoveryMode == recoverCheckpoint,
+	})
+	if err != nil {
+		return err
+	}
+	ap.Mu.Lock()
+	ap.RepoConfig = repo
+	ap.WorktreePath = prepared.Path
+	ap.TaskBranch = prepared.Branch
+	ap.TaskInputSHA = prepared.InputSHA
+	ap.TaskTreeSHA = prepared.TreeSHA
+	ap.TaskOutputSHA = ""
+	ap.TaskOutputTreeSHA = ""
+	ap.TaskRepoName = repo.Name
+	ap.TaskSourceRepoID = repo.SourceRepoID
+	ap.TaskWorktreeLease = prepared.Lease
+	ap.Mu.Unlock()
+	return nil
+}
+
+func releaseTaskWorktreeLease(ap *AgentProcess) {
+	ap.Mu.Lock()
+	lease := ap.TaskWorktreeLease
+	ap.TaskWorktreeLease = nil
+	ap.Mu.Unlock()
+	if lease != nil {
+		_ = lease.Release()
+	}
+}
+
+func resolveTaskRepo(current *config.RepoConfig, sourceRepo string, find func(string) *config.RepoConfig) (*config.RepoConfig, error) {
+	if sourceRepo == "" {
+		return current, nil
+	}
+	if current != nil && (current.Name == sourceRepo || current.SourceRepoID == sourceRepo) {
+		return current, nil
+	}
+	if find != nil {
+		if resolved := find(sourceRepo); resolved != nil {
+			return resolved, nil
+		}
+	}
+	return nil, fmt.Errorf("claimed task source repository %q is not configured", sourceRepo)
+}
+
+func dependencyTaskIDs(issue *backend.IssueDetailData) []string {
+	if issue == nil {
+		return nil
+	}
+	ids := make([]string, 0, len(issue.Dependencies))
+	for _, dependency := range issue.Dependencies {
+		if dependency.Type == "blocks" && dependency.DependsOnID != "" {
+			ids = append(ids, dependency.DependsOnID)
+		}
+	}
+	return ids
+}
+
+func (s *Supervisor) shouldPublishTaskDelivery(ctx context.Context, ap *AgentProcess) (bool, error) {
+	hooks := s.currentCompletionHooks(ap)
+	if !completionHooksRequireDeliveryFence(hooks) {
+		return true, nil
+	}
+	if s.IssueBackend == nil {
+		return false, fmt.Errorf("delivery-fenced task has no issue backend")
+	}
+	issue, err := s.IssueBackend.Get(ctx, ap.AssignedTaskID)
+	if err != nil {
+		return false, fmt.Errorf("verify successful delivery marker: %w", err)
+	}
+	return issueHasLabel(issue, "delivery-pending"), nil
+}
+
+func (s *Supervisor) publishTaskWorktree(ctx context.Context, ap *AgentProcess) error {
+	if s.TaskWorktrees == nil || ap.TaskBranch == "" {
+		return nil
+	}
+	revision, err := s.TaskWorktrees.Publish(ctx, TaskWorktreePublishRequest{
+		WorkspaceKey: s.WorkspaceID,
+		RepoPath:     ap.RepoConfig.ResolveAbsPath(s.ProjectDir),
+		TaskID:       ap.AssignedTaskID,
+		Path:         ap.WorktreePath,
+		Branch:       ap.TaskBranch,
+		InputSHA:     ap.TaskInputSHA,
+	})
+	if err != nil {
+		return err
+	}
+	ap.Mu.Lock()
+	ap.TaskOutputSHA = revision.HeadSHA
+	ap.TaskOutputTreeSHA = revision.TreeSHA
+	ap.Mu.Unlock()
+	return nil
+}
+
+func detachPublishedTaskWorktree(ap *AgentProcess) {
+	ap.Mu.Lock()
+	defer ap.Mu.Unlock()
+	if ap.TaskOutputSHA == "" || ap.AgentWorktreePath == "" {
+		return
+	}
+	ap.WorktreePath = ap.AgentWorktreePath
+	ap.TaskBranch = ""
+	ap.TaskInputSHA = ""
+	ap.TaskTreeSHA = ""
+	ap.TaskOutputSHA = ""
+	ap.TaskOutputTreeSHA = ""
+	ap.TaskRepoName = ""
+	ap.TaskSourceRepoID = ""
 }
 
 // actorReleaseBackend is the optional symmetric counterpart of
@@ -59,6 +297,7 @@ func (s *Supervisor) claimTask(ap *AgentProcess, epicID string) bool {
 		}
 		ap.Mu.Lock()
 		ap.ResumeTaskID = ""
+		ap.RecoveryMode = recoverCold
 		ap.Mu.Unlock()
 	}
 

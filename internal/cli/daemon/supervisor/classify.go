@@ -8,7 +8,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/cli/agent"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
@@ -169,7 +168,18 @@ func (s *Supervisor) runLeftClaimHeld(ap *AgentProcess, taskID string) bool {
 	}
 	ctx, cancel := s.operationContext(claimOperationTimeout)
 	defer cancel()
-	return agent.ClaimStillHeld(ctx, s.IssueBackend, taskID, ap.Entry.Worktree)
+	issue, err := s.IssueBackend.Get(ctx, taskID)
+	if err != nil || issue == nil || issue.Status != "in_progress" || issue.Assignee != ap.Entry.Worktree {
+		return false
+	}
+	// A delivery-managed run deliberately preserves its claim through
+	// `loom complete`; delivery-pending is the positive completion evidence the
+	// supervisor will verify before publishing and routing. Ordinary held claims
+	// remain incomplete.
+	if issueHasLabel(issue, "delivery-pending") && completionHooksRequireDeliveryFence(s.currentCompletionHooks(ap)) {
+		return false
+	}
+	return true
 }
 
 // isIncompleteRun reports whether classifyAgentExit tagged this exit as a run

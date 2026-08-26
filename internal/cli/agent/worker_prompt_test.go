@@ -118,8 +118,8 @@ func TestImplementationPromptsHandOffToQA(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(prompt, "--add-label ready-for-qa") || !strings.Contains(prompt, "--status open") {
-				t.Fatalf("%s has no ready-for-qa handoff", id)
+			if !strings.Contains(prompt, "--add-label delivery-pending") || !strings.Contains(prompt, "supervisor publishes") {
+				t.Fatalf("%s has no supervisor-owned ready-for-qa handoff", id)
 			}
 		})
 	}

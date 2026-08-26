@@ -52,12 +52,11 @@ func (b *FleetBackend) releaseIssueLock(ctx context.Context, op, id, actor strin
 	return b.execAsActor(ctx, op, "/issues/"+url.PathEscape(id)+"/release-lock", nil, actor)
 }
 
-// ReleaseIssueAsActor releases the claim lock on an issue, overriding the
-// configured FleetDB actor for this request. Used by the daemon supervisor
-// to symmetrically free a claim it acquired in claimIssueForAgent when the
-// agent process exits, rather than waiting for the lock's TTL to expire.
+// ReleaseIssueAsActor releases the full claim held by actor. In-progress tasks
+// become open and unassigned; tasks that have already transitioned only drop
+// their operational lock. This keeps a failed preflight claim retryable.
 func (b *FleetBackend) ReleaseIssueAsActor(ctx context.Context, id string, actor string) error {
-	return b.ReleaseIssueLock(ctx, id, actor)
+	return b.ReleaseClaim(ctx, id, actor)
 }
 
 func claimIssueBody(lockTTL time.Duration) (interface{}, error) {

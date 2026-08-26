@@ -76,11 +76,19 @@ func resolveWorkspaceTarget(resolver *cli.Resolver, name, repo string) (Resolved
 	// Try worktree/repo name first — agents run in their own worktree
 	// directory for isolated lock files and working trees.
 	if name != "" {
-		if wtPath, err := resolver.ResolveWorktreePath(name); err == nil {
+		if wt, err := resolver.ResolveAgentByName(name); err == nil {
+			repoName := ""
+			if wt.Repo != nil {
+				repoName = wt.Repo.Name
+			}
 			return ResolvedTarget{
-				WorkDir:   wtPath,
+				WorkDir:   wt.Path,
 				AgentName: name,
+				Repo:      repoName,
 			}, nil
+		}
+		if wtPath, err := resolver.ResolveWorktreePath(name); err == nil {
+			return ResolvedTarget{WorkDir: wtPath, AgentName: name}, nil
 		}
 	}
 	// Fall back to workspace name (e.g., switching workspace context)

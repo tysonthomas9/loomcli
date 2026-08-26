@@ -2,13 +2,15 @@ package supervisor
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
 	"sync"
 	"time"
 
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
+
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
@@ -91,6 +93,7 @@ type Supervisor struct {
 	// IssueBackendReady checks if an epic has ready tasks. Injected by daemon.
 	IssueBackendReady func(epicID string) (bool, error)
 	IssueBackend      backend.IssueBackend
+	TaskWorktrees     TaskWorktreeManager
 
 	// quarantine is the supervisor-scoped, task-ID-keyed ledger of repeated
 	// no-progress kills (see quarantine.go). Lazily initialized via qrec so
@@ -136,10 +139,11 @@ func (s *Supervisor) NewAgent(entry config.AgentEntry, idx int) (*AgentProcess, 
 	}
 
 	ap := &AgentProcess{
-		Entry:        entry,
-		RoleConfig:   roleConfig,
-		WorktreePath: target.WorkDir,
-		RepoConfig:   s.FindRepoConfig(repoName),
+		Entry:             entry,
+		RoleConfig:        roleConfig,
+		AgentWorktreePath: target.WorkDir,
+		WorktreePath:      target.WorkDir,
+		RepoConfig:        s.FindRepoConfig(target.Repo),
 	}
 	return ap, nil
 }
@@ -371,6 +375,22 @@ func (s *Supervisor) setStopReasonDefault(ap *AgentProcess, reason StopReason) {
 // clearAgentSessionState resets session state between supervision cycles.
 func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 	ap.Mu.Lock()
+	// A successfully published task checkout is now owned by the task's next
+	// stage, not by this logical agent. Restore the agent's private discovery
+	// checkout before cold recovery so a producer's next cycle cannot inspect
+	// or terminate a QA process running in the shared task checkout. Failed or
+	// interrupted attempts have no output revision and deliberately retain the
+	// task path for resume/checkpoint recovery.
+	if ap.TaskOutputSHA != "" && ap.AgentWorktreePath != "" {
+		ap.WorktreePath = ap.AgentWorktreePath
+		ap.TaskBranch = ""
+		ap.TaskInputSHA = ""
+		ap.TaskTreeSHA = ""
+		ap.TaskOutputSHA = ""
+		ap.TaskOutputTreeSHA = ""
+		ap.TaskRepoName = ""
+		ap.TaskSourceRepoID = ""
+	}
 	ap.Session = nil
 	ap.AgentSessionID = ""
 	ap.AgentLeaseID = ""
@@ -438,6 +458,15 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 	if !s.claimTask(ap, epicID) {
 		return false
 	}
+	prepareCtx, prepareCancel := s.operationContext(claimOperationTimeout)
+	if err := s.prepareClaimedTaskWorktree(prepareCtx, ap); err != nil {
+		prepareCancel()
+		taskID := s.taskIDForLifecycle(ap, nil)
+		s.releaseAssignedTaskClaim(ap, taskID)
+		s.setPreflightError(ap, agenterr.OutcomeFromHarness(wrapper.ErrUnknown), fmt.Sprintf("prepare task worktree for %s: %v", taskID, err))
+		return false
+	}
+	prepareCancel()
 	s.createAgentSession(ap, epicID)
 	return true
 }
@@ -630,6 +659,27 @@ func (s *Supervisor) agentSessionMetadataLocked(ap *AgentProcess, backend string
 	if ap.LogFilePath != "" {
 		metadata["log_path"] = ap.LogFilePath
 	}
+	if ap.TaskBranch != "" {
+		metadata["task_branch"] = ap.TaskBranch
+	}
+	if ap.TaskInputSHA != "" {
+		metadata["task_input_sha"] = ap.TaskInputSHA
+	}
+	if ap.TaskTreeSHA != "" {
+		metadata["task_input_tree_sha"] = ap.TaskTreeSHA
+	}
+	if ap.TaskOutputSHA != "" {
+		metadata["task_output_sha"] = ap.TaskOutputSHA
+	}
+	if ap.TaskOutputTreeSHA != "" {
+		metadata["task_output_tree_sha"] = ap.TaskOutputTreeSHA
+	}
+	if ap.TaskRepoName != "" {
+		metadata["task_repo"] = ap.TaskRepoName
+	}
+	if ap.TaskSourceRepoID != "" {
+		metadata["task_source_repo_id"] = ap.TaskSourceRepoID
+	}
 	return metadata
 }
 
@@ -737,63 +787,14 @@ func (s *Supervisor) uploadTranscriptArtifact(ctx context.Context, sessionID, ta
 	return "artifact://" + finalized.ArtifactID
 }
 
-// deregisterWorker removes the agent's fleet-db worker registration on exit,
-// keyed by the claim actor (ap.Entry.Worktree). This is the graceful fast path:
-// it collapses the common stop/drain case to instant board cleanup and releases
-// any issue lock the worker still holds. Best-effort and idempotent — the
-// server-side worker TTL + sweeper are the backstop for non-graceful death.
-func (s *Supervisor) deregisterWorker(ap *AgentProcess) {
-	if s.ControlStore == nil || s.WorkspaceID == "" || ap.Entry.Worktree == "" {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
-	defer cancel()
-	if err := s.ControlStore.Workers().Deregister(ctx, s.WorkspaceID, ap.Entry.Worktree); err != nil {
-		slog.Debug("supervisor worker deregister failed",
-			"workspace", s.WorkspaceID, "worker_id", ap.Entry.Worktree, "err", err)
-	}
-}
-
 // spawnAndWait spawns the agent and waits for it to exit. A spawn failure is
 // recorded as a synthetic exit (see markSpawnFailure) so the caller's single
 // restart decision — shouldRestart + sleepBeforeRestart — owns counting and
 // backoff for both real exits and spawn failures.
 func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
+	defer releaseTaskWorktreeLease(ap)
 	if err := s.spawnAgent(ap); err != nil {
-		if errors.Is(err, ErrBackendUnavailable) {
-			// gateBackendAvailable already set the BackendUnavailable state/error.
-			// The normal pre-flight gate runs before task claim, but this spawn-time
-			// gate remains as a race guard for a backend disappearing after claim and
-			// before exec. Clean up any already-created session/claim/worker before
-			// blocking so the task is immediately claimable again.
-			s.completeBackendUnavailableCleanup(ap)
-			s.Concurrency.Release(ap.Entry.Role)
-			return
-		}
-		slog.Warn("spawn failed", "worktree", ap.Entry.Worktree, "err", err)
-		ap.Mu.Lock()
-		orphanSess := ap.Session
-		ap.Session = nil
-		orphanSessionID := ap.AgentSessionID
-		ap.AgentSessionID = ""
-		orphanLeaseID := ap.AgentLeaseID
-		orphanLeaseToken := ap.AgentLeaseToken
-		ap.AgentLeaseID = ""
-		ap.AgentLeaseToken = ""
-		ap.Mu.Unlock()
-		if orphanSess != nil {
-			_ = orphanSess.Finalize(sessions.FinalizeOptions{ExitCode: -1, ErrorClass: "spawn_failure"})
-		}
-		s.completeControlPlaneAgentSession(ap, agentSessionCompletionInput{
-			sessionID:  orphanSessionID,
-			leaseID:    orphanLeaseID,
-			leaseToken: orphanLeaseToken,
-			exitCode:   -1,
-			errClass:   "spawn_failure",
-			taskID:     s.taskIDForLifecycle(ap, nil),
-		})
-		s.Concurrency.Release(ap.Entry.Role)
-		s.markSpawnFailure(ap, err)
+		s.handleSpawnError(ap, err)
 		return
 	}
 
@@ -806,11 +807,34 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 	// quarantine — deliberate (hook outcomes are agent-side, not task-side) and
 	// bounded instead by the agent's block budget via CompletionHookFailure.
 	s.recordTaskExitForQuarantine(ap, exitCode)
+	if exitCode == 0 {
+		ctx, cancel := s.operationContext(controlPlaneOperationTimeout)
+		publish, publishErr := s.shouldPublishTaskDelivery(ctx, ap)
+		if publishErr == nil && publish {
+			publishErr = s.publishTaskWorktree(ctx, ap)
+		}
+		if publishErr != nil {
+			slog.Warn("task delivery publication failed; downstream routing suppressed",
+				"worktree", ap.Entry.Worktree, "task_id", ap.AssignedTaskID, "err", publishErr)
+			s.markCompletionHookFailure(ap, fmt.Errorf("publish task delivery: %w", publishErr))
+			exitCode = -1
+		} else if !publish {
+			slog.Info("task delivery publication skipped: run did not declare a successful delivery",
+				"worktree", ap.Entry.Worktree, "task_id", ap.AssignedTaskID)
+		}
+		cancel()
+	}
 	// Completion hooks run while the session id, claim, and transcript still
 	// exist, and before finalize/checkpoint/recovery decide the run's fate: a
 	// failed hook write demotes exitCode so the owned task is reopened.
 	exitCode = s.runCompletionHooks(ap, exitCode)
 	s.finalizeAgentSession(ap, exitCode)
+	// Session finalization has captured the task checkout. Detach before any
+	// recovery so this producer cannot inspect or terminate the downstream
+	// agent that a successful completion hook may have just made eligible.
+	if exitCode == 0 {
+		detachPublishedTaskWorktree(ap)
+	}
 	s.handleAgentCheckpoint(ap, exitCode)
 	s.postMortemRecovery(ap, exitCode)
 	// Sweep AFTER recovery reset the task to open, so the quarantine write
@@ -818,23 +842,6 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 	s.sweepQuarantineDue(ap)
 	s.Concurrency.Release(ap.Entry.Role)
 	s.handleEpicTransition(ap)
-}
-
-// postMortemRecovery runs recovery after agent exit, skipping for yield exits.
-func (s *Supervisor) postMortemRecovery(ap *AgentProcess, exitCode int) {
-	if IsYieldRequested(ap.WorktreePath) {
-		slog.Info("skipping post-mortem recovery for yield exit", "worktree", ap.Entry.Worktree)
-		return
-	}
-	if err := s.recoverAgent(ap, exitCode, isIncompleteRun(ap)); err != nil {
-		slog.Warn("post-mortem recovery failed", "worktree", ap.Entry.Worktree, "err", err)
-	}
-}
-
-// postExitCleanup runs all cleanup steps after agent exits.
-func (s *Supervisor) postExitCleanup(ap *AgentProcess) {
-	// This is a placeholder — actual cleanup is done inside spawnAndWait.
-	// Keeping as a hook point for future steps.
 }
 
 // sleepBeforeRestart performs interruptible backoff sleep. Returns false if interrupted.

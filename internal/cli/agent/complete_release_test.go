@@ -23,15 +23,32 @@ type releaserStub struct {
 	lastID    atomic.Value // string
 	lastActor atomic.Value // string
 	releaseE  error
+	issue     *backend.IssueDetailData
 }
 
 var _ backend.ClaimReleaser = (*releaserStub)(nil)
 
 func newReleaserStub(releaseErr error) *releaserStub {
 	s := &releaserStub{MockIssueBackend: NewMockIssueBackend(), releaseE: releaseErr}
+	s.GetFn = func(context.Context, string) (*backend.IssueDetailData, error) { return s.issue, nil }
 	s.lastID.Store("")
 	s.lastActor.Store("")
 	return s
+}
+
+func TestReleaseClaimOnComplete_PreservesClaimWhileDeliveryIsPending(t *testing.T) {
+	stub := newReleaserStub(nil)
+	stub.issue = &backend.IssueDetailData{IssueData: backend.IssueData{Labels: []string{"backend", "delivery-pending"}}}
+	cli.SetDefaultIssueBackend(stub)
+	t.Cleanup(cli.ResetDefaultIssueBackend)
+	wt := t.TempDir()
+	writeReleaseTestLock(t, wt, "ISSUE-42")
+
+	releaseClaimOnComplete(wt)
+
+	if got := stub.called.Load(); got != 0 {
+		t.Fatalf("delivery-pending task released before supervisor publication: calls=%d", got)
+	}
 }
 
 func (s *releaserStub) ReleaseClaim(_ context.Context, id, actor string) error {

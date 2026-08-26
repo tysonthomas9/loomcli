@@ -123,3 +123,27 @@ func TestResolveAgentTarget_AbsolutePathMissing(t *testing.T) {
 		t.Fatalf("error = %v, want missing path error", err)
 	}
 }
+
+func TestResolveWorkspaceTargetPreservesAgentRepository(t *testing.T) {
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "repo-a")
+	createGitRepo(t, repoPath)
+	agentPath := filepath.Join(root, "worktrees", "repo-a", "backend-dev-1")
+	if err := os.MkdirAll(filepath.Dir(agentPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cli.RunGitCommand(repoPath, "worktree", "add", agentPath, "-b", "TEAM--backend-dev-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	resolver := testResolver(&LoomConfig{Workspaces: map[string]WorkspaceConfig{
+		"myws": {Path: root, Repos: []RepoConfig{{Name: "repo-a", Path: repoPath}}},
+	}}, "myws")
+	target, err := resolveWorkspaceTarget(resolver, "backend-dev-1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.Repo != "repo-a" {
+		t.Fatalf("target repo = %q, want repo-a", target.Repo)
+	}
+}
