@@ -48,6 +48,10 @@
   flex-shrink: 0;
 }
 
+.swimLane[data-collapsed="true"] .laneHeader {
+  border-radius: var(--surface-radius);
+}
+
 .collapseToggle {
   display: flex;
   align-items: center;
