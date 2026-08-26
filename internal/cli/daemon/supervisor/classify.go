@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"log"
+	"log/slog"
 	"time"
 
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
@@ -47,6 +48,13 @@ func (s *Supervisor) classifyAgentExit(ap *AgentProcess, exitCode int) {
 		return
 	}
 
+	// A non-zero exit we CAUSED is classified from that fact, never from the
+	// log. See supervisorEndedRun.
+	if exitCode != 0 && s.supervisorEndedRun(ap, stopReason) {
+		s.markSupervisorStop(ap, exitCode, backend, stopReason)
+		return
+	}
+
 	if taskID == "" && (exitCode == 0 || stopReason == StopReasonWatchdog) {
 		s.markNoWork(ap, backend)
 	} else if exitCode != 0 {
@@ -64,6 +72,73 @@ func (s *Supervisor) classifyAgentExit(ap *AgentProcess, exitCode int) {
 		ap.LastNoWork = false
 		ap.Mu.Unlock()
 	}
+}
+
+// supervisorEndedRun reports whether the supervisor itself ended this run, as
+// opposed to the agent failing on its own.
+//
+// It exists because ClassifyFromLog INFERS a verdict from the tail of the log,
+// and the tail of a run we killed says nothing about why it ended — it says
+// whatever the agent last printed. A credentials banner an earlier turn had
+// already recovered from is still sitting there, so a healthy agent SIGTERMed
+// by a daemon restart gets filed as AuthFailure: a class the policy treats as
+// StopFatal and human-actionable. Measured 2026-08-26, when a false liveness
+// fatal restarted the daemon and one of the agents it killed was recorded as
+// an auth failure it never had.
+//
+// Two signals, because they become true at different moments. The stop reason
+// is authoritative once set, but it is recorded on the way OUT of the supervise
+// loop — after this classification runs — so a run killed by the shutdown drain
+// still has an empty reason here. The channels are the durable fact: closed
+// before the kill, and they stay closed.
+//
+// StopReasonWatchdog is deliberately absent. That kill is also ours, but it is
+// a verdict ABOUT the agent (it went silent past its output timeout), so it
+// keeps the classification the existing arms give it.
+func (s *Supervisor) supervisorEndedRun(ap *AgentProcess, stopReason StopReason) bool {
+	switch stopReason {
+	case StopReasonShutdown, StopReasonManualStop, StopReasonConfigRemoved:
+		return true
+	}
+	select {
+	case <-s.Shutdown:
+		return true
+	default:
+	}
+	select {
+	case <-ap.StopCh:
+		return true
+	default:
+		return false
+	}
+}
+
+// markSupervisorStop records a run the supervisor ended on purpose.
+//
+// The class is a DOMAIN outcome, not a harness one, and that is the point:
+// nothing about the agent's output failed, so no wrapper class describes this
+// honestly. Being a domain outcome also makes it quarantine-ineligible by
+// construction (agentpolicy.QuarantineEligible), which is correct — a task
+// whose agent we killed for our own reasons has earned no evidence against
+// itself. The disposition is an uncounted retry, so the kill does not erode
+// the restart budget a real failure needs.
+func (s *Supervisor) markSupervisorStop(ap *AgentProcess, exitCode int, backend string, reason StopReason) {
+	msg := "run ended by the supervisor"
+	if reason != "" {
+		msg += " (" + string(reason) + ")"
+	}
+	ap.Mu.Lock()
+	ap.LastError = &agenterr.AgentError{
+		Class:     agenterr.OutcomeFromDomain(agenterr.SupervisorStopOutcome),
+		ExitCode:  exitCode,
+		Message:   msg,
+		Backend:   backend,
+		Timestamp: time.Now(),
+	}
+	ap.LastNoWork = false
+	ap.Mu.Unlock()
+	slog.Info("agent exit classified as a supervisor-initiated stop",
+		"worktree", ap.Entry.Worktree, "exit_code", exitCode, "stop_reason", string(reason))
 }
 
 // markNoWork records an exit with no task attached: the agent found nothing
