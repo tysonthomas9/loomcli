@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { useElapsedTime } from "@/hooks/common";
 import type { OperatorQueueItem } from "@/hooks/issues";
 import { useWorkspaceContext } from "@/hooks/workspace";
+import decisionButtonStyles from "@/components/DecisionButton/DecisionButton.module.css";
 import { RejectCommentForm } from "@/components/IssueDetailPanel";
 import type { Issue, LoomAgentStatus } from "@/types";
 import { effectiveAgentStatus, parseLoomStatus } from "@/types/agent";
@@ -250,8 +251,8 @@ export function OperatorQueueCard({
                 type="button"
                 className={
                   defaultAgentName
-                    ? styles.primaryButton
-                    : styles.secondaryButton
+                    ? `${decisionButtonStyles.button} ${decisionButtonStyles.approve}`
+                    : `${decisionButtonStyles.button} ${decisionButtonStyles.neutral}`
                 }
                 data-testid="queue-approve"
                 data-routed={Boolean(defaultAgentName)}
@@ -271,14 +272,14 @@ export function OperatorQueueCard({
               </button>
               <button
                 type="button"
-                className={styles.secondaryButton}
+                className={`${decisionButtonStyles.button} ${decisionButtonStyles.neutral}`}
                 onClick={() => onOpenIssue(issue)}
               >
                 Read design
               </button>
               <button
                 type="button"
-                className={styles.dangerButton}
+                className={`${decisionButtonStyles.button} ${decisionButtonStyles.reject}`}
                 data-testid="queue-reject"
                 disabled={isActing}
                 onClick={() => setShowRejectForm(true)}
@@ -292,7 +293,7 @@ export function OperatorQueueCard({
             <>
               <button
                 type="button"
-                className={styles.primaryButton}
+                className={`${decisionButtonStyles.button} ${decisionButtonStyles.approve}`}
                 data-testid="queue-unblock"
                 disabled={isActing}
                 onClick={() => void runAction(() => onUnblock(issue))}
@@ -301,7 +302,7 @@ export function OperatorQueueCard({
               </button>
               <button
                 type="button"
-                className={styles.secondaryButton}
+                className={`${decisionButtonStyles.button} ${decisionButtonStyles.neutral}`}
                 onClick={() => onOpenIssue(issue)}
               >
                 Open issue
@@ -312,7 +313,7 @@ export function OperatorQueueCard({
           {kind === "needs-revision" && (
             <button
               type="button"
-              className={styles.primaryButton}
+              className={`${decisionButtonStyles.button} ${decisionButtonStyles.approve}`}
               onClick={() => onOpenIssue(issue)}
             >
               Review task

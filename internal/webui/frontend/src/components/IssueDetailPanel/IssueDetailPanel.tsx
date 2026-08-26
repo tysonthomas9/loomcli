@@ -67,6 +67,7 @@ import {
   PRSection,
   RejectCommentForm,
 } from "./sections";
+import decisionButtonStyles from "@/components/DecisionButton/DecisionButton.module.css";
 import { IssueHeader } from "./header";
 import { AssigneeDropdown, RepoDropdown } from "./fields";
 import { ConfirmDialog } from "../ConfirmDialog";
@@ -1262,7 +1263,7 @@ function DefaultContent({
         <div className={styles.reviewActionBar} data-testid="review-action-bar">
           <button
             type="button"
-            className={styles.reviewApproveButton}
+            className={`${decisionButtonStyles.button} ${decisionButtonStyles.approve}`}
             onClick={handleApprove}
             disabled={isApproving}
             aria-label="Approve"
@@ -1272,7 +1273,7 @@ function DefaultContent({
           </button>
           <button
             type="button"
-            className={styles.reviewRejectButton}
+            className={`${decisionButtonStyles.button} ${decisionButtonStyles.reject}`}
             onClick={handleRejectClick}
             aria-label="Reject"
             data-testid="panel-reject-button"

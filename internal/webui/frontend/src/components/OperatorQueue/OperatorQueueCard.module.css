@@ -211,86 +211,9 @@
   padding: 11px var(--space-4);
 }
 
-.primaryButton,
-.secondaryButton,
-.dangerButton {
-  min-height: 32px;
-  padding: 6px 12px;
-  font: inherit;
-  font-size: 12.5px;
-  font-weight: 500;
-  color: var(--color-text-primary);
-  background: transparent;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition:
-    color var(--transition-fast),
-    background-color var(--transition-fast),
-    border-color var(--transition-fast);
-}
-
-.primaryButton {
-  font-weight: 600;
-  color: var(--accent-text);
-  background: color-mix(in srgb, var(--accent-text) 8%, var(--color-bg-card));
-  border-color: color-mix(in srgb, var(--accent-text) 35%, var(--color-border));
-}
-
-.primaryButton:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent-text) 20%, var(--color-bg-card));
-  border-color: color-mix(in srgb, var(--accent-text) 55%, var(--color-border));
-}
-
-.secondaryButton {
-  color: var(--color-text-secondary);
-}
-
-.secondaryButton:hover:not(:disabled) {
-  color: var(--color-text-primary);
-  background: var(--color-bg-hover);
-  border-color: var(--color-border-hover);
-}
-
-.dangerButton {
-  font-weight: 600;
-  color: var(--color-status-danger-text);
-  background: var(--color-danger-bg);
-  border-color: color-mix(
-    in srgb,
-    var(--color-danger) 35%,
-    var(--color-border)
-  );
-}
-
-.dangerButton:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-danger) 20%, var(--color-bg-card));
-  border-color: color-mix(
-    in srgb,
-    var(--color-danger) 55%,
-    var(--color-border)
-  );
-}
-
-.primaryButton:focus-visible,
-.secondaryButton:focus-visible,
-.dangerButton:focus-visible {
-  outline: 2px solid var(--color-focus);
-  outline-offset: 2px;
-}
-
-.primaryButton:disabled,
-.secondaryButton:disabled,
-.dangerButton:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
 @media (width <= 768px) {
   .actions,
-  .primaryButton,
-  .secondaryButton,
-  .dangerButton {
+  .actions button {
     width: 100%;
   }
 }
