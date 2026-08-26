@@ -352,5 +352,5 @@ event and no session.
 The full Go quality gate passed, including race tests and 65.4% coverage against
 the 60% threshold. Browser inspection found no page or console errors. The
 [retained Kanban screenshot](evidence/2026-08-26-lineage-proof-kanban.png)
-shows the malformed task remaining open in the isolated proof workspace; the
-accessibility snapshot additionally placed every valid task in Done.
+shows every valid task Closed, including the recovery task, while the malformed
+task remains Open in the isolated proof workspace.
