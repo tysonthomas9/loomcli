@@ -1547,3 +1547,37 @@ func TestLeadAgentsFileTextOmitsSafetyBlock(t *testing.T) {
 		t.Fatal("GenerateLeadPrompt no longer contains LeadSafetyPrompt")
 	}
 }
+
+func TestGenerateTerminalPromptBuiltinLeadProfileIsPointerOnly(t *testing.T) {
+	got, err := GenerateTerminalPrompt("builtin:lead-profile")
+	if err != nil {
+		t.Fatalf("GenerateTerminalPrompt builtin lead-profile: %v", err)
+	}
+	// It must point at the profile's CLAUDE.md instead of carrying the role text.
+	if !strings.Contains(got, "CLAUDE.md") {
+		t.Fatalf("lead-profile prompt must point at the profile CLAUDE.md:\n%s", got)
+	}
+	// The whole point: the static role content lives in CLAUDE.md, not here.
+	for _, forbidden := range []string{"Multi-Agent Safety Rules", "### On Startup", "### Available Actions"} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("lead-profile prompt duplicates static lead content %q:\n%s", forbidden, got)
+		}
+	}
+	if got == GenerateLeadPrompt() {
+		t.Fatal("lead-profile prompt must differ from the full lead prompt")
+	}
+}
+
+// TestGenerateTerminalPromptEmptyStillFullLeadPrompt guards the "a non-isolated
+// loom lead is unchanged" acceptance criterion of the profile-prompt split.
+func TestGenerateTerminalPromptEmptyStillFullLeadPrompt(t *testing.T) {
+	got, err := GenerateTerminalPrompt("")
+	if err != nil {
+		t.Fatalf("GenerateTerminalPrompt empty: %v", err)
+	}
+	for _, want := range []string{"## INTERACTIVE MODE: Project Lead", "Multi-Agent Safety Rules"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("default lead prompt missing %q", want)
+		}
+	}
+}
