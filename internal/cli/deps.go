@@ -250,6 +250,7 @@ type fleetDBIssueBackend struct{}
 
 var _ backend.IssueBackend = (*fleetDBIssueBackend)(nil)
 var _ backend.ClaimReleaser = (*fleetDBIssueBackend)(nil)
+var _ backend.DependencyLineageBackend = (*fleetDBIssueBackend)(nil)
 
 func newFleetDBIssueBackend() backend.IssueBackend {
 	return &fleetDBIssueBackend{}
@@ -384,6 +385,22 @@ func (b *fleetDBIssueBackend) ClaimIssue(ctx context.Context, id string, lockTTL
 	return b.withBackend(ctx, "ClaimIssue", func(ib backend.IssueBackend) error {
 		return ib.ClaimIssue(ctx, id, lockTTL)
 	})
+}
+
+// DependencyTaskIDs preserves Fleet's durable dependency history through the
+// lazy embedded fleet-db adapter used by the default CLI and daemon runtime.
+func (b *fleetDBIssueBackend) DependencyTaskIDs(ctx context.Context, id string) ([]string, error) {
+	var out []string
+	err := b.withBackend(ctx, "DependencyTaskIDs", func(ib backend.IssueBackend) error {
+		lineage, ok := ib.(backend.DependencyLineageBackend)
+		if !ok {
+			return nil
+		}
+		var err error
+		out, err = lineage.DependencyTaskIDs(ctx, id)
+		return err
+	})
+	return out, err
 }
 
 // ReleaseClaim implements backend.ClaimReleaser by forwarding to the
