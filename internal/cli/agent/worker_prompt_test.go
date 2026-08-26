@@ -456,6 +456,9 @@ func TestMakeCustomPromptGenResolvesBuiltin(t *testing.T) {
 	if !strings.Contains(prompt, "supervisor") || !strings.Contains(prompt, "loom complete") {
 		t.Error("QA prompt must delegate closure to the supervisor after signaling completion")
 	}
+	if !strings.Contains(prompt, "--add-label delivery-pending") {
+		t.Error("QA prompt must fence the final verification revision before signaling completion")
+	}
 }
 
 func TestEvalPromptDelegatesCloseToSupervisor(t *testing.T) {
@@ -469,6 +472,9 @@ func TestEvalPromptDelegatesCloseToSupervisor(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "supervisor") || !strings.Contains(prompt, "loom complete") {
 		t.Error("eval prompt must delegate closure to the supervisor after signaling completion")
+	}
+	if !strings.Contains(prompt, "--add-label delivery-pending") {
+		t.Error("eval prompt must fence the final verification revision before signaling completion")
 	}
 }
 

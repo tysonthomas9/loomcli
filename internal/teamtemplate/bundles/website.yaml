@@ -93,4 +93,6 @@ agents:
     cross_repo: true
     hooks:
       on_complete:
+        - {type: remove_label, value: delivery-pending}
+        - {type: remove_label, value: ready-for-qa}
         - {type: close}

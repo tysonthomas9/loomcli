@@ -1,6 +1,7 @@
 package teamtemplate_test
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -84,8 +85,13 @@ func TestFinalVerificationAgentsCloseOnlyAfterSupervisorPublishes(t *testing.T) 
 				if agent.Name != tt.agentName {
 					continue
 				}
-				if agent.Hooks == nil || len(agent.Hooks.OnComplete) != 1 || agent.Hooks.OnComplete[0].Type != domain.AgentHookActionClose {
-					t.Fatalf("%s hooks=%+v, want one supervisor close action", tt.agentName, agent.Hooks)
+				want := []domain.AgentHookAction{
+					{Type: domain.AgentHookActionRemoveLabel, Value: "delivery-pending"},
+					{Type: domain.AgentHookActionRemoveLabel, Value: "ready-for-qa"},
+					{Type: domain.AgentHookActionClose},
+				}
+				if agent.Hooks == nil || !reflect.DeepEqual(agent.Hooks.OnComplete, want) {
+					t.Fatalf("%s hooks=%+v, want fenced publish then close pipeline %+v", tt.agentName, agent.Hooks, want)
 				}
 				return
 			}
