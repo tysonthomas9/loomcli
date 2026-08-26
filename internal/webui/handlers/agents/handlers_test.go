@@ -49,6 +49,12 @@ func TestHandleInteractivePromptsListsBuiltins(t *testing.T) {
 	if !domain.IsBuiltinInteractivePrompt("pr-review-checkout") {
 		t.Fatal("pr-review-checkout must remain registered as a launchable builtin prompt")
 	}
+	if _, ok := seen["lead-profile"]; ok {
+		t.Fatalf("hidden prompt lead-profile was returned: %#v", got.Prompts)
+	}
+	if !domain.IsBuiltinInteractivePrompt("lead-profile") {
+		t.Fatal("lead-profile must remain registered as a launchable builtin prompt")
+	}
 }
 
 func TestHandleCreateCarriesInteractiveKindAndPromptFile(t *testing.T) {

@@ -41,6 +41,12 @@ const leadStoreOpTimeout = 10 * time.Second
 var leadMessage string
 var leadPromptFile string
 
+// leadPrintPrompt makes `loom lead` print the resolved STATIC prompt and exit
+// without starting a session. It is how the lead profile's CLAUDE.md is
+// generated, so it must never emit the per-session sections that
+// applyLeadPromptContext appends.
+var leadPrintPrompt bool
+
 var leadCmd = &cobra.Command{
 	Use:     "lead",
 	Short:   "Run the interactive terminal-agent runtime",
@@ -63,7 +69,18 @@ repository or any worktree.
 
 Use --message to seed the session with an initial user request. The message
 is appended to the lead system prompt, so the agent performs its normal
-lead-mode startup and then addresses the request using lead-mode conventions.`,
+lead-mode startup and then addresses the request using lead-mode conventions.
+
+Use --print-prompt to print the resolved static lead prompt and exit without
+starting a session. It prints only the static half - no backend assignment and
+no --message request - which is exactly what belongs in an agent profile's
+CLAUDE.md. Generate one with:
+
+  loom lead --print-prompt > "$WORKSPACE/profiles/lead/claude/CLAUDE.md"
+
+A session whose profile carries that CLAUDE.md should then be launched with
+--prompt builtin:lead-profile, a minimal pointer prompt that leaves the role
+instructions to the profile instead of repeating them every session.`,
 	Args: cobra.NoArgs,
 	Run:  runLead,
 }
@@ -72,6 +89,7 @@ func init() {
 	cli.RegisterCommand(leadCmd)
 	leadCmd.Flags().StringVar(&leadMessage, "message", "", "Initial user request to address in lead mode")
 	leadCmd.Flags().StringVar(&leadPromptFile, "prompt", "", "Path to terminal-agent prompt template")
+	leadCmd.Flags().BoolVar(&leadPrintPrompt, "print-prompt", false, "Print the resolved static lead prompt and exit (no session, no dynamic sections)")
 }
 
 // leadStartupPrompt picks the lead runtime's boot prompt. A role prompt_file
@@ -90,37 +108,16 @@ func leadStartupPrompt(ctx context.Context, registration leadSessionRegistration
 	return applyLeadPromptContext(prompt), seedAndShrink, nil
 }
 
-// prepareLeadBackend resolves the backend to launch and prints the mode banner.
-// An uninstalled backend is not fatal: the operator is dropped into a shell in
-// the lead workdir so they can fix it, and ok is false.
-func prepareLeadBackend(workDir string) (string, bool) {
-	// Check backend health before invoking. If the binary isn't installed,
-	// show a helpful error and drop into a shell so the user can fix it.
-	backendName := cli.GetBackendName()
-	if hs, ok := backends.CheckBackendHealth(backendName); ok && !hs.Installed {
-		fmt.Fprintf(os.Stderr, "Error: %s backend is not installed (%s)\n\n", backendName, hs.Message)
-		fmt.Fprintf(os.Stderr, "Install it and try again. Dropping into a shell so you can fix this.\n\n")
-		execShell(workDir)
-		return "", false
-	}
-
-	fmt.Println("=========================================")
-	fmt.Println("Starting LEAD mode (Interactive)")
-	fmt.Println("=========================================")
-	fmt.Println()
-	return backendName, true
-}
-
 func runLead(cmd *cobra.Command, args []string) {
-	// Resolve lead's own working directory (<ws>/lead, or LOOM_LEAD_WORKDIR),
-	// falling back to the current directory outside a workspace.
-	workDir, dedicated, err := resolveLeadWorkdir(context.Background())
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error getting working directory: %v\n", err)
-		os.Exit(1)
+	// Print-and-exit runs before the preflight and before session
+	// registration: generating a profile file must not touch the backend, write
+	// an orchestrator session row, or mark an epic assignment delivered.
+	if leadPrintPrompt {
+		printLeadPrompt()
+		return
 	}
 
-	backendName, ok := prepareLeadBackend(workDir)
+	workDir, backendName, dedicated, ok := leadRuntimePreflight()
 	if !ok {
 		return
 	}
@@ -169,12 +166,62 @@ func runLead(cmd *cobra.Command, args []string) {
 	}
 }
 
+// leadRuntimePreflight resolves lead's own working directory (<ws>/lead, or
+// LOOM_LEAD_WORKDIR, falling back to the current directory outside a
+// workspace), resolves the backend and prints the mode banner. An uninstalled
+// backend is not fatal: the operator is dropped into a shell in the lead
+// workdir (and ok is false) so they can fix it in place.
+//
+// dedicated reports whether workDir is lead's own directory. It is the first
+// half of the seed-and-shrink predicate - see generateLeadTerminalPrompt.
+func leadRuntimePreflight() (workDir, backendName string, dedicated, ok bool) {
+	workDir, dedicated, err := resolveLeadWorkdir(context.Background())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting working directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	backendName = cli.GetBackendName()
+	if hs, healthy := backends.CheckBackendHealth(backendName); healthy && !hs.Installed {
+		fmt.Fprintf(os.Stderr, "Error: %s backend is not installed (%s)\n\n", backendName, hs.Message)
+		fmt.Fprintf(os.Stderr, "Install it and try again. Dropping into a shell so you can fix this.\n\n")
+		execShell(workDir)
+		return "", "", false, false
+	}
+
+	fmt.Println("=========================================")
+	fmt.Println("Starting LEAD mode (Interactive)")
+	fmt.Println("=========================================")
+	fmt.Println()
+	return workDir, backendName, dedicated, true
+}
+
+// printLeadPrompt writes the static lead prompt to stdout. The zero
+// registration is deliberate: loadLeadRolePrompt then opens its own short-lived
+// read-only store handle, or returns "" when there is no workspace, so this
+// works outside a workspace and with fleet-db down.
+//
+// dedicated is false on purpose: this prints the FULL static prompt, which is
+// exactly what belongs in the profile's CLAUDE.md. Shrinking it to the safety
+// block here would write a persona-less file.
+func printLeadPrompt() {
+	prompt, _, err := generateLeadTerminalPrompt(context.Background(), leadSessionRegistration{}, false)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading terminal prompt: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println(prompt)
+}
+
 // generateLeadTerminalPrompt resolves the argv prompt and reports whether this
 // launch seeds ambient instruction files and shrinks argv to the safety block.
 //
 // Both an explicit --prompt file and an inline role prompt keep today's
 // behavior verbatim and clear the predicate: they are the operator asking for a
-// specific persona on argv, and neither belongs in a seeded AGENTS.md.
+// specific persona on argv, and neither belongs in a seeded AGENTS.md. That is
+// also the path `--prompt builtin:lead-profile` takes, which is how a claude
+// session under its own CLAUDE_CONFIG_DIR gets its persona: from the profile's
+// CLAUDE.md, not from a file in the workdir.
 //
 // The built-in lead prompt shrinks to the safety guardrails ONLY in a dedicated
 // workdir. Shrinking in the os.Getwd fallback would boot a lead with no persona
