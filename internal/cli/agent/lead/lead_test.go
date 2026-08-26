@@ -59,6 +59,9 @@ func TestRunLead_InvokesClaude(t *testing.T) {
 	// back to the backend registry and hits the mock instead of launching a
 	// real claude process under PTY supervision.
 	t.Setenv("LOOM_LEAD_CONTROLLED", "0")
+	// No workspace and no override: this is the os.Getwd fallback branch, and
+	// it must stay that way even when the operator's own LOOM_* vars are set.
+	isolateLeadEnv(t)
 
 	// Setup temp directory as working directory
 	tmpDir := t.TempDir()
@@ -114,6 +117,7 @@ func TestRunLead_InvokesClaude(t *testing.T) {
 
 func TestRunLeadUsesCustomTerminalPrompt(t *testing.T) {
 	t.Setenv("LOOM_LEAD_CONTROLLED", "0")
+	isolateLeadEnv(t)
 	t.Setenv(envAgentName, "nova")
 	t.Setenv("LOOM_AGENT_ROLE", "operator")
 
@@ -180,12 +184,17 @@ func TestGenerateLeadTerminalPromptUsesLiteralRolePrompt(t *testing.T) {
 	leadPromptFile = ""
 	t.Cleanup(func() { leadPromptFile = oldPromptFile })
 
-	prompt, err := generateLeadTerminalPrompt(context.Background(), leadSessionRegistration{
+	// dedicated=true on purpose: an inline role prompt must still win, and must
+	// still clear the seed-and-shrink predicate.
+	prompt, seedAndShrink, err := generateLeadTerminalPrompt(context.Background(), leadSessionRegistration{
 		handle:    &bootstrap.StoreHandle{Store: st},
 		Workspace: "E2E",
-	})
+	}, true)
 	if err != nil {
 		t.Fatalf("generateLeadTerminalPrompt: %v", err)
+	}
+	if seedAndShrink {
+		t.Fatal("inline role prompt must clear seedAndShrink")
 	}
 	if !strings.HasPrefix(prompt, "Literal {{ marker }}") {
 		t.Fatalf("prompt = %q, want literal inline role prompt", prompt)
@@ -302,5 +311,80 @@ func TestMarkLeadAssignmentDelivered(t *testing.T) {
 	}
 	if got := session.Metadata["lead_assignment_delivered_epic"]; got != "EPIC-1" {
 		t.Fatalf("delivered epic = %q", got)
+	}
+}
+
+// capturePrintPromptRun runs runLead with --print-prompt set and returns stdout.
+// The mock backend is installed so the assertion that nothing was invoked is
+// meaningful rather than vacuous.
+func capturePrintPromptRun(t *testing.T, message string) (string, *mockBackend) {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	oldPrint, oldPromptFile, oldMessage := leadPrintPrompt, leadPromptFile, leadMessage
+	leadPrintPrompt = true
+	leadPromptFile = ""
+	leadMessage = message
+	t.Cleanup(func() {
+		leadPrintPrompt, leadPromptFile, leadMessage = oldPrint, oldPromptFile, oldMessage
+	})
+
+	cli.TestingResetBackendState(t)
+	mock := &mockBackend{name: "claude"}
+	cli.RegisterBackend(mock)
+	_ = cli.SetBackend("claude")
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	runLead(nil, nil)
+
+	w.Close()
+	os.Stdout = oldStdout
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	return buf.String(), mock
+}
+
+func TestRunLeadPrintPromptPrintsStaticPromptAndStartsNoSession(t *testing.T) {
+	output, mock := capturePrintPromptRun(t, "")
+
+	if len(mock.interactiveCalls) != 0 {
+		t.Fatalf("--print-prompt started a session: %d invocations", len(mock.interactiveCalls))
+	}
+	if strings.Contains(output, "Starting LEAD mode") {
+		t.Fatalf("--print-prompt printed the session banner: %q", output)
+	}
+	if !strings.Contains(output, agent.GenerateLeadPrompt()) {
+		t.Fatalf("--print-prompt did not print the built-in lead prompt: %q", output)
+	}
+}
+
+func TestRunLeadPrintPromptOmitsDynamicSections(t *testing.T) {
+	output, _ := capturePrintPromptRun(t, "list open epics")
+
+	for _, forbidden := range []string{"## User's Initial Request", "list open epics", "## Loom Backend Assignment"} {
+		if strings.Contains(output, forbidden) {
+			t.Fatalf("--print-prompt leaked per-session content %q: %q", forbidden, output)
+		}
+	}
+}
+
+func TestRunLeadPrintPromptWorksWithoutWorkspace(t *testing.T) {
+	// No workspace and no LOOM_* pointers: loadLeadRolePrompt must fall through
+	// to the built-in prompt instead of failing.
+	t.Setenv("LOOM_WORKSPACE", "")
+	t.Setenv("LOOM_AGENT_ROLE", "")
+
+	output, _ := capturePrintPromptRun(t, "")
+	if !strings.Contains(output, "INTERACTIVE MODE: Project Lead") {
+		t.Fatalf("--print-prompt without a workspace did not print the built-in prompt: %q", output)
 	}
 }
