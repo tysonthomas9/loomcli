@@ -104,6 +104,48 @@ Version drift is the common case and it arrives on its own schedule: the
 harness auto-updates, and every profiled agent stops booting at the next spawn
 without anyone having changed anything in this repo.
 
+## The profile's own identity
+
+A profile root may carry `oauth-token`: a long-lived, non-rotating Claude Code
+credential minted for that one agent by `claude setup-token`, captured by the
+operator's `scripts/setup-profile-token.sh <agent>`. When the file is present,
+the injector exports its trimmed contents as `CLAUDE_CODE_OAUTH_TOKEN`
+alongside `CLAUDE_CONFIG_DIR`. When it is absent the environment is untouched,
+which is every profile provisioned before this existed.
+
+This is what makes a profile an **identity** rather than a copy of one. The
+provisioner's keychain-copy fallback seeds each profile from the *operator's*
+own OAuth pair, so all ten share one credential — and because refresh tokens
+are single-use, the operator's next `/login` invalidates it for whichever
+profile copied it last. The result is `Login expired — Please run /login` on an
+uncontrolled schedule, on whichever agent happens to be running. Measured
+2026-08-19 and again 2026-08-26. A profile holding its own token is unaffected
+by anyone else's refresh, and revoking one agent never touches the other nine.
+
+Three properties the implementation is built around:
+
+- **Additive.** Absent file, identical behavior. Present-but-empty is not
+  absent: it is a broken minting run, and falling through to the operator's
+  token would silently restore the sharing the file exists to end, so it
+  refuses the boot.
+- **Last-assignment wins.** `CLAUDE_CODE_OAUTH_TOKEN` is on the envfilter
+  allowlist, so the operator's own token reaches the child too. The profile's
+  assignment is appended after it and exec resolves duplicates to the last one.
+- **Not in the manifest.** The `files` list is an allowlist of what the
+  fingerprint covers, and a credential must never be hashed into a value that
+  is written down, compared, and printed in a refusal message. Nothing logs the
+  token, and no error carries it or any prefix of it — the child's environment
+  is the only place the value goes. The file is mode 600, like the
+  `.credentials.json` beside it.
+
+`loom lead` applies the same rule, including when it *inherits* its config root
+from the workspace launcher: the launcher exports the directory and nothing
+else, so without reading the token itself a launcher-started lead would run its
+own profile's settings on the operator's credential. It reads the token only
+from a root under `<workspace>/.loom/agent-profiles/` — an operator's own
+config root is theirs, and neither its contents nor a token they exported
+beside it is this feature's business.
+
 ## Who repairs what
 
 The split is not cosmetic — it is why `--fix` is safe to run:
@@ -113,6 +155,11 @@ The split is not cosmetic — it is why `--fix` is safe to run:
   never writes profile files, and never touches credentials. (The doctor-side
   check and its `--fix` land with their own phase of this feature; the
   refusal messages already point at it.)
+- **`scripts/setup-profile-token.sh <agent>` mints an identity.** It runs
+  `claude setup-token` once per agent — an interactive flow a human completes —
+  and captures the printed token straight into `<agent>/claude/oauth-token`. It
+  is the repair for an unreadable or empty token file, and the one thing that
+  is not provisioning: it writes no profile content and no manifest.
 - **`scripts/provision-profile.sh <agent>` is the only thing that provisions.**
   It is workspace-owned, outside this repo, creates or replaces the profile's
   content, seeds the keychain slot the harness authenticates against, and
