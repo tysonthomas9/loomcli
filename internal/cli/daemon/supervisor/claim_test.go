@@ -96,6 +96,38 @@ func TestClaimTaskSkipsInvalidLineageWithoutClaiming(t *testing.T) {
 	}
 }
 
+func TestInvalidLineageDoesNotConsumeAgentRestartBudget(t *testing.T) {
+	maxRetries := 1
+	mock := clitest.NewMockIssueBackend()
+	mock.ReadyResult = []backend.IssueData{{
+		ID: "task-invalid", IssueType: "task", Status: "open", Priority: 1, Title: "Invalid", Design: "plan", SourceRepo: "repo",
+		Metadata: map[string]string{backend.MetadataIntegrationInputs: `["task-b"]`},
+	}}
+	s := newTestSupervisorWithConfig(&cfgpkg.DaemonConfig{
+		Daemon: cfgpkg.DaemonSettings{RestartPolicy: cfgpkg.RestartPolicy{MaxRetries: &maxRetries}},
+	})
+	s.IssueBackend = mock
+	ap := &AgentProcess{
+		Entry:      cfgpkg.AgentEntry{Worktree: "backend-dev-1", Role: "backend-dev"},
+		RoleConfig: cfgpkg.RoleConfig{TaskFilter: "has_design"},
+	}
+
+	for attempt := 1; attempt <= maxRetries+2; attempt++ {
+		if s.claimTask(ap, "") {
+			t.Fatalf("attempt %d: malformed task was claimed", attempt)
+		}
+		if ap.LastError == nil || !ap.LastError.Class.Is(agenterr.NoWorkOutcome) {
+			t.Fatalf("attempt %d: LastError = %#v, want NoWork", attempt, ap.LastError)
+		}
+		if !s.shouldRestart(ap) {
+			t.Fatalf("attempt %d: shouldRestart = false, want idle re-poll", attempt)
+		}
+		if ap.StopReason == StopReasonMaxRetriesBlocked || ap.RestartCount != 0 {
+			t.Fatalf("attempt %d: invalid task consumed restart budget: stop=%q restarts=%d", attempt, ap.StopReason, ap.RestartCount)
+		}
+	}
+}
+
 func TestClaimTaskAcceptsLineageAfterClosedBlockerLeavesProjection(t *testing.T) {
 	mock := clitest.NewMockIssueBackend()
 	mock.ReadyResult = []backend.IssueData{{

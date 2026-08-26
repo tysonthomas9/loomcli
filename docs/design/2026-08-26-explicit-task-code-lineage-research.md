@@ -336,6 +336,19 @@ The invalid task's audit trail contains only `issue.create`: it has no claim or
 release event, session, task worktree, or exact task-scoped Loom ref. This is
 the intended pre-claim refusal and does not cycle ownership.
 
+An independent audit caught a second liveness condition in the first proof
+build: the refusal was classified as an unknown failure, so repeated polls
+could exhaust the backend agent's restart budget even though the task itself
+was never claimed. The final implementation classifies an invalid-only ready
+set as `NoWork` while retaining the diagnostic. A regression test repeatedly
+polls malformed lineage with a one-retry budget and asserts zero counted
+restarts and no blocked stop reason. In the refreshed live stack,
+`backend-dev-1` remained at `restart_count: 0`, automatically claimed the new
+valid `LINEAGEPROOF-10` while `LINEAGEPROOF-9` remained open, and delivered it
+through QA to Closed. Afterward it returned to `NoWork` with six idle polls and
+still had zero counted restarts. The malformed task still had only its create
+event and no session.
+
 The full Go quality gate passed, including race tests and 65.4% coverage against
 the 60% threshold. Browser inspection found no page or console errors. The
 [retained Kanban screenshot](evidence/2026-08-26-lineage-proof-kanban.png)

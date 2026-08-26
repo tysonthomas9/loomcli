@@ -437,7 +437,7 @@ func (s *Supervisor) tryClaimBestTask(ap *AgentProcess, issues []backend.IssueDa
 			slog.Error("skipping task with invalid code lineage", "task_id", match.Issue.ID, "err", err)
 			issues = removeIssueByID(issues, match.Issue.ID)
 			if len(issues) == 0 {
-				s.setPreflightError(ap, agenterr.OutcomeFromHarness(wrapper.ErrUnknown), fmt.Sprintf("no valid tasks: %s has invalid code lineage: %v", match.Issue.ID, err))
+				s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome), fmt.Sprintf("no valid tasks: %s has invalid code lineage: %v", match.Issue.ID, err))
 				return false, true
 			}
 			continue
