@@ -1435,7 +1435,11 @@ function App() {
               onAddWorkspace={() => setShowCreateWorkspace(true)}
             />
           }
-          sidebar={activeView === "files" ? null : sidebarContent}
+          sidebar={
+            activeView === "files" || activeView === "settings"
+              ? null
+              : sidebarContent
+          }
         >
           <div
             className={
