@@ -38,10 +38,10 @@
   align-items: center;
   justify-content: flex-start;
   gap: var(--space-2);
-  width: 100%;
-  min-width: 100%;
+  width: calc(100% + 2 * var(--kanban-board-inline-gap, 0px));
+  min-width: calc(100% + 2 * var(--kanban-board-inline-gap, 0px));
   padding: var(--space-2) var(--space-4);
-  margin-bottom: 0;
+  margin: 0 calc(-1 * var(--kanban-board-inline-gap, 0px));
   background-color: var(--color-bg);
   border-bottom: 0;
   box-shadow: 0 1px 2px rgb(0 0 0 / 5%);

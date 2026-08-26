@@ -1,11 +1,13 @@
 .kanbanShell {
+  --kanban-board-inline-gap: var(--space-3);
+
   display: flex;
   flex-direction: column;
   flex: 1 1 0; /* Fill available space to constrain column height */
   min-width: 0;
   max-width: 100%;
   min-height: 0; /* Allow flex item to shrink below content height */
-  padding-inline: var(--space-2);
+  padding-inline: var(--kanban-board-inline-gap);
   overflow-x: auto;
   overflow-y: auto; /* SwimLaneBoard needs vertical scroll */
 }
