@@ -8,6 +8,7 @@ import { memo } from "react";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 
 import { BlockedBadge } from "@/components/BlockedBadge";
+import { AgentAvatar } from "@/components/AgentAvatar";
 import { HighlightText } from "@/components/HighlightText";
 import { RepoBadge } from "@/components/RepoBadge";
 import { useHasActiveSession } from "@/contexts/IssueSessionContext";
@@ -17,6 +18,7 @@ import { useAgentStoreInstance } from "@/hooks/common";
 import { useToast } from "@/hooks/ui";
 import { useWorkspaceContext } from "@/hooks/workspace";
 import type { BlockerRef, Issue } from "@/types";
+import { resolveAgentByName } from "@/types";
 import {
   formatIssueId,
   getReviewType,
@@ -84,15 +86,6 @@ function getPriorityLevel(priority: number | undefined): 0 | 1 | 2 | 3 | 4 {
   if (priority < 0) return 4;
   if (priority > 4) return 4;
   return priority as 0 | 1 | 2 | 3 | 4;
-}
-
-function personInitials(name: string): string {
-  return name
-    .split(/\s+/)
-    .map((w) => w[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
 }
 
 /** Value-equality for the footer badge so store updates don't churn the card. */
@@ -187,6 +180,14 @@ export const IssueCard = memo(function IssueCard({
     agentStore,
     (s) => resolveCardFooterBadge(s.agents, issue, columnId),
     footerBadgeEqual,
+  );
+  const footerAgent = useStoreWithEqualityFn(
+    agentStore,
+    (s) =>
+      footerBadge?.kind === "agent"
+        ? resolveAgentByName(s.agents, footerBadge.name)
+        : undefined,
+    Object.is,
   );
   const showRepoBadge = isMultiRepo && isAllSelected && !!issue.repo;
   const showFooter = showRepoBadge || !!footerBadge;
@@ -328,21 +329,21 @@ export const IssueCard = memo(function IssueCard({
             {showRepoBadge && issue.repo && <RepoBadge repoName={issue.repo} />}
           </div>
           {footerBadge && (
-            <span
-              className={styles.ownerBadge}
+            <AgentAvatar
+              name={footerBadge.name}
+              agent={footerAgent}
+              compact
               title={
                 footerBadge.kind === "agent"
                   ? `Working: ${footerBadge.name}`
                   : `Owner: ${footerBadge.name}`
               }
-              data-testid={
+              testId={
                 footerBadge.kind === "agent"
                   ? "issue-card-agent"
                   : "issue-card-owner"
               }
-            >
-              {personInitials(footerBadge.name)}
-            </span>
+            />
           )}
         </footer>
       )}
