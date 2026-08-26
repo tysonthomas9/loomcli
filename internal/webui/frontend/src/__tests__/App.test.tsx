@@ -3607,15 +3607,18 @@ describe("App", () => {
   });
 
   describe("sidebar isMultiRepo guard", () => {
-    it("hides the workspace tree on the full-screen settings view", () => {
-      mockUseRouteView.mockReturnValue(createViewStateReturn("settings"));
+    it.each(["settings", "prs"] as const)(
+      "hides the workspace tree on the full-screen %s view",
+      (view) => {
+        mockUseRouteView.mockReturnValue(createViewStateReturn(view));
 
-      render(<App />);
+        render(<App />);
 
-      expect(
-        screen.queryByLabelText(/workspace tree/i),
-      ).not.toBeInTheDocument();
-    });
+        expect(
+          screen.queryByLabelText(/workspace tree/i),
+        ).not.toBeInTheDocument();
+      },
+    );
 
     it("renders WorkspaceTree sidebar for workspace view regardless of isMultiRepo", () => {
       vi.mocked(useWorkspaceContext).mockReturnValue({

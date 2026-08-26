@@ -1436,7 +1436,9 @@ function App() {
             />
           }
           sidebar={
-            activeView === "files" || activeView === "settings"
+            activeView === "files" ||
+            activeView === "settings" ||
+            activeView === "prs"
               ? null
               : sidebarContent
           }
