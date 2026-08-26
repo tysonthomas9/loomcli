@@ -612,6 +612,225 @@
   border-radius: var(--radius-full);
 }
 
+/* Attached PR concept: compact filter rail and elevated review cards. */
+.page {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 28px 24px 64px;
+}
+
+.header {
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 6px;
+}
+
+.title {
+  font-size: 20px;
+  font-weight: 650;
+}
+
+.subtitle {
+  margin: 0;
+  font-size: 13px;
+}
+
+.githubWarning {
+  margin: 14px 0 20px;
+  padding: 9px 14px;
+  font-size: 13px;
+  background: var(--color-bg-card);
+  border: 1px solid
+    color-mix(in srgb, var(--color-text-primary) 6%, transparent);
+  border-left: 3px solid var(--color-warning);
+  border-radius: 10px;
+}
+
+.queueLayout {
+  grid-template-columns: 248px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.filterRail {
+  position: sticky;
+  top: 20px;
+  padding: 8px;
+  background: var(--color-bg-card);
+  border: 0;
+  border-radius: 14px;
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 18%),
+    0 0 0 1px color-mix(in srgb, var(--color-text-primary) 7%, transparent);
+}
+
+.railSearch,
+.listSearch {
+  height: 36px;
+  background: color-mix(in srgb, var(--color-text-primary) 5.5%, transparent);
+  border: 0;
+  border-radius: 9px;
+}
+
+.railSearch {
+  margin-bottom: 6px;
+}
+
+.railSearch:focus-within,
+.listSearch:focus-within {
+  border-color: transparent;
+  box-shadow: 0 0 0 2px var(--color-warning-bg);
+}
+
+.railSection {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top-color: color-mix(
+    in srgb,
+    var(--color-text-primary) 6%,
+    transparent
+  );
+}
+
+.railHeading {
+  margin: 0 0 4px;
+  padding: 4px 10px 2px;
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.09em;
+}
+
+.railSectionHead .railHeading {
+  padding-left: 10px;
+}
+
+.checkRow,
+.pill {
+  position: relative;
+  min-height: 34px;
+  padding: 7px 10px;
+  border-radius: 9px;
+}
+
+.checkbox {
+  border-radius: 5px;
+}
+
+.checkRow[aria-pressed="true"] .checkbox {
+  background: var(--color-warning);
+  border-color: var(--color-warning);
+}
+
+.pill[data-active] {
+  background: var(--color-warning-bg);
+  border-color: transparent;
+}
+
+.pill[data-active]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  background: var(--color-warning);
+  border-radius: 3px;
+}
+
+.listSearch {
+  max-width: none;
+  background: var(--color-bg-card);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 16%),
+    0 0 0 1px color-mix(in srgb, var(--color-text-primary) 7%, transparent);
+}
+
+.toolbar {
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.list {
+  gap: 10px;
+}
+
+.row {
+  gap: 14px;
+  background: var(--color-bg-card);
+  border: 0;
+  border-radius: 12px;
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 18%),
+    0 0 0 1px color-mix(in srgb, var(--color-text-primary) 7%, transparent);
+}
+
+.row:hover {
+  background: var(--color-bg-hover);
+  box-shadow:
+    0 6px 18px rgb(0 0 0 / 22%),
+    0 0 0 1px color-mix(in srgb, var(--color-text-primary) 11%, transparent);
+}
+
+.rowMain {
+  gap: 5px;
+  padding: 14px 0;
+}
+
+.rowIcon {
+  padding-left: 16px;
+}
+
+.rowRight {
+  padding-right: 16px;
+}
+
+.rowTitle {
+  font-size: 14.5px;
+  font-weight: 550;
+}
+
+.status[data-pr-state="review"] {
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+}
+
+.repoChip {
+  padding: 0;
+  font-size: 11.5px;
+  background: transparent;
+  border: 0;
+}
+
+.ticketChip {
+  background: color-mix(in srgb, var(--color-text-primary) 5.5%, transparent);
+  border-radius: 6px;
+}
+
+.epicChip {
+  gap: 5px;
+  padding: 0;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--color-text-tertiary);
+  background: transparent;
+}
+
+.epicChip::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  background: var(--color-type-epic);
+  border-radius: 2.5px;
+}
+
+.avatar,
+.avatarEmpty {
+  width: 30px;
+  height: 30px;
+}
+
 @media (max-width: 900px) {
   .page {
     padding: 18px;

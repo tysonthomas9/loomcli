@@ -36,12 +36,6 @@ const FILTERS: { id: PRFilter; label: string }[] = [
   { id: "merged", label: "Merged" },
 ];
 
-const GROUPS: { id: GroupMode; label: string }[] = [
-  { id: "none", label: "None" },
-  { id: "repo", label: "Repo" },
-  { id: "epic", label: "Epic" },
-];
-
 export interface PullRequestRow {
   /** Loom issue backing the row — primary source when present. */
   issue?: Issue | undefined;
@@ -247,7 +241,7 @@ export function PRsPage(): JSX.Element {
     state: "all",
   });
   const [filter, setFilter] = useState<PRFilter>("review");
-  const [groupMode, setGroupMode] = useState<GroupMode>("none");
+  const groupMode: GroupMode = "none";
   const [query, setQuery] = useState("");
   const [railQuery, setRailQuery] = useState("");
   const [selectedRepos, setSelectedRepos] = useState<Set<string>>(new Set());
@@ -520,20 +514,23 @@ export function PRsPage(): JSX.Element {
     <div className={styles.page}>
       <header className={styles.header}>
         <h1 className={styles.title}>Pull Requests</h1>
+        <p className={styles.subtitle}>
+          {loading && rows.length === 0 ? (
+            <>Loading pull requests…</>
+          ) : rows.length > 0 ? (
+            <>
+              <strong className={styles.subtitleCount}>{openCount}</strong> open
+              {" · "}
+              <strong className={styles.subtitleCount}>
+                {counts.review}
+              </strong>{" "}
+              awaiting review
+            </>
+          ) : (
+            <>Review-stage tasks and GitHub pull requests in this workspace.</>
+          )}
+        </p>
       </header>
-      <p className={styles.subtitle}>
-        {loading && rows.length === 0 ? (
-          <>Loading pull requests…</>
-        ) : rows.length > 0 ? (
-          <>
-            <strong className={styles.subtitleCount}>{openCount} open</strong>
-            {" · "}
-            {counts.review} awaiting review
-          </>
-        ) : (
-          <>Review-stage tasks and GitHub pull requests in this workspace.</>
-        )}
-      </p>
 
       {githubWarning && (
         <p
@@ -683,30 +680,6 @@ export function PRsPage(): JSX.Element {
               <span className={styles.resultCount}>
                 {filtered.length} result{filtered.length === 1 ? "" : "s"}
               </span>
-              <div className={styles.groupControl}>
-                <span className={styles.groupLabel}>Group</span>
-                <div
-                  className={styles.segmented}
-                  role="group"
-                  aria-label="Group pull requests by"
-                >
-                  {GROUPS.map((g) => {
-                    const isActive = groupMode === g.id;
-                    return (
-                      <button
-                        key={g.id}
-                        type="button"
-                        className={styles.segButton}
-                        data-active={isActive || undefined}
-                        aria-pressed={isActive}
-                        onClick={() => setGroupMode(g.id)}
-                      >
-                        {g.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
             </div>
 
             {filtered.length === 0 ? (

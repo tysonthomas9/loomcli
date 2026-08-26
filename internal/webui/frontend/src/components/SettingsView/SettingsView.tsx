@@ -54,45 +54,95 @@ const SETTINGS_CATEGORIES: {
   id: SettingsCategory;
   label: string;
   description: string;
-  icon: string;
 }[] = [
   {
     id: "general",
     label: "General",
     description: "Workspace defaults and project setup.",
-    icon: "≡",
   },
   {
     id: "ai-clis",
     label: "AI CLIs",
     description: "Installed backends and authentication status.",
-    icon: ">_",
   },
   {
     id: "agents",
     label: "Agents",
     description: "Per-agent backend overrides.",
-    icon: "◇",
   },
   {
     id: "runtimes",
     label: "Runtimes",
     description: "Local and remote execution defaults.",
-    icon: "☁",
   },
   {
     id: "integrations",
     label: "Integrations",
     description: "Connected services and credentials.",
-    icon: "⌁",
   },
   {
     id: "storage",
     label: "Storage",
     description: "FleetDB persistence and Redis.",
-    icon: "▱",
   },
 ];
+
+function SettingsCategoryIcon({ category }: { category: SettingsCategory }) {
+  const common = {
+    width: 17,
+    height: 17,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.7,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+  };
+  switch (category) {
+    case "general":
+      return (
+        <svg {...common}>
+          <path d="M4 6h16M4 12h16M4 18h16" />
+          <circle cx="9" cy="6" r="2" fill="currentColor" stroke="none" />
+          <circle cx="15" cy="12" r="2" fill="currentColor" stroke="none" />
+          <circle cx="8" cy="18" r="2" fill="currentColor" stroke="none" />
+        </svg>
+      );
+    case "ai-clis":
+      return (
+        <svg {...common}>
+          <rect x="3" y="4" width="18" height="16" rx="3" />
+          <path d="m7.5 10 2.2 2.2-2.2 2.2M12.5 14.6h4" />
+        </svg>
+      );
+    case "agents":
+      return (
+        <svg {...common}>
+          <rect x="4" y="7" width="16" height="12" rx="3" />
+          <path d="M12 4v3M9 13h.01M15 13h.01" />
+        </svg>
+      );
+    case "runtimes":
+      return (
+        <svg {...common}>
+          <path d="M6.5 18a4 4 0 0 1-.4-7.98A5.5 5.5 0 0 1 16.9 9.2 3.9 3.9 0 0 1 17.5 18h-11Z" />
+        </svg>
+      );
+    case "integrations":
+      return (
+        <svg {...common}>
+          <path d="M9 3v5M15 3v5M7 8h10v4a5 5 0 0 1-10 0V8ZM12 17v4" />
+        </svg>
+      );
+    case "storage":
+      return (
+        <svg {...common}>
+          <ellipse cx="12" cy="6" rx="7.5" ry="3" />
+          <path d="M4.5 6v12c0 1.66 3.36 3 7.5 3s7.5-1.34 7.5-3V6M4.5 12c0 1.66 3.36 3 7.5 3s7.5-1.34 7.5-3" />
+        </svg>
+      );
+  }
+}
 
 const EMPTY_REDIS_FORM: RedisFormState = {
   enabled: false,
@@ -189,6 +239,8 @@ export function SettingsView({
   const panelMatches = (...terms: string[]) =>
     !normalizedSettingsQuery ||
     terms.some((term) => term.toLowerCase().includes(normalizedSettingsQuery));
+  const categoryHidden = (category: SettingsCategory) =>
+    (!normalizedSettingsQuery && activeCategory !== category) || undefined;
 
   const navigateToCategory = (category: SettingsCategory) => {
     setActiveCategory(category);
@@ -452,7 +504,7 @@ export function SettingsView({
                 onClick={() => navigateToCategory(category.id)}
               >
                 <span className={styles.navIcon} aria-hidden="true">
-                  {category.icon}
+                  <SettingsCategoryIcon category={category.id} />
                 </span>
                 <span>{category.label}</span>
                 {category.id === "ai-clis" &&
@@ -487,6 +539,7 @@ export function SettingsView({
             className={styles.panel}
             id="settings-general"
             data-settings-panel="onboarding"
+            data-category-hidden={categoryHidden("general")}
             data-search-hidden={
               !panelMatches("onboarding", "project setup", "checklist") ||
               undefined
@@ -516,6 +569,7 @@ export function SettingsView({
             className={styles.panel}
             id="settings-ai-clis"
             data-settings-panel="ai-clis"
+            data-category-hidden={categoryHidden("ai-clis")}
             data-search-hidden={
               !panelMatches(
                 "AI CLIs",
@@ -545,6 +599,7 @@ export function SettingsView({
           <div
             className={styles.panel}
             data-settings-panel="backend"
+            data-category-hidden={categoryHidden("general")}
             data-search-hidden={
               !panelMatches(
                 "project default backend",
@@ -611,6 +666,7 @@ export function SettingsView({
           <div
             className={styles.panel}
             data-settings-panel="design-format"
+            data-category-hidden={categoryHidden("general")}
             data-testid="design-format-panel"
             data-search-hidden={
               !panelMatches("planner design format", "markdown", "html") ||
@@ -666,6 +722,7 @@ export function SettingsView({
             className={styles.panel}
             id="settings-agents"
             data-settings-panel="agents"
+            data-category-hidden={categoryHidden("agents")}
             data-search-hidden={
               !panelMatches(
                 "agents",
@@ -717,6 +774,7 @@ export function SettingsView({
             className={styles.panel}
             id="settings-runtimes"
             data-settings-panel="runtimes"
+            data-category-hidden={categoryHidden("runtimes")}
             data-testid="remote-runtimes-panel"
             data-search-hidden={
               !panelMatches("runtimes", "Daytona", "Opencode", "task runner") ||
@@ -855,6 +913,7 @@ export function SettingsView({
             className={styles.panel}
             id="settings-integrations"
             data-settings-panel="integrations"
+            data-category-hidden={categoryHidden("integrations")}
             data-testid="github-settings-panel"
             data-search-hidden={
               !panelMatches("integrations", "GitHub", "token", "PR review") ||
@@ -922,6 +981,7 @@ export function SettingsView({
             className={styles.panel}
             id="settings-storage"
             data-settings-panel="storage"
+            data-category-hidden={categoryHidden("storage")}
             data-testid="fleetdb-redis-panel"
             data-search-hidden={
               !panelMatches("storage", "FleetDB", "Redis", "database") ||
