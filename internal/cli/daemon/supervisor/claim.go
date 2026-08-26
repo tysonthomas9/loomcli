@@ -473,14 +473,7 @@ func (s *Supervisor) validateTaskLineageBeforeClaim(issue backend.IssueData) err
 	}
 	ctx, cancel := s.operationContext(claimOperationTimeout)
 	defer cancel()
-	detail, err := s.IssueBackend.Get(ctx, issue.ID)
-	if err != nil {
-		return fmt.Errorf("read task %q dependencies: %w", issue.ID, err)
-	}
-	if detail == nil {
-		return fmt.Errorf("task %q does not exist", issue.ID)
-	}
-	return backend.ValidateTaskLineageReferences(ctx, spec, issue.ID, issue.SourceRepo, detail.Dependencies, s.IssueBackend.Get)
+	return backend.ValidateTaskLineageInputs(ctx, spec, issue.SourceRepo, s.IssueBackend.Get)
 }
 
 // conflictHolder extracts the holder identity from a KindConflict error's

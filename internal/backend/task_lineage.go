@@ -98,37 +98,6 @@ func (s TaskLineageSpec) SchedulingDependencies(explicit []string) []string {
 	return out
 }
 
-// ValidateTaskLineageReferences validates the relational part of task code
-// lineage at the owning issue-backend seam. Every code input must also be a
-// direct blocks dependency in the scheduling graph and must belong to the
-// same source repository as the task.
-func ValidateTaskLineageReferences(
-	ctx context.Context,
-	spec TaskLineageSpec,
-	taskID, sourceRepo string,
-	dependencies []DependencyData,
-	get func(context.Context, string) (*IssueDetailData, error),
-) error {
-	if err := spec.Validate(taskID); err != nil {
-		return err
-	}
-	blockers := make(map[string]struct{}, len(dependencies))
-	for _, dependency := range dependencies {
-		if dependency.IssueID == taskID && dependency.Type == "blocks" {
-			blockers[dependency.DependsOnID] = struct{}{}
-		}
-	}
-	for _, inputID := range append([]string{spec.InheritsFrom}, spec.IntegrationInputs...) {
-		if inputID == "" {
-			continue
-		}
-		if _, ok := blockers[inputID]; !ok {
-			return fmt.Errorf("code input %q is not a direct blocks dependency", inputID)
-		}
-	}
-	return ValidateTaskLineageInputs(ctx, spec, sourceRepo, get)
-}
-
 // ValidateTaskLineageInputs verifies authoring-time references before the
 // issue is created. The supported create paths separately normalize every
 // code input into the new task's direct blocks dependencies.

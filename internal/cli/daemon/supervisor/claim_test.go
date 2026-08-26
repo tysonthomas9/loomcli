@@ -58,13 +58,17 @@ func TestClaimTaskSkipsInvalidLineageWithoutClaiming(t *testing.T) {
 			metadata: map[string]string{backend.MetadataIntegrationInputs: `["task-b"]`},
 		},
 		{
-			name:     "code input is not a direct blocker",
-			metadata: map[string]string{backend.MetadataInheritsFrom: "task-b"},
+			name:     "code input does not exist",
+			metadata: map[string]string{backend.MetadataInheritsFrom: "task-missing"},
+			get: func(context.Context, string) (*backend.IssueDetailData, error) {
+				return nil, nil
+			},
+		},
+		{
+			name:     "code input belongs to another repository",
+			metadata: map[string]string{backend.MetadataInheritsFrom: "task-other-repo"},
 			get: func(_ context.Context, id string) (*backend.IssueDetailData, error) {
-				if id == "task-invalid" {
-					return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id, SourceRepo: "repo"}}, nil
-				}
-				return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id, SourceRepo: "repo"}}, nil
+				return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id, SourceRepo: "other-repo"}}, nil
 			},
 		},
 	} {
@@ -89,6 +93,28 @@ func TestClaimTaskSkipsInvalidLineageWithoutClaiming(t *testing.T) {
 				t.Fatalf("AssignedTaskID = %q", ap.AssignedTaskID)
 			}
 		})
+	}
+}
+
+func TestClaimTaskAcceptsLineageAfterClosedBlockerLeavesProjection(t *testing.T) {
+	mock := clitest.NewMockIssueBackend()
+	mock.ReadyResult = []backend.IssueData{{
+		ID: "task-c", IssueType: "task", Status: "open", Priority: 1, Title: "C", Design: "plan", SourceRepo: "repo",
+		Metadata: map[string]string{backend.MetadataInheritsFrom: "task-a"},
+	}}
+	mock.GetFn = func(_ context.Context, id string) (*backend.IssueDetailData, error) {
+		if id != "task-a" {
+			t.Fatalf("Get(%q), want closed code input task-a", id)
+		}
+		return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id, Status: "closed", SourceRepo: "repo"}}, nil
+	}
+	s := &Supervisor{IssueBackend: mock}
+	ap := &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "falcon", Role: "task"}}
+	if !s.claimTask(ap, "") {
+		t.Fatal("valid closed-input lineage was rejected")
+	}
+	if ap.AssignedTaskID != "task-c" {
+		t.Fatalf("AssignedTaskID = %q, want task-c", ap.AssignedTaskID)
 	}
 }
 

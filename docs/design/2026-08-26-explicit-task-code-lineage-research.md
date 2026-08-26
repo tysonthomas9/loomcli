@@ -99,16 +99,19 @@ For every task:
 4. An integration task has exactly one `inherits_from` base and at least one
    `integration_inputs` entry.
 5. Base and integration inputs are distinct, non-empty, unique, not the task
-   itself, direct blockers of the task, and in the same source repository.
+   itself, direct blockers of the task at authoring time, and in the same source
+   repository. Fleet omits satisfied blockers from the later ready/detail
+   projection, so pre-claim validation rechecks shape, existence and repository
+   but does not try to reconstruct the closed scheduling edge.
 6. An integration output must contain the exact published commit of its base
    and every integration input as Git ancestors. A cherry-pick is insufficient
    because it does not preserve the input commit's immutable identity.
 7. The lineage declaration is immutable after task creation. Changing it
    requires creating a replacement task. This avoids a metadata/dependency
    multi-write race.
-8. Invalid lineage is rejected while authoring the task and, defensively, while
-   scanning ready candidates **before** claim. It must never be handled by
-   claim-then-release.
+8. Invalid lineage shape and references are rejected while authoring the task
+   and, defensively, rechecked while scanning ready candidates **before** claim.
+   It must never be handled by claim-then-release.
 
 Git documents `merge-base --is-ancestor A B` as the exact reachability test for
 whether A is an ancestor of B
@@ -246,8 +249,9 @@ surface remains Loom's typed CLI/API.
 - Ordinary task with one base starts at that exact published SHA.
 - Many scheduling blockers plus one base do not trigger ancestry guessing.
 - Integration spec requires one base and one or more distinct merge inputs.
-- Invalid/self/cross-repo/non-blocker lineage fails before issue creation and
-  fails the defensive ready-candidate check before claim.
+- Invalid/self/cross-repo lineage fails before issue creation and fails the
+  defensive ready-candidate check before claim. The supported create path
+  guarantees every lineage input is also authored as a blocker.
 - CLI normalization adds base and integration inputs to the scheduling-edge
   union exactly once.
 - Fleet create/get round-trips both metadata keys; Loom API and generated
@@ -303,4 +307,3 @@ multiple scheduler intervals and prove it was never claimed.
 - Cherry-pick-only integration is out of scope because it cannot prove the
   immutable input commit is an ancestor of the delivery.
 - Auto-closing the parent epic is unrelated.
-
