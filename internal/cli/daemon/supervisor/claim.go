@@ -133,7 +133,10 @@ func (s *Supervisor) prepareClaimedTaskWorktree(ctx context.Context, ap *AgentPr
 		if err != nil {
 			return fmt.Errorf("read task %q dependencies: %w", ap.AssignedTaskID, err)
 		}
-		requiredDependencies = dependencyTaskIDs(issue)
+		requiredDependencies, err = requiredTaskDependencyIDs(ctx, s.IssueBackend, ap.AssignedTaskID, issue)
+		if err != nil {
+			return err
+		}
 		repo, err = resolveTaskRepo(repo, issue.SourceRepo, s.FindRepoConfig)
 		if err != nil {
 			return err
@@ -169,6 +172,37 @@ func (s *Supervisor) prepareClaimedTaskWorktree(ctx context.Context, ap *AgentPr
 	ap.TaskWorktreeLease = prepared.Lease
 	ap.Mu.Unlock()
 	return nil
+}
+
+func requiredTaskDependencyIDs(ctx context.Context, issues backend.IssueBackend, taskID string, issue *backend.IssueDetailData) ([]string, error) {
+	current := dependencyTaskIDs(issue)
+	lineage, ok := issues.(backend.DependencyLineageBackend)
+	if !ok {
+		return current, nil
+	}
+	historical, err := lineage.DependencyTaskIDs(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("read task %q dependency lineage: %w", taskID, err)
+	}
+	return mergeTaskIDs(current, historical), nil
+}
+
+func mergeTaskIDs(groups ...[]string) []string {
+	var merged []string
+	seen := make(map[string]struct{})
+	for _, group := range groups {
+		for _, id := range group {
+			if id == "" {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			merged = append(merged, id)
+		}
+	}
+	return merged
 }
 
 func releaseTaskWorktreeLease(ap *AgentProcess) {

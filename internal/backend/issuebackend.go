@@ -187,6 +187,15 @@ type DeferredIssueBackend interface {
 	Deferred(ctx context.Context, opts DeferredOpts) ([]IssueData, error)
 }
 
+// DependencyLineageBackend is an optional extension for backends whose ready
+// projection removes blocking edges when a blocker closes. It returns the
+// task's configured direct blocking lineage, including closed blockers, while
+// respecting explicit dependency removals. This is delivery ancestry, not a
+// current-readiness query.
+type DependencyLineageBackend interface {
+	DependencyTaskIDs(ctx context.Context, id string) ([]string, error)
+}
+
 // ClaimReleaser is an optional interface implemented by backends that maintain
 // an explicit claim lock distinct from issue status (e.g., the fleet-db
 // backend). Callers type-assert to release a completed agent's claim using the

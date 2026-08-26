@@ -53,6 +53,15 @@ type recordingTaskWorktreeManager struct {
 	err error
 }
 
+type historicalDependencyBackend struct {
+	*clitest.MockIssueBackend
+	dependencyIDs []string
+}
+
+func (b *historicalDependencyBackend) DependencyTaskIDs(context.Context, string) ([]string, error) {
+	return append([]string(nil), b.dependencyIDs...), nil
+}
+
 func TestRequiredDependenciesUseDirectBlockingTasks(t *testing.T) {
 	issue := &backend.IssueDetailData{Dependencies: []backend.DependencyData{
 		{DependsOnID: "TASK-A", Type: "blocks"},
@@ -93,6 +102,38 @@ func TestPrepareClaimedTaskWorktreeUsesTaskRepoWithoutAgentAffinity(t *testing.T
 	}
 	if ap.RepoConfig != repo || manager.req.RepoName != "backend" || len(manager.req.DependencyTaskIDs) != 1 || manager.req.DependencyTaskIDs[0] != "TASK-8" {
 		t.Fatalf("resolved repo = %+v, request = %+v", ap.RepoConfig, manager.req)
+	}
+}
+
+func TestPrepareClaimedTaskWorktreeUsesHistoricalDependenciesAfterBlockerCloses(t *testing.T) {
+	manager := &recordingTaskWorktreeManager{got: TaskWorktree{Path: "/workspace/task", Branch: "loom/task/ws/TASK-B"}}
+	issues := &historicalDependencyBackend{
+		MockIssueBackend: clitest.NewMockIssueBackend(),
+		dependencyIDs:    []string{"TASK-A"},
+	}
+	issues.GetFn = func(context.Context, string) (*backend.IssueDetailData, error) {
+		// FleetDB removes blocking edges when TASK-A closes, so the claim-time
+		// issue projection no longer contains TASK-A even though its delivery is
+		// required as TASK-B's immutable input.
+		return &backend.IssueDetailData{IssueData: backend.IssueData{ID: "TASK-B", SourceRepo: "repo-back"}}, nil
+	}
+	repo := &cfgpkg.RepoConfig{Name: "backend", SourceRepoID: "repo-back", Path: "/workspace/backend", DefaultBranch: "main"}
+	s := &Supervisor{
+		ProjectDir:    "/workspace",
+		WorkspaceID:   "ws",
+		TaskWorktrees: manager,
+		IssueBackend:  issues,
+		FindRepoConfig: func(string) *cfgpkg.RepoConfig {
+			return repo
+		},
+	}
+	ap := &AgentProcess{AssignedTaskID: "TASK-B"}
+
+	if err := s.prepareClaimedTaskWorktree(context.Background(), ap); err != nil {
+		t.Fatal(err)
+	}
+	if got := manager.req.DependencyTaskIDs; len(got) != 1 || got[0] != "TASK-A" {
+		t.Fatalf("DependencyTaskIDs = %v, want closed blocker TASK-A from durable lineage", got)
 	}
 }
 
