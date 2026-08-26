@@ -5,6 +5,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	cli "github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/teamtemplate"
 )
 
@@ -59,6 +60,37 @@ func TestQARoutesOnlyAfterImplementationHandoff(t *testing.T) {
 		if got := matchTemplateRole(ready, templateRole(t, "fullstack-app", name)); got.Score > 0 {
 			t.Fatalf("%s can reclaim QA handoff: %+v", name, got)
 		}
+	}
+}
+
+func TestFinalVerificationAgentsCloseOnlyAfterSupervisorPublishes(t *testing.T) {
+	tests := []struct {
+		templateID string
+		agentName  string
+	}{
+		{templateID: "fullstack-app", agentName: "qa-engineer-1"},
+		{templateID: "backend", agentName: "qa-engineer-1"},
+		{templateID: "website", agentName: "site-qa-1"},
+		{templateID: "ai-agent", agentName: "eval-engineer-1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.templateID, func(t *testing.T) {
+			tpl, ok := teamtemplate.ByID(tt.templateID)
+			if !ok {
+				t.Fatalf("template %q missing", tt.templateID)
+			}
+			for _, agent := range tpl.Agents {
+				if agent.Name != tt.agentName {
+					continue
+				}
+				if agent.Hooks == nil || len(agent.Hooks.OnComplete) != 1 || agent.Hooks.OnComplete[0].Type != domain.AgentHookActionClose {
+					t.Fatalf("%s hooks=%+v, want one supervisor close action", tt.agentName, agent.Hooks)
+				}
+				return
+			}
+			t.Fatalf("agent %q missing", tt.agentName)
+		})
 	}
 }
 

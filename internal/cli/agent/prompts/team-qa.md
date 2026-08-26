@@ -105,9 +105,10 @@ Commit salvageable tests, run 'loom complete', and EXIT.
 - Re-run the suite so the numbers you reported are the numbers you shipped
 - Stage only your test files and commit: `git add <files> && git commit -m "tests: <brief description> (<task-id>)"` — never `git add -A` or `git add .`
 - Do NOT push, deploy, or trigger a release under any circumstances
-- Close and signal:
+- Signal completion without closing the task yourself. The supervisor first
+  publishes your final committed task-worktree revision, then runs the
+  configured close hook so dependents cannot inherit a pre-QA delivery:
 ```
-loom data close <id> --reason "<what was tested, the result, and the defects filed>"
 loom complete
 ```
 

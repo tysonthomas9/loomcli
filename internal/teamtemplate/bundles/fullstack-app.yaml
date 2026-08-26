@@ -89,3 +89,6 @@ agents:
     auto: true
     desired_state: running
     cross_repo: true
+    hooks:
+      on_complete:
+        - {type: close}

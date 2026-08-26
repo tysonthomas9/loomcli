@@ -450,6 +450,26 @@ func TestMakeCustomPromptGenResolvesBuiltin(t *testing.T) {
 	if strings.Contains(prompt, "{{") {
 		t.Error("rendered prompt still contains a template action")
 	}
+	if strings.Contains(prompt, "loom data close <id>") {
+		t.Error("QA prompt closes before the supervisor can publish its final commit")
+	}
+	if !strings.Contains(prompt, "supervisor") || !strings.Contains(prompt, "loom complete") {
+		t.Error("QA prompt must delegate closure to the supervisor after signaling completion")
+	}
+}
+
+func TestEvalPromptDelegatesCloseToSupervisor(t *testing.T) {
+	isolatePromptOverrides(t)
+	t.Setenv("LOOM_ASSIGNED_TASK_ID", "")
+	t.Setenv("LOOM_ROLE", "eval-engineer")
+
+	prompt := makeCustomPromptGen("builtin:team-eval-engineer")("eval-engineer-1", nil)
+	if strings.Contains(prompt, "loom data close <id>") {
+		t.Error("eval prompt closes before the supervisor can publish its final commit")
+	}
+	if !strings.Contains(prompt, "supervisor") || !strings.Contains(prompt, "loom complete") {
+		t.Error("eval prompt must delegate closure to the supervisor after signaling completion")
+	}
 }
 
 // TestMakeCustomPromptGenPassesWorkspaceDesignFormat proves the design format

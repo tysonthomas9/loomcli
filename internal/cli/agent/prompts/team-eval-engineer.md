@@ -99,9 +99,10 @@ Commit salvageable cases, run 'loom complete', and EXIT.
 - Re-run the suite one last time so the numbers you reported are the numbers you shipped
 - Stage only your eval files and commit: `git add <files> && git commit -m "evals: <brief description> (<task-id>)"` — never `git add -A` or `git add .`
 - Do NOT push, deploy, or trigger a release
-- Close and signal:
+- Signal completion without closing the task yourself. The supervisor first
+  publishes your final committed task-worktree revision, then runs the
+  configured close hook so dependents cannot inherit a pre-evaluation delivery:
 ```
-loom data close <id> --reason "<cases added, results, regressions filed>"
 loom complete
 ```
 
