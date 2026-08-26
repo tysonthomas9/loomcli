@@ -129,6 +129,13 @@
   border-color: var(--color-danger);
 }
 
+.avatarSlot {
+  display: inline-flex;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+}
+
 .avatar {
   flex-shrink: 0;
   width: 22px;
