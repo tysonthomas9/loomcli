@@ -1525,3 +1525,25 @@ func TestGenerateTerminalPromptBuiltinPRReviewCheckout(t *testing.T) {
 		t.Fatal("checkout review prompt must differ from the lead prompt")
 	}
 }
+
+// TestLeadAgentsFileTextOmitsSafetyBlock pins the split introduced for lead's
+// dedicated workdir: the persona is static and goes to AGENTS.md, the safety
+// guardrails are rendered per run and stay on argv.
+func TestLeadAgentsFileTextOmitsSafetyBlock(t *testing.T) {
+	agentsFile := LeadAgentsFileText()
+	if !strings.Contains(agentsFile, "INTERACTIVE MODE: Project Lead") {
+		t.Fatalf("LeadAgentsFileText missing the lead persona:\n%s", agentsFile)
+	}
+	if strings.Contains(agentsFile, "Multi-Agent Safety Rules") {
+		t.Fatal("LeadAgentsFileText must not embed the runtime safety block")
+	}
+	safety := LeadSafetyPrompt()
+	if !strings.Contains(safety, "Multi-Agent Safety Rules") || !strings.Contains(safety, "Do not switch branches") {
+		t.Fatalf("LeadSafetyPrompt missing the guardrails:\n%s", safety)
+	}
+	// The two halves stay reachable from the unchanged full prompt.
+	full := GenerateLeadPrompt()
+	if !strings.Contains(full, safety) {
+		t.Fatal("GenerateLeadPrompt no longer contains LeadSafetyPrompt")
+	}
+}
