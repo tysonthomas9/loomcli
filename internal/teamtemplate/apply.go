@@ -358,6 +358,18 @@ func (r *applyRun) createTeamMember(ctx context.Context, spec TemplateAgent, rol
 // the only thing that can repair it.
 func (r *applyRun) existingMemberStep(ctx context.Context, spec TemplateAgent, existing *domain.Agent, roleKind domain.RoleKind) StepResult {
 	fields := compareAgent(spec, existing)
+	// Hooks are template-owned routing policy. Revision 4 moved the successful
+	// implementer handoff out of prompts and into supervisor completion, so a
+	// nil -> configured change is a safe managed migration independent of
+	// unrelated customized fields. Never overwrite a non-empty custom pipeline.
+	if containsField(fields, "hooks") && existing.Hooks.IsEmpty() && !spec.Hooks.IsEmpty() && !r.deps.DryRun {
+		updated, err := r.deps.Store.Agents().Update(ctx, r.workspaceKey, spec.Name, store.AgentUpdate{Hooks: spec.Hooks.Clone()})
+		if err != nil {
+			return failedStep(entityAgent, spec.Name, err)
+		}
+		existing = updated
+		fields = compareAgent(spec, existing)
+	}
 	if len(fields) > 0 {
 		step := StepResult{Entity: entityAgent, Name: spec.Name, Action: StepSkippedDiverged, Fields: fields}
 		for _, field := range fields {
@@ -369,6 +381,15 @@ func (r *applyRun) existingMemberStep(ctx context.Context, spec TemplateAgent, e
 	}
 	step := StepResult{Entity: entityAgent, Name: spec.Name, Action: StepSkippedMatch}
 	return r.withMaterialization(ctx, step, *existing, roleKind)
+}
+
+func containsField(fields []string, want string) bool {
+	for _, field := range fields {
+		if field == want {
+			return true
+		}
+	}
+	return false
 }
 
 // withMaterialization runs the injected materializer and turns a failure into a

@@ -66,6 +66,7 @@ func compareAgent(tpl TemplateAgent, existing *domain.Agent) []string {
 		boolDiff("auto", tpl.Auto, existing.Auto),
 		stringDiff("desired_state", tpl.DesiredState, string(existing.DesiredState)),
 		boolDiff("cross_repo", tpl.CrossRepo, existing.CrossRepo),
+		{name: "hooks", diverged: !tpl.Hooks.Equal(existing.Hooks)},
 	})
 }
 

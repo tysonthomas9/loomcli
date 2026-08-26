@@ -118,8 +118,8 @@ func TestImplementationPromptsHandOffToQA(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(prompt, "--add-label ready-for-qa") || !strings.Contains(prompt, "--status open") {
-				t.Fatalf("%s has no ready-for-qa handoff", id)
+			if !strings.Contains(prompt, "--add-label delivery-pending") || !strings.Contains(prompt, "supervisor publishes") {
+				t.Fatalf("%s has no supervisor-owned ready-for-qa handoff", id)
 			}
 		})
 	}
@@ -449,6 +449,38 @@ func TestMakeCustomPromptGenResolvesBuiltin(t *testing.T) {
 	}
 	if strings.Contains(prompt, "{{") {
 		t.Error("rendered prompt still contains a template action")
+	}
+	if strings.Contains(prompt, "loom data close <id>") {
+		t.Error("QA prompt closes before the supervisor can publish its final commit")
+	}
+	if !strings.Contains(prompt, "supervisor") || !strings.Contains(prompt, "loom complete") {
+		t.Error("QA prompt must delegate closure to the supervisor after signaling completion")
+	}
+	if !strings.Contains(prompt, "--add-label delivery-pending") {
+		t.Error("QA prompt must fence the final verification revision before signaling completion")
+	}
+	if !strings.Contains(prompt, "--remove-label delivery-pending --status review") || !strings.Contains(prompt, "do not run the success fence") {
+		t.Error("QA prompt must keep blocking-defect runs out of the supervisor close pipeline")
+	}
+}
+
+func TestEvalPromptDelegatesCloseToSupervisor(t *testing.T) {
+	isolatePromptOverrides(t)
+	t.Setenv("LOOM_ASSIGNED_TASK_ID", "")
+	t.Setenv("LOOM_ROLE", "eval-engineer")
+
+	prompt := makeCustomPromptGen("builtin:team-eval-engineer")("eval-engineer-1", nil)
+	if strings.Contains(prompt, "loom data close <id>") {
+		t.Error("eval prompt closes before the supervisor can publish its final commit")
+	}
+	if !strings.Contains(prompt, "supervisor") || !strings.Contains(prompt, "loom complete") {
+		t.Error("eval prompt must delegate closure to the supervisor after signaling completion")
+	}
+	if !strings.Contains(prompt, "--add-label delivery-pending") {
+		t.Error("eval prompt must fence the final verification revision before signaling completion")
+	}
+	if !strings.Contains(prompt, "--remove-label delivery-pending --status review") || !strings.Contains(prompt, "do not run the success fence") {
+		t.Error("eval prompt must keep failing runs out of the supervisor close pipeline")
 	}
 }
 

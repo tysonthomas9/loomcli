@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 // ---------------------------------------------------------------------------
@@ -88,6 +89,22 @@ func TestClassifyAgentExit_ExitZeroWithHeldClaim_IsIncompleteRun(t *testing.T) {
 	}
 	if ap.LastNoWork {
 		t.Error("LastNoWork = true, want false: the agent held a task")
+	}
+}
+
+func TestClassifyAgentExit_DeliveryPendingHeldClaimIsCertifiedCompletion(t *testing.T) {
+	ap := newTaskAgent(t, "backend-dev-1", "loom-77")
+	ap.Entry.Hooks = &domain.AgentHooks{OnComplete: []domain.AgentHookAction{
+		{Type: domain.AgentHookActionRemoveLabel, Value: "delivery-pending"},
+	}}
+	mock := claimStateMock("in_progress", "backend-dev-1")
+	mock.GetResult.Labels = []string{"backend", "delivery-pending"}
+	s := newClaimSupervisor(mock)
+
+	s.classifyAgentExit(ap, 0)
+
+	if ap.LastError != nil {
+		t.Fatalf("delivery-pending completion classified as incomplete: %v", ap.LastError)
 	}
 }
 

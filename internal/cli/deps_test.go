@@ -635,7 +635,6 @@ func TestFleetDBIssueBackend_FailsClosedWhenStoreUnavailable(t *testing.T) {
 	if got := ib.BackendName(); got != "fleet-db" {
 		t.Fatalf("BackendName() = %q, want fleet-db", got)
 	}
-
 	assertUnavailable := func(name string, err error) {
 		t.Helper()
 		if !backend.IsKind(err, backend.KindUnavailable) {

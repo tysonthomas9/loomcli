@@ -50,6 +50,24 @@ func FormatIssueText(detail *backend.IssueDetailData) string {
 			fmt.Fprintf(&b, "  - %s (%s) [%s]\n", dep.DependsOnID, dep.Type, dep.Status)
 		}
 	}
+	appendTaskLineageText(&b, detail.Metadata)
 
 	return b.String()
+}
+
+func appendTaskLineageText(b *strings.Builder, metadata map[string]string) {
+	lineage, err := backend.ParseTaskLineage(metadata)
+	if err != nil {
+		fmt.Fprintf(b, "\nCode lineage: INVALID (%v)\n", err)
+		return
+	}
+	if lineage.InheritsFrom == "" {
+		return
+	}
+	fmt.Fprintf(b, "\nCode lineage base: %s\n", lineage.InheritsFrom)
+	if len(lineage.IntegrationInputs) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "Integration inputs: %s\n", strings.Join(lineage.IntegrationInputs, ", "))
+	fmt.Fprintln(b, "Merge each immutable refs/loom/inputs/... commit into this branch (do not cherry-pick); publication requires every input commit to remain an ancestor.")
 }

@@ -38,8 +38,10 @@ type IssueResponse struct {
 	DeferUntil *time.Time `json:"defer_until,omitempty"`
 
 	// External
-	ExternalRef *string `json:"external_ref,omitempty"`
-	SourceRepo  string  `json:"source_repo,omitempty"`
+	ExternalRef       *string  `json:"external_ref,omitempty"`
+	SourceRepo        string   `json:"source_repo,omitempty"`
+	InheritsFrom      string   `json:"inherits_from,omitempty"`
+	IntegrationInputs []string `json:"integration_inputs,omitempty"`
 
 	// Labels — no omitempty: serializes as [] when empty, not omitted.
 	// Mapping function (moom5.3) must initialize to []string{} to avoid null.

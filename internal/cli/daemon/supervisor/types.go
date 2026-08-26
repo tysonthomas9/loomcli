@@ -16,10 +16,13 @@ import (
 
 // AgentProcess tracks a single supervised agent subprocess.
 type AgentProcess struct {
-	Entry        cfgpkg.AgentEntry  // agent configuration from FleetDB
-	RoleConfig   cfgpkg.RoleConfig  // resolved role configuration
-	WorktreePath string             // resolved worktree path
-	RepoConfig   *cfgpkg.RepoConfig // per-repo config (nil in non-workspace mode)
+	Entry      cfgpkg.AgentEntry // agent configuration from FleetDB
+	RoleConfig cfgpkg.RoleConfig // resolved role configuration
+	// AgentWorktreePath is the stable checkout used to locate the agent. An
+	// active task switches WorktreePath to the checkout owned by that task.
+	AgentWorktreePath string
+	WorktreePath      string             // resolved worktree path
+	RepoConfig        *cfgpkg.RepoConfig // per-repo config (nil in non-workspace mode)
 
 	Cmd                    *exec.Cmd         // current subprocess (nil when not running)
 	Pid                    int               // PID of current subprocess (0 when not running)
@@ -38,14 +41,22 @@ type AgentProcess struct {
 	OwnershipLastHeartbeat time.Time         // last successful ownership heartbeat (server-derived; display/telemetry only)
 	OwnershipRenewedAt     time.Time         // local-clock anchor captured just before the last confirmed acquire/renew was sent; drives the bounded fail-open validity window — never server-derived
 	BeforeRef              string            // git HEAD ref before spawn (for diff stats at finalization)
-	AssignedTaskID         string            // task claimed by supervisor preflight for this run
-	RequestedTaskID        string            // task requested by a lifecycle command before normal queue selection
-	ResumeTaskID           string            // interrupted task to re-claim this cycle (detected from a surviving crash-remnant lock); drives claimResumeTask for BOTH resume and checkpoint recovery. Per-cycle: cleared in clearAgentSessionState, re-detected in preFlightSetup
-	ResumeFailures         int               // consecutive failed RECOVERY attempts — resume AND checkpoint fallback (PERSISTS across cycles); escalation: resume×maxResumeFailures → checkpoint×1 → cold-start
-	RecoveryMode           recoveryMode      // this cycle's recovery classification (resume|checkpoint|cold); per-cycle, set in preFlightSetup, read by recordResumeOutcome to decide whether the run's outcome advances ResumeFailures
-	LastActivity           time.Time         // most recent PTY output observed by the agent's wrapper (driven by agent IPC heartbeats); zero between spawn and first observation
-	InputWaitPending       int               // interactive harness prompts currently awaiting an answer; a count (not a flag) so overlapping prompts nest — see input_wait.go
-	InputWaitSince         time.Time         // when InputWaitPending last rose from zero; anchors the bound that stops a suspension from outliving its cause
+	TaskBranch             string            // stable branch owned by AssignedTaskID
+	TaskInputSHA           string            // immutable HEAD presented to this session
+	TaskTreeSHA            string            // immutable tree presented to this session
+	TaskOutputSHA          string            // immutable HEAD published by this session
+	TaskOutputTreeSHA      string            // immutable tree published by this session
+	TaskRepoName           string            // configured repository selected from the claimed task
+	TaskSourceRepoID       string            // stable control-plane repository identity
+	TaskWorktreeLease      TaskWorktreeLease
+	AssignedTaskID         string       // task claimed by supervisor preflight for this run
+	RequestedTaskID        string       // task requested by a lifecycle command before normal queue selection
+	ResumeTaskID           string       // interrupted task to re-claim this cycle (detected from a surviving crash-remnant lock); drives claimResumeTask for BOTH resume and checkpoint recovery. Per-cycle: cleared in clearAgentSessionState, re-detected in preFlightSetup
+	ResumeFailures         int          // consecutive failed RECOVERY attempts — resume AND checkpoint fallback (PERSISTS across cycles); escalation: resume×maxResumeFailures → checkpoint×1 → cold-start
+	RecoveryMode           recoveryMode // this cycle's recovery classification (resume|checkpoint|cold); per-cycle, set in preFlightSetup, read by recordResumeOutcome to decide whether the run's outcome advances ResumeFailures
+	LastActivity           time.Time    // most recent PTY output observed by the agent's wrapper (driven by agent IPC heartbeats); zero between spawn and first observation
+	InputWaitPending       int          // interactive harness prompts currently awaiting an answer; a count (not a flag) so overlapping prompts nest — see input_wait.go
+	InputWaitSince         time.Time    // when InputWaitPending last rose from zero; anchors the bound that stops a suspension from outliving its cause
 
 	RestartCount   int       // consecutive restart attempts
 	LastStart      time.Time // when subprocess was last spawned

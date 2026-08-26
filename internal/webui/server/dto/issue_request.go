@@ -23,6 +23,8 @@ type CreateIssueRequest struct {
 	EstimatedMinutes   *int     `json:"estimated_minutes,omitempty"` // Pointer: 0 is valid, distinct from unset
 	Labels             []string `json:"labels,omitempty"`
 	Dependencies       []string `json:"dependencies,omitempty"`
+	InheritsFrom       string   `json:"inherits_from,omitempty"`
+	IntegrationInputs  []string `json:"integration_inputs,omitempty"`
 	DueAt              string   `json:"due_at,omitempty"`
 	DeferUntil         string   `json:"defer_until,omitempty"`
 }

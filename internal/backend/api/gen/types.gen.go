@@ -1793,21 +1793,23 @@ type BlockedIssue struct {
 	ExternalRef      *string                   `json:"external_ref,omitempty"`
 
 	// HasDesign True for either a legacy inline or artifact-backed design.
-	HasDesign    *bool                  `json:"has_design,omitempty"`
-	Id           string                 `json:"id"`
-	IssueType    *BlockedIssueIssueType `json:"issue_type,omitempty"`
-	Labels       *[]string              `json:"labels,omitempty"`
-	LastActivity *time.Time             `json:"last_activity,omitempty"`
-	MolType      *string                `json:"mol_type,omitempty"`
-	Notes        *string                `json:"notes,omitempty"`
-	Owner        *string                `json:"owner,omitempty"`
-	Parent       *string                `json:"parent,omitempty"`
-	Pinned       *bool                  `json:"pinned,omitempty"`
-	Priority     int                    `json:"priority"`
-	Rig          *string                `json:"rig,omitempty"`
-	RoleType     *string                `json:"role_type,omitempty"`
-	SourceRepo   *string                `json:"source_repo,omitempty"`
-	SourceSystem *string                `json:"source_system,omitempty"`
+	HasDesign         *bool                  `json:"has_design,omitempty"`
+	Id                string                 `json:"id"`
+	InheritsFrom      *string                `json:"inherits_from,omitempty"`
+	IntegrationInputs *[]string              `json:"integration_inputs,omitempty"`
+	IssueType         *BlockedIssueIssueType `json:"issue_type,omitempty"`
+	Labels            *[]string              `json:"labels,omitempty"`
+	LastActivity      *time.Time             `json:"last_activity,omitempty"`
+	MolType           *string                `json:"mol_type,omitempty"`
+	Notes             *string                `json:"notes,omitempty"`
+	Owner             *string                `json:"owner,omitempty"`
+	Parent            *string                `json:"parent,omitempty"`
+	Pinned            *bool                  `json:"pinned,omitempty"`
+	Priority          int                    `json:"priority"`
+	Rig               *string                `json:"rig,omitempty"`
+	RoleType          *string                `json:"role_type,omitempty"`
+	SourceRepo        *string                `json:"source_repo,omitempty"`
+	SourceSystem      *string                `json:"source_system,omitempty"`
 
 	// Status User-facing statuses. Internal statuses (tombstone, pinned, hooked)
 	// are not settable via the API and excluded from this enum.
@@ -1881,6 +1883,8 @@ type CreateIssueRequest struct {
 	EstimatedMinutes   *int                        `json:"estimated_minutes,omitempty"`
 	ExternalRef        *string                     `json:"external_ref,omitempty"`
 	Id                 *string                     `json:"id,omitempty"`
+	InheritsFrom       *string                     `json:"inherits_from,omitempty"`
+	IntegrationInputs  *[]string                   `json:"integration_inputs,omitempty"`
 	IssueType          CreateIssueRequestIssueType `json:"issue_type"`
 	Labels             *[]string                   `json:"labels,omitempty"`
 	Notes              *string                     `json:"notes,omitempty"`
@@ -2219,21 +2223,23 @@ type Issue struct {
 	ExternalRef      *string            `json:"external_ref,omitempty"`
 
 	// HasDesign True for either a legacy inline or artifact-backed design.
-	HasDesign    *bool           `json:"has_design,omitempty"`
-	Id           string          `json:"id"`
-	IssueType    *IssueIssueType `json:"issue_type,omitempty"`
-	Labels       *[]string       `json:"labels,omitempty"`
-	LastActivity *time.Time      `json:"last_activity,omitempty"`
-	MolType      *string         `json:"mol_type,omitempty"`
-	Notes        *string         `json:"notes,omitempty"`
-	Owner        *string         `json:"owner,omitempty"`
-	Parent       *string         `json:"parent,omitempty"`
-	Pinned       *bool           `json:"pinned,omitempty"`
-	Priority     int             `json:"priority"`
-	Rig          *string         `json:"rig,omitempty"`
-	RoleType     *string         `json:"role_type,omitempty"`
-	SourceRepo   *string         `json:"source_repo,omitempty"`
-	SourceSystem *string         `json:"source_system,omitempty"`
+	HasDesign         *bool           `json:"has_design,omitempty"`
+	Id                string          `json:"id"`
+	InheritsFrom      *string         `json:"inherits_from,omitempty"`
+	IntegrationInputs *[]string       `json:"integration_inputs,omitempty"`
+	IssueType         *IssueIssueType `json:"issue_type,omitempty"`
+	Labels            *[]string       `json:"labels,omitempty"`
+	LastActivity      *time.Time      `json:"last_activity,omitempty"`
+	MolType           *string         `json:"mol_type,omitempty"`
+	Notes             *string         `json:"notes,omitempty"`
+	Owner             *string         `json:"owner,omitempty"`
+	Parent            *string         `json:"parent,omitempty"`
+	Pinned            *bool           `json:"pinned,omitempty"`
+	Priority          int             `json:"priority"`
+	Rig               *string         `json:"rig,omitempty"`
+	RoleType          *string         `json:"role_type,omitempty"`
+	SourceRepo        *string         `json:"source_repo,omitempty"`
+	SourceSystem      *string         `json:"source_system,omitempty"`
 
 	// Status User-facing statuses. Internal statuses (tombstone, pinned, hooked)
 	// are not settable via the API and excluded from this enum.
@@ -2293,20 +2299,22 @@ type IssueResponse struct {
 	ExternalRef      *string                    `json:"external_ref,omitempty"`
 
 	// HasDesign True for either a legacy inline or artifact-backed design.
-	HasDesign   *bool                  `json:"has_design,omitempty"`
-	Id          string                 `json:"id"`
-	IssueType   IssueResponseIssueType `json:"issue_type"`
-	Labels      []string               `json:"labels"`
-	Notes       *string                `json:"notes,omitempty"`
-	Owner       *string                `json:"owner,omitempty"`
-	Parent      *string                `json:"parent,omitempty"`
-	ParentTitle *string                `json:"parent_title,omitempty"`
-	Pinned      bool                   `json:"pinned"`
-	Priority    int                    `json:"priority"`
-	SourceRepo  *string                `json:"source_repo,omitempty"`
-	Status      IssueResponseStatus    `json:"status"`
-	Title       string                 `json:"title"`
-	UpdatedAt   time.Time              `json:"updated_at"`
+	HasDesign         *bool                  `json:"has_design,omitempty"`
+	Id                string                 `json:"id"`
+	InheritsFrom      *string                `json:"inherits_from,omitempty"`
+	IntegrationInputs *[]string              `json:"integration_inputs,omitempty"`
+	IssueType         IssueResponseIssueType `json:"issue_type"`
+	Labels            []string               `json:"labels"`
+	Notes             *string                `json:"notes,omitempty"`
+	Owner             *string                `json:"owner,omitempty"`
+	Parent            *string                `json:"parent,omitempty"`
+	ParentTitle       *string                `json:"parent_title,omitempty"`
+	Pinned            bool                   `json:"pinned"`
+	Priority          int                    `json:"priority"`
+	SourceRepo        *string                `json:"source_repo,omitempty"`
+	Status            IssueResponseStatus    `json:"status"`
+	Title             string                 `json:"title"`
+	UpdatedAt         time.Time              `json:"updated_at"`
 }
 
 // IssueResponseDesignFormat Durable format of the hydrated design body.
@@ -3090,22 +3098,24 @@ type TreeNode struct {
 	ExternalRef      *string               `json:"external_ref,omitempty"`
 
 	// HasDesign True for either a legacy inline or artifact-backed design.
-	HasDesign    *bool              `json:"has_design,omitempty"`
-	Id           string             `json:"id"`
-	IssueType    *TreeNodeIssueType `json:"issue_type,omitempty"`
-	Labels       *[]string          `json:"labels,omitempty"`
-	LastActivity *time.Time         `json:"last_activity,omitempty"`
-	MolType      *string            `json:"mol_type,omitempty"`
-	Notes        *string            `json:"notes,omitempty"`
-	Owner        *string            `json:"owner,omitempty"`
-	Parent       *string            `json:"parent,omitempty"`
-	ParentId     string             `json:"parent_id"`
-	Pinned       *bool              `json:"pinned,omitempty"`
-	Priority     int                `json:"priority"`
-	Rig          *string            `json:"rig,omitempty"`
-	RoleType     *string            `json:"role_type,omitempty"`
-	SourceRepo   *string            `json:"source_repo,omitempty"`
-	SourceSystem *string            `json:"source_system,omitempty"`
+	HasDesign         *bool              `json:"has_design,omitempty"`
+	Id                string             `json:"id"`
+	InheritsFrom      *string            `json:"inherits_from,omitempty"`
+	IntegrationInputs *[]string          `json:"integration_inputs,omitempty"`
+	IssueType         *TreeNodeIssueType `json:"issue_type,omitempty"`
+	Labels            *[]string          `json:"labels,omitempty"`
+	LastActivity      *time.Time         `json:"last_activity,omitempty"`
+	MolType           *string            `json:"mol_type,omitempty"`
+	Notes             *string            `json:"notes,omitempty"`
+	Owner             *string            `json:"owner,omitempty"`
+	Parent            *string            `json:"parent,omitempty"`
+	ParentId          string             `json:"parent_id"`
+	Pinned            *bool              `json:"pinned,omitempty"`
+	Priority          int                `json:"priority"`
+	Rig               *string            `json:"rig,omitempty"`
+	RoleType          *string            `json:"role_type,omitempty"`
+	SourceRepo        *string            `json:"source_repo,omitempty"`
+	SourceSystem      *string            `json:"source_system,omitempty"`
 
 	// Status User-facing statuses. Internal statuses (tombstone, pinned, hooked)
 	// are not settable via the API and excluded from this enum.

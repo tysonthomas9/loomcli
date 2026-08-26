@@ -63,6 +63,8 @@ func createParamsFromRequest(r *http.Request, req *IssueCreateRequest) service.C
 		EstimatedMinutes:   req.EstimatedMinutes,
 		Labels:             req.Labels,
 		Dependencies:       req.Dependencies,
+		InheritsFrom:       req.InheritsFrom,
+		IntegrationInputs:  req.IntegrationInputs,
 		DueAt:              req.DueAt,
 		DeferUntil:         req.DeferUntil,
 		SourceRepo:         req.SourceRepo,

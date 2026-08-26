@@ -101,9 +101,14 @@ Commit salvageable work, run 'loom complete', and EXIT. The design agent role ad
 - Note anything you flagged as unverified in the task notes so a human can confirm it
 - Hand the completed content to QA and signal. Do not close the task; QA owns the final verification and close:
 ```
-loom data update <id> --status open --add-label ready-for-qa --assignee="" --notes "IMPLEMENTED: <which pages changed, and that the build passes>"
+loom data update <id> --add-label delivery-pending --notes "IMPLEMENTED: <which pages changed, and that the build passes>"
 loom complete
 ```
+
+`delivery-pending` makes the task unclaimable while this process exits. The
+supervisor publishes the exact committed revision, then adds `ready-for-qa`
+and reopens the task after this process exits. Do not route or unassign the task
+yourself on the success path.
 
 ### CRITICAL: STOP
 

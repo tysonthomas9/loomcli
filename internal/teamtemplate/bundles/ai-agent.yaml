@@ -2,7 +2,7 @@ schema_version: 1
 id: ai-agent
 label: AI Agent Development
 description: Architect-and-researcher pair over an agent implementer, with an eval engineer and a review terminal.
-revision: 2
+revision: 3
 
 roles:
   # The two Architecture agent roles are made mutually disjoint by their labels:
@@ -38,7 +38,7 @@ roles:
     description: Implements agent and tool-integration tasks against an approved design; extends harness tests for changed behavior.
     prompt_file: builtin:team-agent-dev
     task_filter: has_design
-    exclude_labels: [architect, research, ready-for-qa]
+    exclude_labels: [architect, research, ready-for-qa, delivery-pending]
     effort: medium
     skills: [agent, sdk]
 
@@ -84,8 +84,18 @@ agents:
     auto: true
     desired_state: running
     cross_repo: true
+    hooks:
+      on_complete:
+        - {type: remove_label, value: delivery-pending}
+        - {type: add_label, value: ready-for-qa}
+        - {type: set_status, value: open}
   - name: eval-engineer-1
     role_name: eval-engineer
     auto: true
     desired_state: running
     cross_repo: true
+    hooks:
+      on_complete:
+        - {type: remove_label, value: delivery-pending}
+        - {type: remove_label, value: ready-for-qa}
+        - {type: close}

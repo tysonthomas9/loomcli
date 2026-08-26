@@ -244,6 +244,20 @@ func (s *Supervisor) runCompletionHooks(ap *AgentProcess, exitCode int) int {
 	if !ok {
 		return exitCode
 	}
+	if completionHooksRequireDeliveryFence(hooks) {
+		ctx, cancel := s.operationContext(completionHookTimeout)
+		issue, err := s.IssueBackend.Get(ctx, taskID)
+		cancel()
+		if err != nil {
+			s.markCompletionHookFailure(ap, fmt.Errorf("verify delivery fence: %w", err))
+			return -1
+		}
+		if !issueHasLabel(issue, "delivery-pending") {
+			slog.Info("completion handoff skipped: task did not declare a successful delivery",
+				"worktree", ap.Entry.Worktree, "task_id", taskID)
+			return exitCode
+		}
+	}
 
 	ap.Mu.Lock()
 	sessionID := ap.AgentSessionID
@@ -264,6 +278,30 @@ func (s *Supervisor) runCompletionHooks(ap *AgentProcess, exitCode int) int {
 	slog.Info("completion hooks applied",
 		"worktree", ap.Entry.Worktree, "task_id", taskID, "actions", len(hooks.OnComplete))
 	return exitCode
+}
+
+func completionHooksRequireDeliveryFence(hooks *domain.AgentHooks) bool {
+	if hooks == nil {
+		return false
+	}
+	for _, action := range hooks.OnComplete {
+		if action.Type == domain.AgentHookActionRemoveLabel && action.Value == "delivery-pending" {
+			return true
+		}
+	}
+	return false
+}
+
+func issueHasLabel(issue *backend.IssueDetailData, label string) bool {
+	if issue == nil {
+		return false
+	}
+	for _, candidate := range issue.Labels {
+		if candidate == label {
+			return true
+		}
+	}
+	return false
 }
 
 // advanceReviewCycle either re-arms the previous stage for another round or

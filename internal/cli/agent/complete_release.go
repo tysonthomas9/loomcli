@@ -38,12 +38,30 @@ func releaseClaimOnComplete(worktreePath string) {
 	if !ok {
 		return
 	}
+	// A delivery-managed implementer keeps its claim until the supervisor has
+	// verified and published the exact Git revision. The final set_status hook
+	// releases routing ownership only after that publication succeeds.
 	ctx, cancel := context.WithTimeout(context.Background(), releaseClaimTimeout)
 	defer cancel()
+	if issue, getErr := ib.Get(ctx, info.TaskID); getErr == nil && issueHasDeliveryPending(issue) {
+		return
+	}
 	if err := releaser.ReleaseClaim(ctx, info.TaskID, info.AgentName); err != nil {
 		fmt.Fprintf(os.Stderr, "complete: release claim on %s failed (continuing): %v\n",
 			info.TaskID, err)
 	}
+}
+
+func issueHasDeliveryPending(issue *backend.IssueDetailData) bool {
+	if issue == nil {
+		return false
+	}
+	for _, label := range issue.Labels {
+		if label == "delivery-pending" {
+			return true
+		}
+	}
+	return false
 }
 
 // ClaimStillHeld reports whether taskID is STILL claimed by actor — the

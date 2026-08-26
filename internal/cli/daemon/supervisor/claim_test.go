@@ -47,6 +47,304 @@ func TestClaimTask_SelectsEligibleTaskAndClaims(t *testing.T) {
 	}
 }
 
+func TestClaimTaskSkipsInvalidLineageWithoutClaiming(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		metadata map[string]string
+		get      func(context.Context, string) (*backend.IssueDetailData, error)
+	}{
+		{
+			name:     "integration input without base",
+			metadata: map[string]string{backend.MetadataIntegrationInputs: `["task-b"]`},
+		},
+		{
+			name:     "code input does not exist",
+			metadata: map[string]string{backend.MetadataInheritsFrom: "task-missing"},
+			get: func(context.Context, string) (*backend.IssueDetailData, error) {
+				return nil, nil
+			},
+		},
+		{
+			name:     "code input belongs to another repository",
+			metadata: map[string]string{backend.MetadataInheritsFrom: "task-other-repo"},
+			get: func(_ context.Context, id string) (*backend.IssueDetailData, error) {
+				return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id, SourceRepo: "other-repo"}}, nil
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := clitest.NewMockIssueBackend()
+			mock.ReadyResult = []backend.IssueData{{
+				ID: "task-invalid", IssueType: "task", Status: "open", Priority: 1, Title: "Invalid", SourceRepo: "repo",
+				Metadata: tc.metadata,
+			}}
+			mock.GetFn = tc.get
+			s := &Supervisor{IssueBackend: mock}
+			ap := &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "falcon", Role: "task"}}
+			if s.claimTask(ap, "") {
+				t.Fatal("claimTask accepted invalid lineage")
+			}
+			for _, call := range mock.Calls {
+				if call.Method == "ClaimIssue" {
+					t.Fatalf("invalid lineage was claimed: %#v", mock.Calls)
+				}
+			}
+			if ap.AssignedTaskID != "" {
+				t.Fatalf("AssignedTaskID = %q", ap.AssignedTaskID)
+			}
+		})
+	}
+}
+
+func TestInvalidLineageDoesNotConsumeAgentRestartBudget(t *testing.T) {
+	maxRetries := 1
+	mock := clitest.NewMockIssueBackend()
+	mock.ReadyResult = []backend.IssueData{{
+		ID: "task-invalid", IssueType: "task", Status: "open", Priority: 1, Title: "Invalid", Design: "plan", SourceRepo: "repo",
+		Metadata: map[string]string{backend.MetadataIntegrationInputs: `["task-b"]`},
+	}}
+	s := newTestSupervisorWithConfig(&cfgpkg.DaemonConfig{
+		Daemon: cfgpkg.DaemonSettings{RestartPolicy: cfgpkg.RestartPolicy{MaxRetries: &maxRetries}},
+	})
+	s.IssueBackend = mock
+	ap := &AgentProcess{
+		Entry:      cfgpkg.AgentEntry{Worktree: "backend-dev-1", Role: "backend-dev"},
+		RoleConfig: cfgpkg.RoleConfig{TaskFilter: "has_design"},
+	}
+
+	for attempt := 1; attempt <= maxRetries+2; attempt++ {
+		if s.claimTask(ap, "") {
+			t.Fatalf("attempt %d: malformed task was claimed", attempt)
+		}
+		if ap.LastError == nil || !ap.LastError.Class.Is(agenterr.NoWorkOutcome) {
+			t.Fatalf("attempt %d: LastError = %#v, want NoWork", attempt, ap.LastError)
+		}
+		if !s.shouldRestart(ap) {
+			t.Fatalf("attempt %d: shouldRestart = false, want idle re-poll", attempt)
+		}
+		if ap.StopReason == StopReasonMaxRetriesBlocked || ap.RestartCount != 0 {
+			t.Fatalf("attempt %d: invalid task consumed restart budget: stop=%q restarts=%d", attempt, ap.StopReason, ap.RestartCount)
+		}
+	}
+}
+
+func TestClaimTaskAcceptsLineageAfterClosedBlockerLeavesProjection(t *testing.T) {
+	mock := clitest.NewMockIssueBackend()
+	mock.ReadyResult = []backend.IssueData{{
+		ID: "task-c", IssueType: "task", Status: "open", Priority: 1, Title: "C", Design: "plan", SourceRepo: "repo",
+		Metadata: map[string]string{backend.MetadataInheritsFrom: "task-a"},
+	}}
+	mock.GetFn = func(_ context.Context, id string) (*backend.IssueDetailData, error) {
+		if id != "task-a" {
+			t.Fatalf("Get(%q), want closed code input task-a", id)
+		}
+		return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id, Status: "closed", SourceRepo: "repo"}}, nil
+	}
+	s := &Supervisor{IssueBackend: mock}
+	ap := &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "falcon", Role: "task"}}
+	if !s.claimTask(ap, "") {
+		t.Fatal("valid closed-input lineage was rejected")
+	}
+	if ap.AssignedTaskID != "task-c" {
+		t.Fatalf("AssignedTaskID = %q, want task-c", ap.AssignedTaskID)
+	}
+}
+
+type recordingTaskWorktreeManager struct {
+	req TaskWorktreeRequest
+	got TaskWorktree
+	err error
+}
+
+func TestPrepareClaimedTaskWorktreeUsesTaskRepoWithoutAgentAffinity(t *testing.T) {
+	manager := &recordingTaskWorktreeManager{got: TaskWorktree{Path: "/workspace/task", Branch: "loom/task/ws/TASK-9"}}
+	repo := &cfgpkg.RepoConfig{Name: "backend", SourceRepoID: "repo-back", Path: "/workspace/backend", DefaultBranch: "main"}
+	issues := clitest.NewMockIssueBackend()
+	issues.GetFn = func(context.Context, string) (*backend.IssueDetailData, error) {
+		return &backend.IssueDetailData{
+			IssueData: backend.IssueData{ID: "TASK-9", SourceRepo: "repo-back", Metadata: map[string]string{backend.MetadataInheritsFrom: "TASK-8"}},
+			Dependencies: []backend.DependencyData{
+				{DependsOnID: "TASK-8", Type: "blocks"},
+				{DependsOnID: "TASK-SCHEDULING-ONLY", Type: "blocks"},
+			},
+		}, nil
+	}
+	s := &Supervisor{
+		ProjectDir:    "/workspace",
+		WorkspaceID:   "ws",
+		TaskWorktrees: manager,
+		IssueBackend:  issues,
+		FindRepoConfig: func(key string) *cfgpkg.RepoConfig {
+			if key == "repo-back" {
+				return repo
+			}
+			return nil
+		},
+	}
+	ap := &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "generalist"}, AssignedTaskID: "TASK-9"}
+	if err := s.prepareClaimedTaskWorktree(context.Background(), ap); err != nil {
+		t.Fatal(err)
+	}
+	if ap.RepoConfig != repo || manager.req.RepoName != "backend" || manager.req.BaseTaskID != "TASK-8" {
+		t.Fatalf("resolved repo = %+v, request = %+v", ap.RepoConfig, manager.req)
+	}
+}
+
+func TestPrepareClaimedTaskWorktreeUsesExplicitLineageAfterBlockerCloses(t *testing.T) {
+	manager := &recordingTaskWorktreeManager{got: TaskWorktree{Path: "/workspace/task", Branch: "loom/task/ws/TASK-B"}}
+	issues := clitest.NewMockIssueBackend()
+	issues.GetFn = func(context.Context, string) (*backend.IssueDetailData, error) {
+		return &backend.IssueDetailData{IssueData: backend.IssueData{ID: "TASK-B", SourceRepo: "repo-back", Metadata: map[string]string{backend.MetadataInheritsFrom: "TASK-A"}}}, nil
+	}
+	repo := &cfgpkg.RepoConfig{Name: "backend", SourceRepoID: "repo-back", Path: "/workspace/backend", DefaultBranch: "main"}
+	s := &Supervisor{
+		ProjectDir:    "/workspace",
+		WorkspaceID:   "ws",
+		TaskWorktrees: manager,
+		IssueBackend:  issues,
+		FindRepoConfig: func(string) *cfgpkg.RepoConfig {
+			return repo
+		},
+	}
+	ap := &AgentProcess{AssignedTaskID: "TASK-B"}
+
+	if err := s.prepareClaimedTaskWorktree(context.Background(), ap); err != nil {
+		t.Fatal(err)
+	}
+	if got := manager.req.BaseTaskID; got != "TASK-A" {
+		t.Fatalf("BaseTaskID = %q, want explicit TASK-A", got)
+	}
+}
+
+func TestDeliveryPublicationRequiresConfiguredSuccessFence(t *testing.T) {
+	issues := clitest.NewMockIssueBackend()
+	current := &backend.IssueDetailData{IssueData: backend.IssueData{ID: "TASK-7", Labels: []string{"backend"}}}
+	issues.GetFn = func(context.Context, string) (*backend.IssueDetailData, error) { return current, nil }
+	s := &Supervisor{IssueBackend: issues}
+	ap := &AgentProcess{
+		AssignedTaskID: "TASK-7",
+		Entry: cfgpkg.AgentEntry{Hooks: &domain.AgentHooks{OnComplete: []domain.AgentHookAction{
+			{Type: domain.AgentHookActionRemoveLabel, Value: "delivery-pending"},
+		}}},
+	}
+	got, err := s.shouldPublishTaskDelivery(context.Background(), ap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got {
+		t.Fatal("blocked/needs-revision run without delivery-pending was publishable")
+	}
+	current.Labels = append(current.Labels, "delivery-pending")
+	got, err = s.shouldPublishTaskDelivery(context.Background(), ap)
+	if err != nil || !got {
+		t.Fatalf("successful fenced delivery publishable = %v, err=%v", got, err)
+	}
+}
+
+func TestResolveTaskRepoUsesClaimedTaskSourceRepo(t *testing.T) {
+	first := &cfgpkg.RepoConfig{Name: "frontend", SourceRepoID: "repo-front"}
+	backendRepo := &cfgpkg.RepoConfig{Name: "backend", SourceRepoID: "repo-back"}
+	got, err := resolveTaskRepo(first, "repo-back", func(key string) *cfgpkg.RepoConfig {
+		if key == "repo-back" {
+			return backendRepo
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != backendRepo {
+		t.Fatalf("resolved repo = %+v, want backend source repo", got)
+	}
+}
+
+func (m *recordingTaskWorktreeManager) Prepare(_ context.Context, req TaskWorktreeRequest) (TaskWorktree, error) {
+	m.req = req
+	return m.got, m.err
+}
+
+func (m *recordingTaskWorktreeManager) Publish(_ context.Context, _ TaskWorktreePublishRequest) (TaskWorktreeRevision, error) {
+	return TaskWorktreeRevision{}, nil
+}
+
+func TestPrepareClaimedTaskWorktreeSwitchesExecutionBeforeSessionBaseline(t *testing.T) {
+	manager := &recordingTaskWorktreeManager{got: TaskWorktree{
+		Path:     "/workspace/.loom/task-worktrees/repo/TASK-7",
+		Branch:   "loom/task/ws/TASK-7",
+		InputSHA: "abc123",
+		TreeSHA:  "tree123",
+	}}
+	s := &Supervisor{
+		ProjectDir:    "/workspace",
+		WorkspaceID:   "ws",
+		TaskWorktrees: manager,
+	}
+	ap := &AgentProcess{
+		Entry:          cfgpkg.AgentEntry{Worktree: "qa-engineer-1"},
+		RepoConfig:     &cfgpkg.RepoConfig{Name: "repo", Path: "/workspace/repo", DefaultBranch: "main", Remote: "origin"},
+		WorktreePath:   "/workspace/worktrees/repo/qa-engineer-1",
+		AssignedTaskID: "TASK-7",
+	}
+
+	if err := s.prepareClaimedTaskWorktree(context.Background(), ap); err != nil {
+		t.Fatal(err)
+	}
+	if ap.WorktreePath != manager.got.Path || ap.TaskBranch != manager.got.Branch || ap.TaskInputSHA != manager.got.InputSHA {
+		t.Fatalf("agent task worktree state = path %q branch %q input %q", ap.WorktreePath, ap.TaskBranch, ap.TaskInputSHA)
+	}
+	if manager.req.TaskID != "TASK-7" || manager.req.RepoName != "repo" || manager.req.RepoPath != "/workspace/repo" {
+		t.Fatalf("prepare request = %+v", manager.req)
+	}
+}
+
+func TestTaskWorktreeRevisionIsIncludedInSessionMetadata(t *testing.T) {
+	s := &Supervisor{}
+	ap := &AgentProcess{
+		Entry:             cfgpkg.AgentEntry{Worktree: "qa-engineer-1"},
+		TaskBranch:        "loom/task/ws/TASK-7",
+		TaskInputSHA:      "input123",
+		TaskTreeSHA:       "inputtree123",
+		TaskOutputSHA:     "output456",
+		TaskOutputTreeSHA: "outputtree456",
+	}
+	ap.Mu.Lock()
+	metadata := s.agentSessionMetadataLocked(ap, "codex")
+	ap.Mu.Unlock()
+
+	want := map[string]string{
+		"task_branch":          "loom/task/ws/TASK-7",
+		"task_input_sha":       "input123",
+		"task_input_tree_sha":  "inputtree123",
+		"task_output_sha":      "output456",
+		"task_output_tree_sha": "outputtree456",
+	}
+	for key, value := range want {
+		if metadata[key] != value {
+			t.Errorf("metadata[%q] = %q, want %q", key, metadata[key], value)
+		}
+	}
+}
+
+func TestClearCompletedTaskSessionRestoresPrivateAgentWorktree(t *testing.T) {
+	s := &Supervisor{}
+	ap := &AgentProcess{
+		AgentWorktreePath: "/workspace/.loom/worktrees/repo/backend-dev-1",
+		WorktreePath:      "/workspace/.loom/task-worktrees/repo/TASK-7",
+		TaskBranch:        "loom/task/ws/TASK-7",
+		TaskInputSHA:      "input123",
+		TaskOutputSHA:     "output456",
+		AssignedTaskID:    "TASK-7",
+	}
+
+	s.clearAgentSessionState(ap)
+	if ap.WorktreePath != ap.AgentWorktreePath {
+		t.Fatalf("next recovery path = %q, want private agent worktree %q", ap.WorktreePath, ap.AgentWorktreePath)
+	}
+	if ap.TaskBranch != "" || ap.TaskInputSHA != "" || ap.TaskOutputSHA != "" {
+		t.Fatalf("completed task delivery state survived next cycle: branch=%q input=%q output=%q", ap.TaskBranch, ap.TaskInputSHA, ap.TaskOutputSHA)
+	}
+}
+
 func TestClaimTask_ClaimsRequestedTaskIgnoringRoleFilter(t *testing.T) {
 	mock := clitest.NewMockIssueBackend()
 	mock.ReadyResult = []backend.IssueData{

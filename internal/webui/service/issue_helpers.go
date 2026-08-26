@@ -5,11 +5,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
 )
 
 func validateCreateParams(params *CreateIssueParams) *ServiceError {
+	lineage := backend.TaskLineageSpec{InheritsFrom: params.InheritsFrom, IntegrationInputs: params.IntegrationInputs}
+	if err := lineage.Validate(""); err != nil {
+		return ErrValidation("invalid task code lineage: " + err.Error())
+	}
 	if strings.TrimSpace(params.Title) == "" {
 		return ErrValidation("title is required")
 	}
@@ -28,8 +33,9 @@ func validateCreateParams(params *CreateIssueParams) *ServiceError {
 	if len(params.Labels) > maxLabels {
 		return ErrValidation(fmt.Sprintf("too many labels (max %d, got %d)", maxLabels, len(params.Labels)))
 	}
-	if len(params.Dependencies) > maxDependencies {
-		return ErrValidation(fmt.Sprintf("too many dependencies (max %d, got %d)", maxDependencies, len(params.Dependencies)))
+	dependencyCount := len(lineage.SchedulingDependencies(params.Dependencies))
+	if dependencyCount > maxDependencies {
+		return ErrValidation(fmt.Sprintf("too many dependencies (max %d, got %d)", maxDependencies, dependencyCount))
 	}
 	return nil
 }

@@ -240,5 +240,8 @@ func validateAgent(agent TemplateAgent, kinds map[string]string) error {
 	if !agent.CrossRepo {
 		return fmt.Errorf("agent %q: cross_repo must be true so worktrees match the routing scope", agent.Name)
 	}
+	if err := agent.Hooks.Validate(); err != nil {
+		return fmt.Errorf("agent %q: %w", agent.Name, err)
+	}
 	return nil
 }

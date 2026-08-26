@@ -777,3 +777,15 @@ func TestCommentData_NilOptionalsOmitted(t *testing.T) {
 		t.Errorf("nil EditedAt should be omitted, got: %s", raw)
 	}
 }
+
+func TestFleetCreateBodyPreservesTaskLineageMetadata(t *testing.T) {
+	metadata := map[string]string{
+		"loom.inherits_from":      "TASK-A",
+		"loom.integration_inputs": `["TASK-B"]`,
+	}
+	body := (CreateParams{Title: "Integrate", IssueType: "task", Metadata: metadata}).FleetCreateBody()
+	got, ok := body["metadata"].(map[string]string)
+	if !ok || got["loom.inherits_from"] != "TASK-A" || got["loom.integration_inputs"] != `["TASK-B"]` {
+		t.Fatalf("FleetCreateBody metadata = %#v", body["metadata"])
+	}
+}

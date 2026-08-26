@@ -164,6 +164,78 @@ func TestApplyIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestApplyPersistsSupervisorOwnedImplementerHandoff(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	if _, err := Apply(ctx, localDeps(st), testWorkspace, fullstack(t)); err != nil {
+		t.Fatal(err)
+	}
+	agent, err := st.Agents().Get(ctx, testWorkspace, "backend-dev-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := &domain.AgentHooks{OnComplete: []domain.AgentHookAction{
+		{Type: domain.AgentHookActionRemoveLabel, Value: "delivery-pending"},
+		{Type: domain.AgentHookActionAddLabel, Value: "ready-for-qa"},
+		{Type: domain.AgentHookActionSetStatus, Value: "open"},
+	}}
+	if !agent.Hooks.Equal(want) {
+		t.Fatalf("backend handoff hooks = %#v, want %#v", agent.Hooks, want)
+	}
+}
+
+func TestApplyMigratesMissingTemplateHandoffHooks(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	legacy := fullstack(t)
+	for i := range legacy.Agents {
+		legacy.Agents[i].Hooks = nil
+	}
+	if _, err := Apply(ctx, localDeps(st), testWorkspace, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Apply(ctx, localDeps(st), testWorkspace, fullstack(t)); err != nil {
+		t.Fatal(err)
+	}
+	agent, err := st.Agents().Get(ctx, testWorkspace, "backend-dev-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agent.Hooks.IsEmpty() {
+		t.Fatal("revision upgrade left existing backend agent without supervisor handoff hooks")
+	}
+}
+
+func TestApplyMigratesMissingHooksDespiteUnrelatedAgentDivergence(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	legacy := fullstack(t)
+	for i := range legacy.Agents {
+		legacy.Agents[i].Hooks = nil
+		if legacy.Agents[i].Name == "backend-dev-1" {
+			legacy.Agents[i].CrossRepo = false
+		}
+	}
+	if _, err := Apply(ctx, localDeps(st), testWorkspace, legacy); err != nil {
+		t.Fatal(err)
+	}
+	report, err := Apply(ctx, localDeps(st), testWorkspace, fullstack(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := st.Agents().Get(ctx, testWorkspace, "backend-dev-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agent.Hooks.IsEmpty() {
+		t.Fatal("unrelated agent divergence prevented managed hook migration")
+	}
+	step := mustStep(t, report, entityAgent, "backend-dev-1")
+	if step.Action != StepSkippedDiverged || !containsField(step.Fields, "cross_repo") || containsField(step.Fields, "hooks") {
+		t.Fatalf("migration step = %+v, want cross_repo-only divergence after hooks update", step)
+	}
+}
+
 func TestApplyReportsDivergenceWithoutOverwriting(t *testing.T) {
 	st := newStore(t)
 	ctx := context.Background()

@@ -53,6 +53,7 @@ func TestFleetIssueWire_FieldDriftGuard(t *testing.T) {
 		"created_at": true, "created_by": true, "updated_at": true,
 		"due_at": true, "defer_until": true, "closed_at": true,
 		"close_reason": true,
+		"metadata":     true,
 	}
 	for k := range canonical {
 		if !wireKeys[k] {

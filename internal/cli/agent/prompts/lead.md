@@ -41,6 +41,8 @@ What would you like to do?
 - For epics, use `loom data create --title "<title>" --type epic --priority 2`.
 - For child work, include `--parent <epic-id>`; for repo-scoped work, include `--source-repo <repo-id>`.
 - Add context with `--description`, `--design`, `--notes`, `--label`, and `--depends-on` when the user provides it.
+- Treat `--depends-on` as scheduling only. When a task must start from another task's code, add exactly one `--inherits-from <task-id>`.
+- For fan-in, create an explicit integration task with one `--inherits-from <base-task>` and one or more `--integration-input <task-id>` flags. Its agent must merge those input commits; downstream tasks inherit only from the integration task.
 - Show the create output, then run `loom data show <created-id>` if the user wants to review the full record.
 
 **3. Triage Backlog**

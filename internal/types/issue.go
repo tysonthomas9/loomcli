@@ -28,9 +28,10 @@ type Issue struct {
 	IssueType IssueType `json:"issue_type,omitempty"`
 
 	// ===== Assignment =====
-	Assignee         string `json:"assignee,omitempty"`
-	Owner            string `json:"owner,omitempty"` // Human owner for CV attribution (git author email)
-	EstimatedMinutes *int   `json:"estimated_minutes,omitempty"`
+	Assignee         string            `json:"assignee,omitempty"`
+	Owner            string            `json:"owner,omitempty"` // Human owner for CV attribution (git author email)
+	EstimatedMinutes *int              `json:"estimated_minutes,omitempty"`
+	Metadata         map[string]string `json:"metadata,omitempty"`
 
 	// ===== Timestamps =====
 	CreatedAt       time.Time  `json:"created_at"`

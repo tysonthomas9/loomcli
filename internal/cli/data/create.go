@@ -27,6 +27,8 @@ type createIssueFlags struct {
 	estimatedMinutes   int
 	labels             []string
 	dependencies       []string
+	inheritsFrom       string
+	integrationInputs  []string
 	sourceRepo         string
 	dueAt              string
 	deferUntil         string
@@ -70,6 +72,13 @@ real failure, so success is checkable from the exit code alone.`,
 			if err != nil {
 				return err
 			}
+			lineage, err := backend.ParseTaskLineage(params.Metadata)
+			if err != nil {
+				return fmt.Errorf("invalid task code lineage: %w", err)
+			}
+			if err := backend.ValidateTaskLineageInputs(ctx, lineage, params.SourceRepo, ib.Get); err != nil {
+				return fmt.Errorf("invalid task code lineage: %w", err)
+			}
 			created, err := ib.Create(ctx, params)
 			if err != nil {
 				return err
@@ -99,6 +108,8 @@ func registerCreateFlags(cmd *cobra.Command, flags *createIssueFlags) {
 	cmd.Flags().IntVar(&flags.estimatedMinutes, "estimated-minutes", 0, "Estimated effort in minutes")
 	cmd.Flags().StringArrayVar(&flags.labels, "label", nil, "Label to attach (repeatable)")
 	cmd.Flags().StringArrayVar(&flags.dependencies, "depends-on", nil, "Dependency issue ID (repeatable)")
+	cmd.Flags().StringVar(&flags.inheritsFrom, "inherits-from", "", "Task whose published code is this task's base")
+	cmd.Flags().StringArrayVar(&flags.integrationInputs, "integration-input", nil, "Additional published task delivery to merge (repeatable)")
 	cmd.Flags().StringVar(&flags.sourceRepo, "source-repo", "", "Source repository ID")
 	cmd.Flags().StringVar(&flags.dueAt, "due-at", "", "Due timestamp")
 	cmd.Flags().StringVar(&flags.deferUntil, "defer-until", "", "Defer until timestamp")
@@ -111,6 +122,14 @@ func createParamsFromFlags(cmd *cobra.Command, flags createIssueFlags) (backend.
 	flags.title = strings.TrimSpace(flags.title)
 	if flags.title == "" {
 		return backend.CreateParams{}, fmt.Errorf("--title is required")
+	}
+	lineage := backend.TaskLineageSpec{InheritsFrom: flags.inheritsFrom, IntegrationInputs: flags.integrationInputs}
+	if err := lineage.Validate(""); err != nil {
+		return backend.CreateParams{}, fmt.Errorf("invalid task code lineage: %w", err)
+	}
+	metadata, err := lineage.Metadata()
+	if err != nil {
+		return backend.CreateParams{}, fmt.Errorf("encode task code lineage: %w", err)
 	}
 	params := backend.CreateParams{
 		Parent:             flags.parent,
@@ -127,7 +146,8 @@ func createParamsFromFlags(cmd *cobra.Command, flags createIssueFlags) (backend.
 		CreatedBy:          flags.createdBy,
 		ExternalRef:        flags.externalRef,
 		Labels:             flags.labels,
-		Dependencies:       flags.dependencies,
+		Dependencies:       lineage.SchedulingDependencies(flags.dependencies),
+		Metadata:           metadata,
 		SourceRepo:         flags.sourceRepo,
 		DueAt:              flags.dueAt,
 		DeferUntil:         flags.deferUntil,
