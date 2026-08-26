@@ -19,7 +19,7 @@ import {
   useWorkspaceDesignFormat,
   useWorkspaceContext,
 } from "@/hooks/workspace";
-import type { BackendInfo } from "@/utils/workspace";
+import { isUserFacingBackend, type BackendInfo } from "@/utils/workspace";
 import { useToast } from "@/hooks/ui";
 import { restartOnboarding } from "@/utils/onboardingState";
 import { requestCliSetup } from "@/utils/cliSetup";
@@ -637,11 +637,13 @@ export function SettingsView({
                     onChange={handleSelectChange}
                     data-testid="backend-select"
                   >
-                    {config.available.map((b) => (
-                      <option key={b} value={b}>
-                        {b}
-                      </option>
-                    ))}
+                    {config.available
+                      .filter((backend) => isUserFacingBackend(backend))
+                      .map((b) => (
+                        <option key={b} value={b}>
+                          {b}
+                        </option>
+                      ))}
                   </select>
                   <span className={styles.sourceTag}>
                     {config.source === "fleetdb" ? "From FleetDB" : "Default"}
