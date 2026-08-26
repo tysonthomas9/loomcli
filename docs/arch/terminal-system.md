@@ -366,6 +366,29 @@ When a new talk-to-lead session is created, the server injects a context banner 
 - `TalkToLeadButton`: `SessionBadge` inside the FAB
 - Both update `aria-label` for screen reader announcement
 
+### Lead's Working Directory
+
+Lead is the one agent with no `source_repo`: it manages the backlog, builds nothing and
+runs no gate, so it gets a plain directory at the workspace root — `<workspace>/lead` —
+rather than a git worktree under `worktrees/<repo>/`. `localworkspace.LeadWorkdir` /
+`EnsureLeadWorkdir` resolve it, `LOOM_LEAD_WORKDIR` (absolute paths only) overrides it, and
+both launch paths — `loom lead` and the WebUI agent launcher — call the same resolver so
+they provably compute the same string. Outside a workspace, `loom lead` falls back to
+`os.Getwd`.
+
+In a dedicated workdir, and only when the built-in lead prompt is the one in play, the
+persona moves off argv: `AGENTS.md` is seeded there (seed-if-absent, never overwritten, so
+operator edits survive upgrades) and argv shrinks to the per-run safety guardrails. An
+explicit `--prompt` file or an inline role prompt keeps today's behavior verbatim, and so
+does the `os.Getwd` fallback — shrinking there would boot a lead with no persona, or let it
+adopt an unrelated `AGENTS.md` that happened to be sitting in that directory.
+
+`AGENTS.md` has no `CLAUDE.md` counterpart in that directory, deliberately. Sessions run
+under their own `CLAUDE_CONFIG_DIR` (see *Agent Profiles*), which relocates where claude
+reads ambient project instructions from cwd to the profile root — a `CLAUDE.md` seeded into
+`<workspace>/lead` would be dead weight. claude gets the same static persona from the
+profile's own `CLAUDE.md`, described next.
+
 ### Profile-Scoped Lead Prompt
 
 `loom lead` normally passes the whole lead role prompt (`internal/cli/agent/prompts/lead.md`

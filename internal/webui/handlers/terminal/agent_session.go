@@ -332,19 +332,30 @@ func buildAgentLaunchSpec(ctx context.Context, st store.Store, workspace, sessio
 	return &tabmeta.LaunchSpec{
 		Argv: webuterminal.ShellArgvForCommand(args),
 		Env:  agentLaunchEnv(workspace, sessionName, backend, orchestratorID, agent),
-		Cwd:  agentLaunchCwd(workspace, agent),
+		Cwd:  agentLaunchCwd(workspace, agent, roleKind),
 	}, backend, nil
 }
 
-func agentLaunchCwd(workspace string, agent *domain.Agent) string {
+// agentLaunchCwd resolves the directory a WebUI-launched agent starts in. An
+// empty result makes the PTY inherit the server's own cwd, which for an
+// interactive (lead) agent means the workspace root - so lead falls back to its
+// dedicated workdir instead, resolved through the same
+// localworkspace.LeadWorkdir the terminal launch path uses. Sharing the
+// resolver is what makes the two provably compute the same string.
+func agentLaunchCwd(workspace string, agent *domain.Agent, kind domain.RoleKind) string {
 	if agent == nil {
 		return ""
 	}
 	worktree, ok := localworkspace.RememberedAgentWorktree(workspace, agent.Name)
-	if !ok {
-		return ""
+	if ok {
+		return worktree
 	}
-	return worktree
+	if kind == domain.RoleKindInteractive {
+		if leadDir, leadOK := localworkspace.EnsureLeadWorkdir(workspace); leadOK {
+			return leadDir
+		}
+	}
+	return ""
 }
 
 func loadAgentLaunchRole(ctx context.Context, st store.Store, workspace, roleName string) (*domain.Role, error) {

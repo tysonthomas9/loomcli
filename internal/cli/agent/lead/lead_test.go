@@ -59,6 +59,9 @@ func TestRunLead_InvokesClaude(t *testing.T) {
 	// back to the backend registry and hits the mock instead of launching a
 	// real claude process under PTY supervision.
 	t.Setenv("LOOM_LEAD_CONTROLLED", "0")
+	// No workspace and no override: this is the os.Getwd fallback branch, and
+	// it must stay that way even when the operator's own LOOM_* vars are set.
+	isolateLeadEnv(t)
 
 	// Setup temp directory as working directory
 	tmpDir := t.TempDir()
@@ -114,6 +117,7 @@ func TestRunLead_InvokesClaude(t *testing.T) {
 
 func TestRunLeadUsesCustomTerminalPrompt(t *testing.T) {
 	t.Setenv("LOOM_LEAD_CONTROLLED", "0")
+	isolateLeadEnv(t)
 	t.Setenv(envAgentName, "nova")
 	t.Setenv("LOOM_AGENT_ROLE", "operator")
 
@@ -180,12 +184,17 @@ func TestGenerateLeadTerminalPromptUsesLiteralRolePrompt(t *testing.T) {
 	leadPromptFile = ""
 	t.Cleanup(func() { leadPromptFile = oldPromptFile })
 
-	prompt, err := generateLeadTerminalPrompt(context.Background(), leadSessionRegistration{
+	// dedicated=true on purpose: an inline role prompt must still win, and must
+	// still clear the seed-and-shrink predicate.
+	prompt, seedAndShrink, err := generateLeadTerminalPrompt(context.Background(), leadSessionRegistration{
 		handle:    &bootstrap.StoreHandle{Store: st},
 		Workspace: "E2E",
-	})
+	}, true)
 	if err != nil {
 		t.Fatalf("generateLeadTerminalPrompt: %v", err)
+	}
+	if seedAndShrink {
+		t.Fatal("inline role prompt must clear seedAndShrink")
 	}
 	if !strings.HasPrefix(prompt, "Literal {{ marker }}") {
 		t.Fatalf("prompt = %q, want literal inline role prompt", prompt)
