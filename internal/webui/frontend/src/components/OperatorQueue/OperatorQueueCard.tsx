@@ -272,13 +272,6 @@ export function OperatorQueueCard({
               </button>
               <button
                 type="button"
-                className={`${decisionButtonStyles.button} ${decisionButtonStyles.neutral}`}
-                onClick={() => onOpenIssue(issue)}
-              >
-                Read design
-              </button>
-              <button
-                type="button"
                 className={`${decisionButtonStyles.button} ${decisionButtonStyles.reject}`}
                 data-testid="queue-reject"
                 disabled={isActing}

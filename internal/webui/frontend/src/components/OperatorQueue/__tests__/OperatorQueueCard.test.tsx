@@ -159,6 +159,9 @@ describe("OperatorQueueCard", () => {
     expect(screen.getByTestId("queue-repo")).toHaveTextContent("source-repo");
     expect(card).toHaveTextContent("architect-1 attached a design");
     expect(screen.getByText(/design attached/)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Read design" }),
+    ).not.toBeInTheDocument();
     expect(screen.getByTestId("queue-reject")).toBeEnabled();
 
     fireEvent.click(screen.getByTestId("queue-approve"));
