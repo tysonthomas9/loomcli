@@ -112,6 +112,32 @@ describe("pickDefaultAgentName", () => {
 });
 
 describe("OperatorQueueCard", () => {
+  it("opens the issue from the card surface without hijacking its actions", async () => {
+    const callbacks = handlers();
+    render(
+      <OperatorQueueCard
+        item={item("design-gate")}
+        agents={[agent({ name: "agent-dev-1", role: "dev" })]}
+        {...callbacks}
+      />,
+    );
+
+    const cardTarget = screen.getByRole("button", {
+      name: "Open TASK-1: Build the operator queue",
+    });
+    expect(cardTarget).toHaveAttribute("data-testid", "queue-card-open");
+
+    fireEvent.click(cardTarget);
+    expect(callbacks.onOpenIssue).toHaveBeenCalledTimes(1);
+    expect(callbacks.onOpenIssue).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "TASK-1" }),
+    );
+
+    fireEvent.click(screen.getByTestId("queue-approve"));
+    await waitFor(() => expect(callbacks.onApprove).toHaveBeenCalledTimes(1));
+    expect(callbacks.onOpenIssue).toHaveBeenCalledTimes(1);
+  });
+
   it("renders the design-gate anatomy and routes to the default agent", async () => {
     const callbacks = handlers();
     const agents = [

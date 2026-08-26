@@ -184,6 +184,13 @@ export function OperatorQueueCard({
       data-kind={kind}
       data-issue-id={issue.id}
     >
+      <button
+        type="button"
+        className={styles.cardOpenButton}
+        data-testid="queue-card-open"
+        aria-label={`Open ${issue.id}: ${issue.title}`}
+        onClick={() => onOpenIssue(issue)}
+      />
       <div className={styles.topRow}>
         <span className={styles.kind}>{KIND_LABEL[kind]}</span>
         <span
@@ -313,14 +320,16 @@ export function OperatorQueueCard({
           )}
         </div>
         {kind === "design-gate" && showRejectForm && (
-          <RejectCommentForm
-            issueId={issue.id}
-            onSubmit={(comment) =>
-              void runAction(() => onReject(issue, comment))
-            }
-            onCancel={() => setShowRejectForm(false)}
-            isSubmitting={isActing}
-          />
+          <div className={styles.rejectForm}>
+            <RejectCommentForm
+              issueId={issue.id}
+              onSubmit={(comment) =>
+                void runAction(() => onReject(issue, comment))
+              }
+              onCancel={() => setShowRejectForm(false)}
+              isSubmitting={isActing}
+            />
+          </div>
         )}
       </footer>
     </article>
