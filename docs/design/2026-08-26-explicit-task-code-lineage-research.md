@@ -307,3 +307,37 @@ multiple scheduler intervals and prove it was never claimed.
 - Cherry-pick-only integration is out of scope because it cannot prove the
   immutable input commit is an ancestor of the delivery.
 - Auto-closing the parent epic is unrelated.
+
+## Implementation proof (2026-08-26)
+
+The isolated `loomcli-local-mode-lineage-proof` stack ran the untouched
+`fullstack-app` team template against workspace `LINEAGEPROOF`. Its native
+backend, frontend, and QA agents completed tasks A through F, including the
+seven-task graph above. The malformed raw-client task remained open and
+unassigned throughout the run.
+
+The immutable delivery refs and reachability checks were:
+
+| Edge | Published commits | Result |
+| --- | --- | --- |
+| A to C | `c26fe0a` to `006b1b3` | ancestor |
+| B to D | `dbc11eb` to `9f2a6d4` | ancestor |
+| C to I | `006b1b3` to `1bb792d` | ancestor |
+| D to I | `9f2a6d4` to `1bb792d` | ancestor |
+| I to F | `1bb792d` to `05281ef` | ancestor |
+| scheduling-only E to I | `a9916c8` to `1bb792d` | not an ancestor |
+
+I contains merge commit `be3daed`, whose two parents are the exact C and D
+delivery commits. The final F tree contains byte-exact `A`, `B`, `C`, `D`,
+`I`, and `F` marker files and no E marker. Final QA ran eight fixture scripts
+with 39 passing assertions and no failures.
+
+The invalid task's audit trail contains only `issue.create`: it has no claim or
+release event, session, task worktree, or exact task-scoped Loom ref. This is
+the intended pre-claim refusal and does not cycle ownership.
+
+The full Go quality gate passed, including race tests and 65.4% coverage against
+the 60% threshold. Browser inspection found no page or console errors. The
+[retained Kanban screenshot](evidence/2026-08-26-lineage-proof-kanban.png)
+shows the malformed task remaining open in the isolated proof workspace; the
+accessibility snapshot additionally placed every valid task in Done.
