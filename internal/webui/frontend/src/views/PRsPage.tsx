@@ -8,7 +8,13 @@
  * key. GitHub PRs with no linked issue render as unlinked rows that open
  * externally, and gh failures degrade to a warning banner, never a blank page.
  */
-import { useMemo, useState, type KeyboardEvent } from "react";
+import {
+  useMemo,
+  useState,
+  type Dispatch,
+  type KeyboardEvent,
+  type SetStateAction,
+} from "react";
 import { useSearchParams } from "react-router-dom";
 
 import type { GitPullRequest } from "@/api/workspace";
@@ -242,6 +248,10 @@ export function PRsPage(): JSX.Element {
   });
   const [filter, setFilter] = useState<PRFilter>("review");
   const [groupMode, setGroupMode] = useState<GroupMode>("none");
+  const [query, setQuery] = useState("");
+  const [railQuery, setRailQuery] = useState("");
+  const [selectedRepos, setSelectedRepos] = useState<Set<string>>(new Set());
+  const [selectedEpics, setSelectedEpics] = useState<Set<string>>(new Set());
   const [searchParams, setSearchParams] = useSearchParams();
   const reviewId = searchParams.get("review");
   const reviewPrParam = searchParams.get("review-pr");
@@ -279,10 +289,64 @@ export function PRsPage(): JSX.Element {
     return c;
   }, [rows]);
 
-  const filtered = useMemo(
-    () => rows.filter((r) => matchesFilter(r, filter)),
-    [rows, filter],
-  );
+  const repoFor = (row: PullRequestRow): string =>
+    row.pr?.source_repo || row.pr?.repo_name || row.issue?.repo || "No repo";
+  const epicFor = (row: PullRequestRow): string =>
+    row.issue?.parent_title || "No epic";
+
+  const repoOptions = useMemo(() => {
+    const countsByRepo = new Map<string, number>();
+    for (const row of rows) {
+      const repo = repoFor(row);
+      countsByRepo.set(repo, (countsByRepo.get(repo) ?? 0) + 1);
+    }
+    return [...countsByRepo.entries()].sort(([a], [b]) => a.localeCompare(b));
+  }, [rows]);
+
+  const epicOptions = useMemo(() => {
+    const countsByEpic = new Map<string, number>();
+    for (const row of rows) {
+      const epic = epicFor(row);
+      countsByEpic.set(epic, (countsByEpic.get(epic) ?? 0) + 1);
+    }
+    return [...countsByEpic.entries()].sort(([a], [b]) => a.localeCompare(b));
+  }, [rows]);
+
+  const filtered = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return rows.filter((row) => {
+      if (!matchesFilter(row, filter)) return false;
+      const repo = repoFor(row);
+      const epic = epicFor(row);
+      if (selectedRepos.size > 0 && !selectedRepos.has(repo)) return false;
+      if (selectedEpics.size > 0 && !selectedEpics.has(epic)) return false;
+      if (!normalizedQuery) return true;
+      const searchable = [
+        row.pr?.title,
+        row.pr?.number,
+        row.issue?.title,
+        row.issue?.id,
+        repo,
+        epic,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return searchable.includes(normalizedQuery);
+    });
+  }, [filter, query, rows, selectedEpics, selectedRepos]);
+
+  const toggleSelection = (
+    value: string,
+    setSelection: Dispatch<SetStateAction<Set<string>>>,
+  ): void => {
+    setSelection((current) => {
+      const next = new Set(current);
+      if (next.has(value)) next.delete(value);
+      else next.add(value);
+      return next;
+    });
+  };
 
   const groups = useMemo(() => {
     if (groupMode === "none") return null;
@@ -490,96 +554,201 @@ export function PRsPage(): JSX.Element {
           </p>
         </div>
       ) : rows.length > 0 ? (
-        <>
-          <div className={styles.toolbar}>
-            <div
-              className={styles.filterPills}
-              role="tablist"
-              aria-label="Filter pull requests"
-            >
-              {FILTERS.filter(
-                (f) => f.id === "all" || f.id === "review" || counts[f.id] > 0,
-              ).map((f) => {
-                const isActive = filter === f.id;
-                return (
-                  <button
-                    key={f.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={isActive}
-                    className={styles.pill}
-                    data-active={isActive || undefined}
-                    onClick={() => setFilter(f.id)}
-                  >
-                    {f.label}
-                    <span className={styles.pillCount}>{counts[f.id]}</span>
-                  </button>
-                );
-              })}
-            </div>
-            <div className={styles.groupControl}>
-              <span className={styles.groupLabel}>Group</span>
+        <div className={styles.queueLayout}>
+          <aside
+            className={styles.filterRail}
+            aria-label="Pull request filters"
+          >
+            <label className={styles.railSearch}>
+              <span aria-hidden="true">⌕</span>
+              <input
+                type="search"
+                value={railQuery}
+                onChange={(event) => setRailQuery(event.target.value)}
+                placeholder="Filter repos & epics…"
+                aria-label="Filter repositories and epics"
+              />
+            </label>
+
+            <section className={styles.railSection}>
+              <h2 className={styles.railHeading}>View</h2>
               <div
-                className={styles.segmented}
-                role="group"
-                aria-label="Group pull requests by"
+                className={styles.filterPills}
+                role="tablist"
+                aria-label="Filter pull requests"
               >
-                {GROUPS.map((g) => {
-                  const isActive = groupMode === g.id;
+                {FILTERS.map((f) => {
+                  const isActive = filter === f.id;
                   return (
                     <button
-                      key={g.id}
+                      key={f.id}
                       type="button"
-                      className={styles.segButton}
+                      role="tab"
+                      aria-selected={isActive}
+                      className={styles.pill}
                       data-active={isActive || undefined}
-                      aria-pressed={isActive}
-                      onClick={() => setGroupMode(g.id)}
+                      onClick={() => setFilter(f.id)}
                     >
-                      {g.label}
+                      {f.label}
+                      <span className={styles.pillCount}>{counts[f.id]}</span>
                     </button>
                   );
                 })}
               </div>
-            </div>
-          </div>
+            </section>
 
-          {filtered.length === 0 ? (
-            <div className={styles.empty}>
-              <p className={styles.emptyTitle}>Nothing here</p>
-              <p className={styles.emptyHint}>
-                No pull requests match this filter.
-              </p>
-            </div>
-          ) : groups ? (
-            <div
-              className={styles.scrollRegion}
-              role="region"
-              aria-label="Pull request list"
-            >
-              <div className={styles.groups}>
-                {groups.map(([key, groupRows]) => (
-                  <section key={key} className={styles.group}>
-                    <header className={styles.groupHeader}>
-                      <span className={styles.groupName}>{key}</span>
-                      <span className={styles.groupCount}>
-                        {groupRows.length}
+            <section className={styles.railSection}>
+              <header className={styles.railSectionHead}>
+                <h2 className={styles.railHeading}>Repos</h2>
+                {selectedRepos.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedRepos(new Set())}
+                  >
+                    Clear
+                  </button>
+                )}
+              </header>
+              <div className={styles.checkList}>
+                {repoOptions
+                  .filter(([repo]) =>
+                    repo.toLowerCase().includes(railQuery.trim().toLowerCase()),
+                  )
+                  .map(([repo, count]) => (
+                    <button
+                      key={repo}
+                      type="button"
+                      className={styles.checkRow}
+                      aria-pressed={selectedRepos.has(repo)}
+                      onClick={() => toggleSelection(repo, setSelectedRepos)}
+                    >
+                      <span className={styles.checkbox} aria-hidden="true">
+                        {selectedRepos.has(repo) ? "✓" : ""}
                       </span>
-                    </header>
-                    <ul className={styles.list}>{groupRows.map(renderRow)}</ul>
-                  </section>
-                ))}
+                      <span className={styles.checkLabel}>{repo}</span>
+                      <span className={styles.checkCount}>{count}</span>
+                    </button>
+                  ))}
+              </div>
+            </section>
+
+            <section className={styles.railSection}>
+              <header className={styles.railSectionHead}>
+                <h2 className={styles.railHeading}>Epics</h2>
+                {selectedEpics.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedEpics(new Set())}
+                  >
+                    Clear
+                  </button>
+                )}
+              </header>
+              <div className={styles.checkList}>
+                {epicOptions
+                  .filter(([epic]) =>
+                    epic.toLowerCase().includes(railQuery.trim().toLowerCase()),
+                  )
+                  .map(([epic, count]) => (
+                    <button
+                      key={epic}
+                      type="button"
+                      className={styles.checkRow}
+                      aria-pressed={selectedEpics.has(epic)}
+                      onClick={() => toggleSelection(epic, setSelectedEpics)}
+                    >
+                      <span className={styles.checkbox} aria-hidden="true">
+                        {selectedEpics.has(epic) ? "✓" : ""}
+                      </span>
+                      <span className={styles.checkLabel}>{epic}</span>
+                      <span className={styles.checkCount}>{count}</span>
+                    </button>
+                  ))}
+              </div>
+            </section>
+          </aside>
+
+          <main className={styles.listPane}>
+            <div className={styles.toolbar}>
+              <label className={styles.listSearch}>
+                <span aria-hidden="true">⌕</span>
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search pull requests…"
+                  aria-label="Search pull requests"
+                />
+              </label>
+              <span className={styles.resultCount}>
+                {filtered.length} result{filtered.length === 1 ? "" : "s"}
+              </span>
+              <div className={styles.groupControl}>
+                <span className={styles.groupLabel}>Group</span>
+                <div
+                  className={styles.segmented}
+                  role="group"
+                  aria-label="Group pull requests by"
+                >
+                  {GROUPS.map((g) => {
+                    const isActive = groupMode === g.id;
+                    return (
+                      <button
+                        key={g.id}
+                        type="button"
+                        className={styles.segButton}
+                        data-active={isActive || undefined}
+                        aria-pressed={isActive}
+                        onClick={() => setGroupMode(g.id)}
+                      >
+                        {g.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
-          ) : (
-            <div
-              className={styles.scrollRegion}
-              role="region"
-              aria-label="Pull request list"
-            >
-              <ul className={styles.list}>{filtered.map(renderRow)}</ul>
-            </div>
-          )}
-        </>
+
+            {filtered.length === 0 ? (
+              <div className={styles.empty}>
+                <p className={styles.emptyTitle}>Nothing here</p>
+                <p className={styles.emptyHint}>
+                  No pull requests match this filter.
+                </p>
+              </div>
+            ) : groups ? (
+              <div
+                className={styles.scrollRegion}
+                role="region"
+                aria-label="Pull request list"
+              >
+                <div className={styles.groups}>
+                  {groups.map(([key, groupRows]) => (
+                    <section key={key} className={styles.group}>
+                      <header className={styles.groupHeader}>
+                        <span className={styles.groupName}>{key}</span>
+                        <span className={styles.groupCount}>
+                          {groupRows.length}
+                        </span>
+                      </header>
+                      <ul className={styles.list}>
+                        {groupRows.map(renderRow)}
+                      </ul>
+                    </section>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div
+                className={styles.scrollRegion}
+                role="region"
+                aria-label="Pull request list"
+              >
+                <ul className={styles.list}>{filtered.map(renderRow)}</ul>
+              </div>
+            )}
+          </main>
+        </div>
       ) : null}
     </div>
   );
