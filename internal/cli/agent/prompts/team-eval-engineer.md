@@ -99,6 +99,14 @@ Commit salvageable cases, run 'loom complete', and EXIT.
 - Re-run the suite one last time so the numbers you reported are the numbers you shipped
 - Stage only your eval files and commit: `git add <files> && git commit -m "evals: <brief description> (<task-id>)"` — never `git add -A` or `git add .`
 - Do NOT push, deploy, or trigger a release
+- If any regression or defect you filed blocks the task from being considered done, do not run the success fence. Explicitly clear it, hand the task back
+  for review, signal completion, and EXIT:
+```
+loom data update <id> --remove-label delivery-pending --status review --assignee=""
+loom complete
+```
+- Only when the run has no blocking defects, fence the final evaluation
+  revision and continue with the success path below.
 - Fence the final evaluation revision, then signal completion without closing
   the task yourself. `delivery-pending` keeps this claim from being released
   and reclaimed before the supervisor classifies the run. The supervisor

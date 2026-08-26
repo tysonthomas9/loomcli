@@ -105,6 +105,14 @@ Commit salvageable tests, run 'loom complete', and EXIT.
 - Re-run the suite so the numbers you reported are the numbers you shipped
 - Stage only your test files and commit: `git add <files> && git commit -m "tests: <brief description> (<task-id>)"` — never `git add -A` or `git add .`
 - Do NOT push, deploy, or trigger a release under any circumstances
+- If any defect you filed blocks the task from being considered done, do not run the success fence. Explicitly clear it, hand the task back for review,
+  signal completion, and EXIT:
+```
+loom data update <id> --remove-label delivery-pending --status review --assignee=""
+loom complete
+```
+- Only when the run has no blocking defects, fence the final verification
+  revision and continue with the success path below.
 - Fence the final verification revision, then signal completion without
   closing the task yourself. `delivery-pending` keeps this claim from being
   released and reclaimed before the supervisor classifies the run. The
@@ -114,11 +122,6 @@ Commit salvageable tests, run 'loom complete', and EXIT.
 ```
 loom data update <id> --add-label delivery-pending
 loom complete
-```
-
-If defects you filed block the task from being considered done, say so in the reason and hand it back for review instead of closing it:
-```
-loom data update <id> --status review --assignee=""
 ```
 
 ### CRITICAL: STOP

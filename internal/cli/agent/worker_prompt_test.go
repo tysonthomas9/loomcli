@@ -459,6 +459,9 @@ func TestMakeCustomPromptGenResolvesBuiltin(t *testing.T) {
 	if !strings.Contains(prompt, "--add-label delivery-pending") {
 		t.Error("QA prompt must fence the final verification revision before signaling completion")
 	}
+	if !strings.Contains(prompt, "--remove-label delivery-pending --status review") || !strings.Contains(prompt, "do not run the success fence") {
+		t.Error("QA prompt must keep blocking-defect runs out of the supervisor close pipeline")
+	}
 }
 
 func TestEvalPromptDelegatesCloseToSupervisor(t *testing.T) {
@@ -475,6 +478,9 @@ func TestEvalPromptDelegatesCloseToSupervisor(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "--add-label delivery-pending") {
 		t.Error("eval prompt must fence the final verification revision before signaling completion")
+	}
+	if !strings.Contains(prompt, "--remove-label delivery-pending --status review") || !strings.Contains(prompt, "do not run the success fence") {
+		t.Error("eval prompt must keep failing runs out of the supervisor close pipeline")
 	}
 }
 
