@@ -14,33 +14,34 @@ import (
 // `type` into a struct field. types.Issue tags the same field as
 // `issue_type`, so fleet responses need this projection step.
 type fleetIssueWire struct {
-	ID               string     `json:"id,omitempty"`
-	Title            string     `json:"title,omitempty"`
-	Status           string     `json:"status,omitempty"`
-	Priority         int        `json:"priority,omitempty"`
-	Type             string     `json:"type,omitempty"`
-	Assignee         string     `json:"assignee,omitempty"`
-	Owner            string     `json:"owner,omitempty"`
-	Labels           []string   `json:"labels,omitempty"`
-	Repo             string     `json:"repo,omitempty"`
-	SourceRepo       string     `json:"source_repo,omitempty"`
-	ParentID         string     `json:"parent_id,omitempty"`
-	Parent           string     `json:"parent,omitempty"`
-	Design           string     `json:"design,omitempty"`
-	DesignArtifactID string     `json:"design_artifact_id,omitempty"`
-	DesignFormat     string     `json:"design_format,omitempty"`
-	HasDesign        bool       `json:"has_design"`
-	Notes            string     `json:"notes,omitempty"`
-	Description      string     `json:"description,omitempty"`
-	Acceptance       string     `json:"acceptance_criteria,omitempty"`
-	ExternalRef      string     `json:"external_ref,omitempty"`
-	CreatedAt        time.Time  `json:"created_at,omitempty"`
-	CreatedBy        string     `json:"created_by,omitempty"`
-	UpdatedAt        time.Time  `json:"updated_at,omitempty"`
-	DueAt            *time.Time `json:"due_at,omitempty"`
-	DeferUntil       *time.Time `json:"defer_until,omitempty"`
-	ClosedAt         *time.Time `json:"closed_at,omitempty"`
-	CloseReason      string     `json:"close_reason,omitempty"`
+	ID               string            `json:"id,omitempty"`
+	Title            string            `json:"title,omitempty"`
+	Status           string            `json:"status,omitempty"`
+	Priority         int               `json:"priority,omitempty"`
+	Type             string            `json:"type,omitempty"`
+	Assignee         string            `json:"assignee,omitempty"`
+	Owner            string            `json:"owner,omitempty"`
+	Labels           []string          `json:"labels,omitempty"`
+	Repo             string            `json:"repo,omitempty"`
+	SourceRepo       string            `json:"source_repo,omitempty"`
+	ParentID         string            `json:"parent_id,omitempty"`
+	Parent           string            `json:"parent,omitempty"`
+	Design           string            `json:"design,omitempty"`
+	DesignArtifactID string            `json:"design_artifact_id,omitempty"`
+	DesignFormat     string            `json:"design_format,omitempty"`
+	HasDesign        bool              `json:"has_design"`
+	Notes            string            `json:"notes,omitempty"`
+	Description      string            `json:"description,omitempty"`
+	Acceptance       string            `json:"acceptance_criteria,omitempty"`
+	ExternalRef      string            `json:"external_ref,omitempty"`
+	CreatedAt        time.Time         `json:"created_at,omitempty"`
+	CreatedBy        string            `json:"created_by,omitempty"`
+	UpdatedAt        time.Time         `json:"updated_at,omitempty"`
+	DueAt            *time.Time        `json:"due_at,omitempty"`
+	DeferUntil       *time.Time        `json:"defer_until,omitempty"`
+	ClosedAt         *time.Time        `json:"closed_at,omitempty"`
+	CloseReason      string            `json:"close_reason,omitempty"`
+	Metadata         map[string]string `json:"metadata,omitempty"`
 }
 
 // toIssue projects the wire shape to the canonical types.Issue.
@@ -70,6 +71,7 @@ func (w fleetIssueWire) toIssue() types.Issue {
 		DeferUntil:         w.DeferUntil,
 		ClosedAt:           w.ClosedAt,
 		CloseReason:        w.CloseReason,
+		Metadata:           w.Metadata,
 	}
 }
 
@@ -209,6 +211,7 @@ func issueToData(issue *types.Issue) backend.IssueData {
 		CreatedBy:        issue.CreatedBy,
 		ClosedAt:         issue.ClosedAt,
 		CloseReason:      issue.CloseReason,
+		Metadata:         issue.Metadata,
 	}
 }
 

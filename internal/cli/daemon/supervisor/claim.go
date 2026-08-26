@@ -100,15 +100,16 @@ type TaskWorktreeManager interface {
 type TaskWorktreeLease interface{ Release() error }
 
 type TaskWorktreeRequest struct {
-	WorkspacePath     string
-	WorkspaceKey      string
-	RepoName          string
-	RepoPath          string
-	TaskID            string
-	Remote            string
-	DefaultBranch     string
-	DependencyTaskIDs []string
-	AllowDirtyResume  bool
+	WorkspacePath           string
+	WorkspaceKey            string
+	RepoName                string
+	RepoPath                string
+	TaskID                  string
+	Remote                  string
+	DefaultBranch           string
+	BaseTaskID              string
+	IntegrationInputTaskIDs []string
+	AllowDirtyResume        bool
 }
 
 type TaskWorktree struct {
@@ -127,15 +128,15 @@ func (s *Supervisor) prepareClaimedTaskWorktree(ctx context.Context, ap *AgentPr
 		return nil
 	}
 	repo := ap.RepoConfig
-	var requiredDependencies []string
+	var lineageSpec backend.TaskLineageSpec
 	if s.IssueBackend != nil {
 		issue, err := s.IssueBackend.Get(ctx, ap.AssignedTaskID)
 		if err != nil {
 			return fmt.Errorf("read task %q dependencies: %w", ap.AssignedTaskID, err)
 		}
-		requiredDependencies, err = requiredTaskDependencyIDs(ctx, s.IssueBackend, ap.AssignedTaskID, issue)
+		lineageSpec, err = backend.ParseTaskLineage(issue.Metadata)
 		if err != nil {
-			return err
+			return fmt.Errorf("read task %q code lineage: %w", ap.AssignedTaskID, err)
 		}
 		repo, err = resolveTaskRepo(repo, issue.SourceRepo, s.FindRepoConfig)
 		if err != nil {
@@ -146,15 +147,16 @@ func (s *Supervisor) prepareClaimedTaskWorktree(ctx context.Context, ap *AgentPr
 		return fmt.Errorf("task %q has no resolved repository for its worktree", ap.AssignedTaskID)
 	}
 	prepared, err := s.TaskWorktrees.Prepare(ctx, TaskWorktreeRequest{
-		WorkspacePath:     s.ProjectDir,
-		WorkspaceKey:      s.WorkspaceID,
-		RepoName:          repo.Name,
-		RepoPath:          repo.ResolveAbsPath(s.ProjectDir),
-		TaskID:            ap.AssignedTaskID,
-		Remote:            repo.Remote,
-		DefaultBranch:     repo.DefaultBranch,
-		DependencyTaskIDs: requiredDependencies,
-		AllowDirtyResume:  ap.RecoveryMode == recoverResume || ap.RecoveryMode == recoverCheckpoint,
+		WorkspacePath:           s.ProjectDir,
+		WorkspaceKey:            s.WorkspaceID,
+		RepoName:                repo.Name,
+		RepoPath:                repo.ResolveAbsPath(s.ProjectDir),
+		TaskID:                  ap.AssignedTaskID,
+		Remote:                  repo.Remote,
+		DefaultBranch:           repo.DefaultBranch,
+		BaseTaskID:              lineageSpec.InheritsFrom,
+		IntegrationInputTaskIDs: lineageSpec.IntegrationInputs,
+		AllowDirtyResume:        ap.RecoveryMode == recoverResume || ap.RecoveryMode == recoverCheckpoint,
 	})
 	if err != nil {
 		return err
@@ -172,37 +174,6 @@ func (s *Supervisor) prepareClaimedTaskWorktree(ctx context.Context, ap *AgentPr
 	ap.TaskWorktreeLease = prepared.Lease
 	ap.Mu.Unlock()
 	return nil
-}
-
-func requiredTaskDependencyIDs(ctx context.Context, issues backend.IssueBackend, taskID string, issue *backend.IssueDetailData) ([]string, error) {
-	current := dependencyTaskIDs(issue)
-	lineage, ok := issues.(backend.DependencyLineageBackend)
-	if !ok {
-		return current, nil
-	}
-	historical, err := lineage.DependencyTaskIDs(ctx, taskID)
-	if err != nil {
-		return nil, fmt.Errorf("read task %q dependency lineage: %w", taskID, err)
-	}
-	return mergeTaskIDs(current, historical), nil
-}
-
-func mergeTaskIDs(groups ...[]string) []string {
-	var merged []string
-	seen := make(map[string]struct{})
-	for _, group := range groups {
-		for _, id := range group {
-			if id == "" {
-				continue
-			}
-			if _, ok := seen[id]; ok {
-				continue
-			}
-			seen[id] = struct{}{}
-			merged = append(merged, id)
-		}
-	}
-	return merged
 }
 
 func releaseTaskWorktreeLease(ap *AgentProcess) {
@@ -228,19 +199,6 @@ func resolveTaskRepo(current *config.RepoConfig, sourceRepo string, find func(st
 		}
 	}
 	return nil, fmt.Errorf("claimed task source repository %q is not configured", sourceRepo)
-}
-
-func dependencyTaskIDs(issue *backend.IssueDetailData) []string {
-	if issue == nil {
-		return nil
-	}
-	ids := make([]string, 0, len(issue.Dependencies))
-	for _, dependency := range issue.Dependencies {
-		if dependency.Type == "blocks" && dependency.DependsOnID != "" {
-			ids = append(ids, dependency.DependsOnID)
-		}
-	}
-	return ids
 }
 
 func (s *Supervisor) shouldPublishTaskDelivery(ctx context.Context, ap *AgentProcess) (bool, error) {
@@ -425,6 +383,10 @@ func (s *Supervisor) claimRequestedTask(ap *AgentProcess, opts backend.ReadyOpts
 			s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome), fmt.Sprintf("requested task %s is not claimable", taskID))
 			return false
 		}
+		if err := s.validateTaskLineageBeforeClaim(issue); err != nil {
+			s.setPreflightError(ap, agenterr.OutcomeFromHarness(wrapper.ErrUnknown), fmt.Sprintf("requested task %s has invalid code lineage: %v", taskID, err))
+			return false
+		}
 		if err := s.claimIssueForAgent(ap, taskID, "requested task"); err != nil {
 			if backend.IsKind(err, backend.KindConflict) {
 				s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.LockConflictOutcome), fmt.Sprintf("requested task %s locked by %s", taskID, conflictHolder(err)))
@@ -471,6 +433,15 @@ func (s *Supervisor) tryClaimBestTask(ap *AgentProcess, issues []backend.IssueDa
 		if match == nil {
 			return false, false
 		}
+		if err := s.validateTaskLineageBeforeClaim(match.Issue); err != nil {
+			slog.Error("skipping task with invalid code lineage", "task_id", match.Issue.ID, "err", err)
+			issues = removeIssueByID(issues, match.Issue.ID)
+			if len(issues) == 0 {
+				s.setPreflightError(ap, agenterr.OutcomeFromHarness(wrapper.ErrUnknown), fmt.Sprintf("no valid tasks: %s has invalid code lineage: %v", match.Issue.ID, err))
+				return false, true
+			}
+			continue
+		}
 		if err := s.claimIssueForAgent(ap, match.Issue.ID, match.Reason); err != nil {
 			if backend.IsKind(err, backend.KindConflict) {
 				conflicts++
@@ -490,6 +461,26 @@ func (s *Supervisor) tryClaimBestTask(ap *AgentProcess, issues []backend.IssueDa
 		}
 		return true, false
 	}
+}
+
+func (s *Supervisor) validateTaskLineageBeforeClaim(issue backend.IssueData) error {
+	spec, err := backend.ParseTaskLineage(issue.Metadata)
+	if err != nil {
+		return err
+	}
+	if spec.InheritsFrom == "" && len(spec.IntegrationInputs) == 0 {
+		return spec.Validate(issue.ID)
+	}
+	ctx, cancel := s.operationContext(claimOperationTimeout)
+	defer cancel()
+	detail, err := s.IssueBackend.Get(ctx, issue.ID)
+	if err != nil {
+		return fmt.Errorf("read task %q dependencies: %w", issue.ID, err)
+	}
+	if detail == nil {
+		return fmt.Errorf("task %q does not exist", issue.ID)
+	}
+	return backend.ValidateTaskLineageReferences(ctx, spec, issue.ID, issue.SourceRepo, detail.Dependencies, s.IssueBackend.Get)
 }
 
 // conflictHolder extracts the holder identity from a KindConflict error's

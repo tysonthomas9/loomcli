@@ -59,8 +59,9 @@ type IssueData struct {
 	DependencyCount int `json:"dependency_count,omitempty"`
 	DependentCount  int `json:"dependent_count,omitempty"`
 	// Blocker metadata for blocked-list projections.
-	BlockedByCount int      `json:"blocked_by_count,omitempty"`
-	BlockedBy      []string `json:"blocked_by,omitempty"`
+	BlockedByCount int               `json:"blocked_by_count,omitempty"`
+	BlockedBy      []string          `json:"blocked_by,omitempty"`
+	Metadata       map[string]string `json:"metadata,omitempty"`
 }
 
 // IssueDetailData is the full issue projection returned by Get.
@@ -332,26 +333,27 @@ type CountOpts struct {
 
 // CreateParams contains fields for creating a new issue.
 type CreateParams struct {
-	ID                 string   `json:"id,omitempty"`
-	Parent             string   `json:"parent,omitempty"`
-	Title              string   `json:"title"`
-	Description        string   `json:"description,omitempty"`
-	Status             string   `json:"status,omitempty"`
-	IssueType          string   `json:"issue_type"`
-	Priority           int      `json:"priority"`
-	Design             string   `json:"design,omitempty"`
-	AcceptanceCriteria string   `json:"acceptance_criteria,omitempty"`
-	Notes              string   `json:"notes,omitempty"`
-	Assignee           string   `json:"assignee,omitempty"`
-	Owner              string   `json:"owner,omitempty"`
-	CreatedBy          string   `json:"created_by,omitempty"`
-	ExternalRef        string   `json:"external_ref,omitempty"`
-	EstimatedMinutes   *int     `json:"estimated_minutes,omitempty"`
-	Labels             []string `json:"labels,omitempty"`
-	Dependencies       []string `json:"dependencies,omitempty"`
-	SourceRepo         string   `json:"source_repo,omitempty"`
-	DueAt              string   `json:"due_at,omitempty"`
-	DeferUntil         string   `json:"defer_until,omitempty"`
+	ID                 string            `json:"id,omitempty"`
+	Parent             string            `json:"parent,omitempty"`
+	Title              string            `json:"title"`
+	Description        string            `json:"description,omitempty"`
+	Status             string            `json:"status,omitempty"`
+	IssueType          string            `json:"issue_type"`
+	Priority           int               `json:"priority"`
+	Design             string            `json:"design,omitempty"`
+	AcceptanceCriteria string            `json:"acceptance_criteria,omitempty"`
+	Notes              string            `json:"notes,omitempty"`
+	Assignee           string            `json:"assignee,omitempty"`
+	Owner              string            `json:"owner,omitempty"`
+	CreatedBy          string            `json:"created_by,omitempty"`
+	ExternalRef        string            `json:"external_ref,omitempty"`
+	EstimatedMinutes   *int              `json:"estimated_minutes,omitempty"`
+	Labels             []string          `json:"labels,omitempty"`
+	Dependencies       []string          `json:"dependencies,omitempty"`
+	SourceRepo         string            `json:"source_repo,omitempty"`
+	DueAt              string            `json:"due_at,omitempty"`
+	DeferUntil         string            `json:"defer_until,omitempty"`
+	Metadata           map[string]string `json:"metadata,omitempty"`
 
 	// IdempotencyKey rides as the X-Idempotency-Key HTTP header on create
 	// requests (fleet-db's strict JSON decode rejects unknown body fields,
@@ -410,6 +412,9 @@ func (p CreateParams) FleetCreateBody() map[string]interface{} {
 	setNonEmptyMapStr(req, "external_ref", p.ExternalRef)
 	setNonEmptyMapStr(req, "defer_until", p.DeferUntil)
 	setNonEmptyMapStr(req, "due_at", p.DueAt)
+	if len(p.Metadata) > 0 {
+		req["metadata"] = p.Metadata
+	}
 	return req
 }
 

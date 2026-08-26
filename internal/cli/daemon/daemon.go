@@ -135,15 +135,16 @@ type taskWorktreeAdapter struct {
 
 func (a taskWorktreeAdapter) Prepare(ctx context.Context, req supervisor.TaskWorktreeRequest) (supervisor.TaskWorktree, error) {
 	prepared, err := a.manager.Prepare(ctx, localworkspace.TaskWorktreeRequest{
-		WorkspacePath:     req.WorkspacePath,
-		WorkspaceKey:      req.WorkspaceKey,
-		RepoName:          req.RepoName,
-		RepoPath:          req.RepoPath,
-		TaskID:            req.TaskID,
-		Remote:            req.Remote,
-		DefaultBranch:     req.DefaultBranch,
-		DependencyTaskIDs: req.DependencyTaskIDs,
-		AllowDirtyResume:  req.AllowDirtyResume,
+		WorkspacePath:           req.WorkspacePath,
+		WorkspaceKey:            req.WorkspaceKey,
+		RepoName:                req.RepoName,
+		RepoPath:                req.RepoPath,
+		TaskID:                  req.TaskID,
+		Remote:                  req.Remote,
+		DefaultBranch:           req.DefaultBranch,
+		BaseTaskID:              req.BaseTaskID,
+		IntegrationInputTaskIDs: req.IntegrationInputTaskIDs,
+		AllowDirtyResume:        req.AllowDirtyResume,
 	})
 	if err != nil {
 		return supervisor.TaskWorktree{}, err

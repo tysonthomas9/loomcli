@@ -98,6 +98,8 @@ type CreateIssueParams struct {
 	EstimatedMinutes   *int
 	Labels             []string
 	Dependencies       []string
+	InheritsFrom       string
+	IntegrationInputs  []string
 	DueAt              string
 	DeferUntil         string
 	SourceRepo         string

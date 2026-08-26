@@ -153,7 +153,7 @@ func TestPrepareTaskWorktreeBasesDependentTaskOnPublishedTaskBranch(t *testing.T
 	}
 
 	base.TaskID = "TEAM-B"
-	base.DependencyTaskIDs = []string{"TEAM-A"}
+	base.BaseTaskID = "TEAM-A"
 	dependent, err := PrepareTaskWorktree(context.Background(), base)
 	if err != nil {
 		t.Fatalf("prepare dependent task: %v", err)
@@ -193,13 +193,64 @@ func TestPrepareTaskWorktreeInheritsAvailableCandidateDeliveryAndIgnoresGateOnly
 	}
 
 	base.TaskID = "TEAM-B"
-	base.CandidateDependencyTaskIDs = []string{"TEAM-RESEARCH", "TEAM-A"}
+	base.BaseTaskID = "TEAM-A"
 	dependent, err := PrepareTaskWorktree(context.Background(), base)
 	if err != nil {
 		t.Fatalf("prepare dependent task: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dependent.Path, "from-a.txt")); err != nil {
 		t.Fatalf("task B did not inherit available code delivery: %v", err)
+	}
+}
+
+func TestIntegrationTaskStartsFromOneBaseAndMustMergeEveryInput(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	git(t, "", "init", "-b", "main", repo)
+	git(t, repo, "config", "user.name", "Test User")
+	git(t, repo, "config", "user.email", "test@example.test")
+	writeFile(t, filepath.Join(repo, "base.txt"), "base\n")
+	git(t, repo, "add", "base.txt")
+	git(t, repo, "commit", "-m", "base")
+
+	manager := TaskWorktreeManager{}
+	base := TaskWorktreeRequest{WorkspacePath: root, WorkspaceKey: "TEAM", RepoName: "repo", RepoPath: repo, DefaultBranch: "main"}
+	publish := func(id, filename string) string {
+		base.TaskID = id
+		base.BaseTaskID = ""
+		base.IntegrationInputTaskIDs = nil
+		wt, err := PrepareTaskWorktree(context.Background(), base)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, filepath.Join(wt.Path, filename), id+"\n")
+		git(t, wt.Path, "add", filename)
+		git(t, wt.Path, "commit", "-m", id)
+		if _, err := manager.Publish(context.Background(), TaskWorktreePublishRequest{WorkspaceKey: base.WorkspaceKey, RepoPath: repo, TaskID: id, Path: wt.Path, Branch: wt.Branch, InputSHA: wt.InputSHA}); err != nil {
+			t.Fatal(err)
+		}
+		return gitOut(t, wt.Path, "rev-parse", "HEAD")
+	}
+	aSHA := publish("TEAM-A", "a.txt")
+	bSHA := publish("TEAM-B", "b.txt")
+
+	base.TaskID = "TEAM-I"
+	base.BaseTaskID = "TEAM-A"
+	base.IntegrationInputTaskIDs = []string{"TEAM-B"}
+	integration, err := PrepareTaskWorktree(context.Background(), base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if integration.InputSHA != aSHA {
+		t.Fatalf("integration input SHA = %s, want base %s", integration.InputSHA, aSHA)
+	}
+	pub := TaskWorktreePublishRequest{WorkspaceKey: base.WorkspaceKey, RepoPath: repo, TaskID: base.TaskID, Path: integration.Path, Branch: integration.Branch, InputSHA: integration.InputSHA}
+	if _, err := manager.Publish(context.Background(), pub); err == nil {
+		t.Fatal("published integration output before merging its explicit input")
+	}
+	git(t, integration.Path, "merge", "--no-ff", "-m", "merge TEAM-B", bSHA)
+	if _, err := manager.Publish(context.Background(), pub); err != nil {
+		t.Fatalf("publish merged integration: %v", err)
 	}
 }
 
@@ -328,7 +379,7 @@ func TestPrepareTaskWorktreeRejectsUnpublishedRequiredDependency(t *testing.T) {
 	git(t, upstream.Path, "commit", "-m", "partial")
 
 	base.TaskID = "TEAM-B"
-	base.DependencyTaskIDs = []string{"TEAM-A"}
+	base.BaseTaskID = "TEAM-A"
 	if _, err := PrepareTaskWorktree(context.Background(), base); err == nil {
 		t.Fatal("required dependency accepted a task branch that was never published")
 	}
@@ -359,7 +410,7 @@ func TestPrepareTaskWorktreeRejectsChangedPublishedDependencyReceipt(t *testing.
 	}
 
 	base.TaskID = "TEAM-B"
-	base.DependencyTaskIDs = []string{"TEAM-A"}
+	base.BaseTaskID = "TEAM-A"
 	if _, err := PrepareTaskWorktree(context.Background(), base); err != nil {
 		t.Fatal(err)
 	}
@@ -400,7 +451,7 @@ func TestPublishRejectsDependencyThatAdvancedDuringAttempt(t *testing.T) {
 	}
 
 	base.TaskID = "TEAM-B"
-	base.DependencyTaskIDs = []string{"TEAM-A"}
+	base.BaseTaskID = "TEAM-A"
 	b, err := PrepareTaskWorktree(context.Background(), base)
 	if err != nil {
 		t.Fatal(err)
@@ -447,11 +498,11 @@ func TestPrepareRejectsRemovedDependencyReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	base.TaskID = "TEAM-B"
-	base.DependencyTaskIDs = []string{"TEAM-A"}
+	base.BaseTaskID = "TEAM-A"
 	if _, err := PrepareTaskWorktree(context.Background(), base); err != nil {
 		t.Fatal(err)
 	}
-	base.DependencyTaskIDs = nil
+	base.BaseTaskID = ""
 	if _, err := PrepareTaskWorktree(context.Background(), base); err == nil {
 		t.Fatal("accepted an existing task after removing its recorded dependency")
 	}

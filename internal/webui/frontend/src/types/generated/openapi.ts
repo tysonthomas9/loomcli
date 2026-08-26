@@ -2759,6 +2759,8 @@ export interface components {
       external_ref?: string | null;
       source_system?: string;
       source_repo?: string;
+      inherits_from?: string;
+      integration_inputs?: string[];
       labels?: string[];
       dependencies?: components["schemas"]["Dependency"][];
       comments?: components["schemas"]["Comment"][];
@@ -2824,6 +2826,8 @@ export interface components {
       defer_until?: string | null;
       external_ref?: string | null;
       source_repo?: string;
+      inherits_from?: string;
+      integration_inputs?: string[];
       /** @default [] */
       labels: string[];
       /** @default [] */
@@ -2947,6 +2951,8 @@ export interface components {
       estimated_minutes?: number | null;
       labels?: string[];
       dependencies?: string[];
+      inherits_from?: string;
+      integration_inputs?: string[];
       due_at?: string;
       defer_until?: string;
     };

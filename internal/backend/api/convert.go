@@ -59,6 +59,7 @@ func issueToData(issue gen.Issue) backend.IssueData {
 	}
 	d.DueAt = cloneTimePtr(issue.DueAt)
 	d.DeferUntil = cloneTimePtr(issue.DeferUntil)
+	d.Metadata = lineageMetadata(issue.InheritsFrom, issue.IntegrationInputs)
 	return d
 }
 
@@ -109,10 +110,23 @@ func issueResponseToData(r gen.IssueResponse) backend.IssueData {
 	}
 	d.DueAt = cloneTimePtr(r.DueAt)
 	d.DeferUntil = cloneTimePtr(r.DeferUntil)
+	d.Metadata = lineageMetadata(r.InheritsFrom, r.IntegrationInputs)
 	if d.Labels == nil {
 		d.Labels = []string{}
 	}
 	return d
+}
+
+func lineageMetadata(base *string, inputs *[]string) map[string]string {
+	spec := backend.TaskLineageSpec{}
+	if base != nil {
+		spec.InheritsFrom = *base
+	}
+	if inputs != nil {
+		spec.IntegrationInputs = append([]string(nil), (*inputs)...)
+	}
+	metadata, _ := spec.Metadata()
+	return metadata
 }
 
 // issueResponseToDetailData converts a generated IssueResponse to the richer

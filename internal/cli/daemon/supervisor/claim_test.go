@@ -47,31 +47,55 @@ func TestClaimTask_SelectsEligibleTaskAndClaims(t *testing.T) {
 	}
 }
 
+func TestClaimTaskSkipsInvalidLineageWithoutClaiming(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		metadata map[string]string
+		get      func(context.Context, string) (*backend.IssueDetailData, error)
+	}{
+		{
+			name:     "integration input without base",
+			metadata: map[string]string{backend.MetadataIntegrationInputs: `["task-b"]`},
+		},
+		{
+			name:     "code input is not a direct blocker",
+			metadata: map[string]string{backend.MetadataInheritsFrom: "task-b"},
+			get: func(_ context.Context, id string) (*backend.IssueDetailData, error) {
+				if id == "task-invalid" {
+					return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id, SourceRepo: "repo"}}, nil
+				}
+				return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id, SourceRepo: "repo"}}, nil
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := clitest.NewMockIssueBackend()
+			mock.ReadyResult = []backend.IssueData{{
+				ID: "task-invalid", IssueType: "task", Status: "open", Priority: 1, Title: "Invalid", SourceRepo: "repo",
+				Metadata: tc.metadata,
+			}}
+			mock.GetFn = tc.get
+			s := &Supervisor{IssueBackend: mock}
+			ap := &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "falcon", Role: "task"}}
+			if s.claimTask(ap, "") {
+				t.Fatal("claimTask accepted invalid lineage")
+			}
+			for _, call := range mock.Calls {
+				if call.Method == "ClaimIssue" {
+					t.Fatalf("invalid lineage was claimed: %#v", mock.Calls)
+				}
+			}
+			if ap.AssignedTaskID != "" {
+				t.Fatalf("AssignedTaskID = %q", ap.AssignedTaskID)
+			}
+		})
+	}
+}
+
 type recordingTaskWorktreeManager struct {
 	req TaskWorktreeRequest
 	got TaskWorktree
 	err error
-}
-
-type historicalDependencyBackend struct {
-	*clitest.MockIssueBackend
-	dependencyIDs []string
-}
-
-func (b *historicalDependencyBackend) DependencyTaskIDs(context.Context, string) ([]string, error) {
-	return append([]string(nil), b.dependencyIDs...), nil
-}
-
-func TestRequiredDependenciesUseDirectBlockingTasks(t *testing.T) {
-	issue := &backend.IssueDetailData{Dependencies: []backend.DependencyData{
-		{DependsOnID: "TASK-A", Type: "blocks"},
-		{DependsOnID: "TASK-C", Type: "relates_to"},
-		{DependsOnID: "TASK-B", Type: "blocks"},
-	}}
-	got := dependencyTaskIDs(issue)
-	if len(got) != 2 || got[0] != "TASK-A" || got[1] != "TASK-B" {
-		t.Fatalf("dependencyTaskIDs = %v", got)
-	}
 }
 
 func TestPrepareClaimedTaskWorktreeUsesTaskRepoWithoutAgentAffinity(t *testing.T) {
@@ -80,8 +104,11 @@ func TestPrepareClaimedTaskWorktreeUsesTaskRepoWithoutAgentAffinity(t *testing.T
 	issues := clitest.NewMockIssueBackend()
 	issues.GetFn = func(context.Context, string) (*backend.IssueDetailData, error) {
 		return &backend.IssueDetailData{
-			IssueData:    backend.IssueData{ID: "TASK-9", SourceRepo: "repo-back"},
-			Dependencies: []backend.DependencyData{{DependsOnID: "TASK-8", Type: "blocks"}},
+			IssueData: backend.IssueData{ID: "TASK-9", SourceRepo: "repo-back", Metadata: map[string]string{backend.MetadataInheritsFrom: "TASK-8"}},
+			Dependencies: []backend.DependencyData{
+				{DependsOnID: "TASK-8", Type: "blocks"},
+				{DependsOnID: "TASK-SCHEDULING-ONLY", Type: "blocks"},
+			},
 		}, nil
 	}
 	s := &Supervisor{
@@ -100,22 +127,16 @@ func TestPrepareClaimedTaskWorktreeUsesTaskRepoWithoutAgentAffinity(t *testing.T
 	if err := s.prepareClaimedTaskWorktree(context.Background(), ap); err != nil {
 		t.Fatal(err)
 	}
-	if ap.RepoConfig != repo || manager.req.RepoName != "backend" || len(manager.req.DependencyTaskIDs) != 1 || manager.req.DependencyTaskIDs[0] != "TASK-8" {
+	if ap.RepoConfig != repo || manager.req.RepoName != "backend" || manager.req.BaseTaskID != "TASK-8" {
 		t.Fatalf("resolved repo = %+v, request = %+v", ap.RepoConfig, manager.req)
 	}
 }
 
-func TestPrepareClaimedTaskWorktreeUsesHistoricalDependenciesAfterBlockerCloses(t *testing.T) {
+func TestPrepareClaimedTaskWorktreeUsesExplicitLineageAfterBlockerCloses(t *testing.T) {
 	manager := &recordingTaskWorktreeManager{got: TaskWorktree{Path: "/workspace/task", Branch: "loom/task/ws/TASK-B"}}
-	issues := &historicalDependencyBackend{
-		MockIssueBackend: clitest.NewMockIssueBackend(),
-		dependencyIDs:    []string{"TASK-A"},
-	}
+	issues := clitest.NewMockIssueBackend()
 	issues.GetFn = func(context.Context, string) (*backend.IssueDetailData, error) {
-		// FleetDB removes blocking edges when TASK-A closes, so the claim-time
-		// issue projection no longer contains TASK-A even though its delivery is
-		// required as TASK-B's immutable input.
-		return &backend.IssueDetailData{IssueData: backend.IssueData{ID: "TASK-B", SourceRepo: "repo-back"}}, nil
+		return &backend.IssueDetailData{IssueData: backend.IssueData{ID: "TASK-B", SourceRepo: "repo-back", Metadata: map[string]string{backend.MetadataInheritsFrom: "TASK-A"}}}, nil
 	}
 	repo := &cfgpkg.RepoConfig{Name: "backend", SourceRepoID: "repo-back", Path: "/workspace/backend", DefaultBranch: "main"}
 	s := &Supervisor{
@@ -132,8 +153,8 @@ func TestPrepareClaimedTaskWorktreeUsesHistoricalDependenciesAfterBlockerCloses(
 	if err := s.prepareClaimedTaskWorktree(context.Background(), ap); err != nil {
 		t.Fatal(err)
 	}
-	if got := manager.req.DependencyTaskIDs; len(got) != 1 || got[0] != "TASK-A" {
-		t.Fatalf("DependencyTaskIDs = %v, want closed blocker TASK-A from durable lineage", got)
+	if got := manager.req.BaseTaskID; got != "TASK-A" {
+		t.Fatalf("BaseTaskID = %q, want explicit TASK-A", got)
 	}
 }
 

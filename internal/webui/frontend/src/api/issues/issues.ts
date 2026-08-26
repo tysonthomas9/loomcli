@@ -364,6 +364,8 @@ export interface CreateIssueRequest {
   estimated_minutes?: number;
   labels?: string[];
   dependencies?: string[];
+  inherits_from?: string;
+  integration_inputs?: string[];
   source_repo?: string;
   due_at?: string;
   defer_until?: string;

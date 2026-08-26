@@ -52,34 +52,6 @@ type claimReleaserMockBackend struct {
 	releaseE  error
 }
 
-type dependencyLineageMockBackend struct {
-	*MockIssueBackend
-	ids    []string
-	called string
-}
-
-func (m *dependencyLineageMockBackend) DependencyTaskIDs(_ context.Context, id string) ([]string, error) {
-	m.called = id
-	return append([]string(nil), m.ids...), nil
-}
-
-func TestTracedIssueBackendPreservesDependencyLineage(t *testing.T) {
-	inner := &dependencyLineageMockBackend{MockIssueBackend: NewMockIssueBackend(), ids: []string{"TASK-A"}}
-	wrapped := wrapIssueBackendWithTracing(inner)
-
-	lineage, ok := wrapped.(backend.DependencyLineageBackend)
-	if !ok {
-		t.Fatal("traced issue backend should preserve DependencyLineageBackend")
-	}
-	got, err := lineage.DependencyTaskIDs(context.Background(), "TASK-B")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 1 || got[0] != "TASK-A" || inner.called != "TASK-B" {
-		t.Fatalf("DependencyTaskIDs = %v called=%q, want [TASK-A] called TASK-B", got, inner.called)
-	}
-}
-
 var _ backend.ClaimReleaser = (*claimReleaserMockBackend)(nil)
 
 func (m *claimReleaserMockBackend) ReleaseClaim(_ context.Context, id, actor string) error {

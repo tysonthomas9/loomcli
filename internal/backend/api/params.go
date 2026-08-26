@@ -152,6 +152,15 @@ func createParamsToCreateRequest(params backend.CreateParams) gen.CreateIssueReq
 		deps := append([]string(nil), params.Dependencies...)
 		req.Dependencies = &deps
 	}
+	if lineage, err := backend.ParseTaskLineage(params.Metadata); err == nil {
+		if lineage.InheritsFrom != "" {
+			req.InheritsFrom = &lineage.InheritsFrom
+		}
+		if len(lineage.IntegrationInputs) > 0 {
+			inputs := append([]string(nil), lineage.IntegrationInputs...)
+			req.IntegrationInputs = &inputs
+		}
+	}
 	return req
 }
 

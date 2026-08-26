@@ -23,6 +23,8 @@ import (
 // backend-level CreateParams. SourceRepo must flow through for multi-repo
 // workspaces so FleetDB can persist the issue against the selected repo.
 func createParamsToBackend(p *CreateIssueParams) backend.CreateParams {
+	lineage := backend.TaskLineageSpec{InheritsFrom: p.InheritsFrom, IntegrationInputs: p.IntegrationInputs}
+	metadata, _ := lineage.Metadata() // request validation owns user-facing errors
 	return backend.CreateParams{
 		ID:                 p.ID,
 		Parent:             p.Parent,
@@ -40,7 +42,8 @@ func createParamsToBackend(p *CreateIssueParams) backend.CreateParams {
 		ExternalRef:        p.ExternalRef,
 		EstimatedMinutes:   p.EstimatedMinutes,
 		Labels:             p.Labels,
-		Dependencies:       p.Dependencies,
+		Dependencies:       lineage.SchedulingDependencies(p.Dependencies),
+		Metadata:           metadata,
 		SourceRepo:         p.SourceRepo,
 		DueAt:              p.DueAt,
 		DeferUntil:         p.DeferUntil,
@@ -207,8 +210,22 @@ func issueDetailDataToWire(d *backend.IssueDetailData) map[string]any {
 	out["dependencies"] = depsToWire(d.Dependencies, d.ID)
 	out["dependents"] = depsToWire(d.Dependents, d.ID)
 	out["comments"] = commentsToWire(d.Comments)
+	addTaskLineageFields(out, d.Metadata)
 
 	return out
+}
+
+func addTaskLineageFields(out map[string]any, metadata map[string]string) {
+	lineage, err := backend.ParseTaskLineage(metadata)
+	if err != nil {
+		return
+	}
+	if lineage.InheritsFrom != "" {
+		out["inherits_from"] = lineage.InheritsFrom
+	}
+	if len(lineage.IntegrationInputs) > 0 {
+		out["integration_inputs"] = lineage.IntegrationInputs
+	}
 }
 
 // stringsOrEmpty returns []string{} when in is nil so that JSON encoding

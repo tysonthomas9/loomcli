@@ -635,11 +635,6 @@ func TestFleetDBIssueBackend_FailsClosedWhenStoreUnavailable(t *testing.T) {
 	if got := ib.BackendName(); got != "fleet-db" {
 		t.Fatalf("BackendName() = %q, want fleet-db", got)
 	}
-	lineage, ok := ib.(backend.DependencyLineageBackend)
-	if !ok {
-		t.Fatal("fleetDBIssueBackend does not implement DependencyLineageBackend")
-	}
-
 	assertUnavailable := func(name string, err error) {
 		t.Helper()
 		if !backend.IsKind(err, backend.KindUnavailable) {
@@ -667,8 +662,6 @@ func TestFleetDBIssueBackend_FailsClosedWhenStoreUnavailable(t *testing.T) {
 	assertUnavailable("Create", err)
 	assertUnavailable("Update", ib.Update(ctx, "T-1", backend.UpdateParams{}))
 	assertUnavailable("ClaimIssue", ib.ClaimIssue(ctx, "T-1", time.Minute))
-	_, err = lineage.DependencyTaskIDs(ctx, "T-1")
-	assertUnavailable("DependencyTaskIDs", err)
 	actorBackend, ok := ib.(interface {
 		ClaimIssueAsActor(context.Context, string, time.Duration, string) error
 	})

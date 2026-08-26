@@ -276,26 +276,6 @@ func (t *tracedIssueBackend) ReleaseClaim(ctx context.Context, id, actor string)
 	return err
 }
 
-// DependencyTaskIDs preserves the optional durable-lineage capability through
-// the tracing decorator. Returning an empty lineage for unsupported backends
-// leaves callers free to use their current dependency projection.
-func (t *tracedIssueBackend) DependencyTaskIDs(ctx context.Context, id string) ([]string, error) {
-	ctx, span := t.startSpan(ctx, "DependencyTaskIDs",
-		attribute.String("loom.task_id", id),
-	)
-	lineage, ok := t.inner.(backend.DependencyLineageBackend)
-	if !ok {
-		endSpan(span, nil)
-		return []string{}, nil
-	}
-	ids, err := lineage.DependencyTaskIDs(ctx, id)
-	if err == nil {
-		span.SetAttributes(attribute.Int("result.count", len(ids)))
-	}
-	endSpan(span, err)
-	return ids, err
-}
-
 func (t *tracedIssueBackend) DeferIssue(ctx context.Context, id string, until time.Time) error {
 	ctx, span := t.startSpan(ctx, "DeferIssue",
 		attribute.String("loom.task_id", id),

@@ -24,15 +24,13 @@ type TaskWorktreeRequest struct {
 	Remote        string
 	DefaultBranch string
 
-	// DependencyTaskIDs are required code deliveries. The task begins at the
-	// newest branch that contains every listed dependency; divergent inputs are
-	// rejected rather than combined in an arbitrary order.
-	DependencyTaskIDs []string
+	// BaseTaskID is the one published delivery from which this task starts.
+	// Scheduling dependencies never select a Git base implicitly.
+	BaseTaskID string
 
-	// CandidateDependencyTaskIDs come from ordering-only issue dependencies.
-	// A candidate contributes code only when this workspace has a published
-	// task branch for it; dependencies without code remain scheduling gates.
-	CandidateDependencyTaskIDs []string
+	// IntegrationInputTaskIDs are additional immutable deliveries the agent
+	// must merge. They are recorded at preparation and fenced at publication.
+	IntegrationInputTaskIDs []string
 
 	// AllowDirtyResume is reserved for resuming the same interrupted attempt.
 	// A new agent stage must see only bytes represented by its input SHA/tree.
@@ -93,8 +91,9 @@ type TaskWorktreePublishRequest struct {
 }
 
 type taskDeliveryCandidate struct {
-	taskID string
-	sha    string
+	taskID      string
+	sha         string
+	integration bool
 }
 
 var taskWorktreeLocks sync.Map
@@ -308,53 +307,27 @@ func taskWorktreeStatus(ctx context.Context, path string) (string, error) {
 }
 
 func resolveTaskDependencyBase(ctx context.Context, req TaskWorktreeRequest) (string, []taskDeliveryCandidate, error) {
-	if len(req.DependencyTaskIDs) == 0 && len(req.CandidateDependencyTaskIDs) == 0 {
+	if req.BaseTaskID == "" && len(req.IntegrationInputTaskIDs) == 0 {
 		return "", nil, nil
 	}
-	candidates := make([]taskDeliveryCandidate, 0, len(req.DependencyTaskIDs)+len(req.CandidateDependencyTaskIDs))
-	seen := make(map[string]struct{}, cap(candidates))
-	for _, taskID := range req.DependencyTaskIDs {
+	deliveries := make([]taskDeliveryCandidate, 0, 1+len(req.IntegrationInputTaskIDs))
+	baseSHA := ""
+	if req.BaseTaskID != "" {
+		out, err := resolveTaskDelivery(ctx, req.RepoPath, req.WorkspaceKey, req.BaseTaskID)
+		if err != nil {
+			return "", nil, fmt.Errorf("base task delivery %q is unavailable: %w", req.BaseTaskID, err)
+		}
+		baseSHA = out
+		deliveries = append(deliveries, taskDeliveryCandidate{taskID: req.BaseTaskID, sha: out})
+	}
+	for _, taskID := range req.IntegrationInputTaskIDs {
 		out, err := resolveTaskDelivery(ctx, req.RepoPath, req.WorkspaceKey, taskID)
 		if err != nil {
-			return "", nil, fmt.Errorf("required task delivery %q is unavailable: %w", taskID, err)
+			return "", nil, fmt.Errorf("integration input delivery %q is unavailable: %w", taskID, err)
 		}
-		candidates = append(candidates, taskDeliveryCandidate{taskID: taskID, sha: out})
-		seen[taskID] = struct{}{}
+		deliveries = append(deliveries, taskDeliveryCandidate{taskID: taskID, sha: out, integration: true})
 	}
-	for _, taskID := range req.CandidateDependencyTaskIDs {
-		if _, ok := seen[taskID]; ok {
-			continue
-		}
-		out, err := resolveTaskDelivery(ctx, req.RepoPath, req.WorkspaceKey, taskID)
-		if err != nil {
-			continue
-		}
-		candidates = append(candidates, taskDeliveryCandidate{taskID: taskID, sha: out})
-		seen[taskID] = struct{}{}
-	}
-	if len(candidates) == 0 {
-		return "", nil, nil
-	}
-	for _, possibleBase := range candidates {
-		containsAll := true
-		for _, required := range candidates {
-			if required.sha == possibleBase.sha {
-				continue
-			}
-			if _, err := runGit(ctx, req.RepoPath, "merge-base", "--is-ancestor", required.sha, possibleBase.sha); err != nil {
-				containsAll = false
-				break
-			}
-		}
-		if containsAll {
-			return possibleBase.sha, candidates, nil
-		}
-	}
-	ids := make([]string, 0, len(candidates))
-	for _, candidate := range candidates {
-		ids = append(ids, candidate.taskID)
-	}
-	return "", nil, fmt.Errorf("required task deliveries are divergent and need integration: %s", strings.Join(ids, ", "))
+	return baseSHA, deliveries, nil
 }
 
 func verifyAndRecordTaskInputs(ctx context.Context, req TaskWorktreeRequest, deliveries []taskDeliveryCandidate, head string) error {
@@ -377,10 +350,12 @@ func verifyAndRecordTaskInputs(ctx context.Context, req TaskWorktreeRequest, del
 		switch {
 		case exists && recorded != delivery.sha:
 			return fmt.Errorf("task %q input is stale: dependency %q changed from %s to %s", req.TaskID, delivery.taskID, recorded, delivery.sha)
-		case !exists:
+		case !exists && !delivery.integration:
 			if _, ancestorErr := runGit(ctx, req.RepoPath, "merge-base", "--is-ancestor", delivery.sha, head); ancestorErr != nil {
 				return fmt.Errorf("task %q input does not contain published dependency %q at %s", req.TaskID, delivery.taskID, delivery.sha)
 			}
+			fallthrough
+		case !exists:
 			if _, updateErr := runGit(ctx, req.RepoPath, "update-ref", ref, delivery.sha); updateErr != nil {
 				return fmt.Errorf("record task %q input dependency %q: %w", req.TaskID, delivery.taskID, updateErr)
 			}
@@ -422,6 +397,9 @@ func publishTaskDelivery(ctx context.Context, req TaskWorktreePublishRequest, he
 	var transaction strings.Builder
 	transaction.WriteString("start\n")
 	for inputRef, sha := range receipts {
+		if _, ancestorErr := runGit(ctx, req.RepoPath, "merge-base", "--is-ancestor", sha, head); ancestorErr != nil {
+			return fmt.Errorf("task %q output does not contain required input %s at %s", req.TaskID, inputRef, sha)
+		}
 		dependencySegment := strings.TrimPrefix(inputRef, inputPrefix)
 		if dependencySegment == "" || strings.Contains(dependencySegment, "/") {
 			return fmt.Errorf("invalid dependency receipt ref %q", inputRef)

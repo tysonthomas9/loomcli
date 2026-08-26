@@ -939,6 +939,24 @@ func TestCreateIssue_Backend_InvalidStatusFails(t *testing.T) {
 	}
 }
 
+func TestCreateIssue_BackendRejectsCrossRepoLineageBeforeCreate(t *testing.T) {
+	fb := &fakeIssueBackend{getResult: &backend.IssueDetailData{
+		IssueData: backend.IssueData{ID: "base", SourceRepo: "repo-b"},
+	}}
+	svc := newServiceWithFake(fb)
+	_, err := svc.CreateIssue(context.Background(), CreateIssueParams{
+		Title: "Dependent", IssueType: "task", Priority: 2,
+		SourceRepo: "repo-a", InheritsFrom: "base",
+	})
+	var sErr *ServiceError
+	if !errors.As(err, &sErr) || sErr.Kind != KindValidation {
+		t.Fatalf("expected ValidationError, got %v", err)
+	}
+	if len(fb.createParams) != 0 {
+		t.Fatalf("cross-repo lineage reached Create: %+v", fb.createParams)
+	}
+}
+
 // --- PatchIssue ---
 
 func TestPatchIssue_Backend_Success_PassesParams(t *testing.T) {

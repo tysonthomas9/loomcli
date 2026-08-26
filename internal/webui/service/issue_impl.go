@@ -217,6 +217,10 @@ func (s *issueServiceImpl) CreateIssue(ctx context.Context, params CreateIssuePa
 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	lineage := backend.TaskLineageSpec{InheritsFrom: params.InheritsFrom, IntegrationInputs: params.IntegrationInputs}
+	if err := backend.ValidateTaskLineageInputs(ctx, lineage, params.SourceRepo, be.Get); err != nil {
+		return nil, ErrValidation("invalid task code lineage: " + err.Error())
+	}
 
 	created, err := be.Create(ctx, createParamsToBackend(&params))
 	if err != nil {

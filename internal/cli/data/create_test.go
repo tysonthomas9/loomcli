@@ -10,6 +10,7 @@ import (
 
 func TestCreateCommand_UsesLocalBackend(t *testing.T) {
 	stub := &localBackendStub{
+		detail: &backend.IssueDetailData{IssueData: backend.IssueData{SourceRepo: "loomcli"}},
 		createItem: &backend.IssueData{
 			ID:         "loom-123",
 			Title:      "Add local mode setup",
@@ -33,6 +34,8 @@ func TestCreateCommand_UsesLocalBackend(t *testing.T) {
 			"--label", "local-mode",
 			"--label", "podman",
 			"--depends-on", "dep-1",
+			"--inherits-from", "task-a",
+			"--integration-input", "task-b",
 			"--estimated-minutes", "45",
 		})
 
@@ -48,10 +51,10 @@ func TestCreateCommand_UsesLocalBackend(t *testing.T) {
 		if lines[len(lines)-1] != "CREATED loom-123" {
 			t.Fatalf("last stdout line = %q, want %q", lines[len(lines)-1], "CREATED loom-123")
 		}
-		if len(stub.calls) != 1 || stub.calls[0].method != "Create" {
-			t.Fatalf("calls = %#v, want one Create call", stub.calls)
+		if len(stub.calls) != 3 || stub.calls[0].method != "Get" || stub.calls[1].method != "Get" || stub.calls[2].method != "Create" {
+			t.Fatalf("calls = %#v, want two input Gets and one Create", stub.calls)
 		}
-		params := stub.calls[0].args.(backend.CreateParams)
+		params := stub.calls[2].args.(backend.CreateParams)
 		if params.Title != "Add local mode setup" || params.IssueType != "task" || params.Priority != 1 {
 			t.Fatalf("Create params basic fields = %#v", params)
 		}
@@ -61,8 +64,11 @@ func TestCreateCommand_UsesLocalBackend(t *testing.T) {
 		if len(params.Labels) != 2 || params.Labels[0] != "local-mode" || params.Labels[1] != "podman" {
 			t.Fatalf("Create labels = %#v", params.Labels)
 		}
-		if len(params.Dependencies) != 1 || params.Dependencies[0] != "dep-1" {
+		if got := strings.Join(params.Dependencies, ","); got != "dep-1,task-a,task-b" {
 			t.Fatalf("Create dependencies = %#v", params.Dependencies)
+		}
+		if params.Metadata[backend.MetadataInheritsFrom] != "task-a" || params.Metadata[backend.MetadataIntegrationInputs] != `["task-b"]` {
+			t.Fatalf("Create lineage metadata = %#v", params.Metadata)
 		}
 		if params.EstimatedMinutes == nil || *params.EstimatedMinutes != 45 {
 			t.Fatalf("Create estimated minutes = %#v", params.EstimatedMinutes)
