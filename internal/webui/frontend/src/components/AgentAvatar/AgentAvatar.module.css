@@ -20,6 +20,12 @@
   user-select: none;
 }
 
+.root[data-variant="owner"] .avatar {
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 1px dashed var(--color-border-hover);
+}
+
 .statusDot {
   position: absolute;
   right: -1px;

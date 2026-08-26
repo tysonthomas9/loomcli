@@ -14,6 +14,8 @@ export interface AgentAvatarProps {
   agent?: LoomAgentStatus | undefined;
   /** Match the 26px avatar used by compact sidebar agent cards. */
   compact?: boolean;
+  /** Owners use a neutral outline; agents keep their identity color. */
+  variant?: "agent" | "owner";
   title?: string | undefined;
   testId?: string | undefined;
 }
@@ -23,6 +25,7 @@ export function AgentAvatar({
   name,
   agent,
   compact = false,
+  variant = "agent",
   title,
   testId,
 }: AgentAvatarProps): JSX.Element {
@@ -39,6 +42,7 @@ export function AgentAvatar({
     <span
       className={styles.root}
       data-size={compact ? "compact" : "default"}
+      data-variant={variant}
       data-active={
         parsed?.type === "working" || parsed?.type === "planning"
           ? true
@@ -49,7 +53,11 @@ export function AgentAvatar({
     >
       <span
         className={styles.avatar}
-        style={{ backgroundColor: avatarColor, color: textColor }}
+        style={
+          variant === "agent"
+            ? { backgroundColor: avatarColor, color: textColor }
+            : undefined
+        }
         aria-label={`${name} avatar`}
       >
         {label}

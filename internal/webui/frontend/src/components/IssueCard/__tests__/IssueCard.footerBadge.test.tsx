@@ -61,6 +61,7 @@ describe("IssueCard footer badge", () => {
 
     const badge = screen.getByTestId("issue-card-agent");
     expect(badge).toHaveAttribute("title", "Working: lead-a");
+    expect(badge).toHaveAttribute("data-variant", "agent");
     expect(badge).toHaveTextContent("LA");
     expect(screen.getByLabelText("lead-a avatar")).toBeInTheDocument();
   });
@@ -70,6 +71,7 @@ describe("IssueCard footer badge", () => {
 
     const badge = screen.getByTestId("issue-card-owner");
     expect(badge).toHaveAttribute("title", "Owner: tyson");
+    expect(badge).toHaveAttribute("data-variant", "owner");
     expect(badge).toHaveTextContent("TY");
   });
 

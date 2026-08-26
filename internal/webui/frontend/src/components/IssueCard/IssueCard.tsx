@@ -333,6 +333,7 @@ export const IssueCard = memo(function IssueCard({
               name={footerBadge.name}
               agent={footerAgent}
               compact
+              variant={footerBadge.kind}
               title={
                 footerBadge.kind === "agent"
                   ? `Working: ${footerBadge.name}`
