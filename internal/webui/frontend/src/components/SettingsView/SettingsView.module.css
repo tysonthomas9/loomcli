@@ -4,7 +4,7 @@
  */
 
 .settingsView {
-  padding: 26px 24px 140px;
+  padding: var(--page-padding-top) var(--page-padding-x) 140px;
   overflow: auto;
   height: 100%;
   width: 100%;
@@ -18,7 +18,7 @@
   align-items: flex-end;
   justify-content: space-between;
   gap: 24px;
-  width: min(1160px, 100%);
+  width: min(var(--page-content-max), 100%);
   margin: 0 auto 26px;
 }
 
@@ -39,21 +39,21 @@
 }
 
 .settingsSearch {
-  width: min(360px, 42vw);
-  min-height: 36px;
+  width: min(420px, 42vw);
+  min-height: var(--control-height);
   display: flex;
   align-items: center;
   gap: 9px;
   padding: 0 10px;
   color: var(--color-text-tertiary);
-  background: var(--color-bg-card);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  background: var(--color-bg-active);
+  border: 1px solid var(--color-border-hover);
+  border-radius: var(--radius-full);
 }
 
 .settingsSearch:focus-within {
-  border-color: var(--color-focus);
-  box-shadow: 0 0 0 1px var(--color-focus);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-selection-bg);
 }
 
 .settingsSearch input {
@@ -94,7 +94,7 @@
   display: grid;
   grid-template-columns: 248px minmax(0, 1fr);
   gap: 20px;
-  width: min(1160px, 100%);
+  width: min(var(--page-content-max), 100%);
   margin: 0 auto;
   align-items: start;
 }
@@ -107,7 +107,7 @@
   gap: 3px;
   padding: 8px;
   background: var(--color-bg-card);
-  border-radius: 14px;
+  border-radius: var(--surface-radius);
   box-shadow:
     0 1px 2px rgb(0 0 0 / 18%),
     0 0 0 1px color-mix(in srgb, var(--color-text-primary) 7%, transparent);
@@ -149,8 +149,8 @@
 
 .navItem[data-active] {
   color: var(--color-text-primary);
-  background: var(--color-warning-bg);
-  border-color: transparent;
+  background: var(--color-selection-bg);
+  border-color: var(--color-selection-border);
   font-weight: 600;
 }
 
@@ -161,7 +161,7 @@
   top: 8px;
   bottom: 8px;
   width: 3px;
-  background: var(--color-warning);
+  background: var(--color-primary);
   border-radius: 3px;
 }
 
@@ -262,9 +262,9 @@
 .panel {
   background-color: var(--color-panel-bg);
   border: 1px solid var(--color-border);
-  border-radius: 14px;
+  border-radius: var(--surface-radius);
   box-shadow:
-    0 1px 2px rgb(0 0 0 / 12%),
+    var(--surface-shadow),
     0 0 0 1px color-mix(in srgb, var(--color-text-primary) 3%, transparent);
   overflow: hidden;
   margin-bottom: 18px;

@@ -123,7 +123,7 @@
   --color-text-primary: var(--text-primary);
   --color-text-secondary: var(--text-secondary);
   --color-text-tertiary: #888888;
-  --color-text-muted: #666666;
+  --color-text-muted: #7a7a7a;
   --color-text-inverse: #111111;
   --color-highlight: #854d0e;
   --color-focus: #3b82f6; /* blue-500, focus ring color */
@@ -216,6 +216,26 @@
   --radius-full: 9999px;
 
   /* ===========================
+   * Shared Aether component geometry
+   * =========================== */
+  --surface-radius: var(--radius-xl);
+  --surface-shadow: 0 1px 2px rgb(0 0 0 / 18%);
+  --control-height: 36px;
+  --page-content-max: 1400px;
+  --page-padding-x: var(--space-6);
+  --page-padding-top: var(--space-6);
+  --color-selection-bg: color-mix(
+    in srgb,
+    var(--color-primary) 12%,
+    transparent
+  );
+  --color-selection-border: color-mix(
+    in srgb,
+    var(--color-primary) 28%,
+    transparent
+  );
+
+  /* ===========================
    * Panel Layout Tokens
    * =========================== */
   --panel-width-max: 840px;
@@ -298,7 +318,7 @@
   --color-text-primary: var(--text-primary);
   --color-text-secondary: var(--text-secondary);
   --color-text-tertiary: #6b6661;
-  --color-text-muted: #a09b94;
+  --color-text-muted: #7d7870;
   --color-text-inverse: #ffffff;
   --color-highlight: #fef08a;
   --color-focus: #3b82f6;

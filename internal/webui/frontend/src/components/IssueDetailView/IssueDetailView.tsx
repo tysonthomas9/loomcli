@@ -17,7 +17,7 @@ import { ErrorToast } from "@/components/ErrorToast";
 import { DesignPanel, MarkdownRenderer } from "@/components/IssueDetailPanel";
 import { updateIssue } from "@/hooks/api";
 import { useWorkspaceContext } from "@/hooks/workspace";
-import decisionButtonStyles from "@/components/DecisionButton/DecisionButton.module.css";
+import { decisionButtonStyles } from "@/components/DecisionButton";
 
 import styles from "./IssueDetailView.module.css";
 

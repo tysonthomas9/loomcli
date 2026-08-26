@@ -4,7 +4,7 @@
   flex-direction: column;
   max-width: none;
   margin: 0;
-  padding: 24px;
+  padding: var(--page-padding-top) var(--page-padding-x);
   width: 100%;
   height: 100%;
   min-height: 0;
@@ -20,8 +20,8 @@
 
 .title {
   margin: 0;
-  font-size: var(--font-size-sm);
-  font-weight: 900;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
   letter-spacing: -0.01em;
   color: var(--color-text-primary);
 }
@@ -107,7 +107,7 @@
   padding: 12px;
   background: color-mix(in srgb, var(--color-bg-card) 82%, transparent);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--surface-radius);
   scrollbar-width: thin;
 }
 
@@ -267,7 +267,7 @@
   align-items: stretch;
   gap: 8px;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  border-radius: var(--surface-radius);
   background: var(--color-bg-card);
   cursor: pointer;
   transition:
@@ -614,9 +614,9 @@
 
 /* Attached PR concept: compact filter rail and elevated review cards. */
 .page {
-  max-width: 1400px;
+  max-width: var(--page-content-max);
   margin: 0 auto;
-  padding: 28px 24px 64px;
+  padding: var(--page-padding-top) var(--page-padding-x) 64px;
 }
 
 .header {
@@ -659,7 +659,7 @@
   padding: 8px;
   background: var(--color-bg-card);
   border: 0;
-  border-radius: 14px;
+  border-radius: var(--surface-radius);
   box-shadow:
     0 1px 2px rgb(0 0 0 / 18%),
     0 0 0 1px color-mix(in srgb, var(--color-text-primary) 7%, transparent);
@@ -667,10 +667,10 @@
 
 .railSearch,
 .listSearch {
-  height: 36px;
-  background: color-mix(in srgb, var(--color-text-primary) 5.5%, transparent);
-  border: 0;
-  border-radius: 9px;
+  height: var(--control-height);
+  background: var(--color-bg-active);
+  border: 1px solid var(--color-border-hover);
+  border-radius: var(--radius-full);
 }
 
 .railSearch {
@@ -679,8 +679,8 @@
 
 .railSearch:focus-within,
 .listSearch:focus-within {
-  border-color: transparent;
-  box-shadow: 0 0 0 2px var(--color-warning-bg);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-selection-bg);
 }
 
 .railSection {
@@ -718,13 +718,13 @@
 }
 
 .checkRow[aria-pressed="true"] .checkbox {
-  background: var(--color-warning);
-  border-color: var(--color-warning);
+  background: var(--color-primary);
+  border-color: var(--color-primary);
 }
 
 .pill[data-active] {
-  background: var(--color-warning-bg);
-  border-color: transparent;
+  background: var(--color-selection-bg);
+  border-color: var(--color-selection-border);
 }
 
 .pill[data-active]::before {
@@ -734,13 +734,13 @@
   top: 8px;
   bottom: 8px;
   width: 3px;
-  background: var(--color-warning);
+  background: var(--color-primary);
   border-radius: 3px;
 }
 
 .listSearch {
   max-width: none;
-  background: var(--color-bg-card);
+  background: var(--color-bg-active);
   box-shadow:
     0 1px 2px rgb(0 0 0 / 16%),
     0 0 0 1px color-mix(in srgb, var(--color-text-primary) 7%, transparent);
@@ -759,7 +759,7 @@
   gap: 14px;
   background: var(--color-bg-card);
   border: 0;
-  border-radius: 12px;
+  border-radius: var(--surface-radius);
   box-shadow:
     0 1px 2px rgb(0 0 0 / 18%),
     0 0 0 1px color-mix(in srgb, var(--color-text-primary) 7%, transparent);
@@ -791,8 +791,8 @@
 }
 
 .status[data-pr-state="review"] {
-  color: var(--color-warning);
-  background: var(--color-warning-bg);
+  color: var(--color-status-review-text);
+  background: var(--color-primary-bg);
 }
 
 .repoChip {

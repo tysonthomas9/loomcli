@@ -67,7 +67,7 @@ import {
   PRSection,
   RejectCommentForm,
 } from "./sections";
-import decisionButtonStyles from "@/components/DecisionButton/DecisionButton.module.css";
+import { decisionButtonStyles } from "@/components/DecisionButton";
 import { IssueHeader } from "./header";
 import { AssigneeDropdown, RepoDropdown } from "./fields";
 import { ConfirmDialog } from "../ConfirmDialog";
@@ -1630,16 +1630,16 @@ export function IssueDetailPanel({
 }: IssueDetailPanelProps): JSX.Element {
   const panelRef = useRef<HTMLElement>(null);
 
-  // Full-page maximize toggle for the slide-over.
-  const [isMaximized, setIsMaximized] = useState(false);
+  // Open as a full content workspace by default, matching the PR review detail
+  // model. The header toggle still lets users collapse it to a side panel.
+  const [isMaximized, setIsMaximized] = useState(true);
   const toggleMaximize = useCallback(() => setIsMaximized((v) => !v), []);
-  // Reset to the default slide-over width when the panel closes or the
-  // selected issue changes, so a maximized panel doesn't "stick" across opens.
+  // Each newly opened issue starts in the shared full-workspace detail model.
   useEffect(() => {
-    if (!isOpen) setIsMaximized(false);
+    if (!isOpen) setIsMaximized(true);
   }, [isOpen]);
   useEffect(() => {
-    setIsMaximized(false);
+    setIsMaximized(true);
   }, [issue?.id]);
 
   // Handle Escape key to close panel via global shortcut layer system.

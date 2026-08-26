@@ -3,7 +3,7 @@
   overflow: hidden;
   background: var(--color-bg-card);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--surface-radius);
   transition: border-color var(--transition-fast);
 }
 
@@ -211,7 +211,7 @@
   padding: 11px var(--space-4);
 }
 
-@media (width <= 768px) {
+@media (width <= 520px) {
   .actions,
   .actions button {
     width: 100%;

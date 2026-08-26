@@ -251,8 +251,8 @@
 /* Responsive: fixed-width columns for horizontal scrolling on mobile */
 @media (width <= 768px) {
   .statusColumn {
-    min-width: 260px;
-    flex: 0 0 260px;
+    min-width: 248px;
+    flex: 0 0 248px;
     scroll-snap-align: start;
   }
 }

@@ -11,7 +11,7 @@ import {
   type KeyboardEvent,
 } from "react";
 
-import decisionButtonStyles from "@/components/DecisionButton/DecisionButton.module.css";
+import { decisionButtonStyles } from "@/components/DecisionButton";
 
 import styles from "./RejectCommentForm.module.css";
 

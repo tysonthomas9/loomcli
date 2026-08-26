@@ -10,8 +10,9 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) 372px;
   gap: 20px;
-  width: 100%;
-  padding: 20px var(--space-6) 26px;
+  width: min(100%, var(--page-content-max));
+  margin: 0 auto;
+  padding: var(--page-padding-top) var(--page-padding-x) 26px;
 }
 
 .queueColumn {
@@ -59,7 +60,7 @@
   overflow: hidden;
   background: var(--color-bg-card);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--surface-radius);
 }
 
 .queueStats {
@@ -95,7 +96,7 @@
 
 @media (width <= 768px) {
   .layout {
-    padding: var(--space-4) var(--space-3) var(--space-8);
+    padding: var(--space-4) var(--space-4) var(--space-8);
   }
 
   .header {

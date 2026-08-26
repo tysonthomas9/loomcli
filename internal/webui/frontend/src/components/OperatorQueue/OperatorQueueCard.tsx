@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { useElapsedTime } from "@/hooks/common";
 import type { OperatorQueueItem } from "@/hooks/issues";
 import { useWorkspaceContext } from "@/hooks/workspace";
-import decisionButtonStyles from "@/components/DecisionButton/DecisionButton.module.css";
+import { decisionButtonStyles } from "@/components/DecisionButton";
 import { RejectCommentForm } from "@/components/IssueDetailPanel";
 import type { Issue, LoomAgentStatus } from "@/types";
 import { effectiveAgentStatus, parseLoomStatus } from "@/types/agent";
