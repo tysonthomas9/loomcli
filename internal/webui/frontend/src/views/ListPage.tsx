@@ -155,10 +155,7 @@ export function ListPage(): JSX.Element {
               data-collapsed={isCollapsed}
               aria-labelledby={headerId}
             >
-              <header
-                className={`${laneStyles.laneHeader} ${styles.laneHeader}`}
-                id={headerId}
-              >
+              <header className={laneStyles.laneHeader} id={headerId}>
                 <button
                   type="button"
                   className={laneStyles.collapseToggle}
