@@ -563,6 +563,7 @@ var (
 	ErrProfileFingerprintMismatch = errors.New("profile fingerprint mismatch")
 	ErrProfileVersionDrift        = errors.New("profile harness version drift")
 	ErrProfileVersionUnknown      = errors.New("profile harness version unknown")
+	ErrProfileTokenUnreadable     = errors.New("profile harness token unreadable")
 )
 
 type profileManifest struct {
@@ -582,6 +583,33 @@ var profileHarnessEnvVar = map[string]string{
 // profileHarnesses is the fixed order profile roots are resolved in, so an
 // agent's environment is byte-identical from one boot to the next.
 var profileHarnesses = []string{"claude", "codex"}
+
+// profileTokenFile names the file inside a harness profile root that carries
+// that profile's OWN long-lived credential, and profileTokenEnvVar the
+// variable exporting it. Only claude has one: `claude setup-token` mints a
+// per-invocation, non-rotating token and prints it instead of writing a
+// credentials file, so the operator's setup-profile-token.sh captures it to
+// <root>/claude/oauth-token (mode 600). codex has no equivalent, and a harness
+// absent from these maps simply gets no credential injected.
+//
+// This is what makes a profile an IDENTITY rather than a copy of one. The
+// keychain-copy fallback shares the operator's own OAuth pair across every
+// profile, and the operator's next /login refresh invalidates it for whichever
+// profile copied it last — the "Login expired" the agents kept hitting on an
+// uncontrolled schedule. A profile carrying its own token is unaffected by
+// anyone else's refresh.
+//
+// The token file is deliberately NOT in the manifest's file list: that list is
+// an allowlist of files the fingerprint covers, and a credential must not be
+// hashed into a value that is written down, compared and reported.
+var (
+	profileTokenFile = map[string]string{
+		"claude": "oauth-token",
+	}
+	profileTokenEnvVar = map[string]string{
+		"claude": "CLAUDE_CODE_OAUTH_TOKEN",
+	}
+)
 
 // ProfileHarnesses returns the harnesses a profile root can be provisioned
 // for. Callers that inject one harness at a time (`loom lead`) iterate this
@@ -620,38 +648,83 @@ func ProfileEnvVar(harness string) string {
 // legacy env: silently running the agent against the operator's full ~/.claude
 // is the exact leak per-agent profiles close. Per-agent boot degradation
 // contains the failure to the one agent whose profile is broken.
-func ProfileHarnessEnv(projectDir, agent, harness string) (string, error) {
+func ProfileHarnessEnv(projectDir, agent, harness string) (string, []string, error) {
 	root := agentprofile.Dir(projectDir, agent)
 	if root == "" {
-		return "", nil
+		return "", nil, nil
 	}
 	envVar := profileHarnessEnvVar[harness]
 	if envVar == "" {
-		return "", nil
+		return "", nil, nil
 	}
 	dir := filepath.Join(root, harness)
 	if !dirExists(dir) {
-		return "", nil
+		return "", nil, nil
 	}
 	if err := verifyProfileManifest(dir, profileHarnessBinary[harness]); err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return fmt.Sprintf("%s=%s", envVar, dir), nil
+	env := []string{fmt.Sprintf("%s=%s", envVar, dir)}
+	secret, err := ProfileSecretEnv(dir, harness)
+	if err != nil {
+		return dir, nil, err
+	}
+	return dir, append(env, secret...), nil
+}
+
+// ProfileSecretEnv returns the assignments exporting the credential a harness
+// profile root carries of its own, or nothing when it carries none — which is
+// every profile that has not been migrated to a setup-token identity yet, and
+// every harness that has no such file at all. Absent is not an error: it is
+// the pre-existing configuration, and it must keep working unchanged.
+//
+// It is exported for `loom lead`, the one agent the supervisor does not spawn,
+// which may INHERIT its config root and so never reach ProfileHarnessEnv —
+// but must still pick up that root's credential rather than run on whatever
+// token the operator's shell happened to hold.
+//
+// Neither the token nor any prefix of it appears in the returned error, and it
+// is never logged: the only place the value may go is the child's environment.
+func ProfileSecretEnv(dir, harness string) ([]string, error) {
+	name, envVar := profileTokenFile[harness], profileTokenEnvVar[harness]
+	if name == "" || envVar == "" || dir == "" {
+		return nil, nil
+	}
+	path := filepath.Join(dir, name)
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: path derived from the workspace profile layout, not user input
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("%w: %s: %v", ErrProfileTokenUnreadable, path, err)
+	}
+	token := strings.TrimSpace(string(raw))
+	if token == "" {
+		// Present but empty is a broken provisioning run, not a legacy
+		// profile: falling through to the operator's token would restore the
+		// exact sharing this file exists to end, silently.
+		return nil, fmt.Errorf("%w: %s: file is empty", ErrProfileTokenUnreadable, path)
+	}
+	return []string{fmt.Sprintf("%s=%s", envVar, token)}, nil
 }
 
 // AppendProfileEnv injects every per-agent harness profile root that exists on
-// disk, after verifying each one against its manifest. Absent directories leave
-// the environment untouched, preserving the legacy behavior of inheriting the
+// disk, after verifying each one against its manifest, together with any
+// credential that root carries of its own. Absent directories leave the
+// environment untouched, preserving the legacy behavior of inheriting the
 // operator's ~/.claude and ~/.codex.
+//
+// The profile's assignments are appended LAST, so a profile token overrides an
+// operator token the filtered environment carried in — the allowlist passes
+// CLAUDE_CODE_OAUTH_TOKEN through, and exec resolves duplicates to the final
+// assignment.
 func AppendProfileEnv(env []string, projectDir, agent string) ([]string, error) {
 	for _, harness := range profileHarnesses {
-		assignment, err := ProfileHarnessEnv(projectDir, agent, harness)
+		_, assignments, err := ProfileHarnessEnv(projectDir, agent, harness)
 		if err != nil {
 			return nil, err
 		}
-		if assignment != "" {
-			env = append(env, assignment)
-		}
+		env = append(env, assignments...)
 	}
 	return env, nil
 }

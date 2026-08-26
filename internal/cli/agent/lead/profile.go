@@ -51,17 +51,50 @@ func applyLeadProfile(runtimeDir, agent, harness string) (string, error) {
 		return "", nil
 	}
 	if inherited := os.Getenv(envVar); inherited != "" {
-		return inherited, verifyLeadProfile(runtimeDir, inherited, harness)
+		if err := verifyLeadProfile(runtimeDir, inherited, harness); err != nil {
+			return inherited, err
+		}
+		// The root is settled, but its credential still is not: the launcher
+		// script exports the directory and nothing else, so without this a
+		// launcher-started lead would run its own profile's config against
+		// whatever token the operator's shell held.
+		//
+		// Only for a root this workspace provisioned, on the same boundary
+		// verifyLeadProfile draws: an operator's own config root is theirs,
+		// and reading a credential out of it — let alone overriding the one
+		// they exported beside it — is not this check's business.
+		if !underAgentProfiles(runtimeDir, inherited) {
+			return inherited, nil
+		}
+		secret, err := supervisor.ProfileSecretEnv(inherited, harness)
+		if err != nil {
+			return inherited, err
+		}
+		return inherited, setProfileEnv(secret)
 	}
-	assignment, err := supervisor.ProfileHarnessEnv(runtimeDir, agent, harness)
+	dir, assignments, err := supervisor.ProfileHarnessEnv(runtimeDir, agent, harness)
 	if err != nil {
 		return leadProfileDir(runtimeDir, agent, harness), err
 	}
-	if assignment == "" {
-		return "", nil
+	return dir, setProfileEnv(assignments)
+}
+
+// setProfileEnv exports the assignments a profile resolved to. They arrive as
+// KEY=VALUE because that is the shape the supervisor hands to exec; lead is
+// configuring its own process instead, so it splits them back apart here
+// rather than making the shared helper speak two formats.
+func setProfileEnv(assignments []string) error {
+	for _, assignment := range assignments {
+		key, value, ok := strings.Cut(assignment, "=")
+		if !ok {
+			continue
+		}
+		if err := os.Setenv(key, value); err != nil {
+			// Never %v the assignment: one of these carries a credential.
+			return fmt.Errorf("setting %s: %w", key, err)
+		}
 	}
-	_, dir, _ := strings.Cut(assignment, "=")
-	return dir, os.Setenv(envVar, dir)
+	return nil
 }
 
 // leadProfileDir names the root a failed injection was about. Resolution goes
@@ -116,6 +149,11 @@ func underAgentProfiles(runtimeDir, configDir string) bool {
 func leadProfileRepair(err error, configDir string) string {
 	if errors.Is(err, supervisor.ErrProfileVersionDrift) {
 		return "loom doctor --fix"
+	}
+	if errors.Is(err, supervisor.ErrProfileTokenUnreadable) {
+		// A different script and a different act: provisioning copies files,
+		// while minting an identity is an interactive flow a human completes.
+		return fmt.Sprintf("scripts/setup-profile-token.sh %s", profileAgentName(configDir))
 	}
 	return fmt.Sprintf("scripts/provision-profile.sh %s", profileAgentName(configDir))
 }

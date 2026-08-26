@@ -449,3 +449,126 @@ func TestLeadVerifiesAgainstTheSupervisorsHarnessBinary(t *testing.T) {
 		}
 	}
 }
+
+// clearLeadToken makes CLAUDE_CODE_OAUTH_TOKEN unset for the test and restored
+// after it, so an injection is visible as a change and never leaks out.
+func clearLeadToken(t *testing.T) {
+	t.Helper()
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+	if err := os.Unsetenv("CLAUDE_CODE_OAUTH_TOKEN"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A lead that resolves its own profile root must also pick up that root's
+// identity, or it authenticates as whoever the operator last logged in as.
+func TestApplyLeadProfile_InjectsProfileOAuthToken(t *testing.T) {
+	clearProfileEnv(t)
+	clearLeadToken(t)
+	stubClaudeOnPath(t)
+	runtimeDir := t.TempDir()
+	dir := writeLeadProfile(t, runtimeDir, "lead", fakeHarnessVersion, map[string]string{
+		"settings.json": `{"model":"opus"}`,
+	})
+	if err := os.WriteFile(filepath.Join(dir, "oauth-token"), []byte("sk-ant-oat01-lead\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := applyLeadProfile(runtimeDir, "lead", "claude"); err != nil {
+		t.Fatalf("injection must succeed, got %v", err)
+	}
+	if got := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); got != "sk-ant-oat01-lead" {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want the profile's own token", got)
+	}
+}
+
+// The launcher script exports the config root and nothing else. Verifying that
+// inherited root is not enough: without reading its token too, a launcher-
+// started lead runs its own profile's settings on the operator's credential —
+// the precise pairing that expires on someone else's schedule.
+func TestApplyLeadProfile_InheritedRootStillYieldsItsToken(t *testing.T) {
+	clearProfileEnv(t)
+	stubClaudeOnPath(t)
+	runtimeDir := t.TempDir()
+	inherited := writeLeadProfile(t, runtimeDir, "lead", fakeHarnessVersion, map[string]string{
+		"settings.json": `{"model":"opus"}`,
+	})
+	if err := os.WriteFile(filepath.Join(inherited, "oauth-token"), []byte("sk-ant-oat01-lead"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", inherited)
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-operator")
+
+	if _, err := applyLeadProfile(runtimeDir, "lead", "claude"); err != nil {
+		t.Fatalf("valid inherited profile must proceed, got %v", err)
+	}
+	if got := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); got != "sk-ant-oat01-lead" {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want the profile's own token", got)
+	}
+}
+
+// An operator's own config root is not this feature's business, so nothing is
+// read out of it and the token they exported stays exactly as they set it.
+func TestApplyLeadProfile_OutsideConfigRootLeavesTokenAlone(t *testing.T) {
+	clearProfileEnv(t)
+	stubClaudeOnPath(t)
+	runtimeDir := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "oauth-token"), []byte("sk-ant-oat01-stray"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", outside)
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-operator")
+
+	if _, err := applyLeadProfile(runtimeDir, "lead", "claude"); err != nil {
+		t.Fatalf("an operator's own config root must proceed, got %v", err)
+	}
+	if got := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); got != "sk-ant-oat01-operator" {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want the operator's own value untouched", got)
+	}
+}
+
+// Unmigrated profiles are the majority and must be untouched: no token file,
+// no injection, no failure.
+func TestApplyLeadProfile_NoTokenFileLeavesTokenUnset(t *testing.T) {
+	clearProfileEnv(t)
+	clearLeadToken(t)
+	stubClaudeOnPath(t)
+	runtimeDir := t.TempDir()
+	writeLeadProfile(t, runtimeDir, "lead", fakeHarnessVersion, map[string]string{
+		"settings.json": `{"model":"opus"}`,
+	})
+
+	if _, err := applyLeadProfile(runtimeDir, "lead", "claude"); err != nil {
+		t.Fatalf("a profile without a token must proceed, got %v", err)
+	}
+	if got := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); got != "" {
+		t.Fatalf("no oauth-token file must inject nothing, got %q", got)
+	}
+}
+
+// Minting an identity is a different act from provisioning a profile, so a
+// broken token gets the script that mints one — not the one that copies files.
+func TestLeadProfileRepair_TokenFailureNamesTheTokenScript(t *testing.T) {
+	clearProfileEnv(t)
+	clearLeadToken(t)
+	stubClaudeOnPath(t)
+	runtimeDir := t.TempDir()
+	dir := writeLeadProfile(t, runtimeDir, "lead", fakeHarnessVersion, map[string]string{
+		"settings.json": `{"model":"opus"}`,
+	})
+	if err := os.WriteFile(filepath.Join(dir, "oauth-token"), []byte("\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	failed, err := applyLeadProfile(runtimeDir, "lead", "claude")
+	if !errors.Is(err, supervisor.ErrProfileTokenUnreadable) {
+		t.Fatalf("an empty token file must refuse, got %v", err)
+	}
+	if got, want := leadProfileRepair(err, failed), "scripts/setup-profile-token.sh lead"; got != want {
+		t.Errorf("repair = %q, want %q", got, want)
+	}
+	if got := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); got != "" {
+		t.Errorf("a refused profile must export nothing, got %q", got)
+	}
+}

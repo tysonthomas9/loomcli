@@ -395,3 +395,136 @@ func TestProfileHarnessTablesAgree(t *testing.T) {
 		t.Error("ProfileHarnesses leaked its backing array")
 	}
 }
+
+// The auth-rotation race this closes: a profile whose claude root carries its
+// own `claude setup-token` identity must spawn with it, so nothing about the
+// agent's login depends on the operator's own refresh schedule.
+func TestAppendProfileEnv_InjectsProfileOAuthToken(t *testing.T) {
+	stubHarnessVersion(t, map[string]string{"claude": "2.1.234 (Claude Code)"})
+	projectDir := t.TempDir()
+	dir := writeProfile(t, projectDir, "worker", "2.1.234 (Claude Code)", map[string]string{
+		"settings.json": `{"model":"opus"}`,
+	})
+	// Trailing newline is what a shell redirect leaves behind, and it must not
+	// reach the header the harness sends.
+	if err := os.WriteFile(filepath.Join(dir, "oauth-token"), []byte("sk-ant-oat01-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	env, err := AppendProfileEnv(nil, projectDir, "worker")
+	if err != nil {
+		t.Fatalf("verified profile must boot: %v", err)
+	}
+	if got := findAssignment(env, "CLAUDE_CODE_OAUTH_TOKEN"); got != "sk-ant-oat01-secret" {
+		t.Errorf("CLAUDE_CODE_OAUTH_TOKEN = %q, want the trimmed file contents", got)
+	}
+	if got := findAssignment(env, "CLAUDE_CONFIG_DIR"); got != dir {
+		t.Errorf("CLAUDE_CONFIG_DIR = %q, want %q", got, dir)
+	}
+}
+
+// Strictly additive: every profile provisioned before setup-token identities
+// existed has no such file and must spawn exactly as it does today.
+func TestAppendProfileEnv_NoTokenFileLeavesTokenUnset(t *testing.T) {
+	stubHarnessVersion(t, map[string]string{"claude": "2.1.234 (Claude Code)"})
+	projectDir := t.TempDir()
+	writeProfile(t, projectDir, "worker", "2.1.234 (Claude Code)", map[string]string{
+		"settings.json": `{"model":"opus"}`,
+	})
+
+	env, err := AppendProfileEnv(nil, projectDir, "worker")
+	if err != nil {
+		t.Fatalf("a profile without a token must boot: %v", err)
+	}
+	if got := findAssignment(env, "CLAUDE_CODE_OAUTH_TOKEN"); got != "" {
+		t.Errorf("no oauth-token file must inject nothing, got %q", got)
+	}
+}
+
+// The profile's token is appended after everything the filtered environment
+// carried in, because CLAUDE_CODE_OAUTH_TOKEN is on the envfilter allowlist:
+// the operator's own token reaches the child too, and exec resolves duplicates
+// to the last assignment. If that order ever flipped, the shared credential
+// would win and the race would be back.
+func TestAppendProfileEnv_ProfileTokenOverridesInheritedOne(t *testing.T) {
+	stubHarnessVersion(t, map[string]string{"claude": "2.1.234 (Claude Code)"})
+	projectDir := t.TempDir()
+	dir := writeProfile(t, projectDir, "worker", "2.1.234 (Claude Code)", map[string]string{
+		"settings.json": `{"model":"opus"}`,
+	})
+	if err := os.WriteFile(filepath.Join(dir, "oauth-token"), []byte("sk-ant-oat01-profile"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	env, err := AppendProfileEnv([]string{"CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-operator"}, projectDir, "worker")
+	if err != nil {
+		t.Fatalf("verified profile must boot: %v", err)
+	}
+	if got := findAssignment(env, "CLAUDE_CODE_OAUTH_TOKEN"); got != "sk-ant-oat01-profile" {
+		t.Errorf("last CLAUDE_CODE_OAUTH_TOKEN = %q, want the profile's own token", got)
+	}
+}
+
+// An empty token file is a broken minting run, not a legacy profile. Falling
+// through to the operator's token would silently restore the sharing the file
+// exists to end, so it refuses the boot and names the file — never a byte of
+// whatever it did contain.
+func TestAppendProfileEnv_EmptyTokenFileRefusesBoot(t *testing.T) {
+	stubHarnessVersion(t, map[string]string{"claude": "2.1.234 (Claude Code)"})
+	projectDir := t.TempDir()
+	dir := writeProfile(t, projectDir, "worker", "2.1.234 (Claude Code)", map[string]string{
+		"settings.json": `{"model":"opus"}`,
+	})
+	if err := os.WriteFile(filepath.Join(dir, "oauth-token"), []byte("  \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := AppendProfileEnv(nil, projectDir, "worker")
+	if !errors.Is(err, ErrProfileTokenUnreadable) {
+		t.Fatalf("empty token file must refuse boot, got %v", err)
+	}
+}
+
+// The credential must never travel anywhere but the child's environment — not
+// into an error an operator pastes into a ticket, and not into a log line.
+func TestProfileSecretEnv_ErrorNeverCarriesTheToken(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "oauth-token")
+	if err := os.MkdirAll(path, 0o755); err != nil { // a directory: readable path, unreadable file
+		t.Fatal(err)
+	}
+	_, err := ProfileSecretEnv(dir, "claude")
+	if !errors.Is(err, ErrProfileTokenUnreadable) {
+		t.Fatalf("unreadable token file must refuse, got %v", err)
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("error must name the file to repair, got %q", err)
+	}
+}
+
+// codex has no setup-token equivalent, so its root gets a config variable and
+// nothing else even if a stray file of that name is sitting there.
+func TestProfileSecretEnv_HarnessWithoutTokenInjectsNothing(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "oauth-token"), []byte("sk-ant-oat01-stray"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, harness := range []string{"codex", "unknown"} {
+		got, err := ProfileSecretEnv(dir, harness)
+		if err != nil || len(got) != 0 {
+			t.Errorf("harness %q: got %v (err %v), want nothing", harness, got, err)
+		}
+	}
+}
+
+// findAssignment returns the value of the LAST assignment to key, which is the
+// one exec resolves to.
+func findAssignment(env []string, key string) string {
+	value := ""
+	for _, kv := range env {
+		if k, v, ok := strings.Cut(kv, "="); ok && k == key {
+			value = v
+		}
+	}
+	return value
+}
