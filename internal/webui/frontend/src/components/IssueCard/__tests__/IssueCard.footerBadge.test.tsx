@@ -66,13 +66,13 @@ describe("IssueCard footer badge", () => {
     expect(screen.getByLabelText("lead-a avatar")).toBeInTheDocument();
   });
 
-  it("shows owner badge when no agent is working or assigned", () => {
+  it("shows an empty owner badge when no agent is working or assigned", () => {
     renderWithAgents([], createTestIssue({ owner: "tyson" }));
 
     const badge = screen.getByTestId("issue-card-owner");
     expect(badge).toHaveAttribute("title", "Owner: tyson");
     expect(badge).toHaveAttribute("data-variant", "owner");
-    expect(badge).toHaveTextContent("TY");
+    expect(screen.getByLabelText("tyson avatar")).toBeEmptyDOMElement();
   });
 
   it("shows agent badge from assignee when owner is set but assignee is an agent", () => {

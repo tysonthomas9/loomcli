@@ -60,7 +60,7 @@ export function AgentAvatar({
         }
         aria-label={`${name} avatar`}
       >
-        {label}
+        {variant === "agent" ? label : null}
       </span>
       {parsed && (
         <span
