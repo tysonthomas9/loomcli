@@ -92,8 +92,8 @@
 
 .settingsLayout {
   display: grid;
-  grid-template-columns: 264px minmax(0, 1fr);
-  gap: 40px;
+  grid-template-columns: 248px minmax(0, 1fr);
+  gap: 20px;
   width: min(1160px, 100%);
   margin: 0 auto;
   align-items: start;
@@ -101,22 +101,32 @@
 
 .settingsNav {
   position: sticky;
-  top: 26px;
+  top: 20px;
   display: flex;
   flex-direction: column;
   gap: 3px;
+  padding: 8px;
+  background: var(--color-bg-card);
+  border-radius: 14px;
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 18%),
+    0 0 0 1px color-mix(in srgb, var(--color-text-primary) 7%, transparent);
 }
 
 .navLabel {
-  margin: 0 0 8px;
-  padding: 0 10px;
-  font-size: 11.5px;
+  margin: 0 0 4px;
+  padding: 4px 10px 2px;
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
   color: var(--color-text-tertiary);
 }
 
 .navItem {
+  position: relative;
   width: 100%;
-  min-height: 36px;
+  min-height: 34px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -128,7 +138,7 @@
   color: var(--color-text-secondary);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: var(--radius-md);
+  border-radius: 9px;
   cursor: pointer;
 }
 
@@ -138,10 +148,21 @@
 }
 
 .navItem[data-active] {
-  color: var(--accent-text);
-  background: color-mix(in srgb, var(--accent-text) 10%, transparent);
-  border-color: color-mix(in srgb, var(--accent-text) 14%, transparent);
+  color: var(--color-text-primary);
+  background: var(--color-warning-bg);
+  border-color: transparent;
   font-weight: 600;
+}
+
+.navItem[data-active]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  background: var(--color-warning);
+  border-radius: 3px;
 }
 
 .navItem:focus-visible {
