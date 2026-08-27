@@ -1,0 +1,625 @@
+package fleetdb
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/store"
+)
+
+func TestWorkspaceFileStorePublishesAndDownloadsBinaryTree(t *testing.T) {
+	t.Parallel()
+
+	content := []byte{0, 255, 'x', '\n'}
+	digest := workspaceFileTestDigest(content)
+	createdAt := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
+	var uploaded []byte
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Actor") != "alice" {
+			t.Errorf("X-Actor = %q, want alice", r.Header.Get("X-Actor"))
+		}
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/FLEET/file-uploads":
+			var request workspaceFileUploadRequestWire
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Error(err)
+				return
+			}
+			if request.ContentHash != digest || request.SizeBytes != int64(len(content)) || request.MediaType != "application/octet-stream" {
+				t.Errorf("upload request = %#v", request)
+			}
+			writeWorkspaceFileTestJSON(w, http.StatusCreated, map[string]any{
+				"upload_token": "opaque-upload", "method": http.MethodPut,
+				"url":        "/api/v1/FLEET/file-transfers/opaque-capability",
+				"headers":    map[string][]string{"Content-Type": {"application/octet-stream"}},
+				"expires_at": createdAt.Add(15 * time.Minute),
+			})
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/FLEET/file-transfers/opaque-capability":
+			uploaded, _ = io.ReadAll(r.Body)
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/FLEET/file-trees":
+			var request publishWorkspaceFileTreeRequestWire
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Error(err)
+				return
+			}
+			if len(request.Files) != 1 || request.Files[0].Path != "bin/archive.zip" || !request.Files[0].Executable || request.Files[0].ContentHash != digest {
+				t.Errorf("publish request = %#v", request)
+			}
+			w.Header().Set("ETag", `"wft1_binary"`)
+			w.Header().Set("Location", "/api/v1/FLEET/file-trees/wft1_binary")
+			writeWorkspaceFileTestTree(w, http.StatusCreated, createdAt, digest, len(content))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/FLEET/file-trees/wft1_binary":
+			writeWorkspaceFileTestTree(w, http.StatusOK, createdAt, digest, len(content))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/FLEET/file-trees/wft1_binary/files/bin/archive.zip":
+			writeWorkspaceFileTestJSON(w, http.StatusOK, workspaceFileTestFile(digest, len(content)))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/FLEET/file-trees/wft1_binary/downloads/bin/archive.zip":
+			writeWorkspaceFileTestJSON(w, http.StatusOK, map[string]any{
+				"method": http.MethodGet, "url": "/api/v1/FLEET/file-downloads/opaque-capability", "expires_at": createdAt.Add(15 * time.Minute),
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/FLEET/file-downloads/opaque-capability":
+			_, _ = w.Write(content)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := newWorkspaceFileTestClient(t, server.URL, "alice", "")
+	filesStore := client.WorkspaceFiles()
+	result, err := filesStore.Publish(t.Context(), "FLEET", []domain.WorkspaceFileInput{{
+		Path: "bin/archive.zip", Bytes: content, MediaType: "application/octet-stream", Executable: true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(uploaded, content) {
+		t.Fatalf("uploaded bytes = %v, want %v", uploaded, content)
+	}
+	if result.Status != domain.WorkspaceFileTreePublished || result.ETag != `"wft1_binary"` || result.Location != "/api/v1/FLEET/file-trees/wft1_binary" {
+		t.Fatalf("publish result = %#v", result)
+	}
+	tree, err := filesStore.GetTree(t.Context(), "FLEET", result.Tree.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tree.Files) != 1 || !tree.Files[0].Executable {
+		t.Fatalf("tree = %#v", tree)
+	}
+	downloaded, err := filesStore.Download(t.Context(), "FLEET", tree.Revision, tree.Files[0].Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(downloaded, content) {
+		t.Fatalf("downloaded bytes = %v, want %v", downloaded, content)
+	}
+}
+
+func TestWorkspaceFileStorePreservesPublishStatuses(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		httpStatus int
+		want       domain.WorkspaceFileTreeStatus
+	}{
+		{name: "existing", httpStatus: http.StatusOK, want: domain.WorkspaceFileTreeExisting},
+		{name: "published", httpStatus: http.StatusCreated, want: domain.WorkspaceFileTreePublished},
+		{name: "projection pending", httpStatus: http.StatusAccepted, want: domain.WorkspaceFileTreeProjectionPending},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			content := []byte("status")
+			digest := workspaceFileTestDigest(content)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/file-uploads"):
+					writeWorkspaceFileTestJSON(w, http.StatusCreated, map[string]any{
+						"upload_token": "upload", "method": http.MethodPut, "url": "/transfer", "expires_at": time.Now().Add(time.Minute),
+					})
+				case r.Method == http.MethodPut && r.URL.Path == "/transfer":
+					w.WriteHeader(http.StatusNoContent)
+				case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/file-trees"):
+					w.Header().Set("ETag", `"tree"`)
+					w.Header().Set("Location", "/tree")
+					writeWorkspaceFileTestJSON(w, tc.httpStatus, map[string]any{
+						"workspace_key": "FLEET", "revision": "wft1_status", "created_by": "alice", "created_at": time.Now(),
+						"files": []map[string]any{{"path": "a", "blob_ref": "blob", "content_hash": digest, "size_bytes": len(content), "revision": "wff1_status"}},
+					})
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(server.Close)
+			filesStore := newWorkspaceFileTestStore(t, server.URL, "alice", "secret")
+			result, err := filesStore.Publish(t.Context(), "FLEET", []domain.WorkspaceFileInput{{Path: "a", Bytes: content}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Status != tc.want || result.ETag != `"tree"` || result.Location != "/tree" {
+				t.Fatalf("result = %#v, want status %q and response headers", result, tc.want)
+			}
+		})
+	}
+}
+
+func TestWorkspaceFileStoreSupportsAbsoluteProviderGrantsWithoutCredentialLeak(t *testing.T) {
+	t.Parallel()
+
+	content := []byte{0x50, 0x4b, 0, 0xff}
+	digest := workspaceFileTestDigest(content)
+	var uploaded []byte
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("provider Authorization = %q, want empty", got)
+		}
+		if got := r.Header.Get("X-API-Key"); got != "" {
+			t.Errorf("provider X-API-Key = %q, want empty", got)
+		}
+		if got := r.Header.Get("X-Fleet-API-Key"); got != "" {
+			t.Errorf("provider X-Fleet-API-Key = %q, want empty", got)
+		}
+		if got := r.Header.Get("X-Actor"); got != "" {
+			t.Errorf("provider X-Actor = %q, want empty", got)
+		}
+		if got := r.Header.Get("X-Capability"); got != "provider-only" {
+			t.Errorf("provider X-Capability = %q", got)
+		}
+		switch r.Method {
+		case http.MethodPut:
+			uploaded, _ = io.ReadAll(r.Body)
+			w.WriteHeader(http.StatusNoContent)
+		case http.MethodGet:
+			_, _ = w.Write(content)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(provider.Close)
+
+	fleet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer fleet-token" || r.Header.Get("X-API-Key") != "secret" || r.Header.Get("X-Fleet-API-Key") != "secret" || r.Header.Get("X-Actor") != "alice" {
+			t.Errorf("Fleet credentials = Authorization %q, X-API-Key %q, X-Fleet-API-Key %q, X-Actor %q", r.Header.Get("Authorization"), r.Header.Get("X-API-Key"), r.Header.Get("X-Fleet-API-Key"), r.Header.Get("X-Actor"))
+		}
+		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/file-uploads"):
+			writeWorkspaceFileTestJSON(w, http.StatusCreated, map[string]any{
+				"upload_token": "upload", "method": http.MethodPut, "url": provider.URL + "/object",
+				"headers": map[string][]string{"X-Capability": {"provider-only"}}, "expires_at": time.Now().Add(time.Minute),
+			})
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/file-trees"):
+			writeWorkspaceFileTestJSON(w, http.StatusCreated, workspaceFileAbsoluteTree(digest, len(content)))
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/files/"):
+			writeWorkspaceFileTestJSON(w, http.StatusOK, workspaceFileAbsoluteFile(digest, len(content)))
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/downloads/"):
+			writeWorkspaceFileTestJSON(w, http.StatusOK, map[string]any{
+				"method": http.MethodGet, "url": provider.URL + "/object",
+				"headers": map[string][]string{"X-Capability": {"provider-only"}}, "expires_at": time.Now().Add(time.Minute),
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(fleet.Close)
+
+	client := newWorkspaceFileTestClient(t, fleet.URL, "alice", "secret")
+	client.SetAuthToken("fleet-token")
+	filesStore := client.WorkspaceFiles()
+	result, err := filesStore.Publish(t.Context(), "FLEET", []domain.WorkspaceFileInput{{
+		Path: "archive.zip", Bytes: content, MediaType: "application/zip", Executable: true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(uploaded, content) {
+		t.Fatalf("uploaded = %v, want %v", uploaded, content)
+	}
+	downloaded, err := filesStore.Download(t.Context(), "FLEET", result.Tree.Revision, "archive.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(downloaded, content) {
+		t.Fatalf("downloaded = %v, want %v", downloaded, content)
+	}
+}
+
+func TestWorkspaceFileStoreDownloadVerifiesIntegrityAndClosesBody(t *testing.T) {
+	t.Parallel()
+	closeFailure := io.ErrClosedPipe
+	cases := []struct {
+		name       string
+		declared   []byte
+		downloaded []byte
+		closeErr   error
+		wantErr    error
+	}{
+		{name: "wrong hash", declared: []byte("good"), downloaded: []byte("evil"), wantErr: domain.ErrIntegrity},
+		{name: "too short", declared: []byte("expected"), downloaded: []byte("short"), wantErr: domain.ErrIntegrity},
+		{name: "too long", declared: []byte("short"), downloaded: []byte("too-long"), wantErr: domain.ErrIntegrity},
+		{name: "close failure", declared: []byte("good"), downloaded: []byte("good"), closeErr: closeFailure, wantErr: closeFailure},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			body := &workspaceFileTrackingBody{Reader: bytes.NewReader(tc.downloaded), closeErr: tc.closeErr}
+			httpClient := &http.Client{Transport: workspaceFileRoundTripper(func(r *http.Request) (*http.Response, error) {
+				switch {
+				case strings.Contains(r.URL.Path, "/files/"):
+					return workspaceFileHTTPJSON(http.StatusOK, map[string]any{
+						"path": "file", "blob_ref": "blob", "content_hash": workspaceFileTestDigest(tc.declared), "size_bytes": len(tc.declared), "revision": "opaque-file",
+					}), nil
+				case strings.Contains(r.URL.Path, "/downloads/"):
+					return workspaceFileHTTPJSON(http.StatusOK, map[string]any{"method": http.MethodGet, "url": "https://provider.invalid/object"}), nil
+				case r.URL.Host == "provider.invalid":
+					return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: body}, nil
+				default:
+					return nil, fmt.Errorf("unexpected request %s", r.URL)
+				}
+			})}
+			client := newWorkspaceFileTestClientWithHTTP(t, "http://fleet.invalid", "alice", "", httpClient)
+			_, err := client.WorkspaceFiles().Download(t.Context(), "FLEET", "opaque-tree", "file")
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("Download error = %v, want %v", err, tc.wantErr)
+			}
+			if !body.closed.Load() {
+				t.Fatal("download body was not closed")
+			}
+		})
+	}
+}
+
+func TestWorkspaceFileStoreMapsHTTPAndContextErrors(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		status int
+		code   string
+		want   error
+	}{
+		{name: "not found", status: http.StatusNotFound, code: "not_found", want: domain.ErrNotFound},
+		{name: "invalid", status: http.StatusBadRequest, code: "validation_failed", want: domain.ErrInvalid},
+		{name: "conflict", status: http.StatusConflict, code: "conflict", want: domain.ErrConflict},
+		{name: "expired", status: http.StatusGone, code: "expired", want: domain.ErrGone},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				writeWorkspaceFileTestJSON(w, tc.status, map[string]any{"error": map[string]any{"code": tc.code, "message": tc.name}})
+			}))
+			t.Cleanup(server.Close)
+			_, err := newWorkspaceFileTestStore(t, server.URL, "alice", "").GetTree(t.Context(), "FLEET", "opaque-tree")
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("GetTree error = %v, want %v", err, tc.want)
+			}
+		})
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	client := newWorkspaceFileTestClient(t, "http://127.0.0.1:1", "alice", "")
+	_, err := client.WorkspaceFiles().GetTree(ctx, "FLEET", "opaque-tree")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("GetTree canceled error = %v", err)
+	}
+}
+
+func TestWorkspaceFileStoreRejectsInvalidManifestBeforeUpload(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int64
+	client := newWorkspaceFileTestClientWithHTTP(t, "http://fleet.invalid", "alice", "", &http.Client{Transport: workspaceFileRoundTripper(func(*http.Request) (*http.Response, error) {
+		calls.Add(1)
+		return nil, errors.New("must not be called")
+	})})
+	_, err := client.WorkspaceFiles().Publish(t.Context(), "FLEET", []domain.WorkspaceFileInput{
+		{Path: "scripts", Bytes: []byte("file")}, {Path: "scripts/run", Bytes: []byte("nested")},
+	})
+	if !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("Publish error = %v, want ErrInvalid", err)
+	}
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("HTTP calls = %d, want 0", got)
+	}
+}
+
+func TestWorkspaceFileStoreRejectsMissingWireResponses(t *testing.T) {
+	t.Parallel()
+	if err := validateWorkspaceFileGrant(nil); err == nil {
+		t.Fatal("nil grant accepted")
+	}
+	if err := validateWorkspaceFileGrant(&workspaceFileTransferGrantWire{}); err == nil {
+		t.Fatal("empty grant accepted")
+	}
+	if _, err := workspaceFileTreeFromWire(nil); err == nil {
+		t.Fatal("nil tree accepted")
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeWorkspaceFileTestJSON(w, http.StatusOK, map[string]any{})
+	}))
+	t.Cleanup(server.Close)
+	files := newWorkspaceFileTestStore(t, server.URL, "alice", "")
+	if _, err := files.Publish(t.Context(), "FLEET", []domain.WorkspaceFileInput{{Path: "file"}}); err == nil {
+		t.Fatal("Publish accepted empty upload grant")
+	}
+	if _, err := files.GetTree(t.Context(), "FLEET", "opaque-tree"); err == nil {
+		t.Fatal("GetTree accepted empty tree response")
+	}
+}
+
+func TestWorkspaceFileStoreValidatesResponseManifestWithoutParsingOpaqueTokens(t *testing.T) {
+	t.Parallel()
+	digest := workspaceFileTestDigest(nil)
+	var collide atomic.Bool
+	collide.Store(true)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		files := []map[string]any{{"path": "a", "blob_ref": "opaque", "content_hash": digest, "revision": "opaque-file-token"}}
+		if collide.Load() {
+			files = []map[string]any{
+				{"path": "A", "blob_ref": "opaque-a", "content_hash": digest, "revision": "opaque-file-a"},
+				{"path": "a", "blob_ref": "opaque-b", "content_hash": digest, "revision": "opaque-file-b"},
+			}
+		}
+		writeWorkspaceFileTestJSON(w, http.StatusOK, map[string]any{
+			"workspace_key": "FLEET", "revision": "server-owned-opaque-revision", "files": files, "future_field": "ignored",
+		})
+	}))
+	t.Cleanup(server.Close)
+	files := newWorkspaceFileTestStore(t, server.URL, "alice", "")
+	_, err := files.GetTree(t.Context(), "FLEET", "server-owned-opaque-revision")
+	if !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("GetTree error = %v, want invalid manifest", err)
+	}
+	collide.Store(false)
+	tree, err := files.GetTree(t.Context(), "FLEET", "server-owned-opaque-revision")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tree.Revision != "server-owned-opaque-revision" || tree.Files[0].Revision != "opaque-file-token" {
+		t.Fatalf("opaque tokens changed: tree=%q file=%q", tree.Revision, tree.Files[0].Revision)
+	}
+}
+
+func TestWorkspaceFileStoreRejectsResponseIdentityMismatch(t *testing.T) {
+	t.Parallel()
+	digest := workspaceFileTestDigest(nil)
+	cases := []struct {
+		name string
+		path string
+		body map[string]any
+		run  func(store.WorkspaceFileStore) error
+	}{
+		{
+			name: "get workspace",
+			path: "/file-trees/",
+			body: map[string]any{"workspace_key": "OTHER", "revision": "opaque-tree", "files": []map[string]any{{"path": "file", "blob_ref": "blob", "content_hash": digest}}},
+			run: func(s store.WorkspaceFileStore) error {
+				_, err := s.GetTree(t.Context(), "FLEET", "opaque-tree")
+				return err
+			},
+		},
+		{
+			name: "get revision",
+			path: "/file-trees/",
+			body: map[string]any{"workspace_key": "FLEET", "revision": "different-tree", "files": []map[string]any{{"path": "file", "blob_ref": "blob", "content_hash": digest}}},
+			run: func(s store.WorkspaceFileStore) error {
+				_, err := s.GetTree(t.Context(), "FLEET", "opaque-tree")
+				return err
+			},
+		},
+		{
+			name: "stat path",
+			path: "/files/",
+			body: map[string]any{"path": "other", "blob_ref": "blob", "content_hash": digest},
+			run: func(s store.WorkspaceFileStore) error {
+				_, err := s.Stat(t.Context(), "FLEET", "opaque-tree", "file")
+				return err
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if !strings.Contains(r.URL.Path, tc.path) {
+					http.NotFound(w, r)
+					return
+				}
+				writeWorkspaceFileTestJSON(w, http.StatusOK, tc.body)
+			}))
+			t.Cleanup(server.Close)
+			if err := tc.run(newWorkspaceFileTestStore(t, server.URL, "alice", "")); !errors.Is(err, domain.ErrIntegrity) {
+				t.Fatalf("operation error = %v, want ErrIntegrity", err)
+			}
+		})
+	}
+}
+
+func TestWorkspaceFileStoreRejectsPublishedWorkspaceMismatch(t *testing.T) {
+	t.Parallel()
+	digest := workspaceFileTestDigest(nil)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/file-uploads"):
+			writeWorkspaceFileTestJSON(w, http.StatusCreated, map[string]any{
+				"upload_token": "upload", "method": http.MethodPut, "url": "/transfer",
+			})
+		case r.URL.Path == "/transfer":
+			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(r.URL.Path, "/file-trees"):
+			writeWorkspaceFileTestJSON(w, http.StatusCreated, map[string]any{
+				"workspace_key": "OTHER", "revision": "opaque-tree",
+				"files": []map[string]any{{"path": "file", "blob_ref": "blob", "content_hash": digest}},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	_, err := newWorkspaceFileTestStore(t, server.URL, "alice", "").Publish(t.Context(), "FLEET", []domain.WorkspaceFileInput{{Path: "file"}})
+	if !errors.Is(err, domain.ErrIntegrity) {
+		t.Fatalf("Publish error = %v, want ErrIntegrity", err)
+	}
+}
+
+func TestWorkspaceFileTransfersRejectRedirectsAndNon2xx(t *testing.T) {
+	t.Parallel()
+	var redirectTargetCalls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/redirect":
+			http.Redirect(w, r, "/target", http.StatusTemporaryRedirect)
+		case "/target":
+			redirectTargetCalls.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		case "/gone":
+			writeWorkspaceFileTestJSON(w, http.StatusGone, map[string]any{"error": map[string]any{"code": "expired", "message": "expired"}})
+		}
+	}))
+	t.Cleanup(server.Close)
+	client := newWorkspaceFileTestClient(t, server.URL, "alice", "")
+	if err := client.executeWorkspaceFileTransfer(t.Context(), &workspaceFileTransferGrantWire{Method: http.MethodPut, URL: "/redirect"}, bytes.NewReader(nil)); err == nil || !strings.Contains(err.Error(), "HTTP 307") {
+		t.Fatalf("redirect error = %v", err)
+	}
+	if redirectTargetCalls.Load() != 0 {
+		t.Fatal("workspace file transfer followed redirect")
+	}
+	if err := client.executeWorkspaceFileTransfer(t.Context(), &workspaceFileTransferGrantWire{Method: http.MethodPut, URL: "/gone"}, bytes.NewReader(nil)); !errors.Is(err, domain.ErrGone) {
+		t.Fatalf("local non-2xx error = %v, want ErrGone", err)
+	}
+
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "provider down", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(provider.Close)
+	if err := client.executeWorkspaceFileTransfer(t.Context(), &workspaceFileTransferGrantWire{Method: http.MethodPut, URL: provider.URL}, bytes.NewReader(nil)); err == nil || !strings.Contains(err.Error(), "HTTP 503") {
+		t.Fatalf("provider non-2xx error = %v", err)
+	}
+}
+
+func TestWorkspaceFileStoreUsesDynamicFleetCredentials(t *testing.T) {
+	t.Parallel()
+	content := []byte("dynamic")
+	digest := workspaceFileTestDigest(content)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer new-token" || r.Header.Get("X-API-Key") != "new-key" || r.Header.Get("X-Fleet-API-Key") != "new-key" {
+			t.Errorf("stale credentials on %s: Authorization=%q X-API-Key=%q X-Fleet-API-Key=%q", r.URL.Path, r.Header.Get("Authorization"), r.Header.Get("X-API-Key"), r.Header.Get("X-Fleet-API-Key"))
+		}
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/file-uploads"):
+			writeWorkspaceFileTestJSON(w, http.StatusCreated, map[string]any{"upload_token": "upload", "method": http.MethodPut, "url": "/transfer"})
+		case r.URL.Path == "/transfer":
+			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(r.URL.Path, "/file-trees"):
+			writeWorkspaceFileTestJSON(w, http.StatusCreated, map[string]any{
+				"workspace_key": "FLEET", "revision": "opaque-tree", "files": []map[string]any{{"path": "file", "blob_ref": "blob", "content_hash": digest, "size_bytes": len(content), "revision": "opaque-file"}},
+			})
+		}
+	}))
+	t.Cleanup(server.Close)
+	client := newWorkspaceFileTestClient(t, server.URL, "alice", "old-key")
+	client.SetAuthToken("new-token")
+	client.SetAPIKey("new-key")
+	if _, err := client.WorkspaceFiles().Publish(t.Context(), "FLEET", []domain.WorkspaceFileInput{{Path: "file", Bytes: content}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func workspaceFileTestDigest(content []byte) string {
+	sum := sha256.Sum256(content)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func workspaceFileTestFile(digest string, size int) map[string]any {
+	return map[string]any{
+		"path": "bin/archive.zip", "blob_ref": "blob:v1:opaque", "content_hash": digest,
+		"size_bytes": size, "media_type": "application/octet-stream", "executable": true, "revision": "wff1_binary",
+	}
+}
+
+func writeWorkspaceFileTestTree(w http.ResponseWriter, status int, createdAt time.Time, digest string, size int) {
+	writeWorkspaceFileTestJSON(w, status, map[string]any{
+		"workspace_key": "FLEET", "revision": "wft1_binary", "created_by": "alice", "created_at": createdAt,
+		"files": []map[string]any{workspaceFileTestFile(digest, size)},
+	})
+}
+
+func writeWorkspaceFileTestJSON(w http.ResponseWriter, status int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
+}
+
+func newWorkspaceFileTestStore(t *testing.T, serverURL, actor, apiKey string) store.WorkspaceFileStore {
+	t.Helper()
+	return newWorkspaceFileTestClient(t, serverURL, actor, apiKey).WorkspaceFiles()
+}
+
+func newWorkspaceFileTestClient(t *testing.T, serverURL, actor, apiKey string) *Client {
+	t.Helper()
+	return newWorkspaceFileTestClientWithHTTP(t, serverURL, actor, apiKey, nil)
+}
+
+func newWorkspaceFileTestClientWithHTTP(t *testing.T, serverURL, actor, apiKey string, httpClient *http.Client) *Client {
+	t.Helper()
+	client, err := New(Config{BaseURL: serverURL, Actor: actor, APIKey: apiKey, HTTPClient: httpClient})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client
+}
+
+func workspaceFileAbsoluteFile(digest string, size int) map[string]any {
+	return map[string]any{
+		"path": "archive.zip", "blob_ref": "blob:opaque", "content_hash": digest,
+		"size_bytes": size, "media_type": "application/zip", "executable": true, "revision": "wff1_absolute",
+	}
+}
+
+func workspaceFileAbsoluteTree(digest string, size int) map[string]any {
+	return map[string]any{
+		"workspace_key": "FLEET", "revision": "wft1_absolute", "created_by": "alice", "created_at": time.Now(),
+		"files": []map[string]any{workspaceFileAbsoluteFile(digest, size)},
+	}
+}
+
+type workspaceFileTrackingBody struct {
+	io.Reader
+	closed   atomic.Bool
+	closeErr error
+}
+
+func (b *workspaceFileTrackingBody) Close() error {
+	b.closed.Store(true)
+	return b.closeErr
+}
+
+type workspaceFileRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f workspaceFileRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func workspaceFileHTTPJSON(status int, body any) *http.Response {
+	raw, err := json.Marshal(body)
+	if err != nil {
+		panic(err)
+	}
+	return &http.Response{
+		StatusCode: status,
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       io.NopCloser(bytes.NewReader(raw)),
+	}
+}
