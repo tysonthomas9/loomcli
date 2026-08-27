@@ -72,9 +72,38 @@ loom daemon release [--actor NAME] [--force]
 - Re-holding as the same actor is an idempotent refresh: `Since` is preserved,
   `Reason` and `ExpiresAt` are updated.
 
-If the daemon is not running, both commands exit non-zero with
-`daemon is not running`. A workspace with no daemon has no claimers, so a
-deploy script may legitimately treat that as "already quiesced".
+## No daemon, or a daemon that is still starting
+
+A hold outlives the daemon by design, so **`release` does not require one**.
+With no daemon process alive, `release` clears `.loom/claim-hold.json` directly
+and exits 0 — and exits 0 just the same when there is no file, so a deploy
+script's `trap ... EXIT` is idempotent. `hold` has no offline path: a hold
+written to a file no daemon will read is a quiesce that silently did not
+happen, so it still exits non-zero when nothing is running.
+
+The offline release enforces the **same ownership rule** as the socket path,
+with the same wording — a foreign holder needs `--force`, and the refusal names
+the holder and its `since`. A record that cannot be parsed is releasable with
+`--force` only, and says so. A record that cannot be read at all (it is `0600`;
+the release is running as another UID) reports the path and the owning UID
+rather than claiming the daemon is not running.
+
+A daemon that IS running may still be unreachable for a few seconds: it writes
+`daemon.pid` before `cmdstore.OpenStore` and the supervisor start, and only
+binds `daemon.sock` afterwards — measured at **9 seconds** apart. Both `hold`
+and `release` therefore wait up to **30s** for the socket, polling every 500ms,
+and print one line to stderr while they do:
+
+```
+Waiting up to 30s for the daemon control socket at /…/.loom/daemon.sock (daemon PID 4711 is starting)...
+```
+
+The wait ends early when the socket answers, or when the daemon PID stops being
+alive. It is never entered when no daemon process is alive at all — that case
+takes the offline path immediately instead of stalling for 30s. If the wait
+times out against a live PID, the error names both the PID and the socket path
+and states that the hold file was **deliberately not cleared**: that daemon may
+already be holding a hydrated copy, so clearing the file would not release it.
 
 ## Loudness
 
