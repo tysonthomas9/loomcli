@@ -41,6 +41,7 @@ func (s *Supervisor) classifyAgentExit(ap *AgentProcess, exitCode int) {
 	ap.Mu.Lock()
 	backend := ap.Entry.Backend
 	logPath := ap.LogFilePath
+	logStart := ap.LogFileStartOffset
 	stopReason := ap.StopReason
 	ap.Mu.Unlock()
 	if backend == "" {
@@ -65,7 +66,7 @@ func (s *Supervisor) classifyAgentExit(ap *AgentProcess, exitCode int) {
 	if taskID == "" && (exitCode == 0 || stopReason == StopReasonWatchdog) {
 		s.markNoWork(ap, backend)
 	} else if exitCode != 0 {
-		ae := agenterr.ClassifyFromLog(logPath, exitCode, backend)
+		ae := agenterr.ClassifyFromLogAt(logPath, logStart, exitCode, backend)
 		ap.Mu.Lock()
 		ap.LastError = ae
 		ap.LastNoWork = false

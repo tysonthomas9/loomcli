@@ -1064,3 +1064,143 @@ func TestClassifyFromOutput_IncompatibleBackendCLIIsTerminalModelFailure(t *test
 		t.Fatalf("message = %q", got.Message)
 	}
 }
+
+// writeRunLog builds an append-only daemon log out of consecutive run blocks
+// and returns its path plus the byte offset at which each block starts.
+func writeRunLog(t *testing.T, blocks ...string) (string, []int64) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "worker-agent.log")
+	var (
+		buf     strings.Builder
+		offsets []int64
+	)
+	for _, b := range blocks {
+		offsets = append(offsets, int64(buf.Len()))
+		buf.WriteString(b)
+	}
+	if err := os.WriteFile(path, []byte(buf.String()), 0o600); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+	return path, offsets
+}
+
+// TestClassifyFromLogAt_SkipsPriorRunAuthBanner is the misclassification this
+// exists to stop: the per-role log is append-only and spans days, so a logged-out
+// run from yesterday sits in the same file as today's timeout. Read whole, the
+// stale banner wins and the agent is walled for an auth problem it does not have.
+func TestClassifyFromLogAt_SkipsPriorRunAuthBanner(t *testing.T) {
+	t.Parallel()
+
+	priorRun := "[loom] starting task PUPPET-1\n" +
+		AuthRequiredMarker + ": Not logged in · Run /login\n" +
+		"Not logged in · Run /login\n"
+	thisRun := "[loom] starting task PUPPET-2\n" +
+		"error: context deadline exceeded\n"
+
+	path, offsets := writeRunLog(t, priorRun, thisRun)
+
+	// Control: the whole-file read is what produced the false verdict.
+	if got := ClassifyFromLog(path, 1, "claude"); got.Class != AuthFailure {
+		t.Fatalf("whole-file class = %s, want AuthFailure (control for the bug)", got.Class)
+	}
+
+	got := ClassifyFromLogAt(path, offsets[1], 1, "claude")
+	if got.Class != Timeout {
+		t.Fatalf("class = %s, want Timeout", got.Class)
+	}
+	if strings.Contains(got.RawOutput, "Not logged in") {
+		t.Errorf("raw output still carries the prior run's banner:\n%s", got.RawOutput)
+	}
+}
+
+// TestClassifyFromLogAt_OffsetPastEOFFallsBack covers rotation: the recorded
+// offset points past the end of a log that has since been replaced, so the run's
+// own bytes are gone. Classifying nothing would hide a real failure, so the
+// whole file is read instead.
+func TestClassifyFromLogAt_OffsetPastEOFFallsBack(t *testing.T) {
+	t.Parallel()
+
+	path, _ := writeRunLog(t, "error: context deadline exceeded\n")
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+
+	got := ClassifyFromLogAt(path, info.Size()+4096, 1, "claude")
+	want := ClassifyFromLog(path, 1, "claude")
+	if got.Class != want.Class || got.RawOutput != want.RawOutput {
+		t.Fatalf("offset past EOF: class/raw = %s/%q, want %s/%q",
+			got.Class, got.RawOutput, want.Class, want.RawOutput)
+	}
+	if got.Class != Timeout {
+		t.Fatalf("class = %s, want Timeout", got.Class)
+	}
+}
+
+// TestClassifyFromLogAt_ZeroOffsetMatchesClassifyFromLog is the compatibility
+// invariant: offset 0 is the value every pre-existing caller and test produces,
+// and it must read byte-for-byte what it always did — including past the
+// 100-line and 64KiB tail caps.
+func TestClassifyFromLogAt_ZeroOffsetMatchesClassifyFromLog(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"empty":       "",
+		"single line": "error: context deadline exceeded\n",
+		"over 100 lines": strings.Repeat("chatter\n", 500) +
+			"error: context deadline exceeded\n",
+		"over 64KiB": strings.Repeat("x", 80*1024) +
+			"\nerror: context deadline exceeded\n",
+		"no trailing newline": "Invalid API key · Please run /login",
+	}
+
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			path, _ := writeRunLog(t, body)
+
+			gotTail, gotErr := readLogTailAt(path, 100, 0)
+			wantTail, wantErr := readLogTail(path, 100)
+			if gotTail != wantTail {
+				t.Fatalf("tail differs at offset 0:\ngot  %q\nwant %q", gotTail, wantTail)
+			}
+			if (gotErr == nil) != (wantErr == nil) {
+				t.Fatalf("err differs: got %v, want %v", gotErr, wantErr)
+			}
+
+			got := ClassifyFromLogAt(path, 0, 1, "claude")
+			want := ClassifyFromLog(path, 1, "claude")
+			if got.Class != want.Class || got.RawOutput != want.RawOutput || got.Message != want.Message {
+				t.Fatalf("classification differs at offset 0:\ngot  %+v\nwant %+v", got, want)
+			}
+		})
+	}
+}
+
+// TestReadLogTailAt_ReadsOnlyFromOffset checks the read window directly, so a
+// future change to the tail caps cannot quietly start including pre-offset bytes.
+func TestReadLogTailAt_ReadsOnlyFromOffset(t *testing.T) {
+	t.Parallel()
+
+	path, offsets := writeRunLog(t, "first run\n", "second run\n")
+
+	tail, err := readLogTailAt(path, 100, offsets[1])
+	if err != nil {
+		t.Fatalf("readLogTailAt: %v", err)
+	}
+	if strings.Contains(tail, "first run") {
+		t.Errorf("tail includes pre-offset bytes: %q", tail)
+	}
+	if !strings.Contains(tail, "second run") {
+		t.Errorf("tail is missing the run's own bytes: %q", tail)
+	}
+
+	// An offset exactly at EOF has nothing of its own to report.
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if tail, err := readLogTailAt(path, 100, info.Size()); err != nil || tail != "" {
+		t.Errorf("readLogTailAt at EOF = %q, %v; want empty and no error", tail, err)
+	}
+}
