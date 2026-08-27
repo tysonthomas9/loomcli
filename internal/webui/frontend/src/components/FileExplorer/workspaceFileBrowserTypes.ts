@@ -1,7 +1,9 @@
 import type { FileTreeInlineEdit, FileTreeNodeInfo } from "./FileTree";
 import type { RevisionViewState } from "./FileRevisionPane";
 import type { FileBrowserMode } from "./treeRoots";
+import type { FileIndexData } from "@/api/workspace";
 import type { CheckoutRef } from "@/utils/fileExplorerRefs";
+import type { ExplorerRef, SkillsExplorerRef } from "@/utils/explorerRefs";
 
 export type ExplorerLens = "files" | "changes";
 export type CompareMode = "branch" | "working";
@@ -13,7 +15,7 @@ export interface FileBrowserProps {
 }
 
 export interface ContextMenuState {
-  ref: CheckoutRef;
+  ref: ExplorerRef;
   node: FileTreeNodeInfo;
   x: number;
   y: number;
@@ -28,7 +30,7 @@ export interface CheckoutRepairMenuState {
 }
 
 export interface DeleteConfirmState {
-  ref: CheckoutRef;
+  ref: ExplorerRef;
   node: FileTreeNodeInfo;
 }
 
@@ -43,7 +45,7 @@ export interface RepairConfirmState {
 }
 
 export interface ScopedInlineEdit {
-  ref: CheckoutRef;
+  ref: ExplorerRef;
   edit: FileTreeInlineEdit;
 }
 
@@ -62,15 +64,45 @@ export interface LineTarget {
   token: number;
 }
 
-export interface DiffViewState {
+export interface CheckoutDiffViewState {
+  kind: "checkout";
   ref: CheckoutRef;
   path: string;
   source?: "branch" | undefined;
   from?: string | undefined;
   to?: string | undefined;
   title: string;
-  patch?: string | undefined;
   canOpenFile?: boolean | undefined;
+}
+
+export interface PatchDiffViewState {
+  kind: "patch";
+  path: string;
+  title: string;
+  patch: string;
+}
+
+export type DiffViewState = CheckoutDiffViewState | PatchDiffViewState;
+
+export interface SkillGroupMenuState {
+  ref: SkillsExplorerRef;
+  x: number;
+  y: number;
+}
+
+export interface DeleteSkillState {
+  ref: SkillsExplorerRef;
+  name: string;
+}
+
+export interface BranchDiffRequest {
+  key: string;
+  agent: string;
+}
+
+export interface ScopedFileIndex {
+  ref: CheckoutRef;
+  index: FileIndexData;
 }
 
 export type { RevisionViewState };

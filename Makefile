@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli test-skills-release-compat fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-ci test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify local-mode-skills-verify local-mode-skill-pointer-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -90,6 +90,13 @@ test-playground:
 test-fleetdb-embedded: build
 	@echo "Running fleet-db-only clean checkout embedded smoke..."
 	LOOM_BIN="$(PWD)/loom" scripts/test-fleetdb-clean-checkout.sh
+
+# Release-blocking compatibility proof for a pinned real-world Agent Skills
+# corpus. The release workflow supplies fleet-db main deliberately: Loom and
+# FleetDB are released as one compatibility pair rather than against a stale
+# server pin.
+test-skills-release-compat:
+	@scripts/test-vercel-skills-compat.sh
 
 test-fleetdb-supervisor:
 	@echo "Running fleet-db supervisor control-plane gate..."
@@ -304,6 +311,21 @@ local-mode-routing-verify:
 local-mode-webhook-verify:
 	@test/local-mode/verify-webhook.sh
 
+# Deterministic end-to-end verification of the skills vertical (fleet-db CRUD
+# -> CLI -> materializer -> INDEX.md/catalog projection -> baked backend
+# hook/pointer config) against a running local-mode stack. No model calls.
+local-mode-skills-verify:
+	@test/local-mode/verify-skills.sh
+
+# Live-model smoke: a long-lived agent session must learn about skills
+# added/removed after its session-start snapshot, via the managed
+# UserPromptSubmit hook (files) and the loom-skill-catalog/INDEX.md pointer
+# (awareness). Backend is autodetected from the running stack (codex or claude,
+# override with SKILL_POINTER_BACKEND); needs make local-mode-codex-up or
+# make local-mode-claude-up. Burns real model tokens — keep out of CI.
+local-mode-skill-pointer-verify:
+	@test/local-mode/verify-skill-pointer.sh
+
 local-mode-codex-verify:
 	@LOOM_LOCAL_MODE_PLAN_TASK_ID="$${LOOM_LOCAL_MODE_PLAN_TASK_ID:-LOCALMODE-2}" \
 	  LOOM_LOCAL_MODE_CODE_TASK_ID="$${LOOM_LOCAL_MODE_CODE_TASK_ID:-LOCALMODE-3}" \
@@ -434,6 +456,18 @@ test-e2e: ensure-frontend-deps
 	@cd $(FRONTEND_DIR) && npx playwright test --project=chromium --workers=1
 
 # Run Playwright API e2e tests (self-contained: builds loom, starts server, runs tests)
+# Run the browser e2e suite exactly as CI does: the chromium-ci project, which
+# is the mocked chromium suite minus the quarantined specs listed in
+# playwright.config.ts. --ignore-snapshots because the committed PNGs were
+# generated on the author's machine and snapshotPathTemplate omits {platform},
+# so they cannot match another OS's font rendering; the specs still run.
+# --workers=2 overrides the config's blanket workers:1-under-CI: that setting
+# suits the small API tier, but serialising 360+ browser tests takes hours.
+test-e2e-ci: ensure-frontend-deps
+	@echo "Running Playwright browser e2e tests (mocked, CI selection)..."
+	@cd $(FRONTEND_DIR) && npx playwright install --with-deps chromium 2>/dev/null || true
+	@cd $(FRONTEND_DIR) && npx playwright test --project=chromium-ci --workers=2 --ignore-snapshots
+
 test-e2e-api: ensure-frontend-deps
 	@echo "Running Playwright API e2e tests (self-contained)..."
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 npx playwright test --project=api
@@ -719,6 +753,7 @@ help:
 	@echo "  make test-frontend     - Run frontend unit tests (vitest)"
 	@echo "  make test-e2e          - Run Playwright mocked e2e tests (no server)"
 	@echo "  make test-fleetdb-ui   - Run fleet-db-only UI regression suite"
+	@echo "  make test-skills-release-compat - Verify the pinned Vercel corpus against a FleetDB checkout"
 	@echo "  make test-env-up        - Start the disposable fleet-db test backend (workspace LOOMTEST, :53351)"
 	@echo "  make test-env-down      - Stop it and drop its volumes"
 	@echo "                            Point a shell at it: eval \"\$$(scripts/test-env.sh env)\""
@@ -727,6 +762,8 @@ help:
 	@echo "  make local-mode-codex-up - Run local-mode stack with Codex agents"
 	@echo "  make local-mode-verify  - Verify deterministic local-mode stack"
 	@echo "  make local-mode-codex-verify - Verify Codex local-mode stack"
+	@echo "  make local-mode-skills-verify - Verify the skills vertical e2e (no model)"
+	@echo "  make local-mode-skill-pointer-verify - Live-model smoke of the skill catalog pointer"
 	@echo "  make local-mode-logs    - Tail selected local-mode stack logs"
 	@echo "  make local-mode-down    - Stop selected local-mode stack and volumes"
 	@echo "    LOCAL_MODE_COMPOSE='docker compose' LOCAL_MODE_COMPOSE_PROJECT=name LOCAL_MODE_UI_PORT=8383 LOCAL_MODE_API_PORT=8382 LOCAL_MODE_FLEETDB_PORT=8380"

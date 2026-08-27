@@ -240,7 +240,22 @@ prepare_codex_credentials() {
     echo "[local-mode] FATAL: codex auth missing. Mount local CODEX_HOME at /codex-host or set LOCAL_MODE_CODEX_HOME." >&2
     return 1
   fi
+  write_skill_catalog_pointer /root/.codex/AGENTS.md
   codex --version || true
+}
+
+# Global backend instructions pointing at loom's live skill catalog. Backends
+# snapshot their skill list at session start; the pointer is constant, so it
+# can never go stale, and it sends the model to the always-current INDEX.md.
+write_skill_catalog_pointer() {
+  cat > "$1" <<'EOF'
+# Loom skills
+
+Loom materializes skills into `.agents/skills/` in your working directory and
+adds/removes them between turns. The live catalog is
+`.agents/skills/INDEX.md` — read it before listing or choosing skills; a
+skill list captured at session start may be stale.
+EOF
 }
 
 prepare_claude_credentials() {
@@ -266,6 +281,7 @@ prepare_claude_credentials() {
     echo "[local-mode] FATAL: claude auth missing. Mount local CLAUDE_HOME at /claude-host or set LOCAL_MODE_CLAUDE_HOME (needs ~/.claude/.credentials.json)." >&2
     return 1
   fi
+  write_skill_catalog_pointer /root/.claude/CLAUDE.md
   claude --version || true
 
   # Claude Code keeps interactive onboarding state in ~/.claude.json, separate

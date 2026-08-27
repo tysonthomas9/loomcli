@@ -43,6 +43,9 @@ vi.mock("@/views/WorkspacePage", () => ({ WorkspacePage }));
 const FilesPage = () => null;
 vi.mock("@/views/FilesPage", () => ({ FilesPage }));
 
+const SkillsPage = () => null;
+vi.mock("@/views/SkillsPage", () => ({ SkillsPage }));
+
 const IssueDetailPage = () => null;
 vi.mock("@/views/IssueDetailPage", () => ({ IssueDetailPage }));
 
@@ -123,6 +126,7 @@ describe("router view routes", () => {
       expect(paths).toContain("settings");
       expect(paths).toContain("workspace");
       expect(paths).toContain("files");
+      expect(paths).toContain("skills");
       expect(paths).toContain("issues/:issueId");
       expect(paths).toContain("*");
     });
@@ -143,6 +147,7 @@ describe("router view routes", () => {
       ["settings", SettingsPage],
       ["workspace", WorkspacePage],
       ["files", FilesPage],
+      ["skills", SkillsPage],
       ["issues/:issueId", IssueDetailPage],
     ];
 
