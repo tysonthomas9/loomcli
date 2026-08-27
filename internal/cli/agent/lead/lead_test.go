@@ -62,6 +62,8 @@ func TestRunLead_InvokesClaude(t *testing.T) {
 	// No workspace and no override: this is the os.Getwd fallback branch, and
 	// it must stay that way even when the operator's own LOOM_* vars are set.
 	isolateLeadEnv(t)
+	isolateLeadWorkspace(t)
+	clearProfileEnv(t)
 
 	// Setup temp directory as working directory
 	tmpDir := t.TempDir()
@@ -118,6 +120,8 @@ func TestRunLead_InvokesClaude(t *testing.T) {
 func TestRunLeadUsesCustomTerminalPrompt(t *testing.T) {
 	t.Setenv("LOOM_LEAD_CONTROLLED", "0")
 	isolateLeadEnv(t)
+	isolateLeadWorkspace(t)
+	clearProfileEnv(t)
 	t.Setenv(envAgentName, "nova")
 	t.Setenv("LOOM_AGENT_ROLE", "operator")
 

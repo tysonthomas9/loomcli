@@ -6,7 +6,7 @@ import (
 )
 
 // The supervisor injects CLAUDE_CONFIG_DIR / CODEX_HOME into the agent loom
-// process (see supervisor.appendProfileEnv). The backends layer rebuilds the
+// process (see supervisor.AppendProfileEnv). The backends layer rebuilds the
 // harness environment from cli.FilteredEnv(), so both variables must survive
 // that filter for per-agent profile isolation to reach the harness child.
 func TestProfileEnvPropagatesThroughHarnessEnvBuilders(t *testing.T) {

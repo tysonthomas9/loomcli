@@ -434,7 +434,7 @@ Caveats:
   positionally, so non-isolated sessions and the webui lead terminal — which does not set
   `CLAUDE_CONFIG_DIR` — behave exactly as before. Every new behavior is opt-in behind a flag.
 - The `loom lead` path does **not** verify a profile's manifest (verification is
-  supervisor-only, `spawn.go` `appendProfileEnv`), so a stale or missing profile `CLAUDE.md`
+  supervisor-only, `spawn.go` `AppendProfileEnv`), so a stale or missing profile `CLAUDE.md`
   takes effect silently. The only mitigation today is the pointer prompt's instruction to
   stop and report when the role instructions are absent.
 

@@ -117,6 +117,13 @@ func runLead(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	// Profile enforcement runs AFTER the --print-prompt early return, never
+	// before it: `loom lead --print-prompt > .../profiles/lead/claude/CLAUDE.md`
+	// is how a lead profile is generated in the first place, so gating that
+	// path on a verified profile would make a lead profile impossible to
+	// create. See TestRunLeadPrintPrompt*.
+	enforceLeadProfile()
+
 	workDir, backendName, dedicated, ok := leadRuntimePreflight()
 	if !ok {
 		return
