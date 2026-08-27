@@ -10,8 +10,6 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { UseGitActionsReturn } from "@/hooks/workspace";
-
 import { TerminalHeader } from "../TerminalHeader";
 
 // Mock CSS module
@@ -26,27 +24,6 @@ vi.mock("../EmbeddedTerminal.module.css", () => ({
     actions: "actions",
   },
 }));
-
-function defaultGitActions(
-  overrides: Partial<UseGitActionsReturn> = {},
-): UseGitActionsReturn {
-  return {
-    push: vi.fn(),
-    pull: vi.fn(),
-    sync: vi.fn(),
-    createPR: vi.fn(),
-    reset: vi.fn(),
-    updateTarget: vi.fn(),
-    pushState: { isLoading: false, error: null },
-    pullState: { isLoading: false, error: null },
-    syncState: { isLoading: false, error: null },
-    prState: { isLoading: false, error: null },
-    resetState: { isLoading: false, error: null },
-    targetState: { isLoading: false, error: null },
-    anyLoading: false,
-    ...overrides,
-  };
-}
 
 describe("TerminalHeader", () => {
   describe("backend display", () => {
@@ -353,106 +330,6 @@ describe("TerminalHeader", () => {
 
       fireEvent.click(screen.getByTestId("maximize-btn"));
       expect(onMaximize).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  describe("git action buttons", () => {
-    it("renders git actions when agentName is non-null and gitActions provided", () => {
-      render(
-        <TerminalHeader
-          backend="claude"
-          agentName="agent-1"
-          connectionState="connected"
-          gitActions={defaultGitActions()}
-        />,
-      );
-
-      expect(screen.getByTestId("git-actions")).toBeInTheDocument();
-      expect(screen.getByTestId("action-review-changes")).toBeInTheDocument();
-      expect(screen.getByTestId("action-merge")).toBeInTheDocument();
-    });
-
-    it("does NOT render git actions when agentName is null", () => {
-      render(
-        <TerminalHeader
-          backend="claude"
-          agentName={null}
-          connectionState="connected"
-          gitActions={defaultGitActions()}
-        />,
-      );
-
-      expect(screen.queryByTestId("git-actions")).not.toBeInTheDocument();
-    });
-
-    it("does NOT render git actions when gitActions is undefined", () => {
-      render(
-        <TerminalHeader
-          backend="claude"
-          agentName="agent-1"
-          connectionState="connected"
-        />,
-      );
-
-      expect(screen.queryByTestId("git-actions")).not.toBeInTheDocument();
-    });
-
-    it("disables buttons when anyLoading is true", () => {
-      render(
-        <TerminalHeader
-          backend="claude"
-          agentName="agent-1"
-          connectionState="connected"
-          gitActions={defaultGitActions({ anyLoading: true })}
-        />,
-      );
-
-      expect(screen.getByTestId("action-review-changes")).toBeDisabled();
-      expect(screen.getByTestId("action-merge")).toBeDisabled();
-    });
-
-    it("enables buttons when anyLoading is false", () => {
-      render(
-        <TerminalHeader
-          backend="claude"
-          agentName="agent-1"
-          connectionState="connected"
-          gitActions={defaultGitActions({ anyLoading: false })}
-        />,
-      );
-
-      expect(screen.getByTestId("action-review-changes")).toBeEnabled();
-      expect(screen.getByTestId("action-merge")).toBeEnabled();
-    });
-
-    it("calls gitActions.sync when Review Changes is clicked", () => {
-      const syncFn = vi.fn();
-      render(
-        <TerminalHeader
-          backend="claude"
-          agentName="agent-1"
-          connectionState="connected"
-          gitActions={defaultGitActions({ sync: syncFn })}
-        />,
-      );
-
-      fireEvent.click(screen.getByTestId("action-review-changes"));
-      expect(syncFn).toHaveBeenCalledTimes(1);
-    });
-
-    it("calls gitActions.push when Merge is clicked", () => {
-      const pushFn = vi.fn();
-      render(
-        <TerminalHeader
-          backend="claude"
-          agentName="agent-1"
-          connectionState="connected"
-          gitActions={defaultGitActions({ push: pushFn })}
-        />,
-      );
-
-      fireEvent.click(screen.getByTestId("action-merge"));
-      expect(pushFn).toHaveBeenCalledTimes(1);
     });
   });
 });

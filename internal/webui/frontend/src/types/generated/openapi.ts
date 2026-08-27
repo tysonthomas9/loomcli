@@ -1312,23 +1312,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/workspaces/{ws}/agents/{name}/git/push": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Push agent worktree to remote */
-    post: operations["gitPush"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/workspaces/{ws}/agents/{name}/git/pull": {
     parameters: {
       query?: never;
@@ -1340,23 +1323,6 @@ export interface paths {
     put?: never;
     /** Pull remote changes into agent worktree */
     post: operations["gitPull"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/workspaces/{ws}/agents/{name}/git/sync": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Sync agent worktree (pull + push) */
-    post: operations["gitSync"];
     delete?: never;
     options?: never;
     head?: never;
@@ -1412,23 +1378,6 @@ export interface paths {
     head?: never;
     /** Update agent git push target branch */
     patch: operations["updateGitTarget"];
-    trace?: never;
-  };
-  "/api/workspaces/{ws}/git/push-all": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Push all agent worktrees to remote */
-    post: operations["gitPushAll"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
     trace?: never;
   };
   "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}": {
@@ -6240,38 +6189,6 @@ export interface operations {
       };
     };
   };
-  gitPush: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-        /** @description Agent worktree name */
-        name: components["parameters"]["AgentName"];
-      };
-      cookie?: never;
-    };
-    requestBody?: {
-      content: {
-        "application/json": {
-          /** @description Remote branch target */
-          target?: string;
-        };
-      };
-    };
-    responses: {
-      /** @description Push result */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["MessageResponse"];
-        };
-      };
-    };
-  };
   gitPull: {
     parameters: {
       query?: never;
@@ -6294,31 +6211,6 @@ export interface operations {
     };
     responses: {
       /** @description Pull result */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["MessageResponse"];
-        };
-      };
-    };
-  };
-  gitSync: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-        /** @description Agent worktree name */
-        name: components["parameters"]["AgentName"];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Sync result */
       200: {
         headers: {
           [name: string]: unknown;
@@ -6406,29 +6298,6 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["MessageResponse"];
-        };
-      };
-    };
-  };
-  gitPushAll: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Push results */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": Record<string, never>;
         };
       };
     };

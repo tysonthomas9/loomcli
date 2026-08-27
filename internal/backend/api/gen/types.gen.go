@@ -3111,12 +3111,6 @@ type GitPullJSONBody struct {
 	Source *string `json:"source,omitempty"`
 }
 
-// GitPushJSONBody defines parameters for GitPush.
-type GitPushJSONBody struct {
-	// Target Remote branch target
-	Target *string `json:"target,omitempty"`
-}
-
 // UpdateGitTargetJSONBody defines parameters for UpdateGitTarget.
 type UpdateGitTargetJSONBody struct {
 	Target *string `json:"target,omitempty"`
@@ -3516,9 +3510,6 @@ type CreateAgentJSONRequestBody CreateAgentJSONBody
 
 // GitPullJSONRequestBody defines body for GitPull for application/json ContentType.
 type GitPullJSONRequestBody GitPullJSONBody
-
-// GitPushJSONRequestBody defines body for GitPush for application/json ContentType.
-type GitPushJSONRequestBody GitPushJSONBody
 
 // UpdateGitTargetJSONRequestBody defines body for UpdateGitTarget for application/json ContentType.
 type UpdateGitTargetJSONRequestBody UpdateGitTargetJSONBody

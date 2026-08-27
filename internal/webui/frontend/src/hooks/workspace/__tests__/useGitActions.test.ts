@@ -19,17 +19,13 @@ import { ToastProvider } from "@/hooks/ui";
 import { useGitActions } from "@/hooks/workspace";
 
 // Mock git API functions
-const mockGitPush = vi.fn();
 const mockGitPull = vi.fn();
-const mockGitSync = vi.fn();
 const mockGitCreatePR = vi.fn();
 const mockGitReset = vi.fn();
 const mockGitUpdateTarget = vi.fn();
 
 vi.mock("@/api/workspace", () => ({
-  gitPush: (...args: unknown[]) => mockGitPush(...args),
   gitPull: (...args: unknown[]) => mockGitPull(...args),
-  gitSync: (...args: unknown[]) => mockGitSync(...args),
   gitCreatePR: (...args: unknown[]) => mockGitCreatePR(...args),
   gitReset: (...args: unknown[]) => mockGitReset(...args),
   gitUpdateTarget: (...args: unknown[]) => mockGitUpdateTarget(...args),
@@ -74,15 +70,7 @@ describe("useGitActions", () => {
         { wrapper },
       );
 
-      expect(result.current.pushState).toEqual({
-        isLoading: false,
-        error: null,
-      });
       expect(result.current.pullState).toEqual({
-        isLoading: false,
-        error: null,
-      });
-      expect(result.current.syncState).toEqual({
         isLoading: false,
         error: null,
       });
@@ -99,102 +87,6 @@ describe("useGitActions", () => {
         error: null,
       });
       expect(result.current.anyLoading).toBe(false);
-    });
-  });
-
-  describe("push", () => {
-    it("shows success toast on successful push", async () => {
-      mockGitPush.mockResolvedValue({
-        success: true,
-        message: "Pushed 3 commits",
-      });
-
-      const { result } = renderHook(
-        () => useGitActions({ agentName: "nova" }),
-        { wrapper },
-      );
-
-      await act(async () => {
-        await result.current.push("main");
-      });
-
-      expect(mockGitPush).toHaveBeenCalledWith("test-ws-id", "nova", "main");
-      expect(result.current.pushState).toEqual({
-        isLoading: false,
-        error: null,
-      });
-      expect(mockShowToast).toHaveBeenCalledWith("Pushed 3 commits", {
-        type: "success",
-      });
-    });
-
-    it("uses default message when result.message is empty", async () => {
-      mockGitPush.mockResolvedValue({ success: true, message: "" });
-
-      const { result } = renderHook(
-        () => useGitActions({ agentName: "nova" }),
-        { wrapper },
-      );
-
-      await act(async () => {
-        await result.current.push();
-      });
-
-      expect(mockShowToast).toHaveBeenCalledWith("Push successful", {
-        type: "success",
-      });
-    });
-
-    it("does nothing when agentName is null", async () => {
-      const { result } = renderHook(() => useGitActions({ agentName: null }), {
-        wrapper,
-      });
-
-      await act(async () => {
-        await result.current.push();
-      });
-
-      expect(mockGitPush).not.toHaveBeenCalled();
-    });
-
-    it("calls onStatusChange after successful push", async () => {
-      mockGitPush.mockResolvedValue({ success: true, message: "Done" });
-      const onStatusChange = vi.fn();
-
-      const { result } = renderHook(
-        () =>
-          useGitActions({
-            agentName: "nova",
-            onStatusChange,
-          }),
-        { wrapper },
-      );
-
-      await act(async () => {
-        await result.current.push();
-      });
-
-      expect(onStatusChange).toHaveBeenCalledTimes(1);
-    });
-
-    it("calls onStatusChange after push error", async () => {
-      mockGitPush.mockRejectedValue(new Error("network error"));
-      const onStatusChange = vi.fn();
-
-      const { result } = renderHook(
-        () =>
-          useGitActions({
-            agentName: "nova",
-            onStatusChange,
-          }),
-        { wrapper },
-      );
-
-      await act(async () => {
-        await result.current.push();
-      });
-
-      expect(onStatusChange).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -239,49 +131,6 @@ describe("useGitActions", () => {
       expect(mockShowToast).toHaveBeenCalledWith("Pull successful", {
         type: "success",
       });
-    });
-  });
-
-  describe("sync", () => {
-    it("shows success toast on successful sync", async () => {
-      mockGitSync.mockResolvedValue({
-        push_result: { success: true },
-        pull_result: { success: true },
-      });
-
-      const { result } = renderHook(
-        () => useGitActions({ agentName: "ember" }),
-        { wrapper },
-      );
-
-      await act(async () => {
-        await result.current.sync();
-      });
-
-      expect(mockGitSync).toHaveBeenCalledWith("test-ws-id", "ember");
-      expect(mockShowToast).toHaveBeenCalledWith("Sync successful", {
-        type: "success",
-      });
-    });
-
-    it("calls onStatusChange after sync", async () => {
-      mockGitSync.mockResolvedValue({});
-      const onStatusChange = vi.fn();
-
-      const { result } = renderHook(
-        () =>
-          useGitActions({
-            agentName: "ember",
-            onStatusChange,
-          }),
-        { wrapper },
-      );
-
-      await act(async () => {
-        await result.current.sync();
-      });
-
-      expect(onStatusChange).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -493,7 +342,7 @@ describe("useGitActions", () => {
         const error = new ApiError(409, "Conflict", {
           conflicted_files: ["src/main.go", "src/util.go"],
         });
-        mockGitPush.mockRejectedValue(error);
+        mockGitPull.mockRejectedValue(error);
 
         const { result } = renderHook(
           () => useGitActions({ agentName: "nova" }),
@@ -501,14 +350,14 @@ describe("useGitActions", () => {
         );
 
         await act(async () => {
-          await result.current.push();
+          await result.current.pull();
         });
 
         expect(mockShowToast).toHaveBeenCalledWith(
           "Merge conflicts in 2 files",
           { type: "warning" },
         );
-        expect(result.current.pushState.error).toBe(
+        expect(result.current.pullState.error).toBe(
           "Merge conflicts in 2 files",
         );
       });
@@ -536,7 +385,7 @@ describe("useGitActions", () => {
 
       it("shows generic conflict message when no conflicted_files", async () => {
         const error = new ApiError(409, "Conflict", {});
-        mockGitSync.mockRejectedValue(error);
+        mockGitPull.mockRejectedValue(error);
 
         const { result } = renderHook(
           () => useGitActions({ agentName: "nova" }),
@@ -544,11 +393,11 @@ describe("useGitActions", () => {
         );
 
         await act(async () => {
-          await result.current.sync();
+          await result.current.pull();
         });
 
         expect(mockShowToast).toHaveBeenCalledWith(
-          "Sync resulted in conflicts",
+          "Pull resulted in conflicts",
           { type: "warning" },
         );
       });
@@ -586,7 +435,7 @@ describe("useGitActions", () => {
 
       it("shows generic lock message when no lock_info", async () => {
         const error = new ApiError(423, "Locked", {});
-        mockGitPush.mockRejectedValue(error);
+        mockGitPull.mockRejectedValue(error);
 
         const { result } = renderHook(
           () => useGitActions({ agentName: "nova" }),
@@ -594,7 +443,7 @@ describe("useGitActions", () => {
         );
 
         await act(async () => {
-          await result.current.push();
+          await result.current.pull();
         });
 
         expect(mockShowToast).toHaveBeenCalledWith("Agent is locked", {
@@ -628,7 +477,7 @@ describe("useGitActions", () => {
 
     describe("generic errors", () => {
       it("shows error toast with action name and error message", async () => {
-        mockGitPush.mockRejectedValue(new Error("network timeout"));
+        mockGitPull.mockRejectedValue(new Error("network timeout"));
 
         const { result } = renderHook(
           () => useGitActions({ agentName: "nova" }),
@@ -636,14 +485,14 @@ describe("useGitActions", () => {
         );
 
         await act(async () => {
-          await result.current.push();
+          await result.current.pull();
         });
 
         expect(mockShowToast).toHaveBeenCalledWith(
-          "Push failed: network timeout",
+          "Pull failed: network timeout",
           { type: "error" },
         );
-        expect(result.current.pushState.error).toBe("network timeout");
+        expect(result.current.pullState.error).toBe("network timeout");
       });
 
       it("handles ApiError with string body", async () => {
@@ -666,7 +515,7 @@ describe("useGitActions", () => {
 
       it("handles ApiError with no body", async () => {
         const error = new ApiError(500, "Internal Server Error");
-        mockGitSync.mockRejectedValue(error);
+        mockGitPull.mockRejectedValue(error);
 
         const { result } = renderHook(
           () => useGitActions({ agentName: "nova" }),
@@ -674,17 +523,17 @@ describe("useGitActions", () => {
         );
 
         await act(async () => {
-          await result.current.sync();
+          await result.current.pull();
         });
 
         expect(mockShowToast).toHaveBeenCalledWith(
-          "Sync failed: Internal Server Error",
+          "Pull failed: Internal Server Error",
           { type: "error" },
         );
       });
 
       it("handles non-Error thrown values", async () => {
-        mockGitPush.mockRejectedValue("some string error");
+        mockGitPull.mockRejectedValue("some string error");
 
         const { result } = renderHook(
           () => useGitActions({ agentName: "nova" }),
@@ -692,11 +541,11 @@ describe("useGitActions", () => {
         );
 
         await act(async () => {
-          await result.current.push();
+          await result.current.pull();
         });
 
         expect(mockShowToast).toHaveBeenCalledWith(
-          "Push failed: some string error",
+          "Pull failed: some string error",
           { type: "error" },
         );
       });
@@ -704,35 +553,35 @@ describe("useGitActions", () => {
   });
 
   describe("anyLoading", () => {
-    it("reflects loading state during push", async () => {
+    it("reflects loading state during pull", async () => {
       let resolvePromise: (value: unknown) => void;
       const pendingPromise = new Promise((resolve) => {
         resolvePromise = resolve;
       });
-      mockGitPush.mockReturnValue(pendingPromise);
+      mockGitPull.mockReturnValue(pendingPromise);
 
       const { result } = renderHook(
         () => useGitActions({ agentName: "nova" }),
         { wrapper },
       );
 
-      // Start push but don't await it
-      let pushPromise: Promise<void>;
+      // Start pull but don't await it
+      let pullPromise: Promise<void>;
       act(() => {
-        pushPromise = result.current.push();
+        pullPromise = result.current.pull();
       });
 
       // Should be loading now
-      expect(result.current.pushState.isLoading).toBe(true);
+      expect(result.current.pullState.isLoading).toBe(true);
       expect(result.current.anyLoading).toBe(true);
 
       // Resolve and await
       await act(async () => {
         resolvePromise!({ success: true, message: "Done" });
-        await pushPromise!;
+        await pullPromise!;
       });
 
-      expect(result.current.pushState.isLoading).toBe(false);
+      expect(result.current.pullState.isLoading).toBe(false);
       expect(result.current.anyLoading).toBe(false);
     });
   });

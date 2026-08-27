@@ -300,16 +300,7 @@ func (s *stubAgentService) GetLog(context.Context, string, string, int, int64) (
 func (s *stubAgentService) GetDiffStat(context.Context, string, string) (*service.AgentDiffStatResult, error) {
 	return nil, service.ErrNotImplemented("not implemented")
 }
-func (s *stubAgentService) GitPush(context.Context, string, string, string) (*ops.GitPushResult, error) {
-	return nil, service.ErrNotImplemented("not implemented")
-}
-func (s *stubAgentService) GitPushAll(context.Context, string) (*service.GitPushAllResult, error) {
-	return nil, service.ErrNotImplemented("not implemented")
-}
 func (s *stubAgentService) GitPull(context.Context, string, string, string) (*ops.GitPullResult, error) {
-	return nil, service.ErrNotImplemented("not implemented")
-}
-func (s *stubAgentService) GitSync(context.Context, string, string) (*service.GitSyncResult, error) {
 	return nil, service.ErrNotImplemented("not implemented")
 }
 func (s *stubAgentService) CreatePR(context.Context, string, string, string) (*ops.GitPRResult, error) {

@@ -205,7 +205,8 @@ the planner is cheaper to re-engage than a human, and 8b is non-terminal
   - If the dry-run succeeds, publish:
     `loom stack publish <stack-id> --repo-path <repo-path> --json`
   - Do not use direct integration or direct branch pushes as the completion path.
-- Run 'loom data close <id> --reason "Completed with tests and code review"'
+- Move the published task to review; it must remain open until its PR is merged:
+  `loom data update <id> --status review`
 - Signal completion: loom complete
 
 ### CRITICAL: STOP

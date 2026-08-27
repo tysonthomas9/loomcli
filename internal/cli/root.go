@@ -72,7 +72,7 @@ COMMANDS
   push         Publish one worktree feature branch through git
   merge        Merge a GitHub pull request through gh
   pull         Pull integration branch into worktrees with AI conflict resolution
-  sync         Full sync: push all completed work, then pull into all worktrees
+  sync         Pull protected default branches into all worktrees
   reset        Hard reset worktrees to a specific branch
   list         List all agents and their status
 
@@ -88,9 +88,9 @@ EXAMPLES
   loom task falcon --auto       # Continuous implementation mode
   loom lead                     # Interactive backlog management
   loom monitor                  # Watch agent progress
-  loom push --all               # Push all worktrees to main
+  loom push falcon              # Publish falcon's feature branch
   loom pull --all               # Pull main into all worktrees
-  loom sync                     # Full sync: push all + pull all`,
+  loom sync                     # Pull protected defaults into all worktrees`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if v, _ := cmd.Flags().GetBool("version"); v {
 			fmt.Printf("loom version %s (%s)\n", Version, Build)

@@ -59,7 +59,7 @@ func TestRunWorkspaceSync_MultipleWorkspaces(t *testing.T) {
 	}
 	t.Cleanup(func() { defaultDeps.Agent = origAgent })
 
-	runWorkspaceSync(defaultDeps, false, true, "")
+	runWorkspaceSync(defaultDeps, "")
 }
 
 func TestRunWorkspaceSync_SpecificWorkspaceFlag(t *testing.T) {
@@ -112,7 +112,7 @@ func TestRunWorkspaceSync_SpecificWorkspaceFlag(t *testing.T) {
 	}
 	t.Cleanup(func() { defaultDeps.Agent = origAgent })
 
-	runWorkspaceSync(defaultDeps, false, true, "ws-a")
+	runWorkspaceSync(defaultDeps, "ws-a")
 }
 
 func TestRunWorkspaceSync_UnknownWorkspace(t *testing.T) {
@@ -123,7 +123,7 @@ func TestRunWorkspaceSync_UnknownWorkspace(t *testing.T) {
 		os.Setenv("LOOM_CONFIG_DIR", configDir)
 		defaultResolver = nil
 
-		runWorkspaceSync(defaultDeps, false, false, "nonexistent")
+		runWorkspaceSync(defaultDeps, "nonexistent")
 		return
 	}
 
@@ -204,5 +204,5 @@ func TestRunFullSync_DispatchesToWorkspaceMode(t *testing.T) {
 	t.Cleanup(func() { defaultDeps.Agent = origAgent })
 
 	// Call runWorkspaceSync - should dispatch to workspace mode since config exists
-	runWorkspaceSync(defaultDeps, false, true, "")
+	runWorkspaceSync(defaultDeps, "")
 }

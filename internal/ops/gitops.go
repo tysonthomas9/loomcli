@@ -17,9 +17,6 @@ type GitOps interface {
 	// workspaceID scopes discovery to a specific workspace (empty = default).
 	ResolveAgentWorktree(workspaceID, name string) (*AgentWorktree, error)
 
-	// Push merges the source branch into the target branch (loom push semantics).
-	Push(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error)
-
 	// Pull merges the source branch into the worktree's current branch.
 	Pull(worktreePath, currentBranch, sourceBranch, remote string) (*GitPullResult, error)
 
@@ -77,14 +74,6 @@ type AgentWorktree struct {
 	Remote        string // git remote name (empty = "origin")
 	RepoName      string // workspace repo name
 	IsWorkspace   bool   // true if workspace mode
-}
-
-// GitPushResult contains the result of a push operation.
-type GitPushResult struct {
-	Success         bool     `json:"success"`
-	Message         string   `json:"message"`
-	AlreadyUpToDate bool     `json:"already_up_to_date"`
-	ConflictedFiles []string `json:"conflicted_files,omitempty"`
 }
 
 // GitPullResult contains the result of a pull operation.

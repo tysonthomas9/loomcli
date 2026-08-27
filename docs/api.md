@@ -2592,7 +2592,7 @@ WebSocket endpoint for live agent terminal relay (tmux-backed). Supports bidirec
 
 ## Git Operations
 
-Workspace-scoped REST API for git workflow operations on agent worktrees. These endpoints allow the frontend to push changes, pull updates, synchronize branches, create GitHub PRs, hard-reset worktrees, query git status, update target branches, push all worktrees, and retrieve issue-level diff statistics.
+Workspace-scoped REST API for retained git workflow operations on agent worktrees. These endpoints allow the frontend to pull updates, create GitHub PRs, hard-reset worktrees, query git status, update target branches, and retrieve issue-level diff statistics. Feature-branch publication and merges are CLI workflows; the removed direct-integration push and sync endpoints have no compatibility handlers.
 
 All endpoints are registered on `wsMux` under `/api/workspaces/{ws}/...` behind `WorkspaceMiddleware`. They are **conditionally available** — when `gitOps` is nil (no worktree configuration), none of these endpoints exist and requests fall through to the SPA catch-all.
 
@@ -2600,7 +2600,7 @@ All endpoints are registered on `wsMux` under `/api/workspaces/{ws}/...` behind 
 
 ### Cross-Cutting: Workspace Routing
 
-All 9 endpoints are wrapped by `WorkspaceMiddleware`, which:
+All 6 endpoints are wrapped by `WorkspaceMiddleware`, which:
 
 1. Extracts `{ws}` from the URL path via `r.PathValue("ws")`
 2. Validates non-empty (returns `400` if empty)
@@ -2616,7 +2616,7 @@ Authentication (`401`) is enforced by a separate auth middleware applied at the 
 
 ### Cross-Cutting: Agent Resolution
 
-7 of 9 endpoints use a shared `resolveAgent()` helper that:
+5 of 6 endpoints use a shared `resolveAgent()` helper that:
 
 1. Extracts `{name}` from the URL path
 2. Validates against regex `^[a-zA-Z0-9_-]+$`
@@ -2633,101 +2633,7 @@ Authentication (`401`) is enforced by a separate auth middleware applied at the 
 
 Branch and ref parameters are validated against regex `^[a-zA-Z0-9][a-zA-Z0-9_./-]*$` and must not contain `..` (path traversal prevention). Names starting with `-` are rejected (command injection prevention).
 
-### `POST /api/workspaces/{ws}/git/push-all`
 
-Push all agent worktree branches in this workspace to their target branches.
-
-- **Auth:** Required
-- **Path params:**
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `ws` | string | Workspace ID (UUID) |
-
-- **Request Body:** None
-- **Response:** `200 OK`
-
-```json
-{
-  "results": [
-    {
-      "name": "drift",
-      "success": true,
-      "message": "pushed"
-    },
-    {
-      "name": "spark",
-      "success": true,
-      "message": "already up to date"
-    },
-    {
-      "name": "blaze",
-      "success": false,
-      "error": "merge conflict in file.go"
-    }
-  ],
-  "pushed": 1,
-  "failed": 1
-}
-```
-
-- Each result has `name` + (`success` + `message`) or (`error`). The `success` field defaults to false when `error` is present.
-- `"already up to date"` entries have `success: true` but do NOT increment the `pushed` counter.
-- `pushed`/`failed` counts reflect actual push successes and failures only.
-- Uses `wt.Remote` if set, falls back to `"origin"`.
-
-- **Errors:**
-  - `500` — listing worktrees failed (`{"error": "listing worktrees: ..."}`)
-
-- **Note:** Non-atomic — partial failures are reported per-worktree. Returns `200` with `{"results": [], "pushed": 0, "failed": 0}` if no worktrees exist.
-
-### `POST /api/workspaces/{ws}/agents/{name}/git/push`
-
-Merge the agent's worktree branch INTO the target branch (loom push semantics — not `git push`).
-
-- **Auth:** Required
-- **Path params:**
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `ws` | string | Workspace ID (UUID) |
-| `name` | string | Agent name (validated: `^[a-zA-Z0-9_-]+$`) |
-
-- **Request Body** (optional):
-
-```json
-{
-  "target": "branch-name"
-}
-```
-
-`target` defaults to the worktree's `DefaultBranch` if empty or omitted. Validated against git ref regex.
-
-- **Response:** `200 OK`
-
-```json
-{
-  "success": true,
-  "message": "merged agent/drift into v2",
-  "already_up_to_date": false
-}
-```
-
-- **Response:** `409 Conflict` (merge conflicts)
-
-```json
-{
-  "success": false,
-  "message": "merge conflicts detected",
-  "already_up_to_date": false,
-  "conflicted_files": ["path/to/file.go"]
-}
-```
-
-- **Errors:**
-  - `400` — missing/invalid agent name, invalid target branch name
-  - `404` — agent worktree not found in this workspace
-  - `502` — git operation failed
 
 ### `POST /api/workspaces/{ws}/agents/{name}/git/pull`
 
@@ -2778,75 +2684,6 @@ Merge the source branch INTO the agent's current worktree branch.
   - `500` — getting current branch failed (`{"error": "getting current branch: ..."}`)
   - `502` — git operation failed
 
-### `POST /api/workspaces/{ws}/agents/{name}/git/sync`
-
-Two-phase operation: first pushes worktree branch to default target, then pulls from target back into worktree. If push fails with conflicts, pull is NOT attempted.
-
-- **Auth:** Required
-- **Path params:**
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `ws` | string | Workspace ID (UUID) |
-| `name` | string | Agent name (validated: `^[a-zA-Z0-9_-]+$`) |
-
-- **Request Body:** None
-- **Response:** `200 OK` (both succeed)
-
-```json
-{
-  "push_result": {
-    "success": true,
-    "message": "merged agent/drift into v2",
-    "already_up_to_date": false
-  },
-  "pull_result": {
-    "success": true,
-    "message": "merged v2 into agent/drift",
-    "already_up_to_date": false
-  }
-}
-```
-
-- **Response:** `409 Conflict` (push conflicts — pull not attempted)
-
-```json
-{
-  "push_result": {
-    "success": false,
-    "message": "merge conflicts detected",
-    "already_up_to_date": false,
-    "conflicted_files": ["file.go"]
-  },
-  "pull_result": null
-}
-```
-
-`pull_result` is null when push has conflicts.
-
-- **Response:** `409 Conflict` (push succeeds, pull conflicts)
-
-```json
-{
-  "push_result": {
-    "success": true,
-    "message": "merged agent/drift into v2",
-    "already_up_to_date": false
-  },
-  "pull_result": {
-    "success": false,
-    "message": "merge conflicts detected",
-    "already_up_to_date": false,
-    "conflicted_files": ["file.go"]
-  }
-}
-```
-
-- **Errors:**
-  - `400` — missing/invalid agent name
-  - `404` — agent worktree not found in this workspace
-  - `500` — getting current branch failed (`{"error": "getting current branch: ..."}`)
-  - `502` — push or pull git operation failed
 
 ### `POST /api/workspaces/{ws}/agents/{name}/git/pr`
 

@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	gh "github.com/tysonthomas9/loomcli/internal/github"
 )
 
 var prNumberOrURL = regexp.MustCompile(`^(?:[0-9]+|https://github\.com/[^/]+/[^/]+/pull/[0-9]+)$`)
@@ -48,6 +50,12 @@ func runMerge(cmd *cobra.Command, args []string) error {
 	}
 	deps := cli.GetDeps(cmd)
 	if err := checkGhInstalled(deps); err != nil {
+		return err
+	}
+	if err := gh.PRProtection(cmd.Context(), func(_ context.Context, name string, args ...string) (string, string, error) {
+		result := deps.Exec.Run(".", name, args...)
+		return result.Stdout, result.Stderr, result.Err
+	}, args[0]); err != nil {
 		return err
 	}
 	method := "--squash"

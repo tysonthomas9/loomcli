@@ -146,66 +146,6 @@ func (s *agentServiceImpl) GetDiffStat(_ context.Context, wsID, agentName string
 	}, nil
 }
 
-func (s *agentServiceImpl) GitPush(_ context.Context, wsID, agentName, target string) (*ops.GitPushResult, error) {
-	wt, err := s.resolveAgentWorktree(wsID, agentName)
-	if err != nil {
-		return nil, err
-	}
-
-	if target == "" {
-		target = wt.DefaultBranch
-	}
-
-	result, err := s.gitOps.Push(wt.Path, wt.Branch, target, wt.Remote)
-	if err != nil {
-		return nil, err
-	}
-	return result, nil
-}
-
-func (s *agentServiceImpl) GitPushAll(_ context.Context, wsID string) (*service.GitPushAllResult, error) {
-	worktrees, err := s.gitOps.ListAgentWorktrees(wsID)
-	if err != nil {
-		return nil, fmt.Errorf("listing worktrees: %w", err)
-	}
-
-	var results []service.GitPushAllWorktreeResult
-	pushed, failed := 0, 0
-
-	for _, wt := range worktrees {
-		r, ok := s.pushOneWorktree(wt)
-		results = append(results, r)
-		switch {
-		case ok:
-			pushed++
-		case r.Error != "":
-			failed++
-		}
-	}
-
-	return &service.GitPushAllResult{Results: results, Pushed: pushed, Failed: failed}, nil
-}
-
-// pushOneWorktree pushes a single worktree and returns the result.
-// The bool indicates whether the push was a successful new push.
-func (s *agentServiceImpl) pushOneWorktree(wt ops.AgentWorktree) (service.GitPushAllWorktreeResult, bool) {
-	remote := wt.Remote
-	if remote == "" {
-		remote = "origin"
-	}
-	result, pushErr := s.gitOps.Push(wt.Path, wt.Branch, wt.DefaultBranch, remote)
-	if pushErr != nil {
-		return service.GitPushAllWorktreeResult{Name: wt.Name, Error: pushErr.Error()}, false
-	}
-	if result.AlreadyUpToDate {
-		return service.GitPushAllWorktreeResult{Name: wt.Name, Success: true, Message: "already up to date"}, false
-	}
-	if !result.Success {
-		return service.GitPushAllWorktreeResult{Name: wt.Name, Error: result.Message}, false
-	}
-	return service.GitPushAllWorktreeResult{Name: wt.Name, Success: true, Message: result.Message}, true
-}
-
 func (s *agentServiceImpl) GitPull(_ context.Context, wsID, agentName, source string) (*ops.GitPullResult, error) {
 	wt, err := s.resolveAgentWorktree(wsID, agentName)
 	if err != nil {
@@ -226,40 +166,6 @@ func (s *agentServiceImpl) GitPull(_ context.Context, wsID, agentName, source st
 		return nil, err
 	}
 	return result, nil
-}
-
-func (s *agentServiceImpl) GitSync(_ context.Context, wsID, agentName string) (*service.GitSyncResult, error) {
-	wt, err := s.resolveAgentWorktree(wsID, agentName)
-	if err != nil {
-		return nil, err
-	}
-
-	target := wt.DefaultBranch
-
-	pushResult, err := s.gitOps.Push(wt.Path, wt.Branch, target, wt.Remote)
-	if err != nil {
-		return nil, fmt.Errorf("push failed: %w", err)
-	}
-
-	// If push resulted in conflicts, return immediately with partial result
-	if !pushResult.Success && len(pushResult.ConflictedFiles) > 0 {
-		return &service.GitSyncResult{PushResult: pushResult}, nil
-	}
-
-	currentBranch, err := s.gitOps.GetCurrentBranch(wt.Path)
-	if err != nil {
-		return nil, fmt.Errorf("getting current branch: %w", err)
-	}
-
-	pullResult, err := s.gitOps.Pull(wt.Path, currentBranch, target, wt.Remote)
-	if err != nil {
-		return nil, fmt.Errorf("pull failed: %w", err)
-	}
-
-	return &service.GitSyncResult{
-		PushResult: pushResult,
-		PullResult: pullResult,
-	}, nil
 }
 
 func (s *agentServiceImpl) ListPullRequests(_ context.Context, wsID, state string) (*ops.GitPullRequestList, error) {

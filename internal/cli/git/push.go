@@ -49,12 +49,9 @@ func runPush(cmd *cobra.Command, args []string) error {
 	if wt.Repo == nil {
 		return errors.New("feature publication requires a repository-backed worktree")
 	}
-	branch := strings.TrimSpace(wt.Branch)
-	if branch == "" {
-		return errors.New("cannot publish a detached worktree")
-	}
-	if branch == cli.DefaultBranchForWorktree(wt) {
-		return fmt.Errorf("refusing to publish default branch %q", branch)
+	branch, err := featureBranch(wt)
+	if err != nil {
+		return err
 	}
 	remote, err := resolveFeatureRemote(deps, wt)
 	if err != nil {
@@ -68,6 +65,17 @@ func runPush(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("Published %s to %s/%s\n", branch, remote, branch)
 	return nil
+}
+
+func featureBranch(wt cli.WorktreeInfo) (string, error) {
+	branch := strings.TrimSpace(wt.Branch)
+	if branch == "" {
+		return "", errors.New("cannot publish a detached worktree")
+	}
+	if branch == cli.DefaultBranchForWorktree(wt) {
+		return "", fmt.Errorf("refusing to publish default branch %q", branch)
+	}
+	return branch, nil
 }
 
 func resolveFeatureWorktree(worktrees []cli.WorktreeInfo, name, repo string) (cli.WorktreeInfo, error) {
