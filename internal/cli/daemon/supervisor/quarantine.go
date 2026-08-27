@@ -125,13 +125,25 @@ type taskFailureRecord struct {
 
 	LastUpdated time.Time `json:"last_updated"` // touched on create/increment/latch/write-attempt — the eviction key
 
-	// Field-delta progress baseline (covers plan-role agents, whose artifact
-	// is a fleet-db design/notes write rather than a commit). Populated by
-	// the first successful issue GET; comparisons apply ONLY when known —
-	// "unknown" is never progress, and zero-value hashes are never compared.
+	// Field-delta progress baseline (covers agents whose artifact is not a
+	// worktree commit: a plan role writes design/notes, and the critic /
+	// integrator / tester / decomposer roles write a COMMENT, a LABEL or a
+	// PR). Populated by the first successful issue GET; comparisons apply
+	// ONLY when known — "unknown" is never progress, and zero-value
+	// baselines are never compared.
+	//
+	// Status and UpdatedAt are deliberately NOT tracked: the daemon itself
+	// drives open -> in_progress -> open on every pick and recovery, and any
+	// write bumps UpdatedAt, so either would report progress on every cycle
+	// and disable the breaker outright.
 	BaselineKnown      bool   `json:"baseline_known,omitempty"`
 	BaselineDesignHash uint64 `json:"baseline_design_hash,omitempty"`
 	BaselineNotesHash  uint64 `json:"baseline_notes_hash,omitempty"`
+	// BaselineMaxCommentID is monotone (ids are assigned increasing), so it
+	// is compared with > and never !=: a DELETED comment lowers the max and
+	// must not read as progress.
+	BaselineMaxCommentID int64  `json:"baseline_max_comment_id,omitempty"`
+	BaselineLabelsHash   uint64 `json:"baseline_labels_hash,omitempty"` // FNV-1a over the sorted label set
 
 	LastKillReason  string `json:"last_kill_reason,omitempty"`
 	QuarantineKills int    `json:"quarantine_kills,omitempty"` // Count captured at latch time (display-only; Count itself zeroes as the re-arm baseline)
@@ -351,10 +363,10 @@ func (s *Supervisor) recordTaskExitForQuarantine(ap *AgentProcess, exitCode int)
 	if !agentpolicy.QuarantineEligible(snap.outcome) {
 		return
 	}
-	designHash, notesHash, baselineKnown := s.fetchIssueBaseline(taskID)
-	count, progressed := q.recordEligibleKill(taskID, snap.event, designHash, notesHash, baselineKnown)
+	base, baselineKnown := s.fetchIssueBaseline(taskID)
+	count, progressed := q.recordEligibleKill(taskID, snap.event, base, baselineKnown)
 	if progressed {
-		slog.Info("task progressed between kills (design/notes delta), dropping quarantine record",
+		slog.Info("task progressed between kills (design/notes/comment/label delta), dropping quarantine record",
 			"task", taskID, "agent", ap.Entry.Worktree)
 		return
 	}
@@ -541,26 +553,84 @@ func commitProgressed(worktreePath, beforeRef string) bool {
 	return head != "" && head != beforeRef
 }
 
-// fetchIssueBaseline GETs the issue once per eligible kill and returns
-// FNV-1a hashes of its Design and Notes fields. ok=false (no backend, GET
-// failed) means "unknown": the increment proceeds regardless, and the caller
-// never compares against zero-value hashes.
-func (s *Supervisor) fetchIssueBaseline(taskID string) (designHash, notesHash uint64, ok bool) {
+// issueBaseline is the field-delta progress fingerprint of one issue, read
+// off a single Get response — every component comes from data the GET already
+// returned, so widening it costs no extra network call.
+type issueBaseline struct {
+	designHash   uint64
+	notesHash    uint64
+	maxCommentID int64
+	labelsHash   uint64
+}
+
+// progressedFrom reports whether this (freshly read) baseline shows movement
+// past the recorded one. Hashes compare by inequality; the comment id compares
+// by > because it is monotone and a deletion must not read as progress.
+func (b issueBaseline) progressedFrom(prev issueBaseline) bool {
+	return b.designHash != prev.designHash ||
+		b.notesHash != prev.notesHash ||
+		b.maxCommentID > prev.maxCommentID ||
+		b.labelsHash != prev.labelsHash
+}
+
+// issueBaselineOf fingerprints a Get response. Comments and Labels ride on the
+// same IssueDetailData the design/notes hashes already came from.
+func issueBaselineOf(issue *backend.IssueDetailData) issueBaseline {
+	return issueBaseline{
+		designHash:   hashIssueField(issue.Design),
+		notesHash:    hashIssueField(issue.Notes),
+		maxCommentID: maxCommentID(issue.Comments),
+		labelsHash:   hashLabelSet(issue.Labels),
+	}
+}
+
+// fetchIssueBaseline GETs the issue once per eligible kill and fingerprints
+// it. ok=false (no backend, GET failed) means "unknown": the increment
+// proceeds regardless, and the caller never compares against a zero baseline.
+func (s *Supervisor) fetchIssueBaseline(taskID string) (base issueBaseline, ok bool) {
 	if s.IssueBackend == nil {
-		return 0, 0, false
+		return issueBaseline{}, false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), quarantineWriteTimeout)
 	defer cancel()
 	issue, err := s.IssueBackend.Get(ctx, taskID)
 	if err != nil || issue == nil {
-		return 0, 0, false
+		return issueBaseline{}, false
 	}
-	return hashIssueField(issue.Design), hashIssueField(issue.Notes), true
+	return issueBaselineOf(issue), true
 }
 
 func hashIssueField(v string) uint64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(v))
+	return h.Sum64()
+}
+
+// maxCommentID is the highest comment id on the issue (0 when there are
+// none). fleet-db assigns comment ids monotonically, so this is edit-proof:
+// editing a comment leaves the max alone, and only a NEW comment raises it.
+func maxCommentID(comments []backend.CommentData) int64 {
+	var highest int64
+	for _, c := range comments {
+		if c.ID > highest {
+			highest = c.ID
+		}
+	}
+	return highest
+}
+
+// hashLabelSet is FNV-1a over the sorted, NUL-delimited label set — order
+// independent (label order is not meaningful) and unambiguous across
+// concatenations.
+func hashLabelSet(labels []string) uint64 {
+	sorted := make([]string, len(labels))
+	copy(sorted, labels)
+	sort.Strings(sorted)
+	h := fnv.New64a()
+	for _, l := range sorted {
+		_, _ = h.Write([]byte(l))
+		_, _ = h.Write([]byte{0})
+	}
 	return h.Sum64()
 }
 
@@ -573,10 +643,13 @@ func (q *taskQuarantine) evict(taskID string) {
 }
 
 // recordEligibleKill folds one quarantine-eligible kill into the ledger and
-// returns the record's new count. Field-delta progress (a changed
-// Design/Notes hash against a known baseline) evicts the record instead of
-// incrementing — the task IS moving, just not via commits.
-func (q *taskQuarantine) recordEligibleKill(taskID string, ev killEvent, designHash, notesHash uint64, baselineKnown bool) (count int, progressed bool) {
+// returns the record's new count. Field-delta progress against a known
+// baseline — a changed Design/Notes hash, a NEW comment, or a changed label
+// set — evicts the record instead of incrementing: the task IS moving, just
+// not via commits. The comment and label arms are what make the review roles
+// visible; a critic that posted its verdict and was then reaped used to
+// register as a no-progress kill on the task it had just advanced.
+func (q *taskQuarantine) recordEligibleKill(taskID string, ev killEvent, base issueBaseline, baselineKnown bool) (count int, progressed bool) {
 	// LIFO: the unlock runs first, so the save sees a consistent ledger and
 	// never re-enters the mutex while it is held.
 	defer q.persistAfter()
@@ -584,8 +657,7 @@ func (q *taskQuarantine) recordEligibleKill(taskID string, ev killEvent, designH
 	defer q.mu.Unlock()
 
 	rec := q.rec[taskID]
-	if rec != nil && rec.BaselineKnown && baselineKnown &&
-		(designHash != rec.BaselineDesignHash || notesHash != rec.BaselineNotesHash) {
+	if rec != nil && rec.BaselineKnown && baselineKnown && base.progressedFrom(rec.baseline()) {
 		delete(q.rec, taskID)
 		return 0, true
 	}
@@ -596,10 +668,8 @@ func (q *taskQuarantine) recordEligibleKill(taskID string, ev killEvent, designH
 	}
 	if baselineKnown && !rec.BaselineKnown {
 		// First successful GET establishes the baseline; never inferred as
-		// progress (zero-value hashes are never compared).
-		rec.BaselineKnown = true
-		rec.BaselineDesignHash = designHash
-		rec.BaselineNotesHash = notesHash
+		// progress (zero-value baselines are never compared).
+		rec.setBaseline(base)
 	}
 	if !rec.QuarantinedAt.IsZero() {
 		// Latched record seeing a fresh kill: the task was released (human
@@ -648,12 +718,11 @@ func (s *Supervisor) sweepQuarantineDue(ap *AgentProcess) {
 // dueTask is the snapshot of a record meeting the sweep predicate, taken
 // under the ledger mutex so the network calls run without holding it.
 type dueTask struct {
-	taskID             string
-	count              int
-	kills              []killEvent
-	baselineKnown      bool
-	baselineDesignHash uint64
-	baselineNotesHash  uint64
+	taskID        string
+	count         int
+	kills         []killEvent
+	baselineKnown bool
+	baseline      issueBaseline
 }
 
 // takeDue collects every record meeting the sweep predicate and marks it
@@ -672,12 +741,11 @@ func (q *taskQuarantine) takeDue(threshold int) []dueTask {
 		kills := make([]killEvent, len(rec.Kills))
 		copy(kills, rec.Kills)
 		due = append(due, dueTask{
-			taskID:             id,
-			count:              rec.Count,
-			kills:              kills,
-			baselineKnown:      rec.BaselineKnown,
-			baselineDesignHash: rec.BaselineDesignHash,
-			baselineNotesHash:  rec.BaselineNotesHash,
+			taskID:        id,
+			count:         rec.Count,
+			kills:         kills,
+			baselineKnown: rec.BaselineKnown,
+			baseline:      rec.baseline(),
 		})
 	}
 	return due
@@ -731,9 +799,9 @@ func (s *Supervisor) checkQuarantineTarget(ctx context.Context, due dueTask) qua
 	}
 	switch issue.Status {
 	case "open":
-		if due.baselineKnown &&
-			(hashIssueField(issue.Design) != due.baselineDesignHash ||
-				hashIssueField(issue.Notes) != due.baselineNotesHash) {
+		// Same widening as the record hook, so the two comparisons cannot
+		// disagree about what counts as progress.
+		if due.baselineKnown && issueBaselineOf(issue).progressedFrom(due.baseline) {
 			// Progressed since the spiral was recorded (a stale retry after
 			// a failed write): release it instead of blocking. Commit
 			// progress cannot be stale here — every run's exit passes the
@@ -807,7 +875,7 @@ func (s *Supervisor) postQuarantineComment(ctx context.Context, ap *AgentProcess
 func formatKillTimeline(taskID string, threshold, count int, kills []killEvent) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "**Task quarantined by loom daemon** -- %d consecutive no-progress kills.\n\n", count)
-	fmt.Fprintf(&b, "Claimed and killed %dx with no commit or design/notes progress between attempts\n", count)
+	fmt.Fprintf(&b, "Claimed and killed %dx with no commit, design, notes, comment or label progress\n", count)
 	b.WriteString("(backend stall -> watchdog/ownership kill -> reset -> re-pick -> identical freeze).\n")
 	b.WriteString("Set to **blocked** and unassigned to stop the boomerang.\n\n")
 	b.WriteString("| # | time (UTC) | agent | kill | class | exit | fleet session | claude session | note |\n")
@@ -894,9 +962,47 @@ func (q *taskQuarantine) latch(taskID string, daemonWrote bool) {
 		rec.DaemonWrote = daemonWrote
 		rec.WriteFailed = false
 		rec.LastUpdated = time.Now()
+		// Clear the baseline, do not refresh it. writeQuarantine posts the
+		// kill-timeline comment (and adds the quarantine label) right before
+		// this latch, so a FROZEN baseline would let the daemon read its own
+		// write as task progress on the next kill. Clearing is strictly safer
+		// than refreshing: unknown is never progress, so the next kill simply
+		// re-establishes it.
+		rec.clearBaseline()
 	}
 	q.mu.Unlock()
 	q.persistAfter()
+}
+
+// baseline reads the record's four baseline components back out. Caller holds
+// q.mu.
+func (rec *taskFailureRecord) baseline() issueBaseline {
+	return issueBaseline{
+		designHash:   rec.BaselineDesignHash,
+		notesHash:    rec.BaselineNotesHash,
+		maxCommentID: rec.BaselineMaxCommentID,
+		labelsHash:   rec.BaselineLabelsHash,
+	}
+}
+
+// setBaseline anchors all four components together — they are only ever
+// known or unknown as a set. Caller holds q.mu.
+func (rec *taskFailureRecord) setBaseline(b issueBaseline) {
+	rec.BaselineKnown = true
+	rec.BaselineDesignHash = b.designHash
+	rec.BaselineNotesHash = b.notesHash
+	rec.BaselineMaxCommentID = b.maxCommentID
+	rec.BaselineLabelsHash = b.labelsHash
+}
+
+// clearBaseline returns the record to "unknown", so the next successful GET
+// re-establishes it. Caller holds q.mu.
+func (rec *taskFailureRecord) clearBaseline() {
+	rec.BaselineKnown = false
+	rec.BaselineDesignHash = 0
+	rec.BaselineNotesHash = 0
+	rec.BaselineMaxCommentID = 0
+	rec.BaselineLabelsHash = 0
 }
 
 // evictOldestLocked makes room when the ledger is at capacity by dropping the
