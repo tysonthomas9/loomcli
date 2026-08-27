@@ -1,8 +1,7 @@
 # Live skill sync research: making skill edits visible to all agents immediately
 
 Status: research notes (feat/skills-crud-v1 worktrees; loomcli on v5, fleet-db
-on main). Follows the `docs/design/` date-prefixed convention like
-`2026-08-13-skills-crud-research.md`.
+on main). Follows the `docs/design/` date-prefixed convention.
 
 Question under research (Tyson, 2026-08-14): newly installed/edited Skills
 should show up IMMEDIATELY in ALL agents in the loom system, instead of the
@@ -261,9 +260,8 @@ claim should be re-tested against the codex version the fleet actually runs
 before a design bakes in "codex needs a restart." Note codex reads
 `.agents/skills/` directly (no symlink indirection — loom's canonical dir),
 so the §5.1 symlink-watch caveat does not apply to codex. The
-`.agents/skills` convention itself is cross-agent (Codex, Cursor, OpenCode,
-Amp, Gemini CLI, Copilot read it natively —
-`docs/design/2026-08-13-vercel-skills-research.md:85,140-145`).
+`.agents/skills` convention itself is cross-agent: Codex, Cursor, OpenCode,
+Amp, Gemini CLI, and Copilot read it natively.
 
 Net: **live file sync would plausibly reach RUNNING sessions on both major
 backends** — the opposite of what the snapshot design assumed it could rely
