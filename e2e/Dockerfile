@@ -7,7 +7,7 @@
 #         podman run loomcli-e2e run_test.sh --phase smoke     # smoke only
 #         podman run loomcli-e2e run_test.sh --phase playwright # playwright only
 
-ARG GO_VERSION=1.25.6
+ARG GO_VERSION=1.26.0
 
 # ─── Stage 1: Build Go binaries ─────────────────────────────────────────────
 FROM golang:${GO_VERSION}-bookworm AS builder

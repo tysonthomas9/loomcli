@@ -10,7 +10,7 @@
 # Build:  podman build -f Dockerfile.dev -t loomcli-dev .
 # Run:    scripts/dev-container-run.sh              # port 8091 by default
 
-ARG GO_VERSION=1.25.6
+ARG GO_VERSION=1.26.0
 
 # ── Stage 1: Build loom binary ──
 FROM golang:${GO_VERSION}-bookworm AS builder
