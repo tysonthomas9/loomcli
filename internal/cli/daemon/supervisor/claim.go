@@ -343,6 +343,13 @@ func (s *Supervisor) releaseAssignedTaskClaim(ap *AgentProcess, taskID string) {
 // this a held fleet would write one line per agent per re-check.
 const claimHoldStillHeldLogInterval = 5 * time.Minute
 
+// claimHoldReloadInterval bounds how often ClaimHoldSnapshot re-reads
+// claim-hold.json through the injected ReloadClaimHold hook. The file is the
+// durable source of truth, so an external edit — an `rm`, or a release by a
+// process that could not reach the control socket — must take effect without a
+// daemon restart; this is how fast it does.
+const claimHoldReloadInterval = 3 * time.Second
+
 // ClaimHold is a workspace-level, explicitly-owned refusal to START new work.
 //
 // It gates the claim path ONLY: no yield file is written, no signal is sent,
@@ -433,6 +440,7 @@ func (s *Supervisor) ReleaseClaimHold(actor string, force bool) error {
 // exactly once rather than per agent per cycle.
 func (s *Supervisor) ClaimHoldSnapshot() *ClaimHold {
 	now := time.Now()
+	s.maybeReloadClaimHold(now)
 
 	s.claimHoldMu.Lock()
 	held := s.claimHold
@@ -463,6 +471,56 @@ func (s *Supervisor) ClaimHoldSnapshot() *ClaimHold {
 		}
 	}
 	return nil
+}
+
+// maybeReloadClaimHold re-reads claim-hold.json when it changed underneath this
+// process and adopts what it finds. The file is authoritative: a foreign write
+// (or deletion) wins over the in-memory hold, and the daemon's own writes are
+// filtered out by the injected hook, so they never look like an external change.
+//
+// It FAILS CLOSED. A stat or parse error keeps the in-memory hold and logs one
+// WARN — a hold is never dropped because the filesystem hiccuped. Like
+// LoadClaimHold, adoption deliberately does NOT persist: the value came from
+// the file in the first place.
+func (s *Supervisor) maybeReloadClaimHold(now time.Time) {
+	s.claimHoldMu.Lock()
+	reload := s.ReloadClaimHold
+	if reload == nil || (!s.claimHoldLastReload.IsZero() && now.Sub(s.claimHoldLastReload) < claimHoldReloadInterval) {
+		s.claimHoldMu.Unlock()
+		return
+	}
+	s.claimHoldLastReload = now
+	s.claimHoldMu.Unlock()
+
+	// File I/O deliberately outside the lock, as in SetClaimHold.
+	hold, changed, err := reload()
+	if err != nil {
+		slog.Warn("failed to reload the claim-hold file; keeping the in-memory hold", "err", err)
+		return
+	}
+	if !changed {
+		return
+	}
+
+	stored := hold.clone()
+	if !stored.Active(now) {
+		// Covers nil, Held=false and an already-expired record: a reload must
+		// never resurrect a hold the file itself says is over.
+		stored = nil
+	}
+
+	s.claimHoldMu.Lock()
+	s.claimHold = stored
+	s.claimHoldExpiryLogged = false
+	s.claimHoldLastHeldLog = time.Time{}
+	s.claimHoldMu.Unlock()
+
+	if stored == nil {
+		slog.Info("claim hold reloaded from disk", "state", "released")
+		return
+	}
+	slog.Info("claim hold reloaded from disk", "state", "held",
+		"actor", stored.Actor, "reason", stored.Reason, "expires", claimHoldExpiryLabel(stored))
 }
 
 // LoadClaimHold hydrates the in-memory hold at daemon startup. It deliberately

@@ -97,6 +97,29 @@ surviving a daemon restart is the entire point.
  "since":"2026-08-19T00:41:00Z","expires_at":"2026-08-19T01:41:00Z"}
 ```
 
+The file is **authoritative**, not just a startup seed. Every pre-flight gate
+goes through `ClaimHoldSnapshot`, which re-reads `claim-hold.json` at most once
+every **3 seconds** and adopts whatever it finds: a foreign write replaces the
+in-memory hold, and deleting the file releases it. So
+
+```sh
+rm .loom/claim-hold.json
+```
+
+lifts the gate within roughly 15s (a 3s reload plus the agent's 15s re-check)
+on a daemon that is already running, and the daemon logs one line —
+`claim hold reloaded from disk`. That is the release path for a process that
+cannot reach the control socket.
+
+The daemon's **own** writes are not treated as external changes: the store
+records the `(mtime, size)` of everything it writes, so only someone else's
+write (or an `rm`) triggers adoption. There is no watcher goroutine and no
+fsnotify — the reload rides the pre-flight path that was already reading the
+hold. Last writer wins.
+
+Adoption never resurrects an expired record, and it never re-persists: the
+value came from the file in the first place.
+
 Failure modes:
 
 - **Corrupt / unparsable file** → fail safe but bounded: treated as held by
@@ -105,6 +128,9 @@ Failure modes:
 - **Persist failure** (read-only FS, full disk) → the hold IS applied in
   memory and the operation reports `success:false`, so the operator learns it
   will not survive a restart rather than silently losing it.
+- **Reload failure** (stat or parse error) → **fails closed**: the in-memory
+  hold is kept and one WARN is logged. A hold is never dropped because the
+  filesystem hiccuped.
 - **Expiry uses the local wall clock**, so a machine sleeping past the expiry
   releases early. Accepted; the 5-minute log line makes it observable.
 
