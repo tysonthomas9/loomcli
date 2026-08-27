@@ -196,6 +196,37 @@ func TestMaterializeWritesLiveSkillCatalog(t *testing.T) {
 	}
 }
 
+func TestMaterializePreservesAngleBracketsInDescription(t *testing.T) {
+	t.Parallel()
+
+	target := t.TempDir()
+	description := "Use React's <ViewTransition> component"
+	st := materializeStore{skills: staticSkillStore{skills: []*domain.Skill{{
+		Name: "view-transitions", Scope: domain.SkillScopeWorkspace,
+		Description: description, Content: "body\n",
+	}}}}
+
+	mustMaterialize(t, st, target, "Materialize")
+
+	skillDocument, err := os.ReadFile(filepath.Join(
+		target, filepath.FromSlash(AgentsSkillsDir), "view-transitions", domain.SkillFileNameSKILLMD,
+	))
+	if err != nil {
+		t.Fatalf("read materialized SKILL.md: %v", err)
+	}
+	if !strings.Contains(string(skillDocument), "description: "+description+"\n") {
+		t.Fatalf("materialized SKILL.md did not preserve description: %q", skillDocument)
+	}
+
+	index, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(indexPath)))
+	if err != nil {
+		t.Fatalf("read INDEX.md: %v", err)
+	}
+	if !strings.Contains(string(index), "**view-transitions** — "+description+" → read") {
+		t.Fatalf("INDEX.md did not preserve description: %q", index)
+	}
+}
+
 func TestMaterializeCatalogAnnotatesShadowedSkill(t *testing.T) {
 	target := t.TempDir()
 	st := materializeStore{skills: staticSkillStore{skills: []*domain.Skill{
