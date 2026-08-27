@@ -210,6 +210,12 @@ func runDaemon(cmd *cobra.Command, args []string) {
 func runDaemonBody() int {
 	isolateProcessGroup()
 
+	// Refuse an inherited agent identity before anything else; see
+	// supervisor_env.go for what that costs when it goes unnoticed.
+	if !supervisorEnvOK() {
+		return 1
+	}
+
 	projectDir, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: cannot determine working directory: %v\n", err)
