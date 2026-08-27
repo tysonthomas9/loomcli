@@ -24,21 +24,60 @@ bash -n "$compat"
 # Releases deliberately validate Loom against FleetDB main and the exact corpus
 # revision understood by the compatibility script.
 require_fixed "$release" "uses: ./.github/workflows/skills-compatibility.yml"
+require_fixed "$release" 'loom_ref: ${{ github.sha }}'
 require_fixed "$release" "fleetdb_ref: main"
+require_fixed "$release" 'LOOMCLI_TOKEN: ${{ secrets.LOOMCLI_TOKEN }}'
+require_fixed "$release" 'FLEET_DB_TOKEN: ${{ secrets.FLEET_DB_TOKEN }}'
+if grep -Fq 'secrets: inherit' "$release"; then
+  fail "$release exposes unrelated repository secrets to the compatibility workflow"
+fi
 require_fixed "$workflow" "ref: dd089a8c752c966dee8bf0f27cb625ba193ffd9e"
+require_fixed "$workflow" 'loom_sha: ${{ steps.revisions.outputs.loom_sha }}'
+require_fixed "$workflow" 'fleetdb_sha: ${{ steps.revisions.outputs.fleetdb_sha }}'
+require_fixed "$workflow" 'corpus_sha: ${{ steps.revisions.outputs.corpus_sha }}'
+require_fixed "$workflow" 'ref: ${{ needs.resolve.outputs.loom_sha }}'
+require_fixed "$workflow" 'ref: ${{ needs.resolve.outputs.fleetdb_sha }}'
+require_fixed "$workflow" 'ref: ${{ needs.resolve.outputs.corpus_sha }}'
+require_fixed "$workflow" 'EXPECTED_LOOM_SHA: ${{ needs.resolve.outputs.loom_sha }}'
+require_fixed "$workflow" 'EXPECTED_FLEETDB_SHA: ${{ needs.resolve.outputs.fleetdb_sha }}'
+require_fixed "$workflow" 'EXPECTED_CORPUS_SHA: ${{ needs.resolve.outputs.corpus_sha }}'
+require_fixed "$workflow" 'Compatibility checkout drifted from the resolved revision pair'
+require_fixed "$workflow" 'skills-compatibility-resolved-revisions-${{ github.run_id }}-${{ github.run_attempt }}'
+require_fixed "$workflow" "if: github.repository == 'tysonthomas9/loomcli'"
+require_fixed "$workflow" 'FLEET_DB_TOKEN is required to read private FleetDB from a LoomCLI workflow'
 require_fixed "$compat" 'VERCEL_SKILLS_REF="${VERCEL_SKILLS_REF:-dd089a8c752c966dee8bf0f27cb625ba193ffd9e}"'
 require_fixed "$makefile" 'test-skills-release-compat: test-skills-release-contract'
+
+# The same corpus proof must exercise both byte-plane adapters. The S3 leg uses
+# an ephemeral, job-scoped MinIO instance and bucket; no cloud credentials or
+# persistent object-store resources are needed.
+require_fixed "$workflow" 'storage: [local, s3]'
+require_fixed "$workflow" 'name: LoomCLI / FleetDB compatibility (${{ matrix.storage }})'
+require_fixed "$workflow" 'FLEET_WORKSPACE_FILE_STORE: ${{ matrix.storage }}'
+require_fixed "$workflow" 'FLEET_WORKSPACE_FILE_TOKEN_SECRET='
+require_fixed "$workflow" 'FLEET_RATE_LIMIT_ENABLED=false'
+require_fixed "$workflow" 'quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e'
+require_fixed "$workflow" 'quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727'
+require_fixed "$workflow" 'curl --fail --silent --show-error http://127.0.0.1:9000/minio/health/ready'
+require_fixed "$workflow" 'FLEET_WORKSPACE_FILE_S3_PATH_STYLE=true'
+require_fixed "$workflow" 'FLEET_WORKSPACE_FILE_S3_ENDPOINT=http://127.0.0.1:9000'
+require_fixed "$workflow" 'if: always() && matrix.storage == '\''s3'\'''
+require_fixed "$workflow" 'docker logs "$MINIO_CONTAINER"'
+require_fixed "$workflow" 'make test-skills-release-compat 2>&1 | tee "../skills-compatibility-$STORAGE_MODE.log"'
+require_fixed "$workflow" 'skills-compatibility-${{ matrix.storage }}-revisions-${{ github.run_id }}-${{ github.run_attempt }}'
 
 # The release log must identify every input to the compatibility result.
 require_fixed "$compat" 'Compatibility revisions: loomcli=$loom_sha fleetdb=$fleet_db_sha vercel_skills=$actual_vercel_ref'
 
 # deploy-to-vercel is a supported corpus member with exactly three bundled
-# files. Archive.zip receives explicit binary integrity checks in addition to
-# the whole-bundle byte comparison.
+# files. The complete imported SKILL.md and Archive.zip receive explicit byte
+# integrity checks in addition to the whole-bundle comparison.
 require_fixed "$compat" 'import_ok deploy-to-vercel'
 require_fixed "$compat" 'persisted skill count is $persisted_count, want 9'
 require_fixed "$compat" 'compare_skill deploy-to-vercel deploy-to-vercel 3'
 require_fixed "$compat" 'verify_binary_file deploy-to-vercel Archive.zip'
+require_fixed "$compat" 'cmp -s "$source_dir/SKILL.md" "$target_dir/SKILL.md"'
+require_fixed "$compat" 'SKILL.md byte mismatch'
 require_fixed "$compat" 'source size=$source_size sha256=$source_hash'
 require_fixed "$compat" 'materialized size=$target_size sha256=$target_hash'
 require_fixed "$compat" 'cmp -s "$source_file" "$target_file"'
