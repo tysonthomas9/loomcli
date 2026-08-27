@@ -69,7 +69,8 @@ COMMANDS
   lead         Interactive mode for reviewing plans and managing backlog
   monitor      Dashboard showing agent status and task progress
   recover      Recover agent from error state (clear stale locks, reset tasks)
-  push         Push worktree branches to target with AI conflict resolution
+  push         Publish one worktree feature branch through git
+  merge        Merge a GitHub pull request through gh
   pull         Pull integration branch into worktrees with AI conflict resolution
   sync         Full sync: push all completed work, then pull into all worktrees
   reset        Hard reset worktrees to a specific branch
@@ -79,7 +80,7 @@ GLOBAL FLAGS
       --backend          AI backend CLI (codex, claude, opencode). Env: LOOM_BACKEND
 
 ENVIRONMENT VARIABLES
-  LOOM_DEFAULT_BRANCH    Default integration branch (default: main)
+  LOOM_DEFAULT_BRANCH    Default protected branch (default: main)
   LOOM_BACKEND           AI backend CLI to use (default: codex)
 
 EXAMPLES

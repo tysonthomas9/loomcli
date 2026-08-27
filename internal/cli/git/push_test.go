@@ -7,79 +7,24 @@ import (
 )
 
 func TestPushCmd_ArgsValidation(t *testing.T) {
-	// Save and restore the global flag
-	origPushAll := pushAll
-	defer func() { pushAll = origPushAll }()
-
 	tests := []struct {
 		name      string
 		args      []string
-		allFlag   bool
 		wantError bool
-		errorMsg  string
 	}{
-		{
-			name:      "without --all, no args",
-			args:      []string{},
-			allFlag:   false,
-			wantError: true,
-			errorMsg:  "requires 1-2 arguments",
-		},
-		{
-			name:      "without --all, one arg (success)",
-			args:      []string{"feature/branch"},
-			allFlag:   false,
-			wantError: false,
-		},
-		{
-			name:      "without --all, two args (success)",
-			args:      []string{"feature/branch", "main"},
-			allFlag:   false,
-			wantError: false,
-		},
-		{
-			name:      "without --all, three args",
-			args:      []string{"feature/branch", "main", "extra"},
-			allFlag:   false,
-			wantError: true,
-			errorMsg:  "requires 1-2 arguments",
-		},
-		{
-			name:      "with --all, no args (success)",
-			args:      []string{},
-			allFlag:   true,
-			wantError: false,
-		},
-		{
-			name:      "with --all, one arg (success)",
-			args:      []string{"main"},
-			allFlag:   true,
-			wantError: false,
-		},
-		{
-			name:      "with --all, two args",
-			args:      []string{"main", "extra"},
-			allFlag:   true,
-			wantError: true,
-			errorMsg:  "--all flag accepts at most 1 argument",
-		},
+		{name: "no args", args: []string{}, wantError: true},
+		{name: "one arg", args: []string{"feature/branch"}, wantError: false},
+		{name: "target positional rejected", args: []string{"feature/branch", "main"}, wantError: true},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			// Set the flag state
-			pushAll = tc.allFlag
-
-			// Call the Args validation function directly
 			err := pushCmd.Args(pushCmd, tc.args)
 
 			if tc.wantError {
 				if err == nil {
-					t.Errorf("expected error containing %q, got nil", tc.errorMsg)
+					t.Errorf("expected argument error, got nil")
 					return
-				}
-				if tc.errorMsg != "" && !strings.Contains(err.Error(), tc.errorMsg) {
-					t.Errorf("expected error containing %q, got %q", tc.errorMsg, err.Error())
 				}
 			} else if err != nil {
 				t.Errorf("expected no error, got %v", err)
@@ -527,31 +472,10 @@ func TestPushBranchInRepo_CleanWorkingTree_NoStash(t *testing.T) {
 	}
 }
 
-func TestPushCmd_MergeAlias(t *testing.T) {
+func TestPushCmd_HasNoMergeAlias(t *testing.T) {
 	t.Parallel()
-	// Test that "merge" is listed as an alias for the push command
-	aliases := pushCmd.Aliases
-	found := false
-	for _, a := range aliases {
-		if a == "merge" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("expected 'merge' to be an alias for push command, got aliases: %v", aliases)
-	}
-}
-
-func TestPushCmd_MergeAliasIsFirst(t *testing.T) {
-	t.Parallel()
-	// Test that "merge" alias is the first (primary) alias
-	aliases := pushCmd.Aliases
-	if len(aliases) == 0 {
-		t.Fatal("push command has no aliases")
-	}
-	if aliases[0] != "merge" {
-		t.Errorf("expected first alias to be 'merge', got %q", aliases[0])
+	if len(pushCmd.Aliases) != 0 {
+		t.Errorf("expected push command to have no aliases, got %v", pushCmd.Aliases)
 	}
 }
 
@@ -565,20 +489,8 @@ func TestPushCmd_GroupID(t *testing.T) {
 
 func TestPushCmd_Flags(t *testing.T) {
 	t.Parallel()
-	// Verify flags are registered
-	if allFlag := pushCmd.Flags().Lookup("all"); allFlag == nil {
-		t.Error("expected --all flag to be registered")
-	}
-	if wsFlag := pushCmd.Flags().Lookup("workspace"); wsFlag == nil {
-		t.Error("expected --workspace flag to be registered")
-	}
-
-	// Verify shorthand flags
-	if allFlag := pushCmd.Flags().ShorthandLookup("a"); allFlag == nil {
-		t.Error("expected -a shorthand flag to be registered")
-	}
-	if wsFlag := pushCmd.Flags().ShorthandLookup("W"); wsFlag == nil {
-		t.Error("expected -W shorthand flag to be registered")
+	if pushCmd.Flags().Lookup("repo") == nil || pushCmd.Flags().Lookup("remote") == nil {
+		t.Error("expected --repo and --remote flags to be registered")
 	}
 }
 

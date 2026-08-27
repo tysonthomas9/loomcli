@@ -33,9 +33,49 @@ var stackCmd = &cobra.Command{
 func init() {
 	stackCmd.AddCommand(
 		initCmd(), listCmd(), showCmd(), statusCmd(), validateCmd(),
-		addCmd(), moveCmd(), setBaseCmd(), removeCmd(), publishCmd(), restackCmd(),
+		addCmd(), moveCmd(), setBaseCmd(), removeCmd(), publishCmd(), restackCmd(), mergeCmd(),
 	)
 	cli.RegisterCommand(stackCmd)
+}
+
+func mergeCmd() *cobra.Command {
+	var squash, merge, rebase bool
+	c := &cobra.Command{
+		Use: "merge <stack-or-pr>", Short: "Merge a stack through the official gh-stack extension",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			selected := 0
+			for _, enabled := range []bool{squash, merge, rebase} {
+				if enabled {
+					selected++
+				}
+			}
+			if selected != 1 {
+				return errors.New("exactly one of --squash, --merge, or --rebase is required")
+			}
+			method := "--squash"
+			if merge {
+				method = "--merge"
+			} else if rebase {
+				method = "--rebase"
+			}
+			list, err := exec.CommandContext(cmd.Context(), "gh", "extension", "list").CombinedOutput()
+			if err != nil || !strings.Contains(string(list), "github/gh-stack") {
+				return errors.New("github/gh-stack extension is required; install it before merging")
+			}
+			ghArgs := []string{"stack", "merge", args[0], method}
+			out, err := exec.CommandContext(cmd.Context(), "gh", ghArgs...).CombinedOutput() //nolint:gosec // method and target are validated command inputs.
+			if err != nil {
+				return fmt.Errorf("gh stack merge failed: %s", strings.TrimSpace(string(out)))
+			}
+			fmt.Print(string(out))
+			return nil
+		},
+	}
+	c.Flags().BoolVar(&squash, "squash", false, "squash merge")
+	c.Flags().BoolVar(&merge, "merge", false, "merge commit")
+	c.Flags().BoolVar(&rebase, "rebase", false, "rebase merge")
+	return c
 }
 
 // helpers --------------------------------------------------------------------
