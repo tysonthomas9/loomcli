@@ -163,7 +163,22 @@ func classifyWithPatterns(text string, patterns []errorPattern) *classifyResult 
 // ClassifyFromLog reads the tail of an agent log file and classifies the error.
 // It never returns nil — an Unknown classification is returned if nothing matches.
 func ClassifyFromLog(logPath string, exitCode int, backend string) *AgentError {
-	logTail, _ := readLogTail(logPath, 100)
+	return ClassifyFromLogAt(logPath, 0, exitCode, backend)
+}
+
+// ClassifyFromLogAt is ClassifyFromLog scoped to a single run. Agent logs are
+// append-only and per-role, so they span days and many runs; classifying the
+// raw tail can read a PREVIOUS run's output as this run's verdict — a stale
+// "Not logged in" banner becoming a fresh AuthFailure, which stops the agent
+// fatally for a login that is in fact fine. offset is the byte position of the
+// current run's first line (see supervisor.AgentProcess.LogFileStartOffset);
+// nothing before it is considered.
+//
+// offset 0 is exactly ClassifyFromLog. An offset past the end of the file means
+// the log was rotated or truncated under us, so the run's own bytes are gone:
+// it falls back to whole-file behavior rather than classifying nothing.
+func ClassifyFromLogAt(logPath string, offset int64, exitCode int, backend string) *AgentError {
+	logTail, _ := readLogTailAt(logPath, 100, offset)
 	return classifyFromText(logTail, exitCode, backend)
 }
 
@@ -197,7 +212,19 @@ func ClassifyMarker(text string) (*AgentError, bool) {
 // using the same bounded read as ClassifyFromLog. It exists because the
 // supervisor has no access to the unexported tail reader.
 func ClassifyMarkerFromLog(logPath string) (*AgentError, bool) {
-	logTail, _ := readLogTail(logPath, 100)
+	return ClassifyMarkerFromLogAt(logPath, 0)
+}
+
+// ClassifyMarkerFromLogAt is ClassifyMarkerFromLog scoped to a single run, the
+// way ClassifyFromLogAt scopes ClassifyFromLog — and it matters MORE here, not
+// less. A marker is categorical: it overrides every other verdict and stops the
+// agent fatally. A previous run's "Not logged in · Run /login" left in the
+// append-only log therefore condemns every later run on that agent, no matter
+// how healthy, until someone rotates the file by hand. offset is the byte
+// position of the current run's first line
+// (supervisor.AgentProcess.LogFileStartOffset); 0 restores whole-file behavior.
+func ClassifyMarkerFromLogAt(logPath string, offset int64) (*AgentError, bool) {
+	logTail, _ := readLogTailAt(logPath, 100, offset)
 	return ClassifyMarker(logTail)
 }
 
@@ -362,6 +389,13 @@ const maxLogTailBytes int64 = 64 * 1024
 // readLogTail reads the last maxLines lines from a file, reading at most
 // maxLogTailBytes from the end. Returns empty string on any error.
 func readLogTail(path string, maxLines int) (string, error) {
+	return readLogTailAt(path, maxLines, 0)
+}
+
+// readLogTailAt is readLogTail restricted to the region at or after start.
+// A start beyond the current size means the file shrank (rotation), so the
+// whole file is read instead — the same answer readLogTail gives.
+func readLogTailAt(path string, maxLines int, start int64) (string, error) {
 	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return "", err
@@ -378,9 +412,16 @@ func readLogTail(path string, maxLines int) (string, error) {
 		return "", nil
 	}
 
+	if start < 0 || start > size {
+		start = 0
+	}
+
 	readSize := maxLogTailBytes
-	if size < readSize {
-		readSize = size
+	if size-start < readSize {
+		readSize = size - start
+	}
+	if readSize == 0 {
+		return "", nil
 	}
 
 	offset := size - readSize

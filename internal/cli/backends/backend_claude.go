@@ -366,7 +366,57 @@ type claudeRunTurnFn func(ctx context.Context, cfg claudeRunTurnConfig) (claudeR
 
 var claudeRunTurn claudeRunTurnFn = hwharness.RunTurn
 
+// runTurnDeadlineMargin is how far INSIDE the supervisor's silence watchdog the
+// per-turn deadline is placed when it is derived from that watchdog. The margin
+// is the whole point of deriving it: the deadline must fire strictly before
+// applyIdleKill (internal/cli/daemon/supervisor/health.go) so a drifted turn
+// ends as a normal process exit — classified, completion hooks run — instead of
+// the SIGKILL that skips both.
+const runTurnDeadlineMargin = 120 * time.Second
+
+// runTurnDeadline resolves the wall-clock bound on a single RunTurn call.
+//
+// LOOM_RUN_TURN_TIMEOUT_SECONDS is the explicit knob and wins outright when
+// set, including when it is malformed or non-positive — that reads as "no
+// deadline", not "fall back to something else". With it unset the bound is
+// derived from the daemon's silence watchdog (LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS,
+// exported into the agent env) minus runTurnDeadlineMargin.
+//
+// Returns 0 — deadline disabled — whenever neither var yields a usable value, or
+// when the watchdog is not further out than the margin. Zero is the answer for
+// standalone and interactive use, where neither var is set, so this is inert
+// unless a daemon configured it.
+func runTurnDeadline() time.Duration {
+	if raw := strings.TrimSpace(os.Getenv("LOOM_RUN_TURN_TIMEOUT_SECONDS")); raw != "" {
+		return positiveSecondsDuration(raw)
+	}
+	watchdog := positiveSecondsDuration(strings.TrimSpace(os.Getenv("LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS")))
+	if watchdog <= runTurnDeadlineMargin {
+		return 0
+	}
+	return watchdog - runTurnDeadlineMargin
+}
+
+// positiveSecondsDuration parses a whole-second count, returning 0 for anything
+// empty, malformed or non-positive so callers get one "unusable" answer.
+func positiveSecondsDuration(raw string) time.Duration {
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return time.Duration(n) * time.Second
+}
+
 func invokeClaudeRunTurn(ctx context.Context, workDir, prompt, agentName, resumeID string, onActivity func(wrapper.Snapshot), collector *usage.Collector) (claudeRunTurnResult, error) {
+	// Bound the turn. Without this the ctx carries no deadline at all, so a
+	// turn-detector drift in the harness becomes an unbounded wait that only the
+	// supervisor's watchdog ends — by SIGKILL. See runTurnDeadline.
+	if d := runTurnDeadline(); d > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, d)
+		defer cancel()
+	}
+
 	raw := &capturedOutput{}
 	output := io.Writer(raw)
 	if onActivity != nil {

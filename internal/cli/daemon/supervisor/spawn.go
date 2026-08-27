@@ -521,8 +521,11 @@ func (s *Supervisor) openDaemonLogFile(ap *AgentProcess) *os.File {
 
 	// Snapshot the size before the child writes anything. The file is opened
 	// O_APPEND and outlives restarts, so this is where the archive mirror must
-	// start reading — otherwise cycle N re-copies cycle N-1's output. Treat a
-	// stat failure as "start at 0": duplicated archive lines beat lost ones.
+	// start reading — otherwise cycle N re-copies cycle N-1's output — and it is
+	// also where exit classification must start, or a days-old tail (a stale
+	// "Not logged in" banner, say) is read as this run's verdict. Treat a stat
+	// failure as "start at 0": duplicated archive lines beat lost ones, and
+	// whole-file classification is the pre-existing behavior.
 	ap.LogFileStartOffset = 0
 	if info, err := f.Stat(); err == nil {
 		ap.LogFileStartOffset = info.Size()
