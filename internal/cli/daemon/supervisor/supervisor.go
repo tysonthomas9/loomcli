@@ -37,6 +37,7 @@ type Supervisor struct {
 	ProjectDir  string
 	Repos       []config.RepoConfig // workspace repos for resolveAgentRepos; nil outside workspace mode
 	WorkspaceID string              // stable workspace UUID for log namespacing
+	BootedAt    time.Time           // when this daemon started supervising; zero DISABLES the grace it anchors and never means "the epoch" -- see quarantineBootGrace
 
 	Agents   []*AgentProcess
 	AgentsMu sync.RWMutex // protects the agents slice for concurrent read/write access

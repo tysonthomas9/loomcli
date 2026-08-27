@@ -53,6 +53,19 @@ const (
 	// quarantineRecordTTL drops records not touched within this window at load
 	// time. A task still genuinely boomeranging re-accumulates immediately.
 	quarantineRecordTTL = 24 * time.Hour
+
+	// quarantineBootGrace is how long after daemon boot (Supervisor.BootedAt)
+	// a kill is treated as collateral of the restart itself — resume failures,
+	// stale-lock cleanup, adopted runs — rather than evidence about the task it
+	// was holding.
+	//
+	// A ZERO BootedAt DISABLES the grace: it means the construction site never
+	// recorded a boot time, not that the daemon booted at the epoch, and it
+	// must never suppress a kill. Same trap applyRunDurationKill documents for
+	// a zero lastStart. The Supervisor is a cross-package composite literal, so
+	// every test literal omits the field and must behave exactly as it did
+	// before the field existed.
+	quarantineBootGrace = 5 * time.Minute
 )
 
 // killEvent is one observed kill of a task-holding agent, captured at exit
@@ -67,6 +80,15 @@ type killEvent struct {
 	FleetSessionID  string    `json:"fleet_session_id"`  // ap.AgentSessionID — captured before finalize clears it
 	ClaudeSessionID string    `json:"claude_session_id"` // lock ClaudeSessionID (best-effort; empty if absent)
 	RunID           string    `json:"run_id"`            // lock RunID (best-effort)
+
+	// RunSilent mirrors ap.RunSilentAtStop: for a run_duration_exceeded kill,
+	// whether the run was ALSO silent past its output timeout. Meaningless (and
+	// false) for every other stop reason.
+	RunSilent bool `json:"run_silent,omitempty"`
+	// NotCounted is the quarantineCountable reason string when this kill was
+	// recorded in the timeline but never charged to the task's counter; empty
+	// for a kill that counted.
+	NotCounted string `json:"not_counted,omitempty"`
 }
 
 // reason renders a compact kill descriptor for status output, e.g.
@@ -312,15 +334,18 @@ func (s *Supervisor) recordTaskExitForQuarantine(ap *AgentProcess, exitCode int)
 		q.evict(taskID)
 		return
 	}
-	// A daemon-initiated stop is not task evidence. It is placed AFTER the
-	// clean/commit-progress eviction (a drained agent that DID commit still
-	// clears its record) and BEFORE the outcome check, because a drain that
-	// escalates to SIGTERM classifies as Timeout, which QuarantineEligible
-	// accepts — that is how a config-churn loop manufactured quarantine credit
-	// against tasks that were never at fault.
-	if !stopReasonQuarantineEligible(StopReason(snap.event.StopReason)) {
-		slog.Debug("skipping quarantine record for daemon-initiated stop",
-			"task", taskID, "agent", ap.Entry.Worktree, "stop_reason", snap.event.StopReason)
+	// A kill that is not evidence about the TASK is recorded for diagnosis and
+	// nothing more. This gate keeps the position the narrower lifecycle check it
+	// replaced was given: AFTER the clean/commit-progress eviction (a drained
+	// agent that DID commit still clears its record) and BEFORE the outcome
+	// check, because a drain that escalates to SIGTERM classifies as Timeout,
+	// which QuarantineEligible accepts — that is how a config-churn loop
+	// manufactured quarantine credit against tasks that were never at fault.
+	if countable, why := s.quarantineCountable(snap.event); !countable {
+		snap.event.NotCounted = why
+		q.recordUncountedKill(taskID, snap.event) // timeline only
+		slog.Info("kill not charged to task quarantine", "task", taskID,
+			"agent", ap.Entry.Worktree, "kill", snap.event.reason(), "why", why)
 		return
 	}
 	if !agentpolicy.QuarantineEligible(snap.outcome) {
@@ -365,6 +390,101 @@ func stopReasonQuarantineEligible(r StopReason) bool {
 	}
 }
 
+// lifecycleUncountedReason names the lifecycle stop for the ledger's
+// NotCounted field. Kept in step with stopReasonQuarantineEligible: every
+// reason that predicate rejects needs a name here.
+func lifecycleUncountedReason(r StopReason) string {
+	switch r {
+	case StopReasonShutdown:
+		// The daemon SIGTERMed its own agents mid-run; the task was a bystander.
+		return "daemon_shutdown"
+	case StopReasonManualStop:
+		return "manual_stop"
+	case StopReasonConfigRemoved:
+		return "config_removed"
+	case StopReasonYielded:
+		return "yielded"
+	case StopReasonEphemeralDone:
+		return "ephemeral_done"
+	default:
+		return "lifecycle_stop"
+	}
+}
+
+// quarantineCountable reports whether this kill says anything about the TASK.
+// Kills that are verdicts about the daemon, the agent, or the account are
+// recorded in the timeline for diagnosis but never advance the counter.
+//
+// The outcome-class seat (agentpolicy.QuarantineEligible) cannot make this
+// call: it sees an agenterr.Outcome, which knows nothing of stop reasons or
+// daemon lifecycle. A daemon that SIGTERMs its own agents mid-run produces a
+// perfectly eligible outcome class, and during the 2026-08-26/27 incident three
+// such kills were enough to quarantine a task that had never stalled.
+//
+// StopReasonWatchdog stays COUNTABLE and deliberately so — the watchdog fires
+// because the agent went silent past its output timeout, which is the
+// definition of a stall and the breaker's best signal. So does a bare crash
+// (empty StopReason), the breaker's base case. Blinding the counter to either
+// would leave nothing to count.
+func (s *Supervisor) quarantineCountable(ev killEvent) (bool, string) {
+	r := StopReason(ev.StopReason)
+	// Lifecycle stops keep stopReasonQuarantineEligible as their single
+	// authority: it also rejects yielded and ephemeral_done, which the switch
+	// below never listed and which must not be charged to a task either.
+	if !stopReasonQuarantineEligible(r) {
+		return false, lifecycleUncountedReason(r)
+	}
+	switch r {
+	case StopReasonBackendUnavailable:
+		// The agent's backend CLI is missing from PATH. Nothing to do with the task.
+		return false, "backend_unavailable"
+	case StopReasonMaxRetries, StopReasonMaxRetriesBlocked, StopReasonFastFail:
+		// Agent-level budgets already escalate agent-side (block, fast-fail).
+		// Charging the task too double-counts one failure against two breakers.
+		return false, "agent_budget"
+	case StopReasonRunDurationExceeded:
+		// See applyRunDurationKill: the cap fires regardless of activity, so on
+		// its own it is not a no-progress signal. A run that was still talking
+		// when the ceiling hit it was working, however slowly; only a run that
+		// was ALSO silent is the wedge markRunDurationExceeded argues about.
+		if !ev.RunSilent {
+			return false, "duration_kill_while_active"
+		}
+	}
+	// Collateral of a daemon restart lands in a burst right after boot and says
+	// nothing about any task. Zero BootedAt disables the grace — see the
+	// constant.
+	if !s.BootedAt.IsZero() && ev.At.Sub(s.BootedAt) < quarantineBootGrace {
+		return false, "boot_grace"
+	}
+	return true, ""
+}
+
+// recordUncountedKill files an infrastructure kill in an EXISTING record's
+// timeline and nothing more. Every omission here is load-bearing:
+//
+//   - it never creates a record — an uncounted kill alone does not deserve a
+//     ledger slot, and creating one would churn evictOldestLocked;
+//   - it never increments Count;
+//   - it never clears the latch. recordEligibleKill's re-arm branch exists so a
+//     human-released task needs N FRESH kills before re-quarantining; an
+//     infrastructure kill must not be allowed to consume that re-arm;
+//   - it never evicts. Uncounted is inert, not exculpatory: the task has not
+//     been shown to be making progress, only shown not to be at fault here.
+func (q *taskQuarantine) recordUncountedKill(taskID string, ev killEvent) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	rec := q.rec[taskID]
+	if rec == nil {
+		return
+	}
+	rec.Kills = append(rec.Kills, ev)
+	if len(rec.Kills) > maxKillEventsRetained {
+		rec.Kills = rec.Kills[len(rec.Kills)-maxKillEventsRetained:]
+	}
+	rec.LastUpdated = time.Now()
+}
+
 // taskExitSnapshot is the per-exit state the ledger consumes, read under
 // ap.Mu in one critical section.
 type taskExitSnapshot struct {
@@ -380,6 +500,7 @@ func snapshotTaskExit(ap *AgentProcess, lockInfo *cli.LockInfo, exitCode int) ta
 	stopReason := ap.StopReason
 	beforeRef := ap.BeforeRef
 	fleetSessionID := ap.AgentSessionID
+	runSilent := ap.RunSilentAtStop
 	ap.Mu.Unlock()
 
 	snap := taskExitSnapshot{
@@ -398,6 +519,7 @@ func snapshotTaskExit(ap *AgentProcess, lockInfo *cli.LockInfo, exitCode int) ta
 		ErrClass:       errClass,
 		ExitCode:       exitCode,
 		FleetSessionID: fleetSessionID,
+		RunSilent:      runSilent,
 	}
 	if lockInfo != nil {
 		snap.event.ClaudeSessionID = lockInfo.ClaudeSessionID
@@ -688,8 +810,8 @@ func formatKillTimeline(taskID string, threshold, count int, kills []killEvent) 
 	fmt.Fprintf(&b, "Claimed and killed %dx with no commit or design/notes progress between attempts\n", count)
 	b.WriteString("(backend stall -> watchdog/ownership kill -> reset -> re-pick -> identical freeze).\n")
 	b.WriteString("Set to **blocked** and unassigned to stop the boomerang.\n\n")
-	b.WriteString("| # | time (UTC) | agent | kill | class | exit | fleet session | claude session |\n")
-	b.WriteString("|---|-----------|-------|------|-------|------|---------------|----------------|\n")
+	b.WriteString("| # | time (UTC) | agent | kill | class | exit | fleet session | claude session | note |\n")
+	b.WriteString("|---|-----------|-------|------|-------|------|---------------|----------------|------|\n")
 	for i, ev := range kills {
 		kind := ev.StopReason
 		if kind == "" {
@@ -699,9 +821,18 @@ func formatKillTimeline(taskID string, threshold, count int, kills []killEvent) 
 		if class == "" {
 			class = "-"
 		}
-		fmt.Fprintf(&b, "| %d | %s | %s | %s | %s | %d | %s | %s |\n",
+		// The note column is why a reader can trust the count: kills the
+		// ledger discounted are still listed, marked with the reason they
+		// were not charged to the task.
+		note := ev.NotCounted
+		if note == "" {
+			note = "-"
+		} else {
+			note = "not counted: " + note
+		}
+		fmt.Fprintf(&b, "| %d | %s | %s | %s | %s | %d | %s | %s | %s |\n",
 			i+1, ev.At.UTC().Format(time.RFC3339), ev.Agent, kind, class, ev.ExitCode,
-			shortSessionID(ev.FleetSessionID), shortSessionID(ev.ClaudeSessionID))
+			shortSessionID(ev.FleetSessionID), shortSessionID(ev.ClaudeSessionID), note)
 	}
 	fmt.Fprintf(&b, "\nTo release: investigate the stall, then `loom data update %s --status open`\n", taskID)
 	fmt.Fprintf(&b, "(the %s label stays as an audit marker; clear it via the fleet-db API\n", quarantineLabel)

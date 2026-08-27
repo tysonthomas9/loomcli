@@ -407,14 +407,18 @@ func TestRecordTaskExit_DrainDoesNotResetExistingCount(t *testing.T) {
 
 // TestRecordTaskExit_NonLifecycleStopsStillEligible guards against
 // over-filtering: the reasons the mechanism exists for must keep counting.
+//
+// PUPPET-198 narrowed this list on purpose. run_duration_exceeded, fast_fail
+// and max_retries used to be here and now count only conditionally or not at
+// all — the cap fires whether or not the run was making progress, and the two
+// agent budgets already escalate agent-side, so charging the task double-counts
+// one failure against two breakers. TestQuarantineCountable_* owns those cases
+// now; what remains here is the set that must never stop counting.
 func TestRecordTaskExit_NonLifecycleStopsStillEligible(t *testing.T) {
 	for _, reason := range []StopReason{
 		"", // bare crash / ownership kill
 		StopReasonWatchdog,
-		StopReasonRunDurationExceeded,
 		StopReasonFatalError,
-		StopReasonFastFail,
-		StopReasonMaxRetries,
 	} {
 		name := string(reason)
 		if name == "" {

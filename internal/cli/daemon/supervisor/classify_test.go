@@ -374,11 +374,11 @@ func TestClassifyAgentExit_LogStartOffsetSkipsPriorRunAuthBanner(t *testing.T) {
 
 	newAP := func(offset int64) *AgentProcess {
 		return &AgentProcess{
-			Entry:          config.AgentEntry{Worktree: "falcon", Backend: "claude"},
-			WorktreePath:   tmpDir,
-			LogFilePath:    logPath,
+			Entry:              config.AgentEntry{Worktree: "falcon", Backend: "claude"},
+			WorktreePath:       tmpDir,
+			LogFilePath:        logPath,
 			LogFileStartOffset: offset,
-			StopReason:     StopReasonWatchdog,
+			StopReason:         StopReasonWatchdog,
 		}
 	}
 
