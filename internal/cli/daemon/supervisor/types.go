@@ -48,7 +48,7 @@ type AgentProcess struct {
 	Pid                    int               // PID of current subprocess (0 when not running)
 	LogFile                *os.File          // log file handle for subprocess output (nil if not logging)
 	LogFilePath            string            // path to agent log file for watchdog stat checks
-	LogFileStartOffset     int64             // size of the daemon log when this cycle opened it (O_APPEND); the archive mirror starts reading here so earlier cycles' bytes are not re-copied
+	LogFileStartOffset     int64             // size of the daemon log when this cycle opened it (O_APPEND); the archive mirror starts reading here so earlier cycles' bytes are not re-copied, and exit classification reads from here so a previous run's tail cannot be classified as this run's (PUPPET-49 + PUPPET-184 share this one field)
 	ArchiveLogFile         *os.File          // canonical agent archive (~/.loom/logs/<ws>/agents/<worktree>.log) the web UI Logs tab reads; nil if unavailable
 	stopLogMirror          func()            // idempotent stop+drain for this cycle's archive mirror goroutine; nil when no mirror runs (see startAgentLogMirror)
 	TranscriptPath         string            // path to session transcript.jsonl for watchdog liveness (set by superviseAgent)
@@ -119,7 +119,7 @@ type AgentProcess struct {
 	// task. False for every other stop reason.
 	RunSilentAtStop bool
 
-	Mu sync.Mutex // protects Cmd, Pid, LogFile, SoftKnobWarning, ProfileError, restart tracking, IdleSince, AssignedEpicID, AssignedTaskID, AssignedTaskRepo, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, RunSilentAtStop, LastActivity, InputWaitPending, InputWaitSince, AbandonedRunsChecked
+	Mu sync.Mutex // protects Cmd, Pid, LogFile, LogFileStartOffset, SoftKnobWarning, ProfileError, restart tracking, IdleSince, AssignedEpicID, AssignedTaskID, AssignedTaskRepo, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, RunSilentAtStop, LastActivity, InputWaitPending, InputWaitSince, AbandonedRunsChecked
 }
 
 // StopReason identifies why an agent was stopped.
