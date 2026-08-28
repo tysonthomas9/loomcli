@@ -180,7 +180,11 @@ func computeAgentStatus(ap supervisor.SupervisedAgentStatus, maxRetries int) str
 	// the supervise goroutine is alive and the agent self-resumes, so it is
 	// not "failed". Checked after the running guard so a re-spawned agent
 	// reads as "running".
-	if ap.StopReason == supervisor.StopReasonMaxRetriesBlocked {
+	// The issue-backend outage wait is the same shape: the supervise goroutine
+	// is alive and rechecking on a fixed interval, so the agent is waiting on
+	// infrastructure, not failed.
+	if ap.StopReason == supervisor.StopReasonMaxRetriesBlocked ||
+		ap.StopReason == supervisor.StopReasonIssueBackendUnavailable {
 		return "blocked"
 	}
 	// Not running - check if it failed via stop reason or restart count.

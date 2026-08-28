@@ -43,6 +43,13 @@ const backendStateReassertInterval = 5 * time.Minute
 // toward max_retries — a quiesce is not an agent failure.
 const defaultClaimHoldRecheckInterval = 15 * time.Second
 
+// issueBackendOutageRecheckInterval is the fixed delay between retries while
+// the ISSUE backend (fleet-db) is unreachable or rejecting the daemon's
+// credentials. Nothing about the agent is wrong, so — like the CLI-binary
+// recheck above — we poll on a fixed interval and never count these retries
+// toward max_retries.
+const issueBackendOutageRecheckInterval = 30 * time.Second
+
 // defaultMaxRetriesBlockInterval is the fixed delay between re-attempts after
 // an agent has exhausted its restart budget and blocked (policy OnExhaustion
 // Block). Rather than abandoning the agent (silent loss until a daemon
@@ -305,6 +312,13 @@ func (s *Supervisor) applyUncountedRestart(ap *AgentProcess, d agentpolicy.Dispo
 		s.applyNoWorkRestart(ap)
 		return true
 	}
+	// An issue-backend outage is a fact about the shared store, not about this
+	// agent and not about the account: it must stay ahead of the fleet-wide
+	// wall recording for the same reason a claim hold does.
+	if outcome.Is(agenterr.IssueBackendOutageOutcome) {
+		s.applyIssueBackendOutageRestart(ap)
+		return true
+	}
 	s.recordAccountWall(outcome, ap.LastError)
 	// Rate limits: unlimited uncounted retries by default; the
 	// rate_limit_no_count config opt-out routes them through the counted
@@ -433,6 +447,37 @@ func (s *Supervisor) claimHoldRecheckBackoff() time.Duration {
 		return s.claimHoldRecheckInterval
 	}
 	return defaultClaimHoldRecheckInterval
+}
+
+// applyIssueBackendOutageRestart keeps an agent retrying while the ISSUE
+// backend is unreachable or rejecting the daemon's credentials. It mirrors
+// applyNoWorkRestart rather than applyCountedRestart, and for the same reason:
+// the condition is not a health signal about this agent. Every agent shares
+// one issue backend, so an outage fails all of them within a second of each
+// other; charging it to each agent's restart budget escalates the whole fleet
+// through BlockBudget into FastFail — a terminal stop — over a fault no agent
+// can fix and that typically clears on its own minutes later.
+//
+// RestartCount resets so a pre-outage failure streak does not carry through
+// the outage, and StopReason names the wait so `loom daemon status` shows why
+// the agent is idle instead of reporting an opaque Unknown. Caller holds ap.Mu.
+func (s *Supervisor) applyIssueBackendOutageRestart(ap *AgentProcess) {
+	ap.RestartCount = 0
+	ap.RateRetryCount = 0
+	resetNoWork(ap)
+	ap.StopReason = StopReasonIssueBackendUnavailable
+	slog.Warn("issue backend unavailable, will recheck (not counted toward max_retries)",
+		"worktree", ap.Entry.Worktree, "recheck_in", s.issueBackendRecheckBackoff())
+}
+
+// issueBackendRecheckBackoff is the fixed delay between issue-backend
+// re-checks. It shares the backendRecheckInterval override so a test that
+// shrinks the recheck cadence shrinks both.
+func (s *Supervisor) issueBackendRecheckBackoff() time.Duration {
+	if s.backendRecheckInterval > 0 {
+		return s.backendRecheckInterval
+	}
+	return issueBackendOutageRecheckInterval
 }
 
 // backendRecheckBackoff is the fixed delay between BackendUnavailable re-checks
@@ -594,6 +639,10 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 		// Fixed recheck: waiting for an operator to release a hold, not
 		// backing off a flaky run.
 		return s.claimHoldRecheckBackoff()
+	case agentpolicy.BPIssueBackendOutage:
+		// Fixed recheck: waiting for the issue store to answer again, not
+		// backing off a flaky run.
+		return s.issueBackendRecheckBackoff()
 	case agentpolicy.BPBlock:
 		return s.maxRetriesBlockBackoff()
 	case agentpolicy.BPRateLimit:
