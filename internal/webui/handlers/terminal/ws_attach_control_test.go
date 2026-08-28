@@ -179,3 +179,52 @@ func TestMarkSessionReplaced_ReportsMarkedOnStoreFailure(t *testing.T) {
 		t.Error("marked = false, want true — the frame must still report the replacement")
 	}
 }
+
+// A replacement spawns a shell owned by THIS server process, so created_at
+// has to move forward with it. Left at its pre-restart value, the staleness
+// test in markSessionReplaced keeps matching: every later attach announces
+// another replacement, the client draws another restart boundary, and
+// ptyAttachable keeps reporting the tab dead while its PTY is live.
+func TestMarkSessionReplaced_AdvancesCreatedAtSoTheNextAttachIsNotStale(t *testing.T) {
+	ctx := context.Background()
+	store := newTabMetaStoreForWSTest(t)
+	startedAt := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 8, 14, 13, 0, 0, 0, time.UTC)
+
+	meta := &tabmeta.TabMetadata{
+		Workspace:   "E2E",
+		SessionName: "term_1",
+		CreatedAt:   startedAt.Add(-time.Hour),
+	}
+	if err := store.Set(ctx, meta); err != nil {
+		t.Fatalf("seed Set: %v", err)
+	}
+
+	marked, err := markSessionReplaced(ctx, store, "E2E", "term_1", meta, startedAt, now)
+	if err != nil {
+		t.Fatalf("markSessionReplaced: %v", err)
+	}
+	if !marked {
+		t.Fatal("marked = false, want true for a pre-restart session")
+	}
+	if !meta.CreatedAt.Equal(meta.ReplacedAt) {
+		t.Errorf("meta.CreatedAt = %v, want it advanced to ReplacedAt %v", meta.CreatedAt, meta.ReplacedAt)
+	}
+
+	stored, err := store.Get(ctx, "E2E", "term_1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if stored.CreatedAt.Before(startedAt) {
+		t.Fatalf("stored CreatedAt = %v, want at or after server start %v", stored.CreatedAt, startedAt)
+	}
+
+	// The second attach of the same session must no longer look stale.
+	againMarked, err := markSessionReplaced(ctx, store, "E2E", "term_1", stored, startedAt, now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("second markSessionReplaced: %v", err)
+	}
+	if againMarked {
+		t.Error("second attach was marked replaced again; created_at did not stick")
+	}
+}
