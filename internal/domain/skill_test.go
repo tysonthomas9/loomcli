@@ -10,12 +10,12 @@ import (
 // ws builds a workspace-scoped skill. content distinguishes two skills that
 // share a name so a shadowing assertion can say WHICH one survived.
 func ws(name, content string) *Skill {
-	return &Skill{Name: name, Scope: SkillScopeWorkspace, Content: content}
+	return &Skill{Name: name, Scope: SkillScopeWorkspace, FileTreeRevision: content}
 }
 
 // rl builds a role-scoped skill.
 func rl(role, name, content string) *Skill {
-	return &Skill{Name: name, Scope: SkillScopeRole, RoleName: role, Content: content}
+	return &Skill{Name: name, Scope: SkillScopeRole, RoleName: role, FileTreeRevision: content}
 }
 
 // resolvedNames renders a resolution as "name=content" pairs so a failure
@@ -23,7 +23,7 @@ func rl(role, name, content string) *Skill {
 func resolvedNames(skills []*Skill) []string {
 	out := make([]string, 0, len(skills))
 	for _, s := range skills {
-		out = append(out, s.Name+"="+s.Content)
+		out = append(out, s.Name+"="+s.FileTreeRevision)
 	}
 	return out
 }
@@ -124,13 +124,13 @@ func TestResolveSkillChain(t *testing.T) {
 		},
 		{
 			name:   "an unknown scope is dropped rather than defaulted",
-			skills: []*Skill{{Name: "alpha", Scope: SkillScope("global"), Content: "g"}},
+			skills: []*Skill{{Name: "alpha", Scope: SkillScope("global"), FileTreeRevision: "g"}},
 			role:   "lead",
 			want:   []string{},
 		},
 		{
 			name:   "an unknown scope cannot shadow a real one",
-			skills: []*Skill{{Name: "alpha", Scope: SkillScope(""), Content: "g"}, ws("alpha", "w")},
+			skills: []*Skill{{Name: "alpha", Scope: SkillScope(""), FileTreeRevision: "g"}, ws("alpha", "w")},
 			role:   "lead",
 			want:   []string{"alpha=w"},
 		},
@@ -154,7 +154,7 @@ func TestResolveSkillChain(t *testing.T) {
 		},
 		{
 			name:   "a role-scoped skill with no role name never loads",
-			skills: []*Skill{{Name: "alpha", Scope: SkillScopeRole, Content: "r"}},
+			skills: []*Skill{{Name: "alpha", Scope: SkillScopeRole, FileTreeRevision: "r"}},
 			role:   "lead",
 			want:   []string{},
 		},
@@ -182,8 +182,8 @@ func TestResolveSkillChainDetail_ReportsWhatWasShadowed(t *testing.T) {
 		t.Fatalf("resolved %d skills, want 3: %v", len(got), got)
 	}
 
-	if got[0].Skill.Content != "r" {
-		t.Errorf("alpha resolved to %q, want the role-scoped copy", got[0].Skill.Content)
+	if got[0].Skill.FileTreeRevision != "r" {
+		t.Errorf("alpha resolved to %q, want the role-scoped copy", got[0].Skill.FileTreeRevision)
 	}
 	if got[0].Shadowed != workspaceAlpha {
 		t.Errorf("alpha shadowed = %v, want the workspace-scoped copy", got[0].Shadowed)
@@ -299,7 +299,6 @@ func TestSkillErrorsAreDistinguishable(t *testing.T) {
 	})
 	precondition := error(&SkillPreconditionError{
 		Ref:      WorkspaceSkillRef("alpha"),
-		Path:     "references/api.md",
 		Expected: "0123456789abcdef",
 		Stored:   "fedcba9876543210",
 	})
@@ -457,12 +456,12 @@ func TestValidateRoleName(t *testing.T) {
 	}
 }
 
-func TestSkillCloneIsDeep(t *testing.T) {
-	original := &Skill{Name: "alpha", Scope: SkillScopeWorkspace, Files: []SkillFile{{Path: "a.md", Content: "one"}}}
+func TestSkillCloneIsDetached(t *testing.T) {
+	original := &Skill{Name: "alpha", Scope: SkillScopeWorkspace, FileTreeRevision: "one"}
 	clone := original.Clone()
-	clone.Files[0].Content = "two"
-	if original.Files[0].Content != "one" {
-		t.Errorf("mutating the clone changed the original: %q", original.Files[0].Content)
+	clone.FileTreeRevision = "two"
+	if original.FileTreeRevision != "one" {
+		t.Errorf("mutating the clone changed the original: %q", original.FileTreeRevision)
 	}
 }
 
@@ -470,8 +469,8 @@ func TestSkillCloneIsDeep(t *testing.T) {
 // quoted entity-tag an HTTP layer holds — and every boundary that accepts one
 // has to accept the other. Getting this wrong is what made fleet-db's
 // conditional writes 412 forever before it learned to parse entity-tags.
-func TestNormalizeSkillRevision(t *testing.T) {
-	const bare = "0123456789abcdef"
+func TestNormalizeSkillTreeRevision(t *testing.T) {
+	const bare = "opaque-tree-revision"
 	tests := []struct {
 		name    string
 		in      string
@@ -480,19 +479,19 @@ func TestNormalizeSkillRevision(t *testing.T) {
 	}{
 		{name: "bare revision passes through", in: bare, want: bare},
 		{name: "quoted entity-tag", in: `"` + bare + `"`, want: bare},
-		{name: "weak entity-tag", in: `W/"` + bare + `"`, want: bare},
+		{name: "weak entity-tag", in: `W/"` + bare + `"`, wantErr: true},
 		{name: "surrounding whitespace", in: "  " + bare + "  ", want: bare},
 		{name: "empty stays empty", in: "", want: ""},
-		{name: "wildcard passes through unquoted", in: "*", want: "*"},
+		{name: "wildcard is not a tree revision", in: "*", wantErr: true},
 		{name: "a multi-tag list is refused, not reduced", in: `"a", "b"`, wantErr: true},
 		{name: "a stray quote is refused", in: `"unterminated`, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := NormalizeSkillRevision(tt.in)
+			got, err := NormalizeSkillTreeRevision(tt.in)
 			if tt.wantErr {
 				if err == nil {
-					t.Fatalf("NormalizeSkillRevision(%q) = %q, want an error", tt.in, got)
+					t.Fatalf("NormalizeSkillTreeRevision(%q) = %q, want an error", tt.in, got)
 				}
 				if !errors.Is(err, ErrInvalid) {
 					t.Errorf("error = %v, want it to wrap ErrInvalid", err)
@@ -500,14 +499,14 @@ func TestNormalizeSkillRevision(t *testing.T) {
 				return
 			}
 			if err != nil {
-				t.Fatalf("NormalizeSkillRevision(%q): %v", tt.in, err)
+				t.Fatalf("NormalizeSkillTreeRevision(%q): %v", tt.in, err)
 			}
 			if got != tt.want {
-				t.Errorf("NormalizeSkillRevision(%q) = %q, want %q", tt.in, got, tt.want)
+				t.Errorf("NormalizeSkillTreeRevision(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 			// Idempotent, or a value that passed through two boundaries would
 			// come out different from one that passed through one.
-			again, err := NormalizeSkillRevision(got)
+			again, err := NormalizeSkillTreeRevision(got)
 			if err != nil || again != got {
 				t.Errorf("second pass = %q, %v; want %q", again, err, got)
 			}

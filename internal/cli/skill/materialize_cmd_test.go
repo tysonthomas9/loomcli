@@ -18,16 +18,7 @@ import (
 
 func TestSkillMaterializeMaterializesCurrentWorkdir(t *testing.T) {
 	st := materializeTestStore(t)
-	_, err := st.Skills().Create(context.Background(), store.SkillCreate{
-		WorkspaceKey: testWorkspace,
-		Ref:          domain.WorkspaceSkillRef("review-guide"),
-		Description:  "Review guidance",
-		Content:      "# Review guide\n",
-		Source:       "test",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	createMaterializeTestSkill(t, st, domain.WorkspaceSkillRef("review-guide"), "Review guidance", "# Review guide\n")
 	withMaterializeStore(t, st)
 	t.Setenv(bootstrap.EnvWorkspace, testWorkspace)
 	t.Setenv("LOOM_AGENT_ROLE", "")
@@ -61,15 +52,7 @@ func TestSkillMaterializeResolvesRoleFromAgentName(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.Skills().Create(ctx, store.SkillCreate{
-		WorkspaceKey: testWorkspace,
-		Ref:          domain.RoleSkillRef("reviewer", "review-checklist"),
-		Description:  "Review checklist",
-		Content:      "# Checklist\n",
-		Source:       "test",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	createMaterializeTestSkill(t, st, domain.RoleSkillRef("reviewer", "review-checklist"), "Review checklist", "# Checklist\n")
 	withMaterializeStore(t, st)
 	t.Setenv(bootstrap.EnvWorkspace, testWorkspace)
 	t.Setenv("LOOM_AGENT_ROLE", "")
@@ -111,16 +94,7 @@ func TestSkillMaterializeStoreUnavailableWarnsAndSucceeds(t *testing.T) {
 
 func TestSkillMaterializeRefusalReturnsBlockingExitCode(t *testing.T) {
 	st := materializeTestStore(t)
-	_, err := st.Skills().Create(context.Background(), store.SkillCreate{
-		WorkspaceKey: testWorkspace,
-		Ref:          domain.WorkspaceSkillRef("collision"),
-		Description:  "Collision test",
-		Content:      "# Managed\n",
-		Source:       "test",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	createMaterializeTestSkill(t, st, domain.WorkspaceSkillRef("collision"), "Collision test", "# Managed\n")
 	withMaterializeStore(t, st)
 	t.Setenv(bootstrap.EnvWorkspace, testWorkspace)
 	t.Setenv("LOOM_AGENT_ROLE", "")
@@ -166,6 +140,24 @@ func materializeTestStore(t *testing.T) *memstore.Store {
 		t.Fatal(err)
 	}
 	return st
+}
+
+func createMaterializeTestSkill(t *testing.T, st *memstore.Store, ref domain.SkillRef, description, body string) {
+	t.Helper()
+	snapshot, err := domain.BuildSkillFileTree(ref.Name, description, []byte(body), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision, err := publishSkillSnapshot(t.Context(), st.WorkspaceFiles(), testWorkspace, *snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Skills().Create(t.Context(), store.SkillCreate{
+		WorkspaceKey: testWorkspace, Ref: ref, Description: description,
+		FileTreeRevision: revision, Source: "test",
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func withMaterializeStore(t *testing.T, st store.Store) {

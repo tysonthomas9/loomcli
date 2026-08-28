@@ -33,6 +33,29 @@ func newAgentSessionTestDeps(t *testing.T) (*memstore.Store, *tabmeta.Store, *re
 	return memstore.New(), tabmeta.NewStore(rdb, nil), rdb
 }
 
+func createTerminalTestSkill(t *testing.T, st *memstore.Store, ref domain.SkillRef, description, body string, bundles []domain.SkillFileTreeFile) *domain.Skill {
+	t.Helper()
+	snapshot, err := domain.BuildSkillFileTree(ref.Name, description, []byte(body), bundles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputs := make([]domain.WorkspaceFileInput, 0, len(snapshot.Files))
+	for _, file := range snapshot.Files {
+		inputs = append(inputs, domain.WorkspaceFileInput(file))
+	}
+	published, err := st.WorkspaceFiles().Publish(t.Context(), "E2E", inputs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sk, err := st.Skills().Create(t.Context(), store.SkillCreate{
+		WorkspaceKey: "E2E", Ref: ref, Description: description, FileTreeRevision: published.Tree.Revision,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sk
+}
+
 type slowListTerminalService struct {
 	service.TerminalService
 	delay time.Duration
@@ -355,14 +378,7 @@ func TestEnsureAgentTerminalSessionLaunchesLeadInConfiguredWorktree(t *testing.T
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	if _, err := st.Skills().Create(ctx, store.SkillCreate{
-		WorkspaceKey: "E2E",
-		Ref:          domain.RoleSkillRef("lead", "terminal-skill"),
-		Description:  "terminal materialization",
-		Content:      "Lead skill body\n",
-	}); err != nil {
-		t.Fatalf("create skill: %v", err)
-	}
+	createTerminalTestSkill(t, st, domain.RoleSkillRef("lead", "terminal-skill"), "terminal materialization", "Lead skill body\n", nil)
 	if _, err := st.Agents().Create(ctx, store.AgentCreate{
 		WorkspaceKey: "E2E",
 		Name:         "nova",
@@ -421,15 +437,9 @@ func TestEnsureAgentTerminalSessionFailsBeforeTabOnSkillCollision(t *testing.T) 
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "E2E", Name: "lead", Backend: "codex"}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	if _, err := st.Skills().Create(ctx, store.SkillCreate{
-		WorkspaceKey: "E2E",
-		Ref:          domain.WorkspaceSkillRef("alpha"),
-		Description:  "alpha",
-		Content:      "body",
-		Files:        []domain.SkillFile{{Path: "readme.md", Content: "managed"}},
-	}); err != nil {
-		t.Fatalf("create skill: %v", err)
-	}
+	createTerminalTestSkill(t, st, domain.WorkspaceSkillRef("alpha"), "alpha", "body", []domain.SkillFileTreeFile{{
+		Path: "readme.md", Bytes: []byte("managed"), MediaType: "text/markdown",
+	}})
 	if _, err := st.Agents().Create(ctx, store.AgentCreate{WorkspaceKey: "E2E", Name: "nova", RoleName: "lead"}); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
@@ -522,11 +532,7 @@ func TestEnsureAgentTerminalSessionSkipsSkillRewriteWhenStaleTabPTYIsLive(t *tes
 		t.Fatalf("create role: %v", err)
 	}
 	ref := domain.WorkspaceSkillRef("terminal-skill")
-	if _, err := st.Skills().Create(ctx, store.SkillCreate{
-		WorkspaceKey: "E2E", Ref: ref, Description: "terminal materialization", Content: "Old body\n",
-	}); err != nil {
-		t.Fatalf("create skill: %v", err)
-	}
+	created := createTerminalTestSkill(t, st, ref, "terminal materialization", "Old body\n", nil)
 	if _, err := st.Agents().Create(ctx, store.AgentCreate{
 		WorkspaceKey: "E2E", Name: "nova", RoleName: "lead", Backend: "codex",
 	}); err != nil {
@@ -548,7 +554,22 @@ func TestEnsureAgentTerminalSessionSkipsSkillRewriteWhenStaleTabPTYIsLive(t *tes
 		t.Fatalf("read initial marker: %v", err)
 	}
 	newBody := "New body that must wait for the next process\n"
-	if _, err := st.Skills().Update(ctx, "E2E", ref, store.SkillUpdate{Content: &newBody}); err != nil {
+	snapshot, err := domain.BuildSkillFileTree(ref.Name, created.Description, []byte(newBody), nil)
+	if err != nil {
+		t.Fatalf("build updated skill tree: %v", err)
+	}
+	inputs := make([]domain.WorkspaceFileInput, 0, len(snapshot.Files))
+	for _, file := range snapshot.Files {
+		inputs = append(inputs, domain.WorkspaceFileInput(file))
+	}
+	published, err := st.WorkspaceFiles().Publish(ctx, "E2E", inputs)
+	if err != nil {
+		t.Fatalf("publish updated skill tree: %v", err)
+	}
+	newRevision := published.Tree.Revision
+	if _, err := st.Skills().Update(ctx, "E2E", ref, store.SkillUpdate{
+		FileTreeRevision: &newRevision, ExpectedFileTreeRevision: created.FileTreeRevision,
+	}); err != nil {
 		t.Fatalf("update skill: %v", err)
 	}
 	newBackend := "claude"

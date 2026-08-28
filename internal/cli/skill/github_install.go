@@ -54,8 +54,7 @@ type githubSkillInstaller struct {
 type fetchedGitHubSkill struct {
 	Name                   string
 	Description            string
-	Content                string
-	Files                  []domain.SkillFile
+	Snapshot               domain.SkillFileTreeSnapshot
 	Source                 string
 	DroppedFrontmatterKeys []string
 	SkippedHiddenPaths     []string
@@ -750,17 +749,6 @@ func (a githubArchive) rejectUnsafeSelectedEntries(skillDir string) error {
 
 func (a githubArchive) toSkill(source githubSource, skillDir, nameOverride string) (fetchedGitHubSkill, error) {
 	selected, hiddenPaths := a.selectSkillDirEntries(skillDir)
-	var binaryPaths []string
-	for filePath, file := range selected {
-		if !isSkillText(file.content) {
-			binaryPaths = append(binaryPaths, filePath)
-		}
-	}
-	if len(binaryPaths) > 0 {
-		sort.Strings(binaryPaths)
-		return fetchedGitHubSkill{}, fmt.Errorf("skill contains non-UTF-8 or NUL-bearing files; binary content is not supported: %s", strings.Join(binaryPaths, ", "))
-	}
-
 	document, ok := selected[domain.SkillFileNameSKILLMD]
 	if !ok {
 		return fetchedGitHubSkill{}, fmt.Errorf("selected skill directory does not contain %s", domain.SkillFileNameSKILLMD)
@@ -776,8 +764,11 @@ func (a githubArchive) toSkill(source githubSource, skillDir, nameOverride strin
 	if err != nil {
 		return fetchedGitHubSkill{}, err
 	}
-
 	files, err := bundledSkillFiles(selected)
+	if err != nil {
+		return fetchedGitHubSkill{}, err
+	}
+	snapshot, err := importedSkillSnapshot(document.content, document.executable, files, identity, nameOverride != "")
 	if err != nil {
 		return fetchedGitHubSkill{}, err
 	}
@@ -793,13 +784,16 @@ func (a githubArchive) toSkill(source githubSource, skillDir, nameOverride strin
 		provenance += "/" + provenancePath
 	}
 	provenance += "@" + source.Ref
+	droppedKeys := identity.DroppedFrontmatterKeys
+	if nameOverride == "" {
+		droppedKeys = nil
+	}
 	return fetchedGitHubSkill{
-		Name:                   identity.Name,
-		Description:            identity.Description,
-		Content:                identity.Content,
-		Files:                  files,
+		Name:                   snapshot.Name,
+		Description:            snapshot.Description,
+		Snapshot:               snapshot,
 		Source:                 provenance,
-		DroppedFrontmatterKeys: identity.DroppedFrontmatterKeys,
+		DroppedFrontmatterKeys: droppedKeys,
 		SkippedHiddenPaths:     skippedHidden,
 	}, nil
 }
@@ -845,8 +839,8 @@ func (a githubArchive) selectSkillDirEntries(skillDir string) (map[string]github
 // pointing at their own directory and wanting the full list to fix, while an
 // install is someone else's repository, where the first bad path is already
 // reason enough to stop.
-func bundledSkillFiles(selected map[string]githubArchiveFile) ([]domain.SkillFile, error) {
-	files := make([]domain.SkillFile, 0, len(selected))
+func bundledSkillFiles(selected map[string]githubArchiveFile) ([]domain.SkillFileTreeFile, error) {
+	files := make([]domain.SkillFileTreeFile, 0, len(selected))
 	for filePath, file := range selected {
 		if filePath == domain.SkillFileNameSKILLMD {
 			continue
@@ -854,9 +848,10 @@ func bundledSkillFiles(selected map[string]githubArchiveFile) ([]domain.SkillFil
 		if err := domain.ValidateSkillFilePath(filePath); err != nil {
 			return nil, fmt.Errorf("bundled skill file %q: %w", filePath, err)
 		}
-		files = append(files, domain.SkillFile{
+		files = append(files, domain.SkillFileTreeFile{
 			Path:       filePath,
-			Content:    string(file.content),
+			Bytes:      file.content,
+			MediaType:  skillFileMediaType(filePath, file.content),
 			Executable: file.executable,
 		})
 	}

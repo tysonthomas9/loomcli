@@ -23,9 +23,8 @@ const (
 )
 
 const (
-	ifMatchHeader     = "If-Match"
-	ifNoneMatchHeader = "If-None-Match"
-	etagHeader        = "ETag"
+	ifMatchHeader = "If-Match"
+	etagHeader    = "ETag"
 )
 
 type skillStore struct{ client *Client }
@@ -37,72 +36,37 @@ var (
 	_ store.SkillPackStore = (*skillPackStore)(nil)
 )
 
-// skillWire mirrors fleet-db's models.Skill JSON shape.
-//
-// files carries domain.SkillFile directly rather than a local mirror, on the
-// same reasoning roleWire carries domain.RoleInputPolicy directly: the JSON
-// tags already match field for field, and a second copy of the type is a
-// second place to get the revision field's quoting rule wrong.
+// skillWire mirrors fleet-db's file-tree-only models.Skill JSON shape.
 type skillWire struct {
-	WorkspaceKey    string             `json:"workspace_key"`
-	Name            string             `json:"name"`
-	Scope           string             `json:"scope"`
-	RoleName        string             `json:"role_name,omitempty"`
-	Description     string             `json:"description"`
-	Content         string             `json:"content"`
-	Files           []domain.SkillFile `json:"files,omitempty"`
-	ContentRevision string             `json:"content_revision,omitempty"`
-	CreatedBy       string             `json:"created_by,omitempty"`
-	UpdatedBy       string             `json:"updated_by,omitempty"`
-	Source          string             `json:"source,omitempty"`
-	SourceRef       string             `json:"source_ref,omitempty"`
-	CreatedAt       time.Time          `json:"created_at"`
-	UpdatedAt       time.Time          `json:"updated_at"`
+	WorkspaceKey     string    `json:"workspace_key"`
+	Name             string    `json:"name"`
+	Scope            string    `json:"scope"`
+	RoleName         string    `json:"role_name,omitempty"`
+	Description      string    `json:"description"`
+	FileTreeRevision string    `json:"file_tree_revision"`
+	CreatedBy        string    `json:"created_by,omitempty"`
+	UpdatedBy        string    `json:"updated_by,omitempty"`
+	Source           string    `json:"source,omitempty"`
+	SourceRef        string    `json:"source_ref,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 func (s skillWire) toDomain() *domain.Skill {
 	return &domain.Skill{
-		WorkspaceKey:    s.WorkspaceKey,
-		Name:            s.Name,
-		Scope:           domain.SkillScope(s.Scope),
-		RoleName:        s.RoleName,
-		Description:     s.Description,
-		Content:         s.Content,
-		Files:           append([]domain.SkillFile(nil), s.Files...),
-		ContentRevision: s.ContentRevision,
-		CreatedBy:       s.CreatedBy,
-		UpdatedBy:       s.UpdatedBy,
-		Source:          s.Source,
-		SourceRef:       s.SourceRef,
-		CreatedAt:       s.CreatedAt,
-		UpdatedAt:       s.UpdatedAt,
+		WorkspaceKey: s.WorkspaceKey, Name: s.Name, Scope: domain.SkillScope(s.Scope), RoleName: s.RoleName,
+		Description: s.Description, FileTreeRevision: s.FileTreeRevision,
+		CreatedBy: s.CreatedBy, UpdatedBy: s.UpdatedBy, Source: s.Source, SourceRef: s.SourceRef,
+		CreatedAt: s.CreatedAt, UpdatedAt: s.UpdatedAt,
 	}
-}
-
-// skillFileBody is a bundled file on the way OUT. It drops the revision:
-// revisions are derived server-side and a value sent on a write is ignored, so
-// echoing one back would only suggest it meant something.
-type skillFileBody struct {
-	Path       string `json:"path"`
-	Content    string `json:"content"`
-	Executable bool   `json:"executable,omitempty"`
-}
-
-func skillFileBodies(files []domain.SkillFile) []skillFileBody {
-	out := make([]skillFileBody, 0, len(files))
-	for _, f := range files {
-		out = append(out, skillFileBody{Path: f.Path, Content: f.Content, Executable: f.Executable})
-	}
-	return out
 }
 
 type createSkillBody struct {
-	Name        string          `json:"name,omitempty"`
-	Description string          `json:"description"`
-	Content     string          `json:"content,omitempty"`
-	Files       []skillFileBody `json:"files,omitempty"`
-	Source      string          `json:"source,omitempty"`
-	SourceRef   string          `json:"source_ref,omitempty"`
+	Name             string `json:"name,omitempty"`
+	Description      string `json:"description"`
+	FileTreeRevision string `json:"file_tree_revision"`
+	Source           string `json:"source,omitempty"`
+	SourceRef        string `json:"source_ref,omitempty"`
 }
 
 // newCreateSkillBody builds the create/upsert body. withName is false on the
@@ -111,11 +75,8 @@ type createSkillBody struct {
 // disagree.
 func newCreateSkillBody(in store.SkillCreate, withName bool) createSkillBody {
 	body := createSkillBody{
-		Description: in.Description,
-		Content:     in.Content,
-		Files:       skillFileBodies(in.Files),
-		Source:      in.Source,
-		SourceRef:   in.SourceRef,
+		Description: in.Description, FileTreeRevision: in.FileTreeRevision,
+		Source: in.Source, SourceRef: in.SourceRef,
 	}
 	if withName {
 		body.Name = in.Ref.Name
@@ -124,56 +85,10 @@ func newCreateSkillBody(in store.SkillCreate, withName bool) createSkillBody {
 }
 
 type updateSkillBody struct {
-	Description *string          `json:"description,omitempty"`
-	Content     *string          `json:"content,omitempty"`
-	Files       *[]skillFileBody `json:"files,omitempty"`
-	Source      string           `json:"source,omitempty"`
-	SourceRef   *string          `json:"source_ref,omitempty"`
-}
-
-type putSkillFileBody struct {
-	Content    string `json:"content"`
-	Executable bool   `json:"executable,omitempty"`
-	Source     string `json:"source,omitempty"`
-}
-
-// skillDocumentWire mirrors fleet-db's SkillFileResponse.
-type skillDocumentWire struct {
-	Path       string `json:"path"`
-	Content    string `json:"content"`
-	Executable bool   `json:"executable,omitempty"`
-	Revision   string `json:"revision"`
-	SkillRef   string `json:"skill_ref"`
-}
-
-// toDomain converts a per-document response, reconciling the two forms the
-// revision arrives in.
-//
-// The server sends it twice: unquoted in the JSON `revision` field, and quoted
-// in the ETag header, because RFC 9110 requires an entity-tag to be quoted.
-// The body's value is the canonical one and wins; the header is only a
-// fallback. What must never happen is the quoted form leaking upward, because
-// a caller would then compare a quoted token against the unquoted one the list
-// endpoint gives it, never match, and see a permanent conflict that looks
-// exactly like a real one. (That is the client-side twin of the server bug
-// that made conditional writes fail 100% of the time before parseETagList
-// landed.)
-func (d skillDocumentWire) toDomain(etag string) (*domain.SkillDocument, error) {
-	ref, err := domain.ParseSkillRef(d.SkillRef)
-	if err != nil {
-		return nil, err
-	}
-	revision := d.Revision
-	if revision == "" {
-		revision = parseETag(etag)
-	}
-	return &domain.SkillDocument{
-		Ref:        ref,
-		Path:       d.Path,
-		Content:    d.Content,
-		Executable: d.Executable,
-		Revision:   revision,
-	}, nil
+	Description      *string `json:"description,omitempty"`
+	FileTreeRevision *string `json:"file_tree_revision,omitempty"`
+	Source           string  `json:"source,omitempty"`
+	SourceRef        *string `json:"source_ref,omitempty"`
 }
 
 // ifMatchHeaderValue renders a caller's revision as the entity-tag the wire
@@ -186,43 +101,26 @@ func (d skillDocumentWire) toDomain(etag string) (*domain.SkillDocument, error) 
 // 412s forever with an error that reads like a genuine conflict. That is the
 // exact bug fleet-db shipped and fixed on its own side of this header, and
 // re-creating it one layer up would be no better. Normalizing makes the two
-// forms one form; a multi-tag header is rejected rather than guessed at.
-//
-// "*" travels unquoted — it is a wildcard, not an entity-tag.
+// forms one form; wildcard, weak and multi-tag conditions are rejected because
+// Fleet accepts exactly one quoted strong current tree revision.
 func ifMatchHeaderValue(revision string) (string, error) {
-	normalized, err := domain.NormalizeSkillRevision(revision)
+	normalized, err := domain.NormalizeSkillTreeRevision(revision)
 	if err != nil {
 		return "", err
 	}
-	if normalized == "" || normalized == "*" {
-		return normalized, nil
+	if normalized == "" {
+		return "", fmt.Errorf("expected skill file tree revision is required: %w", domain.ErrInvalid)
 	}
 	return strconv.Quote(normalized), nil
 }
 
-// conditionalWriteHeaders builds the precondition headers for one document
-// write. An empty ifMatch sends no If-Match at all — the caller asserting no
-// precondition — which fleet-db answers 428 for a mutation, deliberately.
-func conditionalWriteHeaders(ifMatch string, ifNoneMatchAny bool) (map[string]string, error) {
-	headers := map[string]string{}
-	if ifMatch != "" {
-		value, err := ifMatchHeaderValue(ifMatch)
-		if err != nil {
-			return nil, err
-		}
-		headers[ifMatchHeader] = value
-	}
-	if ifNoneMatchAny {
-		headers[ifNoneMatchHeader] = "*"
-	}
-	return headers, nil
-}
-
-// parseETag turns an ETag response header into the bare revision. Weak tags
-// are accepted per RFC 9110 §8.8.3: these revisions hash exact bytes, so weak
-// and strong comparison give the same answer.
+// parseETag turns a strong ETag response header into the bare opaque revision.
 func parseETag(header string) string {
-	revision, err := domain.NormalizeSkillRevision(header)
+	header = strings.TrimSpace(header)
+	if len(header) < 2 || !strings.HasPrefix(header, `"`) || !strings.HasSuffix(header, `"`) {
+		return ""
+	}
+	revision, err := domain.NormalizeSkillTreeRevision(header)
 	if err != nil {
 		return ""
 	}
@@ -247,18 +145,6 @@ func skillItemPath(ws string, ref domain.SkillRef) string {
 	return skillCollectionPath(ws, ref) + "/" + pathEscape(ref.Name)
 }
 
-// skillDocumentPath addresses one document. The server's route ends in a
-// `{path...}` wildcard, so the separators stay literal and only the segments
-// are escaped — escaping the whole path would turn "references/api.md" into a
-// single segment that matches nothing.
-func skillDocumentPath(ws string, ref domain.SkillRef, filePath string) string {
-	segments := strings.Split(filePath, "/")
-	for i, segment := range segments {
-		segments[i] = pathEscape(segment)
-	}
-	return skillItemPath(ws, ref) + "/files/" + strings.Join(segments, "/")
-}
-
 func sourceQuery(source string) url.Values {
 	q := url.Values{}
 	if source != "" {
@@ -270,15 +156,16 @@ func sourceQuery(source string) url.Values {
 // --- SkillStore ---
 
 func (s *skillStore) Create(ctx context.Context, in store.SkillCreate) (*domain.Skill, error) {
-	if err := validateSkillRoute(in.WorkspaceKey, in.Ref); err != nil {
+	if err := validateSkillCreateInput(in); err != nil {
 		return nil, err
 	}
 	var resp skillWire
 	path := skillCollectionPath(in.WorkspaceKey, in.Ref)
-	if _, _, err := s.client.doWithResponseNoRedirect(ctx, http.MethodPost, path, newCreateSkillBody(in, true), &resp, nil); err != nil {
+	_, headers, err := s.client.doWithResponseNoRedirect(ctx, http.MethodPost, path, newCreateSkillBody(in, true), &resp, nil)
+	if err != nil {
 		return nil, err
 	}
-	return resp.toDomain(), nil
+	return validateSkillResponse(resp, headers.Get(etagHeader), in.WorkspaceKey, in.Ref, true)
 }
 
 func (s *skillStore) Get(ctx context.Context, ws string, ref domain.SkillRef) (*domain.Skill, error) {
@@ -286,10 +173,11 @@ func (s *skillStore) Get(ctx context.Context, ws string, ref domain.SkillRef) (*
 		return nil, err
 	}
 	var resp skillWire
-	if err := s.client.do(ctx, http.MethodGet, skillItemPath(ws, ref), nil, &resp); err != nil {
+	_, headers, err := s.client.doWithResponse(ctx, http.MethodGet, skillItemPath(ws, ref), nil, &resp, nil)
+	if err != nil {
 		return nil, err
 	}
-	return resp.toDomain(), nil
+	return validateSkillResponse(resp, headers.Get(etagHeader), ws, ref, true)
 }
 
 // List returns skills in the workspace. An empty filter returns BOTH scopes in
@@ -321,13 +209,17 @@ func (s *skillStore) List(ctx context.Context, ws string, filter store.SkillFilt
 	}
 	out := make([]*domain.Skill, 0, len(resp.Skills))
 	for _, sk := range resp.Skills {
-		out = append(out, sk.toDomain())
+		item, err := validateSkillResponse(sk, "", ws, sk.toDomain().Ref(), false)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
 	}
 	return out, nil
 }
 
 func (s *skillStore) Upsert(ctx context.Context, in store.SkillUpsert) (*domain.Skill, bool, error) {
-	if err := validateSkillRoute(in.Skill.WorkspaceKey, in.Skill.Ref); err != nil {
+	if err := validateSkillCreateInput(in.Skill); err != nil {
 		return nil, false, err
 	}
 	method := http.MethodPut
@@ -339,35 +231,42 @@ func (s *skillStore) Upsert(ctx context.Context, in store.SkillUpsert) (*domain.
 		method, path = http.MethodPost, path+"/force-upsert"
 	}
 	var resp skillWire
-	status, _, err := s.client.doWithResponseNoRedirect(ctx, method, path, newCreateSkillBody(in.Skill, false), &resp, nil)
+	status, headers, err := s.client.doWithResponseNoRedirect(ctx, method, path, newCreateSkillBody(in.Skill, false), &resp, nil)
 	if err != nil {
 		return nil, false, err
 	}
-	return resp.toDomain(), status == http.StatusCreated, nil
+	item, err := validateSkillResponse(resp, headers.Get(etagHeader), in.Skill.WorkspaceKey, in.Skill.Ref, true)
+	return item, status == http.StatusCreated, err
 }
 
 func (s *skillStore) Update(ctx context.Context, ws string, ref domain.SkillRef, patch store.SkillUpdate) (*domain.Skill, error) {
 	if err := validateSkillRoute(ws, ref); err != nil {
 		return nil, err
 	}
-	body := updateSkillBody{
-		Description: patch.Description,
-		Content:     patch.Content,
-		Source:      patch.Source,
-		SourceRef:   patch.SourceRef,
+	if patch.Description != nil && patch.FileTreeRevision == nil {
+		return nil, fmt.Errorf("skill description change requires a file_tree_revision CAS: %w", domain.ErrInvalid)
 	}
-	if patch.Files != nil {
-		// A non-nil pointer to an empty slice must serialize as `[]`, not be
-		// omitted: "drop every bundled file" and "leave them alone" are
-		// different instructions and the pointer is what distinguishes them.
-		files := skillFileBodies(*patch.Files)
-		body.Files = &files
+	body := updateSkillBody{
+		Description: patch.Description, FileTreeRevision: patch.FileTreeRevision,
+		Source: patch.Source, SourceRef: patch.SourceRef,
+	}
+	var headers map[string]string
+	if patch.FileTreeRevision != nil {
+		if *patch.FileTreeRevision == "" {
+			return nil, fmt.Errorf("skill file_tree_revision is required: %w", domain.ErrInvalid)
+		}
+		value, err := ifMatchHeaderValue(patch.ExpectedFileTreeRevision)
+		if err != nil {
+			return nil, err
+		}
+		headers = map[string]string{ifMatchHeader: value}
 	}
 	var resp skillWire
-	if _, _, err := s.client.doWithResponseNoRedirect(ctx, http.MethodPatch, skillItemPath(ws, ref), body, &resp, nil); err != nil {
+	_, responseHeaders, err := s.client.doWithResponseNoRedirect(ctx, http.MethodPatch, skillItemPath(ws, ref), body, &resp, headers)
+	if err != nil {
 		return nil, err
 	}
-	return resp.toDomain(), nil
+	return validateSkillResponse(resp, responseHeaders.Get(etagHeader), ws, ref, true)
 }
 
 func (s *skillStore) Delete(ctx context.Context, ws string, ref domain.SkillRef, del store.SkillDelete) error {
@@ -385,51 +284,6 @@ func (s *skillStore) Delete(ctx context.Context, ws string, ref domain.SkillRef,
 	return err
 }
 
-func (s *skillStore) GetFile(ctx context.Context, ws string, ref domain.SkillRef, filePath string) (*domain.SkillDocument, error) {
-	if err := validateSkillDocumentRoute(ws, ref, filePath); err != nil {
-		return nil, err
-	}
-	var resp skillDocumentWire
-	path := skillDocumentPath(ws, ref, filePath)
-	_, headers, err := s.client.doWithResponse(ctx, http.MethodGet, path, nil, &resp, nil)
-	if err != nil {
-		return nil, err
-	}
-	return resp.toDomain(headers.Get(etagHeader))
-}
-
-func (s *skillStore) PutFile(ctx context.Context, ws string, ref domain.SkillRef, write store.SkillFileWrite) (*domain.SkillDocument, error) {
-	if err := validateSkillDocumentRoute(ws, ref, write.Path); err != nil {
-		return nil, err
-	}
-	headers, err := conditionalWriteHeaders(write.IfMatch, write.IfNoneMatchAny)
-	if err != nil {
-		return nil, err
-	}
-	body := putSkillFileBody{Content: write.Content, Executable: write.Executable, Source: write.Source}
-	var resp skillDocumentWire
-	path := skillDocumentPath(ws, ref, write.Path)
-	_, respHeaders, err := s.client.doWithResponseNoRedirect(ctx, http.MethodPut, path, body, &resp, headers)
-	if err != nil {
-		return nil, err
-	}
-	return resp.toDomain(respHeaders.Get(etagHeader))
-}
-
-func (s *skillStore) DeleteFile(ctx context.Context, ws string, ref domain.SkillRef, del store.SkillFileDelete) error {
-	if err := validateSkillDocumentRoute(ws, ref, del.Path); err != nil {
-		return err
-	}
-	headers, err := conditionalWriteHeaders(del.IfMatch, false)
-	if err != nil {
-		return err
-	}
-	// Source travels as a query parameter because DELETE carries no body.
-	path := withQuery(skillDocumentPath(ws, ref, del.Path), sourceQuery(del.Source))
-	_, _, err = s.client.doWithResponseNoRedirect(ctx, http.MethodDelete, path, nil, nil, headers)
-	return err
-}
-
 // validateSkillRoute is the adapter's final defense before constructing a URL.
 // Domain validation protects role/name; the segment check also protects the
 // workspace key supplied separately to the Store method.
@@ -443,14 +297,17 @@ func validateSkillRoute(ws string, ref domain.SkillRef) error {
 	return nil
 }
 
-func validateSkillDocumentRoute(ws string, ref domain.SkillRef, filePath string) error {
-	if err := validateSkillRoute(ws, ref); err != nil {
+func validateSkillCreateInput(in store.SkillCreate) error {
+	if err := validateSkillRoute(in.WorkspaceKey, in.Ref); err != nil {
 		return err
 	}
-	if filePath == domain.SkillFileNameSKILLMD {
-		return nil
+	if err := domain.ValidateSkillDescription(in.Description); err != nil {
+		return err
 	}
-	return domain.ValidateSkillFilePath(filePath)
+	if in.FileTreeRevision == "" {
+		return fmt.Errorf("skill file_tree_revision is required: %w", domain.ErrInvalid)
+	}
+	return nil
 }
 
 func validateSkillPathSegment(field, value string) error {
@@ -467,6 +324,29 @@ func validateSkillPathSegment(field, value string) error {
 		return fmt.Errorf("skill %s %q escapes to an unsafe path segment: %w", field, value, domain.ErrInvalid)
 	}
 	return nil
+}
+
+func validateSkillResponse(wire skillWire, etag, workspace string, ref domain.SkillRef, requireETag bool) (*domain.Skill, error) {
+	skill := wire.toDomain()
+	if err := skill.Ref().Validate(); err != nil {
+		return nil, fmt.Errorf("skill response ref: %w", err)
+	}
+	if skill.WorkspaceKey != workspace || skill.Ref() != ref {
+		return nil, fmt.Errorf("skill response identity %q/%s does not match %q/%s: %w", skill.WorkspaceKey, skill.Ref(), workspace, ref, domain.ErrIntegrity)
+	}
+	if err := domain.ValidateSkillDescription(skill.Description); err != nil {
+		return nil, fmt.Errorf("skill response description: %w", err)
+	}
+	if skill.FileTreeRevision == "" {
+		return nil, fmt.Errorf("skill response file_tree_revision is required: %w", domain.ErrIntegrity)
+	}
+	if requireETag && etag == "" {
+		return nil, fmt.Errorf("skill response ETag is required: %w", domain.ErrIntegrity)
+	}
+	if etag != "" && parseETag(etag) != skill.FileTreeRevision {
+		return nil, fmt.Errorf("skill response ETag %q does not match file_tree_revision %q: %w", etag, skill.FileTreeRevision, domain.ErrIntegrity)
+	}
+	return skill, nil
 }
 
 // --- error classification ---
@@ -500,7 +380,6 @@ func skillPreconditionError(prefix string, body []byte) error {
 	ref, _ := domain.ParseSkillRef(meta["ref"])
 	return &domain.SkillPreconditionError{
 		Ref:      ref,
-		Path:     meta["path"],
 		Message:  prefix,
 		Expected: meta["expected_revision"],
 		Stored:   meta["stored_revision"],

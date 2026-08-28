@@ -2,6 +2,7 @@ package skill
 
 import (
 	"archive/tar"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -45,11 +46,90 @@ func TestSkillImportHappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("canonicalize fixture: %v", err)
 	}
-	if sk.Description != "Use the local tool" || sk.Content != "local body\n" || sk.Source != "import:"+canonical {
+	snapshot := loadTestSkillSnapshot(t, st, sk)
+	if sk.Description != "Use the local tool" || string(snapshot.Body) != "local body\n" || sk.Source != "import:"+canonical {
 		t.Fatalf("imported skill = %+v", sk)
 	}
-	if len(sk.Files) != 1 || sk.Files[0].Path != "scripts/check.sh" || !sk.Files[0].Executable {
-		t.Fatalf("imported files = %+v", sk.Files)
+	files := bundledTreeFiles(snapshot.Files)
+	if len(files) != 1 || files[0].Path != "scripts/check.sh" || !files[0].Executable {
+		t.Fatalf("imported files = %+v", files)
+	}
+}
+
+func TestSkillImportPreservesCompleteDocumentUnlessNameOverride(t *testing.T) {
+	source := []byte("---\nname: metadata-tool\ndescription: Metadata\nlicense: MIT\nmetadata:\n  owner: test\n---\nbody\n")
+	for _, tt := range []struct {
+		name, override string
+		preserved      bool
+	}{
+		{name: "default", preserved: true},
+		{name: "override", override: "renamed-tool"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			withoutAgentName(t)
+			st := memstore.New()
+			withSkillCommandStore(t, st)
+			directory := t.TempDir()
+			if err := os.WriteFile(filepath.Join(directory, domain.SkillFileNameSKILLMD), source, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			args := []string{"import", directory}
+			name := "metadata-tool"
+			if tt.override != "" {
+				args = append(args, "--name", tt.override)
+				name = tt.override
+			}
+			out, err := executeSkillCommand(t, "", args...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sk, err := st.Skills().Get(t.Context(), testWorkspace, domain.WorkspaceSkillRef(name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			stored, err := st.WorkspaceFiles().Download(t.Context(), testWorkspace, sk.FileTreeRevision, domain.SkillFileNameSKILLMD)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.preserved && !bytes.Equal(stored, source) {
+				t.Fatalf("default import changed SKILL.md: %q", stored)
+			}
+			if !tt.preserved && (!bytes.Contains(stored, []byte("name: renamed-tool")) || bytes.Contains(stored, []byte("license: MIT"))) {
+				t.Fatalf("override did not canonically rebuild SKILL.md: %q", stored)
+			}
+			if tt.preserved == strings.Contains(out, "dropped SKILL.md frontmatter keys") {
+				t.Fatalf("dropped-key notice mismatch: %q", out)
+			}
+			if tt.preserved {
+				bundlePath := filepath.Join(directory, "guide.txt")
+				if err := os.WriteFile(bundlePath, []byte("guide\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := executeSkillCommand(t, "", "update", name, "--file", bundlePath); err != nil {
+					t.Fatalf("file-only update: %v", err)
+				}
+				updated, err := st.Skills().Get(t.Context(), testWorkspace, domain.WorkspaceSkillRef(name))
+				if err != nil {
+					t.Fatal(err)
+				}
+				stored, err = st.WorkspaceFiles().Download(t.Context(), testWorkspace, updated.FileTreeRevision, domain.SkillFileNameSKILLMD)
+				if err != nil || !bytes.Equal(stored, source) {
+					t.Fatalf("file-only update changed SKILL.md: %q, %v", stored, err)
+				}
+				if _, err := executeSkillCommand(t, "replacement body\n", "update", name, "--content", "-"); err != nil {
+					t.Fatalf("content-only update: %v", err)
+				}
+				updated, err = st.Skills().Get(t.Context(), testWorkspace, domain.WorkspaceSkillRef(name))
+				if err != nil {
+					t.Fatal(err)
+				}
+				stored, err = st.WorkspaceFiles().Download(t.Context(), testWorkspace, updated.FileTreeRevision, domain.SkillFileNameSKILLMD)
+				want := bytes.Replace(source, []byte("body\n"), []byte("replacement body\n"), 1)
+				if err != nil || !bytes.Equal(stored, want) {
+					t.Fatalf("content-only update changed frontmatter: %q, %v", stored, err)
+				}
+			}
+		})
 	}
 }
 
@@ -71,7 +151,7 @@ func TestSkillImportRefusesSymlinks(t *testing.T) {
 	}
 }
 
-func TestSkillImportBinaryAbortListsEveryFile(t *testing.T) {
+func TestSkillImportPreservesBinaryFiles(t *testing.T) {
 	withoutAgentName(t)
 	st := memstore.New()
 	withSkillCommandStore(t, st)
@@ -83,17 +163,20 @@ func TestSkillImportBinaryAbortListsEveryFile(t *testing.T) {
 		t.Fatalf("write invalid UTF-8 fixture: %v", err)
 	}
 
-	_, err := executeSkillCommand(t, "", "import", directory)
-	if err == nil {
-		t.Fatal("binary import error = nil")
+	if _, err := executeSkillCommand(t, "", "import", directory); err != nil {
+		t.Fatalf("binary import: %v", err)
 	}
-	for _, want := range []string{"binary content is not supported", "zero.dat", "utf8.dat"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("binary import error %q does not contain %q", err, want)
-		}
+	sk, err := st.Skills().Get(context.Background(), testWorkspace, domain.WorkspaceSkillRef("binary-tool"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := st.Skills().Get(context.Background(), testWorkspace, domain.WorkspaceSkillRef("binary-tool")); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("binary import wrote partial skill: %v", err)
+	files := bundledTreeFiles(loadTestSkillSnapshot(t, st, sk).Files)
+	byPath := make(map[string][]byte, len(files))
+	for _, file := range files {
+		byPath[file.Path] = file.Bytes
+	}
+	if string(byPath["zero.dat"]) != "bad\x00data" || len(byPath["utf8.dat"]) != 2 || byPath["utf8.dat"][0] != 0xff {
+		t.Fatalf("binary files changed: %+v", files)
 	}
 }
 
@@ -102,15 +185,7 @@ func TestSkillImportGuardedConflictAndForce(t *testing.T) {
 	st := memstore.New()
 	withSkillCommandStore(t, st)
 	st.SetSkillActor("owner-a")
-	if _, err := st.Skills().Create(context.Background(), store.SkillCreate{
-		WorkspaceKey: testWorkspace,
-		Ref:          domain.WorkspaceSkillRef("guarded-import"),
-		Description:  "Original",
-		Content:      "original body\n",
-		Source:       manualSkillSource,
-	}); err != nil {
-		t.Fatalf("create guarded fixture: %v", err)
-	}
+	createTestSkill(t, st, domain.WorkspaceSkillRef("guarded-import"), "Original", "original body\n", manualSkillSource)
 	st.SetSkillActor("writer-b")
 	directory := writeLocalSkillFixture(t, "guarded-import", "Replacement", "replacement body\n")
 
@@ -124,7 +199,7 @@ func TestSkillImportGuardedConflictAndForce(t *testing.T) {
 		}
 	}
 	sk, getErr := st.Skills().Get(context.Background(), testWorkspace, domain.WorkspaceSkillRef("guarded-import"))
-	if getErr != nil || sk.Content != "original body\n" {
+	if getErr != nil || string(loadTestSkillSnapshot(t, st, sk).Body) != "original body\n" {
 		t.Fatalf("guarded import changed existing skill: skill=%+v err=%v", sk, getErr)
 	}
 
@@ -140,7 +215,7 @@ func TestSkillImportGuardedConflictAndForce(t *testing.T) {
 	if canonicalErr != nil {
 		t.Fatalf("canonicalize import fixture: %v", canonicalErr)
 	}
-	if err != nil || sk.Content != "replacement body\n" || sk.Source != "import:"+canonical {
+	if err != nil || string(loadTestSkillSnapshot(t, st, sk).Body) != "replacement body\n" || sk.Source != "import:"+canonical {
 		t.Fatalf("force-imported skill=%+v err=%v", sk, err)
 	}
 }
@@ -230,8 +305,9 @@ func TestSkillImportSkipsHiddenPathsWithNotice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get clean import: %v", err)
 	}
-	if len(sk.Files) != 1 || sk.Files[0].Path != "guide.txt" {
-		t.Fatalf("hidden paths were bundled: %+v", sk.Files)
+	files := bundledTreeFiles(loadTestSkillSnapshot(t, st, sk).Files)
+	if len(files) != 1 || files[0].Path != "guide.txt" {
+		t.Fatalf("hidden paths were bundled: %+v", files)
 	}
 }
 
@@ -321,43 +397,11 @@ func TestSkillSyncDiscoversMultipleSkillsSkipsConflictAndRecordsSync(t *testing.
 	st := memstore.New()
 	withSkillCommandStore(t, st)
 	st.SetSkillActor("owner-a")
-	if _, err := st.Skills().Create(context.Background(), store.SkillCreate{
-		WorkspaceKey: testWorkspace,
-		Ref:          domain.WorkspaceSkillRef("conflict"),
-		Description:  "Owned elsewhere",
-		Content:      "original\n",
-		Source:       manualSkillSource,
-	}); err != nil {
-		t.Fatalf("create conflict fixture: %v", err)
-	}
+	createTestSkill(t, st, domain.WorkspaceSkillRef("conflict"), "Owned elsewhere", "original\n", manualSkillSource)
 	st.SetSkillActor("pack-syncer")
-	if _, err := st.Skills().Create(context.Background(), store.SkillCreate{
-		WorkspaceKey: testWorkspace,
-		Ref:          domain.WorkspaceSkillRef("updatable"),
-		Description:  "Old",
-		Content:      "old\n",
-		Source:       manualSkillSource,
-	}); err != nil {
-		t.Fatalf("create update fixture: %v", err)
-	}
-	if _, err := st.Skills().Create(context.Background(), store.SkillCreate{
-		WorkspaceKey: testWorkspace,
-		Ref:          domain.WorkspaceSkillRef("from-other-pack"),
-		Description:  "Other pack",
-		Content:      "other pack body\n",
-		Source:       domain.SkillPackSource("other-pack"),
-	}); err != nil {
-		t.Fatalf("create other-pack fixture: %v", err)
-	}
-	if _, err := st.Skills().Create(context.Background(), store.SkillCreate{
-		WorkspaceKey: testWorkspace,
-		Ref:          domain.WorkspaceSkillRef("same-pack"),
-		Description:  "Old same-pack content",
-		Content:      "old same-pack body\n",
-		Source:       domain.SkillPackSource("toolkit"),
-	}); err != nil {
-		t.Fatalf("create same-pack fixture: %v", err)
-	}
+	createTestSkill(t, st, domain.WorkspaceSkillRef("updatable"), "Old", "old\n", manualSkillSource)
+	createTestSkill(t, st, domain.WorkspaceSkillRef("from-other-pack"), "Other pack", "other pack body\n", domain.SkillPackSource("other-pack"))
+	createTestSkill(t, st, domain.WorkspaceSkillRef("same-pack"), "Old same-pack content", "old same-pack body\n", domain.SkillPackSource("toolkit"))
 
 	const commit = "0123456789abcdef0123456789abcdef01234567"
 	tarball := buildSkillTarball(t,
@@ -405,22 +449,24 @@ func TestSkillSyncDiscoversMultipleSkillsSkipsConflictAndRecordsSync(t *testing.
 	if err != nil {
 		t.Fatalf("get root skill: %v", err)
 	}
-	if root.Source != domain.SkillPackSource("toolkit") || root.SourceRef != commit || len(root.Files) != 1 || root.Files[0].Path != "root-guide.txt" {
+	rootFiles := bundledTreeFiles(loadTestSkillSnapshot(t, st, root).Files)
+	if root.Source != domain.SkillPackSource("toolkit") || root.SourceRef != commit || len(rootFiles) != 1 || rootFiles[0].Path != "root-guide.txt" {
 		t.Fatalf("root skill = %+v; nested skill directories must not become root bundled files", root)
 	}
 	alpha, err := st.Skills().Get(context.Background(), testWorkspace, domain.WorkspaceSkillRef("alpha"))
 	if err != nil {
 		t.Fatalf("get alpha skill: %v", err)
 	}
-	if alpha.Source != domain.SkillPackSource("toolkit") || alpha.SourceRef != commit || len(alpha.Files) != 1 || !alpha.Files[0].Executable {
+	alphaFiles := bundledTreeFiles(loadTestSkillSnapshot(t, st, alpha).Files)
+	if alpha.Source != domain.SkillPackSource("toolkit") || alpha.SourceRef != commit || len(alphaFiles) != 1 || !alphaFiles[0].Executable {
 		t.Fatalf("alpha skill = %+v", alpha)
 	}
 	updatable, err := st.Skills().Get(context.Background(), testWorkspace, domain.WorkspaceSkillRef("updatable"))
-	if err != nil || updatable.Content != "old\n" || updatable.Source != manualSkillSource {
+	if err != nil || string(loadTestSkillSnapshot(t, st, updatable).Body) != "old\n" || updatable.Source != manualSkillSource {
 		t.Fatalf("manual same-actor skill was overwritten: skill=%+v err=%v", updatable, err)
 	}
 	fromOther, err := st.Skills().Get(context.Background(), testWorkspace, domain.WorkspaceSkillRef("from-other-pack"))
-	if err != nil || fromOther.Content != "other pack body\n" || fromOther.Source != domain.SkillPackSource("other-pack") {
+	if err != nil || string(loadTestSkillSnapshot(t, st, fromOther).Body) != "other pack body\n" || fromOther.Source != domain.SkillPackSource("other-pack") {
 		t.Fatalf("other-pack same-actor skill was overwritten: skill=%+v err=%v", fromOther, err)
 	}
 	pack, err := st.SkillPacks().Get(context.Background(), testWorkspace, "toolkit")
@@ -562,6 +608,35 @@ func writeLocalSkillFixture(t *testing.T, name, description, body string) string
 		t.Fatalf("write local SKILL.md: %v", err)
 	}
 	return directory
+}
+
+func createTestSkill(t *testing.T, st *memstore.Store, ref domain.SkillRef, description, body, source string) *domain.Skill {
+	t.Helper()
+	snapshot, err := domain.BuildSkillFileTree(ref.Name, description, []byte(body), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision, err := publishSkillSnapshot(t.Context(), st.WorkspaceFiles(), testWorkspace, *snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sk, err := st.Skills().Create(t.Context(), store.SkillCreate{
+		WorkspaceKey: testWorkspace, Ref: ref, Description: description,
+		FileTreeRevision: revision, Source: source,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sk
+}
+
+func loadTestSkillSnapshot(t *testing.T, st *memstore.Store, sk *domain.Skill) domain.SkillFileTreeSnapshot {
+	t.Helper()
+	snapshot, err := loadSkillSnapshot(t.Context(), st.WorkspaceFiles(), sk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
 }
 
 func withGitHubInstaller(t *testing.T, installer githubSkillInstaller) {

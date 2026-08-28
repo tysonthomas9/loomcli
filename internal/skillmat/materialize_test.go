@@ -15,30 +15,147 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
+type skillFixtureFile struct {
+	Path       string
+	Content    string
+	Bytes      []byte
+	MediaType  string
+	Executable bool
+}
+
+// skillFixture preserves the terse shape of the pre-file-tree tests while
+// making every successful fixture travel through the public immutable tree
+// publication seam. Document is used by import tests that must preserve an
+// already-complete SKILL.md byte-for-byte; otherwise Content is the body used
+// to build Loom's canonical document.
+type skillFixture struct {
+	Name        string
+	Scope       domain.SkillScope
+	RoleName    string
+	Description string
+	Content     string
+	Document    []byte
+	Files       []skillFixtureFile
+}
+
 type staticSkillStore struct {
 	store.SkillStore
-	skills []*domain.Skill
+	mu     sync.Mutex
+	files  store.WorkspaceFileStore
+	skills []*skillFixture
 	err    error
 }
 
-func (s staticSkillStore) List(context.Context, string, store.SkillFilter) ([]*domain.Skill, error) {
-	return s.skills, s.err
+func (s *staticSkillStore) workspaceFiles() store.WorkspaceFileStore {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.files == nil {
+		s.files = memstore.New().WorkspaceFiles()
+	}
+	return s.files
+}
+
+func (s *staticSkillStore) List(ctx context.Context, workspace string, _ store.SkillFilter) ([]*domain.Skill, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	files := s.workspaceFiles()
+	out := make([]*domain.Skill, 0, len(s.skills))
+	for _, fixture := range s.skills {
+		skill, err := publishSkillFixture(ctx, files, workspace, fixture)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, skill)
+	}
+	return out, nil
+}
+
+func publishSkillFixture(ctx context.Context, files store.WorkspaceFileStore, workspace string, fixture *skillFixture) (*domain.Skill, error) {
+	bundled := make([]domain.SkillFileTreeFile, 0, len(fixture.Files))
+	for _, file := range fixture.Files {
+		body := append([]byte(nil), file.Bytes...)
+		if body == nil {
+			body = []byte(file.Content)
+		}
+		bundled = append(bundled, domain.SkillFileTreeFile{
+			Path: file.Path, Bytes: body, MediaType: file.MediaType, Executable: file.Executable,
+		})
+	}
+	var (
+		snapshot *domain.SkillFileTreeSnapshot
+		err      error
+	)
+	if fixture.Document != nil {
+		snapshot, err = domain.ValidateSkillFileTree(append(bundled, domain.SkillFileTreeFile{
+			Path: domain.SkillFileNameSKILLMD, Bytes: append([]byte(nil), fixture.Document...), MediaType: "text/markdown",
+		}))
+	} else {
+		snapshot, err = domain.BuildSkillFileTree(fixture.Name, fixture.Description, []byte(fixture.Content), bundled)
+	}
+	if err != nil {
+		return nil, err
+	}
+	inputs := make([]domain.WorkspaceFileInput, 0, len(snapshot.Files))
+	for _, file := range snapshot.Files {
+		inputs = append(inputs, domain.WorkspaceFileInput(file))
+	}
+	published, err := files.Publish(ctx, workspace, inputs)
+	if err != nil {
+		return nil, err
+	}
+	return &domain.Skill{
+		WorkspaceKey: workspace, Name: fixture.Name, Scope: fixture.Scope, RoleName: fixture.RoleName,
+		Description: fixture.Description, FileTreeRevision: published.Tree.Revision,
+	}, nil
 }
 
 type materializeStore struct {
 	store.Store
-	skills store.SkillStore
+	skills *staticSkillStore
+	files  store.WorkspaceFileStore
 }
 
 func (s materializeStore) Skills() store.SkillStore { return s.skills }
+func (s materializeStore) WorkspaceFiles() store.WorkspaceFileStore {
+	if s.files != nil {
+		return s.files
+	}
+	if s.skills == nil {
+		return nil
+	}
+	return s.skills.workspaceFiles()
+}
+
+type failingWorkspaceFileStore struct {
+	store.WorkspaceFileStore
+	getTreeErr  error
+	downloadErr error
+}
+
+func (s failingWorkspaceFileStore) GetTree(ctx context.Context, workspace, revision string) (*domain.WorkspaceFileTree, error) {
+	if s.getTreeErr != nil {
+		return nil, s.getTreeErr
+	}
+	return s.WorkspaceFileStore.GetTree(ctx, workspace, revision)
+}
+
+func (s failingWorkspaceFileStore) Download(ctx context.Context, workspace, revision, filePath string) ([]byte, error) {
+	if s.downloadErr != nil {
+		return nil, s.downloadErr
+	}
+	return s.WorkspaceFileStore.Download(ctx, workspace, revision, filePath)
+}
 
 type markerRecordingRoot struct {
 	secureRoot
@@ -60,7 +177,7 @@ func (r *markerRecordingRoot) Remove(string) error { return nil }
 
 func TestMaterializeResolvesRoleSkillAndWritesAgentLayout(t *testing.T) {
 	target := t.TempDir()
-	st := materializeStore{skills: staticSkillStore{skills: []*domain.Skill{
+	st := materializeStore{skills: &staticSkillStore{skills: []*skillFixture{
 		{
 			Name:        "alpha",
 			Scope:       domain.SkillScopeWorkspace,
@@ -73,7 +190,7 @@ func TestMaterializeResolvesRoleSkillAndWritesAgentLayout(t *testing.T) {
 			RoleName:    "lead",
 			Description: "role skill",
 			Content:     "Role body\n",
-			Files: []domain.SkillFile{{
+			Files: []skillFixtureFile{{
 				Path:       "scripts/run.sh",
 				Content:    "#!/bin/sh\necho ok\n",
 				Executable: true,
@@ -135,10 +252,39 @@ func TestMaterializeResolvesRoleSkillAndWritesAgentLayout(t *testing.T) {
 	}
 }
 
+func TestMaterializePreservesImportedSkillDocumentAndRawExecutableBytes(t *testing.T) {
+	target := t.TempDir()
+	document := []byte("---\ndescription: imported exact\nname: imported\nx-vendor: keep\n---\r\nImported body\r\n")
+	archive := []byte{'P', 'K', 0x03, 0x04, 0x00, 0xff, 0x80, '\n'}
+	st := materializeStore{skills: &staticSkillStore{skills: []*skillFixture{{
+		Name: "imported", Scope: domain.SkillScopeWorkspace, Description: "imported exact", Document: document,
+		Files: []skillFixtureFile{{Path: "Archive.zip", Bytes: archive, MediaType: "application/zip", Executable: true}},
+	}}}}
+
+	mustMaterialize(t, st, target, "Materialize imported tree")
+	skillDir := filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "imported")
+	gotDocument, err := os.ReadFile(filepath.Join(skillDir, domain.SkillFileNameSKILLMD))
+	if err != nil || !bytes.Equal(gotDocument, document) {
+		t.Fatalf("imported SKILL.md = %q, err=%v, want exact bytes %q", gotDocument, err, document)
+	}
+	archivePath := filepath.Join(skillDir, "Archive.zip")
+	gotArchive, err := os.ReadFile(archivePath)
+	if err != nil || !bytes.Equal(gotArchive, archive) {
+		t.Fatalf("Archive.zip = %v, err=%v, want raw bytes %v", gotArchive, err, archive)
+	}
+	info, err := os.Stat(archivePath)
+	if err != nil {
+		t.Fatalf("stat Archive.zip: %v", err)
+	}
+	if info.Mode().Perm() != 0o755 {
+		t.Fatalf("Archive.zip mode = %o, want 755", info.Mode().Perm())
+	}
+}
+
 //nolint:funlen // The test verifies the complete synthetic catalog projection in one fixture.
 func TestMaterializeWritesLiveSkillCatalog(t *testing.T) {
 	target := t.TempDir()
-	st := materializeStore{skills: staticSkillStore{skills: []*domain.Skill{
+	st := materializeStore{skills: &staticSkillStore{skills: []*skillFixture{
 		{Name: "zulu", Scope: domain.SkillScopeWorkspace, Description: "Zulu skill", Content: "zulu\n"},
 		{Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "Alpha skill", Content: "alpha\n"},
 	}}}
@@ -201,7 +347,7 @@ func TestMaterializePreservesAngleBracketsInDescription(t *testing.T) {
 
 	target := t.TempDir()
 	description := "Use React's <ViewTransition> component"
-	st := materializeStore{skills: staticSkillStore{skills: []*domain.Skill{{
+	st := materializeStore{skills: &staticSkillStore{skills: []*skillFixture{{
 		Name: "view-transitions", Scope: domain.SkillScopeWorkspace,
 		Description: description, Content: "body\n",
 	}}}}
@@ -229,7 +375,7 @@ func TestMaterializePreservesAngleBracketsInDescription(t *testing.T) {
 
 func TestMaterializeCatalogAnnotatesShadowedSkill(t *testing.T) {
 	target := t.TempDir()
-	st := materializeStore{skills: staticSkillStore{skills: []*domain.Skill{
+	st := materializeStore{skills: &staticSkillStore{skills: []*skillFixture{
 		{Name: "review", Scope: domain.SkillScopeWorkspace, Description: "workspace review", Content: "workspace\n"},
 		{Name: "review", Scope: domain.SkillScopeRole, RoleName: "lead", Description: "lead review", Content: "lead\n"},
 	}}}
@@ -250,13 +396,13 @@ func TestMaterializeCatalogAnnotatesShadowedSkill(t *testing.T) {
 
 func TestMaterializeRewritesCatalogAfterSkillRemoval(t *testing.T) {
 	target := t.TempDir()
-	alpha := &domain.Skill{Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "Alpha skill", Content: "alpha\n"}
-	beta := &domain.Skill{Name: "beta", Scope: domain.SkillScopeWorkspace, Description: "Beta skill", Content: "beta\n"}
-	skills := &staticSkillStore{skills: []*domain.Skill{alpha, beta}}
+	alpha := &skillFixture{Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "Alpha skill", Content: "alpha\n"}
+	beta := &skillFixture{Name: "beta", Scope: domain.SkillScopeWorkspace, Description: "Beta skill", Content: "beta\n"}
+	skills := &staticSkillStore{skills: []*skillFixture{alpha, beta}}
 	st := materializeStore{skills: skills}
 	mustMaterialize(t, st, target, "initial Materialize")
 
-	skills.skills = []*domain.Skill{alpha}
+	skills.skills = []*skillFixture{alpha}
 	mustMaterialize(t, st, target, "Materialize after removal")
 	index, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(indexPath)))
 	if err != nil {
@@ -277,7 +423,7 @@ func TestMaterializeRewritesCatalogAfterSkillRemoval(t *testing.T) {
 
 func TestMaterializeZeroSkillsWritesCatalogOnly(t *testing.T) {
 	target := t.TempDir()
-	if err := materialize(t.Context(), materializeStore{skills: staticSkillStore{}}, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), materializeStore{skills: &staticSkillStore{}}, "WS", "lead", target); err != nil {
 		t.Fatalf("Materialize: %v", err)
 	}
 
@@ -330,7 +476,7 @@ func TestMaterializeRejectsUnmanagedSkillIndex(t *testing.T) {
 		t.Fatalf("write unmanaged INDEX.md: %v", err)
 	}
 
-	err := materialize(t.Context(), materializeStore{skills: staticSkillStore{}}, "WS", "lead", target)
+	err := materialize(t.Context(), materializeStore{skills: &staticSkillStore{}}, "WS", "lead", target)
 	if err == nil || !strings.Contains(err.Error(), "INDEX.md") || !strings.Contains(err.Error(), "unrecorded") {
 		t.Fatalf("Materialize error = %v, want unmanaged INDEX.md collision", err)
 	}
@@ -345,7 +491,7 @@ func TestMaterializeRejectsUnmanagedSkillIndex(t *testing.T) {
 
 func TestMaterializeMatchingHashIsNoOp(t *testing.T) {
 	target := t.TempDir()
-	skills := &staticSkillStore{skills: []*domain.Skill{{
+	skills := &staticSkillStore{skills: []*skillFixture{{
 		Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "database body\n",
 	}}}
 	st := materializeStore{skills: skills}
@@ -365,52 +511,53 @@ func TestMaterializeMatchingHashIsNoOp(t *testing.T) {
 	}
 }
 
-// A stored skill fleet-db should have refused at write time must not be able to
-// stop materialization for the whole workspace: every Materialize caller treats
-// a non-StoreUnavailable error as fatal, so one bad record would take skills
-// down for every agent until it was deleted.
-func TestMaterializeSkipsUnprojectableSkillsWithoutFailing(t *testing.T) {
+// Invalid trees cannot enter the immutable workspace-file store. If a complete
+// prefetch encounters one, materialization fails before touching the prior
+// projection instead of attempting to salvage a partial catalog.
+func TestMaterializeRejectsUnpublishableSkillTreesBeforeProjection(t *testing.T) {
 	tests := []struct {
 		name string
-		bad  *domain.Skill
+		bad  *skillFixture
 	}{
 		{
 			name: "name reserved for the catalog pointer",
-			bad: &domain.Skill{
+			bad: &skillFixture{
 				Name: catalogSkillName, Scope: domain.SkillScopeWorkspace,
 				Description: "smuggled past write-time validation", Content: "body\n",
 			},
 		},
 		{
 			name: "bundled path escapes the skill directory",
-			bad: &domain.Skill{
+			bad: &skillFixture{
 				Name: "beta", Scope: domain.SkillScopeWorkspace, Description: "beta", Content: "body\n",
-				Files: []domain.SkillFile{{Path: "../escape.md", Content: "nope\n"}},
+				Files: []skillFixtureFile{{Path: "../escape.md", Content: "nope\n"}},
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			target := t.TempDir()
-			good := &domain.Skill{
-				Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body\n",
-			}
-			st := materializeStore{skills: staticSkillStore{skills: []*domain.Skill{tt.bad, good}}}
-			mustMaterialize(t, st, target, "Materialize with one unprojectable skill")
-
-			if _, err := os.Stat(filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "alpha", "SKILL.md")); err != nil {
-				t.Fatalf("healthy skill was not materialized: %v", err)
-			}
-			index, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(indexPath)))
+			skills := &staticSkillStore{skills: []*skillFixture{{
+				Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "prior\n",
+			}}}
+			st := materializeStore{skills: skills}
+			mustMaterialize(t, st, target, "initial Materialize")
+			skillMD := filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "alpha", "SKILL.md")
+			before, err := os.ReadFile(skillMD)
 			if err != nil {
-				t.Fatalf("read catalog index: %v", err)
+				t.Fatalf("read prior projection: %v", err)
 			}
-			if !strings.Contains(string(index), "**alpha**") {
-				t.Fatalf("catalog index omits the healthy skill:\n%s", index)
+
+			skills.skills = []*skillFixture{tt.bad, &skillFixture{
+				Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "replacement\n",
+			}}
+			err = materialize(t.Context(), st, "WS", "lead", target)
+			if !errors.Is(err, domain.ErrInvalid) || IsStoreUnavailable(err) {
+				t.Fatalf("Materialize error = %v, want fatal invalid tree", err)
 			}
-			// The index must not advertise a skill that was never written.
-			if strings.Contains(string(index), "**beta**") {
-				t.Fatalf("catalog index advertises a skipped skill:\n%s", index)
+			after, readErr := os.ReadFile(skillMD)
+			if readErr != nil || !bytes.Equal(after, before) {
+				t.Fatalf("prior projection changed after failed prefetch: before=%q after=%q err=%v", before, after, readErr)
 			}
 			if _, err := os.Stat(filepath.Join(target, "escape.md")); !errors.Is(err, fs.ErrNotExist) {
 				t.Fatalf("bundled path escaped the target: stat err = %v", err)
@@ -477,9 +624,9 @@ func TestMaterializeMatchingHashReconcilesProjectionDrift(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			target := t.TempDir()
-			st := materializeStore{skills: staticSkillStore{skills: []*domain.Skill{{
+			st := materializeStore{skills: &staticSkillStore{skills: []*skillFixture{{
 				Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body\n",
-				Files: []domain.SkillFile{{Path: "run.sh", Content: "#!/bin/sh\n", Executable: true}},
+				Files: []skillFixtureFile{{Path: "run.sh", Content: "#!/bin/sh\n", Executable: true}},
 			}}}}
 			mustMaterialize(t, st, target, "first Materialize")
 			tt.mutate(t, target)
@@ -513,7 +660,7 @@ func TestMaterializeMatchingHashReconcilesProjectionDrift(t *testing.T) {
 
 func TestMaterializeRestoresManagedFileReplacedByEmptyDirectory(t *testing.T) {
 	target := t.TempDir()
-	st := materializeStore{skills: staticSkillStore{skills: []*domain.Skill{{
+	st := materializeStore{skills: &staticSkillStore{skills: []*skillFixture{{
 		Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body\n",
 	}}}}
 	mustMaterialize(t, st, target, "initial Materialize")
@@ -537,26 +684,26 @@ func TestMaterializeRestoresManagedFileReplacedByEmptyDirectory(t *testing.T) {
 
 func TestMaterializeKeepsPersistingSkillsReadableWhileUpdatingAndDeleting(t *testing.T) {
 	target := t.TempDir()
-	version := func(body, fileBody string) *domain.Skill {
-		files := make([]domain.SkillFile, 8)
+	version := func(body, fileBody string) *skillFixture {
+		files := make([]skillFixtureFile, 8)
 		for i := range files {
-			files[i] = domain.SkillFile{
+			files[i] = skillFixtureFile{
 				Path:    fmt.Sprintf("references/file-%02d.md", i),
 				Content: strings.Repeat(fileBody, 128),
 			}
 		}
-		return &domain.Skill{
+		return &skillFixture{
 			Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: body, Files: files,
 		}
 	}
 	alphaA := version("version A\n", "A")
 	alphaB := version("version B\n", "B")
-	beta := &domain.Skill{
+	beta := &skillFixture{
 		Name: "beta", Scope: domain.SkillScopeWorkspace, Description: "beta", Content: "persistent beta\n",
-		Files: []domain.SkillFile{{Path: "references/one.md", Content: "one\n"}, {Path: "references/two.md", Content: "two\n"}},
+		Files: []skillFixtureFile{{Path: "references/one.md", Content: "one\n"}, {Path: "references/two.md", Content: "two\n"}},
 	}
-	deleted := &domain.Skill{Name: "deleted", Scope: domain.SkillScopeWorkspace, Description: "deleted", Content: "remove me\n"}
-	skills := &staticSkillStore{skills: []*domain.Skill{alphaA, beta, deleted}}
+	deleted := &skillFixture{Name: "deleted", Scope: domain.SkillScopeWorkspace, Description: "deleted", Content: "remove me\n"}
+	skills := &staticSkillStore{skills: []*skillFixture{alphaA, beta, deleted}}
 	st := materializeStore{skills: skills}
 	mustMaterialize(t, st, target, "initial Materialize")
 
@@ -616,7 +763,7 @@ func TestMaterializeKeepsPersistingSkillsReadableWhileUpdatingAndDeleting(t *tes
 		if i%2 == 0 {
 			alpha = alphaB
 		}
-		skills.skills = []*domain.Skill{alpha, beta}
+		skills.skills = []*skillFixture{alpha, beta}
 		if err := materialize(t.Context(), st, "WS", "lead", target); err != nil {
 			close(stop)
 			<-readerDone
@@ -648,15 +795,15 @@ func TestMaterializeKeepsPersistingSkillsReadableWhileUpdatingAndDeleting(t *tes
 
 func TestMaterializeAtomicallyUpdatesContentAndExecutableMode(t *testing.T) {
 	target := t.TempDir()
-	skill := &domain.Skill{
+	skill := &skillFixture{
 		Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body\n",
-		Files: []domain.SkillFile{{Path: "scripts/run.sh", Content: "old\n"}},
+		Files: []skillFixtureFile{{Path: "scripts/run.sh", Content: "old\n"}},
 	}
-	skills := &staticSkillStore{skills: []*domain.Skill{skill}}
+	skills := &staticSkillStore{skills: []*skillFixture{skill}}
 	st := materializeStore{skills: skills}
 	mustMaterialize(t, st, target, "initial Materialize")
 
-	skill.Files = []domain.SkillFile{{Path: "scripts/run.sh", Content: "#!/bin/sh\necho new\n", Executable: true}}
+	skill.Files = []skillFixtureFile{{Path: "scripts/run.sh", Content: "#!/bin/sh\necho new\n", Executable: true}}
 	mustMaterialize(t, st, target, "updated Materialize")
 
 	script := filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "alpha", "scripts", "run.sh")
@@ -678,15 +825,15 @@ func TestMaterializeAtomicallyUpdatesContentAndExecutableMode(t *testing.T) {
 
 func TestMaterializeTransitionsCaseFoldCollidingManagedPath(t *testing.T) {
 	target := t.TempDir()
-	skill := &domain.Skill{
+	skill := &skillFixture{
 		Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body\n",
-		Files: []domain.SkillFile{{Path: "Docs/a.md", Content: "old\n"}},
+		Files: []skillFixtureFile{{Path: "Docs/a.md", Content: "old\n"}},
 	}
-	skills := &staticSkillStore{skills: []*domain.Skill{skill}}
+	skills := &staticSkillStore{skills: []*skillFixture{skill}}
 	st := materializeStore{skills: skills}
 	mustMaterialize(t, st, target, "initial Materialize")
 
-	skill.Files = []domain.SkillFile{{Path: "docs/A.md", Content: "new\n"}}
+	skill.Files = []skillFixtureFile{{Path: "docs/A.md", Content: "new\n"}}
 	mustMaterialize(t, st, target, "transition Materialize")
 
 	newPath := filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "alpha", "docs", "A.md")
@@ -720,7 +867,7 @@ func TestMaterializeTransitionsCaseFoldCollidingManagedPath(t *testing.T) {
 
 func TestMaterializeSweepsCrashOrphanedProjectionTemporary(t *testing.T) {
 	target := t.TempDir()
-	st := materializeStore{skills: staticSkillStore{skills: []*domain.Skill{{
+	st := materializeStore{skills: &staticSkillStore{skills: []*skillFixture{{
 		Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body\n",
 	}}}}
 	mustMaterialize(t, st, target, "initial Materialize")
@@ -754,11 +901,20 @@ func TestMaterializeSweepsCrashOrphanedProjectionTemporary(t *testing.T) {
 
 func TestMaterializeRecoversExactPartialProjectionWithoutMarker(t *testing.T) {
 	target := t.TempDir()
-	skill := &domain.Skill{
+	skill := &skillFixture{
 		Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body\n",
-		Files: []domain.SkillFile{{Path: "run.sh", Content: "#!/bin/sh\n", Executable: true}},
+		Files: []skillFixtureFile{{Path: "run.sh", Content: "#!/bin/sh\n", Executable: true}},
 	}
-	entries := desiredEntries(domain.ResolveSkillChainDetail([]*domain.Skill{skill}, "lead"))
+	fixtureStore := &staticSkillStore{skills: []*skillFixture{skill}}
+	st := materializeStore{skills: fixtureStore}
+	metadata, err := fixtureStore.List(t.Context(), "WS", store.SkillFilter{})
+	if err != nil {
+		t.Fatalf("publish fixture tree: %v", err)
+	}
+	entries, err := desiredEntries(t.Context(), st.WorkspaceFiles(), "WS", domain.ResolveSkillChainDetail(metadata, "lead"))
+	if err != nil {
+		t.Fatalf("load desired entries: %v", err)
+	}
 	partial := entries[0]
 	partialPath := filepath.Join(target, filepath.FromSlash(partial.Path))
 	if err := os.MkdirAll(filepath.Dir(partialPath), 0o755); err != nil {
@@ -771,7 +927,6 @@ func TestMaterializeRecoversExactPartialProjectionWithoutMarker(t *testing.T) {
 		t.Fatalf("set exact partial projection mode: %v", err)
 	}
 
-	st := materializeStore{skills: staticSkillStore{skills: []*domain.Skill{skill}}}
 	mustMaterialize(t, st, target, "Materialize after partial write")
 	if _, err := os.Stat(filepath.Join(target, filepath.FromSlash(markerPath))); err != nil {
 		t.Fatalf("stat recovered marker: %v", err)
@@ -796,9 +951,9 @@ func TestWriteMarkerAtomicallyRenamesCompletedTemporaryFile(t *testing.T) {
 
 func TestMaterializeRemovalPreservesUnrecordedFiles(t *testing.T) {
 	target := t.TempDir()
-	skills := &staticSkillStore{skills: []*domain.Skill{{
+	skills := &staticSkillStore{skills: []*skillFixture{{
 		Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body\n",
-		Files: []domain.SkillFile{{Path: "references/managed.md", Content: "managed\n"}},
+		Files: []skillFixtureFile{{Path: "references/managed.md", Content: "managed\n"}},
 	}}}
 	st := materializeStore{skills: skills}
 	mustMaterialize(t, st, target, "first Materialize")
@@ -845,17 +1000,17 @@ func TestMaterializeRemovalPreservesUnrecordedFiles(t *testing.T) {
 
 func TestMaterializeRoleDeletionUnshadowsWorkspaceSkill(t *testing.T) {
 	target := t.TempDir()
-	workspaceSkill := &domain.Skill{
+	workspaceSkill := &skillFixture{
 		Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "workspace", Content: "workspace body\n",
 	}
-	skills := &staticSkillStore{skills: []*domain.Skill{
+	skills := &staticSkillStore{skills: []*skillFixture{
 		workspaceSkill,
 		{Name: "alpha", Scope: domain.SkillScopeRole, RoleName: "lead", Description: "role", Content: "role body\n"},
 	}}
 	st := materializeStore{skills: skills}
 	mustMaterialize(t, st, target, "shadowed Materialize")
 
-	skills.skills = []*domain.Skill{workspaceSkill}
+	skills.skills = []*skillFixture{workspaceSkill}
 	mustMaterialize(t, st, target, "unshadowed Materialize")
 	got, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "alpha", "SKILL.md"))
 	if err != nil {
@@ -866,25 +1021,23 @@ func TestMaterializeRoleDeletionUnshadowsWorkspaceSkill(t *testing.T) {
 	}
 }
 
-// Paths that would collide when written must never both be materialized. The
-// skill carrying them is dropped rather than the projection failing, for the
-// same reason as any other unprojectable record: one malformed skill must not
-// stop every agent in the workspace.
+// Paths that collide under materialization rules are rejected by immutable
+// tree publication, before any member of the tree reaches the filesystem.
 func TestMaterializeRefusesToWriteInSkillPathCollisions(t *testing.T) {
 	tests := []struct {
 		name  string
-		files []domain.SkillFile
+		files []skillFixtureFile
 		// paths that must not exist under the skill directory afterwards
 		unwritten []string
 	}{
 		{
 			name:      "reserved body name under different case",
-			files:     []domain.SkillFile{{Path: "skill.md", Content: "collision"}},
+			files:     []skillFixtureFile{{Path: "skill.md", Content: "collision"}},
 			unwritten: []string{"skill.md"},
 		},
 		{
 			name: "unicode normalization",
-			files: []domain.SkillFile{
+			files: []skillFixtureFile{
 				{Path: "references/caf\u00e9.md", Content: "NFC"},
 				{Path: "references/cafe\u0301.md", Content: "NFD"},
 			},
@@ -892,7 +1045,7 @@ func TestMaterializeRefusesToWriteInSkillPathCollisions(t *testing.T) {
 		},
 		{
 			name: "file versus directory",
-			files: []domain.SkillFile{
+			files: []skillFixtureFile{
 				{Path: "a/b", Content: "file"},
 				{Path: "a/b/c", Content: "child"},
 			},
@@ -902,13 +1055,13 @@ func TestMaterializeRefusesToWriteInSkillPathCollisions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			target := t.TempDir()
-			healthy := &domain.Skill{
-				Name: "beta", Scope: domain.SkillScopeWorkspace, Description: "beta", Content: "beta body\n",
-			}
-			st := materializeStore{skills: staticSkillStore{skills: []*domain.Skill{{
+			st := materializeStore{skills: &staticSkillStore{skills: []*skillFixture{{
 				Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body", Files: tt.files,
-			}, healthy}}}
-			mustMaterialize(t, st, target, "Materialize with a colliding skill")
+			}}}}
+			err := materialize(t.Context(), st, "WS", "lead", target)
+			if !errors.Is(err, domain.ErrInvalid) || IsStoreUnavailable(err) {
+				t.Fatalf("Materialize error = %v, want fatal invalid collision", err)
+			}
 
 			skillDir := filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "alpha")
 			if _, statErr := os.Lstat(skillDir); !os.IsNotExist(statErr) {
@@ -919,16 +1072,8 @@ func TestMaterializeRefusesToWriteInSkillPathCollisions(t *testing.T) {
 					t.Fatalf("colliding path %q was written: stat err = %v", unwritten, statErr)
 				}
 			}
-			// The rest of the workspace still materializes.
-			if _, err := os.Stat(filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "beta", "SKILL.md")); err != nil {
-				t.Fatalf("healthy skill was not materialized: %v", err)
-			}
-			index, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(indexPath)))
-			if err != nil {
-				t.Fatalf("read catalog index: %v", err)
-			}
-			if strings.Contains(string(index), "**alpha**") {
-				t.Fatalf("catalog index advertises the skipped skill:\n%s", index)
+			if _, statErr := os.Lstat(filepath.Join(target, filepath.FromSlash(markerPath))); !os.IsNotExist(statErr) {
+				t.Fatalf("marker exists after rejected tree: %v", statErr)
 			}
 		})
 	}
@@ -944,9 +1089,9 @@ func TestMaterializeRejectsExistingCaseFoldCollision(t *testing.T) {
 	if err := os.WriteFile(existing, []byte("user file\n"), 0o644); err != nil {
 		t.Fatalf("write existing file: %v", err)
 	}
-	st := materializeStore{skills: staticSkillStore{skills: []*domain.Skill{{
+	st := materializeStore{skills: &staticSkillStore{skills: []*skillFixture{{
 		Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body",
-		Files: []domain.SkillFile{{Path: "readme.md", Content: "managed"}},
+		Files: []skillFixtureFile{{Path: "readme.md", Content: "managed"}},
 	}}}}
 
 	err := materialize(t.Context(), st, "WS", "lead", target)
@@ -978,9 +1123,9 @@ func TestMaterializeRefusesSymlinkEscape(t *testing.T) {
 	if err := os.Symlink("../../../../outside/.git/hooks", link); err != nil {
 		t.Fatalf("plant escape symlink: %v", err)
 	}
-	st := materializeStore{skills: staticSkillStore{skills: []*domain.Skill{{
+	st := materializeStore{skills: &staticSkillStore{skills: []*skillFixture{{
 		Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body",
-		Files: []domain.SkillFile{{Path: "link/pre-commit", Content: "#!/bin/sh\n", Executable: true}},
+		Files: []skillFixtureFile{{Path: "link/pre-commit", Content: "#!/bin/sh\n", Executable: true}},
 	}}}}
 
 	err := materialize(t.Context(), st, "WS", "lead", target)
@@ -1003,7 +1148,7 @@ func TestMaterializeRelativeClaudeLinkSurvivesTargetMove(t *testing.T) {
 	if err := os.Mkdir(target, 0o755); err != nil {
 		t.Fatalf("create target: %v", err)
 	}
-	st := materializeStore{skills: staticSkillStore{skills: []*domain.Skill{{
+	st := materializeStore{skills: &staticSkillStore{skills: []*skillFixture{{
 		Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body\n",
 	}}}}
 	mustMaterialize(t, st, target, "Materialize")
@@ -1023,7 +1168,7 @@ func TestMaterializeRelativeClaudeLinkSurvivesTargetMove(t *testing.T) {
 
 func TestMaterializeStoreOutageLeavesProjectionUntouched(t *testing.T) {
 	target := t.TempDir()
-	available := materializeStore{skills: staticSkillStore{skills: []*domain.Skill{{
+	available := materializeStore{skills: &staticSkillStore{skills: []*skillFixture{{
 		Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "old body\n",
 	}}}}
 	if err := materialize(t.Context(), available, "WS", "lead", target); err != nil {
@@ -1035,7 +1180,7 @@ func TestMaterializeStoreOutageLeavesProjectionUntouched(t *testing.T) {
 		t.Fatalf("read initial projection: %v", err)
 	}
 	outage := &url.Error{Op: "GET", URL: "http://fleet-db/skills", Err: syscall.ECONNREFUSED}
-	unavailable := materializeStore{skills: staticSkillStore{err: outage}}
+	unavailable := materializeStore{skills: &staticSkillStore{err: outage}}
 	err = materialize(t.Context(), unavailable, "WS", "lead", target)
 	if !IsStoreUnavailable(err) || !errors.Is(err, outage) {
 		t.Fatalf("Materialize error = %v, want store-unavailable wrapper", err)
@@ -1049,10 +1194,97 @@ func TestMaterializeStoreOutageLeavesProjectionUntouched(t *testing.T) {
 	}
 }
 
+func TestMaterializeWorkspaceFileOutageLeavesProjectionUntouched(t *testing.T) {
+	tests := []struct {
+		name    string
+		err     error
+		getTree bool
+	}{
+		{name: "transport", err: &url.Error{Op: "GET", URL: "http://fleet-db/workspace-files", Err: syscall.ECONNREFUSED}, getTree: true},
+		{name: "server 5xx", err: errors.New("fleet-db returned HTTP 503: temporarily unavailable")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			target := t.TempDir()
+			skills := &staticSkillStore{skills: []*skillFixture{{
+				Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "prior\n",
+			}}}
+			available := materializeStore{skills: skills}
+			mustMaterialize(t, available, target, "initial Materialize")
+			skillMD := filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "alpha", domain.SkillFileNameSKILLMD)
+			before, err := os.ReadFile(skillMD)
+			if err != nil {
+				t.Fatalf("read prior projection: %v", err)
+			}
+
+			skills.skills[0].Content = "replacement\n"
+			failure := failingWorkspaceFileStore{WorkspaceFileStore: skills.workspaceFiles()}
+			if tt.getTree {
+				failure.getTreeErr = tt.err
+			} else {
+				failure.downloadErr = tt.err
+			}
+			unavailable := materializeStore{
+				skills: skills,
+				files:  failure,
+			}
+			err = materialize(t.Context(), unavailable, "WS", "lead", target)
+			if !IsStoreUnavailable(err) || !errors.Is(err, tt.err) {
+				t.Fatalf("Materialize error = %v, want workspace-file store-unavailable wrapper", err)
+			}
+			after, readErr := os.ReadFile(skillMD)
+			if readErr != nil || !bytes.Equal(after, before) {
+				t.Fatalf("projection changed during workspace-file outage: before=%q after=%q err=%v", before, after, readErr)
+			}
+		})
+	}
+}
+
+func TestMaterializeWorkspaceFileIntegrityAndNotFoundRemainFatal(t *testing.T) {
+	tests := []struct {
+		name  string
+		files func(store.WorkspaceFileStore) store.WorkspaceFileStore
+		want  error
+	}{
+		{
+			name: "not found",
+			files: func(files store.WorkspaceFileStore) store.WorkspaceFileStore {
+				return failingWorkspaceFileStore{WorkspaceFileStore: files, downloadErr: domain.ErrNotFound}
+			},
+			want: domain.ErrNotFound,
+		},
+		{
+			name: "integrity",
+			files: func(files store.WorkspaceFileStore) store.WorkspaceFileStore {
+				return failingWorkspaceFileStore{WorkspaceFileStore: files, downloadErr: domain.ErrIntegrity}
+			},
+			want: domain.ErrIntegrity,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			skills := &staticSkillStore{skills: []*skillFixture{{
+				Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body\n",
+			}}}
+			if _, err := skills.List(t.Context(), "WS", store.SkillFilter{}); err != nil {
+				t.Fatalf("publish fixture tree: %v", err)
+			}
+			st := materializeStore{skills: skills, files: tt.files(skills.workspaceFiles())}
+			err := materialize(t.Context(), st, "WS", "lead", t.TempDir())
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("Materialize error = %v, want %v", err, tt.want)
+			}
+			if IsStoreUnavailable(err) {
+				t.Fatalf("fatal workspace-file error classified as unavailable: %v", err)
+			}
+		})
+	}
+}
+
 func TestMaterializeDoesNotDegradeOnNonOutageStoreError(t *testing.T) {
 	target := t.TempDir()
 	denied := fmt.Errorf("skill list forbidden: %w", domain.ErrConflict)
-	st := materializeStore{skills: staticSkillStore{err: denied}}
+	st := materializeStore{skills: &staticSkillStore{err: denied}}
 	err := materialize(t.Context(), st, "WS", "lead", target)
 	if err == nil || !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("Materialize error = %v, want store error", err)
@@ -1064,7 +1296,7 @@ func TestMaterializeDoesNotDegradeOnNonOutageStoreError(t *testing.T) {
 
 func TestMaterializeDoesNotClassifyCancellationAsStoreOutage(t *testing.T) {
 	target := t.TempDir()
-	st := materializeStore{skills: staticSkillStore{err: context.Canceled}}
+	st := materializeStore{skills: &staticSkillStore{err: context.Canceled}}
 	err := materialize(t.Context(), st, "WS", "lead", target)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Materialize error = %v, want context.Canceled", err)
@@ -1098,7 +1330,7 @@ func TestMaterializeRejectsOversizedAndPartialMarkersWithoutCleanup(t *testing.T
 				t.Fatalf("write sentinel: %v", err)
 			}
 
-			err := materialize(t.Context(), materializeStore{skills: staticSkillStore{}}, "WS", "lead", target)
+			err := materialize(t.Context(), materializeStore{skills: &staticSkillStore{}}, "WS", "lead", target)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("Materialize error = %v, want %q", err, tt.want)
 			}
@@ -1141,7 +1373,7 @@ func TestMaterializeEnsuresGitExcludeViaGitPath(t *testing.T) {
 		_ = cmd.Run()
 	})
 
-	st := materializeStore{skills: staticSkillStore{}}
+	st := materializeStore{skills: &staticSkillStore{}}
 	for i := 0; i < 2; i++ {
 		if err := materialize(t.Context(), st, "WS", "lead", linked); err != nil {
 			t.Fatalf("Materialize pass %d: %v", i+1, err)
@@ -1180,7 +1412,7 @@ func TestMaterializeGitExcludeIgnoresPoisonedGitEnvironment(t *testing.T) {
 	t.Setenv("GIT_WORK_TREE", attacker)
 	t.Setenv("GIT_INDEX_FILE", filepath.Join(attacker, ".git", "index"))
 
-	if err := materialize(t.Context(), materializeStore{skills: staticSkillStore{}}, "WS", "lead", target); err != nil {
+	if err := materialize(t.Context(), materializeStore{skills: &staticSkillStore{}}, "WS", "lead", target); err != nil {
 		t.Fatalf("Materialize: %v", err)
 	}
 	targetBody, err := os.ReadFile(targetExclude)
@@ -1213,7 +1445,7 @@ func TestMaterializeGitExcludeRefusesSymlinkedInfoParent(t *testing.T) {
 		t.Fatalf("plant git info symlink: %v", err)
 	}
 
-	err := materialize(t.Context(), materializeStore{skills: staticSkillStore{}}, "WS", "lead", repo)
+	err := materialize(t.Context(), materializeStore{skills: &staticSkillStore{}}, "WS", "lead", repo)
 	if err == nil || !strings.Contains(err.Error(), "symlink") {
 		t.Fatalf("Materialize error = %v, want symlink refusal", err)
 	}
@@ -1225,28 +1457,28 @@ func TestMaterializeGitExcludeRefusesSymlinkedInfoParent(t *testing.T) {
 func TestMaterializeReconcilesManagedFileDirectoryTransitions(t *testing.T) {
 	tests := []struct {
 		name   string
-		before []domain.SkillFile
-		after  []domain.SkillFile
+		before []skillFixtureFile
+		after  []skillFixtureFile
 		want   string
 	}{
 		{
 			name:   "file becomes directory",
-			before: []domain.SkillFile{{Path: "node", Content: "old"}},
-			after:  []domain.SkillFile{{Path: "node/child", Content: "new"}},
+			before: []skillFixtureFile{{Path: "node", Content: "old"}},
+			after:  []skillFixtureFile{{Path: "node/child", Content: "new"}},
 			want:   "node/child",
 		},
 		{
 			name:   "directory becomes file",
-			before: []domain.SkillFile{{Path: "node/child", Content: "old"}},
-			after:  []domain.SkillFile{{Path: "node", Content: "new"}},
+			before: []skillFixtureFile{{Path: "node/child", Content: "old"}},
+			after:  []skillFixtureFile{{Path: "node", Content: "new"}},
 			want:   "node",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			target := t.TempDir()
-			skill := &domain.Skill{Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body", Files: tt.before}
-			skills := &staticSkillStore{skills: []*domain.Skill{skill}}
+			skill := &skillFixture{Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body", Files: tt.before}
+			skills := &staticSkillStore{skills: []*skillFixture{skill}}
 			st := materializeStore{skills: skills}
 			mustMaterialize(t, st, target, "initial Materialize")
 			skill.Files = tt.after
@@ -1261,18 +1493,18 @@ func TestMaterializeReconcilesManagedFileDirectoryTransitions(t *testing.T) {
 
 func TestMaterializeRefusesDirectoryToFileTransitionWithUnrecordedChild(t *testing.T) {
 	target := t.TempDir()
-	skill := &domain.Skill{
+	skill := &skillFixture{
 		Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body",
-		Files: []domain.SkillFile{{Path: "node/managed", Content: "old"}},
+		Files: []skillFixtureFile{{Path: "node/managed", Content: "old"}},
 	}
-	skills := &staticSkillStore{skills: []*domain.Skill{skill}}
+	skills := &staticSkillStore{skills: []*skillFixture{skill}}
 	st := materializeStore{skills: skills}
 	mustMaterialize(t, st, target, "initial Materialize")
 	unrecorded := filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "alpha", "node", "user")
 	if err := os.WriteFile(unrecorded, []byte("keep"), 0o644); err != nil {
 		t.Fatalf("write unrecorded child: %v", err)
 	}
-	skill.Files = []domain.SkillFile{{Path: "node", Content: "new"}}
+	skill.Files = []skillFixtureFile{{Path: "node", Content: "new"}}
 
 	err := materialize(t.Context(), st, "WS", "lead", target)
 	if err == nil || !strings.Contains(err.Error(), "node") || !strings.Contains(err.Error(), "user") {
@@ -1285,11 +1517,11 @@ func TestMaterializeRefusesDirectoryToFileTransitionWithUnrecordedChild(t *testi
 
 func TestMaterializeRefusesManagedFileToNonemptyDirectoryBeforeCleanup(t *testing.T) {
 	target := t.TempDir()
-	skill := &domain.Skill{
+	skill := &skillFixture{
 		Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body",
-		Files: []domain.SkillFile{{Path: "node", Content: "old"}, {Path: "zzz", Content: "must remain"}},
+		Files: []skillFixtureFile{{Path: "node", Content: "old"}, {Path: "zzz", Content: "must remain"}},
 	}
-	skills := &staticSkillStore{skills: []*domain.Skill{skill}}
+	skills := &staticSkillStore{skills: []*skillFixture{skill}}
 	st := materializeStore{skills: skills}
 	mustMaterialize(t, st, target, "initial Materialize")
 	node := filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "alpha", "node")
@@ -1303,7 +1535,7 @@ func TestMaterializeRefusesManagedFileToNonemptyDirectoryBeforeCleanup(t *testin
 	if err := os.WriteFile(unrecorded, []byte("keep"), 0o644); err != nil {
 		t.Fatalf("write unrecorded child: %v", err)
 	}
-	skill.Files = []domain.SkillFile{{Path: "node/child", Content: "new"}, {Path: "zzz", Content: "updated"}}
+	skill.Files = []skillFixtureFile{{Path: "node/child", Content: "new"}, {Path: "zzz", Content: "updated"}}
 
 	err := materialize(t.Context(), st, "WS", "lead", target)
 	if err == nil || !strings.Contains(err.Error(), "node") {

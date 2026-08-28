@@ -212,14 +212,18 @@ func runSkillCreate(cmd *cobra.Command, name string, flags skillCreateFlags) err
 	if err != nil {
 		return err
 	}
+	snapshot, err := domain.BuildSkillFileTree(ref.Name, flags.description, []byte(content), files)
+	if err != nil {
+		return err
+	}
 	return skillWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+		revision, err := publishSkillSnapshot(ctx, h.Store.WorkspaceFiles(), ws, *snapshot)
+		if err != nil {
+			return err
+		}
 		sk, err := h.Store.Skills().Create(ctx, store.SkillCreate{
-			WorkspaceKey: ws,
-			Ref:          ref,
-			Description:  flags.description,
-			Content:      content,
-			Files:        files,
-			Source:       manualSkillSource,
+			WorkspaceKey: ws, Ref: ref, Description: flags.description,
+			FileTreeRevision: revision, Source: manualSkillSource,
 		})
 		if err != nil {
 			return skillWriteError("create", err, false)
@@ -248,13 +252,13 @@ func runSkillInstall(cmd *cobra.Command, source string, flags skillInstallFlags)
 		return err
 	}
 	return skillWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+		revision, err := publishSkillSnapshot(ctx, h.Store.WorkspaceFiles(), ws, fetched.Snapshot)
+		if err != nil {
+			return err
+		}
 		sk, err := h.Store.Skills().Create(ctx, store.SkillCreate{
-			WorkspaceKey: ws,
-			Ref:          ref,
-			Description:  fetched.Description,
-			Content:      fetched.Content,
-			Files:        fetched.Files,
-			Source:       fetched.Source,
+			WorkspaceKey: ws, Ref: ref, Description: fetched.Description,
+			FileTreeRevision: revision, Source: fetched.Source,
 		})
 		if err != nil {
 			return skillInstallWriteError(ref, err)
@@ -309,10 +313,15 @@ func runSkillShow(cmd *cobra.Command, name string, flags skillShowFlags) error {
 		if err != nil {
 			return fmt.Errorf("get skill: %w", err)
 		}
-		if flags.json {
-			return writeSkillJSON(cmd.OutOrStdout(), sk)
+		snapshot, err := loadSkillSnapshot(ctx, h.Store.WorkspaceFiles(), sk)
+		if err != nil {
+			return err
 		}
-		renderSkill(cmd.OutOrStdout(), sk)
+		view := newSkillShowView(sk, snapshot)
+		if flags.json {
+			return writeSkillJSON(cmd.OutOrStdout(), view)
+		}
+		renderSkill(cmd.OutOrStdout(), view)
 		return nil
 	})
 }
@@ -325,29 +334,32 @@ func runSkillUpdate(cmd *cobra.Command, name string, flags skillUpdateFlags) err
 	if err != nil {
 		return err
 	}
-	var patch store.SkillUpdate
-	if cmd.Flags().Changed("description") {
-		patch.Description = &flags.description
+	changes, err := readSkillUpdateChanges(cmd, flags)
+	if err != nil {
+		return err
 	}
-	if cmd.Flags().Changed("content") {
-		content, err := readSkillText(flags.content, cmd.InOrStdin(), "skill content")
-		if err != nil {
-			return err
-		}
-		patch.Content = &content
-	}
-	if cmd.Flags().Changed("file") {
-		files, err := readSkillFiles(flags.files)
-		if err != nil {
-			return err
-		}
-		patch.Files = &files
-	}
-	if patch.Description == nil && patch.Content == nil && patch.Files == nil {
+	if changes.empty() {
 		return fmt.Errorf("nothing to update; pass --description, --content, or --file")
 	}
-	patch.Source = manualSkillSource
 	return skillWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+		current, err := h.Store.Skills().Get(ctx, ws, ref)
+		if err != nil {
+			return fmt.Errorf("get skill before update: %w", err)
+		}
+		snapshot, err := loadSkillSnapshot(ctx, h.Store.WorkspaceFiles(), current)
+		if err != nil {
+			return err
+		}
+		updatedSnapshot, err := buildUpdatedSkillSnapshot(snapshot, current, changes.description, changes.content, changes.files)
+		if err != nil {
+			return err
+		}
+		revision, err := publishSkillSnapshot(ctx, h.Store.WorkspaceFiles(), ws, updatedSnapshot)
+		if err != nil {
+			return err
+		}
+		patch := store.SkillUpdate{Description: changes.description, FileTreeRevision: &revision,
+			ExpectedFileTreeRevision: current.FileTreeRevision, Source: manualSkillSource}
 		sk, err := h.Store.Skills().Update(ctx, ws, ref, patch)
 		if err != nil {
 			return skillWriteError("update", err, false)
@@ -355,6 +367,64 @@ func runSkillUpdate(cmd *cobra.Command, name string, flags skillUpdateFlags) err
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Updated skill %s/%s\n", sk.WorkspaceKey, sk.Ref())
 		return nil
 	})
+}
+
+type skillUpdateChanges struct {
+	description *string
+	content     *string
+	files       *[]domain.SkillFileTreeFile
+}
+
+func (c skillUpdateChanges) empty() bool {
+	return c.description == nil && c.content == nil && c.files == nil
+}
+
+func readSkillUpdateChanges(cmd *cobra.Command, flags skillUpdateFlags) (skillUpdateChanges, error) {
+	var changes skillUpdateChanges
+	if cmd.Flags().Changed("description") {
+		changes.description = &flags.description
+	}
+	if cmd.Flags().Changed("content") {
+		content, err := readSkillText(flags.content, cmd.InOrStdin(), "skill content")
+		if err != nil {
+			return skillUpdateChanges{}, err
+		}
+		changes.content = &content
+	}
+	if cmd.Flags().Changed("file") {
+		files, err := readSkillFiles(flags.files)
+		if err != nil {
+			return skillUpdateChanges{}, err
+		}
+		changes.files = &files
+	}
+	return changes, nil
+}
+
+func buildUpdatedSkillSnapshot(snapshot domain.SkillFileTreeSnapshot, current *domain.Skill, description, content *string, files *[]domain.SkillFileTreeFile) (domain.SkillFileTreeSnapshot, error) {
+	newBody := snapshot.Body
+	if content != nil {
+		newBody = []byte(*content)
+	}
+	newFiles := bundledTreeFiles(snapshot.Files)
+	if files != nil {
+		newFiles = *files
+	}
+	if description != nil {
+		built, err := domain.BuildSkillFileTree(current.Name, *description, newBody, newFiles)
+		if err != nil {
+			return domain.SkillFileTreeSnapshot{}, err
+		}
+		return *built, nil
+	}
+	var err error
+	if content != nil {
+		snapshot, err = replaceSkillBody(snapshot, newBody)
+	}
+	if err == nil && files != nil {
+		snapshot, err = replaceSkillBundles(snapshot, newFiles)
+	}
+	return snapshot, err
 }
 
 func runSkillDelete(cmd *cobra.Command, name string, flags skillDeleteFlags) error {
@@ -483,8 +553,8 @@ func isSkillText(data []byte) bool {
 	return utf8.Valid(data) && bytes.IndexByte(data, 0) < 0
 }
 
-func readSkillFiles(specs []string) ([]domain.SkillFile, error) {
-	files := make([]domain.SkillFile, 0, len(specs))
+func readSkillFiles(specs []string) ([]domain.SkillFileTreeFile, error) {
+	files := make([]domain.SkillFileTreeFile, 0, len(specs))
 	destinations := make(map[string]struct{}, len(specs))
 	for _, spec := range specs {
 		source, destination, hasDestination := strings.Cut(spec, ":")
@@ -509,13 +579,14 @@ func readSkillFiles(specs []string) ([]domain.SkillFile, error) {
 		if !info.Mode().IsRegular() {
 			return nil, fmt.Errorf("bundled skill file %q must be a regular file", source)
 		}
-		content, err := readSkillText(source, nil, "bundled skill file")
+		content, err := os.ReadFile(source) //nolint:gosec // G304 — the operator names the file to bundle
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("read bundled skill file %q: %w", source, err)
 		}
-		files = append(files, domain.SkillFile{
+		files = append(files, domain.SkillFileTreeFile{
 			Path:       destination,
-			Content:    content,
+			Bytes:      content,
+			MediaType:  skillFileMediaType(destination, content),
 			Executable: info.Mode().Perm()&0o111 != 0,
 		})
 		destinations[destination] = struct{}{}
@@ -575,7 +646,34 @@ func formatSkillProvenance(sk *domain.Skill) string {
 	return "created_by=" + createdBy + " source=" + source
 }
 
-func renderSkill(w io.Writer, sk *domain.Skill) {
+type skillShowFile struct {
+	Path       string `json:"path"`
+	MediaType  string `json:"media_type,omitempty"`
+	Executable bool   `json:"executable"`
+	SizeBytes  int    `json:"size_bytes"`
+}
+
+type skillShowView struct {
+	*domain.Skill
+	Content string          `json:"content"`
+	Files   []skillShowFile `json:"files"`
+}
+
+func newSkillShowView(sk *domain.Skill, snapshot domain.SkillFileTreeSnapshot) skillShowView {
+	view := skillShowView{Skill: sk, Content: string(snapshot.Body)}
+	for _, file := range snapshot.Files {
+		if file.Path == domain.SkillFileNameSKILLMD {
+			continue
+		}
+		view.Files = append(view.Files, skillShowFile{
+			Path: file.Path, MediaType: file.MediaType, Executable: file.Executable, SizeBytes: len(file.Bytes),
+		})
+	}
+	return view
+}
+
+func renderSkill(w io.Writer, view skillShowView) {
+	sk := view.Skill
 	_, _ = fmt.Fprintf(w, "Workspace:         %s\n", sk.WorkspaceKey)
 	_, _ = fmt.Fprintf(w, "Name:              %s\n", sk.Name)
 	_, _ = fmt.Fprintf(w, "Scope:             %s\n", formatSkillScope(sk.Ref()))
@@ -592,24 +690,21 @@ func renderSkill(w io.Writer, sk *domain.Skill) {
 	if !sk.UpdatedAt.IsZero() {
 		_, _ = fmt.Fprintf(w, "Updated at:        %s\n", sk.UpdatedAt.Format("2006-01-02T15:04:05.999999999Z07:00"))
 	}
-	_, _ = fmt.Fprintf(w, "Content revision:  %s\n", valueOrUnknown(sk.ContentRevision))
+	_, _ = fmt.Fprintf(w, "File tree revision: %s\n", sk.FileTreeRevision)
 	_, _ = fmt.Fprintln(w, "Content:")
-	_, _ = fmt.Fprintln(w, sk.Content)
-	if len(sk.Files) == 0 {
+	_, _ = fmt.Fprintln(w, view.Content)
+	if len(view.Files) == 0 {
 		_, _ = fmt.Fprintln(w, "Files:             (none)")
 		return
 	}
-	files := append([]domain.SkillFile(nil), sk.Files...)
+	files := append([]skillShowFile(nil), view.Files...)
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	_, _ = fmt.Fprintln(w, "Files:")
 	for _, file := range files {
 		_, _ = fmt.Fprintf(w, "  Path:            %s\n", file.Path)
 		_, _ = fmt.Fprintf(w, "  Executable:      %t\n", file.Executable)
-		_, _ = fmt.Fprintf(w, "  Revision:        %s\n", valueOrUnknown(file.Revision))
-		_, _ = fmt.Fprintln(w, "  Content:")
-		for _, line := range strings.Split(file.Content, "\n") {
-			_, _ = fmt.Fprintf(w, "    %s\n", line)
-		}
+		_, _ = fmt.Fprintf(w, "  Media type:      %s\n", valueOrUnknown(file.MediaType))
+		_, _ = fmt.Fprintf(w, "  Size:            %d bytes\n", file.SizeBytes)
 	}
 }
 
@@ -650,22 +745,19 @@ func skillWriteError(action string, err error, forceAvailable bool) error {
 
 	var stale *domain.SkillPreconditionError
 	if errors.As(err, &stale) || errors.Is(err, domain.ErrSkillPreconditionFailed) {
-		ref, document, revisions := "the skill", "the requested document", ""
+		ref, revisions := "the skill", ""
 		showCommand := "loom skill show <name> --scope <scope>"
 		if stale != nil {
 			if stale.Ref.String() != "" {
 				ref = stale.Ref.String()
 				showCommand = fmt.Sprintf("loom skill show %s --scope %s", stale.Ref.Name, formatSkillScope(stale.Ref))
 			}
-			if stale.Path != "" {
-				document = stale.Path
-			}
 			if stale.Expected != "" || stale.Stored != "" {
 				revisions = fmt.Sprintf(" (expected %s, stored %s)", valueOrUnknown(stale.Expected), valueOrUnknown(stale.Stored))
 			}
 		}
-		return fmt.Errorf("%s skill: stale revision for %s document %s%s; re-read with %q, merge the latest content, and retry: %w",
-			action, ref, document, revisions, showCommand, err)
+		return fmt.Errorf("%s skill: stale whole-tree revision for %s%s; re-read with %q, merge the latest content, and retry: %w",
+			action, ref, revisions, showCommand, err)
 	}
 
 	return fmt.Errorf("%s skill: %w", action, err)

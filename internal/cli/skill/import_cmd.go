@@ -2,6 +2,7 @@ package skill
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -30,8 +31,7 @@ type localSkillFile struct {
 type assembledLocalSkill struct {
 	Name                   string
 	Description            string
-	Content                string
-	Files                  []domain.SkillFile
+	Snapshot               domain.SkillFileTreeSnapshot
 	CanonicalRoot          string
 	DroppedFrontmatterKeys []string
 	SkippedHiddenPaths     []string
@@ -61,38 +61,65 @@ func runSkillImport(cmd *cobra.Command, directory string, flags skillImportFlags
 	if err != nil {
 		return err
 	}
+	writeSkillImportNotices(cmd, local)
+	ref, err := parseSkillRef(local.Name, flags.scope)
+	if err != nil {
+		return err
+	}
+	return skillWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+		revision, err := publishSkillSnapshot(ctx, h.Store.WorkspaceFiles(), ws, local.Snapshot)
+		if err != nil {
+			return err
+		}
+		source := "import:" + local.CanonicalRoot
+		existing, getErr := h.Store.Skills().Get(ctx, ws, ref)
+		created := errors.Is(getErr, domain.ErrNotFound)
+		if getErr != nil && !created {
+			return fmt.Errorf("get skill before import: %w", getErr)
+		}
+		var sk *domain.Skill
+		if created {
+			sk, err = h.Store.Skills().Create(ctx, store.SkillCreate{
+				WorkspaceKey: ws, Ref: ref, Description: local.Description,
+				FileTreeRevision: revision, Source: source,
+			})
+		} else if flags.force {
+			// Fleet's privileged force-upsert route intentionally has no CAS
+			// form; it is the explicit operator override.
+			sk, _, err = h.Store.Skills().Upsert(ctx, store.SkillUpsert{Force: true, Skill: store.SkillCreate{
+				WorkspaceKey: ws, Ref: ref, Description: local.Description,
+				FileTreeRevision: revision, Source: source,
+			}})
+		} else {
+			description := local.Description
+			sk, err = h.Store.Skills().Update(ctx, ws, ref, store.SkillUpdate{
+				Description: &description, FileTreeRevision: &revision,
+				ExpectedFileTreeRevision: existing.FileTreeRevision, Source: source,
+			})
+		}
+		if err != nil {
+			return skillWriteError("import", err, true)
+		}
+		writeSkillImportResult(cmd, sk, created)
+		return nil
+	})
+}
+
+func writeSkillImportResult(cmd *cobra.Command, skill *domain.Skill, created bool) {
+	outcome := "Updated"
+	if created {
+		outcome = "Imported"
+	}
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s skill %s/%s\n", outcome, skill.WorkspaceKey, skill.Ref())
+}
+
+func writeSkillImportNotices(cmd *cobra.Command, local assembledLocalSkill) {
 	if len(local.DroppedFrontmatterKeys) > 0 {
 		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Notice: dropped SKILL.md frontmatter keys: %s\n", strings.Join(local.DroppedFrontmatterKeys, ", "))
 	}
 	if len(local.SkippedHiddenPaths) > 0 {
 		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Notice: skipped hidden skill paths: %s\n", strings.Join(local.SkippedHiddenPaths, ", "))
 	}
-	ref, err := parseSkillRef(local.Name, flags.scope)
-	if err != nil {
-		return err
-	}
-	return skillWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		sk, created, err := h.Store.Skills().Upsert(ctx, store.SkillUpsert{
-			Skill: store.SkillCreate{
-				WorkspaceKey: ws,
-				Ref:          ref,
-				Description:  local.Description,
-				Content:      local.Content,
-				Files:        local.Files,
-				Source:       "import:" + local.CanonicalRoot,
-			},
-			Force: flags.force,
-		})
-		if err != nil {
-			return skillWriteError("import", err, true)
-		}
-		outcome := "Updated"
-		if created {
-			outcome = "Imported"
-		}
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s skill %s/%s\n", outcome, sk.WorkspaceKey, sk.Ref())
-		return nil
-	})
 }
 
 func readLocalSkillDirectory(directory, nameOverride string) (assembledLocalSkill, error) {
@@ -209,7 +236,6 @@ func readLocalSkillDirectoryWithHook(directory, nameOverride string, beforeRead 
 	sort.Slice(files, func(i, j int) bool { return files[i].relative < files[j].relative })
 	contents := make(map[string][]byte, len(files))
 	remaining := maxSkillArchiveDecompressedBytes
-	var binaryPaths []string
 	for index := range files {
 		file := &files[index]
 		info, err := root.Lstat(file.relative)
@@ -242,14 +268,7 @@ func readLocalSkillDirectoryWithHook(directory, nameOverride string, beforeRead 
 		}
 		file.executable = openedInfo.Mode().Perm()&0o111 != 0
 		remaining -= int64(len(data))
-		if !isSkillText(data) {
-			binaryPaths = append(binaryPaths, file.relative)
-		}
 		contents[file.relative] = data
-	}
-	if len(binaryPaths) > 0 {
-		sort.Strings(binaryPaths)
-		return assembledLocalSkill{}, fmt.Errorf("skill contains non-UTF-8 or NUL-bearing files; binary content is not supported: %s", strings.Join(binaryPaths, ", "))
 	}
 	document, ok := contents[domain.SkillFileNameSKILLMD]
 	if !ok {
@@ -262,25 +281,35 @@ func readLocalSkillDirectoryWithHook(directory, nameOverride string, beforeRead 
 		return assembledLocalSkill{}, err
 	}
 
-	bundled := make([]domain.SkillFile, 0, len(files)-1)
+	bundled := make([]domain.SkillFileTreeFile, 0, len(files)-1)
+	documentExecutable := false
 	for _, file := range files {
 		if file.relative == domain.SkillFileNameSKILLMD {
+			documentExecutable = file.executable
 			continue
 		}
-		bundled = append(bundled, domain.SkillFile{
+		bundled = append(bundled, domain.SkillFileTreeFile{
 			Path:       file.relative,
-			Content:    string(contents[file.relative]),
+			Bytes:      contents[file.relative],
+			MediaType:  skillFileMediaType(file.relative, contents[file.relative]),
 			Executable: file.executable,
 		})
 	}
+	snapshot, err := importedSkillSnapshot(document, documentExecutable, bundled, identity, nameOverride != "")
+	if err != nil {
+		return assembledLocalSkill{}, err
+	}
 	skippedHidden = uniqueSortedStrings(skippedHidden)
+	droppedKeys := identity.DroppedFrontmatterKeys
+	if nameOverride == "" {
+		droppedKeys = nil
+	}
 	return assembledLocalSkill{
-		Name:                   identity.Name,
-		Description:            identity.Description,
-		Content:                identity.Content,
-		Files:                  bundled,
+		Name:                   snapshot.Name,
+		Description:            snapshot.Description,
+		Snapshot:               snapshot,
 		CanonicalRoot:          canonicalRoot,
-		DroppedFrontmatterKeys: identity.DroppedFrontmatterKeys,
+		DroppedFrontmatterKeys: droppedKeys,
 		SkippedHiddenPaths:     skippedHidden,
 	}, nil
 }
