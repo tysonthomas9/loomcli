@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -117,6 +118,99 @@ func writeClaimHoldFile(path string, h *supervisor.ClaimHold) error {
 	return nil
 }
 
+// claimHoldStat identifies the CONTENT of claim-hold.json cheaply: (mtime,
+// size). The zero value means "no file", which is itself a state worth
+// distinguishing — deleting the file is exactly how a release without a control
+// socket lifts a hold.
+type claimHoldStat struct {
+	exists  bool
+	modTime time.Time
+	size    int64
+}
+
+// same reports whether two observations describe the same file content.
+// time.Time is compared with Equal rather than ==, which also weighs the
+// monotonic reading and the location pointer.
+func (c claimHoldStat) same(other claimHoldStat) bool {
+	return c.exists == other.exists && c.size == other.size && c.modTime.Equal(other.modTime)
+}
+
+// statClaimHoldFile observes the claim-hold file. A missing file is not an
+// error: it is the zero claimHoldStat.
+func statClaimHoldFile(path string) (claimHoldStat, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return claimHoldStat{}, nil
+		}
+		return claimHoldStat{}, err
+	}
+	return claimHoldStat{exists: true, modTime: fi.ModTime(), size: fi.Size()}, nil
+}
+
+// claimHoldStore owns the mtime/size bookkeeping that lets the supervisor tell
+// a FOREIGN write to claim-hold.json from its own. Every write this process
+// makes records the resulting stat, so only someone else's write (or an `rm`)
+// is reported as changed. Last writer wins; the file is authoritative.
+type claimHoldStore struct {
+	path string
+	mu   sync.Mutex
+	seen claimHoldStat // mtime+size of the last content this process wrote or read
+}
+
+// newClaimHoldStore records the file as it stands before hydration, so the
+// content the daemon starts from is never mistaken for an external change.
+func newClaimHoldStore(path string) *claimHoldStore {
+	store := &claimHoldStore{path: path}
+	if seen, err := statClaimHoldFile(path); err == nil {
+		store.seen = seen
+	}
+	return store
+}
+
+// Write persists the hold and records the stat of what it wrote. A stat that
+// fails AFTER a successful write is not an error the operator needs: the write
+// landed, and the worst consequence is that the next reload re-adopts this
+// process's own value, which is a no-op.
+func (s *claimHoldStore) Write(h *supervisor.ClaimHold) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := writeClaimHoldFile(s.path, h); err != nil {
+		return err
+	}
+	seen, err := statClaimHoldFile(s.path)
+	if err != nil {
+		slog.Warn("could not stat the claim-hold file after writing it; the next reload may re-adopt this write",
+			"path", s.path, "err", err)
+		return nil
+	}
+	s.seen = seen
+	return nil
+}
+
+// ReloadIfChanged re-reads the claim-hold file when its (mtime, size) differs
+// from the last content this process wrote or read. It reports (hold, changed,
+// err); a nil hold with changed=true means the file now says "no hold".
+func (s *claimHoldStore) ReloadIfChanged() (*supervisor.ClaimHold, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, err := statClaimHoldFile(s.path)
+	if err != nil {
+		return nil, false, err
+	}
+	if current.same(s.seen) {
+		return nil, false, nil
+	}
+	h, err := readClaimHoldFile(s.path)
+	if err != nil {
+		// Leave `seen` alone so the next tick retries; the supervisor keeps the
+		// in-memory hold in the meantime.
+		return nil, false, err
+	}
+	s.seen = current
+	return h, true, nil
+}
+
 // loadClaimHoldAtStartup reads the persisted hold, failing SAFE but BOUNDED: a
 // corrupt or unreadable record becomes a hold owned by "unknown" with a short
 // synthetic expiry, so a quiesce is never silently dropped and never becomes
@@ -138,13 +232,13 @@ func loadClaimHoldAtStartup(path string) *supervisor.ClaimHold {
 	}
 }
 
-// hydrateClaimHold loads the persisted hold into the supervisor and wires the
-// persistence hook. Called before the supervisor starts, so no agent can cycle
-// past the gate before the hold is in place.
+// hydrateClaimHold loads the persisted hold into the supervisor and wires both
+// the persistence and the reload hooks. Called before the supervisor starts, so
+// no agent can cycle past the gate before the hold is in place.
 func hydrateClaimHold(d *Daemon, path string) {
-	d.sup.PersistClaimHold = func(h *supervisor.ClaimHold) error {
-		return writeClaimHoldFile(path, h)
-	}
+	store := newClaimHoldStore(path)
+	d.sup.PersistClaimHold = store.Write
+	d.sup.ReloadClaimHold = store.ReloadIfChanged
 	if h := loadClaimHoldAtStartup(path); h != nil {
 		d.sup.LoadClaimHold(h)
 		slog.Warn("claim hold restored from disk; the daemon will not start new work",

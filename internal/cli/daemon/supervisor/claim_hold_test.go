@@ -264,3 +264,92 @@ func TestClaimsHeld_RestartPolicyIsUncountedFixedRecheck(t *testing.T) {
 		t.Fatalf("computeBackoff = %v, want the fixed claim-hold recheck", got)
 	}
 }
+
+// ── reload from disk ────────────────────────────────────────────────────────
+//
+// claim-hold.json is the durable source of truth, so an external edit must
+// reach a daemon that already hydrated. These exercise the injected
+// ReloadClaimHold seam directly; no file and no daemon are involved.
+
+func TestClaimHoldSnapshotAdoptsExternalRelease(t *testing.T) {
+	s, _ := heldSupervisor(t, newHold("union-autodeploy", "deploy union tips", time.Hour))
+	persisted := 0
+	s.PersistClaimHold = func(*ClaimHold) error { persisted++; return nil }
+	// Someone removed the file: the hold is gone on disk.
+	s.ReloadClaimHold = func() (*ClaimHold, bool, error) { return nil, true, nil }
+
+	ap := &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "falcon", Role: "task"}}
+	if !s.gateClaimsHeld(ap) {
+		t.Fatal("gateClaimsHeld still gated after the file released the hold")
+	}
+	if s.ClaimHoldSnapshot() != nil {
+		t.Fatal("in-memory hold survived an external release")
+	}
+	if persisted != 0 {
+		t.Fatalf("adoption re-persisted %d time(s); the value came from the file", persisted)
+	}
+}
+
+func TestClaimHoldSnapshotIgnoresOwnWrite(t *testing.T) {
+	s, _ := heldSupervisor(t, nil)
+	calls := 0
+	// The store filters the daemon's own writes out: nothing changed.
+	s.ReloadClaimHold = func() (*ClaimHold, bool, error) { calls++; return nil, false, nil }
+
+	if err := s.SetClaimHold(newHold("oleh", "maintenance", time.Hour)); err != nil {
+		t.Fatalf("SetClaimHold: %v", err)
+	}
+	ap := &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "falcon", Role: "task"}}
+	for i := 0; i < 5; i++ {
+		if s.gateClaimsHeld(ap) {
+			t.Fatal("the supervisor's own write was adopted as an external release")
+		}
+	}
+	if s.ClaimHoldSnapshot() == nil {
+		t.Fatal("hold disappeared without the file changing")
+	}
+	if calls != 1 {
+		t.Fatalf("ReloadClaimHold called %d times within %s, want exactly 1", calls, claimHoldReloadInterval)
+	}
+}
+
+func TestClaimHoldReloadDoesNotResurrectExpired(t *testing.T) {
+	s, _ := heldSupervisor(t, nil)
+	persisted := 0
+	s.PersistClaimHold = func(*ClaimHold) error { persisted++; return nil }
+	// A stale record left on disk by a daemon that died before clearing it.
+	s.ReloadClaimHold = func() (*ClaimHold, bool, error) {
+		return &ClaimHold{
+			Held: true, Actor: "oleh", Reason: "stale",
+			Since:     time.Now().Add(-2 * time.Hour),
+			ExpiresAt: time.Now().Add(-time.Minute),
+		}, true, nil
+	}
+
+	ap := &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "falcon", Role: "task"}}
+	if !s.gateClaimsHeld(ap) {
+		t.Fatal("an expired on-disk hold was resurrected by the reload")
+	}
+	if s.ClaimHoldSnapshot() != nil {
+		t.Fatal("expired on-disk hold adopted as an active hold")
+	}
+	if persisted != 0 {
+		t.Fatalf("adoption re-persisted %d time(s); the value came from the file", persisted)
+	}
+}
+
+func TestClaimHoldReloadErrorKeepsHold(t *testing.T) {
+	s, _ := heldSupervisor(t, newHold("union-autodeploy", "deploy union tips", time.Hour))
+	s.ReloadClaimHold = func() (*ClaimHold, bool, error) {
+		return nil, false, errors.New("stat: permission denied")
+	}
+
+	ap := &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "falcon", Role: "task"}}
+	if s.gateClaimsHeld(ap) {
+		t.Fatal("a failed reload dropped the hold; it must fail closed")
+	}
+	h := s.ClaimHoldSnapshot()
+	if h == nil || h.Actor != "union-autodeploy" {
+		t.Fatalf("ClaimHoldSnapshot() = %#v, want the in-memory hold kept", h)
+	}
+}
