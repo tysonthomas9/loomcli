@@ -3439,6 +3439,7 @@ export interface components {
       rig?: string;
       mol_type?: string;
       parent?: string;
+      parent_title?: string | null;
     };
     /** @description Full issue detail returned by get-single-issue endpoint. Includes dependency/dependent refs, comments, and counts. */
     IssueResponse: {

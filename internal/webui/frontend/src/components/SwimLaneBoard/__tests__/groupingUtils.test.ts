@@ -169,7 +169,7 @@ describe("groupIssuesByField", () => {
       expect(result[0].groupIssue?.id).toBe("epic-empty");
     });
 
-    it("falls back to a friendly 'Untitled epic' label (not the raw parent ID) when parent_title is not available", () => {
+    it("falls back to the parent ID when the parent is neither loaded nor titled", () => {
       const issues = [
         createMockIssue({ id: "issue-1", parent: "epic-id-123" }),
       ];
@@ -177,9 +177,38 @@ describe("groupIssuesByField", () => {
       const result = groupIssuesByField(issues, "epic");
 
       expect(result).toHaveLength(1);
-      // The raw internal parent ID must never surface as a user-facing lane
-      // title; show a friendly placeholder instead.
-      expect(result[0].title).toBe("Untitled epic");
+      // An ID identifies the lane; a shared placeholder ("Untitled epic") makes
+      // every unresolved lane indistinguishable from every other. This is the
+      // contract asserted by tests/e2e/groupby-epic.spec.ts.
+      expect(result[0].title).toBe("epic-id-123");
+    });
+
+    it("titles a lane from a non-epic parent that is itself in the issue list", () => {
+      const issues = [
+        createMockIssue({ id: "parent-1", title: "Decomposed Parent" }),
+        createMockIssue({ id: "issue-1", parent: "parent-1" }),
+      ];
+
+      const result = groupIssuesByField(issues, "epic");
+
+      const lane = result.find((l) => l.id === "lane-epic-parent-1");
+      expect(lane).toBeDefined();
+      expect(lane?.title).toBe("Decomposed Parent");
+    });
+
+    it("uses parent_title from a child when the parent is not in the issue list", () => {
+      const issues = [
+        createMockIssue({
+          id: "issue-1",
+          parent: "parent-offscreen",
+          parent_title: "Offscreen Parent",
+        }),
+      ];
+
+      const result = groupIssuesByField(issues, "epic");
+
+      expect(result).toHaveLength(1);
+      expect(result[0].title).toBe("Offscreen Parent");
     });
   });
 

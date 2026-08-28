@@ -235,6 +235,41 @@ test.describe("groupBy Epic Swim Lanes", () => {
         page.getByRole("heading", { name: "epic-fallback", exact: true })
       ).toBeVisible()
     })
+
+    test("lane header uses a non-epic parent's own title when it is on the board", async ({
+      page,
+    }) => {
+      // A decomposed non-epic parent: no parent_title on the child, but the
+      // parent issue itself is in the list, so its title titles the lane.
+      const issuesWithLoadedParent = [
+        {
+          id: "parent-loaded",
+          title: "Decomposed Parent Task",
+          status: "open",
+          priority: 2,
+          issue_type: "task",
+          created_at: "2026-01-27T10:00:00Z",
+          updated_at: "2026-01-27T10:00:00Z",
+        },
+        {
+          id: "child-of-loaded",
+          title: "Child Of Loaded Parent",
+          status: "open",
+          priority: 2,
+          issue_type: "task",
+          parent: "parent-loaded", // No parent_title field
+          created_at: "2026-01-27T10:00:00Z",
+          updated_at: "2026-01-27T10:00:00Z",
+        },
+      ]
+
+      await setupMocks(page, issuesWithLoadedParent)
+      await navigateToEpicView(page)
+
+      await expect(
+        page.getByRole("heading", { name: "Decomposed Parent Task", exact: true })
+      ).toBeVisible()
+    })
   })
 
   test.describe("Ungrouped Lane - Issues Without parent", () => {
