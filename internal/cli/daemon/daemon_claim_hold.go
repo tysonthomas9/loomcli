@@ -459,23 +459,48 @@ func validateHoldTTL(ttl time.Duration) (time.Duration, error) {
 	return ttl, nil
 }
 
-// claimHoldEndpoints names the three daemon paths a claim-hold command acts on.
-// They are resolved TOGETHER, from one project directory, so the file the
-// offline release clears is the file belonging to the daemon the socket would
-// have reached — resolving them separately is how a release silently clears
-// some other workspace's hold.
+// claimHoldEndpoints names the daemon paths a claim-hold command acts on.
+// They are resolved TOGETHER, from one project directory or one sidecar
+// record, so the file the offline release clears is the file belonging to the
+// daemon the socket would have reached — resolving them separately is how a
+// release silently clears some other workspace's hold.
 type claimHoldEndpoints struct {
 	projectDir string
 	pidFile    string
 	socketPath string
+	// holdFile is the daemon's OWN claim-hold path when the sidecar recorded
+	// one. Empty means "derive it from pidFile", which is what a cwd-resolved
+	// endpoint set has always done.
+	holdFile string
+	// source names how socketPath was found, for the user-facing lines:
+	// controlSocketSourceCwd or controlSocketSourceWorkspaceLock.
+	source string
 }
 
-// holdPath is the claim-hold record beside this daemon's PID file.
-func (e claimHoldEndpoints) holdPath() string { return resolveClaimHoldPath(e.pidFile) }
+// holdPath is the claim-hold record belonging to this daemon: the one the
+// sidecar named, or the one beside this daemon's PID file.
+func (e claimHoldEndpoints) holdPath() string {
+	if e.holdFile != "" {
+		return e.holdFile
+	}
+	return resolveClaimHoldPath(e.pidFile)
+}
 
-// resolveClaimHoldEndpoints resolves the daemon paths from the working
-// directory, mirroring resolveControlSocketFromCwd's fallback to the default
-// PID file when no daemon config can be read.
+// describe renders the socket and how it was found, for waiting and error lines.
+func (e claimHoldEndpoints) describe() string {
+	return describeControlSocket(e.socketPath, e.source)
+}
+
+// resolveClaimHoldEndpoints resolves the daemon paths a claim-hold command acts
+// on, cwd-first and then from the workspace-lock sidecar. It mirrors
+// resolveControlSocketFromCwd's fallback to the default PID file when no daemon
+// config can be read.
+//
+// A hold is an operational lever pulled from wherever the operator or a deploy
+// script happens to stand, not necessarily from the daemon's project dir. When
+// the cwd has no socket, the whole endpoint set — project dir, socket AND hold
+// file — is taken from ONE sidecar, so the file an offline release clears is
+// still the file of the daemon the socket would have reached.
 func resolveClaimHoldEndpoints() (claimHoldEndpoints, error) {
 	projectDir, err := os.Getwd()
 	if err != nil {
@@ -486,11 +511,30 @@ func resolveClaimHoldEndpoints() (claimHoldEndpoints, error) {
 		config = &cfgpkg.DaemonConfig{Daemon: cfgpkg.DaemonSettings{PIDFile: ".loom/daemon.pid"}}
 	}
 	pidFile := supervisor.ResolveDaemonPath(projectDir, config.Daemon.PIDFile)
-	return claimHoldEndpoints{
+	ep := claimHoldEndpoints{
 		projectDir: projectDir,
 		pidFile:    pidFile,
 		socketPath: filepath.Join(filepath.Dir(pidFile), "daemon.sock"),
-	}, nil
+		source:     controlSocketSourceCwd,
+	}
+	if socketExists(ep.socketPath) {
+		return ep, nil
+	}
+	info, ok := workspaceSidecar()
+	if !ok || info.Socket == "" {
+		// Fall back to the cwd set, so the caller still surfaces the familiar
+		// "no control socket at <path>" error and the offline release still
+		// works exactly as it did before this change.
+		return ep, nil
+	}
+	ep.socketPath = info.Socket
+	ep.source = controlSocketSourceWorkspaceLock
+	if info.Cwd != "" {
+		ep.projectDir = info.Cwd
+		ep.pidFile = supervisor.ResolveDaemonPath(info.Cwd, config.Daemon.PIDFile)
+	}
+	ep.holdFile = info.ClaimHold // empty for an old sidecar: holdPath() derives it
+	return ep, nil
 }
 
 // claimHoldDaemonRuntime reports whether a daemon process is believed alive:
@@ -527,10 +571,10 @@ func dialClaimHoldSocket(ep claimHoldEndpoints, req DaemonControlRequest) (*Daem
 	// like a stopped one during triage.
 	if rt.PID > 0 {
 		fmt.Fprintf(os.Stderr, "Waiting up to %s for the daemon control socket at %s (daemon PID %d is starting)...\n",
-			wait, ep.socketPath, rt.PID)
+			wait, ep.describe(), rt.PID)
 	} else {
 		fmt.Fprintf(os.Stderr, "Waiting up to %s for the daemon control socket at %s (a daemon is starting)...\n",
-			wait, ep.socketPath)
+			wait, ep.describe())
 	}
 
 	deadline := time.Now().Add(wait)
@@ -546,13 +590,15 @@ func dialClaimHoldSocket(ep claimHoldEndpoints, req DaemonControlRequest) (*Daem
 			return nil, fmt.Errorf(
 				"timed out after %s waiting for the daemon control socket at %s (daemon PID %d is alive but has not bound it); "+
 					"%s was deliberately NOT cleared, because that daemon may already hold a hydrated copy",
-				wait, ep.socketPath, rt.PID, ep.holdPath())
+				wait, ep.describe(), rt.PID, ep.holdPath())
 		}
 	}
 }
 
 // requestClaimHold sends one claims_hold_set / claims_hold_get round trip,
-// resolving the daemon paths from the working directory.
+// resolving the daemon paths cwd-first and then from the workspace-lock
+// sidecar. Transport failures name the socket and how it was resolved, so a
+// wrong-daemon mistake is visible in the error itself.
 func requestClaimHold(op string, args any) (*ClaimHoldStatus, error) {
 	ep, err := resolveClaimHoldEndpoints()
 	if err != nil {
@@ -574,10 +620,10 @@ func requestClaimHoldAt(ep claimHoldEndpoints, op string, args any) (*ClaimHoldS
 	}
 	resp, err := dialClaimHoldSocket(ep, req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %s", err, ep.describe())
 	}
 	if !resp.Success {
-		return nil, fmt.Errorf("%s", resp.Error)
+		return nil, fmt.Errorf("%s (%s)", resp.Error, ep.describe())
 	}
 	var status ClaimHoldStatus
 	if len(resp.Data) > 0 {
@@ -599,7 +645,11 @@ func runDaemonHold(cmd *cobra.Command, args []string) error {
 	}
 	actor := resolveHoldActor(daemonHoldActor)
 
-	status, err := requestClaimHold(ctrlOpClaimHoldSet, claimHoldSetArgs{
+	ep, err := resolveClaimHoldEndpoints()
+	if err != nil {
+		return err
+	}
+	status, err := requestClaimHoldAt(ep, ctrlOpClaimHoldSet, claimHoldSetArgs{
 		Held:       true,
 		Actor:      actor,
 		Reason:     daemonHoldReason,
@@ -619,17 +669,20 @@ func runDaemonHold(cmd *cobra.Command, args []string) error {
 	if !daemonHoldWaitIdle {
 		return nil
 	}
-	return waitForClaimHoldIdle(daemonHoldTimeout)
+	return waitForClaimHoldIdle(ep, daemonHoldTimeout)
 }
 
 // waitForClaimHoldIdle polls claims_hold_get until no agent process is left
 // running. On timeout it returns an error WITHOUT releasing the hold — whether
 // to give up on a quiesce is the operator's decision, not this command's.
-func waitForClaimHoldIdle(timeout time.Duration) error {
+func waitForClaimHoldIdle(ep claimHoldEndpoints, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	fmt.Printf("Waiting up to %s for running agents to finish...\n", timeout)
+	fmt.Printf("  Using %s\n", ep.describe())
 	for {
-		status, err := requestClaimHold(ctrlOpClaimHoldGet, nil)
+		// Poll the SAME endpoints the hold was set on, so every round trip
+		// reaches the daemon that is actually holding.
+		status, err := requestClaimHoldAt(ep, ctrlOpClaimHoldGet, nil)
 		if err != nil {
 			return err
 		}
@@ -669,6 +722,7 @@ func runDaemonRelease(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	fmt.Printf("Claim hold released by %s. Agents resume claiming within ~%s.\n", actor, defaultClaimHoldRecheckHint)
+	fmt.Printf("  Released via %s\n", ep.describe())
 	printClaimHoldStatus(*status)
 	return nil
 }
@@ -769,6 +823,20 @@ func claimHoldBanner(h *supervisor.ClaimHold) string {
 	}
 	return fmt.Sprintf("Claims: %s by %s since %s — %s; expires %s",
 		marker, h.Actor, h.Since.Format(time.RFC3339), h.Reason, expires)
+}
+
+// printClaimHoldReleaseHint tells the operator how to clear an active hold and
+// which daemon the release would reach. The socket source matters: a release
+// run from outside the daemon's project dir resolves through the workspace
+// lock, and saying so up front is cheaper than diagnosing it afterwards.
+func printClaimHoldReleaseHint(h *supervisor.ClaimHold) {
+	if h == nil || !h.Active(time.Now()) {
+		return
+	}
+	fmt.Println("  Release with: loom daemon release")
+	if ep, err := resolveClaimHoldEndpoints(); err == nil {
+		fmt.Printf("  Release would reach %s\n", ep.describe())
+	}
 }
 
 func orDash(s string) string {

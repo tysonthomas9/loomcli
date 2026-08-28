@@ -76,6 +76,16 @@ func acquireWorkspaceDaemonLock() (*workspaceDaemonLock, error) {
 	}, nil
 }
 
+// UpdatePaths records the daemon's project dir, control socket and claim hold
+// file in the PID sidecar. Safe on nil (single-project mode has no workspace
+// lock, and control commands then fall back to the cwd-derived socket).
+func (w *workspaceDaemonLock) UpdatePaths(cwd, socket, claimHold string) error {
+	if w == nil || w.pidPath == "" {
+		return nil
+	}
+	return updateWorkspacePID(w.pidPath, cwd, socket, claimHold)
+}
+
 // Release drops the lock and removes the PID sidecar. Safe on nil.
 //
 // The lock file itself intentionally remains on disk. Removing a flocked file
@@ -148,42 +158,67 @@ func detectWorkspaceDaemonRuntime() cli.DaemonRuntimeInfo {
 
 	// wsDir is the provenance: the live workspace supervisor keeps its
 	// daemon-agents.json, daemon.lock and daemon.sock under <wsDir>/.loom,
-	// which is generally NOT the caller's cwd.
-	info := readWorkspacePIDFile(pidPath)
-	if info.PID > 0 && lockfile.IsProcessRunning(info.PID) {
-		return cli.DaemonRuntimeInfo{
-			Running:   true,
-			PID:       info.PID,
-			Source:    "workspace-lock",
-			StartedAt: info.StartedAt,
-			Dir:       wsDir,
-		}
+	// which is generally NOT the caller's cwd. Cwd/Socket come from the
+	// daemon's own record and are reported even when the PID is dead —
+	// they are paths, not liveness evidence.
+	info, _ := readWorkspacePIDFile(pidPath)
+	rt := cli.DaemonRuntimeInfo{
+		Running: true,
+		Source:  "workspace-lock",
+		Dir:     wsDir,
+		Cwd:     info.Cwd,
+		Socket:  info.Socket,
 	}
-	// Lock held but the PID sidecar is missing, unreadable or dead: the
-	// daemon is running, but nothing here identifies it. StartedAt stays
-	// zero (unknown) rather than borrowing an unverified timestamp.
-	return cli.DaemonRuntimeInfo{Running: true, Source: "workspace-lock", Dir: wsDir}
+	if info.PID > 0 && lockfile.IsProcessRunning(info.PID) {
+		// Lock held and the PID sidecar identifies a live process: only then
+		// may its StartedAt be reported. Otherwise StartedAt stays zero
+		// (unknown) rather than borrowing an unverified timestamp.
+		rt.PID = info.PID
+		rt.StartedAt = info.StartedAt
+	}
+	return rt
 }
 
 // readWorkspacePID best-effort reads the existing daemon's PID from
 // the sidecar file. Returns 0 when the file is missing or unreadable.
 func readWorkspacePID(path string) int {
-	return readWorkspacePIDFile(path).PID
+	info, ok := readWorkspacePIDFile(path)
+	if !ok {
+		return 0
+	}
+	return info.PID
 }
 
-// readWorkspacePIDFile best-effort reads the whole daemon PID sidecar. It is
-// the single parser for the file; a missing or unparseable file yields the
-// zero value (PID 0, zero StartedAt).
-func readWorkspacePIDFile(path string) workspacePIDFile {
+// readWorkspacePIDFile parses the whole sidecar. It is the single parser for
+// the file. Returns ok=false when the file is missing or not valid JSON. A
+// sidecar written before the Cwd/Socket/ClaimHold fields existed parses fine,
+// leaving those fields empty.
+func readWorkspacePIDFile(path string) (workspacePIDFile, bool) {
 	data, err := os.ReadFile(path) //nolint:gosec // user-private sidecar
 	if err != nil {
-		return workspacePIDFile{}
+		return workspacePIDFile{}, false
 	}
 	var info workspacePIDFile
 	if err := json.Unmarshal(data, &info); err != nil {
-		return workspacePIDFile{}
+		return workspacePIDFile{}, false
 	}
-	return info
+	return info, true
+}
+
+// workspaceSidecar returns the daemon.pid sidecar for the active LOOM_WORKSPACE
+// when a daemon actually holds the workspace lock. It is the single place that
+// hands out the daemon's OWN recorded paths as a set: callers that need the
+// socket and the claim-hold file must take both from one record, or a release
+// can dial one daemon and clear another workspace's hold.
+//
+// Filesystem-only on purpose: a hold has to work while fleet-db (and so
+// daemonregistry) is being redeployed, which is exactly when it is needed.
+func workspaceSidecar() (workspacePIDFile, bool) {
+	rt := detectWorkspaceDaemonRuntime()
+	if !rt.Running || rt.Dir == "" {
+		return workspacePIDFile{}, false
+	}
+	return readWorkspacePIDFile(filepath.Join(rt.Dir, "daemon.pid"))
 }
 
 // writeWorkspacePID stores the daemon PID as JSON so the format is
@@ -196,7 +231,39 @@ func writeWorkspacePID(path string, pid int) error {
 	return os.WriteFile(path, data, 0o644) //nolint:gosec // user-private sidecar
 }
 
+// updateWorkspacePID records the daemon's resolved paths in the sidecar so
+// control commands can find the socket from any cwd. It preserves the PID and
+// StartedAt already written by acquireWorkspaceDaemonLock — that call happens
+// before resolveDaemonPaths' results are known here, so the paths arrive in a
+// second write rather than the first.
+//
+// Deliberately NOT routed through daemonregistry: the hold has to work while
+// fleet-db is being redeployed, so the lookup path must stay filesystem-only.
+func updateWorkspacePID(path, cwd, socket, claimHold string) error {
+	info, ok := readWorkspacePIDFile(path)
+	if !ok {
+		info = workspacePIDFile{PID: os.Getpid(), StartedAt: time.Now()}
+	}
+	info.Cwd = cwd
+	info.Socket = socket
+	info.ClaimHold = claimHold
+	data, err := json.Marshal(info)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644) //nolint:gosec // user-private sidecar
+}
+
+// workspacePIDFile is the JSON shape of the daemon.pid sidecar.
+//
+// Everything past PID/StartedAt is optional and omitempty: a sidecar written
+// by an older daemon has none of these fields and must still parse, with the
+// new fields left empty. Readers must therefore treat an empty Socket as
+// "unknown", never as "no socket".
 type workspacePIDFile struct {
 	PID       int       `json:"pid"`
 	StartedAt time.Time `json:"started_at"`
+	Cwd       string    `json:"cwd,omitempty"`             // daemon project dir
+	Socket    string    `json:"socket,omitempty"`          // control socket path
+	ClaimHold string    `json:"claim_hold_path,omitempty"` // claim hold state file
 }

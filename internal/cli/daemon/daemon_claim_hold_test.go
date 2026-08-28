@@ -458,9 +458,21 @@ func waitIdleDaemon(t *testing.T, runningPID int) *Daemon {
 	return d
 }
 
+// claimHoldEndpointsForTest resolves the endpoints --wait-idle polls. The
+// waitIdleDaemon fixture puts the control socket in the process working
+// directory, so this is the cwd branch of resolveClaimHoldEndpoints.
+func claimHoldEndpointsForTest(t *testing.T) claimHoldEndpoints {
+	t.Helper()
+	ep, err := resolveClaimHoldEndpoints()
+	if err != nil {
+		t.Fatalf("resolveClaimHoldEndpoints: %v", err)
+	}
+	return ep
+}
+
 func TestWaitForClaimHoldIdle_ReturnsOnceNoAgentIsRunning(t *testing.T) {
 	waitIdleDaemon(t, 0)
-	if err := waitForClaimHoldIdle(10 * time.Second); err != nil {
+	if err := waitForClaimHoldIdle(claimHoldEndpointsForTest(t), 10*time.Second); err != nil {
 		t.Fatalf("waitForClaimHoldIdle with no running agents: %v", err)
 	}
 }
@@ -473,7 +485,7 @@ func TestWaitForClaimHoldIdle_TimesOutWithoutReleasingTheHold(t *testing.T) {
 		t.Fatalf("set: %s", resp.Error)
 	}
 
-	err := waitForClaimHoldIdle(time.Millisecond)
+	err := waitForClaimHoldIdle(claimHoldEndpointsForTest(t), time.Millisecond)
 	if err == nil {
 		t.Fatal("wait-idle succeeded with an agent still running")
 	}

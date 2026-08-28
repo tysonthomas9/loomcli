@@ -42,6 +42,12 @@ type DaemonRuntimeInfo struct {
 	// Dir is the directory the evidence came from. State file and control
 	// socket paths must be derived from this, not from the cwd.
 	Dir string
+	// Cwd and Socket are the daemon's own project dir and control socket
+	// path, when the confirming source knows them. Only the workspace-lock
+	// sidecar carries them today; other sources leave them empty, and an
+	// empty value means "unknown", not "none".
+	Cwd    string
+	Socket string
 }
 
 // DetectDaemonRuntime resolves daemon liveness from authoritative sources in
