@@ -22,8 +22,10 @@ func TestMergeDelegatesToGitHubAfterProtectionCheck(t *testing.T) {
 		switch command {
 		case "gh --version":
 			return cli.CommandResult{Stdout: "gh version 2.80.0"}
-		case "gh pr view 17 --json baseRefName,repository":
-			return cli.CommandResult{Stdout: `{"baseRefName":"main","repository":{"nameWithOwner":"acme/project"}}`}
+		case "gh pr view 17 --json baseRefName":
+			return cli.CommandResult{Stdout: `{"baseRefName":"main"}`}
+		case "gh repo view --json nameWithOwner":
+			return cli.CommandResult{Stdout: `{"nameWithOwner":"acme/project"}`}
 		case "gh api repos/acme/project/branches/main/protection":
 			return cli.CommandResult{Stdout: `{}`}
 		case "gh pr merge 17 --squash":
@@ -38,8 +40,8 @@ func TestMergeDelegatesToGitHubAfterProtectionCheck(t *testing.T) {
 	if err := runMerge(cmd, []string{"17"}); err != nil {
 		t.Fatalf("runMerge: %v", err)
 	}
-	if len(execRunner.Calls) != 4 {
-		t.Fatalf("commands = %d, want gh version, PR view, protection, merge", len(execRunner.Calls))
+	if len(execRunner.Calls) != 5 {
+		t.Fatalf("commands = %d, want gh version, PR view, repo view, protection, merge", len(execRunner.Calls))
 	}
 }
 
@@ -54,8 +56,10 @@ func TestMergeFailsClosedBeforeGitHubMerge(t *testing.T) {
 		switch command {
 		case "gh --version":
 			return cli.CommandResult{}
-		case "gh pr view 17 --json baseRefName,repository":
-			return cli.CommandResult{Stdout: `{"baseRefName":"main","repository":{"nameWithOwner":"acme/project"}}`}
+		case "gh pr view 17 --json baseRefName":
+			return cli.CommandResult{Stdout: `{"baseRefName":"main"}`}
+		case "gh repo view --json nameWithOwner":
+			return cli.CommandResult{Stdout: `{"nameWithOwner":"acme/project"}`}
 		case "gh api repos/acme/project/branches/main/protection":
 			return cli.CommandResult{Stderr: "404 Not Found", Err: errors.New("exit 1")}
 		default:
@@ -112,8 +116,10 @@ func TestMergeReportsMissingGhAndUpstreamFailure(t *testing.T) {
 			switch command {
 			case "gh --version", "gh api repos/acme/project/branches/main/protection":
 				return cli.CommandResult{}
-			case "gh pr view 17 --json baseRefName,repository":
-				return cli.CommandResult{Stdout: `{"baseRefName":"main","repository":{"nameWithOwner":"acme/project"}}`}
+			case "gh pr view 17 --json baseRefName":
+				return cli.CommandResult{Stdout: `{"baseRefName":"main"}`}
+			case "gh repo view --json nameWithOwner":
+				return cli.CommandResult{Stdout: `{"nameWithOwner":"acme/project"}`}
 			case "gh pr merge 17 --squash":
 				return cli.CommandResult{Stderr: "required check failed", Err: errors.New("exit 1")}
 			default:

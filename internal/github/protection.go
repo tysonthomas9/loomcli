@@ -30,20 +30,44 @@ type Runner func(context.Context, string, ...string) (stdout, stderr string, err
 // PRProtection verifies that a pull request's base is protected. GitHub is the
 // authority; missing, malformed, or failed responses are all merge-disabled.
 func PRProtection(ctx context.Context, run Runner, pr string) error {
-	out, stderr, err := run(ctx, "gh", "pr", "view", pr, "--json", "baseRefName,repository")
+	out, stderr, err := run(ctx, "gh", "pr", "view", pr, "--json", "baseRefName")
 	if err != nil {
 		return commandError("reading pull request", stderr, err)
 	}
 	var view struct {
 		BaseRefName string `json:"baseRefName"`
-		Repository  struct {
-			NameWithOwner string `json:"nameWithOwner"`
-		} `json:"repository"`
 	}
-	if err := json.Unmarshal([]byte(out), &view); err != nil || view.BaseRefName == "" || view.Repository.NameWithOwner == "" {
+	if err := json.Unmarshal([]byte(out), &view); err != nil || view.BaseRefName == "" {
 		return errors.New("merge disabled: GitHub pull request protection could not be verified")
 	}
-	return BranchProtection(ctx, run, view.Repository.NameWithOwner, view.BaseRefName)
+
+	repo, ok := pullRequestRepository(pr)
+	if !ok {
+		out, stderr, err = run(ctx, "gh", "repo", "view", "--json", "nameWithOwner")
+		if err != nil {
+			return commandError("reading repository", stderr, err)
+		}
+		var repoView struct {
+			NameWithOwner string `json:"nameWithOwner"`
+		}
+		if err := json.Unmarshal([]byte(out), &repoView); err != nil || repoView.NameWithOwner == "" {
+			return errors.New("merge disabled: GitHub repository protection could not be verified")
+		}
+		repo = repoView.NameWithOwner
+	}
+	return BranchProtection(ctx, run, repo, view.BaseRefName)
+}
+
+func pullRequestRepository(pr string) (string, bool) {
+	u, err := url.Parse(strings.TrimSpace(pr))
+	if err != nil || u.Host != "github.com" {
+		return "", false
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) != 4 || parts[0] == "" || parts[1] == "" || parts[2] != "pull" || parts[3] == "" {
+		return "", false
+	}
+	return parts[0] + "/" + parts[1], true
 }
 
 // RepositoryProtection verifies the configured repository's default branch.
