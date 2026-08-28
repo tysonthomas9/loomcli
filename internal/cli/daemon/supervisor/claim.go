@@ -76,19 +76,50 @@ func (s *Supervisor) claimTask(ap *AgentProcess, epicID string) bool {
 	}
 
 	// First try issues already assigned to this agent's worktree before
-	// falling back to the global ready queue.
+	// falling back to the global ready queue. One conflict ledger spans both
+	// attempts so the failure report below can tell "the queue was empty" from
+	// "every candidate was locked".
+	var conflicts claimConflicts
 	if ap.Entry.Worktree != "" {
 		assignedOpts := opts
 		assignedOpts.Assignee = ap.Entry.Worktree
-		if claimed, decided := s.tryClaimFromReady(ap, assignedOpts, constraints); decided {
+		if claimed, decided := s.tryClaimFromReady(ap, assignedOpts, constraints, &conflicts); decided {
 			return claimed
 		}
 	}
-	if claimed, decided := s.tryClaimFromReady(ap, opts, constraints); decided {
+	if claimed, decided := s.tryClaimFromReady(ap, opts, constraints, &conflicts); decided {
 		return claimed
+	}
+	// The candidate list can empty through conflicts before the retry limit is
+	// reached. Reporting the generic no-work message there would discard the
+	// conflict detail and make a pure lock-contention stall indistinguishable
+	// from an empty board.
+	if conflicts.count > 0 {
+		s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.LockConflictOutcome), conflicts.message())
+		return false
 	}
 	s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome), "no claimable tasks")
 	return false
+}
+
+// claimConflicts accumulates lock-conflict detail across every claim attempt of
+// one agent cycle, so the eventual failure names the last contended issue and
+// its holder instead of the generic "no claimable tasks".
+type claimConflicts struct {
+	count      int
+	lastID     string
+	lastHolder string
+}
+
+func (c *claimConflicts) record(id, holder string) {
+	c.count++
+	c.lastID = id
+	c.lastHolder = holder
+}
+
+func (c *claimConflicts) message() string {
+	return fmt.Sprintf("no claimable tasks after %d conflicts (last: %s locked by %s)",
+		c.count, c.lastID, c.lastHolder)
 }
 
 // buildClaimOpts assembles the ReadyOpts for an agent's task claim,
@@ -115,13 +146,13 @@ func (s *Supervisor) buildClaimOpts(ap *AgentProcess, epicID string) (backend.Re
 // (claimed, decided): decided=false means "no decision, caller may try
 // another opts variant"; decided=true means we either succeeded or hit a
 // failure we've already recorded.
-func (s *Supervisor) tryClaimFromReady(ap *AgentProcess, opts backend.ReadyOpts, constraints cli.RoleConstraints) (claimed, decided bool) {
+func (s *Supervisor) tryClaimFromReady(ap *AgentProcess, opts backend.ReadyOpts, constraints cli.RoleConstraints, conflicts *claimConflicts) (claimed, decided bool) {
 	issues, err := s.readyIssues(opts)
 	if err != nil {
 		s.setPreflightError(ap, agenterr.OutcomeFromHarness(wrapper.ErrUnknown), fmt.Sprintf("ready query failed: %v", err))
 		return false, true
 	}
-	claimed, failed := s.tryClaimBestTask(ap, issues, constraints)
+	claimed, failed := s.tryClaimBestTask(ap, issues, constraints, conflicts)
 	if claimed {
 		return true, true
 	}
@@ -179,6 +210,13 @@ func (s *Supervisor) claimResumeTask(ap *AgentProcess, taskID string) bool {
 		return true
 	}
 	if backend.IsKind(err, backend.KindConflict) && conflictHolder(err) == ap.Entry.Worktree {
+		// The backend says the claim is still ours, so re-take the process-local
+		// reservation the failed attempt above released. Skipping this would
+		// leave the task free for a peer agent to claim underneath us.
+		if reserveErr := s.claims.reserve(taskID, claimantID(ap)); reserveErr != nil {
+			slog.Warn("resume task reserved by another agent; cold-starting", "worktree", ap.Entry.Worktree, "task_id", taskID, "err", reserveErr)
+			return false
+		}
 		ap.Mu.Lock()
 		ap.AssignedTaskID = taskID
 		ap.RequestedTaskID = ""
@@ -200,9 +238,7 @@ func (s *Supervisor) claimResumeTask(ap *AgentProcess, taskID string) bool {
 	return false
 }
 
-func (s *Supervisor) tryClaimBestTask(ap *AgentProcess, issues []backend.IssueData, constraints cli.RoleConstraints) (bool, bool) {
-	conflicts := 0
-	var lastConflictID, lastConflictHolder string
+func (s *Supervisor) tryClaimBestTask(ap *AgentProcess, issues []backend.IssueData, constraints cli.RoleConstraints, conflicts *claimConflicts) (bool, bool) {
 	for {
 		match := cli.SelectBestTask(issues, constraints)
 		if match == nil {
@@ -210,13 +246,9 @@ func (s *Supervisor) tryClaimBestTask(ap *AgentProcess, issues []backend.IssueDa
 		}
 		if err := s.claimIssueForAgent(ap, match.Issue.ID, match.Reason); err != nil {
 			if backend.IsKind(err, backend.KindConflict) {
-				conflicts++
-				lastConflictID = match.Issue.ID
-				lastConflictHolder = conflictHolder(err)
-				if conflicts >= claimConflictRetryLimit {
-					msg := fmt.Sprintf("no claimable tasks after %d conflicts (last: %s locked by %s)",
-						conflicts, lastConflictID, lastConflictHolder)
-					s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.LockConflictOutcome), msg)
+				conflicts.record(match.Issue.ID, conflictHolder(err))
+				if conflicts.count >= claimConflictRetryLimit {
+					s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.LockConflictOutcome), conflicts.message())
 					return false, true
 				}
 				issues = removeIssueByID(issues, match.Issue.ID)
@@ -245,6 +277,13 @@ func conflictHolder(err error) string {
 }
 
 func (s *Supervisor) claimIssueForAgent(ap *AgentProcess, taskID, reason string) error {
+	claimant := claimantID(ap)
+	// Reserve first: this is the mutual exclusion. Losing the reservation race
+	// returns a KindConflict indistinguishable from a backend one, so every
+	// caller's existing conflict handling applies unchanged.
+	if err := s.claims.reserve(taskID, claimant); err != nil {
+		return err
+	}
 	claimCtx, claimCancel := s.operationContext(claimOperationTimeout)
 	var err error
 	if ap.Entry.Worktree != "" {
@@ -258,8 +297,12 @@ func (s *Supervisor) claimIssueForAgent(ap *AgentProcess, taskID, reason string)
 	}
 	claimCancel()
 	if err != nil {
+		s.claims.release(taskID, claimant)
 		return err
 	}
+	// The agent moved on from whatever it reserved before, so anything else
+	// still held under this claimant is stale and must not block a peer.
+	s.claims.dropOthers(claimant, taskID)
 	ap.Mu.Lock()
 	ap.AssignedTaskID = taskID
 	ap.RequestedTaskID = ""
@@ -275,6 +318,83 @@ func (s *Supervisor) claimIssueForAgent(ap *AgentProcess, taskID, reason string)
 	}
 	slog.Info("claimed task for agent", args...)
 	return nil
+}
+
+// claimantID is the identity a claim is reserved under. The worktree is the
+// identifier the rest of the claim path already uses (it is the fleet actor and
+// the conflict holder); agents configured without one fall back to their role
+// so two role-scoped agents still exclude each other.
+func claimantID(ap *AgentProcess) string {
+	if ap.Entry.Worktree != "" {
+		return ap.Entry.Worktree
+	}
+	return "role:" + ap.Entry.Role
+}
+
+// claimLedger is the process-local mutual-exclusion ledger for task claims:
+// task ID -> the claimant (worktree) that holds it. Every agent in this daemon
+// claims through it, so of N agents racing for one issue exactly one reaches
+// the backend and the rest get a KindConflict that falls through
+// tryClaimBestTask's existing conflict path.
+//
+// It exists because a cold-started daemon spawns every agent at once and their
+// claims land in the same millisecond. A backend that does not serialize those
+// writes hands success to all of them and persists none, leaving the issue
+// `open` in the ready queue while N agents work it (the 2026-08-27 PUPPET-201
+// incident: three worktrees, one ticket, no winner). Serializing in-process
+// cannot fix a racy backend for claims arriving from other daemons, but it
+// removes the only source of simultaneity this fleet actually has.
+//
+// A reservation is held for as long as the agent holds the task and is dropped
+// by release when the claim fails or the agent's session finalizes. The zero
+// value is ready to use; the map is lazily initialized under mu.
+type claimLedger struct {
+	mu           sync.Mutex
+	reservations map[string]string
+}
+
+// reserve takes the process-local reservation on taskID for claimant. Returns
+// a KindConflict carrying the current holder in the same "existing_owner" meta
+// key the fleet classifier uses, so conflictHolder names the peer agent rather
+// than "unknown". Re-reserving your own task is a no-op, which keeps the resume
+// path (which re-claims a task it already holds) working.
+func (l *claimLedger) reserve(taskID, claimant string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if holder, ok := l.reservations[taskID]; ok && holder != claimant {
+		return &backend.BackendError{
+			Kind:    backend.KindConflict,
+			Op:      "ClaimIssue",
+			Message: fmt.Sprintf("task %s is already claimed by %s in this daemon", taskID, holder),
+			Meta:    map[string]string{"existing_owner": holder},
+		}
+	}
+	if l.reservations == nil {
+		l.reservations = make(map[string]string)
+	}
+	l.reservations[taskID] = claimant
+	return nil
+}
+
+// release drops the reservation on taskID, but only when claimant still holds
+// it — a stale release must never free a task another agent has since taken.
+func (l *claimLedger) release(taskID, claimant string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if holder, ok := l.reservations[taskID]; ok && holder == claimant {
+		delete(l.reservations, taskID)
+	}
+}
+
+// dropOthers frees every reservation held by claimant except keepID.
+func (l *claimLedger) dropOthers(claimant, keepID string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for id, holder := range l.reservations {
+		if holder == claimant && id != keepID {
+			delete(l.reservations, id)
+		}
+	}
 }
 
 // operationContext returns a context bounded by both the given timeout and
@@ -343,7 +463,15 @@ func removeIssueByID(issues []backend.IssueData, id string) []backend.IssueData 
 // the agent already moved status to closed which auto-releases), this logs at
 // debug level and returns without affecting the cleanup path.
 func (s *Supervisor) releaseAssignedTaskClaim(ap *AgentProcess, taskID string) {
-	if taskID == "" || ap.Entry.Worktree == "" || s.IssueBackend == nil {
+	if taskID == "" {
+		return
+	}
+	// Unconditionally, and before every backend-shaped early return below: the
+	// process-local reservation is ours whether or not the backend supports
+	// actor-scoped release, and leaking one would deadlock the task for the
+	// daemon's remaining lifetime.
+	s.claims.release(taskID, claimantID(ap))
+	if ap.Entry.Worktree == "" || s.IssueBackend == nil {
 		return
 	}
 	releaser, ok := s.IssueBackend.(actorReleaseBackend)

@@ -126,6 +126,7 @@ type Supervisor struct {
 	// the cross-package composite-literal construction site stays untouched.
 	quarantine     *taskQuarantine
 	quarantineOnce sync.Once
+	claims         claimLedger // process-local claim mutual exclusion; see claim.go
 
 	// quarantineStatePathCache is the resolved daemon-quarantine.json path
 	// (cache + test seam). Resolved from ProjectDir on the first qrec call, so
