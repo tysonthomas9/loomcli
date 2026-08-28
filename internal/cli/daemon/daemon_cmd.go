@@ -220,6 +220,30 @@ func runDaemon(cmd *cobra.Command, args []string) {
 	}
 }
 
+// resolveDaemonConfig reads the daemon's working directory and its fleet
+// config, reporting false once it has printed the reason. It is split out of
+// runDaemonBody only because that function owns the boot defers and must stay
+// short enough to read as one sequence.
+func resolveDaemonConfig() (string, *cfgpkg.DaemonConfig, bool) {
+	projectDir, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: cannot determine working directory: %v\n", err)
+		return "", nil, false
+	}
+
+	config, err := cfgpkg.LoadDaemonConfig(projectDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: loading config: %v\n", err)
+		return "", nil, false
+	}
+
+	if len(config.Agents) == 0 {
+		fmt.Fprintf(os.Stderr, "Error: no agents configured in FleetDB for the active workspace\n")
+		return "", nil, false
+	}
+	return projectDir, config, true
+}
+
 // runDaemonBody is the body of `loom daemon`, factored out so its defers can
 // run before runDaemon calls os.Exit on a fatal supervisor failure.
 func runDaemonBody() int {
@@ -231,20 +255,8 @@ func runDaemonBody() int {
 		return 1
 	}
 
-	projectDir, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: cannot determine working directory: %v\n", err)
-		return 1
-	}
-
-	config, err := cfgpkg.LoadDaemonConfig(projectDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: loading config: %v\n", err)
-		return 1
-	}
-
-	if len(config.Agents) == 0 {
-		fmt.Fprintf(os.Stderr, "Error: no agents configured in FleetDB for the active workspace\n")
+	projectDir, config, ok := resolveDaemonConfig()
+	if !ok {
 		return 1
 	}
 
