@@ -627,20 +627,30 @@ func TestSkillErrorBridgePreservesBackingForbidden(t *testing.T) {
 }
 
 func TestBinarySkillFileReturnsMetadataWithoutJSONTextCoercion(t *testing.T) {
-	h := newSkillsHarness(t)
-	ref := domain.RoleSkillRef("reviewer", "review-code")
-	binary := []byte{0x50, 0x4b, 0x03, 0x04, 0x00, 0xff}
-	advanceTestSkillFileBytes(t, h.store, ref, "assets/archive.zip", binary, false, "application/zip")
+	for _, tt := range []struct {
+		name      string
+		binary    []byte
+		mediaType string
+	}{
+		{name: "invalid UTF-8 bytes", binary: []byte{0x50, 0x4b, 0x03, 0x04, 0x00, 0xff}, mediaType: "application/zip"},
+		{name: "non-text media with valid UTF-8 bytes", binary: []byte("valid UTF-8 binary payload"), mediaType: "application/octet-stream"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newSkillsHarness(t)
+			ref := domain.RoleSkillRef("reviewer", "review-code")
+			advanceTestSkillFileBytes(t, h.store, ref, "assets/archive.zip", tt.binary, false, tt.mediaType)
 
-	rr := h.request(t, http.MethodGet, "/api/workspaces/SKILLS/roles/reviewer/skills/review-code/files/assets/archive.zip", "", nil)
-	assertErrorCode(t, rr, http.StatusUnsupportedMediaType, "binary_skill_file")
-	if bytes.Contains(rr.Body.Bytes(), binary) {
-		t.Fatalf("binary bytes were coerced into JSON text: %q", rr.Body.Bytes())
-	}
-	var body map[string]any
-	decodeResponse(t, rr, &body)
-	if body["path"] != "assets/archive.zip" || body["media_type"] != "application/zip" || body["size_bytes"] != float64(len(binary)) {
-		t.Fatalf("binary metadata = %+v", body)
+			rr := h.request(t, http.MethodGet, "/api/workspaces/SKILLS/roles/reviewer/skills/review-code/files/assets/archive.zip", "", nil)
+			assertErrorCode(t, rr, http.StatusUnsupportedMediaType, "binary_skill_file")
+			if bytes.Contains(rr.Body.Bytes(), tt.binary) {
+				t.Fatalf("binary bytes were coerced into JSON text: %q", rr.Body.Bytes())
+			}
+			var body map[string]any
+			decodeResponse(t, rr, &body)
+			if body["path"] != "assets/archive.zip" || body["media_type"] != tt.mediaType || body["size_bytes"] != float64(len(tt.binary)) {
+				t.Fatalf("binary metadata = %+v", body)
+			}
+		})
 	}
 }
 

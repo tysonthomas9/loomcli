@@ -312,7 +312,7 @@ func (h *Handler) getSkillFile(w http.ResponseWriter, r *http.Request, scope dom
 		writeSkillError(w, err)
 		return
 	}
-	if !utf8.Valid(body) || bytes.IndexByte(body, 0) >= 0 {
+	if !isTextEditableMediaType(meta.MediaType) || !utf8.Valid(body) || bytes.IndexByte(body, 0) >= 0 {
 		writeBinarySkillFileUnsupported(w, meta)
 		return
 	}
