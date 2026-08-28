@@ -232,7 +232,7 @@ func TestDialWaitsForLateSocket(t *testing.T) {
 	})
 
 	start := time.Now()
-	resp, err := dialClaimHoldSocket(ep, holdGetRequest(), claimHoldSocketWait)
+	resp, err := dialClaimHoldSocket(ep, holdGetRequest())
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("dial with a late socket: %v", err)
@@ -279,7 +279,7 @@ func TestDialGivesUpWhenDaemonExits(t *testing.T) {
 		t.Fatalf("resolveClaimHoldEndpoints: %v", err)
 	}
 	start := time.Now()
-	_, err = dialClaimHoldSocket(ep, holdGetRequest(), claimHoldSocketWait)
+	_, err = dialClaimHoldSocket(ep, holdGetRequest())
 	if !errors.Is(err, errNoDaemonRunning) {
 		t.Fatalf("err = %v, want errNoDaemonRunning once the daemon PID died", err)
 	}
@@ -296,7 +296,7 @@ func TestDialNoDaemonReturnsImmediately(t *testing.T) {
 	}
 
 	start := time.Now()
-	_, err = dialClaimHoldSocket(ep, holdGetRequest(), claimHoldSocketWait)
+	_, err = dialClaimHoldSocket(ep, holdGetRequest())
 	elapsed := time.Since(start)
 	if !errors.Is(err, errNoDaemonRunning) {
 		t.Fatalf("err = %v, want errNoDaemonRunning", err)
