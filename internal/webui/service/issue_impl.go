@@ -198,11 +198,42 @@ func (s *issueServiceImpl) GetIssue(ctx context.Context, issueID string) (json.R
 		return nil, ErrNotFound(fmt.Sprintf("issue not found: %s", issueID))
 	}
 
-	out, err := json.Marshal(issueDetailDataToWire(detail))
+	wire := issueDetailDataToWire(detail)
+	// parent_title is what the epic-grouped board titles a lane with. The list
+	// path resolves it from the result set; a single-issue detail view has no
+	// such set, so one extra best-effort Get is acceptable here. It must never
+	// fail the request, so errors, a nil detail and an empty title are all
+	// simply "no title".
+	if detail.Parent != "" {
+		if title := s.lookupParentTitle(ctx, be, detail.Parent); title != "" {
+			wire["parent_title"] = title
+		}
+	}
+
+	out, err := json.Marshal(wire)
 	if err != nil {
 		return nil, ErrInternal("failed to marshal issue", err)
 	}
 	return out, nil
+}
+
+// lookupParentTitle does one bounded, best-effort Get for a parent's title.
+// Returns "" for every failure mode; the caller then omits parent_title.
+func (s *issueServiceImpl) lookupParentTitle(
+	ctx context.Context, be backend.IssueBackend, parentID string,
+) string {
+	parentCtx, cancel := context.WithTimeout(ctx, parentTitleBackfillTimeout)
+	defer cancel()
+
+	parent, err := be.Get(parentCtx, parentID)
+	if err != nil {
+		slog.Debug("parent-title lookup failed", "parent_id", parentID, "err", err)
+		return ""
+	}
+	if parent == nil {
+		return ""
+	}
+	return parent.Title
 }
 
 func (s *issueServiceImpl) CreateIssue(ctx context.Context, params CreateIssueParams) (json.RawMessage, error) {

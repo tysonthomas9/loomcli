@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -291,5 +292,195 @@ func TestBackendIssueDataToWithCounts_CarriesExternalRef(t *testing.T) {
 	}
 	if wc.Issue.ExternalRef == nil || *wc.Issue.ExternalRef != ref {
 		t.Errorf("ExternalRef = %v, want %q carried into the embedded Issue", wc.Issue.ExternalRef, ref)
+	}
+}
+
+// --- parent_title enrichment (PUPPET-219) ---
+
+func TestParentTitleIndex_SkipsEmptyIDsAndTitles(t *testing.T) {
+	index := parentTitleIndex([]backend.IssueData{
+		{ID: "a", Title: "Alpha"},
+		{ID: "b", Title: ""},
+		{ID: "", Title: "No ID"},
+		{ID: "a", Title: "Alpha Duplicate"},
+	})
+
+	if len(index) != 1 {
+		t.Fatalf("index = %v, want a single entry", index)
+	}
+	if index["a"] != "Alpha" {
+		t.Errorf("index[a] = %q, want the first entry to win", index["a"])
+	}
+	if _, ok := index["b"]; ok {
+		t.Errorf("empty title indexed; want it treated as unresolved")
+	}
+}
+
+func TestListIssues_Backend_ParentTitleFromResultSet(t *testing.T) {
+	fb := &fakeIssueBackend{
+		listResult: []backend.IssueData{
+			{ID: "parent-1", Title: "Parent One", Status: string(types.StatusOpen)},
+			{ID: "child-1", Title: "Child", Status: string(types.StatusOpen), Parent: "parent-1"},
+		},
+	}
+	svc := newServiceWithFake(fb)
+
+	result, err := svc.ListIssues(context.Background(), ListIssuesParams{Args: &rpc.ListArgs{}})
+	if err != nil {
+		t.Fatalf("ListIssues: %v", err)
+	}
+	var child *IssueWithParent
+	for i := range result.Issues {
+		if result.Issues[i].Issue.ID == "child-1" {
+			child = &result.Issues[i]
+		}
+	}
+	if child == nil {
+		t.Fatal("child-1 missing from result")
+	}
+	if child.ParentTitle == nil || *child.ParentTitle != "Parent One" {
+		t.Fatalf("ParentTitle = %v, want Parent One", child.ParentTitle)
+	}
+	if n := fb.getCallCount(); n != 0 {
+		t.Fatalf("Get calls = %d, want 0 — the title was already in the result set", n)
+	}
+}
+
+// The board's real path: include_blocked=true, so KanbanIssues carry the title.
+func TestListIssues_Backend_KanbanParentTitleFromResultSet(t *testing.T) {
+	fb := &fakeIssueBackend{
+		listResult: []backend.IssueData{
+			{ID: "parent-1", Title: "Parent One", Status: string(types.StatusOpen)},
+			{ID: "child-1", Title: "Child", Status: string(types.StatusOpen), Parent: "parent-1"},
+			{ID: "orphan-1", Title: "Orphan", Status: string(types.StatusOpen)},
+		},
+	}
+	svc := newServiceWithFake(fb)
+
+	result, err := svc.ListIssues(context.Background(), ListIssuesParams{
+		Args:           &rpc.ListArgs{},
+		IncludeBlocked: true,
+	})
+	if err != nil {
+		t.Fatalf("ListIssues: %v", err)
+	}
+	child := findKanbanIssue(t, result.KanbanIssues, "child-1")
+	if child.ParentTitle == nil || *child.ParentTitle != "Parent One" {
+		t.Fatalf("ParentTitle = %v, want Parent One", child.ParentTitle)
+	}
+	orphan := findKanbanIssue(t, result.KanbanIssues, "orphan-1")
+	if orphan.Parent != nil || orphan.ParentTitle != nil {
+		t.Fatalf("orphan Parent/ParentTitle = %v/%v, want both nil", orphan.Parent, orphan.ParentTitle)
+	}
+	if n := fb.getCallCount(); n != 0 {
+		t.Fatalf("Get calls = %d, want 0", n)
+	}
+}
+
+func TestListIssues_Backend_ParentTitleBackfillsMissingParent(t *testing.T) {
+	fb := &fakeIssueBackend{
+		listResult: []backend.IssueData{
+			{ID: "child-1", Title: "Child", Status: string(types.StatusOpen), Parent: "parent-off"},
+			{ID: "child-2", Title: "Child Two", Status: string(types.StatusOpen), Parent: "parent-off"},
+		},
+		getByID: map[string]*backend.IssueDetailData{
+			"parent-off": {IssueData: backend.IssueData{ID: "parent-off", Title: "Offscreen Parent"}},
+		},
+	}
+	svc := newServiceWithFake(fb)
+
+	result, err := svc.ListIssues(context.Background(), ListIssuesParams{Args: &rpc.ListArgs{}})
+	if err != nil {
+		t.Fatalf("ListIssues: %v", err)
+	}
+	for _, got := range result.Issues {
+		if got.ParentTitle == nil || *got.ParentTitle != "Offscreen Parent" {
+			t.Fatalf("%s ParentTitle = %v, want Offscreen Parent", got.Issue.ID, got.ParentTitle)
+		}
+	}
+	// Two children, one distinct parent: exactly one extra Get.
+	if n := fb.getCallCount(); n != 1 {
+		t.Fatalf("Get calls = %d, want exactly 1", n)
+	}
+}
+
+func TestListIssues_Backend_ParentTitleBackfillErrorIsNonFatal(t *testing.T) {
+	fb := &fakeIssueBackend{
+		listResult: []backend.IssueData{
+			{ID: "child-1", Title: "Child", Status: string(types.StatusOpen), Parent: "parent-off"},
+		},
+		getErr: backend.ErrNotFound("get", "no such issue"),
+	}
+	svc := newServiceWithFake(fb)
+
+	result, err := svc.ListIssues(context.Background(), ListIssuesParams{Args: &rpc.ListArgs{}})
+	if err != nil {
+		t.Fatalf("ListIssues: %v — a failed title lookup must not fail the list", err)
+	}
+	if len(result.Issues) != 1 {
+		t.Fatalf("Issues = %d, want 1", len(result.Issues))
+	}
+	got := result.Issues[0]
+	if got.Parent == nil || *got.Parent != "parent-off" {
+		t.Fatalf("Parent = %v, want parent-off", got.Parent)
+	}
+	if got.ParentTitle != nil {
+		t.Fatalf("ParentTitle = %v, want nil", got.ParentTitle)
+	}
+}
+
+func TestListIssues_Backend_ParentTitleBackfillSkippedPastCap(t *testing.T) {
+	issues := make([]backend.IssueData, 0, parentTitleBackfillMax+1)
+	getByID := make(map[string]*backend.IssueDetailData)
+	for i := 0; i <= parentTitleBackfillMax; i++ {
+		childID := "child-" + strconv.Itoa(i)
+		parentID := "parent-" + strconv.Itoa(i)
+		issues = append(issues, backend.IssueData{
+			ID: childID, Title: "Child", Status: string(types.StatusOpen), Parent: parentID,
+		})
+		getByID[parentID] = &backend.IssueDetailData{
+			IssueData: backend.IssueData{ID: parentID, Title: "Parent " + strconv.Itoa(i)},
+		}
+	}
+	fb := &fakeIssueBackend{listResult: issues, getByID: getByID}
+	svc := newServiceWithFake(fb)
+
+	result, err := svc.ListIssues(context.Background(), ListIssuesParams{Args: &rpc.ListArgs{}})
+	if err != nil {
+		t.Fatalf("ListIssues: %v", err)
+	}
+	if n := fb.getCallCount(); n != 0 {
+		t.Fatalf("Get calls = %d, want 0 past the backfill cap", n)
+	}
+	for _, got := range result.Issues {
+		if got.ParentTitle != nil {
+			t.Fatalf("%s ParentTitle = %v, want nil past the cap", got.Issue.ID, got.ParentTitle)
+		}
+	}
+}
+
+func TestListIssues_Backend_ParentWithEmptyTitleStaysUnresolved(t *testing.T) {
+	fb := &fakeIssueBackend{
+		listResult: []backend.IssueData{
+			{ID: "parent-1", Title: "", Status: string(types.StatusOpen)},
+			{ID: "child-1", Title: "Child", Status: string(types.StatusOpen), Parent: "parent-1"},
+		},
+		getByID: map[string]*backend.IssueDetailData{
+			"parent-1": {IssueData: backend.IssueData{ID: "parent-1", Title: ""}},
+		},
+	}
+	svc := newServiceWithFake(fb)
+
+	result, err := svc.ListIssues(context.Background(), ListIssuesParams{Args: &rpc.ListArgs{}})
+	if err != nil {
+		t.Fatalf("ListIssues: %v", err)
+	}
+	for _, got := range result.Issues {
+		if got.Issue.ID != "child-1" {
+			continue
+		}
+		if got.ParentTitle != nil {
+			t.Fatalf("ParentTitle = %v, want nil for an empty parent title", got.ParentTitle)
+		}
 	}
 }
