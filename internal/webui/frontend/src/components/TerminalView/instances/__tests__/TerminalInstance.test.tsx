@@ -15,6 +15,10 @@ const connectionState = vi.hoisted(() => ({
   // path set this before rendering. Left null, the connect mock behaves
   // exactly as it did before, so no other test sees a live socket.
   socket: null as { readyState: number; send: (data: unknown) => void } | null,
+  // Lifecycle callbacks of every connect attempt, so a test can drive the
+  // open/close cycles that the flap detector counts.
+  connectedCallbacks: [] as Array<() => void>,
+  disconnectedCallbacks: [] as Array<() => void>,
 }));
 
 const xtermState = vi.hoisted(() => {
@@ -92,8 +96,8 @@ vi.mock("../terminalConnection", () => ({
       write: (data: string | Uint8Array) => void,
       wsRef: { current: WebSocket | null },
       setConnState: (state: string) => void,
-      _onConnected: () => void,
-      _onDisconnected: () => void,
+      onConnected: () => void,
+      onDisconnected: () => void,
       _onOutput: () => void,
       _onBackendCrash: (reason: string) => void,
       _onSessionKilled: () => void,
@@ -104,6 +108,8 @@ vi.mock("../terminalConnection", () => ({
         wsRef.current = connectionState.socket as unknown as WebSocket;
       }
       connectionState.writeCallbacks.push(write);
+      connectionState.connectedCallbacks.push(onConnected);
+      connectionState.disconnectedCallbacks.push(onDisconnected);
       if (onAttach) connectionState.attachCallbacks.push(onAttach);
       connectionState.fitCountsAtConnect.push(xtermState.fitCount);
       connectionState.terminalSizesAtConnect.push(terminalSize);
@@ -193,6 +199,8 @@ describe("TerminalInstance", () => {
   beforeEach(() => {
     connectionState.writeCallbacks.length = 0;
     connectionState.attachCallbacks.length = 0;
+    connectionState.connectedCallbacks.length = 0;
+    connectionState.disconnectedCallbacks.length = 0;
     connectionState.cleanupCount = 0;
     xtermState.screen = "";
     connectionState.fitCountsAtConnect.length = 0;
@@ -470,6 +478,80 @@ describe("TerminalInstance", () => {
       act(() => latestAttachCallback()(attachFrame()));
 
       expect(boundaryOccurrences()).toBe(1);
+    });
+  });
+
+  describe("shell that dies on spawn", () => {
+    // The flap detector measures wall-clock life, and the reconnect loop
+    // waits on backoff timers, so both need to be under the test's control.
+    beforeEach(() => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    /**
+     * Open the newest connection and immediately close it again, which is
+     * what a session whose launch command exits on startup looks like from
+     * the client: the attach succeeds, the shell behind it is already gone.
+     */
+    function flapNewestConnection(): void {
+      const connected = connectionState.connectedCallbacks.at(-1);
+      const disconnected = connectionState.disconnectedCallbacks.at(-1);
+      if (!connected || !disconnected)
+        throw new Error("no connection captured");
+      act(() => {
+        connected();
+        disconnected();
+      });
+    }
+
+    it("stops reconnecting and reports spawn_failed after repeated instant deaths", async () => {
+      const onConnectionStateChange = vi.fn();
+      await mountConnected({ onConnectionStateChange });
+
+      // Each cycle needs the backoff timer to fire before the next attempt.
+      for (let cycle = 0; cycle < 3; cycle++) {
+        flapNewestConnection();
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(60_000);
+        });
+      }
+
+      const states = onConnectionStateChange.mock.calls.map(([state]) => state);
+      expect(states).toContain("spawn_failed");
+
+      // The loop is stopped, not merely slowed: no further attempts land no
+      // matter how long the client waits.
+      const attemptsAtGiveUp = connectionState.writeCallbacks.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+      });
+      expect(connectionState.writeCallbacks).toHaveLength(attemptsAtGiveUp);
+    });
+
+    it("keeps reconnecting when a connection actually lived a while", async () => {
+      const onConnectionStateChange = vi.fn();
+      await mountConnected({ onConnectionStateChange });
+
+      for (let cycle = 0; cycle < 4; cycle++) {
+        const connected = connectionState.connectedCallbacks.at(-1);
+        const disconnected = connectionState.disconnectedCallbacks.at(-1);
+        act(() => connected?.());
+        // Well past SHORT_LIVED_CONNECTION_MS, so this is an ordinary drop.
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(30_000);
+        });
+        act(() => disconnected?.());
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(60_000);
+        });
+      }
+
+      const states = onConnectionStateChange.mock.calls.map(([state]) => state);
+      expect(states).not.toContain("spawn_failed");
     });
   });
 
