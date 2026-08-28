@@ -45,14 +45,17 @@ const (
 	claimHoldWaitPollInterval = 5 * time.Second
 	defaultClaimHoldWaitLimit = 30 * time.Minute
 
-	// claimHoldSocketWait is how long a control request waits for a daemon that
-	// is starting up to bind its control socket. The daemon writes daemon.pid
-	// before cmdstore.OpenStore and the supervisor start, so the socket can lag
-	// the PID file by several seconds (measured 9s, PUPPET-200); 30s is headroom
-	// over that.
-	claimHoldSocketWait = 30 * time.Second
 	claimHoldSocketPoll = 500 * time.Millisecond
 )
+
+// claimHoldSocketWait is how long a control request waits for a daemon that is
+// starting up to bind its control socket. The daemon writes daemon.pid before
+// cmdstore.OpenStore and the supervisor start, so the socket can lag the PID
+// file by several seconds (measured 9s, PUPPET-200); 30s is headroom over that.
+//
+// A var, not a const, only so a test can shorten it; nothing at runtime writes
+// to it.
+var claimHoldSocketWait = 30 * time.Second
 
 // errNoDaemonRunning reports that no daemon process is believed alive for this
 // workspace, so waiting for a control socket is pointless and the caller may
@@ -500,15 +503,16 @@ func claimHoldDaemonRuntime(projectDir string) cli.DaemonRuntimeInfo {
 	return detectWorkspaceDaemonRuntime()
 }
 
-// dialClaimHoldSocket sends one control request, waiting up to wait for a
-// daemon that is STARTING to bind its socket. The daemon writes daemon.pid
+// dialClaimHoldSocket sends one control request, waiting up to
+// claimHoldSocketWait for a daemon that is STARTING to bind its socket. The daemon writes daemon.pid
 // before it binds daemon.sock, so a command issued in that window used to fail
 // with "daemon is not running" against a daemon that was very much running.
 //
 // It gives up early in the one case where waiting is pointless: no daemon
 // process is alive at all. That is reported as errNoDaemonRunning so a caller
 // with an offline fallback can take it, and every other caller can say so.
-func dialClaimHoldSocket(ep claimHoldEndpoints, req DaemonControlRequest, wait time.Duration) (*DaemonControlResponse, error) {
+func dialClaimHoldSocket(ep claimHoldEndpoints, req DaemonControlRequest) (*DaemonControlResponse, error) {
+	wait := claimHoldSocketWait
 	resp, err := sendDaemonControlRequestFull(ep.socketPath, req)
 	if err == nil {
 		return resp, nil
@@ -568,7 +572,7 @@ func requestClaimHoldAt(ep claimHoldEndpoints, op string, args any) (*ClaimHoldS
 		}
 		req.Args = raw
 	}
-	resp, err := dialClaimHoldSocket(ep, req, claimHoldSocketWait)
+	resp, err := dialClaimHoldSocket(ep, req)
 	if err != nil {
 		return nil, err
 	}
