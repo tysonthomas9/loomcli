@@ -443,8 +443,8 @@ func TestClaimIssueForAgent_FailedClaimReleasesReservation(t *testing.T) {
 	if err := s.claimIssueForAgent(ap, "task-1", "test"); err == nil {
 		t.Fatal("claimIssueForAgent returned nil, want conflict")
 	}
-	if err := s.reserveClaim("task-1", "worker-2"); err != nil {
-		t.Fatalf("reserveClaim after failed claim = %v, want nil (reservation leaked)", err)
+	if err := s.claims.reserve("task-1", "worker-2"); err != nil {
+		t.Fatalf("claims.reserve after failed claim = %v, want nil (reservation leaked)", err)
 	}
 }
 

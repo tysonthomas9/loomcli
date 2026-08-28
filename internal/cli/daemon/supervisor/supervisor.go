@@ -117,27 +117,7 @@ type Supervisor struct {
 	// the cross-package composite-literal construction site stays untouched.
 	quarantine     *taskQuarantine
 	quarantineOnce sync.Once
-
-	// claimReservations is the process-local mutual-exclusion ledger for task
-	// claims: task ID -> the claimant (worktree) that holds it. Every agent in
-	// this daemon claims through it, so of N agents racing for one issue
-	// exactly one reaches the backend and the rest get a KindConflict that
-	// falls through tryClaimBestTask's existing conflict path.
-	//
-	// It exists because a cold-started daemon spawns every agent at once and
-	// their claims land in the same millisecond. A backend that does not
-	// serialize those writes hands success to all of them and persists none,
-	// leaving the issue `open` in the ready queue while N agents work it (the
-	// 2026-08-27 PUPPET-201 incident: three worktrees, one ticket, no winner).
-	// Serializing in-process cannot fix a racy backend for claims arriving
-	// from other daemons, but it removes the only source of simultaneity this
-	// fleet actually has.
-	//
-	// A reservation is held for as long as the agent holds the task and is
-	// dropped by releaseClaimReservation when the claim fails or the agent's
-	// session finalizes. Lazily initialized under claimReservationsMu.
-	claimReservations   map[string]string
-	claimReservationsMu sync.Mutex
+	claims         claimLedger // process-local claim mutual exclusion; see claim.go
 
 	// ControlStore is the fleet-db-backed control plane used for node,
 	// session, lease, terminal, artifact, and command records.

@@ -213,7 +213,7 @@ func (s *Supervisor) claimResumeTask(ap *AgentProcess, taskID string) bool {
 		// The backend says the claim is still ours, so re-take the process-local
 		// reservation the failed attempt above released. Skipping this would
 		// leave the task free for a peer agent to claim underneath us.
-		if reserveErr := s.reserveClaim(taskID, claimantID(ap)); reserveErr != nil {
+		if reserveErr := s.claims.reserve(taskID, claimantID(ap)); reserveErr != nil {
 			slog.Warn("resume task reserved by another agent; cold-starting", "worktree", ap.Entry.Worktree, "task_id", taskID, "err", reserveErr)
 			return false
 		}
@@ -271,7 +271,7 @@ func (s *Supervisor) claimIssueForAgent(ap *AgentProcess, taskID, reason string)
 	// Reserve first: this is the mutual exclusion. Losing the reservation race
 	// returns a KindConflict indistinguishable from a backend one, so every
 	// caller's existing conflict handling applies unchanged.
-	if err := s.reserveClaim(taskID, claimant); err != nil {
+	if err := s.claims.reserve(taskID, claimant); err != nil {
 		return err
 	}
 	claimCtx, claimCancel := s.operationContext(claimOperationTimeout)
@@ -287,12 +287,12 @@ func (s *Supervisor) claimIssueForAgent(ap *AgentProcess, taskID, reason string)
 	}
 	claimCancel()
 	if err != nil {
-		s.releaseClaimReservation(taskID, claimant)
+		s.claims.release(taskID, claimant)
 		return err
 	}
 	// The agent moved on from whatever it reserved before, so anything else
 	// still held under this claimant is stale and must not block a peer.
-	s.dropOtherReservations(claimant, taskID)
+	s.claims.dropOthers(claimant, taskID)
 	ap.Mu.Lock()
 	ap.AssignedTaskID = taskID
 	ap.RequestedTaskID = ""
@@ -312,15 +312,37 @@ func claimantID(ap *AgentProcess) string {
 	return "role:" + ap.Entry.Role
 }
 
-// reserveClaim takes the process-local reservation on taskID for claimant.
-// Returns a KindConflict carrying the current holder in the same
-// "existing_owner" meta key the fleet classifier uses, so conflictHolder names
-// the peer agent rather than "unknown". Re-reserving your own task is a no-op,
-// which keeps the resume path (which re-claims a task it already holds) working.
-func (s *Supervisor) reserveClaim(taskID, claimant string) error {
-	s.claimReservationsMu.Lock()
-	defer s.claimReservationsMu.Unlock()
-	if holder, ok := s.claimReservations[taskID]; ok && holder != claimant {
+// claimLedger is the process-local mutual-exclusion ledger for task claims:
+// task ID -> the claimant (worktree) that holds it. Every agent in this daemon
+// claims through it, so of N agents racing for one issue exactly one reaches
+// the backend and the rest get a KindConflict that falls through
+// tryClaimBestTask's existing conflict path.
+//
+// It exists because a cold-started daemon spawns every agent at once and their
+// claims land in the same millisecond. A backend that does not serialize those
+// writes hands success to all of them and persists none, leaving the issue
+// `open` in the ready queue while N agents work it (the 2026-08-27 PUPPET-201
+// incident: three worktrees, one ticket, no winner). Serializing in-process
+// cannot fix a racy backend for claims arriving from other daemons, but it
+// removes the only source of simultaneity this fleet actually has.
+//
+// A reservation is held for as long as the agent holds the task and is dropped
+// by release when the claim fails or the agent's session finalizes. The zero
+// value is ready to use; the map is lazily initialized under mu.
+type claimLedger struct {
+	mu           sync.Mutex
+	reservations map[string]string
+}
+
+// reserve takes the process-local reservation on taskID for claimant. Returns
+// a KindConflict carrying the current holder in the same "existing_owner" meta
+// key the fleet classifier uses, so conflictHolder names the peer agent rather
+// than "unknown". Re-reserving your own task is a no-op, which keeps the resume
+// path (which re-claims a task it already holds) working.
+func (l *claimLedger) reserve(taskID, claimant string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if holder, ok := l.reservations[taskID]; ok && holder != claimant {
 		return &backend.BackendError{
 			Kind:    backend.KindConflict,
 			Op:      "ClaimIssue",
@@ -328,31 +350,30 @@ func (s *Supervisor) reserveClaim(taskID, claimant string) error {
 			Meta:    map[string]string{"existing_owner": holder},
 		}
 	}
-	if s.claimReservations == nil {
-		s.claimReservations = make(map[string]string)
+	if l.reservations == nil {
+		l.reservations = make(map[string]string)
 	}
-	s.claimReservations[taskID] = claimant
+	l.reservations[taskID] = claimant
 	return nil
 }
 
-// releaseClaimReservation drops the reservation on taskID, but only when
-// claimant still holds it — a stale release must never free a task another
-// agent has since taken.
-func (s *Supervisor) releaseClaimReservation(taskID, claimant string) {
-	s.claimReservationsMu.Lock()
-	defer s.claimReservationsMu.Unlock()
-	if holder, ok := s.claimReservations[taskID]; ok && holder == claimant {
-		delete(s.claimReservations, taskID)
+// release drops the reservation on taskID, but only when claimant still holds
+// it — a stale release must never free a task another agent has since taken.
+func (l *claimLedger) release(taskID, claimant string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if holder, ok := l.reservations[taskID]; ok && holder == claimant {
+		delete(l.reservations, taskID)
 	}
 }
 
-// dropOtherReservations frees every reservation held by claimant except keepID.
-func (s *Supervisor) dropOtherReservations(claimant, keepID string) {
-	s.claimReservationsMu.Lock()
-	defer s.claimReservationsMu.Unlock()
-	for id, holder := range s.claimReservations {
+// dropOthers frees every reservation held by claimant except keepID.
+func (l *claimLedger) dropOthers(claimant, keepID string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for id, holder := range l.reservations {
 		if holder == claimant && id != keepID {
-			delete(s.claimReservations, id)
+			delete(l.reservations, id)
 		}
 	}
 }
@@ -430,7 +451,7 @@ func (s *Supervisor) releaseAssignedTaskClaim(ap *AgentProcess, taskID string) {
 	// process-local reservation is ours whether or not the backend supports
 	// actor-scoped release, and leaking one would deadlock the task for the
 	// daemon's remaining lifetime.
-	s.releaseClaimReservation(taskID, claimantID(ap))
+	s.claims.release(taskID, claimantID(ap))
 	if ap.Entry.Worktree == "" || s.IssueBackend == nil {
 		return
 	}
