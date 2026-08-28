@@ -125,7 +125,7 @@ func newSkillCreateCommand() *cobra.Command {
 	cmd.Flags().StringVar(&flags.description, "description", "", "Description of when to use the skill")
 	cmd.Flags().StringVar(&flags.content, "content", "-", "Path to the SKILL.md body (- for stdin)")
 	cmd.Flags().StringVar(&flags.scope, "scope", string(domain.SkillScopeWorkspace), "Skill scope: workspace or role=<name>")
-	cmd.Flags().StringArrayVar(&flags.files, "file", nil, "Bundled text file as <source>[:<destination>] (repeatable)")
+	cmd.Flags().StringArrayVar(&flags.files, "file", nil, "Bundled file as <source>[:<destination>] (repeatable)")
 	return cmd
 }
 
@@ -174,7 +174,7 @@ bundled file set when present; omit it to leave bundled files unchanged.`,
 	cmd.Flags().StringVar(&flags.description, "description", "", "Replacement description")
 	cmd.Flags().StringVar(&flags.content, "content", "", "Path to the replacement SKILL.md body (- for stdin)")
 	cmd.Flags().StringVar(&flags.scope, "scope", string(domain.SkillScopeWorkspace), "Skill scope: workspace or role=<name>")
-	cmd.Flags().StringArrayVar(&flags.files, "file", nil, "Replacement bundled text file as <source>[:<destination>] (repeatable)")
+	cmd.Flags().StringArrayVar(&flags.files, "file", nil, "Replacement bundled file as <source>[:<destination>] (repeatable)")
 	return cmd
 }
 

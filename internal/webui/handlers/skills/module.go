@@ -30,8 +30,8 @@ func NewModule(st store.Store, accessCfg ...middleware.FileAccessConfig) *Module
 }
 
 // Register installs reads for both scopes and role-scope whole-skill and
-// per-document mutations. Workspace mutation patterns are also registered so
-// they return the A3-specific refusal instead of a generic 405.
+// whole-tree file mutations. Workspace mutation patterns are also registered
+// so they return the A3-specific refusal instead of a generic 405.
 func (m *Module) Register(mux *http.ServeMux) {
 	if m == nil || m.handler == nil || m.handler.Store == nil {
 		return

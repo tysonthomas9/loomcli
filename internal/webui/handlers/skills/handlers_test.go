@@ -475,6 +475,9 @@ func TestPutRoleSkillFileStaleIfMatchReturnsCurrentRevision(t *testing.T) {
 	assertErrorCode(t, write, http.StatusPreconditionFailed, "precondition_failed")
 	var body map[string]string
 	decodeResponse(t, write, &body)
+	if body["error"] != "the skill file tree changed since it was read" {
+		t.Fatalf("error = %q, want whole-tree terminology", body["error"])
+	}
 	if body["revision"] != current.FileTreeRevision {
 		t.Fatalf("revision = %q, want current %q", body["revision"], current.FileTreeRevision)
 	}

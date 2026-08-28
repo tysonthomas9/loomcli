@@ -36,7 +36,7 @@ func mapSkillError(err error) (int, map[string]string) {
 	if errors.As(err, &stale) || errors.Is(err, domain.ErrSkillPreconditionFailed) {
 		response := map[string]string{
 			"code":  "precondition_failed",
-			"error": "the skill document changed since it was read",
+			"error": "the skill file tree changed since it was read",
 		}
 		if stale != nil && stale.Stored != "" {
 			response["revision"] = stale.Stored

@@ -93,19 +93,19 @@ var skillDeviceNames = map[string]bool{
 var (
 	// ErrSkillProvenanceConflict is fleet-db's 409 skill_provenance_conflict:
 	// the stored skill was created by a different actor, and this write would
-	// overwrite (or delete) someone else's document. No retry helps — the
+	// overwrite (or delete) someone else's bundle. No retry helps — the
 	// caller needs the force route, which costs skill.force_overwrite.
 	// Unwrap the error with errors.As into *SkillProvenanceConflictError for
 	// both owners, which is what a bulk import needs to report what it skipped.
 	ErrSkillProvenanceConflict = errors.New("domain: skill is owned by a different actor")
 
 	// ErrSkillPreconditionFailed is fleet-db's 412 precondition_failed: the
-	// If-Match revision on a per-document write did not hold, so the document
+	// If-Match revision on a whole-tree write did not hold, so the bundle
 	// changed since the caller read it. Recoverable — re-read, merge, write
 	// again. errors.As into *SkillPreconditionError for the revision the
 	// caller held and the one on record, enough to offer a diff without a
 	// second round trip.
-	ErrSkillPreconditionFailed = errors.New("domain: skill document changed since it was read")
+	ErrSkillPreconditionFailed = errors.New("domain: skill file tree changed since it was read")
 
 	// ErrSkillForbidden preserves fleet-db's authoritative 403 across the
 	// Store boundary. It is skills-specific because the legacy generic client
@@ -233,9 +233,8 @@ func NormalizeSkillTreeRevision(value string) (string, error) {
 	return tag, nil
 }
 
-// Skill is a workspace-scoped instruction document in the Agent Skills
-// (SKILL.md) format, stored centrally and materialized into agent working
-// directories at spawn.
+// Skill is the metadata record for a workspace-scoped Agent Skills bundle,
+// stored centrally and materialized into agent working directories at spawn.
 //
 // Distinct from Role.Skills, which is a list of routing tags matched against
 // issue labels and has nothing to do with this type — the two senses of the

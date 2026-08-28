@@ -311,7 +311,7 @@ func (c *Client) doWithHeaders(ctx context.Context, method, path string, body, o
 //
 // Both matter to conditional writes. The status separates a 201 create from a
 // 200 update on an upsert, which is what an import or a sync reports back, and
-// the headers carry the ETag a per-document read hands to the next write.
+// the headers carry the whole-tree ETag a skill read hands to the next write.
 func (c *Client) doWithResponse(ctx context.Context, method, path string, body, out any, headers map[string]string) (int, http.Header, error) {
 	return c.doWithResponseRedirectPolicy(ctx, method, path, body, out, headers, true)
 }

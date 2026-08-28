@@ -308,6 +308,9 @@ func TestSkillCommandSurfaceIncludesInstall(t *testing.T) {
 	if got := create.Flags().Lookup("file").Value.Type(); got != "stringArray" {
 		t.Errorf("create --file type = %q, want repeatable stringArray", got)
 	}
+	if got := create.Flags().Lookup("file").Usage; got != "Bundled file as <source>[:<destination>] (repeatable)" {
+		t.Errorf("create --file help = %q", got)
+	}
 	install, _, _ := cmd.Find([]string{"install"})
 	for _, flag := range []string{"scope", "name"} {
 		if install.Flags().Lookup(flag) == nil {
@@ -350,6 +353,9 @@ func TestSkillCommandSurfaceIncludesInstall(t *testing.T) {
 		if update.Flags().Lookup(flag) == nil {
 			t.Errorf("update is missing --%s", flag)
 		}
+	}
+	if got := update.Flags().Lookup("file").Usage; got != "Replacement bundled file as <source>[:<destination>] (repeatable)" {
+		t.Errorf("update --file help = %q", got)
 	}
 	if update.Flags().Lookup("force") != nil {
 		t.Error("update unexpectedly exposes --force")
