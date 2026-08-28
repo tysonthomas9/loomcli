@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -309,5 +310,172 @@ func TestTaskIDForLifecycle_UsesAssignedFallback(t *testing.T) {
 	}
 	if got := s.taskIDForLifecycle(ap, &cli.LockInfo{TaskID: "task-lock"}); got != "task-lock" {
 		t.Fatalf("taskIDForLifecycle(lock) = %q, want task-lock", got)
+	}
+}
+
+// TestClaimTask_SimultaneousClaimsElectOneWinner reproduces the 2026-08-27
+// PUPPET-201 incident: every agent of a cold-started daemon claims in the same
+// millisecond. With a backend that happily accepts all of them, exactly one
+// must still end up holding the issue and the losers must move on.
+func TestClaimTask_SimultaneousClaimsElectOneWinner(t *testing.T) {
+	const agents = 4
+	mock := clitest.NewMockIssueBackend()
+	mock.ReadyResult = []backend.IssueData{
+		{ID: "task-hot", IssueType: "task", Status: "open", Priority: 0, Title: "Contended", Design: "plan"},
+	}
+	// The broken backend under test: no mutual exclusion at all.
+	mock.ClaimIssueFn = func(_ context.Context, _ string, _ time.Duration) error { return nil }
+
+	s := &Supervisor{IssueBackend: mock}
+	aps := make([]*AgentProcess, agents)
+	for i := range aps {
+		aps[i] = &AgentProcess{
+			Entry:      cfgpkg.AgentEntry{Worktree: "worker-" + string(rune('a'+i)), Role: "task"},
+			RoleConfig: cfgpkg.RoleConfig{TaskFilter: "has_design"},
+		}
+	}
+
+	start := make(chan struct{})
+	results := make(chan bool, agents)
+	for _, ap := range aps {
+		go func(ap *AgentProcess) {
+			<-start
+			results <- s.claimTask(ap, "")
+		}(ap)
+	}
+	close(start)
+
+	winners := 0
+	for i := 0; i < agents; i++ {
+		if <-results {
+			winners++
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("winners = %d, want exactly 1", winners)
+	}
+
+	holders := 0
+	for _, ap := range aps {
+		ap.Mu.Lock()
+		assigned := ap.AssignedTaskID
+		lastErr := ap.LastError
+		ap.Mu.Unlock()
+		if assigned == "task-hot" {
+			holders++
+			continue
+		}
+		if assigned != "" {
+			t.Fatalf("loser %s assigned %q, want empty", ap.Entry.Worktree, assigned)
+		}
+		if lastErr == nil || lastErr.Class != agenterr.OutcomeFromDomain(agenterr.LockConflictOutcome) {
+			t.Fatalf("loser %s LastError = %#v, want LockConflict", ap.Entry.Worktree, lastErr)
+		}
+	}
+	if holders != 1 {
+		t.Fatalf("agents holding task-hot = %d, want 1", holders)
+	}
+}
+
+func TestClaimTask_LoserFallsThroughToAnotherTask(t *testing.T) {
+	mock := clitest.NewMockIssueBackend()
+	mock.ReadyResult = []backend.IssueData{
+		{ID: "task-hot", IssueType: "task", Status: "open", Priority: 0, Title: "Contended", Design: "plan"},
+		{ID: "task-cold", IssueType: "task", Status: "open", Priority: 5, Title: "Spare", Design: "plan"},
+	}
+	s := &Supervisor{IssueBackend: mock}
+	winner := &AgentProcess{
+		Entry:      cfgpkg.AgentEntry{Worktree: "worker-1", Role: "task"},
+		RoleConfig: cfgpkg.RoleConfig{TaskFilter: "has_design"},
+	}
+	loser := &AgentProcess{
+		Entry:      cfgpkg.AgentEntry{Worktree: "worker-2", Role: "task"},
+		RoleConfig: cfgpkg.RoleConfig{TaskFilter: "has_design"},
+	}
+
+	if !s.claimTask(winner, "") || winner.AssignedTaskID != "task-hot" {
+		t.Fatalf("winner AssignedTaskID = %q, want task-hot", winner.AssignedTaskID)
+	}
+	if !s.claimTask(loser, "") {
+		t.Fatal("loser claimTask returned false, want fallthrough to the spare task")
+	}
+	if loser.AssignedTaskID != "task-cold" {
+		t.Fatalf("loser AssignedTaskID = %q, want task-cold", loser.AssignedTaskID)
+	}
+}
+
+func TestReleaseAssignedTaskClaim_FreesReservationForPeer(t *testing.T) {
+	mock := clitest.NewMockIssueBackend()
+	mock.ReadyResult = []backend.IssueData{
+		{ID: "task-hot", IssueType: "task", Status: "open", Priority: 0, Title: "Contended", Design: "plan"},
+	}
+	s := &Supervisor{IssueBackend: mock}
+	first := &AgentProcess{
+		Entry:      cfgpkg.AgentEntry{Worktree: "worker-1", Role: "task"},
+		RoleConfig: cfgpkg.RoleConfig{TaskFilter: "has_design"},
+	}
+	second := &AgentProcess{
+		Entry:      cfgpkg.AgentEntry{Worktree: "worker-2", Role: "task"},
+		RoleConfig: cfgpkg.RoleConfig{TaskFilter: "has_design"},
+	}
+
+	if !s.claimTask(first, "") {
+		t.Fatal("first claimTask returned false")
+	}
+	if s.claimTask(second, "") {
+		t.Fatal("second claimTask returned true while the first still holds the task")
+	}
+	s.releaseAssignedTaskClaim(first, "task-hot")
+	if !s.claimTask(second, "") || second.AssignedTaskID != "task-hot" {
+		t.Fatalf("after release, second AssignedTaskID = %q, want task-hot", second.AssignedTaskID)
+	}
+}
+
+// A claim that fails at the backend must not leave its reservation behind.
+func TestClaimIssueForAgent_FailedClaimReleasesReservation(t *testing.T) {
+	mock := clitest.NewMockIssueBackend()
+	mock.ClaimIssueFn = func(_ context.Context, _ string, _ time.Duration) error {
+		return backend.ErrConflict("ClaimIssue", "claimed")
+	}
+	s := &Supervisor{IssueBackend: mock}
+	ap := &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "worker-1", Role: "task"}}
+
+	if err := s.claimIssueForAgent(ap, "task-1", "test"); err == nil {
+		t.Fatal("claimIssueForAgent returned nil, want conflict")
+	}
+	if err := s.reserveClaim("task-1", "worker-2"); err != nil {
+		t.Fatalf("reserveClaim after failed claim = %v, want nil (reservation leaked)", err)
+	}
+}
+
+// The candidate list empties through conflicts well before the retry limit;
+// the report must carry the conflict detail rather than the generic no-work
+// message, so lock contention is distinguishable from an empty board.
+func TestClaimTask_ExhaustedCandidatesReportConflictDetail(t *testing.T) {
+	mock := clitest.NewMockIssueBackend()
+	mock.ReadyResult = []backend.IssueData{
+		{ID: "task-1", IssueType: "task", Status: "open", Priority: 1, Title: "One", Design: "plan"},
+		{ID: "task-2", IssueType: "task", Status: "open", Priority: 2, Title: "Two", Design: "plan"},
+	}
+	mock.ClaimIssueFn = func(_ context.Context, _ string, _ time.Duration) error {
+		return &backend.BackendError{
+			Kind: backend.KindConflict, Op: "ClaimIssue", Message: "claimed",
+			Meta: map[string]string{"existing_owner": "peer-agent"},
+		}
+	}
+	s := &Supervisor{IssueBackend: mock}
+	ap := &AgentProcess{
+		Entry:      cfgpkg.AgentEntry{Worktree: "falcon", Role: "task"},
+		RoleConfig: cfgpkg.RoleConfig{TaskFilter: "has_design"},
+	}
+
+	if s.claimTask(ap, "") {
+		t.Fatal("claimTask returned true after every candidate conflicted")
+	}
+	if ap.LastError == nil || ap.LastError.Class != agenterr.OutcomeFromDomain(agenterr.LockConflictOutcome) {
+		t.Fatalf("LastError = %#v, want LockConflict", ap.LastError)
+	}
+	if !strings.Contains(ap.LastError.Message, "conflicts") || !strings.Contains(ap.LastError.Message, "peer-agent") {
+		t.Fatalf("LastError.Message = %q, want conflict count and holder", ap.LastError.Message)
 	}
 }
