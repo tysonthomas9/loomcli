@@ -58,6 +58,27 @@ const INITIAL_CONNECT_CONFIG: ReconnectConfig = {
  */
 const UNBOUNDED_RECONNECT_TIMEOUT_MS = 60 * 60 * 1000; // 1 h when server disables its own timeout
 
+/**
+ * A connection that opened and then closed again inside this window did not
+ * recover anything: the attach worked, the shell behind it exited. The
+ * backoff cannot see that on its own — `startAutoReconnect` treats every
+ * successful open as recovery and resets, so a session whose launch command
+ * fails on startup reconnects forever at roughly one respawn per second.
+ *
+ * Sized above a realistic launch: a failing `loom lead` writes its error and
+ * exits around three seconds in, so the window must clear that with room to
+ * spare. Legitimate short sessions do not land here — a shell the user exits
+ * closes with 1000 and takes the `session_ended` path before this runs.
+ */
+const SHORT_LIVED_CONNECTION_MS = 10_000;
+
+/**
+ * Consecutive short-lived connections tolerated before we stop reconnecting
+ * and surface `spawn_failed`. Three keeps a genuinely flaky network from
+ * tripping it while still stopping a broken launch command within seconds.
+ */
+const MAX_SHORT_LIVED_CONNECTIONS = 3;
+
 function isSocketOpenOrConnecting(ws: WebSocket | null): boolean {
   return (
     ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING
@@ -73,7 +94,11 @@ export type ConnectionState =
   // The backend tab metadata survived a server restart but the PTY did
   // not. We deliberately did not auto-respawn — the overlay prompts the
   // user before opening a fresh shell so scrollback loss is explicit.
-  | "session_ended";
+  | "session_ended"
+  // Every attach succeeds and the shell dies seconds later: the session's
+  // launch command is failing on startup, so retrying only respawns it.
+  // We stop and hand the user the affordance instead of looping.
+  | "spawn_failed";
 
 export interface TerminalInstanceProps {
   sessionName: string;
@@ -185,6 +210,12 @@ export const TerminalInstance = forwardRef<
   );
   const beingKilledRef = useRef(false);
   const hasConnectedRef = useRef(false);
+  // When the live socket opened, and how many consecutive sockets have opened
+  // only to die inside SHORT_LIVED_CONNECTION_MS. Together they distinguish
+  // "the shell keeps failing to start" from "the network is flaky", which the
+  // reconnect backoff alone cannot tell apart.
+  const connectedAtRef = useRef<number | null>(null);
+  const shortLivedStreakRef = useRef(0);
   const initialViewportSyncDoneRef = useRef(false);
   const [connectionState, setConnectionState] =
     useState<ConnectionState>("disconnected");
@@ -280,6 +311,7 @@ export const TerminalInstance = forwardRef<
         // onConnected — the renderer receives the server's durable PTY replay
         // immediately after this callback.
         () => {
+          connectedAtRef.current = Date.now();
           clearReconnectTimers();
           onReconnectStateChangeRef.current?.(null);
           if (!initialViewportSyncDoneRef.current) {
@@ -291,7 +323,28 @@ export const TerminalInstance = forwardRef<
         // onDisconnected — schedule a reconnect unless we're being killed.
         () => {
           opts?.onOutcome?.(false);
+          // A socket that opened and died again immediately spent its life
+          // on a shell that could not start. Count the streak before the
+          // reconnect decision below; a connection that actually lived
+          // clears it, and one that never opened is a transport failure the
+          // backoff's own attempt counter already bounds.
+          const openedAt = connectedAtRef.current;
+          connectedAtRef.current = null;
+          if (openedAt !== null) {
+            shortLivedStreakRef.current =
+              Date.now() - openedAt < SHORT_LIVED_CONNECTION_MS
+                ? shortLivedStreakRef.current + 1
+                : 0;
+          }
           if (beingKilledRef.current) return;
+          if (shortLivedStreakRef.current >= MAX_SHORT_LIVED_CONNECTIONS) {
+            // Respawning again would only repeat the failure and bury the
+            // shell's own error message under another boundary banner.
+            clearReconnectTimers();
+            onReconnectStateChangeRef.current?.(null);
+            setConnectionState("spawn_failed");
+            return;
+          }
           // Only start a fresh reconnect loop if none is running. If one is
           // already running, startAutoReconnect's own backoff handles the
           // retry — we just wait for the next attempt.
@@ -552,6 +605,10 @@ export const TerminalInstance = forwardRef<
         }),
       reconnect: () => {
         beingKilledRef.current = false;
+        // An explicit user retry starts the flap budget over: the operator
+        // may have just repaired whatever the launch command was failing on.
+        shortLivedStreakRef.current = 0;
+        connectedAtRef.current = null;
         clearReconnectTimers();
         onReconnectStateChangeRef.current?.(null);
         doConnectRef.current?.();
