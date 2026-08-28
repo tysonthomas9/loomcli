@@ -265,12 +265,26 @@ func runDaemonBody() int {
 	// keep that invariant so this deferred cleanup cannot race a state write.
 	defer os.Remove(paths.stateFile)
 
+	recordDaemonPaths(wsLock, config, projectDir, paths)
+
 	shutdown, daemon := initDaemonServices(config, projectDir, paths)
 	// Hydrate the hold BEFORE any agent can cycle, and wire persistence so
 	// socket operations reach the file.
 	hydrateClaimHold(daemon, paths.claimHoldFile)
 
 	return runDaemonMainLoop(config, projectDir, paths, shutdown, daemon, lockFile)
+}
+
+// recordDaemonPaths annotates the workspace PID sidecar with this daemon's
+// project dir, control socket and claim-hold file, before any service starts,
+// so `loom daemon hold`/`release` can find the socket from any cwd as early as
+// possible. Best-effort: a daemon that cannot annotate its sidecar still runs,
+// and callers just fall back to the cwd-derived socket.
+func recordDaemonPaths(wsLock *workspaceDaemonLock, config *cfgpkg.DaemonConfig, projectDir string, paths daemonPaths) {
+	socketPath := resolveDaemonSocketPath(projectDir, config.Daemon.PIDFile)
+	if err := wsLock.UpdatePaths(projectDir, socketPath, paths.claimHoldFile); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: recording daemon paths in workspace lock: %v\n", err)
+	}
 }
 
 // awaitDaemonExit blocks until the daemon's main loop should exit. Returns 0
@@ -525,6 +539,7 @@ func runDaemonStatus(cmd *cobra.Command, args []string) {
 	fmt.Printf("Started: %s\n", state.StartedAt.Format(time.RFC3339))
 	fmt.Printf("Agents: %d\n", len(state.Agents))
 	printClaimHoldBanner(state.ClaimHold)
+	printClaimHoldReleaseHint(state.ClaimHold)
 	fmt.Println("")
 
 	// Pending interactive prompts come from the live daemon, not the state
