@@ -21,6 +21,14 @@ type AgentProcess struct {
 	WorktreePath string             // resolved worktree path
 	RepoConfig   *cfgpkg.RepoConfig // per-repo config (nil in non-workspace mode)
 
+	// claimantOnce/claimantIdentity memoize the process-local claim identity
+	// used for agents configured without a worktree (see claimantID in
+	// claim.go). Self-synchronizing: written only inside claimantOnce.Do and
+	// deliberately NOT covered by Mu, because claimantID is called on paths
+	// that are about to take Mu.
+	claimantOnce     sync.Once
+	claimantIdentity string
+
 	Cmd                    *exec.Cmd         // current subprocess (nil when not running)
 	Pid                    int               // PID of current subprocess (0 when not running)
 	LogFile                *os.File          // log file handle for subprocess output (nil if not logging)
