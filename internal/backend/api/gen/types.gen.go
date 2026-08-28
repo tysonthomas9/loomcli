@@ -2527,6 +2527,7 @@ type BlockedIssue struct {
 	Notes        *string                `json:"notes,omitempty"`
 	Owner        *string                `json:"owner,omitempty"`
 	Parent       *string                `json:"parent,omitempty"`
+	ParentTitle  *string                `json:"parent_title,omitempty"`
 	Pinned       *bool                  `json:"pinned,omitempty"`
 	Priority     int                    `json:"priority"`
 	Rig          *string                `json:"rig,omitempty"`
@@ -3204,6 +3205,7 @@ type Issue struct {
 	Notes        *string         `json:"notes,omitempty"`
 	Owner        *string         `json:"owner,omitempty"`
 	Parent       *string         `json:"parent,omitempty"`
+	ParentTitle  *string         `json:"parent_title,omitempty"`
 	Pinned       *bool           `json:"pinned,omitempty"`
 	Priority     int             `json:"priority"`
 	Rig          *string         `json:"rig,omitempty"`
@@ -4481,6 +4483,7 @@ type TreeNode struct {
 	Owner        *string            `json:"owner,omitempty"`
 	Parent       *string            `json:"parent,omitempty"`
 	ParentId     string             `json:"parent_id"`
+	ParentTitle  *string            `json:"parent_title,omitempty"`
 	Pinned       *bool              `json:"pinned,omitempty"`
 	Priority     int                `json:"priority"`
 	Rig          *string            `json:"rig,omitempty"`
