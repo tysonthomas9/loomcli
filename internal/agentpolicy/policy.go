@@ -57,6 +57,7 @@ const (
 	BPBackendUnavailable                       // fixed recheck: backendRecheckBackoff
 	BPBlock                                    // fixed: maxRetriesBlockBackoff
 	BPClaimsHeld                               // fixed recheck: claimHoldRecheckBackoff
+	BPIssueBackendOutage                       // fixed recheck: issueBackendRecheckBackoff
 )
 
 // Disposition is the policy verdict for an Outcome.
@@ -147,6 +148,14 @@ func decideDomain(d agenterr.DomainOutcome) Disposition {
 		return Disposition{Decision: RetryUncounted, Backoff: BPNoWork}
 	case agenterr.BackendUnavailableOutcome:
 		return Disposition{Decision: Block, Backoff: BPBackendUnavailable}
+	case agenterr.IssueBackendOutageOutcome:
+		// The ISSUE store is down or refusing our credentials — every agent
+		// sharing it fails in lockstep, so this is infrastructure, not agent
+		// health. Uncounted, like NoWork and rate limits: an outage that
+		// eroded max_retries would escalate through Block into FastFail and
+		// terminate the whole fleet over a fault no agent can fix, and the
+		// fleet would still be dead once the backend came back.
+		return Disposition{Decision: RetryUncounted, Backoff: BPIssueBackendOutage}
 	case agenterr.LockConflictOutcome:
 		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}
 	case agenterr.SpawnFailureOutcome:
