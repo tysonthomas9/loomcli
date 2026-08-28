@@ -21,6 +21,7 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   workspace: "Workspace",
   settings: "Settings",
   files: "Files",
+  skills: "Skills",
   "issue-detail": "Issue",
 };
 

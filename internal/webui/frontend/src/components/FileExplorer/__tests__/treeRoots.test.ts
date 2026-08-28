@@ -3,10 +3,17 @@ import { describe, expect, it } from "vitest";
 import type {
   FileCheckout,
   RepoInfo,
+  SkillCatalogGroup,
   WorkspaceAgentInfo,
 } from "@/api/workspace";
 
-import { buildFileTreeSections } from "../treeRoots";
+import {
+  buildFileTreeSections,
+  existingExplorerRefs,
+  gitStatusRefs,
+  modeCapabilities,
+  modeHasCheckouts,
+} from "../treeRoots";
 
 function repo(name: string, groups: string[] = []): RepoInfo {
   return {
@@ -24,7 +31,45 @@ function agent(partial: Partial<WorkspaceAgentInfo>): WorkspaceAgentInfo {
     repos: partial.repos ?? [],
     repo_groups: partial.repo_groups ?? [],
     cross_repo: partial.cross_repo ?? false,
+    role_name: partial.role_name,
   };
+}
+
+function skillGroups(): SkillCatalogGroup[] {
+  const timestamps = {
+    created_at: "2026-08-14T00:00:00Z",
+    updated_at: "2026-08-14T00:00:00Z",
+  };
+  return [
+    {
+      scope: "workspace",
+      skills: [
+        {
+          name: "audit",
+          scope: "workspace",
+          description: "Audit changes",
+          content_revision: "w1",
+          files: [],
+          ...timestamps,
+        },
+      ],
+    },
+    {
+      scope: "role",
+      role: "reviewer",
+      skills: [
+        {
+          name: "audit",
+          scope: "role",
+          role: "reviewer",
+          description: "Review changes",
+          content_revision: "r1",
+          files: [],
+          ...timestamps,
+        },
+      ],
+    },
+  ];
 }
 
 function checkout(item: FileCheckout): FileCheckout {
@@ -238,6 +283,155 @@ describe("treeRoots", () => {
       label: "atlas",
       secondary: "source-repo",
       changeCount: 1,
+    });
+  });
+
+  it("workspace mode emits no skills section", () => {
+    // Skills were a root row in the Files explorer; they now live only in the
+    // Skills section, so the Files tree must not mention them even when the
+    // catalog is populated.
+    const sections = buildFileTreeSections({
+      mode: "workspace",
+      agents: [agent({ name: "atlas", role_name: "reviewer" })],
+      repos: [repo("source-repo")],
+      checkouts: [],
+      skills: skillGroups(),
+    });
+
+    expect(sections.map((section) => section.id)).toEqual([
+      "agents",
+      "repos",
+      "workspace",
+    ]);
+    expect(
+      sections.flatMap((section) => section.roots).map((root) => root.kind),
+    ).not.toContain("skills");
+    expect(existingExplorerRefs(sections)).not.toContainEqual(
+      expect.objectContaining({ kind: "skills" }),
+    );
+  });
+
+  it("skills mode emits only the skills section, workspace group first", () => {
+    const sections = buildFileTreeSections({
+      mode: "skills",
+      agents: [agent({ name: "atlas", role_name: "reviewer" })],
+      repos: [repo("source-repo")],
+      checkouts: [],
+      skills: skillGroups(),
+    });
+
+    // No agents, no repos, no workspace root — the dedicated section shows
+    // skills and nothing else.
+    expect(sections.map((section) => section.id)).toEqual(["skills"]);
+    expect(sections[0]?.roots).toEqual([
+      expect.objectContaining({
+        kind: "skills",
+        label: "Workspace",
+        secondary: "1 skill",
+        skillCount: 1,
+      }),
+      expect.objectContaining({
+        kind: "skills",
+        label: "reviewer",
+        secondary: "1 skill",
+        skillCount: 1,
+      }),
+    ]);
+  });
+
+  it("skills mode unions catalog roles with agent roles", () => {
+    const sections = buildFileTreeSections({
+      mode: "skills",
+      // "planner" has an agent but no skills yet; "reviewer" comes from the
+      // catalog. A role missing from either source must still get a root.
+      agents: [agent({ name: "atlas", role_name: "planner" })],
+      repos: [],
+      checkouts: [],
+      skills: skillGroups(),
+    });
+
+    expect(sections[0]?.roots.map((root) => root.label)).toEqual([
+      "Workspace",
+      "planner",
+      "reviewer",
+    ]);
+  });
+
+  it("agent mode emits no skills section and keeps its git refs", () => {
+    const sections = buildFileTreeSections({
+      mode: "agent",
+      agentName: "atlas",
+      agents: [
+        agent({ name: "atlas", role_name: "reviewer" }),
+        agent({ name: "nova", role_name: "planner" }),
+      ],
+      repos: [],
+      checkouts: [],
+      skills: skillGroups(),
+    });
+
+    expect(sections.map((section) => section.id)).toEqual(["agents"]);
+    expect(existingExplorerRefs(sections)).not.toContainEqual(
+      expect.objectContaining({ kind: "skills" }),
+    );
+    expect(gitStatusRefs(sections)).toEqual([
+      { scope: "agent", target: "atlas" },
+    ]);
+  });
+
+  it("skills mode exposes skill refs and no git refs", () => {
+    const sections = buildFileTreeSections({
+      mode: "skills",
+      agents: [
+        agent({ name: "atlas", role_name: "reviewer" }),
+        agent({ name: "nova", role_name: "planner" }),
+      ],
+      repos: [repo("source-repo")],
+      checkouts: [
+        checkout({
+          kind: "agent",
+          agent: "atlas",
+          repo: "source-repo",
+          exists: true,
+          change_count: 4,
+        }),
+      ],
+      skills: skillGroups(),
+    });
+
+    expect(existingExplorerRefs(sections)).toEqual([
+      { kind: "skills", group: { kind: "workspace" } },
+      { kind: "skills", group: { kind: "role", role: "planner" } },
+      { kind: "skills", group: { kind: "role", role: "reviewer" } },
+    ]);
+    // Skills have no checkout behind them, so nothing here asks git for status.
+    expect(gitStatusRefs(sections)).toEqual([]);
+  });
+
+  it("reports which modes sit on a checkout", () => {
+    // The browser derives this once and then branches on the capability, so a
+    // future checkout-less section is a single entry here, not a hunt for
+    // scattered `mode === "skills"` tests.
+    expect(modeHasCheckouts("workspace")).toBe(true);
+    expect(modeHasCheckouts("agent")).toBe(true);
+    expect(modeHasCheckouts("skills")).toBe(false);
+  });
+
+  it("declares what data each mode needs, not just which roots it shows", () => {
+    // Loading is scoped by these flags: a section fetches file capabilities
+    // only where it has checkouts, and the skills catalog and skill
+    // capabilities only where it shows skills. No mode needs both.
+    expect(modeCapabilities("workspace")).toEqual({
+      checkouts: true,
+      skills: false,
+    });
+    expect(modeCapabilities("agent")).toEqual({
+      checkouts: true,
+      skills: false,
+    });
+    expect(modeCapabilities("skills")).toEqual({
+      checkouts: false,
+      skills: true,
     });
   });
 });

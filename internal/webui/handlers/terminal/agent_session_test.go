@@ -3,10 +3,12 @@ package terminal
 import (
 	"context"
 	"errors"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -34,6 +36,43 @@ func newAgentSessionTestDeps(t *testing.T) (*memstore.Store, *tabmeta.Store, *re
 type slowListTerminalService struct {
 	service.TerminalService
 	delay time.Duration
+}
+
+type liveTabTerminalService struct {
+	service.TerminalService
+	liveSession string
+}
+
+func (s liveTabTerminalService) ListTabs(ctx context.Context, wsID string) ([]tabmeta.TabMetadata, error) {
+	tabs, err := s.TerminalService.ListTabs(ctx, wsID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range tabs {
+		if tabs[i].SessionName == s.liveSession {
+			tabs[i].Attachable = true
+		}
+	}
+	return tabs, nil
+}
+
+type terminalSkillStore struct {
+	store.SkillStore
+	err error
+}
+
+func (s terminalSkillStore) List(context.Context, string, store.SkillFilter) ([]*domain.Skill, error) {
+	return nil, s.err
+}
+
+type terminalMaterializeStore struct {
+	store.Store
+	skills store.SkillStore
+}
+
+func (s terminalMaterializeStore) Skills() store.SkillStore { return s.skills }
+func (s terminalMaterializeStore) SkillMaterializationLeases() store.SkillMaterializationLeaseStore {
+	return nil
 }
 
 func (s slowListTerminalService) ListTabs(ctx context.Context, wsID string) ([]tabmeta.TabMetadata, error) {
@@ -316,6 +355,14 @@ func TestEnsureAgentTerminalSessionLaunchesLeadInConfiguredWorktree(t *testing.T
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
+	if _, err := st.Skills().Create(ctx, store.SkillCreate{
+		WorkspaceKey: "E2E",
+		Ref:          domain.RoleSkillRef("lead", "terminal-skill"),
+		Description:  "terminal materialization",
+		Content:      "Lead skill body\n",
+	}); err != nil {
+		t.Fatalf("create skill: %v", err)
+	}
 	if _, err := st.Agents().Create(ctx, store.AgentCreate{
 		WorkspaceKey: "E2E",
 		Name:         "nova",
@@ -334,6 +381,215 @@ func TestEnsureAgentTerminalSessionLaunchesLeadInConfiguredWorktree(t *testing.T
 	}
 	if meta.Launch.Cwd != worktree {
 		t.Fatalf("Launch.Cwd = %q, want configured lead worktree %q", meta.Launch.Cwd, worktree)
+	}
+	materialized, err := os.ReadFile(filepath.Join(worktree, ".agents", "skills", "terminal-skill", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read terminal skill: %v", err)
+	}
+	if !strings.Contains(string(materialized), "name: terminal-skill\n") || !strings.HasSuffix(string(materialized), "Lead skill body\n") {
+		t.Fatalf("terminal skill = %q", materialized)
+	}
+	hookConfig, err := os.ReadFile(filepath.Join(worktree, ".codex", "hooks.json"))
+	if err != nil {
+		t.Fatalf("read terminal hook config: %v", err)
+	}
+	if !strings.Contains(string(hookConfig), "loom skill materialize") {
+		t.Fatalf("terminal hook config = %q", hookConfig)
+	}
+}
+
+func TestEnsureAgentTerminalSessionFailsBeforeTabOnSkillCollision(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	st, tabStore, rdb := newAgentSessionTestDeps(t)
+	svc := webuiterminal.NewTerminalService(nil, tabStore, nil, rdb, nil, time.Now().Add(-time.Second))
+	worktree := filepath.Join(t.TempDir(), "worktrees", "repo", "nova")
+	skillDir := filepath.Join(worktree, ".agents", "skills", "alpha")
+	if err := os.MkdirAll(filepath.Join(worktree, ".git"), 0o755); err != nil {
+		t.Fatalf("create worktree marker: %v", err)
+	}
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("create skill dir: %v", err)
+	}
+	existing := filepath.Join(skillDir, "README.md")
+	if err := os.WriteFile(existing, []byte("user file\n"), 0o644); err != nil {
+		t.Fatalf("write collision: %v", err)
+	}
+	if err := localworkspace.RememberAgentWorktree("E2E", "nova", worktree); err != nil {
+		t.Fatalf("remember worktree: %v", err)
+	}
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "E2E", Name: "lead", Backend: "codex"}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := st.Skills().Create(ctx, store.SkillCreate{
+		WorkspaceKey: "E2E",
+		Ref:          domain.WorkspaceSkillRef("alpha"),
+		Description:  "alpha",
+		Content:      "body",
+		Files:        []domain.SkillFile{{Path: "readme.md", Content: "managed"}},
+	}); err != nil {
+		t.Fatalf("create skill: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{WorkspaceKey: "E2E", Name: "nova", RoleName: "lead"}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	_, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "nova")
+	var svcErr *service.ServiceError
+	if !errors.As(err, &svcErr) || svcErr.Kind != service.KindInternal {
+		t.Fatalf("ensureAgentTerminalSession error = %v, want internal materialization failure", err)
+	}
+	for _, want := range []string{"README.md", "readme.md"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("ensure error = %q, want path %q", err, want)
+		}
+	}
+	tabs, listErr := svc.ListTabs(ctx, "E2E")
+	if listErr != nil {
+		t.Fatalf("list tabs: %v", listErr)
+	}
+	if len(tabs) != 0 {
+		t.Fatalf("terminal tab persisted after materialization failure: %#v", tabs)
+	}
+	got, readErr := os.ReadFile(existing)
+	if readErr != nil || string(got) != "user file\n" {
+		t.Fatalf("collision file changed: content=%q err=%v", got, readErr)
+	}
+}
+
+func TestEnsureAgentTerminalSessionContinuesOnSkillStoreOutage(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	st, tabStore, rdb := newAgentSessionTestDeps(t)
+	svc := webuiterminal.NewTerminalService(nil, tabStore, nil, rdb, nil, time.Now().Add(-time.Second))
+	worktree := filepath.Join(t.TempDir(), "worktrees", "repo", "nova")
+	if err := os.MkdirAll(filepath.Join(worktree, ".git"), 0o755); err != nil {
+		t.Fatalf("create worktree marker: %v", err)
+	}
+	if err := localworkspace.RememberAgentWorktree("E2E", "nova", worktree); err != nil {
+		t.Fatalf("remember worktree: %v", err)
+	}
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "E2E", Name: "lead", Backend: "codex"}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{WorkspaceKey: "E2E", Name: "nova", RoleName: "lead"}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	outageStore := terminalMaterializeStore{
+		Store:  st,
+		skills: terminalSkillStore{err: &url.Error{Op: "GET", URL: "http://fleet-db/skills", Err: syscall.ECONNREFUSED}},
+	}
+
+	meta, err := ensureAgentTerminalSession(ctx, svc, outageStore, "E2E", "nova")
+	if err != nil {
+		t.Fatalf("ensureAgentTerminalSession: %v", err)
+	}
+	if meta.Launch == nil || meta.Launch.Cwd != worktree {
+		t.Fatalf("launch after outage = %#v, want configured worktree", meta.Launch)
+	}
+	if _, statErr := os.Lstat(filepath.Join(worktree, ".agents")); !os.IsNotExist(statErr) {
+		t.Fatalf("store outage touched skill projection: %v", statErr)
+	}
+}
+
+func TestMaterializeInteractiveSkillsPropagatesCancellation(t *testing.T) {
+	target := t.TempDir()
+	st := terminalMaterializeStore{skills: terminalSkillStore{err: context.Canceled}}
+	err := materializeInteractiveSkills(context.Background(), st, "E2E", "lead", "codex", target)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("materializeInteractiveSkills error = %v, want context.Canceled", err)
+	}
+	if _, statErr := os.Lstat(filepath.Join(target, ".agents")); !os.IsNotExist(statErr) {
+		t.Fatalf("canceled materialization touched target: %v", statErr)
+	}
+}
+
+func TestEnsureAgentTerminalSessionSkipsSkillRewriteWhenStaleTabPTYIsLive(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	st, tabStore, rdb := newAgentSessionTestDeps(t)
+	baseSvc := webuiterminal.NewTerminalService(nil, tabStore, nil, rdb, nil, time.Now().Add(time.Hour))
+	worktree := filepath.Join(t.TempDir(), "worktrees", "repo", "nova")
+	if err := os.MkdirAll(filepath.Join(worktree, ".git"), 0o755); err != nil {
+		t.Fatalf("create worktree marker: %v", err)
+	}
+	if err := localworkspace.RememberAgentWorktree("E2E", "nova", worktree); err != nil {
+		t.Fatalf("remember worktree: %v", err)
+	}
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "E2E", Name: "lead", Kind: string(domain.RoleKindInteractive), Backend: "codex",
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	ref := domain.WorkspaceSkillRef("terminal-skill")
+	if _, err := st.Skills().Create(ctx, store.SkillCreate{
+		WorkspaceKey: "E2E", Ref: ref, Description: "terminal materialization", Content: "Old body\n",
+	}); err != nil {
+		t.Fatalf("create skill: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "E2E", Name: "nova", RoleName: "lead", Backend: "codex",
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	first, err := ensureAgentTerminalSession(ctx, baseSvc, st, "E2E", "nova")
+	if err != nil {
+		t.Fatalf("first ensureAgentTerminalSession: %v", err)
+	}
+	skillPath := filepath.Join(worktree, ".agents", "skills", "terminal-skill", "SKILL.md")
+	markerPath := filepath.Join(worktree, ".agents", "skills", ".loom-skills-marker.json")
+	beforeSkill, err := os.ReadFile(skillPath)
+	if err != nil {
+		t.Fatalf("read initial skill: %v", err)
+	}
+	beforeMarker, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatalf("read initial marker: %v", err)
+	}
+	newBody := "New body that must wait for the next process\n"
+	if _, err := st.Skills().Update(ctx, "E2E", ref, store.SkillUpdate{Content: &newBody}); err != nil {
+		t.Fatalf("update skill: %v", err)
+	}
+	newBackend := "claude"
+	if _, err := st.Agents().Update(ctx, "E2E", "nova", store.AgentUpdate{Backend: &newBackend}); err != nil {
+		t.Fatalf("update agent backend: %v", err)
+	}
+
+	liveSvc := liveTabTerminalService{TerminalService: baseSvc, liveSession: first.SessionName}
+	second, err := ensureAgentTerminalSession(ctx, liveSvc, st, "E2E", "nova")
+	if err != nil {
+		t.Fatalf("second ensureAgentTerminalSession: %v", err)
+	}
+	if second.SessionName == first.SessionName {
+		t.Fatalf("session = %q, want stale launch spec rebuild to remain intact", second.SessionName)
+	}
+	afterSkill, err := os.ReadFile(skillPath)
+	if err != nil {
+		t.Fatalf("read skill after live-PTY rebuild: %v", err)
+	}
+	afterMarker, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatalf("read marker after live-PTY rebuild: %v", err)
+	}
+	if string(afterSkill) != string(beforeSkill) {
+		t.Fatalf("live PTY worktree skill was rewritten:\nbefore=%q\nafter=%q", beforeSkill, afterSkill)
+	}
+	if string(afterMarker) != string(beforeMarker) {
+		t.Fatalf("live PTY worktree marker was rewritten:\nbefore=%q\nafter=%q", beforeMarker, afterMarker)
+	}
+	tabs, err := liveSvc.ListTabs(ctx, "E2E")
+	if err != nil {
+		t.Fatalf("list tabs: %v", err)
+	}
+	var oldStillPresent bool
+	for _, tab := range tabs {
+		if tab.SessionName == first.SessionName {
+			oldStillPresent = true
+		}
+	}
+	if !oldStillPresent {
+		t.Fatal("live stale tab was pruned during rebuild")
 	}
 }
 

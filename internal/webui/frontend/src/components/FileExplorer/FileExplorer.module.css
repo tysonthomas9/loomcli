@@ -523,6 +523,41 @@
   height: 18px;
 }
 
+.skillRootIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  color: var(--color-primary);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.skillAddButton {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.skillAddButton:hover:not(:disabled) {
+  background: var(--color-bg-active);
+  color: var(--color-primary);
+}
+
+.skillAddButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .agentAvatar {
   display: inline-flex;
   align-items: center;
@@ -621,6 +656,31 @@
   font-size: var(--font-size-sm);
 }
 
+.skillsTreeError,
+.skillsEmptyState {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-block: var(--space-1);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+}
+
+.skillsTreeError {
+  border: 1px solid color-mix(in srgb, var(--color-danger) 35%, transparent);
+  color: var(--color-danger);
+}
+
+.skillsEmptyState {
+  color: var(--color-text-muted);
+}
+
+.skillsTreeError button,
+.skillsEmptyState button {
+  margin-left: auto;
+}
+
 .tree {
   /* role="tree" container — single tab stop; arrow keys move the active row */
 }
@@ -662,6 +722,21 @@
 .treeNode[data-selected] {
   background: var(--color-bg-active);
   color: var(--color-primary-text);
+}
+
+.treeNode[data-shadowed] {
+  opacity: 0.55;
+}
+
+.nodeAnnotation {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border: 1px solid var(--color-border-light);
+  border-radius: 999px;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
 }
 
 .treeNode:focus-visible {
@@ -844,6 +919,65 @@
 
 .editorGroup[data-active] {
   box-shadow: inset 0 1px 0 var(--color-primary);
+}
+
+.skillMetadataBar {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-bg-subtle, var(--color-bg-hover));
+  font-size: var(--font-size-xs, 11px);
+}
+
+.skillMetadataMain,
+.skillProvenance,
+.skillDescriptionEditor {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.skillScopeChip {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  color: var(--color-primary);
+  font-weight: 700;
+}
+
+.skillDescription {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skillDescriptionEditor {
+  flex: 1;
+}
+
+.skillDescriptionEditor input {
+  flex: 1;
+  min-width: 120px;
+}
+
+.skillProvenance {
+  flex-wrap: wrap;
+  color: var(--color-text-muted);
+}
+
+.skillProvenance button {
+  padding: 1px 6px;
+}
+
+.skillConcurrencyHint {
+  color: var(--color-text-muted);
+  line-height: 1.35;
 }
 
 .editorGroupBody {
@@ -1371,6 +1505,38 @@
   border-radius: var(--radius-md);
   background: var(--color-panel-bg, var(--color-bg));
   box-shadow: var(--shadow-lg, 0 8px 24px rgb(0 0 0 / 18%));
+}
+
+.dialogTitle {
+  margin: 0 0 var(--space-2);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-md);
+}
+
+.dialogField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-block: var(--space-3);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.dialogField input,
+.dialogField textarea {
+  width: 100%;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  font: inherit;
+}
+
+.dialogError {
+  margin-block: var(--space-2);
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
 }
 
 .moveDialog {

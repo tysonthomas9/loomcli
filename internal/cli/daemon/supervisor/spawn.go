@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,6 +23,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/observability/tracing"
+	"github.com/tysonthomas9/loomcli/internal/skillmat"
 
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -276,6 +278,16 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 		recordErr(span, err, "spawn.backend_unavailable")
 		return err
 	}
+	if err := s.materializeSkills(ap); err != nil {
+		if skillmat.IsStoreUnavailable(err) {
+			slog.Warn("skill store unavailable; continuing with existing materialization",
+				"worktree", ap.Entry.Worktree, "workspace", s.WorkspaceID, "err", err)
+		} else {
+			recordErr(span, err, "spawn.materialize_skills")
+			return fmt.Errorf("materialize skills: %w", err)
+		}
+	}
+	s.ensureHookConfig(ap)
 
 	cmd, err := s.buildCommand(ap)
 	if err != nil {

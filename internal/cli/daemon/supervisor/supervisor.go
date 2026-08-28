@@ -330,6 +330,7 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 
 		if !s.preFlightSetup(ap) {
 			s.recordRecoveryFailure(ap) // a recovery cycle that never reached spawn still counts
+			s.materializeIdleSkills(ap)
 			s.Concurrency.Release(ap.Entry.Role)
 			releaseOwnership()
 			s.postExitCleanup(ap)

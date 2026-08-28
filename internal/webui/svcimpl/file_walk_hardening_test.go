@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/skillpaths"
 )
 
 func TestFileSearchMandatoryGitExclusionAndDoublestar(t *testing.T) {
@@ -223,31 +224,31 @@ func TestFileIndexCacheLRUTTLCopyAndPolicyIsolation(t *testing.T) {
 	cache := newFileIndexCache(2, 1<<20, 10*time.Second)
 	cache.now = func() time.Time { return now }
 	a := &service.FileIndexResult{Paths: []string{"a"}, PartialReasons: []service.FilePartialReason{service.FilePartialFileCount}}
-	cache.put("/root/a", true, a)
+	cache.put("/root/a", true, "skills-v1", a)
 	a.Paths[0] = "mutated"
-	got, ok := cache.get("/root/a", true)
+	got, ok := cache.get("/root/a", true, "skills-v1")
 	if !ok || got.Paths[0] != "a" {
 		t.Fatalf("stored result was not isolated: %+v, ok=%v", got, ok)
 	}
 	got.Paths[0] = "also-mutated"
-	got, _ = cache.get("/root/a", true)
+	got, _ = cache.get("/root/a", true, "skills-v1")
 	if got.Paths[0] != "a" {
 		t.Fatalf("read result was not isolated: %+v", got)
 	}
-	if _, ok := cache.get("/root/a", false); ok {
+	if _, ok := cache.get("/root/a", false, "skills-v1"); ok {
 		t.Fatal("sensitive-capable entry leaked into viewer cache")
 	}
-	cache.put("/root/a", false, &service.FileIndexResult{Paths: []string{"public"}})
+	cache.put("/root/a", false, "skills-v1", &service.FileIndexResult{Paths: []string{"public"}})
 	if cache.lru.Len() != 2 {
 		t.Fatalf("policy entries = %d, want 2", cache.lru.Len())
 	}
 
-	cache.put("/root/b", true, &service.FileIndexResult{Paths: []string{"b"}})
-	if _, ok := cache.get("/root/a", true); ok {
+	cache.put("/root/b", true, "skills-v1", &service.FileIndexResult{Paths: []string{"b"}})
+	if _, ok := cache.get("/root/a", true, "skills-v1"); ok {
 		t.Fatal("least-recently-used entry was not evicted at entry cap")
 	}
 	now = now.Add(11 * time.Second)
-	if _, ok := cache.get("/root/b", true); ok {
+	if _, ok := cache.get("/root/b", true, "skills-v1"); ok {
 		t.Fatal("expired entry was returned")
 	}
 }
@@ -256,23 +257,23 @@ func TestFileIndexCacheByteEvictionAndOverlappingInvalidation(t *testing.T) {
 	first := &service.FileIndexResult{Paths: []string{strings.Repeat("a", 200)}}
 	oneSize := estimateFileIndexSize(first)
 	cache := newFileIndexCache(32, oneSize+10, time.Hour)
-	cache.put("/workspace", true, first)
-	cache.put("/other", true, &service.FileIndexResult{Paths: []string{strings.Repeat("b", 200)}})
-	if _, ok := cache.get("/workspace", true); ok {
+	cache.put("/workspace", true, "skills-v1", first)
+	cache.put("/other", true, "skills-v1", &service.FileIndexResult{Paths: []string{strings.Repeat("b", 200)}})
+	if _, ok := cache.get("/workspace", true, "skills-v1"); ok {
 		t.Fatal("byte bound did not evict least-recently-used payload")
 	}
 
 	cache = newFileIndexCache(32, 1<<20, time.Hour)
 	for _, root := range []string{"/workspace", "/workspace/repo", "/workspace/repo/nested", "/workspace-other"} {
-		cache.put(root, true, &service.FileIndexResult{Paths: []string{root}})
+		cache.put(root, true, "skills-v1", &service.FileIndexResult{Paths: []string{root}})
 	}
 	cache.invalidateOverlapping("/workspace/repo")
 	for _, root := range []string{"/workspace", "/workspace/repo", "/workspace/repo/nested"} {
-		if _, ok := cache.get(root, true); ok {
+		if _, ok := cache.get(root, true, "skills-v1"); ok {
 			t.Fatalf("overlapping root %q was not invalidated", root)
 		}
 	}
-	if _, ok := cache.get("/workspace-other", true); !ok {
+	if _, ok := cache.get("/workspace-other", true, "skills-v1"); !ok {
 		t.Fatal("prefix-only sibling was incorrectly invalidated")
 	}
 }
@@ -281,9 +282,20 @@ func TestFileIndexCacheInvalidationFencesInflightStore(t *testing.T) {
 	cache := newFileIndexCache(32, 1<<20, time.Hour)
 	generation := cache.currentGeneration()
 	cache.invalidateOverlapping("/workspace")
-	cache.putIfGeneration("/workspace", true, &service.FileIndexResult{Paths: []string{"stale.txt"}}, generation)
-	if _, ok := cache.get("/workspace", true); ok {
+	cache.putIfGeneration("/workspace", true, "skills-v1", &service.FileIndexResult{Paths: []string{"stale.txt"}}, generation)
+	if _, ok := cache.get("/workspace", true, "skills-v1"); ok {
 		t.Fatal("result from an invalidated in-flight build was cached")
+	}
+}
+
+func TestFileIndexKeysIncludeSkillPolicyIdentity(t *testing.T) {
+	first := skillpaths.NewPolicy("services/api").Identity()
+	changed := skillpaths.NewPolicy("packages/api").Identity()
+	if fileIndexCacheKey("/workspace", true, first) == fileIndexCacheKey("/workspace", true, changed) {
+		t.Fatal("cache key did not change with skill hiding policy")
+	}
+	if fileIndexBuildKey("/workspace", true, first, 7) == fileIndexBuildKey("/workspace", true, changed, 7) {
+		t.Fatal("build key did not change with skill hiding policy")
 	}
 }
 
@@ -300,7 +312,7 @@ func TestFileIndexSingleflightDoesNotReturnBuildInvalidatedMidFlight(t *testing.
 	releaseFirst := make(chan struct{})
 	started := make(chan int, 2)
 	var starts atomic.Int32
-	impl.indexBuilder = func(context.Context, string, string, bool) (*service.FileIndexResult, error) {
+	impl.indexBuilder = func(context.Context, string, string, bool, skillpaths.Policy) (*service.FileIndexResult, error) {
 		start := int(starts.Add(1))
 		started <- start
 		if start == 1 {
@@ -376,12 +388,12 @@ func TestFileIndexSingleflightCancellationDoesNotCancelSharedBuild(t *testing.T)
 	started := make(chan struct{})
 	release := make(chan struct{})
 	var starts atomic.Int32
-	impl.indexBuilder = func(ctx context.Context, rootPath, identity string, allowSensitive bool) (*service.FileIndexResult, error) {
+	impl.indexBuilder = func(ctx context.Context, rootPath, identity string, allowSensitive bool, skillPolicy skillpaths.Policy) (*service.FileIndexResult, error) {
 		if starts.Add(1) == 1 {
 			close(started)
 		}
 		<-release
-		return original(ctx, rootPath, identity, allowSensitive)
+		return original(ctx, rootPath, identity, allowSensitive, skillPolicy)
 	}
 
 	var wg sync.WaitGroup
@@ -426,7 +438,7 @@ func TestFileIndexReopenRejectsChangedRootIdentity(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, "a.txt"), "a")
 	impl := scopedSvc(root).(*fileServiceImpl)
-	_, err := impl.buildFileIndex(context.Background(), root, "different-canonical-root", true)
+	_, err := impl.buildFileIndex(context.Background(), root, "different-canonical-root", true, skillpaths.NewPolicy(""))
 	if err == nil {
 		t.Fatal("index build accepted a reopened root under the wrong cache identity")
 	}
