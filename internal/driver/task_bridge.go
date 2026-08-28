@@ -13,6 +13,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
+	"github.com/tysonthomas9/loomcli/internal/noderuntime"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -357,13 +358,17 @@ func (e HostBridgeTaskExecutor) runBuiltInFlueWorkflow(ctx context.Context, req 
 	if err != nil {
 		return bridgeTaskRunnerResult{}, fmt.Errorf("encode task runner request: %w", err)
 	}
+	node, err := noderuntime.Resolve()
+	if err != nil {
+		return bridgeTaskRunnerResult{}, err
+	}
 	launcherPath, cleanup, err := writeFlueTaskRunnerLauncher()
 	if err != nil {
 		return bridgeTaskRunnerResult{}, err
 	}
 	defer cleanup()
 
-	cmd := exec.CommandContext(ctx, "node", launcherPath) //nolint:gosec // fixed local runtime for bundled Flue workflow runners.
+	cmd := exec.CommandContext(ctx, node.Path, launcherPath) //nolint:gosec // resolved local Node runtime for bundled Flue workflow runners.
 	if worktree := strings.TrimSpace(e.WorktreePath); worktree != "" {
 		cmd.Dir = worktree
 	}

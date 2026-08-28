@@ -18,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/workflows/packaged"
 )
 
 const (
@@ -163,6 +164,17 @@ func EnsureBuiltinWorkflow(ctx context.Context, st store.Store, ws, name string)
 		}
 		return nil
 	}
+
+	if handled, err := ensureBuiltinFromPackaged(ctx, st, ws, name, sourceRef, digest, spec); handled {
+		return err
+	}
+	return compileAndRegisterBuiltin(ctx, st, ws, name, sourceRef, digest, spec, reuseMissingRunners)
+}
+
+// compileAndRegisterBuiltin is the legacy compile lane (custom-authoring
+// toolchain on disk): byte-for-byte the pre-packaged behavior, including the
+// reuseMissingRunners fail-open onto a usable subset registration.
+func compileAndRegisterBuiltin(ctx context.Context, st store.Store, ws, name, sourceRef, digest string, spec Spec, reuseMissingRunners []string) error {
 	if _, _, err := BuildAndRegister(ctx, st, BuildAndRegisterOptions{
 		WorkspaceKey:  ws,
 		Name:          name,
@@ -186,6 +198,67 @@ func EnsureBuiltinWorkflow(ctx context.Context, st store.Store, ws, name string)
 		}
 		return fmt.Errorf("register built-in workflow %q: %w", name, err)
 	}
+	return nil
+}
+
+// ensureBuiltinFromPackaged runs the packaged lane (DEV-V5-31): a verified
+// pre-built artifact registers WITHOUT the compiler. handled=true means the
+// caller returns err as-is (registered, or failed closed — verification
+// failures are fatal in every mode, and a packaged build or desktop process
+// never falls through to compiling); handled=false means the legacy compile
+// lane is the next step.
+func ensureBuiltinFromPackaged(ctx context.Context, st store.Store, ws, name, sourceRef, digest string, spec Spec) (bool, error) {
+	wantRunners := deriveWorkflowRunnerSpecs(spec.Entrypoint, spec.Files)
+	art, lookupErr := packaged.Lookup(name, digest, wantRunners)
+	switch {
+	case lookupErr == nil:
+		return true, registerPackagedBuiltin(ctx, st, ws, name, sourceRef, digest, art)
+	case errors.Is(lookupErr, packaged.ErrNotPackaged):
+		if packaged.FailClosed() {
+			return true, fmt.Errorf("register built-in workflow %q: %w (desktop packaging error: this Loom build ships no built-in workflow artifact for %s; reinstall Loom)", name, lookupErr, name)
+		}
+		slog.Debug("builtin workflow not packaged; using compile fallback", "workflow", name)
+		return false, nil
+	default:
+		return true, fmt.Errorf("register built-in workflow %q: %w", name, lookupErr)
+	}
+}
+
+// registerPackagedBuiltin registers a verified packaged artifact through the
+// existing no-compile RegisterFlueDriver path as TRUSTED with packaged
+// provenance. A registration failure here is returned as-is: there is no
+// compile fallback and no reuseMissingRunners fail-open on this lane.
+func registerPackagedBuiltin(ctx context.Context, st store.Store, ws, name, sourceRef, digest string, art *packaged.Artifact) error {
+	if _, err := driver.RegisterFlueDriver(ctx, st, driver.RegisterFlueOptions{
+		WorkspaceKey: ws,
+		WorkDir:      builtinWorkflowWorkDir(),
+		DistPath:     art.DistPath,
+		DriverName:   name,
+		DriverID:     name,
+		WorkflowName: name,
+		SourceRef:    sourceRef,
+		SourceDigest: digest,
+		CreatedBy:    "system",
+		Activate:     true,
+		RunnerSpecs:  art.Runners,
+		Manifest:     packagedProvenance(art),
+		Trust:        domain.DriverTrustTrusted,
+		// Re-checked against the staged copy so a tree swapped between
+		// Lookup's verification and the staging read is never promoted.
+		ExpectedArtifactDigest: art.ArtifactDigest,
+	}); err != nil {
+		if errors.Is(err, driver.ErrStagedArtifactDigestMismatch) {
+			return fmt.Errorf("register packaged built-in workflow %q: %w", name, &packaged.VerificationError{
+				Name: name, Field: "artifact_digest", Want: art.ArtifactDigest, Got: "changed during staging",
+			})
+		}
+		return fmt.Errorf("register packaged built-in workflow %q: %w", name, err)
+	}
+	slog.Info("builtin workflow registered from packaged artifact",
+		"workflow", name,
+		"workspace", ws,
+		"artifact_digest", art.ArtifactDigest,
+		"index_digest", art.IndexDigest)
 	return nil
 }
 
@@ -227,13 +300,26 @@ func builtinReuseDecision(ctx context.Context, st store.Store, ws, name string, 
 	if err != nil {
 		return false, "", nil, err
 	}
-	if !bundleAvailable || activeManifestRunnersAreStale(manifest, fresh) {
+	if !bundleAvailable || activeManifestRunnersAreStale(manifest, fresh) || packagedArtifactSuperseded(manifest) {
 		return false, current, nil, nil
 	}
 	if missing = manifestMissingFreshRunners(manifest, fresh); len(missing) > 0 {
 		return false, current, missing, nil
 	}
 	return true, current, nil, nil
+}
+
+// packagedArtifactSuperseded reports that the active version came from this
+// binary's packaged lane but from a DIFFERENT build (its packaged_index_digest
+// is not the one baked into this binary): an app upgrade shipped a new
+// artifact, and the verified artifact must be registered rather than the old
+// staged bundle reused forever. Operator-registered versions and non-packaged
+// builds are unaffected.
+func packagedArtifactSuperseded(manifest map[string]string) bool {
+	if !packaged.IsPackagedBuild() || manifest["provenance"] != packaged.ProvenancePackagedBuiltin {
+		return false
+	}
+	return strings.TrimSpace(manifest["packaged_index_digest"]) != strings.TrimSpace(packaged.ExpectedIndexDigest)
 }
 
 func activeBuiltInWorkflowState(ctx context.Context, st store.Store, ws, driverID string) (string, bool, map[string]string, error) {

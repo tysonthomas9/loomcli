@@ -11,6 +11,12 @@
 #   env:   FLUE_REPO=/path/to/flue  (default: ../flue)
 #          BUILTIN_DIST_DEST=/path/to/output
 #
+# The packaged built-in lane consumes BUILTIN_DIST_DEST via
+# `loom workflow package-builtin epic-runner --dist "$BUILTIN_DIST_DEST" --out <root>`
+# (see scripts/test-packaged-builtin-devbox.sh). The nested
+# dist/node_modules/@loom/sdk runtime is staged by the packager (a real file
+# copy), NOT here — the symlinks below are build-time inputs only.
+#
 # Note: DEST is replaced wholesale (rm -rf + copy) so content-hashed assets from
 # prior builds never accrete.
 set -Eeuo pipefail

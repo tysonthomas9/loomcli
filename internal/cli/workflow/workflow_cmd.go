@@ -17,9 +17,11 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/noderuntime"
 	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/workflows"
+	"github.com/tysonthomas9/loomcli/internal/workflows/packaged"
 )
 
 var (
@@ -110,7 +112,7 @@ var workflowVersionsCmd = &cobra.Command{
 
 var workflowReadyzCmd = &cobra.Command{
 	Use:   "readyz",
-	Short: "Check local workflow authoring prerequisites",
+	Short: "Check built-in workflow runtime readiness and local authoring prerequisites",
 	Args:  cobra.NoArgs,
 	RunE:  runWorkflowReadyz,
 }
@@ -166,7 +168,7 @@ func init() {
 	workflowDigestCmd.Flags().BoolVar(&workflowDigestJSON, "json", false, "JSON output")
 	workflowDigestCmd.Flags().StringArrayVar(&workflowDigestFiles, "file", nil, "Staged source to hash as <spec-key>=<path> (repeatable; must cover the workflow's full source set)")
 
-	workflowCmd.AddCommand(workflowCloneCmd, workflowBuildCmd, workflowApproveCmd, workflowUnapproveCmd, workflowActivateCmd, workflowRunCmd, workflowListCmd, workflowVersionsCmd, workflowReadyzCmd, workflowDigestCmd)
+	workflowCmd.AddCommand(workflowCloneCmd, workflowBuildCmd, workflowApproveCmd, workflowUnapproveCmd, workflowActivateCmd, workflowRunCmd, workflowListCmd, workflowVersionsCmd, workflowReadyzCmd, workflowDigestCmd, workflowPackageBuiltinCmd)
 	cli.RegisterCommand(workflowCmd)
 }
 
@@ -427,24 +429,121 @@ func runWorkflowReadyz(_ *cobra.Command, _ []string) error {
 	if workflowReadyzJSON {
 		return cmdstore.WriteJSON(status)
 	}
-	for key, value := range status {
-		fmt.Printf("%s=%v\n", key, value)
+	for _, line := range flattenReadiness("", status) {
+		fmt.Println(line)
 	}
 	return nil
 }
 
+// flattenReadiness renders nested readiness maps as sorted key.sub=value
+// lines so text mode is stable and greppable.
+func flattenReadiness(prefix string, value any) []string {
+	nested, ok := toStringMap(value)
+	if !ok {
+		return []string{fmt.Sprintf("%s=%v", prefix, value)}
+	}
+	keys := make([]string, 0, len(nested))
+	for key := range nested {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	lines := []string{}
+	for _, key := range keys {
+		full := key
+		if prefix != "" {
+			full = prefix + "." + key
+		}
+		lines = append(lines, flattenReadiness(full, nested[key])...)
+	}
+	return lines
+}
+
+// toStringMap views map[string]any and the typed packaged report maps as a
+// generic map for text rendering (JSON round-trip for struct values).
+func toStringMap(value any) (map[string]any, bool) {
+	switch v := value.(type) {
+	case map[string]any:
+		return v, true
+	case map[string]packaged.ArtifactStatus:
+		out := make(map[string]any, len(v))
+		for key, status := range v {
+			out[key] = structToMap(status)
+		}
+		return out, true
+	case packaged.ArtifactStatus:
+		return structToMap(v), true
+	}
+	return nil, false
+}
+
+func structToMap(value any) map[string]any {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return map[string]any{}
+	}
+	out := map[string]any{}
+	_ = json.Unmarshal(raw, &out)
+	return out
+}
+
+// workflowReadinessStatus reports two independent readiness surfaces:
+// authoring (the local compile toolchain; `ok` keeps meaning this) and the
+// built-in runtime (a resolvable Node plus verified packaged artifacts for
+// every required built-in — or, off the fail-closed path, authoring as the
+// compile fallback).
 func workflowReadinessStatus() map[string]any {
 	sandboxMode := workflowSandboxMode()
+	nodeDesc := noderuntime.Describe()
+	// Authoring runs `flue` (a PATH script with a `node` shebang), so its
+	// node check is PATH node — independent of the LOOM_NODE_BIN/sidecar
+	// resolution the packaged runtime uses (reported under builtin_runtime).
+	nodeOnPath := commandAvailable("node")
+	authoring := map[string]any{
+		"node":         nodeOnPath,
+		"flue":         commandAvailable("flue") || os.Getenv("LOOM_REAL_FLUE_CMD") != "" || os.Getenv("LOOM_REAL_FLUE_CMD_JSON") != "",
+		"loom_sdk":     packageRootAvailable(os.Getenv("LOOM_SDK_ROOT"), "sdk"),
+		"flue_runtime": flueRuntimeAvailable(),
+		"daytona_sdk":  packageRootAvailable(os.Getenv("DAYTONA_SDK_ROOT"), filepath.Join("..", "flue", "node_modules", ".pnpm", "node_modules", "@daytona", "sdk")),
+	}
+	authoringReady := nodeOnPath && authoring["flue"].(bool) && authoring["loom_sdk"].(bool) && authoring["flue_runtime"].(bool)
 	status := map[string]any{
-		"node":                         commandAvailable("node"),
-		"flue":                         commandAvailable("flue") || os.Getenv("LOOM_REAL_FLUE_CMD") != "" || os.Getenv("LOOM_REAL_FLUE_CMD_JSON") != "",
-		"loom_sdk":                     packageRootAvailable(os.Getenv("LOOM_SDK_ROOT"), "sdk"),
-		"flue_runtime":                 flueRuntimeAvailable(),
-		"daytona_sdk":                  packageRootAvailable(os.Getenv("DAYTONA_SDK_ROOT"), filepath.Join("..", "flue", "node_modules", ".pnpm", "node_modules", "@daytona", "sdk")),
 		"sandbox_mode":                 sandboxMode,
 		"untrusted_execution_possible": sandboxMode == driverpkg.SandboxModeContainer,
+		"authoring":                    authoring,
+		"authoring_ready":              authoringReady,
+		"ok":                           authoringReady,
 	}
-	status["ok"] = status["node"].(bool) && status["flue"].(bool) && status["loom_sdk"].(bool) && status["flue_runtime"].(bool)
+	for key, value := range authoring {
+		status[key] = value
+	}
+	names := workflows.BuiltinWorkflowNames()
+	want := make(map[string]packaged.Want, len(names))
+	for _, name := range names {
+		if digest, runners, ok := workflows.BuiltinArtifactExpectation(name); ok {
+			want[name] = packaged.Want{SourceDigest: digest, Runners: runners}
+		}
+	}
+	report := packaged.Describe(names, want)
+	status["builtin_runtime"] = map[string]any{
+		"node":                  nodeDesc,
+		"artifacts":             report.Artifacts,
+		"root":                  report.Root,
+		"index_digest":          report.IndexDigest,
+		"expected_index_digest": report.ExpectedIndexDigest,
+		"flue_commit":           report.FlueCommit,
+		"node_version":          report.NodeVersion,
+		"target":                report.Target,
+		"packaged_build":        report.PackagedBuild,
+		"desktop":               report.Desktop,
+		"required":              report.Required,
+		"fail_closed":           packaged.FailClosed(),
+	}
+	runtimeNodeOK, _ := nodeDesc["ok"].(bool)
+	runtimeReady := runtimeNodeOK && report.AllRequiredVerified()
+	if !packaged.FailClosed() {
+		runtimeReady = runtimeReady || authoringReady
+	}
+	status["builtin_runtime_ready"] = runtimeReady
 	return status
 }
 

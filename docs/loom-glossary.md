@@ -119,6 +119,25 @@ isolation-*shaped* features are not isolation:
 mechanisms, the Daytona remote-isolation path, and an explicit list of what is
 not isolation.
 
+## Built-in Workflow Runtime
+
+- **Packaged built-in artifact**: A pre-compiled Flue `dist/` for a built-in
+  workflow (plus its nested `@loom/sdk` runtime) shipped under
+  `builtin-workflows/` with an `index.json`; a packaged `loom` verifies it
+  against the `-ldflags`-baked index digest and registers it without ever
+  invoking the compiler (`internal/workflows/packaged`, produced by
+  `loom workflow package-builtin`).
+- **Authoring toolchain**: The local Flue CLI + `@loom/sdk` + `@flue/runtime`
+  checkout the compile lane needs (`LOOM_SDK_ROOT`, `FLUE_REPO`, …). A
+  developer escape hatch only; `loom workflow readyz` reports it as
+  `authoring_ready`, separately from `builtin_runtime_ready`.
+- **Node resolver**: The single place every host-side Flue exec site obtains
+  its `node` executable (`internal/noderuntime`): `LOOM_NODE_BIN` override →
+  bundled sibling next to the `loom` binary → PATH.
+- **Required built-in set**: `packaged.RequiredBuiltins` — the built-ins a
+  desktop/packaged build must ship for `builtin_runtime_ready` to roll up
+  true (today `epic-runner`).
+
 ## Other Overloaded Names
 
 - **fleet / fleet-db**: The control-plane data service that stores Loom state.

@@ -86,6 +86,8 @@ echo "fake flue build"
 	}
 	t.Setenv("LOOM_REAL_FLUE_CMD_JSON", string(cmd))
 	t.Setenv("LOOM_REAL_FLUE_CMD", "")
+	t.Setenv("LOOM_LOCAL_RUNTIME", "")
+	t.Setenv("LOOM_BUILTIN_ARTIFACTS_DIR", "")
 	t.Setenv("LOOM_SDK_ROOT", sdkRoot)
 	t.Setenv("LOOM_FLUE_RUNTIME_ROOT", runtimeRoot)
 	t.Setenv("FLUE_RUNTIME_ROOT", "")

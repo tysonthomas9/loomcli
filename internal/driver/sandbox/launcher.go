@@ -38,6 +38,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver/runtypes"
+	"github.com/tysonthomas9/loomcli/internal/noderuntime"
 )
 
 // SandboxFrameType discriminates host-bound frames on the sandbox stdout
@@ -139,14 +140,18 @@ func RecordSandboxPlacement(result *runtypes.RunResult, placement domain.TaskRun
 // built Flue server under local node via the embedded runtime launcher —
 // the pre-seam runBuiltFlueServer behavior, unchanged.
 type ProcessLauncher struct {
-	// NodePath overrides the node executable (default "node").
+	// NodePath overrides the node executable (default: noderuntime.Resolve()).
 	NodePath string
 }
 
 func (l ProcessLauncher) Launch(ctx context.Context, spec LaunchSpec) (SandboxProcess, error) {
 	node := strings.TrimSpace(l.NodePath)
 	if node == "" {
-		node = "node"
+		resolved, err := noderuntime.Resolve()
+		if err != nil {
+			return nil, err
+		}
+		node = resolved.Path
 	}
 	launcherPath, cleanupLauncher, err := writeFlueRuntimeLauncher()
 	if err != nil {
