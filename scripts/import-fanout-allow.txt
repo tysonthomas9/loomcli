@@ -8,7 +8,13 @@
 # such seam. internal/cli grew one import for the same line of
 # work. Ratchet these back down (or remove the entries) when coupling is paid
 # down; do not raise them without recording why here.
-internal/cli/daemon/supervisor 22
+#
+# 23 (was 22) records a merge, not new coupling: the two sides each raised this
+# entry for their own seam and the merged package carries both. v5 took it to 22
+# for the skills/hook pair (hookcfg, skillmat); local/union had taken it to 21
+# for agentprofile. 23 is exactly that sum — no import arrives here that was not
+# already allowed on one side.
+internal/cli/daemon/supervisor 23
 internal/cli 19
 # The skills webui module adds the skills handler package to the app's module
 # wiring and the domain skill path policy to svcimpl's file index.
