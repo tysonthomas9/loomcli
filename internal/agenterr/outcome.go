@@ -19,6 +19,7 @@ const (
 	IncompleteRunOutcome                       // agent exited 0 but never released its task claim (turn ended before the task did)
 	ClaimsHeldOutcome                          // a workspace-level claim hold is active: the supervisor refuses to START new work
 	WorktreeUnavailableOutcome                 // the claimed task's source_repo has no usable worktree for this agent (unknown repo, or resolution failed)
+	IssueBackendOutageOutcome                  // the ISSUE backend (fleet-db) is unreachable or rejecting our credentials
 )
 
 func (d DomainOutcome) String() string {
@@ -39,6 +40,8 @@ func (d DomainOutcome) String() string {
 		return "ClaimsHeld"
 	case WorktreeUnavailableOutcome:
 		return "WorktreeUnavailable"
+	case IssueBackendOutageOutcome:
+		return "IssueBackendOutage"
 	default:
 		return "None"
 	}
