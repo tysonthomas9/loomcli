@@ -333,6 +333,40 @@ async function setupMocks(page: Page, issues: object[]) {
   });
 }
 
+async function dropNodeResizeObserverCallbacks(page: Page) {
+  await page.addInitScript(() => {
+    const NativeResizeObserver = window.ResizeObserver;
+
+    window.ResizeObserver = class implements ResizeObserver {
+      private readonly observer: ResizeObserver;
+
+      constructor(callback: ResizeObserverCallback) {
+        this.observer = new NativeResizeObserver((entries) => {
+          const nonNodeEntries = entries.filter(
+            (entry) =>
+              !(entry.target as Element).classList.contains("react-flow__node"),
+          );
+          if (nonNodeEntries.length > 0) {
+            callback(nonNodeEntries, this);
+          }
+        });
+      }
+
+      observe(target: Element, options?: ResizeObserverOptions) {
+        this.observer.observe(target, options);
+      }
+
+      unobserve(target: Element) {
+        this.observer.unobserve(target);
+      }
+
+      disconnect() {
+        this.observer.disconnect();
+      }
+    };
+  });
+}
+
 /**
  * Navigate to Graph View and wait for API response.
  */
@@ -613,6 +647,16 @@ test.describe("Dependency Edge Styling", () => {
   });
 
   test.describe("Edge cases", () => {
+    test("renders edges when node ResizeObserver callbacks are missed", async ({
+      page,
+    }) => {
+      await dropNodeResizeObserverCallbacks(page);
+      await setupMocks(page, mockIssuesWithBlocks);
+      await navigateToGraphView(page);
+
+      await waitForEdgesWithPaths(page, 1);
+    });
+
     test("graph with no dependencies renders no edges", async ({ page }) => {
       const noDependencies = [
         {

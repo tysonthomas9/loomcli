@@ -10,6 +10,7 @@ import {
   Background,
   MiniMap,
   Panel,
+  useUpdateNodeInternals,
   type NodeMouseHandler,
 } from "@xyflow/react";
 import { useState, useMemo, useCallback, useEffect } from "react";
@@ -133,6 +134,18 @@ const nodeTypes = {
 const edgeTypes = {
   dependency: DependencyEdge,
 } as const;
+
+function SyncNodeInternals({ nodeIds }: { nodeIds: string[] }): null {
+  const updateNodeInternals = useUpdateNodeInternals();
+
+  useEffect(() => {
+    if (nodeIds.length > 0) {
+      updateNodeInternals(nodeIds);
+    }
+  }, [nodeIds, updateNodeInternals]);
+
+  return null;
+}
 
 /**
  * Props for the GraphView component.
@@ -350,6 +363,10 @@ export function GraphView({
     edges,
     layoutOptions,
   );
+  const nodeIds = useMemo(
+    () => layoutedNodes.map((node) => node.id),
+    [layoutedNodes],
+  );
 
   // Handle node click - extract issue from node data
   const handleNodeClick: NodeMouseHandler<IssueNodeType> = useCallback(
@@ -433,6 +450,7 @@ export function GraphView({
       data-testid="graph-view"
     >
       <ReactFlow {...(reactFlowProps as Record<string, never>)}>
+        <SyncNodeInternals nodeIds={nodeIds} />
         <Background gap={16} size={1} />
         {showMiniMap && (
           <MiniMap {...(miniMapProps as Record<string, never>)} />

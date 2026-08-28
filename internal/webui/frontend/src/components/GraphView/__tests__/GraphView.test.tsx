@@ -20,6 +20,9 @@ import type { GraphViewProps } from "../GraphView";
 // Import mocks after vi.mock calls
 
 const TEST_WS_ID = "test-ws-uuid-1234";
+const reactFlowMocks = vi.hoisted(() => ({
+  updateNodeInternals: vi.fn(),
+}));
 
 vi.mock("@/hooks/workspace", async () => {
   const actual =
@@ -73,6 +76,7 @@ vi.mock("@xyflow/react", () => ({
       {children}
     </div>
   )),
+  useUpdateNodeInternals: () => reactFlowMocks.updateNodeInternals,
 }));
 
 // Mock child components
@@ -375,6 +379,22 @@ describe("GraphView", () => {
         "data-node-count",
         "2",
       );
+    });
+
+    it("synchronizes React Flow internals after nodes render", () => {
+      const issues = [
+        createTestIssue({ id: "issue-1" }),
+        createTestIssue({ id: "issue-2" }),
+      ];
+      const nodes = createTestNodes(issues);
+      setupMocks({ nodes });
+
+      render(<GraphView {...createTestProps({ issues })} />);
+
+      expect(reactFlowMocks.updateNodeInternals).toHaveBeenCalledWith([
+        "node-issue-1",
+        "node-issue-2",
+      ]);
     });
 
     it("passes issues to useGraphData hook", () => {
