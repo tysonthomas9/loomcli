@@ -339,8 +339,14 @@ func validateHoldTTL(ttl time.Duration) (time.Duration, error) {
 }
 
 // requestClaimHold sends one claims_hold_set / claims_hold_get round trip.
+//
+// Unlike the other control commands this resolves the socket cwd-independently
+// (resolveControlSocketForCommand): a hold is an operational lever pulled from
+// wherever the operator or a deploy script happens to stand, not necessarily
+// from the daemon's project dir. Transport failures name the socket and how it
+// was resolved, so a wrong-daemon mistake is visible in the error itself.
 func requestClaimHold(op string, args any) (*ClaimHoldStatus, error) {
-	socketPath, err := resolveControlSocketFromCwd()
+	socketPath, source, err := resolveControlSocketForCommand()
 	if err != nil {
 		return nil, err
 	}
@@ -354,10 +360,10 @@ func requestClaimHold(op string, args any) (*ClaimHoldStatus, error) {
 	}
 	resp, err := sendDaemonControlRequestFull(socketPath, req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %s", err, describeControlSocket(socketPath, source))
 	}
 	if !resp.Success {
-		return nil, fmt.Errorf("%s", resp.Error)
+		return nil, fmt.Errorf("%s (%s)", resp.Error, describeControlSocket(socketPath, source))
 	}
 	var status ClaimHoldStatus
 	if len(resp.Data) > 0 {
@@ -403,6 +409,9 @@ func runDaemonHold(cmd *cobra.Command, args []string) error {
 func waitForClaimHoldIdle(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	fmt.Printf("Waiting up to %s for running agents to finish...\n", timeout)
+	if socketPath, source, err := resolveControlSocketForCommand(); err == nil {
+		fmt.Printf("  Using %s\n", describeControlSocket(socketPath, source))
+	}
 	for {
 		status, err := requestClaimHold(ctrlOpClaimHoldGet, nil)
 		if err != nil {
@@ -435,6 +444,9 @@ func runDaemonRelease(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	fmt.Printf("Claim hold released by %s. Agents resume claiming within ~%s.\n", actor, defaultClaimHoldRecheckHint)
+	if socketPath, source, sErr := resolveControlSocketForCommand(); sErr == nil {
+		fmt.Printf("  Released via %s\n", describeControlSocket(socketPath, source))
+	}
 	printClaimHoldStatus(*status)
 	return nil
 }
@@ -476,6 +488,20 @@ func claimHoldBanner(h *supervisor.ClaimHold) string {
 	}
 	return fmt.Sprintf("Claims: %s by %s since %s — %s; expires %s",
 		marker, h.Actor, h.Since.Format(time.RFC3339), h.Reason, expires)
+}
+
+// printClaimHoldReleaseHint tells the operator how to clear an active hold and
+// which daemon the release would reach. The socket source matters: a release
+// run from outside the daemon's project dir resolves through the workspace
+// lock, and saying so up front is cheaper than diagnosing it afterwards.
+func printClaimHoldReleaseHint(h *supervisor.ClaimHold) {
+	if h == nil || !h.Active(time.Now()) {
+		return
+	}
+	fmt.Println("  Release with: loom daemon release")
+	if socketPath, source, err := resolveControlSocketForCommand(); err == nil {
+		fmt.Printf("  Release would reach %s\n", describeControlSocket(socketPath, source))
+	}
 }
 
 func orDash(s string) string {
