@@ -47,6 +47,7 @@ type AgentProcess struct {
 	InputWaitPending       int               // interactive harness prompts currently awaiting an answer; a count (not a flag) so overlapping prompts nest — see input_wait.go
 	InputWaitSince         time.Time         // when InputWaitPending last rose from zero; anchors the bound that stops a suspension from outliving its cause
 
+	LastRearm      time.Time // when the fleet-stall sweep last re-armed this agent's supervise goroutine (see checkFleetStall); zero if never
 	RestartCount   int       // consecutive restart attempts
 	LastStart      time.Time // when subprocess was last spawned
 	LastExit       time.Time // when subprocess last exited
@@ -87,7 +88,15 @@ const (
 	StopReasonYielded            StopReason = "yielded"
 	StopReasonWatchdog           StopReason = "watchdog"
 	StopReasonBackendUnavailable StopReason = "backend_unavailable"
-	StopReasonEphemeralDone      StopReason = "ephemeral_done" // ephemeral-mode agent exited cleanly after one successful task
+	// StopReasonIssueBackendUnavailable marks an agent waiting out an ISSUE
+	// backend (fleet-db) outage — unreachable, or rejecting the daemon's
+	// credentials. Distinct from StopReasonBackendUnavailable, which is about
+	// the agent's own CLI binary: the two collide in the logs (fleet-db's
+	// error text literally reads "backend [unavailable] ...") and only one of
+	// them is about this agent. The supervise goroutine stays alive and
+	// rechecks on a fixed interval, so the agent self-resumes on recovery.
+	StopReasonIssueBackendUnavailable StopReason = "issue_backend_unavailable"
+	StopReasonEphemeralDone           StopReason = "ephemeral_done" // ephemeral-mode agent exited cleanly after one successful task
 	// StopReasonMaxRetriesBlocked marks an agent that exhausted its restart
 	// budget and is now block-and-retrying on a fixed interval (policy
 	// Decision Retry with OnExhaustion Block) instead of being abandoned.

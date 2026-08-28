@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"log"
+	"log/slog"
 	"os"
 	"strconv"
 	"time"
@@ -18,6 +19,13 @@ const primaryBackendRetryCooldown = time.Minute
 // binary is installed or PATH is fixed, so we poll on a fixed interval rather
 // than an exponential backoff, and never count these retries toward max_retries.
 const backendUnavailableRecheckInterval = 30 * time.Second
+
+// issueBackendOutageRecheckInterval is the fixed delay between retries while
+// the ISSUE backend (fleet-db) is unreachable or rejecting the daemon's
+// credentials. Nothing about the agent is wrong, so — like the CLI-binary
+// recheck above — we poll on a fixed interval and never count these retries
+// toward max_retries.
+const issueBackendOutageRecheckInterval = 30 * time.Second
 
 // defaultMaxRetriesBlockInterval is the fixed delay between re-attempts after
 // an agent has exhausted its restart budget and blocked (policy OnExhaustion
@@ -74,20 +82,34 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 		return false
 
 	case agentpolicy.RetryUncounted:
-		if outcome.Is(agenterr.NoWorkOutcome) {
-			s.applyNoWorkRestart(ap)
-			return true
-		}
-		// Rate limits: unlimited uncounted retries by default; the
-		// rate_limit_no_count config opt-out routes them through the
-		// counted budget instead (the layer's config wins, pt7).
-		if s.getRateLimitNoCount() {
-			s.applyRateLimitedRestart(ap)
-			return true
-		}
-		return s.applyCountedRestart(ap, d, maxRetries)
+		return s.applyUncountedRestart(ap, outcome, d, maxRetries)
 
 	default: // Retry
+		return s.applyCountedRestart(ap, d, maxRetries)
+	}
+}
+
+// applyUncountedRestart routes the classes whose failure is not evidence about
+// this agent's health: task availability (NoWork), the shared issue backend
+// being down or refusing our credentials, and rate limits. None of them erodes
+// max_retries — an agent parked by any of these was never broken, and counting
+// them ends in a terminal stop for a condition that clears on its own.
+//
+// Rate limits are the one member with an opt-out: rate_limit_no_count routes
+// them through the counted budget instead (the layer's config wins, pt7).
+// Caller holds ap.Mu.
+func (s *Supervisor) applyUncountedRestart(ap *AgentProcess, outcome agenterr.Outcome, d agentpolicy.Disposition, maxRetries int) bool {
+	switch {
+	case outcome.Is(agenterr.NoWorkOutcome):
+		s.applyNoWorkRestart(ap)
+		return true
+	case outcome.Is(agenterr.IssueBackendOutageOutcome):
+		s.applyIssueBackendOutageRestart(ap)
+		return true
+	case s.getRateLimitNoCount():
+		s.applyRateLimitedRestart(ap)
+		return true
+	default:
 		return s.applyCountedRestart(ap, d, maxRetries)
 	}
 }
@@ -255,6 +277,37 @@ func (s *Supervisor) applyBackendUnavailableRestart(ap *AgentProcess) {
 		ap.Entry.Worktree, s.backendRecheckBackoff())
 }
 
+// applyIssueBackendOutageRestart keeps an agent retrying while the ISSUE
+// backend is unreachable or rejecting the daemon's credentials. It mirrors
+// applyNoWorkRestart rather than applyCountedRestart, and for the same reason:
+// the condition is not a health signal about this agent. Every agent shares
+// one issue backend, so an outage fails all of them within a second of each
+// other; charging it to each agent's restart budget escalates the whole fleet
+// through BlockBudget into FastFail — a terminal stop — over a fault no agent
+// can fix and that typically clears on its own minutes later.
+//
+// RestartCount resets so a pre-outage failure streak does not carry through
+// the outage, and StopReason names the wait so `loom daemon status` shows why
+// the agent is idle instead of reporting an opaque Unknown. Caller holds ap.Mu.
+func (s *Supervisor) applyIssueBackendOutageRestart(ap *AgentProcess) {
+	ap.RestartCount = 0
+	ap.RateRetryCount = 0
+	ap.NoWorkCount = 0
+	ap.StopReason = StopReasonIssueBackendUnavailable
+	slog.Warn("issue backend unavailable, will recheck (not counted toward max_retries)",
+		"worktree", ap.Entry.Worktree, "recheck_in", s.issueBackendRecheckBackoff())
+}
+
+// issueBackendRecheckBackoff is the fixed delay between issue-backend
+// re-checks. It shares the backendRecheckInterval override so a test that
+// shrinks the recheck cadence shrinks both.
+func (s *Supervisor) issueBackendRecheckBackoff() time.Duration {
+	if s.backendRecheckInterval > 0 {
+		return s.backendRecheckInterval
+	}
+	return issueBackendOutageRecheckInterval
+}
+
 // backendRecheckBackoff is the fixed delay between BackendUnavailable re-checks
 // (configurable via backendRecheckInterval; package default otherwise).
 func (s *Supervisor) backendRecheckBackoff() time.Duration {
@@ -308,6 +361,10 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 		// Fixed recheck: waiting for the backend CLI to reappear, not
 		// backing off a flaky run.
 		return s.backendRecheckBackoff()
+	case agentpolicy.BPIssueBackendOutage:
+		// Fixed recheck: waiting for the issue store to answer again, not
+		// backing off a flaky run.
+		return s.issueBackendRecheckBackoff()
 	case agentpolicy.BPBlock:
 		return s.maxRetriesBlockBackoff()
 	case agentpolicy.BPRateLimit:

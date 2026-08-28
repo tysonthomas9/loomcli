@@ -118,7 +118,7 @@ func (s *Supervisor) buildClaimOpts(ap *AgentProcess, epicID string) (backend.Re
 func (s *Supervisor) tryClaimFromReady(ap *AgentProcess, opts backend.ReadyOpts, constraints cli.RoleConstraints) (claimed, decided bool) {
 	issues, err := s.readyIssues(opts)
 	if err != nil {
-		s.setPreflightError(ap, agenterr.OutcomeFromHarness(wrapper.ErrUnknown), fmt.Sprintf("ready query failed: %v", err))
+		s.setIssueBackendError(ap, "ready query failed", err)
 		return false, true
 	}
 	claimed, failed := s.tryClaimBestTask(ap, issues, constraints)
@@ -141,7 +141,7 @@ func (s *Supervisor) readyIssues(opts backend.ReadyOpts) ([]backend.IssueData, e
 func (s *Supervisor) claimRequestedTask(ap *AgentProcess, opts backend.ReadyOpts, taskID string) bool {
 	issues, err := s.readyIssues(opts)
 	if err != nil {
-		s.setPreflightError(ap, agenterr.OutcomeFromHarness(wrapper.ErrUnknown), fmt.Sprintf("ready query failed: %v", err))
+		s.setIssueBackendError(ap, "ready query failed", err)
 		return false
 	}
 	for _, issue := range issues {
@@ -157,7 +157,7 @@ func (s *Supervisor) claimRequestedTask(ap *AgentProcess, opts backend.ReadyOpts
 				s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.LockConflictOutcome), fmt.Sprintf("requested task %s locked by %s", taskID, conflictHolder(err)))
 				return false
 			}
-			s.setPreflightError(ap, agenterr.OutcomeFromHarness(wrapper.ErrUnknown), fmt.Sprintf("claim failed for %s: %v", taskID, err))
+			s.setIssueBackendError(ap, fmt.Sprintf("claim failed for %s", taskID), err)
 			return false
 		}
 		return true
@@ -212,7 +212,7 @@ func (s *Supervisor) tryClaimBestTask(ap *AgentProcess, issues []backend.IssueDa
 				issues = removeIssueByID(issues, match.Issue.ID)
 				continue
 			}
-			s.setPreflightError(ap, agenterr.OutcomeFromHarness(wrapper.ErrUnknown), fmt.Sprintf("claim failed for %s: %v", match.Issue.ID, err))
+			s.setIssueBackendError(ap, fmt.Sprintf("claim failed for %s", match.Issue.ID), err)
 			return false, true
 		}
 		return true, false
@@ -293,6 +293,38 @@ func (s *Supervisor) operationContext(timeout time.Duration) (context.Context, c
 
 func shouldClaimTaskForRole(ap *AgentProcess) bool {
 	return BuiltInRoles[ap.Entry.Role] || ap.RoleConfig.TaskFilter != ""
+}
+
+// setIssueBackendError records a failed issue-backend call as a preflight
+// error, separating an OUTAGE from every other backend failure.
+//
+// The distinction is the whole point. An unreachable or auth-rejecting issue
+// store is infrastructure: it fails every agent at once and clears on its own,
+// so it gets its own domain outcome and an uncounted retry (see
+// agentpolicy.decideDomain). Anything else — a malformed response, an
+// unexpected server error — stays Unknown and keeps eroding the restart
+// budget, because those do not self-heal and an agent spinning on one forever
+// is exactly what the budget exists to stop.
+func (s *Supervisor) setIssueBackendError(ap *AgentProcess, what string, err error) {
+	if issueBackendOutage(err) {
+		s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.IssueBackendOutageOutcome),
+			fmt.Sprintf("%s: issue backend unavailable: %v", what, err))
+		return
+	}
+	s.setPreflightError(ap, agenterr.OutcomeFromHarness(wrapper.ErrUnknown), fmt.Sprintf("%s: %v", what, err))
+}
+
+// issueBackendOutage reports whether err says the issue store could not be
+// reached or would not serve us, as opposed to answering with a real error.
+//
+// KindUnavailable covers both halves of the incident this exists for: the
+// fleet client maps transport failures (connection refused, DNS) AND 401/403
+// onto it ("authentication failed: workspace access denied"), because a
+// credential the daemon cannot fix mid-flight is, to the daemon, the backend
+// being unreachable. KindTimeout is the same condition observed through a
+// deadline. KindCanceled is deliberately absent: that is our own shutdown.
+func issueBackendOutage(err error) bool {
+	return backend.IsKind(err, backend.KindUnavailable) || backend.IsKind(err, backend.KindTimeout)
 }
 
 func (s *Supervisor) setPreflightError(ap *AgentProcess, class agenterr.Outcome, message string) {
