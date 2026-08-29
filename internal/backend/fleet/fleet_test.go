@@ -1606,11 +1606,6 @@ func TestListEvents_ReturnsMostRecentPageAcrossHistoryPagination(t *testing.T) {
 	}
 }
 
-//
-// If future refactors reintroduce unimplemented stubs, add cases here.
-
-// --- Connection refused test ---
-
 func TestConnectionRefused(t *testing.T) {
 	fb, err := New(Config{
 		BaseURL:     "http://127.0.0.1:1", // port 1 is unlikely to be open
