@@ -380,6 +380,34 @@ describe("issueStore", () => {
       expect(s.error).toBeNull();
     });
 
+    it("does not apply a late response from a superseded fetch", async () => {
+      let resolveKanban: (issues: Issue[]) => void;
+      mockGetKanbanIssues.mockImplementationOnce(
+        () =>
+          new Promise<Issue[]>((resolve) => {
+            resolveKanban = resolve;
+          }),
+      );
+      mockFetchGraphIssues.mockResolvedValueOnce([
+        makeIssue({ id: "from-graph" }),
+      ]);
+
+      const kanbanFetch = store.getState().fetchIssues({
+        workspaceId: "ws1",
+        mode: "kanban",
+      });
+      const graphFetch = store.getState().fetchIssues({
+        workspaceId: "ws1",
+        mode: "graph",
+      });
+
+      await graphFetch;
+      resolveKanban!([makeIssue({ id: "from-kanban" })]);
+      await kanbanFetch;
+
+      expect([...store.getState().issuesMap.keys()]).toEqual(["from-graph"]);
+    });
+
     it("passes sourceRepos to filter", async () => {
       mockGetReadyIssues.mockResolvedValue([]);
 
@@ -914,7 +942,7 @@ describe("issueStore", () => {
       expect(refetchSpy).toHaveBeenCalledTimes(10);
     });
 
-    it("keeps the one-second trailing delay after a quiet period", () => {
+    it("keeps the one-second trailing delay for a burst 4.9 seconds after a refresh", () => {
       const refetchSpy = vi
         .spyOn(store.getState(), "refetch")
         .mockResolvedValue();
@@ -931,7 +959,7 @@ describe("issueStore", () => {
       vi.advanceTimersByTime(1_000);
       expect(refetchSpy).toHaveBeenCalledTimes(1);
 
-      vi.advanceTimersByTime(5_000);
+      vi.advanceTimersByTime(4_900);
       applyRefreshMutation();
       vi.advanceTimersByTime(999);
       expect(refetchSpy).toHaveBeenCalledTimes(1);
