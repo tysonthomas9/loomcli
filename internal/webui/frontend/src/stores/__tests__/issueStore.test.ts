@@ -4,6 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { ApiError } from "../../types/common";
 
 import { createIssueStore, issuesAreEqual } from "../issueStore";
 import type { IssueStore } from "../issueStore";
@@ -402,6 +403,41 @@ describe("issueStore", () => {
   // -----------------------------------------------------------------------
 
   describe("auto-retry", () => {
+    it("does not auto-retry a 4xx: the error is shown and retries are exhausted", async () => {
+      mockGetReadyIssues.mockRejectedValueOnce(
+        new ApiError(400, "Bad Request", {
+          error: 'invalid repo format "web": expected "org/repo"',
+        }),
+      );
+
+      await store.getState().fetchIssues({
+        workspaceId: "ws1",
+        mode: "ready",
+      });
+
+      const s = store.getState();
+      expect(s.error).toBe('invalid repo format "web": expected "org/repo"');
+      expect(s.nextRetryAt).toBeNull();
+      expect(s.isLoading).toBe(false);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mockGetReadyIssues).toHaveBeenCalledTimes(1);
+    });
+
+    it("still auto-retries a 5xx and a 429", async () => {
+      mockGetReadyIssues.mockRejectedValueOnce(
+        new ApiError(503, "Service Unavailable", { error: "rate limited" }),
+      );
+      await store.getState().fetchIssues({ workspaceId: "ws1", mode: "ready" });
+      expect(store.getState().nextRetryAt).not.toBeNull();
+
+      store.getState().reset();
+      mockGetReadyIssues.mockRejectedValueOnce(
+        new ApiError(429, "Too Many Requests"),
+      );
+      await store.getState().fetchIssues({ workspaceId: "ws1", mode: "ready" });
+      expect(store.getState().nextRetryAt).not.toBeNull();
+    });
+
     it("schedules an auto-retry when fetch fails with a non-abort error", async () => {
       mockGetReadyIssues.mockRejectedValueOnce(new Error("boom"));
 

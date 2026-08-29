@@ -16,6 +16,7 @@ import {
   fetchGraphIssues,
 } from "../api/issues";
 import type { Issue, WorkFilter, Status } from "../types";
+import { ApiError } from "../types/common";
 import {
   calculateBackoffDelay,
   type ReconnectConfig,
@@ -55,6 +56,16 @@ export type {
   FetchIssuesParams,
   SubscribeFn,
 } from "./issueStoreHelpers";
+
+/**
+ * Whether a failed fetch is worth retrying automatically. Network failures
+ * and 5xx are; 4xx are not, except the two transient ones.
+ */
+export function isRetryableError(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return true;
+  if (err.status === 408 || err.status === 429) return true;
+  return err.status < 400 || err.status >= 500;
+}
 
 export function createIssueStore(
   initialConfig?: IssueStoreConfig,
@@ -307,6 +318,20 @@ export function createIssueStore(
         // starting, 503+kind=starting) from other 503s like "daemon
         // unavailable" and route to the loading-variant UX accordingly.
         const message = extractErrorMessage(err);
+
+        // A client error (4xx) is deterministic — the same request will fail
+        // the same way — so retrying only hammers the server and hides the
+        // real message behind a countdown. 408 and 429 are the transient
+        // exceptions. Surface the error and stop.
+        if (!isRetryableError(err)) {
+          set({
+            error: message,
+            isLoading: false,
+            retryCount: MAX_AUTO_RETRIES,
+            nextRetryAt: null,
+          });
+          return;
+        }
 
         // Schedule exponential-backoff auto-retry if we haven't exhausted
         // the budget. The retry calls fetchIssues({ isAutoRetry: true }),
