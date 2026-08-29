@@ -3556,6 +3556,30 @@ Monitor endpoints serve daemon-collected data (agent status, task distribution, 
 | GET | `/api/observability/metrics` | Event metrics snapshot |
 | GET | `/api/observability/events` | Paginated event log |
 
+#### `GET /metrics` — `loom_*` gauges
+
+The Prometheus exposition served here carries one label set **per workspace**,
+listed from the store on every scrape:
+
+| Series | Labels | Source |
+|--------|--------|--------|
+| `loom_ready_tasks` | `workspace`, `priority` (`0`..`4`) | scoped monitor collection, `tasks.ready_by_priority` |
+| `loom_in_progress_tasks` | `workspace` | scoped monitor collection |
+| `loom_fleet_workers` | `workspace`, `status` (`active`/`idle`/`blocked`) | store agent records |
+| `loom_monitor_collection_ok` | `workspace` | `1` when that workspace collected, `0` otherwise |
+| `loom_monitor_collection_timestamp_seconds` | `workspace` | collection time, unix seconds |
+
+A workspace whose collection fails reports `loom_monitor_collection_ok 0` and
+omits its task and worker samples, so one broken workspace never blanks the
+others. When no workspace can be listed the endpoint still returns `200` with
+`loom_monitor_collection_ok{workspace=""} 0`.
+
+**Breaking change:** `loom_ready_tasks`, `loom_in_progress_tasks` and
+`loom_fleet_workers` gained the `workspace` label, so a dashboard querying the
+bare series must now `sum by (workspace) (...)` or select a workspace. Those
+series read a constant zero before this change, so nothing correct depended on
+them.
+
 ## Multi-Workspace Endpoints
 
 All endpoints in this section are registered on the workspace sub-mux (`wsMux`) behind `WorkspaceMiddleware`. The middleware:
