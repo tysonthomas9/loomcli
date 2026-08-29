@@ -24,8 +24,14 @@ import (
 
 // WorkspaceInfo represents workspace metadata for API responses.
 type WorkspaceInfo struct {
-	Mode       string   `json:"mode"`
-	Name       string   `json:"name,omitempty"`
+	Mode string `json:"mode"`
+	Name string `json:"name,omitempty"`
+	// Resolved reports whether the request was resolved to a concrete
+	// workspace. When false the accompanying counts are unscoped and are
+	// typically all zero, which is otherwise indistinguishable from an idle
+	// fleet. Always emitted (no omitempty) so clients can tell an old server
+	// that never sets it from a new one reporting false.
+	Resolved   bool     `json:"resolved"`
 	Workspaces []string `json:"workspaces,omitempty"`
 }
 
@@ -361,6 +367,7 @@ func getWorkspaceInfo(ctx context.Context, st store.Store, workspaceHint string)
 	}
 	if _, wsName, ok := resolveMonitorWorkspace(ctx, st, workspaceHint); ok {
 		info.Name = wsName
+		info.Resolved = true
 	}
 	return info
 }

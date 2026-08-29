@@ -2390,9 +2390,12 @@ type MonitorWorkspaceDetail struct {
 
 // MonitorWorkspaceInfo defines model for MonitorWorkspaceInfo.
 type MonitorWorkspaceInfo struct {
-	Mode       MonitorWorkspaceInfoMode `json:"mode"`
-	Name       *string                  `json:"name,omitempty"`
-	Workspaces *[]string                `json:"workspaces,omitempty"`
+	Mode MonitorWorkspaceInfoMode `json:"mode"`
+	Name *string                  `json:"name,omitempty"`
+
+	// Resolved True when the server resolved the request to a concrete workspace. False means the counts below are unscoped and may all be zero.
+	Resolved   bool      `json:"resolved"`
+	Workspaces *[]string `json:"workspaces,omitempty"`
 }
 
 // MonitorWorkspaceInfoMode defines model for MonitorWorkspaceInfo.Mode.
