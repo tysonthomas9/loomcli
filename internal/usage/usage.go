@@ -22,4 +22,10 @@ type SessionUsage struct {
 	ExitCode         int       `json:"exit_code"`
 	Model            string    `json:"model,omitempty"`
 	SessionID        string    `json:"session_id,omitempty"`
+
+	// Status and DurationS carry the richer outcome data recorded by the
+	// session index (sessions/index.jsonl). Both are omitempty so records
+	// from the legacy usage.jsonl ledger still round-trip unchanged.
+	Status    string  `json:"status,omitempty"`
+	DurationS float64 `json:"duration_s,omitempty"`
 }
