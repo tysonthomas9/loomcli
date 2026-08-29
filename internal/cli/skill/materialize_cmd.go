@@ -17,7 +17,11 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/skillmat"
 )
 
-const skillMaterializeTimeout = 10 * time.Second
+// A refresh may need to validate and download hundreds of files from a remote
+// FleetDB/object-store pair before it can atomically swap the projection. Keep
+// the hook bounded, but budget for real cloud round trips rather than only a
+// local FleetDB daemon.
+const skillMaterializeTimeout = 2 * time.Minute
 
 var skillMaterializeOpenStore = cmdstore.OpenStore
 
