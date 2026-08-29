@@ -56,7 +56,18 @@ func (s *MonitorDataSource) Resolve(r *http.Request) *monitor.MonitorData {
 	if s == nil {
 		return nil
 	}
-	workspaceHint := r.URL.Query().Get("workspace")
+	return s.ResolveWorkspace(r.URL.Query().Get("workspace"))
+}
+
+// ResolveWorkspace returns monitor data for an explicit workspace key, sharing
+// the same per-workspace cache Resolve uses. The /metrics scrape path calls it
+// once per workspace, so it must not open a collection of its own: at a 15s
+// scrape interval against the 10s cache TTL, a second path would double every
+// workspace's issue-backend load.
+func (s *MonitorDataSource) ResolveWorkspace(workspaceHint string) *monitor.MonitorData {
+	if s == nil {
+		return nil
+	}
 	if workspaceHint == "" || s.backendFn == nil {
 		return s.collectDataFn()
 	}
