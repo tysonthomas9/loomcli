@@ -141,8 +141,14 @@ func TestCheckAgentProfiles_DriftFails(t *testing.T) {
 	if res.Status != StatusFail {
 		t.Fatalf("status = %v, want fail (summary=%q)", res.Status, res.Summary)
 	}
-	if !strings.Contains(res.Summary, "1 of 2") || !strings.Contains(res.Summary, "stale harness version") {
-		t.Errorf("summary = %q, want stale-version summary naming 1 of 2", res.Summary)
+	// The summary says UNVERIFIED, not "bricked": since the spawn path softened
+	// same-major drift these agents boot. The check still FAILS, because an
+	// unverified fleet is a condition the operator must clear.
+	if !strings.Contains(res.Summary, "1 of 2") || !strings.Contains(res.Summary, "running UNVERIFIED") {
+		t.Errorf("summary = %q, want unverified summary naming 1 of 2", res.Summary)
+	}
+	if !strings.Contains(res.Detail, "drift is no longer fatal") {
+		t.Errorf("detail must say agents boot with a warning:\n%s", res.Detail)
 	}
 	for _, want := range []string{"observer", "2.1.236 (Claude Code)", "2.1.237 (Claude Code)", "loom doctor --fix"} {
 		if !strings.Contains(res.Detail, want) {

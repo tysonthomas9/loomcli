@@ -70,6 +70,12 @@ type DaemonState struct {
 	// ClaimHold is the workspace-level refusal to START new work, when one is
 	// active. Runs already in flight are unaffected by it.
 	ClaimHold *supervisor.ClaimHold `json:"claim_hold,omitempty"`
+	// ProfileDrifts lists agent profiles whose manifest pins a different
+	// harness version than the binary reports, and which booted anyway. The
+	// daemon warns once per drift in its log; carrying the condition here is
+	// what makes it visible to an operator who is reading status rather than
+	// grepping a log file.
+	ProfileDrifts []supervisor.ProfileDrift `json:"profile_drifts,omitempty"`
 }
 
 // Cobra command variables
@@ -620,6 +626,7 @@ func printDaemonAgentTable(state *DaemonState, dir string) {
 	}
 
 	printQuarantinedTasks(state.QuarantinedTasks)
+	printProfileDrifts(state.ProfileDrifts)
 }
 
 // pendingInputsForDir fetches every pending prompt from the control socket of

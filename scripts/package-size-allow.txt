@@ -12,7 +12,13 @@
 # PUPPET-40). It cannot live in supervisor.go: that file is at 986 of the
 # 1000-line LOC ceiling, so folding ~400 lines in would trade this gate for
 # that one. Same sub-split end state applies.
-internal/cli/daemon/supervisor 29
+# Raised 29 -> 30 for profile.go (the per-agent harness profile boot path,
+# PUPPET-243). It cannot stay in spawn.go: with the drift record and the
+# softened boot policy folded in, spawn.go measured 1007 lines against the
+# 1000-line LOC ceiling, so keeping one file here would trade this gate for
+# that one — the same trade abandoned_run.go was granted above. The move took
+# spawn.go from 1007 back to 693. Same sub-split end state applies.
+internal/cli/daemon/supervisor 30
 # internal/cli gained the daemon input-await seam (agent_input_await.go) with
 # the human answer path; 26th file, same sub-split end state applies. The
 # hook-driven exit-code contract lives in exit.go rather than a file of its own,

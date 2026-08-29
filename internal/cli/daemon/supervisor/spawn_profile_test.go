@@ -174,8 +174,13 @@ func TestAppendProfileEnv_ManifestedFileDeletedRefusesBoot(t *testing.T) {
 	}
 }
 
-func TestAppendProfileEnv_VersionDriftRefusesBoot(t *testing.T) {
-	stubHarnessVersion(t, map[string]string{"claude": "2.2.0 (Claude Code)"})
+// TestAppendProfileEnv_MajorVersionDriftRefusesBoot: drift ACROSS a major is
+// still a refusal. Same-major drift is covered in profile_drift_test.go, where
+// it must boot instead.
+func TestAppendProfileEnv_MajorVersionDriftRefusesBoot(t *testing.T) {
+	ResetProfileDrifts()
+	t.Cleanup(ResetProfileDrifts)
+	stubHarnessVersion(t, map[string]string{"claude": "3.0.0 (Claude Code)"})
 	projectDir := t.TempDir()
 	writeProfile(t, projectDir, "worker", "2.1.234 (Claude Code)", map[string]string{
 		"settings.json": `{"model":"opus"}`,
@@ -184,6 +189,12 @@ func TestAppendProfileEnv_VersionDriftRefusesBoot(t *testing.T) {
 	_, err := AppendProfileEnv(nil, projectDir, "worker")
 	if !errors.Is(err, ErrProfileVersionDrift) {
 		t.Fatalf("want version drift, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "major version change") {
+		t.Errorf("error must name the major-version change, got %v", err)
+	}
+	if len(ProfileDrifts()) != 0 {
+		t.Errorf("a refused boot must not be recorded as a running-unverified drift: %+v", ProfileDrifts())
 	}
 }
 

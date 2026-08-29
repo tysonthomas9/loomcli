@@ -120,7 +120,10 @@ func verifyLeadProfile(runtimeDir, configDir, harness string) error {
 	if configDir == "" || !underAgentProfiles(runtimeDir, configDir) {
 		return nil
 	}
-	return supervisor.VerifyProfileManifest(configDir, supervisor.ProfileHarnessBinary(harness))
+	// CheckProfileManifest, not VerifyProfileManifest: lead and the agents the
+	// supervisor spawns must share ONE boot policy. Leaving lead strict would
+	// keep the whole-fleet outage alive for the one agent that runs the fleet.
+	return supervisor.CheckProfileManifest(configDir, supervisor.ProfileHarnessBinary(harness))
 }
 
 // underAgentProfiles reports whether configDir sits inside
