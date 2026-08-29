@@ -5,13 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/backends"
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 // TestEmitTaskLifecycleEvents drives the new emit helpers added to plan.go
@@ -120,6 +125,194 @@ func TestEmitTaskLifecycleEvents(t *testing.T) {
 	}
 	if fd.ErrorClass == "" {
 		t.Errorf("event[2]: expected non-empty ErrorClass from classifier")
+	}
+}
+
+func TestRunAgentDaemonEmitsTaskLifecycleEvents(t *testing.T) {
+	tests := []struct {
+		name       string
+		invokeErr  error
+		terminal   events.EventType
+		wantErrMsg string
+	}{
+		{name: "completed", terminal: events.TaskCompleted},
+		{
+			name:       "failed",
+			invokeErr:  errors.New("simulated custom-role failure"),
+			terminal:   events.TaskFailed,
+			wantErrMsg: "simulated custom-role failure",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Not parallel: the backend registry and AgentEventBus are process-wide.
+			tmp := t.TempDir()
+			eventsDir := filepath.Join(tmp, "events")
+			worktree := filepath.Join(tmp, "worktree")
+			if err := os.MkdirAll(worktree, 0o755); err != nil {
+				t.Fatalf("create worktree: %v", err)
+			}
+
+			t.Setenv("LOOM_ASSIGNED_TASK_ID", "loomcli-02")
+			t.Setenv("LOOM_EVENTS_DIR", eventsDir)
+			t.Setenv("LOOM_SESSION_ID", "supervisor-session")
+			t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", filepath.Join(tmp, "runtime"))
+
+			cli.TestingResetAgentEventBus()
+			t.Cleanup(cli.TestingResetAgentEventBus)
+			resetBackendState(t)
+			backend := &mockBackend{name: "custom-role-lifecycle"}
+			backend.nonInteractiveFunc = func(string, string, string, <-chan struct{}, *usage.Collector) error {
+				// Snapshot the JSONL stream at the actual invocation boundary. This
+				// must already contain task.claimed; flushing/resetting here lets the
+				// terminal event create a fresh bus for the same events directory.
+				cli.TestingResetAgentEventBus()
+				observed := readEmittedEvents(t, eventsDir)
+				if len(observed) != 1 || observed[0].Type != events.TaskClaimed {
+					t.Fatalf("events at invocation = %+v, want one %s", observed, events.TaskClaimed)
+				}
+				data, err := observed[0].DecodeData()
+				if err != nil {
+					t.Fatalf("decode claimed event at invocation: %v", err)
+				}
+				claimed, ok := data.(*events.TaskClaimedData)
+				if !ok || claimed.TaskID != "loomcli-02" {
+					t.Fatalf("claimed data at invocation = %#v, want TaskID loomcli-02", data)
+				}
+				return tt.invokeErr
+			}
+			RegisterBackend(backend)
+			if err := SetBackend(backend.Name()); err != nil {
+				t.Fatalf("SetBackend: %v", err)
+			}
+
+			err := runAgentDaemon(worktree, "reviewer-1", func(string, *config.WorkspaceConfig) string {
+				return "review the assigned task"
+			})
+			if !errors.Is(err, tt.invokeErr) {
+				t.Fatalf("runAgentDaemon() error = %v, want %v", err, tt.invokeErr)
+			}
+
+			// Flush the process-wide writer before asserting its JSONL output.
+			cli.TestingResetAgentEventBus()
+			evts := readEmittedEvents(t, eventsDir)
+			if len(evts) != 2 {
+				t.Fatalf("expected claimed and terminal events, got %d: %+v", len(evts), evts)
+			}
+			if evts[0].Type != events.TaskClaimed || evts[1].Type != tt.terminal {
+				t.Fatalf("event types = [%s, %s], want [%s, %s]",
+					evts[0].Type, evts[1].Type, events.TaskClaimed, tt.terminal)
+			}
+			if evts[0].Agent != "reviewer-1" || evts[1].Agent != "reviewer-1" {
+				t.Errorf("event agents = [%q, %q], want reviewer-1", evts[0].Agent, evts[1].Agent)
+			}
+
+			claimedData, err := evts[0].DecodeData()
+			if err != nil {
+				t.Fatalf("decode claimed event: %v", err)
+			}
+			claimed, ok := claimedData.(*events.TaskClaimedData)
+			if !ok || claimed.TaskID != "loomcli-02" {
+				t.Fatalf("claimed data = %#v, want TaskID loomcli-02", claimedData)
+			}
+
+			terminalData, err := evts[1].DecodeData()
+			if err != nil {
+				t.Fatalf("decode terminal event: %v", err)
+			}
+			switch data := terminalData.(type) {
+			case *events.TaskCompletedData:
+				if data.TaskID != "loomcli-02" {
+					t.Errorf("completed TaskID = %q, want loomcli-02", data.TaskID)
+				}
+				if data.Duration.Duration <= 0 {
+					t.Errorf("completed duration = %s, want > 0", data.Duration.Duration)
+				}
+			case *events.TaskFailedData:
+				if data.TaskID != "loomcli-02" {
+					t.Errorf("failed TaskID = %q, want loomcli-02", data.TaskID)
+				}
+				if data.Error != tt.wantErrMsg {
+					t.Errorf("failed error = %q, want %q", data.Error, tt.wantErrMsg)
+				}
+				if data.ErrorClass == "" {
+					t.Error("failed ErrorClass is empty")
+				}
+			default:
+				t.Fatalf("terminal data type = %T, want completed or failed data", terminalData)
+			}
+		})
+	}
+}
+
+const seedCustomDaemonResumeLockEnv = "LOOM_TEST_SEED_CUSTOM_DAEMON_RESUME_LOCK"
+
+func TestRunAgentDaemonResumesAndClearsCompletedSession(t *testing.T) {
+	if os.Getenv(seedCustomDaemonResumeLockEnv) == "1" {
+		worktree := os.Getenv("LOOM_TEST_RESUME_WORKTREE")
+		if err := cli.AcquireLock(worktree, "agent", "reviewer-1"); err != nil {
+			t.Fatalf("seed AcquireLock: %v", err)
+		}
+		if err := cli.UpdateLockTask(worktree, "loomcli-02", ""); err != nil {
+			t.Fatalf("seed UpdateLockTask: %v", err)
+		}
+		if err := cli.UpdateLockClaudeSessionID(worktree, "claude-resume-02"); err != nil {
+			t.Fatalf("seed UpdateLockClaudeSessionID: %v", err)
+		}
+		return // TestMain exits, leaving this process-owned lock stale for the parent.
+	}
+
+	worktree := t.TempDir()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestRunAgentDaemonResumesAndClearsCompletedSession$") //nolint:norawexec // subprocess produces a genuine stale lock
+	cmd.Env = append(os.Environ(),
+		seedCustomDaemonResumeLockEnv+"=1",
+		"LOOM_TEST_RESUME_WORKTREE="+worktree,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("seed stale daemon lock: %v\n%s", err, out)
+	}
+
+	t.Setenv("LOOM_ASSIGNED_TASK_ID", "loomcli-02")
+	t.Setenv("LOOM_EVENTS_DIR", filepath.Join(t.TempDir(), "events"))
+	t.Setenv("LOOM_SESSION_ID", "supervisor-session")
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", filepath.Join(t.TempDir(), "runtime"))
+	cli.TestingResetAgentEventBus()
+	t.Cleanup(cli.TestingResetAgentEventBus)
+	backends.ClearResumeSessionID()
+	t.Cleanup(backends.ClearResumeSessionID)
+
+	completedTask := NewMockIssueBackend()
+	completedTask.GetResult = &backend.IssueDetailData{
+		IssueData: backend.IssueData{ID: "loomcli-02", Status: "closed", Assignee: "reviewer-1"},
+	}
+	setDefaultIssueBackend(completedTask)
+	t.Cleanup(resetDefaultIssueBackend)
+
+	resetBackendState(t)
+	mock := &mockBackend{name: "custom-role-resume"}
+	mock.nonInteractiveFunc = func(string, string, string, <-chan struct{}, *usage.Collector) error {
+		if got := backends.GetResumeSessionID(); got != "claude-resume-02" {
+			t.Errorf("armed resume session = %q, want claude-resume-02", got)
+		}
+		return nil
+	}
+	RegisterBackend(mock)
+	if err := SetBackend(mock.Name()); err != nil {
+		t.Fatalf("SetBackend: %v", err)
+	}
+
+	if err := runAgentDaemon(worktree, "reviewer-1", func(string, *config.WorkspaceConfig) string {
+		return "review the assigned task"
+	}); err != nil {
+		t.Fatalf("runAgentDaemon: %v", err)
+	}
+	info, err := cli.ReadLockFile(worktree)
+	if err != nil || info == nil {
+		t.Fatalf("ReadLockFile: info=%+v err=%v", info, err)
+	}
+	if info.ClaudeSessionID != "" {
+		t.Errorf("ClaudeSessionID = %q, want cleared after completed run", info.ClaudeSessionID)
 	}
 }
 
