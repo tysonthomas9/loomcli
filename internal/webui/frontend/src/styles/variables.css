@@ -45,6 +45,20 @@
   --color-status-in-progress: #f59e0b; /* amber-500 */
   --color-status-closed: #10b981; /* emerald-500 */
 
+  /* Task journey stages */
+  --color-journey-open: #60a5fa;
+  --color-journey-in-progress: #f59e0b;
+  --color-journey-blocked: #ef4444;
+  --color-journey-deferred: #a78bfa;
+  --color-journey-review: #818cf8;
+  --color-journey-closed: #34d399;
+  --color-journey-now: #f0f0f0;
+  --color-journey-supporting-text: #8a8a8a;
+  --color-journey-halt-title: #fca5a5;
+  --color-journey-halt-supporting-text: #e8b4b4;
+  --color-journey-halt-agent-text: #f59e0b;
+  --color-journey-unowned-rail: var(--color-text-muted);
+
   /* ===========================
    * Colors - State
    * =========================== */
@@ -182,6 +196,7 @@
    * Typography - Font Sizes
    * =========================== */
   --font-size-xs: 0.75rem; /* 12px */
+  --font-size-2xs: 0.625rem; /* 10px */
   --font-size-sm: 0.875rem; /* 14px */
   --font-size-base: 0.8125rem; /* 13px — Aether body base */
   --font-size-lg: 1.125rem; /* 18px */
@@ -326,6 +341,20 @@
   --color-panel-bg: #ffffff;
   --color-primary: #2563eb;
   --color-primary-hover: #1d4ed8;
+
+  /* Task journey stages */
+  --color-journey-open: #2563eb;
+  --color-journey-in-progress: #b45309;
+  --color-journey-blocked: #dc2626;
+  --color-journey-deferred: #7c3aed;
+  --color-journey-review: #4f46e5;
+  --color-journey-closed: #047857;
+  --color-journey-now: #1a1a1a;
+  --color-journey-supporting-text: #625d58;
+  --color-journey-halt-title: #991b1b;
+  --color-journey-halt-supporting-text: #7f1d1d;
+  --color-journey-halt-agent-text: #92400e;
+  --color-journey-unowned-rail: var(--color-text-muted);
 
   /* Semantic background colors (light variants) */
   --color-primary-bg: #eff6ff;

@@ -115,15 +115,27 @@ type CommentData struct {
 	EditedAt  *time.Time `json:"edited_at,omitempty"`
 }
 
+// FieldChange is one before/after field delta carried by an issue history
+// event. Values remain strings because that is fleet-db's timeline contract.
+type FieldChange struct {
+	Field  string `json:"field"`
+	Before string `json:"before,omitempty"`
+	After  string `json:"after,omitempty"`
+}
+
 // EventData represents an event/history entry for an issue.
 type EventData struct {
-	ID        string    `json:"id"`
-	IssueID   string    `json:"issue_id"`
-	Kind      string    `json:"kind"`
-	Actor     string    `json:"actor,omitempty"`
-	Target    string    `json:"target,omitempty"`
-	Payload   string    `json:"payload,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        string            `json:"id"`
+	IssueID   string            `json:"issue_id"`
+	Kind      string            `json:"kind"`
+	Actor     string            `json:"actor,omitempty"`
+	Target    string            `json:"target,omitempty"`
+	Payload   string            `json:"payload,omitempty"`
+	Category  string            `json:"category,omitempty"`
+	Summary   string            `json:"summary,omitempty"`
+	Changes   []FieldChange     `json:"changes,omitempty"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
+	CreatedAt time.Time         `json:"created_at"`
 }
 
 // EventHistoryParams configures an issue event-history request. A nil Since

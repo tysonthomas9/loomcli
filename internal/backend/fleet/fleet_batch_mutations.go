@@ -45,10 +45,14 @@ func (w fleetCommentWire) toTypesComment() types.Comment {
 // --- Event operations ---
 
 type fleetEventWire struct {
-	ID        string    `json:"id"`
-	Timestamp time.Time `json:"timestamp"`
-	Actor     string    `json:"actor"`
-	Action    string    `json:"action"`
+	ID        string                `json:"id"`
+	Timestamp time.Time             `json:"timestamp"`
+	Actor     string                `json:"actor"`
+	Action    string                `json:"action"`
+	Category  string                `json:"category"`
+	Summary   string                `json:"summary"`
+	Changes   []backend.FieldChange `json:"changes"`
+	Metadata  map[string]string     `json:"metadata"`
 }
 
 type fleetEventHistory struct {
@@ -178,6 +182,10 @@ func eventDataFromHistory(history []fleetEventWire, issueID string) []backend.Ev
 			IssueID:   issueID,
 			Kind:      event.Action,
 			Actor:     event.Actor,
+			Category:  event.Category,
+			Summary:   event.Summary,
+			Changes:   event.Changes,
+			Metadata:  event.Metadata,
 			CreatedAt: event.Timestamp,
 		})
 	}

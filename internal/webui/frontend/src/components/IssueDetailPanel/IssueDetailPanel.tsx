@@ -58,6 +58,7 @@ import type { SessionRecord } from "@/types/agent";
 
 import {
   ActivityLog,
+  Journey,
   CommentForm,
   DependencySection,
   EditableDescription,
@@ -277,6 +278,8 @@ const SESSIONS_TAB: DetailTab = {
   label: "Runs",
   closable: false,
 };
+
+const ISSUE_EVENT_LIMIT = 200;
 
 function latestFailedRun(sessions: SessionRecord[]): SessionRecord | null {
   const sorted = [...sessions].sort(
@@ -765,6 +768,7 @@ function DefaultContent({
 
   // Local state for events (activity log)
   const [events, setEvents] = useState<Event[]>([]);
+  const eventsRequestIdRef = useRef(0);
 
   // Sync local comments when issue changes (e.g., different issue selected)
   useEffect(() => {
@@ -775,26 +779,31 @@ function DefaultContent({
     }
   }, [issue]);
 
-  // Fetch events when issue changes
+  // Fetch one shared event list for Journey and Activity. The parent merges
+  // live issue mutations into this prop, including updated_at, so the revision
+  // is the same signal that refreshes the status pill.
   const eventIssueId = issue?.id;
+  const eventIssueRevision = issue?.updated_at;
   useEffect(() => {
+    const requestId = ++eventsRequestIdRef.current;
     if (!eventIssueId) {
       setEvents([]);
       return;
     }
-    let cancelled = false;
-    getIssueEvents(workspaceId, eventIssueId).then(
+    getIssueEvents(workspaceId, eventIssueId, ISSUE_EVENT_LIMIT).then(
       (data) => {
-        if (!cancelled) setEvents(data ?? []);
+        if (requestId === eventsRequestIdRef.current) setEvents(data ?? []);
       },
       () => {
-        if (!cancelled) setEvents([]);
+        if (requestId === eventsRequestIdRef.current) setEvents([]);
       },
     );
     return () => {
-      cancelled = true;
+      if (requestId === eventsRequestIdRef.current) {
+        eventsRequestIdRef.current += 1;
+      }
     };
-  }, [eventIssueId]);
+  }, [eventIssueId, eventIssueRevision, workspaceId]);
 
   // Handler for when a new comment is added
   const handleCommentAdded = useCallback((newComment: Comment) => {
@@ -1520,12 +1529,10 @@ function DefaultContent({
               </section>
             )}
 
-            {/* Activity Log (comments + events) */}
-            <ActivityLog
-              comments={localComments ?? []}
-              events={events}
-              issueId={issue.id}
-            />
+            <Journey events={events} eventLimit={ISSUE_EVENT_LIMIT} />
+
+            {/* Comments (audit events are nested in Journey spans) */}
+            <ActivityLog comments={localComments ?? []} issueId={issue.id} />
             <CommentForm
               issueId={issue.id}
               onCommentAdded={handleCommentAdded}

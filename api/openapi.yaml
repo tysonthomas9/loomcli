@@ -877,6 +877,7 @@ paths:
             type: integer
             minimum: 1
             maximum: 500
+            default: 100
         - name: since
           in: query
           description: Opaque fleet-db history cursor. When present (including an empty value), returns one oldest-first page; a bare `since=` starts at the beginning of the issue history.
@@ -5276,7 +5277,7 @@ components:
 
     IssueEvent:
       type: object
-      description: Audit trail entry for an issue. ID is an opaque durable source event ID.
+      description: Audit trail entry for an issue
       required: [id, issue_id, event_type, actor, created_at]
       properties:
         id:
@@ -5287,6 +5288,22 @@ components:
           type: string
         actor:
           type: string
+        target:
+          type: string
+        payload:
+          type: string
+        category:
+          type: string
+        summary:
+          type: string
+        changes:
+          type: array
+          items:
+            $ref: "#/components/schemas/IssueEventFieldChange"
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
         old_value:
           type: [string, "null"]
         new_value:
@@ -5296,6 +5313,18 @@ components:
         created_at:
           type: string
           format: date-time
+
+    IssueEventFieldChange:
+      type: object
+      description: Before and after values for one field changed by an issue event
+      required: [field]
+      properties:
+        field:
+          type: string
+        before:
+          type: string
+        after:
+          type: string
 
     Statistics:
       type: object
@@ -6075,9 +6104,6 @@ components:
         because the SSE stream is not validated by generated clients.
       required: [type, timestamp]
       properties:
-        cursor:
-          type: string
-          description: Durable source event ID for reconnect and cross-surface deduplication.
         type:
           type: string
           enum:

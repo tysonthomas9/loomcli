@@ -339,11 +339,26 @@ func commentToData(c *types.Comment) backend.CommentData {
 
 // eventToData converts types.Event to backend.EventData.
 func eventToData(e *types.Event) backend.EventData {
+	changes := make([]backend.FieldChange, 0, len(e.Changes))
+	for _, change := range e.Changes {
+		changes = append(changes, backend.FieldChange{
+			Field:  change.Field,
+			Before: change.Before,
+			After:  change.After,
+		})
+	}
+
 	return backend.EventData{
 		ID:        e.ID,
 		IssueID:   e.IssueID,
 		Kind:      string(e.EventType),
 		Actor:     e.Actor,
+		Target:    e.Target,
+		Payload:   e.Payload,
+		Category:  e.Category,
+		Summary:   e.Summary,
+		Changes:   changes,
+		Metadata:  e.Metadata,
 		CreatedAt: e.CreatedAt,
 	}
 }
