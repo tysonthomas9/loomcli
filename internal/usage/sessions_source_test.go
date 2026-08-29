@@ -228,7 +228,7 @@ func TestReadSessionUsage_CostIsPassedThroughNotDerived(t *testing.T) {
 		indexRecord{
 			"session_id": "c2", "agent_name": "orion", "backend": "codex",
 			"status": "completed", "started_at": "2026-08-29T09:00:00Z",
-			"ended_at": "2026-08-29T09:05:00Z",
+			"ended_at":     "2026-08-29T09:05:00Z",
 			"input_tokens": 10, "estimated_cost_usd": 1.25,
 		},
 	)
