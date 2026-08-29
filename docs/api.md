@@ -4287,6 +4287,71 @@ Error codes appear in the `code` field of error responses on issue-related endpo
 `loom doctor` runs local health checks and exits non-zero when any check fails.
 `--json` renders the same results as `{"checks": [...], "summary": {...}}`.
 
+### `spawn_health`
+
+Reads the session ledger (`<workspace runtime dir>/sessions/index.jsonl`) and
+reports whether agent runs are succeeding at all over the last hour. This is the
+only check that observes the supervisor *producing work*, as opposed to being
+alive: on 2026-08-29 a seven-hour outage in which every spawn failed ran
+alongside a green `daemon supervisor liveness OK`.
+
+The ledger is read read-only, deduplicated by `session_id` (it holds one record
+per session at create and another at finalize, so raw line counts are wrong),
+and records still `running` are excluded from every count.
+
+| Condition | Status | Summary |
+|-----------|--------|---------|
+| Fewer than 5 terminal runs in the window | *(no output)* | too little evidence to judge a rate |
+| No run completed | `fail` | `no agent run has succeeded in the last 1h0m0s (N failed, M aborted)` |
+| Success rate below 50% | `warn` | `agent run success rate is P% over the last 1h0m0s (N of M succeeded)` |
+| Otherwise | `pass` | `N of M agent run(s) succeeded in the last 1h0m0s` |
+
+`Detail` on the failing arms names the dominant `error_class`, the newest failing
+session, and the supervisor's own recorded error message verbatim (read from that
+session's `metadata.json`, collapsed to one line and truncated to 300 runes)
+rather than a verdict doctor re-derived for itself. `error_class` has two
+producers with different spellings — the supervisor writes `spawn_failure`, the
+normal-exit path writes `SpawnFailure` — which are folded into one bucket and
+displayed using the spelling actually present in the operator's file.
+
+An unreadable ledger is `warn`, never `fail`: doctor must not report an outage it
+cannot see. A missing ledger is a fresh workspace and produces no output.
+
+### `fleet_progress`
+
+The dead man's switch. It asks the issue backend whether any work is ready and
+compares that against completions in the same one-hour window, so it fires for
+causes nobody enumerated — including the ones that produce no failed runs for
+`spawn_health` to look at because no run was ever attempted.
+
+| Condition | Status | Summary |
+|-----------|--------|---------|
+| No ready work | `pass` | `fleet idle: no ready work to pick up` |
+| Something completed | `pass` | `fleet is making progress (N run(s) completed in the last 1h0m0s)` |
+| Ready work waiting, nothing completed | `fail` | `ready work is waiting and nothing has completed in 1h0m0s (N ready, M terminal run(s))` |
+
+Unlike `spawn_health` this check has no minimum-runs floor: ready work with zero
+attempted runs is the most alarming state of all. It is skipped entirely when no
+issue backend is configured or when the ready query fails — `issue_backend` owns
+backend reachability.
+
+### `daemon_stuck` and liveness reconciliation
+
+`daemon_stuck` reports on the supervisor process and the freshness of
+`daemon-agents.json`. When it would otherwise pass while `spawn_health` or
+`fleet_progress` has failed, it is demoted to `warn` and re-summarised as
+`daemon supervisor is scheduling but producing no work`, with its original
+summary preserved in `Detail` under `previously:`. A supervisor that schedules
+perfectly and produces nothing is not live in any sense the operator cares about,
+and the green line sitting next to the red one is what made the 2026-08-29 outage
+read as survivable.
+
+The demotion is deliberately not a second failure: `daemon_stuck` genuinely did
+not observe a stuck supervisor, and duplicating the failure would only inflate
+the exit summary. A `daemon_stuck` that already warns or fails keeps its own more
+specific message, and one that skipped is never invented — `loom_daemon` owns the
+"daemon is not running" case.
+
 ### `agent_profiles`
 
 Verifies every provisioned per-agent harness profile under
@@ -4303,6 +4368,7 @@ harness, not once per profile.
 | Condition | Status | Summary |
 |-----------|--------|---------|
 | Every profile verifies | `pass` | `N agent profile(s) verified against <version>` |
+
 | Version drift, no `--fix` | `fail` | `N of M agent profile(s) pin a stale harness version` |
 | Fingerprint mismatch, missing or unreadable manifest | `fail` | `N of M agent profile(s) failed verification` |
 | Harness binary produced no version | `warn` | `cannot verify: <binary> --version produced nothing` |
@@ -4311,6 +4377,13 @@ harness, not once per profile.
 `Detail` names each failing profile: the agent, its directory, both version
 strings (for drift) or both fingerprints (for a mismatch), and the exact repair
 command.
+
+On the passing arm `Detail` states the check's *scope*: how many profiles it
+found, the directory it enumerated, and the version its own probe reported. The
+supervisor verifies one profile at spawn time from its own project dir with a
+version it memoizes for two minutes, so the two can legitimately disagree; saying
+so is what keeps a green line here from silently contradicting a supervisor that
+is refusing every spawn.
 
 ### `loom doctor --fix` for `agent_profiles`
 

@@ -177,12 +177,31 @@ func renderProfileResult(profiles []agentprofile.Profile, versions map[string]st
 			Detail:  strings.Join(faultLines(unknown), "\n"),
 		}
 	default:
+		// Pass, but scoped. Doctor enumerates a directory with its own
+		// uncached probe; the supervisor verifies one profile at spawn time
+		// from its own project dir. Saying so is what stops a green line here
+		// from silently contradicting a supervisor that is refusing every
+		// spawn for drift against that same binary.
 		return CheckResult{
 			Name:    "agent_profiles",
 			Status:  StatusPass,
 			Summary: fmt.Sprintf("%d agent profile(s) verified against %s", total, versionSummary(versions)),
+			Detail:  profileScopeLine(profiles, versions),
 		}
 	}
+}
+
+// profileScopeLine states exactly what this check looked at, so its verdict is
+// comparable with the supervisor's rather than assumed to agree with it.
+func profileScopeLine(profiles []agentprofile.Profile, versions map[string]string) string {
+	root := "the agent-profiles directory"
+	if len(profiles) > 0 {
+		// profile.Dir is <root>/<agent>/<harness>; two levels up is the root.
+		root = displayDir(filepath.Dir(filepath.Dir(profiles[0].Dir)))
+	}
+	return fmt.Sprintf("scope: %d profile(s) under %s, probed with doctor's own %s; "+
+		"the supervisor verifies each profile at spawn time from its own project dir "+
+		"and may see a different set.", len(profiles), root, versionSummary(versions))
 }
 
 // blessedLines reports what --fix wrote, naming the agents so the operator can
