@@ -184,6 +184,10 @@ type AgentDiffStatResult = service.AgentDiffStatResult
 // MaxListLimit from handler package
 const MaxListLimit = handler.MaxListLimit
 
+// MaxIssueListLimit from handler package: the tighter ceiling applied to the
+// blocked-list endpoint.
+const MaxIssueListLimit = handler.MaxIssueListLimit
+
 // GitSyncResult → service.GitSyncResult
 type GitSyncResult = service.GitSyncResult
 

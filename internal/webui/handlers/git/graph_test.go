@@ -763,11 +763,38 @@ func TestParseBlockedParams(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "limit exceeding MaxListLimit is capped",
+			name: "limit exceeding MaxIssueListLimit is capped",
 			url:  "/api/blocked?limit=5000",
 			checkArgs: func(t *testing.T, args *rpc.BlockedArgs) {
-				if args.Limit != MaxListLimit {
-					t.Errorf("Limit = %d, want %d (capped at MaxListLimit)", args.Limit, MaxListLimit)
+				if args.Limit != MaxIssueListLimit {
+					t.Errorf("Limit = %d, want %d (capped at MaxIssueListLimit)", args.Limit, MaxIssueListLimit)
+				}
+			},
+		},
+		{
+			name: "limit 1000 is capped at MaxIssueListLimit",
+			url:  "/api/blocked?limit=1000",
+			checkArgs: func(t *testing.T, args *rpc.BlockedArgs) {
+				if args.Limit != MaxIssueListLimit {
+					t.Errorf("Limit = %d, want %d (capped at MaxIssueListLimit)", args.Limit, MaxIssueListLimit)
+				}
+			},
+		},
+		{
+			name: "limit at MaxIssueListLimit passes through",
+			url:  "/api/blocked?limit=200",
+			checkArgs: func(t *testing.T, args *rpc.BlockedArgs) {
+				if args.Limit != 200 {
+					t.Errorf("Limit = %d, want 200", args.Limit)
+				}
+			},
+		},
+		{
+			name: "limit just below MaxIssueListLimit is unclamped",
+			url:  "/api/blocked?limit=199",
+			checkArgs: func(t *testing.T, args *rpc.BlockedArgs) {
+				if args.Limit != 199 {
+					t.Errorf("Limit = %d, want 199", args.Limit)
 				}
 			},
 		},
