@@ -48,6 +48,36 @@ type DailyCost struct {
 	Sessions int     `json:"sessions"`
 }
 
+// Reader is the read side of a usage ledger. Both the legacy usage.jsonl
+// store and the sessions-backed reader satisfy it, so the handler does not
+// care which ledger it is serving.
+type Reader interface {
+	Read(usage.Filter) ([]usage.SessionUsage, error)
+}
+
+// sessionsReader reads usage from <dir>/sessions/index.jsonl, the ledger every
+// finalized agent run writes to.
+type sessionsReader struct{ dir string }
+
+func (r sessionsReader) Read(f usage.Filter) ([]usage.SessionUsage, error) {
+	records, _, err := usage.ReadSessionUsage(r.dir, f)
+	return records, err
+}
+
+// InitSessionsReader returns a Reader backed by the session index. It returns
+// nil (yielding a 503 from HandleUsage) when the directory cannot be opened,
+// matching InitStore's nil-safe contract.
+func InitSessionsReader(dir string) Reader {
+	if dir == "" {
+		dir = "."
+	}
+	if _, _, err := usage.ReadSessionUsage(dir, usage.Filter{}); err != nil {
+		log.Printf("Warning: failed to open sessions usage ledger: %v", err)
+		return nil
+	}
+	return sessionsReader{dir: dir}
+}
+
 // InitStore creates a usage store from the given directory.
 // Returns nil if the store cannot be created.
 func InitStore(dir string) *usage.Store {
@@ -62,10 +92,11 @@ func InitStore(dir string) *usage.Store {
 	return s
 }
 
-// HandleUsage returns an http.HandlerFunc that reads usage data from the given store.
-func HandleUsage(store *usage.Store) http.HandlerFunc {
+// HandleUsage returns an http.HandlerFunc that reads usage data from the given
+// reader. A nil reader yields 503.
+func HandleUsage(reader Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if store == nil {
+		if reader == nil {
 			http.Error(w, `{"error":"usage store not initialized"}`, http.StatusServiceUnavailable)
 			return
 		}
@@ -75,6 +106,7 @@ func HandleUsage(store *usage.Store) http.HandlerFunc {
 		f.AgentName = r.URL.Query().Get("agent")
 		f.Backend = r.URL.Query().Get("backend")
 		f.EpicID = r.URL.Query().Get("epic")
+		f.Status = r.URL.Query().Get("status")
 
 		if sinceStr := r.URL.Query().Get("since"); sinceStr != "" {
 			t, err := time.Parse("2006-01-02", sinceStr)
@@ -97,7 +129,7 @@ func HandleUsage(store *usage.Store) http.HandlerFunc {
 			f.Until = t.Add(24*time.Hour - time.Nanosecond)
 		}
 
-		records, err := store.Read(f)
+		records, err := reader.Read(f)
 		if err != nil {
 			log.Printf("Error reading usage data: %v", err)
 			http.Error(w, `{"error":"failed to read usage data"}`, http.StatusInternalServerError)

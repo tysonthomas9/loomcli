@@ -582,7 +582,9 @@ func initUsageStore() {
 	if dir == "" {
 		dir = "."
 	}
-	usageHandler = usagecmd.HandleUsage(usagecmd.InitStore(dir))
+	// The session index is the authoritative ledger; usage.jsonl is legacy and
+	// is no longer written by real fleet runs.
+	usageHandler = usagecmd.HandleUsage(usagecmd.InitSessionsReader(dir))
 }
 
 // registerAgentMetrics registers the spawn/session collector on the default
