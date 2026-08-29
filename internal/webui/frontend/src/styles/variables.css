@@ -2,6 +2,15 @@
  * CSS Custom Properties (Variables)
  * All design tokens for the loom web UI application.
  * Dark-first: :root defines dark theme, [data-theme="light"] overrides for light.
+ *
+ * CONTRAST CONTRACT
+ * Any token used as `color:` for text must reach >=4.5:1 against *every*
+ * surface token in the same theme. Non-text tokens (borders, dots, fills)
+ * need >=3:1.
+ *
+ * This is enforced, not aspirational: src/styles/__tests__/contrast.test.ts
+ * parses this file, derives the surface set from it, and fails on any pair
+ * below the threshold. Run it with `npm run check:contrast`.
  */
 
 :root {
@@ -14,7 +23,7 @@
   --bg-card: #181818;
   --line-color: #2e2e2e;
   --text-primary: #f0f0f0;
-  --text-secondary: #888888;
+  --text-secondary: #adadad;
   --accent-bg: #16233c;
   --accent-text: #60a5fa;
   --font-main:
@@ -61,7 +70,7 @@
   --color-status-idle: #9ca3af; /* gray-400, idle/waiting */
   --color-status-error: #ef4444; /* red-500, error state */
   --color-status-dirty: #f59e0b; /* amber-500, uncommitted changes */
-  --color-status-ready: #6b7280; /* gray-500, ready/available */
+  --color-status-ready: #9ca3af; /* gray-400, ready/available (used as text) */
   --color-status-pending: #9ca3af; /* gray-400, blocked by dependencies */
 
   /* ===========================
@@ -119,8 +128,8 @@
   --color-text: var(--text-primary);
   --color-text-primary: var(--text-primary);
   --color-text-secondary: var(--text-secondary);
-  --color-text-tertiary: #888888;
-  --color-text-muted: #666666;
+  --color-text-tertiary: #a3a3a3;
+  --color-text-muted: #9a9a9a;
   --color-text-inverse: #111111;
   --color-highlight: #854d0e;
   --color-focus: #3b82f6; /* blue-500, focus ring color */
@@ -270,7 +279,7 @@
   --bg-card: #f5f3ef;
   --line-color: #dedad2;
   --text-primary: #1a1a1a;
-  --text-secondary: #6b6661;
+  --text-secondary: #55504b;
   --accent-bg: #e7ecff;
   --accent-text: #2563eb;
 
@@ -294,9 +303,14 @@
   --color-text: var(--text-primary);
   --color-text-primary: var(--text-primary);
   --color-text-secondary: var(--text-secondary);
-  --color-text-tertiary: #6b6661;
-  --color-text-muted: #a09b94;
+  --color-text-tertiary: #5f5a55;
+  --color-text-muted: #635e58;
   --color-text-inverse: #ffffff;
+  /* Agent-status greys rendered as text. The :root values (#9ca3af) are tuned
+     for the dark backdrop and reach only ~1.9-2.5:1 on the light surfaces, so
+     the light theme has to restate them; warm grey to match the neutrals. */
+  --color-status-ready: #635e58;
+  --color-status-idle: #635e58;
   --color-highlight: #fef08a;
   --color-focus: #3b82f6;
   --color-bg-primary: var(--bg-card);

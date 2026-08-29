@@ -2,6 +2,10 @@
  * @vitest-environment jsdom
  */
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
@@ -162,6 +166,82 @@ describe("ListPage", () => {
     fireEvent.click(runButton);
     expect(runEpic).toHaveBeenCalledWith(
       expect.objectContaining({ id: "HELLO-WORLD-2" }),
+    );
+  });
+});
+
+/**
+ * The id pill (`code.rowId`) and the "Unclaimed" badge were the two elements
+ * reported as unreadable in the light theme. The ratios themselves are enforced
+ * by src/styles/__tests__/contrast.test.ts against variables.css; what is
+ * pinned here is that both elements keep *referencing* --color-text-muted, so
+ * the fix cannot later be bypassed with a hardcoded hex.
+ *
+ * jsdom applies no CSS modules and computes no ratios, hence the assertion is
+ * on the token reference in the stylesheet rather than on a rendered colour.
+ */
+describe("ListPage muted-text token contract", () => {
+  function ruleBody(css: string, selector: string): string {
+    const start = css.indexOf(`${selector} {`);
+    expect(start, `${selector} not found`).toBeGreaterThan(-1);
+    return css.slice(start, css.indexOf("}", start));
+  }
+
+  function readCss(...segments: string[]): string {
+    return readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "..", ...segments),
+      "utf8",
+    );
+  }
+
+  beforeEach(() => {
+    mockData.filteredIssues = [
+      createMockIssue({
+        id: "HELLO-WORLD-2",
+        title: "Build the Hello World web app",
+        issue_type: "epic",
+        status: "open",
+      }),
+      createMockIssue({
+        id: "TASK-1",
+        title: "Child Task",
+        issue_type: "task",
+        parent: "HELLO-WORLD-2",
+        parent_title: "Build the Hello World web app",
+        status: "open",
+      }),
+    ];
+  });
+
+  it("renders the id pill and the unclaimed badge through muted-text classes", () => {
+    const { container } = render(<ListPage />);
+
+    const idPill = container.querySelector('code[class*="rowId"]');
+    expect(idPill).not.toBeNull();
+    expect(idPill).toHaveTextContent("TASK-1");
+    expect(screen.getByTestId("lane-unclaimed-badge").className).toContain(
+      "unclaimedBadge",
+    );
+  });
+
+  it("colours .rowId with var(--color-text-muted), not a literal", () => {
+    const rule = ruleBody(readCss("ListPage.module.css"), ".rowId");
+
+    expect(rule).toMatch(/\bcolor:\s*var\(--color-text-muted\)/);
+    expect(rule, "id pill colour must stay a token, not a hex").not.toMatch(
+      /\bcolor:\s*#[0-9a-fA-F]{3,8}/,
+    );
+  });
+
+  it("colours .unclaimedBadge with var(--color-text-muted), not a literal", () => {
+    const rule = ruleBody(
+      readCss("..", "components", "SwimLane", "SwimLane.module.css"),
+      ".unclaimedBadge",
+    );
+
+    expect(rule).toMatch(/\bcolor:\s*var\(--color-text-muted\)/);
+    expect(rule, "badge colour must stay a token, not a hex").not.toMatch(
+      /\bcolor:\s*#[0-9a-fA-F]{3,8}/,
     );
   });
 });
