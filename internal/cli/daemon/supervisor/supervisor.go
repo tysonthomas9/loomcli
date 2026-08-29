@@ -311,6 +311,7 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 		}
 
 		if !s.preFlightSetup(ap) {
+			s.materializeIdleSkills(ap)
 			s.Concurrency.Release(ap.Entry.Role)
 			releaseOwnership()
 			s.postExitCleanup(ap)

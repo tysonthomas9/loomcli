@@ -21,6 +21,7 @@ export type ViewMode =
   | "workspace"
   | "settings"
   | "files"
+  | "skills"
   | "issue-detail"
   | "agents";
 

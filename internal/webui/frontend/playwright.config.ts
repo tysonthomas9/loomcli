@@ -61,6 +61,81 @@ if (isSelfContained) {
   process.env.LOOM_BASE_URL = apiBaseURL;
 }
 
+// Browser specs that predate CI enforcement and currently fail against the
+// shipped UI. The Playwright workflow only ever triggered on `main` while this
+// repo's trunk moved to v5, so nothing ran the browser suite for months and it
+// decayed — most of these break on selectors the June 2026 Aether restyle
+// changed, not on anything recent.
+//
+// The CI browser job runs everything EXCEPT this list, so the suite gates from
+// today and any newly added spec is covered by default. Repairing a spec means
+// deleting its line here: the list may only shrink. Run the full suite locally
+// with `make test-e2e` to see what is still red.
+const QUARANTINED_SPECS = [
+  "**/agent-review-journey.spec.ts",
+  "**/agents-sidebar.spec.ts",
+  "**/app.spec.ts",
+  "**/assembled-views.spec.ts",
+  "**/backlog-column.spec.ts",
+  "**/create-workspace-modal.spec.ts",
+  "**/dependencies-section.spec.ts",
+  "**/dependency-type-filter.spec.ts",
+  "**/filter.spec.ts",
+  "**/filter-bar.spec.ts",
+  "**/filter-url-sync.spec.ts",
+  "**/first-run-onboarding.spec.ts",
+  "**/groupby-assignee.spec.ts",
+  "**/groupby-dropdown.spec.ts",
+  "**/groupby-epic.spec.ts",
+  "**/groupby-label.spec.ts",
+  "**/groupby-none.spec.ts",
+  "**/groupby-priority.spec.ts",
+  "**/groupby-type.spec.ts",
+  "**/groupby-url-sync.spec.ts",
+  "**/issue-detail-panel.spec.ts",
+  "**/issue-detail-panel-wiring.spec.ts",
+  "**/journey-create-triage.spec.ts",
+  "**/journey-monitor-drilldown.spec.ts",
+  "**/journey-project-status.spec.ts",
+  "**/journey-table-sort-select.spec.ts",
+  "**/journey-workspace-lifecycle.spec.ts",
+  "**/kanban.spec.ts",
+  "**/kanban-column-redesign.spec.ts",
+  "**/kanban-redesign.spec.ts",
+  "**/kanban-ui-redesign.spec.ts",
+  "**/keyboard-escape-layers.spec.ts",
+  "**/keyboard-focus-management.spec.ts",
+  "**/keyboard-global-shortcuts.spec.ts",
+  "**/log-streaming.spec.ts",
+  "**/monitor-dashboard.spec.ts",
+  "**/monitor-degradation.spec.ts",
+  "**/monitor-visual-regression.spec.ts",
+  "**/multi-workspace-monitoring.spec.ts",
+  "**/priority-dropdown.spec.ts",
+  "**/prs-page.spec.ts",
+  "**/repo-selector.spec.ts",
+  "**/search.spec.ts",
+  "**/search-filter-journey.spec.ts",
+  "**/server-push.spec.ts",
+  "**/session-detail-view.spec.ts",
+  "**/session-history.spec.ts",
+  "**/session-timeline.spec.ts",
+  "**/sessions-tab.spec.ts",
+  "**/smoke.spec.ts",
+  "**/swimlane-board.spec.ts",
+  "**/swimlane-wiring.spec.ts",
+  "**/terminal-disconnect-reconnect.spec.ts",
+  "**/terminal-keyboard-shortcuts.spec.ts",
+  "**/terminal-split-view.spec.ts",
+  "**/terminal-tab-management.spec.ts",
+  "**/type-dropdown.spec.ts",
+  "**/unblock-stuck-task.spec.ts",
+  "**/view-switcher.spec.ts",
+  "**/visual-regression.spec.ts",
+  "**/visual-regression-terminal.spec.ts",
+  "**/workspace-switcher.spec.ts",
+];
+
 /**
  * Determine webServer config:
  * - Self-contained API e2e: start loom serve via script on dedicated port
@@ -133,6 +208,17 @@ export default defineConfig({
           : {}),
       },
       testIgnore: isIntegration ? undefined : "**/*.integration.spec.ts",
+    },
+    {
+      // What CI gates on: the mocked chromium suite minus the quarantine.
+      name: "chromium-ci",
+      use: {
+        ...devices["Desktop Chrome"],
+        ...(chromiumExecutablePath
+          ? { launchOptions: { executablePath: chromiumExecutablePath } }
+          : {}),
+      },
+      testIgnore: ["**/*.integration.spec.ts", ...QUARANTINED_SPECS],
     },
     {
       name: "integration",

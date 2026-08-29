@@ -21,7 +21,11 @@ make local-mode-codex-up
 The Codex variant builds Codex into the Loom container, mounts
 `${HOME}/.codex` read-only at `/codex-host`, copies `auth.json` and
 `config.toml` into the container, and registers `codex-planner` plus
-`codex-coder`.
+`codex-coder`. The image also bakes `codex-requirements.toml` into
+`/etc/codex/requirements.toml`: the pre-turn `loom skill materialize`
+hook runs with managed provenance (no interactive `/hooks` review), and
+`allow_managed_hooks_only` refuses unmanaged hooks, including any
+`.codex/hooks.json` inside cloned task repos.
 
 Open:
 

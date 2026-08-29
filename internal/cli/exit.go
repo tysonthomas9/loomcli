@@ -2,12 +2,47 @@ package cli
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel/trace"
 )
+
+type commandExitError struct {
+	code int
+	err  error
+}
+
+func (e *commandExitError) Error() string    { return e.err.Error() }
+func (e *commandExitError) Unwrap() error    { return e.err }
+func (e *commandExitError) CLIExitCode() int { return e.code }
+
+// NewCommandExitError returns an error that asks the loom executable to use
+// code while preserving err for display and errors.Is/errors.As.
+func NewCommandExitError(code int, err error) error {
+	if err == nil {
+		err = fmt.Errorf("command exited with status %d", code)
+	}
+	return &commandExitError{code: code, err: err}
+}
+
+// CommandExitCode returns the requested process exit code, or 1 for ordinary
+// command errors. A non-positive requested code is treated as an ordinary
+// failure: a command asking to exit 0 through the error path is asking for a
+// success the caller does not have.
+func CommandExitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	var coded interface{ CLIExitCode() int }
+	if errors.As(err, &coded) && coded.CLIExitCode() > 0 {
+		return coded.CLIExitCode()
+	}
+	return 1
+}
 
 // activeRootSpan and activeTraceShutdown are populated by Execute() with the
 // per-invocation root span and trace-provider shutdown function. ExitWithFlush

@@ -3577,6 +3577,65 @@ describe("App", () => {
     });
   });
 
+  describe("sidebar suppression for views that own their chrome", () => {
+    function mockWorkspaceForSidebar() {
+      vi.mocked(useWorkspaceContext).mockReturnValue({
+        workspace: { name: "my-workspace" },
+        repos: [],
+        groups: [],
+        agents: [],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        getRepoByName: vi.fn(),
+        getReposByGroup: vi.fn(() => []),
+        getAgentByName: vi.fn(),
+        activeWorkspaceName: "my-workspace",
+        setActiveWorkspace: vi.fn(),
+        defaultWorkspaceName: null,
+        setDefaultWorkspace: vi.fn().mockResolvedValue(undefined),
+        selectedRepoNames: new Set<string>(),
+        activeRepos: [],
+        activeRepoNames: [],
+        isAllSelected: true,
+        selectRepos: vi.fn(),
+        selectAll: vi.fn(),
+        toggleRepo: vi.fn(),
+        sourceReposFilter: undefined,
+        isMultiRepo: true,
+      });
+    }
+
+    // Both views render their own left tree, so the workspace sidebar would be
+    // a second tree competing with it.
+    it.each(["files", "skills"])(
+      "hides the WorkspaceTree sidebar on the %s view",
+      (view) => {
+        mockWorkspaceForSidebar();
+        mockUseRouteView.mockReturnValue(createViewStateReturn(view));
+        const mockReturn = createMockUseIssuesReturn({});
+        mockStoreState = mockReturn;
+
+        render(<App />);
+
+        expect(
+          screen.queryByLabelText(/workspace tree/i),
+        ).not.toBeInTheDocument();
+      },
+    );
+
+    it("keeps the WorkspaceTree sidebar on the kanban view", () => {
+      mockWorkspaceForSidebar();
+      mockUseRouteView.mockReturnValue(createViewStateReturn("kanban"));
+      const mockReturn = createMockUseIssuesReturn({});
+      mockStoreState = mockReturn;
+
+      render(<App />);
+
+      expect(screen.getByLabelText(/workspace tree/i)).toBeInTheDocument();
+    });
+  });
+
   describe("sidebar isMultiRepo guard", () => {
     it("renders WorkspaceTree sidebar for workspace view regardless of isMultiRepo", () => {
       vi.mocked(useWorkspaceContext).mockReturnValue({

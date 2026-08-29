@@ -49,12 +49,18 @@ interface FileTreeProps {
   onInlineEditCommit?: () => void;
   onInlineEditCancel?: () => void;
   gitStatus?: Record<string, string> | undefined;
+  annotations?:
+    | Record<string, { label: string; tone?: "shadowed" | "info" }>
+    | undefined;
   /** When set, scroll this path into view + focus it once it appears (jump-to). */
   scrollToPath?: string | null | undefined;
   /** Visual depth offset when this tree is nested under a semantic root. */
   depthOffset?: number | undefined;
   /** Stable id prefix to avoid aria-activedescendant collisions across roots. */
   idPrefix?: string | undefined;
+  /** Called when Arrow navigation leaves the top of this tree, so the owning
+   *  root row can take focus back. Omitted = clamp at the first node. */
+  onExitToRoot?: (() => void) | undefined;
 }
 
 /** A single node in the flattened, visible-order tree. */
@@ -321,6 +327,7 @@ function TreeNodeRow({
   inlineEdit,
   gitStatus,
   folderDecorations,
+  annotation,
   onActivate,
   onContextMenuNode,
   onInlineEditChange,
@@ -336,6 +343,7 @@ function TreeNodeRow({
   inlineEdit?: FileTreeInlineEdit | null | undefined;
   gitStatus: Record<string, string>;
   folderDecorations: Map<string, FolderGitDecoration>;
+  annotation?: { label: string; tone?: "shadowed" | "info" } | undefined;
   onActivate: (node: VisNode) => void;
   onContextMenuNode?: (
     node: FileTreeNodeInfo,
@@ -377,6 +385,7 @@ function TreeNodeRow({
       data-focused={node.path === activePath || undefined}
       data-git-status-kind={decorationKind}
       data-conflict={hasConflict || undefined}
+      data-shadowed={annotation?.tone === "shadowed" || undefined}
       className={styles.treeNode}
       style={{
         paddingLeft: 8 + visualDepth * 16,
@@ -425,6 +434,9 @@ function TreeNodeRow({
           !
         </span>
       )}
+      {annotation && (
+        <span className={styles.nodeAnnotation}>{annotation.label}</span>
+      )}
     </div>
   );
 }
@@ -444,9 +456,11 @@ export function FileTree({
   onInlineEditCommit,
   onInlineEditCancel,
   gitStatus = {},
+  annotations = {},
   scrollToPath,
   depthOffset = 0,
   idPrefix = "ft",
+  onExitToRoot,
 }: FileTreeProps) {
   const treeRef = useRef<HTMLDivElement>(null);
   const [focusedPath, setFocusedPath] = useState<string | null>(null);
@@ -511,7 +525,8 @@ export function FileTree({
           break;
         case "ArrowUp":
           e.preventDefault();
-          focusNode(nodes[Math.max(0, idx - 1)]?.path ?? null);
+          if (idx === 0 && onExitToRoot) onExitToRoot();
+          else focusNode(nodes[Math.max(0, idx - 1)]?.path ?? null);
           break;
         case "Home":
           e.preventDefault();
@@ -533,6 +548,7 @@ export function FileTree({
           else if (cur) {
             const p = parentOf(cur.path);
             if (nodes.some((n) => n.path === p)) focusNode(p);
+            else onExitToRoot?.();
           }
           break;
         case "Enter":
@@ -575,6 +591,7 @@ export function FileTree({
       activate,
       onRequestRename,
       onRequestDelete,
+      onExitToRoot,
     ],
   );
 
@@ -632,6 +649,7 @@ export function FileTree({
             inlineEdit={inlineEdit}
             gitStatus={gitStatus}
             folderDecorations={folderDecorations}
+            annotation={annotations[node.path]}
             onActivate={activate}
             onContextMenuNode={(rowNode, event) => {
               setFocusedPath(rowNode.path);

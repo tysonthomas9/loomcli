@@ -13,6 +13,7 @@
  *     /settings                            → SettingsPage (lazy)
  *     /workspace                           → WorkspacePage (lazy)
  *     /files                               → FilesPage (lazy)
+ *     /skills                              → SkillsPage (lazy)
  *     /issues/:issueId                     → IssueDetailPage (lazy)
  *   /test/*                                → TestFixtures (dev only, preserved)
  *   *                                      → NotFound (404 page)
@@ -150,6 +151,11 @@ const viewRoutes = [
     path: "files",
     lazy: () =>
       import("@/views/FilesPage").then((m) => ({ Component: m.FilesPage })),
+  },
+  {
+    path: "skills",
+    lazy: () =>
+      import("@/views/SkillsPage").then((m) => ({ Component: m.SkillsPage })),
   },
   {
     path: "issues/:issueId",
