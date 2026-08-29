@@ -402,7 +402,9 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 	if !s.gateClaimsHeld(ap) {
 		return false
 	}
-	if err := s.gateBackendAvailable(ap); err != nil {
+	// No span is open on this path; pass an explicit background context so the
+	// absence of a trace parent is visible here rather than hidden in the gate.
+	if err := s.gateBackendAvailable(context.Background(), ap); err != nil {
 		return false
 	}
 	if err := s.gateSafetyKnobsEnforceable(ap); err != nil {
@@ -551,11 +553,16 @@ func (s *Supervisor) createControlPlaneAgentSession(ap *AgentProcess, sessionID,
 // backend-availability gate to flip between AgentStateBackendUnavailable
 // and AgentStateActive). Best-effort: failures are logged but do not
 // block the supervisor.
-func (s *Supervisor) markControlPlaneAgentState(ap *AgentProcess, state domain.AgentState) {
+//
+// ctx supplies the trace parent only: the timeout is derived through
+// context.WithoutCancel so this write still completes while the daemon is
+// tearing down (cmdstore.RootContext() may be a signal context), exactly as it
+// did when it started from context.Background().
+func (s *Supervisor) markControlPlaneAgentState(ctx context.Context, ap *AgentProcess, state domain.AgentState) {
 	if s.ControlStore == nil || s.WorkspaceID == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), controlPlaneOperationTimeout)
 	defer cancel()
 	if _, err := s.ControlStore.Agents().Update(ctx, s.WorkspaceID, ap.Entry.Worktree, store.AgentUpdate{
 		State: &state,
@@ -565,7 +572,10 @@ func (s *Supervisor) markControlPlaneAgentState(ap *AgentProcess, state domain.A
 	}
 }
 
-func (s *Supervisor) markControlPlaneAgentSessionRunning(ap *AgentProcess) {
+// markControlPlaneAgentSessionRunning records the first heartbeat of a freshly
+// spawned agent session. ctx supplies the trace parent only; see
+// markControlPlaneAgentState for why the timeout drops cancellation.
+func (s *Supervisor) markControlPlaneAgentSessionRunning(ctx context.Context, ap *AgentProcess) {
 	if s.ControlStore == nil || s.WorkspaceID == "" {
 		return
 	}
@@ -579,7 +589,7 @@ func (s *Supervisor) markControlPlaneAgentSessionRunning(ap *AgentProcess) {
 	}
 	now := time.Now().UTC()
 	status := domain.AgentSessionRunning
-	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), controlPlaneOperationTimeout)
 	defer cancel()
 	if _, err := s.ControlStore.AgentSessions().Update(ctx, s.WorkspaceID, sessionID, store.AgentSessionUpdate{
 		Status:        &status,
