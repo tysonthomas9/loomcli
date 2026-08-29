@@ -612,8 +612,8 @@ func parseBlockedParams(r *http.Request) (*rpc.BlockedArgs, error) {
 		if l < 0 {
 			return nil, fmt.Errorf("limit must be non-negative (got %d)", l)
 		}
-		if l > handler.MaxListLimit {
-			l = handler.MaxListLimit
+		if l > handler.MaxIssueListLimit {
+			l = handler.MaxIssueListLimit
 		}
 		args.Limit = l
 	}
