@@ -126,6 +126,14 @@ func (m *mockIssueService) ListEvents(ctx context.Context, params service.EventL
 	return nil, nil
 }
 
+func (m *mockIssueService) ListEventHistory(ctx context.Context, params service.EventListParams) (*service.EventListResult, error) {
+	events, err := m.ListEvents(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	return &service.EventListResult{Events: events}, nil
+}
+
 func (m *mockIssueService) MoveIssue(ctx context.Context, params service.MoveIssueParams) (*service.MoveIssueResult, error) {
 	if m.moveIssueFunc != nil {
 		return m.moveIssueFunc(ctx, params)

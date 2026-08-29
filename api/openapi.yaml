@@ -872,11 +872,16 @@ paths:
         - $ref: "#/components/parameters/IssueId"
         - name: limit
           in: query
-          description: Maximum number of most recent events to return
+          description: Maximum events to return. Without `since`, Loom returns the most recent tail and accepts up to 500. With `since`, Loom returns one oldest-first page and clamps the limit to fleet-db's 200-event page maximum.
           schema:
             type: integer
             minimum: 1
             maximum: 500
+        - name: since
+          in: query
+          description: Opaque fleet-db history cursor. When present (including an empty value), returns one oldest-first page; a bare `since=` starts at the beginning of the issue history.
+          schema:
+            type: string
       responses:
         "200":
           description: Issue events
@@ -884,7 +889,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [success, data]
+                required: [success, data, has_more]
                 properties:
                   success:
                     type: boolean
@@ -892,6 +897,18 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/IssueEvent"
+                  cursor:
+                    type: string
+                    description: Opaque cursor for the next oldest-first page. Present only on `since`-paged responses; newest-tail responses carry no cursor, so clients restart pagination with `since=`.
+                  has_more:
+                    type: boolean
+                    description: For a `since` page, whether another forward page exists. For a newest-tail response, true means the tail was truncated and older events are available from `since=`.
+                  total_events:
+                    type: integer
+                    minimum: 0
+                    description: Full issue-history count when known. A zero value means unknown and is omitted from the JSON response; clients must not infer completeness when this field is absent.
+        "400":
+          description: Invalid event-history paging request, including cursor paging unsupported by the active backend
         "404":
           description: Issue not found
 

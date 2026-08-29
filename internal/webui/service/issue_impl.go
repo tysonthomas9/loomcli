@@ -692,3 +692,58 @@ func (s *issueServiceImpl) ListEvents(ctx context.Context, params EventListParam
 	}
 	return events, nil
 }
+
+func (s *issueServiceImpl) ListEventHistory(ctx context.Context, params EventListParams) (*EventListResult, error) {
+	be, svcErr := s.resolveBackend(ctx)
+	if svcErr != nil {
+		return nil, svcErr
+	}
+
+	historyBackend, ok := be.(backend.EventHistoryBackend)
+	if !ok {
+		if params.Since != nil {
+			return nil, ErrValidation("event history paging is not supported by this backend")
+		}
+		events, err := s.ListEvents(ctx, params)
+		if err != nil {
+			return nil, err
+		}
+		return &EventListResult{Events: events}, nil
+	}
+
+	requestCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	data, err := historyBackend.ListEventHistory(requestCtx, params.IssueID, backend.EventHistoryParams{
+		Limit: params.Limit,
+		Since: params.Since,
+	})
+	if err != nil {
+		if params.Since != nil && backend.IsKind(err, backend.KindNotImplemented) {
+			return nil, ErrValidation("event history paging is not supported by this backend")
+		}
+		if params.Since == nil && backend.IsKind(err, backend.KindNotImplemented) {
+			events, fallbackErr := s.ListEvents(ctx, params)
+			if fallbackErr != nil {
+				return nil, fallbackErr
+			}
+			return &EventListResult{Events: events}, nil
+		}
+		slog.Error("backend error in ListEventHistory", "err", err)
+		return nil, translateBackendError(err)
+	}
+	if data == nil {
+		return &EventListResult{Events: []*types.Event{}}, nil
+	}
+
+	events := make([]*types.Event, 0, len(data.Events))
+	for _, event := range data.Events {
+		events = append(events, eventDataToTypesEvent(event))
+	}
+	return &EventListResult{
+		Events:      events,
+		Cursor:      data.Cursor,
+		HasMore:     data.HasMore,
+		TotalEvents: data.TotalEvents,
+	}, nil
+}

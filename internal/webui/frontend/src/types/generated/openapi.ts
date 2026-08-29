@@ -4523,8 +4523,10 @@ export interface operations {
   getIssueEvents: {
     parameters: {
       query?: {
-        /** @description Maximum number of most recent events to return */
+        /** @description Maximum events to return. Without `since`, Loom returns the most recent tail and accepts up to 500. With `since`, Loom returns one oldest-first page and clamps the limit to fleet-db's 200-event page maximum. */
         limit?: number;
+        /** @description Opaque fleet-db history cursor. When present (including an empty value), returns one oldest-first page; a bare `since=` starts at the beginning of the issue history. */
+        since?: string;
       };
       header?: never;
       path: {
@@ -4546,8 +4548,21 @@ export interface operations {
           "application/json": {
             success: boolean;
             data: components["schemas"]["IssueEvent"][];
+            /** @description Opaque cursor for the next oldest-first page. Present only on `since`-paged responses; newest-tail responses carry no cursor, so clients restart pagination with `since=`. */
+            cursor?: string;
+            /** @description For a `since` page, whether another forward page exists. For a newest-tail response, true means the tail was truncated and older events are available from `since=`. */
+            has_more: boolean;
+            /** @description Full issue-history count when known. A zero value means unknown and is omitted from the JSON response; clients must not infer completeness when this field is absent. */
+            total_events?: number;
           };
         };
+      };
+      /** @description Invalid event-history paging request, including cursor paging unsupported by the active backend */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Issue not found */
       404: {
