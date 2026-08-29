@@ -173,9 +173,13 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		app.issueSvc = service.NewIssueServiceWithBackend(
 			app.pool, app.multiPool, middleware.WithWorkspace,
 			service.IssueBackendProvider(config.IssueBackendFn),
+			service.JourneyServiceConfig{EventsDir: config.JourneyEventsDir},
 		)
 	} else {
-		app.issueSvc = service.NewIssueService(app.pool, app.multiPool, middleware.WithWorkspace)
+		app.issueSvc = service.NewIssueService(
+			app.pool, app.multiPool, middleware.WithWorkspace,
+			service.JourneyServiceConfig{EventsDir: config.JourneyEventsDir},
+		)
 	}
 
 	// Create SSE hub for real-time push notifications

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
@@ -173,6 +174,66 @@ type EventListResult struct {
 	TotalEvents int
 }
 
+// Journey describes the durable server-side reconstruction of an issue's
+// stage history and any host-local agent work that can be overlaid on it.
+type Journey struct {
+	Spans        []JourneySpan        `json:"spans"`
+	AgentWindows []JourneyAgentWindow `json:"agent_windows"`
+	LeadTime     JourneyLeadTime      `json:"lead_time"`
+	Honesty      JourneyHonesty       `json:"honesty"`
+}
+
+// JourneySpan is one contiguous status/owner/needs-revision state. End is nil
+// only for the final span of an in-flight issue.
+type JourneySpan struct {
+	Kind          string     `json:"kind"`
+	Stage         string     `json:"stage"`
+	Start         time.Time  `json:"start"`
+	End           *time.Time `json:"end"`
+	Owner         *string    `json:"owner"`
+	Actor         *string    `json:"actor"`
+	NeedsRevision bool       `json:"needs_revision"`
+	Stalled       bool       `json:"stalled"`
+	Approximate   bool       `json:"approximate"`
+	UnknownStart  bool       `json:"unknown_start"`
+}
+
+// JourneyAgentWindow is one host-local task attempt from claim to terminal
+// lifecycle event. End remains nil and outcome is running for an active attempt.
+type JourneyAgentWindow struct {
+	TaskID  string     `json:"task_id"`
+	Agent   string     `json:"agent"`
+	Start   time.Time  `json:"start"`
+	End     *time.Time `json:"end"`
+	Outcome string     `json:"outcome"`
+}
+
+// JourneyLeadTime reports millisecond durations so the wire unit is explicit.
+// TotalMS is visible wall-clock lead time. The four named buckets deliberately
+// may sum below it: deferred/open-assigned intervals and gaps between exact
+// lifecycle attempts do not satisfy any settled category and are not forced
+// into a confident but false classification.
+type JourneyLeadTime struct {
+	TotalMS             int64 `json:"total_ms"`
+	QueuedMS            int64 `json:"queued_ms"`
+	AgentWorkingMS      int64 `json:"agent_working_ms"`
+	WaitingOnOperatorMS int64 `json:"waiting_on_operator_ms"`
+	HaltedMS            int64 `json:"halted_ms"`
+}
+
+// JourneyHonesty makes bounded issue history and missing host-local overlays
+// explicit instead of presenting a partial fold as authoritative.
+type JourneyHonesty struct {
+	CompleteHistory       bool   `json:"complete_history"`
+	Bounded               bool   `json:"bounded"`
+	HasMore               bool   `json:"has_more"`
+	EventsSeen            int    `json:"events_seen"`
+	TotalEvents           int    `json:"total_events,omitempty"`
+	Reason                string `json:"reason,omitempty"`
+	AgentWindowsAvailable bool   `json:"agent_windows_available"`
+	AgentWindowsReason    string `json:"agent_windows_reason,omitempty"`
+}
+
 // SearchIssuesParams holds the parameters for full-text search.
 type SearchIssuesParams struct {
 	Query string
@@ -202,6 +263,7 @@ type IssueService interface {
 	ListDependencies(ctx context.Context, issueID string) (json.RawMessage, error)
 	ListEvents(ctx context.Context, params EventListParams) ([]*types.Event, error)
 	ListEventHistory(ctx context.Context, params EventListParams) (*EventListResult, error)
+	GetJourney(ctx context.Context, issueID string) (*Journey, error)
 	MoveIssue(ctx context.Context, params MoveIssueParams) (*MoveIssueResult, error)
 	SearchIssues(ctx context.Context, params SearchIssuesParams) (json.RawMessage, error)
 }

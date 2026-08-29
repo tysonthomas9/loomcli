@@ -24,6 +24,7 @@ type mockIssueService struct {
 	removeDependencyFunc func(ctx context.Context, params service.RemoveDependencyParams) error
 	listDependenciesFunc func(ctx context.Context, issueID string) (json.RawMessage, error)
 	listEventsFunc       func(ctx context.Context, params service.EventListParams) ([]*types.Event, error)
+	getJourneyFunc       func(ctx context.Context, issueID string) (*service.Journey, error)
 	moveIssueFunc        func(ctx context.Context, params service.MoveIssueParams) (*service.MoveIssueResult, error)
 	searchIssuesFunc     func(ctx context.Context, params service.SearchIssuesParams) (json.RawMessage, error)
 }
@@ -132,6 +133,13 @@ func (m *mockIssueService) ListEventHistory(ctx context.Context, params service.
 		return nil, err
 	}
 	return &service.EventListResult{Events: events}, nil
+}
+
+func (m *mockIssueService) GetJourney(ctx context.Context, issueID string) (*service.Journey, error) {
+	if m.getJourneyFunc != nil {
+		return m.getJourneyFunc(ctx, issueID)
+	}
+	return &service.Journey{}, nil
 }
 
 func (m *mockIssueService) MoveIssue(ctx context.Context, params service.MoveIssueParams) (*service.MoveIssueResult, error) {
