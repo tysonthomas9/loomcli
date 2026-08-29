@@ -547,6 +547,133 @@ func TestCheckFleetDB(t *testing.T) {
 	})
 }
 
+// bareShellAgainstRemoteFleetDB puts the process in the state the parent ticket
+// describes: a shell that carries no fleet-db configuration of its own, running
+// against a non-embedded (cloud-mode) fleet-db.
+func bareShellAgainstRemoteFleetDB(t *testing.T) {
+	t.Helper()
+	t.Setenv("LOOM_FLEET_DB_URL", "http://127.0.0.1:1") // forces bootstrap.ModeCloud; never dialed
+	t.Setenv("LOOM_FLEETDB_REDIS_URL", "")
+	t.Setenv("LOOM_FLEETDB_AUTO_START", "")
+}
+
+// TestCheckFleetDB_DaemonFallback covers the parent ticket's acceptance case:
+// `loom doctor` run from a bare shell must not declare a healthy stack broken
+// merely because the invoking shell carries none of the daemon's configuration.
+//
+// These subtests mutate process-wide environment and the workspace runtime-dir
+// cache, so unlike TestCheckFleetDB they cannot run in parallel.
+func TestCheckFleetDB_DaemonFallback(t *testing.T) {
+	t.Run("bare shell against a correctly configured running daemon does not fail", func(t *testing.T) {
+		bareShellAgainstRemoteFleetDB(t)
+		driftFixture(t, os.Getpid(), liveSnapshot(plainEnv(map[string]string{
+			// Unreachable on purpose: the check must get as far as dialing,
+			// which is proof it stopped reporting "no Redis URL configured".
+			"LOOM_FLEETDB_REDIS_URL": "redis://localhost:19999",
+		})), "")
+
+		result := checkFleetDB()
+		if strings.Contains(result.Summary, "no Redis URL configured") {
+			t.Fatalf("daemon-provided Redis URL was ignored: %s", result.Summary)
+		}
+		if !strings.Contains(result.Detail, "the running daemon's environment") {
+			t.Errorf("expected the detail to name the daemon as the source, got %q", result.Detail)
+		}
+	})
+
+	t.Run("bare shell, daemon running with no snapshot, warns instead of failing", func(t *testing.T) {
+		bareShellAgainstRemoteFleetDB(t)
+		driftFixture(t, os.Getpid(), nil, "")
+
+		result := checkFleetDB()
+		if result.Status != StatusWarn {
+			t.Fatalf("expected warn, got %v: %s", result.Status, result.Summary)
+		}
+		if !strings.Contains(result.Summary, "cannot determine fleet-db configuration") {
+			t.Errorf("unexpected summary %q", result.Summary)
+		}
+		if !strings.Contains(result.Detail, "published no env snapshot") {
+			t.Errorf("unexpected detail %q", result.Detail)
+		}
+	})
+
+	t.Run("bare shell with no daemon running still fails", func(t *testing.T) {
+		bareShellAgainstRemoteFleetDB(t)
+		driftFixture(t, 999999, nil, "")
+
+		result := checkFleetDB()
+		if result.Status != StatusFail {
+			t.Fatalf("expected fail for a genuine misconfiguration, got %v: %s", result.Status, result.Summary)
+		}
+		if !strings.Contains(result.Summary, "no Redis URL configured") {
+			t.Errorf("unexpected summary %q", result.Summary)
+		}
+	})
+
+	t.Run("daemon running with a snapshot that carries no fleet-db config still fails", func(t *testing.T) {
+		bareShellAgainstRemoteFleetDB(t)
+		driftFixture(t, os.Getpid(), liveSnapshot(plainEnv(map[string]string{
+			"LOOM_WORKSPACE": "PUPPET",
+		})), "")
+
+		result := checkFleetDB()
+		if result.Status != StatusFail {
+			t.Fatalf("expected fail, got %v: %s", result.Status, result.Summary)
+		}
+		if !strings.Contains(result.Detail, "checked: this shell and the running daemon's env snapshot") {
+			t.Errorf("expected the detail to note both sources were checked, got %q", result.Detail)
+		}
+	})
+
+	t.Run("daemon auto-start is adopted when the shell sets nothing", func(t *testing.T) {
+		bareShellAgainstRemoteFleetDB(t)
+		driftFixture(t, os.Getpid(), liveSnapshot(plainEnv(map[string]string{
+			"LOOM_FLEETDB_AUTO_START": "true",
+		})), "")
+
+		result := checkFleetDB()
+		if result.Status != StatusPass {
+			t.Fatalf("expected pass, got %v: %s", result.Status, result.Summary)
+		}
+		if !strings.Contains(result.Summary, "miniredis auto-start") {
+			t.Errorf("unexpected summary %q", result.Summary)
+		}
+	})
+
+	t.Run("an unparseable daemon auto-start value does not crash", func(t *testing.T) {
+		bareShellAgainstRemoteFleetDB(t)
+		driftFixture(t, os.Getpid(), liveSnapshot(plainEnv(map[string]string{
+			"LOOM_FLEETDB_AUTO_START": "yes-please",
+		})), "")
+
+		result := checkFleetDB()
+		if result.Status != StatusFail {
+			t.Fatalf("expected the hard failure to stand, got %v: %s", result.Status, result.Summary)
+		}
+	})
+}
+
+// TestReportFleetDBConfigFrom_OriginAnnotation pins the one behavioral
+// difference between the shell-sourced and daemon-sourced reports.
+func TestReportFleetDBConfigFrom_OriginAnnotation(t *testing.T) {
+	t.Parallel()
+
+	cfg := FleetDBServerConfig{AutoStart: true, Workspace: "test-ws"}
+
+	shell := reportFleetDBConfigFrom(cfg, "")
+	if shell.Detail != "" {
+		t.Errorf("a shell-sourced report must carry no source line, got %q", shell.Detail)
+	}
+
+	daemonSourced := reportFleetDBConfigFrom(cfg, "the running daemon's environment")
+	if !strings.Contains(daemonSourced.Detail, "source: the running daemon's environment") {
+		t.Errorf("expected a source line, got %q", daemonSourced.Detail)
+	}
+	if daemonSourced.Status != shell.Status || daemonSourced.Summary != shell.Summary {
+		t.Errorf("origin must not change the verdict: %+v vs %+v", daemonSourced, shell)
+	}
+}
+
 func TestLoomSessionRegex(t *testing.T) {
 	t.Parallel()
 
