@@ -22,6 +22,7 @@ type fakeIssueBackend struct {
 
 	// Per-method canned returns and capture slots.
 	getResult           *backend.IssueDetailData
+	getByID             map[string]*backend.IssueDetailData
 	getErr              error
 	getCalls            []string
 	listResult          []backend.IssueData
@@ -99,7 +100,23 @@ func (f *fakeIssueBackend) Get(_ context.Context, id string) (*backend.IssueDeta
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.getCalls = append(f.getCalls, id)
+	// getByID, when set, serves per-ID canned details (the parent-title
+	// backfill and the detail-view parent lookup both Get several IDs).
+	if f.getByID != nil {
+		if d, ok := f.getByID[id]; ok {
+			return d, nil
+		}
+		return nil, f.getErr
+	}
 	return f.getResult, f.getErr
+}
+
+// getCallCount reports how many Get calls the fake has served, safely against
+// the concurrent backfill.
+func (f *fakeIssueBackend) getCallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.getCalls)
 }
 
 func (f *fakeIssueBackend) List(_ context.Context, opts backend.ListOpts) ([]backend.IssueData, error) {
@@ -1035,6 +1052,68 @@ func TestGetIssue_Backend_Success_ReturnsDetailWire(t *testing.T) {
 	labels, ok := got["labels"].([]any)
 	if !ok || len(labels) != 1 || labels[0] != "alpha" {
 		t.Errorf("labels = %v, want [alpha]", got["labels"])
+	}
+}
+
+// PUPPET-219: the detail endpoint resolves the parent's title with one
+// best-effort Get so the FE has a name for the parent, not just an ID.
+func TestGetIssue_Backend_ParentTitleResolved(t *testing.T) {
+	now := time.Now().UTC()
+	fb := &fakeIssueBackend{
+		getByID: map[string]*backend.IssueDetailData{
+			"child-1": {IssueData: backend.IssueData{
+				ID: "child-1", Title: "Child", Status: "open", Priority: 1,
+				Parent: "parent-1", CreatedAt: now, UpdatedAt: now,
+			}},
+			"parent-1": {IssueData: backend.IssueData{
+				ID: "parent-1", Title: "Parent One", Status: "open", CreatedAt: now, UpdatedAt: now,
+			}},
+		},
+	}
+	svc := newServiceWithFake(fb)
+	raw, err := svc.GetIssue(context.Background(), "child-1")
+	if err != nil {
+		t.Fatalf("GetIssue: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["parent"] != "parent-1" {
+		t.Errorf("parent = %v, want parent-1", got["parent"])
+	}
+	if got["parent_title"] != "Parent One" {
+		t.Errorf("parent_title = %v, want Parent One", got["parent_title"])
+	}
+}
+
+// A failed parent lookup is cosmetic: the detail request still succeeds and
+// simply omits parent_title.
+func TestGetIssue_Backend_ParentTitleLookupFailureIsNonFatal(t *testing.T) {
+	now := time.Now().UTC()
+	fb := &fakeIssueBackend{
+		getByID: map[string]*backend.IssueDetailData{
+			"child-1": {IssueData: backend.IssueData{
+				ID: "child-1", Title: "Child", Status: "open", Priority: 1,
+				Parent: "parent-gone", CreatedAt: now, UpdatedAt: now,
+			}},
+		},
+		getErr: backend.ErrNotFound("Get", "issue not found"),
+	}
+	svc := newServiceWithFake(fb)
+	raw, err := svc.GetIssue(context.Background(), "child-1")
+	if err != nil {
+		t.Fatalf("GetIssue: %v — a failed parent lookup must not fail the request", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["parent"] != "parent-gone" {
+		t.Errorf("parent = %v, want parent-gone", got["parent"])
+	}
+	if _, ok := got["parent_title"]; ok {
+		t.Errorf("parent_title = %v, want it omitted", got["parent_title"])
 	}
 }
 

@@ -110,6 +110,9 @@ export function groupIssuesByField(
  */
 function groupIssuesByEpic(issues: Issue[]): LaneGroup[] {
   const epicIssues = new Map<string, Issue>();
+  // Every issue by ID, epics included, so a non-epic parent that is itself on
+  // the board supplies its own title without any server involvement.
+  const issuesById = new Map<string, Issue>();
   const childGroups = new Map<string, Issue[]>();
   const parentTitles = new Map<string, string>();
   const laneKeys: string[] = [];
@@ -122,6 +125,8 @@ function groupIssuesByEpic(issues: Issue[]): LaneGroup[] {
   };
 
   for (const issue of issues) {
+    issuesById.set(issue.id, issue);
+
     if (issue.issue_type === "epic") {
       epicIssues.set(issue.id, issue);
       registerLaneKey(issue.id);
@@ -150,7 +155,16 @@ function groupIssuesByEpic(issues: Issue[]): LaneGroup[] {
   for (const key of laneKeys) {
     const groupIssue = epicIssues.get(key);
     const groupIssues = childGroups.get(key) ?? [];
-    const title = groupIssue?.title ?? parentTitles.get(key) ?? "Untitled epic";
+    // Resolution order: the epic issue itself, then any loaded issue with that
+    // ID (a decomposed non-epic parent on the board), then parent_title carried
+    // by a child, then the raw parent ID. The ID is a deliberate last resort:
+    // "PUPPET-200" identifies the lane, a shared placeholder does not. See the
+    // e2e contract in tests/e2e/groupby-epic.spec.ts.
+    const title =
+      groupIssue?.title ??
+      issuesById.get(key)?.title ??
+      parentTitles.get(key) ??
+      key;
     lanes.push({
       id: getLaneId("epic", key),
       title,
