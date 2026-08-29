@@ -2,7 +2,6 @@ package serve
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"sort"
 	"time"
@@ -179,32 +178,6 @@ func handleSync(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, SyncResponse{Sync: data.SyncStatus, Timestamp: data.Timestamp})
 }
 
-func handleMetrics(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-
-	data := collectDataFunc()
-	inProgress := 0
-	if data != nil {
-		inProgress = data.Tasks.InProgress
-	}
-
-	fmt.Fprintf(w, "# HELP loom_ready_tasks Number of tasks ready to be claimed\n")
-	fmt.Fprintf(w, "# TYPE loom_ready_tasks gauge\n")
-	for p := 0; p <= 4; p++ {
-		fmt.Fprintf(w, "loom_ready_tasks{priority=\"%d\"} %d\n", p, 0)
-	}
-	fmt.Fprintf(w, "\n# HELP loom_in_progress_tasks Number of tasks currently being worked on\n")
-	fmt.Fprintf(w, "# TYPE loom_in_progress_tasks gauge\n")
-	fmt.Fprintf(w, "loom_in_progress_tasks %d\n", inProgress)
-
-	workerCounts := collectWorkerStatusCounts()
-	fmt.Fprintf(w, "\n# HELP loom_fleet_workers Number of fleet workers by status\n")
-	fmt.Fprintf(w, "# TYPE loom_fleet_workers gauge\n")
-	for _, status := range []string{"active", "idle", "blocked"} {
-		fmt.Fprintf(w, "loom_fleet_workers{status=\"%s\"} %d\n", status, workerCounts[status])
-	}
-}
-
 func handleUsage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, struct{}{})
 }
@@ -264,11 +237,6 @@ func getWorkspaceInfo() WorkspaceInfo {
 	}
 	sort.Strings(info.Workspaces)
 	return info
-}
-
-// collectWorkerStatusCounts is a stub for serve test compat.
-func collectWorkerStatusCounts() map[string]int {
-	return map[string]int{"active": 0, "idle": 0, "blocked": 0}
 }
 
 func setupWorkspaceConfig(t *testing.T, cfg *config.LoomConfig) {
