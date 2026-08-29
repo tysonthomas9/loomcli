@@ -3,12 +3,15 @@ package supervisor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/olesho/harness-wrapper/pkg/discovery"
 
@@ -37,6 +40,33 @@ type supervisorMaterializeStore struct {
 func (s supervisorMaterializeStore) Skills() store.SkillStore { return s.skills }
 func (s supervisorMaterializeStore) SkillMaterializationLeases() store.SkillMaterializationLeaseStore {
 	return nil
+}
+
+// supervisorLeaseStore fails every acquire with a fixed error, so a spawn can be
+// driven down each lease-failure branch.
+type supervisorLeaseStore struct {
+	err error
+}
+
+func (s supervisorLeaseStore) Acquire(context.Context, store.SkillMaterializationLeaseAcquire) (*domain.SkillMaterializationLease, error) {
+	return nil, s.err
+}
+
+func (s supervisorLeaseStore) Renew(context.Context, string, string, string, time.Duration) (time.Time, error) {
+	return time.Time{}, nil
+}
+
+func (s supervisorLeaseStore) Release(context.Context, string, string, string) error { return nil }
+
+type supervisorLeasedStore struct {
+	store.Store
+	skills store.SkillStore
+	leases store.SkillMaterializationLeaseStore
+}
+
+func (s supervisorLeasedStore) Skills() store.SkillStore { return s.skills }
+func (s supervisorLeasedStore) SkillMaterializationLeases() store.SkillMaterializationLeaseStore {
+	return s.leases
 }
 
 func TestSpawnAndWaitMaterializationCollisionUsesSpawnFailurePath(t *testing.T) {
@@ -235,5 +265,88 @@ func TestSpawnAgentStopsWhenSkillListingIsCanceled(t *testing.T) {
 	}
 	if ap.Cmd != nil {
 		t.Fatalf("Cmd = %v, want no subprocess after canceled materialization", ap.Cmd)
+	}
+}
+
+// stubLoomExecutable points the spawned "agent" at a real no-op binary for one
+// test. TestMain's /bin/false is not present on every supported host, and a
+// spawn test that asserts the child started cannot tolerate a missing exec.
+func stubLoomExecutable(t *testing.T) {
+	t.Helper()
+	path, err := exec.LookPath("false")
+	if err != nil {
+		t.Skipf("no false(1) on PATH: %v", err)
+	}
+	prev := loomExecutablePath
+	loomExecutablePath = func() (string, error) { return path, nil }
+	t.Cleanup(func() { loomExecutablePath = prev })
+}
+
+// The regression PUPPET-255 fixes end to end: a fleet-db that does not serve
+// the lease routes must not stop an agent from starting.
+func TestSpawnAgentContinuesWhenLeaseRouteIsMissing(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	target := t.TempDir()
+	stubCheckBackend(t, func(name string) (discovery.Info, error) {
+		return discovery.Info{Name: name, Binary: name, Installed: true, Path: "/bin/false", VersionMatchesPin: true}, nil
+	})
+	// TestMain's package-wide /bin/false is absent on some hosts (macOS ships
+	// only /usr/bin/false), and this test asserts the process actually starts —
+	// so resolve a stand-in that is guaranteed to exec here.
+	stubLoomExecutable(t)
+	routeMissing := fmt.Errorf("fleetdb: POST /api/v1/WS/skill-materialization-leases: HTTP 404: %w",
+		domain.ErrSkillMaterializationLeaseRouteMissing)
+	s := newTestSupervisorWithConfig(&cfgpkg.DaemonConfig{Backend: "codex"})
+	s.WorkspaceID = "WS"
+	s.ControlStore = supervisorLeasedStore{
+		skills: supervisorSkillStore{},
+		leases: supervisorLeaseStore{err: routeMissing},
+	}
+	s.EmitEvent = func(events.Event) {}
+	ap := &AgentProcess{
+		Entry:        cfgpkg.AgentEntry{Worktree: "worker-a", Role: "plan", Backend: "codex"},
+		RoleConfig:   cfgpkg.RoleConfig{},
+		WorktreePath: target,
+	}
+
+	if err := s.spawnAgent(ap); err != nil {
+		t.Fatalf("spawnAgent: %v, want the missing lease route to warn and continue", err)
+	}
+	if ap.Cmd == nil {
+		t.Fatal("Cmd = nil, want the agent process started")
+	}
+	_ = s.waitForAgent(ap)
+}
+
+// The other side of the same branch: a genuine 409 conflict is not an outage
+// and must still fail the spawn.
+func TestSpawnAgentFailsOnLeaseConflictError(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	stubCheckBackend(t, func(name string) (discovery.Info, error) {
+		return discovery.Info{Name: name, Binary: name, Installed: true, Path: "/bin/false", VersionMatchesPin: true}, nil
+	})
+	conflict := fmt.Errorf("fleetdb: POST /api/v1/WS/skill-materialization-leases: HTTP 409: %w", domain.ErrConflict)
+	s := newTestSupervisorWithConfig(&cfgpkg.DaemonConfig{Backend: "codex"})
+	s.WorkspaceID = "WS"
+	s.ControlStore = supervisorLeasedStore{
+		skills: supervisorSkillStore{},
+		leases: supervisorLeaseStore{err: conflict},
+	}
+	s.EmitEvent = func(events.Event) {}
+	ap := &AgentProcess{
+		Entry:        cfgpkg.AgentEntry{Worktree: "worker-a", Role: "plan", Backend: "codex"},
+		RoleConfig:   cfgpkg.RoleConfig{},
+		WorktreePath: t.TempDir(),
+	}
+
+	err := s.spawnAgent(ap)
+	if err == nil {
+		t.Fatal("spawnAgent = nil, want a lease conflict to fail the spawn")
+	}
+	if !strings.Contains(err.Error(), "materialize skills") {
+		t.Fatalf("spawnAgent error = %v, want a materialize skills failure", err)
+	}
+	if ap.Cmd != nil {
+		t.Fatalf("Cmd = %v, want no subprocess after a lease conflict", ap.Cmd)
 	}
 }

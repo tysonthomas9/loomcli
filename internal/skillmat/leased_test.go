@@ -179,6 +179,26 @@ func TestMaterializeLeasedDegradesWhenLeaseStoreIsUnavailable(t *testing.T) {
 	}
 }
 
+// A fleet-db deployed without the lease routes at all is the same operational
+// condition as an unavailable lease store: materialize unlocked, do not fail.
+func TestMaterializeLeasedDegradesWhenLeaseRouteIsMissing(t *testing.T) {
+	var calls []string
+	leases := &fakeSkillMaterializationLeaseStore{
+		acquireErrs: []error{fmt.Errorf("fleetdb: POST /api/v1/WS/skill-materialization-leases: HTTP 404: %w",
+			domain.ErrSkillMaterializationLeaseRouteMissing)},
+		calls: &calls,
+	}
+	st := leasedMaterializeStore{leases: leases}
+	deps := testLeasedMaterializeDeps(&calls)
+
+	if err := materializeLeasedWith(t.Context(), st, "WS", "lead", t.TempDir(), deps); err != nil {
+		t.Fatalf("materializeLeasedWith: %v", err)
+	}
+	if want := []string{"acquire", "materialize"}; !reflect.DeepEqual(calls, want) {
+		t.Fatalf("calls = %v, want %v", calls, want)
+	}
+}
+
 func TestMaterializeLeasedDegradesOnLeaseTransportError(t *testing.T) {
 	var calls []string
 	leases := &fakeSkillMaterializationLeaseStore{
