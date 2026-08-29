@@ -241,14 +241,21 @@ func (b *FleetBackend) execURL(ctx context.Context, op, method, rawURL string, b
 
 // execAsActor wraps doRequestAsActor with standard error classification.
 func (b *FleetBackend) execAsActor(ctx context.Context, op, method, path string, body interface{}, actor string) error {
+	_, err := b.execResponseAsActor(ctx, op, method, path, body, actor)
+	return err
+}
+
+// execResponseAsActor wraps doRequestAsActor with standard error
+// classification and returns the response for mutations that need it.
+func (b *FleetBackend) execResponseAsActor(ctx context.Context, op, method, path string, body interface{}, actor string) (*apiResponse, error) {
 	apiResp, statusCode, err := b.doRequestAsActor(ctx, method, path, body, actor)
 	if err != nil {
-		return classifyTransportError(op, err)
+		return nil, classifyTransportError(op, err)
 	}
 	if cerr := classifyHTTPError(op, statusCode, *apiResp); cerr != nil {
-		return cerr
+		return nil, cerr
 	}
-	return nil
+	return apiResp, nil
 }
 
 // hasData returns true if the response Data field is present and non-null.
@@ -833,8 +840,8 @@ func (b *FleetBackend) Close(ctx context.Context, id string, params backend.Clos
 	// Release the agent claim before closing: a closed issue is terminal and
 	// can't be re-assigned afterward, so the assignee would otherwise linger.
 	// Best-effort — closing is the primary intent.
-	_ = b.releaseClaim(ctx, id, "")
-	resp, err := b.exec(ctx, "Close", "POST", "/issues/"+url.PathEscape(id)+"/close", req)
+	_ = b.releaseClaim(ctx, id, params.Actor)
+	resp, err := b.execResponseAsActor(ctx, "Close", "POST", "/issues/"+url.PathEscape(id)+"/close", req, params.Actor)
 	if err != nil {
 		return nil, err
 	}
@@ -869,7 +876,7 @@ func (b *FleetBackend) Reopen(ctx context.Context, id string, params backend.Reo
 	// status". The per-issue endpoint is also semantically richer — it
 	// runs the reopen state machine server-side and allows concurrent
 	// close-reopen ordering guarantees.
-	_, err := b.exec(ctx, "Reopen", "POST", "/issues/"+url.PathEscape(id)+"/reopen", map[string]interface{}{})
+	err := b.execAsActor(ctx, "Reopen", "POST", "/issues/"+url.PathEscape(id)+"/reopen", map[string]interface{}{}, params.Actor)
 	if err != nil {
 		return err
 	}
@@ -879,13 +886,13 @@ func (b *FleetBackend) Reopen(ctx context.Context, id string, params backend.Reo
 		type commentReq struct {
 			Body string `json:"body"`
 		}
-		_, _ = b.exec(ctx, "Reopen", "POST", "/issues/"+url.PathEscape(id)+"/comments", commentReq{Body: params.Reason})
+		_ = b.execAsActor(ctx, "Reopen", "POST", "/issues/"+url.PathEscape(id)+"/comments", commentReq{Body: params.Reason}, params.Actor)
 	}
 	// A reopened task is no longer claimed by whoever last worked it; clear the
 	// stale assignee so the kanban doesn't render a lingering agent on the
 	// now-open card. Mirrors transitionToOpen's clearAfterTransition.
 	// Best-effort: the reopen transition already succeeded.
-	_ = b.releaseClaim(ctx, id, "")
+	_ = b.releaseClaim(ctx, id, params.Actor)
 	return nil
 }
 

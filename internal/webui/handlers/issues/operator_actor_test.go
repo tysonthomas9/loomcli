@@ -138,6 +138,131 @@ func TestHandlePatchIssue_HomeCompositeWritesUseOperatorActor(t *testing.T) {
 	}
 }
 
+func TestOperatorWriteHandlers_ThreadOperatorActor(t *testing.T) {
+	paths := []struct {
+		name       string
+		newHandler func(*string) http.HandlerFunc
+		newRequest func() *http.Request
+		wantStatus int
+	}{
+		{
+			name: "close",
+			newHandler: func(actor *string) http.HandlerFunc {
+				return HandleCloseIssue(&mockIssueService{closeIssueFunc: func(_ context.Context, params service.CloseIssueParams) (json.RawMessage, error) {
+					*actor = params.Actor
+					return json.RawMessage(`{}`), nil
+				}})
+			},
+			newRequest: func() *http.Request {
+				req := httptest.NewRequest(http.MethodPost, "/api/workspaces/test-ws/issues/issue-1/close", strings.NewReader(`{}`))
+				req.SetPathValue("id", "issue-1")
+				return req
+			},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name: "reopen",
+			newHandler: func(actor *string) http.HandlerFunc {
+				return HandleReopenIssue(&mockIssueService{reopenIssueFunc: func(_ context.Context, params service.ReopenIssueParams) error {
+					*actor = params.Actor
+					return nil
+				}})
+			},
+			newRequest: func() *http.Request {
+				req := httptest.NewRequest(http.MethodPost, "/api/workspaces/test-ws/issues/issue-1/reopen", strings.NewReader(`{}`))
+				req.SetPathValue("id", "issue-1")
+				return req
+			},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name: "add dependency",
+			newHandler: func(actor *string) http.HandlerFunc {
+				return HandleAddDependency(&mockIssueService{addDependencyFunc: func(_ context.Context, params service.AddDependencyParams) error {
+					*actor = params.Actor
+					return nil
+				}})
+			},
+			newRequest: func() *http.Request {
+				req := httptest.NewRequest(http.MethodPost, "/api/workspaces/test-ws/issues/issue-1/deps", strings.NewReader(`{"depends_on_id":"issue-2"}`))
+				req.SetPathValue("id", "issue-1")
+				return req
+			},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name: "remove dependency",
+			newHandler: func(actor *string) http.HandlerFunc {
+				return HandleRemoveDependency(&mockIssueService{removeDependencyFunc: func(_ context.Context, params service.RemoveDependencyParams) error {
+					*actor = params.Actor
+					return nil
+				}})
+			},
+			newRequest: func() *http.Request {
+				req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/test-ws/issues/issue-1/deps/issue-2", nil)
+				req.SetPathValue("id", "issue-1")
+				req.SetPathValue("depId", "issue-2")
+				return req
+			},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name: "add comment",
+			newHandler: func(actor *string) http.HandlerFunc {
+				return HandleAddComment(&mockIssueService{addCommentFunc: func(_ context.Context, params service.AddCommentParams) (*types.Comment, error) {
+					*actor = params.Actor
+					return &types.Comment{ID: 1, IssueID: params.IssueID, Author: params.Author, Text: params.Text}, nil
+				}})
+			},
+			newRequest: func() *http.Request {
+				req := httptest.NewRequest(http.MethodPost, "/api/workspaces/test-ws/issues/issue-1/comments", strings.NewReader(`{"text":"FEEDBACK: revise"}`))
+				req.SetPathValue("id", "issue-1")
+				return req
+			},
+			wantStatus: http.StatusCreated,
+		},
+	}
+
+	actors := []struct {
+		name     string
+		identity *middleware.UserIdentity
+		want     string
+	}{
+		{name: "open mode fallback", want: defaultOperatorActor},
+		{
+			name:     "verified session",
+			identity: &middleware.UserIdentity{UserID: "user-123", Email: "operator@example.com"},
+			want:     "operator@example.com",
+		},
+	}
+
+	for _, actorCase := range actors {
+		t.Run(actorCase.name, func(t *testing.T) {
+			t.Setenv(envOperatorActor, "")
+			for _, path := range paths {
+				t.Run(path.name, func(t *testing.T) {
+					var gotActor string
+					handler := path.newHandler(&gotActor)
+					req := path.newRequest()
+					if actorCase.identity != nil {
+						req = req.WithContext(middleware.WithUserIdentity(req.Context(), *actorCase.identity))
+					}
+					resp := httptest.NewRecorder()
+
+					handler.ServeHTTP(resp, req)
+
+					if resp.Code != path.wantStatus {
+						t.Fatalf("status = %d, want %d; body: %s", resp.Code, path.wantStatus, resp.Body.String())
+					}
+					if gotActor != actorCase.want {
+						t.Errorf("Actor = %q, want %q", gotActor, actorCase.want)
+					}
+				})
+			}
+		})
+	}
+}
+
 func newFleetPatchHandler(t *testing.T, baseURL string) http.HandlerFunc {
 	t.Helper()
 	be, err := fleetbackend.New(fleetbackend.Config{

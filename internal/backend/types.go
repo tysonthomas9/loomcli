@@ -481,6 +481,8 @@ type UpdateParams struct {
 
 // CloseParams contains fields for closing an issue.
 type CloseParams struct {
+	// Actor overrides the backend process identity for this mutation only.
+	Actor       string `json:"-"`
 	Reason      string `json:"reason,omitempty"`
 	Session     string `json:"session,omitempty"`
 	SuggestNext bool   `json:"suggest_next,omitempty"`
@@ -489,6 +491,8 @@ type CloseParams struct {
 
 // ReopenParams contains fields for reopening a closed issue.
 type ReopenParams struct {
+	// Actor overrides the backend process identity for this mutation only.
+	Actor  string `json:"-"`
 	Reason string `json:"reason,omitempty"`
 }
 
@@ -504,6 +508,8 @@ type DeleteParams struct {
 
 // DepAddParams contains fields for adding a dependency between issues.
 type DepAddParams struct {
+	// Actor overrides the backend process identity for this mutation only.
+	Actor   string `json:"-"`
 	FromID  string `json:"from_id"`
 	ToID    string `json:"to_id"`
 	DepType string `json:"dep_type"`
@@ -511,6 +517,8 @@ type DepAddParams struct {
 
 // DepRemoveParams contains fields for removing a dependency between issues.
 type DepRemoveParams struct {
+	// Actor overrides the backend process identity for this mutation only.
+	Actor   string `json:"-"`
 	FromID  string `json:"from_id"`
 	ToID    string `json:"to_id"`
 	DepType string `json:"dep_type,omitempty"`
@@ -518,6 +526,8 @@ type DepRemoveParams struct {
 
 // CommentAddParams contains fields for adding a comment to an issue.
 type CommentAddParams struct {
+	// Actor overrides the backend process identity for this mutation only.
+	Actor   string `json:"-"`
 	IssueID string `json:"issue_id"`
 	Author  string `json:"author"`
 	Text    string `json:"text"`

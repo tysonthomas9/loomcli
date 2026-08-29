@@ -68,6 +68,7 @@ type MoveIssueResult struct {
 // CloseIssueParams holds the parameters for closing an issue.
 type CloseIssueParams struct {
 	IssueID     string
+	Actor       string
 	Reason      string
 	Session     string
 	SuggestNext bool
@@ -138,6 +139,7 @@ type PatchIssueParams struct {
 // AddCommentParams holds the parameters for adding a comment.
 type AddCommentParams struct {
 	IssueID string
+	Actor   string
 	Author  string
 	Text    string
 }
@@ -145,6 +147,7 @@ type AddCommentParams struct {
 // AddDependencyParams holds the parameters for adding a dependency.
 type AddDependencyParams struct {
 	IssueID     string
+	Actor       string
 	DependsOnID string
 	DepType     string // defaults to "blocks"
 }
@@ -152,6 +155,7 @@ type AddDependencyParams struct {
 // RemoveDependencyParams holds the parameters for removing a dependency.
 type RemoveDependencyParams struct {
 	IssueID string
+	Actor   string
 	DepID   string
 }
 
@@ -170,6 +174,7 @@ type SearchIssuesParams struct {
 // ReopenIssueParams holds the parameters for reopening a closed issue.
 type ReopenIssueParams struct {
 	IssueID string
+	Actor   string
 	Reason  string
 }
 
