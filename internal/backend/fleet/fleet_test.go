@@ -1606,6 +1606,42 @@ func TestListEvents_ReturnsMostRecentPageAcrossHistoryPagination(t *testing.T) {
 	}
 }
 
+func TestListEventHistory_SinceClampsToFleetPageMaximum(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	since := "opaque-cursor"
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("limit"); got != "200" {
+			t.Errorf("limit = %q, want 200", got)
+		}
+		if got := r.URL.Query().Get("since"); got != since {
+			t.Errorf("since = %q, want %q", got, since)
+		}
+		respondOK(w, map[string]any{
+			"history": []map[string]any{{
+				"id":        "201-0",
+				"timestamp": now,
+				"actor":     "agent",
+				"action":    "issue.update",
+			}},
+			"cursor":       "next-cursor",
+			"has_more":     true,
+			"total_events": 295,
+		})
+	})
+	defer ts.Close()
+
+	result, err := fb.ListEventHistory(context.Background(), "test-1", backend.EventHistoryParams{
+		Limit: 500,
+		Since: &since,
+	})
+	if err != nil {
+		t.Fatalf("ListEventHistory: %v", err)
+	}
+	if result.Cursor != "next-cursor" || !result.HasMore || result.TotalEvents != 295 {
+		t.Errorf("result metadata = %+v, want forwarded cursor/has_more/total_events", result)
+	}
+}
+
 // --- Not implemented surfaces (partial — implemented methods moved out) ---
 //
 // Count, Batch, GetMutations, and WaitForMutations used to live here as

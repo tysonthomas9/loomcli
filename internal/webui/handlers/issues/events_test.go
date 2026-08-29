@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -308,6 +309,105 @@ func TestHandleGetIssueEvents_InvalidLimitIgnored(t *testing.T) {
 
 	if capturedLimit != 100 {
 		t.Errorf("expected default limit 100, got %d", capturedLimit)
+	}
+}
+
+func TestHandleGetIssueEvents_SinceUnsupportedByBackendReturnsBadRequest(t *testing.T) {
+	svc := service.NewIssueServiceWithBackend(
+		nil,
+		nil,
+		nil,
+		func(context.Context) backend.IssueBackend { return &stubReadyBackend{} },
+	)
+
+	handler := handleGetIssueEvents(svc)
+	req := httptest.NewRequest(http.MethodGet, "/api/issues/test-123/events?since=opaque-cursor", nil)
+	req.SetPathValue("id", "test-123")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+	var response struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Error != "event history paging is not supported by this backend" {
+		t.Errorf("error = %q, want unsupported paging message", response.Error)
+	}
+}
+
+func TestHandleGetIssueEvents_NilHistoryResultReturnsInternalServerError(t *testing.T) {
+	svc := &mockIssueService{
+		listEventHistoryFunc: func(context.Context, service.EventListParams) (*service.EventListResult, error) {
+			return nil, nil
+		},
+	}
+
+	handler := handleGetIssueEvents(svc)
+	req := httptest.NewRequest(http.MethodGet, "/api/issues/test-123/events", nil)
+	req.SetPathValue("id", "test-123")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusInternalServerError, w.Body.String())
+	}
+}
+
+func TestHandleGetIssueEvents_BareSinceUsesFirstPageLimit(t *testing.T) {
+	svc := &mockIssueService{
+		listEventHistoryFunc: func(_ context.Context, params service.EventListParams) (*service.EventListResult, error) {
+			if params.Since == nil || *params.Since != "" {
+				t.Errorf("Since = %v, want present empty cursor", params.Since)
+			}
+			if params.Limit != 200 {
+				t.Errorf("Limit = %d, want 200", params.Limit)
+			}
+			return &service.EventListResult{Events: []*types.Event{}}, nil
+		},
+	}
+
+	handler := handleGetIssueEvents(svc)
+	req := httptest.NewRequest(http.MethodGet, "/api/issues/test-123/events?since=&limit=500", nil)
+	req.SetPathValue("id", "test-123")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+}
+
+func TestHandleGetIssueEvents_UnknownTotalIsOmitted(t *testing.T) {
+	svc := &mockIssueService{
+		listEventHistoryFunc: func(context.Context, service.EventListParams) (*service.EventListResult, error) {
+			return &service.EventListResult{Events: []*types.Event{{ID: "event-1"}}}, nil
+		},
+	}
+
+	handler := handleGetIssueEvents(svc)
+	req := httptest.NewRequest(http.MethodGet, "/api/issues/test-123/events", nil)
+	req.SetPathValue("id", "test-123")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+	var response map[string]json.RawMessage
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if _, ok := response["total_events"]; ok {
+		t.Errorf("total_events should be omitted when the backend does not know it: %s", w.Body.String())
 	}
 }
 

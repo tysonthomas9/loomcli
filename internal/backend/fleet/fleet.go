@@ -42,6 +42,7 @@ type FleetBackend struct {
 // Compile-time interface check.
 var _ backend.IssueBackend = (*FleetBackend)(nil)
 var _ backend.CursorMutationBackend = (*FleetBackend)(nil)
+var _ backend.EventHistoryBackend = (*FleetBackend)(nil)
 var _ backend.ClaimReleaser = (*FleetBackend)(nil)
 
 // apiResponse is the generic JSON envelope returned by fleet server endpoints.

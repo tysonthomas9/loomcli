@@ -454,6 +454,37 @@ func TestIPCIssueBackend_Create_DelegatesToDirectBackend(t *testing.T) {
 	}
 }
 
+func TestIPCIssueBackend_PreservesEventHistoryCapability(t *testing.T) {
+	since := "cursor-200"
+	direct := &eventHistoryMockBackend{
+		MockIssueBackend: NewMockIssueBackend(),
+		result: &backend.EventHistoryData{
+			Cursor:      "cursor-201",
+			HasMore:     true,
+			TotalEvents: 295,
+		},
+	}
+	b := newIPCIssueBackend(&mockIPCMutator{}, direct)
+
+	historyBackend, ok := any(b).(backend.EventHistoryBackend)
+	if !ok {
+		t.Fatal("IPC backend should preserve EventHistoryBackend")
+	}
+	result, err := historyBackend.ListEventHistory(context.Background(), "TASK-1", backend.EventHistoryParams{
+		Limit: 200,
+		Since: &since,
+	})
+	if err != nil {
+		t.Fatalf("ListEventHistory: %v", err)
+	}
+	if result.Cursor != "cursor-201" || result.TotalEvents != 295 {
+		t.Errorf("result = %+v, want forwarded event-history result", result)
+	}
+	if direct.params.Since == nil || *direct.params.Since != since || direct.params.Limit != 200 {
+		t.Errorf("params = %+v, want since %q and limit 200", direct.params, since)
+	}
+}
+
 // --- BackendName test ---
 
 func TestIPCIssueBackend_BackendName(t *testing.T) {
