@@ -3267,7 +3267,12 @@ type ListBlockedParams struct {
 	Assignee *string                `form:"assignee,omitempty" json:"assignee,omitempty"`
 	Type     *ListBlockedParamsType `form:"type,omitempty" json:"type,omitempty"`
 	Priority *int                   `form:"priority,omitempty" json:"priority,omitempty"`
-	Limit    *int                   `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Limit Maximum number of blocked issues to return. Values above the
+	// maximum are clamped to it, not rejected: a request for 1000
+	// returns at most 200 rows with HTTP 200. The response body does
+	// not currently distinguish a clamped page from an exhaustive one.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // ListBlockedParamsType defines parameters for ListBlocked.
@@ -3463,7 +3468,12 @@ type ListIssuesParams struct {
 	Labels *string `form:"labels,omitempty" json:"labels,omitempty"`
 
 	// SourceRepos Comma-separated source repo filters
-	SourceRepos         *string `form:"source_repos,omitempty" json:"source_repos,omitempty"`
+	SourceRepos *string `form:"source_repos,omitempty" json:"source_repos,omitempty"`
+
+	// Limit Maximum number of issues to return. Values above the maximum are
+	// clamped to it, not rejected: a request for 1000 returns at most
+	// 200 rows with HTTP 200. The response body does not currently
+	// distinguish a clamped page from an exhaustive one.
 	Limit               *int    `form:"limit,omitempty" json:"limit,omitempty"`
 	TitleContains       *string `form:"title_contains,omitempty" json:"title_contains,omitempty"`
 	DescriptionContains *string `form:"description_contains,omitempty" json:"description_contains,omitempty"`
