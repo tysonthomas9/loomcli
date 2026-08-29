@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -65,7 +65,7 @@ func collectFilteredEvents(files []string, opts EventReadOpts) []Event {
 	for _, file := range files {
 		fileEvents, err := ReadJSONLFile(file)
 		if err != nil {
-			log.Printf("events: skipping %s: %v", filepath.Base(file), err)
+			slog.Warn("skipping unreadable event file", "file", filepath.Base(file), "err", err)
 			continue
 		}
 		for i := range fileEvents {

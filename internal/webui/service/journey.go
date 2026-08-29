@@ -18,7 +18,9 @@ const (
 	journeyHistoryPageLimit = 200
 	defaultJourneyPageCap   = 100
 	journeySpanKindStatus   = "status"
-	needsRevisionLabel      = "needs-revision"
+	// Mirrors taskfilter.NeedsRevisionLabel (package cli). service cannot
+	// import internal/cli because cli already depends on this package.
+	needsRevisionLabel = "needs-revision"
 )
 
 // JourneyServiceConfig supplies host-local data and deterministic fold knobs.
@@ -75,60 +77,85 @@ func (s *issueServiceImpl) readJourneyHistory(ctx context.Context, issueID strin
 	// A known total matching an unbounded tail proves completeness without a
 	// second request. Unknown totals still take the forward paging seam so a
 	// legacy bounded ListEvents result is never mislabeled complete.
-	if tail.TotalEvents > 0 && !tail.HasMore && len(tail.Events) == tail.TotalEvents {
-		return tail.Events, JourneyHonesty{
-			CompleteHistory: true,
-			EventsSeen:      len(tail.Events),
-			TotalEvents:     tail.TotalEvents,
-		}, nil
+	if hasKnownCompleteJourneyHistory(tail.Events, tail.HasMore, tail.TotalEvents) {
+		return tail.Events, completeJourneyHonesty(tail.Events, tail.TotalEvents), nil
 	}
+	return s.walkJourneyHistory(ctx, issueID, tail)
+}
 
-	cursor := ""
-	events := make([]*types.Event, 0, max(len(tail.Events), tail.TotalEvents))
-	totalEvents := tail.TotalEvents
+type journeyHistoryWalkState struct {
+	cursor      string
+	events      []*types.Event
+	totalEvents int
+}
+
+type journeyHistoryWalkResult struct {
+	events  []*types.Event
+	honesty JourneyHonesty
+}
+
+func (s *issueServiceImpl) walkJourneyHistory(ctx context.Context, issueID string, tail *EventListResult) ([]*types.Event, JourneyHonesty, error) {
+	state := journeyHistoryWalkState{
+		events:      make([]*types.Event, 0, max(len(tail.Events), tail.TotalEvents)),
+		totalEvents: tail.TotalEvents,
+	}
 	for page := 0; page < s.journey.HistoryPageCap; page++ {
-		result, pageErr := s.ListEventHistory(ctx, EventListParams{
-			IssueID: issueID,
-			Limit:   journeyHistoryPageLimit,
-			Since:   &cursor,
-		})
+		outcome, pageErr := s.readJourneyHistoryPage(ctx, issueID, tail, &state)
 		if pageErr != nil {
-			var serviceErr *ServiceError
-			if errors.As(pageErr, &serviceErr) && serviceErr.Kind == KindValidation {
-				boundedEvents, boundedHonesty := boundedJourneyHistory(tail, "history_paging_unavailable")
-				return boundedEvents, boundedHonesty, nil
-			}
 			return nil, JourneyHonesty{}, pageErr
 		}
-		if result == nil {
-			boundedEvents, boundedHonesty := boundedJourneyHistory(tail, "history_page_missing")
-			return boundedEvents, boundedHonesty, nil
+		if outcome != nil {
+			return outcome.events, outcome.honesty, nil
 		}
-		events = append(events, result.Events...)
-		if result.TotalEvents > 0 {
-			totalEvents = result.TotalEvents
-		}
-		if !result.HasMore {
-			if totalEvents > 0 && len(events) != totalEvents {
-				boundedEvents, boundedHonesty := boundedJourneyHistory(tail, "history_count_mismatch")
-				boundedHonesty.TotalEvents = totalEvents
-				return boundedEvents, boundedHonesty, nil
-			}
-			return events, JourneyHonesty{
-				CompleteHistory: true,
-				EventsSeen:      len(events),
-				TotalEvents:     totalEvents,
-			}, nil
-		}
-		if result.Cursor == "" || result.Cursor == cursor {
-			boundedEvents, boundedHonesty := boundedJourneyHistory(tail, "history_cursor_stalled")
-			return boundedEvents, boundedHonesty, nil
-		}
-		cursor = result.Cursor
 	}
 
 	boundedEvents, boundedHonesty := boundedJourneyHistory(tail, "history_page_cap_reached")
 	return boundedEvents, boundedHonesty, nil
+}
+
+func (s *issueServiceImpl) readJourneyHistoryPage(ctx context.Context, issueID string, tail *EventListResult, state *journeyHistoryWalkState) (*journeyHistoryWalkResult, error) {
+	result, err := s.ListEventHistory(ctx, EventListParams{IssueID: issueID, Limit: journeyHistoryPageLimit, Since: &state.cursor})
+	if err != nil {
+		var serviceErr *ServiceError
+		if errors.As(err, &serviceErr) && serviceErr.Kind == KindValidation {
+			return boundedJourneyHistoryResult(tail, "history_paging_unavailable"), nil
+		}
+		return nil, err
+	}
+	if result == nil {
+		return boundedJourneyHistoryResult(tail, "history_page_missing"), nil
+	}
+
+	state.events = append(state.events, result.Events...)
+	if result.TotalEvents > 0 {
+		state.totalEvents = result.TotalEvents
+	}
+	if !result.HasMore {
+		if state.totalEvents > 0 && len(state.events) != state.totalEvents {
+			outcome := boundedJourneyHistoryResult(tail, "history_count_mismatch")
+			outcome.honesty.TotalEvents = state.totalEvents
+			return outcome, nil
+		}
+		return &journeyHistoryWalkResult{events: state.events, honesty: completeJourneyHonesty(state.events, state.totalEvents)}, nil
+	}
+	if result.Cursor == "" || result.Cursor == state.cursor {
+		return boundedJourneyHistoryResult(tail, "history_cursor_stalled"), nil
+	}
+	state.cursor = result.Cursor
+	return nil, nil
+}
+
+func hasKnownCompleteJourneyHistory(events []*types.Event, hasMore bool, totalEvents int) bool {
+	return !hasMore && totalEvents > 0 && len(events) == totalEvents
+}
+
+func completeJourneyHonesty(events []*types.Event, totalEvents int) JourneyHonesty {
+	return JourneyHonesty{CompleteHistory: true, EventsSeen: len(events), TotalEvents: totalEvents}
+}
+
+func boundedJourneyHistoryResult(tail *EventListResult, reason string) *journeyHistoryWalkResult {
+	events, honesty := boundedJourneyHistory(tail, reason)
+	return &journeyHistoryWalkResult{events: events, honesty: honesty}
 }
 
 func boundedJourneyHistory(tail *EventListResult, reason string) ([]*types.Event, JourneyHonesty) {
@@ -172,92 +199,94 @@ func foldJourneySpans(eventList []*types.Event, bounded bool) []JourneySpan {
 	for _, item := range ordered {
 		event := item.event
 		before := state
-		forceBoundary := false
-		action := strings.TrimSpace(strings.ToLower(string(event.EventType)))
-
-		switch action {
-		case "issue.create":
-			state.status = "open"
-			state.owner, state.ownerKnown = assignmentFromCreation(event)
-			state.needsRevision = labelSetAfter(event, needsRevisionLabel, false)
-		case "issue.claim":
-			state.status = "in_progress"
-			state.owner, state.ownerKnown = normalizedStringPointer(event.Actor), true
-			forceBoundary = before.status != ""
-		case "issue.release":
-			state.status = "open"
-			state.owner, state.ownerKnown = nil, true
-		case "issue.defer":
-			state.status = "deferred"
-		case "issue.undefer":
-			state.status = "open"
-		case "issue.close":
-			state.status = "closed"
-		case "issue.reopen":
-			state.status = "open"
-			state.owner, state.ownerKnown = nil, true
-		case "issue.assign":
-			if assignee, present := event.Metadata["assignee"]; present {
-				state.owner, state.ownerKnown = normalizedStringPointer(assignee), true
-			}
-		case "label.add":
-			if strings.EqualFold(strings.TrimSpace(event.Metadata["label"]), needsRevisionLabel) {
-				state.needsRevision = true
-			}
-		case "label.remove":
-			if strings.EqualFold(strings.TrimSpace(event.Metadata["label"]), needsRevisionLabel) {
-				state.needsRevision = false
-			}
-		case "issue.update":
-			if status, ok := changeAfter(event, "status"); ok {
-				state.status = normalizedStatus(status)
-			}
-			state.needsRevision = labelSetAfter(event, needsRevisionLabel, state.needsRevision)
-		}
-
-		if state.status == "" {
+		action, forceBoundary := applyJourneyEvent(&state, event)
+		if !journeyFoldStateChanged(before, state) && !forceBoundary {
 			continue
 		}
-		changed := before.status != state.status || before.ownerKnown != state.ownerKnown ||
-			!equalOptionalString(before.owner, state.owner) || before.needsRevision != state.needsRevision
-		if !changed && !forceBoundary {
-			continue
-		}
-
-		at := event.CreatedAt.UTC()
-		if len(spans) > 0 {
-			spans[len(spans)-1].End = timePointer(at)
-		}
-		span := JourneySpan{
-			Kind:          journeySpanKindStatus,
-			Stage:         state.status,
-			Start:         at,
-			Owner:         cloneStringPointer(state.owner),
-			Actor:         normalizedStringPointer(event.Actor),
-			NeedsRevision: state.needsRevision,
-			Stalled:       action == "issue.release" && strings.EqualFold(strings.TrimSpace(event.Actor), "system"),
-		}
-		if state.status == "closed" {
-			span.End = timePointer(at)
-		}
-		spans = append(spans, span)
+		spans = appendJourneySpan(spans, state, action, event)
 	}
 
-	if len(spans) > 0 && (bounded || ordered[0].event.EventType != types.EventType("issue.create")) {
+	if len(spans) > 0 && (bounded || normalizedJourneyAction(ordered[0].event) != "issue.create") {
 		spans[0].Approximate = true
 		spans[0].UnknownStart = true
 	}
 	return spans
 }
 
-func assignmentFromCreation(event *types.Event) (*string, bool) {
-	if assignee, present := event.Metadata["assignee"]; present {
-		return normalizedStringPointer(assignee), true
+func applyJourneyEvent(state *journeyFoldState, event *types.Event) (string, bool) {
+	action := normalizedJourneyAction(event)
+	hadStatus := state.status != ""
+	forceBoundary := false
+	switch action {
+	case "issue.create":
+		state.status = "open"
+		// fleet-db issue.create has neither metadata nor changes, so a
+		// pre-assigned owner is not detectable and its wait remains queued.
+		state.owner, state.ownerKnown = nil, true
+	case "issue.claim":
+		state.status = "in_progress"
+		state.owner, state.ownerKnown = normalizedStringPointer(event.Actor), true
+		forceBoundary = hadStatus
+	case "issue.release":
+		state.status = "open"
+		state.owner, state.ownerKnown = nil, true
+	case "issue.defer":
+		state.status = "deferred"
+	case "issue.undefer":
+		state.status = "open"
+	case "issue.close":
+		state.status = "closed"
+	case "issue.reopen":
+		state.status = "open"
+		state.owner, state.ownerKnown = nil, true
+	case "issue.assign":
+		if assignee, present := event.Metadata["assignee"]; present {
+			state.owner, state.ownerKnown = normalizedStringPointer(assignee), true
+		}
+	case "label.add", "label.remove":
+		applyJourneyLabelEvent(state, action, event)
+	case "issue.update":
+		if status, ok := changeAfter(event, "status"); ok {
+			state.status = normalizedStatus(status)
+		}
 	}
-	if assignee, present := changeAfter(event, "assignee"); present {
-		return normalizedStringPointer(assignee), true
+	return action, forceBoundary
+}
+
+func normalizedJourneyAction(event *types.Event) string {
+	return strings.TrimSpace(strings.ToLower(string(event.EventType)))
+}
+
+func applyJourneyLabelEvent(state *journeyFoldState, action string, event *types.Event) {
+	if !strings.EqualFold(strings.TrimSpace(event.Metadata["label"]), needsRevisionLabel) {
+		return
 	}
-	return nil, true
+	state.needsRevision = action == "label.add"
+}
+
+func journeyFoldStateChanged(before, after journeyFoldState) bool {
+	return after.status != "" && (before.status != after.status || before.ownerKnown != after.ownerKnown ||
+		!equalOptionalString(before.owner, after.owner) || before.needsRevision != after.needsRevision)
+}
+
+func appendJourneySpan(spans []JourneySpan, state journeyFoldState, action string, event *types.Event) []JourneySpan {
+	at := event.CreatedAt.UTC()
+	if len(spans) > 0 {
+		spans[len(spans)-1].End = timePointer(at)
+	}
+	span := JourneySpan{
+		Kind:          journeySpanKindStatus,
+		Stage:         state.status,
+		Start:         at,
+		Owner:         cloneStringPointer(state.owner),
+		Actor:         normalizedStringPointer(event.Actor),
+		NeedsRevision: state.needsRevision,
+		Stalled:       action == "issue.release" && strings.EqualFold(strings.TrimSpace(event.Actor), "system"),
+	}
+	if state.status == "closed" {
+		span.End = timePointer(at)
+	}
+	return append(spans, span)
 }
 
 func changeAfter(event *types.Event, field string) (string, bool) {
@@ -267,23 +296,6 @@ func changeAfter(event *types.Event, field string) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-func labelSetAfter(event *types.Event, label string, current bool) bool {
-	raw, changed := changeAfter(event, "labels")
-	if !changed {
-		return current
-	}
-	var labels []string
-	if err := json.Unmarshal([]byte(raw), &labels); err != nil {
-		return current
-	}
-	for _, candidate := range labels {
-		if strings.EqualFold(strings.TrimSpace(candidate), label) {
-			return true
-		}
-	}
-	return false
 }
 
 func normalizedStatus(status string) string {
@@ -319,51 +331,34 @@ func timePointer(value time.Time) *time.Time {
 }
 
 func readJourneyAgentWindows(eventsDir, taskID string) ([]JourneyAgentWindow, bool, string) {
-	if strings.TrimSpace(eventsDir) == "" {
-		return []JourneyAgentWindow{}, false, "events_dir_not_configured"
-	}
-	all, _, err := loomevents.ReadEventsFromJSONL(eventsDir, loomevents.EventReadOpts{
-		Page:    1,
-		PerPage: math.MaxInt,
-	})
-	if err != nil {
-		return []JourneyAgentWindow{}, false, "events_read_failed"
+	all, unavailableReason := readJourneyLifecycleEvents(eventsDir)
+	if unavailableReason != "" {
+		return []JourneyAgentWindow{}, false, unavailableReason
 	}
 	sort.SliceStable(all, func(i, j int) bool { return all[i].Timestamp.Before(all[j].Timestamp) })
+	return scanJourneyAgentWindows(all, taskID)
+}
 
+func readJourneyLifecycleEvents(eventsDir string) ([]loomevents.Event, string) {
+	if strings.TrimSpace(eventsDir) == "" {
+		return nil, "events_dir_not_configured"
+	}
+	all, _, err := loomevents.ReadEventsFromJSONL(eventsDir, loomevents.EventReadOpts{Page: 1, PerPage: math.MaxInt})
+	if err != nil {
+		return nil, "events_read_failed"
+	}
+	return all, ""
+}
+
+func scanJourneyAgentWindows(all []loomevents.Event, taskID string) ([]JourneyAgentWindow, bool, string) {
 	windows := make([]JourneyAgentWindow, 0)
 	found := false
 	for _, event := range all {
-		if event.Type != loomevents.TaskClaimed && event.Type != loomevents.TaskCompleted && event.Type != loomevents.TaskFailed {
-			continue
-		}
-		var data struct {
-			TaskID string `json:"task_id"`
-		}
-		if err := json.Unmarshal(event.Data, &data); err != nil || data.TaskID != taskID {
+		if !isJourneyLifecycleEvent(event) || journeyLifecycleTaskID(event) != taskID {
 			continue
 		}
 		found = true
-		switch event.Type {
-		case loomevents.TaskClaimed:
-			windows = append(windows, JourneyAgentWindow{
-				TaskID:  taskID,
-				Agent:   event.Agent,
-				Start:   event.Timestamp.UTC(),
-				Outcome: "running",
-			})
-		case loomevents.TaskCompleted, loomevents.TaskFailed:
-			index := latestOpenAgentWindow(windows, event.Agent)
-			if index < 0 {
-				continue
-			}
-			windows[index].End = timePointer(event.Timestamp.UTC())
-			if event.Type == loomevents.TaskCompleted {
-				windows[index].Outcome = "completed"
-			} else {
-				windows[index].Outcome = "failed"
-			}
-		}
+		windows = applyJourneyLifecycleEvent(windows, taskID, event)
 	}
 	if !found {
 		return windows, false, "no_task_lifecycle_events"
@@ -372,6 +367,37 @@ func readJourneyAgentWindows(eventsDir, taskID string) ([]JourneyAgentWindow, bo
 		return windows, false, "no_claimed_window"
 	}
 	return windows, true, ""
+}
+
+func isJourneyLifecycleEvent(event loomevents.Event) bool {
+	return event.Type == loomevents.TaskClaimed || event.Type == loomevents.TaskCompleted || event.Type == loomevents.TaskFailed
+}
+
+func journeyLifecycleTaskID(event loomevents.Event) string {
+	var data struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := json.Unmarshal(event.Data, &data); err != nil {
+		return ""
+	}
+	return data.TaskID
+}
+
+func applyJourneyLifecycleEvent(windows []JourneyAgentWindow, taskID string, event loomevents.Event) []JourneyAgentWindow {
+	if event.Type == loomevents.TaskClaimed {
+		return append(windows, JourneyAgentWindow{TaskID: taskID, Agent: event.Agent, Start: event.Timestamp.UTC(), Outcome: "running"})
+	}
+	index := latestOpenAgentWindow(windows, event.Agent)
+	if index < 0 {
+		return windows
+	}
+	windows[index].End = timePointer(event.Timestamp.UTC())
+	if event.Type == loomevents.TaskCompleted {
+		windows[index].Outcome = "completed"
+	} else {
+		windows[index].Outcome = "failed"
+	}
+	return windows
 }
 
 func latestOpenAgentWindow(windows []JourneyAgentWindow, agent string) int {
@@ -391,18 +417,31 @@ func latestOpenAgentWindow(windows []JourneyAgentWindow, agent string) int {
 }
 
 func decomposeJourneyLeadTime(spans []JourneySpan, windows []JourneyAgentWindow, windowsAvailable bool, now time.Time) JourneyLeadTime {
-	if len(spans) == 0 {
-		return JourneyLeadTime{}
-	}
-	start := spans[0].Start
-	end := now
-	if last := spans[len(spans)-1]; last.Stage == "closed" {
-		end = last.Start
-	}
-	if !end.After(start) {
+	start, end, ok := journeyLeadTimeRange(spans, now)
+	if !ok {
 		return JourneyLeadTime{}
 	}
 
+	result := JourneyLeadTime{TotalMS: end.Sub(start).Milliseconds()}
+	boundaries := journeyLeadTimeBoundaries(spans, windows, start, end)
+	for index := 0; index+1 < len(boundaries); index++ {
+		addJourneyLeadTimeInterval(&result, spans, windows, windowsAvailable, start, end, boundaries[index], boundaries[index+1])
+	}
+	return result
+}
+
+func journeyLeadTimeRange(spans []JourneySpan, now time.Time) (time.Time, time.Time, bool) {
+	if len(spans) == 0 {
+		return time.Time{}, time.Time{}, false
+	}
+	start, end := spans[0].Start, now
+	if last := spans[len(spans)-1]; last.Stage == "closed" {
+		end = last.Start
+	}
+	return start, end, end.After(start)
+}
+
+func journeyLeadTimeBoundaries(spans []JourneySpan, windows []JourneyAgentWindow, start, end time.Time) []time.Time {
 	boundaries := []time.Time{start, end}
 	for _, span := range spans {
 		boundaries = append(boundaries, span.Start)
@@ -417,42 +456,42 @@ func decomposeJourneyLeadTime(spans []JourneySpan, windows []JourneyAgentWindow,
 		}
 	}
 	sort.Slice(boundaries, func(i, j int) bool { return boundaries[i].Before(boundaries[j]) })
+	return boundaries
+}
 
-	result := JourneyLeadTime{TotalMS: end.Sub(start).Milliseconds()}
-	for index := 0; index+1 < len(boundaries); index++ {
-		left, right := boundaries[index], boundaries[index+1]
-		if !right.After(left) || left.Before(start) || !left.Before(end) {
-			continue
-		}
-		span := journeySpanAt(spans, left)
-		if span == nil {
-			continue
-		}
-		durationMS := right.Sub(left).Milliseconds()
-
-		// The four requested buckets are mutually exclusive. Status-derived
-		// operator waits and halts take precedence over a lifecycle window that
-		// happens to remain open across those intervals; otherwise the same wall
-		// time would be counted twice and cease to be a decomposition.
-		switch {
-		case span.Stage == "blocked":
-			result.HaltedMS += durationMS
-		case span.Stage == "review" || span.NeedsRevision:
-			result.WaitingOnOperatorMS += durationMS
-		case windowsAvailable && journeyAgentWorkingAt(windows, left):
-			result.AgentWorkingMS += durationMS
-		case !windowsAvailable && span.Stage == "in_progress":
-			// Exact claim-to-terminal windows replace the status approximation as
-			// soon as this host has any claimed window for the task. Otherwise a
-			// failed attempt's gap before re-claim would be counted as work merely
-			// because the issue remained in_progress. With no task-local window at
-			// all (old run or another host), in_progress is the documented fallback.
-			result.AgentWorkingMS += durationMS
-		case span.Stage == "open" && span.Owner == nil:
-			result.QueuedMS += durationMS
-		}
+func addJourneyLeadTimeInterval(result *JourneyLeadTime, spans []JourneySpan, windows []JourneyAgentWindow, windowsAvailable bool, start, end, left, right time.Time) {
+	if !right.After(left) || left.Before(start) || !left.Before(end) {
+		return
 	}
-	return result
+	span := journeySpanAt(spans, left)
+	if span == nil {
+		return
+	}
+	addJourneyLeadTimeBucket(result, span, windows, windowsAvailable, left, right.Sub(left).Milliseconds())
+}
+
+func addJourneyLeadTimeBucket(result *JourneyLeadTime, span *JourneySpan, windows []JourneyAgentWindow, windowsAvailable bool, at time.Time, durationMS int64) {
+	// The four requested buckets are mutually exclusive. Status-derived
+	// operator waits and halts take precedence over a lifecycle window that
+	// happens to remain open across those intervals; otherwise the same wall
+	// time would be counted twice and cease to be a decomposition.
+	switch {
+	case span.Stage == "blocked":
+		result.HaltedMS += durationMS
+	case span.Stage == "review" || span.NeedsRevision:
+		result.WaitingOnOperatorMS += durationMS
+	case windowsAvailable && span.Stage == "in_progress" && journeyAgentWorkingAt(windows, at):
+		result.AgentWorkingMS += durationMS
+	case !windowsAvailable && span.Stage == "in_progress":
+		// Exact claim-to-terminal windows replace the status approximation as
+		// soon as this host has any claimed window for the task. Otherwise a
+		// failed attempt's gap before re-claim would be counted as work merely
+		// because the issue remained in_progress. With no task-local window at
+		// all (old run or another host), in_progress is the documented fallback.
+		result.AgentWorkingMS += durationMS
+	case span.Stage == "open" && span.Owner == nil:
+		result.QueuedMS += durationMS
+	}
 }
 
 func journeySpanAt(spans []JourneySpan, at time.Time) *JourneySpan {

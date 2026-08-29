@@ -19,10 +19,14 @@ var journeyTestStart = time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
 
 type journeyHistoryBackend struct {
 	*fakeIssueBackend
-	events []backend.EventData
+	events      []backend.EventData
+	listHistory func(backend.EventHistoryParams) (*backend.EventHistoryData, error)
 }
 
 func (b *journeyHistoryBackend) ListEventHistory(_ context.Context, id string, params backend.EventHistoryParams) (*backend.EventHistoryData, error) {
+	if b.listHistory != nil {
+		return b.listHistory(params)
+	}
 	if params.Since == nil {
 		start := max(0, len(b.events)-params.Limit)
 		return &backend.EventHistoryData{
@@ -204,6 +208,9 @@ func TestGetJourney_MissingLifecycleOverlayStillRendersStageFallback(t *testing.
 	if journey.Honesty.AgentWindowsAvailable || journey.LeadTime.AgentWorkingMS != 30_000 {
 		t.Errorf("overlay honesty/working fallback = %+v / %+v", journey.Honesty, journey.LeadTime)
 	}
+	if journey.Honesty.AgentWindowsReason != "no_task_lifecycle_events" {
+		t.Errorf("agent windows reason = %q, want no_task_lifecycle_events", journey.Honesty.AgentWindowsReason)
+	}
 }
 
 func TestGetJourney_ReaperReleaseMarksStalledSpan(t *testing.T) {
@@ -230,6 +237,84 @@ func TestGetJourney_ReaperReleaseMarksStalledSpan(t *testing.T) {
 	}
 	if got := journey.Spans[len(journey.Spans)-1]; got.Stage != "open" || got.Owner != nil || !got.Stalled {
 		t.Errorf("post-release span = %+v, want stalled open/unassigned", got)
+	}
+	if journey.Honesty.AgentWindowsReason != "events_dir_not_configured" {
+		t.Errorf("agent windows reason = %q, want events_dir_not_configured", journey.Honesty.AgentWindowsReason)
+	}
+}
+
+func TestGetJourney_ManualReleaseIsNotStalled(t *testing.T) {
+	history := &journeyHistoryBackend{
+		fakeIssueBackend: &fakeIssueBackend{},
+		events: []backend.EventData{
+			journeyIssueEvent(0, "issue.create", "operator"),
+			journeyIssueEvent(10, "issue.claim", "agent-dev-1"),
+			journeyIssueEvent(20, "issue.release", "operator"),
+		},
+	}
+	svc := NewIssueServiceWithBackend(nil, nil, nil,
+		func(context.Context) backend.IssueBackend { return history },
+		JourneyServiceConfig{Now: func() time.Time { return journeyTestStart.Add(30 * time.Second) }},
+	)
+
+	journey, err := svc.GetJourney(context.Background(), "task-1")
+	if err != nil {
+		t.Fatalf("GetJourney: %v", err)
+	}
+	if got := journey.Spans[len(journey.Spans)-1]; got.Stalled {
+		t.Errorf("manual-release span = %+v, want stalled=false", got)
+	}
+}
+
+func TestGetJourney_OpenLifecycleWindowStopsAtInProgressSpan(t *testing.T) {
+	history := &journeyHistoryBackend{
+		fakeIssueBackend: &fakeIssueBackend{},
+		events: []backend.EventData{
+			journeyIssueEvent(10, "issue.create", "operator"),
+			journeyIssueEvent(10, "issue.claim", "agent-dev-1"),
+			journeyIssueEvent(3610, "issue.release", "system"),
+		},
+	}
+	eventsDir := writeJourneyLifecycleEvents(t,
+		journeyLifecycleEvent(t, 10, loomevents.TaskClaimed, "agent-dev-1", loomevents.TaskClaimedData{TaskID: "task-1"}),
+	)
+	svc := NewIssueServiceWithBackend(nil, nil, nil,
+		func(context.Context) backend.IssueBackend { return history },
+		JourneyServiceConfig{EventsDir: eventsDir, Now: func() time.Time { return journeyTestStart.Add(7210 * time.Second) }},
+	)
+
+	journey, err := svc.GetJourney(context.Background(), "task-1")
+	if err != nil {
+		t.Fatalf("GetJourney: %v", err)
+	}
+	if got, want := journey.LeadTime, (JourneyLeadTime{
+		TotalMS:        7_200_000,
+		QueuedMS:       3_600_000,
+		AgentWorkingMS: 3_600_000,
+	}); got != want {
+		t.Errorf("lead time = %+v, want %+v", got, want)
+	}
+}
+
+func TestGetJourney_LifecycleHonestyReportsTerminalWithoutClaim(t *testing.T) {
+	history := &journeyHistoryBackend{
+		fakeIssueBackend: &fakeIssueBackend{},
+		events:           []backend.EventData{journeyIssueEvent(0, "issue.create", "operator")},
+	}
+	eventsDir := writeJourneyLifecycleEvents(t,
+		journeyLifecycleEvent(t, 10, loomevents.TaskCompleted, "agent-dev-1", loomevents.TaskCompletedData{TaskID: "task-1"}),
+	)
+	svc := NewIssueServiceWithBackend(nil, nil, nil,
+		func(context.Context) backend.IssueBackend { return history },
+		JourneyServiceConfig{EventsDir: eventsDir, Now: func() time.Time { return journeyTestStart.Add(20 * time.Second) }},
+	)
+
+	journey, err := svc.GetJourney(context.Background(), "task-1")
+	if err != nil {
+		t.Fatalf("GetJourney: %v", err)
+	}
+	if journey.Honesty.AgentWindowsAvailable || journey.Honesty.AgentWindowsReason != "no_claimed_window" {
+		t.Errorf("agent window honesty = %+v, want no_claimed_window", journey.Honesty)
 	}
 }
 
@@ -348,6 +433,72 @@ func TestGetJourney_WalksCursorPagesToCompleteHistory(t *testing.T) {
 	if journey.Spans[0].UnknownStart || journey.Spans[0].Approximate || journey.Spans[0].Stage != "open" {
 		t.Errorf("first span = %+v, want exact open span", journey.Spans[0])
 	}
+}
+
+func TestGetJourney_HistoryHonestyReasons(t *testing.T) {
+	t.Run("paging unavailable", func(t *testing.T) {
+		legacy := &fakeIssueBackend{listEventsResult: []backend.EventData{journeyIssueEvent(0, "issue.create", "operator")}}
+		svc := NewIssueServiceWithBackend(nil, nil, nil,
+			func(context.Context) backend.IssueBackend { return legacy },
+			JourneyServiceConfig{Now: func() time.Time { return journeyTestStart.Add(10 * time.Second) }},
+		)
+
+		journey, err := svc.GetJourney(context.Background(), "task-1")
+		if err != nil {
+			t.Fatalf("GetJourney: %v", err)
+		}
+		if got := journey.Honesty.Reason; got != "history_paging_unavailable" {
+			t.Errorf("history reason = %q, want history_paging_unavailable", got)
+		}
+	})
+
+	t.Run("cursor stalled", func(t *testing.T) {
+		history := &journeyHistoryBackend{
+			fakeIssueBackend: &fakeIssueBackend{},
+			listHistory: func(params backend.EventHistoryParams) (*backend.EventHistoryData, error) {
+				if params.Since == nil {
+					return &backend.EventHistoryData{Events: []backend.EventData{journeyIssueEvent(0, "issue.create", "operator")}, HasMore: true, TotalEvents: 2}, nil
+				}
+				return &backend.EventHistoryData{Cursor: "repeat", HasMore: true, TotalEvents: 2}, nil
+			},
+		}
+		svc := NewIssueServiceWithBackend(nil, nil, nil,
+			func(context.Context) backend.IssueBackend { return history },
+			JourneyServiceConfig{Now: func() time.Time { return journeyTestStart.Add(10 * time.Second) }},
+		)
+
+		journey, err := svc.GetJourney(context.Background(), "task-1")
+		if err != nil {
+			t.Fatalf("GetJourney: %v", err)
+		}
+		if got := journey.Honesty.Reason; got != "history_cursor_stalled" {
+			t.Errorf("history reason = %q, want history_cursor_stalled", got)
+		}
+	})
+
+	t.Run("count mismatch", func(t *testing.T) {
+		history := &journeyHistoryBackend{
+			fakeIssueBackend: &fakeIssueBackend{},
+			listHistory: func(params backend.EventHistoryParams) (*backend.EventHistoryData, error) {
+				if params.Since == nil {
+					return &backend.EventHistoryData{Events: []backend.EventData{journeyIssueEvent(0, "issue.create", "operator")}, HasMore: true, TotalEvents: 2}, nil
+				}
+				return &backend.EventHistoryData{Events: []backend.EventData{journeyIssueEvent(10, "issue.claim", "agent-dev-1")}, TotalEvents: 2}, nil
+			},
+		}
+		svc := NewIssueServiceWithBackend(nil, nil, nil,
+			func(context.Context) backend.IssueBackend { return history },
+			JourneyServiceConfig{Now: func() time.Time { return journeyTestStart.Add(20 * time.Second) }},
+		)
+
+		journey, err := svc.GetJourney(context.Background(), "task-1")
+		if err != nil {
+			t.Fatalf("GetJourney: %v", err)
+		}
+		if got := journey.Honesty.Reason; got != "history_count_mismatch" {
+			t.Errorf("history reason = %q, want history_count_mismatch", got)
+		}
+	})
 }
 
 func TestGetJourney_AssignmentPresenceAndReopenClearOwner(t *testing.T) {
