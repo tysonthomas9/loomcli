@@ -94,7 +94,7 @@ func runLoomUsage(t *testing.T, dir string, args ...string) (stdout, stderr stri
 // default source — `--source legacy` is what still reads it.
 func runLoomUsageLegacy(t *testing.T, dir string, args ...string) (stdout, stderr string, exitCode int) {
 	t.Helper()
-	return runLoomUsageLegacy(t, dir, append([]string{"--source", "legacy"}, args...)...)
+	return runLoomUsage(t, dir, append([]string{"--source", "legacy"}, args...)...)
 }
 
 // sampleRecords returns a reusable fixture set of 4 usage records.
