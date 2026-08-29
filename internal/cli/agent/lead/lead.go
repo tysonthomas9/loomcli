@@ -22,6 +22,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
+	"github.com/tysonthomas9/loomcli/internal/hookcfg"
+	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
+	"github.com/tysonthomas9/loomcli/internal/skillmat"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -40,6 +43,7 @@ const leadStoreOpTimeout = 10 * time.Second
 // --message flag.
 var leadMessage string
 var leadPromptFile string
+var materializeLeadSkillsAtStart = materializeLeadSkills
 
 var leadCmd = &cobra.Command{
 	Use:     "lead",
@@ -85,6 +89,7 @@ func leadStartupPrompt(ctx context.Context, registration leadSessionRegistration
 	return applyLeadPromptContext(prompt), nil
 }
 
+//nolint:funlen // The lead startup sequence stays in launch order.
 func runLead(cmd *cobra.Command, args []string) {
 	// Get current working directory
 	workDir, err := os.Getwd()
@@ -113,6 +118,13 @@ func runLead(cmd *cobra.Command, args []string) {
 	// silently if there is no active workspace or fleet-db is unreachable.
 	registration := registerLeadOrchestratorSession(context.Background(), workDir)
 	defer registration.Finalize()
+	if err := materializeLeadSkillsAtStart(context.Background(), registration, workDir); err != nil {
+		fmt.Fprintf(os.Stderr, "Error materializing lead skills: %v\n", err)
+		fmt.Fprintf(os.Stderr, "\nDropping into a shell. Resolve the skill materialization error and run 'loom lead' to retry.\n\n")
+		execShell(workDir)
+		return
+	}
+	ensureLeadHookConfig(workDir, backendName)
 
 	// Generate the terminal-agent prompt and append the user's initial request if provided.
 	prompt, err := leadStartupPrompt(context.Background(), registration)
@@ -144,6 +156,13 @@ func runLead(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stderr, "Error running agent: %v\n", invokeErr)
 		fmt.Fprintf(os.Stderr, "\nDropping into a shell. Fix the issue and run 'loom lead' to retry.\n\n")
 		execShell(workDir)
+	}
+}
+
+func ensureLeadHookConfig(workDir, backend string) {
+	if err := hookcfg.EnsureSkillMaterializeHook(workDir, backend); err != nil {
+		slog.Warn("lead hook configuration failed; continuing without raw-PTY pre-turn hook",
+			"target", workDir, "backend", backend, "err", err)
 	}
 }
 
@@ -277,6 +296,34 @@ func (r leadSessionRegistration) Store() store.Store {
 	return r.handle.Store
 }
 
+type leadSkillMaterializer func(context.Context, store.Store, string, string, string) error
+
+func materializeLeadSkills(ctx context.Context, registration leadSessionRegistration, workDir string) error {
+	return materializeLeadSkillsWith(ctx, registration, workDir, skillmat.MaterializeLeased)
+}
+
+func materializeLeadSkillsWith(ctx context.Context, registration leadSessionRegistration, workDir string, materialize leadSkillMaterializer) error {
+	st := registration.Store()
+	workspace := strings.TrimSpace(registration.Workspace)
+	if st == nil || workspace == "" {
+		return nil
+	}
+	opCtx, cancel := context.WithTimeout(ctx, leadStoreOpTimeout)
+	defer cancel()
+
+	roleName := leadcontrol.SessionRoleName(opCtx, st, workspace, registration.AgentID)
+
+	if err := materialize(opCtx, st, workspace, roleName, workDir); err != nil {
+		if skillmat.IsStoreUnavailable(err) {
+			slog.Warn("skill store unavailable; continuing with existing lead materialization",
+				"workspace", workspace, "role", roleName, "target", workDir, "err", err)
+			return nil
+		}
+		return fmt.Errorf("materialize lead skills: %w", err)
+	}
+	return nil
+}
+
 // registerLeadOrchestratorSession opens fleet-db, creates an
 // AgentSession{Kind:orchestration}, and starts a heartbeat goroutine. Returns a
 // registration whose Finalize method marks the session completed and stops the
@@ -328,6 +375,17 @@ func openLeadSessionStore(ctx context.Context) (*bootstrap.StoreHandle, string, 
 func createLeadSession(ctx context.Context, handle *bootstrap.StoreHandle, ws, sid, agentID, workDir string) error {
 	createCtx, createCancel := context.WithTimeout(ctx, leadStoreOpTimeout)
 	defer createCancel()
+	metadata := map[string]string{
+		"actor":                         leadSessionActor(),
+		leadcontrol.MetadataLeadWorkDir: workDir,
+	}
+	roleName := strings.TrimSpace(os.Getenv("LOOM_AGENT_ROLE"))
+	if roleName == "" && strings.TrimSpace(agentID) == "lead" {
+		roleName = "lead"
+	}
+	if roleName != "" {
+		metadata[leadcontrol.MetadataLeadRole] = roleName
+	}
 	_, err := handle.Store.AgentSessions().Create(createCtx, store.AgentSessionCreate{
 		WorkspaceKey: ws,
 		SessionID:    sid,
@@ -335,10 +393,7 @@ func createLeadSession(ctx context.Context, handle *bootstrap.StoreHandle, ws, s
 		Kind:         domain.AgentSessionKindOrchestration,
 		TerminalID:   strings.TrimSpace(os.Getenv(envAgentTerminalID)),
 		Status:       domain.AgentSessionRunning,
-		Metadata: map[string]string{
-			"actor":        leadSessionActor(),
-			"lead_workdir": workDir,
-		},
+		Metadata:     metadata,
 	})
 	if errors.Is(err, domain.ErrAlreadyExists) {
 		return nil

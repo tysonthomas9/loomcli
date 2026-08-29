@@ -76,11 +76,17 @@ describe("NavRail", () => {
       expect(screen.getByLabelText("Files")).toBeInTheDocument();
     });
 
-    it("renders exactly six navigation buttons", () => {
+    it("renders a Skills navigation button", () => {
+      render(<NavRail activeView="kanban" onChange={() => {}} />);
+
+      expect(screen.getByLabelText("Skills")).toBeInTheDocument();
+    });
+
+    it("renders exactly seven navigation buttons", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       const buttons = screen.getAllByRole("button");
-      expect(buttons).toHaveLength(6);
+      expect(buttons).toHaveLength(7);
     });
 
     it("renders tooltips for each button", () => {
@@ -123,7 +129,8 @@ describe("NavRail", () => {
       expect(buttons[2]).toHaveAccessibleName("Pull Requests");
       expect(buttons[3]).toHaveAccessibleName("Terminal");
       expect(buttons[4]).toHaveAccessibleName("Files");
-      expect(buttons[5]).toHaveAccessibleName("Settings");
+      expect(buttons[5]).toHaveAccessibleName("Skills");
+      expect(buttons[6]).toHaveAccessibleName("Settings");
     });
 
     it("has navigation landmark with aria-label", () => {
@@ -179,6 +186,13 @@ describe("NavRail", () => {
       expect(terminalButton).toHaveAttribute("data-active");
     });
 
+    it("marks Skills as active when activeView is skills, and not Files", () => {
+      render(<NavRail activeView="skills" onChange={() => {}} />);
+
+      expect(screen.getByLabelText("Skills")).toHaveAttribute("data-active");
+      expect(screen.getByLabelText("Files")).not.toHaveAttribute("data-active");
+    });
+
     it("applies custom className", () => {
       render(
         <NavRail
@@ -220,6 +234,16 @@ describe("NavRail", () => {
 
       expect(onChange).toHaveBeenCalledTimes(1);
       expect(onChange).toHaveBeenCalledWith("terminal");
+    });
+
+    it('calls onChange with "skills" when Skills button is clicked', () => {
+      const onChange = vi.fn();
+      render(<NavRail activeView="kanban" onChange={onChange} />);
+
+      fireEvent.click(screen.getByLabelText("Skills"));
+
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(onChange).toHaveBeenCalledWith("skills");
     });
 
     it('calls onChange with "settings" when Settings button is clicked', () => {

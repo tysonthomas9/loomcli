@@ -1,18 +1,29 @@
-import type {
-  FileMutationData,
-  FileReadData,
-  FileScopeRef,
-} from "@/api/workspace";
+import type { FileMutationData, FileReadData } from "@/api/workspace";
+import { cleanPath } from "@/utils/fileExplorerRefs";
 import {
-  checkoutRefKey,
-  cleanPath,
-  normalizeCheckoutRef,
-  sameCheckoutRef,
-} from "@/utils/fileExplorerRefs";
+  explorerRefKey,
+  isSkillsRef,
+  normalizeExplorerRef,
+  sameExplorerRef,
+  type CheckoutExplorerRef,
+  type ExplorerRef,
+  type SkillsExplorerRef,
+} from "@/utils/explorerRefs";
 
-export interface FileDocumentRef extends FileScopeRef {
+export interface FileDocumentRefOf<R extends ExplorerRef> {
   workspaceId: string;
+  ref: R;
   path: string;
+}
+
+export type FileDocumentRef = FileDocumentRefOf<ExplorerRef>;
+export type CheckoutDocumentRef = FileDocumentRefOf<CheckoutExplorerRef>;
+export type SkillsDocumentRef = FileDocumentRefOf<SkillsExplorerRef>;
+
+export function isSkillsDocumentRef(
+  ref: FileDocumentRef,
+): ref is SkillsDocumentRef {
+  return isSkillsRef(ref.ref);
 }
 
 export interface ExternalFileConflict {
@@ -37,14 +48,46 @@ export interface FileDocumentState {
   draftRevision: number;
 }
 
-export interface FileDocumentOperations {
-  read: (ref: FileDocumentRef, signal: AbortSignal) => Promise<FileReadData>;
+export interface FileDocumentTransport<R extends FileDocumentRef> {
+  read: (ref: R, signal: AbortSignal) => Promise<FileReadData>;
   write: (
-    ref: FileDocumentRef,
+    ref: R,
     content: string,
     signal: AbortSignal,
     ifMatch?: string,
   ) => Promise<FileMutationData>;
+  conditionalSave: boolean;
+}
+
+export interface FileDocumentOperations {
+  read: FileDocumentTransport<FileDocumentRef>["read"];
+  write: FileDocumentTransport<FileDocumentRef>["write"];
+  conditionalSave: (ref: FileDocumentRef) => boolean;
+}
+
+export function routeFileDocumentOperations(routes: {
+  checkout: FileDocumentTransport<CheckoutDocumentRef>;
+  skills: FileDocumentTransport<SkillsDocumentRef>;
+}): FileDocumentOperations {
+  return {
+    read: (ref, signal) =>
+      isSkillsDocumentRef(ref)
+        ? routes.skills.read(ref, signal)
+        : routes.checkout.read(ref as CheckoutDocumentRef, signal),
+    write: (ref, content, signal, ifMatch) =>
+      isSkillsDocumentRef(ref)
+        ? routes.skills.write(ref, content, signal, ifMatch)
+        : routes.checkout.write(
+            ref as CheckoutDocumentRef,
+            content,
+            signal,
+            ifMatch,
+          ),
+    conditionalSave: (ref) =>
+      isSkillsDocumentRef(ref)
+        ? routes.skills.conditionalSave
+        : routes.checkout.conditionalSave,
+  };
 }
 
 interface DocumentRuntime {
@@ -65,21 +108,18 @@ interface BeforeUnloadTarget {
 }
 
 export function fileDocumentKey(ref: FileDocumentRef): string {
-  const normalized = normalizeCheckoutRef(ref);
+  const normalized = normalizeExplorerRef(ref.ref);
   return [
     ref.workspaceId,
-    checkoutRefKey(normalized),
+    explorerRefKey(normalized),
     cleanPath(ref.path),
   ].join("\u001e");
 }
 
 function normalizeDocumentRef(ref: FileDocumentRef): FileDocumentRef {
-  const normalized = normalizeCheckoutRef(ref);
   return {
     workspaceId: ref.workspaceId,
-    scope: normalized.scope,
-    ...(normalized.target ? { target: normalized.target } : {}),
-    ...(normalized.repo ? { repo: normalized.repo } : {}),
+    ref: normalizeExplorerRef(ref.ref),
     path: cleanPath(ref.path),
   };
 }
@@ -251,11 +291,18 @@ export class FileDocumentRegistry {
     const savedDraftRevision = before.draftRevision;
     const started = this.beginRequest(ref, "save");
     try {
-      const result = await this.operations.write(
-        started.ref,
-        savedContent,
-        started.signal,
-      );
+      const result = this.operations.conditionalSave?.(started.ref)
+        ? await this.operations.write(
+            started.ref,
+            savedContent,
+            started.signal,
+            before.baseVersion ?? undefined,
+          )
+        : await this.operations.write(
+            started.ref,
+            savedContent,
+            started.signal,
+          );
       const current = this.states.get(started.key);
       if (!current || current.requestGeneration !== started.generation) {
         return null;
@@ -286,10 +333,28 @@ export class FileDocumentRegistry {
       if (!current || current.requestGeneration !== started.generation) {
         return null;
       }
+      let latestConflict = current.externalConflict;
+      if (isPreconditionFailure(error)) {
+        try {
+          const latest = await this.operations.read(
+            started.ref,
+            started.signal,
+          );
+          latestConflict = {
+            fileData: latest,
+            content: latest.binary ? "" : (latest.content ?? ""),
+            version: latest.version,
+          };
+        } catch {
+          // Keep the prior snapshot when the conflict refresh also fails.
+        }
+      }
       this.replace(started.key, {
         ...current,
         isSaving: false,
+        dirty: true,
         error: isAbortError(error) ? current.error : errorMessage(error),
+        externalConflict: latestConflict,
       });
       return null;
     } finally {
@@ -415,16 +480,12 @@ export class FileDocumentRegistry {
     this.syncBeforeUnload();
   }
 
-  resetPathPrefix(
-    workspaceId: string,
-    scopeRef: FileScopeRef,
-    path: string,
-  ): void {
+  resetPathPrefix(workspaceId: string, ref: ExplorerRef, path: string): void {
     const prefix = cleanPath(path);
     for (const [key, state] of this.states) {
       if (
         state.ref.workspaceId === workspaceId &&
-        sameCheckoutRef(state.ref, scopeRef) &&
+        sameExplorerRef(state.ref.ref, ref) &&
         (state.ref.path === prefix || state.ref.path.startsWith(`${prefix}/`))
       ) {
         this.resetKey(key);
@@ -435,7 +496,7 @@ export class FileDocumentRegistry {
 
   dirtyPathsForPrefix(
     workspaceId: string,
-    scopeRef: FileScopeRef,
+    ref: ExplorerRef,
     path: string,
   ): string[] {
     const prefix = cleanPath(path);
@@ -444,7 +505,7 @@ export class FileDocumentRegistry {
         (state) =>
           state.dirty &&
           state.ref.workspaceId === workspaceId &&
-          sameCheckoutRef(state.ref, scopeRef) &&
+          sameExplorerRef(state.ref.ref, ref) &&
           (state.ref.path === prefix ||
             state.ref.path.startsWith(`${prefix}/`)),
       )
@@ -453,7 +514,7 @@ export class FileDocumentRegistry {
 
   retargetPathPrefix(
     workspaceId: string,
-    scopeRef: FileScopeRef,
+    ref: ExplorerRef,
     from: string,
     to: string,
   ): void {
@@ -462,7 +523,7 @@ export class FileDocumentRegistry {
     const moves = [...this.states.entries()].filter(
       ([, state]) =>
         state.ref.workspaceId === workspaceId &&
-        sameCheckoutRef(state.ref, scopeRef) &&
+        sameExplorerRef(state.ref.ref, ref) &&
         (state.ref.path === source || state.ref.path.startsWith(`${source}/`)),
     );
     for (const [oldKey, state] of moves) {

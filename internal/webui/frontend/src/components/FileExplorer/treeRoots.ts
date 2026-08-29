@@ -2,13 +2,64 @@ import type {
   FileCheckout,
   FileScopeRef,
   RepoInfo,
+  SkillCatalogGroup,
   WorkspaceAgentInfo,
 } from "@/api/workspace";
 import { checkoutRefKey, type CheckoutRef } from "@/utils/fileExplorerRefs";
+import {
+  explorerRefKey,
+  skillsExplorerRef,
+  type ExplorerRef,
+  type SkillsExplorerRef,
+} from "@/utils/explorerRefs";
 
 import { checkoutChangeCount } from "./checkoutAvailability";
 
-export type FileBrowserMode = "workspace" | "agent";
+// "skills" is the dedicated Skills section: the same browser, showing only the
+// skills roots. It is a filter on which sections are emitted, not a second
+// implementation — the tree, editor, tabs and dialogs are shared with the
+// Files section, so the two can never drift apart.
+//
+// Skills live in exactly one place. "workspace" (the Files section) and "agent"
+// (an agent's files) emit git checkouts and nothing else; "skills" emits skill
+// roots and nothing else. Nothing emits both.
+export type FileBrowserMode = "workspace" | "agent" | "skills";
+
+// What a section is made of, declared once per mode. The browser derives this
+// once and branches on the capabilities, never on the mode, so a future section
+// declares what it has instead of being enumerated at every call site.
+export interface FileBrowserModeCapabilities {
+  // The section sits on git checkouts. "workspace" and "agent" browse one;
+  // "skills" browses the catalog and has nothing checked out behind it, so
+  // everything checkout-shaped is off there — the Files/Changes lens (there is
+  // no second lens to switch to), the checkout listing, branch diffs, git
+  // status, search/replace and Quick Open indexing. File capabilities
+  // (/files/capabilities) describe writes to a checkout, so they ride here too:
+  // a section without checkouts neither fetches them nor gates on them.
+  checkouts: boolean;
+  // The section shows skills, so it needs the skills catalog and the skill
+  // capabilities that gate editing them. Only the Skills section does; loading
+  // them elsewhere fetches data that section cannot display and lets a skills
+  // API failure raise a notice on a page that has no skills on it.
+  skills: boolean;
+}
+
+const MODE_CAPABILITIES: Record<FileBrowserMode, FileBrowserModeCapabilities> =
+  {
+    workspace: { checkouts: true, skills: false },
+    agent: { checkouts: true, skills: false },
+    skills: { checkouts: false, skills: true },
+  };
+
+export function modeCapabilities(
+  mode: FileBrowserMode,
+): FileBrowserModeCapabilities {
+  return MODE_CAPABILITIES[mode];
+}
+
+export function modeHasCheckouts(mode: FileBrowserMode): boolean {
+  return modeCapabilities(mode).checkouts;
+}
 
 export interface CheckoutTreeRoot {
   id: string;
@@ -36,10 +87,20 @@ export interface AgentTreeRoot {
   children: CheckoutTreeRoot[];
 }
 
-export type FileTreeRoot = CheckoutTreeRoot | AgentTreeRoot;
+export interface SkillsTreeRoot {
+  id: string;
+  kind: "skills";
+  ref: SkillsExplorerRef;
+  label: string;
+  secondary?: string | undefined;
+  skillCount: number;
+}
+
+export type GitTreeRoot = CheckoutTreeRoot | AgentTreeRoot;
+export type FileTreeRoot = GitTreeRoot | SkillsTreeRoot;
 
 export interface FileTreeSection {
-  id: "agents" | "repos" | "workspace";
+  id: "agents" | "skills" | "repos" | "workspace";
   title: string;
   dimmed?: boolean | undefined;
   roots: FileTreeRoot[];
@@ -51,6 +112,7 @@ export interface BuildFileTreeSectionsInput {
   agents: WorkspaceAgentInfo[];
   repos: RepoInfo[];
   checkouts: FileCheckout[];
+  skills?: SkillCatalogGroup[] | undefined;
 }
 
 function checkoutKey(
@@ -138,13 +200,60 @@ function checkoutRoot(
   };
 }
 
+// One root per skill scope: the workspace scope plus every role that either has
+// a skill in the catalog or an agent wearing it — so a role with a skill but no
+// agent (and vice versa) still gets a root.
+function skillsRoots(
+  agents: WorkspaceAgentInfo[],
+  skills: SkillCatalogGroup[],
+): SkillsTreeRoot[] {
+  const catalogRoles = skills
+    .filter((group) => group.scope === "role" && group.role)
+    .map((group) => group.role!);
+  const agentRoles = agents
+    .map((agent) => agent.role_name)
+    .filter((role): role is string => Boolean(role));
+  const roleNames = [...new Set([...catalogRoles, ...agentRoles])].sort();
+  const groups = [
+    { kind: "workspace" as const },
+    ...roleNames.map((role) => ({ kind: "role" as const, role })),
+  ];
+  return groups.map((group) => {
+    const count =
+      skills.find((candidate) =>
+        group.kind === "workspace"
+          ? candidate.scope === "workspace"
+          : candidate.scope === "role" && candidate.role === group.role,
+      )?.skills.length ?? 0;
+    const ref = skillsExplorerRef(group);
+    return {
+      id: explorerRefKey(ref),
+      kind: "skills",
+      ref,
+      label: group.kind === "workspace" ? "Workspace" : group.role,
+      secondary: `${count} ${count === 1 ? "skill" : "skills"}`,
+      skillCount: count,
+    };
+  });
+}
+
 export function buildFileTreeSections({
   mode,
   agentName,
   agents,
   repos,
   checkouts,
+  skills = [],
 }: BuildFileTreeSectionsInput): FileTreeSection[] {
+  // The Skills section is the only place skills appear. It shows skills and
+  // nothing else — no agents, no repos, no workspace root — so it short-circuits
+  // before any checkout work happens.
+  if (mode === "skills") {
+    return [
+      { id: "skills", title: "Skills", roots: skillsRoots(agents, skills) },
+    ];
+  }
+
   const visibleAgents =
     mode === "agent" && agentName
       ? agents.filter((agent) => agent.name === agentName)
@@ -238,27 +347,39 @@ export function buildFileTreeSections({
   return sections;
 }
 
-export function existingCheckoutRefs(
+export function existingExplorerRefs(
   sections: FileTreeSection[],
-): CheckoutRef[] {
-  const refs: CheckoutRef[] = [];
+): ExplorerRef[] {
+  const refs: ExplorerRef[] = [];
   for (const section of sections) {
     for (const root of section.roots) {
       if (root.kind === "checkout" && root.exists) {
-        refs.push(root.ref);
+        refs.push({ kind: "checkout", checkout: root.ref });
       } else if (root.kind === "agent") {
-        if (root.flattenedRef && root.exists) refs.push(root.flattenedRef);
-        for (const child of root.children) {
-          if (child.exists) refs.push(child.ref);
+        if (root.flattenedRef && root.exists) {
+          refs.push({ kind: "checkout", checkout: root.flattenedRef });
         }
+        for (const child of root.children) {
+          if (child.exists) {
+            refs.push({ kind: "checkout", checkout: child.ref });
+          }
+        }
+      } else if (root.kind === "skills") {
+        refs.push(root.ref);
       }
     }
   }
   const seen = new Set<string>();
   return refs.filter((ref) => {
-    const key = checkoutRefKey(ref);
+    const key = explorerRefKey(ref);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
+}
+
+export function gitStatusRefs(sections: FileTreeSection[]): CheckoutRef[] {
+  return existingExplorerRefs(sections).flatMap((ref) =>
+    ref.kind === "checkout" ? [ref.checkout] : [],
+  );
 }

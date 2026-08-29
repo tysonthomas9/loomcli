@@ -1397,6 +1397,14 @@ function App() {
     />
   );
 
+  // Views that bring their own left tree suppress the workspace sidebar, so
+  // the page owns its chrome instead of showing two trees side by side.
+  const viewOwnsChrome =
+    activeView === "files" ||
+    activeView === "skills" ||
+    activeView === "settings" ||
+    activeView === "prs";
+
   const terminalContainerClassName =
     activeView === "terminal"
       ? styles.terminalRouteContainer
@@ -1435,13 +1443,7 @@ function App() {
               onAddWorkspace={() => setShowCreateWorkspace(true)}
             />
           }
-          sidebar={
-            activeView === "files" ||
-            activeView === "settings" ||
-            activeView === "prs"
-              ? null
-              : sidebarContent
-          }
+          sidebar={viewOwnsChrome ? null : sidebarContent}
         >
           <div
             className={

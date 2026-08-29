@@ -1,0 +1,27 @@
+# Managed hook policy for loom-owned codex containers, baked into the
+# local-mode image at /etc/codex/requirements.toml.
+#
+# Hooks defined here carry managed provenance: codex runs them without the
+# per-handler trust review that gates user-level and repo-level hooks.json.
+# allow_managed_hooks_only additionally refuses every unmanaged hook —
+# including any .codex/hooks.json arriving inside cloned task repos.
+# Verified empirically against codex-cli 0.147.0 (the fleet's pinned version).
+allow_managed_hooks_only = true
+
+[hooks]
+
+[[hooks.UserPromptSubmit]]
+
+[[hooks.UserPromptSubmit.hooks]]
+type = "command"
+# Absolute path: the hook runs via $SHELL -lc with the session's cwd, so it
+# must not depend on PATH. The command self-bounds at 10s; the codex-side
+# timeout (seconds) is a backstop.
+#
+# Same command as hookcfg.EnsureSkillMaterializeHook installs on host sessions
+# (internal/hookcfg/hookcfg.go). Go cannot share a constant with this file, so
+# the two move together by hand; TestEnsureSkillMaterializeHookInstallsTheOneCommand
+# pins the Go side.
+command = "/usr/local/bin/loom skill materialize"
+timeout = 30
+statusMessage = "Materializing loom skills"

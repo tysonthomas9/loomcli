@@ -10,4 +10,5 @@ export { ObservabilityPage } from "./ObservabilityPage";
 export { SettingsPage } from "./SettingsPage";
 export { WorkspacePage } from "./WorkspacePage";
 export { FilesPage } from "./FilesPage";
+export { SkillsPage } from "./SkillsPage";
 export { IssueDetailPage } from "./IssueDetailPage";

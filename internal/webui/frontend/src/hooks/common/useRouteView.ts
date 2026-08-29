@@ -28,6 +28,7 @@ const VALID_VIEW_SEGMENTS: ReadonlySet<string> = new Set<ViewMode>([
   "workspace",
   "settings",
   "files",
+  "skills",
   "agents",
 ]);
 
