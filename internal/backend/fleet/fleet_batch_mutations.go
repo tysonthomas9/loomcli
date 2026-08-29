@@ -147,12 +147,13 @@ func (b *FleetBackend) eventHistoryTail(ctx context.Context, id string, limit, p
 		cursor = history.Cursor
 	}
 
-	if len(result) > limit {
+	truncated := len(result) > limit
+	if truncated {
 		result = result[len(result)-limit:]
 	}
 	return &backend.EventHistoryData{
 		Events:      result,
-		HasMore:     totalEvents > len(result),
+		HasMore:     truncated || totalEvents > len(result),
 		TotalEvents: totalEvents,
 	}, nil
 }
