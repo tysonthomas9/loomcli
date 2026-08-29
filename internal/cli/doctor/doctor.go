@@ -106,6 +106,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		results = append(results, result)
 	}
 
+	results = reconcileLiveness(results)
 	summary := tallyResults(results)
 	output := DoctorOutput{Checks: results, Summary: summary}
 
@@ -142,9 +143,50 @@ func collectDoctorChecks(cmd *cobra.Command) []checkFunc {
 	}
 	checks = append(checks, checkBackendCLI, checkProjectConfig, checkGlobalConfig,
 		checkWorktrees, checkStaleLocks, checkStaleSignalFiles, checkStaleSessionRecords,
-		checkOrphanedTranscripts, checkAgentProfiles, checkOrphanedTmuxSessions, checkLoomDaemon, checkDaemonStuck, checkRedis,
+		checkOrphanedTranscripts, checkAgentProfiles, checkOrphanedTmuxSessions, checkLoomDaemon, checkDaemonStuck,
+		checkSpawnHealth,
+		func() CheckResult { return checkFleetProgress(deps) },
+		checkRedis,
 		func() CheckResult { return checkOrphanedFleetLocks(deps) })
 	return checks
+}
+
+// reconcileLiveness stops daemon_stuck from reporting a green "supervisor
+// liveness OK" beside a red spawn_health or fleet_progress. A supervisor that
+// schedules perfectly and produces no work is not live in any sense the
+// operator cares about; those two lines sitting next to each other is what
+// made a seven-hour total spawn outage read as survivable on 2026-08-29.
+//
+// It demotes rather than duplicates the failure: daemon_stuck genuinely did
+// not observe a stuck supervisor, and a second failure would only inflate the
+// exit summary. A daemon_stuck that already warns or fails keeps its own more
+// specific message, and a daemon_stuck that skipped is never invented —
+// checkLoomDaemon owns the "daemon is not running" case.
+func reconcileLiveness(results []CheckResult) []CheckResult {
+	var failed []string
+	for _, r := range results {
+		if r.Status != StatusFail {
+			continue
+		}
+		if r.Name == "spawn_health" || r.Name == "fleet_progress" {
+			failed = append(failed, r.Name)
+		}
+	}
+	if len(failed) == 0 {
+		return results
+	}
+	for i := range results {
+		if results[i].Name != "daemon_stuck" || results[i].Status != StatusPass {
+			continue
+		}
+		previous := results[i].Summary
+		results[i].Status = StatusWarn
+		results[i].Summary = "daemon supervisor is scheduling but producing no work"
+		results[i].Detail = "the supervisor process is alive and its state file is fresh, but " +
+			strings.Join(failed, " and ") + " failed: scheduling is not the same as progress.\n" +
+			"previously: " + previous
+	}
+	return results
 }
 
 // tallyResults counts pass/warn/fail across all check results.

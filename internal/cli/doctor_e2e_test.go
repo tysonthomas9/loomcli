@@ -5,12 +5,14 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 // loomBinaryPath returns the path to the loom binary, skipping the test if not found.
@@ -462,5 +464,55 @@ func TestE2E_DoctorFleetProbeUnreachable(t *testing.T) {
 	}
 	if !strings.Contains(fleet.Detail, "probe failed") {
 		t.Errorf("Detail = %q, want substring 'probe failed'", fleet.Detail)
+	}
+}
+
+// TestE2E_DoctorReportsSpawnOutage is the scrapeability contract for the
+// 2026-08-29 outage: a workspace whose session ledger shows nothing but failed
+// spawns must surface a `spawn_health` check in --json, and the command must
+// exit non-zero rather than printing a green liveness line.
+func TestE2E_DoctorReportsSpawnOutage(t *testing.T) {
+	dir := initTempGitRepoWithRuntime(t)
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", dir)
+
+	sessDir := filepath.Join(dir, "sessions")
+	if err := os.MkdirAll(sessDir, 0755); err != nil {
+		t.Fatalf("failed to create sessions dir: %v", err)
+	}
+
+	// Paired running + terminal records per session, exactly as the
+	// supervisor writes them, so the reader's dedup path is exercised.
+	var b strings.Builder
+	for i := 0; i < 8; i++ {
+		id := fmt.Sprintf("20260829-02423%d-planner--4e2b057%d", i, i)
+		started := time.Now().Add(-time.Duration(20-i) * time.Minute).UTC().Format(time.RFC3339Nano)
+		b.WriteString(fmt.Sprintf(`{"session_id":%q,"agent_name":"planner","started_at":%q,"status":"running"}`+"\n", id, started))
+		b.WriteString(fmt.Sprintf(`{"session_id":%q,"agent_name":"planner","started_at":%q,"status":"failed","error_class":"spawn_failure"}`+"\n", id, started))
+	}
+	if err := os.WriteFile(filepath.Join(sessDir, "index.jsonl"), []byte(b.String()), 0644); err != nil {
+		t.Fatalf("failed to write index.jsonl: %v", err)
+	}
+
+	stdout, _, exitCode := runLoomDoctor(t, dir, "--json")
+	output := parseDoctorJSON(t, stdout)
+
+	check := findCheck(output, "spawn_health")
+	if check == nil {
+		t.Fatal("spawn_health check should be present when the ledger shows failed runs")
+	}
+	if check.Status != "fail" {
+		t.Errorf("spawn_health status = %q, want fail", check.Status)
+	}
+	if !strings.Contains(check.Detail, "spawn_failure") {
+		t.Errorf("spawn_health detail = %q, want it to name spawn_failure", check.Detail)
+	}
+	if exitCode == 0 {
+		t.Error("loom doctor should exit non-zero while every spawn is failing")
+	}
+
+	// The reported defect: liveness must not still read as OK beside it.
+	if ds := findCheck(output, "daemon_stuck"); ds != nil && ds.Status == "pass" {
+		t.Errorf("daemon_stuck = %q/%q, must not claim liveness while spawn_health fails",
+			ds.Status, ds.Summary)
 	}
 }
