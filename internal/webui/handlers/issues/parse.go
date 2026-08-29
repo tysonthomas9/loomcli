@@ -32,7 +32,8 @@ func parseListParams(r *http.Request) (*rpc.ListArgs, error) { //nolint:funlen
 	// so limit=abc, limit=0 and limit=-1 all quietly meant "no limit" and
 	// returned every row. A caller asking for ten rows and receiving eleven
 	// hundred has no way to tell it was ignored, so these are 400s now. Values
-	// above MaxListLimit are still clamped — that is a real cap, not an ignore.
+	// above MaxIssueListLimit (the ceiling the FleetDB
+	// backend enforces) are still clamped — that is a real cap, not an ignore.
 	limitPtr, err := handler.ParseIntParam(q, "limit")
 	if err != nil {
 		return nil, err
@@ -42,8 +43,8 @@ func parseListParams(r *http.Request) (*rpc.ListArgs, error) { //nolint:funlen
 			return nil, fmt.Errorf("limit must be a positive integer, got %d", *limitPtr)
 		}
 		limit := *limitPtr
-		if limit > handler.MaxListLimit {
-			limit = handler.MaxListLimit
+		if limit > handler.MaxIssueListLimit {
+			limit = handler.MaxIssueListLimit
 		}
 		args.Limit = limit
 	}

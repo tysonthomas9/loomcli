@@ -314,12 +314,22 @@ func TestParseListParams(t *testing.T) {
 			},
 		},
 		{
-			name: "excessive limit is capped at MaxListLimit",
+			name: "excessive limit is capped at MaxIssueListLimit",
 			url:  "/api/issues?limit=999999999",
 			wantFunc: func(t *testing.T, got interface{}) {
 				args := got.(testListArgs)
-				if args.Limit != MaxListLimit {
-					t.Errorf("expected limit=%d for excessive value, got %d", MaxListLimit, args.Limit)
+				if args.Limit != MaxIssueListLimit {
+					t.Errorf("expected limit=%d for excessive value, got %d", MaxIssueListLimit, args.Limit)
+				}
+			},
+		},
+		{
+			name: "limit 1000 is capped at MaxIssueListLimit",
+			url:  "/api/issues?limit=1000",
+			wantFunc: func(t *testing.T, got interface{}) {
+				args := got.(testListArgs)
+				if args.Limit != MaxIssueListLimit {
+					t.Errorf("expected limit=%d for limit=1000, got %d", MaxIssueListLimit, args.Limit)
 				}
 			},
 		},
@@ -475,8 +485,8 @@ func TestHandleListIssues_BadLimitIs400(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200", rec.Code)
 		}
-		if svc.gotLimit != MaxListLimit {
-			t.Errorf("limit = %d, want %d", svc.gotLimit, MaxListLimit)
+		if svc.gotLimit != MaxIssueListLimit {
+			t.Errorf("limit = %d, want %d", svc.gotLimit, MaxIssueListLimit)
 		}
 	})
 }
