@@ -11,6 +11,7 @@ import type { Page } from "@playwright/test";
 
 const WORKSPACE_ID = "test-ws";
 const BASE_PATH = `/ws/${WORKSPACE_ID}/`;
+const KANBAN_PATH = `/ws/${WORKSPACE_ID}/kanban`;
 const WS_API = `/api/workspaces/${WORKSPACE_ID}`;
 
 function ok<T>(data: T): string {
@@ -284,7 +285,7 @@ test.describe("global header and local workspace identity", () => {
       ]),
     );
 
-    await page.goto(BASE_PATH);
+    await page.goto(KANBAN_PATH);
 
     await expect(page.getByRole("tab", { name: "Kanban" })).toHaveAttribute(
       "aria-selected",
