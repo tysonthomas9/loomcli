@@ -13,7 +13,13 @@ export interface ActivityLogProps {
 }
 
 export function ActivityLog({ comments }: ActivityLogProps): JSX.Element {
-  if (comments.length === 0) {
+  const orderedComments = [...comments].sort(
+    (left, right) =>
+      new Date(left.created_at).getTime() -
+      new Date(right.created_at).getTime(),
+  );
+
+  if (orderedComments.length === 0) {
     return (
       <section className={styles.section} data-testid="activity-log">
         <h3 className={styles.sectionTitle}>Comments (0)</h3>
@@ -26,9 +32,11 @@ export function ActivityLog({ comments }: ActivityLogProps): JSX.Element {
 
   return (
     <section className={styles.section} data-testid="activity-log">
-      <h3 className={styles.sectionTitle}>Comments ({comments.length})</h3>
+      <h3 className={styles.sectionTitle}>
+        Comments ({orderedComments.length})
+      </h3>
       <div className={styles.timeline}>
-        {comments.map((comment) => (
+        {orderedComments.map((comment) => (
           <div
             key={`c-${comment.id}`}
             className={styles.commentEntry}
