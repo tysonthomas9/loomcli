@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -29,7 +30,7 @@ func TestBuildCommand_SourceReposInjected(t *testing.T) {
 		WorktreePath: tmpDir,
 	}
 
-	cmd, err := s.buildCommand(ap)
+	cmd, err := s.buildCommand(context.Background(), ap)
 	if err != nil {
 		t.Fatalf("buildCommand error: %v", err)
 	}
@@ -66,7 +67,7 @@ func TestBuildCommand_SourceReposAbsentWhenEmpty(t *testing.T) {
 		WorktreePath: tmpDir,
 	}
 
-	cmd, err := s.buildCommand(ap)
+	cmd, err := s.buildCommand(context.Background(), ap)
 	if err != nil {
 		t.Fatalf("buildCommand error: %v", err)
 	}
@@ -95,7 +96,7 @@ func TestBuildCommand_NoConstraints_BackwardCompat(t *testing.T) {
 		WorktreePath: tmpDir,
 	}
 
-	cmd, err := s.buildCommand(ap)
+	cmd, err := s.buildCommand(context.Background(), ap)
 	if err != nil {
 		t.Fatalf("buildCommand error: %v", err)
 	}
@@ -133,7 +134,7 @@ func TestBuildCommand_ErrorOnUnresolvableRepos(t *testing.T) {
 		WorktreePath: tmpDir,
 	}
 
-	_, err := s.buildCommand(ap)
+	_, err := s.buildCommand(context.Background(), ap)
 	if err == nil {
 		t.Fatal("expected error from buildCommand when repo groups are unresolvable, got nil")
 	}
@@ -162,7 +163,7 @@ func TestBuildCommand_DaemonSocketEnvVar(t *testing.T) {
 			WorktreePath: tmpDir,
 		}
 
-		cmd, err := s.buildCommand(ap)
+		cmd, err := s.buildCommand(context.Background(), ap)
 		if err != nil {
 			t.Fatalf("buildCommand error: %v", err)
 		}
@@ -195,7 +196,7 @@ func TestBuildCommand_DaemonSocketEnvVar(t *testing.T) {
 			WorktreePath: tmpDir,
 		}
 
-		cmd, err := s.buildCommand(ap)
+		cmd, err := s.buildCommand(context.Background(), ap)
 		if err != nil {
 			t.Fatalf("buildCommand error: %v", err)
 		}
