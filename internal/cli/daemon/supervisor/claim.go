@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
@@ -320,15 +321,29 @@ func (s *Supervisor) claimIssueForAgent(ap *AgentProcess, taskID, reason string)
 	return nil
 }
 
+// agentClaimantSeq numbers worktree-less agents so that each gets a claim
+// identity distinct from its same-role peers. Process-local, which is exactly
+// the ledger's scope — reservations never leave this daemon.
+var agentClaimantSeq atomic.Uint64
+
 // claimantID is the identity a claim is reserved under. The worktree is the
 // identifier the rest of the claim path already uses (it is the fleet actor and
-// the conflict holder); agents configured without one fall back to their role
-// so two role-scoped agents still exclude each other.
+// the conflict holder), so an agent that has one is reserved under it.
+//
+// An agent configured without a worktree has no name of its own — AgentEntry
+// has no such field — so it gets a per-instance identity assigned on first use
+// and stable for the rest of its life. Deriving one from the role alone would
+// give two worktree-less agents of one role the same identity, and reserve's
+// "re-reserving your own task is a no-op" path would then let both through to
+// the backend: precisely the simultaneity the ledger exists to remove.
 func claimantID(ap *AgentProcess) string {
 	if ap.Entry.Worktree != "" {
 		return ap.Entry.Worktree
 	}
-	return "role:" + ap.Entry.Role
+	ap.claimantOnce.Do(func() {
+		ap.claimantIdentity = fmt.Sprintf("agent:%s#%d", ap.Entry.Role, agentClaimantSeq.Add(1))
+	})
+	return ap.claimantIdentity
 }
 
 // claimLedger is the process-local mutual-exclusion ledger for task claims:
