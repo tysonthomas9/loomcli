@@ -155,6 +155,24 @@ func printQuarantinedTasks(tasks []supervisor.QuarantinedTaskInfo) {
 	}
 }
 
+// printProfileDrifts prints the profile-drift section of daemon status: agent
+// profiles running against a harness version their manifest does not pin.
+// These agents ARE running — drift within a major is a warning, not a refusal
+// (see supervisor.checkProfileManifest) — so the line says what is unverified,
+// not what is broken.
+func printProfileDrifts(drifts []supervisor.ProfileDrift) {
+	if len(drifts) == 0 {
+		return
+	}
+	fmt.Println("")
+	fmt.Println("Profile drift (running unverified):")
+	for _, d := range drifts {
+		fmt.Printf("  %s  manifest %s, %s %s  (%d spawn(s))\n",
+			d.Dir, d.Manifest, d.Binary, d.Observed, d.Count)
+	}
+	fmt.Println("  re-bless with: loom doctor --fix   (once the version has actually been verified)")
+}
+
 // formatDaemonDuration formats a duration in a human-readable way for daemon status.
 // <1s -> "<1s", <1m -> "Ns", <1h -> "Nm Ns", >=1h -> "Nh Nm".
 func formatDaemonDuration(d time.Duration) string {

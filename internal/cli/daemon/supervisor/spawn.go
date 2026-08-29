@@ -793,6 +793,10 @@ func ProfileEnvVar(harness string) string {
 // legacy env: silently running the agent against the operator's full ~/.claude
 // is the exact leak per-agent profiles close. Per-agent boot degradation
 // contains the failure to the one agent whose profile is broken.
+//
+// "Unverifiable" is checkProfileManifest's judgment, not agentprofile.Verify's:
+// a harness version that drifted within its major boots with a recorded warning
+// rather than refusing. See checkProfileManifest for why.
 func ProfileHarnessEnv(projectDir, agent, harness string) (string, []string, error) {
 	root := agentprofile.Dir(projectDir, agent)
 	if root == "" {
@@ -808,7 +812,7 @@ func ProfileHarnessEnv(projectDir, agent, harness string) (string, []string, err
 	if !dirExists(dir) {
 		return "", nil, nil
 	}
-	if err := verifyProfileManifest(dir, agentprofile.HarnessBinary[harness]); err != nil {
+	if err := checkProfileManifest(dir, agentprofile.HarnessBinary[harness]); err != nil {
 		return "", nil, err
 	}
 	env := []string{fmt.Sprintf("%s=%s", envVar, dir)}
@@ -890,6 +894,58 @@ func VerifyProfileManifest(dir, binary string) error {
 // cached probe to use; the verification itself lives in agentprofile.
 func verifyProfileManifest(dir, binary string) error {
 	return agentprofile.Verify(dir, harnessVersion(binary))
+}
+
+// CheckProfileManifest applies the spawn path's BOOT policy to a profile root
+// for a caller outside the daemon. `loom lead` is the one agent the supervisor
+// does not spawn, so it must reuse this rather than grow a second, weaker —
+// or, since this change, a second, stricter — policy alongside it.
+func CheckProfileManifest(dir, binary string) error {
+	return checkProfileManifest(dir, binary)
+}
+
+// checkProfileManifest applies the spawn path's boot policy to a verification
+// result. It is deliberately NOT agentprofile.Verify's job: Verify reports what
+// is true, and `loom doctor` wants every drift reported strictly. This decides
+// what a BOOT does about it.
+//
+// Version drift within a major is a warning, not a refusal. The manifest pins
+// the version a profile's CONTENT was provisioned against; whether the new
+// harness actually works is harness-wrapper's corpus replay, which this check
+// knows nothing about. Refusing here stopped the whole fleet on an ordinary
+// patch bump four times in six days (2.1.235 -> .237 -> .238 -> .241 -> .243)
+// and again on 2026-08-28 (.250 -> .251).
+//
+// A major jump still refuses, and so does an unparseable version on either
+// side: those are the cases where "probably fine" is not a defensible guess.
+// Every other sentinel — fingerprint mismatch above all — is untouched.
+func checkProfileManifest(dir, binary string) error {
+	err := verifyProfileManifest(dir, binary)
+	if err == nil {
+		// A profile that verifies clean is not drifted any more, whatever it
+		// was when the daemon started: `loom doctor --fix` re-blesses without
+		// restarting anything.
+		clearProfileDrift(dir)
+		return nil
+	}
+	if !errors.Is(err, agentprofile.ErrVersionDrift) {
+		return err
+	}
+	m, lerr := agentprofile.LoadManifest(dir)
+	if lerr != nil {
+		return err // report the drift we already have, not a second fault
+	}
+	got := harnessVersion(binary)
+	if !agentprofile.SameMajorVersion(m.HarnessVersion, got) {
+		return fmt.Errorf("%w (major version change - refusing to boot)", err)
+	}
+	if recordProfileDrift(dir, binary, m.HarnessVersion, got) {
+		log.Printf("[daemon] profile harness version drift: %s: manifest pins %q, %s reports %q "+
+			"- proceeding UNVERIFIED. harness-wrapper has not been verified against this version; "+
+			"run `loom doctor` to see it and `loom doctor --fix` to re-bless once verified.",
+			dir, m.HarnessVersion, binary, got)
+	}
+	return nil
 }
 
 // harnessVersionTTL bounds how long a probed --version string is reused. It is

@@ -35,8 +35,13 @@ type profileFault struct {
 //
 // It walks the profile DIRECTORY rather than the daemon's agent roster, which
 // is the point of running it here: `lead` is not supervisor-spawned, so no
-// daemon-driven check ever sees its profile, and a drifted `lead` profile fails
-// only at the moment an operator tries to use it.
+// daemon-driven check ever sees its profile, and drift on `lead` surfaces only
+// at the moment an operator tries to use it.
+//
+// This check stays STRICT while the spawn path does not: every drift is
+// reported here, including the same-major drift a boot now proceeds through
+// with a warning. That split is deliberate — the daemon decides what a boot
+// does about a fault; `loom doctor` reports what is true.
 //
 // With --fix it re-blesses drift-only profiles. Two safety properties make that
 // safe, and both are structural rather than conventional:
@@ -163,11 +168,19 @@ func renderProfileResult(profiles []agentprofile.Profile, versions map[string]st
 			Detail:  strings.Join(blessedLines(blessed, versions), "\n"),
 		}
 	case len(drifted) > 0:
+		// Still StatusFail, and deliberately: an unverified fleet is a
+		// condition an operator must act on. But the wording no longer says
+		// the fleet is DOWN, because since the spawn path softened same-major
+		// drift to a warning it is not — these agents boot and run.
 		return CheckResult{
 			Name:    "agent_profiles",
 			Status:  StatusFail,
-			Summary: fmt.Sprintf("%d of %d agent profile(s) pin a stale harness version", len(drifted), total),
-			Detail:  strings.Join(faultLines(drifted), "\n"),
+			Summary: fmt.Sprintf("%d of %d agent profile(s) running UNVERIFIED against %s", len(drifted), total, versionSummary(versions)),
+			Detail: strings.Join(append([]string{
+				"manifests pin an older version; agents boot with a warning (drift is no longer fatal).",
+				"harness-wrapper's verified pin is in pkg/versions/versions.json.",
+				"`loom doctor --fix` re-blesses once verification has actually been done.",
+			}, faultLines(drifted)...), "\n"),
 		}
 	case len(unknown) > 0:
 		return CheckResult{
@@ -248,7 +261,7 @@ func faultReason(f profileFault) string {
 // provisioner, which is the only thing allowed to change profile content.
 func faultRepair(f profileFault) string {
 	if errors.Is(f.err, agentprofile.ErrVersionDrift) {
-		return "loom doctor --fix   (re-blesses the pin; no agent restart needed)"
+		return "loom doctor --fix   (re-blesses the pin once verified; agents are already running)"
 	}
 	if errors.Is(f.err, agentprofile.ErrVersionUnknown) {
 		return fmt.Sprintf("install or PATH-expose the %s binary, then re-run loom doctor", f.profile.Harness)
