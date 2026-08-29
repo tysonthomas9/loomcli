@@ -17,6 +17,8 @@ import (
 
 var journeyTestStart = time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
 
+type journeyWorkspaceContextKey struct{}
+
 type journeyHistoryBackend struct {
 	*fakeIssueBackend
 	events      []backend.EventData
@@ -182,6 +184,48 @@ func TestGetJourney_InFlightUsesInjectedClock(t *testing.T) {
 	}
 	if !journey.Honesty.AgentWindowsAvailable {
 		t.Error("agent_windows_available = false, want true")
+	}
+}
+
+func TestGetJourney_UsesEventsDirectoryForRequestWorkspace(t *testing.T) {
+	history := &journeyHistoryBackend{
+		fakeIssueBackend: &fakeIssueBackend{},
+		events: []backend.EventData{
+			journeyIssueEvent(0, "issue.create", "operator"),
+			journeyIssueEvent(10, "issue.claim", "agent-dev-1"),
+		},
+	}
+	defaultEventsDir := writeJourneyLifecycleEvents(t,
+		journeyLifecycleEvent(t, 10, loomevents.TaskClaimed, "default-agent", loomevents.TaskClaimedData{TaskID: "task-1"}),
+	)
+	workspaceBEventsDir := writeJourneyLifecycleEvents(t,
+		journeyLifecycleEvent(t, 10, loomevents.TaskClaimed, "workspace-b-agent", loomevents.TaskClaimedData{TaskID: "task-1"}),
+	)
+	svc := NewIssueServiceWithBackend(nil, nil, nil,
+		func(context.Context) backend.IssueBackend { return history },
+		JourneyServiceConfig{
+			EventsDir: defaultEventsDir,
+			EventsDirForWorkspace: func(workspaceID string) string {
+				if workspaceID == "workspace-b" {
+					return workspaceBEventsDir
+				}
+				return ""
+			},
+			WorkspaceIDFromContext: func(ctx context.Context) string {
+				workspaceID, _ := ctx.Value(journeyWorkspaceContextKey{}).(string)
+				return workspaceID
+			},
+			Now: func() time.Time { return journeyTestStart.Add(20 * time.Second) },
+		},
+	)
+
+	ctx := context.WithValue(context.Background(), journeyWorkspaceContextKey{}, "workspace-b")
+	journey, err := svc.GetJourney(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("GetJourney: %v", err)
+	}
+	if len(journey.AgentWindows) != 1 || journey.AgentWindows[0].Agent != "workspace-b-agent" {
+		t.Errorf("agent windows = %+v, want workspace-b lifecycle window", journey.AgentWindows)
 	}
 }
 
@@ -379,6 +423,43 @@ func TestGetJourney_MultiAttemptKeepsTwoAgentWindows(t *testing.T) {
 	}
 }
 
+func TestGetJourney_SupersedesUnclosedClaimWindow(t *testing.T) {
+	history := &journeyHistoryBackend{
+		fakeIssueBackend: &fakeIssueBackend{},
+		events: []backend.EventData{
+			journeyIssueEvent(0, "issue.create", "operator"),
+			journeyIssueEvent(10, "issue.claim", "agent-a"),
+		},
+	}
+	eventsDir := writeJourneyLifecycleEvents(t,
+		journeyLifecycleEvent(t, 10, loomevents.TaskClaimed, "agent-a", loomevents.TaskClaimedData{TaskID: "task-1"}),
+		journeyLifecycleEvent(t, 60, loomevents.TaskClaimed, "agent-a", loomevents.TaskClaimedData{TaskID: "task-1"}),
+		journeyLifecycleEvent(t, 100, loomevents.TaskCompleted, "agent-a", loomevents.TaskCompletedData{TaskID: "task-1"}),
+	)
+	svc := NewIssueServiceWithBackend(nil, nil, nil,
+		func(context.Context) backend.IssueBackend { return history },
+		JourneyServiceConfig{EventsDir: eventsDir, Now: func() time.Time { return journeyTestStart.Add(160 * time.Second) }},
+	)
+
+	journey, err := svc.GetJourney(context.Background(), "task-1")
+	if err != nil {
+		t.Fatalf("GetJourney: %v", err)
+	}
+	if len(journey.AgentWindows) != 2 {
+		t.Fatalf("agent windows = %+v, want two attempts", journey.AgentWindows)
+	}
+	first, second := journey.AgentWindows[0], journey.AgentWindows[1]
+	if first.End == nil || !first.End.Equal(journeyTestStart.Add(60*time.Second)) || first.Outcome != "superseded" {
+		t.Errorf("first agent window = %+v, want [10,60) superseded", first)
+	}
+	if second.End == nil || !second.End.Equal(journeyTestStart.Add(100*time.Second)) || second.Outcome != "completed" {
+		t.Errorf("second agent window = %+v, want [60,100) completed", second)
+	}
+	if got, want := journey.LeadTime, (JourneyLeadTime{TotalMS: 160_000, QueuedMS: 10_000, AgentWorkingMS: 90_000}); got != want {
+		t.Errorf("lead time = %+v, want %+v", got, want)
+	}
+}
+
 func TestGetJourney_PageCapReportsBoundedAndUnknownStart(t *testing.T) {
 	eventList := make([]backend.EventData, 0, 501)
 	eventList = append(eventList, journeyIssueEvent(0, "issue.create", "operator"))
@@ -410,6 +491,67 @@ func TestGetJourney_PageCapReportsBoundedAndUnknownStart(t *testing.T) {
 	}
 }
 
+func TestGetJourney_PageFailureDegradesToBoundedHistory(t *testing.T) {
+	history := &journeyHistoryBackend{
+		fakeIssueBackend: &fakeIssueBackend{},
+		listHistory: func(params backend.EventHistoryParams) (*backend.EventHistoryData, error) {
+			if params.Since == nil {
+				return &backend.EventHistoryData{
+					Events:      []backend.EventData{journeyIssueEvent(0, "issue.create", "operator")},
+					HasMore:     true,
+					TotalEvents: 2,
+				}, nil
+			}
+			return nil, fmt.Errorf("fleet-db transport failed")
+		},
+	}
+	svc := NewIssueServiceWithBackend(nil, nil, nil,
+		func(context.Context) backend.IssueBackend { return history },
+		JourneyServiceConfig{Now: func() time.Time { return journeyTestStart.Add(10 * time.Second) }},
+	)
+
+	journey, err := svc.GetJourney(context.Background(), "task-1")
+	if err != nil {
+		t.Fatalf("GetJourney: %v", err)
+	}
+	if !journey.Honesty.Bounded || journey.Honesty.Reason != "history_paging_failed" {
+		t.Errorf("history honesty = %+v, want bounded history_paging_failed", journey.Honesty)
+	}
+}
+
+func TestGetJourney_EmptyHistoryVerifiesIssueExists(t *testing.T) {
+	t.Run("unknown issue", func(t *testing.T) {
+		history := &journeyHistoryBackend{fakeIssueBackend: &fakeIssueBackend{}}
+		svc := NewIssueServiceWithBackend(nil, nil, nil,
+			func(context.Context) backend.IssueBackend { return history },
+			JourneyServiceConfig{Now: func() time.Time { return journeyTestStart }},
+		)
+
+		_, err := svc.GetJourney(context.Background(), "missing-task")
+		if serviceErr, ok := err.(*ServiceError); !ok || serviceErr.Kind != KindNotFound {
+			t.Fatalf("GetJourney error = %v, want not-found service error", err)
+		}
+	})
+
+	t.Run("existing issue without events", func(t *testing.T) {
+		history := &journeyHistoryBackend{
+			fakeIssueBackend: &fakeIssueBackend{getResult: &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-1"}}},
+		}
+		svc := NewIssueServiceWithBackend(nil, nil, nil,
+			func(context.Context) backend.IssueBackend { return history },
+			JourneyServiceConfig{Now: func() time.Time { return journeyTestStart }},
+		)
+
+		journey, err := svc.GetJourney(context.Background(), "task-1")
+		if err != nil {
+			t.Fatalf("GetJourney: %v", err)
+		}
+		if !journey.Honesty.CompleteHistory || len(journey.Spans) != 0 || len(journey.AgentWindows) != 0 {
+			t.Errorf("empty journey = %+v, want complete empty journey", journey)
+		}
+	})
+}
+
 func TestGetJourney_WalksCursorPagesToCompleteHistory(t *testing.T) {
 	eventList := make([]backend.EventData, 0, 501)
 	eventList = append(eventList, journeyIssueEvent(0, "issue.create", "operator"))
@@ -432,6 +574,32 @@ func TestGetJourney_WalksCursorPagesToCompleteHistory(t *testing.T) {
 	}
 	if journey.Spans[0].UnknownStart || journey.Spans[0].Approximate || journey.Spans[0].Stage != "open" {
 		t.Errorf("first span = %+v, want exact open span", journey.Spans[0])
+	}
+}
+
+func TestGetJourney_LeadTimeEndsAtFirstClosedSpan(t *testing.T) {
+	label := journeyIssueEvent(200, "label.add", "operator")
+	label.Metadata = map[string]string{"label": "needs-revision"}
+	history := &journeyHistoryBackend{
+		fakeIssueBackend: &fakeIssueBackend{},
+		events: []backend.EventData{
+			journeyIssueEvent(0, "issue.create", "operator"),
+			journeyIssueEvent(10, "issue.claim", "agent-dev-1"),
+			journeyIssueEvent(100, "issue.close", "operator"),
+			label,
+		},
+	}
+	svc := NewIssueServiceWithBackend(nil, nil, nil,
+		func(context.Context) backend.IssueBackend { return history },
+		JourneyServiceConfig{Now: func() time.Time { return journeyTestStart.Add(300 * time.Second) }},
+	)
+
+	journey, err := svc.GetJourney(context.Background(), "task-1")
+	if err != nil {
+		t.Fatalf("GetJourney: %v", err)
+	}
+	if got := journey.LeadTime.TotalMS; got != 100_000 {
+		t.Errorf("total lead time = %d, want 100000", got)
 	}
 }
 

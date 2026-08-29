@@ -200,6 +200,8 @@ type JourneySpan struct {
 
 // JourneyAgentWindow is one host-local task attempt from claim to terminal
 // lifecycle event. End remains nil and outcome is running for an active attempt.
+// A later claim supersedes an unclosed earlier attempt, recording outcome
+// superseded at the later claim timestamp.
 type JourneyAgentWindow struct {
 	TaskID  string     `json:"task_id"`
 	Agent   string     `json:"agent"`

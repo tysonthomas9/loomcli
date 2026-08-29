@@ -169,16 +169,21 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	// backend.IssueBackend. The pool
 	// stays around to back the not-yet-migrated paths (ListIssues/Kanban
 	// and the cross-workspace MoveIssue helper).
+	journeyConfig := service.JourneyServiceConfig{
+		EventsDir:              config.JourneyEventsDir,
+		EventsDirForWorkspace:  workerResolveEventsDir(config.Store),
+		WorkspaceIDFromContext: middleware.WorkspaceFromContext,
+	}
 	if config.IssueBackendFn != nil {
 		app.issueSvc = service.NewIssueServiceWithBackend(
 			app.pool, app.multiPool, middleware.WithWorkspace,
 			service.IssueBackendProvider(config.IssueBackendFn),
-			service.JourneyServiceConfig{EventsDir: config.JourneyEventsDir},
+			journeyConfig,
 		)
 	} else {
 		app.issueSvc = service.NewIssueService(
 			app.pool, app.multiPool, middleware.WithWorkspace,
-			service.JourneyServiceConfig{EventsDir: config.JourneyEventsDir},
+			journeyConfig,
 		)
 	}
 

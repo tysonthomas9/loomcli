@@ -27,9 +27,11 @@ const (
 // HistoryPageCap is primarily a safety bound; zero selects the production
 // default. Now is injectable so open spans never read wall-clock time directly.
 type JourneyServiceConfig struct {
-	EventsDir      string
-	Now            func() time.Time
-	HistoryPageCap int
+	EventsDir              string
+	EventsDirForWorkspace  func(string) string
+	WorkspaceIDFromContext func(context.Context) string
+	Now                    func() time.Time
+	HistoryPageCap         int
 }
 
 func normalizeJourneyServiceConfig(configs []JourneyServiceConfig) JourneyServiceConfig {
@@ -51,9 +53,14 @@ func (s *issueServiceImpl) GetJourney(ctx context.Context, issueID string) (*Jou
 	if err != nil {
 		return nil, err
 	}
+	if len(history) == 0 {
+		if _, err := s.GetIssue(ctx, issueID); err != nil {
+			return nil, err
+		}
+	}
 	now := s.journey.Now().UTC()
 	spans := foldJourneySpans(history, honesty.Bounded)
-	windows, available, windowReason := readJourneyAgentWindows(s.journey.EventsDir, issueID)
+	windows, available, windowReason := readJourneyAgentWindows(s.journey.eventsDirFor(ctx), issueID)
 	honesty.AgentWindowsAvailable = available
 	honesty.AgentWindowsReason = windowReason
 
@@ -63,6 +70,15 @@ func (s *issueServiceImpl) GetJourney(ctx context.Context, issueID string) (*Jou
 		LeadTime:     decomposeJourneyLeadTime(spans, windows, available, now),
 		Honesty:      honesty,
 	}, nil
+}
+
+func (config JourneyServiceConfig) eventsDirFor(ctx context.Context) string {
+	if config.EventsDirForWorkspace != nil && config.WorkspaceIDFromContext != nil {
+		if eventsDir := config.EventsDirForWorkspace(config.WorkspaceIDFromContext(ctx)); eventsDir != "" {
+			return eventsDir
+		}
+	}
+	return config.EventsDir
 }
 
 func (s *issueServiceImpl) readJourneyHistory(ctx context.Context, issueID string) ([]*types.Event, JourneyHonesty, error) {
@@ -100,10 +116,7 @@ func (s *issueServiceImpl) walkJourneyHistory(ctx context.Context, issueID strin
 		totalEvents: tail.TotalEvents,
 	}
 	for page := 0; page < s.journey.HistoryPageCap; page++ {
-		outcome, pageErr := s.readJourneyHistoryPage(ctx, issueID, tail, &state)
-		if pageErr != nil {
-			return nil, JourneyHonesty{}, pageErr
-		}
+		outcome := s.readJourneyHistoryPage(ctx, issueID, tail, &state)
 		if outcome != nil {
 			return outcome.events, outcome.honesty, nil
 		}
@@ -113,17 +126,17 @@ func (s *issueServiceImpl) walkJourneyHistory(ctx context.Context, issueID strin
 	return boundedEvents, boundedHonesty, nil
 }
 
-func (s *issueServiceImpl) readJourneyHistoryPage(ctx context.Context, issueID string, tail *EventListResult, state *journeyHistoryWalkState) (*journeyHistoryWalkResult, error) {
+func (s *issueServiceImpl) readJourneyHistoryPage(ctx context.Context, issueID string, tail *EventListResult, state *journeyHistoryWalkState) *journeyHistoryWalkResult {
 	result, err := s.ListEventHistory(ctx, EventListParams{IssueID: issueID, Limit: journeyHistoryPageLimit, Since: &state.cursor})
 	if err != nil {
 		var serviceErr *ServiceError
 		if errors.As(err, &serviceErr) && serviceErr.Kind == KindValidation {
-			return boundedJourneyHistoryResult(tail, "history_paging_unavailable"), nil
+			return boundedJourneyHistoryResult(tail, "history_paging_unavailable")
 		}
-		return nil, err
+		return boundedJourneyHistoryResult(tail, "history_paging_failed")
 	}
 	if result == nil {
-		return boundedJourneyHistoryResult(tail, "history_page_missing"), nil
+		return boundedJourneyHistoryResult(tail, "history_page_missing")
 	}
 
 	state.events = append(state.events, result.Events...)
@@ -134,15 +147,15 @@ func (s *issueServiceImpl) readJourneyHistoryPage(ctx context.Context, issueID s
 		if state.totalEvents > 0 && len(state.events) != state.totalEvents {
 			outcome := boundedJourneyHistoryResult(tail, "history_count_mismatch")
 			outcome.honesty.TotalEvents = state.totalEvents
-			return outcome, nil
+			return outcome
 		}
-		return &journeyHistoryWalkResult{events: state.events, honesty: completeJourneyHonesty(state.events, state.totalEvents)}, nil
+		return &journeyHistoryWalkResult{events: state.events, honesty: completeJourneyHonesty(state.events, state.totalEvents)}
 	}
 	if result.Cursor == "" || result.Cursor == state.cursor {
-		return boundedJourneyHistoryResult(tail, "history_cursor_stalled"), nil
+		return boundedJourneyHistoryResult(tail, "history_cursor_stalled")
 	}
 	state.cursor = result.Cursor
-	return nil, nil
+	return nil
 }
 
 func hasKnownCompleteJourneyHistory(events []*types.Event, hasMore bool, totalEvents int) bool {
@@ -385,6 +398,10 @@ func journeyLifecycleTaskID(event loomevents.Event) string {
 
 func applyJourneyLifecycleEvent(windows []JourneyAgentWindow, taskID string, event loomevents.Event) []JourneyAgentWindow {
 	if event.Type == loomevents.TaskClaimed {
+		if index := latestOpenAgentWindow(windows, event.Agent); index >= 0 {
+			windows[index].End = timePointer(event.Timestamp.UTC())
+			windows[index].Outcome = "superseded"
+		}
 		return append(windows, JourneyAgentWindow{TaskID: taskID, Agent: event.Agent, Start: event.Timestamp.UTC(), Outcome: "running"})
 	}
 	index := latestOpenAgentWindow(windows, event.Agent)
@@ -435,8 +452,11 @@ func journeyLeadTimeRange(spans []JourneySpan, now time.Time) (time.Time, time.T
 		return time.Time{}, time.Time{}, false
 	}
 	start, end := spans[0].Start, now
-	if last := spans[len(spans)-1]; last.Stage == "closed" {
-		end = last.Start
+	for _, span := range spans {
+		if span.Stage == "closed" {
+			end = span.Start
+			break
+		}
 	}
 	return start, end, end.After(start)
 }

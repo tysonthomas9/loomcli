@@ -68,4 +68,19 @@ func TestHandleGetIssueJourney_ValidatesIDAndMapsServiceErrors(t *testing.T) {
 			t.Fatalf("status = %d, want 503: %s", recorder.Code, recorder.Body.String())
 		}
 	})
+
+	t.Run("issue not found", func(t *testing.T) {
+		svc := &mockIssueService{
+			getJourneyFunc: func(context.Context, string) (*service.Journey, error) {
+				return nil, service.ErrNotFound("issue not found")
+			},
+		}
+		recorder := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/issues/missing/journey", nil)
+		req.SetPathValue("id", "missing")
+		HandleGetIssueJourney(svc).ServeHTTP(recorder, req)
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404: %s", recorder.Code, recorder.Body.String())
+		}
+	})
 }
