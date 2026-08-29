@@ -12,6 +12,13 @@ import (
 )
 
 // recordSessionUsage persists a usage record after an agent invocation finishes.
+//
+// NOTE: usage.jsonl is a LEGACY ledger — this `loom auto` path is the only
+// thing that ever writes it, and the fleet no longer runs auto mode for real
+// work. The authoritative record of every finalized run is
+// <workspace>/sessions/index.jsonl, written by internal/sessions.Finalize and
+// read by usage.ReadSessionUsage. Any new reader of usage data belongs there,
+// not here.
 // Failures are logged but do not interrupt the auto mode loop.
 // When bridge is non-nil, reads the lock via the bridge; otherwise uses the local filesystem.
 func recordSessionUsage(store *usage.Store, collector *usage.Collector, worktreePath, agentName, parentID string, startedAt, endedAt time.Time, invokeErr error, bridge cli.LockBridge) {
