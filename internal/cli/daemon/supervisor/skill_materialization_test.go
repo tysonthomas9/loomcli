@@ -185,7 +185,7 @@ func TestMaterializeSkillsWarnsWhenControlStoreIsMissing(t *testing.T) {
 		WorktreePath: t.TempDir(),
 	}
 
-	if err := s.materializeSkills(ap); err != nil {
+	if err := s.materializeSkills(context.Background(), ap); err != nil {
 		t.Fatalf("materializeSkills: %v", err)
 	}
 	for _, want := range []string{"skill", "not configured", "continuing", "worker-a", "WS"} {

@@ -89,7 +89,7 @@ func TestGateBackendAvailable_TransientMiss_NoStateChange(t *testing.T) {
 
 	s, ap, counter := newFlapSupervisor(t)
 
-	if err := s.gateBackendAvailable(ap); err != nil {
+	if err := s.gateBackendAvailable(context.Background(), ap); err != nil {
 		t.Fatalf("gate returned %v, want nil — a transient miss must not block spawn", err)
 	}
 	if ap.StopReason != "" {
@@ -115,7 +115,7 @@ func TestGateBackendAvailable_PersistentMiss_PatchesOnce(t *testing.T) {
 	s, ap, counter := newFlapSupervisor(t)
 
 	for i := 0; i < 3; i++ {
-		if err := s.gateBackendAvailable(ap); !errors.Is(err, ErrBackendUnavailable) {
+		if err := s.gateBackendAvailable(context.Background(), ap); !errors.Is(err, ErrBackendUnavailable) {
 			t.Fatalf("call %d: err = %v, want ErrBackendUnavailable", i+1, err)
 		}
 	}
@@ -140,7 +140,7 @@ func TestGateBackendAvailable_PersistentMiss_ReassertsAfterInterval(t *testing.T
 	s, ap, counter := newFlapSupervisor(t)
 
 	for i := 0; i < 2; i++ {
-		if err := s.gateBackendAvailable(ap); !errors.Is(err, ErrBackendUnavailable) {
+		if err := s.gateBackendAvailable(context.Background(), ap); !errors.Is(err, ErrBackendUnavailable) {
 			t.Fatalf("call %d: err = %v, want ErrBackendUnavailable", i+1, err)
 		}
 	}
@@ -154,7 +154,7 @@ func TestGateBackendAvailable_PersistentMiss_ReassertsAfterInterval(t *testing.T
 	ap.BackendStatePatchedAt = time.Now().Add(-backendStateReassertInterval - time.Second)
 	ap.Mu.Unlock()
 
-	if err := s.gateBackendAvailable(ap); !errors.Is(err, ErrBackendUnavailable) {
+	if err := s.gateBackendAvailable(context.Background(), ap); !errors.Is(err, ErrBackendUnavailable) {
 		t.Fatalf("third call: err = %v, want ErrBackendUnavailable", err)
 	}
 	if got := counter.snapshot(); len(got) != 2 {
@@ -173,13 +173,13 @@ func TestGateBackendAvailable_Recovery_PatchesActiveOnce(t *testing.T) {
 
 	s, ap, counter := newFlapSupervisor(t)
 
-	if err := s.gateBackendAvailable(ap); !errors.Is(err, ErrBackendUnavailable) {
+	if err := s.gateBackendAvailable(context.Background(), ap); !errors.Is(err, ErrBackendUnavailable) {
 		t.Fatalf("park: err = %v, want ErrBackendUnavailable", err)
 	}
 
 	installed = true
 	for i := 0; i < 2; i++ {
-		if err := s.gateBackendAvailable(ap); err != nil {
+		if err := s.gateBackendAvailable(context.Background(), ap); err != nil {
 			t.Fatalf("recovery call %d: err = %v, want nil", i+1, err)
 		}
 	}

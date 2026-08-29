@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -475,7 +476,9 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 	if !s.gateClaimsHeld(ap) {
 		return false
 	}
-	if err := s.gateBackendAvailable(ap); err != nil {
+	// No span is open on this path; pass an explicit background context so the
+	// absence of a trace parent is visible here rather than hidden in the gate.
+	if err := s.gateBackendAvailable(context.Background(), ap); err != nil {
 		return false
 	}
 	if err := s.gateAccountWall(ap); err != nil {

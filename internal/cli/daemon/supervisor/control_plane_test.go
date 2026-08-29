@@ -252,7 +252,7 @@ func TestSupervisorMirrorsAgentSessionToControlPlane(t *testing.T) {
 	ap.Mu.Lock()
 	ap.LogFilePath = "/tmp/worker-1.log"
 	ap.Mu.Unlock()
-	s.markControlPlaneAgentSessionRunning(ap)
+	s.markControlPlaneAgentSessionRunning(context.Background(), ap)
 	session, err = st.AgentSessions().Get(t.Context(), "WS", ap.AgentSessionID)
 	if err != nil {
 		t.Fatalf("get running agent session: %v", err)

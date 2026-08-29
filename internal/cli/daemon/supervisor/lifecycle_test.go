@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -1429,7 +1430,7 @@ func TestBuildCommand_CustomRoleAllFlags(t *testing.T) {
 		AssignedEpicID: "epic-42",
 	}
 
-	cmd, err := s.buildCommand(ap)
+	cmd, err := s.buildCommand(context.Background(), ap)
 	if err != nil {
 		t.Fatalf("buildCommand error: %v", err)
 	}
@@ -1500,7 +1501,7 @@ func TestBuildCommand_CustomRoleMinimal(t *testing.T) {
 		WorktreePath: tmpDir,
 	}
 
-	cmd, err := s.buildCommand(ap)
+	cmd, err := s.buildCommand(context.Background(), ap)
 	if err != nil {
 		t.Fatalf("buildCommand error: %v", err)
 	}
@@ -1669,7 +1670,7 @@ func TestBuildCommand_BuiltInRoleWithBackendAndEpic(t *testing.T) {
 		AssignedEpicID: "epic-99",
 	}
 
-	cmd, err := s.buildCommand(ap)
+	cmd, err := s.buildCommand(context.Background(), ap)
 	if err != nil {
 		t.Fatalf("buildCommand error: %v", err)
 	}
@@ -1718,7 +1719,7 @@ func TestBuildCommand_CustomRoleMissingPromptFileFails(t *testing.T) {
 		WorktreePath: tmpDir,
 	}
 
-	_, err := s.buildCommand(ap)
+	_, err := s.buildCommand(context.Background(), ap)
 	if err == nil {
 		t.Fatal("buildCommand error = nil, want missing prompt_file error")
 	}
@@ -1942,7 +1943,7 @@ func TestBuildCommand_SessionEnvVars(t *testing.T) {
 			AssignedTaskID:  "task-1",
 		}
 
-		cmd, err := s.buildCommand(ap)
+		cmd, err := s.buildCommand(context.Background(), ap)
 		if err != nil {
 			t.Fatalf("buildCommand: %v", err)
 		}
@@ -2008,7 +2009,7 @@ func TestBuildCommand_SessionEnvVars(t *testing.T) {
 			Session:      nil, // no session
 		}
 
-		cmd, err := s.buildCommand(ap)
+		cmd, err := s.buildCommand(context.Background(), ap)
 		if err != nil {
 			t.Fatalf("buildCommand: %v", err)
 		}

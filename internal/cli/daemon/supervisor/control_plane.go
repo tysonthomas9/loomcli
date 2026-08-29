@@ -310,11 +310,13 @@ func (s *Supervisor) createControlPlaneAgentSession(ap *AgentProcess, sessionID,
 // backend-availability gate to flip between AgentStateBackendUnavailable
 // and AgentStateActive). Best-effort: failures are logged but do not
 // block the supervisor.
-func (s *Supervisor) markControlPlaneAgentState(ap *AgentProcess, state domain.AgentState) {
+func (s *Supervisor) markControlPlaneAgentState(ctx context.Context, ap *AgentProcess, state domain.AgentState) {
 	if s.ControlStore == nil || s.WorkspaceID == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
+	// WithoutCancel keeps the trace parent while detaching cancellation: this
+	// write is best-effort and must still land if the spawn context is done.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), controlPlaneOperationTimeout)
 	defer cancel()
 	if _, err := s.ControlStore.Agents().Update(ctx, s.WorkspaceID, ap.Entry.Worktree, store.AgentUpdate{
 		State: &state,
@@ -324,7 +326,7 @@ func (s *Supervisor) markControlPlaneAgentState(ap *AgentProcess, state domain.A
 	}
 }
 
-func (s *Supervisor) markControlPlaneAgentSessionRunning(ap *AgentProcess) {
+func (s *Supervisor) markControlPlaneAgentSessionRunning(ctx context.Context, ap *AgentProcess) {
 	if s.ControlStore == nil || s.WorkspaceID == "" {
 		return
 	}
@@ -338,7 +340,7 @@ func (s *Supervisor) markControlPlaneAgentSessionRunning(ap *AgentProcess) {
 	}
 	now := time.Now().UTC()
 	status := domain.AgentSessionRunning
-	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), controlPlaneOperationTimeout)
 	defer cancel()
 	if _, err := s.ControlStore.AgentSessions().Update(ctx, s.WorkspaceID, sessionID, store.AgentSessionUpdate{
 		Status:        &status,
