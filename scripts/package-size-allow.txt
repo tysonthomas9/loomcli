@@ -18,3 +18,13 @@ internal/cli/daemon/supervisor 29
 # hook-driven exit-code contract lives in exit.go rather than a file of its own,
 # so this stays at 26.
 internal/cli 26
+# internal/cli/daemon was already at 27 on local/union before this merge — the
+# claim-hold, command-poller, reconciler and workspace-lock seams each landed a
+# file — and reached 28 with supervisor_env.go, PUPPET-211's inherited-identity
+# guard. That guard is deliberately its own file: it runs before anything else
+# in runDaemonBody and folding it into daemon_cmd.go (already the largest file
+# here) would trade this gate for the LOC one, the same trade the supervisor
+# entry above records. This is a ceiling, not a target — the end state is
+# sub-packaging the daemon command surface (control / ipc / state), at which
+# point this entry shrinks or goes.
+internal/cli/daemon 28
