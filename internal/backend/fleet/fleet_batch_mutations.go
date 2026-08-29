@@ -93,29 +93,39 @@ func (b *FleetBackend) ListEventHistory(
 		if limit > historyPageLimit {
 			limit = historyPageLimit
 		}
-		history, err := b.listEventHistoryPage(ctx, id, *params.Since, limit)
-		if err != nil {
-			return nil, err
-		}
-		if history == nil {
-			return &backend.EventHistoryData{Events: []backend.EventData{}}, nil
-		}
-		return &backend.EventHistoryData{
-			Events:      eventDataFromHistory(history.History, id),
-			Cursor:      history.Cursor,
-			HasMore:     history.HasMore,
-			TotalEvents: history.TotalEvents,
-		}, nil
+		return b.eventHistoryForwardPage(ctx, id, *params.Since, limit)
 	}
+	return b.eventHistoryTail(ctx, id, limit, historyPageLimit)
+}
 
-	// fleet-db's history endpoint pages forward from the start of the issue
-	// stream. ListEvents promises the most recent entries, so follow its cursor
-	// to the end and retain only the requested tail.
+// eventHistoryForwardPage serves exactly one oldest-first fleet-db page,
+// passing the paging metadata through verbatim.
+func (b *FleetBackend) eventHistoryForwardPage(ctx context.Context, id, since string, limit int) (*backend.EventHistoryData, error) {
+	history, err := b.listEventHistoryPage(ctx, id, since, limit)
+	if err != nil {
+		return nil, err
+	}
+	if history == nil {
+		return &backend.EventHistoryData{Events: []backend.EventData{}}, nil
+	}
+	return &backend.EventHistoryData{
+		Events:      eventDataFromHistory(history.History, id),
+		Cursor:      history.Cursor,
+		HasMore:     history.HasMore,
+		TotalEvents: history.TotalEvents,
+	}, nil
+}
+
+// eventHistoryTail aggregates the most recent limit events. fleet-db's history
+// endpoint pages forward from the start of the issue stream, so follow its
+// cursor to the end and retain only the requested tail. A tail response
+// carries no cursor; has_more reports whether older events were trimmed.
+func (b *FleetBackend) eventHistoryTail(ctx context.Context, id string, limit, pageLimit int) (*backend.EventHistoryData, error) {
 	result := make([]backend.EventData, 0, limit)
 	totalEvents := 0
 	cursor := ""
 	for {
-		history, err := b.listEventHistoryPage(ctx, id, cursor, historyPageLimit)
+		history, err := b.listEventHistoryPage(ctx, id, cursor, pageLimit)
 		if err != nil {
 			return nil, err
 		}

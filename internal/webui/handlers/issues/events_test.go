@@ -182,6 +182,7 @@ func TestHandleGetIssueEvents_LimitCap(t *testing.T) {
 
 	handler := handleGetIssueEvents(svc)
 
+	// Without since, Loom aggregates the tail itself and accepts up to 500.
 	req := httptest.NewRequest(http.MethodGet, "/api/issues/test-123/events?limit=1000", nil)
 	req.SetPathValue("id", "test-123")
 	w := httptest.NewRecorder()
@@ -192,8 +193,23 @@ func TestHandleGetIssueEvents_LimitCap(t *testing.T) {
 		t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
 	}
 
+	if capturedLimit != 500 {
+		t.Errorf("expected tail limit capped to 500, got %d", capturedLimit)
+	}
+
+	// With since, one fleet-db page: capped to fleet-db's 200 maximum.
+	req = httptest.NewRequest(http.MethodGet, "/api/issues/test-123/events?limit=1000&since=0", nil)
+	req.SetPathValue("id", "test-123")
+	w = httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
 	if capturedLimit != 200 {
-		t.Errorf("expected limit capped to 200, got %d", capturedLimit)
+		t.Errorf("expected paged limit capped to 200, got %d", capturedLimit)
 	}
 }
 
