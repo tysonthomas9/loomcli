@@ -1317,8 +1317,8 @@ func TestListEvents_HappyPath(t *testing.T) {
 	ab, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path + "?" + r.URL.RawQuery
 		respondOK(w, []gen.IssueEvent{
-			{Id: 1, IssueId: "loom-1", EventType: "create", Actor: "alice", CreatedAt: now},
-			{Id: 2, IssueId: "loom-1", EventType: "update", Actor: "bob", CreatedAt: now},
+			{Id: "1", IssueId: "loom-1", EventType: "create", Actor: "alice", CreatedAt: now},
+			{Id: "2", IssueId: "loom-1", EventType: "update", Actor: "bob", CreatedAt: now},
 		})
 	})
 	defer ts.Close()

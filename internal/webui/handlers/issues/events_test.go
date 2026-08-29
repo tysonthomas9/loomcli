@@ -22,8 +22,8 @@ func TestHandleGetIssueEvents_Success(t *testing.T) {
 				t.Errorf("ListEvents called with Limit = %d, want %d", params.Limit, 100)
 			}
 			return []*types.Event{
-				{ID: 1, IssueID: "test-123", EventType: types.EventCreated, Actor: "alice"},
-				{ID: 2, IssueID: "test-123", EventType: types.EventStatusChanged, Actor: "bob"},
+				{ID: "1", IssueID: "test-123", EventType: types.EventCreated, Actor: "alice"},
+				{ID: "2", IssueID: "test-123", EventType: types.EventStatusChanged, Actor: "bob"},
 			}, nil
 		},
 	}

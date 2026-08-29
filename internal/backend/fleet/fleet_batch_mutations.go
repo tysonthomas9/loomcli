@@ -44,40 +44,100 @@ func (w fleetCommentWire) toTypesComment() types.Comment {
 
 // --- Event operations ---
 
+type fleetEventWire struct {
+	ID        string    `json:"id"`
+	Timestamp time.Time `json:"timestamp"`
+	Actor     string    `json:"actor"`
+	Action    string    `json:"action"`
+}
+
+type fleetEventHistory struct {
+	History []fleetEventWire `json:"history"`
+	Cursor  string           `json:"cursor"`
+	HasMore bool             `json:"has_more"`
+}
+
 func (b *FleetBackend) ListEvents(ctx context.Context, id string, limit int) ([]backend.EventData, error) {
-	path := "/issues/" + url.PathEscape(id) + "/history"
-	if limit > 0 {
-		path += "?limit=" + strconv.Itoa(limit)
+	const (
+		historyPageLimit    = 200
+		defaultHistoryLimit = 50
+	)
+	if limit <= 0 {
+		limit = defaultHistoryLimit
 	}
+
+	// fleet-db's history endpoint pages forward from the start of the issue
+	// stream. ListEvents promises the most recent entries, so follow its cursor
+	// to the end and retain only the requested tail.
+	result := make([]backend.EventData, 0, limit)
+	cursor := ""
+	for {
+		history, err := b.listEventHistoryPage(ctx, id, cursor, historyPageLimit)
+		if err != nil {
+			return nil, err
+		}
+		if history == nil {
+			return []backend.EventData{}, nil
+		}
+		result = append(result, eventDataFromHistory(history.History, id)...)
+		if !history.HasMore {
+			break
+		}
+		if history.Cursor == "" || history.Cursor == cursor {
+			return nil, backend.ErrInternal(
+				"ListEvents",
+				"history response has_more without a new cursor",
+				nil,
+			)
+		}
+		cursor = history.Cursor
+	}
+
+	if len(result) > limit {
+		result = result[len(result)-limit:]
+	}
+	return result, nil
+}
+
+func (b *FleetBackend) listEventHistoryPage(
+	ctx context.Context,
+	id string,
+	cursor string,
+	limit int,
+) (*fleetEventHistory, error) {
+	query := url.Values{}
+	query.Set("limit", strconv.Itoa(limit))
+	if cursor != "" {
+		query.Set("since", cursor)
+	}
+	path := "/issues/" + url.PathEscape(id) + "/history?" + query.Encode()
 	resp, err := b.exec(ctx, "ListEvents", "GET", path, nil)
 	if err != nil {
 		return nil, err
 	}
 	if !hasData(resp) {
-		return []backend.EventData{}, nil
+		return nil, nil
 	}
-	var history struct {
-		History []struct {
-			ID        string    `json:"id"`
-			Timestamp time.Time `json:"timestamp"`
-			Actor     string    `json:"actor"`
-			Action    string    `json:"action"`
-		} `json:"history"`
-	}
+
+	var history fleetEventHistory
 	if err := json.Unmarshal(resp.Data, &history); err != nil {
 		return nil, backend.ErrInternal("ListEvents", "unmarshal response", err)
 	}
-	result := make([]backend.EventData, 0, len(history.History))
-	for _, e := range history.History {
+	return &history, nil
+}
+
+func eventDataFromHistory(history []fleetEventWire, issueID string) []backend.EventData {
+	result := make([]backend.EventData, 0, len(history))
+	for _, event := range history {
 		result = append(result, backend.EventData{
-			ID:        e.ID,
-			IssueID:   id,
-			Kind:      e.Action,
-			Actor:     e.Actor,
-			CreatedAt: e.Timestamp,
+			ID:        event.ID,
+			IssueID:   issueID,
+			Kind:      event.Action,
+			Actor:     event.Actor,
+			CreatedAt: event.Timestamp,
 		})
 	}
-	return result, nil
+	return result
 }
 
 // --- Batch operations ---

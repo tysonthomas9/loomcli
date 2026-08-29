@@ -1,7 +1,6 @@
 package api
 
 import (
-	"strconv"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -212,7 +211,7 @@ func commentToData(c gen.Comment) backend.CommentData {
 // eventToData converts gen.IssueEvent to backend.EventData.
 func eventToData(e gen.IssueEvent) backend.EventData {
 	return backend.EventData{
-		ID:        strconv.FormatInt(e.Id, 10),
+		ID:        e.Id,
 		IssueID:   e.IssueId,
 		Kind:      e.EventType,
 		Actor:     e.Actor,

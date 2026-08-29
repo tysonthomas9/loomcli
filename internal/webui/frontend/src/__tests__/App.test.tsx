@@ -943,7 +943,7 @@ describe("App", () => {
     });
     // Set up default store state for issue store selectors
     mockStoreState = createMockUseIssuesReturn({});
-    // Set up default useRouteView mock (kanban is the default view)
+    // Keep board-focused App tests on Kanban unless a case selects another view.
     mockUseRouteView.mockReturnValue(createViewStateReturn("kanban"));
     vi.mocked(useFilterState).mockReturnValue([
       {},
@@ -2316,6 +2316,17 @@ describe("App", () => {
   });
 
   describe("fetchIssues mode parameter based on activeView", () => {
+    it('calls fetchIssues with mode: "kanban" when activeView is "home"', () => {
+      mockStoreState = createMockUseIssuesReturn({});
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("home"));
+
+      render(<App />);
+
+      expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "kanban" }),
+      );
+    });
+
     it('calls fetchIssues with mode: "kanban" when activeView is "kanban"', () => {
       mockStoreState = createMockUseIssuesReturn({});
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("kanban"));
@@ -2441,6 +2452,24 @@ describe("App", () => {
       expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
         expect.objectContaining({ mode: "ready" }),
       );
+    });
+  });
+
+  describe("operator queue navigation badge", () => {
+    it("derives the Home badge from the shared issue collection", () => {
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [
+          createMockIssue({
+            id: "blocked-1",
+            status: "blocked",
+            notes: "BLOCKED: waiting for access",
+          }),
+        ],
+      });
+
+      render(<App />);
+
+      expect(screen.getByTestId("nav-home-badge")).toHaveTextContent("1");
     });
   });
 
@@ -3637,6 +3666,19 @@ describe("App", () => {
   });
 
   describe("sidebar isMultiRepo guard", () => {
+    it.each(["settings", "prs"] as const)(
+      "hides the workspace tree on the full-screen %s view",
+      (view) => {
+        mockUseRouteView.mockReturnValue(createViewStateReturn(view));
+
+        render(<App />);
+
+        expect(
+          screen.queryByLabelText(/workspace tree/i),
+        ).not.toBeInTheDocument();
+      },
+    );
+
     it("renders WorkspaceTree sidebar for workspace view regardless of isMultiRepo", () => {
       vi.mocked(useWorkspaceContext).mockReturnValue({
         workspace: null,
@@ -3969,13 +4011,50 @@ describe("App", () => {
       ).not.toBeInTheDocument();
       expect(
         screen.getByRole("button", {
-          name: "Loom home — return to Kanban board",
+          name: "Loom home",
         }),
       ).toBeInTheDocument();
     });
   });
 
   describe("workspace-driven repo filtering", () => {
+    it("never passes sourceRepos on Home, even with a repo subset selected", () => {
+      vi.mocked(useWorkspaceContext).mockReturnValue({
+        workspace: { name: "filtered-workspace" },
+        repos: [{ name: "repo-alpha" }, { name: "repo-beta" }],
+        groups: [],
+        agents: [],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        getRepoByName: vi.fn(),
+        getReposByGroup: vi.fn(() => []),
+        getAgentByName: vi.fn(),
+        activeWorkspaceName: "filtered-workspace",
+        setActiveWorkspace: vi.fn(),
+        selectedRepoNames: new Set(["repo-alpha"]),
+        activeRepos: [{ name: "repo-alpha" }],
+        activeRepoNames: ["repo-alpha"],
+        isAllSelected: false,
+        selectRepos: vi.fn(),
+        selectAll: vi.fn(),
+        toggleRepo: vi.fn(),
+        sourceReposFilter: ["repo-alpha"],
+        isMultiRepo: true,
+      });
+      mockUseRouteView.mockReturnValue(createViewStateReturn("home"));
+      mockStoreState = createMockUseIssuesReturn({});
+
+      render(<App />);
+
+      expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "kanban" }),
+      );
+      expect(mockStoreState.fetchIssues).not.toHaveBeenCalledWith(
+        expect.objectContaining({ sourceRepos: expect.anything() }),
+      );
+    });
+
     it("passes sourceReposFilter from workspace context to fetchIssues", () => {
       const sourceReposFilter = ["repo-alpha", "repo-beta"];
       vi.mocked(useWorkspaceContext).mockReturnValue({

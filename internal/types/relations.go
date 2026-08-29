@@ -221,7 +221,7 @@ type Comment struct {
 
 // Event represents an audit trail entry
 type Event struct {
-	ID        int64     `json:"id"`
+	ID        string    `json:"id"`
 	IssueID   string    `json:"issue_id"`
 	EventType EventType `json:"event_type"`
 	Actor     string    `json:"actor"`
