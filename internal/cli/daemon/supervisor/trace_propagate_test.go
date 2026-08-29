@@ -15,13 +15,21 @@ import (
 )
 
 // TestBuildCommand_InjectsLoomTraceParent verifies the producer side of the
-// daemon→agent trace-propagation chain. When the daemon has an active root
-// span (published via cmdstore.SetRootContext), supervisor.buildCommand
-// must add LOOM_TRACE_PARENT=<W3C traceparent> to the spawned agent's env,
-// referencing the daemon's span_id. The consumer side (BootstrapContext in
-// the agent process) is covered by tracing.TestBootstrapContext_*.
+// daemon→agent trace-propagation chain: supervisor.buildCommand must add
+// LOOM_TRACE_PARENT=<W3C traceparent> to the spawned agent's env, referencing
+// the span carried by the context it was called with. The consumer side
+// (BootstrapContext in the agent process) is covered by
+// tracing.TestBootstrapContext_*.
 //
-// Pair this test with the consumer-side tests for full chain coverage.
+// The contract is tighter than "the daemon root span": since PUPPET-241 the
+// spawn path calls buildCommand with the daemon.supervisor.spawn span's
+// context, so the agent subprocess parents under the spawn that created it
+// (same trace as the daemon root, different span). This test asserts that
+// shape — span_id is the caller's span, trace_id is still the root's.
+//
+// Pair this test with the consumer-side tests for full chain coverage, and
+// with spawn_trace_parent_test.go, which covers the in-process leg (fleet-db
+// client spans parenting under the spawn span).
 func TestBuildCommand_InjectsLoomTraceParent(t *testing.T) {
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSampler(sdktrace.AlwaysSample()))
@@ -50,7 +58,12 @@ func TestBuildCommand_InjectsLoomTraceParent(t *testing.T) {
 		WorktreePath: tmpDir,
 	}
 
-	cmd, err := s.buildCommand(ap)
+	// The spawn path opens a child span off the root and hands its context to
+	// buildCommand; mirror that here rather than passing the root directly.
+	spawnCtx, spawnSpan := startSpan(cmdstore.RootContext(), "daemon.supervisor.spawn")
+	defer spawnSpan.End()
+
+	cmd, err := s.buildCommand(spawnCtx, ap)
 	if err != nil {
 		t.Fatalf("buildCommand: %v", err)
 	}
@@ -78,9 +91,9 @@ func TestBuildCommand_InjectsLoomTraceParent(t *testing.T) {
 	if parts[1] != wantTraceID {
 		t.Errorf("trace_id in LOOM_TRACE_PARENT = %s, want %s", parts[1], wantTraceID)
 	}
-	// span_id portion must match the parent span's span_id (so the agent
-	// is parented under it, not under some unrelated span).
-	wantSpanID := parentSpan.SpanContext().SpanID().String()
+	// span_id portion must match the SPAWN span's span_id (so the agent's run
+	// is a subtree of the spawn that created it, not a sibling of it).
+	wantSpanID := spawnSpan.SpanContext().SpanID().String()
 	if parts[2] != wantSpanID {
 		t.Errorf("span_id in LOOM_TRACE_PARENT = %s, want %s", parts[2], wantSpanID)
 	}
@@ -109,7 +122,7 @@ func TestBuildCommand_NoTraceParentWhenNoActiveSpan(t *testing.T) {
 		WorktreePath: tmpDir,
 	}
 
-	cmd, err := s.buildCommand(ap)
+	cmd, err := s.buildCommand(context.Background(), ap)
 	if err != nil {
 		t.Fatalf("buildCommand: %v", err)
 	}
