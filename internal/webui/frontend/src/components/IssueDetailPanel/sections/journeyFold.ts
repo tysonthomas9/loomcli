@@ -520,47 +520,47 @@ export function foldJourney(
   // Journey is an audit trace: retain every semantic stage or ownership
   // transition, even when its displayed duration rounds to 0s.
   return spans.map((span): JourneySpan => {
-      span.events.sort((a, b) => auditTime(a) - auditTime(b));
-      span.halts.sort((a, b) => a.startMs - b.startMs);
+    span.events.sort((a, b) => auditTime(a) - auditTime(b));
+    span.halts.sort((a, b) => a.startMs - b.startMs);
 
-      let haltedMs = 0;
-      for (const halt of span.halts) {
-        const haltEndMs = halt.endMs ?? nowMs;
-        halt.durationMs = Math.max(0, haltEndMs - halt.startMs);
-        haltedMs += halt.durationMs;
+    let haltedMs = 0;
+    for (const halt of span.halts) {
+      const haltEndMs = halt.endMs ?? nowMs;
+      halt.durationMs = Math.max(0, haltEndMs - halt.startMs);
+      haltedMs += halt.durationMs;
 
-        if (span.durationMs === 0) {
-          halt.startFraction = 0;
-          halt.endFraction = 0;
-          continue;
-        }
-        halt.startFraction = clampFraction(
-          (halt.startMs - span.startMs) / span.durationMs,
-        );
-        halt.endFraction = Math.max(
-          halt.startFraction,
-          clampFraction((haltEndMs - span.startMs) / span.durationMs),
-        );
+      if (span.durationMs === 0) {
+        halt.startFraction = 0;
+        halt.endFraction = 0;
+        continue;
       }
+      halt.startFraction = clampFraction(
+        (halt.startMs - span.startMs) / span.durationMs,
+      );
+      halt.endFraction = Math.max(
+        halt.startFraction,
+        clampFraction((haltEndMs - span.startMs) / span.durationMs),
+      );
+    }
 
-      return {
-        stage: span.stage,
-        owner: span.owner,
-        start: span.start,
-        end: span.end,
-        durationMs: span.durationMs,
-        haltedMs,
-        halts: span.halts.map((halt) => ({
-          start: halt.start,
-          end: halt.end,
-          durationMs: halt.durationMs,
-          note: halt.note,
-          clearedNote: halt.clearedNote,
-          events: halt.events.sort((a, b) => auditTime(a) - auditTime(b)),
-          startFraction: halt.startFraction,
-          endFraction: halt.endFraction,
-        })),
-        events: span.events,
-      };
-    });
+    return {
+      stage: span.stage,
+      owner: span.owner,
+      start: span.start,
+      end: span.end,
+      durationMs: span.durationMs,
+      haltedMs,
+      halts: span.halts.map((halt) => ({
+        start: halt.start,
+        end: halt.end,
+        durationMs: halt.durationMs,
+        note: halt.note,
+        clearedNote: halt.clearedNote,
+        events: halt.events.sort((a, b) => auditTime(a) - auditTime(b)),
+        startFraction: halt.startFraction,
+        endFraction: halt.endFraction,
+      })),
+      events: span.events,
+    };
+  });
 }
