@@ -18,12 +18,14 @@ const variants: EmptyStateVariant[] = [
   "no-workspaces",
   "no-issues",
   "no-agents",
+  "queue-clear",
 ];
 
 const expectedTitles: Record<EmptyStateVariant, string> = {
   "no-workspaces": "No workspaces configured",
   "no-issues": "No issues yet",
   "no-agents": "No agents running",
+  "queue-clear": "Queue clear",
 };
 
 describe("EmptyState", () => {
@@ -72,6 +74,14 @@ describe("EmptyState", () => {
       render(<EmptyState variant="no-agents" />);
 
       expect(screen.getByText(/loom spawn/)).toBeInTheDocument();
+    });
+
+    it("queue-clear variant explains every in-scope queue trigger", () => {
+      render(<EmptyState variant="queue-clear" />);
+
+      expect(screen.getByText(/design in review/)).toBeInTheDocument();
+      expect(screen.getByText(/declared blocked/)).toBeInTheDocument();
+      expect(screen.getByText(/sent back for revision/)).toBeInTheDocument();
     });
   });
 

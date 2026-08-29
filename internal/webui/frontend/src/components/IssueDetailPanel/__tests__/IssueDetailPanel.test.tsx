@@ -427,6 +427,20 @@ describe("IssueDetailPanel", () => {
       expect(screen.getByTestId("issue-detail-panel")).toBeInTheDocument();
     });
 
+    it("opens in the shared full-workspace detail model by default", () => {
+      const mockIssue = createTestIssue();
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+      expect(screen.getByTestId("issue-detail-panel")).toHaveAttribute(
+        "data-maximized",
+        "true",
+      );
+      expect(
+        screen.getByRole("button", { name: "Exit full screen" }),
+      ).toBeInTheDocument();
+    });
+
     // D-57: close_reason has been on the wire (and written by the bulk-close
     // flow) with nothing rendering it, so "why was this closed?" was only
     // answerable from the API.

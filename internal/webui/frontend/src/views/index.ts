@@ -1,4 +1,5 @@
 export { KanbanPage } from "./KanbanPage";
+export { HomePage } from "./HomePage";
 export { AgentsPage } from "./AgentsPage";
 export { ListPage } from "./ListPage";
 export { PRsPage } from "./PRsPage";

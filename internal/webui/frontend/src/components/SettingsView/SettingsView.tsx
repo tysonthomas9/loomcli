@@ -19,7 +19,7 @@ import {
   useWorkspaceDesignFormat,
   useWorkspaceContext,
 } from "@/hooks/workspace";
-import type { BackendInfo } from "@/utils/workspace";
+import { isUserFacingBackend, type BackendInfo } from "@/utils/workspace";
 import { useToast } from "@/hooks/ui";
 import { restartOnboarding } from "@/utils/onboardingState";
 import { requestCliSetup } from "@/utils/cliSetup";
@@ -42,6 +42,107 @@ interface RedisFormState {
 
 type AgentRuntimeDefault = "local" | "daytona";
 type RuntimeCredentialProvider = "daytona" | "github";
+type SettingsCategory =
+  | "general"
+  | "ai-clis"
+  | "agents"
+  | "runtimes"
+  | "integrations"
+  | "storage";
+
+const SETTINGS_CATEGORIES: {
+  id: SettingsCategory;
+  label: string;
+  description: string;
+}[] = [
+  {
+    id: "general",
+    label: "General",
+    description: "Workspace defaults and project setup.",
+  },
+  {
+    id: "ai-clis",
+    label: "AI CLIs",
+    description: "Installed backends and authentication status.",
+  },
+  {
+    id: "agents",
+    label: "Agents",
+    description: "Per-agent backend overrides.",
+  },
+  {
+    id: "runtimes",
+    label: "Runtimes",
+    description: "Local and remote execution defaults.",
+  },
+  {
+    id: "integrations",
+    label: "Integrations",
+    description: "Connected services and credentials.",
+  },
+  {
+    id: "storage",
+    label: "Storage",
+    description: "FleetDB persistence and Redis.",
+  },
+];
+
+function SettingsCategoryIcon({ category }: { category: SettingsCategory }) {
+  const common = {
+    width: 17,
+    height: 17,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.7,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+  };
+  switch (category) {
+    case "general":
+      return (
+        <svg {...common}>
+          <path d="M4 6h16M4 12h16M4 18h16" />
+          <circle cx="9" cy="6" r="2" fill="currentColor" stroke="none" />
+          <circle cx="15" cy="12" r="2" fill="currentColor" stroke="none" />
+          <circle cx="8" cy="18" r="2" fill="currentColor" stroke="none" />
+        </svg>
+      );
+    case "ai-clis":
+      return (
+        <svg {...common}>
+          <rect x="3" y="4" width="18" height="16" rx="3" />
+          <path d="m7.5 10 2.2 2.2-2.2 2.2M12.5 14.6h4" />
+        </svg>
+      );
+    case "agents":
+      return (
+        <svg {...common}>
+          <rect x="4" y="7" width="16" height="12" rx="3" />
+          <path d="M12 4v3M9 13h.01M15 13h.01" />
+        </svg>
+      );
+    case "runtimes":
+      return (
+        <svg {...common}>
+          <path d="M6.5 18a4 4 0 0 1-.4-7.98A5.5 5.5 0 0 1 16.9 9.2 3.9 3.9 0 0 1 17.5 18h-11Z" />
+        </svg>
+      );
+    case "integrations":
+      return (
+        <svg {...common}>
+          <path d="M9 3v5M15 3v5M7 8h10v4a5 5 0 0 1-10 0V8ZM12 17v4" />
+        </svg>
+      );
+    case "storage":
+      return (
+        <svg {...common}>
+          <ellipse cx="12" cy="6" rx="7.5" ry="3" />
+          <path d="M4.5 6v12c0 1.66 3.36 3 7.5 3s7.5-1.34 7.5-3V6M4.5 12c0 1.66 3.36 3 7.5 3s7.5-1.34 7.5-3" />
+        </svg>
+      );
+  }
+}
 
 const EMPTY_REDIS_FORM: RedisFormState = {
   enabled: false,
@@ -73,6 +174,9 @@ export function SettingsView({
     refetch: refetchBackends,
   } = useBackends();
   const { showToast } = useToast();
+  const [activeCategory, setActiveCategory] =
+    useState<SettingsCategory>("general");
+  const [settingsQuery, setSettingsQuery] = useState("");
   const [selectedBackend, setSelectedBackend] = useState<string | null>(null);
   const {
     settings: localSettings,
@@ -128,6 +232,22 @@ export function SettingsView({
   const rootClassName = [styles.settingsView, className]
     .filter(Boolean)
     .join(" ");
+  const normalizedSettingsQuery = settingsQuery.trim().toLowerCase();
+  const activeCategoryDetails =
+    SETTINGS_CATEGORIES.find((category) => category.id === activeCategory) ??
+    SETTINGS_CATEGORIES[0]!;
+  const panelMatches = (...terms: string[]) =>
+    !normalizedSettingsQuery ||
+    terms.some((term) => term.toLowerCase().includes(normalizedSettingsQuery));
+  const categoryHidden = (category: SettingsCategory) =>
+    (!normalizedSettingsQuery && activeCategory !== category) || undefined;
+
+  const navigateToCategory = (category: SettingsCategory) => {
+    setActiveCategory(category);
+    document
+      .getElementById(`settings-${category}`)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   // Loading state
   if (isLoading && !config) {
@@ -348,522 +468,693 @@ export function SettingsView({
 
   return (
     <div className={rootClassName} data-testid="settings-view">
-      <h2 className={styles.pageTitle}>Settings</h2>
-
-      {/* Onboarding */}
-      <div className={styles.panel}>
-        <div className={styles.panelHeader}>
-          <h3 className={styles.panelTitle}>Onboarding</h3>
-        </div>
-        <div className={styles.panelContent}>
-          <p className={styles.description}>
-            Restore the setup checklist if it was dismissed before onboarding
-            was complete.
+      <header className={styles.pageHeader}>
+        <div>
+          <p className={styles.projectEyebrow}>
+            Project · {workspace?.name || workspaceId}
           </p>
-          <button
-            type="button"
-            className={styles.navButton}
-            onClick={handleRestartOnboarding}
-            data-testid="restart-onboarding-button"
-          >
-            Show Onboarding Checklist
-          </button>
+          <h2 className={styles.pageTitle}>Settings</h2>
         </div>
-      </div>
-
-      {/* AI CLI status */}
-      <div className={styles.panel}>
-        <div className={styles.panelHeader}>
-          <h3 className={styles.panelTitle}>AI CLIs</h3>
-        </div>
-        <div className={styles.panelContent}>
-          <AIBackendSetupList
-            backends={backends}
-            defaultBackend={config.backend}
-            variant="matrix"
-            isLoading={isLoadingBackends}
-            error={backendsError}
-            isSavingDefault={isSaving}
-            onAction={handleBackendSetupAction}
+        <label className={styles.settingsSearch}>
+          <span aria-hidden="true">⌕</span>
+          <span className={styles.srOnly}>Search settings</span>
+          <input
+            type="search"
+            value={settingsQuery}
+            onChange={(event) => setSettingsQuery(event.target.value)}
+            placeholder="Search settings…"
+            data-testid="settings-search"
           />
-        </div>
-      </div>
+          <kbd>⌘K</kbd>
+        </label>
+      </header>
 
-      {/* Project Default Backend */}
-      <div className={styles.panel}>
-        <div className={styles.panelHeader}>
-          <h3 className={styles.panelTitle}>
-            Project Default Backend
-            {isCached && (
-              <span className={styles.cachedBadge} data-testid="cached-badge">
-                (cached)
-              </span>
-            )}
-          </h3>
-        </div>
-        <div className={styles.panelContent}>
-          <div className={styles.formGroup}>
-            <label className={styles.label} htmlFor="backend-select">
-              Default Backend
-            </label>
-            <p className={styles.description}>
-              The AI backend used for new agents unless overridden.
-            </p>
-            <div className={styles.selectRow}>
-              <select
-                id="backend-select"
-                className={styles.select}
-                value={currentValue}
-                onChange={handleSelectChange}
-                data-testid="backend-select"
+      <div className={styles.settingsLayout}>
+        <nav className={styles.settingsNav} aria-label="Settings categories">
+          <p className={styles.navLabel}>Project settings</p>
+          {SETTINGS_CATEGORIES.map((category) => {
+            const isActive = activeCategory === category.id;
+            return (
+              <button
+                key={category.id}
+                type="button"
+                className={styles.navItem}
+                data-active={isActive || undefined}
+                aria-current={isActive ? "page" : undefined}
+                onClick={() => navigateToCategory(category.id)}
               >
-                {config.available.map((b) => (
-                  <option key={b} value={b}>
-                    {b}
-                  </option>
-                ))}
-              </select>
-              <span className={styles.sourceTag}>
-                {config.source === "fleetdb" ? "From FleetDB" : "Default"}
-              </span>
+                <span className={styles.navIcon} aria-hidden="true">
+                  <SettingsCategoryIcon category={category.id} />
+                </span>
+                <span>{category.label}</span>
+                {category.id === "ai-clis" &&
+                  backends.filter((backend) => !backend.available).length >
+                    0 && (
+                    <span className={styles.navBadge}>
+                      {backends.filter((backend) => !backend.available).length}{" "}
+                      to set up
+                    </span>
+                  )}
+              </button>
+            );
+          })}
+        </nav>
+
+        <main className={styles.settingsContent}>
+          <div className={styles.contentIntro}>
+            <h2>
+              {normalizedSettingsQuery
+                ? `Results for “${settingsQuery.trim()}”`
+                : activeCategoryDetails.label}
+            </h2>
+            <p>
+              {normalizedSettingsQuery
+                ? "Matching settings across this project."
+                : activeCategoryDetails.description}
+            </p>
+          </div>
+
+          {/* Onboarding */}
+          <div
+            className={styles.panel}
+            id="settings-general"
+            data-settings-panel="onboarding"
+            data-category-hidden={categoryHidden("general")}
+            data-search-hidden={
+              !panelMatches("onboarding", "project setup", "checklist") ||
+              undefined
+            }
+          >
+            <div className={styles.panelHeader}>
+              <h3 className={styles.panelTitle}>Onboarding</h3>
+            </div>
+            <div className={styles.panelContent}>
+              <p className={styles.description}>
+                Restore the setup checklist if it was dismissed before
+                onboarding was complete.
+              </p>
+              <button
+                type="button"
+                className={styles.navButton}
+                onClick={handleRestartOnboarding}
+                data-testid="restart-onboarding-button"
+              >
+                Show Onboarding Checklist
+              </button>
             </div>
           </div>
-          <div className={styles.formGroup}>
-            <button
-              type="button"
-              className={styles.saveButton}
-              disabled={!hasChanges || isSaving || isCached}
-              onClick={handleSave}
-              data-testid="save-button"
-            >
-              {isSaving ? "Saving..." : "Save"}
-            </button>
-          </div>
-        </div>
-      </div>
 
-      {/* Planner Design Format */}
-      <div className={styles.panel} data-testid="design-format-panel">
-        <div className={styles.panelHeader}>
-          <h3 className={styles.panelTitle}>Planner Design Format</h3>
-        </div>
-        <div className={styles.panelContent}>
-          <div className={styles.formGroup}>
-            <label className={styles.label} htmlFor="design-format-select">
-              Design format
-            </label>
-            <p className={styles.description}>
-              Markdown is portable and remains the default. HTML enables richer
-              layouts and sanitized inline SVG diagrams in issue designs.
-            </p>
-            <select
-              id="design-format-select"
-              className={styles.select}
-              value={designFormat}
-              onChange={(event) =>
-                setDesignFormat(event.target.value as "markdown" | "html")
-              }
-              data-testid="design-format-select"
-            >
-              <option value="markdown">Markdown</option>
-              <option value="html">HTML</option>
-            </select>
-          </div>
-          <div className={styles.formGroup}>
-            <button
-              type="button"
-              className={styles.saveButton}
-              disabled={
-                !workspaceId ||
-                designFormat === persistedDesignFormat ||
-                isSavingDesignFormat
-              }
-              onClick={handleDesignFormatSave}
-              data-testid="design-format-save-button"
-            >
-              {isSavingDesignFormat ? "Saving..." : "Save Design Format"}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Agent Backend Overrides */}
-      <div className={styles.panel}>
-        <div className={styles.panelHeader}>
-          <h3 className={styles.panelTitle}>Agent Backend Overrides</h3>
-        </div>
-        <div className={styles.panelContent}>
-          {agentsWithOverrides.length > 0 ? (
-            <table
-              className={styles.agentTable}
-              data-testid="agent-overrides-table"
-            >
-              <thead>
-                <tr>
-                  <th>Worktree</th>
-                  <th>Role</th>
-                  <th>Backend</th>
-                </tr>
-              </thead>
-              <tbody>
-                {agentsWithOverrides.map((agent) => (
-                  <tr key={agent.worktree}>
-                    <td>{agent.worktree}</td>
-                    <td>{agent.role}</td>
-                    <td>{agent.backend}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <p
-              className={styles.emptyMessage}
-              data-testid="no-overrides-message"
-            >
-              No per-agent overrides configured.
-            </p>
-          )}
-        </div>
-      </div>
-
-      {/* Remote runtimes */}
-      <div className={styles.panel} data-testid="remote-runtimes-panel">
-        <div className={styles.panelHeader}>
-          <h3 className={styles.panelTitle}>Remote runtimes</h3>
-        </div>
-        <div className={styles.panelContent}>
-          <p className={styles.description}>
-            Configure app-triggered task runtimes and Daytona access.
-          </p>
-          <div className={styles.formGroup}>
-            <label className={styles.label} htmlFor="agent-runtime-select">
-              Run task agents
-            </label>
-            <p className={styles.description}>
-              App-triggered epic runs use this runtime for child task agents.
-            </p>
-            <select
-              id="agent-runtime-select"
-              className={styles.select}
-              value={agentRuntime}
-              onChange={(e) =>
-                setAgentRuntime(e.target.value as AgentRuntimeDefault)
-              }
-              data-testid="agent-runtime-select"
-            >
-              <option value="local">Locally</option>
-              <option value="daytona">On Daytona</option>
-            </select>
-          </div>
-          <div className={styles.formGroup}>
-            <button
-              type="button"
-              className={styles.saveButton}
-              disabled={
-                isSavingLocalSettings ||
-                agentRuntime === (runtimeSettings?.default ?? "local")
-              }
-              onClick={handleAgentRuntimeSave}
-              data-testid="agent-runtime-save-button"
-            >
-              {isSavingLocalSettings ? "Saving..." : "Save Agent Runtime"}
-            </button>
-          </div>
-          <div className={styles.formGroup}>
-            <label className={styles.label} htmlFor="opencode-model-input">
-              Opencode Model
-            </label>
-            <p className={styles.description}>
-              Used by app-triggered local epic runs when the project backend is
-              opencode.
-            </p>
-            <input
-              id="opencode-model-input"
-              type="text"
-              className={styles.input}
-              value={opencodeModel}
-              onChange={(e) => setOpencodeModel(e.target.value)}
-              placeholder="provider/model"
-              data-testid="opencode-model-input"
-            />
-          </div>
-          <div className={styles.formGroup}>
-            <button
-              type="button"
-              className={styles.saveButton}
-              disabled={
-                isSavingLocalSettings ||
-                opencodeModel.trim() ===
-                  (localTaskRunnerSettings?.opencode_model ?? "")
-              }
-              onClick={handleLocalTaskRunnerSave}
-              data-testid="local-task-runner-save-button"
-            >
-              {isSavingLocalSettings
-                ? "Saving..."
-                : "Save Local Task Runner Settings"}
-            </button>
-          </div>
-          <div className={styles.formGroup}>
-            <label className={styles.label} htmlFor="daytona-api-key-input">
-              Daytona API Key
-            </label>
-            <input
-              id="daytona-api-key-input"
-              type="password"
-              className={styles.input}
-              value={daytonaApiKey}
-              onChange={(e) => setDaytonaApiKey(e.target.value)}
-              placeholder={
-                runtimeCredentials?.daytona.configured
-                  ? "Saved key unchanged"
-                  : "dtn_..."
-              }
-              data-testid="daytona-api-key-input"
-            />
-            <p className={styles.description}>
-              {runtimeCredentials?.daytona.configured
-                ? "Daytona credential saved"
-                : "No Daytona credential saved"}
-            </p>
-            {runtimeCredentials?.daytona.configured && (
-              <button
-                type="button"
-                className={styles.navButton}
-                disabled={isSavingLocalSettings}
-                onClick={() => handleRuntimeCredentialClear("daytona")}
-                data-testid="daytona-credential-clear-button"
-              >
-                Clear Daytona Key
-              </button>
-            )}
-          </div>
-          <div className={styles.formGroup}>
-            <button
-              type="button"
-              className={styles.saveButton}
-              disabled={isSavingLocalSettings}
-              onClick={() => handleRuntimeCredentialSave("daytona")}
-              data-testid="daytona-credential-save-button"
-            >
-              {isSavingLocalSettings ? "Saving..." : "Save Daytona Credential"}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* GitHub */}
-      <div className={styles.panel} data-testid="github-settings-panel">
-        <div className={styles.panelHeader}>
-          <h3 className={styles.panelTitle}>GitHub</h3>
-        </div>
-        <div className={styles.panelContent}>
-          <div className={styles.formGroup}>
-            <label className={styles.label} htmlFor="github-token-input">
-              GitHub Token for Runtimes and PR Review
-            </label>
-            <input
-              id="github-token-input"
-              type="password"
-              className={styles.input}
-              value={githubToken}
-              onChange={(e) => setGithubToken(e.target.value)}
-              placeholder={
-                runtimeCredentials?.github.configured
-                  ? "Saved token unchanged"
-                  : "github_pat_..."
-              }
-              data-testid="github-token-input"
-            />
-            <p className={styles.description}>
-              {runtimeCredentials?.github.configured && "Credential saved. "}
-              <span>
-                Used for GitHub PR review and remote runtime provisioning.
-              </span>
-            </p>
-            {runtimeCredentials?.github.configured && (
-              <button
-                type="button"
-                className={styles.navButton}
-                disabled={isSavingLocalSettings}
-                onClick={() => handleRuntimeCredentialClear("github")}
-                data-testid="github-credential-clear-button"
-              >
-                Clear GitHub Token
-              </button>
-            )}
-          </div>
-          <div className={styles.formGroup}>
-            <button
-              type="button"
-              className={styles.saveButton}
-              disabled={isSavingLocalSettings}
-              onClick={() => handleRuntimeCredentialSave("github")}
-              data-testid="github-credential-save-button"
-            >
-              {isSavingLocalSettings ? "Saving..." : "Save GitHub Credential"}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* FleetDB Redis */}
-      <div className={styles.panel} data-testid="fleetdb-redis-panel">
-        <div className={styles.panelHeader}>
-          <h3 className={styles.panelTitle}>FleetDB Redis</h3>
-        </div>
-        <div className={styles.panelContent}>
-          <div className={styles.formGroup}>
-            <label className={styles.checkboxLabel}>
-              <input
-                type="checkbox"
-                checked={redisForm.enabled}
-                onChange={(e) =>
-                  setRedisForm((current) => ({
-                    ...current,
-                    enabled: e.target.checked,
-                  }))
-                }
-                data-testid="redis-enabled-checkbox"
+          {/* AI CLI status */}
+          <div
+            className={styles.panel}
+            id="settings-ai-clis"
+            data-settings-panel="ai-clis"
+            data-category-hidden={categoryHidden("ai-clis")}
+            data-search-hidden={
+              !panelMatches(
+                "AI CLIs",
+                "backends",
+                "install",
+                "authentication",
+              ) || undefined
+            }
+          >
+            <div className={styles.panelHeader}>
+              <h3 className={styles.panelTitle}>AI CLIs</h3>
+            </div>
+            <div className={styles.panelContent}>
+              <AIBackendSetupList
+                backends={backends}
+                defaultBackend={config.backend}
+                variant="matrix"
+                isLoading={isLoadingBackends}
+                error={backendsError}
+                isSavingDefault={isSaving}
+                onAction={handleBackendSetupAction}
               />
-              Use external Redis for FleetDB
-            </label>
-            <p className={styles.description}>
-              Stores workspace, task, repo, and agent state in a managed Redis
-              instance instead of local embedded Redis.
-            </p>
+            </div>
           </div>
-          {redisForm.enabled && (
-            <>
+
+          {/* Project Default Backend */}
+          <div
+            className={styles.panel}
+            data-settings-panel="backend"
+            data-category-hidden={categoryHidden("general")}
+            data-search-hidden={
+              !panelMatches(
+                "project default backend",
+                "workspace",
+                "backend",
+              ) || undefined
+            }
+          >
+            <div className={styles.panelHeader}>
+              <h3 className={styles.panelTitle}>
+                Project Default Backend
+                {isCached && (
+                  <span
+                    className={styles.cachedBadge}
+                    data-testid="cached-badge"
+                  >
+                    (cached)
+                  </span>
+                )}
+              </h3>
+            </div>
+            <div className={styles.panelContent}>
               <div className={styles.formGroup}>
-                <label className={styles.label} htmlFor="redis-url-input">
-                  Redis URL
+                <label className={styles.label} htmlFor="backend-select">
+                  Default Backend
                 </label>
                 <p className={styles.description}>
-                  Paste a redis://, rediss://, or redis-cli -u command. The
-                  saved password is never returned to the browser.
+                  The AI backend used for new agents unless overridden.
+                </p>
+                <div className={styles.selectRow}>
+                  <select
+                    id="backend-select"
+                    className={styles.select}
+                    value={currentValue}
+                    onChange={handleSelectChange}
+                    data-testid="backend-select"
+                  >
+                    {config.available
+                      .filter((backend) => isUserFacingBackend(backend))
+                      .map((b) => (
+                        <option key={b} value={b}>
+                          {b}
+                        </option>
+                      ))}
+                  </select>
+                  <span className={styles.sourceTag}>
+                    {config.source === "fleetdb" ? "From FleetDB" : "Default"}
+                  </span>
+                </div>
+              </div>
+              <div className={styles.formGroup}>
+                <button
+                  type="button"
+                  className={styles.saveButton}
+                  disabled={!hasChanges || isSaving || isCached}
+                  onClick={handleSave}
+                  data-testid="save-button"
+                >
+                  {isSaving ? "Saving..." : "Save"}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Planner Design Format */}
+          <div
+            className={styles.panel}
+            data-settings-panel="design-format"
+            data-category-hidden={categoryHidden("general")}
+            data-testid="design-format-panel"
+            data-search-hidden={
+              !panelMatches("planner design format", "markdown", "html") ||
+              undefined
+            }
+          >
+            <div className={styles.panelHeader}>
+              <h3 className={styles.panelTitle}>Planner Design Format</h3>
+            </div>
+            <div className={styles.panelContent}>
+              <div className={styles.formGroup}>
+                <label className={styles.label} htmlFor="design-format-select">
+                  Design format
+                </label>
+                <p className={styles.description}>
+                  Markdown is portable and remains the default. HTML enables
+                  richer layouts and sanitized inline SVG diagrams in issue
+                  designs.
+                </p>
+                <select
+                  id="design-format-select"
+                  className={styles.select}
+                  value={designFormat}
+                  onChange={(event) =>
+                    setDesignFormat(event.target.value as "markdown" | "html")
+                  }
+                  data-testid="design-format-select"
+                >
+                  <option value="markdown">Markdown</option>
+                  <option value="html">HTML</option>
+                </select>
+              </div>
+              <div className={styles.formGroup}>
+                <button
+                  type="button"
+                  className={styles.saveButton}
+                  disabled={
+                    !workspaceId ||
+                    designFormat === persistedDesignFormat ||
+                    isSavingDesignFormat
+                  }
+                  onClick={handleDesignFormatSave}
+                  data-testid="design-format-save-button"
+                >
+                  {isSavingDesignFormat ? "Saving..." : "Save Design Format"}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Agent Backend Overrides */}
+          <div
+            className={styles.panel}
+            id="settings-agents"
+            data-settings-panel="agents"
+            data-category-hidden={categoryHidden("agents")}
+            data-search-hidden={
+              !panelMatches(
+                "agents",
+                "backend overrides",
+                "worktree",
+                "role",
+              ) || undefined
+            }
+          >
+            <div className={styles.panelHeader}>
+              <h3 className={styles.panelTitle}>Agent Backend Overrides</h3>
+            </div>
+            <div className={styles.panelContent}>
+              {agentsWithOverrides.length > 0 ? (
+                <table
+                  className={styles.agentTable}
+                  data-testid="agent-overrides-table"
+                >
+                  <thead>
+                    <tr>
+                      <th>Worktree</th>
+                      <th>Role</th>
+                      <th>Backend</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {agentsWithOverrides.map((agent) => (
+                      <tr key={agent.worktree}>
+                        <td>{agent.worktree}</td>
+                        <td>{agent.role}</td>
+                        <td>{agent.backend}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p
+                  className={styles.emptyMessage}
+                  data-testid="no-overrides-message"
+                >
+                  No per-agent overrides configured.
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Remote runtimes */}
+          <div
+            className={styles.panel}
+            id="settings-runtimes"
+            data-settings-panel="runtimes"
+            data-category-hidden={categoryHidden("runtimes")}
+            data-testid="remote-runtimes-panel"
+            data-search-hidden={
+              !panelMatches("runtimes", "Daytona", "Opencode", "task runner") ||
+              undefined
+            }
+          >
+            <div className={styles.panelHeader}>
+              <h3 className={styles.panelTitle}>Remote runtimes</h3>
+            </div>
+            <div className={styles.panelContent}>
+              <p className={styles.description}>
+                Configure app-triggered task runtimes and Daytona access.
+              </p>
+              <div className={styles.formGroup}>
+                <label className={styles.label} htmlFor="agent-runtime-select">
+                  Run task agents
+                </label>
+                <p className={styles.description}>
+                  App-triggered epic runs use this runtime for child task
+                  agents.
+                </p>
+                <select
+                  id="agent-runtime-select"
+                  className={styles.select}
+                  value={agentRuntime}
+                  onChange={(e) =>
+                    setAgentRuntime(e.target.value as AgentRuntimeDefault)
+                  }
+                  data-testid="agent-runtime-select"
+                >
+                  <option value="local">Locally</option>
+                  <option value="daytona">On Daytona</option>
+                </select>
+              </div>
+              <div className={styles.formGroup}>
+                <button
+                  type="button"
+                  className={styles.saveButton}
+                  disabled={
+                    isSavingLocalSettings ||
+                    agentRuntime === (runtimeSettings?.default ?? "local")
+                  }
+                  onClick={handleAgentRuntimeSave}
+                  data-testid="agent-runtime-save-button"
+                >
+                  {isSavingLocalSettings ? "Saving..." : "Save Agent Runtime"}
+                </button>
+              </div>
+              <div className={styles.formGroup}>
+                <label className={styles.label} htmlFor="opencode-model-input">
+                  Opencode Model
+                </label>
+                <p className={styles.description}>
+                  Used by app-triggered local epic runs when the project backend
+                  is opencode.
                 </p>
                 <input
-                  id="redis-url-input"
-                  type="password"
+                  id="opencode-model-input"
+                  type="text"
                   className={styles.input}
-                  value={redisForm.url}
-                  onChange={(e) => handleRedisUrlChange(e.target.value)}
-                  placeholder="redis://default:password@host:6379"
-                  data-testid="redis-url-input"
+                  value={opencodeModel}
+                  onChange={(e) => setOpencodeModel(e.target.value)}
+                  placeholder="provider/model"
+                  data-testid="opencode-model-input"
                 />
               </div>
-              <div className={styles.fieldGrid}>
-                <div className={styles.formGroup}>
-                  <label className={styles.label} htmlFor="redis-addr-input">
-                    Address
-                  </label>
-                  <input
-                    id="redis-addr-input"
-                    type="text"
-                    className={styles.input}
-                    value={redisForm.addr}
-                    onChange={(e) =>
-                      setRedisForm((current) => ({
-                        ...current,
-                        addr: e.target.value,
-                      }))
-                    }
-                    placeholder="host:6379"
-                    data-testid="redis-addr-input"
-                  />
-                </div>
-                <div className={styles.formGroup}>
-                  <label className={styles.label} htmlFor="redis-db-input">
-                    Database index
-                  </label>
-                  <input
-                    id="redis-db-input"
-                    type="number"
-                    min={0}
-                    className={styles.input}
-                    value={redisForm.db}
-                    onChange={(e) =>
-                      setRedisForm((current) => ({
-                        ...current,
-                        db: e.target.value,
-                      }))
-                    }
-                    data-testid="redis-db-input"
-                  />
-                </div>
-                <div className={styles.formGroup}>
-                  <label
-                    className={styles.label}
-                    htmlFor="redis-password-input"
-                  >
-                    Password
-                  </label>
-                  <input
-                    id="redis-password-input"
-                    type="password"
-                    className={styles.input}
-                    value={redisForm.password}
-                    onChange={(e) =>
-                      setRedisForm((current) => ({
-                        ...current,
-                        password: e.target.value,
-                      }))
-                    }
-                    placeholder={
-                      redisSettings?.password_set
-                        ? "Saved password unchanged"
-                        : "Optional"
-                    }
-                    data-testid="redis-password-input"
-                  />
-                </div>
+              <div className={styles.formGroup}>
+                <button
+                  type="button"
+                  className={styles.saveButton}
+                  disabled={
+                    isSavingLocalSettings ||
+                    opencodeModel.trim() ===
+                      (localTaskRunnerSettings?.opencode_model ?? "")
+                  }
+                  onClick={handleLocalTaskRunnerSave}
+                  data-testid="local-task-runner-save-button"
+                >
+                  {isSavingLocalSettings
+                    ? "Saving..."
+                    : "Save Local Task Runner Settings"}
+                </button>
               </div>
+              <div className={styles.formGroup}>
+                <label className={styles.label} htmlFor="daytona-api-key-input">
+                  Daytona API Key
+                </label>
+                <input
+                  id="daytona-api-key-input"
+                  type="password"
+                  className={styles.input}
+                  value={daytonaApiKey}
+                  onChange={(e) => setDaytonaApiKey(e.target.value)}
+                  placeholder={
+                    runtimeCredentials?.daytona.configured
+                      ? "Saved key unchanged"
+                      : "dtn_..."
+                  }
+                  data-testid="daytona-api-key-input"
+                />
+                <p className={styles.description}>
+                  {runtimeCredentials?.daytona.configured
+                    ? "Daytona credential saved"
+                    : "No Daytona credential saved"}
+                </p>
+                {runtimeCredentials?.daytona.configured && (
+                  <button
+                    type="button"
+                    className={styles.navButton}
+                    disabled={isSavingLocalSettings}
+                    onClick={() => handleRuntimeCredentialClear("daytona")}
+                    data-testid="daytona-credential-clear-button"
+                  >
+                    Clear Daytona Key
+                  </button>
+                )}
+              </div>
+              <div className={styles.formGroup}>
+                <button
+                  type="button"
+                  className={styles.saveButton}
+                  disabled={isSavingLocalSettings}
+                  onClick={() => handleRuntimeCredentialSave("daytona")}
+                  data-testid="daytona-credential-save-button"
+                >
+                  {isSavingLocalSettings
+                    ? "Saving..."
+                    : "Save Daytona Credential"}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* GitHub */}
+          <div
+            className={styles.panel}
+            id="settings-integrations"
+            data-settings-panel="integrations"
+            data-category-hidden={categoryHidden("integrations")}
+            data-testid="github-settings-panel"
+            data-search-hidden={
+              !panelMatches("integrations", "GitHub", "token", "PR review") ||
+              undefined
+            }
+          >
+            <div className={styles.panelHeader}>
+              <h3 className={styles.panelTitle}>GitHub</h3>
+            </div>
+            <div className={styles.panelContent}>
+              <div className={styles.formGroup}>
+                <label className={styles.label} htmlFor="github-token-input">
+                  GitHub Token for Runtimes and PR Review
+                </label>
+                <input
+                  id="github-token-input"
+                  type="password"
+                  className={styles.input}
+                  value={githubToken}
+                  onChange={(e) => setGithubToken(e.target.value)}
+                  placeholder={
+                    runtimeCredentials?.github.configured
+                      ? "Saved token unchanged"
+                      : "github_pat_..."
+                  }
+                  data-testid="github-token-input"
+                />
+                <p className={styles.description}>
+                  {runtimeCredentials?.github.configured &&
+                    "Credential saved. "}
+                  <span>
+                    Used for GitHub PR review and remote runtime provisioning.
+                  </span>
+                </p>
+                {runtimeCredentials?.github.configured && (
+                  <button
+                    type="button"
+                    className={styles.navButton}
+                    disabled={isSavingLocalSettings}
+                    onClick={() => handleRuntimeCredentialClear("github")}
+                    data-testid="github-credential-clear-button"
+                  >
+                    Clear GitHub Token
+                  </button>
+                )}
+              </div>
+              <div className={styles.formGroup}>
+                <button
+                  type="button"
+                  className={styles.saveButton}
+                  disabled={isSavingLocalSettings}
+                  onClick={() => handleRuntimeCredentialSave("github")}
+                  data-testid="github-credential-save-button"
+                >
+                  {isSavingLocalSettings
+                    ? "Saving..."
+                    : "Save GitHub Credential"}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* FleetDB Redis */}
+          <div
+            className={styles.panel}
+            id="settings-storage"
+            data-settings-panel="storage"
+            data-category-hidden={categoryHidden("storage")}
+            data-testid="fleetdb-redis-panel"
+            data-search-hidden={
+              !panelMatches("storage", "FleetDB", "Redis", "database") ||
+              undefined
+            }
+          >
+            <div className={styles.panelHeader}>
+              <h3 className={styles.panelTitle}>FleetDB Redis</h3>
+            </div>
+            <div className={styles.panelContent}>
               <div className={styles.formGroup}>
                 <label className={styles.checkboxLabel}>
                   <input
                     type="checkbox"
-                    checked={redisForm.tls}
+                    checked={redisForm.enabled}
                     onChange={(e) =>
                       setRedisForm((current) => ({
                         ...current,
-                        tls: e.target.checked,
+                        enabled: e.target.checked,
                       }))
                     }
-                    data-testid="redis-tls-checkbox"
+                    data-testid="redis-enabled-checkbox"
                   />
-                  Use TLS
+                  Use external Redis for FleetDB
                 </label>
+                <p className={styles.description}>
+                  Stores workspace, task, repo, and agent state in a managed
+                  Redis instance instead of local embedded Redis.
+                </p>
               </div>
-            </>
-          )}
-          {redisSettings?.enabled && (
-            <p className={styles.description} data-testid="redis-current">
-              Current: {redisSettings.addr || "not configured"} | database{" "}
-              {redisSettings.db} | {redisSettings.tls ? "TLS" : "no TLS"} |{" "}
-              {redisSettings.password_set ? "password saved" : "no password"}
-            </p>
-          )}
-          {localSettingsError && (
-            <p className={styles.errorText} data-testid="redis-settings-error">
-              {localSettingsError}
-            </p>
-          )}
-          <div className={styles.formGroup}>
-            <button
-              type="button"
-              className={styles.saveButton}
-              disabled={isSavingLocalSettings}
-              onClick={handleRedisSave}
-              data-testid="redis-save-button"
-            >
-              {isSavingLocalSettings ? "Saving..." : "Save Redis Settings"}
-            </button>
-            <p className={styles.restartNote}>
-              Restart the local runtime after changing Redis settings.
-            </p>
+              {redisForm.enabled && (
+                <>
+                  <div className={styles.formGroup}>
+                    <label className={styles.label} htmlFor="redis-url-input">
+                      Redis URL
+                    </label>
+                    <p className={styles.description}>
+                      Paste a redis://, rediss://, or redis-cli -u command. The
+                      saved password is never returned to the browser.
+                    </p>
+                    <input
+                      id="redis-url-input"
+                      type="password"
+                      className={styles.input}
+                      value={redisForm.url}
+                      onChange={(e) => handleRedisUrlChange(e.target.value)}
+                      placeholder="redis://default:password@host:6379"
+                      data-testid="redis-url-input"
+                    />
+                  </div>
+                  <div className={styles.fieldGrid}>
+                    <div className={styles.formGroup}>
+                      <label
+                        className={styles.label}
+                        htmlFor="redis-addr-input"
+                      >
+                        Address
+                      </label>
+                      <input
+                        id="redis-addr-input"
+                        type="text"
+                        className={styles.input}
+                        value={redisForm.addr}
+                        onChange={(e) =>
+                          setRedisForm((current) => ({
+                            ...current,
+                            addr: e.target.value,
+                          }))
+                        }
+                        placeholder="host:6379"
+                        data-testid="redis-addr-input"
+                      />
+                    </div>
+                    <div className={styles.formGroup}>
+                      <label className={styles.label} htmlFor="redis-db-input">
+                        Database index
+                      </label>
+                      <input
+                        id="redis-db-input"
+                        type="number"
+                        min={0}
+                        className={styles.input}
+                        value={redisForm.db}
+                        onChange={(e) =>
+                          setRedisForm((current) => ({
+                            ...current,
+                            db: e.target.value,
+                          }))
+                        }
+                        data-testid="redis-db-input"
+                      />
+                    </div>
+                    <div className={styles.formGroup}>
+                      <label
+                        className={styles.label}
+                        htmlFor="redis-password-input"
+                      >
+                        Password
+                      </label>
+                      <input
+                        id="redis-password-input"
+                        type="password"
+                        className={styles.input}
+                        value={redisForm.password}
+                        onChange={(e) =>
+                          setRedisForm((current) => ({
+                            ...current,
+                            password: e.target.value,
+                          }))
+                        }
+                        placeholder={
+                          redisSettings?.password_set
+                            ? "Saved password unchanged"
+                            : "Optional"
+                        }
+                        data-testid="redis-password-input"
+                      />
+                    </div>
+                  </div>
+                  <div className={styles.formGroup}>
+                    <label className={styles.checkboxLabel}>
+                      <input
+                        type="checkbox"
+                        checked={redisForm.tls}
+                        onChange={(e) =>
+                          setRedisForm((current) => ({
+                            ...current,
+                            tls: e.target.checked,
+                          }))
+                        }
+                        data-testid="redis-tls-checkbox"
+                      />
+                      Use TLS
+                    </label>
+                  </div>
+                </>
+              )}
+              {redisSettings?.enabled && (
+                <p className={styles.description} data-testid="redis-current">
+                  Current: {redisSettings.addr || "not configured"} | database{" "}
+                  {redisSettings.db} | {redisSettings.tls ? "TLS" : "no TLS"} |{" "}
+                  {redisSettings.password_set
+                    ? "password saved"
+                    : "no password"}
+                </p>
+              )}
+              {localSettingsError && (
+                <p
+                  className={styles.errorText}
+                  data-testid="redis-settings-error"
+                >
+                  {localSettingsError}
+                </p>
+              )}
+              <div className={styles.formGroup}>
+                <button
+                  type="button"
+                  className={styles.saveButton}
+                  disabled={isSavingLocalSettings}
+                  onClick={handleRedisSave}
+                  data-testid="redis-save-button"
+                >
+                  {isSavingLocalSettings ? "Saving..." : "Save Redis Settings"}
+                </button>
+                <p className={styles.restartNote}>
+                  Restart the local runtime after changing Redis settings.
+                </p>
+              </div>
+            </div>
           </div>
-        </div>
+        </main>
       </div>
     </div>
   );

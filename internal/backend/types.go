@@ -165,7 +165,7 @@ type CloseResult struct {
 // Used by GetMutations and WaitForMutations.
 //
 // MutationData mirrors rpc.MutationEvent but is backend-agnostic. The
-// BeadsBackend subscription layer (task .11) maps rpc.MutationEvent to
+// The backend subscription layer maps rpc.MutationEvent to
 // MutationData. Other backends produce MutationData directly.
 type MutationData struct {
 	Cursor     string    `json:"cursor,omitempty"`

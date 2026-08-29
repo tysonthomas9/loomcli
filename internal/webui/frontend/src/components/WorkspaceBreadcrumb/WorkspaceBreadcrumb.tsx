@@ -9,6 +9,7 @@ import type { ViewMode } from "@/types";
 import styles from "./WorkspaceBreadcrumb.module.css";
 
 const VIEW_LABELS: Record<ViewMode, string> = {
+  home: "Home",
   kanban: "Loom Project",
   table: "List",
   graph: "Graph",

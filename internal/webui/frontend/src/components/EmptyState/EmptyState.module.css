@@ -29,6 +29,18 @@
   color: var(--color-text-muted);
 }
 
+.emptyState[data-variant="queue-clear"] .iconWrapper {
+  width: 44px;
+  height: 44px;
+  color: var(--color-success);
+  background: var(--color-success-bg);
+  border: 1px solid color-mix(in srgb, var(--color-success) 35%, transparent);
+}
+
+.emptyState[data-variant="queue-clear"] .description {
+  max-width: 460px;
+}
+
 .title {
   margin: 0;
   font-size: var(--font-size-lg);

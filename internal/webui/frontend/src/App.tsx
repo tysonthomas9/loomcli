@@ -94,6 +94,7 @@ import {
 import { useIssueFilter } from "@/hooks/issues/useIssueFilter";
 import { useBlockedIssues } from "@/hooks/issues/useBlockedIssues";
 import { useIssueDetail } from "@/hooks/issues/useIssueDetail";
+import { useOperatorQueue } from "@/hooks/issues/useOperatorQueue";
 import { useSearchScope } from "@/hooks/issues/useSearchScope";
 import { useToast } from "@/hooks/ui/useToast";
 import { useTheme } from "@/hooks/ui/useTheme";
@@ -245,6 +246,7 @@ function App() {
 
   const issuesMap = useStore(issueStore, (s) => s.issuesMap);
   const issues = useMemo(() => [...issuesMap.values()], [issuesMap]);
+  const operatorQueue = useOperatorQueue(issues);
   const hasOnboardingRepo = useMemo(
     () => workspaceRepos.some((repo) => isOnboardingRepo(repo)),
     [workspaceRepos],
@@ -290,6 +292,7 @@ function App() {
   // Drive issue fetching based on active view mode, workspace, and source repos
   const issueModeByView: Partial<Record<ViewMode, "graph" | "kanban">> = {
     graph: "graph",
+    home: "kanban",
     kanban: "kanban",
     list: "kanban",
     table: "kanban",
@@ -309,6 +312,12 @@ function App() {
   };
   const issueMode = issueModeByView[activeView] ?? ("ready" as const);
 
+  // Home is the workspace, never a repo: it reads the whole collection even
+  // when the operator has narrowed Kanban to a subset of repos. Derived here
+  // (not in the deps) so only crossing the Home boundary refetches.
+  const effectiveSourceRepos =
+    activeView === "home" ? undefined : sourceReposFilter;
+
   useEffect(() => {
     const controller = new AbortController();
     const params: Parameters<typeof fetchIssues>[0] = {
@@ -316,10 +325,10 @@ function App() {
       mode: issueMode,
       signal: controller.signal,
     };
-    if (sourceReposFilter) params.sourceRepos = sourceReposFilter;
+    if (effectiveSourceRepos) params.sourceRepos = effectiveSourceRepos;
     fetchIssues(params);
     return () => controller.abort();
-  }, [fetchIssues, workspaceId, issueMode, sourceReposFilter]);
+  }, [fetchIssues, workspaceId, issueMode, effectiveSourceRepos]);
 
   // Filter state with URL synchronization
   const [filters, filterActions] = useFilterState();
@@ -386,15 +395,16 @@ function App() {
     filterOptions,
   );
 
-  // Only fetch blocked issues separately when NOT in kanban mode (kanban mode includes it inline)
+  // Only fetch blocked issues separately when the active issue mode does not
+  // already include the enriched blocked fields inline.
   const { data: blockedIssuesData } = useBlockedIssues({
-    enabled: activeView !== "kanban",
+    enabled: activeView !== "kanban" && activeView !== "home",
   });
 
   // Derive blockedIssuesMap from enriched issue data (kanban mode) or separate fetch
   const blockedIssuesMap = useMemo(() => {
-    if (activeView === "kanban") {
-      // In kanban mode, blocked info is already in the issue data
+    if (activeView === "kanban" || activeView === "home") {
+      // In kanban-fetch modes, blocked info is already in the issue data.
       const map = new Map<string, BlockedInfo>();
       for (const issue of issues) {
         if (issue.is_blocked) {
@@ -463,7 +473,7 @@ function App() {
 
   // Previous view for issue-detail back navigation.
   // Tracks the last "content" view (excludes issue-detail, terminal, settings).
-  const previousViewRef = useRef<ViewMode>("kanban");
+  const previousViewRef = useRef<ViewMode>("home");
   if (
     activeView !== "issue-detail" &&
     activeView !== "terminal" &&
@@ -1278,6 +1288,7 @@ function App() {
 
   // Whether the current view depends on issue data (for stale banner suppression)
   const isIssueBasedView =
+    activeView === "home" ||
     activeView === "kanban" ||
     activeView === "list" ||
     activeView === "table" ||
@@ -1347,8 +1358,8 @@ function App() {
     <button
       type="button"
       className={styles.brandButton}
-      onClick={() => navigateToView("kanban")}
-      aria-label="Loom home — return to Kanban board"
+      onClick={() => navigateToView("home")}
+      aria-label="Loom home"
     >
       <span className={styles.brandMark} aria-hidden="true">
         ◇
@@ -1388,7 +1399,11 @@ function App() {
 
   // Views that bring their own left tree suppress the workspace sidebar, so
   // the page owns its chrome instead of showing two trees side by side.
-  const viewOwnsChrome = activeView === "files" || activeView === "skills";
+  const viewOwnsChrome =
+    activeView === "files" ||
+    activeView === "skills" ||
+    activeView === "settings" ||
+    activeView === "prs";
 
   const terminalContainerClassName =
     activeView === "terminal"
@@ -1410,13 +1425,14 @@ function App() {
       <SearchTermProvider value={activeSearchTerm}>
         <AppLayout
           title={headerTitle}
-          onTitleClick={() => navigateToView("kanban")}
+          onTitleClick={() => navigateToView("home")}
           actions={headerActions}
           navRail={
             <NavRail
               activeView={activeView}
               onChange={handleNavChange}
               sessionCount={activeSessionCount}
+              operatorQueueCount={operatorQueue.length}
               badges={{ terminal: hasTerminalUnread }}
               workspaces={(workspace?.workspaces ?? []).map((ws) => ({
                 id: ws.id,

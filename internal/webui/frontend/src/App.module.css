@@ -139,9 +139,14 @@
   font-family: var(--font-family-base);
   font-size: var(--font-size-sm);
   font-weight: 600;
-  color: #fff;
-  background-color: var(--color-primary);
-  border: 1px solid var(--color-primary);
+  color: var(--color-primary);
+  background-color: color-mix(
+    in srgb,
+    var(--color-primary) 10%,
+    var(--color-bg-card)
+  );
+  border: 1px solid
+    color-mix(in srgb, var(--color-primary) 28%, var(--color-border));
   border-radius: var(--radius-md);
   cursor: pointer;
   white-space: nowrap;
@@ -152,8 +157,17 @@
 }
 
 .newIssueButton:hover {
-  background-color: var(--color-primary-hover);
-  border-color: var(--color-primary-hover);
+  color: var(--color-primary-hover);
+  background-color: color-mix(
+    in srgb,
+    var(--color-primary) 16%,
+    var(--color-bg-card)
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--color-primary) 42%,
+    var(--color-border)
+  );
 }
 
 .newIssueButton:focus-visible {

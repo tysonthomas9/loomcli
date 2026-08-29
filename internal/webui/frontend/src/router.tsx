@@ -4,6 +4,7 @@
  * Route tree:
  *   /                                      → RedirectToWorkspace (resolve last-used or default)
  *   /ws/:workspaceId/                      → WorkspaceLayout → App (shell/layout)
+ *     /home                                → HomePage (lazy)
  *     /kanban                              → KanbanPage (lazy)
  *     /table                               → TablePage (lazy)
  *     /graph                               → GraphPage (lazy)
@@ -19,7 +20,7 @@
  *   *                                      → NotFound (404 page)
  */
 
-import { createBrowserRouter, Navigate } from "react-router-dom";
+import { createBrowserRouter, Navigate, useParams } from "react-router-dom";
 
 import App from "@/App";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -85,8 +86,28 @@ const devRoutes = import.meta.env.DEV
  * preserve WebSocket connections across view switches. Its route exists
  * solely for URL matching; the Component renders null.
  */
+/**
+ * Unknown in-workspace paths land on Home. This must be an absolute redirect:
+ * a relative `<Navigate to="home">` under the `*` splat resolves against the
+ * unmatched segment, so `/ws/x/nope` → `/ws/x/nope/home` → `*` again, forever.
+ */
+export function RedirectToWorkspaceHome(): JSX.Element {
+  const { workspaceId } = useParams();
+  return (
+    <Navigate
+      to={workspaceId ? `/ws/${encodeURIComponent(workspaceId)}/home` : "/"}
+      replace
+    />
+  );
+}
+
 const viewRoutes = [
-  { index: true, element: <Navigate to="kanban" replace /> },
+  { index: true, element: <Navigate to="home" replace /> },
+  {
+    path: "home",
+    lazy: () =>
+      import("@/views/HomePage").then((m) => ({ Component: m.HomePage })),
+  },
   {
     path: "kanban",
     lazy: () =>
@@ -169,7 +190,7 @@ const viewRoutes = [
     lazy: () =>
       import("@/views/AgentsPage").then((m) => ({ Component: m.AgentsPage })),
   },
-  { path: "*", element: <Navigate to="kanban" replace /> },
+  { path: "*", element: <RedirectToWorkspaceHome /> },
 ];
 
 export const router = createBrowserRouter([
