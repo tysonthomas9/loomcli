@@ -172,10 +172,6 @@ type ClaimedTask struct {
 	ClaimedAt  time.Time `json:"claimedAt,omitempty"`
 }
 
-type actorClaimer interface {
-	ClaimIssueAsActor(context.Context, string, time.Duration, string) error
-}
-
 func ClaimReadyTask(ctx context.Context, issueBackend backend.IssueBackend, opts TaskClaimOptions) (*ClaimedTask, error) {
 	if issueBackend == nil {
 		return nil, fmt.Errorf("issue backend required: %w", domain.ErrInvalid)
@@ -243,12 +239,11 @@ func hasAnyLabel(labels []string, set map[string]struct{}) bool {
 }
 
 func claimIssue(ctx context.Context, issueBackend backend.IssueBackend, issueID string, lockTTL time.Duration, actor string) error {
-	if actor != "" {
-		if actorBackend, ok := issueBackend.(actorClaimer); ok {
-			return actorBackend.ClaimIssueAsActor(ctx, issueID, lockTTL, actor)
-		}
-	}
-	return issueBackend.ClaimIssue(ctx, issueID, lockTTL)
+	return issueBackend.ClaimIssue(ctx, backend.ClaimIssueParams{
+		ID:         issueID,
+		LockTTL:    lockTTL,
+		OwnerActor: actor,
+	})
 }
 
 func claimedTaskFromIssue(issue backend.IssueData, actor string) *ClaimedTask {

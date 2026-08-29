@@ -36,7 +36,7 @@ func TestWrapIssueBackendWithTracing_Smoke(t *testing.T) {
 	_, _ = wrapped.SearchIssues(ctx, "query", 10)
 	_, _ = wrapped.Create(ctx, backend.CreateParams{Title: "t"})
 	_ = wrapped.Update(ctx, "id-1", backend.UpdateParams{})
-	_ = wrapped.ClaimIssue(ctx, "id-1", time.Minute)
+	_ = wrapped.ClaimIssue(ctx, backend.ClaimIssueParams{ID: "id-1", LockTTL: time.Minute})
 	_ = wrapped.DeferIssue(ctx, "id-1", time.Now().Add(time.Hour))
 	_ = wrapped.UndeferIssue(ctx, "id-1")
 	_, _ = wrapped.Close(ctx, "id-1", backend.CloseParams{})

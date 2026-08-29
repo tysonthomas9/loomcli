@@ -108,7 +108,7 @@ func (f *fakeBackend) Create(ctx context.Context, params backend.CreateParams) (
 func (f *fakeBackend) Update(ctx context.Context, id string, params backend.UpdateParams) error {
 	return errors.New("not implemented")
 }
-func (f *fakeBackend) ClaimIssue(ctx context.Context, id string, lockTTL time.Duration) error {
+func (f *fakeBackend) ClaimIssue(ctx context.Context, params backend.ClaimIssueParams) error {
 	return errors.New("not implemented")
 }
 func (f *fakeBackend) ReleaseIssueLock(ctx context.Context, id, actor string) error {

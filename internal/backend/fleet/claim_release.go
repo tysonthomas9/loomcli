@@ -8,24 +8,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 )
 
-// Actor-scoped claim/release operations. Split out of fleet.go to keep that
-// file under the 1000-line LOC ceiling after the release features landed.
-
-// ClaimIssueAsActor atomically claims an issue while overriding the configured
-// FleetDB actor for this request.
-func (b *FleetBackend) ClaimIssueAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error {
-	if id == "" {
-		return backend.ErrValidation("ClaimIssue", "id must not be empty")
-	}
-	if actor == "" {
-		return backend.ErrValidation("ClaimIssue", "actor must not be empty")
-	}
-	body, err := claimIssueBody(lockTTL)
-	if err != nil {
-		return err
-	}
-	return b.execAsActor(ctx, "ClaimIssue", "/issues/"+url.PathEscape(id)+"/claim", body, actor)
-}
+// Actor-scoped release operations. Split out of fleet.go to keep that file
+// under the 1000-line LOC ceiling after the release features landed.
 
 // ReleaseIssueLock releases only the operational lock on the issue without
 // changing its status or assignee. Idempotent: a missing lock returns nil.

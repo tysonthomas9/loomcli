@@ -352,18 +352,19 @@ func (b *APIBackend) Update(ctx context.Context, id string, params backend.Updat
 
 // ClaimIssue atomically claims an issue via POST /issues/{id}/claim. A zero
 // TTL asks the server to use its default; positive TTLs are forwarded as
-// second-granular lock_ttl values. Returns KindConflict when the issue is
-// already claimed by a different agent and KindNotFound when it does not
-// exist.
-func (b *APIBackend) ClaimIssue(ctx context.Context, id string, lockTTL time.Duration) error {
-	if id == "" {
+// second-granular lock_ttl values. params.OwnerActor is forwarded to the
+// server for policy-gated actor delegation. Returns KindConflict when the
+// issue is already claimed by a different agent and KindNotFound when it
+// does not exist.
+func (b *APIBackend) ClaimIssue(ctx context.Context, params backend.ClaimIssueParams) error {
+	if params.ID == "" {
 		return backend.ErrValidation("ClaimIssue", "id must not be empty")
 	}
-	body, err := claimIssueBody(lockTTL)
+	body, err := claimIssueBody(params)
 	if err != nil {
 		return err
 	}
-	path := "/issues/" + url.PathEscape(id) + "/claim"
+	path := "/issues/" + url.PathEscape(params.ID) + "/claim"
 	_, err = b.exec(ctx, "ClaimIssue", http.MethodPost, path, body)
 	return err
 }
@@ -376,17 +377,22 @@ func (b *APIBackend) ReleaseIssueLock(_ context.Context, _, _ string) error {
 	return backend.ErrNotImplemented("ReleaseIssueLock", "APIBackend does not support explicit lock release; rely on TTL expiry")
 }
 
-func claimIssueBody(lockTTL time.Duration) (any, error) {
-	if lockTTL < 0 {
+func claimIssueBody(params backend.ClaimIssueParams) (any, error) {
+	if params.LockTTL < 0 {
 		return nil, backend.ErrValidation("ClaimIssue", "lockTTL must not be negative")
 	}
-	if lockTTL == 0 {
+	ownerActor := strings.TrimSpace(params.OwnerActor)
+	if params.LockTTL == 0 && ownerActor == "" {
 		return nil, nil
 	}
-	seconds := int((lockTTL + time.Second - time.Nanosecond) / time.Second)
-	return struct {
-		LockTTL int `json:"lock_ttl"`
-	}{LockTTL: seconds}, nil
+	body := struct {
+		LockTTL    int    `json:"lock_ttl,omitempty"`
+		OwnerActor string `json:"owner_actor,omitempty"`
+	}{OwnerActor: ownerActor}
+	if params.LockTTL > 0 {
+		body.LockTTL = int((params.LockTTL + time.Second - time.Nanosecond) / time.Second)
+	}
+	return body, nil
 }
 
 // DeferIssue defers an issue via PATCH with status="deferred" and optional

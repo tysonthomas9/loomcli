@@ -46,8 +46,9 @@ func (m *mockIPCBackend) ReleaseClaim(_ context.Context, id, actor string) error
 }
 
 type mockClaimCall struct {
-	ID      string
-	LockTTL time.Duration
+	ID         string
+	LockTTL    time.Duration
+	OwnerActor string
 }
 
 type mockUpdateCall struct {
@@ -65,8 +66,8 @@ type mockReleaseCall struct {
 	Actor string
 }
 
-func (m *mockIPCBackend) ClaimIssue(_ context.Context, id string, lockTTL time.Duration) error {
-	m.claimCalls = append(m.claimCalls, mockClaimCall{ID: id, LockTTL: lockTTL})
+func (m *mockIPCBackend) ClaimIssue(_ context.Context, params backend.ClaimIssueParams) error {
+	m.claimCalls = append(m.claimCalls, mockClaimCall{ID: params.ID, LockTTL: params.LockTTL, OwnerActor: params.OwnerActor})
 	return m.claimErr
 }
 
@@ -238,6 +239,29 @@ func TestIPCServer_ClaimSuccess(t *testing.T) {
 	}
 	if mb.claimCalls[0].LockTTL != 0 {
 		t.Errorf("claim LockTTL = %v, want 0", mb.claimCalls[0].LockTTL)
+	}
+	if mb.claimCalls[0].OwnerActor != "falcon" {
+		t.Errorf("claim OwnerActor = %q, want falcon", mb.claimCalls[0].OwnerActor)
+	}
+}
+
+func TestIPCServer_ClaimRejectsMismatchedOwnerActor(t *testing.T) {
+	mb := &mockIPCBackend{}
+	d := newTestIPCDaemon(mb)
+	defer close(d.sup.Shutdown)
+
+	resp := d.handleIPCClaim(AgentIPCRequest{
+		Operation: ipcOpClaim,
+		AgentName: "falcon",
+		IssueID:   "abc-123",
+		Args:      json.RawMessage(`{"owner_actor":"nova"}`),
+	})
+
+	if resp.Success || resp.Kind != string(backend.KindValidation) {
+		t.Fatalf("response = %#v, want validation failure", resp)
+	}
+	if len(mb.claimCalls) != 0 {
+		t.Fatalf("backend claim calls = %d, want 0", len(mb.claimCalls))
 	}
 }
 

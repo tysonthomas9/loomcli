@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
@@ -76,7 +77,9 @@ type CloseIssueParams struct {
 
 // ClaimIssueParams holds the parameters for atomically claiming an issue.
 type ClaimIssueParams struct {
-	IssueID string
+	IssueID    string
+	LockTTL    time.Duration
+	OwnerActor string
 }
 
 // CreateIssueParams mirrors IssueCreateRequest but is not HTTP-bound.

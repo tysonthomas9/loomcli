@@ -46,6 +46,12 @@ type CloseResponse struct {
 	Error   string          `json:"error,omitempty"`
 }
 
+// ClaimIssueRequest represents the optional JSON body for claiming an issue.
+type ClaimIssueRequest struct {
+	LockTTL    int    `json:"lock_ttl,omitempty"`
+	OwnerActor string `json:"owner_actor,omitempty"`
+}
+
 // PatchIssueRequest represents the PATCH /api/issues/:id request body.
 // All fields are optional pointers to support partial updates.
 type PatchIssueRequest struct {

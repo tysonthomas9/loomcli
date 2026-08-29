@@ -68,7 +68,7 @@ func (s *stubGraphBackend) Create(_ context.Context, _ backend.CreateParams) (*b
 func (s *stubGraphBackend) Update(_ context.Context, _ string, _ backend.UpdateParams) error {
 	return fmt.Errorf("Update not implemented in stubGraphBackend")
 }
-func (s *stubGraphBackend) ClaimIssue(_ context.Context, _ string, _ time.Duration) error {
+func (s *stubGraphBackend) ClaimIssue(_ context.Context, _ backend.ClaimIssueParams) error {
 	return fmt.Errorf("ClaimIssue not implemented in stubGraphBackend")
 }
 func (s *stubGraphBackend) ReleaseIssueLock(_ context.Context, _, _ string) error {

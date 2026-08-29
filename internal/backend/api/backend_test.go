@@ -660,7 +660,7 @@ func TestClaimIssue_Success(t *testing.T) {
 	})
 	defer ts.Close()
 
-	if err := ab.ClaimIssue(context.Background(), "abc", 0); err != nil {
+	if err := ab.ClaimIssue(context.Background(), backend.ClaimIssueParams{ID: "abc"}); err != nil {
 		t.Fatalf("ClaimIssue: %v", err)
 	}
 	if gotMethod != http.MethodPost {
@@ -668,6 +668,29 @@ func TestClaimIssue_Success(t *testing.T) {
 	}
 	if !strings.HasSuffix(gotPath, "/issues/abc/claim") {
 		t.Errorf("path = %q, want suffix /issues/abc/claim", gotPath)
+	}
+}
+
+func TestClaimIssue_ForwardsOwnerActor(t *testing.T) {
+	ab, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/issues/abc/claim") {
+			t.Errorf("path = %q, want suffix /issues/abc/claim", r.URL.Path)
+		}
+		var body struct {
+			OwnerActor string `json:"owner_actor"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if body.OwnerActor != "falcon" {
+			t.Fatalf("owner_actor = %q, want falcon", body.OwnerActor)
+		}
+		respondOK(w, gen.IssueResponse{Id: "abc"})
+	})
+	defer ts.Close()
+
+	if err := ab.ClaimIssue(context.Background(), backend.ClaimIssueParams{ID: "abc", OwnerActor: "falcon"}); err != nil {
+		t.Fatalf("ClaimIssue: %v", err)
 	}
 }
 
@@ -686,7 +709,7 @@ func TestClaimIssue_ForwardsLockTTL(t *testing.T) {
 	})
 	defer ts.Close()
 
-	if err := ab.ClaimIssue(context.Background(), "abc", 5*time.Minute); err != nil {
+	if err := ab.ClaimIssue(context.Background(), backend.ClaimIssueParams{ID: "abc", LockTTL: 5 * time.Minute}); err != nil {
 		t.Fatalf("ClaimIssue: %v", err)
 	}
 }
@@ -706,7 +729,7 @@ func TestClaimIssue_RoundsPositiveSubsecondTTL(t *testing.T) {
 	})
 	defer ts.Close()
 
-	if err := ab.ClaimIssue(context.Background(), "abc", time.Millisecond); err != nil {
+	if err := ab.ClaimIssue(context.Background(), backend.ClaimIssueParams{ID: "abc", LockTTL: time.Millisecond}); err != nil {
 		t.Fatalf("ClaimIssue: %v", err)
 	}
 }
@@ -717,7 +740,7 @@ func TestClaimIssue_AlreadyClaimed(t *testing.T) {
 	})
 	defer ts.Close()
 
-	err := ab.ClaimIssue(context.Background(), "abc", 0)
+	err := ab.ClaimIssue(context.Background(), backend.ClaimIssueParams{ID: "abc"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -735,7 +758,7 @@ func TestClaimIssue_NotFound(t *testing.T) {
 	})
 	defer ts.Close()
 
-	err := ab.ClaimIssue(context.Background(), "abc", 0)
+	err := ab.ClaimIssue(context.Background(), backend.ClaimIssueParams{ID: "abc"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -750,7 +773,7 @@ func TestClaimIssue_EmptyID(t *testing.T) {
 	})
 	defer ts.Close()
 
-	err := ab.ClaimIssue(context.Background(), "", 0)
+	err := ab.ClaimIssue(context.Background(), backend.ClaimIssueParams{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -765,7 +788,7 @@ func TestClaimIssue_NegativeTTL(t *testing.T) {
 	})
 	defer ts.Close()
 
-	err := ab.ClaimIssue(context.Background(), "abc", -1*time.Second)
+	err := ab.ClaimIssue(context.Background(), backend.ClaimIssueParams{ID: "abc", LockTTL: -1 * time.Second})
 	if err == nil {
 		t.Fatal("expected error")
 	}

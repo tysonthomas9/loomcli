@@ -57,7 +57,7 @@ func (s *stubReadyBackend) Create(_ context.Context, _ backend.CreateParams) (*b
 func (s *stubReadyBackend) Update(_ context.Context, _ string, _ backend.UpdateParams) error {
 	return fmt.Errorf("Update not implemented in stubReadyBackend")
 }
-func (s *stubReadyBackend) ClaimIssue(_ context.Context, _ string, _ time.Duration) error {
+func (s *stubReadyBackend) ClaimIssue(_ context.Context, _ backend.ClaimIssueParams) error {
 	return fmt.Errorf("ClaimIssue not implemented in stubReadyBackend")
 }
 func (s *stubReadyBackend) ReleaseIssueLock(_ context.Context, _, _ string) error {

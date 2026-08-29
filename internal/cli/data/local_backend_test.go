@@ -84,8 +84,8 @@ func (b *localBackendStub) Update(_ context.Context, id string, params backend.U
 	return b.updateErr
 }
 
-func (b *localBackendStub) ClaimIssue(_ context.Context, id string, lockTTL time.Duration) error {
-	b.record("ClaimIssue", id, lockTTL)
+func (b *localBackendStub) ClaimIssue(_ context.Context, params backend.ClaimIssueParams) error {
+	b.record("ClaimIssue", params.ID, params)
 	return nil
 }
 
@@ -285,6 +285,28 @@ func TestDataBlocked_NoServerUsesLocalBackend(t *testing.T) {
 		opts := stub.calls[0].args.(backend.BlockedOpts)
 		if opts.Limit != 7 || opts.Type != "bug" || opts.ParentID != "epic-2" {
 			t.Fatalf("Blocked opts = %#v", opts)
+		}
+	})
+}
+
+func TestDataClaim_WithActorPassesOwnerActor(t *testing.T) {
+	stub := &localBackendStub{}
+	withLocalBackend(t, stub, func() {
+		claimActor = "  falcon  "
+		t.Cleanup(func() { claimActor = "" })
+		outputFormat = "text"
+
+		if _, err := captureDataStdout(t, func() error {
+			return claimCmd.RunE(claimCmd, []string{"loom-1"})
+		}); err != nil {
+			t.Fatalf("claim: %v", err)
+		}
+		if len(stub.calls) != 1 || stub.calls[0].method != "ClaimIssue" {
+			t.Fatalf("calls = %#v, want one ClaimIssue", stub.calls)
+		}
+		params := stub.calls[0].args.(backend.ClaimIssueParams)
+		if params.ID != "loom-1" || params.OwnerActor != "falcon" || params.LockTTL != 0 {
+			t.Fatalf("ClaimIssue params = %#v, want loom-1 owned by falcon", params)
 		}
 	})
 }

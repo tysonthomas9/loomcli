@@ -337,7 +337,7 @@ func (s *issueServiceImpl) CloseIssue(ctx context.Context, params CloseIssuePara
 	return out, nil
 }
 
-// ClaimIssue atomically claims an issue by ID for the server-side actor.
+// ClaimIssue atomically claims an issue by ID and forwards optional claim parameters.
 // Returns 409-equivalent ErrConflict if the issue is already claimed by a
 // different agent. Re-claim by the same actor is idempotent and returns the
 // issue without error.
@@ -365,7 +365,7 @@ func (s *issueServiceImpl) ClaimIssue(ctx context.Context, params ClaimIssuePara
 		return nil, err
 	}
 
-	if err := be.ClaimIssue(ctx, params.IssueID, 0); err != nil {
+	if err := be.ClaimIssue(ctx, backend.ClaimIssueParams{ID: params.IssueID, LockTTL: params.LockTTL, OwnerActor: params.OwnerActor}); err != nil {
 		slog.Error("backend error in ClaimIssue", "issue_id", params.IssueID, "err", err)
 		return nil, translateBackendError(err)
 	}

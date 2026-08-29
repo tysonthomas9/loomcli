@@ -1666,6 +1666,15 @@ type BlockerRef struct {
 	Title    string `json:"title"`
 }
 
+// ClaimIssueRequest defines model for ClaimIssueRequest.
+type ClaimIssueRequest struct {
+	// LockTtl Optional claim lock TTL in seconds. Omitted or zero uses the backend default.
+	LockTtl *int `json:"lock_ttl,omitempty"`
+
+	// OwnerActor Optional actor that should own the claim lock. Servers may reject unsupported delegation.
+	OwnerActor *string `json:"owner_actor,omitempty"`
+}
+
 // CloseRequest defines model for CloseRequest.
 type CloseRequest struct {
 	Force       *bool   `json:"force,omitempty"`
@@ -3555,6 +3564,9 @@ type CreateIssueJSONRequestBody = CreateIssueRequest
 
 // PatchIssueJSONRequestBody defines body for PatchIssue for application/json ContentType.
 type PatchIssueJSONRequestBody = PatchIssueRequest
+
+// ClaimIssueJSONRequestBody defines body for ClaimIssue for application/json ContentType.
+type ClaimIssueJSONRequestBody = ClaimIssueRequest
 
 // CloseIssueJSONRequestBody defines body for CloseIssue for application/json ContentType.
 type CloseIssueJSONRequestBody = CloseRequest

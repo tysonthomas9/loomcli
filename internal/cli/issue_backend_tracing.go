@@ -202,12 +202,13 @@ func (t *tracedIssueBackend) Update(ctx context.Context, id string, params backe
 	return err
 }
 
-func (t *tracedIssueBackend) ClaimIssue(ctx context.Context, id string, lockTTL time.Duration) error {
+func (t *tracedIssueBackend) ClaimIssue(ctx context.Context, params backend.ClaimIssueParams) error {
 	ctx, span := t.startSpan(ctx, "ClaimIssue",
-		attribute.String("loom.task_id", id),
-		attribute.Int64("lock_ttl_ms", lockTTL.Milliseconds()),
+		attribute.String("loom.task_id", params.ID),
+		attribute.Int64("lock_ttl_ms", params.LockTTL.Milliseconds()),
+		attribute.Bool("owner_actor.override", params.OwnerActor != ""),
 	)
-	err := t.inner.ClaimIssue(ctx, id, lockTTL)
+	err := t.inner.ClaimIssue(ctx, params)
 	endSpan(span, err)
 	return err
 }
@@ -235,23 +236,6 @@ func (t *tracedIssueBackend) ReleaseIssueAsActor(ctx context.Context, id, actor 
 		return err
 	}
 	err := t.inner.ReleaseIssueLock(ctx, id, actor)
-	endSpan(span, err)
-	return err
-}
-
-func (t *tracedIssueBackend) ClaimIssueAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error {
-	ctx, span := t.startSpan(ctx, "ClaimIssueAsActor",
-		attribute.String("loom.task_id", id),
-		attribute.Int64("lock_ttl_ms", lockTTL.Milliseconds()),
-	)
-	if actorBackend, ok := t.inner.(interface {
-		ClaimIssueAsActor(context.Context, string, time.Duration, string) error
-	}); ok {
-		err := actorBackend.ClaimIssueAsActor(ctx, id, lockTTL, actor)
-		endSpan(span, err)
-		return err
-	}
-	err := t.inner.ClaimIssue(ctx, id, lockTTL)
 	endSpan(span, err)
 	return err
 }

@@ -3,8 +3,11 @@ package issues
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -117,9 +120,9 @@ func HandleCloseIssue(svc service.IssueService) http.HandlerFunc {
 	}
 }
 
-// HandleClaimIssue returns a handler that atomically claims an issue by ID
-// for the server-side actor. Returns 409 if the issue is already claimed by
-// another agent.
+// HandleClaimIssue returns a handler that atomically claims an issue by ID.
+// An optional request body can set lock_ttl and a policy-gated owner_actor.
+// Returns 409 if the issue is already claimed by another agent.
 func HandleClaimIssue(svc service.IssueService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		issueID := r.PathValue("id")
@@ -128,7 +131,28 @@ func HandleClaimIssue(svc service.IssueService) http.HandlerFunc {
 			return
 		}
 
-		data, err := svc.ClaimIssue(r.Context(), service.ClaimIssueParams{IssueID: issueID})
+		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
+		var req ClaimIssueRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				writeIssuesError(w, http.StatusRequestEntityTooLarge, "request body too large (max 1MB)", "REQUEST_TOO_LARGE")
+				return
+			}
+			slog.Warn("invalid JSON body in handleClaimIssue", "err", err)
+			writeIssuesError(w, http.StatusBadRequest, "invalid request body", "INVALID_JSON")
+			return
+		}
+		if req.LockTTL < 0 {
+			writeIssuesError(w, http.StatusBadRequest, "lock_ttl must not be negative", "INVALID_CLAIM_TTL")
+			return
+		}
+
+		data, err := svc.ClaimIssue(r.Context(), service.ClaimIssueParams{
+			IssueID:    issueID,
+			LockTTL:    time.Duration(req.LockTTL) * time.Second,
+			OwnerActor: strings.TrimSpace(req.OwnerActor),
+		})
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
