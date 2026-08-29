@@ -947,7 +947,7 @@ func TestPatchIssue_Backend_Success_PassesParams(t *testing.T) {
 	title := "Renamed"
 	status := "in_progress"
 	err := svc.PatchIssue(context.Background(), PatchIssueParams{
-		IssueID: "i-1", Title: &title, Status: &status,
+		IssueID: "i-1", Actor: "operator@local", Title: &title, Status: &status,
 	})
 	if err != nil {
 		t.Fatalf("PatchIssue: %v", err)
@@ -961,6 +961,9 @@ func TestPatchIssue_Backend_Success_PassesParams(t *testing.T) {
 	}
 	if got.params.Status == nil || *got.params.Status != "in_progress" {
 		t.Errorf("Status not propagated: %+v", got.params.Status)
+	}
+	if got.params.Actor != "operator@local" {
+		t.Errorf("Actor = %q, want operator@local", got.params.Actor)
 	}
 }
 

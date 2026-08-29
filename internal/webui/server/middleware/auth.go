@@ -178,6 +178,22 @@ func UserIdentityFromContext(ctx context.Context) (UserIdentity, bool) {
 	return identity, ok
 }
 
+// VerifiedUserActorFromContext resolves the audit actor for an authenticated
+// webui user: email when present, otherwise the immutable JWT subject. The
+// boolean is false when the context does not contain a verified subject.
+func VerifiedUserActorFromContext(ctx context.Context) (actor, userID string, ok bool) {
+	identity, ok := UserIdentityFromContext(ctx)
+	if !ok || strings.TrimSpace(identity.UserID) == "" {
+		return "", "", false
+	}
+	userID = strings.TrimSpace(identity.UserID)
+	actor = strings.TrimSpace(identity.Email)
+	if actor == "" {
+		actor = userID
+	}
+	return actor, userID, true
+}
+
 // extractBearerToken extracts a Bearer token from the Authorization header only.
 // Case-insensitive "Bearer" prefix check per RFC 6750.
 func extractBearerToken(r *http.Request) string {

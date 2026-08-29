@@ -111,6 +111,7 @@ type CreateIssueParams struct {
 // PatchIssueParams mirrors PatchIssueRequest but is not HTTP-bound.
 type PatchIssueParams struct {
 	IssueID            string
+	Actor              string
 	Title              *string
 	Description        *string
 	Status             *string

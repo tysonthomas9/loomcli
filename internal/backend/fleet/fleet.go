@@ -131,36 +131,13 @@ func (b *FleetBackend) BackendName() string { return "fleet" }
 
 // doRequest executes an HTTP request and parses the JSON response envelope.
 func (b *FleetBackend) doRequest(ctx context.Context, method, path string, body interface{}) (*apiResponse, int, error) {
-	b.mu.RLock()
-	auth := fleethttp.Auth{BearerToken: b.authToken, APIKey: b.apiKey, Actor: b.actor}
-	b.mu.RUnlock()
-
-	req, err := fleethttp.BuildJSONRequest(ctx, method, b.baseWorkspaceURL+path, auth, body)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	resp, err := b.client.Do(req)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
-	if err != nil {
-		return nil, resp.StatusCode, fmt.Errorf("read response body: %w", err)
-	}
-
-	apiResp, err := parseFleetResponse(respBody, resp.StatusCode)
-	if err != nil {
-		return nil, resp.StatusCode, err
-	}
-	return apiResp, resp.StatusCode, nil
+	return b.doRequestAsActor(ctx, method, path, body, "")
 }
 
-// doRequestAsActor performs a POST request with the X-Actor header overridden.
-// Only POST is needed in practice (claim / release endpoints); see execAsActor.
-func (b *FleetBackend) doRequestAsActor(ctx context.Context, path string, body interface{}, actor string) (*apiResponse, int, error) {
+// doRequestAsActor executes an HTTP request with the X-Actor header overridden
+// when actor is non-empty. An empty actor preserves the configured process
+// identity.
+func (b *FleetBackend) doRequestAsActor(ctx context.Context, method, path string, body interface{}, actor string) (*apiResponse, int, error) {
 	b.mu.RLock()
 	auth := fleethttp.Auth{BearerToken: b.authToken, APIKey: b.apiKey, Actor: b.actor}
 	b.mu.RUnlock()
@@ -168,7 +145,7 @@ func (b *FleetBackend) doRequestAsActor(ctx context.Context, path string, body i
 		auth.Actor = actor
 	}
 
-	req, err := fleethttp.BuildJSONRequest(ctx, "POST", b.baseWorkspaceURL+path, auth, body)
+	req, err := fleethttp.BuildJSONRequest(ctx, method, b.baseWorkspaceURL+path, auth, body)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -263,10 +240,8 @@ func (b *FleetBackend) execURL(ctx context.Context, op, method, rawURL string, b
 }
 
 // execAsActor wraps doRequestAsActor with standard error classification.
-// Only POST endpoints (claim / release) use this path; the method is therefore
-// hardcoded rather than parameterized.
-func (b *FleetBackend) execAsActor(ctx context.Context, op, path string, body interface{}, actor string) error {
-	apiResp, statusCode, err := b.doRequestAsActor(ctx, path, body, actor)
+func (b *FleetBackend) execAsActor(ctx context.Context, op, method, path string, body interface{}, actor string) error {
+	apiResp, statusCode, err := b.doRequestAsActor(ctx, method, path, body, actor)
 	if err != nil {
 		return classifyTransportError(op, err)
 	}
@@ -589,7 +564,7 @@ func (b *FleetBackend) Update(ctx context.Context, id string, params backend.Upd
 
 	req := updateParamsToPatchRequest(params)
 	if len(req) > 0 {
-		if _, err := b.exec(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), req); err != nil {
+		if err := b.execAsActor(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), req, params.Actor); err != nil {
 			return err
 		}
 		handled = true
@@ -610,7 +585,7 @@ func (b *FleetBackend) Update(ctx context.Context, id string, params backend.Upd
 	// normal assign step below.
 	assignBefore := shouldAssignBeforeStatus(params)
 	if assignBefore {
-		if err := b.assignIssue(ctx, id, *params.Assignee); err != nil {
+		if err := b.assignIssue(ctx, id, *params.Assignee, params.Actor); err != nil {
 			return err
 		}
 		handled = true
@@ -625,7 +600,7 @@ func (b *FleetBackend) Update(ctx context.Context, id string, params backend.Upd
 	}
 
 	if params.Assignee != nil && !assignBefore && !assigneeHandledByStatus {
-		if err := b.assignIssue(ctx, id, *params.Assignee); err != nil {
+		if err := b.assignIssue(ctx, id, *params.Assignee, params.Actor); err != nil {
 			return err
 		}
 		handled = true
@@ -653,7 +628,7 @@ func (b *FleetBackend) applyStatusUpdate(ctx context.Context, id string, params 
 	clearAssigneeOnOpen := target == "open" && params.Assignee == nil
 	if current != nil && current.Status == target {
 		if clearAssigneeOnOpen && current.Assignee != "" {
-			return false, b.assignIssue(ctx, id, "")
+			return false, b.assignIssue(ctx, id, "", params.Actor)
 		}
 		return target == "in_progress" && params.Assignee != nil, nil
 	}
@@ -664,23 +639,22 @@ func (b *FleetBackend) applyStatusUpdate(ctx context.Context, id string, params 
 		if actor == "" {
 			return false, backend.ErrValidation("Update", "assignee or configured actor is required to claim an issue")
 		}
-		return true, b.execAsActor(ctx, "Update", "/issues/"+url.PathEscape(id)+"/claim", nil, actor)
+		return true, b.execAsActor(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/claim", nil, actor)
 	case "open":
-		return false, b.transitionToOpen(ctx, id, current, clearAssigneeOnOpen)
+		return false, b.transitionToOpen(ctx, id, current, clearAssigneeOnOpen, params.Actor)
 	case "closed":
 		// Release the claim before closing (see Close): the issue is terminal
 		// afterward and can't be unassigned. Best-effort.
-		_ = b.releaseClaim(ctx, id)
-		_, err := b.exec(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/close", map[string]interface{}{})
-		return false, err
+		_ = b.releaseClaim(ctx, id, params.Actor)
+		return false, b.execAsActor(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/close", map[string]interface{}{}, params.Actor)
 	case "deferred":
 		until, err := parseOptionalFleetTime(params.DeferUntil)
 		if err != nil {
 			return false, err
 		}
-		return false, b.deferIssue(ctx, id, until)
+		return false, b.deferIssue(ctx, id, until, params.Actor)
 	case "blocked", "review":
-		return false, b.transitionToBlockedOrReview(ctx, id, target, current)
+		return false, b.transitionToBlockedOrReview(ctx, id, target, current, params.Actor)
 	default:
 		return false, backend.ErrValidation("Update", "unsupported status for FleetDB workflow: "+target)
 	}
@@ -709,7 +683,7 @@ func (b *FleetBackend) ReleaseClaim(ctx context.Context, id, actor string) error
 		return nil
 	}
 	if current.Status == "in_progress" {
-		return b.execAsActor(ctx, "ReleaseClaim",
+		return b.execAsActor(ctx, "ReleaseClaim", "POST",
 			"/issues/"+url.PathEscape(id)+"/release", nil, actor)
 	}
 	return b.releaseIssueLock(ctx, "ReleaseClaim", id, actor, false)
@@ -722,19 +696,19 @@ func (b *FleetBackend) ReleaseClaim(ctx context.Context, id, actor string) error
 // apply any requested assignee change (the caller returns false: assignee not
 // handled here). We release as current.Assignee (the lock holder); the assign is
 // deferred (see shouldAssignBeforeStatus) so that identity is still intact here.
-func (b *FleetBackend) transitionToBlockedOrReview(ctx context.Context, id, target string, current *backend.IssueDetailData) error {
+func (b *FleetBackend) transitionToBlockedOrReview(ctx context.Context, id, target string, current *backend.IssueDetailData, actor string) error {
 	if current != nil && current.Status == "in_progress" && current.Assignee != "" {
 		if err := b.releaseIssueLock(ctx, "Update", id, current.Assignee, false); err != nil {
 			return err
 		}
 	}
-	if _, err := b.exec(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), map[string]interface{}{"status": target}); err != nil {
+	if err := b.execAsActor(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), map[string]interface{}{"status": target}, actor); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (b *FleetBackend) transitionToOpen(ctx context.Context, id string, current *backend.IssueDetailData, clearAssignee bool) error {
+func (b *FleetBackend) transitionToOpen(ctx context.Context, id string, current *backend.IssueDetailData, clearAssignee bool, actor string) error {
 	if current == nil {
 		return backend.ErrNotFound("Update", "issue not found")
 	}
@@ -742,22 +716,22 @@ func (b *FleetBackend) transitionToOpen(ctx context.Context, id string, current 
 	var err error
 	switch current.Status {
 	case "closed":
-		_, err = b.exec(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/reopen", map[string]interface{}{})
+		err = b.execAsActor(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/reopen", map[string]interface{}{}, actor)
 	case "deferred":
-		_, err = b.exec(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/undefer", nil)
+		err = b.execAsActor(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/undefer", nil, actor)
 	case "in_progress":
 		if current.Assignee != "" {
-			return b.execAsActor(ctx, "Update", "/issues/"+url.PathEscape(id)+"/release", nil, current.Assignee)
+			return b.execAsActor(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/release", nil, current.Assignee)
 		}
-		_, err = b.exec(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), map[string]interface{}{"status": "open"})
+		err = b.execAsActor(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), map[string]interface{}{"status": "open"}, actor)
 	default:
-		_, err = b.exec(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), map[string]interface{}{"status": "open"})
+		err = b.execAsActor(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), map[string]interface{}{"status": "open"}, actor)
 	}
 	if err != nil {
 		return err
 	}
 	if clearAfterTransition {
-		return b.assignIssue(ctx, id, "")
+		return b.assignIssue(ctx, id, "", actor)
 	}
 	return nil
 }
@@ -774,12 +748,11 @@ func (b *FleetBackend) claimActor(assignee *string, current *backend.IssueDetail
 	return b.actor
 }
 
-func (b *FleetBackend) assignIssue(ctx context.Context, id, assignee string) error {
+func (b *FleetBackend) assignIssue(ctx context.Context, id, assignee, actor string) error {
 	body := struct {
 		Assignee string `json:"assignee"`
 	}{Assignee: assignee}
-	_, err := b.exec(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/assign", body)
-	return err
+	return b.execAsActor(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/assign", body, actor)
 }
 
 // releaseClaim clears the assignee ("the agent currently working this") when a
@@ -787,19 +760,18 @@ func (b *FleetBackend) assignIssue(ctx context.Context, id, assignee string) err
 // kanban renders a stale agent row on the reopened/closed card. It is a no-op
 // server-side when there's no assignee. fleet-db rejects /assign on terminal
 // issues, so close callers must release *before* closing.
-func (b *FleetBackend) releaseClaim(ctx context.Context, id string) error {
-	return b.assignIssue(ctx, id, "")
+func (b *FleetBackend) releaseClaim(ctx context.Context, id, actor string) error {
+	return b.assignIssue(ctx, id, "", actor)
 }
 
-func (b *FleetBackend) deferIssue(ctx context.Context, id string, until time.Time) error {
+func (b *FleetBackend) deferIssue(ctx context.Context, id string, until time.Time, actor string) error {
 	var body interface{}
 	if !until.IsZero() {
 		body = struct {
 			DeferUntil time.Time `json:"defer_until"`
 		}{DeferUntil: until}
 	}
-	_, err := b.exec(ctx, "DeferIssue", "POST", "/issues/"+url.PathEscape(id)+"/defer", body)
-	return err
+	return b.execAsActor(ctx, "DeferIssue", "POST", "/issues/"+url.PathEscape(id)+"/defer", body, actor)
 }
 
 func parseOptionalFleetTime(raw *string) (time.Time, error) {
@@ -839,7 +811,7 @@ func (b *FleetBackend) DeferIssue(ctx context.Context, id string, until time.Tim
 	if id == "" {
 		return backend.ErrValidation("DeferIssue", "id must not be empty")
 	}
-	return b.deferIssue(ctx, id, until)
+	return b.deferIssue(ctx, id, until, "")
 }
 
 // UndeferIssue restores a deferred issue to "open" status and clears defer_until.
@@ -861,7 +833,7 @@ func (b *FleetBackend) Close(ctx context.Context, id string, params backend.Clos
 	// Release the agent claim before closing: a closed issue is terminal and
 	// can't be re-assigned afterward, so the assignee would otherwise linger.
 	// Best-effort — closing is the primary intent.
-	_ = b.releaseClaim(ctx, id)
+	_ = b.releaseClaim(ctx, id, "")
 	resp, err := b.exec(ctx, "Close", "POST", "/issues/"+url.PathEscape(id)+"/close", req)
 	if err != nil {
 		return nil, err
@@ -913,7 +885,7 @@ func (b *FleetBackend) Reopen(ctx context.Context, id string, params backend.Reo
 	// stale assignee so the kanban doesn't render a lingering agent on the
 	// now-open card. Mirrors transitionToOpen's clearAfterTransition.
 	// Best-effort: the reopen transition already succeeded.
-	_ = b.releaseClaim(ctx, id)
+	_ = b.releaseClaim(ctx, id, "")
 	return nil
 }
 

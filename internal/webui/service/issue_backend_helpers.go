@@ -55,6 +55,7 @@ func createParamsToBackend(p *CreateIssueParams) backend.CreateParams {
 // noticed in operation.
 func patchParamsToBackendUpdate(p *PatchIssueParams) backend.UpdateParams {
 	return backend.UpdateParams{
+		Actor:              p.Actor,
 		Title:              p.Title,
 		Description:        p.Description,
 		Status:             p.Status,

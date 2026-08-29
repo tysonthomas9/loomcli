@@ -87,16 +87,22 @@ func (b *FleetBackend) RemoveDependency(ctx context.Context, params backend.DepR
 // --- Label operations ---
 
 func (b *FleetBackend) AddLabel(ctx context.Context, id string, label string) error {
+	return b.addLabel(ctx, id, label, "")
+}
+
+func (b *FleetBackend) addLabel(ctx context.Context, id string, label string, actor string) error {
 	req := struct {
 		Label string `json:"label"`
 	}{Label: label}
-	_, err := b.exec(ctx, "AddLabel", "POST", "/issues/"+url.PathEscape(id)+"/labels", req)
-	return err
+	return b.execAsActor(ctx, "AddLabel", "POST", "/issues/"+url.PathEscape(id)+"/labels", req, actor)
 }
 
 func (b *FleetBackend) RemoveLabel(ctx context.Context, id string, label string) error {
-	_, err := b.exec(ctx, "RemoveLabel", "DELETE", "/issues/"+url.PathEscape(id)+"/labels/"+url.PathEscape(label), nil)
-	return err
+	return b.removeLabel(ctx, id, label, "")
+}
+
+func (b *FleetBackend) removeLabel(ctx context.Context, id string, label string, actor string) error {
+	return b.execAsActor(ctx, "RemoveLabel", "DELETE", "/issues/"+url.PathEscape(id)+"/labels/"+url.PathEscape(label), nil, actor)
 }
 
 // --- Comment operations ---

@@ -784,9 +784,12 @@ func TestUpdate_StatusInProgressWithAssigneeClaimsAsAssignee(t *testing.T) {
 
 	status := "in_progress"
 	assignee := "[H] Tyson"
+	// The operator Actor must not leak into the claim: the claim actor becomes
+	// the lock holder and assignee, so it stays the assignee's identity.
 	err := fb.Update(context.Background(), "test-1", backend.UpdateParams{
 		Status:   &status,
 		Assignee: &assignee,
+		Actor:    "operator@local",
 	})
 	if err != nil {
 		t.Fatalf("Update: %v", err)

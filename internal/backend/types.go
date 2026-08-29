@@ -453,6 +453,9 @@ func (p CreateParams) IdempotencyHeaders() map[string]string {
 // When Claim is true, the atomic claim operation takes precedence over
 // an explicit Status field in the same request.
 type UpdateParams struct {
+	// Actor overrides the backend's configured process actor for writes
+	// performed by this update. Empty preserves the configured actor.
+	Actor              string   `json:"-"`
 	Title              *string  `json:"title,omitempty"`
 	Description        *string  `json:"description,omitempty"`
 	Status             *string  `json:"status,omitempty"`
