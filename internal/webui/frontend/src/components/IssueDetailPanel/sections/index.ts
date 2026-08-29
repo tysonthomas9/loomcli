@@ -5,6 +5,9 @@
 export { ActivityLog } from "./ActivityLog";
 export type { ActivityLogProps } from "./ActivityLog";
 
+export { Journey } from "./Journey";
+export type { JourneyProps } from "./Journey";
+
 export { AuthorAvatar } from "./AuthorAvatar";
 export type { AuthorAvatarProps } from "./AuthorAvatar";
 

@@ -441,14 +441,14 @@ describe("Dependency alias", () => {
 describe("Event alias (IssueEvent)", () => {
   it("has expected fields from generated IssueEvent schema", () => {
     const event: Event = {
-      id: 1,
+      id: "1-0",
       issue_id: "loom-5",
       event_type: "issue.created",
       actor: "alice",
       created_at: "2024-03-01T12:00:00Z",
     };
 
-    expect(event.id).toBe(1);
+    expect(event.id).toBe("1-0");
     expect(event.issue_id).toBe("loom-5");
     expect(event.event_type).toBe("issue.created");
     expect(event.actor).toBe("alice");
@@ -456,7 +456,7 @@ describe("Event alias (IssueEvent)", () => {
 
   it("supports optional old_value/new_value/comment", () => {
     const event: Event = {
-      id: 2,
+      id: "2-0",
       issue_id: "loom-5",
       event_type: "issue.status_changed",
       actor: "bob",
@@ -825,7 +825,7 @@ describe("Structural compatibility", () => {
 
   it("generated IssueEvent schema object satisfies Event alias", () => {
     const raw: components["schemas"]["IssueEvent"] = {
-      id: 1,
+      id: "1-0",
       issue_id: "loom-1",
       event_type: "issue.created",
       actor: "system",

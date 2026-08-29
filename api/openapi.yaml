@@ -872,11 +872,12 @@ paths:
         - $ref: "#/components/parameters/IssueId"
         - name: limit
           in: query
-          description: Maximum number of most recent events to return
+          description: Maximum number of recent events to return
           schema:
             type: integer
             minimum: 1
-            maximum: 500
+            maximum: 200
+            default: 100
       responses:
         "200":
           description: Issue events
@@ -5259,7 +5260,7 @@ components:
 
     IssueEvent:
       type: object
-      description: Audit trail entry for an issue. ID is an opaque durable source event ID.
+      description: Audit trail entry for an issue
       required: [id, issue_id, event_type, actor, created_at]
       properties:
         id:
@@ -5270,6 +5271,22 @@ components:
           type: string
         actor:
           type: string
+        target:
+          type: string
+        payload:
+          type: string
+        category:
+          type: string
+        summary:
+          type: string
+        changes:
+          type: array
+          items:
+            $ref: "#/components/schemas/IssueEventFieldChange"
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
         old_value:
           type: [string, "null"]
         new_value:
@@ -5279,6 +5296,18 @@ components:
         created_at:
           type: string
           format: date-time
+
+    IssueEventFieldChange:
+      type: object
+      description: Before and after values for one field changed by an issue event
+      required: [field]
+      properties:
+        field:
+          type: string
+        before:
+          type: string
+        after:
+          type: string
 
     Statistics:
       type: object
@@ -6058,9 +6087,6 @@ components:
         because the SSE stream is not validated by generated clients.
       required: [type, timestamp]
       properties:
-        cursor:
-          type: string
-          description: Durable source event ID for reconnect and cross-surface deduplication.
         type:
           type: string
           enum:

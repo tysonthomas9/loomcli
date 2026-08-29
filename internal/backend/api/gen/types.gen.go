@@ -2085,16 +2085,29 @@ type IssueIssueType string
 // are not settable via the API and excluded from this enum.
 type IssueStatus string
 
-// IssueEvent Audit trail entry for an issue. ID is an opaque durable source event ID.
+// IssueEvent Audit trail entry for an issue
 type IssueEvent struct {
-	Actor     string    `json:"actor"`
-	Comment   *string   `json:"comment,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	EventType string    `json:"event_type"`
-	Id        string    `json:"id"`
-	IssueId   string    `json:"issue_id"`
-	NewValue  *string   `json:"new_value,omitempty"`
-	OldValue  *string   `json:"old_value,omitempty"`
+	Actor     string                   `json:"actor"`
+	Category  *string                  `json:"category,omitempty"`
+	Changes   *[]IssueEventFieldChange `json:"changes,omitempty"`
+	Comment   *string                  `json:"comment,omitempty"`
+	CreatedAt time.Time                `json:"created_at"`
+	EventType string                   `json:"event_type"`
+	Id        string                   `json:"id"`
+	IssueId   string                   `json:"issue_id"`
+	Metadata  *map[string]string       `json:"metadata,omitempty"`
+	NewValue  *string                  `json:"new_value,omitempty"`
+	OldValue  *string                  `json:"old_value,omitempty"`
+	Payload   *string                  `json:"payload,omitempty"`
+	Summary   *string                  `json:"summary,omitempty"`
+	Target    *string                  `json:"target,omitempty"`
+}
+
+// IssueEventFieldChange Before and after values for one field changed by an issue event
+type IssueEventFieldChange struct {
+	After  *string `json:"after,omitempty"`
+	Before *string `json:"before,omitempty"`
+	Field  string  `json:"field"`
 }
 
 // IssueResponse Full issue detail returned by get-single-issue endpoint. Includes dependency/dependent refs, comments, and counts.
@@ -2427,9 +2440,6 @@ type MutationPayload struct {
 	Action   *string `json:"action,omitempty"`
 	Actor    *string `json:"actor,omitempty"`
 	Assignee *string `json:"assignee,omitempty"`
-
-	// Cursor Durable source event ID for reconnect and cross-surface deduplication.
-	Cursor *string `json:"cursor,omitempty"`
 
 	// EntityId Generic changed entity identifier.
 	EntityId *string `json:"entity_id,omitempty"`
@@ -3395,7 +3405,7 @@ type GetGraphParamsStatus string
 
 // GetIssueEventsParams defines parameters for GetIssueEvents.
 type GetIssueEventsParams struct {
-	// Limit Maximum number of most recent events to return
+	// Limit Maximum number of recent events to return
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 

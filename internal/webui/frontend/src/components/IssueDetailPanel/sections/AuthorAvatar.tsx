@@ -44,7 +44,7 @@ function getAvatarColor(name: string): string {
   );
 }
 
-function detectAgent(name: string): boolean {
+export function detectAgent(name: string): boolean {
   const lower = name.toLowerCase();
   return AGENT_PATTERNS.some((p) => lower.includes(p));
 }

@@ -19,7 +19,7 @@ type EventListResponse struct {
 // parseEventLimit parses and clamps the limit query parameter.
 func parseEventLimit(r *http.Request) int {
 	const defaultLimit = 100
-	const maxLimit = 500
+	const maxLimit = 200
 
 	limitStr := r.URL.Query().Get("limit")
 	if limitStr == "" {

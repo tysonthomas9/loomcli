@@ -316,15 +316,27 @@ func commentDataToTypesComment(d *backend.CommentData) *types.Comment {
 
 // eventDataToTypesEvent maps backend.EventData onto the strongly typed
 // types.Event used by the ListEvents handler response shape.
-//
-// Event IDs are opaque durable source cursors. Preserving them avoids
-// collapsing FleetDB stream IDs and lets REST history deduplicate with SSE.
 func eventDataToTypesEvent(d backend.EventData) *types.Event {
+	changes := make([]types.FieldChange, 0, len(d.Changes))
+	for _, change := range d.Changes {
+		changes = append(changes, types.FieldChange{
+			Field:  change.Field,
+			Before: change.Before,
+			After:  change.After,
+		})
+	}
+
 	return &types.Event{
 		ID:        d.ID,
 		IssueID:   d.IssueID,
 		EventType: types.EventType(d.Kind),
 		Actor:     d.Actor,
+		Target:    d.Target,
+		Payload:   d.Payload,
+		Category:  d.Category,
+		Summary:   d.Summary,
+		Changes:   changes,
+		Metadata:  d.Metadata,
 		CreatedAt: d.CreatedAt,
 	}
 }

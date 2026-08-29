@@ -7,6 +7,7 @@
  */
 
 import {
+  act,
   render,
   screen,
   fireEvent,
@@ -16,13 +17,19 @@ import {
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { Issue, IssueDetails, IssueWithDependencyMetadata } from "@/types";
+import type {
+  Event,
+  Issue,
+  IssueDetails,
+  IssueWithDependencyMetadata,
+} from "@/types";
 import type { SessionRecord } from "@/types/agent";
 import {
   updateIssue,
   startWorkflowRun,
   createWorkspaceAgent,
   deleteWorkspaceAgent,
+  getIssueEvents,
 } from "@/api";
 import { createAgentStore } from "@/stores/agentStore";
 
@@ -220,6 +227,28 @@ function createTestIssueDetails(
   };
 }
 
+function createTestEvent(overrides: Partial<Event> = {}): Event {
+  return {
+    id: "event-1",
+    issue_id: "test-123",
+    event_type: "issue.create",
+    actor: "alice",
+    created_at: "2026-01-23T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 /**
  * Create a test dependency issue.
  */
@@ -379,6 +408,9 @@ describe("IssueDetailPanel", () => {
     >;
     mockDeleteWorkspaceAgent.mockReset();
     mockDeleteWorkspaceAgent.mockResolvedValue(undefined);
+    const mockGetIssueEvents = vi.mocked(getIssueEvents);
+    mockGetIssueEvents.mockReset();
+    mockGetIssueEvents.mockImplementation(() => new Promise(() => {}));
   });
 
   // Reset body overflow after each test
@@ -544,6 +576,104 @@ describe("IssueDetailPanel", () => {
         <IssueDetailPanel isOpen={false} issue={null} onClose={() => {}} />,
       );
       expect(screen.getByTestId("issue-detail-panel")).toBeInTheDocument();
+    });
+  });
+
+  describe("event history", () => {
+    it("requests the full event window explicitly", async () => {
+      const mockGetIssueEvents = vi.mocked(getIssueEvents);
+      mockGetIssueEvents.mockResolvedValue([]);
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({ workspaceId: "workspace-1" }),
+      );
+
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={createTestIssueDetails()}
+          onClose={() => {}}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(mockGetIssueEvents).toHaveBeenCalledWith(
+          "workspace-1",
+          "test-123",
+          200,
+        );
+      });
+    });
+
+    it("refreshes on the issue revision and ignores an older response", async () => {
+      const mockGetIssueEvents = vi.mocked(getIssueEvents);
+      const firstRequest = deferred<Event[]>();
+      const secondRequest = deferred<Event[]>();
+      mockGetIssueEvents
+        .mockReturnValueOnce(firstRequest.promise)
+        .mockReturnValueOnce(secondRequest.promise);
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({ workspaceId: "workspace-1" }),
+      );
+      const initialIssue = createTestIssueDetails({
+        status: "in_progress",
+        updated_at: "2026-01-23T00:00:00Z",
+      });
+      const { rerender } = render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={initialIssue}
+          onClose={() => {}}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(mockGetIssueEvents).toHaveBeenCalledTimes(1);
+      });
+
+      rerender(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={{
+            ...initialIssue,
+            status: "closed",
+            updated_at: "2026-01-23T00:00:01Z",
+          }}
+          onClose={() => {}}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(mockGetIssueEvents).toHaveBeenCalledTimes(2);
+      });
+
+      secondRequest.resolve([
+        createTestEvent(),
+        createTestEvent({
+          id: "event-2",
+          event_type: "issue.close",
+          actor: "worker-1",
+          created_at: "2026-01-23T00:00:01Z",
+        }),
+      ]);
+      await waitFor(() => {
+        expect(screen.getByTestId("journey-tail")).toHaveTextContent("Done");
+      });
+
+      await act(async () => {
+        firstRequest.resolve([
+          createTestEvent(),
+          createTestEvent({
+            id: "event-2",
+            event_type: "issue.claim",
+            actor: "worker-1",
+            created_at: "2026-01-23T00:00:01Z",
+          }),
+        ]);
+        await Promise.resolve();
+      });
+
+      expect(screen.getByTestId("journey-tail")).toHaveTextContent("Done");
+      expect(screen.queryByTestId("journey-now-line")).not.toBeInTheDocument();
     });
   });
 
