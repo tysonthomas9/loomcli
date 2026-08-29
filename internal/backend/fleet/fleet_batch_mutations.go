@@ -44,6 +44,23 @@ func (w fleetCommentWire) toTypesComment() types.Comment {
 
 // --- Event operations ---
 
+type fleetEventWire struct {
+	ID        string                `json:"id"`
+	Timestamp time.Time             `json:"timestamp"`
+	Actor     string                `json:"actor"`
+	Action    string                `json:"action"`
+	Category  string                `json:"category"`
+	Summary   string                `json:"summary"`
+	Changes   []backend.FieldChange `json:"changes"`
+	Metadata  map[string]string     `json:"metadata"`
+}
+
+type fleetEventHistory struct {
+	History []fleetEventWire `json:"history"`
+	Cursor  string           `json:"cursor"`
+	HasMore bool             `json:"has_more"`
+}
+
 func (b *FleetBackend) ListEvents(ctx context.Context, id string, limit int) ([]backend.EventData, error) {
 	const (
 		historyPageLimit    = 200
@@ -59,50 +76,14 @@ func (b *FleetBackend) ListEvents(ctx context.Context, id string, limit int) ([]
 	result := make([]backend.EventData, 0, limit)
 	cursor := ""
 	for {
-		query := url.Values{}
-		query.Set("limit", strconv.Itoa(historyPageLimit))
-		if cursor != "" {
-			query.Set("since", cursor)
-		}
-		path := "/issues/" + url.PathEscape(id) + "/history?" + query.Encode()
-		resp, err := b.exec(ctx, "ListEvents", "GET", path, nil)
+		history, err := b.listEventHistoryPage(ctx, id, cursor, historyPageLimit)
 		if err != nil {
 			return nil, err
 		}
-		if !hasData(resp) {
+		if history == nil {
 			return []backend.EventData{}, nil
 		}
-
-		var history struct {
-			History []struct {
-				ID        string                `json:"id"`
-				Timestamp time.Time             `json:"timestamp"`
-				Actor     string                `json:"actor"`
-				Action    string                `json:"action"`
-				Category  string                `json:"category"`
-				Summary   string                `json:"summary"`
-				Changes   []backend.FieldChange `json:"changes"`
-				Metadata  map[string]string     `json:"metadata"`
-			} `json:"history"`
-			Cursor  string `json:"cursor"`
-			HasMore bool   `json:"has_more"`
-		}
-		if err := json.Unmarshal(resp.Data, &history); err != nil {
-			return nil, backend.ErrInternal("ListEvents", "unmarshal response", err)
-		}
-		for _, e := range history.History {
-			result = append(result, backend.EventData{
-				ID:        e.ID,
-				IssueID:   id,
-				Kind:      e.Action,
-				Actor:     e.Actor,
-				Category:  e.Category,
-				Summary:   e.Summary,
-				Changes:   e.Changes,
-				Metadata:  e.Metadata,
-				CreatedAt: e.Timestamp,
-			})
-		}
+		result = append(result, eventDataFromHistory(history.History, id)...)
 		if !history.HasMore {
 			break
 		}
@@ -120,6 +101,51 @@ func (b *FleetBackend) ListEvents(ctx context.Context, id string, limit int) ([]
 		result = result[len(result)-limit:]
 	}
 	return result, nil
+}
+
+func (b *FleetBackend) listEventHistoryPage(
+	ctx context.Context,
+	id string,
+	cursor string,
+	limit int,
+) (*fleetEventHistory, error) {
+	query := url.Values{}
+	query.Set("limit", strconv.Itoa(limit))
+	if cursor != "" {
+		query.Set("since", cursor)
+	}
+	path := "/issues/" + url.PathEscape(id) + "/history?" + query.Encode()
+	resp, err := b.exec(ctx, "ListEvents", "GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if !hasData(resp) {
+		return nil, nil
+	}
+
+	var history fleetEventHistory
+	if err := json.Unmarshal(resp.Data, &history); err != nil {
+		return nil, backend.ErrInternal("ListEvents", "unmarshal response", err)
+	}
+	return &history, nil
+}
+
+func eventDataFromHistory(history []fleetEventWire, issueID string) []backend.EventData {
+	result := make([]backend.EventData, 0, len(history))
+	for _, event := range history {
+		result = append(result, backend.EventData{
+			ID:        event.ID,
+			IssueID:   issueID,
+			Kind:      event.Action,
+			Actor:     event.Actor,
+			Category:  event.Category,
+			Summary:   event.Summary,
+			Changes:   event.Changes,
+			Metadata:  event.Metadata,
+			CreatedAt: event.Timestamp,
+		})
+	}
+	return result
 }
 
 // --- Batch operations ---
