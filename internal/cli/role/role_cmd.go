@@ -333,30 +333,69 @@ func runRoleUnset(_ *cobra.Command, args []string) error {
 // is true, *int / *float64 fields use the clear-via-double-pointer
 // signal (&nil); string fields go to "" / empty slice; bool to false.
 //
-//nolint:cyclop,funlen // Mirrors the supported role patch fields one-to-one.
+// The key families live in the helpers below — plain strings, closed
+// vocabularies, scalars with an unset branch, and list-shaped fields — and the
+// first helper that recognizes the key wins.
 func buildRolePatch(key, value string, unset bool) (store.RoleUpdate, error) {
 	var patch store.RoleUpdate
+	if buildRoleStringPatch(&patch, key, value) {
+		return patch, nil
+	}
+	if handled, err := buildRoleValidatedPatch(&patch, key, value); err != nil {
+		return patch, err
+	} else if handled {
+		return patch, nil
+	}
+	if handled, err := buildRoleScalarPatch(&patch, key, value, unset); err != nil {
+		return patch, err
+	} else if handled {
+		return patch, nil
+	}
+	if handled, err := buildRoleListPatch(&patch, key, value, unset); err != nil {
+		return patch, err
+	} else if handled {
+		return patch, nil
+	}
+	return patch, fmt.Errorf("unknown key %q (run 'loom role set --help' for supported keys)", key)
+}
+
+// buildRoleStringPatch handles the fields that are stored verbatim.
+func buildRoleStringPatch(patch *store.RoleUpdate, key, value string) bool {
 	switch key {
 	case "description":
 		patch.Description = strPtr(value)
-	case "kind":
-		if err := validateRoleKindValue(value); err != nil {
-			return patch, err
-		}
-		patch.Kind = strPtr(normalizeRoleKindValue(value))
 	case "prompt":
 		patch.Prompt = strPtr(value)
 	case "prompt_file":
 		patch.PromptFile = strPtr(value)
 	case "model":
 		patch.Model = strPtr(value)
+	case "backend":
+		patch.Backend = strPtr(value)
+	case "effort":
+		patch.Effort = strPtr(value)
+	default:
+		return false
+	}
+	return true
+}
+
+// buildRoleValidatedPatch handles the closed-vocabulary fields: a bad value is
+// rejected here, with the accepted spellings, rather than as a server 400.
+func buildRoleValidatedPatch(patch *store.RoleUpdate, key, value string) (bool, error) {
+	switch key {
+	case "kind":
+		if err := validateRoleKindValue(value); err != nil {
+			return true, err
+		}
+		patch.Kind = strPtr(normalizeRoleKindValue(value))
 	case "task_filter":
 		// The role's filter is the one the daemon router actually reads, so an
 		// unrecognized value here degrades routing silently. Reject it at input
 		// time and store the canonical spelling.
 		canonical, err := cli.ValidateTaskFilter(value)
 		if err != nil {
-			return patch, err
+			return true, err
 		}
 		patch.TaskFilter = strPtr(canonical)
 	case "executor":
@@ -364,75 +403,90 @@ func buildRolePatch(key, value string, unset bool) (store.RoleUpdate, error) {
 		// the accepted values instead of as a server 400: "" (clear, same as
 		// turn), "turn", or "conversation".
 		if value != "" && value != "turn" && value != "conversation" {
-			return store.RoleUpdate{}, fmt.Errorf("executor must be %q or %q (empty clears it)", "turn", "conversation")
+			*patch = store.RoleUpdate{}
+			return true, fmt.Errorf("executor must be %q or %q (empty clears it)", "turn", "conversation")
 		}
 		patch.Executor = strPtr(value)
-	case "backend":
-		patch.Backend = strPtr(value)
-	case "effort":
-		patch.Effort = strPtr(value)
+	default:
+		return false, nil
+	}
+	return true, nil
+}
+
+// buildRoleScalarPatch handles the numeric/boolean fields: each has an unset
+// branch that clears the field and a parse that reports the expected shape.
+func buildRoleScalarPatch(patch *store.RoleUpdate, key, value string, unset bool) (bool, error) {
+	switch key {
 	case "read_only":
 		if unset {
 			b := false
 			patch.ReadOnly = &b
-			return patch, nil
+			return true, nil
 		}
 		b, err := strconv.ParseBool(value)
 		if err != nil {
-			return patch, fmt.Errorf("read_only must be true/false: %w", err)
+			return true, fmt.Errorf("read_only must be true/false: %w", err)
 		}
 		patch.ReadOnly = &b
 	case "max_priority":
-		if unset {
-			var nilInt *int
-			patch.MaxPriority = &nilInt
-			return patch, nil
-		}
-		n, err := strconv.Atoi(value)
+		ptr, err := roleIntField(value, unset, "max_priority must be an integer")
 		if err != nil {
-			return patch, fmt.Errorf("max_priority must be an integer: %w", err)
+			return true, err
 		}
-		ptr := &n
-		patch.MaxPriority = &ptr
+		patch.MaxPriority = ptr
 	case "max_concurrency":
-		if unset {
-			var nilInt *int
-			patch.MaxConcurrency = &nilInt
-			return patch, nil
-		}
-		n, err := strconv.Atoi(value)
+		ptr, err := roleIntField(value, unset, "max_concurrency must be an integer")
 		if err != nil {
-			return patch, fmt.Errorf("max_concurrency must be an integer: %w", err)
+			return true, err
 		}
-		ptr := &n
-		patch.MaxConcurrency = &ptr
+		patch.MaxConcurrency = ptr
 	case "max_budget_usd":
 		if unset {
 			var nilF *float64
 			patch.MaxBudgetUSD = &nilF
-			return patch, nil
+			return true, nil
 		}
 		f, err := strconv.ParseFloat(value, 64)
 		if err != nil {
-			return patch, fmt.Errorf("max_budget_usd must be a number: %w", err)
+			return true, fmt.Errorf("max_budget_usd must be a number: %w", err)
 		}
 		ptr := &f
 		patch.MaxBudgetUSD = &ptr
 	case "max_run_duration":
-		if unset {
-			var nilInt *int
-			patch.MaxRunDuration = &nilInt
-			return patch, nil
-		}
-		n, err := strconv.Atoi(value)
-		if err != nil {
-			return patch, fmt.Errorf("max_run_duration must be an integer number of seconds: %w", err)
-		}
 		// 0 is accepted, not rejected: it is how a role says "no wall-clock cap
 		// on my runs". Clearing the field (unset) means something different —
 		// inherit the daemon default — which is why both spellings exist.
-		ptr := &n
-		patch.MaxRunDuration = &ptr
+		ptr, err := roleIntField(value, unset, "max_run_duration must be an integer number of seconds")
+		if err != nil {
+			return true, err
+		}
+		patch.MaxRunDuration = ptr
+	default:
+		return false, nil
+	}
+	return true, nil
+}
+
+// roleIntField builds the clear-or-parse value for an int-valued role field:
+// the clear-via-double-pointer signal when unset, otherwise the parsed value.
+// msg is the field-specific prefix of the parse error.
+func roleIntField(value string, unset bool, msg string) (**int, error) {
+	if unset {
+		var nilInt *int
+		return &nilInt, nil
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", msg, err)
+	}
+	ptr := &n
+	return &ptr, nil
+}
+
+// buildRoleListPatch handles the list-shaped fields: the CSV string slices and
+// the input policy, which is parsed out of the same CSV form.
+func buildRoleListPatch(patch *store.RoleUpdate, key, value string, unset bool) (bool, error) {
+	switch key {
 	case "skills":
 		patch.Skills = sliceCSVPtr(value)
 	case "labels":
@@ -452,17 +506,17 @@ func buildRolePatch(key, value string, unset bool) (store.RoleUpdate, error) {
 			// nothing must resolve identically, and both must resolve to deny.
 			var nilPolicy *domain.RoleInputPolicy
 			patch.InputPolicy = &nilPolicy
-			return patch, nil
+			return true, nil
 		}
 		policy, err := parseInputPolicySpec(splitCSV(value))
 		if err != nil {
-			return patch, err
+			return true, err
 		}
 		patch.InputPolicy = &policy
 	default:
-		return patch, fmt.Errorf("unknown key %q (run 'loom role set --help' for supported keys)", key)
+		return false, nil
 	}
-	return patch, nil
+	return true, nil
 }
 
 // strPtr → *string for the simple "set this string" path. Empty input

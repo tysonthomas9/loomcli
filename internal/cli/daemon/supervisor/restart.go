@@ -623,28 +623,13 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 	outcome := lastErr.Class
 	d := agentpolicy.Decide(outcome)
 
+	if fixed, ok := s.fixedBackoff(d.Backoff, noWorkCount); ok {
+		return fixed
+	}
+
 	var initial int
 	var retryN int
 	switch d.Backoff {
-	case agentpolicy.BPNoWork:
-		// Task availability is not a backend-health signal, so this is not the
-		// exponential retry curve - it is a poll that relaxes while the board stays
-		// empty and snaps back to no_work_backoff the moment anything is claimed.
-		return noWorkPollInterval(s.getNoWorkBackoff(), s.GetIdlePollInterval(), noWorkCount)
-	case agentpolicy.BPBackendUnavailable:
-		// Fixed recheck: waiting for the backend CLI to reappear, not
-		// backing off a flaky run.
-		return s.backendRecheckBackoff()
-	case agentpolicy.BPClaimsHeld:
-		// Fixed recheck: waiting for an operator to release a hold, not
-		// backing off a flaky run.
-		return s.claimHoldRecheckBackoff()
-	case agentpolicy.BPIssueBackendOutage:
-		// Fixed recheck: waiting for the issue store to answer again, not
-		// backing off a flaky run.
-		return s.issueBackendRecheckBackoff()
-	case agentpolicy.BPBlock:
-		return s.maxRetriesBlockBackoff()
 	case agentpolicy.BPRateLimit:
 		initial = s.getRateLimitBackoff()
 		retryN = rateCount
@@ -662,6 +647,34 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 		hint = lastErr.RetryAfter
 	}
 	return exponentialBackoff(initial, retryN, maxBackoff, hint)
+}
+
+// fixedBackoff handles the policies that are NOT the exponential retry curve:
+// each returns a fixed recheck interval and is done. It reports (0, false) for
+// the policies that fall through to the curve in computeBackoff.
+func (s *Supervisor) fixedBackoff(bp agentpolicy.BackoffProfile, noWorkCount int) (time.Duration, bool) {
+	switch bp {
+	case agentpolicy.BPNoWork:
+		// Task availability is not a backend-health signal, so this is not the
+		// exponential retry curve - it is a poll that relaxes while the board stays
+		// empty and snaps back to no_work_backoff the moment anything is claimed.
+		return noWorkPollInterval(s.getNoWorkBackoff(), s.GetIdlePollInterval(), noWorkCount), true
+	case agentpolicy.BPBackendUnavailable:
+		// Fixed recheck: waiting for the backend CLI to reappear, not
+		// backing off a flaky run.
+		return s.backendRecheckBackoff(), true
+	case agentpolicy.BPClaimsHeld:
+		// Fixed recheck: waiting for an operator to release a hold, not
+		// backing off a flaky run.
+		return s.claimHoldRecheckBackoff(), true
+	case agentpolicy.BPIssueBackendOutage:
+		// Fixed recheck: waiting for the issue store to answer again, not
+		// backing off a flaky run.
+		return s.issueBackendRecheckBackoff(), true
+	case agentpolicy.BPBlock:
+		return s.maxRetriesBlockBackoff(), true
+	}
+	return 0, false
 }
 
 // envSuccessCadenceSeconds sets the minimum interval between successful claim
