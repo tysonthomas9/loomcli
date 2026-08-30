@@ -58,12 +58,28 @@ func isPublicRoute(method, path string) bool {
 	case strings.HasPrefix(normalizedPath, "/api/agents/") && strings.HasSuffix(normalizedPath, "/logs/stream"):
 		// Workspace-scoped agent log SSE uses a one-time token validated by its handler.
 		return true
+	case isTaskLogStreamPath(normalizedPath):
+		// Workspace-scoped task-phase log SSE uses a one-time token validated by its handler.
+		return true
 	case !strings.HasPrefix(normalizedPath, "/api/"):
 		// Frontend static files and SPA routes
 		return true
 	}
 
 	return false
+}
+
+func isTaskLogStreamPath(normalizedPath string) bool {
+	rest, ok := strings.CutPrefix(normalizedPath, "/api/tasks/")
+	if !ok {
+		return false
+	}
+	rest, ok = strings.CutSuffix(rest, "/stream")
+	if !ok {
+		return false
+	}
+	taskID, phase, ok := strings.Cut(rest, "/logs/")
+	return ok && taskID != "" && phase != ""
 }
 
 // hasOwnAuthPrefix reports whether the (workspace-normalized) path belongs to

@@ -1517,6 +1517,24 @@ func (e ListReadyParamsSort) Valid() bool {
 	}
 }
 
+// Defines values for StreamTaskPhaseLogParamsPhase.
+const (
+	Implementation StreamTaskPhaseLogParamsPhase = "implementation"
+	Planning       StreamTaskPhaseLogParamsPhase = "planning"
+)
+
+// Valid indicates whether the value is a known member of the StreamTaskPhaseLogParamsPhase enum.
+func (e StreamTaskPhaseLogParamsPhase) Valid() bool {
+	switch e {
+	case Implementation:
+		return true
+	case Planning:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for StartTerminalSetupJSONBodyAction.
 const (
 	Configure StartTerminalSetupJSONBodyAction = "configure"
@@ -3489,6 +3507,21 @@ type GetTaskLogParams struct {
 	// BeforeLine Read lines before this line number (for pagination)
 	BeforeLine *int64 `form:"before_line,omitempty" json:"before_line,omitempty"`
 }
+
+// StreamTaskPhaseLogParams defines parameters for StreamTaskPhaseLog.
+type StreamTaskPhaseLogParams struct {
+	// Token One-time SSE auth token (for EventSource clients)
+	Token *string `form:"token,omitempty" json:"token,omitempty"`
+
+	// Offset Byte offset to resume replay from; wins over tail_bytes
+	Offset *int64 `form:"offset,omitempty" json:"offset,omitempty"`
+
+	// TailBytes Initial number of bytes to replay from the end of the log
+	TailBytes *int64 `form:"tail_bytes,omitempty" json:"tail_bytes,omitempty"`
+}
+
+// StreamTaskPhaseLogParamsPhase defines parameters for StreamTaskPhaseLog.
+type StreamTaskPhaseLogParamsPhase string
 
 // GetTerminalSessionStatusParams defines parameters for GetTerminalSessionStatus.
 type GetTerminalSessionStatusParams struct {

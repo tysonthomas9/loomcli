@@ -806,6 +806,30 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/tasks/{id}/logs/{phase}/stream": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Stream a task phase log with initial replay and live updates
+     * @description Replays log bytes from `offset`, from an EOF-relative `tail_bytes`
+     *     window, or from byte zero when neither is supplied, then streams live
+     *     `log-chunk` events. `offset` wins when both cursor parameters are
+     *     present. A `truncated` event tells the client to reset its buffer and
+     *     byte cursor.
+     */
+    get: operations["streamTaskPhaseLog"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/terminal/sessions": {
     parameters: {
       query?: never;
@@ -5277,6 +5301,60 @@ export interface operations {
               /** Format: int64 */
               start_line?: number;
             };
+          };
+        };
+      };
+    };
+  };
+  streamTaskPhaseLog: {
+    parameters: {
+      query?: {
+        /** @description One-time SSE auth token (for EventSource clients) */
+        token?: string;
+        /** @description Byte offset to resume replay from; wins over tail_bytes */
+        offset?: number;
+        /** @description Initial number of bytes to replay from the end of the log */
+        tail_bytes?: number;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        id: string;
+        phase: "planning" | "implementation";
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description SSE stream of LogChunkPayload and truncated events */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/event-stream": string;
+        };
+      };
+      /** @description Invalid task ID, phase, or cursor parameter */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            error: string;
+          };
+        };
+      };
+      /** @description Missing, expired, or reused one-time stream token */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            error: string;
           };
         };
       };

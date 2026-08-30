@@ -26,7 +26,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -42,6 +41,7 @@ import {
   orderAgentsForEpicRunner,
 } from "@/components/AgentIconRail/AgentIconRail";
 import { IssueDetailPanel } from "@/components/IssueDetailPanel/IssueDetailPanel";
+import { LiveLogPane } from "@/components/LiveLogPane";
 import {
   EPIC_RUNNER_WORKFLOW_NAME,
   isTerminalWorkflowRunStatus,
@@ -53,7 +53,6 @@ import {
   useWorkspaceViewData,
 } from "@/contexts/WorkspaceViewContext";
 import { useAgentStoreInstance } from "@/hooks";
-import { useLogStream } from "@/hooks/terminal/useLogStream";
 import { useLocalSettings, useWorkspaceContext } from "@/hooks/workspace";
 import {
   OPEN_QUEUE_PANEL_MAX_WIDTH,
@@ -90,70 +89,6 @@ const WorkspaceFileBrowser = lazy(() =>
     default: m.WorkspaceFileBrowser,
   })),
 );
-
-interface AgentLiveLogsPaneProps {
-  workspaceId: string;
-  agentName: string | undefined;
-  isActive: boolean;
-}
-
-function AgentLiveLogsPane({
-  workspaceId,
-  agentName,
-  isActive,
-}: AgentLiveLogsPaneProps): JSX.Element {
-  const stream = useLogStream({
-    workspaceId,
-    streamPath: `/agents/${encodeURIComponent(agentName ?? "")}/logs/stream`,
-    enabled: isActive && !!agentName,
-  });
-
-  // Stick to the tail: new content keeps the pane pinned to the bottom
-  // unless the reader has scrolled up to look at history.
-  const outputRef = useRef<HTMLPreElement | null>(null);
-  const pinnedRef = useRef(true);
-  const handleScroll = useCallback(() => {
-    const el = outputRef.current;
-    if (!el) return;
-    pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-  }, []);
-  useEffect(() => {
-    const el = outputRef.current;
-    if (el && pinnedRef.current) {
-      el.scrollTop = el.scrollHeight;
-    }
-  }, [stream.content]);
-
-  if (!agentName) {
-    return (
-      <div className={styles.tabFallback}>Select an agent to view logs.</div>
-    );
-  }
-
-  const viewState =
-    stream.state === "connected" && stream.content === ""
-      ? "empty"
-      : stream.state;
-  const stateLabel = viewState === "empty" ? "no logs" : viewState;
-
-  return (
-    <div className={styles.liveLogPane}>
-      <div className={styles.liveLogStatus}>
-        <span data-testid="agent-log-state" data-state={viewState}>
-          {stateLabel}
-        </span>
-      </div>
-      <pre
-        ref={outputRef}
-        onScroll={handleScroll}
-        className={styles.liveLogOutput}
-        data-testid="agent-log-content"
-      >
-        {stream.content}
-      </pre>
-    </div>
-  );
-}
 
 export function AgentsPage(): JSX.Element {
   return (
@@ -532,11 +467,18 @@ function AgentsPageInner(): JSX.Element {
             </div>
           );
         case "logs":
+          if (!agentName) {
+            return (
+              <div className={styles.tabFallback}>
+                Select an agent to view logs.
+              </div>
+            );
+          }
           return (
-            <AgentLiveLogsPane
+            <LiveLogPane
               workspaceId={workspaceId}
-              agentName={agentName}
-              isActive={isActive}
+              streamPath={`/agents/${encodeURIComponent(agentName)}/logs/stream`}
+              enabled={isActive}
             />
           );
         case "git":

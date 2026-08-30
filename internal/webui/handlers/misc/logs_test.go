@@ -84,9 +84,9 @@ func TestValidTaskIDRegex(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := validTaskID.MatchString(tt.input)
+			got := IsValidTaskID(tt.input)
 			if got != tt.valid {
-				t.Errorf("validTaskID.MatchString(%q) = %v, want %v", tt.input, got, tt.valid)
+				t.Errorf("IsValidTaskID(%q) = %v, want %v", tt.input, got, tt.valid)
 			}
 		})
 	}
@@ -114,9 +114,9 @@ func TestValidPhaseRegex(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := validPhase.MatchString(tt.input)
+			got := IsValidPhase(tt.input)
 			if got != tt.valid {
-				t.Errorf("validPhase.MatchString(%q) = %v, want %v", tt.input, got, tt.valid)
+				t.Errorf("IsValidPhase(%q) = %v, want %v", tt.input, got, tt.valid)
 			}
 		})
 	}

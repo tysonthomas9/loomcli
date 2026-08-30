@@ -16,7 +16,7 @@ import (
 // [*http.ServeMux].
 //
 // The agent archive route is conditional on agentSvc being non-nil. The agent
-// stream and task archive routes are always registered.
+// stream and task archive/stream routes are always registered.
 type Module struct {
 	agentSvc  service.AgentService // may be nil — agent archive route skipped
 	sseTokens *realtime.TokenStore // may be nil in open auth mode
@@ -36,9 +36,72 @@ func (m *Module) Register(mux *http.ServeMux) {
 	}
 	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/logs/stream", m.handleAgentLogStream)
 
-	// Task log routes — always registered (zero-parameter constructors)
+	// Task log routes — always registered.
 	mux.HandleFunc("GET /api/workspaces/{ws}/tasks/{id}/logs", misc.HandleListTaskPhases())
 	mux.HandleFunc("GET /api/workspaces/{ws}/tasks/{id}/logs/{phase}", misc.HandleGetTaskLog())
+	mux.HandleFunc("GET /api/workspaces/{ws}/tasks/{id}/logs/{phase}/stream", m.handleTaskLogStream)
+}
+
+func (m *Module) handleTaskLogStream(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("ws")
+	if m.sseTokens != nil {
+		if _, err := m.sseTokens.Validate(r.URL.Query().Get("token"), workspaceID); err != nil {
+			writeError(w, http.StatusUnauthorized, "invalid or expired stream token")
+			return
+		}
+	}
+
+	taskID := r.PathValue("id")
+	if !misc.IsValidTaskID(taskID) {
+		writeError(w, http.StatusBadRequest, "invalid task ID")
+		return
+	}
+	phase := r.PathValue("phase")
+	if !misc.IsValidPhase(phase) {
+		writeError(w, http.StatusBadRequest, "invalid phase")
+		return
+	}
+
+	logPath, err := GetTaskLogPath(workspaceID, taskID, phase)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid task log path")
+		return
+	}
+	serveLogStream(w, r, workspaceID, logPath, "task log")
+}
+
+// serveLogStream is the shared tail of the log stream handlers: workspace
+// fencing, cursor parsing, streamer lifecycle, write-deadline clearing (the
+// server's 30s WriteTimeout would otherwise kill the stream), and Stream.
+func serveLogStream(w http.ResponseWriter, r *http.Request, workspaceID, logPath, kind string) {
+	workspaceLogDir, err := GetWorkspaceLogDir(workspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve workspace log directory")
+		return
+	}
+	if err := ValidatePathWithinDir(logPath, workspaceLogDir); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid "+kind+" path")
+		return
+	}
+
+	start, err := parseStreamStart(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	streamer, err := NewLogStreamer(logPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to open "+kind+" stream")
+		return
+	}
+	defer streamer.Close()
+	rc := http.NewResponseController(w)
+	if err := rc.SetWriteDeadline(time.Time{}); err != nil {
+		slog.Error(kind+" SSE: failed to disable write deadline", "err", err)
+	}
+
+	_ = streamer.Stream(r.Context(), w, start)
 }
 
 func (m *Module) handleAgentLogStream(w http.ResponseWriter, r *http.Request) {
@@ -56,39 +119,12 @@ func (m *Module) handleAgentLogStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	start, err := parseStreamStart(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
 	logPath, err := GetAgentLogPath(workspaceID, agentName)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid agent log path")
 		return
 	}
-	workspaceLogDir, err := GetWorkspaceLogDir(workspaceID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to resolve workspace log directory")
-		return
-	}
-	if err := ValidatePathWithinDir(logPath, workspaceLogDir); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid agent log path")
-		return
-	}
-
-	streamer, err := NewLogStreamer(logPath)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to open agent log stream")
-		return
-	}
-	defer streamer.Close()
-	rc := http.NewResponseController(w)
-	if err := rc.SetWriteDeadline(time.Time{}); err != nil {
-		slog.Error("agent log SSE: failed to disable write deadline", "err", err)
-	}
-
-	_ = streamer.Stream(r.Context(), w, start)
+	serveLogStream(w, r, workspaceID, logPath, "agent log")
 }
 
 func parseStreamStart(r *http.Request) (StreamStart, error) {
