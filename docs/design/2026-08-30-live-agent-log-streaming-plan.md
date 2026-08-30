@@ -11,11 +11,14 @@
 
 Live tail of agent logs over SSE in two existing UI surfaces:
 
-1. **Agent detail → Logs tab** (`AgentDetailPanel/AgentLogsTab.tsx`): today it
-   prefers the tmux terminal and otherwise shows a static archive snapshot —
-   which is exactly the case for background agents (planner, task runner). It
-   gains a live mode: scrollback first, then new lines appended as the agent
-   works.
+1. **Agents page → Logs tab** (`views/AgentsPage.tsx` +
+   `AgentEditorGroups.tsx`): the routed agent surface
+   (`/ws/{id}/agents/{name}`) gains a "Logs" editor tab that live-tails the
+   agent's log — scrollback first, then new lines appended as the agent
+   works. *(Correction from browser verification: the originally targeted
+   `AgentDetailPanel/AgentLogsTab.tsx` is an orphaned component — mounted
+   behind a panel type nothing ever opens — so the live mode wired there is
+   kept but the reachable surface is the Agents page tab strip.)*
 2. **Issue detail → task-log phase tabs** (`IssueDetailPanel`, the
    `task-log-{phase}` tabpanels): today a 500ms-polled text blob; the tabs
    gain the same live append.
@@ -120,15 +123,22 @@ this plan gives it routes and consumers.
 
 8. **Surface behavior: stream while visible.** *(Reverses running-only
    gating.)* Gating on a "running" signal races startup, completion, and
-   late flushes — and `AgentLogsTab`'s `isActive` prop means *tab
-   visibility*, not agent state. Instead: whenever the logs surface is in
-   archive mode and visible, the stream is open; close on hide/unmount. A
-   stopped agent's stream simply replays and idles on heartbeats. tmux
-   terminal remains preferred when a session exists. Same rule for task
-   phase tabs (which today poll every 500ms; live phases stop polling,
+   late flushes — visibility is the only input. The Agents page Logs tab
+   streams while it is the active tab; close on deactivate/unmount. A
+   stopped agent's stream simply replays and idles on heartbeats. The Logs
+   pane never embeds a terminal — the Terminal tab owns tmux. Same rule for
+   task phase tabs (which today poll every 500ms; live phases stop polling,
    completed phases can keep the one-shot fetch).
 
-9. **Non-goals.** No tmux replacement; no change to `loom daemon logs -f`;
+9. **Streaming handlers clear the server write deadline.** The webui
+   `http.Server` sets `WriteTimeout: 30s`, which kills any response still
+   writing at 30s; every long-lived stream handler must clear it
+   (`ResponseController.SetWriteDeadline(time.Time{})`), as
+   `realtime/handler.go`, the driver watch, terminal, and PR-review
+   streams already do. The log stream does this; the workflows run stream,
+   which had the same latent 30s death, is fixed in passing.
+
+10. **Non-goals.** No tmux replacement; no change to `loom daemon logs -f`;
    no PR-review changes; no writer/frame changes; no new SSE client
    abstraction (the hook is an input to the deferred client-side SSE
    consolidation); no consolidation of the `handlers/misc` duplicate
@@ -155,8 +165,9 @@ merges.
    401 without/with-burned token when a store is configured, 400 on
    traversal-shaped params, connect-then-create for a missing file.
 3. `useLogStream` hook (token fetch → EventSource → streaming decode →
-   manual reconnect at last offset) + AgentLogsTab live mode, unit-tested
-   with the mocked EventSource pattern from `sse.test.ts`.
+   manual reconnect at last offset) + the Agents page "Logs" editor tab
+   (and the orphaned AgentLogsTab's live mode), unit-tested with the
+   mocked EventSource pattern from `sse.test.ts`.
 4. Full-stack proof on the running codex local-mode stack: open a working
    agent's Logs tab and watch lines appear without refresh
    (browser-verified, console clean).
@@ -210,5 +221,7 @@ package.json script). No `byte_size` field (decision 4).
 - Streams authenticate via one-time SSE tokens in auth mode, fail closed
   pre-stream with structured JSON errors, and reconnect with fresh tokens.
 - Traversal-shaped path params are rejected before any file access.
+- A stream survives well past the server's 30s `WriteTimeout` (heartbeats
+  keep arriving on an idle stream).
 - No fsnotify watcher outlives its request.
 - No SSE framing outside `realtime/writer.go` (seam test still green).

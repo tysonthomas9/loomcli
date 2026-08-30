@@ -2,8 +2,10 @@ package log
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
@@ -81,6 +83,10 @@ func (m *Module) handleAgentLogStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer streamer.Close()
+	rc := http.NewResponseController(w)
+	if err := rc.SetWriteDeadline(time.Time{}); err != nil {
+		slog.Error("agent log SSE: failed to disable write deadline", "err", err)
+	}
 
 	_ = streamer.Stream(r.Context(), w, start)
 }

@@ -3,7 +3,7 @@
  *
  * Layout (driven by App.tsx):
  *   [WorkspaceTree — same sidebar as kanban]
- *   [tabbed main panel — Terminal / Info / Git / Diff / Files]
+ *   [tabbed main panel — Terminal / Info / Logs / Git / Diff / Files]
  *   [right column — either AgentWorkPanel OR inline IssueDetailPanel]
  *
  * The tabbed main panel comes from the Aether V3 design (feat/updated-UI);
@@ -52,6 +52,7 @@ import {
   useWorkspaceViewData,
 } from "@/contexts/WorkspaceViewContext";
 import { useAgentStoreInstance } from "@/hooks";
+import { useLogStream } from "@/hooks/terminal/useLogStream";
 import { useLocalSettings, useWorkspaceContext } from "@/hooks/workspace";
 import {
   OPEN_QUEUE_PANEL_MAX_WIDTH,
@@ -88,6 +89,49 @@ const WorkspaceFileBrowser = lazy(() =>
     default: m.WorkspaceFileBrowser,
   })),
 );
+
+interface AgentLiveLogsPaneProps {
+  workspaceId: string;
+  agentName: string | undefined;
+  isActive: boolean;
+}
+
+function AgentLiveLogsPane({
+  workspaceId,
+  agentName,
+  isActive,
+}: AgentLiveLogsPaneProps): JSX.Element {
+  const stream = useLogStream({
+    workspaceId,
+    streamPath: `/agents/${encodeURIComponent(agentName ?? "")}/logs/stream`,
+    enabled: isActive && !!agentName,
+  });
+
+  if (!agentName) {
+    return (
+      <div className={styles.tabFallback}>Select an agent to view logs.</div>
+    );
+  }
+
+  const viewState =
+    stream.state === "connected" && stream.content === ""
+      ? "empty"
+      : stream.state;
+  const stateLabel = viewState === "empty" ? "no logs" : viewState;
+
+  return (
+    <div className={styles.liveLogPane}>
+      <div className={styles.liveLogStatus}>
+        <span data-testid="agent-log-state" data-state={viewState}>
+          {stateLabel}
+        </span>
+      </div>
+      <pre className={styles.liveLogOutput} data-testid="agent-log-content">
+        {stream.content}
+      </pre>
+    </div>
+  );
+}
 
 export function AgentsPage(): JSX.Element {
   return (
@@ -465,6 +509,14 @@ function AgentsPageInner(): JSX.Element {
               </section>
             </div>
           );
+        case "logs":
+          return (
+            <AgentLiveLogsPane
+              workspaceId={workspaceId}
+              agentName={agentName}
+              isActive={isActive}
+            />
+          );
         case "git":
           if (!selected) {
             return (
@@ -535,6 +587,7 @@ function AgentsPageInner(): JSX.Element {
       roleName,
       infoStats,
       statusType,
+      workspaceId,
     ],
   );
 

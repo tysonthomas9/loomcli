@@ -263,3 +263,41 @@ func TestAgentLogStream_ConnectThenCreate(t *testing.T) {
 		t.Fatalf("live chunk = %q, want %q", got, "created-live")
 	}
 }
+
+func TestAgentLogStream_ClearsServerWriteDeadline(t *testing.T) {
+	runtimeDir := t.TempDir()
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
+	logFile, err := GetAgentLogPath(testStreamWorkspace, testStreamAgent)
+	if err != nil {
+		t.Fatalf("GetAgentLogPath() error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(logFile), 0o755); err != nil {
+		t.Fatalf("failed to create agent log directory: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	NewModule(nil, nil).Register(mux)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/workspaces/"+testStreamWorkspace+"/agents/"+testStreamAgent+"/logs/stream",
+		nil,
+	).WithContext(ctx)
+	recorder := &writeDeadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	mux.ServeHTTP(recorder, req)
+
+	if len(recorder.deadlines) != 1 || !recorder.deadlines[0].IsZero() {
+		t.Fatalf("write deadlines = %v, want one zero deadline", recorder.deadlines)
+	}
+}
+
+type writeDeadlineRecorder struct {
+	*httptest.ResponseRecorder
+	deadlines []time.Time
+}
+
+func (w *writeDeadlineRecorder) SetWriteDeadline(deadline time.Time) error {
+	w.deadlines = append(w.deadlines, deadline)
+	return nil
+}
