@@ -22,7 +22,23 @@ describe("AgentEditorGroups", () => {
     expect(
       screen.getByRole("button", { name: "Terminal" }),
     ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Runs" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Files" })).toBeInTheDocument();
+  });
+
+  it("can make runs the initial agent view", () => {
+    render(
+      <AgentEditorGroups
+        resetKey="planner"
+        initialTab="runs"
+        renderPane={(tab) => <div data-testid={`pane-${tab}`}>{tab}</div>}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Runs" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
   });
 
   it("moves the active tab into a right editor group when split is clicked", () => {

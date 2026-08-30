@@ -40,6 +40,15 @@ type SessionService interface {
 	GetSessionScrollback(ctx context.Context, wsID, issueID, recordID string) (*SessionScrollbackResult, error)
 }
 
+// AgentSessionService extends the task-scoped session service with the
+// agent-scoped history used by background-agent detail pages.
+type AgentSessionService interface {
+	SessionService
+	ListAgentSessions(ctx context.Context, wsID, agentName string) ([]SessionListItem, error)
+	GetAgentSessionTranscript(ctx context.Context, wsID, agentName, sessionID string) ([]transcript.Event, error)
+	GetAgentSessionDiff(ctx context.Context, wsID, agentName, sessionID string) (string, error)
+}
+
 // SessionListItem extends a session record with computed UI fields.
 type SessionListItem struct {
 	sessions.SessionRecord

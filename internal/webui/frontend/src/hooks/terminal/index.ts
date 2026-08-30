@@ -23,6 +23,9 @@ export type {
 
 export { useTaskSessions } from "./useTaskSessions";
 export type { UseTaskSessionsResult } from "./useTaskSessions";
+export { useAgentSessions } from "./useAgentSessions";
+export { useAgentSessionTranscript } from "./useAgentSessionTranscript";
+export { useAgentSessionDiff } from "./useAgentSessionDiff";
 
 export {
   useTerminalFont,

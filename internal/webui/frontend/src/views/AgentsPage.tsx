@@ -33,6 +33,7 @@ import { useStore } from "zustand";
 
 import { ErrorBoundary, LoadingSkeleton } from "@/components";
 import { AgentDetailMain } from "@/components/AgentDetailMain/AgentDetailMain";
+import { AgentRunsPanel } from "@/components/IssueDetailPanel";
 import { GitTab } from "@/components/AgentDetailPanel";
 import { AgentServiceDetail } from "@/components/AgentServiceDetail";
 import { AgentWorkPanel } from "@/components/AgentWorkPanel/AgentWorkPanel";
@@ -407,6 +408,14 @@ function AgentsPageInner(): JSX.Element {
   const renderAgentPane = useCallback(
     (tab: AgentEditorTab, isActive: boolean) => {
       switch (tab) {
+        case "runs":
+          return agentName ? (
+            <AgentRunsPanel agentName={agentName} />
+          ) : (
+            <div className={styles.tabFallback}>
+              Select an agent to view runs.
+            </div>
+          );
         case "terminal":
           return (
             <div className={styles.realTabBody}>
@@ -598,6 +607,7 @@ function AgentsPageInner(): JSX.Element {
         ) : (
           <AgentEditorGroups
             resetKey={agentName}
+            initialTab="runs"
             renderPane={renderAgentPane}
           />
         )}

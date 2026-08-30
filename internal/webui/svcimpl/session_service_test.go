@@ -77,6 +77,43 @@ func TestSessionServiceListTaskSessionsUsesControlPlane(t *testing.T) {
 	}
 }
 
+func TestSessionServiceListsAgentRunsAndEnforcesTranscriptOwnership(t *testing.T) {
+	ctx := t.Context()
+	st := memstore.New()
+	body := []byte(`{"seq":1,"role":"assistant","type":"text","text":"planned"}` + "\n")
+	createFinalizedArtifact(t, st, "agent-transcript-1", "planner-session-1", "TASK-1", "", "transcript", "application/x-ndjson", body)
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "planner-session-1",
+		AgentID:      "planner",
+		TaskID:       "TASK-1",
+		Status:       domain.AgentSessionCompleted,
+		Phase:        "planning",
+		Metadata: map[string]string{
+			"backend":        "codex",
+			"transcript_ref": "artifact://agent-transcript-1",
+		},
+	}); err != nil {
+		t.Fatalf("create agent session: %v", err)
+	}
+
+	svc := NewSessionService(st, nil)
+	items, err := svc.ListAgentSessions(ctx, "WS", "planner")
+	if err != nil {
+		t.Fatalf("ListAgentSessions: %v", err)
+	}
+	if len(items) != 1 || items[0].AgentName != "planner" || !items[0].HasTranscript {
+		t.Fatalf("items = %+v", items)
+	}
+	events, err := svc.GetAgentSessionTranscript(ctx, "WS", "planner", "planner-session-1")
+	if err != nil || len(events) != 1 || events[0].Text != "planned" {
+		t.Fatalf("events = %+v, err = %v", events, err)
+	}
+	if _, err := svc.GetAgentSessionTranscript(ctx, "WS", "other-agent", "planner-session-1"); err == nil {
+		t.Fatal("expected agent ownership mismatch to be hidden")
+	}
+}
+
 func TestSessionServiceCloudControlPlaneTranscriptArtifactReadContent(t *testing.T) {
 	ctx := t.Context()
 	st := memstore.New()

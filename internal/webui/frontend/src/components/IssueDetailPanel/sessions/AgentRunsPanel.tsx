@@ -1,0 +1,89 @@
+import { useEffect, useMemo, useState } from "react";
+
+import { useAgentSessions } from "@/hooks/terminal";
+import type { SessionRecord } from "@/types/agent";
+import { sessionTotalTokens } from "@/utils/sessionUsage";
+
+import { SessionDetailView } from "./SessionDetailView";
+import { SessionTimeline, type RunRailSummary } from "./SessionTimeline";
+import styles from "./SessionsTab.module.css";
+
+export function AgentRunsPanel({
+  agentName,
+}: {
+  agentName: string;
+}): JSX.Element {
+  const { sessions, isLoading, error } = useAgentSessions(agentName);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
+    null,
+  );
+
+  useEffect(() => {
+    if (sessions.length === 0) {
+      setSelectedSessionId(null);
+      return;
+    }
+    if (!sessions.some((session) => session.session_id === selectedSessionId)) {
+      setSelectedSessionId(sessions[0]!.session_id);
+    }
+  }, [selectedSessionId, sessions]);
+
+  const selectedSession =
+    sessions.find((session) => session.session_id === selectedSessionId) ??
+    null;
+  const summary = useMemo(() => computeSummary(sessions), [sessions]);
+
+  if (error && sessions.length === 0) {
+    return (
+      <div className={styles.emptyState} role="alert">
+        Failed to load runs: {error.message}
+      </div>
+    );
+  }
+  if (!isLoading && sessions.length === 0) {
+    return (
+      <div className={styles.emptyState} data-testid="agent-runs-empty">
+        No runs recorded for this agent yet
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.outerContainer} data-testid="agent-runs-panel">
+      <div className={styles.container}>
+        <SessionTimeline
+          sessions={sessions}
+          selectedId={selectedSessionId}
+          onSelect={setSelectedSessionId}
+          isLoading={isLoading}
+          summary={summary}
+        />
+        {selectedSession ? (
+          <SessionDetailView agentName={agentName} session={selectedSession} />
+        ) : (
+          <div className={styles.detailEmpty}>Select a run to view details</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function computeSummary(sessions: SessionRecord[]): RunRailSummary {
+  return sessions.reduce<RunRailSummary>(
+    (summary, session) => ({
+      count: summary.count + 1,
+      totalTokens: summary.totalTokens + sessionTotalTokens(session),
+      totalCost: summary.totalCost + (session.estimated_cost_usd ?? 0),
+      activeSessions: summary.activeSessions + (session.is_active ? 1 : 0),
+      failedSessions:
+        summary.failedSessions + (session.status === "failed" ? 1 : 0),
+    }),
+    {
+      count: 0,
+      totalTokens: 0,
+      totalCost: 0,
+      activeSessions: 0,
+      failedSessions: 0,
+    },
+  );
+}

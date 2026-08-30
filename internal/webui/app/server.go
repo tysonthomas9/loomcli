@@ -59,10 +59,10 @@ type Server struct {
 	issueSvc     service.IssueService
 	agentSvc     service.AgentService
 	workspaceSvc service.WorkspaceService
-	termSvc      service.TerminalService // nil if termMgr is nil
-	diffSvc      service.DiffService     // nil if ops.GitOps is nil
-	fileSvc      service.FileService     // nil if ops.FileOps is nil
-	sessSvc      service.SessionService  // always constructed (stores may be nil internally)
+	termSvc      service.TerminalService     // nil if termMgr is nil
+	diffSvc      service.DiffService         // nil if ops.GitOps is nil
+	fileSvc      service.FileService         // nil if ops.FileOps is nil
+	sessSvc      service.AgentSessionService // always constructed (stores may be nil internally)
 
 	// Real-time
 	hub               *appstores.Hub

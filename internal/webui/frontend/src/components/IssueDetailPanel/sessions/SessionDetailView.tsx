@@ -10,7 +10,12 @@
 import { useState } from "react";
 
 import { CodeMirrorEditor } from "@/components/CodeMirrorEditor";
-import { useSessionTranscript, useSessionDiff } from "@/hooks/terminal";
+import {
+  useAgentSessionDiff,
+  useAgentSessionTranscript,
+  useSessionTranscript,
+  useSessionDiff,
+} from "@/hooks/terminal";
 import type { SessionRecord } from "@/types/agent";
 import { formatStatusLabel } from "@/utils/issue";
 import { formatTokens, sessionTotalTokens } from "@/utils/sessionUsage";
@@ -19,7 +24,8 @@ import styles from "./SessionsTab.module.css";
 import { TranscriptWorklog } from "./TranscriptWorklog";
 
 export interface SessionDetailViewProps {
-  taskId: string;
+  taskId?: string;
+  agentName?: string;
   session: SessionRecord;
 }
 
@@ -56,6 +62,7 @@ function runErrorSummary(session: SessionRecord): string | null {
 
 export function SessionDetailView({
   taskId,
+  agentName,
   session,
 }: SessionDetailViewProps): JSX.Element {
   const [innerTab, setInnerTab] = useState<InnerTab>("transcript");
@@ -64,17 +71,38 @@ export function SessionDetailView({
     entries,
     isLoading: transcriptLoading,
     error: transcriptError,
-  } = useSessionTranscript(taskId, session.session_id, session.is_active);
+  } = useSessionTranscript(
+    taskId ?? null,
+    session.session_id,
+    session.is_active,
+  );
+  const agentTranscript = useAgentSessionTranscript(
+    agentName ?? null,
+    session.session_id,
+    session.is_active,
+  );
 
   const {
     diff,
     isLoading: diffLoading,
     error: diffError,
   } = useSessionDiff(
-    taskId,
+    taskId ?? null,
     session.session_id,
     innerTab === "diff" && session.has_diff,
   );
+  const agentDiff = useAgentSessionDiff(
+    agentName ?? null,
+    session.session_id,
+    innerTab === "diff" && session.has_diff,
+  );
+
+  const transcriptState = agentName
+    ? agentTranscript
+    : { entries, isLoading: transcriptLoading, error: transcriptError };
+  const diffState = agentName
+    ? agentDiff
+    : { diff, isLoading: diffLoading, error: diffError };
 
   const totalTokens = sessionTotalTokens(session);
   const runError = runErrorSummary(session);
@@ -206,43 +234,48 @@ export function SessionDetailView({
           className={styles.transcriptContainer}
           data-testid="session-transcript"
         >
-          {transcriptLoading && entries.length === 0 && (
-            <div className={styles.emptyState}>Loading transcript...</div>
-          )}
-          {transcriptError && (
+          {transcriptState.isLoading &&
+            transcriptState.entries.length === 0 && (
+              <div className={styles.emptyState}>Loading transcript...</div>
+            )}
+          {transcriptState.error && (
             <div className={styles.errorText}>
-              Failed to load transcript: {transcriptError.message}
+              Failed to load transcript: {transcriptState.error.message}
             </div>
           )}
-          {!transcriptLoading && !transcriptError && entries.length === 0 && (
-            <div className={styles.emptyState}>No transcript entries</div>
-          )}
+          {!transcriptState.isLoading &&
+            !transcriptState.error &&
+            transcriptState.entries.length === 0 && (
+              <div className={styles.emptyState}>No transcript entries</div>
+            )}
 
-          {entries.length > 0 ? <TranscriptWorklog entries={entries} /> : null}
+          {transcriptState.entries.length > 0 ? (
+            <TranscriptWorklog entries={transcriptState.entries} />
+          ) : null}
         </div>
       )}
 
       {innerTab === "diff" && (
         <div className={styles.diffContainer} data-testid="session-diff">
-          {diffLoading && (
+          {diffState.isLoading && (
             <div className={styles.emptyState}>Loading diff...</div>
           )}
-          {diffError && (
+          {diffState.error && (
             <div className={styles.errorText}>
-              Failed to load diff: {diffError.message}
+              Failed to load diff: {diffState.error.message}
             </div>
           )}
-          {!diffLoading && !diffError && diff && (
+          {!diffState.isLoading && !diffState.error && diffState.diff && (
             <div className={styles.diffCodeMirror}>
               <CodeMirrorEditor
-                value={diff}
+                value={diffState.diff}
                 language="diff"
                 readOnly
                 hideLineNumbers
               />
             </div>
           )}
-          {!diffLoading && !diffError && !diff && (
+          {!diffState.isLoading && !diffState.error && !diffState.diff && (
             <div className={styles.diffEmpty}>No diff available</div>
           )}
         </div>

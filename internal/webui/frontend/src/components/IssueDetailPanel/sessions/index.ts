@@ -17,3 +17,4 @@ export { SessionTimelineRow } from "./SessionTimelineRow";
 export type { SessionTimelineRowProps } from "./SessionTimelineRow";
 
 export { SessionHistorySection } from "./SessionHistorySection";
+export { AgentRunsPanel } from "./AgentRunsPanel";

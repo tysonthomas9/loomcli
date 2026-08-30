@@ -23,6 +23,9 @@ type SessionModule struct {
 	getSessionHandler           http.HandlerFunc
 	getSessionTranscriptHandler http.HandlerFunc
 	getSessionDiffHandler       http.HandlerFunc
+	listAgentSessionsHandler    http.HandlerFunc
+	getAgentTranscriptHandler   http.HandlerFunc
+	getAgentDiffHandler         http.HandlerFunc
 }
 
 // SessionModuleOpts holds the injected task-scoped session handlers.
@@ -31,6 +34,9 @@ type SessionModuleOpts struct {
 	GetSession           http.HandlerFunc
 	GetSessionTranscript http.HandlerFunc
 	GetSessionDiff       http.HandlerFunc
+	ListAgentSessions    http.HandlerFunc
+	GetAgentTranscript   http.HandlerFunc
+	GetAgentDiff         http.HandlerFunc
 }
 
 // NewSessionModule returns a SessionModule that will register routes using
@@ -42,6 +48,9 @@ func NewSessionModule(sessSvc service.SessionService, opts SessionModuleOpts) *S
 		getSessionHandler:           opts.GetSession,
 		getSessionTranscriptHandler: opts.GetSessionTranscript,
 		getSessionDiffHandler:       opts.GetSessionDiff,
+		listAgentSessionsHandler:    opts.ListAgentSessions,
+		getAgentTranscriptHandler:   opts.GetAgentTranscript,
+		getAgentDiffHandler:         opts.GetAgentDiff,
 	}
 }
 
@@ -63,5 +72,14 @@ func (m *SessionModule) Register(mux *http.ServeMux) {
 	}
 	if m.getSessionDiffHandler != nil {
 		mux.HandleFunc("GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/diff", m.getSessionDiffHandler)
+	}
+	if m.listAgentSessionsHandler != nil {
+		mux.HandleFunc("GET /api/workspaces/{ws}/agents/{agentName}/sessions", m.listAgentSessionsHandler)
+	}
+	if m.getAgentTranscriptHandler != nil {
+		mux.HandleFunc("GET /api/workspaces/{ws}/agents/{agentName}/sessions/{sessionId}/transcript", m.getAgentTranscriptHandler)
+	}
+	if m.getAgentDiffHandler != nil {
+		mux.HandleFunc("GET /api/workspaces/{ws}/agents/{agentName}/sessions/{sessionId}/diff", m.getAgentDiffHandler)
 	}
 }
