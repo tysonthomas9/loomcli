@@ -306,6 +306,7 @@ func (s *issueServiceImpl) CloseIssue(ctx context.Context, params CloseIssuePara
 	defer cancel()
 
 	result, err := be.Close(ctx, params.IssueID, backend.CloseParams{
+		Actor:       params.Actor,
 		Reason:      params.Reason,
 		Session:     params.Session,
 		SuggestNext: params.SuggestNext,
@@ -482,6 +483,7 @@ func (s *issueServiceImpl) AddComment(ctx context.Context, params AddCommentPara
 
 	data, err := be.AddComment(ctx, backend.CommentAddParams{
 		IssueID: params.IssueID,
+		Actor:   params.Actor,
 		Author:  author,
 		Text:    text,
 	})
@@ -518,6 +520,7 @@ func (s *issueServiceImpl) AddDependency(ctx context.Context, params AddDependen
 
 	if err := be.AddDependency(ctx, backend.DepAddParams{
 		FromID:  params.IssueID,
+		Actor:   params.Actor,
 		ToID:    params.DependsOnID,
 		DepType: depType,
 	}); err != nil {
@@ -538,6 +541,7 @@ func (s *issueServiceImpl) RemoveDependency(ctx context.Context, params RemoveDe
 
 	if err := be.RemoveDependency(ctx, backend.DepRemoveParams{
 		FromID: params.IssueID,
+		Actor:  params.Actor,
 		ToID:   params.DepID,
 	}); err != nil {
 		slog.Error("backend error in RemoveDependency", "err", err)
@@ -602,7 +606,7 @@ func (s *issueServiceImpl) ReopenIssue(ctx context.Context, params ReopenIssuePa
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	if err := be.Reopen(ctx, params.IssueID, backend.ReopenParams{Reason: params.Reason}); err != nil {
+	if err := be.Reopen(ctx, params.IssueID, backend.ReopenParams{Actor: params.Actor, Reason: params.Reason}); err != nil {
 		slog.Error("backend error in ReopenIssue", "issue_id", params.IssueID, "err", err)
 		return translateBackendError(err)
 	}
