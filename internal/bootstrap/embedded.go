@@ -337,6 +337,7 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 	}()
 
 	snapshotPath := filepath.Join(fleetDir, "redis-snapshot.json")
+	historyPath := filepath.Join(fleetDir, "history.sqlite")
 	redisCfg, err := desiredEmbeddedRedisConfig(dataDir)
 	if err != nil {
 		return nil, fmt.Errorf("embedded: load local settings: %w", err)
@@ -370,11 +371,16 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 	//   --auth-dev-mode                     accept X-Actor as identity (no JWT setup)
 	//   --authz-enabled=false               single-user mode skips RBAC
 	//   --rpc-enabled=false                 embedded mode uses HTTP only; avoid binding /var/run
+	//   --archive-*                         keep complete issue history in an owner-private,
+	//                                       embedded SQLite journal next to the Redis snapshot
 	cmd := exec.CommandContext(ctx, binPath, //nolint:gosec // binPath is from controlled discovery
 		"--redis-durability-profile=managed",
 		"--auth-dev-mode",
 		"--authz-enabled=false",
 		"--rpc-enabled=false",
+		"--archive-enabled=true",
+		"--archive-backend=sqlite",
+		"--archive-sqlite-path="+historyPath,
 	)
 	cmd.Env = append(os.Environ(),
 		"FLEET_SERVER_ADDR="+httpAddr,

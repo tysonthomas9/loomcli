@@ -71,6 +71,11 @@ available, builds `src-tauri/binaries/fleet-db-<target-triple>`. The
 resources, then sets `FLEET_DB_BIN` and `LOOM_FRONTEND_DIR` for the local
 `loom serve` process.
 
+The embedded FleetDB runs Redis with a required SQLite history journal at
+`<data-dir>/fleet-db/history.sqlite`. The journal is bundled into the existing
+FleetDB process—Desktop does not ship or supervise a PostgreSQL server—and its
+file is restricted to the owner (`0600`).
+
 ## Current Slice
 
 The initial desktop shell can:

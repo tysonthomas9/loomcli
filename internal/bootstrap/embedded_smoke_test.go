@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -29,6 +30,14 @@ func TestEmbeddedFleetDBPersistenceSmoke(t *testing.T) {
 	emb, err := bootstrap.StartEmbedded(ctx, dataDir, slog.Default())
 	if err != nil {
 		t.Fatalf("StartEmbedded first: %v", err)
+	}
+	historyPath := filepath.Join(dataDir, "fleet-db", "history.sqlite")
+	info, err := os.Stat(historyPath)
+	if err != nil {
+		t.Fatalf("embedded history journal is unavailable at %s: %v", historyPath, err)
+	}
+	if got := info.Mode().Perm(); got != 0600 {
+		t.Fatalf("embedded history journal mode = %04o, want 0600", got)
 	}
 	client, err := fleetdb.New(fleetdb.Config{BaseURL: emb.URL(), Actor: "embedded-smoke"})
 	if err != nil {
