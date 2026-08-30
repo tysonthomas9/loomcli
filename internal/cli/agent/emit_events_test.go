@@ -48,6 +48,12 @@ func TestEmitTaskLifecycleEvents(t *testing.T) {
 
 	worktree := t.TempDir()
 	writeLockFile(t, worktree, "T-100")
+	completedTask := NewMockIssueBackend()
+	completedTask.GetResult = &backend.IssueDetailData{
+		IssueData: backend.IssueData{ID: "T-100", Status: "closed", Assignee: "plan-agent"},
+	}
+	setDefaultIssueBackend(completedTask)
+	t.Cleanup(resetDefaultIssueBackend)
 
 	// 1. TaskClaimed (the daemon-mode emit path; LOOM_ASSIGNED_TASK_ID
 	// would be the source in production).
@@ -162,12 +168,19 @@ func TestRunAgentDaemonEmitsTaskLifecycleEvents(t *testing.T) {
 			cli.TestingResetAgentEventBus()
 			t.Cleanup(cli.TestingResetAgentEventBus)
 			resetBackendState(t)
+			completedTask := NewMockIssueBackend()
+			completedTask.GetResult = &backend.IssueDetailData{
+				IssueData: backend.IssueData{ID: "loomcli-02", Status: "closed", Assignee: "reviewer-1"},
+			}
+			setDefaultIssueBackend(completedTask)
+			t.Cleanup(resetDefaultIssueBackend)
+
 			backend := &mockBackend{name: "custom-role-lifecycle"}
 			backend.nonInteractiveFunc = func(string, string, string, <-chan struct{}, *usage.Collector) error {
 				// Snapshot the JSONL stream at the actual invocation boundary. This
-				// must already contain task.claimed; flushing/resetting here lets the
-				// terminal event create a fresh bus for the same events directory.
-				cli.TestingResetAgentEventBus()
+				// must already contain task.claimed. Do not reset or close the bus:
+				// this asserts that the event itself was made durable before the
+				// backend began its potentially long-running invocation.
 				observed := readEmittedEvents(t, eventsDir)
 				if len(observed) != 1 || observed[0].Type != events.TaskClaimed {
 					t.Fatalf("events at invocation = %+v, want one %s", observed, events.TaskClaimed)
@@ -241,6 +254,64 @@ func TestRunAgentDaemonEmitsTaskLifecycleEvents(t *testing.T) {
 				}
 			default:
 				t.Fatalf("terminal data type = %T, want completed or failed data", terminalData)
+			}
+		})
+	}
+}
+
+func TestEmitTaskLifecycleResult_EmitsCompletedOnlyAfterClaimReleased(t *testing.T) {
+	tests := []struct {
+		name            string
+		status          string
+		wantCompleted   int
+		flushBeforeRead bool
+	}{
+		{
+			name:            "claim still held",
+			status:          "in_progress",
+			wantCompleted:   0,
+			flushBeforeRead: true,
+		},
+		{
+			name:          "claim released",
+			status:        "closed",
+			wantCompleted: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			eventsDir := t.TempDir()
+			t.Setenv("LOOM_EVENTS_DIR", eventsDir)
+			cli.TestingResetAgentEventBus()
+			t.Cleanup(cli.TestingResetAgentEventBus)
+
+			worktree := t.TempDir()
+			writeLockFile(t, worktree, "loomcli-02")
+			issueBackend := NewMockIssueBackend()
+			issueBackend.GetResult = &backend.IssueDetailData{
+				IssueData: backend.IssueData{
+					ID:       "loomcli-02",
+					Status:   tt.status,
+					Assignee: "plan-agent",
+				},
+			}
+			setDefaultIssueBackend(issueBackend)
+			t.Cleanup(resetDefaultIssueBackend)
+
+			emitTaskLifecycleResult("plan-agent", worktree, time.Now().Add(-time.Second), nil)
+			if tt.flushBeforeRead {
+				cli.TestingResetAgentEventBus()
+			}
+
+			var completed int
+			for _, evt := range readEmittedEvents(t, eventsDir) {
+				if evt.Type == events.TaskCompleted {
+					completed++
+				}
+			}
+			if completed != tt.wantCompleted {
+				t.Fatalf("TaskCompleted count = %d, want %d", completed, tt.wantCompleted)
 			}
 		})
 	}
