@@ -403,6 +403,10 @@ func TestCreateAgentRuntimeProvider(t *testing.T) {
 		{name: "ci", provider: domain.RuntimeProviderCI},
 		{name: "other", provider: domain.RuntimeProviderOther},
 		{name: "invalid", provider: domain.RuntimeProvider("unknown"), wantErr: true},
+		// exe exists in the enum so the reaper can sweep its orphans. A caller
+		// must not be able to provision on it. See
+		// domain.ClientSelectableRuntimeProvider.
+		{name: "exe is not client-selectable", provider: domain.RuntimeProviderExe, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

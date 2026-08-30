@@ -632,18 +632,15 @@ func validateAgentCreateInput(in service.AgentCreateInput) error {
 	default:
 		return service.ErrValidation("invalid role kind")
 	}
-	switch in.RuntimeProvider {
-	case "",
-		domain.RuntimeProviderLocal,
-		domain.RuntimeProviderE2B,
-		domain.RuntimeProviderKubernetes,
-		domain.RuntimeProviderDaytona,
-		domain.RuntimeProviderCI,
-		domain.RuntimeProviderOther:
-		return nil
-	default:
+	// Empty means "unset"; ResolveRuntimeProvider maps that to local. Anything
+	// else must clear the client-selectable boundary -- this is the only thing
+	// standing between a caller-supplied runtime_provider and the placement
+	// broker, so it deliberately lives in domain rather than being inlined here
+	// where a future provider would get added to it as routine enum upkeep.
+	if in.RuntimeProvider != "" && !domain.ClientSelectableRuntimeProvider(in.RuntimeProvider) {
 		return service.ErrValidation("invalid runtime provider")
 	}
+	return nil
 }
 
 func (s *agentServiceImpl) SetTargetBranch(_ context.Context, wsID, agentName, branch string) error {

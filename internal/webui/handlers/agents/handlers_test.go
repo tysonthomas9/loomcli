@@ -440,3 +440,68 @@ func (f *fakeLeadProvisioner) ProvisionForAgent(_ context.Context, ws, name stri
 	f.calls <- provisionCall{ws: ws, name: name}
 	return f.err
 }
+
+// TestHandleCreateRejectsNonSelectableRuntimeProviderFromRawJSON exercises the
+// boundary through the ACTUAL request path, because that is where the earlier
+// reasoning went wrong.
+//
+// It is tempting to believe a provider is unreachable because it is absent from
+// the OpenAPI schema and the UI. Neither enforces anything at runtime: this
+// handler decodes the request body into a hand-written Go struct, and
+// encoding/json ignores unknown fields rather than rejecting them, so the only
+// thing that can refuse "exe" is server-side validation. A curl command is the
+// whole threat model.
+func TestHandleCreateRejectsNonSelectableRuntimeProviderFromRawJSON(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key: "TEST2", Name: "TEST2", DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	agentSvc := svcimpl.NewAgentService(nil, nil, nil, st)
+	provisioner := &fakeLeadProvisioner{calls: make(chan provisionCall, 4)}
+
+	for _, tc := range []struct {
+		name     string
+		body     string
+		wantCode int
+	}{
+		{
+			name:     "exe is refused",
+			body:     `{"name":"lead-exe","role_name":"lead","runtime_provider":"exe"}`,
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "unknown provider is refused",
+			body:     `{"name":"lead-bogus","role_name":"lead","runtime_provider":"fly"}`,
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "daytona is still accepted",
+			body:     `{"name":"lead-daytona","role_name":"lead","runtime_provider":"daytona"}`,
+			wantCode: http.StatusCreated,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST2/agents",
+				bytes.NewBufferString(tc.body))
+			req = req.WithContext(middleware.WithWorkspace(req.Context(), "TEST2"))
+			rr := httptest.NewRecorder()
+
+			HandleCreate(agentSvc, nil, provisioner).ServeHTTP(rr, req)
+
+			if rr.Code != tc.wantCode {
+				t.Fatalf("status = %d body = %s, want %d", rr.Code, rr.Body.String(), tc.wantCode)
+			}
+		})
+	}
+
+	// The refused agents must not have been persisted -- a rejected create that
+	// still writes the row is the failure mode that matters.
+	for _, name := range []string{"lead-exe", "lead-bogus"} {
+		if _, err := st.Agents().Get(ctx, "TEST2", name); err == nil {
+			t.Fatalf("agent %q was persisted despite a rejected create", name)
+		}
+	}
+}

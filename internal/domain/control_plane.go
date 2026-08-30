@@ -25,9 +25,11 @@ const (
 	RuntimeProviderE2B        RuntimeProvider = "e2b"
 	RuntimeProviderKubernetes RuntimeProvider = "kubernetes"
 	RuntimeProviderDaytona    RuntimeProvider = "daytona"
-	// RuntimeProviderExe is registered in the Go enum only. It is deliberately
-	// absent from the OpenAPI schema and the UI: nothing can select it until
-	// the exe vertical lands behind its capability gate.
+	// RuntimeProviderExe is registered in the Go enum only. What keeps a client
+	// from selecting it is ClientSelectableRuntimeProvider below -- NOT its
+	// absence from the OpenAPI schema, which enforces nothing: the agents
+	// handler decodes request JSON into a hand-written Go struct, and the
+	// decoder ignores unknown fields rather than rejecting them.
 	RuntimeProviderExe   RuntimeProvider = "exe"
 	RuntimeProviderCI    RuntimeProvider = "ci"
 	RuntimeProviderOther RuntimeProvider = "other"
@@ -112,6 +114,43 @@ type NodePlacement struct {
 	DeleteAttempts      int       `json:"delete_attempts,omitempty"`
 	LastDeleteError     string    `json:"last_delete_error,omitempty"`
 	NextDeleteAt        time.Time `json:"next_delete_at,omitempty"`
+}
+
+// ClientSelectableRuntimeProvider reports whether a CALLER may ask for this
+// runtime provider when creating an agent.
+//
+// This is a SECURITY BOUNDARY, not a mirror of the RuntimeProvider enum, and
+// the distinction is the whole point. A client-supplied runtime_provider flows
+// POST /api/agents -> AgentCreateInput -> store.AgentCreate -> agent record ->
+// ResolveRuntimeProvider -> the placement broker, so whatever is allowed here
+// is what a caller can make the server provision on.
+//
+// Nothing upstream constrains it: the OpenAPI schema is not consulted at
+// runtime (the handler decodes into a hand-written struct, and encoding/json
+// ignores unknown fields), and the UI not offering a value stops nobody
+// holding a curl command.
+//
+// So adding a provider to the enum must NOT add it here. A provider is listed
+// only once running caller-chosen workloads on it is a reviewed decision --
+// which for a sandbox provider means its credential handling, egress policy
+// and quota accounting have all been signed off. RuntimeProviderExe is
+// deliberately absent: it is registered so the reaper can sweep its orphans,
+// which is the opposite of letting callers create them.
+func ClientSelectableRuntimeProvider(p RuntimeProvider) bool {
+	switch p {
+	case RuntimeProviderLocal,
+		RuntimeProviderE2B,
+		RuntimeProviderKubernetes,
+		RuntimeProviderDaytona,
+		RuntimeProviderCI,
+		RuntimeProviderOther:
+		return true
+	default:
+		// Fail closed: the empty value is handled by the caller (it means
+		// "unset", which ResolveRuntimeProvider maps to local), and every
+		// unknown or not-yet-approved provider lands here.
+		return false
+	}
 }
 
 func ResolveRuntimeProvider(agent *Agent, profile *DaemonProfile) RuntimeProvider {
