@@ -600,3 +600,9 @@ func providerSandboxHasLabels(sandbox ProviderSandbox, labels map[string]string)
 	}
 	return true
 }
+
+func (f *fakeProvider) allCallsSnapshot() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.allCalls...)
+}

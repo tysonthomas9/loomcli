@@ -161,7 +161,13 @@ type ProvisionResult struct {
 type ReleaseFence struct {
 	Generation int64
 	SandboxID  string
-	Force      bool
+	// RuntimeProvider fences the release to the provider the caller believes
+	// owns the sandbox. A sandbox id is unique only WITHIN a provider, so
+	// SandboxID alone is not an identity -- fencing on it while the placement
+	// has since moved to another provider would confirm a match that means
+	// nothing. Empty skips the check, matching the other fields.
+	RuntimeProvider domain.RuntimeProvider
+	Force           bool
 }
 
 // ListResult contains placement records plus summed live reservations.
@@ -318,6 +324,18 @@ func (b *Broker) Provision(ctx context.Context, req ProvisionRequest) (*Provisio
 
 // provisionLive resumes a live placement, first draining a releasing row.
 func (b *Broker) provisionLive(ctx context.Context, req ProvisionRequest, live *domain.Node) (*ProvisionResult, bool, error) {
+	// Refuse to resume a live placement under a DIFFERENT provider than the
+	// request asked for. Every provider call routes by the node's stamped
+	// provider, so resuming here would have quietly succeeded -- returning a
+	// result that says the lead is running while it runs on the other
+	// platform entirely. The caller must release the live placement first;
+	// silently honoring the old provider makes a provider change look applied
+	// when nothing moved.
+	if live.RuntimeProvider != req.RuntimeProvider {
+		return nil, false, fmt.Errorf(
+			"agent %q has a live placement on runtime provider %q; cannot provision on %q until it is released: %w",
+			req.AgentName, live.RuntimeProvider, req.RuntimeProvider, domain.ErrConflict)
+	}
 	if live.Placement.State == domain.PlacementStateReleasing {
 		if _, err := b.releaseLocked(ctx, live.WorkspaceKey, live.NodeID, ReleaseFence{
 			Generation: live.Placement.Generation,

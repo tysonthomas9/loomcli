@@ -63,6 +63,11 @@ func validateReleaseFence(node *domain.Node, fence ReleaseFence) error {
 	if fence.SandboxID != "" && strings.TrimSpace(node.Placement.SandboxID) != fence.SandboxID {
 		return fmt.Errorf("placement %q sandbox %q does not match fence sandbox %q: %w", node.NodeID, strings.TrimSpace(node.Placement.SandboxID), fence.SandboxID, domain.ErrConflict)
 	}
+	// Checked LAST and independently of SandboxID: a sandbox id matching under
+	// the wrong provider is a coincidence, not a confirmation.
+	if fence.RuntimeProvider != "" && node.RuntimeProvider != fence.RuntimeProvider {
+		return fmt.Errorf("placement %q runtime provider %q does not match fence provider %q: %w", node.NodeID, node.RuntimeProvider, fence.RuntimeProvider, domain.ErrConflict)
+	}
 	return nil
 }
 
