@@ -6,10 +6,10 @@
 
 import { useMemo } from "react";
 
-import { CodeMirrorEditor } from "@/components/CodeMirrorEditor";
 import { useSessionDiff, useTaskSessions } from "@/hooks/terminal";
 
 import styles from "./SessionsTab.module.css";
+import { SessionDiffViewer } from "./SessionDiffViewer";
 
 export interface TaskSessionDiffPaneProps {
   taskId: string;
@@ -79,14 +79,7 @@ export function TaskSessionDiffPane({
             {session.backend ? ` · ${session.backend}` : ""}
           </div>
         ) : null}
-        <div className={styles.diffCodeMirror}>
-          <CodeMirrorEditor
-            value={diff}
-            language="diff"
-            readOnly
-            hideLineNumbers
-          />
-        </div>
+        <SessionDiffViewer diff={diff} />
       </div>
     );
   }

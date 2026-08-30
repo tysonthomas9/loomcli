@@ -156,6 +156,15 @@ describe("CreateAgentModal: default prop seeding", () => {
       screen.queryByTestId("create-agent-interactive-builtin"),
     ).not.toBeInTheDocument();
   });
+
+  it("offers scheduled agents through the unified New Agent dialog", () => {
+    const onSelectScheduledAgent = vi.fn();
+    renderModal({ onSelectScheduledAgent });
+
+    fireEvent.click(screen.getByTestId("create-agent-template-scheduled"));
+
+    expect(onSelectScheduledAgent).toHaveBeenCalledOnce();
+  });
 });
 
 // ---------- wasOpenRef: don't reset on re-render ----------

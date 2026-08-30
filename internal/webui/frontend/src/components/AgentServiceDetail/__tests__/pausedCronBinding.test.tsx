@@ -109,7 +109,7 @@ describe("a cron binding disabled out-of-band", () => {
   // B9: the label must name the flag that is actually holding the schedule.
   it("reports the schedule as paused rather than merely unscheduled", () => {
     render(<AgentServiceDetail workspaceId="WS" service={pausedByBinding} />);
-    const nextFire = screen.getByText("Next fire").nextElementSibling;
+    const nextFire = screen.getByText("Next run").nextElementSibling;
     expect(nextFire).toHaveTextContent("Paused");
     expect(nextFire).not.toHaveTextContent("Not scheduled");
   });
@@ -120,12 +120,13 @@ describe("a cron binding disabled out-of-band", () => {
     render(<AgentServiceDetail workspaceId="WS" service={pausedByBinding} />);
     expect(
       screen.getByTestId("binding-updated-by-binding-cron-scout-weekly"),
-    ).toHaveTextContent("Last changed by alice@example.com");
+    ).toHaveTextContent("Schedule last changed by alice@example.com");
   });
 
   // B11: the operator must be able to undo it from the panel.
   it("offers a control that re-enables the binding", async () => {
     render(<AgentServiceDetail workspaceId="WS" service={pausedByBinding} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Settings" }));
     fireEvent.click(screen.getByTestId("agent-service-toggle-schedule"));
     await waitFor(() => {
       expect(mocks.patchAgentService).toHaveBeenCalledWith("scout", {

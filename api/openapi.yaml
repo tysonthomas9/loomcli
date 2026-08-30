@@ -1319,6 +1319,102 @@ paths:
           description: Record not found
 
   # ── Sessions (Task-Scoped Audit Trail) ──────────────────────────────────
+  /api/workspaces/{ws}/agents/{agentName}/sessions:
+    get:
+      operationId: listAgentSessions
+      tags: [sessions]
+      summary: List sessions for a background agent
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: agentName
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Agent session list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      agent_name:
+                        type: string
+                      sessions:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/SessionResponse"
+
+  /api/workspaces/{ws}/agents/{agentName}/sessions/{sessionId}/transcript:
+    get:
+      operationId: getAgentSessionTranscript
+      tags: [sessions]
+      summary: Get a background agent session transcript
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: agentName
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Transcript
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      session_id:
+                        type: string
+                      entries:
+                        type: array
+                        items:
+                          type: object
+
+  /api/workspaces/{ws}/agents/{agentName}/sessions/{sessionId}/diff:
+    get:
+      operationId: getAgentSessionDiff
+      tags: [sessions]
+      summary: Get a background agent session diff
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: agentName
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session diff
+          content:
+            text/plain:
+              schema:
+                type: string
+
   /api/workspaces/{ws}/tasks/{taskId}/sessions:
     get:
       operationId: listTaskSessions

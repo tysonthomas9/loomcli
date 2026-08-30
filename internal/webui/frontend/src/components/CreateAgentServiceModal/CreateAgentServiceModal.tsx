@@ -121,6 +121,7 @@ export function CreateAgentServiceModal({
       onClose={onClose}
       overlayTestId="create-agent-service-overlay"
       closeTestId="create-agent-service-close"
+      dialogClassName={aetherModalStyles.dialogWide}
       footer={
         <>
           <button

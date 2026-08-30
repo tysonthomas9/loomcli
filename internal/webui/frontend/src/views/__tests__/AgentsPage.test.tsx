@@ -254,6 +254,37 @@ describe("AgentsPage", () => {
     expect(toggle.getAttribute("aria-label")).toBe("Split editor right");
   });
 
+  it("opens interactive lead agents on Terminal without a Runs tab", async () => {
+    render(<AgentsPage />);
+
+    expect(
+      await screen.findByRole("button", { name: "Terminal" }),
+    ).toHaveAttribute("aria-current", "page");
+    expect(
+      screen.queryByRole("button", { name: "Runs" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps Runs as the initial tab for worker agents", async () => {
+    mocks.routeAgentName = "coder-1";
+    mocks.agents = [
+      {
+        name: "coder-1",
+        role: "task",
+        repo: "loomcli",
+        status: "ready",
+        branch: "agent/coder-1",
+      },
+    ];
+
+    render(<AgentsPage />);
+
+    expect(await screen.findByRole("button", { name: "Runs" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  });
+
   it("shows the selected roster agent's real role in the prompt card", async () => {
     mocks.agents = [
       {

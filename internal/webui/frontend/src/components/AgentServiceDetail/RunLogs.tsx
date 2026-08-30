@@ -6,7 +6,8 @@ import type {
   TaskRunDTO,
   TaskRunStatus,
 } from "@/api/agentServices";
-import { getIssue } from "@/api/issues";
+import { TranscriptWorklog } from "@/components/IssueDetailPanel";
+import { getIssue } from "@/hooks/api";
 import { useIssueStoreInstance } from "@/hooks/common/useStoreContext";
 import {
   useDriverRunLog,
@@ -17,7 +18,6 @@ import { ApiError } from "@/types/common";
 import { formatStatusLabel } from "@/utils/issue";
 
 import styles from "./AgentServiceDetail.module.css";
-import { TranscriptRows } from "./TranscriptRows";
 
 interface TaskLogsSectionProps {
   workspaceId: string;
@@ -206,7 +206,7 @@ function TaskLogRow({
                     Transcript unavailable: {transcriptError.message}
                   </p>
                 ) : entries.length > 0 ? (
-                  <TranscriptRows entries={entries} />
+                  <TranscriptWorklog entries={entries} />
                 ) : transcriptInitialized ? (
                   <p
                     className={styles.emptyText}
@@ -261,13 +261,20 @@ export function TaskLogsSection({
 }: TaskLogsSectionProps): JSX.Element {
   return (
     <section className={styles.taskLogsSection} data-testid="task-logs-section">
-      <h3>Task logs</h3>
+      <div className={styles.sectionHeadingRow}>
+        <h3>Run steps</h3>
+        {initialized && !error && tasks.length > 0 ? (
+          <span className={styles.stepCount}>
+            {tasks.length} {tasks.length === 1 ? "step" : "steps"}
+          </span>
+        ) : null}
+      </div>
       {error ? (
         <p className={styles.errorText} role="alert">
-          Task logs unavailable: {error.message}
+          Run steps unavailable: {error.message}
         </p>
       ) : loading && !initialized ? (
-        <p className={styles.emptyText}>Loading task logs…</p>
+        <p className={styles.emptyText}>Loading run steps…</p>
       ) : tasks.length === 0 ? (
         <p className={styles.emptyText}>No task runs were recorded.</p>
       ) : (

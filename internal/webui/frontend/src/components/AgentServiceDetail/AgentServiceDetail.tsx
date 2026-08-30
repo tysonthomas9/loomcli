@@ -6,7 +6,6 @@ import type {
   DriverRunStatus,
   RunEventDTO,
 } from "@/api/agentServices";
-import { MarkdownRenderer } from "@/components/IssueDetailPanel";
 import { RolePromptCard } from "@/components/RolePromptCard";
 import {
   useAgentServiceJournal,
@@ -20,12 +19,12 @@ import {
   agentServiceHealthLabel,
   agentServiceSchedulePaused,
   bindingCadenceLabel,
-  firstEnabledCronBinding,
   formatFireTime,
 } from "@/utils/bindingDisplay";
 import { formatStatusLabel } from "@/utils/issue";
 
 import styles from "./AgentServiceDetail.module.css";
+import { JournalHistory } from "./JournalHistory";
 import { HarnessLog, TaskLogsSection } from "./RunLogs";
 import { AgentServiceSettings } from "./AgentServiceSettings";
 
@@ -42,6 +41,12 @@ function behaviorLabel(service: AgentServiceDTO): string {
   }
   if (service.behavior.roleName?.trim()) return "Prompt autonomous agent";
   return "Autonomous agent";
+}
+
+function serviceSubtitle(service: AgentServiceDTO): string {
+  const label = behaviorLabel(service);
+  const displayName = service.name.trim() || service.id;
+  return displayName === service.id ? label : `${label} · ${service.id}`;
 }
 
 function runTimestamp(run: DriverRunDTO): string {
@@ -161,9 +166,9 @@ export function AgentServiceDetail({
     notFound,
     refresh: refreshRuns,
   } = useAgentServiceRuns(workspaceId, service.id);
-  const [activeTab, setActiveTab] = useState<"overview" | "journal">(
-    "overview",
-  );
+  const [activeTab, setActiveTab] = useState<
+    "overview" | "settings" | "journal"
+  >("overview");
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const [liveLogRefreshTick, setLiveLogRefreshTick] = useState(0);
   const previousExpandedRunRef = useRef<{
@@ -194,7 +199,9 @@ export function AgentServiceDetail({
   });
   const events = oldestFirst(unsortedEvents);
   const nextFire = formatFireTime(service.nextFireAt);
-  const nextFireBinding = firstEnabledCronBinding(service);
+  const cronBinding = service.bindings.find(
+    (binding) => binding.sourceKind === "cron",
+  );
   const schedulePaused = agentServiceSchedulePaused(service);
   const healthLabel = agentServiceHealthLabel(service);
   const expandedRun = expandedRunId
@@ -256,9 +263,9 @@ export function AgentServiceDetail({
     <div className={styles.detail} data-testid="agent-service-detail">
       <header className={styles.header}>
         <div>
-          <p className={styles.eyebrow}>Autonomous</p>
+          <p className={styles.eyebrow}>Background agent</p>
           <h1 className={styles.name}>{service.name.trim() || service.id}</h1>
-          <p className={styles.subtitle}>{behaviorLabel(service)}</p>
+          <p className={styles.subtitle}>{serviceSubtitle(service)}</p>
         </div>
         <span
           className={styles.healthPill}
@@ -280,6 +287,17 @@ export function AgentServiceDetail({
           onClick={() => setActiveTab("overview")}
         >
           Overview
+        </button>
+        <button
+          type="button"
+          role="tab"
+          id="agent-service-settings-tab"
+          aria-controls="agent-service-settings-panel"
+          aria-selected={activeTab === "settings"}
+          className={styles.tab}
+          onClick={() => setActiveTab("settings")}
+        >
+          Settings
         </button>
         <button
           type="button"
@@ -316,107 +334,43 @@ export function AgentServiceDetail({
             </section>
           ) : null}
 
-          {service.behavior.scripted ? (
-            <AgentServiceSettings
-              workspaceId={workspaceId}
-              service={service}
-              onChange={setService}
-              {...(onRemoved ? { onRemoved } : {})}
-            />
-          ) : null}
-
-          <section className={styles.card}>
-            <h2 className={styles.cardTitle}>Record</h2>
-            <dl className={styles.definitionGrid}>
+          <section className={styles.card} aria-label="Run summary">
+            <dl className={styles.summaryGrid}>
               <div>
-                <dt>ID</dt>
-                <dd>{service.id}</dd>
+                <dt>Schedule</dt>
+                <dd>
+                  {cronBinding ? bindingCadenceLabel(cronBinding) : "Manual"}
+                </dd>
               </div>
               <div>
-                <dt>Trigger kind</dt>
-                <dd>{formatStatusLabel(service.triggerKind)}</dd>
-              </div>
-              <div>
-                <dt>Desired state</dt>
-                <dd>{service.enabled ? "Enabled" : "Disabled"}</dd>
+                <dt>Next run</dt>
+                <dd>
+                  {schedulePaused ? "Paused" : nextFire || "Not scheduled"}
+                </dd>
               </div>
               <div>
                 <dt>Last run</dt>
                 <dd>
                   {service.lastRunStatus
                     ? formatStatusLabel(service.lastRunStatus)
-                    : "No runs"}
+                    : "No runs yet"}
                 </dd>
               </div>
-              <div>
-                <dt>Consecutive failures</dt>
-                <dd>{service.consecutiveFailures}</dd>
-              </div>
-              <div>
-                <dt>Next fire</dt>
-                <dd>
-                  {schedulePaused ? "Paused" : nextFire || "Not scheduled"}
-                </dd>
-              </div>
-              {service.behavior.roleName ? (
+              {service.consecutiveFailures > 0 ? (
                 <div>
-                  <dt>Role</dt>
-                  <dd>{service.behavior.roleName}</dd>
-                </div>
-              ) : null}
-              {service.behavior.driverId ? (
-                <div>
-                  <dt>Driver</dt>
-                  <dd>{service.behavior.driverId}</dd>
-                </div>
-              ) : null}
-              {service.behavior.driverVersionId ? (
-                <div>
-                  <dt>Driver version</dt>
-                  <dd>{service.behavior.driverVersionId}</dd>
+                  <dt>Failures</dt>
+                  <dd>{service.consecutiveFailures} consecutive</dd>
                 </div>
               ) : null}
             </dl>
-          </section>
-
-          {service.behavior.roleName?.trim() ? (
-            <RolePromptCard
-              workspaceId={workspaceId}
-              roleName={service.behavior.roleName.trim()}
-            />
-          ) : null}
-
-          <section className={styles.card}>
-            <h2 className={styles.cardTitle}>Bindings</h2>
-            {service.bindings.length === 0 ? (
-              <p className={styles.emptyText}>No bindings configured.</p>
-            ) : (
-              <div className={styles.bindingList}>
-                {service.bindings.map((binding) => (
-                  <article className={styles.bindingRow} key={binding.id}>
-                    <div className={styles.rowMain}>
-                      <strong>{bindingCadenceLabel(binding)}</strong>
-                      <span>{binding.routeKey || binding.id}</span>
-                    </div>
-                    <div className={styles.rowMeta}>
-                      <span>{binding.enabled ? "Enabled" : "Disabled"}</span>
-                      {binding.updatedBy ? (
-                        <span data-testid={`binding-updated-by-${binding.id}`}>
-                          {`Last changed by ${binding.updatedBy}`}
-                        </span>
-                      ) : null}
-                      <span>
-                        {!service.enabled || !binding.enabled
-                          ? "Paused"
-                          : binding.id === nextFireBinding?.id && nextFire
-                            ? `Next ${nextFire}`
-                            : "No next fire"}
-                      </span>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            )}
+            {cronBinding?.updatedBy ? (
+              <p
+                className={styles.summaryAttribution}
+                data-testid={`binding-updated-by-${cronBinding.id}`}
+              >
+                Schedule last changed by {cronBinding.updatedBy}
+              </p>
+            ) : null}
           </section>
 
           <section className={styles.card} data-testid="agent-service-runs">
@@ -478,32 +432,7 @@ export function AgentServiceDetail({
                         className={styles.runPanel}
                         id={`agent-service-run-panel-${run.runId}`}
                       >
-                        <div className={styles.runPanelHeading}>
-                          <span
-                            className={styles.runStatus}
-                            data-status={run.status}
-                          >
-                            {formatStatusLabel(run.status)}
-                          </span>
-                          <p className={styles.fullSummary}>
-                            {runSummary(run)}
-                          </p>
-                        </div>
                         <dl className={styles.runDefinitionGrid}>
-                          <div>
-                            <dt>Run ID</dt>
-                            <dd>{run.runId}</dd>
-                          </div>
-                          <div>
-                            <dt>Started</dt>
-                            <dd>{runTimestamp(run) || "Unknown"}</dd>
-                          </div>
-                          <div>
-                            <dt>Finished</dt>
-                            <dd>
-                              {formatFireTime(run.finishedAt) || "Not finished"}
-                            </dd>
-                          </div>
                           <div>
                             <dt>Duration</dt>
                             <dd>{runDuration(run)}</dd>
@@ -515,19 +444,7 @@ export function AgentServiceDetail({
                             </div>
                           ) : null}
                         </dl>
-                        {run.output?.flue_stdout_tail ? (
-                          <section className={styles.outputSection}>
-                            <h3>Output (tail)</h3>
-                            <pre>{run.output.flue_stdout_tail}</pre>
-                          </section>
-                        ) : null}
                         <HarnessLog workspaceId={workspaceId} run={run} />
-                        {!run.output?.flue_stdout_tail &&
-                        !run.output?.logs_ref ? (
-                          <p className={styles.emptyText}>
-                            No output was captured for this run.
-                          </p>
-                        ) : null}
                         <TaskLogsSection
                           workspaceId={workspaceId}
                           tasks={tasks}
@@ -583,6 +500,29 @@ export function AgentServiceDetail({
             )}
           </section>
         </div>
+      ) : activeTab === "settings" ? (
+        <div
+          className={`${styles.scrollArea} ${styles.settingsPanel}`}
+          role="tabpanel"
+          id="agent-service-settings-panel"
+          aria-labelledby="agent-service-settings-tab"
+        >
+          {service.behavior.scripted ? (
+            <AgentServiceSettings
+              workspaceId={workspaceId}
+              service={service}
+              onChange={setService}
+              {...(onRemoved ? { onRemoved } : {})}
+            />
+          ) : null}
+          {service.behavior.roleName?.trim() ? (
+            <RolePromptCard
+              workspaceId={workspaceId}
+              roleName={service.behavior.roleName.trim()}
+              fillHeight
+            />
+          ) : null}
+        </div>
       ) : (
         <div
           className={styles.scrollArea}
@@ -619,10 +559,7 @@ export function AgentServiceDetail({
                     Showing the last 512 KiB of this journal.
                   </p>
                 ) : null}
-                <MarkdownRenderer
-                  content={journal.content}
-                  className={styles.journalContent}
-                />
+                <JournalHistory content={journal.content} />
               </>
             ) : (
               <p className={styles.emptyText}>No journal content.</p>

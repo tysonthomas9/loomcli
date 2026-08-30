@@ -663,6 +663,57 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/agents/{agentName}/sessions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List sessions for a background agent */
+    get: operations["listAgentSessions"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/agents/{agentName}/sessions/{sessionId}/transcript": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get a background agent session transcript */
+    get: operations["getAgentSessionTranscript"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/agents/{agentName}/sessions/{sessionId}/diff": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get a background agent session diff */
+    get: operations["getAgentSessionDiff"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/tasks/{taskId}/sessions": {
     parameters: {
       query?: never;
@@ -4933,6 +4984,92 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+    };
+  };
+  listAgentSessions: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        agentName: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Agent session list */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data?: {
+              agent_name?: string;
+              sessions?: components["schemas"]["SessionResponse"][];
+            };
+          };
+        };
+      };
+    };
+  };
+  getAgentSessionTranscript: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        agentName: string;
+        sessionId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Transcript */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data?: {
+              session_id?: string;
+              entries?: Record<string, never>[];
+            };
+          };
+        };
+      };
+    };
+  };
+  getAgentSessionDiff: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        agentName: string;
+        sessionId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Session diff */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/plain": string;
+        };
       };
     };
   };

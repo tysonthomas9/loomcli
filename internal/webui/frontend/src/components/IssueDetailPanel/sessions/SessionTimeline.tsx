@@ -6,7 +6,7 @@
 import type { SessionRecord } from "@/types/agent";
 import { formatCost, formatTokens } from "@/utils/sessionUsage";
 
-import { SessionTimelineRow } from "./SessionTimelineRow";
+import { SessionTimelineRow, type SessionRowLabel } from "./SessionTimelineRow";
 import styles from "./SessionsTab.module.css";
 
 export interface RunRailSummary {
@@ -23,6 +23,8 @@ export interface SessionTimelineProps {
   onSelect: (id: string) => void;
   isLoading: boolean;
   summary: RunRailSummary;
+  getRowLabel?: (session: SessionRecord) => SessionRowLabel;
+  compactRows?: boolean;
 }
 
 export function SessionTimeline({
@@ -31,6 +33,8 @@ export function SessionTimeline({
   onSelect,
   isLoading,
   summary,
+  getRowLabel,
+  compactRows = false,
 }: SessionTimelineProps): JSX.Element {
   if (isLoading && sessions.length === 0) {
     return (
@@ -87,6 +91,8 @@ export function SessionTimeline({
             session={session}
             isSelected={selectedId === session.session_id}
             onClick={() => onSelect(session.session_id)}
+            {...(getRowLabel ? { label: getRowLabel(session) } : {})}
+            compact={compactRows}
           />
         ))}
       </div>

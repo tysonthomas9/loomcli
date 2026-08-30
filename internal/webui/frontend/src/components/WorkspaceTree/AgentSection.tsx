@@ -7,14 +7,15 @@ import type React from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
 
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
+  useAgentServiceMutations,
   useAgentStoreInstance,
   useAgentServices,
   useDeleteWorkspaceAgent,
   useWorkspaceContext,
 } from "@/hooks";
 import { useToast } from "@/hooks/ui";
-import { CreateAgentServiceModal } from "@/components/CreateAgentServiceModal";
 import type { LoomAgentStatus } from "@/types";
 import {
   SK_AGENT_SECTION_ORDER,
@@ -29,6 +30,7 @@ import {
 import { isPRReviewerAgent } from "@/utils/agentDisplay";
 import {
   agentServiceCadenceLabel,
+  agentServiceDotColor,
   agentServiceDotState,
   agentServiceDotTooltip,
 } from "@/utils/bindingDisplay";
@@ -36,6 +38,7 @@ import { wsGet, wsSet } from "@/utils/scopedStorage";
 
 import styles from "./AgentSection.module.css";
 import {
+  agentServiceCardAgent,
   withoutDurableAgentProjections,
 } from "./agentSectionAutomationRows";
 import { AgentContextMenu } from "./menus/AgentContextMenu";
@@ -73,9 +76,11 @@ export function AgentSection({
   } = useWorkspaceContext();
   const { showToast } = useToast();
   const deleteAgent = useDeleteWorkspaceAgent();
+  const agentServiceMutations = useAgentServiceMutations(workspaceId);
   const [agentOrder, setAgentOrder] = useState<string[]>([]);
   const [contextMenu, setContextMenu] = useState<AgentMenuState | null>(null);
-  const [createAutonomousOpen, setCreateAutonomousOpen] = useState(false);
+  const [serviceToRemove, setServiceToRemove] = useState<string | null>(null);
+  const [removingService, setRemovingService] = useState(false);
   const prsView = activeView === "prs";
   const addClick = prsView ? undefined : onAddClick;
   const { services: allAgentServices } = useAgentServices(workspaceId, {
@@ -87,7 +92,10 @@ export function AgentSection({
     () => (prsView ? [] : allAgentServices),
     [allAgentServices, prsView],
   );
-  const showAutonomousGroup = !prsView && Boolean(workspaceId);
+  const serviceById = useMemo(
+    () => new Map(agentServices.map((record) => [record.id, record])),
+    [agentServices],
+  );
 
   // Merge fleet agents with workspace config agents.
   // Config agents that aren't yet running appear as "configured" placeholders.
@@ -117,7 +125,14 @@ export function AgentSection({
       merged = [...orderedFleetAgents, ...configPlaceholders];
     }
     merged = withoutDurableAgentProjections(merged, agentServices);
-    if (!prsView) return merged;
+    if (!prsView) {
+      return [
+        ...merged,
+        ...agentServices.map((record) =>
+          agentServiceCardAgent(record, workspace?.name ?? ""),
+        ),
+      ];
+    }
     return merged.filter(isPRReviewerAgent);
   }, [
     agentServices,
@@ -161,12 +176,34 @@ export function AgentSection({
     () => splitAgentsByRuntime(orderedAgents),
     [orderedAgents],
   );
-  const showBackgroundGroup = regular.length > 0 && background.length > 0;
+  const showBackgroundGroup =
+    agentServices.length > 0 || (regular.length > 0 && background.length > 0);
+
+  const servicePresentations = useMemo(
+    () =>
+      Object.fromEntries(
+        agentServices.map((record) => [
+          record.id,
+          {
+            taskTitle: agentServiceCadenceLabel(record),
+            statusDotColor: agentServiceDotColor(record),
+            title: agentServiceDotTooltip(record),
+            testId: `autonomous-agent-${record.id}`,
+            state: agentServiceDotState(record),
+          },
+        ]),
+      ),
+    [agentServices],
+  );
 
   const handleArchive = useCallback(
     async (name: string) => {
       if (!workspaceId) return;
       setContextMenu(null);
+      if (serviceById.has(name)) {
+        setServiceToRemove(name);
+        return;
+      }
       try {
         await deleteAgent(workspaceId, name);
         showToast(`Agent ${name} archived`, { type: "success" });
@@ -175,8 +212,25 @@ export function AgentSection({
         showToast("Failed to archive agent", { type: "error" });
       }
     },
-    [deleteAgent, refetch, showToast, workspaceId],
+    [deleteAgent, refetch, serviceById, showToast, workspaceId],
   );
+
+  const confirmServiceRemoval = useCallback(async () => {
+    if (!serviceToRemove) return;
+    const record = serviceById.get(serviceToRemove);
+    setRemovingService(true);
+    try {
+      await agentServiceMutations.remove(serviceToRemove);
+      showToast(`Scheduled agent ${record?.name || serviceToRemove} removed`, {
+        type: "success",
+      });
+      setServiceToRemove(null);
+    } catch {
+      showToast("Failed to remove scheduled agent", { type: "error" });
+    } finally {
+      setRemovingService(false);
+    }
+  }, [agentServiceMutations, serviceById, serviceToRemove, showToast]);
 
   const handleAgentContextMenu = useCallback(
     (event: React.MouseEvent, name: string) => {
@@ -190,12 +244,7 @@ export function AgentSection({
     setContextMenu(null);
   }, []);
 
-  if (
-    agents.length === 0 &&
-    agentServices.length === 0 &&
-    !addClick &&
-    !showAutonomousGroup
-  )
+  if (agents.length === 0 && agentServices.length === 0 && !addClick)
     return <></>;
 
   const listProps = {
@@ -230,6 +279,7 @@ export function AgentSection({
             <SortableAgentList
               agents={background}
               listClassName={styles.subgroupList}
+              presentations={servicePresentations}
               {...listProps}
             />
           </div>
@@ -240,48 +290,6 @@ export function AgentSection({
             {...listProps}
           />
         )}
-        {showAutonomousGroup ? (
-          <div data-testid="agent-section-autonomous">
-            <div className={styles.groupHeader}>
-              <span>Autonomous</span>
-            </div>
-            {agentServices.map((record) => {
-              const name = record.name.trim() || record.id;
-              const cadence = agentServiceCadenceLabel(record);
-              const tooltip = agentServiceDotTooltip(record);
-              return (
-                <button
-                  type="button"
-                  key={record.id}
-                  className={styles.workflowRow}
-                  data-testid={`autonomous-agent-${record.id}`}
-                  data-selected={selectedAgentName === record.id || undefined}
-                  aria-label={`${name}, ${cadence}, ${tooltip}`}
-                  onClick={() => onAgentClick?.(record.id)}
-                  title={tooltip}
-                >
-                  <span
-                    className={styles.workflowDot}
-                    data-state={agentServiceDotState(record)}
-                    aria-hidden="true"
-                  />
-                  <span className={styles.workflowText}>
-                    <span className={styles.workflowName}>{name}</span>
-                    <span className={styles.workflowMeta}>{cadence}</span>
-                  </span>
-                </button>
-              );
-            })}
-            <button
-              type="button"
-              className={`${styles.addButton} ${styles.autonomousAddButton}`}
-              aria-label="+ Add autonomous agent"
-              onClick={() => setCreateAutonomousOpen(true)}
-            >
-              + Add autonomous agent
-            </button>
-          </div>
-        ) : null}
       </div>
       {addClick && (
         <button type="button" className={styles.addButton} onClick={addClick}>
@@ -299,20 +307,22 @@ export function AgentSection({
         }}
         onClose={closeContextMenu}
       />
-      <CreateAgentServiceModal
-        isOpen={createAutonomousOpen}
-        workspaceId={workspaceId}
-        onClose={() => setCreateAutonomousOpen(false)}
-        onSuccess={(service) => {
-          showToast(
-            `Autonomous agent "${service.name || service.id}" created`,
-            {
-              type: "success",
-            },
-          );
-          onAgentClick?.(service.id);
-        }}
-      />
+      {serviceToRemove ? (
+        <ConfirmDialog
+          isOpen
+          title="Remove scheduled agent"
+          message={
+            <span>
+              Remove <strong>{serviceToRemove}</strong> and its trigger binding?
+              This cannot be undone.
+            </span>
+          }
+          confirmLabel={removingService ? "Removing…" : "Remove"}
+          variant="danger"
+          onConfirm={() => void confirmServiceRemoval()}
+          onCancel={() => setServiceToRemove(null)}
+        />
+      ) : null}
     </div>
   );
 }

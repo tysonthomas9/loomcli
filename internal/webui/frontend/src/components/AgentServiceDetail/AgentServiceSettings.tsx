@@ -8,6 +8,7 @@ import {
   scheduleError,
   SCHEDULE_PRESETS,
 } from "@/utils/agentServiceForm";
+import { formatFireTime } from "@/utils/bindingDisplay";
 
 import styles from "./AgentServiceDetail.module.css";
 
@@ -167,7 +168,7 @@ export function AgentServiceSettings({
   return (
     <section className={styles.card} data-testid="agent-service-settings">
       <div className={styles.cardHeadingRow}>
-        <h2 className={styles.cardTitle}>Settings</h2>
+        <h2 className={styles.cardTitle}>Configuration</h2>
         <button
           type="button"
           className={styles.secondaryButton}
@@ -245,6 +246,16 @@ export function AgentServiceSettings({
             </button>
           ))}
         </div>
+        <p className={styles.scheduleContext}>
+          {!service.enabled || !cronBinding?.enabled
+            ? "Schedule paused"
+            : service.nextFireAt
+              ? `Next run ${formatFireTime(service.nextFireAt)}`
+              : "No next run is scheduled"}
+          {cronBinding?.updatedBy
+            ? ` · Last changed by ${cronBinding.updatedBy}`
+            : ""}
+        </p>
         {scheduleTouched && invalidSchedule ? (
           <p className={styles.errorText} role="alert">
             {invalidSchedule}
@@ -258,24 +269,27 @@ export function AgentServiceSettings({
         </p>
       ) : null}
 
-      <div className={styles.dangerRow}>
-        <div>
-          <strong>Remove autonomous agent</strong>
-          <p>Removes this instance and its trigger binding.</p>
+      <details className={styles.dangerZone}>
+        <summary>Danger zone</summary>
+        <div className={styles.dangerRow}>
+          <div>
+            <strong>Remove scheduled agent</strong>
+            <p>Removes this instance and its trigger binding.</p>
+          </div>
+          <button
+            type="button"
+            className={styles.dangerButton}
+            onClick={() => setConfirmRemove(true)}
+            disabled={busy !== null}
+          >
+            Remove agent
+          </button>
         </div>
-        <button
-          type="button"
-          className={styles.dangerButton}
-          onClick={() => setConfirmRemove(true)}
-          disabled={busy !== null}
-        >
-          Remove agent
-        </button>
-      </div>
+      </details>
 
       <ConfirmDialog
         isOpen={confirmRemove}
-        title="Remove autonomous agent"
+        title="Remove scheduled agent"
         message={
           <span>
             Remove <strong>{service.id}</strong>? This cannot be undone.

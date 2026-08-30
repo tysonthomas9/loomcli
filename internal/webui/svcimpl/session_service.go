@@ -22,7 +22,7 @@ import (
 )
 
 // Compile-time check.
-var _ service.SessionService = (*sessionServiceImpl)(nil)
+var _ service.AgentSessionService = (*sessionServiceImpl)(nil)
 
 var userHomeDir = os.UserHomeDir
 
@@ -34,13 +34,13 @@ type sessionServiceImpl struct {
 }
 
 // NewSessionService creates a new SessionService implementation.
-func NewSessionService(st store.Store, histStore *sessionhistory.Store) service.SessionService {
+func NewSessionService(st store.Store, histStore *sessionhistory.Store) service.AgentSessionService {
 	return NewSessionServiceWithRuntimeDir(st, histStore, "")
 }
 
 // NewSessionServiceWithRuntimeDir creates a SessionService that also searches
 // the daemon/runtime session store used by local desktop mode.
-func NewSessionServiceWithRuntimeDir(st store.Store, histStore *sessionhistory.Store, runtimeDir string) service.SessionService {
+func NewSessionServiceWithRuntimeDir(st store.Store, histStore *sessionhistory.Store, runtimeDir string) service.AgentSessionService {
 	return &sessionServiceImpl{store: st, histStore: histStore, runtimeDir: runtimeDir}
 }
 
@@ -154,6 +154,66 @@ func (s *sessionServiceImpl) ListTaskSessions(ctx context.Context, wsID, taskID 
 			items = append(items, item)
 		}
 	}
+	return items, nil
+}
+
+func (s *sessionServiceImpl) ListAgentSessions(ctx context.Context, wsID, agentName string) ([]service.SessionListItem, error) {
+	if agentName == "" || !validTaskID.MatchString(agentName) {
+		return nil, service.ErrValidation("invalid agent name: must match [a-zA-Z0-9._-]+")
+	}
+	if s.store != nil {
+		records, err := s.store.AgentSessions().List(ctx, wsID, store.AgentSessionFilter{AgentID: agentName, Limit: 100})
+		if err == nil && len(records) > 0 {
+			stores, _ := s.storesForWorkspace(ctx, wsID)
+			items := make([]service.SessionListItem, 0, len(records))
+			for _, rec := range records {
+				if rec == nil {
+					continue
+				}
+				item := service.SessionListItem{
+					SessionRecord: sessionRecordFromAgentSession(rec),
+					IsActive:      isActiveAgentSession(rec.Status),
+				}
+				fillControlPlaneArtifactFlags(&item, stores, rec)
+				if local := storeOwningSession(stores, rec.SessionID); local != nil {
+					if meta, loadErr := local.LoadMetadata(rec.SessionID); loadErr == nil {
+						enrichSessionRecordFromLocal(&item.SessionRecord, meta.SessionRecord)
+						enrichSessionUsageFromTranscript(local, &item.SessionRecord)
+					}
+				}
+				items = append(items, item)
+			}
+			sort.Slice(items, func(i, j int) bool { return items[i].StartedAt.After(items[j].StartedAt) })
+			return items, nil
+		}
+	}
+
+	stores, err := s.storesForWorkspace(ctx, wsID)
+	if err != nil {
+		return nil, err
+	}
+	var items []service.SessionListItem
+	for _, sessStore := range stores {
+		records, queryErr := sessStore.Query(sessions.Filter{AgentName: agentName})
+		if queryErr != nil {
+			continue
+		}
+		for _, rec := range records {
+			item := service.SessionListItem{SessionRecord: rec, IsActive: rec.Status == sessions.StatusRunning}
+			enrichSessionUsageFromTranscript(sessStore, &item.SessionRecord)
+			if info, statErr := os.Stat(sessStore.NativeTranscriptPath(rec.SessionID)); statErr == nil && info.Size() > 0 {
+				item.HasTranscript = true
+			}
+			if !item.HasTranscript && eventStoreHasTranscript(sessStore, rec.SessionID) {
+				item.HasTranscript = true
+			}
+			if diff, readErr := sessStore.ReadDiff(rec.SessionID); readErr == nil && diff != "" {
+				item.HasDiff = true
+			}
+			items = append(items, item)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].StartedAt.After(items[j].StartedAt) })
 	return items, nil
 }
 
@@ -473,11 +533,45 @@ func (s *sessionServiceImpl) GetSessionTranscript(ctx context.Context, wsID, tas
 	return events, nil
 }
 
+func (s *sessionServiceImpl) GetAgentSessionTranscript(ctx context.Context, wsID, agentName, sessionID string) ([]transcript.Event, error) {
+	store, _, err := s.authorizedAgentSessionStore(ctx, wsID, agentName, sessionID)
+	if err != nil {
+		if !serviceErrorNotFound(err) {
+			return nil, err
+		}
+		rec, recErr := s.controlPlaneAgentSessionRecord(ctx, wsID, agentName, sessionID)
+		if recErr != nil {
+			return nil, recErr
+		}
+		return s.transcriptFromControlPlaneRecord(ctx, wsID, rec)
+	}
+	if evs, ok := eventStoreParentEvents(store, sessionID); ok {
+		return evs, nil
+	}
+	events, loadErr := store.LoadNativeEvents(sessionID)
+	if loadErr != nil {
+		if rec, recErr := s.controlPlaneAgentSessionRecord(ctx, wsID, agentName, sessionID); recErr == nil {
+			if cpEvents, cpErr := s.transcriptFromControlPlaneRecord(ctx, wsID, rec); cpErr == nil {
+				return cpEvents, nil
+			}
+		}
+		return nil, service.ErrInternal("failed to load transcript", loadErr)
+	}
+	if events == nil {
+		events = []transcript.Event{}
+	}
+	return events, nil
+}
+
 func (s *sessionServiceImpl) controlPlaneSessionTranscript(ctx context.Context, wsID, taskID, sessionID string) ([]transcript.Event, error) {
 	rec, err := s.controlPlaneSessionRecord(ctx, wsID, taskID, sessionID)
 	if err != nil {
 		return nil, err
 	}
+	return s.transcriptFromControlPlaneRecord(ctx, wsID, rec)
+}
+
+func (s *sessionServiceImpl) transcriptFromControlPlaneRecord(ctx context.Context, wsID string, rec *domain.AgentSession) ([]transcript.Event, error) {
 	transcriptRef := ""
 	if rec.Metadata != nil {
 		transcriptRef = strings.TrimSpace(rec.Metadata["transcript_ref"])
@@ -672,6 +766,47 @@ func (s *sessionServiceImpl) authorizedSessionStore(ctx context.Context, wsID, t
 	return store, meta, nil
 }
 
+func (s *sessionServiceImpl) authorizedAgentSessionStore(ctx context.Context, wsID, agentName, sessionID string) (*sessions.Store, *sessions.SessionMetadata, error) {
+	if agentName == "" || !validTaskID.MatchString(agentName) {
+		return nil, nil, service.ErrValidation("invalid agent name")
+	}
+	if sessionID == "" || !validSessionID.MatchString(sessionID) {
+		return nil, nil, service.ErrValidation("invalid session ID")
+	}
+	sessStore, err := s.findStoreForSession(ctx, wsID, sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	meta, err := sessStore.LoadMetadata(sessionID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil, service.ErrNotFound("session not found")
+		}
+		return nil, nil, service.ErrInternal("failed to load session", err)
+	}
+	if meta.AgentName != agentName {
+		return nil, nil, service.ErrNotFound("session not found")
+	}
+	return sessStore, meta, nil
+}
+
+func (s *sessionServiceImpl) controlPlaneAgentSessionRecord(ctx context.Context, wsID, agentName, sessionID string) (*domain.AgentSession, error) {
+	if s.store == nil {
+		return nil, service.ErrNotFound("session not found")
+	}
+	rec, err := s.store.AgentSessions().Get(ctx, wsID, sessionID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, service.ErrNotFound("session not found")
+		}
+		return nil, service.ErrInternal("failed to load session", err)
+	}
+	if rec.AgentID != agentName {
+		return nil, service.ErrNotFound("session not found")
+	}
+	return rec, nil
+}
+
 func (s *sessionServiceImpl) GetSessionDiff(ctx context.Context, wsID, taskID, sessionID string) (string, error) {
 	store, _, err := s.authorizedSessionStore(ctx, wsID, taskID, sessionID)
 	if err != nil {
@@ -704,16 +839,41 @@ func (s *sessionServiceImpl) GetSessionDiff(ctx context.Context, wsID, taskID, s
 	return diff, nil
 }
 
+func (s *sessionServiceImpl) GetAgentSessionDiff(ctx context.Context, wsID, agentName, sessionID string) (string, error) {
+	sessStore, _, err := s.authorizedAgentSessionStore(ctx, wsID, agentName, sessionID)
+	if err == nil {
+		diff, readErr := sessStore.ReadDiff(sessionID)
+		if readErr == nil && diff != "" {
+			return diff, nil
+		}
+		if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+			return "", service.ErrInternal("failed to read diff", readErr)
+		}
+	} else if !serviceErrorNotFound(err) {
+		return "", err
+	}
+	rec, recErr := s.controlPlaneAgentSessionRecord(ctx, wsID, agentName, sessionID)
+	if recErr != nil {
+		return "", recErr
+	}
+	return s.controlPlaneDiffFromRecord(ctx, wsID, rec)
+}
+
 func (s *sessionServiceImpl) controlPlaneSessionDiff(ctx context.Context, wsID, taskID, sessionID string) (string, error) {
 	rec, err := s.controlPlaneSessionRecord(ctx, wsID, taskID, sessionID)
 	if err != nil {
 		return "", err
 	}
+	return s.controlPlaneDiffFromRecord(ctx, wsID, rec)
+}
+
+func (s *sessionServiceImpl) controlPlaneDiffFromRecord(ctx context.Context, wsID string, rec *domain.AgentSession) (string, error) {
 	artifactID := ""
 	if rec.Metadata != nil {
 		artifactID = controlPlaneDiffArtifactRef(rec.Metadata)
 	}
 	if artifactID == "" && rec.Metadata != nil {
+		var err error
 		artifactID, err = s.diffArtifactIDForTaskRun(ctx, wsID, rec.Metadata["task_run_id"])
 		if err != nil {
 			return "", err

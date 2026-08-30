@@ -116,6 +116,26 @@ describe("SessionDetailView", () => {
       expect(screen.getByText("opus-4")).toBeInTheDocument();
     });
 
+    it("opens the contextual ticket from the masthead", () => {
+      const onContextClick = vi.fn();
+      render(
+        <SessionDetailView
+          taskId="task-1"
+          session={defaultSession}
+          contextLabel={{
+            primary: "Local mode coder dogfood",
+            secondary: "LOCALMODE-3",
+          }}
+          onContextClick={onContextClick}
+        />,
+      );
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Open ticket LOCALMODE-3" }),
+      );
+      expect(onContextClick).toHaveBeenCalledTimes(1);
+    });
+
     it("omits the model label when model is absent", () => {
       const session = createSession({ model: undefined });
       render(<SessionDetailView taskId="task-1" session={session} />);
@@ -358,6 +378,62 @@ describe("SessionDetailView", () => {
       // Literal markdown syntax must not survive
       expect(container.textContent).not.toContain("**JsonlStateStore**");
       expect(container.textContent).not.toContain("`add_state`");
+    });
+
+    it("renders Scout result JSON as recommendation content with raw output available", () => {
+      mockUseSessionTranscript.mockReturnValue({
+        entries: [
+          createEntry({
+            seq: 1,
+            role: "assistant",
+            type: "text",
+            text: JSON.stringify({
+              recommendations: [
+                {
+                  title: "Document the fixture contract",
+                  description:
+                    "Clarify the gate.\n\n## Acceptance Criteria\n\n- Document `make gate`.",
+                  rationale: "The validation entry point is undocumented.",
+                  repo: "source-repo",
+                  labels: ["recommended", "repo:source-repo"],
+                  priority: 3,
+                  anchors: ["README.md", "Makefile"],
+                },
+              ],
+              skipped: [{ title: "Existing work", reason: "Already tracked" }],
+              agentsMd: "## Workspace Overview\n\nOne local fixture.",
+            }),
+          }),
+        ],
+        isLoading: false,
+        error: null,
+      });
+
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
+
+      expect(screen.getByTestId("scout-result")).toBeInTheDocument();
+      expect(
+        screen.getByText("Document the fixture contract"),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Acceptance Criteria")).toBeInTheDocument();
+      expect(screen.getByText("README.md")).toBeInTheDocument();
+      expect(screen.getByText("Skipped candidates (1)")).toBeInTheDocument();
+      expect(screen.getByText("Workspace notes")).toBeInTheDocument();
+      expect(screen.getByText("Raw result")).toBeInTheDocument();
+    });
+
+    it("keeps malformed Scout-like JSON visible as ordinary transcript text", () => {
+      const content = '{"recommendations": "invalid", "skipped": []}';
+      mockUseSessionTranscript.mockReturnValue({
+        entries: [createEntry({ seq: 1, text: content })],
+        isLoading: false,
+        error: null,
+      });
+
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
+
+      expect(screen.queryByTestId("scout-result")).not.toBeInTheDocument();
+      expect(screen.getByText(content)).toBeInTheDocument();
     });
 
     it("renders a user-message interjection as formatted Markdown", () => {
@@ -636,15 +712,31 @@ describe("SessionDetailView", () => {
       ).toBeInTheDocument();
     });
 
-    it("renders diff in CodeMirrorEditor when present", () => {
+    it("renders a saved patch with the shared structured diff UI", () => {
       mockUseSessionDiff.mockReturnValue({
-        diff: "--- a\n+++ b\n",
+        diff: [
+          "diff --git a/src/example.ts b/src/example.ts",
+          "index 1111111..2222222 100644",
+          "--- a/src/example.ts",
+          "+++ b/src/example.ts",
+          "@@ -1 +1 @@",
+          "-const answer = 41;",
+          "+const answer = 42;",
+        ].join("\n"),
         isLoading: false,
         error: null,
       });
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       fireEvent.click(screen.getByTestId("session-inner-tab-diff"));
-      expect(screen.getByTestId("codemirror-editor")).toBeInTheDocument();
+      expect(screen.getByTestId("session-diff-viewer")).toBeInTheDocument();
+      expect(screen.getByText("src/example.ts")).toBeInTheDocument();
+      expect(screen.getAllByText("+1")).toHaveLength(2);
+      expect(screen.getAllByText("-1")).toHaveLength(2);
+      expect(screen.getByText("+const answer = 42;")).toHaveAttribute(
+        "data-type",
+        "add",
+      );
+      expect(screen.queryByTestId("codemirror-editor")).not.toBeInTheDocument();
     });
 
     it("shows 'No diff available' when diff is null", () => {

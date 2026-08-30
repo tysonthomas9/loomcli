@@ -134,6 +134,23 @@ export function agentServiceDotState(
   return "idle";
 }
 
+/** Theme-aware status color for surfaces that render an inline status dot. */
+export function agentServiceDotColor(service: AgentServiceDTO): string {
+  switch (agentServiceDotState(service)) {
+    case "idle":
+      return "var(--color-success, #22c55e)";
+    case "running":
+      return "var(--color-info, #3b82f6)";
+    case "warn":
+    case "unknown":
+      return "var(--color-warning, #d99700)";
+    case "failing":
+      return "var(--color-danger, #d14545)";
+    case "off":
+      return "var(--color-status-idle, #888)";
+  }
+}
+
 export function agentServiceHealthLabel(service: AgentServiceDTO): string {
   switch (agentServiceDotState(service)) {
     case "unknown":

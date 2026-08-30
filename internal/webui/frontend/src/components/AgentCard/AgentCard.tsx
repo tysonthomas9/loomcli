@@ -38,6 +38,8 @@ export interface AgentCardProps {
   compact?: boolean;
   /** Highlight as the currently selected agent in sidebar lists. */
   selected?: boolean;
+  /** Optional authoritative status-dot color for non-fleet agent records. */
+  statusDotColor?: string | undefined;
 }
 
 function pickedUpTaskLabel(
@@ -65,10 +67,11 @@ export function AgentCard({
   showRepoBadge = true,
   compact = false,
   selected = false,
+  statusDotColor,
 }: AgentCardProps): JSX.Element {
   const parsed = parseLoomStatus(effectiveAgentStatus(agent));
   const avatarColor = getAvatarColor(agent.name);
-  const dotColor = getStatusDotColor(parsed.type);
+  const dotColor = statusDotColor ?? getStatusDotColor(parsed.type);
   const statusLabel = getStatusLabel(parsed);
   // When the badge reflects fleet-db's live_status (serve-only deployments,
   // where no task title is loaded), surface the active task/phase on hover.

@@ -45,7 +45,7 @@ type LocalSettingsHandlers struct {
 }
 
 // NewIssueModules creates the issue and session modules.
-func NewIssueModules(issueSvc service.IssueService, sessSvc service.SessionService, st store.Store) []interface{ Register(*http.ServeMux) } {
+func NewIssueModules(issueSvc service.IssueService, sessSvc service.AgentSessionService, st store.Store) []interface{ Register(*http.ServeMux) } {
 	return []interface{ Register(*http.ServeMux) }{
 		issues.NewIssueModule(issueSvc, st),
 		issues.NewSessionModule(sessSvc, issues.SessionModuleOpts{
@@ -53,6 +53,9 @@ func NewIssueModules(issueSvc service.IssueService, sessSvc service.SessionServi
 			GetSession:           misc.HandleGetSession(sessSvc),
 			GetSessionTranscript: misc.HandleGetSessionTranscript(sessSvc),
 			GetSessionDiff:       misc.HandleGetSessionDiff(sessSvc),
+			ListAgentSessions:    misc.HandleListAgentSessions(sessSvc),
+			GetAgentTranscript:   misc.HandleGetAgentSessionTranscript(sessSvc),
+			GetAgentDiff:         misc.HandleGetAgentSessionDiff(sessSvc),
 		}),
 	}
 }

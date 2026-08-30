@@ -5,6 +5,13 @@
   background: var(--color-bg-primary);
 }
 
+.fillHeight {
+  display: flex;
+  flex: 1;
+  min-height: 360px;
+  flex-direction: column;
+}
+
 .headingRow {
   display: flex;
   align-items: flex-start;
@@ -69,6 +76,12 @@
 
 .editor {
   resize: vertical;
+}
+
+.fillHeight .editor,
+.fillHeight .sourceBody {
+  flex: 1;
+  min-height: 220px;
 }
 
 .editor:focus-visible,

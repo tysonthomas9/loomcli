@@ -33,6 +33,7 @@ import { useStore } from "zustand";
 
 import { ErrorBoundary, LoadingSkeleton } from "@/components";
 import { AgentDetailMain } from "@/components/AgentDetailMain/AgentDetailMain";
+import { AgentRunsPanel } from "@/components/IssueDetailPanel";
 import { GitTab } from "@/components/AgentDetailPanel";
 import { AgentServiceDetail } from "@/components/AgentServiceDetail";
 import { AgentWorkPanel } from "@/components/AgentWorkPanel/AgentWorkPanel";
@@ -75,6 +76,7 @@ import {
   issueRepoName,
 } from "@/utils/epicRunnerPayload";
 import { formatStatusLabel } from "@/utils/issue";
+import { isInteractiveAgent } from "@/utils/agentRole";
 import type { TerminalInputRequest } from "@/components/TerminalView/TerminalView";
 
 import {
@@ -82,8 +84,15 @@ import {
   saveAgentWorkPanelView,
 } from "@/utils/agentWorkPanelStorage";
 
-import { AgentEditorGroups, type AgentEditorTab } from "./AgentEditorGroups";
+import {
+  AgentEditorGroups,
+  ALL_AGENT_EDITOR_TABS,
+  type AgentEditorTab,
+} from "./AgentEditorGroups";
 import styles from "./AgentsPage.module.css";
+
+const INTERACTIVE_AGENT_EDITOR_TABS: readonly AgentEditorTab[] =
+  ALL_AGENT_EDITOR_TABS.filter((tab) => tab !== "runs");
 
 // Heavy tabs (CodeMirror/diff) are code-split, mirroring AgentDetailPanel.
 const DiffTab = lazy(() =>
@@ -401,12 +410,26 @@ function AgentsPageInner(): JSX.Element {
   const statusType = parseLoomStatus(selected?.status ?? "").type;
   const roleName = selected?.role ?? statusType;
   const selectedPromptRole = selected?.role?.trim() ?? "";
+  const selectedAgentIsInteractive = selected
+    ? isInteractiveAgent(selected)
+    : false;
   const selColor = getAvatarColor(selected?.name ?? "agent");
   const selText = shouldUseWhiteText(selColor) ? "#fff" : "#171717";
 
   const renderAgentPane = useCallback(
     (tab: AgentEditorTab, isActive: boolean) => {
       switch (tab) {
+        case "runs":
+          return agentName ? (
+            <AgentRunsPanel
+              agentName={agentName}
+              onTaskClick={handleTaskClick}
+            />
+          ) : (
+            <div className={styles.tabFallback}>
+              Select an agent to view runs.
+            </div>
+          );
         case "terminal":
           return (
             <div className={styles.realTabBody}>
@@ -563,6 +586,7 @@ function AgentsPageInner(): JSX.Element {
     },
     [
       agentName,
+      handleTaskClick,
       pendingTerminalInput,
       selected,
       selColor,
@@ -598,6 +622,12 @@ function AgentsPageInner(): JSX.Element {
         ) : (
           <AgentEditorGroups
             resetKey={agentName}
+            initialTab={selectedAgentIsInteractive ? "terminal" : "runs"}
+            availableTabs={
+              selectedAgentIsInteractive
+                ? INTERACTIVE_AGENT_EDITOR_TABS
+                : ALL_AGENT_EDITOR_TABS
+            }
             renderPane={renderAgentPane}
           />
         )}

@@ -13,11 +13,25 @@ import {
 
 import styles from "./AgentEditorGroups.module.css";
 
-export type AgentEditorTab = "terminal" | "info" | "git" | "diff" | "files";
+export type AgentEditorTab =
+  | "runs"
+  | "terminal"
+  | "info"
+  | "git"
+  | "diff"
+  | "files";
 
-const ALL_TABS: AgentEditorTab[] = ["terminal", "info", "git", "diff", "files"];
+export const ALL_AGENT_EDITOR_TABS: readonly AgentEditorTab[] = [
+  "runs",
+  "terminal",
+  "info",
+  "git",
+  "diff",
+  "files",
+];
 
 const TAB_LABELS: Record<AgentEditorTab, string> = {
+  runs: "Runs",
   terminal: "Terminal",
   info: "Info",
   git: "Git",
@@ -48,8 +62,14 @@ function normalizeGroups(groups: EditorGroup[]): EditorGroup[] {
   }));
 }
 
-function initialGroups(): EditorGroup[] {
-  return [{ tabs: [...ALL_TABS], active: "terminal" }];
+function initialGroups(
+  initialTab: AgentEditorTab,
+  availableTabs: readonly AgentEditorTab[],
+): EditorGroup[] {
+  const tabs: AgentEditorTab[] =
+    availableTabs.length > 0 ? [...availableTabs] : ["terminal"];
+  const active = tabs.includes(initialTab) ? initialTab : tabs[0]!;
+  return [{ tabs, active }];
 }
 
 /** Aether wireframe "columns" icon — split active tab into a right editor group. */
@@ -77,19 +97,26 @@ export interface AgentEditorGroupsProps {
   /** Resets layout when the selected agent changes. */
   resetKey: string | undefined;
   renderPane: (tab: AgentEditorTab, isActive: boolean) => ReactNode;
+  initialTab?: AgentEditorTab;
+  availableTabs?: readonly AgentEditorTab[];
 }
 
 export function AgentEditorGroups({
   resetKey,
   renderPane,
+  initialTab = "terminal",
+  availableTabs = ALL_AGENT_EDITOR_TABS,
 }: AgentEditorGroupsProps): JSX.Element {
-  const [groups, setGroups] = useState<EditorGroup[]>(initialGroups);
+  const availableTabsKey = availableTabs.join("\0");
+  const [groups, setGroups] = useState<EditorGroup[]>(() =>
+    initialGroups(initialTab, availableTabs),
+  );
   const dragRef = useRef<DragPayload | null>(null);
   const isSplit = groups.length > 1;
 
   useEffect(() => {
-    setGroups(initialGroups());
-  }, [resetKey]);
+    setGroups(initialGroups(initialTab, availableTabs));
+  }, [availableTabs, availableTabsKey, initialTab, resetKey]);
 
   const activate = useCallback((groupIndex: number, tab: AgentEditorTab) => {
     setGroups((prev) =>

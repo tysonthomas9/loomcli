@@ -38,6 +38,12 @@ type SessionListData struct {
 	Sessions []service.SessionListItem `json:"sessions"`
 }
 
+// AgentSessionListData contains the agent name and its sessions.
+type AgentSessionListData struct {
+	AgentName string                    `json:"agent_name"`
+	Sessions  []service.SessionListItem `json:"sessions"`
+}
+
 // SessionDetailResponse is the JSON envelope for a single session's metadata.
 type SessionDetailResponse struct {
 	Success bool                       `json:"success"`
@@ -103,6 +109,70 @@ func HandleListTaskSessions(svc service.SessionService) http.HandlerFunc {
 			},
 		})
 	}
+}
+
+// HandleListAgentSessions returns all recorded runs for a background agent.
+func HandleListAgentSessions(svc service.AgentSessionService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		agentName := r.PathValue("agentName")
+		items, err := svc.ListAgentSessions(r.Context(), wsID, agentName)
+		if err != nil {
+			writeSessionError(w, err)
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, map[string]interface{}{
+			"success": true,
+			"data":    AgentSessionListData{AgentName: agentName, Sessions: items},
+		})
+	}
+}
+
+// HandleGetAgentSessionTranscript returns a canonical transcript for an
+// agent-owned session.
+func HandleGetAgentSessionTranscript(svc service.AgentSessionService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		agentName := r.PathValue("agentName")
+		sessionID := r.PathValue("sessionId")
+		entries, err := svc.GetAgentSessionTranscript(r.Context(), wsID, agentName, sessionID)
+		if err != nil {
+			writeSessionError(w, err)
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, TranscriptResponse{
+			Success: true,
+			Data:    &TranscriptData{SessionID: sessionID, Entries: entries},
+		})
+	}
+}
+
+// HandleGetAgentSessionDiff returns the patch for an agent-owned session.
+func HandleGetAgentSessionDiff(svc service.AgentSessionService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		agentName := r.PathValue("agentName")
+		sessionID := r.PathValue("sessionId")
+		diff, err := svc.GetAgentSessionDiff(r.Context(), wsID, agentName, sessionID)
+		if err != nil {
+			writeSessionError(w, err)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(diff))
+	}
+}
+
+func writeSessionError(w http.ResponseWriter, err error) {
+	var svcErr *service.ServiceError
+	status := http.StatusInternalServerError
+	msg := "internal server error"
+	if errors.As(err, &svcErr) {
+		status = handler.StatusForKind(svcErr.Kind)
+		msg = svcErr.Message
+	}
+	handler.WriteJSON(w, status, map[string]interface{}{"success": false, "error": msg})
 }
 
 // HandleGetSession returns metadata for a single session.

@@ -64,6 +64,7 @@ import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher/WorkspaceSwitc
 import { CreateIssueModal } from "@/components/CreateIssueModal/CreateIssueModal";
 import { CreateWorkspaceModal } from "@/components/CreateWorkspaceModal/CreateWorkspaceModal";
 import { CreateAgentModal } from "@/components/CreateAgentModal/CreateAgentModal";
+import { CreateAgentServiceModal } from "@/components/CreateAgentServiceModal";
 import {
   OnboardingFlow,
   type OnboardingStep,
@@ -520,6 +521,7 @@ function App() {
   const [showCreateIssue, setShowCreateIssue] = useState(false);
   const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
   const [showCreateAgent, setShowCreateAgent] = useState(false);
+  const [showCreateAgentService, setShowCreateAgentService] = useState(false);
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const [onboardingAction, setOnboardingAction] =
     useState<OnboardingAction | null>(null);
@@ -1555,6 +1557,10 @@ function App() {
               defaultRoleName: ONBOARDING_AGENT_ROLE,
             }
           : {})}
+        onSelectScheduledAgent={() => {
+          setShowCreateAgent(false);
+          setShowCreateAgentService(true);
+        }}
         onClose={() => setShowCreateAgent(false)}
         onSuccess={(agent) => {
           setShowCreateAgent(false);
@@ -1579,6 +1585,19 @@ function App() {
           } else {
             refetchWorkspaceAfterAgentCreate();
           }
+        }}
+      />
+      <CreateAgentServiceModal
+        isOpen={showCreateAgentService}
+        workspaceId={workspaceId}
+        onClose={() => setShowCreateAgentService(false)}
+        onSuccess={(service) => {
+          setShowCreateAgentService(false);
+          showToast(
+            `Scheduled agent "${service.name || service.id}" created`,
+            { type: "success" },
+          );
+          navigate(`/ws/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(service.id)}`);
         }}
       />
     </KeyboardShortcutProvider>

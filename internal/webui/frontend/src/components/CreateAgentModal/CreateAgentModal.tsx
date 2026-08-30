@@ -120,6 +120,7 @@ export interface CreateAgentModalProps {
   defaultName?: string;
   defaultRoleName?: BackgroundRole;
   defaultKind?: AgentKind;
+  onSelectScheduledAgent?: () => void;
   onClose: () => void;
   onSuccess: (agent: WorkspaceAgentInfo) => void;
 }
@@ -132,6 +133,7 @@ export function CreateAgentModal({
   defaultName,
   defaultRoleName,
   defaultKind,
+  onSelectScheduledAgent,
   onClose,
   onSuccess,
 }: CreateAgentModalProps): JSX.Element | null {
@@ -440,6 +442,19 @@ export function CreateAgentModal({
                   onSelect={() => selectBackground(template.role)}
                 />
               ))}
+              {onSelectScheduledAgent ? (
+                <AgentTemplateCard
+                  title="Scheduled agent"
+                  description="Runs a scripted role on a recurring schedule."
+                  glyph="S"
+                  accentColor="#7c3aed"
+                  selected={false}
+                  disabled={isSubmitting}
+                  ariaLabel="Scheduled agent, background agent"
+                  testId="create-agent-template-scheduled"
+                  onSelect={onSelectScheduledAgent}
+                />
+              ) : null}
             </div>
           </div>
 

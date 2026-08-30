@@ -16,6 +16,10 @@ export interface SortableAgentRowProps {
   onContextMenu?:
     | ((event: React.MouseEvent, agentName: string) => void)
     | undefined;
+  statusDotColor?: string | undefined;
+  title?: string | undefined;
+  testId?: string | undefined;
+  state?: string | undefined;
 }
 
 export function SortableAgentRow({
@@ -25,6 +29,10 @@ export function SortableAgentRow({
   selected = false,
   onArchive,
   onContextMenu,
+  statusDotColor,
+  title,
+  testId,
+  state,
 }: SortableAgentRowProps): JSX.Element {
   const {
     attributes,
@@ -51,7 +59,9 @@ export function SortableAgentRow({
       style={style}
       className={styles.agentRow}
       data-dragging={isDragging || undefined}
-      data-testid="sortable-agent-row"
+      data-testid={testId ?? "sortable-agent-row"}
+      data-state={state}
+      title={title}
       onContextMenu={(event) => {
         if (!onContextMenu) return;
         event.preventDefault();
@@ -64,6 +74,7 @@ export function SortableAgentRow({
         selected={selected}
         showRepoBadge={false}
         taskTitle={taskTitle}
+        statusDotColor={statusDotColor}
         className={styles.agentCardInRow}
         onClick={handleClick}
       />
