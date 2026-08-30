@@ -136,11 +136,14 @@ func receiveState(t *testing.T, states <-chan domain.PlacementState) domain.Plac
 	return ""
 }
 
-func parseCreateToken(t *testing.T, call CreateRequest) *leadtoken.OccupantClaims {
+// parseProcessToken reads the occupant token from the PTY PROCESS env, which
+// is the only place it belongs: create env is durable provider-side sandbox
+// metadata, so a bearer token there outlives the process that needs it.
+func parseProcessToken(t *testing.T, spec ProcessSpec) *leadtoken.OccupantClaims {
 	t.Helper()
-	token := call.Env[OccupantTokenEnv]
+	token := spec.Env[OccupantTokenEnv]
 	if token == "" {
-		t.Fatalf("create env missing %s", OccupantTokenEnv)
+		t.Fatalf("process env missing %s", OccupantTokenEnv)
 	}
 	claims, err := leadtoken.ParseOccupantToken(token, testTokenKey)
 	if err != nil {

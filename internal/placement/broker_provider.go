@@ -288,5 +288,12 @@ func validateProvisionRequest(req ProvisionRequest) error {
 	if req.RuntimeProvider == "" {
 		return fmt.Errorf("runtime provider required on provision request: %w", domain.ErrInvalid)
 	}
+	// Reject rather than overwrite: see reservedLeadEnvKeys.
+	if key := reservedLeadEnvKeyIn(req.Env); key != "" {
+		return fmt.Errorf("env %q is set by the placement broker and must not be supplied by the caller: %w", key, domain.ErrInvalid)
+	}
+	if key := reservedLeadEnvKeyIn(req.Process.Env); key != "" {
+		return fmt.Errorf("process env %q is set by the placement broker and must not be supplied by the caller: %w", key, domain.ErrInvalid)
+	}
 	return nil
 }

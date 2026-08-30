@@ -191,7 +191,9 @@ func providerCreateRequest(req ProvisionRequest, nodeID, token, deploymentID, le
 	labels[EnvironmentLabelKey] = deploymentID
 	labels["loom-workspace"] = req.WorkspaceKey
 	labels["loom-agent"] = req.AgentName
-	env := leadEnv(req.Env, req.WorkspaceKey, req.AgentName, nodeID, token, leadAPIBaseURL, bootPlan)
+	// Secrets are stripped here and supplied to the PTY process instead, so a
+	// bearer token never becomes durable provider-side sandbox metadata.
+	env := withoutSecretEnv(leadEnv(req.Env, req.WorkspaceKey, req.AgentName, nodeID, token, leadAPIBaseURL, bootPlan))
 	return CreateRequest{
 		WorkspaceKey:           req.WorkspaceKey,
 		AgentName:              req.AgentName,
@@ -242,6 +244,45 @@ func promptPathFromCommand(command []string) string {
 		}
 	}
 	return ""
+}
+
+// reservedLeadEnvKeys are set by the broker from placement identity. A caller
+// supplying one was silently OVERWRITTEN, which is the wrong failure: the
+// caller believes their value took effect, and the safety of the whole scheme
+// then rests on the overwrite list never drifting from this one. Rejecting the
+// key instead makes the two impossible to disagree.
+var reservedLeadEnvKeys = []string{
+	OccupantTokenEnv,
+	"LOOM_WORKSPACE",
+	"LOOM_AGENT_NAME",
+	"LOOM_LEAD_PLACEMENT_ID",
+	"LOOM_LEAD_API_URL",
+}
+
+// leadSecretEnvKeys must never reach a provider's sandbox-CREATE call. Create
+// env is durable provider-side state -- Daytona stores it on the sandbox and
+// serves it back from its API and console for the sandbox's lifetime -- while
+// process env lives only for the PTY. The occupant token is a bearer
+// credential, so it belongs only in the second.
+var leadSecretEnvKeys = []string{OccupantTokenEnv}
+
+// reservedLeadEnvKeyIn reports the first reserved key present in env, or "".
+func reservedLeadEnvKeyIn(env map[string]string) string {
+	for _, key := range reservedLeadEnvKeys {
+		if _, ok := env[key]; ok {
+			return key
+		}
+	}
+	return ""
+}
+
+// withoutSecretEnv returns env stripped of every credential-bearing key.
+func withoutSecretEnv(env map[string]string) map[string]string {
+	out := copyMap(env)
+	for _, key := range leadSecretEnvKeys {
+		delete(out, key)
+	}
+	return out
 }
 
 func leadEnv(base map[string]string, workspace, agent, nodeID, token, leadAPIBaseURL string, bootPlan leadBootPlan) map[string]string {

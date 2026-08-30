@@ -198,7 +198,7 @@ func TestProvisionCreateLabelAndToken(t *testing.T) {
 	if got := call.Labels[EnvironmentLabelKey]; got != testDeploymentID {
 		t.Fatalf("create label %s = %q, want %q", EnvironmentLabelKey, got, testDeploymentID)
 	}
-	claims := parseCreateToken(t, call)
+	claims := parseProcessToken(t, provider.startProcessCall(t, 0))
 	if claims.PlacementID != result.Node.NodeID || claims.Generation != result.Node.Placement.Generation {
 		t.Fatalf("claims placement/gen = %q/%d, want %q/%d",
 			claims.PlacementID, claims.Generation, result.Node.NodeID, result.Node.Placement.Generation)
