@@ -3,6 +3,7 @@ import { useStore } from "zustand";
 
 import { useIssueStoreInstance } from "@/hooks/common";
 import { useAgentSessions } from "@/hooks/terminal";
+import type { Issue } from "@/types";
 import type { SessionRecord } from "@/types/agent";
 import { sessionTotalTokens } from "@/utils/sessionUsage";
 
@@ -13,8 +14,10 @@ import styles from "./SessionsTab.module.css";
 
 export function AgentRunsPanel({
   agentName,
+  onTaskClick,
 }: {
   agentName: string;
+  onTaskClick?: (issue: Issue) => void;
 }): JSX.Element {
   const { sessions, isLoading, error } = useAgentSessions(agentName);
   const issueStore = useIssueStoreInstance();
@@ -39,6 +42,9 @@ export function AgentRunsPanel({
   const summary = useMemo(() => computeSummary(sessions), [sessions]);
   const getTicketLabel = (session: SessionRecord): SessionRowLabel =>
     agentRunTicketLabel(session, issuesMap.get(session.task_id)?.title);
+  const selectedIssue = selectedSession
+    ? issuesMap.get(selectedSession.task_id)
+    : undefined;
 
   if (error && sessions.length === 0) {
     return (
@@ -65,12 +71,16 @@ export function AgentRunsPanel({
           isLoading={isLoading}
           summary={summary}
           getRowLabel={getTicketLabel}
+          compactRows
         />
         {selectedSession ? (
           <SessionDetailView
             agentName={agentName}
             session={selectedSession}
             contextLabel={getTicketLabel(selectedSession)}
+            {...(selectedIssue && onTaskClick
+              ? { onContextClick: () => onTaskClick(selectedIssue) }
+              : {})}
           />
         ) : (
           <div className={styles.detailEmpty}>Select a run to view details</div>

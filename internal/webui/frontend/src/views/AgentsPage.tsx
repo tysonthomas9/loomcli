@@ -410,7 +410,10 @@ function AgentsPageInner(): JSX.Element {
       switch (tab) {
         case "runs":
           return agentName ? (
-            <AgentRunsPanel agentName={agentName} />
+            <AgentRunsPanel
+              agentName={agentName}
+              onTaskClick={handleTaskClick}
+            />
           ) : (
             <div className={styles.tabFallback}>
               Select an agent to view runs.
@@ -572,6 +575,7 @@ function AgentsPageInner(): JSX.Element {
     },
     [
       agentName,
+      handleTaskClick,
       pendingTerminalInput,
       selected,
       selColor,

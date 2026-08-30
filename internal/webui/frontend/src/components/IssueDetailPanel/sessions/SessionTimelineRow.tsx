@@ -17,6 +17,7 @@ export interface SessionTimelineRowProps {
   isSelected: boolean;
   onClick: () => void;
   label?: SessionRowLabel;
+  compact?: boolean;
 }
 
 export interface SessionRowLabel {
@@ -68,6 +69,7 @@ export function SessionTimelineRow({
   isSelected,
   onClick,
   label,
+  compact = false,
 }: SessionTimelineRowProps): JSX.Element {
   const totalTokens = sessionTotalTokens(session);
   const errorSummary = runErrorSummary(session);
@@ -83,7 +85,7 @@ export function SessionTimelineRow({
 
   return (
     <div
-      className={`${styles.row} ${isSelected ? styles.selected : ""}`}
+      className={`${styles.row} ${compact ? styles.compactRow : ""} ${isSelected ? styles.selected : ""}`}
       onClick={onClick}
       role="button"
       tabIndex={0}
@@ -106,51 +108,65 @@ export function SessionTimelineRow({
           <span className={styles.agentName}>{primaryLabel}</span>
           {when && <span className={styles.rowWhen}>{when}</span>}
         </div>
-        {label?.secondary && (
-          <div className={styles.rowContext}>{label.secondary}</div>
-        )}
-        <div className={styles.rowPills}>
-          {session.phase && (
-            <span className={styles.phaseBadge} data-phase={session.phase}>
-              {session.phase}
+        {compact ? (
+          <div className={styles.compactMeta}>
+            {label?.secondary && <span>{label.secondary}</span>}
+            <span className={styles.compactStatus} data-status={session.status}>
+              {statusLabel}
             </span>
-          )}
-          <span className={styles.statusPill} data-status={session.status}>
-            {statusLabel}
-          </span>
-        </div>
+            <span>{formatDuration(session.duration_s)}</span>
+          </div>
+        ) : (
+          <>
+            {label?.secondary && (
+              <div className={styles.rowContext}>{label.secondary}</div>
+            )}
+            <div className={styles.rowPills}>
+              {session.phase && (
+                <span className={styles.phaseBadge} data-phase={session.phase}>
+                  {session.phase}
+                </span>
+              )}
+              <span className={styles.statusPill} data-status={session.status}>
+                {statusLabel}
+              </span>
+            </div>
+          </>
+        )}
         {errorSummary && (
           <div className={styles.errorSummary}>{errorSummary}</div>
         )}
-        <div className={styles.rowBottom}>
-          <span className={styles.duration}>
-            {formatDuration(session.duration_s)}
-          </span>
-          <span aria-hidden="true">·</span>
-          <span className={styles.tokens}>{formatTokens(totalTokens)}</span>
-          {showCost && (
-            <>
-              <span aria-hidden="true">·</span>
-              <span className={styles.cost}>
-                {formatCost(session.estimated_cost_usd)}
-              </span>
-            </>
-          )}
-          {showFiles && (
-            <>
-              <span aria-hidden="true">·</span>
-              <span className={styles.filesStat} data-testid="row-files-stat">
-                {session.files_changed}
-                {(session.lines_added > 0 || session.lines_removed > 0) && (
-                  <span className={styles.filesDelta}>
-                    {" "}
-                    +{session.lines_added} −{session.lines_removed}
-                  </span>
-                )}
-              </span>
-            </>
-          )}
-        </div>
+        {!compact && (
+          <div className={styles.rowBottom}>
+            <span className={styles.duration}>
+              {formatDuration(session.duration_s)}
+            </span>
+            <span aria-hidden="true">·</span>
+            <span className={styles.tokens}>{formatTokens(totalTokens)}</span>
+            {showCost && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className={styles.cost}>
+                  {formatCost(session.estimated_cost_usd)}
+                </span>
+              </>
+            )}
+            {showFiles && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className={styles.filesStat} data-testid="row-files-stat">
+                  {session.files_changed}
+                  {(session.lines_added > 0 || session.lines_removed > 0) && (
+                    <span className={styles.filesDelta}>
+                      {" "}
+                      +{session.lines_added} −{session.lines_removed}
+                    </span>
+                  )}
+                </span>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

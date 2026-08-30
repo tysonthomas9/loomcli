@@ -116,6 +116,26 @@ describe("SessionDetailView", () => {
       expect(screen.getByText("opus-4")).toBeInTheDocument();
     });
 
+    it("opens the contextual ticket from the masthead", () => {
+      const onContextClick = vi.fn();
+      render(
+        <SessionDetailView
+          taskId="task-1"
+          session={defaultSession}
+          contextLabel={{
+            primary: "Local mode coder dogfood",
+            secondary: "LOCALMODE-3",
+          }}
+          onContextClick={onContextClick}
+        />,
+      );
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Open ticket LOCALMODE-3" }),
+      );
+      expect(onContextClick).toHaveBeenCalledTimes(1);
+    });
+
     it("omits the model label when model is absent", () => {
       const session = createSession({ model: undefined });
       render(<SessionDetailView taskId="task-1" session={session} />);

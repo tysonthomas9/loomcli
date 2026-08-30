@@ -170,6 +170,10 @@
   border-left-color: var(--color-primary);
 }
 
+.compactRow {
+  padding-block: 10px;
+}
+
 .rowMain {
   flex: 1;
   min-width: 0;
@@ -211,6 +215,42 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.compactMeta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0;
+  color: var(--color-text-tertiary);
+  font-size: 10px;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.compactMeta > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compactMeta > span + span::before {
+  content: "·";
+  margin-inline: 5px;
+  color: var(--color-text-tertiary);
+}
+
+.compactStatus[data-status="completed"] {
+  color: var(--color-status-success, #16a34a);
+}
+
+.compactStatus[data-status="failed"] {
+  color: var(--color-status-danger, #dc2626);
+}
+
+.compactStatus[data-status="running"] {
+  color: var(--color-status-warning, #ca8a04);
 }
 
 .rowPills {
@@ -387,6 +427,32 @@
   flex: none;
   overflow: visible;
   text-overflow: unset;
+}
+
+.mastheadTicketLink {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.mastheadTicketLink:hover .agentName,
+.mastheadTicketLink:focus-visible .agentName {
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.mastheadTicketLink:focus-visible {
+  border-radius: var(--radius-sm);
+  outline: 2px solid var(--color-primary);
+  outline-offset: 3px;
 }
 
 .agentBackend {

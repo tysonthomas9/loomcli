@@ -78,6 +78,24 @@ describe("SessionTimelineRow", () => {
       ).toBeInTheDocument();
     });
 
+    it("uses a compact ticket summary for agent-scoped runs", () => {
+      render(
+        <SessionTimelineRow
+          {...defaultProps}
+          compact
+          label={{
+            primary: "Local mode coder dogfood",
+            secondary: "LOCALMODE-3",
+          }}
+        />,
+      );
+
+      expect(screen.getByText("LOCALMODE-3")).toBeInTheDocument();
+      expect(screen.getByText("Completed")).toBeInTheDocument();
+      expect(screen.getByText("5m 0s")).toBeInTheDocument();
+      expect(screen.queryByText("8.0K")).not.toBeInTheDocument();
+    });
+
     it("renders with correct test id", () => {
       render(<SessionTimelineRow {...defaultProps} />);
       expect(screen.getByTestId("session-row-sess-1")).toBeInTheDocument();

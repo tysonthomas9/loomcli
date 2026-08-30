@@ -29,6 +29,7 @@ export interface SessionDetailViewProps {
   agentName?: string;
   session: SessionRecord;
   contextLabel?: SessionRowLabel;
+  onContextClick?: () => void;
 }
 
 type InnerTab = "transcript" | "diff";
@@ -67,6 +68,7 @@ export function SessionDetailView({
   agentName,
   session,
   contextLabel,
+  onContextClick,
 }: SessionDetailViewProps): JSX.Element {
   const [innerTab, setInnerTab] = useState<InnerTab>("transcript");
 
@@ -115,15 +117,36 @@ export function SessionDetailView({
       {/* ── Masthead ── */}
       <header className={styles.masthead}>
         <div className={styles.mastheadHeader}>
-          <span className={styles.agentName}>
-            {contextLabel?.primary ?? session.agent_name}
-          </span>
-          {contextLabel?.secondary && (
+          {contextLabel && onContextClick ? (
+            <button
+              type="button"
+              className={styles.mastheadTicketLink}
+              onClick={onContextClick}
+              aria-label={`Open ticket ${contextLabel.secondary ?? contextLabel.primary}`}
+            >
+              <span className={styles.agentName}>{contextLabel.primary}</span>
+              {contextLabel.secondary && (
+                <>
+                  <span className={styles.sep}>·</span>
+                  <span className={styles.agentBackend}>
+                    {contextLabel.secondary}
+                  </span>
+                </>
+              )}
+            </button>
+          ) : (
             <>
-              <span className={styles.sep}>·</span>
-              <span className={styles.agentBackend}>
-                {contextLabel.secondary}
+              <span className={styles.agentName}>
+                {contextLabel?.primary ?? session.agent_name}
               </span>
+              {contextLabel?.secondary && (
+                <>
+                  <span className={styles.sep}>·</span>
+                  <span className={styles.agentBackend}>
+                    {contextLabel.secondary}
+                  </span>
+                </>
+              )}
             </>
           )}
           <span className={styles.sep}>·</span>

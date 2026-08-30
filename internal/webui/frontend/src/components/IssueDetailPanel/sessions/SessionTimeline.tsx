@@ -24,6 +24,7 @@ export interface SessionTimelineProps {
   isLoading: boolean;
   summary: RunRailSummary;
   getRowLabel?: (session: SessionRecord) => SessionRowLabel;
+  compactRows?: boolean;
 }
 
 export function SessionTimeline({
@@ -33,6 +34,7 @@ export function SessionTimeline({
   isLoading,
   summary,
   getRowLabel,
+  compactRows = false,
 }: SessionTimelineProps): JSX.Element {
   if (isLoading && sessions.length === 0) {
     return (
@@ -90,6 +92,7 @@ export function SessionTimeline({
             isSelected={selectedId === session.session_id}
             onClick={() => onSelect(session.session_id)}
             {...(getRowLabel ? { label: getRowLabel(session) } : {})}
+            compact={compactRows}
           />
         ))}
       </div>
