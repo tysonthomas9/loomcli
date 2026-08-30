@@ -6,7 +6,6 @@ import type {
   DriverRunStatus,
   RunEventDTO,
 } from "@/api/agentServices";
-import { MarkdownRenderer } from "@/components/IssueDetailPanel";
 import { RolePromptCard } from "@/components/RolePromptCard";
 import {
   useAgentServiceJournal,
@@ -25,6 +24,7 @@ import {
 import { formatStatusLabel } from "@/utils/issue";
 
 import styles from "./AgentServiceDetail.module.css";
+import { JournalHistory } from "./JournalHistory";
 import { HarnessLog, TaskLogsSection } from "./RunLogs";
 import { AgentServiceSettings } from "./AgentServiceSettings";
 
@@ -554,10 +554,7 @@ export function AgentServiceDetail({
                     Showing the last 512 KiB of this journal.
                   </p>
                 ) : null}
-                <MarkdownRenderer
-                  content={journal.content}
-                  className={styles.journalContent}
-                />
+                <JournalHistory content={journal.content} />
               </>
             ) : (
               <p className={styles.emptyText}>No journal content.</p>
