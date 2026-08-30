@@ -2,27 +2,24 @@
  * @vitest-environment jsdom
  */
 
-/**
- * Unit tests for AgentLogsTab.
- *
- * Regression guard: an archive that comes back empty (e.g. a daemon-supervised
- * agent whose log file does not exist yet, which getAgentLogArchive turns into
- * an empty line list) must render an explicit "no logs" state — never the
- * misleading "connected" label over a blank viewer.
- */
-
 import { render, screen, waitFor } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom";
 
 import { AgentLogsTab } from "./AgentLogsTab";
 
 const getAgentTerminalInfo = vi.fn();
-const getAgentLogArchive = vi.fn();
+const ensureAgentTerminalSession = vi.fn();
+const useLogStream = vi.fn();
 
 vi.mock("@/hooks/api", () => ({
   getAgentTerminalInfo: (...args: unknown[]) => getAgentTerminalInfo(...args),
-  getAgentLogArchive: (...args: unknown[]) => getAgentLogArchive(...args),
+  ensureAgentTerminalSession: (...args: unknown[]) =>
+    ensureAgentTerminalSession(...args),
+}));
+
+vi.mock("@/hooks/terminal/useLogStream", () => ({
+  useLogStream: (...args: unknown[]) => useLogStream(...args),
 }));
 
 vi.mock("@/hooks/workspace", () => ({
@@ -40,15 +37,21 @@ function statusEl(): Element | null {
 describe("AgentLogsTab", () => {
   beforeEach(() => {
     getAgentTerminalInfo.mockReset();
-    getAgentLogArchive.mockReset();
+    ensureAgentTerminalSession.mockReset();
+    useLogStream.mockReset();
+    useLogStream.mockReturnValue({
+      content: "",
+      state: "disconnected",
+      error: null,
+    });
   });
 
-  it("shows an explicit empty state (not 'connected') when the archive is empty", async () => {
+  it("shows an explicit empty state when a connected live stream has no bytes", async () => {
     getAgentTerminalInfo.mockResolvedValue("archive");
-    getAgentLogArchive.mockResolvedValue({
-      lines: [],
-      lineCount: 0,
-      startLine: 1,
+    useLogStream.mockReturnValue({
+      content: "",
+      state: "connected",
+      error: null,
     });
 
     render(<AgentLogsTab agentName="ember" isActive />);
@@ -56,32 +59,62 @@ describe("AgentLogsTab", () => {
     const empty = await screen.findByTestId("archive-empty");
     expect(empty).toHaveTextContent(/no logs available/i);
     expect(statusEl()).toHaveAttribute("data-state", "empty");
-    // The crux of the bug: it must NOT claim a populated, connected log.
-    expect(statusEl()).not.toHaveAttribute("data-state", "connected");
     expect(screen.queryByTestId("terminal-container")).toBeNull();
   });
 
-  it("shows the snapshot and 'connected' when the archive has lines", async () => {
+  it("uses the live stream for visible archive-mode agents", async () => {
     getAgentTerminalInfo.mockResolvedValue("archive");
-    getAgentLogArchive.mockResolvedValue({
-      lines: ["alpha", "beta"],
-      lineCount: 2,
-      startLine: 1,
+    useLogStream.mockReturnValue({
+      content: "alpha\nbeta",
+      state: "connected",
+      error: null,
     });
 
     render(<AgentLogsTab agentName="ember" isActive />);
 
-    // findByTestId resolves on the container's FIRST render, which can happen
-    // after the terminal-info resolve but before the archive lines land — the
-    // immediate content/state assertions then race the second update (seen as
-    // a CI-only flake). Await the content and the state themselves.
     const pre = await screen.findByTestId("terminal-container");
-    await waitFor(() => expect(pre).toHaveTextContent("alpha"));
+    expect(pre).toHaveTextContent("alpha");
     expect(pre).toHaveTextContent("beta");
+    expect(screen.getByRole("heading", { name: "Live log" })).toBeVisible();
     await waitFor(() =>
-      expect(statusEl()).toHaveAttribute("data-state", "connected"),
+      expect(useLogStream).toHaveBeenLastCalledWith({
+        workspaceId: "default",
+        streamPath: "/agents/ember/logs/stream",
+        enabled: true,
+      }),
     );
-    expect(screen.queryByTestId("archive-empty")).toBeNull();
+  });
+
+  it("does not stream while the tab is hidden", () => {
+    render(<AgentLogsTab agentName="ember" isActive={false} />);
+
+    expect(getAgentTerminalInfo).not.toHaveBeenCalled();
+    expect(useLogStream).toHaveBeenLastCalledWith({
+      workspaceId: "default",
+      streamPath: "/agents/ember/logs/stream",
+      enabled: false,
+    });
+  });
+
+  it("keeps tmux preferred when a session exists", async () => {
+    getAgentTerminalInfo.mockResolvedValue("tmux");
+    ensureAgentTerminalSession.mockResolvedValue({
+      session_name: "loom-ember",
+      backend: "codex",
+      agent_id: "ember",
+    });
+
+    render(<AgentLogsTab agentName="ember" isActive />);
+
+    expect(await screen.findByTestId("embedded-terminal")).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Live terminal" }),
+    ).toBeVisible();
+    expect(useLogStream).toHaveBeenLastCalledWith({
+      workspaceId: "default",
+      streamPath: "/agents/ember/logs/stream",
+      enabled: false,
+    });
   });
 
   it("reports disconnected when the terminal-info lookup fails", async () => {

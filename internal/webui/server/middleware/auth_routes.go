@@ -55,6 +55,9 @@ func isPublicRoute(method, path string) bool {
 		// Workspace-scoped agent terminal WebSocket (/api/workspaces/{ws}/agents/{name}/terminal/ws)
 		// uses one-time token auth (validated in handler). Matched via stripWorkspacePrefix normalization.
 		return true
+	case strings.HasPrefix(normalizedPath, "/api/agents/") && strings.HasSuffix(normalizedPath, "/logs/stream"):
+		// Workspace-scoped agent log SSE uses a one-time token validated by its handler.
+		return true
 	case !strings.HasPrefix(normalizedPath, "/api/"):
 		// Frontend static files and SPA routes
 		return true

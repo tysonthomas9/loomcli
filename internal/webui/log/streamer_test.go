@@ -92,6 +92,14 @@ func decodeChunkB64(t *testing.T, payload LogChunkPayload) string {
 	return string(b)
 }
 
+func streamOffset(offset int64) StreamStart {
+	return StreamStart{Offset: &offset}
+}
+
+func streamTailBytes(tailBytes int64) StreamStart {
+	return StreamStart{TailBytes: &tailBytes}
+}
+
 func TestNewLogStreamer_Success(t *testing.T) {
 	tmpDir := t.TempDir()
 	logFile := filepath.Join(tmpDir, "test.log")
@@ -131,7 +139,7 @@ func TestLogStreamer_Stream_InitialContentRawChunk(t *testing.T) {
 	defer func() { _ = s.Close() }()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = s.Stream(r.Context(), w, 0)
+		_ = s.Stream(r.Context(), w, StreamStart{})
 	}))
 	defer server.Close()
 
@@ -182,7 +190,7 @@ func TestLogStreamer_Stream_SinceBytes(t *testing.T) {
 	defer func() { _ = s.Close() }()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = s.Stream(r.Context(), w, 3)
+		_ = s.Stream(r.Context(), w, streamOffset(3))
 	}))
 	defer server.Close()
 
@@ -211,6 +219,93 @@ func TestLogStreamer_Stream_SinceBytes(t *testing.T) {
 	}
 }
 
+func TestLogStreamer_Stream_TailBytes(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	logDir := filepath.Join(tmpHome, ".loom", "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("failed to create log dir: %v", err)
+	}
+
+	logFile := filepath.Join(logDir, "test.log")
+	if err := os.WriteFile(logFile, []byte("abcdef"), 0o644); err != nil {
+		t.Fatalf("failed to write log file: %v", err)
+	}
+
+	s, err := NewLogStreamer(logFile)
+	if err != nil {
+		t.Fatalf("NewLogStreamer() error = %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = s.Stream(r.Context(), w, streamTailBytes(4))
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client := connectTestSSE(t, ctx, server.URL)
+	defer client.close()
+
+	evt, err := client.readEvent(5 * time.Second)
+	if err != nil {
+		t.Fatalf("failed to read event: %v", err)
+	}
+	var payload LogChunkPayload
+	if err := json.Unmarshal([]byte(evt.Data), &payload); err != nil {
+		t.Fatalf("failed to parse payload: %v", err)
+	}
+	if got := decodeChunkB64(t, payload); got != "cdef" {
+		t.Fatalf("decoded chunk = %q, want %q", got, "cdef")
+	}
+	if payload.ByteOffset != 6 {
+		t.Fatalf("byte_offset = %d, want 6", payload.ByteOffset)
+	}
+}
+
+func TestLogStreamer_Stream_MissingFileThenCreate(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	logDir := filepath.Join(tmpHome, ".loom", "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("failed to create log dir: %v", err)
+	}
+
+	logFile := filepath.Join(logDir, "missing.log")
+	s, err := NewLogStreamer(logFile)
+	if err != nil {
+		t.Fatalf("NewLogStreamer() error = %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = s.Stream(r.Context(), w, StreamStart{})
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client := connectTestSSE(t, ctx, server.URL)
+	defer client.close()
+
+	if err := os.WriteFile(logFile, []byte("created\n"), 0o644); err != nil {
+		t.Fatalf("failed to create log file: %v", err)
+	}
+
+	evt, err := client.readEvent(5 * time.Second)
+	if err != nil {
+		t.Fatalf("failed to read create event: %v", err)
+	}
+	var payload LogChunkPayload
+	if err := json.Unmarshal([]byte(evt.Data), &payload); err != nil {
+		t.Fatalf("failed to parse payload: %v", err)
+	}
+	if got := decodeChunkB64(t, payload); got != "created\n" {
+		t.Fatalf("decoded chunk = %q, want %q", got, "created\\n")
+	}
+}
+
 func TestLogStreamer_Stream_AppendAndTruncate(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
@@ -231,7 +326,7 @@ func TestLogStreamer_Stream_AppendAndTruncate(t *testing.T) {
 	defer func() { _ = s.Close() }()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = s.Stream(r.Context(), w, 0)
+		_ = s.Stream(r.Context(), w, StreamStart{})
 	}))
 	defer server.Close()
 
@@ -350,11 +445,31 @@ func TestLogStreamer_StreamStopsOnWriteFailure(t *testing.T) {
 
 	writeErr := errors.New("client disconnected")
 	rw := &failAtWriteResponseWriter{failAt: 2, err: writeErr}
-	if err := s.Stream(context.Background(), rw, 0); !errors.Is(err, writeErr) {
+	if err := s.Stream(context.Background(), rw, StreamStart{}); !errors.Is(err, writeErr) {
 		t.Fatalf("Stream() error = %v, want %v", err, writeErr)
 	}
 	if rw.flushes != 1 {
 		t.Fatalf("flush count = %d, want retry frame only", rw.flushes)
+	}
+}
+
+func TestLogStreamer_CloseReleasesWatcher(t *testing.T) {
+	tmpDir := t.TempDir()
+	s, err := NewLogStreamer(filepath.Join(tmpDir, "test.log"))
+	if err != nil {
+		t.Fatalf("NewLogStreamer() error = %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	select {
+	case _, ok := <-s.watcher.Events:
+		if ok {
+			t.Fatal("watcher events channel remains open after Close")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("watcher events channel did not close")
 	}
 }
 

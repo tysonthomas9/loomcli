@@ -2187,6 +2187,18 @@ type IssueTabState struct {
 	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
+// LogChunkPayload Raw log bytes carried by a resumable log-chunk SSE event
+type LogChunkPayload struct {
+	// ByteOffset File byte offset immediately after this chunk
+	ByteOffset int64 `json:"byte_offset"`
+
+	// ChunkB64 Base64-encoded raw log bytes
+	ChunkB64 string `json:"chunk_b64"`
+
+	// Timestamp UTC time when the chunk was read
+	Timestamp time.Time `json:"timestamp"`
+}
+
 // MessageResponse defines model for MessageResponse.
 type MessageResponse struct {
 	Message string                 `json:"message"`
@@ -3142,6 +3154,18 @@ type GetAgentLogParams struct {
 
 	// BeforeLine Read lines before this line number (for pagination)
 	BeforeLine *int64 `form:"before_line,omitempty" json:"before_line,omitempty"`
+}
+
+// StreamAgentLogParams defines parameters for StreamAgentLog.
+type StreamAgentLogParams struct {
+	// Token One-time SSE auth token (for EventSource clients)
+	Token *string `form:"token,omitempty" json:"token,omitempty"`
+
+	// Offset Byte offset to resume replay from; wins over tail_bytes
+	Offset *int64 `form:"offset,omitempty" json:"offset,omitempty"`
+
+	// TailBytes Initial number of bytes to replay from the end of the log
+	TailBytes *int64 `form:"tail_bytes,omitempty" json:"tail_bytes,omitempty"`
 }
 
 // StopAgentJSONBody defines parameters for StopAgent.
