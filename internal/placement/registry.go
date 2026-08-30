@@ -164,3 +164,27 @@ func (b *Broker) maxLiveFor(kind domain.RuntimeProvider) ResourceSize {
 	}
 	return b.maxLiveByProvider[kind]
 }
+
+// ParkingCapable lets a provider declare that it CANNOT park an idle sandbox.
+//
+// Parking is expressed as an autostop interval, which assumes the platform can
+// stop and later restart a sandbox. Not every provider can: exe.dev has no
+// stop/start at all, so SetAutostopInterval has nothing to implement and would
+// have to fail.
+//
+// A provider that does not implement this is assumed parking-capable. That
+// default is deliberate, chosen on which mistake is worse: assuming capability
+// wrongly makes SetAutostopInterval fail LOUDLY, while assuming incapability
+// wrongly would silently stop arming autostop on a provider that does support
+// it -- leads that never park, billing forever, with nothing to notice it.
+type ParkingCapable interface {
+	SupportsParking() bool
+}
+
+// supportsParking reports whether this provider can park idle sandboxes.
+func (h providerHandle) supportsParking() bool {
+	if capable, ok := h.adapter.(ParkingCapable); ok {
+		return capable.SupportsParking()
+	}
+	return true
+}

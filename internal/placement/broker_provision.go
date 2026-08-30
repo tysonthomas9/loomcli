@@ -568,6 +568,15 @@ func (b *Broker) armParkingAutostop(ctx context.Context, prov providerHandle, sa
 }
 
 func (b *Broker) setAutostopInterval(ctx context.Context, prov providerHandle, sandboxID string, interval time.Duration) error {
+	// The capability gate lives HERE, at the single choke point, rather than at
+	// each caller. Parking has three call sites -- initial arming, resume
+	// shielding, and post-resume restoration -- and gating only the obvious
+	// one (arming) would leave a non-parking provider failing its resume:
+	// shielding returns its error straight out of resumeLivePlacement, so the
+	// lead could never be revived at all. One gate cannot drift from itself.
+	if !prov.supportsParking() {
+		return nil
+	}
 	stopCtx, cancel := detachedTimeout(ctx, detachedProviderOperationTimeout)
 	defer cancel()
 	if err := prov.adapter.SetAutostopInterval(stopCtx, sandboxID, interval); err != nil {
