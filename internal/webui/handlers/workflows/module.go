@@ -240,6 +240,10 @@ func (m *Module) streamRunEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	// Commit the response now so clients observe the stream as open even when
+	// the first page is empty — a completed run never produces another event,
+	// and the old loop flushed every fetched page, empty ones included.
+	_ = http.NewResponseController(w).Flush()
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
