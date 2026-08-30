@@ -43,6 +43,12 @@ function behaviorLabel(service: AgentServiceDTO): string {
   return "Autonomous agent";
 }
 
+function serviceSubtitle(service: AgentServiceDTO): string {
+  const label = behaviorLabel(service);
+  const displayName = service.name.trim() || service.id;
+  return displayName === service.id ? label : `${label} · ${service.id}`;
+}
+
 function runTimestamp(run: DriverRunDTO): string {
   return formatFireTime(run.startedAt ?? run.createdAt);
 }
@@ -259,9 +265,7 @@ export function AgentServiceDetail({
         <div>
           <p className={styles.eyebrow}>Background agent</p>
           <h1 className={styles.name}>{service.name.trim() || service.id}</h1>
-          <p className={styles.subtitle}>
-            {behaviorLabel(service)} · {service.id}
-          </p>
+          <p className={styles.subtitle}>{serviceSubtitle(service)}</p>
         </div>
         <span
           className={styles.healthPill}
@@ -498,7 +502,7 @@ export function AgentServiceDetail({
         </div>
       ) : activeTab === "settings" ? (
         <div
-          className={styles.scrollArea}
+          className={`${styles.scrollArea} ${styles.settingsPanel}`}
           role="tabpanel"
           id="agent-service-settings-panel"
           aria-labelledby="agent-service-settings-tab"
@@ -515,6 +519,7 @@ export function AgentServiceDetail({
             <RolePromptCard
               workspaceId={workspaceId}
               roleName={service.behavior.roleName.trim()}
+              fillHeight
             />
           ) : null}
         </div>

@@ -360,6 +360,62 @@ describe("SessionDetailView", () => {
       expect(container.textContent).not.toContain("`add_state`");
     });
 
+    it("renders Scout result JSON as recommendation content with raw output available", () => {
+      mockUseSessionTranscript.mockReturnValue({
+        entries: [
+          createEntry({
+            seq: 1,
+            role: "assistant",
+            type: "text",
+            text: JSON.stringify({
+              recommendations: [
+                {
+                  title: "Document the fixture contract",
+                  description:
+                    "Clarify the gate.\n\n## Acceptance Criteria\n\n- Document `make gate`.",
+                  rationale: "The validation entry point is undocumented.",
+                  repo: "source-repo",
+                  labels: ["recommended", "repo:source-repo"],
+                  priority: 3,
+                  anchors: ["README.md", "Makefile"],
+                },
+              ],
+              skipped: [{ title: "Existing work", reason: "Already tracked" }],
+              agentsMd: "## Workspace Overview\n\nOne local fixture.",
+            }),
+          }),
+        ],
+        isLoading: false,
+        error: null,
+      });
+
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
+
+      expect(screen.getByTestId("scout-result")).toBeInTheDocument();
+      expect(
+        screen.getByText("Document the fixture contract"),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Acceptance Criteria")).toBeInTheDocument();
+      expect(screen.getByText("README.md")).toBeInTheDocument();
+      expect(screen.getByText("Skipped candidates (1)")).toBeInTheDocument();
+      expect(screen.getByText("Workspace notes")).toBeInTheDocument();
+      expect(screen.getByText("Raw result")).toBeInTheDocument();
+    });
+
+    it("keeps malformed Scout-like JSON visible as ordinary transcript text", () => {
+      const content = '{"recommendations": "invalid", "skipped": []}';
+      mockUseSessionTranscript.mockReturnValue({
+        entries: [createEntry({ seq: 1, text: content })],
+        isLoading: false,
+        error: null,
+      });
+
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
+
+      expect(screen.queryByTestId("scout-result")).not.toBeInTheDocument();
+      expect(screen.getByText(content)).toBeInTheDocument();
+    });
+
     it("renders a user-message interjection as formatted Markdown", () => {
       mockUseSessionTranscript.mockReturnValue({
         entries: [

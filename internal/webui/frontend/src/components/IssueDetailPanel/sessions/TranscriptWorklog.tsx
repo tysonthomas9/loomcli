@@ -5,6 +5,7 @@ import type { TranscriptEntry } from "@/types/agent";
 import { argPreview } from "@/utils/toolPreview";
 
 import { MarkdownRenderer } from "../sections/MarkdownRenderer";
+import { parseScoutResult, ScoutResultMessage } from "./ScoutResultMessage";
 import styles from "./SessionsTab.module.css";
 
 type ToolItem = {
@@ -59,7 +60,9 @@ function isSyntheticUserContext(text: string): boolean {
   );
 }
 
-export function groupTranscriptEvents(entries: TranscriptEntry[]): GroupedEvents {
+export function groupTranscriptEvents(
+  entries: TranscriptEntry[],
+): GroupedEvents {
   const resultById = new Map<string, TranscriptEntry>();
   for (const entry of entries) {
     if (entry.type === "tool_result" && entry.tool_use_id) {
@@ -232,11 +235,7 @@ export function TranscriptWorklog({
             </div>
             {block.items.map((item) =>
               item.kind === "text" ? (
-                <MarkdownRenderer
-                  key={item.seq}
-                  content={item.text}
-                  className={styles.msg}
-                />
+                <TranscriptText key={item.seq} content={item.text} />
               ) : (
                 <ToolPill
                   key={item.seq}
@@ -262,4 +261,10 @@ export function TranscriptWorklog({
       })}
     </>
   );
+}
+
+function TranscriptText({ content }: { content: string }): JSX.Element {
+  if (parseScoutResult(content))
+    return <ScoutResultMessage content={content} />;
+  return <MarkdownRenderer content={content} className={styles.msg} />;
 }

@@ -220,6 +220,20 @@ describe("AgentServiceDetail", () => {
     );
   });
 
+  it("does not repeat the service ID when it is also the display name", () => {
+    render(
+      <AgentServiceDetail
+        workspaceId="WS"
+        service={{ ...service, id: "test", name: "test" }}
+      />,
+    );
+
+    expect(screen.getByText("Scout scripted role")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Scout scripted role · test"),
+    ).not.toBeInTheDocument();
+  });
+
   it("disables and re-enables a scripted instance through desiredState", async () => {
     render(<AgentServiceDetail workspaceId="WS" service={service} />);
     fireEvent.click(screen.getByRole("tab", { name: "Settings" }));

@@ -12,6 +12,7 @@ import styles from "./RolePromptCard.module.css";
 export interface RolePromptCardProps {
   workspaceId: string;
   roleName: string;
+  fillHeight?: boolean;
 }
 
 const sourceLabels: Record<RoleSourceKind, string> = {
@@ -25,6 +26,7 @@ const sourceLabels: Record<RoleSourceKind, string> = {
 export function RolePromptCard({
   workspaceId,
   roleName,
+  fillHeight = false,
 }: RolePromptCardProps): JSX.Element {
   const [role, setRole] = useState<RolePromptDTO | null>(null);
   const [draft, setDraft] = useState("");
@@ -92,7 +94,10 @@ export function RolePromptCard({
   };
 
   return (
-    <section className={styles.card} data-testid="role-prompt-card">
+    <section
+      className={`${styles.card} ${fillHeight ? styles.fillHeight : ""}`}
+      data-testid="role-prompt-card"
+    >
       <div className={styles.headingRow}>
         <div>
           <h2 className={styles.title}>Role prompt</h2>
