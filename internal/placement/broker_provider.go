@@ -151,32 +151,61 @@ func (b *Broker) admitProvisioningNode(ctx context.Context, req ProvisionRequest
 	return b.createProvisioningNode(ctx, req, generation)
 }
 
+// checkQuota enforces BOTH budgets: the account-wide MaxLive and, when
+// configured, the requested provider's own cap.
+//
+// Both are required. The global cap alone lets one provider fill the account
+// budget and starve the others. A per-provider cap alone would silently raise
+// total capacity every time a provider is registered -- and MaxLive is what
+// bounds the shared-OAuth blast radius, which is a property of the credential
+// every lead shares, not of any one provider.
 func (b *Broker) checkQuota(ctx context.Context, req ProvisionRequest, excludeNodeID string) error {
-	if b.maxLive.VCPU <= 0 && b.maxLive.MemGiB <= 0 {
+	providerMax := b.maxLiveFor(req.RuntimeProvider)
+	globalUncapped := b.maxLive.VCPU <= 0 && b.maxLive.MemGiB <= 0
+	providerUncapped := providerMax.VCPU <= 0 && providerMax.MemGiB <= 0
+	if globalUncapped && providerUncapped {
 		return nil
 	}
-	reserved, err := b.accountReserved(ctx, req.WorkspaceKey, excludeNodeID)
+	byProvider, total, err := b.accountReserved(ctx, req.WorkspaceKey, excludeNodeID)
 	if err != nil {
 		return err
 	}
-	next := reserved
-	next.VCPU += req.Resource.VCPU
-	next.MemGiB += req.Resource.MemGiB
-	return enforceQuota(next, b.maxLive)
+	if err := enforceQuota(withRequest(total, req.Resource), b.maxLive); err != nil {
+		return fmt.Errorf("account-wide %w", err)
+	}
+	if providerUncapped {
+		return nil
+	}
+	next := withRequest(byProvider[req.RuntimeProvider], req.Resource)
+	if err := enforceQuota(next, providerMax); err != nil {
+		return fmt.Errorf("runtime provider %q %w", req.RuntimeProvider, err)
+	}
+	return nil
 }
 
-func (b *Broker) accountReserved(ctx context.Context, fallbackWorkspaceKey, excludeNodeID string) (ResourceSize, error) {
+func withRequest(reserved, request ResourceSize) ResourceSize {
+	reserved.VCPU += request.VCPU
+	reserved.MemGiB += request.MemGiB
+	return reserved
+}
+
+// accountReserved returns reservations broken down per runtime provider AND
+// their account-wide total. Both come from ONE walk of the same rows so the two
+// figures cannot disagree -- admission and reporting drifting apart is the
+// exact defect this replaced.
+func (b *Broker) accountReserved(ctx context.Context, fallbackWorkspaceKey, excludeNodeID string) (map[domain.RuntimeProvider]ResourceSize, ResourceSize, error) {
 	// NodeStore has no account-wide List; enumerating WorkspaceStore.List and
 	// then listing nodes per workspace is the widest scope the store exposes.
 	workspaceKeys, err := b.workspaceKeys(ctx, fallbackWorkspaceKey)
 	if err != nil {
-		return ResourceSize{}, err
+		return nil, ResourceSize{}, err
 	}
+	byProvider := make(map[domain.RuntimeProvider]ResourceSize)
 	var total ResourceSize
 	for _, workspaceKey := range workspaceKeys {
 		nodes, err := b.store.Nodes().List(ctx, workspaceKey)
 		if err != nil {
-			return ResourceSize{}, err
+			return nil, ResourceSize{}, err
 		}
 		for _, node := range nodes {
 			if node == nil || node.Placement == nil {
@@ -185,12 +214,16 @@ func (b *Broker) accountReserved(ctx context.Context, fallbackWorkspaceKey, excl
 			if node.NodeID == excludeNodeID || !b.countsTowardQuota(node) {
 				continue
 			}
-			if isQuotaReservedPlacementState(node.Placement.State) {
-				addReservation(&total, node.Placement)
+			if !isQuotaReservedPlacementState(node.Placement.State) {
+				continue
 			}
+			addReservation(&total, node.Placement)
+			perProvider := byProvider[node.RuntimeProvider]
+			addReservation(&perProvider, node.Placement)
+			byProvider[node.RuntimeProvider] = perProvider
 		}
 	}
-	return total, nil
+	return byProvider, total, nil
 }
 
 func (b *Broker) workspaceKeys(ctx context.Context, fallbackWorkspaceKey string) ([]string, error) {

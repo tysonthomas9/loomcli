@@ -141,3 +141,26 @@ func (b *Broker) registeredProviders() []domain.RuntimeProvider {
 	sort.Slice(kinds, func(i, j int) bool { return kinds[i] < kinds[j] })
 	return kinds
 }
+
+// cloneMaxLive snapshots the per-provider caps for the same reason the provider
+// registry is snapshotted: a budget the caller can still mutate is not a budget.
+func cloneMaxLive(in map[domain.RuntimeProvider]ResourceSize) map[domain.RuntimeProvider]ResourceSize {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[domain.RuntimeProvider]ResourceSize, len(in))
+	for kind, size := range in {
+		out[kind] = size
+	}
+	return out
+}
+
+// maxLiveFor returns the per-provider cap, or the zero value when none is
+// configured. Zero means "uncapped at this level" -- the account-wide MaxLive
+// still applies, so an unconfigured provider is never unbounded.
+func (b *Broker) maxLiveFor(kind domain.RuntimeProvider) ResourceSize {
+	if b.maxLiveByProvider == nil {
+		return ResourceSize{}
+	}
+	return b.maxLiveByProvider[kind]
+}

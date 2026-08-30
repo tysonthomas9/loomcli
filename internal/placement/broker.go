@@ -44,10 +44,23 @@ type Config struct {
 	// replaces the former single Provider field: sandbox ids are unique only
 	// within a provider, so routing must follow the owning node's stamped
 	// RuntimeProvider. Resolution is fail-closed (see providerFor).
-	Providers               ProviderRegistry
-	TokenKey                []byte
-	TokenTTL                time.Duration
-	MaxLive                 ResourceSize
+	Providers ProviderRegistry
+	TokenKey  []byte
+	TokenTTL  time.Duration
+	// MaxLive is the ACCOUNT-WIDE live budget, summed across every registered
+	// provider. It stays global on purpose: it bounds the shared-OAuth blast
+	// radius (one Codex auth.json is seeded into every lead, so concurrent
+	// leads can invalidate each other's refresh token -- see
+	// newServePlacementBroker). That hazard is a property of the credential,
+	// not of the sandbox provider, so registering a second provider must not
+	// silently double it.
+	MaxLive ResourceSize
+	// MaxLiveByProvider caps each provider individually, IN ADDITION to
+	// MaxLive. Without it, one provider filling the global budget starves the
+	// others; setting entries that sum to at most MaxLive gives each provider
+	// guaranteed headroom. Absent or zero means "no per-provider cap", which
+	// is byte-identical to the previous single-budget behavior.
+	MaxLiveByProvider       map[domain.RuntimeProvider]ResourceSize
 	NodeTTL                 time.Duration
 	ProvisioningTimeout     time.Duration
 	LeadHeartbeatStaleAfter time.Duration
@@ -78,6 +91,7 @@ type Broker struct {
 	tokenKey                []byte
 	tokenTTL                time.Duration
 	maxLive                 ResourceSize
+	maxLiveByProvider       map[domain.RuntimeProvider]ResourceSize
 	nodeTTL                 time.Duration
 	provisioningTimeout     time.Duration
 	leadHeartbeatStaleAfter time.Duration
@@ -152,9 +166,15 @@ type ReleaseFence struct {
 
 // ListResult contains placement records plus summed live reservations.
 type ListResult struct {
-	Placements     []*domain.Node
-	LiveReserved   ResourceSize
-	NeedsAttention []string
+	Placements []*domain.Node
+	// LiveReserved is the account-wide total across every registered provider,
+	// the figure MaxLive is checked against.
+	LiveReserved ResourceSize
+	// LiveReservedByProvider breaks the same total down per runtime provider.
+	// Reporting one global number hid which provider consumed the budget, so a
+	// second provider's usage was indistinguishable from the first's.
+	LiveReservedByProvider map[domain.RuntimeProvider]ResourceSize
+	NeedsAttention         []string
 }
 
 // NewBroker validates dependencies and resolves the signing key.
@@ -194,6 +214,7 @@ func NewBroker(cfg Config) (*Broker, error) {
 		tokenKey:                key,
 		tokenTTL:                ttl,
 		maxLive:                 cfg.MaxLive,
+		maxLiveByProvider:       cloneMaxLive(cfg.MaxLiveByProvider),
 		nodeTTL:                 nodeTTL,
 		provisioningTimeout:     provisioningTimeout,
 		leadHeartbeatStaleAfter: staleAfter,
@@ -366,15 +387,16 @@ func (b *Broker) List(ctx context.Context, workspaceKey string) (*ListResult, er
 		}
 		result.Placements = append(result.Placements, node)
 		// Counts every placement on a provider this broker manages, rather
-		// than hardcoding Daytona. Behaviorally identical while Daytona is the
-		// only registered provider.
-		//
-		// NOTE: LiveReserved is still a SINGLE global budget. Making it
-		// provider-keyed (so one provider's reservations cannot consume
-		// another's quota) is a separate change and is not implemented here.
-		if _, provErr := b.providerFor(node.RuntimeProvider); provErr == nil &&
-			isQuotaReservedPlacementState(node.Placement.State) {
+		// than hardcoding Daytona, and attributes it to the provider that owns
+		// it so the two views cannot drift.
+		if b.countsTowardQuota(node) && isQuotaReservedPlacementState(node.Placement.State) {
 			addReservation(&result.LiveReserved, node.Placement)
+			if result.LiveReservedByProvider == nil {
+				result.LiveReservedByProvider = make(map[domain.RuntimeProvider]ResourceSize)
+			}
+			perProvider := result.LiveReservedByProvider[node.RuntimeProvider]
+			addReservation(&perProvider, node.Placement)
+			result.LiveReservedByProvider[node.RuntimeProvider] = perProvider
 		}
 		if PlacementNeedsAttention(node) {
 			result.NeedsAttention = append(result.NeedsAttention, node.NodeID)
