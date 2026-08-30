@@ -5,6 +5,7 @@ import "@testing-library/jest-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentServiceDTO } from "@/api/agentServices";
+import { aetherModalStyles } from "@/components/AetherModal";
 import { ApiError } from "@/types/common";
 
 import { CreateAgentServiceModal } from "../CreateAgentServiceModal";
@@ -77,6 +78,14 @@ describe("CreateAgentServiceModal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.create.mockResolvedValue(createdService);
+  });
+
+  it("uses the standard wide dialog layout", () => {
+    renderModal();
+
+    expect(
+      screen.getByRole("dialog", { name: "Add autonomous agent" }),
+    ).toHaveClass(aetherModalStyles.dialogWide);
   });
 
   it("validates the service ID grammar live and requires a schedule", () => {

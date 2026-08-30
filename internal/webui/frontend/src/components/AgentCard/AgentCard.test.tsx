@@ -101,6 +101,16 @@ describe("AgentCard", () => {
       expect(dot).toBeInstanceOf(HTMLElement);
       expect((dot as HTMLElement).style.backgroundColor).toBeTruthy();
     });
+
+    it("accepts an authoritative status-dot color", () => {
+      const { container } = render(
+        <AgentCard agent={makeAgent()} statusDotColor="#123456" />,
+      );
+
+      expect(container.querySelector('[aria-hidden="true"]')).toHaveStyle({
+        backgroundColor: "#123456",
+      });
+    });
   });
 
   describe("agent name", () => {

@@ -65,8 +65,24 @@ vi.mock("@dnd-kit/sortable", () => ({
 }));
 
 vi.mock("@/components/AgentCard", () => ({
-  AgentCard: ({ agent }: { agent: { name: string } }) => (
-    <div data-testid={`agent-card-${agent.name}`}>{agent.name}</div>
+  AgentCard: ({
+    agent,
+    taskTitle,
+  }: {
+    agent: {
+      name: string;
+      display_name?: string;
+      role_label?: string;
+      status: string;
+    };
+    taskTitle?: string;
+  }) => (
+    <div data-testid={`agent-card-${agent.name}`} data-status={agent.status}>
+      <span aria-label={`${agent.name} avatar`}>{agent.name.slice(0, 1)}</span>
+      {agent.display_name}
+      {agent.role_label}
+      {taskTitle}
+    </div>
   ),
 }));
 
@@ -133,6 +149,8 @@ describe("AgentSection scheduled background agents", () => {
     expect(screen.getByTestId("autonomous-agent-scout")).toHaveTextContent(
       "Weekly",
     );
+    expect(screen.getByLabelText("scout avatar")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-card-scout")).toHaveTextContent("Scout");
 
     fireEvent.click(screen.getByTestId("autonomous-agent-scout"));
     expect(onAgentClick).toHaveBeenCalledWith("scout");
@@ -163,6 +181,10 @@ describe("AgentSection scheduled background agents", () => {
       "title",
       expect.stringContaining("fleet-db timeout"),
     );
-    expect(row.querySelector('[data-state="unknown"]')).toBeInTheDocument();
+    expect(row).toHaveAttribute("data-state", "unknown");
+    expect(screen.getByTestId("agent-card-scout")).toHaveAttribute(
+      "data-status",
+      "error",
+    );
   });
 });

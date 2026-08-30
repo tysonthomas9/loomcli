@@ -7,6 +7,8 @@ import type React from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
 
+import type { AgentServiceDTO } from "@/api/agentServices";
+import { AgentCard } from "@/components/AgentCard";
 import {
   useAgentStoreInstance,
   useAgentServices,
@@ -28,15 +30,14 @@ import {
 import { isPRReviewerAgent } from "@/utils/agentDisplay";
 import {
   agentServiceCadenceLabel,
+  agentServiceDotColor,
   agentServiceDotState,
   agentServiceDotTooltip,
 } from "@/utils/bindingDisplay";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 
 import styles from "./AgentSection.module.css";
-import {
-  withoutDurableAgentProjections,
-} from "./agentSectionAutomationRows";
+import { withoutDurableAgentProjections } from "./agentSectionAutomationRows";
 import { AgentContextMenu } from "./menus/AgentContextMenu";
 import { SortableAgentList } from "./SortableAgentList";
 
@@ -53,6 +54,45 @@ interface AgentMenuState {
   name: string;
   x: number;
   y: number;
+}
+
+function agentServiceCardStatus(service: AgentServiceDTO): string {
+  switch (agentServiceDotState(service)) {
+    case "idle":
+      return "ready";
+    case "running":
+      return "working";
+    case "warn":
+    case "unknown":
+    case "failing":
+      return "error";
+    case "off":
+      return "ready";
+  }
+}
+
+function agentServiceCardAgent(
+  service: AgentServiceDTO,
+  workspaceName: string,
+): LoomAgentStatus {
+  const displayName = service.name.trim() || service.id;
+  const roleName = service.behavior.roleName?.trim() || "background";
+  const roleLabel =
+    service.behavior.roleDisplayName?.trim() ||
+    (roleName === "background" ? "Background" : roleName);
+  return {
+    name: service.id,
+    display_name: displayName,
+    role: roleName,
+    role_label: roleLabel,
+    role_kind: "worker",
+    daemon_managed: true,
+    branch: "",
+    status: agentServiceCardStatus(service),
+    ahead: 0,
+    behind: 0,
+    workspace: workspaceName,
+  };
 }
 
 export function AgentSection({
@@ -188,11 +228,7 @@ export function AgentSection({
     setContextMenu(null);
   }, []);
 
-  if (
-    agents.length === 0 &&
-    agentServices.length === 0 &&
-    !addClick
-  )
+  if (agents.length === 0 && agentServices.length === 0 && !addClick)
     return <></>;
 
   const listProps = {
@@ -233,26 +269,31 @@ export function AgentSection({
               const name = record.name.trim() || record.id;
               const cadence = agentServiceCadenceLabel(record);
               const tooltip = agentServiceDotTooltip(record);
+              const cardAgent = agentServiceCardAgent(
+                record,
+                workspace?.name ?? "",
+              );
               return (
                 <button
                   type="button"
                   key={record.id}
-                  className={styles.workflowRow}
+                  className={styles.serviceCardButton}
                   data-testid={`autonomous-agent-${record.id}`}
                   data-selected={selectedAgentName === record.id || undefined}
+                  data-state={agentServiceDotState(record)}
                   aria-label={`${name}, ${cadence}, ${tooltip}`}
                   onClick={() => onAgentClick?.(record.id)}
                   title={tooltip}
                 >
-                  <span
-                    className={styles.workflowDot}
-                    data-state={agentServiceDotState(record)}
-                    aria-hidden="true"
+                  <AgentCard
+                    agent={cardAgent}
+                    compact
+                    selected={selectedAgentName === record.id}
+                    showRepoBadge={false}
+                    taskTitle={cadence}
+                    statusDotColor={agentServiceDotColor(record)}
+                    className={styles.serviceCard}
                   />
-                  <span className={styles.workflowText}>
-                    <span className={styles.workflowName}>{name}</span>
-                    <span className={styles.workflowMeta}>{cadence}</span>
-                  </span>
                 </button>
               );
             })}
