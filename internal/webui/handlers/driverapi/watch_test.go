@@ -13,6 +13,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 // watchTestTimeout bounds every streaming test so a broken stream fails
@@ -25,6 +26,7 @@ type sseFrame struct {
 	event   string
 	data    string
 	comment string
+	retry   string
 }
 
 // sseStream wraps an open watch response for frame-at-a-time reading.
@@ -70,9 +72,31 @@ func (s *sseStream) nextFrame(t *testing.T) (sseFrame, bool) {
 			frame.event = strings.TrimPrefix(line, "event: ")
 		case strings.HasPrefix(line, "data: "):
 			frame.data = strings.TrimPrefix(line, "data: ")
+		case strings.HasPrefix(line, "retry:"):
+			frame.retry = strings.TrimSpace(strings.TrimPrefix(line, "retry:"))
 		default:
 			t.Fatalf("unexpected SSE line %q", line)
 		}
+	}
+}
+
+func TestWatchEpicRetryPrecedesSnapshot(t *testing.T) {
+	h := newTestHarness(t, "")
+	stream := openWatch(t, h, "", h.ownerHeaders())
+	if stream.resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", stream.resp.StatusCode)
+	}
+
+	retry, ok := stream.nextFrame(t)
+	if !ok || retry.retry != strconv.Itoa(realtime.RetryMs) {
+		t.Fatalf("first frame = %+v, want retry %d", retry, realtime.RetryMs)
+	}
+	if retry.id != "" || retry.event != "" || retry.data != "" || retry.comment != "" {
+		t.Fatalf("retry frame has unexpected fields: %+v", retry)
+	}
+	snapshot, ok := stream.nextFrame(t)
+	if !ok || snapshot.event != "snapshot" {
+		t.Fatalf("second frame = %+v, want event snapshot", snapshot)
 	}
 }
 
