@@ -173,7 +173,7 @@ func cachedAgentTerminalTab(ctx context.Context, st store.Store, workspace, agen
 // viewport instead of erroring.
 func ensureDaytonaLeadAttachable(ctx context.Context, st store.Store, workspace, agentName string, agent *domain.Agent, roleKind domain.RoleKind, revivers []leadPlacementReviver, liveTabFallback bool) error {
 	if roleKind != domain.RoleKindInteractive ||
-		agentRuntimeProvider(ctx, st, workspace, agent) != domain.RuntimeProviderDaytona ||
+		!domain.SandboxPlacedRuntimeProvider(agentRuntimeProvider(ctx, st, workspace, agent)) ||
 		len(revivers) == 0 || revivers[0] == nil {
 		return nil
 	}
@@ -390,7 +390,7 @@ func buildAgentLaunchSpec(ctx context.Context, st store.Store, workspace, sessio
 	}
 	roleKind := domain.ResolveRoleKind(role, agent.RoleName)
 	backend := agentLaunchBackend(ctx, st, workspace, agent, role)
-	if roleKind == domain.RoleKindInteractive && agentRuntimeProvider(ctx, st, workspace, agent) == domain.RuntimeProviderDaytona {
+	if roleKind == domain.RoleKindInteractive && domain.SandboxPlacedRuntimeProvider(agentRuntimeProvider(ctx, st, workspace, agent)) {
 		remote, err := daytonaLeadRemoteLaunchSpec(ctx, st, workspace, agent.Name)
 		if err != nil {
 			return nil, "", err

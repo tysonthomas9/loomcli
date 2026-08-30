@@ -239,10 +239,12 @@ func applyMonitorRuntimePlacement(
 	nodes []*domain.Node,
 ) {
 	if domain.RoleKind(status.RoleKind) != domain.RoleKindInteractive ||
-		domain.ResolveRuntimeProvider(assignment, profile) != domain.RuntimeProviderDaytona {
+		!domain.SandboxPlacedRuntimeProvider(domain.ResolveRuntimeProvider(assignment, profile)) {
 		return
 	}
-	status.RuntimeProvider = string(domain.RuntimeProviderDaytona)
+	// Report the provider actually resolved, not a constant: hardcoding it
+	// mislabels every non-Daytona lead in the monitor.
+	status.RuntimeProvider = string(domain.ResolveRuntimeProvider(assignment, profile))
 	node := latestDaytonaPlacementForMonitor(nodes, assignment.Name)
 	runtimeStatus, runtimeError := domain.LeadRuntimeStatusFor(node, domain.LeadProvisionAttempt{
 		Outcome: assignment.LastProvisionOutcome,
@@ -276,7 +278,7 @@ func latestDaytonaPlacementForMonitor(nodes []*domain.Node, agentName string) *d
 }
 
 func daytonaPlacementMatchesAgent(node *domain.Node, agentName string) bool {
-	if node == nil || node.Placement == nil || node.RuntimeProvider != domain.RuntimeProviderDaytona {
+	if node == nil || node.Placement == nil || !domain.SandboxPlacedRuntimeProvider(node.RuntimeProvider) {
 		return false
 	}
 	if node.OwnerActor == "agent:"+agentName {

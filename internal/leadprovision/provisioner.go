@@ -107,7 +107,7 @@ func (p *Provisioner) provisionForAgent(ctx context.Context, workspaceKey, agent
 	if err != nil {
 		return err
 	}
-	if !target.needsDaytonaLeadProvision() {
+	if !target.needsSandboxLeadProvision() {
 		return nil
 	}
 	if p.broker == nil {
@@ -161,12 +161,12 @@ func (t provisionTarget) runtimeProvider() domain.RuntimeProvider {
 	return domain.ResolveRuntimeProvider(t.agent, t.profile)
 }
 
-func (t provisionTarget) needsDaytonaLeadProvision() bool {
+func (t provisionTarget) needsSandboxLeadProvision() bool {
 	if t.agent == nil {
 		return false
 	}
 	roleKind := domain.ResolveRoleKind(t.role, t.agent.RoleName)
-	return roleKind == domain.RoleKindInteractive && t.runtimeProvider() == domain.RuntimeProviderDaytona
+	return roleKind == domain.RoleKindInteractive && domain.SandboxPlacedRuntimeProvider(t.runtimeProvider())
 }
 
 func (p *Provisioner) runtimeCredentials() (string, func() (string, error), error) {

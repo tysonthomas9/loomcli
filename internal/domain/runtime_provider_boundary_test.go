@@ -26,6 +26,47 @@ var selectableByDesign = map[RuntimeProvider]bool{
 	RuntimeProviderExe: false,
 }
 
+// sandboxPlacedByDesign is the second axis, declared per constant for the same
+// reason as selectableByDesign: a missing entry must be a test failure, not a
+// silent default. Getting this one wrong does not fail loudly -- it silently
+// treats a sandboxed lead as local, so it is never provisioned, never
+// attachable, or never reported.
+var sandboxPlacedByDesign = map[RuntimeProvider]bool{
+	RuntimeProviderDaytona: true,
+	RuntimeProviderExe:     true,
+
+	RuntimeProviderLocal:      false,
+	RuntimeProviderE2B:        false,
+	RuntimeProviderKubernetes: false,
+	RuntimeProviderCI:         false,
+	RuntimeProviderOther:      false,
+}
+
+func TestSandboxPlacedRuntimeProviderMatchesDesign(t *testing.T) {
+	for provider, want := range sandboxPlacedByDesign {
+		if got := SandboxPlacedRuntimeProvider(provider); got != want {
+			t.Errorf("SandboxPlacedRuntimeProvider(%q) = %v, want %v", provider, got, want)
+		}
+	}
+	for _, p := range []RuntimeProvider{"", "  ", "DAYTONA", "unknown"} {
+		if SandboxPlacedRuntimeProvider(p) {
+			t.Errorf("SandboxPlacedRuntimeProvider(%q) = true, want false (must fail closed)", p)
+		}
+	}
+}
+
+// TestExeIsSandboxPlacedButNotSelectable pins the distinction the two axes
+// exist to express, since collapsing them is the easy mistake: exe leads ARE
+// sandbox-placed, and a caller still must not be able to ask for one.
+func TestExeIsSandboxPlacedButNotSelectable(t *testing.T) {
+	if !SandboxPlacedRuntimeProvider(RuntimeProviderExe) {
+		t.Error("exe leads are placed in a sandbox")
+	}
+	if ClientSelectableRuntimeProvider(RuntimeProviderExe) {
+		t.Error("exe must not be client-selectable")
+	}
+}
+
 func TestClientSelectableRuntimeProviderMatchesDesign(t *testing.T) {
 	for provider, want := range selectableByDesign {
 		if got := ClientSelectableRuntimeProvider(provider); got != want {
@@ -61,6 +102,10 @@ func TestEveryRuntimeProviderHasADeclaredVerdict(t *testing.T) {
 		t.Fatal("parsed zero RuntimeProvider constants; the parser below is broken, not the enum")
 	}
 	for _, provider := range declared {
+		if _, ok := sandboxPlacedByDesign[provider]; !ok {
+			t.Errorf("RuntimeProvider %q has no entry in sandboxPlacedByDesign; "+
+				"decide whether its leads run in a remote sandbox or as a local process", provider)
+		}
 		if _, ok := selectableByDesign[provider]; !ok {
 			t.Errorf(`RuntimeProvider %q has no entry in selectableByDesign.
 

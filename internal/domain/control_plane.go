@@ -153,6 +153,29 @@ func ClientSelectableRuntimeProvider(p RuntimeProvider) bool {
 	}
 }
 
+// SandboxPlacedRuntimeProvider reports whether leads on this runtime provider
+// are placed in a REMOTE SANDBOX by the placement broker, rather than run as a
+// local process.
+//
+// It replaces a scatter of `== RuntimeProviderDaytona` checks that each meant
+// "is this a sandboxed lead?" and each had to be found and updated by hand when
+// a provider was added. Missing one does not fail loudly: it silently treats a
+// sandboxed lead as local, so it is never provisioned, never attachable, or
+// never reported.
+//
+// Distinct from ClientSelectableRuntimeProvider (whether a CALLER may ask for
+// it) and from a broker's ProviderRegistry (whether an adapter is wired in this
+// process). A provider can be sandbox-placed while remaining unselectable and
+// unregistered -- which is exactly RuntimeProviderExe's state today.
+func SandboxPlacedRuntimeProvider(p RuntimeProvider) bool {
+	switch p {
+	case RuntimeProviderDaytona, RuntimeProviderExe:
+		return true
+	default:
+		return false
+	}
+}
+
 func ResolveRuntimeProvider(agent *Agent, profile *DaemonProfile) RuntimeProvider {
 	if agent != nil && agent.RuntimeProvider != "" {
 		return agent.RuntimeProvider
