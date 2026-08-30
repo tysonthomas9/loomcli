@@ -117,8 +117,11 @@ func TestTaskLogStream_LiveAppend(t *testing.T) {
 		t.Fatalf("failed to write log: %v", err)
 	}
 
-	client, _ := connectTaskStream(t, h.streamURL("tail_bytes=0"))
-	assertRetryPrelude(t, client.scanner)
+	client, _ := connectTaskStream(t, h.streamURL("tail_bytes=4"))
+	// Receiving replay proves its stat completed, so the append below is post-stat.
+	if got := decodeChunkB64(t, readLogChunk(t, client)); got != "seed" {
+		t.Fatalf("replay = %q, want %q", got, "seed")
+	}
 	file, err := os.OpenFile(h.logFile, os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		t.Fatalf("failed to open log: %v", err)

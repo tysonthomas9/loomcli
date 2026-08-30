@@ -3,7 +3,7 @@ import { test, expect, Page } from '@playwright/test'
 import { setupFleetMocks, workspaceApi } from './helpers/fleet'
 
 /**
- * E2E tests for IssueDetailPanel task log tabs using snapshot polling.
+ * E2E tests for IssueDetailPanel task log tabs using live SSE streams.
  */
 
 const DOM_SETTLE_MS = 400
@@ -32,13 +32,33 @@ const mockBugIssue = {
 
 const allMockIssues = [mockTaskIssue, mockBugIssue]
 
+type TaskLogPhase = 'planning' | 'implementation'
+
+function taskLogStreamPath(api: string, phase: TaskLogPhase) {
+  return `${api}/tasks/log-task-1/logs/${phase}/stream`
+}
+
+function logChunkStream(text: string) {
+  const bytes = Buffer.from(text, 'utf8')
+  return (
+    'retry: 5000\n\n' +
+    'id: 1\n' +
+    'event: log-chunk\n' +
+    `data: ${JSON.stringify({
+      chunk_b64: bytes.toString('base64'),
+      byte_offset: bytes.length,
+      timestamp: '2026-08-30T00:00:00Z',
+    })}\n\n`
+  )
+}
+
 async function setupBaseMocks(
   page: Page,
   options?: {
     phases?: string[]
     phasesError?: boolean
-    planningLogStatus?: number
-    implementationLogStatus?: number
+    planningStreamStatus?: number
+    implementationStreamStatus?: number
   }
 ) {
   const phases = options?.phases ?? ['planning', 'implementation']
@@ -53,6 +73,19 @@ async function setupBaseMocks(
   })
 
   await setupFleetMocks(page, allMockIssues)
+
+  // setupFleetMocks aborts event endpoints by default. Log streams run in
+  // open mode here, so the token exchange must explicitly report disabled.
+  await page.route(
+    (url) => url.pathname === `${api}/events/token`,
+    async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ disabled: true }),
+      })
+    }
+  )
 
   await page.route('**/api/monitor/agents', async (route) => {
     await route.fulfill({
@@ -117,47 +150,35 @@ async function setupBaseMocks(
     }
   )
 
-  await page.route(`**${api}/tasks/log-task-1/logs/planning**`, async (route) => {
-    const status = options?.planningLogStatus ?? 200
-    if (status !== 200) {
-      await route.fulfill({
-        status,
-        contentType: 'application/json',
-        body: JSON.stringify({ success: false, error: 'planning log error' }),
-      })
-      return
-    }
+  for (const phase of ['planning', 'implementation'] as const) {
+    await page.route(
+      (url) => url.pathname === taskLogStreamPath(api, phase),
+      async (route) => {
+        const status = phase === 'planning' ? (options?.planningStreamStatus ?? 200) : (options?.implementationStreamStatus ?? 200)
+        if (status !== 200) {
+          await route.fulfill({
+            status,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              success: false,
+              error: `${phase} log stream error`,
+            }),
+          })
+          return
+        }
 
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        success: true,
-        data: { lines: ['Planning line 1', 'Planning line 2'], line_count: 2 },
-      }),
-    })
-  })
-
-  await page.route(`**${api}/tasks/log-task-1/logs/implementation**`, async (route) => {
-    const status = options?.implementationLogStatus ?? 200
-    if (status !== 200) {
-      await route.fulfill({
-        status,
-        contentType: 'application/json',
-        body: JSON.stringify({ success: false, error: 'implementation log error' }),
-      })
-      return
-    }
-
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        success: true,
-        data: { lines: ['Implementation line 1', 'Implementation line 2'], line_count: 2 },
-      }),
-    })
-  })
+        const label = phase === 'planning' ? 'Planning' : 'Implementation'
+        await route.fulfill({
+          status: 200,
+          headers: {
+            'content-type': 'text/event-stream',
+            'cache-control': 'no-cache',
+          },
+          body: logChunkStream(`${label} stream\n`),
+        })
+      }
+    )
+  }
 }
 
 async function navigateToApp(page: Page) {
@@ -197,74 +218,59 @@ test.describe('Task Log Tabs', () => {
     await expect(panel.getByRole('tab', { name: 'Implementation' })).not.toBeVisible()
   })
 
-  test('planning tab mounts LogViewer and polls planning endpoint', async ({ page }) => {
-    let planningCalls = 0
+  test('planning tab opens one live stream and renders its content', async ({ page }) => {
     await setupBaseMocks(page)
-
-    await page.route('**/api/workspaces/default/tasks/log-task-1/logs/planning**', async (route) => {
-      planningCalls += 1
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          success: true,
-          data: { lines: ['Planning line 1'], line_count: 1 },
-        }),
-      })
+    const streamPath = taskLogStreamPath(workspaceApi(), 'planning')
+    let planningRequests = 0
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname === streamPath) planningRequests += 1
     })
 
     await navigateToApp(page)
     await openIssuePanel(page, 'Task With Logs')
 
     const panel = page.getByTestId('issue-detail-panel')
+    const streamRequest = page.waitForRequest((request) => new URL(request.url()).pathname === streamPath)
     await panel.getByRole('tab', { name: 'Planning' }).click()
+    await streamRequest
     await expect(page.getByTestId('log-viewer')).toBeVisible()
-
-    await expect
-      .poll(() => planningCalls, { timeout: 5000 })
-      .toBeGreaterThan(0)
+    await expect(page.getByTestId('agent-log-content')).toContainText('Planning stream')
+    await page.waitForTimeout(DOM_SETTLE_MS)
+    expect(planningRequests).toBe(1)
   })
 
-  test('switching from planning to implementation changes polled endpoint', async ({ page }) => {
-    let planningCalls = 0
-    let implementationCalls = 0
-
+  test('switching phases abandons planning and opens implementation stream', async ({ page }) => {
     await setupBaseMocks(page)
-
-    await page.route('**/api/workspaces/default/tasks/log-task-1/logs/planning**', async (route) => {
-      planningCalls += 1
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          success: true,
-          data: { lines: ['Planning line'], line_count: 1 },
-        }),
-      })
-    })
-
-    await page.route('**/api/workspaces/default/tasks/log-task-1/logs/implementation**', async (route) => {
-      implementationCalls += 1
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          success: true,
-          data: { lines: ['Implementation line'], line_count: 1 },
-        }),
-      })
+    const api = workspaceApi()
+    const planningPath = taskLogStreamPath(api, 'planning')
+    const implementationPath = taskLogStreamPath(api, 'implementation')
+    let planningRequests = 0
+    let implementationRequests = 0
+    page.on('request', (request) => {
+      const path = new URL(request.url()).pathname
+      if (path === planningPath) planningRequests += 1
+      if (path === implementationPath) implementationRequests += 1
     })
 
     await navigateToApp(page)
     await openIssuePanel(page, 'Task With Logs')
 
     const panel = page.getByTestId('issue-detail-panel')
+    const planningRequest = page.waitForRequest((request) => new URL(request.url()).pathname === planningPath)
     await panel.getByRole('tab', { name: 'Planning' }).click()
-    await expect(page.getByTestId('log-viewer')).toBeVisible()
-    await expect.poll(() => planningCalls, { timeout: 5000 }).toBeGreaterThan(0)
+    await planningRequest
+    await expect(page.getByTestId('agent-log-content')).toContainText('Planning stream')
 
+    const implementationRequest = page.waitForRequest((request) => new URL(request.url()).pathname === implementationPath)
     await panel.getByRole('tab', { name: 'Implementation' }).click()
-    await expect.poll(() => implementationCalls, { timeout: 5000 }).toBeGreaterThan(0)
+    await implementationRequest
+    await expect(page.getByTestId('agent-log-content')).toContainText('Implementation stream')
+
+    // The finite planning fixture schedules a 5s reconnect. Waiting beyond it
+    // proves the hidden pane canceled that retry when its EventSource closed.
+    await page.waitForTimeout(5200)
+    expect(planningRequests).toBe(1)
+    expect(implementationRequests).toBeGreaterThanOrEqual(1)
   })
 
   test('phase discovery error keeps panel usable and hides log tabs', async ({ page }) => {
@@ -280,8 +286,11 @@ test.describe('Task Log Tabs', () => {
     await expect(page.getByText('A task with log phases')).toBeVisible()
   })
 
-  test('snapshot endpoint failure shows non-connected state in log viewer', async ({ page }) => {
-    await setupBaseMocks(page, { phases: ['planning'], planningLogStatus: 500 })
+  test('stream endpoint failure shows non-connected state in log viewer', async ({ page }) => {
+    await setupBaseMocks(page, {
+      phases: ['planning'],
+      planningStreamStatus: 500,
+    })
     await navigateToApp(page)
     await openIssuePanel(page, 'Task With Logs')
 
