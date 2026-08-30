@@ -48,8 +48,18 @@ type TaskPhasesData struct {
 // is available.
 const defaultWorkspaceDir = "_default"
 
-// getLogDir returns the base log directory (~/.loom/logs).
+// getLogDir returns the base log directory. It must resolve the same root as
+// internal/webui/log.GetLogDir — the log writers and stream routes use that
+// resolver, so a diverging root here makes the archive endpoints (including
+// the task phase lister the UI builds its tabs from) read an empty tree.
+// Kept as a mirror rather than a call because internal/webui/log imports this
+// package; folding the duplicates into one seam is recorded follow-up work.
 func getLogDir() (string, error) {
+	for _, env := range []string{"LOOM_WORKSPACE_RUNTIME_DIR", "LOOM_CONFIG_DIR"} {
+		if base := os.Getenv(env); base != "" {
+			return filepath.Join(base, ".loom", "logs"), nil
+		}
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("failed to get home directory: %w", err)
