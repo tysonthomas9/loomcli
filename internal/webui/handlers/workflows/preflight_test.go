@@ -6,12 +6,12 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
+	"github.com/tysonthomas9/loomcli/internal/runtimepreflight/preflighttest"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -103,7 +103,7 @@ func TestCreateWorkflowRunPreflightPassesWhenHealthy(t *testing.T) {
 }
 
 func TestStepOneGateParityWebUI(t *testing.T) {
-	fixture := loadWebUIGateParityFixture(t)
+	fixture := preflighttest.LoadGateParityFixture(t)
 	st := memstore.New()
 	if _, err := st.Daemon().Upsert(context.Background(), &domain.DaemonProfile{
 		WorkspaceKey: fixture.Workspace,
@@ -116,35 +116,7 @@ func TestStepOneGateParityWebUI(t *testing.T) {
 	})
 	t.Cleanup(restore)
 	err := NewModule(st).preflightRunnerForRun(context.Background(), fixture.Workspace, BuiltinEpicRunnerWorkflowName, json.RawMessage(`{}`))
-	var notReady *runtimepreflight.NotReadyError
-	if !errors.As(err, &notReady) {
-		t.Fatalf("Web UI gate error = %T %v, want *NotReadyError", err, err)
-	}
-	if notReady.Result.Backend != fixture.Backend || notReady.Result.Health == nil || *notReady.Result.Health != fixture.Health ||
-		notReady.Result.ErrorClass != fixture.ErrorClass || notReady.Result.Message != fixture.Message {
-		t.Fatalf("Web UI gate = %+v, want backend:%q health:%+v class:%q message:%q", notReady.Result, fixture.Backend, fixture.Health, fixture.ErrorClass, fixture.Message)
-	}
-}
-
-type webUIGateParityFixture struct {
-	Workspace  string                        `json:"workspace"`
-	Backend    string                        `json:"backend"`
-	Health     runtimepreflight.HealthStatus `json:"health"`
-	ErrorClass runtimepreflight.ErrorClass   `json:"error_class"`
-	Message    string                        `json:"message"`
-}
-
-func loadWebUIGateParityFixture(t *testing.T) webUIGateParityFixture {
-	t.Helper()
-	data, err := os.ReadFile("../../../runtimepreflight/testdata/gate-parity.json")
-	if err != nil {
-		t.Fatalf("read gate parity fixture: %v", err)
-	}
-	var fixture webUIGateParityFixture
-	if err := json.Unmarshal(data, &fixture); err != nil {
-		t.Fatalf("decode gate parity fixture: %v", err)
-	}
-	return fixture
+	preflighttest.AssertGateParityError(t, err, fixture)
 }
 
 func TestCreateWorkflowRunPreflightOperationalFailureIsNotAVerdict(t *testing.T) {

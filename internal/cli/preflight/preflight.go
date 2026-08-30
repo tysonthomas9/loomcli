@@ -152,7 +152,13 @@ func safeErrorSummary(err error) string {
 		return ""
 	}
 	const maxRunes = 512
-	value := strings.Join(strings.Fields(err.Error()), " ")
+	fields := strings.Fields(err.Error())
+	for index, field := range fields {
+		if strings.Contains(field, "://") {
+			fields[index] = "[redacted]"
+		}
+	}
+	value := strings.Join(fields, " ")
 	runes := []rune(value)
 	if len(runes) <= maxRunes {
 		return value

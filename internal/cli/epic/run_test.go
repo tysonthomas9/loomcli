@@ -2,9 +2,7 @@ package epic
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"os"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
@@ -12,6 +10,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/localbackend"
 	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
+	"github.com/tysonthomas9/loomcli/internal/runtimepreflight/preflighttest"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -86,7 +85,7 @@ func TestEmptyRunnerPreflightsFailClosed(t *testing.T) {
 }
 
 func TestStepOneGateParityEpic(t *testing.T) {
-	fixture := loadEpicGateParityFixture(t)
+	fixture := preflighttest.LoadGateParityFixture(t)
 	st := memstore.New()
 	if _, err := st.Daemon().Upsert(context.Background(), &domain.DaemonProfile{
 		WorkspaceKey: fixture.Workspace,
@@ -99,40 +98,7 @@ func TestStepOneGateParityEpic(t *testing.T) {
 	})
 	t.Cleanup(restore)
 	err := preflightEpicRun(context.Background(), st, fixture.Workspace, localbackend.LocalTaskRunnerEntrypoint)
-	assertEpicGateParity(t, err, fixture)
-}
-
-type epicGateParityFixture struct {
-	Workspace  string                        `json:"workspace"`
-	Backend    string                        `json:"backend"`
-	Health     runtimepreflight.HealthStatus `json:"health"`
-	ErrorClass runtimepreflight.ErrorClass   `json:"error_class"`
-	Message    string                        `json:"message"`
-}
-
-func loadEpicGateParityFixture(t *testing.T) epicGateParityFixture {
-	t.Helper()
-	data, err := os.ReadFile("../../runtimepreflight/testdata/gate-parity.json")
-	if err != nil {
-		t.Fatalf("read gate parity fixture: %v", err)
-	}
-	var fixture epicGateParityFixture
-	if err := json.Unmarshal(data, &fixture); err != nil {
-		t.Fatalf("decode gate parity fixture: %v", err)
-	}
-	return fixture
-}
-
-func assertEpicGateParity(t *testing.T, err error, fixture epicGateParityFixture) {
-	t.Helper()
-	var notReady *runtimepreflight.NotReadyError
-	if !errors.As(err, &notReady) {
-		t.Fatalf("epic gate error = %T %v, want *NotReadyError", err, err)
-	}
-	if notReady.Result.Backend != fixture.Backend || notReady.Result.Health == nil || *notReady.Result.Health != fixture.Health ||
-		notReady.Result.ErrorClass != fixture.ErrorClass || notReady.Result.Message != fixture.Message {
-		t.Fatalf("epic gate = %+v, want backend:%q health:%+v class:%q message:%q", notReady.Result, fixture.Backend, fixture.Health, fixture.ErrorClass, fixture.Message)
-	}
+	preflighttest.AssertGateParityError(t, err, fixture)
 }
 
 // TestExplicitNonLocalRunnerSkipsPreflight confirms the gate does not fire for a

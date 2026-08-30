@@ -285,15 +285,20 @@ func TestRenderHumanEveryClass(t *testing.T) {
 }
 
 func TestCommandOperationalFailuresIncludeSingleLineCause(t *testing.T) {
+	const sentinelURL = "http://127.0.0.1:8280/fleetdb"
 	cases := []struct {
-		name string
-		deps commandDeps
+		name         string
+		deps         commandDeps
+		wantContains []string
+		wantAbsent   []string
 	}{
 		{
 			name: "open store",
 			deps: commandDeps{openStore: func(context.Context) (*bootstrap.StoreHandle, error) {
-				return nil, errors.New("fleet unavailable\nretry later")
+				return nil, fmt.Errorf("fleet unavailable at %s\nretry later", sentinelURL)
 			}},
+			wantContains: []string{"fleet unavailable at [redacted] retry later", "[redacted]"},
+			wantAbsent:   []string{sentinelURL},
 		},
 		{
 			name: "active workspace",
@@ -302,9 +307,25 @@ func TestCommandOperationalFailuresIncludeSingleLineCause(t *testing.T) {
 					return &bootstrap.StoreHandle{Store: commandStore(t, "codex")}, nil
 				},
 				activeWorkspace: func(context.Context, store.Store) (string, error) {
-					return "", errors.New("active workspace unavailable\nretry later")
+					storeFailure := fmt.Errorf("GET %s: transport unavailable", sentinelURL)
+					return "", fmt.Errorf("resolve active workspace: %w", storeFailure)
 				},
 			},
+			wantContains: []string{"resolve active workspace: GET [redacted] transport unavailable", "[redacted]"},
+			wantAbsent:   []string{sentinelURL},
+		},
+		{
+			name: "no active workspace guidance",
+			deps: commandDeps{
+				openStore: func(context.Context) (*bootstrap.StoreHandle, error) {
+					return &bootstrap.StoreHandle{Store: commandStore(t, "codex")}, nil
+				},
+				activeWorkspace: func(context.Context, store.Store) (string, error) {
+					return "", errors.New("no active workspace: set LOOM_WORKSPACE or pass --workspace")
+				},
+			},
+			wantContains: []string{"no active workspace: set LOOM_WORKSPACE or pass --workspace"},
+			wantAbsent:   []string{"[redacted]"},
 		},
 	}
 	for _, tc := range cases {
@@ -318,8 +339,18 @@ func TestCommandOperationalFailuresIncludeSingleLineCause(t *testing.T) {
 			if got.ErrorClass != runtimepreflight.ErrorClassResolutionFailed {
 				t.Fatalf("result = %+v, want resolution failure", got.Result)
 			}
-			if !strings.Contains(got.Message, "unavailable retry later") || strings.Contains(got.Message, "\n") {
+			if strings.Contains(got.Message, "\n") {
 				t.Fatalf("message = %q, want single-line underlying cause", got.Message)
+			}
+			for _, want := range tc.wantContains {
+				if !strings.Contains(got.Message, want) {
+					t.Errorf("message = %q, want substring %q", got.Message, want)
+				}
+			}
+			for _, unwanted := range tc.wantAbsent {
+				if strings.Contains(got.Message, unwanted) {
+					t.Errorf("message = %q, must not contain %q", got.Message, unwanted)
+				}
 			}
 		})
 	}

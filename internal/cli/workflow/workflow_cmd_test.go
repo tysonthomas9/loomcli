@@ -18,6 +18,7 @@ import (
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
+	"github.com/tysonthomas9/loomcli/internal/runtimepreflight/preflighttest"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/workflows"
 )
@@ -282,7 +283,7 @@ func TestWorkflowRunLocalRunnerPreflightFailureDoesNotCreateRun(t *testing.T) {
 }
 
 func TestStepOneGateParityWorkflow(t *testing.T) {
-	fixture := loadWorkflowGateParityFixture(t)
+	fixture := preflighttest.LoadGateParityFixture(t)
 	_, st := setupWorkflowCommandStore(t)
 	if _, err := st.Daemon().Upsert(context.Background(), &domain.DaemonProfile{
 		WorkspaceKey: fixture.Workspace,
@@ -295,40 +296,7 @@ func TestStepOneGateParityWorkflow(t *testing.T) {
 	})
 	t.Cleanup(restore)
 	err := preflightWorkflowRun(context.Background(), st, fixture.Workspace, workflows.BuiltinEpicRunnerWorkflowName, json.RawMessage(`{}`))
-	assertWorkflowGateParity(t, err, fixture)
-}
-
-type workflowGateParityFixture struct {
-	Workspace  string                        `json:"workspace"`
-	Backend    string                        `json:"backend"`
-	Health     runtimepreflight.HealthStatus `json:"health"`
-	ErrorClass runtimepreflight.ErrorClass   `json:"error_class"`
-	Message    string                        `json:"message"`
-}
-
-func loadWorkflowGateParityFixture(t *testing.T) workflowGateParityFixture {
-	t.Helper()
-	data, err := os.ReadFile("../../runtimepreflight/testdata/gate-parity.json")
-	if err != nil {
-		t.Fatalf("read gate parity fixture: %v", err)
-	}
-	var fixture workflowGateParityFixture
-	if err := json.Unmarshal(data, &fixture); err != nil {
-		t.Fatalf("decode gate parity fixture: %v", err)
-	}
-	return fixture
-}
-
-func assertWorkflowGateParity(t *testing.T, err error, fixture workflowGateParityFixture) {
-	t.Helper()
-	var notReady *runtimepreflight.NotReadyError
-	if !errors.As(err, &notReady) {
-		t.Fatalf("workflow gate error = %T %v, want *NotReadyError", err, err)
-	}
-	if notReady.Result.Backend != fixture.Backend || notReady.Result.Health == nil || *notReady.Result.Health != fixture.Health ||
-		notReady.Result.ErrorClass != fixture.ErrorClass || notReady.Result.Message != fixture.Message {
-		t.Fatalf("workflow gate = %+v, want backend:%q health:%+v class:%q message:%q", notReady.Result, fixture.Backend, fixture.Health, fixture.ErrorClass, fixture.Message)
-	}
+	preflighttest.AssertGateParityError(t, err, fixture)
 }
 
 func TestWorkflowVersionsUnknownWorkflowReturnsError(t *testing.T) {

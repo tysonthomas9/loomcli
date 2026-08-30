@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"strings"
 	"testing"
 
@@ -214,50 +213,6 @@ func TestCheckLocalTaskRunnerClassification(t *testing.T) {
 	}
 }
 
-func TestStepOneGateParityCanonicalCheck(t *testing.T) {
-	fixture := loadGateParityFixture(t, "testdata/gate-parity.json")
-	result, err := checkWithProbe(
-		t,
-		context.Background(),
-		targetStoreStub{profile: &domain.DaemonProfile{AgentBackend: fixture.Backend}},
-		Request{WorkspaceKey: fixture.Workspace},
-		func(string) (HealthStatus, bool) { return fixture.Health, true },
-	)
-	if err != nil {
-		t.Fatalf("CheckLocalTaskRunner() error = %v", err)
-	}
-	assertGateParityResult(t, result, fixture)
-}
-
-type gateParityFixture struct {
-	Workspace  string       `json:"workspace"`
-	Backend    string       `json:"backend"`
-	Health     HealthStatus `json:"health"`
-	ErrorClass ErrorClass   `json:"error_class"`
-	Message    string       `json:"message"`
-}
-
-func loadGateParityFixture(t *testing.T, path string) gateParityFixture {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read gate parity fixture: %v", err)
-	}
-	var fixture gateParityFixture
-	if err := json.Unmarshal(data, &fixture); err != nil {
-		t.Fatalf("decode gate parity fixture: %v", err)
-	}
-	return fixture
-}
-
-func assertGateParityResult(t *testing.T, result Result, fixture gateParityFixture) {
-	t.Helper()
-	if result.Backend != fixture.Backend || result.Health == nil || *result.Health != fixture.Health ||
-		result.ErrorClass != fixture.ErrorClass || result.Message != fixture.Message {
-		t.Fatalf("verdict = %+v, want backend:%q health:%+v class:%q message:%q", result, fixture.Backend, fixture.Health, fixture.ErrorClass, fixture.Message)
-	}
-}
-
 func TestCheckLocalTaskRunnerResolutionFailures(t *testing.T) {
 	storeFailure := errors.New("fleet unavailable")
 	cases := []struct {
@@ -290,6 +245,44 @@ func TestCheckLocalTaskRunnerResolutionFailures(t *testing.T) {
 			}
 			if result.Backend != "" || result.BackendSource != "" || result.Health != nil {
 				t.Fatalf("result = %+v, want unresolved backend and nil health", result)
+			}
+		})
+	}
+}
+
+func TestCheckLocalTaskRunnerKeepsStoreDetailOutOfAuthoredFields(t *testing.T) {
+	const sentinelURL = "http://127.0.0.1:8280/fleetdb"
+	storeFailure := errors.New(sentinelURL)
+	cases := []struct {
+		name    string
+		store   targetStore
+		request Request
+	}{
+		{
+			name:    "agent store",
+			store:   targetStoreStub{agentErr: storeFailure},
+			request: Request{WorkspaceKey: "ACME", AgentName: "worker-a", AgentRequired: true},
+		},
+		{
+			name:    "daemon profile store",
+			store:   targetStoreStub{daemonErr: storeFailure},
+			request: Request{WorkspaceKey: "ACME"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			restore := SetHealthCheckerForTest(healthyProbe)
+			t.Cleanup(restore)
+			result, err := CheckLocalTaskRunner(context.Background(), tc.store, tc.request)
+			if !errors.Is(err, storeFailure) || !strings.Contains(err.Error(), sentinelURL) {
+				t.Fatalf("CheckLocalTaskRunner() error = %v, want wrapped sentinel store failure", err)
+			}
+			authored := result.Message + " " + strings.Join(result.Remediation, " ")
+			if strings.Contains(authored, sentinelURL) {
+				t.Fatalf("Loom-authored fields leaked store detail: %+v", result)
+			}
+			if result.ErrorClass != ErrorClassResolutionFailed {
+				t.Fatalf("error class = %q, want %q", result.ErrorClass, ErrorClassResolutionFailed)
 			}
 		})
 	}

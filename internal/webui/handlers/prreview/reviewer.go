@@ -203,7 +203,7 @@ func (m *Module) ensureReviewer(w http.ResponseWriter, r *http.Request) {
 		r.Context(), ws, agentName, params.owner, params.repo, params.number,
 	); err != nil {
 		slog.Error("pr-review: ensure reviewer agent failed", "ws", ws, "agent", agentName, "err", err)
-		writePRReviewErrorCode(w, http.StatusInternalServerError, "internal", "failed to prepare the reviewer agent", false)
+		writePRReviewError(w, err)
 		return
 	}
 
