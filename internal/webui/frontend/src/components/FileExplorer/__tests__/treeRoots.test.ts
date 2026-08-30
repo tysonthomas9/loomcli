@@ -434,4 +434,24 @@ describe("treeRoots", () => {
       skills: true,
     });
   });
+
+  it("does not crash when a fresh agent omits repos/repo_groups", () => {
+    // The create-agent response omits empty repos/repo_groups, so an
+    // optimistically-inserted agent can reach the tree builder with those
+    // fields undefined (before the normalized refetch repairs the snapshot).
+    // Regression for "undefined is not an object (evaluating 'e.repo_groups')".
+    const rawAgent = {
+      name: "fresh",
+      cross_repo: true,
+    } as unknown as WorkspaceAgentInfo;
+
+    expect(() =>
+      buildFileTreeSections({
+        mode: "workspace",
+        agents: [rawAgent],
+        repos: [repo("source-repo")],
+        checkouts: [],
+      }),
+    ).not.toThrow();
+  });
 });
