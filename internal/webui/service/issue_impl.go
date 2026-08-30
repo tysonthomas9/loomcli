@@ -56,6 +56,7 @@ type issueServiceImpl struct {
 	// remain to back ListIssues/ListKanban and the cross-workspace MoveIssue
 	// path which have not yet been migrated.
 	backendFn IssueBackendProvider
+	journey   JourneyServiceConfig
 
 	labelMutationMu sync.Mutex
 }
@@ -72,8 +73,8 @@ type issueServiceImpl struct {
 // Prefer NewIssueServiceWithBackend when an IssueBackend is available; this
 // constructor is retained for tests and call sites that have not yet been
 // updated to thread the backend through.
-func NewIssueService(pool daemon.Pool, multiPool *daemon.MultiPool, withWorkspaceFn func(ctx context.Context, wsID string) context.Context) IssueService {
-	return &issueServiceImpl{pool: pool, multiPool: multiPool, withWorkspaceFn: withWorkspaceFn}
+func NewIssueService(pool daemon.Pool, multiPool *daemon.MultiPool, withWorkspaceFn func(ctx context.Context, wsID string) context.Context, journeyConfig ...JourneyServiceConfig) IssueService {
+	return &issueServiceImpl{pool: pool, multiPool: multiPool, withWorkspaceFn: withWorkspaceFn, journey: normalizeJourneyServiceConfig(journeyConfig)}
 }
 
 // NewIssueServiceWithBackend creates a new IssueService implementation that
@@ -85,12 +86,13 @@ func NewIssueService(pool daemon.Pool, multiPool *daemon.MultiPool, withWorkspac
 // package can resolve the backend lazily without webui taking an import on
 // internal/cli. backendFn may be nil; methods that need the backend then
 // behave as if the backend were unavailable.
-func NewIssueServiceWithBackend(pool daemon.Pool, multiPool *daemon.MultiPool, withWorkspaceFn func(ctx context.Context, wsID string) context.Context, backendFn IssueBackendProvider) IssueService {
+func NewIssueServiceWithBackend(pool daemon.Pool, multiPool *daemon.MultiPool, withWorkspaceFn func(ctx context.Context, wsID string) context.Context, backendFn IssueBackendProvider, journeyConfig ...JourneyServiceConfig) IssueService {
 	return &issueServiceImpl{
 		pool:            pool,
 		multiPool:       multiPool,
 		withWorkspaceFn: withWorkspaceFn,
 		backendFn:       backendFn,
+		journey:         normalizeJourneyServiceConfig(journeyConfig),
 	}
 }
 

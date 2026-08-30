@@ -279,6 +279,9 @@ func (s *stubIssueService) ListEvents(context.Context, service.EventListParams) 
 func (s *stubIssueService) ListEventHistory(context.Context, service.EventListParams) (*service.EventListResult, error) {
 	return nil, service.ErrNotImplemented("not implemented")
 }
+func (s *stubIssueService) GetJourney(context.Context, string) (*service.Journey, error) {
+	return nil, service.ErrNotImplemented("not implemented")
+}
 func (s *stubIssueService) MoveIssue(context.Context, service.MoveIssueParams) (*service.MoveIssueResult, error) {
 	return nil, service.ErrNotImplemented("not implemented")
 }

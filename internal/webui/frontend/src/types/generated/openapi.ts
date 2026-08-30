@@ -426,6 +426,29 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/issues/{id}/journey": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Reconstruct an issue's durable journey
+     * @description Returns status spans reconstructed from the complete fleet-db issue
+     *     history when available, plus an optional host-local agent lifecycle
+     *     overlay. The honesty block reports any bounded history or unavailable
+     *     lifecycle overlay so clients do not treat partial durations as exact.
+     */
+    get: operations["getIssueJourney"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/issues/{id}/git/diff-stat": {
     parameters: {
       query?: never;
@@ -2785,6 +2808,62 @@ export interface components {
       before?: string;
       after?: string;
     };
+    JourneyResponse: {
+      success: boolean;
+      data?: components["schemas"]["Journey"];
+      error?: string;
+    };
+    Journey: {
+      spans: components["schemas"]["JourneySpan"][];
+      agent_windows: components["schemas"]["JourneyAgentWindow"][];
+      lead_time: components["schemas"]["JourneyLeadTime"];
+      honesty: components["schemas"]["JourneyHonesty"];
+    };
+    JourneySpan: {
+      kind: string;
+      stage: string;
+      /** Format: date-time */
+      start: string;
+      /** Format: date-time */
+      end: string | null;
+      owner: string | null;
+      actor: string | null;
+      needs_revision: boolean;
+      stalled: boolean;
+      approximate: boolean;
+      unknown_start: boolean;
+    };
+    JourneyAgentWindow: {
+      task_id: string;
+      agent: string;
+      /** Format: date-time */
+      start: string;
+      /** Format: date-time */
+      end: string | null;
+      outcome: string;
+    };
+    JourneyLeadTime: {
+      /** Format: int64 */
+      total_ms: number;
+      /** Format: int64 */
+      queued_ms: number;
+      /** Format: int64 */
+      agent_working_ms: number;
+      /** Format: int64 */
+      waiting_on_operator_ms: number;
+      /** Format: int64 */
+      halted_ms: number;
+    };
+    JourneyHonesty: {
+      complete_history: boolean;
+      bounded: boolean;
+      has_more: boolean;
+      events_seen: number;
+      total_events?: number;
+      reason?: string;
+      agent_windows_available: boolean;
+      agent_windows_reason?: string;
+    };
     Statistics: {
       total_issues: number;
       open_issues: number;
@@ -4582,6 +4661,49 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+    };
+  };
+  getIssueJourney: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Issue identifier */
+        id: components["parameters"]["IssueId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Issue journey */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["JourneyResponse"];
+        };
+      };
+      /** @description Missing issue ID */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Issue not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
       };
     };
   };
