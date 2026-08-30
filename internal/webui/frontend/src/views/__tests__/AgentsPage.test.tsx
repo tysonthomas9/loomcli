@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import "@testing-library/jest-dom";
 import { existsSync } from "node:fs";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -19,6 +20,7 @@ const mocks = vi.hoisted(() => {
     startWorkflowRun: vi.fn(),
     localSettings: { settings: null },
     workspaceContext: { repos: [] },
+    useLogStream: vi.fn(),
     agents: [] as Array<{
       name: string;
       role?: string;
@@ -72,6 +74,10 @@ vi.mock("@/hooks/workspace", () => ({
 
 vi.mock("@/hooks/ui/useToast", () => ({
   useToast: () => ({ showToast: mocks.showToast }),
+}));
+
+vi.mock("@/hooks/terminal/useLogStream", () => ({
+  useLogStream: (...args: unknown[]) => mocks.useLogStream(...args),
 }));
 
 vi.mock("@/components", () => ({
@@ -145,6 +151,11 @@ describe("AgentsPage", () => {
     mocks.localSettings = { settings: null };
     mocks.workspaceContext = { repos: [] };
     mocks.agents = [];
+    mocks.useLogStream.mockReturnValue({
+      content: "",
+      state: "disconnected",
+      error: null,
+    });
     mocks.startWorkflowRun.mockResolvedValue({
       run_id: "run-1",
       status: "queued",
@@ -292,6 +303,69 @@ describe("AgentsPage", () => {
           .getAttribute("data-active"),
       ).toBe("true");
     });
+  });
+
+  it("renders a reachable Logs tab and streams only while it is active", async () => {
+    mocks.agents = [
+      {
+        name: "lead-1",
+        role: "lead",
+        repo: "loomcli",
+        status: "ready",
+        branch: "agent/lead-1",
+      },
+    ];
+    mocks.useLogStream.mockReturnValue({
+      content: "live line\n",
+      state: "connected",
+      error: null,
+    });
+
+    render(<AgentsPage />);
+
+    const logsTab = screen.getByRole("button", { name: "Logs" });
+    expect(logsTab).toBeInTheDocument();
+    expect(mocks.useLogStream).toHaveBeenLastCalledWith({
+      workspaceId: "DESKTOP-QA",
+      streamPath: "/agents/lead-1/logs/stream",
+      enabled: false,
+    });
+
+    fireEvent.click(logsTab);
+
+    await waitFor(() => {
+      expect(mocks.useLogStream).toHaveBeenLastCalledWith({
+        workspaceId: "DESKTOP-QA",
+        streamPath: "/agents/lead-1/logs/stream",
+        enabled: true,
+      });
+    });
+    expect(screen.getByTestId("agent-log-content")).toHaveTextContent(
+      "live line",
+    );
+    expect(screen.queryByTestId("embedded-terminal")).toBeNull();
+  });
+
+  it("labels a connected empty Logs stream as no logs", async () => {
+    mocks.agents = [
+      {
+        name: "lead-1",
+        role: "lead",
+        status: "ready",
+      },
+    ];
+    mocks.useLogStream.mockReturnValue({
+      content: "",
+      state: "connected",
+      error: null,
+    });
+
+    render(<AgentsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Logs" }));
+
+    const state = await screen.findByTestId("agent-log-state");
+    expect(state).toHaveAttribute("data-state", "empty");
+    expect(state).toHaveTextContent("no logs");
   });
 
   it("does not leave the retired legacy file editor module in source", () => {

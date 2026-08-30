@@ -52,6 +52,14 @@ type LogContentData struct {
 	StartLine int64    `json:"start_line"`
 }
 
+// StreamStart selects where replay begins before live tailing starts.
+// Offset wins over TailBytes when both are present. With neither, replay
+// begins at byte zero.
+type StreamStart struct {
+	Offset    *int64
+	TailBytes *int64
+}
+
 // TaskPhasesResponse is the response for listing task log phases.
 type TaskPhasesResponse struct {
 	Success bool            `json:"success"`
@@ -93,9 +101,9 @@ func NewLogStreamer(fp string) (*LogStreamer, error) {
 }
 
 // Stream starts SSE streaming to the ResponseWriter.
-// startOffset is the byte offset to begin replay from.
+// start selects the byte offset to begin replay from.
 // Blocks until context canceled or error.
-func (s *LogStreamer) Stream(ctx context.Context, w http.ResponseWriter, startOffset int64) error {
+func (s *LogStreamer) Stream(ctx context.Context, w http.ResponseWriter, start StreamStart) error {
 	sw, err := realtime.NewWriter(w)
 	if err != nil {
 		return fmt.Errorf("streaming unsupported")
@@ -106,7 +114,7 @@ func (s *LogStreamer) Stream(ctx context.Context, w http.ResponseWriter, startOf
 		return err
 	}
 
-	currentOffset, err := s.replayExistingContent(ctx, sw, startOffset)
+	currentOffset, err := s.replayExistingContent(ctx, sw, start)
 	if err != nil {
 		return err
 	}
@@ -126,15 +134,18 @@ func writeSSEHeaders(w http.ResponseWriter) {
 	w.Header().Set("X-Accel-Buffering", "no")
 }
 
-// replayExistingContent opens the log file and replays content from startOffset.
+// replayExistingContent opens the log file and replays content from start.
 // Returns the final byte offset after replay.
-func (s *LogStreamer) replayExistingContent(ctx context.Context, sw *realtime.Writer, startOffset int64) (int64, error) {
+func (s *LogStreamer) replayExistingContent(ctx context.Context, sw *realtime.Writer, start StreamStart) (int64, error) {
 	logDir, dirErr := GetLogDir()
 	if dirErr != nil {
 		return 0, dirErr
 	}
 	file, err := openLogFileSecure(s.logFilePath, logDir)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
 		return 0, err
 	}
 	defer file.Close()
@@ -144,12 +155,26 @@ func (s *LogStreamer) replayExistingContent(ctx context.Context, sw *realtime.Wr
 		return 0, err
 	}
 
-	startOffset = clampOffset(startOffset, stat.Size())
+	startOffset := replayStartOffset(start, stat.Size())
 	if _, err := file.Seek(startOffset, io.SeekStart); err != nil {
 		return 0, err
 	}
 
 	return s.readAndEmitChunks(ctx, sw, file, startOffset)
+}
+
+func replayStartOffset(start StreamStart, fileSize int64) int64 {
+	if start.Offset != nil {
+		return clampOffset(*start.Offset, fileSize)
+	}
+	if start.TailBytes != nil {
+		tailBytes := *start.TailBytes
+		if tailBytes < 0 {
+			tailBytes = 0
+		}
+		return max(0, fileSize-tailBytes)
+	}
+	return 0
 }
 
 // clampOffset ensures offset is within [0, fileSize].

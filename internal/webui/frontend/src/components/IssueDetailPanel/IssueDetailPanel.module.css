@@ -493,6 +493,21 @@
   min-width: 0;
 }
 
+.taskLogPanel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.taskLogHeader {
+  flex-shrink: 0;
+  padding: var(--space-4) var(--space-4) 0;
+  background: var(--color-panel-bg);
+}
+
 /* ============= Split View (Terminal + Details) ============= */
 
 .splitContainer {

@@ -12,7 +12,7 @@ import (
 // directories directly under ~/.loom/logs/.
 const defaultWorkspaceDir = "_default"
 
-// getLogDir returns the base log directory (~/.loom/logs).
+// GetLogDir returns the base log directory (~/.loom/logs).
 func GetLogDir() (string, error) {
 	for _, env := range []string{"LOOM_WORKSPACE_RUNTIME_DIR", "LOOM_CONFIG_DIR"} {
 		if base := os.Getenv(env); base != "" {
@@ -26,7 +26,7 @@ func GetLogDir() (string, error) {
 	return filepath.Join(home, ".loom", "logs"), nil
 }
 
-// getWorkspaceLogDir returns the workspace-scoped log directory (~/.loom/logs/{wsID}).
+// GetWorkspaceLogDir returns the workspace-scoped log directory (~/.loom/logs/{wsID}).
 // If workspaceID is empty, falls back to ~/.loom/logs/_default.
 func GetWorkspaceLogDir(workspaceID string) (string, error) {
 	logDir, err := GetLogDir()
@@ -39,7 +39,7 @@ func GetWorkspaceLogDir(workspaceID string) (string, error) {
 	return filepath.Join(logDir, workspaceID), nil
 }
 
-// getAgentLogPath returns the path to an agent's log file, scoped by workspace.
+// GetAgentLogPath returns the path to an agent's log file, scoped by workspace.
 // It validates the resolved path to prevent symlink attacks.
 func GetAgentLogPath(workspaceID, agentName string) (string, error) {
 	logDir, err := GetLogDir()
@@ -62,7 +62,7 @@ func GetAgentLogPath(workspaceID, agentName string) (string, error) {
 	return logPath, nil
 }
 
-// getTaskLogPath returns the path to a task's phase log file, scoped by workspace.
+// GetTaskLogPath returns the path to a task's phase log file, scoped by workspace.
 // It validates the resolved path to prevent symlink attacks.
 func GetTaskLogPath(workspaceID, taskID, phase string) (string, error) {
 	logDir, err := GetLogDir()
@@ -85,7 +85,7 @@ func GetTaskLogPath(workspaceID, taskID, phase string) (string, error) {
 	return logPath, nil
 }
 
-// getTaskLogDir returns the directory containing a task's log files, scoped by workspace.
+// GetTaskLogDir returns the directory containing a task's log files, scoped by workspace.
 // It validates the resolved path to prevent symlink attacks.
 func GetTaskLogDir(workspaceID, taskID string) (string, error) {
 	logDir, err := GetLogDir()
@@ -108,7 +108,7 @@ func GetTaskLogDir(workspaceID, taskID string) (string, error) {
 	return taskDir, nil
 }
 
-// validatePathWithinDir checks that the resolved path stays within the allowed directory.
+// ValidatePathWithinDir checks that the resolved path stays within the allowed directory.
 // This prevents symlink attacks where a symlink could point outside the log directory.
 func ValidatePathWithinDir(path, allowedDir string) error {
 	resolvedAllowedDir, err := resolvePathForComparison(allowedDir)

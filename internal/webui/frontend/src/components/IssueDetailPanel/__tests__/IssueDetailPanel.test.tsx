@@ -30,6 +30,7 @@ import {
   createWorkspaceAgent,
   deleteWorkspaceAgent,
   getIssueEvents,
+  getTaskLogPhases,
 } from "@/api";
 import { createAgentStore } from "@/stores/agentStore";
 
@@ -45,6 +46,8 @@ const {
   mockUseWorkspaceContext,
   mockUseAgentStoreInstance,
   mockGetTaskSessions,
+  mockUseTaskLogPolling,
+  mockLiveLogPane,
   mockShowToast,
   mockUseToast,
 } = vi.hoisted(() => ({
@@ -101,6 +104,8 @@ const {
   })),
   mockUseAgentStoreInstance: vi.fn(),
   mockGetTaskSessions: vi.fn(() => Promise.resolve([])),
+  mockUseTaskLogPolling: vi.fn(),
+  mockLiveLogPane: vi.fn(),
   mockShowToast: vi.fn(),
   mockUseToast: vi.fn(() => ({
     toasts: [],
@@ -171,6 +176,35 @@ vi.mock("@/hooks/common", async () => {
     await vi.importActual<typeof import("@/hooks/common")>("@/hooks/common");
   return { ...actual, useAgentStoreInstance: mockUseAgentStoreInstance };
 });
+
+vi.mock("@/hooks/terminal", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/terminal")>(
+      "@/hooks/terminal",
+    );
+  return {
+    ...actual,
+    useTaskLogPolling: (...args: unknown[]) => mockUseTaskLogPolling(...args),
+  };
+});
+
+vi.mock("@/components/LiveLogPane", () => ({
+  LiveLogPane: (props: {
+    workspaceId: string;
+    streamPath: string;
+    enabled: boolean;
+  }) => {
+    mockLiveLogPane(props);
+    return (
+      <div
+        data-testid="mock-live-log-pane"
+        data-workspace-id={props.workspaceId}
+        data-stream-path={props.streamPath}
+        data-enabled={String(props.enabled)}
+      />
+    );
+  },
+}));
 
 vi.mock("@/hooks", async (importOriginal) => {
   const orig = await importOriginal<typeof import("@/hooks")>();
@@ -362,6 +396,10 @@ describe("IssueDetailPanel", () => {
     mockUseWorkspaceContext.mockImplementation(() => createWorkspaceContext());
     mockGetTaskSessions.mockReset();
     mockGetTaskSessions.mockResolvedValue([]);
+    mockUseTaskLogPolling.mockReset();
+    mockLiveLogPane.mockReset();
+    vi.mocked(getTaskLogPhases).mockReset();
+    vi.mocked(getTaskLogPhases).mockResolvedValue([]);
     mockShowToast.mockReset();
     mockUseToast.mockReset();
     mockUseToast.mockImplementation(() => ({
@@ -493,6 +531,40 @@ describe("IssueDetailPanel", () => {
         </IssueDetailPanel>,
       );
       expect(screen.getByTestId("child-content")).toBeInTheDocument();
+    });
+
+    it("streams the active task phase without starting the polling loop", async () => {
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({ workspaceId: "DESKTOP-QA" }),
+      );
+      vi.mocked(getTaskLogPhases).mockResolvedValue(["planning"]);
+
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={createTestIssue({
+            id: "LOOM-123",
+            issue_type: "task",
+          })}
+          onClose={() => {}}
+        />,
+      );
+
+      const planningTab = await screen.findByRole("tab", {
+        name: "Planning",
+      });
+      expect(screen.queryByTestId("mock-live-log-pane")).toBeNull();
+
+      fireEvent.click(planningTab);
+
+      const livePane = await screen.findByTestId("mock-live-log-pane");
+      expect(livePane).toHaveAttribute("data-workspace-id", "DESKTOP-QA");
+      expect(livePane).toHaveAttribute(
+        "data-stream-path",
+        "/tasks/LOOM-123/logs/planning/stream",
+      );
+      expect(livePane).toHaveAttribute("data-enabled", "true");
+      expect(mockUseTaskLogPolling).not.toHaveBeenCalled();
     });
 
     it("shows latest failed task run and links to Runs tab", async () => {

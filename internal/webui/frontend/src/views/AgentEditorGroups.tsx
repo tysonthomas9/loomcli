@@ -13,13 +13,27 @@ import {
 
 import styles from "./AgentEditorGroups.module.css";
 
-export type AgentEditorTab = "terminal" | "info" | "git" | "diff" | "files";
+export type AgentEditorTab =
+  | "terminal"
+  | "info"
+  | "logs"
+  | "git"
+  | "diff"
+  | "files";
 
-const ALL_TABS: AgentEditorTab[] = ["terminal", "info", "git", "diff", "files"];
+const ALL_TABS: AgentEditorTab[] = [
+  "terminal",
+  "info",
+  "logs",
+  "git",
+  "diff",
+  "files",
+];
 
 const TAB_LABELS: Record<AgentEditorTab, string> = {
   terminal: "Terminal",
   info: "Info",
+  logs: "Logs",
   git: "Git",
   diff: "Diff",
   files: "Files",

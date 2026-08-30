@@ -738,7 +738,7 @@ func (s *stubFileService) MovePathVersionedScoped(_ context.Context, _ string, _
 // Test-local SessionService implementation
 // ---------------------------------------------------------------------------
 
-// validTaskID and validSessionID are already defined in the misc package
+// IsValidTaskID and validSessionID are already defined in the misc package
 // (logs.go and sessions.go), so we reuse them here.
 
 // testSessionServiceImpl mirrors the root webui.sessionServiceImpl for tests.
@@ -758,7 +758,7 @@ func (s *testSessionServiceImpl) ListTaskSessions(_ context.Context, _, taskID s
 	if s.sessStore == nil {
 		return nil, service.ErrUnavailable("session store not available")
 	}
-	if taskID == "" || !validTaskID.MatchString(taskID) {
+	if !IsValidTaskID(taskID) {
 		return nil, service.ErrValidation("invalid task ID: must match [a-zA-Z0-9._-]+")
 	}
 	records, err := s.sessStore.SessionsByTask(taskID)
@@ -786,7 +786,7 @@ func (s *testSessionServiceImpl) GetSession(_ context.Context, _, taskID, sessio
 	if s.sessStore == nil {
 		return nil, service.ErrUnavailable("session store not available")
 	}
-	if taskID == "" || !validTaskID.MatchString(taskID) {
+	if !IsValidTaskID(taskID) {
 		return nil, service.ErrValidation("invalid task ID")
 	}
 	if sessionID == "" || !validSessionID.MatchString(sessionID) {
@@ -812,7 +812,7 @@ func (s *testSessionServiceImpl) GetSessionTranscript(_ context.Context, _, task
 	if s.sessStore == nil {
 		return nil, service.ErrUnavailable("session store not available")
 	}
-	if taskID == "" || !validTaskID.MatchString(taskID) {
+	if !IsValidTaskID(taskID) {
 		return nil, service.ErrValidation("invalid task ID")
 	}
 	if sessionID == "" || !validSessionID.MatchString(sessionID) {
@@ -888,7 +888,7 @@ func (s *testSessionServiceImpl) GetSessionDiff(_ context.Context, _, taskID, se
 	if s.sessStore == nil {
 		return "", service.ErrUnavailable("session store not available")
 	}
-	if taskID == "" || !validTaskID.MatchString(taskID) {
+	if !IsValidTaskID(taskID) {
 		return "", service.ErrValidation("invalid task ID")
 	}
 	if sessionID == "" || !validSessionID.MatchString(sessionID) {

@@ -1,6 +1,7 @@
 package log
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,7 +11,7 @@ import (
 var _ module = (*LogModule)(nil)
 
 func TestLogModule_RegisterRoutes(t *testing.T) {
-	mod := NewLogModule(&mockAgentService{})
+	mod := NewLogModule(&mockAgentService{}, nil)
 
 	mux := http.NewServeMux()
 	mod.Register(mux)
@@ -20,6 +21,7 @@ func TestLogModule_RegisterRoutes(t *testing.T) {
 		path   string
 	}{
 		{"GET", "/api/workspaces/test-ws/agents/agent1/logs"},
+		{"GET", "/api/workspaces/test-ws/agents/agent1/logs/stream"},
 		{"GET", "/api/workspaces/test-ws/tasks/task1/logs"},
 		{"GET", "/api/workspaces/test-ws/tasks/task1/logs/phase1"},
 	}
@@ -40,7 +42,7 @@ func TestLogModule_RegisterRoutes(t *testing.T) {
 
 func TestLogModule_ConditionalRoutes(t *testing.T) {
 	t.Run("nil agentSvc omits agent log route", func(t *testing.T) {
-		mod := NewLogModule(nil)
+		mod := NewLogModule(nil, nil)
 
 		mux := http.NewServeMux()
 		mod.Register(mux)
@@ -54,6 +56,17 @@ func TestLogModule_ConditionalRoutes(t *testing.T) {
 			t.Errorf("agent log with nil agentSvc: expected 404, got %d", rec.Code)
 		}
 
+		// The live stream does not depend on agentSvc and remains registered.
+		rec = httptest.NewRecorder()
+		req = httptest.NewRequest("GET", "/api/workspaces/test-ws/agents/agent1/logs/stream", nil)
+		ctx, cancel := context.WithCancel(req.Context())
+		cancel()
+		req = req.WithContext(ctx)
+		mux.ServeHTTP(rec, req)
+		if rec.Code == http.StatusNotFound {
+			t.Error("agent stream route should be registered even with nil agentSvc")
+		}
+
 		// Task log routes should still be registered
 		rec = httptest.NewRecorder()
 		req = httptest.NewRequest("GET", "/api/workspaces/test-ws/tasks/task1/logs", nil)
@@ -65,7 +78,7 @@ func TestLogModule_ConditionalRoutes(t *testing.T) {
 	})
 
 	t.Run("non-nil agentSvc registers agent log route", func(t *testing.T) {
-		mod := NewLogModule(&mockAgentService{})
+		mod := NewLogModule(&mockAgentService{}, nil)
 
 		mux := http.NewServeMux()
 		mod.Register(mux)
@@ -81,7 +94,7 @@ func TestLogModule_ConditionalRoutes(t *testing.T) {
 }
 
 func TestLogModule_WrongMethod_Returns405(t *testing.T) {
-	mod := NewLogModule(&mockAgentService{})
+	mod := NewLogModule(&mockAgentService{}, nil)
 
 	mux := http.NewServeMux()
 	mod.Register(mux)

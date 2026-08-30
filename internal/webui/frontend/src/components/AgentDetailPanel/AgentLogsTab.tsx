@@ -1,12 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 
-import {
-  ensureAgentTerminalSession,
-  getAgentLogArchive,
-  getAgentTerminalInfo,
-} from "@/hooks/api";
+import { ensureAgentTerminalSession, getAgentTerminalInfo } from "@/hooks/api";
 import { EmbeddedTerminal } from "@/components/EmbeddedTerminal";
 import type { ConnectionState } from "@/components/TerminalView";
+import { useLogStream } from "@/hooks/terminal/useLogStream";
 import { useWorkspaceContext } from "@/hooks/workspace";
 
 import styles from "./AgentDetailPanel.module.css";
@@ -16,12 +13,9 @@ interface AgentLogsTabProps {
   isActive: boolean;
 }
 
-// LogViewState widens ConnectionState with "empty": an archive fetch that
-// succeeded (or 404'd — see getAgentLogArchive) but returned no lines. We
-// surface that distinctly instead of showing the misleading "connected" label
-// over a blank viewer, which is what a daemon-mode agent with no archived log
-// used to render.
-type LogViewState = ConnectionState | "empty";
+// LogViewState widens ConnectionState with "empty" so an idle live stream with
+// no replayed bytes does not show a misleading populated/connected state.
+type LogViewState = ConnectionState | "reconnecting" | "empty";
 
 export function AgentLogsTab({
   agentName,
@@ -34,11 +28,17 @@ export function AgentLogsTab({
     backend: string;
     agentName: string;
   } | null>(null);
-  const [lines, setLines] = useState<string[]>([]);
   const [state, setState] = useState<LogViewState>("connecting");
+
+  const liveStream = useLogStream({
+    workspaceId,
+    streamPath: `/agents/${encodeURIComponent(agentName)}/logs/stream`,
+    enabled: isActive && mode === "archive",
+  });
 
   const load = useCallback(async () => {
     setState("connecting");
+    setMode(null);
     setTerminalSession(null);
     try {
       const nextMode = await getAgentTerminalInfo(workspaceId, agentName);
@@ -50,16 +50,9 @@ export function AgentLogsTab({
           agentName: meta.agent_id ?? agentName,
         });
         setMode("tmux");
-        setLines([]);
         // tmux connection state is driven by EmbeddedTerminal below.
       } else {
-        const archive = await getAgentLogArchive(workspaceId, agentName);
         setMode("archive");
-        setLines(archive.lines);
-        // "connected" only when there is actually something to show; an empty
-        // archive reports "empty" so the UI never claims a populated log when
-        // there isn't one.
-        setState(archive.lines.length > 0 ? "connected" : "empty");
       }
     } catch {
       setState("disconnected");
@@ -71,19 +64,26 @@ export function AgentLogsTab({
     void load();
   }, [isActive, load]);
 
-  const stateLabel = state === "empty" ? "no logs" : state;
+  const liveState: LogViewState =
+    mode === "archive" &&
+    liveStream.state === "connected" &&
+    liveStream.content === ""
+      ? "empty"
+      : liveStream.state;
+  const viewState = mode === "archive" ? liveState : state;
+  const stateLabel = viewState === "empty" ? "no logs" : viewState;
 
   return (
     <div className={styles.scrollableContent}>
       <div className={styles.section}>
         <h3 className={styles.sectionTitle}>
-          {mode === "tmux" ? "Live terminal" : "Archive snapshot"}
+          {mode === "tmux" ? "Live terminal" : "Live log"}
         </h3>
         <button type="button" onClick={load}>
           Refresh
         </button>
         <div data-testid="log-viewer">
-          <span data-state={state}>{stateLabel}</span>
+          <span data-state={viewState}>{stateLabel}</span>
           {mode === "tmux" && terminalSession ? (
             <EmbeddedTerminal
               sessionName={terminalSession.sessionName}
@@ -92,12 +92,14 @@ export function AgentLogsTab({
               isActive={isActive}
               onConnectionStateChange={setState}
             />
-          ) : state === "empty" ? (
+          ) : viewState === "empty" ? (
             <p data-testid="archive-empty" className={styles.emptyState}>
               No logs available for this agent yet.
             </p>
           ) : (
-            <pre data-testid="terminal-container">{lines.join("\n")}</pre>
+            <pre data-testid="terminal-container">
+              {mode === "archive" ? liveStream.content : ""}
+            </pre>
           )}
         </div>
       </div>

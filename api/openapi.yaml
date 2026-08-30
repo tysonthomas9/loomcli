@@ -1499,6 +1499,68 @@ paths:
                         type: integer
                         format: int64
 
+  /api/workspaces/{ws}/agents/{name}/logs/stream:
+    get:
+      operationId: streamAgentLog
+      tags: [logs]
+      summary: Stream an agent log with initial replay and live updates
+      description: |
+        Replays log bytes from `offset`, from an EOF-relative `tail_bytes`
+        window, or from byte zero when neither is supplied, then streams live
+        `log-chunk` events. `offset` wins when both cursor parameters are
+        present. A `truncated` event tells the client to reset its buffer and
+        byte cursor.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+        - name: token
+          in: query
+          description: One-time SSE auth token (for EventSource clients)
+          schema:
+            type: string
+        - name: offset
+          in: query
+          description: Byte offset to resume replay from; wins over tail_bytes
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+        - name: tail_bytes
+          in: query
+          description: Initial number of bytes to replay from the end of the log
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+      responses:
+        "200":
+          description: SSE stream of LogChunkPayload and truncated events
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: Newline-delimited SSE log-chunk, truncated, and heartbeat frames
+        "400":
+          description: Invalid agent name or cursor parameter
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+        "401":
+          description: Missing, expired, or reused one-time stream token
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+
   /api/workspaces/{ws}/tasks/{id}/logs:
     get:
       operationId: listTaskPhases
@@ -1582,6 +1644,78 @@ paths:
                       start_line:
                         type: integer
                         format: int64
+
+  /api/workspaces/{ws}/tasks/{id}/logs/{phase}/stream:
+    get:
+      operationId: streamTaskPhaseLog
+      tags: [logs]
+      summary: Stream a task phase log with initial replay and live updates
+      description: |
+        Replays log bytes from `offset`, from an EOF-relative `tail_bytes`
+        window, or from byte zero when neither is supplied, then streams live
+        `log-chunk` events. `offset` wins when both cursor parameters are
+        present. A `truncated` event tells the client to reset its buffer and
+        byte cursor.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: phase
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [planning, implementation]
+        - name: token
+          in: query
+          description: One-time SSE auth token (for EventSource clients)
+          schema:
+            type: string
+        - name: offset
+          in: query
+          description: Byte offset to resume replay from; wins over tail_bytes
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+        - name: tail_bytes
+          in: query
+          description: Initial number of bytes to replay from the end of the log
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+      responses:
+        "200":
+          description: SSE stream of LogChunkPayload and truncated events
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: Newline-delimited SSE log-chunk, truncated, and heartbeat frames
+        "400":
+          description: Invalid task ID, phase, or cursor parameter
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+        "401":
+          description: Missing, expired, or reused one-time stream token
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
 
   # ── Terminal ────────────────────────────────────────────────────────────
   /api/workspaces/{ws}/terminal/sessions:
@@ -4329,6 +4463,24 @@ components:
 
   schemas:
     # ── Response Envelopes ──────────────────────────────────────────────
+    LogChunkPayload:
+      type: object
+      description: Raw log bytes carried by a resumable log-chunk SSE event
+      required: [chunk_b64, byte_offset, timestamp]
+      properties:
+        chunk_b64:
+          type: string
+          description: Base64-encoded raw log bytes
+        byte_offset:
+          type: integer
+          format: int64
+          minimum: 0
+          description: File byte offset immediately after this chunk
+        timestamp:
+          type: string
+          format: date-time
+          description: UTC time when the chunk was read
+
     ErrorResponse:
       type: object
       required: [success, error]

@@ -3,7 +3,7 @@
  *
  * Layout (driven by App.tsx):
  *   [WorkspaceTree — same sidebar as kanban]
- *   [tabbed main panel — Terminal / Info / Git / Diff / Files]
+ *   [tabbed main panel — Terminal / Info / Logs / Git / Diff / Files]
  *   [right column — either AgentWorkPanel OR inline IssueDetailPanel]
  *
  * The tabbed main panel comes from the Aether V3 design (feat/updated-UI);
@@ -41,6 +41,7 @@ import {
   orderAgentsForEpicRunner,
 } from "@/components/AgentIconRail/AgentIconRail";
 import { IssueDetailPanel } from "@/components/IssueDetailPanel/IssueDetailPanel";
+import { LiveLogPane } from "@/components/LiveLogPane";
 import {
   EPIC_RUNNER_WORKFLOW_NAME,
   isTerminalWorkflowRunStatus,
@@ -465,6 +466,21 @@ function AgentsPageInner(): JSX.Element {
               </section>
             </div>
           );
+        case "logs":
+          if (!agentName) {
+            return (
+              <div className={styles.tabFallback}>
+                Select an agent to view logs.
+              </div>
+            );
+          }
+          return (
+            <LiveLogPane
+              workspaceId={workspaceId}
+              streamPath={`/agents/${encodeURIComponent(agentName)}/logs/stream`}
+              enabled={isActive}
+            />
+          );
         case "git":
           if (!selected) {
             return (
@@ -535,6 +551,7 @@ function AgentsPageInner(): JSX.Element {
       roleName,
       infoStats,
       statusType,
+      workspaceId,
     ],
   );
 

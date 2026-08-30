@@ -53,7 +53,7 @@ import {
   getBackendFromSessionName,
   type ConnectionState,
 } from "@/components/TerminalView";
-import { useTaskLogPolling, useTaskSessions } from "@/hooks/terminal";
+import { useTaskSessions } from "@/hooks/terminal";
 import type { SessionRecord } from "@/types/agent";
 
 import {
@@ -77,6 +77,7 @@ import { SplitDetailSummary } from "./SplitDetailSummary";
 import { EmbeddedTerminal } from "../EmbeddedTerminal";
 import { ResizeDivider } from "./actions";
 import { ErrorToast } from "../ErrorToast";
+import { LiveLogPane } from "@/components/LiveLogPane";
 import { useSplitRatio, useToast } from "@/hooks/ui";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { SessionsTab } from "./sessions";
@@ -398,31 +399,23 @@ function TaskPhaseLogPanel({
   issueId: string;
   phase: "planning" | "implementation";
 }): JSX.Element {
-  const { chunks, state } = useTaskLogPolling({
-    taskId: issueId,
-    phase,
-    enabled: true,
-    pollIntervalMs: 500,
-  });
-  const text = useMemo(() => {
-    const decoder = new TextDecoder();
-    return chunks.map((chunk) => decoder.decode(chunk.chunk)).join("");
-  }, [chunks]);
+  const { workspaceId } = useWorkspaceContext();
 
   return (
     <div
-      className={styles.scrollableContent}
+      className={styles.taskLogPanel}
       role="tabpanel"
       id={`issue-panel-tabpanel-task-log-${phase}`}
       aria-labelledby={`issue-panel-tab-task-log-${phase}`}
     >
-      <div className={styles.section}>
+      <div className={styles.taskLogHeader}>
         <h3 className={styles.sectionTitle}>{formatPhaseLabel(phase)}</h3>
-        <div data-testid="log-viewer">
-          <span data-state={state}>{formatStatusLabel(state)}</span>
-          <pre data-testid="terminal-container">{text}</pre>
-        </div>
       </div>
+      <LiveLogPane
+        workspaceId={workspaceId}
+        streamPath={`/tasks/${encodeURIComponent(issueId)}/logs/${phase}/stream`}
+        enabled
+      />
     </div>
   );
 }

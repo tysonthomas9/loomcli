@@ -84,9 +84,9 @@ func TestValidTaskIDRegex(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := validTaskID.MatchString(tt.input)
+			got := IsValidTaskID(tt.input)
 			if got != tt.valid {
-				t.Errorf("validTaskID.MatchString(%q) = %v, want %v", tt.input, got, tt.valid)
+				t.Errorf("IsValidTaskID(%q) = %v, want %v", tt.input, got, tt.valid)
 			}
 		})
 	}
@@ -114,9 +114,9 @@ func TestValidPhaseRegex(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := validPhase.MatchString(tt.input)
+			got := IsValidPhase(tt.input)
 			if got != tt.valid {
-				t.Errorf("validPhase.MatchString(%q) = %v, want %v", tt.input, got, tt.valid)
+				t.Errorf("IsValidPhase(%q) = %v, want %v", tt.input, got, tt.valid)
 			}
 		})
 	}
@@ -1244,6 +1244,56 @@ func TestHandleGetAgentLog_LinesParam(t *testing.T) {
 	}
 	if resp.Data != nil && len(resp.Data.Lines) > 5 {
 		t.Errorf("expected at most 5 lines, got %d", len(resp.Data.Lines))
+	}
+}
+
+// TestHandleListTaskPhases_HonorsConfigDirRoot pins the archive endpoints to
+// the same log root the writers and stream routes use: with LOOM_CONFIG_DIR
+// set, phases must be discovered under it, not under $HOME. A divergence here
+// hid every task-log tab in the UI on local-mode stacks.
+func TestHandleListTaskPhases_HonorsConfigDirRoot(t *testing.T) {
+	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to resolve temp dir: %v", err)
+	}
+	configDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to resolve config dir: %v", err)
+	}
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", "")
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
+
+	wsID := "test-ws-configdir"
+	taskID := "configdirtask1"
+	taskDir := filepath.Join(configDir, ".loom", "logs", wsID, "tasks", taskID)
+	if err := os.MkdirAll(taskDir, 0o755); err != nil {
+		t.Fatalf("failed to create task log dir: %v", err)
+	}
+	logPath := filepath.Join(taskDir, "planning.log")
+	if err := os.WriteFile(logPath, []byte("planning content\n"), 0o644); err != nil {
+		t.Fatalf("failed to write planning log: %v", err)
+	}
+
+	handler := handleListTaskPhases()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/workspaces/{ws}/tasks/{id}/logs", handler)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+wsID+"/tasks/"+taskID+"/logs", nil)
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), wsID))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	var resp TaskPhasesResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !resp.Success || resp.Data == nil || len(resp.Data.Phases) != 1 || resp.Data.Phases[0] != "planning" {
+		t.Fatalf("expected phases [planning] from LOOM_CONFIG_DIR root, got success=%v data=%+v error=%q",
+			resp.Success, resp.Data, resp.Error)
 	}
 }
 

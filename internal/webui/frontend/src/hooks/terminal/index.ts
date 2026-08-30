@@ -21,6 +21,9 @@ export type {
   LogStreamState,
 } from "./useTaskLogPolling";
 
+export { useLogStream, getLogStreamUrl } from "./useLogStream";
+export type { UseLogStreamOptions, UseLogStreamResult } from "./useLogStream";
+
 export { useTaskSessions } from "./useTaskSessions";
 export type { UseTaskSessionsResult } from "./useTaskSessions";
 

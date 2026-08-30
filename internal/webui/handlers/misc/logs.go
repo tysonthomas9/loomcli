@@ -25,11 +25,21 @@ func parseBeforeLine(r *http.Request) int64 {
 // validAgentName matches alphanumeric characters, hyphens, and underscores.
 var validAgentName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
-// validTaskID matches task IDs (e.g., "loomcli-5y1sd.1").
-var validTaskID = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+// validTaskIDPattern matches task IDs (e.g., "loomcli-5y1sd.1").
+var validTaskIDPattern = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 
-// validPhase matches allowed phase names.
-var validPhase = regexp.MustCompile(`^(planning|implementation)$`)
+// validPhasePattern matches allowed phase names.
+var validPhasePattern = regexp.MustCompile(`^(planning|implementation)$`)
+
+// IsValidTaskID reports whether taskID is safe to use in a task log path.
+func IsValidTaskID(taskID string) bool {
+	return validTaskIDPattern.MatchString(taskID)
+}
+
+// IsValidPhase reports whether phase names a supported task log phase.
+func IsValidPhase(phase string) bool {
+	return validPhasePattern.MatchString(phase)
+}
 
 // HandleGetAgentLog returns the current log file content for an agent.
 // GET /api/workspaces/{ws}/agents/{name}/logs
@@ -86,7 +96,7 @@ func HandleListTaskPhases() http.HandlerFunc {
 		}
 
 		// Validate task ID
-		if !validTaskID.MatchString(taskID) {
+		if !IsValidTaskID(taskID) {
 			handler.WriteJSON(w, http.StatusBadRequest, TaskPhasesResponse{
 				Success: false,
 				Error:   "invalid task ID: must match [a-zA-Z0-9._-]+",
@@ -134,7 +144,7 @@ func HandleGetTaskLog() http.HandlerFunc { //nolint:funlen
 		}
 
 		// Validate task ID
-		if !validTaskID.MatchString(taskID) {
+		if !IsValidTaskID(taskID) {
 			handler.WriteJSON(w, http.StatusBadRequest, LogContentResponse{
 				Success: false,
 				Error:   "invalid task ID: must match [a-zA-Z0-9._-]+",
@@ -153,7 +163,7 @@ func HandleGetTaskLog() http.HandlerFunc { //nolint:funlen
 		}
 
 		// Validate phase
-		if !validPhase.MatchString(phase) {
+		if !IsValidPhase(phase) {
 			handler.WriteJSON(w, http.StatusBadRequest, LogContentResponse{
 				Success: false,
 				Error:   "invalid phase: must be 'planning' or 'implementation'",

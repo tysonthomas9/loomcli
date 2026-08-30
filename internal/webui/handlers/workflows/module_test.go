@@ -399,6 +399,47 @@ func TestStreamRunEventsCommitsResponseWithoutEvents(t *testing.T) {
 	}
 }
 
+func TestStreamRunEventsClearsServerWriteDeadline(t *testing.T) {
+	ctx := context.Background()
+	st := seededWorkflowStore(t, ctx)
+	run, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+		WorkspaceKey:    "TEST",
+		RunID:           "run-deadline",
+		DriverID:        "demo",
+		DriverVersionID: "version-1",
+		Payload:         json.RawMessage(`{"ok":true}`),
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	reqCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/workspaces/TEST/runs/"+run.RunID+"/stream?after=0",
+		nil,
+	).WithContext(reqCtx)
+	recorder := &workflowDeadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	mux := http.NewServeMux()
+	NewModule(st).Register(mux)
+	mux.ServeHTTP(recorder, req)
+
+	if len(recorder.deadlines) != 1 || !recorder.deadlines[0].IsZero() {
+		t.Fatalf("write deadlines = %v, want one zero deadline", recorder.deadlines)
+	}
+}
+
+type workflowDeadlineRecorder struct {
+	*httptest.ResponseRecorder
+	deadlines []time.Time
+}
+
+func (w *workflowDeadlineRecorder) SetWriteDeadline(deadline time.Time) error {
+	w.deadlines = append(w.deadlines, deadline)
+	return nil
+}
+
 func serveWorkflowStreamOnce(t *testing.T, st store.Store, runID string) string {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())

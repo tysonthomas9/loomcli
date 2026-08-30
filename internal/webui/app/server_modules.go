@@ -60,7 +60,7 @@ func (app *Server) buildModules() {
 		modbuilder.NewIssueModules(app.issueSvc, app.sessSvc, app.config.Store)...)
 
 	// Log module (always added — handles nil agentSvc gracefully)
-	app.wsModules = append(app.wsModules, svcimpl.NewLogModule(app.agentSvc))
+	app.wsModules = append(app.wsModules, svcimpl.NewLogModule(app.agentSvc, app.sseTokens))
 
 	// SSE subscription
 	if app.hub != nil {
