@@ -486,6 +486,31 @@ test("LoomDriverClient epics.watch reconnects with Last-Event-ID after disconnec
   });
 });
 
+test("LoomDriverClient epics.watch server retry hint overrides caller reconnectMs", async () => {
+  await withSSEServer((call, res, calls) => {
+    res.writeHead(200, { "Content-Type": "text/event-stream" });
+    if (calls.length === 1) {
+      res.write("retry: 20\n\n");
+      writeSSEFrame(res, "0", "snapshot", { epic: { epicId: "EPIC-1" }, active: null });
+      res.end();
+      return;
+    }
+    writeSSEFrame(res, "0", "closed", { code: "parent_not_running" });
+    res.end();
+  }, async ({ apiUrl, calls }) => {
+    const client = watchTestClient(apiUrl);
+    const startedAt = Date.now();
+    const events = await collectWatchEvents(
+      client.epics.watch({ epicId: "EPIC-1", reconnectMs: 1000 })
+    );
+    const elapsedMs = Date.now() - startedAt;
+
+    assert.deepEqual(events.map((event) => event.type), ["snapshot", "closed"]);
+    assert.equal(calls.length, 2);
+    assert.ok(elapsedMs < 750, `server retry hint was not applied; reconnect took ${elapsedMs}ms`);
+  });
+});
+
 test("LoomDriverClient epics.watch ends iteration when the AbortSignal fires", async () => {
   await withSSEServer((call, res) => {
     res.writeHead(200, { "Content-Type": "text/event-stream" });

@@ -3,6 +3,7 @@ package workflows
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -313,6 +314,88 @@ func TestGetRunEventsReturnsDriverRunEvents(t *testing.T) {
 	if len(page.Events) != 1 || page.Events[0].EntityID != "run-1" || page.Events[0].EntityType != "driver_run" {
 		t.Fatalf("events page = %+v, want one driver_run event", page)
 	}
+}
+
+func TestStreamRunEventsUsesIDLessFrames(t *testing.T) {
+	ctx := context.Background()
+	st := seededWorkflowStore(t, ctx)
+	run, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+		WorkspaceKey:    "TEST",
+		RunID:           "run-stream",
+		DriverID:        "demo",
+		DriverVersionID: "version-1",
+		Payload:         json.RawMessage(`{"ok":true}`),
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	t.Run("event", func(t *testing.T) {
+		body := serveWorkflowStreamOnce(t, st, run.RunID)
+		if !strings.Contains(body, "event: event\n") {
+			t.Fatalf("stream body = %q, want event frame", body)
+		}
+		if hasSSEIDLine(body) {
+			t.Fatalf("stream body = %q, want ID-less event frame", body)
+		}
+	})
+
+	t.Run("error", func(t *testing.T) {
+		streamErr := errors.New("events unavailable")
+		failingRuns := &failingEventsDriverRunStore{DriverRunStore: st.DriverRuns(), err: streamErr}
+		failingStore := &workflowStreamStore{Store: st, driverRuns: failingRuns}
+		body := serveWorkflowStreamOnce(t, failingStore, run.RunID)
+		if !strings.Contains(body, "event: error\n") || !strings.Contains(body, streamErr.Error()) {
+			t.Fatalf("stream body = %q, want error frame", body)
+		}
+		if hasSSEIDLine(body) {
+			t.Fatalf("stream body = %q, want ID-less error frame", body)
+		}
+	})
+}
+
+func serveWorkflowStreamOnce(t *testing.T, st store.Store, runID string) string {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/TEST/runs/"+runID+"/stream?after=0", nil).WithContext(ctx)
+	recorder := &cancelOnFlushRecorder{ResponseRecorder: httptest.NewRecorder(), cancel: cancel}
+	mux := http.NewServeMux()
+	NewModule(st).Register(mux)
+	mux.ServeHTTP(recorder, req)
+	return recorder.Body.String()
+}
+
+func hasSSEIDLine(body string) bool {
+	return strings.HasPrefix(body, "id:") || strings.Contains(body, "\nid:")
+}
+
+type cancelOnFlushRecorder struct {
+	*httptest.ResponseRecorder
+	cancel context.CancelFunc
+}
+
+func (w *cancelOnFlushRecorder) Flush() {
+	w.ResponseRecorder.Flush()
+	w.cancel()
+}
+
+type workflowStreamStore struct {
+	store.Store
+	driverRuns store.DriverRunStore
+}
+
+func (s *workflowStreamStore) DriverRuns() store.DriverRunStore {
+	return s.driverRuns
+}
+
+type failingEventsDriverRunStore struct {
+	store.DriverRunStore
+	err error
+}
+
+func (s *failingEventsDriverRunStore) Events(context.Context, string, string, string, int) (*domain.PlatformEventsPage, error) {
+	return nil, s.err
 }
 
 func TestCreateWorkflowVersionRejectsPackageManifest(t *testing.T) {
