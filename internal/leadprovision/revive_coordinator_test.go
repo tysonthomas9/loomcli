@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/placement"
 )
 
@@ -19,7 +20,7 @@ func TestReviveCoordinatorSingleflightsConcurrentEnsures(t *testing.T) {
 	}}
 	provisioner := newFakeReviveProvisioner()
 	provisioner.block = make(chan struct{})
-	coordinator := NewReviveCoordinator(provider, provisioner)
+	coordinator := NewReviveCoordinator(daytonaStateOnly(provider), provisioner)
 
 	const callers = 12
 	start := make(chan struct{})
@@ -30,7 +31,7 @@ func TestReviveCoordinatorSingleflightsConcurrentEnsures(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			errs <- coordinator.EnsureAttachable(context.Background(), "WS", "nova", "sandbox-1")
+			errs <- coordinator.EnsureAttachable(context.Background(), "WS", "nova", domain.RuntimeProviderDaytona, "sandbox-1")
 		}()
 	}
 	close(start)
@@ -75,9 +76,9 @@ func TestReviveCoordinatorRetainsFailureAndKicksOneFreshRetry(t *testing.T) {
 	provisioner.errs = []error{firstErr, nil}
 	provisioner.blockAfter = 1
 	provisioner.block = make(chan struct{})
-	coordinator := NewReviveCoordinator(provider, provisioner)
+	coordinator := NewReviveCoordinator(daytonaStateOnly(provider), provisioner)
 
-	if err := coordinator.EnsureAttachable(context.Background(), "WS", "nova", "sandbox-1"); !errors.Is(err, ErrReviveStarting) {
+	if err := coordinator.EnsureAttachable(context.Background(), "WS", "nova", domain.RuntimeProviderDaytona, "sandbox-1"); !errors.Is(err, ErrReviveStarting) {
 		t.Fatalf("first EnsureAttachable = %v, want ErrReviveStarting", err)
 	}
 	provisioner.waitForCompletions(t, 1)
@@ -86,7 +87,7 @@ func TestReviveCoordinatorRetainsFailureAndKicksOneFreshRetry(t *testing.T) {
 		t.Fatalf("status after failure = %+v, want retained failure", status)
 	}
 
-	err := coordinator.EnsureAttachable(context.Background(), "WS", "nova", "sandbox-1")
+	err := coordinator.EnsureAttachable(context.Background(), "WS", "nova", domain.RuntimeProviderDaytona, "sandbox-1")
 	if !errors.Is(err, firstErr) {
 		t.Fatalf("retry EnsureAttachable = %v, want retained error", err)
 	}
@@ -109,9 +110,9 @@ func TestReviveCoordinatorRevivesStartedSandboxWithoutLeadPTY(t *testing.T) {
 	}}
 	provisioner := newFakeReviveProvisioner()
 	provisioner.block = make(chan struct{})
-	coordinator := NewReviveCoordinator(provider, provisioner)
+	coordinator := NewReviveCoordinator(daytonaStateOnly(provider), provisioner)
 
-	err := coordinator.EnsureAttachable(context.Background(), "WS", "nova", "sandbox-1")
+	err := coordinator.EnsureAttachable(context.Background(), "WS", "nova", domain.RuntimeProviderDaytona, "sandbox-1")
 	if !errors.Is(err, ErrReviveStarting) {
 		t.Fatalf("EnsureAttachable = %v, want ErrReviveStarting", err)
 	}
@@ -133,9 +134,9 @@ func TestReviveCoordinatorStartedSandboxWithLeadPTYIsAttachable(t *testing.T) {
 		sessions: []placement.PtySession{{SessionID: placement.LeadPTYSessionID}},
 	}
 	provisioner := newFakeReviveProvisioner()
-	coordinator := NewReviveCoordinator(provider, provisioner)
+	coordinator := NewReviveCoordinator(daytonaStateOnly(provider), provisioner)
 
-	if err := coordinator.EnsureAttachable(context.Background(), "WS", "nova", "sandbox-1"); err != nil {
+	if err := coordinator.EnsureAttachable(context.Background(), "WS", "nova", domain.RuntimeProviderDaytona, "sandbox-1"); err != nil {
 		t.Fatalf("EnsureAttachable: %v", err)
 	}
 	if got := provisioner.callCount(); got != 0 {
@@ -148,9 +149,9 @@ func TestReviveCoordinatorRejectsProviderWithoutRawState(t *testing.T) {
 		ID:    "sandbox-1",
 		State: placement.ProviderSandboxRunning,
 	}}
-	coordinator := NewReviveCoordinator(provider, newFakeReviveProvisioner())
+	coordinator := NewReviveCoordinator(daytonaStateOnly(provider), newFakeReviveProvisioner())
 
-	err := coordinator.EnsureAttachable(context.Background(), "WS", "nova", "sandbox-1")
+	err := coordinator.EnsureAttachable(context.Background(), "WS", "nova", domain.RuntimeProviderDaytona, "sandbox-1")
 	if err == nil || !strings.Contains(err.Error(), "provider does not expose raw state") {
 		t.Fatalf("EnsureAttachable = %v, want missing raw-state error", err)
 	}
@@ -283,4 +284,10 @@ func (f *fakeReviveProvisioner) waitForCompletions(t *testing.T, want int) {
 			t.Fatalf("timed out waiting for provision completion %d", want)
 		}
 	}
+}
+
+// daytonaStateOnly is the single-provider registry the pre-registry tests
+// implicitly assumed.
+func daytonaStateOnly(p SandboxStateProvider) SandboxStateProviderRegistry {
+	return SandboxStateProviderRegistry{domain.RuntimeProviderDaytona: p}
 }

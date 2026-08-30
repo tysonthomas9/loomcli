@@ -445,7 +445,7 @@ type fakeLeadPlacementReviver struct {
 	sandboxID string
 }
 
-func (f *fakeLeadPlacementReviver) EnsureAttachable(_ context.Context, _, _, sandboxID string) error {
+func (f *fakeLeadPlacementReviver) EnsureAttachable(_ context.Context, _, _ string, _ domain.RuntimeProvider, sandboxID string) error {
 	f.calls++
 	f.sandboxID = sandboxID
 	return f.err

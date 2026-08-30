@@ -34,7 +34,10 @@ const (
 var agentTerminalSessionLocks sync.Map
 
 type leadPlacementReviver interface {
-	EnsureAttachable(context.Context, string, string, string) error
+	// The runtime provider is required, not inferred: a sandbox id is unique
+	// only within a provider, so reviving by id alone can act on an unrelated
+	// sandbox once a second provider is registered.
+	EnsureAttachable(context.Context, string, string, domain.RuntimeProvider, string) error
 }
 
 // HandleEnsureAgentTerminalSession resolves an agent name to a persisted UUID
@@ -182,7 +185,10 @@ func ensureDaytonaLeadAttachable(ctx context.Context, st store.Store, workspace,
 		}
 		return err
 	}
-	err = reviver.EnsureAttachable(ctx, workspace, agentName, node.Placement.SandboxID)
+	// The NODE's stamped provider is authoritative, not the agent record's
+	// resolved one: the placement was created under whatever provider was in
+	// force then, and that is the platform holding this sandbox id.
+	err = reviver.EnsureAttachable(ctx, workspace, agentName, node.RuntimeProvider, node.Placement.SandboxID)
 	switch {
 	case err == nil:
 		return nil

@@ -790,7 +790,12 @@ func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, sto
 		cfg.DriverRunTokenKey = driverRunTokenKey()
 		cfg.LeadProvisioner = buildLeadProvisioner(storeHandle.Store, placementBroker)
 		if cfg.LeadProvisioner != nil && placementProvider != nil {
-			cfg.LeadReviveCoordinator = leadprovision.NewReviveCoordinator(placementProvider, cfg.LeadProvisioner)
+			// Keyed by runtime provider so revive routes to the platform that
+			// owns the sandbox id, matching the placement broker's registry.
+			cfg.LeadReviveCoordinator = leadprovision.NewReviveCoordinator(
+				leadprovision.SandboxStateProviderRegistry{
+					domain.RuntimeProviderDaytona: placementProvider,
+				}, cfg.LeadProvisioner)
 		}
 	}
 	applyFleetConfig(&cfg, fs)

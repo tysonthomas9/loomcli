@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/placement"
 )
 
@@ -39,12 +40,21 @@ type SandboxStateProvider interface {
 	ListPtySessions(context.Context, string) ([]placement.PtySession, error)
 }
 
+// SandboxStateProviderRegistry maps a runtime provider onto the adapter that
+// owns its sandboxes, mirroring placement.ProviderRegistry.
+//
+// The coordinator previously held ONE provider and took a bare sandbox id. A
+// sandbox id is unique only within a provider, so with a second provider
+// registered that would inspect -- and revive -- whatever sandbox happened to
+// carry the same id on the wrong platform.
+type SandboxStateProviderRegistry map[domain.RuntimeProvider]SandboxStateProvider
+
 type AgentProvisioner interface {
 	ReviveForAgent(context.Context, string, string) error
 }
 
 type ReviveCoordinator struct {
-	provider    SandboxStateProvider
+	providers   SandboxStateProviderRegistry
 	provisioner AgentProvisioner
 	mu          sync.Mutex
 	entries     map[reviveKey]*reviveEntry
@@ -61,17 +71,55 @@ type reviveEntry struct {
 	err   error
 }
 
-func NewReviveCoordinator(provider SandboxStateProvider, provisioner AgentProvisioner) *ReviveCoordinator {
+func NewReviveCoordinator(providers SandboxStateProviderRegistry, provisioner AgentProvisioner) *ReviveCoordinator {
+	// Snapshot: a registry the caller can still mutate would let routing change
+	// under a running coordinator.
+	snapshot := make(SandboxStateProviderRegistry, len(providers))
+	for kind, p := range providers {
+		if kind == "" || p == nil {
+			continue
+		}
+		snapshot[kind] = p
+	}
 	return &ReviveCoordinator{
-		provider:    provider,
+		providers:   snapshot,
 		provisioner: provisioner,
 		entries:     make(map[reviveKey]*reviveEntry),
 	}
 }
 
-func (c *ReviveCoordinator) EnsureAttachable(ctx context.Context, workspace, agent, sandboxID string) error {
-	if c == nil || c.provider == nil || c.provisioner == nil {
+// Supports reports whether revive can act on a runtime provider, so callers can
+// gate on the registry instead of hardcoding a provider name.
+func (c *ReviveCoordinator) Supports(kind domain.RuntimeProvider) bool {
+	if c == nil {
+		return false
+	}
+	_, err := c.providerFor(kind)
+	return err == nil
+}
+
+// providerFor resolves the adapter owning a sandbox, FAIL-CLOSED. An
+// unregistered or unset provider is an error, never a fallback to the only
+// registered adapter -- that fallback is precisely how a revive lands on
+// another platform's sandbox.
+func (c *ReviveCoordinator) providerFor(kind domain.RuntimeProvider) (SandboxStateProvider, error) {
+	if strings.TrimSpace(string(kind)) == "" {
+		return nil, fmt.Errorf("runtime provider not set on lead placement")
+	}
+	p, ok := c.providers[kind]
+	if !ok || p == nil {
+		return nil, fmt.Errorf("no sandbox state provider registered for runtime provider %q", kind)
+	}
+	return p, nil
+}
+
+func (c *ReviveCoordinator) EnsureAttachable(ctx context.Context, workspace, agent string, kind domain.RuntimeProvider, sandboxID string) error {
+	if c == nil || len(c.providers) == 0 || c.provisioner == nil {
 		return fmt.Errorf("lead revive coordinator is not configured")
+	}
+	prov, err := c.providerFor(kind)
+	if err != nil {
+		return err
 	}
 	key := reviveKey{workspace: strings.TrimSpace(workspace), agent: strings.TrimSpace(agent)}
 	sandboxID = strings.TrimSpace(sandboxID)
@@ -92,7 +140,7 @@ func (c *ReviveCoordinator) EnsureAttachable(ctx context.Context, workspace, age
 		return retained
 	}
 
-	needsRevive, err := c.sandboxRequiresRevive(ctx, sandboxID)
+	needsRevive, err := c.sandboxRequiresRevive(ctx, prov, sandboxID)
 	if err != nil {
 		return err
 	}
@@ -107,13 +155,13 @@ func (c *ReviveCoordinator) EnsureAttachable(ctx context.Context, workspace, age
 
 // sandboxRequiresRevive inspects raw provider state; callers hold the entry
 // lock so concurrent ensures cannot both observe idle and kick a revive.
-func (c *ReviveCoordinator) sandboxRequiresRevive(ctx context.Context, sandboxID string) (bool, error) {
+func (c *ReviveCoordinator) sandboxRequiresRevive(ctx context.Context, prov SandboxStateProvider, sandboxID string) (bool, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	stateCtx, cancel := context.WithTimeout(ctx, reviveStateTimeout)
 	defer cancel()
-	sandbox, err := c.provider.Get(stateCtx, sandboxID)
+	sandbox, err := prov.Get(stateCtx, sandboxID)
 	if err != nil {
 		return false, fmt.Errorf("get lead sandbox %q state before attach: %w", sandboxID, err)
 	}
@@ -122,7 +170,7 @@ func (c *ReviveCoordinator) sandboxRequiresRevive(ctx context.Context, sandboxID
 		return false, err
 	}
 	if sandbox.RawState == placement.ProviderSandboxRawStarted {
-		sessions, listErr := c.provider.ListPtySessions(stateCtx, sandboxID)
+		sessions, listErr := prov.ListPtySessions(stateCtx, sandboxID)
 		if listErr != nil {
 			return false, fmt.Errorf("list lead sandbox %q PTY sessions before attach: %w", sandboxID, listErr)
 		}
