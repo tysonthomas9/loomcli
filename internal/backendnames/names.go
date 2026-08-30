@@ -1,5 +1,7 @@
 package backendnames
 
+import "strings"
+
 const (
 	Claude   = "claude"
 	Codex    = "codex"
@@ -13,6 +15,14 @@ var localTaskRunnerBackends = []string{
 	Codex,
 	OpenCode,
 	Gemini,
+	Cursor,
+}
+
+var controlledLeadBackends = []string{
+	Codex,
+	Claude,
+	Gemini,
+	OpenCode,
 	Cursor,
 }
 
@@ -31,4 +41,22 @@ func IsLocalTaskRunnerBackend(name string) bool {
 // local task runner in its canonical display order.
 func LocalTaskRunnerBackends() []string {
 	return append([]string(nil), localTaskRunnerBackends...)
+}
+
+// IsControlledLeadBackend reports whether name has a controlled interactive
+// lead runtime that supports queued message delivery.
+func IsControlledLeadBackend(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	for _, backend := range controlledLeadBackends {
+		if name == backend {
+			return true
+		}
+	}
+	return false
+}
+
+// ControlledLeadBackends returns the controlled lead backends in canonical
+// display order.
+func ControlledLeadBackends() []string {
+	return append([]string(nil), controlledLeadBackends...)
 }

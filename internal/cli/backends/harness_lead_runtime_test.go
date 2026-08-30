@@ -2,14 +2,83 @@ package backends
 
 import (
 	"context"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"slices"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 
+	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 )
+
+func TestRunControlledLeadRuntimeMatchesCanonicalBackendSet(t *testing.T) {
+	sourcePath := "harness_lead_runtime.go"
+	file, err := parser.ParseFile(token.NewFileSet(), sourcePath, nil, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", sourcePath, err)
+	}
+	handled := []string{backendnames.Codex}
+	foundCodexSpecialCase := false
+	ast.Inspect(file, func(node ast.Node) bool {
+		fn, ok := node.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "harnessLeadInvocation" {
+			return true
+		}
+		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			clause, ok := node.(*ast.CaseClause)
+			if !ok {
+				return true
+			}
+			for _, expr := range clause.List {
+				literal, ok := expr.(*ast.BasicLit)
+				if !ok || literal.Kind != token.STRING {
+					continue
+				}
+				backend, unquoteErr := strconv.Unquote(literal.Value)
+				if unquoteErr != nil {
+					t.Fatalf("unquote harness backend %s: %v", literal.Value, unquoteErr)
+				}
+				handled = append(handled, backend)
+			}
+			return true
+		})
+		return false
+	})
+	ast.Inspect(file, func(node ast.Node) bool {
+		fn, ok := node.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "RunControlledLeadRuntime" {
+			return true
+		}
+		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			binary, ok := node.(*ast.BinaryExpr)
+			if !ok || binary.Op != token.EQL {
+				return true
+			}
+			left, leftOK := binary.X.(*ast.Ident)
+			right, rightOK := binary.Y.(*ast.Ident)
+			if leftOK && rightOK && left.Name == "backend" && right.Name == "NameCodex" {
+				foundCodexSpecialCase = true
+			}
+			return true
+		})
+		return false
+	})
+	if !foundCodexSpecialCase {
+		t.Fatal("RunControlledLeadRuntime no longer has the Codex special case")
+	}
+	want := backendnames.ControlledLeadBackends()
+	sort.Strings(handled)
+	sort.Strings(want)
+	if !slices.Equal(handled, want) {
+		t.Fatalf("RunControlledLeadRuntime backends = %v, canonical set = %v", handled, want)
+	}
+}
 
 func installFakeHarnessLead(t *testing.T) *leadcontrol.HarnessLeadRuntimeConfig {
 	t.Helper()

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/localbackend"
 	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
@@ -22,26 +23,18 @@ const (
 	TaskRunnerCommandJSONEnv = "LOOM_DRIVER_TASK_RUNNER_CMD_JSON"
 	TaskRunnerCommandEnv     = "LOOM_DRIVER_TASK_RUNNER_CMD"
 
-	// LocalTaskRunnerEntrypoint is the bundled local task runner entrypoint.
-	// Only this runner gets the resolved backend env + the trusted-local
-	// provider-credential env allowlist (§4.3); Daytona/remote runners keep the
-	// strict driver filter.
-	LocalTaskRunnerEntrypoint = "local-task-runner"
-
 	// TaskRunnerBackendEnv carries the resolved backend CLI to the local task
 	// runner (§4.5).
 	TaskRunnerBackendEnv = "LOOM_TASK_RUNNER_BACKEND"
-
-	// defaultTaskRunnerBackend mirrors service.GetWorkspaceBackend's default
-	// (DaemonProfile.AgentBackend empty -> codex).
-	defaultTaskRunnerBackend = "codex"
 )
+
+const localBackendResolutionFailed = "local_backend_resolution_failed"
 
 // isLocalTaskRunner reports whether the request targets the bundled local task
 // runner. The env widening in §4.3 is gated strictly by the runner entrypoint
 // so a leak cannot reach Daytona/remote runners.
 func isLocalTaskRunner(req TaskExecRequest) bool {
-	return strings.TrimSpace(req.RunnerEntrypoint) == LocalTaskRunnerEntrypoint
+	return strings.TrimSpace(req.RunnerEntrypoint) == localbackend.LocalTaskRunnerEntrypoint
 }
 
 type HostBridgeTaskExecutor struct {
@@ -67,6 +60,10 @@ type HostBridgeTaskExecutor struct {
 	// unblocks successors — so a dependent's resolver reads a durable node. When
 	// nil (the pre-stacking sites and all tests), the barrier is inert.
 	StackStore stackstore.Store
+	// PreflightChecker resolves and checks the concrete worker's local backend
+	// immediately before spawn. The returned backend is the only value bound
+	// into the runner environment.
+	PreflightChecker func(ctx context.Context, workspaceKey, workerProfileID string) (backend string, err error)
 	// stackBinding is computed once per ExecuteTask after the worktree resolves:
 	// the task's stack id, canonical output branch, and base ref. When set, it is
 	// exported to a stacked runner so it pushes the canonical branch on the
@@ -78,6 +75,17 @@ type HostBridgeTaskExecutor struct {
 	// which the per-run git worktree does NOT contain — so taskRunnerBundleEnv must
 	// resolve the bundle against this base, not the reassigned worktree.
 	driverBundleBaseDir string
+	checkedBackend      string
+}
+
+type localBackendPreflightError struct {
+	message string
+}
+
+func (e *localBackendPreflightError) Error() string { return e.message }
+
+func (e *localBackendPreflightError) PreflightClass() string {
+	return localBackendResolutionFailed
 }
 
 type bridgeTaskRunnerResult struct {
@@ -302,6 +310,16 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 }
 
 func (e HostBridgeTaskExecutor) bridgeRunner(ctx context.Context, req TaskExecRequest) (func() (bridgeTaskRunnerResult, error), error) {
+	if isLocalTaskRunner(req) {
+		backend, err := e.preflightLocalTaskRunner(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		e.checkedBackend = strings.TrimSpace(backend)
+		if e.checkedBackend == "" {
+			return nil, &localBackendPreflightError{message: "local task runner preflight checker returned an empty backend"}
+		}
+	}
 	command, err := e.command()
 	if err != nil {
 		return nil, err
@@ -320,6 +338,17 @@ func (e HostBridgeTaskExecutor) bridgeRunner(ctx context.Context, req TaskExecRe
 	default:
 		return nil, nil
 	}
+}
+
+func (e HostBridgeTaskExecutor) preflightLocalTaskRunner(ctx context.Context, req TaskExecRequest) (string, error) {
+	if e.PreflightChecker == nil {
+		return "", &localBackendPreflightError{message: "local task runner preflight checker is not configured"}
+	}
+	backend, err := e.PreflightChecker(ctx, req.WorkspaceKey, req.WorkerProfileID)
+	if err != nil {
+		return "", err
+	}
+	return backend, nil
 }
 
 func (e HostBridgeTaskExecutor) command() ([]string, error) {
@@ -369,7 +398,11 @@ func (e HostBridgeTaskExecutor) runBuiltInFlueWorkflow(ctx context.Context, req 
 	}
 	baseEnv := taskRunnerBaseEnvForRequest(req, os.Environ())
 	env := append([]string{}, baseEnv...)
-	env = append(env, e.taskRunnerEnv(req, string(input), baseEnv)...)
+	runnerEnv, err := e.taskRunnerEnv(req, string(input), baseEnv)
+	if err != nil {
+		return bridgeTaskRunnerResult{}, err
+	}
+	env = append(env, runnerEnv...)
 	cmd.Env = env
 	cmd.Stdin = bytes.NewReader(input)
 	var stdout, stderr bytes.Buffer
@@ -429,7 +462,11 @@ func (e HostBridgeTaskExecutor) runCommand(ctx context.Context, req TaskExecRequ
 	}
 	baseEnv := taskRunnerBaseEnvForRequest(req, os.Environ())
 	env := append([]string{}, baseEnv...)
-	env = append(env, e.taskRunnerEnv(req, string(input), baseEnv)...)
+	runnerEnv, err := e.taskRunnerEnv(req, string(input), baseEnv)
+	if err != nil {
+		return bridgeTaskRunnerResult{}, err
+	}
+	env = append(env, runnerEnv...)
 	cmd.Env = env
 	cmd.Stdin = bytes.NewReader(input)
 	var stdout, stderr bytes.Buffer
@@ -658,7 +695,7 @@ process.once('SIGTERM', () => {
 });
 `
 
-func (e HostBridgeTaskExecutor) taskRunnerEnv(req TaskExecRequest, requestJSON string, inherited ...[]string) []string {
+func (e HostBridgeTaskExecutor) taskRunnerEnv(req TaskExecRequest, requestJSON string, inherited ...[]string) ([]string, error) {
 	env := []string{
 		"LOOM_TASK_RUN_REQUEST_JSON=" + requestJSON,
 		"LOOM_WORKTREE_PATH=" + strings.TrimSpace(e.WorktreePath),
@@ -699,14 +736,18 @@ func (e HostBridgeTaskExecutor) taskRunnerEnv(req TaskExecRequest, requestJSON s
 	}
 	env = append(env, e.taskRunnerBundleEnv(req)...)
 	if isLocalTaskRunner(req) {
-		env = append(env, TaskRunnerBackendEnv+"="+e.resolveTaskRunnerBackend(req))
+		checkedBackend := strings.TrimSpace(e.checkedBackend)
+		if checkedBackend == "" {
+			return nil, &localBackendPreflightError{message: "local task runner backend was not checked before environment binding"}
+		}
+		env = append(env, TaskRunnerBackendEnv+"="+checkedBackend)
 		existing := env
 		if len(inherited) > 0 && len(inherited[0]) > 0 {
 			existing = append(append([]string{}, inherited[0]...), env...)
 		}
 		env = append(env, e.localTaskRunnerSettingsEnv(existing)...)
 	}
-	return env
+	return env, nil
 }
 
 func (e HostBridgeTaskExecutor) localTaskRunnerSettingsEnv(existing []string) []string {
@@ -744,31 +785,6 @@ func envHasAny(env []string, names ...string) bool {
 		}
 	}
 	return false
-}
-
-// resolveTaskRunnerBackend resolves the backend CLI for the local task runner,
-// mirroring service.GetWorkspaceBackend precedence (§4.3): a per-agent override
-// (the worker's agent row Backend) wins, else DaemonProfile.AgentBackend, else
-// the default codex. The store is consulted best-effort; any lookup failure
-// falls through to the next source so the runner always receives a backend.
-func (e HostBridgeTaskExecutor) resolveTaskRunnerBackend(req TaskExecRequest) string {
-	if e.Store == nil {
-		return defaultTaskRunnerBackend
-	}
-	ctx := context.Background()
-	if worker := strings.TrimSpace(req.WorkerProfileID); worker != "" {
-		if agent, err := e.Store.Agents().Get(ctx, req.WorkspaceKey, worker); err == nil && agent != nil {
-			if backend := strings.TrimSpace(agent.Backend); backend != "" {
-				return backend
-			}
-		}
-	}
-	if profile, err := e.Store.Daemon().Get(ctx, req.WorkspaceKey); err == nil && profile != nil {
-		if backend := strings.TrimSpace(profile.AgentBackend); backend != "" {
-			return backend
-		}
-	}
-	return defaultTaskRunnerBackend
 }
 
 func (e HostBridgeTaskExecutor) taskRunnerBundleEnv(req TaskExecRequest) []string {

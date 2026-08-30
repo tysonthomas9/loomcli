@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
+	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/connector/providers"
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -497,18 +498,22 @@ func (m *Module) reconcileReviewerRole(ctx context.Context, ws string, role *dom
 	return nil
 }
 
-// reviewerBackend resolves the backend for a reviewer agent: the workspace's
-// configured agent backend when it names a controlled lead runtime, else
-// codex. Controlled is required because the chat routes deliver messages via
-// the lead inbox; an uncontrolled backend would strand them.
+// reviewerBackend resolves the backend for a reviewer agent. Controlled is
+// required because the chat routes deliver messages via the lead inbox; an
+// uncontrolled backend would strand them.
 func (m *Module) reviewerBackend(ctx context.Context, ws string) (string, error) {
 	backend, _, err := localbackend.Resolve(ctx, m.store, ws, "", false, "")
 	if err != nil {
 		return "", err
 	}
 	backend = strings.ToLower(backend)
-	if !leadcontrol.IsControlledLeadBackend(backend) {
-		return leadcontrol.RuntimeProviderCodex, nil
+	if !backendnames.IsControlledLeadBackend(backend) {
+		return "", fmt.Errorf(
+			"reviewer backend %q does not support controlled lead runtime; supported backends: %s: %w",
+			backend,
+			strings.Join(backendnames.ControlledLeadBackends(), ", "),
+			domain.ErrInvalid,
+		)
 	}
 	return backend, nil
 }

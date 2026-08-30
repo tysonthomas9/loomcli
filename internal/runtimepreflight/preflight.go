@@ -184,6 +184,25 @@ func classifyLocalTaskRunner(result Result, status HealthStatus) Result {
 // only a completed not-ready verdict into NotReadyError.
 func RequireLocalTaskRunner(ctx context.Context, st targetStore, req Request) error {
 	result, err := CheckLocalTaskRunner(ctx, st, req)
+	return requireResult(result, err)
+}
+
+// NewLocalTaskRunnerChecker returns the launch-seam checker used by hosts that
+// already know the concrete worker profile. The worker profile ID is resolved
+// as an optional agent name before falling through to workspace and default
+// configuration.
+func NewLocalTaskRunnerChecker(st targetStore) func(context.Context, string, string) (string, error) {
+	return func(ctx context.Context, workspaceKey, workerProfileID string) (string, error) {
+		result, err := CheckLocalTaskRunner(ctx, st, Request{
+			WorkspaceKey:  workspaceKey,
+			AgentName:     workerProfileID,
+			AgentRequired: false,
+		})
+		return result.Backend, requireResult(result, err)
+	}
+}
+
+func requireResult(result Result, err error) error {
 	if err != nil {
 		return err
 	}

@@ -31,3 +31,14 @@ func TestLocalTaskRunnerBackendsMatchTypeScriptRunner(t *testing.T) {
 		t.Fatalf("TypeScript SUPPORTED backends = %v, Go backends = %v", got, want)
 	}
 }
+
+func TestControlledLeadBackends(t *testing.T) {
+	for _, backend := range ControlledLeadBackends() {
+		if !IsControlledLeadBackend("  " + backend + "  ") {
+			t.Fatalf("IsControlledLeadBackend(%q) = false", backend)
+		}
+	}
+	if IsControlledLeadBackend("daytona") {
+		t.Fatal("daytona unexpectedly supports controlled lead runtime")
+	}
+}

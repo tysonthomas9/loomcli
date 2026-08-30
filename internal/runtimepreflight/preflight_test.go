@@ -194,6 +194,9 @@ func TestCheckLocalTaskRunnerClassification(t *testing.T) {
 			if (result.Health != nil) != tc.wantHealth {
 				t.Fatalf("health = %#v, want present %v", result.Health, tc.wantHealth)
 			}
+			if tc.wantHealth && *result.Health != boundedHealthStatus(tc.status) {
+				t.Fatalf("health = %+v, want canonical projection %+v", *result.Health, tc.status)
+			}
 			if tc.wantReady && (len(result.Remediation) != 0 || result.ErrorClass != "") {
 				t.Fatalf("ready result = %+v, want no class or remediation", result)
 			}
@@ -351,6 +354,34 @@ func TestRequireLocalTaskRunnerReturnsOperationalErrorUnchanged(t *testing.T) {
 	if errors.As(err, &notReady) {
 		t.Fatalf("operational error was converted to NotReadyError: %+v", notReady)
 	}
+}
+
+func TestNewLocalTaskRunnerCheckerResolvesConcreteWorkerOnce(t *testing.T) {
+	restore := SetHealthCheckerForTest(healthyProbe)
+	t.Cleanup(restore)
+
+	t.Run("agent override", func(t *testing.T) {
+		agent := &domain.Agent{Backend: "claude"}
+		checker := NewLocalTaskRunnerChecker(targetStoreStub{
+			agent:   agent,
+			profile: &domain.DaemonProfile{AgentBackend: "claude"},
+		})
+		agent.Backend = "cursor"
+		backend, err := checker(context.Background(), "WS", "worker-a")
+		if err != nil || backend != "cursor" {
+			t.Fatalf("checker = %q, %v; want cursor, nil", backend, err)
+		}
+	})
+
+	t.Run("missing agent falls through", func(t *testing.T) {
+		checker := NewLocalTaskRunnerChecker(targetStoreStub{
+			profile: &domain.DaemonProfile{AgentBackend: "gemini"},
+		})
+		backend, err := checker(context.Background(), "WS", "missing-worker")
+		if err != nil || backend != "gemini" {
+			t.Fatalf("checker = %q, %v; want gemini, nil", backend, err)
+		}
+	})
 }
 
 func TestResultJSONOmissionRules(t *testing.T) {

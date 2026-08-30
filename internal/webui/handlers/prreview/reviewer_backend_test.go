@@ -3,6 +3,7 @@ package prreview
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -160,14 +161,27 @@ func TestEnsureReviewerAgentUsesWorkspaceBackend(t *testing.T) {
 }
 
 func TestEnsureReviewerAgentDefaultsToCodex(t *testing.T) {
-	for _, workspaceBackend := range []string{"", "not-a-real-backend"} {
-		env := newBackendTestEnv(t, workspaceBackend)
-		if err := env.module.ensureReviewerAgent(context.Background(), prReviewTestWorkspace, "review-hello-pr-7", "hello"); err != nil {
-			t.Fatalf("ensureReviewerAgent(%q): %v", workspaceBackend, err)
-		}
-		if got := env.agentBackend(t, "review-hello-pr-7"); got != "codex" {
-			t.Fatalf("workspace backend %q: agent backend = %q, want codex", workspaceBackend, got)
-		}
+	env := newBackendTestEnv(t, "")
+	if err := env.module.ensureReviewerAgent(context.Background(), prReviewTestWorkspace, "review-hello-pr-7", "hello"); err != nil {
+		t.Fatalf("ensureReviewerAgent: %v", err)
+	}
+	if got := env.agentBackend(t, "review-hello-pr-7"); got != "codex" {
+		t.Fatalf("agent backend = %q, want codex", got)
+	}
+}
+
+func TestEnsureReviewerAgentRejectsUnsupportedWorkspaceBackend(t *testing.T) {
+	env := newBackendTestEnv(t, "not-a-real-backend")
+	err := env.module.ensureReviewerAgent(context.Background(), prReviewTestWorkspace, "review-hello-pr-7", "hello")
+	if err == nil || !strings.Contains(err.Error(), `reviewer backend "not-a-real-backend"`) ||
+		!strings.Contains(err.Error(), "supported backends: codex, claude, gemini, opencode, cursor") {
+		t.Fatalf("ensureReviewerAgent error = %v, want backend and supported set", err)
+	}
+	if !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("ensureReviewerAgent error = %v, want domain.ErrInvalid", err)
+	}
+	if _, getErr := env.store.Agents().Get(context.Background(), prReviewTestWorkspace, "review-hello-pr-7"); !errors.Is(getErr, domain.ErrNotFound) {
+		t.Fatalf("reviewer agent lookup error = %v, want ErrNotFound", getErr)
 	}
 }
 

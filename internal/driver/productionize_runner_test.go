@@ -13,6 +13,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/localbackend"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -185,7 +186,7 @@ func TestLocalTaskRunnerBaseEnvWideningGatedByEntrypoint(t *testing.T) {
 		"LOOM_FLEET_DB_API_KEY=fleet-secret",
 	}
 
-	local := TaskExecRequest{RunnerEntrypoint: LocalTaskRunnerEntrypoint}
+	local := TaskExecRequest{RunnerEntrypoint: localbackend.LocalTaskRunnerEntrypoint}
 	localEnv := envMap(taskRunnerBaseEnvForRequest(local, env))
 	for _, key := range []string{
 		"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_HOME",
@@ -222,65 +223,22 @@ func TestLocalTaskRunnerBaseEnvWideningGatedByEntrypoint(t *testing.T) {
 	}
 }
 
-// The local task runner gets the resolved backend env (§4.3/§4.5); other
+// The local task runner gets the exact backend returned by preflight; other
 // runners never do.
-func TestLocalTaskRunnerBackendEnvResolution(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("defaults to codex without a profile", func(t *testing.T) {
-		st := memstore.New()
-		if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
-			t.Fatalf("create workspace: %v", err)
-		}
+func TestLocalTaskRunnerBackendEnvUsesCheckedValue(t *testing.T) {
+	t.Run("local runner gets exact checked backend", func(t *testing.T) {
 		req := hostBridgeTaskExecRequest()
-		req.RunnerEntrypoint = LocalTaskRunnerEntrypoint
-		env := envMap(HostBridgeTaskExecutor{Store: st}.taskRunnerEnv(req, "{}"))
-		if env[TaskRunnerBackendEnv] != "codex" {
-			t.Fatalf("%s = %q, want codex default", TaskRunnerBackendEnv, env[TaskRunnerBackendEnv])
-		}
-	})
-
-	t.Run("uses workspace daemon profile backend", func(t *testing.T) {
-		st := memstore.New()
-		if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
-			t.Fatalf("create workspace: %v", err)
-		}
-		if _, err := st.Daemon().Upsert(ctx, &domain.DaemonProfile{WorkspaceKey: "WS", AgentBackend: "claude"}); err != nil {
-			t.Fatalf("upsert daemon profile: %v", err)
-		}
-		req := hostBridgeTaskExecRequest()
-		req.RunnerEntrypoint = LocalTaskRunnerEntrypoint
-		env := envMap(HostBridgeTaskExecutor{Store: st}.taskRunnerEnv(req, "{}"))
-		if env[TaskRunnerBackendEnv] != "claude" {
-			t.Fatalf("%s = %q, want claude from daemon profile", TaskRunnerBackendEnv, env[TaskRunnerBackendEnv])
-		}
-	})
-
-	t.Run("per-agent override wins", func(t *testing.T) {
-		st := memstore.New()
-		if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
-			t.Fatalf("create workspace: %v", err)
-		}
-		if _, err := st.Daemon().Upsert(ctx, &domain.DaemonProfile{WorkspaceKey: "WS", AgentBackend: "claude"}); err != nil {
-			t.Fatalf("upsert daemon profile: %v", err)
-		}
-		if _, err := st.Agents().Create(ctx, store.AgentCreate{WorkspaceKey: "WS", Name: "worker-a", RoleName: "impl", Backend: "gemini"}); err != nil {
-			t.Fatalf("create agent: %v", err)
-		}
-		req := hostBridgeTaskExecRequest()
-		req.RunnerEntrypoint = LocalTaskRunnerEntrypoint
-		req.WorkerProfileID = "worker-a"
-		env := envMap(HostBridgeTaskExecutor{Store: st}.taskRunnerEnv(req, "{}"))
+		req.RunnerEntrypoint = localbackend.LocalTaskRunnerEntrypoint
+		env := envMap(mustTaskRunnerEnv(t, HostBridgeTaskExecutor{checkedBackend: "gemini"}, req, "{}"))
 		if env[TaskRunnerBackendEnv] != "gemini" {
-			t.Fatalf("%s = %q, want gemini from per-agent override", TaskRunnerBackendEnv, env[TaskRunnerBackendEnv])
+			t.Fatalf("%s = %q, want exact checked backend gemini", TaskRunnerBackendEnv, env[TaskRunnerBackendEnv])
 		}
 	})
 
 	t.Run("non-local runner gets no backend env", func(t *testing.T) {
-		st := memstore.New()
 		req := hostBridgeTaskExecRequest()
 		req.RunnerEntrypoint = "daytona-task-runner"
-		env := envMap(HostBridgeTaskExecutor{Store: st}.taskRunnerEnv(req, "{}"))
+		env := envMap(mustTaskRunnerEnv(t, HostBridgeTaskExecutor{checkedBackend: "gemini"}, req, "{}"))
 		if _, ok := env[TaskRunnerBackendEnv]; ok {
 			t.Fatalf("daytona runner unexpectedly got %s: %+v", TaskRunnerBackendEnv, env)
 		}
@@ -430,7 +388,7 @@ setInterval(() => {}, 1000);
 	req.RunnerEntrypoint = "local-task-runner"
 	req.RunnerVersionID = "driver-version-1"
 	req.RunnerTrustLevel = domain.DriverTrustTrusted
-	result, err := (HostBridgeTaskExecutor{Store: st, WorktreePath: worktree}).ExecuteTask(ctx, req)
+	result, err := (HostBridgeTaskExecutor{Store: st, WorktreePath: worktree, PreflightChecker: permissiveLocalPreflight}).ExecuteTask(ctx, req)
 	if err != nil {
 		t.Fatalf("ExecuteTask: %v", err)
 	}
@@ -520,7 +478,7 @@ setInterval(() => {}, 1000);
 	req.RunnerEntrypoint = "local-task-runner"
 	req.RunnerVersionID = "driver-version-1"
 	req.RunnerTrustLevel = domain.DriverTrustTrusted
-	result, err := (HostBridgeTaskExecutor{Store: st, WorktreePath: worktree}).ExecuteTask(ctx, req)
+	result, err := (HostBridgeTaskExecutor{Store: st, WorktreePath: worktree, PreflightChecker: permissiveLocalPreflight}).ExecuteTask(ctx, req)
 	if err != nil {
 		t.Fatalf("ExecuteTask: %v", err)
 	}

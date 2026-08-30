@@ -3,10 +3,16 @@ package backends
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
+
+	"github.com/tysonthomas9/loomcli/internal/cli"
 )
 
 // mockHealthyBackend implements Backend + MetadataProvider + HealthCheckableBackend.
@@ -95,6 +101,47 @@ func captureOutput(t *testing.T, fn func()) string {
 	r.Close()
 	os.Stdout = origStdout
 	return buf.String()
+}
+
+func executeBackendCommand(t *testing.T, args ...string) (stdout, stderr string, runErr error) {
+	t.Helper()
+	stdoutRead, stdoutWrite, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stdout pipe: %v", err)
+	}
+	stderrRead, stderrWrite, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stderr pipe: %v", err)
+	}
+	previousStdout, previousStderr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = stdoutWrite, stderrWrite
+	root := &cobra.Command{Use: "loom"}
+	root.AddGroup(&cobra.Group{ID: "config", Title: "Configuration"})
+	root.AddCommand(backendCmd)
+	root.SetArgs(args)
+	root.SetOut(stdoutWrite)
+	root.SetErr(stderrWrite)
+	backendHealthCmd.SilenceErrors, backendHealthCmd.SilenceUsage = false, false
+	backendInfoCmd.SilenceErrors, backendInfoCmd.SilenceUsage = false, false
+	runErr = root.Execute()
+	if runErr != nil {
+		_, _ = fmt.Fprintln(os.Stderr, runErr)
+	}
+	_ = stdoutWrite.Close()
+	_ = stderrWrite.Close()
+	os.Stdout, os.Stderr = previousStdout, previousStderr
+	root.RemoveCommand(backendCmd)
+	backendHealthCmd.SilenceErrors, backendHealthCmd.SilenceUsage = false, false
+	backendInfoCmd.SilenceErrors, backendInfoCmd.SilenceUsage = false, false
+	stdoutBytes, err := io.ReadAll(stdoutRead)
+	if err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	stderrBytes, err := io.ReadAll(stderrRead)
+	if err != nil {
+		t.Fatalf("read stderr: %v", err)
+	}
+	return string(stdoutBytes), string(stderrBytes), runErr
 }
 
 // --- GetBackendByName ---
@@ -220,7 +267,9 @@ func TestBackendHealthOutput(t *testing.T) {
 	RegisterBackend(&mockHealthyBackend{mockBackend: mockBackend{name: "good"}})
 
 	out := captureOutput(t, func() {
-		runBackendHealth(nil, nil)
+		if err := runBackendHealth(nil, nil); err != nil {
+			t.Fatalf("runBackendHealth: %v", err)
+		}
 	})
 
 	if !strings.Contains(out, "good") {
@@ -244,9 +293,9 @@ func TestBackendHealthJSON(t *testing.T) {
 	t.Cleanup(func() { backendHealthJSON = origFlag })
 
 	out := captureOutput(t, func() {
-		// Note: runBackendHealth calls os.Exit(1) when unhealthy.
-		// With all healthy backends, it returns normally.
-		runBackendHealth(nil, nil)
+		if err := runBackendHealth(nil, nil); err != nil {
+			t.Fatalf("runBackendHealth: %v", err)
+		}
 	})
 
 	var entries []backendHealthEntry
@@ -264,11 +313,69 @@ func TestBackendHealthJSON(t *testing.T) {
 	}
 }
 
+func TestBackendHealthUsesCanonicalProjectionAndCodedExit(t *testing.T) {
+	resetBackendState(t)
+	RegisterBackend(&mockUnhealthyBackend{mockBackend: mockBackend{name: "bad"}})
+
+	row := buildHealthEntry("bad")
+	status, ok := CheckBackendHealth("bad")
+	if !ok {
+		t.Fatal("CheckBackendHealth(bad) = false")
+	}
+	info := buildInfoOutput("bad", InspectCapabilities(mustBackend(t, "bad")))
+	if info.Health == nil || row.Healthy != status.Healthy || row.Installed != status.Installed ||
+		row.APIKeySet != status.APIKeySet || row.Version != status.Version || row.Message != status.Message ||
+		*info.Health != status {
+		t.Fatalf("health projections drifted: row=%+v info=%+v canonical=%+v", row, info.Health, status)
+	}
+
+	stdout, stderr, err := executeBackendCommand(t, "backend", "health")
+	if err == nil || cli.CommandExitCode(err) != 1 || !strings.Contains(err.Error(), "unhealthy") {
+		t.Fatalf("runBackendHealth error = %v, want coded exit 1", err)
+	}
+	if !strings.Contains(stdout, "bad") || !strings.Contains(stdout, "binary not found") {
+		t.Fatalf("stdout = %q, want unchanged health table", stdout)
+	}
+	if stderr != "one or more backends are unhealthy\n" {
+		t.Fatalf("stderr = %q, want one main error line", stderr)
+	}
+}
+
+func TestBackendInfoUnknownUsesCodedExit(t *testing.T) {
+	resetBackendState(t)
+	RegisterBackend(&mockHealthyBackend{mockBackend: mockBackend{name: "good"}})
+	stdout, stderr, err := executeBackendCommand(t, "backend", "info", "missing")
+	if err == nil || cli.CommandExitCode(err) != 1 || !strings.Contains(err.Error(), `unknown backend "missing"`) {
+		t.Fatalf("runBackendInfo error = %v, want coded exit 1", err)
+	}
+	var coded interface{ CLIExitCode() int }
+	if !errors.As(err, &coded) {
+		t.Fatalf("runBackendInfo error = %T, want coded error", err)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	if stderr != "unknown backend \"missing\"; available: good\n" {
+		t.Fatalf("stderr = %q, want one main error line", stderr)
+	}
+}
+
+func mustBackend(t *testing.T, name string) cli.Backend {
+	t.Helper()
+	backend, ok := cli.GetBackendByName(name)
+	if !ok {
+		t.Fatalf("backend %q not registered", name)
+	}
+	return backend
+}
+
 func TestBackendHealthEmpty(t *testing.T) {
 	resetBackendState(t)
 
 	out := captureOutput(t, func() {
-		runBackendHealth(nil, nil)
+		if err := runBackendHealth(nil, nil); err != nil {
+			t.Fatalf("runBackendHealth: %v", err)
+		}
 	})
 
 	if !strings.Contains(out, "No backends registered") {
@@ -288,7 +395,9 @@ func TestBackendInfoValidName(t *testing.T) {
 	t.Cleanup(func() { backendInfoJSON = origFlag })
 
 	out := captureOutput(t, func() {
-		runBackendInfo(nil, []string{"alpha"})
+		if err := runBackendInfo(nil, []string{"alpha"}); err != nil {
+			t.Fatalf("runBackendInfo: %v", err)
+		}
 	})
 
 	if !strings.Contains(out, "Backend: alpha") {
@@ -318,7 +427,9 @@ func TestBackendInfoJSON(t *testing.T) {
 	t.Cleanup(func() { backendInfoJSON = origFlag })
 
 	out := captureOutput(t, func() {
-		runBackendInfo(nil, []string{"alpha"})
+		if err := runBackendInfo(nil, []string{"alpha"}); err != nil {
+			t.Fatalf("runBackendInfo: %v", err)
+		}
 	})
 
 	var info backendInfoOutput
@@ -362,7 +473,9 @@ func TestBackendInfoCapabilities(t *testing.T) {
 	t.Cleanup(func() { backendInfoJSON = origFlag })
 
 	out := captureOutput(t, func() {
-		runBackendInfo(nil, []string{"bare"})
+		if err := runBackendInfo(nil, []string{"bare"}); err != nil {
+			t.Fatalf("runBackendInfo: %v", err)
+		}
 	})
 
 	var info backendInfoOutput
@@ -399,7 +512,9 @@ func TestBackendInfoWithConfig(t *testing.T) {
 	t.Cleanup(func() { backendInfoJSON = origFlag })
 
 	out := captureOutput(t, func() {
-		runBackendInfo(nil, []string{"configbe"})
+		if err := runBackendInfo(nil, []string{"configbe"}); err != nil {
+			t.Fatalf("runBackendInfo: %v", err)
+		}
 	})
 
 	var info backendInfoOutput

@@ -60,7 +60,8 @@ func newCommand(deps commandDeps) *cobra.Command {
 
 The check is read-only. It resolves the same workspace and agent configuration
 used by automatic run gates, probes backend health, and reports one canonical
-readiness verdict without changing the selected backend or workspace.`,
+readiness verdict without changing the selected backend or workspace. The
+global --backend flag does not affect preflight targeting; use --ai-backend.`,
 		Example: `  loom preflight
   loom preflight --agent worker-a
   loom preflight --ai-backend codex

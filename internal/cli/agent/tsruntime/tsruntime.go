@@ -14,6 +14,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/localbackend"
+	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 	"github.com/tysonthomas9/loomcli/internal/workflows"
@@ -53,7 +55,7 @@ func taskRunnerEntrypoint() string {
 	if v := strings.TrimSpace(os.Getenv("LOOM_DAEMON_LEAF_RUNNER")); v != "" {
 		return v
 	}
-	return driver.LocalTaskRunnerEntrypoint
+	return localbackend.LocalTaskRunnerEntrypoint
 }
 
 // daytonaRepoURL returns an explicit DAYTONA_REPO_URL, or the worktree's origin
@@ -84,6 +86,11 @@ func daytonaRepoURL(workDir string) string {
 // path needs its own span, wrap here or trace inside InvokeNonInteractive.
 type agentInvoker struct{ fallback cli.AgentInvoker }
 
+var (
+	resolveTaskRunnerBundleServerPath = taskRunnerBundleServerPath
+	runBundledTaskRunner              = driver.RunBundledTaskRunner
+)
+
 func (i agentInvoker) InvokeInteractive(workDir, prompt, agentName string) error {
 	// Interactive runs are not part of the daemon leaf; defer to the Go path.
 	return i.fallback.InvokeInteractive(workDir, prompt, agentName)
@@ -91,7 +98,7 @@ func (i agentInvoker) InvokeInteractive(workDir, prompt, agentName string) error
 
 //nolint:funlen // TS leaf invocation has to assemble one driver request with env, input, transcript, and patch-back handling.
 func (i agentInvoker) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
-	serverPath, err := taskRunnerBundleServerPath()
+	serverPath, err := resolveTaskRunnerBundleServerPath()
 	if err != nil {
 		return fmt.Errorf("ts-runtime: materialize bundle: %w", err)
 	}
@@ -124,8 +131,13 @@ func (i agentInvoker) InvokeNonInteractive(workDir, prompt, agentName string, sh
 
 	ctx, cancel := contextFromShutdown(shutdown)
 	defer cancel()
+	if entrypoint == localbackend.LocalTaskRunnerEntrypoint {
+		if err := runtimepreflight.RequireLocalTaskRunner(ctx, nil, runtimepreflight.Request{BackendOverride: backend}); err != nil {
+			return fmt.Errorf("ts-runtime: local task runner preflight: %w", err)
+		}
+	}
 
-	raw, err := driver.RunBundledTaskRunner(ctx, driver.BundledRunnerOptions{
+	raw, err := runBundledTaskRunner(ctx, driver.BundledRunnerOptions{
 		ServerPath:   serverPath,
 		Entrypoint:   entrypoint,
 		Worktree:     workDir,
@@ -149,7 +161,7 @@ func (i agentInvoker) InvokeNonInteractive(workDir, prompt, agentName string, sh
 	// leaf must apply that patch back onto the host worktree and commit, or finalize records
 	// files_changed=0 and serve surfaces no diff. (Daytona delivers via its own PR/sandbox path —
 	// it returns no top-level patch, so this is a no-op for the Daytona entrypoint.)
-	if entrypoint == driver.LocalTaskRunnerEntrypoint {
+	if entrypoint == localbackend.LocalTaskRunnerEntrypoint {
 		applyLeafPatchBack(ctx, workDir, baseRef, patch, taskRunID)
 	}
 	return nil
