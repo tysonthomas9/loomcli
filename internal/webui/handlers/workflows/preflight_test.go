@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 	"github.com/tysonthomas9/loomcli/internal/runtimepreflight/preflighttest"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
 
 type failingDaemonTargetStore struct {
@@ -191,8 +192,8 @@ func TestRunnerIsLocal(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := runnerIsLocal(json.RawMessage(tc.payload)); got != tc.want {
-				t.Fatalf("runnerIsLocal(%q) = %v, want %v", tc.payload, got, tc.want)
+			if got := workflowdefs.RunNeedsLocalTaskRunnerPreflight(BuiltinEpicRunnerWorkflowName, json.RawMessage(tc.payload)); got != tc.want {
+				t.Fatalf("RunNeedsLocalTaskRunnerPreflight(%q) = %v, want %v", tc.payload, got, tc.want)
 			}
 		})
 	}

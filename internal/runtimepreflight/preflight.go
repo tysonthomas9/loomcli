@@ -13,25 +13,19 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localbackend"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // Request identifies the local task runner target to evaluate.
-type Request struct {
-	WorkspaceKey    string
-	AgentName       string
-	AgentRequired   bool
-	BackendOverride string
-}
+type Request = localbackend.Target
 
 // BackendSource records which precedence level selected the backend.
-type BackendSource string
+type BackendSource = localbackend.Source
 
 const (
-	BackendSourceOverride  BackendSource = "override"
-	BackendSourceAgent     BackendSource = "agent"
-	BackendSourceWorkspace BackendSource = "workspace"
-	BackendSourceDefault   BackendSource = "default"
+	BackendSourceOverride  = localbackend.SourceOverride
+	BackendSourceAgent     = localbackend.SourceAgent
+	BackendSourceWorkspace = localbackend.SourceWorkspace
+	BackendSourceDefault   = localbackend.SourceDefault
 )
 
 // ErrorClass is a stable local task runner readiness failure class.
@@ -88,16 +82,16 @@ func (e *NotReadyError) PreflightClass() string {
 	return string(e.Result.ErrorClass)
 }
 
-type targetStore interface {
-	Agents() store.AgentStore
-	Daemon() store.DaemonProfileStore
-}
+type targetStore = localbackend.TargetStore
 
-type healthProbe func(name string) (HealthStatus, bool)
+type healthProbe func(ctx context.Context, name string) (HealthStatus, bool)
 
 var (
 	healthCheckerMu sync.RWMutex
-	healthChecker   healthProbe = backends.CheckBackendHealth
+	healthChecker   healthProbe = func(_ context.Context, name string) (HealthStatus, bool) {
+		return backends.CheckBackendHealth(name)
+	}
+	admissionHealthChecker healthProbe = backends.CheckBackendHealthForAdmission
 )
 
 // CheckLocalTaskRunner resolves a target and returns the most complete safe
@@ -109,23 +103,25 @@ func CheckLocalTaskRunner(ctx context.Context, st targetStore, req Request) (Res
 	return checkLocalTaskRunner(ctx, st, req, probe)
 }
 
+// CheckLocalTaskRunnerForAdmission evaluates launch readiness without
+// collecting display-only backend metadata such as a CLI version.
+func CheckLocalTaskRunnerForAdmission(ctx context.Context, st targetStore, req Request) (Result, error) {
+	healthCheckerMu.RLock()
+	probe := admissionHealthChecker
+	healthCheckerMu.RUnlock()
+	return checkLocalTaskRunner(ctx, st, req, probe)
+}
+
 func checkLocalTaskRunner(ctx context.Context, st targetStore, req Request, probe healthProbe) (Result, error) {
-	backend, source, err := localbackend.Resolve(
-		ctx,
-		st,
-		req.WorkspaceKey,
-		req.AgentName,
-		req.AgentRequired,
-		req.BackendOverride,
-	)
-	result := Result{Backend: backend, BackendSource: BackendSource(source)}
+	backend, source, err := localbackend.Resolve(ctx, st, req)
+	result := Result{Backend: backend, BackendSource: source}
 	if err != nil {
 		return resolutionFailure(result, req, err), err
 	}
 	if err := ctx.Err(); err != nil {
 		return evaluationFailure(result, backend), err
 	}
-	status, ok := probe(backend)
+	status, ok := probe(ctx, backend)
 	if err := ctx.Err(); err != nil {
 		return evaluationFailure(result, backend), err
 	}
@@ -187,13 +183,20 @@ func RequireLocalTaskRunner(ctx context.Context, st targetStore, req Request) er
 	return requireResult(result, err)
 }
 
+// RequireLocalTaskRunnerForAdmission is the launch-path projection of the
+// admission check.
+func RequireLocalTaskRunnerForAdmission(ctx context.Context, st targetStore, req Request) error {
+	result, err := CheckLocalTaskRunnerForAdmission(ctx, st, req)
+	return requireResult(result, err)
+}
+
 // NewLocalTaskRunnerChecker returns the launch-seam checker used by hosts that
 // already know the concrete worker profile. The worker profile ID is resolved
 // as an optional agent name before falling through to workspace and default
 // configuration.
 func NewLocalTaskRunnerChecker(st targetStore) func(context.Context, string, string) (string, error) {
 	return func(ctx context.Context, workspaceKey, workerProfileID string) (string, error) {
-		result, err := CheckLocalTaskRunner(ctx, st, Request{
+		result, err := CheckLocalTaskRunnerForAdmission(ctx, st, Request{
 			WorkspaceKey:  workspaceKey,
 			AgentName:     workerProfileID,
 			AgentRequired: false,
@@ -216,12 +219,18 @@ func requireResult(result Result, err error) error {
 // restore function. External suites use it to avoid depending on host CLIs.
 func SetHealthCheckerForTest(fn func(name string) (HealthStatus, bool)) (restore func()) {
 	healthCheckerMu.Lock()
-	previous := healthChecker
-	healthChecker = fn
+	previousHealth := healthChecker
+	previousAdmission := admissionHealthChecker
+	probe := func(_ context.Context, name string) (HealthStatus, bool) {
+		return fn(name)
+	}
+	healthChecker = probe
+	admissionHealthChecker = probe
 	healthCheckerMu.Unlock()
 	return func() {
 		healthCheckerMu.Lock()
-		healthChecker = previous
+		healthChecker = previousHealth
+		admissionHealthChecker = previousAdmission
 		healthCheckerMu.Unlock()
 	}
 }

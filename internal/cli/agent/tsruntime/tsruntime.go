@@ -132,7 +132,7 @@ func (i agentInvoker) InvokeNonInteractive(workDir, prompt, agentName string, sh
 	ctx, cancel := contextFromShutdown(shutdown)
 	defer cancel()
 	if entrypoint == localbackend.LocalTaskRunnerEntrypoint {
-		if err := runtimepreflight.RequireLocalTaskRunner(ctx, nil, runtimepreflight.Request{BackendOverride: backend}); err != nil {
+		if err := runtimepreflight.RequireLocalTaskRunnerForAdmission(ctx, nil, runtimepreflight.Request{BackendOverride: backend}); err != nil {
 			return fmt.Errorf("ts-runtime: local task runner preflight: %w", err)
 		}
 	}

@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -74,7 +77,13 @@ func healthyProbe(string) (HealthStatus, bool) {
 	return HealthStatus{Healthy: true, Installed: true, APIKeySet: true, Message: "ready"}, true
 }
 
-func checkWithProbe(t *testing.T, ctx context.Context, st targetStore, req Request, probe healthProbe) (Result, error) {
+func checkWithProbe(
+	t *testing.T,
+	ctx context.Context,
+	st targetStore,
+	req Request,
+	probe func(string) (HealthStatus, bool),
+) (Result, error) {
 	t.Helper()
 	restore := SetHealthCheckerForTest(probe)
 	t.Cleanup(restore)
@@ -384,6 +393,111 @@ func TestNewLocalTaskRunnerCheckerResolvesConcreteWorkerOnce(t *testing.T) {
 			t.Fatalf("checker = %q, %v; want gemini, nil", backend, err)
 		}
 	})
+}
+
+func TestNewLocalTaskRunnerCheckerAdmissionClassification(t *testing.T) {
+	cases := []struct {
+		name      string
+		status    HealthStatus
+		wantClass ErrorClass
+	}{
+		{
+			name:   "healthy",
+			status: HealthStatus{Healthy: true, Installed: true, APIKeySet: true, Message: "ready"},
+		},
+		{
+			name:      "not installed",
+			status:    HealthStatus{Installed: false, Message: "binary missing"},
+			wantClass: ErrorClassUnavailable,
+		},
+		{
+			name:      "not authenticated",
+			status:    HealthStatus{Installed: true, APIKeySet: false, Message: "auth missing"},
+			wantClass: ErrorClassAuthMissing,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			restore := SetHealthCheckerForTest(func(string) (HealthStatus, bool) {
+				return tc.status, true
+			})
+			t.Cleanup(restore)
+
+			checker := NewLocalTaskRunnerChecker(targetStoreStub{
+				profile: &domain.DaemonProfile{AgentBackend: "codex"},
+			})
+			backend, err := checker(context.Background(), "WS", "worker-a")
+			if backend != "codex" {
+				t.Fatalf("checker backend = %q, want codex", backend)
+			}
+			if tc.wantClass == "" {
+				if err != nil {
+					t.Fatalf("checker error = %v, want nil", err)
+				}
+				return
+			}
+			var notReady *NotReadyError
+			if !errors.As(err, &notReady) || notReady.Result.ErrorClass != tc.wantClass {
+				t.Fatalf("checker error = %v, want typed class %q", err, tc.wantClass)
+			}
+		})
+	}
+}
+
+func TestNewLocalTaskRunnerCheckerSkipsVersionProbe(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake CLI fixture is a /bin/sh script")
+	}
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "version-probed")
+	binary := filepath.Join(dir, "gemini")
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\n: > \"$LOOM_TEST_VERSION_MARKER\"\necho 9.9.9\n"), 0o755); err != nil {
+		t.Fatalf("write fake gemini: %v", err)
+	}
+	t.Setenv("PATH", dir)
+	t.Setenv("GEMINI_API_KEY", "test-key")
+	t.Setenv("LOOM_TEST_VERSION_MARKER", marker)
+
+	checker := NewLocalTaskRunnerChecker(targetStoreStub{
+		profile: &domain.DaemonProfile{AgentBackend: "gemini"},
+	})
+	backend, err := checker(context.Background(), "WS", "worker-a")
+	if err != nil || backend != "gemini" {
+		t.Fatalf("checker = %q, %v; want gemini, nil", backend, err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("launch checker spawned --version; marker stat error = %v", err)
+	}
+}
+
+func TestCheckLocalTaskRunnerForAdmissionContextCanceledDuringProbe(t *testing.T) {
+	started := make(chan struct{})
+	healthCheckerMu.Lock()
+	previous := admissionHealthChecker
+	admissionHealthChecker = func(ctx context.Context, _ string) (HealthStatus, bool) {
+		close(started)
+		<-ctx.Done()
+		return HealthStatus{Healthy: true, Installed: true, APIKeySet: true}, true
+	}
+	healthCheckerMu.Unlock()
+	t.Cleanup(func() {
+		healthCheckerMu.Lock()
+		admissionHealthChecker = previous
+		healthCheckerMu.Unlock()
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-started
+		cancel()
+	}()
+	result, err := CheckLocalTaskRunnerForAdmission(ctx, nil, Request{BackendOverride: "codex"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("CheckLocalTaskRunnerForAdmission() error = %v, want context.Canceled", err)
+	}
+	if result.ErrorClass != ErrorClassResolutionFailed || result.Ready || result.Health != nil {
+		t.Fatalf("result = %+v, want evaluation failure without a verdict", result)
+	}
 }
 
 func TestResultJSONOmissionRules(t *testing.T) {

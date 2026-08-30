@@ -20,6 +20,14 @@ const (
 	DefaultBackend            = backendnames.Codex
 )
 
+// Target identifies the local task runner backend configuration to resolve.
+type Target struct {
+	WorkspaceKey    string
+	AgentName       string
+	AgentRequired   bool
+	BackendOverride string
+}
+
 // Source records which precedence level selected a backend.
 type Source string
 
@@ -30,7 +38,8 @@ const (
 	SourceDefault   Source = "default"
 )
 
-type targetStore interface {
+// TargetStore provides the configuration consulted by Resolve.
+type TargetStore interface {
 	Agents() store.AgentStore
 	Daemon() store.DaemonProfileStore
 }
@@ -40,15 +49,13 @@ type targetStore interface {
 // command targets cannot be bypassed by supplying an explicit backend.
 func Resolve(
 	ctx context.Context,
-	st targetStore,
-	workspaceKey, agentName string,
-	agentRequired bool,
-	backendOverride string,
+	st TargetStore,
+	target Target,
 ) (string, Source, error) {
-	workspaceKey = strings.TrimSpace(workspaceKey)
-	agentName = strings.TrimSpace(agentName)
-	backendOverride = strings.TrimSpace(backendOverride)
-	agentBackend, err := resolveAgentBackend(ctx, st, workspaceKey, agentName, agentRequired)
+	workspaceKey := strings.TrimSpace(target.WorkspaceKey)
+	agentName := strings.TrimSpace(target.AgentName)
+	backendOverride := strings.TrimSpace(target.BackendOverride)
+	agentBackend, err := resolveAgentBackend(ctx, st, workspaceKey, agentName, target.AgentRequired)
 	if err != nil {
 		return "", "", err
 	}
@@ -63,7 +70,7 @@ func Resolve(
 
 func resolveAgentBackend(
 	ctx context.Context,
-	st targetStore,
+	st TargetStore,
 	workspaceKey, agentName string,
 	agentRequired bool,
 ) (string, error) {
@@ -95,7 +102,7 @@ func resolveAgentBackend(
 	return strings.TrimSpace(agent.Backend), nil
 }
 
-func resolveWorkspaceBackend(ctx context.Context, st targetStore, workspaceKey string) (string, Source, error) {
+func resolveWorkspaceBackend(ctx context.Context, st TargetStore, workspaceKey string) (string, Source, error) {
 	if workspaceKey == "" {
 		return "", "", fmt.Errorf("active workspace is required when no backend override is provided: %w", domain.ErrInvalid)
 	}

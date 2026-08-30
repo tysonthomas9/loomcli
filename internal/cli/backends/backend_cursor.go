@@ -126,19 +126,30 @@ func (c *CursorBackend) Meta() BackendMeta {
 
 // HealthCheck reports the installation and readiness status of the Cursor backend.
 func (c *CursorBackend) HealthCheck() HealthStatus {
+	return c.healthCheck(context.Background(), true)
+}
+
+// HealthCheckForAdmission reports readiness without collecting the CLI version.
+func (c *CursorBackend) HealthCheckForAdmission(ctx context.Context) HealthStatus {
+	return c.healthCheck(ctx, false)
+}
+
+func (c *CursorBackend) healthCheck(ctx context.Context, includeVersion bool) HealthStatus {
 	var hs HealthStatus
 	var issues []string
 
 	if _, err := exec.LookPath("cursor-agent"); err == nil {
 		hs.Installed = true
-		hs.Version = detectBinaryVersion("cursor-agent")
+		if includeVersion {
+			hs.Version = detectBinaryVersion("cursor-agent")
+		}
 	} else {
 		issues = append(issues, "cursor-agent binary not found on PATH")
 	}
 
 	if os.Getenv("CURSOR_API_KEY") != "" {
 		hs.APIKeySet = true
-	} else if hs.Installed && cursorAuthStatus() == nil {
+	} else if hs.Installed && cursorAuthStatus(ctx) == nil {
 		hs.APIKeySet = true
 	} else {
 		issues = append(issues, "CURSOR_API_KEY not set and cursor-agent status is not logged in")
@@ -153,8 +164,8 @@ func (c *CursorBackend) HealthCheck() HealthStatus {
 	return hs
 }
 
-func defaultCursorAuthStatus() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func defaultCursorAuthStatus(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "cursor-agent", "status")
 	cmd.Stdin = nil

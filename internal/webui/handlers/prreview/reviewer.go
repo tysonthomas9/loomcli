@@ -502,7 +502,7 @@ func (m *Module) reconcileReviewerRole(ctx context.Context, ws string, role *dom
 // required because the chat routes deliver messages via the lead inbox; an
 // uncontrolled backend would strand them.
 func (m *Module) reviewerBackend(ctx context.Context, ws string) (string, error) {
-	backend, _, err := localbackend.Resolve(ctx, m.store, ws, "", false, "")
+	backend, _, err := localbackend.Resolve(ctx, m.store, localbackend.Target{WorkspaceKey: ws})
 	if err != nil {
 		return "", err
 	}

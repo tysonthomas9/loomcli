@@ -3,9 +3,7 @@ package workflows
 import (
 	"context"
 	"encoding/json"
-	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/localbackend"
 	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
@@ -22,34 +20,8 @@ import (
 // workflows. Returns an actionable error string when the local runner cannot
 // execute.
 func (m *Module) preflightRunnerForRun(ctx context.Context, ws, workflowName string, payload json.RawMessage) error {
-	if strings.TrimSpace(workflowName) != workflowdefs.BuiltinEpicRunnerWorkflowName {
-		return nil
-	}
-	if !runnerIsLocal(payload) {
+	if !workflowdefs.RunNeedsLocalTaskRunnerPreflight(workflowName, payload) {
 		return nil
 	}
 	return runtimepreflight.RequireLocalTaskRunner(ctx, m.store, runtimepreflight.Request{WorkspaceKey: ws})
-}
-
-// runnerIsLocal reports whether the run payload resolves to the local task
-// runner. An absent/empty runner is the UI "Locally" default, which epic-runner
-// resolves to "local-task-runner".
-func runnerIsLocal(payload json.RawMessage) bool {
-	runner := strings.TrimSpace(payloadRunner(payload))
-	return runner == "" || runner == localbackend.LocalTaskRunnerEntrypoint
-}
-
-// payloadRunner extracts the top-level "runner" string from the run payload,
-// returning "" when absent or malformed (treated as the local default).
-func payloadRunner(payload json.RawMessage) string {
-	if len(payload) == 0 {
-		return ""
-	}
-	var fields struct {
-		Runner string `json:"runner"`
-	}
-	if err := json.Unmarshal(payload, &fields); err != nil {
-		return ""
-	}
-	return fields.Runner
 }

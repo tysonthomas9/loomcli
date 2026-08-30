@@ -17,7 +17,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
-	"github.com/tysonthomas9/loomcli/internal/localbackend"
 	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/workflows"
@@ -352,7 +351,7 @@ func runWorkflowRun(_ *cobra.Command, args []string) error {
 }
 
 func preflightWorkflowRun(ctx context.Context, st store.Store, workspace, driverID string, payload json.RawMessage) error {
-	if !workflowRunRequiresLocalPreflight(driverID, payload) {
+	if !workflows.RunNeedsLocalTaskRunnerPreflight(driverID, payload) {
 		return nil
 	}
 	return runtimepreflight.RequireLocalTaskRunner(ctx, st, runtimepreflight.Request{WorkspaceKey: workspace})
@@ -481,27 +480,6 @@ func workflowMissingPrerequisites(source *workflows.LocalSource) []string {
 		}
 	}
 	return missing
-}
-
-func workflowRunRequiresLocalPreflight(driverID string, payload json.RawMessage) bool {
-	if strings.TrimSpace(driverID) != workflows.BuiltinEpicRunnerWorkflowName {
-		return false
-	}
-	runner := strings.TrimSpace(payloadRunner(payload))
-	return runner == "" || runner == localbackend.LocalTaskRunnerEntrypoint
-}
-
-func payloadRunner(payload json.RawMessage) string {
-	if len(payload) == 0 {
-		return ""
-	}
-	var fields struct {
-		Runner string `json:"runner"`
-	}
-	if err := json.Unmarshal(payload, &fields); err != nil {
-		return ""
-	}
-	return fields.Runner
 }
 
 func workflowPayload(values []string, epicID string) (json.RawMessage, error) {

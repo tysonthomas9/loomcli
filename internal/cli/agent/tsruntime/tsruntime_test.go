@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
@@ -62,6 +65,39 @@ func TestInvokeNonInteractivePreflightFailureStopsLocalLaunch(t *testing.T) {
 	var notReady *runtimepreflight.NotReadyError
 	if !errors.As(err, &notReady) || notReady.PreflightClass() != string(runtimepreflight.ErrorClassUnavailable) {
 		t.Fatalf("InvokeNonInteractive error = %v, want typed unavailable preflight", err)
+	}
+}
+
+func TestInvokeNonInteractivePreflightSkipsVersionProbe(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake CLI fixture is a /bin/sh script")
+	}
+	restoreTSRuntimeSeams(t)
+	active := cli.TestingActiveBackend()
+	previousBackend := *active
+	*active = "gemini"
+	t.Cleanup(func() { *active = previousBackend })
+	t.Setenv("LOOM_DAEMON_LEAF_RUNNER", localbackend.LocalTaskRunnerEntrypoint)
+
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "version-probed")
+	binary := filepath.Join(dir, "gemini")
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\n: > \"$LOOM_TEST_VERSION_MARKER\"\necho 9.9.9\n"), 0o755); err != nil {
+		t.Fatalf("write fake gemini: %v", err)
+	}
+	t.Setenv("PATH", dir)
+	t.Setenv("GEMINI_API_KEY", "test-key")
+	t.Setenv("LOOM_TEST_VERSION_MARKER", marker)
+	resolveTaskRunnerBundleServerPath = func() (string, error) { return "/bundle/server.mjs", nil }
+	runBundledTaskRunner = func(context.Context, driver.BundledRunnerOptions) (json.RawMessage, error) {
+		return json.RawMessage(`{"status":"completed"}`), nil
+	}
+
+	if err := (agentInvoker{}).InvokeNonInteractive(t.TempDir(), "prompt", "worker-a", nil, nil); err != nil {
+		t.Fatalf("InvokeNonInteractive: %v", err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("tsruntime preflight spawned --version; marker stat error = %v", err)
 	}
 }
 

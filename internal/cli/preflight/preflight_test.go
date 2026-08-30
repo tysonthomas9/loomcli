@@ -97,6 +97,9 @@ func TestCommandActiveWorkspaceDefault(t *testing.T) {
 	if got.Backend != "codex" || got.BackendSource != runtimepreflight.BackendSourceDefault || !got.Ready {
 		t.Fatalf("verdict = %+v", got.Result)
 	}
+	if !strings.Contains(stdout, `"backend_source": "default"`) {
+		t.Fatalf("JSON backend_source wire value changed: %s", stdout)
+	}
 }
 
 func TestCommandAgentOverride(t *testing.T) {

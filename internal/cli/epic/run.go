@@ -81,7 +81,7 @@ func init() {
 	epicRunCmd.Flags().StringVar(&runNodeID, "node-id", "", "Daemon node ID to run spawned workers on (default: the single active local node)")
 	epicRunCmd.Flags().StringVar(&runLead, "lead", "", "Lead agent running this epic (default: $LOOM_AGENT_NAME when set)")
 	epicRunCmd.Flags().StringVar(&runWorkflow, "workflow", workflowdefs.BuiltinEpicRunnerWorkflowName, "Workflow name to run")
-	epicRunCmd.Flags().StringVar(&runRunner, "runner", "local-task-runner", "Runner requested for child task runs")
+	epicRunCmd.Flags().StringVar(&runRunner, "runner", localbackend.LocalTaskRunnerEntrypoint, "Runner requested for child task runs")
 	epicRunCmd.Flags().StringVar(&runRepoURL, "repo-url", "", "Repository URL passed to compatible task runners")
 	epicRunCmd.Flags().StringVar(&runBaseBranch, "base-branch", "", "Base branch passed to compatible task runners")
 	epicRunCmd.Flags().BoolVar(&runOpenPR, "open-pull-request", false, "Ask compatible task runners to open pull requests")
@@ -97,8 +97,8 @@ func init() {
 // runnerNeedsLocalPreflight reports whether the requested runner resolves to
 // the local task runner and therefore must be fail-closed preflighted before
 // queuing. An empty/whitespace runner resolves to local-task-runner downstream
-// (epic-runner.ts defaults it, matching the webui's runnerIsLocal), so it is
-// gated identically; daytona/other explicit runners are not.
+// (epic-runner.ts defaults it), so it is gated identically; daytona/other
+// explicit runners are not.
 func runnerNeedsLocalPreflight(runner string) bool {
 	r := strings.TrimSpace(runner)
 	return r == "" || r == localbackend.LocalTaskRunnerEntrypoint
@@ -129,8 +129,7 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 	// fail deep in the worker (or worse, fake-complete). Only gate the local
 	// runner; daytona/other explicit runners run their own runtime. An empty
 	// runner resolves to the local-task-runner downstream (epic-runner.ts
-	// defaults it, matching the webui's runnerIsLocal), so it must be
-	// preflighted identically.
+	// defaults it), so it must be preflighted identically.
 	if err := preflightEpicRun(ctx, handle.Store, ws, runRunner); err != nil {
 		return err
 	}
