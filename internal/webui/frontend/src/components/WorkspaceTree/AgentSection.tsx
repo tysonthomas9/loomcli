@@ -7,7 +7,6 @@ import type React from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
 
-import type { AgentServiceDTO } from "@/api/agentServices";
 import { AgentCard } from "@/components/AgentCard";
 import {
   useAgentStoreInstance,
@@ -37,7 +36,10 @@ import {
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 
 import styles from "./AgentSection.module.css";
-import { withoutDurableAgentProjections } from "./agentSectionAutomationRows";
+import {
+  agentServiceCardAgent,
+  withoutDurableAgentProjections,
+} from "./agentSectionAutomationRows";
 import { AgentContextMenu } from "./menus/AgentContextMenu";
 import { SortableAgentList } from "./SortableAgentList";
 
@@ -54,45 +56,6 @@ interface AgentMenuState {
   name: string;
   x: number;
   y: number;
-}
-
-function agentServiceCardStatus(service: AgentServiceDTO): string {
-  switch (agentServiceDotState(service)) {
-    case "idle":
-      return "ready";
-    case "running":
-      return "working";
-    case "warn":
-    case "unknown":
-    case "failing":
-      return "error";
-    case "off":
-      return "ready";
-  }
-}
-
-function agentServiceCardAgent(
-  service: AgentServiceDTO,
-  workspaceName: string,
-): LoomAgentStatus {
-  const displayName = service.name.trim() || service.id;
-  const roleName = service.behavior.roleName?.trim() || "background";
-  const roleLabel =
-    service.behavior.roleDisplayName?.trim() ||
-    (roleName === "background" ? "Background" : roleName);
-  return {
-    name: service.id,
-    display_name: displayName,
-    role: roleName,
-    role_label: roleLabel,
-    role_kind: "worker",
-    daemon_managed: true,
-    branch: "",
-    status: agentServiceCardStatus(service),
-    ahead: 0,
-    behind: 0,
-    workspace: workspaceName,
-  };
 }
 
 export function AgentSection({

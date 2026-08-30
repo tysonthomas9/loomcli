@@ -12,11 +12,19 @@ import {
   orderAgentsForEpicRunner,
 } from "@/components/AgentIconRail";
 import { CompactRailHost } from "@/components/CompactRail";
-import { useAgentStoreInstance, useWorkspaceContext } from "@/hooks";
+import {
+  useAgentServices,
+  useAgentStoreInstance,
+  useWorkspaceContext,
+} from "@/hooks";
 import type { LoomAgentStatus } from "@/types";
 import { isPRReviewerAgent } from "@/utils/agentDisplay";
 
 import styles from "./CollapsedAgentRail.module.css";
+import {
+  agentServiceCardAgent,
+  withoutDurableAgentProjections,
+} from "./agentSectionAutomationRows";
 
 export interface CollapsedAgentRailProps {
   onAgentClick?: ((agentName: string) => void) | undefined;
@@ -34,9 +42,20 @@ export function CollapsedAgentRail({
 }: CollapsedAgentRailProps): JSX.Element {
   const agentStore = useAgentStoreInstance();
   const fleetAgents = useStore(agentStore, (s) => s.agents);
-  const { agents: workspaceConfigAgents, workspace } = useWorkspaceContext();
+  const {
+    agents: workspaceConfigAgents,
+    workspace,
+    workspaceId,
+  } = useWorkspaceContext();
   const prsView = activeView === "prs";
   const addClick = prsView ? undefined : onAddClick;
+  const { services: allAgentServices } = useAgentServices(workspaceId, {
+    enabled: Boolean(workspaceId),
+  });
+  const agentServices = useMemo(
+    () => (prsView ? [] : allAgentServices),
+    [allAgentServices, prsView],
+  );
 
   const agents = useMemo<LoomAgentStatus[]>(() => {
     const merged: LoomAgentStatus[] = [...fleetAgents];
@@ -58,12 +77,25 @@ export function CollapsedAgentRail({
         merged.push(entry);
       }
     }
-    const ordered = orderAgentsForEpicRunner(merged).filter(
+    const rosterAgents = withoutDurableAgentProjections(merged, agentServices);
+    const serviceAgents = agentServices.map((record) =>
+      agentServiceCardAgent(record, workspace?.name ?? ""),
+    );
+    const ordered = orderAgentsForEpicRunner([
+      ...rosterAgents,
+      ...serviceAgents,
+    ]).filter(
       (agent) => agent.status === "configured" || isLiveAgentRailVisible(agent),
     );
     if (!prsView) return ordered;
     return ordered.filter(isPRReviewerAgent);
-  }, [fleetAgents, workspaceConfigAgents, workspace?.name, prsView]);
+  }, [
+    agentServices,
+    fleetAgents,
+    workspaceConfigAgents,
+    workspace?.name,
+    prsView,
+  ]);
 
   return (
     <nav
