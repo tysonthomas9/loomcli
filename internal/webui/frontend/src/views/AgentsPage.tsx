@@ -26,6 +26,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -107,6 +108,22 @@ function AgentLiveLogsPane({
     enabled: isActive && !!agentName,
   });
 
+  // Stick to the tail: new content keeps the pane pinned to the bottom
+  // unless the reader has scrolled up to look at history.
+  const outputRef = useRef<HTMLPreElement | null>(null);
+  const pinnedRef = useRef(true);
+  const handleScroll = useCallback(() => {
+    const el = outputRef.current;
+    if (!el) return;
+    pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  }, []);
+  useEffect(() => {
+    const el = outputRef.current;
+    if (el && pinnedRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [stream.content]);
+
   if (!agentName) {
     return (
       <div className={styles.tabFallback}>Select an agent to view logs.</div>
@@ -126,7 +143,12 @@ function AgentLiveLogsPane({
           {stateLabel}
         </span>
       </div>
-      <pre className={styles.liveLogOutput} data-testid="agent-log-content">
+      <pre
+        ref={outputRef}
+        onScroll={handleScroll}
+        className={styles.liveLogOutput}
+        data-testid="agent-log-content"
+      >
         {stream.content}
       </pre>
     </div>
