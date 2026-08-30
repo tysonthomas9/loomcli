@@ -436,7 +436,11 @@ func daytonaLeadRemoteLaunchSpec(ctx context.Context, st store.Store, workspace,
 		return nil, err
 	}
 	return &tabmeta.RemoteLaunchSpec{
-		Provider:     string(domain.RuntimeProviderDaytona),
+		// The node's stamped provider, never a literal: this string selects the
+		// SDK the sandbox id is handed to, and an id is unique only within a
+		// provider. Hardcoding "daytona" here was safe only because the lookup
+		// below filtered to Daytona nodes -- a coupling nothing enforced.
+		Provider:     string(node.RuntimeProvider),
 		SandboxID:    strings.TrimSpace(node.Placement.SandboxID),
 		PTYSessionID: webuterminal.DefaultDaytonaLeadPTYSessionID,
 	}, nil
@@ -495,7 +499,11 @@ func terminalNodeMatchesDaytonaLeadAnyState(node *domain.Node, agentName string)
 	if node == nil || node.Placement == nil {
 		return false
 	}
-	if node.RuntimeProvider != domain.RuntimeProviderDaytona {
+	// Attachable providers come from the terminal package's registry, so
+	// registering a provider's upstream factory is what enables its leads
+	// here -- one place, not a second equality site to remember. Identical
+	// behavior while Daytona is the only registered factory.
+	if !webuterminal.SupportsRemoteProvider(node.RuntimeProvider) {
 		return false
 	}
 	if node.OwnerActor == "agent:"+agentName {

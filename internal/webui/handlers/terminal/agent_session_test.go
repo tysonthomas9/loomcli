@@ -1505,3 +1505,86 @@ func TestBuildAgentLaunchSpecFallsBackToWorkspaceBackend(t *testing.T) {
 		t.Fatalf("launch argv missing --backend codex: %v", launch.Argv)
 	}
 }
+
+// createLeadPlacementOn is createDaytonaLeadPlacement with the runtime provider
+// as a parameter, so the launch-spec test can build a placement on a provider
+// other than Daytona.
+func createLeadPlacementOn(t *testing.T, st store.Store, kind domain.RuntimeProvider, workspace, agentName, nodeID, sandboxID string) {
+	t.Helper()
+	now := time.Now().UTC()
+	if _, err := st.Nodes().Create(context.Background(), store.NodeCreate{
+		WorkspaceKey:    workspace,
+		NodeID:          nodeID,
+		OwnerActor:      "agent:" + agentName,
+		RuntimeProvider: kind,
+		Placement: &domain.NodePlacement{
+			SandboxID:            sandboxID,
+			Generation:           1,
+			State:                domain.PlacementStateActive,
+			LeadProcessStartedAt: &now,
+		},
+		Labels: []string{
+			"loom-lead-placement",
+			"loom-workspace=" + workspace,
+			"loom-agent=" + agentName,
+		},
+		Capabilities:  []string{"lead:session"},
+		ToolInventory: []string{"loom-lead"},
+		DrainState:    domain.NodeDrainActive,
+		TTL:           time.Hour,
+	}); err != nil {
+		t.Fatalf("create placement node: %v", err)
+	}
+}
+
+// TestRemoteLaunchSpecCarriesTheNodesProvider closes a gap a fault injection
+// exposed: restoring the hardcoded "daytona" literal in the launch spec broke
+// no test, so nothing proved the spec followed the placement.
+//
+// It matters because that string selects which SDK the sandbox id is handed to,
+// and an id is unique only within a provider. The literal was safe only while
+// the lookup filtered to Daytona nodes -- a coupling nothing enforced, and one
+// that breaks the moment a second provider becomes attachable.
+func TestRemoteLaunchSpecCarriesTheNodesProvider(t *testing.T) {
+	const fakeKind = domain.RuntimeProvider("fake-remote")
+	// Make the fake provider attachable so the lead lookup does not filter it
+	// out; the launch spec must then report THIS provider, not Daytona.
+	t.Cleanup(webuiterminal.RegisterRemoteUpstreamFactory(fakeKind,
+		func(context.Context, string, string) (webuiterminal.PTYUpstream, error) {
+			return nil, errors.New("not exercised")
+		}))
+
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST2", Name: "TEST2"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	createLeadPlacementOn(t, st, fakeKind, "TEST2", "nova", "placement-1", "sandbox-1")
+
+	spec, err := daytonaLeadRemoteLaunchSpec(ctx, st, "TEST2", "nova")
+	if err != nil {
+		t.Fatalf("daytonaLeadRemoteLaunchSpec: %v", err)
+	}
+	if spec.Provider != string(fakeKind) {
+		t.Fatalf("launch spec provider = %q, want %q (the node's stamped provider)", spec.Provider, fakeKind)
+	}
+	if spec.SandboxID != "sandbox-1" {
+		t.Fatalf("launch spec sandbox = %q, want sandbox-1", spec.SandboxID)
+	}
+}
+
+// TestLeadLookupSkipsUnattachableProviders is the inverse guard: broadening the
+// filter must not admit providers with no attach path, or the spec would name a
+// provider the PTY manager cannot route.
+func TestLeadLookupSkipsUnattachableProviders(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST2", Name: "TEST2"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	createLeadPlacementOn(t, st, domain.RuntimeProviderExe, "TEST2", "nova", "placement-1", "sandbox-1")
+
+	if _, err := daytonaLeadRemoteLaunchSpec(ctx, st, "TEST2", "nova"); err == nil {
+		t.Fatal("a placement on a provider with no registered attach path must not be returned")
+	}
+}

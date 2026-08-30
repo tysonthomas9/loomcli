@@ -385,25 +385,23 @@ func (m *PTYManager) attachRemoteSession(key SessionKey, cols, rows uint16, remo
 	if remote == nil {
 		return nil, fmt.Errorf("remote terminal launch spec required")
 	}
-	provider := strings.TrimSpace(remote.Provider)
-	switch provider {
-	case "daytona":
-		return m.attachDaytonaSession(key, cols, rows, remote)
-	default:
-		return nil, fmt.Errorf("unsupported remote terminal provider %q", provider)
+	factory, err := remoteUpstreamFactoryFor(remote.Provider)
+	if err != nil {
+		return nil, err
 	}
+	return m.attachRemoteUpstream(key, cols, rows, remote, factory)
 }
 
-func (m *PTYManager) attachDaytonaSession(key SessionKey, cols, rows uint16, remote *tabmeta.RemoteLaunchSpec) (*ptySession, error) {
+func (m *PTYManager) attachRemoteUpstream(key SessionKey, cols, rows uint16, remote *tabmeta.RemoteLaunchSpec, factory RemoteUpstreamFactory) (*ptySession, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), daytonaAttachTimeout)
 	defer cancel()
-	upstream, err := newDaytonaPTYUpstreamForManager(ctx, remote.SandboxID, remote.PTYSessionID, DaytonaPTYConfig{})
+	upstream, err := factory(ctx, remote.SandboxID, remote.PTYSessionID)
 	if err != nil {
 		return nil, err
 	}
 	if err := upstream.Resize(ctx, cols, rows); err != nil {
 		_ = upstream.Close()
-		return nil, fmt.Errorf("resize daytona pty %q in sandbox %q: %w", remote.PTYSessionID, remote.SandboxID, err)
+		return nil, fmt.Errorf("resize %s pty %q in sandbox %q: %w", remote.Provider, remote.PTYSessionID, remote.SandboxID, err)
 	}
 	sess := newPtySession(key, upstream, m.onSessionExited)
 	go sess.drain()
