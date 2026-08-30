@@ -179,6 +179,42 @@ func TestHostBridgeTaskExecutorRechecksPersistedAgentBackendAfterQueue(t *testin
 	if got := outcome.Run.RuntimeMetadata["checked_backend"]; got != updatedBackend {
 		t.Fatalf("bound %s = %q, want %q", TaskRunnerBackendEnv, got, updatedBackend)
 	}
+
+	updatedBackend = "opencode"
+	if _, err := st.Agents().Update(ctx, "TEST", workerProfileID, store.AgentUpdate{Backend: &updatedBackend}); err != nil {
+		t.Fatalf("update agent backend again: %v", err)
+	}
+	queued, err = EnqueueTaskRunWithResult(ctx, st, TaskRunRequestOptions{
+		WorkspaceKey:    "TEST",
+		DriverRunID:     run.RunID,
+		TaskRunID:       "task-run-agent-backend-race-second",
+		TaskID:          "TEST-2",
+		WorkerProfileID: workerProfileID,
+		Runner:          "local-task-runner",
+		ParentNodeID:    run.NodeID,
+		ParentLeaseID:   run.LeaseID,
+		ParentFence:     run.FencingToken,
+	}, executor)
+	if err != nil {
+		t.Fatalf("enqueue second task run: %v", err)
+	}
+	outcome, err = ClaimAndExecuteTaskRunWithResult(ctx, st, TaskRunWorkerOptions{
+		WorkspaceKey:      "TEST",
+		TaskRunID:         queued.Run.TaskRunID,
+		NodeID:            "node-1",
+		RunnerID:          "runner-agent-backend-race-second",
+		WorkerProfileIDs:  []string{workerProfileID},
+		HeartbeatInterval: -1,
+	}, executor)
+	if err != nil {
+		t.Fatalf("claim and execute second task run: %v", err)
+	}
+	if !slices.Equal(probedBackends, []string{"gemini", "opencode"}) {
+		t.Fatalf("probed backends = %v, want updated backend at each launch", probedBackends)
+	}
+	if got := outcome.Run.RuntimeMetadata["checked_backend"]; got != updatedBackend {
+		t.Fatalf("second run bound %s = %q, want %q", TaskRunnerBackendEnv, got, updatedBackend)
+	}
 }
 
 func TestHostBridgeTaskExecutorLocalRunnerPreflightFailures(t *testing.T) {
