@@ -25,12 +25,11 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/metricscmd"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/observability"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/opsimpl"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/placementwire"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/usagecmd"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
-	"github.com/tysonthomas9/loomcli/internal/leadprovision"
 	"github.com/tysonthomas9/loomcli/internal/placement"
 	"github.com/tysonthomas9/loomcli/internal/placement/daytona"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -250,7 +249,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	// buildPlacementBroker returns nil unless Daytona creds + a deployment id
 	// + an occupant-token key are all configured, so this is a no-op on
 	// deployments that do not place leads in sandboxes.
-	placementBroker, placementProvider := buildPlacementBroker(storeHandle.Store)
+	placementBroker, placementProviders := placementwire.Build(storeHandle.Store, driverRunTokenKey())
 	startPlacementReaper(ctx, placementBroker, placementReaperInterval(), placementReaperEnforce())
 
 	issueBackendFn := cli.WorkspaceAwareIssueBackendForURL(storeHandle.URL(), fleetState.clientCfg.Actor)
@@ -260,7 +259,7 @@ func runServe(cmd *cobra.Command, args []string) {
 
 	webuiErr := make(chan error, 1)
 	go func() {
-		cfg := buildServerConfig(monitorHandlers, fleetState, storeHandle, placementBroker, placementProvider)
+		cfg := buildServerConfig(monitorHandlers, fleetState, storeHandle, placementBroker, placementProviders)
 		webuiErr <- webuiapp.StartServer(ctx, cfg)
 	}()
 
@@ -465,88 +464,16 @@ func driverRunTokenKey() []byte {
 	return key
 }
 
-// buildPlacementBroker constructs the Daytona placement broker when this
-// deployment is configured to place leads in sandboxes. It returns nil (and
-// logs once) unless DAYTONA_API_KEY, LOOM_DEPLOYMENT_ID, and an occupant-token
-// signing key are all present -- the broker mints occupant tokens with the same
-// key the leadapi module verifies (DriverRunTokenKey), so a mismatch would make
-// every sandboxed lead's API call fail. Callers treat nil as "sandbox placement
-// disabled".
-func buildPlacementBroker(st store.Store) (*placement.Broker, placement.Provider) {
-	if strings.TrimSpace(os.Getenv(daytona.APIKeyEnv)) == "" {
-		return nil, nil
-	}
-	tokenKey := driverRunTokenKey()
-	if len(tokenKey) == 0 {
-		slog.Warn("placement broker disabled: no occupant-token signing key (set LOOM_RUN_TOKEN_SIGNING_KEY)")
-		return nil, nil
-	}
-	provider, err := daytona.New(daytona.Config{})
-	if err != nil {
-		slog.Error("placement broker disabled: construct Daytona provider", "err", err)
-		return nil, nil
-	}
-	broker, err := newServePlacementBroker(st, provider, tokenKey)
-	if err != nil {
-		// Most commonly a missing LOOM_DEPLOYMENT_ID (required so provider
-		// sandboxes carry the loom-env label the reaper scopes to).
-		slog.Error("placement broker disabled: construct broker", "err", err)
-		return nil, nil
-	}
-	slog.Info("Placement broker enabled (Daytona lead sandboxes)")
-	return broker, provider
-}
-
-func newServePlacementBroker(st store.Store, provider placement.Provider, tokenKey []byte) (*placement.Broker, error) {
-	// POC operating note: one Codex auth.json (ChatGPT OAuth, including a
-	// refresh token) is seeded into every lead sandbox. If OpenAI rotates the
-	// refresh token, concurrent leads can invalidate each other's token. The
-	// small default MaxLive (about four 2/4 leads) bounds this shared-OAuth
-	// blast radius; the real fix (post-POC, ticket 08 §2) is per-lead
-	// short-lived tokens. Revoke the codex + claude creds at POC close.
-	if leadBootstrapEnabled() && leadAPIBaseURL() == "" {
-		slog.Warn("LOOM_LEAD_BOOTSTRAP enabled but LOOM_LEAD_API_BASE_URL unset; leads will boot the snapshot-baked binary")
-	}
-	return placement.NewBroker(placement.Config{
-		Store: st,
-		// Daytona is the only registered provider. Adding a second one is a
-		// registry entry plus its credential wiring -- nothing in the broker
-		// changes, because routing follows each node's stamped
-		// RuntimeProvider rather than ambient configuration.
-		Providers: placement.ProviderRegistry{
-			domain.RuntimeProviderDaytona: provider,
-		},
-		TokenKey:             tokenKey,
-		LeadAPIBaseURL:       leadAPIBaseURL(),
-		LeadBootstrapEnabled: leadBootstrapEnabled(),
-		MaxLive: placement.ResourceSize{
-			VCPU:   leadMaxVCPU(),
-			MemGiB: leadMaxMemGiB(),
-		},
-	})
-}
-
 // leadBootstrapEnabled is the single kill-switch for download-at-boot: it gates
 // both the serve endpoint that streams serve's own binary and the provider step
 // that installs it into each lead sandbox. Default off (fail-hard downloads
 // make it opt-in). Accepts strconv.ParseBool truthy values ("1", "true", ...).
-func leadBootstrapEnabled() bool {
-	raw := strings.TrimSpace(os.Getenv(envLoomLeadBootstrap))
-	if raw == "" {
-		return false
-	}
-	enabled, err := strconv.ParseBool(raw)
-	return err == nil && enabled
-}
 
 // leadAPIBaseURL is the public serve origin injected into Daytona lead
 // sandboxes as LOOM_LEAD_API_URL. It must be reachable from inside the
 // sandbox; behind a proxy, set LOOM_LEAD_API_BASE_URL to that public origin.
 // When unset, the broker injects no URL and sandbox leads fail their
 // preflight loudly instead of falling back to a local fleet-db.
-func leadAPIBaseURL() string {
-	return strings.TrimSpace(os.Getenv(envLoomLeadAPIBaseURL))
-}
 
 // leadSnapshotRef resolves the snapshot every brokered lead sandbox boots
 // from. LOOM_LEAD_SNAPSHOT accepts a Daytona snapshot name or ID and lets an
@@ -560,51 +487,8 @@ func leadSnapshotRef() string {
 	return daytona.DefaultSnapshotName
 }
 
-func buildLeadProvisioner(st store.Store, broker *placement.Broker) *leadprovision.Provisioner {
-	if st == nil || broker == nil {
-		return nil
-	}
-	return leadprovision.New(
-		broker,
-		st,
-		bootstrap.LoomDir(),
-		leadAllowlist(),
-		leadSnapshotRef(),
-		leadprovision.DefaultResource(),
-	)
-}
-
-func leadMaxVCPU() int {
-	return boundedIntEnv(envLoomLeadMaxVCPU, 8, 64)
-}
-
 func leadLostReleaseGrace() time.Duration {
 	return boundedDurationEnv(envLoomLeadLostReleaseGrace, 30*time.Minute)
-}
-
-func leadMaxMemGiB() int {
-	return boundedIntEnv(envLoomLeadMaxMemGiB, 16, 128)
-}
-
-// leadAllowlist resolves the network domain allowlist for lead sandboxes.
-// Daytona applies the allowlist at create time only, so a change here affects
-// only newly provisioned sandboxes -- never a lead already running.
-func leadAllowlist() []string {
-	raw := strings.TrimSpace(os.Getenv(envLoomLeadAllowlist))
-	if raw == "" {
-		return leadprovision.DefaultAllowlist()
-	}
-	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if trimmed := strings.TrimSpace(part); trimmed != "" {
-			out = append(out, trimmed)
-		}
-	}
-	if len(out) == 0 {
-		return leadprovision.DefaultAllowlist()
-	}
-	return out
 }
 
 func driverExecutorEnabled() bool {
@@ -771,7 +655,7 @@ func buildMonitorHandlers(collectDataFn metricscmd.CollectDataFn, staleDetectorH
 	}
 }
 
-func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, storeHandle *bootstrap.StoreHandle, placementBroker *placement.Broker, placementProvider placement.Provider) webui.ServerConfig {
+func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, storeHandle *bootstrap.StoreHandle, placementBroker *placement.Broker, placementProviders placement.ProviderRegistry) webui.ServerConfig {
 	gitOps := opsimpl.NewGitOps()
 	resolvedBackend := cli.ResolveBackendName()
 	log.Printf("Terminal backend: %s", resolvedBackend)
@@ -788,14 +672,9 @@ func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, sto
 		cfg.DriverAPIToken = driverAPIToken()
 		cfg.DriverAPIBaseURL = driverAPIBaseURL()
 		cfg.DriverRunTokenKey = driverRunTokenKey()
-		cfg.LeadProvisioner = buildLeadProvisioner(storeHandle.Store, placementBroker)
-		if cfg.LeadProvisioner != nil && placementProvider != nil {
-			// Keyed by runtime provider so revive routes to the platform that
-			// owns the sandbox id, matching the placement broker's registry.
-			cfg.LeadReviveCoordinator = leadprovision.NewReviveCoordinator(
-				leadprovision.SandboxStateProviderRegistry{
-					domain.RuntimeProviderDaytona: placementProvider,
-				}, cfg.LeadProvisioner)
+		cfg.LeadProvisioner = placementwire.LeadProvisioner(storeHandle.Store, placementBroker, leadSnapshotRef())
+		if cfg.LeadProvisioner != nil && len(placementProviders) > 0 {
+			cfg.LeadReviveCoordinator = placementwire.LeadReviveCoordinator(placementProviders, cfg.LeadProvisioner)
 		}
 	}
 	applyFleetConfig(&cfg, fs)
@@ -832,7 +711,7 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		ExtAuthAllowInsecure:  serveAuthAllowInsecure,
 		WorkspaceRoleResolver: buildFileBrowserRoleResolver(),
 		LeadDataAllowOpenAuth: leadDataAllowOpenAuth,
-		LeadBootstrapEnabled:  leadBootstrapEnabled(),
+		LeadBootstrapEnabled:  placementwire.LeadBootstrapEnabled(),
 		GitOps:                gitOps,
 		FileOps:               gitOps,
 		BackendOps:            opsimpl.NewBackendOps(),

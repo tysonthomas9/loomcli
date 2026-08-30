@@ -14,16 +14,18 @@
 #                           resolves its issue backend over serve instead of a
 #                           local store) and +netbase (the shared IPv4/proxy
 #                           transport the lock bridge dials through).
-#   internal/cli/serve      +placement, +placement/daytona, +leadprovision —
-#                           serve constructs the placement broker, the Daytona
-#                           provider and the lead provisioner, because it is the
-#                           only process holding the provider credential. Worth
-#                           paying down by moving that construction behind one
-#                           wiring package.
+#   internal/cli/serve      +placement — serve holds the provider credential, so
+#                           it is the process that constructs the broker. The
+#                           provider construction itself was paid down as the
+#                           note here asked: it now lives behind
+#                           internal/cli/serve/placementwire, which absorbs
+#                           placement/daytona, placement/exe, leadprovision and
+#                           webui/terminal. Adding a THIRD provider must not
+#                           move this number.
 #   internal/webui/modbuilder  +leadapi, +health, +backend, +leadprovision.
 #                           Constructing modules is this package's entire job,
 #                           so its fanout tracks the module count.
 internal/cli/daemon/supervisor 21
 internal/cli 22
-internal/cli/serve 21
+internal/cli/serve 21  # was 22 before placementwire; do not raise
 internal/webui/modbuilder 20
