@@ -9,7 +9,6 @@
 
 import { useState } from "react";
 
-import { CodeMirrorEditor } from "@/components/CodeMirrorEditor";
 import {
   useAgentSessionDiff,
   useAgentSessionTranscript,
@@ -21,6 +20,7 @@ import { formatStatusLabel } from "@/utils/issue";
 import { formatTokens, sessionTotalTokens } from "@/utils/sessionUsage";
 
 import styles from "./SessionsTab.module.css";
+import { SessionDiffViewer } from "./SessionDiffViewer";
 import { TranscriptWorklog } from "./TranscriptWorklog";
 import type { SessionRowLabel } from "./SessionTimelineRow";
 
@@ -302,14 +302,7 @@ export function SessionDetailView({
             </div>
           )}
           {!diffState.isLoading && !diffState.error && diffState.diff && (
-            <div className={styles.diffCodeMirror}>
-              <CodeMirrorEditor
-                value={diffState.diff}
-                language="diff"
-                readOnly
-                hideLineNumbers
-              />
-            </div>
+            <SessionDiffViewer diff={diffState.diff} />
           )}
           {!diffState.isLoading && !diffState.error && !diffState.diff && (
             <div className={styles.diffEmpty}>No diff available</div>

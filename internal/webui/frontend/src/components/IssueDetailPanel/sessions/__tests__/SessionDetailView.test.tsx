@@ -712,15 +712,31 @@ describe("SessionDetailView", () => {
       ).toBeInTheDocument();
     });
 
-    it("renders diff in CodeMirrorEditor when present", () => {
+    it("renders a saved patch with the shared structured diff UI", () => {
       mockUseSessionDiff.mockReturnValue({
-        diff: "--- a\n+++ b\n",
+        diff: [
+          "diff --git a/src/example.ts b/src/example.ts",
+          "index 1111111..2222222 100644",
+          "--- a/src/example.ts",
+          "+++ b/src/example.ts",
+          "@@ -1 +1 @@",
+          "-const answer = 41;",
+          "+const answer = 42;",
+        ].join("\n"),
         isLoading: false,
         error: null,
       });
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       fireEvent.click(screen.getByTestId("session-inner-tab-diff"));
-      expect(screen.getByTestId("codemirror-editor")).toBeInTheDocument();
+      expect(screen.getByTestId("session-diff-viewer")).toBeInTheDocument();
+      expect(screen.getByText("src/example.ts")).toBeInTheDocument();
+      expect(screen.getAllByText("+1")).toHaveLength(2);
+      expect(screen.getAllByText("-1")).toHaveLength(2);
+      expect(screen.getByText("+const answer = 42;")).toHaveAttribute(
+        "data-type",
+        "add",
+      );
+      expect(screen.queryByTestId("codemirror-editor")).not.toBeInTheDocument();
     });
 
     it("shows 'No diff available' when diff is null", () => {
