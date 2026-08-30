@@ -2,134 +2,407 @@ package runtimepreflight
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-// fakeDaemonStore implements store.DaemonProfileStore for resolving the
-// workspace AgentBackend without a full store.
-type fakeDaemonStore struct {
+type targetStoreStub struct {
+	agent     *domain.Agent
+	agentErr  error
+	profile   *domain.DaemonProfile
+	daemonErr error
+}
+
+func (s targetStoreStub) Agents() store.AgentStore {
+	return agentStoreStub{agent: s.agent, err: s.agentErr}
+}
+
+func (s targetStoreStub) Daemon() store.DaemonProfileStore {
+	return daemonStoreStub{profile: s.profile, err: s.daemonErr}
+}
+
+type agentStoreStub struct {
+	agent *domain.Agent
+	err   error
+}
+
+func (s agentStoreStub) Create(context.Context, store.AgentCreate) (*domain.Agent, error) {
+	return nil, errors.New("unexpected agent create")
+}
+
+func (s agentStoreStub) Get(context.Context, string, string) (*domain.Agent, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.agent == nil {
+		return nil, domain.ErrNotFound
+	}
+	return s.agent, nil
+}
+
+func (s agentStoreStub) List(context.Context, string) ([]*domain.Agent, error) {
+	return nil, errors.New("unexpected agent list")
+}
+
+func (s agentStoreStub) Update(context.Context, string, string, store.AgentUpdate) (*domain.Agent, error) {
+	return nil, errors.New("unexpected agent update")
+}
+
+func (s agentStoreStub) Delete(context.Context, string, string) error {
+	return errors.New("unexpected agent delete")
+}
+
+type daemonStoreStub struct {
 	profile *domain.DaemonProfile
 	err     error
 }
 
-func (f fakeDaemonStore) Get(context.Context, string) (*domain.DaemonProfile, error) {
-	return f.profile, f.err
+func (s daemonStoreStub) Get(context.Context, string) (*domain.DaemonProfile, error) {
+	return s.profile, s.err
 }
 
-func (f fakeDaemonStore) Upsert(context.Context, *domain.DaemonProfile) (*domain.DaemonProfile, error) {
-	return f.profile, nil
+func (s daemonStoreStub) Upsert(context.Context, *domain.DaemonProfile) (*domain.DaemonProfile, error) {
+	return nil, errors.New("unexpected daemon upsert")
 }
 
-// fakeGetter implements the minimal daemonGetter surface preflight needs.
-type fakeGetter struct{ ds store.DaemonProfileStore }
-
-func (g fakeGetter) Daemon() store.DaemonProfileStore { return g.ds }
-
-func getterWithBackend(backend string) fakeGetter {
-	return fakeGetter{ds: fakeDaemonStore{profile: &domain.DaemonProfile{AgentBackend: backend}}}
+func healthyProbe(string) (HealthStatus, bool) {
+	return HealthStatus{Healthy: true, Installed: true, APIKeySet: true, Message: "ready"}, true
 }
 
-func TestResolveLocalBackend(t *testing.T) {
-	ctx := context.Background()
-
-	if got := ResolveLocalBackend(ctx, getterWithBackend("claude"), "TEST"); got != "claude" {
-		t.Fatalf("explicit AgentBackend = %q, want claude", got)
+func TestCheckLocalTaskRunnerResolutionPrecedence(t *testing.T) {
+	t.Setenv("LOOM_BACKEND", "claude")
+	cases := []struct {
+		name        string
+		store       targetStore
+		request     Request
+		wantBackend string
+		wantSource  BackendSource
+	}{
+		{
+			name:        "explicit override without workspace",
+			request:     Request{BackendOverride: " gemini "},
+			wantBackend: "gemini",
+			wantSource:  BackendSourceOverride,
+		},
+		{
+			name: "explicit override still validates required agent",
+			store: targetStoreStub{
+				agent:   &domain.Agent{Name: "worker-a", Backend: "claude"},
+				profile: &domain.DaemonProfile{AgentBackend: "opencode"},
+			},
+			request:     Request{WorkspaceKey: "ACME", AgentName: "worker-a", AgentRequired: true, BackendOverride: "gemini"},
+			wantBackend: "gemini",
+			wantSource:  BackendSourceOverride,
+		},
+		{
+			name:        "agent backend",
+			store:       targetStoreStub{agent: &domain.Agent{Backend: "cursor"}, profile: &domain.DaemonProfile{AgentBackend: "gemini"}},
+			request:     Request{WorkspaceKey: "ACME", AgentName: "worker-a", AgentRequired: true},
+			wantBackend: "cursor",
+			wantSource:  BackendSourceAgent,
+		},
+		{
+			name:        "blank agent backend falls through",
+			store:       targetStoreStub{agent: &domain.Agent{Backend: "  "}, profile: &domain.DaemonProfile{AgentBackend: "gemini"}},
+			request:     Request{WorkspaceKey: "ACME", AgentName: "worker-a", AgentRequired: true},
+			wantBackend: "gemini",
+			wantSource:  BackendSourceWorkspace,
+		},
+		{
+			name:        "optional missing agent falls through",
+			store:       targetStoreStub{profile: &domain.DaemonProfile{AgentBackend: "opencode"}},
+			request:     Request{WorkspaceKey: "ACME", AgentName: "worker-a"},
+			wantBackend: "opencode",
+			wantSource:  BackendSourceWorkspace,
+		},
+		{
+			name:        "workspace backend",
+			store:       targetStoreStub{profile: &domain.DaemonProfile{AgentBackend: "claude"}},
+			request:     Request{WorkspaceKey: "ACME"},
+			wantBackend: "claude",
+			wantSource:  BackendSourceWorkspace,
+		},
+		{
+			name:        "codex default ignores LOOM_BACKEND",
+			store:       targetStoreStub{profile: &domain.DaemonProfile{AgentBackend: "  "}},
+			request:     Request{WorkspaceKey: "ACME"},
+			wantBackend: "codex",
+			wantSource:  BackendSourceDefault,
+		},
 	}
-	if got := ResolveLocalBackend(ctx, getterWithBackend("  "), "TEST"); got != DefaultBackend {
-		t.Fatalf("blank AgentBackend = %q, want default %q", got, DefaultBackend)
-	}
-	if got := ResolveLocalBackend(ctx, fakeGetter{ds: fakeDaemonStore{profile: nil}}, "TEST"); got != DefaultBackend {
-		t.Fatalf("nil profile = %q, want default %q", got, DefaultBackend)
-	}
-	if got := ResolveLocalBackend(ctx, fakeGetter{ds: fakeDaemonStore{err: errors.New("boom")}}, "TEST"); got != DefaultBackend {
-		t.Fatalf("store error = %q, want default %q", got, DefaultBackend)
-	}
-	if got := ResolveLocalBackend(ctx, nil, "TEST"); got != DefaultBackend {
-		t.Fatalf("nil getter = %q, want default %q", got, DefaultBackend)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var checked string
+			result, err := checkLocalTaskRunner(context.Background(), tc.store, tc.request, func(name string) (HealthStatus, bool) {
+				checked = name
+				return healthyProbe(name)
+			})
+			if err != nil {
+				t.Fatalf("CheckLocalTaskRunner() error = %v", err)
+			}
+			if result.Backend != tc.wantBackend || result.BackendSource != tc.wantSource {
+				t.Fatalf("resolution = (%q, %q), want (%q, %q)", result.Backend, result.BackendSource, tc.wantBackend, tc.wantSource)
+			}
+			if checked != tc.wantBackend {
+				t.Fatalf("health checked backend %q, want %q", checked, tc.wantBackend)
+			}
+			if !result.Ready {
+				t.Fatalf("result = %+v, want ready", result)
+			}
+		})
 	}
 }
 
-func TestPreflightLocalTaskRunnerHealthy(t *testing.T) {
-	restore := SetHealthCheckerForTest(func(name string) (backends.HealthStatus, bool) {
-		if name != "codex" {
-			t.Fatalf("health checked backend %q, want resolved default codex", name)
-		}
-		return backends.HealthStatus{Healthy: true, Installed: true, APIKeySet: true}, true
+func TestCheckLocalTaskRunnerClassification(t *testing.T) {
+	cases := []struct {
+		name       string
+		backend    string
+		status     HealthStatus
+		probeOK    bool
+		wantReady  bool
+		wantClass  ErrorClass
+		wantHealth bool
+	}{
+		{"unknown backend", "made-up", HealthStatus{}, false, false, ErrorClassUnavailable, false},
+		{"missing health capability", "codex", HealthStatus{}, false, false, ErrorClassUnavailable, false},
+		{"healthy unsupported backend", "echo", HealthStatus{Healthy: true, Installed: true, APIKeySet: true}, true, false, ErrorClassUnsupported, true},
+		{"unhealthy unsupported backend", "echo", HealthStatus{Installed: true, APIKeySet: true}, true, false, ErrorClassUnsupported, true},
+		{"binary missing", "codex", HealthStatus{Installed: false}, true, false, ErrorClassUnavailable, true},
+		{"healthy but binary missing", "codex", HealthStatus{Healthy: true, Installed: false, APIKeySet: true}, true, false, ErrorClassUnavailable, true},
+		{"authentication missing", "codex", HealthStatus{Installed: true, APIKeySet: false}, true, false, ErrorClassAuthMissing, true},
+		{"installed authenticated unhealthy", "gemini", HealthStatus{Installed: true, APIKeySet: true}, true, false, ErrorClassUnhealthy, true},
+		{"healthy", "claude", HealthStatus{Healthy: true, Installed: true, APIKeySet: true}, true, true, "", true},
+		{"healthy without API key signal", "opencode", HealthStatus{Healthy: true, Installed: true, APIKeySet: false}, true, true, "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := checkLocalTaskRunner(context.Background(), nil, Request{BackendOverride: tc.backend}, func(string) (HealthStatus, bool) {
+				return tc.status, tc.probeOK
+			})
+			if err != nil {
+				t.Fatalf("CheckLocalTaskRunner() error = %v", err)
+			}
+			if result.Ready != tc.wantReady || result.ErrorClass != tc.wantClass {
+				t.Fatalf("verdict = ready:%v class:%q, want ready:%v class:%q", result.Ready, result.ErrorClass, tc.wantReady, tc.wantClass)
+			}
+			if (result.Health != nil) != tc.wantHealth {
+				t.Fatalf("health = %#v, want present %v", result.Health, tc.wantHealth)
+			}
+			if tc.wantReady && (len(result.Remediation) != 0 || result.ErrorClass != "") {
+				t.Fatalf("ready result = %+v, want no class or remediation", result)
+			}
+			if !tc.wantReady && (result.Message == "" || len(result.Remediation) == 0) {
+				t.Fatalf("not-ready result = %+v, want message and remediation", result)
+			}
+		})
+	}
+}
+
+func TestStepOneGateParityCanonicalCheck(t *testing.T) {
+	fixture := loadGateParityFixture(t, "testdata/gate-parity.json")
+	result, err := checkLocalTaskRunner(
+		context.Background(),
+		targetStoreStub{profile: &domain.DaemonProfile{AgentBackend: fixture.Backend}},
+		Request{WorkspaceKey: fixture.Workspace},
+		func(string) (HealthStatus, bool) { return fixture.Health, true },
+	)
+	if err != nil {
+		t.Fatalf("CheckLocalTaskRunner() error = %v", err)
+	}
+	assertGateParityResult(t, result, fixture)
+}
+
+type gateParityFixture struct {
+	Workspace  string       `json:"workspace"`
+	Backend    string       `json:"backend"`
+	Health     HealthStatus `json:"health"`
+	ErrorClass ErrorClass   `json:"error_class"`
+	Message    string       `json:"message"`
+}
+
+func loadGateParityFixture(t *testing.T, path string) gateParityFixture {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read gate parity fixture: %v", err)
+	}
+	var fixture gateParityFixture
+	if err := json.Unmarshal(data, &fixture); err != nil {
+		t.Fatalf("decode gate parity fixture: %v", err)
+	}
+	return fixture
+}
+
+func assertGateParityResult(t *testing.T, result Result, fixture gateParityFixture) {
+	t.Helper()
+	if result.ErrorClass != fixture.ErrorClass || result.Message != fixture.Message {
+		t.Fatalf("verdict = class:%q message:%q, want class:%q message:%q", result.ErrorClass, result.Message, fixture.ErrorClass, fixture.Message)
+	}
+}
+
+func TestCheckLocalTaskRunnerResolutionFailures(t *testing.T) {
+	storeFailure := errors.New("fleet unavailable")
+	cases := []struct {
+		name        string
+		store       targetStore
+		request     Request
+		wantMessage string
+	}{
+		{"agent not found", targetStoreStub{}, Request{WorkspaceKey: "ACME", AgentName: "missing", AgentRequired: true}, `agent "missing" was not found in workspace "ACME"`},
+		{"agent read failure", targetStoreStub{agentErr: storeFailure}, Request{WorkspaceKey: "ACME", AgentName: "worker-a", AgentRequired: true}, `backend configuration for agent "worker-a" in workspace "ACME" could not be read`},
+		{"daemon profile read failure", targetStoreStub{daemonErr: storeFailure}, Request{WorkspaceKey: "ACME"}, `backend configuration for workspace "ACME" could not be read`},
+		{"agent missing workspace", nil, Request{AgentName: "worker-a", AgentRequired: true, BackendOverride: "codex"}, `agent "worker-a" requires an active workspace`},
+		{"workspace missing", nil, Request{}, `an active workspace is required when no backend override is provided`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			result, err := checkLocalTaskRunner(context.Background(), tc.store, tc.request, func(string) (HealthStatus, bool) {
+				called = true
+				return healthyProbe("")
+			})
+			if err == nil {
+				t.Fatal("CheckLocalTaskRunner() error = nil, want operational failure")
+			}
+			if called {
+				t.Fatal("health probe ran after resolution failure")
+			}
+			if result.ErrorClass != ErrorClassResolutionFailed || result.Message != tc.wantMessage {
+				t.Fatalf("result = %+v, want resolution failure message %q", result, tc.wantMessage)
+			}
+			if result.Backend != "" || result.BackendSource != "" || result.Health != nil {
+				t.Fatalf("result = %+v, want unresolved backend and nil health", result)
+			}
+		})
+	}
+}
+
+func TestCheckLocalTaskRunnerContextCanceledBeforeProbe(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	called := false
+	result, err := checkLocalTaskRunner(ctx, nil, Request{BackendOverride: "codex"}, func(string) (HealthStatus, bool) {
+		called = true
+		return healthyProbe("")
 	})
-	defer restore()
-
-	if err := PreflightLocalTaskRunner(context.Background(), getterWithBackend(""), "TEST"); err != nil {
-		t.Fatalf("healthy backend should pass preflight, got %v", err)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("CheckLocalTaskRunner() error = %v, want context.Canceled", err)
+	}
+	if called {
+		t.Fatal("health probe ran with canceled context")
+	}
+	if result.ErrorClass != ErrorClassResolutionFailed || result.Health != nil {
+		t.Fatalf("result = %+v, want operational resolution failure with nil health", result)
+	}
+	if result.Backend != "codex" || result.BackendSource != BackendSourceOverride {
+		t.Fatalf("result = %+v, want resolved override retained", result)
 	}
 }
 
-func TestPreflightLocalTaskRunnerBinaryMissing(t *testing.T) {
-	restore := SetHealthCheckerForTest(func(string) (backends.HealthStatus, bool) {
-		return backends.HealthStatus{Installed: false, APIKeySet: false, Message: "codex binary not found on PATH"}, true
+func TestCheckLocalTaskRunnerKeepsAdapterDetailOutOfAuthoredFields(t *testing.T) {
+	const adapterDetail = "Authorization: Bearer secret-value"
+	result, err := checkLocalTaskRunner(context.Background(), nil, Request{BackendOverride: "codex"}, func(string) (HealthStatus, bool) {
+		return HealthStatus{Installed: true, APIKeySet: true, Message: adapterDetail}, true
 	})
-	defer restore()
-
-	err := PreflightLocalTaskRunner(context.Background(), getterWithBackend("codex"), "TEST")
-	if err == nil {
-		t.Fatal("missing binary must fail preflight (fail-closed)")
+	if err != nil {
+		t.Fatalf("CheckLocalTaskRunner() error = %v", err)
 	}
-	if !strings.Contains(err.Error(), "local_backend_unavailable") {
-		t.Fatalf("error = %v, want local_backend_unavailable", err)
+	if result.Health == nil || result.Health.Message != adapterDetail {
+		t.Fatalf("health = %#v, want capped passthrough detail", result.Health)
 	}
-	if !strings.Contains(err.Error(), "codex") {
-		t.Fatalf("error = %v, want to name the backend (codex)", err)
+	if strings.Contains(result.Message, "secret-value") || strings.Contains(strings.Join(result.Remediation, " "), "secret-value") {
+		t.Fatalf("Loom-authored fields leaked adapter detail: %+v", result)
 	}
 }
 
-func TestPreflightLocalTaskRunnerAuthMissing(t *testing.T) {
-	restore := SetHealthCheckerForTest(func(string) (backends.HealthStatus, bool) {
-		return backends.HealthStatus{Installed: true, APIKeySet: false, Message: "OPENAI_API_KEY not set"}, true
+func TestRequireLocalTaskRunnerReturnsTypedVerdict(t *testing.T) {
+	restore := SetHealthCheckerForTest(func(string) (HealthStatus, bool) {
+		return HealthStatus{Installed: false, Message: "binary missing"}, true
 	})
-	defer restore()
-
-	err := PreflightLocalTaskRunner(context.Background(), getterWithBackend("codex"), "TEST")
-	if err == nil {
-		t.Fatal("missing auth must fail preflight (fail-closed)")
+	t.Cleanup(restore)
+	err := RequireLocalTaskRunner(context.Background(), nil, Request{BackendOverride: "codex"})
+	var notReady *NotReadyError
+	if !errors.As(err, &notReady) {
+		t.Fatalf("RequireLocalTaskRunner() error = %T %v, want *NotReadyError", err, err)
 	}
-	if !strings.Contains(err.Error(), "local_backend_auth_missing") {
-		t.Fatalf("error = %v, want local_backend_auth_missing", err)
+	if notReady.PreflightClass() != string(ErrorClassUnavailable) || notReady.Result.ErrorClass != ErrorClassUnavailable {
+		t.Fatalf("typed error = %+v, want unavailable result", notReady)
+	}
+	want := "backend codex CLI is not installed (local_backend_unavailable); next: install the codex CLI"
+	if err.Error() != want {
+		t.Fatalf("NotReadyError.Error() = %q, want %q", err, want)
 	}
 }
 
-func TestPreflightLocalTaskRunnerUnknownBackend(t *testing.T) {
-	restore := SetHealthCheckerForTest(func(string) (backends.HealthStatus, bool) {
-		// Unregistered / no health-check support => (zero, false).
-		return backends.HealthStatus{}, false
-	})
-	defer restore()
-
-	err := PreflightLocalTaskRunner(context.Background(), getterWithBackend("made-up"), "TEST")
-	if err == nil {
-		t.Fatal("unknown backend must fail closed")
+func TestRequireLocalTaskRunnerReturnsOperationalErrorUnchanged(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := RequireLocalTaskRunner(ctx, nil, Request{BackendOverride: "codex"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("RequireLocalTaskRunner() error = %v, want context.Canceled", err)
 	}
-	if !strings.Contains(err.Error(), "made-up") {
-		t.Fatalf("error = %v, want to name the unknown backend", err)
+	var notReady *NotReadyError
+	if errors.As(err, &notReady) {
+		t.Fatalf("operational error was converted to NotReadyError: %+v", notReady)
 	}
 }
 
-func TestPreflightResolvesConfiguredBackend(t *testing.T) {
-	var checked string
-	restore := SetHealthCheckerForTest(func(name string) (backends.HealthStatus, bool) {
-		checked = name
-		return backends.HealthStatus{Healthy: true, Installed: true, APIKeySet: true}, true
-	})
-	defer restore()
-
-	if err := PreflightLocalTaskRunner(context.Background(), getterWithBackend("gemini"), "TEST"); err != nil {
-		t.Fatalf("preflight error: %v", err)
+func TestResultJSONOmissionRules(t *testing.T) {
+	cases := []struct {
+		name    string
+		result  Result
+		present []string
+		absent  []string
+	}{
+		{
+			name:    "ready",
+			result:  Result{Backend: "codex", BackendSource: BackendSourceDefault, Ready: true, Health: &HealthStatus{}, Message: "ready"},
+			present: []string{"backend", "backend_source", "ready", "health", "message"},
+			absent:  []string{"error_class", "remediation"},
+		},
+		{
+			name:    "resolution failed before selection",
+			result:  Result{ErrorClass: ErrorClassResolutionFailed, Message: "failed", Remediation: []string{"retry"}},
+			present: []string{"ready", "error_class", "message", "remediation"},
+			absent:  []string{"backend", "backend_source", "health"},
+		},
 	}
-	if checked != "gemini" {
-		t.Fatalf("health-checked backend = %q, want configured gemini", checked)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data, err := json.Marshal(tc.result)
+			if err != nil {
+				t.Fatalf("marshal Result: %v", err)
+			}
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(data, &fields); err != nil {
+				t.Fatalf("unmarshal Result: %v", err)
+			}
+			for _, name := range tc.present {
+				if _, ok := fields[name]; !ok {
+					t.Errorf("field %q absent from %s", name, data)
+				}
+			}
+			for _, name := range tc.absent {
+				if _, ok := fields[name]; ok {
+					t.Errorf("field %q present in %s", name, data)
+				}
+			}
+		})
+	}
+}
+
+func TestBoundedHealthStatus(t *testing.T) {
+	status := boundedHealthStatus(HealthStatus{Version: strings.Repeat("v", 5000), Message: strings.Repeat("m", 5000)})
+	if len([]rune(status.Version)) != 4096 || len([]rune(status.Message)) != 4096 {
+		t.Fatalf("bounded lengths = (%d, %d), want (4096, 4096)", len([]rune(status.Version)), len([]rune(status.Message)))
+	}
+	if !strings.HasSuffix(status.Version, "…") {
+		t.Fatalf("bounded version does not end in ellipsis: %q", status.Version[len(status.Version)-8:])
 	}
 }

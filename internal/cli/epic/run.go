@@ -21,6 +21,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/localbackend"
 	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
@@ -100,7 +101,7 @@ func init() {
 // gated identically; daytona/other explicit runners are not.
 func runnerNeedsLocalPreflight(runner string) bool {
 	r := strings.TrimSpace(runner)
-	return r == "" || r == runtimepreflight.LocalTaskRunnerEntrypoint
+	return r == "" || r == localbackend.LocalTaskRunnerEntrypoint
 }
 
 //nolint:funlen // The command wires validation, queueing, optional projection, execution, and post-drain publish.
@@ -130,10 +131,8 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 	// runner resolves to the local-task-runner downstream (epic-runner.ts
 	// defaults it, matching the webui's runnerIsLocal), so it must be
 	// preflighted identically.
-	if runnerNeedsLocalPreflight(runRunner) {
-		if err := runtimepreflight.PreflightLocalTaskRunner(ctx, handle.Store, ws); err != nil {
-			return err
-		}
+	if err := preflightEpicRun(ctx, handle.Store, ws, runRunner); err != nil {
+		return err
 	}
 
 	workflowName := epicRunWorkflow()
@@ -189,6 +188,13 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 		}
 	}
 	return nil
+}
+
+func preflightEpicRun(ctx context.Context, st store.Store, workspace, runner string) error {
+	if !runnerNeedsLocalPreflight(runner) {
+		return nil
+	}
+	return runtimepreflight.RequireLocalTaskRunner(ctx, st, runtimepreflight.Request{WorkspaceKey: workspace})
 }
 
 func queueEpicWorkflowRun(ctx context.Context, st store.Store, ws, workflowName, runID string, payload json.RawMessage) (*domain.DriverRun, error) {

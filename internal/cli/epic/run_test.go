@@ -2,11 +2,15 @@ package epic
 
 import (
 	"context"
-	"strings"
+	"encoding/json"
+	"errors"
+	"os"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/localbackend"
 	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -21,7 +25,7 @@ func TestRunnerNeedsLocalPreflight(t *testing.T) {
 		runner string
 		want   bool
 	}{
-		{"explicit local", runtimepreflight.LocalTaskRunnerEntrypoint, true},
+		{"explicit local", localbackend.LocalTaskRunnerEntrypoint, true},
 		{"empty resolves to local", "", true},
 		{"whitespace resolves to local", "   ", true},
 		{"local with surrounding space", "  local-task-runner  ", true},
@@ -37,13 +41,15 @@ func TestRunnerNeedsLocalPreflight(t *testing.T) {
 	}
 }
 
-// daemonGetterStub satisfies the surface PreflightLocalTaskRunner needs so the
+// daemonGetterStub satisfies the target-store surface preflight needs so the
 // gated branch can be exercised without a full store.
 type daemonGetterStub struct{ backend string }
 
 func (s daemonGetterStub) Daemon() store.DaemonProfileStore {
 	return daemonProfileStoreStub(s)
 }
+
+func (s daemonGetterStub) Agents() store.AgentStore { return nil }
 
 type daemonProfileStoreStub struct{ backend string }
 
@@ -64,17 +70,67 @@ func TestEmptyRunnerPreflightsFailClosed(t *testing.T) {
 	})
 	defer restore()
 
-	for _, runner := range []string{"", "   ", runtimepreflight.LocalTaskRunnerEntrypoint} {
+	for _, runner := range []string{"", "   ", localbackend.LocalTaskRunnerEntrypoint} {
 		if !runnerNeedsLocalPreflight(runner) {
 			t.Fatalf("runner %q must be gated for preflight", runner)
 		}
-		err := runtimepreflight.PreflightLocalTaskRunner(context.Background(), daemonGetterStub{}, "TEST")
+		err := runtimepreflight.RequireLocalTaskRunner(context.Background(), daemonGetterStub{}, runtimepreflight.Request{WorkspaceKey: "TEST"})
 		if err == nil {
 			t.Fatalf("runner %q: missing backend must fail closed", runner)
 		}
-		if !strings.Contains(err.Error(), "local_backend_unavailable") {
-			t.Fatalf("runner %q: error = %v, want local_backend_unavailable", runner, err)
+		var notReady *runtimepreflight.NotReadyError
+		if !errors.As(err, &notReady) || notReady.Result.ErrorClass != runtimepreflight.ErrorClassUnavailable {
+			t.Fatalf("runner %q: error = %T %v, want typed local_backend_unavailable", runner, err, err)
 		}
+	}
+}
+
+func TestStepOneGateParityEpic(t *testing.T) {
+	fixture := loadEpicGateParityFixture(t)
+	st := memstore.New()
+	if _, err := st.Daemon().Upsert(context.Background(), &domain.DaemonProfile{
+		WorkspaceKey: fixture.Workspace,
+		AgentBackend: fixture.Backend,
+	}); err != nil {
+		t.Fatalf("upsert daemon profile: %v", err)
+	}
+	restore := runtimepreflight.SetHealthCheckerForTest(func(string) (runtimepreflight.HealthStatus, bool) {
+		return fixture.Health, true
+	})
+	t.Cleanup(restore)
+	err := preflightEpicRun(context.Background(), st, fixture.Workspace, localbackend.LocalTaskRunnerEntrypoint)
+	assertEpicGateParity(t, err, fixture)
+}
+
+type epicGateParityFixture struct {
+	Workspace  string                        `json:"workspace"`
+	Backend    string                        `json:"backend"`
+	Health     runtimepreflight.HealthStatus `json:"health"`
+	ErrorClass runtimepreflight.ErrorClass   `json:"error_class"`
+	Message    string                        `json:"message"`
+}
+
+func loadEpicGateParityFixture(t *testing.T) epicGateParityFixture {
+	t.Helper()
+	data, err := os.ReadFile("../../runtimepreflight/testdata/gate-parity.json")
+	if err != nil {
+		t.Fatalf("read gate parity fixture: %v", err)
+	}
+	var fixture epicGateParityFixture
+	if err := json.Unmarshal(data, &fixture); err != nil {
+		t.Fatalf("decode gate parity fixture: %v", err)
+	}
+	return fixture
+}
+
+func assertEpicGateParity(t *testing.T, err error, fixture epicGateParityFixture) {
+	t.Helper()
+	var notReady *runtimepreflight.NotReadyError
+	if !errors.As(err, &notReady) {
+		t.Fatalf("epic gate error = %T %v, want *NotReadyError", err, err)
+	}
+	if notReady.Result.ErrorClass != fixture.ErrorClass || notReady.Result.Message != fixture.Message {
+		t.Fatalf("epic gate = class:%q message:%q, want class:%q message:%q", notReady.Result.ErrorClass, notReady.Result.Message, fixture.ErrorClass, fixture.Message)
 	}
 }
 

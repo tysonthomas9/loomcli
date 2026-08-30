@@ -1,123 +1,260 @@
-// Package runtimepreflight holds fail-closed checks that run BEFORE a runner
-// is queued. Today it guards the local task runner: the real local runner
-// shells out to the user-selected backend CLI (claude/codex/opencode/gemini/
-// cursor), so if that binary or its auth is missing the run would fake-complete
-// or fail deep in the worker. Preflight resolves the effective backend and
-// runs that backend's HealthCheck up front so `loom epic run` and the UI
-// epic-start path fail with a clear, actionable message instead.
-//
-// The package is deliberately neutral (no CLI/webui imports) so both the CLI
-// (internal/cli/epic) and the webui handler (internal/webui/handlers/workflows)
-// can depend on it without an import cycle.
+// Package runtimepreflight evaluates whether a resolved AI backend can run
+// the bundled local task runner.
 package runtimepreflight
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/localbackend"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-// LocalTaskRunnerEntrypoint is the runner name that routes to the bundled
-// local task runner (which execs the backend CLI). Preflight only fires for
-// this runner; daytona/openshell/other explicit runners are not gated here.
-const LocalTaskRunnerEntrypoint = "local-task-runner"
+// Request identifies the local task runner target to evaluate.
+type Request struct {
+	WorkspaceKey    string
+	AgentName       string
+	AgentRequired   bool
+	BackendOverride string
+}
 
-// DefaultBackend mirrors the workspace default backend (Settings "Project
-// Default Backend") used when no DaemonProfile.AgentBackend is set.
-const DefaultBackend = backendnames.Codex
+// BackendSource records which precedence level selected the backend.
+type BackendSource string
 
-// HealthStatus describes backend readiness for local-runner preflight tests
-// without making webui packages import the CLI backend package directly.
+const (
+	BackendSourceOverride  BackendSource = "override"
+	BackendSourceAgent     BackendSource = "agent"
+	BackendSourceWorkspace BackendSource = "workspace"
+	BackendSourceDefault   BackendSource = "default"
+)
+
+// ErrorClass is a stable local task runner readiness failure class.
+type ErrorClass string
+
+const (
+	ErrorClassUnavailable      ErrorClass = "local_backend_unavailable"
+	ErrorClassUnsupported      ErrorClass = "local_backend_unsupported"
+	ErrorClassAuthMissing      ErrorClass = "local_backend_auth_missing"
+	ErrorClassUnhealthy        ErrorClass = "local_backend_unhealthy"
+	ErrorClassResolutionFailed ErrorClass = "local_backend_resolution_failed"
+)
+
+// HealthStatus is the raw backend-adapter health projection.
 type HealthStatus = backends.HealthStatus
 
-// healthChecker reports a backend's installation/auth status by name. It is a
-// package var so tests can stub the backend registry without registering real
-// backends. Defaults to backends.CheckBackendHealth, which reads the global
-// backend registry populated by internal/cli/backends init().
-var healthChecker = backends.CheckBackendHealth
+// Result is the canonical local task runner readiness verdict.
+type Result struct {
+	Backend       string        `json:"backend,omitempty"`
+	BackendSource BackendSource `json:"backend_source,omitempty"`
+	Ready         bool          `json:"ready"`
+	Health        *HealthStatus `json:"health,omitempty"`
+	ErrorClass    ErrorClass    `json:"error_class,omitempty"`
+	Message       string        `json:"message"`
+	Remediation   []string      `json:"remediation,omitempty"`
+}
 
-// daemonGetter is the minimal store surface preflight needs: the per-workspace
-// daemon profile carrying AgentBackend. Implemented by store.Store via
-// store.DaemonProfileStore.
-type daemonGetter interface {
+// NotReadyError is the automatic-gate projection of a completed not-ready
+// verdict. Result remains available to callers that need structured output.
+type NotReadyError struct {
+	Result Result
+}
+
+func (e *NotReadyError) Error() string {
+	if e == nil {
+		return "local task runner is not ready"
+	}
+	message := e.Result.Message
+	if e.Result.ErrorClass != "" {
+		message += fmt.Sprintf(" (%s)", e.Result.ErrorClass)
+	}
+	if len(e.Result.Remediation) > 0 {
+		message += "; next: " + e.Result.Remediation[0]
+	}
+	return message
+}
+
+// PreflightClass exposes the canonical class without requiring callers to
+// import this package's concrete error type.
+func (e *NotReadyError) PreflightClass() string {
+	if e == nil {
+		return ""
+	}
+	return string(e.Result.ErrorClass)
+}
+
+type targetStore interface {
+	Agents() store.AgentStore
 	Daemon() store.DaemonProfileStore
 }
 
-// ResolveLocalBackend returns the effective backend for the local task runner
-// in workspace ws, mirroring service.GetWorkspaceBackend precedence: the
-// DaemonProfile.AgentBackend when set, else the default (codex). A per-agent
-// override is not known at epic-run/queue time (no specific agent is bound
-// yet), so the workspace default is authoritative here.
-func ResolveLocalBackend(ctx context.Context, st daemonGetter, ws string) string {
-	if st == nil {
-		return DefaultBackend
-	}
-	profile, err := st.Daemon().Get(ctx, ws)
-	if err != nil || profile == nil {
-		return DefaultBackend
-	}
-	if backend := strings.TrimSpace(profile.AgentBackend); backend != "" {
-		return backend
-	}
-	return DefaultBackend
+type healthProbe func(name string) (HealthStatus, bool)
+
+var (
+	healthCheckerMu sync.RWMutex
+	healthChecker   healthProbe = backends.CheckBackendHealth
+)
+
+// CheckLocalTaskRunner resolves a target and returns the most complete safe
+// verdict available. Its error is non-nil only when evaluation did not finish.
+func CheckLocalTaskRunner(ctx context.Context, st targetStore, req Request) (Result, error) {
+	healthCheckerMu.RLock()
+	probe := healthChecker
+	healthCheckerMu.RUnlock()
+	return checkLocalTaskRunner(ctx, st, req, probe)
 }
 
-// PreflightLocalTaskRunner resolves the effective backend for workspace ws and
-// runs that backend's HealthCheck. It returns a clear, actionable error if the
-// local runner cannot execute (backend binary not on PATH, or provider auth
-// missing); nil when the backend is healthy.
-//
-// This is fail-closed by design: a missing binary or missing auth must stop the
-// run from being queued rather than letting it surface as a fake completion or
-// an opaque deep failure.
-func PreflightLocalTaskRunner(ctx context.Context, st daemonGetter, ws string) error {
-	backend := ResolveLocalBackend(ctx, st, ws)
-
-	status, ok := healthChecker(backend)
+func checkLocalTaskRunner(ctx context.Context, st targetStore, req Request, probe healthProbe) (Result, error) {
+	backend, source, err := localbackend.Resolve(
+		ctx,
+		st,
+		req.WorkspaceKey,
+		req.AgentName,
+		req.AgentRequired,
+		req.BackendOverride,
+	)
+	result := Result{Backend: backend, BackendSource: BackendSource(source)}
+	if err != nil {
+		return resolutionFailure(result, req, err), err
+	}
+	if err := ctx.Err(); err != nil {
+		return evaluationFailure(result, backend), err
+	}
+	status, ok := probe(backend)
+	if err := ctx.Err(); err != nil {
+		return evaluationFailure(result, backend), err
+	}
 	if !ok {
-		// Unknown/unregistered backend, or one without a HealthCheck. Fail
-		// closed: we cannot prove the local runner can execute.
-		return fmt.Errorf("local task runner backend %q is not available for health checks; "+
-			"set a supported Project Default Backend (claude, codex, opencode, gemini, cursor)", backend)
+		result.ErrorClass = ErrorClassUnavailable
+		result.Message = fmt.Sprintf("backend %s is not available for health checks", backend)
+		result.Remediation = []string{chooseSupportedBackendRemediation()}
+		return result, nil
 	}
-	if status.Healthy {
-		return nil
+	status = boundedHealthStatus(status)
+	result.Health = &status
+	return classifyLocalTaskRunner(result, status), nil
+}
+
+func classifyLocalTaskRunner(result Result, status HealthStatus) Result {
+	backend := result.Backend
+	if !backendnames.IsLocalTaskRunnerBackend(backend) {
+		result.ErrorClass = ErrorClassUnsupported
+		result.Message = fmt.Sprintf("backend %s is not supported by the local task runner", backend)
+		result.Remediation = []string{chooseSupportedBackendRemediation()}
+		return result
+	}
+	if status.Installed && status.Healthy {
+		result.Ready = true
+		result.Message = fmt.Sprintf("backend %s is ready for the local task runner", backend)
+		return result
 	}
 
-	// Distinguish the two fail classes for a precise message; the error-class
-	// registry (§4.5) names these local_backend_unavailable / _auth_missing.
 	switch {
 	case !status.Installed:
-		return fmt.Errorf("local task runner cannot start: backend %q CLI is not installed (%s); "+
-			"install it or switch the Project Default Backend (local_backend_unavailable)",
-			backend, healthMessage(status))
+		result.ErrorClass = ErrorClassUnavailable
+		result.Message = fmt.Sprintf("backend %s CLI is not installed", backend)
+		result.Remediation = []string{
+			fmt.Sprintf("install the %s CLI", backend),
+			chooseSupportedBackendRemediation(),
+		}
 	case !status.APIKeySet:
-		return fmt.Errorf("local task runner cannot start: backend %q is missing auth (%s); "+
-			"set the provider credentials or switch the Project Default Backend (local_backend_auth_missing)",
-			backend, healthMessage(status))
+		result.ErrorClass = ErrorClassAuthMissing
+		result.Message = fmt.Sprintf("backend %s is installed but not authenticated", backend)
+		result.Remediation = []string{
+			fmt.Sprintf("authenticate the %s CLI or configure credentials", backend),
+			"retry the preflight check",
+		}
 	default:
-		return fmt.Errorf("local task runner cannot start: backend %q is not ready (%s)",
-			backend, healthMessage(status))
+		result.ErrorClass = ErrorClassUnhealthy
+		result.Message = fmt.Sprintf("backend %s is installed and authenticated but not healthy", backend)
+		result.Remediation = []string{
+			fmt.Sprintf("run loom backend info %s", backend),
+			"repair the backend and retry",
+		}
 	}
+	return result
+}
+
+// RequireLocalTaskRunner returns operational failures unchanged and converts
+// only a completed not-ready verdict into NotReadyError.
+func RequireLocalTaskRunner(ctx context.Context, st targetStore, req Request) error {
+	result, err := CheckLocalTaskRunner(ctx, st, req)
+	if err != nil {
+		return err
+	}
+	if result.Ready {
+		return nil
+	}
+	return &NotReadyError{Result: result}
 }
 
 // SetHealthCheckerForTest overrides the backend health checker and returns a
-// restore function. Intended for tests that must exercise preflight without a
-// real backend CLI/auth on the host (or that depend on local runs queuing
-// without gating on the host's backend state).
+// restore function. External suites use it to avoid depending on host CLIs.
 func SetHealthCheckerForTest(fn func(name string) (HealthStatus, bool)) (restore func()) {
-	prev := healthChecker
+	healthCheckerMu.Lock()
+	previous := healthChecker
 	healthChecker = fn
-	return func() { healthChecker = prev }
+	healthCheckerMu.Unlock()
+	return func() {
+		healthCheckerMu.Lock()
+		healthChecker = previous
+		healthCheckerMu.Unlock()
+	}
 }
 
-func healthMessage(status HealthStatus) string {
-	if msg := strings.TrimSpace(status.Message); msg != "" {
-		return msg
+func resolutionFailure(result Result, req Request, err error) Result {
+	result.ErrorClass = ErrorClassResolutionFailed
+	agentName := strings.TrimSpace(req.AgentName)
+	workspaceKey := strings.TrimSpace(req.WorkspaceKey)
+	switch {
+	case agentName != "" && errors.Is(err, domain.ErrNotFound):
+		result.Message = fmt.Sprintf("agent %q was not found in workspace %q", agentName, workspaceKey)
+		result.Remediation = []string{"verify the agent name and workspace, then retry"}
+	case agentName != "" && workspaceKey == "":
+		result.Message = fmt.Sprintf("agent %q requires an active workspace", agentName)
+		result.Remediation = []string{"select a workspace and retry"}
+	case agentName != "":
+		result.Message = fmt.Sprintf("backend configuration for agent %q in workspace %q could not be read", agentName, workspaceKey)
+		result.Remediation = []string{"repair workspace connectivity or configuration and retry"}
+	case workspaceKey != "":
+		result.Message = fmt.Sprintf("backend configuration for workspace %q could not be read", workspaceKey)
+		result.Remediation = []string{"repair workspace connectivity or configuration and retry"}
+	default:
+		result.Message = "an active workspace is required when no backend override is provided"
+		result.Remediation = []string{"select a workspace or pass --ai-backend"}
 	}
-	return "no detail reported"
+	return result
+}
+
+func evaluationFailure(result Result, backend string) Result {
+	result.ErrorClass = ErrorClassResolutionFailed
+	result.Message = fmt.Sprintf("health evaluation for backend %s could not be completed", backend)
+	result.Remediation = []string{"retry the preflight check"}
+	return result
+}
+
+func chooseSupportedBackendRemediation() string {
+	return "choose a runner-supported backend: " + strings.Join(backendnames.LocalTaskRunnerBackends(), ", ")
+}
+
+// Adapter-authored strings remain passthrough, matching loom backend health,
+// but are capped so an external adapter cannot make reports unbounded.
+func boundedHealthStatus(status HealthStatus) HealthStatus {
+	status.Version = boundedHealthText(status.Version)
+	status.Message = boundedHealthText(status.Message)
+	return status
+}
+
+func boundedHealthText(value string) string {
+	const maxRunes = 4096
+	runes := []rune(value)
+	if len(runes) <= maxRunes {
+		return value
+	}
+	return string(runes[:maxRunes-1]) + "…"
 }

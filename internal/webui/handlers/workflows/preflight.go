@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/localbackend"
 	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
@@ -27,7 +28,7 @@ func (m *Module) preflightRunnerForRun(ctx context.Context, ws, workflowName str
 	if !runnerIsLocal(payload) {
 		return nil
 	}
-	return runtimepreflight.PreflightLocalTaskRunner(ctx, m.store, ws)
+	return runtimepreflight.RequireLocalTaskRunner(ctx, m.store, runtimepreflight.Request{WorkspaceKey: ws})
 }
 
 // runnerIsLocal reports whether the run payload resolves to the local task
@@ -35,7 +36,7 @@ func (m *Module) preflightRunnerForRun(ctx context.Context, ws, workflowName str
 // resolves to "local-task-runner".
 func runnerIsLocal(payload json.RawMessage) bool {
 	runner := strings.TrimSpace(payloadRunner(payload))
-	return runner == "" || runner == runtimepreflight.LocalTaskRunnerEntrypoint
+	return runner == "" || runner == localbackend.LocalTaskRunnerEntrypoint
 }
 
 // payloadRunner extracts the top-level "runner" string from the run payload,

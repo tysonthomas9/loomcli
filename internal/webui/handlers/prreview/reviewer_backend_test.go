@@ -49,6 +49,25 @@ type backendTestEnv struct {
 	term   *fakeTerminalService
 }
 
+type failingDaemonTargetStore struct {
+	store.Store
+	err error
+}
+
+func (s failingDaemonTargetStore) Daemon() store.DaemonProfileStore {
+	return failingDaemonProfileStore{err: s.err}
+}
+
+type failingDaemonProfileStore struct{ err error }
+
+func (s failingDaemonProfileStore) Get(context.Context, string) (*domain.DaemonProfile, error) {
+	return nil, s.err
+}
+
+func (s failingDaemonProfileStore) Upsert(context.Context, *domain.DaemonProfile) (*domain.DaemonProfile, error) {
+	return nil, errors.New("unexpected daemon profile upsert")
+}
+
 func newBackendTestEnv(t *testing.T, workspaceBackend string) *backendTestEnv {
 	t.Helper()
 	st := memstore.New()
@@ -149,6 +168,24 @@ func TestEnsureReviewerAgentDefaultsToCodex(t *testing.T) {
 		if got := env.agentBackend(t, "review-hello-pr-7"); got != "codex" {
 			t.Fatalf("workspace backend %q: agent backend = %q, want codex", workspaceBackend, got)
 		}
+	}
+}
+
+func TestEnsureReviewerAgentFailsClosedOnBackendResolutionError(t *testing.T) {
+	env := newBackendTestEnv(t, "")
+	storeFailure := errors.New("fleet unavailable")
+	failingStore := failingDaemonTargetStore{Store: env.store, err: storeFailure}
+	env.module.store = failingStore
+
+	err := env.module.ensureReviewerAgent(context.Background(), prReviewTestWorkspace, "review-hello-pr-7", "hello")
+	if !errors.Is(err, storeFailure) {
+		t.Fatalf("ensureReviewerAgent() error = %v, want backend resolution failure", err)
+	}
+	if _, getErr := env.store.Agents().Get(context.Background(), prReviewTestWorkspace, "review-hello-pr-7"); !errors.Is(getErr, domain.ErrNotFound) {
+		t.Fatalf("reviewer agent lookup error = %v, want ErrNotFound", getErr)
+	}
+	if _, getErr := env.store.Roles().Get(context.Background(), prReviewTestWorkspace, reviewerRoleName); !errors.Is(getErr, domain.ErrNotFound) {
+		t.Fatalf("reviewer role lookup error = %v, want ErrNotFound", getErr)
 	}
 }
 

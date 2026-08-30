@@ -268,8 +268,9 @@ func TestWorkflowRunLocalRunnerPreflightFailureDoesNotCreateRun(t *testing.T) {
 	_, err := captureWorkflowStdout(t, func() error {
 		return runWorkflowRun(&cobra.Command{}, []string{workflows.BuiltinEpicRunnerWorkflowName})
 	})
-	if err == nil || !strings.Contains(err.Error(), "local_backend_unavailable") {
-		t.Fatalf("runWorkflowRun err = %v, want local backend preflight failure", err)
+	var notReady *runtimepreflight.NotReadyError
+	if !errors.As(err, &notReady) || notReady.Result.ErrorClass != runtimepreflight.ErrorClassUnavailable {
+		t.Fatalf("runWorkflowRun err = %T %v, want typed local backend preflight failure", err, err)
 	}
 	runs, listErr := st.DriverRuns().List(ctx, "TEST", store.DriverRunFilter{})
 	if listErr != nil {
@@ -277,6 +278,55 @@ func TestWorkflowRunLocalRunnerPreflightFailureDoesNotCreateRun(t *testing.T) {
 	}
 	if len(runs) != 0 {
 		t.Fatalf("runs = %+v, want no persisted run after preflight failure", runs)
+	}
+}
+
+func TestStepOneGateParityWorkflow(t *testing.T) {
+	fixture := loadWorkflowGateParityFixture(t)
+	_, st := setupWorkflowCommandStore(t)
+	if _, err := st.Daemon().Upsert(context.Background(), &domain.DaemonProfile{
+		WorkspaceKey: fixture.Workspace,
+		AgentBackend: fixture.Backend,
+	}); err != nil {
+		t.Fatalf("upsert daemon profile: %v", err)
+	}
+	restore := runtimepreflight.SetHealthCheckerForTest(func(string) (runtimepreflight.HealthStatus, bool) {
+		return fixture.Health, true
+	})
+	t.Cleanup(restore)
+	err := preflightWorkflowRun(context.Background(), st, fixture.Workspace, workflows.BuiltinEpicRunnerWorkflowName, json.RawMessage(`{}`))
+	assertWorkflowGateParity(t, err, fixture)
+}
+
+type workflowGateParityFixture struct {
+	Workspace  string                        `json:"workspace"`
+	Backend    string                        `json:"backend"`
+	Health     runtimepreflight.HealthStatus `json:"health"`
+	ErrorClass runtimepreflight.ErrorClass   `json:"error_class"`
+	Message    string                        `json:"message"`
+}
+
+func loadWorkflowGateParityFixture(t *testing.T) workflowGateParityFixture {
+	t.Helper()
+	data, err := os.ReadFile("../../runtimepreflight/testdata/gate-parity.json")
+	if err != nil {
+		t.Fatalf("read gate parity fixture: %v", err)
+	}
+	var fixture workflowGateParityFixture
+	if err := json.Unmarshal(data, &fixture); err != nil {
+		t.Fatalf("decode gate parity fixture: %v", err)
+	}
+	return fixture
+}
+
+func assertWorkflowGateParity(t *testing.T, err error, fixture workflowGateParityFixture) {
+	t.Helper()
+	var notReady *runtimepreflight.NotReadyError
+	if !errors.As(err, &notReady) {
+		t.Fatalf("workflow gate error = %T %v, want *NotReadyError", err, err)
+	}
+	if notReady.Result.ErrorClass != fixture.ErrorClass || notReady.Result.Message != fixture.Message {
+		t.Fatalf("workflow gate = class:%q message:%q, want class:%q message:%q", notReady.Result.ErrorClass, notReady.Result.Message, fixture.ErrorClass, fixture.Message)
 	}
 }
 
