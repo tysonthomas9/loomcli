@@ -66,16 +66,20 @@ func RegisterActiveTraceState(span trace.Span, shutdown func(context.Context) er
 }
 
 // ExitWithFlush ends the active root span, flushes the trace provider with a
-// short timeout, and then calls os.Exit(code). Use this from CLI handlers
-// instead of os.Exit when traces should be exported even on the failure
-// path. Safe to call from any goroutine; multiple concurrent callers are
-// idempotent (the underlying provider's Shutdown is itself idempotent).
+// short timeout, flushes the agent event bus, and then calls os.Exit(code). Use
+// this from CLI handlers instead of os.Exit when traces and host-local event
+// JSONL should be exported on the failure path. Safe to call from any
+// goroutine; multiple concurrent callers are idempotent (the underlying
+// provider's and event writer's Shutdown/Close operations are idempotent).
 func ExitWithFlush(code int) {
 	if v := activeRootSpan.Load(); v != nil {
 		if span, ok := v.(trace.Span); ok && span != nil {
 			span.End()
 		}
 	}
+	// JSONLWriter is buffered, so it must be closed before os.Exit bypasses
+	// Execute's normal-return defers. CloseAgentEventBus is idempotent.
+	CloseAgentEventBus(context.Background())
 	if v := activeTraceShutdown.Load(); v != nil {
 		if fn, ok := v.(func(context.Context) error); ok && fn != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

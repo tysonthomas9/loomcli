@@ -80,17 +80,27 @@ func ClaimStillHeld(ctx context.Context, ib backend.IssueBackend, taskID, actor 
 	return detail.Status == "in_progress" && detail.Assignee == actor
 }
 
-// claimStillHeldForWorktree answers ClaimStillHeld for the task recorded on the
-// worktree's own lock, resolving the actor the same way releaseClaimOnComplete
-// does (the lock's AgentName is the identity the claim was taken under). Used
-// by the in-process worker, which — unlike the supervisor — has no handle on
-// the issue backend beyond the process default.
-func claimStillHeldForWorktree(worktreePath string) bool {
-	info, err := cli.ReadLockFile(worktreePath)
-	if err != nil || info == nil || info.TaskID == "" || info.AgentName == "" {
+// claimStillHeldForLock answers ClaimStillHeld for a worktree lock, resolving
+// the actor the same way releaseClaimOnComplete does (the lock's AgentName is
+// the identity the claim was taken under). Keeping this separate lets callers
+// that already read the lock use the same completion discriminator without a
+// second, potentially different lock read.
+func claimStillHeldForLock(info *cli.LockInfo) bool {
+	if info == nil || info.TaskID == "" || info.AgentName == "" {
 		return false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), releaseClaimTimeout)
 	defer cancel()
 	return ClaimStillHeld(ctx, cli.DefaultIssueBackend(), info.TaskID, info.AgentName)
+}
+
+// claimStillHeldForWorktree answers ClaimStillHeld for the task recorded on the
+// worktree's own lock. Used by the in-process worker, which — unlike the
+// supervisor — has no handle on the issue backend beyond the process default.
+func claimStillHeldForWorktree(worktreePath string) bool {
+	info, err := cli.ReadLockFile(worktreePath)
+	if err != nil {
+		return false
+	}
+	return claimStillHeldForLock(info)
 }
