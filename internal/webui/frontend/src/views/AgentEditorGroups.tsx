@@ -21,7 +21,7 @@ export type AgentEditorTab =
   | "diff"
   | "files";
 
-const ALL_TABS: AgentEditorTab[] = [
+export const ALL_AGENT_EDITOR_TABS: readonly AgentEditorTab[] = [
   "runs",
   "terminal",
   "info",
@@ -62,8 +62,14 @@ function normalizeGroups(groups: EditorGroup[]): EditorGroup[] {
   }));
 }
 
-function initialGroups(initialTab: AgentEditorTab): EditorGroup[] {
-  return [{ tabs: [...ALL_TABS], active: initialTab }];
+function initialGroups(
+  initialTab: AgentEditorTab,
+  availableTabs: readonly AgentEditorTab[],
+): EditorGroup[] {
+  const tabs: AgentEditorTab[] =
+    availableTabs.length > 0 ? [...availableTabs] : ["terminal"];
+  const active = tabs.includes(initialTab) ? initialTab : tabs[0]!;
+  return [{ tabs, active }];
 }
 
 /** Aether wireframe "columns" icon — split active tab into a right editor group. */
@@ -92,22 +98,25 @@ export interface AgentEditorGroupsProps {
   resetKey: string | undefined;
   renderPane: (tab: AgentEditorTab, isActive: boolean) => ReactNode;
   initialTab?: AgentEditorTab;
+  availableTabs?: readonly AgentEditorTab[];
 }
 
 export function AgentEditorGroups({
   resetKey,
   renderPane,
   initialTab = "terminal",
+  availableTabs = ALL_AGENT_EDITOR_TABS,
 }: AgentEditorGroupsProps): JSX.Element {
+  const availableTabsKey = availableTabs.join("\0");
   const [groups, setGroups] = useState<EditorGroup[]>(() =>
-    initialGroups(initialTab),
+    initialGroups(initialTab, availableTabs),
   );
   const dragRef = useRef<DragPayload | null>(null);
   const isSplit = groups.length > 1;
 
   useEffect(() => {
-    setGroups(initialGroups(initialTab));
-  }, [initialTab, resetKey]);
+    setGroups(initialGroups(initialTab, availableTabs));
+  }, [availableTabs, availableTabsKey, initialTab, resetKey]);
 
   const activate = useCallback((groupIndex: number, tab: AgentEditorTab) => {
     setGroups((prev) =>
