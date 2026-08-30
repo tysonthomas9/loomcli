@@ -103,7 +103,7 @@ function scout(overrides: Partial<AgentServiceDTO> = {}): AgentServiceDTO {
   };
 }
 
-describe("AgentSection Autonomous group", () => {
+describe("AgentSection scheduled background agents", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.services = [];
@@ -124,8 +124,8 @@ describe("AgentSection Autonomous group", () => {
 
     render(<AgentSection onAgentClick={onAgentClick} />);
 
-    expect(screen.getByTestId("agent-section-autonomous")).toHaveTextContent(
-      "Autonomous",
+    expect(screen.getByTestId("agent-section-background")).toHaveTextContent(
+      "Background",
     );
     expect(screen.getByTestId("autonomous-agent-scout")).toHaveTextContent(
       "Scout",
@@ -138,18 +138,15 @@ describe("AgentSection Autonomous group", () => {
     expect(onAgentClick).toHaveBeenCalledWith("scout");
   });
 
-  it("keeps the autonomous Add-agent entry when there are no instances", () => {
+  it("uses the single Add-agent entry when there are no instances", () => {
     render(<AgentSection onAddClick={vi.fn()} />);
 
-    expect(screen.getByTestId("agent-section-autonomous")).toHaveTextContent(
-      "Autonomous",
-    );
-    expect(
-      screen.getByRole("button", { name: "+ Add autonomous agent" }),
-    ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "+ Add agent" }),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "+ Add autonomous agent" }),
+    ).not.toBeInTheDocument();
   });
 
   it("surfaces server-computed health errors as an unknown warning state", () => {

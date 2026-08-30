@@ -213,6 +213,7 @@ describe("AgentServiceDetail", () => {
 
   it("renders the editable role prompt for a scripted role", () => {
     render(<AgentServiceDetail workspaceId="WS" service={service} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Settings" }));
     expect(screen.getByTestId("role-prompt-card")).toHaveAttribute(
       "data-role",
       "scout",
@@ -221,6 +222,7 @@ describe("AgentServiceDetail", () => {
 
   it("disables and re-enables a scripted instance through desiredState", async () => {
     render(<AgentServiceDetail workspaceId="WS" service={service} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Settings" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Disable agent" }));
     await waitFor(() => {
@@ -253,9 +255,11 @@ describe("AgentServiceDetail", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("tab", { name: "Settings" }));
+    fireEvent.click(screen.getByText("Danger zone"));
     fireEvent.click(screen.getByRole("button", { name: "Remove agent" }));
     const dialog = screen.getByRole("alertdialog", {
-      name: "Remove autonomous agent",
+      name: "Remove scheduled agent",
     });
     expect(within(dialog).getByText("scout")).toBeInTheDocument();
     expect(mocks.removeAgentService).not.toHaveBeenCalled();
@@ -279,6 +283,7 @@ describe("AgentServiceDetail", () => {
         }}
       />,
     );
+    fireEvent.click(screen.getByRole("tab", { name: "Settings" }));
     expect(screen.getByTestId("role-prompt-card")).toHaveAttribute(
       "data-role",
       "reviewer",
@@ -306,26 +311,12 @@ describe("AgentServiceDetail", () => {
       />,
     );
 
-    const record = screen
-      .getByRole("heading", { name: "Record" })
-      .closest("section");
-    const bindings = screen
-      .getByRole("heading", { name: "Bindings" })
-      .closest("section");
-    expect(record).not.toBeNull();
-    expect(bindings).not.toBeNull();
-    expect(
-      within(record as HTMLElement).getByText("Paused"),
-    ).toBeInTheDocument();
-    expect(
-      within(bindings as HTMLElement).getByText("Paused"),
-    ).toBeInTheDocument();
-    expect(
-      within(bindings as HTMLElement).queryByText(/^Next /),
-    ).not.toBeInTheDocument();
+    expect(screen.getByText("Next run").nextElementSibling).toHaveTextContent(
+      "Paused",
+    );
   });
 
-  it("expands a run with full details, stdout tail, harness disclosure, and newest-last events", async () => {
+  it("expands a run without repeating its summary and shows harness and newest-last events", async () => {
     mocks.runs = [
       completedRun({
         output: {
@@ -364,15 +355,12 @@ describe("AgentServiceDetail", () => {
     expect(panel).not.toBeNull();
     const detail = within(panel as HTMLElement);
     expect(
-      detail.getByText(
+      detail.queryByText(
         "Reviewed every candidate and recorded the final recommendation.",
       ),
-    ).toBeInTheDocument();
+    ).not.toBeInTheDocument();
     expect(detail.getByText("1m 30s")).toBeInTheDocument();
-    expect(
-      detail.getByRole("heading", { name: "Output (tail)" }),
-    ).toBeInTheDocument();
-    expect(panel?.querySelector("pre")?.textContent).toBe("line one\nline two");
+    expect(detail.queryByText("line one")).not.toBeInTheDocument();
     expect(
       detail.queryByText(/runtime\/scout\/run-1\.log/),
     ).not.toBeInTheDocument();
@@ -398,7 +386,7 @@ describe("AgentServiceDetail", () => {
     expandRun();
 
     expect(
-      screen.getByText("No output was captured for this run."),
+      await screen.findByText("No task runs were recorded."),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("heading", { name: "Output (tail)" }),
@@ -553,28 +541,19 @@ describe("AgentServiceDetail", () => {
     const rawButton = within(viewToggle).getByRole("button", { name: "Raw" });
     expect(prettyButton).toHaveAttribute("aria-pressed", "true");
     expect(rawButton).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByTestId("transcript-view")).toBeInTheDocument();
-    expect(screen.getByTestId("transcript-command")).toHaveTextContent(
-      '$ /bin/bash -lc "make gate"',
-    );
-    expect(screen.getByTestId("transcript-command")).toHaveTextContent(
-      "exit 1",
-    );
-    expect(screen.getByTestId("transcript-message")).toHaveTextContent(
-      '"recommendations": []',
-    );
-    expect(screen.getByTestId("transcript-turn-completed")).toHaveTextContent(
-      "349,798 input tokens (305,920 cached) · 3,342 output",
-    );
+    expect(screen.getByText("1 tool call")).toBeInTheDocument();
+    expect(screen.getByTestId("tool-pill")).toHaveTextContent("shell");
+    expect(screen.getByTestId("tool-pill")).toHaveTextContent("make gate");
+    expect(screen.getByText('{"recommendations":[]}')).toBeInTheDocument();
     expect(screen.queryByText("gate failed")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByTestId("transcript-output-toggle"));
-    expect(screen.getByText("gate failed")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("tool-pill"));
+    expect(screen.getByText(/gate failed/)).toBeInTheDocument();
 
     fireEvent.click(rawButton);
     expect(rawButton).toHaveAttribute("aria-pressed", "true");
     expect(prettyButton).toHaveAttribute("aria-pressed", "false");
-    expect(screen.queryByTestId("transcript-view")).not.toBeInTheDocument();
+    expect(screen.queryByText("1 tool call")).not.toBeInTheDocument();
     expect(
       (await screen.findByTestId("task-log-content-task-1")).textContent,
     ).toBe(rawLog);

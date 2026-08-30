@@ -14,7 +14,6 @@ import {
   useWorkspaceContext,
 } from "@/hooks";
 import { useToast } from "@/hooks/ui";
-import { CreateAgentServiceModal } from "@/components/CreateAgentServiceModal";
 import type { LoomAgentStatus } from "@/types";
 import {
   SK_AGENT_SECTION_ORDER,
@@ -75,7 +74,6 @@ export function AgentSection({
   const deleteAgent = useDeleteWorkspaceAgent();
   const [agentOrder, setAgentOrder] = useState<string[]>([]);
   const [contextMenu, setContextMenu] = useState<AgentMenuState | null>(null);
-  const [createAutonomousOpen, setCreateAutonomousOpen] = useState(false);
   const prsView = activeView === "prs";
   const addClick = prsView ? undefined : onAddClick;
   const { services: allAgentServices } = useAgentServices(workspaceId, {
@@ -87,7 +85,6 @@ export function AgentSection({
     () => (prsView ? [] : allAgentServices),
     [allAgentServices, prsView],
   );
-  const showAutonomousGroup = !prsView && Boolean(workspaceId);
 
   // Merge fleet agents with workspace config agents.
   // Config agents that aren't yet running appear as "configured" placeholders.
@@ -161,7 +158,8 @@ export function AgentSection({
     () => splitAgentsByRuntime(orderedAgents),
     [orderedAgents],
   );
-  const showBackgroundGroup = regular.length > 0 && background.length > 0;
+  const showBackgroundGroup =
+    agentServices.length > 0 || (regular.length > 0 && background.length > 0);
 
   const handleArchive = useCallback(
     async (name: string) => {
@@ -193,8 +191,7 @@ export function AgentSection({
   if (
     agents.length === 0 &&
     agentServices.length === 0 &&
-    !addClick &&
-    !showAutonomousGroup
+    !addClick
   )
     return <></>;
 
@@ -232,19 +229,6 @@ export function AgentSection({
               listClassName={styles.subgroupList}
               {...listProps}
             />
-          </div>
-        ) : (
-          <SortableAgentList
-            agents={background}
-            listClassName={styles.sortableList}
-            {...listProps}
-          />
-        )}
-        {showAutonomousGroup ? (
-          <div data-testid="agent-section-autonomous">
-            <div className={styles.groupHeader}>
-              <span>Autonomous</span>
-            </div>
             {agentServices.map((record) => {
               const name = record.name.trim() || record.id;
               const cadence = agentServiceCadenceLabel(record);
@@ -272,16 +256,14 @@ export function AgentSection({
                 </button>
               );
             })}
-            <button
-              type="button"
-              className={`${styles.addButton} ${styles.autonomousAddButton}`}
-              aria-label="+ Add autonomous agent"
-              onClick={() => setCreateAutonomousOpen(true)}
-            >
-              + Add autonomous agent
-            </button>
           </div>
-        ) : null}
+        ) : (
+          <SortableAgentList
+            agents={background}
+            listClassName={styles.sortableList}
+            {...listProps}
+          />
+        )}
       </div>
       {addClick && (
         <button type="button" className={styles.addButton} onClick={addClick}>
@@ -298,20 +280,6 @@ export function AgentSection({
           if (contextMenu) void handleArchive(contextMenu.name);
         }}
         onClose={closeContextMenu}
-      />
-      <CreateAgentServiceModal
-        isOpen={createAutonomousOpen}
-        workspaceId={workspaceId}
-        onClose={() => setCreateAutonomousOpen(false)}
-        onSuccess={(service) => {
-          showToast(
-            `Autonomous agent "${service.name || service.id}" created`,
-            {
-              type: "success",
-            },
-          );
-          onAgentClick?.(service.id);
-        }}
       />
     </div>
   );
