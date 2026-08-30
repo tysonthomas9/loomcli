@@ -218,12 +218,13 @@ func TestLeadSnapshotRef(t *testing.T) {
 
 func serveTestProvisionRequest(agent string) placement.ProvisionRequest {
 	return placement.ProvisionRequest{
-		WorkspaceKey: "WS",
-		AgentName:    agent,
-		SnapshotRef:  "snapshot",
-		Caps:         []string{placement.CapLeadSession},
-		Resource:     placement.ResourceSize{VCPU: 2, MemGiB: 4},
-		Backend:      "codex",
+		WorkspaceKey:    "WS",
+		AgentName:       agent,
+		SnapshotRef:     "snapshot",
+		Caps:            []string{placement.CapLeadSession},
+		Resource:        placement.ResourceSize{VCPU: 2, MemGiB: 4},
+		RuntimeProvider: domain.RuntimeProviderDaytona,
+		Backend:         "codex",
 	}
 }
 

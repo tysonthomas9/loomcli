@@ -22,14 +22,14 @@ func sandboxNameForPlacement(placementID string) string {
 // findSandboxByPlacementName performs the authoritative point read for the
 // placement's deterministic sandbox name. Absent-state results are folded into
 // ErrSandboxNotFound so callers see one "definitely not there" signal.
-func (b *Broker) findSandboxByPlacementName(ctx context.Context, placementID string) (ProviderSandbox, error) {
+func (b *Broker) findSandboxByPlacementName(ctx context.Context, prov providerHandle, placementID string) (ProviderSandbox, error) {
 	name := sandboxNameForPlacement(placementID)
 	if name == "" {
 		return ProviderSandbox{}, fmt.Errorf("placement id required: %w", domain.ErrInvalid)
 	}
 	getCtx, cancel := detachedTimeout(ctx, detachedProviderOperationTimeout)
 	defer cancel()
-	sandbox, err := b.provider.FindByName(getCtx, name)
+	sandbox, err := prov.adapter.FindByName(getCtx, name)
 	if err != nil {
 		return ProviderSandbox{}, err
 	}
@@ -45,10 +45,14 @@ func (b *Broker) findSandboxByPlacementName(ctx context.Context, placementID str
 // before deterministic naming. found=false means the provider positively
 // reported zero — a lookup failure is returned as an error, never as absence.
 func (b *Broker) reconcileProviderIdentity(ctx context.Context, node *domain.Node) (ProviderSandbox, bool, error) {
+	prov, err := b.providerForNode(node)
+	if err != nil {
+		return ProviderSandbox{}, false, err
+	}
 	if node == nil || node.Placement == nil {
 		return ProviderSandbox{}, false, fmt.Errorf("placement record required: %w", domain.ErrInvalid)
 	}
-	sandbox, err := b.findSandboxByPlacementName(ctx, node.NodeID)
+	sandbox, err := b.findSandboxByPlacementName(ctx, prov, node.NodeID)
 	if err == nil {
 		if !providerSandboxMatchesPlacement(sandbox, node.NodeID) {
 			return ProviderSandbox{}, false, fmt.Errorf(
@@ -60,7 +64,7 @@ func (b *Broker) reconcileProviderIdentity(ctx context.Context, node *domain.Nod
 	if !errors.Is(err, ErrSandboxNotFound) {
 		return ProviderSandbox{}, false, fmt.Errorf("find sandbox by name for placement %q: %w", node.NodeID, err)
 	}
-	matches, err := b.providerSandboxesForPlacement(ctx, node.NodeID)
+	matches, err := b.providerSandboxesForPlacement(ctx, prov, node.NodeID)
 	if err != nil {
 		return ProviderSandbox{}, false, err
 	}
@@ -75,11 +79,15 @@ func (b *Broker) reconcileProviderIdentity(ctx context.Context, node *domain.Nod
 // failure releases the row immediately; everything else is ambiguous and goes
 // through reconciliation.
 func (b *Broker) handleCreateFailure(ctx context.Context, node *domain.Node, created CreateResult, createErr error) (adopted bool, err error) {
+	prov, err := b.providerForNode(node)
+	if err != nil {
+		return false, err
+	}
 	sandboxID := strings.TrimSpace(created.SandboxID)
 	wrapped := fmt.Errorf("create sandbox for placement %q: %w", node.NodeID, createErr)
 	if sandboxID != "" {
 		node = b.appendAbandonedSandboxIDBestEffort(ctx, node, sandboxID)
-		if deleteErr := b.deleteSandbox(ctx, sandboxID); deleteErr != nil {
+		if deleteErr := b.deleteSandbox(ctx, prov, sandboxID); deleteErr != nil {
 			return false, fmt.Errorf("create sandbox for placement %q returned sandbox %q but failed: %v; compensating delete failed, leaked sandbox id %q: %w", node.NodeID, sandboxID, createErr, sandboxID, deleteErr)
 		}
 		return false, wrapped

@@ -25,8 +25,12 @@ const (
 	RuntimeProviderE2B        RuntimeProvider = "e2b"
 	RuntimeProviderKubernetes RuntimeProvider = "kubernetes"
 	RuntimeProviderDaytona    RuntimeProvider = "daytona"
-	RuntimeProviderCI         RuntimeProvider = "ci"
-	RuntimeProviderOther      RuntimeProvider = "other"
+	// RuntimeProviderExe is registered in the Go enum only. It is deliberately
+	// absent from the OpenAPI schema and the UI: nothing can select it until
+	// the exe vertical lands behind its capability gate.
+	RuntimeProviderExe   RuntimeProvider = "exe"
+	RuntimeProviderCI    RuntimeProvider = "ci"
+	RuntimeProviderOther RuntimeProvider = "other"
 )
 
 type NodeDrainState string

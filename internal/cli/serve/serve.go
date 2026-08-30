@@ -28,6 +28,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/usagecmd"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/leadprovision"
 	"github.com/tysonthomas9/loomcli/internal/placement"
@@ -507,8 +508,14 @@ func newServePlacementBroker(st store.Store, provider placement.Provider, tokenK
 		slog.Warn("LOOM_LEAD_BOOTSTRAP enabled but LOOM_LEAD_API_BASE_URL unset; leads will boot the snapshot-baked binary")
 	}
 	return placement.NewBroker(placement.Config{
-		Store:                st,
-		Provider:             provider,
+		Store: st,
+		// Daytona is the only registered provider. Adding a second one is a
+		// registry entry plus its credential wiring -- nothing in the broker
+		// changes, because routing follows each node's stamped
+		// RuntimeProvider rather than ambient configuration.
+		Providers: placement.ProviderRegistry{
+			domain.RuntimeProviderDaytona: provider,
+		},
 		TokenKey:             tokenKey,
 		LeadAPIBaseURL:       leadAPIBaseURL(),
 		LeadBootstrapEnabled: leadBootstrapEnabled(),

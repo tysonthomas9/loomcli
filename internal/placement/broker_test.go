@@ -591,7 +591,7 @@ func TestBrokerSettledDefaults(t *testing.T) {
 func TestBrokerRequiresExplicitDeploymentID(t *testing.T) {
 	t.Setenv(deploymentIDEnv, "")
 
-	_, err := NewBroker(Config{Store: memstore.New(), Provider: &fakeProvider{}, TokenKey: testTokenKey})
+	_, err := NewBroker(Config{Store: memstore.New(), Providers: daytonaOnly(&fakeProvider{}), TokenKey: testTokenKey})
 	if !errors.Is(err, domain.ErrInvalid) {
 		t.Fatalf("NewBroker without deployment id = %v, want ErrInvalid", err)
 	}
@@ -603,7 +603,7 @@ func TestBrokerRequiresExplicitDeploymentID(t *testing.T) {
 func TestBrokerUsesDeploymentIDFromEnv(t *testing.T) {
 	t.Setenv(deploymentIDEnv, "env-deployment")
 
-	broker, err := NewBroker(Config{Store: memstore.New(), Provider: &fakeProvider{}, TokenKey: testTokenKey})
+	broker, err := NewBroker(Config{Store: memstore.New(), Providers: daytonaOnly(&fakeProvider{}), TokenKey: testTokenKey})
 	if err != nil {
 		t.Fatalf("NewBroker: %v", err)
 	}

@@ -39,8 +39,12 @@ const (
 
 // Config wires Broker dependencies.
 type Config struct {
-	Store                   store.Store
-	Provider                Provider
+	Store store.Store
+	// Providers maps each runtime provider onto its sandbox adapter. It
+	// replaces the former single Provider field: sandbox ids are unique only
+	// within a provider, so routing must follow the owning node's stamped
+	// RuntimeProvider. Resolution is fail-closed (see providerFor).
+	Providers               ProviderRegistry
 	TokenKey                []byte
 	TokenTTL                time.Duration
 	MaxLive                 ResourceSize
@@ -70,7 +74,7 @@ type Config struct {
 // Broker creates, reads, lists, and releases lead placements.
 type Broker struct {
 	store                   store.Store
-	provider                Provider
+	providers               ProviderRegistry
 	tokenKey                []byte
 	tokenTTL                time.Duration
 	maxLive                 ResourceSize
@@ -102,13 +106,16 @@ type placementLockKey struct {
 
 // ProvisionRequest asks the broker to get or create a lead placement.
 type ProvisionRequest struct {
-	WorkspaceKey           string
-	AgentName              string
-	SnapshotRef            string
-	Labels                 map[string]string
-	Env                    map[string]string
-	Caps                   []string
-	Resource               ResourceSize
+	WorkspaceKey string
+	AgentName    string
+	SnapshotRef  string
+	Labels       map[string]string
+	Env          map[string]string
+	Caps         []string
+	Resource     ResourceSize
+	// RuntimeProvider selects which registered sandbox provider owns this
+	// placement. Required: see validateProvisionRequest.
+	RuntimeProvider        domain.RuntimeProvider
 	NetworkDomainAllowlist []string
 	Process                ProcessSpec
 	RepoName               string
@@ -152,8 +159,11 @@ type ListResult struct {
 
 // NewBroker validates dependencies and resolves the signing key.
 func NewBroker(cfg Config) (*Broker, error) {
-	if cfg.Store == nil || cfg.Provider == nil {
-		return nil, fmt.Errorf("store and provider required: %w", domain.ErrInvalid)
+	if cfg.Store == nil {
+		return nil, fmt.Errorf("store required: %w", domain.ErrInvalid)
+	}
+	if err := validateProviderRegistry(cfg.Providers); err != nil {
+		return nil, err
 	}
 	key, err := brokerTokenKey(cfg.TokenKey)
 	if err != nil {
@@ -175,8 +185,12 @@ func NewBroker(cfg Config) (*Broker, error) {
 		now = func() time.Time { return time.Now().UTC() }
 	}
 	return &Broker{
-		store:                   cfg.Store,
-		provider:                cfg.Provider,
+		store: cfg.Store,
+		// Defensive copy: Config.Providers is an exported map the caller still
+		// holds. Retaining it by reference would let a caller swap an adapter
+		// after construction and silently redirect an existing sandbox id to a
+		// different provider, bypassing every validation done here.
+		providers:               cfg.Providers.clone(),
 		tokenKey:                key,
 		tokenTTL:                ttl,
 		maxLive:                 cfg.MaxLive,
@@ -245,6 +259,15 @@ func (b *Broker) lockPlacement(workspaceKey, agentName string) func() {
 func (b *Broker) Provision(ctx context.Context, req ProvisionRequest) (*ProvisionResult, error) {
 	req = normalizeProvisionRequest(req)
 	if err := validateProvisionRequest(req); err != nil {
+		return nil, err
+	}
+	// Resolve the requested provider BEFORE taking the lock or writing
+	// anything. Resolving later (inside createSandbox, after
+	// admitProvisioningNode persists the row) leaves a durable `provisioning`
+	// row that cannot be resumed -- its provider is unresolvable -- and that
+	// the reaper refuses to examine, because an unregistered provider is
+	// deliberately skipped. The placement would be wedged forever.
+	if _, err := b.providerFor(req.RuntimeProvider); err != nil {
 		return nil, err
 	}
 	unlock := b.lockPlacement(req.WorkspaceKey, req.AgentName)
@@ -342,7 +365,15 @@ func (b *Broker) List(ctx context.Context, workspaceKey string) (*ListResult, er
 			continue
 		}
 		result.Placements = append(result.Placements, node)
-		if node.RuntimeProvider == domain.RuntimeProviderDaytona && isQuotaReservedPlacementState(node.Placement.State) {
+		// Counts every placement on a provider this broker manages, rather
+		// than hardcoding Daytona. Behaviorally identical while Daytona is the
+		// only registered provider.
+		//
+		// NOTE: LiveReserved is still a SINGLE global budget. Making it
+		// provider-keyed (so one provider's reservations cannot consume
+		// another's quota) is a separate change and is not implemented here.
+		if _, provErr := b.providerFor(node.RuntimeProvider); provErr == nil &&
+			isQuotaReservedPlacementState(node.Placement.State) {
 			addReservation(&result.LiveReserved, node.Placement)
 		}
 		if PlacementNeedsAttention(node) {

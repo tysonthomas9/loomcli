@@ -37,7 +37,7 @@ func TestLiveLeadPlacementEndToEnd(t *testing.T) {
 
 	broker, err := placement.NewBroker(placement.Config{
 		Store:        st,
-		Provider:     provider,
+		Providers:    placement.ProviderRegistry{domain.RuntimeProviderDaytona: provider},
 		TokenKey:     key,
 		DeploymentID: "mac-e2e",
 	})
@@ -88,12 +88,13 @@ func TestLiveLeadPlacementEndToEnd(t *testing.T) {
 	// --- Step 1: provision ------------------------------------------------
 	start := time.Now()
 	res, err := broker.Provision(ctx, placement.ProvisionRequest{
-		WorkspaceKey: ws,
-		AgentName:    agent,
-		SnapshotRef:  "loom-lead-poc-v2",
-		Caps:         []string{placement.CapLeadSession},
-		Resource:     placement.ResourceSize{VCPU: 2, MemGiB: 4},
-		PromptText:   "Live Daytona lead placement prompt upload proof.\n",
+		WorkspaceKey:    ws,
+		AgentName:       agent,
+		SnapshotRef:     "loom-lead-poc-v2",
+		Caps:            []string{placement.CapLeadSession},
+		Resource:        placement.ResourceSize{VCPU: 2, MemGiB: 4},
+		RuntimeProvider: domain.RuntimeProviderDaytona,
+		PromptText:      "Live Daytona lead placement prompt upload proof.\n",
 		NetworkDomainAllowlist: []string{
 			"app.daytona.io", "api.anthropic.com", "registry.npmjs.org", "github.com",
 		},
@@ -151,8 +152,9 @@ func TestLiveLeadPlacementEndToEnd(t *testing.T) {
 	// --- Idempotency: a second provision must not create a second sandbox --
 	res2, err := broker.Provision(ctx, placement.ProvisionRequest{
 		WorkspaceKey: ws, AgentName: agent, SnapshotRef: "loom-lead-poc-v2",
-		Caps:     []string{placement.CapLeadSession},
-		Resource: placement.ResourceSize{VCPU: 2, MemGiB: 4},
+		Caps:            []string{placement.CapLeadSession},
+		Resource:        placement.ResourceSize{VCPU: 2, MemGiB: 4},
+		RuntimeProvider: domain.RuntimeProviderDaytona,
 	})
 	if err != nil {
 		t.Fatalf("second Provision: %v", err)

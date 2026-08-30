@@ -32,6 +32,13 @@ func (b *Broker) releaseLocked(ctx context.Context, workspaceKey, placementID st
 	if sandboxID == "" {
 		return b.releaseUnknownSandboxID(releaseCtx, node, fence, false)
 	}
+	// Resolve before any state mutation: a failure after markReleasing leaves
+	// the row in `releasing` and the reaper skips unregistered providers, so
+	// the placement can never be finished by hand or by the reaper.
+	prov, provErr := b.providerForNode(node)
+	if provErr != nil {
+		return nil, provErr
+	}
 	staged, err := b.markReleasing(releaseCtx, node)
 	if err != nil {
 		return nil, err
@@ -40,7 +47,7 @@ func (b *Broker) releaseLocked(ctx context.Context, workspaceKey, placementID st
 	if err != nil {
 		return nil, err
 	}
-	if err := b.deleteAndConfirmSandbox(releaseCtx, sandboxID); err != nil {
+	if err := b.deleteAndConfirmSandbox(releaseCtx, prov, sandboxID); err != nil {
 		return staged, err
 	}
 	return b.markReleased(releaseCtx, workspaceKey, placementID, fence, domain.PlacementReleaseReasonUnspecified)
@@ -262,6 +269,11 @@ func (b *Broker) forceReleasePlacement(ctx context.Context, node *domain.Node) (
 	if node == nil || node.Placement == nil {
 		return nil, fmt.Errorf("placement record required: %w", domain.ErrInvalid)
 	}
+	// Same ordering rule as Release: prove the provider is resolvable before
+	// any durable mutation.
+	if _, provErr := b.providerForNode(node); provErr != nil {
+		return nil, provErr
+	}
 	sandboxID := strings.TrimSpace(node.Placement.SandboxID)
 	if sandboxID == "" {
 		return b.releaseUnknownSandboxID(ctx, node, ReleaseFence{Generation: node.Placement.Generation}, true)
@@ -274,7 +286,11 @@ func (b *Broker) forceReleasePlacement(ctx context.Context, node *domain.Node) (
 	if err != nil {
 		return nil, err
 	}
-	if err := b.deleteAndConfirmSandbox(ctx, sandboxID); err != nil {
+	prov, provErr := b.providerForNode(node)
+	if provErr != nil {
+		return ledgered, provErr
+	}
+	if err := b.deleteAndConfirmSandbox(ctx, prov, sandboxID); err != nil {
 		return ledgered, fmt.Errorf("force release sandbox %q deletion unconfirmed: %w", sandboxID, err)
 	}
 	return b.markReleased(ctx, ledgered.WorkspaceKey, ledgered.NodeID, ReleaseFence{
@@ -284,6 +300,11 @@ func (b *Broker) forceReleasePlacement(ctx context.Context, node *domain.Node) (
 }
 
 func (b *Broker) releaseUnknownSandboxID(ctx context.Context, node *domain.Node, fence ReleaseFence, forceClean bool) (*domain.Node, error) {
+	if node != nil && node.Placement != nil {
+		if _, provErr := b.providerForNode(node); provErr != nil {
+			return nil, provErr
+		}
+	}
 	if node == nil || node.Placement == nil {
 		return nil, fmt.Errorf("placement record required: %w", domain.ErrInvalid)
 	}
@@ -304,7 +325,11 @@ func (b *Broker) releaseUnknownSandboxID(ctx context.Context, node *domain.Node,
 		if err != nil {
 			return nil, err
 		}
-		if err := b.deleteAndConfirmSandbox(ctx, sandboxID); err != nil {
+		prov, provErr := b.providerForNode(node)
+		if provErr != nil {
+			return adopted, provErr
+		}
+		if err := b.deleteAndConfirmSandbox(ctx, prov, sandboxID); err != nil {
 			return adopted, err
 		}
 		return b.markReleased(ctx, node.WorkspaceKey, node.NodeID, fence, domain.PlacementReleaseReasonUnspecified)
@@ -328,22 +353,22 @@ func (b *Broker) releaseUnknownSandboxID(ctx context.Context, node *domain.Node,
 	return b.markReleased(ctx, node.WorkspaceKey, node.NodeID, fence, domain.PlacementReleaseReasonUnspecified)
 }
 
-func (b *Broker) deleteSandbox(ctx context.Context, sandboxID string) error {
+func (b *Broker) deleteSandbox(ctx context.Context, prov providerHandle, sandboxID string) error {
 	sandboxID = strings.TrimSpace(sandboxID)
 	if sandboxID == "" {
 		return fmt.Errorf("sandbox id required: %w", domain.ErrInvalid)
 	}
-	if err := b.provider.Delete(ctx, sandboxID); err != nil && !errors.Is(err, ErrSandboxNotFound) {
+	if err := prov.adapter.Delete(ctx, sandboxID); err != nil && !errors.Is(err, ErrSandboxNotFound) {
 		return fmt.Errorf("delete sandbox %q: %w", sandboxID, err)
 	}
 	return nil
 }
 
-func (b *Broker) deleteAndConfirmSandbox(ctx context.Context, sandboxID string) error {
-	if err := b.deleteSandbox(ctx, sandboxID); err != nil {
+func (b *Broker) deleteAndConfirmSandbox(ctx context.Context, prov providerHandle, sandboxID string) error {
+	if err := b.deleteSandbox(ctx, prov, sandboxID); err != nil {
 		return err
 	}
-	return b.confirmSandboxDeleted(ctx, sandboxID)
+	return b.confirmSandboxDeleted(ctx, prov, sandboxID)
 }
 
 // confirmSandboxDeleted polls until the provider proves the sandbox is gone.
@@ -358,14 +383,14 @@ func (b *Broker) deleteAndConfirmSandbox(ctx context.Context, sandboxID string) 
 // still alive severs the only link anything has to a resource that is still
 // billing. Failing to confirm is safe: the record stays `releasing` and the
 // delete is re-driven.
-func (b *Broker) confirmSandboxDeleted(ctx context.Context, sandboxID string) error {
+func (b *Broker) confirmSandboxDeleted(ctx context.Context, prov providerHandle, sandboxID string) error {
 	sandboxID = strings.TrimSpace(sandboxID)
 	if sandboxID == "" {
 		return fmt.Errorf("sandbox id required: %w", domain.ErrInvalid)
 	}
 	var lastState ProviderSandboxState
 	for attempt := range deleteConfirmAttempts {
-		sandbox, err := b.provider.Get(ctx, sandboxID)
+		sandbox, err := prov.adapter.Get(ctx, sandboxID)
 		if errors.Is(err, ErrSandboxNotFound) {
 			return nil
 		}

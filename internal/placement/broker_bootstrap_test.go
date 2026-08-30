@@ -11,7 +11,7 @@ func newBootstrapBroker(t *testing.T, provider *fakeProvider, enabled bool, base
 	t.Helper()
 	broker, err := NewBroker(Config{
 		Store:                memstore.New(),
-		Provider:             provider,
+		Providers:            daytonaOnly(provider),
 		TokenKey:             testTokenKey,
 		DeploymentID:         testDeploymentID,
 		LeadAPIBaseURL:       baseURL,

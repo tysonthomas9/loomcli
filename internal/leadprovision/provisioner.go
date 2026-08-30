@@ -130,7 +130,7 @@ func (p *Provisioner) provisionForAgent(ctx context.Context, workspaceKey, agent
 		return fmt.Errorf("resolve lead prompt text for Daytona lead provisioning: %w", err)
 	}
 
-	req := p.provisionRequest(ws, name, authJSON, gitToken, promptText)
+	req := p.provisionRequest(ws, name, authJSON, gitToken, promptText, target.runtimeProvider())
 	req.ForceLeadProbe = forceLeadProbe
 	result, err := p.broker.Provision(ctx, req)
 	if err != nil {
@@ -157,13 +157,16 @@ func (p *Provisioner) loadProvisionTarget(ctx context.Context, ws, name string) 
 	return provisionTarget{agent: agent, role: role, profile: p.daemonProfile(ctx, ws)}, nil
 }
 
+func (t provisionTarget) runtimeProvider() domain.RuntimeProvider {
+	return domain.ResolveRuntimeProvider(t.agent, t.profile)
+}
+
 func (t provisionTarget) needsDaytonaLeadProvision() bool {
 	if t.agent == nil {
 		return false
 	}
 	roleKind := domain.ResolveRoleKind(t.role, t.agent.RoleName)
-	runtimeProvider := domain.ResolveRuntimeProvider(t.agent, t.profile)
-	return roleKind == domain.RoleKindInteractive && runtimeProvider == domain.RuntimeProviderDaytona
+	return roleKind == domain.RoleKindInteractive && t.runtimeProvider() == domain.RuntimeProviderDaytona
 }
 
 func (p *Provisioner) runtimeCredentials() (string, func() (string, error), error) {
@@ -181,7 +184,7 @@ func (p *Provisioner) runtimeCredentials() (string, func() (string, error), erro
 	return authJSON, p.gitTokenCallback(settings), nil
 }
 
-func (p *Provisioner) provisionRequest(ws, name, authJSON string, gitToken func() (string, error), promptText string) placement.ProvisionRequest {
+func (p *Provisioner) provisionRequest(ws, name, authJSON string, gitToken func() (string, error), promptText string, runtimeProvider domain.RuntimeProvider) placement.ProvisionRequest {
 	return placement.ProvisionRequest{
 		WorkspaceKey: ws,
 		AgentName:    name,
@@ -194,6 +197,7 @@ func (p *Provisioner) provisionRequest(ws, name, authJSON string, gitToken func(
 			placement.CapLeadDispatch,
 		},
 		Resource:               p.resource,
+		RuntimeProvider:        runtimeProvider,
 		Backend:                backendnames.Codex,
 		GitToken:               gitToken,
 		PromptText:             promptText,

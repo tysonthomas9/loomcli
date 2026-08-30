@@ -11,6 +11,13 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
+// daytonaOnly is the single-provider registry used by fixtures that predate
+// the provider registry. Tests that need multi-provider routing build their
+// own ProviderRegistry explicitly.
+func daytonaOnly(p Provider) ProviderRegistry {
+	return ProviderRegistry{domain.RuntimeProviderDaytona: p}
+}
+
 func mustBroker(t *testing.T, st store.Store, provider *fakeProvider) *Broker {
 	t.Helper()
 	return mustBrokerWithMax(t, st, provider, ResourceSize{})
@@ -20,7 +27,7 @@ func mustBrokerWithMax(t *testing.T, st store.Store, provider *fakeProvider, max
 	t.Helper()
 	broker, err := NewBroker(Config{
 		Store:        st,
-		Provider:     provider,
+		Providers:    daytonaOnly(provider),
 		TokenKey:     testTokenKey,
 		MaxLive:      max,
 		DeploymentID: testDeploymentID,
@@ -39,7 +46,7 @@ func mustBrokerWithClock(t *testing.T, st store.Store, provider *fakeProvider, c
 	t.Helper()
 	broker, err := NewBroker(Config{
 		Store:                st,
-		Provider:             provider,
+		Providers:            daytonaOnly(provider),
 		TokenKey:             testTokenKey,
 		DeploymentID:         testDeploymentID,
 		DeleteConfirmBackoff: time.Millisecond,
@@ -55,7 +62,7 @@ func mustBrokerWithNow(t *testing.T, st store.Store, provider *fakeProvider, now
 	t.Helper()
 	broker, err := NewBroker(Config{
 		Store:                st,
-		Provider:             provider,
+		Providers:            daytonaOnly(provider),
 		TokenKey:             testTokenKey,
 		DeploymentID:         testDeploymentID,
 		DeleteConfirmBackoff: time.Millisecond,
@@ -73,6 +80,7 @@ func testProvisionRequest(agent string, vcpu, memGiB int) ProvisionRequest {
 		AgentName:              agent,
 		SnapshotRef:            "snapshot://lead",
 		Resource:               ResourceSize{VCPU: vcpu, MemGiB: memGiB},
+		RuntimeProvider:        domain.RuntimeProviderDaytona,
 		NetworkDomainAllowlist: []string{"api.loom.invalid"},
 		Env:                    map[string]string{"CUSTOM": "value"},
 		Labels:                 map[string]string{"custom": "value"},

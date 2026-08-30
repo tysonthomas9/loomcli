@@ -41,7 +41,7 @@ func TestLiveCreateSeamReconcile(t *testing.T) {
 	st := memstore.New()
 	broker, err := placement.NewBroker(placement.Config{
 		Store:        st,
-		Provider:     provider,
+		Providers:    placement.ProviderRegistry{domain.RuntimeProviderDaytona: provider},
 		TokenKey:     []byte("0123456789abcdef0123456789abcdef"),
 		DeploymentID: deployment,
 		// Keep the two-pass wait test-sized; production default is minutes.

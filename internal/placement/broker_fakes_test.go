@@ -48,15 +48,24 @@ type fakeProvider struct {
 	ensureRunningCalls     []string
 	listCalls              []map[string]string
 	listPtySessionCalls    []string
-	setAutostopCalls       []time.Duration
-	events                 []string
-	sandboxes              map[string]ProviderSandbox
-	listOnlySandboxes      []ProviderSandbox
-	listInvisible          map[string]bool
-	names                  map[string]string
-	ptySessions            map[string]map[string]PtySession
-	createResult           *CreateResult
-	createErr              error
+	findByNameCalls        []string
+	// allCalls records EVERY entry into a Provider method, before any error or
+	// existence check can return early. The per-method counters below record
+	// only successful paths (SetAutostopInterval, for example, returns
+	// ErrSandboxNotFound before recording), so a stray call against an empty
+	// non-owning provider would otherwise be invisible to totalCalls.
+	allCalls            []string
+	updateActivityCalls []string
+	killPtyCalls        []string
+	setAutostopCalls    []time.Duration
+	events              []string
+	sandboxes           map[string]ProviderSandbox
+	listOnlySandboxes   []ProviderSandbox
+	listInvisible       map[string]bool
+	names               map[string]string
+	ptySessions         map[string]map[string]PtySession
+	createResult        *CreateResult
+	createErr           error
 	// createLosesResponse simulates a create whose response is lost after
 	// dispatch: the sandbox is made (with its labels and name) but the call
 	// returns an empty CreateResult alongside createErr.
@@ -81,6 +90,7 @@ type fakeProvider struct {
 }
 
 func (f *fakeProvider) Create(ctx context.Context, req CreateRequest) (CreateResult, error) {
+	f.recordCall("Create")
 	if f.createDelay > 0 {
 		time.Sleep(f.createDelay)
 	}
@@ -125,6 +135,7 @@ func (f *fakeProvider) Create(ctx context.Context, req CreateRequest) (CreateRes
 }
 
 func (f *fakeProvider) Get(_ context.Context, sandboxID string) (ProviderSandbox, error) {
+	f.recordCall("Get")
 	f.mu.Lock()
 	f.getCalls = append(f.getCalls, sandboxID)
 	call := len(f.getCalls)
@@ -149,7 +160,9 @@ func (f *fakeProvider) Get(_ context.Context, sandboxID string) (ProviderSandbox
 }
 
 func (f *fakeProvider) FindByName(_ context.Context, name string) (ProviderSandbox, error) {
+	f.recordCall("FindByName")
 	f.mu.Lock()
+	f.findByNameCalls = append(f.findByNameCalls, name)
 	err := f.findByNameErr
 	var sandbox ProviderSandbox
 	ok := false
@@ -178,6 +191,7 @@ func (f *fakeProvider) setSandboxName(name, sandboxID string) {
 }
 
 func (f *fakeProvider) EnsureRunning(_ context.Context, sandboxID string) (bool, error) {
+	f.recordCall("EnsureRunning")
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.ensureRunningCalls = append(f.ensureRunningCalls, sandboxID)
@@ -199,6 +213,7 @@ func (f *fakeProvider) EnsureRunning(_ context.Context, sandboxID string) (bool,
 }
 
 func (f *fakeProvider) Delete(_ context.Context, sandboxID string) error {
+	f.recordCall("Delete")
 	if f.deleteHook != nil {
 		f.deleteHook(sandboxID)
 	}
@@ -216,11 +231,16 @@ func (f *fakeProvider) Delete(_ context.Context, sandboxID string) error {
 	return nil
 }
 
-func (f *fakeProvider) UpdateLastActivity(context.Context, string) error {
+func (f *fakeProvider) UpdateLastActivity(_ context.Context, sandboxID string) error {
+	f.recordCall("UpdateLastActivity")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.updateActivityCalls = append(f.updateActivityCalls, sandboxID)
 	return nil
 }
 
 func (f *fakeProvider) SetAutostopInterval(_ context.Context, sandboxID string, interval time.Duration) error {
+	f.recordCall("SetAutostopInterval")
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.setAutostopErr != nil {
@@ -235,6 +255,7 @@ func (f *fakeProvider) SetAutostopInterval(_ context.Context, sandboxID string, 
 }
 
 func (f *fakeProvider) PrepareLeadBoot(_ context.Context, sandboxID string, prep LeadBootPrep) error {
+	f.recordCall("PrepareLeadBoot")
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.prepSandboxIDs = append(f.prepSandboxIDs, sandboxID)
@@ -250,6 +271,7 @@ func (f *fakeProvider) PrepareLeadBoot(_ context.Context, sandboxID string, prep
 }
 
 func (f *fakeProvider) CreatePty(_ context.Context, sandboxID string, spec ProcessSpec) error {
+	f.recordCall("CreatePty")
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.startProcessCalls = append(f.startProcessCalls, cloneProcessSpec(spec))
@@ -296,6 +318,7 @@ func (f *fakeProvider) CreatePty(_ context.Context, sandboxID string, spec Proce
 }
 
 func (f *fakeProvider) ListManaged(_ context.Context, labels map[string]string) ([]ProviderSandbox, error) {
+	f.recordCall("ListManaged")
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.listCalls = append(f.listCalls, copyMap(labels))
@@ -318,6 +341,7 @@ func (f *fakeProvider) ListManaged(_ context.Context, labels map[string]string) 
 }
 
 func (f *fakeProvider) ListPtySessions(_ context.Context, sandboxID string) ([]PtySession, error) {
+	f.recordCall("ListPtySessions")
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.listPtySessionCalls = append(f.listPtySessionCalls, sandboxID)
@@ -335,13 +359,22 @@ func (f *fakeProvider) ListPtySessions(_ context.Context, sandboxID string) ([]P
 }
 
 func (f *fakeProvider) KillPtySession(_ context.Context, sandboxID, sessionID string) error {
+	f.recordCall("KillPtySession")
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.killPtyCalls = append(f.killPtyCalls, sandboxID)
 	if _, ok := f.sandboxes[sandboxID]; !ok {
 		return ErrSandboxNotFound
 	}
 	delete(f.ptySessions[sandboxID], sessionID)
 	return nil
+}
+
+// recordCall must be the FIRST statement of every Provider method on this fake.
+func (f *fakeProvider) recordCall(method string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.allCalls = append(f.allCalls, method)
 }
 
 func (f *fakeProvider) addSandbox(sandbox ProviderSandbox) {

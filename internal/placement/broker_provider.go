@@ -10,8 +10,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/leadtoken"
 )
 
-func (b *Broker) providerSandboxIDForPlacement(ctx context.Context, placementID string) (string, error) {
-	matches, err := b.providerSandboxesForPlacement(ctx, placementID)
+func (b *Broker) providerSandboxIDForPlacement(ctx context.Context, prov providerHandle, placementID string) (string, error) {
+	matches, err := b.providerSandboxesForPlacement(ctx, prov, placementID)
 	if err != nil {
 		return "", err
 	}
@@ -28,8 +28,8 @@ func (b *Broker) providerSandboxIDForPlacement(ctx context.Context, placementID 
 	return sandboxID, nil
 }
 
-func (b *Broker) providerSandboxesForPlacement(ctx context.Context, placementID string) ([]ProviderSandbox, error) {
-	sandboxes, err := b.listProviderSandboxes(ctx, map[string]string{
+func (b *Broker) providerSandboxesForPlacement(ctx context.Context, prov providerHandle, placementID string) ([]ProviderSandbox, error) {
+	sandboxes, err := b.listProviderSandboxes(ctx, prov, map[string]string{
 		PlacementLabelKey: strings.TrimSpace(placementID),
 	})
 	if err != nil {
@@ -43,7 +43,7 @@ func (b *Broker) providerSandboxesForPlacement(ctx context.Context, placementID 
 		if !providerSandboxMatchesPlacement(sandbox, placementID) {
 			continue
 		}
-		confirmed, err := b.confirmListedSandbox(ctx, sandbox.ID)
+		confirmed, err := b.confirmListedSandbox(ctx, prov, sandbox.ID)
 		if errors.Is(err, ErrSandboxNotFound) {
 			continue
 		}
@@ -58,20 +58,20 @@ func (b *Broker) providerSandboxesForPlacement(ctx context.Context, placementID 
 	return matches, nil
 }
 
-func (b *Broker) listProviderSandboxes(ctx context.Context, labels map[string]string) ([]ProviderSandbox, error) {
+func (b *Broker) listProviderSandboxes(ctx context.Context, prov providerHandle, labels map[string]string) ([]ProviderSandbox, error) {
 	listCtx, cancel := detachedTimeout(ctx, detachedProviderOperationTimeout)
 	defer cancel()
-	return b.provider.ListManaged(listCtx, labels)
+	return prov.adapter.ListManaged(listCtx, labels)
 }
 
-func (b *Broker) confirmListedSandbox(ctx context.Context, sandboxID string) (ProviderSandbox, error) {
+func (b *Broker) confirmListedSandbox(ctx context.Context, prov providerHandle, sandboxID string) (ProviderSandbox, error) {
 	sandboxID = strings.TrimSpace(sandboxID)
 	if sandboxID == "" {
 		return ProviderSandbox{}, fmt.Errorf("provider sandbox has empty id: %w", domain.ErrInvalid)
 	}
 	getCtx, cancel := detachedTimeout(ctx, detachedProviderOperationTimeout)
 	defer cancel()
-	sandbox, err := b.provider.Get(getCtx, sandboxID)
+	sandbox, err := prov.adapter.Get(getCtx, sandboxID)
 	if err != nil {
 		return ProviderSandbox{}, err
 	}
@@ -82,7 +82,11 @@ func (b *Broker) confirmListedSandbox(ctx context.Context, sandboxID string) (Pr
 }
 
 func (b *Broker) confirmRecordedSandbox(ctx context.Context, node *domain.Node, sandboxID string) (ProviderSandbox, error) {
-	sandbox, err := b.confirmListedSandbox(ctx, sandboxID)
+	prov, err := b.providerForNode(node)
+	if err != nil {
+		return ProviderSandbox{}, err
+	}
+	sandbox, err := b.confirmListedSandbox(ctx, prov, sandboxID)
 	if err != nil {
 		return ProviderSandbox{}, err
 	}
@@ -178,7 +182,7 @@ func (b *Broker) accountReserved(ctx context.Context, fallbackWorkspaceKey, excl
 			if node == nil || node.Placement == nil {
 				continue
 			}
-			if node.NodeID == excludeNodeID || node.RuntimeProvider != domain.RuntimeProviderDaytona {
+			if node.NodeID == excludeNodeID || !b.countsTowardQuota(node) {
 				continue
 			}
 			if isQuotaReservedPlacementState(node.Placement.State) {
@@ -243,6 +247,13 @@ func validateProvisionRequest(req ProvisionRequest) error {
 	}
 	if req.Resource.VCPU <= 0 || req.Resource.MemGiB <= 0 {
 		return fmt.Errorf("positive vcpu and memory reservations required: %w", domain.ErrInvalid)
+	}
+	// Required, not defaulted. Per-provider quota is impossible without it, and
+	// defaulting to "the only provider" is the silent-fallback failure this
+	// registry exists to prevent: a placement created on one provider and
+	// released against another severs the record of a live, billing sandbox.
+	if req.RuntimeProvider == "" {
+		return fmt.Errorf("runtime provider required on provision request: %w", domain.ErrInvalid)
 	}
 	return nil
 }

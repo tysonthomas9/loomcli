@@ -69,6 +69,11 @@ type ReaperAction struct {
 	FromState  string
 	ToState    string
 	Action     string
+	// RuntimeProvider identifies which provider the action was taken against.
+	// Sandbox ids are unique only within a provider, so without it two
+	// providers' actions on identical ids are indistinguishable in the audit
+	// trail.
+	RuntimeProvider domain.RuntimeProvider
 }
 
 // NewPlacementReaper constructs a placement reaper. Writes remain disabled
@@ -126,7 +131,7 @@ func (r *PlacementReaper) RunOnce(ctx context.Context) (ReaperResult, error) {
 			if ctx.Err() != nil {
 				return result, errors.Join(append(errs, ctx.Err())...)
 			}
-			if !reaperShouldExamineNode(node) {
+			if !r.shouldExamineNode(node) {
 				continue
 			}
 			result.Examined++
@@ -141,10 +146,17 @@ func (r *PlacementReaper) RunOnce(ctx context.Context) (ReaperResult, error) {
 	return result, errors.Join(errs...)
 }
 
-func reaperShouldExamineNode(node *domain.Node) bool {
-	return node != nil &&
-		node.Placement != nil &&
-		node.RuntimeProvider == domain.RuntimeProviderDaytona
+// shouldExamineNode gates the reaper to placements this broker can actually
+// act on. It used to hardcode Daytona; it now asks the registry, so a node
+// stamped with a provider that is not registered in THIS deployment is skipped
+// rather than reaped against the wrong adapter. Fail-closed: an unstamped or
+// unknown provider is never examined, because reaping is destructive.
+func (r *PlacementReaper) shouldExamineNode(node *domain.Node) bool {
+	if node == nil || node.Placement == nil {
+		return false
+	}
+	_, err := r.broker.providerFor(node.RuntimeProvider)
+	return err == nil
 }
 
 func (r *PlacementReaper) reapRecordNode(ctx context.Context, node *domain.Node, result *ReaperResult) error {
@@ -165,7 +177,11 @@ func (r *PlacementReaper) reapRecordNode(ctx context.Context, node *domain.Node,
 }
 
 func (r *PlacementReaper) reapProvisioning(ctx context.Context, node *domain.Node, result *ReaperResult) error {
-	matches, err := r.broker.providerSandboxesForPlacement(ctx, node.NodeID)
+	prov, provErr := r.broker.providerForNode(node)
+	if provErr != nil {
+		return provErr
+	}
+	matches, err := r.broker.providerSandboxesForPlacement(ctx, prov, node.NodeID)
 	if err != nil {
 		if errors.Is(err, domain.ErrConflict) {
 			return r.deadLetterNode(ctx, result, node, "", err)
@@ -182,7 +198,7 @@ func (r *PlacementReaper) reapProvisioning(ctx context.Context, node *domain.Nod
 		// The eventually-consistent label list found nothing; the
 		// deterministic-name point read is authoritative and may still find the
 		// sandbox an ambiguous create left behind.
-		named, err := r.broker.findSandboxByPlacementName(ctx, node.NodeID)
+		named, err := r.broker.findSandboxByPlacementName(ctx, prov, node.NodeID)
 		if err == nil {
 			if !providerSandboxMatchesPlacement(named, node.NodeID) {
 				return r.deadLetterNode(ctx, result, node, named.ID, fmt.Errorf(
@@ -201,6 +217,10 @@ func (r *PlacementReaper) reapProvisioning(ctx context.Context, node *domain.Nod
 }
 
 func (r *PlacementReaper) reapProvisioningMatchedSandbox(ctx context.Context, node *domain.Node, sandbox ProviderSandbox, result *ReaperResult) error {
+	prov, provErr := r.broker.providerForNode(node)
+	if provErr != nil {
+		return provErr
+	}
 	sandboxID := strings.TrimSpace(sandbox.ID)
 	if !r.broker.provisioningDeadlineExpired(node) {
 		r.logObserve(ctx, node, sandboxID, "provisioning sandbox exists before deadline")
@@ -215,7 +235,7 @@ func (r *PlacementReaper) reapProvisioningMatchedSandbox(ctx context.Context, no
 		if err != nil {
 			return err
 		}
-		if err := r.broker.deleteAndConfirmSandbox(ctx, sandboxID); err != nil {
+		if err := r.broker.deleteAndConfirmSandbox(ctx, prov, sandboxID); err != nil {
 			return err
 		}
 		_, err = r.broker.markReleased(ctx, adopted.WorkspaceKey, adopted.NodeID, ReleaseFence{
@@ -264,7 +284,11 @@ func (r *PlacementReaper) reapProvisioningWithoutSandbox(ctx context.Context, no
 }
 
 func (r *PlacementReaper) reapProvisioningRecordedSandbox(ctx context.Context, node *domain.Node, sandboxID string, result *ReaperResult) error {
-	sandbox, err := r.broker.provider.Get(ctx, sandboxID)
+	prov, provErr := r.broker.providerForNode(node)
+	if provErr != nil {
+		return provErr
+	}
+	sandbox, err := prov.adapter.Get(ctx, sandboxID)
 	if errors.Is(err, ErrSandboxNotFound) || sandbox.State == ProviderSandboxAbsent {
 		if !r.broker.provisioningDeadlineExpired(node) {
 			r.logObserve(ctx, node, sandboxID, "recorded provisioning sandbox absent before deadline")
@@ -366,6 +390,10 @@ func (r *PlacementReaper) markActiveLostIfStillAbsent(ctx context.Context, resul
 }
 
 func (r *PlacementReaper) reapReleasing(ctx context.Context, node *domain.Node, result *ReaperResult) error {
+	prov, provErr := r.broker.providerForNode(node)
+	if provErr != nil {
+		return provErr
+	}
 	sandboxID := strings.TrimSpace(node.Placement.SandboxID)
 	if sandboxID == "" {
 		return r.deadLetterNode(ctx, result, node, "", fmt.Errorf("releasing placement %q has empty sandbox id: %w", node.NodeID, domain.ErrInvalid))
@@ -383,7 +411,7 @@ func (r *PlacementReaper) reapReleasing(ctx context.Context, node *domain.Node, 
 		next := current.Placement.NextDeleteAt
 		return next.IsZero() || !r.now().UTC().Before(next.UTC())
 	}, func(current *domain.Node) error {
-		if err := r.broker.deleteAndConfirmSandbox(ctx, sandboxID); err != nil {
+		if err := r.broker.deleteAndConfirmSandbox(ctx, prov, sandboxID); err != nil {
 			attempts := current.Placement.DeleteAttempts + 1
 			nextDeleteAt := r.now().UTC().Add(reaperDeleteBackoff(attempts))
 			updated, updateErr := r.broker.recordDeleteRetry(ctx, current, attempts, err.Error(), nextDeleteAt)
@@ -405,7 +433,11 @@ func (r *PlacementReaper) reapReleasing(ctx context.Context, node *domain.Node, 
 }
 
 func (r *PlacementReaper) reapReleased(ctx context.Context, node *domain.Node, result *ReaperResult) error {
-	matches, err := r.broker.providerSandboxesForPlacement(ctx, node.NodeID)
+	prov, provErr := r.broker.providerForNode(node)
+	if provErr != nil {
+		return provErr
+	}
+	matches, err := r.broker.providerSandboxesForPlacement(ctx, prov, node.NodeID)
 	if err != nil {
 		if errors.Is(err, domain.ErrConflict) {
 			return r.deadLetterNode(ctx, result, node, "", err)
@@ -423,7 +455,11 @@ func (r *PlacementReaper) reapReleased(ctx context.Context, node *domain.Node, r
 }
 
 func (r *PlacementReaper) reapLost(ctx context.Context, node *domain.Node, result *ReaperResult) error {
-	matches, err := r.broker.providerSandboxesForPlacement(ctx, node.NodeID)
+	prov, provErr := r.broker.providerForNode(node)
+	if provErr != nil {
+		return provErr
+	}
+	matches, err := r.broker.providerSandboxesForPlacement(ctx, prov, node.NodeID)
 	if err != nil {
 		if errors.Is(err, domain.ErrConflict) {
 			return r.deadLetterNode(ctx, result, node, "", err)
@@ -512,12 +548,32 @@ func (r *PlacementReaper) lostPastReleaseGrace(node *domain.Node) bool {
 }
 
 func (r *PlacementReaper) reapProviderOrphans(ctx context.Context, result *ReaperResult) error {
-	sandboxes, err := r.broker.listProviderSandboxes(ctx, map[string]string{
+	// Sweep EVERY registered provider. Enumerating only one would leave the
+	// others' orphans billing forever, invisible to the reaper.
+	var errs []error
+	for _, kind := range r.broker.registeredProviders() {
+		if ctx.Err() != nil {
+			return errors.Join(append(errs, ctx.Err())...)
+		}
+		if err := r.reapProviderOrphansFor(ctx, kind, result); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (r *PlacementReaper) reapProviderOrphansFor(ctx context.Context, kind domain.RuntimeProvider, result *ReaperResult) error {
+	prov, err := r.broker.providerFor(kind)
+	if err != nil {
+		return err
+	}
+	sandboxes, err := r.broker.listProviderSandboxes(ctx, prov, map[string]string{
 		EnvironmentLabelKey: r.broker.deploymentID,
 	})
 	if err != nil {
-		slog.ErrorContext(ctx, "placement reaper provider orphan list failed", "error", err)
-		return fmt.Errorf("list provider sandboxes for deployment %q: %w", r.broker.deploymentID, err)
+		slog.ErrorContext(ctx, "placement reaper provider orphan list failed",
+			"error", err, "runtime_provider", string(kind))
+		return fmt.Errorf("list provider sandboxes for deployment %q on provider %q: %w", r.broker.deploymentID, kind, err)
 	}
 	var errs []error
 	for _, sandbox := range sandboxes {
@@ -529,87 +585,109 @@ func (r *PlacementReaper) reapProviderOrphans(ctx context.Context, result *Reape
 			continue
 		}
 		result.Examined++
-		if err := r.reapProviderOrphan(ctx, sandbox, placementID, result); err != nil {
+		if err := r.reapProviderOrphan(ctx, prov, sandbox, placementID, result); err != nil {
 			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
 }
 
-func (r *PlacementReaper) reapProviderOrphan(ctx context.Context, sandbox ProviderSandbox, placementID string, result *ReaperResult) error {
+func (r *PlacementReaper) reapProviderOrphan(ctx context.Context, prov providerHandle, sandbox ProviderSandbox, placementID string, result *ReaperResult) error {
 	if strings.TrimSpace(sandbox.Labels[EnvironmentLabelKey]) != r.broker.deploymentID {
 		return nil
 	}
-	workspaceKey, agentName, err := r.providerOrphanIdentity(ctx, sandbox, placementID, result)
+	workspaceKey, agentName, err := r.providerOrphanIdentity(ctx, prov.kind, sandbox, placementID, result)
 	if err != nil {
 		return err
 	}
-	exists, err := r.providerOrphanRecordExists(ctx, workspaceKey, placementID, "get")
+	exists, err := r.providerOrphanRecordExists(ctx, prov.kind, workspaceKey, placementID, "get")
 	if err != nil || exists {
 		return err
 	}
-	if !r.providerOrphanPastGrace(ctx, sandbox, placementID, workspaceKey, agentName) {
+	if !r.providerOrphanPastGrace(ctx, prov.kind, sandbox, placementID, workspaceKey, agentName) {
 		return nil
 	}
-	return r.deleteProviderOrphan(ctx, sandbox, placementID, workspaceKey, agentName, result)
+	return r.deleteProviderOrphan(ctx, prov, sandbox, placementID, workspaceKey, agentName, result)
 }
 
-func (r *PlacementReaper) providerOrphanIdentity(ctx context.Context, sandbox ProviderSandbox, placementID string, result *ReaperResult) (string, string, error) {
+func (r *PlacementReaper) providerOrphanIdentity(ctx context.Context, kind domain.RuntimeProvider, sandbox ProviderSandbox, placementID string, result *ReaperResult) (string, string, error) {
 	workspaceKey := strings.TrimSpace(sandbox.Labels["loom-workspace"])
 	agentName := strings.TrimSpace(sandbox.Labels["loom-agent"])
 	if workspaceKey != "" && agentName != "" {
 		return workspaceKey, agentName, nil
 	}
-	action := providerOrphanAction(sandbox, placementID, workspaceKey, agentName, reaperStateNeedsAttention, reaperActionDeadLetter)
+	action := providerOrphanAction(kind, sandbox, placementID, workspaceKey, agentName, reaperStateNeedsAttention, reaperActionDeadLetter)
 	result.DeadLettered++
 	result.Actions = append(result.Actions, action)
 	r.logAction(ctx, action, slog.LevelError)
 	return "", "", fmt.Errorf("orphan sandbox %q missing workspace or agent label: %w", sandbox.ID, domain.ErrInvalid)
 }
 
-func (r *PlacementReaper) providerOrphanRecordExists(ctx context.Context, workspaceKey, placementID, prefix string) (bool, error) {
-	if _, err := r.broker.store.Nodes().Get(ctx, workspaceKey, placementID); err == nil {
-		return true, nil
-	} else if !errors.Is(err, domain.ErrNotFound) {
+// providerOrphanRecordExists reports whether a placement record OWNED BY THIS
+// PROVIDER still claims the sandbox, which is what suppresses orphan deletion.
+//
+// Ownership must be compared, not assumed. A placement id identifies a record,
+// not a provider, so a record belonging to a DIFFERENT provider must not
+// protect this provider's sandbox: doing so silently leaks it, because nothing
+// else will ever sweep it. Reaping is destructive, so the inverse mistake
+// matters too -- an unreadable record, or one whose provider cannot be
+// determined, is treated as "exists" and suppresses deletion.
+func (r *PlacementReaper) providerOrphanRecordExists(ctx context.Context, kind domain.RuntimeProvider, workspaceKey, placementID, prefix string) (bool, error) {
+	node, err := r.broker.store.Nodes().Get(ctx, workspaceKey, placementID)
+	switch {
+	case err == nil:
+		if node != nil && node.RuntimeProvider == kind {
+			return true, nil
+		}
+		if node == nil {
+			// Fail closed: cannot prove the record is not ours.
+			return true, nil
+		}
+		// A record exists but belongs to another provider, so it says nothing
+		// about this provider's sandbox. Treat the sandbox as unclaimed.
+		return false, nil
+	case errors.Is(err, domain.ErrNotFound):
+		return false, nil
+	default:
 		return false, fmt.Errorf("%s placement %q/%q for provider orphan check: %w", prefix, workspaceKey, placementID, err)
 	}
-	return false, nil
 }
 
-func (r *PlacementReaper) providerOrphanPastGrace(ctx context.Context, sandbox ProviderSandbox, placementID, workspaceKey, agentName string) bool {
+func (r *PlacementReaper) providerOrphanPastGrace(ctx context.Context, kind domain.RuntimeProvider, sandbox ProviderSandbox, placementID, workspaceKey, agentName string) bool {
 	if sandbox.CreatedAt.IsZero() || r.now().UTC().Sub(sandbox.CreatedAt.UTC()) < r.grace {
-		r.logAction(ctx, providerOrphanAction(sandbox, placementID, workspaceKey, agentName, reaperStateOrphan, reaperActionObserve), slog.LevelInfo)
+		r.logAction(ctx, providerOrphanAction(kind, sandbox, placementID, workspaceKey, agentName, reaperStateOrphan, reaperActionObserve), slog.LevelInfo)
 		return false
 	}
 	return true
 }
 
-func (r *PlacementReaper) deleteProviderOrphan(ctx context.Context, sandbox ProviderSandbox, placementID, workspaceKey, agentName string, result *ReaperResult) error {
+func (r *PlacementReaper) deleteProviderOrphan(ctx context.Context, prov providerHandle, sandbox ProviderSandbox, placementID, workspaceKey, agentName string, result *ReaperResult) error {
 	unlock := r.broker.lockPlacement(workspaceKey, agentName)
 	defer unlock()
-	exists, err := r.providerOrphanRecordExists(ctx, workspaceKey, placementID, "fresh get")
+	exists, err := r.providerOrphanRecordExists(ctx, prov.kind, workspaceKey, placementID, "fresh get")
 	if err != nil || exists {
 		return err
 	}
-	action := providerOrphanAction(sandbox, placementID, workspaceKey, agentName, reaperStateDeleted, reaperActionDeleteOrphan)
+	action := providerOrphanAction(prov.kind, sandbox, placementID, workspaceKey, agentName, reaperStateDeleted, reaperActionDeleteOrphan)
 	result.Acted++
 	result.Actions = append(result.Actions, action)
 	r.logAction(ctx, action, slog.LevelInfo)
 	if !r.enforce {
 		return nil
 	}
-	return r.broker.deleteAndConfirmSandbox(ctx, sandbox.ID)
+	return r.broker.deleteAndConfirmSandbox(ctx, prov, sandbox.ID)
 }
 
-func providerOrphanAction(sandbox ProviderSandbox, placementID, workspaceKey, agentName, toState, actionName string) ReaperAction {
+func providerOrphanAction(kind domain.RuntimeProvider, sandbox ProviderSandbox, placementID, workspaceKey, agentName, toState, actionName string) ReaperAction {
 	return ReaperAction{
-		NodeID:    placementID,
-		Workspace: workspaceKey,
-		Agent:     agentName,
-		SandboxID: strings.TrimSpace(sandbox.ID),
-		FromState: reaperStateOrphan,
-		ToState:   toState,
-		Action:    actionName,
+		NodeID:          placementID,
+		Workspace:       workspaceKey,
+		Agent:           agentName,
+		SandboxID:       strings.TrimSpace(sandbox.ID),
+		FromState:       reaperStateOrphan,
+		ToState:         toState,
+		Action:          actionName,
+		RuntimeProvider: kind,
 	}
 }
 
@@ -693,6 +771,7 @@ func reaperActionFromNode(node *domain.Node, sandboxID, actionName, fromState, t
 	action.NodeID = node.NodeID
 	action.Workspace = node.WorkspaceKey
 	action.Agent = placementAgentName(node)
+	action.RuntimeProvider = node.RuntimeProvider
 	if node.Placement != nil {
 		action.Generation = node.Placement.Generation
 	}

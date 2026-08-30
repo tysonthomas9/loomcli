@@ -13,6 +13,10 @@ import (
 )
 
 func (b *Broker) createSandbox(ctx context.Context, req ProvisionRequest, node *domain.Node, bootPlan leadBootPlan) (result *ProvisionResult, adopted bool, err error) {
+	prov, err := b.providerForNode(node)
+	if err != nil {
+		return nil, false, err
+	}
 	token, caps, err := b.mintToken(node, req.Caps)
 	if err != nil {
 		return nil, false, err
@@ -24,7 +28,7 @@ func (b *Broker) createSandbox(ctx context.Context, req ProvisionRequest, node *
 	// a reaper; this does not make an in-process crash atomic.
 	createCtx, cancel := detachedTimeout(ctx, detachedCreateTimeout)
 	defer cancel()
-	created, err := b.provider.Create(createCtx, providerCreateRequest(req, node.NodeID, token, b.deploymentID, b.leadAPIBaseURL, bootPlan))
+	created, err := prov.adapter.Create(createCtx, providerCreateRequest(req, node.NodeID, token, b.deploymentID, b.leadAPIBaseURL, bootPlan))
 	sandboxID := strings.TrimSpace(created.SandboxID)
 	if err != nil {
 		adopted, failErr := b.handleCreateFailure(createCtx, node, created, err)
@@ -34,7 +38,7 @@ func (b *Broker) createSandbox(ctx context.Context, req ProvisionRequest, node *
 	if err != nil {
 		if sandboxID != "" {
 			node = b.appendAbandonedSandboxIDBestEffort(createCtx, node, sandboxID)
-			if deleteErr := b.deleteSandbox(createCtx, sandboxID); deleteErr != nil {
+			if deleteErr := b.deleteSandbox(createCtx, prov, sandboxID); deleteErr != nil {
 				return nil, false, fmt.Errorf("record sandbox id %q for placement %q: %v; compensating delete failed, leaked sandbox id %q: %w", sandboxID, node.NodeID, err, sandboxID, deleteErr)
 			}
 		}
@@ -42,7 +46,7 @@ func (b *Broker) createSandbox(ctx context.Context, req ProvisionRequest, node *
 	}
 	if bootPlan.needsPrep() {
 		prepCtx, prepCancel := detachedTimeout(ctx, b.effectiveLeadBootPrepTimeout())
-		prepErr := b.provider.PrepareLeadBoot(prepCtx, sandboxID, bootPlan.prep)
+		prepErr := prov.adapter.PrepareLeadBoot(prepCtx, sandboxID, bootPlan.prep)
 		prepCancel()
 		if prepErr != nil {
 			if err := b.compensateLeadBootPrepFailure(createCtx, recorded, sandboxID, prepErr); err != nil {
@@ -136,7 +140,7 @@ func (b *Broker) createProvisioningNode(ctx context.Context, req ProvisionReques
 		WorkspaceKey:    req.WorkspaceKey,
 		NodeID:          newPlacementID(),
 		OwnerActor:      agentOwnerActor(req.AgentName),
-		RuntimeProvider: domain.RuntimeProviderDaytona,
+		RuntimeProvider: req.RuntimeProvider,
 		Placement:       placement,
 		Labels:          nodeLabels(req),
 		Capabilities:    []string{CapLeadSession},
@@ -198,9 +202,19 @@ func (b *Broker) recordSandboxID(ctx context.Context, node *domain.Node, sandbox
 	return updated, nil
 }
 
-func (b *Broker) resumeLivePlacement(ctx context.Context, req ProvisionRequest, node *domain.Node) (result *ProvisionResult, retry bool, err error) {
+// resumeProvider requires a usable placement record AND a registered provider
+// before any resume work begins.
+func (b *Broker) resumeProvider(node *domain.Node) (providerHandle, error) {
 	if node == nil || node.Placement == nil {
-		return nil, false, fmt.Errorf("placement record required: %w", domain.ErrInvalid)
+		return providerHandle{}, fmt.Errorf("placement record required: %w", domain.ErrInvalid)
+	}
+	return b.providerForNode(node)
+}
+
+func (b *Broker) resumeLivePlacement(ctx context.Context, req ProvisionRequest, node *domain.Node) (result *ProvisionResult, retry bool, err error) {
+	prov, err := b.resumeProvider(node)
+	if err != nil {
+		return nil, false, err
 	}
 	var sandboxID string
 	node, sandboxID, retry, err = b.resolveResumeSandbox(ctx, node)
@@ -217,7 +231,7 @@ func (b *Broker) resumeLivePlacement(ctx context.Context, req ProvisionRequest, 
 	if sandbox.State == ProviderSandboxAbsent {
 		return nil, false, b.markLostResumeAbsent(ctx, node, sandboxID, "is Get-confirmed absent and marked lost")
 	}
-	if err := b.setAutostopInterval(ctx, sandboxID, reviveAutostopInterval); err != nil {
+	if err := b.setAutostopInterval(ctx, prov, sandboxID, reviveAutostopInterval); err != nil {
 		if errors.Is(err, ErrSandboxNotFound) {
 			return nil, false, b.markLostResumeAbsent(ctx, node, sandboxID, "disappeared before autostop shielding and was marked lost")
 		}
@@ -231,7 +245,7 @@ func (b *Broker) resumeLivePlacement(ctx context.Context, req ProvisionRequest, 
 		err = b.restoreParkingAfterResume(ctx, node, sandboxID, result, err)
 	}()
 
-	resumed, err := b.provider.EnsureRunning(ctx, sandboxID)
+	resumed, err := prov.adapter.EnsureRunning(ctx, sandboxID)
 	if errors.Is(err, ErrSandboxNotFound) {
 		sandboxConfirmedAbsent = true
 		if markErr := b.markLost(ctx, node); markErr != nil {
@@ -254,7 +268,11 @@ func (b *Broker) resumeLivePlacement(ctx context.Context, req ProvisionRequest, 
 // joined into the returned error on failure paths, recorded on LeadStartError
 // when the resume otherwise succeeded.
 func (b *Broker) restoreParkingAfterResume(ctx context.Context, node *domain.Node, sandboxID string, result *ProvisionResult, err error) error {
-	restoreErr := b.armParkingAutostop(ctx, sandboxID)
+	prov, provErr := b.providerForNode(node)
+	if provErr != nil {
+		return provErr
+	}
+	restoreErr := b.armParkingAutostop(ctx, prov, sandboxID)
 	if restoreErr == nil {
 		return err
 	}
@@ -326,6 +344,10 @@ func (b *Broker) markLostResumeAbsent(ctx context.Context, node *domain.Node, sa
 }
 
 func (b *Broker) startOrReplaceRecordedSandbox(ctx context.Context, req ProvisionRequest, node *domain.Node, resumed bool) (result *ProvisionResult, sandboxAbsent bool, err error) {
+	prov, err := b.providerForNode(node)
+	if err != nil {
+		return nil, false, err
+	}
 	token, caps, err := b.mintToken(node, req.Caps)
 	if err != nil {
 		return nil, false, err
@@ -352,7 +374,7 @@ func (b *Broker) startOrReplaceRecordedSandbox(ctx context.Context, req Provisio
 	// once lead heartbeats land and shouldProbeLeadProcess stops firing.
 	if bootPlan.needsPrep() {
 		prepCtx, prepCancel := detachedTimeout(ctx, b.effectiveLeadBootPrepTimeout())
-		prepErr := b.provider.PrepareLeadBoot(prepCtx, sandboxID, bootPlan.prep)
+		prepErr := prov.adapter.PrepareLeadBoot(prepCtx, sandboxID, bootPlan.prep)
 		prepCancel()
 		if errors.Is(prepErr, ErrSandboxNotFound) {
 			if lostErr := b.markLostAfterBootNotFound(ctx, node, sandboxID); lostErr != nil {
@@ -408,9 +430,13 @@ func (b *Broker) markLeadProcessStarted(ctx context.Context, node *domain.Node, 
 }
 
 func (b *Broker) markLostAfterBootNotFound(ctx context.Context, node *domain.Node, sandboxID string) error {
+	prov, err := b.providerForNode(node)
+	if err != nil {
+		return err
+	}
 	confirmCtx, cancel := detachedTimeout(ctx, detachedProviderOperationTimeout)
 	defer cancel()
-	if _, err := b.provider.Get(confirmCtx, sandboxID); err == nil {
+	if _, err := prov.adapter.Get(confirmCtx, sandboxID); err == nil {
 		return fmt.Errorf("sandbox %q was reported missing by PTY create but Get still confirms it exists: %w", sandboxID, domain.ErrConflict)
 	} else if !errors.Is(err, ErrSandboxNotFound) {
 		return fmt.Errorf("confirm sandbox %q after PTY not found: %w", sandboxID, err)
@@ -463,11 +489,15 @@ func (b *Broker) recordLeadBootOutcome(ctx context.Context, result *ProvisionRes
 }
 
 func (b *Broker) tryStartLeadProcess(ctx context.Context, req ProvisionRequest, node *domain.Node, token string, bootPlan leadBootPlan, armAutostop bool) (leadBootOutcome, error) {
+	prov, err := b.providerForNode(node)
+	if err != nil {
+		return leadBootOutcome{node: node}, err
+	}
 	sandboxID := strings.TrimSpace(node.Placement.SandboxID)
 	if sandboxID == "" {
 		return leadBootOutcome{node: node}, fmt.Errorf("placement %q has no recorded sandbox id: %w", node.NodeID, domain.ErrInvalid)
 	}
-	hasLead, err := b.providerHasLeadPTY(ctx, sandboxID)
+	hasLead, err := b.providerHasLeadPTY(ctx, prov, sandboxID)
 	if err != nil {
 		return leadBootOutcome{node: node}, err
 	}
@@ -483,7 +513,7 @@ func (b *Broker) tryStartLeadProcess(ctx context.Context, req ProvisionRequest, 
 	}
 	startCtx, cancel := detachedTimeout(ctx, detachedProviderOperationTimeout)
 	defer cancel()
-	if err := b.provider.CreatePty(startCtx, sandboxID, processSpec(req, node, token, b.leadAPIBaseURL, bootPlan)); err != nil && !errors.Is(err, ErrPtySessionAlreadyExists) {
+	if err := prov.adapter.CreatePty(startCtx, sandboxID, processSpec(req, node, token, b.leadAPIBaseURL, bootPlan)); err != nil && !errors.Is(err, ErrPtySessionAlreadyExists) {
 		return leadBootOutcome{node: node}, err
 	}
 	// Confirms the PTY was not already gone at first observation. This catches
@@ -491,7 +521,7 @@ func (b *Broker) tryStartLeadProcess(ctx context.Context, req ProvisionRequest, 
 	// lead that dies seconds later; durable liveness is the heartbeat's job,
 	// not this probe's. A fixed delay would not close that gap either -- the
 	// slow failures (e.g. an in-sandbox store bootstrap) take seconds.
-	hasLead, err = b.providerHasLeadPTY(ctx, sandboxID)
+	hasLead, err = b.providerHasLeadPTY(ctx, prov, sandboxID)
 	if err != nil {
 		return leadBootOutcome{node: node}, err
 	}
@@ -503,7 +533,7 @@ func (b *Broker) tryStartLeadProcess(ctx context.Context, req ProvisionRequest, 
 		return leadBootOutcome{node: node}, err
 	}
 	if armAutostop {
-		if err := b.armParkingAutostop(ctx, sandboxID); err != nil {
+		if err := b.armParkingAutostop(ctx, prov, sandboxID); err != nil {
 			slog.WarnContext(ctx, "arm lead sandbox autostop failed",
 				"workspace", node.WorkspaceKey,
 				"placement", node.NodeID,
@@ -515,10 +545,10 @@ func (b *Broker) tryStartLeadProcess(ctx context.Context, req ProvisionRequest, 
 	return leadBootOutcome{node: started, started: true}, nil
 }
 
-func (b *Broker) providerHasLeadPTY(ctx context.Context, sandboxID string) (bool, error) {
+func (b *Broker) providerHasLeadPTY(ctx context.Context, prov providerHandle, sandboxID string) (bool, error) {
 	listCtx, cancel := detachedTimeout(ctx, detachedProviderOperationTimeout)
 	defer cancel()
-	sessions, err := b.provider.ListPtySessions(listCtx, sandboxID)
+	sessions, err := prov.adapter.ListPtySessions(listCtx, sandboxID)
 	if err != nil {
 		return false, err
 	}
@@ -530,17 +560,17 @@ func (b *Broker) providerHasLeadPTY(ctx context.Context, sandboxID string) (bool
 	return false, nil
 }
 
-func (b *Broker) armParkingAutostop(ctx context.Context, sandboxID string) error {
+func (b *Broker) armParkingAutostop(ctx context.Context, prov providerHandle, sandboxID string) error {
 	if b.parkingAutostopInterval <= 0 {
 		return nil
 	}
-	return b.setAutostopInterval(ctx, sandboxID, b.parkingAutostopInterval)
+	return b.setAutostopInterval(ctx, prov, sandboxID, b.parkingAutostopInterval)
 }
 
-func (b *Broker) setAutostopInterval(ctx context.Context, sandboxID string, interval time.Duration) error {
+func (b *Broker) setAutostopInterval(ctx context.Context, prov providerHandle, sandboxID string, interval time.Duration) error {
 	stopCtx, cancel := detachedTimeout(ctx, detachedProviderOperationTimeout)
 	defer cancel()
-	if err := b.provider.SetAutostopInterval(stopCtx, sandboxID, interval); err != nil {
+	if err := prov.adapter.SetAutostopInterval(stopCtx, sandboxID, interval); err != nil {
 		return fmt.Errorf("set sandbox %q autostop interval: %w", sandboxID, err)
 	}
 	return nil

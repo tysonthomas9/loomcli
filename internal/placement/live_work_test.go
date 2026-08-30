@@ -49,7 +49,7 @@ func TestLiveLeadDoesRealRepoWork(t *testing.T) {
 	st := memstore.New()
 	key := []byte("0123456789abcdef0123456789abcdef")
 	broker, err := placement.NewBroker(placement.Config{
-		Store: st, Provider: provider, TokenKey: key, DeploymentID: "mac-work",
+		Store: st, Providers: placement.ProviderRegistry{domain.RuntimeProviderDaytona: provider}, TokenKey: key, DeploymentID: "mac-work",
 	})
 	if err != nil {
 		t.Fatalf("NewBroker: %v", err)
@@ -96,13 +96,14 @@ func TestLiveLeadDoesRealRepoWork(t *testing.T) {
 
 	start := time.Now()
 	res, err := broker.Provision(ctx, placement.ProvisionRequest{
-		WorkspaceKey: ws,
-		AgentName:    agent,
-		SnapshotRef:  "loom-lead-poc-v2",
-		Caps:         []string{placement.CapLeadSession},
-		Resource:     placement.ResourceSize{VCPU: 2, MemGiB: 4},
-		Backend:      "codex",
-		GitToken:     gitToken,
+		WorkspaceKey:    ws,
+		AgentName:       agent,
+		SnapshotRef:     "loom-lead-poc-v2",
+		Caps:            []string{placement.CapLeadSession},
+		Resource:        placement.ResourceSize{VCPU: 2, MemGiB: 4},
+		RuntimeProvider: domain.RuntimeProviderDaytona,
+		Backend:         "codex",
+		GitToken:        gitToken,
 		SeedFiles: []placement.SandboxFile{
 			{Path: "/root/.codex/auth.json", Content: authJSON, Mode: "600"},
 		},
