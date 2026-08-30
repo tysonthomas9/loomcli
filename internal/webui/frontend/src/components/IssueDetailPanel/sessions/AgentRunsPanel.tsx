@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
+import { useStore } from "zustand";
 
+import { useIssueStoreInstance } from "@/hooks/common";
 import { useAgentSessions } from "@/hooks/terminal";
 import type { SessionRecord } from "@/types/agent";
 import { sessionTotalTokens } from "@/utils/sessionUsage";
 
 import { SessionDetailView } from "./SessionDetailView";
 import { SessionTimeline, type RunRailSummary } from "./SessionTimeline";
+import type { SessionRowLabel } from "./SessionTimelineRow";
 import styles from "./SessionsTab.module.css";
 
 export function AgentRunsPanel({
@@ -14,6 +17,8 @@ export function AgentRunsPanel({
   agentName: string;
 }): JSX.Element {
   const { sessions, isLoading, error } = useAgentSessions(agentName);
+  const issueStore = useIssueStoreInstance();
+  const issuesMap = useStore(issueStore, (state) => state.issuesMap);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
     null,
   );
@@ -32,6 +37,8 @@ export function AgentRunsPanel({
     sessions.find((session) => session.session_id === selectedSessionId) ??
     null;
   const summary = useMemo(() => computeSummary(sessions), [sessions]);
+  const getTicketLabel = (session: SessionRecord): SessionRowLabel =>
+    agentRunTicketLabel(session, issuesMap.get(session.task_id)?.title);
 
   if (error && sessions.length === 0) {
     return (
@@ -57,15 +64,32 @@ export function AgentRunsPanel({
           onSelect={setSelectedSessionId}
           isLoading={isLoading}
           summary={summary}
+          getRowLabel={getTicketLabel}
         />
         {selectedSession ? (
-          <SessionDetailView agentName={agentName} session={selectedSession} />
+          <SessionDetailView
+            agentName={agentName}
+            session={selectedSession}
+            contextLabel={getTicketLabel(selectedSession)}
+          />
         ) : (
           <div className={styles.detailEmpty}>Select a run to view details</div>
         )}
       </div>
     </div>
   );
+}
+
+export function agentRunTicketLabel(
+  session: SessionRecord,
+  issueTitle?: string,
+): SessionRowLabel {
+  const taskId = session.task_id.trim();
+  if (!taskId) return { primary: "Unassigned run" };
+
+  const title = issueTitle?.trim();
+  if (!title) return { primary: taskId };
+  return { primary: title, secondary: taskId };
 }
 
 function computeSummary(sessions: SessionRecord[]): RunRailSummary {

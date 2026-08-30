@@ -16,6 +16,12 @@ export interface SessionTimelineRowProps {
   session: SessionRecord;
   isSelected: boolean;
   onClick: () => void;
+  label?: SessionRowLabel;
+}
+
+export interface SessionRowLabel {
+  primary: string;
+  secondary?: string;
 }
 
 /** Format duration in seconds to "Xm Ys" */
@@ -61,6 +67,7 @@ export function SessionTimelineRow({
   session,
   isSelected,
   onClick,
+  label,
 }: SessionTimelineRowProps): JSX.Element {
   const totalTokens = sessionTotalTokens(session);
   const errorSummary = runErrorSummary(session);
@@ -71,6 +78,8 @@ export function SessionTimelineRow({
     session.lines_added > 0 ||
     session.lines_removed > 0;
   const showCost = (session.estimated_cost_usd ?? 0) > 0;
+  const primaryLabel = label?.primary ?? session.agent_name;
+  const accessibleLabel = label ? primaryLabel : `Run by ${session.agent_name}`;
 
   return (
     <div
@@ -84,7 +93,7 @@ export function SessionTimelineRow({
           onClick();
         }
       }}
-      aria-label={`Run by ${session.agent_name}, ${statusLabel}${errorSummary ? `, ${errorSummary}` : ""}`}
+      aria-label={`${accessibleLabel}, ${statusLabel}${errorSummary ? `, ${errorSummary}` : ""}`}
       data-testid={`session-row-${session.session_id}`}
     >
       <div className={styles.rowMain}>
@@ -94,9 +103,12 @@ export function SessionTimelineRow({
             data-status={session.status}
             aria-label={session.status}
           />
-          <span className={styles.agentName}>{session.agent_name}</span>
+          <span className={styles.agentName}>{primaryLabel}</span>
           {when && <span className={styles.rowWhen}>{when}</span>}
         </div>
+        {label?.secondary && (
+          <div className={styles.rowContext}>{label.secondary}</div>
+        )}
         <div className={styles.rowPills}>
           {session.phase && (
             <span className={styles.phaseBadge} data-phase={session.phase}>

@@ -22,11 +22,13 @@ import { formatTokens, sessionTotalTokens } from "@/utils/sessionUsage";
 
 import styles from "./SessionsTab.module.css";
 import { TranscriptWorklog } from "./TranscriptWorklog";
+import type { SessionRowLabel } from "./SessionTimelineRow";
 
 export interface SessionDetailViewProps {
   taskId?: string;
   agentName?: string;
   session: SessionRecord;
+  contextLabel?: SessionRowLabel;
 }
 
 type InnerTab = "transcript" | "diff";
@@ -64,6 +66,7 @@ export function SessionDetailView({
   taskId,
   agentName,
   session,
+  contextLabel,
 }: SessionDetailViewProps): JSX.Element {
   const [innerTab, setInnerTab] = useState<InnerTab>("transcript");
 
@@ -112,7 +115,17 @@ export function SessionDetailView({
       {/* ── Masthead ── */}
       <header className={styles.masthead}>
         <div className={styles.mastheadHeader}>
-          <span className={styles.agentName}>{session.agent_name}</span>
+          <span className={styles.agentName}>
+            {contextLabel?.primary ?? session.agent_name}
+          </span>
+          {contextLabel?.secondary && (
+            <>
+              <span className={styles.sep}>·</span>
+              <span className={styles.agentBackend}>
+                {contextLabel.secondary}
+              </span>
+            </>
+          )}
           <span className={styles.sep}>·</span>
           <span className={styles.agentBackend}>{session.backend}</span>
           {session.model && (

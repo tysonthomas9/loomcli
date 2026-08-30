@@ -59,6 +59,25 @@ describe("SessionTimelineRow", () => {
       expect(screen.getByText("nova")).toBeInTheDocument();
     });
 
+    it("renders a contextual ticket label instead of the redundant agent name", () => {
+      render(
+        <SessionTimelineRow
+          {...defaultProps}
+          label={{
+            primary: "Local mode coder dogfood",
+            secondary: "LOCALMODE-3",
+          }}
+        />,
+      );
+
+      expect(screen.getByText("Local mode coder dogfood")).toBeInTheDocument();
+      expect(screen.getByText("LOCALMODE-3")).toBeInTheDocument();
+      expect(screen.queryByText("nova")).not.toBeInTheDocument();
+      expect(
+        screen.getByLabelText("Local mode coder dogfood, Completed"),
+      ).toBeInTheDocument();
+    });
+
     it("renders with correct test id", () => {
       render(<SessionTimelineRow {...defaultProps} />);
       expect(screen.getByTestId("session-row-sess-1")).toBeInTheDocument();

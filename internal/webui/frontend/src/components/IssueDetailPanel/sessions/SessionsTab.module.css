@@ -202,6 +202,17 @@
   flex-shrink: 0;
 }
 
+.rowContext {
+  min-width: 0;
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .rowPills {
   display: flex;
   flex-wrap: wrap;
