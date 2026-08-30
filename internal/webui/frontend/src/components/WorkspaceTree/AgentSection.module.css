@@ -211,28 +211,3 @@
   padding-top: 0.375rem;
   padding-bottom: 0.375rem;
 }
-
-.serviceCardButton {
-  width: 100%;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: background-color 0.15s ease;
-}
-
-.serviceCardButton:hover {
-  background: var(--color-bg-hover);
-}
-
-.serviceCardButton:focus-visible {
-  outline: 2px solid var(--color-focus);
-  outline-offset: -2px;
-}
-
-.serviceCard {
-  border-bottom: none;
-}

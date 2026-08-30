@@ -7,8 +7,9 @@ import type React from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
 
-import { AgentCard } from "@/components/AgentCard";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
+  useAgentServiceMutations,
   useAgentStoreInstance,
   useAgentServices,
   useDeleteWorkspaceAgent,
@@ -75,8 +76,11 @@ export function AgentSection({
   } = useWorkspaceContext();
   const { showToast } = useToast();
   const deleteAgent = useDeleteWorkspaceAgent();
+  const agentServiceMutations = useAgentServiceMutations(workspaceId);
   const [agentOrder, setAgentOrder] = useState<string[]>([]);
   const [contextMenu, setContextMenu] = useState<AgentMenuState | null>(null);
+  const [serviceToRemove, setServiceToRemove] = useState<string | null>(null);
+  const [removingService, setRemovingService] = useState(false);
   const prsView = activeView === "prs";
   const addClick = prsView ? undefined : onAddClick;
   const { services: allAgentServices } = useAgentServices(workspaceId, {
@@ -87,6 +91,10 @@ export function AgentSection({
   const agentServices = useMemo(
     () => (prsView ? [] : allAgentServices),
     [allAgentServices, prsView],
+  );
+  const serviceById = useMemo(
+    () => new Map(agentServices.map((record) => [record.id, record])),
+    [agentServices],
   );
 
   // Merge fleet agents with workspace config agents.
@@ -117,7 +125,14 @@ export function AgentSection({
       merged = [...orderedFleetAgents, ...configPlaceholders];
     }
     merged = withoutDurableAgentProjections(merged, agentServices);
-    if (!prsView) return merged;
+    if (!prsView) {
+      return [
+        ...merged,
+        ...agentServices.map((record) =>
+          agentServiceCardAgent(record, workspace?.name ?? ""),
+        ),
+      ];
+    }
     return merged.filter(isPRReviewerAgent);
   }, [
     agentServices,
@@ -164,10 +179,31 @@ export function AgentSection({
   const showBackgroundGroup =
     agentServices.length > 0 || (regular.length > 0 && background.length > 0);
 
+  const servicePresentations = useMemo(
+    () =>
+      Object.fromEntries(
+        agentServices.map((record) => [
+          record.id,
+          {
+            taskTitle: agentServiceCadenceLabel(record),
+            statusDotColor: agentServiceDotColor(record),
+            title: agentServiceDotTooltip(record),
+            testId: `autonomous-agent-${record.id}`,
+            state: agentServiceDotState(record),
+          },
+        ]),
+      ),
+    [agentServices],
+  );
+
   const handleArchive = useCallback(
     async (name: string) => {
       if (!workspaceId) return;
       setContextMenu(null);
+      if (serviceById.has(name)) {
+        setServiceToRemove(name);
+        return;
+      }
       try {
         await deleteAgent(workspaceId, name);
         showToast(`Agent ${name} archived`, { type: "success" });
@@ -176,8 +212,25 @@ export function AgentSection({
         showToast("Failed to archive agent", { type: "error" });
       }
     },
-    [deleteAgent, refetch, showToast, workspaceId],
+    [deleteAgent, refetch, serviceById, showToast, workspaceId],
   );
+
+  const confirmServiceRemoval = useCallback(async () => {
+    if (!serviceToRemove) return;
+    const record = serviceById.get(serviceToRemove);
+    setRemovingService(true);
+    try {
+      await agentServiceMutations.remove(serviceToRemove);
+      showToast(`Scheduled agent ${record?.name || serviceToRemove} removed`, {
+        type: "success",
+      });
+      setServiceToRemove(null);
+    } catch {
+      showToast("Failed to remove scheduled agent", { type: "error" });
+    } finally {
+      setRemovingService(false);
+    }
+  }, [agentServiceMutations, serviceById, serviceToRemove, showToast]);
 
   const handleAgentContextMenu = useCallback(
     (event: React.MouseEvent, name: string) => {
@@ -226,40 +279,9 @@ export function AgentSection({
             <SortableAgentList
               agents={background}
               listClassName={styles.subgroupList}
+              presentations={servicePresentations}
               {...listProps}
             />
-            {agentServices.map((record) => {
-              const name = record.name.trim() || record.id;
-              const cadence = agentServiceCadenceLabel(record);
-              const tooltip = agentServiceDotTooltip(record);
-              const cardAgent = agentServiceCardAgent(
-                record,
-                workspace?.name ?? "",
-              );
-              return (
-                <button
-                  type="button"
-                  key={record.id}
-                  className={styles.serviceCardButton}
-                  data-testid={`autonomous-agent-${record.id}`}
-                  data-selected={selectedAgentName === record.id || undefined}
-                  data-state={agentServiceDotState(record)}
-                  aria-label={`${name}, ${cadence}, ${tooltip}`}
-                  onClick={() => onAgentClick?.(record.id)}
-                  title={tooltip}
-                >
-                  <AgentCard
-                    agent={cardAgent}
-                    compact
-                    selected={selectedAgentName === record.id}
-                    showRepoBadge={false}
-                    taskTitle={cadence}
-                    statusDotColor={agentServiceDotColor(record)}
-                    className={styles.serviceCard}
-                  />
-                </button>
-              );
-            })}
           </div>
         ) : (
           <SortableAgentList
@@ -285,6 +307,22 @@ export function AgentSection({
         }}
         onClose={closeContextMenu}
       />
+      {serviceToRemove ? (
+        <ConfirmDialog
+          isOpen
+          title="Remove scheduled agent"
+          message={
+            <span>
+              Remove <strong>{serviceToRemove}</strong> and its trigger binding?
+              This cannot be undone.
+            </span>
+          }
+          confirmLabel={removingService ? "Removing…" : "Remove"}
+          variant="danger"
+          onConfirm={() => void confirmServiceRemoval()}
+          onCancel={() => setServiceToRemove(null)}
+        />
+      ) : null}
     </div>
   );
 }

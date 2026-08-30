@@ -34,6 +34,18 @@ export interface SortableAgentListProps {
   onAgentContextMenu?:
     | ((event: React.MouseEvent, agentName: string) => void)
     | undefined;
+  presentations?:
+    | Record<
+        string,
+        {
+          taskTitle?: string | undefined;
+          statusDotColor?: string | undefined;
+          title?: string | undefined;
+          testId?: string | undefined;
+          state?: string | undefined;
+        }
+      >
+    | undefined;
 }
 
 export function SortableAgentList({
@@ -46,6 +58,7 @@ export function SortableAgentList({
   listClassName,
   onArchive,
   onAgentContextMenu,
+  presentations,
 }: SortableAgentListProps): JSX.Element | null {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -85,20 +98,29 @@ export function SortableAgentList({
         strategy={verticalListSortingStrategy}
       >
         <div className={listClassName ?? styles.list}>
-          {agents.map((agent) => (
-            <SortableAgentRow
-              key={agent.name}
-              agent={agent}
-              taskTitle={agentTasks?.[agent.name]?.title}
-              onAgentClick={onAgentClick}
-              selected={
-                selectedAgentName != null &&
-                agent.name.toLowerCase() === selectedAgentName.toLowerCase()
-              }
-              onArchive={onArchive}
-              onContextMenu={onAgentContextMenu}
-            />
-          ))}
+          {agents.map((agent) => {
+            const presentation = presentations?.[agent.name];
+            return (
+              <SortableAgentRow
+                key={agent.name}
+                agent={agent}
+                taskTitle={
+                  presentation?.taskTitle ?? agentTasks?.[agent.name]?.title
+                }
+                statusDotColor={presentation?.statusDotColor}
+                title={presentation?.title}
+                testId={presentation?.testId}
+                state={presentation?.state}
+                onAgentClick={onAgentClick}
+                selected={
+                  selectedAgentName != null &&
+                  agent.name.toLowerCase() === selectedAgentName.toLowerCase()
+                }
+                onArchive={onArchive}
+                onContextMenu={onAgentContextMenu}
+              />
+            );
+          })}
         </div>
       </SortableContext>
     </DndContext>

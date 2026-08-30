@@ -2,7 +2,13 @@
  * @vitest-environment jsdom
  */
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -13,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   services: [] as AgentServiceDTO[],
   useAgentStoreInstance: vi.fn(),
   useWorkspaceContext: vi.fn(),
+  removeService: vi.fn(),
 }));
 
 vi.mock("@/hooks", async () => {
@@ -30,8 +37,34 @@ vi.mock("@/hooks", async () => {
       refresh: vi.fn(),
     }),
     useDeleteWorkspaceAgent: () => vi.fn(),
+    useAgentServiceMutations: () => ({
+      create: vi.fn(),
+      patch: vi.fn(),
+      remove: mocks.removeService,
+    }),
   };
 });
+
+vi.mock("@/components/ConfirmDialog", () => ({
+  ConfirmDialog: ({
+    isOpen,
+    title,
+    confirmLabel,
+    onConfirm,
+  }: {
+    isOpen: boolean;
+    title: string;
+    confirmLabel: string;
+    onConfirm: () => void;
+  }) =>
+    isOpen ? (
+      <div role="alertdialog" aria-label={title}>
+        <button type="button" onClick={onConfirm}>
+          {confirmLabel}
+        </button>
+      </div>
+    ) : null,
+}));
 
 vi.mock("@/hooks/ui", () => ({
   useToast: () => ({ showToast: vi.fn() }),
@@ -68,6 +101,7 @@ vi.mock("@/components/AgentCard", () => ({
   AgentCard: ({
     agent,
     taskTitle,
+    onClick,
   }: {
     agent: {
       name: string;
@@ -76,8 +110,13 @@ vi.mock("@/components/AgentCard", () => ({
       status: string;
     };
     taskTitle?: string;
+    onClick?: () => void;
   }) => (
-    <div data-testid={`agent-card-${agent.name}`} data-status={agent.status}>
+    <div
+      data-testid={`agent-card-${agent.name}`}
+      data-status={agent.status}
+      onClick={onClick}
+    >
       <span aria-label={`${agent.name} avatar`}>{agent.name.slice(0, 1)}</span>
       {agent.display_name}
       {agent.role_label}
@@ -122,6 +161,8 @@ function scout(overrides: Partial<AgentServiceDTO> = {}): AgentServiceDTO {
 describe("AgentSection scheduled background agents", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
+    mocks.removeService.mockResolvedValue(undefined);
     mocks.services = [];
     const store = createAgentStore();
     store.setState({ agents: [] });
@@ -152,8 +193,68 @@ describe("AgentSection scheduled background agents", () => {
     expect(screen.getByLabelText("scout avatar")).toBeInTheDocument();
     expect(screen.getByTestId("agent-card-scout")).toHaveTextContent("Scout");
 
-    fireEvent.click(screen.getByTestId("autonomous-agent-scout"));
+    fireEvent.click(screen.getByTestId("agent-card-scout"));
     expect(onAgentClick).toHaveBeenCalledWith("scout");
+  });
+
+  it("gives scheduled agents the shared archive and reorder controls", () => {
+    mocks.services = [scout()];
+
+    render(<AgentSection />);
+
+    expect(screen.getByLabelText("Archive scout")).toBeInTheDocument();
+    expect(screen.getByLabelText("Drag to reorder scout")).toBeInTheDocument();
+  });
+
+  it("confirms scheduled-agent removal through the service API", async () => {
+    mocks.services = [scout()];
+
+    render(<AgentSection />);
+
+    fireEvent.click(screen.getByLabelText("Archive scout"));
+    expect(
+      screen.getByRole("alertdialog", { name: "Remove scheduled agent" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+
+    await waitFor(() =>
+      expect(mocks.removeService).toHaveBeenCalledWith("scout"),
+    );
+  });
+
+  it("includes scheduled agents in the persisted background order", async () => {
+    mocks.services = [scout()];
+    const store = createAgentStore();
+    store.setState({
+      agents: [
+        {
+          name: "planner",
+          role: "plan",
+          branch: "",
+          status: "idle",
+          ahead: 0,
+          behind: 0,
+          workspace: "WS",
+        },
+      ],
+    });
+    mocks.useAgentStoreInstance.mockReturnValue(store);
+    localStorage.setItem(
+      "loom:WS:agent-section-order",
+      JSON.stringify(["scout", "planner"]),
+    );
+
+    render(<AgentSection />);
+
+    await waitFor(() => {
+      const cards = within(
+        screen.getByTestId("agent-section-background"),
+      ).getAllByTestId(/agent-card-/);
+      expect(cards.map((card) => card.getAttribute("data-testid"))).toEqual([
+        "agent-card-scout",
+        "agent-card-planner",
+      ]);
+    });
   });
 
   it("uses the single Add-agent entry when there are no instances", () => {
