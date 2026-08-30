@@ -20,10 +20,11 @@ var selectableByDesign = map[RuntimeProvider]bool{
 	RuntimeProviderCI:         true,
 	RuntimeProviderOther:      true,
 
-	// Registered so the reaper can sweep its orphans -- which is the opposite
-	// of letting callers create them. Flipping this to true means a caller can
-	// POST {"runtime_provider":"exe"} and have the server provision on it.
-	RuntimeProviderExe: false,
+	// A caller may POST {"runtime_provider":"exe"} and have the server
+	// provision on it. The one boundary exe does NOT clear is egress policy,
+	// which exe.dev cannot enforce; the adapter refuses a provision carrying an
+	// allowlist rather than silently granting open egress.
+	RuntimeProviderExe: true,
 }
 
 // sandboxPlacedByDesign is the second axis, declared per constant for the same
@@ -55,15 +56,42 @@ func TestSandboxPlacedRuntimeProviderMatchesDesign(t *testing.T) {
 	}
 }
 
-// TestExeIsSandboxPlacedButNotSelectable pins the distinction the two axes
-// exist to express, since collapsing them is the easy mistake: exe leads ARE
-// sandbox-placed, and a caller still must not be able to ask for one.
-func TestExeIsSandboxPlacedButNotSelectable(t *testing.T) {
+// TestRuntimeProviderAxesAreIndependent pins the distinction the two axes
+// exist to express, since collapsing them is the easy mistake: "a caller may
+// ask for it" and "its leads live in a remote sandbox" are different
+// questions, and one must never be implemented in terms of the other.
+//
+// It asserts the shape rather than one provider's current value, so it keeps
+// working as providers move across either axis -- which they do: exe was
+// sandbox-placed-but-not-selectable until its boundaries were signed off.
+func TestRuntimeProviderAxesAreIndependent(t *testing.T) {
+	// local is the standing witness: selectable by every caller, and its leads
+	// are plain local processes.
+	if !ClientSelectableRuntimeProvider(RuntimeProviderLocal) {
+		t.Error("local must stay client-selectable")
+	}
+	if SandboxPlacedRuntimeProvider(RuntimeProviderLocal) {
+		t.Error("local leads are not sandbox-placed")
+	}
+
+	differs := false
+	for provider := range selectableByDesign {
+		if ClientSelectableRuntimeProvider(provider) != SandboxPlacedRuntimeProvider(provider) {
+			differs = true
+			break
+		}
+	}
+	if !differs {
+		t.Error("the two axes agree on every provider; one is being derived from the other")
+	}
+}
+
+// TestExeIsSandboxPlaced pins the half of exe's classification that does not
+// depend on a review decision: wherever it is selectable or not, its leads run
+// in a remote VM and must be provisioned, attached and reaped as such.
+func TestExeIsSandboxPlaced(t *testing.T) {
 	if !SandboxPlacedRuntimeProvider(RuntimeProviderExe) {
 		t.Error("exe leads are placed in a sandbox")
-	}
-	if ClientSelectableRuntimeProvider(RuntimeProviderExe) {
-		t.Error("exe must not be client-selectable")
 	}
 }
 

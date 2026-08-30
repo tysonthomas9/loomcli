@@ -25,11 +25,11 @@ const (
 	RuntimeProviderE2B        RuntimeProvider = "e2b"
 	RuntimeProviderKubernetes RuntimeProvider = "kubernetes"
 	RuntimeProviderDaytona    RuntimeProvider = "daytona"
-	// RuntimeProviderExe is registered in the Go enum only. What keeps a client
-	// from selecting it is ClientSelectableRuntimeProvider below -- NOT its
-	// absence from the OpenAPI schema, which enforces nothing: the agents
-	// handler decodes request JSON into a hand-written Go struct, and the
-	// decoder ignores unknown fields rather than rejecting them.
+	// RuntimeProviderExe is client-selectable. Note that its absence from the
+	// OpenAPI schema would enforce nothing anyway: the agents handler decodes
+	// request JSON into a hand-written Go struct, and the decoder ignores
+	// unknown fields rather than rejecting them. The only gate that has ever
+	// mattered is ClientSelectableRuntimeProvider below.
 	RuntimeProviderExe   RuntimeProvider = "exe"
 	RuntimeProviderCI    RuntimeProvider = "ci"
 	RuntimeProviderOther RuntimeProvider = "other"
@@ -133,15 +133,28 @@ type NodePlacement struct {
 // So adding a provider to the enum must NOT add it here. A provider is listed
 // only once running caller-chosen workloads on it is a reviewed decision --
 // which for a sandbox provider means its credential handling, egress policy
-// and quota accounting have all been signed off. RuntimeProviderExe is
-// deliberately absent: it is registered so the reaper can sweep its orphans,
-// which is the opposite of letting callers create them.
+// and quota accounting have all been signed off.
+//
+// RuntimeProviderExe is listed. What was signed off, explicitly:
+//
+//	credential handling -- serve holds the exe.dev token and the lead never
+//	  does. The occupant token reaches the VM over SSH under trust-on-first-use
+//	  host-key pinning, so a substituted host is detected after the first
+//	  connection but not on it.
+//	quota accounting -- exe gets its own MaxLiveByProvider slice, enforced in
+//	  addition to the account-wide MaxLive.
+//	egress policy -- NOT enforceable. exe.dev has no equivalent of Daytona's
+//	  create-time domain allow list. The adapter therefore REFUSES a provision
+//	  carrying an allowlist unless the operator has opted in to open egress,
+//	  rather than accepting one it cannot honor. Selecting exe means accepting
+//	  that its leads reach the network unrestricted.
 func ClientSelectableRuntimeProvider(p RuntimeProvider) bool {
 	switch p {
 	case RuntimeProviderLocal,
 		RuntimeProviderE2B,
 		RuntimeProviderKubernetes,
 		RuntimeProviderDaytona,
+		RuntimeProviderExe,
 		RuntimeProviderCI,
 		RuntimeProviderOther:
 		return true

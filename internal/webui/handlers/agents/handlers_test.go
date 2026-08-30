@@ -449,8 +449,12 @@ func (f *fakeLeadProvisioner) ProvisionForAgent(_ context.Context, ws, name stri
 // the OpenAPI schema and the UI. Neither enforces anything at runtime: this
 // handler decodes the request body into a hand-written Go struct, and
 // encoding/json ignores unknown fields rather than rejecting them, so the only
-// thing that can refuse "exe" is server-side validation. A curl command is the
-// whole threat model.
+// thing that can refuse a provider is server-side validation. A curl command is
+// the whole threat model.
+//
+// "exe" moved to the ACCEPTED side when it was signed off as client-selectable.
+// The negative case is deliberately kept -- an undeclared provider name, which
+// is what a caller probing this endpoint actually sends.
 func TestHandleCreateRejectsNonSelectableRuntimeProviderFromRawJSON(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
@@ -468,9 +472,9 @@ func TestHandleCreateRejectsNonSelectableRuntimeProviderFromRawJSON(t *testing.T
 		wantCode int
 	}{
 		{
-			name:     "exe is refused",
+			name:     "exe is accepted now that it is client-selectable",
 			body:     `{"name":"lead-exe","role_name":"lead","runtime_provider":"exe"}`,
-			wantCode: http.StatusBadRequest,
+			wantCode: http.StatusCreated,
 		},
 		{
 			name:     "unknown provider is refused",
@@ -499,7 +503,7 @@ func TestHandleCreateRejectsNonSelectableRuntimeProviderFromRawJSON(t *testing.T
 
 	// The refused agents must not have been persisted -- a rejected create that
 	// still writes the row is the failure mode that matters.
-	for _, name := range []string{"lead-exe", "lead-bogus"} {
+	for _, name := range []string{"lead-bogus"} {
 		if _, err := st.Agents().Get(ctx, "TEST2", name); err == nil {
 			t.Fatalf("agent %q was persisted despite a rejected create", name)
 		}

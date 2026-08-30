@@ -403,10 +403,12 @@ func TestCreateAgentRuntimeProvider(t *testing.T) {
 		{name: "ci", provider: domain.RuntimeProviderCI},
 		{name: "other", provider: domain.RuntimeProviderOther},
 		{name: "invalid", provider: domain.RuntimeProvider("unknown"), wantErr: true},
-		// exe exists in the enum so the reaper can sweep its orphans. A caller
-		// must not be able to provision on it. See
-		// domain.ClientSelectableRuntimeProvider.
-		{name: "exe is not client-selectable", provider: domain.RuntimeProviderExe, wantErr: true},
+		// exe became client-selectable once its credential handling and quota
+		// accounting were signed off; its egress policy cannot be enforced, so
+		// the adapter refuses a provision carrying an allowlist. See
+		// domain.ClientSelectableRuntimeProvider. "unknown" above is the case
+		// that still proves the boundary rejects anything unlisted.
+		{name: "exe", provider: domain.RuntimeProviderExe},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
