@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"testing"
 
@@ -62,6 +63,15 @@ func (m *mockUnhealthyBackend) HealthCheck() HealthStatus {
 		APIKeySet: false,
 		Message:   "binary not found",
 	}
+}
+
+type mockHealthStatusBackend struct {
+	mockBackend
+	status HealthStatus
+}
+
+func (m *mockHealthStatusBackend) HealthCheck() HealthStatus {
+	return m.status
 }
 
 // mockConfigurableBackend implements Backend + ConfigurableBackend.
@@ -297,6 +307,19 @@ func TestBackendHealthJSON(t *testing.T) {
 			t.Fatalf("runBackendHealth: %v", err)
 		}
 	})
+	wantJSON := "[\n" +
+		"  {\n" +
+		"    \"name\": \"good\",\n" +
+		"    \"healthy\": true,\n" +
+		"    \"installed\": true,\n" +
+		"    \"version\": \"1.0.0\",\n" +
+		"    \"api_key_set\": true,\n" +
+		"    \"message\": \"ready\"\n" +
+		"  }\n" +
+		"]\n"
+	if out != wantJSON {
+		t.Fatalf("backend health JSON changed:\ngot:\n%s\nwant:\n%s", out, wantJSON)
+	}
 
 	var entries []backendHealthEntry
 	if err := json.Unmarshal([]byte(out), &entries); err != nil {
@@ -311,22 +334,40 @@ func TestBackendHealthJSON(t *testing.T) {
 	if entries[0].Message != "ready" {
 		t.Errorf("expected message 'ready', got %q", entries[0].Message)
 	}
+	var rawEntries []map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(out), &rawEntries); err != nil {
+		t.Fatalf("decode JSON key set: %v", err)
+	}
+	keys := make([]string, 0, len(rawEntries[0]))
+	for key := range rawEntries[0] {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	const wantKeys = "api_key_set,healthy,installed,message,name,version"
+	if got := strings.Join(keys, ","); got != wantKeys {
+		t.Fatalf("backend health JSON keys = %s, want %s", got, wantKeys)
+	}
 }
 
 func TestBackendHealthUsesCanonicalProjectionAndCodedExit(t *testing.T) {
 	resetBackendState(t)
-	RegisterBackend(&mockUnhealthyBackend{mockBackend: mockBackend{name: "bad"}})
+	status := HealthStatus{
+		Healthy:   false,
+		Installed: true,
+		Version:   "1.2.3-test",
+		APIKeySet: true,
+		Message:   "binary not found",
+	}
+	RegisterBackend(&mockHealthStatusBackend{mockBackend: mockBackend{name: "bad"}, status: status})
 
 	row := buildHealthEntry("bad")
-	status, ok := CheckBackendHealth("bad")
+	canonical, ok := CheckBackendHealth("bad")
 	if !ok {
 		t.Fatal("CheckBackendHealth(bad) = false")
 	}
 	info := buildInfoOutput("bad", InspectCapabilities(mustBackend(t, "bad")))
-	if info.Health == nil || row.Healthy != status.Healthy || row.Installed != status.Installed ||
-		row.APIKeySet != status.APIKeySet || row.Version != status.Version || row.Message != status.Message ||
-		*info.Health != status {
-		t.Fatalf("health projections drifted: row=%+v info=%+v canonical=%+v", row, info.Health, status)
+	if info.Health == nil || row.HealthStatus != canonical || *info.Health != canonical {
+		t.Fatalf("health projections drifted: row=%+v info=%+v canonical=%+v", row, info.Health, canonical)
 	}
 
 	stdout, stderr, err := executeBackendCommand(t, "backend", "health")

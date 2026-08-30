@@ -25,6 +25,7 @@ func TestRunControlledLeadRuntimeMatchesCanonicalBackendSet(t *testing.T) {
 	}
 	handled := []string{backendnames.Codex}
 	foundCodexSpecialCase := false
+	foundHarnessInvocationCall := false
 	ast.Inspect(file, func(node ast.Node) bool {
 		fn, ok := node.(*ast.FuncDecl)
 		if !ok || fn.Name.Name != "harnessLeadInvocation" {
@@ -56,14 +57,21 @@ func TestRunControlledLeadRuntimeMatchesCanonicalBackendSet(t *testing.T) {
 			return true
 		}
 		ast.Inspect(fn.Body, func(node ast.Node) bool {
-			binary, ok := node.(*ast.BinaryExpr)
-			if !ok || binary.Op != token.EQL {
-				return true
-			}
-			left, leftOK := binary.X.(*ast.Ident)
-			right, rightOK := binary.Y.(*ast.Ident)
-			if leftOK && rightOK && left.Name == "backend" && right.Name == "NameCodex" {
-				foundCodexSpecialCase = true
+			switch expression := node.(type) {
+			case *ast.BinaryExpr:
+				if expression.Op != token.EQL {
+					return true
+				}
+				left, leftOK := expression.X.(*ast.Ident)
+				right, rightOK := expression.Y.(*ast.Ident)
+				if leftOK && rightOK && left.Name == "backend" && right.Name == "NameCodex" {
+					foundCodexSpecialCase = true
+				}
+			case *ast.CallExpr:
+				callee, ok := expression.Fun.(*ast.Ident)
+				if ok && callee.Name == "harnessLeadInvocation" {
+					foundHarnessInvocationCall = true
+				}
 			}
 			return true
 		})
@@ -71,6 +79,9 @@ func TestRunControlledLeadRuntimeMatchesCanonicalBackendSet(t *testing.T) {
 	})
 	if !foundCodexSpecialCase {
 		t.Fatal("RunControlledLeadRuntime no longer has the Codex special case")
+	}
+	if !foundHarnessInvocationCall {
+		t.Fatal("RunControlledLeadRuntime no longer calls harnessLeadInvocation")
 	}
 	want := backendnames.ControlledLeadBackends()
 	sort.Strings(handled)
@@ -135,37 +146,55 @@ func TestRunControlledLeadRuntimeDispatchesClaude(t *testing.T) {
 }
 
 func TestRunControlledLeadRuntimeDispatchesGenericBackends(t *testing.T) {
-	cases := map[string]struct {
-		args   []string
-		binary string // backend name and exec binary differ for cursor (cursor-agent)
+	expectations := map[string]struct {
+		args           []string
+		binary         string // backend name and exec binary differ for cursor (cursor-agent)
+		dynamicSession bool
 	}{
-		"gemini":   {[]string{"--approval-mode=yolo"}, "gemini"},
-		"cursor":   {[]string{"--force"}, "cursor-agent"},
-		"opencode": {nil, "opencode"},
+		backendnames.Claude:   {binary: "claude", dynamicSession: true},
+		backendnames.Gemini:   {args: []string{"--approval-mode=yolo"}, binary: "gemini"},
+		backendnames.Cursor:   {args: []string{"--force"}, binary: "cursor-agent"},
+		backendnames.OpenCode: {binary: "opencode"},
 	}
-	for backend, want := range cases {
-		captured := installFakeHarnessLead(t)
-		handled, err := RunControlledLeadRuntime(context.Background(), nil, "WS", "nova", "lead-session", "/repo", "prompt", backend)
-		if err != nil {
-			t.Fatalf("%s: RunControlledLeadRuntime() error = %v", backend, err)
+	for _, backend := range backendnames.ControlledLeadBackends() {
+		if backend == backendnames.Codex {
+			continue
 		}
-		if !handled {
-			t.Fatalf("%s lead should be handled by the controlled runtime", backend)
+		want, ok := expectations[backend]
+		if !ok {
+			t.Fatalf("canonical backend %q has no behavioral dispatch expectation", backend)
 		}
-		if captured.Backend != backend || captured.BinaryPath != want.binary {
-			t.Fatalf("%s: captured config = %+v", backend, captured)
-		}
-		if !slices.Equal(captured.Args, want.args) {
-			t.Fatalf("%s: captured args = %q, want %q", backend, captured.Args, want.args)
-		}
-		if backend == "opencode" && captured.PromptFlag != "--prompt" {
-			t.Fatalf("opencode: PromptFlag = %q, want --prompt", captured.PromptFlag)
-		}
-		for _, kv := range captured.Env {
-			if strings.HasPrefix(kv, "CLAUDE_CODE_NO_FLICKER=") {
-				t.Fatalf("%s: Claude-only virtual scroll mode leaked into env: %#v", backend, captured.Env)
+		t.Run(backend, func(t *testing.T) {
+			captured := installFakeHarnessLead(t)
+			handled, err := RunControlledLeadRuntime(context.Background(), nil, "WS", "nova", "lead-session", "/repo", "prompt", backend)
+			if err != nil {
+				t.Fatalf("RunControlledLeadRuntime() error = %v", err)
 			}
-		}
+			if !handled {
+				t.Fatal("lead should be handled by the controlled runtime")
+			}
+			if captured.Backend != backend || captured.BinaryPath != want.binary {
+				t.Fatalf("captured config = %+v", captured)
+			}
+			if want.dynamicSession {
+				if len(captured.Args) != 3 || captured.Args[0] != "--session-id" || captured.Args[2] != "--dangerously-skip-permissions" {
+					t.Fatalf("captured args = %q, want dynamic Claude session args", captured.Args)
+				}
+			} else if !slices.Equal(captured.Args, want.args) {
+				t.Fatalf("captured args = %q, want %q", captured.Args, want.args)
+			}
+			if backend == backendnames.OpenCode && captured.PromptFlag != "--prompt" {
+				t.Fatalf("PromptFlag = %q, want --prompt", captured.PromptFlag)
+			}
+			if backend == backendnames.Claude {
+				return
+			}
+			for _, kv := range captured.Env {
+				if strings.HasPrefix(kv, "CLAUDE_CODE_NO_FLICKER=") {
+					t.Fatalf("Claude-only virtual scroll mode leaked into env: %#v", captured.Env)
+				}
+			}
+		})
 	}
 }
 

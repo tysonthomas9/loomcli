@@ -75,6 +75,13 @@ func healthyProbe(string) (HealthStatus, bool) {
 	return HealthStatus{Healthy: true, Installed: true, APIKeySet: true, Message: "ready"}, true
 }
 
+func checkWithProbe(t *testing.T, ctx context.Context, st targetStore, req Request, probe healthProbe) (Result, error) {
+	t.Helper()
+	restore := SetHealthCheckerForTest(probe)
+	t.Cleanup(restore)
+	return CheckLocalTaskRunner(ctx, st, req)
+}
+
 func TestCheckLocalTaskRunnerResolutionPrecedence(t *testing.T) {
 	t.Setenv("LOOM_BACKEND", "claude")
 	cases := []struct {
@@ -139,7 +146,7 @@ func TestCheckLocalTaskRunnerResolutionPrecedence(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var checked string
-			result, err := checkLocalTaskRunner(context.Background(), tc.store, tc.request, func(name string) (HealthStatus, bool) {
+			result, err := checkWithProbe(t, context.Background(), tc.store, tc.request, func(name string) (HealthStatus, bool) {
 				checked = name
 				return healthyProbe(name)
 			})
@@ -182,7 +189,7 @@ func TestCheckLocalTaskRunnerClassification(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := checkLocalTaskRunner(context.Background(), nil, Request{BackendOverride: tc.backend}, func(string) (HealthStatus, bool) {
+			result, err := checkWithProbe(t, context.Background(), nil, Request{BackendOverride: tc.backend}, func(string) (HealthStatus, bool) {
 				return tc.status, tc.probeOK
 			})
 			if err != nil {
@@ -209,7 +216,8 @@ func TestCheckLocalTaskRunnerClassification(t *testing.T) {
 
 func TestStepOneGateParityCanonicalCheck(t *testing.T) {
 	fixture := loadGateParityFixture(t, "testdata/gate-parity.json")
-	result, err := checkLocalTaskRunner(
+	result, err := checkWithProbe(
+		t,
 		context.Background(),
 		targetStoreStub{profile: &domain.DaemonProfile{AgentBackend: fixture.Backend}},
 		Request{WorkspaceKey: fixture.Workspace},
@@ -244,8 +252,9 @@ func loadGateParityFixture(t *testing.T, path string) gateParityFixture {
 
 func assertGateParityResult(t *testing.T, result Result, fixture gateParityFixture) {
 	t.Helper()
-	if result.ErrorClass != fixture.ErrorClass || result.Message != fixture.Message {
-		t.Fatalf("verdict = class:%q message:%q, want class:%q message:%q", result.ErrorClass, result.Message, fixture.ErrorClass, fixture.Message)
+	if result.Backend != fixture.Backend || result.Health == nil || *result.Health != fixture.Health ||
+		result.ErrorClass != fixture.ErrorClass || result.Message != fixture.Message {
+		t.Fatalf("verdict = %+v, want backend:%q health:%+v class:%q message:%q", result, fixture.Backend, fixture.Health, fixture.ErrorClass, fixture.Message)
 	}
 }
 
@@ -266,7 +275,7 @@ func TestCheckLocalTaskRunnerResolutionFailures(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			called := false
-			result, err := checkLocalTaskRunner(context.Background(), tc.store, tc.request, func(string) (HealthStatus, bool) {
+			result, err := checkWithProbe(t, context.Background(), tc.store, tc.request, func(string) (HealthStatus, bool) {
 				called = true
 				return healthyProbe("")
 			})
@@ -290,7 +299,7 @@ func TestCheckLocalTaskRunnerContextCanceledBeforeProbe(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	called := false
-	result, err := checkLocalTaskRunner(ctx, nil, Request{BackendOverride: "codex"}, func(string) (HealthStatus, bool) {
+	result, err := checkWithProbe(t, ctx, nil, Request{BackendOverride: "codex"}, func(string) (HealthStatus, bool) {
 		called = true
 		return healthyProbe("")
 	})
@@ -310,7 +319,7 @@ func TestCheckLocalTaskRunnerContextCanceledBeforeProbe(t *testing.T) {
 
 func TestCheckLocalTaskRunnerKeepsAdapterDetailOutOfAuthoredFields(t *testing.T) {
 	const adapterDetail = "Authorization: Bearer secret-value"
-	result, err := checkLocalTaskRunner(context.Background(), nil, Request{BackendOverride: "codex"}, func(string) (HealthStatus, bool) {
+	result, err := checkWithProbe(t, context.Background(), nil, Request{BackendOverride: "codex"}, func(string) (HealthStatus, bool) {
 		return HealthStatus{Installed: true, APIKeySet: true, Message: adapterDetail}, true
 	})
 	if err != nil {

@@ -129,8 +129,9 @@ func assertEpicGateParity(t *testing.T, err error, fixture epicGateParityFixture
 	if !errors.As(err, &notReady) {
 		t.Fatalf("epic gate error = %T %v, want *NotReadyError", err, err)
 	}
-	if notReady.Result.ErrorClass != fixture.ErrorClass || notReady.Result.Message != fixture.Message {
-		t.Fatalf("epic gate = class:%q message:%q, want class:%q message:%q", notReady.Result.ErrorClass, notReady.Result.Message, fixture.ErrorClass, fixture.Message)
+	if notReady.Result.Backend != fixture.Backend || notReady.Result.Health == nil || *notReady.Result.Health != fixture.Health ||
+		notReady.Result.ErrorClass != fixture.ErrorClass || notReady.Result.Message != fixture.Message {
+		t.Fatalf("epic gate = %+v, want backend:%q health:%+v class:%q message:%q", notReady.Result, fixture.Backend, fixture.Health, fixture.ErrorClass, fixture.Message)
 	}
 }
 

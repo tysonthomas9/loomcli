@@ -128,12 +128,8 @@ var backendHealthCmd = &cobra.Command{
 }
 
 type backendHealthEntry struct {
-	Name      string `json:"name"`
-	Healthy   bool   `json:"healthy"`
-	Installed bool   `json:"installed"`
-	Version   string `json:"version"`
-	APIKeySet bool   `json:"api_key_set"`
-	Message   string `json:"message"`
+	Name string `json:"name"`
+	HealthStatus
 }
 
 func runBackendHealth(cmd *cobra.Command, _ []string) error {
@@ -175,11 +171,7 @@ func buildHealthEntry(name string) backendHealthEntry {
 		e.Message = "no health check available"
 		return e
 	}
-	e.Healthy = hs.Healthy
-	e.Installed = hs.Installed
-	e.Version = hs.Version
-	e.APIKeySet = hs.APIKeySet
-	e.Message = hs.Message
+	e.HealthStatus = hs
 	return e
 }
 

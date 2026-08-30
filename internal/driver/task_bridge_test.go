@@ -18,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/localbackend"
 	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
+	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -105,6 +106,78 @@ func TestHostBridgeTaskExecutorGatesConfiguredLocalRunnerAndBindsCheckedBackend(
 	}
 	if result.RuntimeMetadata["checked_backend"] != "gemini" {
 		t.Fatalf("runtime metadata = %+v, want checked backend gemini", result.RuntimeMetadata)
+	}
+}
+
+func TestHostBridgeTaskExecutorRechecksPersistedAgentBackendAfterQueue(t *testing.T) {
+	ctx, st, run := setupRunningDriverRun(t)
+	const workerProfileID = "worker-race"
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "TEST",
+		Name:         workerProfileID,
+		RoleName:     "task",
+		Backend:      "claude",
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if _, err := st.WorkerProfiles().Create(ctx, store.WorkerProfileCreate{
+		WorkspaceKey: "TEST",
+		ProfileID:    workerProfileID,
+		Role:         "task",
+	}); err != nil {
+		t.Fatalf("create worker profile: %v", err)
+	}
+
+	var probedBackends []string
+	restore := runtimepreflight.SetHealthCheckerForTest(func(name string) (runtimepreflight.HealthStatus, bool) {
+		probedBackends = append(probedBackends, name)
+		return runtimepreflight.HealthStatus{Healthy: true, Installed: true, APIKeySet: true, Message: "ready"}, true
+	})
+	t.Cleanup(restore)
+	executor := HostBridgeTaskExecutor{
+		Store:            st,
+		WorktreePath:     t.TempDir(),
+		Command:          hostBridgeHelperCommand(t, "backend-env", "unused", "unused"),
+		PreflightChecker: runtimepreflight.NewLocalTaskRunnerChecker(st),
+	}
+	queued, err := EnqueueTaskRunWithResult(ctx, st, TaskRunRequestOptions{
+		WorkspaceKey:    "TEST",
+		DriverRunID:     run.RunID,
+		TaskRunID:       "task-run-agent-backend-race",
+		TaskID:          "TEST-1",
+		WorkerProfileID: workerProfileID,
+		Runner:          "local-task-runner",
+		ParentNodeID:    run.NodeID,
+		ParentLeaseID:   run.LeaseID,
+		ParentFence:     run.FencingToken,
+	}, executor)
+	if err != nil {
+		t.Fatalf("enqueue task run: %v", err)
+	}
+	if len(probedBackends) != 0 {
+		t.Fatalf("backend probe ran before launch: %v", probedBackends)
+	}
+
+	updatedBackend := "gemini"
+	if _, err := st.Agents().Update(ctx, "TEST", workerProfileID, store.AgentUpdate{Backend: &updatedBackend}); err != nil {
+		t.Fatalf("update agent backend: %v", err)
+	}
+	outcome, err := ClaimAndExecuteTaskRunWithResult(ctx, st, TaskRunWorkerOptions{
+		WorkspaceKey:      "TEST",
+		TaskRunID:         queued.Run.TaskRunID,
+		NodeID:            "node-1",
+		RunnerID:          "runner-agent-backend-race",
+		WorkerProfileIDs:  []string{workerProfileID},
+		HeartbeatInterval: -1,
+	}, executor)
+	if err != nil {
+		t.Fatalf("claim and execute task run: %v", err)
+	}
+	if !slices.Equal(probedBackends, []string{updatedBackend}) {
+		t.Fatalf("probed backends = %v, want only updated backend %q", probedBackends, updatedBackend)
+	}
+	if got := outcome.Run.RuntimeMetadata["checked_backend"]; got != updatedBackend {
+		t.Fatalf("bound %s = %q, want %q", TaskRunnerBackendEnv, got, updatedBackend)
 	}
 }
 
