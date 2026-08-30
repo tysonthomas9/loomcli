@@ -138,6 +138,25 @@ type EventData struct {
 	CreatedAt time.Time         `json:"created_at"`
 }
 
+// EventHistoryParams configures an issue event-history request. A nil Since
+// requests the most recent tail; a non-nil Since requests one forward page.
+type EventHistoryParams struct {
+	Limit int
+	Since *string
+}
+
+// EventHistoryData carries issue events together with the fleet-db stream
+// metadata needed to distinguish a complete result from a partial page.
+type EventHistoryData struct {
+	Events []EventData
+	// Cursor is set only for a forward Since page. Newest-tail responses omit
+	// it; clients start a separate forward walk with an empty Since cursor.
+	Cursor  string
+	HasMore bool
+	// TotalEvents is zero when the backend cannot report an exact history size.
+	TotalEvents int
+}
+
 // StatsData contains aggregate issue statistics.
 // Fields mirror types.Statistics so no data is dropped during mapping.
 type StatsData struct {
@@ -191,6 +210,13 @@ type MutationData struct {
 type CursorMutationBackend interface {
 	GetMutationsAfter(ctx context.Context, since string) ([]MutationData, error)
 	WaitForMutationsAfter(ctx context.Context, since string, timeoutMs int64) ([]MutationData, error)
+}
+
+// EventHistoryBackend is an optional IssueBackend extension for honest issue
+// history pagination. It preserves ListEvents' newest-tail behavior when Since
+// is nil and exposes one forward fleet-db page when Since is non-nil.
+type EventHistoryBackend interface {
+	ListEventHistory(ctx context.Context, id string, params EventHistoryParams) (*EventHistoryData, error)
 }
 
 // ---------------------------------------------------------------------------

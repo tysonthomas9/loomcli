@@ -158,6 +158,19 @@ type RemoveDependencyParams struct {
 type EventListParams struct {
 	IssueID string
 	Limit   int
+	Since   *string
+}
+
+// EventListResult carries issue events and completeness metadata to the HTTP
+// handler without exposing backend wire types.
+type EventListResult struct {
+	Events []*types.Event
+	// Cursor is set only for a forward Since page. Newest-tail responses omit
+	// it; callers start a separate forward walk with an empty Since cursor.
+	Cursor  string
+	HasMore bool
+	// TotalEvents is zero when the backend cannot report an exact history size.
+	TotalEvents int
 }
 
 // SearchIssuesParams holds the parameters for full-text search.
@@ -188,6 +201,7 @@ type IssueService interface {
 	RemoveDependency(ctx context.Context, params RemoveDependencyParams) error
 	ListDependencies(ctx context.Context, issueID string) (json.RawMessage, error)
 	ListEvents(ctx context.Context, params EventListParams) ([]*types.Event, error)
+	ListEventHistory(ctx context.Context, params EventListParams) (*EventListResult, error)
 	MoveIssue(ctx context.Context, params MoveIssueParams) (*MoveIssueResult, error)
 	SearchIssues(ctx context.Context, params SearchIssuesParams) (json.RawMessage, error)
 }

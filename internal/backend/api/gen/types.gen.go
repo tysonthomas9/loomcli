@@ -3405,8 +3405,11 @@ type GetGraphParamsStatus string
 
 // GetIssueEventsParams defines parameters for GetIssueEvents.
 type GetIssueEventsParams struct {
-	// Limit Maximum number of recent events to return
+	// Limit Maximum events to return. Without `since`, Loom returns the most recent tail and accepts up to 500. With `since`, Loom returns one oldest-first page and clamps the limit to fleet-db's 200-event page maximum.
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Since Opaque fleet-db history cursor. When present (including an empty value), returns one oldest-first page; a bare `since=` starts at the beginning of the issue history.
+	Since *string `form:"since,omitempty" json:"since,omitempty"`
 }
 
 // SaveIssueTabsJSONBody defines parameters for SaveIssueTabs.

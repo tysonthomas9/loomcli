@@ -712,3 +712,9 @@ func TestFleetDBIssueBackend_FailsClosedWhenStoreUnavailable(t *testing.T) {
 	_, err = ib.WaitForMutations(ctx, 0, 1)
 	assertUnavailable("WaitForMutations", err)
 }
+
+func TestFleetDBIssueBackendPreservesEventHistoryCapability(t *testing.T) {
+	if _, ok := newFleetDBIssueBackend().(backend.EventHistoryBackend); !ok {
+		t.Fatal("fleetDBIssueBackend should preserve EventHistoryBackend")
+	}
+}

@@ -313,6 +313,30 @@ func TestListEvents_Backend_Unavailable_NilBackend(t *testing.T) {
 	}
 }
 
+func TestListEventHistory_LegacyBackendLeavesTotalUnknown(t *testing.T) {
+	now := time.Now().UTC()
+	fb := &fakeIssueBackend{
+		listEventsResult: []backend.EventData{{
+			ID:        "1",
+			IssueID:   "test-1",
+			Kind:      "issue.created",
+			CreatedAt: now,
+		}},
+	}
+	svc := newServiceWithFake(fb)
+
+	result, err := svc.ListEventHistory(context.Background(), EventListParams{IssueID: "test-1", Limit: 100})
+	if err != nil {
+		t.Fatalf("ListEventHistory: %v", err)
+	}
+	if len(result.Events) != 1 {
+		t.Fatalf("event count = %d, want 1", len(result.Events))
+	}
+	if result.TotalEvents != 0 {
+		t.Errorf("TotalEvents = %d, want 0 when the legacy backend has no total", result.TotalEvents)
+	}
+}
+
 // --- AddDependency / RemoveDependency ---
 
 func TestAddDependency_Backend_Success(t *testing.T) {

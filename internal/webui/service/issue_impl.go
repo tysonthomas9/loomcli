@@ -692,3 +692,61 @@ func (s *issueServiceImpl) ListEvents(ctx context.Context, params EventListParam
 	}
 	return events, nil
 }
+
+func (s *issueServiceImpl) ListEventHistory(ctx context.Context, params EventListParams) (*EventListResult, error) {
+	be, svcErr := s.resolveBackend(ctx)
+	if svcErr != nil {
+		return nil, svcErr
+	}
+
+	historyBackend, ok := be.(backend.EventHistoryBackend)
+	if !ok {
+		return s.legacyEventTail(ctx, params)
+	}
+
+	requestCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	data, err := historyBackend.ListEventHistory(requestCtx, params.IssueID, backend.EventHistoryParams{
+		Limit: params.Limit,
+		Since: params.Since,
+	})
+	if err != nil {
+		if backend.IsKind(err, backend.KindNotImplemented) {
+			return s.legacyEventTail(ctx, params)
+		}
+		slog.Error("backend error in ListEventHistory", "err", err)
+		return nil, translateBackendError(err)
+	}
+	return eventHistoryResult(data), nil
+}
+
+// legacyEventTail serves the pre-paging tail contract for backends without
+// event-history support. It cannot honor a cursor, so a since request is a
+// client error rather than a silently wrong page; totals stay unknown.
+func (s *issueServiceImpl) legacyEventTail(ctx context.Context, params EventListParams) (*EventListResult, error) {
+	if params.Since != nil {
+		return nil, ErrValidation("event history paging is not supported by this backend")
+	}
+	events, err := s.ListEvents(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	return &EventListResult{Events: events}, nil
+}
+
+func eventHistoryResult(data *backend.EventHistoryData) *EventListResult {
+	if data == nil {
+		return &EventListResult{Events: []*types.Event{}}
+	}
+	events := make([]*types.Event, 0, len(data.Events))
+	for _, event := range data.Events {
+		events = append(events, eventDataToTypesEvent(event))
+	}
+	return &EventListResult{
+		Events:      events,
+		Cursor:      data.Cursor,
+		HasMore:     data.HasMore,
+		TotalEvents: data.TotalEvents,
+	}
+}

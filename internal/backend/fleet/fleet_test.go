@@ -1606,20 +1606,6 @@ func TestListEvents_ReturnsMostRecentPageAcrossHistoryPagination(t *testing.T) {
 	}
 }
 
-// --- Not implemented surfaces (partial — implemented methods moved out) ---
-//
-// Count, Batch, GetMutations, and WaitForMutations used to live here as
-// ErrNotImplemented stubs; they are now wired against fleet-db endpoints
-// (see tests above). The only remaining KindNotImplemented paths are:
-//
-//   - Count with GroupBy set — Count cannot return grouped data through its
-//     int return value; callers must use Stats or (future) a GroupedCount API.
-//     This is exercised by TestCount_GroupByRejected.
-//
-// If future refactors reintroduce unimplemented stubs, add cases here.
-
-// --- Connection refused test ---
-
 func TestConnectionRefused(t *testing.T) {
 	fb, err := New(Config{
 		BaseURL:     "http://127.0.0.1:1", // port 1 is unlikely to be open
