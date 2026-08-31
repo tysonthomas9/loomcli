@@ -46,8 +46,10 @@ var envAllowlistExact = map[string]bool{
 	// leaks. This map is an ALLOWLIST for interactive/lead agents running on the
 	// host, which must authenticate and therefore need exactly those names. Wiring
 	// the two together would invert this file's meaning.
-	// Git hosting tokens (needed by container agents for git push)
-	"GITHUB_TOKEN": true, "GITHUB_TOKEN_FILE": true,
+	// Git hosting tokens (needed by container agents for git push). gh reads
+	// GH_TOKEN before GITHUB_TOKEN, and internal/driver/env.go already pairs
+	// them, so passing only one of the two leaves half the tooling unauthenticated.
+	"GITHUB_TOKEN": true, "GITHUB_TOKEN_FILE": true, "GH_TOKEN": true,
 	// E2E test stubs. Exact matches keep arbitrary STUB_* values out.
 	"STUB_CODEX_EPIC_RUNNER": true, "STUB_CODEX_INVOCATIONS": true,
 	// Editor

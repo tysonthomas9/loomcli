@@ -1,6 +1,7 @@
 package opsimpl
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -60,10 +61,22 @@ func (g *GitOpsImpl) RepairCheckout(workspaceID, scope, target, repoName string,
 		return ops.RepairResult{}, err
 	}
 	source, sourceOK := findRepairSource(ws, wsRoot, spec.repo, spec.path)
+	var result ops.RepairResult
 	if !exists {
-		return provisionMissingCheckout(source, sourceOK, spec)
+		result, err = provisionMissingCheckout(source, sourceOK, spec)
+	} else {
+		result, err = repairExistingCheckout(source, sourceOK, spec, force)
 	}
-	return repairExistingCheckout(source, sourceOK, spec, force)
+	if err != nil {
+		return ops.RepairResult{}, err
+	}
+	// Checkouts created before loom installed its env-token credential helper
+	// self-heal here. Best-effort on purpose: a helper that cannot be written
+	// is not a reason to report an otherwise-successful repair as failed.
+	if result.Repaired {
+		_ = localworkspace.EnsureCredentialHelper(context.Background(), spec.path)
+	}
+	return result, nil
 }
 
 // provisionMissingCheckout creates a checkout whose working directory is absent.
