@@ -7,6 +7,24 @@ import path from "path";
 // Defaults to the local Go server when VITE_API_BASE_URL is unset.
 const apiProxyTarget = process.env.VITE_API_BASE_URL || "http://localhost:8080";
 
+// Mirrors resolvePort() in playwright.config.ts. Duplicated deliberately:
+// importing it from there would pull @playwright/test into the Vite config
+// graph. A typo'd port must fail here exactly as it does there, so that Vite
+// never quietly binds the default while Playwright probes the intended port
+// (PUPPET-217).
+function resolvePort(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    throw new Error(`${name} must be an integer TCP port`);
+  }
+  return port;
+}
+
+const devPort = resolvePort("E2E_DEV_PORT", 3000);
+const previewPort = resolvePort("E2E_FRONTEND_PORT", 3000);
+
 function includesAny(id: string, needles: string[]): boolean {
   return needles.some((needle) => id.includes(needle));
 }
@@ -175,7 +193,7 @@ export default defineConfig(({ mode }) => ({
   },
 
   server: {
-    port: 3000,
+    port: devPort,
     // Fail fast if port is in use (ensures proxy aligns with Go backend)
     strictPort: true,
     // Proxy API calls to Go backend during development.
@@ -198,7 +216,7 @@ export default defineConfig(({ mode }) => ({
   },
 
   preview: {
-    port: 3000,
+    port: previewPort,
     strictPort: true,
     // Vite preview is used only for real integration tests, where the built
     // frontend must talk to the Go server. Keep this proxy enabled even when
