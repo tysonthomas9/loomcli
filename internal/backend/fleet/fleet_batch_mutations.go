@@ -44,40 +44,163 @@ func (w fleetCommentWire) toTypesComment() types.Comment {
 
 // --- Event operations ---
 
+type fleetEventWire struct {
+	ID        string                `json:"id"`
+	Timestamp time.Time             `json:"timestamp"`
+	Actor     string                `json:"actor"`
+	Action    string                `json:"action"`
+	Category  string                `json:"category"`
+	Summary   string                `json:"summary"`
+	Changes   []backend.FieldChange `json:"changes"`
+	Metadata  map[string]string     `json:"metadata"`
+}
+
+type fleetEventHistory struct {
+	History     []fleetEventWire `json:"history"`
+	Cursor      string           `json:"cursor"`
+	HasMore     bool             `json:"has_more"`
+	TotalEvents int              `json:"total_events"`
+}
+
 func (b *FleetBackend) ListEvents(ctx context.Context, id string, limit int) ([]backend.EventData, error) {
-	path := "/issues/" + url.PathEscape(id) + "/history"
-	if limit > 0 {
-		path += "?limit=" + strconv.Itoa(limit)
+	history, err := b.ListEventHistory(ctx, id, backend.EventHistoryParams{Limit: limit})
+	if err != nil {
+		return nil, err
 	}
+	if history == nil {
+		return []backend.EventData{}, nil
+	}
+	return history.Events, nil
+}
+
+// ListEventHistory returns the newest event tail when Since is nil and one
+// oldest-first fleet-db page when Since is non-nil. Tail responses carry no
+// cursor; HasMore reports whether their oldest events were trimmed.
+func (b *FleetBackend) ListEventHistory(
+	ctx context.Context,
+	id string,
+	params backend.EventHistoryParams,
+) (*backend.EventHistoryData, error) {
+	const (
+		historyPageLimit    = 200
+		defaultHistoryLimit = 50
+	)
+	limit := params.Limit
+	if limit <= 0 {
+		limit = defaultHistoryLimit
+	}
+	if params.Since != nil {
+		if limit > historyPageLimit {
+			limit = historyPageLimit
+		}
+		return b.eventHistoryForwardPage(ctx, id, *params.Since, limit)
+	}
+	return b.eventHistoryTail(ctx, id, limit, historyPageLimit)
+}
+
+// eventHistoryForwardPage serves exactly one oldest-first fleet-db page,
+// passing the paging metadata through verbatim.
+func (b *FleetBackend) eventHistoryForwardPage(ctx context.Context, id, since string, limit int) (*backend.EventHistoryData, error) {
+	history, err := b.listEventHistoryPage(ctx, id, since, limit)
+	if err != nil {
+		return nil, err
+	}
+	if history == nil {
+		return &backend.EventHistoryData{Events: []backend.EventData{}}, nil
+	}
+	return &backend.EventHistoryData{
+		Events:      eventDataFromHistory(history.History, id),
+		Cursor:      history.Cursor,
+		HasMore:     history.HasMore,
+		TotalEvents: history.TotalEvents,
+	}, nil
+}
+
+// eventHistoryTail aggregates the most recent limit events. fleet-db's history
+// endpoint pages forward from the start of the issue stream, so follow its
+// cursor to the end and retain only the requested tail. A tail response
+// carries no cursor; has_more reports whether older events were trimmed.
+func (b *FleetBackend) eventHistoryTail(ctx context.Context, id string, limit, pageLimit int) (*backend.EventHistoryData, error) {
+	result := make([]backend.EventData, 0, limit)
+	totalEvents := 0
+	cursor := ""
+	for {
+		history, err := b.listEventHistoryPage(ctx, id, cursor, pageLimit)
+		if err != nil {
+			return nil, err
+		}
+		if history == nil {
+			return &backend.EventHistoryData{Events: []backend.EventData{}}, nil
+		}
+		result = append(result, eventDataFromHistory(history.History, id)...)
+		totalEvents = history.TotalEvents
+		if !history.HasMore {
+			break
+		}
+		if history.Cursor == "" || history.Cursor == cursor {
+			return nil, backend.ErrInternal(
+				"ListEvents",
+				"history response has_more without a new cursor",
+				nil,
+			)
+		}
+		cursor = history.Cursor
+	}
+
+	truncated := len(result) > limit
+	if truncated {
+		result = result[len(result)-limit:]
+	}
+	return &backend.EventHistoryData{
+		Events:      result,
+		HasMore:     truncated || totalEvents > len(result),
+		TotalEvents: totalEvents,
+	}, nil
+}
+
+func (b *FleetBackend) listEventHistoryPage(
+	ctx context.Context,
+	id string,
+	cursor string,
+	limit int,
+) (*fleetEventHistory, error) {
+	query := url.Values{}
+	query.Set("limit", strconv.Itoa(limit))
+	if cursor != "" {
+		query.Set("since", cursor)
+	}
+	path := "/issues/" + url.PathEscape(id) + "/history?" + query.Encode()
 	resp, err := b.exec(ctx, "ListEvents", "GET", path, nil)
 	if err != nil {
 		return nil, err
 	}
 	if !hasData(resp) {
-		return []backend.EventData{}, nil
+		return nil, nil
 	}
-	var history struct {
-		History []struct {
-			ID        string    `json:"id"`
-			Timestamp time.Time `json:"timestamp"`
-			Actor     string    `json:"actor"`
-			Action    string    `json:"action"`
-		} `json:"history"`
-	}
+
+	var history fleetEventHistory
 	if err := json.Unmarshal(resp.Data, &history); err != nil {
 		return nil, backend.ErrInternal("ListEvents", "unmarshal response", err)
 	}
-	result := make([]backend.EventData, 0, len(history.History))
-	for _, e := range history.History {
+	return &history, nil
+}
+
+func eventDataFromHistory(history []fleetEventWire, issueID string) []backend.EventData {
+	result := make([]backend.EventData, 0, len(history))
+	for _, event := range history {
 		result = append(result, backend.EventData{
-			ID:        e.ID,
-			IssueID:   id,
-			Kind:      e.Action,
-			Actor:     e.Actor,
-			CreatedAt: e.Timestamp,
+			ID:        event.ID,
+			IssueID:   issueID,
+			Kind:      event.Action,
+			Actor:     event.Actor,
+			Category:  event.Category,
+			Summary:   event.Summary,
+			Changes:   event.Changes,
+			Metadata:  event.Metadata,
+			CreatedAt: event.Timestamp,
 		})
 	}
-	return result, nil
+	return result
 }
 
 // --- Batch operations ---

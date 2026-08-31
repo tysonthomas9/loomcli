@@ -103,7 +103,10 @@
 /* Responsive: mobile layout — bottom nav padding */
 @media (width <= 768px) {
   .contentWrapper {
-    padding-bottom: var(--nav-bottom-height);
+    /* Reserve real layout space for the fixed iPad navigation dock. Padding
+       was consumed by full-height child views and still let the dock cover
+       their scroll regions. */
+    margin-bottom: var(--nav-bottom-height);
   }
 
   .sidebarSlot {

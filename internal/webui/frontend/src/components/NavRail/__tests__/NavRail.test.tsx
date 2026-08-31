@@ -15,6 +15,12 @@ import { NavRail, WORKSPACE_SWITCHER_LIST_MAX_HEIGHT_PX } from "../NavRail";
 
 describe("NavRail", () => {
   describe("rendering", () => {
+    it("renders a Home button", () => {
+      render(<NavRail activeView="home" onChange={() => {}} />);
+
+      expect(screen.getByLabelText("Home")).toBeInTheDocument();
+    });
+
     it("renders a Workspaces button", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
@@ -76,11 +82,11 @@ describe("NavRail", () => {
       expect(screen.getByLabelText("Skills")).toBeInTheDocument();
     });
 
-    it("renders exactly six navigation buttons", () => {
+    it("renders exactly seven navigation buttons", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       const buttons = screen.getAllByRole("button");
-      expect(buttons).toHaveLength(6);
+      expect(buttons).toHaveLength(7);
     });
 
     it("renders tooltips for each button", () => {
@@ -92,6 +98,7 @@ describe("NavRail", () => {
         "span.tooltip, [class*='tooltip']",
       );
       const tooltipTexts = Array.from(tooltips).map((t) => t.textContent);
+      expect(tooltipTexts).toContain("Home");
       expect(tooltipTexts).toContain("Workspaces");
       expect(tooltipTexts).not.toContain("Agents");
       expect(tooltipTexts).toContain("Pull Requests");
@@ -113,16 +120,17 @@ describe("NavRail", () => {
       ).toBeInTheDocument();
     });
 
-    it("renders buttons in correct order: Workspaces, Pull Requests, Terminal, Files, Skills, Settings", () => {
+    it("renders Home first, followed by the existing navigation order", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       const buttons = screen.getAllByRole("button");
-      expect(buttons[0]).toHaveAccessibleName("Workspaces");
-      expect(buttons[1]).toHaveAccessibleName("Pull Requests");
-      expect(buttons[2]).toHaveAccessibleName("Terminal");
-      expect(buttons[3]).toHaveAccessibleName("Files");
-      expect(buttons[4]).toHaveAccessibleName("Skills");
-      expect(buttons[5]).toHaveAccessibleName("Settings");
+      expect(buttons[0]).toHaveAccessibleName("Home");
+      expect(buttons[1]).toHaveAccessibleName("Workspaces");
+      expect(buttons[2]).toHaveAccessibleName("Pull Requests");
+      expect(buttons[3]).toHaveAccessibleName("Terminal");
+      expect(buttons[4]).toHaveAccessibleName("Files");
+      expect(buttons[5]).toHaveAccessibleName("Skills");
+      expect(buttons[6]).toHaveAccessibleName("Settings");
     });
 
     it("has navigation landmark with aria-label", () => {
@@ -141,6 +149,15 @@ describe("NavRail", () => {
 
       expect(settingsButton).toHaveAttribute("data-active");
       expect(workspacesButton).not.toHaveAttribute("data-active");
+    });
+
+    it("marks Home as active when activeView is home", () => {
+      render(<NavRail activeView="home" onChange={() => {}} />);
+
+      expect(screen.getByLabelText("Home")).toHaveAttribute("data-active");
+      expect(screen.getByLabelText("Workspaces")).not.toHaveAttribute(
+        "data-active",
+      );
     });
 
     it("marks Workspaces as active when activeView is kanban", () => {
@@ -190,6 +207,15 @@ describe("NavRail", () => {
   });
 
   describe("interactions", () => {
+    it('calls onChange with "home" when Home is clicked', () => {
+      const onChange = vi.fn();
+      render(<NavRail activeView="kanban" onChange={onChange} />);
+
+      fireEvent.click(screen.getByLabelText("Home"));
+
+      expect(onChange).toHaveBeenCalledWith("home");
+    });
+
     it('calls onChange with "kanban" when Workspaces button is clicked', () => {
       const onChange = vi.fn();
       render(<NavRail activeView="settings" onChange={onChange} />);
@@ -293,6 +319,32 @@ describe("NavRail", () => {
       // Other buttons do not contain the badge
       const workspacesButton = screen.getByLabelText("Workspaces");
       expect(workspacesButton).not.toContainElement(badge);
+    });
+  });
+
+  describe("operator queue badge", () => {
+    it("renders the queue count on Home only when it is positive", () => {
+      const { rerender } = render(
+        <NavRail
+          activeView="kanban"
+          onChange={() => {}}
+          operatorQueueCount={3}
+        />,
+      );
+
+      const badge = screen.getByTestId("nav-home-badge");
+      expect(badge).toHaveTextContent("3");
+      expect(badge).toHaveAccessibleName("3 items need you");
+      expect(screen.getByLabelText("Home")).toContainElement(badge);
+
+      rerender(
+        <NavRail
+          activeView="kanban"
+          onChange={() => {}}
+          operatorQueueCount={0}
+        />,
+      );
+      expect(screen.queryByTestId("nav-home-badge")).not.toBeInTheDocument();
     });
   });
 

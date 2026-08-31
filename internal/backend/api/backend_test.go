@@ -1317,8 +1317,8 @@ func TestListEvents_HappyPath(t *testing.T) {
 	ab, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path + "?" + r.URL.RawQuery
 		respondOK(w, []gen.IssueEvent{
-			{Id: 1, IssueId: "loom-1", EventType: "create", Actor: "alice", CreatedAt: now},
-			{Id: 2, IssueId: "loom-1", EventType: "update", Actor: "bob", CreatedAt: now},
+			{Id: "1-0", IssueId: "loom-1", EventType: "create", Actor: "alice", CreatedAt: now},
+			{Id: "2-0", IssueId: "loom-1", EventType: "update", Actor: "bob", CreatedAt: now},
 		})
 	})
 	defer ts.Close()
@@ -1330,7 +1330,7 @@ func TestListEvents_HappyPath(t *testing.T) {
 	if len(result) != 2 {
 		t.Fatalf("len = %d", len(result))
 	}
-	if result[0].ID != "1" {
+	if result[0].ID != "1-0" {
 		t.Errorf("ID = %q", result[0].ID)
 	}
 	if strings.Contains(gotPath, "limit=") {

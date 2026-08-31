@@ -12,7 +12,7 @@ import (
 
 func (b *FleetBackend) applyLabelUpdates(ctx context.Context, id string, params backend.UpdateParams) error {
 	for _, label := range params.AddLabels {
-		if err := b.AddLabel(ctx, id, label); err != nil {
+		if err := b.addLabel(ctx, id, label, params.Actor); err != nil {
 			return err
 		}
 		if err := b.waitForLabelState(ctx, id, label, true); err != nil {
@@ -22,8 +22,9 @@ func (b *FleetBackend) applyLabelUpdates(ctx context.Context, id string, params 
 	for _, label := range params.RemoveLabels {
 		// params.Force only ever applies to labels the caller named explicitly;
 		// the SetLabels reconciliation below never forces, so a wholesale set
-		// cannot strip a reserved label by accident.
-		if err := b.removeLabel(ctx, id, label, params.Force); err != nil {
+		// cannot strip a reserved label by accident. params.Actor attributes the
+		// write; empty leaves the process identity in place.
+		if err := b.removeLabel(ctx, id, label, params.Force, params.Actor); err != nil {
 			return err
 		}
 		if err := b.waitForLabelState(ctx, id, label, false); err != nil {
@@ -39,7 +40,7 @@ func (b *FleetBackend) applyLabelUpdates(ctx context.Context, id string, params 
 	}
 	for _, label := range current.Labels {
 		if !containsString(params.SetLabels, label) {
-			if err := b.RemoveLabel(ctx, id, label); err != nil {
+			if err := b.removeLabel(ctx, id, label, false, params.Actor); err != nil {
 				return err
 			}
 			if err := b.waitForLabelState(ctx, id, label, false); err != nil {
@@ -49,7 +50,7 @@ func (b *FleetBackend) applyLabelUpdates(ctx context.Context, id string, params 
 	}
 	for _, label := range params.SetLabels {
 		if !containsString(current.Labels, label) {
-			if err := b.AddLabel(ctx, id, label); err != nil {
+			if err := b.addLabel(ctx, id, label, params.Actor); err != nil {
 				return err
 			}
 			if err := b.waitForLabelState(ctx, id, label, true); err != nil {

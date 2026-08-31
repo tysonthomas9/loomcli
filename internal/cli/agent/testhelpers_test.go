@@ -86,7 +86,9 @@ type mockBackend struct {
 	interactiveCalls []struct {
 		workDir, prompt, agentName string
 	}
-	interactiveErr error
+	interactiveErr     error
+	nonInteractiveErr  error
+	nonInteractiveFunc func(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error
 }
 
 func (m *mockBackend) Name() string { return m.name }
@@ -97,7 +99,10 @@ func (m *mockBackend) InvokeInteractive(workDir, prompt, agentName string) error
 	return m.interactiveErr
 }
 func (m *mockBackend) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
-	return nil
+	if m.nonInteractiveFunc != nil {
+		return m.nonInteractiveFunc(workDir, prompt, agentName, shutdown, collector)
+	}
+	return m.nonInteractiveErr
 }
 
 // defaultResolver is a package-level Resolver for tests.

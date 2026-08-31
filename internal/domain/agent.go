@@ -511,10 +511,16 @@ type Agent struct {
 	Auto             bool     `json:"auto,omitempty"`
 	Backend          string   `json:"backend,omitempty"`
 	FallbackBackends []string `json:"fallback_backends,omitempty"`
-	Repos            []string `json:"repos,omitempty"`
-	RepoGroups       []string `json:"repo_groups,omitempty"`
-	CrossRepo        bool     `json:"cross_repo,omitempty"`
-	Parent           string   `json:"parent,omitempty"`
+	// Repos/RepoGroups are always serialized (no omitempty): the API contract
+	// declares both required (api/openapi.yaml WorkspaceAgentInfo), and the web
+	// UI dereferences them as arrays. Omitting them on an empty agent shipped
+	// `undefined` to the frontend, crashing the freshly-created (optimistically
+	// inserted, un-refetched) agent render. Read paths coalesce nil to [] so an
+	// empty agent serializes as [] rather than null.
+	Repos      []string `json:"repos"`
+	RepoGroups []string `json:"repo_groups"`
+	CrossRepo  bool     `json:"cross_repo,omitempty"`
+	Parent     string   `json:"parent,omitempty"`
 	// OrchestratorSessionID was here historically as a cache of the
 	// lead-to-orchestration AgentSession join. AgentSession is the
 	// single source of truth; use store.OrchestrationSessionIDFor.

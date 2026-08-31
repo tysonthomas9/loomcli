@@ -59,6 +59,7 @@ import type { SessionRecord } from "@/types/agent";
 
 import {
   ActivityLog,
+  Journey,
   CommentForm,
   DependencySection,
   EditableDescription,
@@ -68,6 +69,7 @@ import {
   PRSection,
   RejectCommentForm,
 } from "./sections";
+import { decisionButtonStyles } from "@/components/DecisionButton";
 import { IssueHeader } from "./header";
 import { AssigneeDropdown, RepoDropdown } from "./fields";
 import { ConfirmDialog } from "../ConfirmDialog";
@@ -277,6 +279,8 @@ const SESSIONS_TAB: DetailTab = {
   label: "Runs",
   closable: false,
 };
+
+const ISSUE_EVENT_LIMIT = 200;
 
 function latestFailedRun(sessions: SessionRecord[]): SessionRecord | null {
   const sorted = [...sessions].sort(
@@ -771,6 +775,7 @@ function DefaultContent({
 
   // Local state for events (activity log)
   const [events, setEvents] = useState<Event[]>([]);
+  const eventsRequestIdRef = useRef(0);
 
   // Sync local comments when issue changes (e.g., different issue selected)
   useEffect(() => {
@@ -781,26 +786,31 @@ function DefaultContent({
     }
   }, [issue]);
 
-  // Fetch events when issue changes
+  // Fetch one shared event list for Journey and Activity. The parent merges
+  // live issue mutations into this prop, including updated_at, so the revision
+  // is the same signal that refreshes the status pill.
   const eventIssueId = issue?.id;
+  const eventIssueRevision = issue?.updated_at;
   useEffect(() => {
+    const requestId = ++eventsRequestIdRef.current;
     if (!eventIssueId) {
       setEvents([]);
       return;
     }
-    let cancelled = false;
-    getIssueEvents(workspaceId, eventIssueId).then(
+    getIssueEvents(workspaceId, eventIssueId, ISSUE_EVENT_LIMIT).then(
       (data) => {
-        if (!cancelled) setEvents(data ?? []);
+        if (requestId === eventsRequestIdRef.current) setEvents(data ?? []);
       },
       () => {
-        if (!cancelled) setEvents([]);
+        if (requestId === eventsRequestIdRef.current) setEvents([]);
       },
     );
     return () => {
-      cancelled = true;
+      if (requestId === eventsRequestIdRef.current) {
+        eventsRequestIdRef.current += 1;
+      }
     };
-  }, [eventIssueId]);
+  }, [eventIssueId, eventIssueRevision, workspaceId]);
 
   // Handler for when a new comment is added
   const handleCommentAdded = useCallback((newComment: Comment) => {
@@ -1286,7 +1296,7 @@ function DefaultContent({
         <div className={styles.reviewActionBar} data-testid="review-action-bar">
           <button
             type="button"
-            className={styles.reviewApproveButton}
+            className={`${decisionButtonStyles.button} ${decisionButtonStyles.approve}`}
             onClick={handleApprove}
             disabled={isApproving || approveBlockedReason !== null}
             title={approveBlockedReason ?? undefined}
@@ -1297,7 +1307,7 @@ function DefaultContent({
           </button>
           <button
             type="button"
-            className={styles.reviewRejectButton}
+            className={`${decisionButtonStyles.button} ${decisionButtonStyles.reject}`}
             onClick={handleRejectClick}
             disabled={approveBlockedReason !== null}
             title={approveBlockedReason ?? undefined}
@@ -1555,12 +1565,10 @@ function DefaultContent({
               </section>
             )}
 
-            {/* Activity Log (comments + events) */}
-            <ActivityLog
-              comments={localComments ?? []}
-              events={events}
-              issueId={issue.id}
-            />
+            <Journey events={events} eventLimit={ISSUE_EVENT_LIMIT} />
+
+            {/* Comments (audit events are nested in Journey spans) */}
+            <ActivityLog comments={localComments ?? []} issueId={issue.id} />
             <CommentForm
               issueId={issue.id}
               onCommentAdded={handleCommentAdded}
@@ -1674,16 +1682,16 @@ export function IssueDetailPanel({
 }: IssueDetailPanelProps): JSX.Element {
   const panelRef = useRef<HTMLElement>(null);
 
-  // Full-page maximize toggle for the slide-over.
-  const [isMaximized, setIsMaximized] = useState(false);
+  // Open as a full content workspace by default, matching the PR review detail
+  // model. The header toggle still lets users collapse it to a side panel.
+  const [isMaximized, setIsMaximized] = useState(true);
   const toggleMaximize = useCallback(() => setIsMaximized((v) => !v), []);
-  // Reset to the default slide-over width when the panel closes or the
-  // selected issue changes, so a maximized panel doesn't "stick" across opens.
+  // Each newly opened issue starts in the shared full-workspace detail model.
   useEffect(() => {
-    if (!isOpen) setIsMaximized(false);
+    if (!isOpen) setIsMaximized(true);
   }, [isOpen]);
   useEffect(() => {
-    setIsMaximized(false);
+    setIsMaximized(true);
   }, [issue?.id]);
 
   // Handle Escape key to close panel via global shortcut layer system.

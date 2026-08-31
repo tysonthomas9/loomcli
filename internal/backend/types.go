@@ -115,15 +115,46 @@ type CommentData struct {
 	EditedAt  *time.Time `json:"edited_at,omitempty"`
 }
 
+// FieldChange is one before/after field delta carried by an issue history
+// event. Values remain strings because that is fleet-db's timeline contract.
+type FieldChange struct {
+	Field  string `json:"field"`
+	Before string `json:"before,omitempty"`
+	After  string `json:"after,omitempty"`
+}
+
 // EventData represents an event/history entry for an issue.
 type EventData struct {
-	ID        string    `json:"id"`
-	IssueID   string    `json:"issue_id"`
-	Kind      string    `json:"kind"`
-	Actor     string    `json:"actor,omitempty"`
-	Target    string    `json:"target,omitempty"`
-	Payload   string    `json:"payload,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        string            `json:"id"`
+	IssueID   string            `json:"issue_id"`
+	Kind      string            `json:"kind"`
+	Actor     string            `json:"actor,omitempty"`
+	Target    string            `json:"target,omitempty"`
+	Payload   string            `json:"payload,omitempty"`
+	Category  string            `json:"category,omitempty"`
+	Summary   string            `json:"summary,omitempty"`
+	Changes   []FieldChange     `json:"changes,omitempty"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
+	CreatedAt time.Time         `json:"created_at"`
+}
+
+// EventHistoryParams configures an issue event-history request. A nil Since
+// requests the most recent tail; a non-nil Since requests one forward page.
+type EventHistoryParams struct {
+	Limit int
+	Since *string
+}
+
+// EventHistoryData carries issue events together with the fleet-db stream
+// metadata needed to distinguish a complete result from a partial page.
+type EventHistoryData struct {
+	Events []EventData
+	// Cursor is set only for a forward Since page. Newest-tail responses omit
+	// it; clients start a separate forward walk with an empty Since cursor.
+	Cursor  string
+	HasMore bool
+	// TotalEvents is zero when the backend cannot report an exact history size.
+	TotalEvents int
 }
 
 // StatsData contains aggregate issue statistics.
@@ -153,7 +184,7 @@ type CloseResult struct {
 // Used by GetMutations and WaitForMutations.
 //
 // MutationData mirrors rpc.MutationEvent but is backend-agnostic. The
-// BeadsBackend subscription layer (task .11) maps rpc.MutationEvent to
+// The backend subscription layer maps rpc.MutationEvent to
 // MutationData. Other backends produce MutationData directly.
 type MutationData struct {
 	Cursor     string    `json:"cursor,omitempty"`
@@ -179,6 +210,13 @@ type MutationData struct {
 type CursorMutationBackend interface {
 	GetMutationsAfter(ctx context.Context, since string) ([]MutationData, error)
 	WaitForMutationsAfter(ctx context.Context, since string, timeoutMs int64) ([]MutationData, error)
+}
+
+// EventHistoryBackend is an optional IssueBackend extension for honest issue
+// history pagination. It preserves ListEvents' newest-tail behavior when Since
+// is nil and exposes one forward fleet-db page when Since is non-nil.
+type EventHistoryBackend interface {
+	ListEventHistory(ctx context.Context, id string, params EventHistoryParams) (*EventHistoryData, error)
 }
 
 // ---------------------------------------------------------------------------
@@ -453,6 +491,9 @@ func (p CreateParams) IdempotencyHeaders() map[string]string {
 // When Claim is true, the atomic claim operation takes precedence over
 // an explicit Status field in the same request.
 type UpdateParams struct {
+	// Actor overrides the backend's configured process actor for writes
+	// performed by this update. Empty preserves the configured actor.
+	Actor              string   `json:"-"`
 	Title              *string  `json:"title,omitempty"`
 	Description        *string  `json:"description,omitempty"`
 	Status             *string  `json:"status,omitempty"`
@@ -483,6 +524,8 @@ type UpdateParams struct {
 
 // CloseParams contains fields for closing an issue.
 type CloseParams struct {
+	// Actor overrides the backend process identity for this mutation only.
+	Actor       string `json:"-"`
 	Reason      string `json:"reason,omitempty"`
 	Session     string `json:"session,omitempty"`
 	SuggestNext bool   `json:"suggest_next,omitempty"`
@@ -491,6 +534,8 @@ type CloseParams struct {
 
 // ReopenParams contains fields for reopening a closed issue.
 type ReopenParams struct {
+	// Actor overrides the backend process identity for this mutation only.
+	Actor  string `json:"-"`
 	Reason string `json:"reason,omitempty"`
 }
 
@@ -506,6 +551,8 @@ type DeleteParams struct {
 
 // DepAddParams contains fields for adding a dependency between issues.
 type DepAddParams struct {
+	// Actor overrides the backend process identity for this mutation only.
+	Actor   string `json:"-"`
 	FromID  string `json:"from_id"`
 	ToID    string `json:"to_id"`
 	DepType string `json:"dep_type"`
@@ -513,6 +560,8 @@ type DepAddParams struct {
 
 // DepRemoveParams contains fields for removing a dependency between issues.
 type DepRemoveParams struct {
+	// Actor overrides the backend process identity for this mutation only.
+	Actor   string `json:"-"`
 	FromID  string `json:"from_id"`
 	ToID    string `json:"to_id"`
 	DepType string `json:"dep_type,omitempty"`
@@ -520,6 +569,8 @@ type DepRemoveParams struct {
 
 // CommentAddParams contains fields for adding a comment to an issue.
 type CommentAddParams struct {
+	// Actor overrides the backend process identity for this mutation only.
+	Actor   string `json:"-"`
 	IssueID string `json:"issue_id"`
 	Author  string `json:"author"`
 	Text    string `json:"text"`

@@ -29,6 +29,21 @@ export interface BackendInfo {
   healthMessage?: string;
 }
 
+const TESTING_ONLY_BACKENDS = new Set(["localdogfood"]);
+
+/**
+ * Whether a discovered backend belongs in user-facing backend selectors.
+ * Test-only backends are opt-in so a helper executable on PATH cannot leak
+ * into production settings or agent creation screens.
+ */
+export function isUserFacingBackend(
+  name: string,
+  showTestingBackends = import.meta.env.VITE_SHOW_TESTING_BACKENDS === "true",
+): boolean {
+  const normalizedName = name.toLowerCase().replace(/[-_]/g, "");
+  return showTestingBackends || !TESTING_ONLY_BACKENDS.has(normalizedName);
+}
+
 interface BackendDefaults {
   displayName: string;
   provider: string;

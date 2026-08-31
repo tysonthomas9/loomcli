@@ -60,7 +60,7 @@ func (b *FleetBackend) postDependency(ctx context.Context, params backend.DepAdd
 		DependsOnID: params.ToID,
 		Type:        params.DepType,
 	}
-	if _, err := b.exec(ctx, "AddDependency", "POST", "/issues/"+url.PathEscape(params.FromID)+"/deps", req); err != nil {
+	if err := b.execAsActor(ctx, "AddDependency", "POST", "/issues/"+url.PathEscape(params.FromID)+"/deps", req, params.Actor); err != nil {
 		return err
 	}
 	return nil
@@ -75,40 +75,44 @@ func (b *FleetBackend) RemoveDependency(ctx context.Context, params backend.DepR
 		depType = "blocks"
 	}
 	path := "/issues/" + url.PathEscape(params.FromID) + "/deps/" + url.PathEscape(params.ToID) + "?type=" + url.QueryEscape(depType)
-	if _, err := b.exec(ctx, "RemoveDependency", "DELETE", path, nil); err != nil {
+	if err := b.execAsActor(ctx, "RemoveDependency", "DELETE", path, nil, params.Actor); err != nil {
 		return err
 	}
 	if err := b.waitForDependencyState(ctx, "RemoveDependency", params.FromID, params.ToID, false); err != nil {
 		return err
 	}
-	return b.clearBlockedStatusAfterDependencyRemoval(ctx, params.FromID)
+	return b.clearBlockedStatusAfterDependencyRemoval(ctx, params.FromID, params.Actor)
 }
 
 // --- Label operations ---
 
 func (b *FleetBackend) AddLabel(ctx context.Context, id string, label string) error {
+	return b.addLabel(ctx, id, label, "")
+}
+
+func (b *FleetBackend) addLabel(ctx context.Context, id string, label string, actor string) error {
 	req := struct {
 		Label string `json:"label"`
 	}{Label: label}
-	_, err := b.exec(ctx, "AddLabel", "POST", "/issues/"+url.PathEscape(id)+"/labels", req)
-	return err
+	return b.execAsActor(ctx, "AddLabel", "POST", "/issues/"+url.PathEscape(id)+"/labels", req, actor)
 }
 
 func (b *FleetBackend) RemoveLabel(ctx context.Context, id string, label string) error {
-	return b.removeLabel(ctx, id, label, false)
+	return b.removeLabel(ctx, id, label, false, "")
 }
 
 // removeLabel deletes a label, optionally asking fleet-db to override its
-// reserved-label protection. Reserved labels (currently "operator") are
-// refused by the server unless force is set, which is what makes the un-park
-// an explicit act rather than an accident.
-func (b *FleetBackend) removeLabel(ctx context.Context, id, label string, force bool) error {
+// reserved-label protection, and optionally attributing the write to a specific
+// actor. Reserved labels (currently "operator") are refused by the server unless
+// force is set, which is what makes the un-park an explicit act rather than an
+// accident. An empty actor preserves the configured process identity, so agents,
+// the supervisor and every background path are unchanged by construction.
+func (b *FleetBackend) removeLabel(ctx context.Context, id, label string, force bool, actor string) error {
 	path := "/issues/" + url.PathEscape(id) + "/labels/" + url.PathEscape(label)
 	if force {
 		path += "?force=true"
 	}
-	_, err := b.exec(ctx, "RemoveLabel", "DELETE", path, nil)
-	return err
+	return b.execAsActor(ctx, "RemoveLabel", "DELETE", path, nil, actor)
 }
 
 // --- Comment operations ---
@@ -156,7 +160,7 @@ func (b *FleetBackend) AddComment(ctx context.Context, params backend.CommentAdd
 	type commentReq struct {
 		Body string `json:"body"`
 	}
-	resp, err := b.exec(ctx, "AddComment", "POST", "/issues/"+url.PathEscape(params.IssueID)+"/comments", commentReq{Body: params.Text})
+	resp, err := b.execResponseAsActor(ctx, "AddComment", "POST", "/issues/"+url.PathEscape(params.IssueID)+"/comments", commentReq{Body: params.Text}, params.Actor)
 	if err != nil {
 		return nil, err
 	}

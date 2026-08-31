@@ -56,6 +56,7 @@ type issueServiceImpl struct {
 	// remain to back ListIssues/ListKanban and the cross-workspace MoveIssue
 	// path which have not yet been migrated.
 	backendFn IssueBackendProvider
+	journey   JourneyServiceConfig
 
 	labelMutationMu sync.Mutex
 }
@@ -72,8 +73,8 @@ type issueServiceImpl struct {
 // Prefer NewIssueServiceWithBackend when an IssueBackend is available; this
 // constructor is retained for tests and call sites that have not yet been
 // updated to thread the backend through.
-func NewIssueService(pool daemon.Pool, multiPool *daemon.MultiPool, withWorkspaceFn func(ctx context.Context, wsID string) context.Context) IssueService {
-	return &issueServiceImpl{pool: pool, multiPool: multiPool, withWorkspaceFn: withWorkspaceFn}
+func NewIssueService(pool daemon.Pool, multiPool *daemon.MultiPool, withWorkspaceFn func(ctx context.Context, wsID string) context.Context, journeyConfig ...JourneyServiceConfig) IssueService {
+	return &issueServiceImpl{pool: pool, multiPool: multiPool, withWorkspaceFn: withWorkspaceFn, journey: normalizeJourneyServiceConfig(journeyConfig)}
 }
 
 // NewIssueServiceWithBackend creates a new IssueService implementation that
@@ -85,12 +86,13 @@ func NewIssueService(pool daemon.Pool, multiPool *daemon.MultiPool, withWorkspac
 // package can resolve the backend lazily without webui taking an import on
 // internal/cli. backendFn may be nil; methods that need the backend then
 // behave as if the backend were unavailable.
-func NewIssueServiceWithBackend(pool daemon.Pool, multiPool *daemon.MultiPool, withWorkspaceFn func(ctx context.Context, wsID string) context.Context, backendFn IssueBackendProvider) IssueService {
+func NewIssueServiceWithBackend(pool daemon.Pool, multiPool *daemon.MultiPool, withWorkspaceFn func(ctx context.Context, wsID string) context.Context, backendFn IssueBackendProvider, journeyConfig ...JourneyServiceConfig) IssueService {
 	return &issueServiceImpl{
 		pool:            pool,
 		multiPool:       multiPool,
 		withWorkspaceFn: withWorkspaceFn,
 		backendFn:       backendFn,
+		journey:         normalizeJourneyServiceConfig(journeyConfig),
 	}
 }
 
@@ -335,6 +337,7 @@ func (s *issueServiceImpl) CloseIssue(ctx context.Context, params CloseIssuePara
 	defer cancel()
 
 	result, err := be.Close(ctx, params.IssueID, backend.CloseParams{
+		Actor:       params.Actor,
 		Reason:      params.Reason,
 		Session:     params.Session,
 		SuggestNext: params.SuggestNext,
@@ -511,6 +514,7 @@ func (s *issueServiceImpl) AddComment(ctx context.Context, params AddCommentPara
 
 	data, err := be.AddComment(ctx, backend.CommentAddParams{
 		IssueID: params.IssueID,
+		Actor:   params.Actor,
 		Author:  author,
 		Text:    text,
 	})
@@ -547,6 +551,7 @@ func (s *issueServiceImpl) AddDependency(ctx context.Context, params AddDependen
 
 	if err := be.AddDependency(ctx, backend.DepAddParams{
 		FromID:  params.IssueID,
+		Actor:   params.Actor,
 		ToID:    params.DependsOnID,
 		DepType: depType,
 	}); err != nil {
@@ -567,6 +572,7 @@ func (s *issueServiceImpl) RemoveDependency(ctx context.Context, params RemoveDe
 
 	if err := be.RemoveDependency(ctx, backend.DepRemoveParams{
 		FromID: params.IssueID,
+		Actor:  params.Actor,
 		ToID:   params.DepID,
 	}); err != nil {
 		slog.Error("backend error in RemoveDependency", "err", err)
@@ -631,7 +637,7 @@ func (s *issueServiceImpl) ReopenIssue(ctx context.Context, params ReopenIssuePa
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	if err := be.Reopen(ctx, params.IssueID, backend.ReopenParams{Reason: params.Reason}); err != nil {
+	if err := be.Reopen(ctx, params.IssueID, backend.ReopenParams{Actor: params.Actor, Reason: params.Reason}); err != nil {
 		slog.Error("backend error in ReopenIssue", "issue_id", params.IssueID, "err", err)
 		return translateBackendError(err)
 	}
@@ -722,4 +728,62 @@ func (s *issueServiceImpl) ListEvents(ctx context.Context, params EventListParam
 		events = append(events, eventDataToTypesEvent(e))
 	}
 	return events, nil
+}
+
+func (s *issueServiceImpl) ListEventHistory(ctx context.Context, params EventListParams) (*EventListResult, error) {
+	be, svcErr := s.resolveBackend(ctx)
+	if svcErr != nil {
+		return nil, svcErr
+	}
+
+	historyBackend, ok := be.(backend.EventHistoryBackend)
+	if !ok {
+		return s.legacyEventTail(ctx, params)
+	}
+
+	requestCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	data, err := historyBackend.ListEventHistory(requestCtx, params.IssueID, backend.EventHistoryParams{
+		Limit: params.Limit,
+		Since: params.Since,
+	})
+	if err != nil {
+		if backend.IsKind(err, backend.KindNotImplemented) {
+			return s.legacyEventTail(ctx, params)
+		}
+		slog.Error("backend error in ListEventHistory", "err", err)
+		return nil, translateBackendError(err)
+	}
+	return eventHistoryResult(data), nil
+}
+
+// legacyEventTail serves the pre-paging tail contract for backends without
+// event-history support. It cannot honor a cursor, so a since request is a
+// client error rather than a silently wrong page; totals stay unknown.
+func (s *issueServiceImpl) legacyEventTail(ctx context.Context, params EventListParams) (*EventListResult, error) {
+	if params.Since != nil {
+		return nil, ErrValidation("event history paging is not supported by this backend")
+	}
+	events, err := s.ListEvents(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	return &EventListResult{Events: events}, nil
+}
+
+func eventHistoryResult(data *backend.EventHistoryData) *EventListResult {
+	if data == nil {
+		return &EventListResult{Events: []*types.Event{}}
+	}
+	events := make([]*types.Event, 0, len(data.Events))
+	for _, event := range data.Events {
+		events = append(events, eventDataToTypesEvent(event))
+	}
+	return &EventListResult{
+		Events:      events,
+		Cursor:      data.Cursor,
+		HasMore:     data.HasMore,
+		TotalEvents: data.TotalEvents,
+	}
 }

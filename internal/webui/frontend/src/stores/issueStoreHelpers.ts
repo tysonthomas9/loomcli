@@ -57,6 +57,7 @@ export const MAX_RECONNECT_ATTEMPTS = 10;
 export const STALE_BANNER_DELAY_MS = 5_000;
 export const AUTO_ROLLBACK_TIMEOUT_MS = 30_000;
 export const REFRESH_DEBOUNCE_MS = 1_000;
+export const MAX_PROJECTION_REFRESH_WAIT_MS = 5_000;
 export const MAX_AUTO_RETRIES = 5;
 export const RETRY_BASE_DELAY_MS = 1_000;
 export const RETRY_MAX_DELAY_MS = 16_000;
@@ -164,6 +165,35 @@ export const INITIAL_STATE: IssueStoreState = {
 
 export function issuesAreEqual(a: Issue, b: Issue): boolean {
   return jsonishEqual(a, b);
+}
+
+/**
+ * Keep a newer live issue while accepting the Kanban endpoint's authoritative
+ * derived fields. SSE mutations do not carry these projection fields, so
+ * retaining them from the live object can pin an issue in its former column.
+ */
+export function mergeKanbanProjection(current: Issue, fetched: Issue): Issue {
+  const projectionsMatch =
+    current.is_blocked === fetched.is_blocked &&
+    current.is_ready === fetched.is_ready &&
+    current.is_deferred === fetched.is_deferred &&
+    current.blocked_by_count === fetched.blocked_by_count &&
+    jsonishEqual(current.blocked_by, fetched.blocked_by) &&
+    jsonishEqual(current.blocked_by_details, fetched.blocked_by_details);
+
+  if (projectionsMatch) return current;
+
+  const {
+    is_blocked: _isBlocked,
+    is_ready: _isReady,
+    is_deferred: _isDeferred,
+    blocked_by_count: _blockedByCount,
+    blocked_by: _blockedBy,
+    blocked_by_details: _blockedByDetails,
+    ...currentWithoutProjection
+  } = current;
+
+  return { ...fetched, ...currentWithoutProjection };
 }
 
 function jsonishEqual(a: unknown, b: unknown): boolean {

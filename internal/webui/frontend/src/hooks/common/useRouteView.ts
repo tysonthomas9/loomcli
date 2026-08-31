@@ -15,6 +15,7 @@ import { type ViewMode, DEFAULT_VIEW } from "@/types";
  * "issue-detail" is not a segment — it's derived from the issues/:issueId route.
  */
 const VALID_VIEW_SEGMENTS: ReadonlySet<string> = new Set<ViewMode>([
+  "home",
   "kanban",
   "list",
   "table",
@@ -58,6 +59,7 @@ export interface UseRouteViewReturn {
 /**
  * Extract the view segment from the URL path.
  *
+ * /ws/abc/home         → "home"
  * /ws/abc/kanban       → "kanban"
  * /ws/abc/terminal     → "terminal"
  * /ws/abc/issues/T-5   → "issue-detail"

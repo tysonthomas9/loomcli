@@ -58,8 +58,8 @@ func (a agentWire) toDomain() *domain.Agent {
 		Auto:             a.Auto,
 		Backend:          a.Backend,
 		FallbackBackends: a.FallbackBackends,
-		Repos:            a.Repos,
-		RepoGroups:       a.RepoGroups,
+		Repos:            coalesceStrings(a.Repos),
+		RepoGroups:       coalesceStrings(a.RepoGroups),
 		CrossRepo:        a.CrossRepo,
 		Parent:           a.Parent,
 		State:            domain.AgentState(a.State),
@@ -78,6 +78,17 @@ func (a agentWire) toDomain() *domain.Agent {
 		ActivePhase:      a.ActivePhase,
 		LastErrorClass:   a.LastErrorClass,
 	}
+}
+
+// coalesceStrings returns a non-nil slice so agent Repos/RepoGroups serialize as
+// [] rather than null. fleet-db omits empty repos/repo_groups on the wire, which
+// decodes to a nil slice here; the web response contract (and the UI) require an
+// array. See domain.Agent.Repos.
+func coalesceStrings(in []string) []string {
+	if in == nil {
+		return []string{}
+	}
+	return in
 }
 
 func (s *agentStore) Create(ctx context.Context, in store.AgentCreate) (*domain.Agent, error) {

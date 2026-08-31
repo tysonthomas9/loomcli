@@ -26,6 +26,7 @@ function createRouterWrapper(initialPath = "/ws/test-ws/kanban") {
           path: "/ws/:workspaceId",
           children: [
             { index: true, element: children },
+            { path: "home", element: children },
             { path: "kanban", element: children },
             { path: "table", element: children },
             { path: "graph", element: children },
@@ -81,6 +82,7 @@ function createLocationProbeWrapper(initialPath: string) {
           path: "/ws/:workspaceId",
           children: [
             { index: true, element },
+            { path: "home", element },
             { path: "kanban", element },
             { path: "table", element },
             { path: "graph", element },
@@ -112,6 +114,14 @@ describe("useRouteView", () => {
   });
 
   describe("initial view derivation", () => {
+    it("returns home for /ws/:id/home", () => {
+      const { result } = renderHook(() => useRouteView(), {
+        wrapper: createRouterWrapper("/ws/test-ws/home"),
+      });
+
+      expect(result.current.view).toBe("home");
+    });
+
     it("returns kanban for /ws/:id/kanban", () => {
       const { result } = renderHook(() => useRouteView(), {
         wrapper: createRouterWrapper("/ws/test-ws/kanban"),
@@ -218,7 +228,7 @@ describe("useRouteView", () => {
       });
 
       expect(result.current.view).toBe(DEFAULT_VIEW);
-      expect(result.current.view).toBe("kanban");
+      expect(result.current.view).toBe("home");
     });
   });
 
@@ -300,7 +310,7 @@ describe("useRouteView", () => {
       expect(result.current.view).toBe("table");
     });
 
-    it("navigating to DEFAULT_VIEW shows kanban", () => {
+    it("navigating to DEFAULT_VIEW shows home", () => {
       const { result } = renderHook(() => useRouteView(), {
         wrapper: createRouterWrapper("/ws/test-ws/table"),
       });
@@ -308,10 +318,10 @@ describe("useRouteView", () => {
       expect(result.current.view).toBe("table");
 
       act(() => {
-        result.current.navigateToView("kanban");
+        result.current.navigateToView(DEFAULT_VIEW);
       });
 
-      expect(result.current.view).toBe("kanban");
+      expect(result.current.view).toBe("home");
     });
 
     it("navigating through multiple views works", () => {

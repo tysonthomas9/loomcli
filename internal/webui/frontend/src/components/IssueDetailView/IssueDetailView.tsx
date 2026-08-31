@@ -18,6 +18,7 @@ import { ErrorToast } from "@/components/ErrorToast";
 import { DesignPanel, MarkdownRenderer } from "@/components/IssueDetailPanel";
 import { updateIssue } from "@/hooks/api";
 import { useWorkspaceContext } from "@/hooks/workspace";
+import { decisionButtonStyles } from "@/components/DecisionButton";
 
 import styles from "./IssueDetailView.module.css";
 
@@ -566,7 +567,7 @@ export function IssueDetailView({
           >
             <button
               type="button"
-              className={styles.reviewApproveButton}
+              className={`${decisionButtonStyles.button} ${decisionButtonStyles.approve}`}
               onClick={handleApprove}
               disabled={isApproving || approveBlockedReason !== null}
               title={approveBlockedReason ?? undefined}
@@ -577,7 +578,7 @@ export function IssueDetailView({
             </button>
             <button
               type="button"
-              className={styles.reviewRejectButton}
+              className={`${decisionButtonStyles.button} ${decisionButtonStyles.reject}`}
               onClick={() => setShowRejectForm(true)}
               disabled={approveBlockedReason !== null}
               title={approveBlockedReason ?? undefined}
@@ -611,7 +612,7 @@ export function IssueDetailView({
             />
             <button
               type="button"
-              className={styles.reviewRejectButton}
+              className={`${decisionButtonStyles.button} ${decisionButtonStyles.reject}`}
               onClick={handleRejectSubmit}
               disabled={isRejecting || !rejectComment.trim()}
               data-testid="detail-reject-submit"

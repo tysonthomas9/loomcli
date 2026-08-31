@@ -31,7 +31,7 @@ export interface AppLayoutProps {
   banner?: ReactNode;
   /** Application title displayed in header (defaults to "Loom") */
   title?: ReactNode;
-  /** When set, the brand/title becomes a home button (design: logo → kanban) */
+  /** When set, the brand/title becomes a home button. */
   onTitleClick?: () => void;
   /** Additional CSS class name */
   className?: string;
@@ -71,7 +71,7 @@ export function AppLayout({
                 type="button"
                 className={styles.brandButton}
                 onClick={onTitleClick}
-                aria-label="Go to board"
+                aria-label="Go home"
               >
                 <h1 className={styles.title}>{title}</h1>
               </button>
