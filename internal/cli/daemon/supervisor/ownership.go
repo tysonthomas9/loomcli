@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"time"
 
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/cli/daemonregistry"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/lockfile"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -27,7 +30,18 @@ const (
 	ownershipAcquireInconclusive
 )
 
+// acquireAgentOwnership acquires the agent's ownership lease with no
+// takeover: the ordinary path every caller outside the reclaim probe uses.
 func (s *Supervisor) acquireAgentOwnership(ap *AgentProcess) ownershipAcquireOutcome {
+	return s.acquireAgentOwnershipWithTakeover(ap, "")
+}
+
+// acquireAgentOwnershipWithTakeover is acquireAgentOwnership plus an
+// optional compare-and-steal: a non-empty takeoverFrom asks the server to
+// break a still-live lease, but only while that lease still names exactly
+// that owner. The caller (reclaimAbandonedOwnership) is responsible for
+// having proved the named owner is gone.
+func (s *Supervisor) acquireAgentOwnershipWithTakeover(ap *AgentProcess, takeoverFrom string) ownershipAcquireOutcome {
 	if s.ControlStore == nil || s.WorkspaceID == "" {
 		// Disabled control plane maps to success so non-control-plane
 		// supervision keeps today's behavior exactly.
@@ -48,9 +62,17 @@ func (s *Supervisor) acquireAgentOwnership(ap *AgentProcess) ownershipAcquireOut
 		RuntimeProvider: domain.RuntimeProviderLocal,
 		NodeID:          nodeID,
 		TTL:             ttl,
+		// Empty for every ordinary acquire, which keeps the request
+		// wire-identical to what an older fleet-db accepts.
+		TakeoverFromOwnerID: takeoverFrom,
 	})
 	if err != nil {
-		if errors.Is(err, domain.ErrAlreadyExists) || errors.Is(err, domain.ErrConflict) {
+		// ErrAlreadyClaimed is fleet-db's 409 already_claimed — a
+		// server-arbitrated "someone else owns this", not an
+		// inconclusive transport failure. Classifying it as
+		// inconclusive made the verify-before-kill path fail open on a
+		// lease it had verifiably lost (split-brain double-run).
+		if errors.Is(err, domain.ErrAlreadyExists) || errors.Is(err, domain.ErrConflict) || errors.Is(err, domain.ErrAlreadyClaimed) {
 			slog.Info("agent ownership held by another daemon", "worktree", ap.Entry.Worktree, "workspace", s.WorkspaceID, "err", err)
 			return ownershipHeldByOther
 		}
@@ -330,6 +352,7 @@ func isTypedDomainError(err error) bool {
 		errors.Is(err, domain.ErrNotFound) ||
 		errors.Is(err, domain.ErrAlreadyExists) ||
 		errors.Is(err, domain.ErrConflict) ||
+		errors.Is(err, domain.ErrAlreadyClaimed) ||
 		errors.Is(err, domain.ErrInvalid)
 }
 
@@ -370,4 +393,135 @@ func (s *Supervisor) sleepBeforeOwnershipRetry(ap *AgentProcess) bool {
 		s.setStopReasonDefault(ap, StopReasonConfigRemoved)
 		return false
 	}
+}
+
+// ─── abandonment probe ───────────────────────────────────────────────────────
+//
+// Kept in this file rather than an ownership_reclaim.go of its own: the
+// supervisor package sits at its recorded package-size ceiling
+// (scripts/package-size-allow.txt), and a 29th file would raise a ratchet
+// whose stated end state is sub-splitting the package, not growing it.
+
+// ownershipPIDIsRunning is the liveness probe used by the abandonment
+// decision, indirected so tests can pin it without spawning processes.
+var ownershipPIDIsRunning = lockfile.IsProcessRunning
+
+// acquireAgentOwnershipWithReclaim is the supervision loop's entry point:
+// an ordinary acquire, and — only when the server says the lease is
+// verifiably held by someone else — one abandonment probe that may reclaim
+// a lease orphaned by a dead local supervisor. Returns true when the agent
+// may run; false means the caller falls back to the retry sleep.
+//
+// Deliberately NOT used by arbitrateOwnershipByReacquire: a supervisor
+// resolving its own heartbeat failure must never steal the lease back, or
+// verify-before-kill stops meaning anything.
+func (s *Supervisor) acquireAgentOwnershipWithReclaim(ap *AgentProcess) bool {
+	switch s.acquireAgentOwnership(ap) {
+	case ownershipAcquired:
+		return true
+	case ownershipHeldByOther:
+		return s.reclaimAbandonedOwnership(ap)
+	default: // ownershipAcquireInconclusive
+		return false
+	}
+}
+
+// reclaimAbandonedOwnership answers one question: is the owner currently
+// holding this agent's lease provably gone? It answers only from evidence
+// it can verify locally — the lease row, this machine's hostname, and the
+// liveness of a PID on this host — and EVERY unproven case returns false,
+// which is today's behavior (wait out the retry interval, and ultimately
+// the lease TTL).
+//
+// PID reuse fails safe: a recycled PID reads as alive, so we decline to
+// steal and wait instead. There is no path where reuse causes a wrongful
+// steal.
+func (s *Supervisor) reclaimAbandonedOwnership(ap *AgentProcess) bool {
+	if s.ControlStore == nil || s.WorkspaceID == "" {
+		return false
+	}
+	agentID := ap.Entry.Worktree
+	nodeID := s.NodeID
+	if nodeID == "" {
+		nodeID = s.resolveNodeID()
+	}
+	// The 409 does not carry the current owner_id, so read the lease.
+	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
+	lease, err := s.ControlStore.AgentOwnershipLeases().Get(ctx, s.WorkspaceID, agentID)
+	cancel()
+	if err != nil || lease == nil {
+		// No evidence (transport failure, 404, already released): no steal.
+		slog.Debug("ownership reclaim: lease unreadable; not reclaiming", "worktree", agentID, "workspace", s.WorkspaceID, "err", err)
+		return false
+	}
+	localHost, hostErr := os.Hostname()
+	if hostErr != nil {
+		localHost = ""
+	}
+	deadOwner, ok := abandonedOwnerID(lease, nodeID, os.Getpid(), localHost, ownershipPIDIsRunning, time.Now())
+	if !ok {
+		return false
+	}
+	// A steal must be loud and greppable: it names both owners.
+	slog.Warn("reclaiming abandoned agent ownership lease",
+		"worktree", agentID, "workspace", s.WorkspaceID,
+		"dead_owner_id", deadOwner, "new_owner_id", nodeID)
+	if outcome := s.acquireAgentOwnershipWithTakeover(ap, deadOwner); outcome != ownershipAcquired {
+		// Lost the compare-and-swap race to another reclaimer, or the
+		// server does not understand takeovers yet (a pre-takeover
+		// fleet-db rejects the body as invalid). Either way: no steal,
+		// fall back to the retry loop, which is today's behavior.
+		slog.Info("ownership reclaim did not take effect; falling back to retry",
+			"worktree", agentID, "workspace", s.WorkspaceID, "dead_owner_id", deadOwner, "outcome", outcome)
+		return false
+	}
+	return true
+}
+
+// abandonedOwnerID returns the owner_id of a lease whose owner is provably
+// a dead supervisor process on THIS host, and ok=false for every case that
+// falls short of that proof. It is pure so the whole steal policy is
+// table-testable.
+func abandonedOwnerID(
+	lease *domain.AgentOwnershipLease,
+	selfNodeID string,
+	selfPID int,
+	localHost string,
+	isRunning func(int) bool,
+	now time.Time,
+) (string, bool) {
+	if lease == nil || lease.OwnerID == "" {
+		return "", false
+	}
+	// Only a live lease is in anyone's way; an expired or released one is
+	// acquired by the ordinary retry without a steal.
+	if lease.Status != domain.AgentLeaseActive || !lease.ExpiresAt.After(now) {
+		return "", false
+	}
+	// A remotely-run agent's owner cannot be probed from here.
+	if lease.RuntimeProvider != domain.RuntimeProviderLocal {
+		return "", false
+	}
+	// Our own node ID: a same-owner re-acquire already succeeds, so a
+	// takeover would be both unnecessary and self-directed.
+	if lease.OwnerID == selfNodeID {
+		return "", false
+	}
+	host, pid, ok := daemonregistry.ParseSupervisorNodeID(lease.OwnerID)
+	if !ok {
+		// A fleet/K8s runner or a future naming scheme: not ours to judge.
+		return "", false
+	}
+	// Cross-host recovery is out of scope: it needs node-registry evidence,
+	// not a local PID probe, and a wrong answer double-runs the agent.
+	if localHost == "" || host != localHost {
+		return "", false
+	}
+	if pid == selfPID {
+		return "", false
+	}
+	if isRunning(pid) {
+		return "", false
+	}
+	return lease.OwnerID, true
 }
