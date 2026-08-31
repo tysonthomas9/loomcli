@@ -58,17 +58,6 @@ const issueBackendOutageRecheckInterval = 30 * time.Second
 // a flaky dependency recovering) lets it self-resume.
 const defaultMaxRetriesBlockInterval = 60 * time.Second
 
-// defaultAccountWallCooldown is how long the fleet stays parked after an
-// account-level wall (auth, billing, usage limit) is observed. It is the
-// compromise between resuming quickly once a human fixes billing and burning
-// a run per agent per poll against a wall that is not going to move.
-const defaultAccountWallCooldown = 15 * time.Minute
-
-// maxAccountWallCooldown caps the recorded wall regardless of what the backend
-// suggested. A harness that answers "retry after 86400" must not be able to
-// park the whole fleet for a day.
-const maxAccountWallCooldown = 1 * time.Hour
-
 // agentAuthStoppedLabel marks the task an agent was holding when it
 // fatal-stopped on an AuthFailure. It is the durable, queryable half of the
 // signal (`loom data list --label agent-auth-stopped`): the daemon only ever
@@ -110,10 +99,10 @@ func (s *Supervisor) decideRestart(ap *AgentProcess) (bool, string) {
 		return false, ""
 	}
 
-	// Parked by the fleet-wide account wall: a block, not a failure (see
+	// Parked by a wall, of either scope: a block, not a failure (see
 	// gateAccountWall). Every counter stays intact and the agent resumes by
 	// itself at expiry.
-	if ap.StopReason == StopReasonAccountWall {
+	if ap.StopReason.IsWallPark() {
 		return true, ""
 	}
 
@@ -191,10 +180,13 @@ func (s *Supervisor) applyFatalStop(ap *AgentProcess, outcome agenterr.Outcome) 
 		ap.Entry.Worktree, outcome)
 	resetNoWork(ap)
 	ap.StopReason = StopReasonFatalError
-	// The wall is an account fact, not an agent fact: record it once so the
-	// pre-spawn gate parks the rest of the fleet. Takes only s.WallMu and
-	// touches no ap field — this runs with ap.Mu held.
-	s.recordAccountWall(outcome, ap.LastError)
+	// Record the wall once so the pre-spawn gate parks whoever it covers. Its
+	// blast radius is whatever owns the credential it is about: this agent's
+	// profile root for an auth failure, the whole account for billing and
+	// usage. ap.CredentialKey is the cached key (refreshed by gateAccountWall
+	// each cycle) and is read here because this runs with ap.Mu held;
+	// recordWall itself takes only s.WallMu and touches no ap field.
+	s.recordWall(ap.CredentialKey, outcome, ap.LastError)
 
 	if !outcome.IsClass(wrapper.ErrAuth) {
 		return ""
@@ -319,7 +311,9 @@ func (s *Supervisor) applyUncountedRestart(ap *AgentProcess, d agentpolicy.Dispo
 		s.applyIssueBackendOutageRestart(ap)
 		return true
 	}
-	s.recordAccountWall(outcome, ap.LastError)
+	// Same scoping rule as applyFatalStop, and the same reason for reading the
+	// cached key: this runs with ap.Mu held.
+	s.recordWall(ap.CredentialKey, outcome, ap.LastError)
 	// Rate limits: unlimited uncounted retries by default; the
 	// rate_limit_no_count config opt-out routes them through the counted
 	// budget instead (the layer's config wins, pt7).
@@ -489,100 +483,6 @@ func (s *Supervisor) backendRecheckBackoff() time.Duration {
 	return backendUnavailableRecheckInterval
 }
 
-// isAccountWallClass reports whether an outcome is an ACCOUNT-level wall —
-// one that no other agent on the same account can get past either. Every other
-// class (transient, timeout, spawn failure, model-not-found…) is agent-local
-// and must never park the fleet.
-func isAccountWallClass(o agenterr.Outcome) bool {
-	return o.IsClass(wrapper.ErrAuth) ||
-		o.IsClass(wrapper.ErrBilling) ||
-		o.IsClass(wrapper.ErrRateLimited)
-}
-
-// recordAccountWall arms (or extends) the fleet-wide account wall. It takes
-// only s.WallMu and reads no AgentProcess field, because its callers hold
-// ap.Mu. The wall never shortens: a live wall is only ever pushed further out,
-// so a second, smaller observation cannot release the fleet early.
-//
-// Deliberately in-memory only. A daemon restart drops the wall, which is the
-// right trade: a restart is an operator action, the first agent to hit the
-// wall re-arms it within one run, and a stale on-disk wall outliving a fixed
-// account would be worse than the bug this closes.
-func (s *Supervisor) recordAccountWall(outcome agenterr.Outcome, ae *agenterr.AgentError) {
-	if !isAccountWallClass(outcome) {
-		return
-	}
-	cooldown := s.getAccountWallCooldown()
-	if cooldown <= 0 {
-		return // gate disabled: classify and stop the agent, but park nobody
-	}
-	// A wall that stated its own reset time knows better than the default.
-	if ae != nil && ae.RetryAfter > 0 {
-		cooldown = ae.RetryAfter
-	}
-	if cooldown > maxAccountWallCooldown {
-		cooldown = maxAccountWallCooldown
-	}
-	var message string
-	if ae != nil {
-		message = ae.Message
-	}
-	until := time.Now().Add(cooldown)
-
-	s.WallMu.Lock()
-	defer s.WallMu.Unlock()
-	if !until.After(s.WallUntil) {
-		return
-	}
-	s.WallUntil = until
-	s.WallClass = outcome
-	s.WallMessage = message
-}
-
-// accountWallActive reports the time remaining on a live account wall and the
-// message recorded with it. Returns ok=false once the wall has expired (or was
-// never armed) — expiry is purely time-based, so the fleet resumes on its own.
-func (s *Supervisor) accountWallActive() (time.Duration, string, bool) {
-	s.WallMu.Lock()
-	defer s.WallMu.Unlock()
-	if s.WallUntil.IsZero() {
-		return 0, "", false
-	}
-	remaining := time.Until(s.WallUntil)
-	if remaining <= 0 {
-		return 0, "", false
-	}
-	return remaining, s.WallMessage, true
-}
-
-// getAccountWallCooldown returns the configured fleet-wide wall cooldown.
-// 0 disables the gate entirely: walls still classify and still stop their own
-// agent, but no other agent is parked. The env override exists so integration
-// tests can arm and expire a wall without waiting fifteen minutes.
-func (s *Supervisor) getAccountWallCooldown() time.Duration {
-	if v := os.Getenv("LOOM_DAEMON_ACCOUNT_WALL_COOLDOWN_SECONDS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			return time.Duration(n) * time.Second
-		}
-	}
-	cfg := s.ConfigSnapshot()
-	if cfg != nil && cfg.Daemon.RestartPolicy.AccountWallCooldown != nil {
-		return time.Duration(*cfg.Daemon.RestartPolicy.AccountWallCooldown) * time.Second
-	}
-	return defaultAccountWallCooldown
-}
-
-// accountWallBackoff is how long a parked agent sleeps before re-checking the
-// gate: exactly what the wall has left to run (itself capped at
-// maxAccountWallCooldown), or zero when the wall lifted under us.
-func (s *Supervisor) accountWallBackoff() time.Duration {
-	remaining, _, ok := s.accountWallActive()
-	if !ok {
-		return 0
-	}
-	return remaining
-}
-
 // computeBackoff returns the sleep duration before the next restart. The
 // policy disposition names the configured bucket (BackoffProfile); this
 // layer applies its restart_policy values and counters.
@@ -595,11 +495,13 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 	rateCount := ap.RateRetryCount
 	noWorkCount := ap.NoWorkCount
 	blocked := ap.StopReason == StopReasonMaxRetriesBlocked
-	walled := ap.StopReason == StopReasonAccountWall
+	// Read together: a wall park sleeps out the wall on the agent's OWN
+	// credential, so the reason and the key are one fact under this lock.
+	walled, credentialKey := ap.StopReason.IsWallPark(), ap.CredentialKey
 	ap.Mu.Unlock()
 
 	if walled {
-		return s.accountWallBackoff()
+		return s.wallBackoffFor(credentialKey)
 	}
 
 	// A blocked agent sleeps the fixed block interval — keyed on StopReason,

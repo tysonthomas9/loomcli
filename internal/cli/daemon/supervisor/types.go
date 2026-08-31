@@ -57,6 +57,7 @@ type AgentProcess struct {
 	InputWaitPending       int               // interactive harness prompts currently awaiting an answer; a count (not a flag) so overlapping prompts nest — see input_wait.go
 	InputWaitSince         time.Time         // when InputWaitPending last rose from zero; anchors the bound that stops a suspension from outliving its cause
 	AbandonedRunsChecked   bool              // true once this process reconciled the agent's leftover unfinished sessions; the check is per daemon lifetime, not per cycle — within one process every run is finished by the exit path
+	CredentialKey          string            // cache of ProfileCredentialKey for this agent, refreshed by gateAccountWall every poll cycle so the wall-recording path can read it under the ap.Mu it already holds; "" means the agent inherits the operator's shared harness config
 
 	LastRearm      time.Time // when the fleet-stall sweep last re-armed this agent's supervise goroutine (see checkFleetStall); zero if never
 	RestartCount   int       // consecutive restart attempts
@@ -94,7 +95,7 @@ type AgentProcess struct {
 	// task. False for every other stop reason.
 	RunSilentAtStop bool
 
-	Mu sync.Mutex // protects Cmd, Pid, LogFile, LogFileStartOffset, SoftKnobWarning, restart tracking, IdleSince, AssignedEpicID, AssignedTaskID, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, RunSilentAtStop, LastActivity, InputWaitPending, InputWaitSince, AbandonedRunsChecked
+	Mu sync.Mutex // protects Cmd, Pid, LogFile, LogFileStartOffset, SoftKnobWarning, restart tracking, IdleSince, AssignedEpicID, AssignedTaskID, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, RunSilentAtStop, LastActivity, InputWaitPending, InputWaitSince, AbandonedRunsChecked, CredentialKey
 }
 
 // StopReason identifies why an agent was stopped.
@@ -112,11 +113,19 @@ const (
 	StopReasonWatchdog           StopReason = "watchdog"
 	StopReasonBackendUnavailable StopReason = "backend_unavailable"
 	// StopReasonAccountWall marks an agent parked by the fleet-wide
-	// account-wall gate: another agent hit an auth/billing/usage wall, which
-	// is an account-level fact, so this one is held back until the recorded
-	// cooldown expires. It is a park, not a failure — the restart budget is
-	// untouched and the supervise loop self-recovers at expiry.
+	// account-wall gate: another agent hit a billing or usage-limit wall,
+	// which is a fact about the shared subscription, so this one is held back
+	// until the recorded cooldown expires. It is a park, not a failure — the
+	// restart budget is untouched and the supervise loop self-recovers at
+	// expiry.
 	StopReasonAccountWall StopReason = "account_wall"
+	// StopReasonProfileWall marks an agent parked by a PROFILE-scoped wall: an
+	// auth failure on the credential set this agent runs on. It differs from
+	// StopReasonAccountWall in exactly one way, and it is the way that
+	// matters — its blast radius is one profile root (see
+	// ProfileCredentialKey), so agents authenticating from a different root
+	// keep claiming and working. Park semantics are otherwise identical.
+	StopReasonProfileWall StopReason = "profile_wall"
 	// StopReasonIssueBackendUnavailable marks an agent waiting out an ISSUE
 	// backend (fleet-db) outage — unreachable, or rejecting the daemon's
 	// credentials. Distinct from StopReasonBackendUnavailable, which is about
@@ -149,6 +158,14 @@ const (
 	// verdict a four-hour run must never get.
 	StopReasonRunDurationExceeded StopReason = "run_duration_exceeded"
 )
+
+// IsWallPark reports whether the reason is a wall park of ANY scope. Call
+// sites outside the gate itself care that the agent is parked behind a wall,
+// not which credential the wall belongs to — asking it this way means a third
+// scope cannot be forgotten at one of them.
+func (r StopReason) IsWallPark() bool {
+	return r == StopReasonAccountWall || r == StopReasonProfileWall
+}
 
 // resolveRemote returns the git remote name for this agent.
 // Uses RepoConfig.Remote if available, otherwise defaults to "origin".
