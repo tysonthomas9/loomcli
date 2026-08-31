@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
@@ -29,7 +30,7 @@ func ResolveAgentTarget(name, repo string) (ResolvedTarget, error) {
 		}
 		return ResolvedTarget{
 			WorkDir:   name,
-			AgentName: filepath.Base(name),
+			AgentName: resolvedAgentName(filepath.Base(name)),
 		}, nil
 	}
 
@@ -50,6 +51,16 @@ func ResolveAgentTarget(name, repo string) (ResolvedTarget, error) {
 	return resolveWorkspaceTarget(resolver, name, repo)
 }
 
+// resolvedAgentName preserves the daemon-issued identity when a worker is
+// launched against a task-owned worktree. Human invocations do not set this
+// variable, so they retain the path-derived basename.
+func resolvedAgentName(fallback string) string {
+	if agentName := strings.TrimSpace(os.Getenv("LOOM_AGENT_NAME")); agentName != "" {
+		return agentName
+	}
+	return fallback
+}
+
 // resolveWorkspaceTarget handles workspace-mode resolution including per-repo routing.
 func resolveWorkspaceTarget(resolver *cli.Resolver, name, repo string) (ResolvedTarget, error) {
 	// Absolute paths are used as-is even in workspace mode
@@ -59,7 +70,7 @@ func resolveWorkspaceTarget(resolver *cli.Resolver, name, repo string) (Resolved
 		}
 		return ResolvedTarget{
 			WorkDir:   name,
-			AgentName: filepath.Base(name),
+			AgentName: resolvedAgentName(filepath.Base(name)),
 		}, nil
 	}
 

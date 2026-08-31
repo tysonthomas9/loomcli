@@ -112,6 +112,22 @@ func TestResolveAgentTarget_AbsolutePath(t *testing.T) {
 	}
 }
 
+func TestResolveAgentTarget_AbsoluteTaskPathUsesDaemonAgentName(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "T514-2-0c859f4047")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LOOM_AGENT_NAME", "backend-dev-1")
+
+	target, err := ResolveAgentTarget(dir, "")
+	if err != nil {
+		t.Fatalf("ResolveAgentTarget() error = %v", err)
+	}
+	if target.WorkDir != dir || target.AgentName != "backend-dev-1" {
+		t.Fatalf("target = %+v, want task path with daemon agent name", target)
+	}
+}
+
 func TestResolveAgentTarget_AbsolutePathMissing(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "missing")
 

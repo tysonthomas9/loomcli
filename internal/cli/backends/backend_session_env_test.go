@@ -106,6 +106,7 @@ func TestActiveSessionEnvVars_WhenEmpty(t *testing.T) {
 
 func TestBuildBackendEnv_IncludesActiveSessionEnv(t *testing.T) {
 	t.Cleanup(ClearActiveSessionEnv)
+	t.Setenv("LOOM_AGENT_NAME", "")
 
 	SetActiveSessionRuntimeEnv("/runtime", "sess-123")
 
@@ -119,6 +120,15 @@ func TestBuildBackendEnv_IncludesActiveSessionEnv(t *testing.T) {
 		if !envHas(env, want) {
 			t.Fatalf("buildBackendEnv missing %q in %v", want, env)
 		}
+	}
+}
+
+func TestBuildBackendEnv_DaemonAgentNameOverridesPathDerivedName(t *testing.T) {
+	t.Setenv("LOOM_AGENT_NAME", "backend-dev-1")
+
+	env := buildBackendEnv("/task-worktree/T514-2-0c859f4047", "T514-2-0c859f4047")
+	if got, ok := envValue(env, "LOOM_AGENT_NAME"); !ok || got != "backend-dev-1" {
+		t.Fatalf("LOOM_AGENT_NAME = %q, present=%v, want backend-dev-1", got, ok)
 	}
 }
 
