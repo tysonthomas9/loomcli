@@ -95,6 +95,15 @@ type TaskSummary struct {
 	NeedReview       int `json:"need_review"`
 	Backlog          int `json:"backlog"`
 	Epics            int `json:"epics"` // Open epics (tracked separately)
+	// ReadyByPriority counts ready work items per priority bucket 0..4, with
+	// out-of-range priorities folded into 4. All five buckets are always
+	// present so a Prometheus series never vanishes.
+	//
+	// Deliberate divergence from ReadyToImplement/NeedsPlanning above: those
+	// two do NOT exclude needs-revision issues, this histogram DOES. That is
+	// what the loom_ready_tasks gauge has always reported, and the gauge's
+	// semantics are preserved here rather than silently changed.
+	ReadyByPriority map[int]int `json:"ready_by_priority,omitempty"`
 }
 
 // WorktreeSyncDetail holds per-worktree sync detail (commits ahead or behind).

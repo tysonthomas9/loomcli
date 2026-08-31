@@ -3467,6 +3467,10 @@ export interface components {
       need_review: number;
       backlog: number;
       epics: number;
+      /** @description Ready work items per priority bucket 0..4 (out-of-range priorities folded into 4), keyed by priority as a string. Excludes needs-revision issues, unlike ready_to_implement/needs_planning. */
+      ready_by_priority?: {
+        [key: string]: number;
+      };
     };
     MonitorStats: {
       open: number;

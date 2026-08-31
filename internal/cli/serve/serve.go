@@ -589,7 +589,7 @@ func buildMonitorHandlers(collectDataFn metricscmd.CollectDataFn, staleDetectorH
 		Workspaces:           metricscmd.HandleWorkspaces(st),
 		StaleDetector:        staleDetectorHandler,
 		Usage:                usageHandler,
-		Metrics:              metricscmd.HandleMetrics(collectDataFn),
+		Metrics:              metricscmd.HandleMetrics(monitorDataSource, monitorStoreDataSource, st),
 		ObservabilityMetrics: observability.HandleMetrics(eventsDir, observability.NewMetricsCache(eventsDir)),
 		ObservabilityEvents:  observability.HandleEvents(eventsDir),
 	}

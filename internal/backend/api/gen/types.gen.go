@@ -2438,12 +2438,15 @@ type MonitorTaskInfo struct {
 
 // MonitorTaskSummary defines model for MonitorTaskSummary.
 type MonitorTaskSummary struct {
-	Backlog          int `json:"backlog"`
-	Epics            int `json:"epics"`
-	InProgress       int `json:"in_progress"`
-	NeedReview       int `json:"need_review"`
-	NeedsPlanning    int `json:"needs_planning"`
-	ReadyToImplement int `json:"ready_to_implement"`
+	Backlog       int `json:"backlog"`
+	Epics         int `json:"epics"`
+	InProgress    int `json:"in_progress"`
+	NeedReview    int `json:"need_review"`
+	NeedsPlanning int `json:"needs_planning"`
+
+	// ReadyByPriority Ready work items per priority bucket 0..4 (out-of-range priorities folded into 4), keyed by priority as a string. Excludes needs-revision issues, unlike ready_to_implement/needs_planning.
+	ReadyByPriority  *map[string]int `json:"ready_by_priority,omitempty"`
+	ReadyToImplement int             `json:"ready_to_implement"`
 }
 
 // MonitorTasksResponse defines model for MonitorTasksResponse.

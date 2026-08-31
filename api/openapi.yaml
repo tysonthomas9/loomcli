@@ -6659,6 +6659,14 @@ components:
           type: integer
         epics:
           type: integer
+        ready_by_priority:
+          type: object
+          description: >-
+            Ready work items per priority bucket 0..4 (out-of-range priorities
+            folded into 4), keyed by priority as a string. Excludes
+            needs-revision issues, unlike ready_to_implement/needs_planning.
+          additionalProperties:
+            type: integer
 
     MonitorStats:
       type: object
