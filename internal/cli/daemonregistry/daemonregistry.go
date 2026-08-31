@@ -192,26 +192,44 @@ func parseLabels(labels []string) (pid int, cwd, socket string) {
 	return pid, cwd, socket
 }
 
+// ParseSupervisorNodeID splits a supervisor node ID of the form
+// "loom-supervisor-<host>-<pid>" into its host and PID parts. It is the
+// single definition of that format's parse rule, shared by the Node
+// registry's ghost-row check and by the supervisor's ownership-lease
+// reclaim probe; the format itself is minted by
+// (*supervisor.Supervisor).resolveNodeID.
+//
+// ok is false for anything that is not a supervisor node ID — a different
+// prefix, no PID suffix, or a non-positive/unparseable PID. Callers must
+// treat !ok as "no evidence", never as a match.
+func ParseSupervisorNodeID(nodeID string) (host string, pid int, ok bool) {
+	const prefix = "loom-supervisor-"
+	if !strings.HasPrefix(nodeID, prefix) {
+		return "", 0, false
+	}
+	rest := strings.TrimPrefix(nodeID, prefix)
+	// rest is "<host>-<pid>"; the host itself may contain hyphens,
+	// so trim the final "-<digits>" suffix to recover the host part.
+	idx := strings.LastIndex(rest, "-")
+	if idx <= 0 {
+		return "", 0, false
+	}
+	n, err := strconv.Atoi(rest[idx+1:])
+	if err != nil || n <= 0 {
+		return "", 0, false
+	}
+	return rest[:idx], n, true
+}
+
 // hostnameMatchesLocal returns true when the NodeID
 // (form: "loom-supervisor-<host>-<pid>") was registered on this host.
 // If the NodeID cannot be parsed or the local hostname is unknown we
 // return false, meaning the caller should trust the heartbeat alone
 // without probing the PID locally.
 func hostnameMatchesLocal(nodeID, localHost string) bool {
-	if localHost == "" || nodeID == "" {
+	if localHost == "" {
 		return false
 	}
-	const prefix = "loom-supervisor-"
-	if !strings.HasPrefix(nodeID, prefix) {
-		return false
-	}
-	rest := strings.TrimPrefix(nodeID, prefix)
-	// rest is "<host>-<pid>"; the host itself may contain hyphens,
-	// so trim the final "-<digits>" suffix to recover the host part.
-	idx := strings.LastIndex(rest, "-")
-	if idx < 0 {
-		return false
-	}
-	host := rest[:idx]
-	return host == localHost
+	host, _, ok := ParseSupervisorNodeID(nodeID)
+	return ok && host == localHost
 }
