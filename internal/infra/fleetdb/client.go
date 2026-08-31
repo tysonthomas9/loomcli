@@ -102,6 +102,7 @@ type Client struct {
 	matLeases  *skillMaterializationLeaseStore
 	skillPacks *skillPackStore
 	daemon     *daemonStore
+	capabils   *capabilityStore
 
 	connectors      *connectorStore
 	connectorGrants *connectorGrantStore
@@ -159,6 +160,7 @@ func New(cfg Config) (*Client, error) {
 	c.matLeases = &skillMaterializationLeaseStore{client: c}
 	c.skillPacks = &skillPackStore{client: c}
 	c.daemon = &daemonStore{client: c}
+	c.capabils = &capabilityStore{client: c}
 	c.connectors = &connectorStore{client: c}
 	c.connectorGrants = &connectorGrantStore{client: c}
 	c.connectorCalls = &connectorAuditStore{client: c}
@@ -255,6 +257,9 @@ func (c *Client) SkillPacks() store.SkillPackStore { return c.skillPacks }
 
 // Daemon returns the DaemonProfileStore.
 func (c *Client) Daemon() store.DaemonProfileStore { return c.daemon }
+
+// Capabilities returns the server capability document store.
+func (c *Client) Capabilities() store.CapabilityStore { return c.capabils }
 
 // Close is a no-op — HTTP clients hold no resources beyond the
 // transport's connection pool, and that is shared / not owned by us.

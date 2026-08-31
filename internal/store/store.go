@@ -53,5 +53,6 @@ type Store interface {
 	SkillMaterializationLeases() SkillMaterializationLeaseStore
 	SkillPacks() SkillPackStore
 	Daemon() DaemonProfileStore
+	Capabilities() CapabilityStore
 	io.Closer
 }
