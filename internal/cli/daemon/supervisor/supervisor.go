@@ -462,6 +462,7 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 	if err := s.prepareClaimedTaskWorktree(prepareCtx, ap); err != nil {
 		prepareCancel()
 		taskID := s.taskIDForLifecycle(ap, nil)
+		slog.Warn("task worktree preflight failed", "worktree", ap.Entry.Worktree, "task_id", taskID, "err", err)
 		s.releaseAssignedTaskClaim(ap, taskID)
 		s.setPreflightError(ap, agenterr.OutcomeFromHarness(wrapper.ErrUnknown), fmt.Sprintf("prepare task worktree for %s: %v", taskID, err))
 		return false

@@ -6,6 +6,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/agent"
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
 // recoveryMode classifies how a supervise cycle recovers a worktree after a
@@ -37,15 +38,25 @@ const maxResumeFailures = 2
 // saved checkpoint + worktree diff).
 func (s *Supervisor) detectRecovery(ap *AgentProcess) (string, recoveryMode) {
 	info, running, err := cli.CheckLock(ap.WorktreePath)
-	if err != nil || info == nil || running || info.TaskID == "" {
-		return "", recoverCold // no crash remnant / agent still alive / no task to recover
+	if err == nil && info != nil && !running && info.TaskID != "" {
+		if ttl := agent.ResumeTTL(); ttl > 0 && !info.TaskStartedAt.IsZero() && time.Since(info.TaskStartedAt) > ttl {
+			slog.Info("interrupted task too old to recover; cold-starting",
+				"worktree", ap.Entry.Worktree, "task_id", info.TaskID,
+				"age", time.Since(info.TaskStartedAt).Round(time.Second))
+			return "", recoverCold
+		}
+		return s.recoveryModeForLock(ap, info)
 	}
-	if ttl := agent.ResumeTTL(); ttl > 0 && !info.TaskStartedAt.IsZero() && time.Since(info.TaskStartedAt) > ttl {
-		slog.Info("interrupted task too old to recover; cold-starting",
-			"worktree", ap.Entry.Worktree, "task_id", info.TaskID,
-			"age", time.Since(info.TaskStartedAt).Round(time.Second))
-		return "", recoverCold
+	// Incomplete exit-0 recovery clears the lock after saving its checkpoint.
+	// Carry that checkpoint into the next fresh claim before cold recovery can
+	// discard the committed task worktree.
+	if cp, cpErr := config.LoadCheckpoint(cli.ResolveLockDir(ap.WorktreePath)); cpErr == nil && cp != nil && cp.TaskID != "" && (cp.AgentName == "" || cp.AgentName == ap.Entry.Worktree) {
+		return cp.TaskID, recoverCheckpoint
 	}
+	return "", recoverCold // no crash remnant / agent still alive / no task to recover
+}
+
+func (s *Supervisor) recoveryModeForLock(ap *AgentProcess, info *cli.LockInfo) (string, recoveryMode) {
 	ap.Mu.Lock()
 	fails := ap.ResumeFailures
 	ap.Mu.Unlock()

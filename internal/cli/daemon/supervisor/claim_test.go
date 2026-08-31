@@ -2,6 +2,8 @@ package supervisor
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -154,6 +156,32 @@ type recordingTaskWorktreeManager struct {
 	req TaskWorktreeRequest
 	got TaskWorktree
 	err error
+}
+
+func TestPreFlightSetupLogsTaskWorktreePreparationFailure(t *testing.T) {
+	logs := captureSlog(t)
+	prepareErr := errors.New("task has committed working state without a published delivery")
+	manager := &recordingTaskWorktreeManager{err: prepareErr}
+	mock := clitest.NewMockIssueBackend()
+	mock.ReadyResult = []backend.IssueData{{ID: "T514-2", IssueType: "task", Status: "open", SourceRepo: "repo", Design: "plan"}}
+	mock.GetResult = &backend.IssueDetailData{IssueData: mock.ReadyResult[0]}
+	s := newTestSupervisor()
+	s.ProjectDir = t.TempDir()
+	s.WorkspaceID = "ws"
+	s.TaskWorktrees = manager
+	s.IssueBackend = mock
+	s.FindRepoConfig = func(string) *cfgpkg.RepoConfig {
+		return &cfgpkg.RepoConfig{Name: "repo", Path: s.ProjectDir, DefaultBranch: "main"}
+	}
+	ap := &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "backend-dev-1", Role: "task"}, WorktreePath: s.ProjectDir,
+		RoleConfig: cfgpkg.RoleConfig{TaskFilter: "has_design"}}
+
+	if s.preFlightSetup(ap) {
+		t.Fatal("preFlightSetup returned true after preparation failure")
+	}
+	if !strings.Contains(logs.String(), "task worktree preflight failed") || !strings.Contains(logs.String(), prepareErr.Error()) {
+		t.Fatalf("logs = %q, want preparation error", logs.String())
+	}
 }
 
 func TestPrepareClaimedTaskWorktreeUsesTaskRepoWithoutAgentAffinity(t *testing.T) {
