@@ -424,3 +424,33 @@ func ResetProfileDrifts() {
 	profileDrifts = map[string]ProfileDrift{}
 	profileDriftMu.Unlock()
 }
+
+// ProfileCredentialKey returns the identity that OWNS the credentials the agent
+// will run on: its per-agent profile root when one exists on disk, or "" when
+// it has none and therefore inherits the operator's shared harness config.
+//
+// It is the scoping key for auth walls: an expired login is a fact about ONE
+// credential set, and "" is a credential set too — every agent without a
+// profile shares the operator's, so an auth wall keyed "" correctly parks all
+// of them and nobody else.
+//
+// Keyed on the ROOT, not on a per-harness subdirectory: an agent runs one
+// backend at a time and may fail over between them, and both roots belong to
+// the same agent identity — a per-harness key would let one broken profile arm
+// two independent walls.
+//
+// Deliberately stat-only: this runs on every poll cycle for every agent, so it
+// must not load a manifest or probe a harness version. Whether the profile is
+// VERIFIABLE is a spawn-time question (AppendProfileEnv), not a wall question.
+func ProfileCredentialKey(projectDir, agent string) string {
+	root := agentprofile.Dir(projectDir, agent)
+	if root == "" {
+		return ""
+	}
+	for _, harness := range profileHarnesses {
+		if dirExists(filepath.Join(root, harness)) {
+			return root
+		}
+	}
+	return ""
+}

@@ -62,8 +62,12 @@ type RestartPolicy struct {
 	IdlePollInterval *int  `yaml:"idle_poll_interval,omitempty"`  // seconds (default 30); polling interval for task availability
 	YieldTimeout     *int  `yaml:"yield_timeout,omitempty"`       // seconds; how long to wait for agent to yield before SIGTERM (default 60)
 	SigtermTimeout   *int  `yaml:"sigterm_timeout,omitempty"`     // seconds; SIGTERM→SIGKILL window (default 300)
-	// AccountWallCooldown pauses new runs fleet-wide after an account-level
-	// auth/billing/usage wall (0 = disabled).
+	// AccountWallCooldown is how long agents stay parked after a credential
+	// wall is observed. It governs BOTH scopes deliberately — an auth wall
+	// (parks one profile root's agents) and a billing/usage wall (parks the
+	// fleet) both want the same "wait for a human" cadence, and a second knob
+	// would be a second thing to get wrong. 0 disables ALL wall parking: the
+	// failure is still classified and still stops its own agent.
 	AccountWallCooldown *int `yaml:"account_wall_cooldown,omitempty"` // seconds (default 900)
 }
 

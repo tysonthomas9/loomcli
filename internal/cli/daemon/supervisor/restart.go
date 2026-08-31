@@ -99,10 +99,10 @@ func (s *Supervisor) decideRestart(ap *AgentProcess) (bool, string) {
 		return false, ""
 	}
 
-	// Parked by the fleet-wide account wall: a block, not a failure (see
+	// Parked by a wall, of either scope: a block, not a failure (see
 	// gateAccountWall). Every counter stays intact and the agent resumes by
 	// itself at expiry.
-	if ap.StopReason == StopReasonAccountWall {
+	if ap.StopReason.IsWallPark() {
 		return true, ""
 	}
 
@@ -180,10 +180,13 @@ func (s *Supervisor) applyFatalStop(ap *AgentProcess, outcome agenterr.Outcome) 
 		ap.Entry.Worktree, outcome)
 	resetNoWork(ap)
 	ap.StopReason = StopReasonFatalError
-	// The wall is an account fact, not an agent fact: record it once so the
-	// pre-spawn gate parks the rest of the fleet. Takes only s.WallMu and
-	// touches no ap field — this runs with ap.Mu held.
-	s.recordAccountWall(outcome, ap.LastError)
+	// Record the wall once so the pre-spawn gate parks whoever it covers. Its
+	// blast radius is whatever owns the credential it is about: this agent's
+	// profile root for an auth failure, the whole account for billing and
+	// usage. ap.CredentialKey is the cached key (refreshed by gateAccountWall
+	// each cycle) and is read here because this runs with ap.Mu held;
+	// recordWall itself takes only s.WallMu and touches no ap field.
+	s.recordWall(ap.CredentialKey, outcome, ap.LastError)
 
 	if !outcome.IsClass(wrapper.ErrAuth) {
 		return ""
@@ -308,7 +311,9 @@ func (s *Supervisor) applyUncountedRestart(ap *AgentProcess, d agentpolicy.Dispo
 		s.applyIssueBackendOutageRestart(ap)
 		return true
 	}
-	s.recordAccountWall(outcome, ap.LastError)
+	// Same scoping rule as applyFatalStop, and the same reason for reading the
+	// cached key: this runs with ap.Mu held.
+	s.recordWall(ap.CredentialKey, outcome, ap.LastError)
 	// Rate limits: unlimited uncounted retries by default; the
 	// rate_limit_no_count config opt-out routes them through the counted
 	// budget instead (the layer's config wins, pt7).
@@ -490,11 +495,13 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 	rateCount := ap.RateRetryCount
 	noWorkCount := ap.NoWorkCount
 	blocked := ap.StopReason == StopReasonMaxRetriesBlocked
-	walled := ap.StopReason == StopReasonAccountWall
+	// Read together: a wall park sleeps out the wall on the agent's OWN
+	// credential, so the reason and the key are one fact under this lock.
+	walled, credentialKey := ap.StopReason.IsWallPark(), ap.CredentialKey
 	ap.Mu.Unlock()
 
 	if walled {
-		return s.accountWallBackoff()
+		return s.wallBackoffFor(credentialKey)
 	}
 
 	// A blocked agent sleeps the fixed block interval — keyed on StopReason,

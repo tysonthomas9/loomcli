@@ -173,6 +173,27 @@ func printProfileDrifts(drifts []supervisor.ProfileDrift) {
 	fmt.Println("  re-bless with: loom doctor --fix   (once the version has actually been verified)")
 }
 
+// printWalls prints the credential walls currently parking agents. The scope
+// and the credential are the point of the line: "account" means the whole
+// subscription and every agent is held, "profile" names ONE credential set and
+// only its agents are held. An operator reading a fleet that has stopped needs
+// to tell those apart before anything else.
+func printWalls(walls []supervisor.WallInfo) {
+	if len(walls) == 0 {
+		return
+	}
+	fmt.Println("")
+	fmt.Println("Credential walls (agents parked):")
+	for _, w := range walls {
+		line := fmt.Sprintf("  %s (%s)  %s  %s remaining",
+			w.Scope, w.Credential, w.Class, formatDaemonDuration(time.Until(w.Until)))
+		if w.Message != "" {
+			line += "  — " + firstLine(w.Message)
+		}
+		fmt.Println(line)
+	}
+}
+
 // formatDaemonDuration formats a duration in a human-readable way for daemon status.
 // <1s -> "<1s", <1m -> "Ns", <1h -> "Nm Ns", >=1h -> "Nh Nm".
 func formatDaemonDuration(d time.Duration) string {
