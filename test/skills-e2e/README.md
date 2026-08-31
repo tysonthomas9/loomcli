@@ -45,10 +45,11 @@ the actual product receives the intended paths, modes, and bytes.
 Skill representation and opaque tree revision. Exact materialized bytes and
 modes are compared with the staged updated fixture.
 
-Covered scenario metadata is authored once in `registry/scenarios.go`. Each
-top-level E2E test calls its typed scenario's `Covers(t)` method before invoking
-public Loom commands. The fast registry test validates IDs, ownership, matrices,
-and edge-case uniqueness without starting services.
+Each typed scenario declaration lives immediately above its top-level E2E test,
+which calls the scenario's `Covers(t)` method before invoking public Loom
+commands. `Covers(t)` derives the test name and covered status, validates the
+metadata, and records the scenario executed by that test process.
 
-CI generates `e2e-coverage-<storage>.yaml` from those Go declarations and
-uploads it as evidence. The YAML is not checked in and is never edited by hand.
+The actual E2E run generates `e2e-coverage-<storage>.yaml` from its recorded
+scenarios, and CI uploads that report as evidence. The YAML is not checked in
+and is never edited by hand.

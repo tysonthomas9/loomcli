@@ -1,18 +1,28 @@
-// Package registry is the authored source of truth for executable E2E
-// coverage. YAML reports are generated from these typed declarations.
+// Package registry validates E2E coverage declared beside executable tests and
+// renders reports from the scenarios recorded by the current test process.
 package registry
 
 import (
 	"fmt"
 	"io"
+	"os"
 	"regexp"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 )
 
 var scenarioIDPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+
+var executedCoverage coverageRecorder
+
+type coverageRecorder struct {
+	mu        sync.Mutex
+	scenarios []Scenario
+}
 
 type EdgeCase struct {
 	ID        int    `yaml:"id"`
@@ -36,12 +46,47 @@ type Scenario struct {
 // It records no product behavior and does not hide any public Loom operation.
 func (s Scenario) Covers(t *testing.T) {
 	t.Helper()
-	if err := validateScenario(s); err != nil {
-		t.Fatalf("invalid scenario %q: %v", s.ID, err)
+	executedCoverage.covers(t, s)
+}
+
+func (r *coverageRecorder) covers(t *testing.T, scenario Scenario) {
+	t.Helper()
+	scenario.Test = t.Name()
+	scenario.Status = "covered"
+	if err := validateScenario(scenario); err != nil {
+		t.Fatalf("invalid scenario %q: %v", scenario.ID, err)
 	}
-	if t.Name() != s.Test {
-		t.Fatalf("scenario %q is registered to %s, not %s", s.ID, s.Test, t.Name())
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	updated := append(slices.Clone(r.scenarios), scenario)
+	if err := Validate(updated); err != nil {
+		t.Fatalf("record E2E coverage: %v", err)
 	}
+	r.scenarios = updated
+}
+
+func (r *coverageRecorder) snapshot() []Scenario {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.scenarios)
+}
+
+func (r *coverageRecorder) writeYAML(w io.Writer) error {
+	scenarios := r.snapshot()
+	if len(scenarios) == 0 {
+		return fmt.Errorf("no E2E scenarios executed")
+	}
+	return WriteYAML(w, scenarios)
+}
+
+// WriteCoverageFile renders coverage recorded by the current E2E test process.
+func WriteCoverageFile(path string) error {
+	var report strings.Builder
+	if err := executedCoverage.writeYAML(&report); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(report.String()), 0o644)
 }
 
 func Validate(scenarios []Scenario) error {

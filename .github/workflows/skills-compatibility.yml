@@ -202,15 +202,6 @@ jobs:
         with:
           go-version-file: loomcli/go.mod
 
-      - name: Generate E2E coverage report
-        working-directory: loomcli
-        shell: bash
-        env:
-          STORAGE_MODE: ${{ matrix.storage }}
-        run: |
-          go test ./test/skills-e2e/registry
-          go run ./test/skills-e2e/cmd/e2e-coverage > "../e2e-coverage-$STORAGE_MODE.yaml"
-
       - name: Configure workspace-file storage
         shell: bash
         env:
@@ -315,6 +306,7 @@ jobs:
           VERCEL_SKILLS_REPO: ${{ github.workspace }}/vercel-agent-skills
           FLEET_WORKSPACE_FILE_STORE: ${{ matrix.storage }}
           STORAGE_MODE: ${{ matrix.storage }}
+          E2E_COVERAGE_OUTPUT: ${{ github.workspace }}/e2e-coverage-${{ matrix.storage }}.yaml
         run: |
           set -o pipefail
           make test-skills-release-compat 2>&1 | tee "../skills-compatibility-$STORAGE_MODE.log"

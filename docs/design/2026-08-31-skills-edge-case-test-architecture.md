@@ -99,6 +99,7 @@ dedicated Go suite:
 ```text
 test/skills-e2e/
 ├── README.md
+├── coverage_test.go
 ├── suite_test.go
 ├── lifecycle_test.go
 ├── publication_test.go
@@ -111,9 +112,7 @@ test/skills-e2e/
 │   └── evidence.go
 ├── registry/
 │   ├── registry.go
-│   ├── registry_test.go
-│   └── scenarios.go
-├── cmd/e2e-coverage/main.go
+│   └── registry_test.go
 └── testdata/
     └── exact-round-trip/
         ├── initial/
@@ -234,21 +233,19 @@ share reviewed literals but do not share the production implementation.
 
 ## Executable E2E coverage
 
-`test/skills-e2e/registry/scenarios.go` is the sole authored source for covered
-scenarios. A typed declaration owns the stable ID, behavior, top-level test,
-owner, seam, required matrix, and any covered edge-case IDs:
+Each covered scenario is declared immediately above its executable E2E test. A
+typed declaration owns the stable ID, behavior, owner, seam, required matrix,
+and any covered edge-case IDs:
 
 ```go
-var ConcurrentTreePublication = Scenario{
+var concurrentTreePublication = registry.Scenario{
     ID:        "concurrent-tree-publication",
     Behavior:  "concurrent publication creates one logical tree",
-    Test:      "TestTreeCreationConcurrentIdenticalPublish",
     Owner:     "fleet",
     Seam:      "fleet-publication",
     Backends:  []string{"redis", "postgres"},
     Providers: []string{"minio"},
-    Status:    "covered",
-    Cases: []EdgeCase{{
+    Cases: []registry.EdgeCase{{
         ID: 50,
         Behavior: "concurrent publication creates one logical tree",
         Rationale: "publication atomicity varies by persistence adapter",
@@ -256,13 +253,13 @@ var ConcurrentTreePublication = Scenario{
 }
 ```
 
-The executable test calls `ConcurrentTreePublication.Covers(t)`. That call
-validates the metadata and fails if the declaration names a different test. A
-fast registry test validates unique scenario and edge-case IDs, required
-fields, and canonical backend/provider values without starting services.
+The executable test calls `concurrentTreePublication.Covers(t)`. That call
+derives the test name and covered status, validates the metadata, and records
+the scenario in the current test process.
 
-CI runs the validator, generates a YAML rendering, and uploads the rendering as
-an artifact. The repository does not contain a hand-edited coverage YAML file.
+The actual E2E process generates a YAML rendering from the scenarios it ran,
+and CI uploads that rendering as an artifact. The repository does not contain a
+hand-edited coverage YAML file or a separate scenario catalog.
 Planned, blocked, and not-applicable cases remain design/backlog dispositions
 until they have an executable owning-seam test; only executable `covered`
 metadata belongs in this registry.
@@ -270,7 +267,7 @@ metadata belongs in this registry.
 ## Matrix selection
 
 Do not run a Cartesian product of every case across every backend and provider.
-Each registry entry declares only the dimensions capable of changing its
+Each coverage declaration names only the dimensions capable of changing its
 behavior.
 
 Examples:
@@ -384,7 +381,7 @@ behind those targets rather than growing inline workflow shell.
 
 ## Implementation order
 
-1. Add typed registry entries for executable coverage; keep the remaining
+1. Add typed coverage declarations beside executable tests; keep the remaining
    accepted dispositions in the design/backlog until their owning tests exist.
 2. Create the Go harness and checked-in exact-round-trip fixtures.
 3. Move the current Redis/MinIO lifecycle tracer from shell into the Go suite
@@ -396,8 +393,8 @@ behind those targets rather than growing inline workflow shell.
    integrity, and grant security.
 7. Add the existing-bucket GCS provider lane after provider-neutral scenarios
    pass locally.
-8. Add a registry entry only when the named test and required matrix are
-   enforced in CI; generated YAML remains evidence rather than source.
+8. Add a declaration only beside a test whose required matrix is enforced in
+   CI; generated YAML remains evidence rather than source.
 
 ## Definition of done
 

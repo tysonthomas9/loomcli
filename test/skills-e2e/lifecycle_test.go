@@ -9,8 +9,24 @@ import (
 	"github.com/tysonthomas9/loomcli/test/skills-e2e/registry"
 )
 
+var skillUpdateRoundTrip = registry.Scenario{
+	ID:        "skill-update-roundtrip",
+	Behavior:  "an update selects and materializes the exact new revision",
+	Owner:     "loom",
+	Seam:      "loom-fleet-e2e",
+	Backends:  []string{"redis"},
+	Providers: []string{"minio"},
+	Cases: []registry.EdgeCase{
+		{ID: 1, Behavior: "binary bytes and executable mode round-trip exactly", Rationale: "the materialized tree is compared byte-for-byte and mode-for-mode"},
+		{ID: 2, Behavior: "a zero-byte bundled file round-trips exactly", Rationale: "the fixture contains empty.dat and the exact tree comparison requires zero bytes"},
+		{ID: 3, Behavior: "nested slash-separated paths round-trip exactly", Rationale: "the fixture requires exact nested docs, assets, and scripts paths"},
+		{ID: 12, Behavior: "non-root files retain arbitrary bytes and executable mode", Rationale: "binary and executable non-root files are checked against literal fixtures"},
+		{ID: 15, Behavior: "updating Skill content selects and materializes a new tree revision", Rationale: "two public imports require different revisions and the second literal revision is selected"},
+	},
+}
+
 func TestSkillUpdateSelectsAndMaterializesExactRevision(t *testing.T) {
-	registry.SkillUpdateRoundTrip.Covers(t)
+	skillUpdateRoundTrip.Covers(t)
 	loom := harness.Open(t)
 	initialSource := loom.SkillFixture("exact-round-trip/initial")
 	updatedSource := loom.SkillFixture("exact-round-trip/updated")
@@ -30,8 +46,17 @@ func TestSkillUpdateSelectsAndMaterializesExactRevision(t *testing.T) {
 	materialized.RequireExactTree(updatedSource, "exact-round-trip")
 }
 
+var stableIdenticalReimport = registry.Scenario{
+	ID:        "stable-identical-reimport",
+	Behavior:  "importing identical content retains the content revision",
+	Owner:     "loom",
+	Seam:      "loom-fleet-e2e",
+	Backends:  []string{"redis"},
+	Providers: []string{"minio"},
+}
+
 func TestIdenticalSkillReimportKeepsContentRevision(t *testing.T) {
-	registry.StableIdenticalReimport.Covers(t)
+	stableIdenticalReimport.Covers(t)
 	loom := harness.Open(t)
 	source := loom.SkillFixture("stable-reimport/current")
 
@@ -50,8 +75,17 @@ func TestIdenticalSkillReimportKeepsContentRevision(t *testing.T) {
 	materialized.RequireExactTree(source, "stable-reimport")
 }
 
+var contentUpdatePreservesBundles = registry.Scenario{
+	ID:        "content-update-preserves-bundles",
+	Behavior:  "updating only Skill content preserves every bundled file",
+	Owner:     "loom",
+	Seam:      "loom-fleet-e2e",
+	Backends:  []string{"redis"},
+	Providers: []string{"minio"},
+}
+
 func TestSkillContentUpdatePreservesBundledFiles(t *testing.T) {
-	registry.ContentUpdatePreservesBundles.Covers(t)
+	contentUpdatePreservesBundles.Covers(t)
 	loom := harness.Open(t)
 	originalSource := loom.SkillFixture("content-update/original")
 	expectedSource := loom.SkillFixture("content-update/expected")
@@ -74,8 +108,17 @@ func TestSkillContentUpdatePreservesBundledFiles(t *testing.T) {
 	materialized.RequireExactTree(expectedSource, "content-update")
 }
 
+var rematerializationPrunesStaleFiles = registry.Scenario{
+	ID:        "rematerialization-prunes-stale-files",
+	Behavior:  "rematerialization removes files absent from the selected revision",
+	Owner:     "loom",
+	Seam:      "loom-fleet-e2e",
+	Backends:  []string{"redis"},
+	Providers: []string{"minio"},
+}
+
 func TestSkillRematerializationRemovesStaleFiles(t *testing.T) {
-	registry.RematerializationPrunesStaleFiles.Covers(t)
+	rematerializationPrunesStaleFiles.Covers(t)
 	loom := harness.Open(t)
 	initialSource := loom.SkillFixture("shrinking-tree/initial")
 	updatedSource := loom.SkillFixture("shrinking-tree/updated")
@@ -89,8 +132,17 @@ func TestSkillRematerializationRemovesStaleFiles(t *testing.T) {
 	materialized.RequireExactTree(updatedSource, "shrinking-tree")
 }
 
+var deletionPrunesMaterialization = registry.Scenario{
+	ID:        "deletion-prunes-materialization",
+	Behavior:  "deleting a Skill prunes it from an existing materialization",
+	Owner:     "loom",
+	Seam:      "loom-fleet-e2e",
+	Backends:  []string{"redis"},
+	Providers: []string{"minio"},
+}
+
 func TestSkillDeletionPrunesExistingMaterialization(t *testing.T) {
-	registry.DeletionPrunesMaterialization.Covers(t)
+	deletionPrunesMaterialization.Covers(t)
 	loom := harness.Open(t)
 	source := loom.SkillFixture("deleted-skill/current")
 
@@ -103,8 +155,17 @@ func TestSkillDeletionPrunesExistingMaterialization(t *testing.T) {
 	materialized.RequireSkillAbsent("deleted-skill")
 }
 
+var listShowRevisionAgreement = registry.Scenario{
+	ID:        "list-show-revision-agreement",
+	Behavior:  "public list and show results report the same selected revision",
+	Owner:     "loom",
+	Seam:      "loom-fleet-e2e",
+	Backends:  []string{"redis"},
+	Providers: []string{"minio"},
+}
+
 func TestSkillListReportsSelectedRevision(t *testing.T) {
-	registry.ListShowRevisionAgreement.Covers(t)
+	listShowRevisionAgreement.Covers(t)
 	loom := harness.Open(t)
 	source := loom.SkillFixture("listed-skill/current")
 
