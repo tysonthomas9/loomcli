@@ -225,3 +225,30 @@ func testLeasedMaterializeDeps(calls *[]string) leasedMaterializeDeps {
 		},
 	}
 }
+
+func TestMaterializeLeasedSkipsAcquireWhenLeasesDisabled(t *testing.T) {
+	// The whole point of the boot-time preflight threading a flag down here:
+	// a fleet-db that does not serve the lease routes must cost zero round
+	// trips per spawn, not one that always fails.
+	var calls []string
+	leases := &fakeSkillMaterializationLeaseStore{
+		acquireErrs: []error{fmt.Errorf("route missing: %w", domain.ErrNotFound)},
+		calls:       &calls,
+	}
+	st := leasedMaterializeStore{leases: leases}
+	deps := testLeasedMaterializeDeps(&calls)
+	deps.leasesDisabled = true
+
+	if err := materializeLeasedWith(t.Context(), st, "WS", "lead", t.TempDir(), deps); err != nil {
+		t.Fatalf("materializeLeasedWith: %v", err)
+	}
+	if want := []string{"materialize"}; !reflect.DeepEqual(calls, want) {
+		t.Fatalf("calls = %v, want %v — acquire must not be attempted", calls, want)
+	}
+}
+
+func TestMaterializeWithOptionsDefaultsToLeasing(t *testing.T) {
+	if (Options{}).LeasesDisabled {
+		t.Fatal("the zero Options must leave leasing enabled")
+	}
+}

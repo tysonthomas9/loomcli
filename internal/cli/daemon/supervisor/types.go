@@ -6,6 +6,7 @@ package supervisor
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -170,4 +171,12 @@ type SupervisedAgentStatus struct {
 var BuiltInRoles = map[string]bool{
 	"plan": true,
 	"task": true,
+}
+
+// ResolveDaemonPath resolves a path relative to projectDir, or returns as-is if absolute.
+func ResolveDaemonPath(projectDir, path string) string {
+	if filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(projectDir, path)
 }

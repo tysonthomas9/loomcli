@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/notify"
+	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -63,7 +64,16 @@ type Daemon struct {
 	// inputs holds each agent's outstanding interactive prompt so an operator
 	// can see and answer it (see daemon_input.go).
 	inputs *inputRegistry
+
+	// preflight is the boot-time fleet-db capability report. A fatal one
+	// never reaches here — initDaemonServices exits before NewDaemon — so
+	// this is always a report the daemon is allowed to start under, kept for
+	// the banner and for the degradations the supervisor must honor.
+	preflight runtimepreflight.Report
 }
+
+// PreflightReport returns the boot-time fleet-db capability report.
+func (d *Daemon) PreflightReport() runtimepreflight.Report { return d.preflight }
 
 // configSnapshot returns a snapshot of the current config pointer under RLock.
 // Safe for concurrent use with reloadAndReconcile which swaps d.config under Lock.

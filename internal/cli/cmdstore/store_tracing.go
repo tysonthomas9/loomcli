@@ -171,6 +171,10 @@ func (t *tracedStore) SkillMaterializationLeases() store.SkillMaterializationLea
 
 func (t *tracedStore) SkillPacks() store.SkillPackStore { return t.inner.SkillPacks() }
 
+// Capabilities passes through untraced: it is read once at boot, before the
+// daemon is running, so a span would have nothing to correlate with.
+func (t *tracedStore) Capabilities() store.CapabilityStore { return t.inner.Capabilities() }
+
 // Awaits returns the traced await wrapper (chunk AW5): spans per call with
 // workspace / instance / run / pattern attributes.
 func (t *tracedStore) Awaits() store.AwaitStore { return t.awaits }

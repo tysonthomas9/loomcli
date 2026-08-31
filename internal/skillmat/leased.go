@@ -36,17 +36,36 @@ type leasedMaterializeDeps struct {
 	pid         func() int
 	sleep       func(context.Context, time.Duration) error
 	materialize func(context.Context, store.Store, string, string, string) error
+
+	// leasesDisabled short-circuits lease acquisition; see Options.
+	leasesDisabled bool
+}
+
+// Options tunes one materialization.
+type Options struct {
+	// LeasesDisabled skips lease acquisition entirely and materializes
+	// unlocked. Set by the daemon when the boot-time capability preflight
+	// established that this fleet-db does not serve the lease routes: the
+	// call cannot succeed, and paying for it once per spawn is how one
+	// incident made 774 pointless round trips.
+	LeasesDisabled bool
 }
 
 // MaterializeLeased serializes materializers that target the same host-local
 // directory, degrading to the existing unlocked behavior when the ephemeral
 // lease service is unavailable.
 func MaterializeLeased(ctx context.Context, st store.Store, workspace, roleName, targetDir string) error {
+	return MaterializeWithOptions(ctx, st, workspace, roleName, targetDir, Options{})
+}
+
+// MaterializeWithOptions is MaterializeLeased with the caller's options.
+func MaterializeWithOptions(ctx context.Context, st store.Store, workspace, roleName, targetDir string, opts Options) error {
 	return materializeLeasedWith(ctx, st, workspace, roleName, targetDir, leasedMaterializeDeps{
-		hostname:    os.Hostname,
-		pid:         os.Getpid,
-		sleep:       sleepMaterializationLeaseBackoff,
-		materialize: materialize,
+		hostname:       os.Hostname,
+		pid:            os.Getpid,
+		sleep:          sleepMaterializationLeaseBackoff,
+		materialize:    materialize,
+		leasesDisabled: opts.LeasesDisabled,
 	})
 }
 
@@ -77,6 +96,13 @@ func materializeLeasedWith(
 	holder := skillMaterializationLeaseHolder(roleName, hostname, deps.pid())
 
 	leases := st.SkillMaterializationLeases()
+	if deps.leasesDisabled {
+		// Announced once at boot by the preflight, not per spawn: this path
+		// is taken for every agent on a fleet-db without the lease routes.
+		slog.Debug("skill materialization leases disabled by fleet-db capability preflight; continuing without lease",
+			"workspace", workspace, "role", roleName, "target", absoluteTarget)
+		return deps.materialize(ctx, st, workspace, roleName, targetDir)
+	}
 	if leases == nil {
 		slog.Warn("skill materialization lease store is not configured; continuing without lease",
 			"workspace", workspace, "role", roleName, "target", absoluteTarget)

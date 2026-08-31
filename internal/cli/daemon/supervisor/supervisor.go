@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -121,6 +120,14 @@ type Supervisor struct {
 	// ControlStore is the fleet-db-backed control plane used for node,
 	// session, lease, terminal, artifact, and command records.
 	ControlStore store.Store
+
+	// LeasesDisabled suppresses skill-materialization lease acquisition for
+	// the process lifetime, set at boot when the capability preflight found
+	// the fleet-db does not serve the lease routes. Without it every spawn
+	// pays a round trip that can only fail before falling through to the
+	// same unlocked materialization.
+	LeasesDisabled bool
+
 	NodeID       string
 	NodeTTL      time.Duration
 	NodeInterval time.Duration
@@ -988,12 +995,4 @@ func (s *Supervisor) resolveRoleConfig(roleName string, agentIndex int) (config.
 		return config.RoleConfig{}, fmt.Errorf("agent[%d]: %w", agentIndex, err)
 	}
 	return rc, nil
-}
-
-// ResolveDaemonPath resolves a path relative to projectDir, or returns as-is if absolute.
-func ResolveDaemonPath(projectDir, path string) string {
-	if filepath.IsAbs(path) {
-		return path
-	}
-	return filepath.Join(projectDir, path)
 }
