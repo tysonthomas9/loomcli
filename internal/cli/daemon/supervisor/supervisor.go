@@ -268,8 +268,8 @@ func (s *Supervisor) Stop() {
 
 	s.drainAllWithGrace(snapshot)
 
-	// Wait for all superviseAgent goroutines to exit
-	s.Wg.Wait()
+	// Bounded wait for the supervise goroutines, then release any lease left
+	s.waitForAgentsThenReleaseOwnership()
 }
 
 // superviseAgent is the main loop for a single agent (runs in goroutine).

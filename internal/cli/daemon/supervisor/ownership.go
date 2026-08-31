@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
@@ -368,6 +369,99 @@ func (s *Supervisor) sleepBeforeOwnershipRetry(ap *AgentProcess) bool {
 		return false
 	case <-ap.StopCh:
 		s.setStopReasonDefault(ap, StopReasonConfigRemoved)
+		return false
+	}
+}
+
+// Shutdown budget. daemon.Stop() bounds the whole shutdown at 30s and
+// drainAllWithGrace alone can burn most of it, so the wait for the supervise
+// goroutines is capped and the remainder is reserved for the lease sweep
+// below. Vars, not consts, so tests can shrink them.
+var (
+	shutdownAgentWaitTimeout    = 20 * time.Second
+	shutdownLeaseReleaseTimeout = 5 * time.Second
+)
+
+// waitForAgentsThenReleaseOwnership is the tail of Supervisor.Stop(): wait
+// (boundedly) for the superviseAgent goroutines to unwind, then release any
+// agent-ownership lease those goroutines did not get to release themselves.
+//
+// The wait is bounded because the lease sweep matters more than a tidy
+// unwind: a supervisor that exits still holding leases stalls every agent it
+// owned for the full lease TTL (30m), while a lease released a little early
+// during shutdown costs at most a duplicate-spawn window that the drain has
+// already closed.
+func (s *Supervisor) waitForAgentsThenReleaseOwnership() {
+	if !waitGroupWithTimeout(&s.Wg, shutdownAgentWaitTimeout) {
+		slog.Warn("supervise goroutines still running at shutdown deadline; releasing ownership leases anyway",
+			"workspace", s.WorkspaceID, "timeout", shutdownAgentWaitTimeout)
+	}
+	// Strictly AFTER the drain: releasing a lease while our agent process is
+	// still alive would invite another supervisor to claim that agent and
+	// spawn a duplicate.
+	s.releaseAllOwnershipLeases()
+}
+
+// releaseAllOwnershipLeases releases, in parallel and under a short deadline,
+// every agent-ownership lease still held when the supervisor stops. Reaching
+// a lease here is not routine — the normal unwind in superviseAgent releases
+// it — so anything found is logged at WARN with the agents named.
+//
+// releaseAgentOwnership is idempotent (it clears the token under ap.Mu and
+// returns early when empty), so racing a concurrent unwind is a no-op rather
+// than a double release.
+func (s *Supervisor) releaseAllOwnershipLeases() {
+	if s.ControlStore == nil || s.WorkspaceID == "" {
+		return
+	}
+	s.AgentsMu.RLock()
+	snapshot := make([]*AgentProcess, len(s.Agents))
+	copy(snapshot, s.Agents)
+	s.AgentsMu.RUnlock()
+
+	var (
+		wg   sync.WaitGroup
+		held []string
+	)
+	for _, ap := range snapshot {
+		ap.Mu.Lock()
+		token := ap.OwnershipLeaseToken
+		ap.Mu.Unlock()
+		if token == "" {
+			continue // already released by the normal unwind
+		}
+		held = append(held, ap.Entry.Worktree)
+		wg.Add(1)
+		go func(agent *AgentProcess) {
+			defer wg.Done()
+			s.releaseAgentOwnership(agent)
+		}(ap)
+	}
+	if len(held) == 0 {
+		return
+	}
+	slog.Warn("agent ownership leases still held at shutdown; releasing", "workspace", s.WorkspaceID, "worktrees", held)
+	if !waitGroupWithTimeout(&wg, shutdownLeaseReleaseTimeout) {
+		slog.Warn("agent ownership lease release did not complete before shutdown deadline",
+			"workspace", s.WorkspaceID, "worktrees", held, "timeout", shutdownLeaseReleaseTimeout)
+	}
+}
+
+// waitGroupWithTimeout reports whether wg finished before timeout elapsed.
+// The waiter goroutine outlives a timeout by design — it is parked on a
+// WaitGroup the process is about to abandon.
+func waitGroupWithTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return true
+	case <-timer.C:
 		return false
 	}
 }
