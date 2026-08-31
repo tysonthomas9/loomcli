@@ -106,6 +106,14 @@ func (s *Supervisor) RunCritical(name string, fn func()) {
 // treated as failures.
 func (s *Supervisor) supervisedAgentBody(name string, ap *AgentProcess) {
 	defer s.Wg.Done()
+	// The tick slot outlives the goroutine unless it is released here. A
+	// supervise loop that returns terminally (auth/billing fatal stop,
+	// fail-fast, config removed) stops recording, and the watchdog goes on
+	// scanning a name nothing will ever stamp again — so a single stopped
+	// agent fatals the whole daemon one threshold later, forever, on every
+	// restart. Released before RecoverAndSignal so a panicking body frees it
+	// too. Re-arming an agent re-registers the slot (see health.go).
+	defer s.UnregisterTick(name)
 	defer close(ap.Done)
 	defer s.RecoverAndSignal(name)
 	s.superviseAgent(ap)
@@ -118,6 +126,15 @@ func (s *Supervisor) RegisterTick(name string) {
 	tick := new(atomic.Int64)
 	tick.Store(time.Now().UnixNano())
 	s.Ticks.Store(name, tick)
+}
+
+// UnregisterTick removes a goroutine's tick slot so the liveness watchdog stops
+// scanning it. Call it when a watched goroutine exits for good; a slot left
+// behind is frozen at its last stamp and ages without bound, which the watchdog
+// cannot distinguish from a wedged goroutine. Unknown names are ignored, so it
+// is safe to call unconditionally and more than once.
+func (s *Supervisor) UnregisterTick(name string) {
+	s.Ticks.Delete(name)
 }
 
 // RecordTick stamps the current time on the named goroutine's tick slot. Call
