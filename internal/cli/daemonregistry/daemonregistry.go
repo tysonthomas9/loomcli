@@ -65,6 +65,11 @@ const (
 	LabelPID    = "loom.daemon.pid="
 	LabelCwd    = "loom.daemon.cwd="
 	LabelSocket = "loom.daemon.socket="
+	// LabelDegraded marks a daemon that is running but has a self-reported
+	// degradation active; the value is the supervisor.DegradationKind. One
+	// label per active kind. Because Node labels are replaced wholesale on
+	// update, recovery removes the label by simply not re-emitting it.
+	LabelDegraded = "loom.daemon.degraded="
 )
 
 // Detect checks whether a daemon has registered itself in the fleet-db
