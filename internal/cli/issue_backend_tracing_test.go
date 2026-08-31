@@ -176,3 +176,67 @@ func TestTracedIssueBackendReleaseClaim_PropagatesError(t *testing.T) {
 		t.Errorf("ReleaseClaim error = %v, want %v", got, want)
 	}
 }
+
+// actorAccessMockBackend is a MockIssueBackend that also answers the doctor's
+// actor-authorization probe.
+type actorAccessMockBackend struct {
+	*MockIssueBackend
+	calls     int
+	lastActor string
+	probeErr  error
+}
+
+func (m *actorAccessMockBackend) CheckActorAccess(_ context.Context, actor string) error {
+	m.calls++
+	m.lastActor = actor
+	return m.probeErr
+}
+
+func (m *actorAccessMockBackend) Workspace() string { return "PUPPET" }
+
+// TestTracedIssueBackendForwardsCheckActorAccess pins the forwarding the
+// doctor check depends on. The CLI always wraps its backend in tracing, so an
+// optional interface that is not re-implemented here is invisible in
+// production while still passing tests that hold the bare backend.
+func TestTracedIssueBackendForwardsCheckActorAccess(t *testing.T) {
+	probeErr := errors.New("workspace access denied")
+	inner := &actorAccessMockBackend{MockIssueBackend: NewMockIssueBackend(), probeErr: probeErr}
+	wrapped := wrapIssueBackendWithTracing(inner)
+
+	checker, ok := wrapped.(interface {
+		CheckActorAccess(context.Context, string) error
+		Workspace() string
+	})
+	if !ok {
+		t.Fatal("tracedIssueBackend should expose the actor access probe")
+	}
+	if err := checker.CheckActorAccess(context.Background(), "operator@local"); !errors.Is(err, probeErr) {
+		t.Fatalf("CheckActorAccess = %v, want the inner backend's verdict", err)
+	}
+	if inner.calls != 1 || inner.lastActor != "operator@local" {
+		t.Fatalf("inner probe = calls=%d actor=%q, want 1 / operator@local", inner.calls, inner.lastActor)
+	}
+	if checker.Workspace() != "PUPPET" {
+		t.Errorf("Workspace() = %q, want the inner backend's workspace", checker.Workspace())
+	}
+}
+
+// A backend with no probe must report unsupported, never "authorized": the
+// wrapper satisfies the interface unconditionally, so returning nil would make
+// every non-fleet backend look like a passing check.
+func TestTracedIssueBackendCheckActorAccessUnsupported(t *testing.T) {
+	wrapped := wrapIssueBackendWithTracing(NewMockIssueBackend())
+	checker, ok := wrapped.(interface {
+		CheckActorAccess(context.Context, string) error
+	})
+	if !ok {
+		t.Fatal("tracedIssueBackend should expose the actor access probe")
+	}
+	err := checker.CheckActorAccess(context.Background(), "operator@local")
+	if err == nil {
+		t.Fatal("unsupported probe returned nil, which reads as authorized")
+	}
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Errorf("err = %v, want a validation error", err)
+	}
+}
