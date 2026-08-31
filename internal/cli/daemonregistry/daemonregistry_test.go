@@ -451,3 +451,29 @@ func TestHostnameMatchesLocal_Cases(t *testing.T) {
 		}
 	}
 }
+
+func TestParseSupervisorNodeID_Cases(t *testing.T) {
+	cases := []struct {
+		nodeID   string
+		wantHost string
+		wantPID  int
+		wantOK   bool
+	}{
+		{"loom-supervisor-host1-12", "host1", 12, true},
+		{"loom-supervisor-host-with-dashes-12", "host-with-dashes", 12, true},
+		{"loom-supervisor-host1-0", "", 0, false},
+		{"loom-supervisor-host1-", "", 0, false},
+		{"loom-supervisor-host1-abc", "", 0, false},
+		{"loom-supervisor-host1", "", 0, false},
+		{"loom-supervisor--12", "", 0, false},
+		{"unrelated-id-12", "", 0, false},
+		{"", "", 0, false},
+	}
+	for _, tc := range cases {
+		host, pid, ok := ParseSupervisorNodeID(tc.nodeID)
+		if host != tc.wantHost || pid != tc.wantPID || ok != tc.wantOK {
+			t.Errorf("ParseSupervisorNodeID(%q) = (%q, %d, %v), want (%q, %d, %v)",
+				tc.nodeID, host, pid, ok, tc.wantHost, tc.wantPID, tc.wantOK)
+		}
+	}
+}

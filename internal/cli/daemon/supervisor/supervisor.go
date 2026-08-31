@@ -300,7 +300,7 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 
 		s.clearAgentSessionState(ap)
 
-		if s.acquireAgentOwnership(ap) != ownershipAcquired {
+		if !s.acquireAgentOwnershipWithReclaim(ap) {
 			if !s.sleepBeforeOwnershipRetry(ap) {
 				return
 			}

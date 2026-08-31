@@ -674,6 +674,12 @@ func (s *agentOwnershipLeaseStore) Acquire(ctx context.Context, in store.AgentOw
 		"node_id":          in.NodeID,
 		"ttl_seconds":      ttlSeconds(in.TTL),
 	}
+	// Omitted when empty so an ordinary acquire keeps exactly the body an
+	// older fleet-db expects: the server decodes with DisallowUnknownFields,
+	// so an unconditional key would 400 every acquire against one.
+	if in.TakeoverFromOwnerID != "" {
+		body["takeover_from_owner_id"] = in.TakeoverFromOwnerID
+	}
 	var out domain.AgentOwnershipLease
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/agent-ownership-leases/"+pathEscape(in.AgentID)+"/acquire", body, &out); err != nil {
 		return nil, err
