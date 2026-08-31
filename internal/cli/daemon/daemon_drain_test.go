@@ -427,7 +427,7 @@ func TestParkedAgentReachesTheStateFile(t *testing.T) {
 	}}
 
 	path := t.TempDir() + "/daemon-agents.json"
-	if err := writeStateFile(path, time.Now(), nil, parked, nil, 3); err != nil {
+	if err := writeStateFile(path, time.Now(), nil, parked, nil, nil, 3); err != nil {
 		t.Fatalf("writeStateFile: %v", err)
 	}
 	state, err := ReadStateFile(path)

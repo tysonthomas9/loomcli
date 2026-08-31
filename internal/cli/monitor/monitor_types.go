@@ -138,8 +138,12 @@ type MonitorStats struct {
 // DaemonAgentState represents the daemon-agents.json file format.
 // This matches the DaemonState written by daemon_cmd.go.
 type DaemonAgentState struct {
-	PID    int                     `json:"pid"`
-	Agents []DaemonAgentStateEntry `json:"agents"`
+	PID int `json:"pid"`
+	// WrittenAt is when the daemon last wrote the file. Consumers (monitor,
+	// webui) use it to flag state that has stopped advancing instead of
+	// rendering it as truth. Zero for files written by an older binary.
+	WrittenAt time.Time               `json:"written_at,omitempty"`
+	Agents    []DaemonAgentStateEntry `json:"agents"`
 }
 
 // DaemonAgentStateEntry represents a single agent in daemon-agents.json

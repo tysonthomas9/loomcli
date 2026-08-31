@@ -104,11 +104,17 @@ type stateExtras struct {
 //
 // extras is variadic to carry 0 or 1 snapshots of the daemon-wide conditions
 // without disturbing the existing positional signature (and its call sites).
-func writeStateFile(path string, startedAt time.Time, agents []supervisor.SupervisedAgentStatus, parked []ParkedAgent, quarantined []supervisor.QuarantinedTaskInfo, maxRetries int, extras ...stateExtras) error {
+//
+// degradations are the supervisor's active degradation episodes; they ride in
+// the file so every out-of-band reader learns the daemon is impaired without
+// having to reach the daemon itself.
+func writeStateFile(path string, startedAt time.Time, agents []supervisor.SupervisedAgentStatus, parked []ParkedAgent, quarantined []supervisor.QuarantinedTaskInfo, degradations []supervisor.Degradation, maxRetries int, extras ...stateExtras) error {
 	state := DaemonState{
 		PID:              os.Getpid(),
 		StartedAt:        startedAt,
 		Agents:           make([]DaemonAgentStatus, len(agents), len(agents)+len(parked)),
+		WrittenAt:        time.Now(),
+		Degradations:     degradations,
 		QuarantinedTasks: quarantined,
 		// Read from the supervisor package's own record rather than threaded
 		// through the signature: the drift is a property of this host's

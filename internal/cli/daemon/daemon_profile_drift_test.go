@@ -53,7 +53,7 @@ func TestWriteStateFile_CarriesProfileDrifts(t *testing.T) {
 	t.Cleanup(supervisor.ResetProfileDrifts)
 
 	path := filepath.Join(t.TempDir(), "daemon-agents.json")
-	if err := writeStateFile(path, time.Now(), nil, nil, nil, 3); err != nil {
+	if err := writeStateFile(path, time.Now(), nil, nil, nil, nil, 3); err != nil {
 		t.Fatalf("writeStateFile: %v", err)
 	}
 	state, err := ReadStateFile(path)
