@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -15,6 +16,7 @@ import (
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 	"github.com/tysonthomas9/loomcli/internal/kv"
+	"github.com/tysonthomas9/loomcli/internal/webui/operatorid"
 )
 
 // orphanLockGracePeriod is how long an in_progress issue may go unmatched by a
@@ -283,4 +285,82 @@ func checkFleet() CheckResult {
 		Status:  StatusPass,
 		Summary: fmt.Sprintf("fleet configured and reachable (workspace: %s, URL: %s)", fleetCfg.Workspace, fleetCfg.URL),
 	}
+}
+
+// actorAccessChecker is the optional capability a backend advertises when it
+// can probe whether a given actor is authorized. Detected the same way as
+// backend.ClaimReleaser; only the fleet backend implements it.
+type actorAccessChecker interface {
+	CheckActorAccess(ctx context.Context, actor string) error
+	Workspace() string
+}
+
+// checkOperatorActorRole reports whether the operator identity the webui
+// attributes board writes to actually holds a role in the issue backend.
+//
+// When it does not, writes still succeed — the backend falls back to the
+// process actor — but attribution is silently lost, and before that fallback
+// existed the whole board went read-only. This check surfaces the condition
+// before an operator discovers it by clicking.
+//
+// Report-only. Returns an empty CheckResult (skipped) when there is no issue
+// backend, when the backend cannot probe actors, when an API key is configured
+// (fleet-db then takes the identity from the key and ignores X-Actor entirely,
+// so there is nothing to diagnose), or when the probe fails to reach the
+// server (the fleet/fleet-db reachability checks already report that).
+func checkOperatorActorRole(deps *cli.Deps) CheckResult {
+	if deps == nil || deps.IssueBackend == nil {
+		return CheckResult{}
+	}
+	checker, ok := deps.IssueBackend.(actorAccessChecker)
+	if !ok {
+		return CheckResult{}
+	}
+	if os.Getenv(bootstrap.EnvFleetDBAPIKey) != "" {
+		return CheckResult{}
+	}
+
+	actor := operatorid.Resolve()
+	workspace := checker.Workspace()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	err := checker.CheckActorAccess(ctx, actor)
+	switch {
+	case err == nil:
+		return CheckResult{
+			Name:    "operator_actor_role",
+			Status:  StatusPass,
+			Summary: fmt.Sprintf("operator actor %q is authorized in workspace %q", actor, workspace),
+		}
+	case isActorForbidden(err):
+		return CheckResult{
+			Name:    "operator_actor_role",
+			Status:  StatusWarn,
+			Summary: fmt.Sprintf("operator actor %q has no role in fleet-db workspace %q", actor, workspace),
+			Detail: "board writes still succeed (they fall back to the process actor) but are " +
+				"attributed to the process actor, not the operator.\n" +
+				"remediation: grant the actor a role in fleet-db (redis: SET " +
+				"fleet-db:acl:global-roles:" + actor + " maintainer), or set " +
+				operatorid.EnvOperatorActor + " to an actor that already has one.",
+		}
+	default:
+		// Unreachable or otherwise broken: checkFleet / checkFleetDB own
+		// that diagnosis. Do not double-report it here.
+		return CheckResult{}
+	}
+}
+
+// isActorForbidden reports whether err is the authorization rejection the
+// probe is looking for, as opposed to a transport failure. The fleet backend
+// classifies both as KindUnavailable (see internal/backend/fleet/errors.go,
+// where 403 keeps that kind deliberately), so the message is what separates
+// them.
+func isActorForbidden(err error) bool {
+	var be *backend.BackendError
+	if !errors.As(err, &be) {
+		return false
+	}
+	return strings.Contains(be.Message, "is not authorized in workspace")
 }
