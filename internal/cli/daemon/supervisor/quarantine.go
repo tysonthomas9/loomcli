@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"hash/fnv"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -14,11 +13,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/agentpolicy"
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/cli/automode"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
@@ -67,42 +64,6 @@ const (
 	// before the field existed.
 	quarantineBootGrace = 5 * time.Minute
 )
-
-// killEvent is one observed kill of a task-holding agent, captured at exit
-// time (after classifyAgentExit, before finalize/recovery clear the session
-// and lock state it reads).
-type killEvent struct {
-	At              time.Time `json:"at"`
-	Agent           string    `json:"agent"`             // ap.Entry.Worktree
-	StopReason      string    `json:"stop_reason"`       // e.g. "watchdog"; empty for a bare crash / ownership kill
-	ErrClass        string    `json:"err_class"`         // classified outcome (Unknown | Timeout | Transient | ContextOverflow)
-	ExitCode        int       `json:"exit_code"`         //
-	FleetSessionID  string    `json:"fleet_session_id"`  // ap.AgentSessionID — captured before finalize clears it
-	ClaudeSessionID string    `json:"claude_session_id"` // lock ClaudeSessionID (best-effort; empty if absent)
-	RunID           string    `json:"run_id"`            // lock RunID (best-effort)
-
-	// RunSilent mirrors ap.RunSilentAtStop: for a run_duration_exceeded kill,
-	// whether the run was ALSO silent past its output timeout. Meaningless (and
-	// false) for every other stop reason.
-	RunSilent bool `json:"run_silent,omitempty"`
-	// NotCounted is the quarantineCountable reason string when this kill was
-	// recorded in the timeline but never charged to the task's counter; empty
-	// for a kill that counted.
-	NotCounted string `json:"not_counted,omitempty"`
-}
-
-// reason renders a compact kill descriptor for status output, e.g.
-// "watchdog/Timeout" or "crash/Unknown".
-func (ev killEvent) reason() string {
-	kind := ev.StopReason
-	if kind == "" {
-		kind = "crash"
-	}
-	if ev.ErrClass == "" {
-		return kind
-	}
-	return kind + "/" + ev.ErrClass
-}
 
 // taskFailureRecord accumulates consecutive no-progress kills for one task.
 // Every persisted field is exported and tagged: the record round-trips through
@@ -375,103 +336,6 @@ func (s *Supervisor) recordTaskExitForQuarantine(ap *AgentProcess, exitCode int)
 		"count", count, "threshold", s.quarantineThreshold())
 }
 
-// stopReasonQuarantineEligible reports whether a kill carrying this stop
-// reason counts as evidence that the TASK is stalling.
-//
-// Lifecycle stops do not: a drain (config change, shutdown, an operator's
-// stop) is a decision the daemon made about the AGENT, and the run it
-// interrupted carries no evidence in either direction. The gate is therefore a
-// skip, not an evict — an accumulated count survives a drain and the next
-// genuine kill continues from where it left off.
-//
-// The behavioral consequence is worth stating plainly: a task that only ever
-// dies during drains is never quarantined. That is correct — such a task is
-// being killed by the daemon, not by its own stall.
-//
-// Everything else stays eligible, notably watchdog (the signal the whole
-// mechanism was built for), run_duration_exceeded, fatal_error, fast_fail and
-// a bare crash (empty reason). backend_unavailable and rate_limited are
-// already filtered out by the outcome class.
-func stopReasonQuarantineEligible(r StopReason) bool {
-	switch r {
-	case StopReasonConfigRemoved, StopReasonShutdown, StopReasonManualStop,
-		StopReasonYielded, StopReasonEphemeralDone:
-		return false
-	default:
-		return true
-	}
-}
-
-// lifecycleUncountedReason names the lifecycle stop for the ledger's
-// NotCounted field. Kept in step with stopReasonQuarantineEligible: every
-// reason that predicate rejects needs a name here.
-func lifecycleUncountedReason(r StopReason) string {
-	switch r {
-	case StopReasonShutdown:
-		// The daemon SIGTERMed its own agents mid-run; the task was a bystander.
-		return "daemon_shutdown"
-	case StopReasonManualStop:
-		return "manual_stop"
-	case StopReasonConfigRemoved:
-		return "config_removed"
-	case StopReasonYielded:
-		return "yielded"
-	case StopReasonEphemeralDone:
-		return "ephemeral_done"
-	default:
-		return "lifecycle_stop"
-	}
-}
-
-// quarantineCountable reports whether this kill says anything about the TASK.
-// Kills that are verdicts about the daemon, the agent, or the account are
-// recorded in the timeline for diagnosis but never advance the counter.
-//
-// The outcome-class seat (agentpolicy.QuarantineEligible) cannot make this
-// call: it sees an agenterr.Outcome, which knows nothing of stop reasons or
-// daemon lifecycle. A daemon that SIGTERMs its own agents mid-run produces a
-// perfectly eligible outcome class, and during the 2026-08-26/27 incident three
-// such kills were enough to quarantine a task that had never stalled.
-//
-// StopReasonWatchdog stays COUNTABLE and deliberately so — the watchdog fires
-// because the agent went silent past its output timeout, which is the
-// definition of a stall and the breaker's best signal. So does a bare crash
-// (empty StopReason), the breaker's base case. Blinding the counter to either
-// would leave nothing to count.
-func (s *Supervisor) quarantineCountable(ev killEvent) (bool, string) {
-	r := StopReason(ev.StopReason)
-	// Lifecycle stops keep stopReasonQuarantineEligible as their single
-	// authority: it also rejects yielded and ephemeral_done, which the switch
-	// below never listed and which must not be charged to a task either.
-	if !stopReasonQuarantineEligible(r) {
-		return false, lifecycleUncountedReason(r)
-	}
-	switch r {
-	case StopReasonBackendUnavailable:
-		// The agent's backend CLI is missing from PATH. Nothing to do with the task.
-		return false, "backend_unavailable"
-	case StopReasonMaxRetries, StopReasonMaxRetriesBlocked, StopReasonFastFail:
-		// Agent-level budgets already escalate agent-side (block, fast-fail).
-		// Charging the task too double-counts one failure against two breakers.
-		return false, "agent_budget"
-	case StopReasonRunDurationExceeded:
-		// See applyRunDurationKill: the cap fires regardless of activity, so on
-		// its own it is not a no-progress signal. A run that was still talking
-		// when the ceiling hit it was working, however slowly; only a run that
-		// was ALSO silent is the wedge markRunDurationExceeded argues about.
-		if !ev.RunSilent {
-			return false, "duration_kill_while_active"
-		}
-	}
-	// Collateral of a daemon restart lands in a burst right after boot and says
-	// nothing about any task. Zero BootedAt disables the grace — see the
-	// constant.
-	if !s.BootedAt.IsZero() && ev.At.Sub(s.BootedAt) < quarantineBootGrace {
-		return false, "boot_grace"
-	}
-	return true, ""
-}
-
 // recordUncountedKill files an infrastructure kill in an EXISTING record's
 // timeline and nothing more. Every omission here is load-bearing:
 //
@@ -495,143 +359,6 @@ func (q *taskQuarantine) recordUncountedKill(taskID string, ev killEvent) {
 		rec.Kills = rec.Kills[len(rec.Kills)-maxKillEventsRetained:]
 	}
 	rec.LastUpdated = time.Now()
-}
-
-// taskExitSnapshot is the per-exit state the ledger consumes, read under
-// ap.Mu in one critical section.
-type taskExitSnapshot struct {
-	clean     bool
-	outcome   agenterr.Outcome
-	beforeRef string
-	event     killEvent
-}
-
-func snapshotTaskExit(ap *AgentProcess, lockInfo *cli.LockInfo, exitCode int) taskExitSnapshot {
-	ap.Mu.Lock()
-	lastErr := ap.LastError
-	stopReason := ap.StopReason
-	beforeRef := ap.BeforeRef
-	fleetSessionID := ap.AgentSessionID
-	runSilent := ap.RunSilentAtStop
-	ap.Mu.Unlock()
-
-	snap := taskExitSnapshot{
-		clean:     exitCode == 0 && lastErr == nil,
-		beforeRef: beforeRef,
-	}
-	errClass := ""
-	if lastErr != nil {
-		snap.outcome = lastErr.Class
-		errClass = lastErr.Class.String()
-	}
-	snap.event = killEvent{
-		At:             time.Now(),
-		Agent:          ap.Entry.Worktree,
-		StopReason:     string(stopReason),
-		ErrClass:       errClass,
-		ExitCode:       exitCode,
-		FleetSessionID: fleetSessionID,
-		RunSilent:      runSilent,
-	}
-	if lockInfo != nil {
-		snap.event.ClaudeSessionID = lockInfo.ClaudeSessionID
-		snap.event.RunID = lockInfo.RunID
-	}
-	return snap
-}
-
-// commitProgressed reports whether the worktree HEAD moved past the ref
-// captured at session creation. An unknown baseline (BeforeRef empty — it is
-// set only after session creation succeeds) or an unreadable current HEAD is
-// NOT progress: comparing HEAD against "" would fake progress on every
-// session-creation-failure exit and suppress quarantine for that failure mode.
-func commitProgressed(worktreePath, beforeRef string) bool {
-	if beforeRef == "" {
-		return false
-	}
-	head := automode.CaptureHEADRef(worktreePath)
-	return head != "" && head != beforeRef
-}
-
-// issueBaseline is the field-delta progress fingerprint of one issue, read
-// off a single Get response — every component comes from data the GET already
-// returned, so widening it costs no extra network call.
-type issueBaseline struct {
-	designHash   uint64
-	notesHash    uint64
-	maxCommentID int64
-	labelsHash   uint64
-}
-
-// progressedFrom reports whether this (freshly read) baseline shows movement
-// past the recorded one. Hashes compare by inequality; the comment id compares
-// by > because it is monotone and a deletion must not read as progress.
-func (b issueBaseline) progressedFrom(prev issueBaseline) bool {
-	return b.designHash != prev.designHash ||
-		b.notesHash != prev.notesHash ||
-		b.maxCommentID > prev.maxCommentID ||
-		b.labelsHash != prev.labelsHash
-}
-
-// issueBaselineOf fingerprints a Get response. Comments and Labels ride on the
-// same IssueDetailData the design/notes hashes already came from.
-func issueBaselineOf(issue *backend.IssueDetailData) issueBaseline {
-	return issueBaseline{
-		designHash:   hashIssueField(issue.Design),
-		notesHash:    hashIssueField(issue.Notes),
-		maxCommentID: maxCommentID(issue.Comments),
-		labelsHash:   hashLabelSet(issue.Labels),
-	}
-}
-
-// fetchIssueBaseline GETs the issue once per eligible kill and fingerprints
-// it. ok=false (no backend, GET failed) means "unknown": the increment
-// proceeds regardless, and the caller never compares against a zero baseline.
-func (s *Supervisor) fetchIssueBaseline(taskID string) (base issueBaseline, ok bool) {
-	if s.IssueBackend == nil {
-		return issueBaseline{}, false
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), quarantineWriteTimeout)
-	defer cancel()
-	issue, err := s.IssueBackend.Get(ctx, taskID)
-	if err != nil || issue == nil {
-		return issueBaseline{}, false
-	}
-	return issueBaselineOf(issue), true
-}
-
-func hashIssueField(v string) uint64 {
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(v))
-	return h.Sum64()
-}
-
-// maxCommentID is the highest comment id on the issue (0 when there are
-// none). fleet-db assigns comment ids monotonically, so this is edit-proof:
-// editing a comment leaves the max alone, and only a NEW comment raises it.
-func maxCommentID(comments []backend.CommentData) int64 {
-	var highest int64
-	for _, c := range comments {
-		if c.ID > highest {
-			highest = c.ID
-		}
-	}
-	return highest
-}
-
-// hashLabelSet is FNV-1a over the sorted, NUL-delimited label set — order
-// independent (label order is not meaningful) and unambiguous across
-// concatenations.
-func hashLabelSet(labels []string) uint64 {
-	sorted := make([]string, len(labels))
-	copy(sorted, labels)
-	sort.Strings(sorted)
-	h := fnv.New64a()
-	for _, l := range sorted {
-		_, _ = h.Write([]byte(l))
-		_, _ = h.Write([]byte{0})
-	}
-	return h.Sum64()
 }
 
 // evict drops a task's failure record (clean exit or progress observed).

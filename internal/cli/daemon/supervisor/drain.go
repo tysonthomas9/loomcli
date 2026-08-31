@@ -34,10 +34,7 @@ func (s *Supervisor) DrainWithGrace(ap *AgentProcess, reason string, yieldTimeou
 		}
 	}
 
-	ap.Mu.Lock()
-	pid := ap.Pid
-	ap.Mu.Unlock()
-	if pid == 0 || !lockfile.IsProcessRunning(pid) {
+	if s.agentStopped(ap) {
 		if err := ClearYieldFile(ap.WorktreePath); err != nil {
 			slog.Warn("failed to clear stale yield file", "worktree", ap.Entry.Worktree, "err", err)
 		}
@@ -66,24 +63,39 @@ func (s *Supervisor) DrainWithGrace(ap *AgentProcess, reason string, yieldTimeou
 	}()
 
 	// Phase 2: Poll for voluntary exit
-	deadline := time.Now().Add(yieldTimeout)
-	for time.Now().Before(deadline) {
-		ap.Mu.Lock()
-		pid := ap.Pid
-		ap.Mu.Unlock()
-
-		if pid == 0 || !lockfile.IsProcessRunning(pid) {
-			slog.Info("agent yielded gracefully", "worktree", ap.Entry.Worktree, "elapsed", time.Since(start).Truncate(time.Millisecond))
-			return outcome(DrainPhaseYielded)
-		}
-
-		time.Sleep(500 * time.Millisecond)
+	if s.waitForVoluntaryExit(ap, time.Now().Add(yieldTimeout)) {
+		slog.Info("agent yielded gracefully", "worktree", ap.Entry.Worktree, "elapsed", time.Since(start).Truncate(time.Millisecond))
+		return outcome(DrainPhaseYielded)
 	}
 
 	// Phase 3: Escalate to SIGTERM -> SIGKILL
 	slog.Info("yield timeout expired, escalating to SIGTERM", "worktree", ap.Entry.Worktree, "timeout", yieldTimeout)
 	s.StopAgent(ap, sigtermTimeout)
 	return outcome(DrainPhaseSigterm)
+}
+
+// agentStopped reports whether the agent's process is gone: either the pid was
+// never recorded (or has been cleared on exit) or the OS no longer knows it.
+// Both the pre-check and the yield poll below ask this same question, so it
+// lives here rather than being spelled out twice.
+func (s *Supervisor) agentStopped(ap *AgentProcess) bool {
+	ap.Mu.Lock()
+	pid := ap.Pid
+	ap.Mu.Unlock()
+	return pid == 0 || !lockfile.IsProcessRunning(pid)
+}
+
+// waitForVoluntaryExit polls until the agent exits or the deadline passes,
+// returning true only when the agent left on its own. The caller keeps the
+// logging so the elapsed-time accounting stays with the outcome it describes.
+func (s *Supervisor) waitForVoluntaryExit(ap *AgentProcess, deadline time.Time) bool {
+	for time.Now().Before(deadline) {
+		if s.agentStopped(ap) {
+			return true
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return false
 }
 
 // GetYieldTimeout returns the configured yield timeout duration.

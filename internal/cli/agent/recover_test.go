@@ -1526,7 +1526,7 @@ func TestResetTask_CrashedIntoReviewIsRequeued(t *testing.T) {
 	}
 }
 
-// The crash cause must not become a licence to resurrect terminal states: a
+// The crash cause must not become a license to resurrect terminal states: a
 // closed task stays closed, and a blocked one stays quarantined whether it was
 // the daemon or a human that put it there.
 func TestResetTask_CrashStillRespectsTerminalStates(t *testing.T) {

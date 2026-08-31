@@ -183,7 +183,7 @@ const (
 // actual work (design, comments, labels it set itself) is untouched, so nothing
 // is lost by re-queueing; the alternative is losing the task entirely.
 //
-// On a clean exit the old behaviour stands: the hooks ran, so an agent-set
+// On a clean exit the old behavior stands: the hooks ran, so an agent-set
 // review is a real state and stomping it would undo a legitimate handoff.
 func resetTask(deps *cli.Deps, taskID string, cause resetCause) {
 	ib := deps.IssueBackend
