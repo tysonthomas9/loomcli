@@ -314,3 +314,90 @@ func TestCheckAgentProfiles_ProbesOncePerHarness(t *testing.T) {
 		t.Errorf("probe called %d times for 4 claude profiles, want 1", calls)
 	}
 }
+
+// stageManagedProfile provisions an agent whose settings.json is MANAGED: the
+// pristine baseline under .provisioned/ is byte-hashed, the live file is not.
+func stageManagedProfile(t *testing.T, runtimeDir, agent, pinnedVersion, baseline, live string) string {
+	t.Helper()
+	dir := filepath.Join(runtimeDir, ".loom", "agent-profiles", agent, "claude")
+	if err := os.MkdirAll(filepath.Join(dir, agentprofile.ProvisionedDirName), 0o755); err != nil {
+		t.Fatalf("mkdir profile: %v", err)
+	}
+	baseRel := filepath.Join(agentprofile.ProvisionedDirName, "settings.json")
+	if err := os.WriteFile(filepath.Join(dir, baseRel), []byte(baseline), 0o644); err != nil {
+		t.Fatalf("write baseline: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(live), 0o644); err != nil {
+		t.Fatalf("write settings.json: %v", err)
+	}
+	files := []string{baseRel}
+	sum, err := agentprofile.Fingerprint(dir, files)
+	if err != nil {
+		t.Fatalf("fingerprint: %v", err)
+	}
+	writeManifest(t, dir, agentprofile.Manifest{
+		Files:          files,
+		Managed:        []string{"settings.json"},
+		Fingerprint:    sum,
+		HarnessVersion: pinnedVersion,
+	})
+	return dir
+}
+
+// A live settings.json that only reordered its keys and gained a runtime key is
+// the 2026-08-30 outage. `loom doctor` must report it as healthy.
+func TestCheckAgentProfiles_ManagedReorderAndExtraKeyPasses(t *testing.T) {
+	runtimeDir := stageProfileWorkspace(t, "2.1.240 (Claude Code)")
+	stageManagedProfile(t, runtimeDir, "worker", "2.1.240 (Claude Code)",
+		`{"permissions":{"defaultMode":"auto"},"disableRemoteControl":true}`,
+		`{"disableRemoteControl":true,"enabledPlugins":{"x@y":true},"permissions":{"defaultMode":"auto"}}`)
+
+	res := checkAgentProfiles()
+	if res.Status != StatusPass {
+		t.Fatalf("status = %v, want StatusPass\n%s\n%s", res.Status, res.Summary, res.Detail)
+	}
+}
+
+// A changed provisioned key fails the check, and the report names the path so
+// the operator knows what to look at.
+func TestCheckAgentProfiles_ManagedDriftFails(t *testing.T) {
+	runtimeDir := stageProfileWorkspace(t, "2.1.240 (Claude Code)")
+	stageManagedProfile(t, runtimeDir, "worker", "2.1.240 (Claude Code)",
+		`{"permissions":{"defaultMode":"auto"}}`,
+		`{"permissions":{"defaultMode":"plan"}}`)
+
+	res := checkAgentProfiles()
+	if res.Status != StatusFail {
+		t.Fatalf("status = %v, want StatusFail", res.Status)
+	}
+	if !strings.Contains(res.Detail, "permissions.defaultMode") {
+		t.Fatalf("detail does not name the diverging path:\n%s", res.Detail)
+	}
+	if !strings.Contains(res.Detail, "provision-profile.sh worker") {
+		t.Fatalf("detail does not route to the provisioner:\n%s", res.Detail)
+	}
+}
+
+// Edge 17: --fix must not "repair" managed drift. It only touches the drifted
+// (version) bucket, and Bless re-verifies first — assert it rather than assume.
+func TestCheckAgentProfiles_FixDoesNotRepairManagedDrift(t *testing.T) {
+	runtimeDir := stageProfileWorkspace(t, "2.1.251 (Claude Code)")
+	dir := stageManagedProfile(t, runtimeDir, "worker", "2.1.240 (Claude Code)",
+		`{"permissions":{"defaultMode":"auto"}}`,
+		`{"permissions":{"defaultMode":"plan"}}`)
+	before := readManifestBytes(t, dir)
+
+	doctorFix = true
+	t.Cleanup(func() { doctorFix = false })
+
+	res := checkAgentProfiles()
+	if res.Status != StatusFail {
+		t.Fatalf("status = %v, want StatusFail: --fix must not launder managed drift", res.Status)
+	}
+	if after := readManifestBytes(t, dir); string(after) != string(before) {
+		t.Fatalf("--fix rewrote the manifest of a managed-drifted profile:\n%s", after)
+	}
+	if readManifest(t, dir).HarnessVersion != "2.1.240 (Claude Code)" {
+		t.Fatal("--fix re-blessed a profile whose provisioned settings had changed")
+	}
+}
