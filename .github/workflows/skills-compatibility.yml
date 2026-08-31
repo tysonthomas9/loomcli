@@ -202,6 +202,15 @@ jobs:
         with:
           go-version-file: loomcli/go.mod
 
+      - name: Generate E2E coverage report
+        working-directory: loomcli
+        shell: bash
+        env:
+          STORAGE_MODE: ${{ matrix.storage }}
+        run: |
+          go test ./test/skills-e2e/registry
+          go run ./test/skills-e2e/cmd/e2e-coverage > "../e2e-coverage-$STORAGE_MODE.yaml"
+
       - name: Configure workspace-file storage
         shell: bash
         env:
@@ -385,5 +394,6 @@ jobs:
             skills-compatibility-${{ matrix.storage }}.log
             skills-compatibility-${{ matrix.storage }}-diagnostics.txt
             skills-compatibility-${{ matrix.storage }}-redis-diagnostics.txt
+            e2e-coverage-${{ matrix.storage }}.yaml
           if-no-files-found: error
           retention-days: 90

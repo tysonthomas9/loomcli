@@ -68,7 +68,7 @@ services and externally observable outcomes.
 ### Chosen representation
 
 The suite uses **scenario-driven executable specifications backed by a deep
-real-service harness and a declarative edge-case registry**.
+real-service harness and a typed Go coverage registry**.
 
 Each artifact has one job:
 
@@ -77,15 +77,16 @@ Each artifact has one job:
 | Go scenario | State the user-observable behavior being proved |
 | Checked-in fixture | Make exact inputs and expected bytes reviewable |
 | Harness module | Hide real-process invocation, faults, polling, evidence, and cleanup |
-| `edge-cases.yaml` | Map stable case IDs to owners, seams, tests, and required matrices |
+| Go registry | Map covered case IDs to owners, seams, tests, and required matrices |
+| Generated YAML artifact | Provide a language-neutral CI report without becoming an authored source |
 | Design document | Record why seams, policies, and exclusions were chosen |
 | TDD loop | Reproduce one behavior before making its smallest owning-seam fix |
 
-YAML is not the scenario language. Distributed scenarios require concurrency,
-cancellation, restart, and rich failure reporting; encoding those operations in
-YAML would create an untyped interpreter that is harder to understand than Go.
-The registry remains declarative while executable behavior remains typed and
-navigable.
+YAML is neither the scenario language nor an authored registry. Distributed
+scenarios require concurrency, cancellation, restart, and rich failure
+reporting; encoding those operations in YAML would create an untyped interpreter
+that is harder to understand than Go. Covered metadata lives beside executable
+behavior in typed Go. CI renders that metadata to YAML only for evidence.
 
 The first reviewable implementation is deliberately small: one lifecycle
 scenario, one harness implementation, one fixture family, and only the registry
@@ -98,7 +99,6 @@ dedicated Go suite:
 ```text
 test/skills-e2e/
 ├── README.md
-├── edge-cases.yaml
 ├── suite_test.go
 ├── lifecycle_test.go
 ├── publication_test.go
@@ -109,6 +109,11 @@ test/skills-e2e/
 │   ├── loom.go
 │   ├── faults.go
 │   └── evidence.go
+├── registry/
+│   ├── registry.go
+│   ├── registry_test.go
+│   └── scenarios.go
+├── cmd/e2e-coverage/main.go
 └── testdata/
     └── exact-round-trip/
         ├── initial/
@@ -185,8 +190,9 @@ TestTransfer/corrupt_download_is_not_materialized
 TestGCS/presigned_round_trip
 ```
 
-Names describe behavior rather than implementation or edge-case numbers. The
-coverage registry maps stable IDs to these names.
+Names describe behavior rather than implementation or edge-case numbers. Each
+test calls its typed scenario's `Covers(t)` method, which verifies that the
+stable scenario ID is attached to the declared top-level test.
 
 Successful output is concise:
 
@@ -226,50 +232,40 @@ Assertions must not call production hashing or manifest code to derive their
 expected values at test time. Domain golden vectors and the E2E fixture manifest
 share reviewed literals but do not share the production implementation.
 
-## Edge-case coverage registry
+## Executable E2E coverage
 
-`test/skills-e2e/edge-cases.yaml` is the authoritative accountability map. A
-scenario catalog maps each stable semantic ID to one top-level Go test:
+`test/skills-e2e/registry/scenarios.go` is the sole authored source for covered
+scenarios. A typed declaration owns the stable ID, behavior, top-level test,
+owner, seam, required matrix, and any covered edge-case IDs:
 
-```yaml
-scenarios:
-  - id: concurrent-tree-publication
-    behavior: concurrent publication creates one logical tree
-    test: TestTreeCreationConcurrentIdenticalPublish
+```go
+var ConcurrentTreePublication = Scenario{
+    ID:        "concurrent-tree-publication",
+    Behavior:  "concurrent publication creates one logical tree",
+    Test:      "TestTreeCreationConcurrentIdenticalPublish",
+    Owner:     "fleet",
+    Seam:      "fleet-publication",
+    Backends:  []string{"redis", "postgres"},
+    Providers: []string{"minio"},
+    Status:    "covered",
+    Cases: []EdgeCase{{
+        ID: 50,
+        Behavior: "concurrent publication creates one logical tree",
+        Rationale: "publication atomicity varies by persistence adapter",
+    }},
+}
 ```
 
-Each edge-case entry then references the scenario without repeating the Go test
-name:
+The executable test calls `ConcurrentTreePublication.Covers(t)`. That call
+validates the metadata and fails if the declaration names a different test. A
+fast registry test validates unique scenario and edge-case IDs, required
+fields, and canonical backend/provider values without starting services.
 
-```yaml
-- id: 50
-  behavior: concurrent publication creates one logical tree
-  scenario: concurrent-tree-publication
-  owner: fleet
-  seam: fleet-publication
-  backends: [redis, postgres]
-  providers: [minio]
-  status: planned
-  rationale: publication atomicity varies by persistence adapter
-```
-
-Allowed statuses are:
-
-- `covered`: the named test exists and its required matrix is enforced;
-- `planned`: accepted work with an owning seam and matrix;
-- `not_applicable`: excluded by an explicit product decision, with rationale;
-- `blocked`: impossible to validate until a named interface or capability
-  exists, with an owner for that prerequisite.
-
-CI validates:
-
-- every stable edge-case ID appears exactly once;
-- every scenario ID appears exactly once and names an existing top-level test;
-- every entry has a stable scenario ID, owner, seam, status, and rationale;
-- every `covered` edge case references a registered scenario;
-- backend/provider values come from the canonical dimension vocabulary;
-- `not_applicable` and `blocked` entries contain nonempty reasons; and
-- no required matrix silently disappears from workflow configuration.
+CI runs the validator, generates a YAML rendering, and uploads the rendering as
+an artifact. The repository does not contain a hand-edited coverage YAML file.
+Planned, blocked, and not-applicable cases remain design/backlog dispositions
+until they have an executable owning-seam test; only executable `covered`
+metadata belongs in this registry.
 
 ## Matrix selection
 
@@ -388,7 +384,8 @@ behind those targets rather than growing inline workflow shell.
 
 ## Implementation order
 
-1. Add the coverage registry with all 95 IDs and accepted dispositions.
+1. Add typed registry entries for executable coverage; keep the remaining
+   accepted dispositions in the design/backlog until their owning tests exist.
 2. Create the Go harness and checked-in exact-round-trip fixtures.
 3. Move the current Redis/MinIO lifecycle tracer from shell into the Go suite
    without changing its externally observed behavior.
@@ -399,8 +396,8 @@ behind those targets rather than growing inline workflow shell.
    integrity, and grant security.
 7. Add the existing-bucket GCS provider lane after provider-neutral scenarios
    pass locally.
-8. Change registry entries from `planned` to `covered` only when the named test
-   and required matrix are enforced in CI.
+8. Add a registry entry only when the named test and required matrix are
+   enforced in CI; generated YAML remains evidence rather than source.
 
 ## Definition of done
 

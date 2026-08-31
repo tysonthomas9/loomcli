@@ -9,7 +9,8 @@ workflow="$ROOT/.github/workflows/skills-compatibility.yml"
 makefile="$ROOT/Makefile"
 skills_e2e="$ROOT/test/skills-e2e/lifecycle_test.go"
 skills_e2e_manifest="$ROOT/test/skills-e2e/testdata/exact-round-trip/expected.json"
-skills_e2e_registry="$ROOT/test/skills-e2e/edge-cases.yaml"
+skills_e2e_registry="$ROOT/test/skills-e2e/registry/scenarios.go"
+skills_e2e_generator="$ROOT/test/skills-e2e/cmd/e2e-coverage/main.go"
 
 fail() {
   echo "release skills contract: $*" >&2
@@ -78,18 +79,22 @@ require_fixed "$skills_e2e" 'func TestSkillRematerializationRemovesStaleFiles'
 require_fixed "$skills_e2e" 'func TestSkillDeletionPrunesExistingMaterialization'
 require_fixed "$skills_e2e" 'func TestSkillListReportsSelectedRevision'
 require_fixed "$skills_e2e_manifest" '"file_tree_revision": "wft1_igfqkQVa_aBOjSr27_UUdKDCWweouc67JnMLCbk_e0k"'
-require_fixed "$skills_e2e_registry" 'scenario: skill-update-roundtrip'
-require_fixed "$skills_e2e_registry" 'test: TestSkillUpdateSelectsAndMaterializesExactRevision'
-require_fixed "$skills_e2e_registry" 'id: stable-identical-reimport'
-require_fixed "$skills_e2e_registry" 'test: TestIdenticalSkillReimportKeepsContentRevision'
-require_fixed "$skills_e2e_registry" 'id: content-update-preserves-bundles'
-require_fixed "$skills_e2e_registry" 'test: TestSkillContentUpdatePreservesBundledFiles'
-require_fixed "$skills_e2e_registry" 'id: rematerialization-prunes-stale-files'
-require_fixed "$skills_e2e_registry" 'test: TestSkillRematerializationRemovesStaleFiles'
-require_fixed "$skills_e2e_registry" 'id: deletion-prunes-materialization'
-require_fixed "$skills_e2e_registry" 'test: TestSkillDeletionPrunesExistingMaterialization'
-require_fixed "$skills_e2e_registry" 'id: list-show-revision-agreement'
-require_fixed "$skills_e2e_registry" 'test: TestSkillListReportsSelectedRevision'
+require_fixed "$skills_e2e" 'registry.SkillUpdateRoundTrip.Covers(t)'
+require_fixed "$skills_e2e" 'registry.StableIdenticalReimport.Covers(t)'
+require_fixed "$skills_e2e" 'registry.ContentUpdatePreservesBundles.Covers(t)'
+require_fixed "$skills_e2e" 'registry.RematerializationPrunesStaleFiles.Covers(t)'
+require_fixed "$skills_e2e" 'registry.DeletionPrunesMaterialization.Covers(t)'
+require_fixed "$skills_e2e" 'registry.ListShowRevisionAgreement.Covers(t)'
+require_fixed "$skills_e2e_registry" 'ID:        "skill-update-roundtrip"'
+require_fixed "$skills_e2e_registry" 'ID:        "stable-identical-reimport"'
+require_fixed "$skills_e2e_registry" 'ID:        "content-update-preserves-bundles"'
+require_fixed "$skills_e2e_registry" 'ID:        "rematerialization-prunes-stale-files"'
+require_fixed "$skills_e2e_registry" 'ID:        "deletion-prunes-materialization"'
+require_fixed "$skills_e2e_registry" 'ID:        "list-show-revision-agreement"'
+require_fixed "$skills_e2e_generator" 'registry.WriteYAML(os.Stdout, registry.Scenarios)'
+require_fixed "$workflow" 'go test ./test/skills-e2e/registry'
+require_fixed "$workflow" 'go run ./test/skills-e2e/cmd/e2e-coverage > "../e2e-coverage-$STORAGE_MODE.yaml"'
+require_fixed "$workflow" 'e2e-coverage-${{ matrix.storage }}.yaml'
 require_fixed "$workflow" 'real_processes=loom-cli,fleet-db,redis,projector,http,$object_provider'
 require_fixed "$workflow" 'skills-compatibility-${{ matrix.storage }}-revisions-${{ github.run_id }}-${{ github.run_attempt }}'
 
@@ -98,6 +103,9 @@ require_fixed "$compat" 'Compatibility revisions: loomcli=$loom_sha fleetdb=$fle
 
 if grep -Fq 'run_exact_skill_lifecycle' "$compat"; then
   fail "$compat still embeds the lifecycle scenario in shell"
+fi
+if [[ -e "$ROOT/test/skills-e2e/edge-cases.yaml" ]]; then
+  fail "covered Skill E2E metadata must be authored in Go, not checked-in YAML"
 fi
 
 # deploy-to-vercel is a supported corpus member with exactly three bundled

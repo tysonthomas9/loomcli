@@ -45,7 +45,10 @@ the actual product receives the intended paths, modes, and bytes.
 Skill representation and opaque tree revision. Exact materialized bytes and
 modes are compared with the staged updated fixture.
 
-`edge-cases.yaml` has one scenario catalog that maps stable semantic IDs to
-top-level Go tests. Edge-case rows reference those scenario IDs instead of
-repeating Go runner names. It is a coverage registry, not an executable
-scenario language or a copy of Go test-runner display names.
+Covered scenario metadata is authored once in `registry/scenarios.go`. Each
+top-level E2E test calls its typed scenario's `Covers(t)` method before invoking
+public Loom commands. The fast registry test validates IDs, ownership, matrices,
+and edge-case uniqueness without starting services.
+
+CI generates `e2e-coverage-<storage>.yaml` from those Go declarations and
+uploads it as evidence. The YAML is not checked in and is never edited by hand.

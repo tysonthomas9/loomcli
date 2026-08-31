@@ -6,9 +6,11 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/test/skills-e2e/harness"
+	"github.com/tysonthomas9/loomcli/test/skills-e2e/registry"
 )
 
 func TestSkillUpdateSelectsAndMaterializesExactRevision(t *testing.T) {
+	registry.SkillUpdateRoundTrip.Covers(t)
 	loom := harness.Open(t)
 	initialSource := loom.SkillFixture("exact-round-trip/initial")
 	updatedSource := loom.SkillFixture("exact-round-trip/updated")
@@ -29,6 +31,7 @@ func TestSkillUpdateSelectsAndMaterializesExactRevision(t *testing.T) {
 }
 
 func TestIdenticalSkillReimportKeepsContentRevision(t *testing.T) {
+	registry.StableIdenticalReimport.Covers(t)
 	loom := harness.Open(t)
 	source := loom.SkillFixture("stable-reimport/current")
 
@@ -48,6 +51,7 @@ func TestIdenticalSkillReimportKeepsContentRevision(t *testing.T) {
 }
 
 func TestSkillContentUpdatePreservesBundledFiles(t *testing.T) {
+	registry.ContentUpdatePreservesBundles.Covers(t)
 	loom := harness.Open(t)
 	originalSource := loom.SkillFixture("content-update/original")
 	expectedSource := loom.SkillFixture("content-update/expected")
@@ -71,6 +75,7 @@ func TestSkillContentUpdatePreservesBundledFiles(t *testing.T) {
 }
 
 func TestSkillRematerializationRemovesStaleFiles(t *testing.T) {
+	registry.RematerializationPrunesStaleFiles.Covers(t)
 	loom := harness.Open(t)
 	initialSource := loom.SkillFixture("shrinking-tree/initial")
 	updatedSource := loom.SkillFixture("shrinking-tree/updated")
@@ -85,6 +90,7 @@ func TestSkillRematerializationRemovesStaleFiles(t *testing.T) {
 }
 
 func TestSkillDeletionPrunesExistingMaterialization(t *testing.T) {
+	registry.DeletionPrunesMaterialization.Covers(t)
 	loom := harness.Open(t)
 	source := loom.SkillFixture("deleted-skill/current")
 
@@ -98,6 +104,7 @@ func TestSkillDeletionPrunesExistingMaterialization(t *testing.T) {
 }
 
 func TestSkillListReportsSelectedRevision(t *testing.T) {
+	registry.ListShowRevisionAgreement.Covers(t)
 	loom := harness.Open(t)
 	source := loom.SkillFixture("listed-skill/current")
 
