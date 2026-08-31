@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/daemonregistry"
 	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -89,7 +90,45 @@ func (s *Supervisor) daemonRuntimeLabels() []string {
 	if s.IpcSocketPath != "" {
 		labels = append(labels, daemonregistry.LabelSocket+s.IpcSocketPath)
 	}
+	// One label per active degradation. Labels are replaced wholesale by
+	// NodeUpdate, so a recovered daemon drops its degraded labels on the next
+	// refresh without any explicit removal step.
+	labels = append(labels, s.DegradedLabels()...)
 	return labels
+}
+
+// PublishDegradation announces the current state of one degradation kind on the
+// two handles that do NOT share a failure mode with the thing that degraded:
+// the events bus and the fleet-db Node labels. The daemon state file is
+// deliberately not one of them — a state_write degradation is precisely the
+// case where writing the report there fails too.
+//
+// Best-effort by construction. It is called from the state updater's 5s loop,
+// and a fleet-db that is slow or unreachable must not stall that loop or turn a
+// reporting problem into a second outage: RefreshNodeLabels already logs at
+// Warn and swallows its error, and a nil ControlStore or EmitEvent (tests, and
+// daemons running without a control plane) is a no-op rather than a panic.
+func (s *Supervisor) PublishDegradation(kind DegradationKind) {
+	d, active := s.Degradation(kind)
+	data := events.DaemonDegradedData{
+		Kind:   string(kind),
+		Active: active,
+	}
+	if active {
+		data.Since = d.Since
+		data.Count = d.Count
+		data.LastErr = d.LastErr
+	}
+
+	if s.EmitEvent != nil {
+		if evt, err := events.NewEvent(events.DaemonDegraded, "", "", "", data); err == nil {
+			s.EmitEvent(evt)
+		} else {
+			slog.Warn("building daemon degradation event failed", "kind", string(kind), "err", err)
+		}
+	}
+
+	s.RefreshNodeLabels()
 }
 
 // RefreshNodeLabels re-publishes the supervisor's Node labels using

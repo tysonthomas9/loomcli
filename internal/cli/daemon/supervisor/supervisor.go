@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -47,6 +46,14 @@ type Supervisor struct {
 	WallClass    agenterr.Outcome
 	WallMessage  string
 	ProfileWalls map[string]credentialWall
+
+	// Active self-reported degradations, and when each was last announced;
+	// see degraded.go. Guarded by degradedMu and deliberately NOT by AgentsMu:
+	// the writer is the 5s state updater, which must never contend with
+	// supervision to report that something is wrong.
+	degradations       map[DegradationKind]*Degradation
+	lastDegradedNotice map[DegradationKind]time.Time
+	degradedMu         sync.Mutex
 
 	Shutdown     chan struct{}  // closed to signal shutdown
 	ShutdownOnce sync.Once      // protects shutdown channel from double-close
@@ -722,12 +729,4 @@ func (s *Supervisor) resolveRoleConfig(roleName string, agentIndex int) (config.
 		return config.RoleConfig{}, fmt.Errorf("agent[%d]: %w", agentIndex, err)
 	}
 	return rc, nil
-}
-
-// ResolveDaemonPath resolves a path relative to projectDir, or returns as-is if absolute.
-func ResolveDaemonPath(projectDir, path string) string {
-	if filepath.IsAbs(path) {
-		return path
-	}
-	return filepath.Join(projectDir, path)
 }
