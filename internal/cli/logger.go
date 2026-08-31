@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 
@@ -32,6 +33,23 @@ func InitLogger(format, output string) error {
 		w = f
 	}
 
+	slog.SetDefault(slog.New(NewSlogHandler(w, format)))
+
+	// Bridge existing log.Printf calls through slog
+	slog.SetLogLoggerLevel(slog.LevelInfo)
+
+	return nil
+}
+
+// LogFormat returns the log format the process was started with, so a caller
+// that re-installs the default handler over a different writer keeps the same
+// line shape.
+func LogFormat() string { return logFormat }
+
+// NewSlogHandler builds the handler shape InitLogger installs: JSON or text
+// (text for any unrecognized format), wrapped so trace_id / span_id from the
+// context are injected when an active span is present.
+func NewSlogHandler(w io.Writer, format string) slog.Handler {
 	opts := &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}
@@ -41,20 +59,12 @@ func InitLogger(format, output string) error {
 	case "json":
 		handler = slog.NewJSONHandler(w, opts)
 	default:
-		// "text" or any unrecognized value defaults to text
 		handler = slog.NewTextHandler(w, opts)
 	}
 
-	// Inject trace_id / span_id from context. Pass-through when no active
-	// span is present in context, so non-traced runs are unchanged.
-	handler = &traceContextHandler{inner: handler}
-
-	slog.SetDefault(slog.New(handler))
-
-	// Bridge existing log.Printf calls through slog
-	slog.SetLogLoggerLevel(slog.LevelInfo)
-
-	return nil
+	// Pass-through when no active span is present in context, so non-traced
+	// runs are unchanged.
+	return &traceContextHandler{inner: handler}
 }
 
 type traceContextHandler struct {

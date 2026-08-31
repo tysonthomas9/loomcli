@@ -125,6 +125,18 @@ type Supervisor struct {
 	NodeTTL      time.Duration
 	NodeInterval time.Duration
 
+	// LogHeartbeatInterval throttles the "daemon heartbeat" line the health
+	// checker emits. The line exists so daemon.log's mtime is a real liveness
+	// signal: without it an idle fleet writes nothing and a silent log is
+	// indistinguishable from a dead daemon. Zero means the package default
+	// (defaultLogHeartbeatInterval); negative disables the heartbeat entirely,
+	// which is what a configured log_heartbeat_sec of 0 resolves to.
+	LogHeartbeatInterval time.Duration
+
+	// lastHeartbeat is owned by the health-checker goroutine and read/written
+	// only from it, so it needs no lock.
+	lastHeartbeat time.Time
+
 	// backendRecheckInterval is the fixed delay computeBackoff returns for a
 	// BackendUnavailable block (agent's backend CLI missing from PATH). Zero
 	// means use the package default (backendUnavailableRecheckInterval). Tests set a
@@ -236,19 +248,6 @@ func (s *Supervisor) startAgentSupervisor(ap *AgentProcess) {
 	s.Wg.Add(1)
 	go s.supervisedAgentBody(name, ap)
 }
-
-const (
-	defaultNodeTTL      = 2 * time.Minute
-	defaultNodeInterval = 30 * time.Second
-	// defaultLeaseTTL must outlive a typical real-codex turn (often 5+
-	// minutes) so the lease is still Active when the worker calls
-	// loom data close. There is no periodic heartbeat loop on the agent
-	// lease today (only IPC mutations renew it), so a short TTL silently
-	// fails task completion after a long codex session.
-	defaultLeaseTTL = 30 * time.Minute
-)
-
-var controlPlaneOperationTimeout = 2 * time.Second
 
 // Stop gracefully shuts down all agents. Safe to call multiple times.
 func (s *Supervisor) Stop() {

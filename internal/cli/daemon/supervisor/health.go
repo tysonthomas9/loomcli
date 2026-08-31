@@ -369,4 +369,29 @@ func (s *Supervisor) checkAgentHealth() {
 	if evt, err := events.NewEvent(events.HealthCheck, "", "", "", events.HealthCheckData{AgentCount: totalAgents, HealthyCount: healthyAgents}); err == nil {
 		s.EmitEvent(evt)
 	}
+
+	s.emitLogHeartbeat(totalAgents, healthyAgents)
 }
+
+// emitLogHeartbeat writes a periodic line to the daemon log so an idle fleet
+// still advances daemon.log's mtime. Called only from the health-checker
+// goroutine, which owns lastHeartbeat.
+func (s *Supervisor) emitLogHeartbeat(totalAgents, healthyAgents int) {
+	interval := s.LogHeartbeatInterval
+	if interval < 0 {
+		return
+	}
+	if interval == 0 {
+		interval = defaultLogHeartbeatInterval
+	}
+	now := time.Now()
+	if !s.lastHeartbeat.IsZero() && now.Sub(s.lastHeartbeat) < interval {
+		return
+	}
+	s.lastHeartbeat = now
+	slog.Info("daemon heartbeat", "agents", totalAgents, "healthy", healthyAgents)
+}
+
+// defaultLogHeartbeatInterval is the throttle applied when
+// Supervisor.LogHeartbeatInterval is zero.
+const defaultLogHeartbeatInterval = 60 * time.Second

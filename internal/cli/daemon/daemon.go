@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/cli/daemon/daemonlog"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/notify"
@@ -54,6 +55,11 @@ type Daemon struct {
 	mutBuf *MutationBuffer
 
 	issueBackend backend.IssueBackend // pluggable issue data access
+
+	// logSink is the daemon's own log file writer, installed in
+	// runDaemonMainLoop. Nil outside the daemon run path (tests, control
+	// commands). Held so shutdown can close it and status can query its health.
+	logSink *daemonlog.Sink
 
 	// store is the fleet-db backed source of agent assignments and daemon
 	// profile data.
@@ -110,6 +116,8 @@ func NewDaemon(config *cfgpkg.DaemonConfig, projectDir string, eventBus events.E
 		Agents:         make([]*supervisor.AgentProcess, 0, len(config.Agents)),
 		ControlStore:   st,
 		IssueBackend:   issueBackend,
+
+		LogHeartbeatInterval: logHeartbeatInterval(config.Daemon.LogHeartbeatSec),
 	}
 
 	wireSupervisorCallbacks(sup, issueBackend)
@@ -122,6 +130,20 @@ func NewDaemon(config *cfgpkg.DaemonConfig, projectDir string, eventBus events.E
 	d.sup = sup
 
 	return d, nil
+}
+
+// logHeartbeatInterval maps the configured log_heartbeat_sec onto the
+// supervisor's field: unset means the supervisor default, and a configured 0
+// (or negative) disables the heartbeat, which the supervisor spells as a
+// negative duration.
+func logHeartbeatInterval(sec *int) time.Duration {
+	if sec == nil {
+		return 0
+	}
+	if *sec <= 0 {
+		return -1
+	}
+	return time.Duration(*sec) * time.Second
 }
 
 // Start launches the supervisor.

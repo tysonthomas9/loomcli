@@ -161,3 +161,17 @@ func resolveNodeOwnerActor() string {
 	}
 	return "local"
 }
+
+const (
+	defaultNodeTTL      = 2 * time.Minute
+	defaultNodeInterval = 30 * time.Second
+
+	// defaultLeaseTTL must outlive a typical real-codex turn (often 5+
+	// minutes) so the lease is still Active when the worker calls
+	// loom data close. There is no periodic heartbeat loop on the agent
+	// lease today (only IPC mutations renew it), so a short TTL silently
+	// fails task completion after a long codex session.
+	defaultLeaseTTL = 30 * time.Minute
+)
+
+var controlPlaneOperationTimeout = 2 * time.Second
