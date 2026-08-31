@@ -134,9 +134,17 @@ func CloneRepoTo(ctx context.Context, cloneURL, targetPath string) error {
 		return fmt.Errorf("create clone parent directory: %w", err)
 	}
 	cmd := exec.CommandContext(ctx, "git", "clone", cloneURL, targetPath) //nolint:gosec // URL is validated upstream and passed as argv.
+	// Every other git call in this package goes through runGit, which pins this;
+	// without it a credential-less clone of a private repo blocks on a prompt
+	// instead of failing fast.
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git clone failed for %s: %s", cloneURL, strings.TrimSpace(string(output)))
+	}
+	// A clone nothing can push from is not a usable clone.
+	if err := EnsureCredentialHelper(ctx, targetPath); err != nil {
+		return fmt.Errorf("configure credential helper for %s: %w", targetPath, err)
 	}
 	return nil
 }
