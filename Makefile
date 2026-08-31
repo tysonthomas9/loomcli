@@ -463,6 +463,10 @@ test-frontend: ensure-frontend-deps
 	@cd $(FRONTEND_DIR) && npx vitest run
 
 # Run Playwright e2e tests — mocked chromium tests (no server needed)
+#
+# Environment overrides accepted (see playwright.config.ts):
+#   E2E_DEV_PORT      default 3000 — port for the Vite dev server this suite starts
+#   E2E_REUSE_SERVER  set to 1 to reuse an already-running dev server (ignored in CI)
 e2e: test-e2e
 
 test-e2e: ensure-frontend-deps
