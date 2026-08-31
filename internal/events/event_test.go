@@ -25,6 +25,7 @@ func TestEventType_Constants(t *testing.T) {
 		{PRCreated, "pr.created"},
 		{ConflictResolved, "conflict.resolved"},
 		{HealthCheck, "system.health_check"},
+		{DaemonDegraded, "system.daemon_degraded"},
 		{ConfigReloaded, "system.config_reloaded"},
 		{CircuitOpened, "circuit.opened"},
 		{CircuitClosed, "circuit.closed"},
@@ -83,6 +84,40 @@ func TestNewEvent_And_DecodeData(t *testing.T) {
 			checkFn: func(t *testing.T, decoded interface{}) {
 				d := decoded.(*HealthCheckData)
 				if d.AgentCount != 5 || d.HealthyCount != 4 {
+					t.Errorf("unexpected: %+v", d)
+				}
+			},
+		},
+		{
+			name: "system.daemon_degraded",
+			et:   DaemonDegraded,
+			data: DaemonDegradedData{
+				Kind:    "state_write",
+				Active:  true,
+				Since:   time.Date(2026, 8, 31, 9, 15, 0, 0, time.UTC),
+				Count:   7,
+				LastErr: "write /tmp/state.json: no space left on device",
+			},
+			checkFn: func(t *testing.T, decoded interface{}) {
+				d := decoded.(*DaemonDegradedData)
+				if d.Kind != "state_write" || !d.Active || d.Count != 7 {
+					t.Errorf("unexpected: %+v", d)
+				}
+				if !d.Since.Equal(time.Date(2026, 8, 31, 9, 15, 0, 0, time.UTC)) {
+					t.Errorf("unexpected Since: %v", d.Since)
+				}
+				if d.LastErr != "write /tmp/state.json: no space left on device" {
+					t.Errorf("unexpected LastErr: %q", d.LastErr)
+				}
+			},
+		},
+		{
+			name: "system.daemon_degraded recovery omits last_err",
+			et:   DaemonDegraded,
+			data: DaemonDegradedData{Kind: "state_write", Active: false},
+			checkFn: func(t *testing.T, decoded interface{}) {
+				d := decoded.(*DaemonDegradedData)
+				if d.Kind != "state_write" || d.Active || d.LastErr != "" {
 					t.Errorf("unexpected: %+v", d)
 				}
 			},
@@ -189,5 +224,16 @@ func TestTaskCompletedData_DurationJSON(t *testing.T) {
 	}
 	if decoded.Duration.Duration != 90*time.Second {
 		t.Errorf("Duration = %v, want 90s", decoded.Duration)
+	}
+}
+
+// Legacy JSONL files use the pre-rename underscore forms; normalizeEventType
+// maps them back so old logs still replay.
+func TestNormalizeEventType_DaemonDegraded(t *testing.T) {
+	if got := normalizeEventType("daemon_degraded"); got != DaemonDegraded {
+		t.Errorf("normalizeEventType(daemon_degraded) = %q, want %q", got, DaemonDegraded)
+	}
+	if got := normalizeEventType(DaemonDegraded); got != DaemonDegraded {
+		t.Errorf("normalizeEventType(%q) = %q, want unchanged", DaemonDegraded, got)
 	}
 }
