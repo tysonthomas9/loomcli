@@ -44,7 +44,109 @@ func stageProfile(t *testing.T, runtimeDir, agent, pinnedVersion string) string 
 		t.Fatalf("fingerprint: %v", err)
 	}
 	writeManifest(t, dir, agentprofile.Manifest{Files: files, Fingerprint: sum, HarnessVersion: pinnedVersion})
+	// A provisioned claude profile carries its own minted credential; doctor
+	// now reports one that does not. It is outside the manifest's file list, so
+	// it does not enter the fingerprint above.
+	writeProfileToken(t, dir, "sk-ant-oat01-fixture")
 	return dir
+}
+
+// writeProfileToken writes (or, given "", removes) a profile's oauth-token.
+func writeProfileToken(t *testing.T, dir, token string) {
+	t.Helper()
+	path := filepath.Join(dir, "oauth-token")
+	if token == "" {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			t.Fatalf("remove oauth-token: %v", err)
+		}
+		return
+	}
+	if err := os.WriteFile(path, []byte(token), 0o600); err != nil {
+		t.Fatalf("write oauth-token: %v", err)
+	}
+}
+
+// stageCodexProfile provisions a codex profile, which has no credential file of
+// its own and must never be reported for lacking one.
+func stageCodexProfile(t *testing.T, runtimeDir, agent, pinnedVersion string) string {
+	t.Helper()
+	dir := filepath.Join(runtimeDir, ".loom", "agent-profiles", agent, "codex")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir codex profile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte("# "+agent+"\n"), 0o644); err != nil {
+		t.Fatalf("write config.toml: %v", err)
+	}
+	files := []string{"config.toml"}
+	sum, err := agentprofile.Fingerprint(dir, files)
+	if err != nil {
+		t.Fatalf("fingerprint: %v", err)
+	}
+	writeManifest(t, dir, agentprofile.Manifest{Files: files, Fingerprint: sum, HarnessVersion: pinnedVersion})
+	return dir
+}
+
+// agentprofile.Verify never looks at the credential — the token is deliberately
+// outside the manifest — so a profile that was never minted verified clean and
+// doctor reported the whole fleet green while those agents died on their first
+// API call. worker-2 and worker-3 were exactly this on disk. The repair is the
+// interactive minting script, not the provisioner.
+func TestCheckAgentProfiles_MissingOAuthTokenFails(t *testing.T) {
+	const version = "2.1.237 (Claude Code)"
+	runtimeDir := stageProfileWorkspace(t, version)
+	dir := stageProfile(t, runtimeDir, "worker-2", version)
+	writeProfileToken(t, dir, "")
+	stageProfile(t, runtimeDir, "planner", version)
+
+	got := checkAgentProfiles()
+	if got.Status != StatusFail {
+		t.Fatalf("Status = %v, want StatusFail (an identity-less profile is not green)", got.Status)
+	}
+	if !strings.Contains(got.Detail, "worker-2") {
+		t.Errorf("detail must name the profile, got:\n%s", got.Detail)
+	}
+	if !strings.Contains(got.Detail, "no oauth-token: profile was never minted") {
+		t.Errorf("detail must state the fault, got:\n%s", got.Detail)
+	}
+	if !strings.Contains(got.Detail, "scripts/setup-profile-token.sh worker-2") {
+		t.Errorf("detail must name the minting repair, got:\n%s", got.Detail)
+	}
+	if strings.Contains(got.Detail, "planner") {
+		t.Errorf("a minted profile must not be reported, got:\n%s", got.Detail)
+	}
+}
+
+// An empty token is a broken minting run rather than an absent one, so it keeps
+// the provisioner repair and must not be laundered into the missing bucket.
+func TestCheckAgentProfiles_EmptyOAuthTokenFails(t *testing.T) {
+	const version = "2.1.237 (Claude Code)"
+	runtimeDir := stageProfileWorkspace(t, version)
+	dir := stageProfile(t, runtimeDir, "worker-3", version)
+	writeProfileToken(t, dir, "\n")
+
+	got := checkAgentProfiles()
+	if got.Status != StatusFail {
+		t.Fatalf("Status = %v, want StatusFail", got.Status)
+	}
+	if !strings.Contains(got.Detail, "oauth-token unusable") {
+		t.Errorf("detail must state the fault, got:\n%s", got.Detail)
+	}
+	if strings.Contains(got.Detail, "setup-profile-token.sh") {
+		t.Errorf("a broken token is re-provisioned, not re-minted, got:\n%s", got.Detail)
+	}
+}
+
+// codex has no credential file at all, so the probe must stay silent about it.
+// Without this, the check reports every codex profile in the fleet as broken.
+func TestCheckAgentProfiles_CodexNeedsNoToken(t *testing.T) {
+	const version = "codex-cli 0.147.0"
+	runtimeDir := stageProfileWorkspace(t, version)
+	stageCodexProfile(t, runtimeDir, "worker", version)
+
+	got := checkAgentProfiles()
+	if got.Status != StatusPass {
+		t.Fatalf("Status = %v, want StatusPass; detail:\n%s", got.Status, got.Detail)
+	}
 }
 
 func writeManifest(t *testing.T, dir string, m agentprofile.Manifest) {

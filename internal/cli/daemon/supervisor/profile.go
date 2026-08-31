@@ -41,11 +41,20 @@ var (
 	ErrProfileVersionUnknown      = agentprofile.ErrVersionUnknown
 )
 
-// ErrProfileTokenUnreadable is deliberately NOT an agentprofile alias: the
+// The two token sentinels are deliberately NOT agentprofile aliases: the
 // credential file is the supervisor's concern, not the manifest's — the
 // manifest does not describe it, so agentprofile has no counterpart to alias.
-// Keep it here rather than "tidying" it into agentprofile.
-var ErrProfileTokenUnreadable = errors.New("profile harness token unreadable")
+// Keep them here rather than "tidying" them into agentprofile.
+//
+// They are two sentinels rather than one because the repair differs, and both
+// repair lines (`loom lead`'s and `loom doctor`'s) branch on which one it is:
+// an UNREADABLE token was minted and then broken, so re-provisioning restores
+// it; a MISSING one was never minted at all, and only the interactive
+// setup-profile-token.sh can create it.
+var (
+	ErrProfileTokenUnreadable = errors.New("profile harness token unreadable")
+	ErrProfileTokenMissing    = errors.New("profile harness token missing")
+)
 
 // profileHarnessEnvVar maps a profile harness root to the environment variable
 // that points the harness at it. Together with agentprofile.HarnessBinary this
@@ -154,11 +163,48 @@ func ProfileHarnessEnv(projectDir, agent, harness string) (string, []string, err
 	return dir, append(env, secret...), nil
 }
 
+// ProfileTokenPath returns the path to the credential file a harness profile
+// root is expected to carry, or "" for a harness that has none (codex, and
+// anything absent from profileTokenFile).
+//
+// Exported so `loom doctor` can probe for the credential without a second copy
+// of the filename table: the whole point of the table is that a new harness is
+// one entry, and a doctor that hardcoded "oauth-token" would silently keep
+// checking claude's file for a harness that moved to another one.
+func ProfileTokenPath(dir, harness string) string {
+	name := profileTokenFile[harness]
+	if name == "" || dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, name)
+}
+
 // ProfileSecretEnv returns the assignments exporting the credential a harness
-// profile root carries of its own, or nothing when it carries none — which is
-// every profile that has not been migrated to a setup-token identity yet, and
-// every harness that has no such file at all. Absent is not an error: it is
-// the pre-existing configuration, and it must keep working unchanged.
+// profile root carries of its own, or nothing when the harness has no
+// credential file at all (codex, and anything absent from profileTokenFile).
+//
+// For a harness that DOES have one, an absent token file is a boot failure —
+// ErrProfileTokenMissing — exactly as a present-but-empty one already was.
+// The doc here used to promise the opposite ("Absent is not an error: it is
+// the pre-existing configuration"), and that sentence was the bug: it was only
+// ever safe while "absent" meant "legacy profile, falls back to the shared
+// keychain". The keychain fallback is gone, so an absent token now means the
+// profile has NO identity — the agent boots credential-less, claims a task and
+// dies on its first API call, which parks the fleet behind a stream of
+// four-second exit-0 runs (277 of them from 2026-08-30).
+//
+// The precondition that makes an unconditional refusal safe: both call sites
+// reach here only after the profile root has passed manifest verification, so
+// an unmanaged directory can never arrive at this function —
+//
+//   - ProfileHarnessEnv calls checkProfileManifest(dir, ...) and returns early
+//     on error;
+//   - lead.applyLeadProfile calls it only after verifyLeadProfile and only when
+//     underAgentProfiles(runtimeDir, inherited) holds, so an operator's own
+//     ~/.claude is excluded and never reaches it.
+//
+// Do NOT add a redundant manifest-presence stat below to "make it safe on its
+// own": a second gate here would drift from the real one above.
 //
 // It is exported for `loom lead`, the one agent the supervisor does not spawn,
 // which may INHERIT its config root and so never reach ProfileHarnessEnv —
@@ -176,7 +222,11 @@ func ProfileSecretEnv(dir, harness string) ([]string, error) {
 	raw, err := os.ReadFile(path) //nolint:gosec // G304: path derived from the workspace profile layout, not user input
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			// Never minted. A dangling symlink lands here too, and reporting
+			// it as missing is right: the identity is not there.
+			return nil, fmt.Errorf("%w: %s: profile was never minted "+
+				"(run scripts/setup-profile-token.sh %s, then scripts/provision-profile.sh %s)",
+				ErrProfileTokenMissing, path, profileAgentOf(dir), profileAgentOf(dir))
 		}
 		return nil, fmt.Errorf("%w: %s: %v", ErrProfileTokenUnreadable, path, err)
 	}
@@ -188,6 +238,17 @@ func ProfileSecretEnv(dir, harness string) ([]string, error) {
 		return nil, fmt.Errorf("%w: %s: file is empty", ErrProfileTokenUnreadable, path)
 	}
 	return []string{fmt.Sprintf("%s=%s", envVar, token)}, nil
+}
+
+// profileAgentOf recovers the agent name from a profile harness root
+// (<...>/agent-profiles/<agent>/<harness>), so the refusal names the profile
+// an operator actually has to mint rather than making them decode a path.
+func profileAgentOf(dir string) string {
+	agent := filepath.Base(filepath.Dir(filepath.Clean(dir)))
+	if agent == "." || agent == string(filepath.Separator) || agent == "" {
+		return "<agent>"
+	}
+	return agent
 }
 
 // AppendProfileEnv injects every per-agent harness profile root that exists on

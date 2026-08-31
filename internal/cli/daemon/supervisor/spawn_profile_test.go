@@ -76,7 +76,28 @@ func writeProfile(t *testing.T, projectDir, worktree, version string, files map[
 	if err := os.WriteFile(filepath.Join(dir, ProfileManifestName), raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// A provisioned claude profile always carries its own minted credential —
+	// without one it now refuses to boot — so the fixture writes one by
+	// default and the tests about a MISSING token remove it explicitly. It is
+	// outside the manifest's file list, exactly as the provisioner leaves it,
+	// so it does not enter the fingerprint above.
+	writeProfileToken(t, dir, "sk-ant-oat01-fixture")
 	return dir
+}
+
+// writeProfileToken writes (or, given "", removes) a profile's oauth-token.
+func writeProfileToken(t *testing.T, dir, token string) {
+	t.Helper()
+	path := filepath.Join(dir, "oauth-token")
+	if token == "" {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		return
+	}
+	if err := os.WriteFile(path, []byte(token), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestAppendProfileEnv_AbsentDirsLeaveEnvUntouched(t *testing.T) {
@@ -346,6 +367,9 @@ func TestAppendProfileEnv_ExportsPerExistingHarnessRoot(t *testing.T) {
 				want["CLAUDE_CONFIG_DIR"] = writeProfile(t, projectDir, "worker", claudeVersion, map[string]string{
 					"settings.json": `{"model":"opus"}`,
 				})
+				// A provisioned claude root always carries its identity, so
+				// the exported set is the config dir AND its credential.
+				want["CLAUDE_CODE_OAUTH_TOKEN"] = "sk-ant-oat01-fixture"
 			}
 			if tc.codex {
 				want["CODEX_HOME"] = writeCodexProfile(t, projectDir, "worker", codexVersion)
@@ -448,21 +472,98 @@ func TestAppendProfileEnv_InjectsProfileOAuthToken(t *testing.T) {
 	}
 }
 
-// Strictly additive: every profile provisioned before setup-token identities
-// existed has no such file and must spawn exactly as it does today.
-func TestAppendProfileEnv_NoTokenFileLeavesTokenUnset(t *testing.T) {
+// The worker-2 case, and the single most important test in this file: a claude
+// profile that verifies clean but was never minted has NO identity. Booting it
+// credential-less used to be deliberate ("absent means legacy, fall back to the
+// keychain"), and after the keychain fallback was removed it meant the agent
+// spawned, claimed a task and died on its first API call — 277 four-second
+// exit-0 runs from 2026-08-30, which park the fleet behind work that reads as
+// completed. Absent must refuse exactly as present-but-empty already does.
+func TestAppendProfileEnv_MissingTokenFileRefusesBoot(t *testing.T) {
 	stubHarnessVersion(t, map[string]string{"claude": "2.1.234 (Claude Code)"})
 	projectDir := t.TempDir()
-	writeProfile(t, projectDir, "worker", "2.1.234 (Claude Code)", map[string]string{
+	dir := writeProfile(t, projectDir, "worker", "2.1.234 (Claude Code)", map[string]string{
 		"settings.json": `{"model":"opus"}`,
 	})
+	writeProfileToken(t, dir, "")
+
+	env, err := AppendProfileEnv(nil, projectDir, "worker")
+	if !errors.Is(err, ErrProfileTokenMissing) {
+		t.Fatalf("unminted profile must refuse boot, got err %v (env %v)", err, env)
+	}
+	if env != nil {
+		t.Errorf("a refused boot must not hand back an environment, got %v", env)
+	}
+	if !strings.Contains(err.Error(), filepath.Join(dir, "oauth-token")) {
+		t.Errorf("error must name the file to mint, got %q", err)
+	}
+	if !strings.Contains(err.Error(), "setup-profile-token.sh") {
+		t.Errorf("error must name the repair script, got %q", err)
+	}
+}
+
+// The missing-token refusal must not become a refusal for harnesses that never
+// had a credential file. Without this, the fix silently bricks every codex
+// agent: codex roots carry no oauth-token by design.
+func TestAppendProfileEnv_CodexRootWithoutTokenStillBoots(t *testing.T) {
+	stubHarnessVersion(t, map[string]string{"codex": "codex-cli 0.147.0"})
+	projectDir := t.TempDir()
+	codexDir := filepath.Join(projectDir, ".loom", AgentProfilesDirName, "worker", "codex")
+	if err := os.MkdirAll(codexDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(agentprofile.Manifest{
+		Files:          []string{},
+		Fingerprint:    hex.EncodeToString(sha256.New().Sum(nil)),
+		HarnessVersion: "codex-cli 0.147.0",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(codexDir, ProfileManifestName), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	env, err := AppendProfileEnv(nil, projectDir, "worker")
 	if err != nil {
-		t.Fatalf("a profile without a token must boot: %v", err)
+		t.Fatalf("a codex profile has no credential file and must boot: %v", err)
+	}
+	if got := findAssignment(env, "CODEX_HOME"); got != codexDir {
+		t.Errorf("CODEX_HOME = %q, want %q", got, codexDir)
 	}
 	if got := findAssignment(env, "CLAUDE_CODE_OAUTH_TOKEN"); got != "" {
-		t.Errorf("no oauth-token file must inject nothing, got %q", got)
+		t.Errorf("codex must get no credential, got %q", got)
+	}
+}
+
+// A dangling symlink reads as IsNotExist, so it reports MISSING rather than
+// unreadable. That is the right bucket: the identity is not there, and the
+// repair is to mint one.
+func TestProfileSecretEnv_DanglingSymlinkIsMissing(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Symlink(filepath.Join(dir, "nowhere"), filepath.Join(dir, "oauth-token")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if _, err := ProfileSecretEnv(dir, "claude"); !errors.Is(err, ErrProfileTokenMissing) {
+		t.Fatalf("dangling token symlink must report missing, got %v", err)
+	}
+}
+
+// The two token faults must stay distinguishable: the repair lines in `loom
+// lead` and `loom doctor` branch on the sentinel, and a never-minted profile
+// needs the interactive setup script that a merely broken one does not.
+func TestProfileSecretEnv_MissingAndUnreadableAreDistinctSentinels(t *testing.T) {
+	dir := t.TempDir()
+	_, missing := ProfileSecretEnv(dir, "claude")
+	if !errors.Is(missing, ErrProfileTokenMissing) || errors.Is(missing, ErrProfileTokenUnreadable) {
+		t.Fatalf("absent token must be missing and not unreadable, got %v", missing)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "oauth-token"), []byte(" \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, empty := ProfileSecretEnv(dir, "claude")
+	if !errors.Is(empty, ErrProfileTokenUnreadable) || errors.Is(empty, ErrProfileTokenMissing) {
+		t.Fatalf("empty token must be unreadable and not missing, got %v", empty)
 	}
 }
 
