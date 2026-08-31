@@ -38,7 +38,16 @@ func IsFleetMode(cfg *config.DaemonConfig) bool {
 
 // printDaemonBanner prints the startup banner for the daemon, varying the
 // output for fleet mode (no agent list) vs normal mode (shows agents).
-func PrintDaemonBanner(config *config.DaemonConfig, projectDir string) {
+// PrintDaemonBanner prints the supervisor's startup banner.
+//
+// preflightLines carries the fleet-db capability report's rendering — the
+// Degraded block, or the unreachable/unverified warning — already formatted by
+// internal/runtimepreflight. It is passed as lines rather than as the report
+// itself so this package does not take a dependency on the preflight package;
+// the report is the caller's to hold. Empty for a clean boot, which prints
+// exactly what it printed before this existed. A fatal report never reaches
+// here: the daemon exits upstream of this call.
+func PrintDaemonBanner(config *config.DaemonConfig, projectDir string, preflightLines []string) {
 	fmt.Println("═══════════════════════════════════════════════════════════════")
 	if IsFleetMode(config) {
 		fmt.Println("Loom Agent Supervisor — Fleet Mode")
@@ -53,6 +62,9 @@ func PrintDaemonBanner(config *config.DaemonConfig, projectDir string) {
 		for _, a := range config.Agents {
 			fmt.Printf("  - %s (%s)\n", a.Worktree, a.Role)
 		}
+	}
+	for _, line := range preflightLines {
+		fmt.Println(line)
 	}
 	fmt.Println("Press Ctrl+C to stop")
 	fmt.Println("═══════════════════════════════════════════════════════════════")

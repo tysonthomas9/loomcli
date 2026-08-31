@@ -52,6 +52,7 @@ type Store struct {
 	skills     *skillStore
 	skillPacks *skillPackStore
 	daemon     *daemonStore
+	capabils   *capabilityStore
 	conns      *connectorStore
 	grants     *connectorGrantStore
 	audits     *connectorAuditStore
@@ -107,6 +108,7 @@ func New() *Store {
 		skills:     skills,
 		skillPacks: newSkillPackStore(),
 		daemon:     newDaemonStore(),
+		capabils:   newCapabilityStore(),
 		conns:      newConnectorStore(),
 		grants:     newConnectorGrantStore(),
 		audits:     newConnectorAuditStore(),
@@ -265,6 +267,15 @@ func (s *Store) SetSkillActor(actor string) {
 
 // Daemon returns the DaemonProfileStore.
 func (s *Store) Daemon() store.DaemonProfileStore { return s.daemon }
+
+// Capabilities reports a synthetic full-capability document.
+//
+// memstore is not a fleet-db and has no routes to enumerate; every capability
+// loom declares is served, by definition, because memstore implements the
+// whole Store interface in process. Reporting the manifest verbatim keeps an
+// in-memory run's boot preflight clean instead of failing it on an absence
+// that has no meaning here.
+func (s *Store) Capabilities() store.CapabilityStore { return s.capabils }
 
 // Close is a no-op — memory has no resources to release.
 func (s *Store) Close() error { return nil }
