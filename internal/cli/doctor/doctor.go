@@ -148,6 +148,7 @@ func collectDoctorChecks(cmd *cobra.Command) []checkFunc {
 		func() CheckResult { return checkFleetProgress(deps) },
 		checkRedis,
 		func() CheckResult { return checkOrphanedFleetLocks(deps) })
+	checks = append(checks, checkDiskHeadroom)
 	return checks
 }
 
