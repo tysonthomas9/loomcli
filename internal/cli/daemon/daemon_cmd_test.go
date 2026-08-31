@@ -1696,3 +1696,39 @@ func TestRunDaemonStatus_NotRunningWritesToCommandOut(t *testing.T) {
 		t.Errorf("output = %q, want it captured from the command's writer", buf.String())
 	}
 }
+
+// TestStateFileCarriesTheWalls: `loom daemon status` must be able to answer
+// "why is nothing spawning", and — the part the 2026-08-31 outage needed —
+// whether the wall is the whole account or one broken profile. That answer
+// only exists if the walls survive the state file and reach the printer.
+func TestStateFileCarriesTheWalls(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "daemon-agents.json")
+	until := time.Now().Add(12 * time.Minute)
+	walls := []supervisor.WallInfo{
+		{Scope: "account", Credential: "shared", Class: "BillingError", Message: "credit balance too low", Until: until},
+		{Scope: "profile", Credential: "/w/.loom/agent-profiles/worker-2", Class: "AuthFailure", Until: until},
+	}
+
+	if err := writeStateFile(path, time.Now(), nil, nil, nil, 3, stateExtras{Walls: walls}); err != nil {
+		t.Fatalf("writeStateFile: %v", err)
+	}
+	state, err := ReadStateFile(path)
+	if err != nil {
+		t.Fatalf("ReadStateFile: %v", err)
+	}
+	if len(state.Walls) != 2 {
+		t.Fatalf("Walls = %#v, want both walls round-tripped", state.Walls)
+	}
+
+	out := captureStdout(t, func() { printWalls(state.Walls) })
+	for _, want := range []string{"account", "shared", "profile", "worker-2", "AuthFailure", "credit balance too low"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("printWalls output missing %q:\n%s", want, out)
+		}
+	}
+
+	// No walls, no section: a healthy daemon's status must stay quiet.
+	if got := captureStdout(t, func() { printWalls(nil) }); got != "" {
+		t.Errorf("printWalls(nil) printed %q, want nothing", got)
+	}
+}
