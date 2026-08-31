@@ -3,6 +3,7 @@ package doctor
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/agentprofile"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 )
 
 // profileProbeTimeout bounds one "<harness> --version" fork. The binary is a
@@ -81,6 +83,13 @@ func checkAgentProfiles() CheckResult {
 	for _, p := range profiles {
 		got := versions[p.Harness]
 		err := agentprofile.Verify(p.Dir, got)
+		if err == nil {
+			// Verify does not look at the credential at all — the token is
+			// deliberately outside the manifest — so a profile with no
+			// identity verified clean and doctor reported the fleet green
+			// while its agents died on their first API call. Probe it here.
+			err = checkProfileCredential(p)
+		}
 		switch {
 		case err == nil:
 		case errors.Is(err, agentprofile.ErrVersionDrift):
@@ -101,6 +110,35 @@ func checkAgentProfiles() CheckResult {
 	}
 
 	return renderProfileResult(profiles, versions, blessed, drifted, broken, unknown)
+}
+
+// checkProfileCredential reports why a profile's own credential cannot serve as
+// an identity, or nil when the harness has none to carry or the one it has is
+// usable. It is the doctor-side twin of supervisor.ProfileSecretEnv's refusal,
+// and reuses that package's sentinels so the report buckets by the same repair
+// the boot path would name.
+//
+// It never reads the token bytes: existence and a non-whitespace size are
+// exactly what distinguishes "never minted" from "minted then broken", and a
+// credential must not pass through a reporting path.
+func checkProfileCredential(p agentprofile.Profile) error {
+	path := supervisor.ProfileTokenPath(p.Dir, p.Harness)
+	if path == "" {
+		return nil // this harness carries no credential of its own
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%w: %s", supervisor.ErrProfileTokenMissing, path)
+		}
+		return fmt.Errorf("%w: %s: %v", supervisor.ErrProfileTokenUnreadable, path, err)
+	}
+	// Size, not content: a token is never whitespace-only, and anything at or
+	// below the size of a stray newline cannot be one.
+	if info.Size() <= 1 {
+		return fmt.Errorf("%w: %s: file is empty", supervisor.ErrProfileTokenUnreadable, path)
+	}
+	return nil
 }
 
 // probeHarnessVersions forks "<binary> --version" once per DISTINCT harness,
@@ -268,6 +306,10 @@ func faultReason(f profileFault) string {
 		return fmt.Sprintf("cannot verify: %s --version produced nothing", binary)
 	case errors.Is(f.err, agentprofile.ErrFingerprintMismatch):
 		return "fingerprint mismatch: " + fingerprintPair(f.profile.Dir)
+	case errors.Is(f.err, supervisor.ErrProfileTokenMissing):
+		return "no oauth-token: profile was never minted"
+	case errors.Is(f.err, supervisor.ErrProfileTokenUnreadable):
+		return "oauth-token unusable: " + f.err.Error()
 	case errors.Is(f.err, agentprofile.ErrManifestMissing):
 		return "no " + agentprofile.ManifestName + ": profile dir exists but was never provisioned"
 	default:
@@ -281,6 +323,10 @@ func faultReason(f profileFault) string {
 func faultRepair(f profileFault) string {
 	if errors.Is(f.err, agentprofile.ErrVersionDrift) {
 		return "loom doctor --fix   (re-blesses the pin once verified; agents are already running)"
+	}
+	if errors.Is(f.err, supervisor.ErrProfileTokenMissing) {
+		return fmt.Sprintf("scripts/setup-profile-token.sh %s   (interactive, then provision-profile.sh %s)",
+			f.profile.Agent, f.profile.Agent)
 	}
 	if errors.Is(f.err, agentprofile.ErrVersionUnknown) {
 		return fmt.Sprintf("install or PATH-expose the %s binary, then re-run loom doctor", f.profile.Harness)

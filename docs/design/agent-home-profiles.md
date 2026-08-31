@@ -110,8 +110,9 @@ A profile root may carry `oauth-token`: a long-lived, non-rotating Claude Code
 credential minted for that one agent by `claude setup-token`, captured by the
 operator's `scripts/setup-profile-token.sh <agent>`. When the file is present,
 the injector exports its trimmed contents as `CLAUDE_CODE_OAUTH_TOKEN`
-alongside `CLAUDE_CONFIG_DIR`. When it is absent the environment is untouched,
-which is every profile provisioned before this existed.
+alongside `CLAUDE_CONFIG_DIR`. On a provisioned `claude` root the file is
+**required**: an absent one refuses the boot, exactly as a present-but-empty
+one does.
 
 This is what makes a profile an **identity** rather than a copy of one. The
 provisioner's keychain-copy fallback seeds each profile from the *operator's*
@@ -124,10 +125,27 @@ by anyone else's refresh, and revoking one agent never touches the other nine.
 
 Three properties the implementation is built around:
 
-- **Additive.** Absent file, identical behavior. Present-but-empty is not
-  absent: it is a broken minting run, and falling through to the operator's
-  token would silently restore the sharing the file exists to end, so it
-  refuses the boot.
+- **Required on a provisioned root, for the harnesses that have one.** A
+  `claude` profile with no `oauth-token` has no identity at all, so the boot is
+  refused (`ErrProfileTokenMissing`) rather than proceeding credential-less.
+  Present-but-empty is a broken minting run and refuses too
+  (`ErrProfileTokenUnreadable`); the two are separate sentinels because the
+  repairs differ — never minted needs the interactive
+  `setup-profile-token.sh <agent>` *and then* `provision-profile.sh <agent>`,
+  while a broken file is restored by re-provisioning alone. `codex`, and any
+  harness with no credential file in the table, is untouched: nothing is
+  required of it and nothing is injected.
+
+  This rule used to read the other way — *"Additive. Absent file, identical
+  behavior."* — and that was correct only while "absent" meant "legacy profile,
+  falls back to the operator's keychain". The keychain fallback is gone. Once it
+  went, an unminted profile silently became an agent that spawns, claims a task,
+  and dies on its first API call: 277 four-second `exit 0` runs from 2026-08-30,
+  which read as completed work and park the fleet. `worker-2` and `worker-3`
+  were exactly this shape on disk. The refusal is unconditional because both
+  call sites reach the credential check only *after* manifest verification, so a
+  directory this workspace never provisioned — an operator's own `~/.claude`
+  above all — can never arrive there.
 - **Last-assignment wins.** `CLAUDE_CODE_OAUTH_TOKEN` is on the envfilter
   allowlist, so the operator's own token reaches the child too. The profile's
   assignment is appended after it and exec resolves duplicates to the last one.
@@ -158,8 +176,12 @@ The split is not cosmetic — it is why `--fix` is safe to run:
 - **`scripts/setup-profile-token.sh <agent>` mints an identity.** It runs
   `claude setup-token` once per agent — an interactive flow a human completes —
   and captures the printed token straight into `<agent>/claude/oauth-token`. It
-  is the repair for an unreadable or empty token file, and the one thing that
-  is not provisioning: it writes no profile content and no manifest.
+  is the repair for a missing token file — followed by
+  `provision-profile.sh <agent>`, since minting alone does not materialize the
+  token into the live profile root — and the one thing that is not
+  provisioning: it writes no profile content and no manifest. An *unreadable or
+  empty* token file is a different fault: the identity exists, so
+  `provision-profile.sh <agent>` alone restores it.
 - **`scripts/provision-profile.sh <agent>` is the only thing that provisions.**
   It is workspace-owned, outside this repo, creates or replaces the profile's
   content, seeds the keychain slot the harness authenticates against, and

@@ -153,6 +153,12 @@ func leadProfileRepair(err error, configDir string) string {
 	if errors.Is(err, supervisor.ErrProfileVersionDrift) {
 		return "loom doctor --fix"
 	}
+	if errors.Is(err, supervisor.ErrProfileTokenMissing) {
+		// Never minted: minting alone does not materialize the token into the
+		// live profile root, so both scripts are required, in this order.
+		agent := profileAgentName(configDir)
+		return fmt.Sprintf("scripts/setup-profile-token.sh %s && scripts/provision-profile.sh %s", agent, agent)
+	}
 	if errors.Is(err, supervisor.ErrProfileTokenUnreadable) {
 		// A different script and a different act: provisioning copies files,
 		// while minting an identity is an interactive flow a human completes.
