@@ -143,3 +143,53 @@ Loom's workspace creation accepts git clone URLs via the API. If the API is expo
 ### Recommendation
 
 When exposing the Loom API to untrusted users, use `--auth-url` for authentication and configure network egress rules to restrict outbound git connections to approved hosts.
+
+## Operator Attribution on Board Writes
+
+Issue writes originating in the web UI carry a per-request *operator identity*
+in the `X-Actor` header, so the board's audit trail names the person who
+clicked rather than the harness process. The identity is:
+
+1. the verified session's email (or subject) when authentication is enabled, else
+2. `LOOM_OPERATOR_ACTOR`, else
+3. `operator@local`.
+
+### The actor must hold a role in the issue backend's ACL
+
+fleet-db honors `X-Actor` but then requires that actor to hold an ACL role in
+the workspace. An issue store provisioned before operator attribution existed
+knows only the harness actor, so the operator identity is rejected with
+`403 forbidden: workspace access denied`.
+
+That rejection is **advisory, never fatal**. The fleet client retries the
+rejected request exactly once as the configured process actor, so the write
+lands. What is lost is attribution, not the board: the audit trail records the
+process actor instead of the operator. A warning naming the actor, the
+workspace, and the remediation is logged once per actor per ten minutes, and
+`loom doctor` reports the same condition as a `operator_actor_role` warning.
+
+Only the "actor has no role at all" rejection falls back. `403 insufficient
+permissions` — the actor *has* a role that lacks the permission — is reported
+honestly and never retried, because escalating it to the process actor would be
+privilege escalation rather than a fallback. `401` credential failures are
+likewise never retried.
+
+To restore attribution, grant the actor a role:
+
+```
+redis-cli SET 'fleet-db:acl:global-roles:operator@local' maintainer
+```
+
+The denial is re-probed within ten minutes, so a role granted while `loom
+serve` is running takes effect without a restart. Alternatively point
+`LOOM_OPERATOR_ACTOR` at an actor that already holds a role.
+
+### Attribution requires header-based identity
+
+fleet-db resolves identity in the order **API key → header**, first success
+wins, and then strips `X-Actor`. So when loom is configured with
+`LOOM_FLEET_DB_API_KEY`, every write is attributed to the *key's* actor and the
+operator identity is ignored entirely — operator attribution is only in effect
+when loom sends no API key and fleet-db runs with `auth.dev_mode`. `loom
+doctor` skips the `operator_actor_role` check under an API key for that reason:
+there is nothing to diagnose.

@@ -278,6 +278,38 @@ func (t *tracedIssueBackend) ReleaseClaim(ctx context.Context, id, actor string)
 	return err
 }
 
+// CheckActorAccess forwards the doctor's actor-authorization probe to the
+// inner backend when it supports one. Capability-detected like ReleaseClaim:
+// this wrapper is the default in the CLI, so a new optional interface that is
+// not forwarded here is invisible in production while still passing unit tests
+// that hold the bare backend.
+func (t *tracedIssueBackend) CheckActorAccess(ctx context.Context, actor string) error {
+	ctx, span := t.startSpan(ctx, "CheckActorAccess")
+	checker, ok := t.inner.(interface {
+		CheckActorAccess(context.Context, string) error
+	})
+	if !ok {
+		// Report unsupported as an error, never as "authorized": this
+		// wrapper unconditionally satisfies the interface, so returning
+		// nil would make every non-fleet backend look like a pass.
+		err := backend.ErrValidation("CheckActorAccess", "backend does not support actor access checks")
+		endSpan(span, err)
+		return err
+	}
+	err := checker.CheckActorAccess(ctx, actor)
+	endSpan(span, err)
+	return err
+}
+
+// Workspace forwards the inner backend's workspace id, so diagnostics can name
+// the workspace an actor was rejected from through the wrapper.
+func (t *tracedIssueBackend) Workspace() string {
+	if w, ok := t.inner.(interface{ Workspace() string }); ok {
+		return w.Workspace()
+	}
+	return ""
+}
+
 func (t *tracedIssueBackend) DeferIssue(ctx context.Context, id string, until time.Time) error {
 	ctx, span := t.startSpan(ctx, "DeferIssue",
 		attribute.String("loom.task_id", id),

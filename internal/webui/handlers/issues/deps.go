@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/backend/advisoryactor"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -85,9 +86,10 @@ func HandleAddDependency(svc service.IssueService) http.HandlerFunc {
 			return
 		}
 
-		err := svc.AddDependency(r.Context(), service.AddDependencyParams{
+		ctx := operatorActorContext(r, fallbackActor)
+		err := svc.AddDependency(ctx, service.AddDependencyParams{
 			IssueID:     issueID,
-			Actor:       operatorActor(r.Context(), fallbackActor),
+			Actor:       advisoryactor.From(ctx),
 			DependsOnID: req.DependsOnID,
 			DepType:     req.DepType,
 		})
@@ -126,9 +128,10 @@ func HandleRemoveDependency(svc service.IssueService) http.HandlerFunc {
 			return
 		}
 
-		err := svc.RemoveDependency(r.Context(), service.RemoveDependencyParams{
+		ctx := operatorActorContext(r, fallbackActor)
+		err := svc.RemoveDependency(ctx, service.RemoveDependencyParams{
 			IssueID: issueID,
-			Actor:   operatorActor(r.Context(), fallbackActor),
+			Actor:   advisoryactor.From(ctx),
 			DepID:   depID,
 		})
 		if err != nil {
