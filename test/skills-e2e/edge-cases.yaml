@@ -1,0 +1,51 @@
+version: 1
+cases:
+  - id: 1
+    behavior: binary bytes and executable mode round-trip exactly
+    owner: loom
+    seam: loom-fleet-e2e
+    test: TestSkillLifecycle/updates_the_selected_revision_and_materializes_the_exact_tree
+    backends: [redis]
+    providers: [minio]
+    status: covered
+    rationale: the materialized tree is compared byte-for-byte and mode-for-mode
+
+  - id: 2
+    behavior: a zero-byte bundled file round-trips exactly
+    owner: loom
+    seam: loom-fleet-e2e
+    test: TestSkillLifecycle/updates_the_selected_revision_and_materializes_the_exact_tree
+    backends: [redis]
+    providers: [minio]
+    status: covered
+    rationale: the fixture contains empty.dat and the exact tree comparison requires zero bytes
+
+  - id: 3
+    behavior: nested slash-separated paths round-trip exactly
+    owner: loom
+    seam: loom-fleet-e2e
+    test: TestSkillLifecycle/updates_the_selected_revision_and_materializes_the_exact_tree
+    backends: [redis]
+    providers: [minio]
+    status: covered
+    rationale: the fixture requires exact nested docs, assets, and scripts paths
+
+  - id: 12
+    behavior: non-root files retain arbitrary bytes and executable mode
+    owner: loom
+    seam: loom-fleet-e2e
+    test: TestSkillLifecycle/updates_the_selected_revision_and_materializes_the_exact_tree
+    backends: [redis]
+    providers: [minio]
+    status: covered
+    rationale: binary and executable non-root files are checked against literal fixtures
+
+  - id: 15
+    behavior: updating Skill content selects and materializes a new tree revision
+    owner: loom
+    seam: loom-fleet-e2e
+    test: TestSkillLifecycle/updates_the_selected_revision_and_materializes_the_exact_tree
+    backends: [redis]
+    providers: [minio]
+    status: covered
+    rationale: two public imports require different revisions and the second literal revision is selected

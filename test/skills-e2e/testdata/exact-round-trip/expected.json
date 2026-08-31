@@ -1,0 +1,40 @@
+{
+  "source_fixture": "exact-round-trip/updated",
+  "skill": {
+    "workspace_key": "SKILLSRELEASE",
+    "name": "exact-round-trip",
+    "scope": "workspace",
+    "description": "Exact real-service round trip",
+    "file_tree_revision": "wft1_igfqkQVa_aBOjSr27_UUdKDCWweouc67JnMLCbk_e0k",
+    "created_by": "vercel-skills-compat",
+    "updated_by": "vercel-skills-compat",
+    "source": "",
+    "content": "# Exact round trip\n\nselected body\n",
+    "files": [
+      {
+        "path": "assets/payload.bin",
+        "media_type": "application/octet-stream",
+        "executable": false,
+        "size_bytes": 7
+      },
+      {
+        "path": "docs/nested.txt",
+        "media_type": "text/plain",
+        "executable": false,
+        "size_bytes": 21
+      },
+      {
+        "path": "empty.dat",
+        "media_type": "text/plain; charset=utf-8",
+        "executable": false,
+        "size_bytes": 0
+      },
+      {
+        "path": "scripts/run.sh",
+        "media_type": "text/x-shellscript",
+        "executable": true,
+        "size_bytes": 30
+      }
+    ]
+  }
+}

@@ -7,6 +7,9 @@ compat="$ROOT/scripts/test-vercel-skills-compat.sh"
 release="$ROOT/.github/workflows/release.yml"
 workflow="$ROOT/.github/workflows/skills-compatibility.yml"
 makefile="$ROOT/Makefile"
+skills_e2e="$ROOT/test/skills-e2e/lifecycle_test.go"
+skills_e2e_manifest="$ROOT/test/skills-e2e/testdata/exact-round-trip/expected.json"
+skills_e2e_registry="$ROOT/test/skills-e2e/edge-cases.yaml"
 
 fail() {
   echo "release skills contract: $*" >&2
@@ -66,14 +69,21 @@ require_fixed "$workflow" 'docker logs "$MINIO_CONTAINER"'
 require_fixed "$workflow" 'make test-skills-release-compat 2>&1 | tee "../skills-compatibility-$STORAGE_MODE.log"'
 require_fixed "$workflow" 'REDIS_CONTAINER=loom-skills-redis-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$STORAGE_MODE'
 require_fixed "$workflow" 'redis:7.4.2-alpine@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952'
-require_fixed "$compat" 'run_exact_skill_lifecycle'
 require_fixed "$compat" 'LOOM_E2E_REDIS_ADDR'
-require_fixed "$compat" 'expected_revision="wft1_igfqkQVa_aBOjSr27_UUdKDCWweouc67JnMLCbk_e0k"'
+require_fixed "$compat" 'go test -tags=e2e -count=1 -v ./test/skills-e2e'
+require_fixed "$skills_e2e" 'func TestSkillLifecycle'
+require_fixed "$skills_e2e" 'updates the selected revision and materializes the exact tree'
+require_fixed "$skills_e2e_manifest" '"file_tree_revision": "wft1_igfqkQVa_aBOjSr27_UUdKDCWweouc67JnMLCbk_e0k"'
+require_fixed "$skills_e2e_registry" 'test: TestSkillLifecycle/updates_the_selected_revision_and_materializes_the_exact_tree'
 require_fixed "$workflow" 'real_processes=loom-cli,fleet-db,redis,projector,http,$object_provider'
 require_fixed "$workflow" 'skills-compatibility-${{ matrix.storage }}-revisions-${{ github.run_id }}-${{ github.run_attempt }}'
 
 # The release log must identify every input to the compatibility result.
 require_fixed "$compat" 'Compatibility revisions: loomcli=$loom_sha fleetdb=$fleet_db_sha vercel_skills=$actual_vercel_ref'
+
+if grep -Fq 'run_exact_skill_lifecycle' "$compat"; then
+  fail "$compat still embeds the lifecycle scenario in shell"
+fi
 
 # deploy-to-vercel is a supported corpus member with exactly three bundled
 # files. The complete imported SKILL.md and Archive.zip receive explicit byte

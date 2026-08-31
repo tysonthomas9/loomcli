@@ -65,6 +65,33 @@ services and externally observable outcomes.
 
 ## Suite layout
 
+### Chosen representation
+
+The suite uses **scenario-driven executable specifications backed by a deep
+real-service harness and a declarative edge-case registry**.
+
+Each artifact has one job:
+
+| Artifact | Responsibility |
+|---|---|
+| Go scenario | State the user-observable behavior being proved |
+| Checked-in fixture | Make exact inputs and expected bytes reviewable |
+| Harness module | Hide real-process invocation, faults, polling, evidence, and cleanup |
+| `edge-cases.yaml` | Map stable case IDs to owners, seams, tests, and required matrices |
+| Design document | Record why seams, policies, and exclusions were chosen |
+| TDD loop | Reproduce one behavior before making its smallest owning-seam fix |
+
+YAML is not the scenario language. Distributed scenarios require concurrency,
+cancellation, restart, and rich failure reporting; encoding those operations in
+YAML would create an untyped interpreter that is harder to understand than Go.
+The registry remains declarative while executable behavior remains typed and
+navigable.
+
+The first reviewable implementation is deliberately small: one lifecycle
+scenario, one harness implementation, one fixture family, and only the registry
+entries directly covered by that scenario. New interface methods are added only
+when a subsequent red-green slice demonstrates repeated mechanics.
+
 The lifecycle scenarios move out of the Vercel corpus shell script into a
 dedicated Go suite:
 
@@ -86,14 +113,18 @@ test/skills-e2e/
     └── exact-round-trip/
         ├── initial/
         │   ├── SKILL.md
-        │   ├── assets/payload.bin
+        │   ├── assets/payload.bin.hex
         │   ├── docs/nested.txt
-        │   ├── empty.dat
-        │   └── scripts/run.sh
+        │   ├── empty.dat.empty
+        │   └── scripts/run.sh.executable
         ├── updated/
         │   └── ...
         └── expected.json
 ```
+
+The suffixes keep otherwise opaque fixture properties visible in review. The
+harness stages `.hex`, `.empty`, and `.executable` recipes as the real binary,
+zero-byte, and mode-`0755` files before invoking Loom.
 
 The existing Vercel corpus test remains focused on one question: whether the
 pinned external corpus imports and materializes successfully. It does not own
