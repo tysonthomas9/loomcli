@@ -228,8 +228,18 @@ share reviewed literals but do not share the production implementation.
 
 ## Edge-case coverage registry
 
-`test/skills-e2e/edge-cases.yaml` is the authoritative accountability map. Each
-entry contains:
+`test/skills-e2e/edge-cases.yaml` is the authoritative accountability map. A
+scenario catalog maps each stable semantic ID to one top-level Go test:
+
+```yaml
+scenarios:
+  - id: concurrent-tree-publication
+    behavior: concurrent publication creates one logical tree
+    test: TestTreeCreationConcurrentIdenticalPublish
+```
+
+Each edge-case entry then references the scenario without repeating the Go test
+name:
 
 ```yaml
 - id: 50
@@ -237,7 +247,6 @@ entry contains:
   scenario: concurrent-tree-publication
   owner: fleet
   seam: fleet-publication
-  test: TestTreeCreation/concurrent_identical_publish
   backends: [redis, postgres]
   providers: [minio]
   status: planned
@@ -255,8 +264,9 @@ Allowed statuses are:
 CI validates:
 
 - every stable edge-case ID appears exactly once;
+- every scenario ID appears exactly once and names an existing top-level test;
 - every entry has a stable scenario ID, owner, seam, status, and rationale;
-- every `covered` test name exists;
+- every `covered` edge case references a registered scenario;
 - backend/provider values come from the canonical dimension vocabulary;
 - `not_applicable` and `blocked` entries contain nonempty reasons; and
 - no required matrix silently disappears from workflow configuration.

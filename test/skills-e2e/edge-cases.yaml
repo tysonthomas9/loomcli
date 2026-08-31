@@ -1,11 +1,35 @@
 version: 1
+scenarios:
+  - id: skill-update-roundtrip
+    behavior: an update selects and materializes the exact new revision
+    test: TestSkillUpdateSelectsAndMaterializesExactRevision
+
+  - id: stable-identical-reimport
+    behavior: importing identical content retains the content revision
+    test: TestIdenticalSkillReimportKeepsContentRevision
+
+  - id: content-update-preserves-bundles
+    behavior: updating only Skill content preserves every bundled file
+    test: TestSkillContentUpdatePreservesBundledFiles
+
+  - id: rematerialization-prunes-stale-files
+    behavior: rematerialization removes files absent from the selected revision
+    test: TestSkillRematerializationRemovesStaleFiles
+
+  - id: deletion-prunes-materialization
+    behavior: deleting a Skill prunes it from an existing materialization
+    test: TestSkillDeletionPrunesExistingMaterialization
+
+  - id: list-show-revision-agreement
+    behavior: public list and show results report the same selected revision
+    test: TestSkillListReportsSelectedRevision
+
 cases:
   - id: 1
     behavior: binary bytes and executable mode round-trip exactly
     owner: loom
     seam: loom-fleet-e2e
     scenario: skill-update-roundtrip
-    test: TestSkillUpdateSelectsAndMaterializesExactRevision
     backends: [redis]
     providers: [minio]
     status: covered
@@ -16,7 +40,6 @@ cases:
     owner: loom
     seam: loom-fleet-e2e
     scenario: skill-update-roundtrip
-    test: TestSkillUpdateSelectsAndMaterializesExactRevision
     backends: [redis]
     providers: [minio]
     status: covered
@@ -27,7 +50,6 @@ cases:
     owner: loom
     seam: loom-fleet-e2e
     scenario: skill-update-roundtrip
-    test: TestSkillUpdateSelectsAndMaterializesExactRevision
     backends: [redis]
     providers: [minio]
     status: covered
@@ -38,7 +60,6 @@ cases:
     owner: loom
     seam: loom-fleet-e2e
     scenario: skill-update-roundtrip
-    test: TestSkillUpdateSelectsAndMaterializesExactRevision
     backends: [redis]
     providers: [minio]
     status: covered
@@ -49,7 +70,6 @@ cases:
     owner: loom
     seam: loom-fleet-e2e
     scenario: skill-update-roundtrip
-    test: TestSkillUpdateSelectsAndMaterializesExactRevision
     backends: [redis]
     providers: [minio]
     status: covered

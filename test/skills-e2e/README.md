@@ -45,6 +45,7 @@ the actual product receives the intended paths, modes, and bytes.
 Skill representation and opaque tree revision. Exact materialized bytes and
 modes are compared with the staged updated fixture.
 
-`edge-cases.yaml` maps stable review IDs to stable semantic scenario IDs and
-top-level behavioral tests. It is a coverage registry, not an executable
+`edge-cases.yaml` has one scenario catalog that maps stable semantic IDs to
+top-level Go tests. Edge-case rows reference those scenario IDs instead of
+repeating Go runner names. It is a coverage registry, not an executable
 scenario language or a copy of Go test-runner display names.
