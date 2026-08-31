@@ -413,6 +413,7 @@ func (s *Supervisor) checkAgentHealth() {
 	}
 
 	s.reannounceDegradations()
+	s.emitLogHeartbeat(totalAgents, healthyAgents)
 }
 
 // degradedReannounceInterval is how often an ONGOING degradation is re-logged
@@ -772,3 +773,26 @@ func (s *Supervisor) rearmAgent(ap *AgentProcess) {
 	slog.Warn("re-armed stopped agent after fleet stall cleared",
 		"worktree", ap.Entry.Worktree, "previous_stop_reason", previous, "last_error_class", lastErr)
 }
+
+// emitLogHeartbeat writes a periodic line to the daemon log so an idle fleet
+// still advances daemon.log's mtime. Called only from the health-checker
+// goroutine, which owns lastHeartbeat.
+func (s *Supervisor) emitLogHeartbeat(totalAgents, healthyAgents int) {
+	interval := s.LogHeartbeatInterval
+	if interval < 0 {
+		return
+	}
+	if interval == 0 {
+		interval = defaultLogHeartbeatInterval
+	}
+	now := time.Now()
+	if !s.lastHeartbeat.IsZero() && now.Sub(s.lastHeartbeat) < interval {
+		return
+	}
+	s.lastHeartbeat = now
+	slog.Info("daemon heartbeat", "agents", totalAgents, "healthy", healthyAgents)
+}
+
+// defaultLogHeartbeatInterval is the throttle applied when
+// Supervisor.LogHeartbeatInterval is zero.
+const defaultLogHeartbeatInterval = 60 * time.Second
