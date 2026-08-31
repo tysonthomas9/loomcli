@@ -98,6 +98,17 @@ All user-supplied markdown rendered in the frontend passes through DOMPurify san
 
 `FilterEnv()` strips `GIT_*` environment variables from agent subprocess environments as defense-in-depth. This prevents agents from inheriting git credential helpers, custom hooks, or configuration that could leak credentials or alter git behavior.
 
+### Repo-local Credential Helper
+
+Loom installs a git credential helper into the `.git/config` of every loom-managed clone whose `origin` is an `https://` remote (`localworkspace.EnsureCredentialHelper`). The helper is a shell snippet that answers `get` with `x-access-token` and the value of `GITHUB_TOKEN` (falling back to `GH_TOKEN`) read from the environment at call time — **no token is ever written to disk**, only a reference to an environment variable.
+
+It exists because agents run under a daemon process with no working directory service available: `osxkeychain`, the global `gh` credential helper, and `ssh` all fail before they read any configuration, so https plus a token in the environment is the only credential path that still works. `GIT_ASKPASS` and `GIT_CONFIG_*` remain blocked by `FilterEnv()`; this deliberately routes around them via repo configuration rather than re-opening them.
+
+Two consequences worth knowing:
+
+- The helper list is written as an empty entry followed by loom's snippet. The empty entry **resets** helpers inherited from system and global git config for this repo, so a keychain helper cannot answer first. A hand-written `credential.helper` in a loom-managed clone will be replaced.
+- It applies only to loom-managed clones with https remotes. `git@`, `file://`, and local-path remotes are left untouched, and linked worktrees inherit the setting from the clone's shared `.git/config`.
+
 ### Log Path Sanitization
 
 Role names used in daemon log file paths are sanitized to prevent path traversal. Characters outside `[a-zA-Z0-9_-]` are rejected.

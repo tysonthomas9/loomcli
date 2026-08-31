@@ -37,8 +37,10 @@ var envAllowlistExact = map[string]bool{
 	// equivalent of a ~/.claude login, so interactive/lead claude invocations must
 	// inherit it (mirrors trustedLocalProviderCredentials on the task-runner path).
 	"CLAUDE_CODE_OAUTH_TOKEN": true,
-	// Git hosting tokens (needed by container agents for git push)
-	"GITHUB_TOKEN": true, "GITHUB_TOKEN_FILE": true,
+	// Git hosting tokens (needed by container agents for git push). gh reads
+	// GH_TOKEN before GITHUB_TOKEN, and internal/driver/env.go already pairs
+	// them, so passing only one of the two leaves half the tooling unauthenticated.
+	"GITHUB_TOKEN": true, "GITHUB_TOKEN_FILE": true, "GH_TOKEN": true,
 	// E2E test stubs. Exact matches keep arbitrary STUB_* values out.
 	"STUB_CODEX_EPIC_RUNNER": true, "STUB_CODEX_INVOCATIONS": true,
 	// Editor
