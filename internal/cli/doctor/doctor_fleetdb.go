@@ -17,14 +17,28 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/kv"
 )
 
-// checkOrphanedFleetLocks scans all in_progress issues and warns when the
-// recorded assignee is not currently a running daemon-managed agent. This
-// surfaces "lock survived agent exit" situations so the operator can either
-// `loom recover <worktree>` (which releases the fleet-db lock) or wait for
-// the TTL to expire.
+// orphanLockGracePeriod is how long an in_progress issue may go unmatched by a
+// live daemon claim before it is reported. The daemon state updater ticks every
+// ~5s and an agent claims its task mid-session, so a freshly claimed issue is
+// briefly absent from the live set. 10 minutes leaves generous headroom.
+const orphanLockGracePeriod = 10 * time.Minute
+
+// orphanLockNow is overridden in tests.
+var orphanLockNow = time.Now
+
+// checkOrphanedFleetLocks reports in_progress issues that no running
+// daemon-managed agent currently names as its task, so the operator can return
+// a genuinely abandoned claim to the queue.
+//
+// It compares issue IDs to the task IDs recorded in the daemon state file.
+// Before PUPPET-240 it looked up issue.Assignee (the shared fleet-db actor,
+// e.g. "loom") in a map keyed by agent worktree name ("planner", "worker-2"),
+// two namespaces that never intersect — so every in_progress issue was reported
+// orphaned no matter how healthy the fleet was.
 //
 // Report-only. Returns an empty CheckResult (skipped) when no IssueBackend is
-// configured, when listing fails, or when no in_progress issues exist.
+// configured, when listing fails, when no in_progress issues exist, or when the
+// daemon supplies no liveness data at all.
 func checkOrphanedFleetLocks(deps *cli.Deps) CheckResult {
 	if deps == nil || deps.IssueBackend == nil {
 		return CheckResult{}
@@ -43,34 +57,80 @@ func checkOrphanedFleetLocks(deps *cli.Deps) CheckResult {
 
 	stateFilePath := cfgpkg.ResolveDaemonStatePath(cli.GetWorkspaceRuntimeDir())
 	managed := monitor.LoadDaemonManagedAgents(stateFilePath)
+	if managed == nil {
+		// No liveness signal (state file missing/unparseable, or the daemon
+		// PID is dead). checkLoomDaemon and checkDaemonStuck own that failure
+		// mode; reporting every in_progress issue as orphaned here would be
+		// noise, not information.
+		return CheckResult{}
+	}
 
+	// Compare issue IDs to issue IDs. A stale-but-present state file (updater
+	// goroutine dead) can yield a false PASS here; that is deliberate —
+	// checkDaemonStuck owns state-file staleness, and PASS is the safe
+	// direction when the alternative invites a destructive recovery.
+	live := make(map[string]struct{}, len(managed))
+	for _, info := range managed {
+		if info.CurrentTaskID != "" {
+			live[info.CurrentTaskID] = struct{}{}
+		}
+	}
+
+	return evaluateOrphanedFleetLocks(issues, live, orphanLockNow())
+}
+
+// evaluateOrphanedFleetLocks is the pure decision half of
+// checkOrphanedFleetLocks: given the in_progress issues, the set of task IDs
+// live agents currently hold, and a clock, it decides PASS or WARN. The grace
+// window is orphanLockGracePeriod; tests vary the clock instead.
+func evaluateOrphanedFleetLocks(issues []backend.IssueData, live map[string]struct{}, now time.Time) CheckResult {
+	const grace = orphanLockGracePeriod
 	var orphans []string
+	held, recent := 0, 0
 	for _, issue := range issues {
-		holder := issue.Assignee
-		if holder == "" {
+		if _, ok := live[issue.ID]; ok {
+			held++
 			continue
 		}
-		if _, ok := managed[holder]; ok {
+		// A freshly updated claim may not have reached the state file yet.
+		if !issue.UpdatedAt.IsZero() && now.Sub(issue.UpdatedAt) < grace {
+			recent++
 			continue
 		}
-		orphans = append(orphans, fmt.Sprintf("issue=%s holder=%s status=stopped-or-dead", issue.ID, holder))
+		orphans = append(orphans, fmt.Sprintf("issue=%s assignee=%s %s (no running agent names it as its task)",
+			issue.ID, issue.Assignee, orphanIdleField(issue, now)))
 	}
 
 	if len(orphans) == 0 {
 		return CheckResult{
-			Name:    "orphaned_fleet_locks",
-			Status:  StatusPass,
-			Summary: fmt.Sprintf("no orphaned fleet-db issue locks (%d in_progress claimed by live agents)", len(issues)),
+			Name:   "orphaned_fleet_locks",
+			Status: StatusPass,
+			Summary: fmt.Sprintf("no orphaned fleet-db issue locks (%d in_progress: %d held by live agents, %d claimed within %s)",
+				len(issues), held, recent, grace),
 		}
 	}
 
 	sort.Strings(orphans)
 	return CheckResult{
-		Name:    "orphaned_fleet_locks",
-		Status:  StatusWarn,
-		Summary: fmt.Sprintf("%d in_progress issue(s) claimed by agents that are not running", len(orphans)),
-		Detail:  strings.Join(orphans, "\n") + "\nremediation: run `loom recover <worktree>` to release the fleet-db lock, or wait for TTL expiry.",
+		Name:   "orphaned_fleet_locks",
+		Status: StatusWarn,
+		Summary: fmt.Sprintf("%d of %d in_progress issue(s) not claimed by any running agent",
+			len(orphans), len(issues)),
+		Detail: strings.Join(orphans, "\n") +
+			"\nremediation: confirm with `loom monitor`, then for each issue above run" +
+			" `loom data update <id> --status open --assignee=\"\"` to return it to the queue," +
+			" or wait for claim TTL expiry.",
 	}
+}
+
+// orphanIdleField renders the idle term of an orphan line. A zero UpdatedAt
+// means the backend gave no activity timestamp, not that the issue has been
+// idle since the year zero.
+func orphanIdleField(issue backend.IssueData, now time.Time) string {
+	if issue.UpdatedAt.IsZero() {
+		return "idle=unknown"
+	}
+	return fmt.Sprintf("idle=%s", now.Sub(issue.UpdatedAt).Truncate(time.Second))
 }
 
 // fleetHealthProbe is overridden in tests to avoid real network calls.
