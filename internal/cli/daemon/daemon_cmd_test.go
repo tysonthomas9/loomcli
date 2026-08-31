@@ -319,7 +319,7 @@ func TestWriteStateFile_RoundTripsQuarantinedTasks(t *testing.T) {
 			WriteFailed:    true,
 		},
 	}
-	if err := writeStateFile(stateFilePath, time.Now(), nil, nil, quarantined, 3); err != nil {
+	if err := writeStateFile(stateFilePath, time.Now(), nil, nil, quarantined, nil, 3); err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
 	}
 
@@ -342,7 +342,7 @@ func TestWriteStateFile_RoundTripsQuarantinedTasks(t *testing.T) {
 	}
 
 	// Empty quarantine list keeps the field out of the JSON entirely.
-	if err := writeStateFile(stateFilePath, time.Now(), nil, nil, nil, 3); err != nil {
+	if err := writeStateFile(stateFilePath, time.Now(), nil, nil, nil, nil, 3); err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
 	}
 	raw, err := os.ReadFile(stateFilePath)
@@ -371,7 +371,7 @@ func TestWriteStateFile_IncludesUnavailableAgents(t *testing.T) {
 		},
 	}
 
-	if err := writeStateFile(stateFilePath, time.Now(), agents, unavailable, nil, 3); err != nil {
+	if err := writeStateFile(stateFilePath, time.Now(), agents, unavailable, nil, nil, 3); err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
 	}
 
@@ -715,7 +715,7 @@ func TestWriteStateFile_Success(t *testing.T) {
 		},
 	}
 
-	err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, 3)
+	err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, nil, 3)
 
 	if err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
@@ -748,7 +748,7 @@ func TestWriteStateFile_AtomicWrite(t *testing.T) {
 
 	// Write state
 	agents := []SupervisedAgentStatus{{Worktree: "test", Role: "plan"}}
-	if err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, 3); err != nil {
+	if err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, nil, 3); err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
 	}
 
@@ -916,7 +916,7 @@ func TestStateFileLifecycle(t *testing.T) {
 	agents := []SupervisedAgentStatus{
 		{Worktree: "falcon", Role: "plan", PID: os.Getpid()},
 	}
-	if err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, 3); err != nil {
+	if err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, nil, 3); err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
 	}
 
@@ -931,7 +931,7 @@ func TestStateFileLifecycle(t *testing.T) {
 
 	// Update state (add agent)
 	agents = append(agents, SupervisedAgentStatus{Worktree: "nova", Role: "task"})
-	if err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, 3); err != nil {
+	if err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, nil, 3); err != nil {
 		t.Fatalf("writeStateFile() update error = %v", err)
 	}
 
@@ -1349,7 +1349,7 @@ func TestWriteStateFile_WithStopReason(t *testing.T) {
 		},
 	}
 
-	err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, 3)
+	err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, nil, 3)
 	if err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
 	}
@@ -1552,7 +1552,7 @@ func TestWriteStateFile_NewFields_RoundTrip(t *testing.T) {
 		},
 	}
 
-	err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, 3)
+	err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, nil, 3)
 	if err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
 	}
@@ -1740,5 +1740,182 @@ func TestRunDaemonStatus_NotRunningWritesToCommandOut(t *testing.T) {
 
 	if !strings.Contains(buf.String(), "Daemon: not running") {
 		t.Errorf("output = %q, want it captured from the command's writer", buf.String())
+	}
+}
+
+// State-file staleness (written_at + degradations) Tests
+// ============================================================================
+
+// captureDaemonStdout runs fn with os.Stdout redirected to a pipe and returns
+// everything it printed. The display helpers print with fmt, so this is the
+// only way to assert on them.
+func captureDaemonStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error = %v", err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = orig }()
+
+	fn()
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("close pipe writer: %v", err)
+	}
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatalf("read pipe: %v", err)
+	}
+	return buf.String()
+}
+
+func TestWriteStateFile_RoundTripsWrittenAtAndDegradations(t *testing.T) {
+	stateFilePath := filepath.Join(t.TempDir(), "daemon-agents.json")
+
+	degradations := []supervisor.Degradation{
+		{
+			Kind:    supervisor.DegradationStateWrite,
+			Since:   time.Date(2026, 8, 31, 9, 0, 0, 0, time.UTC),
+			Count:   7,
+			LastErr: "write /tmp/daemon-agents.json.tmp: no space left on device",
+		},
+		{Kind: supervisor.DegradationLogWrite, Since: time.Date(2026, 8, 31, 9, 5, 0, 0, time.UTC), Count: 1},
+	}
+
+	before := time.Now()
+	if err := writeStateFile(stateFilePath, before, nil, nil, nil, degradations, 3); err != nil {
+		t.Fatalf("writeStateFile() error = %v", err)
+	}
+
+	result, err := ReadStateFile(stateFilePath)
+	if err != nil {
+		t.Fatalf("ReadStateFile() error = %v", err)
+	}
+	if result.WrittenAt.Before(before.Truncate(time.Second)) || result.WrittenAt.After(time.Now()) {
+		t.Errorf("WrittenAt = %v, want between %v and now", result.WrittenAt, before)
+	}
+	if len(result.Degradations) != 2 {
+		t.Fatalf("len(Degradations) = %d, want 2", len(result.Degradations))
+	}
+	got := result.Degradations[0]
+	if got.Kind != supervisor.DegradationStateWrite || got.Count != 7 {
+		t.Errorf("Degradations[0] = %+v, want state_write/7", got)
+	}
+	if !got.Since.Equal(degradations[0].Since) {
+		t.Errorf("Degradations[0].Since = %v, want %v", got.Since, degradations[0].Since)
+	}
+	if got.LastErr != degradations[0].LastErr {
+		t.Errorf("Degradations[0].LastErr = %q, want %q", got.LastErr, degradations[0].LastErr)
+	}
+
+	// A healthy daemon writes no degradations key at all.
+	if err := writeStateFile(stateFilePath, before, nil, nil, nil, nil, 3); err != nil {
+		t.Fatalf("writeStateFile() error = %v", err)
+	}
+	raw, err := os.ReadFile(stateFilePath)
+	if err != nil {
+		t.Fatalf("read state file: %v", err)
+	}
+	if strings.Contains(string(raw), "degradations") {
+		t.Errorf("healthy daemon must omit degradations from JSON:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "written_at") {
+		t.Errorf("written_at must always be present:\n%s", raw)
+	}
+}
+
+func TestPrintStateFreshness_StaleAndFresh(t *testing.T) {
+	stateFilePath := filepath.Join(t.TempDir(), "daemon-agents.json")
+
+	stale := &DaemonState{WrittenAt: time.Now().Add(-2 * time.Hour)}
+	out := captureDaemonStdout(t, func() { printStateFreshness(stale, stateFilePath) })
+	if !strings.Contains(out, "STALE: daemon-agents.json last written") {
+		t.Errorf("stale state must print the banner, got %q", out)
+	}
+	if !strings.Contains(out, "2h0m0s ago") {
+		t.Errorf("banner must report the age, got %q", out)
+	}
+
+	fresh := &DaemonState{WrittenAt: time.Now().Add(-2 * time.Second)}
+	out = captureDaemonStdout(t, func() { printStateFreshness(fresh, stateFilePath) })
+	if out != "" {
+		t.Errorf("fresh state must print nothing, got %q", out)
+	}
+}
+
+func TestPrintStateFreshness_OneLinePerDegradation(t *testing.T) {
+	stateFilePath := filepath.Join(t.TempDir(), "daemon-agents.json")
+
+	state := &DaemonState{
+		WrittenAt: time.Now(),
+		Degradations: []supervisor.Degradation{
+			{
+				Kind:    supervisor.DegradationStateWrite,
+				Since:   time.Date(2026, 8, 31, 9, 0, 0, 0, time.UTC),
+				Count:   7,
+				LastErr: "no space left on device",
+			},
+			{Kind: supervisor.DegradationLogWrite, Since: time.Date(2026, 8, 31, 9, 5, 0, 0, time.UTC), Count: 2, LastErr: "permission denied"},
+		},
+	}
+
+	out := captureDaemonStdout(t, func() { printStateFreshness(state, stateFilePath) })
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("want one line per degradation, got %d:\n%s", len(lines), out)
+	}
+	if !strings.Contains(lines[0], "DEGRADED: state_write since 2026-08-31T09:00:00Z (7 failures): no space left on device") {
+		t.Errorf("degradation line 0 = %q", lines[0])
+	}
+	if !strings.Contains(lines[1], "DEGRADED: log_write since 2026-08-31T09:05:00Z (2 failures): permission denied") {
+		t.Errorf("degradation line 1 = %q", lines[1])
+	}
+}
+
+// A state file written by a binary predating written_at deserializes with a
+// zero WrittenAt. Reporting time.Since(zero) would claim the file is 56 years
+// old on every single status call, so the reader falls back to mtime.
+func TestPrintStateFreshness_ZeroWrittenAtFallsBackToMtime(t *testing.T) {
+	stateFilePath := filepath.Join(t.TempDir(), "daemon-agents.json")
+	if err := os.WriteFile(stateFilePath, []byte(`{"pid":1,"agents":[]}`), 0600); err != nil {
+		t.Fatalf("write legacy state file: %v", err)
+	}
+
+	legacy, err := ReadStateFile(stateFilePath)
+	if err != nil {
+		t.Fatalf("ReadStateFile() error = %v", err)
+	}
+	if !legacy.WrittenAt.IsZero() {
+		t.Fatalf("legacy state file must deserialize with a zero WrittenAt, got %v", legacy.WrittenAt)
+	}
+
+	out := captureDaemonStdout(t, func() { printStateFreshness(legacy, stateFilePath) })
+	if out != "" {
+		t.Errorf("a just-written legacy file is fresh by mtime; want no banner, got %q", out)
+	}
+
+	// Backdate the file: mtime is now the only staleness signal there is.
+	old := time.Now().Add(-90 * time.Minute)
+	if err := os.Chtimes(stateFilePath, old, old); err != nil {
+		t.Fatalf("os.Chtimes() error = %v", err)
+	}
+	out = captureDaemonStdout(t, func() { printStateFreshness(legacy, stateFilePath) })
+	if !strings.Contains(out, "STALE") || !strings.Contains(out, "1h30m0s ago") {
+		t.Errorf("backdated legacy file must be reported stale by mtime, got %q", out)
+	}
+}
+
+// An unreadable state file yields no age at all — better silence than a
+// fabricated staleness claim.
+func TestStateFileAge_UnreadableFileHasNoAge(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does-not-exist.json")
+	if _, ok := stateFileAge(&DaemonState{}, missing); ok {
+		t.Error("stateFileAge() ok = true for a missing file, want false")
+	}
+	out := captureDaemonStdout(t, func() { printStateFreshness(&DaemonState{}, missing) })
+	if out != "" {
+		t.Errorf("want no output when the age is unknown, got %q", out)
 	}
 }
