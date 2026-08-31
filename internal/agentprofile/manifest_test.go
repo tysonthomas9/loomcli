@@ -423,3 +423,221 @@ func rm(t *testing.T, path string) {
 		t.Fatal(err)
 	}
 }
+
+// ── managed content (the .provisioned baseline) ─────────────────────────────
+
+// writeManagedProfile materializes what the provisioner produces for a profile
+// with one managed file: the live copy (NOT hashed, NOT in `files`), the
+// pristine baseline under .provisioned/ (hashed, IS in `files`), plus whatever
+// ordinary byte-hashed files the caller asks for.
+func writeManagedProfile(t *testing.T, root, version string, files map[string]string, rel, baseline, live string) string {
+	t.Helper()
+	all := map[string]string{}
+	for k, v := range files {
+		all[k] = v
+	}
+	all[filepath.Join(ProvisionedDirName, rel)] = baseline
+
+	dir := filepath.Join(root, "claude")
+	if err := os.MkdirAll(filepath.Join(dir, ProvisionedDirName), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(all))
+	for name := range all {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	h := sha256.New()
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(all[name]), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		h.Write([]byte(name))
+		h.Write([]byte{0})
+		h.Write([]byte(all[name]))
+	}
+	if err := os.WriteFile(filepath.Join(dir, rel), []byte(live), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(Manifest{
+		Files:          names,
+		Managed:        []string{rel},
+		Fingerprint:    hex.EncodeToString(h.Sum(nil)),
+		HarnessVersion: version,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ManifestName), raw, 0o644); err != nil { //nolint:gosec // G306: manifests are world-readable by design, as the provisioner writes them
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// Every profile on disk today has no "managed" key. It must unmarshal to nil,
+// verifyManaged must be a no-op, and settings.json must stay byte-hashed —
+// this is the regression guard for the whole existing fleet.
+func TestVerify_ManifestWithoutManagedKeepsByteBehavior(t *testing.T) {
+	dir := writeProfile(t, t.TempDir(), "claude", testVersion, map[string]string{
+		"settings.json": `{"model":"opus"}`,
+	})
+	m, err := LoadManifest(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Managed != nil {
+		t.Fatalf("Managed = %v, want nil for a manifest with no managed key", m.Managed)
+	}
+	if err := Verify(dir, testVersion); err != nil {
+		t.Fatalf("Verify = %v, want nil", err)
+	}
+	// The byte hash is still in force for it: one edited character refuses.
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"model":"sonnet"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Verify(dir, testVersion); !errors.Is(err, ErrFingerprintMismatch) {
+		t.Fatalf("Verify = %v, want ErrFingerprintMismatch", err)
+	}
+}
+
+// The 2026-08-30 outage, reproduced: Claude Code re-serialized worker's
+// settings.json with a different key order and added "enabledPlugins", the byte
+// hash tripped, and the agent became permanently unspawnable because Bless
+// refuses on a fingerprint mismatch. Enabling a plugin bricked an agent.
+// Under the managed scheme this is a clean pass.
+func TestVerify_ManagedSurvivesTheKeyReorderPlusEnabledPluginsOutage(t *testing.T) {
+	dir := writeManagedProfile(t, t.TempDir(), testVersion,
+		map[string]string{"CLAUDE.md": "house rules\n"},
+		"settings.json",
+		`{"permissions":{"defaultMode":"auto"},"disableRemoteControl":true}`,
+		`{"disableRemoteControl":true,"enabledPlugins":{"x@y":true},"permissions":{"defaultMode":"auto"}}`)
+	if err := Verify(dir, testVersion); err != nil {
+		t.Fatalf("Verify = %v, want nil: the harness reordering keys and adding a runtime key must not brick the agent", err)
+	}
+}
+
+func TestVerify_ManagedDriftWhenAProvisionedKeyChanges(t *testing.T) {
+	dir := writeManagedProfile(t, t.TempDir(), testVersion, nil, "settings.json",
+		`{"permissions":{"defaultMode":"auto"}}`,
+		`{"permissions":{"defaultMode":"plan"}}`)
+	err := Verify(dir, testVersion)
+	if !errors.Is(err, ErrManagedContentDrift) {
+		t.Fatalf("Verify = %v, want ErrManagedContentDrift", err)
+	}
+	if !strings.Contains(err.Error(), "permissions.defaultMode") {
+		t.Fatalf("error does not name the diverging path: %v", err)
+	}
+}
+
+func TestVerify_ManagedDriftWhenAProvisionedKeyIsRemoved(t *testing.T) {
+	dir := writeManagedProfile(t, t.TempDir(), testVersion, nil, "settings.json",
+		`{"disableRemoteControl":true}`,
+		`{"enabledPlugins":{}}`)
+	if err := Verify(dir, testVersion); !errors.Is(err, ErrManagedContentDrift) {
+		t.Fatalf("Verify = %v, want ErrManagedContentDrift", err)
+	}
+}
+
+// A hand-edited manifest naming a managed file with no .provisioned/ baseline
+// is a provisioning fault, not drift, and must never silently pass.
+func TestVerify_ManagedWithNoBaselineIsUnreadable(t *testing.T) {
+	dir := writeProfile(t, t.TempDir(), "claude", testVersion, map[string]string{
+		"settings.json": `{"model":"opus"}`,
+	})
+	m, err := LoadManifest(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Managed = []string{"settings.json"}
+	raw, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ManifestName), raw, 0o644); err != nil { //nolint:gosec // G306: matches the provisioner's mode
+		t.Fatal(err)
+	}
+	if err := Verify(dir, testVersion); !errors.Is(err, ErrManifestUnreadable) {
+		t.Fatalf("Verify = %v, want ErrManifestUnreadable", err)
+	}
+}
+
+// Edge 16: content faults outrank version faults. A profile with BOTH managed
+// drift and a same-major version drift must report the content fault, so the
+// soft-failing version drift can never mask a real content change.
+func TestVerify_ManagedDriftBeatsVersionDrift(t *testing.T) {
+	dir := writeManagedProfile(t, t.TempDir(), "2.1.234 (Claude Code)", nil, "settings.json",
+		`{"permissions":{"defaultMode":"auto"}}`,
+		`{"permissions":{"defaultMode":"plan"}}`)
+	err := Verify(dir, "2.1.251 (Claude Code)")
+	if !errors.Is(err, ErrManagedContentDrift) {
+		t.Fatalf("Verify = %v, want ErrManagedContentDrift to outrank ErrVersionDrift", err)
+	}
+	if errors.Is(err, ErrVersionDrift) {
+		t.Fatalf("Verify reported version drift, hiding the content fault: %v", err)
+	}
+}
+
+// Bless must never launder unverified content. It already refused on a
+// fingerprint mismatch; managed drift is the same property under the semantic
+// scheme.
+func TestBless_RefusesOnManagedDrift(t *testing.T) {
+	dir := writeManagedProfile(t, t.TempDir(), "2.1.234 (Claude Code)", nil, "settings.json",
+		`{"permissions":{"defaultMode":"auto"}}`,
+		`{"permissions":{"defaultMode":"plan"}}`)
+	before := readFile(t, filepath.Join(dir, ManifestName))
+	if err := Bless(dir, "2.1.251 (Claude Code)"); !errors.Is(err, ErrManagedContentDrift) {
+		t.Fatalf("Bless = %v, want ErrManagedContentDrift", err)
+	}
+	if after := readFile(t, filepath.Join(dir, ManifestName)); string(after) != string(before) {
+		t.Fatal("Bless rewrote the manifest despite refusing")
+	}
+}
+
+// The other half: a managed profile whose live file merely gained a runtime key
+// still blesses, because it verifies.
+func TestBless_SucceedsWhenManagedContentOnlyGainedKeys(t *testing.T) {
+	dir := writeManagedProfile(t, t.TempDir(), "2.1.234 (Claude Code)", nil, "settings.json",
+		`{"permissions":{"defaultMode":"auto"}}`,
+		`{"enabledPlugins":{"x@y":true},"permissions":{"defaultMode":"auto"}}`)
+	if err := Bless(dir, "2.1.251 (Claude Code)"); err != nil {
+		t.Fatalf("Bless = %v, want nil", err)
+	}
+	if err := Verify(dir, "2.1.251 (Claude Code)"); err != nil {
+		t.Fatalf("Verify after Bless = %v, want nil", err)
+	}
+}
+
+// marshalManifest reproduces the provisioner's json.dump(..., indent=1)
+// byte-for-byte, and that has to keep holding now that `managed` sits between
+// `files` and `fingerprint`.
+func TestMarshalManifest_ManagedFieldOrderMatchesTheProvisioner(t *testing.T) {
+	raw, err := marshalManifest(Manifest{
+		Files:          []string{".provisioned/settings.json", "CLAUDE.md"},
+		Managed:        []string{"settings.json"},
+		Fingerprint:    "abc",
+		HarnessVersion: testVersion,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "{\n \"files\": [\n  \".provisioned/settings.json\",\n  \"CLAUDE.md\"\n ],\n \"managed\": [\n  \"settings.json\"\n ],\n \"fingerprint\": \"abc\",\n \"harness_version\": \"" + testVersion + "\"\n}"
+	if string(raw) != want {
+		t.Fatalf("marshalManifest =\n%s\nwant\n%s", raw, want)
+	}
+}
+
+// A manifest with no managed key must not grow one when re-marshaled, or every
+// existing profile would diff against a fresh provision after one Bless.
+func TestMarshalManifest_OmitsManagedWhenAbsent(t *testing.T) {
+	raw, err := marshalManifest(Manifest{
+		Files:          []string{"CLAUDE.md"},
+		Fingerprint:    "abc",
+		HarnessVersion: testVersion,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "managed") {
+		t.Fatalf("marshalManifest emitted a managed key for a manifest that has none:\n%s", raw)
+	}
+}

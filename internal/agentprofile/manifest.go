@@ -19,6 +19,7 @@ import (
 // operator's provision-profile script:
 //
 //	{"files": [...sorted relative paths...],
+//	 "managed": [...sorted relative paths...],
 //	 "fingerprint": "<sha256 hex>",
 //	 "harness_version": "<claude|codex --version, first line trimmed>"}
 //
@@ -26,6 +27,17 @@ import (
 // (relative path + NUL + file bytes). The list is an ALLOWLIST: files not
 // named in it are ignored entirely, because the harness owns them and mutates
 // them at runtime by design (.credentials.json, .claude.json, sessions/).
+//
+// The two lists are two different allowlists over two different schemes:
+//
+//   - `files` is the BYTE allowlist. Every entry is hashed into `fingerprint`,
+//     so every entry must be content nothing but the provisioner ever writes.
+//   - `managed` is the SEMANTIC allowlist: provisioned content the harness
+//     legitimately rewrites (settings.json). Nothing in it is byte-hashed. Its
+//     pristine baseline lives at .provisioned/<rel>, which IS in `files`, and
+//     the live file is verified against that baseline as a subset — see
+//     managed.go. `managed` is optional; a manifest without it verifies
+//     exactly as it always did.
 //
 // The manifest lives here rather than in the supervisor because three callers
 // now read it — spawn, `loom doctor` (no daemon) and `loom lead` (not
@@ -48,7 +60,10 @@ var harnessOrder = []string{"claude", "codex"}
 // Manifest is the parsed .manifest.json. Field order is the provisioner's dict
 // order, so a re-marshaled manifest diffs clean against a fresh provision.
 type Manifest struct {
-	Files          []string `json:"files"`
+	Files []string `json:"files"`
+	// Managed is positioned after Files because that is the provisioner's dict
+	// order; omitempty keeps a pre-`managed` manifest re-marshaling unchanged.
+	Managed        []string `json:"managed,omitempty"`
 	Fingerprint    string   `json:"fingerprint"`
 	HarnessVersion string   `json:"harness_version"`
 }
@@ -60,6 +75,7 @@ var (
 	ErrManifestMissing     = errors.New("profile manifest missing")
 	ErrManifestUnreadable  = errors.New("profile manifest unreadable")
 	ErrFingerprintMismatch = errors.New("profile fingerprint mismatch")
+	ErrManagedContentDrift = errors.New("profile managed content drift")
 	ErrVersionDrift        = errors.New("profile harness version drift")
 	ErrVersionUnknown      = errors.New("profile harness version unknown")
 )
@@ -125,6 +141,13 @@ func Verify(dir, gotVersion string) error {
 			ErrFingerprintMismatch, dir, shortSum(m.Fingerprint), shortSum(sum))
 	}
 
+	// Content faults outrank version faults, so this precedes the version
+	// comparison: a soft-failed version drift must never mask a real change to
+	// what the agent is actually configured to do.
+	if err := verifyManaged(dir, m.Managed); err != nil {
+		return err
+	}
+
 	binary := binaryFor(dir)
 	if gotVersion == "" {
 		return fmt.Errorf("%w: %s: %s --version produced nothing", ErrVersionUnknown, dir, binary)
@@ -140,9 +163,12 @@ func Verify(dir, gotVersion string) error {
 // re-verifying the fingerprint. It is the supported answer to "the harness
 // auto-updated and the profile content is unchanged".
 //
-// It refuses on a fingerprint mismatch: that is a different fault with a
-// different repair (re-run the operator's provisioner), and blessing it would
-// launder unprovisioned content past the check the manifest exists to make.
+// It refuses on a fingerprint mismatch, and equally on managed content drift:
+// those are different faults with a different repair (re-run the operator's
+// provisioner), and blessing either would launder unprovisioned content past
+// the check the manifest exists to make. Both halves of the verification are
+// re-run here for exactly that reason — "never bless content it has not
+// verified" is a property of Bless, not of the caller.
 // It never creates a manifest that did not exist — provisioning is not this
 // function's job — and it is reachable only from an operator-typed command;
 // nothing in the daemon re-blesses on its own.
@@ -168,6 +194,9 @@ func Bless(dir, gotVersion string) error {
 	if sum != m.Fingerprint {
 		return fmt.Errorf("%w: %s: manifest %s, on disk %s (re-provision the profile)",
 			ErrFingerprintMismatch, dir, shortSum(m.Fingerprint), shortSum(sum))
+	}
+	if err := verifyManaged(dir, m.Managed); err != nil {
+		return err
 	}
 
 	if gotVersion == "" {
