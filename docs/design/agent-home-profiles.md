@@ -26,7 +26,8 @@ A provisioned profile root carries `.manifest.json`:
 
 ```json
 {
-  "files": ["CLAUDE.md", "settings.json"],
+  "files": ["CLAUDE.md", ".provisioned/settings.json"],
+  "managed": ["settings.json"],
   "fingerprint": "<sha256 hex>",
   "harness_version": "2.1.237 (Claude Code)"
 }
@@ -41,13 +42,60 @@ them at runtime by design (`.credentials.json`, `.claude.json`, `sessions/`).
 Hashing the whole directory would make every profile fail verification within
 minutes of first use.
 
-The manifest carries **two independent guarantees**, and they fail for
+### `managed`: provisioned content the harness also writes
+
+`settings.json` is both at once. It is provisioned — it carries `permissions`,
+`defaultMode`, and the `disable*` flags — *and* Claude Code rewrites it at
+runtime. On 2026-08-30 the harness re-serialized `worker`'s copy with a
+different key order plus a new `enabledPlugins` key; the byte hash tripped and
+the agent became permanently unspawnable, with `loom doctor --fix` unable to
+help because `Bless` refuses on a fingerprint mismatch by design. Enabling a
+plugin bricked an agent.
+
+Dropping the file from the manifest would lose all verification of the settings
+that actually govern what the agent may do. Canonicalizing the JSON and ignoring
+a list of harness-owned keys is the same trap one level up: the next runtime key
+the harness invents re-bricks the fleet.
+
+So the provisioner writes each managed file **twice**: the live copy at `<rel>`,
+and a pristine, never-rewritten copy at `.provisioned/<rel>`. The baseline is
+what goes in `files` and gets byte-hashed — nothing but the provisioner ever
+writes under `.provisioned/`, so its hash is stable forever. The live file is
+listed in `managed` and is not hashed at all. Verification instead asserts
+**baseline ⊆ live**: every key the baseline declares is present in the live file
+and deep-equal, recursing through objects, exact for scalars and for arrays
+(order significant). Extra keys in the live file are the harness's business.
+
+| live-file change | byte hash | subset check |
+|---|---|---|
+| keys reordered by re-serialization | fail | pass |
+| harness adds `enabledPlugins`, or any future runtime key | fail | pass |
+| `permissions.defaultMode` changed | fail | **fail** |
+| `disableRemoteControl` deleted | fail | **fail** |
+| element appended to `permissions.allow` | fail | **fail** |
+
+`managed` is optional and backward compatibility is structural: a manifest
+without the key parses to an empty list, the semantic check is a no-op, and
+`settings.json` stays in `files` and stays byte-hashed. Nothing changes for a
+profile until it is re-provisioned.
+
+The manifest carries **three independent guarantees**, and they fail for
 different reasons and are repaired by different people:
 
 | field | guarantee | violated when |
 |---|---|---|
 | `fingerprint` | the profile's *content* is what was provisioned | a file was edited, truncated, or deleted underneath the agent |
+| `managed` | the provisioned *settings* are still in effect | a provisioned key was changed or removed (an **added** key is not a violation) |
 | `harness_version` | this content was *blessed against this harness build* | the harness auto-updated since provisioning |
+
+A managed-content violation refuses the boot, exactly like a fingerprint
+mismatch, and it is checked **before** the version comparison so that a
+soft-failing same-major version drift can never mask a real content change.
+
+> Note on `oauth-token`: the provisioner byte-hashes it even though the rule
+> below says credentials are not in the manifest. That inconsistency is
+> deliberately left alone — removing the entry would invalidate every existing
+> fingerprint and force a fleet-wide re-provision.
 
 ## Why the version pin is exact, and must never become a range
 

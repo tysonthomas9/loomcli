@@ -236,6 +236,11 @@ func faultReason(f profileFault) string {
 		return fmt.Sprintf("cannot verify: %s --version produced nothing", binary)
 	case errors.Is(f.err, agentprofile.ErrFingerprintMismatch):
 		return "fingerprint mismatch: " + fingerprintPair(f.profile.Dir)
+	case errors.Is(f.err, agentprofile.ErrManagedContentDrift):
+		// The error already names the file and the dotted JSON path of the
+		// divergence, which is the whole operator-facing value; restating it
+		// here would only lose the path.
+		return f.err.Error()
 	case errors.Is(f.err, agentprofile.ErrManifestMissing):
 		return "no " + agentprofile.ManifestName + ": profile dir exists but was never provisioned"
 	default:
