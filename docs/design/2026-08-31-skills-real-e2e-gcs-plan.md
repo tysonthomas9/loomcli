@@ -2,6 +2,9 @@
 
 Status: accepted for implementation
 
+Test-suite structure and edge-case accountability are defined in
+[Skills Edge-Case Test Architecture](2026-08-31-skills-edge-case-test-architecture.md).
+
 Stack placement:
 
 - Loom base: PR #533, `test/skills-s3-release-proof`, pinned at
