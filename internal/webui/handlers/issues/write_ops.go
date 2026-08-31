@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/backend/advisoryactor"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -97,16 +98,17 @@ func HandleCloseIssue(svc service.IssueService) http.HandlerFunc {
 			}
 		}
 
+		ctx := operatorActorContext(r, fallbackActor)
 		params := service.CloseIssueParams{
 			IssueID:     issueID,
-			Actor:       operatorActor(r.Context(), fallbackActor),
+			Actor:       advisoryactor.From(ctx),
 			Reason:      req.ResolvedReason(),
 			Session:     req.Session,
 			SuggestNext: req.SuggestNext,
 			Force:       req.Force,
 		}
 
-		data, err := svc.CloseIssue(r.Context(), params)
+		data, err := svc.CloseIssue(ctx, params)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
@@ -191,9 +193,10 @@ func HandleReopenIssue(svc service.IssueService) http.HandlerFunc {
 			}
 		}
 
-		err := svc.ReopenIssue(r.Context(), service.ReopenIssueParams{
+		ctx := operatorActorContext(r, fallbackActor)
+		err := svc.ReopenIssue(ctx, service.ReopenIssueParams{
 			IssueID: issueID,
-			Actor:   operatorActor(r.Context(), fallbackActor),
+			Actor:   advisoryactor.From(ctx),
 			Reason:  req.Reason,
 		})
 		if err != nil {

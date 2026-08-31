@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/backend/advisoryactor"
 	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 	"github.com/tysonthomas9/loomcli/internal/types"
 )
@@ -32,11 +33,20 @@ type FleetBackend struct {
 	client           *http.Client
 	baseWorkspaceURL string // e.g., "http://host/api/v1/ws1"
 	baseWorkspaceV2  string // e.g., "http://host/api/v2/ws1"
+	workspace        string // workspace id, for diagnostics that must name it
+
+	// now is the clock used by the advisory-actor denial cache. Overridden
+	// in tests so TTL behavior is exercised without sleeping.
+	now func() time.Time
 
 	mu        sync.RWMutex
 	authToken string
 	apiKey    string
 	actor     string
+	// deniedActors records, per advisory actor, when the issue store last
+	// said that actor holds no role in this workspace. Guarded by mu and
+	// bounded by eviction on write; see advisory_fallback.go.
+	deniedActors map[string]time.Time
 }
 
 // Compile-time interface check.
@@ -78,6 +88,8 @@ func New(cfg Config) (*FleetBackend, error) {
 		client:           httpClient,
 		baseWorkspaceURL: baseURL + "/api/v1/" + url.PathEscape(cfg.WorkspaceID),
 		baseWorkspaceV2:  baseURL + "/api/v2/" + url.PathEscape(cfg.WorkspaceID),
+		workspace:        cfg.WorkspaceID,
+		now:              time.Now,
 		authToken:        cfg.AuthToken,
 		apiKey:           cfg.APIKey,
 		actor:            cfg.Actor,
@@ -88,7 +100,13 @@ func (b *FleetBackend) doRequestURL(ctx context.Context, method, rawURL string, 
 	b.mu.RLock()
 	auth := fleethttp.Auth{BearerToken: b.authToken, APIKey: b.apiKey, Actor: b.actor}
 	b.mu.RUnlock()
+	return b.sendRequest(ctx, method, rawURL, auth, body)
+}
 
+// sendRequest builds, sends and parses a single request. It is the one place
+// an HTTP round-trip happens, so the advisory-actor retry can re-issue an
+// identical request without duplicating the read/parse handling.
+func (b *FleetBackend) sendRequest(ctx context.Context, method, rawURL string, auth fleethttp.Auth, body interface{}) (*apiResponse, int, error) {
 	req, err := fleethttp.BuildJSONRequest(ctx, method, rawURL, auth, body)
 	if err != nil {
 		return nil, 0, err
@@ -138,35 +156,51 @@ func (b *FleetBackend) doRequest(ctx context.Context, method, path string, body 
 // doRequestAsActor executes an HTTP request with the X-Actor header overridden
 // when actor is non-empty. An empty actor preserves the configured process
 // identity.
+//
+// When the override is *advisory* — the caller stamped the same actor on the
+// context via advisoryactor.With, meaning "attribute this write to them if you
+// can" — a "workspace access denied" rejection is retried exactly once as the
+// process actor. fleet-db decides authorization before the handler runs, so the
+// rejected request changed nothing and the retry is a re-authorization, not an
+// at-least-once hazard. Non-advisory overrides (claim/release, which make the
+// named actor the lock holder) are never retried.
 func (b *FleetBackend) doRequestAsActor(ctx context.Context, method, path string, body interface{}, actor string) (*apiResponse, int, error) {
+	apiResp, statusCode, _, err := b.doRequestAsEffectiveActor(ctx, method, path, body, actor)
+	return apiResp, statusCode, err
+}
+
+// doRequestAsEffectiveActor is doRequestAsActor plus the identity that
+// produced the returned response — the process actor when the advisory attempt
+// fell back, so an error can name both actors instead of blaming only the one
+// the caller asked for.
+func (b *FleetBackend) doRequestAsEffectiveActor(ctx context.Context, method, path string, body interface{}, actor string) (*apiResponse, int, string, error) {
 	b.mu.RLock()
 	auth := fleethttp.Auth{BearerToken: b.authToken, APIKey: b.apiKey, Actor: b.actor}
+	processActor := b.actor
 	b.mu.RUnlock()
 	if actor != "" {
 		auth.Actor = actor
 	}
 
-	req, err := fleethttp.BuildJSONRequest(ctx, method, b.baseWorkspaceURL+path, auth, body)
-	if err != nil {
-		return nil, 0, err
+	// Advisory only when the override is the identity the caller stamped and
+	// it differs from the process actor (equal actors make the retry a
+	// pointless resend).
+	advisory := actor != "" && actor != processActor && actor == advisoryactor.From(ctx)
+	if advisory && b.advisoryActorDenied(actor) {
+		auth.Actor = processActor
+		advisory = false
 	}
 
-	resp, err := b.client.Do(req)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
-	if err != nil {
-		return nil, resp.StatusCode, fmt.Errorf("read response body: %w", err)
+	reqURL := b.baseWorkspaceURL + path
+	apiResp, statusCode, err := b.sendRequest(ctx, method, reqURL, auth, body)
+	if err != nil || !advisory || !isNoRoleDenial(statusCode, apiResp) {
+		return apiResp, statusCode, auth.Actor, err
 	}
 
-	apiResp, err := parseFleetResponse(respBody, resp.StatusCode)
-	if err != nil {
-		return nil, resp.StatusCode, err
-	}
-	return apiResp, resp.StatusCode, nil
+	b.recordAdvisoryDenial(actor, processActor)
+	auth.Actor = processActor
+	apiResp, statusCode, err = b.sendRequest(ctx, method, reqURL, auth, body)
+	return apiResp, statusCode, processActor, err
 }
 
 // parseFleetResponse turns a fleet-db response body into the apiResponse
@@ -249,11 +283,11 @@ func (b *FleetBackend) execAsActor(ctx context.Context, op, method, path string,
 // execResponseAsActor wraps doRequestAsActor with standard error
 // classification and returns the response for mutations that need it.
 func (b *FleetBackend) execResponseAsActor(ctx context.Context, op, method, path string, body interface{}, actor string) (*apiResponse, error) {
-	apiResp, statusCode, err := b.doRequestAsActor(ctx, method, path, body, actor)
+	apiResp, statusCode, effective, err := b.doRequestAsEffectiveActor(ctx, method, path, body, actor)
 	if err != nil {
 		return nil, classifyTransportError(op, err)
 	}
-	if cerr := classifyHTTPError(op, statusCode, *apiResp); cerr != nil {
+	if cerr := b.classifyAs(ctx, op, statusCode, *apiResp, actor, effective); cerr != nil {
 		return nil, cerr
 	}
 	return apiResp, nil
