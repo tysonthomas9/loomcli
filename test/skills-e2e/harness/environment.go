@@ -18,9 +18,21 @@ import (
 )
 
 type Environment struct {
+	t          *testing.T
 	loomBin    string
 	fixtureDir string
 	sources    map[string]string
+}
+
+// SkillFixture is a checked-in source tree staged exactly as a user would
+// present it to `loom skill import`.
+type SkillFixture struct {
+	root string
+}
+
+// FileFixture is a checked-in file passed to a public Loom command.
+type FileFixture struct {
+	path string
 }
 
 type Skill struct {
@@ -71,89 +83,156 @@ func Open(t *testing.T) *Environment {
 	fixtureDir := filepath.Clean(filepath.Join(filepath.Dir(sourceFile), "..", "testdata"))
 
 	return &Environment{
+		t:          t,
 		loomBin:    loomBin,
 		fixtureDir: fixtureDir,
 		sources:    make(map[string]string),
 	}
 }
 
-func (e *Environment) ImportSkill(t *testing.T, fixture string) Skill {
-	t.Helper()
-	source := e.stageFixture(t, fixture)
-	e.run(t, "", "skill", "import", source)
-
-	name := strings.Split(filepath.ToSlash(fixture), "/")[0]
-	skill := e.ShowSkill(t, name)
+// SkillFixture stages a readable fixture recipe as a real Skill directory.
+// Staging is test setup; no product operation occurs until SkillImport runs.
+func (e *Environment) SkillFixture(fixture string) SkillFixture {
+	e.t.Helper()
+	source := e.stageFixture(fixture)
 	e.sources[fixture] = source
-	return skill
+	return SkillFixture{root: source}
 }
 
-func (e *Environment) ShowSkill(t *testing.T, name string) Skill {
-	t.Helper()
-	output := e.run(t, "", "skill", "show", name, "--json")
+// FileFixture returns the path to a checked-in file for a public Loom command.
+func (e *Environment) FileFixture(fixture string) FileFixture {
+	e.t.Helper()
+	path := filepath.Join(e.fixtureDir, filepath.FromSlash(fixture))
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		e.t.Fatalf("file fixture is not a regular file: %s", path)
+	}
+	return FileFixture{path: path}
+}
+
+// SkillImport invokes `loom skill import` and nothing else.
+func (e *Environment) SkillImport(fixture SkillFixture) {
+	e.t.Helper()
+	e.run("", "skill", "import", fixture.root)
+}
+
+// SkillShow invokes `loom skill show --json` and decodes its public response.
+func (e *Environment) SkillShow(name string) Skill {
+	e.t.Helper()
+	output := e.run("", "skill", "show", name, "--json")
 	var skill Skill
 	if err := json.Unmarshal(output, &skill); err != nil {
-		t.Fatalf("decode public Skill %q: %v\n%s", name, err, output)
+		e.t.Fatalf("decode public Skill %q: %v\n%s", name, err, output)
 	}
 	return skill
 }
 
-func (e *Environment) RequireSkill(t *testing.T, actual Skill, manifestPath string) {
-	t.Helper()
+// SkillList invokes `loom skill list --json` and decodes its public response.
+func (e *Environment) SkillList() []Skill {
+	e.t.Helper()
+	output := e.run("", "skill", "list", "--json")
+	var skills []Skill
+	if err := json.Unmarshal(output, &skills); err != nil {
+		e.t.Fatalf("decode public Skill list: %v\n%s", err, output)
+	}
+	return skills
+}
+
+// SkillUpdateContent invokes `loom skill update --content` and nothing else.
+func (e *Environment) SkillUpdateContent(name string, content FileFixture) {
+	e.t.Helper()
+	e.run("", "skill", "update", name, "--content", content.path)
+}
+
+// SkillDelete invokes `loom skill delete` and nothing else.
+func (e *Environment) SkillDelete(name string) {
+	e.t.Helper()
+	e.run("", "skill", "delete", name)
+}
+
+func (e *Environment) RequireSkill(actual Skill, manifestPath string) {
+	e.t.Helper()
 	manifestBytes, err := os.ReadFile(filepath.Join(e.fixtureDir, filepath.FromSlash(manifestPath)))
 	if err != nil {
-		t.Fatalf("read expected Skill manifest: %v", err)
+		e.t.Fatalf("read expected Skill manifest: %v", err)
 	}
 	var expected expectedSkill
 	if err := json.Unmarshal(manifestBytes, &expected); err != nil {
-		t.Fatalf("decode expected Skill manifest: %v", err)
+		e.t.Fatalf("decode expected Skill manifest: %v", err)
 	}
 	source, ok := e.sources[expected.SourceFixture]
 	if !ok {
-		t.Fatalf("expected source fixture %q was not imported", expected.SourceFixture)
+		e.t.Fatalf("expected source fixture %q was not staged", expected.SourceFixture)
 	}
 	expected.Skill.Source = "import:" + source
 
 	if !reflect.DeepEqual(actual, expected.Skill) {
-		t.Fatalf("public Skill differs from literal manifest\n%s", jsonDifference(expected.Skill, actual))
+		e.t.Fatalf("public Skill differs from literal manifest\n%s", jsonDifference(expected.Skill, actual))
 	}
 }
 
-func (e *Environment) MaterializeSkills(t *testing.T) Materialization {
-	t.Helper()
-	root := t.TempDir()
-	e.run(t, root, "skill", "materialize")
+// SkillMaterialize invokes `loom skill materialize` in a fresh worktree.
+func (e *Environment) SkillMaterialize() Materialization {
+	e.t.Helper()
+	root := e.t.TempDir()
+	e.run(root, "skill", "materialize")
 	return Materialization{env: e, root: root}
 }
 
-func (m Materialization) RequireExactTree(t *testing.T, fixture, skillName string) {
-	t.Helper()
-	expectedRoot, ok := m.env.sources[fixture]
-	if !ok {
-		t.Fatalf("fixture %q was not imported", fixture)
-	}
+// SkillMaterializeInto invokes `loom skill materialize` again in an existing
+// worktree so scenarios can observe reconciliation and pruning.
+func (e *Environment) SkillMaterializeInto(target Materialization) {
+	e.t.Helper()
+	e.run(target.root, "skill", "materialize")
+}
+
+func (m Materialization) RequireExactTree(fixture SkillFixture, skillName string) {
+	m.env.t.Helper()
+	expectedRoot := fixture.root
 	actualRoot := filepath.Join(m.root, ".agents", "skills", skillName)
 
-	expectedFiles := collectFiles(t, expectedRoot)
-	actualFiles := collectFiles(t, actualRoot)
+	expectedFiles := collectFiles(m.env.t, expectedRoot)
+	actualFiles := collectFiles(m.env.t, actualRoot)
 	if !reflect.DeepEqual(mapKeys(expectedFiles), mapKeys(actualFiles)) {
-		t.Fatalf("materialized paths differ\nexpected: %v\nactual:   %v", mapKeys(expectedFiles), mapKeys(actualFiles))
+		m.env.t.Fatalf("materialized paths differ\nexpected: %v\nactual:   %v", mapKeys(expectedFiles), mapKeys(actualFiles))
 	}
 
 	for path, expected := range expectedFiles {
 		actual := actualFiles[path]
 		if !bytes.Equal(actual.data, expected.data) {
-			t.Fatalf("materialized bytes differ for %s\nexpected sha256: %x\nactual sha256:   %x",
+			m.env.t.Fatalf("materialized bytes differ for %s\nexpected sha256: %x\nactual sha256:   %x",
 				path, sha256.Sum256(expected.data), sha256.Sum256(actual.data))
 		}
 		if actual.mode != expected.mode {
-			t.Fatalf("materialized mode differs for %s: expected %04o, actual %04o", path, expected.mode, actual.mode)
+			m.env.t.Fatalf("materialized mode differs for %s: expected %04o, actual %04o", path, expected.mode, actual.mode)
 		}
 	}
 }
 
-func (e *Environment) run(t *testing.T, dir string, args ...string) []byte {
-	t.Helper()
+func (m Materialization) RequireSkillAbsent(skillName string) {
+	m.env.t.Helper()
+	path := filepath.Join(m.root, ".agents", "skills", skillName)
+	if _, err := os.Lstat(path); !os.IsNotExist(err) {
+		m.env.t.Fatalf("materialized skill %q still exists after deletion: %v", skillName, err)
+	}
+}
+
+func (e *Environment) RequireListedSkill(expected Skill, listed []Skill) {
+	e.t.Helper()
+	for _, actual := range listed {
+		if actual.Name == expected.Name && actual.Scope == expected.Scope {
+			if actual.FileTreeRevision != expected.FileTreeRevision {
+				e.t.Fatalf("listed Skill %q revision = %q, want selected revision %q",
+					expected.Name, actual.FileTreeRevision, expected.FileTreeRevision)
+			}
+			return
+		}
+	}
+	e.t.Fatalf("selected Skill %q was absent from public Skill list", expected.Name)
+}
+
+func (e *Environment) run(dir string, args ...string) []byte {
+	e.t.Helper()
 	command := exec.Command(e.loomBin, args...)
 	command.Env = os.Environ()
 	command.Dir = dir
@@ -163,18 +242,18 @@ func (e *Environment) run(t *testing.T, dir string, args ...string) []byte {
 	command.Stderr = &stderr
 	err := command.Run()
 	if err != nil {
-		t.Fatalf("loom %s failed: %v\nstdout:\n%s\nstderr:\n%s",
+		e.t.Fatalf("loom %s failed: %v\nstdout:\n%s\nstderr:\n%s",
 			strings.Join(args, " "), err, stdout.Bytes(), stderr.Bytes())
 	}
 	return stdout.Bytes()
 }
 
-func (e *Environment) stageFixture(t *testing.T, fixture string) string {
-	t.Helper()
+func (e *Environment) stageFixture(fixture string) string {
+	e.t.Helper()
 	sourceRoot := filepath.Join(e.fixtureDir, filepath.FromSlash(fixture))
-	targetRoot := filepath.Join(t.TempDir(), "skill")
+	targetRoot := filepath.Join(e.t.TempDir(), "skill")
 	if err := os.MkdirAll(targetRoot, 0o755); err != nil {
-		t.Fatalf("create staged fixture: %v", err)
+		e.t.Fatalf("create staged fixture: %v", err)
 	}
 
 	err := filepath.WalkDir(sourceRoot, func(sourcePath string, entry fs.DirEntry, walkErr error) error {
@@ -220,12 +299,12 @@ func (e *Environment) stageFixture(t *testing.T, fixture string) string {
 		return os.Chmod(targetPath, mode)
 	})
 	if err != nil {
-		t.Fatalf("stage fixture %q: %v", fixture, err)
+		e.t.Fatalf("stage fixture %q: %v", fixture, err)
 	}
 
 	canonical, err := filepath.EvalSymlinks(targetRoot)
 	if err != nil {
-		t.Fatalf("canonicalize staged fixture: %v", err)
+		e.t.Fatalf("canonicalize staged fixture: %v", err)
 	}
 	return canonical
 }

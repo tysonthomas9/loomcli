@@ -5,6 +5,22 @@ real Loom/Fleet test environment. Scenarios invoke the public `loom` CLI; they
 do not import product internals or inspect Redis/PostgreSQL as user-journey
 evidence.
 
+Scenario code keeps every public operation visible. The harness stages fixtures,
+runs processes, decodes JSON, and compares results, but it does not combine
+multiple Loom commands into one invented action. A scenario therefore reads in
+the same order as the user journey:
+
+```go
+loom.SkillImport(source)
+selected := loom.SkillShow("example")
+materialized := loom.SkillMaterialize()
+materialized.RequireExactTree(source, "example")
+```
+
+The suite currently covers the exact update round trip plus five independent
+behaviors: stable identical reimport, content-only update, stale-file pruning,
+whole-skill deletion, and agreement between public list and show results.
+
 The surrounding compatibility workflow provisions the real persistence and
 object-store processes. It then supplies `SKILLS_E2E_LOOM_BIN` and runs:
 
@@ -29,5 +45,6 @@ the actual product receives the intended paths, modes, and bytes.
 Skill representation and opaque tree revision. Exact materialized bytes and
 modes are compared with the staged updated fixture.
 
-`edge-cases.yaml` maps stable review IDs to behavioral tests. It is a coverage
-registry, not an executable scenario language.
+`edge-cases.yaml` maps stable review IDs to stable semantic scenario IDs and
+top-level behavioral tests. It is a coverage registry, not an executable
+scenario language or a copy of Go test-runner display names.

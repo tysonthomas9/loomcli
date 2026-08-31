@@ -139,22 +139,28 @@ log capture, evidence formatting, and cleanup.
 Illustrative interface:
 
 ```go
-env := e2e.Open(t)
+loom := harness.Open(t)
+initialSource := loom.SkillFixture("exact-round-trip/initial")
+updatedSource := loom.SkillFixture("exact-round-trip/updated")
 
-initial := env.ImportSkill(t, "exact-round-trip/initial")
-updated := env.ImportSkill(t, "exact-round-trip/updated")
-shown := env.ShowSkill(t, "exact-round-trip")
-installed := env.MaterializeSkills(t)
+loom.SkillImport(initialSource)
+initial := loom.SkillShow("exact-round-trip")
 
-env.RequireSkill(t, shown, "exact-round-trip/expected.json")
-installed.RequireExactTree(t, "exact-round-trip", "exact-round-trip/expected.json")
+loom.SkillImport(updatedSource)
+selected := loom.SkillShow("exact-round-trip")
 
-env.Faults().FailProjectionOnce(t)
-env.RestartFleet(t)
+materialized := loom.SkillMaterialize()
+materialized.RequireExactTree(updatedSource, "exact-round-trip")
 ```
 
 The interface must not grow one method per edge case. Scenarios compose a small
 set of product actions, failure controls, and behavioral assertions.
+
+Each scenario-facing product action maps to exactly one public command. The
+harness must not combine `skill import` with an implicit `skill show`, or hide a
+sequence of public operations behind a scenario-specific verb. Fixture staging
+and result comparison remain behind the harness because they are test mechanics,
+not product actions.
 
 The harness invokes the real `loom` binary and Fleet HTTP interface. It does not
 import internal Loom/Fleet packages to perform product operations, query Redis
@@ -162,11 +168,15 @@ or PostgreSQL as journey evidence, or hand-create events.
 
 ## Human-readable scenarios
 
-Each behavior receives a separate named test or subtest:
+Each behavior receives a separate top-level named test:
 
 ```text
-TestSkillLifecycle/updates_the_selected_revision
-TestSkillLifecycle/materializes_exact_bytes_and_modes
+TestSkillUpdateSelectsAndMaterializesExactRevision
+TestIdenticalSkillReimportKeepsContentRevision
+TestSkillContentUpdatePreservesBundledFiles
+TestSkillRematerializationRemovesStaleFiles
+TestSkillDeletionPrunesExistingMaterialization
+TestSkillListReportsSelectedRevision
 TestPublication/concurrent_publishers_receive_one_creation
 TestPublication/lost_response_retry_returns_original_result
 TestProjection/pending_publication_waits_until_readable
@@ -181,14 +191,14 @@ coverage registry maps stable IDs to these names.
 Successful output is concise:
 
 ```text
-PASS TestSkillLifecycle/updates_the_selected_revision
-PASS TestSkillLifecycle/materializes_exact_bytes_and_modes
+PASS TestSkillUpdateSelectsAndMaterializesExactRevision
+PASS TestSkillRematerializationRemovesStaleFiles
 ```
 
 Failures lead with the observable difference and point to retained evidence:
 
 ```text
-FAIL TestSkillLifecycle/materializes_exact_bytes_and_modes
+FAIL TestSkillUpdateSelectsAndMaterializesExactRevision
 
 scripts/run.sh:
   expected mode: 0755
@@ -224,6 +234,7 @@ entry contains:
 ```yaml
 - id: 50
   behavior: concurrent publication creates one logical tree
+  scenario: concurrent-tree-publication
   owner: fleet
   seam: fleet-publication
   test: TestTreeCreation/concurrent_identical_publish
@@ -244,7 +255,7 @@ Allowed statuses are:
 CI validates:
 
 - every stable edge-case ID appears exactly once;
-- every entry has an owner, seam, status, and rationale;
+- every entry has a stable scenario ID, owner, seam, status, and rationale;
 - every `covered` test name exists;
 - backend/provider values come from the canonical dimension vocabulary;
 - `not_applicable` and `blocked` entries contain nonempty reasons; and
