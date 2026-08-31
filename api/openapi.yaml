@@ -5548,6 +5548,12 @@ components:
           type: string
         external_ref:
           type: string
+        source_repo:
+          type: string
+          description: >-
+            Source repository ID. Required by workspaces configured with
+            repo-required issue creation; an issue without it can never be
+            claimed by a repo-scoped agent.
         estimated_minutes:
           type: [integer, "null"]
         labels:

@@ -1717,8 +1717,11 @@ type CreateIssueRequest struct {
 	Owner              *string                     `json:"owner,omitempty"`
 	Parent             *string                     `json:"parent,omitempty"`
 	Priority           int                         `json:"priority"`
-	Status             *CreateIssueRequestStatus   `json:"status,omitempty"`
-	Title              string                      `json:"title"`
+
+	// SourceRepo Source repository ID. Required by workspaces configured with repo-required issue creation; an issue without it can never be claimed by a repo-scoped agent.
+	SourceRepo *string                   `json:"source_repo,omitempty"`
+	Status     *CreateIssueRequestStatus `json:"status,omitempty"`
+	Title      string                    `json:"title"`
 }
 
 // CreateIssueRequestIssueType defines model for CreateIssueRequest.IssueType.
