@@ -92,6 +92,9 @@ func ReadStateFile(path string) (*DaemonState, error) {
 }
 
 // writeStateFile writes the daemon-agents.json state file.
+// degradations are the supervisor's active degradation episodes; they ride in
+// the file so every out-of-band reader learns the daemon is impaired without
+// having to reach the daemon itself.
 //
 // unavailable holds the agents the daemon could not construct. They are
 // appended as ordinary rows because this file is the whole fleet as the CLI and
@@ -100,11 +103,13 @@ func ReadStateFile(path string) (*DaemonState, error) {
 //
 // hold is variadic to carry 0 or 1 claim-hold snapshots without disturbing the
 // existing positional signature (and its call sites).
-func writeStateFile(path string, startedAt time.Time, agents []supervisor.SupervisedAgentStatus, unavailable []UnavailableAgent, quarantined []supervisor.QuarantinedTaskInfo, maxRetries int, hold ...*supervisor.ClaimHold) error {
+func writeStateFile(path string, startedAt time.Time, agents []supervisor.SupervisedAgentStatus, unavailable []UnavailableAgent, quarantined []supervisor.QuarantinedTaskInfo, degradations []supervisor.Degradation, maxRetries int, hold ...*supervisor.ClaimHold) error {
 	state := DaemonState{
 		PID:              os.Getpid(),
 		StartedAt:        startedAt,
 		Agents:           make([]DaemonAgentStatus, len(agents), len(agents)+len(unavailable)),
+		WrittenAt:        time.Now(),
+		Degradations:     degradations,
 		QuarantinedTasks: quarantined,
 	}
 	if len(hold) > 0 {
