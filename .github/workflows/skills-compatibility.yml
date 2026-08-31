@@ -163,6 +163,10 @@ jobs:
           loom_sha="$(git -C loomcli rev-parse HEAD)"
           fleetdb_sha="$(git -C fleet-db rev-parse HEAD)"
           corpus_sha="$(git -C vercel-agent-skills rev-parse HEAD)"
+          object_provider=local
+          if [[ "$STORAGE_MODE" == "s3" ]]; then
+            object_provider=minio
+          fi
           if [[ "$loom_sha" != "$EXPECTED_LOOM_SHA" ||
             "$fleetdb_sha" != "$EXPECTED_FLEETDB_SHA" ||
             "$corpus_sha" != "$EXPECTED_CORPUS_SHA" ]]; then
@@ -176,6 +180,9 @@ jobs:
             echo "fleetdb_sha=$fleetdb_sha"
             echo "vercel_skills_sha=$corpus_sha"
             echo "storage_mode=$STORAGE_MODE"
+            echo "persistence_backend=redis"
+            echo "object_provider=$object_provider"
+            echo "real_processes=loom-cli,fleet-db,redis,projector,http,$object_provider"
           } | tee skills-compatibility-revisions.txt
           {
             echo '### Skills compatibility revision pair'
@@ -186,6 +193,8 @@ jobs:
             echo "| FleetDB | \`$REQUESTED_FLEETDB_REF\` | \`$fleetdb_sha\` |"
             echo "| Vercel Agent Skills | pinned | \`$corpus_sha\` |"
             echo "| Workspace-file storage | matrix | \`$STORAGE_MODE\` |"
+            echo "| Persistence backend | real service | \`redis\` |"
+            echo "| Object provider | real service | \`$object_provider\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Set up Go
@@ -207,6 +216,8 @@ jobs:
           # coverage and would make this storage/compatibility proof timing
           # dependent rather than test either adapter.
           echo "FLEET_RATE_LIMIT_ENABLED=false" >> "$GITHUB_ENV"
+          echo "REDIS_CONTAINER=loom-skills-redis-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$STORAGE_MODE" >> "$GITHUB_ENV"
+          echo "LOOM_E2E_REDIS_ADDR=127.0.0.1:6379" >> "$GITHUB_ENV"
 
           if [[ "$STORAGE_MODE" == "local" ]]; then
             local_dir="$RUNNER_TEMP/skills-workspace-files-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
@@ -229,6 +240,29 @@ jobs:
           echo "FLEET_WORKSPACE_FILE_S3_PATH_STYLE=true" >> "$GITHUB_ENV"
           echo "FLEET_WORKSPACE_FILE_S3_ACCESS_KEY_ID=loom-skills" >> "$GITHUB_ENV"
           echo "FLEET_WORKSPACE_FILE_S3_SECRET_ACCESS_KEY=$minio_password" >> "$GITHUB_ENV"
+
+      - name: Start isolated real Redis persistence
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --detach \
+            --name "$REDIS_CONTAINER" \
+            --publish 127.0.0.1:6379:6379 \
+            redis:7.4.2-alpine@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952 \
+            redis-server --save '' --appendonly no
+
+          ready=false
+          for _ in $(seq 1 30); do
+            if [[ "$(docker exec "$REDIS_CONTAINER" redis-cli ping 2>/dev/null || true)" == "PONG" ]]; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$ready" != "true" ]]; then
+            docker logs "$REDIS_CONTAINER" >&2
+            exit 1
+          fi
 
       - name: Start isolated MinIO storage
         if: matrix.storage == 's3'
@@ -315,6 +349,32 @@ jobs:
             docker network rm "$MINIO_NETWORK"
           fi
 
+      - name: Capture and stop Redis
+        if: always()
+        shell: bash
+        env:
+          STORAGE_MODE: ${{ matrix.storage }}
+        run: |
+          set -u
+          diagnostics="skills-compatibility-$STORAGE_MODE-redis-diagnostics.txt"
+          {
+            echo "storage_mode=$STORAGE_MODE"
+            echo "redis_backend=real-container"
+            echo "redis_image=redis:7.4.2-alpine@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952"
+            echo
+            echo "### Redis server log"
+            if [[ -n "${REDIS_CONTAINER:-}" ]] && docker inspect "$REDIS_CONTAINER" >/dev/null 2>&1; then
+              docker logs "$REDIS_CONTAINER" 2>&1
+            else
+              echo "Redis container was not created"
+            fi
+          } > "$diagnostics"
+
+          if [[ -n "${REDIS_CONTAINER:-}" ]] && docker inspect "$REDIS_CONTAINER" >/dev/null 2>&1; then
+            docker stop "$REDIS_CONTAINER"
+            docker rm "$REDIS_CONTAINER"
+          fi
+
       - name: Upload revision evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -324,5 +384,6 @@ jobs:
             skills-compatibility-revisions.txt
             skills-compatibility-${{ matrix.storage }}.log
             skills-compatibility-${{ matrix.storage }}-diagnostics.txt
+            skills-compatibility-${{ matrix.storage }}-redis-diagnostics.txt
           if-no-files-found: error
           retention-days: 90

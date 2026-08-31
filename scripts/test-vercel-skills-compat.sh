@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FLEET_DB_REPO="${FLEET_DB_REPO:?set FLEET_DB_REPO to a fleet-db checkout}"
 VERCEL_SKILLS_REPO="${VERCEL_SKILLS_REPO:?set VERCEL_SKILLS_REPO to the pinned vercel-labs/agent-skills checkout}"
 VERCEL_SKILLS_REF="${VERCEL_SKILLS_REF:-dd089a8c752c966dee8bf0f27cb625ba193ffd9e}"
+LOOM_E2E_REDIS_ADDR="${LOOM_E2E_REDIS_ADDR:?set LOOM_E2E_REDIS_ADDR to the run-owned real Redis address}"
 
 if [[ ! -d "$FLEET_DB_REPO/cmd/fleet-db" ]]; then
   echo "fleet-db checkout not found at $FLEET_DB_REPO" >&2
@@ -24,6 +25,7 @@ fi
 loom_sha="$(git -C "$ROOT" rev-parse HEAD)"
 fleet_db_sha="$(git -C "$FLEET_DB_REPO" rev-parse HEAD)"
 echo "Compatibility revisions: loomcli=$loom_sha fleetdb=$fleet_db_sha vercel_skills=$actual_vercel_ref"
+echo "Real-service topology: loom-cli fleet-db redis projector http object-store=${FLEET_WORKSPACE_FILE_STORE:-local}"
 
 tmp="$(mktemp -d -t loom-vercel-skills-compat.XXXXXX)"
 cleanup() {
@@ -46,12 +48,160 @@ export LOOM_LOG_FORMAT="text"
 export LOOM_WORKSPACE="SKILLSRELEASE"
 export FLEET_DB_BIN="$fleet_db_bin"
 mkdir -p "$HOME" "$LOOM_CONFIG_DIR"
+printf '{"version":1,"fleetdb_redis":{"enabled":true,"addr":"%s"},"agent_runtime":{"default":"local"}}\n' \
+  "$LOOM_E2E_REDIS_ADDR" >"$LOOM_CONFIG_DIR/local-settings.json"
 
 workspace_log="$tmp/workspace-add.log"
 if ! "$loom_bin" workspace add "$LOOM_WORKSPACE" --description "release compatibility corpus" >"$workspace_log" 2>&1; then
   cat "$workspace_log" >&2
   exit 1
 fi
+
+file_mode() {
+  if stat -c '%a' "$1" >/dev/null 2>&1; then
+    stat -c '%a' "$1"
+  else
+    stat -f '%Lp' "$1"
+  fi
+}
+
+run_exact_skill_lifecycle() {
+  source_dir="$tmp/exact-round-trip-source"
+  expected_dir="$tmp/exact-round-trip-expected"
+  mkdir -p "$source_dir/docs" "$source_dir/assets" "$source_dir/scripts" "$expected_dir/docs" "$expected_dir/assets" "$expected_dir/scripts"
+  source_dir="$(cd "$source_dir" && pwd -P)"
+  expected_dir="$(cd "$expected_dir" && pwd -P)"
+
+  cat >"$source_dir/SKILL.md" <<'EOF'
+---
+name: exact-round-trip
+description: Initial real-service revision
+---
+# Exact round trip
+
+initial body
+EOF
+  printf 'initial nested text\n' >"$source_dir/docs/nested.txt"
+  printf '\000\001\177\200\377\012\101' >"$source_dir/assets/payload.bin"
+  printf '#!/bin/sh\nprintf '\''initial e2e\\n'\''\n' >"$source_dir/scripts/run.sh"
+  : >"$source_dir/empty.dat"
+  chmod 0755 "$source_dir/scripts/run.sh"
+
+  initial_log="$tmp/exact-round-trip-initial-import.log"
+  "$loom_bin" skill import "$source_dir" >"$initial_log" 2>&1 || {
+    cat "$initial_log" >&2
+    exit 1
+  }
+  initial_show="$tmp/exact-round-trip-initial.json"
+  "$loom_bin" skill show exact-round-trip --json >"$initial_show"
+  initial_revision="$(jq -er '.file_tree_revision' "$initial_show")"
+
+  # Update the same Skill through loom skill import. Loom reads the current
+  # pointer and sends it as expected_file_tree_revision on Fleet's public CAS
+  # update route; this is the selected revision materialized below.
+  cat >"$source_dir/SKILL.md" <<'EOF'
+---
+name: exact-round-trip
+description: Exact real-service round trip
+---
+# Exact round trip
+
+selected body
+EOF
+  printf 'nested text\nline two\n' >"$source_dir/docs/nested.txt"
+  printf '\000\001\177\200\377\012\101' >"$source_dir/assets/payload.bin"
+  printf '#!/bin/sh\nprintf '\''real e2e\\n'\''\n' >"$source_dir/scripts/run.sh"
+  : >"$source_dir/empty.dat"
+  chmod 0755 "$source_dir/scripts/run.sh"
+
+  # Construct the oracle independently from the imported directory. These
+  # literals, including the opaque revision, are intentionally not derived by
+  # calling Loom/Fleet hashing or manifest code at test time.
+  cat >"$expected_dir/SKILL.md" <<'EOF'
+---
+name: exact-round-trip
+description: Exact real-service round trip
+---
+# Exact round trip
+
+selected body
+EOF
+  printf 'nested text\nline two\n' >"$expected_dir/docs/nested.txt"
+  printf '\000\001\177\200\377\012\101' >"$expected_dir/assets/payload.bin"
+  printf '#!/bin/sh\nprintf '\''real e2e\\n'\''\n' >"$expected_dir/scripts/run.sh"
+  : >"$expected_dir/empty.dat"
+  chmod 0755 "$expected_dir/scripts/run.sh"
+
+  selected_log="$tmp/exact-round-trip-selected-import.log"
+  "$loom_bin" skill import "$source_dir" >"$selected_log" 2>&1 || {
+    cat "$selected_log" >&2
+    exit 1
+  }
+  selected_show="$tmp/exact-round-trip-selected.json"
+  "$loom_bin" skill show exact-round-trip --json >"$selected_show"
+  selected_revision="$(jq -er '.file_tree_revision' "$selected_show")"
+  expected_revision="wft1_igfqkQVa_aBOjSr27_UUdKDCWweouc67JnMLCbk_e0k"
+
+  if [[ "$initial_revision" == "$selected_revision" ]]; then
+    echo "Skill CAS did not select a new file-tree revision" >&2
+    exit 1
+  fi
+  if [[ "$selected_revision" != "$expected_revision" ]]; then
+    echo "selected revision=$selected_revision want independent literal=$expected_revision" >&2
+    exit 1
+  fi
+
+  expected_source="import:$source_dir"
+  if ! jq -e --arg revision "$expected_revision" --arg source "$expected_source" '
+    .workspace_key == "SKILLSRELEASE" and
+    .name == "exact-round-trip" and
+    .scope == "workspace" and
+    .description == "Exact real-service round trip" and
+    .file_tree_revision == $revision and
+    .created_by == "vercel-skills-compat" and
+    .updated_by == "vercel-skills-compat" and
+    .source == $source and
+    .content == "# Exact round trip\n\nselected body\n" and
+    .files == [
+      {"path":"assets/payload.bin","media_type":"application/octet-stream","executable":false,"size_bytes":7},
+      {"path":"docs/nested.txt","media_type":"text/plain","executable":false,"size_bytes":21},
+      {"path":"empty.dat","media_type":"text/plain; charset=utf-8","executable":false,"size_bytes":0},
+      {"path":"scripts/run.sh","media_type":"text/x-shellscript","executable":true,"size_bytes":30}
+    ]
+  ' "$selected_show" >/dev/null; then
+    echo "selected Skill metadata did not match the independent literal oracle" >&2
+    jq . "$selected_show" >&2
+    exit 1
+  fi
+
+  exact_materialized="$tmp/exact-round-trip-materialized"
+  mkdir -p "$exact_materialized"
+  (cd "$exact_materialized" && "$loom_bin" skill materialize) >"$tmp/exact-round-trip-materialize.log" 2>&1
+  target_dir="$exact_materialized/.agents/skills/exact-round-trip"
+  actual_paths="$(cd "$target_dir" && find . -type f -print | sed 's#^./##' | LC_ALL=C sort)"
+  expected_paths=$'SKILL.md\nassets/payload.bin\ndocs/nested.txt\nempty.dat\nscripts/run.sh'
+  if [[ "$actual_paths" != "$expected_paths" ]]; then
+    echo "materialized paths differ" >&2
+    printf 'actual:\n%s\nexpected:\n%s\n' "$actual_paths" "$expected_paths" >&2
+    exit 1
+  fi
+  for relative in SKILL.md assets/payload.bin docs/nested.txt empty.dat scripts/run.sh; do
+    if ! cmp -s "$expected_dir/$relative" "$target_dir/$relative"; then
+      echo "materialized literal bytes differ: $relative" >&2
+      exit 1
+    fi
+  done
+  for relative in SKILL.md assets/payload.bin docs/nested.txt empty.dat; do
+    mode="$(file_mode "$target_dir/$relative")"
+    [[ "$mode" == "644" ]] || { echo "$relative mode=$mode want=644" >&2; exit 1; }
+  done
+  mode="$(file_mode "$target_dir/scripts/run.sh")"
+  [[ "$mode" == "755" ]] || { echo "scripts/run.sh mode=$mode want=755" >&2; exit 1; }
+
+  echo "Exact Skill lifecycle verified: initial_revision=$initial_revision selected_revision=$selected_revision redis=$LOOM_E2E_REDIS_ADDR"
+}
+
+run_exact_skill_lifecycle
 
 import_ok() {
   source_name="$1"
@@ -79,7 +229,7 @@ if ! "$loom_bin" skill list >"$list_log" 2>"$list_stderr"; then
   cat "$list_stderr" >&2
   exit 1
 fi
-persisted_count="$(grep -c 'scope=workspace' "$list_log")"
+persisted_count="$(grep 'scope=workspace' "$list_log" | grep -vc '^exact-round-trip ')"
 if [[ "$persisted_count" != "9" ]]; then
   echo "persisted skill count is $persisted_count, want 9" >&2
   cat "$list_log" >&2
