@@ -87,7 +87,30 @@ func writeLeadHarnessProfile(t *testing.T, runtimeDir, agent, harness, version s
 	if err := os.WriteFile(filepath.Join(dir, supervisor.ProfileManifestName), raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if harness == "claude" {
+		// A provisioned claude profile always carries its own minted token —
+		// one that lacks it now refuses to boot — so the fixture writes one and
+		// the tests about a MISSING token remove it explicitly. It sits outside
+		// the manifest's file list, as the provisioner leaves it, so it does
+		// not enter the fingerprint above.
+		writeLeadProfileToken(t, dir, "sk-ant-oat01-fixture")
+	}
 	return dir
+}
+
+// writeLeadProfileToken writes (or, given "", removes) a profile's oauth-token.
+func writeLeadProfileToken(t *testing.T, dir, token string) {
+	t.Helper()
+	path := filepath.Join(dir, "oauth-token")
+	if token == "" {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		return
+	}
+	if err := os.WriteFile(path, []byte(token), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func sortStrings(s []string) {
@@ -528,22 +551,53 @@ func TestApplyLeadProfile_OutsideConfigRootLeavesTokenAlone(t *testing.T) {
 	}
 }
 
-// Unmigrated profiles are the majority and must be untouched: no token file,
-// no injection, no failure.
-func TestApplyLeadProfile_NoTokenFileLeavesTokenUnset(t *testing.T) {
+// A provisioned lead profile with no minted token has no identity, so lead must
+// refuse rather than start on whatever token the operator's shell held — the
+// same rule the supervisor now applies to every agent it spawns. The repair is
+// BOTH scripts: minting prints a token into profiles/, and only provisioning
+// materializes it into the live root.
+func TestApplyLeadProfile_MissingTokenRefusesAndNamesBothScripts(t *testing.T) {
 	clearProfileEnv(t)
 	clearLeadToken(t)
 	stubClaudeOnPath(t)
 	runtimeDir := t.TempDir()
-	writeLeadProfile(t, runtimeDir, "lead", fakeHarnessVersion, map[string]string{
+	dir := writeLeadProfile(t, runtimeDir, "lead", fakeHarnessVersion, map[string]string{
 		"settings.json": `{"model":"opus"}`,
 	})
+	writeLeadProfileToken(t, dir, "")
 
-	if _, err := applyLeadProfile(runtimeDir, "lead", "claude"); err != nil {
-		t.Fatalf("a profile without a token must proceed, got %v", err)
+	failed, err := applyLeadProfile(runtimeDir, "lead", "claude")
+	if !errors.Is(err, supervisor.ErrProfileTokenMissing) {
+		t.Fatalf("an unminted profile must refuse, got %v", err)
+	}
+	want := "scripts/setup-profile-token.sh lead && scripts/provision-profile.sh lead"
+	if got := leadProfileRepair(err, failed); got != want {
+		t.Errorf("repair = %q, want %q", got, want)
 	}
 	if got := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); got != "" {
-		t.Fatalf("no oauth-token file must inject nothing, got %q", got)
+		t.Errorf("a refused profile must export nothing, got %q", got)
+	}
+}
+
+// The property that makes the unconditional refusal above SAFE, and it is
+// invisible from inside ProfileSecretEnv: an operator who exported a config
+// root of their own never reaches the credential check at all. Without this
+// regression test, tightening the token rule silently locks out every operator
+// running `loom lead` against their own ~/.claude, which has no oauth-token
+// file and never will.
+func TestApplyLeadProfile_InheritedRootOutsideProfilesNeedsNoToken(t *testing.T) {
+	clearProfileEnv(t)
+	clearLeadToken(t)
+	stubClaudeOnPath(t)
+	runtimeDir := t.TempDir()
+	outside := t.TempDir() // an operator's own config root: no manifest, no token
+	t.Setenv("CLAUDE_CONFIG_DIR", outside)
+
+	if _, err := applyLeadProfile(runtimeDir, "lead", "claude"); err != nil {
+		t.Fatalf("an operator's own config root must proceed without a token, got %v", err)
+	}
+	if got := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); got != "" {
+		t.Errorf("nothing may be injected for a root this workspace did not provision, got %q", got)
 	}
 }
 
