@@ -49,9 +49,12 @@ func (s *Supervisor) detectRecovery(ap *AgentProcess) (string, recoveryMode) {
 	}
 	// Incomplete exit-0 recovery clears the lock after saving its checkpoint.
 	// Carry that checkpoint into the next fresh claim before cold recovery can
-	// discard the committed task worktree.
-	if cp, cpErr := config.LoadCheckpoint(cli.ResolveLockDir(ap.WorktreePath)); cpErr == nil && cp != nil && cp.TaskID != "" && (cp.AgentName == "" || cp.AgentName == ap.Entry.Worktree) {
-		return cp.TaskID, recoverCheckpoint
+	// discard the committed task worktree. A daemon restart resets WorktreePath
+	// to the agent's home, so the home copy is checked as well.
+	for _, lockDir := range checkpointLockDirs(ap) {
+		if cp, cpErr := config.LoadCheckpoint(lockDir); cpErr == nil && cp != nil && cp.TaskID != "" && (cp.AgentName == "" || cp.AgentName == ap.Entry.Worktree) {
+			return cp.TaskID, recoverCheckpoint
+		}
 	}
 	return "", recoverCold // no crash remnant / agent still alive / no task to recover
 }
