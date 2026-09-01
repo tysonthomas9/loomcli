@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -282,14 +283,72 @@ func checkFleetDB() CheckResult {
 	if bootstrap.DetectMode() == bootstrap.ModeLocal {
 		return checkEmbeddedFleetDB()
 	}
+	var cfg cfgpkg.FleetDBServerConfig
 	dc, err := cfgpkg.LoadDaemonConfig(cli.GetWorkspaceRuntimeDir())
 	if err != nil {
-		cfg, _ := cfgpkg.ResolveFleetDBConfig(&cfgpkg.DaemonSettings{})
+		cfg, _ = cfgpkg.ResolveFleetDBConfig(&cfgpkg.DaemonSettings{})
+	} else {
+		cfg, _ = cfgpkg.ResolveFleetDBConfig(&dc.Daemon)
+	}
+
+	// ResolveFleetDBConfig reads the INVOKING SHELL's environment, so a bare
+	// shell reports a hard failure against a stack that is perfectly healthy:
+	// the daemon holds the configuration and this shell does not. Fall back to
+	// the daemon's own published snapshot. Precedence is shell -> daemon ->
+	// hard fail; the shell wins when set, even if the daemon disagrees, because
+	// it is the shell's configuration being diagnosed and config_drift reports
+	// the disagreement separately.
+	if cfg.RedisURL != "" || cfg.AutoStart {
 		return reportFleetDBConfig(cfg)
 	}
-	cfg, _ := cfgpkg.ResolveFleetDBConfig(&dc.Daemon)
-	return reportFleetDBConfig(cfg)
+	return reportFleetDBFromDaemon(cfg)
 }
+
+// reportFleetDBFromDaemon is the fallback path taken when this shell carries no
+// fleet-db configuration at all.
+func reportFleetDBFromDaemon(cfg cfgpkg.FleetDBServerConfig) CheckResult {
+	snap, running := loadRunningDaemonSnapshot()
+	if snap == nil {
+		if running {
+			// The daemon is up but published no snapshot (a binary predating
+			// this reporting). We cannot read its configuration and must not
+			// claim the stack is broken.
+			return CheckResult{
+				Name:    "fleetdb",
+				Status:  StatusWarn,
+				Summary: "cannot determine fleet-db configuration from this shell",
+				Detail: "the loom daemon is running but published no env snapshot " +
+					"(binary predates `loom doctor` env reporting); restart the daemon to enable it, " +
+					"or set LOOM_FLEETDB_REDIS_URL in this shell",
+			}
+		}
+		// No shell value, no auto-start, no running daemon: a genuine
+		// misconfiguration, and the existing hard failure is correct.
+		return reportFleetDBConfig(cfg)
+	}
+
+	origin := ""
+	if v := snap.Plain("LOOM_FLEETDB_REDIS_URL"); v != "" {
+		cfg.RedisURL, origin = v, daemonEnvOrigin
+	}
+	if b := snap.Plain("LOOM_FLEETDB_AUTO_START"); b != "" {
+		// An unparseable value means false, exactly as ResolveFleetDBConfig
+		// treats it. Never crash on it.
+		parsed, _ := strconv.ParseBool(b)
+		if parsed {
+			cfg.AutoStart, origin = true, daemonEnvOrigin
+		}
+	}
+	res := reportFleetDBConfigFrom(cfg, origin)
+	if origin == "" && res.Status == StatusFail {
+		res.Detail += "\nchecked: this shell and the running daemon's env snapshot; neither sets LOOM_FLEETDB_REDIS_URL"
+	}
+	return res
+}
+
+// daemonEnvOrigin labels a configuration value that came from the running
+// daemon's snapshot rather than from this shell.
+const daemonEnvOrigin = "the running daemon's environment"
 
 func checkEmbeddedFleetDB() CheckResult {
 	diag := bootstrap.DiagnoseFleetDBBinary()
@@ -309,21 +368,30 @@ func checkEmbeddedFleetDB() CheckResult {
 	}
 }
 
+// reportFleetDBConfig reports a configuration resolved from this shell.
 func reportFleetDBConfig(cfg cfgpkg.FleetDBServerConfig) CheckResult {
+	return reportFleetDBConfigFrom(cfg, "")
+}
+
+// reportFleetDBConfigFrom reports a configuration, naming where it came from.
+// origin is "" for this shell, or a phrase naming another source; when set it
+// is appended to Detail on every branch so the reader can tell which
+// environment the verdict describes.
+func reportFleetDBConfigFrom(cfg cfgpkg.FleetDBServerConfig, origin string) CheckResult {
 	if cfg.AutoStart && cfg.RedisURL == "" {
-		return CheckResult{
+		return withConfigOrigin(CheckResult{
 			Name:    "fleetdb",
 			Status:  StatusPass,
 			Summary: fmt.Sprintf("fleet-db configured (workspace: %s, miniredis auto-start)", cfg.Workspace),
-		}
+		}, origin)
 	}
 	if cfg.RedisURL == "" {
-		return CheckResult{
+		return withConfigOrigin(CheckResult{
 			Name:    "fleetdb",
 			Status:  StatusFail,
 			Summary: "fleet-db enabled but no Redis URL configured and auto-start disabled",
 			Detail:  "Set LOOM_FLEETDB_REDIS_URL or LOOM_FLEETDB_AUTO_START=true",
-		}
+		}, origin)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -334,19 +402,35 @@ func reportFleetDBConfig(cfg cfgpkg.FleetDBServerConfig) CheckResult {
 	defer func() { _ = client.Close() }()
 
 	if err := client.Ping(ctx); err != nil {
-		return CheckResult{
+		return withConfigOrigin(CheckResult{
 			Name:    "fleetdb",
 			Status:  StatusFail,
 			Summary: fmt.Sprintf("fleet-db Redis not reachable at %s", cfg.RedisURL),
 			Detail:  err.Error(),
-		}
+		}, origin)
 	}
 
-	return CheckResult{
+	return withConfigOrigin(CheckResult{
 		Name:    "fleetdb",
 		Status:  StatusPass,
 		Summary: fmt.Sprintf("fleet-db configured (workspace: %s, Redis: %s)", cfg.Workspace, cfg.RedisURL),
+	}, origin)
+}
+
+// withConfigOrigin appends a "source:" line naming where the configuration came
+// from. A shell-resolved configuration (origin "") is left untouched, so the
+// existing reports are unchanged.
+func withConfigOrigin(res CheckResult, origin string) CheckResult {
+	if origin == "" {
+		return res
 	}
+	line := fmt.Sprintf("source: %s (this shell does not set LOOM_FLEETDB_REDIS_URL)", origin)
+	if res.Detail == "" {
+		res.Detail = line
+	} else {
+		res.Detail += "\n" + line
+	}
+	return res
 }
 
 func checkFleet() CheckResult {

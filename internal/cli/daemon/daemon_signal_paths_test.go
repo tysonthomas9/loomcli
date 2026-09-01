@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"os"
 	"path/filepath"
 	"syscall"
 	"testing"
@@ -77,4 +78,43 @@ func TestResolveDaemonPaths_DerivesSiblingsFromPIDFile(t *testing.T) {
 	if paths.logDir == "" || paths.eventsDir == "" || paths.stateFile == "" {
 		t.Errorf("expected all paths populated, got %+v", paths)
 	}
+	// The env snapshot lives beside the PID file so the two live and die together.
+	if got, want := filepath.Dir(paths.envFile), filepath.Dir(paths.stateFile); got != want {
+		t.Errorf("envFile dir = %q, want %q (beside the state/PID file)", got, want)
+	}
+	if got, want := filepath.Base(paths.envFile), cfgpkg.SnapshotFileName; got != want {
+		t.Errorf("envFile base = %q, want %q", got, want)
+	}
+}
+
+// TestInitEnvSnapshot_WritesReadableSnapshot verifies the daemon publishes the
+// configuration it resolved, and that a write failure is survivable: a daemon
+// must not refuse to start because it could not write a diagnostic.
+func TestInitEnvSnapshot_WritesReadableSnapshot(t *testing.T) {
+	t.Setenv("LOOM_WORKSPACE", "PUPPET")
+
+	path := filepath.Join(t.TempDir(), cfgpkg.SnapshotFileName)
+	initEnvSnapshot(path)
+
+	snap, err := cfgpkg.LoadDaemonEnvSnapshot(path)
+	if err != nil {
+		t.Fatalf("LoadDaemonEnvSnapshot: %v", err)
+	}
+	if snap.PID != os.Getpid() {
+		t.Errorf("pid = %d, want %d", snap.PID, os.Getpid())
+	}
+	if snap.Plain("LOOM_WORKSPACE") != "PUPPET" {
+		t.Errorf("expected LOOM_WORKSPACE in the snapshot, got %+v", snap.Env)
+	}
+}
+
+func TestInitEnvSnapshot_UnwritablePathDoesNotExit(t *testing.T) {
+	// A path whose parent is a regular file cannot be created.
+	blocker := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write blocker: %v", err)
+	}
+
+	// The bar is simply that this returns.
+	initEnvSnapshot(filepath.Join(blocker, cfgpkg.SnapshotFileName))
 }
