@@ -17,6 +17,7 @@ var skillUpdateRoundTrip = registry.Scenario{
 		{ID: 2},
 		{ID: 3},
 		{ID: 12},
+		{ID: 15},
 	},
 }
 
@@ -29,12 +30,17 @@ func TestSkillUpdateSelectsAndMaterializesExactRevision(t *testing.T) {
 	loom.SkillImport(initialSource)
 	initial := loom.SkillShow("exact-round-trip")
 
+	cas := loom.TraceNextSkillCAS()
 	loom.SkillImport(updatedSource)
 	selected := loom.SkillShow("exact-round-trip")
 
 	if initial.FileTreeRevision == selected.FileTreeRevision {
 		t.Fatalf("updated Skill retained initial tree revision %q", initial.FileTreeRevision)
 	}
+	if initial.Description == selected.Description {
+		t.Fatalf("updated Skill retained initial description %q", initial.Description)
+	}
+	cas.RequireSingleDescriptionAndPointerCAS(initial.FileTreeRevision, selected.Description, selected.FileTreeRevision)
 	loom.RequireSkill(selected, "exact-round-trip/expected.json")
 
 	materialized := loom.SkillMaterialize()

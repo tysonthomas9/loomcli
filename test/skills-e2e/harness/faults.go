@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,11 +30,97 @@ type CorruptDownload struct {
 	target    *fileDownloadGrant
 }
 
+type SkillCASTrace struct {
+	t                *testing.T
+	mu               sync.Mutex
+	requests         int
+	ifMatch          string
+	description      string
+	fileTreeRevision string
+	malformedRequest error
+}
+
+type skillCASRequest struct {
+	Description      *string `json:"description"`
+	FileTreeRevision *string `json:"file_tree_revision"`
+}
+
 type fileDownloadGrant struct {
 	Method    string              `json:"method"`
 	URL       string              `json:"url"`
 	Headers   map[string][]string `json:"headers"`
 	ExpiresAt time.Time           `json:"expires_at"`
+}
+
+// TraceNextSkillCAS forwards one public Loom command to the real Fleet process
+// while recording the atomic Skill description/tree-pointer PATCH.
+func (e *Environment) TraceNextSkillCAS() *SkillCASTrace {
+	e.t.Helper()
+	upstream, err := url.Parse(requireEnv(e.t, "LOOM_FLEET_DB_URL"))
+	if err != nil {
+		e.t.Fatalf("parse LOOM_FLEET_DB_URL: %v", err)
+	}
+	trace := &SkillCASTrace{t: e.t}
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.Method == http.MethodPatch {
+			trace.record(request)
+		}
+		response, err := forwardRequest(request, upstream)
+		if err != nil {
+			http.Error(w, "Fleet proxy transport failed", http.StatusBadGateway)
+			return
+		}
+		defer response.Body.Close()
+		copyResponseHeaders(w.Header(), response.Header)
+		w.WriteHeader(response.StatusCode)
+		_, _ = io.Copy(w, response.Body)
+	}))
+	e.t.Cleanup(proxy.Close)
+	if e.nextEnv == nil {
+		e.nextEnv = make(map[string]string)
+	}
+	e.nextEnv["LOOM_FLEET_DB_URL"] = proxy.URL
+	return trace
+}
+
+func (t *SkillCASTrace) record(request *http.Request) {
+	body, err := io.ReadAll(request.Body)
+	if err == nil {
+		request.Body = io.NopCloser(bytes.NewReader(body))
+	}
+	var patch skillCASRequest
+	if err == nil {
+		err = json.Unmarshal(body, &patch)
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.requests++
+	t.ifMatch = request.Header.Get("If-Match")
+	t.malformedRequest = err
+	if patch.Description != nil {
+		t.description = *patch.Description
+	}
+	if patch.FileTreeRevision != nil {
+		t.fileTreeRevision = *patch.FileTreeRevision
+	}
+}
+
+func (t *SkillCASTrace) RequireSingleDescriptionAndPointerCAS(expectedPrior, description, revision string) {
+	t.t.Helper()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.malformedRequest != nil {
+		t.t.Fatalf("decode Skill CAS request: %v", t.malformedRequest)
+	}
+	if t.requests != 1 {
+		t.t.Fatalf("Skill CAS requests = %d, want exactly 1", t.requests)
+	}
+	if t.ifMatch != strconv.Quote(expectedPrior) {
+		t.t.Fatalf("Skill CAS If-Match = %q, want %q", t.ifMatch, strconv.Quote(expectedPrior))
+	}
+	if t.description != description || t.fileTreeRevision != revision {
+		t.t.Fatalf("Skill CAS description/tree = %q/%q, want %q/%q", t.description, t.fileTreeRevision, description, revision)
+	}
 }
 
 // DropNextTreePublicationResponse routes the next Loom command through a real
