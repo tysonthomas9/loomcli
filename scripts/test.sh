@@ -7,6 +7,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SKIP_FILE="$REPO_ROOT/.test-skip"
 
+# Scrub the inherited loom runtime environment before anything else runs
+# (PUPPET-332). A fleet agent shell exports LOOM_WORKSPACE_RUNTIME_DIR pointing
+# at the live workspace, and `go test` inheriting it appends real rows to the
+# production session and usage ledgers. The in-process guard in
+# internal/cli.GetWorkspaceRuntimeDir covers the test binary itself; this covers
+# every subprocess a test spawns, which the in-process guard cannot. Re-exec is
+# self-limiting via LOOM_TEST_ENV_CLEAN, and it happens BEFORE the
+# LOOM_CONFIG_DIR setup below because the scrubber unsets that variable too.
+if [[ -z "${LOOM_TEST_ENV_CLEAN:-}" ]]; then
+    export LOOM_TEST_ENV_CLEAN=1
+    exec "$SCRIPT_DIR/with-clean-loom-env.sh" "$SCRIPT_DIR/test.sh" "$@"
+fi
+
 # Isolate tests from the real ~/.loom so state-cache writes never clobber
 # the user's workspace path registry (LOOMDEV-14).
 if [[ -z "${LOOM_CONFIG_DIR:-}" ]]; then

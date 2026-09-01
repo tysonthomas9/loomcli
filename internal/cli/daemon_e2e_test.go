@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
 // setupDaemonTestDir creates a fully isolated test environment with a git repo,
@@ -88,11 +90,11 @@ func startDaemon(t *testing.T, dir string, extraArgs ...string) (*bytes.Buffer, 
 	if err != nil {
 		t.Fatalf("resolving stubs dir: %v", err)
 	}
-	cmd.Env = append(os.Environ(),
+	cmd.Env = testutil.SandboxLoomRuntimeDir(append(os.Environ(),
 		fmt.Sprintf("PATH=%s:%s", stubsDir, os.Getenv("PATH")),
 		"STUB_CLAUDE_DELAY=30",
 		"STUB_CLAUDE_EXIT_CODE=0",
-	)
+	))
 
 	// Create a new process group so we can kill the daemon + children
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -157,11 +159,11 @@ func runLoomDaemon(t *testing.T, dir string, args ...string) (stdout, stderr str
 	if err != nil {
 		t.Fatalf("resolving stubs dir: %v", err)
 	}
-	cmd.Env = append(os.Environ(),
+	cmd.Env = testutil.SandboxLoomRuntimeDir(append(os.Environ(),
 		fmt.Sprintf("PATH=%s:%s", stubsDir, os.Getenv("PATH")),
 		"STUB_CLAUDE_DELAY=30",
 		"STUB_CLAUDE_EXIT_CODE=0",
-	)
+	))
 
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf
