@@ -28,6 +28,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/netutil"
 	"github.com/tysonthomas9/loomcli/internal/store"
+
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
 func TestE2E_GitHubWebhookDispatchesDriverRunWithEphemeralStack(t *testing.T) {
@@ -1134,6 +1136,9 @@ func githubWebhookEnv(overrides map[string]string) []string {
 	}
 	for name, value := range overrides {
 		out = append(out, name+"="+value)
+	}
+	if _, ok := overrides["LOOM_WORKSPACE_RUNTIME_DIR"]; !ok {
+		out = testutil.SandboxLoomRuntimeDir(out)
 	}
 	return out
 }

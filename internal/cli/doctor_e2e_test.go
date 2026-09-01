@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
 // loomBinaryPath returns the path to the loom binary, skipping the test if not found.
@@ -77,7 +79,7 @@ func runLoomDoctor(t *testing.T, dir string, args ...string) (stdout, stderr str
 	filtered = append(filtered, "HOME="+dir)
 	filtered = append(filtered, "LOOM_CONFIG_DIR="+filepath.Join(dir, ".loom-config"))
 	filtered = append(filtered, "GIT_CONFIG_NOSYSTEM=1")
-	cmd.Env = filtered
+	cmd.Env = testutil.SandboxLoomRuntimeDir(filtered)
 
 	var stdoutBuf, stderrBuf strings.Builder
 	cmd.Stdout = &stdoutBuf
@@ -444,7 +446,7 @@ func TestE2E_DoctorFleetProbeUnreachable(t *testing.T) {
 		"LOOM_FLEET_URL=http://fleet-probe-must-not-resolve.invalid:65535",
 		"LOOM_WORKSPACE=TEST",
 	)
-	cmd.Env = filtered
+	cmd.Env = testutil.SandboxLoomRuntimeDir(filtered)
 
 	var stdoutBuf, stderrBuf strings.Builder
 	cmd.Stdout = &stdoutBuf

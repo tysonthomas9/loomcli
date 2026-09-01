@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
 // setupInitTestRepo creates an isolated temp dir with a real git repo.
@@ -47,7 +49,7 @@ func runLoomInit(t *testing.T, dir string, args ...string) (stdout, stderr strin
 		filtered = append(filtered, e)
 	}
 	filtered = append(filtered, "GIT_CONFIG_NOSYSTEM=1")
-	cmd.Env = filtered
+	cmd.Env = testutil.SandboxLoomRuntimeDir(filtered)
 
 	var stdoutBuf, stderrBuf strings.Builder
 	cmd.Stdout = &stdoutBuf
