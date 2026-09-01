@@ -306,6 +306,7 @@ func TestWorkspaceFileStorePendingWaitHonorsCancellationAndDeadline(t *testing.T
 
 func TestWorkspaceFileStoreSupportsAbsoluteProviderGrantsWithoutCredentialLeak(t *testing.T) {
 	t.Parallel()
+	registry.MarkEvidence(t, 38, 39)
 
 	content := []byte{0x50, 0x4b, 0, 0xff}
 	digest := workspaceFileTestDigest(content)
@@ -656,6 +657,7 @@ func TestWorkspaceFileStoreRejectsPublishedWorkspaceMismatch(t *testing.T) {
 
 func TestWorkspaceFileTransfersRejectRedirectsAndNon2xx(t *testing.T) {
 	t.Parallel()
+	registry.MarkEvidence(t, 40)
 	var redirectTargetCalls atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -693,6 +695,7 @@ func TestWorkspaceFileTransfersRejectRedirectsAndNon2xx(t *testing.T) {
 
 func TestWorkspaceFileStoreRejectsUnsafeUploadGrantsBeforeTransfer(t *testing.T) {
 	t.Parallel()
+	registry.MarkEvidence(t, 41, 42, 44)
 	for _, tc := range []struct {
 		name    string
 		method  string
@@ -703,6 +706,7 @@ func TestWorkspaceFileStoreRejectsUnsafeUploadGrantsBeforeTransfer(t *testing.T)
 		{name: "wrong method", method: http.MethodGet, target: "https://objects.example/upload", expires: time.Now().Add(time.Minute), want: "method"},
 		{name: "expired", method: http.MethodPut, target: "https://objects.example/upload", expires: time.Now().Add(-time.Minute), want: "expired"},
 		{name: "insecure remote", method: http.MethodPut, target: "http://objects.example/upload", expires: time.Now().Add(time.Minute), want: "HTTPS"},
+		{name: "malformed URL", method: http.MethodPut, target: "https://objects.example/upload#fragment", expires: time.Now().Add(time.Minute), want: "invalid"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -724,6 +728,16 @@ func TestWorkspaceFileStoreRejectsUnsafeUploadGrantsBeforeTransfer(t *testing.T)
 				t.Fatalf("provider calls = %d, want 0", got)
 			}
 		})
+	}
+	if err := validateWorkspaceFileGrant(&workspaceFileTransferGrantWire{
+		Method: http.MethodPut, URL: "https://objects.example/download", ExpiresAt: time.Now().Add(time.Minute),
+	}, http.MethodGet, time.Now()); err == nil || !strings.Contains(err.Error(), "method") {
+		t.Fatalf("download grant accepted PUT: %v", err)
+	}
+	if err := validateWorkspaceFileGrant(&workspaceFileTransferGrantWire{
+		Method: http.MethodPut, URL: "http://127.0.0.1:9000/upload", ExpiresAt: time.Now().Add(time.Minute),
+	}, http.MethodPut, time.Now()); err != nil {
+		t.Fatalf("explicit loopback HTTP grant rejected: %v", err)
 	}
 }
 
