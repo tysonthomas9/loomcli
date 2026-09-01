@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -303,6 +304,11 @@ func matchesSessionFilter(rec SessionRecord, f Filter) bool {
 		return false
 	}
 	if f.AgentName != "" && rec.AgentName != f.AgentName {
+		return false
+	}
+	// An empty KnownAgents disables the allowlist — it must never mean
+	// "match nothing", which would silently report zero runs.
+	if len(f.KnownAgents) > 0 && !slices.Contains(f.KnownAgents, rec.AgentName) {
 		return false
 	}
 	if f.Backend != "" && rec.Backend != f.Backend {
