@@ -37,7 +37,10 @@ type supervisorMaterializeStore struct {
 
 func (s supervisorMaterializeStore) Skills() store.SkillStore { return s.skills }
 func (s supervisorMaterializeStore) SkillMaterializationLeases() store.SkillMaterializationLeaseStore {
-	return nil
+	if s.Store == nil {
+		return nil
+	}
+	return s.Store.SkillMaterializationLeases()
 }
 
 func supervisorSkillTestStore(t *testing.T, name, description, body string, bundles []domain.SkillFileTreeFile) *memstore.Store {
@@ -114,7 +117,7 @@ func TestSpawnAgentContinuesWhenSkillStoreIsUnavailable(t *testing.T) {
 	outage := &url.Error{Op: "GET", URL: "http://fleet-db/skills", Err: syscall.ECONNREFUSED}
 	s := newTestSupervisorWithConfig(&cfgpkg.DaemonConfig{Backend: "codex"})
 	s.WorkspaceID = "WS"
-	s.ControlStore = supervisorMaterializeStore{skills: supervisorSkillStore{err: outage}}
+	s.ControlStore = supervisorMaterializeStore{Store: memstore.New(), skills: supervisorSkillStore{err: outage}}
 	s.EmitEvent = func(events.Event) {} // spawn success path emits AgentStarted
 	ap := &AgentProcess{
 		Entry:        cfgpkg.AgentEntry{Worktree: "worker-a", Role: "plan", Backend: "codex"},
@@ -236,7 +239,7 @@ func TestSpawnAgentStopsWhenSkillListingIsCanceled(t *testing.T) {
 	})
 	s := newTestSupervisorWithConfig(&cfgpkg.DaemonConfig{Backend: "codex"})
 	s.WorkspaceID = "WS"
-	s.ControlStore = supervisorMaterializeStore{skills: supervisorSkillStore{err: context.Canceled}}
+	s.ControlStore = supervisorMaterializeStore{Store: memstore.New(), skills: supervisorSkillStore{err: context.Canceled}}
 	ap := &AgentProcess{
 		Entry:        cfgpkg.AgentEntry{Worktree: "worker-a", Role: "plan", Backend: "codex"},
 		RoleConfig:   cfgpkg.RoleConfig{},

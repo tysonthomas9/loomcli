@@ -95,7 +95,10 @@ type terminalMaterializeStore struct {
 
 func (s terminalMaterializeStore) Skills() store.SkillStore { return s.skills }
 func (s terminalMaterializeStore) SkillMaterializationLeases() store.SkillMaterializationLeaseStore {
-	return nil
+	if s.Store == nil {
+		return nil
+	}
+	return s.Store.SkillMaterializationLeases()
 }
 
 func (s slowListTerminalService) ListTabs(ctx context.Context, wsID string) ([]tabmeta.TabMetadata, error) {
@@ -504,7 +507,7 @@ func TestEnsureAgentTerminalSessionContinuesOnSkillStoreOutage(t *testing.T) {
 
 func TestMaterializeInteractiveSkillsPropagatesCancellation(t *testing.T) {
 	target := t.TempDir()
-	st := terminalMaterializeStore{skills: terminalSkillStore{err: context.Canceled}}
+	st := terminalMaterializeStore{Store: memstore.New(), skills: terminalSkillStore{err: context.Canceled}}
 	err := materializeInteractiveSkills(context.Background(), st, "E2E", "lead", "codex", target)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("materializeInteractiveSkills error = %v, want context.Canceled", err)
