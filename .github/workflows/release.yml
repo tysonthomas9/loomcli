@@ -21,6 +21,9 @@ jobs:
     secrets:
       LOOMCLI_TOKEN: ${{ secrets.LOOMCLI_TOKEN }}
       FLEET_DB_TOKEN: ${{ secrets.FLEET_DB_TOKEN }}
+      GCS_TEST_BUCKET: ${{ secrets.GCS_TEST_BUCKET }}
+      GCS_HMAC_ACCESS_KEY_ID: ${{ secrets.GCS_HMAC_ACCESS_KEY_ID }}
+      GCS_HMAC_SECRET_ACCESS_KEY: ${{ secrets.GCS_HMAC_SECRET_ACCESS_KEY }}
 
   goreleaser:
     needs: skills-compatibility

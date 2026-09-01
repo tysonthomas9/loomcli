@@ -68,7 +68,7 @@ func TestSkillMaterializeResolvesRoleFromAgentName(t *testing.T) {
 	}
 }
 
-func TestSkillMaterializeStoreUnavailableWarnsAndSucceeds(t *testing.T) {
+func TestSkillMaterializeStoreUnavailableReturnsBlockingExitCode(t *testing.T) {
 	st := materializeTestStore(t)
 	unavailable := storeWithSkills{
 		Store: st,
@@ -84,11 +84,14 @@ func TestSkillMaterializeStoreUnavailableWarnsAndSucceeds(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	output, err := executeSkillCommand(t, "", "materialize")
-	if err != nil {
-		t.Fatalf("materialize error = %v, want nil; output = %s", err, output)
+	if err == nil {
+		t.Fatalf("materialize error = nil, want failure; output = %s", output)
 	}
-	if !strings.Contains(output, "Warning: skill store unavailable") || !strings.Contains(output, "temporary failure") {
-		t.Fatalf("warning output = %q", output)
+	if got := cli.CommandExitCode(err); got != 2 {
+		t.Fatalf("exit code = %d, want 2; error = %v", got, err)
+	}
+	if !strings.Contains(err.Error(), "skill materialization was refused") || !strings.Contains(err.Error(), "temporary failure") {
+		t.Fatalf("materialization error = %v", err)
 	}
 }
 
@@ -184,10 +187,13 @@ func TestSkillMaterializeOpenFailureIsUnavailable(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	output, err := executeSkillCommand(t, "", "materialize")
-	if err != nil {
-		t.Fatalf("materialize error = %v, want nil", err)
+	if err == nil {
+		t.Fatalf("materialize error = nil, want failure; output = %s", output)
 	}
-	if !strings.Contains(output, "fleet-db is down") {
-		t.Fatalf("warning output = %q", output)
+	if got := cli.CommandExitCode(err); got != 2 {
+		t.Fatalf("exit code = %d, want 2; error = %v", got, err)
+	}
+	if !strings.Contains(err.Error(), "fleet-db is down") {
+		t.Fatalf("materialization error = %v", err)
 	}
 }

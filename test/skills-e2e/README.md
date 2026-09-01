@@ -17,9 +17,10 @@ materialized := loom.SkillMaterialize()
 materialized.RequireExactTree(source, "example")
 ```
 
-The suite currently covers the exact update round trip plus five independent
-behaviors: stable identical reimport, content-only update, stale-file pruning,
-whole-skill deletion, and agreement between public list and show results.
+The suite covers lifecycle round trips, concurrent and ambiguous publication,
+delayed visibility, corrupt-download rejection, and the production GCS XML
+path. Fleet's companion real-backend tests own publication atomicity,
+projection recovery, and provider grant enforcement.
 
 The surrounding compatibility workflow provisions the real persistence and
 object-store processes. It then supplies `SKILLS_E2E_LOOM_BIN` and runs:
@@ -50,6 +51,11 @@ which calls the scenario's `Covers(t)` method before invoking public Loom
 commands. `Covers(t)` derives the test name and covered status, validates the
 metadata, and records the scenario executed by that test process.
 
-The actual E2E run generates `e2e-coverage-<storage>.yaml` from its recorded
+The actual E2E run generates `e2e-coverage-<backend>-<storage>.yaml` from its recorded
 scenarios, and CI uploads that report as evidence. The YAML is not checked in
 and is never edited by hand.
+
+Pull requests run Redis/MinIO and PostgreSQL/MinIO. Releases additionally use
+the existing GCS test bucket through Fleet's production S3-compatible XML
+configuration. Each GCS run receives a unique prefix, records every returned
+object version/generation, and deletes only those recorded run-owned objects.

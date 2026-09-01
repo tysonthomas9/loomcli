@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 type Environment struct {
@@ -22,6 +23,29 @@ type Environment struct {
 	loomBin    string
 	fixtureDir string
 	sources    map[string]string
+	nextEnv    map[string]string
+	lastStderr string
+}
+
+// DelayNextTreeProjection makes the next public Loom command run an E2E-tagged
+// Fleet binary that fails inline tree projection once and delays real
+// background projection. Production Fleet builds do not contain these controls.
+func (e *Environment) DelayNextTreeProjection(delay time.Duration) {
+	e.t.Helper()
+	if delay <= 0 {
+		e.t.Fatalf("tree projection delay must be positive: %v", delay)
+	}
+	e.nextEnv = map[string]string{
+		"FLEET_E2E_WORKSPACE_FILE_INLINE_FAILURES":  "1",
+		"FLEET_E2E_WORKSPACE_FILE_BACKGROUND_DELAY": delay.String(),
+	}
+}
+
+func (e *Environment) RequireLastCommandActivated(name string) {
+	e.t.Helper()
+	if !strings.Contains(e.lastStderr, name) {
+		e.t.Fatalf("last Loom command did not activate %q\nstderr:\n%s", name, e.lastStderr)
+	}
 }
 
 // SkillFixture is a checked-in source tree staged exactly as a user would
@@ -63,6 +87,15 @@ type expectedSkill struct {
 type Materialization struct {
 	env  *Environment
 	root string
+}
+
+// Command is one already-started public Loom command.
+type Command struct {
+	t      *testing.T
+	args   []string
+	cmd    *exec.Cmd
+	stdout bytes.Buffer
+	stderr bytes.Buffer
 }
 
 func Open(t *testing.T) *Environment {
@@ -114,6 +147,54 @@ func (e *Environment) FileFixture(fixture string) FileFixture {
 func (e *Environment) SkillImport(fixture SkillFixture) {
 	e.t.Helper()
 	e.run("", "skill", "import", fixture.root)
+}
+
+// SkillImportFails invokes one public import and requires the command to fail.
+func (e *Environment) SkillImportFails(fixture SkillFixture) {
+	e.t.Helper()
+	args := []string{"skill", "import", fixture.root}
+	// The executable and arguments are controlled by this black-box harness.
+	//nolint:gosec // Running the real Loom CLI is the purpose of this method.
+	command := exec.Command(e.loomBin, args...)
+	command.Env = append(os.Environ(), e.consumeNextCommandEnv()...)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	err := command.Run()
+	e.lastStderr = stderr.String()
+	if err == nil {
+		e.t.Fatalf("loom %s unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s",
+			strings.Join(args, " "), stdout.Bytes(), stderr.Bytes())
+	}
+}
+
+// StartSkillImport starts `loom skill import` immediately and returns a handle
+// whose Wait method observes that one public command. Starting two handles
+// before waiting creates a deterministic client-side concurrency window.
+func (e *Environment) StartSkillImport(fixture SkillFixture) *Command {
+	e.t.Helper()
+	args := []string{"skill", "import", fixture.root}
+	// The executable and arguments are controlled by this black-box harness.
+	//nolint:gosec // Starting the real Loom CLI is the purpose of this method.
+	cmd := exec.Command(e.loomBin, args...)
+	command := &Command{t: e.t, args: args, cmd: cmd}
+	cmd.Env = os.Environ()
+	cmd.Stdout = &command.stdout
+	cmd.Stderr = &command.stderr
+	if err := cmd.Start(); err != nil {
+		e.t.Fatalf("start loom %s: %v", strings.Join(args, " "), err)
+	}
+	return command
+}
+
+// Wait requires the public Loom command to finish successfully.
+func (c *Command) Wait() {
+	c.t.Helper()
+	if err := c.cmd.Wait(); err != nil {
+		c.t.Fatalf("loom %s failed: %v\nstdout:\n%s\nstderr:\n%s",
+			strings.Join(c.args, " "), err, c.stdout.Bytes(), c.stderr.Bytes())
+	}
 }
 
 // SkillShow invokes `loom skill show --json` and decodes its public response.
@@ -179,6 +260,30 @@ func (e *Environment) SkillMaterialize() Materialization {
 	return Materialization{env: e, root: root}
 }
 
+// SkillMaterializeFails invokes one public materialization into a fresh
+// worktree and requires the command to reject the operation.
+func (e *Environment) SkillMaterializeFails() Materialization {
+	e.t.Helper()
+	root := e.t.TempDir()
+	args := []string{"skill", "materialize"}
+	// The executable and arguments are controlled by this black-box harness.
+	//nolint:gosec // Running the real Loom CLI is the purpose of this method.
+	command := exec.Command(e.loomBin, args...)
+	command.Env = append(os.Environ(), e.consumeNextCommandEnv()...)
+	command.Dir = root
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	err := command.Run()
+	e.lastStderr = stderr.String()
+	if err == nil {
+		e.t.Fatalf("loom %s unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s",
+			strings.Join(args, " "), stdout.Bytes(), stderr.Bytes())
+	}
+	return Materialization{env: e, root: root}
+}
+
 // SkillMaterializeInto invokes `loom skill materialize` again in an existing
 // worktree so scenarios can observe reconciliation and pruning.
 func (e *Environment) SkillMaterializeInto(target Materialization) {
@@ -233,19 +338,37 @@ func (e *Environment) RequireListedSkill(expected Skill, listed []Skill) {
 
 func (e *Environment) run(dir string, args ...string) []byte {
 	e.t.Helper()
+	// The executable is resolved from the test-controlled SKILLS_E2E_LOOM_BIN;
+	// scenarios pass explicit public Loom CLI arguments rather than shell text.
+	//nolint:gosec // This is the purpose of the black-box E2E harness.
 	command := exec.Command(e.loomBin, args...)
-	command.Env = os.Environ()
+	command.Env = append(os.Environ(), e.consumeNextCommandEnv()...)
 	command.Dir = dir
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	command.Stdout = &stdout
 	command.Stderr = &stderr
 	err := command.Run()
+	e.lastStderr = stderr.String()
 	if err != nil {
 		e.t.Fatalf("loom %s failed: %v\nstdout:\n%s\nstderr:\n%s",
 			strings.Join(args, " "), err, stdout.Bytes(), stderr.Bytes())
 	}
 	return stdout.Bytes()
+}
+
+func (e *Environment) consumeNextCommandEnv() []string {
+	keys := make([]string, 0, len(e.nextEnv))
+	for key := range e.nextEnv {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	values := make([]string, 0, len(keys))
+	for _, key := range keys {
+		values = append(values, key+"="+e.nextEnv[key])
+	}
+	e.nextEnv = nil
+	return values
 }
 
 func (e *Environment) stageFixture(fixture string) string {
@@ -268,35 +391,7 @@ func (e *Environment) stageFixture(fixture string) string {
 			return os.MkdirAll(filepath.Join(targetRoot, relative), 0o755)
 		}
 
-		data, err := os.ReadFile(sourcePath)
-		if err != nil {
-			return err
-		}
-		mode := fs.FileMode(0o644)
-		targetRelative := relative
-		switch {
-		case strings.HasSuffix(relative, ".executable"):
-			targetRelative = strings.TrimSuffix(relative, ".executable")
-			mode = 0o755
-		case strings.HasSuffix(relative, ".empty"):
-			targetRelative = strings.TrimSuffix(relative, ".empty")
-			data = nil
-		case strings.HasSuffix(relative, ".hex"):
-			targetRelative = strings.TrimSuffix(relative, ".hex")
-			data, err = hex.DecodeString(strings.TrimSpace(string(data)))
-			if err != nil {
-				return fmt.Errorf("decode %s: %w", relative, err)
-			}
-		}
-
-		targetPath := filepath.Join(targetRoot, targetRelative)
-		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(targetPath, data, mode); err != nil {
-			return err
-		}
-		return os.Chmod(targetPath, mode)
+		return stageFixtureFile(sourcePath, targetRoot, relative)
 	})
 	if err != nil {
 		e.t.Fatalf("stage fixture %q: %v", fixture, err)
@@ -307,6 +402,40 @@ func (e *Environment) stageFixture(fixture string) string {
 		e.t.Fatalf("canonicalize staged fixture: %v", err)
 	}
 	return canonical
+}
+
+func stageFixtureFile(sourcePath, targetRoot, relative string) error {
+	// sourcePath is supplied by WalkDir beneath the checked-in fixture root.
+	//nolint:gosec // Reading that test-controlled path is intentional.
+	data, err := os.ReadFile(sourcePath)
+	if err != nil {
+		return err
+	}
+	mode := fs.FileMode(0o644)
+	targetRelative := relative
+	switch {
+	case strings.HasSuffix(relative, ".executable"):
+		targetRelative = strings.TrimSuffix(relative, ".executable")
+		mode = 0o755
+	case strings.HasSuffix(relative, ".empty"):
+		targetRelative = strings.TrimSuffix(relative, ".empty")
+		data = nil
+	case strings.HasSuffix(relative, ".hex"):
+		targetRelative = strings.TrimSuffix(relative, ".hex")
+		data, err = hex.DecodeString(strings.TrimSpace(string(data)))
+		if err != nil {
+			return fmt.Errorf("decode %s: %w", relative, err)
+		}
+	}
+
+	targetPath := filepath.Join(targetRoot, targetRelative)
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(targetPath, data, mode); err != nil {
+		return err
+	}
+	return os.Chmod(targetPath, mode)
 }
 
 type fileState struct {
@@ -328,6 +457,8 @@ func collectFiles(t *testing.T, root string) map[string]fileState {
 		if err != nil {
 			return err
 		}
+		// path is supplied by WalkDir beneath the test-owned materialization.
+		//nolint:gosec // Reading that test-controlled path is intentional.
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return err

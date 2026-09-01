@@ -8,6 +8,7 @@ release="$ROOT/.github/workflows/release.yml"
 workflow="$ROOT/.github/workflows/skills-compatibility.yml"
 makefile="$ROOT/Makefile"
 skills_e2e="$ROOT/test/skills-e2e/lifecycle_test.go"
+skills_e2e_provider="$ROOT/test/skills-e2e/provider_test.go"
 skills_e2e_coverage="$ROOT/test/skills-e2e/coverage_test.go"
 skills_e2e_manifest="$ROOT/test/skills-e2e/testdata/exact-round-trip/expected.json"
 
@@ -31,6 +32,9 @@ require_fixed "$release" 'loom_ref: ${{ github.sha }}'
 require_fixed "$release" "fleetdb_ref: main"
 require_fixed "$release" 'LOOMCLI_TOKEN: ${{ secrets.LOOMCLI_TOKEN }}'
 require_fixed "$release" 'FLEET_DB_TOKEN: ${{ secrets.FLEET_DB_TOKEN }}'
+require_fixed "$release" 'GCS_TEST_BUCKET: ${{ secrets.GCS_TEST_BUCKET }}'
+require_fixed "$release" 'GCS_HMAC_ACCESS_KEY_ID: ${{ secrets.GCS_HMAC_ACCESS_KEY_ID }}'
+require_fixed "$release" 'GCS_HMAC_SECRET_ACCESS_KEY: ${{ secrets.GCS_HMAC_SECRET_ACCESS_KEY }}'
 if grep -Fq 'secrets: inherit' "$release"; then
   fail "$release exposes unrelated repository secrets to the compatibility workflow"
 fi
@@ -51,11 +55,11 @@ require_fixed "$workflow" 'FLEET_DB_TOKEN is required to read private FleetDB fr
 require_fixed "$compat" 'VERCEL_SKILLS_REF="${VERCEL_SKILLS_REF:-dd089a8c752c966dee8bf0f27cb625ba193ffd9e}"'
 require_fixed "$makefile" 'test-skills-release-compat: test-skills-release-contract'
 
-# The same corpus proof must exercise both byte-plane adapters. The S3 leg uses
-# an ephemeral, job-scoped MinIO instance and bucket; no cloud credentials or
-# persistent object-store resources are needed.
-require_fixed "$workflow" 'storage: [local, s3]'
-require_fixed "$workflow" 'name: LoomCLI / FleetDB compatibility (${{ matrix.storage }})'
+# The same corpus proof exercises the local byte plane plus Redis/MinIO and
+# PostgreSQL/MinIO. Concurrent public clients share one real Fleet process.
+require_fixed "$workflow" 'backend: redis'
+require_fixed "$workflow" 'backend: postgres'
+require_fixed "$workflow" 'name: LoomCLI / FleetDB compatibility (${{ matrix.backend }}-${{ matrix.storage }})'
 require_fixed "$workflow" 'FLEET_WORKSPACE_FILE_STORE: ${{ matrix.storage }}'
 require_fixed "$workflow" 'FLEET_WORKSPACE_FILE_TOKEN_SECRET='
 require_fixed "$workflow" 'FLEET_RATE_LIMIT_ENABLED=false'
@@ -66,11 +70,16 @@ require_fixed "$workflow" 'FLEET_WORKSPACE_FILE_S3_PATH_STYLE=true'
 require_fixed "$workflow" 'FLEET_WORKSPACE_FILE_S3_ENDPOINT=http://127.0.0.1:9000'
 require_fixed "$workflow" 'if: always() && matrix.storage == '\''s3'\'''
 require_fixed "$workflow" 'docker logs "$MINIO_CONTAINER"'
-require_fixed "$workflow" 'make test-skills-release-compat 2>&1 | tee "../skills-compatibility-$STORAGE_MODE.log"'
-require_fixed "$workflow" 'REDIS_CONTAINER=loom-skills-redis-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$STORAGE_MODE'
+require_fixed "$workflow" 'make test-skills-release-compat 2>&1 | tee "../skills-compatibility-$FLEET_E2E_BACKEND-$STORAGE_MODE.log"'
+require_fixed "$workflow" 'REDIS_CONTAINER=loom-skills-redis-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$PERSISTENCE_BACKEND-$STORAGE_MODE'
 require_fixed "$workflow" 'redis:7.4.2-alpine@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952'
+require_fixed "$workflow" 'postgres:16-alpine@sha256:738d1359df5aa0b6d50a9071e989c49fdd39152a2a805c6ff131bf5e2243e0b3'
 require_fixed "$compat" 'LOOM_E2E_REDIS_ADDR'
-require_fixed "$compat" 'go test -tags=e2e -count=1 -v ./test/skills-e2e'
+require_fixed "$compat" 'FLEET_E2E_POSTGRES_DSN'
+require_fixed "$compat" 'export LOOM_FLEET_DB_URL="http://127.0.0.1:$fleet_port"'
+require_fixed "$compat" "go test -tags=e2e -count=1 -v -skip '^TestSkillImportWaitsForDelayedTreeVisibility$' ./test/skills-e2e"
+require_fixed "$compat" "go test -tags=e2e -count=1 -v -run '^TestSkillImportWaitsForDelayedTreeVisibility$' ./test/skills-e2e"
+require_fixed "$compat" 'go build -tags=e2e -o "$fleet_db_bin" ./cmd/fleet-db'
 require_fixed "$skills_e2e" 'func TestSkillUpdateSelectsAndMaterializesExactRevision'
 require_fixed "$skills_e2e" 'func TestIdenticalSkillReimportKeepsContentRevision'
 require_fixed "$skills_e2e" 'func TestSkillContentUpdatePreservesBundledFiles'
@@ -92,10 +101,19 @@ require_fixed "$skills_e2e" 'ID:        "deletion-prunes-materialization"'
 require_fixed "$skills_e2e" 'ID:        "list-show-revision-agreement"'
 require_fixed "$skills_e2e_coverage" 'func TestMain(m *testing.M)'
 require_fixed "$skills_e2e_coverage" 'registry.WriteCoverageFile(output)'
-require_fixed "$workflow" 'E2E_COVERAGE_OUTPUT: ${{ github.workspace }}/e2e-coverage-${{ matrix.storage }}.yaml'
-require_fixed "$workflow" 'e2e-coverage-${{ matrix.storage }}.yaml'
-require_fixed "$workflow" 'real_processes=loom-cli,fleet-db,redis,projector,http,$object_provider'
-require_fixed "$workflow" 'skills-compatibility-${{ matrix.storage }}-revisions-${{ github.run_id }}-${{ github.run_attempt }}'
+require_fixed "$workflow" 'E2E_COVERAGE_OUTPUT: ${{ github.workspace }}/e2e-coverage-${{ matrix.backend }}-${{ matrix.storage }}.yaml'
+require_fixed "$workflow" 'e2e-coverage-${{ matrix.backend }}-${{ matrix.storage }}.yaml'
+require_fixed "$workflow" 'real_processes=loom-cli,fleet-db,$PERSISTENCE_BACKEND,redis,projector,http,$object_provider'
+require_fixed "$workflow" 'skills-compatibility-${{ matrix.backend }}-${{ matrix.storage }}-revisions-${{ github.run_id }}-${{ github.run_attempt }}'
+require_fixed "$workflow" 'name: Existing GCS bucket provider gate'
+require_fixed "$workflow" 'FLEET_WORKSPACE_FILE_S3_ENDPOINT=https://storage.googleapis.com'
+require_fixed "$workflow" 'prefix="loom-skills-e2e/$GITHUB_RUN_ID/$GITHUB_RUN_ATTEMPT/$suffix"'
+require_fixed "$workflow" 'aws --endpoint-url https://storage.googleapis.com s3api list-object-versions'
+require_fixed "$workflow" 'gcs-created-objects.json'
+require_fixed "$workflow" 'SKILLS_E2E_PROVIDER: gcs'
+require_fixed "$workflow" 'TestWorkspaceFile(APIConformance_S3Compatible|S3SignedUploadRejectsTamperingAndWrongMethod|S3SignedUploadExpires)'
+require_fixed "$skills_e2e_provider" 'func TestGCSPresignedRoundTrip'
+require_fixed "$skills_e2e_provider" 'gcsPresignedRoundTrip.Covers(t)'
 
 # The release log must identify every input to the compatibility result.
 require_fixed "$compat" 'Compatibility revisions: loomcli=$loom_sha fleetdb=$fleet_db_sha vercel_skills=$actual_vercel_ref'

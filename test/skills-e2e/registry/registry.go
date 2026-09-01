@@ -171,9 +171,11 @@ func WriteYAML(w io.Writer, scenarios []Scenario) error {
 	}
 	encoder := yaml.NewEncoder(w)
 	encoder.SetIndent(2)
-	defer encoder.Close()
-	return encoder.Encode(struct {
+	if err := encoder.Encode(struct {
 		Version   int        `yaml:"version"`
 		Scenarios []Scenario `yaml:"scenarios"`
-	}{Version: 1, Scenarios: scenarios})
+	}{Version: 1, Scenarios: scenarios}); err != nil {
+		return err
+	}
+	return encoder.Close()
 }
