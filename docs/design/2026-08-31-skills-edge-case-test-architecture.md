@@ -341,6 +341,21 @@ and CI responsibilities.
 Pure domain tests do not need external processes. Their claim is deterministic
 validation or identity, not distributed-system behavior.
 
+### Case 70 remains partial
+
+Loom snapshots the previous managed projection before replacement and restores
+it after any one-shot filesystem mutation failure. If restoration itself fails,
+the command surfaces both the original and rollback errors and deliberately
+leaves the old marker in place, so the next invocation cannot mistake a mixed
+tree for current and will reconcile it.
+
+This is recovery hardening, not whole-projection atomicity. The public
+projection spans `.agents/skills` and `.claude/skills`; they cannot be switched
+with one portable filesystem operation, and rollback cannot guarantee success
+under a persistent filesystem fault. Case 70 must not be emitted as covered
+until both views are backed by a single atomically switched generation (or an
+equivalent transactional topology) while preserving allowed unrecorded files.
+
 A failpoint controls when a real implementation fails; it does not return a
 fabricated successful result. Every fault control must provide a deterministic
 activation handshake so the test proves the intended fault occurred before it
