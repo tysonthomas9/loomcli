@@ -122,6 +122,48 @@ func publishSkillFixture(ctx context.Context, files store.WorkspaceFileStore, wo
 	}, nil
 }
 
+type countingManifestStore struct {
+	store.WorkspaceFileStore
+	getTreeCalls int
+}
+
+func (s *countingManifestStore) GetTree(ctx context.Context, workspace, revision string) (*domain.WorkspaceFileTree, error) {
+	s.getTreeCalls++
+	return s.WorkspaceFileStore.GetTree(ctx, workspace, revision)
+}
+
+func TestMaterializationPlanHydratesTheExactResolvedManifestWithoutRelistingOrRefetching(t *testing.T) {
+	oldFixture := &skillFixture{Name: "planned", Scope: domain.SkillScopeWorkspace, Description: "old description", Content: "old body"}
+	skills := &staticSkillStore{skills: []*skillFixture{oldFixture}}
+	files := &countingManifestStore{WorkspaceFileStore: skills.workspaceFiles()}
+	st := materializeStore{skills: skills, files: files}
+	plan, err := resolveMaterializationPlan(t.Context(), st, "WS", "lead")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.TreeRevisions) != 1 {
+		t.Fatalf("tree revisions = %v", plan.TreeRevisions)
+	}
+	if files.getTreeCalls != 1 {
+		t.Fatalf("manifest reads while resolving = %d, want 1", files.getTreeCalls)
+	}
+	skills.skills = []*skillFixture{{Name: "planned", Scope: domain.SkillScopeWorkspace, Description: "new description", Content: "new body"}}
+	target := t.TempDir()
+	if err := materializePlanWithRootOpener(t.Context(), st, "WS", target, plan, openSecureRoot, nil); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(target, AgentsSkillsDir, "planned", domain.SkillFileNameSKILLMD))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(body, []byte("old body")) || bytes.Contains(body, []byte("new body")) {
+		t.Fatalf("materialized document = %q, want exact pre-lease plan", body)
+	}
+	if files.getTreeCalls != 1 {
+		t.Fatalf("manifest reads after hydration = %d, want no post-plan refetch", files.getTreeCalls)
+	}
+}
+
 type materializeStore struct {
 	store.Store
 	skills *staticSkillStore

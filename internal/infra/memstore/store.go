@@ -51,6 +51,7 @@ type Store struct {
 	roles      *roleStore
 	skills     *skillStore
 	files      *workspaceFileStore
+	matLeases  *skillMaterializationLeaseStore
 	skillPacks *skillPackStore
 	daemon     *daemonStore
 	conns      *connectorStore
@@ -108,6 +109,7 @@ func New() *Store {
 		roles:      roles,
 		skills:     skills,
 		files:      files,
+		matLeases:  newSkillMaterializationLeaseStore(files),
 		skillPacks: newSkillPackStore(),
 		daemon:     newDaemonStore(),
 		conns:      newConnectorStore(),
@@ -250,9 +252,11 @@ func (s *Store) Skills() store.SkillStore { return s.skills }
 // WorkspaceFiles returns the provider-neutral immutable file-tree store.
 func (s *Store) WorkspaceFiles() store.WorkspaceFileStore { return s.files }
 
-// SkillMaterializationLeases is nil because memstore is process-local and
-// production materialization coordination belongs to fleet-db's Redis lease.
-func (s *Store) SkillMaterializationLeases() store.SkillMaterializationLeaseStore { return nil }
+// SkillMaterializationLeases returns the process-local test double for
+// fleet-db's materialization lease service.
+func (s *Store) SkillMaterializationLeases() store.SkillMaterializationLeaseStore {
+	return s.matLeases
+}
 
 // SkillPacks returns the SkillPackStore.
 func (s *Store) SkillPacks() store.SkillPackStore { return s.skillPacks }

@@ -7,10 +7,11 @@ import (
 
 // SkillMaterializationLease is fleet-db's client-facing live lease.
 type SkillMaterializationLease struct {
-	Token     string    `json:"token"`
-	TargetKey string    `json:"target_key"`
-	Holder    string    `json:"holder"`
-	ExpiresAt time.Time `json:"expires_at"`
+	Token         string    `json:"token"`
+	TargetKey     string    `json:"target_key"`
+	Holder        string    `json:"holder"`
+	ExpiresAt     time.Time `json:"expires_at"`
+	TreeRevisions []string  `json:"tree_revisions"`
 }
 
 // SkillMaterializationLeaseConflictError carries the current holder metadata

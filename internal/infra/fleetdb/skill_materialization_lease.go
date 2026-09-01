@@ -20,9 +20,10 @@ type skillMaterializationLeaseStore struct{ client *Client }
 var _ store.SkillMaterializationLeaseStore = (*skillMaterializationLeaseStore)(nil)
 
 type acquireSkillMaterializationLeaseBody struct {
-	Holder     string `json:"holder"`
-	TargetKey  string `json:"target_key"`
-	TTLSeconds int    `json:"ttl_seconds,omitempty"`
+	Holder        string   `json:"holder"`
+	TargetKey     string   `json:"target_key"`
+	TreeRevisions []string `json:"tree_revisions"`
+	TTLSeconds    int      `json:"ttl_seconds,omitempty"`
 }
 
 type renewSkillMaterializationLeaseBody struct {
@@ -36,7 +37,8 @@ type releaseSkillMaterializationLeaseBody struct {
 
 func (s *skillMaterializationLeaseStore) Acquire(ctx context.Context, in store.SkillMaterializationLeaseAcquire) (*domain.SkillMaterializationLease, error) {
 	body := acquireSkillMaterializationLeaseBody{
-		Holder: in.Holder, TargetKey: in.TargetKey, TTLSeconds: ttlSeconds(in.TTL),
+		Holder: in.Holder, TargetKey: in.TargetKey,
+		TreeRevisions: append([]string{}, in.TreeRevisions...), TTLSeconds: ttlSeconds(in.TTL),
 	}
 	var out domain.SkillMaterializationLease
 	path := "/api/v1/" + pathEscape(in.WorkspaceKey) + "/skill-materialization-leases"
