@@ -22,6 +22,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/fleetdbcap"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
+	"github.com/tysonthomas9/loomcli/internal/metrics/spawnmetrics"
 	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -279,7 +280,7 @@ func runDaemonBody() int {
 	ValidateDaemonPaths(projectDir, paths.pidFile, paths.logDir)
 
 	if daemonDryRun {
-		printDryRunInfo(config, paths.pidFile, paths.logDir, paths.stateFile)
+		printDryRunInfo(config, paths.pidFile, paths.logDir, paths.stateFile, paths.spawnMetrics)
 		return 0
 	}
 
@@ -308,6 +309,9 @@ func runDaemonBody() int {
 	recordDaemonPaths(wsLock, config, projectDir, paths)
 
 	shutdown, daemon := initDaemonServices(config, projectDir, paths)
+	// Land the final counts on a graceful shutdown; nil-safe by contract, and
+	// best-effort — a failed snapshot write must not change the exit path.
+	defer func() { _ = daemon.sup.SpawnMetrics.Flush() }()
 	// Hydrate the hold BEFORE any agent can cycle, and wire persistence so
 	// socket operations reach the file.
 	hydrateClaimHold(daemon, paths.claimHoldFile)
@@ -370,6 +374,11 @@ type daemonPaths struct {
 	// stateFile it is NOT removed on shutdown — surviving a daemon restart is
 	// the entire point of the hold.
 	claimHoldFile string
+	// spawnMetrics is the daemon's spawn counter snapshot. It lives in the
+	// WORKSPACE runtime dir — the same one the serve-side reader resolves —
+	// not next to the PID file: a divergence there yields a metric that
+	// silently never appears.
+	spawnMetrics string
 }
 
 // resolveDaemonPaths resolves all daemon-related filesystem paths.
@@ -383,6 +392,7 @@ func resolveDaemonPaths(projectDir string, config *cfgpkg.DaemonConfig) daemonPa
 		eventsDir: supervisor.ResolveDaemonPath(projectDir, config.Daemon.EventsDir),
 
 		claimHoldFile: resolveClaimHoldPath(pidFile),
+		spawnMetrics:  spawnmetrics.SnapshotPath(cli.GetWorkspaceRuntimeDir()),
 	}
 }
 
@@ -446,6 +456,7 @@ func initDaemonServices(config *cfgpkg.DaemonConfig, projectDir string, paths da
 	// incident came from a fleet-db that never served the route. The Part-1
 	// runtime classification remains the backstop for a mid-run regression.
 	daemon.sup.LeasesDisabled = missingCapability(report, "skill-materialization-leases")
+	daemon.sup.SpawnMetrics = spawnmetrics.NewRecorder(paths.spawnMetrics)
 
 	return shutdown, daemon
 }

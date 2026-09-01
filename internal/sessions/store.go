@@ -104,6 +104,7 @@ func initialSessionMetadata(sid string, opts CreateOptions) SessionMetadata {
 			SessionID:     sid,
 			EpicID:        opts.EpicID,
 			AgentName:     opts.AgentName,
+			Role:          opts.Role,
 			Backend:       opts.Backend,
 			Phase:         opts.Phase,
 			StartedAt:     time.Now().UTC(),

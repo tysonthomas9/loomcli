@@ -20,6 +20,7 @@ import (
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/metrics/spawnmetrics"
 	"github.com/tysonthomas9/loomcli/internal/observability/tracing"
 	"github.com/tysonthomas9/loomcli/internal/skillmat"
 
@@ -287,7 +288,7 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 	defer span.End()
 
 	if err := s.gateBackendAvailable(ap); err != nil {
-		recordErr(span, err, "spawn.backend_unavailable")
+		s.recordSpawnFailure(span, err, ap.Entry.Role, spawnmetrics.ClassBackendUnavailable)
 		return err
 	}
 	if err := s.materializeSkills(ap); err != nil {
@@ -295,7 +296,7 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 			slog.Warn("skill store unavailable; continuing with existing materialization",
 				"worktree", ap.Entry.Worktree, "workspace", s.WorkspaceID, "err", err)
 		} else {
-			recordErr(span, err, "spawn.materialize_skills")
+			s.recordSpawnFailure(span, err, ap.Entry.Role, spawnmetrics.ClassMaterializeSkills)
 			return fmt.Errorf("materialize skills: %w", err)
 		}
 	}
@@ -303,7 +304,7 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 
 	cmd, err := s.buildCommand(ap)
 	if err != nil {
-		recordErr(span, err, "spawn.build_command")
+		s.recordSpawnFailure(span, err, ap.Entry.Role, spawnmetrics.ClassBuildCommand)
 		return fmt.Errorf("build command: %w", err)
 	}
 
@@ -314,7 +315,7 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 	if err := cmd.Start(); err != nil {
 		closeAgentLogs(ap)
 		ap.Mu.Unlock()
-		recordErr(span, err, "spawn.start")
+		s.recordSpawnFailure(span, err, ap.Entry.Role, spawnmetrics.ClassStart)
 		return fmt.Errorf("failed to start subprocess: %w", err)
 	}
 
@@ -333,6 +334,13 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 	role := ap.Entry.Role
 	epicID := ap.AssignedEpicID
 	ap.Mu.Unlock()
+
+	// Counted here, outside ap.Mu: the recorder's debounced flush can take a
+	// file write, which must not happen under the agent lock. The precondition
+	// is exactly the same as inside — cmd.Start() returned nil and ap.Pid is
+	// set — and it stays independent of the EmitEvent / control-plane steps
+	// below, which are reporting, not spawning.
+	s.SpawnMetrics.RecordSuccess(role)
 
 	span.SetAttributes(attribute.Int("loom.pid", pid))
 

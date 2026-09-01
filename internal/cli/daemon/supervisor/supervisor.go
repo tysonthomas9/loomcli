@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
 	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/metrics/spawnmetrics"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -107,6 +108,9 @@ type Supervisor struct {
 	lastLivenessScan      time.Time
 	lastLivenessScanWall  time.Time
 	livenessFatalSignaled bool
+
+	// SpawnMetrics counts spawn outcomes per role; nil-safe, so tests need no wiring.
+	SpawnMetrics *spawnmetrics.Recorder
 
 	Concurrency *ConcurrencyTracker
 	EventBus    EventEmitter
@@ -739,14 +743,4 @@ func (s *Supervisor) GetAgents() []SupervisedAgentStatus {
 		result[i].RemoteBranch = ap.ResolveRemoteBranch()
 	}
 	return result
-}
-
-// resolveRoleConfig looks up a role by name, supporting both built-in and custom roles.
-func (s *Supervisor) resolveRoleConfig(roleName string, agentIndex int) (config.RoleConfig, error) {
-	cfg := s.ConfigSnapshot()
-	rc, err := ResolveRoleConfigStatic(roleName, cfg, s.ProjectDir)
-	if err != nil {
-		return config.RoleConfig{}, fmt.Errorf("agent[%d]: %w", agentIndex, err)
-	}
-	return rc, nil
 }

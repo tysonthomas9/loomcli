@@ -5,16 +5,17 @@
 # orchestration hub: the completion-hook, usage-accounting, watchdog and
 # run-duration work each add a seam it must coordinate, which pushed it past
 # the global threshold of 18; pre-turn hook management (hookcfg) is one more
-# such seam. internal/cli grew one import for the same line of
-# work. Ratchet these back down (or remove the entries) when coupling is paid
-# down; do not raise them without recording why here.
+# such seam, and spawn-outcome metrics (spawnmetrics) is one more still.
+# internal/cli grew one import for the same line of work. Ratchet these back
+# down (or remove the entries) when coupling is paid down; do not raise them
+# without recording why here.
 #
-# 23 (was 22) records a merge, not new coupling: the two sides each raised this
-# entry for their own seam and the merged package carries both. v5 took it to 22
+# 24 records a merge, not new coupling: the sides each raised this entry for
+# their own seam and the merged package carries all of them. v5 took it to 22
 # for the skills/hook pair (hookcfg, skillmat); local/union had taken it to 21
-# for agentprofile. 23 is exactly that sum — no import arrives here that was not
-# already allowed on one side.
-internal/cli/daemon/supervisor 23
+# for agentprofile (23 combined); PUPPET-252 adds spawnmetrics on top. No
+# import arrives here that was not already allowed on one side.
+internal/cli/daemon/supervisor 24
 internal/cli 19
 # The skills webui module adds the skills handler package to the app's module
 # wiring and the domain skill path policy to svcimpl's file index.

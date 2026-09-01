@@ -237,7 +237,7 @@ func (s *Supervisor) createAgentSession(ap *AgentProcess, epicID string) {
 	ap.Mu.Unlock()
 
 	sess, err := sessStore.CreateSession(sessions.CreateOptions{
-		AgentName: ap.Entry.Worktree, Backend: s.GetEffectiveBackend(ap),
+		AgentName: ap.Entry.Worktree, Role: ap.Entry.Role, Backend: s.GetEffectiveBackend(ap),
 		EpicID: epicID, Phase: phase, AttemptNum: restartCount,
 	})
 	if err != nil {
