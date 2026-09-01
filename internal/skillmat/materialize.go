@@ -876,11 +876,11 @@ func entryExactlyMatches(root secureRoot, entry desiredEntry) (bool, error) {
 	}
 }
 
-//nolint:gocognit,cyclop,funlen // The collision matrix (file/dir/symlink × managed/foreign) is deliberately exhaustive in one place.
 func detectExistingCollisions(root secureRoot, targetDir string, entries []desiredEntry, previous *marker) error {
 	return detectExistingCollisionsInRoots(root, targetDir, entries, previous, []string{AgentsSkillsDir, ClaudeSkillsDir})
 }
 
+//nolint:gocognit,cyclop,funlen // The collision matrix (file/dir/symlink × managed/foreign) is deliberately exhaustive in one place.
 func detectExistingCollisionsInRoots(
 	root secureRoot, targetDir string, entries []desiredEntry, previous *marker, rootNames []string,
 ) error {
