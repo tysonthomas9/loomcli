@@ -46,14 +46,24 @@ the actual product receives the intended paths, modes, and bytes.
 Skill representation and opaque tree revision. Exact materialized bytes and
 modes are compared with the staged updated fixture.
 
-Each typed scenario declaration lives immediately above its top-level E2E test,
-which calls the scenario's `Covers(t)` method before invoking public Loom
-commands. `Covers(t)` derives the test name and covered status, validates the
-metadata, and records the scenario executed by that test process.
+Each typed scenario declaration lives immediately above its executable test,
+which calls the scenario's `Covers(t)` method before exercising the owning
+seam. `Covers(t)` derives the test name, validates the metadata, and records the
+scenario only after the complete test passes. Deterministic path and revision
+cases use the public Loom domain seam; lifecycle cases continue through the
+public CLI and real services.
 
-The actual E2E run generates `e2e-coverage-<backend>-<storage>.yaml` from its recorded
-scenarios, and CI uploads that report as evidence. The YAML is not checked in
-and is never edited by hand.
+The actual run generates a `skills-edge-coverage/v1` Loom report containing
+only the canonical case IDs proved by that execution, with the exact Loom
+revision, owning test, seam, backends, and providers. CI uploads
+`e2e-coverage-<backend>-<storage>.yaml` as evidence. YAML is generated output;
+it is not checked in or edited by hand.
+
+A Loom report may be structurally valid while still partial. Release readiness
+is a separate paired check over the generated Loom and Fleet reports plus the
+six typed strict-cutover exclusions for cases 72-77. That check rejects every
+missing, duplicate, out-of-range, or otherwise excluded applicable case; there
+is no unresolved disposition that can produce a release-ready result.
 
 Pull requests run Redis/MinIO and PostgreSQL/MinIO. Releases additionally use
 the existing GCS test bucket through Fleet's production S3-compatible XML

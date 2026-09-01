@@ -94,7 +94,7 @@ if ! "$loom_bin" workspace add "$LOOM_WORKSPACE" --description "release compatib
 fi
 
 skills_e2e_log="$tmp/skills-e2e.log"
-if ! (cd "$ROOT" && SKILLS_E2E_LOOM_BIN="$loom_bin" \
+if ! (cd "$ROOT" && SKILLS_E2E_LOOM_BIN="$loom_bin" SKILLS_EDGE_REVISION="$loom_sha" \
   go test -tags=e2e -count=1 -v -skip '^TestSkillImportWaitsForDelayedTreeVisibility$' ./test/skills-e2e) >"$skills_e2e_log" 2>&1; then
   cat "$skills_e2e_log" >&2
   exit 1
@@ -115,7 +115,7 @@ if [[ "$FLEET_E2E_BACKEND" == "redis" ]]; then
     projection_coverage="${E2E_COVERAGE_OUTPUT%.yaml}-projection.yaml"
   fi
   projection_log="$tmp/skills-e2e-projection.log"
-  if ! (cd "$ROOT" && SKILLS_E2E_LOOM_BIN="$loom_bin" E2E_COVERAGE_OUTPUT="$projection_coverage" \
+  if ! (cd "$ROOT" && SKILLS_E2E_LOOM_BIN="$loom_bin" SKILLS_EDGE_REVISION="$loom_sha" E2E_COVERAGE_OUTPUT="$projection_coverage" \
     go test -tags=e2e -count=1 -v -run '^TestSkillImportWaitsForDelayedTreeVisibility$' ./test/skills-e2e) >"$projection_log" 2>&1; then
     cat "$projection_log" >&2
     exit 1

@@ -16,11 +16,6 @@ var concurrentTreePublication = registry.Scenario{
 	Seam:      "loom-fleet-e2e",
 	Backends:  []string{"redis", "postgres"},
 	Providers: []string{"minio"},
-	Cases: []registry.EdgeCase{
-		{ID: 50, Behavior: "concurrent publication creates one logical tree", Rationale: "real concurrent public imports race at Fleet's revision-keyed command"},
-		{ID: 51, Behavior: "concurrent publishers observe one accepted identity", Rationale: "both successful imports expose the same selected revision"},
-		{ID: 52, Behavior: "first accepted provenance remains stable", Rationale: "Fleet's real-backend command conformance verifies all callers receive the accepted event"},
-	},
 }
 
 func TestConcurrentSkillImportsSelectOneTreeRevision(t *testing.T) {
@@ -41,7 +36,7 @@ func TestConcurrentSkillImportsSelectOneTreeRevision(t *testing.T) {
 var lostPublicationResponseIsRetryable = registry.Scenario{
 	ID:        "lost-publication-response-is-retryable",
 	Behavior:  "retrying after a committed response is lost returns the accepted tree",
-	Owner:     "fleet",
+	Owner:     "loom",
 	Seam:      "loom-fleet-e2e",
 	Backends:  []string{"redis", "postgres"},
 	Providers: []string{"minio"},

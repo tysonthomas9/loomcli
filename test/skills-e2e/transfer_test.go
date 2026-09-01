@@ -17,8 +17,7 @@ var corruptDownloadIsRejected = registry.Scenario{
 	Backends:  []string{"redis", "postgres"},
 	Providers: []string{"minio"},
 	Cases: []registry.EdgeCase{
-		{ID: 40, Behavior: "a truncated download is rejected", Rationale: "a real proxy shortens the successful provider response"},
-		{ID: 41, Behavior: "invalid downloaded bytes are not materialized", Rationale: "the public materialize command fails and leaves no Skill tree"},
+		{ID: 34, Behavior: "download size and SHA-256 are verified before bytes are returned", Rationale: "a real proxy truncates provider bytes and the public materialize command rejects them"},
 	},
 }
 

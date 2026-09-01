@@ -1,5 +1,3 @@
-//go:build e2e
-
 package skillse2e_test
 
 import (

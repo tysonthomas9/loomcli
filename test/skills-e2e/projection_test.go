@@ -18,7 +18,6 @@ var delayedProjectionBecomesReadable = registry.Scenario{
 	Backends:  []string{"redis"},
 	Providers: []string{"minio"},
 	Cases: []registry.EdgeCase{
-		{ID: 63, Behavior: "Fleet reports projection pending truthfully", Rationale: "the real inline projection fails after durable append"},
 		{ID: 64, Behavior: "successful publication guarantees an immediate tree read", Rationale: "Loom does not return from import until the public tree query succeeds"},
 		{ID: 65, Behavior: "pending publication is polled with a bounded context-aware policy", Rationale: "the real background projection is delayed before import completes"},
 	},
