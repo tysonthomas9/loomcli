@@ -27,6 +27,7 @@ var (
 	updateAddLabels    []string
 	updateRemoveLabels []string
 	updateForce        bool
+	updateParent       string
 )
 
 var updateCmd = &cobra.Command{
@@ -101,6 +102,12 @@ func updateParamsFromFlags(cmd *cobra.Command) (backend.UpdateParams, bool, erro
 	}
 	if cmd.Flags().Changed("title") {
 		params.Title = &updateTitle
+		changed = true
+	}
+	// Changed(), not a non-empty check: --parent "" must mean "detach", which
+	// is indistinguishable from "flag omitted" by value alone.
+	if cmd.Flags().Changed("parent") {
+		params.Parent = &updateParent
 		changed = true
 	}
 	if applyLabelFlags(cmd, &params) {
@@ -238,6 +245,7 @@ func init() {
 	updateCmd.Flags().StringVar(&updateDesignFormat, "design-format", "", "Set design format (markdown or html)")
 	updateCmd.Flags().IntVar(&updatePriority, "priority", 0, "Set priority")
 	updateCmd.Flags().StringVar(&updateTitle, "title", "", "Set title")
+	updateCmd.Flags().StringVar(&updateParent, "parent", "", "Set parent issue ID (\"\" detaches); requires a fleet-db that accepts parent_id on PATCH — against an older server the whole update fails, not just this field")
 	updateCmd.Flags().StringVar(&updateDescription, "description", "", "Set description")
 	updateCmd.Flags().StringVar(&updateDescFile, "description-from-file", "", "Read description from file (use - for stdin)")
 	updateCmd.Flags().StringArrayVar(&updateAddDeps, "depends-on", nil, "Add dependency on issue ID (repeatable)")

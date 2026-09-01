@@ -332,6 +332,10 @@ func updateParamsToPatchRequest(params backend.UpdateParams) map[string]interfac
 	// Field rename: loom's IssueBackend uses "issue_type"; fleet-db's
 	// UpdateIssueRequest names the same field "type".
 	setStrField(req, "type", params.IssueType)
+	// Field rename: loom's IssueBackend uses "parent"; fleet-db's
+	// UpdateIssueRequest names the same field "parent_id". An empty string
+	// is meaningful here — it detaches the issue from its parent.
+	setStrField(req, "parent_id", params.Parent)
 	setStrField(req, "due_at", params.DueAt)
 	setStrField(req, "external_ref", params.ExternalRef)
 	return req

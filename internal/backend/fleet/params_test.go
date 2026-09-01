@@ -68,6 +68,7 @@ var fleetUpdateIssueFields = map[string]bool{
 	"type":          true,
 	"design":        true,
 	"design_format": true,
+	"parent_id":     true,
 	"notes":         true,
 	"owner":         true,
 	"due_at":        true,
@@ -113,6 +114,7 @@ func TestUpdateParamsToPatchRequest_ForwardsEachSupportedField(t *testing.T) {
 		{"notes", backend.UpdateParams{Notes: strPtr("a note")}, "a note"},
 		{"owner", backend.UpdateParams{Owner: strPtr("alice")}, "alice"},
 		{"type", backend.UpdateParams{IssueType: strPtr("epic")}, "epic"},
+		{"parent_id", backend.UpdateParams{Parent: strPtr("PUPPET-1")}, "PUPPET-1"},
 		{"due_at", backend.UpdateParams{DueAt: strPtr("2026-06-01T00:00:00Z")}, "2026-06-01T00:00:00Z"},
 		{"external_ref", backend.UpdateParams{
 			ExternalRef: strPtr("https://github.com/owner/repo/pull/42"),
@@ -143,6 +145,35 @@ func TestUpdateParamsToPatchRequest_ForwardsEachSupportedField(t *testing.T) {
 		if !covered[key] {
 			t.Errorf("converter emits %q with no case in this table", key)
 		}
+	}
+}
+
+// TestUpdateParamsToPatchRequest_RenamesParentToParentID pins the rename that
+// is silent when wrong: loom calls the field "parent", fleet-db's
+// UpdateIssueRequest calls it "parent_id", and a body carrying "parent" is
+// simply ignored by the server rather than rejected — the re-link appears to
+// succeed and nothing moves.
+func TestUpdateParamsToPatchRequest_RenamesParentToParentID(t *testing.T) {
+	req := updateParamsToPatchRequest(backend.UpdateParams{Parent: strPtr("PUPPET-1")})
+	if _, ok := req["parent"]; ok {
+		t.Error("parent key must be dropped — fleet-db expects 'parent_id'")
+	}
+	if got, ok := req["parent_id"]; !ok || got != "PUPPET-1" {
+		t.Errorf("parent_id = %v (present=%t), want %q", got, ok, "PUPPET-1")
+	}
+}
+
+// An empty Parent is the detach request, so it must travel as an explicit
+// empty string; dropping it the way a non-empty check would makes --parent ""
+// a silent no-op.
+func TestUpdateParamsToPatchRequest_EmptyParentDetaches(t *testing.T) {
+	req := updateParamsToPatchRequest(backend.UpdateParams{Parent: strPtr("")})
+	got, ok := req["parent_id"]
+	if !ok {
+		t.Fatal("parent_id absent for an empty Parent — detach must send the key")
+	}
+	if got != "" {
+		t.Errorf("parent_id = %v, want empty string", got)
 	}
 }
 
