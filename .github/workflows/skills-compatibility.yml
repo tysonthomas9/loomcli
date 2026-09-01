@@ -418,7 +418,7 @@ jobs:
         run: |
           set -euo pipefail
           export GOCACHE="$RUNNER_TEMP/loom-edge-coverage-cache"
-          go test -json ./internal/domain ./internal/cli/skill ./internal/infra/fleetdb ./internal/skillmat ./test/skills-e2e |
+          go test -json ./internal/domain ./internal/cli/skill ./internal/cireport ./internal/infra/fleetdb ./internal/skillmat ./test/skills-e2e |
             go run ./cmd/skills-edge-coverage extract -repository=loom -revision "$LOOM_SHA" \
               > "$GITHUB_WORKSPACE/loom-domain-evidence-v2.json"
 
@@ -431,11 +431,39 @@ jobs:
         run: |
           set -euo pipefail
           export GOCACHE="$RUNNER_TEMP/fleet-edge-ordinary-cache"
-          marked_tests='^Test(HTTPClientWorkspaceFileTransfer.*|SkillTreePointerUpdateDistinguishesMissingAndStalePreconditions|WorkspaceFileAPIRenameCreatesNewTreeAndReusesBlob|WorkspaceFileAPIConformance_(InvalidTransfersDoNotPublishEvents|ProjectionPendingIsAccepted|AppendFailureLeavesOnlyStagedBytes)|WorkspaceFileAPIRejectsMutatedTransferTokensWithDeliberateStatus|WorkspaceFileTreeRevisionCanonicalAndSensitive|WorkspaceFileTreeRevisionMatchesCrossRepositoryVectors|WorkspaceFileIdentitySeparatesMediaTypeAndExecutableFromSharedContent|SkillService_(UpdateValidatesRootSkillDocumentBeforeCAS|UpdateSourceMetadataDoesNotRequireFileTree)|WorkspaceFileService(IdenticalRetryPreservesFirstWriterAndOneEvent|VerifiesAllObjectsBeforeAppend|UploadTokenBindsEveryTransferClaim|RequiresExactlyOneObjectCredentialBeforeIO)|RedisStorage_Contract|ObjectStoreConformance|LocalObjectStoreRejectsWorkspaceSymlinkEscape|ObjectReferenceBindsWorkspaceHashAndSize|FleetPublicationCannotBypassPairedCompatibility|DeploymentRequiresSuccessfulProofForExactFleetImage)$'
+          marked_tests='^Test(HTTPClientWorkspaceFileTransfer.*|SkillTreePointerUpdateDistinguishesMissingAndStalePreconditions|WorkspaceFileAPIRenameCreatesNewTreeAndReusesBlob|WorkspaceFileAPIConformance_(InvalidTransfersDoNotPublishEvents|ProjectionPendingIsAccepted|AppendFailureLeavesOnlyStagedBytes)|WorkspaceFileAPIRejectsMutatedTransferTokensWithDeliberateStatus|WorkspaceFileTreeRevisionCanonicalAndSensitive|WorkspaceFileTreeRevisionMatchesCrossRepositoryVectors|WorkspaceFileIdentitySeparatesMediaTypeAndExecutableFromSharedContent|SkillService_(UpdateValidatesRootSkillDocumentBeforeCAS|UpdateSourceMetadataDoesNotRequireFileTree)|WorkspaceFileService(IdenticalRetryPreservesFirstWriterAndOneEvent|VerifiesAllObjectsBeforeAppend|UploadTokenBindsEveryTransferClaim|RequiresExactlyOneObjectCredentialBeforeIO)|RedisStorage_Contract|ObjectStoreConformance|LocalObjectStoreRejectsWorkspaceSymlinkEscape|ObjectReferenceBindsWorkspaceHashAndSize|InfrastructureFailureObserverIsExternalAndLeastPrivilege|FleetPublicationCannotBypassPairedCompatibility|DeploymentRequiresSuccessfulProofForExactFleetImage)$'
           go test -json ./pkg/client ./internal/api ./internal/models ./internal/service \
             ./internal/storage ./internal/storage/blob ./internal/releasegate -run "$marked_tests" |
             go run ./cmd/edge-case-coverage -revision "$FLEET_SHA" \
               > "$GITHUB_WORKSPACE/fleet-ordinary-evidence-v2.json"
+
+      - name: Extract Fleet release-architecture evidence
+        if: inputs.edge_readiness && matrix.backend == 'redis' && matrix.storage == 'local'
+        working-directory: fleet-db
+        shell: bash
+        env:
+          FLEET_SHA: ${{ needs.resolve.outputs.fleetdb_sha }}
+          FLEET_RELEASE_STAGE_EVIDENCE: "1"
+        run: |
+          set -euo pipefail
+          export GOCACHE="$RUNNER_TEMP/fleet-edge-release-cache"
+          go test -json ./internal/releasegate -run '^TestWorkspaceFileRoutesDeployBeforeStrictSkillShape$' |
+            go run ./cmd/edge-case-coverage -revision "$FLEET_SHA" \
+              > "$GITHUB_WORKSPACE/fleet-release-evidence-v2.json"
+
+      - name: Extract Fleet operational evidence
+        if: inputs.edge_readiness && matrix.backend == 'redis' && matrix.storage == 'local'
+        working-directory: fleet-db
+        shell: bash
+        env:
+          FLEET_SHA: ${{ needs.resolve.outputs.fleetdb_sha }}
+        run: |
+          set -euo pipefail
+          export GOCACHE="$RUNNER_TEMP/fleet-edge-operations-cache"
+          marked_tests='^Test(WorkspaceFileMetricsHaveFixedNamesLabelsAndCardinality|OperationalMetricsObserveProviderAndRetentionSeams|ApplyReportsOnlySafeBoundedDurableFailureDetails|ScrubDoesNotQuarantineTransientProviderFailure|OperatorCommandPlansThenAppliesThroughTheReconcileInterface|SkillService_Attach(FileTreeUsesConditionalAppender|FileTreeMapsAuthoritativeMismatch|SameTreeStalePreconditionRecordsStaleCAS)|WorkspaceFileService(RecordsPublicationAndOperationSeams|DirectDownloadUsesPublicationVerifiedMetadataWithoutReread))$'
+          go test -json ./internal/service ./internal/workspacefilemetrics ./internal/workspaceobjects ./cmd/fleet-workspace-objects -run "$marked_tests" |
+            go run ./cmd/edge-case-coverage -revision "$FLEET_SHA" \
+              > "$GITHUB_WORKSPACE/fleet-operations-evidence-v2.json"
 
       - name: Extract Fleet generated-contract evidence
         if: inputs.edge_readiness && matrix.backend == 'redis' && matrix.storage == 'local'
@@ -461,7 +489,7 @@ jobs:
           set -euo pipefail
           export GOCACHE="$RUNNER_TEMP/fleet-edge-redis-cache"
           go test -json -tags integration ./internal/storage/integrationtest ./internal/projection \
-            -run '^Test(RedisSkillDescriptionAndTreeCASIsAtomic|RedisWorkspaceFilePublication.*|WorkspaceFileProjectionRestartRetriesFailedEvent)$' |
+            -run '^Test(RedisSkillDescriptionAndTreeCASIsAtomic|RedisWorkspaceFilePublication.*|RedisWorkspaceFileTreeIsAtomicallyVisibleOrAbsent|WorkspaceFileProjectionRestartRetriesFailedEvent)$' |
             go run ./cmd/edge-case-coverage -revision "$FLEET_SHA" \
               > "$GITHUB_WORKSPACE/fleet-redis-evidence-v2.json"
 
@@ -476,7 +504,7 @@ jobs:
           set -euo pipefail
           export GOCACHE="$RUNNER_TEMP/fleet-edge-postgres-cache"
           go test -json -tags integration ./internal/storage/postgres ./internal/projection \
-            -run '^Test(PostgresStorage_Contract|PostgresSkillDescriptionAndTreeCASIsAtomic|PostgresWorkspaceFilePublication.*|PostgresWorkspaceFileProjectionRestartRetriesFailedEvent)$' |
+            -run '^Test(PostgresStorage_Contract|PostgresSkillDescriptionAndTreeCASIsAtomic|PostgresWorkspaceFilePublication.*|PostgresWorkspaceFileTreeIsAtomicallyVisibleOrAbsent|PostgresWorkspaceFileProjectionRestartRetriesFailedEvent)$' |
             go run ./cmd/edge-case-coverage -revision "$FLEET_SHA" \
               > "$GITHUB_WORKSPACE/fleet-postgres-evidence-v2.json"
 
@@ -490,8 +518,9 @@ jobs:
         run: |
           set -euo pipefail
           export GOCACHE="$RUNNER_TEMP/fleet-edge-minio-cache"
-          go test -json ./internal/api ./internal/storage/blob \
-            -run '^(TestWorkspaceFileS3SignedUploadBindsLengthTypeAndChecksum|TestWorkspaceFileMinIOOutageBeforeVerificationPublishesNoEvent|TestS3ProviderUsesWorkspaceContentAddressedKey)$' |
+          go test -json -tags integration ./internal/api ./internal/storage/blob ./internal/service \
+            ./internal/workspacefileconfig ./internal/workspaceobjects ./cmd/fleet-workspace-objects \
+            -run '^(TestWorkspaceFileS3SignedUploadBindsLengthTypeAndChecksum|TestWorkspaceFileMinIOOutageBeforeVerificationPublishesNoEvent|TestS3ProviderUsesWorkspaceContentAddressedKey|TestMinIOVersioningRemainsRecoveryMetadataNotSkillIdentity|TestWorkspaceFileDirectDownloadRealMinIOHasZeroFleetProviderBandwidth|TestRealMinIOLifecycleIsLongerThanFleetRootsAndGrace|TestWorkspaceObjectOperationsRealProvider|TestWorkspaceObjectScrubRealMinIOCorruptionQuarantinesTree|TestOperatorCommandRealProviderPlansAndCollectsInterruptedUpload)$' |
             go run ./cmd/edge-case-coverage -revision "$FLEET_SHA" \
               > "$GITHUB_WORKSPACE/fleet-minio-evidence-v2.json"
 
@@ -505,6 +534,8 @@ jobs:
             e2e-coverage-${{ matrix.backend }}-${{ matrix.storage }}-projection.json
             loom-domain-evidence-v2.json
             fleet-ordinary-evidence-v2.json
+            fleet-release-evidence-v2.json
+            fleet-operations-evidence-v2.json
             fleet-generated-contract-evidence-v2.json
             fleet-redis-evidence-v2.json
             fleet-postgres-evidence-v2.json
