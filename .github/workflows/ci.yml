@@ -43,7 +43,7 @@ jobs:
           make build
 
       - name: Validate release skills contract
-        run: make test-skills-release-contract
+        run: go test ./internal/cireport -count=1
 
       - name: make check-go
         run: make check-go
