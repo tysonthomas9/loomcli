@@ -11,7 +11,10 @@ setup: >-
   -d '{"name":"e2e-ws-2","type":"empty"}' >/dev/null; echo "ensured e2e-ws-2"
 teardown: >-
   "$AFT_TESTS_DIR/scripts/close-open-issues.sh";
-  AFT_WS=E2E-WS-2 "$AFT_TESTS_DIR/scripts/close-open-issues.sh"
+  AFT_WS=E2E-WS-2 "$AFT_TESTS_DIR/scripts/close-open-issues.sh";
+  curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-2/issues?include_blocked=true&limit=100" |
+  python3 -c 'import json,os,sys; title="graph move "+os.environ.get("RUN_ID", "local"); print("\\n".join(str(i["id"]) for i in json.load(sys.stdin).get("data", []) if i.get("title")==title))' |
+  while IFS= read -r id; do [ -z "$id" ] || curl -sf -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-2/issues/$id" >/dev/null; done
 
 tests:
   # covers: LCLI-WP-004 partial (API-driven create/remove + board/graph reflection —
@@ -229,3 +232,13 @@ tests:
       - run: >-
           python3 -c 'import json,os; title="graph move "+os.environ["RUN_ID"]; issues=json.load(open(os.environ["AFT_WORK_DIR"]+"/graphMoveTargetIssues")); assert sum(i.get("title")==title for i in issues)==1, issues'
         intent: "An operator's readback confirms exactly one moved issue persisted in the target workspace"
+      - run: >-
+          id="$(python3 -c 'import json,os; title="graph move "+os.environ["RUN_ID"]; issues=json.load(open(os.environ["AFT_WORK_DIR"]+"/graphMoveTargetIssues")); print(next(i["id"] for i in issues if i.get("title")==title))')";
+          curl -sf -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-2/issues/$id" >/dev/null
+        intent: "An operator removes the moved fixture so the second workspace remains empty for later suites"
+      - open: /ws/E2E-WS-2/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the target workspace board rerenders after fixture removal"
+      - expect: { visible: { testid: empty-workspace-board } }
