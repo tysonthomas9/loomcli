@@ -159,4 +159,10 @@ type Filter struct {
 	Status    SessionStatus `json:"status,omitempty"`
 	Since     time.Time     `json:"since,omitempty"`
 	Until     time.Time     `json:"until,omitempty"`
+
+	// KnownAgents, when non-empty, restricts results to records whose AgentName
+	// appears in it. Health readers pass the workspace's configured agents so a
+	// stray writer cannot move a success-rate threshold. An empty (or nil) slice
+	// disables the filter, so existing callers and tests are unaffected.
+	KnownAgents []string `json:"known_agents,omitempty"`
 }
