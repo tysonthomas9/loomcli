@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/agentprofiles"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
@@ -141,7 +143,12 @@ type sessionScanResult struct {
 
 // scanSessionDirs checks session directories for anomalies: missing metadata,
 // missing index entries, and leftover temp files.
-func scanSessionDirs(sessDir string, indexedIDs map[string]bool) (sessionScanResult, error) {
+//
+// knownAgents mirrors the allowlist applied to indexedIDs. Both sides of the
+// comparison must cover the same set of sessions: a directory whose agent is
+// filtered out of the index would otherwise be reported as orphaned, and
+// --fix would re-append it to the index on every run.
+func scanSessionDirs(store *sessions.Store, sessDir string, indexedIDs map[string]bool, knownAgents []string) (sessionScanResult, error) {
 	dirEntries, err := os.ReadDir(sessDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -164,6 +171,16 @@ func scanSessionDirs(sessDir string, indexedIDs map[string]bool) (sessionScanRes
 			continue
 		}
 
+		// Skip sessions belonging to agents the allowlist excludes, so they
+		// are neither reported nor re-indexed. Half-written dirs are reported
+		// above regardless: with no metadata.json there is no agent to check.
+		if len(knownAgents) > 0 {
+			meta, loadErr := store.LoadMetadata(name)
+			if loadErr == nil && !slices.Contains(knownAgents, meta.AgentName) {
+				continue
+			}
+		}
+
 		// Check orphaned first — if not in index, that's the primary issue.
 		// Skip tmp check for orphaned dirs to avoid double-counting.
 		if !indexedIDs[name] {
@@ -181,8 +198,11 @@ func scanSessionDirs(sessDir string, indexedIDs map[string]bool) (sessionScanRes
 
 // queryIndexedSessionIDs returns all session IDs present in the index.
 // Also triggers auto-healing of stale running sessions as a side effect of Query.
-func queryIndexedSessionIDs(store *sessions.Store) (map[string]bool, error) {
-	records, err := store.Query(sessions.Filter{})
+//
+// knownAgents is the workspace's configured-agent allowlist; nil or empty means
+// no filtering, so a workspace without a profiles/ directory behaves as before.
+func queryIndexedSessionIDs(store *sessions.Store, knownAgents []string) (map[string]bool, error) {
+	records, err := store.Query(sessions.Filter{KnownAgents: knownAgents})
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +218,8 @@ func checkStaleSessionRecords() CheckResult {
 	if err != nil {
 		return CheckResult{} // skip — sessions store not available
 	}
-	indexedIDs, err := queryIndexedSessionIDs(sessStore)
+	knownAgents := agentprofiles.ConfiguredAgentNames(cli.GetWorkspaceRuntimeDir())
+	indexedIDs, err := queryIndexedSessionIDs(sessStore, knownAgents)
 	if err != nil {
 		return CheckResult{
 			Name:    "stale_sessions",
@@ -207,7 +228,7 @@ func checkStaleSessionRecords() CheckResult {
 			Detail:  err.Error(),
 		}
 	}
-	scan, scanErr := scanSessionDirs(sessStore.Dir(), indexedIDs)
+	scan, scanErr := scanSessionDirs(sessStore, sessStore.Dir(), indexedIDs, knownAgents)
 	if scanErr != nil {
 		return CheckResult{
 			Name:    "stale_sessions",
