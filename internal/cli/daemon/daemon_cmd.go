@@ -19,7 +19,9 @@ import (
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/fleetdbcap"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
+	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -413,6 +415,22 @@ func initDaemonServices(config *cfgpkg.DaemonConfig, projectDir string, paths da
 		st = storeHandle.Store
 	}
 
+	// Capability preflight runs here — after the store is open and BEFORE
+	// NewDaemon, so an incompatible fleet-db exits from upstream of
+	// runDaemonMainLoop and PrintDaemonBanner is never reached. A daemon that
+	// prints a healthy banner and then fails every spawn is the failure this
+	// exists to prevent.
+	report := runtimepreflight.CheckFleetDB(cmdstore.RootContext(), capabilityStoreOf(st), fleetdbcap.Requirements(), runtimepreflight.ModeFromEnv())
+	report.Endpoint = storeHandle.URL()
+	slog.Info("fleet-db capability preflight", report.LogAttrs()...)
+	if report.Fatal() {
+		fmt.Fprintln(os.Stderr, report.Message())
+		if storeHandle != nil {
+			_ = storeHandle.Close()
+		}
+		os.Exit(1)
+	}
+
 	daemon, err := NewDaemon(config, projectDir, eventBus, cli.DefaultIssueBackend(), st)
 	if err != nil {
 		if storeHandle != nil {
@@ -422,8 +440,35 @@ func initDaemonServices(config *cfgpkg.DaemonConfig, projectDir string, paths da
 		os.Exit(1)
 	}
 	daemon.storeHandle = storeHandle
+	daemon.preflight = report
+	// Stop making the doomed call: 774 pointless lease round trips in one
+	// incident came from a fleet-db that never served the route. The Part-1
+	// runtime classification remains the backstop for a mid-run regression.
+	daemon.sup.LeasesDisabled = missingCapability(report, "skill-materialization-leases")
 
 	return shutdown, daemon
+}
+
+// capabilityStoreOf returns st's capability store, or nil when there is no
+// store at all. A nil CapabilityStore makes the preflight a no-op rather than
+// a failure, which is what a store-less run needs.
+func capabilityStoreOf(st store.Store) store.CapabilityStore {
+	if st == nil {
+		return nil
+	}
+	return st.Capabilities()
+}
+
+// missingCapability reports whether the preflight positively established that
+// the named capability is absent. Unreachable/unverified reports establish
+// nothing, so they leave the feature enabled.
+func missingCapability(report runtimepreflight.Report, name string) bool {
+	for _, m := range report.Missing {
+		if m.Capability == name {
+			return true
+		}
+	}
+	return false
 }
 
 // runDaemonMainLoop starts the daemon, state updater, and waits for shutdown.
@@ -431,7 +476,7 @@ func initDaemonServices(config *cfgpkg.DaemonConfig, projectDir string, paths da
 // supervisor goroutine died (panic, unexpected return, or liveness watchdog
 // timeout).
 func runDaemonMainLoop(config *cfgpkg.DaemonConfig, projectDir string, paths daemonPaths, shutdown chan struct{}, daemon *Daemon, lockFile *os.File, cleanup func()) int {
-	cli.PrintDaemonBanner(config, projectDir)
+	cli.PrintDaemonBanner(config, projectDir, daemon.preflight.BannerLines())
 
 	maxRetries := 3
 	if config.Daemon.RestartPolicy.MaxRetries != nil {

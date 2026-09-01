@@ -140,6 +140,14 @@ type Supervisor struct {
 	// ControlStore is the fleet-db-backed control plane used for node,
 	// session, lease, terminal, artifact, and command records.
 	ControlStore store.Store
+
+	// LeasesDisabled suppresses skill-materialization lease acquisition for
+	// the process lifetime, set at boot when the capability preflight found
+	// the fleet-db does not serve the lease routes. Without it every spawn
+	// pays a round trip that can only fail before falling through to the
+	// same unlocked materialization.
+	LeasesDisabled bool
+
 	NodeID       string
 	NodeTTL      time.Duration
 	NodeInterval time.Duration
