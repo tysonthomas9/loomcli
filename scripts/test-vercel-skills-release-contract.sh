@@ -9,6 +9,7 @@ workflow="$ROOT/.github/workflows/skills-compatibility.yml"
 makefile="$ROOT/Makefile"
 skills_e2e="$ROOT/test/skills-e2e/lifecycle_test.go"
 skills_e2e_provider="$ROOT/test/skills-e2e/provider_test.go"
+skills_e2e_revisions="$ROOT/test/skills-e2e/revision_manifest_test.go"
 skills_e2e_coverage="$ROOT/test/skills-e2e/coverage_test.go"
 skills_e2e_manifest="$ROOT/test/skills-e2e/testdata/exact-round-trip/expected.json"
 
@@ -114,11 +115,19 @@ require_fixed "$skills_e2e_coverage" 'func TestMain(m *testing.M)'
 require_fixed "$skills_e2e_coverage" 'registry.WriteCoverageFile(output)'
 require_fixed "$compat" 'SKILLS_EDGE_REVISION="$loom_sha"'
 require_fixed "$workflow" 'E2E_COVERAGE_OUTPUT: ${{ github.workspace }}/e2e-coverage-${{ matrix.backend }}-${{ matrix.storage }}.json'
+require_fixed "$workflow" 'SKILLS_E2E_REVISION_MANIFEST: ${{ github.workspace }}/skills-compatibility-revisions.txt'
+require_fixed "$workflow" 'SKILLS_E2E_REVISION_MANIFEST: ${{ github.workspace }}/gcs-provider-revisions.txt'
 require_fixed "$workflow" 'e2e-coverage-${{ matrix.backend }}-${{ matrix.storage }}.json'
 require_fixed "$workflow" 'real_processes=loom-cli,fleet-db,$PERSISTENCE_BACKEND,redis,projector,http,$object_provider'
 require_fixed "$workflow" 'skills-compatibility-${{ matrix.backend }}-${{ matrix.storage }}-revisions-${{ github.run_id }}-${{ github.run_attempt }}'
 require_fixed "$workflow" 'go run ./cmd/skills-edge-coverage readiness "${reports[@]}"'
 require_fixed "$workflow" 'go run ./cmd/edge-case-coverage -revision "$FLEET_SHA"'
+require_fixed "$workflow" './pkg/client ./internal/api ./internal/models ./internal/service'
+require_fixed "$workflow" './internal/storage ./internal/storage/blob ./internal/releasegate'
+require_fixed "$workflow" 'RedisSkillDescriptionAndTreeCASIsAtomic|RedisWorkspaceFilePublication.*|WorkspaceFileProjectionRestartRetriesFailedEvent'
+require_fixed "$workflow" 'PostgresStorage_Contract|PostgresSkillDescriptionAndTreeCASIsAtomic|PostgresWorkspaceFilePublication.*|PostgresWorkspaceFileProjectionRestartRetriesFailedEvent'
+require_fixed "$workflow" 'TestWorkspaceFileS3SignedUploadBindsLengthTypeAndChecksum|TestWorkspaceFileMinIOOutageBeforeVerificationPublishesNoEvent|TestS3ProviderUsesWorkspaceContentAddressedKey'
+require_fixed "$workflow" 'TestWorkspaceFileS3SignedUploadBindsLengthTypeAndChecksum|TestS3ProviderUsesWorkspaceContentAddressedKey'
 require_fixed "$workflow" 'name: Exact 1-95 edge-case readiness'
 require_fixed "$workflow" 'name: Existing GCS bucket provider gate'
 require_fixed "$workflow" 'FLEET_WORKSPACE_FILE_S3_ENDPOINT=https://storage.googleapis.com'
@@ -129,6 +138,8 @@ require_fixed "$workflow" 'SKILLS_E2E_PROVIDER: gcs'
 require_fixed "$workflow" 'TestWorkspaceFile(APIConformance_S3Compatible|S3SignedUploadRejectsTamperingAndWrongMethod|S3SignedUploadExpires)'
 require_fixed "$skills_e2e_provider" 'func TestGCSPresignedRoundTrip'
 require_fixed "$skills_e2e_provider" 'gcsPresignedRoundTrip.Covers(t)'
+require_fixed "$skills_e2e_revisions" 'func TestCompatibilityRevisionManifestMatchesProviderRun'
+require_fixed "$skills_e2e_revisions" 'Cases:    []registry.EdgeCase{{ID: 81}}'
 
 # The release log must identify every input to the compatibility result.
 require_fixed "$compat" 'Compatibility revisions: loomcli=$loom_sha fleetdb=$fleet_db_sha vercel_skills=$actual_vercel_ref'

@@ -110,6 +110,75 @@ func TestWorkspaceFileStorePublishesAndDownloadsBinaryTree(t *testing.T) {
 	}
 }
 
+func TestWorkspaceFileStoreRenameCreatesNewTreeAndReusesBlob(t *testing.T) {
+	registry.MarkEvidence(t, 22)
+
+	content := []byte("shared bytes")
+	digest := workspaceFileTestDigest(content)
+	createdAt := time.Date(2026, time.August, 31, 12, 0, 0, 0, time.UTC)
+	var publications atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/file-uploads"):
+			writeWorkspaceFileTestJSON(w, http.StatusCreated, map[string]any{
+				"upload_token": "upload", "method": http.MethodPut, "url": "/transfer", "expires_at": time.Now().Add(time.Minute),
+			})
+		case r.Method == http.MethodPut && r.URL.Path == "/transfer":
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/file-trees"):
+			var request publishWorkspaceFileTreeRequestWire
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Errorf("decode publication: %v", err)
+				return
+			}
+			if len(request.Files) != 1 || request.Files[0].ContentHash != digest {
+				t.Errorf("publication = %#v, want one shared-content file", request.Files)
+				return
+			}
+			sequence := publications.Add(1)
+			revision := "wft1_original"
+			if sequence == 2 {
+				revision = "wft1_renamed"
+			}
+			writeWorkspaceFileTestJSON(w, http.StatusCreated, map[string]any{
+				"workspace_key": "FLEET", "revision": revision, "created_by": "alice", "created_at": createdAt,
+				"files": []map[string]any{{
+					"path": request.Files[0].Path, "blob_ref": "blob_shared_bytes", "content_hash": digest,
+					"size_bytes": len(content), "media_type": "text/plain", "revision": "wff1_shared",
+				}},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	files := newWorkspaceFileTestStore(t, server.URL, "alice", "")
+	original, err := files.Publish(t.Context(), "FLEET", []domain.WorkspaceFileInput{{Path: "docs/old.md", Bytes: content, MediaType: "text/plain"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	renamed, err := files.Publish(t.Context(), "FLEET", []domain.WorkspaceFileInput{{Path: "docs/new.md", Bytes: content, MediaType: "text/plain"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if original.Tree.Revision == renamed.Tree.Revision {
+		t.Fatalf("rename retained tree revision %q", original.Tree.Revision)
+	}
+	if got, want := original.Tree.Files[0].Path, "docs/old.md"; got != want {
+		t.Fatalf("original path = %q, want %q", got, want)
+	}
+	if got, want := renamed.Tree.Files[0].Path, "docs/new.md"; got != want {
+		t.Fatalf("renamed path = %q, want %q", got, want)
+	}
+	if got, want := renamed.Tree.Files[0].BlobRef, original.Tree.Files[0].BlobRef; got != want {
+		t.Fatalf("rename blob ref = %q, want reused %q", got, want)
+	}
+	if got, want := renamed.Tree.Files[0].ContentHash, original.Tree.Files[0].ContentHash; got != want {
+		t.Fatalf("rename content hash = %q, want reused %q", got, want)
+	}
+}
+
 func TestWorkspaceFileStorePreservesPublishStatuses(t *testing.T) {
 	t.Parallel()
 
