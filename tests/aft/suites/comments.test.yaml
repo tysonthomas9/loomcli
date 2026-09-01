@@ -9,8 +9,18 @@ teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 tests:
   # covers: LCLI-IW-013; LCLI-RA-006; CommentForm; ActivityLog; comments API
   - name: agent and human comments render in panel activity
-    intent: An agent posts ordered comments and lifecycle transitions through the workspace API, then a human commenter submits through CommentForm while API readback verifies persistence under the configured web-stack actor
+    intent: An agent's API mutations stream into an already-open human UI, then a human commenter submits through CommentForm while API readback verifies persistence under the configured web-stack actor
     steps:
+      # Mount the human surface before any agent mutation. This is deliberately
+      # part of the journey rather than fixture setup: every following API
+      # mutation must be observed through the live board/activity UI, and its
+      # step screenshot then carries actual frontend evidence instead of a
+      # capture of about:blank.
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready to receive streamed agent changes"
       - api:
           method: "POST"
           path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
@@ -22,36 +32,8 @@ tests:
             - from: "data.id"
               as: "commentsId"
         intent: "An agent creates the comments timeline issue at priority 2"
-      - api:
-          method: "POST"
-          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:commentsId}/comments"
-          body:
-            text: "first api comment $RUN_ID"
-        intent: "An agent posts the first ordered comment on the timeline issue"
-      - api:
-          method: "POST"
-          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:commentsId}/comments"
-          body:
-            text: "second api comment $RUN_ID"
-        intent: "An agent posts the second ordered comment on the timeline issue"
-      - api:
-          method: "POST"
-          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:commentsId}/close"
-          body:
-            reason: "aft-close-evidence"
-        intent: "An agent closes the timeline issue with recorded evidence"
-      - api:
-          method: "POST"
-          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:commentsId}/reopen"
-          body:
-            reason: "aft-reopen-evidence"
-        intent: "An agent reopens the timeline issue for the human comment flow"
-      - open: /ws/E2E-WS/kanban
-      - wait:
-          fn: >-
-            !!document.querySelector('[data-testid=board-toolbar]')
-        intent: "Wait until the workspace board is ready"
       - wait: { text: comments timeline }
+        intent: "Wait until the newly created agent issue streams into the rendered board"
       - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
       - click: { selector: "section[data-status=ready] article", first: true }
       - wait:
@@ -59,6 +41,49 @@ tests:
             document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open'
         intent: "Wait until the selected issue detail panel is open"
       - expect: { visible: { testid: activity-log } }
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:commentsId}/comments"
+          body:
+            text: "first api comment $RUN_ID"
+        intent: "An agent posts the first ordered comment on the timeline issue"
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('[data-testid=activity-comment]')).some((n) => n.textContent.includes('first api comment ${RUN_ID:-local}'))
+        intent: "Wait until the first agent comment streams into the open activity log"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:commentsId}/comments"
+          body:
+            text: "second api comment $RUN_ID"
+        intent: "An agent posts the second ordered comment on the timeline issue"
+      # Both comments must be present before the lifecycle transitions so this
+      # checkpoint detects an SSE/UI synchronization regression at the second
+      # mutation, not only in the final state.
+      - wait:
+          fn: >-
+            (() => { const text = document.querySelector('[data-testid=activity-log]')?.textContent || ''; return text.indexOf('first api comment ${RUN_ID:-local}') >= 0 && text.indexOf('second api comment ${RUN_ID:-local}') > text.indexOf('first api comment ${RUN_ID:-local}'); })()
+        intent: "Wait until the second agent comment streams in after the first one"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:commentsId}/close"
+          body:
+            reason: "aft-close-evidence"
+        intent: "An agent closes the timeline issue with recorded evidence"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=status-dropdown]')?.getAttribute('data-status') === 'closed'
+        intent: "Wait until the agent close streams into the open issue status control"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:commentsId}/reopen"
+          body:
+            reason: "aft-reopen-evidence"
+        intent: "An agent reopens the timeline issue for the human comment flow"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=status-dropdown]')?.getAttribute('data-status') === 'open'
+        intent: "Wait until the agent reopen streams into the open issue status control"
       # comments load async after the panel opens; close/reopen REASONS also
       # render as activity-comment nodes, so assert at-least rather than exact
       - wait:
