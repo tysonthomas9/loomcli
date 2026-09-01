@@ -705,6 +705,41 @@ func TestMaterializeBoundsAndReclaimsRecoveryGenerations(t *testing.T) {
 	}
 }
 
+func TestMaterializeRecoveryRemovesAtMostOneGenerationPerInvocation(t *testing.T) {
+	target := t.TempDir()
+	skill, st := atomicityFixture()
+	mustMaterialize(t, st, target, "initial Materialize")
+	want := snapshotMaterializedProjection(t, target)
+	for i := 1; i <= 2; i++ {
+		abandoned := filepath.Join(target, filepath.FromSlash(projectionGenerationsDir), fmt.Sprintf("%024x", i))
+		if err := os.MkdirAll(abandoned, 0o700); err != nil {
+			t.Fatalf("plant abandoned generation %d: %v", i, err)
+		}
+		if err := os.WriteFile(filepath.Join(abandoned, "leftover"), []byte("x"), 0o600); err != nil {
+			t.Fatalf("plant abandoned file %d: %v", i, err)
+		}
+	}
+	updateAtomicityFixture(skill)
+
+	err := materialize(t.Context(), st, "WS", "lead", target)
+	if err == nil || !strings.Contains(err.Error(), "additional abandoned") {
+		t.Fatalf("Materialize error = %v, want bounded recovery refusal", err)
+	}
+	if got := retainedGenerationCount(t, target); got != 1 {
+		t.Fatalf("retained generations after one recovery pass = %d, want 1", got)
+	}
+	if got := snapshotMaterializedProjection(t, target); !reflect.DeepEqual(got, want) {
+		t.Fatalf("bounded recovery changed the current projection:\n got: %#v\nwant: %#v", got, want)
+	}
+
+	mustMaterialize(t, st, target, "second bounded recovery Materialize")
+	assertNoRetainedGenerations(t, target)
+	got, readErr := os.ReadFile(filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "alpha", "SKILL.md"))
+	if readErr != nil || !strings.Contains(string(got), "new body") {
+		t.Fatalf("post-recovery projection = %q, err=%v, want updated generation", got, readErr)
+	}
+}
+
 func retainedGenerationCount(t *testing.T, target string) int {
 	t.Helper()
 	entries, err := os.ReadDir(filepath.Join(target, filepath.FromSlash(projectionGenerationsDir)))

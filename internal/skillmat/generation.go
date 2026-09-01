@@ -201,9 +201,15 @@ func cleanupAbandonedGenerations(root secureRoot) error {
 		if !generationBasePattern.MatchString(base) {
 			return fmt.Errorf("unexpected path %q in skill projection generations", base)
 		}
-		if err := removeProjectionTree(root, path.Join(projectionGenerationsDir, base)); err != nil {
-			return fmt.Errorf("remove abandoned skill projection generation %q: %w", base, err)
-		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	if err := removeProjectionTree(root, path.Join(projectionGenerationsDir, names[0])); err != nil {
+		return fmt.Errorf("remove abandoned skill projection generation %q: %w", names[0], err)
+	}
+	if len(names) > 1 {
+		return fmt.Errorf("additional abandoned skill projection generations remain after bounded recovery; retry materialization")
 	}
 	return nil
 }

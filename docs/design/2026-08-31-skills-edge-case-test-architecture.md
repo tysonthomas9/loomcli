@@ -369,10 +369,11 @@ Generation cloning streams regular files rather than loading unrecorded files
 into memory. Preserved content is bounded to 16 MiB per file and 64 MiB across
 the generation; exceeding either limit fails before exchange and removes the
 stage. Loom securely removes failed stages, removes the displaced generation
-after a successful exchange, and clears at most one recovery generation before
-starting another update. A post-commit cleanup error is returned explicitly as
-such: the new complete generation remains current, and the next locked
-invocation finishes reclamation before doing further work.
+after a successful exchange, and clears at most one recovery generation per
+invocation. If another recovery generation remains, Loom returns before
+staging and the caller retries. A post-commit cleanup error is returned
+explicitly as such: the new complete generation remains current, and the next
+locked invocation finishes reclamation before doing further work.
 
 A failpoint controls when a real implementation fails; it does not return a
 fabricated successful result. Every fault control must provide a deterministic
