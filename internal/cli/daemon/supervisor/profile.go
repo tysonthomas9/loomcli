@@ -37,6 +37,7 @@ var (
 	ErrProfileManifestMissing     = agentprofile.ErrManifestMissing
 	ErrProfileManifestUnreadable  = agentprofile.ErrManifestUnreadable
 	ErrProfileFingerprintMismatch = agentprofile.ErrFingerprintMismatch
+	ErrProfileManagedContentDrift = agentprofile.ErrManagedContentDrift
 	ErrProfileVersionDrift        = agentprofile.ErrVersionDrift
 	ErrProfileVersionUnknown      = agentprofile.ErrVersionUnknown
 )
@@ -311,6 +312,10 @@ func CheckProfileManifest(dir, binary string) error {
 // A major jump still refuses, and so does an unparseable version on either
 // side: those are the cases where "probably fine" is not a defensible guess.
 // Every other sentinel — fingerprint mismatch above all — is untouched.
+// ErrManagedContentDrift is one of those: a provisioned settings key that was
+// changed or removed underneath the agent refuses the boot, exactly like a
+// fingerprint mismatch, because it is the same fault reported by the scheme
+// that can tell it apart from the harness merely re-serializing the file.
 func checkProfileManifest(dir, binary string) error {
 	err := verifyProfileManifest(dir, binary)
 	if err == nil {
