@@ -1,0 +1,19 @@
+{
+  "schema_version": "skills-edge-evidence/v2",
+  "repository": "fleet",
+  "revision": "fleet-golden-sha",
+  "evidence": [
+    {
+      "id": 50,
+      "package": "github.com/BrowserOperator/fleet-db/internal/storage",
+      "test": "TestRedisWorkspaceFilePublicationAcceptsOneConcurrentCreation",
+      "backend": "redis"
+    },
+    {
+      "id": 50,
+      "package": "github.com/BrowserOperator/fleet-db/internal/storage/postgres",
+      "test": "TestPostgresWorkspaceFilePublicationAcceptsOneConcurrentCreation",
+      "backend": "postgres"
+    }
+  ]
+}

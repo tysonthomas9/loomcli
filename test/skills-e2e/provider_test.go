@@ -11,12 +11,8 @@ import (
 )
 
 var gcsPresignedRoundTrip = registry.Scenario{
-	ID:        "gcs-presigned-roundtrip",
-	Behavior:  "the production GCS XML path publishes and materializes exact Skill bytes",
-	Owner:     "loom",
-	Seam:      "loom-fleet-e2e",
-	Backends:  []string{"redis"},
-	Providers: []string{"gcs"},
+	ID:       "gcs-presigned-roundtrip",
+	Behavior: "the production GCS XML path publishes and materializes exact Skill bytes",
 }
 
 func TestGCSPresignedRoundTrip(t *testing.T) {

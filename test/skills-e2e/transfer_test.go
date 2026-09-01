@@ -10,14 +10,10 @@ import (
 )
 
 var corruptDownloadIsRejected = registry.Scenario{
-	ID:        "corrupt-download-is-rejected",
-	Behavior:  "materialization rejects object bytes changed in transit",
-	Owner:     "loom",
-	Seam:      "loom-fleet-e2e",
-	Backends:  []string{"redis", "postgres"},
-	Providers: []string{"minio"},
+	ID:       "corrupt-download-is-rejected",
+	Behavior: "materialization rejects object bytes changed in transit",
 	Cases: []registry.EdgeCase{
-		{ID: 34, Behavior: "download size and SHA-256 are verified before bytes are returned", Rationale: "a real proxy truncates provider bytes and the public materialize command rejects them"},
+		{ID: 34},
 	},
 }
 

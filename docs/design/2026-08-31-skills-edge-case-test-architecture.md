@@ -77,16 +77,21 @@ Each artifact has one job:
 | Go scenario | State the user-observable behavior being proved |
 | Checked-in fixture | Make exact inputs and expected bytes reviewable |
 | Harness module | Hide real-process invocation, faults, polling, evidence, and cleanup |
-| Go registry | Map covered case IDs to owners, seams, tests, and required matrices |
-| Generated YAML artifact | Provide a language-neutral CI report without becoming an authored source |
+| Canonical Go catalog | Own all 1-95 behaviors, primary owners, seams, explicit required coordinates, and N/A decisions |
+| ID-only test marker | Bind a canonical ID to one executable top-level test without repeating catalog facts |
+| Generated JSON shard | Record only passing test identity and actual repository/backend/provider coordinates |
+| Readiness aggregator | Merge Loom/Fleet shards and report every missing explicit coordinate |
 | Design document | Record why seams, policies, and exclusions were chosen |
 | TDD loop | Reproduce one behavior before making its smallest owning-seam fix |
 
 YAML is neither the scenario language nor an authored registry. Distributed
 scenarios require concurrency, cancellation, restart, and rich failure
 reporting; encoding those operations in YAML would create an untyped interpreter
-that is harder to understand than Go. Covered metadata lives beside executable
-behavior in typed Go. CI renders that metadata to YAML only for evidence.
+that is harder to understand than Go. Test-local metadata contains only an ID;
+the one deliberate central semantic catalog keeps each canonical behavior,
+owner, seam, decision, and minimal coordinate list in one reviewable typed row.
+CI emits versioned JSON evidence from actual passing processes. Any YAML view is
+generated output only.
 
 The first reviewable implementation is deliberately small: one lifecycle
 scenario, one harness implementation, one fixture family, and only the registry
@@ -231,44 +236,40 @@ Assertions must not call production hashing or manifest code to derive their
 expected values at test time. Domain golden vectors and the E2E fixture manifest
 share reviewed literals but do not share the production implementation.
 
-## Executable E2E coverage
+## Executable evidence and canonical accountability
 
-Each covered scenario is declared immediately above its executable E2E test. A
-typed declaration owns the stable ID, behavior, owner, seam, required matrix,
-and any covered edge-case IDs:
+Each public scenario remains immediately above its executable E2E test. The
+scenario is readable, but evidence repeats only canonical IDs:
 
 ```go
 var concurrentTreePublication = registry.Scenario{
-    ID:        "concurrent-tree-publication",
-    Behavior:  "concurrent publication creates one logical tree",
-    Owner:     "fleet",
-    Seam:      "fleet-publication",
-    Backends:  []string{"redis", "postgres"},
-    Providers: []string{"minio"},
-    Cases: []registry.EdgeCase{{
-        ID: 50,
-        Behavior: "concurrent publication creates one logical tree",
-        Rationale: "publication atomicity varies by persistence adapter",
-    }},
+    ID:       "concurrent-tree-publication",
+    Behavior: "concurrent imports select the same accepted revision",
+    Cases:    []registry.EdgeCase{{ID: 50}},
 }
 ```
 
-The executable test calls `concurrentTreePublication.Covers(t)`. That call
-derives the test name and covered status, validates the metadata, and records
-the scenario in the current test process.
+Ordinary owning-package tests call `registry.MarkEvidence(t, ids...)`. A
+`go test -json` parser keys pending markers by package plus top-level test and
+promotes them only when that exact test passes. It rejects subtest ownership,
+so a parent cannot accidentally claim coverage from one passing child.
 
-The actual E2E process generates a YAML rendering from the scenarios it ran,
-and CI uploads that rendering as an artifact. The repository does not contain a
-hand-edited coverage YAML file or a separate scenario catalog.
-Planned, blocked, and not-applicable cases remain design/backlog dispositions
-until they have an executable owning-seam test; only executable `covered`
-metadata belongs in this registry.
+Every shard uses `skills-edge-evidence/v2` and records repository, exact
+revision, ID, package, test, and only the backend/provider actually executed.
+It contains no trusted behavior, owner, seam, or intended matrix.
+
+The paired aggregator validates shards against the canonical catalog, merges
+repeated evidence across processes, and matches explicit required tuples.
+Empty required dimensions mean that dimension is irrelevant, not that runtime
+evidence must be empty. It retains extra truthful evidence but never lets one
+coordinate satisfy a different explicit tuple. Readiness output always lists
+all missing tuples deterministically and is nonzero while incomplete. Only
+catalog decisions 72-77 may be N/A; there is no green unresolved disposition.
 
 ## Matrix selection
 
 Do not run a Cartesian product of every case across every backend and provider.
-Each coverage declaration names only the dimensions capable of changing its
-behavior.
+Each canonical row names only the coordinates capable of changing its behavior.
 
 Examples:
 
@@ -408,8 +409,8 @@ behind those targets rather than growing inline workflow shell.
    integrity, and grant security.
 7. Add the existing-bucket GCS provider lane after provider-neutral scenarios
    pass locally.
-8. Add a declaration only beside a test whose required matrix is enforced in
-   CI; generated YAML remains evidence rather than source.
+8. Add an ID-only marker only beside a sufficient owning test. Generate v2 JSON
+   from actual runtime coordinates; YAML, if requested, remains generated only.
 
 ## Definition of done
 

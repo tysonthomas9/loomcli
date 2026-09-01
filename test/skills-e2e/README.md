@@ -46,23 +46,24 @@ the actual product receives the intended paths, modes, and bytes.
 Skill representation and opaque tree revision. Exact materialized bytes and
 modes are compared with the staged updated fixture.
 
-Each typed scenario declaration lives immediately above its executable test,
-which calls the scenario's `Covers(t)` method before exercising the owning
-seam. `Covers(t)` derives the test name, validates the metadata, and records the
-scenario only after the complete test passes. Deterministic path and revision
-cases use the public Loom domain seam; lifecycle cases continue through the
-public CLI and real services.
+Each scenario declaration lives immediately above its executable test, which
+calls `Covers(t)` before exercising the owning seam. A scenario keeps a readable
+name and behavior, but its coverage metadata references only canonical IDs.
+The single typed 1-95 catalog in `registry/catalog_v2.go` owns behavior wording,
+owner, seam, required execution coordinates, and the strict-cutover decisions.
 
-The actual run generates a `skills-edge-coverage/v1` Loom report containing
-only the canonical case IDs proved by that execution, with the exact Loom
-revision, owning test, seam, backends, and providers. CI uploads
-`e2e-coverage-<backend>-<storage>.yaml` as evidence. YAML is generated output;
-it is not checked in or edited by hand.
+Passing runs generate `skills-edge-evidence/v2` JSON shards. Each evidence row
+contains only its canonical ID, Go package, top-level test, and the backend or
+provider actually used by that process. Ordinary package tests log the same
+ID-only marker; `skills-edge-coverage extract` promotes it only after the exact
+package-and-test pair passes under `go test -json`.
 
-A Loom report may be structurally valid while still partial. Release readiness
-is a separate paired check over the generated Loom and Fleet reports plus the
-six typed strict-cutover exclusions for cases 72-77. That check rejects every
-missing, duplicate, out-of-range, or otherwise excluded applicable case; there
+A repository shard may be structurally valid while still partial. The optional
+`edge_readiness` compatibility input generates real Loom and Fleet shards and
+runs `skills-edge-coverage readiness`. That deliberately fails until every
+explicit catalog coordinate is proved. It merges repeated IDs across shards,
+treats unspecified required dimensions as irrelevant, and adds only catalog
+N/A decisions 72-77; there
 is no unresolved disposition that can produce a release-ready result.
 
 Pull requests run Redis/MinIO and PostgreSQL/MinIO. Releases additionally use

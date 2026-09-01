@@ -11,15 +11,10 @@ import (
 )
 
 var delayedProjectionBecomesReadable = registry.Scenario{
-	ID:        "delayed-projection-becomes-readable",
-	Behavior:  "Skill import waits for a durably published tree to become readable",
-	Owner:     "loom",
-	Seam:      "loom-fleet-e2e",
-	Backends:  []string{"redis"},
-	Providers: []string{"minio"},
+	ID:       "delayed-projection-becomes-readable",
+	Behavior: "Skill import waits for a durably published tree to become readable",
 	Cases: []registry.EdgeCase{
-		{ID: 64, Behavior: "successful publication guarantees an immediate tree read", Rationale: "Loom does not return from import until the public tree query succeeds"},
-		{ID: 65, Behavior: "pending publication is polled with a bounded context-aware policy", Rationale: "the real background projection is delayed before import completes"},
+		{ID: 64},
 	},
 }
 

@@ -112,7 +112,7 @@ if [[ "$FLEET_E2E_BACKEND" == "redis" ]]; then
   unset LOOM_FLEET_DB_URL
   projection_coverage=""
   if [[ -n "${E2E_COVERAGE_OUTPUT:-}" ]]; then
-    projection_coverage="${E2E_COVERAGE_OUTPUT%.yaml}-projection.yaml"
+    projection_coverage="${E2E_COVERAGE_OUTPUT%.json}-projection.json"
   fi
   projection_log="$tmp/skills-e2e-projection.log"
   if ! (cd "$ROOT" && SKILLS_E2E_LOOM_BIN="$loom_bin" SKILLS_EDGE_REVISION="$loom_sha" E2E_COVERAGE_OUTPUT="$projection_coverage" \

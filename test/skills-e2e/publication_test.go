@@ -10,12 +10,8 @@ import (
 )
 
 var concurrentTreePublication = registry.Scenario{
-	ID:        "concurrent-tree-publication",
-	Behavior:  "concurrent imports accept one logical tree and select the same revision",
-	Owner:     "fleet",
-	Seam:      "loom-fleet-e2e",
-	Backends:  []string{"redis", "postgres"},
-	Providers: []string{"minio"},
+	ID:       "concurrent-tree-publication",
+	Behavior: "concurrent imports accept one logical tree and select the same revision",
 }
 
 func TestConcurrentSkillImportsSelectOneTreeRevision(t *testing.T) {
@@ -34,14 +30,10 @@ func TestConcurrentSkillImportsSelectOneTreeRevision(t *testing.T) {
 }
 
 var lostPublicationResponseIsRetryable = registry.Scenario{
-	ID:        "lost-publication-response-is-retryable",
-	Behavior:  "retrying after a committed response is lost returns the accepted tree",
-	Owner:     "loom",
-	Seam:      "loom-fleet-e2e",
-	Backends:  []string{"redis", "postgres"},
-	Providers: []string{"minio"},
+	ID:       "lost-publication-response-is-retryable",
+	Behavior: "retrying after a committed response is lost returns the accepted tree",
 	Cases: []registry.EdgeCase{{
-		ID: 66, Behavior: "an ambiguous publication retry does not create a second logical tree", Rationale: "a real proxy drops the successful public response after Fleet commits it",
+		ID: 66,
 	}},
 }
 

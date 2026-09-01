@@ -9,19 +9,8 @@ import (
 	"github.com/tysonthomas9/loomcli/test/skills-e2e/registry"
 )
 
-var unsafeWorkspaceFilePaths = registry.Scenario{
-	ID:       "unsafe-workspace-file-paths",
-	Behavior: "unsafe provider-neutral paths are rejected before materialization",
-	Owner:    registry.OwnerLoom,
-	Seam:     registry.SeamLoomDomain,
-	Cases: []registry.EdgeCase{{
-		ID: 4, Behavior: "absolute, traversal, NUL, control, and unsafe separators are rejected",
-		Rationale: "an exhaustive public domain table exercises every canonical unsafe path class",
-	}},
-}
-
 func TestWorkspaceFilePathsRejectEveryUnsafeClass(t *testing.T) {
-	unsafeWorkspaceFilePaths.Covers(t)
+	registry.MarkEvidence(t, 4)
 	paths := []string{
 		"", "/absolute", "../outside", "nested/../outside", "nested/./file",
 		"nested//file", "nested/", "nul\x00byte", "control\nbyte", `back\slash`,
@@ -37,19 +26,8 @@ func TestWorkspaceFilePathsRejectEveryUnsafeClass(t *testing.T) {
 	}
 }
 
-var reservedWorkspaceFileNames = registry.Scenario{
-	ID:       "reserved-workspace-file-names",
-	Behavior: "platform-reserved device names are rejected before materialization",
-	Owner:    registry.OwnerLoom,
-	Seam:     registry.SeamLoomDomain,
-	Cases: []registry.EdgeCase{{
-		ID: 8, Behavior: "CON, NUL, COM1-9, and LPT1-9 are rejected case-insensitively with extensions",
-		Rationale: "the public path validator is exercised across the complete reserved-name matrix",
-	}},
-}
-
 func TestWorkspaceFilePathsRejectEveryReservedDeviceName(t *testing.T) {
-	reservedWorkspaceFileNames.Covers(t)
+	registry.MarkEvidence(t, 8)
 	names := []string{"CON", "nul.txt"}
 	for index := 1; index <= 9; index++ {
 		names = append(names, fmt.Sprintf("CoM%d.log", index), fmt.Sprintf("lPt%d.bin", index))
@@ -65,19 +43,8 @@ func TestWorkspaceFilePathsRejectEveryReservedDeviceName(t *testing.T) {
 	}
 }
 
-var workspaceFileIdentityVectors = registry.Scenario{
-	ID:       "workspace-file-identity-vectors",
-	Behavior: "workspace-file identity distinguishes paths and materialization metadata without duplicating bytes",
-	Owner:    registry.OwnerLoom,
-	Seam:     registry.SeamLoomDomain,
-	Cases: []registry.EdgeCase{
-		{ID: 20, Behavior: "same bytes reused under different paths produce distinct tree identities", Rationale: "literal file and tree revision vectors hold blob identity fixed while changing only the path"},
-		{ID: 21, Behavior: "same bytes with different media type and executable metadata produce distinct file and tree identities", Rationale: "literal revision vectors hold the blob, hash, size, and path fixed while changing materialization metadata"},
-	},
-}
-
 func TestWorkspaceFileIdentityLiteralVectors(t *testing.T) {
-	workspaceFileIdentityVectors.Covers(t)
+	registry.MarkEvidence(t, 20, 21)
 	base := domain.WorkspaceFile{
 		Path:        "docs/a.md",
 		BlobRef:     "blob_shared_bytes",
