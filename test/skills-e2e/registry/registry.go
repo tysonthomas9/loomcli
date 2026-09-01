@@ -123,6 +123,7 @@ func WriteCoverageFile(path string) error {
 	if err != nil {
 		return err
 	}
+	// #nosec G304 -- path is the caller-selected generated evidence artifact.
 	file, err := os.Create(path)
 	if err != nil {
 		return err

@@ -12,9 +12,6 @@ import (
 var corruptDownloadIsRejected = registry.Scenario{
 	ID:       "corrupt-download-is-rejected",
 	Behavior: "materialization rejects object bytes changed in transit",
-	Cases: []registry.EdgeCase{
-		{ID: 34},
-	},
 }
 
 func TestCorruptSkillDownloadIsNotMaterialized(t *testing.T) {

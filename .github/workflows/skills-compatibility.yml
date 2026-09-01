@@ -781,6 +781,8 @@ jobs:
           persist-credentials: false
 
       - name: Download Loom and Fleet evidence shards
+        id: download-edge-evidence
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           pattern: skills-edge-evidence-*
@@ -788,12 +790,19 @@ jobs:
           merge-multiple: true
 
       - name: Enforce canonical readiness
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
           export GOCACHE="$RUNNER_TEMP/loom-edge-readiness-cache"
+          if [[ "${{ steps.download-edge-evidence.outcome }}" != "success" ]]; then
+            printf '%s\n' '{"ready":false,"evidence":[],"not_applicable":[],"missing":[],"infrastructure_failure":"evidence artifact download failed"}' > skills-edge-readiness.json
+            echo "::error::Loom/Fleet evidence artifact download failed"
+            exit 1
+          fi
           mapfile -t reports < <(find edge-evidence -type f -name '*.json' -print | sort)
           if (( ${#reports[@]} == 0 )); then
+            printf '%s\n' '{"ready":false,"evidence":[],"not_applicable":[],"missing":[],"infrastructure_failure":"no evidence reports downloaded"}' > skills-edge-readiness.json
             echo "::error::No v2 Loom/Fleet evidence shards were downloaded"
             exit 1
           fi
@@ -805,5 +814,5 @@ jobs:
         with:
           name: skills-edge-readiness-${{ github.run_id }}-${{ github.run_attempt }}
           path: skills-edge-readiness.json
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 90

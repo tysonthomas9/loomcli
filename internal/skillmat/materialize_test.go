@@ -1754,6 +1754,8 @@ func snapshotMaterializedProjection(t *testing.T, target string) map[string]proj
 				node.LinkTarget, err = os.Readlink(name)
 			case info.Mode().IsRegular():
 				var content []byte
+				// #nosec G122 -- this is a test-only snapshot rooted in t.TempDir;
+				// Lstat above deliberately records symlinks without opening them.
 				content, err = os.ReadFile(name)
 				node.Content = string(content)
 			}

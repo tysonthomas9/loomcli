@@ -44,7 +44,7 @@ func TestWorkspaceFilePathsRejectEveryReservedDeviceName(t *testing.T) {
 }
 
 func TestWorkspaceFileIdentityLiteralVectors(t *testing.T) {
-	registry.MarkEvidence(t, 20, 21)
+	registry.MarkEvidence(t, 20)
 	base := domain.WorkspaceFile{
 		Path:        "docs/a.md",
 		BlobRef:     "blob_shared_bytes",

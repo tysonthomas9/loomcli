@@ -50,6 +50,13 @@ require_fixed "$workflow" 'EXPECTED_FLEETDB_SHA: ${{ needs.resolve.outputs.fleet
 require_fixed "$workflow" 'EXPECTED_CORPUS_SHA: ${{ needs.resolve.outputs.corpus_sha }}'
 require_fixed "$workflow" 'Compatibility checkout drifted from the resolved revision pair'
 require_fixed "$workflow" 'skills-compatibility-resolved-revisions-${{ github.run_id }}-${{ github.run_attempt }}'
+require_fixed "$workflow" 'id: download-edge-evidence'
+require_fixed "$workflow" 'continue-on-error: true'
+require_fixed "$workflow" 'if: always()'
+require_fixed "$workflow" '"infrastructure_failure":"evidence artifact download failed"'
+require_fixed "$workflow" '"infrastructure_failure":"no evidence reports downloaded"'
+require_fixed "$workflow" 'path: skills-edge-readiness.json'
+require_fixed "$workflow" 'if-no-files-found: error'
 require_fixed "$workflow" "if: github.repository == 'tysonthomas9/loomcli'"
 require_fixed "$workflow" 'FLEET_DB_TOKEN is required to read private FleetDB from a LoomCLI workflow'
 require_fixed "$compat" 'VERCEL_SKILLS_REF="${VERCEL_SKILLS_REF:-dd089a8c752c966dee8bf0f27cb625ba193ffd9e}"'

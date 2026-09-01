@@ -62,6 +62,7 @@ func readiness(args []string, stdout io.Writer) error {
 	}
 	reports := make([]registry.EvidenceReport, 0, flags.NArg())
 	for _, path := range flags.Args() {
+		// #nosec G304 -- readiness intentionally reads operator-selected report paths.
 		file, err := os.Open(path)
 		if err != nil {
 			return err

@@ -159,35 +159,54 @@ func ValidateReadiness(catalog []CaseDefinition, reports []EvidenceReport) (Read
 	if err := validateCatalog(catalog); err != nil {
 		return ReadinessResult{}, err
 	}
-	revisions := make(map[Repository]string)
 	definitions := make(map[int]CaseDefinition, len(catalog))
 	for _, definition := range catalog {
 		definitions[definition.ID] = definition
 	}
-	var result ReadinessResult
+	evidence, err := collectVerifiedEvidence(definitions, reports)
+	if err != nil {
+		return ReadinessResult{}, err
+	}
+	result := buildReadinessResult(catalog, evidence)
+	sort.Slice(result.Evidence, func(i, j int) bool {
+		if result.Evidence[i].ID != result.Evidence[j].ID {
+			return result.Evidence[i].ID < result.Evidence[j].ID
+		}
+		return evidenceKey(result.Evidence[i].Repository, result.Evidence[i].Evidence) < evidenceKey(result.Evidence[j].Repository, result.Evidence[j].Evidence)
+	})
+	return result, nil
+}
+
+func collectVerifiedEvidence(definitions map[int]CaseDefinition, reports []EvidenceReport) ([]VerifiedEvidence, error) {
+	revisions := make(map[Repository]string)
+	var evidence []VerifiedEvidence
 	seen := make(map[string]struct{})
 	for _, report := range reports {
 		if err := ValidateEvidenceReport(report); err != nil {
-			return ReadinessResult{}, err
+			return nil, err
 		}
 		if revision, ok := revisions[report.Repository]; ok && revision != report.Revision {
-			return ReadinessResult{}, fmt.Errorf("repository %s has conflicting revisions %q and %q", report.Repository, revision, report.Revision)
+			return nil, fmt.Errorf("repository %s has conflicting revisions %q and %q", report.Repository, revision, report.Revision)
 		}
 		revisions[report.Repository] = report.Revision
 		for _, item := range report.Evidence {
 			definition := definitions[item.ID]
 			if definition.Decision != DecisionApplicable {
-				return ReadinessResult{}, fmt.Errorf("case %d is %s and cannot have evidence", item.ID, definition.Decision)
+				return nil, fmt.Errorf("case %d is %s and cannot have evidence", item.ID, definition.Decision)
 			}
 			key := evidenceKey(report.Repository, item)
 			if _, duplicate := seen[key]; duplicate {
 				continue
 			}
 			seen[key] = struct{}{}
-			result.Evidence = append(result.Evidence, VerifiedEvidence{Repository: report.Repository, Evidence: item})
+			evidence = append(evidence, VerifiedEvidence{Repository: report.Repository, Evidence: item})
 		}
 	}
+	return evidence, nil
+}
 
+func buildReadinessResult(catalog []CaseDefinition, evidence []VerifiedEvidence) ReadinessResult {
+	result := ReadinessResult{Evidence: evidence}
 	for _, definition := range catalog {
 		if definition.Decision == DecisionNotApplicable {
 			result.NotApplicable = append(result.NotApplicable, definition)
@@ -200,57 +219,76 @@ func ValidateReadiness(catalog []CaseDefinition, reports []EvidenceReport) (Read
 		}
 	}
 	result.Ready = len(result.Missing) == 0
-	sort.Slice(result.Evidence, func(i, j int) bool {
-		if result.Evidence[i].ID != result.Evidence[j].ID {
-			return result.Evidence[i].ID < result.Evidence[j].ID
-		}
-		return evidenceKey(result.Evidence[i].Repository, result.Evidence[i].Evidence) < evidenceKey(result.Evidence[j].Repository, result.Evidence[j].Evidence)
-	})
-	return result, nil
+	return result
 }
 
 func validateCatalog(catalog []CaseDefinition) error {
 	seen := make(map[int]struct{}, len(catalog))
 	for _, definition := range catalog {
-		if err := validateCaseID(definition.ID); err != nil {
-			return fmt.Errorf("catalog: %w", err)
-		}
-		if _, duplicate := seen[definition.ID]; duplicate {
-			return fmt.Errorf("catalog duplicate edge-case ID %d", definition.ID)
+		if err := validateCatalogDefinition(definition, seen); err != nil {
+			return err
 		}
 		seen[definition.ID] = struct{}{}
-		if strings.TrimSpace(definition.Behavior) == "" || strings.TrimSpace(definition.Owner) == "" || strings.TrimSpace(definition.Seam) == "" {
-			return fmt.Errorf("case %d behavior, owner, and seam are required", definition.ID)
-		}
-		if definition.Owner != "loom" && definition.Owner != "fleet" && definition.Owner != "shared" && definition.Owner != "none" {
-			return fmt.Errorf("case %d has invalid owner %q", definition.ID, definition.Owner)
-		}
-		if definition.Decision == DecisionNotApplicable {
-			if definition.ID < FirstStrictCutoverExclusionID || definition.ID > LastStrictCutoverExclusionID {
-				return fmt.Errorf("case %d cannot be not_applicable", definition.ID)
-			}
-			if strings.TrimSpace(definition.Rationale) == "" {
-				return fmt.Errorf("case %d not_applicable rationale is required", definition.ID)
-			}
-			if len(definition.RequiredEvidence) != 0 {
-				return fmt.Errorf("case %d not_applicable cannot require evidence", definition.ID)
-			}
-		} else if definition.Decision != DecisionApplicable {
-			return fmt.Errorf("case %d has invalid decision %q", definition.ID, definition.Decision)
-		} else if len(definition.RequiredEvidence) == 0 {
-			return fmt.Errorf("case %d applicable requires evidence", definition.ID)
-		}
-		coordSeen := make(map[EvidenceCoordinate]struct{}, len(definition.RequiredEvidence))
-		for _, coordinate := range definition.RequiredEvidence {
-			if err := validateCoordinate(coordinate); err != nil {
-				return fmt.Errorf("case %d: %w", definition.ID, err)
-			}
-			if _, duplicate := coordSeen[coordinate]; duplicate {
-				return fmt.Errorf("case %d duplicate required evidence %s", definition.ID, coordinateLabel(coordinate))
-			}
-			coordSeen[coordinate] = struct{}{}
-		}
 	}
+	return validateCatalogUniverse(seen)
+}
+
+func validateCatalogDefinition(definition CaseDefinition, seen map[int]struct{}) error {
+	if err := validateCaseID(definition.ID); err != nil {
+		return fmt.Errorf("catalog: %w", err)
+	}
+	if _, duplicate := seen[definition.ID]; duplicate {
+		return fmt.Errorf("catalog duplicate edge-case ID %d", definition.ID)
+	}
+	if strings.TrimSpace(definition.Behavior) == "" || strings.TrimSpace(definition.Owner) == "" || strings.TrimSpace(definition.Seam) == "" {
+		return fmt.Errorf("case %d behavior, owner, and seam are required", definition.ID)
+	}
+	if definition.Owner != "loom" && definition.Owner != "fleet" && definition.Owner != "shared" && definition.Owner != "none" {
+		return fmt.Errorf("case %d has invalid owner %q", definition.ID, definition.Owner)
+	}
+	if err := validateCatalogDecision(definition); err != nil {
+		return err
+	}
+	return validateRequiredCoordinates(definition)
+}
+
+func validateCatalogDecision(definition CaseDefinition) error {
+	if definition.Decision == DecisionNotApplicable {
+		if definition.ID < FirstStrictCutoverExclusionID || definition.ID > LastStrictCutoverExclusionID {
+			return fmt.Errorf("case %d cannot be not_applicable", definition.ID)
+		}
+		if strings.TrimSpace(definition.Rationale) == "" {
+			return fmt.Errorf("case %d not_applicable rationale is required", definition.ID)
+		}
+		if len(definition.RequiredEvidence) != 0 {
+			return fmt.Errorf("case %d not_applicable cannot require evidence", definition.ID)
+		}
+		return nil
+	}
+	if definition.Decision != DecisionApplicable {
+		return fmt.Errorf("case %d has invalid decision %q", definition.ID, definition.Decision)
+	}
+	if len(definition.RequiredEvidence) == 0 {
+		return fmt.Errorf("case %d applicable requires evidence", definition.ID)
+	}
+	return nil
+}
+
+func validateRequiredCoordinates(definition CaseDefinition) error {
+	coordSeen := make(map[EvidenceCoordinate]struct{}, len(definition.RequiredEvidence))
+	for _, coordinate := range definition.RequiredEvidence {
+		if err := validateCoordinate(coordinate); err != nil {
+			return fmt.Errorf("case %d: %w", definition.ID, err)
+		}
+		if _, duplicate := coordSeen[coordinate]; duplicate {
+			return fmt.Errorf("case %d duplicate required evidence %s", definition.ID, coordinateLabel(coordinate))
+		}
+		coordSeen[coordinate] = struct{}{}
+	}
+	return nil
+}
+
+func validateCatalogUniverse(seen map[int]struct{}) error {
 	for id := MinEdgeCaseID; id <= MaxEdgeCaseID; id++ {
 		if _, ok := seen[id]; !ok {
 			return fmt.Errorf("catalog missing edge-case ID %d", id)

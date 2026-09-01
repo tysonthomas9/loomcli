@@ -3,6 +3,14 @@ package registry
 // CanonicalCatalog is the single authored semantic ledger. Each row keeps the
 // wording, ownership, seam, and minimal execution coordinates together.
 func CanonicalCatalog() []CaseDefinition {
+	catalog := catalogCases1To24()
+	catalog = append(catalog, catalogCases25To48()...)
+	catalog = append(catalog, catalogCases49To71()...)
+	catalog = append(catalog, catalogCases72To95()...)
+	return catalog
+}
+
+func catalogCases1To24() []CaseDefinition {
 	return []CaseDefinition{
 		app(1, "Arbitrary binary bundled files are preserved byte-for-byte.", "loom", "public-lifecycle", loomMinIOBackends()...),
 		app(2, "Zero-byte files are valid and retain a stable hash/revision.", "loom", "public-lifecycle", loomMinIOBackends()...),
@@ -28,6 +36,11 @@ func CanonicalCatalog() []CaseDefinition {
 		app(22, "A rename creates a new tree while permitting blob reuse.", "shared", "adapter-conformance", loom(), fleet()),
 		app(23, "Object references contain no bucket, endpoint, provider key, local path, or credential.", "fleet", "object-store-conformance", fleet()),
 		app(24, "Object references are bound to workspace, content hash, and size.", "fleet", "object-identity", fleet()),
+	}
+}
+
+func catalogCases25To48() []CaseDefinition {
+	return []CaseDefinition{
 		app(25, "A cross-workspace object reference fails before provider/filesystem I/O.", "fleet", "object-store-conformance", fleet()),
 		app(26, "Declared hash mismatch is rejected before publication.", "fleet", "object-api-integration", fleet()),
 		app(27, "Declared size mismatch is rejected before publication.", "fleet", "object-api-integration", fleet()),
@@ -52,6 +65,11 @@ func CanonicalCatalog() []CaseDefinition {
 		app(46, "GCS S3 compatibility excludes incompatible SDK-private headers from SigV4 while retaining required request headers.", "fleet", "gcs-provider", gcsFleet()),
 		app(47, "Bytes remain staging data until all objects verify and the tree event is durable.", "fleet", "service-integration", fleet()),
 		app(48, "A complete tree is visible atomically or absent; partial manifests are never visible.", "fleet", "projection-conformance", redisFleet(), postgresFleet()),
+	}
+}
+
+func catalogCases49To71() []CaseDefinition {
+	return []CaseDefinition{
 		app(49, "Sequential exact publication retry returns the existing tree.", "fleet", "service-integration", fleet()),
 		app(50, "Concurrent identical publication produces one logical create event and one first-writer provenance record.", "fleet", "storage-conformance", redisFleet(), postgresFleet()),
 		app(51, "First accepted created_by and created_at are deterministic under a publication race.", "fleet", "storage-conformance", redisFleet(), postgresFleet()),
@@ -75,6 +93,11 @@ func CanonicalCatalog() []CaseDefinition {
 		app(69, "Store outage during materialization preserves the last safe local projection and surfaces a warning.", "loom", "materializer", loom()),
 		app(70, "Integrity, path, collision, and filesystem failures during materialization fail closed rather than replacing the safe projection.", "loom", "materializer", loom()),
 		app(71, "A file disappearing between manifest fetch and download fails without partially replacing the materialized Skill.", "loom", "materializer", loom()),
+	}
+}
+
+func catalogCases72To95() []CaseDefinition {
+	return []CaseDefinition{
 		na(72, "Existing inline Redis Skills are converted to immutable trees before the strict reader requires file_tree_revision."),
 		na(73, "Existing PostgreSQL JSONB Skills are converted likewise."),
 		na(74, "Migration preserves exact document and bundle bytes, executable bits, source metadata, and provenance."),
