@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+# End-to-end proof that the stack works, not just that it started.
+#
+# Two halves. The first exercises all five workspace-file operations and checks
+# the bytes survive a round trip through GCS. The second checks the parts a
+# storage round trip says nothing about -- the seeded workspace, the plan role,
+# the registered agents, the daemon actually spawning sessions, and the SPA and
+# its API proxy -- because the gate used to pass with a dead daemon and a
+# completely broken UI.
+#
+# Runs on the VM so it hits every service over loopback and needs no tunnel.
+# Exits non-zero on any failure, so CI can gate on it.
+set -euo pipefail
+NAME="${1:?stack name}"; PROJECT="${2:?project}"; ZONE="${3:?zone}"
+# Passed in by the Makefile from Terraform outputs, so the gate cannot drift
+# from the stack it is testing the way the hardcoded tunnel ports once did.
+LOOM_WS="${4:-LOOMGCP}"; EXPECT_PLAN_READ_ONLY="${5:-false}"
+
+# The python body stays single-quoted so its own quoting is safe; only this
+# short prefix is double-quoted, and it contains nothing but two known values.
+gcloud compute ssh "$NAME" --project "$PROJECT" --zone "$ZONE" \
+  --tunnel-through-iap --quiet \
+  --command "export LOOM_WS=$LOOM_WS EXPECT_PLAN_READ_ONLY=$EXPECT_PLAN_READ_ONLY; "'python3 - <<"PYEOF"
+import hashlib, json, os, sys, urllib.error, urllib.request
+
+BASE = "http://127.0.0.1:8280"   # fleet-db
+API  = "http://127.0.0.1:8282"   # loom serve
+UI   = "http://127.0.0.1:8283"   # caddy + SPA
+WS   = os.environ.get("SMOKE_WS", "SMOKE")
+HDRS = {"Content-Type": "application/json", "X-Actor": "smoke@fixture.local"}
+failures = []
+
+def call(method, url, body=None, hdrs=None, raw=False):
+    data = body if raw else (json.dumps(body).encode() if body is not None else None)
+    req = urllib.request.Request(url, data=data, headers=hdrs if hdrs is not None else HDRS, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+
+def check(label, ok, detail=""):
+    print(("  PASS  " if ok else "  FAIL  ") + label + (("  " + str(detail)[:160]) if not ok else ""))
+    if not ok:
+        failures.append(label)
+
+code, _ = call("GET", BASE + "/healthz")
+check("fleet-db /healthz", code == 200, code)
+
+# Workspace creation is under /admin; /api/v1/workspaces does not exist.
+code, body = call("POST", BASE + "/api/v1/admin/workspaces", {"key": WS, "name": "smoke"})
+check("create workspace", code in (201, 409), f"{code} {body[:120]}")
+
+# Unique per run, so each run exercises a real upload instead of silently
+# taking the content-addressed dedup path on the second and later runs.
+payload = ("loom-stack smoke %s " % os.environ.get("SMOKE_NONCE", str(os.getpid()))).encode() + b"\x00\x01\x02 binary\n"
+digest = "sha256:" + hashlib.sha256(payload).hexdigest()
+
+code, body = call("POST", f"{BASE}/api/v1/{WS}/file-uploads",
+                  {"content_hash": digest, "size_bytes": len(payload),
+                   "media_type": "application/octet-stream"})
+check("begin upload", code in (200, 201), f"{code} {body[:200]}")
+if code not in (200, 201):
+    sys.exit(1)
+grant = json.loads(body)
+check("grant is a presigned GCS URL", "storage.googleapis.com" in grant["url"], grant["url"][:80])
+
+# The grant headers are mandatory. Dropping them yields a GCS
+# MalformedSecurityHeader on x-amz-checksum-sha256.
+uh = {k: (v[0] if isinstance(v, list) else v) for k, v in (grant.get("headers") or {}).items()}
+code, body = call(grant.get("method", "PUT"), grant["url"], payload, hdrs=uh, raw=True)
+check("upload to GCS", code in (200, 201), f"{code} {body[:200]}")
+
+code, body = call("POST", f"{BASE}/api/v1/{WS}/file-trees", {"files": [{
+    "path": "smoke/payload.bin", "upload_token": grant["upload_token"],
+    "content_hash": digest, "size_bytes": len(payload),
+    "media_type": "application/octet-stream", "executable": True}]})
+# 201 on first publish, 200 when this exact tree already exists. Asserting on
+# 201 alone made the gate pass once and fail on every re-run against the same
+# stack -- which is the normal way anyone uses it.
+check("publish tree", code in (200, 201), f"{code} {body[:200]}")
+if code not in (200, 201):
+    sys.exit(1)
+rev = json.loads(body)["revision"]
+print(f"        revision {rev}")
+
+code, _ = call("GET", f"{BASE}/api/v1/{WS}/file-trees/{rev}")
+check("get tree", code == 200, code)
+
+code, _ = call("GET", f"{BASE}/api/v1/{WS}/file-trees/{rev}/files/smoke/payload.bin")
+check("stat file", code == 200, code)
+
+code, body = call("POST", f"{BASE}/api/v1/{WS}/file-trees/{rev}/downloads/smoke/payload.bin", {})
+check("resolve download", code == 200, code)
+if code == 200:
+    d = json.loads(body)
+    dh = {k: (v[0] if isinstance(v, list) else v) for k, v in (d.get("headers") or {}).items()}
+    code, got = call(d.get("method", "GET"), d["url"], None, hdrs=dh, raw=True)
+    check("download", code == 200, code)
+    # NUL bytes and the exec bit are the parts a naive text path would eat.
+    check("byte-exact round trip", got == payload, f"{len(got)}B vs {len(payload)}B")
+
+code, body = call("GET", API + "/api/config")
+check("loom /api/config", code == 200, code)
+
+# ---------------------------------------------------------------------------
+# Everything below is about the stack DOING something, not merely answering.
+# ---------------------------------------------------------------------------
+print()
+
+LW = os.environ.get("LOOM_WS", "LOOMGCP")
+
+def get_list(path, key):
+    code, body = call("GET", f"{BASE}/api/v1/{LW}/{path}")
+    if code != 200:
+        return code, []
+    return code, json.loads(body).get(key, [])
+
+# fleet-db wraps collections under their own name, not a generic "data".
+code, issues = get_list("issues", "issues")
+check(f"seeded workspace {LW} has issues", code == 200 and len(issues) > 0,
+      f"{code}, {len(issues)} issues")
+
+code, body = call("GET", f"{BASE}/api/v1/{LW}/roles")
+roles = {r["name"]: r for r in json.loads(body).get("roles", [])} if code == 200 else {}
+check("built-in roles seeded", {"lead", "plan", "task"} <= set(roles), sorted(roles))
+
+# read_only is omitted from the JSON when false, so assert on the effective
+# value rather than on the key being present. This is the check that would
+# have caught the codex planner stalling on a read-only sandbox.
+plan_ro = bool(roles.get("plan", {}).get("read_only", False))
+want_ro = os.environ.get("EXPECT_PLAN_READ_ONLY", "false") == "true"
+check(f"plan role read_only == {want_ro}", plan_ro == want_ro, f"got {plan_ro}")
+
+code, agents = get_list("agents", "agents")
+check("agents registered", code == 200 and len(agents) >= 2,
+      f"{code}, {[a.get("name") for a in agents]}")
+
+# The daemon has no HTTP surface of its own: if it is dead the API still
+# answers, the containers still look healthy, and nothing ever runs. That is
+# precisely the failure this gate used to miss. Sessions are the evidence it
+# spawned something, and a non-pending status is evidence one actually ran.
+code, sessions = get_list("agent-sessions", "agent_sessions")
+check("daemon spawned agent sessions", code == 200 and len(sessions) > 0,
+      f"{code}, {len(sessions)} sessions")
+ran = [x for x in sessions if x.get("status") in ("running", "completed")]
+check("at least one session ran", len(ran) > 0,
+      sorted({x.get("status") for x in sessions}))
+
+# The SPA is a different image from loom and the Caddy rules are hand-written,
+# so both can break independently of everything above.
+code, body = call("GET", UI + "/", hdrs={})
+check("SPA served by the ui container", code == 200 and b"<title>" in body, code)
+
+code, _ = call("GET", UI + "/api/config", hdrs={})
+check("caddy proxies /api to loom", code == 200, code)
+
+code, _ = call("GET", UI + f"/ws/{LW}/kanban", hdrs={})
+check("SPA deep link falls back to index.html", code == 200, code)
+
+print()
+if failures:
+    print(f"SMOKE FAILED: {len(failures)} check(s): " + ", ".join(failures))
+    sys.exit(1)
+print("SMOKE PASSED")
+PYEOF'

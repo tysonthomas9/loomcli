@@ -1,0 +1,189 @@
+# Rendered by Terraform. Edits here are overwritten on the next apply.
+name: loom-stack
+
+networks:
+  stack:
+    driver: bridge
+
+volumes:
+  redis-data:
+  loom-data:
+  loom-workspace:
+
+services:
+  redis:
+    image: ${redis_image}
+    # AOF on, RDB off. fleet-db keeps every workspace, role and issue in Redis,
+    # so running with no persistence made `systemctl restart loom-stack` -- the
+    # documented way to pick up a rotated secret -- silently discard all of it
+    # while loom's filesystem volumes survived, leaving the two out of step.
+    # appendfsync everysec is the right durability/throughput point here: the
+    # worst case is losing the last second of a test stack's writes.
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --save
+      - ""
+      - --requirepass
+      - $${REDIS_PASSWORD}
+    environment:
+      # The healthcheck below runs inside the container and expands
+      # $$REDIS_PASSWORD there, so the value has to exist in the container env,
+      # not just in the compose interpolation above.
+      REDIS_PASSWORD: $${REDIS_PASSWORD}
+    networks: [stack]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # Ports publish on all interfaces, NOT 127.0.0.1. IAP forwards to the VM's
+  # network interface, so a loopback-only bind makes the tunnel -- the only
+  # intended way in -- fail with "failed to connect to backend". The exposure
+  # is closed by the firewall instead: these ports accept traffic from
+  # 35.235.240.0/20 only, and the VM has no public IP.
+  fleet-db:
+    image: ${fleetdb_image}
+    depends_on:
+      redis:
+        condition: service_healthy
+    command:
+      - "--redis-addr=redis:6379"
+      - "--addr=:8080"
+      - "--auth-dev-mode"
+      - "--authz-enabled=false"
+    environment:
+      FLEET_REDIS_PASSWORD: $${REDIS_PASSWORD}
+
+      # fleet-db exits at startup without an explicit artifact backend.
+      FLEETDB_ARTIFACT_CONTENT_BACKEND: local
+      FLEETDB_ARTIFACT_CONTENT_DIR: /tmp/fleet-db-artifacts
+
+      # Defaults to "local". Without this line every S3 variable below is
+      # read and then ignored, and blobs land on the container filesystem.
+      FLEET_WORKSPACE_FILE_STORE: s3
+
+      # Must be base64url of >=32 bytes or the workspace file API is disabled
+      # with only a log line to say so.
+      FLEET_WORKSPACE_FILE_TOKEN_SECRET: $${WORKSPACE_FILE_TOKEN}
+
+      FLEET_WORKSPACE_FILE_S3_BUCKET: ${bucket}
+      FLEET_WORKSPACE_FILE_S3_PREFIX: workspace-files
+      FLEET_WORKSPACE_FILE_S3_REGION: ${region}
+      FLEET_WORKSPACE_FILE_S3_ENDPOINT: https://storage.googleapis.com
+      FLEET_WORKSPACE_FILE_S3_PATH_STYLE: "true"
+      FLEET_WORKSPACE_FILE_S3_ACCESS_KEY_ID: $${S3_ACCESS_KEY_ID}
+      FLEET_WORKSPACE_FILE_S3_SECRET_ACCESS_KEY: $${S3_SECRET_ACCESS_KEY}
+    networks: [stack]
+    ports:
+      - "${fleetdb_port}:8080"
+    restart: unless-stopped
+
+  loom:
+    image: ${loom_image}
+    depends_on:
+      fleet-db:
+        condition: service_started
+    environment:
+      HOME: /root
+      LOOM_CONFIG_DIR: /root/.loom
+      LOOM_WORKSPACE: ${loom_workspace}
+      LOOM_ISSUE_BACKEND: fleetdb
+      LOOM_FLEET_DB_URL: http://fleet-db:8080
+      LOOM_FLEET_URL: http://fleet-db:8080
+      LOOM_FLEETDB_REDIS_URL: redis:6379
+      LOOM_FLEET_DB_ACTOR: stack-harness@fixture.local
+      LOOM_FLEET_ACTOR: stack-harness@fixture.local
+      LOOM_BACKEND: ${codex_enabled ? "codex" : "localdogfood"}
+      LOOM_SERVER_URL: http://127.0.0.1:8080
+      LOOM_WEBUI_URL: http://127.0.0.1:8080
+
+      # File-browser routes fail closed unless the browser's origin is listed,
+      # and through an IAP tunnel the browser's Host is localhost:<LOCAL port>,
+      # which is not the port the container publishes. Both are listed:
+      # ui_local_port is what `make tunnel` opens, ui_port is what the
+      # iap_tunnel_ui output tells you to open by hand.
+      LOOM_FRONTEND_URL: "http://localhost:${ui_local_port},http://127.0.0.1:${ui_local_port},http://localhost:${ui_port},http://127.0.0.1:${ui_port}"
+    networks: [stack]
+    # Deliberately NOT relaxing seccomp/apparmor here. codex's read-only
+    # sandbox is bubblewrap, and making it run inside Docker takes BOTH
+    # seccomp=unconfined (or clone/unshare with CLONE_NEWUSER is denied) and
+    # apparmor=unconfined (or bwrap fails at "Failed to make / slave"). Both
+    # were measured on this stack. That trade -- strip the container's real
+    # isolation to enable a weaker sandbox inside it -- is not worth making,
+    # least of all for a mode the planner cannot use anyway. See
+    # plan_role_read_only in variables.tf.
+    ports:
+      - "${api_port}:8080"
+    volumes:
+      - loom-data:/root/.loom
+      - loom-workspace:/workspace
+%{ if codex_enabled ~}
+      # Read-only on purpose. The entrypoint's prepare_codex_credentials()
+      # copies /codex-host/auth.json to /root/.codex/auth.json, which is
+      # writable, so codex can still refresh its token. Mounting straight onto
+      # /root/.codex would make the refresh fail.
+      - /opt/loom/codex:/codex-host:ro
+%{ endif ~}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/config > /dev/null 2>&1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+    restart: unless-stopped
+
+%{ if !plan_role_read_only ~}
+  # Runs alongside loom, not after it. The `plan` role does not exist until
+  # loom creates the workspace, and the daemon starts spawning agents only a
+  # few steps later, so the PATCH has to land inside that window. Doing it
+  # after the stack reports healthy does not work: measured on this stack, the
+  # first planner session was created at 22:46:23 and compose did not call loom
+  # healthy until 22:46:24, so a post-start relax always misses run #1 -- and
+  # run #1 is the one an operator looks at.
+  #
+  # Reuses the loom image (already pulled, already has curl) rather than adding
+  # a registry dependency for a six-line shell loop.
+  role-init:
+    image: ${loom_image}
+    depends_on:
+      fleet-db:
+        condition: service_started
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        for i in $$(seq 1 600); do
+          # Timeouts matter: without them one stalled request can outlast the
+          # whole nominal 120s budget, so the loop never reaches its retries.
+          if curl -sf --connect-timeout 2 --max-time 5 \
+               -X PATCH -H 'Content-Type: application/json' \
+               -H 'X-Actor: stack-harness@fixture.local' \
+               -d '{"read_only":false}' \
+               "http://fleet-db:8080/api/v1/${loom_workspace}/roles/plan" >/dev/null; then
+            echo "plan role read_only=false"
+            exit 0
+          fi
+          sleep 0.2
+        done
+        echo "FATAL: plan role never appeared; codex planners would stall" >&2
+        exit 1
+    networks: [stack]
+    restart: "no"
+
+%{ endif ~}
+  ui:
+    image: ${ui_image}
+    depends_on:
+      loom:
+        condition: service_started
+    networks: [stack]
+    ports:
+      - "${ui_port}:8080"
+    restart: unless-stopped

@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Open IAP tunnels for the UI, the loom API and fleet-db.
+#
+# Local ports come from Terraform (tunnel_*_port outputs), not from a formula
+# repeated here. loom's LOOM_FRONTEND_URL has to allow the exact origin the
+# browser will send, so the ports have exactly one owner; when this script
+# derived them independently the two drifted and the file-browser routes
+# started failing with an origin loom did not recognise.
+#
+# Nothing here kills a listener it did not start -- if a port is busy, it says
+# so and moves on.
+set -euo pipefail
+NAME="${1:?stack name}"; PROJECT="${2:?project}"; ZONE="${3:?zone}"
+UI_LOCAL="${4:?ui local port}"; API_LOCAL="${5:?api local port}"; DB_LOCAL="${6:?fleetdb local port}"
+WORKSPACE="${7:?workspace key}"
+
+declare -a REMOTE=(8283 8282 8280)
+declare -a LOCAL=("$UI_LOCAL" "$API_LOCAL" "$DB_LOCAL")
+declare -a LABEL=(ui api fleetdb)
+
+pids=()
+ui_ok=0
+for i in "${!REMOTE[@]}"; do
+  local_port="${LOCAL[$i]}"
+  if lsof -nP -iTCP:"$local_port" -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "port $local_port busy, skipping ${LABEL[$i]} (not killing a listener I did not start)" >&2
+    continue
+  fi
+  gcloud compute start-iap-tunnel "$NAME" "${REMOTE[$i]}" \
+    --local-host-port="localhost:$local_port" \
+    --project "$PROJECT" --zone "$ZONE" >/dev/null 2>&1 &
+  pids+=($!)
+  [ "${LABEL[$i]}" = ui ] && ui_ok=1
+  echo "${LABEL[$i]}  http://localhost:$local_port"
+done
+
+if [ "${#pids[@]}" -eq 0 ]; then
+  echo "no tunnels opened" >&2
+  exit 1
+fi
+
+echo
+# Only advertise the UI URL if this script actually opened that tunnel. It used
+# to print the URL unconditionally, which pointed you at whatever unrelated
+# process happened to hold the port.
+if [ "$ui_ok" -eq 1 ]; then
+  echo "UI: http://localhost:${UI_LOCAL}/ws/${WORKSPACE}/kanban"
+else
+  echo "UI tunnel not opened (port ${UI_LOCAL} was busy)" >&2
+fi
+echo "ctrl-c to close the tunnels"
+trap 'kill "${pids[@]}" 2>/dev/null || true' INT TERM
+wait

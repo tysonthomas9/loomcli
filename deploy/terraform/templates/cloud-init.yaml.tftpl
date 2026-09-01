@@ -1,0 +1,162 @@
+#cloud-config
+# Rendered by Terraform (vm.tf). Runs once on first boot.
+
+package_update: true
+packages:
+  - docker.io
+  - docker-compose-v2
+  - python3
+
+write_files:
+  - path: /opt/loom/docker-compose.yml
+    permissions: "0644"
+    encoding: b64
+    content: ${compose_file}
+
+  # Secrets are fetched at boot, not baked into the image or the compose file.
+  # printf '%s' and end="" matter: Secret Manager returns exactly the bytes you
+  # stored, and a stray trailing newline in a password reaches Redis verbatim
+  # and fails as WRONGPASS.
+  - path: /opt/loom/fetch-secrets
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      PROJECT="${project_id}"
+      meta() {
+        curl -sf -H 'Metadata-Flavor: Google' \
+          "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" \
+        | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"],end="")'
+      }
+      secret() {
+        local name="$1" tok
+        tok="$(meta)"
+        curl -sf -H "Authorization: Bearer $tok" \
+          "https://secretmanager.googleapis.com/v1/projects/$PROJECT/secrets/$name/versions/latest:access" \
+        | python3 -c 'import sys,json,base64;print(base64.b64decode(json.load(sys.stdin)["payload"]["data"]).decode(),end="")'
+      }
+      # Fail closed. `printf '%s' "$(secret X)"` does NOT trip `set -e` when the
+      # fetch fails -- bash reports printf's status, not the substitution's --
+      # so an IAM propagation delay or a Secret Manager blip used to write an
+      # EMPTY .env over a good one. An empty Redis password removes auth
+      # entirely. Assign first (assignment DOES trip set -e), reject empties,
+      # and only then write.
+      need() {
+        local name="$1" value
+        value="$(secret "$name")"
+        if [ -z "$value" ]; then
+          echo "FATAL: secret $name is empty or could not be read" >&2
+          exit 1
+        fi
+        printf '%s' "$value"
+      }
+      redis_pw="$(need '${redis_secret}')"
+      wf_token="$(need '${workspace_token_secret}')"
+      s3_id="$(need '${s3_access_id_secret}')"
+      s3_key="$(need '${s3_secret_secret}')"
+
+      # Artifact Registry needs a docker login. gcloud is not on this image, so
+      # authenticate with the service account's metadata token directly. The
+      # token is short-lived, which is fine: this runs on every unit start.
+      # Fatal, not a warning: without it every image pull 403s and the stack
+      # never starts, so failing here says why instead of leaving that to be
+      # discovered in docker logs.
+      docker login -u oauth2accesstoken -p "$(meta)" "https://${registry_host}" >/dev/null 2>&1 || {
+        echo "FATAL: docker login to ${registry_host} failed" >&2
+        exit 1
+      }
+
+      # Written via a temp file and renamed, so a failure part-way through
+      # leaves the previous working .env intact rather than truncating it.
+      umask 077
+      env_tmp="$(mktemp /opt/loom/.env.XXXXXX)"
+      {
+        printf 'REDIS_PASSWORD=%s\n'       "$redis_pw"
+        printf 'WORKSPACE_FILE_TOKEN=%s\n' "$wf_token"
+        printf 'S3_ACCESS_KEY_ID=%s\n'     "$s3_id"
+        printf 'S3_SECRET_ACCESS_KEY=%s\n' "$s3_key"
+      } > "$env_tmp"
+      chmod 600 "$env_tmp"
+      mv "$env_tmp" /opt/loom/.env
+%{ if codex_secret != "" ~}
+      # codex reads auth.json from disk, so it lands as a file rather than an
+      # env var. 0600 and re-fetched on every unit start, so rotating the
+      # secret version and restarting picks up a new token. Same fail-closed
+      # treatment: codex with an empty auth.json is a stack that looks healthy
+      # and cannot run a single agent.
+      codex_auth="$(need '${codex_secret}')"
+      mkdir -p /opt/loom/codex
+      codex_tmp="$(mktemp /opt/loom/codex/auth.json.XXXXXX)"
+      printf '%s' "$codex_auth" > "$codex_tmp"
+      chmod 600 "$codex_tmp"
+      mv "$codex_tmp" /opt/loom/codex/auth.json
+%{ endif ~}
+
+%{ if !plan_role_read_only ~}
+  # role-init exits 0 or 1, but nothing was reading that: the unit's `--wait`
+  # step deliberately excludes one-shots, so a sidecar that gave up after 120s
+  # left systemd reporting success and a codex planner that would silently
+  # retry forever. Since read_only=false is required functionality under codex,
+  # a failure here is a failed stack, not a warning.
+  - path: /opt/loom/check-role-init
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      compose() { docker compose --env-file /opt/loom/.env -f /opt/loom/docker-compose.yml "$@"; }
+      cid="$(compose ps -aq role-init)"
+      if [ -z "$cid" ]; then
+        echo "FATAL: role-init container was never created" >&2
+        exit 1
+      fi
+      # It starts with loom and normally finishes first, but do not assume it.
+      for _ in $(seq 1 60); do
+        state="$(docker inspect -f '{{.State.Status}}' "$cid")"
+        [ "$state" = running ] || break
+        sleep 2
+      done
+      code="$(docker inspect -f '{{.State.ExitCode}}' "$cid")"
+      if [ "$code" != "0" ]; then
+        echo "FATAL: role-init exited $code -- the plan role was NOT relaxed," >&2
+        echo "so codex planners will stall silently. Container log:" >&2
+        docker logs "$cid" 2>&1 | tail -20 >&2
+        exit 1
+      fi
+      echo "role-init ok"
+%{ endif ~}
+  - path: /etc/systemd/system/loom-stack.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Loom + fleet-db stack
+      Requires=docker.service
+      After=docker.service network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      WorkingDirectory=/opt/loom
+      # Secrets are re-read on every start so rotating a secret version and
+      # restarting the unit is enough -- no redeploy, no image rebuild.
+      ExecStartPre=/opt/loom/fetch-secrets
+      # Two steps on purpose. `up -d --wait` fails the whole unit when ANY
+      # container exits, and role-init is a one-shot that exits 0 by design:
+      #   container loom-stack-role-init-1 exited (0)
+      #   docker compose ... up -d --wait (code=exited, status=1/FAILURE)
+      # So start everything first -- role-init included, concurrently with loom,
+      # which it has to be -- then wait only on the long-running services.
+      ExecStart=/usr/bin/docker compose --env-file /opt/loom/.env up -d
+      ExecStartPost=/usr/bin/docker compose --env-file /opt/loom/.env up -d --wait --no-recreate redis fleet-db loom ui
+%{ if !plan_role_read_only ~}
+      ExecStartPost=/opt/loom/check-role-init
+%{ endif ~}
+      ExecStop=/usr/bin/docker compose down
+      TimeoutStartSec=900
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - systemctl enable --now docker
+  - systemctl enable --now loom-stack.service
