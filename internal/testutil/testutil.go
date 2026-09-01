@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -129,4 +130,36 @@ func LoadFixture(t *testing.T, path string) string {
 
 	t.Fatalf("failed to load fixture %s: not found in any search path", path)
 	return ""
+}
+
+// sandboxRuntimeDir is a per-process temp dir used as the runtime root for
+// subprocesses a test spawns. One dir per test binary keeps state coherent
+// across the whole run, the same way bootstrap's test config dir does.
+var sandboxRuntimeDir = sync.OnceValue(func() string {
+	dir, err := os.MkdirTemp("", "loom-test-runtime-*")
+	if err != nil {
+		return ""
+	}
+	return dir
+})
+
+// SandboxLoomRuntimeDir returns env with LOOM_WORKSPACE_RUNTIME_DIR replaced by
+// a per-process temp dir.
+//
+// The in-process guard in cli.GetWorkspaceRuntimeDir does not cross an exec
+// boundary, so a test that runs the loom binary with a pass-through os.Environ()
+// hands the child the fleet workspace it inherited from the launching agent
+// shell — and the child then appends to the production session and usage
+// ledgers (PUPPET-332). Call this on the env of any command that runs loom,
+// unless the test already sets an explicit LOOM_WORKSPACE_RUNTIME_DIR of its
+// own; this function would override that.
+func SandboxLoomRuntimeDir(env []string) []string {
+	out := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		if strings.HasPrefix(entry, "LOOM_WORKSPACE_RUNTIME_DIR=") {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return append(out, "LOOM_WORKSPACE_RUNTIME_DIR="+sandboxRuntimeDir())
 }

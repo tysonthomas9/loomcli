@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
 // runLoomWorkspace executes `loom workspace <subArgs...>` with an isolated LOOM_CONFIG_DIR.
@@ -29,7 +31,7 @@ func runLoomWorkspace(t *testing.T, configDir string, subArgs ...string) (stdout
 	}
 	filtered = append(filtered, "LOOM_CONFIG_DIR="+configDir)
 	filtered = append(filtered, "GIT_CONFIG_NOSYSTEM=1")
-	cmd.Env = filtered
+	cmd.Env = testutil.SandboxLoomRuntimeDir(filtered)
 
 	var stdoutBuf, stderrBuf strings.Builder
 	cmd.Stdout = &stdoutBuf

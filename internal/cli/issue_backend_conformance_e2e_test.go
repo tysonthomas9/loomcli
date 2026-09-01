@@ -25,6 +25,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/store"
+
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
 func TestE2E_IssueBackendConformance_AllModes(t *testing.T) {
@@ -302,6 +304,9 @@ func backendModeEnv(values map[string]string) []string {
 	}
 	for key, value := range values {
 		env = append(env, fmt.Sprintf("%s=%s", key, value))
+	}
+	if _, ok := values["LOOM_WORKSPACE_RUNTIME_DIR"]; !ok {
+		env = testutil.SandboxLoomRuntimeDir(env)
 	}
 	return env
 }

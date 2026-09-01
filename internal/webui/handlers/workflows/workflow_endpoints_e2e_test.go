@@ -32,6 +32,8 @@ import (
 	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/netutil"
 	"github.com/tysonthomas9/loomcli/internal/store"
+
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
 func TestE2E_WorkflowEndpointsRunRealFlueEpicRunner(t *testing.T) {
@@ -1368,6 +1370,9 @@ func workflowEndpointEnv(overrides map[string]string) []string {
 	}
 	for name, value := range overrides {
 		out = append(out, name+"="+value)
+	}
+	if _, ok := overrides["LOOM_WORKSPACE_RUNTIME_DIR"]; !ok {
+		out = testutil.SandboxLoomRuntimeDir(out)
 	}
 	return out
 }
