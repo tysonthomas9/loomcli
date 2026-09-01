@@ -25,10 +25,12 @@ type ResponseDrop struct {
 type CorruptDownload struct {
 	t          *testing.T
 	env        *Environment
+	upstream   *url.URL
 	activated  atomic.Bool
 	sameLength bool
 	mu         sync.Mutex
 	target     *fileDownloadGrant
+	fleetAuth  http.Header
 }
 
 type SkillCASTrace struct {
@@ -193,7 +195,7 @@ func (e *Environment) corruptNextFileDownload(revision string, sameLength bool) 
 	if err != nil {
 		e.t.Fatalf("parse LOOM_FLEET_DB_URL: %v", err)
 	}
-	fault := &CorruptDownload{t: e.t, env: e, sameLength: sameLength}
+	fault := &CorruptDownload{t: e.t, env: e, upstream: upstream, sameLength: sameLength}
 	downloadProxy := httptest.NewServer(http.HandlerFunc(fault.serveCorruptDownload))
 	e.t.Cleanup(downloadProxy.Close)
 
@@ -211,17 +213,30 @@ func (e *Environment) corruptNextFileDownload(revision string, sameLength bool) 
 func (f *CorruptDownload) serveCorruptDownload(w http.ResponseWriter, _ *http.Request) {
 	f.mu.Lock()
 	target := f.target
+	fleetAuth := f.fleetAuth.Clone()
 	f.mu.Unlock()
 	if target == nil {
 		http.Error(w, "download grant unavailable", http.StatusBadGateway)
 		return
 	}
-	request, err := http.NewRequestWithContext(f.t.Context(), target.Method, target.URL, nil)
+	targetURL, err := url.Parse(target.URL)
+	if err != nil {
+		http.Error(w, "invalid download grant", http.StatusBadGateway)
+		return
+	}
+	isFleetDownload := !targetURL.IsAbs()
+	if isFleetDownload {
+		targetURL = f.upstream.ResolveReference(targetURL)
+	}
+	request, err := http.NewRequestWithContext(f.t.Context(), target.Method, targetURL.String(), nil)
 	if err != nil {
 		http.Error(w, "invalid download grant", http.StatusBadGateway)
 		return
 	}
 	request.Header = http.Header(target.Headers).Clone()
+	if isFleetDownload {
+		copyResponseHeaders(request.Header, fleetAuth)
+	}
 	response, err := http.DefaultTransport.RoundTrip(request)
 	if err != nil {
 		http.Error(w, "provider download failed", http.StatusBadGateway)
@@ -260,7 +275,7 @@ func (f *CorruptDownload) serveFleetDownloadGrant(w http.ResponseWriter, request
 	}
 	selected := strings.Contains(request.URL.Path, "/file-trees/"+url.PathEscape(revision)+"/downloads/")
 	if request.Method == http.MethodPost && selected && response.StatusCode == http.StatusOK {
-		body, err = f.rewriteDownloadGrant(body, downloadURL)
+		body, err = f.rewriteDownloadGrant(body, downloadURL, request.Header)
 		if err != nil {
 			http.Error(w, "rewrite download grant", http.StatusBadGateway)
 			return
@@ -272,7 +287,7 @@ func (f *CorruptDownload) serveFleetDownloadGrant(w http.ResponseWriter, request
 	_, _ = io.Copy(w, bytes.NewReader(body))
 }
 
-func (f *CorruptDownload) rewriteDownloadGrant(body []byte, downloadURL string) ([]byte, error) {
+func (f *CorruptDownload) rewriteDownloadGrant(body []byte, downloadURL string, fleetAuth http.Header) ([]byte, error) {
 	var grant fileDownloadGrant
 	if err := json.Unmarshal(body, &grant); err != nil || grant.URL == "" {
 		return body, nil
@@ -284,6 +299,7 @@ func (f *CorruptDownload) rewriteDownloadGrant(body []byte, downloadURL string) 
 	}
 	original := grant
 	f.target = &original
+	f.fleetAuth = selectFleetAuthHeaders(fleetAuth)
 	grant.URL = downloadURL + "/download"
 	grant.Headers = nil
 	return json.Marshal(grant)
@@ -295,8 +311,25 @@ func (f *CorruptDownload) RequireActivated() {
 		f.mu.Lock()
 		target := f.target
 		f.mu.Unlock()
-		f.t.Fatalf("download-corruption proxy did not activate (captured grant: %+v)\nmaterialize stderr:\n%s", target, f.env.lastStderr)
+		method := ""
+		relative := false
+		if target != nil {
+			method = target.Method
+			parsed, err := url.Parse(target.URL)
+			relative = err == nil && !parsed.IsAbs()
+		}
+		f.t.Fatalf("download-corruption proxy did not activate (method=%q relative=%t)\nmaterialize stderr:\n%s", method, relative, f.env.lastStderr)
 	}
+}
+
+func selectFleetAuthHeaders(source http.Header) http.Header {
+	target := make(http.Header)
+	for _, key := range []string{"Authorization", "X-API-Key", "X-Fleet-API-Key", "X-Actor"} {
+		for _, value := range source.Values(key) {
+			target.Add(key, value)
+		}
+	}
+	return target
 }
 
 func forwardRequest(request *http.Request, upstream *url.URL) (*http.Response, error) {
