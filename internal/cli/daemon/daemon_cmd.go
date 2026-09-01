@@ -19,6 +19,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
+	"github.com/tysonthomas9/loomcli/internal/metrics/spawnmetrics"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -231,7 +232,7 @@ func runDaemonBody() int {
 	ValidateDaemonPaths(projectDir, paths.pidFile, paths.logDir)
 
 	if daemonDryRun {
-		printDryRunInfo(config, paths.pidFile, paths.logDir, paths.stateFile)
+		printDryRunInfo(config, paths.pidFile, paths.logDir, paths.stateFile, paths.spawnMetrics)
 		return 0
 	}
 
@@ -258,6 +259,9 @@ func runDaemonBody() int {
 	defer os.Remove(paths.stateFile)
 
 	shutdown, daemon := initDaemonServices(config, projectDir, paths)
+	// Land the final counts on a graceful shutdown; nil-safe by contract, and
+	// best-effort — a failed snapshot write must not change the exit path.
+	defer func() { _ = daemon.sup.SpawnMetrics.Flush() }()
 
 	return runDaemonMainLoop(config, projectDir, paths, shutdown, daemon, lockFile)
 }
@@ -285,6 +289,11 @@ type daemonPaths struct {
 	stateFile string
 	lockFile  string
 	eventsDir string
+	// spawnMetrics is the daemon's spawn counter snapshot. It lives in the
+	// WORKSPACE runtime dir — the same one the serve-side reader resolves —
+	// not next to the PID file: a divergence there yields a metric that
+	// silently never appears.
+	spawnMetrics string
 }
 
 // resolveDaemonPaths resolves all daemon-related filesystem paths.
@@ -296,6 +305,8 @@ func resolveDaemonPaths(projectDir string, config *cfgpkg.DaemonConfig) daemonPa
 		stateFile: cfgpkg.ResolveDaemonStatePath(projectDir),
 		lockFile:  filepath.Join(filepath.Dir(pidFile), "daemon.lock"),
 		eventsDir: supervisor.ResolveDaemonPath(projectDir, config.Daemon.EventsDir),
+
+		spawnMetrics: spawnmetrics.SnapshotPath(cli.GetWorkspaceRuntimeDir()),
 	}
 }
 
@@ -338,6 +349,7 @@ func initDaemonServices(config *cfgpkg.DaemonConfig, projectDir string, paths da
 		os.Exit(1)
 	}
 	daemon.storeHandle = storeHandle
+	daemon.sup.SpawnMetrics = spawnmetrics.NewRecorder(paths.spawnMetrics)
 
 	return shutdown, daemon
 }

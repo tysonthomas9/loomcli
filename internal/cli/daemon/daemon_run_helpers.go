@@ -79,13 +79,14 @@ func stopOTelExporter(exp *otelexport.Exporter) {
 // printDryRunInfo displays what would happen in dry-run mode.
 // NOTE: If config.DaemonSettings gains secret fields (RedisURL),
 // their values should be masked via config.SecretResolver.MaskSecrets() before printing.
-func printDryRunInfo(config *config.DaemonConfig, pidFile, logDir, stateFile string) {
+func printDryRunInfo(config *config.DaemonConfig, pidFile, logDir, stateFile, spawnMetricsFile string) {
 	fmt.Println("DRY RUN - No daemon will be started")
 	fmt.Println("")
 	fmt.Println("Configuration:")
 	fmt.Printf("  PID file: %s\n", pidFile)
 	fmt.Printf("  State file: %s\n", stateFile)
 	fmt.Printf("  Log directory: %s\n", logDir)
+	fmt.Printf("  Spawn metrics file: %s\n", spawnMetricsFile)
 	if config.Daemon.RestartPolicy.MaxRetries != nil {
 		fmt.Printf("  Max retries: %d\n", *config.Daemon.RestartPolicy.MaxRetries)
 	} else {

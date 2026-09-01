@@ -18,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/metrics/spawnmetrics"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/store"
 
@@ -95,6 +96,11 @@ type Supervisor struct {
 	lastLivenessScan      time.Time
 	lastLivenessScanWall  time.Time
 	livenessFatalSignaled bool
+
+	// SpawnMetrics counts spawn outcomes per role for the serve-side collector.
+	// Nil is fine — every Recorder method is nil-safe — so tests that build a
+	// bare Supervisor need no wiring.
+	SpawnMetrics *spawnmetrics.Recorder
 
 	Concurrency *ConcurrencyTracker
 	EventBus    EventEmitter
@@ -500,7 +506,7 @@ func (s *Supervisor) createAgentSession(ap *AgentProcess, epicID string) {
 	ap.Mu.Unlock()
 
 	sess, err := sessStore.CreateSession(sessions.CreateOptions{
-		AgentName: ap.Entry.Worktree, Backend: s.GetEffectiveBackend(ap),
+		AgentName: ap.Entry.Worktree, Role: ap.Entry.Role, Backend: s.GetEffectiveBackend(ap),
 		EpicID: epicID, Phase: phase, AttemptNum: restartCount,
 	})
 	if err != nil {
