@@ -62,8 +62,8 @@ resource "google_compute_instance" "stack" {
   }
 
   network_interface {
-    network    = data.google_compute_network.default.id
-    subnetwork = data.google_compute_subnetwork.default.id
+    network    = google_compute_network.stack.id
+    subnetwork = google_compute_subnetwork.stack.id
 
     # An access_config block at all is what assigns a public IP; omitting it
     # leaves the VM reachable only through IAP.

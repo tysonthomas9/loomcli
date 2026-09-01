@@ -15,17 +15,20 @@ NAME="${1:?stack name}"; PROJECT="${2:?project}"; ZONE="${3:?zone}"
 # Passed in by the Makefile from Terraform outputs, so the gate cannot drift
 # from the stack it is testing the way the hardcoded tunnel ports once did.
 LOOM_WS="${4:-LOOMGCP}"; EXPECT_PLAN_READ_ONLY="${5:-false}"
+# Ports too. Same reason: iap_web_ports is configurable, and a gate that
+# hardcodes what it probes reports a broken stack whenever it is overridden.
+DB_PORT="${6:-8280}"; API_PORT="${7:-8282}"; UI_PORT="${8:-8283}"
 
 # The python body stays single-quoted so its own quoting is safe; only this
 # short prefix is double-quoted, and it contains nothing but two known values.
 gcloud compute ssh "$NAME" --project "$PROJECT" --zone "$ZONE" \
   --tunnel-through-iap --quiet \
-  --command "export LOOM_WS=$LOOM_WS EXPECT_PLAN_READ_ONLY=$EXPECT_PLAN_READ_ONLY; "'python3 - <<"PYEOF"
+  --command "export LOOM_WS=$LOOM_WS EXPECT_PLAN_READ_ONLY=$EXPECT_PLAN_READ_ONLY DB_PORT=$DB_PORT API_PORT=$API_PORT UI_PORT=$UI_PORT; "'python3 - <<"PYEOF"
 import hashlib, json, os, sys, urllib.error, urllib.request
 
-BASE = "http://127.0.0.1:8280"   # fleet-db
-API  = "http://127.0.0.1:8282"   # loom serve
-UI   = "http://127.0.0.1:8283"   # caddy + SPA
+BASE = "http://127.0.0.1:%s" % os.environ["DB_PORT"]    # fleet-db
+API  = "http://127.0.0.1:%s" % os.environ["API_PORT"]   # loom serve
+UI   = "http://127.0.0.1:%s" % os.environ["UI_PORT"]    # caddy + SPA
 WS   = os.environ.get("SMOKE_WS", "SMOKE")
 HDRS = {"Content-Type": "application/json", "X-Actor": "smoke@fixture.local"}
 failures = []

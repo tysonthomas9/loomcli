@@ -12,11 +12,23 @@ make tunnel NAME=loom-pr512  # IAP tunnels + the browser URL
 make down NAME=loom-pr512    # destroy everything the stack created
 ```
 
-`NAME` is the isolation boundary, in three senses: it prefixes every resource,
-it is the network tag the firewall rules target so concurrent stacks cannot
-reach each other's ports, and it selects a **Terraform workspace** so each stack
-has its own state. That last one matters -- without it `make down NAME=b` reads
-whatever state the directory happens to hold and destroys stack A.
+`NAME` is the isolation boundary, in four senses: it prefixes every resource,
+it names a **VPC of its own** so stacks cannot see each other at all, it is the
+network tag the firewall rules target, and it selects a **Terraform workspace**
+so each stack has its own state. That last one matters -- without it
+`make down NAME=b` reads whatever state the directory happens to hold and
+destroys stack A.
+
+The per-stack VPC is what makes concurrent stacks actually work, not just a
+tidier boundary. Sharing the project's `default` network meant sharing its
+address space, and Cloud NAT refuses two gateways with overlapping subnet
+coverage in one network and region -- so the first `make up` succeeded and the
+second failed on `NAT gateway ... cannot have overlapping subnetwork ranges`.
+Separate networks make the subnet CIDR a constant (`var.subnet_cidr`, the same
+`10.90.0.0/24` for every stack) instead of something to allocate. The cost is
+quota: a project allows **5 VPC networks** by default, one of which is
+`default`, so about four concurrent stacks before you need a quota bump. That
+surfaces as a clear error at apply time.
 
 Local tunnel ports are derived from the name too, in Terraform, and exported as
 outputs; `make tunnel` reads them rather than recomputing them, and refuses to
@@ -128,17 +140,29 @@ IAP forwards to the VM's network interface, so a loopback-only bind makes the
 tunnel fail with `failed to connect to backend`. Redis publishes no host port at
 all. Cloud NAT gives the VM outbound access for image pulls.
 
-What closes those ports is a **deny** rule, not the allow rules. GCP firewall
-rules are additive, and a stock default VPC carries `default-allow-internal` at
-priority 65534 — so any other VM in the network could reach fleet-db, which runs
-with `--auth-dev-mode` and `--authz-enabled=false`. The stack adds a deny at
-priority 1100, below the IAP allows at 1000 and above the default rules.
-Measured from a peer VM in the same VPC:
+Two things keep those ports closed, and it is worth knowing which does what.
+
+The **network** is the primary boundary: each stack gets its own custom-mode
+VPC, which ships no permissive rules at all. Nothing else in the project shares
+it, so there is nothing to be reachable from.
+
+The **deny** rule is the second layer, and it exists because allow rules close
+nothing — GCP firewall rules are additive. It matters most when stacks shared
+the project's `default` network, which carries `default-allow-internal` at
+priority 65534: any other VM could reach fleet-db, which runs with
+`--auth-dev-mode` and `--authz-enabled=false`, so reachable meant fully
+readable and writable. Measured from a peer VM back when the stack lived on the
+default network:
 
 ```
 loom-tftest  8280/8282/8283/22  -> blocked      (this stack, deny rule)
 peer VM      8090               -> REACHABLE    (no deny rule, same VPC)
 ```
+
+On a per-stack VPC that exposure is gone by construction, so treat the numbers
+above as the reason the rule is there rather than a description of today's
+topology. The rule stays because it is free and still bites if this network is
+ever peered, or if someone adds a broad allow while debugging.
 
 The priority gap is deliberate: a deliberate allow an operator adds at
 priority < 1100 still takes effect.
@@ -157,6 +181,7 @@ which is the point — opening these ports should be an explicit act.
 | `google_storage_bucket` | Content-addressed workspace files, uniform access, no versioning |
 | `google_storage_hmac_key` | GCS S3-interop credential for fleet-db |
 | 4 × `google_secret_manager_secret` | Redis password, workspace-file token, S3 id + secret |
+| `google_compute_network` + `google_compute_subnetwork` | Custom-mode VPC per stack; `private_ip_google_access` on |
 | 3 × `google_compute_firewall` | Two IAP allows (priority 1000) plus the deny (1100) that closes everything else |
 | Cloud Router + NAT | Only when the VM has no external IP |
 
@@ -214,11 +239,32 @@ These each cost real debugging time and are now handled in code:
   Assign first, reject empties, write through a temp file and rename.
 - **Tag each image from its own commit.** fleet-db tagged with loom's SHA meant
   a fleet-db change did not move the tag and the stack kept the stale image.
-- **Allow rules do not close anything.** GCP firewall rules are additive; only a
-  deny rule makes "IAP only" true on the default VPC.
+- **A commit id names a commit, not a working tree.** Building from a dirty
+  checkout pushed modified source under the clean `<sha>` tag, so `loom_image`
+  never changed, the VM was never replaced, and `wait-healthy` passed against
+  the *old* container -- indistinguishable from a change that had no effect.
+  The tag now carries a hash of the actual delta (`git diff HEAD` plus the
+  hashed contents of untracked files, which land in the build context too).
+- **Allow rules do not close anything.** GCP firewall rules are additive; a deny
+  rule is what made "IAP only" true while stacks shared the default VPC.
+- **Cloud NAT will not tolerate overlapping coverage.** One
+  `ALL_SUBNETWORKS_ALL_IP_RANGES` gateway per stack on a shared network means
+  the second stack cannot be applied at all. Give each stack its own VPC and
+  the question disappears.
+- **A gate must read the stack, not the command line.** `make smoke` rebuilt
+  its expectations from Make arguments, so the documented `make smoke NAME=...`
+  after `make up CODEX=1` asserted the wrong plan-role state and failed a
+  healthy stack. Every expectation now comes from `tofu output`. The same rule
+  covers ports: `wait-healthy` hardcoded 8282, so overriding `iap_web_ports`
+  bought a 15-minute timeout against a stack that was fine.
+- **`docker inspect` reports exit code 0 for a RUNNING container.** The
+  `role-init` check polled for a terminal state and then read `.State.ExitCode`
+  unconditionally, so a sidecar that never finished was indistinguishable from
+  one that succeeded. Reject the running state explicitly, and give the check a
+  window longer than the sidecar's own timeout so the two do not race.
 - **A one-shot that exits non-zero is invisible unless something reads it.**
   `role-init` failing left systemd reporting success, so an `ExecStartPost`
-  now inspects its exit code and fails the unit.
+  now inspects its exit code -- and its liveness -- and fails the unit.
 - **`smoke` has to be re-runnable.** Asserting `publish tree == 201` passed once
   and failed on every later run, because a re-publish of identical
   content-addressed bytes returns 200.

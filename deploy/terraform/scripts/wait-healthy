@@ -4,6 +4,10 @@
 # containers, so "instance RUNNING" is several minutes early.
 set -euo pipefail
 NAME="${1:?stack name}"; PROJECT="${2:?project}"; ZONE="${3:?zone}"
+# Passed in from a Terraform output, not hardcoded. With 8282 baked in, any
+# stack that overrode iap_web_ports sat here for the full 15 minutes and then
+# reported a timeout -- while being completely healthy on a different port.
+API_PORT="${4:?loom api port}"
 DEADLINE=$(( $(date +%s) + 900 ))
 
 ssh_probe() {
@@ -17,7 +21,7 @@ while [ "$(date +%s)" -lt "$DEADLINE" ]; do
       *active*)
         # is-active flips to active once compose --wait returns, which already
         # means every healthcheck passed. Confirm the API answers anyway.
-        if ssh_probe 'curl -sf http://127.0.0.1:8282/api/config >/dev/null && echo ok' | grep -q ok; then
+        if ssh_probe "curl -sf http://127.0.0.1:$API_PORT/api/config >/dev/null && echo ok" | grep -q ok; then
           echo "stack healthy"; exit 0
         fi
         ;;

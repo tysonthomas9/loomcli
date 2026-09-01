@@ -110,11 +110,27 @@ write_files:
         exit 1
       fi
       # It starts with loom and normally finishes first, but do not assume it.
-      for _ in $(seq 1 60); do
+      #
+      # 300s, not 120s: role-init polls for 120s of its OWN before giving up,
+      # plus curl connect/max timeouts, so a 120s window here could expire
+      # while the sidecar was still legitimately working. Anything past 300s
+      # is a genuine hang.
+      state=""
+      for _ in $(seq 1 150); do
         state="$(docker inspect -f '{{.State.Status}}' "$cid")"
         [ "$state" = running ] || break
         sleep 2
       done
+      # Falling out of that loop still running used to reach the ExitCode read
+      # below -- and docker reports ExitCode 0 for a RUNNING container, so a
+      # hung sidecar was indistinguishable from a successful one and the unit
+      # came up green with the plan role possibly never relaxed. Reject it.
+      if [ "$state" = running ]; then
+        echo "FATAL: role-init still running after 300s -- the plan role was" >&2
+        echo "NOT confirmed relaxed, so codex planners may stall silently." >&2
+        docker logs "$cid" 2>&1 | tail -20 >&2
+        exit 1
+      fi
       code="$(docker inspect -f '{{.State.ExitCode}}' "$cid")"
       if [ "$code" != "0" ]; then
         echo "FATAL: role-init exited $code -- the plan role was NOT relaxed," >&2

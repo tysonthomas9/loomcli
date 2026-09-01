@@ -62,10 +62,24 @@ variable "enable_cloud_nat" {
   default     = true
 }
 
+variable "subnet_cidr" {
+  description = <<-EOT
+    Range for this stack's subnet. Every stack builds its own VPC, so stacks
+    cannot see each other and the SAME range is correct for all of them --
+    there is nothing to allocate and nothing to collide. Only change this if
+    the stack has to be peered with something that already uses this range.
+  EOT
+  type        = string
+  default     = "10.90.0.0/24"
+}
+
 variable "iap_web_ports" {
   description = <<-EOT
-    TCP ports reachable through IAP tunnels, on top of SSH. Defaults match the
-    local-mode stack: fleet-db, the loom API, and the Caddy-served UI.
+    TCP ports reachable through IAP tunnels, on top of SSH, in the order
+    [fleet-db, loom API, Caddy-served UI]. Defaults match the local-mode
+    stack. wait-healthy and smoke read these back out of Terraform outputs
+    rather than hardcoding them, so overriding this does not strand the
+    health gate probing a port nothing is listening on.
   EOT
   type        = list(string)
   default     = ["8280", "8282", "8283"]

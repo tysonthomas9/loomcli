@@ -18,12 +18,31 @@ PROJECT   ?= $(shell gcloud config get-value project 2>/dev/null)
 REGION    ?= us-central1
 ZONE      ?= $(REGION)-a
 REGISTRY  ?= $(REGION)-docker.pkg.dev/$(PROJECT)/loom
-# Tag by commit so a stack always names the code it is running.
-TAG       ?= $(shell git -C $(REPO_ROOT) rev-parse --short HEAD)$(TAG_SUFFIX)
 FLEETDB_SRC ?= $(REPO_ROOT)/../fleet-db
+
+# Tag by commit so a stack always names the code it is running -- but a commit
+# id names a COMMIT, not a working tree. Building from a dirty checkout pushed
+# modified source under the clean SHA, so var.loom_image never changed, the VM
+# was never replaced (nothing in its boot config differed), and wait-healthy
+# reported success after probing the OLD container. Silent, and it looked like
+# the change simply had no effect.
+#
+# So: append a hash of the actual delta -- `git diff HEAD` for tracked edits,
+# plus the hashed CONTENT of untracked files, since those land in the build
+# context too and listing their names alone would not notice an edit. Clean
+# tree -> empty suffix, so committed builds keep their plain <sha> tags.
+# `cd ... || exit 0` and not `cd ... &&`: with && a missing checkout sends the
+# whole thing into the || branch, which would then hash whatever repo make was
+# invoked from and stamp THAT delta onto fleet-db's tag.
+tree_delta = $(shell ( cd $(1) 2>/dev/null || exit 0; git diff --quiet HEAD 2>/dev/null && test -z "$$(git ls-files -o --exclude-standard)" || printf -- '-dirty.%s' "$$( { git diff HEAD; git ls-files -o --exclude-standard -z | xargs -0 git hash-object; } 2>/dev/null | shasum | cut -c1-8 )" ) 2>/dev/null)
+
+LOOM_DELTA    := $(call tree_delta,$(REPO_ROOT))
+FLEETDB_DELTA := $(call tree_delta,$(FLEETDB_SRC))
+
+TAG       ?= $(shell git -C $(REPO_ROOT) rev-parse --short HEAD)$(LOOM_DELTA)$(TAG_SUFFIX)
 # Tagged from ITS OWN commit. Tagging fleet-db with loom's SHA meant a
 # fleet-db change did not alter the tag, so the stack kept the stale image.
-FLEETDB_TAG ?= $(shell git -C $(FLEETDB_SRC) rev-parse --short HEAD 2>/dev/null || echo unknown)
+FLEETDB_TAG ?= $(shell git -C $(FLEETDB_SRC) rev-parse --short HEAD 2>/dev/null || echo unknown)$(FLEETDB_DELTA)
 
 # CODEX=1 builds a loom image WITH the codex CLI and points the stack at an
 # existing Secret Manager secret holding auth.json. The binary is a build arg
@@ -112,15 +131,24 @@ apply: state ## Apply infrastructure only (assumes images already pushed)
 
 up: images apply ## Full pipeline: images -> infra -> wait healthy
 	@echo "waiting for the stack to report healthy..."
-	@$(CURDIR)/scripts/wait-healthy $(NAME) $(PROJECT) $(ZONE)
+	@$(CURDIR)/scripts/wait-healthy $(NAME) $(PROJECT) $(ZONE) \
+		$$($(TF) output -raw api_port)
 	@echo
 	@$(TF) output -raw iap_tunnel_ui
 	@echo
 
+# Every expectation comes from `tofu output`, i.e. from the stack as deployed.
+# Reconstructing them from Make arguments meant `make up CODEX=1` followed by
+# the documented `make smoke NAME=...` asserted read_only=true against a stack
+# deployed read_only=false -- a healthy stack failing its own gate because the
+# second command was missing a flag the first one had.
 smoke: state ## End-to-end proof: workspace file round trip through GCS
 	@$(CURDIR)/scripts/smoke $(NAME) $(PROJECT) $(ZONE) \
 		$$($(TF) output -raw loom_workspace) \
-		$$(test "$(CODEX)" = 1 && echo false || echo true)
+		$$($(TF) output -raw plan_role_read_only) \
+		$$($(TF) output -raw fleetdb_port) \
+		$$($(TF) output -raw api_port) \
+		$$($(TF) output -raw ui_port)
 
 tunnel: state ## Open IAP tunnels in the background and print the URL
 	@$(CURDIR)/scripts/tunnel $(NAME) $(PROJECT) $(ZONE) \

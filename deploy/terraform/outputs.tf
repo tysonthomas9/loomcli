@@ -27,9 +27,10 @@ output "ssh_command" {
 
 # Ports publish on ALL interfaces on the VM -- IAP forwards to the NIC, so a
 # loopback bind breaks the tunnel. What keeps them closed is the firewall
-# (source 35.235.240.0/20 only) plus the absence of an external IP. Note that
-# on a stock default VPC `default-allow-internal` still lets other VMs in the
-# network reach these ports, and fleet-db runs with auth in dev mode.
+# (source 35.235.240.0/20 only), the absence of an external IP, and the fact
+# that this VPC belongs to this stack alone and carries no permissive default
+# rules. That last part matters: fleet-db runs with auth in dev mode, so
+# anything that CAN reach the port has full read/write.
 output "iap_tunnel_ui" {
   description = "Run this, then open http://localhost:8283 in a browser."
   value       = "gcloud compute start-iap-tunnel ${google_compute_instance.stack.name} ${var.iap_web_ports[2]} --local-host-port=localhost:${var.iap_web_ports[2]} --project ${var.project_id} --zone ${var.zone}"
@@ -67,4 +68,31 @@ output "tunnel_fleetdb_port" {
 output "loom_workspace" {
   description = "Workspace key the stack seeded, for URL construction."
   value       = var.loom_workspace
+}
+
+# The service ports the containers publish, exported so the health gate and the
+# smoke gate probe what this stack actually listens on. They used to be
+# hardcoded 8280/8282/8283 in both scripts, which meant overriding
+# iap_web_ports produced a 15-minute wait-healthy timeout against a stack that
+# was perfectly healthy -- the same drift that once broke the tunnel ports.
+output "fleetdb_port" {
+  value = var.iap_web_ports[0]
+}
+
+output "api_port" {
+  value = var.iap_web_ports[1]
+}
+
+output "ui_port" {
+  value = var.iap_web_ports[2]
+}
+
+# What smoke should EXPECT of the plan role, read from the deployed stack
+# rather than reconstructed from Make arguments. `make up CODEX=1` followed by
+# the documented `make smoke NAME=...` used to assert read_only=true against a
+# stack deliberately deployed with read_only=false, failing a healthy stack for
+# saying exactly what it was configured to say.
+output "plan_role_read_only" {
+  description = "Whether this stack left the plan role read-only (false under CODEX=1)."
+  value       = var.plan_role_read_only
 }
