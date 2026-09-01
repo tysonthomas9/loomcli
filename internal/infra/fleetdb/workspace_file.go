@@ -30,6 +30,11 @@ const (
 	pendingTreeWaitTimeout  = 10 * time.Second
 )
 
+type pendingTreeWaitPolicy struct {
+	PollInterval time.Duration
+	Timeout      time.Duration
+}
+
 // These wire types are temporary local mirrors of FleetDB's workspace-file
 // JSON contract. Keep them private so the later generated-client cutover can
 // replace this file without exposing transport details to callers.
@@ -139,7 +144,14 @@ func (s *workspaceFileStore) Publish(ctx context.Context, workspaceKey string, f
 }
 
 func (s *workspaceFileStore) waitForTree(ctx context.Context, workspaceKey, revision string) (*domain.WorkspaceFileTree, error) {
-	waitCtx, cancel := context.WithTimeout(ctx, pendingTreeWaitTimeout)
+	return s.waitForTreeWithPolicy(ctx, workspaceKey, revision, pendingTreeWaitPolicy{
+		PollInterval: pendingTreePollInterval,
+		Timeout:      pendingTreeWaitTimeout,
+	})
+}
+
+func (s *workspaceFileStore) waitForTreeWithPolicy(ctx context.Context, workspaceKey, revision string, policy pendingTreeWaitPolicy) (*domain.WorkspaceFileTree, error) {
+	waitCtx, cancel := context.WithTimeout(ctx, policy.Timeout)
 	defer cancel()
 	for {
 		tree, err := s.GetTree(waitCtx, workspaceKey, revision)
@@ -149,7 +161,7 @@ func (s *workspaceFileStore) waitForTree(ctx context.Context, workspaceKey, revi
 		if !errors.Is(err, domain.ErrNotFound) {
 			return nil, err
 		}
-		timer := time.NewTimer(pendingTreePollInterval)
+		timer := time.NewTimer(policy.PollInterval)
 		select {
 		case <-waitCtx.Done():
 			if !timer.Stop() {

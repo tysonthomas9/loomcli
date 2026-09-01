@@ -18,6 +18,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/test/skills-e2e/registry"
 )
 
 func TestWorkspaceFileStorePublishesAndDownloadsBinaryTree(t *testing.T) {
@@ -208,6 +209,101 @@ func TestWorkspaceFileStoreWaitsUntilPendingTreeIsReadable(t *testing.T) {
 	}
 }
 
+func TestWorkspaceFileStorePendingWaitHonorsCancellationAndDeadline(t *testing.T) {
+	registry.MarkEvidence(t, 65)
+
+	for _, tc := range []struct {
+		name      string
+		context   func(context.Context, <-chan struct{}) (context.Context, context.CancelFunc)
+		wantError error
+	}{
+		{
+			name: "cancellation",
+			context: func(parent context.Context, firstRead <-chan struct{}) (context.Context, context.CancelFunc) {
+				ctx, cancel := context.WithCancel(parent)
+				go func() {
+					<-firstRead
+					cancel()
+				}()
+				return ctx, cancel
+			},
+			wantError: context.Canceled,
+		},
+		{
+			name: "deadline",
+			context: func(parent context.Context, _ <-chan struct{}) (context.Context, context.CancelFunc) {
+				return context.WithTimeout(parent, 50*time.Millisecond)
+			},
+			wantError: context.DeadlineExceeded,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			content := []byte("pending")
+			digest := workspaceFileTestDigest(content)
+			firstRead := make(chan struct{})
+			var signalOnce atomic.Bool
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/file-uploads"):
+					writeWorkspaceFileTestJSON(w, http.StatusCreated, map[string]any{
+						"upload_token": "upload", "method": http.MethodPut, "url": "/transfer", "expires_at": time.Now().Add(time.Minute),
+					})
+				case r.Method == http.MethodPut && r.URL.Path == "/transfer":
+					w.WriteHeader(http.StatusNoContent)
+				case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/file-trees"):
+					writeWorkspaceFileTestJSON(w, http.StatusAccepted, map[string]any{
+						"workspace_key": "FLEET", "revision": "wft1_pending", "created_by": "alice", "created_at": time.Now(),
+						"files": []map[string]any{{"path": "a", "blob_ref": "blob", "content_hash": digest, "size_bytes": len(content), "revision": "wff1_pending"}},
+					})
+				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/file-trees/wft1_pending"):
+					if signalOnce.CompareAndSwap(false, true) {
+						close(firstRead)
+					}
+					writeWorkspaceFileTestJSON(w, http.StatusNotFound, map[string]any{"error": map[string]any{"code": "not_found", "message": "pending"}})
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(server.Close)
+
+			ctx, cancel := tc.context(t.Context(), firstRead)
+			defer cancel()
+			started := time.Now()
+			_, err := newWorkspaceFileTestStore(t, server.URL, "alice", "").Publish(
+				ctx, "FLEET", []domain.WorkspaceFileInput{{Path: "a", Bytes: content}},
+			)
+			if !errors.Is(err, tc.wantError) {
+				t.Fatalf("Publish error = %v, want %v", err, tc.wantError)
+			}
+			if elapsed := time.Since(started); elapsed >= time.Second {
+				t.Fatalf("pending wait returned after %s, want context-bounded return under 1s", elapsed)
+			}
+		})
+	}
+
+	t.Run("internal bound", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			writeWorkspaceFileTestJSON(w, http.StatusNotFound, map[string]any{
+				"error": map[string]any{"code": "not_found", "message": "still pending"},
+			})
+		}))
+		t.Cleanup(server.Close)
+		filesStore := newWorkspaceFileTestClient(t, server.URL, "alice", "").WorkspaceFiles().(*workspaceFileStore)
+
+		started := time.Now()
+		_, err := filesStore.waitForTreeWithPolicy(t.Context(), "FLEET", "wft1_pending", pendingTreeWaitPolicy{
+			PollInterval: 5 * time.Millisecond,
+			Timeout:      40 * time.Millisecond,
+		})
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("waitForTreeWithPolicy error = %v, want DeadlineExceeded", err)
+		}
+		if elapsed := time.Since(started); elapsed < 30*time.Millisecond || elapsed >= time.Second {
+			t.Fatalf("internal pending bound returned after %s, want 30ms <= elapsed < 1s", elapsed)
+		}
+	})
+}
+
 func TestWorkspaceFileStoreSupportsAbsoluteProviderGrantsWithoutCredentialLeak(t *testing.T) {
 	t.Parallel()
 
@@ -384,6 +480,38 @@ func TestWorkspaceFileStoreRejectsInvalidManifestBeforeUpload(t *testing.T) {
 	}
 	if got := calls.Load(); got != 0 {
 		t.Fatalf("HTTP calls = %d, want 0", got)
+	}
+}
+
+func TestWorkspaceFileStoreUploadFailurePublishesNoTree(t *testing.T) {
+	registry.MarkEvidence(t, 61)
+
+	var publicationRequests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/file-uploads"):
+			writeWorkspaceFileTestJSON(w, http.StatusCreated, map[string]any{
+				"upload_token": "upload", "method": http.MethodPut, "url": "/transfer", "expires_at": time.Now().Add(time.Minute),
+			})
+		case r.Method == http.MethodPut && r.URL.Path == "/transfer":
+			http.Error(w, "upload failed", http.StatusServiceUnavailable)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/file-trees"):
+			publicationRequests.Add(1)
+			w.WriteHeader(http.StatusCreated)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	_, err := newWorkspaceFileTestStore(t, server.URL, "alice", "").Publish(
+		t.Context(), "FLEET", []domain.WorkspaceFileInput{{Path: "file", Bytes: []byte("not published")}},
+	)
+	if err == nil || !strings.Contains(err.Error(), "HTTP 503") {
+		t.Fatalf("Publish error = %v, want upload HTTP 503", err)
+	}
+	if got := publicationRequests.Load(); got != 0 {
+		t.Fatalf("tree publication requests = %d, want 0 after upload failure", got)
 	}
 }
 
