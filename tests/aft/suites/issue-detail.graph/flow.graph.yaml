@@ -1,5 +1,6 @@
 kind: graph
 version: 1
+classification: { area: issues, feature: issue-detail, surface: mixed, purpose: journey }
 flow: issue-detail
 intent: A human creates an issue and exercises the editable issue-detail panel through mounted UI controls.
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
