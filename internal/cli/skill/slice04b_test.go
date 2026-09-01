@@ -16,7 +16,31 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/test/skills-e2e/registry"
 )
+
+func TestLoadSkillSnapshotRejectsNameAndDescriptionMismatch(t *testing.T) {
+	registry.MarkEvidence(t, 14)
+	st := memstore.New()
+	original := createTestSkill(t, st, domain.WorkspaceSkillRef("identity-tool"), "Matching description", "body\n", "test")
+
+	for _, tc := range []struct {
+		name   string
+		mutate func(*domain.Skill)
+	}{
+		{name: "name", mutate: func(skill *domain.Skill) { skill.Name = "different-name" }},
+		{name: "description", mutate: func(skill *domain.Skill) { skill.Description = "Different description" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mismatched := *original
+			tc.mutate(&mismatched)
+			_, err := loadSkillSnapshot(t.Context(), st.WorkspaceFiles(), &mismatched)
+			if !errors.Is(err, domain.ErrIntegrity) {
+				t.Fatalf("loadSkillSnapshot error = %v, want ErrIntegrity", err)
+			}
+		})
+	}
+}
 
 func TestSkillImportHappyPath(t *testing.T) {
 	withoutAgentName(t)

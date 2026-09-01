@@ -378,7 +378,7 @@ jobs:
         run: |
           set -euo pipefail
           export GOCACHE="$RUNNER_TEMP/loom-edge-coverage-cache"
-          go test -json ./internal/domain ./internal/infra/fleetdb ./internal/skillmat ./test/skills-e2e |
+          go test -json ./internal/domain ./internal/cli/skill ./internal/infra/fleetdb ./internal/skillmat ./test/skills-e2e |
             go run ./cmd/skills-edge-coverage extract -repository=loom -revision "$LOOM_SHA" \
               > "$GITHUB_WORKSPACE/loom-domain-evidence-v2.json"
 

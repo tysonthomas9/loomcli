@@ -78,6 +78,7 @@ func TestBuildSkillFileTreeReturnsDefensiveDeterministicCopies(t *testing.T) {
 
 func TestValidateSkillFileTreeRequiresOneNonExecutableRootDocument(t *testing.T) {
 	t.Parallel()
+	registry.MarkEvidence(t, 5, 10, 11)
 
 	validDocument := []byte("---\nname: valid-tool\ndescription: Valid tool\n---\nbody\n")
 	tests := []struct {
@@ -85,7 +86,12 @@ func TestValidateSkillFileTreeRequiresOneNonExecutableRootDocument(t *testing.T)
 		files []SkillFileTreeFile
 	}{
 		{name: "missing", files: []SkillFileTreeFile{{Path: "README.md", Bytes: []byte("readme")}}},
+		{name: "duplicate", files: []SkillFileTreeFile{
+			{Path: SkillFileNameSKILLMD, Bytes: validDocument},
+			{Path: SkillFileNameSKILLMD, Bytes: validDocument},
+		}},
 		{name: "executable", files: []SkillFileTreeFile{{Path: SkillFileNameSKILLMD, Bytes: validDocument, Executable: true}}},
+		{name: "invalid metadata", files: []SkillFileTreeFile{{Path: SkillFileNameSKILLMD, Bytes: []byte("not skill frontmatter")}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
