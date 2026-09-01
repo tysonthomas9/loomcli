@@ -17,6 +17,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/cli/daemon/daemonlog"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/fleetdbcap"
@@ -475,8 +476,31 @@ func missingCapability(report runtimepreflight.Report, name string) bool {
 // Returns a process exit code: 0 on graceful shutdown, 2 if a critical
 // supervisor goroutine died (panic, unexpected return, or liveness watchdog
 // timeout).
+// installDaemonLogSink takes ownership of the daemon's own log. Until this
+// point every line goes only to stderr, which depends entirely on the process
+// manager's capture staying healthy; from here it is teed into a file this
+// process opens and re-opens itself. An install failure is reported and
+// ignored on purpose — a daemon with no self-log must still supervise.
+func installDaemonLogSink(daemon *Daemon, paths daemonPaths) {
+	sink, err := daemonlog.Install(paths.logDir, daemon.sup.WorkspaceID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: daemon log sink degraded to stderr only: %v\n", err)
+	}
+	daemon.logSink = sink
+}
+
+// closeDaemonLogSink closes the daemon's log file. Call it only after the
+// state updater has stopped, so nothing is still logging.
+func closeDaemonLogSink(daemon *Daemon) {
+	if daemon.logSink != nil {
+		_ = daemon.logSink.Close()
+	}
+}
+
 func runDaemonMainLoop(config *cfgpkg.DaemonConfig, projectDir string, paths daemonPaths, shutdown chan struct{}, daemon *Daemon, lockFile *os.File, cleanup func()) int {
 	cli.PrintDaemonBanner(config, projectDir, daemon.preflight.BannerLines())
+
+	installDaemonLogSink(daemon, paths)
 
 	maxRetries := 3
 	if config.Daemon.RestartPolicy.MaxRetries != nil {
@@ -521,6 +545,8 @@ func runDaemonMainLoop(config *cfgpkg.DaemonConfig, projectDir string, paths dae
 	if !waitBounded(stateUpdateDone, stateUpdaterBudget) {
 		log.Printf("[daemon] state updater did not exit within %s; continuing exit", stateUpdaterBudget)
 	}
+
+	closeDaemonLogSink(daemon)
 
 	if exitCode == 0 {
 		fmt.Println("Daemon stopped.")

@@ -26,6 +26,9 @@ type DaemonSettings struct {
 	OTel           *OTelDaemonConfig `yaml:"otel,omitempty"`
 	IssueBackend   string            `yaml:"issue_backend,omitempty"`   // "fleetdb", "fleet", or "api"
 	StartupTimeout *int              `yaml:"startup_timeout,omitempty"` // seconds; how long to wait for daemon readiness (default 30)
+	// LogHeartbeatSec throttles the daemon's periodic heartbeat log line
+	// (default 60). 0 disables the heartbeat.
+	LogHeartbeatSec *int `yaml:"log_heartbeat_sec,omitempty"`
 }
 
 // GetStartupTimeout returns the configured startup timeout or the given fallback.
@@ -260,7 +263,8 @@ func newDefaultDaemonConfig() *DaemonConfig {
 				BackoffMax:     IntPtr(300),
 				OutputTimeout:  IntPtr(900), // 15 minutes
 			},
-			MaxAgents: IntPtr(20),
+			MaxAgents:       IntPtr(20),
+			LogHeartbeatSec: IntPtr(60),
 		},
 		Roles: make(map[string]RoleConfig),
 	}
@@ -575,6 +579,9 @@ func OverlayDaemonSettings(dst *DaemonSettings, src *DaemonSettings) {
 	}
 	if src.StartupTimeout != nil {
 		dst.StartupTimeout = src.StartupTimeout
+	}
+	if src.LogHeartbeatSec != nil {
+		dst.LogHeartbeatSec = src.LogHeartbeatSec
 	}
 }
 

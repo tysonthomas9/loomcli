@@ -152,6 +152,18 @@ type Supervisor struct {
 	NodeTTL      time.Duration
 	NodeInterval time.Duration
 
+	// LogHeartbeatInterval throttles the "daemon heartbeat" line the health
+	// checker emits. The line exists so daemon.log's mtime is a real liveness
+	// signal: without it an idle fleet writes nothing and a silent log is
+	// indistinguishable from a dead daemon. Zero means the package default
+	// (defaultLogHeartbeatInterval); negative disables the heartbeat entirely,
+	// which is what a configured log_heartbeat_sec of 0 resolves to.
+	LogHeartbeatInterval time.Duration
+
+	// lastHeartbeat is owned by the health-checker goroutine and read/written
+	// only from it, so it needs no lock.
+	lastHeartbeat time.Time
+
 	// backendRecheckInterval is the fixed delay computeBackoff returns for a
 	// BackendUnavailable block (agent's backend CLI missing from PATH). Zero
 	// means use the package default (backendUnavailableRecheckInterval). Tests set a
