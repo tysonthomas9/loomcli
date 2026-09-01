@@ -93,6 +93,7 @@ require_fixed "$compat" 'export LOOM_FLEET_DB_URL="http://127.0.0.1:$fleet_port"
 require_fixed "$compat" "go test -tags=e2e -count=1 -v -skip '^TestSkillImportWaitsForDelayedTreeVisibility$' ./test/skills-e2e"
 require_fixed "$compat" "go test -tags=e2e -count=1 -v -run '^TestSkillImportWaitsForDelayedTreeVisibility$' ./test/skills-e2e"
 require_fixed "$compat" 'go build -tags=e2e -o "$fleet_db_bin" ./cmd/fleet-db'
+require_fixed "$compat" 'chmod -R u+w "$tmp" 2>/dev/null || true'
 require_fixed "$skills_e2e" 'func TestSkillUpdateSelectsAndMaterializesExactRevision'
 require_fixed "$skills_e2e" 'func TestIdenticalSkillReimportKeepsContentRevision'
 require_fixed "$skills_e2e" 'func TestSkillContentUpdatePreservesBundledFiles'

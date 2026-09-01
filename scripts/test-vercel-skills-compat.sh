@@ -41,6 +41,10 @@ cleanup() {
     kill "$fleet_db_pid" 2>/dev/null || true
     wait "$fleet_db_pid" 2>/dev/null || true
   fi
+  # Go deliberately makes downloaded module-cache files read-only. The cache is
+  # rooted below this run-owned temp directory after HOME is changed below, so
+  # make only that owned tree writable before removing it.
+  chmod -R u+w "$tmp" 2>/dev/null || true
   rm -rf "$tmp"
 }
 trap cleanup EXIT
