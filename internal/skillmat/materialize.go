@@ -109,10 +109,11 @@ func IsStoreUnavailable(err error) bool {
 	return errors.As(err, &unavailable)
 }
 
-// materialize resolves workspace and role skills and reconciles targetDir's
-// Loom-managed skill projection. A matching marker is a no-op. Store read
-// failures are returned as StoreUnavailableError before the filesystem is
-// touched; every other error is a fail-closed local preparation failure.
+// materialize resolves workspace and role skills and atomically replaces
+// targetDir's Loom-managed skill projection. A matching marker is a no-op.
+// Store read failures are returned as StoreUnavailableError before the
+// filesystem is touched; every other error leaves the current generation
+// selected and is a fail-closed local preparation failure.
 //
 //nolint:cyclop,funlen // The reconcile pipeline reads as one ordered sequence of gates.
 func materialize(ctx context.Context, st store.Store, workspace, roleName, targetDir string) error {
@@ -121,11 +122,14 @@ func materialize(ctx context.Context, st store.Store, workspace, roleName, targe
 
 type secureRootOpener func(string) (secureRoot, error)
 
-//nolint:cyclop,funlen // The reconcile pipeline reads as one ordered sequence of gates.
+//nolint:cyclop,funlen,gocognit // The reconcile pipeline reads as one ordered sequence of gates.
 func materializeWithRootOpener(
 	ctx context.Context, st store.Store, workspace, roleName, targetDir string, openRoot secureRootOpener,
 ) error {
 	if err := ensurePlatformSupported(); err != nil {
+		return err
+	}
+	if err := ensureAtomicProjectionSupported(); err != nil {
 		return err
 	}
 	if st == nil || st.Skills() == nil {
@@ -158,14 +162,33 @@ func materializeWithRootOpener(
 	}
 	defer root.Close()
 
-	previous, err := readMarker(root)
+	if err := ensureProjectionAliases(root); err != nil {
+		return err
+	}
+	currentGenerationPath, err := currentGeneration(root)
 	if err != nil {
 		return err
 	}
-	if err := sweepTemporaryFiles(root); err != nil {
-		return fmt.Errorf("sweep skill materialization temporaries: %w", err)
+	var currentRoot secureRoot
+	if currentGenerationPath != "" {
+		currentRoot = generationRoot{secureRoot: root, prefix: currentGenerationPath}
 	}
-	current, err := projectionIsCurrent(root, previous, projectionHash, paths, entries)
+	var previous *marker
+	if currentRoot != nil {
+		previous, err = readMarker(currentRoot)
+		if err != nil {
+			return err
+		}
+	}
+	if currentRoot != nil {
+		if err := sweepTemporaryFiles(currentRoot); err != nil {
+			return fmt.Errorf("sweep skill materialization temporaries: %w", err)
+		}
+	}
+	current := false
+	if currentRoot != nil {
+		current, err = projectionIsCurrent(currentRoot, previous, projectionHash, paths, entries)
+	}
 	if err != nil {
 		return err
 	}
@@ -176,36 +199,36 @@ func materializeWithRootOpener(
 	if err := detectDesiredCollisions(entries); err != nil {
 		return err
 	}
-	if err := detectExistingCollisions(root, targetDir, entries, previous); err != nil {
-		return err
+	if currentRoot != nil {
+		physicalTarget := filepath.Join(targetDir, filepath.FromSlash(currentGenerationPath))
+		if err := detectExistingCollisions(currentRoot, physicalTarget, entries, previous); err != nil {
+			return err
+		}
 	}
 	if err := ensureSkillGitExcludes(ctx, targetDir); err != nil {
 		return err
-	}
-	previousEntries, err := snapshotManagedEntries(root, previous)
-	if err != nil {
-		return fmt.Errorf("snapshot previous skill projection: %w", err)
 	}
 	markerBytes, err := json.MarshalIndent(marker{Version: markerVersion, Hash: projectionHash, Paths: paths}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode skill marker: %w", err)
 	}
 	markerBytes = append(markerBytes, '\n')
-	// Rollback materially reduces partial projections for transient local
-	// failures, but it is deliberately best-effort: a persistent filesystem
-	// failure can also prevent restoration. The old marker is not replaced
-	// until every projection mutation succeeds, so a later invocation will
-	// detect and reconcile any mixed tree rather than accepting it as current.
-	rollback := func(cause error) error {
-		if err := restoreProjection(root, previousEntries, paths); err != nil {
-			return errors.Join(cause, fmt.Errorf("restore previous skill projection: %w", err))
-		}
-		return cause
+
+	stagedGeneration, err := newGeneration(root)
+	if err != nil {
+		return err
+	}
+	if err := cloneGeneration(root, currentGenerationPath, stagedGeneration); err != nil {
+		return fmt.Errorf("stage current skill projection: %w", err)
+	}
+	stagedRoot := generationRoot{secureRoot: root, prefix: stagedGeneration}
+	if err := sweepTemporaryFiles(stagedRoot); err != nil {
+		return fmt.Errorf("sweep skill materialization temporaries: %w", err)
 	}
 	stalePaths := findStalePaths(previous, paths)
 	preDeleted := make(map[string]bool)
-	if err := writeProjection(root, entries, stalePaths, preDeleted); err != nil {
-		return rollback(err)
+	if err := writeProjection(stagedRoot, entries, stalePaths, preDeleted); err != nil {
+		return err
 	}
 	remainingStale := stalePaths[:0]
 	for _, stale := range stalePaths {
@@ -213,11 +236,14 @@ func materializeWithRootOpener(
 			remainingStale = append(remainingStale, stale)
 		}
 	}
-	if err := cleanupStale(root, remainingStale); err != nil {
-		return rollback(err)
+	if err := cleanupStale(stagedRoot, remainingStale); err != nil {
+		return err
 	}
-	if err := writeMarkerAtomically(root, markerBytes); err != nil {
-		return rollback(fmt.Errorf("write skill marker: %w", err))
+	if err := writeMarkerAtomically(stagedRoot, markerBytes); err != nil {
+		return fmt.Errorf("write skill marker: %w", err)
+	}
+	if err := commitGeneration(root, stagedGeneration); err != nil {
+		return err
 	}
 	return nil
 }
@@ -266,54 +292,6 @@ func findStalePaths(previous *marker, desiredPaths []string) []string {
 		}
 	}
 	return paths
-}
-
-func snapshotManagedEntries(root secureRoot, previous *marker) ([]desiredEntry, error) {
-	if previous == nil {
-		return nil, nil
-	}
-	entries := make([]desiredEntry, 0, len(previous.Paths))
-	for _, recorded := range previous.Paths {
-		info, err := root.Lstat(recorded)
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		entry := desiredEntry{Path: recorded, Mode: info.Mode.Perm(), Skill: "rollback", SourcePath: recorded}
-		switch {
-		case info.Mode.IsRegular():
-			entry.Kind = entryFile
-			entry.Content, _, err = root.ReadFile(recorded, info.Size+1)
-		case info.Mode&os.ModeSymlink != 0:
-			entry.Kind = entrySymlink
-			entry.LinkTarget = info.LinkTarget
-		default:
-			// Structural drift is repaired by the normal projection writer. It
-			// is not a prior readable entry that rollback can restore.
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		entries = append(entries, entry)
-	}
-	return entries, nil
-}
-
-func restoreProjection(root secureRoot, previousEntries []desiredEntry, attemptedPaths []string) error {
-	preDeleted := make(map[string]bool)
-	if err := writeProjection(root, previousEntries, attemptedPaths, preDeleted); err != nil {
-		return err
-	}
-	remaining := make([]string, 0, len(attemptedPaths))
-	for _, attempted := range attemptedPaths {
-		if !preDeleted[attempted] {
-			remaining = append(remaining, attempted)
-		}
-	}
-	return cleanupStale(root, remaining)
 }
 
 func cleanupStale(root secureRoot, paths []string) error {

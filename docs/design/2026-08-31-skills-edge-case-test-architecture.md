@@ -342,20 +342,21 @@ and CI responsibilities.
 Pure domain tests do not need external processes. Their claim is deterministic
 validation or identity, not distributed-system behavior.
 
-### Case 70 remains partial
+### Case 70 uses one atomically exchanged generation
 
-Loom snapshots the previous managed projection before replacement and restores
-it after any one-shot filesystem mutation failure. If restoration itself fails,
-the command surfaces both the original and rollback errors and deliberately
-leaves the old marker in place, so the next invocation cannot mistake a mixed
-tree for current and will reconcile it.
+Loom prepares the complete `.agents/skills` and `.claude/skills` trees in a
+new hidden generation. The two public paths are stable relative symlinks into
+one `current` generation directory, so one atomic directory exchange publishes
+both views together. The generation is cloned before reconciliation, which
+preserves allowed unrecorded files, while the ordinary collision checks still
+refuse any desired path that would overwrite them.
 
-This is recovery hardening, not whole-projection atomicity. The public
-projection spans `.agents/skills` and `.claude/skills`; they cannot be switched
-with one portable filesystem operation, and rollback cannot guarantee success
-under a persistent filesystem fault. Case 70 must not be emitted as covered
-until both views are backed by a single atomically switched generation (or an
-equivalent transactional topology) while preserving allowed unrecorded files.
+The commit uses `RENAME_SWAP` on macOS and `RENAME_EXCHANGE` on Linux. Every
+integrity, path, collision, or filesystem error before that one operation
+leaves the prior directory selected. On an initial materialization, the public
+links remain dangling until the complete generation is renamed into `current`,
+so failure exposes no partial projection. Pre-generation development layouts
+are rejected rather than migrated because the feature has not launched.
 
 A failpoint controls when a real implementation fails; it does not return a
 fabricated successful result. Every fault control must provide a deterministic

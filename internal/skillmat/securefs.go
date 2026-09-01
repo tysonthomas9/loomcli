@@ -15,6 +15,8 @@ type secureRoot interface {
 	AppendFile(name string, content []byte, perm os.FileMode) error
 	Symlink(target, name string) error
 	Rename(oldName, newName string) error
+	// Swap atomically exchanges two existing paths on the same filesystem.
+	Swap(firstName, secondName string) error
 	Remove(name string) error
 	RemoveDir(name string) error
 }

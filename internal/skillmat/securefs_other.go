@@ -8,6 +8,8 @@ var errUnsupportedPlatform = errors.New("skill materialization is not supported 
 
 func ensurePlatformSupported() error { return errUnsupportedPlatform }
 
+func ensureAtomicProjectionSupported() error { return errUnsupportedPlatform }
+
 func openSecureRoot(string) (secureRoot, error) {
 	return nil, errUnsupportedPlatform
 }

@@ -232,6 +232,23 @@ func (r *unixSecureRoot) Rename(oldName, newName string) error {
 	return nil
 }
 
+func (r *unixSecureRoot) Swap(firstName, secondName string) error {
+	firstParent, firstBase, err := r.openParent(firstName)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = unix.Close(firstParent) }()
+	secondParent, secondBase, err := r.openParent(secondName)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = unix.Close(secondParent) }()
+	if err := swapAt(firstParent, firstBase, secondParent, secondBase); err != nil {
+		return securePathError(secondName, err)
+	}
+	return nil
+}
+
 func (r *unixSecureRoot) Remove(name string) error {
 	parent, base, err := r.openParent(name)
 	if err != nil {
