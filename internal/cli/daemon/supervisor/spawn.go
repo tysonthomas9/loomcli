@@ -10,11 +10,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/agentprofile"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/agent"
+	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -71,9 +74,9 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_ASSIGNED_TASK_ID=%s", assignedTaskID))
 	}
 
-	cmd.Env = s.appendDaemonEnv(cmd.Env)
-	cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_YIELD_FILE=%s", filepath.Join(ap.WorktreePath, YieldFileName)))
-	cmd.Env = appendSessionEnv(cmd.Env, ap)
+	if cmd.Env, err = s.appendRuntimeEnv(cmd.Env, ap); err != nil {
+		return nil, err
+	}
 
 	// Propagate the active trace context so the agent subprocess's bootstrap
 	// span and per-request spans inherit the daemon's trace tree.
@@ -546,4 +549,138 @@ func (s *Supervisor) appendDaemonEnv(env []string) []string {
 		env = append(env, fmt.Sprintf("LOOM_DAEMON_SOCKET=%s", s.IpcSocketPath))
 	}
 	return env
+}
+
+// AgentProfilesDirName is the workspace-relative root holding per-agent
+// harness profile directories: .loom/agent-profiles/<worktree>/{claude,codex}.
+// When a backend subdirectory exists for an agent, the supervisor exports the
+// matching harness config-root variable (CLAUDE_CONFIG_DIR / CODEX_HOME) into
+// the agent process. envfilter allowlists both names, so the value flows
+// unchanged through cli.FilteredEnv() into the harness child built by the
+// backends layer — no change is needed there.
+//
+// Directory existence is the whole contract: there is no config key and no
+// flag, so the same layout works unchanged inside a container image.
+const AgentProfilesDirName = agentprofile.DirName
+
+// appendRuntimeEnv appends the per-run environment an agent subprocess needs:
+// the daemon's control-plane wiring, its verified harness profile roots, the
+// yield file it watches, and its session identity. It is the one step of
+// buildCommand that can fail, because an agent whose profile does not verify
+// must not boot at all — see appendProfileEnv.
+func (s *Supervisor) appendRuntimeEnv(env []string, ap *AgentProcess) ([]string, error) {
+	env = s.appendDaemonEnv(env)
+	env, err := appendProfileEnv(env, s.ProjectDir, ap.Entry.Worktree)
+	if err != nil {
+		return nil, fmt.Errorf("agent %s profile: %w", ap.Entry.Worktree, err)
+	}
+	env = append(env, fmt.Sprintf("LOOM_YIELD_FILE=%s", filepath.Join(ap.WorktreePath, YieldFileName)))
+	return appendSessionEnv(env, ap), nil
+}
+
+// ProfileManifestName is the launch-verification manifest a provisioned
+// profile root carries. Format and fingerprint scheme are documented on
+// agentprofile.ManifestName, which owns the verification.
+const ProfileManifestName = agentprofile.ManifestName
+
+// Boot-refusal reasons, distinguished so an operator reading the agent's
+// failure knows which repair applies: re-provision (stale fingerprint),
+// re-bless the upgrade (version drift), or provision at all (no manifest).
+// They are aliases of the agentprofile sentinels, so errors.Is works across
+// both packages.
+var (
+	ErrProfileManifestMissing     = agentprofile.ErrManifestMissing
+	ErrProfileManifestUnreadable  = agentprofile.ErrManifestUnreadable
+	ErrProfileFingerprintMismatch = agentprofile.ErrFingerprintMismatch
+	ErrProfileVersionDrift        = agentprofile.ErrVersionDrift
+	ErrProfileVersionUnknown      = agentprofile.ErrVersionUnknown
+)
+
+// appendProfileEnv injects per-agent harness profile roots when they exist on
+// disk, after verifying each one against its manifest. Absent directories
+// leave the environment untouched, preserving the legacy behavior of
+// inheriting the operator's ~/.claude and ~/.codex.
+//
+// An existing but unverifiable profile is a BOOT FAILURE, never a fallback to
+// legacy env: silently running the agent against the operator's full ~/.claude
+// is the exact leak per-agent profiles close. Per-agent boot degradation
+// contains the failure to the one agent whose profile is broken.
+func appendProfileEnv(env []string, projectDir, worktree string) ([]string, error) {
+	root := agentprofile.Dir(projectDir, worktree)
+	if root == "" {
+		// No resolvable profile root (empty or non-segment agent name): the
+		// same situation as no profile on disk, so stay on the legacy env.
+		return env, nil
+	}
+	for _, harness := range []string{"claude", "codex"} {
+		dir := filepath.Join(root, harness)
+		if !dirExists(dir) {
+			continue
+		}
+		if err := verifyProfileManifest(dir, agentprofile.HarnessBinary[harness]); err != nil {
+			return nil, err
+		}
+		switch harness {
+		case "claude":
+			env = append(env, fmt.Sprintf("CLAUDE_CONFIG_DIR=%s", dir))
+		case "codex":
+			env = append(env, fmt.Sprintf("CODEX_HOME=%s", dir))
+		}
+	}
+	return env, nil
+}
+
+// verifyProfileManifest verifies dir against its manifest, supplying the
+// observed harness version from this package's TTL cache. binary selects which
+// cached probe to use; the verification itself lives in agentprofile.
+func verifyProfileManifest(dir, binary string) error {
+	return agentprofile.Verify(dir, harnessVersion(binary))
+}
+
+// harnessVersionTTL bounds how long a probed --version string is reused. It is
+// deliberately coarse: the point is that one spawn cycle — every agent the
+// supervisor brings up in a burst — costs a single probe per binary rather
+// than one per agent, each of which forks a node CLI and can cost seconds.
+// A harness upgrade lands within a TTL, and the next boot re-probes.
+const harnessVersionTTL = 2 * time.Minute
+
+var (
+	harnessVersionMu    sync.Mutex
+	harnessVersionCache = map[string]harnessVersionEntry{}
+)
+
+type harnessVersionEntry struct {
+	version string
+	probed  time.Time
+}
+
+// harnessVersion returns the cached "<binary> --version" first line, probing
+// at most once per binary per TTL. Failures are NOT cached: a probe killed
+// under load would otherwise refuse every agent boot for the whole TTL.
+func harnessVersion(binary string) string {
+	harnessVersionMu.Lock()
+	if e, ok := harnessVersionCache[binary]; ok && time.Since(e.probed) < harnessVersionTTL {
+		harnessVersionMu.Unlock()
+		return e.version
+	}
+	harnessVersionMu.Unlock()
+
+	version := probeHarnessVersion(binary)
+	if version == "" {
+		return ""
+	}
+	harnessVersionMu.Lock()
+	harnessVersionCache[binary] = harnessVersionEntry{version: version, probed: time.Now()}
+	harnessVersionMu.Unlock()
+	return version
+}
+
+// probeHarnessVersion is a seam for tests; production runs the real binary.
+var probeHarnessVersion = func(binary string) string {
+	return agentprofile.ProbeVersion(binary, backends.VersionProbeTimeout)
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }

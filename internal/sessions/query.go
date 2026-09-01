@@ -70,6 +70,14 @@ func (s *Store) readDedupedIndex(f Filter) ([]SessionRecord, error) {
 	return deduped, nil
 }
 
+// Snapshot reads index.jsonl and returns the deduplicated SessionRecords
+// matching the filter. Unlike Query it performs no stale-record healing and
+// writes nothing: callers that only observe (loom doctor) must not mutate the
+// ledger they are diagnosing. A missing index file yields (nil, nil).
+func (s *Store) Snapshot(f Filter) ([]SessionRecord, error) {
+	return s.readDedupedIndex(f)
+}
+
 // Query reads index.jsonl and returns all SessionRecords matching the filter.
 // If the index file does not exist, it returns an empty slice (not an error).
 // Corrupt lines are skipped with a log warning.

@@ -29,7 +29,7 @@ type orphanSession struct {
 // checkOrphanedTranscripts finds completed Claude sessions whose native
 // transcript was never captured — e.g. fleet/daemon-mode runs, which have no
 // Claude Code hooks installed — and, with --fix, backfills agent_transcript.jsonl
-// plus token usage from Claude Code's own ~/.claude/projects transcript.
+// plus token usage from Claude Code's own projects transcript.
 func checkOrphanedTranscripts() CheckResult {
 	sessStore, err := sessions.NewStore(cli.GetWorkspaceRuntimeDir())
 	if err != nil {
@@ -58,7 +58,7 @@ func checkOrphanedTranscripts() CheckResult {
 		Name:    "orphaned_transcripts",
 		Status:  StatusWarn,
 		Summary: fmt.Sprintf("%d claude session(s) missing a captured transcript", len(orphans)),
-		Detail:  "Run: loom doctor --fix to backfill from ~/.claude/projects",
+		Detail:  "Run: loom doctor --fix to backfill from Claude Code's own projects dir",
 	}
 }
 
@@ -184,7 +184,7 @@ type transcriptCandidate struct {
 // the active workspace. Claude indexes transcripts by encoded working dir; the
 // project dir name ends with "-<agentName>" and contains the workspace token.
 func claudeCandidateFiles(workspaceToken, agentName string) []transcriptCandidate {
-	root := claudeProjectsRoot()
+	root := claudeProjectsRootFor(agentName)
 	if root == "" || agentName == "" {
 		return nil
 	}
@@ -249,12 +249,16 @@ func earliestUnclaimed(candidates []transcriptCandidate, claimed map[string]bool
 	return best
 }
 
-// claudeProjectsRoot returns Claude Code's projects dir (honoring
-// CLAUDE_CONFIG_DIR), or "" if it cannot be resolved.
-func claudeProjectsRoot() string {
-	root := sessions.ClaudeConfigDir()
-	if root == "" {
-		return ""
-	}
-	return filepath.Join(root, "projects")
+// claudeProjectsRootFor returns Claude Code's projects dir for one agent, or
+// "" if it cannot be resolved.
+//
+// It is per-agent because `loom doctor` runs in the operator's shell, not in
+// the agent's process: an agent with a harness profile writes its transcripts
+// under that profile, and the operator's own CLAUDE_CONFIG_DIR (or ~/.claude)
+// has none of them. Resolving process-scoped here reported every profiled
+// session as "unmatched" and left --fix with nothing to backfill. An agent
+// with no profile still resolves to the process root, so a fleet without
+// profiles sees an identical report.
+func claudeProjectsRootFor(agentName string) string {
+	return sessions.ClaudeProjectsRootFor(cli.GetWorkspaceRuntimeDir(), agentName)
 }
