@@ -2187,6 +2187,65 @@ type IssueTabState struct {
 	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
+// Journey defines model for Journey.
+type Journey struct {
+	AgentWindows []JourneyAgentWindow `json:"agent_windows"`
+	Honesty      JourneyHonesty       `json:"honesty"`
+	LeadTime     JourneyLeadTime      `json:"lead_time"`
+	Spans        []JourneySpan        `json:"spans"`
+}
+
+// JourneyAgentWindow defines model for JourneyAgentWindow.
+type JourneyAgentWindow struct {
+	Agent   string     `json:"agent"`
+	End     *time.Time `json:"end"`
+	Outcome string     `json:"outcome"`
+	Start   time.Time  `json:"start"`
+	TaskId  string     `json:"task_id"`
+}
+
+// JourneyHonesty defines model for JourneyHonesty.
+type JourneyHonesty struct {
+	AgentWindowsAvailable bool    `json:"agent_windows_available"`
+	AgentWindowsReason    *string `json:"agent_windows_reason,omitempty"`
+	Bounded               bool    `json:"bounded"`
+	CompleteHistory       bool    `json:"complete_history"`
+	EventsSeen            int     `json:"events_seen"`
+	HasMore               bool    `json:"has_more"`
+	Reason                *string `json:"reason,omitempty"`
+	TotalEvents           *int    `json:"total_events,omitempty"`
+}
+
+// JourneyLeadTime defines model for JourneyLeadTime.
+type JourneyLeadTime struct {
+	AgentWorkingMs      int64 `json:"agent_working_ms"`
+	HaltedMs            int64 `json:"halted_ms"`
+	QueuedMs            int64 `json:"queued_ms"`
+	TotalMs             int64 `json:"total_ms"`
+	WaitingOnOperatorMs int64 `json:"waiting_on_operator_ms"`
+}
+
+// JourneyResponse defines model for JourneyResponse.
+type JourneyResponse struct {
+	Data    *Journey `json:"data,omitempty"`
+	Error   *string  `json:"error,omitempty"`
+	Success bool     `json:"success"`
+}
+
+// JourneySpan defines model for JourneySpan.
+type JourneySpan struct {
+	Actor         *string    `json:"actor"`
+	Approximate   bool       `json:"approximate"`
+	End           *time.Time `json:"end"`
+	Kind          string     `json:"kind"`
+	NeedsRevision bool       `json:"needs_revision"`
+	Owner         *string    `json:"owner"`
+	Stage         string     `json:"stage"`
+	Stalled       bool       `json:"stalled"`
+	Start         time.Time  `json:"start"`
+	UnknownStart  bool       `json:"unknown_start"`
+}
+
 // MessageResponse defines model for MessageResponse.
 type MessageResponse struct {
 	Message string                 `json:"message"`
@@ -3405,8 +3464,11 @@ type GetGraphParamsStatus string
 
 // GetIssueEventsParams defines parameters for GetIssueEvents.
 type GetIssueEventsParams struct {
-	// Limit Maximum number of recent events to return
+	// Limit Maximum events to return. Without `since`, Loom returns the most recent tail and accepts up to 500. With `since`, Loom returns one oldest-first page and clamps the limit to fleet-db's 200-event page maximum.
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Since Opaque fleet-db history cursor. When present (including an empty value), returns one oldest-first page; a bare `since=` starts at the beginning of the issue history.
+	Since *string `form:"since,omitempty" json:"since,omitempty"`
 }
 
 // SaveIssueTabsJSONBody defines parameters for SaveIssueTabs.

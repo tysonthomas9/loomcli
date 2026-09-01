@@ -784,9 +784,12 @@ func TestUpdate_StatusInProgressWithAssigneeClaimsAsAssignee(t *testing.T) {
 
 	status := "in_progress"
 	assignee := "[H] Tyson"
+	// The operator Actor must not leak into the claim: the claim actor becomes
+	// the lock holder and assignee, so it stays the assignee's identity.
 	err := fb.Update(context.Background(), "test-1", backend.UpdateParams{
 		Status:   &status,
 		Assignee: &assignee,
+		Actor:    "operator@local",
 	})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
@@ -1605,20 +1608,6 @@ func TestListEvents_ReturnsMostRecentPageAcrossHistoryPagination(t *testing.T) {
 		t.Errorf("IDs = %v, want [201-0 202-0 203-0]", got)
 	}
 }
-
-// --- Not implemented surfaces (partial — implemented methods moved out) ---
-//
-// Count, Batch, GetMutations, and WaitForMutations used to live here as
-// ErrNotImplemented stubs; they are now wired against fleet-db endpoints
-// (see tests above). The only remaining KindNotImplemented paths are:
-//
-//   - Count with GroupBy set — Count cannot return grouped data through its
-//     int return value; callers must use Stats or (future) a GroupedCount API.
-//     This is exercised by TestCount_GroupByRejected.
-//
-// If future refactors reintroduce unimplemented stubs, add cases here.
-
-// --- Connection refused test ---
 
 func TestConnectionRefused(t *testing.T) {
 	fb, err := New(Config{
