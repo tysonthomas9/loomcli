@@ -23,11 +23,12 @@ type ResponseDrop struct {
 }
 
 type CorruptDownload struct {
-	t         *testing.T
-	env       *Environment
-	activated atomic.Bool
-	mu        sync.Mutex
-	target    *fileDownloadGrant
+	t          *testing.T
+	env        *Environment
+	activated  atomic.Bool
+	sameLength bool
+	mu         sync.Mutex
+	target     *fileDownloadGrant
 }
 
 type SkillCASTrace struct {
@@ -177,12 +178,22 @@ func (f *ResponseDrop) RequireActivated() {
 // CorruptNextFileDownload rewrites one real Fleet download grant to a proxy
 // that fetches the signed provider URL and truncates the successful response.
 func (e *Environment) CorruptNextFileDownload(revision string) *CorruptDownload {
+	return e.corruptNextFileDownload(revision, false)
+}
+
+// CorruptNextFileDownloadSameLength changes bytes without changing the real
+// provider response length, isolating SHA verification from size validation.
+func (e *Environment) CorruptNextFileDownloadSameLength(revision string) *CorruptDownload {
+	return e.corruptNextFileDownload(revision, true)
+}
+
+func (e *Environment) corruptNextFileDownload(revision string, sameLength bool) *CorruptDownload {
 	e.t.Helper()
 	upstream, err := url.Parse(requireEnv(e.t, "LOOM_FLEET_DB_URL"))
 	if err != nil {
 		e.t.Fatalf("parse LOOM_FLEET_DB_URL: %v", err)
 	}
-	fault := &CorruptDownload{t: e.t, env: e}
+	fault := &CorruptDownload{t: e.t, env: e, sameLength: sameLength}
 	downloadProxy := httptest.NewServer(http.HandlerFunc(fault.serveCorruptDownload))
 	e.t.Cleanup(downloadProxy.Close)
 
@@ -223,7 +234,11 @@ func (f *CorruptDownload) serveCorruptDownload(w http.ResponseWriter, _ *http.Re
 		return
 	}
 	if response.StatusCode >= 200 && response.StatusCode < 300 && len(body) > 0 && f.activated.CompareAndSwap(false, true) {
-		body = body[:len(body)-1]
+		if f.sameLength {
+			body[0] ^= 0xff
+		} else {
+			body = body[:len(body)-1]
+		}
 	}
 	copyResponseHeaders(w.Header(), response.Header)
 	w.Header().Del("Content-Length")
