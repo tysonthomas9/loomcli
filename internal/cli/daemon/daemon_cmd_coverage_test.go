@@ -13,7 +13,7 @@ func TestPrintDryRunInfo_DefaultValues(t *testing.T) {
 	}
 
 	// Should not panic - exercises all default branches
-	printDryRunInfo(config, "/tmp/pid", "/tmp/logs", "/tmp/state")
+	printDryRunInfo(config, "/tmp/pid", "/tmp/logs", "/tmp/state", "/tmp/spawn-metrics.json")
 }
 
 func TestPrintDryRunInfo_CustomValues(t *testing.T) {
@@ -37,7 +37,7 @@ func TestPrintDryRunInfo_CustomValues(t *testing.T) {
 	}
 
 	// Should not panic - exercises all custom value branches
-	printDryRunInfo(config, "/var/run/loom.pid", "/var/log/loom", "/var/run/loom.state")
+	printDryRunInfo(config, "/var/run/loom.pid", "/var/log/loom", "/var/run/loom.state", "/var/run/spawn-metrics.json")
 }
 
 func TestPrintDryRunInfo_NoAgents(t *testing.T) {
@@ -46,5 +46,5 @@ func TestPrintDryRunInfo_NoAgents(t *testing.T) {
 	}
 
 	// Should not panic even with no agents
-	printDryRunInfo(config, "/tmp/pid", "/tmp/logs", "/tmp/state")
+	printDryRunInfo(config, "/tmp/pid", "/tmp/logs", "/tmp/state", "/tmp/spawn-metrics.json")
 }
