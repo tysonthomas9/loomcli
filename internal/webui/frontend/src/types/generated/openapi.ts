@@ -2896,6 +2896,8 @@ export interface components {
       owner?: string;
       created_by?: string;
       external_ref?: string;
+      /** @description Source repository ID. Required by workspaces configured with repo-required issue creation; an issue without it can never be claimed by a repo-scoped agent. */
+      source_repo?: string;
       estimated_minutes?: number | null;
       labels?: string[];
       dependencies?: string[];

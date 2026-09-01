@@ -193,6 +193,14 @@ func setCreateStringFields(req *gen.CreateIssueRequest, params backend.CreatePar
 	if params.ExternalRef != "" {
 		req.ExternalRef = &params.ExternalRef
 	}
+	// PatchIssueRequest deliberately has no source_repo counterpart: nothing
+	// downstream of an update could honor it (neither service.PatchIssueParams
+	// nor backend.UpdateParams carries a repo), so declaring it there would
+	// ship a second silently-dropped field. Moving an issue between repos is a
+	// separate feature; a repo-less issue must be recreated.
+	if params.SourceRepo != "" {
+		req.SourceRepo = &params.SourceRepo
+	}
 	if params.DueAt != "" {
 		req.DueAt = &params.DueAt
 	}
