@@ -160,7 +160,8 @@ fi
 # files. The complete imported SKILL.md and Archive.zip receive explicit byte
 # integrity checks in addition to the whole-bundle comparison.
 require_fixed "$compat" 'import_ok deploy-to-vercel'
-require_fixed "$compat" 'persisted skill count is $persisted_count, want 9'
+require_fixed "$compat" 'persisted_corpus_skills=('
+require_fixed "$compat" 'persisted corpus skill $skill_name appears $match_count times, want exactly 1'
 require_fixed "$compat" 'compare_skill deploy-to-vercel deploy-to-vercel 3'
 require_fixed "$compat" 'verify_binary_file deploy-to-vercel Archive.zip'
 require_fixed "$compat" 'cmp -s "$source_dir/SKILL.md" "$target_dir/SKILL.md"'

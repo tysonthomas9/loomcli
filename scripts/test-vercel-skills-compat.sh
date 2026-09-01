@@ -153,17 +153,25 @@ if ! "$loom_bin" skill list >"$list_log" 2>"$list_stderr"; then
   cat "$list_stderr" >&2
   exit 1
 fi
-persisted_count="$(grep 'scope=workspace' "$list_log" | grep -vc '^exact-round-trip ')"
-if [[ "$persisted_count" != "9" ]]; then
-  echo "persisted skill count is $persisted_count, want 9" >&2
-  cat "$list_log" >&2
-  exit 1
-fi
-if ! grep -q '^vercel-react-view-transitions ' "$list_log"; then
-  echo "react-view-transitions was not persisted" >&2
-  cat "$list_log" >&2
-  exit 1
-fi
+persisted_corpus_skills=(
+  vercel-composition-patterns
+  deploy-to-vercel
+  vercel-react-best-practices
+  vercel-react-native-skills
+  vercel-react-view-transitions
+  vercel-cli-with-tokens
+  vercel-optimize
+  web-design-guidelines
+  writing-guidelines
+)
+for skill_name in "${persisted_corpus_skills[@]}"; do
+  match_count="$(awk -v name="$skill_name" '$1 == name && /scope=workspace/ { count++ } END { print count+0 }' "$list_log")"
+  if [[ "$match_count" != "1" ]]; then
+    echo "persisted corpus skill $skill_name appears $match_count times, want exactly 1" >&2
+    cat "$list_log" >&2
+    exit 1
+  fi
+done
 
 materialized="$tmp/materialized"
 mkdir -p "$materialized"
