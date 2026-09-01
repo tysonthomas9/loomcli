@@ -45,6 +45,7 @@ require_fixed "$workflow" 'fleetdb_sha: ${{ steps.revisions.outputs.fleetdb_sha 
 require_fixed "$workflow" 'corpus_sha: ${{ steps.revisions.outputs.corpus_sha }}'
 require_fixed "$workflow" 'ref: ${{ needs.resolve.outputs.loom_sha }}'
 require_fixed "$workflow" 'ref: ${{ needs.resolve.outputs.fleetdb_sha }}'
+require_fixed "$workflow" 'fetch-depth: 0'
 require_fixed "$workflow" 'ref: ${{ needs.resolve.outputs.corpus_sha }}'
 require_fixed "$workflow" 'EXPECTED_LOOM_SHA: ${{ needs.resolve.outputs.loom_sha }}'
 require_fixed "$workflow" 'EXPECTED_FLEETDB_SHA: ${{ needs.resolve.outputs.fleetdb_sha }}'

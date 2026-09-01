@@ -153,6 +153,8 @@ jobs:
           repository: tysonthomas9/fleet-db
           ref: ${{ needs.resolve.outputs.fleetdb_sha }}
           path: fleet-db
+          # ID 79 executes both immutable release stages from Fleet history.
+          fetch-depth: 0
           token: ${{ secrets.FLEET_DB_TOKEN || github.token }}
           persist-credentials: false
 
