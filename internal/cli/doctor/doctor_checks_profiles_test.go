@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -506,5 +507,34 @@ func TestCheckAgentProfiles_FixDoesNotRepairManagedDrift(t *testing.T) {
 	}
 	if readManifest(t, dir).HarnessVersion != "2.1.240 (Claude Code)" {
 		t.Fatal("--fix re-blessed a profile whose provisioned settings had changed")
+	}
+}
+
+// faultRepair must route managed drift to the provisioner and must NOT offer
+// `loom doctor --fix`. --fix only re-blesses the version pin, so offering it
+// here would send the operator to a command that cannot repair the fault and
+// that Bless refuses outright. Today this holds because managed drift falls
+// through faultRepair's default; pinning it means a later refactor cannot
+// start offering --fix for it silently.
+func TestFaultRepair_ManagedDriftRoutesToProvisioner(t *testing.T) {
+	f := profileFault{
+		profile: agentprofile.Profile{Agent: "worker", Harness: "claude", Dir: "/tmp/p/worker/claude"},
+		err: fmt.Errorf("%w: /tmp/p/worker/claude: settings.json: permissions.defaultMode",
+			agentprofile.ErrManagedContentDrift),
+	}
+
+	got := faultRepair(f)
+	want := "scripts/provision-profile.sh worker   (--fix will not touch this)"
+	if got != want {
+		t.Fatalf("faultRepair = %q, want %q", got, want)
+	}
+	if strings.Contains(got, "loom doctor --fix") {
+		t.Fatalf("faultRepair offers --fix for a fault --fix cannot repair: %q", got)
+	}
+
+	// The reason line beside it must keep the error verbatim: the dotted JSON
+	// path is the only thing that tells the operator what diverged.
+	if reason := faultReason(f); !strings.Contains(reason, "permissions.defaultMode") {
+		t.Fatalf("faultReason = %q, want the diverging path preserved", reason)
 	}
 }
