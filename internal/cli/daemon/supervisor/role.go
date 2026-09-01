@@ -145,3 +145,13 @@ func mergeRoleExecution(base, overlay cfgpkg.RoleConfig) cfgpkg.RoleConfig {
 	// PromptFile intentionally NOT merged for built-in roles
 	return base
 }
+
+// resolveRoleConfig looks up a role by name, supporting both built-in and custom roles.
+func (s *Supervisor) resolveRoleConfig(roleName string, agentIndex int) (cfgpkg.RoleConfig, error) {
+	cfg := s.ConfigSnapshot()
+	rc, err := ResolveRoleConfigStatic(roleName, cfg, s.ProjectDir)
+	if err != nil {
+		return cfgpkg.RoleConfig{}, fmt.Errorf("agent[%d]: %w", agentIndex, err)
+	}
+	return rc, nil
+}
