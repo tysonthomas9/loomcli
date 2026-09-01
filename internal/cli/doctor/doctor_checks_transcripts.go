@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/agentprofiles"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
@@ -33,7 +35,7 @@ func checkOrphanedTranscripts() CheckResult {
 	if err != nil {
 		return CheckResult{} // skip — sessions store not available
 	}
-	orphans, err := scanOrphanedClaudeSessions(sessStore)
+	orphans, err := scanOrphanedClaudeSessions(sessStore, agentprofiles.ConfiguredAgentNames(cli.GetWorkspaceRuntimeDir()))
 	if err != nil {
 		return CheckResult{
 			Name:    "orphaned_transcripts",
@@ -62,7 +64,12 @@ func checkOrphanedTranscripts() CheckResult {
 
 // scanOrphanedClaudeSessions returns claude-backend sessions whose
 // agent_transcript.jsonl is absent.
-func scanOrphanedClaudeSessions(store *sessions.Store) ([]orphanSession, error) {
+//
+// knownAgents is the workspace's configured-agent allowlist; when non-empty,
+// sessions written under any other agent name are ignored, so a stray writer
+// cannot make this health check report work that is not the fleet's. Empty or
+// nil means no filtering.
+func scanOrphanedClaudeSessions(store *sessions.Store, knownAgents []string) ([]orphanSession, error) {
 	entries, err := os.ReadDir(store.Dir())
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -81,6 +88,9 @@ func scanOrphanedClaudeSessions(store *sessions.Store) ([]orphanSession, error) 
 			continue
 		}
 		if meta.Status == sessions.StatusRunning {
+			continue
+		}
+		if len(knownAgents) > 0 && !slices.Contains(knownAgents, meta.AgentName) {
 			continue
 		}
 		if info, statErr := os.Stat(store.NativeTranscriptPath(id)); statErr == nil && !info.IsDir() && info.Size() > 0 {
