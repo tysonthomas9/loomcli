@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"reflect"
 	"testing"
 	"time"
 
@@ -21,7 +22,8 @@ func TestSkillMaterializationLeaseStoreAcquire(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode body: %v", err)
 		}
-		if body.Holder != "lead@host#42" || body.TargetKey != "target-sha256" || body.TTLSeconds != 15 {
+		if body.Holder != "lead@host#42" || body.TargetKey != "target-sha256" || body.TTLSeconds != 15 ||
+			!reflect.DeepEqual(body.TreeRevisions, []string{"wft1_a", "wft1_b"}) {
 			t.Fatalf("body = %+v", body)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -33,13 +35,36 @@ func TestSkillMaterializationLeaseStoreAcquire(t *testing.T) {
 	defer closeFn()
 
 	got, err := client.SkillMaterializationLeases().Acquire(t.Context(), store.SkillMaterializationLeaseAcquire{
-		WorkspaceKey: "WS", Holder: "lead@host#42", TargetKey: "target-sha256", TTL: 15 * time.Second,
+		WorkspaceKey: "WS", Holder: "lead@host#42", TargetKey: "target-sha256",
+		TreeRevisions: []string{"wft1_a", "wft1_b"}, TTL: 15 * time.Second,
 	})
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
 	}
 	if got.Token != "token-1" || got.TargetKey != "target-sha256" || got.Holder != "lead@host#42" || !got.ExpiresAt.Equal(expiresAt) {
 		t.Fatalf("lease = %+v", got)
+	}
+}
+
+func TestSkillMaterializationLeaseStoreAcquireEncodesExplicitEmptyRevisionSet(t *testing.T) {
+	client, closeFn := newSkillTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		var body acquireSkillMaterializationLeaseBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.TreeRevisions == nil || len(body.TreeRevisions) != 0 {
+			t.Fatalf("tree_revisions = %#v, want explicit []", body.TreeRevisions)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(domain.SkillMaterializationLease{Token: "empty-token", TreeRevisions: []string{}})
+	})
+	defer closeFn()
+
+	if _, err := client.SkillMaterializationLeases().Acquire(t.Context(), store.SkillMaterializationLeaseAcquire{
+		WorkspaceKey: "WS", Holder: "lead@host#42", TargetKey: "target-sha256", TTL: time.Second,
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 

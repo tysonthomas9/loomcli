@@ -122,6 +122,31 @@ func publishSkillFixture(ctx context.Context, files store.WorkspaceFileStore, wo
 	}, nil
 }
 
+func TestMaterializationPlanHydratesTheExactResolvedManifestWithoutRelisting(t *testing.T) {
+	oldFixture := &skillFixture{Name: "planned", Scope: domain.SkillScopeWorkspace, Description: "old description", Content: "old body"}
+	skills := &staticSkillStore{skills: []*skillFixture{oldFixture}}
+	st := materializeStore{skills: skills, files: skills.workspaceFiles()}
+	plan, err := resolveMaterializationPlan(t.Context(), st, "WS", "lead")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.TreeRevisions) != 1 {
+		t.Fatalf("tree revisions = %v", plan.TreeRevisions)
+	}
+	skills.skills = []*skillFixture{{Name: "planned", Scope: domain.SkillScopeWorkspace, Description: "new description", Content: "new body"}}
+	target := t.TempDir()
+	if err := materializePlanWithRootOpener(t.Context(), st, "WS", target, plan, openSecureRoot, nil); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(target, AgentsSkillsDir, "planned", domain.SkillFileNameSKILLMD))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(body, []byte("old body")) || bytes.Contains(body, []byte("new body")) {
+		t.Fatalf("materialized document = %q, want exact pre-lease plan", body)
+	}
+}
+
 type materializeStore struct {
 	store.Store
 	skills *staticSkillStore
