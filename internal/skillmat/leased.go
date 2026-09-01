@@ -59,7 +59,6 @@ func MaterializeLeased(ctx context.Context, st store.Store, workspace, roleName,
 	})
 }
 
-//nolint:funlen // Plan, acquire, bounded retry, renewal, and release read as one protocol.
 func materializeLeasedWith(
 	ctx context.Context,
 	st store.Store,
@@ -89,53 +88,11 @@ func materializeLeasedWith(
 		return &StoreUnavailableError{Err: domain.ErrSkillMaterializationLeaseStoreUnavailable}
 	}
 
-	var conflict *domain.SkillMaterializationLeaseConflictError
-	var lease *domain.SkillMaterializationLease
-	var plan *materializationPlan
-	for attempt := 0; ; attempt++ {
-		plan, err = deps.resolve(ctx, st, workspace, roleName)
-		if err != nil {
-			return err
-		}
-		lease, err = leases.Acquire(ctx, store.SkillMaterializationLeaseAcquire{
-			WorkspaceKey:  workspace,
-			Holder:        holder,
-			TargetKey:     targetKey,
-			TreeRevisions: append([]string{}, plan.TreeRevisions...),
-			TTL:           materializationLeaseTTL,
-		})
-		if err == nil {
-			if lease == nil || strings.TrimSpace(lease.Token) == "" {
-				return fmt.Errorf("acquire skill materialization lease: fleet-db returned an empty lease")
-			}
-			if validationErr := validateAcquiredMaterializationLease(lease, targetKey, holder, plan.TreeRevisions, time.Now()); validationErr != nil {
-				releaseCtx, cancelRelease := context.WithTimeout(context.WithoutCancel(ctx), materializationLeaseReleaseTimeout)
-				releaseErr := leases.Release(releaseCtx, workspace, targetKey, lease.Token)
-				cancelRelease()
-				if releaseErr != nil {
-					slog.Warn("rejected skill materialization lease release failed",
-						"workspace", workspace, "role", roleName, "target", absoluteTarget, "err", releaseErr)
-				}
-				return validationErr
-			}
-			break
-		}
-		if !errors.As(err, &conflict) {
-			if errors.Is(err, domain.ErrSkillMaterializationLeaseStoreUnavailable) || isTransportError(err) {
-				return &StoreUnavailableError{Err: fmt.Errorf("acquire skill materialization lease: %w", err)}
-			}
-			return fmt.Errorf("acquire skill materialization lease: %w", err)
-		}
-		if attempt == len(materializationLeaseBackoff) {
-			slog.Info("skill materialization lease remains held; skipping this materialization",
-				"workspace", workspace, "role", roleName, "target", absoluteTarget,
-				"holder", conflict.Holder, "expires_at", conflict.ExpiresAt)
-			return nil
-		}
-		if err := deps.sleep(ctx, materializationLeaseBackoff[attempt]); err != nil {
-			return err
-		}
-		conflict = nil
+	lease, plan, err := acquireMaterializationLease(
+		ctx, st, workspace, roleName, absoluteTarget, targetKey, holder, leases, deps,
+	)
+	if err != nil || lease == nil {
+		return err
 	}
 
 	materializeErr := materializeWithLeaseRenewal(ctx, st, workspace, targetDir, targetKey, lease.Token, plan, leases, deps)
@@ -146,6 +103,68 @@ func materializeLeasedWith(
 			"workspace", workspace, "role", roleName, "target", absoluteTarget, "err", err)
 	}
 	return materializeErr
+}
+
+func acquireMaterializationLease(
+	ctx context.Context,
+	st store.Store,
+	workspace, roleName, absoluteTarget, targetKey, holder string,
+	leases store.SkillMaterializationLeaseStore,
+	deps leasedMaterializeDeps,
+) (*domain.SkillMaterializationLease, *materializationPlan, error) {
+	for attempt := 0; ; attempt++ {
+		plan, err := deps.resolve(ctx, st, workspace, roleName)
+		if err != nil {
+			return nil, nil, err
+		}
+		lease, err := leases.Acquire(ctx, store.SkillMaterializationLeaseAcquire{
+			WorkspaceKey: workspace, Holder: holder, TargetKey: targetKey,
+			TreeRevisions: append([]string{}, plan.TreeRevisions...), TTL: materializationLeaseTTL,
+		})
+		if err == nil {
+			return acceptMaterializationLease(ctx, workspace, roleName, absoluteTarget, targetKey, holder, leases, lease, plan)
+		}
+		var conflict *domain.SkillMaterializationLeaseConflictError
+		if !errors.As(err, &conflict) {
+			if errors.Is(err, domain.ErrSkillMaterializationLeaseStoreUnavailable) || isTransportError(err) {
+				return nil, nil, &StoreUnavailableError{Err: fmt.Errorf("acquire skill materialization lease: %w", err)}
+			}
+			return nil, nil, fmt.Errorf("acquire skill materialization lease: %w", err)
+		}
+		if attempt == len(materializationLeaseBackoff) {
+			slog.Info("skill materialization lease remains held; skipping this materialization",
+				"workspace", workspace, "role", roleName, "target", absoluteTarget,
+				"holder", conflict.Holder, "expires_at", conflict.ExpiresAt)
+			return nil, nil, nil
+		}
+		if err := deps.sleep(ctx, materializationLeaseBackoff[attempt]); err != nil {
+			return nil, nil, err
+		}
+	}
+}
+
+func acceptMaterializationLease(
+	ctx context.Context,
+	workspace, roleName, absoluteTarget, targetKey, holder string,
+	leases store.SkillMaterializationLeaseStore,
+	lease *domain.SkillMaterializationLease,
+	plan *materializationPlan,
+) (*domain.SkillMaterializationLease, *materializationPlan, error) {
+	if lease == nil || strings.TrimSpace(lease.Token) == "" {
+		return nil, nil, fmt.Errorf("acquire skill materialization lease: fleet-db returned an empty lease")
+	}
+	validationErr := validateAcquiredMaterializationLease(lease, targetKey, holder, plan.TreeRevisions, time.Now())
+	if validationErr == nil {
+		return lease, plan, nil
+	}
+	releaseCtx, cancelRelease := context.WithTimeout(context.WithoutCancel(ctx), materializationLeaseReleaseTimeout)
+	releaseErr := leases.Release(releaseCtx, workspace, targetKey, lease.Token)
+	cancelRelease()
+	if releaseErr != nil {
+		slog.Warn("rejected skill materialization lease release failed",
+			"workspace", workspace, "role", roleName, "target", absoluteTarget, "err", releaseErr)
+	}
+	return nil, nil, validationErr
 }
 
 func validateAcquiredMaterializationLease(
@@ -178,12 +197,29 @@ func materializeWithLeaseRenewal(
 	leases store.SkillMaterializationLeaseStore,
 	deps leasedMaterializeDeps,
 ) error {
-	renewEvery := deps.renewEvery
+	renew := func(renewCtx context.Context) error {
+		return renewMaterializationLease(renewCtx, leases, workspace, targetKey, token)
+	}
+	operationCtx, cancel, stopRenewal := startMaterializationLeaseRenewal(ctx, deps.renewEvery, renew)
+	defer cancel()
+	applyErr := deps.apply(operationCtx, st, workspace, targetDir, plan, func(commitCtx context.Context) error {
+		if err := stopRenewal(); err != nil {
+			return err
+		}
+		return renew(commitCtx)
+	})
+	return errors.Join(applyErr, stopRenewal())
+}
+
+func startMaterializationLeaseRenewal(
+	ctx context.Context,
+	renewEvery time.Duration,
+	renew func(context.Context) error,
+) (context.Context, context.CancelFunc, func() error) {
 	if renewEvery <= 0 || renewEvery >= materializationLeaseTTL {
 		renewEvery = materializationLeaseTTL / 3
 	}
 	operationCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
 	stop := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
@@ -198,7 +234,7 @@ func materializeWithLeaseRenewal(
 				done <- operationCtx.Err()
 				return
 			case <-ticker.C:
-				if err := renewMaterializationLease(operationCtx, leases, workspace, targetKey, token); err != nil {
+				if err := renew(operationCtx); err != nil {
 					done <- err
 					cancel()
 					return
@@ -216,13 +252,7 @@ func materializeWithLeaseRenewal(
 		})
 		return backgroundErr
 	}
-	applyErr := deps.apply(operationCtx, st, workspace, targetDir, plan, func(commitCtx context.Context) error {
-		if err := stopRenewal(); err != nil {
-			return err
-		}
-		return renewMaterializationLease(commitCtx, leases, workspace, targetKey, token)
-	})
-	return errors.Join(applyErr, stopRenewal())
+	return operationCtx, cancel, stopRenewal
 }
 
 func renewMaterializationLease(ctx context.Context, leases store.SkillMaterializationLeaseStore, workspace, targetKey, token string) error {

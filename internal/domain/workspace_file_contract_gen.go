@@ -52,6 +52,18 @@ func WorkspaceFileTreeRevision(files []WorkspaceFile) string {
 	return "wft1_" + encoded.digest()
 }
 
+// ValidWorkspaceFileTreeRevision reports whether revision is the canonical
+// opaque identity emitted by WorkspaceFileTreeRevision.
+func ValidWorkspaceFileTreeRevision(revision string) bool {
+	const prefix = "wft1_"
+	if len(revision) <= len(prefix) || revision[:len(prefix)] != prefix {
+		return false
+	}
+	encoded := revision[len(prefix):]
+	decoded, err := base64.RawURLEncoding.DecodeString(encoded)
+	return err == nil && len(decoded) == sha256.Size && base64.RawURLEncoding.EncodeToString(decoded) == encoded
+}
+
 type workspaceFileCanonicalFields []byte
 
 func (c *workspaceFileCanonicalFields) bytes(value []byte) {

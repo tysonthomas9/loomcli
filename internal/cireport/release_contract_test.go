@@ -5,8 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/test/skills-e2e/registry"
 	"gopkg.in/yaml.v3"
+
+	"github.com/tysonthomas9/loomcli/test/skills-e2e/registry"
 )
 
 func TestLoomReleaseCannotBypassPairedCompatibility(t *testing.T) {

@@ -71,14 +71,7 @@ func New() *Store {
 	drivers, versions, profiles, roles, services, bindings, skills := newCatalogGraph(files)
 	nodes := newNodeStore()
 	artifacts := newArtifactStore()
-	runs := newDriverRunStore(versions, bindings)
-	steps := newDriverStepStore(runs)
-	taskRuns := newTaskRunStore(runs, steps, artifacts, profiles, nodes)
-	events := newTriggerEventStore()
-	deliveries := newTriggerDeliveryStore(bindings)
-	routes := &triggerRouteStore{bindings: bindings, events: events, deliveries: deliveries, runs: runs}
-	awaits := newAwaitStore(events)
-	linkRunGraph(runs, steps, taskRuns, awaits)
+	runGraph := newRunGraph(versions, bindings, artifacts, profiles, nodes)
 	return &Store{
 		workspaces: newWorkspaceStore(),
 		repos:      newRepoStore(),
@@ -96,15 +89,15 @@ func New() *Store {
 		profiles:   profiles,
 		services:   services,
 		bindings:   bindings,
-		events:     events,
-		deliveries: deliveries,
-		routes:     routes,
-		runs:       runs,
-		steps:      steps,
-		taskRuns:   taskRuns,
+		events:     runGraph.events,
+		deliveries: runGraph.deliveries,
+		routes:     runGraph.routes,
+		runs:       runGraph.runs,
+		steps:      runGraph.steps,
+		taskRuns:   runGraph.taskRuns,
 		taskEvents: newTaskRunEventStore(),
 		outbox:     newOutboxStore(),
-		awaits:     awaits,
+		awaits:     runGraph.awaits,
 		workers:    newWorkerStore(),
 		roles:      roles,
 		skills:     skills,
@@ -115,6 +108,42 @@ func New() *Store {
 		conns:      newConnectorStore(),
 		grants:     newConnectorGrantStore(),
 		audits:     newConnectorAuditStore(),
+	}
+}
+
+type runGraph struct {
+	events     *triggerEventStore
+	deliveries *triggerDeliveryStore
+	routes     *triggerRouteStore
+	runs       *driverRunStore
+	steps      *driverStepStore
+	taskRuns   *taskRunStore
+	awaits     *awaitStore
+}
+
+func newRunGraph(
+	versions *driverVersionStore,
+	bindings *triggerBindingStore,
+	artifacts *artifactStore,
+	profiles *workerProfileStore,
+	nodes *nodeStore,
+) runGraph {
+	runs := newDriverRunStore(versions, bindings)
+	steps := newDriverStepStore(runs)
+	taskRuns := newTaskRunStore(runs, steps, artifacts, profiles, nodes)
+	events := newTriggerEventStore()
+	deliveries := newTriggerDeliveryStore(bindings)
+	routes := &triggerRouteStore{bindings: bindings, events: events, deliveries: deliveries, runs: runs}
+	awaits := newAwaitStore(events)
+	linkRunGraph(runs, steps, taskRuns, awaits)
+	return runGraph{
+		events:     events,
+		deliveries: deliveries,
+		routes:     routes,
+		runs:       runs,
+		steps:      steps,
+		taskRuns:   taskRuns,
+		awaits:     awaits,
 	}
 }
 
