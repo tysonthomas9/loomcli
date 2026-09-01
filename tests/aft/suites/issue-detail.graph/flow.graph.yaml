@@ -1,7 +1,6 @@
 kind: graph
 version: 1
 flow: issue-detail
-classification: { area: issues, feature: issue-detail, surface: mixed, purpose: journey }
 intent: A human creates an issue and exercises the editable issue-detail panel through mounted UI controls.
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
