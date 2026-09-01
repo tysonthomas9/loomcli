@@ -623,13 +623,35 @@ func (s *Supervisor) StopWithBudget(budget time.Duration) StopReport {
 	outcomes, drainCompleted := s.drainAllWithGrace(snapshot, deadline)
 
 	// Wait for all superviseAgent goroutines to exit, bounded by the remaining
-	// budget.
+	// budget AND by shutdownAgentWaitTimeout, whichever comes first.
+	//
+	// The second bound exists because the lease sweep below matters more than a
+	// tidy unwind. A supervisor that exits still holding agent-ownership leases
+	// stalls every agent it owned until the lease TTL expires — 30 minutes,
+	// measured twice on 2026-08-31 (PUPPET-277) — whereas a lease released a
+	// little early costs at most a duplicate-spawn window the drain has already
+	// closed. So Stop() may now return before the full budget; WaitCompleted
+	// still reports whether the goroutines actually unwound, which is what
+	// names the straggler (PUPPET-41).
 	wgDone := make(chan struct{})
 	go func() {
 		s.Wg.Wait()
 		close(wgDone)
 	}()
-	waitCompleted := waitUntil(wgDone, deadline)
+	sweepBy := time.Now().Add(shutdownAgentWaitTimeout)
+	if sweepBy.After(deadline) {
+		sweepBy = deadline
+	}
+	waitCompleted := waitUntil(wgDone, sweepBy)
+	if !waitCompleted {
+		slog.Warn("supervise goroutines still running at the lease-sweep deadline; releasing ownership leases anyway",
+			"workspace", s.WorkspaceID, "timeout", shutdownAgentWaitTimeout)
+	}
+
+	// Strictly AFTER the drain: releasing a lease while our agent process is
+	// still alive would invite another supervisor to claim that agent and spawn
+	// a duplicate. Idempotent, so racing a concurrent unwind is a no-op.
+	s.releaseAllOwnershipLeases()
 
 	return StopReport{
 		Budget:         budget,
