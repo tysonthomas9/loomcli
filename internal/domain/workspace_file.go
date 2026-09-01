@@ -2,8 +2,6 @@ package domain
 
 import (
 	"crypto/sha256"
-	"encoding/base64"
-	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"path"
@@ -15,19 +13,6 @@ import (
 
 	"golang.org/x/text/cases"
 	"golang.org/x/text/unicode/norm"
-)
-
-const (
-	// MaxWorkspaceFiles is Fleet's generic immutable-manifest entry ceiling.
-	MaxWorkspaceFiles = 257
-	// MaxWorkspaceFilePathLength bounds one complete relative path in bytes.
-	MaxWorkspaceFilePathLength = 256
-	// MaxWorkspaceFilePathSegmentLength matches the common NAME_MAX limit.
-	MaxWorkspaceFilePathSegmentLength = 255
-	// MaxWorkspaceFileBlobRefLength bounds one opaque provider-neutral ref.
-	MaxWorkspaceFileBlobRefLength = 256
-	// MaxWorkspaceFileMediaTypeLength bounds advisory media metadata.
-	MaxWorkspaceFileMediaTypeLength = 255
 )
 
 // WorkspaceFileInput is one file's bytes and materialization metadata on the
@@ -226,63 +211,4 @@ func containsControl(value string) bool {
 		}
 	}
 	return false
-}
-
-func WorkspaceFileRevision(file WorkspaceFile) string {
-	var encoded workspaceFileCanonicalFields
-	encoded.string(file.ContentHash)
-	encoded.int64(file.SizeBytes)
-	encoded.string(file.MediaType)
-	encoded.boolean(file.Executable)
-	return "wff1_" + encoded.digest()
-}
-
-// WorkspaceFileTreeRevision includes the opaque BlobRef exactly as Fleet's
-// server contract does. Because blob references are workspace-bound, equal
-// files published in different workspaces intentionally have different tree
-// identities even though their per-file revisions remain equal.
-func WorkspaceFileTreeRevision(files []WorkspaceFile) string {
-	canonical := append([]WorkspaceFile(nil), files...)
-	sort.Slice(canonical, func(i, j int) bool { return canonical[i].Path < canonical[j].Path })
-	var encoded workspaceFileCanonicalFields
-	for _, file := range canonical {
-		encoded.string(file.Path)
-		encoded.string(file.BlobRef)
-		encoded.string(file.ContentHash)
-		encoded.int64(file.SizeBytes)
-		encoded.string(file.MediaType)
-		encoded.boolean(file.Executable)
-	}
-	return "wft1_" + encoded.digest()
-}
-
-type workspaceFileCanonicalFields []byte
-
-func (c *workspaceFileCanonicalFields) bytes(value []byte) {
-	var length [8]byte
-	binary.BigEndian.PutUint64(length[:], uint64(len(value)))
-	*c = append(*c, length[:]...)
-	*c = append(*c, value...)
-}
-
-func (c *workspaceFileCanonicalFields) string(value string) { c.bytes([]byte(value)) }
-
-func (c *workspaceFileCanonicalFields) int64(value int64) {
-	var encoded [8]byte
-	// #nosec G115 -- two's-complement bits are the canonical int64 encoding.
-	binary.BigEndian.PutUint64(encoded[:], uint64(value))
-	c.bytes(encoded[:])
-}
-
-func (c *workspaceFileCanonicalFields) boolean(value bool) {
-	if value {
-		c.bytes([]byte{1})
-		return
-	}
-	c.bytes([]byte{0})
-}
-
-func (c workspaceFileCanonicalFields) digest() string {
-	sum := sha256.Sum256(c)
-	return base64.RawURLEncoding.EncodeToString(sum[:])
 }

@@ -35,23 +35,9 @@ const (
 // immutable workspace file tree.
 const SkillFileNameSKILLMD = "SKILL.md"
 
-// MaxSkillNameLength is the Agent Skills limit on a skill name, mirrored from
-// fleet-db's models.MaxSkillNameLength.
-const MaxSkillNameLength = 64
-
 const (
 	// MaxRoleNameLength mirrors fleet-db's role-name path-segment limit.
 	MaxRoleNameLength = 100
-	// MaxSkillDescriptionCharacters is the Agent Skills description limit.
-	MaxSkillDescriptionCharacters = 1024
-	// MaxSkillContentBytes bounds the complete SKILL.md object.
-	MaxSkillContentBytes = 100_000
-	// MaxSkillFilePathLength bounds one bundled file destination.
-	MaxSkillFilePathLength = 256
-	// MaxSkillFilePathSegmentLength mirrors filesystem NAME_MAX.
-	MaxSkillFilePathSegmentLength = 255
-	// MaxSkillProvenanceLength bounds source and source_ref metadata.
-	MaxSkillProvenanceLength = 256
 )
 
 // skillNamePattern is the Agent Skills name rule: lowercase letters, digits

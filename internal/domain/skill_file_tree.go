@@ -10,15 +10,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const (
-	// MaxSkillFiles is the number of bundled files allowed in addition to SKILL.md.
-	MaxSkillFiles = 256
-	// MaxSkillFileBytes bounds each bundled file while allowing arbitrary bytes.
-	MaxSkillFileBytes = 128 << 10
-	// MaxSkillFilesTotalBytes bounds all bundled files together.
-	MaxSkillFilesTotalBytes = 1_000_000
-)
-
 // SkillFileTreeFile is one byte-bearing file in a complete Skill tree.
 // Callers use it before publication and after downloading an immutable tree.
 type SkillFileTreeFile struct {
