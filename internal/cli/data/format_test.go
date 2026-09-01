@@ -150,14 +150,27 @@ func TestPrintMessageResultJSON(t *testing.T) {
 }
 
 func TestMonitorWorkspaceNameFallbacks(t *testing.T) {
+	name := "PUPPET"
+	if got := monitorWorkspaceName(&gen.MonitorStatusResponse{
+		Workspace: gen.MonitorWorkspaceInfo{Mode: "workspace", Name: &name, Resolved: true},
+	}); got != name {
+		t.Fatalf("resolved name = %q, want %q", got, name)
+	}
+	// Mode is the literal string "workspace"; it must never stand in for a name.
 	mode := gen.MonitorWorkspaceInfoMode("workspace")
 	if got := monitorWorkspaceName(&gen.MonitorStatusResponse{
 		Workspace: gen.MonitorWorkspaceInfo{Mode: mode},
-	}); got != "workspace" {
-		t.Fatalf("mode fallback = %q, want workspace", got)
+	}); got != "(unresolved)" {
+		t.Fatalf("mode-only = %q, want (unresolved)", got)
 	}
-	if got := monitorWorkspaceName(&gen.MonitorStatusResponse{}); got != "(default)" {
-		t.Fatalf("empty fallback = %q, want default", got)
+	if got := monitorWorkspaceName(&gen.MonitorStatusResponse{}); got != "(unresolved)" {
+		t.Fatalf("empty = %q, want (unresolved)", got)
+	}
+	empty := ""
+	if got := monitorWorkspaceName(&gen.MonitorStatusResponse{
+		Workspace: gen.MonitorWorkspaceInfo{Mode: mode, Name: &empty},
+	}); got != "(unresolved)" {
+		t.Fatalf("empty name = %q, want (unresolved)", got)
 	}
 }
 
@@ -210,4 +223,54 @@ func TestAgentDisplayStatusPrecedence(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestPrintMonitorStatusWorkspaceHeader is the regression test for the exact
+// string in PUPPET-258: `Workspace: workspace`, the server's MODE rendered as
+// if it were a workspace NAME, over an all-zero dashboard.
+func TestPrintMonitorStatusWorkspaceHeader(t *testing.T) {
+	const warning = "warning: server did not resolve a workspace; counts below are not scoped and may be zero"
+
+	t.Run("resolved prints the name and no warning", func(t *testing.T) {
+		name := "PUPPET"
+		var out bytes.Buffer
+		s := &gen.MonitorStatusResponse{
+			Workspace: gen.MonitorWorkspaceInfo{Mode: "workspace", Name: &name, Resolved: true},
+			Tasks:     gen.MonitorTaskSummary{ReadyToImplement: 16, InProgress: 7},
+			Stats:     gen.MonitorStats{Open: 23, Total: 41},
+		}
+		if err := printMonitorStatus(&out, s, formatText); err != nil {
+			t.Fatalf("printMonitorStatus: %v", err)
+		}
+		got := out.String()
+		if !strings.Contains(got, "Workspace: PUPPET\n") {
+			t.Errorf("output missing the workspace name header; got:\n%s", got)
+		}
+		if strings.Contains(got, warning) {
+			t.Errorf("unexpected unresolved warning; got:\n%s", got)
+		}
+		if !strings.Contains(got, "ready_to_implement: 16") {
+			t.Errorf("counts not rendered from the payload; got:\n%s", got)
+		}
+	})
+
+	t.Run("mode-only prints (unresolved) and warns", func(t *testing.T) {
+		var out bytes.Buffer
+		s := &gen.MonitorStatusResponse{
+			Workspace: gen.MonitorWorkspaceInfo{Mode: "workspace"},
+		}
+		if err := printMonitorStatus(&out, s, formatText); err != nil {
+			t.Fatalf("printMonitorStatus: %v", err)
+		}
+		got := out.String()
+		if strings.Contains(got, "Workspace: workspace") {
+			t.Errorf("regression: mode printed as a workspace name; got:\n%s", got)
+		}
+		if !strings.Contains(got, "Workspace: (unresolved)\n") {
+			t.Errorf("output missing the (unresolved) header; got:\n%s", got)
+		}
+		if !strings.Contains(got, warning) {
+			t.Errorf("output missing the unresolved warning; got:\n%s", got)
+		}
+	})
 }

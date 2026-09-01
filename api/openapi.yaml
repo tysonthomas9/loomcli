@@ -6499,13 +6499,18 @@ components:
 
     MonitorWorkspaceInfo:
       type: object
-      required: [mode]
+      required: [mode, resolved]
       properties:
         mode:
           type: string
           enum: [workspace]
         name:
           type: string
+        resolved:
+          type: boolean
+          description: >-
+            True when the server resolved the request to a concrete workspace.
+            False means the counts below are unscoped and may all be zero.
         workspaces:
           type: array
           items:

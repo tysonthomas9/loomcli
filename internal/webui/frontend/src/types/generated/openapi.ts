@@ -3394,6 +3394,8 @@ export interface components {
       /** @enum {string} */
       mode: "workspace";
       name?: string;
+      /** @description True when the server resolved the request to a concrete workspace. False means the counts below are unscoped and may all be zero. */
+      resolved: boolean;
       workspaces?: string[];
     };
     MonitorWorkspaceDetail: {
