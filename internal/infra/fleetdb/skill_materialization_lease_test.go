@@ -30,6 +30,7 @@ func TestSkillMaterializationLeaseStoreAcquire(t *testing.T) {
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(domain.SkillMaterializationLease{
 			Token: "token-1", TargetKey: body.TargetKey, Holder: body.Holder, ExpiresAt: expiresAt,
+			TreeRevisions: append([]string{}, body.TreeRevisions...),
 		})
 	})
 	defer closeFn()
@@ -41,7 +42,8 @@ func TestSkillMaterializationLeaseStoreAcquire(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
 	}
-	if got.Token != "token-1" || got.TargetKey != "target-sha256" || got.Holder != "lead@host#42" || !got.ExpiresAt.Equal(expiresAt) {
+	if got.Token != "token-1" || got.TargetKey != "target-sha256" || got.Holder != "lead@host#42" || !got.ExpiresAt.Equal(expiresAt) ||
+		!reflect.DeepEqual(got.TreeRevisions, []string{"wft1_a", "wft1_b"}) {
 		t.Fatalf("lease = %+v", got)
 	}
 }

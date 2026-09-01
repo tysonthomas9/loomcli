@@ -2,6 +2,7 @@ package skillmat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -18,15 +19,17 @@ import (
 )
 
 type fakeSkillMaterializationLeaseStore struct {
-	acquireErrs []error
-	lease       *domain.SkillMaterializationLease
-	releaseErr  error
-	renewErr    error
-	renewCalls  atomic.Int32
-	renewNotify chan struct{}
-	echoTrees   bool
-	acquires    []store.SkillMaterializationLeaseAcquire
-	calls       *[]string
+	acquireErrs        []error
+	lease              *domain.SkillMaterializationLease
+	releaseErr         error
+	renewErr           error
+	renewCalls         atomic.Int32
+	renewNotify        chan struct{}
+	echoTrees          bool
+	preserveNilTrees   bool
+	preserveZeroExpiry bool
+	acquires           []store.SkillMaterializationLeaseAcquire
+	calls              *[]string
 }
 
 func (s *fakeSkillMaterializationLeaseStore) Acquire(_ context.Context, in store.SkillMaterializationLeaseAcquire) (*domain.SkillMaterializationLease, error) {
@@ -38,12 +41,23 @@ func (s *fakeSkillMaterializationLeaseStore) Acquire(_ context.Context, in store
 	if index < len(s.acquireErrs) && s.acquireErrs[index] != nil {
 		return nil, s.acquireErrs[index]
 	}
-	if s.lease != nil && s.echoTrees {
+	if s.lease != nil {
 		out := *s.lease
-		out.TreeRevisions = append([]string{}, in.TreeRevisions...)
+		if out.TargetKey == "" {
+			out.TargetKey = in.TargetKey
+		}
+		if out.Holder == "" {
+			out.Holder = in.Holder
+		}
+		if out.ExpiresAt.IsZero() && !s.preserveZeroExpiry {
+			out.ExpiresAt = time.Now().Add(time.Minute)
+		}
+		if s.echoTrees || (out.TreeRevisions == nil && !s.preserveNilTrees) {
+			out.TreeRevisions = append([]string{}, in.TreeRevisions...)
+		}
 		return &out, nil
 	}
-	return s.lease, nil
+	return nil, nil
 }
 
 func (s *fakeSkillMaterializationLeaseStore) Renew(context.Context, string, string, string, time.Duration) (time.Time, error) {
@@ -173,8 +187,74 @@ func TestMaterializeLeasedRejectsMismatchedLeaseRevisionSetBeforeHydration(t *te
 	if !errors.Is(err, domain.ErrIntegrity) {
 		t.Fatalf("error = %v, want integrity failure", err)
 	}
-	if want := []string{"acquire"}; !reflect.DeepEqual(calls, want) {
+	if want := []string{"acquire", "release"}; !reflect.DeepEqual(calls, want) {
 		t.Fatalf("calls = %v, want %v", calls, want)
+	}
+}
+
+func TestMaterializeLeasedRejectsMissingOrNullLeaseRevisionSetAndReleases(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		body string
+	}{
+		{name: "missing", body: `{"token":"token-1"}`},
+		{name: "null", body: `{"token":"token-1","tree_revisions":null}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls []string
+			var lease domain.SkillMaterializationLease
+			if err := json.Unmarshal([]byte(tt.body), &lease); err != nil {
+				t.Fatal(err)
+			}
+			leases := &fakeSkillMaterializationLeaseStore{
+				lease: &lease,
+				calls: &calls, preserveNilTrees: true,
+			}
+			st := leasedMaterializeStore{leases: leases}
+			deps := testLeasedMaterializeDeps(&calls)
+			deps.resolve = func(context.Context, store.Store, string, string) (*materializationPlan, error) {
+				return &materializationPlan{TreeRevisions: []string{}}, nil
+			}
+
+			err := materializeLeasedWith(t.Context(), st, "WS", "lead", t.TempDir(), deps)
+			if !errors.Is(err, domain.ErrIntegrity) {
+				t.Fatalf("error = %v, want integrity failure", err)
+			}
+			if want := []string{"acquire", "release"}; !reflect.DeepEqual(calls, want) {
+				t.Fatalf("calls = %v, want %v", calls, want)
+			}
+		})
+	}
+}
+
+func TestMaterializeLeasedRejectsInvalidLeaseIdentityOrExpiryAndReleases(t *testing.T) {
+	future := time.Now().Add(time.Minute)
+	tests := []struct {
+		name  string
+		lease *domain.SkillMaterializationLease
+	}{
+		{name: "wrong target", lease: &domain.SkillMaterializationLease{Token: "token-1", TargetKey: "other-target", Holder: "lead@test-host#1234", ExpiresAt: future, TreeRevisions: []string{}}},
+		{name: "wrong holder", lease: &domain.SkillMaterializationLease{Token: "token-1", Holder: "other@test-host#9", ExpiresAt: future, TreeRevisions: []string{}}},
+		{name: "missing expiry", lease: &domain.SkillMaterializationLease{Token: "token-1", Holder: "lead@test-host#1234", TreeRevisions: []string{}}},
+		{name: "expired", lease: &domain.SkillMaterializationLease{Token: "token-1", Holder: "lead@test-host#1234", ExpiresAt: time.Unix(1, 0), TreeRevisions: []string{}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls []string
+			leases := &fakeSkillMaterializationLeaseStore{
+				lease: tt.lease, calls: &calls, preserveZeroExpiry: tt.name == "missing expiry",
+			}
+			st := leasedMaterializeStore{leases: leases}
+			deps := testLeasedMaterializeDeps(&calls)
+
+			err := materializeLeasedWith(t.Context(), st, "WS", "lead", t.TempDir(), deps)
+			if !errors.Is(err, domain.ErrIntegrity) {
+				t.Fatalf("error = %v, want integrity failure", err)
+			}
+			if want := []string{"acquire", "release"}; !reflect.DeepEqual(calls, want) {
+				t.Fatalf("calls = %v, want %v", calls, want)
+			}
+		})
 	}
 }
 
@@ -256,6 +336,44 @@ func TestMaterializeLeasedRetriesUntilContentionClears(t *testing.T) {
 	}
 }
 
+func TestMaterializeLeasedReresolvesExactPlanAfterContention(t *testing.T) {
+	var calls []string
+	conflict := &domain.SkillMaterializationLeaseConflictError{
+		Holder: "other@test-host#9", ExpiresAt: time.Now().UTC().Add(time.Second),
+	}
+	leases := &fakeSkillMaterializationLeaseStore{
+		acquireErrs: []error{conflict, nil},
+		lease:       &domain.SkillMaterializationLease{Token: "token-after-wait"},
+		echoTrees:   true,
+		calls:       &calls,
+	}
+	st := leasedMaterializeStore{leases: leases}
+	deps := testLeasedMaterializeDeps(&calls)
+	resolveCalls := 0
+	deps.resolve = func(context.Context, store.Store, string, string) (*materializationPlan, error) {
+		resolveCalls++
+		return &materializationPlan{TreeRevisions: []string{fmt.Sprintf("wft1_plan_%d", resolveCalls)}}, nil
+	}
+	deps.apply = func(ctx context.Context, _ store.Store, _, _ string, plan *materializationPlan, beforeCommit beforeMaterializationCommit) error {
+		if want := []string{"wft1_plan_2"}; !reflect.DeepEqual(plan.TreeRevisions, want) {
+			t.Fatalf("applied revisions = %v, want freshly resolved %v", plan.TreeRevisions, want)
+		}
+		return beforeCommit(ctx)
+	}
+
+	if err := materializeLeasedWith(t.Context(), st, "WS", "reviewer", t.TempDir(), deps); err != nil {
+		t.Fatal(err)
+	}
+	if resolveCalls != 2 {
+		t.Fatalf("resolve calls = %d, want one resolution per acquire attempt", resolveCalls)
+	}
+	if len(leases.acquires) != 2 ||
+		!reflect.DeepEqual(leases.acquires[0].TreeRevisions, []string{"wft1_plan_1"}) ||
+		!reflect.DeepEqual(leases.acquires[1].TreeRevisions, []string{"wft1_plan_2"}) {
+		t.Fatalf("acquire revisions = %+v, want plans 1 then 2", leases.acquires)
+	}
+}
+
 func TestMaterializeLeasedFailsBeforeHydrationWhenLeaseStoreIsUnavailable(t *testing.T) {
 	var calls []string
 	leases := &fakeSkillMaterializationLeaseStore{
@@ -329,6 +447,24 @@ func TestMaterializeLeasedLeaseLossFailsBeforeCommitAndStillReleases(t *testing.
 	}
 }
 
+func TestMaterializeLeasedClassifiesRenewalStoreOutageAndPreservesProjection(t *testing.T) {
+	var calls []string
+	outage := &url.Error{Op: "PUT", URL: "http://fleet-db/leases/target", Err: syscall.ECONNREFUSED}
+	leases := &fakeSkillMaterializationLeaseStore{
+		lease: &domain.SkillMaterializationLease{Token: "token-1"}, renewErr: outage, calls: &calls,
+	}
+	st := leasedMaterializeStore{leases: leases}
+	deps := testLeasedMaterializeDeps(&calls)
+
+	err := materializeLeasedWith(t.Context(), st, "WS", "lead", t.TempDir(), deps)
+	if !IsStoreUnavailable(err) || !errors.Is(err, outage) {
+		t.Fatalf("error = %v, want StoreUnavailableError wrapping renewal outage", err)
+	}
+	if want := []string{"acquire", "materialize", "release"}; !reflect.DeepEqual(calls, want) {
+		t.Fatalf("calls = %v, want %v", calls, want)
+	}
+}
+
 func TestMaterializeLeasedRenewsDuringSlowHydrationAndAgainBeforeCommit(t *testing.T) {
 	var calls []string
 	notified := make(chan struct{}, 1)
@@ -364,7 +500,7 @@ func testLeasedMaterializeDeps(calls *[]string) leasedMaterializeDeps {
 		pid:      func() int { return 1234 },
 		sleep:    func(context.Context, time.Duration) error { return nil },
 		resolve: func(context.Context, store.Store, string, string) (*materializationPlan, error) {
-			return &materializationPlan{}, nil
+			return &materializationPlan{TreeRevisions: []string{}}, nil
 		},
 		apply: func(ctx context.Context, _ store.Store, _, _ string, _ *materializationPlan, beforeCommit beforeMaterializationCommit) error {
 			*calls = append(*calls, "materialize")
