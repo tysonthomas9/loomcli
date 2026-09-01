@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -134,6 +135,71 @@ func TestListStatusFilter(t *testing.T) {
 		}
 		if !strings.Contains(capturedQuery, "status=open") {
 			t.Errorf("query = %q, want one containing 'status=open'", capturedQuery)
+		}
+	})
+}
+
+// resetListLabelFlagVars clears listLabels before and after a test so the shared
+// package-level listCmd stays order-independent.
+//
+// It is also what keeps repeated real parsing safe: pflag's stringArrayValue
+// tracks its own "changed" bool that no test helper can reach, so a second
+// ParseFlags of --label in one test binary APPENDS instead of replacing.
+// Appending to a nil slice yields the expected result anyway.
+func resetListLabelFlagVars(t *testing.T) {
+	t.Helper()
+	listLabels = nil
+	t.Cleanup(func() { listLabels = nil })
+}
+
+// TestListLabelFlag_ParseSemantics drives real pflag parsing, which runList
+// deliberately bypasses (it calls the backend with a ListOpts directly and never
+// executes listCmd). It pins the flag to StringArray: StringSlice would
+// comma-split "x,y" into two labels and a plain StringVar would keep only the
+// last occurrence.
+func TestListLabelFlag_ParseSemantics(t *testing.T) {
+	resetListLabelFlagVars(t)
+
+	if err := listCmd.ParseFlags([]string{
+		"--label", "a",
+		"--label", "b",
+		"--label", "x,y",
+	}); err != nil {
+		t.Fatalf("ParseFlags: %v", err)
+	}
+
+	if want := []string{"a", "b", "x,y"}; !reflect.DeepEqual(listLabels, want) {
+		t.Fatalf("listLabels = %#v, want %#v (StringArray: no comma-split, every occurrence kept)", listLabels, want)
+	}
+	if !listCmd.Flags().Changed("label") {
+		t.Fatal("parsing --label must mark the flag Changed")
+	}
+}
+
+func TestListLabelFlag_DefaultNil(t *testing.T) {
+	resetListLabelFlagVars(t)
+
+	if err := listCmd.ParseFlags([]string{"--status", "open"}); err != nil {
+		t.Fatalf("ParseFlags: %v", err)
+	}
+	if listLabels != nil {
+		t.Fatalf("listLabels = %#v, want nil when --label is absent (so ListOpts.Labels is omitted)", listLabels)
+	}
+}
+
+func TestListLabelFilter(t *testing.T) {
+	var capturedQuery string
+	srv := issueListServer(t, []gen.Issue{}, &capturedQuery)
+	defer srv.Close()
+
+	withDataClientState(t, func() {
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+		_, err := runList(t, srv.URL, backend.ListOpts{Labels: []string{"a", "b"}}, "text")
+		if err != nil {
+			t.Fatalf("runList: %v", err)
+		}
+		if !strings.Contains(capturedQuery, "labels=a%2Cb") {
+			t.Errorf("query = %q, want one containing 'labels=a%%2Cb'", capturedQuery)
 		}
 	})
 }
