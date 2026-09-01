@@ -133,6 +133,7 @@ func collectDoctorChecks(cmd *cobra.Command) []checkFunc {
 	checks := []checkFunc{
 		func() CheckResult { return checkGit(deps) },
 		func() CheckResult { return checkGitRepo(deps) },
+		func() CheckResult { return checkPublishAuth(deps) },
 		func() CheckResult { return checkTmux(deps) },
 		checkIssueBackend,
 	}
