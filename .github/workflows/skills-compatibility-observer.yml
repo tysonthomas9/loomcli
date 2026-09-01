@@ -1,0 +1,25 @@
+name: Skills compatibility observer
+
+on:
+  workflow_run:
+    workflows: ["Skills compatibility"]
+    types: [completed]
+
+permissions:
+  actions: read
+  checks: write
+  contents: read
+
+jobs:
+  classify:
+    name: Classify compatibility completion
+    permissions:
+      actions: read
+      checks: write
+      contents: read
+    uses: ./.github/workflows/skills-run-observer.yml
+    with:
+      repository: ${{ github.repository }}
+      run_id: ${{ github.event.workflow_run.id }}
+      head_sha: ${{ github.event.workflow_run.head_sha }}
+      observer_ref: ${{ github.workflow_sha }}

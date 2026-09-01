@@ -1,0 +1,58 @@
+name: Observe skills workflow outcome
+
+on:
+  workflow_call:
+    inputs:
+      repository:
+        description: Repository containing the observed workflow run
+        required: true
+        type: string
+      run_id:
+        description: Completed workflow run ID
+        required: true
+        type: number
+      head_sha:
+        description: Expected head revision for the check report
+        required: true
+        type: string
+      observer_ref:
+        description: Exact trusted Loom revision containing the observer
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  checks: write
+  contents: read
+
+jobs:
+  observe:
+    name: Classify workflow completion
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Always execute trusted observer code. Never checkout the observed run
+      # or download its artifacts in this privileged workflow_run context.
+      - name: Checkout observer
+        uses: actions/checkout@v4
+        with:
+          repository: tysonthomas9/loomcli
+          ref: ${{ inputs.observer_ref }}
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
+      - name: Classify and publish neutral or failure check
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          OBSERVED_REPOSITORY: ${{ inputs.repository }}
+          OBSERVED_RUN_ID: ${{ inputs.run_id }}
+          OBSERVED_HEAD_SHA: ${{ inputs.head_sha }}
+        run: >-
+          go run ./cmd/skills-run-observer
+          --repository "$OBSERVED_REPOSITORY"
+          --run-id "$OBSERVED_RUN_ID"
+          --head-sha "$OBSERVED_HEAD_SHA"
