@@ -192,7 +192,7 @@ func resetUpdateFieldFlags(t *testing.T) {
 	for _, name := range []string{
 		"status", "assignee", "notes", "design", "priority",
 		"title", "description", "description-from-file",
-		"add-label", "remove-label",
+		"add-label", "remove-label", "parent",
 	} {
 		setTestFlagChanged(t, updateCmd.Flags(), name, false)
 	}
@@ -579,4 +579,64 @@ func TestDataUpdate_UpdateErrorPropagates(t *testing.T) {
 			t.Fatalf("calls = %#v, want only the failed Update (dependency calls must not run)", stub.calls)
 		}
 	})
+}
+
+// --- --parent ---
+//
+// The flag re-links a child through PATCH parent_id (fleet-db PUPPET-341).
+// Its whole subtlety is that the empty string is a real value: "" detaches,
+// while omitting the flag must leave Parent nil so the PATCH carries no
+// parent_id key at all.
+
+func updateParentParams(t *testing.T, value string, changed bool) backend.UpdateParams {
+	t.Helper()
+	var params backend.UpdateParams
+	stub := &localBackendStub{}
+	withLocalBackend(t, stub, func() {
+		resetUpdateFieldFlags(t)
+		outputFormat = "text"
+		updateParent = value
+		updateTitle = "t"
+		t.Cleanup(func() { updateParent = ""; updateTitle = "" })
+		setTestFlagChanged(t, updateCmd.Flags(), "title", true)
+		setTestFlagChanged(t, updateCmd.Flags(), "parent", changed)
+
+		if _, err := captureDataStdout(t, func() error {
+			return updateCmd.RunE(updateCmd, []string{"loom-342"})
+		}); err != nil {
+			t.Fatalf("update: %v", err)
+		}
+		if len(stub.calls) != 1 {
+			t.Fatalf("calls = %#v, want one call", stub.calls)
+		}
+		params = stub.calls[0].args.(backend.UpdateParams)
+	})
+	return params
+}
+
+func TestDataUpdate_ParentFlagSetsParent(t *testing.T) {
+	params := updateParentParams(t, "PUPPET-336", true)
+	if params.Parent == nil {
+		t.Fatal("Update parent = nil, want pointer to \"PUPPET-336\"")
+	}
+	if *params.Parent != "PUPPET-336" {
+		t.Errorf("Update parent = %q, want %q", *params.Parent, "PUPPET-336")
+	}
+}
+
+func TestDataUpdate_EmptyParentDetaches(t *testing.T) {
+	params := updateParentParams(t, "", true)
+	if params.Parent == nil {
+		t.Fatal("Update parent = nil for --parent \"\", want non-nil pointer to empty string (detach)")
+	}
+	if *params.Parent != "" {
+		t.Errorf("Update parent = %q, want empty string", *params.Parent)
+	}
+}
+
+func TestDataUpdate_NoParentFlagLeavesParentNil(t *testing.T) {
+	params := updateParentParams(t, "", false)
+	if params.Parent != nil {
+		t.Errorf("Update parent = %q for an omitted flag, want nil", *params.Parent)
+	}
 }
