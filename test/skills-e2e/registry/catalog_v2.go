@@ -48,7 +48,7 @@ func catalogCases25To48() []CaseDefinition {
 		app(29, "S3 presigned uploads bind exact content length, content type, and SHA-256.", "fleet", "provider-transfer", minioFleet(), gcsFleet()),
 		app(30, "Provider object keys use <prefix>/workspaces/<workspace>/sha256/<digest>.", "fleet", "provider-object-key", minioFleet(), gcsFleet()),
 		app(31, "The tree revision algorithm is identical across FleetDB and Loom.", "shared", "identity-vectors", loom(), fleet()),
-		app(32, "Determine whether that algorithm has one canonical source or two handwritten implementations; compatibility vectors alone do not count as one source.", "shared", "generated-contract", loom(), fleet()),
+		app(32, "Fleet's canonical contract generates the revision algorithm consumed by both FleetDB and Loom; neither repository owns a handwritten copy.", "shared", "generated-contract", loom(), fleet()),
 		app(33, "A same-revision/different-manifest collision fails closed.", "fleet", "storage-conformance", redisFleet(), postgresFleet()),
 		app(34, "Downloaded bytes are bounded by declared size and verified by SHA-256 before Loom returns them.", "loom", "transfer-adapter", loomMinIOBackends()...),
 		app(35, "Upload tokens are HMAC-authenticated and bind version, kind, workspace, actor, hash, size, media type, object reference, and expiry.", "fleet", "token-service", fleet()),

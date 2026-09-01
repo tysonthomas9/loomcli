@@ -132,9 +132,47 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+  generated-contract:
+    name: Generated workspace-file contract pair
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout LoomCLI
+        uses: actions/checkout@v4
+        with:
+          repository: tysonthomas9/loomcli
+          ref: ${{ needs.resolve.outputs.loom_sha }}
+          path: loomcli
+          token: ${{ secrets.LOOMCLI_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Checkout FleetDB
+        uses: actions/checkout@v4
+        with:
+          repository: tysonthomas9/fleet-db
+          ref: ${{ needs.resolve.outputs.fleetdb_sha }}
+          path: fleet-db
+          token: ${{ secrets.FLEET_DB_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: fleet-db/go.mod
+
+      - name: Reject generated contract drift in either repository
+        working-directory: fleet-db
+        shell: bash
+        run: >-
+          go run ./cmd/gen-workspace-file-contract -check
+          -contract contracts/workspace-file-v1.json
+          -fleet-out internal/models/workspace_file_contract_gen.go
+          -loom-out ../loomcli/internal/domain/workspace_file_contract_gen.go
+
   proof:
     name: LoomCLI / FleetDB compatibility (${{ matrix.backend }}-${{ matrix.storage }})
-    needs: resolve
+    needs: [resolve, generated-contract]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -396,6 +434,19 @@ jobs:
             go run ./cmd/edge-case-coverage -revision "$FLEET_SHA" \
               > "$GITHUB_WORKSPACE/fleet-api-evidence-v2.json"
 
+      - name: Extract Fleet generated-contract evidence
+        if: inputs.edge_readiness && matrix.backend == 'redis' && matrix.storage == 'local'
+        working-directory: fleet-db
+        shell: bash
+        env:
+          FLEET_SHA: ${{ needs.resolve.outputs.fleetdb_sha }}
+        run: |
+          set -euo pipefail
+          export GOCACHE="$RUNNER_TEMP/fleet-edge-contract-cache"
+          go test -json ./internal/models -run '^TestGeneratedWorkspaceFileContractOwnsLimitsAndRevisionEncoding$' |
+            go run ./cmd/edge-case-coverage -revision "$FLEET_SHA" \
+              > "$GITHUB_WORKSPACE/fleet-generated-contract-evidence-v2.json"
+
       - name: Extract Fleet Redis evidence
         if: inputs.edge_readiness && matrix.backend == 'redis' && matrix.storage == 'local'
         working-directory: fleet-db
@@ -450,6 +501,7 @@ jobs:
             e2e-coverage-${{ matrix.backend }}-${{ matrix.storage }}-projection.json
             loom-domain-evidence-v2.json
             fleet-api-evidence-v2.json
+            fleet-generated-contract-evidence-v2.json
             fleet-redis-evidence-v2.json
             fleet-postgres-evidence-v2.json
             fleet-minio-evidence-v2.json
