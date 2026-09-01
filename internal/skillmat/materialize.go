@@ -172,7 +172,7 @@ func materializeWithRootOpener(
 	}
 	defer func() { _ = projectionLock.Close() }()
 
-	if err := ensureProjectionAliases(root); err != nil {
+	if err := ensureProjectionAliases(root, targetDir, entries); err != nil {
 		return err
 	}
 	if err := cleanupAbandonedGenerations(root); err != nil {
@@ -878,6 +878,12 @@ func entryExactlyMatches(root secureRoot, entry desiredEntry) (bool, error) {
 
 //nolint:gocognit,cyclop,funlen // The collision matrix (file/dir/symlink × managed/foreign) is deliberately exhaustive in one place.
 func detectExistingCollisions(root secureRoot, targetDir string, entries []desiredEntry, previous *marker) error {
+	return detectExistingCollisionsInRoots(root, targetDir, entries, previous, []string{AgentsSkillsDir, ClaudeSkillsDir})
+}
+
+func detectExistingCollisionsInRoots(
+	root secureRoot, targetDir string, entries []desiredEntry, previous *marker, rootNames []string,
+) error {
 	managed := map[string]bool{}
 	managedDirs := map[string]bool{}
 	if previous != nil {
@@ -898,7 +904,7 @@ func detectExistingCollisions(root secureRoot, targetDir string, entries []desir
 			}
 		}
 	}
-	for _, rootName := range []string{AgentsSkillsDir, ClaudeSkillsDir} {
+	for _, rootName := range rootNames {
 		absoluteRoot := filepath.Join(targetDir, filepath.FromSlash(rootName))
 		err := filepath.WalkDir(absoluteRoot, func(name string, item fs.DirEntry, walkErr error) error {
 			if errors.Is(walkErr, fs.ErrNotExist) {

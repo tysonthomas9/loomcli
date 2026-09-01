@@ -93,7 +93,7 @@ func currentGeneration(root secureRoot) (string, error) {
 	return projectionCurrentPath, nil
 }
 
-func ensureProjectionAliases(root secureRoot) error {
+func ensureProjectionAliases(root secureRoot, targetDir string, entries []desiredEntry) error {
 	if err := root.MkdirAll(".agents", 0o755); err != nil {
 		return fmt.Errorf("create .agents directory: %w", err)
 	}
@@ -118,6 +118,9 @@ func ensureProjectionAliases(root secureRoot) error {
 			return fmt.Errorf("inspect projection alias %q: %w", alias.name, err)
 		}
 		if info.Mode&os.ModeSymlink == 0 || info.LinkTarget != alias.target {
+			if err := detectExistingCollisionsInRoots(root, targetDir, entries, nil, []string{alias.name}); err != nil {
+				return err
+			}
 			return fmt.Errorf("materialized directory %q collides with existing path", alias.name)
 		}
 	}
