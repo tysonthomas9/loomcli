@@ -19,6 +19,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"syscall"
 
 	"golang.org/x/text/cases"
 	"golang.org/x/text/unicode/norm"
@@ -162,7 +163,19 @@ func materializeWithRootOpener(
 	}
 	defer root.Close()
 
+	if err := root.MkdirAll(projectionStateDir, 0o700); err != nil {
+		return fmt.Errorf("create skill projection state directory: %w", err)
+	}
+	projectionLock, err := root.Lock(ctx, projectionLockPath)
+	if err != nil {
+		return fmt.Errorf("lock skill projection target: %w", err)
+	}
+	defer func() { _ = projectionLock.Close() }()
+
 	if err := ensureProjectionAliases(root); err != nil {
+		return err
+	}
+	if err := cleanupAbandonedGenerations(root); err != nil {
 		return err
 	}
 	currentGenerationPath, err := currentGeneration(root)
@@ -214,36 +227,15 @@ func materializeWithRootOpener(
 	}
 	markerBytes = append(markerBytes, '\n')
 
-	stagedGeneration, err := newGeneration(root)
+	stagedGeneration, err := prepareGeneration(root, currentGenerationPath, previous, entries, paths, markerBytes)
 	if err != nil {
 		return err
 	}
-	if err := cloneGeneration(root, currentGenerationPath, stagedGeneration); err != nil {
-		return fmt.Errorf("stage current skill projection: %w", err)
-	}
-	stagedRoot := generationRoot{secureRoot: root, prefix: stagedGeneration}
-	if err := sweepTemporaryFiles(stagedRoot); err != nil {
-		return fmt.Errorf("sweep skill materialization temporaries: %w", err)
-	}
-	stalePaths := findStalePaths(previous, paths)
-	preDeleted := make(map[string]bool)
-	if err := writeProjection(stagedRoot, entries, stalePaths, preDeleted); err != nil {
-		return err
-	}
-	remainingStale := stalePaths[:0]
-	for _, stale := range stalePaths {
-		if !preDeleted[stale] {
-			remainingStale = append(remainingStale, stale)
-		}
-	}
-	if err := cleanupStale(stagedRoot, remainingStale); err != nil {
-		return err
-	}
-	if err := writeMarkerAtomically(stagedRoot, markerBytes); err != nil {
-		return fmt.Errorf("write skill marker: %w", err)
-	}
 	if err := commitGeneration(root, stagedGeneration); err != nil {
-		return err
+		return cleanupFailedGeneration(root, stagedGeneration, err)
+	}
+	if err := removeProjectionTree(root, stagedGeneration); err != nil {
+		return fmt.Errorf("skill projection committed but remove displaced generation: %w", err)
 	}
 	return nil
 }
@@ -306,8 +298,7 @@ func cleanupStale(root secureRoot, paths []string) error {
 			return fmt.Errorf("remove stale materialized path %q: %w", recorded, err)
 		}
 	}
-	removeEmptyParents(root, paths)
-	return nil
+	return removeEmptyParents(root, paths)
 }
 
 func writeProjection(root secureRoot, entries []desiredEntry, stalePaths []string, preDeleted map[string]bool) error {
@@ -787,7 +778,7 @@ func writeMarkerAtomically(root secureRoot, markerBytes []byte) (retErr error) {
 	return nil
 }
 
-func removeEmptyParents(root secureRoot, names []string) {
+func removeEmptyParents(root secureRoot, names []string) error {
 	dirs := make(map[string]bool)
 	for _, name := range names {
 		for parent := path.Dir(name); parent != "." && parent != AgentsSkillsDir && parent != ClaudeSkillsDir; parent = path.Dir(parent) {
@@ -800,8 +791,11 @@ func removeEmptyParents(root secureRoot, names []string) {
 	}
 	sort.Slice(ordered, func(i, j int) bool { return pathDepth(ordered[i]) > pathDepth(ordered[j]) })
 	for _, dir := range ordered {
-		_ = root.RemoveDir(dir)
+		if err := root.RemoveDir(dir); err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ENOTEMPTY) && !errors.Is(err, syscall.EEXIST) {
+			return fmt.Errorf("remove empty materialized directory %q: %w", dir, err)
+		}
 	}
+	return nil
 }
 
 func pathDepth(name string) int { return strings.Count(name, "/") }

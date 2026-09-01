@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/url"
 	"os"
@@ -169,6 +170,10 @@ func (r *markerRecordingRoot) CreateFile(name string, _ []byte, _ os.FileMode) e
 	return nil
 }
 
+func (r *markerRecordingRoot) CopyFile(sourceName, destinationName string, perm os.FileMode, maxBytes int64) (int64, error) {
+	return r.secureRoot.CopyFile(sourceName, destinationName, perm, maxBytes)
+}
+
 func (r *markerRecordingRoot) Rename(oldName, newName string) error {
 	r.renamed = append(r.renamed, [2]string{oldName, newName})
 	return nil
@@ -179,15 +184,21 @@ func (r *markerRecordingRoot) Swap(firstName, secondName string) error {
 	return nil
 }
 
+func (r *markerRecordingRoot) Lock(ctx context.Context, name string) (io.Closer, error) {
+	return r.secureRoot.Lock(ctx, name)
+}
+
 func (r *markerRecordingRoot) Remove(string) error { return nil }
 
 type failNthMutationRoot struct {
 	secureRoot
-	failAt                         int
-	persistent                     bool
-	mutations                      int
-	faultTriggered                 bool
-	replacementOccurredBeforeFault bool
+	failAt             int
+	persistent         bool
+	mutations          int
+	faultTriggered     bool
+	exchangeCommitted  bool
+	exchangeMutation   int
+	cleanupAfterCommit bool
 }
 
 func (r *failNthMutationRoot) fail() error {
@@ -213,6 +224,16 @@ func (r *failNthMutationRoot) CreateFile(name string, content []byte, perm os.Fi
 	return r.secureRoot.CreateFile(name, content, perm)
 }
 
+func (r *failNthMutationRoot) CopyFile(sourceName, destinationName string, perm os.FileMode, maxBytes int64) (int64, error) {
+	if err := r.fail(); err != nil {
+		if r.exchangeCommitted {
+			r.cleanupAfterCommit = true
+		}
+		return 0, err
+	}
+	return r.secureRoot.CopyFile(sourceName, destinationName, perm, maxBytes)
+}
+
 func (r *failNthMutationRoot) Symlink(target, name string) error {
 	if err := r.fail(); err != nil {
 		return err
@@ -224,30 +245,53 @@ func (r *failNthMutationRoot) Rename(oldName, newName string) error {
 	if err := r.fail(); err != nil {
 		return err
 	}
-	if !r.faultTriggered && !isTemporaryBase(path.Base(newName)) {
-		r.replacementOccurredBeforeFault = true
+	if err := r.secureRoot.Rename(oldName, newName); err != nil {
+		return err
 	}
-	return r.secureRoot.Rename(oldName, newName)
+	if newName == projectionCurrentPath {
+		r.exchangeCommitted = true
+		r.exchangeMutation = r.mutations
+	}
+	return nil
 }
 
 func (r *failNthMutationRoot) Swap(firstName, secondName string) error {
 	if err := r.fail(); err != nil {
 		return err
 	}
-	if !r.faultTriggered {
-		r.replacementOccurredBeforeFault = true
+	if err := r.secureRoot.Swap(firstName, secondName); err != nil {
+		return err
 	}
-	return r.secureRoot.Swap(firstName, secondName)
+	r.exchangeCommitted = true
+	r.exchangeMutation = r.mutations
+	return nil
 }
 
 func (r *failNthMutationRoot) Remove(name string) error {
 	if err := r.fail(); err != nil {
+		if r.exchangeCommitted {
+			r.cleanupAfterCommit = true
+		}
 		return err
 	}
 	return r.secureRoot.Remove(name)
 }
 
-func TestMaterializeOneShotFilesystemFailuresRestoreEntirePreviousProjection(t *testing.T) {
+func (r *failNthMutationRoot) RemoveDir(name string) error {
+	if err := r.fail(); err != nil {
+		if r.exchangeCommitted {
+			r.cleanupAfterCommit = true
+		}
+		return err
+	}
+	return r.secureRoot.RemoveDir(name)
+}
+
+func (r *failNthMutationRoot) Lock(ctx context.Context, name string) (io.Closer, error) {
+	return r.secureRoot.Lock(ctx, name)
+}
+
+func TestMaterializeOneShotFailuresExposeOnlyPreviousOrCommittedGeneration(t *testing.T) {
 	countTarget := t.TempDir()
 	countSkill, countStore := atomicityFixture()
 	mustMaterialize(t, countStore, countTarget, "operation-count initial Materialize")
@@ -262,13 +306,14 @@ func TestMaterializeOneShotFilesystemFailuresRestoreEntirePreviousProjection(t *
 		return counter, nil
 	})
 	if err != nil {
-		t.Fatalf("count replacement operations: %v", err)
+		t.Fatalf("count generation update operations: %v", err)
 	}
 	if counter == nil || counter.mutations == 0 {
-		t.Fatal("replacement performed no injectable filesystem mutations")
+		t.Fatal("generation update performed no injectable filesystem mutations")
 	}
+	wantCommitted := snapshotMaterializedProjection(t, countTarget)
 
-	postReplacementFaults := 0
+	postCommitCleanupFaults := 0
 	for failAt := 1; failAt <= counter.mutations; failAt++ {
 		t.Run(fmt.Sprintf("operation-%02d", failAt), func(t *testing.T) {
 			target := t.TempDir()
@@ -292,16 +337,18 @@ func TestMaterializeOneShotFilesystemFailuresRestoreEntirePreviousProjection(t *
 			if injected == nil || !injected.faultTriggered {
 				t.Fatalf("fault handshake = %#v, want operation %d to fail", injected, failAt)
 			}
-			if injected.replacementOccurredBeforeFault {
-				postReplacementFaults++
+			wantAfterFailure := want
+			if injected.exchangeCommitted {
+				postCommitCleanupFaults++
+				wantAfterFailure = wantCommitted
 			}
-			if got := snapshotMaterializedProjection(t, target); !reflect.DeepEqual(got, want) {
-				t.Fatalf("failed replacement changed the materialized projection:\n got: %#v\nwant: %#v", got, want)
+			if got := snapshotMaterializedProjection(t, target); !reflect.DeepEqual(got, wantAfterFailure) {
+				t.Fatalf("failure exposed a partial generation:\n got: %#v\nwant: %#v", got, wantAfterFailure)
 			}
 		})
 	}
-	if postReplacementFaults == 0 {
-		t.Fatal("fault matrix never failed after a managed replacement")
+	if postCommitCleanupFaults == 0 {
+		t.Fatal("fault matrix never exercised cleanup after a committed exchange")
 	}
 }
 
@@ -328,7 +375,7 @@ func TestMaterializePersistentFailureLeavesOldGenerationForRecovery(t *testing.T
 	}
 	afterFailureMarker, readErr := os.ReadFile(markerFile)
 	if readErr != nil || !bytes.Equal(afterFailureMarker, oldMarker) {
-		t.Fatalf("marker advanced after failed rollback: content=%q err=%v", afterFailureMarker, readErr)
+		t.Fatalf("marker advanced after failed staging: content=%q err=%v", afterFailureMarker, readErr)
 	}
 
 	mustMaterialize(t, st, target, "recovery Materialize")
@@ -350,6 +397,95 @@ func TestMaterializePersistentFailureLeavesOldGenerationForRecovery(t *testing.T
 	if _, statErr := os.Stat(removed); !os.IsNotExist(statErr) {
 		t.Fatalf("removed old path survived recovery: %v", statErr)
 	}
+}
+
+type blockingGenerationRoot struct {
+	secureRoot
+	once    sync.Once
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (r *blockingGenerationRoot) MkdirAll(name string, perm os.FileMode) error {
+	if strings.HasPrefix(name, projectionGenerationsDir+"/") {
+		r.once.Do(func() {
+			close(r.entered)
+			<-r.release
+		})
+	}
+	return r.secureRoot.MkdirAll(name, perm)
+}
+
+type lockAttemptRoot struct {
+	secureRoot
+	attempted chan struct{}
+	once      sync.Once
+}
+
+func (r *lockAttemptRoot) Lock(ctx context.Context, name string) (io.Closer, error) {
+	r.once.Do(func() { close(r.attempted) })
+	return r.secureRoot.Lock(ctx, name)
+}
+
+func TestMaterializeSerializesOverlappingWritersForOneTarget(t *testing.T) {
+	target := t.TempDir()
+	initialSkill, initialStore := atomicityFixture()
+	mustMaterialize(t, initialStore, target, "initial Materialize")
+
+	firstSkill := *initialSkill
+	updateAtomicityFixture(&firstSkill)
+	firstSkill.Content = "writer one\n"
+	firstStore := materializeStore{skills: &staticSkillStore{skills: []*skillFixture{&firstSkill}}}
+	secondSkill := firstSkill
+	secondSkill.Content = "writer two\n"
+	secondSkill.Files = []skillFixtureFile{{Path: "references/keep.md", Content: "writer two keep\n"}}
+	secondStore := materializeStore{skills: &staticSkillStore{skills: []*skillFixture{&secondSkill}}}
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- materializeWithRootOpener(t.Context(), firstStore, "WS", "lead", target, func(rootPath string) (secureRoot, error) {
+			root, err := openSecureRoot(rootPath)
+			if err != nil {
+				return nil, err
+			}
+			return &blockingGenerationRoot{secureRoot: root, entered: entered, release: release}, nil
+		})
+	}()
+	<-entered
+
+	attempted := make(chan struct{})
+	secondDone := make(chan error, 1)
+	go func() {
+		secondDone <- materializeWithRootOpener(t.Context(), secondStore, "WS", "lead", target, func(rootPath string) (secureRoot, error) {
+			root, err := openSecureRoot(rootPath)
+			if err != nil {
+				return nil, err
+			}
+			return &lockAttemptRoot{secureRoot: root, attempted: attempted}, nil
+		})
+	}()
+	<-attempted
+	select {
+	case err := <-secondDone:
+		t.Fatalf("second writer passed target lock while first was staging: %v", err)
+	default:
+	}
+	close(release)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first writer: %v", err)
+	}
+	if err := <-secondDone; err != nil {
+		t.Fatalf("second writer: %v", err)
+	}
+
+	want := "---\nname: alpha\ndescription: alpha\n---\nwriter two\n"
+	got, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "alpha", "SKILL.md"))
+	if err != nil || string(got) != want {
+		t.Fatalf("final serialized projection = %q, err=%v, want second writer", got, err)
+	}
+	assertNoRetainedGenerations(t, target)
 }
 
 func TestMaterializeFailuresNeverReplaceCurrentProjection(t *testing.T) {
@@ -415,11 +551,12 @@ func TestMaterializeFailuresNeverReplaceCurrentProjection(t *testing.T) {
 		counter = &failNthMutationRoot{secureRoot: root}
 		return counter, nil
 	}); err != nil {
-		t.Fatalf("count replacement operations: %v", err)
+		t.Fatalf("count generation update operations: %v", err)
 	}
 	if counter == nil || counter.mutations == 0 {
-		t.Fatal("replacement performed no injectable filesystem mutations")
+		t.Fatal("generation update performed no injectable filesystem mutations")
 	}
+	wantCommitted := snapshotMaterializedProjection(t, countTarget)
 
 	for failAt := 1; failAt <= counter.mutations; failAt++ {
 		t.Run(fmt.Sprintf("persistent-update-operation-%02d", failAt), func(t *testing.T) {
@@ -444,8 +581,12 @@ func TestMaterializeFailuresNeverReplaceCurrentProjection(t *testing.T) {
 			if injected == nil || !injected.faultTriggered {
 				t.Fatalf("fault handshake = %#v, want operation %d to fail", injected, failAt)
 			}
-			if got := snapshotMaterializedProjection(t, target); !reflect.DeepEqual(got, want) {
-				t.Fatalf("persistent failure changed the current projection:\n got: %#v\nwant: %#v", got, want)
+			wantAfterFailure := want
+			if injected.exchangeCommitted {
+				wantAfterFailure = wantCommitted
+			}
+			if got := snapshotMaterializedProjection(t, target); !reflect.DeepEqual(got, wantAfterFailure) {
+				t.Fatalf("persistent failure exposed a partial generation:\n got: %#v\nwant: %#v", got, wantAfterFailure)
 			}
 		})
 	}
@@ -488,6 +629,190 @@ func TestMaterializeFailuresNeverReplaceCurrentProjection(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestMaterializeBoundsAndReclaimsRecoveryGenerations(t *testing.T) {
+	countTarget := t.TempDir()
+	countSkill, countStore := atomicityFixture()
+	mustMaterialize(t, countStore, countTarget, "count initial Materialize")
+	updateAtomicityFixture(countSkill)
+	var counter *failNthMutationRoot
+	if err := materializeWithRootOpener(t.Context(), countStore, "WS", "lead", countTarget, func(rootPath string) (secureRoot, error) {
+		root, err := openSecureRoot(rootPath)
+		if err != nil {
+			return nil, err
+		}
+		counter = &failNthMutationRoot{secureRoot: root}
+		return counter, nil
+	}); err != nil {
+		t.Fatalf("count update operations: %v", err)
+	}
+	if counter.exchangeMutation == 0 || counter.exchangeMutation >= counter.mutations {
+		t.Fatalf("exchange mutation = %d of %d, want post-commit cleanup boundary", counter.exchangeMutation, counter.mutations)
+	}
+	assertNoRetainedGenerations(t, countTarget)
+
+	target := t.TempDir()
+	skill, st := atomicityFixture()
+	mustMaterialize(t, st, target, "initial Materialize")
+	updateAtomicityFixture(skill)
+	var injected *failNthMutationRoot
+	err := materializeWithRootOpener(t.Context(), st, "WS", "lead", target, func(rootPath string) (secureRoot, error) {
+		root, openErr := openSecureRoot(rootPath)
+		if openErr != nil {
+			return nil, openErr
+		}
+		injected = &failNthMutationRoot{secureRoot: root, failAt: counter.exchangeMutation + 1, persistent: true}
+		return injected, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "committed but remove displaced generation") || !injected.exchangeCommitted {
+		t.Fatalf("post-commit cleanup error = %v, injected=%#v", err, injected)
+	}
+	if got := retainedGenerationCount(t, target); got != 1 {
+		t.Fatalf("retained generations after cleanup failure = %d, want 1", got)
+	}
+	mustMaterialize(t, st, target, "cleanup recovery Materialize")
+	assertNoRetainedGenerations(t, target)
+
+	// A persistent failure while recovering the one abandoned generation must
+	// stop before allocating another, so repeated retries remain bounded.
+	for attempt := 1; attempt <= 3; attempt++ {
+		abandoned := filepath.Join(target, filepath.FromSlash(projectionGenerationsDir), fmt.Sprintf("%024x", attempt))
+		if err := os.MkdirAll(abandoned, 0o700); err != nil {
+			t.Fatalf("plant abandoned generation %d: %v", attempt, err)
+		}
+		if err := os.WriteFile(filepath.Join(abandoned, "leftover"), []byte("x"), 0o600); err != nil {
+			t.Fatalf("plant abandoned file %d: %v", attempt, err)
+		}
+		var retry *failNthMutationRoot
+		err := materializeWithRootOpener(t.Context(), st, "WS", "lead", target, func(rootPath string) (secureRoot, error) {
+			root, openErr := openSecureRoot(rootPath)
+			if openErr != nil {
+				return nil, openErr
+			}
+			retry = &failNthMutationRoot{secureRoot: root, failAt: 2, persistent: true}
+			return retry, nil
+		})
+		if err == nil {
+			t.Fatalf("persistent recovery attempt %d unexpectedly succeeded", attempt)
+		}
+		if got := retainedGenerationCount(t, target); got > 1 {
+			t.Fatalf("persistent recovery attempt %d retained %d generations, want at most 1", attempt, got)
+		}
+		mustMaterialize(t, st, target, fmt.Sprintf("recover abandoned generation %d", attempt))
+		assertNoRetainedGenerations(t, target)
+	}
+}
+
+func retainedGenerationCount(t *testing.T, target string) int {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(target, filepath.FromSlash(projectionGenerationsDir)))
+	if err != nil {
+		t.Fatalf("read retained generations: %v", err)
+	}
+	return len(entries)
+}
+
+func assertNoRetainedGenerations(t *testing.T, target string) {
+	t.Helper()
+	if got := retainedGenerationCount(t, target); got != 0 {
+		t.Fatalf("retained generations = %d, want 0", got)
+	}
+}
+
+func TestMaterializeRejectsOversizedSparseUnrecordedFileBeforeExchange(t *testing.T) {
+	target := t.TempDir()
+	skill, st := atomicityFixture()
+	mustMaterialize(t, st, target, "initial Materialize")
+	markerFile := filepath.Join(target, filepath.FromSlash(markerPath))
+	oldMarker, err := os.ReadFile(markerFile)
+	if err != nil {
+		t.Fatalf("read old marker: %v", err)
+	}
+	sparse := filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "alpha", "large.user")
+	file, err := os.OpenFile(sparse, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
+	if err != nil {
+		t.Fatalf("create sparse unrecorded file: %v", err)
+	}
+	if err := file.Truncate(maxPreservedProjectionFileBytes + 1); err != nil {
+		_ = file.Close()
+		t.Fatalf("size sparse unrecorded file: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close sparse unrecorded file: %v", err)
+	}
+	updateAtomicityFixture(skill)
+
+	err = materialize(t.Context(), st, "WS", "lead", target)
+	if err == nil || !strings.Contains(err.Error(), "exceeds clone limit") {
+		t.Fatalf("Materialize error = %v, want bounded clone refusal", err)
+	}
+	afterMarker, readErr := os.ReadFile(markerFile)
+	if readErr != nil || !bytes.Equal(afterMarker, oldMarker) {
+		t.Fatalf("marker changed after bounded clone refusal: content=%q err=%v", afterMarker, readErr)
+	}
+	info, statErr := os.Stat(sparse)
+	if statErr != nil || info.Size() != maxPreservedProjectionFileBytes+1 {
+		t.Fatalf("sparse unrecorded file changed: info=%#v err=%v", info, statErr)
+	}
+	assertNoRetainedGenerations(t, target)
+}
+
+type cloneLimitRoot struct {
+	secureRoot
+	files  map[string]int64
+	limits []int64
+}
+
+func (r *cloneLimitRoot) ReadDir(name string) ([]string, error) {
+	if name == path.Join("current", AgentsSkillsDir) {
+		names := make([]string, 0, len(r.files))
+		for file := range r.files {
+			names = append(names, path.Base(file))
+		}
+		return names, nil
+	}
+	if name == path.Join("current", ClaudeSkillsDir) {
+		return nil, nil
+	}
+	return nil, fs.ErrNotExist
+}
+
+func (r *cloneLimitRoot) Lstat(name string) (securePathInfo, error) {
+	size, ok := r.files[name]
+	if !ok {
+		return securePathInfo{}, fs.ErrNotExist
+	}
+	return securePathInfo{Mode: 0o644, Size: size}, nil
+}
+
+func (r *cloneLimitRoot) MkdirAll(string, os.FileMode) error { return nil }
+
+func (r *cloneLimitRoot) CopyFile(sourceName, _ string, _ os.FileMode, maxBytes int64) (int64, error) {
+	r.limits = append(r.limits, maxBytes)
+	size := r.files[sourceName]
+	if size > maxBytes {
+		return 0, fmt.Errorf("%s exceeds clone limit of %d bytes", sourceName, maxBytes)
+	}
+	return size, nil
+}
+
+func TestCloneGenerationEnforcesAggregateStreamingLimit(t *testing.T) {
+	root := &cloneLimitRoot{files: make(map[string]int64)}
+	fileSize := int64(maxPreservedProjectionFileBytes / 2)
+	for i := 0; i < 9; i++ {
+		name := path.Join("current", AgentsSkillsDir, fmt.Sprintf("unrecorded-%d", i))
+		root.files[name] = fileSize
+	}
+	err := cloneGeneration(root, "current", "staged")
+	if err == nil || !strings.Contains(err.Error(), "exceeds clone limit") {
+		t.Fatalf("cloneGeneration error = %v, want aggregate bound", err)
+	}
+	for _, limit := range root.limits {
+		if limit > maxPreservedProjectionFileBytes {
+			t.Fatalf("per-file clone limit = %d, want at most %d", limit, maxPreservedProjectionFileBytes)
+		}
 	}
 }
 
