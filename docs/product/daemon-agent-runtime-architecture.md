@@ -472,6 +472,98 @@ This supports:
 - Kubernetes rollout duplicate pods
 - failover after node loss
 
+## Daemon Operations
+
+### The Daemon-Owned Log
+
+The daemon writes its own log file and does not depend on the process manager
+to capture stderr. Every line is teed: stderr still carries it (so `pm2 logs`,
+`journalctl`, or a terminal keeps working) and a file the daemon opens itself
+carries it too.
+
+- Path: `<log_dir>/<workspace-id>/daemon.log`, where `log_dir` is the daemon's
+  `log_dir` setting (default `.loom/logs`, resolved relative to the project
+  directory when not absolute). The workspace-id segment is omitted when no
+  workspace is active.
+- The daemon re-opens the file by itself when a write fails, backing off from
+  5s to 60s. A file deleted or moved out from under a running daemon is
+  therefore recovered without a restart.
+- At 128 MiB the file is rolled aside to `daemon.log.1`. That is a single
+  rollover, not a rotation scheme: this log is a debugging aid, not an archive.
+- A log the daemon cannot open is never fatal. The sink degrades to
+  stderr-only, the startup prints
+  `Warning: daemon log sink degraded to stderr only: ...`, and the daemon keeps
+  supervising.
+
+This exists because a process manager's writer can break and stay broken. A
+transient ENOSPC broke pm2's stream to `~/.pm2/logs` and the daemon logged
+nothing for two hours while supervising normally. loomcli cannot repair another
+process's writer, so it stopped depending on it.
+
+### `log_heartbeat_sec`
+
+An idle fleet does no work and therefore logs nothing, which makes a silent
+`daemon.log` indistinguishable from a dead daemon. The health checker emits a
+periodic `daemon heartbeat` line so the file's mtime is a real liveness signal.
+
+```yaml
+daemon:
+  log_heartbeat_sec: 60   # default; 0 disables the heartbeat entirely
+```
+
+Lowering it makes the staleness signal sharper at the cost of log volume;
+setting it to `0` gives up mtime-based liveness, and the `daemon_logging`
+doctor check below will then flag a quiet daemon.
+
+### The `loom.daemon.degraded=` Node Label
+
+When the daemon detects that one of its own subsystems is degraded it records
+the condition on its node registration as a `loom.daemon.degraded=<kind>`
+label, one label per degraded subsystem:
+
+| Label | Meaning |
+| --- | --- |
+| `loom.daemon.degraded=log_write` | the daemon-owned log sink cannot write |
+| `loom.daemon.degraded=state_write` | `daemon-agents.json` cannot be written |
+
+The labels are the fleet-visible answer to "which part of this daemon is
+unhealthy", readable without shelling into the machine. Node labels are a full
+replace on every registration refresh, so a subsystem that recovers simply
+drops its label — there is no separate clear step.
+
+They are published on a handle that does not share a failure mode with the one
+that broke: during the 2026-08-31 incident the only report of the failure was a
+`Warning:` printed to a file descriptor that was itself the broken thing.
+
+### The `daemon_logging` Doctor Check
+
+`loom doctor` runs two daemon-liveness checks side by side, and the pair is
+what makes a diagnosis possible:
+
+| Check | Watches | Says |
+| --- | --- | --- |
+| `daemon_stuck` | `daemon-agents.json` mtime and agent `backoff_until` | the supervisor is wedged |
+| `daemon_logging` | `daemon.log` mtime | the daemon has stopped writing its log |
+
+`daemon_logging` skips entirely when no daemon is running (`loom_daemon` owns
+that message). Otherwise:
+
+- Log file missing → **WARN**. The running binary may predate the self-owned
+  log file; restart it.
+- Log unwritten for more than 2 minutes → **WARN** (two missed heartbeats).
+- Log unwritten for more than 5 minutes → **FAIL**, with the remediation:
+  check free disk space, inspect the node's `degraded:` labels, and restart
+  with `kill -TERM <pid> && loom daemon`.
+- When the log is stale but `daemon-agents.json` is current, the detail adds
+  `state file is current — the log path specifically is broken, not the
+  daemon`. That is the discriminator: the supervisor is healthy and only the
+  log path failed, which is precisely the case that went undiagnosed for two
+  hours.
+
+The thresholds are deliberately generous relative to the 60s heartbeat. A
+laptop resumed from suspend makes every mtime look ancient; a 5-minute FAIL
+window clears itself on the next heartbeat rather than latching.
+
 ## Acceptance Criteria
 
 - Starting two daemons for the same workspace cannot produce two active
