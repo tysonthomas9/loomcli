@@ -340,11 +340,12 @@ jobs:
         run: |
           set -euo pipefail
           docker run --detach \
+            --platform linux/amd64 \
             --name "$POSTGRES_CONTAINER" \
             --publish 127.0.0.1:5432:5432 \
             --env POSTGRES_PASSWORD \
             --env POSTGRES_DB=fleetdb \
-            postgres:16-alpine@sha256:738d1359df5aa0b6d50a9071e989c49fdd39152a2a805c6ff131bf5e2243e0b3
+            postgres:16-alpine@sha256:075f7ba66bc9b3ce7d6b8b635208ff61cd7cf1a67d71ec530eec5d7ae0cbe571
 
           ready=false
           for _ in $(seq 1 60); do
