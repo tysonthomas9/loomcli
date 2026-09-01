@@ -80,6 +80,40 @@ func TestSkillImportHappyPath(t *testing.T) {
 	}
 }
 
+func TestSkillImportConvergesWhenCreateLosesRace(t *testing.T) {
+	withoutAgentName(t)
+	st := memstore.New()
+	racing := &createAlreadyExistsAfterPersistSkillStore{SkillStore: st.Skills()}
+	withSkillCommandStore(t, storeWithSkills{Store: st, skills: racing})
+	directory := writeLocalSkillFixture(t, "racing-import", "Same desired Skill", "body\n")
+
+	out, err := executeSkillCommand(t, "", "import", directory)
+	if err != nil {
+		t.Fatalf("import after concurrent create: %v", err)
+	}
+	if !strings.Contains(out, "Updated skill TEST/workspace:racing-import") {
+		t.Fatalf("import output = %q", out)
+	}
+	sk, err := st.Skills().Get(t.Context(), testWorkspace, domain.WorkspaceSkillRef("racing-import"))
+	if err != nil {
+		t.Fatalf("get converged Skill: %v", err)
+	}
+	if sk.Description != "Same desired Skill" {
+		t.Fatalf("converged Skill description = %q", sk.Description)
+	}
+}
+
+type createAlreadyExistsAfterPersistSkillStore struct {
+	store.SkillStore
+}
+
+func (s *createAlreadyExistsAfterPersistSkillStore) Create(ctx context.Context, in store.SkillCreate) (*domain.Skill, error) {
+	if _, err := s.SkillStore.Create(ctx, in); err != nil {
+		return nil, err
+	}
+	return nil, domain.ErrAlreadyExists
+}
+
 func TestSkillImportPreservesCompleteDocumentUnlessNameOverride(t *testing.T) {
 	source := []byte("---\nname: metadata-tool\ndescription: Metadata\nlicense: MIT\nmetadata:\n  owner: test\n---\nbody\n")
 	for _, tt := range []struct {

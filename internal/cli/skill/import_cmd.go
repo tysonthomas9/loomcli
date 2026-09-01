@@ -83,6 +83,24 @@ func runSkillImport(cmd *cobra.Command, directory string, flags skillImportFlags
 				WorkspaceKey: ws, Ref: ref, Description: local.Description,
 				FileTreeRevision: revision, Source: source,
 			})
+			if errors.Is(err, domain.ErrAlreadyExists) {
+				// Another importer may create the same Skill after our initial
+				// read. Re-enter the ordinary guarded-update path so identical
+				// imports converge while provenance and CAS checks still apply.
+				created = false
+				if flags.force {
+					sk, _, err = h.Store.Skills().Upsert(ctx, store.SkillUpsert{Force: true, Skill: store.SkillCreate{
+						WorkspaceKey: ws, Ref: ref, Description: local.Description,
+						FileTreeRevision: revision, Source: source,
+					}})
+				} else if existing, err = h.Store.Skills().Get(ctx, ws, ref); err == nil {
+					description := local.Description
+					sk, err = h.Store.Skills().Update(ctx, ws, ref, store.SkillUpdate{
+						Description: &description, FileTreeRevision: &revision,
+						ExpectedFileTreeRevision: existing.FileTreeRevision, Source: source,
+					})
+				}
+			}
 		} else if flags.force {
 			// Fleet's privileged force-upsert route intentionally has no CAS
 			// form; it is the explicit operator override.

@@ -233,7 +233,8 @@ func (f *CorruptDownload) serveCorruptDownload(w http.ResponseWriter, _ *http.Re
 		http.Error(w, "invalid download grant", http.StatusBadGateway)
 		return
 	}
-	request.Header = http.Header(target.Headers).Clone()
+	request.Header = make(http.Header)
+	copyResponseHeaders(request.Header, http.Header(target.Headers))
 	if isFleetDownload {
 		copyResponseHeaders(request.Header, fleetAuth)
 	}
