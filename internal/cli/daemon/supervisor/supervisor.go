@@ -97,9 +97,7 @@ type Supervisor struct {
 	lastLivenessScanWall  time.Time
 	livenessFatalSignaled bool
 
-	// SpawnMetrics counts spawn outcomes per role for the serve-side collector.
-	// Nil is fine — every Recorder method is nil-safe — so tests that build a
-	// bare Supervisor need no wiring.
+	// SpawnMetrics counts spawn outcomes per role; nil-safe, so tests need no wiring.
 	SpawnMetrics *spawnmetrics.Recorder
 
 	Concurrency *ConcurrencyTracker
@@ -984,16 +982,6 @@ func (s *Supervisor) GetAgents() []SupervisedAgentStatus {
 		result[i].RemoteBranch = ap.ResolveRemoteBranch()
 	}
 	return result
-}
-
-// resolveRoleConfig looks up a role by name, supporting both built-in and custom roles.
-func (s *Supervisor) resolveRoleConfig(roleName string, agentIndex int) (config.RoleConfig, error) {
-	cfg := s.ConfigSnapshot()
-	rc, err := ResolveRoleConfigStatic(roleName, cfg, s.ProjectDir)
-	if err != nil {
-		return config.RoleConfig{}, fmt.Errorf("agent[%d]: %w", agentIndex, err)
-	}
-	return rc, nil
 }
 
 // ResolveDaemonPath resolves a path relative to projectDir, or returns as-is if absolute.

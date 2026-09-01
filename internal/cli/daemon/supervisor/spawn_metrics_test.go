@@ -245,7 +245,7 @@ func TestCreateAgentSession_StampsRole(t *testing.T) {
 
 // setWorkspaceRuntimeDir points cli.GetWorkspaceRuntimeDir at dir for the test,
 // resetting the process-wide cache on both sides so neither this test nor its
-// neighbours see a stale value.
+// neighbors see a stale value.
 func setWorkspaceRuntimeDir(t *testing.T, dir string) {
 	t.Helper()
 	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", dir)
