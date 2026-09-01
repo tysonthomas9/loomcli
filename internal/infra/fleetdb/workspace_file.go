@@ -182,7 +182,7 @@ func (s *workspaceFileStore) beginUpload(ctx context.Context, workspaceKey strin
 	if err := s.client.do(ctx, http.MethodPost, path, request, &grant); err != nil {
 		return nil, fmt.Errorf("begin workspace file upload: %w", err)
 	}
-	if err := validateWorkspaceFileGrant(&grant, http.MethodPut, time.Now()); err != nil {
+	if err := validateWorkspaceFileGrant(&grant, http.MethodPut, time.Now(), s.client.workspaceFileGrantMaxTTL); err != nil {
 		return nil, fmt.Errorf("begin workspace file upload: %w", err)
 	}
 	return &grant, nil
@@ -255,7 +255,7 @@ func (s *workspaceFileStore) resolveDownload(ctx context.Context, workspaceKey, 
 	if err := s.client.do(ctx, http.MethodPost, path, nil, &grant); err != nil {
 		return nil, fmt.Errorf("resolve workspace file download: %w", err)
 	}
-	if err := validateWorkspaceFileGrant(&grant, http.MethodGet, time.Now()); err != nil {
+	if err := validateWorkspaceFileGrant(&grant, http.MethodGet, time.Now(), s.client.workspaceFileGrantMaxTTL); err != nil {
 		return nil, fmt.Errorf("resolve workspace file download: %w", err)
 	}
 	return &grant, nil
@@ -286,7 +286,7 @@ func (c *Client) openWorkspaceFileDownload(ctx context.Context, grant *workspace
 }
 
 func (c *Client) workspaceFileTransfer(ctx context.Context, grant *workspaceFileTransferGrantWire, body io.Reader) (*http.Response, bool, error) {
-	if err := validateWorkspaceFileGrant(grant, "", time.Now()); err != nil {
+	if err := validateWorkspaceFileGrant(grant, "", time.Now(), c.workspaceFileGrantMaxTTL); err != nil {
 		return nil, false, err
 	}
 	target := grant.URL
@@ -330,17 +330,13 @@ func workspaceFileTransferStatusError(method, target string, local bool, resp *h
 	if local {
 		return classifyHTTPError(method, target, resp.StatusCode, body)
 	}
-	message := strings.TrimSpace(string(body))
-	if len(message) > 200 {
-		message = message[:200] + "..."
-	}
-	if message != "" {
-		return fmt.Errorf("workspace file provider transfer %s %s: HTTP %d: %s", method, target, resp.StatusCode, message)
-	}
+	// Provider response bodies are untrusted and may echo signed header or
+	// query values. Keep external transfer errors deliberately body-free so
+	// callers can safely log them without disclosing capabilities.
 	return fmt.Errorf("workspace file provider transfer %s %s: HTTP %d", method, target, resp.StatusCode)
 }
 
-func validateWorkspaceFileGrant(grant *workspaceFileTransferGrantWire, expectedMethod string, now time.Time) error {
+func validateWorkspaceFileGrant(grant *workspaceFileTransferGrantWire, expectedMethod string, now time.Time, maxTTL time.Duration) error {
 	if grant == nil {
 		return fmt.Errorf("workspace file transfer grant is required")
 	}
@@ -350,8 +346,8 @@ func validateWorkspaceFileGrant(grant *workspaceFileTransferGrantWire, expectedM
 	if expectedMethod != "" && grant.Method != expectedMethod {
 		return fmt.Errorf("workspace file transfer grant method is %q, want %q", grant.Method, expectedMethod)
 	}
-	if grant.ExpiresAt.IsZero() || !grant.ExpiresAt.After(now) {
-		return fmt.Errorf("workspace file transfer grant is expired")
+	if err := validateWorkspaceFileGrantExpiry(grant.ExpiresAt, now, maxTTL); err != nil {
+		return err
 	}
 	parsed, err := url.Parse(grant.URL)
 	if err != nil || parsed.User != nil || parsed.Fragment != "" {
@@ -373,6 +369,16 @@ func validateWorkspaceFileGrant(grant *workspaceFileTransferGrantWire, expectedM
 		return nil
 	}
 	return fmt.Errorf("workspace file transfer grant URL must use HTTPS (HTTP is allowed only for loopback test providers)")
+}
+
+func validateWorkspaceFileGrantExpiry(expiresAt, now time.Time, maxTTL time.Duration) error {
+	if expiresAt.IsZero() || !expiresAt.After(now) {
+		return fmt.Errorf("workspace file transfer grant is expired")
+	}
+	if maxTTL <= 0 || expiresAt.After(now.Add(maxTTL)) {
+		return fmt.Errorf("workspace file transfer grant expiry exceeds maximum TTL %s", maxTTL)
+	}
+	return nil
 }
 
 func isLoopbackWorkspaceFileHost(host string) bool {

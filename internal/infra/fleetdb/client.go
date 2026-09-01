@@ -24,6 +24,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/fleethttp"
@@ -36,6 +37,8 @@ import (
 // fleet-db ever sends a malformed/huge body. Workspace metadata is
 // kilobytes; this is generous.
 const maxResponseBody = 16 << 20
+
+const defaultWorkspaceFileGrantMaxTTL = 20 * time.Minute
 
 // Config holds connection parameters for the fleet-db HTTP client.
 type Config struct {
@@ -59,6 +62,10 @@ type Config struct {
 	// with default settings is used. Production callers should inject a
 	// transport-pooled client.
 	HTTPClient *http.Client
+
+	// WorkspaceFileGrantMaxTTL bounds transfer capabilities accepted from
+	// Fleet. Zero uses the 20-minute default.
+	WorkspaceFileGrantMaxTTL time.Duration
 }
 
 // Client is the fleet-db HTTP client. Implements store.Store.
@@ -66,10 +73,11 @@ type Client struct {
 	baseURL string
 	http    *http.Client
 
-	mu        sync.RWMutex
-	apiKey    string
-	actor     string
-	authToken string
+	mu                       sync.RWMutex
+	apiKey                   string
+	actor                    string
+	authToken                string
+	workspaceFileGrantMaxTTL time.Duration
 
 	workspaces *workspaceStore
 	repos      *repoStore
@@ -116,6 +124,13 @@ func New(cfg Config) (*Client, error) {
 	if cfg.BaseURL == "" {
 		return nil, fmt.Errorf("fleetdb: BaseURL required")
 	}
+	if cfg.WorkspaceFileGrantMaxTTL < 0 {
+		return nil, fmt.Errorf("fleetdb: WorkspaceFileGrantMaxTTL must not be negative")
+	}
+	grantMaxTTL := cfg.WorkspaceFileGrantMaxTTL
+	if grantMaxTTL == 0 {
+		grantMaxTTL = defaultWorkspaceFileGrantMaxTTL
+	}
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {
 		httpClient = &http.Client{
@@ -123,11 +138,12 @@ func New(cfg Config) (*Client, error) {
 		}
 	}
 	c := &Client{
-		baseURL:   strings.TrimRight(cfg.BaseURL, "/"),
-		http:      httpClient,
-		apiKey:    cfg.APIKey,
-		actor:     cfg.Actor,
-		authToken: cfg.AuthToken,
+		baseURL:                  strings.TrimRight(cfg.BaseURL, "/"),
+		http:                     httpClient,
+		apiKey:                   cfg.APIKey,
+		actor:                    cfg.Actor,
+		authToken:                cfg.AuthToken,
+		workspaceFileGrantMaxTTL: grantMaxTTL,
 	}
 	c.workspaces = &workspaceStore{client: c}
 	c.repos = &repoStore{client: c}

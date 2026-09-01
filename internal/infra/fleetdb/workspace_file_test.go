@@ -306,7 +306,7 @@ func TestWorkspaceFileStorePendingWaitHonorsCancellationAndDeadline(t *testing.T
 
 func TestWorkspaceFileStoreSupportsAbsoluteProviderGrantsWithoutCredentialLeak(t *testing.T) {
 	t.Parallel()
-	registry.MarkEvidence(t, 38, 39)
+	registry.MarkEvidence(t, 38, 39, 45)
 
 	content := []byte{0x50, 0x4b, 0, 0xff}
 	digest := workspaceFileTestDigest(content)
@@ -326,6 +326,10 @@ func TestWorkspaceFileStoreSupportsAbsoluteProviderGrantsWithoutCredentialLeak(t
 		}
 		if got := r.Header.Get("X-Capability"); got != "provider-only" {
 			t.Errorf("provider X-Capability = %q", got)
+		}
+		if r.URL.Path == "/fail" {
+			http.Error(w, "provider echoed provider-only and query-secret", http.StatusServiceUnavailable)
+			return
 		}
 		switch r.Method {
 		case http.MethodPut:
@@ -382,6 +386,16 @@ func TestWorkspaceFileStoreSupportsAbsoluteProviderGrantsWithoutCredentialLeak(t
 	}
 	if !bytes.Equal(downloaded, content) {
 		t.Fatalf("downloaded = %v, want %v", downloaded, content)
+	}
+	err = client.executeWorkspaceFileTransfer(t.Context(), &workspaceFileTransferGrantWire{
+		Method: http.MethodPut, URL: provider.URL + "/fail?X-Signature=query-secret",
+		Headers: map[string][]string{"X-Capability": {"provider-only"}}, ExpiresAt: time.Now().Add(time.Minute),
+	}, bytes.NewReader(content))
+	if err == nil || !strings.Contains(err.Error(), "HTTP 503") {
+		t.Fatalf("provider failure error = %v, want HTTP 503", err)
+	}
+	if strings.Contains(err.Error(), "provider-only") || strings.Contains(err.Error(), "query-secret") {
+		t.Fatalf("provider failure leaked signed values: %v", err)
 	}
 }
 
@@ -518,10 +532,10 @@ func TestWorkspaceFileStoreUploadFailurePublishesNoTree(t *testing.T) {
 
 func TestWorkspaceFileStoreRejectsMissingWireResponses(t *testing.T) {
 	t.Parallel()
-	if err := validateWorkspaceFileGrant(nil, http.MethodGet, time.Now()); err == nil {
+	if err := validateWorkspaceFileGrant(nil, http.MethodGet, time.Now(), defaultWorkspaceFileGrantMaxTTL); err == nil {
 		t.Fatal("nil grant accepted")
 	}
-	if err := validateWorkspaceFileGrant(&workspaceFileTransferGrantWire{}, http.MethodGet, time.Now()); err == nil {
+	if err := validateWorkspaceFileGrant(&workspaceFileTransferGrantWire{}, http.MethodGet, time.Now(), defaultWorkspaceFileGrantMaxTTL); err == nil {
 		t.Fatal("empty grant accepted")
 	}
 	if _, err := workspaceFileTreeFromWire(nil); err == nil {
@@ -731,13 +745,37 @@ func TestWorkspaceFileStoreRejectsUnsafeUploadGrantsBeforeTransfer(t *testing.T)
 	}
 	if err := validateWorkspaceFileGrant(&workspaceFileTransferGrantWire{
 		Method: http.MethodPut, URL: "https://objects.example/download", ExpiresAt: time.Now().Add(time.Minute),
-	}, http.MethodGet, time.Now()); err == nil || !strings.Contains(err.Error(), "method") {
+	}, http.MethodGet, time.Now(), defaultWorkspaceFileGrantMaxTTL); err == nil || !strings.Contains(err.Error(), "method") {
 		t.Fatalf("download grant accepted PUT: %v", err)
 	}
 	if err := validateWorkspaceFileGrant(&workspaceFileTransferGrantWire{
 		Method: http.MethodPut, URL: "http://127.0.0.1:9000/upload", ExpiresAt: time.Now().Add(time.Minute),
-	}, http.MethodPut, time.Now()); err != nil {
+	}, http.MethodPut, time.Now(), defaultWorkspaceFileGrantMaxTTL); err != nil {
 		t.Fatalf("explicit loopback HTTP grant rejected: %v", err)
+	}
+}
+
+func TestWorkspaceFileGrantExpiryHonorsConfiguredMaximum(t *testing.T) {
+	registry.MarkEvidence(t, 43)
+
+	maxTTL := 2 * time.Minute
+	client, err := New(Config{BaseURL: "https://fleet.example", Actor: "alice", WorkspaceFileGrantMaxTTL: maxTTL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.workspaceFileGrantMaxTTL != maxTTL {
+		t.Fatalf("configured grant max TTL = %s, want %s", client.workspaceFileGrantMaxTTL, maxTTL)
+	}
+	now := time.Date(2026, time.August, 31, 12, 0, 0, 0, time.UTC)
+	grant := &workspaceFileTransferGrantWire{
+		Method: http.MethodPut, URL: "https://objects.example/upload", ExpiresAt: now.Add(maxTTL),
+	}
+	if err := validateWorkspaceFileGrant(grant, http.MethodPut, now, client.workspaceFileGrantMaxTTL); err != nil {
+		t.Fatalf("grant at exact configured maximum rejected: %v", err)
+	}
+	grant.ExpiresAt = now.Add(maxTTL + time.Nanosecond)
+	if err := validateWorkspaceFileGrant(grant, http.MethodPut, now, client.workspaceFileGrantMaxTTL); err == nil || !strings.Contains(err.Error(), "maximum TTL") {
+		t.Fatalf("grant above configured maximum error = %v, want maximum TTL rejection", err)
 	}
 }
 

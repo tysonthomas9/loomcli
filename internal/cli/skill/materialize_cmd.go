@@ -50,6 +50,9 @@ func runSkillMaterialize(cmd *cobra.Command) error {
 	defer cancel()
 
 	if err := materializeCurrentWorkdir(ctx); err != nil {
+		if skillmat.IsStoreUnavailable(err) {
+			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Warning: Fleet skill storage is unavailable; the existing Skill projection was preserved.")
+		}
 		return cli.NewCommandExitError(2, fmt.Errorf("skill materialization was refused: %w", err))
 	}
 	return nil

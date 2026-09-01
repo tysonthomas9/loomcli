@@ -44,7 +44,7 @@ func TestWorkspaceFilePathsRejectEveryReservedDeviceName(t *testing.T) {
 }
 
 func TestWorkspaceFileIdentityLiteralVectors(t *testing.T) {
-	registry.MarkEvidence(t, 20)
+	registry.MarkEvidence(t, 20, 21)
 	base := domain.WorkspaceFile{
 		Path:        "docs/a.md",
 		BlobRef:     "blob_shared_bytes",
@@ -54,9 +54,10 @@ func TestWorkspaceFileIdentityLiteralVectors(t *testing.T) {
 	}
 	differentPath := base
 	differentPath.Path = "docs/b.md"
-	differentMetadata := base
-	differentMetadata.MediaType = "application/octet-stream"
-	differentMetadata.Executable = true
+	differentMediaType := base
+	differentMediaType.MediaType = "application/octet-stream"
+	differentExecutable := base
+	differentExecutable.Executable = true
 
 	vectors := []struct {
 		name     string
@@ -66,7 +67,8 @@ func TestWorkspaceFileIdentityLiteralVectors(t *testing.T) {
 	}{
 		{name: "base", file: base, wantFile: "wff1_5Q9_dQLOlcMLfDUGg1QIfg4oyPvTDOfb5Wr3wEtQpjs", wantTree: "wft1_TTaFMFgXKcvIV70-SCy0eroN5AMKfKPY9Z_oVC7frHA"},
 		{name: "different path", file: differentPath, wantFile: "wff1_5Q9_dQLOlcMLfDUGg1QIfg4oyPvTDOfb5Wr3wEtQpjs", wantTree: "wft1_ELo5_RprP5-qsh6pASi3iXIeMnf-1V_uxvZTCAh7KnU"},
-		{name: "different metadata", file: differentMetadata, wantFile: "wff1_gqg9dxzN4jgFEo3JNnxB7jUFJWils2eSvceauJRHm-M", wantTree: "wft1_B77I1rJfsdfibV0Z1Q2ohdpoF8egbcK0XoJZYOURu-Q"},
+		{name: "different media type", file: differentMediaType, wantFile: "wff1_iAqwAUgevf7ENNbJyYasdjAEFStKQ1lauCHl-Woby_s", wantTree: "wft1_E4WFBoFDRz6MPcVC_TXHPDD1r0mdYA2xg4BLQUc3SRI"},
+		{name: "different executable", file: differentExecutable, wantFile: "wff1_0Wc-Sxb2tdF73h-2S8dYZuAvnoO093un21v891nLF3E", wantTree: "wft1_2VB6XY10ubbu_ek6osLAafdeYrqmAok0rFfsyXbdZfQ"},
 	}
 	for _, vector := range vectors {
 		t.Run(vector.name, func(t *testing.T) {
@@ -84,10 +86,15 @@ func TestWorkspaceFileIdentityLiteralVectors(t *testing.T) {
 	if got, other := domain.WorkspaceFileTreeRevision([]domain.WorkspaceFile{base}), domain.WorkspaceFileTreeRevision([]domain.WorkspaceFile{differentPath}); got == other {
 		t.Fatalf("different paths produced the same tree revision %q", got)
 	}
-	if got, other := domain.WorkspaceFileRevision(base), domain.WorkspaceFileRevision(differentMetadata); got == other {
-		t.Fatalf("different materialization metadata produced the same file revision %q", got)
-	}
-	if got, other := domain.WorkspaceFileTreeRevision([]domain.WorkspaceFile{base}), domain.WorkspaceFileTreeRevision([]domain.WorkspaceFile{differentMetadata}); got == other {
-		t.Fatalf("different materialization metadata produced the same tree revision %q", got)
+	for _, changed := range []domain.WorkspaceFile{differentMediaType, differentExecutable} {
+		if changed.ContentHash != base.ContentHash || changed.BlobRef != base.BlobRef {
+			t.Fatalf("metadata-only vector changed byte identity: base=%#v changed=%#v", base, changed)
+		}
+		if got, other := domain.WorkspaceFileRevision(base), domain.WorkspaceFileRevision(changed); got == other {
+			t.Fatalf("metadata-only change produced the same file revision %q", got)
+		}
+		if got, other := domain.WorkspaceFileTreeRevision([]domain.WorkspaceFile{base}), domain.WorkspaceFileTreeRevision([]domain.WorkspaceFile{changed}); got == other {
+			t.Fatalf("metadata-only change produced the same tree revision %q", got)
+		}
 	}
 }

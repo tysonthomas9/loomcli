@@ -23,6 +23,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/test/skills-e2e/registry"
 )
 
 type skillFixtureFile struct {
@@ -1415,6 +1416,7 @@ func TestMaterializeWorkspaceFileOutageLeavesProjectionUntouched(t *testing.T) {
 }
 
 func TestMaterializeWorkspaceFileIntegrityAndNotFoundRemainFatal(t *testing.T) {
+	registry.MarkEvidence(t, 71)
 	tests := []struct {
 		name  string
 		files func(store.WorkspaceFileStore) store.WorkspaceFileStore
@@ -1437,19 +1439,25 @@ func TestMaterializeWorkspaceFileIntegrityAndNotFoundRemainFatal(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			target := t.TempDir()
 			skills := &staticSkillStore{skills: []*skillFixture{{
-				Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body\n",
+				Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "prior\n",
 			}}}
-			if _, err := skills.List(t.Context(), "WS", store.SkillFilter{}); err != nil {
-				t.Fatalf("publish fixture tree: %v", err)
-			}
+			mustMaterialize(t, materializeStore{skills: skills}, target, "initial Materialize")
+			before := snapshotMaterializedProjection(t, target)
+
+			skills.skills[0].Content = "replacement\n"
 			st := materializeStore{skills: skills, files: tt.files(skills.workspaceFiles())}
-			err := materialize(t.Context(), st, "WS", "lead", t.TempDir())
+			err := materialize(t.Context(), st, "WS", "lead", target)
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("Materialize error = %v, want %v", err, tt.want)
 			}
 			if IsStoreUnavailable(err) {
 				t.Fatalf("fatal workspace-file error classified as unavailable: %v", err)
+			}
+			after := snapshotMaterializedProjection(t, target)
+			if !reflect.DeepEqual(after, before) {
+				t.Fatalf("projection changed after download failure:\nbefore=%#v\nafter=%#v", before, after)
 			}
 		})
 	}
