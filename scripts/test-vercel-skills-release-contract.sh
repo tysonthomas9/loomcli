@@ -24,6 +24,19 @@ require_fixed() {
   grep -Fq -- "$text" "$file" || fail "$file is missing: $text"
 }
 
+require_section_fixed() {
+  file="$1"
+  start="$2"
+  end="$3"
+  text="$4"
+  awk -v start="$start" -v end="$end" -v text="$text" '
+    index($0, start) { in_section = 1 }
+    in_section && index($0, text) { found = 1 }
+    in_section && index($0, end) { exit(found ? 0 : 1) }
+    END { if (!found) exit 1 }
+  ' "$file" || fail "$file section $start is missing: $text"
+}
+
 bash -n "$compat"
 
 # Releases deliberately validate Loom against FleetDB main and the exact corpus
@@ -130,11 +143,17 @@ require_fixed "$workflow" './internal/storage ./internal/storage/blob ./internal
 require_fixed "$workflow" './internal/domain ./internal/cli/skill ./internal/cireport ./internal/infra/fleetdb ./internal/skillmat ./test/skills-e2e'
 require_fixed "$workflow" 'RedisWorkspaceFileTreeIsAtomicallyVisibleOrAbsent'
 require_fixed "$workflow" 'PostgresWorkspaceFileTreeIsAtomicallyVisibleOrAbsent'
-require_fixed "$workflow" 'TestWorkspaceFileDirectDownloadRealMinIOHasZeroFleetProviderBandwidth'
+require_section_fixed "$workflow" 'proof:' 'name: Checkout pinned Vercel Agent Skills corpus' 'fetch-depth: 0'
+require_section_fixed "$workflow" 'name: Extract Fleet Redis evidence' 'name: Extract Fleet PostgreSQL evidence' './internal/workspaceobjects'
+require_section_fixed "$workflow" 'name: Extract Fleet Redis evidence' 'name: Extract Fleet PostgreSQL evidence' 'TestTypedWorkspaceObjectRootsPersistInRealRedis'
+require_section_fixed "$workflow" 'name: Extract Fleet PostgreSQL evidence' 'name: Extract Fleet MinIO evidence' './internal/workspaceobjects'
+require_section_fixed "$workflow" 'name: Extract Fleet PostgreSQL evidence' 'name: Extract Fleet MinIO evidence' 'TestPostgresWorkspaceObjectRetentionParity'
+require_section_fixed "$workflow" 'name: Extract Fleet MinIO evidence' 'name: Upload v2 edge evidence shards' 'TestWorkspaceObjectRetentionAndPublicationFenceRealProvider'
+require_section_fixed "$workflow" 'name: Extract Fleet MinIO evidence' 'name: Upload v2 edge evidence shards' 'TestWorkspaceFileDirectDownloadRealProviderHasZeroFleetProviderBandwidth'
+require_section_fixed "$workflow" 'name: Extract Fleet MinIO evidence' 'name: Upload v2 edge evidence shards' 'TestWorkspaceObjectScrubRealProviderCorruptionQuarantinesTree'
 require_fixed "$workflow" 'TestRealMinIOLifecycleIsLongerThanFleetRootsAndGrace'
 require_fixed "$workflow" 'TestMinIOVersioningRemainsRecoveryMetadataNotSkillIdentity'
 require_fixed "$workflow" 'TestWorkspaceObjectOperationsRealProvider'
-require_fixed "$workflow" 'TestWorkspaceObjectScrubRealMinIOCorruptionQuarantinesTree'
 require_fixed "$workflow" 'TestOperatorCommandRealProviderPlansAndCollectsInterruptedUpload'
 require_fixed "$workflow" 'TestWorkspaceFileS3SignedUploadBindsLengthTypeAndChecksum|TestS3ProviderUsesWorkspaceContentAddressedKey'
 require_fixed "$workflow" 'name: Exact 1-95 edge-case readiness'
@@ -145,6 +164,16 @@ require_fixed "$workflow" 'aws --endpoint-url https://storage.googleapis.com s3a
 require_fixed "$workflow" 'gcs-created-objects.json'
 require_fixed "$workflow" 'SKILLS_E2E_PROVIDER: gcs'
 require_fixed "$workflow" 'TestWorkspaceFile(APIConformance_S3Compatible|S3SignedUploadRejectsTamperingAndWrongMethod|S3SignedUploadExpires)'
+require_section_fixed "$workflow" 'name: Extract Fleet GCS evidence' 'name: Upload GCS v2 edge evidence shards' 'go test -json -tags integration'
+require_section_fixed "$workflow" 'name: Extract Fleet GCS evidence' 'name: Upload GCS v2 edge evidence shards' './internal/service'
+require_section_fixed "$workflow" 'name: Extract Fleet GCS evidence' 'name: Upload GCS v2 edge evidence shards' './internal/workspacefileconfig'
+require_section_fixed "$workflow" 'name: Extract Fleet GCS evidence' 'name: Upload GCS v2 edge evidence shards' './internal/workspaceobjects'
+require_section_fixed "$workflow" 'name: Extract Fleet GCS evidence' 'name: Upload GCS v2 edge evidence shards' 'TestWorkspaceFileGCSOutageBeforeVerificationPublishesNoEvent'
+require_section_fixed "$workflow" 'name: Extract Fleet GCS evidence' 'name: Upload GCS v2 edge evidence shards' 'TestWorkspaceObjectOperationsRealProvider'
+require_section_fixed "$workflow" 'name: Extract Fleet GCS evidence' 'name: Upload GCS v2 edge evidence shards' 'TestRealGCSLifecycleIsLongerThanFleetRootsAndGrace'
+require_section_fixed "$workflow" 'name: Extract Fleet GCS evidence' 'name: Upload GCS v2 edge evidence shards' 'TestGCSVersioningRemainsRecoveryMetadataNotSkillIdentity'
+require_section_fixed "$workflow" 'name: Extract Fleet GCS evidence' 'name: Upload GCS v2 edge evidence shards' 'TestWorkspaceFileDirectDownloadRealProviderHasZeroFleetProviderBandwidth'
+require_section_fixed "$workflow" 'name: Extract Fleet GCS evidence' 'name: Upload GCS v2 edge evidence shards' 'TestWorkspaceObjectScrubRealProviderCorruptionQuarantinesTree'
 require_fixed "$skills_e2e_provider" 'func TestGCSPresignedRoundTrip'
 require_fixed "$skills_e2e_provider" 'gcsPresignedRoundTrip.Covers(t)'
 require_fixed "$skills_e2e_revisions" 'func TestCompatibilityRevisionManifestMatchesProviderRun'

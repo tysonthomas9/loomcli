@@ -205,6 +205,10 @@ jobs:
           path: fleet-db
           token: ${{ secrets.FLEET_DB_TOKEN || github.token }}
           persist-credentials: false
+          # Fleet's additive-release proof compares the staged revision with
+          # its parent. A shallow checkout makes that real compatibility test
+          # fail before it can inspect the release boundary.
+          fetch-depth: 0
 
       - name: Checkout pinned Vercel Agent Skills corpus
         uses: actions/checkout@v4
@@ -491,7 +495,8 @@ jobs:
           set -euo pipefail
           export GOCACHE="$RUNNER_TEMP/fleet-edge-redis-cache"
           go test -json -tags integration ./internal/storage/integrationtest ./internal/projection \
-            -run '^Test(RedisSkillDescriptionAndTreeCASIsAtomic|RedisWorkspaceFilePublication.*|RedisWorkspaceFileTreeIsAtomicallyVisibleOrAbsent|WorkspaceFileProjectionRestartRetriesFailedEvent)$' |
+            ./internal/workspaceobjects \
+            -run '^(TestRedisSkillDescriptionAndTreeCASIsAtomic|TestRedisWorkspaceFilePublication.*|TestRedisWorkspaceFileTreeIsAtomicallyVisibleOrAbsent|TestWorkspaceFileProjectionRestartRetriesFailedEvent|TestTypedWorkspaceObjectRootsPersistInRealRedis)$' |
             go run ./cmd/edge-case-coverage -revision "$FLEET_SHA" \
               > "$GITHUB_WORKSPACE/fleet-redis-evidence-v2.json"
 
@@ -506,7 +511,8 @@ jobs:
           set -euo pipefail
           export GOCACHE="$RUNNER_TEMP/fleet-edge-postgres-cache"
           go test -json -tags integration ./internal/storage/postgres ./internal/projection \
-            -run '^Test(PostgresStorage_Contract|PostgresSkillDescriptionAndTreeCASIsAtomic|PostgresWorkspaceFilePublication.*|PostgresWorkspaceFileTreeIsAtomicallyVisibleOrAbsent|PostgresWorkspaceFileProjectionRestartRetriesFailedEvent)$' |
+            ./internal/workspaceobjects \
+            -run '^(TestPostgresStorage_Contract|TestPostgresSkillDescriptionAndTreeCASIsAtomic|TestPostgresWorkspaceFilePublication.*|TestPostgresWorkspaceFileTreeIsAtomicallyVisibleOrAbsent|TestPostgresWorkspaceFileProjectionRestartRetriesFailedEvent|TestPostgresWorkspaceObjectRetentionParity)$' |
             go run ./cmd/edge-case-coverage -revision "$FLEET_SHA" \
               > "$GITHUB_WORKSPACE/fleet-postgres-evidence-v2.json"
 
@@ -522,7 +528,7 @@ jobs:
           export GOCACHE="$RUNNER_TEMP/fleet-edge-minio-cache"
           go test -json -tags integration ./internal/api ./internal/storage/blob ./internal/service \
             ./internal/workspacefileconfig ./internal/workspaceobjects ./cmd/fleet-workspace-objects \
-            -run '^(TestWorkspaceFileS3SignedUploadBindsLengthTypeAndChecksum|TestWorkspaceFileMinIOOutageBeforeVerificationPublishesNoEvent|TestS3ProviderUsesWorkspaceContentAddressedKey|TestMinIOVersioningRemainsRecoveryMetadataNotSkillIdentity|TestWorkspaceFileDirectDownloadRealMinIOHasZeroFleetProviderBandwidth|TestRealMinIOLifecycleIsLongerThanFleetRootsAndGrace|TestWorkspaceObjectOperationsRealProvider|TestWorkspaceObjectScrubRealMinIOCorruptionQuarantinesTree|TestOperatorCommandRealProviderPlansAndCollectsInterruptedUpload)$' |
+            -run '^(TestWorkspaceFileS3SignedUploadBindsLengthTypeAndChecksum|TestWorkspaceFileMinIOOutageBeforeVerificationPublishesNoEvent|TestS3ProviderUsesWorkspaceContentAddressedKey|TestMinIOVersioningRemainsRecoveryMetadataNotSkillIdentity|TestWorkspaceFileDirectDownloadRealProviderHasZeroFleetProviderBandwidth|TestRealMinIOLifecycleIsLongerThanFleetRootsAndGrace|TestWorkspaceObjectOperationsRealProvider|TestWorkspaceObjectScrubRealProviderCorruptionQuarantinesTree|TestWorkspaceObjectRetentionAndPublicationFenceRealProvider|TestOperatorCommandRealProviderPlansAndCollectsInterruptedUpload)$' |
             go run ./cmd/edge-case-coverage -revision "$FLEET_SHA" \
               > "$GITHUB_WORKSPACE/fleet-minio-evidence-v2.json"
 
@@ -781,8 +787,9 @@ jobs:
         run: |
           set -euo pipefail
           export GOCACHE="$RUNNER_TEMP/fleet-edge-gcs-cache"
-          go test -json ./internal/api ./internal/storage/blob \
-            -run '^(TestWorkspaceFileS3SignedUploadBindsLengthTypeAndChecksum|TestS3ProviderUsesWorkspaceContentAddressedKey)$' |
+          go test -json -tags integration ./internal/api ./internal/storage/blob ./internal/service \
+            ./internal/workspacefileconfig ./internal/workspaceobjects \
+            -run '^(TestWorkspaceFileS3SignedUploadBindsLengthTypeAndChecksum|TestS3ProviderUsesWorkspaceContentAddressedKey|TestWorkspaceFileGCSOutageBeforeVerificationPublishesNoEvent|TestWorkspaceObjectOperationsRealProvider|TestRealGCSLifecycleIsLongerThanFleetRootsAndGrace|TestGCSVersioningRemainsRecoveryMetadataNotSkillIdentity|TestWorkspaceFileDirectDownloadRealProviderHasZeroFleetProviderBandwidth|TestWorkspaceObjectScrubRealProviderCorruptionQuarantinesTree)$' |
             go run ./cmd/edge-case-coverage -revision "$FLEET_SHA" \
               > "$GITHUB_WORKSPACE/fleet-gcs-evidence-v2.json"
 
