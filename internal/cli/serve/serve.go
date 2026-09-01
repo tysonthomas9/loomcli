@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
@@ -29,6 +30,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/usagecmd"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/metrics/agentmetrics"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	webuiapp "github.com/tysonthomas9/loomcli/internal/webui/app"
@@ -218,6 +220,13 @@ func runServe(cmd *cobra.Command, args []string) {
 		staleDetectorHandler = daemonwire.InitStaleDetectorHandler(ctx, serveRedisAddr, serveRedisPassword)
 	}
 	initUsageStore()
+	// Spawn and session metrics are gathered from the default registry by
+	// webui.PromHandler(), so registering here is all the wiring /metrics
+	// needs. Best-effort: a metrics collector must not keep serve from
+	// starting.
+	if err := registerAgentMetrics(cli.GetWorkspaceRuntimeDir()); err != nil {
+		slog.Warn("agent metrics collector not registered", "error", err)
+	}
 
 	// Open a fleet-db-backed store handle for the default fleet-db path.
 	storeHandle, storeErr := openServeStore(ctx, fleetState)
@@ -574,6 +583,26 @@ func initUsageStore() {
 		dir = "."
 	}
 	usageHandler = usagecmd.HandleUsage(usagecmd.InitStore(dir))
+}
+
+// registerAgentMetrics registers the spawn/session collector on the default
+// Prometheus registry for runtimeDir — the same runtime directory that reaches
+// SessionRuntimeDir below, and the same one the daemon resolves for its
+// snapshot, so one resolution serves both processes.
+//
+// An AlreadyRegisteredError is success, not failure: serve is started
+// in-process by more than one test, and MustRegister would panic the second
+// time.
+func registerAgentMetrics(runtimeDir string) error {
+	err := prometheus.Register(agentmetrics.New(runtimeDir))
+	if err == nil {
+		return nil
+	}
+	var already prometheus.AlreadyRegisteredError
+	if errors.As(err, &already) {
+		return nil
+	}
+	return err
 }
 
 func buildMonitorHandlers(collectDataFn metricscmd.CollectDataFn, staleDetectorHandler http.HandlerFunc, st store.Store, issueBackendFn metricscmd.IssueBackendFn, defaultWorkspace string) webui.MonitorHandlers {
