@@ -786,6 +786,91 @@ describe("useTerminalMetadata", () => {
       expect(result.current.tabs[0].label).toBe("WS2");
     });
 
+    it("does not roll a failed ws1 mutation back over ws2's tabs", async () => {
+      mockList.mockResolvedValueOnce([
+        createMockTab({ session_name: "a-1", label: "WS1" }),
+      ]);
+
+      const { result, rerender } = renderHook(
+        ({ ws }: { ws: string }) => useTerminalMetadata(ws),
+        { initialProps: { ws: "ws1" } },
+      );
+      await flushPromises();
+
+      let rejectPatch: (err: unknown) => void = () => {};
+      mockPatch.mockImplementationOnce(
+        () =>
+          new Promise<TabMetadata>((_resolve, reject) => {
+            rejectPatch = reject;
+          }),
+      );
+      let renaming: Promise<void> = Promise.resolve();
+      act(() => {
+        renaming = result.current.updateLabel("a-1", "Renamed");
+      });
+      expect(result.current.tabs[0].label).toBe("Renamed");
+
+      mockList.mockResolvedValueOnce([
+        createMockTab({ session_name: "b-1", label: "WS2" }),
+      ]);
+      rerender({ ws: "ws2" });
+      await flushPromises();
+      expect(result.current.tabs[0].label).toBe("WS2");
+
+      await act(async () => {
+        rejectPatch(new Error("Patch failed"));
+        await renaming;
+      });
+
+      // The rollback belongs to ws1; ws2's list must survive it untouched.
+      expect(result.current.tabs).toHaveLength(1);
+      expect(result.current.tabs[0].session_name).toBe("b-1");
+      expect(result.current.tabs[0].label).toBe("WS2");
+      expect(result.current.error).toBeNull();
+    });
+
+    it("does not clear the list when a mutation issued before the load fails", async () => {
+      let resolveList: (value: TabMetadata[]) => void = () => {};
+      mockList.mockImplementationOnce(
+        () =>
+          new Promise<TabMetadata[]>((resolve) => {
+            resolveList = resolve;
+          }),
+      );
+
+      const { result } = renderHook(() => useTerminalMetadata("ws1"));
+      await flushPromises();
+
+      // Issued while no workspace-fresh list is held, so the optimistic apply
+      // is skipped and there is nothing to roll back to.
+      let rejectPatch: (err: unknown) => void = () => {};
+      mockPatch.mockImplementationOnce(
+        () =>
+          new Promise<TabMetadata>((_resolve, reject) => {
+            rejectPatch = reject;
+          }),
+      );
+      let renaming: Promise<void> = Promise.resolve();
+      act(() => {
+        renaming = result.current.updateLabel("sess-1", "Renamed");
+      });
+
+      await act(async () => {
+        resolveList([createMockTab()]);
+        await Promise.resolve();
+      });
+      expect(result.current.tabs).toHaveLength(1);
+
+      await act(async () => {
+        rejectPatch(new Error("Patch failed"));
+        await renaming;
+      });
+
+      expect(result.current.tabs).toHaveLength(1);
+      expect(result.current.tabs[0].session_name).toBe("sess-1");
+      expect(result.current.error?.message).toBe("Patch failed");
+    });
+
     it("reports not-loading with empty tabs while disabled", async () => {
       const { result } = renderHook(() =>
         useTerminalMetadata("ws1", { enabled: false }),

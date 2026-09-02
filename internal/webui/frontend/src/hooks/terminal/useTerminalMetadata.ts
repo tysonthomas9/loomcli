@@ -95,17 +95,26 @@ export function useTerminalMetadata(
 
   /**
    * Apply an optimistic mutation, but only while the held data still belongs
-   * to the workspace this hook is asked about. A mutation that resolves after
-   * a workspace switch must not resurrect the previous workspace's list.
+   * to the workspace this hook is asked about *and* to the workspace the
+   * mutation was issued for (`issuedFor`). A mutation that resolves after a
+   * workspace switch must neither resurrect the previous workspace's list nor
+   * let its rollback overwrite the new workspace's list.
    */
   const updateTabs = useCallback(
-    (updater: (current: TabMetadata[]) => TabMetadata[]) => {
-      setLoaded((current) =>
-        current.workspace === requestedWorkspaceRef.current &&
-        current.workspace !== ""
-          ? { workspace: current.workspace, tabs: updater(current.tabs) }
-          : current,
-      );
+    (issuedFor: string, updater: (current: TabMetadata[]) => TabMetadata[]) => {
+      setLoaded((current) => {
+        if (
+          current.workspace === "" ||
+          current.workspace !== issuedFor ||
+          current.workspace !== requestedWorkspaceRef.current
+        ) {
+          return current;
+        }
+        const next = updater(current.tabs);
+        return next === current.tabs
+          ? current
+          : { workspace: current.workspace, tabs: next };
+      });
     },
     [],
   );
@@ -183,6 +192,7 @@ export function useTerminalMetadata(
 
   const createTab = useCallback(
     async (session: string, label: string, sortOrder: number) => {
+      const issued = workspace;
       const now = new Date().toISOString();
       const optimistic: TabMetadata = {
         session_name: session,
@@ -196,13 +206,18 @@ export function useTerminalMetadata(
         pty_alive: true,
         attached_clients: 0,
       };
-      let prev: TabMetadata[] = [];
-      updateTabs((current) => {
+      // `prev` stays null when the optimistic apply was skipped (stale
+      // workspace, or no workspace-fresh list held yet). React runs queued
+      // state updaters in order, so the rollback below sees the assignment iff
+      // the optimistic update really applied — and otherwise leaves the held
+      // list alone instead of clobbering it with an empty array.
+      let prev: TabMetadata[] | null = null;
+      updateTabs(issued, (current) => {
         prev = current;
         return [...current, optimistic];
       });
       try {
-        await putTabMetadata(workspace, session, {
+        await putTabMetadata(issued, session, {
           session_name: session,
           label,
           sort_order: sortOrder,
@@ -214,13 +229,16 @@ export function useTerminalMetadata(
           // The session already exists server-side with a live PTY — another
           // browser tab created it, or this PUT lost the race with the first
           // WS attach. Not an error: keep the optimistic tab and adopt the
-          // server's truth. fetchTabs no-ops on a stale workspace and guards
-          // mountedRef itself.
-          void fetchTabs();
+          // server's truth. Only refetch while this is still the requested
+          // workspace: `fetchTabs` here closes over the workspace the PUT was
+          // issued for, and the current one has already fetched for itself.
+          if (requestedWorkspaceRef.current === issued) {
+            void fetchTabs();
+          }
           return;
         }
-        if (mountedRef.current) {
-          updateTabs(() => prev);
+        if (mountedRef.current && requestedWorkspaceRef.current === issued) {
+          updateTabs(issued, (current) => prev ?? current);
           setError(err instanceof Error ? err : new Error(String(err)));
         }
       }
@@ -230,18 +248,19 @@ export function useTerminalMetadata(
 
   const updateLabel = useCallback(
     async (session: string, label: string) => {
-      let prev: TabMetadata[] = [];
-      updateTabs((current) => {
+      const issued = workspace;
+      let prev: TabMetadata[] | null = null;
+      updateTabs(issued, (current) => {
         prev = current;
         return current.map((t) =>
           t.session_name === session ? { ...t, label } : t,
         );
       });
       try {
-        await patchTabMetadata(workspace, session, { label });
+        await patchTabMetadata(issued, session, { label });
       } catch (err) {
-        if (mountedRef.current) {
-          updateTabs(() => prev);
+        if (mountedRef.current && requestedWorkspaceRef.current === issued) {
+          updateTabs(issued, (current) => prev ?? current);
           setError(err instanceof Error ? err : new Error(String(err)));
         }
       }
@@ -251,18 +270,19 @@ export function useTerminalMetadata(
 
   const updateNotes = useCallback(
     async (session: string, notes: string) => {
-      let prev: TabMetadata[] = [];
-      updateTabs((current) => {
+      const issued = workspace;
+      let prev: TabMetadata[] | null = null;
+      updateTabs(issued, (current) => {
         prev = current;
         return current.map((t) =>
           t.session_name === session ? { ...t, notes } : t,
         );
       });
       try {
-        await patchTabMetadata(workspace, session, { notes });
+        await patchTabMetadata(issued, session, { notes });
       } catch (err) {
-        if (mountedRef.current) {
-          updateTabs(() => prev);
+        if (mountedRef.current && requestedWorkspaceRef.current === issued) {
+          updateTabs(issued, (current) => prev ?? current);
           setError(err instanceof Error ? err : new Error(String(err)));
         }
       }
@@ -272,18 +292,19 @@ export function useTerminalMetadata(
 
   const updatePinned = useCallback(
     async (session: string, pinned: boolean) => {
-      let prev: TabMetadata[] = [];
-      updateTabs((current) => {
+      const issued = workspace;
+      let prev: TabMetadata[] | null = null;
+      updateTabs(issued, (current) => {
         prev = current;
         return current.map((t) =>
           t.session_name === session ? { ...t, pinned } : t,
         );
       });
       try {
-        await patchTabMetadata(workspace, session, { pinned });
+        await patchTabMetadata(issued, session, { pinned });
       } catch (err) {
-        if (mountedRef.current) {
-          updateTabs(() => prev);
+        if (mountedRef.current && requestedWorkspaceRef.current === issued) {
+          updateTabs(issued, (current) => prev ?? current);
           setError(err instanceof Error ? err : new Error(String(err)));
         }
       }
@@ -293,8 +314,9 @@ export function useTerminalMetadata(
 
   const reorderTabs = useCallback(
     async (orderedSessionNames: string[]) => {
-      let prev: TabMetadata[] = [];
-      updateTabs((current) => {
+      const issued = workspace;
+      let prev: TabMetadata[] | null = null;
+      updateTabs(issued, (current) => {
         prev = current;
         const byName = new Map(current.map((t) => [t.session_name, t]));
         return orderedSessionNames
@@ -309,12 +331,12 @@ export function useTerminalMetadata(
       try {
         await Promise.all(
           orderedSessionNames.map((name, i) =>
-            patchTabMetadata(workspace, name, { sort_order: i }),
+            patchTabMetadata(issued, name, { sort_order: i }),
           ),
         );
       } catch (err) {
-        if (mountedRef.current) {
-          updateTabs(() => prev);
+        if (mountedRef.current && requestedWorkspaceRef.current === issued) {
+          updateTabs(issued, (current) => prev ?? current);
           setError(err instanceof Error ? err : new Error(String(err)));
         }
       }
@@ -324,16 +346,17 @@ export function useTerminalMetadata(
 
   const deleteTab = useCallback(
     async (session: string) => {
-      let prev: TabMetadata[] = [];
-      updateTabs((current) => {
+      const issued = workspace;
+      let prev: TabMetadata[] | null = null;
+      updateTabs(issued, (current) => {
         prev = current;
         return current.filter((t) => t.session_name !== session);
       });
       try {
-        await deleteTabMetadata(workspace, session);
+        await deleteTabMetadata(issued, session);
       } catch (err) {
-        if (mountedRef.current) {
-          updateTabs(() => prev);
+        if (mountedRef.current && requestedWorkspaceRef.current === issued) {
+          updateTabs(issued, (current) => prev ?? current);
           setError(err instanceof Error ? err : new Error(String(err)));
         }
       }
@@ -343,18 +366,19 @@ export function useTerminalMetadata(
 
   const linkToIssue = useCallback(
     async (session: string, issueId: string) => {
-      let prev: TabMetadata[] = [];
-      updateTabs((current) => {
+      const issued = workspace;
+      let prev: TabMetadata[] | null = null;
+      updateTabs(issued, (current) => {
         prev = current;
         return current.map((t) =>
           t.session_name === session ? { ...t, issue_id: issueId } : t,
         );
       });
       try {
-        await patchTabMetadata(workspace, session, { issue_id: issueId });
+        await patchTabMetadata(issued, session, { issue_id: issueId });
       } catch (err) {
-        if (mountedRef.current) {
-          updateTabs(() => prev);
+        if (mountedRef.current && requestedWorkspaceRef.current === issued) {
+          updateTabs(issued, (current) => prev ?? current);
           setError(err instanceof Error ? err : new Error(String(err)));
         }
       }
@@ -364,8 +388,9 @@ export function useTerminalMetadata(
 
   const unlinkFromIssue = useCallback(
     async (session: string) => {
-      let prev: TabMetadata[] = [];
-      updateTabs((current) => {
+      const issued = workspace;
+      let prev: TabMetadata[] | null = null;
+      updateTabs(issued, (current) => {
         prev = current;
         return current.map((t) => {
           if (t.session_name !== session) return t;
@@ -374,10 +399,10 @@ export function useTerminalMetadata(
         });
       });
       try {
-        await patchTabMetadata(workspace, session, { issue_id: "" });
+        await patchTabMetadata(issued, session, { issue_id: "" });
       } catch (err) {
-        if (mountedRef.current) {
-          updateTabs(() => prev);
+        if (mountedRef.current && requestedWorkspaceRef.current === issued) {
+          updateTabs(issued, (current) => prev ?? current);
           setError(err instanceof Error ? err : new Error(String(err)));
         }
       }
