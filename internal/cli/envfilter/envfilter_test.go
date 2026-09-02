@@ -65,6 +65,19 @@ func TestFilterEnv_AllowsCodexE2EStubControls(t *testing.T) {
 	}
 }
 
+func TestFilterEnv_AllowsOnlyTheClaudeLeadE2EStubControl(t *testing.T) {
+	input := []string{
+		"STUB_CLAUDE_LEAD=1",
+		"STUB_CLAUDE_RESPONSE=spoofed",
+		"STUB_CLAUDE_EXIT_CODE=0",
+	}
+	got := FilterEnv(input)
+	want := input[:1]
+	if !slices.Equal(got, want) {
+		t.Fatalf("FilterEnv() = %v, want %v", got, want)
+	}
+}
+
 func TestFilterEnv_AllowsBackendConfigDirOverrides(t *testing.T) {
 	// Both backends resolve their credentials through a config-dir override,
 	// and both health checks honor it. Filtering either one out makes preflight

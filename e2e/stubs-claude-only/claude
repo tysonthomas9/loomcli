@@ -6,6 +6,7 @@
 #   STUB_CLAUDE_EXIT_CODE  - exit code (default: 0)
 #   STUB_CLAUDE_RESPONSE   - custom response text (default: built-in)
 #   STUB_CLAUDE_DELAY      - seconds to sleep before responding (default: 0)
+#   STUB_CLAUDE_LEAD       - when 1, expose a persistent controlled lead TUI
 
 set -e
 
@@ -24,14 +25,25 @@ fi
 IS_PIPE=false
 IS_STREAM_JSON=false
 HAS_SKIP_PERMS=false
+HAS_SESSION_ID=false
+SESSION_ID=""
 PROMPT_TEXT=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        -p) IS_PIPE=true ;;
+        -p|--print) IS_PIPE=true ;;
         --output-format)
             shift
             if [ "$1" = "stream-json" ]; then IS_STREAM_JSON=true; fi
+            ;;
+        --session-id)
+            if [ "$#" -gt 1 ]; then
+                shift
+                SESSION_ID="$1"
+                if printf '%s\n' "$SESSION_ID" | grep -Eq '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'; then
+                    HAS_SESSION_ID=true
+                fi
+            fi
             ;;
         --dangerously-skip-permissions) HAS_SKIP_PERMS=true ;;
         --*) ;;
@@ -46,7 +58,40 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-if [ "$IS_PIPE" = "true" ] && [ "$IS_STREAM_JSON" = "true" ]; then
+if [ "${STUB_CLAUDE_LEAD:-0}" = "1" ] &&
+    [ "$HAS_SKIP_PERMS" = "true" ] &&
+    [ "$HAS_SESSION_ID" = "true" ] &&
+    [ "$IS_PIPE" = "false" ] &&
+    [ "$IS_STREAM_JSON" = "false" ]; then
+    if [ "$EXIT_CODE" != "0" ]; then
+        exit "$EXIT_CODE"
+    fi
+    PROMPT_CONTRACT="$(printf '%s' "$PROMPT_TEXT" | python3 -c 'import hashlib, sys
+data = sys.stdin.buffer.read()
+separator = b"\n\n\n### Multi-Agent Safety Rules"
+authored = data.rsplit(separator, 1)[0] if separator in data else data
+safety_blocks = 1 if separator in data else 0
+print(f"authored-sha256={hashlib.sha256(authored).hexdigest()} authored-bytes={len(authored)} safety-blocks={safety_blocks}")')"
+    render_controlled_lead() {
+        # Real TUIs redraw after their PTY is resized. The controlled stub does
+        # the same so the post-attach frame is deterministic without slowing
+        # startup or replaying raw PTY bytes in production. Keep the redraw in
+        # one printf: a resize trap between separate echo calls can otherwise
+        # clear and partially overwrite the frame it interrupted.
+        printf '\033[2J\033[HClaude Code\n❯\nControlled Claude stub ready: %s\nControlled Claude prompt contract: %s\nControlled Claude session: %s\n' \
+            "${LOOM_AGENT_NAME:-unknown}" "$PROMPT_CONTRACT" "$SESSION_ID"
+    }
+    trap 'render_controlled_lead' WINCH
+    render_controlled_lead
+    i=1
+    while IFS= read -r _line; do
+        echo "$RESPONSE"
+        echo "claude --resume $SESSION_ID"
+        echo "✻ Baked for ${i}s"
+        echo "❯"
+        i=$((i + 1))
+    done
+elif [ "$IS_PIPE" = "true" ] && [ "$IS_STREAM_JSON" = "true" ]; then
     # Non-interactive stream-json mode: read prompt from stdin, output stream events
     if [ ! -t 0 ]; then
         cat > /dev/null
@@ -61,13 +106,13 @@ elif [ "$HAS_SKIP_PERMS" = "true" ]; then
     echo "❯"
     if [ -n "$PROMPT_TEXT" ]; then
         echo "$RESPONSE"
-        echo "claude --resume 123e4567-e89b-12d3-a456-426614174000"
+        echo "claude --resume ${SESSION_ID:-123e4567-e89b-12d3-a456-426614174000}"
         echo "✻ Baked for 1s"
     else
         i=1
         while IFS= read -r _line; do
             echo "$RESPONSE"
-            echo "claude --resume 123e4567-e89b-12d3-a456-426614174000"
+            echo "claude --resume ${SESSION_ID:-123e4567-e89b-12d3-a456-426614174000}"
             echo "✻ Baked for ${i}s"
             echo "❯"
             i=$((i + 1))

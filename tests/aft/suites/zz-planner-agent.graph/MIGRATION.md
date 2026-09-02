@@ -38,6 +38,6 @@ Added strict-state assertions:
   retained before the added `notText` assertion.
 
 Scenarios 7 and 9 move their original trailing assertions into terminal states
-without adding a terminal check. The shared default-Planner prerequisite is
-additional mechanics only for scenarios 3 and 7-11; scenario 1 authors that
-creation flow directly.
+without adding a terminal check. Scenario 1 now shares the default-Planner
+creation and exact persisted Info/API contract with scenarios 3 and 7-11;
+its leaf records that already-verified definition as the scenario outcome.

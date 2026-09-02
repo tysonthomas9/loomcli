@@ -9,24 +9,54 @@ blocks:
       - fill:
           testid: create-agent-name
           value: cust-xss-${RUN_ID:-local}
+      - run: |-
+          set -e
+          printf '%s' 'Review PRs.
+          <img src=x onerror="window.__aftXss=1">
+          <script>window.__aftXss=1</script>
+          [click](javascript:window.__aftXss=1)' > "$AFT_WORK_DIR/cus-d6.prompt"
+          python3 - "$AFT_WORK_DIR/cus-d6.prompt" <<'PY'
+          import sys
+          data = open(sys.argv[1], "rb").read()
+          assert data and not data.endswith(b"\n"), data[-16:]
+          PY
+        intent: Prepare one exact executable-looking prompt fixture without a trailing newline
       - wait:
           fn: document.querySelectorAll('[data-testid=create-agent-backend] option').length > 1
         intent: Wait until backend options are loaded before selecting claude
       - select:
           testid: create-agent-backend
           value: claude
-      - fill:
-          testid: create-agent-interactive-prompt
-          value: |-
-            Review PRs.
-            <img src=x onerror="window.__aftXss=1">
-            <script>window.__aftXss=1</script>
-            [click](javascript:window.__aftXss=1)
+      - run: agent-browser --session "$AFT_SESSION" find testid create-agent-interactive-prompt fill "$(cat "$AFT_WORK_DIR/cus-d6.prompt")"
+        intent: Paste the exact executable-looking fixture into the custom prompt field
+      - use: capture-controlled-claude-authored-prompt
+        with:
+          fingerprintKey: cust-xss-${RUN_ID:-local}
       - click:
           testid: create-agent-submit
       - wait:
           fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('cust-xss-${RUN_ID:-local}')"
         intent: Wait until the xss-shaped custom agent appears after submit
+      - run: |-
+          set -e
+          name="cust-xss-${RUN_ID:-local}"
+          LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-CUSTOM role show "$name" --json > "$AFT_WORK_DIR/cus-d6-role.json"
+          python3 - "$AFT_WORK_DIR/cus-d6-role.json" "$AFT_WORK_DIR/cus-d6.prompt" <<'PY'
+          import hashlib, json, sys
+          role = json.load(open(sys.argv[1]))
+          got = role.get("prompt", "").encode("utf-8")
+          want = open(sys.argv[2], "rb").read()
+          if got != want:
+              raise AssertionError({
+                  "got_bytes": len(got),
+                  "want_bytes": len(want),
+                  "got_sha256": hashlib.sha256(got).hexdigest(),
+                  "want_sha256": hashlib.sha256(want).hexdigest(),
+              })
+          assert role.get("kind") == "interactive", role.get("kind")
+          assert not role.get("prompt_file"), role.get("prompt_file")
+          PY
+        intent: Confirm storage contains the exact submitted XSS-shaped bytes before testing their absence from the DOM
       - open: /ws/E2E-WS-CUSTOM/agents/cust-xss-${RUN_ID:-local}
       - wait:
           fn: |-
@@ -50,6 +80,16 @@ blocks:
               return Date.now() - window.__aftAgentsPageStableAt >= 300;
             })()
         intent: Wait until the custom agent detail page is ready
+      - use: assert-controlled-agent-terminal
+        with:
+          workspace: E2E-WS-CUSTOM
+          agent: cust-xss-${RUN_ID:-local}
+          role: cust-xss-${RUN_ID:-local}
+          backend: claude
+          readyText: "Controlled Claude stub ready: cust-xss-${RUN_ID:-local}"
+      - use: assert-controlled-claude-authored-prompt
+        with:
+          fingerprintKey: cust-xss-${RUN_ID:-local}
       - click:
           role: button
           name: Info
@@ -66,6 +106,8 @@ blocks:
       - expect:
           notText: onerror
       - reload: true
+  terminal-07-xss-shaped-custom-prompt-is-inert-in-agents-ui:
+    steps:
       - wait:
           fn: |-
             (() => {
@@ -91,8 +133,6 @@ blocks:
       - wait:
           fn: window.__aftXss === undefined && !document.querySelector('script[data-injected], img[onerror]') && !document.querySelector('a[href^="javascript:"]')
         intent: Wait until the reloaded agents surface still has not executed the prompt text
-  terminal-07-xss-shaped-custom-prompt-is-inert-in-agents-ui:
-    steps:
       - expect:
           notText: onerror
   case-18-custom-agent-appears-in-the-agents-rail-without-reload:
@@ -107,11 +147,11 @@ blocks:
           value: AFT-SSE-${RUN_ID:-local}
       - click:
           testid: create-agent-submit
+  terminal-18-custom-agent-appears-in-the-agents-rail-without-reload:
+    steps:
       - wait:
           fn: "!document.querySelector('[data-testid=create-agent-overlay]')"
         intent: Wait until the custom agent modal closes after submit
-  terminal-18-custom-agent-appears-in-the-agents-rail-without-reload:
-    steps:
       - expect:
           visible:
             selector: "[aria-label='Agent: cust-sse-${RUN_ID:-local}']"

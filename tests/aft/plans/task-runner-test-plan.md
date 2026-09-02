@@ -515,10 +515,11 @@ then a best-effort `pkill`-by-signature of any `loom … task <agent>` left runn
 
 ### Group B — starting a UI-created Task Runner
 
-#### TSK-D7 — Delegation starts the Task Runner (control-plane truth)
+#### TSK-D7 — Delegation records requested running state (control-plane truth)
 - **Tier**: `suites/zz-task-runner.test.yaml`.
 - **Intent**: *An operator delegates an open task to the Task Runner they just created, and the
-  issue and the agent both record that work was started.*
+  issue and agent projections record assignment plus requested running state; this does not prove
+  a worker process started.*
 - **Preconditions**: TSK-D1's agent; one open issue created by an API-client actor with a `design`
   field so it is genuinely claimable.
 - **Steps**: `open /ws/E2E-WS-TASK/kanban` → open the issue's detail panel →
@@ -535,8 +536,8 @@ then a best-effort `pkill`-by-signature of any `loom … task <agent>` left runn
   - **Explicitly do not assert** that a process started. With no `loom daemon` in the stack the
     queued `AgentCommand` is never consumed. Put that limitation in a comment above the test so the
     next reader does not "fix" it.
-- **Edge rationale**: this is the only mounted UI gesture that starts an agent, and it is currently
-  untested for any role. It is also the gesture CONTEXT.md names *Delegation*.
+- **Edge rationale**: this is the only mounted UI gesture that requests an agent start, and it is
+  currently untested for any role. It is also the gesture CONTEXT.md names *Delegation*.
 - **Status**: ready to write.
 
 #### TSK-D8a — Starting a missing agent is a clean 404
@@ -889,10 +890,10 @@ Revision 2 called this one case "ready" while its body required blocked TSK-D9. 
   the six tabs `Terminal, Info, Git, Logs, Diff, Files`.
 - **Status**: ready to write.
 
-#### TSK-D18 — Quarantined task is visibly quarantined
+#### TSK-D18 — API-seeded quarantine state renders the quarantine badge
 - **Tier**: `suites/zz-task-runner.test.yaml`.
-- **Intent**: *A task the daemon quarantined after repeated no-progress kills is visibly marked on
-  the board, so an operator can see why an agent stopped making progress on it.*
+- **Intent**: *An issue seeded with blocked status and the quarantine label is visibly marked on
+  the board; this case validates presentation and does not assert that a daemon produced the state.*
 - **Steps**: an API-client actor sets the terminal state the supervisor would write —
   `status: "blocked"`, `assignee: ""`, labels `+["loom:quarantined"]`, exactly the single update at
   `supervisor/quarantine.go:435-460` — then the operator browses the board.
@@ -903,7 +904,7 @@ Revision 2 called this one case "ready" while its body required blocked TSK-D9. 
 - **Edge rationale**: `COVERAGE-PLAN.md:125` deferred quarantine as "supervisor runtime, not
   browser-observable deterministically". That is true of *entering* quarantine; the *rendering* is
   browser-observable once an API actor writes the same state, and it is the operator-facing half.
-  Actor fidelity holds: the daemon really does mutate via the store.
+  Daemon-driven entry into quarantine remains outside this deterministic scenario.
 - **Status**: ready to write.
 
 #### TSK-D19 — Agent health fields are exposed on the wire (and rendered nowhere)
@@ -1347,7 +1348,7 @@ Legend — **Status**: `ready` = writable today; `blocked:Bn` = needs the named 
 | TSK-D4 | Name validation + normalization | edge | `suites/zz-task-runner` | none | disabled-submit contract; lowercase normalization | ready |
 | TSK-D5 | Duplicate name → 409 in dialog | edge | `suites/zz-task-runner` | none | `create-agent-error`; modal stays open; no 2nd agent | ready |
 | TSK-D6 | Repo-less workspace: copy vs 400 | edge | `surface-suites` + tier-1 browser half | none | 400 + compensating delete **+ the B11 contradiction** | ready |
-| TSK-D7 | Delegation starts the agent | happy | `suites/zz-task-runner` | none | `agent-assignee-<name>`; `state/desired_state` readback | ready |
+| TSK-D7 | Delegation records assignment + requested running state | happy | `suites/zz-task-runner` | none | `agent-assignee-<name>`; `state/desired_state` readback; no process claim | ready |
 | TSK-D8a | Start a missing agent → 404 | edge | `surface-suites` | none | 404 (the "nothing queued" half is unobservable) | ready |
 | TSK-D8b | Failed start rolls issue back | edge | `suites/zz-task-runner` | vitest `IssueDetailPanel.test.tsx:905-918` (assignee save) | rollback PATCH in a browser | blocked:B12 |
 | **TSK-D9** | **UI-created agent claims→commits→closes** | happy | `suites/zz-task-runner` | **none in any tier** | path A with an agent definition; session + diff + logs | **blocked:B1** |
@@ -1362,7 +1363,7 @@ Legend — **Status**: `ready` = writable today; `blocked:Bn` = needs the named 
 | TSK-D15 | start/stop/restart/yield contracts | edge | `surface-suites` | none | 200/200/202/202 + state pairs + 400/404/501 | ready |
 | TSK-D16 | Archive Logs branch for role=task | happy | `suites/zz-task-runner` | `zz-agent-flow` case 1 (lead) | `terminal/info mode == archive`; task role | ready |
 | TSK-D17 | Agent visible on all surfaces | happy | `suites/zz-task-runner` | `zz-agent-flow` case 1 (lead) | Background subgroup classification | ready |
-| TSK-D18 | Quarantined task badge | edge | `suites/zz-task-runner` | none (deferred in COVERAGE-PLAN) | rendering half is browser-observable | ready |
+| TSK-D18 | API-seeded quarantine badge presentation | edge | `suites/zz-task-runner` | none (deferred in COVERAGE-PLAN) | rendering half only; daemon entry not asserted | ready |
 | TSK-D19 | Agent-health fields on the wire | edge | `surface-suites` | none | guards the contract; **no UI exists** (B6) | ready (low value) |
 | **TSK-R1** | **UI-created agent, real backend, e2e** | happy | `real-suites-task-agent` ×4 | `real-suites-*` cover path B only | path A + agent identity + worktree placement | ready (new tier) |
 | TSK-R2 | Multi-task epic, dependency-ordered | happy | `real-suites-task-agent` (codex) | `e2e/epic_runner_codex.sh` (CLI harness, stubbed) | real backend, supervisor loop, 3 sessions, real `depends_on` | ready |

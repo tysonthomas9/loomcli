@@ -3,7 +3,9 @@ package e2e_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -12,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -28,7 +31,9 @@ func TestCodexStubRunsAControlledLeadWithTheLiteralPrompt(t *testing.T) {
 	t.Setenv("STUB_ARGV_LOG", argvLog)
 	codexPath := filepath.Join(repoRoot(t), "e2e", "stubs", "codex")
 
-	const prompt = "Refer to {{ .AgentName }} and {{.Role}}. Unclosed: {{ if .SafetyBlock }}"
+	const authoredPrompt = "Refer to `{{ .AgentName }}` and ${reviewer}. Unclosed: {{ if .SafetyBlock }}\n\n\n### Multi-Agent Safety Rules\nThis heading is authored text."
+	const generatedSafetySuffix = "\n\n\n### Multi-Agent Safety Rules\nDo not expose secrets."
+	const prompt = authoredPrompt + generatedSafetySuffix
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stdinReader, stdinWriter := io.Pipe()
@@ -109,8 +114,15 @@ func TestCodexStubRunsAControlledLeadWithTheLiteralPrompt(t *testing.T) {
 	if !sawRemotePrompt {
 		t.Fatalf("codex stub did not receive the literal custom prompt through the remote TUI: %q", raw)
 	}
-	if !strings.Contains(output.String(), "Controlled Codex prompt contract: prefix-sha256=b8078611e09da1b89c51c636f9e19b638bfaf0e6c159f3a2f0862e4f5f0bd77e safety-blocks=0") {
-		t.Fatalf("codex stub did not expose the measured prompt contract\noutput:\n%s", output.String())
+	wantContract := fmt.Sprintf(
+		"Controlled Codex prompt contract: prefix-sha256=%x safety-blocks=1",
+		sha256.Sum256([]byte(authoredPrompt)),
+	)
+	if !strings.Contains(output.String(), wantContract) {
+		t.Fatalf("codex stub did not expose the measured prompt contract\nwant: %s\noutput:\n%s", wantContract, output.String())
+	}
+	if !strings.Contains(output.String(), "Controlled Codex prompt identity: other") {
+		t.Fatalf("codex stub misclassified a literal custom prompt as a built-in prompt\noutput:\n%s", output.String())
 	}
 }
 
@@ -145,6 +157,219 @@ func TestCodexStubExitCodeFailsControlledRuntimeBeforeBootstrap(t *testing.T) {
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 23 {
 		t.Fatalf("controlled stub exit = %v, want exit code 23", err)
+	}
+}
+
+func TestClaudeStubsHoldAControlledLeadWithoutEchoingItsPrompt(t *testing.T) {
+	const prompt = "Do not render this secret-shaped prompt: <script>alert('aft')</script>; preserve `literal ${reviewer}` bytes."
+	const sessionID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+	for _, stubDir := range []string{"stubs", "stubs-claude-only"} {
+		stubDir := stubDir
+		t.Run(stubDir, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			cmd := exec.CommandContext( //nolint:norawexec,gosec // executes this repo's deterministic test stub.
+				ctx,
+				filepath.Join(repoRoot(t), "e2e", stubDir, "claude"),
+				"--session-id", sessionID,
+				"--dangerously-skip-permissions",
+				prompt,
+			)
+			stdin, err := cmd.StdinPipe()
+			if err != nil {
+				t.Fatalf("open controlled Claude stdin: %v", err)
+			}
+			var output synchronizedBuffer
+			cmd.Stdout = &output
+			cmd.Stderr = &output
+			cmd.Env = append(os.Environ(),
+				"LOOM_AGENT_NAME=custom-prompt-agent",
+				"STUB_CLAUDE_EXIT_CODE=0",
+				"STUB_CLAUDE_LEAD=1",
+			)
+			if err := cmd.Start(); err != nil {
+				t.Fatalf("start controlled Claude stub: %v", err)
+			}
+
+			done := make(chan error, 1)
+			go func() { done <- cmd.Wait() }()
+			deadline := time.NewTimer(5 * time.Second)
+			defer deadline.Stop()
+			ticker := time.NewTicker(20 * time.Millisecond)
+			defer ticker.Stop()
+			for !strings.Contains(output.String(), "Controlled Claude stub ready: custom-prompt-agent") {
+				select {
+				case err := <-done:
+					t.Fatalf("controlled Claude stub exited before becoming ready: %v\noutput:\n%s", err, output.String())
+				case <-deadline.C:
+					t.Fatalf("controlled Claude stub never became ready\noutput:\n%s", output.String())
+				case <-ticker.C:
+				}
+			}
+			readyCount := strings.Count(output.String(), "Controlled Claude stub ready: custom-prompt-agent")
+			if err := cmd.Process.Signal(syscall.SIGWINCH); err != nil {
+				t.Fatalf("signal controlled Claude terminal resize: %v", err)
+			}
+			redrawDeadline := time.NewTimer(2 * time.Second)
+			defer redrawDeadline.Stop()
+			for strings.Count(output.String(), "Controlled Claude stub ready: custom-prompt-agent") == readyCount {
+				select {
+				case err := <-done:
+					t.Fatalf("controlled Claude stub exited before terminal redraw: %v\noutput:\n%s", err, output.String())
+				case <-redrawDeadline.C:
+					t.Fatalf("controlled Claude stub did not redraw after SIGWINCH\noutput:\n%s", output.String())
+				case <-ticker.C:
+				}
+			}
+			if strings.Contains(output.String(), prompt) {
+				t.Fatalf("controlled Claude stub echoed the prompt into reviewer-visible output:\n%s", output.String())
+			}
+			wantContract := fmt.Sprintf(
+				"Controlled Claude prompt contract: authored-sha256=%x authored-bytes=%d safety-blocks=0",
+				sha256.Sum256([]byte(prompt)), len([]byte(prompt)),
+			)
+			if !strings.Contains(output.String(), wantContract) {
+				t.Fatalf("controlled Claude stub did not fingerprint its exact authored prompt\nwant: %s\noutput:\n%s", wantContract, output.String())
+			}
+			if !strings.Contains(output.String(), "Controlled Claude session: "+sessionID) {
+				t.Fatalf("controlled Claude stub did not report the supplied session ID\noutput:\n%s", output.String())
+			}
+
+			select {
+			case err := <-done:
+				t.Fatalf("controlled Claude stub exited instead of remaining interactive: %v\noutput:\n%s", err, output.String())
+			case <-time.After(150 * time.Millisecond):
+			}
+
+			if err := stdin.Close(); err != nil {
+				t.Fatalf("close controlled Claude stdin: %v", err)
+			}
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatalf("controlled Claude stub returned an error after input closed: %v\noutput:\n%s", err, output.String())
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("controlled Claude stub did not stop after input closed")
+			}
+		})
+	}
+}
+
+func TestClaudeStubsDistinguishExpectedWrongAndMissingAuthoredPrompts(t *testing.T) {
+	const sessionID = "11111111-2222-4333-8444-555555555555"
+	const safety = "\n\n\n### Multi-Agent Safety Rules\nnever expose secrets"
+	cases := []struct {
+		name     string
+		authored string
+		prompt   string
+		safety   int
+	}{
+		{name: "expected", authored: "expected custom instructions", prompt: "expected custom instructions" + safety, safety: 1},
+		{name: "wrong", authored: "different custom instructions", prompt: "different custom instructions" + safety, safety: 1},
+		{name: "authored-heading", authored: "review this literal heading\n\n\n### Multi-Agent Safety Rules\ninside the authored prompt", prompt: "review this literal heading\n\n\n### Multi-Agent Safety Rules\ninside the authored prompt" + safety, safety: 1},
+		{name: "missing", authored: "", prompt: "", safety: 0},
+	}
+	for _, stubDir := range []string{"stubs", "stubs-claude-only"} {
+		stubDir := stubDir
+		t.Run(stubDir, func(t *testing.T) {
+			seen := make(map[string]string)
+			for _, tc := range cases {
+				tc := tc
+				t.Run(tc.name, func(t *testing.T) {
+					args := []string{"--session-id", sessionID, "--dangerously-skip-permissions"}
+					if tc.prompt != "" {
+						args = append(args, tc.prompt)
+					}
+					cmd := exec.Command( //nolint:norawexec,gosec // executes this repo's deterministic test stub.
+						filepath.Join(repoRoot(t), "e2e", stubDir, "claude"), args...,
+					)
+					cmd.Env = append(os.Environ(),
+						"LOOM_AGENT_NAME=prompt-contract-agent",
+						"STUB_CLAUDE_EXIT_CODE=0",
+						"STUB_CLAUDE_LEAD=1",
+					)
+					out, err := cmd.CombinedOutput()
+					if err != nil {
+						t.Fatalf("run controlled Claude stub: %v\noutput:\n%s", err, out)
+					}
+					want := fmt.Sprintf(
+						"Controlled Claude prompt contract: authored-sha256=%x authored-bytes=%d safety-blocks=%d",
+						sha256.Sum256([]byte(tc.authored)), len([]byte(tc.authored)), tc.safety,
+					)
+					if !strings.Contains(string(out), want) {
+						t.Fatalf("prompt contract mismatch\nwant: %s\noutput:\n%s", want, out)
+					}
+					if tc.prompt != "" && strings.Contains(string(out), tc.prompt) {
+						t.Fatalf("controlled Claude stub exposed prompt bytes:\n%s", out)
+					}
+					if !strings.Contains(string(out), "Controlled Claude session: "+sessionID) {
+						t.Fatalf("controlled Claude stub did not report supplied session ID:\n%s", out)
+					}
+					seen[tc.name] = want
+				})
+			}
+			if seen["expected"] == seen["wrong"] || seen["expected"] == seen["missing"] || seen["wrong"] == seen["missing"] {
+				t.Fatalf("distinct prompt inputs produced indistinguishable contracts: %v", seen)
+			}
+		})
+	}
+}
+
+func TestClaudeStubsDoNotTreatOneShotCallsAsControlledLeads(t *testing.T) {
+	for _, stubDir := range []string{"stubs", "stubs-claude-only"} {
+		stubDir := stubDir
+		t.Run(stubDir, func(t *testing.T) {
+			for _, call := range []struct {
+				name             string
+				args             []string
+				wantStreamResult bool
+			}{
+				{
+					name:             "background-stream-without-session",
+					args:             []string{"-p", "--verbose", "--output-format", "stream-json", "--dangerously-skip-permissions"},
+					wantStreamResult: true,
+				},
+				{
+					name:             "stream-with-session",
+					args:             []string{"-p", "--verbose", "--output-format", "stream-json", "--session-id", "123e4567-e89b-12d3-a456-426614174000", "--dangerously-skip-permissions"},
+					wantStreamResult: true,
+				},
+				{
+					name: "print-with-session",
+					args: []string{"--print", "--session-id", "123e4567-e89b-12d3-a456-426614174000", "--dangerously-skip-permissions"},
+				},
+				{
+					name: "interactive-with-invalid-session",
+					args: []string{"--session-id", "not-a-uuid", "--dangerously-skip-permissions", "prompt"},
+				},
+			} {
+				call := call
+				t.Run(call.name, func(t *testing.T) {
+					cmd := exec.Command( //nolint:norawexec,gosec // executes this repo's deterministic test stub.
+						filepath.Join(repoRoot(t), "e2e", stubDir, "claude"),
+						call.args...,
+					)
+					cmd.Stdin = strings.NewReader("background task prompt")
+					cmd.Env = append(os.Environ(),
+						"LOOM_AGENT_NAME=background-agent",
+						"STUB_CLAUDE_EXIT_CODE=0",
+						"STUB_CLAUDE_LEAD=1",
+					)
+					out, err := cmd.CombinedOutput()
+					if err != nil {
+						t.Fatalf("run one-shot Claude stub: %v\noutput:\n%s", err, out)
+					}
+					if strings.Contains(string(out), "Controlled Claude stub ready") {
+						t.Fatalf("one-shot Claude call was captured by controlled lead mode:\n%s", out)
+					}
+					if call.wantStreamResult && !strings.Contains(string(out), `"type":"result"`) {
+						t.Fatalf("one-shot Claude call did not retain stream-json behavior:\n%s", out)
+					}
+				})
+			}
+		})
 	}
 }
 

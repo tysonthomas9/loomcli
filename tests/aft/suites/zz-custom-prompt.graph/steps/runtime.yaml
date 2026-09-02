@@ -111,6 +111,9 @@ blocks:
       - fill:
           testid: create-agent-interactive-prompt
           value: AFT-D8D-${RUN_ID:-local}
+      - use: capture-controlled-claude-authored-prompt
+        with:
+          fingerprintKey: orchestrator
       - click:
           testid: create-agent-submit
       - wait:
@@ -132,72 +135,63 @@ blocks:
           assert len(matches) == 1, agents
           assert matches[0].get("role_name") == "orchestrator", matches[0]
           PY
-        intent: An operator's readback confirms the orchestrator-named custom agent exists
+        intent: An operator's public readback confirms orchestrator owns one custom role identity
       - run: |
           set -e
           LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-CUSTOM role show orchestrator --json > "$AFT_WORK_DIR/d8d-role.json"
           python3 - "$AFT_WORK_DIR/d8d-role.json" "${RUN_ID:-local}" <<'PY'
-          import json, sys
-          r = json.load(open(sys.argv[1]))
-          want = "AFT-D8D-" + sys.argv[2]
-          assert r.get("kind") == "interactive", r
-          assert r.get("prompt") == want, r
-          assert r.get("description") == "Lead/orchestrator interactive", r
+          import hashlib, json, sys
+          role = json.load(open(sys.argv[1]))
+          prompt = role.get("prompt")
+          prompt_bytes = prompt.encode("utf-8") if isinstance(prompt, str) else None
+          summary = {
+              "name": role.get("name"),
+              "kind": role.get("kind"),
+              "description": role.get("description"),
+              "prompt_bytes": len(prompt_bytes) if prompt_bytes is not None else None,
+              "prompt_sha256": hashlib.sha256(prompt_bytes).hexdigest() if prompt_bytes is not None else None,
+          }
+          assert role.get("kind") == "interactive", summary
+          assert prompt == "AFT-D8D-" + sys.argv[2], summary
+          assert role.get("description") == "Lead/orchestrator interactive", summary
           PY
-        intent: An operator's CLI readback confirms the orchestrator role prompt and legacy description
+        intent: Confirm the orchestrator role stores the exact custom prompt and legacy interactive description
       - open: /ws/E2E-WS-CUSTOM/agents/orchestrator
-      - wait:
-          fn: |-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
-        intent: Wait until the orchestrator agent detail page is ready
-      - wait:
-          fn: "!!document.querySelector('[data-testid=terminal-view] [data-testid=terminal-tab-bar], [data-testid=terminal-view] [data-testid=terminal-wrapper]')"
-        intent: Wait until the orchestrator terminal surface is mounted
-      - run: |
-          set -e
-          # budget: terminal-launch (120s) - orchestrator terminal launch spec can lag PTY spawn.
-          for i in $(seq 1 60); do
-            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/terminal/tabs" > "$AFT_WORK_DIR/d8d-tabs.json" &&
-            python3 - "$AFT_WORK_DIR/d8d-tabs.json" <<'PY' && exit 0
-          import json, sys
-          d = json.load(open(sys.argv[1]))
-          tabs = d.get("data") or []
-          matches = [t for t in tabs if t.get("agent_id") == "orchestrator"]
-          assert matches, tabs
-          t = matches[0]
-          assert t.get("backend") == "claude", t
-          assert t.get("launch", {}).get("env", {}).get("LOOM_AGENT_ROLE") == "orchestrator", t
-          PY
-            sleep 2
-          done
-          echo "orchestrator terminal launch metadata never appeared"
-          cat "$AFT_WORK_DIR/d8d-tabs.json" 2>/dev/null || true
-          exit 1
-        intent: An operator polls terminal tabs until the orchestrator launch env is persisted
+        intent: An operator opens the orchestrator-named agent to verify its controlled Claude session
   terminal-12-custom-prompt-named-orchestrator-deterministically-creat:
     steps:
-      - expect:
-          count:
-            testid: create-agent-error
-            equals: 0
+      - use: assert-controlled-agent-terminal
+        with:
+          workspace: E2E-WS-CUSTOM
+          agent: orchestrator
+          role: orchestrator
+          backend: claude
+          readyText: "Controlled Claude stub ready: orchestrator"
+      - use: assert-controlled-claude-authored-prompt
+        with:
+          fingerprintKey: orchestrator
+      - wait:
+          fn: |-
+            (async () => {
+              const [tabResponse, monitorResponse] = await Promise.all([
+                fetch('/api/workspaces/E2E-WS-CUSTOM/terminal/tabs', { cache: 'no-store' }),
+                fetch('/api/monitor/status?workspace=E2E-WS-CUSTOM', { cache: 'no-store' }),
+              ]);
+              if (!tabResponse.ok || !monitorResponse.ok) return false;
+              const payload = await tabResponse.json();
+              const monitor = await monitorResponse.json();
+              const tabs = Array.isArray(payload.data) ? payload.data : [];
+              const matches = tabs.filter((tab) => tab.agent_id === 'orchestrator');
+              const projected = Array.isArray(monitor.agents)
+                ? monitor.agents.filter((agent) => agent.name === 'orchestrator')
+                : [];
+              return matches.length === 1 &&
+                matches[0]?.launch?.env?.LOOM_AGENT_ROLE === 'orchestrator' &&
+                projected.length === 1 &&
+                projected[0].role === 'orchestrator' &&
+                projected[0].role_kind === 'interactive';
+            })()
+        intent: Confirm the live launch and monitor projection both resolve orchestrator as the interactive role
   case-14-backend-selection-reaches-custom-agent-row-and-terminal-:
     steps:
       - click:
@@ -214,6 +208,9 @@ blocks:
       - fill:
           testid: create-agent-interactive-prompt
           value: AFT-BACKEND-${RUN_ID:-local}
+      - use: capture-controlled-claude-authored-prompt
+        with:
+          fingerprintKey: cust-be-${RUN_ID:-local}
       - click:
           testid: create-agent-submit
       - wait:
@@ -250,32 +247,6 @@ blocks:
             - path: data
               contains: gemini
         intent: An operator confirms the registered backend list includes every first-class backend
-      - open: /ws/E2E-WS-CUSTOM/agents/cust-be-${RUN_ID:-local}
-      - wait:
-          fn: |-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
-        intent: Wait until the claude-backed custom agent detail page is ready
-      - wait:
-          fn: "!!document.querySelector('[data-testid=terminal-view] [data-testid=terminal-tab-bar], [data-testid=terminal-view] [data-testid=terminal-wrapper]')"
-        intent: Wait until the claude-backed custom agent terminal surface is mounted
       - run: |
           set -e
           run="${RUN_ID:-local}"
@@ -291,43 +262,45 @@ blocks:
           assert by_name[sys.argv[2]].get("backend") == "claude", by_name[sys.argv[2]]
           assert by_name[sys.argv[3]].get("backend") == "codex", by_name[sys.argv[3]]
           PY
-          # budget: terminal-launch (120s) - backend-specific launch argv appears after tab creation.
-          for i in $(seq 1 60); do
-            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/terminal/tabs" > "$AFT_WORK_DIR/d10-tabs.json" &&
-            python3 - "$AFT_WORK_DIR/d10-tabs.json" "$name" <<'PY' && exit 0
-          import json, sys
-          d = json.load(open(sys.argv[1]))
-          name = sys.argv[2]
-          tabs = d.get("data") or []
-          matches = [t for t in tabs if t.get("agent_id") == name]
-          assert matches, tabs
-          t = matches[0]
-          launch = t.get("launch") or {}
-          argv = launch.get("argv") or []
-          cmd = argv[1] if len(argv) > 1 else ""
-          env = launch.get("env") or {}
-          assert t.get("kind") == "agent", t
-          assert t.get("role") == name, t
-          assert t.get("backend") == "claude", t
-          assert argv and argv[0] == "-c", argv
-          assert "'--backend' 'claude'" in cmd, cmd
-          assert cmd.endswith("'lead'"), cmd
-          assert "--prompt" not in cmd, cmd
-          assert env.get("LOOM_AGENT_ROLE") == name, env
-          assert env.get("LOOM_AGENT_NAME") == name, env
-          assert launch.get("cwd", "") == "", launch
-          PY
-            sleep 2
-          done
-          echo "claude backend terminal launch metadata never appeared"
-          cat "$AFT_WORK_DIR/d10-tabs.json" 2>/dev/null || true
-          exit 1
-        intent: An operator polls terminal tabs until the claude-backed launch spec is persisted and verifies argv env and cwd
+        intent: An operator's readback confirms the selected agent uses Claude while its default-backend companion uses Codex
+      - open: /ws/E2E-WS-CUSTOM/agents/cust-be-${RUN_ID:-local}
+        intent: An operator opens the Claude-backed agent to verify the selected backend actually starts
   terminal-14-backend-selection-reaches-custom-agent-row-and-terminal-:
     steps:
-      - expect:
-          visible:
-            selector: body
+      - use: assert-controlled-agent-terminal
+        with:
+          workspace: E2E-WS-CUSTOM
+          agent: cust-be-${RUN_ID:-local}
+          role: cust-be-${RUN_ID:-local}
+          backend: claude
+          readyText: "Controlled Claude stub ready: cust-be-${RUN_ID:-local}"
+      - use: assert-controlled-claude-authored-prompt
+        with:
+          fingerprintKey: cust-be-${RUN_ID:-local}
+      - wait:
+          fn: |-
+            (async () => {
+              const name = 'cust-be-${RUN_ID:-local}';
+              const response = await fetch('/api/workspaces/E2E-WS-CUSTOM/terminal/tabs', { cache: 'no-store' });
+              if (!response.ok) return false;
+              const payload = await response.json();
+              const tabs = Array.isArray(payload.data) ? payload.data : [];
+              const matches = tabs.filter((tab) => tab.agent_id === name);
+              if (matches.length !== 1) return false;
+              const tab = matches[0];
+              const launch = tab.launch || {};
+              const argv = launch.argv || [];
+              const command = argv.length > 1 ? argv[1] : '';
+              const env = launch.env || {};
+              return argv[0] === '-c' &&
+                command.includes("'--backend' 'claude'") &&
+                command.endsWith("'lead'") &&
+                !command.includes('--prompt') &&
+                env.LOOM_AGENT_ROLE === name &&
+                env.LOOM_AGENT_NAME === name &&
+                (launch.cwd || '') === '';
+            })()
+        intent: Confirm the connected Claude terminal preserves the selected backend, agent identity, and no-worktree launch contract
   case-15-repo-scoping-persists-but-custom-interactive-launch-has-:
     steps:
       - click:
@@ -344,6 +317,9 @@ blocks:
       - fill:
           testid: create-agent-interactive-prompt
           value: AFT-REPO-SCOPED-${RUN_ID:-local}
+      - use: capture-controlled-claude-authored-prompt
+        with:
+          fingerprintKey: cust-repo-${RUN_ID:-local}
       - click:
           testid: create-agent-submit
       - wait:
@@ -366,6 +342,9 @@ blocks:
       - fill:
           testid: create-agent-interactive-prompt
           value: AFT-CROSS-REPO-${RUN_ID:-local}
+      - use: capture-controlled-claude-authored-prompt
+        with:
+          fingerprintKey: cust-cross-${RUN_ID:-local}
       - wait:
           fn: |-
             (() => {
@@ -394,58 +373,6 @@ blocks:
       - wait:
           fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('cust-cross-${RUN_ID:-local}')"
         intent: Wait until the workspace-wide custom agent appears after submit
-      - open: /ws/E2E-WS-CUSTOM/agents/cust-repo-${RUN_ID:-local}
-      - wait:
-          fn: |-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
-        intent: Wait until the repo-scoped custom agent detail page is ready
-      - wait:
-          fn: "!!document.querySelector('[data-testid=terminal-view] [data-testid=terminal-tab-bar], [data-testid=terminal-view] [data-testid=terminal-wrapper]')"
-        intent: Wait until the repo-scoped custom agent terminal surface is mounted
-      - open: /ws/E2E-WS-CUSTOM/agents/cust-cross-${RUN_ID:-local}
-      - wait:
-          fn: |-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
-        intent: Wait until the workspace-wide custom agent detail page is ready
-      - wait:
-          fn: "!!document.querySelector('[data-testid=terminal-view] [data-testid=terminal-tab-bar], [data-testid=terminal-view] [data-testid=terminal-wrapper]')"
-        intent: Wait until the workspace-wide custom agent terminal surface is mounted
       - run: |
           set -e
           run="${RUN_ID:-local}"
@@ -472,38 +399,61 @@ blocks:
               path = pathlib.Path(ws["path"]) / "worktrees" / repo / name
               assert not path.exists(), str(path)
           PY
-          for agent in "$repo_agent" "$cross_agent"; do
-            # budget: terminal-launch (120s) - each terminal tab must persist its launch env.
-            for i in $(seq 1 60); do
-              curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/terminal/tabs" > "$AFT_WORK_DIR/d11-tabs-$agent.json" &&
-              python3 - "$AFT_WORK_DIR/d11-tabs-$agent.json" "$agent" <<'PY' && break
-          import json, sys
-          d = json.load(open(sys.argv[1]))
-          agent = sys.argv[2]
-          tabs = d.get("data") or []
-          matches = [t for t in tabs if t.get("agent_id") == agent]
-          assert matches, tabs
-          launch = matches[0].get("launch") or {}
-          assert launch.get("cwd", "") == "", launch
-          PY
-              sleep 2
-            done
-            python3 - "$AFT_WORK_DIR/d11-tabs-$agent.json" "$agent" <<'PY'
-          import json, sys
-          d = json.load(open(sys.argv[1]))
-          agent = sys.argv[2]
-          tabs = d.get("data") or []
-          matches = [t for t in tabs if t.get("agent_id") == agent]
-          assert matches, tabs
-          assert (matches[0].get("launch") or {}).get("cwd", "") == "", matches[0]
-          PY
-          done
-        intent: An operator reads back repo scope, absent agent worktrees, and empty launch cwd from API and terminal tabs
+        intent: An operator reads back repo scope and confirms neither interactive agent receives a filesystem worktree
+      - open: /ws/E2E-WS-CUSTOM/agents/cust-repo-${RUN_ID:-local}
+        intent: An operator opens the repo-scoped agent and waits for its controlled Claude session
+      - use: assert-controlled-agent-terminal
+        with:
+          workspace: E2E-WS-CUSTOM
+          agent: cust-repo-${RUN_ID:-local}
+          role: cust-repo-${RUN_ID:-local}
+          backend: claude
+          readyText: "Controlled Claude stub ready: cust-repo-${RUN_ID:-local}"
+      - use: assert-controlled-claude-authored-prompt
+        with:
+          fingerprintKey: cust-repo-${RUN_ID:-local}
+      - wait:
+          fn: |-
+            (async () => {
+              const name = 'cust-repo-${RUN_ID:-local}';
+              const response = await fetch('/api/workspaces/E2E-WS-CUSTOM/terminal/tabs', { cache: 'no-store' });
+              if (!response.ok) return false;
+              const payload = await response.json();
+              const tabs = Array.isArray(payload.data) ? payload.data : [];
+              const matches = tabs.filter((tab) => tab.agent_id === name);
+              return matches.length === 1 && (matches[0].launch?.cwd || '') === '';
+            })()
+        intent: Confirm the connected repo-scoped agent starts without a terminal worktree cwd
+      - open: /ws/E2E-WS-CUSTOM/agents/cust-cross-${RUN_ID:-local}
+        intent: An operator opens the workspace-wide agent to verify the second independent Claude session
   terminal-15-repo-scoping-persists-but-custom-interactive-launch-has-:
     steps:
-      - expect:
-          visible:
-            selector: body
+      - use: assert-controlled-agent-terminal
+        with:
+          workspace: E2E-WS-CUSTOM
+          agent: cust-cross-${RUN_ID:-local}
+          role: cust-cross-${RUN_ID:-local}
+          backend: claude
+          readyText: "Controlled Claude stub ready: cust-cross-${RUN_ID:-local}"
+      - use: assert-controlled-claude-authored-prompt
+        with:
+          fingerprintKey: cust-cross-${RUN_ID:-local}
+      - wait:
+          fn: |-
+            (async () => {
+              const names = ['cust-repo-${RUN_ID:-local}', 'cust-cross-${RUN_ID:-local}'];
+              const response = await fetch('/api/workspaces/E2E-WS-CUSTOM/terminal/tabs', { cache: 'no-store' });
+              if (!response.ok) return false;
+              const payload = await response.json();
+              const tabs = Array.isArray(payload.data) ? payload.data : [];
+              return names.every((name) => {
+                const matches = tabs.filter((tab) => tab.agent_id === name);
+                return matches.length === 1 &&
+                  matches[0].pty_alive === true &&
+                  (matches[0].launch?.cwd || '') === '';
+              });
+            })()
+        intent: Confirm both independently launched agents remain connected without terminal worktree cwd values
   case-16-custom-prompt-is-not-visible-or-editable-after-creation:
     steps:
       - open: /ws/E2E-WS-CUSTOM/agents/cust-${RUN_ID:-local}
@@ -552,15 +502,53 @@ blocks:
           run="${RUN_ID:-local}"
           name="cust-$run"
           want="You are a release-notes reviewer. AFT-PROMPT-MARKER-$run"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/agents" > "$AFT_WORK_DIR/d12-agents.json"
           LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-CUSTOM role show "$name" --json > "$AFT_WORK_DIR/d12-role.json"
-          python3 - "$AFT_WORK_DIR/d12-role.json" "$want" <<'PY'
-          import json, sys
-          r = json.load(open(sys.argv[1]))
-          assert r.get("prompt") == sys.argv[2], r
+          python3 - "$AFT_WORK_DIR/d12-agents.json" "$AFT_WORK_DIR/d12-role.json" "$name" "$want" <<'PY'
+          import hashlib, json, sys
+          d = json.load(open(sys.argv[1]))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          matches = [a for a in agents or [] if a.get("name") == sys.argv[3]]
+          assert len(matches) == 1, agents
+          assert matches[0].get("role_name") == sys.argv[3], matches[0]
+          assert matches[0].get("backend") == "codex", matches[0]
+          role = json.load(open(sys.argv[2]))
+          prompt = role.get("prompt")
+          prompt_bytes = prompt.encode("utf-8") if isinstance(prompt, str) else None
+          summary = {
+              "name": role.get("name"),
+              "kind": role.get("kind"),
+              "prompt_bytes": len(prompt_bytes) if prompt_bytes is not None else None,
+              "prompt_sha256": hashlib.sha256(prompt_bytes).hexdigest() if prompt_bytes is not None else None,
+          }
+          assert role.get("name") == sys.argv[3], summary
+          assert role.get("kind") == "interactive", summary
+          assert prompt == sys.argv[4], summary
           PY
-        intent: An operator's CLI readback confirms the ignored prompt patch left the role prompt unchanged
+        intent: Confirm the unsupported prompt patch leaves both the agent contract and exact persisted role prompt unchanged
   terminal-16-custom-prompt-is-not-visible-or-editable-after-creation:
     steps:
+      - use: assert-controlled-agent-terminal
+        with:
+          workspace: E2E-WS-CUSTOM
+          agent: cust-${RUN_ID:-local}
+          role: cust-${RUN_ID:-local}
+          backend: codex
+          readyText: "Controlled Codex stub connected: cust-${RUN_ID:-local}"
+      - wait:
+          fn: |-
+            (async () => {
+              const authored = 'You are a release-notes reviewer. AFT-PROMPT-MARKER-${RUN_ID:-local}';
+              const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(authored));
+              const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+              const wrapper = document.querySelector('[data-testid=terminal-wrapper]');
+              if (!wrapper) return false;
+              const rows = Array.from(wrapper.querySelectorAll('.term-row')).map((el) => el.textContent || '').join('\n');
+              const text = rows || wrapper.textContent || '';
+              return text.includes('Controlled Codex prompt contract: prefix-sha256=' + hash + ' safety-blocks=1');
+            })()
+        intent: Confirm the post-patch process still receives the original hidden prompt fingerprint and one safety block
       - expect:
           notText: AFT-PROMPT-MARKER
   case-20-mixed-case-custom-agent-name-is-normalized-by-the-ui:
@@ -579,37 +567,14 @@ blocks:
       - fill:
           testid: create-agent-interactive-prompt
           value: AFT-MIX-${RUN_ID:-local}
+      - use: capture-controlled-claude-authored-prompt
+        with:
+          fingerprintKey: custmix-${RUN_ID:-local}
       - click:
           testid: create-agent-submit
       - wait:
           fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('custmix-${RUN_ID:-local}')"
         intent: Wait until the mixed-case custom agent appears under its normalized name
-      - open: /ws/E2E-WS-CUSTOM/agents/custmix-${RUN_ID:-local}
-      - wait:
-          fn: |-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
-        intent: Wait until the normalized custom agent route renders
-      - wait:
-          fn: "!!document.querySelector('[data-testid=terminal-view] [data-testid=terminal-tab-bar], [data-testid=terminal-view] [data-testid=terminal-wrapper]')"
-        intent: Wait until the normalized custom agent terminal surface is mounted
       - run: |
           set -e
           run="${RUN_ID:-local}"
@@ -625,32 +590,37 @@ blocks:
           matches = [a for a in agents or [] if a.get("name") == name]
           assert len(matches) == 1, agents
           assert matches[0].get("role_name") == name, matches[0]
-          r = json.load(open(sys.argv[2]))
-          assert r.get("name") == name, r
+          role = json.load(open(sys.argv[2]))
+          summary = {key: value for key, value in role.items() if key != "prompt"}
+          assert role.get("name") == name, summary
           PY
-          # budget: terminal-launch (120s) - API-created agent launch argv appears after terminal tab creation.
-          for i in $(seq 1 60); do
-            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/terminal/tabs" > "$AFT_WORK_DIR/d17a-tabs.json" &&
-            python3 - "$AFT_WORK_DIR/d17a-tabs.json" "$name" <<'PY' && exit 0
-          import json, sys
-          d = json.load(open(sys.argv[1]))
-          name = sys.argv[2]
-          tabs = d.get("data") or []
-          matches = [t for t in tabs if t.get("agent_id") == name]
-          assert matches, tabs
-          assert matches[0].get("launch", {}).get("env", {}).get("LOOM_AGENT_ROLE") == name, matches[0]
-          PY
-            sleep 2
-          done
-          echo "normalized custom agent terminal launch metadata never appeared"
-          cat "$AFT_WORK_DIR/d17a-tabs.json" 2>/dev/null || true
-          exit 1
-        intent: An operator polls terminal tabs until the normalized custom agent role env is persisted
+        intent: Confirm the UI persisted one agent and a resolvable role under the normalized identity
+      - open: /ws/E2E-WS-CUSTOM/agents/custmix-${RUN_ID:-local}
+        intent: An operator opens the normalized custom agent to verify its controlled Claude session
   terminal-20-mixed-case-custom-agent-name-is-normalized-by-the-ui:
     steps:
-      - expect:
-          visible:
-            selector: body
+      - use: assert-controlled-agent-terminal
+        with:
+          workspace: E2E-WS-CUSTOM
+          agent: custmix-${RUN_ID:-local}
+          role: custmix-${RUN_ID:-local}
+          backend: claude
+          readyText: "Controlled Claude stub ready: custmix-${RUN_ID:-local}"
+      - use: assert-controlled-claude-authored-prompt
+        with:
+          fingerprintKey: custmix-${RUN_ID:-local}
+      - wait:
+          fn: |-
+            (async () => {
+              const name = 'custmix-${RUN_ID:-local}';
+              const response = await fetch('/api/workspaces/E2E-WS-CUSTOM/terminal/tabs', { cache: 'no-store' });
+              if (!response.ok) return false;
+              const payload = await response.json();
+              const tabs = Array.isArray(payload.data) ? payload.data : [];
+              const matches = tabs.filter((tab) => tab.agent_id === name);
+              return matches.length === 1 && matches[0]?.launch?.env?.LOOM_AGENT_ROLE === name;
+            })()
+        intent: Confirm the connected terminal inherits the same normalized role identity
   case-22-built-in-pr-review-template-works-in-a-clean-control-wor:
     steps:
       - use: choose-pr-review-template
@@ -691,62 +661,19 @@ blocks:
           matches = [a for a in agents or [] if a.get("name") == name]
           assert len(matches) == 1, agents
           assert matches[0].get("role_name") == "pr-review", matches[0]
-          r = json.load(open(sys.argv[2]))
-          assert r.get("kind") == "interactive", r
-          assert r.get("prompt_file") == "builtin:pr-review", r
-          assert not r.get("prompt"), r
-          PY
-        intent: An operator's readback confirms the PR Review agent and built-in role prompt_file
-      - open: /ws/E2E-WS-CUSTOM-CTL/agents/rev-${RUN_ID:-local}
-      - wait:
-          fn: |-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
-        intent: Wait until the PR Review agent detail page is ready
-      - wait:
-          fn: "!!document.querySelector('[data-testid=terminal-view] [data-testid=terminal-tab-bar], [data-testid=terminal-view] [data-testid=terminal-wrapper]')"
-        intent: Wait until the PR Review agent terminal surface is mounted
-      - run: |
-          set -e
-          name="rev-${RUN_ID:-local}"
-          # budget: terminal-launch (120s) - built-in PR Review launch spec can lag PTY spawn.
-          for i in $(seq 1 60); do
-            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM-CTL/terminal/tabs" > "$AFT_WORK_DIR/d19-tabs.json" &&
-            python3 - "$AFT_WORK_DIR/d19-tabs.json" "$name" <<'PY' && exit 0
-          import json, sys
-          d = json.load(open(sys.argv[1]))
-          name = sys.argv[2]
-          tabs = d.get("data") or []
-          matches = [t for t in tabs if t.get("agent_id") == name]
-          assert matches, tabs
-          cmd = (matches[0].get("launch") or {}).get("argv", ["", ""])[1]
           assert matches[0].get("backend") == "claude", matches[0]
-          assert "'--backend' 'claude'" in cmd, cmd
-          assert "'--prompt' 'builtin:pr-review'" in cmd, cmd
+          role = json.load(open(sys.argv[2]))
+          summary = {
+              "name": role.get("name"),
+              "kind": role.get("kind"),
+              "prompt_file": role.get("prompt_file"),
+              "has_inline_prompt": bool(role.get("prompt")),
+          }
+          assert role.get("kind") == "interactive", summary
+          assert role.get("prompt_file") == "builtin:pr-review", summary
+          assert not role.get("prompt"), summary
           PY
-            sleep 2
-          done
-          echo "PR Review launch metadata never appeared"
-          cat "$AFT_WORK_DIR/d19-tabs.json" 2>/dev/null || true
-          exit 1
-        intent: An operator polls terminal tabs until the PR Review launch spec contains the builtin prompt flag
+        intent: Confirm the PR Review agent and its built-in role preserve the selected backend, prompt file, and empty inline prompt
       - api:
           method: GET
           path: /api/workspaces/E2E-WS-CUSTOM-CTL/interactive-prompts
@@ -754,8 +681,34 @@ blocks:
             - path: prompts.1.id
               equals: pr-review
         intent: An operator confirms the built-in interactive prompt registry still exposes pr-review
+      - open: /ws/E2E-WS-CUSTOM-CTL/agents/rev-${RUN_ID:-local}
+        intent: An operator opens the PR Review agent to verify the built-in prompt starts a controlled Claude session
   terminal-22-built-in-pr-review-template-works-in-a-clean-control-wor:
     steps:
+      - use: assert-controlled-agent-terminal
+        with:
+          workspace: E2E-WS-CUSTOM-CTL
+          agent: rev-${RUN_ID:-local}
+          role: pr-review
+          backend: claude
+          readyText: "Controlled Claude stub ready: rev-${RUN_ID:-local}"
+      - use: assert-controlled-claude-generated-prompt
+      - wait:
+          fn: |-
+            (async () => {
+              const name = 'rev-${RUN_ID:-local}';
+              const response = await fetch('/api/workspaces/E2E-WS-CUSTOM-CTL/terminal/tabs', { cache: 'no-store' });
+              if (!response.ok) return false;
+              const payload = await response.json();
+              const tabs = Array.isArray(payload.data) ? payload.data : [];
+              const matches = tabs.filter((tab) => tab.agent_id === name);
+              if (matches.length !== 1) return false;
+              const argv = matches[0].launch?.argv || [];
+              const command = argv.length > 1 ? argv[1] : '';
+              return command.includes("'--backend' 'claude'") &&
+                command.includes("'--prompt' 'builtin:pr-review'");
+            })()
+        intent: Confirm the connected PR Review terminal launches Claude with the built-in prompt contract
       - expect:
           count:
             testid: create-agent-interactive-prompt

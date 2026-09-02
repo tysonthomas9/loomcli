@@ -72,13 +72,23 @@ blocks:
           prompt="You are a release-notes reviewer. AFT-PROMPT-MARKER-$run"
           LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-CUSTOM role show "$name" --json > "$AFT_WORK_DIR/d1-role.json"
           python3 - "$AFT_WORK_DIR/d1-role.json" "$prompt" <<'PY'
-          import json, sys
+          import hashlib, json, sys
           r = json.load(open(sys.argv[1]))
           want = sys.argv[2]
-          assert r.get("kind") == "interactive", r
-          assert r.get("prompt") == want, r
-          assert not r.get("prompt_file"), r
-          assert r.get("description") == "Interactive terminal agent", r
+          prompt = r.get("prompt")
+          prompt_bytes = prompt.encode("utf-8") if isinstance(prompt, str) else None
+          summary = {
+              "name": r.get("name"),
+              "kind": r.get("kind"),
+              "description": r.get("description"),
+              "has_prompt_file": bool(r.get("prompt_file")),
+              "prompt_bytes": len(prompt_bytes) if prompt_bytes is not None else None,
+              "prompt_sha256": hashlib.sha256(prompt_bytes).hexdigest() if prompt_bytes is not None else None,
+          }
+          assert r.get("kind") == "interactive", summary
+          assert prompt == want, summary
+          assert not r.get("prompt_file"), summary
+          assert r.get("description") == "Interactive terminal agent", summary
           PY
         intent: An operator's CLI readback confirms the role stores exactly the prompt text
   terminal-01-custom-prompt-creates-an-interactive-role-with-byte-exac:

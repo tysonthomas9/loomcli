@@ -21,10 +21,13 @@ states:
           name: aria-pressed
           equals: 'true'
   default-planner-ready:
-    intent: The default Planner exists for every path that probes its lifecycle or presentation.
+    intent: The selected background Planner's Info view shows its Plan role and repo scope; no terminal health is implied.
     assert:
-    - expect:
-        text: planner-${RUN_ID:-local}
+    - use: planner-info-ready
+      with:
+        name: planner-${RUN_ID:-local}
+        backend: codex
+        scope: plan-repo
   scenario-1-planner-template-creates-plan-role-agent:
     intent: planner template creates plan role agent
     testIntent: An operator creates a Planner background agent through CreateAgentModal and confirms the workspace records it with the plan role and no auto-start
@@ -45,31 +48,80 @@ states:
     testIntent: An operator who reuses an existing Planner name sees the workspace duplicate error inside the Planner form and no second agent is created
     terminal: true
     assert:
+    - wait:
+        fn: document.querySelector('[data-testid=create-agent-error]')?.textContent.includes('An agent with this name already exists.')
+      intent: Confirm the duplicate-name conflict is visible in the Planner form
     - expect:
         visible:
           testid: create-agent-error
+    - expect:
+        attr:
+          testid: create-agent-error
+          name: role
+          equals: alert
+    - expect:
+        visible:
+          testid: create-agent-overlay
+    - wait:
+        fn: |-
+          (async () => {
+            const response = await fetch('/api/workspaces/E2E-PL-${AFT_CASE_KEY}/agents', { cache: 'no-store' });
+            if (!response.ok) return false;
+            const payload = await response.json();
+            const data = payload.data ?? payload;
+            const agents = Array.isArray(data) ? data : (data.agents || []);
+            return agents.filter((agent) => agent.name === 'planner-${RUN_ID:-local}').length === 1;
+          })()
+      intent: Confirm the rejected duplicate left exactly one Planner definition
   scenario-4-backend-dropdown-persists-on-planner:
     intent: backend dropdown persists on planner
     testIntent: An operator picks a non-default AI backend for the Planner and the workspace records that backend on the agent
     terminal: true
     assert:
-    - expect:
-        text: planner-be-${RUN_ID:-local}
+    - use: planner-info-ready
+      with:
+        name: planner-be-${RUN_ID:-local}
+        backend: claude
+        scope: plan-repo
   scenario-5-repo-chip-deselect-makes-planner-workspace-scope:
     intent: repo chip deselect makes planner workspace scoped
     testIntent: An operator deselects the preselected repo so the Planner gets workspace-wide scope and the workspace records cross-repo with no repos
     terminal: true
     assert:
-    - expect:
-        text: planner-scope-${RUN_ID:-local}
+    - use: planner-info-ready
+      with:
+        name: planner-scope-${RUN_ID:-local}
+        backend: codex
+        scope: All repos
   scenario-6-repo-less-planner-creation-shows-promised-scope-:
     intent: repo-less planner creation shows promised scope then fails
     testIntent: An operator creating a Planner in a workspace with no repos is told the agent will get workspace scope and then sees the create fail
     terminal: true
     assert:
+    - wait:
+        fn: document.querySelector('[data-testid=create-agent-error]')?.textContent.includes('This workspace has no repos yet — add one from the sidebar first.')
+      intent: Confirm the repo-less Planner error is visible in the still-mounted form
     - expect:
         visible:
           testid: create-agent-error
+    - expect:
+        visible:
+          testid: create-agent-overlay
+    - expect:
+        count:
+          testid: create-agent-repo-chips
+          equals: 0
+    - wait:
+        fn: |-
+          (async () => {
+            const response = await fetch('/api/workspaces/E2E-PE-${AFT_CASE_KEY}/agents', { cache: 'no-store' });
+            if (!response.ok) return false;
+            const payload = await response.json();
+            const data = payload.data ?? payload;
+            const agents = Array.isArray(data) ? data : (data.agents || []);
+            return !agents.some((agent) => agent.name === 'planner-empty-${RUN_ID:-local}');
+          })()
+      intent: Confirm the failed submit persisted no Planner definition
   scenario-7-planner-appears-in-rail-background-group-and-mon:
     intent: planner appears in rail background group and monitor
     testIntent: An operator sees the newly created Planner in the agents rail with its Plan role and idle status and in the monitor activity panel
@@ -79,21 +131,25 @@ states:
         fn: "!!document.querySelector('[data-testid=agent-activity-panel]')"
       intent: Wait until the monitor activity panel remounts after the status-cache window
     - wait:
-        fn: document.body.textContent.includes('planner-${RUN_ID:-local}')
-      intent: Wait until the monitor UI includes the Planner name
+        fn: |-
+          (() => {
+            const panel = document.querySelector('[data-testid=agent-activity-panel]');
+            return !!panel && !!panel.querySelector('[aria-label="Agent: planner-${RUN_ID:-local}"]');
+          })()
+      intent: Wait until the exact Planner row appears inside the monitor activity panel
     - expect:
         notText: No agents found
   scenario-8-modal-created-planner-claims-no-work-without-sup:
-    intent: modal-created planner claims no work without supervisor
-    testIntent: An operator confirms a newly created Planner claims no work on its own and a design-less task stays open and unassigned
+    intent: without a supervisor, a configured Planner leaves design-less work unclaimed
+    testIntent: "An operator confirms that creating a Planner definition does not start a worker process: a design-less task stays open, unassigned, and without a session"
     terminal: true
     assert:
     - expect:
         visible:
           testid: board-toolbar
   scenario-9-assigned-in-progress-planner-renders-active-task:
-    intent: assigned in-progress planner renders active task states and assignee chip
-    testIntent: An orchestration client assigns in-progress tasks and an operator sees planning and working states with active-task identity while the detail panel names the Planner assignee
+    intent: assigned issues project Planning and Working presentation states
+    testIntent: An orchestration client assigns in-progress tasks and an operator reviews the synthesized Planning and Working UI projections plus assignee identity; this does not assert either worker process ran
     terminal: true
     assert:
     - wait:
@@ -112,38 +168,40 @@ states:
           name: aria-label
           equals: 'Assignee: planner-${RUN_ID:-local}. Click to change.'
   scenario-10-stopped-planner-shows-no-terminal-empty-state:
-    intent: stopped planner shows no terminal empty state
+    intent: the stopped background Planner shows its no-terminal empty state
     testIntent: An operator who stops the Planner sees the agents page explain that there is no live terminal session instead of attaching to one
     terminal: true
     assert:
     - wait:
-        fn: |-
-          (() => {
-            const page = document.querySelector('[data-testid=agents-page]');
-            const add = Array.from(document.querySelectorAll('button'))
-              .some((b) => (b.textContent || '').trim() === '+ Add agent');
-            const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-            const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-            const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-            if (!page || !settled) {
-              window.__aftAgentsPageStableSig = null;
-              window.__aftAgentsPageStableAt = 0;
-              return false;
-            }
-            if (window.__aftAgentsPageStableSig !== sig) {
-              window.__aftAgentsPageStableSig = sig;
-              window.__aftAgentsPageStableAt = Date.now();
-              return false;
-            }
-            return Date.now() - window.__aftAgentsPageStableAt >= 300;
-          })() && !document.body.textContent.includes('Agent is stopped')
-      intent: Wait until the stopped empty state disappears after desired_state is restored
+        fn: document.body.textContent.includes('Agent is stopped') && document.body.textContent.includes('This agent does not have a live terminal session. Start the agent before attaching to its PTY.')
+      intent: Confirm the selected stopped Planner explains why no live terminal is available
     - expect:
-        notText: Agent is stopped
+        text: Agent is stopped
+    - expect:
+        text: This agent does not have a live terminal session. Start the agent before attaching to its PTY.
+    - expect:
+        count:
+          testid: terminal-wrapper
+          equals: 0
+    - wait:
+        fn: |-
+          (async () => {
+            const response = await fetch('/api/workspaces/E2E-PL-${AFT_CASE_KEY}/agents', { cache: 'no-store' });
+            if (!response.ok) return false;
+            const payload = await response.json();
+            const data = payload.data ?? payload;
+            const agents = Array.isArray(data) ? data : (data.agents || []);
+            const planner = agents.find((agent) => agent.name === 'planner-${RUN_ID:-local}');
+            return planner?.role_name === 'plan' && planner.desired_state === 'stopped';
+          })()
+      intent: Confirm storage still describes a stopped Plan worker rather than a failed interactive terminal
   scenario-11-planner-can-be-deleted-and-recreated:
     intent: planner can be deleted and recreated
     testIntent: An operator removes the Planner through the workspace API and recreates it from the modal under the same name
     terminal: true
     assert:
-    - expect:
-        text: planner-${RUN_ID:-local}
+    - use: planner-info-ready
+      with:
+        name: planner-${RUN_ID:-local}
+        backend: codex
+        scope: plan-repo

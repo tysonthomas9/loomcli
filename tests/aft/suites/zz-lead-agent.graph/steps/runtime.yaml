@@ -108,84 +108,17 @@ blocks:
             equals: 1
   case-11-opening-a-lead-agent-launches-loom-lead-with-attribution:
     steps:
-      - open: /ws/E2E-WS-LEAD/agents/atlas-${RUN_ID:-local}
-      - wait:
-          fn: |-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
-        intent: Wait until the lead detail page is ready
-      - wait:
-          fn: "!!document.querySelector('[data-testid=terminal-wrapper][data-terminal-renderer=xterm] .xterm')"
-        intent: Wait until the lead terminal mounts the xterm grid
-      - wait:
-          fn: |-
-            (() => {
-              const wrapper = document.querySelector('[data-testid=terminal-wrapper]');
-              const rows = wrapper?.querySelector('.xterm-rows')?.textContent || '';
-              return rows.includes('Starting LEAD mode');
-            })()
-        intent: Wait until the lead runtime startup banner reaches the browser terminal
-      - run: |
-          set -e
-          name="atlas-${RUN_ID:-local}"
-          # budget: terminal-launch (60s) - PTY launch and startup banner metadata must settle.
-          for i in $(seq 1 30); do
-            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/terminal/tabs" > "$AFT_WORK_DIR/lead-d8-tabs.json" &&
-            python3 - "$AFT_WORK_DIR/lead-d8-tabs.json" "$AFT_WORK_DIR/leadSession-atlas" "$name" <<'PY' && exit 0
-          import json, sys
-          d = json.load(open(sys.argv[1]))
-          tabs = d.get("data") or []
-          assert isinstance(tabs, list), type(tabs)
-          matches = [t for t in tabs if t.get("kind") == "agent" and t.get("agent_id") == sys.argv[3]]
-          assert matches, tabs
-          live = [t for t in matches if t.get("pty_alive")]
-          t = live[0] if live else matches[0]
-          name = sys.argv[3]
-          open(sys.argv[2], "w", encoding="utf-8").write(t["session_name"])
-          assert t.get("role") == "lead", t
-          assert t.get("writable") is True, t
-          assert t.get("session_name", "").startswith("term_"), t
-          launch = t.get("launch") or {}
-          argv = " ".join(str(x) for x in (launch.get("argv") or []))
-          env = launch.get("env") or {}
-          assert argv.rstrip().endswith("'lead'"), argv
-          assert "'--workspace' 'E2E-WS-LEAD'" in argv, argv
-          assert "--prompt" not in argv, argv
-          assert env.get("LOOM_AGENT_NAME") == name, env
-          assert env.get("LOOM_AGENT_ROLE") == "lead", env
-          assert env.get("LOOM_AGENT_TERMINAL_ID") == t.get("session_name"), env
-          assert env.get("LOOM_WORKSPACE") == "E2E-WS-LEAD", env
-          assert env.get("LOOM_BACKEND") == t.get("backend") and env.get("LOOM_BACKEND"), env
-          assert env.get("LOOM_ORCHESTRATOR_SESSION_ID", "").startswith("lead-"), env
-          PY
-            sleep 2
-          done
-          echo "lead terminal launch metadata never resolved"
-          cat "$AFT_WORK_DIR/lead-d8-tabs.json" 2>/dev/null || true
-          exit 1
-        intent: An operator polls terminal tabs until the exact lead agent launch spec and attribution env are persisted
+      - use: open-lead-terminal
+        with:
+          name: atlas-${RUN_ID:-local}
   terminal-11-opening-a-lead-agent-launches-loom-lead-with-attribution:
     steps:
-      - expect:
-          visible:
-            selector: body
+      - use: controlled-codex-lead-connected
+        with:
+          name: atlas-${RUN_ID:-local}
+      - use: lead-launch-attribution-ready
+        with:
+          name: atlas-${RUN_ID:-local}
   case-12-starting-a-lead-terminal-creates-its-orchestration-sessi:
     steps:
       - run: |
@@ -204,41 +137,56 @@ blocks:
           assert ae.get("LOOM_ORCHESTRATOR_SESSION_ID", "").startswith("lead-"), ae
           assert ae.get("LOOM_ORCHESTRATOR_SESSION_ID") == be.get("LOOM_ORCHESTRATOR_SESSION_ID"), (ae, be)
           PY
-        intent: An operator re-reads the agent terminal session and confirms the session plus launch env remain stable
-      - run: |
-          set -e
-          name="atlas-${RUN_ID:-local}"
-          # budget: monitor-cache (20s) - monitor cache must join the terminal launch env.
-          for i in $(seq 1 20); do
-            curl -sf "$AFT_BASE_URL/api/monitor/status?workspace=E2E-WS-LEAD" > "$AFT_WORK_DIR/lead-d9-monitor.json" &&
-            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/terminal/tabs" > "$AFT_WORK_DIR/lead-d9-tabs.json" &&
-            python3 - "$AFT_WORK_DIR/lead-d9-monitor.json" "$AFT_WORK_DIR/lead-d9-tabs.json" "$name" <<'PY' && exit 0
-          import json, sys
-          mon = json.load(open(sys.argv[1]))
-          tabs_doc = json.load(open(sys.argv[2]))
-          name = sys.argv[3]
-          agents = mon.get("agents") or []
-          matches = [a for a in agents if a.get("name") == name]
-          assert matches, agents
-          orch = matches[0].get("orchestrator_session_id") or ""
-          assert orch.startswith("lead-"), matches[0]
-          tabs = tabs_doc.get("data") or []
-          tab_matches = [t for t in tabs if t.get("kind") == "agent" and t.get("agent_id") == name]
-          assert tab_matches, tabs
-          env_ids = [((t.get("launch") or {}).get("env") or {}).get("LOOM_ORCHESTRATOR_SESSION_ID") for t in tab_matches]
-          assert orch in env_ids, (orch, env_ids, tab_matches)
-          PY
-            sleep 1
-          done
-          echo "monitor status never exposed the lead orchestration session id"
-          cat "$AFT_WORK_DIR/lead-d9-monitor.json" 2>/dev/null || true
-          cat "$AFT_WORK_DIR/lead-d9-tabs.json" 2>/dev/null || true
-          exit 1
-        intent: An operator polls monitor status beyond its cache window and joins orchestrator_session_id to launch.env
+        intent: An operator re-reads the connected Lead terminal session and confirms its identity and inherited orchestration id remain stable.
   terminal-12-starting-a-lead-terminal-creates-its-orchestration-sessi:
     steps:
+      - wait:
+          fn: |-
+            (async () => {
+              const name = 'atlas-${RUN_ID:-local}';
+              const [monitorResponse, tabsResponse] = await Promise.all([
+                fetch('/api/monitor/status?workspace=E2E-WS-LEAD', { cache: 'no-store' }),
+                fetch('/api/workspaces/E2E-WS-LEAD/terminal/tabs', { cache: 'no-store' })
+              ]);
+              if (!monitorResponse.ok || !tabsResponse.ok) return false;
+              const monitor = await monitorResponse.json();
+              const tabsPayload = await tabsResponse.json();
+              const agents = Array.isArray(monitor.agents) ? monitor.agents : [];
+              const tabs = Array.isArray(tabsPayload.data) ? tabsPayload.data : [];
+              const agent = agents.find((entry) => entry.name === name);
+              const sessionId = String(agent?.orchestrator_session_id || '');
+              const matches = tabs.filter((tab) => tab.kind === 'agent' && tab.agent_id === name);
+              const inheritedIds = matches.map((tab) =>
+                String((tab.launch?.env || {}).LOOM_ORCHESTRATOR_SESSION_ID || ''));
+              return sessionId.startsWith('lead-') &&
+                matches.length > 0 &&
+                inheritedIds.includes(sessionId);
+            })()
+        intent: Confirm monitor status joins the Lead's orchestration session id to the child launch environment after the cache settles.
+      - wait:
+          fn: |-
+            (async () => {
+              const [monitorResponse, tabsResponse] = await Promise.all([
+                fetch('/api/monitor/status?workspace=E2E-WS-LEAD', { cache: 'no-store' }),
+                fetch('/api/workspaces/E2E-WS-LEAD/terminal/tabs', { cache: 'no-store' })
+              ]);
+              if (!monitorResponse.ok || !tabsResponse.ok) return false;
+              const monitor = await monitorResponse.json();
+              const tabsPayload = await tabsResponse.json();
+              const agents = Array.isArray(monitor.agents) ? monitor.agents : [];
+              const tabs = Array.isArray(tabsPayload.data) ? tabsPayload.data : [];
+              const agent = agents.find((entry) => entry.name === 'atlas-${RUN_ID:-local}');
+              const sessionId = String(agent?.orchestrator_session_id || '');
+              const matches = tabs.filter((tab) =>
+                tab.agent_id === 'atlas-${RUN_ID:-local}' && tab.kind === 'agent' && tab.pty_alive === true);
+              return sessionId.startsWith('lead-') &&
+                matches.length === 1 &&
+                (matches[0].launch?.env || {}).LOOM_ORCHESTRATOR_SESSION_ID === sessionId;
+            })()
+        intent: Confirm the connected Lead and its live terminal share the same orchestration session id.
       - expect:
-          url: about:blank
+          visible:
+            testid: terminal-wrapper
   case-13-reopening-a-lead-reuses-its-terminal-session:
     steps:
       - run: |
@@ -281,33 +229,32 @@ blocks:
         intent: An operator confirms navigation away and back still leaves exactly one agent-bound lead tab
   terminal-13-reopening-a-lead-reuses-its-terminal-session:
     steps:
-      - expect:
-          visible:
-            selector: body
+      - use: controlled-codex-lead-connected
+        with:
+          name: atlas-${RUN_ID:-local}
   case-14-migrating-a-lead-backend-rebuilds-the-launch-spec:
     steps:
       - run: |
           set -e
           name="atlas-${RUN_ID:-local}"
-          old="$(cat "$AFT_WORK_DIR/leadSession-atlas")"
           curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/terminal/tabs" > "$AFT_WORK_DIR/lead-d13-before-tabs.json"
-          python3 - "$AFT_WORK_DIR/lead-d13-before-tabs.json" "$old" "$name" <<'PY'
+          python3 - "$AFT_WORK_DIR/lead-d13-before-tabs.json" "$AFT_WORK_DIR/leadSession-atlas" "$name" <<'PY'
           import json, sys
           tabs = json.load(open(sys.argv[1])).get("data") or []
-          old, name = sys.argv[2], sys.argv[3]
-          matches = [t for t in tabs if t.get("session_name") == old and t.get("agent_id") == name]
-          assert matches, tabs
-          assert matches[0].get("pty_alive") is True, matches[0]
-          assert ((matches[0].get("launch") or {}).get("env") or {}).get("LOOM_BACKEND"), matches[0]
+          session_file, name = sys.argv[2], sys.argv[3]
+          matches = [t for t in tabs if t.get("agent_id") == name and t.get("backend") == "codex" and t.get("pty_alive") is True]
+          assert len(matches) == 1, tabs
+          assert ((matches[0].get("launch") or {}).get("env") or {}).get("LOOM_BACKEND") == "codex", matches[0]
+          open(session_file, "w", encoding="utf-8").write(matches[0]["session_name"])
           PY
-        intent: An operator records the existing live lead PTY before changing the backend
+        intent: An operator records the connected Codex terminal before changing the Lead's backend.
       - api:
           method: PATCH
           path: /api/workspaces/E2E-WS-LEAD/agents/atlas-${RUN_ID:-local}
           body:
             backend: claude
           status: 200
-        intent: An operator changes the lead agent backend to claude
+        intent: An operator changes the Lead's configured backend to Claude.
       - run: |
           set -e
           name="atlas-${RUN_ID:-local}"
@@ -339,27 +286,22 @@ blocks:
           cat "$AFT_WORK_DIR/lead-d13-session.json" 2>/dev/null || true
           cat "$AFT_WORK_DIR/lead-d13-after-tabs.json" 2>/dev/null || true
           exit 1
-        intent: An operator reads back the rebuilt claude launch spec and the currently surviving old PTY
+        intent: An operator confirms the fresh Claude launch spec while the prior Codex PTY remains live; this does not claim Claude connected.
   terminal-14-migrating-a-lead-backend-rebuilds-the-launch-spec:
     steps:
-      - expect:
-          url: about:blank
+      - use: controlled-codex-lead-connected
+        with:
+          name: atlas-${RUN_ID:-local}
   case-15-stopped-lead-keeps-its-terminal-pane:
     steps:
       - api:
           method: POST
           path: /api/workspaces/E2E-WS-LEAD/agents/atlas-${RUN_ID:-local}/stop
           status: 200
-        intent: An operator stops the lead agent through the lifecycle API
-      - open: /ws/E2E-WS-LEAD/agents/atlas-${RUN_ID:-local}
-      - wait:
-          fn: "!!document.querySelector('[data-testid=terminal-wrapper]')"
-        intent: Wait until the stopped lead detail page still renders its terminal pane
-      - expect:
-          visible:
-            testid: terminal-wrapper
-      - expect:
-          notText: This agent does not have a live terminal session.
+        intent: An operator stops the connected Lead through the lifecycle API.
+      - use: open-lead-terminal
+        with:
+          name: atlas-${RUN_ID:-local}
       - run: |
           set -e
           name="atlas-${RUN_ID:-local}"
@@ -371,12 +313,27 @@ blocks:
           assert d.get("launch"), d
           assert d.get("writable") is True, d
           PY
-        intent: An operator confirms terminal/session still returns a writable launch spec for the stopped interactive lead
+        intent: An operator confirms the stopped interactive Lead still resolves a writable terminal launch spec.
   terminal-15-stopped-lead-keeps-its-terminal-pane:
     steps:
+      - use: controlled-codex-lead-connected
+        with:
+          name: atlas-${RUN_ID:-local}
+      - wait:
+          fn: |-
+            (async () => {
+              const response = await fetch('/api/workspaces/E2E-WS-LEAD/agents', { cache: 'no-store' });
+              if (!response.ok) return false;
+              const payload = await response.json();
+              const data = payload.data ?? payload;
+              const agents = Array.isArray(data) ? data : (Array.isArray(data.agents) ? data.agents : []);
+              const lead = agents.find((agent) => agent.name === 'atlas-${RUN_ID:-local}');
+              return lead?.desired_state === 'stopped';
+            })()
+        intent: Confirm the Lead remains explicitly stopped while its existing terminal stays available for review.
       - expect:
           notText: This agent does not have a live terminal session.
-  case-16-deleting-a-lead-leaves-its-terminal-pty-running-until-ta:
+  prepare-disposable-lead-runtime:
     steps:
       - api:
           method: POST
@@ -389,39 +346,37 @@ blocks:
             repos: []
             backend: codex
           status: 201
-        intent: An operator creates a disposable lead whose deletion this case will observe
-      - open: /ws/E2E-WS-LEAD/agents/doomed-${RUN_ID:-local}
-      - wait:
-          fn: "!!document.querySelector('[data-testid=terminal-wrapper][data-terminal-renderer=xterm] .xterm')"
-        intent: Wait until the disposable lead terminal is attached
+        intent: An operator creates a disposable Lead whose live terminal can be observed before deletion.
+      - use: open-lead-terminal
+        with:
+          name: doomed-${RUN_ID:-local}
+  delete-disposable-lead:
+    steps:
       - run: |
           set -e
           name="doomed-${RUN_ID:-local}"
-          # budget: terminal-launch (40s) - disposable lead tab must appear before deletion.
-          for i in $(seq 1 20); do
-            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/terminal/tabs" > "$AFT_WORK_DIR/lead-d15-tabs-before.json" &&
-            python3 - "$AFT_WORK_DIR/lead-d15-tabs-before.json" "$AFT_WORK_DIR/leadSession-doomed" "$name" <<'PY' && exit 0
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/terminal/tabs" > "$AFT_WORK_DIR/lead-d15-tabs-before.json"
+          python3 - "$AFT_WORK_DIR/lead-d15-tabs-before.json" "$AFT_WORK_DIR/leadSession-doomed" "$name" <<'PY'
           import json, sys
           d = json.load(open(sys.argv[1]))
           tabs = d.get("data") or []
           assert isinstance(tabs, list), type(tabs)
-          matches = [t for t in tabs if t.get("kind") == "agent" and t.get("agent_id") == sys.argv[3]]
-          assert matches, tabs
-          live = [t for t in matches if t.get("pty_alive") is True]
-          assert live, matches
-          open(sys.argv[2], "w", encoding="utf-8").write(live[0]["session_name"])
+          name = sys.argv[3]
+          matches = [t for t in tabs if t.get("kind") == "agent" and t.get("agent_id") == name]
+          assert len(matches) == 1, tabs
+          tab = matches[0]
+          assert tab.get("role") == "lead", tab
+          assert tab.get("backend") == "codex", tab
+          assert tab.get("pty_alive") is True, tab
+          assert ((tab.get("launch") or {}).get("env") or {}).get("LOOM_AGENT_NAME") == name, tab
+          open(sys.argv[2], "w", encoding="utf-8").write(tab["session_name"])
           PY
-            sleep 2
-          done
-          echo "doomed lead PTY never came alive"
-          cat "$AFT_WORK_DIR/lead-d15-tabs-before.json" 2>/dev/null || true
-          exit 1
-        intent: An operator records the disposable lead's live terminal session from the terminal tabs array
+        intent: An operator records the exact live controlled-Codex terminal that belongs to the disposable Lead.
       - api:
           method: DELETE
           path: /api/workspaces/E2E-WS-LEAD/agents/doomed-${RUN_ID:-local}
           status: 200
-        intent: An operator deletes the disposable lead while its terminal is running
+        intent: An operator deletes the disposable Lead while its connected terminal is still running.
       - api:
           method: POST
           path: /api/workspaces/E2E-WS-LEAD/agents/doomed-${RUN_ID:-local}/terminal/session
@@ -429,7 +384,9 @@ blocks:
           assert:
             - path: error
               contains: agent not found
-        intent: An operator confirms the deleted lead can no longer resolve a terminal session
+        intent: Confirm the deleted Lead can no longer resolve a new terminal session.
+  reclaim-disposable-lead-terminal:
+    steps:
       - run: |
           set -e
           session="$(cat "$AFT_WORK_DIR/leadSession-doomed")"
@@ -443,22 +400,43 @@ blocks:
           assert matches, "orphan tab is gone - product behavior changed, re-pin this case"
           assert matches[0].get("pty_alive") is True, "orphan PTY was reaped - product behavior changed, re-pin this case"
           PY
-        intent: An operator confirms the deleted lead still leaves an orphaned tab with a live PTY
+        intent: Confirm the deleted Lead still leaves its exact controlled-Codex terminal alive as an orphaned tab.
       - run: |
           set -e
           session="$(cat "$AFT_WORK_DIR/leadSession-doomed")"
-          curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/terminal/tabs/$session" >/dev/null
-          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/terminal/tabs" > "$AFT_WORK_DIR/lead-d15-tabs-cleanup.json"
-          python3 - "$AFT_WORK_DIR/lead-d15-tabs-cleanup.json" "$session" <<'PY'
+          curl -sf -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/terminal/tabs/$session" >/dev/null
+          for i in $(seq 1 20); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/terminal/tabs" > "$AFT_WORK_DIR/lead-d15-tabs-cleanup.json" &&
+            python3 - "$AFT_WORK_DIR/lead-d15-tabs-cleanup.json" "$session" <<'PY' && exit 0
           import json, sys
           d = json.load(open(sys.argv[1]))
           tabs = d.get("data")
           assert isinstance(tabs, list), d
           assert not [t for t in tabs if t.get("session_name") == sys.argv[2]], tabs
           PY
-        intent: An operator reclaims the orphaned terminal tab so the disposable lead leaves no live PTY behind
+            sleep 1
+          done
+          echo "orphaned disposable Lead terminal was not reclaimed"
+          cat "$AFT_WORK_DIR/lead-d15-tabs-cleanup.json" 2>/dev/null || true
+          exit 1
+        intent: An operator explicitly reclaims the orphaned terminal tab and confirms its PTY is gone.
+      - open: /ws/E2E-WS-LEAD/kanban
+        intent: An operator returns to the active workspace after reclaiming the disposable Lead terminal.
+      - wait:
+          fn: "!!document.querySelector('[data-testid=board-toolbar]')"
+        intent: Wait until the workspace board is ready for continued work.
   terminal-16-deleting-a-lead-leaves-its-terminal-pty-running-until-ta:
     steps:
+      - wait:
+          fn: |-
+            (async () => {
+              const response = await fetch('/api/workspaces/E2E-WS-LEAD/terminal/tabs', { cache: 'no-store' });
+              if (!response.ok) return false;
+              const payload = await response.json();
+              const tabs = Array.isArray(payload.data) ? payload.data : [];
+              return !tabs.some((tab) => tab.agent_id === 'doomed-${RUN_ID:-local}');
+            })()
+        intent: Confirm no terminal tab remains bound to the reclaimed disposable Lead.
       - expect:
           visible:
-            selector: body
+            testid: board-toolbar

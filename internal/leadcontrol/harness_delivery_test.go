@@ -479,6 +479,7 @@ type fakeHarnessConversation struct {
 	resizes               [][2]uint16
 	resizeErrs            []error
 	snapshot              wrapper.Snapshot
+	outputOnAttach        string
 	inputPending          bool
 	sendErr               error
 	sendBlocksUntilCancel bool
@@ -501,6 +502,12 @@ func newFakeHarnessConversation() *fakeHarnessConversation {
 func (f *fakeHarnessConversation) setSnapshot(snap wrapper.Snapshot) {
 	f.mu.Lock()
 	f.snapshot = snap
+	f.mu.Unlock()
+}
+
+func (f *fakeHarnessConversation) setOutputOnAttach(output string) {
+	f.mu.Lock()
+	f.outputOnAttach = output
 	f.mu.Unlock()
 }
 
@@ -576,7 +583,15 @@ func (f *fakeHarnessConversation) WriteStdin(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (f *fakeHarnessConversation) AttachOutput(io.Writer) func() { return func() {} }
+func (f *fakeHarnessConversation) AttachOutput(w io.Writer) func() {
+	f.mu.Lock()
+	output := f.outputOnAttach
+	f.mu.Unlock()
+	if output != "" {
+		_, _ = io.WriteString(w, output)
+	}
+	return func() {}
+}
 
 func (f *fakeHarnessConversation) Resize(cols, rows uint16) error {
 	f.mu.Lock()

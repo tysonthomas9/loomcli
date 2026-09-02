@@ -118,14 +118,12 @@ being folded in; two were rejected with evidence. What changed:
    (`internal/cli/agent/prompts.go:376-381`), and — better than codex noticed — it is
    **user-visible**: `lead.go:118-124` prints `Error loading terminal prompt: …` to stderr and
    then `execShell`s, so the PTY stays alive showing the error. Redesigned around that.
-3. **PRR-D5 must not assert stub terminal text.** With the default codex backend,
-   `loom lead` takes the controlled runtime (`internal/cli/backends/harness_lead_runtime.go:49-51`)
-   → `startCodexAppServer` runs `codex app-server --listen …`
-   (`internal/leadcontrol/codex_runtime.go:107-124`). `e2e/stubs/codex` recognizes only
-   `exec`/`--json` (`e2e/stubs/codex:27-34`), so `app-server` falls into the interactive branch,
-   prints its canned text and **exits**; the runtime then fails to dial. Terminal *content* is
-   therefore not a stable contract. PRR-D5 now asserts `launch.argv` + tab metadata and only
-   that the wterm grid **mounts**.
+3. **PRR-D5 must prove controlled bootstrap, not just a mounted grid.** The deterministic
+   Codex stub now implements both sides of the controlled runtime: `app-server --listen`
+   accepts the loopback WebSocket initialization and `--remote` reports an agent-specific
+   connection plus a hashed prompt contract while remaining interactive. PRR-D5 groups that
+   visible connection with the exact live `/terminal/tabs` record, launch selector, role/name
+   attribution, and terminal wrapper. A launch spec or mounted grid alone is not success.
 4. **`LOOM_WEBUI_GITHUB_TOKEN` is a hard prerequisite, not cleanup.** `resolveGitHubToken`
    returns the env var **before** consulting saved local settings
    (`internal/webui/handlers/prreview/seed.go:127-129`), and the non-real branch of
@@ -489,18 +487,12 @@ Proposed suite layout:
 - **Tier**: product-correctness (`suites/zz-pr-review-agents.test.yaml`, continues PRR-D1).
 - **Intent**: An operator opening their PR Review agent gets a live terminal launched with
   the built-in PR-review prompt.
-- **Steps**: `open: /ws/E2E-WS-PRR/agents/prr-${RUN_ID}` → `wait.fn` `terminal-view` present →
-  `wait.fn` `[data-testid=terminal-wrapper] .wterm` present (the grid **mounts**).
-- **Do not assert terminal row content.** With the default codex backend `loom lead` takes the
-  controlled runtime (`internal/cli/backends/harness_lead_runtime.go:49-51`) and shells out to
-  `codex app-server --listen <endpoint>` (`internal/leadcontrol/codex_runtime.go:107-124`).
-  `e2e/stubs/codex` matches only `exec` / `--json` (`e2e/stubs/codex:27-34`), so `app-server`
-  lands in the interactive branch, prints its canned text and exits — after which the runtime
-  fails to dial its own endpoint. Whatever ends up on screen is an artifact of that mismatch,
-  not a product contract. Mount-only is the honest browser assertion; the contract lives in the
-  launch spec below.
-- **Readbacks** — `run:` over `GET /api/workspaces/E2E-WS-PRR/terminal/tabs`, selecting the tab
-  with `agent_id == "prr-${RUN_ID}"` in python (the response is a list; order is not pinned):
+- **Steps**: `open: /ws/E2E-WS-PRR/agents/prr-${RUN_ID}-${AFT_CASE_ID}` followed by one grouped
+  state assertion. The state waits for the agent-specific controlled Codex marker and prompt
+  contract (`safety-blocks=1`), fails immediately on an agent-start/backend error, reads the
+  same-origin public terminal-tabs endpoint, and keeps the mounted wrapper visible.
+- **Readbacks** — browser `fetch` over `GET /api/workspaces/E2E-WS-PRR/terminal/tabs`, selecting
+  exactly one tab with the case-isolated `agent_id` (the response is a list; order is not pinned):
   - `kind == "agent"`.
   - `launch.argv` (joined) contains `lead`, `--prompt`, and `builtin:pr-review`. Note
     `argv` is the **shell-wrapped** form (`webuterminal.ShellArgvForCommand`,
@@ -508,17 +500,18 @@ Proposed suite layout:
   - `launch.env.LOOM_AGENT_ROLE == "pr-review"` and `launch.env.LOOM_AGENT_NAME ==
     "prr-${RUN_ID}"` (`agent_session.go:427-437`).
   - `pty_alive == true`. DTO: `internal/webui/tabmeta/store.go:35-63`.
-- **Edge rationale**: the *only* deterministic proof that `prompt_file` survives
-  create → role → launch spec. Everything else about the template is cosmetic.
+- **Edge rationale**: the launch selector proves which built-in prompt was requested; the
+  controlled prompt contract proves the process received a rendered prompt with one safety
+  block; the connection marker and `pty_alive` prove that bootstrap did not fail afterward.
 
 #### PRR-D5b — `PR-REVIEW-READY` in terminal output
-- **Tier**: **needs-new-seam** (S5) for the deterministic tier; delivered instead by PRR-R1.
+- **Tier**: the deterministic tier proves a hashed prompt contract; direct sentinel rendering
+  remains a real-backend concern delivered by PRR-R1.
 - **Intent**: An operator sees the PR reviewer announce itself before asking for a PR.
-- **Why blocked**: two layers, not one. The controlled codex runtime never hands the prompt to
-  the stub as a positional argument at all (it goes over the app-server socket —
-  `codex_runtime.go:107-124`, `:144-150`), and even the uncontrolled path's stub discards
-  positional args (`e2e/stubs/codex:27-34`). See S5 for the two candidate seams, including the
-  product's own `LOOM_LEAD_CONTROLLED=0` escape hatch.
+- **Boundary**: the controlled stub observes prompt bytes through the same remote launch used by
+  the product, but intentionally reports a fingerprint and safety-block count rather than
+  echoing operator instructions into reviewer-visible output. The literal sentinel remains
+  unit-tested and is exercised visibly only by the real-backend tier.
 
 #### PRR-D6 — Role reuse and role-conflict on the shared `pr-review` role
 - **Tier**: product-correctness for the happy half; surface for the conflict half
@@ -1315,38 +1308,15 @@ so `pr-workspace-degraded`, `pr-contracts`, `review-actions`, and the new connec
 build the same world instead of four copies of an inline `run:` block. Today those four
 suites each re-implement the same 15-line git+curl incantation.
 
-### S5 — Making `PR-REVIEW-READY` observable without a real model
-**Blocks**: PRR-D5b only.
+### S5 — Controlled PR Review prompt observation without a real model
+**Status**: delivered for PRR-D5 at the prompt-contract boundary.
 
-Revision 1 under-described this. There are **two** layers between the prompt and the screen,
-and a stub edit alone only removes one of them.
-
-- **Layer 1 — the controlled runtime never passes the prompt as argv.** With the default codex
-  backend, `loom lead` calls `RunControlledLeadRuntime`
-  (`internal/cli/backends/harness_lead_runtime.go:49-51`) → `RunCodexLeadRuntime`, which starts
-  `codex app-server --listen <endpoint>` (`internal/leadcontrol/codex_runtime.go:107-124`) and
-  then a remote TUI (`:144-150`); the prompt travels over the socket. The stub answers neither.
-- **Layer 2 — the uncontrolled fallback's stub discards positionals.** `e2e/stubs/codex` matches
-  only `exec` and `--json` (`e2e/stubs/codex:27-34`).
-
-Two candidate seams, in preference order:
-
-1. **Use the product's own escape hatch.** `LOOM_LEAD_CONTROLLED=0`
-   (`harness_lead_runtime.go:14-26`) makes `RunControlledLeadRuntime` return `handled=false`, so
-   `lead.go:140-142` falls back to `cli.InvokeAgent(workDir, prompt, "")` — the plain
-   interactive launch that *does* hand the prompt to the CLI. Combined with a stub that echoes
-   its positional argument, the sentinel becomes `wait: { text: "PR-REVIEW-READY" }` scoped to
-   `[data-testid=terminal-wrapper]`. **Cost**: it is a per-server-process env var, so it changes
-   every lead in the run to the uncontrolled path — which is the *wrong* path to be testing
-   elsewhere. Only acceptable if the case gets its own stack invocation.
-2. **Stub echo.** Capture the last positional argument in `e2e/stubs/codex` and print its first
-   line when `STUB_CODEX_ECHO_PROMPT=1`. Still needs layer 1 solved, so it is strictly
-   additional work, not an alternative.
-
-**Recommendation unchanged: low priority.** The sentinel is unit-tested
-(`internal/cli/agent/prompts_test.go:674`), PRR-D5's `launch.argv` readback proves the wiring
-deterministically, and PRR-R1 covers the human-visible half on a real backend. Do not spend a
-product env var on it.
+The deterministic Codex stub now speaks the controlled app-server/remote protocol. The prompt
+therefore crosses the production launch seam, and the remote side reports a stable fingerprint,
+safety-block count, and exact built-in PR Review identity before holding the PTY open. This proves
+delivery without echoing custom or secret-shaped prompts into screenshots. The identity check is
+derived from the non-secret built-in prompt header (`PR-REVIEW-READY` plus the PR Review mode
+heading); PRR-R1 still owns literal human-visible model behavior.
 
 ### S6 — Missing testids and small product gaps
 - `PRReviewWorkspace` decision buttons (`✗ Request changes` / `✓ Approve`,
@@ -1465,8 +1435,8 @@ before they land):
 | PRR-D2 | template selection semantics + true default | edge | product-correctness | ready | — |
 | PRR-D3 | interactive-prompts contract; checkout prompt hidden | edge | product-correctness + readback | ready | — |
 | PRR-D4 | prompt-list fallback notice (`offline:`) | edge | product-correctness | ready | — |
-| PRR-D5 | terminal launch argv carries `builtin:pr-review` | happy | product-correctness | ready | — |
-| PRR-D5b | `PR-REVIEW-READY` visible in terminal | edge | product-correctness | **S5** (or PRR-R1) | `prompts_test.go:674` (unit) |
+| PRR-D5 | connected controlled runtime receives `builtin:pr-review` contract | happy | product-correctness | ready | controlled Codex app-server/remote stub |
+| PRR-D5b | `PR-REVIEW-READY` visible in terminal | edge | real-backend | PRR-R1 | `prompts_test.go:674` (unit) |
 | PRR-D6a | second PR Review agent reuses the role | edge | product-correctness | ready | — |
 | PRR-D6b | role-name conflict with a different prompt | edge | surface | ready | — |
 | PRR-D7 | "+ New review agent…" prefill + assignment | happy | product-correctness | ready **(G1)** | — |

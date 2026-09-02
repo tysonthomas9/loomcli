@@ -85,6 +85,103 @@ blocks:
     - wait:
         fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('nova')"
       intent: Wait until the created agent appears after the modal closes
+    - open: "/ws/E2E-AF-${AFT_CASE_KEY}/agents/nova"
+      intent: An operator opens nova so the shared trunk ends on the Lead being reviewed, not an incidental agent selection
+  controlled-codex-lead-connected:
+    params:
+    - name
+    steps:
+    - wait:
+        fn: |-
+          (() => {
+            const wrapper = document.querySelector('[data-testid=terminal-wrapper]');
+            if (!wrapper) return false;
+            const rows = Array.from(wrapper.querySelectorAll('.term-row')).map((el) => el.textContent || '').join('\n');
+            const text = rows || wrapper.textContent || '';
+            const failure = [
+              'Error running agent',
+              'backend is not installed',
+              'codex remote stub failed to connect',
+              'Dropping into a shell'
+            ].find((message) => text.includes(message));
+            if (failure) {
+              throw new Error('controlled Lead failed before connection: ' + text.slice(-400));
+            }
+            return text.includes('Starting LEAD mode') &&
+              text.includes('Launching controlled Codex lead session...') &&
+              text.includes('Controlled Codex stub connected: {{name}}');
+          })()
+      intent: Wait until {{name}} completes the controlled Codex bootstrap without falling back to a shell
+    - wait:
+        fn: |-
+          (async () => {
+            const response = await fetch('/api/workspaces/E2E-AF-${AFT_CASE_KEY}/terminal/tabs', { cache: 'no-store' });
+            if (!response.ok) return false;
+            const payload = await response.json();
+            const tabs = Array.isArray(payload.data) ? payload.data : [];
+            const matches = tabs.filter((tab) =>
+              tab.agent_id === '{{name}}' &&
+              tab.kind === 'agent' &&
+              tab.role === 'lead' &&
+              tab.backend === 'codex');
+            return matches.length === 1 && matches[0].pty_alive === true;
+          })()
+      intent: Confirm {{name}} owns exactly one live Codex-backed Lead terminal
+    - expect:
+        visible:
+          testid: terminal-wrapper
+    - wait:
+        fn: |-
+          (() => {
+            const details = document.querySelector("section[aria-label='Agent details']");
+            return location.pathname.endsWith('/agents/{{name}}') &&
+              (details?.textContent || '').toLowerCase().includes('{{name}}'.toLowerCase());
+          })()
+      intent: Confirm the selected agent detail route and visible header still belong to {{name}}
+  show-agent-info:
+    params:
+    - name
+    steps:
+    - open: "/ws/E2E-AF-${AFT_CASE_KEY}/agents/{{name}}"
+      intent: An operator opens {{name}} so its background-agent definition is the review subject
+    - wait:
+        fn: |-
+          (() => {
+            const page = document.querySelector('[data-testid=agents-page]');
+            const card = document.querySelector("[aria-label='Agent: {{name}}']");
+            const root = document.querySelector('[data-testid=agent-editor-groups]');
+            const info = Array.from(root?.querySelectorAll('button[draggable="true"]') || [])
+              .find((button) => (button.textContent || '').trim() === 'Info');
+            const ready = location.pathname.endsWith('/agents/{{name}}') && page && card && root && info;
+            const sig = [location.pathname, !!card, !!root, !!info].join('|');
+            if (!ready) {
+              window.__aftAgentInfoReadySig = null;
+              window.__aftAgentInfoReadyAt = 0;
+              return false;
+            }
+            if (window.__aftAgentInfoReadySig !== sig) {
+              window.__aftAgentInfoReadySig = sig;
+              window.__aftAgentInfoReadyAt = Date.now();
+              return false;
+            }
+            return Date.now() - window.__aftAgentInfoReadyAt >= 300;
+          })()
+      intent: Wait until {{name}} and its editor tabs are ready
+    - click:
+        role: button
+        name: Info
+        exact: true
+      intent: An operator selects {{name}}'s Info tab
+    - wait:
+        fn: |-
+          (() => {
+            const root = document.querySelector('[data-testid=agent-editor-groups]');
+            const info = Array.from(root?.querySelectorAll('button[draggable="true"]') || [])
+              .find((button) => (button.textContent || '').trim() === 'Info');
+            return info?.getAttribute('aria-current') === 'page' &&
+              !!root?.querySelector('[role=tabpanel]:not([data-hidden])');
+          })()
+      intent: Wait until the Info tab is active
   complete-epic-run:
     steps:
     - api:

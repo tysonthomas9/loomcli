@@ -126,11 +126,11 @@ start: browser-ready
 graph:
   browser-ready:
     open-task-runner-dialog: task-runner-dialog-open
-    run-scenario-6-delegation-assigns-and-starts-the-task-r: scenario-6-delegation-assigns-and-starts-the-task-runner-in
+    run-scenario-6-delegation-records-control-plane-state: scenario-6-delegation-records-control-plane-state
     run-scenario-7-task-runner-with-no-designed-ready-work-: scenario-7-task-runner-with-no-designed-ready-work-exits-id
     run-scenario-8-task-runner-source-repo-scope-filters-re: scenario-8-task-runner-source-repo-scope-filters-ready-work
     run-scenario-9-task-runner-logs-tab-shows-archive-mode-: scenario-9-task-runner-logs-tab-shows-archive-mode-and-seed
-    run-scenario-10-task-runner-appears-on-every-agent-surfa: scenario-10-task-runner-appears-on-every-agent-surface-with-
+    run-scenario-10-task-runner-appears-on-every-agent-surfa: scenario-10-task-runner-info-ready
     run-scenario-11-quarantined-task-renders-the-visible-qua: scenario-11-quarantined-task-renders-the-visible-quarantine-
   task-runner-dialog-open:
     choose-task-runner-template: task-runner-template-selected
@@ -140,5 +140,7 @@ graph:
     run-scenario-3-task-runner-backend-dropdown-selection-i: scenario-3-task-runner-backend-dropdown-selection-is-honore
     run-scenario-4-task-runner-name-validation-blocks-inval: scenario-4-task-runner-name-validation-blocks-invalid-names
     run-scenario-5-duplicate-task-runner-name-stays-in-the-: scenario-5-duplicate-task-runner-name-stays-in-the-dialog-w
+  scenario-10-task-runner-info-ready:
+    review-scenario-10-task-runner-in-monitor: scenario-10-task-runner-appears-on-every-agent-surface-with-
 coverage:
   strategy: transition

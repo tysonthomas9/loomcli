@@ -10,41 +10,13 @@ transitions:
     steps:
     - use: provision-nova
   run-scenario-1-created-agent-definition-appears-in-agen:
-    intent: An operator creates a Lead agent through CreateAgentModal, observes it in the agents rail and monitor, and refreshes a runtime-seeded archive log
+    intent: After the shared trunk proves nova's controlled Codex Lead terminal is connected, an operator refreshes its archive log and reviews its warmed monitor projection
     actor: human
     via: ui
     steps:
-    - open: "/ws/E2E-AF-${AFT_CASE_KEY}/agents/nova"
     - wait:
-        fn: |-
-          (() => {
-            const page = document.querySelector('[data-testid=agents-page]');
-            const add = Array.from(document.querySelectorAll('button'))
-              .some((b) => (b.textContent || '').trim() === '+ Add agent');
-            const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-            const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-            const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-            if (!page || !settled) {
-              window.__aftAgentsPageStableSig = null;
-              window.__aftAgentsPageStableAt = 0;
-              return false;
-            }
-            if (window.__aftAgentsPageStableSig !== sig) {
-              window.__aftAgentsPageStableSig = sig;
-              window.__aftAgentsPageStableAt = Date.now();
-              return false;
-            }
-            return Date.now() - window.__aftAgentsPageStableAt >= 300;
-          })()
-      intent: Wait until the agents page is ready
-    - expect:
-        url: "**/ws/*/agents/nova**"
-    - expect:
-        visible:
-          testid: agents-page
-    - wait:
-        fn: document.body.textContent.includes('nova')
-      intent: Wait until nova appears in the current agent surface
+        fn: "!!document.querySelector(\"[aria-label='Agent: nova']\")"
+      intent: Confirm the live agents rail projects nova before leaving the agent review surface
     - click:
         role: button
         name: Logs
@@ -66,15 +38,30 @@ transitions:
     - expect:
         visible:
           testid: terminal-container
+    - run: |
+        set -e
+        for i in $(seq 1 16); do
+          curl -sf "$AFT_BASE_URL/api/monitor/status?workspace=E2E-AF-${AFT_CASE_KEY}" > "$AFT_WORK_DIR/af-d1-monitor.json" &&
+          python3 - "$AFT_WORK_DIR/af-d1-monitor.json" <<'PY' && exit 0
+        import json, sys
+        d = json.load(open(sys.argv[1]))
+        matches = [a for a in d.get("agents", []) if a.get("name") == "nova"]
+        assert len(matches) == 1, d.get("agents")
+        assert matches[0].get("role") == "lead", matches[0]
+        PY
+          sleep 1
+        done
+        echo "monitor status never exposed nova"
+        cat "$AFT_WORK_DIR/af-d1-monitor.json" 2>/dev/null || true
+        exit 1
+      intent: Warm the monitor projection and confirm it classifies nova as a Lead before opening the review surface
     - open: "/ws/E2E-AF-${AFT_CASE_KEY}/monitor"
+      intent: An operator opens the monitor after nova's projection is ready
     - wait:
         fn: "!!document.querySelector('[data-testid=agent-activity-panel]')"
       intent: Wait until the agent activity panel is ready
-    - wait:
-        ms: 5500
-    - reload: true
   run-scenario-2-epic-runner-drives-a-stub-agent-to-compl:
-    intent: An orchestration client triggers the epic-runner workflow so a stub-backed agent claims and closes its task while an operator observes the board and recorded session
+    intent: An orchestration client triggers the epic-runner workflow so its local task-runner path closes the child task and records a session without attributing that execution to a named agent definition
     actor: api-client
     via: api
     steps:
@@ -158,10 +145,8 @@ transitions:
             return Date.now() - window.__aftAgentsPageStableAt >= 300;
           })() && document.body.textContent.includes('agent-flow epic')
       intent: Wait until the agents page renders the completed epic history
-    - run: epic="$(cat "$AFT_WORK_DIR/agentEpicId")"; for i in 1 2 3; do agent-browser --session "$AFT_SESSION" find role button click --name "Expand epic $epic" && exit 0 || true; sleep 1; done; echo "epic expand control never clicked"; exit 1
-      intent: A reviewer retries expanding the epic until completed child history is visible
-    - run: task="$(cat "$AFT_WORK_DIR/agentTaskId")"; for i in 1 2 3; do agent-browser --session "$AFT_SESSION" find role button click --name "$task" && exit 0 || true; sleep 1; done; echo "closed task card never clicked"; exit 1
-      intent: A reviewer retries opening the completed task from epic history
+    - run: epic="$(cat "$AFT_WORK_DIR/agentEpicId")"; task="$(cat "$AFT_WORK_DIR/agentTaskId")"; expand_selector="button[aria-label^='Expand epic $epic (']"; expand_count="$(agent-browser --session "$AFT_SESSION" get count "$expand_selector")"; case "$expand_count" in ''|*[!0-9]*) echo "invalid epic expand count $expand_count"; exit 1;; esac; if [ "$expand_count" -gt 0 ]; then agent-browser --session "$AFT_SESSION" click "$expand_selector"; fi; for i in 1 2 3; do agent-browser --session "$AFT_SESSION" find role button click --name "$task" && exit 0 || true; sleep 1; done; echo "completed task card never opened"; exit 1
+      intent: A reviewer opens the completed task, expanding its epic only on surfaces where history is collapsed
     - wait:
         fn: document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open'
       intent: Wait until the selected issue detail panel is open
@@ -259,6 +244,10 @@ transitions:
         first: true
     - click:
         testid: create-agent-submit
+      intent: An operator submits the workspace-scope Task agent form
+    - use: show-agent-info
+      with:
+        name: iris-${RUN_ID:-local}
     - run: for i in $(seq 1 10); do curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AF-${AFT_CASE_KEY}/agents" > "$AFT_WORK_DIR/agent-list-after-iris.json" && python3 -c 'import json,sys; name=sys.argv[2]; d=json.load(open(sys.argv[1])); data=d.get("data",d); agents=data.get("agents") if isinstance(data,dict) else data; assert any(a.get("name")==name for a in agents), agents' "$AFT_WORK_DIR/agent-list-after-iris.json" "iris-${RUN_ID:-local}" && exit 0; sleep 1; done; echo "iris agent never appeared"; exit 1
       intent: An operator's readback waits for the second agent definition to persist
   complete-epic-run-for-completion:

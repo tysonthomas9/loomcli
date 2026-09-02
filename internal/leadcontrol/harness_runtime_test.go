@@ -68,6 +68,7 @@ func TestRunHarnessLeadRuntimeLifecycle(t *testing.T) {
 	createHarnessLeadSession(t, st)
 
 	fake := newFakeHarnessConversation()
+	fake.setOutputOnAttach("Claude Code\n❯\nControlled Claude stub ready: nova\n")
 	origOpen := openHarnessConversation
 	var gotOpts chat.Options
 	openHarnessConversation = func(_ context.Context, opts chat.Options) (harnessConversation, error) {
@@ -123,6 +124,9 @@ func TestRunHarnessLeadRuntimeLifecycle(t *testing.T) {
 	}
 	if len(gotOpts.Args) == 0 || gotOpts.Args[len(gotOpts.Args)-1] != "lead prompt" {
 		t.Fatalf("prompt not appended to args: %#v", gotOpts.Args)
+	}
+	if got := strings.Count(out.String(), "Controlled Claude stub ready: nova"); got != 1 {
+		t.Fatalf("post-attach TUI frame count = %d, want exactly one; output: %q", got, out.String())
 	}
 
 	// The status watcher promotes the runtime out of "starting" on its first

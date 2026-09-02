@@ -236,7 +236,12 @@ def _run_remote(argv: list[str]) -> int:
     safety_separator = f"\n\n\n{safety_header}"
     prompt_prefix = prompt.rsplit(safety_separator, 1)[0] if safety_separator in prompt else prompt
     prompt_fingerprint = hashlib.sha256(prompt_prefix.encode("utf-8")).hexdigest()
-    safety_blocks = prompt.count(safety_header)
+    prompt_identity = (
+        "pr-review"
+        if prompt_prefix.startswith("PR-REVIEW-READY\n\n## INTERACTIVE MODE: PR Review\n")
+        else "other"
+    )
+    safety_blocks = 1 if safety_separator in prompt else 0
     with _connect_remote(endpoint) as conn:
         _initialize_remote(conn)
         print("Codex")
@@ -248,6 +253,7 @@ def _run_remote(argv: list[str]) -> int:
             f"Controlled Codex prompt contract: prefix-sha256={prompt_fingerprint} safety-blocks={safety_blocks}",
             flush=True,
         )
+        print(f"Controlled Codex prompt identity: {prompt_identity}", flush=True)
         stdin_fd = sys.stdin.fileno()
         while True:
             readable, _, _ = select.select([stdin_fd, conn], [], [])

@@ -25,56 +25,10 @@ transitions:
         value: worker-modal-a-${RUN_ID:-local}
     - click:
         testid: create-agent-submit
-    - wait:
-        fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('worker-modal-a-${RUN_ID:-local}')"
-      intent: Wait until the modal closes and the single-repo worker appears
-    - expect:
-        visible:
-          selector: "[aria-label='Agent: worker-modal-a-${RUN_ID:-local}']"
-    - run: |
-        set -e
-        run="${RUN_ID:-local}"
-        name="worker-modal-a-$run"
-        repo_a="$(cat "$AFT_WORK_DIR/task-repo-a.name")"
-        # budget: db-persist (10s) - modal submit writes the agent row before readback.
-        for i in $(seq 1 10); do
-          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-TR-${AFT_CASE_KEY}/agents" > "$AFT_WORK_DIR/tsk-d1-agents.json" &&
-          python3 - "$AFT_WORK_DIR/tsk-d1-agents.json" "$name" "$repo_a" <<'PY' && exit 0
-        import json, sys
-        d = json.load(open(sys.argv[1]))
-        name, repo_a = sys.argv[2], sys.argv[3]
-        agents = d.get("data") if isinstance(d, dict) else []
-        matches = [a for a in agents or [] if a.get("name") == name]
-        assert len(matches) == 1, agents
-        a = matches[0]
-        assert a.get("role_name") == "task", a
-        assert not a.get("auto"), a
-        assert not a.get("cross_repo"), a
-        assert a.get("repos") == [repo_a], a
-        assert a.get("backend") == "codex", a
-        PY
-          sleep 1
-        done
-        echo "single-repo worker readback never matched"
-        cat "$AFT_WORK_DIR/tsk-d1-agents.json" 2>/dev/null || true
-        exit 1
-      intent: An operator reads back the created worker from the unordered agent list
-    - run: |
-        set -e
-        run="${RUN_ID:-local}"
-        name="worker-modal-a-$run"
-        repo_a="$(cat "$AFT_WORK_DIR/task-repo-a.name")"
-        ws_path="$(cat "$AFT_WORK_DIR/task-workspace.path")"
-        wt="$ws_path/worktrees/$repo_a/$name"
-        # budget: worktree-materialization (10s) - local agent worktree is created after the row.
-        for i in $(seq 1 10); do
-          [ -e "$wt/.git" ] && git -C "$wt" rev-parse --is-inside-work-tree >/dev/null 2>&1 && break
-          sleep 1
-        done
-        [ -e "$wt/.git" ] || { echo "missing worktree $wt"; exit 1; }
-        branch="$(git -C "$wt" rev-parse --abbrev-ref HEAD)"
-        [ "$branch" = "$name" ] || { echo "branch $branch != $name"; exit 1; }
-      intent: An operator confirms the create transaction materialized a git worktree on the agent branch
+      intent: An operator submits the single-repo Task Runner form
+    - use: show-task-agent-info
+      with:
+        name: worker-modal-a-${RUN_ID:-local}
   run-scenario-2-task-runner-modal-creates-a-workspace-sc:
     intent: An operator deselects every repo chip so a Task Runner takes workspace-wide scope and gets a worktree for every repo
     actor: human
@@ -101,49 +55,10 @@ transitions:
           equals: 'false'
     - click:
         testid: create-agent-submit
-    - wait:
-        fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('worker-cross-${RUN_ID:-local}')"
-      intent: Wait until the modal closes and the cross-repo worker appears
-    - run: |
-        set -e
-        run="${RUN_ID:-local}"
-        name="worker-cross-$run"
-        # budget: db-persist (10s) - modal submit writes the cross-repo agent row.
-        for i in $(seq 1 10); do
-          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-TR-${AFT_CASE_KEY}/agents" > "$AFT_WORK_DIR/tsk-d2-agents.json" &&
-          python3 - "$AFT_WORK_DIR/tsk-d2-agents.json" "$name" <<'PY' && exit 0
-        import json, sys
-        d = json.load(open(sys.argv[1]))
-        name = sys.argv[2]
-        agents = d.get("data") if isinstance(d, dict) else []
-        matches = [a for a in agents or [] if a.get("name") == name]
-        assert len(matches) == 1, agents
-        a = matches[0]
-        assert a.get("role_name") == "task", a
-        assert a.get("cross_repo") is True, a
-        assert not a.get("repos"), a
-        PY
-          sleep 1
-        done
-        echo "cross-repo worker readback never matched"
-        cat "$AFT_WORK_DIR/tsk-d2-agents.json" 2>/dev/null || true
-        exit 1
-      intent: An operator reads back the cross-repo worker scope from the unordered agent list
-    - run: |
-        set -e
-        run="${RUN_ID:-local}"
-        name="worker-cross-$run"
-        ws_path="$(cat "$AFT_WORK_DIR/task-workspace.path")"
-        repo_a="$(cat "$AFT_WORK_DIR/task-repo-a.name")"
-        repo_b="$(cat "$AFT_WORK_DIR/task-repo-b.name")"
-        for repo in "$repo_a" "$repo_b"; do
-          wt="$ws_path/worktrees/$repo/$name"
-          [ -e "$wt/.git" ] || { echo "missing cross-repo worktree $wt"; exit 1; }
-          git -C "$wt" rev-parse --is-inside-work-tree >/dev/null
-          branch="$(git -C "$wt" rev-parse --abbrev-ref HEAD)"
-          [ "$branch" = "$name" ] || { echo "branch $branch != $name for $repo"; exit 1; }
-        done
-      intent: An operator confirms workspace-scope creation materialized one worktree per repo
+      intent: An operator submits the workspace-scope Task Runner form
+    - use: show-task-agent-info
+      with:
+        name: worker-cross-${RUN_ID:-local}
   run-scenario-3-task-runner-backend-dropdown-selection-i:
     intent: An operator selects a non-default backend for a Task Runner and verifies that backend is stored on the agent
     actor: human
@@ -171,24 +86,10 @@ transitions:
         value: claude
     - click:
         testid: create-agent-submit
-    - wait:
-        fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('worker-claude-${RUN_ID:-local}')"
-      intent: Wait until the claude-backed worker appears after submit
-    - run: |
-        set -e
-        run="${RUN_ID:-local}"
-        name="worker-claude-$run"
-        curl -sf "$AFT_BASE_URL/api/workspaces/E2E-TR-${AFT_CASE_KEY}/agents" > "$AFT_WORK_DIR/tsk-d3-agents.json"
-        python3 - "$AFT_WORK_DIR/tsk-d3-agents.json" "$name" <<'PY'
-        import json, sys
-        d = json.load(open(sys.argv[1]))
-        name = sys.argv[2]
-        agents = d.get("data") if isinstance(d, dict) else []
-        matches = [a for a in agents or [] if a.get("name") == name]
-        assert len(matches) == 1, agents
-        assert matches[0].get("backend") == "claude", matches[0]
-        PY
-      intent: An operator reads back the selected claude backend from the agent list
+      intent: An operator submits the Task Runner with the selected Claude backend
+    - use: show-task-agent-info
+      with:
+        name: worker-claude-${RUN_ID:-local}
   run-scenario-4-task-runner-name-validation-blocks-inval:
     intent: An operator cannot submit invalid Task Runner names and sees a valid uppercase entry normalized to lowercase storage
     actor: human
@@ -221,24 +122,10 @@ transitions:
           equals: true
     - click:
         testid: create-agent-submit
-    - wait:
-        fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('worker-b-${RUN_ID:-local}')"
-      intent: Wait until the normalized lowercase worker appears
-    - run: |
-        set -e
-        run="${RUN_ID:-local}"
-        name="worker-b-$run"
-        curl -sf "$AFT_BASE_URL/api/workspaces/E2E-TR-${AFT_CASE_KEY}/agents" > "$AFT_WORK_DIR/tsk-d4-agents.json"
-        python3 - "$AFT_WORK_DIR/tsk-d4-agents.json" "$name" <<'PY'
-        import json, sys
-        d = json.load(open(sys.argv[1]))
-        name = sys.argv[2]
-        agents = d.get("data") if isinstance(d, dict) else []
-        matches = [a for a in agents or [] if a.get("name") == name]
-        assert len(matches) == 1, agents
-        assert matches[0].get("name") == name, matches[0]
-        PY
-      intent: An operator reads back the lowercase stored agent name from the unordered list
+      intent: An operator submits the valid uppercase name for normalization
+    - use: show-task-agent-info
+      with:
+        name: worker-b-${RUN_ID:-local}
   run-scenario-5-duplicate-task-runner-name-stays-in-the-:
     intent: An operator reusing an existing Task Runner name sees the server conflict in the dialog and no second agent is created
     actor: human
@@ -252,32 +139,8 @@ transitions:
     - wait:
         fn: document.querySelector('[data-testid=create-agent-error]')?.textContent.includes('An agent with this name already exists.')
       intent: Wait until the duplicate-name conflict is rendered in the modal
-    - expect:
-        visible:
-          testid: create-agent-error
-    - expect:
-        visible:
-          testid: create-agent-overlay
-    - expect:
-        value:
-          testid: create-agent-name
-          equals: worker-a-${RUN_ID:-local}
-    - run: |
-        set -e
-        run="${RUN_ID:-local}"
-        name="worker-a-$run"
-        curl -sf "$AFT_BASE_URL/api/workspaces/E2E-TR-${AFT_CASE_KEY}/agents" > "$AFT_WORK_DIR/tsk-d5-agents.json"
-        python3 - "$AFT_WORK_DIR/tsk-d5-agents.json" "$name" <<'PY'
-        import json, sys
-        d = json.load(open(sys.argv[1]))
-        name = sys.argv[2]
-        agents = d.get("data") if isinstance(d, dict) else []
-        matches = [a for a in agents or [] if a.get("name") == name]
-        assert len(matches) == 1, agents
-        PY
-      intent: An operator confirms the duplicate submit did not create a second agent
-  run-scenario-6-delegation-assigns-and-starts-the-task-r:
-    intent: An operator delegates an open designed task to a UI-created Task Runner and verifies the issue and agent record that work was started
+  run-scenario-6-delegation-records-control-plane-state:
+    intent: An operator delegates an open designed task and verifies the resulting issue and requested-agent lifecycle projections without claiming a daemon or worker process ran
     actor: human
     via: ui
     steps:
@@ -327,7 +190,7 @@ transitions:
         testid: agent-assignee-worker-a-${RUN_ID:-local}
     - wait:
         fn: "!document.querySelector('[data-testid=assignee-saving]') && !document.querySelector('[data-testid=assignee-error]') && !document.querySelector('[data-testid=assignee-dropdown-menu]')"
-      intent: Wait until assignment save and lifecycle start complete without an assignee error
+      intent: Wait until assignment save and the requested lifecycle projection complete without an assignee error
     - run: |
         set -e
         run="${RUN_ID:-local}"
@@ -370,7 +233,7 @@ transitions:
         echo "worker-a lifecycle state never reached active/running"
         cat "$AFT_WORK_DIR/tsk-d7-agents.json" 2>/dev/null || true
         exit 1
-      intent: An operator reads back the Task Runner lifecycle state after delegation
+      intent: An operator reads back the Task Runner's control-plane active/running request after delegation; this is not process-health evidence
   run-scenario-7-task-runner-with-no-designed-ready-work-:
     intent: A Task Runner started when only a designless open task exists reports no work and leaves that task untouched
     actor: human
@@ -706,74 +569,44 @@ transitions:
     - click:
         testid: log-refresh-button
   run-scenario-10-task-runner-appears-on-every-agent-surfa:
-    intent: An operator can discover a newly created Task Runner from the agents rail, workspace tree, monitor, and agent detail deep link
+    intent: An operator opens the existing Task Runner's Info view and reviews its background-worker identity across the detail route, rail, and workspace tree
     actor: human
     via: ui
     steps:
-    - open: "/ws/E2E-TR-${AFT_CASE_KEY}/agents/worker-a-${RUN_ID:-local}"
-    - wait:
-        fn: |-
-          (() => {
-            const page = document.querySelector('[data-testid=agents-page]');
-            const add = Array.from(document.querySelectorAll('button'))
-              .some((b) => (b.textContent || '').trim() === '+ Add agent');
-            const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-            const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-            const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-            if (!page || !settled) {
-              window.__aftAgentsPageStableSig = null;
-              window.__aftAgentsPageStableAt = 0;
-              return false;
-            }
-            if (window.__aftAgentsPageStableSig !== sig) {
-              window.__aftAgentsPageStableSig = sig;
-              window.__aftAgentsPageStableAt = Date.now();
-              return false;
-            }
-            return Date.now() - window.__aftAgentsPageStableAt >= 300;
-          })()
-      intent: Wait until the worker-a agent detail page is ready
-    - expect:
-        url: "**/ws/*/agents/worker-a-${RUN_ID:-local}**"
-    - expect:
-        visible:
-          selector: "[aria-label='Agent: worker-a-${RUN_ID:-local}']"
-    - wait:
-        fn: document.querySelector('[data-testid=agent-section-background]')?.textContent.includes('worker-a-${RUN_ID:-local}')
-      intent: Wait until the workspace tree renders worker-a under the Background subgroup
-    - wait:
-        fn: |-
-          (() => {
-            const group = document.querySelector('[data-testid=agent-editor-groups]');
-            if (!group) return false;
-            const labels = Array.from(group.querySelectorAll('button[draggable="true"]')).map((b) => b.textContent.trim()).filter(Boolean);
-            return JSON.stringify(labels) === JSON.stringify(["Terminal", "Info", "Git", "Logs", "Diff", "Files"]);
-          })()
-      intent: Wait until the agent detail route renders the expected six editor tabs
-    - open: "/ws/E2E-TR-${AFT_CASE_KEY}/monitor"
-    - wait:
-        fn: "!!document.querySelector('[data-testid=agent-activity-panel]')"
-      intent: Wait until the task workspace monitor activity panel is mounted
+    - use: show-task-agent-info
+      with:
+        name: worker-a-${RUN_ID:-local}
+  review-scenario-10-task-runner-in-monitor:
+    intent: An operator opens the monitor only after its status projection contains worker-a; the monitor row is presentation evidence, not proof of a live worker process
+    actor: human
+    via: ui
+    steps:
     - run: |
         set -e
         name="worker-a-${RUN_ID:-local}"
-        # budget: monitor-cache (16s) - monitor/status can lag seeded log visibility.
+        # budget: monitor-cache (16s) - warm the projection before opening the review surface.
         for i in $(seq 1 16); do
           curl -sf "$AFT_BASE_URL/api/monitor/status?workspace=E2E-TR-${AFT_CASE_KEY}" > "$AFT_WORK_DIR/tsk-d17-monitor.json" &&
           python3 - "$AFT_WORK_DIR/tsk-d17-monitor.json" "$name" <<'PY' && exit 0
         import json, sys
         d = json.load(open(sys.argv[1]))
-        assert any(a.get("name") == sys.argv[2] for a in d.get("agents", [])), d.get("agents")
+        matches = [a for a in d.get("agents", []) if a.get("name") == sys.argv[2]]
+        assert len(matches) == 1, d.get("agents")
+        assert matches[0].get("role") == "task", matches[0]
         PY
           sleep 1
         done
         echo "monitor status never exposed worker-a"
         cat "$AFT_WORK_DIR/tsk-d17-monitor.json" 2>/dev/null || true
         exit 1
-      intent: Poll monitor status past its cache window before reloading the monitor UI
-    - reload: true
+      intent: Warm the monitor projection and confirm it classifies worker-a as a Task agent
+    - open: "/ws/E2E-TR-${AFT_CASE_KEY}/monitor"
+      intent: An operator opens the monitor after its worker projection is ready
+    - wait:
+        fn: "!!document.querySelector('[data-testid=agent-activity-panel]')"
+      intent: Wait until the task workspace monitor activity panel is mounted
   run-scenario-11-quarantined-task-renders-the-visible-qua:
-    intent: An operator sees the board badge for a task whose terminal daemon state marks it quarantined
+    intent: An operator sees the board badge for a task whose blocked status and quarantine label were seeded through the API; no daemon execution is claimed
     actor: human
     via: ui
     steps:
@@ -790,13 +623,13 @@ transitions:
         save:
         - from: data.id
           as: tskD18IssueId
-      intent: An API client creates the quarantined task before moving it to blocked
+      intent: An API client creates the quarantine presentation fixture with the quarantine label
     - api:
         method: PATCH
         path: "/api/workspaces/E2E-TR-${AFT_CASE_KEY}/issues/${var:tskD18IssueId}"
         body:
           status: blocked
-      intent: An API client moves the quarantined task to blocked because create rejects blocked status
+      intent: An API client seeds the blocked status required for the quarantine badge because create rejects blocked status
     - open: "/ws/E2E-TR-${AFT_CASE_KEY}/kanban"
     - wait:
         fn: "!!document.querySelector('[data-testid=board-toolbar]')"

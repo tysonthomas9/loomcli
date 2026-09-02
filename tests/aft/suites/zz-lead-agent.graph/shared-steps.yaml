@@ -90,6 +90,166 @@ blocks:
           dialogIntent: "{{dialogIntent}}"
       - click:
           testid: create-agent-template-lead
+  open-lead-terminal:
+    params:
+      - name
+    steps:
+      - open: /ws/E2E-WS-LEAD/agents/{{name}}
+        intent: An operator opens {{name}} and waits for its embedded Lead terminal evidence.
+  show-lead-info:
+    params:
+      - name
+    steps:
+      - open: /ws/E2E-WS-LEAD/agents/{{name}}
+        intent: An operator opens {{name}} so its Lead definition is the review subject.
+      - wait:
+          fn: |-
+            (() => {
+              const page = document.querySelector('[data-testid=agents-page]');
+              const card = document.querySelector("[aria-label='Agent: {{name}}']");
+              const root = document.querySelector('[data-testid=agent-editor-groups]');
+              const info = Array.from(root?.querySelectorAll('button[draggable="true"]') || [])
+                .find((button) => (button.textContent || '').trim() === 'Info');
+              return location.pathname.endsWith('/agents/{{name}}') && !!page && !!card && !!root && !!info;
+            })()
+        intent: Wait until {{name}} and its editor tabs are ready.
+      - click:
+          role: button
+          name: Info
+          exact: true
+        intent: An operator selects {{name}}'s Info tab.
+      - wait:
+          fn: |-
+            (() => {
+              const root = document.querySelector('[data-testid=agent-editor-groups]');
+              const info = Array.from(root?.querySelectorAll('button[draggable="true"]') || [])
+                .find((button) => (button.textContent || '').trim() === 'Info');
+              const pane = Array.from(root?.querySelectorAll('[role=tabpanel]:not([data-hidden])') || [])
+                .find((candidate) => !candidate.parentElement?.closest('[role=tabpanel]'));
+              const text = (pane?.textContent || '').replace(/\s+/g, ' ').trim();
+              return info?.getAttribute('aria-current') === 'page' &&
+                text.includes('{{name}}') && text.includes('Lead agent');
+            })()
+        intent: Wait until {{name}}'s Info pane visibly identifies the Lead definition.
+  controlled-codex-lead-connected:
+    params:
+      - name
+    steps:
+      - wait:
+          fn: |-
+            (() => {
+              const wrapper = document.querySelector('[data-testid=terminal-wrapper]');
+              if (!wrapper) return false;
+              const rows = Array.from(wrapper.querySelectorAll('.term-row')).map((el) => el.textContent || '').join('\n');
+              const text = rows || wrapper.textContent || '';
+              const failure = [
+                'Error running agent',
+                'backend is not installed',
+                'codex app-server exited before ready',
+                'codex remote stub failed to connect',
+                'Dropping into a shell'
+              ].find((message) => text.includes(message));
+              if (failure) {
+                throw new Error('controlled Lead failed before connection: ' + text.slice(-400));
+              }
+              return text.includes('Starting LEAD mode') &&
+                text.includes('Launching controlled Codex lead session...') &&
+                text.includes('Controlled Codex stub connected: {{name}}');
+            })()
+        intent: Wait until {{name}} completes the controlled Codex bootstrap without falling back to a shell.
+      - wait:
+          fn: |-
+            (async () => {
+              const response = await fetch('/api/workspaces/E2E-WS-LEAD/terminal/tabs', { cache: 'no-store' });
+              if (!response.ok) return false;
+              const payload = await response.json();
+              const tabs = Array.isArray(payload.data) ? payload.data : [];
+              const matches = tabs.filter((tab) =>
+                tab.agent_id === '{{name}}' &&
+                tab.kind === 'agent' &&
+                tab.role === 'lead' &&
+                tab.backend === 'codex');
+              return matches.length === 1 && matches[0].pty_alive === true;
+            })()
+        intent: Confirm {{name}} owns exactly one live Codex-backed Lead terminal.
+      - expect:
+          visible:
+            testid: terminal-wrapper
+  controlled-claude-lead-connected:
+    params:
+      - name
+    steps:
+      - wait:
+          fn: |-
+            (() => {
+              const wrapper = document.querySelector('[data-testid=terminal-wrapper]');
+              if (!wrapper) return false;
+              const rows = Array.from(wrapper.querySelectorAll('.term-row')).map((el) => el.textContent || '').join('\n');
+              const text = rows || wrapper.textContent || '';
+              const failure = [
+                'Error running agent',
+                'backend is not installed',
+                'Dropping into a shell'
+              ].find((message) => text.includes(message));
+              if (failure) {
+                throw new Error('controlled Claude Lead failed before connection: ' + text.slice(-400));
+              }
+              const session = /Controlled Claude session: [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+              return text.includes('Controlled Claude stub ready: {{name}}') &&
+                session.test(text);
+            })()
+        intent: Wait until {{name}} completes the controlled Claude bootstrap and reports its session identity without falling back to a shell.
+      - wait:
+          fn: |-
+            (async () => {
+              const response = await fetch('/api/workspaces/E2E-WS-LEAD/terminal/tabs', { cache: 'no-store' });
+              if (!response.ok) return false;
+              const payload = await response.json();
+              const tabs = Array.isArray(payload.data) ? payload.data : [];
+              const matches = tabs.filter((tab) =>
+                tab.agent_id === '{{name}}' &&
+                tab.kind === 'agent' &&
+                tab.role === 'lead' &&
+                tab.backend === 'claude');
+              return matches.length === 1 && matches[0].pty_alive === true;
+            })()
+        intent: Confirm {{name}} owns exactly one live Claude-backed Lead terminal.
+      - expect:
+          visible:
+            testid: terminal-wrapper
+        intent: Confirm {{name}}'s connected Claude terminal is visible to the reviewer.
+  lead-launch-attribution-ready:
+    params:
+      - name
+    steps:
+      - wait:
+          fn: |-
+            (async () => {
+              const response = await fetch('/api/workspaces/E2E-WS-LEAD/terminal/tabs', { cache: 'no-store' });
+              if (!response.ok) return false;
+              const payload = await response.json();
+              const tabs = Array.isArray(payload.data) ? payload.data : [];
+              const matches = tabs.filter((tab) =>
+                tab.agent_id === '{{name}}' && tab.kind === 'agent' && tab.pty_alive === true);
+              if (matches.length !== 1) return false;
+              const tab = matches[0];
+              const launch = tab.launch || {};
+              const argv = (launch.argv || []).map(String).join(' ');
+              const env = launch.env || {};
+              return tab.role === 'lead' &&
+                tab.writable === true &&
+                String(tab.session_name || '').startsWith('term_') &&
+                argv.trim().endsWith("'lead'") &&
+                argv.includes("'--workspace' 'E2E-WS-LEAD'") &&
+                !argv.includes('--prompt') &&
+                env.LOOM_AGENT_NAME === '{{name}}' &&
+                env.LOOM_AGENT_ROLE === 'lead' &&
+                env.LOOM_AGENT_TERMINAL_ID === tab.session_name &&
+                env.LOOM_WORKSPACE === 'E2E-WS-LEAD' &&
+                env.LOOM_BACKEND === tab.backend &&
+                String(env.LOOM_ORCHESTRATOR_SESSION_ID || '').startsWith('lead-');
+            })()
+        intent: Confirm the connected Lead terminal carries the exact workspace and orchestration attribution contract.
   remove-case-agent-and-tabs:
     params:
       - name
@@ -140,33 +300,6 @@ blocks:
       - use: ensure-lead-agent
         with:
           name: atlas-${RUN_ID:-local}
-  start-primary-lead-session:
-    steps:
-      - run: |-
-          set -e
-          name="atlas-${RUN_ID:-local}"
-          session_file="$AFT_WORK_DIR/leadSession-atlas"
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/agents/$name/terminal/session" > "$AFT_WORK_DIR/prereq-atlas-session.json"
-          python3 - "$AFT_WORK_DIR/prereq-atlas-session.json" "$session_file" <<'PY'
-          import json, sys
-          data = json.load(open(sys.argv[1]))["data"]
-          assert data.get("session_name"), data
-          open(sys.argv[2], "w", encoding="utf-8").write(data["session_name"])
-          PY
-          for i in $(seq 1 20); do
-            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/terminal/tabs" > "$AFT_WORK_DIR/prereq-atlas-tabs.json" &&
-            python3 - "$AFT_WORK_DIR/prereq-atlas-tabs.json" "$session_file" <<'PY' && exit 0
-          import json, sys
-          tabs = json.load(open(sys.argv[1])).get("data") or []
-          session = open(sys.argv[2], encoding="utf-8").read().strip()
-          matches = [tab for tab in tabs if tab.get("session_name") == session]
-          assert matches and matches[0].get("pty_alive") is True, matches
-          PY
-            sleep 2
-          done
-          echo "primary Lead prerequisite terminal never became live"
-          exit 1
-        intent: Start the primary Lead terminal, record its session id, and wait until its PTY is live.
   assign-primary-lead:
     steps:
       - api:

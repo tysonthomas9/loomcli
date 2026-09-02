@@ -116,6 +116,176 @@ blocks:
           dialogIntent: "{{dialogIntent}}"
       - click:
           testid: create-agent-template-interactive-pr-review
+  assert-controlled-agent-terminal:
+    params:
+      - workspace
+      - agent
+      - role
+      - backend
+      - readyText
+    steps:
+      - wait:
+          fn: |-
+            (() => {
+              const wrapper = document.querySelector('[data-testid=terminal-wrapper]');
+              if (!wrapper) return false;
+              const rows = Array.from(wrapper.querySelectorAll('.term-row')).map((el) => el.textContent || '').join('\n');
+              const text = rows || wrapper.textContent || '';
+              if (text.includes('Error running agent') || text.includes('backend is not installed')) {
+                throw new Error('controlled agent failed to start: ' + text.slice(-400));
+              }
+              return text.includes('{{readyText}}');
+            })()
+        intent: Wait until the controlled {{backend}} process is ready without an agent-start error
+      - wait:
+          fn: |-
+            (async () => {
+              const response = await fetch('/api/workspaces/{{workspace}}/terminal/tabs', { cache: 'no-store' });
+              if (!response.ok) return false;
+              const payload = await response.json();
+              const tabs = Array.isArray(payload.data) ? payload.data : [];
+              const matches = tabs.filter((tab) =>
+                tab.agent_id === '{{agent}}' &&
+                tab.kind === 'agent' &&
+                tab.role === '{{role}}' &&
+                tab.backend === '{{backend}}');
+              return matches.length === 1 && matches[0].pty_alive === true;
+            })()
+        intent: Confirm exactly one live {{backend}} terminal belongs to {{agent}}
+      - expect:
+          visible:
+            testid: terminal-wrapper
+        intent: Confirm the connected {{backend}} terminal is visible to the reviewer
+  capture-controlled-claude-authored-prompt:
+    params:
+      - fingerprintKey
+    steps:
+      - wait:
+          fn: |-
+            (async () => {
+              const field = document.querySelector('[data-testid=create-agent-interactive-prompt]');
+              if (!field || !('value' in field)) return false;
+              const bytes = new TextEncoder().encode(String(field.value));
+              if (bytes.byteLength === 0) return false;
+              const digest = await crypto.subtle.digest('SHA-256', bytes);
+              const sha256 = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+              const key = 'aft:claude-prompt-fingerprint:' + '{{fingerprintKey}}';
+              sessionStorage.setItem(key, JSON.stringify({ sha256, bytes: bytes.byteLength }));
+              return true;
+            })()
+        intent: Capture only the mounted prompt fingerprint and UTF-8 byte count before submission
+  assert-controlled-claude-authored-prompt:
+    params:
+      - fingerprintKey
+    steps:
+      - wait:
+          fn: |-
+            (() => {
+              const key = 'aft:claude-prompt-fingerprint:' + '{{fingerprintKey}}';
+              const encoded = sessionStorage.getItem(key);
+              if (!encoded) throw new Error('missing captured Claude prompt fingerprint');
+              const fingerprint = JSON.parse(encoded);
+              const hash = String(fingerprint.sha256 || '');
+              const byteLength = Number(fingerprint.bytes);
+              if (!/^[0-9a-f]{64}$/i.test(hash) || !Number.isInteger(byteLength) || byteLength <= 0) {
+                throw new Error('invalid captured Claude prompt fingerprint');
+              }
+              const wrapper = document.querySelector('[data-testid=terminal-wrapper]');
+              if (!wrapper) return false;
+              const rows = Array.from(wrapper.querySelectorAll('.term-row')).map((el) => el.textContent || '').join('\n');
+              const text = rows || wrapper.textContent || '';
+              const expected = 'Controlled Claude prompt contract: authored-sha256=' + hash + ' authored-bytes=' + byteLength + ' safety-blocks=1';
+              const session = /Controlled Claude session: [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+              return text.includes(expected) && session.test(text);
+            })()
+        intent: Confirm Claude received the same authored prompt captured from the mounted form and reports its run-scoped session UUID without exposing prompt text
+  assert-controlled-claude-generated-prompt:
+    steps:
+      - wait:
+          fn: |-
+            (() => {
+              const wrapper = document.querySelector('[data-testid=terminal-wrapper]');
+              if (!wrapper) return false;
+              const rows = Array.from(wrapper.querySelectorAll('.term-row')).map((el) => el.textContent || '').join('\n');
+              const text = rows || wrapper.textContent || '';
+              const contract = /Controlled Claude prompt contract: authored-sha256=[0-9a-f]{64} authored-bytes=([1-9][0-9]*) safety-blocks=1/i;
+              const session = /Controlled Claude session: [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+              return contract.test(text) && session.test(text);
+            })()
+        intent: Confirm Claude received a non-empty generated prompt and reports its run-scoped session UUID without exposing prompt text
+  assert-create-agent-error:
+    params:
+      - errorText
+    steps:
+      - expect:
+          visible:
+            testid: create-agent-error
+        intent: Confirm the agent creation error is visible
+      - expect:
+          text: "{{errorText}}"
+        intent: Confirm the error explains why this agent cannot be created
+      - expect:
+          visible:
+            testid: create-agent-overlay
+        intent: Confirm the form stays open so the operator can correct the agent
+  assert-custom-prompt-submit-disabled:
+    steps:
+      - expect:
+          enabled:
+            testid: create-agent-submit
+            equals: false
+        intent: Confirm Create agent remains disabled without usable instructions
+      - expect:
+          count:
+            testid: create-agent-error
+            equals: 0
+        intent: Confirm validation does not show a server error before submission
+  reset-independent-path-agent-terminals:
+    steps:
+      - run: |-
+          set -e
+          for workspace in E2E-WS-CUSTOM E2E-WS-CUSTOM-CTL; do
+            safe_workspace="$(printf '%s' "$workspace" | tr -c 'A-Za-z0-9_-' '_')"
+            before="$AFT_WORK_DIR/path-start-${AFT_CASE_ID:-local}-$safe_workspace-before.json"
+            sessions="$AFT_WORK_DIR/path-start-${AFT_CASE_ID:-local}-$safe_workspace-agent-sessions.txt"
+            after="$AFT_WORK_DIR/path-start-${AFT_CASE_ID:-local}-$safe_workspace-after.json"
+            curl -sf "$AFT_BASE_URL/api/workspaces/$workspace/terminal/tabs" > "$before"
+            python3 - "$before" > "$sessions" <<'PY'
+          import json, sys
+          doc = json.load(open(sys.argv[1]))
+          tabs = doc.get("data") or []
+          assert isinstance(tabs, list), type(tabs)
+          for tab in tabs:
+              if tab.get("kind") == "agent":
+                  session = tab.get("session_name")
+                  assert session, tab
+                  print(session)
+          PY
+            while IFS= read -r session; do
+              [ -z "$session" ] || curl -sf -X DELETE "$AFT_BASE_URL/api/workspaces/$workspace/terminal/tabs/$session" >/dev/null
+            done < "$sessions"
+            curl -sf "$AFT_BASE_URL/api/workspaces/$workspace/terminal/tabs" > "$after"
+            python3 - "$before" "$after" <<'PY'
+          import json, sys
+          before = json.load(open(sys.argv[1])).get("data") or []
+          after = json.load(open(sys.argv[2])).get("data") or []
+          remaining_agents = [tab for tab in after if tab.get("kind") == "agent"]
+          assert not remaining_agents, remaining_agents
+          protected_before = {
+              tab.get("session_name"): tab.get("kind")
+              for tab in before
+              if tab.get("kind") != "agent" and tab.get("session_name")
+          }
+          protected_after = {
+              tab.get("session_name"): tab.get("kind")
+              for tab in after
+              if tab.get("kind") != "agent" and tab.get("session_name")
+          }
+          missing = {session: kind for session, kind in protected_before.items() if protected_after.get(session) != kind}
+          assert not missing, {"removed_non_agent_tabs": missing}
+          PY
+          done
+        intent: Stop only surviving custom-agent PTYs in both fixture workspaces while retaining every pre-existing non-agent tab identity and kind
   remove-case-agent-and-tabs:
     params:
       - name

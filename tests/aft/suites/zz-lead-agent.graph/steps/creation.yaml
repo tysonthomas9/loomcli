@@ -64,11 +64,18 @@ blocks:
             - path: error
               contains: agent worktree
         intent: An operator confirms the interactive lead did not get an agent worktree at creation time
+      - use: show-lead-info
+        with:
+          name: atlas-${RUN_ID:-local}
   terminal-03-lead-template-creates-an-interactive-lead-agent-and-role:
     steps:
       - expect:
+          url: "**/agents/atlas-${RUN_ID:-local}**"
+        intent: Confirm the review remains focused on the newly created Lead.
+      - expect:
           visible:
-            selector: body
+            selector: "[aria-label='Agent: atlas-${RUN_ID:-local}']"
+        intent: Keep the exact created Lead visible beside its grouped definition checks.
   case-04-lead-backend-dropdown-selects-the-runtime:
     steps:
       - use: open-create-agent-dialog
@@ -145,11 +152,16 @@ blocks:
           cat "$AFT_WORK_DIR/lead-d2-terminal.json" 2>/dev/null || true
           exit 1
         intent: An operator reads back the Claude lead terminal launch contract from the agent session endpoint
+      - open: /ws/E2E-WS-LEAD/agents/atlas-cl-${RUN_ID:-local}
+        intent: An operator opens the exact Claude-backed Lead whose runtime was selected.
   terminal-04-lead-backend-dropdown-selects-the-runtime:
     steps:
-      - expect:
-          visible:
-            selector: body
+      - use: controlled-claude-lead-connected
+        with:
+          name: atlas-cl-${RUN_ID:-local}
+      - use: lead-launch-attribution-ready
+        with:
+          name: atlas-cl-${RUN_ID:-local}
   case-05-lead-repo-scope-round-trips-workspace-wide-and-pinned-ch:
     steps:
       - use: open-create-agent-dialog
@@ -366,8 +378,15 @@ blocks:
           assert matches[0].get("kind") == "interactive", matches[0]
           PY
         intent: An operator's CLI readback confirms the second Lead reused the one interactive lead role
+      - use: show-lead-info
+        with:
+          name: atlas-b-${RUN_ID:-local}
   terminal-08-second-lead-reuses-the-existing-lead-role:
     steps:
       - expect:
+          url: "**/agents/atlas-b-${RUN_ID:-local}**"
+        intent: Confirm the review remains focused on the second Lead.
+      - expect:
           visible:
-            selector: body
+            selector: "[aria-label='Agent: atlas-b-${RUN_ID:-local}']"
+        intent: Keep the second Lead visible beside the grouped shared-role checks.

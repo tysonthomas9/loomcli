@@ -744,12 +744,15 @@ else
     # 503 egress_unavailable contract into a live connector-seed + egress attempt
     # with the operator's real PAT. The deterministic tier also needs no Gemini keys.
     # Load-bearing: the seed resolver's fallback reads a sealed settings credential; that is only safe because scripts/start-e2e-server.sh exports LOOM_CONFIG_DIR to tmp/e2e-workspace/.loom-config (wiped per run) — do not remove that export.
+    # Opt the deterministic server into the persistent Claude harness-lead stub. The
+    # stub requires Claude's --session-id interactive signature, so one-shot task
+    # calls keep their existing stream-json behavior.
     SERVER_PATH="$REPO_ROOT/e2e/stubs:$PATH"
     assert_server_cli_closure "$SERVER_PATH" "$REPO_ROOT/e2e/stubs" || exit 1
     env -u LOOM_WEBUI_GITHUB_TOKEN -u GH_TOKEN -u GITHUB_TOKEN \
         -u GEMINI_API_KEY -u GOOGLE_API_KEY \
         E2E_PORT="$E2E_PORT" E2E_FRONTEND_PORT="$E2E_FRONTEND_PORT" FLEET_DB_REPO="$FLEET_DB_REPO" \
-        PATH="$SERVER_PATH" OPENAI_API_KEY="stub-e2e" FLUE_REPO="$FLUE_REPO" \
+        PATH="$SERVER_PATH" OPENAI_API_KEY="stub-e2e" LOOM_LEAD_CONTROLLED=1 STUB_CLAUDE_LEAD=1 FLUE_REPO="$FLUE_REPO" \
         ${FAKE_GH_BASE:+LOOM_CONNECTOR_GITHUB_BASE_URL="$FAKE_GH_BASE"} \
         LOOM_REAL_FLUE_CMD_JSON="$FLUE_CMD_JSON" \
         bash "$REPO_ROOT/scripts/start-e2e-server.sh" >"$REPORT_DIR/server.log" 2>&1 &

@@ -47,7 +47,7 @@ const expectedPrefixes = [
   ['agent-flow', ['provision-nova'], 4],
   ['custom-prompts', ['reset-template-prompt-subject', 'create-template-prompt-subject'], 2],
   ['lead-agents', ['prepare-primary-lead'], 11],
-  ['lead-agents', ['prepare-primary-lead', 'start-primary-lead-session'], 2],
+  ['lead-agents', ['prepare-primary-lead', 'connect-primary-lead-runtime'], 4],
   ['lead-agents', ['prepare-second-lead'], 3],
   ['planner-agent', ['open-planner-dialog', 'choose-planner-template'], 10],
   ['planner-agent', ['open-planner-dialog', 'choose-planner-template', 'create-default-planner'], 7],
@@ -57,6 +57,17 @@ const expectedPrefixes = [
   ['task-runner', ['open-task-runner-dialog', 'choose-task-runner-template'], 5],
   ['agent-lifecycle-contracts', ['open-task-runner-dialog', 'choose-task-runner-template'], 2],
   ['review-actions-surface', ['open-case-review-workspace'], 2],
+]
+
+// Single-consumer lifecycle chains do not belong in expectedPrefixes: their
+// descendant count is necessarily one. Pin the complete path instead so a
+// destructive multi-stage proof cannot be flattened into an unrelated leaf.
+const expectedCompletePaths = [
+  ['lead-agents', 'verified-16-deleting-a-lead-leaves-its-terminal-pty-running-until-ta', [
+    'prepare-disposable-lead-runtime',
+    'delete-disposable-lead',
+    'reclaim-disposable-lead-terminal',
+  ]],
 ]
 
 const portable = (path) => relative(testsDir, path).split(sep).join('/')
@@ -120,6 +131,51 @@ for (const [flow, prefix, expectedCount] of expectedPrefixes) {
   assert(tests, `missing compiled flow ${flow}`)
   const actualCount = tests.filter((test) => prefix.every((transition, index) => test.graph.transitions[index] === transition)).length
   assert.equal(actualCount, expectedCount, `${flow}: shared prefix ${prefix.join(' -> ')} changed descendant count`)
+}
+
+for (const [flow, terminalState, expectedPath] of expectedCompletePaths) {
+  const tests = testsByFlow.get(flow)
+  assert(tests, `missing compiled flow ${flow}`)
+  const matches = tests.filter((test) => test.graph.states.at(-1) === terminalState)
+  assert.equal(matches.length, 1, `${flow}: terminal state ${terminalState} must identify exactly one execution`)
+  assert.deepEqual(matches[0].graph.transitions, expectedPath, `${flow}: complete path to ${terminalState} changed`)
+}
+
+const customPromptTests = testsByFlow.get('custom-prompts')
+assert(customPromptTests, 'missing compiled custom-prompts flow')
+const customPromptSteps = customPromptTests.flatMap((test) => test.steps)
+const promptCaptures = customPromptSteps.filter((step) => step.intent === 'Capture only the mounted prompt fingerprint and UTF-8 byte count before submission')
+const promptAssertions = customPromptSteps.filter((step) => step.intent === 'Confirm Claude received the same authored prompt captured from the mounted form and reports its run-scoped session UUID without exposing prompt text')
+const unsafeRoleDiagnostics = customPromptSteps.filter((step) => typeof step.run === 'string' && /assert[^\n]*,\s*(?:role|r)\s*$/m.test(step.run))
+const overstatedSessionClaims = customPromptSteps.filter((step) => step.intent?.includes('real session identity'))
+assert.equal(promptCaptures.length, 6, 'custom prompt runtime paths must capture six mounted prompt fingerprints before submission')
+assert.equal(promptAssertions.length, 6, 'custom prompt runtime paths must compare six safe prompt fingerprints at the terminal')
+assert.equal(unsafeRoleDiagnostics.length, 0, 'custom prompt failure diagnostics must never serialize a complete role object containing prompt text')
+assert.equal(overstatedSessionClaims.length, 0, 'controlled Claude evidence must describe a run-scoped UUID, not a real external session')
+for (const step of promptCaptures) {
+  const source = step.wait?.fn ?? ''
+  assert(source.includes("String(field.value)"), 'custom prompt fingerprint capture must read the mounted form value')
+  assert(source.includes('sessionStorage.setItem'), 'custom prompt fingerprint capture must persist only its derived contract')
+  assert(!source.includes('String.raw') && !source.includes('expectedPrompt'), 'custom prompt fingerprint capture must not interpolate expected prompt bytes')
+}
+for (const step of promptAssertions) {
+  const source = step.wait?.fn ?? ''
+  assert(source.includes('sessionStorage.getItem'), 'custom prompt terminal assertion must read the pre-submit fingerprint')
+  assert(!source.includes('String.raw') && !source.includes('expectedPrompt'), 'custom prompt terminal assertion must not interpolate expected prompt bytes')
+}
+
+const exactMonitorRows = [
+  ['agent-flow', 'Wait until nova appears as an exact row inside the monitor activity panel', 'Agent: nova'],
+  ['planner-agent', 'Wait until the exact Planner row appears inside the monitor activity panel', `Agent: planner-${compileEnv.RUN_ID}`],
+  ['task-runner', 'Wait until the exact Task Runner row appears inside the monitor activity panel', `Agent: worker-a-${compileEnv.RUN_ID}`],
+]
+for (const [flow, intent, ariaLabel] of exactMonitorRows) {
+  const steps = testsByFlow.get(flow).flatMap((test) => test.steps).filter((step) => step.intent === intent)
+  assert.equal(steps.length, 1, `${flow}: expected one exact monitor-row assertion`)
+  const source = steps[0].wait?.fn ?? ''
+  assert(source.includes("querySelector('[data-testid=agent-activity-panel]')"), `${flow}: monitor assertion must bind to the activity panel`)
+  assert(source.includes(`[aria-label="${ariaLabel}"]`), `${flow}: monitor assertion must bind to the exact agent row`)
+  assert(!source.includes('document.body'), `${flow}: persistent rail content must not satisfy the monitor assertion`)
 }
 
 let linearExecutions = 0

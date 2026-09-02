@@ -23,40 +23,102 @@ states:
     testIntent: An operator creates a Task Runner scoped to one repo through CreateAgentModal and verifies the stored agent plus materialized worktree
     terminal: true
     assert:
-    - expect:
-        text: worker-modal-a-${RUN_ID:-local}
+    - use: task-agent-info-ready
+      with:
+        name: worker-modal-a-${RUN_ID:-local}
+        backend: codex
+        scope: task-repo-a
+    - wait:
+        fn: |-
+          (async () => {
+            const response = await fetch('/api/workspaces/E2E-TR-${AFT_CASE_KEY}/files/checkouts', { cache: 'no-store' });
+            if (!response.ok) return false;
+            const payload = await response.json();
+            const data = payload.data ?? payload;
+            const matches = (data.checkouts || []).filter((checkout) =>
+              checkout.kind === 'agent' && checkout.agent === 'worker-modal-a-${RUN_ID:-local}');
+            return matches.length === 1 && matches[0].repo === 'task-repo-a' &&
+              matches[0].exists === true && matches[0].branch === 'worker-modal-a-${RUN_ID:-local}' &&
+              matches[0].status_error !== true;
+          })()
+      intent: Confirm the public checkout inventory exposes the reviewed Task agent's exact repo and branch
   scenario-2-task-runner-modal-creates-a-workspace-scope-work:
     intent: task runner modal creates a workspace-scope worker in every repo
     testIntent: An operator deselects every repo chip so a Task Runner takes workspace-wide scope and gets a worktree for every repo
     terminal: true
     assert:
-    - expect:
-        text: worker-cross-${RUN_ID:-local}
+    - use: task-agent-info-ready
+      with:
+        name: worker-cross-${RUN_ID:-local}
+        backend: codex
+        scope: All repos
+    - wait:
+        fn: |-
+          (async () => {
+            const response = await fetch('/api/workspaces/E2E-TR-${AFT_CASE_KEY}/files/checkouts', { cache: 'no-store' });
+            if (!response.ok) return false;
+            const payload = await response.json();
+            const data = payload.data ?? payload;
+            const matches = (data.checkouts || []).filter((checkout) =>
+              checkout.kind === 'agent' && checkout.agent === 'worker-cross-${RUN_ID:-local}');
+            const repos = matches.map((checkout) => checkout.repo).sort();
+            return JSON.stringify(repos) === JSON.stringify(['task-repo-a', 'task-repo-b']) &&
+              matches.every((checkout) => checkout.exists === true &&
+                checkout.branch === 'worker-cross-${RUN_ID:-local}' && checkout.status_error !== true);
+          })()
+      intent: Confirm the public checkout inventory exposes one exact-branch worktree for each repo
   scenario-3-task-runner-backend-dropdown-selection-is-honore:
     intent: task runner backend dropdown selection is honored
     testIntent: An operator selects a non-default backend for a Task Runner and verifies that backend is stored on the agent
     terminal: true
     assert:
-    - expect:
-        text: worker-claude-${RUN_ID:-local}
+    - use: task-agent-info-ready
+      with:
+        name: worker-claude-${RUN_ID:-local}
+        backend: claude
+        scope: task-repo-a
   scenario-4-task-runner-name-validation-blocks-invalid-names:
     intent: task runner name validation blocks invalid names and lowercases valid names
     testIntent: An operator cannot submit invalid Task Runner names and sees a valid uppercase entry normalized to lowercase storage
     terminal: true
     assert:
-    - expect:
-        text: worker-b-${RUN_ID:-local}
+    - use: task-agent-info-ready
+      with:
+        name: worker-b-${RUN_ID:-local}
+        backend: codex
+        scope: task-repo-a
   scenario-5-duplicate-task-runner-name-stays-in-the-dialog-w:
     intent: duplicate task runner name stays in the dialog with a conflict
     testIntent: An operator reusing an existing Task Runner name sees the server conflict in the dialog and no second agent is created
     terminal: true
     assert:
+    - wait:
+        fn: document.querySelector('[data-testid=create-agent-error]')?.textContent.includes('An agent with this name already exists.')
+      intent: Confirm the duplicate-name conflict is visible in the Task Runner form
     - expect:
         visible:
           testid: create-agent-error
-  scenario-6-delegation-assigns-and-starts-the-task-runner-in:
-    intent: delegation assigns and starts the task runner in the control plane
-    testIntent: An operator delegates an open designed task to a UI-created Task Runner and verifies the issue and agent record that work was started
+    - expect:
+        visible:
+          testid: create-agent-overlay
+    - expect:
+        value:
+          testid: create-agent-name
+          equals: worker-a-${RUN_ID:-local}
+    - wait:
+        fn: |-
+          (async () => {
+            const response = await fetch('/api/workspaces/E2E-TR-${AFT_CASE_KEY}/agents', { cache: 'no-store' });
+            if (!response.ok) return false;
+            const payload = await response.json();
+            const data = payload.data ?? payload;
+            const agents = Array.isArray(data) ? data : (data.agents || []);
+            return agents.filter((agent) => agent.name === 'worker-a-${RUN_ID:-local}').length === 1;
+          })()
+      intent: Confirm the rejected duplicate left exactly one worker definition
+  scenario-6-delegation-records-control-plane-state:
+    intent: delegation records assignment and requested running state in the control plane
+    testIntent: An operator delegates a designed task and verifies the issue and agent projections changed; no daemon or worker-process execution is asserted
     terminal: true
     assert:
     - wait:
@@ -98,18 +160,33 @@ states:
     - expect:
         text: ARCHIVE SNAPSHOT
   scenario-10-task-runner-appears-on-every-agent-surface-with-:
-    intent: task runner appears on every agent surface with background identity
-    testIntent: An operator can discover a newly created Task Runner from the agents rail, workspace tree, monitor, and agent detail deep link
+    intent: monitor presents the stored Task Runner as a background agent
+    testIntent: An operator reviews worker-a first in its Info view and then in the warmed monitor projection; neither surface is treated as proof of a live worker process
     terminal: true
     assert:
     - wait:
-        fn: "!!document.querySelector('[data-testid=agent-activity-panel]') && document.body.textContent.includes('worker-a-${RUN_ID:-local}')"
-      intent: Wait until the monitor status cache refresh exposes worker-a
+        fn: |-
+          (() => {
+            const panel = document.querySelector('[data-testid=agent-activity-panel]');
+            return !!panel && !!panel.querySelector('[aria-label="Agent: worker-a-${RUN_ID:-local}"]');
+          })()
+      intent: Wait until the exact Task Runner row appears inside the monitor activity panel
     - expect:
         notText: No agents found
+  scenario-10-task-runner-info-ready:
+    intent: worker-a's Info view shows its stored Task role and single-repo scope without implying terminal health.
+    assert:
+    - use: task-agent-info-ready
+      with:
+        name: worker-a-${RUN_ID:-local}
+        backend: codex
+        scope: task-repo-a
+    - wait:
+        fn: document.querySelector('[data-testid=agent-section-background]')?.textContent.includes('worker-a-${RUN_ID:-local}')
+      intent: Confirm the workspace tree classifies worker-a under Background agents
   scenario-11-quarantined-task-renders-the-visible-quarantine-:
-    intent: quarantined task renders the visible quarantine badge
-    testIntent: An operator sees the board badge for a task whose terminal daemon state marks it quarantined
+    intent: an API-seeded quarantined task renders the visible quarantine badge
+    testIntent: An operator sees the board presentation for an issue seeded with blocked status and the quarantine label; this does not assert a daemon produced that state
     terminal: true
     assert:
     - wait:

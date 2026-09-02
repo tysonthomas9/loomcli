@@ -117,9 +117,11 @@ from a parallel cross-review were **rejected** with code evidence.
    dedicated cleanup for exactly this (`reviewer.go:521-551`); the generic lead path
    has none. LED-D13 now covers stale runtime metadata + the surviving old PTY, and
    the product gap is filed as **B12**.
-6. **LED-D8 proves the launch chain, not prompt resolution.** The banner prints at
-   `lead.go:106-109`, *before* prompt loading (`:118`) and runtime dispatch (`:130`).
-   Retitled and re-scoped; prompt-resolution proof moved to the real tier.
+6. **LED-D8 proves the launch chain and controlled bootstrap, not model behavior.**
+   The browser now waits past the early banner for the deterministic Codex remote to
+   initialize, emit its agent-specific connection marker, and remain live. This proves
+   backend dispatch and bootstrap while leaving prompt semantics and real model behavior
+   to the real tier.
 7. **B6 was overstated.** aft supports `text`, `notText`, `count`, `attr`, `value`,
    `enabled`, `checked`, and `wait.fn` (`../testing-app/src/types.ts:87-114`), so
    LED-D16/D18 are writable today. B6 is reclassified **robustness seam**, not blocker.
@@ -569,16 +571,15 @@ dead code in the happy path; surface tier because it needs a fabricated failure.
 
 ---
 
-**LED-D8 — Opening a lead agent launches `loom lead` in the embedded terminal
-(launch-chain coverage)**
-*Tier:* product-correctness · *Status:* ready-to-write (assertion text needs one
-exploratory run to pin — see Blocker B10)
-*Scope note (rev 2):* this case proves the **launch chain only** — agent record →
-`ensureAgentTerminalSession` → launch spec → PTY → `loom lead` reached its banner. It
-does **not** prove prompt resolution or a working runtime: the banner prints at
-`lead.go:106-109`, *before* `leadStartupPrompt` (`:118`) and
-`RunControlledLeadRuntime` (`:130`). Prompt-resolution and sustained-runtime proof
-belong to LED-R1/LED-R2 (or to a deterministic harness variant once B1 lands).
+**LED-D8 — Opening a lead agent connects controlled Codex in the embedded terminal
+(bootstrap + launch-attribution coverage)**
+*Tier:* product-correctness · *Status:* implemented in the graph package
+*Scope note (rev 4):* this case proves agent record → `ensureAgentTerminalSession` →
+launch spec → PTY → `loom lead` → deterministic Codex remote initialization. It waits
+past the early `Starting LEAD mode` banner for an agent-specific controlled-connection
+marker and one live agent-bound tab. It does **not** claim a model response, thread
+creation, prompt semantic correctness, or real-provider behavior; those remain real-tier
+contracts.
 *Intent:* An operator opens their Lead agent and the embedded terminal attaches to a
 `loom lead` process launched for that specific agent.
 *Preconditions:* LED-D1's lead exists; stub backends are on the **server's** PATH
@@ -588,20 +589,30 @@ belong to LED-R1/LED-R2 (or to a deterministic harness variant once B1 lands).
 - open: /ws/E2E-WS-LEAD/agents/atlas-${RUN_ID:-local}
 - wait: { fn: "!!document.querySelector('[data-testid=agents-page]')" }
   intent: "Wait until the agents page is ready"
-- wait: { fn: "!!document.querySelector('[data-testid=terminal-wrapper] .wterm')" }
-  intent: "Wait until the lead terminal mounts the wterm grid"
+- wait: { fn: "!!document.querySelector('[data-testid=terminal-wrapper] .xterm')" }
+  intent: "Wait until the embedded Lead terminal mounts"
 - wait:
     fn: >-
       (() => { const rows = document.querySelectorAll('[data-testid=terminal-wrapper] .term-row');
       return Array.from(rows).map(r => r.textContent).join('\n').includes('Starting LEAD mode'); })()
   intent: "Wait until the lead runtime banner reaches the browser terminal"
+- wait:
+    fn: >-
+      (() => { const root = document.querySelector('[data-testid=terminal-wrapper]');
+      const text = root ? root.textContent || '' : ''; return
+      text.includes('Controlled Codex stub connected: atlas-${RUN_ID:-local}') &&
+      !text.includes('codex app-server exited before ready'); })()
+  intent: "Wait until the controlled Codex remote connects for this exact Lead"
 - run: >-
     for i in $(seq 1 20); do curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/agents/atlas-${RUN_ID:-local}/terminal/session" > "$AFT_WORK_DIR/lead-tab.json" && python3 -c 'import json,sys; n=sys.argv[3]; d=json.load(open(sys.argv[1]))["data"]; assert d["kind"]=="agent", d; assert d["role"]=="lead", d; assert d["agent_id"]==n, d; assert d["writable"] is True, d; assert d["session_name"].startswith("term_"), d; L=d["launch"]; argv=" ".join(L["argv"]); assert argv.endswith("lead"), argv; assert "--workspace E2E-WS-LEAD" in argv.replace("'"'"'",""), argv; e=L["env"]; assert e["LOOM_AGENT_NAME"]==n, e; assert e["LOOM_AGENT_ROLE"]=="lead", e; assert e["LOOM_WORKSPACE"]=="E2E-WS-LEAD", e; assert e["LOOM_AGENT_TERMINAL_ID"]==d["session_name"], e; assert e["LOOM_ORCHESTRATOR_SESSION_ID"].startswith("lead-"), e; open(sys.argv[2],"w").write(d["session_name"])' "$AFT_WORK_DIR/lead-tab.json" "$AFT_WORK_DIR/leadSession" "atlas-${RUN_ID:-local}" && exit 0; sleep 1; done; echo "lead terminal session never resolved"; exit 1
   intent: "An operator reads back the lead terminal tab and the launch contract the Terminal view opened it with"
 ```
-*Assertions:* `terminal-wrapper` + `.wterm` mounted; `.term-row` text contains
-`Starting LEAD mode` (`lead.go:107`); tab metadata `kind=agent`, `role=lead`,
-`agent_id`, `writable=true`, `session_name` matches `term_*`, argv ends in `lead`.
+*Assertions:* the terminal contains `Starting LEAD mode`,
+`Launching controlled Codex lead session...`, and the exact
+`Controlled Codex stub connected: {agent}` marker; known bootstrap and fallback-shell
+errors are absent; exactly one matching Codex-backed Lead tab has `pty_alive=true`;
+tab metadata has `kind=agent`, `role=lead`, `agent_id`, `writable=true`, a `term_*`
+session name, and argv ending in `lead`.
 
 **Launch-env readbacks (rev 2, finding 8).** `LaunchSpec.Env` is serialized as
 `launch.env` (`internal/webui/tabmeta/store.go:59-64`; frontend mirror
@@ -619,20 +630,16 @@ belong to LED-R1/LED-R2 (or to a deterministic harness variant once B1 lands).
 A regression in any of these is invisible in the terminal output but silently breaks
 lead attribution and inbox delivery — which is exactly why they belong here rather
 than in a runtime case.
-*Edge rationale (rev 3 — rescope finished):* this is the single highest-value missing
-assertion, and what it proves is the chain agent record → `ensureAgentTerminalSession`
-→ launch spec (argv **and** env) → PTY → `loom lead` **started**. It stops there. It
-does **not** prove prompt resolution, backend dispatch, or a controlled runtime: the
-banner is printed at `lead.go:106-109`, before `leadStartupPrompt` (`:118`) and before
-`RunControlledLeadRuntime` (`:130`). That ordering is also precisely why the case works
-with the stubs today — the banner lands before any backend is invoked.
-Prompt-resolution evidence lives in LED-D1's role readback (empty
+*Edge rationale (rev 4):* the early banner alone was a false-positive seam because it
+could be followed immediately by `codex app-server exited before ready`. The shared
+controlled-Codex block therefore waits for the later remote connection marker and a live
+PTY before accepting the state. Launch metadata then proves exact attribution. This is
+deterministic backend-bootstrap evidence, not evidence of a model turn or thread.
+Prompt-resolution configuration evidence lives in LED-D1's role readback (empty
 `prompt`/`prompt_file` ⇒ the embedded `prompts/lead.md` is what `loom lead` will load)
 and, end to end, in the real tier.
-*Caveat:* the deterministic Codex stub now completes bootstrap and holds a connected remote
-process open, but it does not create a thread or execute lead-session behavior. Keep this case's
-assertions limited to the banner and launch metadata; the later controlled-runtime behavior
-remains outside LED-D8's contract.
+*Caveat:* the deterministic Codex stub completes WebSocket initialization and holds the
+remote process open, but it does not create a thread or execute lead-session behavior.
 
 ---
 
@@ -1559,13 +1566,12 @@ failing stub does not work, because `Installed` derives from `exec.LookPath` alo
 string (`backend_capabilities.go:101-109`). Rev 2 recommended the failing stub; that was
 wrong (R3-E3).
 
-**B10 — Exact terminal text needs one exploratory run.**
-The `.term-row` assertions in LED-D8 / LED-D8b are derived from source
-(`lead.go:107`, `:100`) but PTY line-wrapping at 80 cols and the wterm grid's
-row-splitting can break a literal match. Run
-`AFT_SUITES=tests/aft/suites/zz-lead-agent.test.yaml make test-aft AFT_ARGS="--screenshots"`
-once and pin the observed substrings — prefer short, wrap-safe fragments
-(`Starting LEAD mode`, `not installed`) over full lines.
+**B10 — Resolved: wrap-safe controlled terminal fragments are pinned.**
+LED-D8 reads rendered `.term-row` content with a terminal-wrapper fallback and matches
+the short `Starting LEAD mode`, `Launching controlled Codex lead session...`, and
+agent-specific `Controlled Codex stub connected:` fragments. A focused strict browser
+run with screenshots passed on September 2, 2026. LED-D8b still uses the short
+`not installed` fragment when its separate PATH-isolation seam is available.
 
 **B11 — No `ws:` step in the aft DSL** (COVERAGE-PLAN.md:121-126).
 Not a blocker for this plan: the browser is the actor for every lead terminal case, so
@@ -1634,7 +1640,7 @@ Legend — **Tier**: PC = product-correctness (`suites/`), SF = surface
 | LED-D5 | Duplicate name renders `create-agent-error` | edge | PC | ready | none |
 | LED-D6 | Second lead reuses the `lead` role | edge | PC | ready *(via `loom role list --json`)* | none |
 | LED-D7 | Lead card survives prompts-endpoint outage | edge | SF | ready | none |
-| LED-D8 | Opening a lead launches `loom lead` (launch chain + launch env) | happy | PC | ready (pin text, B10) | **spawned but unasserted** by zz-agent-flow c1 |
+| LED-D8 | Opening a lead connects controlled Codex (bootstrap + launch env) | happy | PC | implemented | **spawned but unasserted** by zz-agent-flow c1 |
 | LED-D8b | Missing-backend guidance in the terminal | edge | PC | **blocked — B9a** *(needs server-PATH isolation; a failing stub cannot work)* | none |
 | LED-D9 | Terminal start creates the orchestration session (+ env join) | happy | PC | ready | none |
 | LED-D10 | `lead-{backend}-{n}` naming increments | happy | PC | ready | pages.test.yaml asserts only "some tab has a label" |

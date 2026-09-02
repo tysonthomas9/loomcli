@@ -18,10 +18,11 @@ setup: |
     suffix="${pair%%:*}"
     name="${pair#*:}"
     repo="$AFT_WORK_DIR/${suffix}-repo"
+    workspace="$AFT_WORK_DIR/${suffix}-workspace"
     mkdir -p "$repo"
     git -C "$repo" init -q
     git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit --allow-empty -m init -q
-    python3 -c 'import json,sys; print(json.dumps({"name":sys.argv[1],"type":"empty","repos":[sys.argv[2]]}))' "$name" "$repo" > "$AFT_WORK_DIR/${suffix}-workspace.json"
+    python3 -c 'import json,sys; print(json.dumps({"name":sys.argv[1],"type":"empty","path":sys.argv[2],"repos":[sys.argv[3]]}))' "$name" "$workspace" "$repo" > "$AFT_WORK_DIR/${suffix}-workspace.json"
     curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/${suffix}-workspace.json" > "$AFT_WORK_DIR/${suffix}-workspace.resp.json"
   done
 teardown: |

@@ -23,16 +23,9 @@ blocks:
       - click:
           testid: create-agent-interactive-prompt
       - press: Backspace
-      - expect:
-          enabled:
-            testid: create-agent-submit
-            equals: false
   terminal-02-empty-custom-prompt-keeps-submit-disabled:
     steps:
-      - expect:
-          count:
-            testid: create-agent-error
-            equals: 0
+      - use: assert-custom-prompt-submit-disabled
   case-03-whitespace-only-custom-prompt-keeps-submit-disabled:
     steps:
       - click:
@@ -43,6 +36,8 @@ blocks:
       - fill:
           testid: create-agent-interactive-prompt
           value: "  \ \n\t  \ \n  "
+  terminal-03-whitespace-only-custom-prompt-keeps-submit-disabled:
+    steps:
       - wait:
           fn: |-
             (() => {
@@ -50,16 +45,7 @@ blocks:
               return value !== "" && value.trim() === "";
             })()
         intent: Wait until the raw textarea value is non-empty whitespace before checking submit gating
-      - expect:
-          enabled:
-            testid: create-agent-submit
-            equals: false
-  terminal-03-whitespace-only-custom-prompt-keeps-submit-disabled:
-    steps:
-      - expect:
-          count:
-            testid: create-agent-error
-            equals: 0
+      - use: assert-custom-prompt-submit-disabled
   case-09-custom-prompt-named-task-is-rejected-by-the-seeded-worke:
     steps:
       - click:
@@ -75,14 +61,6 @@ blocks:
       - wait:
           fn: "!!document.querySelector('[data-testid=create-agent-error]')"
         intent: Wait until the task-name collision error appears after submit
-      - expect:
-          visible:
-            testid: create-agent-error
-      - expect:
-          text: Role "task" already exists and is not interactive; choose a different agent name
-      - expect:
-          visible:
-            testid: create-agent-overlay
       - run: |
           set -e
           curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/agents" > "$AFT_WORK_DIR/d8a-agents.json"
@@ -97,9 +75,9 @@ blocks:
         intent: An operator's readback confirms the rejected task-named agent was not created
   terminal-09-custom-prompt-named-task-is-rejected-by-the-seeded-worke:
     steps:
-      - expect:
-          visible:
-            testid: create-agent-overlay
+      - use: assert-create-agent-error
+        with:
+          errorText: Role "task" already exists and is not interactive; choose a different agent name
   case-10-custom-prompt-named-plan-is-rejected-by-the-seeded-worke:
     steps:
       - click:
@@ -115,14 +93,6 @@ blocks:
       - wait:
           fn: "!!document.querySelector('[data-testid=create-agent-error]')"
         intent: Wait until the plan-name collision error appears after submit
-      - expect:
-          visible:
-            testid: create-agent-error
-      - expect:
-          text: Role "plan" already exists and is not interactive; choose a different agent name
-      - expect:
-          visible:
-            testid: create-agent-overlay
       - run: |
           set -e
           curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/agents" > "$AFT_WORK_DIR/d8b-agents.json"
@@ -137,9 +107,9 @@ blocks:
         intent: An operator's readback confirms the rejected plan-named agent was not created
   terminal-10-custom-prompt-named-plan-is-rejected-by-the-seeded-worke:
     steps:
-      - expect:
-          visible:
-            testid: create-agent-overlay
+      - use: assert-create-agent-error
+        with:
+          errorText: Role "plan" already exists and is not interactive; choose a different agent name
   case-11-custom-prompt-named-lead-is-rejected-by-the-seeded-lead-:
     steps:
       - click:
@@ -155,14 +125,6 @@ blocks:
       - wait:
           fn: "!!document.querySelector('[data-testid=create-agent-error]')"
         intent: Wait until the lead-name collision error appears after submit
-      - expect:
-          visible:
-            testid: create-agent-error
-      - expect:
-          text: Role "lead" already exists with a different prompt; choose a different agent name or reuse its prompt
-      - expect:
-          visible:
-            testid: create-agent-overlay
       - run: |
           set -e
           curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/agents" > "$AFT_WORK_DIR/d8c-agents.json"
@@ -177,9 +139,9 @@ blocks:
         intent: An operator's readback confirms the rejected lead-named agent was not created
   terminal-11-custom-prompt-named-lead-is-rejected-by-the-seeded-lead-:
     steps:
-      - expect:
-          visible:
-            testid: create-agent-overlay
+      - use: assert-create-agent-error
+        with:
+          errorText: Role "lead" already exists with a different prompt; choose a different agent name or reuse its prompt
   case-17-recreating-a-deleted-custom-agent-with-a-different-promp:
     steps:
       - click:
@@ -258,14 +220,22 @@ blocks:
           curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/agents" > "$AFT_WORK_DIR/d13-agents.json"
           LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-CUSTOM role show "$name" --json > "$AFT_WORK_DIR/d13-role.json"
           python3 - "$AFT_WORK_DIR/d13-agents.json" "$AFT_WORK_DIR/d13-role.json" "${RUN_ID:-local}" <<'PY'
-          import json, sys
+          import hashlib, json, sys
           d = json.load(open(sys.argv[1]))
           data = d.get("data", d)
           agents = data.get("agents") if isinstance(data, dict) else data
           name = "cust-recycle-" + sys.argv[3]
           assert len([a for a in agents or [] if a.get("name") == name]) == 1, agents
           r = json.load(open(sys.argv[2]))
-          assert r.get("prompt") == "AFT-RECYCLE-P1-" + sys.argv[3], r
+          prompt = r.get("prompt")
+          prompt_bytes = prompt.encode("utf-8") if isinstance(prompt, str) else None
+          summary = {
+              "name": r.get("name"),
+              "kind": r.get("kind"),
+              "prompt_bytes": len(prompt_bytes) if prompt_bytes is not None else None,
+              "prompt_sha256": hashlib.sha256(prompt_bytes).hexdigest() if prompt_bytes is not None else None,
+          }
+          assert prompt == "AFT-RECYCLE-P1-" + sys.argv[3], summary
           PY
         intent: An operator's readback confirms the recycled agent exists with the original role prompt unchanged
   terminal-17-recreating-a-deleted-custom-agent-with-a-different-promp:
@@ -328,35 +298,35 @@ blocks:
       - wait:
           fn: "!!document.querySelector('[data-testid=create-agent-error]')"
         intent: Wait until the duplicate custom-agent error appears after submit
-      - expect:
-          visible:
-            testid: create-agent-error
-      - expect:
-          text: An agent with this name already exists.
-      - expect:
-          visible:
-            testid: create-agent-overlay
       - run: |
           set -e
           name="cust-dup-${RUN_ID:-local}"
           curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/agents" > "$AFT_WORK_DIR/d16-agents.json"
           LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-CUSTOM role show "$name" --json > "$AFT_WORK_DIR/d16-role.json"
           python3 - "$AFT_WORK_DIR/d16-agents.json" "$AFT_WORK_DIR/d16-role.json" "${RUN_ID:-local}" <<'PY'
-          import json, sys
+          import hashlib, json, sys
           d = json.load(open(sys.argv[1]))
           data = d.get("data", d)
           agents = data.get("agents") if isinstance(data, dict) else data
           name = "cust-dup-" + sys.argv[3]
           assert len([a for a in agents or [] if a.get("name") == name]) == 1, agents
           r = json.load(open(sys.argv[2]))
-          assert r.get("prompt") == "AFT-DUP-" + sys.argv[3], r
+          prompt = r.get("prompt")
+          prompt_bytes = prompt.encode("utf-8") if isinstance(prompt, str) else None
+          summary = {
+              "name": r.get("name"),
+              "kind": r.get("kind"),
+              "prompt_bytes": len(prompt_bytes) if prompt_bytes is not None else None,
+              "prompt_sha256": hashlib.sha256(prompt_bytes).hexdigest() if prompt_bytes is not None else None,
+          }
+          assert prompt == "AFT-DUP-" + sys.argv[3], summary
           PY
         intent: An operator's readback confirms only one duplicate-name agent exists and its prompt is unchanged
   terminal-19-duplicate-custom-agent-name-is-refused-with-a-visible-er:
     steps:
-      - expect:
-          visible:
-            testid: create-agent-overlay
+      - use: assert-create-agent-error
+        with:
+          errorText: An agent with this name already exists.
   case-21-invalid-custom-agent-names-keep-submit-disabled:
     steps:
       - click:

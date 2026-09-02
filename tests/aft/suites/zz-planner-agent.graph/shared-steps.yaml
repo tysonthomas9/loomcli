@@ -70,3 +70,107 @@ blocks:
     steps:
     - click:
         testid: create-agent-template-planner
+  create-default-planner-agent:
+    steps:
+    - fill:
+        testid: create-agent-name
+        value: planner-${RUN_ID:-local}
+    - click:
+        testid: create-agent-submit
+      intent: An operator submits the default Planner form
+    - use: show-planner-info
+      with:
+        name: planner-${RUN_ID:-local}
+  show-planner-info:
+    params:
+    - name
+    steps:
+    - open: "/ws/E2E-PL-${AFT_CASE_KEY}/agents/{{name}}"
+      intent: An operator opens {{name}} so its Planner definition is the review subject
+    - wait:
+        fn: |-
+          (() => {
+            const page = document.querySelector('[data-testid=agents-page]');
+            const card = document.querySelector("[aria-label='Agent: {{name}}']");
+            const root = document.querySelector('[data-testid=agent-editor-groups]');
+            const info = Array.from(root?.querySelectorAll('button[draggable="true"]') || [])
+              .find((button) => (button.textContent || '').trim() === 'Info');
+            const ready = location.pathname.endsWith('/agents/{{name}}') && page && card && root && info;
+            const sig = [location.pathname, !!card, !!root, !!info].join('|');
+            if (!ready) {
+              window.__aftPlannerInfoReadySig = null;
+              window.__aftPlannerInfoReadyAt = 0;
+              return false;
+            }
+            if (window.__aftPlannerInfoReadySig !== sig) {
+              window.__aftPlannerInfoReadySig = sig;
+              window.__aftPlannerInfoReadyAt = Date.now();
+              return false;
+            }
+            return Date.now() - window.__aftPlannerInfoReadyAt >= 300;
+          })()
+      intent: Wait until {{name}} and its editor tabs are ready
+    - click:
+        role: button
+        name: Info
+        exact: true
+      intent: An operator selects {{name}}'s Info tab
+    - wait:
+        fn: |-
+          (() => {
+            const root = document.querySelector('[data-testid=agent-editor-groups]');
+            const info = Array.from(root?.querySelectorAll('button[draggable="true"]') || [])
+              .find((button) => (button.textContent || '').trim() === 'Info');
+            return info?.getAttribute('aria-current') === 'page' &&
+              !!root?.querySelector('[role=tabpanel]:not([data-hidden])');
+          })()
+      intent: Wait until the Info tab is active
+  planner-info-ready:
+    params:
+    - name
+    - backend
+    - scope
+    steps:
+    - expect:
+        url: "**/agents/{{name}}**"
+    - expect:
+        visible:
+          selector: "[aria-label='Agent: {{name}}']"
+    - wait:
+        fn: |-
+          (() => {
+            const root = document.querySelector('[data-testid=agent-editor-groups]');
+            const pane = Array.from(root?.querySelectorAll('[role=tabpanel]:not([data-hidden])') || [])
+              .find((candidate) => !candidate.parentElement?.closest('[role=tabpanel]'));
+            const text = (pane?.textContent || '').replace(/\s+/g, ' ').trim();
+            const fieldValue = (label) => {
+              const term = Array.from(pane?.querySelectorAll('dt') || [])
+                .find((node) => (node.textContent || '').trim() === label);
+              const value = term?.nextElementSibling;
+              return value?.tagName === 'DD' ? (value.textContent || '').trim() : null;
+            };
+            const expectedScopeLabel = '{{scope}}' === 'All repos' ? '—' : '{{scope}}';
+            return text.includes('{{name}}') && text.includes('Plan agent') &&
+              fieldValue('Role') === 'Plan' && fieldValue('Scope') === expectedScopeLabel;
+          })()
+      intent: Confirm the selected Info pane presents {{name}} as a Plan agent with the expected human-readable scope
+    - wait:
+        fn: |-
+          (async () => {
+            const response = await fetch('/api/workspaces/E2E-PL-${AFT_CASE_KEY}/agents', { cache: 'no-store' });
+            if (!response.ok) return false;
+            const payload = await response.json();
+            const data = payload.data ?? payload;
+            const agents = Array.isArray(data) ? data : (data.agents || []);
+            const matches = agents.filter((agent) => agent.name === '{{name}}');
+            if (matches.length !== 1) return false;
+            const planner = matches[0];
+            const workspaceScope = '{{scope}}' === 'All repos';
+            return planner.role_name === 'plan' && planner.backend === '{{backend}}' &&
+              planner.auto !== true && (workspaceScope ? planner.cross_repo === true : planner.cross_repo !== true) &&
+              (workspaceScope
+                ? (planner.repos || []).length === 0
+                : (planner.repos || []).length === 1 && planner.repos[0] === '{{scope}}') &&
+              (!planner.state || planner.state === 'idle') && !planner.mode;
+          })()
+      intent: Confirm storage has exactly one idle, non-auto-starting Plan worker with the reviewed backend and exact scope

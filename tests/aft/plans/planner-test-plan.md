@@ -514,7 +514,7 @@ matching the `iris-${RUN_ID:-local}` convention (`zz-agent-flow.test.yaml:249`).
 #### PLN-D8 — a modal-created planner stays idle (auto:false, no supervisor)
 
 - **Tier:** PC · **Kind:** edge
-- **Intent:** `An operator confirms a newly created Planner claims no work on its own: the design-less task stays open and unassigned`
+- **Intent:** `An operator confirms that creating a Planner definition does not start a worker process: the design-less task stays open, unassigned, and without a session`
 - **Steps:** with the planner from PLN-D1 present, `api: POST …/issues` creating a **task**
   (`issue_type: "task"`, no `design`) titled `planner-idle ${RUN_ID}` → open the board →
   `wait: { text: planner-idle }` → `wait: { ms: 8000 }` (one agent-store poll cycle plus
@@ -528,10 +528,10 @@ matching the `iris-${RUN_ID:-local}` convention (`zz-agent-flow.test.yaml:249`).
   documents a real trap: `auto` is **not** what gates supervision
   (`internal/cli/config/project.go:133-142`), the absent daemon is.
 
-#### PLN-D9 — a planner working a task renders the **Planning** badge
+#### PLN-D9 — an assigned task projects the **Planning** badge without running a planner
 
 - **Tier:** PC · **Kind:** happy · **No new seam required**
-- **Intent:** `An orchestration client assigns an in-progress task to the Planner and an operator sees the agent report Planning on that task`
+- **Intent:** `An orchestration client assigns an in-progress task to the Planner and an operator reviews the synthesized Planning projection; this does not assert a Planner process ran`
 - **Mechanism (verified):** `mergeStoreAgentsWithRuntime` synthesizes the status string when a
   store agent has no runtime entry but *does* own an in-progress task:
   ```go
@@ -1588,8 +1588,8 @@ Prefer (2). MED.
 | PLN-D5 | repo chip deselect ⇒ `cross_repo:true, repos:[]` | edge | PC | ready-to-write |
 | PLN-D6 | no-repos hint promises workspace scope, create returns **400** | edge | PC | ready-to-write (r2: reclassified from happy/201; guards PLN-B13) |
 | PLN-D7 | planner in rail + background group + monitor, role `Plan`, status `Idle` | happy | PC | ready-to-write (r2: companion must be a **lead**; testid friction — PLN-B7) |
-| PLN-D8 | `auto:false` planner claims nothing | edge | PC | ready-to-write |
-| PLN-D9 | in-progress assigned task ⇒ **Planning** badge (vs task agent's **Working**) | happy | PC | ready-to-write |
+| PLN-D8 | no supervisor ⇒ Planner definition stays idle; task stays unassigned with no session | edge | PC | ready-to-write |
+| PLN-D9 | API-assigned in-progress task ⇒ synthesized **Planning** badge (vs task agent's **Working**) | happy | PC | ready-to-write |
 | PLN-D10 | stopped planner ⇒ "Agent is stopped" / no terminal | edge | PC | ready-to-write (r3: must patch `desired_state`; `state` is not projected) |
 | PLN-D11 | delete (API) + recreate (modal) | edge | PC | ready-to-write (delete leg API-only — PLN-B4) |
 | PLN-D12 | `backend_unavailable` rendered in the UI | edge | PC (target) | blocked-on-seam PLN-B5 (r3: needs **server projection** first, not just a seed) |

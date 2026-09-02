@@ -16,43 +16,21 @@ transitions:
     steps:
     - use: choose-planner-template
   create-default-planner:
-    intent: An operator submits the default Planner and waits for it to appear.
+    intent: An operator submits the default Planner and opens its persisted worker metadata in Info.
     actor: human
     via: ui
     steps:
-    - fill:
-        testid: create-agent-name
-        value: planner-${RUN_ID:-local}
-    - click:
-        testid: create-agent-submit
-    - wait:
-        fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('planner-${RUN_ID:-local}')"
-      intent: Wait until the Planner modal closes and the new agent appears
+    - use: create-default-planner-agent
   run-scenario-1-planner-template-creates-plan-role-agent:
-    intent: An operator creates a Planner background agent through CreateAgentModal and confirms the workspace records it with the plan role and no auto-start
-    actor: system
-    via: runtime
+    intent: An operator records the shared, fully verified Planner definition as the creation scenario's outcome
+    actor: human
+    via: ui
     steps:
-    - run: |
-        set -e
-        name="planner-${RUN_ID:-local}"
-        curl -sf "$AFT_BASE_URL/api/workspaces/E2E-PL-${AFT_CASE_KEY}/agents" > "$AFT_WORK_DIR/pln-d1-agents.json"
-        python3 - "$AFT_WORK_DIR/pln-d1-agents.json" "$name" <<'PY'
-        import json, sys
-        d = json.load(open(sys.argv[1]))
-        data = d.get("data", d)
-        agents = data.get("agents") if isinstance(data, dict) else data
-        matches = [a for a in agents or [] if a.get("name") == sys.argv[2]]
-        assert len(matches) == 1, agents
-        a = matches[0]
-        assert a.get("role_name") == "plan", a
-        assert not a.get("auto"), a
-        assert not a.get("cross_repo"), a
-        assert len(a.get("repos") or []) == 1, a
-        assert not a.get("state") or a.get("state") == "idle", a
-        assert not a.get("mode"), a
-        PY
-      intent: An operator filters the unordered agent list and verifies the Planner create contract
+    - click:
+        role: button
+        name: Info
+        exact: true
+      intent: An operator keeps the shared, fully verified Planner definition open as this scenario's review outcome
   run-scenario-2-invalid-planner-name-keeps-create-disabl:
     intent: An operator typing invalid Planner names sees Create stay disabled and no agent is created
     actor: human
@@ -167,32 +145,6 @@ transitions:
     - wait:
         fn: "!!document.querySelector('[data-testid=create-agent-error]')"
       intent: Wait until the duplicate-name error is rendered before asserting visibility
-    - expect:
-        visible:
-          testid: create-agent-error
-    - expect:
-        attr:
-          testid: create-agent-error
-          name: role
-          equals: alert
-    - expect:
-        text: An agent with this name already exists.
-    - expect:
-        visible:
-          testid: create-agent-overlay
-    - run: |
-        set -e
-        name="planner-${RUN_ID:-local}"
-        curl -sf "$AFT_BASE_URL/api/workspaces/E2E-PL-${AFT_CASE_KEY}/agents" > "$AFT_WORK_DIR/pln-d3-agents.json"
-        python3 - "$AFT_WORK_DIR/pln-d3-agents.json" "$name" <<'PY'
-        import json, sys
-        d = json.load(open(sys.argv[1]))
-        data = d.get("data", d)
-        agents = data.get("agents") if isinstance(data, dict) else data
-        matches = [a for a in agents or [] if a.get("name") == sys.argv[2]]
-        assert len(matches) == 1, agents
-        PY
-      intent: An operator confirms the duplicate submit left exactly one Planner row
   run-scenario-4-backend-dropdown-persists-on-planner:
     intent: An operator picks a non-default AI backend for the Planner and the workspace records that backend on the agent
     actor: human
@@ -213,25 +165,10 @@ transitions:
           equals: claude
     - click:
         testid: create-agent-submit
-    - wait:
-        fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('planner-be-${RUN_ID:-local}')"
-      intent: Wait until the claude-backed Planner appears after submit
-    - run: |
-        set -e
-        name="planner-be-${RUN_ID:-local}"
-        curl -sf "$AFT_BASE_URL/api/workspaces/E2E-PL-${AFT_CASE_KEY}/agents" > "$AFT_WORK_DIR/pln-d4-agents.json"
-        python3 - "$AFT_WORK_DIR/pln-d4-agents.json" "$name" <<'PY'
-        import json, sys
-        d = json.load(open(sys.argv[1]))
-        data = d.get("data", d)
-        agents = data.get("agents") if isinstance(data, dict) else data
-        matches = [a for a in agents or [] if a.get("name") == sys.argv[2]]
-        assert len(matches) == 1, agents
-        a = matches[0]
-        assert a.get("role_name") == "plan", a
-        assert a.get("backend") == "claude", a
-        PY
-      intent: An operator filters the unordered agent list and verifies the selected Planner backend
+      intent: An operator submits the Planner with the selected Claude backend
+    - use: show-planner-info
+      with:
+        name: planner-be-${RUN_ID:-local}
   run-scenario-5-repo-chip-deselect-makes-planner-workspa:
     intent: An operator deselects the preselected repo so the Planner gets workspace-wide scope and the workspace records cross-repo with no repos
     actor: human
@@ -252,25 +189,10 @@ transitions:
         value: planner-scope-${RUN_ID:-local}
     - click:
         testid: create-agent-submit
-    - wait:
-        fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('planner-scope-${RUN_ID:-local}')"
-      intent: Wait until the workspace-scoped Planner appears after submit
-    - run: |
-        set -e
-        name="planner-scope-${RUN_ID:-local}"
-        curl -sf "$AFT_BASE_URL/api/workspaces/E2E-PL-${AFT_CASE_KEY}/agents" > "$AFT_WORK_DIR/pln-d5-agents.json"
-        python3 - "$AFT_WORK_DIR/pln-d5-agents.json" "$name" <<'PY'
-        import json, sys
-        d = json.load(open(sys.argv[1]))
-        data = d.get("data", d)
-        agents = data.get("agents") if isinstance(data, dict) else data
-        matches = [a for a in agents or [] if a.get("name") == sys.argv[2]]
-        assert len(matches) == 1, agents
-        a = matches[0]
-        assert a.get("cross_repo") is True, a
-        assert not a.get("repos"), a
-        PY
-      intent: An operator filters the unordered agent list and verifies workspace-scope persistence
+      intent: An operator submits the workspace-scope Planner form
+    - use: show-planner-info
+      with:
+        name: planner-scope-${RUN_ID:-local}
   run-scenario-6-repo-less-planner-creation-shows-promise:
     intent: An operator creating a Planner in a workspace with no repos is told the agent will get workspace scope and then sees the create fail
     actor: human
@@ -357,27 +279,6 @@ transitions:
     - wait:
         fn: "!!document.querySelector('[data-testid=create-agent-error]')"
       intent: Wait until the repo-less create error is rendered before asserting visibility
-    - expect:
-        visible:
-          testid: create-agent-error
-    - expect:
-        text: This workspace has no repos yet — add one from the sidebar first.
-    - expect:
-        visible:
-          testid: create-agent-overlay
-    - run: |
-        set -e
-        name="planner-empty-${RUN_ID:-local}"
-        curl -sf "$AFT_BASE_URL/api/workspaces/E2E-PE-${AFT_CASE_KEY}/agents" > "$AFT_WORK_DIR/pln-d6-agents.json"
-        python3 - "$AFT_WORK_DIR/pln-d6-agents.json" "$name" <<'PY'
-        import json, sys
-        d = json.load(open(sys.argv[1]))
-        data = d.get("data", d)
-        agents = data.get("agents") if isinstance(data, dict) else data
-        assert isinstance(agents, list), d
-        assert not [a for a in agents or [] if a.get("name") == sys.argv[2]], agents
-        PY
-      intent: An operator verifies the failed repo-less submit persisted no Planner row
   run-scenario-7-planner-appears-in-rail-background-group:
     intent: An operator sees the newly created Planner in the agents rail with its Plan role and idle status and in the monitor activity panel
     actor: human
@@ -489,8 +390,14 @@ transitions:
             };
             const pane = activePane();
             const text = (pane?.textContent || '').replace(/\s+/g, ' ').trim();
-            return text.includes('Plan agent') && /Role\s*Plan/.test(text) &&
-              text.includes('Scope') && text.includes('plan-repo');
+            const fieldValue = (label) => {
+              const term = Array.from(pane?.querySelectorAll('dt') || [])
+                .find((node) => (node.textContent || '').trim() === label);
+              const value = term?.nextElementSibling;
+              return value?.tagName === 'DD' ? (value.textContent || '').trim() : null;
+            };
+            return text.includes('Plan agent') &&
+              fieldValue('Role') === 'Plan' && fieldValue('Scope') === 'plan-repo';
           })()
       intent: Wait until the Info tab reports the Planner role and repo scope
     - open: "/ws/E2E-PL-${AFT_CASE_KEY}/monitor"
@@ -521,7 +428,7 @@ transitions:
       intent: An operator polls monitor status until it exposes the Planner
     - reload: true
   run-scenario-8-modal-created-planner-claims-no-work-wit:
-    intent: An operator confirms a newly created Planner claims no work on its own and a design-less task stays open and unassigned
+    intent: An operator confirms that a configured Planner without a supervisor starts no worker process and leaves a design-less task open, unassigned, and sessionless
     actor: human
     via: ui
     steps:
@@ -583,7 +490,7 @@ transitions:
           exists: false
       intent: An operator confirms no planning session was recorded for the untouched task
   run-scenario-9-assigned-in-progress-planner-renders-act:
-    intent: An orchestration client assigns in-progress tasks and an operator sees planning and working states with active-task identity while the detail panel names the Planner assignee
+    intent: An orchestration client assigns in-progress tasks and an operator reviews the synthesized Planning and Working projections plus assignee identity without treating them as process-health evidence
     actor: human
     via: ui
     steps:
@@ -764,63 +671,11 @@ transitions:
         PY
       intent: An operator reads the unordered agent list and confirms desired_state stopped persisted
     - open: "/ws/E2E-PL-${AFT_CASE_KEY}/agents/planner-${RUN_ID:-local}"
-    - wait:
-        fn: |-
-          (() => {
-            const page = document.querySelector('[data-testid=agents-page]');
-            const add = Array.from(document.querySelectorAll('button'))
-              .some((b) => (b.textContent || '').trim() === '+ Add agent');
-            const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-            const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-            const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-            if (!page || !settled) {
-              window.__aftAgentsPageStableSig = null;
-              window.__aftAgentsPageStableAt = 0;
-              return false;
-            }
-            if (window.__aftAgentsPageStableSig !== sig) {
-              window.__aftAgentsPageStableSig = sig;
-              window.__aftAgentsPageStableAt = Date.now();
-              return false;
-            }
-            return Date.now() - window.__aftAgentsPageStableAt >= 300;
-          })()
-      intent: Wait until the stopped Planner detail route is ready
-    - wait:
-        fn: document.body.textContent.includes('Agent is stopped') && document.body.textContent.includes('This agent does not have a live terminal session. Start the agent before attaching to its PTY.')
-      intent: Wait until the stopped Planner empty state replaces the terminal
-    - expect:
-        text: Agent is stopped
-    - expect:
-        text: This agent does not have a live terminal session. Start the agent before attaching to its PTY.
-    - api:
-        method: PATCH
-        path: "/api/workspaces/E2E-PL-${AFT_CASE_KEY}/agents/planner-${RUN_ID:-local}"
-        body:
-          desired_state: running
-        status: 200
-      intent: An API client restores the Planner desired_state for later tests
-    - run: |
-        set -e
-        name="planner-${RUN_ID:-local}"
-        # budget: db-persist (10s) - desired_state restore must reach list readback.
-        for i in $(seq 1 10); do
-          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-PL-${AFT_CASE_KEY}/agents" > "$AFT_WORK_DIR/pln-d10-running.json" &&
-          python3 - "$AFT_WORK_DIR/pln-d10-running.json" "$name" <<'PY' && exit 0
-        import json, sys
-        d = json.load(open(sys.argv[1]))
-        data = d.get("data", d)
-        agents = data.get("agents") if isinstance(data, dict) else data
-        matches = [a for a in agents or [] if a.get("name") == sys.argv[2]]
-        assert matches and matches[0].get("desired_state") == "running", agents
-        PY
-          sleep 1
-        done
-        echo "Planner desired_state did not restore to running"
-        cat "$AFT_WORK_DIR/pln-d10-running.json" 2>/dev/null || true
-        exit 1
-      intent: An operator polls the agent readback before reopening the restored Planner route
-    - open: "/ws/E2E-PL-${AFT_CASE_KEY}/agents/planner-${RUN_ID:-local}"
+      intent: An operator opens the stopped Planner's detail route
+    - click:
+        selector: "[data-testid=agent-editor-groups] button"
+        first: true
+      intent: An operator selects Terminal to review the stopped background worker's no-session explanation
   run-scenario-11-planner-can-be-deleted-and-recreated:
     intent: An operator removes the Planner through the workspace API and recreates it from the modal under the same name
     actor: human
@@ -909,9 +764,10 @@ transitions:
         value: planner-${RUN_ID:-local}
     - click:
         testid: create-agent-submit
-    - wait:
-        fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('planner-${RUN_ID:-local}')"
-      intent: Wait until the recreated Planner appears after submit
+      intent: An operator submits the recreated Planner definition
+    - use: show-planner-info
+      with:
+        name: planner-${RUN_ID:-local}
     - run: |
         set -e
         name="planner-${RUN_ID:-local}"

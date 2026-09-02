@@ -58,7 +58,7 @@ graph:
     prove-04-lead-backend-dropdown-selects-the-runtime: verified-04-lead-backend-dropdown-selects-the-runtime
     prove-05-lead-repo-scope-round-trips-workspace-wide-and-pinned-ch: verified-05-lead-repo-scope-round-trips-workspace-wide-and-pinned-ch
     prove-06-lead-name-validation-blocks-invalid-submit: verified-06-lead-name-validation-blocks-invalid-submit
-    prove-16-deleting-a-lead-leaves-its-terminal-pty-running-until-ta: verified-16-deleting-a-lead-leaves-its-terminal-pty-running-until-ta
+    prepare-disposable-lead-runtime: disposable-lead-connected
     prove-19-slide-over-run-epic-control-is-inert-pinned-defect: verified-19-slide-over-run-epic-control-is-inert-pinned-defect
     prove-20-list-lane-run-epic-creates-the-same-purpose-named-lead: verified-20-list-lane-run-epic-creates-the-same-purpose-named-lead
     clear-primary-lead: primary-lead-cleared
@@ -67,17 +67,17 @@ graph:
   primary-lead-cleared:
     prove-03-lead-template-creates-an-interactive-lead-agent-and-role: verified-03-lead-template-creates-an-interactive-lead-agent-and-role
   primary-lead-ready:
-    start-primary-lead-session: primary-lead-session-ready
+    connect-primary-lead-runtime: primary-lead-connected
     assign-primary-lead: primary-lead-assigned
     clear-second-lead: second-lead-cleared
     prove-07-duplicate-lead-name-renders-the-server-error-inline: verified-07-duplicate-lead-name-renders-the-server-error-inline
     prove-09-unassigned-lead-reads-no-epic-assigned-without-idle-nois: verified-09-unassigned-lead-reads-no-epic-assigned-without-idle-nois
     prove-11-opening-a-lead-agent-launches-loom-lead-with-attribution: verified-11-opening-a-lead-agent-launches-loom-lead-with-attribution
-    prove-12-starting-a-lead-terminal-creates-its-orchestration-sessi: verified-12-starting-a-lead-terminal-creates-its-orchestration-sessi
-    prove-13-reopening-a-lead-reuses-its-terminal-session: verified-13-reopening-a-lead-reuses-its-terminal-session
     prove-17-assigning-an-epic-marks-the-lead-context-delivery-state: verified-17-assigning-an-epic-marks-the-lead-context-delivery-state
     prove-23-lead-files-tab-exposes-the-no-worktree-checkout-state: verified-23-lead-files-tab-exposes-the-no-worktree-checkout-state
-  primary-lead-session-ready:
+  primary-lead-connected:
+    prove-12-starting-a-lead-terminal-creates-its-orchestration-sessi: verified-12-starting-a-lead-terminal-creates-its-orchestration-sessi
+    prove-13-reopening-a-lead-reuses-its-terminal-session: verified-13-reopening-a-lead-reuses-its-terminal-session
     prove-14-migrating-a-lead-backend-rebuilds-the-launch-spec: verified-14-migrating-a-lead-backend-rebuilds-the-launch-spec
     prove-15-stopped-lead-keeps-its-terminal-pane: verified-15-stopped-lead-keeps-its-terminal-pane
   primary-lead-assigned:
@@ -88,5 +88,9 @@ graph:
     prove-10-lead-work-panel-offers-epic-filters-while-worker-panel-d: verified-10-lead-work-panel-offers-epic-filters-while-worker-panel-d
     prove-21-agents-page-run-epic-reuses-the-selected-lead: verified-21-agents-page-run-epic-reuses-the-selected-lead
     prove-22-leads-sort-ahead-of-workers-in-the-rail: verified-22-leads-sort-ahead-of-workers-in-the-rail
+  disposable-lead-connected:
+    delete-disposable-lead: disposable-lead-orphaned
+  disposable-lead-orphaned:
+    reclaim-disposable-lead-terminal: verified-16-deleting-a-lead-leaves-its-terminal-pty-running-until-ta
 coverage:
   strategy: transition

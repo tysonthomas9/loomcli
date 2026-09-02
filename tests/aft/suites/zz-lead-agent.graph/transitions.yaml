@@ -22,7 +22,7 @@ transitions:
     steps:
       - use: case-03-lead-template-creates-an-interactive-lead-agent-and-role
   prove-04-lead-backend-dropdown-selects-the-runtime:
-    intent: An operator creates a Lead agent with the Claude backend selected and verifies the choice reaches the agent record and launch spec
+    intent: An operator creates a Lead with Claude selected, opens that exact agent, and verifies its controlled Claude terminal and matching live launch metadata
     actor: human
     via: ui
     steps:
@@ -64,41 +64,53 @@ transitions:
     steps:
       - use: case-10-lead-work-panel-offers-epic-filters-while-worker-panel-d
   prove-11-opening-a-lead-agent-launches-loom-lead-with-attribution:
-    intent: An operator opens a Lead agent and verifies the embedded terminal is backed by a loom lead launch spec for that exact agent
+    intent: An operator opens a Lead and verifies its controlled Codex connection and exact workspace attribution
     actor: human
     via: ui
     steps:
       - use: case-11-opening-a-lead-agent-launches-loom-lead-with-attribution
   prove-12-starting-a-lead-terminal-creates-its-orchestration-sessi:
-    intent: An operator verifies the lead terminal's orchestration session id is stable and matches the id inherited by the child launch environment
+    intent: An operator verifies the connected Lead keeps one stable orchestration session shared with its child launch environment
     actor: system
     via: cli
     steps:
       - use: case-12-starting-a-lead-terminal-creates-its-orchestration-sessi
   prove-13-reopening-a-lead-reuses-its-terminal-session:
-    intent: An operator returning to their Lead agent reattaches to the same terminal session instead of spawning a second agent-bound tab
+    intent: An operator returns to the connected Lead and reattaches its original terminal instead of spawning a second tab
     actor: human
     via: ui
     steps:
       - use: case-13-reopening-a-lead-reuses-its-terminal-session
   prove-14-migrating-a-lead-backend-rebuilds-the-launch-spec:
-    intent: An operator switching a Lead agent from codex to claude receives a fresh terminal launch spec while the prior tab's current survival is pinned
+    intent: An operator switches the Lead to Claude and verifies the new launch spec without claiming a connected Claude runtime
     actor: api-client
     via: api
     steps:
       - use: case-14-migrating-a-lead-backend-rebuilds-the-launch-spec
   prove-15-stopped-lead-keeps-its-terminal-pane:
-    intent: An operator stopping a Lead agent still sees and can resolve its terminal, unlike stopped daemon workers
+    intent: An operator stops the connected Lead and verifies its existing terminal remains available
     actor: human
     via: ui
     steps:
       - use: case-15-stopped-lead-keeps-its-terminal-pane
-  prove-16-deleting-a-lead-leaves-its-terminal-pty-running-until-ta:
-    intent: An operator deletes a disposable Lead agent while its terminal is running and observes the current orphan-tab behavior before reclaiming it
+  prepare-disposable-lead-runtime:
+    intent: An operator creates a disposable Lead and opens it through a connected controlled Codex terminal
     actor: human
     via: ui
     steps:
-      - use: case-16-deleting-a-lead-leaves-its-terminal-pty-running-until-ta
+      - use: prepare-disposable-lead-runtime
+  delete-disposable-lead:
+    intent: An operator deletes the disposable Lead and verifies its connected terminal becomes a live orphan
+    actor: human
+    via: runtime
+    steps:
+      - use: delete-disposable-lead
+  reclaim-disposable-lead-terminal:
+    intent: An operator explicitly reclaims the orphaned terminal tab and returns to the active workspace
+    actor: human
+    via: runtime
+    steps:
+      - use: reclaim-disposable-lead-terminal
   prove-17-assigning-an-epic-marks-the-lead-context-delivery-state:
     intent: An orchestration client assigns an epic to the Lead agent and an operator sees the assigned-epic and captured delivery header state
     actor: human
@@ -155,12 +167,14 @@ transitions:
     via: api
     steps:
       - use: prepare-primary-lead
-  start-primary-lead-session:
-    intent: The runtime starts a live terminal session required by the session lifecycle branches.
-    actor: system
-    via: runtime
+  connect-primary-lead-runtime:
+    intent: An operator opens the primary Lead and waits for a connected controlled Codex session before lifecycle checks.
+    actor: human
+    via: ui
     steps:
-      - use: start-primary-lead-session
+      - use: open-lead-terminal
+        with:
+          name: atlas-${RUN_ID:-local}
   assign-primary-lead:
     intent: An API client gives the primary Lead an epic prerequisite for the claim-badge branch.
     actor: api-client

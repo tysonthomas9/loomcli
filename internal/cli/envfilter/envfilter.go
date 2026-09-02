@@ -41,6 +41,7 @@ var envAllowlistExact = map[string]bool{
 	"GITHUB_TOKEN": true, "GITHUB_TOKEN_FILE": true,
 	// E2E test stubs. Exact matches keep arbitrary STUB_* values out.
 	"STUB_CODEX_EPIC_RUNNER": true, "STUB_CODEX_INVOCATIONS": true,
+	"STUB_CLAUDE_LEAD": true,
 	// Editor
 	"EDITOR": true, "VISUAL": true,
 }

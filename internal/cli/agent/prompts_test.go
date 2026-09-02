@@ -733,16 +733,17 @@ func TestGenerateTerminalPromptCustomReplacesBaseAndAppendsSafety(t *testing.T) 
 }
 
 func TestGenerateTerminalPromptTextPreservesLiteralTextAndAppendsSafetyOnce(t *testing.T) {
-	text := "Literal {{ .AgentName }} marker"
+	text := "Literal `{{ .AgentName }}` and ${reviewer} marker\n\n\n### Multi-Agent Safety Rules\nThis heading is authored text."
 	prompt, err := GenerateTerminalPromptText(text)
 	if err != nil {
 		t.Fatalf("GenerateTerminalPromptText: %v", err)
 	}
-	if !strings.HasPrefix(prompt, text) {
-		t.Fatalf("prompt = %q, want literal prefix %q", prompt, text)
+	wantSuffix := "\n\n" + buildSafetyGuardrailsBlock()
+	if got := strings.TrimSuffix(prompt, wantSuffix); got != text {
+		t.Fatalf("authored prompt = %q, want byte-exact literal %q", got, text)
 	}
-	if got := strings.Count(prompt, "Multi-Agent Safety Rules"); got != 1 {
-		t.Fatalf("safety block count = %d, want 1", got)
+	if !strings.HasSuffix(prompt, wantSuffix) {
+		t.Fatalf("prompt does not end with exactly one generated safety suffix: %q", prompt)
 	}
 }
 

@@ -311,6 +311,10 @@ blocks:
           print(len(agents or []))
           PY
         intent: An operator records the expected would-be lead name and the agent count before using the selected-lead Run control
+      - open: /ws/E2E-WS-LEAD/agents/worker-${RUN_ID:-local}
+      - wait:
+          fn: "!!document.querySelector(\"[role=group][aria-label='Filter tasks by status']\") && !Array.from(document.querySelectorAll('button')).some((b) => (b.getAttribute('aria-label') || '').startsWith('Run epic '))"
+        intent: Confirm the non-lead worker panel shows task filters and no Run epic control before exercising the Lead-only action
       - open: /ws/E2E-WS-LEAD/agents/atlas-b-${RUN_ID:-local}
       - wait:
           fn: |-
@@ -361,12 +365,12 @@ blocks:
           assert selected and selected[0].get("role_name") == "lead", agents
           PY
         intent: An operator's readback confirms the agents-page Run action did not mint a purpose-named lead
-      - open: /ws/E2E-WS-LEAD/agents/worker-${RUN_ID:-local}
-      - wait:
-          fn: "!!document.querySelector(\"[role=group][aria-label='Filter tasks by status']\") && !Array.from(document.querySelectorAll('button')).some((b) => (b.getAttribute('aria-label') || '').startsWith('Run epic '))"
-        intent: Wait until the non-lead worker panel shows task filters and no Run epic control
   terminal-21-agents-page-run-epic-reuses-the-selected-lead:
     steps:
       - expect:
+          url: "**/agents/atlas-b-${RUN_ID:-local}**"
+        intent: Confirm the final review remains focused on the Lead that was reused.
+      - expect:
           visible:
-            selector: body
+            selector: "[aria-label='Agent: atlas-b-${RUN_ID:-local}']"
+        intent: Keep the reused Lead visible beside the grouped Run epic checks.

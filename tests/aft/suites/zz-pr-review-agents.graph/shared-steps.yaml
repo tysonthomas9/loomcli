@@ -68,26 +68,100 @@ blocks:
         value: "{{agentName}}"
     - click:
         testid: create-agent-submit
+  assert-pr-review-agent-definition:
+    params:
+    - agentName
+    steps:
     - wait:
-        fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('{{agentName}}')"
-      intent: Wait until the PR Review agent appears after submit
+        fn: "!document.querySelector('[data-testid=create-agent-overlay]') && !!document.querySelector(\"[aria-label='Agent: {{agentName}}']\")"
+      intent: Wait until the creation dialog closes and the exact PR Review agent appears
+    - wait:
+        fn: |-
+          (async () => {
+            const response = await fetch('/api/workspaces/E2E-WS-PRR/agents', { cache: 'no-store' });
+            if (!response.ok) return false;
+            const payload = await response.json();
+            const data = payload.data ?? payload;
+            const agents = Array.isArray(data) ? data : (Array.isArray(data.agents) ? data.agents : []);
+            const matches = agents.filter((agent) => agent.name === '{{agentName}}');
+            return matches.length === 1 &&
+              matches[0].role_name === 'pr-review' &&
+              !!matches[0].backend &&
+              matches[0].auto === false;
+          })()
+      intent: Confirm the persisted agent uses the PR Review role, has a backend, and is not auto-started
     - expect:
         visible:
           selector: "[aria-label='Agent: {{agentName}}']"
-    - run: |
-        set -e
-        name="{{agentName}}"
-        curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-PRR/agents" > "$AFT_WORK_DIR/prr-d1-agents.json"
-        python3 - "$AFT_WORK_DIR/prr-d1-agents.json" "$name" <<'PY'
-        import json, sys
-        d = json.load(open(sys.argv[1]))
-        data = d.get("data", d)
-        agents = data.get("agents") if isinstance(data, dict) else data
-        matches = [a for a in agents or [] if a.get("name") == sys.argv[2]]
-        assert len(matches) == 1, agents
-        a = matches[0]
-        assert a.get("role_name") == "pr-review", a
-        assert a.get("backend"), a
-        assert not a.get("auto"), a
-        PY
-      intent: An operator's readback selects the created PR Review agent from the unordered agent list
+      intent: Keep the exact created PR Review agent visible while its persisted definition is reviewed
+  assert-two-pr-review-agents-share-role:
+    params:
+    - primaryName
+    - secondaryName
+    steps:
+    - wait:
+        fn: |-
+          (async () => {
+            const response = await fetch('/api/workspaces/E2E-WS-PRR/agents', { cache: 'no-store' });
+            if (!response.ok) return false;
+            const payload = await response.json();
+            const data = payload.data ?? payload;
+            const agents = Array.isArray(data) ? data : (Array.isArray(data.agents) ? data.agents : []);
+            const byName = new Map(agents.map((agent) => [agent.name, agent]));
+            const primary = byName.get('{{primaryName}}');
+            const secondary = byName.get('{{secondaryName}}');
+            return !!primary && !!secondary &&
+              primary.role_name === 'pr-review' && secondary.role_name === 'pr-review';
+          })()
+      intent: Confirm both independently named PR Review agents reuse the same persisted PR Review role
+    - expect:
+        visible:
+          selector: "[aria-label='Agent: {{secondaryName}}']"
+      intent: Keep the second PR Review agent visible while shared-role reuse is reviewed
+  assert-connected-pr-review-terminal:
+    params:
+    - agentName
+    steps:
+    - wait:
+        fn: |-
+          (() => {
+            const wrapper = document.querySelector('[data-testid=terminal-wrapper]');
+            if (!wrapper) return false;
+            const rows = Array.from(wrapper.querySelectorAll('.term-row')).map((el) => el.textContent || '').join('\n');
+            const text = rows || wrapper.textContent || '';
+            if (text.includes('Error running agent') || text.includes('backend is not installed')) {
+              throw new Error('PR Review agent failed to start: ' + text.slice(-400));
+            }
+            return text.includes('Controlled Codex stub connected: {{agentName}}') &&
+              text.includes('Controlled Codex prompt contract:') &&
+              text.includes('Controlled Codex prompt identity: pr-review') &&
+              text.includes('safety-blocks=1');
+          })()
+      intent: Wait until the controlled Codex process identifies the built-in PR Review prompt and connects without a startup error
+    - wait:
+        fn: |-
+          (async () => {
+            const response = await fetch('/api/workspaces/E2E-WS-PRR/terminal/tabs', { cache: 'no-store' });
+            if (!response.ok) return false;
+            const payload = await response.json();
+            const tabs = Array.isArray(payload.data) ? payload.data : [];
+            const matches = tabs.filter((tab) =>
+              tab.agent_id === '{{agentName}}' &&
+              tab.kind === 'agent' &&
+              tab.role === 'pr-review' &&
+              tab.backend === 'codex');
+            if (matches.length !== 1 || matches[0].pty_alive !== true) return false;
+            const launch = matches[0].launch || {};
+            const argv = Array.isArray(launch.argv) ? launch.argv.map(String).join(' ') : '';
+            const env = launch.env || {};
+            return argv.includes('lead') &&
+              argv.includes('--prompt') &&
+              argv.includes('builtin:pr-review') &&
+              env.LOOM_AGENT_ROLE === 'pr-review' &&
+              env.LOOM_AGENT_NAME === '{{agentName}}';
+          })()
+      intent: Confirm exactly one live Codex tab owns this PR Review agent and carries the built-in review launch contract
+    - expect:
+        visible:
+          testid: terminal-wrapper
+      intent: Keep the connected PR Review terminal visible beside its grouped runtime checks

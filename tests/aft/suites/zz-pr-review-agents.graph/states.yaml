@@ -13,81 +13,185 @@ states:
         visible:
           testid: agents-page
   scenario-1-modal-creates-a-pr-review-interactive-agent:
-    intent: modal creates a PR Review interactive agent
+    intent: Created PR Review agent is visibly present with the persisted interactive definition
     testIntent: An operator creates a PR Review terminal agent from the agent templates and verifies the stored agent uses the built-in PR-review role
     terminal: true
     assert:
-    - expect:
-        visible:
-          selector: "[aria-label='Agent: prr-${RUN_ID:-local}']"
+    - use: assert-pr-review-agent-definition
+      with:
+        agentName: prr-${RUN_ID:-local}
   primary-pr-review-agent-ready:
     intent: A case-isolated primary PR Review agent and its shared role are persisted.
     assert:
-    - expect:
-        visible:
-          selector: "[aria-label='Agent: prr-${RUN_ID:-local}-${AFT_CASE_ID}']"
+    - use: assert-pr-review-agent-definition
+      with:
+        agentName: prr-${RUN_ID:-local}-${AFT_CASE_ID}
   create-agent-dialog-open:
-    intent: The agent creation dialog is mounted for template-contract review.
+    intent: The creation dialog opens with Task Runner as its documented default template.
     assert:
     - expect:
         visible:
           testid: create-agent-overlay
+      intent: Confirm the creation dialog itself is visible
+    - expect:
+        attr:
+          testid: create-agent-template-task
+          name: aria-pressed
+          equals: 'true'
+      intent: Confirm Task Runner is initially selected
+    - expect:
+        attr:
+          testid: create-agent-template-interactive-pr-review
+          name: aria-pressed
+          equals: 'false'
+      intent: Confirm PR Review is initially unselected
+    - expect:
+        attr:
+          testid: create-agent-name
+          name: placeholder
+          equals: worker
+      intent: Confirm the default name guidance matches Task Runner
   scenario-2-pr-review-template-selection-documents-the-true-default:
-    intent: PR Review template selection documents the true default
+    intent: Selecting PR Review changes the active template and reviewer name guidance
     testIntent: An operator opening the agent templates sees Task Runner preselected and can switch to the PR Review template
     terminal: true
     assert:
     - expect:
-        count:
-          testid: create-agent-overlay
-          equals: 0
+        attr:
+          testid: create-agent-template-task
+          name: aria-pressed
+          equals: 'false'
+      intent: Confirm Task Runner is no longer selected
+    - expect:
+        attr:
+          testid: create-agent-template-interactive-pr-review
+          name: aria-pressed
+          equals: 'true'
+      intent: Confirm PR Review is now selected
+    - expect:
+        attr:
+          testid: create-agent-name
+          name: placeholder
+          equals: reviewer
+      intent: Confirm the name guidance now matches PR Review
   scenario-3-interactive-prompts-expose-only-visible-templates:
-    intent: interactive prompts expose only visible templates
+    intent: The dialog shows published interactive templates and omits the hidden checkout prompt
     testIntent: An operator sees only the published built-in interactive prompts and never sees the hidden checkout prompt as a template
     terminal: true
     assert:
+    - wait:
+        fn: document.querySelectorAll('[data-testid=create-agent-template-lead], [data-testid=create-agent-template-interactive-pr-review]').length === 2
+      intent: Wait until the modal renders exactly the published built-in interactive templates
+    - expect:
+        visible:
+          testid: create-agent-template-lead
+      intent: Confirm the published Lead template remains visible
+    - expect:
+        visible:
+          testid: create-agent-template-interactive-pr-review
+      intent: Confirm the published PR Review template remains visible
     - expect:
         count:
-          testid: create-agent-overlay
+          selector: "[data-testid=create-agent-template-interactive-pr-review-checkout]"
           equals: 0
+      intent: Confirm the hidden checkout prompt is not offered as a template
+    - expect:
+        visible:
+          testid: create-agent-template-custom-prompt
+      intent: Confirm the custom interactive prompt option remains visible
   scenario-4-prompt-list-failure-keeps-built-in-templates-visible:
-    intent: prompt list failure keeps built-in templates visible
+    intent: Prompt-list failure leaves the fallback templates and an honest notice visible
     testIntent: An operator whose prompt list fails to load still sees the built-in interactive templates and an honest fallback notice
     terminal: true
     assert:
-    - expect:
-        count:
-          testid: create-agent-overlay
-          equals: 0
-  scenario-5-pr-review-terminal-launch-carries-the-built-in-prompt:
-    intent: PR Review terminal launch carries the built-in prompt
-    testIntent: An operator opening their PR Review agent gets a mounted terminal launched with the built-in PR-review prompt
-    terminal: true
-    assert:
+    - wait:
+        text: Prompt list unavailable; showing built-in defaults.
     - expect:
         visible:
-          testid: terminal-view
+          testid: create-agent-template-lead
+      intent: Confirm fallback still provides the Lead template
+    - expect:
+        visible:
+          testid: create-agent-template-interactive-pr-review
+      intent: Confirm fallback still provides the PR Review template
+    - expect:
+        notText: Something went wrong
+      intent: Confirm the scoped fallback notice replaces the generic error screen
+  scenario-5-pr-review-terminal-launch-carries-the-built-in-prompt:
+    intent: PR Review agent starts a connected Codex session with the built-in review prompt
+    testIntent: An operator sees their PR Review agent connect through controlled Codex with one live attributed terminal and the built-in PR-review prompt contract
+    terminal: true
+    assert:
+    - use: assert-connected-pr-review-terminal
+      with:
+        agentName: prr-${RUN_ID:-local}-${AFT_CASE_ID}
   scenario-6-second-pr-review-agent-reuses-the-shared-role:
-    intent: second PR Review agent reuses the shared role
+    intent: Both visibly distinct PR Review agents reuse the same persisted role
     testIntent: An operator creates a second PR Review agent and verifies both agents share the workspace PR-review role
     terminal: true
     assert:
-    - expect:
-        visible:
-          selector: "[aria-label='Agent: prr2-${RUN_ID:-local}']"
+    - use: assert-two-pr-review-agents-share-role
+      with:
+        primaryName: prr-${RUN_ID:-local}-${AFT_CASE_ID}
+        secondaryName: prr2-${RUN_ID:-local}
   scenario-7-conflicting-prompt-cannot-reuse-the-pr-review-role:
-    intent: conflicting prompt cannot reuse the PR Review role
+    intent: The rejected role conflict leaves the original PR Review agent unchanged
     testIntent: An API client that tries to reuse the PR-review role with a different prompt receives the documented role-conflict error
     terminal: true
     assert:
+    - wait:
+        fn: |-
+          (async () => {
+            const response = await fetch('/api/workspaces/E2E-WS-PRR/agents', { cache: 'no-store' });
+            if (!response.ok) return false;
+            const payload = await response.json();
+            const data = payload.data ?? payload;
+            const agents = Array.isArray(data) ? data : (Array.isArray(data.agents) ? data.agents : []);
+            return agents.some((agent) => agent.name === 'prr-${RUN_ID:-local}-${AFT_CASE_ID}' && agent.role_name === 'pr-review') &&
+              !agents.some((agent) => agent.name === 'pr-review');
+          })()
+      intent: Confirm the original case agent still owns the role and no conflicting agent was created
     - expect:
         visible:
-          testid: agents-page
+          selector: "[aria-label='Agent: prr-${RUN_ID:-local}-${AFT_CASE_ID}']"
+      intent: Keep the original PR Review agent visible after the conflicting create is rejected
   scenario-8-unknown-built-in-prompt-fails-visibly-at-terminal-launch:
     intent: unknown built-in prompt fails visibly at terminal launch
     testIntent: An operator whose interactive agent names an unknown built-in prompt sees the terminal report the prompt-loading error while the hidden checkout prompt remains API-accepted
     terminal: true
     assert:
+    - wait:
+        fn: |-
+          (() => {
+            const wrapper = document.querySelector('[data-testid=terminal-wrapper]');
+            if (!wrapper) return false;
+            const rows = Array.from(wrapper.querySelectorAll('.term-row')).map((el) => el.textContent || '').join('\n');
+            const text = rows || wrapper.textContent || '';
+            return text.includes('Error loading terminal prompt:') &&
+              text.includes('unknown built-in interactive prompt');
+          })()
+      intent: Wait until the unknown built-in prompt error is visible in the surviving terminal
+    - wait:
+        fn: |-
+          (async () => {
+            const response = await fetch('/api/workspaces/E2E-WS-PRR/terminal/tabs', { cache: 'no-store' });
+            if (!response.ok) return false;
+            const payload = await response.json();
+            const tabs = Array.isArray(payload.data) ? payload.data : [];
+            const matches = tabs.filter((tab) => tab.agent_id === 'prrbad-${RUN_ID:-local}');
+            if (matches.length !== 1 || matches[0].pty_alive !== true) return false;
+            const launch = matches[0].launch || {};
+            const argv = Array.isArray(launch.argv) ? launch.argv.map(String).join(' ') : '';
+            return matches[0].kind === 'agent' && argv.includes('builtin:not-a-prompt');
+          })()
+      intent: Confirm the recovery shell remains live under the exact rejected prompt launch record
+    - expect:
+        notText: "Controlled Codex stub connected:"
+      intent: Confirm the rejected prompt never reaches a connected Codex session
+    - expect:
+        notText: Something went wrong
+      intent: Confirm the terminal explains the prompt error without replacing the page
     - expect:
         visible:
           testid: terminal-wrapper
+      intent: Keep the recovery terminal visible beside the grouped rejection evidence

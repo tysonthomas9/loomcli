@@ -88,14 +88,23 @@ role name.
 - **CUS-D14 must unset `LOOM_AGENT_EFFORT` and `LOOM_CLAUDE_EFFORT`.**
   `appendCodexEffortArgs` **prepends** `-c model_reasoning_effort="…"`
   (`backend_effort.go:15-22`), so with either set, argv does not begin with `exec`.
-- **CUS-D5 is the controlled-runtime pilot.** The deterministic Codex stub now implements
+- **CUS-D5 is the approved controlled-runtime reference.** The deterministic Codex stub implements
   the narrow app-server bootstrap needed for readiness, holds its remote TUI on stdin, and
   connects that remote process over WebSocket (**S-1/S-7**). The process reports a measured
   prompt-prefix fingerprint and safety-block count; the case requires those values, the
   controlled-runtime banner, an agent-specific connection marker, and no visible start error.
   A same-origin terminal-tabs readback also requires exactly one owned Codex tab with
   `pty_alive=true`. This proves bootstrap and argv fidelity only; it does not claim thread
-  discovery or turns.
+  discovery or turns. The same reviewer-evidence shape now covers the custom-agent paths that
+  open Claude terminals: the deterministic AFT server opts into a persistent harness-lead stub
+  that requires `--session-id`, excludes print/stream-json calls, emits an agent-specific ready
+  marker without echoing the prompt, and remains alive until its PTY input closes. The exact
+  `STUB_CLAUDE_LEAD` control is allowlisted to the child process while other `STUB_CLAUDE_*`
+  values stay filtered. The first root transition of every independent custom-prompt graph
+  execution invokes one shared cleanup block that deletes only canonical `kind=agent` terminal
+  tabs in its two fixture workspaces, verifies their PTYs are gone, and proves existing lead/shell
+  tab metadata survives. Cleanup stays inside the established root transitions so deeper shared
+  prefixes remain reusable.
 
 **Accepted — the real tier was over-blocked**
 `run-aft.sh` assigns `AFT_SUITES` with `:=` under `AFT_REAL_BACKEND` and then runs exactly that
@@ -157,10 +166,17 @@ reviews. Every finding was re-verified against source before being folded in. Wh
   launching `loom serve` and registers that same directory. Corrected in both places.
 
 **Accepted — determinism and honesty**
-- The deterministic Codex stub now has a deliberately narrow `app-server` implementation and a
+- The deterministic Codex stub has a deliberately narrow `app-server` implementation and a
   remote client that completes a real WebSocket initialize handshake. CUS-D5 may therefore
   assert a connected controlled Codex process in the mounted terminal and its prompt argv. It still
-  cannot claim thread/turn or model behavior. The remaining boundary is recorded as **S-7**.
+  cannot claim thread/turn or model behavior. A matching opt-in Claude harness-lead stub now
+  gives D6/D8d/D10/D11/D17a/D19 visible readiness plus live-PTY evidence while leaving one-shot
+  Claude calls unchanged. For every inline custom prompt, the review card computes the expected
+  authored SHA-256 and UTF-8 byte count and requires the stub's measurement of its actual final
+  prompt argument; the terminal also exposes the supplied Claude session UUID but never the prompt
+  bytes. D19's built-in control requires a non-empty generated-prompt fingerprint plus its exact
+  stored `prompt_file` and launch flag. Neither stub is evidence of model behavior. The remaining
+  boundary is recorded as **S-7**.
 - CUS-D6 is reclassified from a product-correctness case to an explicitly-labelled
   **negative-rendering regression fence**, and is no longer counted as sanitizer coverage.
 - CUS-D11's "no worktree exists under the workspace" is narrowed to the agent-scoped path;
@@ -517,19 +533,30 @@ Common preconditions unless stated: `E2E-WS-CUSTOM` exists with ≥1 repo; brows
   markup anywhere in the agents surface.
 - **Fixture:**
   `Review PRs.\n<img src=x onerror="window.__aftXss=1">\n<script>window.__aftXss=1</script>\n[click](javascript:window.__aftXss=1)`
-- **Steps:** create via UI (`cust-xss-${RUN_ID}`) → `open /ws/E2E-WS-CUSTOM/agents/cust-xss-${RUN_ID}`
-  → `wait.fn` on `agents-page` → visit the Info and Logs tabs → `wait: { ms: 250 }`.
+- **Fixture owner:** this case writes `$AFT_WORK_DIR/cus-d6.prompt` without a trailing newline.
+  The browser fill and the persistence comparison both consume that same file, so there is one
+  source of truth for the payload whose rendering is under review.
+- **Steps:** create via UI (`cust-xss-${RUN_ID}`) using the fixture file → `role show --json` and
+  compare its stored prompt bytes to that file → open
+  `/ws/E2E-WS-CUSTOM/agents/cust-xss-${RUN_ID}` → wait for the controlled Claude readiness marker
+  and one live owned PTY → visit the Info and Logs tabs → `wait: { ms: 250 }`.
 - **Assertions**
+  - before any DOM claim, `role show --json` reports `kind == interactive`, no `prompt_file`, and
+    `.prompt.encode("utf-8")` byte-equal to the exact fixture; mismatch diagnostics disclose only
+    byte counts and SHA-256 fingerprints, not the executable-looking prompt
+  - the controlled Claude terminal is reviewer-visible, owns exactly one live agent tab, and has
+    no `Error running agent` or missing-backend text; its measured authored SHA-256 and byte count
+    must match the same XSS fixture and its reported session ID must be a UUID; this is process and
+    prompt-delivery evidence, not model behavior
   - `wait.fn`: `window.__aftXss === undefined && !document.querySelector('script[data-injected], img[onerror]') && !document.querySelector('a[href^="javascript:"]')`
   - `expect: { notText: "onerror" }` on the agents page
   - reload once and repeat (SSE re-render path)
-  - **not asserted:** anything about the terminal pane. CUS-D5 now proves the narrow controlled
-    Codex bootstrap, but this XSS fence intentionally asserts only DOM safety and does not turn
-    backend output into part of its contract.
-- **Edge rationale + honesty note:** **this currently passes vacuously** — the prompt is not
-  rendered on any surface (no `/roles` route, `WorkspaceAgentInfo` has no `prompt` field,
-  `api/workspace/workspace.ts:33-40`). Write it anyway and say so in the suite comment: it is
-  the fence that fires the day a "show prompt" surface lands (see CUS-D12 / **P-5**).
+- **Edge rationale + honesty note:** this is still a negative absence fence because the prompt is
+  not rendered on any surface (no `/roles` route, `WorkspaceAgentInfo` has no `prompt` field,
+  `api/workspace/workspace.ts:33-40`), not evidence that a renderer sanitizes hostile markup. The
+  exact persistence precondition removes the weaker vacuity where a different or empty prompt
+  could make the DOM check green. It is the fence that fires the day a "show prompt" surface lands
+  (see CUS-D12 / **P-5**).
   The field that *is* rendered is the agent **name** — `AgentDetailMain.tsx:573` in the
   header, `AgentCard.tsx:107` in the rail (`:464-468` renders the *role label*, which for a
   custom-prompt agent happens to equal the name) — and it is charset-constrained by
@@ -608,6 +635,8 @@ Every workspace is seeded with roles `plan`, `task`, and `lead`
     and **`description == "Lead/orchestrator interactive"`** — because `isLeadAgentRole`
     → `IsInteractiveRoleName("orchestrator")` is true (`domain/role.go:58-66`,
     `agent_service.go:465-468`). A *custom* agent gets the lead role's description
+  - the grouped terminal card requires the controlled Claude process to measure the same
+    `AFT-D8D-${RUN_ID}` authored-prompt SHA-256 and byte count and report a UUID session ID
   - `run:` `/terminal/tabs` (polled) → `launch.env.LOOM_AGENT_ROLE == "orchestrator"`
   This is the sharpest form of **P-1**: the legacy first-class interactive role name is
   claimable by any custom prompt, and nothing warns. Contrast D8c, where `lead` *is* seeded and
@@ -638,13 +667,14 @@ Every workspace is seeded with roles `plan`, `task`, and `lead`
 - **Intent:** An operator who picks a non-default AI backend for their custom agent gets a
   terminal session that actually launches on that backend.
 - **Steps:** custom card → name `cust-be-${RUN_ID}` → `select: { testid: create-agent-backend, value: "claude" }`
-  → prompt text → submit → `open /ws/E2E-WS-CUSTOM/agents/cust-be-${RUN_ID}` → wait for the
-  terminal mount (`TerminalView` triggers the ensure-session POST).
-- **Assertions** — one `run:` step **polling** `/terminal/tabs` until a tab with this exact
-  `agent_id` exists (the ensure-session promise is async — `useSessionSeeding.ts:123-149`), then
-  a `python3` block selecting that tab by `agent_id` (arrays again — `api:` cannot filter):
-  - agent list readback → `backend == "claude"`
+  → prompt text → submit → create a default-backend companion → read back both persisted agents
+  → `open /ws/E2E-WS-CUSTOM/agents/cust-be-${RUN_ID}`. The final grouped review moment waits
+  for the controlled Claude marker and same-origin terminal state.
+- **Assertions:**
+  - agent list readback before navigation → selected agent `backend == "claude"`; companion
+    `backend == "codex"`
   - the selected tab has `kind == "agent"`, `role == cust-be-${RUN_ID}`, `backend == "claude"`
+    and `pty_alive == true`
   - `launch.argv[0] == "-c"`; `launch.argv[1]` contains `'--backend' 'claude'` and ends with
     `'lead'`, and **does not contain `--prompt`** — this is the inline-prompt branch of
     `agentLaunchCommandArgs` (`:393-395`). Every element is single-quoted by `shellQuote`
@@ -653,7 +683,6 @@ Every workspace is seeded with roles `plan`, `task`, and `lead`
     — the env key that `loadLeadRolePrompt` uses to find the prompt (`lead.go:161-197`)
   - `launch.cwd == ""` — interactive agents get no worktree (`agent_service.go:389-395`,
     `agentLaunchCwd:339-347`). Pin it; see **P-4**
-  - a companion default-backend agent asserts `backend == "codex"` and `'--backend' 'codex'`
   - `api: GET /api/backends` → the list **includes** `codex`, `claude`, `cursor`, `opencode`,
     `gemini` (registration sites: `backend_codex.go:234`, `backend_claude.go:200`,
     `backend_cursor.go:167`, `backend_opencode.go:137`, `backend_gemini.go:144`). This one
@@ -662,13 +691,12 @@ Every workspace is seeded with roles `plan`, `task`, and `lead`
     (`printable`, `testing-app/src/api-step.ts:20-24`). Assert *inclusion only*, never an exact
     set — `backend_external.go:174` can register arbitrary configured names. (`echo` will not
     appear: `backend_echo.go:1` is `//go:build testbackend`.)
-  - **not asserted:** `pty_alive`, terminal rows, or any backend output. This case is a launch-
-    specification comparison, not a runtime-health case. The launch spec is
-    written by the ensure-session handler (`ensureAgentTerminalSession` → `PutTab` → `GetTab`,
-    `agent_session.go:76-137`) with no dependency on a successful spawn. CUS-D5 separately pins
-    the deterministic Codex bootstrap; this case's non-default Claude path does not implement
-    the same controlled-session handshake. Choose `claude` because its executable is stubbed —
-    **never `gemini`**, which has no stub in any farm and would reach the operator's real CLI
+  - the terminal rows contain `Controlled Claude stub ready: cust-be-${RUN_ID}` and contain no
+    `Error running agent` or `backend is not installed` text; the measured authored SHA-256 and
+    UTF-8 byte count match `AFT-BACKEND-${RUN_ID}`, and the reported session ID is a UUID
+  - **not asserted:** Claude thread, turn, or model behavior. This is deterministic process and
+    orchestration evidence. Choose `claude` because its executable is stubbed — **never
+    `gemini`**, which has no stub in any farm and would reach the operator's real CLI
 - **Edge rationale:** the argv+env pair is the *entire* spawn contract for a custom-prompt
   agent, and it is asymmetric (backend in argv, prompt identity in env). It is also
   free to assert — `GET /terminal/tabs` is a read.
@@ -681,8 +709,10 @@ Every workspace is seeded with roles `plan`, `task`, and `lead`
 - **Steps:** (a) leave the modal's preselected first repo chip and submit; (b) second agent,
   click the chip to deselect (`[data-testid='create-agent-repo-chips'] button`, first) and submit.
 - **Assertions:** (a) `cross_repo == false`, `repos == ["<repo>"]`; (b) `cross_repo == true`,
-  `repos` empty (both via the `run:` + `python3` list filter). In **both** cases
-  `launch.cwd == ""`.
+  `repos` empty (both via the `run:` + `python3` list filter before terminal navigation). Each
+  detail route must then show its own controlled Claude ready marker, exact authored-prompt
+  fingerprint and byte count, a UUID session ID, exactly one matching live PTY, and
+  `launch.cwd == ""`; the second grouped moment confirms both sessions remain live.
   The worktree assertion is **scoped to this agent's own expected path**, not a workspace-wide
   glob (which any other suite's background agents would contaminate). The canonical path is
   `filepath.Join(workspacePath, "worktrees", repoName, agentName)` — i.e.
@@ -713,6 +743,8 @@ Every workspace is seeded with roles `plan`, `task`, and `lead`
     so even the API cannot revise it; assert
     `PATCH /agents/{name}` with `{"prompt":"x"}` returns 200 **and** `role show --json`
     shows the prompt unchanged (silently ignored — pin the no-op)
+  - the final review moment also requires the existing controlled Codex agent to remain connected
+    with one live owned PTY, while the prompt marker remains absent from the rendered terminal
 - **Edge rationale:** the only escape hatch is the CLI (`loom role set <name> prompt <text>`,
   `role_cmd.go:282-285`), which the web UI never surfaces. Product gap **P-5**.
 
@@ -885,7 +917,9 @@ Every workspace is seeded with roles `plan`, `task`, and `lead`
   prompt, submit.
   **Assertions:** `run:` filter over `GET /agents` → `name == custmix-${RUN_ID}` **and**
   `role_name == custmix-${RUN_ID}`; `role show custmix-${RUN_ID} --json` resolves;
-  `open /ws/.../agents/custmix-${RUN_ID}` renders; polled `/terminal/tabs` →
+  `open /ws/.../agents/custmix-${RUN_ID}` renders a controlled Claude ready marker plus the exact
+  authored-prompt fingerprint and a UUID session ID; same-origin terminal state shows exactly one
+  live owned PTY and
   `launch.env.LOOM_AGENT_ROLE == custmix-${RUN_ID}`.
 - **Where the normalization actually happens — corrected in revision 3.** Revision 2 said the
   server re-normalizes `role_name`. It does not. `normalizeFirstClassAgentRole`
@@ -948,10 +982,13 @@ Every workspace is seeded with roles `plan`, `task`, and `lead`
 - **Assertions**
   - `expect: { count: { testid: create-agent-interactive-prompt, equals: 0 } }` before submit —
     the textarea belongs to the custom card only (`CreateAgentModal.tsx:544-563`)
-  - 201; `run:` list filter → `role_name == "pr-review"`, `name == rev-${RUN_ID}`
+  - 201; `run:` list filter → `role_name == "pr-review"`, `name == rev-${RUN_ID}`, and
+    `backend == "claude"`
   - `run:` `role show pr-review --json` → `kind == "interactive"`,
     `prompt_file == "builtin:pr-review"`, `prompt` empty
-  - `run:` `/terminal/tabs` after opening the agent → `launch.argv[1]` **does** contain
+  - the grouped final terminal moment shows `Controlled Claude stub ready: rev-${RUN_ID}`, a
+    non-empty generated-prompt fingerprint and UUID session ID, exactly one live owned PTY, and
+    `launch.argv[1]` **does** contain
     `'--prompt' 'builtin:pr-review'` — the *other* branch of `agentLaunchCommandArgs`
     (`:393-395`), and the exact contrast CUS-D10 asserts the absence of
   - `GET /interactive-prompts` still lists `pr-review` (registry unchanged)
@@ -1268,11 +1305,12 @@ agent detail has no prompt tab (`views/AgentEditorGroups.tsx:33-40`). An operato
 back, review, or revise what they told their agent — only `loom role show/set` can.
 **Spec:** a read-only `GET /api/workspaces/{ws}/agents/{name}/prompt` (or `role_prompt` on the
 monitor status payload) would let CUS-D1/D4/D5/D9 drop the CLI shell-out entirely and would
-make CUS-D6's XSS assertions non-vacuous. This is the single highest-leverage seam in the plan.
+promote CUS-D6 from an exact-payload absence fence to direct safe-rendering coverage. This is the
+single highest-leverage seam in the plan.
 
 ### S-1 — Stub argv/stdin observation (needed to observe the spawned process contract)
 
-**Severity:** stack · **Status:** PARTIAL — codex pilot implemented for CUS-D5
+**Severity:** stack · **Status:** PARTIAL — Codex argv reference plus Claude lifecycle parity implemented
 
 `e2e/stubs/codex` now appends an atomic, locked NUL-delimited record
 `pid \0 argv0 \0 arg1 \0 … \0\0` to `$STUB_ARGV_LOG` when set. The focused Go test uses that
@@ -1282,10 +1320,17 @@ the number of appended safety blocks. A same-origin browser readback pins the ow
 live PTY. Those browser-visible contracts let all final UI checks live inside one grouped
 terminal-state card instead of adding runner-only cards with duplicate stills.
 
-These seams make the Codex controlled-runtime argv observable for the CUS-D5 pilot.
-CUS-D14 still covers the non-interactive fallback (`backend_codex.go:63-79,108-116`) via its
-per-test stub, and harness-wrapper prompt delivery (`harness_runtime.go:210-216`) remains
-outside this pilot. Extending the shared capture contract to the other stubs remains open.
+The deterministic AFT server also opts into a persistent Claude harness-lead mode in both Claude
+stub layouts. It accepts only a valid `--session-id` non-print/non-stream-json signature, emits a
+reviewer-visible agent-specific ready marker, the actual supplied session ID, and a safe SHA-256 /
+byte-count contract measured from the final prompt argument after separating the appended safety
+block. It never echoes prompt bytes and remains alive until stdin closes. Focused tests prove both
+stub copies distinguish expected, different, and missing authored prompts, reject invalid session
+signatures from controlled mode, and stop on EOF. Each inline-prompt AFT card computes its own
+expected fingerprint; D19 separately combines a non-empty generated-prompt contract with exact
+stored built-in role fields and launch args. CUS-D14 still covers the non-interactive Codex fallback
+(`backend_codex.go:63-79,108-116`) via its per-test stub. Measured prompt capture for the remaining
+backends remains open.
 
 ### S-2 — `seed-session` (ADR-0001 family)
 
@@ -1346,9 +1391,9 @@ resolve `testId={IDENT.testId}` and `testId={\`…${x}\`}` against module-level 
 or (cheaper) inline the literal `data-testid` onto `AgentTemplateCard`'s root in addition to
 the prop.
 
-### S-7 — Deterministic controlled-Codex bootstrap; unhealthy backend still missing
+### S-7 — Deterministic controlled-backend bootstrap; unhealthy backend still missing
 
-**Severity:** stack · **Status:** PARTIAL — bootstrap pilot implemented
+**Severity:** stack · **Status:** PARTIAL — Codex bootstrap and Claude harness lifecycle implemented
 
 Controlled codex starts `codex app-server --listen <endpoint>` and then connects to it
 (`internal/leadcontrol/codex_runtime.go:107-135`). The deterministic Codex stub now delegates
@@ -1359,6 +1404,11 @@ both that socket and stdin open. CUS-D5 can therefore assert bootstrap, a connec
 process, an owned live PTY, and prompt argv without claiming model behavior. The helper
 intentionally does not create a thread or implement `thread/read`, `turn/start`, or message
 delivery.
+
+Claude's deterministic harness path is intentionally smaller: the shared stub recognizes only
+the interactive `--session-id` launch, prints an agent-specific ready marker without the prompt,
+and holds the PTY until stdin closes. The custom-agent Claude cases can therefore assert visible
+readiness, ownership, and lifecycle, but not prompt bytes, sessions, turns, or model behavior.
 
 No stub yet reports *unhealthy*, so the backend-unavailable branch (`lead.go:97-103`) is still
 reachable only by relying on a binary being absent from the host (see CUS-R4a's guard).
@@ -1400,25 +1450,25 @@ readback filters an array, polls, compares bytes, or fills from a file.
 | CUS-D3 whitespace-only prompt → submit disabled | edge | product-correctness | step | C | zz | ready-to-write |
 | CUS-D4 multiline + metacharacters byte-exact | edge | product-correctness | run (fill + compare) | C | zz | ready-to-write (fixture must have **no** terminal newline) |
 | CUS-D5 `{{ .AgentName }}` not expanded | edge | product-correctness | run | C | zz | implemented pilot; owns `cus-d5.prompt`; proves controlled bootstrap + remote connection + prompt-contract fingerprint |
-| CUS-D6 XSS-shaped prompt inert in agents UI | edge | product-correctness | step | C | zz | ready-to-write — **negative-rendering fence only, vacuous until P-5; not sanitizer coverage** |
+| CUS-D6 XSS-shaped prompt inert in agents UI | edge | product-correctness | run + grouped state | C | zz | implemented with exact persisted-byte and delivered-prompt fingerprint preconditions; **negative-rendering fence only, not sanitizer coverage** |
 | CUS-D7a 32 KB prompt via the UI | edge | product-correctness | run (fill + compare) | C | zz | ready-to-write |
 | CUS-D7b 100 000 / 100 001 / >1 MB boundaries | edge | surface | run (curl `--data-binary`) | C | sf | ready-to-write; UI variant needs **S-4** |
 | CUS-D8a `task` collision → 400 | edge | product-correctness | run | C | zz | ready-to-write |
 | CUS-D8b `plan` collision → 400 | edge | product-correctness | run | C | zz | ready-to-write |
 | CUS-D8c `lead` collision → 400 | edge | product-correctness | run | C | zz | ready-to-write |
-| CUS-D8d `orchestrator` → **201, pinned** | edge | product-correctness | run | C | zz | ready-to-write (was an unpinned probe; now deterministic, sharpens **P-1**) |
+| CUS-D8d `orchestrator` → **201, pinned** | edge | product-correctness | grouped state + run | C | zz | implemented with exact kind/prompt/legacy-description readback, delivered-prompt fingerprint, controlled Claude readiness, and live PTY (was an unpinned probe; sharpens **P-1**) |
 | CUS-D9 whitespace trimming semantics | edge | product-correctness | run | C | zz | ready-to-write |
-| CUS-D10 backend select → agent row + launch spec | happy | product-correctness | run (**poll tabs**) | C | zz | ready-to-write; deliberately launch-spec only (CUS-D5 owns controlled Codex runtime health) |
-| CUS-D11 repo scoping + empty cwd + no worktree | happy/edge | product-correctness | run (**poll tabs**) | C | zz | ready-to-write (path = `<ws>/worktrees/<repo>/<agent>`) |
-| CUS-D12 prompt not visible/editable after create | edge | product-correctness | step + run | C | zz | ready-to-write (selector excludes `agent-editor-split`) |
+| CUS-D10 backend select → connected agent + launch spec | happy | product-correctness | grouped state + run | C | zz | implemented with delivered-prompt fingerprint, controlled Claude readiness, live PTY, and launch contract |
+| CUS-D11 repo scoping + empty cwd + no worktree | happy/edge | product-correctness | grouped state + run | C | zz | implemented with delivered-prompt fingerprints for both independent Claude sessions (path = `<ws>/worktrees/<repo>/<agent>`) |
+| CUS-D12 prompt not visible/editable after create | edge | product-correctness | grouped state + run | C | zz | implemented with exact post-PATCH persisted-prompt readback and the existing controlled Codex session (selector excludes `agent-editor-split`) |
 | CUS-D13 recreate-after-delete blocked by orphan role | edge | product-correctness | run | C | zz | ready-to-write |
 | CUS-D14 prompt reaches backend argv (**non-interactive path only**) | happy | surface | run (per-test stub) | C | **zz** | retained for fallback coverage; controlled Codex argv is independently pinned by the CUS-D5 pilot |
 | CUS-D15 new agent appears via SSE | happy | product-correctness | step | C | zz | ready-to-write (name-exact `aria-label`, was vacuous) |
 | CUS-D16 duplicate name → 409 in error alert | edge | product-correctness | run | C | zz | ready-to-write |
-| CUS-D17a UI normalizes name **and** role_name | edge | product-correctness | run (**poll tabs**) | C | zz | ready-to-write (client-side invariant) |
+| CUS-D17a UI normalizes name **and** role_name | edge | product-correctness | grouped state + run | C | zz | implemented with explicit normalized-role lookup, delivered-prompt fingerprint, and controlled Claude readiness (client-side invariant) |
 | CUS-D17b mixed-case `role_name` via API → 400 | edge | surface | run | C | sf | ready-to-write (**new**; server does not normalize `role_name`) |
 | CUS-D18 invalid / XSS-shaped names gated | edge | product-correctness | step | C | zz | ready-to-write |
-| CUS-D19 built-in PR Review baseline (control for S3) | happy | product-correctness | run (**poll tabs**) | **CTL** | zz | ready-to-write — own clean workspace, **no ordering dependency** |
+| CUS-D19 built-in PR Review baseline (control for S3) | happy | product-correctness | grouped state + run | **CTL** | zz | implemented with exact stored role fields, a non-empty generated-prompt fingerprint, and controlled Claude readiness — own clean workspace, **no ordering dependency** |
 | CUS-D20 `prompt` + `prompt_file` precedence | edge | surface | run | C | sf | ready-to-write (argv half reuses D14's probe, so runs in `zz`) |
 | CUS-S1 API accepts empty interactive prompt | edge | surface | run | C | sf | ready-to-write (**second probe needs a fresh name**); pins **P-2** |
 | CUS-S2 interactive-prompt registry contract | happy | surface | step | C | sf | ready-to-write |
@@ -1435,11 +1485,12 @@ readback filters an array, polls, compares bytes, or fills from a file.
 **21 product-correctness** (D1–D6, D7a, D8a–d, D9–D13, D15, D16, D17a, D18, D19) +
 **7 surface** (D7b, D14, D17b, D20, S1, S2, S3). All 28 are defined in the current AFT corpus
 against one `loom serve` stack. Three carry explicit scope limits rather than clean coverage —
-CUS-D6 is vacuous until **P-5**, CUS-D7b's UI variant needs **S-4**, and CUS-D14 deliberately
-covers only the non-interactive fallback while CUS-D5 owns the controlled Codex pilot — and
-none has an unpinned expected outcome any more (CUS-D8d is now pinned to 201).
+CUS-D6 is an exact-payload absence fence rather than sanitizer coverage until **P-5**, CUS-D7b's
+UI variant needs **S-4**, and CUS-D14 deliberately covers only the non-interactive fallback while
+CUS-D5 owns the controlled Codex pilot — and none has an unpinned expected outcome any more
+(CUS-D8d is now pinned to 201).
 
-**22 of the 28 need a `run:` step**; 6 are pure step-vocabulary cases (D2, D3, D6, D15, D18, S2).
+**23 of the 28 need a `run:` step**; 5 are pure step-vocabulary cases (D2, D3, D15, D18, S2).
 **Five of the `run:` cases must poll** rather than read once (D10, D11, D17a, D19, and D20's
 launch half), because ensure-session is asynchronous.
 

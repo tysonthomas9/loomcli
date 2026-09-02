@@ -53,8 +53,8 @@ states:
     assert:
       - use: terminal-06-custom-prompt-reaches-codex-argv-in-the-noninteractive-r
   verified-07-xss-shaped-custom-prompt-is-inert-in-agents-ui:
-    intent: xss-shaped custom prompt is inert in agents UI
-    testIntent: An operator's prompt containing executable HTML never becomes executable markup in the agents surface
+    intent: XSS-shaped instructions stay inert in a connected custom agent
+    testIntent: An operator confirms the exact submitted XSS-shaped bytes were stored, starts the controlled Claude agent, and verifies those instructions never become markup in the agents surface
     terminal: true
     assert:
       - use: terminal-07-xss-shaped-custom-prompt-is-inert-in-agents-ui
@@ -83,8 +83,8 @@ states:
     assert:
       - use: terminal-11-custom-prompt-named-lead-is-rejected-by-the-seeded-lead-
   verified-12-custom-prompt-named-orchestrator-deterministically-creat:
-    intent: custom prompt named orchestrator deterministically creates an interactive role
-    testIntent: An operator can create a custom prompt agent named orchestrator and the workspace records it as an interactive role
+    intent: An orchestrator-named custom agent starts a connected Claude session
+    testIntent: An operator creates an agent named orchestrator, verifies its stored role, and sees its controlled Claude process become ready
     terminal: true
     assert:
       - use: terminal-12-custom-prompt-named-orchestrator-deterministically-creat
@@ -95,20 +95,20 @@ states:
     assert:
       - use: terminal-13-custom-prompt-trims-surrounding-whitespace-and-preserves
   verified-14-backend-selection-reaches-custom-agent-row-and-terminal-:
-    intent: backend selection reaches custom agent row and terminal launch spec
-    testIntent: An operator selects a non-default AI backend for a custom agent and verifies the persisted launch contract
+    intent: The selected Claude backend starts the custom agent
+    testIntent: An operator selects Claude instead of the default Codex backend and sees the custom agent connect with the persisted launch contract
     terminal: true
     assert:
       - use: terminal-14-backend-selection-reaches-custom-agent-row-and-terminal-
   verified-15-repo-scoping-persists-but-custom-interactive-launch-has-:
-    intent: repo scoping persists but custom interactive launch has no worktree cwd
-    testIntent: An operator scopes one custom agent to a repo and another to the whole workspace, then verifies both launch without an interactive worktree
+    intent: Repo-scoped and workspace-wide custom agents start without worktrees
+    testIntent: An operator creates one agent for a repo and one for the workspace, then sees both independent Claude sessions connect without worktree cwd values
     terminal: true
     assert:
       - use: terminal-15-repo-scoping-persists-but-custom-interactive-launch-has-
   verified-16-custom-prompt-is-not-visible-or-editable-after-creation:
-    intent: custom prompt is not visible or editable after creation
-    testIntent: An operator returning to a custom agent finds no prompt tab, no prompt text, and no API patch path that changes the role prompt
+    intent: A connected custom agent keeps its instructions private and immutable
+    testIntent: An operator returns to a connected agent and finds no prompt tab, no prompt text, and no API patch path that changes the stored instructions
     terminal: true
     assert:
       - use: terminal-16-custom-prompt-is-not-visible-or-editable-after-creation
@@ -131,8 +131,8 @@ states:
     assert:
       - use: terminal-19-duplicate-custom-agent-name-is-refused-with-a-visible-er
   verified-20-mixed-case-custom-agent-name-is-normalized-by-the-ui:
-    intent: mixed-case custom agent name is normalized by the UI
-    testIntent: An operator typing a mixed-case custom agent name gets one canonical lower-case agent addressable at the lower-case route
+    intent: A mixed-case agent name starts under its normalized identity
+    testIntent: An operator types a mixed-case name and sees one connected Claude agent addressed by the canonical lower-case identity
     terminal: true
     assert:
       - use: terminal-20-mixed-case-custom-agent-name-is-normalized-by-the-ui
@@ -143,8 +143,8 @@ states:
     assert:
       - use: terminal-21-invalid-custom-agent-names-keep-submit-disabled
   verified-22-built-in-pr-review-template-works-in-a-clean-control-wor:
-    intent: built-in pr review template works in a clean control workspace
-    testIntent: An operator creates a PR Review agent from the built-in template in a clean workspace and verifies the prompt-file launch branch
+    intent: The built-in PR Review template starts a connected Claude agent
+    testIntent: An operator creates PR Review in a clean workspace and sees Claude connect using the built-in prompt-file launch contract
     terminal: true
     assert:
       - use: terminal-22-built-in-pr-review-template-works-in-a-clean-control-wor
