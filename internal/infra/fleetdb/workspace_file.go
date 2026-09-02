@@ -88,36 +88,62 @@ type workspaceFileTreeWire struct {
 	CreatedAt    time.Time           `json:"created_at"`
 }
 
-//nolint:funlen // The upload grants and one manifest publication form one store operation.
 func (s *workspaceFileStore) Publish(ctx context.Context, workspaceKey string, files []domain.WorkspaceFileInput) (*domain.WorkspaceFileTreePublishResult, error) {
 	canonical, err := canonicalWorkspaceFileInputs(files)
 	if err != nil {
 		return nil, err
 	}
-	specs := make([]workspaceFileSpecWire, 0, len(canonical))
-	for _, file := range canonical {
-		digest := workspaceFileDigest(file.Bytes)
+	specs := workspaceFileSpecs(canonical)
+	path := workspaceFileAPIPath(workspaceKey) + "/file-tree-uploads"
+	session, err := s.beginWorkspaceFileUpload(ctx, path, specs)
+	if err != nil {
+		return nil, err
+	}
+	filesByPath, err := s.validateWorkspaceFileUploadSession(session, canonical)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.uploadWorkspaceFiles(ctx, path, session, filesByPath); err != nil {
+		return nil, err
+	}
+	return s.publishWorkspaceFileUpload(ctx, workspaceKey, path, session)
+}
+
+func workspaceFileSpecs(files []domain.WorkspaceFileInput) []workspaceFileSpecWire {
+	specs := make([]workspaceFileSpecWire, 0, len(files))
+	for _, file := range files {
 		specs = append(specs, workspaceFileSpecWire{
-			Path: file.Path, ContentHash: digest, ChecksumCRC32C: workspaceFileCRC32C(file.Bytes),
-			SizeBytes: int64(len(file.Bytes)), MediaType: file.MediaType, Executable: file.Executable,
+			Path:           file.Path,
+			ContentHash:    workspaceFileDigest(file.Bytes),
+			ChecksumCRC32C: workspaceFileCRC32C(file.Bytes),
+			SizeBytes:      int64(len(file.Bytes)),
+			MediaType:      file.MediaType,
+			Executable:     file.Executable,
 		})
 	}
+	return specs
+}
+
+func (s *workspaceFileStore) beginWorkspaceFileUpload(ctx context.Context, path string, specs []workspaceFileSpecWire) (*workspaceFileUploadSessionWire, error) {
 	var session workspaceFileUploadSessionWire
-	path := workspaceFileAPIPath(workspaceKey) + "/file-tree-uploads"
 	if _, _, err := s.client.doWithResponse(ctx, http.MethodPost, path, struct {
 		Files []workspaceFileSpecWire `json:"files"`
 	}{Files: specs}, &session, nil); err != nil {
 		return nil, fmt.Errorf("begin workspace file tree upload: %w", err)
 	}
+	return &session, nil
+}
+
+func (s *workspaceFileStore) validateWorkspaceFileUploadSession(session *workspaceFileUploadSessionWire, files []domain.WorkspaceFileInput) (map[string]domain.WorkspaceFileInput, error) {
 	if strings.TrimSpace(session.ID) == "" || strings.TrimSpace(session.Revision) == "" {
 		return nil, fmt.Errorf("begin workspace file tree upload returned an invalid session: %w", domain.ErrIntegrity)
 	}
-	if len(session.Files) != len(canonical) {
-		return nil, fmt.Errorf("begin workspace file tree upload returned %d grants, want %d: %w", len(session.Files), len(canonical), domain.ErrIntegrity)
+	if len(session.Files) != len(files) {
+		return nil, fmt.Errorf("begin workspace file tree upload returned %d grants, want %d: %w", len(session.Files), len(files), domain.ErrIntegrity)
 	}
-	byPath := make(map[string]domain.WorkspaceFileInput, len(canonical))
-	for _, file := range canonical {
-		byPath[file.Path] = file
+	filesByPath := make(map[string]domain.WorkspaceFileInput, len(files))
+	for _, file := range files {
+		filesByPath[file.Path] = file
 	}
 	seen := make(map[string]struct{}, len(session.Files))
 	for _, upload := range session.Files {
@@ -125,7 +151,7 @@ func (s *workspaceFileStore) Publish(ctx context.Context, workspaceKey string, f
 			return nil, fmt.Errorf("duplicate workspace file upload grant path %q: %w", upload.Path, domain.ErrIntegrity)
 		}
 		seen[upload.Path] = struct{}{}
-		file, ok := byPath[upload.Path]
+		file, ok := filesByPath[upload.Path]
 		if !ok {
 			return nil, fmt.Errorf("unexpected workspace file upload grant path %q: %w", upload.Path, domain.ErrIntegrity)
 		}
@@ -133,16 +159,24 @@ func (s *workspaceFileStore) Publish(ctx context.Context, workspaceKey string, f
 			return nil, fmt.Errorf("begin workspace file upload %q: %w", file.Path, err)
 		}
 	}
+	return filesByPath, nil
+}
+
+func (s *workspaceFileStore) uploadWorkspaceFiles(ctx context.Context, path string, session *workspaceFileUploadSessionWire, filesByPath map[string]domain.WorkspaceFileInput) error {
 	for _, upload := range session.Files {
-		file := byPath[upload.Path]
+		file := filesByPath[upload.Path]
 		if err := s.client.executeWorkspaceFileTransfer(ctx, &upload.Transfer, bytes.NewReader(file.Bytes)); err != nil {
-			return nil, fmt.Errorf("upload workspace file %q: %w", file.Path, err)
+			return fmt.Errorf("upload workspace file %q: %w", file.Path, err)
 		}
 		completePath := path + "/" + pathEscape(session.ID) + "/complete/" + escapeWorkspaceFilePath(file.Path)
 		if err := s.client.do(ctx, http.MethodPost, completePath, nil, nil); err != nil {
-			return nil, fmt.Errorf("complete workspace file upload %q: %w", file.Path, err)
+			return fmt.Errorf("complete workspace file upload %q: %w", file.Path, err)
 		}
 	}
+	return nil
+}
+
+func (s *workspaceFileStore) publishWorkspaceFileUpload(ctx context.Context, workspaceKey, path string, session *workspaceFileUploadSessionWire) (*domain.WorkspaceFileTreePublishResult, error) {
 	var tree workspaceFileTreeWire
 	publishPath := path + "/" + pathEscape(session.ID) + "/publish"
 	statusCode, headers, err := s.client.doWithResponse(ctx, http.MethodPost, publishPath, nil, &tree, nil)
@@ -156,16 +190,9 @@ func (s *workspaceFileStore) Publish(ctx context.Context, workspaceKey string, f
 	if err != nil {
 		return nil, fmt.Errorf("publish workspace file tree: %w", err)
 	}
-	var status domain.WorkspaceFileTreeStatus
-	switch statusCode {
-	case http.StatusOK:
-		status = domain.WorkspaceFileTreeExisting
-	case http.StatusCreated:
-		status = domain.WorkspaceFileTreePublished
-	case http.StatusAccepted:
-		status = domain.WorkspaceFileTreeProjectionPending
-	default:
-		return nil, fmt.Errorf("publish workspace file tree: unexpected HTTP status %d", statusCode)
+	status, err := workspaceFilePublishStatus(statusCode)
+	if err != nil {
+		return nil, err
 	}
 	if tree.WorkspaceKey != workspaceKey {
 		return nil, fmt.Errorf("publish workspace file tree returned workspace %q, want %q: %w", tree.WorkspaceKey, workspaceKey, domain.ErrIntegrity)
@@ -187,6 +214,19 @@ func (s *workspaceFileStore) Publish(ctx context.Context, workspaceKey string, f
 	return &domain.WorkspaceFileTreePublishResult{
 		Tree: domainTree, Status: status, ETag: headers.Get("ETag"), Location: headers.Get("Location"),
 	}, nil
+}
+
+func workspaceFilePublishStatus(statusCode int) (domain.WorkspaceFileTreeStatus, error) {
+	switch statusCode {
+	case http.StatusOK:
+		return domain.WorkspaceFileTreeExisting, nil
+	case http.StatusCreated:
+		return domain.WorkspaceFileTreePublished, nil
+	case http.StatusAccepted:
+		return domain.WorkspaceFileTreeProjectionPending, nil
+	default:
+		return "", fmt.Errorf("publish workspace file tree: unexpected HTTP status %d", statusCode)
+	}
 }
 
 func workspaceFileCRC32C(body []byte) string {
