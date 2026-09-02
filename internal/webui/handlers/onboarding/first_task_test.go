@@ -246,6 +246,14 @@ func (s *stubIssueService) PatchIssue(ctx context.Context, params service.PatchI
 func (s *stubIssueService) CloseIssue(context.Context, service.CloseIssueParams) (json.RawMessage, error) {
 	return nil, service.ErrNotImplemented("not implemented")
 }
+func (s *stubIssueService) ArchiveIssue(context.Context, service.ArchiveIssueParams) error {
+	return service.ErrNotImplemented("not implemented")
+}
+
+func (s *stubIssueService) UnarchiveIssue(context.Context, service.UnarchiveIssueParams) error {
+	return service.ErrNotImplemented("not implemented")
+}
+
 func (s *stubIssueService) ReopenIssue(context.Context, service.ReopenIssueParams) error {
 	return service.ErrNotImplemented("not implemented")
 }

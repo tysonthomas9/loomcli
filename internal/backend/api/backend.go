@@ -446,6 +446,29 @@ func (b *APIBackend) Close(ctx context.Context, id string, params backend.CloseP
 	}, nil
 }
 
+// Archive tombstones an issue via the dedicated archive route. tombstone is
+// not a settable status on PATCH, so this cannot be expressed as an update.
+func (b *APIBackend) Archive(ctx context.Context, id string, params backend.ArchiveParams) error {
+	if id == "" {
+		return backend.ErrValidation("Archive", "id must not be empty")
+	}
+	req := gen.ArchiveRequest{}
+	if params.Reason != "" {
+		req.Reason = &params.Reason
+	}
+	_, err := b.exec(ctx, "Archive", http.MethodPost, "/issues/"+url.PathEscape(id)+"/archive", req)
+	return err
+}
+
+// Unarchive restores an archived issue via the dedicated unarchive route.
+func (b *APIBackend) Unarchive(ctx context.Context, id string) error {
+	if id == "" {
+		return backend.ErrValidation("Unarchive", "id must not be empty")
+	}
+	_, err := b.exec(ctx, "Unarchive", http.MethodPost, "/issues/"+url.PathEscape(id)+"/unarchive", nil)
+	return err
+}
+
 func (b *APIBackend) Reopen(ctx context.Context, id string, params backend.ReopenParams) error {
 	if id == "" {
 		return backend.ErrValidation("Reopen", "id must not be empty")

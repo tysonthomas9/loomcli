@@ -464,6 +464,18 @@ func (b *fleetDBIssueBackend) Close(ctx context.Context, id string, params backe
 	return out, err
 }
 
+func (b *fleetDBIssueBackend) Archive(ctx context.Context, id string, params backend.ArchiveParams) error {
+	return b.withBackend(ctx, "Archive", func(ib backend.IssueBackend) error {
+		return ib.Archive(ctx, id, params)
+	})
+}
+
+func (b *fleetDBIssueBackend) Unarchive(ctx context.Context, id string) error {
+	return b.withBackend(ctx, "Unarchive", func(ib backend.IssueBackend) error {
+		return ib.Unarchive(ctx, id)
+	})
+}
+
 func (b *fleetDBIssueBackend) Reopen(ctx context.Context, id string, params backend.ReopenParams) error {
 	return b.withBackend(ctx, "Reopen", func(ib backend.IssueBackend) error {
 		return ib.Reopen(ctx, id, params)
@@ -639,6 +651,12 @@ func (b *unavailableIssueBackend) UndeferIssue(context.Context, string) error {
 }
 func (b *unavailableIssueBackend) Close(context.Context, string, backend.CloseParams) (*backend.CloseResult, error) {
 	return nil, b.unavailable("Close")
+}
+func (b *unavailableIssueBackend) Archive(context.Context, string, backend.ArchiveParams) error {
+	return b.unavailable("Archive")
+}
+func (b *unavailableIssueBackend) Unarchive(context.Context, string) error {
+	return b.unavailable("Unarchive")
 }
 func (b *unavailableIssueBackend) Reopen(context.Context, string, backend.ReopenParams) error {
 	return b.unavailable("Reopen")

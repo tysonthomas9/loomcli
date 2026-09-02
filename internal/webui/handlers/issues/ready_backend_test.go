@@ -72,6 +72,14 @@ func (s *stubReadyBackend) UndeferIssue(_ context.Context, _ string) error {
 func (s *stubReadyBackend) Close(_ context.Context, _ string, _ backend.CloseParams) (*backend.CloseResult, error) {
 	return nil, fmt.Errorf("Close not implemented in stubReadyBackend")
 }
+func (s *stubReadyBackend) Archive(_ context.Context, _ string, _ backend.ArchiveParams) error {
+	return fmt.Errorf("Archive not implemented in stubReadyBackend")
+}
+
+func (s *stubReadyBackend) Unarchive(_ context.Context, _ string) error {
+	return fmt.Errorf("Unarchive not implemented in stubReadyBackend")
+}
+
 func (s *stubReadyBackend) Reopen(_ context.Context, _ string, _ backend.ReopenParams) error {
 	return fmt.Errorf("Reopen not implemented in stubReadyBackend")
 }

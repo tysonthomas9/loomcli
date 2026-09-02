@@ -16,6 +16,8 @@ type mockIssueService struct {
 	patchIssueFunc       func(ctx context.Context, params service.PatchIssueParams) error
 	closeIssueFunc       func(ctx context.Context, params service.CloseIssueParams) (json.RawMessage, error)
 	reopenIssueFunc      func(ctx context.Context, params service.ReopenIssueParams) error
+	archiveIssueFunc     func(ctx context.Context, params service.ArchiveIssueParams) error
+	unarchiveIssueFunc   func(ctx context.Context, params service.UnarchiveIssueParams) error
 	claimIssueFunc       func(ctx context.Context, params service.ClaimIssueParams) (json.RawMessage, error)
 	deleteIssueFunc      func(ctx context.Context, issueID string) (json.RawMessage, error)
 	addCommentFunc       func(ctx context.Context, params service.AddCommentParams) (*types.Comment, error)
@@ -90,6 +92,20 @@ func (m *mockIssueService) ListComments(ctx context.Context, issueID string) ([]
 		return m.listCommentsFunc(ctx, issueID)
 	}
 	return nil, nil
+}
+
+func (m *mockIssueService) ArchiveIssue(ctx context.Context, params service.ArchiveIssueParams) error {
+	if m.archiveIssueFunc != nil {
+		return m.archiveIssueFunc(ctx, params)
+	}
+	return nil
+}
+
+func (m *mockIssueService) UnarchiveIssue(ctx context.Context, params service.UnarchiveIssueParams) error {
+	if m.unarchiveIssueFunc != nil {
+		return m.unarchiveIssueFunc(ctx, params)
+	}
+	return nil
 }
 
 func (m *mockIssueService) ReopenIssue(ctx context.Context, params service.ReopenIssueParams) error {

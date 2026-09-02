@@ -255,6 +255,19 @@ type ReopenIssueParams struct {
 	Reason  string
 }
 
+// ArchiveIssueParams holds the parameters for archiving (tombstoning) an issue.
+type ArchiveIssueParams struct {
+	IssueID string
+	Actor   string
+	Reason  string
+}
+
+// UnarchiveIssueParams holds the parameters for restoring an archived issue.
+type UnarchiveIssueParams struct {
+	IssueID string
+	Actor   string
+}
+
 // IssueService defines the business logic operations for issues.
 type IssueService interface {
 	GetIssue(ctx context.Context, issueID string) (json.RawMessage, error)
@@ -263,6 +276,8 @@ type IssueService interface {
 	PatchIssue(ctx context.Context, params PatchIssueParams) error
 	CloseIssue(ctx context.Context, params CloseIssueParams) (json.RawMessage, error)
 	ReopenIssue(ctx context.Context, params ReopenIssueParams) error
+	ArchiveIssue(ctx context.Context, params ArchiveIssueParams) error
+	UnarchiveIssue(ctx context.Context, params UnarchiveIssueParams) error
 	ClaimIssue(ctx context.Context, params ClaimIssueParams) (json.RawMessage, error)
 	DeleteIssue(ctx context.Context, issueID string) (json.RawMessage, error)
 	AddComment(ctx context.Context, params AddCommentParams) (*types.Comment, error)

@@ -46,6 +46,10 @@ type fakeIssueBackend struct {
 	closeErr            error
 	closeCalls          []closeCall
 	reopenCalls         []reopenCall
+	archiveErr          error
+	archiveCalls        []archiveCall
+	unarchiveErr        error
+	unarchiveCalls      []string
 	deleteErr           error
 	deleteCalls         []backend.DeleteParams
 	addCommentResult    *backend.CommentData
@@ -77,6 +81,11 @@ type closeCall struct {
 type reopenCall struct {
 	id     string
 	params backend.ReopenParams
+}
+
+type archiveCall struct {
+	id     string
+	params backend.ArchiveParams
 }
 
 type listEventsCall struct {
@@ -197,6 +206,20 @@ func (f *fakeIssueBackend) Close(_ context.Context, id string, params backend.Cl
 	defer f.mu.Unlock()
 	f.closeCalls = append(f.closeCalls, closeCall{id: id, params: params})
 	return f.closeResult, f.closeErr
+}
+
+func (f *fakeIssueBackend) Archive(_ context.Context, id string, params backend.ArchiveParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.archiveCalls = append(f.archiveCalls, archiveCall{id: id, params: params})
+	return f.archiveErr
+}
+
+func (f *fakeIssueBackend) Unarchive(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.unarchiveCalls = append(f.unarchiveCalls, id)
+	return f.unarchiveErr
 }
 
 func (f *fakeIssueBackend) Reopen(_ context.Context, id string, params backend.ReopenParams) error {
@@ -1348,5 +1371,71 @@ func TestCreateIssue_Backend_ForwardsIdempotency(t *testing.T) {
 	}
 	if fb.createParams[0].IdempotencyKey != "key-xyz" || !fb.createParams[0].Force {
 		t.Errorf("idempotency not forwarded to backend.CreateParams: %+v", fb.createParams[0])
+	}
+}
+
+// --- Archive / Unarchive ---
+
+func TestArchiveIssue_PassesActorAndReason(t *testing.T) {
+	fb := &fakeIssueBackend{}
+	svc := newServiceWithFake(fb)
+
+	err := svc.ArchiveIssue(context.Background(), ArchiveIssueParams{
+		IssueID: "PUPPET-1",
+		Actor:   "operator",
+		Reason:  "superseded",
+	})
+	if err != nil {
+		t.Fatalf("ArchiveIssue: %v", err)
+	}
+	if len(fb.archiveCalls) != 1 {
+		t.Fatalf("archive calls = %d, want 1", len(fb.archiveCalls))
+	}
+	got := fb.archiveCalls[0]
+	if got.id != "PUPPET-1" {
+		t.Errorf("archived id = %q, want %q", got.id, "PUPPET-1")
+	}
+	if got.params.Actor != "operator" {
+		t.Errorf("archive actor = %q, want %q", got.params.Actor, "operator")
+	}
+	if got.params.Reason != "superseded" {
+		t.Errorf("archive reason = %q, want %q", got.params.Reason, "superseded")
+	}
+}
+
+func TestArchiveIssue_EmptyIDIsValidationError(t *testing.T) {
+	fb := &fakeIssueBackend{}
+	svc := newServiceWithFake(fb)
+
+	err := svc.ArchiveIssue(context.Background(), ArchiveIssueParams{IssueID: "  "})
+	if err == nil {
+		t.Fatal("ArchiveIssue with blank id: want error, got nil")
+	}
+	if len(fb.archiveCalls) != 0 {
+		t.Errorf("archive calls = %d, want 0 (must not reach the backend)", len(fb.archiveCalls))
+	}
+}
+
+func TestUnarchiveIssue_CallsBackend(t *testing.T) {
+	fb := &fakeIssueBackend{}
+	svc := newServiceWithFake(fb)
+
+	if err := svc.UnarchiveIssue(context.Background(), UnarchiveIssueParams{IssueID: "PUPPET-1"}); err != nil {
+		t.Fatalf("UnarchiveIssue: %v", err)
+	}
+	if len(fb.unarchiveCalls) != 1 || fb.unarchiveCalls[0] != "PUPPET-1" {
+		t.Errorf("unarchive calls = %v, want [PUPPET-1]", fb.unarchiveCalls)
+	}
+}
+
+func TestUnarchiveIssue_EmptyIDIsValidationError(t *testing.T) {
+	fb := &fakeIssueBackend{}
+	svc := newServiceWithFake(fb)
+
+	if err := svc.UnarchiveIssue(context.Background(), UnarchiveIssueParams{IssueID: ""}); err == nil {
+		t.Fatal("UnarchiveIssue with blank id: want error, got nil")
+	}
+	if len(fb.unarchiveCalls) != 0 {
+		t.Errorf("unarchive calls = %d, want 0 (must not reach the backend)", len(fb.unarchiveCalls))
 	}
 }
