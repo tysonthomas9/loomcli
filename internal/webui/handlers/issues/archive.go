@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/backend/advisoryactor"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -60,9 +61,10 @@ func HandleArchiveIssue(svc service.IssueService) http.HandlerFunc {
 			}
 		}
 
-		err := svc.ArchiveIssue(r.Context(), service.ArchiveIssueParams{
+		ctx := operatorActorContext(r, fallbackActor)
+		err := svc.ArchiveIssue(ctx, service.ArchiveIssueParams{
 			IssueID: issueID,
-			Actor:   operatorActor(r.Context(), fallbackActor),
+			Actor:   advisoryactor.From(ctx),
 			Reason:  req.Reason,
 		})
 		if err != nil {
@@ -88,9 +90,10 @@ func HandleUnarchiveIssue(svc service.IssueService) http.HandlerFunc {
 			return
 		}
 
-		err := svc.UnarchiveIssue(r.Context(), service.UnarchiveIssueParams{
+		ctx := operatorActorContext(r, fallbackActor)
+		err := svc.UnarchiveIssue(ctx, service.UnarchiveIssueParams{
 			IssueID: issueID,
-			Actor:   operatorActor(r.Context(), fallbackActor),
+			Actor:   advisoryactor.From(ctx),
 		})
 		if err != nil {
 			handler.HandleServiceError(w, err)
