@@ -68,9 +68,7 @@ export function MonitorDashboard({
   const showStaleBanner = !isConnected && agents.length > 0;
 
   // Fetch blocked issues for bottleneck detection
-  const { data: blockedIssues, loading: isLoadingBlocked } = useBlockedIssues({
-    pollInterval: 30000,
-  });
+  const { data: blockedIssues, loading: isLoadingBlocked } = useBlockedIssues();
 
   // Handler for bottleneck clicks - opens issue detail panel
   const handleBottleneckClick = (issue: Pick<Issue, "id" | "title">) => {
