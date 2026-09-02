@@ -10,7 +10,7 @@ tests:
   # covers: LCLI-WP-002; LCLI-WP-006 partial (markdown description only — the
   # DesignPanel's design notes / acceptance criteria are untested); LCLI-WP-003
   # partial; PriorityDropdown; LabelEditor; IssueDetailPanel PATCH wiring
-  - name: detail panel edits markdown status and persists metadata
+  - name: Issue detail edits persist after reload
     intent: An agent creates an issue through the API, then a human editor saves markdown, changes priority and labels through mounted controls, and changes status while readbacks verify persistence
     steps:
       - api:
