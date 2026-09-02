@@ -5,6 +5,8 @@ creation prefix reaches `detail-panel-ready`, which fans out to complete
 human journeys covering description save/cancel, type, priority/owner, labels,
 comments, lifecycle, title, dependency, and card reopen behavior.
 
+`shared-steps.yaml` owns the parameterized setup blocks used by every replay,
+including nested form-fill/create composition and shared state assertions.
 `states.yaml` defines the observable contract at each node. The files under
 `transitions/` contain ordinary AFT steps grouped by product concept, so browser
 mechanics do not obscure the graph. Imported fragments never add edges.
@@ -16,6 +18,10 @@ starts at `browser-ready`, replays issue creation through the New Issue modal,
 and uses the compiler-provided `${AFT_CASE_ID}` to keep its issue, label, and
 comment distinct. All mutations are performed by a human through mounted UI
 controls; reloads and filtered URLs provide browser-visible persistence checks.
+Reusable blocks reduce source duplication only: all fourteen paths still rerun
+their expanded setup and assertions independently. The storyboard Flow view
+folds those repeated captures by authored source while retaining each execution
+under the collapsed card.
 
 The deepened label, priority, and comment branches continue past their original
 persistence checks to cover label removal, owner persistence on the card, and

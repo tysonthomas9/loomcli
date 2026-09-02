@@ -7,6 +7,7 @@ baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 
 imports:
+  - shared-steps.yaml
   - states.yaml
   - transitions/entry-and-creation.yaml
   - transitions/description.yaml

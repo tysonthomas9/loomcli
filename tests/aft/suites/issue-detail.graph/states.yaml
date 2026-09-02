@@ -6,59 +6,24 @@ states:
   browser-ready:
     intent: A fresh graph path begins in the runner's blank browser page.
     assert:
-      - expect: { url: "about:blank" }
+      - use: blank-browser-ready
 
   board-ready:
     intent: The Kanban board is hydrated and has no Ready card for this graph path.
     assert:
-      - wait:
-          fn: >-
-            !!document.querySelector('[data-testid=board-toolbar]')
-        intent: Wait until the workspace board is ready.
-      - expect: { visible: { testid: board-toolbar } }
-      - expect:
-          count:
-            selector: "section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']"
-            equals: 0
+      - use: hydrated-board-ready
+        with: { title: "aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}" }
 
   create-form-ready:
     intent: The mounted New Issue form is ready for human input.
     assert:
-      - wait:
-          fn: >-
-            !!document.querySelector('[data-testid=create-issue-title]')
-        intent: Wait until the New Issue form is ready.
-      - expect: { visible: { testid: create-issue-title } }
-      - expect: { enabled: { testid: create-issue-submit, equals: false } }
+      - use: new-issue-form-ready
 
   detail-panel-ready:
     intent: The newly created issue is loaded in the editable slide-over panel.
     assert:
-      - wait:
-          fn: >-
-            (() => {
-              const panel = document.querySelector('[data-testid=issue-detail-panel]');
-              return panel?.getAttribute('data-state') === 'open' &&
-                panel?.getAttribute('data-loading') === 'false' &&
-                !!document.querySelector('[data-testid=issue-id]') &&
-                !!document.querySelector('[data-testid=editable-description]') &&
-                !!document.querySelector('[data-testid=comment-form]');
-            })()
-        intent: Wait until the complete editable issue panel is ready.
-      - expect: { visible: { testid: issue-header } }
-      - expect: { visible: { testid: header-close-button } }
-      - expect: { visible: { testid: status-dropdown } }
-      - expect: { visible: { testid: priority-dropdown-trigger } }
-      - expect: { visible: { testid: label-editor } }
-      - expect: { visible: { testid: editable-description } }
-      - expect: { visible: { testid: comment-form } }
-      - expect: { text: "aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}" }
-      # Negative control for the review branch: a fresh open issue must not
-      # mount the reviewer action bar.
-      - expect:
-          count:
-            selector: "[data-testid=review-action-bar]"
-            equals: 0
+      - use: editable-issue-panel-ready
+        with: { title: "aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}" }
 
   description-saved:
     intent: The human-authored markdown is rendered immediately after saving.

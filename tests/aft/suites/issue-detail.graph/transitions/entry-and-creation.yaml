@@ -9,25 +9,22 @@ transitions:
     actor: human
     via: ui
     steps:
-      - open: "/ws/${AFT_WS:-E2E-WS}/kanban"
+      - use: open-workspace-board
+        with: { workspace: "${AFT_WS:-E2E-WS}" }
 
   open-create-modal:
     intent: A human opens the mounted New Issue modal from the hydrated board.
     actor: human
     via: ui
     steps:
-      - wait: { load: networkidle }
-      - click: { testid: new-issue-button }
+      - use: open-new-issue-form
 
   create-open-issue:
     intent: A human creates this path's issue through the New Issue form and reaches its auto-opened detail panel.
     actor: human
     via: ui
     steps:
-      - fill:
-          testid: create-issue-title
-          value: "aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}"
-      - fill:
-          testid: create-issue-description
-          value: "Initial issue detail description ${RUN_ID:-local}-${AFT_CASE_ID}."
-      - click: { testid: create-issue-submit }
+      - use: create-issue-through-form
+        with:
+          title: "aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}"
+          description: "Initial issue detail description ${RUN_ID:-local}-${AFT_CASE_ID}."
