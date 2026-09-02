@@ -1,6 +1,7 @@
 # Provider plugins and local state never belong in the repo.
 .terraform/
-.terraform.lock.hcl
+.terraform-data/
+.loom-gcp-image-build.lock
 *.tfstate
 *.tfstate.*
 *.tfplan

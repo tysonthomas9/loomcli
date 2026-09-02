@@ -6,9 +6,9 @@ works, and tearing it down. Four containers on one VM — Redis, fleet-db, loom
 blobs in GCS.
 
 ```
-make up NAME=loom-pr512      # build + push images, apply, wait until healthy
+make up NAME=loom-pr512 TUNNEL_PORT_BASE=18100  # build + push, apply, wait
 make smoke NAME=loom-pr512   # end-to-end proof, non-zero exit on failure
-make tunnel NAME=loom-pr512  # IAP tunnels + the browser URL
+make tunnel NAME=loom-pr512 TUNNEL_PORT_BASE=18100  # IAP tunnels + browser URL
 make down NAME=loom-pr512    # destroy everything the stack created
 ```
 
@@ -18,6 +18,11 @@ network tag the firewall rules target, and it selects a **Terraform workspace**
 so each stack has its own state. That last one matters -- without it
 `make down NAME=b` reads whatever state the directory happens to hold and
 destroys stack A.
+
+Terraform state is stored in the shared, versioned GCS bucket
+`<PROJECT>-loom-tfstate`; `make state` creates it if needed. Each stack remains
+isolated by its workspace prefix, while the bucket's IAM boundary protects the
+credentials held in state from the local checkout.
 
 The per-stack VPC is what makes concurrent stacks actually work, not just a
 tidier boundary. Sharing the project's `default` network meant sharing its
@@ -30,14 +35,19 @@ quota: a project allows **5 VPC networks** by default, one of which is
 `default`, so about four concurrent stacks before you need a quota bump. That
 surfaces as a clear error at apply time.
 
-Local tunnel ports are derived from the name too, in Terraform, and exported as
-outputs; `make tunnel` reads them rather than recomputing them, and refuses to
-touch a port it did not open.
+Local tunnel ports are owned by Terraform and exported as outputs; `make tunnel`
+reads both the local and remote ports rather than recomputing them, and refuses
+to touch a port it did not open. The default local ports are name-derived for
+Set `TUNNEL_PORT_BASE`/`tunnel_port_base` to a unique UI port for every stack
+tunnelled from the same workstation; API and fleet-db use the next two ports.
+The value is required by the Makefile and Terraform so the deployment never
+pretends to allocate a collision-free local port automatically.
 
 ## Prerequisites
 
-- `terraform`, `gcloud`, `docker`, `git`
-- A fleet-db checkout beside this repo (or set `FLEETDB_SRC`)
+- `terraform` (or `tofu`), `gcloud`, `docker` (or `podman`), `git`
+- A fleet-db checkout containing the wired workspace-file API and S3 store
+  (or set `FLEETDB_SRC`); `make preflight` verifies those files
 - `roles/owner`, or enough to create VMs, buckets, secrets, HMAC keys and IAM
 - APIs enabled: `compute`, `secretmanager`, `iap`, `artifactregistry`, `storage`
 
@@ -45,14 +55,25 @@ touch a port it did not open.
 project, and creates the Artifact Registry repo if it is missing. It runs
 automatically as part of `make up`.
 
+If Docker is unavailable but a Podman machine is running, use
+`CONTAINER_CLI=podman`; the Makefile logs Podman into Artifact Registry with
+the active gcloud access token before pushing images.
+
+The `loom` Artifact Registry repository is a shared project bootstrap resource:
+preflight creates it once (concurrent creators tolerate `ALREADY_EXISTS`), and
+`make down` deliberately leaves it in place. The VM's reader binding is scoped
+to that repository, not the whole project.
+
 Two defaults worth overriding explicitly:
 
 - `PROJECT` falls back to your gcloud default project, which is often stale or
   belongs to another org. Preflight now fails with one clear line instead of an
   IAM error halfway through an apply, but passing `PROJECT=<id>` is safer.
 - `FLEETDB_SRC` defaults to a sibling `fleet-db` checkout. **In a git worktree
-  that path does not exist**, so set it:
-  `make up FLEETDB_SRC=~/codebase/code-agents/loom-aug/fleet-db`.
+  that path does not exist**, so set it. The checkout must include the
+  workspace-file API (`internal/api/workspace_files.go`) wired from
+  `cmd/fleet-db/main.go` and the S3 store used for GCS interoperability:
+  `make up FLEETDB_SRC=/path/to/compatible/fleet-db`.
 
 Either `tofu` or `terraform` works; `TF_BIN` picks the binary and prefers
 OpenTofu when both are present.
@@ -66,7 +87,7 @@ credentials. To drive real agents:
 gcloud secrets create loom-codex-auth --replication-policy=automatic \
   --data-file="$HOME/.codex/auth.json"
 
-make up NAME=loom-pr512 CODEX=1
+make up NAME=loom-pr512 TUNNEL_PORT_BASE=18100 CODEX=1
 ```
 
 `CODEX=1` changes three things, and each is load-bearing:
@@ -177,17 +198,20 @@ which is the point — opening these ports should be an explicit act.
 | Resource | Notes |
 |---|---|
 | `google_compute_instance` | `e2-standard-2`, Ubuntu 24.04, cloud-init brings the stack up |
-| `google_service_account` | Narrow: its own bucket, its own secrets, logs, metrics |
+| `google_service_account` | Narrow: its own bucket, its own secrets, the shared image repository, logs, metrics |
 | `google_storage_bucket` | Content-addressed workspace files, uniform access, no versioning |
 | `google_storage_hmac_key` | GCS S3-interop credential for fleet-db |
-| 4 × `google_secret_manager_secret` | Redis password, workspace-file token, S3 id + secret |
+| 5 × `google_secret_manager_secret` | Redis password, workspace-file token, run-token signing key, S3 id + secret |
 | `google_compute_network` + `google_compute_subnetwork` | Custom-mode VPC per stack; `private_ip_google_access` on |
 | 3 × `google_compute_firewall` | Two IAP allows (priority 1000) plus the deny (1100) that closes everything else |
 | Cloud Router + NAT | Only when the VM has no external IP |
+| Artifact Registry `loom` repository | Shared project bootstrap, created by preflight and retained across stack teardown |
 
 Secrets are generated by Terraform, stored in Secret Manager, and fetched by
-the VM at boot. None is baked into an image or the compose file. Rotating one is
-a new secret version plus `systemctl restart loom-stack` — no redeploy.
+the VM at boot. None is baked into an image or the compose file. This includes
+loom's `LOOM_RUN_TOKEN_SIGNING_KEY`, whose persistence lets in-flight run tokens
+survive a serve restart. Rotating one is a new secret version plus
+`systemctl restart loom-stack` — no redeploy.
 
 Redis runs AOF (`--appendonly yes --appendfsync everysec`) into a named volume,
 so a restart keeps fleet-db's workspaces, roles and issues. It did not always:
@@ -230,9 +254,9 @@ These each cost real debugging time and are now handled in code:
   the `COPY` no matter how recently you ran `make build-frontend`, so the build
   streams a tar of just the two paths it needs as the context instead.
 - **cloud-init runs once per instance, and metadata is mutable.** Changing an
-  image tag without forcing replacement updates metadata, reports success, and
-  deploys nothing. A `terraform_data` hash of the rendered boot config drives
-  `replace_triggered_by` so a changed tag replaces the VM.
+  image reference without forcing replacement updates metadata, reports
+  success, and deploys nothing. A `terraform_data` hash of the rendered boot
+  config drives `replace_triggered_by` so a changed digest replaces the VM.
 - **Secrets fetched as `printf '%s' "$(secret X)"` fail OPEN.** `set -e` sees
   printf's status, not the substitution's, so a Secret Manager blip wrote an
   empty `.env` over a good one -- and an empty Redis password removes auth.
@@ -244,7 +268,9 @@ These each cost real debugging time and are now handled in code:
   never changed, the VM was never replaced, and `wait-healthy` passed against
   the *old* container -- indistinguishable from a change that had no effect.
   The tag now carries a hash of the actual delta (`git diff HEAD` plus the
-  hashed contents of untracked files, which land in the build context too).
+  hashed contents of untracked files, which land in the build context too) and
+  the generated UI bundle contents, which are ignored by git but copied into
+  the UI image.
 - **Allow rules do not close anything.** GCP firewall rules are additive; a deny
   rule is what made "IAP only" true while stacks shared the default VPC.
 - **Cloud NAT will not tolerate overlapping coverage.** One
@@ -265,16 +291,25 @@ These each cost real debugging time and are now handled in code:
 - **A one-shot that exits non-zero is invisible unless something reads it.**
   `role-init` failing left systemd reporting success, so an `ExecStartPost`
   now inspects its exit code -- and its liveness -- and fails the unit.
+- **Image tags are lookup labels, not deployment identity.** `make apply`
+  resolves each pushed tag to its Artifact Registry digest and passes
+  `image@sha256:...` to Terraform. The UI base and Redis base are also pinned,
+  and the Codex CLI build uses an explicit version.
 - **`smoke` has to be re-runnable.** Asserting `publish tree == 201` passed once
   and failed on every later run, because a re-publish of identical
   content-addressed bytes returns 200.
 - **codex's read-only sandbox cannot run in a stock container.** Two walls, one
   behind the other; see above. Keep `plan_role_read_only=false` under codex.
 - **`docker compose up --wait` returns before loom's daemon spawns agents.**
-  Anything that must happen before the first agent run belongs in the stack, not
-  in `ExecStartPost`.
+  The loom healthcheck now waits for the seeded agents and a daemon session as
+  well as `/api/config`, so anything that must happen before the first agent
+  run is ready before `make up` returns.
 - **`up -d --wait` fails on a one-shot container that exits 0.** Start, then
   wait on the long-running services by name.
+- **A failed readiness check leaves paid infrastructure behind.** `make up`
+  prints the exact `make down NAME=... PROJECT=...` command to use after a
+  post-apply failure; cleanup is explicit so operators can inspect a failed VM
+  before destroying it.
 - **`ports:` publish on all interfaces, never `127.0.0.1:`.** IAP forwards to
   the VM's network interface, so a loopback bind makes every tunnel fail with
   `failed to connect to backend`. The firewall is what closes these ports.

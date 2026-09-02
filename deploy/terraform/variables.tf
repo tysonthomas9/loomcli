@@ -24,8 +24,8 @@ variable "name" {
   default     = "loom-stack"
 
   validation {
-    condition     = can(regex("^[a-z]([-a-z0-9]{0,28}[a-z0-9])?$", var.name))
-    error_message = "name must be a valid GCE resource name: lowercase, start with a letter, <=30 chars."
+    condition     = can(regex("^[a-z][-a-z0-9]{4,28}[a-z0-9]$", var.name))
+    error_message = "name must be 6-30 characters, lowercase, start with a letter, and end with a letter or digit."
   }
 }
 
@@ -83,6 +83,37 @@ variable "iap_web_ports" {
   EOT
   type        = list(string)
   default     = ["8280", "8282", "8283"]
+
+  validation {
+    condition = (length(var.iap_web_ports) == 3 &&
+      alltrue([
+        for port in var.iap_web_ports :
+        can(tonumber(port)) &&
+        tonumber(port) >= 1 &&
+        tonumber(port) <= 65535 &&
+        tonumber(port) != 22 &&
+        floor(tonumber(port)) == tonumber(port)
+      ]) &&
+      length(distinct([
+        for port in var.iap_web_ports : can(tonumber(port)) ? tonumber(port) : 0
+    ])) == 3)
+    error_message = "iap_web_ports must contain exactly three unique integer TCP ports from 1 through 65535, excluding SSH port 22, in [fleet-db, loom API, UI] order."
+  }
+}
+
+variable "tunnel_port_base" {
+  description = <<-EOT
+    Required local port for the UI IAP tunnel. The API and fleet-db tunnels
+    use this port plus one and plus two. Set a unique value for each stack
+    tunnelled from the same workstation; Terraform does not attempt to act as
+    a global local-port allocator.
+  EOT
+  type        = number
+
+  validation {
+    condition     = var.tunnel_port_base >= 1024 && var.tunnel_port_base <= 65533 && floor(var.tunnel_port_base) == var.tunnel_port_base
+    error_message = "tunnel_port_base must be an integer from 1024 through 65533 so the three tunnel ports fit in the TCP range."
+  }
 }
 
 variable "fleetdb_image" {
@@ -109,8 +140,10 @@ variable "ui_image" {
 }
 
 variable "redis_image" {
-  type    = string
-  default = "docker.io/library/redis:7-alpine"
+  type = string
+  # The VM image is amd64; pin the architecture-specific digest so Docker
+  # cannot select an incompatible arm64 image when given a digest reference.
+  default = "docker.io/library/redis:7-alpine@sha256:1db42ccef14898aa29bae778452d567534b59c107129cbc1163fb552de184d3c"
 }
 
 variable "loom_workspace" {
@@ -135,12 +168,6 @@ variable "ephemeral" {
   default     = true
 }
 
-variable "smoke_workspace" {
-  description = "Workspace key the smoke test creates and writes into. Kept separate from loom_workspace so a failed smoke run cannot corrupt the seeded one."
-  type        = string
-  default     = "SMOKE"
-}
-
 variable "registry_host" {
   description = <<-EOT
     Artifact Registry host the VM authenticates docker against, e.g.
@@ -148,6 +175,24 @@ variable "registry_host" {
   EOT
   type        = string
   default     = ""
+}
+
+variable "registry_project" {
+  description = "Artifact Registry project. Empty uses project_id."
+  type        = string
+  default     = ""
+}
+
+variable "registry_location" {
+  description = "Artifact Registry location. Empty uses region."
+  type        = string
+  default     = ""
+}
+
+variable "registry_repository" {
+  description = "Artifact Registry repository containing the fleet-db, loom, and UI images."
+  type        = string
+  default     = "loom"
 }
 
 variable "codex_auth_secret" {

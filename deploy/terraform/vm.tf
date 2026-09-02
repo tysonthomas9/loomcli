@@ -4,15 +4,12 @@ data "google_compute_image" "ubuntu" {
 }
 
 locals {
-  # Local tunnel ports, derived from the stack name so two stacks tunnelled at
-  # once do not collide. Terraform owns them because loom's origin allowlist
-  # has to contain the port the browser will actually use -- when the script
-  # derived them independently, `make tunnel` produced an origin loom rejected
-  # and the file-browser routes failed.
-  tunnel_offset       = (parseint(substr(md5(var.name), 0, 4), 16) % 40 + 1) * 10
-  tunnel_ui_port      = 8000 + local.tunnel_offset
-  tunnel_api_port     = 8000 + local.tunnel_offset + 1
-  tunnel_fleetdb_port = 8000 + local.tunnel_offset + 2
+  # Terraform owns the local tunnel ports because loom's origin allowlist has
+  # to contain the port the browser will actually use. The required explicit
+  # base is the collision-free option when several stacks share a workstation.
+  tunnel_ui_port      = var.tunnel_port_base
+  tunnel_api_port     = local.tunnel_ui_port + 1
+  tunnel_fleetdb_port = local.tunnel_ui_port + 2
 
   cloud_init = templatefile("${path.module}/templates/cloud-init.yaml.tftpl", {
     compose_file = base64encode(templatefile("${path.module}/templates/docker-compose.yml.tftpl", {
@@ -32,16 +29,17 @@ locals {
       # relaxed by a sidecar in the stack itself rather than from systemd.
       plan_role_read_only = var.plan_role_read_only
     }))
-    redis_secret           = google_secret_manager_secret.redis_password.secret_id
-    workspace_token_secret = google_secret_manager_secret.workspace_file_token.secret_id
-    s3_access_id_secret    = google_secret_manager_secret.s3_access_id.secret_id
-    s3_secret_secret       = google_secret_manager_secret.s3_secret.secret_id
-    project_id             = var.project_id
-    registry_host          = coalesce(var.registry_host, "${var.region}-docker.pkg.dev")
-    codex_secret           = var.codex_auth_secret
-    plan_role_read_only    = var.plan_role_read_only
-    fleetdb_port           = var.iap_web_ports[0]
-    loom_workspace         = var.loom_workspace
+    redis_secret                 = google_secret_manager_secret.redis_password.secret_id
+    workspace_token_secret       = google_secret_manager_secret.workspace_file_token.secret_id
+    run_token_signing_key_secret = google_secret_manager_secret.run_token_signing_key.secret_id
+    s3_access_id_secret          = google_secret_manager_secret.s3_access_id.secret_id
+    s3_secret_secret             = google_secret_manager_secret.s3_secret.secret_id
+    project_id                   = var.project_id
+    registry_host                = coalesce(var.registry_host, "${var.region}-docker.pkg.dev")
+    codex_secret                 = var.codex_auth_secret
+    plan_role_read_only          = var.plan_role_read_only
+    fleetdb_port                 = var.iap_web_ports[0]
+    loom_workspace               = var.loom_workspace
   })
 }
 
@@ -94,6 +92,7 @@ resource "google_compute_instance" "stack" {
     google_compute_router_nat.nat,
     google_secret_manager_secret_version.redis_password,
     google_secret_manager_secret_version.workspace_file_token,
+    google_secret_manager_secret_version.run_token_signing_key,
     google_secret_manager_secret_version.s3_access_id,
     google_secret_manager_secret_version.s3_secret,
     google_secret_manager_secret_iam_member.accessor,
@@ -102,7 +101,7 @@ resource "google_compute_instance" "stack" {
     # Image pulls happen in cloud-init, seconds after boot. Without this the
     # VM can come up before the reader binding on a brand-new service account
     # exists, and every pull 403s.
-    google_project_iam_member.artifact_reader,
+    google_artifact_registry_repository_iam_member.artifact_reader,
   ]
 
   # cloud-init runs ONCE per instance. Metadata is mutable, so without this the

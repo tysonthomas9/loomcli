@@ -17,6 +17,13 @@ resource "google_storage_bucket" "workspace_files" {
   force_destroy = var.ephemeral
   labels        = var.labels
 
+  lifecycle {
+    precondition {
+      condition     = length(var.project_id) + length(var.name) + 10 <= 63
+      error_message = "project_id plus name is too long for the generated GCS bucket name (maximum 63 characters)."
+    }
+  }
+
   versioning {
     enabled = false
   }

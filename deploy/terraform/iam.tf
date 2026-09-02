@@ -1,10 +1,13 @@
 locals {
-  codex_enabled = var.codex_auth_secret != ""
+  codex_enabled              = var.codex_auth_secret != ""
+  artifact_registry_project  = coalesce(var.registry_project, var.project_id)
+  artifact_registry_location = coalesce(var.registry_location, var.region)
 }
 
 # One service account for the VM. It is deliberately narrow: read the stack's
-# own secrets, read/write the stack's own bucket, ship logs and metrics. It has
-# no project-wide storage or secret access.
+# own secrets, read/write the stack's own bucket, read the shared image
+# repository, and ship logs and metrics. It has no project-wide storage or
+# secret access.
 resource "google_service_account" "vm" {
   account_id   = var.name
   project      = var.project_id
@@ -12,12 +15,16 @@ resource "google_service_account" "vm" {
   description  = "Runtime identity for the ${var.name} VM. Managed by Terraform."
 }
 
-# Without this the VM cannot pull its own images: cloud-init runs, docker
-# starts, and every pull 403s. The stack boots and never becomes healthy.
-resource "google_project_iam_member" "artifact_reader" {
-  project = var.project_id
-  role    = "roles/artifactregistry.reader"
-  member  = "serviceAccount:${google_service_account.vm.email}"
+# The Artifact Registry repository is a shared bootstrap resource created by
+# `make preflight`, because images must be pushed before the first Terraform
+# apply. Scope the VM binding to that repository instead of the whole project.
+# The repository intentionally survives `make down` and is documented as such.
+resource "google_artifact_registry_repository_iam_member" "artifact_reader" {
+  project    = local.artifact_registry_project
+  location   = local.artifact_registry_location
+  repository = var.registry_repository
+  role       = "roles/artifactregistry.reader"
+  member     = "serviceAccount:${google_service_account.vm.email}"
 }
 
 resource "google_project_iam_member" "logging" {

@@ -32,16 +32,16 @@ output "ssh_command" {
 # rules. That last part matters: fleet-db runs with auth in dev mode, so
 # anything that CAN reach the port has full read/write.
 output "iap_tunnel_ui" {
-  description = "Run this, then open http://localhost:8283 in a browser."
-  value       = "gcloud compute start-iap-tunnel ${google_compute_instance.stack.name} ${var.iap_web_ports[2]} --local-host-port=localhost:${var.iap_web_ports[2]} --project ${var.project_id} --zone ${var.zone}"
+  description = "Run this, then open the local UI port in a browser."
+  value       = "gcloud compute start-iap-tunnel ${google_compute_instance.stack.name} ${var.iap_web_ports[2]} --local-host-port=localhost:${local.tunnel_ui_port} --project ${var.project_id} --zone ${var.zone}"
 }
 
 output "iap_tunnel_api" {
-  value = "gcloud compute start-iap-tunnel ${google_compute_instance.stack.name} ${var.iap_web_ports[1]} --local-host-port=localhost:${var.iap_web_ports[1]} --project ${var.project_id} --zone ${var.zone}"
+  value = "gcloud compute start-iap-tunnel ${google_compute_instance.stack.name} ${var.iap_web_ports[1]} --local-host-port=localhost:${local.tunnel_api_port} --project ${var.project_id} --zone ${var.zone}"
 }
 
 output "iap_tunnel_fleetdb" {
-  value = "gcloud compute start-iap-tunnel ${google_compute_instance.stack.name} ${var.iap_web_ports[0]} --local-host-port=localhost:${var.iap_web_ports[0]} --project ${var.project_id} --zone ${var.zone}"
+  value = "gcloud compute start-iap-tunnel ${google_compute_instance.stack.name} ${var.iap_web_ports[0]} --local-host-port=localhost:${local.tunnel_fleetdb_port} --project ${var.project_id} --zone ${var.zone}"
 }
 
 output "hmac_access_id" {
@@ -49,8 +49,8 @@ output "hmac_access_id" {
   value       = google_storage_hmac_key.workspace_files.access_id
 }
 
-# Local ports `make tunnel` opens. Derived from the stack name so concurrent
-# stacks do not collide, and exported rather than recomputed in bash: loom's
+# Local ports `make tunnel` opens. The required tunnel_port_base is the single
+# owner of this triple; export them rather than recomputing in bash: loom's
 # origin allowlist has to agree with them, and two independent derivations
 # drifted apart once already.
 output "tunnel_ui_port" {

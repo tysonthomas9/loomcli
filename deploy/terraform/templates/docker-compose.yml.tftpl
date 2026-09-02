@@ -104,6 +104,10 @@ services:
       LOOM_BACKEND: ${codex_enabled ? "codex" : "localdogfood"}
       LOOM_SERVER_URL: http://127.0.0.1:8080
       LOOM_WEBUI_URL: http://127.0.0.1:8080
+      # Persisted in Secret Manager and fetched into /opt/loom/.env at every
+      # unit start. A generated key here would invalidate in-flight runs on a
+      # serve restart.
+      LOOM_RUN_TOKEN_SIGNING_KEY: $${LOOM_RUN_TOKEN_SIGNING_KEY}
 
       # File-browser routes fail closed unless the browser's origin is listed,
       # and through an IAP tunnel the browser's Host is localhost:<LOCAL port>,
@@ -133,10 +137,13 @@ services:
       - /opt/loom/codex:/codex-host:ro
 %{ endif ~}
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/config > /dev/null 2>&1"]
+      # /api/config only proves that serve is listening. The FleetDB checks
+      # make compose readiness wait for loom's workspace/agents and daemon
+      # session to exist, which is the state the smoke gate immediately uses.
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/config > /dev/null 2>&1 && test -s /root/.loom/workspaces/${loom_workspace}/.loom/daemon.pid && kill -0 \"$$(cat /root/.loom/workspaces/${loom_workspace}/.loom/daemon.pid)\" && curl -sf http://fleet-db:8080/api/v1/${loom_workspace}/agents | jq -e '.agents | length >= 2' > /dev/null && curl -sf http://fleet-db:8080/api/v1/${loom_workspace}/agent-sessions | jq -e 'any(.agent_sessions[]; .status == \"running\" or .status == \"completed\")' > /dev/null"]
       interval: 5s
       timeout: 3s
-      retries: 20
+      retries: 60
       start_period: 30s
     restart: unless-stopped
 
@@ -159,9 +166,10 @@ services:
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |
-        for i in $$(seq 1 600); do
+        deadline=$$(( $$(date +%s) + 120 ))
+        while [ $$(date +%s) -lt $$deadline ]; do
           # Timeouts matter: without them one stalled request can outlast the
-          # whole nominal 120s budget, so the loop never reaches its retries.
+          # deadline and hide the actual bounded failure window.
           if curl -sf --connect-timeout 2 --max-time 5 \
                -X PATCH -H 'Content-Type: application/json' \
                -H 'X-Actor: stack-harness@fixture.local' \
@@ -186,4 +194,12 @@ services:
     networks: [stack]
     ports:
       - "${ui_port}:8080"
+    healthcheck:
+      # The UI is a separate image and proxy; a healthy loom API does not
+      # prove Caddy served the SPA bundle or its deep-link fallback.
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/ | grep -q '<!doctype html>'"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
     restart: unless-stopped

@@ -13,6 +13,12 @@ resource "random_bytes" "workspace_file_token" {
   length = 32
 }
 
+# loom signs run tokens with this key. It must outlive a serve restart or every
+# in-flight agent run becomes unverifiable when the API process comes back.
+resource "random_id" "run_token_signing_key" {
+  byte_length = 32
+}
+
 locals {
   stack_secrets = {
     redis_password = {
@@ -20,6 +26,9 @@ locals {
     }
     workspace_file_token = {
       secret_id = google_secret_manager_secret.workspace_file_token.secret_id
+    }
+    run_token_signing_key = {
+      secret_id = google_secret_manager_secret.run_token_signing_key.secret_id
     }
     s3_access_id = {
       secret_id = google_secret_manager_secret.s3_access_id.secret_id
@@ -61,6 +70,21 @@ resource "google_secret_manager_secret_version" "workspace_file_token" {
   # base64url specifically, so translate the alphabet and drop the padding --
   # feeding it standard base64 disables the workspace file API silently.
   secret_data = replace(replace(replace(random_bytes.workspace_file_token.base64, "=", ""), "+", "-"), "/", "_")
+}
+
+resource "google_secret_manager_secret" "run_token_signing_key" {
+  secret_id = "${var.name}-run-token-signing-key"
+  project   = var.project_id
+  labels    = var.labels
+
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "run_token_signing_key" {
+  secret      = google_secret_manager_secret.run_token_signing_key.id
+  secret_data = random_id.run_token_signing_key.hex
 }
 
 resource "google_secret_manager_secret" "s3_access_id" {

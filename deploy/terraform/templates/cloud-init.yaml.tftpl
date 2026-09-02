@@ -52,6 +52,7 @@ write_files:
       }
       redis_pw="$(need '${redis_secret}')"
       wf_token="$(need '${workspace_token_secret}')"
+      run_token_signing_key="$(need '${run_token_signing_key_secret}')"
       s3_id="$(need '${s3_access_id_secret}')"
       s3_key="$(need '${s3_secret_secret}')"
 
@@ -61,7 +62,7 @@ write_files:
       # Fatal, not a warning: without it every image pull 403s and the stack
       # never starts, so failing here says why instead of leaving that to be
       # discovered in docker logs.
-      docker login -u oauth2accesstoken -p "$(meta)" "https://${registry_host}" >/dev/null 2>&1 || {
+      printf '%s' "$(meta)" | docker login -u oauth2accesstoken --password-stdin "https://${registry_host}" >/dev/null 2>&1 || {
         echo "FATAL: docker login to ${registry_host} failed" >&2
         exit 1
       }
@@ -73,6 +74,7 @@ write_files:
       {
         printf 'REDIS_PASSWORD=%s\n'       "$redis_pw"
         printf 'WORKSPACE_FILE_TOKEN=%s\n' "$wf_token"
+        printf 'LOOM_RUN_TOKEN_SIGNING_KEY=%s\n' "$run_token_signing_key"
         printf 'S3_ACCESS_KEY_ID=%s\n'     "$s3_id"
         printf 'S3_SECRET_ACCESS_KEY=%s\n' "$s3_key"
       } > "$env_tmp"
@@ -111,23 +113,35 @@ write_files:
       fi
       # It starts with loom and normally finishes first, but do not assume it.
       #
-      # 300s, not 120s: role-init polls for 120s of its OWN before giving up,
-      # plus curl connect/max timeouts, so a 120s window here could expire
-      # while the sidecar was still legitimately working. Anything past 300s
-      # is a genuine hang.
+      # 300s, not 120s: role-init has a 120s deadline, and one in-flight curl
+      # can finish its five-second max timeout just after that deadline. This
+      # leaves ample room for the sidecar to finish without hiding a hang.
       state=""
+      exited=0
       for _ in $(seq 1 150); do
         state="$(docker inspect -f '{{.State.Status}}' "$cid")"
-        [ "$state" = running ] || break
-        sleep 2
+        case "$state" in
+          exited)
+            exited=1
+            break
+            ;;
+          running|created|restarting|paused)
+            sleep 2
+            ;;
+          *)
+            echo "FATAL: role-init entered unexpected state '$state'" >&2
+            docker logs "$cid" 2>&1 | tail -20 >&2 || true
+            exit 1
+            ;;
+        esac
       done
-      # Falling out of that loop still running used to reach the ExitCode read
-      # below -- and docker reports ExitCode 0 for a RUNNING container, so a
-      # hung sidecar was indistinguishable from a successful one and the unit
-      # came up green with the plan role possibly never relaxed. Reject it.
-      if [ "$state" = running ]; then
-        echo "FATAL: role-init still running after 300s -- the plan role was" >&2
-        echo "NOT confirmed relaxed, so codex planners may stall silently." >&2
+      # Only an explicitly exited container has a meaningful exit code.
+      # Docker reports ExitCode 0 for a RUNNING or merely CREATED container,
+      # so accepting any non-running state would turn a never-started sidecar
+      # into a successful unit and leave the plan role unrelaxed.
+      if [ "$exited" != 1 ]; then
+        echo "FATAL: role-init did not exit after 300s (state=$state) -- the" >&2
+        echo "plan role was NOT confirmed relaxed, so codex planners may stall." >&2
         docker logs "$cid" 2>&1 | tail -20 >&2
         exit 1
       fi
@@ -154,7 +168,9 @@ write_files:
       RemainAfterExit=yes
       WorkingDirectory=/opt/loom
       # Secrets are re-read on every start so rotating a secret version and
-      # restarting the unit is enough -- no redeploy, no image rebuild.
+      # restarting the unit is enough -- no redeploy, no image rebuild. The
+      # compose command reads the freshly fetched file explicitly below; do not
+      # load it as a systemd EnvironmentFile before ExecStartPre refreshes it.
       ExecStartPre=/opt/loom/fetch-secrets
       # Two steps on purpose. `up -d --wait` fails the whole unit when ANY
       # container exits, and role-init is a one-shot that exits 0 by design:
