@@ -805,35 +805,17 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Record and delete only run-owned GCS generations
+      - name: Delete only run-owned GCS generations
         if: always()
+        working-directory: fleet-db
         shell: bash
+        env:
+          FLEET_GCS_CLEANUP_RUN_OWNED: "1"
+          FLEET_WORKSPACE_FILE_EVIDENCE_PROVIDER: gcs
         run: |
           set -euo pipefail
-          if [[ ! "${FLEET_WORKSPACE_FILE_S3_PREFIX:-}" =~ ^loom-skills-e2e/[0-9]+/[0-9]+/[0-9a-f]{16}$ ]]; then
-            echo "Refused cleanup: unresolved GCS prefix" > gcs-cleanup.txt
-            exit 1
-          fi
-          aws --endpoint-url https://storage.googleapis.com s3api list-object-versions \
-            --bucket "$FLEET_WORKSPACE_FILE_S3_BUCKET" \
-            --prefix "$FLEET_WORKSPACE_FILE_S3_PREFIX/" > gcs-created-objects.json
-          : > gcs-cleanup.txt
-          jq -r '(.Versions // []) + (.DeleteMarkers // []) | .[] | [.Key, (.VersionId // "")] | @tsv' \
-            gcs-created-objects.json |
-          while IFS=$'\t' read -r key version; do
-            [[ "$key" == "$FLEET_WORKSPACE_FILE_S3_PREFIX/"* ]] || {
-              echo "Refused out-of-prefix key: $key" >> gcs-cleanup.txt
-              exit 1
-            }
-            if [[ -n "$version" && "$version" != "null" ]]; then
-              aws --endpoint-url https://storage.googleapis.com s3api delete-object \
-                --bucket "$FLEET_WORKSPACE_FILE_S3_BUCKET" --key "$key" --version-id "$version" >/dev/null
-            else
-              aws --endpoint-url https://storage.googleapis.com s3api delete-object \
-                --bucket "$FLEET_WORKSPACE_FILE_S3_BUCKET" --key "$key" >/dev/null
-            fi
-            printf 'deleted key=%s version=%s\n' "$key" "${version:-current}" >> gcs-cleanup.txt
-          done
+          go test -count=1 -v ./internal/storage/blob \
+            -run '^TestCleanupRunOwnedGCSPrefix$' 2>&1 | tee ../gcs-cleanup.txt
 
       - name: Capture and stop GCS Redis
         if: always()
@@ -857,7 +839,6 @@ jobs:
             gcs-provider-revisions.txt
             skills-compatibility-redis-gcs.log
             gcs-signed-grants.log
-            gcs-created-objects.json
             gcs-cleanup.txt
             gcs-redis-diagnostics.txt
             e2e-coverage-redis-gcs.json
