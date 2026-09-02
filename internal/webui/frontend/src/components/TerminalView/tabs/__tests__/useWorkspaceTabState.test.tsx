@@ -4,8 +4,10 @@
 
 /**
  * Unit tests for useWorkspaceTabState hook.
- * Validates that tab state is keyed by the route workspace id (not the name),
- * so workspace renames do NOT clear tabs.
+ * Validates that tab state is keyed on the `:workspaceId` route param. SPA
+ * navigation always puts the canonical UUID there, so renames do NOT clear
+ * tabs; a hand-typed URL may instead carry a name alias the server accepts,
+ * which simply keys its own cache entry.
  */
 
 import { renderHook } from "@testing-library/react";

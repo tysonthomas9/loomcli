@@ -1,9 +1,17 @@
 /**
  * Hook to manage workspace-scoped tab state.
  * Resolves the active workspace from WorkspaceContext, saves/restores tab sets
- * when switching workspaces (keyed by the route workspace id, so there is no
- * transient "__unresolved__" hop while polled workspace data catches up), and returns
- * the resolved workspace name and ID.
+ * when switching workspaces, and returns the resolved workspace name and ID.
+ *
+ * Keyed on the raw `:workspaceId` route param rather than the polled workspace
+ * data, so there is no transient "__unresolved__" hop while that data catches
+ * up. SPA navigation always writes the canonical workspace UUID into the URL,
+ * so in practice the key is the stable id and a rename does not clear tabs.
+ * The server also accepts a workspace *name* in that route segment, so a
+ * hand-typed `/ws/<name>/` URL keys the cache on the alias it was typed with —
+ * a separate entry from the same workspace's UUID, and one that stops matching
+ * if the workspace is renamed. Both are per-session in-memory caches, so the
+ * only cost is tabs re-hydrating from the server.
  */
 
 import { useEffect, useRef, type MutableRefObject } from "react";
