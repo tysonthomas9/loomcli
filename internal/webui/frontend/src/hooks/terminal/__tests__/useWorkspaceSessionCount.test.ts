@@ -107,15 +107,28 @@ describe("useWorkspaceSessionCount", () => {
     });
 
     // Switching workspaces must not carry the previous count over — the badge
-    // has to be re-derived from the new workspace's server state.
+    // has to drop to 0 synchronously and be re-derived from the new
+    // workspace's server state. Hold the new fetch pending so the reset is
+    // observable rather than raced by the response.
+    let resolveNew: (tabs: TabMetadata[]) => void = () => {};
+    mockList.mockImplementationOnce(
+      () =>
+        new Promise<TabMetadata[]>((resolve) => {
+          resolveNew = resolve;
+        }),
+    );
     currentWorkspaceId = "ws-2";
-    mockList.mockResolvedValue([tab(), tab({ session_name: "lead-shell-2" })]);
     rerender();
 
-    await waitFor(() => {
-      expect(result.current.sessionCount).toBe(2);
-    });
+    expect(result.current.sessionCount).toBe(0);
     expect(mockList).toHaveBeenLastCalledWith("ws-2");
+
+    await act(async () => {
+      resolveNew([tab(), tab({ session_name: "lead-shell-2" })]);
+      await Promise.resolve();
+    });
+
+    expect(result.current.sessionCount).toBe(2);
   });
 
   it("ignores a stale response for the previous workspace", async () => {
