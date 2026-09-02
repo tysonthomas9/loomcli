@@ -1,0 +1,65 @@
+kind: graph-transitions
+version: 1
+flow: review-actions-surface
+group: review-actions-surface
+transitions:
+  open-case-review-workspace:
+    intent: An API client creates a review fixture and a reviewer opens its queue workspace.
+    actor: human
+    via: ui
+    steps:
+    - use: open-case-review-workspace
+  approve-case-review:
+    intent: An issue moved to review appears as a queue row, its review workspace opens in-app, and Approve closes the issue
+    actor: human
+    via: ui
+    steps:
+    - wait:
+        url: "**review=**"
+    - wait:
+        fn: "!!document.querySelector('[data-testid=pr-review-workspace]')"
+      intent: Wait until the review workspace is ready
+    - expect:
+        visible:
+          testid: pr-review-workspace
+    - expect:
+        visible:
+          testid: review-agent-button
+    - click:
+        role: button
+        name: Approve
+    - wait:
+        fn: "!document.querySelector('[data-testid=pr-review-workspace]')"
+      intent: Wait until the completed review workspace closes
+    - api:
+        method: GET
+        path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:reviewActionId}"
+        assert:
+        - path: data.status
+          equals: closed
+      intent: A reviewer's readback confirms approval closed the issue
+  request-changes-on-case-review:
+    intent: Request changes in the review workspace reopens the issue and removes it from the review queue
+    actor: human
+    via: ui
+    steps:
+    - wait:
+        fn: "!!document.querySelector('[data-testid=pr-review-workspace]')"
+      intent: Wait until the review workspace is ready
+    - click:
+        role: button
+        name: Request changes
+    - wait:
+        fn: "!document.querySelector('[data-testid=pr-review-workspace]')"
+      intent: Wait until the completed review workspace closes
+    - api:
+        method: GET
+        path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:reviewActionId}"
+        assert:
+        - path: data.status
+          equals: open
+        - path: data.labels
+          contains: needs-revision
+        - path: data.notes
+          contains: requested changes
+      intent: A reviewer's readback confirms requested changes reopened and annotated the issue

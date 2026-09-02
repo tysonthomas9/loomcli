@@ -1,0 +1,93 @@
+kind: graph-steps
+version: 1
+flow: pr-review-agents
+blocks:
+  blank-browser:
+    steps:
+    - expect:
+        url: about:blank
+  open-prr-agent-list:
+    steps:
+    - open: "/ws/E2E-WS-PRR/agents"
+    - wait:
+        fn: |-
+          (() => {
+            const page = document.querySelector('[data-testid=agents-page]');
+            const add = Array.from(document.querySelectorAll('button'))
+              .some((b) => (b.textContent || '').trim() === '+ Add agent');
+            const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
+            const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
+            const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
+            if (!page || !settled) {
+              window.__aftAgentsPageStableSig = null;
+              window.__aftAgentsPageStableAt = 0;
+              return false;
+            }
+            if (window.__aftAgentsPageStableSig !== sig) {
+              window.__aftAgentsPageStableSig = sig;
+              window.__aftAgentsPageStableAt = Date.now();
+              return false;
+            }
+            return Date.now() - window.__aftAgentsPageStableAt >= 300;
+          })()
+      intent: Wait until the PRR workspace agents page is ready
+  open-create-agent-dialog:
+    steps:
+    - click:
+        role: button
+        name: "+ Add agent"
+        exact: true
+    - wait:
+        fn: |-
+          (() => {
+            const overlay = document.querySelector('[data-testid=create-agent-overlay]');
+            if (overlay) {
+              window.__aftCreateAgentOverlayWaitStartedAt = 0;
+              return true;
+            }
+            if (!window.__aftCreateAgentOverlayWaitStartedAt) {
+              window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
+            }
+            const add = Array.from(document.querySelectorAll('button'))
+              .some((b) => (b.textContent || '').trim() === '+ Add agent');
+            if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
+              throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
+            }
+            return false;
+          })()
+      intent: Wait until the agent creation dialog is open
+  create-case-primary-pr-review-agent:
+    params:
+    - agentName
+    steps:
+    - use: open-create-agent-dialog
+    - click:
+        testid: create-agent-template-interactive-pr-review
+    - fill:
+        testid: create-agent-name
+        value: "{{agentName}}"
+    - click:
+        testid: create-agent-submit
+    - wait:
+        fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('{{agentName}}')"
+      intent: Wait until the PR Review agent appears after submit
+    - expect:
+        visible:
+          selector: "[aria-label='Agent: {{agentName}}']"
+    - run: |
+        set -e
+        name="{{agentName}}"
+        curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-PRR/agents" > "$AFT_WORK_DIR/prr-d1-agents.json"
+        python3 - "$AFT_WORK_DIR/prr-d1-agents.json" "$name" <<'PY'
+        import json, sys
+        d = json.load(open(sys.argv[1]))
+        data = d.get("data", d)
+        agents = data.get("agents") if isinstance(data, dict) else data
+        matches = [a for a in agents or [] if a.get("name") == sys.argv[2]]
+        assert len(matches) == 1, agents
+        a = matches[0]
+        assert a.get("role_name") == "pr-review", a
+        assert a.get("backend"), a
+        assert not a.get("auto"), a
+        PY
+      intent: An operator's readback selects the created PR Review agent from the unordered agent list

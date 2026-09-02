@@ -1,0 +1,116 @@
+kind: graph-steps
+version: 1
+flow: lead-agents
+blocks:
+  case-01-terminal-page-increments-codex-lead-tab-names:
+    steps:
+      - open: /ws/E2E-WS-LEAD/terminal
+      - wait:
+          fn: "!!document.querySelector('[data-testid=terminal-view]')"
+        intent: Wait until the lead workspace terminal view is ready
+      - wait:
+          fn: "!!document.querySelector('[data-testid=terminal-tab-bar]')"
+        intent: Wait until the terminal tab bar renders
+      - wait:
+          fn: |-
+            Array.from(document.querySelectorAll('[data-testid^="terminal-tab-label-"]'))
+              .map((n) => (n.textContent || '').trim()).includes('lead-codex-1')
+        intent: Wait until the default codex lead tab is labelled lead-codex-1
+      - click:
+          testid: terminal-new-tab-button
+      - wait:
+          fn: "!!document.querySelector('[data-testid=new-terminal-tab-menu]')"
+        intent: Wait until the new terminal backend menu is open
+      - click:
+          testid: new-tab-backend-codex
+      - wait:
+          fn: |-
+            Array.from(document.querySelectorAll('[data-testid^="terminal-tab-label-"]'))
+              .map((n) => (n.textContent || '').trim()).includes('lead-codex-2')
+        intent: Wait until the second codex lead tab is labelled lead-codex-2
+      - run: |
+          set -e
+          # budget: terminal-launch (40s) - PTY spawn and terminal tab metadata can lag the UI label.
+          for i in $(seq 1 20); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/terminal/tabs" > "$AFT_WORK_DIR/lead-d10-tabs.json" &&
+            python3 - "$AFT_WORK_DIR/lead-d10-tabs.json" "$AFT_WORK_DIR" <<'PY' && exit 0
+          import json, pathlib, re, sys
+          d = json.load(open(sys.argv[1]))
+          tabs = d.get("data") or []
+          assert isinstance(tabs, list), type(tabs)
+          by_label = {t.get("label"): t for t in tabs}
+          first = by_label.get("lead-codex-1")
+          second = by_label.get("lead-codex-2")
+          assert first and second, by_label
+          assert re.match(r"^e2e-ws-lead--lead-codex-1$", first.get("session_name", ""), re.I), first
+          assert re.match(r"^e2e-ws-lead--lead-codex-2$", second.get("session_name", ""), re.I), second
+          work = pathlib.Path(sys.argv[2])
+          (work / "leadSession-terminal-codex-1").write_text(first["session_name"], encoding="utf-8")
+          (work / "leadSession-terminal-codex-2").write_text(second["session_name"], encoding="utf-8")
+          PY
+            sleep 2
+          done
+          echo "codex lead terminal tab metadata never resolved"
+          cat "$AFT_WORK_DIR/lead-d10-tabs.json" 2>/dev/null || true
+          exit 1
+        intent: An operator reads back terminal tab metadata and confirms workspace-prefixed lead-codex session names
+  terminal-01-terminal-page-increments-codex-lead-tab-names:
+    steps:
+      - expect:
+          visible:
+            selector: body
+  case-02-shell-lead-tab-is-not-an-ai-lead-runtime:
+    steps:
+      - open: /ws/E2E-WS-LEAD/terminal
+      - wait:
+          fn: "!!document.querySelector('[data-testid=terminal-tab-bar]')"
+        intent: Wait until the terminal tab bar renders for the shell-tab check
+      - click:
+          testid: terminal-new-tab-button
+      - wait:
+          fn: "!!document.querySelector('[data-testid=new-terminal-tab-menu]')"
+        intent: Wait until the new terminal backend menu is open
+      - click:
+          testid: new-tab-backend-shell
+      - wait:
+          fn: |-
+            Array.from(document.querySelectorAll('[data-testid^="terminal-tab-label-"]'))
+              .map((n) => (n.textContent || '').trim()).includes('lead-shell-1')
+        intent: Wait until the shell lead tab is labelled lead-shell-1
+      - wait:
+          fn: |-
+            (() => {
+              const active = document.querySelector('[role=tabpanel][aria-hidden="false"]');
+              const text = active ? (active.textContent || '') : '';
+              const terminal = active?.querySelector('[data-testid=terminal-wrapper][data-terminal-renderer=xterm] .xterm');
+              return !!active && !!terminal && !text.includes('Starting LEAD mode');
+            })()
+        intent: Wait until the active shell pane renders a terminal grid and proves it is not rendering the lead startup banner
+      - run: |
+          set -e
+          # budget: terminal-launch (40s) - shell PTY tab metadata arrives after launch.
+          for i in $(seq 1 20); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/terminal/tabs" > "$AFT_WORK_DIR/lead-d11-tabs.json" &&
+            python3 - "$AFT_WORK_DIR/lead-d11-tabs.json" "$AFT_WORK_DIR/leadSession-terminal-shell" <<'PY' && exit 0
+          import json, re, sys
+          d = json.load(open(sys.argv[1]))
+          tabs = d.get("data") or []
+          assert isinstance(tabs, list), type(tabs)
+          matches = [t for t in tabs if t.get("label") == "lead-shell-1"]
+          assert matches, tabs
+          t = matches[0]
+          assert re.match(r"^e2e-ws-lead--lead-shell-1$", t.get("session_name", ""), re.I), t
+          assert not t.get("launch"), t
+          open(sys.argv[2], "w", encoding="utf-8").write(t["session_name"])
+          PY
+            sleep 2
+          done
+          echo "shell terminal tab metadata never resolved"
+          cat "$AFT_WORK_DIR/lead-d11-tabs.json" 2>/dev/null || true
+          exit 1
+        intent: An operator reads back the shell tab metadata and confirms it has no agent launch spec
+  terminal-02-shell-lead-tab-is-not-an-ai-lead-runtime:
+    steps:
+      - expect:
+          visible:
+            selector: body

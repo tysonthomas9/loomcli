@@ -1,0 +1,75 @@
+kind: graph-states
+version: 1
+flow: agent-flow
+states:
+  browser-ready:
+    intent: A fresh graph path begins in the runner's blank browser page.
+    assert:
+    - use: blank-browser-ready
+  nova-ready:
+    intent: The nova Lead agent exists for every dependent agent-flow path.
+    assert:
+    - expect:
+        visible:
+          selector: "[aria-label='Agent: nova']"
+  scenario-1-created-agent-definition-appears-in-agents-page-:
+    intent: created agent definition appears in agents page and monitor
+    testIntent: An operator creates a Lead agent through CreateAgentModal, observes it in the agents rail and monitor, and refreshes a runtime-seeded archive log
+    terminal: true
+    assert:
+    - wait:
+        fn: "!!document.querySelector('[data-testid=agent-activity-panel]')"
+      intent: Wait until the agent activity panel is ready
+    - wait:
+        fn: document.body.textContent.includes('nova')
+      intent: Wait until nova appears in the current agent surface
+    - expect:
+        notText: No agents found
+  scenario-2-epic-runner-drives-a-stub-agent-to-complete-a-ta:
+    intent: epic runner drives a stub agent to complete a task
+    testIntent: An orchestration client triggers the epic-runner workflow so a stub-backed agent claims and closes its task while an operator observes the board and recorded session
+    terminal: true
+    assert:
+    - wait:
+        fn: '!Array.from(document.querySelectorAll("section[data-status=ready] article")).some((el) => el.textContent.includes(''agent-flow task''))'
+      intent: Wait until the completed agent-flow task leaves the Ready column
+    - expect:
+        count:
+          selector: section[data-status=ready] article[aria-label*='agent-flow task ${RUN_ID:-local}']
+          equals: 0
+  scenario-3-agent-diff-tab-opens-changed-file:
+    intent: agent diff tab opens changed file
+    testIntent: An agent change seeded through the runtime worktree flow appears to an operator in nova's Diff tab and opens as a per-file patch
+    terminal: true
+    assert:
+    - wait:
+        text: AFT-DIFF-MARKER
+    - expect:
+        text: AFT-DIFF-MARKER
+  scenario-4-session-detail-transcript-and-diff-tabs-render:
+    intent: session detail transcript and diff tabs render
+    testIntent: A reviewer expands an open epic's completed history, opens the closed task, and inspects its recorded transcript and unavailable-diff state in the Runs tab
+    terminal: true
+    assert:
+    - expect:
+        visible:
+          testid: session-detail-view
+  scenario-5-create-second-agent-from-modal-without-starting-:
+    intent: create second agent from modal without starting it
+    testIntent: An operator creates a second task agent through CreateAgentModal, deselects the preselected repo for workspace-wide scope, and verifies it exists without starting it
+    terminal: true
+    assert:
+    - expect:
+        text: iris-${RUN_ID:-local}
+  completion-epic-run-ready:
+    intent: The standalone stub-backed epic run completed inside this path.
+    assert:
+    - expect:
+        visible:
+          testid: board-toolbar
+  session-epic-run-ready:
+    intent: The session-detail path created its own completed epic, task, run, and session identifiers.
+    assert:
+    - expect:
+        visible:
+          testid: board-toolbar

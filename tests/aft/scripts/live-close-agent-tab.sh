@@ -2,7 +2,8 @@
 # Kill an agent's terminal tab(s) and PROVE they are gone — the last step of every
 # live-tier test. In the live tier the PTY holds a real, billed model process, and
 # `DELETE /terminal/tabs/{session}` is what kills it (terminal/service_tabs.go:145-166):
-# deleting the agent or the workspace does not (see zz-lead-agent.test.yaml LED-D15,
+# deleting the agent or the workspace does not (see zz-lead-agent.graph's
+# `verified-16-deleting-a-lead-leaves-its-terminal-pty-running-until-ta` state,
 # which pins the orphan). Suite teardown still sweeps as a backstop, but teardown
 # failure is report-only in aft, so cleanup that matters has to fail the test itself.
 #

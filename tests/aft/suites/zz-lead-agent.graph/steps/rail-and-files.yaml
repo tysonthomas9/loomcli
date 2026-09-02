@@ -1,0 +1,161 @@
+kind: graph-steps
+version: 1
+flow: lead-agents
+blocks:
+  case-22-leads-sort-ahead-of-workers-in-the-rail:
+    steps:
+      - open: /ws/E2E-WS-LEAD/agents/atlas-b-${RUN_ID:-local}
+      - wait:
+          fn: |-
+            (() => {
+              const run = '${RUN_ID:-local}';
+              const lead = 'atlas-b-' + run;
+              const worker = 'worker-' + run;
+              const cards = Array.from(document.querySelectorAll('[aria-label^="Agent: "]'));
+              const labels = cards.map((c) => c.getAttribute('aria-label') || '');
+              const leadIndex = labels.indexOf('Agent: ' + lead);
+              const workerIndex = labels.indexOf('Agent: ' + worker);
+              const bg = document.querySelector('[data-testid=agent-section-background]');
+              return leadIndex >= 0 &&
+                workerIndex >= 0 &&
+                leadIndex < workerIndex &&
+                !!bg &&
+                !!Array.from(bg.querySelectorAll('[aria-label^="Agent: "]')).some((n) => n.getAttribute('aria-label') === 'Agent: ' + worker) &&
+                !Array.from(bg.querySelectorAll('[aria-label^="Agent: "]')).some((n) => n.getAttribute('aria-label') === 'Agent: ' + lead);
+            })()
+        intent: Wait until the sidebar orders the lead before the worker and groups only the worker under Background
+  terminal-22-leads-sort-ahead-of-workers-in-the-rail:
+    steps:
+      - expect:
+          visible:
+            selector: body
+  case-23-lead-files-tab-exposes-the-no-worktree-checkout-state:
+    steps:
+      - open: /ws/E2E-WS-LEAD/agents/atlas-${RUN_ID:-local}
+      - wait:
+          fn: "!!document.querySelector('[data-testid=agent-editor-groups]')"
+        intent: Wait until the lead agent editor tabs are ready
+      - run: |
+          set -e
+          agent-browser --session "$AFT_SESSION" eval "
+            (() => {
+              const btn = Array.from(document.querySelectorAll('[data-testid=agent-editor-groups] button[draggable]'))
+                .find((b) => (b.textContent || '').trim() === 'Files');
+              if (!btn) throw new Error('Files editor tab not found in strip');
+              btn.click();
+              return true;
+            })()"
+        intent: An operator opens the Files tab in the lead agent editor strip
+      - wait:
+          fn: |-
+            (() => {
+              const activePane = () => {
+                const root = document.querySelector('[data-testid=agent-editor-groups]');
+                return Array.from(root?.querySelectorAll('[role=tabpanel]:not([data-hidden])') || [])
+                  .find((pane) => !pane.parentElement?.closest('[role=tabpanel]'));
+              };
+              const active = activePane();
+              const leadToggle = Array.from(active?.querySelectorAll('button') || [])
+                .find((button) => {
+                  const text = (button.textContent || '').replace(/\s+/g, ' ').trim();
+                  return text.includes('atlas-${RUN_ID:-local}') && text.includes('lead-repo');
+                });
+              const leadRow = leadToggle?.parentElement || null;
+              const leadText = (leadRow?.textContent || '').replace(/\s+/g, ' ').trim();
+              if (leadToggle && !leadText.includes('Not checked out') &&
+                  leadToggle.getAttribute('aria-expanded') === 'false' &&
+                  !leadToggle.disabled) {
+                leadToggle.click();
+                return false;
+              }
+              return !!active && !!leadRow && leadText.includes('Not checked out');
+            })()
+        intent: Wait until the active Files tab renders the lead checkout row with a Not checked out badge
+      - wait:
+          fn: |-
+            (() => {
+              const activePane = () => {
+                const root = document.querySelector('[data-testid=agent-editor-groups]');
+                return Array.from(root?.querySelectorAll('[role=tabpanel]:not([data-hidden])') || [])
+                  .find((pane) => !pane.parentElement?.closest('[role=tabpanel]'));
+              };
+              const active = activePane();
+              const text = active ? (active.textContent || '') : '';
+              const titles = Array.from(active?.querySelectorAll('[title]') || []).map((el) => el.getAttribute('title') || '');
+              const leadToggle = Array.from(active?.querySelectorAll('button') || [])
+                .find((button) => {
+                  const buttonText = (button.textContent || '').replace(/\s+/g, ' ').trim();
+                  return buttonText.includes('atlas-${RUN_ID:-local}') && buttonText.includes('lead-repo');
+                });
+              const leadRow = leadToggle?.parentElement || null;
+              const leadText = (leadRow?.textContent || '').replace(/\s+/g, ' ').trim();
+              return !!leadRow &&
+                leadText.includes('Not checked out') &&
+                !text.includes('agent worktree') &&
+                !titles.some((title) => title.includes('worktrees/lead-repo/atlas-${RUN_ID:-local}'));
+            })()
+        intent: Wait until the active Files tab renders the no-worktree lead checkout state without a raw worktree path
+      - expect:
+          text: Not checked out
+      - api:
+          method: GET
+          path: /api/workspaces/E2E-WS-LEAD/agents/atlas-${RUN_ID:-local}/git/diff-stat
+          status: 404
+          assert:
+            - path: error
+              contains: agent worktree
+        intent: An operator confirms the lead diff-stat path still has no local agent worktree
+      - open: /ws/E2E-WS-LEAD/agents/worker-${RUN_ID:-local}
+      - wait:
+          fn: "!!document.querySelector('[data-testid=agent-editor-groups]')"
+        intent: Wait until the worker agent editor tabs are ready for the checkout contrast
+      - run: |
+          set -e
+          agent-browser --session "$AFT_SESSION" eval "
+            (() => {
+              const btn = Array.from(document.querySelectorAll('[data-testid=agent-editor-groups] button[draggable]'))
+                .find((b) => (b.textContent || '').trim() === 'Files');
+              if (!btn) throw new Error('Files editor tab not found in strip');
+              btn.click();
+              return true;
+            })()"
+        intent: An operator opens the Files tab in the lead agent editor strip
+      - wait:
+          fn: |-
+            (() => {
+              const activePane = () => {
+                const root = document.querySelector('[data-testid=agent-editor-groups]');
+                return Array.from(root?.querySelectorAll('[role=tabpanel]:not([data-hidden])') || [])
+                  .find((pane) => !pane.parentElement?.closest('[role=tabpanel]'));
+              };
+              const active = activePane();
+              const workerToggle = Array.from(active?.querySelectorAll('button') || [])
+                .find((button) => {
+                  const text = (button.textContent || '').replace(/\s+/g, ' ').trim();
+                  return text.includes('worker-${RUN_ID:-local}') && text.includes('lead-repo');
+                });
+              const workerRow = workerToggle?.parentElement || null;
+              const workerText = (workerRow?.textContent || '').replace(/\s+/g, ' ').trim();
+              if (workerToggle && workerToggle.getAttribute('aria-expanded') === 'false' && !workerToggle.disabled) {
+                workerToggle.click();
+                return false;
+              }
+              return !!active && !!workerRow &&
+                workerText.includes('worker-${RUN_ID:-local}') &&
+                workerText.includes('lead-repo') &&
+                !workerText.includes('Not checked out') &&
+                (active.textContent || '').includes('Changes');
+            })()
+        intent: Wait until the worker Files tab renders its checked-out lead-repo row and changes lens
+      - api:
+          method: GET
+          path: /api/workspaces/E2E-WS-LEAD/agents/worker-${RUN_ID:-local}/git/diff-stat
+          status: 200
+          assert:
+            - path: branch
+              contains: worker-${RUN_ID:-local}
+        intent: An operator confirms the task worker contrast path does have a local agent worktree
+  terminal-23-lead-files-tab-exposes-the-no-worktree-checkout-state:
+    steps:
+      - expect:
+          text: Changes

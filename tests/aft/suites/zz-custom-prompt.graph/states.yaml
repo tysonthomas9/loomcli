@@ -1,0 +1,171 @@
+kind: graph-states
+version: 1
+flow: custom-prompts
+states:
+  browser-ready:
+    intent: A fresh graph path begins in the runner's blank browser page.
+    assert:
+      - expect:
+          url: about:blank
+  create-agent-dialog-ready:
+    intent: The mounted Create Agent dialog is ready for template selection.
+    assert:
+      - use: wait-for-create-agent-dialog
+        with:
+          intent: Wait until the agent creation dialog is open
+      - expect:
+          visible:
+            testid: create-agent-overlay
+  verified-01-custom-prompt-creates-an-interactive-role-with-byte-exac:
+    intent: custom prompt creates an interactive role with byte-exact instructions
+    testIntent: An operator defines a terminal teammate with inline instructions through CreateAgentModal and verifies the stored agent, role, and prompt
+    terminal: true
+    assert:
+      - use: terminal-01-custom-prompt-creates-an-interactive-role-with-byte-exac
+  verified-02-empty-custom-prompt-keeps-submit-disabled:
+    intent: empty custom prompt keeps submit disabled
+    testIntent: An operator selecting the Custom prompt template cannot create an agent before writing instructions
+    terminal: true
+    assert:
+      - use: terminal-02-empty-custom-prompt-keeps-submit-disabled
+  verified-03-whitespace-only-custom-prompt-keeps-submit-disabled:
+    intent: whitespace-only custom prompt keeps submit disabled
+    testIntent: An operator who types only whitespace into the custom prompt still cannot submit the agent
+    terminal: true
+    assert:
+      - use: terminal-03-whitespace-only-custom-prompt-keeps-submit-disabled
+  verified-04-multiline-metacharacter-prompt-persists-byte-exact:
+    intent: multiline metacharacter prompt persists byte-exact
+    testIntent: An operator pastes a multi-paragraph prompt containing shell and markdown metacharacters and verifies the stored bytes are unchanged
+    terminal: true
+    assert:
+      - use: terminal-04-multiline-metacharacter-prompt-persists-byte-exact
+  verified-05-template-looking-custom-prompt-is-stored-literally:
+    intent: template-looking custom prompt is stored literally
+    testIntent: An operator whose prompt contains Go template syntax gets that text stored literally rather than expanded
+    terminal: true
+    assert:
+      - use: terminal-05-template-looking-custom-prompt-is-stored-literally
+  verified-06-custom-prompt-reaches-codex-argv-in-the-noninteractive-r:
+    intent: custom prompt reaches codex argv in the noninteractive runtime probe
+    testIntent: A runtime contract probe confirms stored custom prompt text is passed to the backend as the final positional argument
+    terminal: true
+    assert:
+      - use: terminal-06-custom-prompt-reaches-codex-argv-in-the-noninteractive-r
+  verified-07-xss-shaped-custom-prompt-is-inert-in-agents-ui:
+    intent: xss-shaped custom prompt is inert in agents UI
+    testIntent: An operator's prompt containing executable HTML never becomes executable markup in the agents surface
+    terminal: true
+    assert:
+      - use: terminal-07-xss-shaped-custom-prompt-is-inert-in-agents-ui
+  verified-08-thirty-two-kilobyte-custom-prompt-survives-the-ui-round-:
+    intent: thirty-two kilobyte custom prompt survives the UI round trip
+    testIntent: An operator pastes a long detailed prompt and verifies the agent role stores all of it intact
+    terminal: true
+    assert:
+      - use: terminal-08-thirty-two-kilobyte-custom-prompt-survives-the-ui-round-
+  verified-09-custom-prompt-named-task-is-rejected-by-the-seeded-worke:
+    intent: custom prompt named task is rejected by the seeded worker role
+    testIntent: An operator naming a custom interactive agent after the task role gets a visible collision error and no agent row
+    terminal: true
+    assert:
+      - use: terminal-09-custom-prompt-named-task-is-rejected-by-the-seeded-worke
+  verified-10-custom-prompt-named-plan-is-rejected-by-the-seeded-worke:
+    intent: custom prompt named plan is rejected by the seeded worker role
+    testIntent: An operator naming a custom interactive agent after the plan role gets a visible collision error and no agent row
+    terminal: true
+    assert:
+      - use: terminal-10-custom-prompt-named-plan-is-rejected-by-the-seeded-worke
+  verified-11-custom-prompt-named-lead-is-rejected-by-the-seeded-lead-:
+    intent: custom prompt named lead is rejected by the seeded lead role
+    testIntent: An operator naming a custom interactive agent after the lead role gets a visible prompt mismatch and no agent row
+    terminal: true
+    assert:
+      - use: terminal-11-custom-prompt-named-lead-is-rejected-by-the-seeded-lead-
+  verified-12-custom-prompt-named-orchestrator-deterministically-creat:
+    intent: custom prompt named orchestrator deterministically creates an interactive role
+    testIntent: An operator can create a custom prompt agent named orchestrator and the workspace records it as an interactive role
+    terminal: true
+    assert:
+      - use: terminal-12-custom-prompt-named-orchestrator-deterministically-creat
+  verified-13-custom-prompt-trims-surrounding-whitespace-and-preserves:
+    intent: custom prompt trims surrounding whitespace and preserves interior formatting
+    testIntent: An operator pasting stray blank lines around a prompt gets only the surrounding whitespace trimmed
+    terminal: true
+    assert:
+      - use: terminal-13-custom-prompt-trims-surrounding-whitespace-and-preserves
+  verified-14-backend-selection-reaches-custom-agent-row-and-terminal-:
+    intent: backend selection reaches custom agent row and terminal launch spec
+    testIntent: An operator selects a non-default AI backend for a custom agent and verifies the persisted launch contract
+    terminal: true
+    assert:
+      - use: terminal-14-backend-selection-reaches-custom-agent-row-and-terminal-
+  verified-15-repo-scoping-persists-but-custom-interactive-launch-has-:
+    intent: repo scoping persists but custom interactive launch has no worktree cwd
+    testIntent: An operator scopes one custom agent to a repo and another to the whole workspace, then verifies both launch without an interactive worktree
+    terminal: true
+    assert:
+      - use: terminal-15-repo-scoping-persists-but-custom-interactive-launch-has-
+  verified-16-custom-prompt-is-not-visible-or-editable-after-creation:
+    intent: custom prompt is not visible or editable after creation
+    testIntent: An operator returning to a custom agent finds no prompt tab, no prompt text, and no API patch path that changes the role prompt
+    terminal: true
+    assert:
+      - use: terminal-16-custom-prompt-is-not-visible-or-editable-after-creation
+  verified-17-recreating-a-deleted-custom-agent-with-a-different-promp:
+    intent: recreating a deleted custom agent with a different prompt is blocked
+    testIntent: An operator deletes a custom prompt agent and discovers a different replacement prompt is blocked by the orphaned role
+    terminal: true
+    assert:
+      - use: terminal-17-recreating-a-deleted-custom-agent-with-a-different-promp
+  verified-18-custom-agent-appears-in-the-agents-rail-without-reload:
+    intent: custom agent appears in the agents rail without reload
+    testIntent: An operator sees a newly created custom teammate in the agents rail as soon as the modal closes
+    terminal: true
+    assert:
+      - use: terminal-18-custom-agent-appears-in-the-agents-rail-without-reload
+  verified-19-duplicate-custom-agent-name-is-refused-with-a-visible-er:
+    intent: duplicate custom agent name is refused with a visible error
+    testIntent: An operator reusing an existing custom agent name sees a conflict and the first role prompt remains unchanged
+    terminal: true
+    assert:
+      - use: terminal-19-duplicate-custom-agent-name-is-refused-with-a-visible-er
+  verified-20-mixed-case-custom-agent-name-is-normalized-by-the-ui:
+    intent: mixed-case custom agent name is normalized by the UI
+    testIntent: An operator typing a mixed-case custom agent name gets one canonical lower-case agent addressable at the lower-case route
+    terminal: true
+    assert:
+      - use: terminal-20-mixed-case-custom-agent-name-is-normalized-by-the-ui
+  verified-21-invalid-custom-agent-names-keep-submit-disabled:
+    intent: invalid custom agent names keep submit disabled
+    testIntent: An operator cannot submit a custom agent name that the workspace cannot safely store or render
+    terminal: true
+    assert:
+      - use: terminal-21-invalid-custom-agent-names-keep-submit-disabled
+  verified-22-built-in-pr-review-template-works-in-a-clean-control-wor:
+    intent: built-in pr review template works in a clean control workspace
+    testIntent: An operator creates a PR Review agent from the built-in template in a clean workspace and verifies the prompt-file launch branch
+    terminal: true
+    assert:
+      - use: terminal-22-built-in-pr-review-template-works-in-a-clean-control-wor
+  primary-custom-agent-cleared:
+    intent: The primary custom-agent identity is free for an independent UI creation path.
+    assert:
+      - expect:
+          url: about:blank
+  primary-custom-agent-ready:
+    intent: The primary custom agent exists for an independent post-creation review path.
+    assert:
+      - expect:
+          url: about:blank
+  template-prompt-subject-cleared:
+    intent: The fixed template-prompt identity is free for an independent recreation path.
+    assert:
+      - expect:
+          url: about:blank
+  template-prompt-subject-ready:
+    intent: The exact template-looking prompt fixture and custom role exist for independent storage and argv checks.
+    assert:
+      - expect:
+          visible:
+            selector: "[aria-label='Agent: cust-tmpl-${RUN_ID:-local}']"

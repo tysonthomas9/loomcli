@@ -1,0 +1,144 @@
+kind: graph
+version: 1
+classification:
+  area: agents
+  feature: task-runners
+  surface: mixed
+  purpose: journey
+flow: task-runner
+suite: zz-task-runner
+intent: Each independently replayed path preserves one legacy zz-task-runner scenario while shared source steps form reviewable trunks.
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+fixtureScope: path
+setup: |
+  set -e
+  test -n "$AFT_CASE_ID"
+  printf '%s' "$AFT_CASE_KEY" | grep -Eq '^[A-Z0-9]{1,4}-[A-F0-9]{8}$'
+  "$AFT_TESTS_DIR/scripts/clean-test-workspace.sh" E2E-TR-${AFT_CASE_KEY}
+
+  case_dir="$AFT_WORK_DIR/cases/tr-$AFT_CASE_KEY"
+  rm -rf "$case_dir"
+  for suffix in a b; do
+    repo="$case_dir/task-repo-$suffix"
+    mkdir -p "$repo"
+    git -C "$repo" init -q
+    git -C "$repo" config user.name "Loom AFT"
+    git -C "$repo" config user.email "aft@example.test"
+    git -C "$repo" commit --allow-empty -m init -q
+    printf 'gate:\n\t@true\n' > "$repo/Makefile"
+    mkdir -p "$repo/epic-runner-output"
+    : > "$repo/epic-runner-output/.gitkeep"
+    git -C "$repo" add Makefile epic-runner-output/.gitkeep
+    git -C "$repo" commit -m "add aft task fixtures" -q
+    git -C "$repo" branch -M main
+  done
+
+  git init --bare "$case_dir/task-remote-a" -q
+  git -C "$case_dir/task-repo-a" remote add origin "$case_dir/task-remote-a"
+  git -C "$case_dir/task-repo-a" push -u origin main -q
+
+  python3 - "$case_dir/task-repo-a" "$case_dir/task-repo-b" "$AFT_CASE_KEY" > "$AFT_WORK_DIR/task-workspace.json" <<'PY'
+  import json, sys
+  print(json.dumps({
+      "name": f"E2E-TR-{sys.argv[3]}",
+      "type": "empty",
+      "repos": [sys.argv[1], sys.argv[2]],
+  }))
+  PY
+  curl -sf -X POST "$AFT_BASE_URL/api/workspaces" \
+    -H "Content-Type: application/json" \
+    -d @"$AFT_WORK_DIR/task-workspace.json" \
+    > "$AFT_WORK_DIR/task-workspace.resp.json"
+  python3 - "$AFT_WORK_DIR/task-workspace.resp.json" "$case_dir/task-repo-a" "$case_dir/task-repo-b" "$AFT_WORK_DIR" "E2E-TR-${AFT_CASE_KEY}" <<'PY'
+  import json, pathlib, sys
+  resp, repo_a, repo_b, work, workspace = sys.argv[1:]
+  data = json.load(open(resp)).get("data") or {}
+  assert data.get("id") == workspace, data
+  pathlib.Path(work, "task-workspace.path").write_text(data["path"], encoding="utf-8")
+  repos = data.get("repos") or []
+  by_name = {r.get("name"): r for r in repos}
+  for suffix, repo_path in [("a", repo_a), ("b", repo_b)]:
+      repo = by_name[pathlib.Path(repo_path).name]
+      pathlib.Path(work, f"task-repo-{suffix}.name").write_text(repo["name"], encoding="utf-8")
+      pathlib.Path(work, f"task-repo-{suffix}.source").write_text(repo.get("source_repo_id") or repo["name"], encoding="utf-8")
+  PY
+  run="${RUN_ID:-local}"
+  repo_a="$(cat "$AFT_WORK_DIR/task-repo-a.name")"
+  python3 - "$run" "$repo_a" > "$AFT_WORK_DIR/task-worker-a.json" <<'PY'
+  import json, sys
+  run, repo = sys.argv[1], sys.argv[2]
+  print(json.dumps({
+      "name": f"worker-a-{run}",
+      "role_name": "task",
+      "auto": False,
+      "cross_repo": False,
+      "repos": [repo],
+      "backend": "codex",
+  }))
+  PY
+  curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-TR-${AFT_CASE_KEY}/agents" \
+    -H "Content-Type: application/json" \
+    -d @"$AFT_WORK_DIR/task-worker-a.json" \
+    > "$AFT_WORK_DIR/task-worker-a.resp.json"
+  python3 - "$run" > "$AFT_WORK_DIR/task-lead-companion.json" <<'PY'
+  import json, sys
+  run = sys.argv[1]
+  print(json.dumps({
+      "name": f"lead-task-{run}",
+      "role_name": "lead",
+      "auto": False,
+      "cross_repo": True,
+      "repos": [],
+      "backend": "codex",
+  }))
+  PY
+  curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-TR-${AFT_CASE_KEY}/agents" \
+    -H "Content-Type: application/json" \
+    -d @"$AFT_WORK_DIR/task-lead-companion.json" \
+    > "$AFT_WORK_DIR/task-lead-companion.resp.json"
+teardown: |
+  set +e
+  AFT_WS=E2E-TR-${AFT_CASE_KEY} "$AFT_TESTS_DIR/scripts/close-open-issues.sh"
+  curl -s "$AFT_BASE_URL/api/workspaces/E2E-TR-${AFT_CASE_KEY}/agents" > "$AFT_WORK_DIR/task-agents.teardown.json" || true
+  python3 - "$AFT_WORK_DIR/task-agents.teardown.json" "${RUN_ID:-local}" <<'PY' > "$AFT_WORK_DIR/task-agents.teardown.list"
+  import json, sys
+  try:
+      d = json.load(open(sys.argv[1]))
+  except Exception:
+      d = {}
+  run = sys.argv[2]
+  agents = d.get("data") if isinstance(d, dict) else []
+  for a in agents or []:
+      name = a.get("name", "")
+      if name.endswith("-" + run):
+          print(name)
+  PY
+  while read -r agent; do
+    [ -n "$agent" ] && curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-TR-${AFT_CASE_KEY}/agents/$agent" >/dev/null || true
+  done < "$AFT_WORK_DIR/task-agents.teardown.list"
+  pkill -f "loom .*--workspace E2E-TR-${AFT_CASE_KEY} .* task .*-${RUN_ID:-local}" >/dev/null 2>&1 || true
+  "$AFT_TESTS_DIR/scripts/clean-test-workspace.sh" E2E-TR-${AFT_CASE_KEY}
+imports:
+- shared-steps.yaml
+- states.yaml
+- transitions.yaml
+start: browser-ready
+graph:
+  browser-ready:
+    open-task-runner-dialog: task-runner-dialog-open
+    run-scenario-6-delegation-assigns-and-starts-the-task-r: scenario-6-delegation-assigns-and-starts-the-task-runner-in
+    run-scenario-7-task-runner-with-no-designed-ready-work-: scenario-7-task-runner-with-no-designed-ready-work-exits-id
+    run-scenario-8-task-runner-source-repo-scope-filters-re: scenario-8-task-runner-source-repo-scope-filters-ready-work
+    run-scenario-9-task-runner-logs-tab-shows-archive-mode-: scenario-9-task-runner-logs-tab-shows-archive-mode-and-seed
+    run-scenario-10-task-runner-appears-on-every-agent-surfa: scenario-10-task-runner-appears-on-every-agent-surface-with-
+    run-scenario-11-quarantined-task-renders-the-visible-qua: scenario-11-quarantined-task-renders-the-visible-quarantine-
+  task-runner-dialog-open:
+    choose-task-runner-template: task-runner-template-selected
+  task-runner-template-selected:
+    run-scenario-1-task-runner-modal-creates-a-single-repo-: scenario-1-task-runner-modal-creates-a-single-repo-worker-w
+    run-scenario-2-task-runner-modal-creates-a-workspace-sc: scenario-2-task-runner-modal-creates-a-workspace-scope-work
+    run-scenario-3-task-runner-backend-dropdown-selection-i: scenario-3-task-runner-backend-dropdown-selection-is-honore
+    run-scenario-4-task-runner-name-validation-blocks-inval: scenario-4-task-runner-name-validation-blocks-invalid-names
+    run-scenario-5-duplicate-task-runner-name-stays-in-the-: scenario-5-duplicate-task-runner-name-stays-in-the-dialog-w
+coverage:
+  strategy: transition

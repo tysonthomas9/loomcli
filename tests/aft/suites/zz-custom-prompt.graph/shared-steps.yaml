@@ -1,0 +1,161 @@
+kind: graph-steps
+version: 1
+flow: custom-prompts
+blocks:
+  wait-for-agents-page:
+    params:
+      - intent
+    steps:
+      - wait:
+          fn: |-
+            (() => {
+              const page = document.querySelector('[data-testid=agents-page]');
+              const add = Array.from(document.querySelectorAll('button'))
+                .some((b) => (b.textContent || '').trim() === '+ Add agent');
+              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
+              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
+              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
+              if (!page || !settled) {
+                window.__aftAgentsPageStableSig = null;
+                window.__aftAgentsPageStableAt = 0;
+                return false;
+              }
+              if (window.__aftAgentsPageStableSig !== sig) {
+                window.__aftAgentsPageStableSig = sig;
+                window.__aftAgentsPageStableAt = Date.now();
+                return false;
+              }
+              return Date.now() - window.__aftAgentsPageStableAt >= 300;
+            })()
+        intent: "{{intent}}"
+  open-agents-page:
+    params:
+      - path
+      - readyIntent
+    steps:
+      - open: "{{path}}"
+      - use: wait-for-agents-page
+        with:
+          intent: "{{readyIntent}}"
+  wait-for-create-agent-dialog:
+    params:
+      - intent
+    steps:
+      - wait:
+          fn: |-
+            (() => {
+              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
+              if (overlay) {
+                window.__aftCreateAgentOverlayWaitStartedAt = 0;
+                return true;
+              }
+              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
+                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
+              }
+              const add = Array.from(document.querySelectorAll('button'))
+                .some((b) => (b.textContent || '').trim() === '+ Add agent');
+              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
+                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
+              }
+              return false;
+            })()
+        intent: "{{intent}}"
+  open-create-agent-dialog:
+    params:
+      - path
+      - readyIntent
+      - dialogIntent
+    steps:
+      - use: open-agents-page
+        with:
+          path: "{{path}}"
+          readyIntent: "{{readyIntent}}"
+      - click:
+          role: button
+          name: + Add agent
+          exact: true
+      - use: wait-for-create-agent-dialog
+        with:
+          intent: "{{dialogIntent}}"
+  request-create-agent-dialog:
+    params:
+      - path
+      - readyIntent
+    steps:
+      - use: open-agents-page
+        with:
+          path: "{{path}}"
+          readyIntent: "{{readyIntent}}"
+      - click:
+          role: button
+          name: + Add agent
+          exact: true
+  choose-custom-prompt-template:
+    params:
+      - path
+      - readyIntent
+      - dialogIntent
+    steps:
+      - use: open-create-agent-dialog
+        with:
+          path: "{{path}}"
+          readyIntent: "{{readyIntent}}"
+          dialogIntent: "{{dialogIntent}}"
+      - click:
+          testid: create-agent-template-custom-prompt
+  choose-pr-review-template:
+    params:
+      - path
+      - readyIntent
+      - dialogIntent
+    steps:
+      - use: open-create-agent-dialog
+        with:
+          path: "{{path}}"
+          readyIntent: "{{readyIntent}}"
+          dialogIntent: "{{dialogIntent}}"
+      - click:
+          testid: create-agent-template-interactive-pr-review
+  remove-case-agent-and-tabs:
+    params:
+      - name
+    steps:
+      - run: |-
+          set -e
+          name="{{name}}"
+          safe_name="$(printf '%s' "$name" | tr -c 'A-Za-z0-9_-' '_')"
+          tabs_file="$AFT_WORK_DIR/prereq-${AFT_CASE_ID:-local}-$safe_name-tabs.json"
+          sessions_file="$AFT_WORK_DIR/prereq-${AFT_CASE_ID:-local}-$safe_name-sessions.txt"
+          curl -s "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/terminal/tabs" > "$tabs_file" || printf '%s' '{"data":[]}' > "$tabs_file"
+          python3 - "$tabs_file" "$name" <<'PY' > "$sessions_file"
+          import json, sys
+          try:
+              doc = json.load(open(sys.argv[1]))
+          except Exception:
+              doc = {}
+          for tab in doc.get("data") or []:
+              if tab.get("agent_id") == sys.argv[2] and tab.get("session_name"):
+                  print(tab["session_name"])
+          PY
+          while read -r session; do
+            [ -n "$session" ] && curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/terminal/tabs/$session" >/dev/null || true
+          done < "$sessions_file"
+          curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/agents/$name" >/dev/null || true
+        intent: Reset the case-owned agent and any surviving terminal tabs before independently replaying this path.
+  seed-primary-custom-agent:
+    steps:
+      - use: remove-case-agent-and-tabs
+        with:
+          name: cust-${RUN_ID:-local}
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-WS-CUSTOM/agents
+          body:
+            name: cust-${RUN_ID:-local}
+            role_name: cust-${RUN_ID:-local}
+            kind: interactive
+            prompt: You are a release-notes reviewer. AFT-PROMPT-MARKER-${RUN_ID:-local}
+            auto: false
+            backend: codex
+          status: 201
+        intent: Seed the exact custom agent whose post-creation privacy surface this path reviews.

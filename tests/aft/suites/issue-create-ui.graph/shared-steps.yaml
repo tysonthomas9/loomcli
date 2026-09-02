@@ -1,0 +1,28 @@
+kind: graph-steps
+version: 1
+flow: issue-create-ui
+
+blocks:
+  blank-browser:
+    steps:
+      - expect: { url: "about:blank" }
+
+  open-workspace-board:
+    steps:
+      - open: /ws/E2E-WS/kanban
+
+  hydrated-board:
+    steps:
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: Wait until the workspace board is ready
+      - expect: { visible: { testid: board-toolbar } }
+
+  open-new-issue-form:
+    steps:
+      - click: { testid: new-issue-button }
+
+  visible-new-issue-form:
+    steps:
+      - expect: { visible: { testid: create-issue-title } }

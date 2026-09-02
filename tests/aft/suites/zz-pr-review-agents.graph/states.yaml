@@ -1,0 +1,93 @@
+kind: graph-states
+version: 1
+flow: pr-review-agents
+states:
+  browser-ready:
+    intent: A fresh graph path begins in the runner's blank browser page.
+    assert:
+    - use: blank-browser
+  agent-list-ready:
+    intent: The PR Review workspace agent list is settled.
+    assert:
+    - expect:
+        visible:
+          testid: agents-page
+  scenario-1-modal-creates-a-pr-review-interactive-agent:
+    intent: modal creates a PR Review interactive agent
+    testIntent: An operator creates a PR Review terminal agent from the agent templates and verifies the stored agent uses the built-in PR-review role
+    terminal: true
+    assert:
+    - expect:
+        visible:
+          selector: "[aria-label='Agent: prr-${RUN_ID:-local}']"
+  primary-pr-review-agent-ready:
+    intent: A case-isolated primary PR Review agent and its shared role are persisted.
+    assert:
+    - expect:
+        visible:
+          selector: "[aria-label='Agent: prr-${RUN_ID:-local}-${AFT_CASE_ID}']"
+  create-agent-dialog-open:
+    intent: The agent creation dialog is mounted for template-contract review.
+    assert:
+    - expect:
+        visible:
+          testid: create-agent-overlay
+  scenario-2-pr-review-template-selection-documents-the-true-default:
+    intent: PR Review template selection documents the true default
+    testIntent: An operator opening the agent templates sees Task Runner preselected and can switch to the PR Review template
+    terminal: true
+    assert:
+    - expect:
+        count:
+          testid: create-agent-overlay
+          equals: 0
+  scenario-3-interactive-prompts-expose-only-visible-templates:
+    intent: interactive prompts expose only visible templates
+    testIntent: An operator sees only the published built-in interactive prompts and never sees the hidden checkout prompt as a template
+    terminal: true
+    assert:
+    - expect:
+        count:
+          testid: create-agent-overlay
+          equals: 0
+  scenario-4-prompt-list-failure-keeps-built-in-templates-visible:
+    intent: prompt list failure keeps built-in templates visible
+    testIntent: An operator whose prompt list fails to load still sees the built-in interactive templates and an honest fallback notice
+    terminal: true
+    assert:
+    - expect:
+        count:
+          testid: create-agent-overlay
+          equals: 0
+  scenario-5-pr-review-terminal-launch-carries-the-built-in-prompt:
+    intent: PR Review terminal launch carries the built-in prompt
+    testIntent: An operator opening their PR Review agent gets a mounted terminal launched with the built-in PR-review prompt
+    terminal: true
+    assert:
+    - expect:
+        visible:
+          testid: terminal-view
+  scenario-6-second-pr-review-agent-reuses-the-shared-role:
+    intent: second PR Review agent reuses the shared role
+    testIntent: An operator creates a second PR Review agent and verifies both agents share the workspace PR-review role
+    terminal: true
+    assert:
+    - expect:
+        visible:
+          selector: "[aria-label='Agent: prr2-${RUN_ID:-local}']"
+  scenario-7-conflicting-prompt-cannot-reuse-the-pr-review-role:
+    intent: conflicting prompt cannot reuse the PR Review role
+    testIntent: An API client that tries to reuse the PR-review role with a different prompt receives the documented role-conflict error
+    terminal: true
+    assert:
+    - expect:
+        visible:
+          testid: agents-page
+  scenario-8-unknown-built-in-prompt-fails-visibly-at-terminal-launch:
+    intent: unknown built-in prompt fails visibly at terminal launch
+    testIntent: An operator whose interactive agent names an unknown built-in prompt sees the terminal report the prompt-loading error while the hidden checkout prompt remains API-accepted
+    terminal: true
+    assert:
+    - expect:
+        visible:
+          testid: terminal-wrapper

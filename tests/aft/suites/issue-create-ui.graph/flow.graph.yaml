@@ -1,0 +1,35 @@
+kind: graph
+version: 1
+classification: { area: issues, feature: issue-creation, surface: mixed, purpose: journey }
+flow: issue-create-ui
+suite: issue-create-ui
+intent: A human author creates and validates issues through the mounted New Issue form.
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+fixtureScope: graph
+
+imports:
+  - shared-steps.yaml
+  - states.yaml
+  - transitions.yaml
+
+start: browser-ready
+
+graph:
+  browser-ready:
+    open-board: board-ready
+
+  board-ready:
+    open-blank-title-form: blank-title-form
+    open-basic-create-form: basic-create-form
+    open-rich-create-form: rich-create-form
+
+  basic-create-form:
+    create-basic-issue: basic-issue-created
+
+  rich-create-form:
+    create-full-field-issue: full-field-issue-persisted
+    exercise-soft-duplicate-guard: forced-duplicate-created
+
+coverage:
+  strategy: transition

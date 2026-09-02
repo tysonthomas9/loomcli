@@ -453,7 +453,8 @@ left unpushed for a PR. The stack-improvement items in §3 remain open follow-up
 - A review-status issue can render Approve and Request changes, but without a PR, branch, commit,
   or diff the reviewer has nothing to inspect. Treating those clicks as product-correct review
   scenarios overclaims a hollow fixture.
-- The two action tests moved to `tests/aft/surface-suites/review-actions.test.yaml`. Promote them
+- The two action tests moved to the `tests/aft/surface-suites/review-actions.graph/`
+  package. Promote them
   when branch/commit review-content seeding exists; see §3.9.
 
 ### 1.20 Workspace resolution by name is inconsistent across routes — reviewer route 500s

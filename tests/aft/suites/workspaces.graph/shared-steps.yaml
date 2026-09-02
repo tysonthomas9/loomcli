@@ -1,0 +1,14 @@
+kind: graph-steps
+version: 1
+flow: workspaces
+blocks:
+  blank-browser:
+    steps:
+    - expect:
+        url: about:blank
+  open-primary-workspace-board:
+    steps:
+    - open: "/ws/E2E-WS/kanban"
+    - wait:
+        fn: "!!document.querySelector('[data-testid=board-toolbar]')"
+      intent: Wait until the workspace board is ready

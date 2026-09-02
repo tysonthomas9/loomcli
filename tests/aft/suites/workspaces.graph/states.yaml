@@ -1,0 +1,60 @@
+kind: graph-states
+version: 1
+flow: workspaces
+states:
+  browser-ready:
+    intent: A fresh graph path begins in the runner's blank browser page.
+    assert:
+    - use: blank-browser
+  primary-board-ready:
+    intent: The primary workspace board is hydrated for workspace-management actions.
+    assert:
+    - expect:
+        visible:
+          testid: board-toolbar
+  scenario-1-empty-mode-modal-creates-a-workspace-with-a-routable-boa:
+    intent: empty-mode modal creates a workspace with a routable board
+    testIntent: An operator creates an empty workspace through the modal and reaches its empty kanban board
+    terminal: true
+    assert:
+    - wait:
+        fn: "!!document.querySelector('[data-testid=board-toolbar]')"
+      intent: Wait until the workspace board is ready
+    - wait:
+        fn: |-
+          (() => {
+            const el = document.querySelector('[data-testid=empty-workspace-board]');
+            if (!el || el.offsetParent === null) {
+              window.__aftEmptyBoardStableAt = 0;
+              return false;
+            }
+            if (!window.__aftEmptyBoardStableAt) {
+              window.__aftEmptyBoardStableAt = Date.now();
+              return false;
+            }
+            return Date.now() - window.__aftEmptyBoardStableAt >= 500;
+          })()
+      intent: Wait until the new workspace empty board stays visibly laid out across a re-render window
+    - expect:
+        visible:
+          testid: empty-workspace-board
+  scenario-2-workspace-selector-switches-route-and-board-scope:
+    intent: workspace selector switches route and board scope
+    testIntent: An agent creates an issue in E2E-WS through the API, then an operator switches to e2e-ws-2 and sees the route and board scope change
+    terminal: true
+    assert:
+    - expect:
+        url: "**/ws/E2E-WS-2/kanban**"
+  scenario-3-second-workspace-deep-link-opens-scoped-empty-board:
+    intent: second workspace deep link opens scoped empty board
+    testIntent: An operator follows a direct link to the second workspace and sees its correctly scoped empty board without visiting the primary workspace first
+    terminal: true
+    assert:
+    - wait:
+        fn: "!!document.querySelector('[data-testid=board-toolbar]')"
+      intent: Wait until the workspace board is ready
+    - wait:
+        url: "**/ws/E2E-WS-2/kanban**"
+    - expect:
+        visible:
+          testid: empty-workspace-board

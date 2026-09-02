@@ -1,0 +1,72 @@
+kind: graph-steps
+version: 1
+flow: task-runner
+blocks:
+  expect-browser-url:
+    params:
+    - url
+    steps:
+    - expect:
+        url: "{{url}}"
+  blank-browser-ready:
+    steps:
+    - use: expect-browser-url
+      with:
+        url: about:blank
+  open-agents-page:
+    params: []
+    steps:
+    - open: "/ws/E2E-TR-${AFT_CASE_KEY}/agents"
+    - wait:
+        fn: |-
+          (() => {
+            const page = document.querySelector('[data-testid=agents-page]');
+            const add = Array.from(document.querySelectorAll('button'))
+              .some((b) => (b.textContent || '').trim() === '+ Add agent');
+            const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
+            const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
+            const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
+            if (!page || !settled) {
+              window.__aftAgentsPageStableSig = null;
+              window.__aftAgentsPageStableAt = 0;
+              return false;
+            }
+            if (window.__aftAgentsPageStableSig !== sig) {
+              window.__aftAgentsPageStableSig = sig;
+              window.__aftAgentsPageStableAt = Date.now();
+              return false;
+            }
+            return Date.now() - window.__aftAgentsPageStableAt >= 300;
+          })()
+      intent: Wait until the Task Runner workspace agents page is ready
+  open-create-agent-dialog:
+    params: []
+    steps:
+    - use: open-agents-page
+    - click:
+        role: button
+        name: "+ Add agent"
+        exact: true
+    - wait:
+        fn: |-
+          (() => {
+            const overlay = document.querySelector('[data-testid=create-agent-overlay]');
+            if (overlay) {
+              window.__aftCreateAgentOverlayWaitStartedAt = 0;
+              return true;
+            }
+            if (!window.__aftCreateAgentOverlayWaitStartedAt) {
+              window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
+            }
+            const add = Array.from(document.querySelectorAll('button'))
+              .some((b) => (b.textContent || '').trim() === '+ Add agent');
+            if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
+              throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
+            }
+            return false;
+          })()
+      intent: Wait until the agent creation dialog is open
+  choose-task-template:
+    steps:
+    - click:
+        testid: create-agent-template-task

@@ -23,8 +23,8 @@ invariants:
     implementation: {state: enforced}
     proofs:
       - {dimension: contract, kind: go, path: internal/backend/fleet/idempotency_test.go, selector: TestCreate_IdempotencyHeadersAndWireBody}
-      - {dimension: persistence, kind: aft, path: tests/aft/suites/issue-create-ui.test.yaml, selector: duplicate titles hit the soft-duplicate guard}
-      - {dimension: ui, kind: aft, path: tests/aft/suites/issue-create-ui.test.yaml, selector: create an issue through the New Issue modal}
+      - {dimension: persistence, kind: aft, path: tests/aft/suites/issue-create-ui.graph/states.yaml, selector: duplicate titles hit the soft-duplicate guard}
+      - {dimension: ui, kind: aft, path: tests/aft/suites/issue-create-ui.graph/states.yaml, selector: create an issue through the New Issue modal}
       - {dimension: retry, kind: go, path: internal/backend/fleet/idempotency_test.go, selector: TestCreate_ReplayedResponseStillReturnsIssue}
 
   - id: PT-ISSUE-CLOSE-001
@@ -132,7 +132,7 @@ invariants:
     proofs:
       - {dimension: contract, kind: go, path: internal/webui/app/multi_workspace_integration_test.go, selector: TestMultiWorkspace}
       - {dimension: persistence, kind: go, path: internal/webui/svcimpl/session_service_test.go, selector: TestSessionServiceSharedRuntimeCannotLeakAcrossWorkspaces}
-      - {dimension: ui, kind: aft, path: tests/aft/suites/workspaces.test.yaml, selector: switch}
+      - {dimension: ui, kind: aft, path: tests/aft/suites/workspaces.graph/states.yaml, selector: workspace selector switches route and board scope}
       - {dimension: retry, kind: go, path: internal/webui/app/terminal_auth_test.go, selector: cross}
 
   - id: PT-REVIEW-DECISION-001
@@ -160,6 +160,6 @@ invariants:
       gap: GitHub approve, request-changes, and merge execution is not configured; linked decisions return 503 before Loom mutation
     proofs:
       - {dimension: contract, kind: go, path: internal/webui/handlers/issues/review_decision_test.go, selector: TestReviewDecisionGitHubRefFailsClosedBeforeLoomMutation}
-      - {dimension: persistence, kind: aft, path: tests/aft/surface-suites/review-actions.test.yaml, selector: approving a review issue}
-      - {dimension: ui, kind: aft, path: tests/aft/surface-suites/review-actions.test.yaml, selector: requesting changes}
+      - {dimension: persistence, kind: aft, path: tests/aft/surface-suites/review-actions.graph/states.yaml, selector: approving a review issue}
+      - {dimension: ui, kind: aft, path: tests/aft/surface-suites/review-actions.graph/states.yaml, selector: requesting changes}
       - {dimension: retry, kind: go, path: internal/webui/handlers/issues/review_decision_test.go, selector: TestReviewDecisionReplaySkipsAlreadyAppliedPatch}

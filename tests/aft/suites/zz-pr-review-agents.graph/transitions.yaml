@@ -1,0 +1,378 @@
+kind: graph-transitions
+version: 1
+flow: pr-review-agents
+group: zz-pr-review-agents
+transitions:
+  open-prr-agent-list:
+    intent: An operator opens the PR Review workspace agent list.
+    actor: human
+    via: ui
+    steps:
+    - use: open-prr-agent-list
+  create-primary-agent-for-scenario-1:
+    intent: An operator creates a PR Review terminal agent from the agent templates and verifies the stored agent uses the built-in PR-review role
+    actor: human
+    via: ui
+    steps:
+    - use: create-case-primary-pr-review-agent
+      with:
+        agentName: prr-${RUN_ID:-local}
+  create-primary-agent-prerequisite:
+    intent: An operator independently creates the primary PR Review agent required by role-reuse and terminal scenarios.
+    actor: human
+    via: ui
+    steps:
+    - use: create-case-primary-pr-review-agent
+      with:
+        agentName: prr-${RUN_ID:-local}-${AFT_CASE_ID}
+  open-create-agent-dialog:
+    intent: An operator opens the agent creation dialog from the settled PR Review agent list.
+    actor: human
+    via: ui
+    steps:
+    - use: open-create-agent-dialog
+  verify-2-pr-review-template-selection-documents-the-true-default:
+    intent: An operator opening the agent templates sees Task Runner preselected and can switch to the PR Review template
+    actor: human
+    via: ui
+    steps:
+    - expect:
+        attr:
+          testid: create-agent-template-task
+          name: aria-pressed
+          equals: 'true'
+    - expect:
+        attr:
+          testid: create-agent-template-interactive-pr-review
+          name: aria-pressed
+          equals: 'false'
+    - expect:
+        attr:
+          testid: create-agent-name
+          name: placeholder
+          equals: worker
+    - click:
+        testid: create-agent-template-interactive-pr-review
+    - expect:
+        attr:
+          testid: create-agent-template-task
+          name: aria-pressed
+          equals: 'false'
+    - expect:
+        attr:
+          testid: create-agent-template-interactive-pr-review
+          name: aria-pressed
+          equals: 'true'
+    - expect:
+        attr:
+          testid: create-agent-name
+          name: placeholder
+          equals: reviewer
+    - click:
+        testid: create-agent-close
+  verify-3-interactive-prompts-expose-only-visible-templates:
+    intent: An operator sees only the published built-in interactive prompts and never sees the hidden checkout prompt as a template
+    actor: human
+    via: ui
+    steps:
+    - wait:
+        fn: document.querySelectorAll('[data-testid=create-agent-template-lead], [data-testid=create-agent-template-interactive-pr-review]').length === 2
+      intent: Wait until the modal renders exactly the visible built-in interactive templates
+    - expect:
+        visible:
+          testid: create-agent-template-lead
+    - expect:
+        visible:
+          testid: create-agent-template-interactive-pr-review
+    - expect:
+        count:
+          selector: "[data-testid=create-agent-template-interactive-pr-review-checkout]"
+          equals: 0
+    - expect:
+        visible:
+          testid: create-agent-template-custom-prompt
+    - api:
+        method: GET
+        path: "/api/workspaces/E2E-WS-PRR/interactive-prompts"
+        status: 200
+        assert:
+        - path: prompts.0.id
+          equals: lead
+        - path: prompts.1.id
+          equals: pr-review
+        - path: prompts.1.label
+          equals: PR Review
+        - path: prompts.2
+          exists: false
+      intent: An operator confirms the interactive prompt endpoint omits hidden built-ins
+    - click:
+        testid: create-agent-close
+  verify-4-prompt-list-failure-keeps-built-in-templates-visible:
+    intent: An operator whose prompt list fails to load still sees the built-in interactive templates and an honest fallback notice
+    actor: human
+    via: ui
+    steps:
+    - open: "/ws/E2E-WS-PRR/agents"
+    - wait:
+        fn: |-
+          (() => {
+            const page = document.querySelector('[data-testid=agents-page]');
+            const add = Array.from(document.querySelectorAll('button'))
+              .some((b) => (b.textContent || '').trim() === '+ Add agent');
+            const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
+            const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
+            const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
+            if (!page || !settled) {
+              window.__aftAgentsPageStableSig = null;
+              window.__aftAgentsPageStableAt = 0;
+              return false;
+            }
+            if (window.__aftAgentsPageStableSig !== sig) {
+              window.__aftAgentsPageStableSig = sig;
+              window.__aftAgentsPageStableAt = Date.now();
+              return false;
+            }
+            return Date.now() - window.__aftAgentsPageStableAt >= 300;
+          })()
+      intent: Wait until the PRR workspace agents page is ready with the prompt-list route aborted
+    - click:
+        role: button
+        name: "+ Add agent"
+        exact: true
+    - wait:
+        fn: |-
+          (() => {
+            const overlay = document.querySelector('[data-testid=create-agent-overlay]');
+            if (overlay) {
+              window.__aftCreateAgentOverlayWaitStartedAt = 0;
+              return true;
+            }
+            if (!window.__aftCreateAgentOverlayWaitStartedAt) {
+              window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
+            }
+            const add = Array.from(document.querySelectorAll('button'))
+              .some((b) => (b.textContent || '').trim() === '+ Add agent');
+            if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
+              throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
+            }
+            return false;
+          })()
+      intent: Wait until the agent creation dialog is open with the prompt request failed
+    - wait:
+        text: Prompt list unavailable; showing built-in defaults.
+    - expect:
+        visible:
+          testid: create-agent-template-lead
+    - expect:
+        visible:
+          testid: create-agent-template-interactive-pr-review
+    - expect:
+        notText: Something went wrong
+    - click:
+        testid: create-agent-close
+    routes:
+    - url: "**/api/workspaces/E2E-WS-PRR/interactive-prompts"
+      abort: true
+  exercise-5-pr-review-terminal-launch-carries-the-built-in-prompt:
+    intent: An operator opening their PR Review agent gets a mounted terminal launched with the built-in PR-review prompt
+    actor: human
+    via: ui
+    steps:
+    - open: "/ws/E2E-WS-PRR/agents/prr-${RUN_ID:-local}-${AFT_CASE_ID}"
+    - wait:
+        fn: "!!document.querySelector('[data-testid=terminal-view]')"
+      intent: Wait until the PR Review agent terminal view is ready
+    - wait:
+        fn: "!!document.querySelector('[data-testid=terminal-wrapper][data-terminal-renderer=xterm] .xterm')"
+      intent: Wait until the PR Review terminal grid mounts
+    - run: |
+        set -e
+        name="prr-${RUN_ID:-local}-${AFT_CASE_ID}"
+        # budget: terminal-launch (120s) - PR Review terminal launch spec can lag PTY spawn.
+        for i in $(seq 1 60); do
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-PRR/terminal/tabs" > "$AFT_WORK_DIR/prr-d5-tabs.json" &&
+          python3 - "$AFT_WORK_DIR/prr-d5-tabs.json" "$name" <<'PY' && exit 0
+        import json, sys
+        d = json.load(open(sys.argv[1]))
+        name = sys.argv[2]
+        tabs = d.get("data") or []
+        matches = [t for t in tabs if t.get("agent_id") == name]
+        assert matches, tabs
+        t = matches[0]
+        launch = t.get("launch") or {}
+        argv = launch.get("argv") or []
+        joined = " ".join(str(x) for x in argv)
+        env = launch.get("env") or {}
+        assert t.get("kind") == "agent", t
+        assert "lead" in joined, joined
+        assert "--prompt" in joined, joined
+        assert "builtin:pr-review" in joined, joined
+        assert env.get("LOOM_AGENT_ROLE") == "pr-review", env
+        assert env.get("LOOM_AGENT_NAME") == name, env
+        assert t.get("pty_alive") is True, t
+        PY
+          sleep 2
+        done
+        echo "PR Review launch metadata never appeared"
+        cat "$AFT_WORK_DIR/prr-d5-tabs.json" 2>/dev/null || true
+        exit 1
+      intent: An operator polls terminal tabs until the exact PR Review agent launch spec is persisted
+  exercise-6-second-pr-review-agent-reuses-the-shared-role:
+    intent: An operator creates a second PR Review agent and verifies both agents share the workspace PR-review role
+    actor: human
+    via: ui
+    steps:
+    - use: open-prr-agent-list
+    - click:
+        role: button
+        name: "+ Add agent"
+        exact: true
+    - wait:
+        fn: |-
+          (() => {
+            const overlay = document.querySelector('[data-testid=create-agent-overlay]');
+            if (overlay) {
+              window.__aftCreateAgentOverlayWaitStartedAt = 0;
+              return true;
+            }
+            if (!window.__aftCreateAgentOverlayWaitStartedAt) {
+              window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
+            }
+            const add = Array.from(document.querySelectorAll('button'))
+              .some((b) => (b.textContent || '').trim() === '+ Add agent');
+            if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
+              throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
+            }
+            return false;
+          })()
+      intent: Wait until the agent creation dialog is open
+    - click:
+        testid: create-agent-template-interactive-pr-review
+    - fill:
+        testid: create-agent-name
+        value: prr2-${RUN_ID:-local}
+    - click:
+        testid: create-agent-submit
+    - wait:
+        fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('prr2-${RUN_ID:-local}')"
+      intent: Wait until the second PR Review agent appears after submit
+    - run: |
+        set -e
+        run="${RUN_ID:-local}"
+        curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-PRR/agents" > "$AFT_WORK_DIR/prr-d6a-agents.json"
+        python3 - "$AFT_WORK_DIR/prr-d6a-agents.json" "prr-$run-$AFT_CASE_ID" "prr2-$run" <<'PY'
+        import json, sys
+        d = json.load(open(sys.argv[1]))
+        data = d.get("data", d)
+        agents = data.get("agents") if isinstance(data, dict) else data
+        by_name = {a.get("name"): a for a in agents or []}
+        for name in sys.argv[2:]:
+            assert name in by_name, agents
+            assert by_name[name].get("role_name") == "pr-review", by_name[name]
+        PY
+      intent: An operator's readback confirms both modal-created PR Review agents reuse the PR-review role
+  exercise-7-conflicting-prompt-cannot-reuse-the-pr-review-role:
+    intent: An API client that tries to reuse the PR-review role with a different prompt receives the documented role-conflict error
+    actor: api-client
+    via: api
+    steps:
+    - api:
+        method: POST
+        path: "/api/workspaces/E2E-WS-PRR/agents"
+        body:
+          name: pr-review
+          role_name: pr-review
+          kind: interactive
+          prompt: totally different PR Review prompt ${RUN_ID:-local}
+          auto: false
+          backend: codex
+        status: 400
+        assert:
+        - path: kind
+          equals: validation_error
+        - path: error
+          contains: already exists with a different prompt
+      intent: An API client probes the shared PR Review role conflict semantics
+  exercise-8-unknown-built-in-prompt-fails-visibly-at-terminal-launch:
+    intent: An operator whose interactive agent names an unknown built-in prompt sees the terminal report the prompt-loading error while the hidden checkout prompt remains API-accepted
+    actor: human
+    via: ui
+    steps:
+    - api:
+        method: POST
+        path: "/api/workspaces/E2E-WS-PRR/agents"
+        body:
+          name: prrbad-${RUN_ID:-local}
+          role_name: prrbad-${RUN_ID:-local}
+          kind: interactive
+          prompt_file: builtin:not-a-prompt
+          auto: false
+          backend: codex
+        status: 201
+        assert:
+        - path: name
+          equals: prrbad-${RUN_ID:-local}
+        - path: role_name
+          equals: prrbad-${RUN_ID:-local}
+      intent: An API client provisions an interactive agent whose role stores an unknown built-in prompt
+    - open: "/ws/E2E-WS-PRR/agents/prrbad-${RUN_ID:-local}"
+    - wait:
+        fn: "!!document.querySelector('[data-testid=terminal-wrapper][data-terminal-renderer=xterm] .xterm')"
+      intent: Wait until the bad-prompt agent terminal grid mounts
+    - wait:
+        fn: |-
+          (() => {
+            const wrapper = document.querySelector('[data-testid=terminal-wrapper]');
+            if (!wrapper) return false;
+            const rows = Array.from(wrapper.querySelectorAll('.term-row')).map((el) => el.textContent || '').join('\n');
+            const text = rows || wrapper.textContent || '';
+            return text.includes('Error loading terminal prompt:') &&
+              text.includes('unknown built-in interactive prompt');
+          })()
+      intent: Wait until the bad built-in prompt error is visible in the surviving terminal
+    - expect:
+        notText: Something went wrong
+    - run: |
+        set -e
+        name="prrbad-${RUN_ID:-local}"
+        # budget: terminal-launch (120s) - PR Review launch argv appears after terminal tab creation.
+        for i in $(seq 1 60); do
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-PRR/terminal/tabs" > "$AFT_WORK_DIR/prr-d20-tabs.json" &&
+          python3 - "$AFT_WORK_DIR/prr-d20-tabs.json" "$name" <<'PY' && exit 0
+        import json, sys
+        d = json.load(open(sys.argv[1]))
+        name = sys.argv[2]
+        tabs = d.get("data") or []
+        matches = [t for t in tabs if t.get("agent_id") == name]
+        assert matches, tabs
+        t = matches[0]
+        launch = t.get("launch") or {}
+        argv = launch.get("argv") or []
+        joined = " ".join(str(x) for x in argv)
+        assert t.get("kind") == "agent", t
+        assert "builtin:not-a-prompt" in joined, joined
+        assert t.get("pty_alive") is True, t
+        PY
+          sleep 2
+        done
+        echo "bad-prompt launch metadata never appeared"
+        cat "$AFT_WORK_DIR/prr-d20-tabs.json" 2>/dev/null || true
+        exit 1
+      intent: An operator polls terminal tabs until the bad-prompt launch spec is persisted
+    - api:
+        method: POST
+        path: "/api/workspaces/E2E-WS-PRR/agents"
+        body:
+          name: prrhidden-${RUN_ID:-local}
+          role_name: prrhidden-${RUN_ID:-local}
+          kind: interactive
+          prompt_file: builtin:pr-review-checkout
+          auto: false
+          backend: codex
+        status: 201
+        assert:
+        - path: name
+          equals: prrhidden-${RUN_ID:-local}
+        - path: role_name
+          equals: prrhidden-${RUN_ID:-local}
+      intent: An API client confirms the hidden checkout built-in prompt is accepted at create time

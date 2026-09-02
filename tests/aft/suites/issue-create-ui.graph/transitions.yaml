@@ -1,0 +1,171 @@
+kind: graph-transitions
+version: 1
+flow: issue-create-ui
+group: issue-creation
+
+transitions:
+  open-board:
+    intent: A human follows the canonical workspace Kanban URL.
+    actor: human
+    via: ui
+    steps:
+      - use: open-workspace-board
+
+  open-blank-title-form:
+    intent: A human opens the New Issue form without entering a title.
+    actor: human
+    via: ui
+    steps:
+      - use: open-new-issue-form
+
+  open-basic-create-form:
+    intent: A human lets first-session hydration settle before opening the New Issue form.
+    actor: human
+    via: ui
+    steps:
+      - wait: { load: networkidle }
+      - use: open-new-issue-form
+
+  open-rich-create-form:
+    intent: A human opens the New Issue form for a metadata-rich creation path.
+    actor: human
+    via: ui
+    steps:
+      - use: open-new-issue-form
+
+  create-basic-issue:
+    intent: A human submits a basic issue and an operator verifies its durable creation record.
+    actor: human
+    via: ui
+    steps:
+      - fill: { testid: create-issue-title, value: "ui created ${RUN_ID:-local}" }
+      - click: { testid: create-issue-submit }
+      - wait: { text: ui created }
+      - expect:
+          count:
+            selector: "section[data-status=ready] article[aria-label*='ui created ${RUN_ID:-local}']"
+            equals: 1
+      - run: >-
+          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues?limit=100"
+          | python3 -c "import os,sys,json,urllib.request; base=os.environ['AFT_BASE_URL']; ws=os.environ.get('AFT_WS','E2E-WS'); title='ui created '+os.environ['RUN_ID']; issues=json.load(sys.stdin)['data']; matches=[i for i in issues if i.get('title')==title]; assert len(matches)==1, matches; issue=matches[0]; events=json.load(urllib.request.urlopen(f'{base}/api/workspaces/{ws}/issues/{issue[\"id\"]}/events'))['data']; creates=[e for e in events if e.get('event_type')=='issue.created']; assert len(creates)==1, events"
+        intent: A human author's readback confirms one created issue and one creation event
+
+  create-full-field-issue:
+    intent: A human creates a deferred bug with a description and verifies it after reload.
+    actor: human
+    via: ui
+    steps:
+      - fill: { testid: create-issue-title, value: "ui-full-field-${RUN_ID:-local}" }
+      - select: { testid: create-issue-type, value: bug }
+      - select: { testid: create-issue-status, value: deferred }
+      - fill: { testid: create-issue-description, value: "full-field description ${RUN_ID:-local}" }
+      - click: { testid: create-issue-submit }
+      - wait: { text: "ui-full-field-${RUN_ID:-local}" }
+      - expect: { visible: { testid: issue-detail-panel } }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=metadata-type]')?.textContent?.includes('Bug')
+        intent: Wait until the detail panel renders the saved Bug type
+      - expect: { text: "full-field description ${RUN_ID:-local}" }
+      - run: >-
+          issue_id=$(curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues?status=deferred&limit=100"
+          | python3 -c "import os,sys,json; data=json.load(sys.stdin)['data']; title='ui-full-field-' + os.environ['RUN_ID']; matches=[issue for issue in data if issue.get('title') == title]; assert matches, data; print(matches[0]['id'])");
+          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$issue_id"
+          | python3 -c "import os,sys,json; issue=json.load(sys.stdin)['data']; assert issue.get('issue_type') == 'bug', issue; assert issue.get('description') == 'full-field description ' + os.environ['RUN_ID'], issue; assert issue.get('status') == 'deferred', issue"
+        intent: A human author's readback confirms the deferred bug description persisted
+      - reload: true
+
+  exercise-soft-duplicate-guard:
+    intent: A human follows the warning to the original issue, then explicitly creates a distinct duplicate.
+    actor: human
+    via: ui
+    steps:
+      - fill: { testid: create-issue-title, value: "ui-duplicate-${RUN_ID:-local}" }
+      - click: { testid: create-issue-submit }
+      - wait:
+          fn: >-
+            document.querySelectorAll("section[data-status=ready] article[aria-label*='ui-duplicate-${RUN_ID:-local}']").length === 1
+        intent: Wait until the board renders exactly one ready issue card
+      - api:
+          method: GET
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues?limit=100"
+          save:
+            - from: data
+              as: duplicateFirstIssues
+        intent: An operator reads back the first human-created duplicate candidate
+      - run: >-
+          python3 -c 'import json,os; data=json.load(open(os.environ["AFT_WORK_DIR"]+"/duplicateFirstIssues")); title="ui-duplicate-"+os.environ["RUN_ID"]; matches=[i for i in data if i.get("title")==title]; assert len(matches)==1, matches; open(os.environ["AFT_WORK_DIR"]+"/duplicateFirstId","w").write(matches[0]["id"]+"\n")'
+        intent: An operator's readback records the sole first issue for later identity comparison
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: Wait until the workspace board is ready
+      - click: { testid: new-issue-button }
+      - expect: { visible: { testid: create-issue-title } }
+      - fill: { testid: create-issue-title, value: "ui-duplicate-${RUN_ID:-local}" }
+      - click: { testid: create-issue-submit }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=soft-duplicate-notice]')
+        intent: Wait until the duplicate-title warning appears
+      - expect: { visible: { testid: soft-duplicate-notice } }
+      - expect: { text: An identical issue was created moments ago }
+      - expect: { visible: { testid: soft-duplicate-show-existing } }
+      - expect: { visible: { testid: soft-duplicate-create-anyway } }
+      - api:
+          method: GET
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues?limit=100"
+          save:
+            - from: data
+              as: duplicateGuardedIssues
+        intent: An operator reads back issues after the guarded duplicate submission
+      - run: >-
+          python3 -c 'import json,os; title="ui-duplicate-"+os.environ["RUN_ID"]; first=open(os.environ["AFT_WORK_DIR"]+"/duplicateFirstId").read().strip(); matches=[i for i in json.load(open(os.environ["AFT_WORK_DIR"]+"/duplicateGuardedIssues")) if i.get("title")==title]; assert len(matches)==1, matches; assert matches[0]["id"]==first, (matches,first)'
+        intent: An operator's readback confirms the duplicate guard preserved the original issue identity
+      - click: { testid: soft-duplicate-show-existing }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open'
+        intent: Wait until Show existing opens the issue detail panel
+      - expect: { visible: { testid: issue-header } }
+      - expect: { text: "ui-duplicate-${RUN_ID:-local}" }
+      - run: >-
+          expected=$(cat "$AFT_WORK_DIR/duplicateFirstId");
+          for i in 1 2 3; do
+          actual=$(agent-browser --session "$AFT_SESSION" get text "[data-testid=issue-id]" 2>/dev/null || true);
+          [ "$actual" = "$expected" ] && exit 0;
+          sleep 1;
+          done;
+          echo "Show existing opened '$actual', expected '$expected'"; exit 1
+        intent: A human author's visible issue id confirms Show existing opened the original issue identity
+      - click: { testid: header-close-button }
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=issue-detail-panel]') ||
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'closed'
+        intent: Wait until the original issue detail panel closes
+      - click: { testid: new-issue-button }
+      - expect: { visible: { testid: create-issue-title } }
+      - fill: { testid: create-issue-title, value: "ui-duplicate-${RUN_ID:-local}" }
+      - click: { testid: create-issue-submit }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=soft-duplicate-notice]')
+        intent: Wait until the repeated duplicate-title warning appears
+      - expect: { visible: { testid: soft-duplicate-create-anyway } }
+      - click: { testid: soft-duplicate-create-anyway }
+      - wait:
+          fn: >-
+            document.querySelectorAll("section[data-status=ready] article[aria-label*='ui-duplicate-${RUN_ID:-local}']").length === 2
+        intent: Wait until the board renders exactly two ready issue cards
+      - api:
+          method: GET
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues?limit=100"
+          save:
+            - from: data
+              as: duplicateForcedIssues
+        intent: An operator reads back issues after choosing Create anyway
+      - run: >-
+          python3 -c 'import json,os; title="ui-duplicate-"+os.environ["RUN_ID"]; first=open(os.environ["AFT_WORK_DIR"]+"/duplicateFirstId").read().strip(); matches=[i for i in json.load(open(os.environ["AFT_WORK_DIR"]+"/duplicateForcedIssues")) if i.get("title")==title]; ids={i["id"] for i in matches}; assert len(matches)==2 and len(ids)==2 and first in ids, matches'
+        intent: An operator's readback confirms Create anyway produced two distinct issue identities

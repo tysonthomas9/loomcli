@@ -848,6 +848,7 @@ if [[ -n "${AFT_SUITES+x}" ]]; then
     AFT_SUITE_PATHS=("$AFT_SUITES")
 else
     AFT_SUITE_PATHS=("$SCRIPT_DIR/suites" "$SCRIPT_DIR/surface-suites")
+    node "$SCRIPT_DIR/scripts/validate-default-graph-corpus.mjs" "$AFT_DIR" "$SCRIPT_DIR"
 fi
 
 # 15s step timeout (aft default is 8s): the Loom SPA leans on SSE + polling stores,

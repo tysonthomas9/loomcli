@@ -1,0 +1,56 @@
+kind: graph
+version: 1
+classification:
+  area: agents
+  feature: agent-lifecycle
+  surface: mixed
+  purpose: journey
+flow: agent-flow
+suite: zz-agent-flow
+intent: Each independently replayed path preserves one legacy zz-agent-flow scenario while shared source steps form reviewable trunks.
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+fixtureScope: path
+setup: |
+  set -e
+  test -n "$AFT_CASE_ID"
+  printf '%s' "$AFT_CASE_KEY" | grep -Eq '^[A-Z0-9]{1,4}-[A-F0-9]{8}$'
+  workspace="E2E-AF-${AFT_CASE_KEY}"
+  "$AFT_TESTS_DIR/scripts/clean-test-workspace.sh" "$workspace"
+  case_dir="$AFT_WORK_DIR/cases/af-$AFT_CASE_KEY"
+  rm -rf "$case_dir"
+  mkdir -p "$case_dir"
+  d="$case_dir/agent-repo"
+  mkdir -p "$d"
+  git -C "$d" init -q
+  git -C "$d" -c user.email=e2e@x -c user.name=e2e commit --allow-empty -m init -q
+  python3 -c 'import json,sys; print(json.dumps({"name":sys.argv[1],"type":"empty","repos":[sys.argv[2]]}))' "$workspace" "$d" > "$AFT_WORK_DIR/agent-workspace.json"
+  curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/agent-workspace.json" > "$AFT_WORK_DIR/agent-workspace.resp.json"
+  python3 - "$AFT_WORK_DIR/agent-workspace.resp.json" "$workspace" <<'PY'
+  import json, sys
+  data = json.load(open(sys.argv[1])).get("data") or {}
+  assert data.get("id") == sys.argv[2], data
+  PY
+teardown: |
+  set +e
+  AFT_WS=E2E-AF-${AFT_CASE_KEY} "$AFT_TESTS_DIR/scripts/close-open-issues.sh"
+  "$AFT_TESTS_DIR/scripts/clean-test-workspace.sh" E2E-AF-${AFT_CASE_KEY}
+imports:
+- shared-steps.yaml
+- states.yaml
+- transitions.yaml
+start: browser-ready
+graph:
+  browser-ready:
+    provision-nova: nova-ready
+    complete-epic-run-for-completion: completion-epic-run-ready
+  nova-ready:
+    complete-epic-run-for-session: session-epic-run-ready
+    run-scenario-1-created-agent-definition-appears-in-agen: scenario-1-created-agent-definition-appears-in-agents-page-
+    run-scenario-3-agent-diff-tab-opens-changed-file: scenario-3-agent-diff-tab-opens-changed-file
+    run-scenario-5-create-second-agent-from-modal-without-s: scenario-5-create-second-agent-from-modal-without-starting-
+  completion-epic-run-ready:
+    run-scenario-2-epic-runner-drives-a-stub-agent-to-compl: scenario-2-epic-runner-drives-a-stub-agent-to-complete-a-ta
+  session-epic-run-ready:
+    run-scenario-4-session-detail-transcript-and-diff-tabs-: scenario-4-session-detail-transcript-and-diff-tabs-render
+coverage:
+  strategy: transition

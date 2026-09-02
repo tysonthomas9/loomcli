@@ -1,0 +1,275 @@
+kind: graph-transitions
+version: 1
+flow: agent-flow
+group: zz-agent-flow
+transitions:
+  provision-nova:
+    intent: An operator provisions nova through the mounted agent creation flow.
+    actor: human
+    via: ui
+    steps:
+    - use: provision-nova
+  run-scenario-1-created-agent-definition-appears-in-agen:
+    intent: An operator creates a Lead agent through CreateAgentModal, observes it in the agents rail and monitor, and refreshes a runtime-seeded archive log
+    actor: human
+    via: ui
+    steps:
+    - open: "/ws/E2E-AF-${AFT_CASE_KEY}/agents/nova"
+    - wait:
+        fn: |-
+          (() => {
+            const page = document.querySelector('[data-testid=agents-page]');
+            const add = Array.from(document.querySelectorAll('button'))
+              .some((b) => (b.textContent || '').trim() === '+ Add agent');
+            const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
+            const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
+            const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
+            if (!page || !settled) {
+              window.__aftAgentsPageStableSig = null;
+              window.__aftAgentsPageStableAt = 0;
+              return false;
+            }
+            if (window.__aftAgentsPageStableSig !== sig) {
+              window.__aftAgentsPageStableSig = sig;
+              window.__aftAgentsPageStableAt = Date.now();
+              return false;
+            }
+            return Date.now() - window.__aftAgentsPageStableAt >= 300;
+          })()
+      intent: Wait until the agents page is ready
+    - expect:
+        url: "**/ws/*/agents/nova**"
+    - expect:
+        visible:
+          testid: agents-page
+    - wait:
+        fn: document.body.textContent.includes('nova')
+      intent: Wait until nova appears in the current agent surface
+    - click:
+        role: button
+        name: Logs
+        exact: true
+    - wait:
+        fn: "!!document.querySelector('[data-testid=log-viewer]')"
+      intent: Wait until the archived agent log viewer is ready
+    - expect:
+        visible:
+          testid: archive-empty
+    - expect:
+        text: No logs available for this agent yet.
+    - run: printf '%s\n' "nova lead log line one" "nova lead AFT-LOG-MARKER $RUN_ID" | LOOM_TESTSUPPORT=1 LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" daemon seed-log --workspace E2E-AF-${AFT_CASE_KEY} --agent nova --content -
+      intent: The local runtime seeds nova with an archived log marker
+    - click:
+        testid: log-refresh-button
+    - wait:
+        text: AFT-LOG-MARKER
+    - expect:
+        visible:
+          testid: terminal-container
+    - open: "/ws/E2E-AF-${AFT_CASE_KEY}/monitor"
+    - wait:
+        fn: "!!document.querySelector('[data-testid=agent-activity-panel]')"
+      intent: Wait until the agent activity panel is ready
+    - wait:
+        ms: 5500
+    - reload: true
+  run-scenario-2-epic-runner-drives-a-stub-agent-to-compl:
+    intent: An orchestration client triggers the epic-runner workflow so a stub-backed agent claims and closes its task while an operator observes the board and recorded session
+    actor: api-client
+    via: api
+    steps:
+    - api:
+        method: GET
+        path: "/api/workspaces/E2E-AF-${AFT_CASE_KEY}/tasks/${var:agentTaskId}/sessions"
+        assert:
+        - path: data.sessions.0
+          exists: true
+      intent: An operator confirms the completed task recorded at least one session
+  run-scenario-3-agent-diff-tab-opens-changed-file:
+    intent: An agent change seeded through the runtime worktree flow appears to an operator in nova's Diff tab and opens as a per-file patch
+    actor: human
+    via: ui
+    steps:
+    - run: file="aft-diff-${RUN_ID:-local}.txt"; printf '%s\n' "AFT-DIFF-MARKER ${RUN_ID:-local}" | LOOM_TESTSUPPORT=1 LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" daemon seed-worktree --workspace E2E-AF-${AFT_CASE_KEY} --agent nova --file "$file" --content - --message "aft diff ${RUN_ID:-local}"; printf '%s\n' "$file" > "$AFT_WORK_DIR/agent-diff-file.name"
+      intent: The local runtime seeds nova's worktree with one changed file
+    - open: "/ws/E2E-AF-${AFT_CASE_KEY}/agents/nova"
+    - wait:
+        fn: |-
+          (() => {
+            const page = document.querySelector('[data-testid=agents-page]');
+            const add = Array.from(document.querySelectorAll('button'))
+              .some((b) => (b.textContent || '').trim() === '+ Add agent');
+            const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
+            const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
+            const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
+            if (!page || !settled) {
+              window.__aftAgentsPageStableSig = null;
+              window.__aftAgentsPageStableAt = 0;
+              return false;
+            }
+            if (window.__aftAgentsPageStableSig !== sig) {
+              window.__aftAgentsPageStableSig = sig;
+              window.__aftAgentsPageStableAt = Date.now();
+              return false;
+            }
+            return Date.now() - window.__aftAgentsPageStableAt >= 300;
+          })()
+      intent: Wait until the agents page is ready
+    - click:
+        role: button
+        name: Diff
+        exact: true
+    - run: file="$(cat "$AFT_WORK_DIR/agent-diff-file.name")"; for i in $(seq 1 10); do curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AF-${AFT_CASE_KEY}/agents/nova/diff/files?to=HEAD" > "$AFT_WORK_DIR/agent-diff-files.json" && python3 -c 'import json,sys; f=sys.argv[2]; d=json.load(open(sys.argv[1])); files=(d.get("data") or {}).get("files") or []; assert any(x.get("path")==f for x in files), files' "$AFT_WORK_DIR/agent-diff-files.json" "$file" && exit 0; sleep 1; done; echo "agent diff file never appeared"; exit 1
+      intent: An operator waits until nova's seeded changed file appears in Diff
+    - wait:
+        text: 1 file changed
+    - click:
+        role: button
+        name: aft-diff-${RUN_ID:-local}.txt
+  run-scenario-4-session-detail-transcript-and-diff-tabs-:
+    intent: A reviewer expands an open epic's completed history, opens the closed task, and inspects its recorded transcript and unavailable-diff state in the Runs tab
+    actor: human
+    via: ui
+    steps:
+    - run: curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AF-${AFT_CASE_KEY}/runs/$(cat "$AFT_WORK_DIR/agentRunId")" > "$AFT_WORK_DIR/agent-run-detail.json"
+      intent: A reviewer reads back the completed epic-runner record for the later session scenario
+    - run: task="$(cat "$AFT_WORK_DIR/agentTaskId")"; curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AF-${AFT_CASE_KEY}/tasks/$task/sessions" > "$AFT_WORK_DIR/agent-sessions.json"; python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); data=d.get("data",{}); sessions=data.get("sessions") if isinstance(data,dict) else data; assert sessions, d; s=sessions[0]; assert s.get("session_id"), s; assert s.get("has_transcript") is True, s; assert s.get("has_diff") is False, s; assert s.get("files_changed")==0, s; print(s["session_id"])' "$AFT_WORK_DIR/agent-sessions.json" > "$AFT_WORK_DIR/agentSessionId"
+      intent: A reviewer records the completed task session and its artifact availability
+    - open: "/ws/E2E-AF-${AFT_CASE_KEY}/agents/nova"
+    - wait:
+        fn: |-
+          (() => {
+            const page = document.querySelector('[data-testid=agents-page]');
+            const add = Array.from(document.querySelectorAll('button'))
+              .some((b) => (b.textContent || '').trim() === '+ Add agent');
+            const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
+            const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
+            const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
+            if (!page || !settled) {
+              window.__aftAgentsPageStableSig = null;
+              window.__aftAgentsPageStableAt = 0;
+              return false;
+            }
+            if (window.__aftAgentsPageStableSig !== sig) {
+              window.__aftAgentsPageStableSig = sig;
+              window.__aftAgentsPageStableAt = Date.now();
+              return false;
+            }
+            return Date.now() - window.__aftAgentsPageStableAt >= 300;
+          })() && document.body.textContent.includes('agent-flow epic')
+      intent: Wait until the agents page renders the completed epic history
+    - run: epic="$(cat "$AFT_WORK_DIR/agentEpicId")"; for i in 1 2 3; do agent-browser --session "$AFT_SESSION" find role button click --name "Expand epic $epic" && exit 0 || true; sleep 1; done; echo "epic expand control never clicked"; exit 1
+      intent: A reviewer retries expanding the epic until completed child history is visible
+    - run: task="$(cat "$AFT_WORK_DIR/agentTaskId")"; for i in 1 2 3; do agent-browser --session "$AFT_SESSION" find role button click --name "$task" && exit 0 || true; sleep 1; done; echo "closed task card never clicked"; exit 1
+      intent: A reviewer retries opening the completed task from epic history
+    - wait:
+        fn: document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open'
+      intent: Wait until the selected issue detail panel is open
+    - click:
+        role: tab
+        name: Runs
+        exact: true
+    - wait:
+        fn: "!!document.querySelector('[data-testid=sessions-tab]') && !!document.querySelector('[data-testid=session-timeline]')"
+      intent: Wait until the Runs tab renders the session timeline
+    - run: sid="$(cat "$AFT_WORK_DIR/agentSessionId")"; agent-browser --session "$AFT_SESSION" click "[data-testid='session-row-$sid']"
+      intent: A reviewer opens the recorded session from the Runs timeline
+    - wait:
+        fn: "!!document.querySelector('[data-testid=session-detail-view]')"
+      intent: Wait until the selected session detail is ready
+    - expect:
+        visible:
+          testid: session-inner-tab-transcript
+    - expect:
+        visible:
+          testid: session-transcript
+    - expect:
+        enabled:
+          testid: session-inner-tab-diff
+          equals: false
+    - expect:
+        attr:
+          testid: session-inner-tab-diff
+          name: title
+          equals: No diff available
+    - expect:
+        count:
+          testid: session-diff
+          equals: 0
+    - run: task="$(cat "$AFT_WORK_DIR/agentTaskId")"; sid="$(cat "$AFT_WORK_DIR/agentSessionId")"; detail_code="$(curl -sS -o "$AFT_WORK_DIR/agent-session-detail.json" -w "%{http_code}" "$AFT_BASE_URL/api/workspaces/E2E-AF-${AFT_CASE_KEY}/tasks/$task/sessions/$sid")"; transcript_code="$(curl -sS -o "$AFT_WORK_DIR/agent-session-transcript.json" -w "%{http_code}" "$AFT_BASE_URL/api/workspaces/E2E-AF-${AFT_CASE_KEY}/tasks/$task/sessions/$sid/transcript")"; diff_code="$(curl -sS -o "$AFT_WORK_DIR/agent-session-diff.resp.json" -w "%{http_code}" "$AFT_BASE_URL/api/workspaces/E2E-AF-${AFT_CASE_KEY}/tasks/$task/sessions/$sid/diff")"; python3 -c 'import json,sys; detail=json.load(open(sys.argv[1])); transcript=json.load(open(sys.argv[2])); no_diff=json.load(open(sys.argv[3])); assert sys.argv[4]=="200", (sys.argv[4],detail); assert sys.argv[5]=="200", (sys.argv[5],transcript); assert sys.argv[6]=="404", (sys.argv[6],no_diff); assert (detail.get("data") or {}).get("session_id")==sys.argv[7], detail; assert transcript.get("success") is True and (transcript.get("data") or {}).get("entries"), transcript; assert no_diff.get("success") is False and no_diff.get("error")=="diff not found", no_diff' "$AFT_WORK_DIR/agent-session-detail.json" "$AFT_WORK_DIR/agent-session-transcript.json" "$AFT_WORK_DIR/agent-session-diff.resp.json" "$detail_code" "$transcript_code" "$diff_code" "$sid"
+      intent: A reviewer reads back the session detail, transcript, and expected unavailable diff contract
+  run-scenario-5-create-second-agent-from-modal-without-s:
+    intent: An operator creates a second task agent through CreateAgentModal, deselects the preselected repo for workspace-wide scope, and verifies it exists without starting it
+    actor: human
+    via: ui
+    steps:
+    - open: "/ws/E2E-AF-${AFT_CASE_KEY}/agents/nova"
+    - wait:
+        fn: |-
+          (() => {
+            const page = document.querySelector('[data-testid=agents-page]');
+            const add = Array.from(document.querySelectorAll('button'))
+              .some((b) => (b.textContent || '').trim() === '+ Add agent');
+            const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
+            const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
+            const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
+            if (!page || !settled) {
+              window.__aftAgentsPageStableSig = null;
+              window.__aftAgentsPageStableAt = 0;
+              return false;
+            }
+            if (window.__aftAgentsPageStableSig !== sig) {
+              window.__aftAgentsPageStableSig = sig;
+              window.__aftAgentsPageStableAt = Date.now();
+              return false;
+            }
+            return Date.now() - window.__aftAgentsPageStableAt >= 300;
+          })()
+      intent: Wait until the agents page is ready
+    - click:
+        role: button
+        name: "+ Add agent"
+        exact: true
+    - wait:
+        fn: |-
+          (() => {
+            const overlay = document.querySelector('[data-testid=create-agent-overlay]');
+            if (overlay) {
+              window.__aftCreateAgentOverlayWaitStartedAt = 0;
+              return true;
+            }
+            if (!window.__aftCreateAgentOverlayWaitStartedAt) {
+              window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
+            }
+            const add = Array.from(document.querySelectorAll('button'))
+              .some((b) => (b.textContent || '').trim() === '+ Add agent');
+            if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
+              throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
+            }
+            return false;
+          })()
+      intent: Wait until the agent creation dialog is open
+    - click:
+        testid: create-agent-template-task
+    - fill:
+        testid: create-agent-name
+        value: iris-${RUN_ID:-local}
+    - click:
+        selector: "[data-testid='create-agent-repo-chips'] button"
+        first: true
+    - click:
+        testid: create-agent-submit
+    - run: for i in $(seq 1 10); do curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AF-${AFT_CASE_KEY}/agents" > "$AFT_WORK_DIR/agent-list-after-iris.json" && python3 -c 'import json,sys; name=sys.argv[2]; d=json.load(open(sys.argv[1])); data=d.get("data",d); agents=data.get("agents") if isinstance(data,dict) else data; assert any(a.get("name")==name for a in agents), agents' "$AFT_WORK_DIR/agent-list-after-iris.json" "iris-${RUN_ID:-local}" && exit 0; sleep 1; done; echo "iris agent never appeared"; exit 1
+      intent: An operator's readback waits for the second agent definition to persist
+  complete-epic-run-for-completion:
+    intent: An orchestration client creates and completes the standalone stub-backed epic run.
+    actor: api-client
+    via: api
+    steps:
+    - use: complete-epic-run
+  complete-epic-run-for-session:
+    intent: An orchestration client creates and completes the epic run required by the session-detail path.
+    actor: api-client
+    via: api
+    steps:
+    - use: complete-epic-run

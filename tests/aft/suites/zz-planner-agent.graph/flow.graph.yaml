@@ -1,0 +1,83 @@
+kind: graph
+version: 1
+classification:
+  area: agents
+  feature: planner-agents
+  surface: mixed
+  purpose: journey
+flow: planner-agent
+suite: zz-planner-agent
+intent: Each independently replayed path preserves one legacy zz-planner-agent scenario while shared source steps form reviewable trunks.
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+fixtureScope: path
+setup: |
+  set -e
+  test -n "$AFT_CASE_ID"
+  printf '%s' "$AFT_CASE_KEY" | grep -Eq '^[A-Z0-9]{1,4}-[A-F0-9]{8}$'
+  run="${RUN_ID:-local}"
+  "$AFT_TESTS_DIR/scripts/clean-test-workspace.sh" E2E-PL-${AFT_CASE_KEY}
+  "$AFT_TESTS_DIR/scripts/clean-test-workspace.sh" E2E-PE-${AFT_CASE_KEY}
+  case_dir="$AFT_WORK_DIR/cases/pl-$AFT_CASE_KEY"
+  rm -rf "$case_dir"
+  repo="$case_dir/plan-repo"
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit --allow-empty -m init -q
+  python3 -c 'import json,sys; print(json.dumps({"name":sys.argv[1],"type":"empty","repos":[sys.argv[2]]}))' "E2E-PL-${AFT_CASE_KEY}" "$repo" > "$AFT_WORK_DIR/plan-workspace.json"
+  curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/plan-workspace.json" > "$AFT_WORK_DIR/plan-workspace.resp.json"
+  python3 - "$AFT_WORK_DIR/plan-workspace.resp.json" "E2E-PL-${AFT_CASE_KEY}" <<'PY'
+  import json, sys
+  data = json.load(open(sys.argv[1])).get("data") or {}
+  assert data.get("id") == sys.argv[2], data
+  PY
+  python3 - "$run" > "$AFT_WORK_DIR/plan-lead-companion.json" <<'PY'
+  import json, sys
+  run = sys.argv[1]
+  print(json.dumps({
+      "name": f"lead-{run}",
+      "role_name": "lead",
+      "auto": False,
+      "cross_repo": True,
+      "repos": [],
+      "backend": "codex",
+  }))
+  PY
+  curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-PL-${AFT_CASE_KEY}/agents" \
+    -H "Content-Type: application/json" \
+    -d @"$AFT_WORK_DIR/plan-lead-companion.json" \
+    > "$AFT_WORK_DIR/plan-lead-companion.resp.json"
+teardown: |
+  set +e
+  run="${RUN_ID:-local}"
+  AFT_WS=E2E-PL-${AFT_CASE_KEY} "$AFT_TESTS_DIR/scripts/close-open-issues.sh"
+  for agent in "planner-${RUN_ID:-local}" "planner-be-${RUN_ID:-local}" "planner-scope-${RUN_ID:-local}" "planner-task-${RUN_ID:-local}" "lead-${RUN_ID:-local}"; do
+    curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-PL-${AFT_CASE_KEY}/agents/$agent" >/dev/null || true
+  done
+  "$AFT_TESTS_DIR/scripts/clean-test-workspace.sh" E2E-PE-${AFT_CASE_KEY}
+  "$AFT_TESTS_DIR/scripts/clean-test-workspace.sh" E2E-PL-${AFT_CASE_KEY}
+imports:
+- shared-steps.yaml
+- states.yaml
+- transitions.yaml
+start: browser-ready
+graph:
+  browser-ready:
+    open-planner-dialog: planner-dialog-open
+    run-scenario-6-repo-less-planner-creation-shows-promise: scenario-6-repo-less-planner-creation-shows-promised-scope-
+  planner-dialog-open:
+    choose-planner-template: planner-template-selected
+  planner-template-selected:
+    run-scenario-2-invalid-planner-name-keeps-create-disabl: scenario-2-invalid-planner-name-keeps-create-disabled
+    run-scenario-4-backend-dropdown-persists-on-planner: scenario-4-backend-dropdown-persists-on-planner
+    run-scenario-5-repo-chip-deselect-makes-planner-workspa: scenario-5-repo-chip-deselect-makes-planner-workspace-scope
+    create-default-planner: default-planner-ready
+  default-planner-ready:
+    run-scenario-1-planner-template-creates-plan-role-agent: scenario-1-planner-template-creates-plan-role-agent
+    run-scenario-3-duplicate-planner-name-surfaces-server-c: scenario-3-duplicate-planner-name-surfaces-server-conflict
+    run-scenario-7-planner-appears-in-rail-background-group: scenario-7-planner-appears-in-rail-background-group-and-mon
+    run-scenario-8-modal-created-planner-claims-no-work-wit: scenario-8-modal-created-planner-claims-no-work-without-sup
+    run-scenario-9-assigned-in-progress-planner-renders-act: scenario-9-assigned-in-progress-planner-renders-active-task
+    run-scenario-10-stopped-planner-shows-no-terminal-empty-: scenario-10-stopped-planner-shows-no-terminal-empty-state
+    run-scenario-11-planner-can-be-deleted-and-recreated: scenario-11-planner-can-be-deleted-and-recreated
+coverage:
+  strategy: transition

@@ -1,0 +1,431 @@
+kind: graph-steps
+version: 1
+flow: custom-prompts
+blocks:
+  case-02-empty-custom-prompt-keeps-submit-disabled:
+    steps:
+      - click:
+          testid: create-agent-template-custom-prompt
+      - fill:
+          testid: create-agent-name
+          value: cust-empty-${RUN_ID:-local}
+      - expect:
+          enabled:
+            testid: create-agent-submit
+            equals: false
+      - fill:
+          testid: create-agent-interactive-prompt
+          value: x
+      - expect:
+          enabled:
+            testid: create-agent-submit
+            equals: true
+      - click:
+          testid: create-agent-interactive-prompt
+      - press: Backspace
+      - expect:
+          enabled:
+            testid: create-agent-submit
+            equals: false
+  terminal-02-empty-custom-prompt-keeps-submit-disabled:
+    steps:
+      - expect:
+          count:
+            testid: create-agent-error
+            equals: 0
+  case-03-whitespace-only-custom-prompt-keeps-submit-disabled:
+    steps:
+      - click:
+          testid: create-agent-template-custom-prompt
+      - fill:
+          testid: create-agent-name
+          value: cust-ws-${RUN_ID:-local}
+      - fill:
+          testid: create-agent-interactive-prompt
+          value: "  \ \n\t  \ \n  "
+      - wait:
+          fn: |-
+            (() => {
+              const value = document.querySelector('[data-testid=create-agent-interactive-prompt]')?.value;
+              return value !== "" && value.trim() === "";
+            })()
+        intent: Wait until the raw textarea value is non-empty whitespace before checking submit gating
+      - expect:
+          enabled:
+            testid: create-agent-submit
+            equals: false
+  terminal-03-whitespace-only-custom-prompt-keeps-submit-disabled:
+    steps:
+      - expect:
+          count:
+            testid: create-agent-error
+            equals: 0
+  case-09-custom-prompt-named-task-is-rejected-by-the-seeded-worke:
+    steps:
+      - click:
+          testid: create-agent-template-custom-prompt
+      - fill:
+          testid: create-agent-name
+          value: task
+      - fill:
+          testid: create-agent-interactive-prompt
+          value: AFT-D8A-${RUN_ID:-local}
+      - click:
+          testid: create-agent-submit
+      - wait:
+          fn: "!!document.querySelector('[data-testid=create-agent-error]')"
+        intent: Wait until the task-name collision error appears after submit
+      - expect:
+          visible:
+            testid: create-agent-error
+      - expect:
+          text: Role "task" already exists and is not interactive; choose a different agent name
+      - expect:
+          visible:
+            testid: create-agent-overlay
+      - run: |
+          set -e
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/agents" > "$AFT_WORK_DIR/d8a-agents.json"
+          python3 - "$AFT_WORK_DIR/d8a-agents.json" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          assert isinstance(agents, list), d
+          assert not [a for a in agents or [] if a.get("name") == "task"], agents
+          PY
+        intent: An operator's readback confirms the rejected task-named agent was not created
+  terminal-09-custom-prompt-named-task-is-rejected-by-the-seeded-worke:
+    steps:
+      - expect:
+          visible:
+            testid: create-agent-overlay
+  case-10-custom-prompt-named-plan-is-rejected-by-the-seeded-worke:
+    steps:
+      - click:
+          testid: create-agent-template-custom-prompt
+      - fill:
+          testid: create-agent-name
+          value: plan
+      - fill:
+          testid: create-agent-interactive-prompt
+          value: AFT-D8B-${RUN_ID:-local}
+      - click:
+          testid: create-agent-submit
+      - wait:
+          fn: "!!document.querySelector('[data-testid=create-agent-error]')"
+        intent: Wait until the plan-name collision error appears after submit
+      - expect:
+          visible:
+            testid: create-agent-error
+      - expect:
+          text: Role "plan" already exists and is not interactive; choose a different agent name
+      - expect:
+          visible:
+            testid: create-agent-overlay
+      - run: |
+          set -e
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/agents" > "$AFT_WORK_DIR/d8b-agents.json"
+          python3 - "$AFT_WORK_DIR/d8b-agents.json" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          assert isinstance(agents, list), d
+          assert not [a for a in agents or [] if a.get("name") == "plan"], agents
+          PY
+        intent: An operator's readback confirms the rejected plan-named agent was not created
+  terminal-10-custom-prompt-named-plan-is-rejected-by-the-seeded-worke:
+    steps:
+      - expect:
+          visible:
+            testid: create-agent-overlay
+  case-11-custom-prompt-named-lead-is-rejected-by-the-seeded-lead-:
+    steps:
+      - click:
+          testid: create-agent-template-custom-prompt
+      - fill:
+          testid: create-agent-name
+          value: lead
+      - fill:
+          testid: create-agent-interactive-prompt
+          value: AFT-D8C-${RUN_ID:-local}
+      - click:
+          testid: create-agent-submit
+      - wait:
+          fn: "!!document.querySelector('[data-testid=create-agent-error]')"
+        intent: Wait until the lead-name collision error appears after submit
+      - expect:
+          visible:
+            testid: create-agent-error
+      - expect:
+          text: Role "lead" already exists with a different prompt; choose a different agent name or reuse its prompt
+      - expect:
+          visible:
+            testid: create-agent-overlay
+      - run: |
+          set -e
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/agents" > "$AFT_WORK_DIR/d8c-agents.json"
+          python3 - "$AFT_WORK_DIR/d8c-agents.json" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          assert isinstance(agents, list), d
+          assert not [a for a in agents or [] if a.get("name") == "lead"], agents
+          PY
+        intent: An operator's readback confirms the rejected lead-named agent was not created
+  terminal-11-custom-prompt-named-lead-is-rejected-by-the-seeded-lead-:
+    steps:
+      - expect:
+          visible:
+            testid: create-agent-overlay
+  case-17-recreating-a-deleted-custom-agent-with-a-different-promp:
+    steps:
+      - click:
+          testid: create-agent-template-custom-prompt
+      - fill:
+          testid: create-agent-name
+          value: cust-recycle-${RUN_ID:-local}
+      - fill:
+          testid: create-agent-interactive-prompt
+          value: AFT-RECYCLE-P1-${RUN_ID:-local}
+      - click:
+          testid: create-agent-submit
+      - wait:
+          fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('cust-recycle-${RUN_ID:-local}')"
+        intent: Wait until the recyclable custom agent appears after submit
+      - api:
+          method: DELETE
+          path: /api/workspaces/E2E-WS-CUSTOM/agents/cust-recycle-${RUN_ID:-local}
+          status: 200
+        intent: An operator deletes the custom agent while its role remains in the workspace
+      - click:
+          role: button
+          name: + Add agent
+          exact: true
+      - wait:
+          fn: |-
+            (() => {
+              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
+              if (overlay) {
+                window.__aftCreateAgentOverlayWaitStartedAt = 0;
+                return true;
+              }
+              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
+                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
+              }
+              const add = Array.from(document.querySelectorAll('button'))
+                .some((b) => (b.textContent || '').trim() === '+ Add agent');
+              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
+                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
+              }
+              return false;
+            })()
+        intent: Wait until the agent creation dialog reopens for the different prompt attempt
+      - click:
+          testid: create-agent-template-custom-prompt
+      - fill:
+          testid: create-agent-name
+          value: cust-recycle-${RUN_ID:-local}
+      - fill:
+          testid: create-agent-interactive-prompt
+          value: AFT-RECYCLE-P2-${RUN_ID:-local}
+      - click:
+          testid: create-agent-submit
+      - wait:
+          fn: "!!document.querySelector('[data-testid=create-agent-error]')"
+        intent: Wait until the recycled-name prompt conflict error appears after submit
+      - expect:
+          visible:
+            testid: create-agent-error
+      - expect:
+          text: already exists with a different prompt
+      - expect:
+          visible:
+            testid: create-agent-overlay
+      - fill:
+          testid: create-agent-interactive-prompt
+          value: AFT-RECYCLE-P1-${RUN_ID:-local}
+      - click:
+          testid: create-agent-submit
+      - wait:
+          fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('cust-recycle-${RUN_ID:-local}')"
+        intent: Wait until recreating the agent with its original prompt succeeds
+      - run: |
+          set -e
+          name="cust-recycle-${RUN_ID:-local}"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/agents" > "$AFT_WORK_DIR/d13-agents.json"
+          LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-CUSTOM role show "$name" --json > "$AFT_WORK_DIR/d13-role.json"
+          python3 - "$AFT_WORK_DIR/d13-agents.json" "$AFT_WORK_DIR/d13-role.json" "${RUN_ID:-local}" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          name = "cust-recycle-" + sys.argv[3]
+          assert len([a for a in agents or [] if a.get("name") == name]) == 1, agents
+          r = json.load(open(sys.argv[2]))
+          assert r.get("prompt") == "AFT-RECYCLE-P1-" + sys.argv[3], r
+          PY
+        intent: An operator's readback confirms the recycled agent exists with the original role prompt unchanged
+  terminal-17-recreating-a-deleted-custom-agent-with-a-different-promp:
+    steps:
+      - expect:
+          count:
+            testid: create-agent-overlay
+            equals: 0
+      - expect:
+          visible:
+            selector: "[aria-label='Agent: cust-recycle-${RUN_ID:-local}']"
+  case-19-duplicate-custom-agent-name-is-refused-with-a-visible-er:
+    steps:
+      - click:
+          testid: create-agent-template-custom-prompt
+      - fill:
+          testid: create-agent-name
+          value: cust-dup-${RUN_ID:-local}
+      - fill:
+          testid: create-agent-interactive-prompt
+          value: AFT-DUP-${RUN_ID:-local}
+      - click:
+          testid: create-agent-submit
+      - wait:
+          fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('cust-dup-${RUN_ID:-local}')"
+        intent: Wait until the first duplicate-name candidate appears after submit
+      - click:
+          role: button
+          name: + Add agent
+          exact: true
+      - wait:
+          fn: |-
+            (() => {
+              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
+              if (overlay) {
+                window.__aftCreateAgentOverlayWaitStartedAt = 0;
+                return true;
+              }
+              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
+                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
+              }
+              const add = Array.from(document.querySelectorAll('button'))
+                .some((b) => (b.textContent || '').trim() === '+ Add agent');
+              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
+                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
+              }
+              return false;
+            })()
+        intent: Wait until the agent creation dialog reopens for the duplicate attempt
+      - click:
+          testid: create-agent-template-custom-prompt
+      - fill:
+          testid: create-agent-name
+          value: cust-dup-${RUN_ID:-local}
+      - fill:
+          testid: create-agent-interactive-prompt
+          value: AFT-DUP-${RUN_ID:-local}
+      - click:
+          testid: create-agent-submit
+      - wait:
+          fn: "!!document.querySelector('[data-testid=create-agent-error]')"
+        intent: Wait until the duplicate custom-agent error appears after submit
+      - expect:
+          visible:
+            testid: create-agent-error
+      - expect:
+          text: An agent with this name already exists.
+      - expect:
+          visible:
+            testid: create-agent-overlay
+      - run: |
+          set -e
+          name="cust-dup-${RUN_ID:-local}"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/agents" > "$AFT_WORK_DIR/d16-agents.json"
+          LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-CUSTOM role show "$name" --json > "$AFT_WORK_DIR/d16-role.json"
+          python3 - "$AFT_WORK_DIR/d16-agents.json" "$AFT_WORK_DIR/d16-role.json" "${RUN_ID:-local}" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          name = "cust-dup-" + sys.argv[3]
+          assert len([a for a in agents or [] if a.get("name") == name]) == 1, agents
+          r = json.load(open(sys.argv[2]))
+          assert r.get("prompt") == "AFT-DUP-" + sys.argv[3], r
+          PY
+        intent: An operator's readback confirms only one duplicate-name agent exists and its prompt is unchanged
+  terminal-19-duplicate-custom-agent-name-is-refused-with-a-visible-er:
+    steps:
+      - expect:
+          visible:
+            testid: create-agent-overlay
+  case-21-invalid-custom-agent-names-keep-submit-disabled:
+    steps:
+      - click:
+          testid: create-agent-template-custom-prompt
+      - fill:
+          testid: create-agent-interactive-prompt
+          value: AFT-VALID-NAME-PROMPT-${RUN_ID:-local}
+      - fill:
+          testid: create-agent-name
+          value: -lead
+      - expect:
+          enabled:
+            testid: create-agent-submit
+            equals: false
+      - fill:
+          testid: create-agent-name
+          value: lead-
+      - expect:
+          enabled:
+            testid: create-agent-submit
+            equals: false
+      - fill:
+          testid: create-agent-name
+          value: a b
+      - expect:
+          enabled:
+            testid: create-agent-submit
+            equals: false
+      - fill:
+          testid: create-agent-name
+          value: Ünicode
+      - expect:
+          enabled:
+            testid: create-agent-submit
+            equals: false
+      - fill:
+          testid: create-agent-name
+          value: <img src=x onerror=1>
+      - expect:
+          enabled:
+            testid: create-agent-submit
+            equals: false
+      - wait:
+          fn: window.__aftXss === undefined
+        intent: Wait until the xss-shaped name has not executed while held in the input
+      - fill:
+          testid: create-agent-name
+          value: ../escape
+      - expect:
+          enabled:
+            testid: create-agent-submit
+            equals: false
+      - fill:
+          testid: create-agent-name
+          value: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      - expect:
+          enabled:
+            testid: create-agent-submit
+            equals: false
+      - expect:
+          count:
+            testid: create-agent-error
+            equals: 0
+      - fill:
+          testid: create-agent-name
+          value: cust-valid-${RUN_ID:-local}
+  terminal-21-invalid-custom-agent-names-keep-submit-disabled:
+    steps:
+      - expect:
+          enabled:
+            testid: create-agent-submit
+            equals: true

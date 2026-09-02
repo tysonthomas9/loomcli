@@ -1,0 +1,26 @@
+kind: graph
+version: 1
+classification:
+  area: reviews
+  feature: review-actions
+  surface: mixed
+  purpose: contract
+flow: review-actions-surface
+suite: review-actions-surface
+intent: Approval and request-changes outcomes replay a shared case-isolated review-queue prerequisite.
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+fixtureScope: graph
+imports:
+- shared-steps.yaml
+- states.yaml
+- transitions.yaml
+start: browser-ready
+coverage:
+  strategy: transition
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+graph:
+  browser-ready:
+    open-case-review-workspace: review-workspace-open
+  review-workspace-open:
+    approve-case-review: scenario-1-approving-a-review-issue-closes-it-and-clears-the-queue
+    request-changes-on-case-review: scenario-2-requesting-changes-sends-the-issue-back-to-open

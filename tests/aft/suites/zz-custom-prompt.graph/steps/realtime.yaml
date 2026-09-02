@@ -1,0 +1,117 @@
+kind: graph-steps
+version: 1
+flow: custom-prompts
+blocks:
+  case-07-xss-shaped-custom-prompt-is-inert-in-agents-ui:
+    steps:
+      - click:
+          testid: create-agent-template-custom-prompt
+      - fill:
+          testid: create-agent-name
+          value: cust-xss-${RUN_ID:-local}
+      - wait:
+          fn: document.querySelectorAll('[data-testid=create-agent-backend] option').length > 1
+        intent: Wait until backend options are loaded before selecting claude
+      - select:
+          testid: create-agent-backend
+          value: claude
+      - fill:
+          testid: create-agent-interactive-prompt
+          value: |-
+            Review PRs.
+            <img src=x onerror="window.__aftXss=1">
+            <script>window.__aftXss=1</script>
+            [click](javascript:window.__aftXss=1)
+      - click:
+          testid: create-agent-submit
+      - wait:
+          fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('cust-xss-${RUN_ID:-local}')"
+        intent: Wait until the xss-shaped custom agent appears after submit
+      - open: /ws/E2E-WS-CUSTOM/agents/cust-xss-${RUN_ID:-local}
+      - wait:
+          fn: |-
+            (() => {
+              const page = document.querySelector('[data-testid=agents-page]');
+              const add = Array.from(document.querySelectorAll('button'))
+                .some((b) => (b.textContent || '').trim() === '+ Add agent');
+              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
+              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
+              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
+              if (!page || !settled) {
+                window.__aftAgentsPageStableSig = null;
+                window.__aftAgentsPageStableAt = 0;
+                return false;
+              }
+              if (window.__aftAgentsPageStableSig !== sig) {
+                window.__aftAgentsPageStableSig = sig;
+                window.__aftAgentsPageStableAt = Date.now();
+                return false;
+              }
+              return Date.now() - window.__aftAgentsPageStableAt >= 300;
+            })()
+        intent: Wait until the custom agent detail page is ready
+      - click:
+          role: button
+          name: Info
+          exact: true
+      - click:
+          role: button
+          name: Logs
+          exact: true
+      - wait:
+          ms: 250
+      - wait:
+          fn: window.__aftXss === undefined && !document.querySelector('script[data-injected], img[onerror]') && !document.querySelector('a[href^="javascript:"]')
+        intent: Wait until the agents surface proves the xss-shaped prompt was not rendered as markup
+      - expect:
+          notText: onerror
+      - reload: true
+      - wait:
+          fn: |-
+            (() => {
+              const page = document.querySelector('[data-testid=agents-page]');
+              const add = Array.from(document.querySelectorAll('button'))
+                .some((b) => (b.textContent || '').trim() === '+ Add agent');
+              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
+              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
+              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
+              if (!page || !settled) {
+                window.__aftAgentsPageStableSig = null;
+                window.__aftAgentsPageStableAt = 0;
+                return false;
+              }
+              if (window.__aftAgentsPageStableSig !== sig) {
+                window.__aftAgentsPageStableSig = sig;
+                window.__aftAgentsPageStableAt = Date.now();
+                return false;
+              }
+              return Date.now() - window.__aftAgentsPageStableAt >= 300;
+            })()
+        intent: Wait until the reloaded custom agent detail page is ready
+      - wait:
+          fn: window.__aftXss === undefined && !document.querySelector('script[data-injected], img[onerror]') && !document.querySelector('a[href^="javascript:"]')
+        intent: Wait until the reloaded agents surface still has not executed the prompt text
+  terminal-07-xss-shaped-custom-prompt-is-inert-in-agents-ui:
+    steps:
+      - expect:
+          notText: onerror
+  case-18-custom-agent-appears-in-the-agents-rail-without-reload:
+    steps:
+      - click:
+          testid: create-agent-template-custom-prompt
+      - fill:
+          testid: create-agent-name
+          value: cust-sse-${RUN_ID:-local}
+      - fill:
+          testid: create-agent-interactive-prompt
+          value: AFT-SSE-${RUN_ID:-local}
+      - click:
+          testid: create-agent-submit
+      - wait:
+          fn: "!document.querySelector('[data-testid=create-agent-overlay]')"
+        intent: Wait until the custom agent modal closes after submit
+  terminal-18-custom-agent-appears-in-the-agents-rail-without-reload:
+    steps:
+      - expect:
+          visible:
+            selector: "[aria-label='Agent: cust-sse-${RUN_ID:-local}']"

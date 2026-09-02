@@ -461,7 +461,7 @@ tests:
           agent-browser --session "$AFT_SESSION" eval "JSON.stringify(Array.from(document.querySelectorAll('[role=tab]')).map(e=>((e.textContent||'').trim()+':'+e.getAttribute('aria-selected'))))" >&2 || true
           exit 1
         intent: "An operator switches the issue panel to its Runs tab"
-      # Mirror the deterministic flow that passes (zz-agent-flow.test.yaml:294-298):
+      # Mirror zz-agent-flow.graph's session-detail transition:
       # the timeline must MOUNT before hunting for a row inside it.
       #
       # A run: block, NOT `wait: fn:` — a wait has no per-step timeout and inherits the
@@ -778,7 +778,7 @@ tests:
           agent-browser --session "$AFT_SESSION" eval "JSON.stringify(Array.from(document.querySelectorAll('[role=tab]')).map(e=>((e.textContent||'').trim()+':'+e.getAttribute('aria-selected'))))" >&2 || true
           exit 1
         intent: "An operator switches the issue panel to its Runs tab"
-      # Mirror the deterministic flow that passes (zz-agent-flow.test.yaml:294-298):
+      # Mirror zz-agent-flow.graph's session-detail transition:
       # the timeline must MOUNT before hunting for a row inside it.
       #
       # A run: block, NOT `wait: fn:` — a wait has no per-step timeout and inherits the

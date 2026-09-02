@@ -1,0 +1,77 @@
+kind: graph
+version: 1
+suite: zz-custom-prompt
+classification:
+  area: agents
+  feature: custom-prompts
+  surface: mixed
+  purpose: journey
+flow: custom-prompts
+intent: Operators configure, validate, launch, and review interactive agents with custom prompts.
+fixtureScope: graph
+baseUrl: ${AFT_BASE_URL:-http://127.0.0.1:3100}
+setup: |
+  set -e
+  "$AFT_TESTS_DIR/scripts/clean-test-workspace.sh" E2E-WS-CUSTOM
+  "$AFT_TESTS_DIR/scripts/clean-test-workspace.sh" E2E-WS-CUSTOM-CTL
+  for pair in custom:e2e-ws-custom ctl:e2e-ws-custom-ctl; do
+    suffix="${pair%%:*}"
+    name="${pair#*:}"
+    repo="$AFT_WORK_DIR/${suffix}-repo"
+    mkdir -p "$repo"
+    git -C "$repo" init -q
+    git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit --allow-empty -m init -q
+    python3 -c 'import json,sys; print(json.dumps({"name":sys.argv[1],"type":"empty","repos":[sys.argv[2]]}))' "$name" "$repo" > "$AFT_WORK_DIR/${suffix}-workspace.json"
+    curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/${suffix}-workspace.json" > "$AFT_WORK_DIR/${suffix}-workspace.resp.json"
+  done
+teardown: |
+  set +e
+  for ws in E2E-WS-CUSTOM E2E-WS-CUSTOM-CTL; do
+    AFT_WS="$ws" "$AFT_TESTS_DIR/scripts/close-open-issues.sh"
+    "$AFT_TESTS_DIR/scripts/clean-test-workspace.sh" "$ws"
+  done
+imports:
+  - shared-steps.yaml
+  - steps/persistence.yaml
+  - steps/validation.yaml
+  - steps/runtime.yaml
+  - steps/realtime.yaml
+  - states.yaml
+  - transitions.yaml
+start: browser-ready
+graph:
+  browser-ready:
+    request-create-agent-dialog: create-agent-dialog-ready
+    prove-04-multiline-metacharacter-prompt-persists-byte-exact: verified-04-multiline-metacharacter-prompt-persists-byte-exact
+    prove-08-thirty-two-kilobyte-custom-prompt-survives-the-ui-round-: verified-08-thirty-two-kilobyte-custom-prompt-survives-the-ui-round-
+    prove-22-built-in-pr-review-template-works-in-a-clean-control-wor: verified-22-built-in-pr-review-template-works-in-a-clean-control-wor
+    clear-primary-custom-agent: primary-custom-agent-cleared
+    seed-primary-custom-agent: primary-custom-agent-ready
+    reset-template-prompt-subject: template-prompt-subject-cleared
+  create-agent-dialog-ready:
+    prove-02-empty-custom-prompt-keeps-submit-disabled: verified-02-empty-custom-prompt-keeps-submit-disabled
+    prove-03-whitespace-only-custom-prompt-keeps-submit-disabled: verified-03-whitespace-only-custom-prompt-keeps-submit-disabled
+    prove-07-xss-shaped-custom-prompt-is-inert-in-agents-ui: verified-07-xss-shaped-custom-prompt-is-inert-in-agents-ui
+    prove-09-custom-prompt-named-task-is-rejected-by-the-seeded-worke: verified-09-custom-prompt-named-task-is-rejected-by-the-seeded-worke
+    prove-10-custom-prompt-named-plan-is-rejected-by-the-seeded-worke: verified-10-custom-prompt-named-plan-is-rejected-by-the-seeded-worke
+    prove-11-custom-prompt-named-lead-is-rejected-by-the-seeded-lead-: verified-11-custom-prompt-named-lead-is-rejected-by-the-seeded-lead-
+    prove-12-custom-prompt-named-orchestrator-deterministically-creat: verified-12-custom-prompt-named-orchestrator-deterministically-creat
+    prove-13-custom-prompt-trims-surrounding-whitespace-and-preserves: verified-13-custom-prompt-trims-surrounding-whitespace-and-preserves
+    prove-14-backend-selection-reaches-custom-agent-row-and-terminal-: verified-14-backend-selection-reaches-custom-agent-row-and-terminal-
+    prove-15-repo-scoping-persists-but-custom-interactive-launch-has-: verified-15-repo-scoping-persists-but-custom-interactive-launch-has-
+    prove-17-recreating-a-deleted-custom-agent-with-a-different-promp: verified-17-recreating-a-deleted-custom-agent-with-a-different-promp
+    prove-18-custom-agent-appears-in-the-agents-rail-without-reload: verified-18-custom-agent-appears-in-the-agents-rail-without-reload
+    prove-19-duplicate-custom-agent-name-is-refused-with-a-visible-er: verified-19-duplicate-custom-agent-name-is-refused-with-a-visible-er
+    prove-20-mixed-case-custom-agent-name-is-normalized-by-the-ui: verified-20-mixed-case-custom-agent-name-is-normalized-by-the-ui
+    prove-21-invalid-custom-agent-names-keep-submit-disabled: verified-21-invalid-custom-agent-names-keep-submit-disabled
+  primary-custom-agent-cleared:
+    prove-01-custom-prompt-creates-an-interactive-role-with-byte-exac: verified-01-custom-prompt-creates-an-interactive-role-with-byte-exac
+  primary-custom-agent-ready:
+    prove-16-custom-prompt-is-not-visible-or-editable-after-creation: verified-16-custom-prompt-is-not-visible-or-editable-after-creation
+  template-prompt-subject-cleared:
+    create-template-prompt-subject: template-prompt-subject-ready
+  template-prompt-subject-ready:
+    prove-05-template-looking-custom-prompt-is-stored-literally: verified-05-template-looking-custom-prompt-is-stored-literally
+    prove-06-custom-prompt-reaches-codex-argv-in-the-noninteractive-r: verified-06-custom-prompt-reaches-codex-argv-in-the-noninteractive-r
+coverage:
+  strategy: transition

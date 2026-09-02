@@ -1,0 +1,282 @@
+kind: graph-steps
+version: 1
+flow: custom-prompts
+blocks:
+  case-01-custom-prompt-creates-an-interactive-role-with-byte-exac:
+    steps:
+      - use: choose-custom-prompt-template
+        with:
+          path: /ws/E2E-WS-CUSTOM/agents
+          readyIntent: Wait until the custom workspace agents page is ready
+          dialogIntent: Wait until the agent creation dialog is open
+      - expect:
+          visible:
+            testid: create-agent-interactive-prompt
+      - fill:
+          testid: create-agent-name
+          value: cust-${RUN_ID:-local}
+      - fill:
+          testid: create-agent-interactive-prompt
+          value: You are a release-notes reviewer. AFT-PROMPT-MARKER-${RUN_ID:-local}
+      - click:
+          testid: create-agent-submit
+      - wait:
+          fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('cust-${RUN_ID:-local}')"
+        intent: Wait until the modal closes and the new custom agent appears through the agents store
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          name="cust-$run"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/agents" > "$AFT_WORK_DIR/d1-agents.json"
+          python3 - "$AFT_WORK_DIR/d1-agents.json" "$name" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          name = sys.argv[2]
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          matches = [a for a in agents or [] if a.get("name") == name]
+          assert len(matches) == 1, agents
+          a = matches[0]
+          assert a.get("role_name") == name, a
+          assert a.get("backend") == "codex", a
+          assert not a.get("auto"), a
+          PY
+        intent: An operator's readback selects the created custom agent from the unordered agent list
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          name="cust-$run"
+          # budget: monitor-cache (16s) - monitor/status must expose the new custom agent.
+          for i in $(seq 1 16); do
+            curl -sf "$AFT_BASE_URL/api/monitor/status?workspace=E2E-WS-CUSTOM" > "$AFT_WORK_DIR/d1-monitor.json" &&
+            python3 - "$AFT_WORK_DIR/d1-monitor.json" "$name" <<'PY' && exit 0
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          name = sys.argv[2]
+          matches = [a for a in d.get("agents", []) if a.get("name") == name]
+          assert len(matches) == 1, d.get("agents")
+          a = matches[0]
+          assert a.get("role_kind") == "interactive", a
+          assert a.get("role") == name, a
+          PY
+            sleep 1
+          done
+          echo "monitor status never exposed custom interactive agent"
+          cat "$AFT_WORK_DIR/d1-monitor.json" 2>/dev/null || true
+          exit 1
+        intent: An operator's readback confirms the monitor resolves the custom role as interactive
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          name="cust-$run"
+          prompt="You are a release-notes reviewer. AFT-PROMPT-MARKER-$run"
+          LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-CUSTOM role show "$name" --json > "$AFT_WORK_DIR/d1-role.json"
+          python3 - "$AFT_WORK_DIR/d1-role.json" "$prompt" <<'PY'
+          import json, sys
+          r = json.load(open(sys.argv[1]))
+          want = sys.argv[2]
+          assert r.get("kind") == "interactive", r
+          assert r.get("prompt") == want, r
+          assert not r.get("prompt_file"), r
+          assert r.get("description") == "Interactive terminal agent", r
+          PY
+        intent: An operator's CLI readback confirms the role stores exactly the prompt text
+  terminal-01-custom-prompt-creates-an-interactive-role-with-byte-exac:
+    steps:
+      - expect:
+          count:
+            testid: create-agent-overlay
+            equals: 0
+  case-04-multiline-metacharacter-prompt-persists-byte-exact:
+    steps:
+      - run: |
+          set -e
+          printf '%s' $'Line one: review PRs.\nLine two: run `make gate` and $(echo not-substituted).\nLine three: quotes "double" \'single\' and a backslash \\ plus |&;><*?[]{}$\nLine four: unicode ✅ emoji 🚀 accents éü and CJK 漢字\nLine five: **markdown** _emphasis_ and a [link](https://example.test)' > "$AFT_WORK_DIR/cus-d4.prompt"
+          python3 - "$AFT_WORK_DIR/cus-d4.prompt" <<'PY'
+          import sys
+          data = open(sys.argv[1], "rb").read()
+          assert data and not data.endswith(b"\n"), data[-16:]
+          PY
+        intent: An operator prepares the exact multiline prompt fixture without a trailing newline
+      - use: choose-custom-prompt-template
+        with:
+          path: /ws/E2E-WS-CUSTOM/agents
+          readyIntent: Wait until the custom workspace agents page is ready
+          dialogIntent: Wait until the agent creation dialog is open
+      - fill:
+          testid: create-agent-name
+          value: cust-multi-${RUN_ID:-local}
+      - run: agent-browser --session "$AFT_SESSION" find testid create-agent-interactive-prompt fill "$(cat "$AFT_WORK_DIR/cus-d4.prompt")"
+        intent: An operator pastes a multi-paragraph prompt containing shell metacharacters
+      - expect:
+          enabled:
+            testid: create-agent-submit
+            equals: true
+      - click:
+          testid: create-agent-submit
+      - wait:
+          fn: "!document.querySelector('[data-testid=create-agent-overlay]')"
+        intent: Wait until the custom-prompt modal closes after submitting the multiline prompt
+      - run: |
+          set -e
+          name="cust-multi-${RUN_ID:-local}"
+          LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-CUSTOM role show "$name" --json > "$AFT_WORK_DIR/cus-d4-role.json"
+          python3 - "$AFT_WORK_DIR/cus-d4-role.json" "$AFT_WORK_DIR/cus-d4.prompt" <<'PY'
+          import json, sys
+          r = json.load(open(sys.argv[1]))
+          got = r.get("prompt", "")
+          want = open(sys.argv[2], encoding="utf-8").read()
+          assert got == want, (len(got), len(want), got[-40:], want[-40:])
+          assert len(got.encode("utf-8")) == len(open(sys.argv[2], "rb").read()), (len(got.encode("utf-8")), len(open(sys.argv[2], "rb").read()))
+          PY
+        intent: An operator's CLI readback confirms multiline prompt bytes match the fixture
+  terminal-04-multiline-metacharacter-prompt-persists-byte-exact:
+    steps:
+      - expect:
+          count:
+            testid: create-agent-overlay
+            equals: 0
+  create-template-prompt-subject:
+    steps:
+      - run: |
+          set -e
+          printf '%s' 'Refer to {{ .AgentName }} and {{.Role}}. Unclosed: {{ if .SafetyBlock }}' > "$AFT_WORK_DIR/cus-d5.prompt"
+          python3 - "$AFT_WORK_DIR/cus-d5.prompt" <<'PY'
+          import sys
+          data = open(sys.argv[1], "rb").read()
+          assert data and not data.endswith(b"\n"), data
+          PY
+        intent: An operator prepares the template-looking prompt fixture without a trailing newline
+      - use: choose-custom-prompt-template
+        with:
+          path: /ws/E2E-WS-CUSTOM/agents
+          readyIntent: Wait until the custom workspace agents page is ready
+          dialogIntent: Wait until the agent creation dialog is open
+      - fill:
+          testid: create-agent-name
+          value: cust-tmpl-${RUN_ID:-local}
+      - run: agent-browser --session "$AFT_SESSION" find testid create-agent-interactive-prompt fill "$(cat "$AFT_WORK_DIR/cus-d5.prompt")"
+        intent: An operator pastes a template-looking prompt into the custom prompt textarea
+      - expect:
+          enabled:
+            testid: create-agent-submit
+            equals: true
+      - click:
+          testid: create-agent-submit
+      - wait:
+          fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('cust-tmpl-${RUN_ID:-local}')"
+        intent: Wait until the template-looking custom agent appears after submit
+  case-05-template-looking-custom-prompt-is-stored-literally:
+    steps:
+      - run: |
+          set -e
+          name="cust-tmpl-${RUN_ID:-local}"
+          LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-CUSTOM role show "$name" --json > "$AFT_WORK_DIR/cus-d5-role.json"
+          python3 - "$AFT_WORK_DIR/cus-d5-role.json" "$AFT_WORK_DIR/cus-d5.prompt" <<'PY'
+          import json, sys
+          r = json.load(open(sys.argv[1]))
+          got = r.get("prompt", "")
+          want = open(sys.argv[2], encoding="utf-8").read()
+          assert got == want, (got, want)
+          assert "{{ .AgentName }}" in got and "{{.Role}}" in got and "{{ if .SafetyBlock }}" in got, got
+          PY
+        intent: An operator's CLI readback confirms template-looking text stayed literal in storage
+  terminal-05-template-looking-custom-prompt-is-stored-literally:
+    steps:
+      - expect:
+          count:
+            testid: create-agent-overlay
+            equals: 0
+  case-08-thirty-two-kilobyte-custom-prompt-survives-the-ui-round-:
+    steps:
+      - run: |
+          set -e
+          python3 - "$AFT_WORK_DIR/cus-d7a.prompt.src" <<'PY'
+          import os, sys
+          path = sys.argv[1]
+          run = os.environ.get("RUN_ID") or "local"
+          seed = ("AFT-LONG-" + run + "-0123456789abcdef|").encode()
+          data = (seed * ((32768 // len(seed)) + 1))[:32768]
+          open(path, "wb").write(data)
+          PY
+          printf '%s' "$(cat "$AFT_WORK_DIR/cus-d7a.prompt.src")" > "$AFT_WORK_DIR/cus-d7a.prompt"
+          python3 - "$AFT_WORK_DIR/cus-d7a.prompt" <<'PY'
+          import sys
+          data = open(sys.argv[1], "rb").read()
+          assert len(data) == 32768, len(data)
+          assert not data.endswith(b"\n"), data[-16:]
+          PY
+        intent: An operator prepares the 32KB custom prompt fixture with printf and no trailing newline
+      - use: choose-custom-prompt-template
+        with:
+          path: /ws/E2E-WS-CUSTOM/agents
+          readyIntent: Wait until the custom workspace agents page is ready
+          dialogIntent: Wait until the agent creation dialog is open
+      - fill:
+          testid: create-agent-name
+          value: cust-long-${RUN_ID:-local}
+      - run: agent-browser --session "$AFT_SESSION" find testid create-agent-interactive-prompt fill "$(cat "$AFT_WORK_DIR/cus-d7a.prompt")"
+        intent: An operator pastes the 32KB prompt through the active browser session
+      - expect:
+          enabled:
+            testid: create-agent-submit
+            equals: true
+      - click:
+          testid: create-agent-submit
+      - wait:
+          fn: "!document.querySelector('[data-testid=create-agent-overlay]')"
+        intent: Wait until the custom-prompt modal closes after submitting the long prompt
+      - run: |
+          set -e
+          name="cust-long-${RUN_ID:-local}"
+          LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-CUSTOM role show "$name" --json > "$AFT_WORK_DIR/cus-d7a-role.json"
+          python3 - "$AFT_WORK_DIR/cus-d7a-role.json" "$AFT_WORK_DIR/cus-d7a.prompt" <<'PY'
+          import json, sys
+          got = json.load(open(sys.argv[1])).get("prompt", "")
+          want = open(sys.argv[2], "rb").read()
+          gbytes = got.encode("utf-8")
+          assert len(gbytes) == 32768, len(gbytes)
+          assert gbytes[:64] == want[:64], (gbytes[:64], want[:64])
+          assert gbytes[-64:] == want[-64:], (gbytes[-64:], want[-64:])
+          PY
+        intent: An operator's CLI readback confirms the 32KB prompt length and edge bytes
+  terminal-08-thirty-two-kilobyte-custom-prompt-survives-the-ui-round-:
+    steps:
+      - expect:
+          count:
+            testid: create-agent-overlay
+            equals: 0
+  case-13-custom-prompt-trims-surrounding-whitespace-and-preserves:
+    steps:
+      - click:
+          testid: create-agent-template-custom-prompt
+      - fill:
+          testid: create-agent-name
+          value: cust-trim-${RUN_ID:-local}
+      - fill:
+          testid: create-agent-interactive-prompt
+          value: "\n\n   AFT-TRIM-START-${RUN_ID:-local}\n\n    indented line kept\n\nAFT-TRIM-END   \n\n"
+      - click:
+          testid: create-agent-submit
+      - wait:
+          fn: "!document.querySelector('[data-testid=create-agent-overlay]')"
+        intent: Wait until the custom-prompt modal closes after submitting the trim prompt
+      - run: |
+          set -e
+          name="cust-trim-${RUN_ID:-local}"
+          LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-CUSTOM role show "$name" --json > "$AFT_WORK_DIR/d9-role.json"
+          python3 - "$AFT_WORK_DIR/d9-role.json" "${RUN_ID:-local}" <<'PY'
+          import json, sys
+          p = json.load(open(sys.argv[1])).get("prompt", "")
+          run = sys.argv[2]
+          assert p.startswith("AFT-TRIM-START-" + run), repr(p[:40])
+          assert p.endswith("AFT-TRIM-END"), repr(p[-40:])
+          assert "\n\n    indented line kept\n\n" in p, repr(p)
+          assert not p.startswith("\n") and not p.endswith("\n") and not p.endswith(" "), repr(p[-10:])
+          PY
+        intent: An operator's CLI readback confirms whole-string trimming and preserved interior whitespace
+  terminal-13-custom-prompt-trims-surrounding-whitespace-and-preserves:
+    steps:
+      - expect:
+          visible:
+            selector: body

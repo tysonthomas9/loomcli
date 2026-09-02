@@ -1,0 +1,32 @@
+kind: graph-steps
+version: 1
+flow: review-actions-surface
+blocks:
+  blank-browser:
+    steps:
+    - expect:
+        url: about:blank
+  open-case-review-workspace:
+    steps:
+    - api:
+        method: POST
+        path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+        body:
+          title: review-action-${RUN_ID:-local}-${AFT_CASE_ID}
+          issue_type: task
+          priority: 2
+        save:
+        - from: data.id
+          as: reviewActionId
+      intent: An API client creates the case-isolated review-action fixture
+    - api:
+        method: PATCH
+        path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:reviewActionId}"
+        body:
+          status: review
+      intent: An API client moves the case-isolated fixture into the review queue
+    - open: "/ws/E2E-WS/prs"
+    - wait:
+        text: review-action-${RUN_ID:-local}-${AFT_CASE_ID}
+    - run: for i in 1 2 3; do agent-browser --session "$AFT_SESSION" find role button click --name "review-action-${RUN_ID:-local}-$AFT_CASE_ID" || true; sleep 1; agent-browser --session "$AFT_SESSION" eval "location.search" | grep -q "review=" && exit 0; done; echo "review row click never opened the workspace"; exit 1
+      intent: A reviewer retries the case-isolated queue row until the review workspace opens

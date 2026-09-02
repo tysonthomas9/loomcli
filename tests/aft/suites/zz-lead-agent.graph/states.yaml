@@ -1,0 +1,177 @@
+kind: graph-states
+version: 1
+flow: lead-agents
+states:
+  browser-ready:
+    intent: A fresh graph path begins in the runner's blank browser page.
+    assert:
+      - expect:
+          url: about:blank
+  verified-01-terminal-page-increments-codex-lead-tab-names:
+    intent: terminal page increments codex lead tab names
+    testIntent: An operator opens the Terminal page and adds a second codex lead tab whose label and session name increment without collision
+    terminal: true
+    assert:
+      - use: terminal-01-terminal-page-increments-codex-lead-tab-names
+  verified-02-shell-lead-tab-is-not-an-ai-lead-runtime:
+    intent: shell lead tab is not an AI lead runtime
+    testIntent: An operator adds a shell tab from the lead terminal menu and verifies it is a login shell session rather than a loom lead runtime
+    terminal: true
+    assert:
+      - use: terminal-02-shell-lead-tab-is-not-an-ai-lead-runtime
+  verified-03-lead-template-creates-an-interactive-lead-agent-and-role:
+    intent: lead template creates an interactive lead agent and role
+    testIntent: An operator creates a Lead agent through CreateAgentModal and verifies the stored agent, role, and absence of an agent worktree
+    terminal: true
+    assert:
+      - use: terminal-03-lead-template-creates-an-interactive-lead-agent-and-role
+  verified-04-lead-backend-dropdown-selects-the-runtime:
+    intent: lead backend dropdown selects the runtime
+    testIntent: An operator creates a Lead agent with the Claude backend selected and verifies the choice reaches the agent record and launch spec
+    terminal: true
+    assert:
+      - use: terminal-04-lead-backend-dropdown-selects-the-runtime
+  verified-05-lead-repo-scope-round-trips-workspace-wide-and-pinned-ch:
+    intent: lead repo scope round trips workspace-wide and pinned choices
+    testIntent: An operator creates one workspace-wide Lead and one repo-pinned Lead and verifies the derived repo scope on both agent records
+    terminal: true
+    assert:
+      - use: terminal-05-lead-repo-scope-round-trips-workspace-wide-and-pinned-ch
+  verified-06-lead-name-validation-blocks-invalid-submit:
+    intent: lead name validation blocks invalid submit
+    testIntent: An operator cannot submit invalid Lead agent names, while uppercase input is normalized into a valid stored name
+    terminal: true
+    assert:
+      - use: terminal-06-lead-name-validation-blocks-invalid-submit
+  verified-07-duplicate-lead-name-renders-the-server-error-inline:
+    intent: duplicate lead name renders the server error inline
+    testIntent: An operator retrying an existing Lead agent name sees the server conflict in the dialog without creating another agent
+    terminal: true
+    assert:
+      - use: terminal-07-duplicate-lead-name-renders-the-server-error-inline
+  verified-08-second-lead-reuses-the-existing-lead-role:
+    intent: second lead reuses the existing lead role
+    testIntent: An operator creates a second Lead agent and verifies both agents share the single workspace lead role
+    terminal: true
+    assert:
+      - use: terminal-08-second-lead-reuses-the-existing-lead-role
+  verified-09-unassigned-lead-reads-no-epic-assigned-without-idle-nois:
+    intent: unassigned lead reads no epic assigned without idle noise
+    testIntent: An operator viewing a fresh unassigned Lead sees the no-epic header state and does not see a leading idle status segment
+    terminal: true
+    assert:
+      - use: terminal-09-unassigned-lead-reads-no-epic-assigned-without-idle-nois
+  verified-10-lead-work-panel-offers-epic-filters-while-worker-panel-d:
+    intent: lead work panel offers epic filters while worker panel does not
+    testIntent: An operator sees Lead-only epic filter pills on an unassigned Lead agent, while a task worker receives task-status filters instead
+    terminal: true
+    assert:
+      - use: terminal-10-lead-work-panel-offers-epic-filters-while-worker-panel-d
+  verified-11-opening-a-lead-agent-launches-loom-lead-with-attribution:
+    intent: opening a lead agent launches loom lead with attribution env
+    testIntent: An operator opens a Lead agent and verifies the embedded terminal is backed by a loom lead launch spec for that exact agent
+    terminal: true
+    assert:
+      - use: terminal-11-opening-a-lead-agent-launches-loom-lead-with-attribution
+  verified-12-starting-a-lead-terminal-creates-its-orchestration-sessi:
+    intent: starting a lead terminal creates its orchestration session
+    testIntent: An operator verifies the lead terminal's orchestration session id is stable and matches the id inherited by the child launch environment
+    terminal: true
+    assert:
+      - use: terminal-12-starting-a-lead-terminal-creates-its-orchestration-sessi
+  verified-13-reopening-a-lead-reuses-its-terminal-session:
+    intent: reopening a lead reuses its terminal session
+    testIntent: An operator returning to their Lead agent reattaches to the same terminal session instead of spawning a second agent-bound tab
+    terminal: true
+    assert:
+      - use: terminal-13-reopening-a-lead-reuses-its-terminal-session
+  verified-14-migrating-a-lead-backend-rebuilds-the-launch-spec:
+    intent: migrating a lead backend rebuilds the launch spec
+    testIntent: An operator switching a Lead agent from codex to claude receives a fresh terminal launch spec while the prior tab's current survival is pinned
+    terminal: true
+    assert:
+      - use: terminal-14-migrating-a-lead-backend-rebuilds-the-launch-spec
+  verified-15-stopped-lead-keeps-its-terminal-pane:
+    intent: stopped lead keeps its terminal pane
+    testIntent: An operator stopping a Lead agent still sees and can resolve its terminal, unlike stopped daemon workers
+    terminal: true
+    assert:
+      - use: terminal-15-stopped-lead-keeps-its-terminal-pane
+  verified-16-deleting-a-lead-leaves-its-terminal-pty-running-until-ta:
+    intent: deleting a lead leaves its terminal PTY running until tab delete
+    testIntent: An operator deletes a disposable Lead agent while its terminal is running and observes the current orphan-tab behavior before reclaiming it
+    terminal: true
+    assert:
+      - use: terminal-16-deleting-a-lead-leaves-its-terminal-pty-running-until-ta
+  verified-17-assigning-an-epic-marks-the-lead-context-delivery-state:
+    intent: assigning an epic marks the lead context delivery state
+    testIntent: An orchestration client assigns an epic to the Lead agent and an operator sees the assigned-epic and captured delivery header state
+    terminal: true
+    assert:
+      - use: terminal-17-assigning-an-epic-marks-the-lead-context-delivery-state
+  verified-18-lead-claim-badge-appears-on-the-assigned-epic-lane:
+    intent: lead claim badge appears on the assigned epic lane
+    testIntent: A reviewer opening the list view can see the lead that owns one epic and the unclaimed state on another epic
+    terminal: true
+    assert:
+      - use: terminal-18-lead-claim-badge-appears-on-the-assigned-epic-lane
+  verified-19-slide-over-run-epic-control-is-inert-pinned-defect:
+    intent: slide-over run epic control is inert -- pinned defect
+    testIntent: An operator clicks Run epic from issue detail and verifies the current pinned defect where no epic runner is queued
+    terminal: true
+    assert:
+      - use: terminal-19-slide-over-run-epic-control-is-inert-pinned-defect
+  verified-20-list-lane-run-epic-creates-the-same-purpose-named-lead:
+    intent: list lane run epic creates the same purpose-named lead
+    testIntent: An operator starts an epic run from the list lane control and verifies the same lead naming contract as issue detail
+    terminal: true
+    assert:
+      - use: terminal-20-list-lane-run-epic-creates-the-same-purpose-named-lead
+  verified-21-agents-page-run-epic-reuses-the-selected-lead:
+    intent: agents page run epic reuses the selected lead
+    testIntent: An operator starts an epic run from an unassigned Lead's work panel and verifies the selected lead is reused instead of minting another one
+    terminal: true
+    assert:
+      - use: terminal-21-agents-page-run-epic-reuses-the-selected-lead
+  verified-22-leads-sort-ahead-of-workers-in-the-rail:
+    intent: leads sort ahead of workers in the rail
+    testIntent: An operator with a mixed fleet finds Lead agents ahead of task workers and sees the worker under the Background grouping
+    terminal: true
+    assert:
+      - use: terminal-22-leads-sort-ahead-of-workers-in-the-rail
+  verified-23-lead-files-tab-exposes-the-no-worktree-checkout-state:
+    intent: lead files tab exposes the no-worktree checkout state
+    testIntent: An operator browsing files from a Lead agent sees the current missing-checkout state while API readbacks confirm the lead has no agent worktree
+    terminal: true
+    assert:
+      - use: terminal-23-lead-files-tab-exposes-the-no-worktree-checkout-state
+  primary-lead-cleared:
+    intent: The primary Lead identity is free for an independent UI creation path.
+    assert:
+      - expect:
+          url: about:blank
+  primary-lead-ready:
+    intent: A fresh, unassigned primary Lead exists for this independent branch.
+    assert:
+      - expect:
+          url: about:blank
+  primary-lead-session-ready:
+    intent: The primary Lead has a live recorded terminal session for lifecycle checks.
+    assert:
+      - expect:
+          url: about:blank
+  primary-lead-assigned:
+    intent: The primary Lead is assigned to a case-owned prerequisite epic.
+    assert:
+      - expect:
+          url: about:blank
+  second-lead-cleared:
+    intent: The secondary Lead identity is free for an independent UI creation path.
+    assert:
+      - expect:
+          url: about:blank
+  second-lead-ready:
+    intent: A fresh, unassigned secondary Lead exists for this independent branch.
+    assert:
+      - expect:
+          url: about:blank

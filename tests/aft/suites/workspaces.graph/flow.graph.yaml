@@ -1,0 +1,28 @@
+kind: graph
+version: 1
+classification:
+  area: workspaces
+  feature: workspace-management
+  surface: mixed
+  purpose: journey
+flow: workspaces
+suite: workspaces
+intent: Workspace creation, switching, and deep-link paths reuse only their true navigation prerequisites.
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+fixtureScope: graph
+imports:
+- shared-steps.yaml
+- states.yaml
+- transitions.yaml
+start: browser-ready
+coverage:
+  strategy: transition
+setup: 'curl -s -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d ''{"name":"e2e-ws-2","type":"empty"}'' >/dev/null; echo "ensured e2e-ws-2"'
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"; if [ -s "$AFT_WORK_DIR/workspaces-empty.id" ]; then curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/$(cat "$AFT_WORK_DIR/workspaces-empty.id")" >/dev/null || true; fi'
+graph:
+  browser-ready:
+    open-primary-workspace-board: primary-board-ready
+    open-3-second-workspace-deep-link-opens-scoped-empty-board: scenario-3-second-workspace-deep-link-opens-scoped-empty-board
+  primary-board-ready:
+    complete-1-empty-mode-modal-creates-a-workspace-with-a-routable-boa: scenario-1-empty-mode-modal-creates-a-workspace-with-a-routable-boa
+    complete-2-workspace-selector-switches-route-and-board-scope: scenario-2-workspace-selector-switches-route-and-board-scope

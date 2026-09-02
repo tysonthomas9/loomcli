@@ -4,7 +4,7 @@ suite: dependencies-graph
 classification: { area: issues, feature: dependencies, surface: mixed, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 # The cross-workspace move journey needs a stable target even when this suite
-# runs before workspaces.test.yaml. Creating the named empty workspace is
+# runs before the workspaces graph package. Creating the named empty workspace is
 # idempotent for this fixture; the stack canonicalizes its id to E2E-WS-2.
 setup: >-
   curl -s -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json"

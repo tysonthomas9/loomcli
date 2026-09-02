@@ -1,0 +1,95 @@
+kind: graph
+version: 1
+classification:
+  area: agents
+  feature: task-runners
+  surface: api
+  purpose: contract
+flow: agent-lifecycle-contracts
+suite: agent-lifecycle-contracts
+intent: Each independently replayed path preserves one legacy agent-lifecycle-contracts scenario while shared source steps form reviewable trunks.
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+fixtureScope: graph
+setup: |
+  set -e
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-TASK-CTL" >/dev/null || true
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-TASK-NOREPO" >/dev/null || true
+
+  repo="$AFT_WORK_DIR/task-ctl-repo"
+  rm -rf "$repo"
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  git -C "$repo" config user.name "Loom AFT"
+  git -C "$repo" config user.email "aft@example.test"
+  git -C "$repo" commit --allow-empty -m init -q
+  printf 'gate:\n\t@true\n' > "$repo/Makefile"
+  mkdir -p "$repo/epic-runner-output"
+  : > "$repo/epic-runner-output/.gitkeep"
+  git -C "$repo" add Makefile epic-runner-output/.gitkeep
+  git -C "$repo" commit -m "add aft task fixtures" -q
+  git -C "$repo" branch -M main
+
+  python3 - "$repo" > "$AFT_WORK_DIR/task-ctl-workspace.json" <<'PY'
+  import json, sys
+  print(json.dumps({"name": "e2e-ws-task-ctl", "type": "empty", "repos": [sys.argv[1]]}))
+  PY
+  curl -sf -X POST "$AFT_BASE_URL/api/workspaces" \
+    -H "Content-Type: application/json" \
+    -d @"$AFT_WORK_DIR/task-ctl-workspace.json" \
+    > "$AFT_WORK_DIR/task-ctl-workspace.resp.json"
+  python3 - "$AFT_WORK_DIR/task-ctl-workspace.resp.json" "$AFT_WORK_DIR" <<'PY'
+  import json, pathlib, sys
+  data = json.load(open(sys.argv[1])).get("data") or {}
+  work = pathlib.Path(sys.argv[2])
+  work.joinpath("task-ctl-workspace.path").write_text(data["path"], encoding="utf-8")
+  repo = (data.get("repos") or [])[0]
+  work.joinpath("task-ctl-repo.name").write_text(repo["name"], encoding="utf-8")
+  work.joinpath("task-ctl-repo.source").write_text(repo.get("source_repo_id") or repo["name"], encoding="utf-8")
+  PY
+
+  printf '%s\n' '{"name":"e2e-ws-task-norepo","type":"empty","repos":[]}' > "$AFT_WORK_DIR/task-norepo-workspace.json"
+  curl -sf -X POST "$AFT_BASE_URL/api/workspaces" \
+    -H "Content-Type: application/json" \
+    -d @"$AFT_WORK_DIR/task-norepo-workspace.json" \
+    > "$AFT_WORK_DIR/task-norepo-workspace.resp.json"
+teardown: |
+  set +e
+  for ws in E2E-WS-TASK-CTL E2E-WS-TASK-NOREPO; do
+    AFT_WS="$ws" "$AFT_TESTS_DIR/scripts/close-open-issues.sh"
+    curl -s "$AFT_BASE_URL/api/workspaces/$ws/agents" > "$AFT_WORK_DIR/task-$ws-agents.teardown.json" || true
+    python3 - "$AFT_WORK_DIR/task-$ws-agents.teardown.json" "${RUN_ID:-local}" <<'PY' > "$AFT_WORK_DIR/task-$ws-agents.teardown.list"
+  import json, sys
+  try:
+      d = json.load(open(sys.argv[1]))
+  except Exception:
+      d = {}
+  run = sys.argv[2]
+  agents = d.get("data") if isinstance(d, dict) else []
+  for a in agents or []:
+      name = a.get("name", "")
+      if name.endswith("-" + run):
+          print(name)
+  PY
+    while read -r agent; do
+      [ -n "$agent" ] && curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/$ws/agents/$agent" >/dev/null || true
+    done < "$AFT_WORK_DIR/task-$ws-agents.teardown.list"
+    curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/$ws" >/dev/null || true
+  done
+imports:
+- shared-steps.yaml
+- states.yaml
+- transitions.yaml
+start: browser-ready
+graph:
+  browser-ready:
+    open-task-runner-dialog: task-runner-dialog-open
+    run-scenario-1-repo-less-task-runner-create-explains-re: scenario-1-repo-less-task-runner-create-explains-repo-requi
+    run-scenario-2-starting-a-missing-task-runner-returns-n: scenario-2-starting-a-missing-task-runner-returns-not-found
+    run-scenario-4-task-runner-lifecycle-endpoints-write-th: scenario-4-task-runner-lifecycle-endpoints-write-the-daemon
+  task-runner-dialog-open:
+    choose-task-runner-template: task-runner-template-selected
+  task-runner-template-selected:
+    run-scenario-3-deleting-a-fresh-task-runner-removes-it-: scenario-3-deleting-a-fresh-task-runner-removes-it-from-sur
+    run-scenario-5-assigned-but-idle-task-runner-health-fie: scenario-5-assigned-but-idle-task-runner-health-fields-stay
+coverage:
+  strategy: transition

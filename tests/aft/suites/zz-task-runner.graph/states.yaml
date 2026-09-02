@@ -1,0 +1,131 @@
+kind: graph-states
+version: 1
+flow: task-runner
+states:
+  browser-ready:
+    intent: A fresh graph path begins in the runner's blank browser page.
+    assert:
+    - use: blank-browser-ready
+  task-runner-dialog-open:
+    intent: The agent creation dialog exposes the Task Runner template.
+    assert:
+    - expect:
+        visible:
+          testid: create-agent-template-task
+  task-runner-template-selected:
+    intent: The Task Runner template is selected and its form is ready.
+    assert:
+    - expect:
+        visible:
+          testid: create-agent-name
+  scenario-1-task-runner-modal-creates-a-single-repo-worker-w:
+    intent: task runner modal creates a single-repo worker with a worktree
+    testIntent: An operator creates a Task Runner scoped to one repo through CreateAgentModal and verifies the stored agent plus materialized worktree
+    terminal: true
+    assert:
+    - expect:
+        text: worker-modal-a-${RUN_ID:-local}
+  scenario-2-task-runner-modal-creates-a-workspace-scope-work:
+    intent: task runner modal creates a workspace-scope worker in every repo
+    testIntent: An operator deselects every repo chip so a Task Runner takes workspace-wide scope and gets a worktree for every repo
+    terminal: true
+    assert:
+    - expect:
+        text: worker-cross-${RUN_ID:-local}
+  scenario-3-task-runner-backend-dropdown-selection-is-honore:
+    intent: task runner backend dropdown selection is honored
+    testIntent: An operator selects a non-default backend for a Task Runner and verifies that backend is stored on the agent
+    terminal: true
+    assert:
+    - expect:
+        text: worker-claude-${RUN_ID:-local}
+  scenario-4-task-runner-name-validation-blocks-invalid-names:
+    intent: task runner name validation blocks invalid names and lowercases valid names
+    testIntent: An operator cannot submit invalid Task Runner names and sees a valid uppercase entry normalized to lowercase storage
+    terminal: true
+    assert:
+    - expect:
+        text: worker-b-${RUN_ID:-local}
+  scenario-5-duplicate-task-runner-name-stays-in-the-dialog-w:
+    intent: duplicate task runner name stays in the dialog with a conflict
+    testIntent: An operator reusing an existing Task Runner name sees the server conflict in the dialog and no second agent is created
+    terminal: true
+    assert:
+    - expect:
+        visible:
+          testid: create-agent-error
+  scenario-6-delegation-assigns-and-starts-the-task-runner-in:
+    intent: delegation assigns and starts the task runner in the control plane
+    testIntent: An operator delegates an open designed task to a UI-created Task Runner and verifies the issue and agent record that work was started
+    terminal: true
+    assert:
+    - wait:
+        fn: '!Array.from(document.querySelectorAll("section[data-status=ready] article")).some((el) => el.textContent.includes(''task-runner delegation ${RUN_ID:-local}'')) && Array.from(document.querySelectorAll("section[data-status=in_progress] article")).some((el) => el.textContent.includes(''task-runner delegation ${RUN_ID:-local}''))'
+      intent: Wait until the board moves the delegated issue from Ready to In Progress
+    - expect:
+        count:
+          selector: section[data-status=ready] article[aria-label*='task-runner delegation ${RUN_ID:-local}']
+          equals: 0
+  scenario-7-task-runner-with-no-designed-ready-work-exits-id:
+    intent: task runner with no designed ready work exits idle without a session
+    testIntent: A Task Runner started when only a designless open task exists reports no work and leaves that task untouched
+    terminal: true
+    assert:
+    - expect:
+        text: idle-${RUN_ID:-local}
+  scenario-8-task-runner-source-repo-scope-filters-ready-work:
+    intent: task runner source-repo scope filters ready work
+    testIntent: A Task Runner scoped to repo B ignores designed work attributed to repo A, and the positive control proves that repo A work was available
+    terminal: true
+    assert:
+    - expect:
+        text: scoped-${RUN_ID:-local}
+  scenario-9-task-runner-logs-tab-shows-archive-mode-and-seed:
+    intent: task runner logs tab shows archive mode and seeded content
+    testIntent: An operator opens a Task Runner Logs tab, sees the empty archive state, then refreshes runtime-seeded archive content
+    terminal: true
+    assert:
+    - wait:
+        text: AFT-TASK-LOG-MARKER
+    - expect:
+        visible:
+          testid: terminal-container
+    - expect:
+        attr:
+          testid: log-status
+          name: data-state
+          equals: connected
+    - expect:
+        text: ARCHIVE SNAPSHOT
+  scenario-10-task-runner-appears-on-every-agent-surface-with-:
+    intent: task runner appears on every agent surface with background identity
+    testIntent: An operator can discover a newly created Task Runner from the agents rail, workspace tree, monitor, and agent detail deep link
+    terminal: true
+    assert:
+    - wait:
+        fn: "!!document.querySelector('[data-testid=agent-activity-panel]') && document.body.textContent.includes('worker-a-${RUN_ID:-local}')"
+      intent: Wait until the monitor status cache refresh exposes worker-a
+    - expect:
+        notText: No agents found
+  scenario-11-quarantined-task-renders-the-visible-quarantine-:
+    intent: quarantined task renders the visible quarantine badge
+    testIntent: An operator sees the board badge for a task whose terminal daemon state marks it quarantined
+    terminal: true
+    assert:
+    - wait:
+        fn: Array.from(document.querySelectorAll("section[data-status=blocked] article")).some((el) => el.textContent.includes('task-runner quarantine ${RUN_ID:-local}'))
+      intent: Wait until the quarantined task appears in the Blocked column
+    - expect:
+        count:
+          selector: section[data-status=blocked] article[aria-label*='task-runner quarantine ${RUN_ID:-local}']
+          equals: 1
+    - expect:
+        visible:
+          selector: section[data-status=blocked] article[aria-label*='task-runner quarantine ${RUN_ID:-local}'] [aria-label='Task quarantined']
+    - expect:
+        attr:
+          selector: section[data-status=blocked] article[aria-label*='task-runner quarantine ${RUN_ID:-local}'] [aria-label='Task quarantined']
+          name: title
+          equals: Task quarantined by daemon after repeated no-progress kills — see comment for the kill timeline
+    - expect:
+        text: Quarantined

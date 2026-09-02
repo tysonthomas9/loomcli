@@ -1,0 +1,373 @@
+kind: graph-steps
+version: 1
+flow: lead-agents
+blocks:
+  case-03-lead-template-creates-an-interactive-lead-agent-and-role:
+    steps:
+      - use: choose-lead-template
+        with:
+          path: /ws/E2E-WS-LEAD/agents
+          readyIntent: Wait until the agents page is ready
+          dialogIntent: Wait until the agent creation dialog is open
+      - fill:
+          testid: create-agent-name
+          value: atlas-${RUN_ID:-local}
+      - click:
+          testid: create-agent-submit
+      - wait:
+          fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('atlas-${RUN_ID:-local}')"
+        intent: Wait until the lead create dialog closes and the new lead appears
+      - run: |
+          set -e
+          name="atlas-${RUN_ID:-local}"
+          # budget: db-persist (10s) - modal submit writes the lead agent row before readback.
+          for i in $(seq 1 10); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/agents" > "$AFT_WORK_DIR/lead-d1-agents.json" &&
+            python3 - "$AFT_WORK_DIR/lead-d1-agents.json" "$name" <<'PY' && exit 0
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          name = sys.argv[2]
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          matches = [a for a in agents or [] if a.get("name") == name]
+          assert len(matches) == 1, agents
+          a = matches[0]
+          assert a.get("role_name") == "lead", a
+          assert not a.get("auto"), a
+          PY
+            sleep 1
+          done
+          echo "lead agent never persisted"
+          cat "$AFT_WORK_DIR/lead-d1-agents.json" 2>/dev/null || true
+          exit 1
+        intent: An operator's readback selects the created lead from the unordered agent list and pins role_name plus auto
+      - run: |
+          set -e
+          LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-LEAD role list --json > "$AFT_WORK_DIR/lead-d1-roles.json"
+          python3 - "$AFT_WORK_DIR/lead-d1-roles.json" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          roles = d if isinstance(d, list) else d.get("roles", d.get("data", []))
+          matches = [r for r in roles if r.get("name") == "lead"]
+          assert len(matches) == 1, roles
+          r = matches[0]
+          assert r.get("kind") == "interactive", r
+          assert not (r.get("prompt") or "").strip(), r
+          assert not (r.get("prompt_file") or "").strip(), r
+          PY
+        intent: An operator's CLI readback confirms the auto-created lead role is interactive with no prompt override
+      - api:
+          method: GET
+          path: /api/workspaces/E2E-WS-LEAD/agents/atlas-${RUN_ID:-local}/git/diff-stat
+          status: 404
+          assert:
+            - path: error
+              contains: agent worktree
+        intent: An operator confirms the interactive lead did not get an agent worktree at creation time
+  terminal-03-lead-template-creates-an-interactive-lead-agent-and-role:
+    steps:
+      - expect:
+          visible:
+            selector: body
+  case-04-lead-backend-dropdown-selects-the-runtime:
+    steps:
+      - use: open-create-agent-dialog
+        with:
+          path: /ws/E2E-WS-LEAD/agents
+          readyIntent: Wait until the agents page is ready for backend selection
+          dialogIntent: Wait until the agent creation dialog is open
+      - click:
+          testid: create-agent-template-lead
+      - fill:
+          testid: create-agent-name
+          value: atlas-cl-${RUN_ID:-local}
+      - wait:
+          fn: document.querySelectorAll('[data-testid=create-agent-backend] option').length > 1
+        intent: Wait until backend options are loaded before selecting claude
+      - select:
+          testid: create-agent-backend
+          value: claude
+      - click:
+          testid: create-agent-submit
+      - wait:
+          fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('atlas-cl-${RUN_ID:-local}')"
+        intent: Wait until the Claude-backed lead appears after submit
+      - run: |
+          set -e
+          name="atlas-cl-${RUN_ID:-local}"
+          # budget: db-persist (10s) - modal submit writes the claude lead row before readback.
+          for i in $(seq 1 10); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/agents" > "$AFT_WORK_DIR/lead-d2-agents.json" &&
+            python3 - "$AFT_WORK_DIR/lead-d2-agents.json" "$name" <<'PY' && exit 0
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          name = sys.argv[2]
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          matches = [a for a in agents or [] if a.get("name") == name]
+          assert len(matches) == 1, agents
+          a = matches[0]
+          assert a.get("role_name") == "lead", a
+          assert a.get("backend") == "claude", a
+          assert not a.get("auto"), a
+          PY
+            sleep 1
+          done
+          echo "Claude-backed lead agent never persisted"
+          cat "$AFT_WORK_DIR/lead-d2-agents.json" 2>/dev/null || true
+          exit 1
+        intent: An operator's readback confirms the selected backend persisted on the lead agent
+      - run: |
+          set -e
+          name="atlas-cl-${RUN_ID:-local}"
+          # budget: terminal-launch (40s) - terminal/session must return the persisted launch spec.
+          for i in $(seq 1 20); do
+            curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/agents/$name/terminal/session" > "$AFT_WORK_DIR/lead-d2-terminal.json" &&
+            python3 - "$AFT_WORK_DIR/lead-d2-terminal.json" "$AFT_WORK_DIR/leadSession-atlas-cl" "$name" <<'PY' && exit 0
+          import json, sys
+          d = json.load(open(sys.argv[1]))["data"]
+          name = sys.argv[3]
+          assert d.get("backend") == "claude", d
+          assert d.get("agent_id") == name, d
+          assert d.get("role") == "lead", d
+          launch = d.get("launch") or {}
+          argv = " ".join(str(x) for x in (launch.get("argv") or []))
+          env = launch.get("env") or {}
+          assert "'--backend' 'claude'" in argv, argv
+          assert argv.rstrip().endswith("'lead'"), argv
+          assert env.get("LOOM_BACKEND") == "claude", env
+          assert env.get("LOOM_AGENT_NAME") == name, env
+          open(sys.argv[2], "w", encoding="utf-8").write(d["session_name"])
+          PY
+            sleep 2
+          done
+          echo "Claude-backed lead terminal launch metadata never resolved"
+          cat "$AFT_WORK_DIR/lead-d2-terminal.json" 2>/dev/null || true
+          exit 1
+        intent: An operator reads back the Claude lead terminal launch contract from the agent session endpoint
+  terminal-04-lead-backend-dropdown-selects-the-runtime:
+    steps:
+      - expect:
+          visible:
+            selector: body
+  case-05-lead-repo-scope-round-trips-workspace-wide-and-pinned-ch:
+    steps:
+      - use: open-create-agent-dialog
+        with:
+          path: /ws/E2E-WS-LEAD/agents
+          readyIntent: Wait until the agents page is ready for workspace-wide lead creation
+          dialogIntent: Wait until the agent creation dialog is open
+      - click:
+          testid: create-agent-template-lead
+      - fill:
+          testid: create-agent-name
+          value: atlas-all-${RUN_ID:-local}
+      - click:
+          selector: "[data-testid='create-agent-repo-chips'] button"
+          first: true
+      - wait:
+          fn: |-
+            (() => {
+              const text = document.body.textContent.replace(/\s+/g, ' ');
+              return text.includes('No repo selected — the agent gets workspace-wide scope.');
+            })()
+        intent: Wait until the workspace-wide scope copy is rendered after clearing the repo chip
+      - expect:
+          text: No repo selected — the agent gets workspace-wide scope.
+      - click:
+          testid: create-agent-submit
+      - wait:
+          fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('atlas-all-${RUN_ID:-local}')"
+        intent: Wait until the workspace-wide lead appears after submit
+      - click:
+          role: button
+          name: + Add agent
+          exact: true
+      - wait:
+          fn: |-
+            (() => {
+              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
+              if (overlay) {
+                window.__aftCreateAgentOverlayWaitStartedAt = 0;
+                return true;
+              }
+              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
+                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
+              }
+              const add = Array.from(document.querySelectorAll('button'))
+                .some((b) => (b.textContent || '').trim() === '+ Add agent');
+              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
+                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
+              }
+              return false;
+            })()
+        intent: Wait until the agent creation dialog is open for the pinned lead
+      - click:
+          testid: create-agent-template-lead
+      - fill:
+          testid: create-agent-name
+          value: atlas-pin-${RUN_ID:-local}
+      - click:
+          testid: create-agent-submit
+      - wait:
+          fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('atlas-pin-${RUN_ID:-local}')"
+        intent: Wait until the repo-pinned lead appears after submit
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/agents" > "$AFT_WORK_DIR/lead-d3-agents.json"
+          python3 - "$AFT_WORK_DIR/lead-d3-agents.json" "atlas-all-$run" "atlas-pin-$run" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          by_name = {a.get("name"): a for a in agents or []}
+          all_name, pin_name = sys.argv[2], sys.argv[3]
+          assert all_name in by_name and pin_name in by_name, agents
+          all_agent = by_name[all_name]
+          pin_agent = by_name[pin_name]
+          assert all_agent.get("role_name") == "lead", all_agent
+          assert all_agent.get("cross_repo") is True, all_agent
+          assert (all_agent.get("repos") or []) == [], all_agent
+          assert pin_agent.get("role_name") == "lead", pin_agent
+          assert not pin_agent.get("cross_repo"), pin_agent
+          assert pin_agent.get("repos") == ["lead-repo"], pin_agent
+          PY
+        intent: An operator's readback confirms lead repo-scope choices persisted with omitempty-safe booleans
+  terminal-05-lead-repo-scope-round-trips-workspace-wide-and-pinned-ch:
+    steps:
+      - expect:
+          visible:
+            selector: "[aria-label='Agent: atlas-pin-${RUN_ID:-local}']"
+  case-06-lead-name-validation-blocks-invalid-submit:
+    steps:
+      - use: open-create-agent-dialog
+        with:
+          path: /ws/E2E-WS-LEAD/agents
+          readyIntent: Wait until the agents page is ready for lead name validation
+          dialogIntent: Wait until the agent creation dialog is open
+      - click:
+          testid: create-agent-template-lead
+      - expect:
+          enabled:
+            testid: create-agent-submit
+            equals: false
+      - fill:
+          testid: create-agent-name
+          value: Atlas
+      - expect:
+          enabled:
+            testid: create-agent-submit
+            equals: true
+      - fill:
+          testid: create-agent-name
+          value: -atlas
+      - expect:
+          enabled:
+            testid: create-agent-submit
+            equals: false
+      - fill:
+          testid: create-agent-name
+          value: atlas!
+      - expect:
+          enabled:
+            testid: create-agent-submit
+            equals: false
+      - click:
+          testid: create-agent-close
+  terminal-06-lead-name-validation-blocks-invalid-submit:
+    steps:
+      - expect:
+          count:
+            testid: create-agent-overlay
+            equals: 0
+  case-07-duplicate-lead-name-renders-the-server-error-inline:
+    steps:
+      - use: choose-lead-template
+        with:
+          path: /ws/E2E-WS-LEAD/agents
+          readyIntent: Wait until the agents page is ready for duplicate lead creation
+          dialogIntent: Wait until the agent creation dialog is open
+      - fill:
+          testid: create-agent-name
+          value: atlas-${RUN_ID:-local}
+      - click:
+          testid: create-agent-submit
+      - wait:
+          fn: "!!document.querySelector('[data-testid=create-agent-error]')"
+        intent: Wait until the duplicate-name server error is rendered before asserting visibility
+      - expect:
+          visible:
+            testid: create-agent-error
+      - expect:
+          visible:
+            testid: create-agent-overlay
+      - run: |
+          set -e
+          name="atlas-${RUN_ID:-local}"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/agents" > "$AFT_WORK_DIR/lead-d5-agents.json"
+          python3 - "$AFT_WORK_DIR/lead-d5-agents.json" "$name" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          matches = [a for a in agents or [] if a.get("name") == sys.argv[2]]
+          assert len(matches) == 1, agents
+          PY
+        intent: An operator's readback confirms the duplicate submit did not create a second same-named lead
+      - click:
+          testid: create-agent-close
+  terminal-07-duplicate-lead-name-renders-the-server-error-inline:
+    steps:
+      - expect:
+          count:
+            testid: create-agent-overlay
+            equals: 0
+  case-08-second-lead-reuses-the-existing-lead-role:
+    steps:
+      - use: choose-lead-template
+        with:
+          path: /ws/E2E-WS-LEAD/agents
+          readyIntent: Wait until the agents page is ready for the second lead
+          dialogIntent: Wait until the agent creation dialog is open
+      - fill:
+          testid: create-agent-name
+          value: atlas-b-${RUN_ID:-local}
+      - click:
+          testid: create-agent-submit
+      - wait:
+          fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('atlas-b-${RUN_ID:-local}')"
+        intent: Wait until the second Lead agent appears after submit
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/agents" > "$AFT_WORK_DIR/lead-d6-agents.json"
+          python3 - "$AFT_WORK_DIR/lead-d6-agents.json" "atlas-$run" "atlas-b-$run" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          by_name = {a.get("name"): a for a in agents or []}
+          for name in sys.argv[2:]:
+              assert name in by_name, agents
+              assert by_name[name].get("role_name") == "lead", by_name[name]
+              assert not by_name[name].get("auto"), by_name[name]
+          PY
+        intent: An operator's readback confirms both lead agents point at role_name lead
+      - run: |
+          set -e
+          LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-LEAD role list --json > "$AFT_WORK_DIR/lead-d6-roles.json"
+          python3 - "$AFT_WORK_DIR/lead-d6-roles.json" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          roles = d if isinstance(d, list) else d.get("roles", d.get("data", []))
+          matches = [r for r in roles if r.get("name") == "lead"]
+          assert len(matches) == 1, roles
+          assert matches[0].get("kind") == "interactive", matches[0]
+          PY
+        intent: An operator's CLI readback confirms the second Lead reused the one interactive lead role
+  terminal-08-second-lead-reuses-the-existing-lead-role:
+    steps:
+      - expect:
+          visible:
+            selector: body

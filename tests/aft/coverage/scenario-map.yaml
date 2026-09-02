@@ -1,0 +1,498 @@
+kind: aft-scenario-map
+version: 1
+asOf: 2026-09-02
+
+scope:
+  gate: default deterministic AFT corpus
+  executions: 152
+  productExecutions: 131
+  surfaceContractExecutions: 21
+  observedBaseline:
+    passed: 147
+    failed: 5
+    runId: 2026-09-02T07:59:02.171Z
+  excludedTiers:
+    - live-interactive-suites
+    - live-pr-review-suites
+    - live-worker-suites
+    - real-suites
+    - real-suites-claude
+    - real-suites-cursor
+    - real-suites-opencode
+    - real-suites-podman
+    - real-terminal-suites
+
+executionInvariants:
+  - Every graph leaf is an independent execution with a fresh browser session.
+  - Shared graph setup and teardown run once per graph package when fixtureScope is graph.
+  - A leaf replays every shared transition on its path; no prior leaf supplies product state.
+  - Product journeys and surface contracts remain separate graphs when their fixture or proof semantics differ.
+  - A migrated graph preserves the legacy scenario name, intent, route stubs, and ordered mechanics; graph-state assertions may add explicit observable proofs.
+  - Known failures remain represented until the underlying product or scenario defect is fixed.
+
+census:
+  note: Reachability counts are discovery signals, not behavioral proof.
+  routes: { reached: 13, total: 14 }
+  components: { reached: 47, total: 53 }
+  endpoints: { reached: 60, total: 83, limitation: method is not distinguished }
+  testids: { reached: 289, total: 477, limitation: mounted or rendered only }
+
+storyAudit:
+  registry: docs/qa/feature-user-stories.tsv
+  note: These browser-observable story IDs lack complete default AFT proof; each maps to explicit coverage gaps and a current disposition.
+  unannotated:
+    - { story: LCLI-AD-015, disposition: implementation-gap, gap: AFT-IMPL-ISSUE-DETAIL-AGENT-START }
+    - { story: LCLI-DV-008, disposition: partial, gaps: [AFT-GAP-ACTIVITY-CONTENT, AFT-GAP-WORKFLOW-TERMINALS, AFT-GAP-PR-QUEUE-NONEMPTY, AFT-GAP-PR-DETAIL-ROUTE] }
+    - { story: LCLI-IW-007, disposition: missing, gap: AFT-GAP-FILES-JOURNEYS }
+    - { story: LCLI-IW-010, disposition: partial, gap: AFT-GAP-BRANCH-DIFF-REVIEW }
+    - { story: LCLI-IW-014, disposition: missing, gap: AFT-GAP-TASK-CARD-RUN-INDICATORS }
+    - { story: LCLI-PS-003, disposition: missing, gap: AFT-GAP-ONBOARDING }
+    - { story: LCLI-RA-001, disposition: partial, gap: AFT-GAP-PR-QUEUE-NONEMPTY }
+    - { story: LCLI-RA-009, disposition: partial, gap: AFT-GAP-BRANCH-DIFF-REVIEW }
+    - { story: LCLI-RA-010, disposition: implementation-gap, gap: AFT-GAP-PR-DETAIL-ROUTE }
+    - { story: LCLI-RA-011, disposition: implementation-gap, gap: AFT-IMPL-PR-REF-DIFF }
+    - { story: LCLI-RA-012, disposition: implementation-gap, gap: AFT-IMPL-PR-REVIEW-AGENT }
+    - { story: LCLI-RA-013, disposition: implementation-gap, gaps: [AFT-IMPL-GITHUB-REVIEW-DECISION, AFT-GAP-REAL-REVIEW-DECISION] }
+    - { story: LCLI-RA-014, disposition: partial, gap: AFT-GAP-PR-CHROME }
+
+families:
+  - id: issues.creation
+    status: partial
+    owns:
+      routes: ["/ws/:workspaceId/kanban"]
+      components: [CreateIssueModal, IssueCard, IssueDetailPanel]
+    scenarios:
+      - tests/aft/suites/issue-create-ui.graph/flow.graph.yaml
+    proves:
+      - blank-title validation
+      - basic durable creation and one creation event
+      - full-field type, description, and deferred-status persistence
+      - soft-duplicate warning, Show existing, and explicit Create anyway
+    missing:
+      - id: AFT-GAP-ISSUE-CREATE-FAILURE
+        status: missing
+        priority: P1
+        scenario: A rejected or interrupted create remains editable and succeeds on an intentional retry without duplication.
+
+  - id: issues.detail
+    status: partial
+    owns:
+      routes: ["/ws/:workspaceId/issues/:issueId", "/ws/:workspaceId/kanban"]
+      components: [IssueDetailPanel, IssueDetailView, EditableTitle, StatusDropdown]
+    scenarios:
+      - tests/aft/suites/issue-detail.graph/flow.graph.yaml
+      - tests/aft/suites/issue-detail.test.yaml
+      - tests/aft/suites/comments.test.yaml
+      - tests/aft/suites/issue-lifecycle.test.yaml
+      - tests/aft/suites/markdown-safety.test.yaml
+    proves:
+      - description, title, type, priority, owner, label, status, and dependency persistence
+      - comment persistence and blank-comment rejection
+      - mounted panel completeness and markdown sanitization
+    missing:
+      - id: AFT-GAP-STANDALONE-DETAIL
+        status: implementation-gap
+        priority: P1
+        code: internal/webui/frontend/src/components/IssueDetailView/IssueDetailView.tsx
+        scenario: The standalone issue route provides the same editing, comment, lifecycle, and error behavior as the slide-over panel.
+      - id: AFT-GAP-ACTIVITY-CONTENT
+        status: missing
+        priority: P1
+        scenario: Activity event rows expose actor, timestamp, mutation type, close reason, and their total ordering with comments.
+      - id: AFT-IMPL-ISSUE-DETAIL-AGENT-START
+        status: implementation-gap
+        priority: P0
+        stories: [LCLI-AD-015]
+        code:
+          component: internal/webui/frontend/src/components/IssueDetailPanel/actions/StartWorkButton.tsx
+          missingMount: internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx
+        finding: StartWorkButton implements Start Work and Review with Agent, but no production component imports or mounts it.
+      - id: AFT-GAP-ISSUE-DEPENDENCY-EDITING
+        status: missing
+        priority: P0
+        stories: [LCLI-WP-004]
+        code:
+          section: internal/webui/frontend/src/components/IssueDetailPanel/sections/DependencySection.tsx
+          picker: internal/webui/frontend/src/components/IssueDetailPanel/sections/DependencySearchPicker.tsx
+        scenario: An operator adds and removes a blocking dependency through issue detail, invalid self or cyclic edges are rejected visibly, and the detail, board, and graph projections converge.
+      - id: AFT-IMPL-DESIGN-ACCEPTANCE-EDITING
+        status: implementation-gap
+        priority: P1
+        stories: [LCLI-WP-006]
+        code:
+          renderer: internal/webui/frontend/src/components/IssueDetailPanel/sections/DesignPanel.tsx
+          panel: internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx
+          contract: internal/webui/frontend/src/api/issues/issues.ts
+        finding: Issue detail only renders existing design content, and acceptance_criteria is present in the API contract but has no production issue-detail or create-form editor or renderer.
+      - id: AFT-GAP-EPIC-ROLLUP
+        status: missing
+        priority: P0
+        stories: [LCLI-WP-005]
+        code: internal/webui/frontend/src/components/IssueDetailPanel/sections/EpicRollup.tsx
+        scenario: A seeded epic summarizes child status, ownership, dependencies, and progress, navigates to a selected child, and remains coherent after an update and reload.
+
+  - id: issues.board-views
+    status: partial
+    owns:
+      routes: ["/ws/:workspaceId/kanban", "/ws/:workspaceId/list", "/ws/:workspaceId/table", "/ws/:workspaceId/graph"]
+      components: [KanbanBoard, SwimLaneBoard, IssueTable, GraphView, GraphControls, AssigneePrompt]
+    scenarios:
+      - tests/aft/suites/views.test.yaml
+      - tests/aft/suites/filters.test.yaml
+      - tests/aft/suites/table-bulk.test.yaml
+      - tests/aft/suites/dependencies-graph.test.yaml
+    missing:
+      - id: AFT-GAP-KANBAN-DRAG
+        status: missing
+        priority: P0
+        stories: [LCLI-WP-003]
+        scenario: Dragging a Ready card to In Progress opens the assignee prompt, persists the chosen assignee, and survives reload.
+      - id: AFT-GAP-GRAPH-FILTERS
+        status: missing
+        priority: P2
+        scenario: Graph filters, closed-item visibility, selection highlight, and deep-linked selection compose without losing state while the viewport is zoomed or fit.
+      - id: AFT-GAP-GRAPH-READY-HIGHLIGHT
+        status: missing
+        priority: P0
+        stories: [LCLI-DV-005]
+        code:
+          controls: internal/webui/frontend/src/components/GraphControls/GraphControls.tsx
+          graph: internal/webui/frontend/src/components/GraphView/GraphView.tsx
+        scenario: Ready highlighting distinguishes actionable nodes from blocked chains and remains correct while filters, selection, zoom, and fit are composed.
+      - id: AFT-IMPL-BLOCKED-SUMMARY
+        status: implementation-gap
+        priority: P0
+        stories: [LCLI-DV-005]
+        code:
+          component: internal/webui/frontend/src/components/BlockedSummary/BlockedSummary.tsx
+          exportsOnly: internal/webui/frontend/src/components/index.ts
+        finding: BlockedSummary implements the blocked-issue badge and navigation dropdown, but no production surface imports and mounts it.
+      - id: AFT-GAP-TABLE-METADATA
+        status: missing
+        priority: P1
+        scenario: Table priority and assignee bulk edits, sorting, clear-selection, and partial-failure recovery preserve explicit row outcomes.
+      - id: AFT-GAP-TASK-CARD-RUN-INDICATORS
+        status: missing
+        priority: P0
+        stories: [LCLI-IW-014]
+        code:
+          projection: internal/webui/frontend/src/components/IssueCard/cardAgentView.ts
+          row: internal/webui/frontend/src/components/IssueCard/AgentRow.tsx
+        scenario: Task cards distinguish active, stale, offline, failed, and review-ready agent runs and expose compact recovery context without opening issue detail.
+
+  - id: issues.realtime
+    status: partial
+    owns:
+      components: [StaleDataBanner, ConnectionStatus]
+      services: [workspace mutation SSE, issue projection reconciliation]
+    scenarios:
+      - tests/aft/suites/smoke.test.yaml
+      - tests/aft/suites/sse-resilience.test.yaml
+      - tests/aft/suites/comments.test.yaml
+    proves:
+      - an API-created issue appears without reload
+      - one disconnect and cursor catch-up clears stale state
+      - comments converge while the detail panel is mounted
+    missing:
+      - id: AFT-GAP-SSE-AGGREGATE
+        status: missing
+        priority: P0
+        stories: [LCLI-IW-004, LCLI-RA-007, LCLI-OPS-012]
+        scenario: External label and dependency mutations update board plus detail projections through both mutation endpoints, then reconnect without duplicates, regression, or cross-workspace leakage.
+
+  - id: workspaces.lifecycle
+    status: partial
+    owns:
+      routes: ["/ws/:workspaceId/workspace"]
+      components: [CreateWorkspaceModal, AddRepoModal, ConfirmDialog, WorkspaceSwitcher, WorkspaceTree]
+    scenarios:
+      - tests/aft/suites/workspaces.graph/flow.graph.yaml
+      - tests/aft/suites/workspace-mgmt.test.yaml
+      - tests/aft/surface-suites/workspace-order.test.yaml
+    proves:
+      - empty and local workspace creation
+      - repository add and remove
+      - rename, ordering, switching, and workspace isolation
+    missing:
+      - id: AFT-GAP-WORKSPACE-DELETE
+        status: missing
+        priority: P1
+        scenario: Workspace deletion, undo or recovery, failed creation, and job failure expose durable outcomes without leaving a ghost route.
+      - id: AFT-GAP-WORKSPACE-MULTIREPO-VIEW
+        status: missing
+        priority: P1
+        scenario: A seeded multi-repository workspace opens its workspace route, renders each repository, and preserves repository and route selection across reload.
+
+  - id: agents.custom-prompts
+    status: covered
+    owns:
+      routes: ["/ws/:workspaceId/agents", "/ws/:workspaceId/agents/:agentName"]
+      components: [CreateAgentModal, AgentsSidebar, AgentDetailPanel]
+    scenarios:
+      - tests/aft/suites/zz-custom-prompt.graph/flow.graph.yaml
+      - tests/aft/surface-suites/custom-prompt-contracts.test.yaml
+    proves:
+      - prompt validation, normalization, persistence, bounds, rendering safety, backend, repository scope, argv, and collision behavior
+
+  - id: agents.leads
+    status: partial
+    owns:
+      components: [CreateAgentModal, AgentWorkPanel, AgentDetailPanel, TerminalView]
+    scenarios:
+      - tests/aft/suites/zz-lead-agent.graph/flow.graph.yaml
+    missing:
+      - id: AFT-GAP-DIRECT-START-AGENT
+        status: missing
+        priority: P1
+        scenario: The direct Start Agent control launches, reconnects to, stops, and restarts a non-ephemeral background agent with visible failure handling.
+
+  - id: agents.planners
+    status: covered
+    owns:
+      components: [CreateAgentModal, AgentsSidebar, AgentWorkPanel]
+    scenarios:
+      - tests/aft/suites/zz-planner-agent.graph/flow.graph.yaml
+      - tests/aft/surface-suites/planner-contracts.test.yaml
+
+  - id: agents.task-runners
+    status: covered
+    owns:
+      components: [CreateAgentModal, AgentCard, AgentDetailPanel, AgentActivityPanel]
+    scenarios:
+      - tests/aft/suites/zz-task-runner.graph/flow.graph.yaml
+      - tests/aft/surface-suites/agent-lifecycle-contracts.graph/flow.graph.yaml
+
+  - id: agents.run-evidence
+    status: partial
+    owns:
+      components: [AgentDetailPanel, CodeMirrorEditor]
+      services: [sessions, transcript, diff, run detail, artifacts]
+    scenarios:
+      - tests/aft/suites/zz-agent-flow.graph/flow.graph.yaml
+    proves:
+      - one seeded changed file appears in an agent Diff tab and opens as a per-file patch
+    missing:
+      - id: AFT-GAP-BRANCH-DIFF-REVIEW
+        status: missing
+        priority: P0
+        stories: [LCLI-IW-010, LCLI-RA-009]
+        code:
+          status: internal/webui/frontend/src/components/AgentDetailPanel/GitTab.tsx
+          diff: internal/webui/frontend/src/components/AgentDetailPanel/DiffTab.tsx
+          patch: internal/webui/frontend/src/components/AgentDetailPanel/DiffFileViewer.tsx
+        scenario: Agent review composes branch status, ahead and behind counts, target changes, multi-file patches, conflicts, and push, pull, sync, PR, and reset action states for the selected workspace.
+      - id: AFT-GAP-WORKFLOW-TERMINALS
+        status: missing
+        priority: P0
+        scenario: Failed, cancelled, and needs-review runs retain coherent task, session, transcript, diff, artifact, usage, and reconnect evidence.
+      - id: AFT-GAP-WORKFLOW-SUSPEND-RESUME
+        status: missing
+        priority: P0
+        scenario: A suspended-awaiting-event run remains nonterminal through reconnect, resumes exactly once on its event or timeout, and reaches a coherent terminal outcome.
+      - id: AFT-GAP-SUBAGENT-TRANSCRIPT-UI
+        status: implementation-gap
+        priority: P1
+        code:
+          service: internal/webui/svcimpl/session_service.go
+          handlers: internal/webui/handlers/misc/sessions.go
+          missingRegistration: internal/webui/app
+          missingConsumer: internal/webui/frontend/src
+        scenario: A captured subagent appears under its parent session and opens its canonical transcript without confusing parent and child identity.
+
+  - id: reviews.pull-requests
+    status: partial
+    owns:
+      routes: ["/ws/:workspaceId/prs"]
+      components: [PRDiscussionPanel]
+    scenarios:
+      - tests/aft/suites/zz-pr-review-agents.graph/flow.graph.yaml
+      - tests/aft/suites/review-queue.test.yaml
+      - tests/aft/suites/pr-workspace-degraded.test.yaml
+      - tests/aft/surface-suites/pr-contracts.test.yaml
+      - tests/aft/surface-suites/review-actions.graph/flow.graph.yaml
+    missing:
+      - id: AFT-GAP-PR-QUEUE-NONEMPTY
+        status: missing
+        priority: P1
+        stories: [LCLI-DV-008, LCLI-RA-001]
+        scenario: A multi-row review queue filters and groups review work, then preserves query selection through detail navigation and back navigation.
+      - id: AFT-GAP-PR-DETAIL-ROUTE
+        status: implementation-gap
+        priority: P1
+        stories: [LCLI-RA-010]
+        code:
+          router: internal/webui/frontend/src/router.tsx
+          queryConsumer: internal/webui/frontend/src/views/PRsPage.tsx
+        scenario: Linked and taskless pull requests open at /ws/:workspaceId/prs/:repo/:number with checks, decisions, task links, and refresh-safe back navigation.
+      - id: AFT-IMPL-PR-REF-DIFF
+        status: implementation-gap
+        priority: P1
+        stories: [LCLI-RA-011]
+        code:
+          routes: internal/webui/handlers/git/module.go
+          existingWorktreeDiff: internal/webui/handlers/git/diff.go
+        finding: The backend exposes agent and worktree diff routes, but has no PR-ref file-list or per-file patch route for taskless or external pull requests.
+      - id: AFT-IMPL-PR-REVIEW-AGENT
+        status: implementation-gap
+        priority: P1
+        stories: [LCLI-RA-012]
+        code:
+          workspace: internal/webui/frontend/src/views/PRReviewWorkspace.tsx
+          agentControl: internal/webui/handlers/agentcontrol/handlers.go
+        finding: Review starts normal issue-scoped agents; there is no persisted owner/repo/number-keyed review-agent lifecycle or isolated PR review worktree.
+      - id: AFT-GAP-PR-CHROME
+        status: missing
+        priority: P1
+        stories: [LCLI-RA-014]
+        code:
+          detail: internal/webui/frontend/src/components/IssueDetailPanel/sections/PRSection.tsx
+          card: internal/webui/frontend/src/components/IssueCard/IssueCard.tsx
+          epic: internal/webui/frontend/src/components/IssueDetailPanel/sections/EpicRollup.tsx
+        scenario: A linked pull request renders coherent state on its task card, issue-detail PR section, and epic rollup, then updates those projections without requiring queue navigation.
+      - id: AFT-IMPL-GITHUB-REVIEW-DECISION
+        status: implementation-gap
+        priority: P0
+        stories: [LCLI-RA-013]
+        code:
+          service: internal/webui/service/review_decision.go
+          workspace: internal/webui/frontend/src/views/PRReviewWorkspace.tsx
+          pullRequests: internal/webui/handlers/git/pull_requests.go
+        finding: GitHub-linked review decisions fail closed before Loom mutation because no GitHub approve, request-changes, merge, or CI-gate executor is wired.
+      - id: AFT-GAP-REAL-REVIEW-DECISION
+        status: opt-in-live
+        priority: P1
+        stories: [LCLI-RA-013]
+        scenario: After the GitHub decision executor is implemented, an opt-in credentialed proof shows approve, request changes, and merge converge real GitHub and Loom state with retry after a partial external commit.
+
+  - id: workspaces.settings
+    status: partial
+    owns:
+      routes: ["/ws/:workspaceId/settings"]
+      components: [SettingsView, UserMenu, AIBackendSetupList]
+    scenarios:
+      - tests/aft/suites/settings-design-format.test.yaml
+      - tests/aft/surface-suites/design-format-legacy.test.yaml
+    missing:
+      - id: AFT-GAP-SETTINGS-BREADTH
+        status: missing
+        priority: P1
+        scenario: Backend availability, GitHub, Redis, editor, onboarding, and OpenCode settings round-trip and expose invalid or unavailable states.
+
+  - id: workspaces.files
+    status: partial
+    stories: [LCLI-IW-007]
+    owns:
+      routes: ["/ws/:workspaceId/files"]
+      components: [FileExplorer, CodeMirrorEditor, OpenInEditor]
+    scenarios:
+      - tests/aft/suites/pages.test.yaml
+    proves:
+      - the explorer route and toolbar mount
+    missing:
+      - id: AFT-GAP-FILES-JOURNEYS
+        status: missing
+        priority: P0
+        scenario: Browse, quick-open, edit, save, conflict, create, move, delete, search, replace, history, blame, git status, and multi-checkout behavior use a seeded real repository.
+
+  - id: platform.monitor-observability
+    status: partial
+    owns:
+      routes: ["/ws/:workspaceId/monitor", "/ws/:workspaceId/observability"]
+      components: [MonitorDashboard, ObservabilityDashboard, BlockingDependenciesCanvas]
+    scenarios:
+      - tests/aft/suites/monitor.test.yaml
+      - tests/aft/suites/pages.test.yaml
+    missing:
+      - id: AFT-GAP-MONITOR-NONEMPTY
+        status: missing
+        priority: P1
+        scenario: Clicking a nonempty agent or bottleneck opens the selected record, while failed, stale, and retry states recover after reconnect.
+      - id: AFT-GAP-MONITOR-CANVAS
+        status: implementation-gap
+        priority: P2
+        code: internal/webui/frontend/src/components/MonitorDashboard/BlockingDependenciesCanvas.tsx
+        scenario: Monitor renders its dependency canvas and expands it to Graph through onViewChange.
+      - id: AFT-GAP-OBSERVABILITY-NONZERO
+        status: missing
+        priority: P1
+        scenario: Nonzero metrics, errors, time ranges, and retry behavior agree with seeded run evidence.
+
+  - id: platform.terminal
+    status: partial
+    owns:
+      routes: ["/ws/:workspaceId/terminal"]
+      components: [TerminalView, EmbeddedTerminal]
+    scenarios:
+      - tests/aft/suites/pages.test.yaml
+      - tests/aft/suites/zz-lead-agent.graph/flow.graph.yaml
+    missing:
+      - id: AFT-GAP-TERMINAL-TABS
+        status: missing
+        priority: P1
+        scenario: Select, rename, and close existing terminal tabs through the UI, then reconnect and restore them after reload without losing agent attribution or attaching to a foreign workspace.
+
+  - id: platform.onboarding
+    status: missing
+    stories: [LCLI-PS-003]
+    owns:
+      components: [OnboardingFlow]
+    scenarios: []
+    missing:
+      - id: AFT-GAP-ONBOARDING
+        status: missing
+        priority: P0
+        scenario: A clean user completes backend setup, workspace creation, first task, dismissal, and resume after reload.
+
+  - id: platform.boot-api
+    status: partial
+    owns:
+      routes: [/]
+      components: [AppLayout, BootError, WorkspaceLayout]
+    scenarios:
+      - tests/aft/suites/smoke.test.yaml
+      - tests/aft/surface-suites/api-contracts.test.yaml
+    missing:
+      - id: AFT-GAP-BOOT-FAILURE
+        status: missing
+        priority: P1
+        code:
+          boot: internal/webui/frontend/src/main.tsx
+          error: internal/webui/frontend/src/components/BootError/BootError.tsx
+        scenario: Configuration timeout, malformed data, and server failure render BootError; an intentional retry recovers, and stale workspace state returns to a valid route.
+
+implementationGaps:
+  - id: AFT-IMPL-PENDING-INPUT
+    status: implementation-gap
+    priority: P1
+    code:
+      component: internal/webui/frontend/src/components/AgentDetailPanel/PendingInputBanner.tsx
+      hook: internal/webui/frontend/src/hooks/agents/usePendingInput.ts
+    finding: The component and hook exist but no production component imports and mounts PendingInputBanner.
+  - id: AFT-IMPL-MONITOR-CONTROLS
+    status: implementation-gap
+    priority: P2
+    code: internal/webui/frontend/src/components/MonitorDashboard/MonitorDashboard.tsx
+    finding: The monitor settings button is rendered without a handler; the separate monitor-canvas gap owns the unwired onViewChange and BlockingDependenciesCanvas path.
+
+lowerLevelOnly:
+  - lease fencing and concurrent claim authority
+  - workflow sandbox placement and admission
+  - webhook signatures and replay defense
+  - mutation cursor framing and out-of-order protocol matrices
+  - concurrency, idempotency, and security isolation matrices that have no faithful browser-observable outcome
+
+knownFailures:
+  - source: tests/aft/suites/comments.test.yaml
+    scenario: agent and human comments render in panel activity
+  - source: tests/aft/suites/zz-agent-flow.graph/flow.graph.yaml
+    selectorSource: tests/aft/suites/zz-agent-flow.graph/states.yaml
+    scenario: session detail transcript and diff tabs render
+  - source: tests/aft/suites/zz-agent-flow.graph/flow.graph.yaml
+    selectorSource: tests/aft/suites/zz-agent-flow.graph/states.yaml
+    scenario: epic runner drives a stub agent to complete a task
+  - source: tests/aft/suites/zz-lead-agent.graph/flow.graph.yaml
+    selectorSource: tests/aft/suites/zz-lead-agent.graph/states.yaml
+    scenario: list lane run epic creates the same purpose-named lead
+  - source: tests/aft/suites/zz-lead-agent.graph/flow.graph.yaml
+    selectorSource: tests/aft/suites/zz-lead-agent.graph/states.yaml
+    scenario: agents page run epic reuses the selected lead

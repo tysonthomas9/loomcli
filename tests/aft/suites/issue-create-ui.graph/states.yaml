@@ -1,0 +1,71 @@
+kind: graph-states
+version: 1
+flow: issue-create-ui
+
+states:
+  browser-ready:
+    intent: A fresh execution begins in the runner's blank browser page.
+    assert:
+      - use: blank-browser
+
+  board-ready:
+    intent: The workspace Kanban board is hydrated for issue creation.
+    assert:
+      - use: hydrated-board
+
+  blank-title-form:
+    intent: empty title keeps submit disabled
+    testIntent: A human author cannot submit the New Issue modal with a blank title
+    terminal: true
+    assert:
+      - use: visible-new-issue-form
+      - expect: { enabled: { testid: create-issue-submit, equals: false } }
+
+  basic-create-form:
+    intent: The hydrated New Issue form is ready for the basic creation path.
+    assert:
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=create-issue-title]')
+        intent: Wait until the new-issue form is ready
+      - use: visible-new-issue-form
+
+  rich-create-form:
+    intent: The New Issue form is ready for metadata and duplicate-guard paths.
+    assert:
+      - use: visible-new-issue-form
+
+  basic-issue-created:
+    intent: create an issue through the New Issue modal
+    testIntent: A human author creates an issue through the New Issue modal and sees it appear in the Open column
+    terminal: true
+    assert:
+      - expect:
+          count:
+            selector: "section[data-status=ready] article[aria-label*='ui created ${RUN_ID:-local}']"
+            equals: 1
+
+  full-field-issue-persisted:
+    intent: full-field create preserves type and description
+    testIntent: A human author creates an issue with type, description, and deferred status, then verifies the saved values in the detail panel and through an API readback
+    terminal: true
+    assert:
+      - wait:
+          fn: >-
+            document.querySelectorAll("section[data-status=backlog] article[aria-label*='ui-full-field-${RUN_ID:-local}']").length === 1
+        intent: Wait until the reloaded board renders the deferred issue in Backlog
+      - expect:
+          count:
+            selector: "section[data-status=backlog] article[aria-label*='ui-full-field-${RUN_ID:-local}']"
+            equals: 1
+
+  forced-duplicate-created:
+    intent: duplicate titles hit the soft-duplicate guard
+    testIntent: A human author sees the soft-duplicate warning, opens the existing issue, then repeats the guarded submit and chooses Create anyway to get a distinct second issue
+    terminal: true
+    assert:
+      - expect:
+          count:
+            selector: "section[data-status=ready] article[aria-label*='ui-duplicate-${RUN_ID:-local}']"
+            equals: 2
+      - expect: { notText: Something went wrong }

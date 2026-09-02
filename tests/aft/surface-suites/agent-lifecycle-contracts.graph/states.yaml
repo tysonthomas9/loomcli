@@ -1,0 +1,57 @@
+kind: graph-states
+version: 1
+flow: agent-lifecycle-contracts
+states:
+  browser-ready:
+    intent: A fresh graph path begins in the runner's blank browser page.
+    assert:
+    - use: blank-browser-ready
+  task-runner-dialog-open:
+    intent: The Task Runner creation dialog is open.
+    assert:
+    - expect:
+        visible:
+          testid: create-agent-template-task
+  task-runner-template-selected:
+    intent: The Task Runner template is selected and its form is ready.
+    assert:
+    - expect:
+        visible:
+          testid: create-agent-name
+  scenario-1-repo-less-task-runner-create-explains-repo-requi:
+    intent: repo-less task runner create explains repo requirement
+    testIntent: An API client and then an operator both discover that a repo-less workspace rejects a Task Runner without repos and the modal explains the requirement
+    terminal: true
+    assert:
+    - expect:
+        visible:
+          testid: create-agent-error
+  scenario-2-starting-a-missing-task-runner-returns-not-found:
+    intent: starting a missing task runner returns not found
+    testIntent: An API client that starts an agent which no longer exists gets a clean not-found response
+    terminal: true
+    assert:
+    - expect:
+        url: about:blank
+  scenario-3-deleting-a-fresh-task-runner-removes-it-from-sur:
+    intent: deleting a fresh task runner removes it from surfaces and frees its name
+    testIntent: An API client deletes a freshly modal-created Task Runner, while an operator sees it disappear and verifies its name is reusable
+    terminal: true
+    assert:
+    - expect:
+        visible:
+          testid: agent-activity-panel
+  scenario-4-task-runner-lifecycle-endpoints-write-the-daemon:
+    intent: task runner lifecycle endpoints write the daemon reconciliation contract
+    testIntent: An API client exercises start, stop, restart, yield, payload start, invalid patches, and the unsupported queue endpoint for a Task Runner
+    terminal: true
+    assert:
+    - expect:
+        url: about:blank
+  scenario-5-assigned-but-idle-task-runner-health-fields-stay:
+    intent: assigned but idle task runner health fields stay explicit on the wire
+    testIntent: An API client prepares an assigned in-progress task for a modal-created Task Runner and verifies the agent-health wire contract without claiming a UI rendering surface
+    terminal: true
+    assert:
+    - expect:
+        text: health-${RUN_ID:-local}

@@ -1,0 +1,177 @@
+kind: graph-transitions
+version: 1
+flow: custom-prompts
+group: legacy-scenario-leaves
+transitions:
+  request-create-agent-dialog:
+    intent: A human opens the feature workspace and requests the mounted Create Agent dialog.
+    actor: human
+    via: ui
+    steps:
+      - use: request-create-agent-dialog
+        with:
+          path: /ws/E2E-WS-CUSTOM/agents
+          readyIntent: Wait until the custom workspace agents page is ready
+  prove-01-custom-prompt-creates-an-interactive-role-with-byte-exac:
+    intent: An operator defines a terminal teammate with inline instructions through CreateAgentModal and verifies the stored agent, role, and prompt
+    actor: human
+    via: ui
+    steps:
+      - use: case-01-custom-prompt-creates-an-interactive-role-with-byte-exac
+  prove-02-empty-custom-prompt-keeps-submit-disabled:
+    intent: An operator selecting the Custom prompt template cannot create an agent before writing instructions
+    actor: human
+    via: ui
+    steps:
+      - use: case-02-empty-custom-prompt-keeps-submit-disabled
+  prove-03-whitespace-only-custom-prompt-keeps-submit-disabled:
+    intent: An operator who types only whitespace into the custom prompt still cannot submit the agent
+    actor: human
+    via: ui
+    steps:
+      - use: case-03-whitespace-only-custom-prompt-keeps-submit-disabled
+  prove-04-multiline-metacharacter-prompt-persists-byte-exact:
+    intent: An operator pastes a multi-paragraph prompt containing shell and markdown metacharacters and verifies the stored bytes are unchanged
+    actor: human
+    via: ui
+    steps:
+      - use: case-04-multiline-metacharacter-prompt-persists-byte-exact
+  prove-05-template-looking-custom-prompt-is-stored-literally:
+    intent: An operator whose prompt contains Go template syntax gets that text stored literally rather than expanded
+    actor: human
+    via: cli
+    steps:
+      - use: case-05-template-looking-custom-prompt-is-stored-literally
+  prove-06-custom-prompt-reaches-codex-argv-in-the-noninteractive-r:
+    intent: A runtime contract probe confirms stored custom prompt text is passed to the backend as the final positional argument
+    actor: api-client
+    via: api
+    steps:
+      - use: case-06-custom-prompt-reaches-codex-argv-in-the-noninteractive-r
+  prove-07-xss-shaped-custom-prompt-is-inert-in-agents-ui:
+    intent: An operator's prompt containing executable HTML never becomes executable markup in the agents surface
+    actor: human
+    via: ui
+    steps:
+      - use: case-07-xss-shaped-custom-prompt-is-inert-in-agents-ui
+  prove-08-thirty-two-kilobyte-custom-prompt-survives-the-ui-round-:
+    intent: An operator pastes a long detailed prompt and verifies the agent role stores all of it intact
+    actor: human
+    via: ui
+    steps:
+      - use: case-08-thirty-two-kilobyte-custom-prompt-survives-the-ui-round-
+  prove-09-custom-prompt-named-task-is-rejected-by-the-seeded-worke:
+    intent: An operator naming a custom interactive agent after the task role gets a visible collision error and no agent row
+    actor: human
+    via: ui
+    steps:
+      - use: case-09-custom-prompt-named-task-is-rejected-by-the-seeded-worke
+  prove-10-custom-prompt-named-plan-is-rejected-by-the-seeded-worke:
+    intent: An operator naming a custom interactive agent after the plan role gets a visible collision error and no agent row
+    actor: human
+    via: ui
+    steps:
+      - use: case-10-custom-prompt-named-plan-is-rejected-by-the-seeded-worke
+  prove-11-custom-prompt-named-lead-is-rejected-by-the-seeded-lead-:
+    intent: An operator naming a custom interactive agent after the lead role gets a visible prompt mismatch and no agent row
+    actor: human
+    via: ui
+    steps:
+      - use: case-11-custom-prompt-named-lead-is-rejected-by-the-seeded-lead-
+  prove-12-custom-prompt-named-orchestrator-deterministically-creat:
+    intent: An operator can create a custom prompt agent named orchestrator and the workspace records it as an interactive role
+    actor: human
+    via: ui
+    steps:
+      - use: case-12-custom-prompt-named-orchestrator-deterministically-creat
+  prove-13-custom-prompt-trims-surrounding-whitespace-and-preserves:
+    intent: An operator pasting stray blank lines around a prompt gets only the surrounding whitespace trimmed
+    actor: human
+    via: ui
+    steps:
+      - use: case-13-custom-prompt-trims-surrounding-whitespace-and-preserves
+  prove-14-backend-selection-reaches-custom-agent-row-and-terminal-:
+    intent: An operator selects a non-default AI backend for a custom agent and verifies the persisted launch contract
+    actor: human
+    via: ui
+    steps:
+      - use: case-14-backend-selection-reaches-custom-agent-row-and-terminal-
+  prove-15-repo-scoping-persists-but-custom-interactive-launch-has-:
+    intent: An operator scopes one custom agent to a repo and another to the whole workspace, then verifies both launch without an interactive worktree
+    actor: human
+    via: ui
+    steps:
+      - use: case-15-repo-scoping-persists-but-custom-interactive-launch-has-
+  prove-16-custom-prompt-is-not-visible-or-editable-after-creation:
+    intent: An operator returning to a custom agent finds no prompt tab, no prompt text, and no API patch path that changes the role prompt
+    actor: human
+    via: ui
+    steps:
+      - use: case-16-custom-prompt-is-not-visible-or-editable-after-creation
+  prove-17-recreating-a-deleted-custom-agent-with-a-different-promp:
+    intent: An operator deletes a custom prompt agent and discovers a different replacement prompt is blocked by the orphaned role
+    actor: human
+    via: ui
+    steps:
+      - use: case-17-recreating-a-deleted-custom-agent-with-a-different-promp
+  prove-18-custom-agent-appears-in-the-agents-rail-without-reload:
+    intent: An operator sees a newly created custom teammate in the agents rail as soon as the modal closes
+    actor: human
+    via: ui
+    steps:
+      - use: case-18-custom-agent-appears-in-the-agents-rail-without-reload
+  prove-19-duplicate-custom-agent-name-is-refused-with-a-visible-er:
+    intent: An operator reusing an existing custom agent name sees a conflict and the first role prompt remains unchanged
+    actor: human
+    via: ui
+    steps:
+      - use: case-19-duplicate-custom-agent-name-is-refused-with-a-visible-er
+  prove-20-mixed-case-custom-agent-name-is-normalized-by-the-ui:
+    intent: An operator typing a mixed-case custom agent name gets one canonical lower-case agent addressable at the lower-case route
+    actor: human
+    via: ui
+    steps:
+      - use: case-20-mixed-case-custom-agent-name-is-normalized-by-the-ui
+  prove-21-invalid-custom-agent-names-keep-submit-disabled:
+    intent: An operator cannot submit a custom agent name that the workspace cannot safely store or render
+    actor: human
+    via: ui
+    steps:
+      - use: case-21-invalid-custom-agent-names-keep-submit-disabled
+  prove-22-built-in-pr-review-template-works-in-a-clean-control-wor:
+    intent: An operator creates a PR Review agent from the built-in template in a clean workspace and verifies the prompt-file launch branch
+    actor: human
+    via: ui
+    steps:
+      - use: case-22-built-in-pr-review-template-works-in-a-clean-control-wor
+  clear-primary-custom-agent:
+    intent: The runner removes any prior primary custom agent before its creation journey.
+    actor: system
+    via: cli
+    steps:
+      - use: remove-case-agent-and-tabs
+        with:
+          name: cust-${RUN_ID:-local}
+  seed-primary-custom-agent:
+    intent: An API client creates the primary custom agent required by the post-creation privacy journey.
+    actor: api-client
+    via: api
+    steps:
+      - use: seed-primary-custom-agent
+  reset-template-prompt-subject:
+    intent: The runner clears the fixed template-prompt agent and role before either independent consumer path.
+    actor: system
+    via: cli
+    steps:
+      - use: remove-case-agent-and-tabs
+        with:
+          name: cust-tmpl-${RUN_ID:-local}
+      - run: |
+          LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-CUSTOM role remove "cust-tmpl-${RUN_ID:-local}" >/dev/null 2>&1 || true
+        intent: Remove the fixed custom role so its exact template-looking prompt can be recreated independently.
+  create-template-prompt-subject:
+    intent: A human creates the exact template-looking prompt fixture and custom agent consumed by both verification leaves.
+    actor: human
+    via: ui
+    steps:
+      - use: create-template-prompt-subject

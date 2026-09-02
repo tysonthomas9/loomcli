@@ -1,0 +1,372 @@
+kind: graph-steps
+version: 1
+flow: lead-agents
+blocks:
+  case-17-assigning-an-epic-marks-the-lead-context-delivery-state:
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-WS-LEAD/issues
+          body:
+            title: lead assigned epic ${RUN_ID:-local}
+            issue_type: epic
+            priority: 2
+          status: 201
+          save:
+            - from: data.id
+              as: leadEpicId
+        intent: An orchestration client seeds the epic this lead will own
+      - api:
+          method: PATCH
+          path: /api/workspaces/E2E-WS-LEAD/agents/atlas-${RUN_ID:-local}
+          body:
+            parent: ${var:leadEpicId}
+          status: 200
+        intent: An orchestration client assigns the epic to the lead agent
+      - open: /ws/E2E-WS-LEAD/agents/atlas-${RUN_ID:-local}
+      - wait:
+          fn: document.body.textContent.includes('Assigned epic')
+        intent: Wait until the lead header reports its assigned epic
+      - run: |
+          set -e
+          name="atlas-${RUN_ID:-local}"
+          epic="$(cat "$AFT_WORK_DIR/leadEpicId")"
+          state_file="$AFT_WORK_DIR/lead-d17-delivery-state"
+          expected_file="$AFT_WORK_DIR/lead-d17-header-text"
+          found=0
+          # delivery_state pending is transient; pinning it deterministically needs a hold-delivery seam.
+          # budget: context-delivery (45s) - epic delivery state crosses monitor cache and UI state.
+          for i in $(seq 1 45); do
+            curl -sf "$AFT_BASE_URL/api/monitor/status?workspace=E2E-WS-LEAD" > "$AFT_WORK_DIR/lead-d17-monitor.json" &&
+            python3 - "$AFT_WORK_DIR/lead-d17-monitor.json" "$name" "$epic" "$state_file" "$expected_file" <<'PY' && { found=1; break; }
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          name, epic = sys.argv[2], sys.argv[3]
+          state_file, expected_file = sys.argv[4], sys.argv[5]
+          agents = d.get("agents") or []
+          matches = [a for a in agents if a.get("name") == name]
+          assert matches, agents
+          a = matches[0]
+          assert a.get("parent") == epic, a
+          state = a.get("delivery_state")
+          assert state in {"pending", "delivered"}, a
+          expected = {"pending": "context pending", "delivered": "context sent"}[state]
+          open(state_file, "w", encoding="utf-8").write(state)
+          open(expected_file, "w", encoding="utf-8").write(expected)
+          PY
+            sleep 1
+          done
+          if [ "$found" != "1" ]; then
+            echo "monitor status never exposed pending or delivered lead delivery state"
+            cat "$AFT_WORK_DIR/lead-d17-monitor.json" 2>/dev/null || true
+            exit 1
+          fi
+          state="$(cat "$state_file")"
+          expected="$(cat "$expected_file")"
+          agent-browser --session "$AFT_SESSION" eval "window.__aftLeadD17DeliveryState = '$state'; window.__aftLeadD17ExpectedHeader = '$expected';"
+        intent: An operator polls monitor status beyond its workspace cache and captures pending or delivered lead delivery state
+      - wait:
+          fn: |-
+            (() => {
+              const state = window.__aftLeadD17DeliveryState;
+              const expected = window.__aftLeadD17ExpectedHeader;
+              if (!['pending', 'delivered'].includes(state) || !expected) return false;
+              const text = (document.body.textContent || '').replace(/\s+/g, ' ').trim();
+              return text.includes('Assigned epic') && text.includes(expected);
+            })()
+        intent: Wait until the lead header reflects the captured pending or delivered context delivery state
+  terminal-17-assigning-an-epic-marks-the-lead-context-delivery-state:
+    steps:
+      - expect:
+          visible:
+            selector: body
+  case-18-lead-claim-badge-appears-on-the-assigned-epic-lane:
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-WS-LEAD/issues
+          body:
+            title: lead unclaimed badge epic ${RUN_ID:-local}
+            issue_type: epic
+            priority: 2
+          status: 201
+          save:
+            - from: data.id
+              as: unclaimedBadgeEpicId
+        intent: An orchestration client seeds an unclaimed epic so the list lane can render its unclaimed badge
+      - open: /ws/E2E-WS-LEAD/list
+      - wait:
+          fn: "!!document.querySelector('[data-testid=list-page]') && !!document.querySelector('[data-testid=lane-runner-badge]') && !!document.querySelector('[data-testid=lane-unclaimed-badge]')"
+        intent: Wait until the list page renders both claimed and unclaimed epic lane badges
+      - expect:
+          visible:
+            testid: lane-runner-badge
+      - expect:
+          visible:
+            testid: lane-unclaimed-badge
+      - wait:
+          fn: |-
+            Array.from(document.querySelectorAll('[data-testid=lane-runner-badge]'))
+              .some((badge) => (badge.textContent || '').includes('atlas-${RUN_ID:-local}'))
+        intent: Wait until the claimed epic lane names the assigned lead
+  terminal-18-lead-claim-badge-appears-on-the-assigned-epic-lane:
+    steps:
+      - expect:
+          visible:
+            testid: lane-unclaimed-badge
+  case-19-slide-over-run-epic-control-is-inert-pinned-defect:
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-WS-LEAD/issues
+          body:
+            title: lead detail runnable epic ${RUN_ID:-local}
+            issue_type: epic
+            priority: 2
+          status: 201
+          save:
+            - from: data.id
+              as: d20aEpicId
+        intent: An orchestration client seeds an unclaimed epic for the issue-detail run control
+      - open: /ws/E2E-WS-LEAD/kanban
+      - wait:
+          fn: "!!document.querySelector('[data-testid=board-toolbar]')"
+        intent: Wait until the workspace board is ready before opening the epic panel
+      - fill:
+          testid: search-input-field
+          value: lead detail runnable epic ${RUN_ID:-local}
+      - wait:
+          fn: |-
+            Array.from(document.querySelectorAll('section')).some((el) =>
+              (el.textContent || '').includes('lead detail runnable epic ${RUN_ID:-local}') &&
+              !!el.querySelector('[data-testid=lane-title-button]'))
+        intent: Wait until the runnable epic swimlane header is visible on the board
+      - run: |
+          set -e
+          title="lead detail runnable epic ${RUN_ID:-local}"
+          agent-browser --session "$AFT_SESSION" eval "
+            (() => {
+              const section = Array.from(document.querySelectorAll('section'))
+                .find((s) => (s.textContent || '').includes('$title'));
+              if (!section) throw new Error('runnable epic swimlane not found');
+              const btn = section.querySelector('[data-testid=lane-title-button]');
+              if (!btn) throw new Error('lane-title-button not found');
+              btn.scrollIntoView({ block: 'center' });
+              btn.click();
+              return true;
+            })()
+          "
+        intent: An operator opens the epic detail slide-over from the swimlane header title
+      - wait:
+          fn: document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open' && !!document.querySelector('[data-testid=header-run-epic-button]') && document.querySelectorAll('[data-testid=activity-log] [data-testid=activity-comment], [data-testid=activity-log] [data-testid=activity-event]').length === 1
+        intent: Wait until the epic detail panel header run control is available with exactly one initial activity entry
+      - click:
+          testid: header-run-epic-button
+      - wait:
+          fn: |-
+            (() => {
+              const activity = document.querySelector('[data-testid=issue-detail-panel] [data-testid=activity-log]');
+              if (!activity) return false;
+              const items = activity.querySelectorAll('[data-testid=activity-comment], [data-testid=activity-event]');
+              const toastText = document.querySelector('[data-testid=toast-container]')?.textContent || '';
+              const hasRunToast = toastText.includes('Epic runner queued') || toastText.includes('Epic runner failed');
+              if (items.length !== 1 || hasRunToast) {
+                window.__aftD20aInertViolation = true;
+                return false;
+              }
+              if (!window.__aftD20aInertStartedAt) {
+                window.__aftD20aInertStartedAt = Date.now();
+              }
+              return !window.__aftD20aInertViolation &&
+                Date.now() - window.__aftD20aInertStartedAt >= 8000;
+            })()
+        intent: Wait about 8s and prove slide-over Run epic remains inert with one activity item and no runner toast
+  terminal-19-slide-over-run-epic-control-is-inert-pinned-defect:
+    steps:
+      - expect:
+          visible:
+            selector: body
+  case-20-list-lane-run-epic-creates-the-same-purpose-named-lead:
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-WS-LEAD/issues
+          body:
+            title: lead lane runnable epic ${RUN_ID:-local}
+            issue_type: epic
+            priority: 2
+          status: 201
+          save:
+            - from: data.id
+              as: d20bEpicId
+        intent: An orchestration client seeds the unclaimed epic for the list lane run control
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-WS-LEAD/issues
+          body:
+            title: lead lane runnable child ${RUN_ID:-local}
+            issue_type: task
+            priority: 2
+            parent: ${var:d20bEpicId}
+          status: 201
+        intent: An orchestration client gives the list-lane epic one open child so it matches the plan's runnable fixture shape
+      - run: |
+          set -e
+          python3 - "$AFT_WORK_DIR/d20bEpicId" "$AFT_WORK_DIR/d20bExpectedLead" <<'PY'
+          import re, sys
+          epic = open(sys.argv[1], encoding="utf-8").read().strip()
+          slug = re.sub(r"[^a-z0-9_-]+", "-", epic.strip().lower()).strip("-")[:48].rstrip("-") or "epic"
+          open(sys.argv[2], "w", encoding="utf-8").write("lead-" + slug)
+          PY
+        intent: An operator computes the expected list-lane lead name from the saved epic id
+      - open: /ws/E2E-WS-LEAD/list
+      - wait:
+          fn: "!!document.querySelector('[data-testid=list-page]') && document.body.textContent.includes('lead lane runnable epic ${RUN_ID:-local}')"
+        intent: Wait until the list page renders the runnable lane fixture
+      - run: |
+          set -e
+          title="lead lane runnable epic ${RUN_ID:-local}"
+          agent-browser --session "$AFT_SESSION" eval "
+            (() => {
+              const section = Array.from(document.querySelectorAll('section'))
+                .find((s) => (s.textContent || '').includes('$title'));
+              if (!section) throw new Error('runnable epic lane not found');
+              const btn = section.querySelector('[data-testid=lane-run-epic-button]');
+              if (!btn) throw new Error('lane-run-epic-button not found');
+              btn.scrollIntoView({ block: 'center' });
+              btn.click();
+              return true;
+            })()
+          "
+        intent: An operator clicks the list lane Run epic control by the stable lane-run-epic-button testid
+      - wait:
+          fn: document.body.textContent.includes('Epic runner queued for lead-')
+        intent: Wait until the list-lane run action reports a queued epic runner
+      - run: |
+          set -e
+          want="$(cat "$AFT_WORK_DIR/d20bExpectedLead")"
+          # budget: db-persist (20s) - Run action may create the purpose-named lead row asynchronously.
+          for i in $(seq 1 20); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/agents" > "$AFT_WORK_DIR/lead-d20b-agents.json" &&
+            python3 - "$AFT_WORK_DIR/lead-d20b-agents.json" "$want" <<'PY' && exit 0
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          matches = [a for a in agents or [] if a.get("name") == sys.argv[2]]
+          assert len(matches) == 1, agents
+          a = matches[0]
+          assert a.get("role_name") == "lead", a
+          assert not a.get("auto"), a
+          PY
+            sleep 1
+          done
+          echo "list-lane run epic did not create the expected lead"
+          cat "$AFT_WORK_DIR/lead-d20b-agents.json" 2>/dev/null || true
+          exit 1
+        intent: An operator's readback confirms list-lane Run epic created the expected lead agent
+  terminal-20-list-lane-run-epic-creates-the-same-purpose-named-lead:
+    steps:
+      - expect:
+          visible:
+            selector: body
+  case-21-agents-page-run-epic-reuses-the-selected-lead:
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-WS-LEAD/issues
+          body:
+            title: lead panel runnable epic ${RUN_ID:-local}
+            issue_type: epic
+            priority: 2
+          status: 201
+          save:
+            - from: data.id
+              as: d20cEpicId
+        intent: An orchestration client seeds the unclaimed epic for the agents-page work-panel Run control
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-WS-LEAD/issues
+          body:
+            title: lead panel runnable child ${RUN_ID:-local}
+            issue_type: task
+            priority: 2
+            parent: ${var:d20cEpicId}
+          status: 201
+        intent: An orchestration client gives the work-panel epic one open child so it is runnable
+      - run: |
+          set -e
+          python3 - "$AFT_WORK_DIR/d20cEpicId" "$AFT_WORK_DIR/d20cExpectedLead" <<'PY'
+          import re, sys
+          epic = open(sys.argv[1], encoding="utf-8").read().strip()
+          slug = re.sub(r"[^a-z0-9_-]+", "-", epic.strip().lower()).strip("-")[:48].rstrip("-") or "epic"
+          open(sys.argv[2], "w", encoding="utf-8").write("lead-" + slug)
+          PY
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/agents" > "$AFT_WORK_DIR/lead-d20c-agents-before.json"
+          python3 - "$AFT_WORK_DIR/lead-d20c-agents-before.json" <<'PY' > "$AFT_WORK_DIR/d20cAgentCountBefore"
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          print(len(agents or []))
+          PY
+        intent: An operator records the expected would-be lead name and the agent count before using the selected-lead Run control
+      - open: /ws/E2E-WS-LEAD/agents/atlas-b-${RUN_ID:-local}
+      - wait:
+          fn: |-
+            (() => {
+              const page = document.querySelector('[data-testid=agents-page]');
+              const add = Array.from(document.querySelectorAll('button'))
+                .some((b) => (b.textContent || '').trim() === '+ Add agent');
+              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
+              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
+              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
+              if (!page || !settled) {
+                window.__aftAgentsPageStableSig = null;
+                window.__aftAgentsPageStableAt = 0;
+                return false;
+              }
+              if (window.__aftAgentsPageStableSig !== sig) {
+                window.__aftAgentsPageStableSig = sig;
+                window.__aftAgentsPageStableAt = Date.now();
+                return false;
+              }
+              return Date.now() - window.__aftAgentsPageStableAt >= 300;
+            })() && !!document.querySelector("[role=group][aria-label='Filter epics']") && document.body.textContent.includes('lead panel runnable epic ${RUN_ID:-local}')
+        intent: Wait until the unassigned selected lead shows the runnable epic in its open queue
+      - run: |
+          set -e
+          epic="$(cat "$AFT_WORK_DIR/d20cEpicId")"
+          agent-browser --session "$AFT_SESSION" find role button click --name "Run epic $epic"
+        intent: An operator clicks the agents-page work-panel Run epic control for the raw epic id
+      - wait:
+          fn: document.body.textContent.includes('Epic runner queued for atlas-b-${RUN_ID:-local}:')
+        intent: Wait until the agents-page Run control reports the selected lead in the queued-run toast
+      - run: |
+          set -e
+          before="$(cat "$AFT_WORK_DIR/d20cAgentCountBefore")"
+          forbidden="$(cat "$AFT_WORK_DIR/d20cExpectedLead")"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/agents" > "$AFT_WORK_DIR/lead-d20c-agents-after.json"
+          python3 - "$AFT_WORK_DIR/lead-d20c-agents-after.json" "$before" "$forbidden" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          before = int(sys.argv[2])
+          forbidden = sys.argv[3]
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          assert isinstance(agents, list), d
+          assert len(agents) == before, (before, len(agents), agents)
+          assert not [a for a in agents if a.get("name") == forbidden], agents
+          selected = [a for a in agents if a.get("name") == "atlas-b-" + (__import__("os").environ.get("RUN_ID") or "local")]
+          assert selected and selected[0].get("role_name") == "lead", agents
+          PY
+        intent: An operator's readback confirms the agents-page Run action did not mint a purpose-named lead
+      - open: /ws/E2E-WS-LEAD/agents/worker-${RUN_ID:-local}
+      - wait:
+          fn: "!!document.querySelector(\"[role=group][aria-label='Filter tasks by status']\") && !Array.from(document.querySelectorAll('button')).some((b) => (b.getAttribute('aria-label') || '').startsWith('Run epic '))"
+        intent: Wait until the non-lead worker panel shows task filters and no Run epic control
+  terminal-21-agents-page-run-epic-reuses-the-selected-lead:
+    steps:
+      - expect:
+          visible:
+            selector: body

@@ -1,0 +1,31 @@
+kind: graph-states
+version: 1
+flow: review-actions-surface
+states:
+  browser-ready:
+    intent: A fresh graph path begins in the runner's blank browser page.
+    assert:
+    - use: blank-browser
+  review-workspace-open:
+    intent: A case-isolated issue is in review and its in-app review workspace is mounted.
+    assert:
+    - wait:
+        fn: "!!document.querySelector('[data-testid=pr-review-workspace]')"
+      intent: Wait until the review workspace is ready
+    - expect:
+        visible:
+          testid: pr-review-workspace
+  scenario-1-approving-a-review-issue-closes-it-and-clears-the-queue:
+    intent: approving a review issue closes it and clears the queue
+    testIntent: An issue moved to review appears as a queue row, its review workspace opens in-app, and Approve closes the issue
+    terminal: true
+    assert:
+    - expect:
+        notText: review-action-${RUN_ID:-local}-${AFT_CASE_ID}
+  scenario-2-requesting-changes-sends-the-issue-back-to-open:
+    intent: requesting changes sends the issue back to open
+    testIntent: Request changes in the review workspace reopens the issue and removes it from the review queue
+    terminal: true
+    assert:
+    - expect:
+        notText: review-action-${RUN_ID:-local}-${AFT_CASE_ID}

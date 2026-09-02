@@ -1,0 +1,48 @@
+kind: graph
+version: 1
+classification:
+  area: reviews
+  feature: pr-review-agents
+  surface: mixed
+  purpose: journey
+flow: pr-review-agents
+suite: zz-pr-review-agents
+intent: PR Review template paths reuse the agent-list and primary-agent prerequisites while every leaf replays its own durable setup.
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+fixtureScope: graph
+imports:
+- shared-steps.yaml
+- states.yaml
+- transitions.yaml
+start: browser-ready
+coverage:
+  strategy: transition
+setup: |
+  set -e
+  "$AFT_TESTS_DIR/scripts/clean-test-workspace.sh" E2E-WS-PRR
+  repo="$AFT_WORK_DIR/prr-repo"
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit --allow-empty -m init -q
+  python3 -c 'import json,sys; print(json.dumps({"name":sys.argv[1],"type":"empty","repos":[sys.argv[2]]}))' "e2e-ws-prr" "$repo" > "$AFT_WORK_DIR/prr-workspace.json"
+  curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/prr-workspace.json" > "$AFT_WORK_DIR/prr-workspace.resp.json"
+teardown: |
+  set +e
+  AFT_WS=E2E-WS-PRR "$AFT_TESTS_DIR/scripts/close-open-issues.sh"
+  "$AFT_TESTS_DIR/scripts/clean-test-workspace.sh" E2E-WS-PRR
+graph:
+  browser-ready:
+    open-prr-agent-list: agent-list-ready
+    verify-4-prompt-list-failure-keeps-built-in-templates-visible: scenario-4-prompt-list-failure-keeps-built-in-templates-visible
+    exercise-8-unknown-built-in-prompt-fails-visibly-at-terminal-launch: scenario-8-unknown-built-in-prompt-fails-visibly-at-terminal-launch
+  agent-list-ready:
+    create-primary-agent-for-scenario-1: scenario-1-modal-creates-a-pr-review-interactive-agent
+    create-primary-agent-prerequisite: primary-pr-review-agent-ready
+    open-create-agent-dialog: create-agent-dialog-open
+  primary-pr-review-agent-ready:
+    exercise-5-pr-review-terminal-launch-carries-the-built-in-prompt: scenario-5-pr-review-terminal-launch-carries-the-built-in-prompt
+    exercise-6-second-pr-review-agent-reuses-the-shared-role: scenario-6-second-pr-review-agent-reuses-the-shared-role
+    exercise-7-conflicting-prompt-cannot-reuse-the-pr-review-role: scenario-7-conflicting-prompt-cannot-reuse-the-pr-review-role
+  create-agent-dialog-open:
+    verify-2-pr-review-template-selection-documents-the-true-default: scenario-2-pr-review-template-selection-documents-the-true-default
+    verify-3-interactive-prompts-expose-only-visible-templates: scenario-3-interactive-prompts-expose-only-visible-templates

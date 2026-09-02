@@ -1,0 +1,762 @@
+kind: graph-steps
+version: 1
+flow: custom-prompts
+blocks:
+  case-06-custom-prompt-reaches-codex-argv-in-the-noninteractive-r:
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-WS-CUSTOM/agents
+          body:
+            name: cust-both-argv-${RUN_ID:-local}
+            role_name: cust-both-argv-${RUN_ID:-local}
+            kind: interactive
+            prompt: AFT-INLINE-${RUN_ID:-local}
+            prompt_file: builtin:pr-review
+            auto: false
+            backend: codex
+          status: 201
+        intent: An API client provisions the prompt precedence subject used by the same argv probe
+      - run: |
+          set -e
+          python3 - "$AFT_WORK_DIR" "$AFT_LOOM_BIN" "$AFT_LOOM_CONFIG_DIR" "${RUN_ID:-local}" <<'PY'
+          import os, pathlib, shlex, stat, subprocess, sys
+          work = pathlib.Path(sys.argv[1]).resolve()
+          loom = sys.argv[2]
+          config_dir = sys.argv[3]
+          run = sys.argv[4]
+          stub_dir = work / "cus-d14-stubbin"
+          stub_dir.mkdir(parents=True, exist_ok=True)
+          stub = stub_dir / "codex"
+          def write_stub(log):
+              log_arg = shlex.quote(str(log))
+              stub.write_text(f"""#!/bin/sh
+          printf '%s\\0' "$@" >> {log_arg}
+          printf -- '--\\0' >> {log_arg}
+          printf '{{"status":"completed","output":"stub"}}\\n'
+          exit 0
+          """, encoding="utf-8")
+              stub.chmod(stub.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+          def run_probe(agent, fixture=None, inline=None):
+              log = work / f"{agent}.argv"
+              out = work / f"{agent}.lead.out"
+              if log.exists():
+                  log.unlink()
+              write_stub(log)
+              env = os.environ.copy()
+              env.update({
+                  "PATH": str(stub_dir) + os.pathsep + env.get("PATH", ""),
+                  "LOOM_CONFIG_DIR": config_dir,
+                  "LOOM_LEAD_CONTROLLED": "0",
+                  "LOOM_AGENT_NAME": agent,
+                  "LOOM_AGENT_ROLE": agent,
+              })
+              env.pop("LOOM_AGENT_EFFORT", None)
+              env.pop("LOOM_CLAUDE_EFFORT", None)
+              with out.open("wb") as fh:
+                  try:
+                      subprocess.run([loom, "--workspace", "E2E-WS-CUSTOM", "--backend", "codex", "lead"], input=b"", stdout=fh, stderr=subprocess.STDOUT, env=env, timeout=60, check=True)
+                  except Exception:
+                      sys.stderr.write(out.read_text(encoding="utf-8", errors="replace"))
+                      if log.exists():
+                          sys.stderr.write(repr(log.read_bytes()) + "\n")
+                      raise
+              raw = log.read_bytes()
+              records = [r for r in raw.split(b"--\0") if r]
+              assert records, raw
+              exec_records = [
+                  r for r in records
+                  if ([x.decode("utf-8") for x in r.split(b"\0") if x] or [""])[0] == "exec"
+              ]
+              assert exec_records, raw
+              first = [x.decode("utf-8") for x in exec_records[0].split(b"\0") if x]
+              assert first[:3] == ["exec", "--json", "--dangerously-bypass-approvals-and-sandbox"], first
+              prompt = first[-1]
+              if fixture:
+                  want = pathlib.Path(fixture).read_text(encoding="utf-8")
+                  assert prompt.startswith(want), (prompt[:120], want)
+                  assert "{{ .AgentName }}" in prompt, prompt
+                  assert agent not in prompt, prompt
+              if inline:
+                  assert prompt.startswith(inline), prompt[:120]
+                  assert "builtin:pr-review" not in prompt, prompt
+              assert prompt.count("\n\n### Multi-Agent Safety Rules") == 1, prompt
+              assert "## INTERACTIVE MODE: Project Lead" not in prompt, prompt
+              for rec in exec_records[1:]:
+                  assert rec == exec_records[0], raw
+
+          run_probe(f"cust-tmpl-{run}", fixture=work / "cus-d5.prompt")
+          run_probe(f"cust-both-argv-{run}", inline=f"AFT-INLINE-{run}")
+          PY
+        intent: The local runtime probes codex argv with a per-test stub and verifies the custom prompt is final and literal
+  terminal-06-custom-prompt-reaches-codex-argv-in-the-noninteractive-r:
+    steps:
+      - expect:
+          visible:
+            selector: "[aria-label='Agent: cust-tmpl-${RUN_ID:-local}']"
+  case-12-custom-prompt-named-orchestrator-deterministically-creat:
+    steps:
+      - click:
+          testid: create-agent-template-custom-prompt
+      - fill:
+          testid: create-agent-name
+          value: orchestrator
+      - wait:
+          fn: document.querySelectorAll('[data-testid=create-agent-backend] option').length > 1
+        intent: Wait until backend options are loaded before selecting claude
+      - select:
+          testid: create-agent-backend
+          value: claude
+      - fill:
+          testid: create-agent-interactive-prompt
+          value: AFT-D8D-${RUN_ID:-local}
+      - click:
+          testid: create-agent-submit
+      - wait:
+          fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('orchestrator')"
+        intent: Wait until the orchestrator custom agent appears after submit
+      - expect:
+          count:
+            testid: create-agent-error
+            equals: 0
+      - run: |
+          set -e
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/agents" > "$AFT_WORK_DIR/d8d-agents.json"
+          python3 - "$AFT_WORK_DIR/d8d-agents.json" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          matches = [a for a in agents or [] if a.get("name") == "orchestrator"]
+          assert len(matches) == 1, agents
+          assert matches[0].get("role_name") == "orchestrator", matches[0]
+          PY
+        intent: An operator's readback confirms the orchestrator-named custom agent exists
+      - run: |
+          set -e
+          LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-CUSTOM role show orchestrator --json > "$AFT_WORK_DIR/d8d-role.json"
+          python3 - "$AFT_WORK_DIR/d8d-role.json" "${RUN_ID:-local}" <<'PY'
+          import json, sys
+          r = json.load(open(sys.argv[1]))
+          want = "AFT-D8D-" + sys.argv[2]
+          assert r.get("kind") == "interactive", r
+          assert r.get("prompt") == want, r
+          assert r.get("description") == "Lead/orchestrator interactive", r
+          PY
+        intent: An operator's CLI readback confirms the orchestrator role prompt and legacy description
+      - open: /ws/E2E-WS-CUSTOM/agents/orchestrator
+      - wait:
+          fn: |-
+            (() => {
+              const page = document.querySelector('[data-testid=agents-page]');
+              const add = Array.from(document.querySelectorAll('button'))
+                .some((b) => (b.textContent || '').trim() === '+ Add agent');
+              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
+              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
+              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
+              if (!page || !settled) {
+                window.__aftAgentsPageStableSig = null;
+                window.__aftAgentsPageStableAt = 0;
+                return false;
+              }
+              if (window.__aftAgentsPageStableSig !== sig) {
+                window.__aftAgentsPageStableSig = sig;
+                window.__aftAgentsPageStableAt = Date.now();
+                return false;
+              }
+              return Date.now() - window.__aftAgentsPageStableAt >= 300;
+            })()
+        intent: Wait until the orchestrator agent detail page is ready
+      - wait:
+          fn: "!!document.querySelector('[data-testid=terminal-view] [data-testid=terminal-tab-bar], [data-testid=terminal-view] [data-testid=terminal-wrapper]')"
+        intent: Wait until the orchestrator terminal surface is mounted
+      - run: |
+          set -e
+          # budget: terminal-launch (120s) - orchestrator terminal launch spec can lag PTY spawn.
+          for i in $(seq 1 60); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/terminal/tabs" > "$AFT_WORK_DIR/d8d-tabs.json" &&
+            python3 - "$AFT_WORK_DIR/d8d-tabs.json" <<'PY' && exit 0
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          tabs = d.get("data") or []
+          matches = [t for t in tabs if t.get("agent_id") == "orchestrator"]
+          assert matches, tabs
+          t = matches[0]
+          assert t.get("backend") == "claude", t
+          assert t.get("launch", {}).get("env", {}).get("LOOM_AGENT_ROLE") == "orchestrator", t
+          PY
+            sleep 2
+          done
+          echo "orchestrator terminal launch metadata never appeared"
+          cat "$AFT_WORK_DIR/d8d-tabs.json" 2>/dev/null || true
+          exit 1
+        intent: An operator polls terminal tabs until the orchestrator launch env is persisted
+  terminal-12-custom-prompt-named-orchestrator-deterministically-creat:
+    steps:
+      - expect:
+          count:
+            testid: create-agent-error
+            equals: 0
+  case-14-backend-selection-reaches-custom-agent-row-and-terminal-:
+    steps:
+      - click:
+          testid: create-agent-template-custom-prompt
+      - fill:
+          testid: create-agent-name
+          value: cust-be-${RUN_ID:-local}
+      - wait:
+          fn: document.querySelectorAll('[data-testid=create-agent-backend] option').length > 1
+        intent: Wait until backend options are loaded before selecting claude
+      - select:
+          testid: create-agent-backend
+          value: claude
+      - fill:
+          testid: create-agent-interactive-prompt
+          value: AFT-BACKEND-${RUN_ID:-local}
+      - click:
+          testid: create-agent-submit
+      - wait:
+          fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('cust-be-${RUN_ID:-local}')"
+        intent: Wait until the claude-backed custom agent appears after submit
+      - use: choose-custom-prompt-template
+        with:
+          path: /ws/E2E-WS-CUSTOM/agents
+          readyIntent: Wait until the custom workspace agents page is ready for the default backend companion
+          dialogIntent: Wait until the agent creation dialog is open for the default backend companion
+      - fill:
+          testid: create-agent-name
+          value: cust-be-default-${RUN_ID:-local}
+      - fill:
+          testid: create-agent-interactive-prompt
+          value: AFT-BACKEND-DEFAULT-${RUN_ID:-local}
+      - click:
+          testid: create-agent-submit
+      - wait:
+          fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('cust-be-default-${RUN_ID:-local}')"
+        intent: Wait until the codex-backed default custom agent appears after submit
+      - api:
+          method: GET
+          path: /api/backends
+          assert:
+            - path: data
+              contains: codex
+            - path: data
+              contains: claude
+            - path: data
+              contains: cursor
+            - path: data
+              contains: opencode
+            - path: data
+              contains: gemini
+        intent: An operator confirms the registered backend list includes every first-class backend
+      - open: /ws/E2E-WS-CUSTOM/agents/cust-be-${RUN_ID:-local}
+      - wait:
+          fn: |-
+            (() => {
+              const page = document.querySelector('[data-testid=agents-page]');
+              const add = Array.from(document.querySelectorAll('button'))
+                .some((b) => (b.textContent || '').trim() === '+ Add agent');
+              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
+              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
+              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
+              if (!page || !settled) {
+                window.__aftAgentsPageStableSig = null;
+                window.__aftAgentsPageStableAt = 0;
+                return false;
+              }
+              if (window.__aftAgentsPageStableSig !== sig) {
+                window.__aftAgentsPageStableSig = sig;
+                window.__aftAgentsPageStableAt = Date.now();
+                return false;
+              }
+              return Date.now() - window.__aftAgentsPageStableAt >= 300;
+            })()
+        intent: Wait until the claude-backed custom agent detail page is ready
+      - wait:
+          fn: "!!document.querySelector('[data-testid=terminal-view] [data-testid=terminal-tab-bar], [data-testid=terminal-view] [data-testid=terminal-wrapper]')"
+        intent: Wait until the claude-backed custom agent terminal surface is mounted
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          name="cust-be-$run"
+          default_name="cust-be-default-$run"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/agents" > "$AFT_WORK_DIR/d10-agents.json"
+          python3 - "$AFT_WORK_DIR/d10-agents.json" "$name" "$default_name" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          by_name = {a.get("name"): a for a in agents or []}
+          assert by_name[sys.argv[2]].get("backend") == "claude", by_name[sys.argv[2]]
+          assert by_name[sys.argv[3]].get("backend") == "codex", by_name[sys.argv[3]]
+          PY
+          # budget: terminal-launch (120s) - backend-specific launch argv appears after tab creation.
+          for i in $(seq 1 60); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/terminal/tabs" > "$AFT_WORK_DIR/d10-tabs.json" &&
+            python3 - "$AFT_WORK_DIR/d10-tabs.json" "$name" <<'PY' && exit 0
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          name = sys.argv[2]
+          tabs = d.get("data") or []
+          matches = [t for t in tabs if t.get("agent_id") == name]
+          assert matches, tabs
+          t = matches[0]
+          launch = t.get("launch") or {}
+          argv = launch.get("argv") or []
+          cmd = argv[1] if len(argv) > 1 else ""
+          env = launch.get("env") or {}
+          assert t.get("kind") == "agent", t
+          assert t.get("role") == name, t
+          assert t.get("backend") == "claude", t
+          assert argv and argv[0] == "-c", argv
+          assert "'--backend' 'claude'" in cmd, cmd
+          assert cmd.endswith("'lead'"), cmd
+          assert "--prompt" not in cmd, cmd
+          assert env.get("LOOM_AGENT_ROLE") == name, env
+          assert env.get("LOOM_AGENT_NAME") == name, env
+          assert launch.get("cwd", "") == "", launch
+          PY
+            sleep 2
+          done
+          echo "claude backend terminal launch metadata never appeared"
+          cat "$AFT_WORK_DIR/d10-tabs.json" 2>/dev/null || true
+          exit 1
+        intent: An operator polls terminal tabs until the claude-backed launch spec is persisted and verifies argv env and cwd
+  terminal-14-backend-selection-reaches-custom-agent-row-and-terminal-:
+    steps:
+      - expect:
+          visible:
+            selector: body
+  case-15-repo-scoping-persists-but-custom-interactive-launch-has-:
+    steps:
+      - click:
+          testid: create-agent-template-custom-prompt
+      - fill:
+          testid: create-agent-name
+          value: cust-repo-${RUN_ID:-local}
+      - wait:
+          fn: document.querySelectorAll('[data-testid=create-agent-backend] option').length > 1
+        intent: Wait until backend options are loaded before selecting claude
+      - select:
+          testid: create-agent-backend
+          value: claude
+      - fill:
+          testid: create-agent-interactive-prompt
+          value: AFT-REPO-SCOPED-${RUN_ID:-local}
+      - click:
+          testid: create-agent-submit
+      - wait:
+          fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('cust-repo-${RUN_ID:-local}')"
+        intent: Wait until the repo-scoped custom agent appears after submit
+      - use: choose-custom-prompt-template
+        with:
+          path: /ws/E2E-WS-CUSTOM/agents
+          readyIntent: Wait until the custom workspace agents page is ready for workspace-wide scope
+          dialogIntent: Wait until the agent creation dialog is open for workspace-wide scope
+      - fill:
+          testid: create-agent-name
+          value: cust-cross-${RUN_ID:-local}
+      - wait:
+          fn: document.querySelectorAll('[data-testid=create-agent-backend] option').length > 1
+        intent: Wait until backend options are loaded before selecting claude
+      - select:
+          testid: create-agent-backend
+          value: claude
+      - fill:
+          testid: create-agent-interactive-prompt
+          value: AFT-CROSS-REPO-${RUN_ID:-local}
+      - wait:
+          fn: |-
+            (() => {
+              const chips = document.querySelector('[data-testid="create-agent-repo-chips"]');
+              const button = chips?.querySelector('button');
+              if (!chips || !button) return false;
+              let scroller = chips.parentElement;
+              while (scroller && scroller !== document.body) {
+                const style = getComputedStyle(scroller);
+                if (/(auto|scroll)/.test(style.overflowY) && scroller.scrollHeight > scroller.clientHeight) break;
+                scroller = scroller.parentElement;
+              }
+              chips.scrollIntoView({ block: 'center', inline: 'nearest' });
+              const rect = button.getBoundingClientRect();
+              const bounds = scroller && scroller !== document.body
+                ? scroller.getBoundingClientRect()
+                : { top: 0, bottom: window.innerHeight || document.documentElement.clientHeight };
+              return rect.top >= bounds.top && rect.bottom <= bounds.bottom;
+            })()
+        intent: Scroll the modal body until the repo chips are visible before toggling workspace scope
+      - click:
+          selector: "[data-testid='create-agent-repo-chips'] button"
+          first: true
+      - click:
+          testid: create-agent-submit
+      - wait:
+          fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('cust-cross-${RUN_ID:-local}')"
+        intent: Wait until the workspace-wide custom agent appears after submit
+      - open: /ws/E2E-WS-CUSTOM/agents/cust-repo-${RUN_ID:-local}
+      - wait:
+          fn: |-
+            (() => {
+              const page = document.querySelector('[data-testid=agents-page]');
+              const add = Array.from(document.querySelectorAll('button'))
+                .some((b) => (b.textContent || '').trim() === '+ Add agent');
+              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
+              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
+              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
+              if (!page || !settled) {
+                window.__aftAgentsPageStableSig = null;
+                window.__aftAgentsPageStableAt = 0;
+                return false;
+              }
+              if (window.__aftAgentsPageStableSig !== sig) {
+                window.__aftAgentsPageStableSig = sig;
+                window.__aftAgentsPageStableAt = Date.now();
+                return false;
+              }
+              return Date.now() - window.__aftAgentsPageStableAt >= 300;
+            })()
+        intent: Wait until the repo-scoped custom agent detail page is ready
+      - wait:
+          fn: "!!document.querySelector('[data-testid=terminal-view] [data-testid=terminal-tab-bar], [data-testid=terminal-view] [data-testid=terminal-wrapper]')"
+        intent: Wait until the repo-scoped custom agent terminal surface is mounted
+      - open: /ws/E2E-WS-CUSTOM/agents/cust-cross-${RUN_ID:-local}
+      - wait:
+          fn: |-
+            (() => {
+              const page = document.querySelector('[data-testid=agents-page]');
+              const add = Array.from(document.querySelectorAll('button'))
+                .some((b) => (b.textContent || '').trim() === '+ Add agent');
+              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
+              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
+              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
+              if (!page || !settled) {
+                window.__aftAgentsPageStableSig = null;
+                window.__aftAgentsPageStableAt = 0;
+                return false;
+              }
+              if (window.__aftAgentsPageStableSig !== sig) {
+                window.__aftAgentsPageStableSig = sig;
+                window.__aftAgentsPageStableAt = Date.now();
+                return false;
+              }
+              return Date.now() - window.__aftAgentsPageStableAt >= 300;
+            })()
+        intent: Wait until the workspace-wide custom agent detail page is ready
+      - wait:
+          fn: "!!document.querySelector('[data-testid=terminal-view] [data-testid=terminal-tab-bar], [data-testid=terminal-view] [data-testid=terminal-wrapper]')"
+        intent: Wait until the workspace-wide custom agent terminal surface is mounted
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          repo_agent="cust-repo-$run"
+          cross_agent="cust-cross-$run"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM" > "$AFT_WORK_DIR/d11-workspace.json"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/agents" > "$AFT_WORK_DIR/d11-agents.json"
+          python3 - "$AFT_WORK_DIR/d11-workspace.json" "$AFT_WORK_DIR/d11-agents.json" "$repo_agent" "$cross_agent" <<'PY'
+          import json, pathlib, sys
+          ws = json.load(open(sys.argv[1]))["data"]
+          d = json.load(open(sys.argv[2]))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          by_name = {a.get("name"): a for a in agents or []}
+          repo = ws["repos"][0]["name"]
+          repo_agent, cross_agent = sys.argv[3], sys.argv[4]
+          a = by_name[repo_agent]
+          assert not a.get("cross_repo"), a
+          assert a.get("repos") == [repo], (a, repo)
+          b = by_name[cross_agent]
+          assert b.get("cross_repo") is True, b
+          assert not b.get("repos"), b
+          for name in [repo_agent, cross_agent]:
+              path = pathlib.Path(ws["path"]) / "worktrees" / repo / name
+              assert not path.exists(), str(path)
+          PY
+          for agent in "$repo_agent" "$cross_agent"; do
+            # budget: terminal-launch (120s) - each terminal tab must persist its launch env.
+            for i in $(seq 1 60); do
+              curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/terminal/tabs" > "$AFT_WORK_DIR/d11-tabs-$agent.json" &&
+              python3 - "$AFT_WORK_DIR/d11-tabs-$agent.json" "$agent" <<'PY' && break
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          agent = sys.argv[2]
+          tabs = d.get("data") or []
+          matches = [t for t in tabs if t.get("agent_id") == agent]
+          assert matches, tabs
+          launch = matches[0].get("launch") or {}
+          assert launch.get("cwd", "") == "", launch
+          PY
+              sleep 2
+            done
+            python3 - "$AFT_WORK_DIR/d11-tabs-$agent.json" "$agent" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          agent = sys.argv[2]
+          tabs = d.get("data") or []
+          matches = [t for t in tabs if t.get("agent_id") == agent]
+          assert matches, tabs
+          assert (matches[0].get("launch") or {}).get("cwd", "") == "", matches[0]
+          PY
+          done
+        intent: An operator reads back repo scope, absent agent worktrees, and empty launch cwd from API and terminal tabs
+  terminal-15-repo-scoping-persists-but-custom-interactive-launch-has-:
+    steps:
+      - expect:
+          visible:
+            selector: body
+  case-16-custom-prompt-is-not-visible-or-editable-after-creation:
+    steps:
+      - open: /ws/E2E-WS-CUSTOM/agents/cust-${RUN_ID:-local}
+      - wait:
+          fn: |-
+            (() => {
+              const page = document.querySelector('[data-testid=agents-page]');
+              const add = Array.from(document.querySelectorAll('button'))
+                .some((b) => (b.textContent || '').trim() === '+ Add agent');
+              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
+              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
+              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
+              if (!page || !settled) {
+                window.__aftAgentsPageStableSig = null;
+                window.__aftAgentsPageStableAt = 0;
+                return false;
+              }
+              if (window.__aftAgentsPageStableSig !== sig) {
+                window.__aftAgentsPageStableSig = sig;
+                window.__aftAgentsPageStableAt = Date.now();
+                return false;
+              }
+              return Date.now() - window.__aftAgentsPageStableAt >= 300;
+            })()
+        intent: Wait until the previously created custom agent detail page is ready
+      - wait:
+          fn: |-
+            (() => {
+              const group = document.querySelector("[data-testid=agent-editor-groups]");
+              if (!group) return false;
+              const labels = Array.from(group.querySelectorAll('button[draggable="true"]')).map((b) => b.textContent.trim()).filter(Boolean);
+              return JSON.stringify(labels) === JSON.stringify(["Terminal", "Info", "Git", "Logs", "Diff", "Files"]);
+            })()
+        intent: Wait until the agent editor tab labels exactly match the promptless tab set
+      - expect:
+          notText: AFT-PROMPT-MARKER
+      - api:
+          method: PATCH
+          path: /api/workspaces/E2E-WS-CUSTOM/agents/cust-${RUN_ID:-local}
+          body:
+            prompt: AFT-SHOULD-NOT-CHANGE
+          status: 200
+        intent: An operator probes the agent patch API with a prompt field that the service ignores
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          name="cust-$run"
+          want="You are a release-notes reviewer. AFT-PROMPT-MARKER-$run"
+          LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-CUSTOM role show "$name" --json > "$AFT_WORK_DIR/d12-role.json"
+          python3 - "$AFT_WORK_DIR/d12-role.json" "$want" <<'PY'
+          import json, sys
+          r = json.load(open(sys.argv[1]))
+          assert r.get("prompt") == sys.argv[2], r
+          PY
+        intent: An operator's CLI readback confirms the ignored prompt patch left the role prompt unchanged
+  terminal-16-custom-prompt-is-not-visible-or-editable-after-creation:
+    steps:
+      - expect:
+          notText: AFT-PROMPT-MARKER
+  case-20-mixed-case-custom-agent-name-is-normalized-by-the-ui:
+    steps:
+      - click:
+          testid: create-agent-template-custom-prompt
+      - fill:
+          testid: create-agent-name
+          value: CustMix-${RUN_ID:-local}
+      - wait:
+          fn: document.querySelectorAll('[data-testid=create-agent-backend] option').length > 1
+        intent: Wait until backend options are loaded before selecting claude
+      - select:
+          testid: create-agent-backend
+          value: claude
+      - fill:
+          testid: create-agent-interactive-prompt
+          value: AFT-MIX-${RUN_ID:-local}
+      - click:
+          testid: create-agent-submit
+      - wait:
+          fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('custmix-${RUN_ID:-local}')"
+        intent: Wait until the mixed-case custom agent appears under its normalized name
+      - open: /ws/E2E-WS-CUSTOM/agents/custmix-${RUN_ID:-local}
+      - wait:
+          fn: |-
+            (() => {
+              const page = document.querySelector('[data-testid=agents-page]');
+              const add = Array.from(document.querySelectorAll('button'))
+                .some((b) => (b.textContent || '').trim() === '+ Add agent');
+              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
+              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
+              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
+              if (!page || !settled) {
+                window.__aftAgentsPageStableSig = null;
+                window.__aftAgentsPageStableAt = 0;
+                return false;
+              }
+              if (window.__aftAgentsPageStableSig !== sig) {
+                window.__aftAgentsPageStableSig = sig;
+                window.__aftAgentsPageStableAt = Date.now();
+                return false;
+              }
+              return Date.now() - window.__aftAgentsPageStableAt >= 300;
+            })()
+        intent: Wait until the normalized custom agent route renders
+      - wait:
+          fn: "!!document.querySelector('[data-testid=terminal-view] [data-testid=terminal-tab-bar], [data-testid=terminal-view] [data-testid=terminal-wrapper]')"
+        intent: Wait until the normalized custom agent terminal surface is mounted
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          name="custmix-$run"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/agents" > "$AFT_WORK_DIR/d17a-agents.json"
+          LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-CUSTOM role show "$name" --json > "$AFT_WORK_DIR/d17a-role.json"
+          python3 - "$AFT_WORK_DIR/d17a-agents.json" "$AFT_WORK_DIR/d17a-role.json" "$name" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          name = sys.argv[3]
+          matches = [a for a in agents or [] if a.get("name") == name]
+          assert len(matches) == 1, agents
+          assert matches[0].get("role_name") == name, matches[0]
+          r = json.load(open(sys.argv[2]))
+          assert r.get("name") == name, r
+          PY
+          # budget: terminal-launch (120s) - API-created agent launch argv appears after terminal tab creation.
+          for i in $(seq 1 60); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/terminal/tabs" > "$AFT_WORK_DIR/d17a-tabs.json" &&
+            python3 - "$AFT_WORK_DIR/d17a-tabs.json" "$name" <<'PY' && exit 0
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          name = sys.argv[2]
+          tabs = d.get("data") or []
+          matches = [t for t in tabs if t.get("agent_id") == name]
+          assert matches, tabs
+          assert matches[0].get("launch", {}).get("env", {}).get("LOOM_AGENT_ROLE") == name, matches[0]
+          PY
+            sleep 2
+          done
+          echo "normalized custom agent terminal launch metadata never appeared"
+          cat "$AFT_WORK_DIR/d17a-tabs.json" 2>/dev/null || true
+          exit 1
+        intent: An operator polls terminal tabs until the normalized custom agent role env is persisted
+  terminal-20-mixed-case-custom-agent-name-is-normalized-by-the-ui:
+    steps:
+      - expect:
+          visible:
+            selector: body
+  case-22-built-in-pr-review-template-works-in-a-clean-control-wor:
+    steps:
+      - use: choose-pr-review-template
+        with:
+          path: /ws/E2E-WS-CUSTOM-CTL/agents
+          readyIntent: Wait until the clean control workspace agents page is ready
+          dialogIntent: Wait until the agent creation dialog is open in the clean control workspace
+      - expect:
+          count:
+            testid: create-agent-interactive-prompt
+            equals: 0
+      - fill:
+          testid: create-agent-name
+          value: rev-${RUN_ID:-local}
+      - wait:
+          fn: document.querySelectorAll('[data-testid=create-agent-backend] option').length > 1
+        intent: Wait until backend options are loaded before selecting claude
+      - select:
+          testid: create-agent-backend
+          value: claude
+      - click:
+          testid: create-agent-submit
+      - wait:
+          fn: "!document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('rev-${RUN_ID:-local}')"
+        intent: Wait until the PR Review agent appears after submit
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          name="rev-$run"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM-CTL/agents" > "$AFT_WORK_DIR/d19-agents.json"
+          LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-CUSTOM-CTL role show pr-review --json > "$AFT_WORK_DIR/d19-role.json"
+          python3 - "$AFT_WORK_DIR/d19-agents.json" "$AFT_WORK_DIR/d19-role.json" "$name" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          data = d.get("data", d)
+          agents = data.get("agents") if isinstance(data, dict) else data
+          name = sys.argv[3]
+          matches = [a for a in agents or [] if a.get("name") == name]
+          assert len(matches) == 1, agents
+          assert matches[0].get("role_name") == "pr-review", matches[0]
+          r = json.load(open(sys.argv[2]))
+          assert r.get("kind") == "interactive", r
+          assert r.get("prompt_file") == "builtin:pr-review", r
+          assert not r.get("prompt"), r
+          PY
+        intent: An operator's readback confirms the PR Review agent and built-in role prompt_file
+      - open: /ws/E2E-WS-CUSTOM-CTL/agents/rev-${RUN_ID:-local}
+      - wait:
+          fn: |-
+            (() => {
+              const page = document.querySelector('[data-testid=agents-page]');
+              const add = Array.from(document.querySelectorAll('button'))
+                .some((b) => (b.textContent || '').trim() === '+ Add agent');
+              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
+              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
+              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
+              if (!page || !settled) {
+                window.__aftAgentsPageStableSig = null;
+                window.__aftAgentsPageStableAt = 0;
+                return false;
+              }
+              if (window.__aftAgentsPageStableSig !== sig) {
+                window.__aftAgentsPageStableSig = sig;
+                window.__aftAgentsPageStableAt = Date.now();
+                return false;
+              }
+              return Date.now() - window.__aftAgentsPageStableAt >= 300;
+            })()
+        intent: Wait until the PR Review agent detail page is ready
+      - wait:
+          fn: "!!document.querySelector('[data-testid=terminal-view] [data-testid=terminal-tab-bar], [data-testid=terminal-view] [data-testid=terminal-wrapper]')"
+        intent: Wait until the PR Review agent terminal surface is mounted
+      - run: |
+          set -e
+          name="rev-${RUN_ID:-local}"
+          # budget: terminal-launch (120s) - built-in PR Review launch spec can lag PTY spawn.
+          for i in $(seq 1 60); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM-CTL/terminal/tabs" > "$AFT_WORK_DIR/d19-tabs.json" &&
+            python3 - "$AFT_WORK_DIR/d19-tabs.json" "$name" <<'PY' && exit 0
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          name = sys.argv[2]
+          tabs = d.get("data") or []
+          matches = [t for t in tabs if t.get("agent_id") == name]
+          assert matches, tabs
+          cmd = (matches[0].get("launch") or {}).get("argv", ["", ""])[1]
+          assert matches[0].get("backend") == "claude", matches[0]
+          assert "'--backend' 'claude'" in cmd, cmd
+          assert "'--prompt' 'builtin:pr-review'" in cmd, cmd
+          PY
+            sleep 2
+          done
+          echo "PR Review launch metadata never appeared"
+          cat "$AFT_WORK_DIR/d19-tabs.json" 2>/dev/null || true
+          exit 1
+        intent: An operator polls terminal tabs until the PR Review launch spec contains the builtin prompt flag
+      - api:
+          method: GET
+          path: /api/workspaces/E2E-WS-CUSTOM-CTL/interactive-prompts
+          assert:
+            - path: prompts.1.id
+              equals: pr-review
+        intent: An operator confirms the built-in interactive prompt registry still exposes pr-review
+  terminal-22-built-in-pr-review-template-works-in-a-clean-control-wor:
+    steps:
+      - expect:
+          count:
+            testid: create-agent-interactive-prompt
+            equals: 0
