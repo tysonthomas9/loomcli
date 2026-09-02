@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -28,7 +29,9 @@ import (
 )
 
 // buildCommand constructs the exec.Cmd for spawning an agent subprocess (does not start it).
-func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
+// ctx carries the caller's active span; it is what the child inherits through
+// LOOM_TRACE_PARENT, so the agent's whole run nests under the spawn that made it.
+func (s *Supervisor) buildCommand(ctx context.Context, ap *AgentProcess) (*exec.Cmd, error) {
 	cfg := s.ConfigSnapshot()
 
 	ap.Mu.Lock()
@@ -78,9 +81,11 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	}
 
 	// Propagate the active trace context so the agent subprocess's bootstrap
-	// span and per-request spans inherit the daemon's trace tree.
+	// span and per-request spans inherit the daemon's trace tree. ctx is the
+	// caller's span context (the spawn span, on the spawnAgent path), so the
+	// child parents under the spawn rather than under the daemon root.
 	// See docs/observability/tracing-contract.md §5.
-	if tp := tracing.TraceparentFromContext(cmdstore.RootContext()); tp != "" {
+	if tp := tracing.TraceparentFromContext(ctx); tp != "" {
 		cmd.Env = append(cmd.Env, "LOOM_TRACE_PARENT="+tp)
 	}
 
@@ -279,7 +284,7 @@ func appendSessionEnv(env []string, ap *AgentProcess) []string {
 //
 //nolint:funlen // Linear orchestration: gate → build → start → record. Each step is short; extracting would fragment the lifecycle.
 func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
-	_, span := startSpan(cmdstore.RootContext(),
+	ctx, span := startSpan(cmdstore.RootContext(),
 		"daemon.supervisor.spawn",
 		attribute.String("loom.agent", ap.Entry.Worktree),
 		attribute.String("loom.role", ap.Entry.Role),
@@ -287,11 +292,11 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 	)
 	defer span.End()
 
-	if err := s.gateBackendAvailable(ap); err != nil {
+	if err := s.gateBackendAvailable(ctx, ap); err != nil {
 		s.recordSpawnFailure(span, err, ap.Entry.Role, spawnmetrics.ClassBackendUnavailable)
 		return err
 	}
-	if err := s.materializeSkills(ap); err != nil {
+	if err := s.materializeSkills(ctx, ap); err != nil {
 		if skillmat.IsStoreUnavailable(err) {
 			slog.Warn("skill store unavailable; continuing with existing materialization",
 				"worktree", ap.Entry.Worktree, "workspace", s.WorkspaceID, "err", err)
@@ -302,7 +307,7 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 	}
 	s.ensureHookConfig(ap)
 
-	cmd, err := s.buildCommand(ap)
+	cmd, err := s.buildCommand(ctx, ap)
 	if err != nil {
 		s.recordSpawnFailure(span, err, ap.Entry.Role, spawnmetrics.ClassBuildCommand)
 		return fmt.Errorf("build command: %w", err)
@@ -349,7 +354,7 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 	if evt, err := events.NewEvent(events.AgentStarted, worktree, role, epicID, events.AgentStartedData{PID: pid}); err == nil {
 		s.EmitEvent(evt)
 	}
-	s.markControlPlaneAgentSessionRunning(ap)
+	s.markControlPlaneAgentSessionRunning(ctx, ap)
 
 	return nil
 }

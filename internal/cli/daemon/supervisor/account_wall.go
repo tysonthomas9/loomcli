@@ -18,6 +18,7 @@ package supervisor
 // healthy agents.
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"os"
@@ -295,7 +296,10 @@ func (s *Supervisor) gateAccountWall(ap *AgentProcess) error {
 		worktree := ap.Entry.Worktree
 		ap.Mu.Unlock()
 		if wasWalled {
-			s.markControlPlaneAgentState(ap, domain.AgentStateActive)
+			// gateAccountWall runs on the pre-flight path, where no spawn span is
+			// open; pass an explicit background context so the missing trace parent
+			// is visible here rather than implied.
+			s.markControlPlaneAgentState(context.Background(), ap, domain.AgentStateActive)
 			slog.Info("wall lifted — resuming spawn", "worktree", worktree)
 		}
 		return nil
@@ -320,7 +324,7 @@ func (s *Supervisor) gateAccountWall(ap *AgentProcess) error {
 	worktree := ap.Entry.Worktree
 	ap.Mu.Unlock()
 
-	s.markControlPlaneAgentState(ap, domain.AgentStateIdle)
+	s.markControlPlaneAgentState(context.Background(), ap, domain.AgentStateIdle)
 	// One line per wall transition, not one per agent per poll cycle. It names
 	// the scope and the credential: the 2026-08-31 outage was slow to diagnose
 	// because the line asserted "account-level" about what was really one

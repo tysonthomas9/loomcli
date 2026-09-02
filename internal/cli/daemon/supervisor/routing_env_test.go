@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -36,7 +37,7 @@ func TestBuildCommand_RoutingEnvVars(t *testing.T) {
 		WorktreePath: tmpDir,
 	}
 
-	cmd, err := s.buildCommand(ap)
+	cmd, err := s.buildCommand(context.Background(), ap)
 	if err != nil {
 		t.Fatalf("buildCommand error: %v", err)
 	}
@@ -91,7 +92,7 @@ func TestBuildCommand_NoRoutingEnvVars(t *testing.T) {
 		WorktreePath: tmpDir,
 	}
 
-	cmd, err := s.buildCommand(ap)
+	cmd, err := s.buildCommand(context.Background(), ap)
 	if err != nil {
 		t.Fatalf("buildCommand error: %v", err)
 	}

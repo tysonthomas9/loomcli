@@ -33,7 +33,10 @@ var ErrBackendUnavailable = errors.New("supervisor: backend binary not on PATH")
 // A discovery-layer failure (e.g. unreadable embedded versions.json)
 // is logged but does not block spawn — the supervisor will surface
 // the exec error if the binary is genuinely missing.
-func (s *Supervisor) gateBackendAvailable(ap *AgentProcess) error {
+//
+// ctx carries the caller's span so the control-plane state writes this gate
+// makes record as children of it rather than as orphan siblings.
+func (s *Supervisor) gateBackendAvailable(ctx context.Context, ap *AgentProcess) error {
 	backend := s.GetEffectiveBackend(ap)
 	if backend == "" {
 		// No backend resolved (test fixture or misconfiguration). The
@@ -49,17 +52,17 @@ func (s *Supervisor) gateBackendAvailable(ap *AgentProcess) error {
 	}
 
 	if info.Installed {
-		s.noteBackendAvailable(ap, backend, misses)
+		s.noteBackendAvailable(ctx, ap, backend, misses)
 		return nil
 	}
-	s.noteBackendUnavailable(ap, backend, info.InstallHint)
+	s.noteBackendUnavailable(ctx, ap, backend, info.InstallHint)
 	return ErrBackendUnavailable
 }
 
 // noteBackendAvailable handles the installed branch of the gate: it clears a
 // previous backend-unavailable block so UIs reflect the recovery before the
 // spawn proceeds, and reports a miss that ConfirmBackend rode out.
-func (s *Supervisor) noteBackendAvailable(ap *AgentProcess, backend string, misses int) {
+func (s *Supervisor) noteBackendAvailable(ctx context.Context, ap *AgentProcess, backend string, misses int) {
 	ap.Mu.Lock()
 	wasUnavailable := ap.StopReason == StopReasonBackendUnavailable
 	if wasUnavailable {
@@ -78,7 +81,7 @@ func (s *Supervisor) noteBackendAvailable(ap *AgentProcess, backend string, miss
 			worktree, backend, misses)
 	}
 	if wasUnavailable {
-		s.markControlPlaneAgentState(ap, domain.AgentStateActive)
+		s.markControlPlaneAgentState(ctx, ap, domain.AgentStateActive)
 		log.Printf("[daemon] Agent %s: backend %q now on PATH — resuming spawn",
 			worktree, backend)
 	}
@@ -91,7 +94,7 @@ func (s *Supervisor) noteBackendAvailable(ap *AgentProcess, backend string, miss
 // those rechecks is what made the flap unbounded. It fires on transition plus a
 // bounded level re-assert, so a control-plane row reset out from under a parked
 // agent still converges.
-func (s *Supervisor) noteBackendUnavailable(ap *AgentProcess, backend, installHint string) {
+func (s *Supervisor) noteBackendUnavailable(ctx context.Context, ap *AgentProcess, backend, installHint string) {
 	// Decide under the lock, act after it — markControlPlaneAgentState makes a
 	// network call and must never run while ap.Mu is held.
 	ap.Mu.Lock()
@@ -114,7 +117,7 @@ func (s *Supervisor) noteBackendUnavailable(ap *AgentProcess, backend, installHi
 	ap.Mu.Unlock()
 
 	if shouldPatch {
-		s.markControlPlaneAgentState(ap, domain.AgentStateBackendUnavailable)
+		s.markControlPlaneAgentState(ctx, ap, domain.AgentStateBackendUnavailable)
 	}
 	if !wasUnavailable {
 		log.Printf("[daemon] Agent %s: backend %q not on PATH — skipping spawn (%s)",
@@ -278,7 +281,7 @@ func (s *Supervisor) ensureHookConfig(ap *AgentProcess) {
 	}
 }
 
-func (s *Supervisor) materializeSkills(ap *AgentProcess) error {
+func (s *Supervisor) materializeSkills(ctx context.Context, ap *AgentProcess) error {
 	if s.WorkspaceID == "" {
 		return nil
 	}
@@ -287,7 +290,7 @@ func (s *Supervisor) materializeSkills(ap *AgentProcess) error {
 			"worktree", ap.Entry.Worktree, "workspace", s.WorkspaceID)
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(cmdstore.RootContext(), controlPlaneOperationTimeout)
+	ctx, cancel := context.WithTimeout(ctx, controlPlaneOperationTimeout)
 	defer cancel()
 	return skillmat.MaterializeWithOptions(ctx, s.ControlStore, s.WorkspaceID, ap.Entry.Role, ap.WorktreePath,
 		skillmat.Options{LeasesDisabled: s.LeasesDisabled})
@@ -306,7 +309,7 @@ func (s *Supervisor) materializeIdleSkills(ap *AgentProcess) {
 	if !noWork {
 		return
 	}
-	if err := s.materializeSkills(ap); err != nil {
+	if err := s.materializeSkills(cmdstore.RootContext(), ap); err != nil {
 		slog.Warn("idle skill materialization failed", "worktree", ap.Entry.Worktree, "err", err)
 	}
 }
