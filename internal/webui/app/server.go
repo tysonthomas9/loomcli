@@ -245,7 +245,19 @@ func (app *Server) run(ctx context.Context) error { //nolint:funlen // server li
 	if authMW == nil {
 		authMW = func(next http.Handler) http.Handler { return next }
 	}
-	rl, rateLimitMW := middleware.RateLimit(middleware.DefaultRateLimitConfig())
+	rlCfg := middleware.DefaultRateLimitConfig()
+	if app.config.RateLimit != nil {
+		rlCfg = app.config.RateLimit.WithDefaults()
+	}
+	if rlCfg.Enabled {
+		logger.Info("http rate limiting enabled", "component", "ratelimit",
+			"read_rate", float64(rlCfg.ReadRate), "read_burst", rlCfg.ReadBurst,
+			"mutate_rate", float64(rlCfg.MutateRate), "mutate_burst", rlCfg.MutateBurst)
+	} else {
+		// Warn, not Info: an operator scanning logs should see a protection is off.
+		logger.Warn("http rate limiting disabled", "component", "ratelimit")
+	}
+	rl, rateLimitMW := middleware.RateLimit(rlCfg)
 	// Prometheus HTTP metrics: outer wraps the chain to record duration+status;
 	// routeCapture must run innermost (after mux routes) to read r.Pattern.
 	metricsOuter, routeCapture := webui.PromMetricsMiddleware()

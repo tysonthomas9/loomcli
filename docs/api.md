@@ -4152,6 +4152,23 @@ Per-IP token bucket rate limiting applied to all API endpoints (except `/health`
 - Returns `429 Too Many Requests` with `Retry-After` header
 - `/api/client-errors` and `/api/csp-report` are excluded from this global limiter — they use dedicated per-endpoint rate limiters (see [Client Error & CSP Reporting](#client-error--csp-reporting))
 
+### Configuration
+
+The global limiter is on by default at the rates above. `loom serve` exposes it via flags, each of which reads a `LOOM_RATE_LIMIT_*` env var when the flag is not passed (the flag wins when both are set):
+
+| Flag | Env Var | Default | Description |
+|------|---------|---------|-------------|
+| `--rate-limit-enabled` | `LOOM_RATE_LIMIT_ENABLED` | `true` | Per-IP HTTP rate limiting. Set `0`/`false`/`off`/`no` to disable |
+| `--rate-limit-read-rate` | `LOOM_RATE_LIMIT_READ_RATE` | `100` | Sustained read req/s per IP |
+| `--rate-limit-read-burst` | `LOOM_RATE_LIMIT_READ_BURST` | `200` | Read burst per IP |
+| `--rate-limit-mutate-rate` | `LOOM_RATE_LIMIT_MUTATE_RATE` | `20` | Sustained mutating req/s per IP |
+| `--rate-limit-mutate-burst` | `LOOM_RATE_LIMIT_MUTATE_BURST` | `40` | Mutating burst per IP |
+
+- A non-positive or unparseable value is logged and falls back to the default — it never reaches the limiter, where `0` would reject every request. A burst below its rate is raised to one second's worth of requests.
+- Disabling logs a `WARN` at startup (`http rate limiting disabled`); enabling logs the effective rates at `INFO`.
+- **Disabling removes a DoS protection.** It exists for E2E suites and single-IP automation, which trip the per-IP limits from one address. See [Security](security.md#http-rate-limiting).
+- The per-endpoint limiters on `/api/client-errors` and `/api/config` are separate and are *not* affected by these settings.
+
 ## Error Codes
 
 Error codes appear in the `code` field of error responses on issue-related endpoints:

@@ -19,6 +19,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/testutil"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // mockMonitorData creates a sample MonitorData for testing
@@ -1592,5 +1593,116 @@ func TestCollectWorkerStatusCounts_NoDaemon(t *testing.T) {
 	// Verify no unexpected keys
 	if len(counts) != 3 {
 		t.Errorf("len(counts) = %d, want 3", len(counts))
+	}
+}
+
+func TestRateLimitEnabledDefault(t *testing.T) {
+	for _, value := range []string{"", "1", "true", "TRUE", "yes", "on", "unexpected"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv(envLoomRateLimitEnabled, value)
+			if !rateLimitEnabledDefault() {
+				t.Fatalf("rateLimitEnabledDefault() = false for %q", value)
+			}
+		})
+	}
+	for _, value := range []string{"0", "false", "FALSE", "off", "no", " off "} {
+		t.Run("disabled_"+value, func(t *testing.T) {
+			t.Setenv(envLoomRateLimitEnabled, value)
+			if rateLimitEnabledDefault() {
+				t.Fatalf("rateLimitEnabledDefault() = true for %q", value)
+			}
+		})
+	}
+}
+
+func TestIntEnvDefault(t *testing.T) {
+	tests := []struct {
+		value string
+		want  int
+	}{
+		{"", 100},
+		{"500", 500},
+		{"abc", 100}, // unparseable: warn and fall back, never abort serve
+		{"0", 100},   // 0 would make rate.NewLimiter reject every request
+		{"-5", 100},  // ditto for negatives
+		{" 250 ", 250},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			t.Setenv(envLoomRateLimitReadRate, tt.value)
+			if got := intEnvDefault(envLoomRateLimitReadRate, 100); got != tt.want {
+				t.Errorf("intEnvDefault(%q) = %d, want %d", tt.value, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestServeFlags_RateLimitDefaults(t *testing.T) {
+	testutil.ClearLoomEnv(t)
+
+	tests := []struct {
+		name     string
+		flagType string
+		def      string
+	}{
+		{"rate-limit-enabled", "bool", "true"},
+		{"rate-limit-read-rate", "int", "100"},
+		{"rate-limit-read-burst", "int", "200"},
+		{"rate-limit-mutate-rate", "int", "20"},
+		{"rate-limit-mutate-burst", "int", "40"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := serveCmd.Flags().Lookup(tt.name)
+			if f == nil {
+				t.Fatalf("%s flag not registered on serveCmd", tt.name)
+			}
+			if f.Value.Type() != tt.flagType {
+				t.Errorf("%s type = %q, want %q", tt.name, f.Value.Type(), tt.flagType)
+			}
+			if f.DefValue != tt.def {
+				t.Errorf("%s default = %q, want %q", tt.name, f.DefValue, tt.def)
+			}
+		})
+	}
+}
+
+func TestBuildRateLimitConfig(t *testing.T) {
+	// These are package-level vars on a shared serveCmd; restore them.
+	origEnabled, origReadRate, origReadBurst := serveRateLimitEnabled, serveRateLimitReadRate, serveRateLimitReadBurst
+	origMutateRate, origMutateBurst := serveRateLimitMutateRate, serveRateLimitMutateBurst
+	t.Cleanup(func() {
+		serveRateLimitEnabled, serveRateLimitReadRate, serveRateLimitReadBurst = origEnabled, origReadRate, origReadBurst
+		serveRateLimitMutateRate, serveRateLimitMutateBurst = origMutateRate, origMutateBurst
+	})
+
+	serveRateLimitEnabled = true
+	serveRateLimitReadRate = 500
+	serveRateLimitReadBurst = 1000
+	serveRateLimitMutateRate = 300
+	serveRateLimitMutateBurst = 600
+
+	cfg := buildRateLimitConfig()
+	if cfg == nil {
+		t.Fatal("buildRateLimitConfig() = nil, want a config")
+	}
+	if !cfg.Enabled {
+		t.Error("Enabled = false, want true")
+	}
+	if cfg.ReadRate != 500 || cfg.ReadBurst != 1000 {
+		t.Errorf("read = %v/%d, want 500/1000", cfg.ReadRate, cfg.ReadBurst)
+	}
+	if cfg.MutateRate != 300 || cfg.MutateBurst != 600 {
+		t.Errorf("mutate = %v/%d, want 300/600", cfg.MutateRate, cfg.MutateBurst)
+	}
+	// Cleanup/TTL are not flag-controlled and must keep package defaults.
+	d := middleware.DefaultRateLimitConfig()
+	if cfg.CleanupInterval != d.CleanupInterval || cfg.EntryTTL != d.EntryTTL {
+		t.Errorf("cleanup/ttl = %v/%v, want %v/%v", cfg.CleanupInterval, cfg.EntryTTL, d.CleanupInterval, d.EntryTTL)
+	}
+
+	serveRateLimitEnabled = false
+	if buildRateLimitConfig().Enabled {
+		t.Error("Enabled = true after opting out, want false")
 	}
 }
