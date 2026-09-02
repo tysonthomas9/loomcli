@@ -27,6 +27,7 @@ var (
 	updateRemoveDeps         []string
 	updateAddLabels          []string
 	updateRemoveLabels       []string
+	updateSourceRepo         string
 )
 
 var updateCmd = &cobra.Command{
@@ -142,6 +143,7 @@ func applyStringFlags(cmd *cobra.Command, params *backend.UpdateParams) bool {
 		{"design", &updateDesign, &params.Design},
 		{"acceptance-criteria", &updateAcceptanceCriteria, &params.AcceptanceCriteria},
 		{"title", &updateTitle, &params.Title},
+		{"source-repo", &updateSourceRepo, &params.Repo},
 	}
 	changed := false
 	for _, f := range flags {
@@ -258,6 +260,7 @@ func init() {
 	updateCmd.Flags().StringArrayVar(&updateRemoveDeps, "remove-depends-on", nil, "Remove dependency on issue ID (repeatable)")
 	updateCmd.Flags().StringArrayVar(&updateAddLabels, "add-label", nil, "Add label (repeatable); other labels are preserved")
 	updateCmd.Flags().StringArrayVar(&updateRemoveLabels, "remove-label", nil, "Remove label (repeatable); other labels are preserved")
+	updateCmd.Flags().StringVar(&updateSourceRepo, "source-repo", "", "Set source repo (pass an empty value to clear it)")
 }
 
 func readDescriptionFile(path string, stdin io.Reader) (string, error) {

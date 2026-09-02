@@ -69,6 +69,7 @@ func patchParamsToBackendUpdate(p *PatchIssueParams) backend.UpdateParams {
 		ExternalRef:        p.ExternalRef,
 		EstimatedMinutes:   p.EstimatedMinutes,
 		IssueType:          p.IssueType,
+		Repo:               p.Repo,
 		AddLabels:          p.AddLabels,
 		RemoveLabels:       p.RemoveLabels,
 		SetLabels:          p.SetLabels,
