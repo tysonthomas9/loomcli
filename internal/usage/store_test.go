@@ -275,3 +275,51 @@ func TestStore_ConcurrentAppends(t *testing.T) {
 		t.Errorf("Read returned %d records, want %d", len(records), n)
 	}
 }
+
+// TestStore_Read_KnownAgents pins the legacy usage.jsonl reader to the same
+// allowlist as the session-ledger reader: `loom usage --source legacy` must
+// not contradict the default view under the same flags.
+func TestStore_Read_KnownAgents(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	now := time.Now()
+	for _, agent := range []string{"nova", "go-test-writer", ""} {
+		if err := s.Append(SessionUsage{
+			AgentName: agent, Backend: "claude", InputTokens: 10,
+			StartedAt: now, EndedAt: now.Add(time.Minute),
+		}); err != nil {
+			t.Fatalf("Append(%q): %v", agent, err)
+		}
+	}
+
+	// An unattributed row ("") is dropped by a non-empty allowlist, because ""
+	// is never a profile directory name.
+	got, err := s.Read(Filter{KnownAgents: []string{"nova"}})
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(got) != 1 || got[0].AgentName != "nova" {
+		t.Fatalf("got %+v, want the single nova record", got)
+	}
+
+	// Empty allowlist disables the filter.
+	all, err := s.Read(Filter{})
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("got %d records with an empty allowlist, want all 3", len(all))
+	}
+
+	// AND semantics with AgentName.
+	none, err := s.Read(Filter{AgentName: "go-test-writer", KnownAgents: []string{"nova"}})
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(none) != 0 {
+		t.Fatalf("got %d records, want 0 (AgentName and KnownAgents disagree)", len(none))
+	}
+}

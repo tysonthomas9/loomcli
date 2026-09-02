@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/cli/agentprofiles"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -57,9 +58,19 @@ type Reader interface {
 
 // sessionsReader reads usage from <dir>/sessions/index.jsonl, the ledger every
 // finalized agent run writes to.
-type sessionsReader struct{ dir string }
+//
+// knownAgents is the workspace's configured-agent allowlist, resolved once at
+// construction: the panel is a reporting surface, so ledger rows written by
+// agents this workspace never configured must not move its totals. Empty means
+// unfiltered (PUPPET-340).
+type sessionsReader struct {
+	dir         string
+	knownAgents []string
+}
 
 func (r sessionsReader) Read(f usage.Filter) ([]usage.SessionUsage, error) {
+	// f is a value copy, so this scopes the read without the handler seeing it.
+	f.KnownAgents = r.knownAgents
 	records, _, err := usage.ReadSessionUsage(r.dir, f)
 	return records, err
 }
@@ -67,15 +78,22 @@ func (r sessionsReader) Read(f usage.Filter) ([]usage.SessionUsage, error) {
 // InitSessionsReader returns a Reader backed by the session index. It returns
 // nil (yielding a 503 from HandleUsage) when the directory cannot be opened,
 // matching InitStore's nil-safe contract.
+//
+// It resolves the configured-agent allowlist from dir itself rather than
+// taking it as an argument: this is the panel's only constructor, so opting in
+// here is the panel's opt-in, and it leaves internal/cli/serve — which sits at
+// its import fan-out ceiling — untouched.
 func InitSessionsReader(dir string) Reader {
 	if dir == "" {
 		dir = "."
 	}
+	// The openability probe stays unfiltered: it is an existence check, not a
+	// data read, and must not 503 a workspace whose only rows are unconfigured.
 	if _, _, err := usage.ReadSessionUsage(dir, usage.Filter{}); err != nil {
 		log.Printf("Warning: failed to open sessions usage ledger: %v", err)
 		return nil
 	}
-	return sessionsReader{dir: dir}
+	return sessionsReader{dir: dir, knownAgents: agentprofiles.ConfiguredAgentNames(dir)}
 }
 
 // InitStore creates a usage store from the given directory.
