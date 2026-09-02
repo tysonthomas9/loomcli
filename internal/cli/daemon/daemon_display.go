@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -130,6 +131,45 @@ func printAgentBranchInfo(agent DaemonAgentStatus) {
 	}
 
 	fmt.Println(branchLine)
+}
+
+// stateStalenessThreshold is how old daemon-agents.json may be before the
+// status listing below it stops being trustworthy. The state updater ticks
+// every 5s, so 30s is six missed writes — well past a slow tick and well short
+// of the two hours the 2026-08-31 outage went unnoticed.
+const stateStalenessThreshold = 30 * time.Second
+
+// stateFileAge reports how long ago the state file was written, and whether an
+// age could be determined at all.
+//
+// WrittenAt is authoritative when present. It is absent from files written by
+// an older binary, and treating a zero time as the write time would report a
+// staleness measured in decades — so that case falls back to the file's mtime,
+// which is the pre-existing (weaker, `cp`-forgeable) signal.
+func stateFileAge(state *DaemonState, stateFilePath string) (time.Duration, bool) {
+	if state != nil && !state.WrittenAt.IsZero() {
+		return time.Since(state.WrittenAt), true
+	}
+	fi, err := os.Stat(stateFilePath)
+	if err != nil {
+		return 0, false
+	}
+	return time.Since(fi.ModTime()), true
+}
+
+// printStateFreshness prints the staleness banner and any active degradations
+// BEFORE the agent table, so an operator reading top-down learns the data is
+// suspect before they read the data.
+func printStateFreshness(state *DaemonState, stateFilePath string) {
+	if age, ok := stateFileAge(state, stateFilePath); ok && age > stateStalenessThreshold {
+		fmt.Printf("⚠  STALE: daemon-agents.json last written %s ago — the agent list below may not reflect reality.\n", age.Truncate(time.Second))
+	}
+	if state == nil {
+		return
+	}
+	for _, d := range state.Degradations {
+		fmt.Printf("⚠  DEGRADED: %s since %s (%d failures): %s\n", d.Kind, d.Since.Format(time.RFC3339), d.Count, d.LastErr)
+	}
 }
 
 // printQuarantinedTasks prints the quarantined-task section of daemon status.

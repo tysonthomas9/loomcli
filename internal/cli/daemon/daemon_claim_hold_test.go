@@ -402,7 +402,7 @@ func TestWriteStateFile_CarriesTheHoldAndGatedFlag(t *testing.T) {
 		{Worktree: "beta", Role: "task"},
 	}
 
-	if err := writeStateFile(path, time.Now(), agents, nil, nil, 3, stateExtras{Hold: hold}); err != nil {
+	if err := writeStateFile(path, time.Now(), agents, nil, nil, nil, 3, stateExtras{Hold: hold}); err != nil {
 		t.Fatalf("writeStateFile: %v", err)
 	}
 	state, err := ReadStateFile(path)
@@ -417,7 +417,7 @@ func TestWriteStateFile_CarriesTheHoldAndGatedFlag(t *testing.T) {
 	}
 
 	// The variadic is optional: omitting it must leave the hold absent.
-	if err := writeStateFile(path, time.Now(), agents, nil, nil, 3); err != nil {
+	if err := writeStateFile(path, time.Now(), agents, nil, nil, nil, 3); err != nil {
 		t.Fatalf("writeStateFile without hold: %v", err)
 	}
 	state, err = ReadStateFile(path)
