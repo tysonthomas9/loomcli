@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/url"
 	"strings"
 	"testing"
@@ -316,6 +317,49 @@ func TestUpdateParamsToPatchRequest_PlainFields(t *testing.T) {
 	}
 	if req.Assignee == nil || *req.Assignee != assignee {
 		t.Errorf("Assignee = %v", req.Assignee)
+	}
+}
+
+// TestUpdateParamsToPatchRequest_Repo covers the source-repo hop through the
+// serve API. The loom server relays this PATCH on to fleet-db, whose strict
+// decoder rejects the whole body on an unknown field, so the key must be
+// absent — not zero-valued — whenever the caller did not pass --source-repo.
+func TestUpdateParamsToPatchRequest_Repo(t *testing.T) {
+	repo := "fleet-db"
+	req := updateParamsToPatchRequest(backend.UpdateParams{Repo: &repo})
+	if req.Repo == nil || *req.Repo != repo {
+		t.Errorf("Repo = %v, want %q", req.Repo, repo)
+	}
+
+	// nil stays nil: the field is json:"repo,omitempty", so a nil pointer
+	// keeps the key out of the marshaled body entirely.
+	if got := updateParamsToPatchRequest(backend.UpdateParams{}); got.Repo != nil {
+		t.Errorf("Repo = %v for an unset param, want nil", got.Repo)
+	}
+
+	// An explicit empty string is a clear, and must survive as a non-nil
+	// pointer rather than collapsing back into "leave it alone".
+	empty := ""
+	if got := updateParamsToPatchRequest(backend.UpdateParams{Repo: &empty}); got.Repo == nil || *got.Repo != "" {
+		t.Errorf("Repo = %v for an explicit empty value, want a non-nil empty string", got.Repo)
+	}
+}
+
+// TestUpdateParamsToPatchRequest_RepoOmittedFromJSON asserts the property the
+// strict decoder downstream actually cares about: the marshaled body has no
+// "repo" key at all when Repo is nil.
+func TestUpdateParamsToPatchRequest_RepoOmittedFromJSON(t *testing.T) {
+	status := "blocked"
+	body, err := json.Marshal(updateParamsToPatchRequest(backend.UpdateParams{Status: &status}))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := decoded["repo"]; ok {
+		t.Errorf("PATCH body carries a repo key with Repo unset: %s", body)
 	}
 }
 

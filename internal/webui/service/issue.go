@@ -127,6 +127,7 @@ type PatchIssueParams struct {
 	ExternalRef        *string
 	EstimatedMinutes   *int
 	IssueType          *string
+	Repo               *string
 	AddLabels          []string
 	RemoveLabels       []string
 	SetLabels          []string
