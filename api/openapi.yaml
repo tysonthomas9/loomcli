@@ -5595,6 +5595,9 @@ components:
           type: [integer, "null"]
         issue_type:
           type: [string, "null"]
+        repo:
+          description: Source repo for the issue. Omit to leave unchanged; empty string clears it.
+          type: [string, "null"]
         add_labels:
           type: array
           items:

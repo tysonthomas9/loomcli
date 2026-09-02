@@ -2925,6 +2925,8 @@ export interface components {
       external_ref?: string | null;
       estimated_minutes?: number | null;
       issue_type?: string | null;
+      /** @description Source repo for the issue. Omit to leave unchanged; empty string clears it. */
+      repo?: string | null;
       add_labels?: string[];
       remove_labels?: string[];
       set_labels?: string[];

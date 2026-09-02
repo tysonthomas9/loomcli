@@ -62,6 +62,7 @@ type PatchIssueRequest struct {
 	ExternalRef        *string  `json:"external_ref,omitempty"`
 	EstimatedMinutes   *int     `json:"estimated_minutes,omitempty"`
 	IssueType          *string  `json:"issue_type,omitempty"`
+	Repo               *string  `json:"repo,omitempty"`
 	AddLabels          []string `json:"add_labels,omitempty"`
 	RemoveLabels       []string `json:"remove_labels,omitempty"`
 	SetLabels          []string `json:"set_labels,omitempty"`
