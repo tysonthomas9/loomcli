@@ -681,7 +681,18 @@ func (s *Supervisor) waitForAgent(ap *AgentProcess) int {
 // this cycle classifies anything — it would otherwise inherit the previous
 // cycle's verdict and skip the cold-start cleanup it exists to perform.
 func (s *Supervisor) recoverAgent(ap *AgentProcess, exitCode int, incomplete bool) error {
-	return agent.RecoverWorktree(ap.WorktreePath, ap.Entry.Worktree, exitCode, incomplete)
+	return s.recoverAgentForTask(ap, s.taskIDForLifecycle(ap, nil), exitCode, incomplete)
+}
+
+// recoverAgentForTask is recoverAgent with the claimed task named explicitly.
+// Recovery cannot derive it from the worktree lock alone — automode clears the
+// lock's TaskID while the fleet-db claim is still held — so callers hand over
+// the id they already trust: the supervisor's AssignedTaskID (via
+// taskIDForLifecycle) after an exit, or the checkpoint's task id on a cold
+// pre-flight after a daemon restart. RecoverWorktree still prefers a populated
+// lock; taskID is the fallback that keeps the claim from leaking.
+func (s *Supervisor) recoverAgentForTask(ap *AgentProcess, taskID string, exitCode int, incomplete bool) error {
+	return agent.RecoverWorktree(ap.WorktreePath, ap.Entry.Worktree, taskID, exitCode, incomplete)
 }
 
 // appendDaemonEnv appends daemon-level env vars (workspace ID, IPC socket path)

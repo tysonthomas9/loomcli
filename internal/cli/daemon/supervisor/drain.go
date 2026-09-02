@@ -53,6 +53,7 @@ func (s *Supervisor) DrainWithGrace(ap *AgentProcess, reason string, yieldTimeou
 	// Phase 1: Write yield file
 	if err := s.RequestYield(ap, reason); err != nil {
 		slog.Warn("yield file write failed, falling back to SIGTERM", "worktree", ap.Entry.Worktree, "err", err)
+		s.markYieldEscalated(ap)
 		s.StopAgent(ap, sigtermTimeout)
 		return outcome(DrainPhaseYieldWriteFail)
 	}
@@ -68,8 +69,11 @@ func (s *Supervisor) DrainWithGrace(ap *AgentProcess, reason string, yieldTimeou
 		return outcome(DrainPhaseYielded)
 	}
 
-	// Phase 3: Escalate to SIGTERM -> SIGKILL
+	// Phase 3: Escalate to SIGTERM -> SIGKILL.
+	// Mark BEFORE the kill: the post-exit chain in spawnAndWait runs as soon as
+	// the process dies, and it must see that this exit was a kill.
 	slog.Info("yield timeout expired, escalating to SIGTERM", "worktree", ap.Entry.Worktree, "timeout", yieldTimeout)
+	s.markYieldEscalated(ap)
 	s.StopAgent(ap, sigtermTimeout)
 	return outcome(DrainPhaseSigterm)
 }
@@ -96,6 +100,39 @@ func (s *Supervisor) waitForVoluntaryExit(ap *AgentProcess, deadline time.Time) 
 		time.Sleep(500 * time.Millisecond)
 	}
 	return false
+}
+
+// markYieldEscalated records that a drain gave up on the yield and killed the
+// agent, so the exit path classifies it as a kill rather than a graceful yield.
+func (s *Supervisor) markYieldEscalated(ap *AgentProcess) {
+	ap.Mu.Lock()
+	ap.YieldEscalated = true
+	ap.Mu.Unlock()
+}
+
+// isGracefulYieldExit reports whether this exit was the agent voluntarily
+// standing down for a yield request, as opposed to a kill. Reads the in-memory
+// drain state, not the yield FILE: DrainWithGrace clears that file in a defer
+// that races the exit chain in spawnAndWait, so a file probe after the process
+// is dead is a coin flip in both directions — it can skip recovery for a killed
+// agent (leaking its fleet-db claim) or run destructive recovery over work a
+// graceful yield meant to resume.
+//
+// A yield that timed out and was killed is NOT a graceful yield: it is a kill,
+// and it must release the claim like every other kill.
+func (s *Supervisor) isGracefulYieldExit(ap *AgentProcess) bool {
+	ap.Mu.Lock()
+	requested, escalated := ap.YieldRequested, ap.YieldEscalated
+	ap.Mu.Unlock()
+	if escalated {
+		return false
+	}
+	if requested {
+		return true
+	}
+	// No daemon-side drain ran: fall back to the file, which is the only record
+	// of an agent-initiated yield.
+	return IsYieldRequested(ap.WorktreePath)
 }
 
 // GetYieldTimeout returns the configured yield timeout duration.

@@ -83,7 +83,7 @@ func TestRecoverWorktree_IncompleteRun_RequeuesTaskAndKeepsUntrackedFiles(t *tes
 	setDefaultIssueBackend(tracker)
 	t.Cleanup(resetDefaultIssueBackend)
 
-	if err := RecoverWorktree(tmpDir, "test-agent", 0, true); err != nil {
+	if err := RecoverWorktree(tmpDir, "test-agent", "", 0, true); err != nil {
 		t.Fatalf("RecoverWorktree: %v", err)
 	}
 
@@ -113,7 +113,7 @@ func TestRecoverWorktree_CompleteRun_TrustsStatusAndStillCleans(t *testing.T) {
 	setDefaultIssueBackend(tracker)
 	t.Cleanup(resetDefaultIssueBackend)
 
-	if err := RecoverWorktree(tmpDir, "test-agent", 0, false); err != nil {
+	if err := RecoverWorktree(tmpDir, "test-agent", "", 0, false); err != nil {
 		t.Fatalf("RecoverWorktree: %v", err)
 	}
 

@@ -172,6 +172,43 @@ func clearStaleLock(worktreePath string, pid int) {
 	}
 }
 
+// releaseRecoveredTask releases the fleet-db claim an exited agent held on
+// taskID and decides whether the task goes back on the queue. A no-op when
+// taskID is empty (nothing was claimed, or nothing survived that says so).
+func releaseRecoveredTask(deps *cli.Deps, agentName, taskID string, exitCode int, incomplete bool) {
+	if taskID == "" {
+		return
+	}
+	// Always release the fleet-db issue lock on every exit path.
+	// Status mutations the agent already performed (review/closed/
+	// open via Update or Close) do NOT release the lock server-side,
+	// so without this call the lock survives until its TTL expires
+	// and other agents get spurious claim conflicts.
+	releaseFleetIssueLock(deps, agentName, taskID)
+
+	switch {
+	case exitCode != 0:
+		fmt.Printf("[recover] Agent %s exited with code %d, resetting task %s\n",
+			agentName, exitCode, taskID)
+		resetTask(deps, taskID, resetAfterCrash)
+	case incomplete:
+		// Exited 0 but the claim was never released, so there is no
+		// agent-set status to trust here — the task is still sitting in
+		// in_progress with nobody working it. Put it back on the queue
+		// so another agent (or this one on its next cycle) can carry it
+		// forward. resetTask still no-ops on review/closed/blocked, so
+		// a status the agent DID set is never stomped.
+		fmt.Printf("[recover] Agent %s exited cleanly (code 0) without releasing its claim, returning task %s to the queue\n",
+			agentName, taskID)
+		resetTask(deps, taskID, resetAfterCleanExit)
+	default:
+		// Clean exit: trust the agent updated task status correctly.
+		// Do NOT reset — the agent may have set status to review/closed.
+		fmt.Printf("[recover] Agent %s exited cleanly (code 0), trusting agent's task status for %s\n",
+			agentName, taskID)
+	}
+}
+
 // RecoverWorktree provides a non-interactive recovery path for daemon use:
 // force-release locks, kill processes, reset orphaned tasks, clean files.
 // On clean exit (code 0) trusts agent's task status; on non-zero resets tasks.
@@ -183,7 +220,18 @@ func clearStaleLock(worktreePath string, pid int) {
 // uncommitted work is the thing the next attempt continues from. Callers that
 // have no exit to classify (pre-flight cold recovery) pass false: that path is
 // deliberately destructive.
-func RecoverWorktree(worktreePath, agentName string, exitCode int, incomplete bool) error {
+//
+// fallbackTaskID is the caller's own record of the task this run was working —
+// the supervisor's AssignedTaskID, or a checkpoint's task id. It exists because
+// THE LOCK IS A HINT, NOT THE SOURCE OF TRUTH: automode clears the lock's
+// TaskID at the top of every loop iteration and in skipStuckTask while the
+// fleet-db claim is still held, so a lock with an empty TaskID says nothing
+// about whether a claim is outstanding. Resolution order is lock first (it
+// reflects what the agent process actually last worked on), then this
+// fallback; releasing the claim and resetting the task are keyed on the
+// RESOLVED id and no longer require a lock to exist at all. Callers with no
+// task in hand pass "".
+func RecoverWorktree(worktreePath, agentName, fallbackTaskID string, exitCode int, incomplete bool) error {
 	deps := &cli.Deps{}
 	*deps = *cli.GetDeps(nil)
 	deps.IssueBackend = cli.DefaultIssueBackend()
@@ -206,49 +254,24 @@ func RecoverWorktree(worktreePath, agentName string, exitCode int, incomplete bo
 		if err := forceReleaseLock(worktreePath); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("failed to clear lock: %w", err)
 		}
-
-		// 4. Handle orphaned task from lock
-		if lockInfo.TaskID != "" {
-			// Always release the fleet-db issue lock on every exit path.
-			// Status mutations the agent already performed (review/closed/
-			// open via Update or Close) do NOT release the lock server-side,
-			// so without this call the lock survives until its TTL expires
-			// and other agents get spurious claim conflicts.
-			releaseFleetIssueLock(deps, agentName, lockInfo.TaskID)
-
-			switch {
-			case exitCode != 0:
-				fmt.Printf("[recover] Agent %s exited with code %d, resetting task %s\n",
-					agentName, exitCode, lockInfo.TaskID)
-				// Non-zero exit: completion hooks never ran, so an agent-set
-				// "review" is mid-run state rather than a handoff.
-				resetTask(deps, lockInfo.TaskID, resetAfterCrash)
-			case incomplete:
-				// Exited 0 but the claim was never released, so there is no
-				// agent-set status to trust here — the task is still sitting in
-				// in_progress with nobody working it. Put it back on the queue
-				// so another agent (or this one on its next cycle) can carry it
-				// forward. The exit was clean, so its completion hooks ran and
-				// resetTask still no-ops on review/closed/blocked — a status
-				// the agent DID set is never stomped.
-				fmt.Printf("[recover] Agent %s exited cleanly (code 0) without releasing its claim, returning task %s to the queue\n",
-					agentName, lockInfo.TaskID)
-				resetTask(deps, lockInfo.TaskID, resetAfterCleanExit)
-			default:
-				// Clean exit: trust the agent updated task status correctly.
-				// Do NOT reset — the agent may have set status to review/closed.
-				fmt.Printf("[recover] Agent %s exited cleanly (code 0), trusting agent's task status for %s\n",
-					agentName, lockInfo.TaskID)
-			}
-		}
 	}
 
-	// 5. Reset any additional orphaned tasks for this agent (no analysis)
+	// 4. Handle the orphaned task. Deliberately OUTSIDE the lockInfo != nil
+	// scope: the claim outlives the lock's record of it (automode clears the
+	// lock's TaskID mid-run), so gating this on the lock is how a killed agent
+	// leaves a task wedged in in_progress with nobody working it.
 	lockTaskID := ""
 	if lockInfo != nil {
 		lockTaskID = lockInfo.TaskID
 	}
-	resetOrphanedAgentTasks(deps, worktreePath, agentName, lockTaskID, false)
+	taskID := lockTaskID
+	if taskID == "" {
+		taskID = fallbackTaskID
+	}
+	releaseRecoveredTask(deps, agentName, taskID, exitCode, incomplete)
+
+	// 5. Reset any additional orphaned tasks for this agent (no analysis)
+	resetOrphanedAgentTasks(deps, worktreePath, agentName, taskID, false)
 
 	// 6. Clean untracked files (force=true, no prompting).
 	//

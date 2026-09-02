@@ -744,7 +744,7 @@ func TestRecoverWorktree_NoLock(t *testing.T) {
 	})
 	mock.Install()
 
-	err := RecoverWorktree(tmpDir, "test-agent", -1, false)
+	err := RecoverWorktree(tmpDir, "test-agent", "", -1, false)
 	if err != nil {
 		t.Errorf("expected nil error, got: %v", err)
 	}
@@ -784,7 +784,7 @@ func TestRecoverWorktree_StaleLock(t *testing.T) {
 	})
 	mock.Install()
 
-	err := RecoverWorktree(tmpDir, "test-agent", -1, false)
+	err := RecoverWorktree(tmpDir, "test-agent", "", -1, false)
 	if err != nil {
 		t.Errorf("expected nil error, got: %v", err)
 	}
@@ -810,7 +810,7 @@ func TestRecoverWorktree_LockCheckError(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{})
 	mock.Install()
 
-	err := RecoverWorktree(tmpDir, "test-agent", -1, false)
+	err := RecoverWorktree(tmpDir, "test-agent", "", -1, false)
 	if err == nil {
 		t.Error("expected error when CheckLock fails, got nil")
 	}
@@ -834,7 +834,7 @@ func TestRecoverWorktree_EmptyAgentName(t *testing.T) {
 	})
 	mock.Install()
 
-	err := RecoverWorktree(tmpDir, "", -1, false)
+	err := RecoverWorktree(tmpDir, "", "", -1, false)
 	if err != nil {
 		t.Errorf("expected nil error, got: %v", err)
 	}
@@ -1274,7 +1274,7 @@ func TestRecoverWorktree_WorkspaceStaleLock(t *testing.T) {
 	mock.Install()
 
 	// Pass repoDir as worktreePath -- lock is at repoDir (per-worktree)
-	err := RecoverWorktree(repoDir, "test-agent", -1, false)
+	err := RecoverWorktree(repoDir, "test-agent", "", -1, false)
 	if err != nil {
 		t.Errorf("expected nil error, got: %v", err)
 	}
@@ -1542,5 +1542,141 @@ func TestResetTask_CrashStillRespectsTerminalStates(t *testing.T) {
 				t.Errorf("a %s task must not be reset even after a crash", status)
 			}
 		})
+	}
+}
+
+// ============================================================================
+// RecoverWorktree: the caller-supplied fallback task id
+//
+// The lock is a hint, not the source of truth — automode clears its TaskID
+// mid-run while the fleet-db claim is still held — so recovery must be able to
+// release a claim the lock no longer names.
+// ============================================================================
+
+// releasedTasks returns the task ids ReleaseIssueLock was called for.
+func releasedTasks(m *MockIssueBackend) []string {
+	var ids []string
+	for _, c := range m.Calls {
+		if c.Method != "ReleaseIssueLock" || len(c.Args) < 1 {
+			continue
+		}
+		if id, ok := c.Args[0].(string); ok {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func TestRecoverWorktree_FallbackTaskID_NoLock(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	mock := NewCommandMock(t, []CommandStub{{
+		Dir:  tmpDir,
+		Name: "git",
+		Args: []string{"clean", "-fdn", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"},
+	}})
+	mock.Install()
+
+	tracker := claimStateBackend("in_progress", "test-agent")
+	setDefaultIssueBackend(tracker)
+	t.Cleanup(resetDefaultIssueBackend)
+
+	if err := RecoverWorktree(tmpDir, "test-agent", "task-123", -1, false); err != nil {
+		t.Fatalf("RecoverWorktree: %v", err)
+	}
+
+	if got := releasedTasks(tracker); len(got) != 1 || got[0] != "task-123" {
+		t.Errorf("ReleaseIssueLock calls = %v, want [task-123]; a killed agent's claim must be released even with no lock", got)
+	}
+	status := updateStatusFor(t, tracker, "task-123")
+	if status == nil || *status != "open" {
+		t.Errorf("reset status = %v, want open", status)
+	}
+}
+
+func TestRecoverWorktree_FallbackTaskID_LockWithoutTask(t *testing.T) {
+	// The incident's exact shape: a surviving lock whose TaskID automode
+	// already cleared, while the fleet-db claim is still outstanding.
+	tmpDir := t.TempDir()
+	writeAgentLock(t, tmpDir, deadPID, "test-agent", "", "claude-abc")
+
+	mock := NewCommandMock(t, []CommandStub{{
+		Dir:  tmpDir,
+		Name: "git",
+		Args: []string{"clean", "-fdn", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"},
+	}})
+	mock.Install()
+
+	tracker := claimStateBackend("in_progress", "test-agent")
+	setDefaultIssueBackend(tracker)
+	t.Cleanup(resetDefaultIssueBackend)
+
+	if err := RecoverWorktree(tmpDir, "test-agent", "task-123", -1, false); err != nil {
+		t.Fatalf("RecoverWorktree: %v", err)
+	}
+
+	if got := releasedTasks(tracker); len(got) != 1 || got[0] != "task-123" {
+		t.Errorf("ReleaseIssueLock calls = %v, want [task-123]", got)
+	}
+	status := updateStatusFor(t, tracker, "task-123")
+	if status == nil || *status != "open" {
+		t.Errorf("reset status = %v, want open; the task must go back on the queue", status)
+	}
+}
+
+func TestRecoverWorktree_LockTaskWinsOverFallback(t *testing.T) {
+	// A populated lock reflects what the agent process actually last worked on,
+	// so it outranks the supervisor's record.
+	tmpDir := t.TempDir()
+	writeAgentLock(t, tmpDir, deadPID, "test-agent", "task-lock", "claude-abc")
+
+	mock := NewCommandMock(t, []CommandStub{{
+		Dir:  tmpDir,
+		Name: "git",
+		Args: []string{"clean", "-fdn", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"},
+	}})
+	mock.Install()
+
+	tracker := claimStateBackend("in_progress", "test-agent")
+	tracker.GetResult.ID = "task-lock"
+	setDefaultIssueBackend(tracker)
+	t.Cleanup(resetDefaultIssueBackend)
+
+	if err := RecoverWorktree(tmpDir, "test-agent", "task-fallback", -1, false); err != nil {
+		t.Fatalf("RecoverWorktree: %v", err)
+	}
+
+	if got := releasedTasks(tracker); len(got) != 1 || got[0] != "task-lock" {
+		t.Errorf("ReleaseIssueLock calls = %v, want [task-lock] only", got)
+	}
+	if status := updateStatusFor(t, tracker, "task-fallback"); status != nil {
+		t.Errorf("fallback task was reset to %q; the lock's task must win", *status)
+	}
+}
+
+func TestRecoverWorktree_FallbackTaskID_CleanExit(t *testing.T) {
+	// Exit 0 and complete: release the claim, but trust the status the agent set.
+	tmpDir := t.TempDir()
+
+	mock := NewCommandMock(t, []CommandStub{{
+		Dir:  tmpDir,
+		Name: "git",
+		Args: []string{"clean", "-fdn", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"},
+	}})
+	mock.Install()
+
+	tracker := claimStateBackend("review", "test-agent")
+	setDefaultIssueBackend(tracker)
+	t.Cleanup(resetDefaultIssueBackend)
+
+	if err := RecoverWorktree(tmpDir, "test-agent", "task-123", 0, false); err != nil {
+		t.Fatalf("RecoverWorktree: %v", err)
+	}
+
+	if got := releasedTasks(tracker); len(got) != 1 || got[0] != "task-123" {
+		t.Errorf("ReleaseIssueLock calls = %v, want [task-123]", got)
+	}
+	if status := updateStatusFor(t, tracker, "task-123"); status != nil {
+		t.Errorf("task was reset to %q on a clean exit; the agent's status must stand", *status)
 	}
 }

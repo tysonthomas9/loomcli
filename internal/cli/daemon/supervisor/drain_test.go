@@ -466,3 +466,140 @@ func TestDrainWithGrace_PIDZeroDoesNotStampStopReason(t *testing.T) {
 		t.Errorf("StopReason = %q, want empty (already-stopped agent must not be stamped)", got)
 	}
 }
+
+// Yield classification: graceful stand-down vs escalated kill
+//
+// The post-exit chain cannot probe the yield FILE — DrainWithGrace clears it in
+// a defer that races spawnAndWait — so the drain records its verdict in memory.
+// ---------------------------------------------------------------------------
+
+func TestDrainWithGrace_TimeoutSetsYieldEscalated(t *testing.T) {
+	s := newDrainTestSupervisor(&config.DaemonConfig{})
+	dir := t.TempDir()
+
+	// A process that never reads the yield file, so the deadline expires.
+	cmd := exec.Command("sleep", "60") //nolint:norawexec
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start sleep: %v", err)
+	}
+	ap := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "test"},
+		Cmd:          cmd,
+		Pid:          cmd.Process.Pid,
+		WorktreePath: dir,
+	}
+	t.Cleanup(func() {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		_ = cmd.Wait()
+	})
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.waitForAgent(ap)
+	}()
+
+	if s.DrainWithGrace(ap, "test-timeout", 1*time.Second, 5*time.Second).Yielded() {
+		t.Error("DrainWithGrace() = true, want false (the agent ignored the yield)")
+	}
+	wg.Wait()
+
+	ap.Mu.Lock()
+	requested, escalated := ap.YieldRequested, ap.YieldEscalated
+	ap.Mu.Unlock()
+	if !requested {
+		t.Error("YieldRequested = false, want true (a yield file was written)")
+	}
+	if !escalated {
+		t.Error("YieldEscalated = false, want true (the yield timed out and the agent was killed)")
+	}
+	if s.isGracefulYieldExit(ap) {
+		t.Error("isGracefulYieldExit() = true after an escalated drain; a killed agent must go through recovery so its claim is released")
+	}
+}
+
+func TestDrainWithGrace_GracefulExitDoesNotEscalate(t *testing.T) {
+	s := newDrainTestSupervisor(&config.DaemonConfig{})
+	dir := t.TempDir()
+
+	cmd := exec.Command("bash", "-c", //nolint:norawexec
+		`while [ ! -f "`+filepath.Join(dir, YieldFileName)+`" ]; do sleep 0.1; done; exit 0`)
+	cmd.Dir = dir
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start test process: %v", err)
+	}
+	ap := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "test"},
+		Cmd:          cmd,
+		Pid:          cmd.Process.Pid,
+		WorktreePath: dir,
+	}
+	t.Cleanup(func() {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		_ = cmd.Wait()
+	})
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.waitForAgent(ap)
+	}()
+
+	if !s.DrainWithGrace(ap, "test-yield", 10*time.Second, 5*time.Second).Yielded() {
+		t.Error("DrainWithGrace() = false, want true (the agent honored the yield)")
+	}
+	wg.Wait()
+
+	ap.Mu.Lock()
+	requested, escalated := ap.YieldRequested, ap.YieldEscalated
+	ap.Mu.Unlock()
+	if !requested {
+		t.Error("YieldRequested = false, want true")
+	}
+	if escalated {
+		t.Error("YieldEscalated = true, want false (the agent stood down on its own)")
+	}
+	// The drain's defer already removed the file; the verdict must survive that.
+	if !s.isGracefulYieldExit(ap) {
+		t.Error("isGracefulYieldExit() = false after a graceful yield whose file was cleared; the claim must be kept for the resume cycle")
+	}
+}
+
+func TestIsGracefulYieldExit(t *testing.T) {
+	cases := []struct {
+		name        string
+		requested   bool
+		escalated   bool
+		filePresent bool
+		want        bool
+	}{
+		{name: "graceful yield, file still present", requested: true, filePresent: true, want: true},
+		{name: "graceful yield, file already cleared by the drain defer", requested: true, want: true},
+		{name: "escalated yield, file already cleared", requested: true, escalated: true, want: false},
+		{name: "escalated yield, file still present", requested: true, escalated: true, filePresent: true, want: false},
+		{name: "no drain, agent-initiated yield file", filePresent: true, want: true},
+		{name: "plain crash, no yield anywhere", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newDrainTestSupervisor(&config.DaemonConfig{})
+			dir := t.TempDir()
+			if tc.filePresent {
+				writeYieldFile(t, dir, "test")
+			}
+			ap := &AgentProcess{
+				Entry:          config.AgentEntry{Worktree: "test"},
+				WorktreePath:   dir,
+				YieldRequested: tc.requested,
+				YieldEscalated: tc.escalated,
+			}
+			if got := s.isGracefulYieldExit(ap); got != tc.want {
+				t.Errorf("isGracefulYieldExit() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

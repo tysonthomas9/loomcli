@@ -6,6 +6,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/agent"
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
 // recoveryMode classifies how a supervise cycle recovers a worktree after a
@@ -66,6 +67,48 @@ func (s *Supervisor) detectRecovery(ap *AgentProcess) (string, recoveryMode) {
 		// out of scope for resume-recovery — cold-start.
 		return "", recoverCold
 	}
+}
+
+// checkpointRecoveryTask returns the task id and exit code of the last run
+// recorded in this worktree's checkpoint, for the case where the lock carries
+// no task: automode clears the lock's TaskID while the fleet-db claim is still
+// held, and a daemon restart drops the in-memory AssignedTaskID with it, so the
+// checkpoint is the only surviving record of the claim that must be released.
+//
+// The exit code matters as much as the id: a non-zero one means the last run
+// died on that task, so recovery resets it back to the queue; exit 0 keeps the
+// "trust the agent's status" behavior and only releases the issue lock.
+//
+// Guarded so a stale or foreign checkpoint can never reopen someone else's
+// task: the checkpoint must parse, name a task, belong to this agent, agree
+// with any task the lock does name, and be younger than agent.ResumeTTL (when
+// that TTL is enabled). Returns ("", 0) otherwise — never an error, because a
+// missing or unreadable checkpoint just means "nothing to recover".
+func checkpointRecoveryTask(ap *AgentProcess) (string, int) {
+	cp, err := config.LoadCheckpoint(cli.ResolveLockDir(ap.WorktreePath))
+	if err != nil || cp == nil || cp.TaskID == "" {
+		return "", 0
+	}
+	owner := ap.Entry.Worktree
+	lockTaskID := ""
+	if info, _, lockErr := cli.CheckLock(ap.WorktreePath); lockErr == nil && info != nil {
+		lockTaskID = info.TaskID
+		if info.AgentName != "" {
+			owner = info.AgentName
+		}
+	}
+	if cp.AgentName != owner {
+		return "", 0
+	}
+	if lockTaskID != "" && lockTaskID != cp.TaskID {
+		return "", 0 // the lock knows better; leave the resolution to it
+	}
+	if ttl := agent.ResumeTTL(); ttl > 0 && !cp.Timestamp.IsZero() && time.Since(cp.Timestamp) > ttl {
+		return "", 0
+	}
+	slog.Info("cold recovery falling back to checkpoint task",
+		"worktree", ap.Entry.Worktree, "task_id", cp.TaskID, "exit_code", cp.ExitCode)
+	return cp.TaskID, cp.ExitCode
 }
 
 // prepareResume sets up a `--resume` cycle: kill any orphaned backend the crashed
