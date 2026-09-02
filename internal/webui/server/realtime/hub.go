@@ -56,6 +56,10 @@ type MutationPayload struct {
 	Priority    *int   `json:"priority,omitempty"`     // Issue priority (for update events from external poll)
 	SourceRepo  string `json:"source_repo,omitempty"`  // Source repository for multi-repo filtering
 	WorkspaceID string `json:"workspace_id,omitempty"` // Workspace ID for multi-workspace filtering
+	PTYAlive    *bool  `json:"pty_alive,omitempty"`    // Terminal lifecycle liveness, explicit false when ended
+	ExitReason  string `json:"exit_reason,omitempty"`  // Terminal lifecycle reason: exited, killed, or shutdown
+	Kind        string `json:"kind,omitempty"`         // Terminal runtime kind, for example pty or agent_tmux
+	Agent       *bool  `json:"agent,omitempty"`        // Whether the terminal runtime belongs to an agent
 }
 
 // Hub manages connected SSE clients and broadcasts mutations to them.

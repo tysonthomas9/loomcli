@@ -7,11 +7,12 @@
  * Covers the counting rule (non-agent tabs with a live PTY), the empty-workspace
  * short circuit, the workspace-switch reset that is the PUPPET-123 regression,
  * the stale-response guard, SSE-driven debounced refetch, the cancellation of a
- * debounce left pending across a workspace switch, and silent failure.
+ * debounce left pending across a workspace switch, the hidden-paused five
+ * minute safety poll, and silent failure.
  */
 
 import { renderHook, waitFor, act } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import * as terminalApi from "@/api/terminal";
 import type { TabMetadata } from "@/api/terminal";
@@ -62,11 +63,18 @@ const mockList = vi.mocked(terminalApi.listTabMetadata);
 
 /** Mirrors DEBOUNCE_MS in the hook under test. */
 const DEBOUNCE_MS = 200;
+/** Mirrors POLL_MS in the hook under test. */
+const POLL_MS = 5 * 60_000;
 
 describe("useWorkspaceSessionCount", () => {
   beforeEach(() => {
     currentWorkspaceId = "ws-1";
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it("counts only non-agent tabs with a live PTY", async () => {
@@ -224,6 +232,57 @@ describe("useWorkspaceSessionCount", () => {
     expect(mockList).toHaveBeenNthCalledWith(1, "ws-1");
     expect(mockList).toHaveBeenNthCalledWith(2, "ws-2");
     vi.useRealTimers();
+  });
+
+  it("runs the safety poll every five minutes while visible", async () => {
+    vi.useFakeTimers();
+    mockList.mockResolvedValue([tab()]);
+
+    renderHook(() => useWorkspaceSessionCount());
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(POLL_MS - 1);
+      await Promise.resolve();
+    });
+    expect(mockList).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+      await Promise.resolve();
+    });
+    expect(mockList).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it("pauses the safety poll while hidden and refetches when visible", async () => {
+    vi.useFakeTimers();
+    const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+    const visibility = vi
+      .spyOn(document, "visibilityState", "get")
+      .mockReturnValue("hidden");
+    mockList.mockResolvedValue([tab()]);
+
+    renderHook(() => useWorkspaceSessionCount());
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(POLL_MS * 2);
+      await Promise.resolve();
+    });
+    expect(mockList).toHaveBeenCalledTimes(1);
+
+    hidden.mockReturnValue(false);
+    visibility.mockReturnValue("visible");
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      await Promise.resolve();
+    });
+    expect(mockList).toHaveBeenCalledTimes(2);
   });
 
   it("keeps the previous count and does not throw when the fetch rejects", async () => {
