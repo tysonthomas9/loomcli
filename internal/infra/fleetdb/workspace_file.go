@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"math"
 	"net"
@@ -39,11 +42,12 @@ type pendingTreeWaitPolicy struct {
 // JSON contract. Keep them private so the later generated-client cutover can
 // replace this file without exposing transport details to callers.
 type workspaceFileSpecWire struct {
-	Path        string `json:"path"`
-	ContentHash string `json:"content_hash"`
-	SizeBytes   int64  `json:"size_bytes"`
-	MediaType   string `json:"media_type,omitempty"`
-	Executable  bool   `json:"executable,omitempty"`
+	Path           string `json:"path"`
+	ContentHash    string `json:"content_hash"`
+	ChecksumCRC32C string `json:"checksum_crc32c"`
+	SizeBytes      int64  `json:"size_bytes"`
+	MediaType      string `json:"media_type,omitempty"`
+	Executable     bool   `json:"executable,omitempty"`
 }
 
 type workspaceFileTransferGrantWire struct {
@@ -94,7 +98,7 @@ func (s *workspaceFileStore) Publish(ctx context.Context, workspaceKey string, f
 	for _, file := range canonical {
 		digest := workspaceFileDigest(file.Bytes)
 		specs = append(specs, workspaceFileSpecWire{
-			Path: file.Path, ContentHash: digest,
+			Path: file.Path, ContentHash: digest, ChecksumCRC32C: workspaceFileCRC32C(file.Bytes),
 			SizeBytes: int64(len(file.Bytes)), MediaType: file.MediaType, Executable: file.Executable,
 		})
 	}
@@ -183,6 +187,12 @@ func (s *workspaceFileStore) Publish(ctx context.Context, workspaceKey string, f
 	return &domain.WorkspaceFileTreePublishResult{
 		Tree: domainTree, Status: status, ETag: headers.Get("ETag"), Location: headers.Get("Location"),
 	}, nil
+}
+
+func workspaceFileCRC32C(body []byte) string {
+	var encoded [4]byte
+	binary.BigEndian.PutUint32(encoded[:], crc32.Checksum(body, crc32.MakeTable(crc32.Castagnoli)))
+	return base64.StdEncoding.EncodeToString(encoded[:])
 }
 
 func (s *workspaceFileStore) waitForTree(ctx context.Context, workspaceKey, revision string) (*domain.WorkspaceFileTree, error) {

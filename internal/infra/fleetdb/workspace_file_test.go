@@ -21,6 +21,12 @@ import (
 	"github.com/tysonthomas9/loomcli/test/skills-e2e/registry"
 )
 
+func TestWorkspaceFileCRC32C(t *testing.T) {
+	if got, want := workspaceFileCRC32C([]byte("123456789")), "4waSgw=="; got != want {
+		t.Fatalf("workspaceFileCRC32C() = %q, want %q", got, want)
+	}
+}
+
 func TestWorkspaceFileStorePublishesAndDownloadsBinaryTree(t *testing.T) {
 	t.Parallel()
 

@@ -55,6 +55,9 @@ Stack placement:
 5. The existing Google Cloud Storage test bucket is the production-provider
    target. GCS is exercised through the same XML/S3-compatible path used by
    Fleet in production.
+   Loom declares CRC32C for GCS transport validation; Fleet signs
+   `x-goog-hash` and `x-goog-if-generation-match: 0`, then independently
+   verifies the canonical SHA-256 before recording a receipt.
 6. Deterministic failure controls are allowed when the system under test remains
    real. A network proxy or a test-only failpoint may delay, drop, or fail a
    boundary; it must not replace the real implementation.
