@@ -216,6 +216,28 @@ describe("HomePage", () => {
     );
   });
 
+  // PUPPET-146: `handleReject` re-throws, and the queue card only has a
+  // try/finally around it. Without this catch the failure reaches nothing but
+  // the global unhandled-rejection reporter.
+  it("toasts when the canonical rejection action fails", async () => {
+    mockData.issues = [
+      issue({ id: "DESIGN-1", status: "review", has_design: true }),
+    ];
+    mockActions.handleReject.mockRejectedValueOnce(
+      new Error("issue is not claimable"),
+    );
+    render(<HomePage />);
+
+    fireEvent.click(screen.getByTestId("queue-reject"));
+
+    await waitFor(() =>
+      expect(mockActions.showToast).toHaveBeenCalledWith(
+        "issue is not claimable",
+        { type: "error" },
+      ),
+    );
+  });
+
   it("reopens a blocked task and retains its assignee in the same write", async () => {
     mockData.issues = [
       issue({
