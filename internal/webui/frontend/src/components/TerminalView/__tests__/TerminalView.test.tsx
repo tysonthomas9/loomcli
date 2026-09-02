@@ -49,6 +49,7 @@ const mockMetadataHook = vi.hoisted(() => ({
     writable?: boolean;
   }>,
   isLoading: false,
+  isFetching: false,
   error: null as Error | null,
   createTab: vi.fn().mockResolvedValue(undefined),
   updateLabel: vi.fn().mockResolvedValue(undefined),
@@ -268,6 +269,7 @@ function setMetadata(
     updated_at: now,
   }));
   mockMetadataHook.isLoading = isLoading;
+  mockMetadataHook.isFetching = isLoading;
   mockMetadataHook.error = null;
 }
 
@@ -284,7 +286,9 @@ describe("TerminalView", () => {
     sessionStorage.clear();
     mockMetadataHook.tabs = [];
     mockMetadataHook.isLoading = true;
+    mockMetadataHook.isFetching = true;
     mockMetadataHook.error = null;
+    mockMetadataHook.refetch = vi.fn();
     mockMetadataHook.createTab = vi.fn().mockResolvedValue(undefined);
     mockWorkspaceCtx.workspaceId = "";
     mockWorkspaceCtx.activeWorkspaceName = null;
@@ -344,6 +348,40 @@ describe("TerminalView", () => {
       expect(
         screen.getByTestId("loading-skeleton-terminal"),
       ).toBeInTheDocument();
+    });
+
+    // PUPPET-125: a failed list load deliberately leaves the hook loading, so
+    // the skeleton alone would be permanent. The view must offer a way out.
+    it("shows a retryable error instead of a permanent skeleton on load failure", () => {
+      mockMetadataHook.tabs = [];
+      mockMetadataHook.isLoading = true;
+      mockMetadataHook.isFetching = false;
+      mockMetadataHook.error = new Error("Network error");
+      render(<TerminalView />);
+
+      expect(
+        screen.queryByTestId("loading-skeleton-terminal"),
+      ).not.toBeInTheDocument();
+      expect(screen.getByTestId("tab-metadata-error")).toBeInTheDocument();
+      expect(screen.getByText("Network error")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId("retry-tab-metadata"));
+      expect(mockMetadataHook.refetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the skeleton while a retry is in flight", () => {
+      mockMetadataHook.tabs = [];
+      mockMetadataHook.isLoading = true;
+      mockMetadataHook.isFetching = true;
+      mockMetadataHook.error = new Error("Network error");
+      render(<TerminalView />);
+
+      expect(
+        screen.getByTestId("loading-skeleton-terminal"),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("tab-metadata-error"),
+      ).not.toBeInTheDocument();
     });
 
     it("restores tabs from persisted metadata once loaded", () => {

@@ -24,6 +24,13 @@ export interface UseTerminalMetadataReturn {
    * "this workspace has no terminal tabs" (see PUPPET-125).
    */
   isLoading: boolean;
+  /**
+   * True while a list request is on the wire for the currently requested
+   * workspace. `isLoading` stays true after a *failed* load (the stamp is not
+   * advanced), so a consumer that wants to distinguish "still trying" from
+   * "gave up, offer a retry" reads this alongside `error`.
+   */
+  isFetching: boolean;
   error: Error | null;
   createTab: (
     session: string,
@@ -396,6 +403,7 @@ export function useTerminalMetadata(
   return {
     tabs,
     isLoading,
+    isFetching: enabled && isFetching,
     error,
     createTab,
     updateLabel,

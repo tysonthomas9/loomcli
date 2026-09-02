@@ -19,7 +19,11 @@ import {
   TERMINAL_SIDEBAR_SELECT_EVENT,
 } from "@/utils/terminalSidebarBridge";
 
-import { NoBackendsEmptyState, useTabEditorGroups } from "./layout";
+import {
+  NoBackendsEmptyState,
+  TabMetadataErrorState,
+  useTabEditorGroups,
+} from "./layout";
 import groupStyles from "./layout/TerminalGroupLayout.module.css";
 import {
   TerminalPane,
@@ -155,6 +159,9 @@ export function TerminalView({
     deleteTab,
     reorderTabs: reorderTabMeta,
     isLoading: metaLoading,
+    isFetching: metaFetching,
+    error: metaError,
+    refetch: refetchTabMeta,
   } = useTerminalMetadata(workspaceId, { enabled: isActive });
   const { config, isLoading: configLoading } = useBackendConfig(workspaceId, {
     enabled: isActive,
@@ -840,7 +847,16 @@ export function TerminalView({
   const containerClassName = styles.container;
   return (
     <div className={containerClassName} data-testid="terminal-view">
-      {(metaLoading || configLoading) && visibleTabs.length === 0 ? (
+      {metaError && !metaFetching && visibleTabs.length === 0 ? (
+        // A failed list load leaves the hook loading forever by design, so
+        // without this branch the skeleton below would never clear (PUPPET-125).
+        <TabMetadataErrorState
+          message={metaError.message}
+          onRetry={() => {
+            void refetchTabMeta();
+          }}
+        />
+      ) : (metaLoading || configLoading) && visibleTabs.length === 0 ? (
         <LoadingSkeleton.Terminal />
       ) : visibleTabs.length === 0 ? (
         <NoBackendsEmptyState
