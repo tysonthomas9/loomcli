@@ -38,11 +38,12 @@ jobs:
           # which failed every job here from 2026-08-19 with no change on our
           # side. `latest` means an upstream regression lands in CI unannounced
           # and cannot be reproduced from the repo alone. v2.13.1 carries
-          # staticcheck v0.8.0 final, which fixes it.
+          # staticcheck v0.8.0 final, which fixes it; v2.13.2 bumps it to v0.8.1
+          # and is what `latest` had been resolving to when this pin landed.
           #
           # Bump deliberately: run `make check-go` against the new version
           # first, since a staticcheck minor can add checks.
-          version: v2.13.1
+          version: v2.13.2
           install-only: true
 
       - name: Configure Git
