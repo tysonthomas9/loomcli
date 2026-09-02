@@ -2609,9 +2609,12 @@ type PatchIssueRequest struct {
 	Pinned             *bool                          `json:"pinned,omitempty"`
 	Priority           *int                           `json:"priority,omitempty"`
 	RemoveLabels       *[]string                      `json:"remove_labels,omitempty"`
-	SetLabels          *[]string                      `json:"set_labels,omitempty"`
-	Status             *PatchIssueRequestStatus       `json:"status,omitempty"`
-	Title              *string                        `json:"title,omitempty"`
+
+	// Repo Source repo for the issue. Omit to leave unchanged; empty string clears it.
+	Repo      *string                  `json:"repo,omitempty"`
+	SetLabels *[]string                `json:"set_labels,omitempty"`
+	Status    *PatchIssueRequestStatus `json:"status,omitempty"`
+	Title     *string                  `json:"title,omitempty"`
 }
 
 // PatchIssueRequestAgentState defines model for PatchIssueRequest.AgentState.

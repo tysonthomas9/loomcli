@@ -490,6 +490,13 @@ func (p CreateParams) IdempotencyHeaders() map[string]string {
 // distinguish "set to value" from "don't change" (nil = don't change).
 // When Claim is true, the atomic claim operation takes precedence over
 // an explicit Status field in the same request.
+//
+// Repo is the issue's source repo. Loom names it "source_repo"; the fleet-db
+// PATCH wire field is "repo" (as on create), and the fleet backend renames it.
+// nil leaves it alone, "" clears it — and nil must reach the wire as an absent
+// key, never a zero value: fleet-db decodes PATCH bodies with
+// DisallowUnknownFields, so an always-present key an older server does not know
+// 400s the entire request, losing every other field traveling with it.
 type UpdateParams struct {
 	// Actor overrides the backend's configured process actor for writes
 	// performed by this update. Empty preserves the configured actor.
@@ -507,6 +514,7 @@ type UpdateParams struct {
 	IssueType          *string  `json:"issue_type,omitempty"`
 	ExternalRef        *string  `json:"external_ref,omitempty"`
 	EstimatedMinutes   *int     `json:"estimated_minutes,omitempty"`
+	Repo               *string  `json:"source_repo,omitempty"`
 	AddLabels          []string `json:"add_labels,omitempty"`
 	RemoveLabels       []string `json:"remove_labels,omitempty"`
 	SetLabels          []string `json:"set_labels,omitempty"`

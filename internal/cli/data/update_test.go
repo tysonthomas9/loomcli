@@ -718,3 +718,64 @@ func TestDataUpdate_NoParentFlagLeavesParentNil(t *testing.T) {
 		t.Errorf("Update parent = %q for an omitted flag, want nil", *params.Parent)
 	}
 }
+
+// TestDataUpdate_SourceRepoFlag covers the CLI end of the source-repo repair
+// path: --source-repo populates UpdateParams.Repo (loom's name for fleet-db's
+// "repo"), and an empty value is forwarded as an explicit clear rather than
+// being treated as "flag not given".
+func TestDataUpdate_SourceRepoFlag(t *testing.T) {
+	cases := []struct {
+		name string
+		val  string
+	}{
+		{"sets the repo", "fleet-db"},
+		{"empty value clears it", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &localBackendStub{}
+			withLocalBackend(t, stub, func() {
+				outputFormat = "text"
+				updateSourceRepo = tc.val
+				t.Cleanup(func() { updateSourceRepo = "" })
+				setTestFlagChanged(t, updateCmd.Flags(), "source-repo", true)
+
+				if _, err := captureDataStdout(t, func() error {
+					return updateCmd.RunE(updateCmd, []string{"loom-99"})
+				}); err != nil {
+					t.Fatalf("update: %v", err)
+				}
+				if len(stub.calls) != 1 || stub.calls[0].method != "Update" {
+					t.Fatalf("calls = %#v, want one Update call", stub.calls)
+				}
+				params := stub.calls[0].args.(backend.UpdateParams)
+				if params.Repo == nil || *params.Repo != tc.val {
+					t.Fatalf("Update repo = %#v, want %q", params.Repo, tc.val)
+				}
+			})
+		})
+	}
+}
+
+// TestDataUpdate_SourceRepoOmittedLeavesRepoNil is the CLI half of the
+// strict-decoder guard: an update that never mentions --source-repo must leave
+// Repo nil all the way down, so no "repo" key reaches fleet-db.
+func TestDataUpdate_SourceRepoOmittedLeavesRepoNil(t *testing.T) {
+	stub := &localBackendStub{}
+	withLocalBackend(t, stub, func() {
+		outputFormat = "text"
+		updateTitle = "new title"
+		t.Cleanup(func() { updateTitle = "" })
+		setTestFlagChanged(t, updateCmd.Flags(), "title", true)
+
+		if _, err := captureDataStdout(t, func() error {
+			return updateCmd.RunE(updateCmd, []string{"loom-99"})
+		}); err != nil {
+			t.Fatalf("update: %v", err)
+		}
+		params := stub.calls[0].args.(backend.UpdateParams)
+		if params.Repo != nil {
+			t.Fatalf("Update repo = %#v, want nil when --source-repo was not passed", params.Repo)
+		}
+	})
+}

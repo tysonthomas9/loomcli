@@ -1600,6 +1600,50 @@ func TestHandlePatchIssue_Success(t *testing.T) {
 	}
 }
 
+// TestHandlePatchIssue_SourceRepo covers the HTTP hop for the source repo:
+// a "repo" key in the PATCH body reaches PatchIssueParams.Repo, and a body
+// without it leaves Repo nil so nothing downstream sends the field on to
+// fleet-db's strict decoder.
+func TestHandlePatchIssue_SourceRepo(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want *string
+	}{
+		{"set", `{"repo":"fleet-db"}`, strPtrIssues("fleet-db")},
+		{"clear", `{"repo":""}`, strPtrIssues("")},
+		{"absent", `{"title":"Updated"}`, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var captured service.PatchIssueParams
+			svc := &mockIssueService{
+				patchIssueFunc: func(ctx context.Context, params service.PatchIssueParams) error {
+					captured = params
+					return nil
+				},
+			}
+			req := httptest.NewRequest(http.MethodPatch, "/api/issues/test-123", strings.NewReader(tc.body))
+			req.SetPathValue("id", "test-123")
+			w := httptest.NewRecorder()
+			handlePatchIssue(svc).ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d (body %s)", w.Code, http.StatusOK, w.Body.String())
+			}
+			switch {
+			case tc.want == nil && captured.Repo != nil:
+				t.Errorf("Repo = %q, want nil", *captured.Repo)
+			case tc.want != nil && captured.Repo == nil:
+				t.Errorf("Repo = nil, want %q", *tc.want)
+			case tc.want != nil && *captured.Repo != *tc.want:
+				t.Errorf("Repo = %q, want %q", *captured.Repo, *tc.want)
+			}
+		})
+	}
+}
+
+func strPtrIssues(s string) *string { return &s }
+
 func TestHandlePatchIssue_NotFound(t *testing.T) {
 	svc := &mockIssueService{
 		patchIssueFunc: func(ctx context.Context, params service.PatchIssueParams) error {

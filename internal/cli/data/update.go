@@ -28,6 +28,7 @@ var (
 	updateRemoveLabels []string
 	updateForce        bool
 	updateParent       string
+	updateSourceRepo   string
 )
 
 var updateCmd = &cobra.Command{
@@ -108,6 +109,10 @@ func updateParamsFromFlags(cmd *cobra.Command) (backend.UpdateParams, bool, erro
 	// is indistinguishable from "flag omitted" by value alone.
 	if cmd.Flags().Changed("parent") {
 		params.Parent = &updateParent
+		changed = true
+	}
+	if cmd.Flags().Changed("source-repo") {
+		params.Repo = &updateSourceRepo
 		changed = true
 	}
 	if applyLabelFlags(cmd, &params) {
@@ -253,6 +258,7 @@ func init() {
 	updateCmd.Flags().StringArrayVar(&updateAddLabels, "add-label", nil, "Add label (repeatable); other labels are preserved")
 	updateCmd.Flags().StringArrayVar(&updateRemoveLabels, "remove-label", nil, "Remove label (repeatable); other labels are preserved. Reserved labels (e.g. \"operator\") also need --force")
 	updateCmd.Flags().BoolVar(&updateForce, "force", false, "Allow --remove-label to remove a reserved label such as \"operator\", which parks an issue for a human")
+	updateCmd.Flags().StringVar(&updateSourceRepo, "source-repo", "", "Set source repo (pass an empty value to clear it)")
 }
 
 func readDescriptionFile(path string, stdin io.Reader) (string, error) {

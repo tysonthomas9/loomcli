@@ -1031,6 +1031,32 @@ func TestPatchIssue_Backend_Success_PassesParams(t *testing.T) {
 	}
 }
 
+// TestPatchIssue_Backend_Repo covers the service hop for the source repo:
+// PatchIssueParams.Repo must reach backend.UpdateParams.Repo, and must stay
+// nil when the caller did not set it — the serve API relays this PATCH to
+// fleet-db, whose strict decoder 400s the whole body on an unexpected key.
+func TestPatchIssue_Backend_Repo(t *testing.T) {
+	repo := "fleet-db"
+	fb := &fakeIssueBackend{}
+	svc := newServiceWithFake(fb)
+	if err := svc.PatchIssue(context.Background(), PatchIssueParams{IssueID: "i-1", Repo: &repo}); err != nil {
+		t.Fatalf("PatchIssue: %v", err)
+	}
+	got := fb.updateCalls[0].params
+	if got.Repo == nil || *got.Repo != repo {
+		t.Errorf("Repo = %v, want %q", got.Repo, repo)
+	}
+
+	fb2 := &fakeIssueBackend{}
+	title := "Renamed"
+	if err := newServiceWithFake(fb2).PatchIssue(context.Background(), PatchIssueParams{IssueID: "i-1", Title: &title}); err != nil {
+		t.Fatalf("PatchIssue: %v", err)
+	}
+	if r := fb2.updateCalls[0].params.Repo; r != nil {
+		t.Errorf("Repo = %v for a patch that did not set it, want nil", r)
+	}
+}
+
 func TestPatchIssue_Backend_TemplateError_MapsToConflict(t *testing.T) {
 	fb := &fakeIssueBackend{
 		updateErr: backend.ErrInternal("Update", "cannot update template issue", nil),
