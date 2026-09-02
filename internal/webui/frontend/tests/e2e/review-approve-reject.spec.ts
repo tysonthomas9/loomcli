@@ -702,7 +702,9 @@ test.describe("E2E Journey: Review and approve/reject agent plan", () => {
       waitUntil: "domcontentloaded",
     });
 
-    const status = page.getByTestId("status-dropdown");
+    // v5 renders a second status dropdown in the issue header; scope to the view.
+    const view = page.getByTestId("issue-detail-view");
+    const status = view.getByTestId("status-dropdown");
     await expect(status).toHaveValue("blocked");
     await expect(page.getByTestId("detail-approve-button")).toBeVisible();
 
