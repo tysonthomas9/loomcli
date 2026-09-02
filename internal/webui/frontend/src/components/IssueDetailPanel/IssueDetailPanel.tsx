@@ -465,7 +465,7 @@ function DefaultContent({
   const [rejectError, setRejectError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   // Latched from a server 409: the issue is not claimable, so approving it will
-  // keep failing until it is re-fetched. Cleared on issue change (PUPPET-146).
+  // keep failing until the record changes (PUPPET-146).
   const [approveBlockedReason, setApproveBlockedReason] = useState<
     string | null
   >(null);
@@ -1129,11 +1129,18 @@ function DefaultContent({
     setIsRejecting(false);
     setRejectError(null);
     setActionError(null);
-    setApproveBlockedReason(null);
     setShowMoveDialog(false);
     setMoveError(null);
     setIsStartingEpicRun(false);
   }, [issue?.id]);
+
+  // Clear the latch on any new revision of the record, not just a different
+  // issue: an SSE update (the agent released its claim, the status moved) can
+  // make the very same issue claimable again, and the operator would otherwise
+  // be stuck looking at a disabled Approve button until they navigated away.
+  useEffect(() => {
+    setApproveBlockedReason(null);
+  }, [issue?.id, issue?.updated_at]);
 
   // Loading state
   if (isLoading) {
@@ -1299,12 +1306,13 @@ function DefaultContent({
           >
             {isApproving ? "..." : "\u2713"} Approve
           </button>
+          {/* Not disabled by an approve 409: reject is a different transition
+              (PATCH status=open) that the claim guard does not cover, and
+              sending the task back is often the way out. */}
           <button
             type="button"
             className={`${decisionButtonStyles.button} ${decisionButtonStyles.reject}`}
             onClick={handleRejectClick}
-            disabled={approveBlockedReason !== null}
-            title={approveBlockedReason ?? undefined}
             aria-label="Reject"
             data-testid="panel-reject-button"
           >

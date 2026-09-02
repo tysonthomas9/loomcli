@@ -1346,7 +1346,7 @@ describe("IssueDetailPanel", () => {
       );
     });
 
-    it("disables both review buttons with the reason after a 409", async () => {
+    it("disables only Approve, with the reason, after a 409", async () => {
       const mockIssue = createTestIssueDetails({
         title: "Some task",
         status: "review",
@@ -1374,11 +1374,11 @@ describe("IssueDetailPanel", () => {
         ).toHaveTextContent("issue is not claimable");
       });
       const approve = screen.getByTestId("panel-approve-button");
-      const reject = screen.getByTestId("panel-reject-button");
       expect(approve).toBeDisabled();
-      expect(reject).toBeDisabled();
       expect(approve).toHaveAttribute("title", "issue is not claimable");
-      expect(reject).toHaveAttribute("title", "issue is not claimable");
+      // Reject is a different transition (PATCH status=open) that the claim
+      // guard does not cover, so the 409 must not take it away.
+      expect(screen.getByTestId("panel-reject-button")).not.toBeDisabled();
     });
 
     // A network error is not the server refusing: retrying is legitimate.
@@ -1461,6 +1461,55 @@ describe("IssueDetailPanel", () => {
       expect(
         screen.queryByTestId("action-error-toast"),
       ).not.toBeInTheDocument();
+      expect(screen.getByTestId("panel-approve-button")).not.toBeDisabled();
+    });
+
+    // An SSE update can make the same issue claimable again, so the latch has
+    // to key on the record, not just on its identity.
+    it("clears the blocked latch when the same issue is updated", async () => {
+      const onApprove = vi
+        .fn()
+        .mockRejectedValue(
+          new ApiError(409, "Conflict", { error: "issue is not claimable" }),
+        );
+      const { rerender } = render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={createTestIssueDetails({
+            title: "Some task",
+            status: "review",
+            updated_at: "2026-01-23T00:00:00Z",
+          })}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("panel-approve-button"));
+      await waitFor(() => {
+        expect(screen.getByTestId("panel-approve-button")).toBeDisabled();
+      });
+
+      rerender(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={createTestIssueDetails({
+            title: "Some task",
+            status: "review",
+            updated_at: "2026-01-23T00:05:00Z",
+          })}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={vi.fn()}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId("panel-approve-blocked-reason"),
+        ).not.toBeInTheDocument();
+      });
       expect(screen.getByTestId("panel-approve-button")).not.toBeDisabled();
     });
 

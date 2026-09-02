@@ -385,7 +385,7 @@ describe("IssueDetailView", () => {
       expect(approve).not.toHaveTextContent("...");
     });
 
-    it("disables both review buttons with the reason after a 409", async () => {
+    it("disables only Approve, with the reason, after a 409", async () => {
       const onApprove = vi
         .fn()
         .mockRejectedValue(
@@ -407,11 +407,11 @@ describe("IssueDetailView", () => {
         ).toHaveTextContent("issue is not claimable");
       });
       const approve = screen.getByTestId("detail-approve-button");
-      const reject = screen.getByTestId("detail-reject-button");
       expect(approve).toBeDisabled();
-      expect(reject).toBeDisabled();
       expect(approve).toHaveAttribute("title", "issue is not claimable");
-      expect(reject).toHaveAttribute("title", "issue is not claimable");
+      // Reject is a different transition (PATCH status=open) that the claim
+      // guard does not cover, so the 409 must not take it away.
+      expect(screen.getByTestId("detail-reject-button")).not.toBeDisabled();
     });
 
     // A network error is not the server refusing: retrying is legitimate.
@@ -475,6 +475,42 @@ describe("IssueDetailView", () => {
       expect(
         screen.queryByTestId("action-error-toast"),
       ).not.toBeInTheDocument();
+      expect(screen.getByTestId("detail-approve-button")).not.toBeDisabled();
+    });
+
+    // An SSE update can make the same issue claimable again, so the latch has
+    // to key on the record, not just on its identity.
+    it("clears the blocked latch when the same issue is updated", async () => {
+      const onApprove = vi
+        .fn()
+        .mockRejectedValue(
+          new ApiError(409, "Conflict", { error: "issue is not claimable" }),
+        );
+      const props = createDefaultProps({
+        issue: createReviewIssue({ updated_at: "2024-01-15T10:30:00Z" }),
+        onApprove,
+      });
+      const { rerender } = render(<IssueDetailView {...props} />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("detail-approve-button"));
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId("detail-approve-button")).toBeDisabled();
+      });
+
+      rerender(
+        <IssueDetailView
+          {...props}
+          issue={createReviewIssue({ updated_at: "2024-01-15T10:35:00Z" })}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId("detail-approve-blocked-reason"),
+        ).not.toBeInTheDocument();
+      });
       expect(screen.getByTestId("detail-approve-button")).not.toBeDisabled();
     });
 
