@@ -24,16 +24,15 @@ volumes:
 services:
   redis:
     image: docker.io/library/redis:7-alpine
-    # Persistence ON, mirroring deploy/podman-stack/compose.yaml. This stack is
-    # long-lived dogfood: terminal tab metadata (internal/webui/tabmeta) and the
-    # fleet-db issue store live here and must survive a container/host restart.
-    # `make local-mode-down` still wipes them via `down -v`. Do not disable AOF.
-    command:
-      - "redis-server"
-      - "--appendonly"
-      - "yes"
-      - "--maxmemory-policy"
-      - "noeviction"
+    # Persistence ON. This stack is long-lived dogfood: terminal tab metadata
+    # (internal/webui/tabmeta) and the fleet-db issue store live here and must
+    # survive a container/host restart. Dropping the old `--save ""` also
+    # re-enables Redis' default RDB snapshots, so /data carries an AOF plus
+    # periodic dumps. Unlike deploy/podman-stack/compose.yaml there is no
+    # `--maxmemory` cap: under Redis' default noeviction policy a cap turns
+    # memory pressure into write failures, the wrong trade for a dev box.
+    # `make local-mode-down` still wipes the volume via `down -v`.
+    command: ["redis-server", "--appendonly", "yes"]
     networks: [local-mode]
     volumes:
       - redis-data:/data
