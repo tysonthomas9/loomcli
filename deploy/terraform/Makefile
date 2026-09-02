@@ -189,15 +189,33 @@ backend: ## Ensure the shared encrypted Terraform state bucket exists
 	fi
 	@gcloud storage buckets update "gs://$(TF_STATE_BUCKET)" --versioning --project="$(PROJECT)" >/dev/null
 
+# Two checkouts running `make up` at the same moment both reconcile this
+# module. The GCS backend surfaces a held lock as "Error loading state ...
+# 412 conditionNotMet", which -lock-timeout does not retry, so the second
+# apply failed outright on the first parallel run. Retry only on that error;
+# anything else fails immediately.
 shared: backend ## Create or reconcile the shared VPC, subnet, router, and NAT
 	$(SHARED_TF) init -input=false \
 		-backend-config="bucket=$(TF_STATE_BUCKET)" \
 		-backend-config="prefix=loom-gcp-shared" >/dev/null
-	$(SHARED_TF) apply -auto-approve -input=false -lock-timeout=10m \
-		-var project_id=$(PROJECT) \
-		-var region=$(REGION) \
-		-var network_name=$(SHARED_NETWORK) \
-		-var subnet_cidr=$(SHARED_SUBNET_CIDR)
+	for attempt in $$(seq 1 40); do
+		if out="$$($(SHARED_TF) apply -auto-approve -input=false -lock-timeout=10m \
+				-var project_id=$(PROJECT) \
+				-var region=$(REGION) \
+				-var network_name=$(SHARED_NETWORK) \
+				-var subnet_cidr=$(SHARED_SUBNET_CIDR) 2>&1)"; then
+			printf '%s\n' "$$out" | tail -3
+			break
+		fi
+		if printf '%s\n' "$$out" | grep -E 'tflock|acquiring the state lock|conditionNotMet' >/dev/null; then
+			echo "shared: state locked by another checkout, retrying ($$attempt/40)"
+			[ "$$attempt" -lt 40 ] || { printf '%s\n' "$$out" >&2; exit 1; }
+			sleep 15
+			continue
+		fi
+		printf '%s\n' "$$out" >&2
+		exit 1
+	done
 
 shared-down: backend ## Destroy shared networking after every stack is gone
 	$(SHARED_TF) init -input=false \
