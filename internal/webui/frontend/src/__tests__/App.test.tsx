@@ -2321,10 +2321,10 @@ describe("App", () => {
       });
     });
 
-    // The settle edge is the only signal, so it does not matter WHY the entry
-    // left pendingIds: the store's auto-rollback timeout restores the same
-    // snapshot and clears the same set (asserted against the real store in
-    // issueStore.test.ts), and the detail surface reverts identically.
+    // The settle edge fires on every pending -> settled transition, including
+    // the successful ones, so the effect narrows to a status difference. Left
+    // unguarded it would write on every settle and churn against the
+    // timestamp-guarded effect above.
     it("does not resync details when the settled issue's status is unchanged", async () => {
       const updateIssueDetails = vi.fn();
       const settled = createMockIssue({
