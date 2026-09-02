@@ -187,3 +187,74 @@ func TestInitSessionsReader_MissingIndexStillReads(t *testing.T) {
 		t.Errorf("session count = %d, want 0", resp.SessionCount)
 	}
 }
+
+// writeProfiles stages <dir>/profiles/<agent> directories, the shape
+// agentprofiles.ConfiguredAgentNames reads the allowlist from.
+func writeProfiles(t *testing.T, dir string, agents ...string) {
+	t.Helper()
+	for _, agent := range agents {
+		if err := os.MkdirAll(filepath.Join(dir, "profiles", agent), 0o700); err != nil {
+			t.Fatalf("mkdir profile %q: %v", agent, err)
+		}
+	}
+}
+
+// TestInitSessionsReader_ScopesToConfiguredAgents: the panel resolves the
+// allowlist from the directory it is given, so a ledger row from an agent this
+// workspace never configured cannot move the served totals.
+func TestInitSessionsReader_ScopesToConfiguredAgents(t *testing.T) {
+	dir := fixtureDir(t)
+	writeProfiles(t, dir, "nova")
+
+	reader := InitSessionsReader(dir)
+	if reader == nil {
+		t.Fatal("InitSessionsReader returned nil for a readable directory")
+	}
+	rr, resp := getUsage(t, reader, "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	if resp.SessionCount != 1 {
+		t.Fatalf("session count = %d, want 1 (only nova is configured)", resp.SessionCount)
+	}
+	if len(resp.ByAgent) != 1 || resp.ByAgent[0].Name != "nova" {
+		t.Errorf("by_agent = %+v, want nova alone", resp.ByAgent)
+	}
+}
+
+// TestInitSessionsReader_NoProfilesDirServesEverything is the invariant: with
+// no profiles/ directory the allowlist is empty and the panel reads the whole
+// ledger, exactly as it did before this opt-in.
+func TestInitSessionsReader_NoProfilesDirServesEverything(t *testing.T) {
+	reader := InitSessionsReader(fixtureDir(t))
+	if reader == nil {
+		t.Fatal("InitSessionsReader returned nil for a readable directory")
+	}
+	rr, resp := getUsage(t, reader, "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	if resp.SessionCount != 2 {
+		t.Errorf("session count = %d, want 2 (unfiltered)", resp.SessionCount)
+	}
+}
+
+// TestInitSessionsReader_AllRowsUnconfiguredStillOpens: the openability probe
+// stays unfiltered, so a workspace whose every ledger row belongs to an
+// unconfigured agent gets an empty panel, not a 503.
+func TestInitSessionsReader_AllRowsUnconfiguredStillOpens(t *testing.T) {
+	dir := fixtureDir(t)
+	writeProfiles(t, dir, "nobody-in-the-ledger")
+
+	reader := InitSessionsReader(dir)
+	if reader == nil {
+		t.Fatal("InitSessionsReader returned nil; the probe must not be filtered")
+	}
+	rr, resp := getUsage(t, reader, "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	if resp.SessionCount != 0 {
+		t.Errorf("session count = %d, want 0", resp.SessionCount)
+	}
+}

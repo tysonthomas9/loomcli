@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/agentprofiles"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
@@ -131,7 +132,14 @@ func runUsage(cmd *cobra.Command, _ []string) {
 
 // readUsageRecords reads usage records from the selected ledger and returns
 // them alongside the resolved path of the file they came from.
+//
+// Both ledgers are scoped to the same allowlist, so `--source legacy` cannot
+// contradict the default view under the same flags.
 func readUsageRecords(loomDir string, f usage.Filter) ([]usage.SessionUsage, string, error) {
+	// Reporting reads are scoped to the workspace's configured agents so stray
+	// ledger rows cannot move the totals; empty means unfiltered (PUPPET-340).
+	// f is a value parameter, so this mutates nothing the caller sees.
+	f.KnownAgents = agentprofiles.ConfiguredAgentNames(loomDir)
 	switch usageSource {
 	case usageSourceSessions, "":
 		return usage.ReadSessionUsage(loomDir, f)

@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
@@ -64,6 +65,17 @@ type Filter struct {
 	Status    string
 	Since     time.Time
 	Until     time.Time
+
+	// KnownAgents is an allowlist of agent names. A record whose AgentName is
+	// not in the list is dropped. Empty or nil disables the filter entirely —
+	// it must never mean "match nothing", so a workspace that cannot resolve
+	// its configured agents reads the whole ledger rather than reporting zero.
+	// Callers supply the list (see agentprofiles.ConfiguredAgentNames); this
+	// package never resolves it. Mirrors sessions.Filter.KnownAgents, and is
+	// honored by both Reader implementations — the legacy usage.jsonl reader
+	// here and the session-ledger reader in sessions_source.go — so the two
+	// sources cannot disagree under the same flags.
+	KnownAgents []string
 }
 
 // Read returns all usage records matching the filter. If the file does not
@@ -107,6 +119,9 @@ func (s *Store) Read(filter Filter) ([]SessionUsage, error) {
 
 func matchesFilter(rec SessionUsage, f Filter) bool {
 	if f.AgentName != "" && rec.AgentName != f.AgentName {
+		return false
+	}
+	if len(f.KnownAgents) > 0 && !slices.Contains(f.KnownAgents, rec.AgentName) {
 		return false
 	}
 	if f.Backend != "" && rec.Backend != f.Backend {

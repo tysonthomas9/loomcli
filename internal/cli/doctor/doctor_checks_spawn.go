@@ -9,6 +9,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/agentprofiles"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
@@ -160,13 +161,23 @@ func tallyOutcomes(recs []sessions.SessionRecord, since time.Time) outcomeTally 
 // loadOutcomeTally reads the session ledger read-only and tallies the window.
 // A nil store means the sessions store itself was unavailable, which is not
 // something to diagnose; a non-nil error means the ledger could not be read.
+//
+// The tally is scoped to the workspace's configured agents, so ledger rows
+// written by agents this workspace never configured — most of all the rows a
+// `go test` run writes when LOOM_WORKSPACE_RUNTIME_DIR is exported — cannot
+// move the success rate. An empty allowlist means the whole ledger, so a
+// workspace without a profiles/ directory behaves exactly as it does today.
 func loadOutcomeTally(now time.Time) (outcomeTally, *sessions.Store, error) {
 	since := now.Add(-spawnHealthWindow)
-	store, err := sessions.NewStore(cli.GetWorkspaceRuntimeDir())
+	runtimeDir := cli.GetWorkspaceRuntimeDir()
+	store, err := sessions.NewStore(runtimeDir)
 	if err != nil {
 		return outcomeTally{}, nil, err
 	}
-	recs, err := store.Snapshot(sessions.Filter{Since: since})
+	recs, err := store.Snapshot(sessions.Filter{
+		Since:       since,
+		KnownAgents: agentprofiles.ConfiguredAgentNames(runtimeDir),
+	})
 	if err != nil {
 		return outcomeTally{}, store, err
 	}
