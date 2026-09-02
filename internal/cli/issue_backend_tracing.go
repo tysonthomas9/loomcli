@@ -308,6 +308,24 @@ func (t *tracedIssueBackend) Close(ctx context.Context, id string, params backen
 	return out, err
 }
 
+func (t *tracedIssueBackend) Archive(ctx context.Context, id string, params backend.ArchiveParams) error {
+	ctx, span := t.startSpan(ctx, "Archive",
+		attribute.String("loom.task_id", id),
+	)
+	err := t.inner.Archive(ctx, id, params)
+	endSpan(span, err)
+	return err
+}
+
+func (t *tracedIssueBackend) Unarchive(ctx context.Context, id string) error {
+	ctx, span := t.startSpan(ctx, "Unarchive",
+		attribute.String("loom.task_id", id),
+	)
+	err := t.inner.Unarchive(ctx, id)
+	endSpan(span, err)
+	return err
+}
+
 func (t *tracedIssueBackend) Reopen(ctx context.Context, id string, params backend.ReopenParams) error {
 	ctx, span := t.startSpan(ctx, "Reopen",
 		attribute.String("loom.task_id", id),

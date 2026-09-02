@@ -527,6 +527,15 @@ type CloseParams struct {
 	Force       bool   `json:"force,omitempty"`
 }
 
+// ArchiveParams contains fields for archiving (tombstoning) an issue.
+type ArchiveParams struct {
+	// Actor overrides the backend process identity for this mutation only.
+	Actor string `json:"-"`
+	// Reason is recorded only when the issue does not already carry a close
+	// reason, so archiving a closed issue preserves what the close said.
+	Reason string `json:"reason,omitempty"`
+}
+
 // ReopenParams contains fields for reopening a closed issue.
 type ReopenParams struct {
 	// Actor overrides the backend process identity for this mutation only.

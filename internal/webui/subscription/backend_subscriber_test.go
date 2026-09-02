@@ -123,6 +123,14 @@ func (f *fakeBackend) UndeferIssue(ctx context.Context, id string) error {
 func (f *fakeBackend) Close(ctx context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {
 	return nil, errors.New("not implemented")
 }
+func (f *fakeBackend) Archive(ctx context.Context, id string, params backend.ArchiveParams) error {
+	return errors.New("not implemented")
+}
+
+func (f *fakeBackend) Unarchive(ctx context.Context, id string) error {
+	return errors.New("not implemented")
+}
+
 func (f *fakeBackend) Reopen(ctx context.Context, id string, params backend.ReopenParams) error {
 	return errors.New("not implemented")
 }

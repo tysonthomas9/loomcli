@@ -1579,6 +1579,11 @@ type AgentStatusResponse struct {
 // AgentStatusResponseAgentState defines model for AgentStatusResponse.AgentState.
 type AgentStatusResponseAgentState string
 
+// ArchiveRequest defines model for ArchiveRequest.
+type ArchiveRequest struct {
+	Reason *string `json:"reason,omitempty"`
+}
+
 // BackendConfigResponse defines model for BackendConfigResponse.
 type BackendConfigResponse struct {
 	Data *struct {
@@ -3636,6 +3641,9 @@ type CreateIssueJSONRequestBody = CreateIssueRequest
 
 // PatchIssueJSONRequestBody defines body for PatchIssue for application/json ContentType.
 type PatchIssueJSONRequestBody = PatchIssueRequest
+
+// ArchiveIssueJSONRequestBody defines body for ArchiveIssue for application/json ContentType.
+type ArchiveIssueJSONRequestBody = ArchiveRequest
 
 // CloseIssueJSONRequestBody defines body for CloseIssue for application/json ContentType.
 type CloseIssueJSONRequestBody = CloseRequest

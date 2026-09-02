@@ -784,6 +784,66 @@ paths:
         "404":
           description: Issue not found
 
+  /api/workspaces/{ws}/issues/{id}/archive:
+    post:
+      operationId: archiveIssue
+      tags: [issues]
+      summary: Archive (tombstone) an issue with optional reason
+      description: |
+        Archives an issue by transitioning it to the terminal `tombstone`
+        status. Archiving is idempotent: archiving an already-archived issue
+        succeeds. The reason is only recorded when the issue does not already
+        carry a close reason, so archiving a closed issue preserves what the
+        close said.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/IssueId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ArchiveRequest"
+      responses:
+        "200":
+          description: Issue archived
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+        "404":
+          description: Issue not found
+
+  /api/workspaces/{ws}/issues/{id}/unarchive:
+    post:
+      operationId: unarchiveIssue
+      tags: [issues]
+      summary: Restore an archived issue
+      description: |
+        Restores a `tombstone` issue to its pre-archive status. Unlike archive
+        this is strict: restoring an issue that was never archived is an error.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/IssueId"
+      responses:
+        "200":
+          description: Issue restored
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+        "404":
+          description: Issue not found
+
   /api/workspaces/{ws}/issues/{id}/claim:
     post:
       operationId: claimIssue
@@ -5630,6 +5690,12 @@ components:
           type: boolean
         force:
           type: boolean
+
+    ArchiveRequest:
+      type: object
+      properties:
+        reason:
+          type: string
 
     MoveIssueRequest:
       type: object

@@ -368,6 +368,51 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/issues/{id}/archive": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Archive (tombstone) an issue with optional reason
+     * @description Archives an issue by transitioning it to the terminal `tombstone`
+     *     status. Archiving is idempotent: archiving an already-archived issue
+     *     succeeds. The reason is only recorded when the issue does not already
+     *     carry a close reason, so archiving a closed issue preserves what the
+     *     close said.
+     */
+    post: operations["archiveIssue"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/issues/{id}/unarchive": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Restore an archived issue
+     * @description Restores a `tombstone` issue to its pre-archive status. Unlike archive
+     *     this is strict: restoring an issue that was never archived is an error.
+     */
+    post: operations["unarchiveIssue"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/issues/{id}/claim": {
     parameters: {
       query?: never;
@@ -2950,6 +2995,9 @@ export interface components {
       suggest_next?: boolean;
       force?: boolean;
     };
+    ArchiveRequest: {
+      reason?: string;
+    };
     MoveIssueRequest: {
       target_workspace: string;
     };
@@ -4498,6 +4546,79 @@ export interface operations {
           "application/json": {
             success: boolean;
             data?: Record<string, never>;
+          };
+        };
+      };
+      /** @description Issue not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  archiveIssue: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Issue identifier */
+        id: components["parameters"]["IssueId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ArchiveRequest"];
+      };
+    };
+    responses: {
+      /** @description Issue archived */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data?: Record<string, never>;
+          };
+        };
+      };
+      /** @description Issue not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  unarchiveIssue: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Issue identifier */
+        id: components["parameters"]["IssueId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Issue restored */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
           };
         };
       };

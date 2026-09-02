@@ -45,6 +45,8 @@ func (m *IssueModule) Register(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/workspaces/{ws}/issues/{id}", HandlePatchIssue(m.svc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/close", HandleCloseIssue(m.svc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/reopen", HandleReopenIssue(m.svc))
+	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/archive", HandleArchiveIssue(m.svc))
+	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/unarchive", HandleUnarchiveIssue(m.svc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/claim", HandleClaimIssue(m.svc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/move", HandleMoveIssue(m.svc, m.store))
 	mux.HandleFunc("DELETE /api/workspaces/{ws}/issues/{id}", HandleDeleteIssue(m.svc))

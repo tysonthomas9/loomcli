@@ -19,6 +19,8 @@ import {
   createIssue,
   updateIssue,
   closeIssue,
+  archiveIssue,
+  unarchiveIssue,
   addDependency,
   removeDependency,
   addComment,
@@ -1789,6 +1791,70 @@ describe("issues API", () => {
           params: { path: { ws: "test-ws-id", id: "issue-123" } },
           body: {},
         }),
+      );
+    });
+  });
+
+  describe("archiveIssue", () => {
+    it("posts to the archive route with an empty body when no reason", async () => {
+      mockApiPost.mockResolvedValue(okResponse({ success: true }));
+
+      await archiveIssue("test-ws-id", "issue-123");
+
+      expect(mockApiPost).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/issues/{id}/archive",
+        expect.objectContaining({
+          params: { path: { ws: "test-ws-id", id: "issue-123" } },
+          body: {},
+        }),
+      );
+    });
+
+    it("posts the reason when one is given", async () => {
+      mockApiPost.mockResolvedValue(okResponse({ success: true }));
+
+      await archiveIssue("test-ws-id", "issue-123", "superseded");
+
+      expect(mockApiPost).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/issues/{id}/archive",
+        expect.objectContaining({
+          body: { reason: "superseded" },
+        }),
+      );
+    });
+
+    it("propagates ApiError from an HTTP error response", async () => {
+      mockApiPost.mockResolvedValue(
+        errorResponse(404, "Not Found", { error: "issue not found" }),
+      );
+
+      await expect(archiveIssue("test-ws-id", "ghost-1")).rejects.toThrow(
+        ApiError,
+      );
+    });
+  });
+
+  describe("unarchiveIssue", () => {
+    it("posts to the unarchive route", async () => {
+      mockApiPost.mockResolvedValue(okResponse({ success: true }));
+
+      await unarchiveIssue("test-ws-id", "issue-123");
+
+      expect(mockApiPost).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/issues/{id}/unarchive",
+        expect.objectContaining({
+          params: { path: { ws: "test-ws-id", id: "issue-123" } },
+        }),
+      );
+    });
+
+    it("propagates ApiError when the issue was never archived", async () => {
+      mockApiPost.mockResolvedValue(
+        errorResponse(409, "Conflict", { error: "issue is not archived" }),
+      );
+
+      await expect(unarchiveIssue("test-ws-id", "issue-123")).rejects.toThrow(
+        ApiError,
       );
     });
   });

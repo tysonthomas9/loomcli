@@ -613,6 +613,52 @@ func (s *issueServiceImpl) ReopenIssue(ctx context.Context, params ReopenIssuePa
 	return nil
 }
 
+// ArchiveIssue moves an issue to the terminal "tombstone" status. Archiving is
+// idempotent at the backend, so a repeated archive is a quiet success.
+// Returns ErrValidation for empty IssueID.
+func (s *issueServiceImpl) ArchiveIssue(ctx context.Context, params ArchiveIssueParams) error {
+	if strings.TrimSpace(params.IssueID) == "" {
+		return ErrValidation("issue ID is required")
+	}
+
+	be, svcErr := s.resolveBackend(ctx)
+	if svcErr != nil {
+		return svcErr
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	if err := be.Archive(ctx, params.IssueID, backend.ArchiveParams{Actor: params.Actor, Reason: params.Reason}); err != nil {
+		slog.Error("backend error in ArchiveIssue", "issue_id", params.IssueID, "err", err)
+		return translateBackendError(err)
+	}
+	return nil
+}
+
+// UnarchiveIssue restores an archived issue to its pre-archive status.
+// Unlike archive this is strict: unarchiving an issue that was never archived
+// is a conflict. Returns ErrValidation for empty IssueID.
+func (s *issueServiceImpl) UnarchiveIssue(ctx context.Context, params UnarchiveIssueParams) error {
+	if strings.TrimSpace(params.IssueID) == "" {
+		return ErrValidation("issue ID is required")
+	}
+
+	be, svcErr := s.resolveBackend(ctx)
+	if svcErr != nil {
+		return svcErr
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	if err := be.Unarchive(ctx, params.IssueID); err != nil {
+		slog.Error("backend error in UnarchiveIssue", "issue_id", params.IssueID, "err", err)
+		return translateBackendError(err)
+	}
+	return nil
+}
+
 // ListComments returns all comments for an issue, ordered by creation time.
 // Returns ErrValidation for empty IssueID.
 func (s *issueServiceImpl) ListComments(ctx context.Context, issueID string) ([]*types.Comment, error) {

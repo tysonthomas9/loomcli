@@ -481,6 +481,44 @@ export async function closeIssue(
   if (error) throw apiErrorFromResponse(error, response);
 }
 
+/**
+ * Archive (tombstone) an issue with an optional reason.
+ *
+ * Archiving has its own endpoint rather than being a status update: tombstone
+ * is not a settable status on PATCH, so `updateIssue(..., {status:
+ * "tombstone"})` is rejected server-side.
+ */
+export async function archiveIssue(
+  workspaceId: string,
+  id: string,
+  reason?: string,
+): Promise<void> {
+  const { error, response } = await api.POST(
+    "/api/workspaces/{ws}/issues/{id}/archive",
+    {
+      params: { path: { ws: workspaceId, id } },
+      body: reason ? { reason } : {},
+    },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
+}
+
+/**
+ * Restore a previously archived issue.
+ */
+export async function unarchiveIssue(
+  workspaceId: string,
+  id: string,
+): Promise<void> {
+  const { error, response } = await api.POST(
+    "/api/workspaces/{ws}/issues/{id}/unarchive",
+    {
+      params: { path: { ws: workspaceId, id } },
+    },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
+}
+
 // ============= DEPENDENCY OPERATIONS =============
 
 export async function addDependency(
