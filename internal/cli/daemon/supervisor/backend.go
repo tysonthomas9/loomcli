@@ -3,6 +3,7 @@ package supervisor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"log/slog"
 	"time"
@@ -176,6 +177,75 @@ func (s *Supervisor) gateSafetyKnobsEnforceable(ap *AgentProcess) error {
 	ap.Mu.Unlock()
 	log.Printf("[daemon] Agent %s: %v — skipping spawn", worktree, err)
 	return err
+}
+
+// gateProfileVerified refuses to start a supervision cycle for an agent whose
+// harness profile does not verify against its manifest, BEFORE the agent
+// claims anything.
+//
+// The refusal itself already existed at spawn time (AppendProfileEnv), and it
+// still does — no agent process may ever be launched against an unverified
+// profile. But a spawn-time-only refusal happens AFTER claimTask, so a drifted
+// agent claimed a real task, failed to boot, released the claim, and the next
+// cycle recorded "no claimable tasks" over the diagnosis. Measured cost:
+// ~5 hours of a dead agent presenting as idle while it churned the board.
+// Gating here produces zero claims and zero churn.
+//
+// The refusal is stored in ap.ProfileError (a slot setPreflightError cannot
+// overwrite) and stamped as StopReasonProfileInvalid so the agent renders as
+// blocked rather than stopped. A profile that verifies clears both.
+func (s *Supervisor) gateProfileVerified(ap *AgentProcess) error {
+	// Same check the spawn path runs; the env it builds is discarded here.
+	// Calling it rather than restating it is what keeps the pre-flight gate
+	// and the spawn gate from ever disagreeing about what "verified" means.
+	_, err := AppendProfileEnv(nil, s.ProjectDir, ap.Entry.Worktree)
+	if err == nil {
+		ap.Mu.Lock()
+		recovered := ap.ProfileError != nil
+		ap.ProfileError = nil
+		if ap.StopReason == StopReasonProfileInvalid {
+			ap.StopReason = ""
+		}
+		worktree := ap.Entry.Worktree
+		ap.Mu.Unlock()
+		if recovered {
+			log.Printf("[daemon] Agent %s: harness profile verifies again — resuming", worktree)
+		}
+		return nil
+	}
+
+	msg := err.Error()
+	// Resolved before the lock: GetEffectiveBackend acquires ap.Mu itself.
+	backendName := s.GetEffectiveBackend(ap)
+	ap.Mu.Lock()
+	ap.ProfileError = &agenterr.AgentError{
+		Class:     agenterr.OutcomeFromDomain(agenterr.SpawnFailureOutcome),
+		Message:   msg,
+		Backend:   backendName,
+		Timestamp: time.Now(),
+	}
+	ap.StopReason = StopReasonProfileInvalid
+	worktree := ap.Entry.Worktree
+	s.appendProfileRefusalToAgentLog(ap, msg)
+	ap.Mu.Unlock()
+
+	log.Printf("[daemon] Agent %s: profile verification failed — not claiming any task: %s", worktree, msg)
+	return err
+}
+
+// appendProfileRefusalToAgentLog writes the refusal to the same file
+// `loom daemon logs <agent>` reads. Without it that file is empty for a
+// structural reason — it is only ever opened while wiring a child process, and
+// a refused agent has no child — so the second place an operator looks when an
+// agent goes quiet says nothing at all. Best-effort; caller holds ap.Mu.
+func (s *Supervisor) appendProfileRefusalToAgentLog(ap *AgentProcess, msg string) {
+	f := s.openDaemonLogFile(ap)
+	if f == nil {
+		return
+	}
+	defer func() { _ = f.Close() }()
+	_, _ = fmt.Fprintf(f, "[%s] [loom] PROFILE VERIFICATION FAILED — agent not started, no task claimed: %s\n",
+		time.Now().Format(time.RFC3339), msg)
 }
 
 // GetEffectiveBackend returns the backend name for the agent's current failover position.

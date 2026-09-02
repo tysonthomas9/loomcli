@@ -4278,6 +4278,36 @@ Per-IP token bucket rate limiting applied to all API endpoints (except `/health`
 - Returns `429 Too Many Requests` with `Retry-After` header
 - `/api/client-errors` and `/api/csp-report` are excluded from this global limiter — they use dedicated per-endpoint rate limiters (see [Client Error & CSP Reporting](#client-error--csp-reporting))
 
+## Daemon Agent State
+
+`daemon-agents.json` — written by the daemon every few seconds and read by
+`loom daemon status` and the monitor views — carries one object per supervised
+agent. Fields are omitted when empty unless noted.
+
+### `profile_error`
+
+```json
+{
+  "worktree": "observer",
+  "role": "observer",
+  "status": "blocked",
+  "stop_reason": "profile_invalid",
+  "profile_error": "profile harness version drift: /path/.loom/agent-profiles/observer/claude: manifest pins \"2.1.236 (Claude Code)\", claude reports \"2.1.237 (Claude Code)\" (re-provision to bless the upgrade)"
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `profile_error` | string (omitempty) | The harness-profile refusal keeping this agent out of the claim loop. Set when the agent's `.loom/agent-profiles/<agent>/{claude,codex}` directory fails manifest verification in daemon pre-flight; cleared on the first cycle that verifies. Absent for every healthy agent. |
+
+The refusal is raised **before** the agent claims a task, so a drifted agent
+claims nothing and produces no board churn. It is stored in its own field
+rather than in `last_error_class` for a specific reason: `last_error_class` is
+overwritten by every cycle's outcome (typically `NoWork`), which used to erase
+the diagnosis within one poll interval. `status` is `blocked` and `stop_reason`
+is `profile_invalid` for the whole time the condition holds; the agent
+self-resumes once the profile is re-provisioned.
+
 ## Error Codes
 
 Error codes appear in the `code` field of error responses on issue-related endpoints:

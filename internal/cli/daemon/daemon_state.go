@@ -181,6 +181,7 @@ func toDaemonAgentStatus(ap supervisor.SupervisedAgentStatus, maxRetries int) Da
 		OwnershipLastHeartbeat: ap.OwnershipLastHeartbeat,
 		LastActivity:           ap.LastActivity,
 		ClaimsGated:            ap.ClaimsGated,
+		ProfileError:           ap.ProfileError,
 	}
 	if ap.StopReason != "" && ap.PID == 0 {
 		if !ap.LastExit.IsZero() {
@@ -205,7 +206,8 @@ func computeAgentStatus(ap supervisor.SupervisedAgentStatus, maxRetries int) str
 	// is alive and rechecking on a fixed interval, so the agent is waiting on
 	// infrastructure, not failed.
 	if ap.StopReason == supervisor.StopReasonMaxRetriesBlocked ||
-		ap.StopReason == supervisor.StopReasonIssueBackendUnavailable {
+		ap.StopReason == supervisor.StopReasonIssueBackendUnavailable ||
+		ap.StopReason == supervisor.StopReasonProfileInvalid {
 		return "blocked"
 	}
 	// Not running - check if it failed via stop reason or restart count.

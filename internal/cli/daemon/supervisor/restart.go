@@ -95,8 +95,8 @@ func (s *Supervisor) decideRestart(ap *AgentProcess) (bool, string) {
 	ap.Mu.Lock()
 	defer ap.Mu.Unlock()
 
-	if stopAfterEphemeralTask(ap) {
-		return false, ""
+	if decided, restart := s.earlyRestartVerdict(ap); decided {
+		return restart, ""
 	}
 
 	// Parked by a wall, of either scope: a block, not a failure (see
@@ -151,6 +151,26 @@ func (s *Supervisor) decideRestart(ap *AgentProcess) (bool, string) {
 func resetNoWork(ap *AgentProcess) {
 	ap.NoWorkCount = 0
 	ap.IdleSince = time.Time{}
+}
+
+// earlyRestartVerdict decides the cases that must not read the exit fields at
+// all, and reports whether it decided. Both belong here for the same reason:
+// the run those fields describe is not the run being judged. An ephemeral
+// agent has finished its one task; a profile refusal never spawned anything,
+// so exit 0 / no error would take the clean-success branch and quietly clear
+// the block. Caller holds ap.Mu.
+func (s *Supervisor) earlyRestartVerdict(ap *AgentProcess) (decided, restart bool) {
+	if stopAfterEphemeralTask(ap) {
+		return true, false
+	}
+	// Uncounted on purpose: no number of restarts repairs a manifest, and
+	// eroding the budget would only turn a legible blocked agent into a dead
+	// one.
+	if ap.ProfileError != nil {
+		s.applyProfileInvalidRestart(ap)
+		return true, true
+	}
+	return false, false
 }
 
 // stopAfterEphemeralTask stops the supervisor once an ephemeral agent has
@@ -474,6 +494,20 @@ func (s *Supervisor) issueBackendRecheckBackoff() time.Duration {
 	return issueBackendOutageRecheckInterval
 }
 
+// applyProfileInvalidRestart keeps an agent visibly blocked on a profile
+// refusal while re-checking on the fixed backend-recheck interval. Mirrors
+// applyBackendUnavailableRestart: same shape of fault (an environment the
+// operator repairs out-of-band), same self-recovery once repaired —
+// gateProfileVerified clears ProfileError and the stop reason on the first
+// cycle that verifies. Caller holds ap.Mu.
+func (s *Supervisor) applyProfileInvalidRestart(ap *AgentProcess) {
+	ap.RateRetryCount = 0
+	ap.NoWorkCount = 0
+	ap.StopReason = StopReasonProfileInvalid
+	log.Printf("[daemon] Agent %s: harness profile invalid, will recheck in %s (not counted toward max_retries)",
+		ap.Entry.Worktree, s.backendRecheckBackoff())
+}
+
 // backendRecheckBackoff is the fixed delay between BackendUnavailable re-checks
 // (configurable via backendRecheckInterval; package default otherwise).
 func (s *Supervisor) backendRecheckBackoff() time.Duration {
@@ -498,10 +532,17 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 	// Read together: a wall park sleeps out the wall on the agent's OWN
 	// credential, so the reason and the key are one fact under this lock.
 	walled, credentialKey := ap.StopReason.IsWallPark(), ap.CredentialKey
+	profileInvalid := ap.ProfileError != nil
 	ap.Mu.Unlock()
 
 	if walled {
 		return s.wallBackoffFor(credentialKey)
+	}
+
+	// Fixed recheck, like a missing backend binary: we are waiting on an
+	// operator repairing a profile, not backing off a flaky run.
+	if profileInvalid {
+		return s.backendRecheckBackoff()
 	}
 
 	// A blocked agent sleeps the fixed block interval — keyed on StopReason,

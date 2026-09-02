@@ -73,6 +73,7 @@ func printAgentDiagnostics(agent DaemonAgentStatus) {
 		runtime := agent.LastExit.Sub(agent.LastStart)
 		fmt.Printf("      Last run: %s (exit %d)\n", formatDaemonDuration(runtime), agent.LastExitCode)
 	}
+	printAgentProfileError(agent)
 	if agent.LastErrorClass != "" {
 		fmt.Printf("      Last error: %s\n", agent.LastErrorClass)
 	}
@@ -99,6 +100,47 @@ func printAgentDiagnostics(agent DaemonAgentStatus) {
 			fmt.Printf("      Stopped: %s\n", agent.StopReason)
 		}
 	}
+}
+
+// printAgentProfileError renders the harness-profile refusal that is keeping
+// an agent out of the claim loop, above the transient diagnostics: those churn
+// every poll cycle, this does not change until an operator repairs the
+// profile. Nothing is printed when the profile verifies, so a healthy fleet's
+// status output is unchanged.
+func printAgentProfileError(agent DaemonAgentStatus) {
+	if agent.ProfileError == "" {
+		return
+	}
+	lines := strings.Split(agent.ProfileError, "\n")
+	fmt.Printf("      Profile: INVALID — %s\n", lines[0])
+	for _, line := range lines[1:] {
+		fmt.Printf("                %s\n", line)
+	}
+}
+
+// printProfileBlockedBanner states the fleet-level fact once. One `claude`
+// auto-update drifts every profiled agent at the same instant, so the count is
+// what an operator can act on at a glance; the same per-agent line repeated
+// four times is not.
+func printProfileBlockedBanner(agents []DaemonAgentStatus) {
+	var blocked []string
+	for _, a := range agents {
+		if a.ProfileError != "" {
+			blocked = append(blocked, a.Worktree)
+		}
+	}
+	if len(blocked) == 0 {
+		return
+	}
+	noun := "agents"
+	if len(blocked) == 1 {
+		noun = "agent"
+	}
+	fmt.Println("")
+	fmt.Printf("⚠ %d %s blocked on profile verification: %s\n",
+		len(blocked), noun, strings.Join(blocked, ", "))
+	fmt.Println("  No task is claimed while a profile fails to verify. Re-provision the")
+	fmt.Println("  profile directories named above, then the agents resume on their own.")
 }
 
 // printAgentBranchInfo prints the branch and git sync status for an agent.
