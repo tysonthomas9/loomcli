@@ -6304,6 +6304,18 @@ components:
           type: string
         workspace_id:
           type: string
+        pty_alive:
+          type: boolean
+          description: Terminal process liveness after a lifecycle transition; omitted for non-terminal events.
+        exit_reason:
+          type: string
+          description: Terminal process end reason, currently exited, killed, or shutdown.
+        kind:
+          type: string
+          description: Terminal runtime kind, for example pty or agent_tmux.
+        agent:
+          type: boolean
+          description: Whether the terminal runtime belongs to an agent; explicit false on non-agent terminal lifecycle events.
 
     # ── Monitor Schemas ─────────────────────────────────────────────────
     MonitorStatusResponse:

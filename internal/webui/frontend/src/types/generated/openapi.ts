@@ -3299,6 +3299,14 @@ export interface components {
       priority?: number | null;
       source_repo?: string;
       workspace_id?: string;
+      /** @description Terminal process liveness after a lifecycle transition; omitted for non-terminal events. */
+      pty_alive?: boolean;
+      /** @description Terminal process end reason, currently exited, killed, or shutdown. */
+      exit_reason?: string;
+      /** @description Terminal runtime kind, for example pty or agent_tmux. */
+      kind?: string;
+      /** @description Whether the terminal runtime belongs to an agent; explicit false on non-agent terminal lifecycle events. */
+      agent?: boolean;
     };
     MonitorStatusResponse: {
       workspace: components["schemas"]["MonitorWorkspaceInfo"];

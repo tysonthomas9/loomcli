@@ -7,10 +7,10 @@
  * non-agent tabs whose PTY is attachable (`pty_alive`), i.e. *live sessions in
  * this workspace*, not sockets this browser tab currently holds open.
  *
- * Freshness: refetches on workspace change, on SSE terminal mutations
- * (debounced), every 30s, and when the document becomes visible. The slow poll
- * exists because a PTY that exits on its own emits no SSE event, so that case
- * corrects within one poll interval (or immediately on tab focus).
+ * Freshness: refetches on workspace change, on SSE terminal metadata/lifecycle
+ * mutations (debounced), every five minutes as a reconnect safety net, and
+ * when the document becomes visible. The safety poll pauses while hidden;
+ * normal PTY spawn, exit, and kill transitions arrive through SSE.
  */
 
 import { useState, useCallback, useEffect, useRef } from "react";
@@ -33,7 +33,7 @@ export interface UseWorkspaceSessionCountOptions {
 }
 
 const DEBOUNCE_MS = 200;
-const POLL_MS = 30000;
+const POLL_MS = 5 * 60_000;
 
 export function useWorkspaceSessionCount(
   options: UseWorkspaceSessionCountOptions = {},
@@ -120,7 +120,9 @@ export function useWorkspaceSessionCount(
   useEffect(() => {
     if (!enabled) return;
     const interval = setInterval(() => {
-      fetchCount();
+      if (!document.hidden) {
+        fetchCount();
+      }
     }, POLL_MS);
     const onVisibility = () => {
       if (document.visibilityState === "visible") {

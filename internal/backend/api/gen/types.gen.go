@@ -2496,8 +2496,11 @@ type MoveResult struct {
 // because the SSE stream is not validated by generated clients.
 type MutationPayload struct {
 	// Action Source action for the mutation, usually the fleet-db action such as issue.update or dep.add.
-	Action   *string `json:"action,omitempty"`
-	Actor    *string `json:"actor,omitempty"`
+	Action *string `json:"action,omitempty"`
+	Actor  *string `json:"actor,omitempty"`
+
+	// Agent Whether the terminal runtime belongs to an agent; explicit false on non-agent terminal lifecycle events.
+	Agent    *bool   `json:"agent,omitempty"`
 	Assignee *string `json:"assignee,omitempty"`
 
 	// EntityId Generic changed entity identifier.
@@ -2506,8 +2509,14 @@ type MutationPayload struct {
 	// EntityType Generic changed entity type, for example issue, dependency, comment, label, agent, terminal, session, or workspace.
 	EntityType *string `json:"entity_type,omitempty"`
 
+	// ExitReason Terminal process end reason, currently exited, killed, or shutdown.
+	ExitReason *string `json:"exit_reason,omitempty"`
+
 	// IssueId Legacy issue identifier for issue-scoped consumers; omitted for non-issue entities.
 	IssueId *string `json:"issue_id,omitempty"`
+
+	// Kind Terminal runtime kind, for example pty or agent_tmux.
+	Kind *string `json:"kind,omitempty"`
 
 	// NewStatus Present for status mutation events
 	NewStatus *string `json:"new_status,omitempty"`
@@ -2516,8 +2525,11 @@ type MutationPayload struct {
 	OldStatus *string `json:"old_status,omitempty"`
 
 	// ParentId Present for bonded mutation events
-	ParentId   *string `json:"parent_id,omitempty"`
-	Priority   *int    `json:"priority,omitempty"`
+	ParentId *string `json:"parent_id,omitempty"`
+	Priority *int    `json:"priority,omitempty"`
+
+	// PtyAlive Terminal process liveness after a lifecycle transition; omitted for non-terminal events.
+	PtyAlive   *bool   `json:"pty_alive,omitempty"`
 	SourceRepo *string `json:"source_repo,omitempty"`
 
 	// StepCount Present for bonded mutation events
