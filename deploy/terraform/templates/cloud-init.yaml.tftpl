@@ -189,6 +189,36 @@ write_files:
       [Install]
       WantedBy=multi-user.target
 
+%{ if auto_stop_minutes > 0 ~}
+  # A guest poweroff leaves the instance TERMINATED: compute billing stops,
+  # but the boot disk remains. `make resume` or `make up` starts it again and
+  # this boot-relative timer gives it another full working window.
+  - path: /etc/systemd/system/loom-autostop.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Power off this disposable Loom stack
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/bin/systemctl poweroff
+
+  - path: /etc/systemd/system/loom-autostop.timer
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Auto-stop this disposable Loom stack after boot
+
+      [Timer]
+      OnBootSec=${auto_stop_minutes}min
+
+      [Install]
+      WantedBy=timers.target
+%{ endif ~}
+
 runcmd:
   - systemctl enable --now docker
   - systemctl enable --now loom-stack.service
+%{ if auto_stop_minutes > 0 ~}
+  - systemctl enable --now loom-autostop.timer
+%{ endif ~}

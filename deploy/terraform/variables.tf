@@ -4,7 +4,7 @@ variable "project_id" {
 }
 
 variable "region" {
-  description = "Region for the bucket, the subnet, and (if enabled) Cloud NAT."
+  description = "Region for the bucket, shared subnet, and VM."
   type        = string
   default     = "us-central1"
 }
@@ -18,15 +18,42 @@ variable "zone" {
 variable "name" {
   description = <<-EOT
     Prefix for every resource name. Also the network tag the firewall rules
-    target, so two stacks with different names cannot reach each other's ports.
+    target, so the shared-network deny rule isolates this stack's ports.
   EOT
   type        = string
-  default     = "loom-stack"
 
   validation {
     condition     = can(regex("^[a-z][-a-z0-9]{4,28}[a-z0-9]$", var.name))
     error_message = "name must be 6-30 characters, lowercase, start with a letter, and end with a letter or digit."
   }
+}
+
+variable "network_name" {
+  description = "Name of the shared project-bootstrap VPC."
+  type        = string
+  default     = "loom"
+}
+
+variable "expires_at" {
+  description = "TTL for `make reap`, as Unix seconds."
+  type        = number
+}
+
+variable "auto_stop_minutes" {
+  description = "Minutes after boot before the guest powers off. Set to 0 to disable."
+  type        = number
+  default     = 50
+}
+
+variable "owner" {
+  description = "Label-safe user name that created the stack."
+  type        = string
+  default     = ""
+}
+
+variable "owner_id" {
+  description = "Twelve hexadecimal characters identifying the creating checkout."
+  type        = string
 }
 
 variable "machine_type" {
@@ -48,29 +75,11 @@ variable "boot_disk_gb" {
 variable "enable_external_ip" {
   description = <<-EOT
     Give the VM a public IP. false is the recommended posture: reach the stack
-    over IAP instead (see the iap_tunnel_* outputs). Turning it off means the VM
-    has no route to the internet, so enable_cloud_nat must be true or image
-    pulls and apt will hang.
+    over IAP instead (see the iap_tunnel_* outputs). The shared Cloud NAT gives
+    private VMs outbound access for package and image downloads.
   EOT
   type        = bool
   default     = false
-}
-
-variable "enable_cloud_nat" {
-  description = "Create a Cloud Router + NAT so a VM with no external IP can still reach the internet."
-  type        = bool
-  default     = true
-}
-
-variable "subnet_cidr" {
-  description = <<-EOT
-    Range for this stack's subnet. Every stack builds its own VPC, so stacks
-    cannot see each other and the SAME range is correct for all of them --
-    there is nothing to allocate and nothing to collide. Only change this if
-    the stack has to be peered with something that already uses this range.
-  EOT
-  type        = string
-  default     = "10.90.0.0/24"
 }
 
 variable "iap_web_ports" {

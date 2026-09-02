@@ -40,16 +40,23 @@ locals {
     plan_role_read_only          = var.plan_role_read_only
     fleetdb_port                 = var.iap_web_ports[0]
     loom_workspace               = var.loom_workspace
+    auto_stop_minutes            = var.auto_stop_minutes
   })
 }
 
 resource "google_compute_instance" "stack" {
-  name         = var.name
-  project      = var.project_id
-  zone         = var.zone
-  machine_type = var.machine_type
-  tags         = [var.name]
-  labels       = var.labels
+  name           = var.name
+  project        = var.project_id
+  zone           = var.zone
+  machine_type   = var.machine_type
+  desired_status = "RUNNING"
+  tags           = [var.name]
+  labels = merge(var.labels, {
+    loom-stack = var.name
+    owner      = var.owner
+    checkout   = var.owner_id
+    expires-at = tostring(var.expires_at)
+  })
 
   boot_disk {
     initialize_params {
@@ -60,8 +67,8 @@ resource "google_compute_instance" "stack" {
   }
 
   network_interface {
-    network    = google_compute_network.stack.id
-    subnetwork = google_compute_subnetwork.stack.id
+    network    = data.google_compute_network.shared.id
+    subnetwork = data.google_compute_subnetwork.shared.id
 
     # An access_config block at all is what assigns a public IP; omitting it
     # leaves the VM reachable only through IAP.
@@ -86,10 +93,7 @@ resource "google_compute_instance" "stack" {
     user-data = local.cloud_init
   }
 
-  # Without NAT and without a public IP the startup script cannot fetch
-  # anything, so make that ordering explicit rather than racy.
   depends_on = [
-    google_compute_router_nat.nat,
     google_secret_manager_secret_version.redis_password,
     google_secret_manager_secret_version.workspace_file_token,
     google_secret_manager_secret_version.run_token_signing_key,

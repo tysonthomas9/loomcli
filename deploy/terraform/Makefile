@@ -1,11 +1,12 @@
 # Pipeline for bringing up a disposable Loom + fleet-db stack on a GCP VM.
 #
-#   make up          build + push images, apply, wait until healthy (set TUNNEL_PORT_BASE)
+#   make up          mint a checkout stack, build + push, apply, wait healthy
 #   make smoke       prove the stack end to end (exits non-zero on failure)
-#   make tunnel      open IAP tunnels and print the browser URL (set TUNNEL_PORT_BASE)
+#   make tunnel      open IAP tunnels and print the browser URL
 #   make down        destroy everything this stack created
 #
-# Every stack is named, so several can run at once without colliding:
+# `make up` stores a minted name and free tunnel ports in this checkout's
+# gitignored .stack. Explicit mode remains available when both are supplied:
 #   make up NAME=loom-pr512 TUNNEL_PORT_BASE=18100
 #
 SHELL := /bin/bash
@@ -20,8 +21,14 @@ ifeq ($(filter oneshell,$(.FEATURES)),)
 $(error GNU Make 3.82+ is required (.ONESHELL); this is $(MAKE_VERSION). macOS: brew install make, then run gmake)
 endif
 
+# A checkout-created stack supplies defaults to every later invocation. An
+# explicit NAME skips the file completely so it cannot silently borrow the
+# checkout stack's tunnel ports or identity.
+ifeq ($(origin NAME),undefined)
+-include $(CURDIR)/.stack
+endif
+
 REPO_ROOT := $(shell git rev-parse --show-toplevel)
-NAME      ?= loom-stack
 PROJECT   ?= $(shell gcloud config get-value project 2>/dev/null)
 REGION    ?= us-central1
 ZONE      ?= $(REGION)-a
@@ -40,6 +47,17 @@ REGISTRY_PROJECT = $(word 2,$(subst /, ,$(REGISTRY)))
 REGISTRY_REPOSITORY = $(word 3,$(subst /, ,$(REGISTRY)))
 TF_STATE_BUCKET ?= $(PROJECT)-loom-tfstate
 IMAGE_BUILD_LOCK ?= $(REPO_ROOT)/.loom-gcp-image-build.lock
+SHARED_NETWORK ?= loom
+SHARED_SUBNET_CIDR ?= 10.90.0.0/20
+TTL_MINUTES ?= 480
+AUTO_STOP_MINUTES ?= 50
+EXPIRES_AT ?= $(shell echo $$(( $$(date +%s) + $(TTL_MINUTES)*60 )))
+ADOPT ?= 0
+DRY_RUN ?= 0
+REAP_ALL ?= 0
+
+OWNER_ID := $(shell printf '%s' "$$(hostname):$(CURDIR)" | shasum | cut -c1-12)
+OWNER := $(shell printf '%s' "$${USER:-unknown}" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_-\n' '-')
 
 # Tag by commit so a stack always names the code it is running -- but a commit
 # id names a COMMIT, not a working tree. Building from a dirty checkout pushed
@@ -101,8 +119,11 @@ TF_BIN ?= $(shell command -v tofu 2>/dev/null || command -v terraform 2>/dev/nul
 # race between workspace select and apply. Give every NAME its own data dir;
 # the backend lock still serialises two operations on the same stack.
 TF = TF_DATA_DIR="$(CURDIR)/.terraform-data/$(NAME)" $(TF_BIN) -chdir="$(CURDIR)"
+SHARED_TF = TF_DATA_DIR="$(CURDIR)/.terraform-data/shared" $(TF_BIN) -chdir="$(CURDIR)/shared"
 
 TFVARS = -var project_id=$(PROJECT) -var region=$(REGION) -var zone=$(ZONE) -var name=$(NAME) \
+         -var network_name=$(SHARED_NETWORK) -var expires_at=$(EXPIRES_AT) \
+         -var auto_stop_minutes=$(AUTO_STOP_MINUTES) -var owner=$(OWNER) -var owner_id=$(OWNER_ID) \
          -var registry_host=$(REGISTRY_HOST) -var registry_project=$(REGISTRY_PROJECT) \
          -var registry_location=$(REGISTRY_LOCATION) -var registry_repository=$(REGISTRY_REPOSITORY) \
          $(CODEX_TFVARS) $(TUNNEL_TFVARS)
@@ -115,10 +136,13 @@ FLEETDB_DIGEST = $(shell gcloud artifacts docker images describe "$(REGISTRY)/fl
 LOOM_DIGEST    = $(shell gcloud artifacts docker images describe "$(REGISTRY)/loom:$(TAG)" --project="$(REGISTRY_PROJECT)" --format='value(image_summary.digest)' 2>/dev/null)
 UI_DIGEST      = $(shell gcloud artifacts docker images describe "$(REGISTRY)/loom-ui:$(TAG)" --project="$(REGISTRY_PROJECT)" --format='value(image_summary.digest)' 2>/dev/null)
 
-.PHONY: help inputs preflight backend frontend frontend-unlocked print-tags state images apply up smoke tunnel status down fmt validate
+.PHONY: help stack-required inputs preflight backend shared shared-down frontend frontend-unlocked print-tags state images apply up _up smoke tunnel status down list reap resume extend fmt validate
 
 help:
 	@grep -E '^[a-z-]+:.*?##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | column -t -s "$$(printf '\t')"
+
+stack-required:
+	@test -n "$(NAME)" || { echo "no stack in this checkout: run make up first, or pass NAME=<stack>" >&2; exit 1; }
 
 preflight: ## Fail early on the things that otherwise fail slowly
 	@test -n "$(TF_BIN)" || { echo "missing: tofu or terraform"; exit 1; }
@@ -165,6 +189,29 @@ backend: ## Ensure the shared encrypted Terraform state bucket exists
 	fi
 	@gcloud storage buckets update "gs://$(TF_STATE_BUCKET)" --versioning --project="$(PROJECT)" >/dev/null
 
+shared: backend ## Create or reconcile the shared VPC, subnet, router, and NAT
+	$(SHARED_TF) init -input=false \
+		-backend-config="bucket=$(TF_STATE_BUCKET)" \
+		-backend-config="prefix=loom-gcp-shared" >/dev/null
+	$(SHARED_TF) apply -auto-approve -input=false -lock-timeout=10m \
+		-var project_id=$(PROJECT) \
+		-var region=$(REGION) \
+		-var network_name=$(SHARED_NETWORK) \
+		-var subnet_cidr=$(SHARED_SUBNET_CIDR)
+
+shared-down: backend ## Destroy shared networking after every stack is gone
+	$(SHARED_TF) init -input=false \
+		-backend-config="bucket=$(TF_STATE_BUCKET)" \
+		-backend-config="prefix=loom-gcp-shared" >/dev/null
+	if ! $(SHARED_TF) destroy -auto-approve -input=false -lock-timeout=10m \
+		-var project_id=$(PROJECT) \
+		-var region=$(REGION) \
+		-var network_name=$(SHARED_NETWORK) \
+		-var subnet_cidr=$(SHARED_SUBNET_CIDR); then
+		echo "shared-down failed; Terraform refuses to remove a subnet while a stack VM still uses it. Run make list and destroy every stack first." >&2
+		exit 1
+	fi
+
 frontend: preflight ## Build the SPA bundle used by the UI image
 	lock="$(IMAGE_BUILD_LOCK)"
 	while ! mkdir "$$lock" 2>/dev/null; do sleep 1; done
@@ -202,18 +249,25 @@ images: preflight ## Build and push fleet-db, loom, and the SPA image (CODEX=1 a
 # NAME selects a Terraform WORKSPACE, not just resource names. Without this
 # every stack shares one state file in this directory: applying NAME=b after
 # NAME=a makes Terraform read b as edits to a, and `make down NAME=b` destroys
-# stack a. State lives in terraform.tfstate.d/<name>/; the workspace selector
-# itself lives in the per-name `.terraform-data/` directory.
-#
-# One caveat this does not fix: the local backend keeps a single lock, so two
-# applies from this directory at once still serialise.
-state: backend ## Select this stack's Terraform workspace (creates it on first use)
+# stack a. GCS stores the workspace state; the selected-workspace marker and
+# provider data live in the per-name `.terraform-data/` directory.
+state: stack-required backend ## Select this stack's Terraform workspace and enforce checkout ownership
 	@[[ "$(NAME)" =~ ^[a-z][-a-z0-9]{4,28}[a-z0-9]$$ ]] || { echo "NAME must be 6-30 lowercase characters, start with a letter, and end alphanumeric" >&2; exit 1; }
 	@$(TF) init -input=false -backend-config="bucket=$(TF_STATE_BUCKET)" -backend-config="prefix=loom-gcp" >/dev/null
-	@$(TF) workspace select -or-create "$(NAME)" >/dev/null
+	@if $(TF) workspace list | sed 's/^[* ]*//' | grep -Fx "$(NAME)" >/dev/null; then
+		$(TF) workspace select "$(NAME)" >/dev/null
+		remote_owner_id="$$($(TF) output -raw owner_id 2>/dev/null || true)"
+		if [ -n "$$remote_owner_id" ] && [ "$$remote_owner_id" != "$(OWNER_ID)" ] && [ "$(ADOPT)" != 1 ]; then
+			remote_owner="$$($(TF) output -raw owner 2>/dev/null || printf unknown)"
+			echo "NAME=$(NAME) is in use by another checkout (owner_id $$remote_owner_id, owner $$remote_owner): pick another NAME, or pass ADOPT=1 to take it over." >&2
+			exit 1
+		fi
+	else
+		$(TF) workspace new "$(NAME)" >/dev/null
+	fi
 	@echo "state: workspace $$($(TF) workspace show)"
 
-apply: inputs state ## Apply infrastructure only (assumes images already pushed)
+apply: stack-required inputs state shared ## Apply infrastructure only (assumes images already pushed)
 	test -n "$(FLEETDB_DIGEST)" && test -n "$(LOOM_DIGEST)" && test -n "$(UI_DIGEST)" || { echo "published image digest missing; run make images first" >&2; exit 1; }
 	@echo "if apply fails, inspect or clean up with: make down NAME=$(NAME) PROJECT=$(PROJECT) REGION=$(REGION) ZONE=$(ZONE) TF_STATE_BUCKET=$(TF_STATE_BUCKET)" >&2
 	$(TF) apply -auto-approve -input=false $(TFVARS) \
@@ -221,7 +275,11 @@ apply: inputs state ## Apply infrastructure only (assumes images already pushed)
 		-var loom_image="$(REGISTRY)/loom@$(LOOM_DIGEST)" \
 		-var ui_image="$(REGISTRY)/loom-ui@$(UI_DIGEST)"
 
-up: inputs images apply ## Full pipeline: images -> infra -> wait healthy
+up: ## Mint or use this checkout's stack, then build, apply, and wait healthy
+	test -f $(CURDIR)/.stack || test -n "$(NAME)" || $(CURDIR)/scripts/stack-init
+	$(MAKE) --no-print-directory _up
+
+_up: images apply
 	@echo "waiting for the stack to report healthy..."
 	@echo "if readiness fails, inspect or clean up with: make down NAME=$(NAME) PROJECT=$(PROJECT) REGION=$(REGION) ZONE=$(ZONE) TF_STATE_BUCKET=$(TF_STATE_BUCKET)" >&2
 	$(CURDIR)/scripts/wait-healthy $(NAME) $(PROJECT) $(ZONE) \
@@ -236,7 +294,7 @@ up: inputs images apply ## Full pipeline: images -> infra -> wait healthy
 # the documented `make smoke NAME=...` asserted read_only=true against a stack
 # deployed read_only=false -- a healthy stack failing its own gate because the
 # second command was missing a flag the first one had.
-smoke: state ## End-to-end proof: workspace file round trip through GCS
+smoke: stack-required state ## End-to-end proof: workspace file round trip through GCS
 	@$(CURDIR)/scripts/smoke $(NAME) $(PROJECT) $(ZONE) \
 		$$($(TF) output -raw loom_workspace) \
 		$$($(TF) output -raw plan_role_read_only) \
@@ -244,7 +302,7 @@ smoke: state ## End-to-end proof: workspace file round trip through GCS
 		$$($(TF) output -raw api_port) \
 		$$($(TF) output -raw ui_port)
 
-tunnel: state ## Open IAP tunnels in the background and print the URL
+tunnel: stack-required state ## Open IAP tunnels in the background and print the URL
 	@test -n "$(TUNNEL_PORT_BASE)" || { echo "TUNNEL_PORT_BASE is required for a collision-free local tunnel (reuse the value passed to make up)" >&2; exit 1; }
 	actual_tunnel_port="$$($(TF) output -raw tunnel_ui_port)"
 	@test "$$actual_tunnel_port" = "$(TUNNEL_PORT_BASE)" || { echo "TUNNEL_PORT_BASE=$(TUNNEL_PORT_BASE) does not match deployed tunnel_ui_port=$$actual_tunnel_port; reapply with the same base" >&2; exit 1; }
@@ -258,17 +316,45 @@ tunnel: state ## Open IAP tunnels in the background and print the URL
 		--db-remote="$$($(TF) output -raw fleetdb_port)" \
 		--workspace="$$($(TF) output -raw loom_workspace)"
 
-status: ## Container state on the VM
+status: stack-required ## Container state on the VM
 	gcloud compute ssh $(NAME) --project $(PROJECT) --zone $(ZONE) --tunnel-through-iap --quiet \
 		--command 'sudo docker compose -f /opt/loom/docker-compose.yml ps; systemctl is-active loom-stack'
 
-down: state ## Destroy this stack (bucket, HMAC key, secrets, VM, firewall)
-	tunnel_port_base="$$($(TF) output -raw tunnel_ui_port)"
+down: stack-required state ## Destroy this stack and archive this checkout's matching .stack
+	tunnel_port_base="$$($(TF) output -raw tunnel_ui_port 2>/dev/null || printf 18000)"
 	$(TF) destroy -auto-approve -input=false $(TFVARS) \
 		-var tunnel_port_base="$$tunnel_port_base" \
 		-var fleetdb_image=destroy-placeholder \
 		-var loom_image=destroy-placeholder \
 		-var ui_image=destroy-placeholder
+	$(TF) workspace select default >/dev/null
+	$(TF) workspace delete "$(NAME)" >/dev/null
+	if [ -f "$(CURDIR)/.stack" ] && [ "$$(awk -F= '$$1 == "NAME" { print substr($$0, 6); exit }' "$(CURDIR)/.stack")" = "$(NAME)" ]; then
+		mv "$(CURDIR)/.stack" "$(CURDIR)/.stack.last"
+	fi
+
+list: backend ## List live stack VMs and Terraform workspaces without VMs
+	PROJECT="$(PROJECT)" TF_BIN="$(TF_BIN)" TF_ROOT="$(CURDIR)" \
+		TF_STATE_BUCKET="$(TF_STATE_BUCKET)" STACK_FILE="$(CURDIR)/.stack" \
+		$(CURDIR)/scripts/list
+
+reap: backend ## Destroy expired stacks (DRY_RUN=1 previews; REAP_ALL=1 selects all)
+	PROJECT="$(PROJECT)" REGION="$(REGION)" ZONE="$(ZONE)" TF_BIN="$(TF_BIN)" \
+		TF_ROOT="$(CURDIR)" TF_STATE_BUCKET="$(TF_STATE_BUCKET)" MAKE_BIN="$(MAKE)" \
+		SHARED_NETWORK="$(SHARED_NETWORK)" SHARED_SUBNET_CIDR="$(SHARED_SUBNET_CIDR)" \
+		TTL_MINUTES="$(TTL_MINUTES)" AUTO_STOP_MINUTES="$(AUTO_STOP_MINUTES)" \
+		DRY_RUN="$(DRY_RUN)" REAP_ALL="$(REAP_ALL)" $(CURDIR)/scripts/reap
+
+resume: stack-required state ## Start an auto-stopped VM and wait for stack health
+	gcloud compute instances start $(NAME) --project $(PROJECT) --zone $(ZONE) --quiet
+	$(CURDIR)/scripts/wait-healthy $(NAME) $(PROJECT) $(ZONE) \
+		$$($(TF) output -raw api_port) \
+		$$($(TF) output -raw ui_port)
+
+extend: stack-required state ## Re-arm guest auto-stop and extend the stack TTL
+	gcloud compute ssh $(NAME) --project $(PROJECT) --zone $(ZONE) --tunnel-through-iap --quiet \
+		--command 'sudo systemctl restart loom-autostop.timer'
+	$(MAKE) --no-print-directory apply
 
 fmt:
 	$(TF) fmt -recursive

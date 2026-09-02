@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${PROJECT:?PROJECT is required}"
+: "${TF_BIN:?TF_BIN is required}"
+: "${TF_ROOT:?TF_ROOT is required}"
+: "${TF_STATE_BUCKET:?TF_STATE_BUCKET is required}"
+STACK_FILE="${STACK_FILE:-$TF_ROOT/.stack}"
+
+command -v gcloud >/dev/null || { echo "list: gcloud is required" >&2; exit 1; }
+command -v python3 >/dev/null || { echo "list: python3 is required" >&2; exit 1; }
+
+export TF_DATA_DIR="$TF_ROOT/.terraform-data/list"
+"$TF_BIN" -chdir="$TF_ROOT" init -input=false \
+  -backend-config="bucket=$TF_STATE_BUCKET" \
+  -backend-config="prefix=loom-gcp" >/dev/null
+
+# The label filter is mandatory: never enumerate unrelated project VMs.
+VM_JSON="$(gcloud compute instances list --project="$PROJECT" \
+  --filter="labels.loom-stack:*" --format=json)"
+WORKSPACES="$("$TF_BIN" -chdir="$TF_ROOT" workspace list)"
+export VM_JSON WORKSPACES STACK_FILE
+
+python3 <<'PY'
+import datetime
+import json
+import os
+
+
+def stack_name(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for raw in handle:
+                key, separator, value = raw.rstrip("\n").partition("=")
+                if separator and key == "NAME":
+                    return value
+    except OSError:
+        pass
+    return ""
+
+
+def duration(seconds):
+    seconds = max(0, int(seconds))
+    minutes = seconds // 60
+    days, remainder = divmod(minutes, 24 * 60)
+    hours, minutes = divmod(remainder, 60)
+    if days:
+        return f"{days}d{hours:02}h"
+    if hours:
+        return f"{hours}h{minutes:02}m"
+    return f"{minutes}m"
+
+
+def age(created, now):
+    if not created:
+        return "-"
+    try:
+        stamp = datetime.datetime.fromisoformat(created.replace("Z", "+00:00"))
+        return duration(now - stamp.timestamp())
+    except (TypeError, ValueError):
+        return "-"
+
+
+now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+current = stack_name(os.environ["STACK_FILE"])
+instances = json.loads(os.environ.get("VM_JSON") or "[]")
+vm_rows = []
+vm_names = set()
+
+for instance in instances:
+    labels = instance.get("labels") or {}
+    name = labels.get("loom-stack") or instance.get("name") or "-"
+    vm_names.add(name)
+    display_name = name + ("*" if name == current else "")
+    zone = (instance.get("zone") or "-").rsplit("/", 1)[-1]
+    expiry_raw = labels.get("expires-at")
+    try:
+        expiry = int(expiry_raw)
+        expires = "expired" if expiry <= now else duration(expiry - now)
+    except (TypeError, ValueError):
+        expires = "-"
+    vm_rows.append([
+        display_name,
+        instance.get("status") or "-",
+        zone,
+        labels.get("owner") or "-",
+        labels.get("checkout") or "-",
+        age(instance.get("creationTimestamp"), now),
+        expires,
+    ])
+
+workspaces = []
+for raw in os.environ.get("WORKSPACES", "").splitlines():
+    workspace = raw.strip().lstrip("*").strip()
+    if workspace and workspace != "default":
+        workspaces.append(workspace)
+
+state_rows = []
+for name in sorted(set(workspaces) - vm_names):
+    state_rows.append([
+        name + ("*" if name == current else ""),
+        "state only",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+    ])
+
+headers = ["NAME", "STATUS", "ZONE", "OWNER", "CHECKOUT", "AGE", "EXPIRES"]
+vm_rows.sort(key=lambda row: row[0].rstrip("*"))
+rows = vm_rows + state_rows
+widths = [len(header) for header in headers]
+for row in rows:
+    widths = [max(width, len(str(value))) for width, value in zip(widths, row)]
+
+print("  ".join(header.ljust(width) for header, width in zip(headers, widths)).rstrip())
+for row in rows:
+    print("  ".join(str(value).ljust(width) for value, width in zip(row, widths)).rstrip())
+PY
