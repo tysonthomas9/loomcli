@@ -68,6 +68,14 @@ func (stubFleetBackend) UndeferIssue(_ context.Context, _ string) error { return
 func (stubFleetBackend) Close(_ context.Context, _ string, _ backend.CloseParams) (*backend.CloseResult, error) {
 	return nil, errors.New("stub")
 }
+func (stubFleetBackend) Archive(_ context.Context, _ string, _ backend.ArchiveParams) error {
+	return errors.New("stub")
+}
+
+func (stubFleetBackend) Unarchive(_ context.Context, _ string) error {
+	return errors.New("stub")
+}
+
 func (stubFleetBackend) Reopen(_ context.Context, _ string, _ backend.ReopenParams) error {
 	return errors.New("stub")
 }
