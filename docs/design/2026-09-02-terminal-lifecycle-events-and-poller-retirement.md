@@ -190,6 +190,24 @@ rebinding in `useEventProvider.tsx`; and reconciling `BlockedIssue` blocker
 details with the wire type; documenting that the `parent_id` filter is
 direct-parent matching rather than descendant matching.
 
+Live verification of slice 2 (two browser passes on a local-mode stack) found
+three pre-existing transport defects that every later slice inherits and that
+gate the zero-poll cutover:
+
+- `internal/webui/subscription/backend_subscriber.go` re-creates a workspace
+  subscriber with cursor `0` after the idle deactivation in `multi.go`, so the
+  next SSE client triggers a replay of the whole FleetDB mutation stream to
+  every connected client.
+- That backlog overflows the new client's send buffer, and
+  `realtime/hub.go` `broadcastToClients` evicts it; the browser reconnects a
+  second later, so a cold load pays two handshakes (and, for invalidated
+  queries, a third repair fetch).
+- `internal/webui/frontend/src/api/common/sse.ts` `connect()` returns without
+  `scheduleReconnect()` when the token exchange fails (a 502 while the server
+  restarts); the tab never reconnects, `retryNow()` is inert, and the Monitor
+  banner does not reflect it because it follows the agent-status poll. Until
+  this is fixed, the safety poll is the only repair after a server restart.
+
 ### Data-source classes
 
 - **Invalidate and refetch:** tab metadata/count, blocked issues, task session
