@@ -1513,6 +1513,63 @@ describe("IssueDetailPanel", () => {
       expect(screen.getByTestId("panel-approve-button")).not.toBeDisabled();
     });
 
+    // The optimistic status update stamps a fabricated `updated_at` and the
+    // rollback restores the original, so the panel lands back on the
+    // pre-approve revision just after the 409 latches. That revert is not a
+    // new revision and must not re-arm Approve (PUPPET-146).
+    it("keeps the blocked latch when the failed update rolls back", async () => {
+      const original = createTestIssueDetails({
+        title: "Some task",
+        status: "review",
+        updated_at: "2026-01-23T00:00:00Z",
+      });
+      const optimistic = createTestIssueDetails({
+        title: "Some task",
+        status: "in_progress",
+        updated_at: "2026-01-23T00:00:01Z",
+      });
+
+      let rejectApprove: (err: unknown) => void = () => {};
+      const onApprove = vi.fn(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectApprove = reject;
+          }),
+      );
+      const renderPanel = (issue: IssueDetails) => (
+        <IssueDetailPanel
+          isOpen={true}
+          issue={issue}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={vi.fn()}
+        />
+      );
+
+      const { rerender } = render(renderPanel(original));
+
+      fireEvent.click(screen.getByTestId("panel-approve-button"));
+
+      // The optimistic write reaches the panel while the PATCH is in flight,
+      // then the server refuses it.
+      rerender(renderPanel(optimistic));
+      await act(async () => {
+        rejectApprove(
+          new ApiError(409, "Conflict", { error: "issue is not claimable" }),
+        );
+      });
+
+      // The rollback puts the original revision back.
+      rerender(renderPanel(original));
+
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("panel-approve-blocked-reason"),
+        ).toHaveTextContent("issue is not claimable");
+      });
+      expect(screen.getByTestId("panel-approve-button")).toBeDisabled();
+    });
+
     it("clicking Reject button shows the reject comment form", () => {
       const mockIssue = createTestIssueDetails({
         title: "Some task",

@@ -465,10 +465,14 @@ function DefaultContent({
   const [rejectError, setRejectError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   // Latched from a server 409: the issue is not claimable, so approving it will
-  // keep failing until the record changes (PUPPET-146).
-  const [approveBlockedReason, setApproveBlockedReason] = useState<
-    string | null
-  >(null);
+  // keep failing until the record changes (PUPPET-146). The revision the
+  // refusal was issued against is latched alongside it — see the clearing
+  // effect below for why the reason alone is not enough.
+  const [approveBlocked, setApproveBlocked] = useState<{
+    reason: string;
+    revision: string;
+  } | null>(null);
+  const approveBlockedReason = approveBlocked?.reason ?? null;
   const [showMoveDialog, setShowMoveDialog] = useState(false);
   const [moveError, setMoveError] = useState<string | null>(null);
   const [isStartingEpicRun, setIsStartingEpicRun] = useState(false);
@@ -1057,6 +1061,9 @@ function DefaultContent({
   const handleApprove = useCallback(async () => {
     if (!issue || !onApprove || isApproving || approveBlockedReason !== null)
       return;
+    // The revision the server is about to refuse — read before the optimistic
+    // update rewrites it, because that is the revision the rollback restores.
+    const attemptedRevision = `${issue.id}@${issue.updated_at ?? ""}`;
     setIsApproving(true);
     setActionError(null);
     try {
@@ -1068,7 +1075,7 @@ function DefaultContent({
       // A 409 means the server refuses to claim this issue; retrying without a
       // re-fetch can only fail the same way, so latch the reason and disable.
       if (err instanceof ApiError && err.status === 409) {
-        setApproveBlockedReason(message);
+        setApproveBlocked({ reason: message, revision: attemptedRevision });
       }
     }
   }, [issue, onApprove, isApproving, approveBlockedReason]);
@@ -1134,13 +1141,25 @@ function DefaultContent({
     setIsStartingEpicRun(false);
   }, [issue?.id]);
 
+  // Identity plus revision: an SSE update (the agent released its claim, the
+  // status moved) can make the very same issue claimable again.
+  const issueRevision = `${issue?.id ?? ""}@${issue?.updated_at ?? ""}`;
+
   // Clear the latch on any new revision of the record, not just a different
-  // issue: an SSE update (the agent released its claim, the status moved) can
-  // make the very same issue claimable again, and the operator would otherwise
-  // be stuck looking at a disabled Approve button until they navigated away.
+  // issue, or the operator stays stuck looking at a disabled Approve button
+  // until they navigate away.
+  //
+  // Except the revision the refusal itself was issued against. The optimistic
+  // status update stamps a fabricated `updated_at`, and the 409 rollback
+  // restores the original one, so the panel lands back on the pre-approve
+  // revision a beat AFTER the catch above latches the reason. Clearing
+  // unconditionally therefore erased the message it had just set and
+  // re-enabled Approve, which is the whole bug (PUPPET-146).
   useEffect(() => {
-    setApproveBlockedReason(null);
-  }, [issue?.id, issue?.updated_at]);
+    setApproveBlocked((current) =>
+      current && current.revision === issueRevision ? current : null,
+    );
+  }, [issueRevision]);
 
   // Loading state
   if (isLoading) {
