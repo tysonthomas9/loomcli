@@ -831,6 +831,20 @@ describe("issues API", () => {
       );
     });
 
+    it("forwards an abort signal to the blocked request", async () => {
+      mockApiGet.mockResolvedValue(
+        okResponse({ success: true, data: mockBlockedIssues }),
+      );
+      const controller = new AbortController();
+
+      await getBlockedIssues("test-ws-id", {}, { signal: controller.signal });
+
+      expect(mockApiGet).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/blocked",
+        expect.objectContaining({ signal: controller.signal }),
+      );
+    });
+
     it("calls api.GET with /api/workspaces/{ws}/blocked when empty options", async () => {
       mockApiGet.mockResolvedValue(
         okResponse({ success: true, data: mockBlockedIssues }),

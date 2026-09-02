@@ -1,17 +1,23 @@
 /**
  * @vitest-environment jsdom
  */
+
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import React from "react";
 
 import { getBlockedIssues } from "@/api/issues";
+import type { MutationPayload } from "@/types/workspace";
 import type { BlockedIssue } from "@/types";
+import {
+  EventContext,
+  InvalidatedQueryRegistry,
+  InvalidatedQueryRegistryContext,
+  type EventContextValue,
+} from "@/hooks/common";
 
 import { useBlockedIssues } from "../useBlockedIssues";
 
-// Import after mocking
-
-// Mock the getBlockedIssues API function
 vi.mock("@/api/issues", () => ({
   getBlockedIssues: vi.fn(),
 }));
@@ -29,48 +35,60 @@ vi.mock("@/hooks/workspace", async () => {
 
 const mockGetBlockedIssues = vi.mocked(getBlockedIssues);
 
-/**
- * Helper to create a minimal valid BlockedIssue for testing.
- */
-function createBlockedIssue(
-  overrides: Partial<BlockedIssue> = {},
-): BlockedIssue {
+function createBlockedIssue(id = "issue-1"): BlockedIssue {
   return {
-    id: overrides.id ?? "issue-1",
-    title: overrides.title ?? "Test Issue",
-    priority: overrides.priority ?? 2,
-    created_at: overrides.created_at ?? "2024-01-01T00:00:00Z",
-    updated_at: overrides.updated_at ?? "2024-01-01T00:00:00Z",
-    blocked_by_count: overrides.blocked_by_count ?? 1,
-    blocked_by: overrides.blocked_by ?? ["blocker-1"],
-    ...overrides,
+    id,
+    title: `Blocked ${id}`,
+    priority: 2,
+    created_at: "2024-01-01T00:00:00Z",
+    updated_at: "2024-01-01T00:00:00Z",
+    blocked_by_count: 1,
+    blocked_by: ["blocker-1"],
   };
 }
 
-/**
- * Helper to create a set of test blocked issues.
- */
-function createTestBlockedIssues(): BlockedIssue[] {
-  return [
-    createBlockedIssue({
-      id: "issue-1",
-      title: "Blocked Issue 1",
-      blocked_by_count: 2,
-      blocked_by: ["blocker-1", "blocker-2"],
-    }),
-    createBlockedIssue({
-      id: "issue-2",
-      title: "Blocked Issue 2",
-      blocked_by_count: 1,
-      blocked_by: ["blocker-3"],
-    }),
-  ];
+let epoch = 0;
+let state: EventContextValue["state"] = "connected";
+let eventListeners = new Set<(mutation: MutationPayload) => void>();
+let registry = new InvalidatedQueryRegistry();
+
+const subscribe = vi.fn(
+  (callback: (mutation: MutationPayload) => void): (() => void) => {
+    eventListeners.add(callback);
+    return () => eventListeners.delete(callback);
+  },
+);
+
+function Wrapper({ children }: { children: React.ReactNode }): JSX.Element {
+  const context: EventContextValue = {
+    state,
+    reconnectAttempts: 0,
+    lastError: null,
+    isConnected: state === "connected",
+    connectionEpoch: epoch,
+    subscribe,
+    retryNow: vi.fn(),
+    disconnect: vi.fn(),
+  };
+  return React.createElement(
+    InvalidatedQueryRegistryContext.Provider,
+    { value: registry },
+    React.createElement(EventContext.Provider, { value: context }, children),
+  );
 }
 
-/**
- * Helper to flush pending promises when using fake timers.
- */
-async function flushPromises(): Promise<void> {
+function emit(mutation: Partial<MutationPayload>): void {
+  const payload: MutationPayload = {
+    type: "update",
+    timestamp: "2025-01-01T00:00:00Z",
+    ...mutation,
+  };
+  act(() => {
+    for (const listener of eventListeners) listener(payload);
+  });
+}
+
+async function settle(): Promise<void> {
   await act(async () => {
     await Promise.resolve();
   });
@@ -79,652 +97,172 @@ async function flushPromises(): Promise<void> {
 describe("useBlockedIssues", () => {
   beforeEach(() => {
     mockGetBlockedIssues.mockReset();
+    eventListeners = new Set();
+    registry = new InvalidatedQueryRegistry();
+    epoch = 0;
+    state = "connected";
+    subscribe.mockClear();
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
-  describe("Initial state", () => {
-    it("returns expected shape with all properties", async () => {
-      mockGetBlockedIssues.mockResolvedValue([]);
-
-      const { result } = renderHook(() => useBlockedIssues());
-
-      expect(result.current).toHaveProperty("data");
-      expect(result.current).toHaveProperty("loading");
-      expect(result.current).toHaveProperty("error");
-      expect(result.current).toHaveProperty("refetch");
-
-      expect(typeof result.current.refetch).toBe("function");
-
-      // Wait for fetch to complete to avoid act warnings
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false);
-      });
+  it("fetches on mount and forwards the request signal", async () => {
+    mockGetBlockedIssues.mockResolvedValue([]);
+    const { result } = renderHook(() => useBlockedIssues(), {
+      wrapper: Wrapper,
     });
 
-    it("starts with loading=true when enabled", async () => {
-      mockGetBlockedIssues.mockImplementation(
-        () => new Promise(() => {}), // Never resolves
-      );
-
-      const { result } = renderHook(() => useBlockedIssues());
-
-      expect(result.current.loading).toBe(true);
-      expect(result.current.data).toBeNull();
-      expect(result.current.error).toBeNull();
-    });
-
-    it("starts with loading=false when enabled=false", () => {
-      const { result } = renderHook(() => useBlockedIssues({ enabled: false }));
-
-      expect(result.current.loading).toBe(false);
-      expect(result.current.data).toBeNull();
-      expect(result.current.error).toBeNull();
-    });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.data).toEqual([]);
+    expect(mockGetBlockedIssues).toHaveBeenCalledWith(
+      "test-ws-id",
+      {},
+      { signal: expect.any(AbortSignal) },
+    );
   });
 
-  describe("Successful data fetch", () => {
-    it("fetches data on mount", async () => {
-      const testIssues = createTestBlockedIssues();
-      mockGetBlockedIssues.mockResolvedValue(testIssues);
-
-      const { result } = renderHook(() => useBlockedIssues());
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false);
-      });
-
-      expect(result.current.data).toEqual(testIssues);
-      expect(result.current.error).toBeNull();
-      expect(mockGetBlockedIssues).toHaveBeenCalledTimes(1);
-      expect(mockGetBlockedIssues).toHaveBeenCalledWith("test-ws-id", {});
+  it("keeps data on errors and clears the error after success", async () => {
+    const data = [createBlockedIssue()];
+    mockGetBlockedIssues.mockResolvedValueOnce(data);
+    const { result } = renderHook(() => useBlockedIssues(), {
+      wrapper: Wrapper,
     });
+    await waitFor(() => expect(result.current.data).toEqual(data));
 
-    it("sets loading to false after successful fetch", async () => {
-      mockGetBlockedIssues.mockResolvedValue([]);
+    mockGetBlockedIssues.mockRejectedValueOnce(new Error("network"));
+    await act(async () => result.current.refetch());
+    expect(result.current.data).toEqual(data);
+    expect(result.current.error).toEqual(new Error("network"));
 
-      const { result } = renderHook(() => useBlockedIssues());
-
-      expect(result.current.loading).toBe(true);
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false);
-      });
-
-      expect(result.current.data).toEqual([]);
-    });
-
-    it("clears error on successful fetch", async () => {
-      // First call fails
-      mockGetBlockedIssues.mockRejectedValueOnce(new Error("Network error"));
-
-      const { result } = renderHook(() => useBlockedIssues());
-
-      await waitFor(() => {
-        expect(result.current.error).not.toBeNull();
-      });
-
-      // Second call succeeds
-      mockGetBlockedIssues.mockResolvedValue([]);
-
-      await act(async () => {
-        await result.current.refetch();
-      });
-
-      expect(result.current.error).toBeNull();
-    });
+    mockGetBlockedIssues.mockResolvedValueOnce([]);
+    await act(async () => result.current.refetch());
+    expect(result.current.error).toBeNull();
+    expect(result.current.data).toEqual([]);
   });
 
-  describe("Error handling", () => {
-    it("sets error on fetch failure", async () => {
-      const testError = new Error("Network error");
-      mockGetBlockedIssues.mockRejectedValue(testError);
+  it("passes filters and refetches when the key changes", async () => {
+    mockGetBlockedIssues.mockResolvedValue([]);
+    const { result, rerender } = renderHook(
+      ({ parentId }: { parentId?: string }) => useBlockedIssues({ parentId }),
+      { initialProps: { parentId: "epic-1" }, wrapper: Wrapper },
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(mockGetBlockedIssues).toHaveBeenCalledWith(
+      "test-ws-id",
+      { parent_id: "epic-1" },
+      { signal: expect.any(AbortSignal) },
+    );
 
-      const { result } = renderHook(() => useBlockedIssues());
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false);
-      });
-
-      expect(result.current.error).toEqual(testError);
-      expect(result.current.data).toBeNull();
-    });
-
-    it("converts non-Error thrown values to Error", async () => {
-      mockGetBlockedIssues.mockRejectedValue("string error");
-
-      const { result } = renderHook(() => useBlockedIssues());
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false);
-      });
-
-      expect(result.current.error).toBeInstanceOf(Error);
-      expect(result.current.error?.message).toBe("string error");
-    });
-
-    it("keeps stale data on error", async () => {
-      const testIssues = createTestBlockedIssues();
-      mockGetBlockedIssues.mockResolvedValueOnce(testIssues);
-
-      const { result } = renderHook(() => useBlockedIssues());
-
-      await waitFor(() => {
-        expect(result.current.data).toEqual(testIssues);
-      });
-
-      // Now fail on refetch
-      mockGetBlockedIssues.mockRejectedValueOnce(new Error("Network error"));
-
-      await act(async () => {
-        await result.current.refetch();
-      });
-
-      // Data should still be there
-      expect(result.current.data).toEqual(testIssues);
-      expect(result.current.error).not.toBeNull();
-    });
+    rerender({ parentId: "epic-2" });
+    await waitFor(() =>
+      expect(mockGetBlockedIssues).toHaveBeenLastCalledWith(
+        "test-ws-id",
+        { parent_id: "epic-2" },
+        { signal: expect.any(AbortSignal) },
+      ),
+    );
   });
 
-  describe("Refetch functionality", () => {
-    it("refetch() triggers new fetch", async () => {
-      mockGetBlockedIssues.mockResolvedValue([]);
+  it("shares one mount request and one debounced event fetch", async () => {
+    mockGetBlockedIssues.mockResolvedValue([]);
+    const first = renderHook(() => useBlockedIssues(), { wrapper: Wrapper });
+    const second = renderHook(() => useBlockedIssues(), { wrapper: Wrapper });
+    await waitFor(() => expect(first.result.current.loading).toBe(false));
+    expect(mockGetBlockedIssues).toHaveBeenCalledTimes(1);
 
-      const { result } = renderHook(() => useBlockedIssues());
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false);
-      });
-
-      expect(mockGetBlockedIssues).toHaveBeenCalledTimes(1);
-
-      await act(async () => {
-        await result.current.refetch();
-      });
-
-      expect(mockGetBlockedIssues).toHaveBeenCalledTimes(2);
+    emit({ entity_type: "issue", action: "issue.update" });
+    emit({ entity_type: "dependency", action: "dep.add" });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 250));
     });
-
-    it("refetch() updates data with new values", async () => {
-      const initialIssues = [createBlockedIssue({ id: "issue-1" })];
-      const updatedIssues = [
-        createBlockedIssue({ id: "issue-1" }),
-        createBlockedIssue({ id: "issue-2" }),
-      ];
-
-      mockGetBlockedIssues.mockResolvedValueOnce(initialIssues);
-
-      const { result } = renderHook(() => useBlockedIssues());
-
-      await waitFor(() => {
-        expect(result.current.data).toEqual(initialIssues);
-      });
-
-      mockGetBlockedIssues.mockResolvedValueOnce(updatedIssues);
-
-      await act(async () => {
-        await result.current.refetch();
-      });
-
-      expect(result.current.data).toEqual(updatedIssues);
-    });
-
-    it("refetch is stable across renders", async () => {
-      mockGetBlockedIssues.mockResolvedValue([]);
-
-      const { result, rerender } = renderHook(() => useBlockedIssues());
-
-      const initialRefetch = result.current.refetch;
-
-      rerender();
-
-      expect(result.current.refetch).toBe(initialRefetch);
-
-      // Wait for fetch to complete
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false);
-      });
-    });
+    expect(mockGetBlockedIssues).toHaveBeenCalledTimes(2);
+    expect(second.result.current.data).toEqual([]);
   });
 
-  describe("Polling behavior", () => {
-    beforeEach(() => {
-      vi.useFakeTimers();
-    });
+  it("uses entity_type precedence and ignores legacy dep", async () => {
+    vi.useFakeTimers();
+    mockGetBlockedIssues.mockResolvedValue([]);
+    renderHook(() => useBlockedIssues(), { wrapper: Wrapper });
+    await settle();
+    mockGetBlockedIssues.mockClear();
 
-    afterEach(() => {
-      vi.useRealTimers();
-    });
-
-    it("polls at specified interval", async () => {
-      mockGetBlockedIssues.mockResolvedValue([]);
-
-      renderHook(() => useBlockedIssues({ pollInterval: 5000 }));
-
-      // Initial fetch
-      expect(mockGetBlockedIssues).toHaveBeenCalledTimes(1);
-
-      // Flush initial promise
-      await flushPromises();
-
-      // Advance time by pollInterval
-      await act(async () => {
-        vi.advanceTimersByTime(5000);
-      });
-      await flushPromises();
-
-      expect(mockGetBlockedIssues).toHaveBeenCalledTimes(2);
-
-      // Advance again
-      await act(async () => {
-        vi.advanceTimersByTime(5000);
-      });
-      await flushPromises();
-
-      expect(mockGetBlockedIssues).toHaveBeenCalledTimes(3);
-    });
-
-    it("does not poll when pollInterval is not set", async () => {
-      mockGetBlockedIssues.mockResolvedValue([]);
-
-      renderHook(() => useBlockedIssues());
-
-      expect(mockGetBlockedIssues).toHaveBeenCalledTimes(1);
-      await flushPromises();
-
-      // Advance time significantly
-      await act(async () => {
-        vi.advanceTimersByTime(30000);
-      });
-      await flushPromises();
-
-      // Should still be just 1 call
-      expect(mockGetBlockedIssues).toHaveBeenCalledTimes(1);
-    });
-
-    it("does not poll when pollInterval is 0", async () => {
-      mockGetBlockedIssues.mockResolvedValue([]);
-
-      renderHook(() => useBlockedIssues({ pollInterval: 0 }));
-
-      expect(mockGetBlockedIssues).toHaveBeenCalledTimes(1);
-      await flushPromises();
-
-      await act(async () => {
-        vi.advanceTimersByTime(10000);
-      });
-      await flushPromises();
-
-      expect(mockGetBlockedIssues).toHaveBeenCalledTimes(1);
-    });
-
-    it("does not poll when enabled=false", async () => {
-      mockGetBlockedIssues.mockResolvedValue([]);
-
-      renderHook(() =>
-        useBlockedIssues({
-          pollInterval: 1000,
-          enabled: false,
-        }),
-      );
-
-      // No initial fetch
-      expect(mockGetBlockedIssues).toHaveBeenCalledTimes(0);
-
-      // Advance time
-      await act(async () => {
-        vi.advanceTimersByTime(5000);
-      });
-      await flushPromises();
-
-      // Still no fetch
-      expect(mockGetBlockedIssues).toHaveBeenCalledTimes(0);
-    });
-
-    it("prevents overlapping poll requests", async () => {
-      let resolveFirst: (value: BlockedIssue[]) => void;
-      const firstPromise = new Promise<BlockedIssue[]>((resolve) => {
-        resolveFirst = resolve;
-      });
-      mockGetBlockedIssues.mockReturnValueOnce(firstPromise);
-      mockGetBlockedIssues.mockResolvedValue([]);
-
-      renderHook(() => useBlockedIssues({ pollInterval: 1000 }));
-
-      // Initial fetch starts
-      expect(mockGetBlockedIssues).toHaveBeenCalledTimes(1);
-
-      // Advance time - poll should trigger but be skipped since fetch in progress
-      await act(async () => {
-        vi.advanceTimersByTime(1000);
-      });
-
-      // Still just 1 call because fetch is in progress
-      expect(mockGetBlockedIssues).toHaveBeenCalledTimes(1);
-
-      // Resolve the first fetch
-      await act(async () => {
-        resolveFirst!([]);
-      });
-
-      // Advance to next poll
-      await act(async () => {
-        vi.advanceTimersByTime(1000);
-      });
-      await flushPromises();
-
-      // Now second fetch should happen
-      expect(mockGetBlockedIssues).toHaveBeenCalledTimes(2);
-    });
+    emit({ type: "refresh", entity_type: "agent", action: "agent.refresh" });
+    emit({ type: "refresh", entity_type: "" });
+    emit({ type: "update", entity_type: "dep", action: "dep.add" });
+    vi.advanceTimersByTime(200);
+    await settle();
+    expect(mockGetBlockedIssues).toHaveBeenCalledTimes(1);
   });
 
-  describe("parentId filtering", () => {
-    it("passes parentId to API as parent_id", async () => {
-      mockGetBlockedIssues.mockResolvedValue([]);
+  it("does not fetch while disabled, but disabled refetch still uses the entry", async () => {
+    mockGetBlockedIssues.mockResolvedValue([]);
+    const { result, rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) => useBlockedIssues({ enabled }),
+      { initialProps: { enabled: false }, wrapper: Wrapper },
+    );
+    expect(mockGetBlockedIssues).not.toHaveBeenCalled();
 
-      const { result } = renderHook(() =>
-        useBlockedIssues({ parentId: "epic-123" }),
-      );
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false);
-      });
-
-      expect(mockGetBlockedIssues).toHaveBeenCalledWith("test-ws-id", {
-        parent_id: "epic-123",
-      });
-    });
-
-    it("omits parent_id when parentId is undefined", async () => {
-      mockGetBlockedIssues.mockResolvedValue([]);
-
-      const { result } = renderHook(() => useBlockedIssues());
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false);
-      });
-
-      expect(mockGetBlockedIssues).toHaveBeenCalledWith("test-ws-id", {});
-    });
-
-    it("refetches when parentId changes", async () => {
-      mockGetBlockedIssues.mockResolvedValue([]);
-
-      const { result, rerender } = renderHook(
-        ({ parentId }) => useBlockedIssues({ parentId }),
-        {
-          initialProps: { parentId: "epic-1" },
-        },
-      );
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false);
-      });
-
-      expect(mockGetBlockedIssues).toHaveBeenCalledWith("test-ws-id", {
-        parent_id: "epic-1",
-      });
-
-      rerender({ parentId: "epic-2" });
-
-      await waitFor(() => {
-        expect(mockGetBlockedIssues).toHaveBeenCalledWith("test-ws-id", {
-          parent_id: "epic-2",
-        });
-      });
-    });
+    await act(async () => result.current.refetch());
+    expect(mockGetBlockedIssues).toHaveBeenCalledTimes(1);
+    rerender({ enabled: true });
+    await waitFor(() => expect(mockGetBlockedIssues).toHaveBeenCalledTimes(2));
   });
 
-  describe("enabled option", () => {
-    it("does not fetch when enabled=false", () => {
-      mockGetBlockedIssues.mockResolvedValue([]);
-
-      renderHook(() => useBlockedIssues({ enabled: false }));
-
-      expect(mockGetBlockedIssues).not.toHaveBeenCalled();
+  it("refetches once on a completed connection epoch", async () => {
+    vi.useFakeTimers();
+    mockGetBlockedIssues.mockResolvedValue([]);
+    const { rerender } = renderHook(() => useBlockedIssues(), {
+      wrapper: Wrapper,
     });
+    await settle();
+    expect(mockGetBlockedIssues).toHaveBeenCalledTimes(1);
 
-    it("fetches when enabled changes from false to true", async () => {
-      mockGetBlockedIssues.mockResolvedValue([]);
-
-      const { result, rerender } = renderHook(
-        ({ enabled }) => useBlockedIssues({ enabled }),
-        {
-          initialProps: { enabled: false },
-        },
-      );
-
-      expect(mockGetBlockedIssues).not.toHaveBeenCalled();
-
-      rerender({ enabled: true });
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false);
-      });
-
-      expect(mockGetBlockedIssues).toHaveBeenCalledTimes(1);
-    });
-
-    it("stops polling when enabled changes to false", async () => {
-      vi.useFakeTimers();
-
-      mockGetBlockedIssues.mockResolvedValue([]);
-
-      const { rerender } = renderHook(
-        ({ enabled }) =>
-          useBlockedIssues({
-            enabled,
-            pollInterval: 1000,
-          }),
-        { initialProps: { enabled: true } },
-      );
-
-      expect(mockGetBlockedIssues).toHaveBeenCalledTimes(1);
-      await flushPromises();
-
-      // Disable
-      rerender({ enabled: false });
-
-      // Advance time
-      await act(async () => {
-        vi.advanceTimersByTime(5000);
-      });
-      await flushPromises();
-
-      // No more calls after disable
-      expect(mockGetBlockedIssues).toHaveBeenCalledTimes(1);
-
-      vi.useRealTimers();
-    });
-
-    it("defaults enabled to true", async () => {
-      mockGetBlockedIssues.mockResolvedValue([]);
-
-      const { result } = renderHook(() => useBlockedIssues());
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false);
-      });
-
-      expect(mockGetBlockedIssues).toHaveBeenCalledTimes(1);
-    });
+    epoch = 1;
+    rerender();
+    vi.advanceTimersByTime(200);
+    await settle();
+    expect(mockGetBlockedIssues).toHaveBeenCalledTimes(2);
   });
 
-  describe("Cleanup on unmount", () => {
-    it("clears polling interval on unmount", async () => {
-      vi.useFakeTimers();
+  it("does one immediate repair fetch when the document becomes visible", async () => {
+    vi.useFakeTimers();
+    mockGetBlockedIssues.mockResolvedValue([]);
+    renderHook(() => useBlockedIssues(), { wrapper: Wrapper });
+    await settle();
+    mockGetBlockedIssues.mockClear();
 
-      mockGetBlockedIssues.mockResolvedValue([]);
+    Object.defineProperty(document, "visibilityState", { value: "hidden" });
+    emit({ entity_type: "issue", action: "issue.update" });
+    vi.advanceTimersByTime(250);
+    await settle();
+    expect(mockGetBlockedIssues).not.toHaveBeenCalled();
 
-      const { unmount } = renderHook(() =>
-        useBlockedIssues({ pollInterval: 1000 }),
-      );
-
-      expect(mockGetBlockedIssues).toHaveBeenCalledTimes(1);
-      await flushPromises();
-
-      unmount();
-
-      // Advance time after unmount
-      await act(async () => {
-        vi.advanceTimersByTime(5000);
-      });
-      await flushPromises();
-
-      // No additional calls
-      expect(mockGetBlockedIssues).toHaveBeenCalledTimes(1);
-
-      vi.useRealTimers();
-    });
-
-    it("does not update state after unmount", async () => {
-      let resolvePromise: (value: BlockedIssue[]) => void;
-      const slowPromise = new Promise<BlockedIssue[]>((resolve) => {
-        resolvePromise = resolve;
-      });
-      mockGetBlockedIssues.mockReturnValue(slowPromise);
-
-      const { result, unmount } = renderHook(() => useBlockedIssues());
-
-      expect(result.current.loading).toBe(true);
-
-      // Unmount while fetch is in progress
-      unmount();
-
-      // Resolve the promise after unmount
-      await act(async () => {
-        resolvePromise!([createBlockedIssue()]);
-      });
-
-      // No errors should occur (React would warn about state update on unmounted component)
-    });
-
-    it("sets mountedRef to false on unmount", async () => {
-      mockGetBlockedIssues.mockResolvedValue([]);
-
-      const { result, unmount } = renderHook(() => useBlockedIssues());
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false);
-      });
-
-      unmount();
-
-      // This verifies that the cleanup ran by checking no additional effects happen
-      // The actual mountedRef is internal, so we test behavior instead
-    });
+    Object.defineProperty(document, "visibilityState", { value: "visible" });
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    await settle();
+    expect(mockGetBlockedIssues).toHaveBeenCalledTimes(1);
   });
 
-  describe("Hook reactivity", () => {
-    it("updates when options change", async () => {
-      mockGetBlockedIssues.mockResolvedValue([]);
-
-      const { result, rerender } = renderHook(
-        ({ parentId }) => useBlockedIssues({ parentId }),
-        {
-          initialProps: { parentId: undefined as string | undefined },
-        },
-      );
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false);
-      });
-
-      expect(mockGetBlockedIssues).toHaveBeenCalledWith("test-ws-id", {});
-
-      rerender({ parentId: "new-parent" });
-
-      await waitFor(() => {
-        expect(mockGetBlockedIssues).toHaveBeenCalledWith("test-ws-id", {
-          parent_id: "new-parent",
-        });
-      });
+  it("silently ignores AbortError and aborts an in-flight request on unmount", async () => {
+    let rejectRequest: (error: unknown) => void = () => {};
+    mockGetBlockedIssues.mockReturnValue(
+      new Promise<BlockedIssue[]>((_, reject) => {
+        rejectRequest = reject;
+      }),
+    );
+    const { result, unmount } = renderHook(() => useBlockedIssues(), {
+      wrapper: Wrapper,
     });
-  });
-
-  describe("Interval stacking prevention", () => {
-    beforeEach(() => {
-      vi.useFakeTimers();
-    });
-
-    afterEach(() => {
-      vi.useRealTimers();
-    });
-
-    it("does not stack intervals when parentId changes rapidly", async () => {
-      mockGetBlockedIssues.mockResolvedValue([]);
-
-      const { rerender } = renderHook(
-        ({ parentId }) =>
-          useBlockedIssues({
-            parentId,
-            pollInterval: 5000,
-          }),
-        { initialProps: { parentId: "epic-1" } },
-      );
-
-      await flushPromises();
-
-      // Change parentId multiple times rapidly
-      rerender({ parentId: "epic-2" });
-      await flushPromises();
-      rerender({ parentId: "epic-3" });
-      await flushPromises();
-
-      // Reset call count to only measure poll calls
-      mockGetBlockedIssues.mockClear();
-
-      // Advance one poll interval - should only get ONE poll call (not 3 stacked intervals)
-      await act(async () => {
-        vi.advanceTimersByTime(5000);
-      });
-      await flushPromises();
-
-      expect(mockGetBlockedIssues).toHaveBeenCalledTimes(1);
-      expect(mockGetBlockedIssues).toHaveBeenCalledWith("test-ws-id", {
-        parent_id: "epic-3",
-      });
-    });
-  });
-
-  describe("Edge cases", () => {
-    it("handles empty response array", async () => {
-      mockGetBlockedIssues.mockResolvedValue([]);
-
-      const { result } = renderHook(() => useBlockedIssues());
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false);
-      });
-
-      expect(result.current.data).toEqual([]);
-      expect(result.current.error).toBeNull();
-    });
-
-    it("handles undefined options", async () => {
-      mockGetBlockedIssues.mockResolvedValue([]);
-
-      const { result } = renderHook(() => useBlockedIssues(undefined));
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false);
-      });
-
-      expect(mockGetBlockedIssues).toHaveBeenCalledWith("test-ws-id", {});
-    });
-
-    it("handles empty options object", async () => {
-      mockGetBlockedIssues.mockResolvedValue([]);
-
-      const { result } = renderHook(() => useBlockedIssues());
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false);
-      });
-
-      expect(mockGetBlockedIssues).toHaveBeenCalledWith("test-ws-id", {});
-    });
+    const refetchPromise = act(async () => result.current.refetch());
+    unmount();
+    rejectRequest(new DOMException("aborted", "AbortError"));
+    await refetchPromise;
+    expect(result.current.error).toBeNull();
   });
 });
