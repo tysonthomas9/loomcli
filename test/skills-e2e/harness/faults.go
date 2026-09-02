@@ -20,6 +20,9 @@ import (
 type ResponseDrop struct {
 	t         *testing.T
 	activated atomic.Bool
+	mu        sync.Mutex
+	paths     []string
+	statuses  []int
 }
 
 type CorruptDownload struct {
@@ -127,7 +130,7 @@ func (t *SkillCASTrace) RequireSingleDescriptionAndPointerCAS(expectedPrior, des
 }
 
 // DropNextTreePublicationResponse routes the next Loom command through a real
-// forwarding proxy and drops its successful POST /file-trees response.
+// forwarding proxy and drops its successful upload-session publication response.
 func (e *Environment) DropNextTreePublicationResponse() *ResponseDrop {
 	e.t.Helper()
 	upstream, err := url.Parse(requireEnv(e.t, "LOOM_FLEET_DB_URL"))
@@ -143,7 +146,10 @@ func (e *Environment) DropNextTreePublicationResponse() *ResponseDrop {
 		}
 		defer response.Body.Close()
 
-		isTreePublish := request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/file-trees")
+		isTreePublish := request.Method == http.MethodPost && strings.Contains(request.URL.Path, "/file-tree-uploads/") && strings.HasSuffix(request.URL.Path, "/publish")
+		if isTreePublish && response.StatusCode >= 200 && response.StatusCode < 300 {
+			fault.record(request.URL.Path, response.StatusCode)
+		}
 		if isTreePublish && response.StatusCode >= 200 && response.StatusCode < 300 && fault.activated.CompareAndSwap(false, true) {
 			_, _ = io.Copy(io.Discard, response.Body)
 			hijacker, ok := w.(http.Hijacker)
@@ -174,6 +180,28 @@ func (f *ResponseDrop) RequireActivated() {
 	f.t.Helper()
 	if !f.activated.Load() {
 		f.t.Fatal("tree-publication response-drop proxy did not activate")
+	}
+}
+
+func (f *ResponseDrop) record(path string, status int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.paths = append(f.paths, path)
+	f.statuses = append(f.statuses, status)
+}
+
+// RequireSingleCreationReplay proves one public import retried the identical
+// session publication and Fleet replayed it without a second durable create.
+func (f *ResponseDrop) RequireSingleCreationReplay() {
+	f.t.Helper()
+	f.RequireActivated()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.paths) != 2 || f.paths[0] != f.paths[1] {
+		f.t.Fatalf("tree publication paths = %v, want exactly two identical session paths", f.paths)
+	}
+	if f.statuses[0] != http.StatusCreated || f.statuses[1] != http.StatusOK {
+		f.t.Fatalf("tree publication statuses = %v, want [201 200] for one create and one replay", f.statuses)
 	}
 }
 

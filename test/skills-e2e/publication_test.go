@@ -43,10 +43,8 @@ func TestLostPublicationResponseCanBeRetried(t *testing.T) {
 	source := loom.SkillFixture("lost-response/current")
 
 	dropped := loom.DropNextTreePublicationResponse()
-	loom.SkillImportFails(source)
-	dropped.RequireActivated()
-
 	loom.SkillImport(source)
+	dropped.RequireSingleCreationReplay()
 	selected := loom.SkillShow("lost-response")
 	materialized := loom.SkillMaterialize()
 	materialized.RequireExactTree(source, selected.Name)
