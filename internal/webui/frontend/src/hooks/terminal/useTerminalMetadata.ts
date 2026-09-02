@@ -125,6 +125,13 @@ export function useTerminalMetadata(
       return;
     }
     const requested = workspace;
+    if (requestedWorkspaceRef.current !== requested) {
+      // This closure belongs to a workspace the hook has since moved off (e.g.
+      // the `refetch` a late 409 reaches for). Touching `isFetching`/`error`
+      // here would strand the current workspace in the loading skeleton,
+      // because only the matching workspace's fetch resets them again.
+      return;
+    }
     setIsFetching(true);
     setError(null);
     try {

@@ -735,6 +735,57 @@ describe("useTerminalMetadata", () => {
       expect(result.current.tabs).toEqual([]);
     });
 
+    it("does not strand the new workspace loading when a stale PUT 409s", async () => {
+      mockList.mockResolvedValueOnce([
+        createMockTab({ session_name: "a-1", label: "WS1" }),
+      ]);
+
+      const { result, rerender } = renderHook(
+        ({ ws }: { ws: string }) => useTerminalMetadata(ws),
+        { initialProps: { ws: "ws1" } },
+      );
+      await flushPromises();
+      expect(result.current.tabs[0].label).toBe("WS1");
+
+      // A PUT for ws1 still on the wire when the workspace switches.
+      let rejectPut: (err: unknown) => void = () => {};
+      mockPut.mockImplementationOnce(
+        () =>
+          new Promise<TabMetadata>((_resolve, reject) => {
+            rejectPut = reject;
+          }),
+      );
+      let creating: Promise<void> = Promise.resolve();
+      act(() => {
+        creating = result.current.createTab("a-2", "New Tab", 1);
+      });
+
+      // Switch to ws2 and let its list land.
+      mockList.mockResolvedValueOnce([
+        createMockTab({ session_name: "b-1", label: "WS2" }),
+      ]);
+      rerender({ ws: "ws2" });
+      await flushPromises();
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.tabs[0].label).toBe("WS2");
+
+      const listCalls = mockList.mock.calls.length;
+
+      // Only now does the ws1 PUT come back 409. Its reconciling refetch is
+      // for ws1 — running it would flip isFetching for ws2 and never reset it,
+      // pinning the view on the loading skeleton.
+      await act(async () => {
+        rejectPut(new ApiError(409, "Conflict"));
+        await creating;
+      });
+
+      expect(mockList).toHaveBeenCalledTimes(listCalls);
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.error).toBeNull();
+      expect(result.current.tabs).toHaveLength(1);
+      expect(result.current.tabs[0].label).toBe("WS2");
+    });
+
     it("reports not-loading with empty tabs while disabled", async () => {
       const { result } = renderHook(() =>
         useTerminalMetadata("ws1", { enabled: false }),
