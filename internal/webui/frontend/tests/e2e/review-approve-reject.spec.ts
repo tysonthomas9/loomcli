@@ -708,13 +708,18 @@ test.describe("E2E Journey: Review and approve/reject agent plan", () => {
     await expect(status).toHaveValue("blocked");
     await expect(page.getByTestId("detail-approve-button")).toBeVisible();
 
-    await page.getByTestId("detail-approve-button").click();
-
-    await page.waitForResponse(
+    // Arm the wait BEFORE the click. `route.fulfill` answers the PATCH from
+    // the test process, so the response can land before a post-click
+    // `waitForResponse` has subscribed — and that listener never sees it.
+    const patchResponse = page.waitForResponse(
       (res) =>
         res.url().includes("/issues/blocked-help-001") &&
         res.request().method() === "PATCH",
     );
+
+    await page.getByTestId("detail-approve-button").click();
+
+    await patchResponse;
 
     // The server's own message, verbatim.
     await expect(
