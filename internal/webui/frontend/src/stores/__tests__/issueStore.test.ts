@@ -1379,6 +1379,29 @@ describe("issueStore", () => {
       expect(toastFn).toHaveBeenCalledWith("API Error", { type: "error" });
     });
 
+    // PUPPET-146: the caller that renders the rejection itself opts out, so
+    // one failure does not stack two identical toasts. The rollback and the
+    // re-throw are unaffected.
+    it("skips the rollback toast when toastOnRollback is false", async () => {
+      const toastFn = vi.fn();
+      store.getState().configure({ onToast: toastFn });
+
+      const issue = makeIssue({ id: "a", status: "open" });
+      store.setState({ issuesMap: new Map([["a", issue]]) });
+      mockUpdateIssue.mockRejectedValue(new Error("API Error"));
+
+      await expect(
+        store.getState().updateIssueStatus("a", "in_progress", "ws1", {
+          toastOnRollback: false,
+        }),
+      ).rejects.toThrow("API Error");
+
+      const s = store.getState();
+      expect(s.issuesMap.get("a")!.status).toBe("open");
+      expect(s.pendingIds.size).toBe(0);
+      expect(toastFn).not.toHaveBeenCalled();
+    });
+
     // PUPPET-146: the whole detail-view bug rests on this. The optimistic
     // issue carries a FABRICATED fresh `updated_at`, and the rollback restores
     // the snapshot's ORIGINAL one — which reads as "stale" to any consumer

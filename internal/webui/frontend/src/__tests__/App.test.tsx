@@ -3451,6 +3451,8 @@ describe("App", () => {
           "help-issue",
           "in_progress",
           "test-ws-id",
+          // The caller renders the rejection itself (PUPPET-146).
+          { toastOnRollback: false },
         );
       });
 
@@ -3625,7 +3627,10 @@ describe("App", () => {
       });
     });
 
-    it("approve shows error toast on failure for code review type", async () => {
+    // PUPPET-146: App re-throws instead of toasting. The detail view's own
+    // ErrorToast is the single surface — App toasting as well stacked two
+    // identical toasts in the same corner for one failure.
+    it("code approve failure surfaces once, on the detail view", async () => {
       const mockCloseIssueFn = mockCloseIssue.mockRejectedValue(
         new Error("Network error"),
       );
@@ -3664,18 +3669,22 @@ describe("App", () => {
       fireEvent.click(approveButton);
 
       await waitFor(() => {
-        expect(showToast).toHaveBeenCalledWith("Network error", {
-          type: "error",
-        });
+        expect(screen.getByTestId("action-error-toast")).toHaveTextContent(
+          "Network error",
+        );
+      });
+      expect(showToast).not.toHaveBeenCalledWith("Network error", {
+        type: "error",
       });
       mockCloseIssueFn.mockReset();
     });
 
-    // PUPPET-146: the "help" branch delegates its toast to the store's
-    // rollback, but it used to SWALLOW the error too — so the promise
+    // PUPPET-146: the "help" branch used to SWALLOW the error — so the promise
     // handleApprove returns resolved on failure, the caller's catch never
     // ran, and the detail view stayed silent with its Approve button stuck
-    // on the "..." spinner. The re-throw is what makes both observable.
+    // on the "..." spinner. The re-throw is what makes both observable, and
+    // the store's own rollback toast is opted out of so the message appears
+    // exactly once.
     it("help approve re-throws so the detail view surfaces the failure", async () => {
       const updateIssueStatus = vi
         .fn()
@@ -3715,13 +3724,20 @@ describe("App", () => {
       expect(screen.getByTestId("detail-approve-button")).not.toHaveTextContent(
         "...",
       );
+      expect(updateIssueStatus).toHaveBeenCalledWith(
+        "help-issue",
+        "in_progress",
+        expect.anything(),
+        { toastOnRollback: false },
+      );
     });
 
     // Plan approve no longer goes through the optimistic path (it has to carry
-    // a label delta), so nothing rolls back or surfaces the error for it.
-    // Without a toast a failed approve is indistinguishable from a successful
-    // one — and the issue silently stays in review carrying needs-revision.
-    it("approve shows error toast on failure for plan review type", async () => {
+    // a label delta), so nothing in the store rolls back or reports for it.
+    // The failure has to reach the detail view, or a failed approve is
+    // indistinguishable from a successful one — and the issue silently stays
+    // in review carrying needs-revision.
+    it("plan approve failure surfaces once, on the detail view", async () => {
       mockUpdateIssue.mockRejectedValueOnce(new Error("Network error"));
       const updateIssueStatus = vi.fn();
       const showToast = vi.fn();
@@ -3766,9 +3782,12 @@ describe("App", () => {
 
       // The failure must surface: nothing else reports it for this branch.
       await waitFor(() => {
-        expect(showToast).toHaveBeenCalledWith("Network error", {
-          type: "error",
-        });
+        expect(screen.getByTestId("action-error-toast")).toHaveTextContent(
+          "Network error",
+        );
+      });
+      expect(showToast).not.toHaveBeenCalledWith("Network error", {
+        type: "error",
       });
       expect(updateIssueStatus).not.toHaveBeenCalled();
     });
