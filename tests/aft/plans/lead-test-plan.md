@@ -260,7 +260,7 @@ matching observation on `/ws/:id/terminal`.
      `cli.InvokeAgent` (`harness_lead_runtime.go:14-26`, `lead.go:140-142`)
    - `codex` → `leadcontrol.RunCodexLeadRuntime`
      (`internal/leadcontrol/codex_runtime.go:42-88`): spawns
-     `codex app-server --listen ws://127.0.0.1:{port} -c sqlite_home=...`
+     `codex app-server --listen ws://127.0.0.1:{port}`
      (`codex_runtime.go:121`), waits up to 60s for a websocket probe
      (`codex_runtime.go:22`, `:235-262`), then runs the remote TUI
      `codex --remote {endpoint} --no-alt-screen --dangerously-bypass-approvals-and-sandbox -C {workdir} {prompt}`
@@ -629,11 +629,10 @@ with the stubs today — the banner lands before any backend is invoked.
 Prompt-resolution evidence lives in LED-D1's role readback (empty
 `prompt`/`prompt_file` ⇒ the embedded `prompts/lead.md` is what `loom lead` will load)
 and, end to end, in the real tier.
-*Caveat:* with the stub `codex`, the app-server probe fails immediately
-(the stub ignores `app-server` and exits 0 → `waitForCodexAppServer` returns
-"codex app-server exited before ready", `codex_runtime.go:245-250`), so the terminal
-then shows `Error running agent:` + `Dropping into a shell.` and drops to a shell.
-Assert only up to the banner and the metadata readbacks.
+*Caveat:* the deterministic Codex stub now completes bootstrap and holds a connected remote
+process open, but it does not create a thread or execute lead-session behavior. Keep this case's
+assertions limited to the banner and launch metadata; the later controlled-runtime behavior
+remains outside LED-D8's contract.
 
 ---
 
@@ -1272,8 +1271,9 @@ chained bounded `run:` polls (≤120s each, per
 contain `Error running agent`; `/monitor/status` reports a non-empty
 `orchestrator_session_id`. Reaching the "Launching controlled…" line is itself
 meaningful: it prints only *after* `waitForCodexAppServer` succeeded
-(`codex_runtime.go:64-78` → `:143-144`), so it proves the app-server came up — which is
-exactly what the stub cannot do.
+(`codex_runtime.go:64-78` → `:143-144`), so it proves the app-server came up. The real tier is
+still required here because the deterministic stub proves only bootstrap and connection, not a
+real Codex TUI or provider behavior.
 *Assertions (blocked on B5):* `lead_runtime_provider == "codex"`,
 `lead_runtime_controlled == "true"`, `codex_app_server_endpoint` matching
 `^ws://127\.0\.0\.1:\d+$`, `lead_runtime_status` in
@@ -1432,14 +1432,16 @@ first answer, or gate it on `STUB_CLAUDE_LEAD=1`. The turn markers the harness n
 *Unlocks:* a deterministic LED-D8 variant on the **harness** path with a live runtime;
 deterministic `lead_runtime_status` transitions; a deterministic version of LED-R3.
 
-**B2 — The codex stub has no `app-server` mode.**
-`e2e/stubs/codex:125-150` routes `app-server --listen …` into the plain interactive
-branch, so it prints and exits; `waitForCodexAppServer` fails immediately
-(`codex_runtime.go:245-250`). Implementing the app-server JSON-RPC/websocket protocol
-in shell is not realistic.
-*Recommendation:* accept it. Make **claude** the deterministic lead backend once B1
-lands, keep codex leads to the real tier, and assert only the pre-backend banner in
-LED-D8. Do **not** invest in a fake app-server.
+**B2 — The codex stub supports bootstrap, not lead-session behavior.**
+The custom-prompt CUS-D5 pilot added a deliberately narrow WebSocket helper behind
+`e2e/stubs/codex app-server --listen …`. It answers `initialize`, returns an empty
+`thread/list`, and rejects every unsupported method. The remote stub establishes its own
+WebSocket connection and keeps it open with the PTY. That is enough to prove controlled-
+runtime bootstrap, connection, and prompt argv fidelity, but it does not create a thread or
+support `thread/read`, `turn/start`, inbox delivery, or runtime-status changes.
+*Recommendation:* keep **claude** as the deterministic backend for lead-session behavior once
+B1 lands, and keep codex thread/turn behavior in the real tier. Do not expand the bootstrap
+helper into a behavioral clone of Codex merely to satisfy LED-D8.
 
 **B3 — No way to enqueue an inbox message for a plain lead.**
 Every producer requires either a verified DriverRun (driver ops) or a PR-review agent.

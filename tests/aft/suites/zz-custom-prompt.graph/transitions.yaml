@@ -37,9 +37,9 @@ transitions:
     steps:
       - use: case-04-multiline-metacharacter-prompt-persists-byte-exact
   prove-05-template-looking-custom-prompt-is-stored-literally:
-    intent: An operator whose prompt contains Go template syntax gets that text stored literally rather than expanded
+    intent: An operator sees a controlled Codex agent connect with Go-template-looking instructions preserved literally
     actor: human
-    via: cli
+    via: runtime
     steps:
       - use: case-05-template-looking-custom-prompt-is-stored-literally
   prove-06-custom-prompt-reaches-codex-argv-in-the-noninteractive-r:

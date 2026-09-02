@@ -88,8 +88,14 @@ role name.
 - **CUS-D14 must unset `LOOM_AGENT_EFFORT` and `LOOM_CLAUDE_EFFORT`.**
   `appendCodexEffortArgs` **prepends** `-c model_reasoning_effort="…"`
   (`backend_effort.go:15-22`), so with either set, argv does not begin with `exec`.
-- **CUS-D5 must not expect "a running lead"** — the deterministic stub cannot boot the
-  controlled runtime (**S-7**). Reduced to the 201 + no-5xx assertion.
+- **CUS-D5 is the controlled-runtime pilot.** The deterministic Codex stub now implements
+  the narrow app-server bootstrap needed for readiness, holds its remote TUI on stdin, and
+  connects that remote process over WebSocket (**S-1/S-7**). The process reports a measured
+  prompt-prefix fingerprint and safety-block count; the case requires those values, the
+  controlled-runtime banner, an agent-specific connection marker, and no visible start error.
+  A same-origin terminal-tabs readback also requires exactly one owned Codex tab with
+  `pty_alive=true`. This proves bootstrap and argv fidelity only; it does not claim thread
+  discovery or turns.
 
 **Accepted — the real tier was over-blocked**
 `run-aft.sh` assigns `AFT_SUITES` with `:=` under `AFT_REAL_BACKEND` and then runs exactly that
@@ -134,10 +140,11 @@ reviews. Every finding was re-verified against source before being folded in. Wh
   `defaultCodexInvoker` short-circuits to the non-interactive path
   (`internal/cli/backends/backend_codex.go:63-79`), so the asserted `--no-alt-screen` flag
   (interactive-only, `:41-44`) never appears. Redesigned honestly in CUS-D14: it now asserts
-  the **non-interactive** argv shape, and the case states plainly that the two *controlled*
-  runtimes' positional-prompt append (`codex_runtime.go:152`,
-  `harness_runtime.go:210-216`) stays deterministically uncovered until **S-1**.
-  The load-bearing half survives: `buildCodexNonInteractiveArgs`
+  the **non-interactive** argv shape. The CUS-D5 pilot now covers the controlled Codex path's
+  positional-prompt append (`codex_runtime.go:152`) through the remote process's measured
+  prompt fingerprint; a focused Go test separately pins the full argv log. The harness-wrapper
+  path (`harness_runtime.go:210-216`) remains outside the pilot. The fallback
+  half remains useful: `buildCodexNonInteractiveArgs`
   (`backend_codex.go:108-116`) still passes the prompt as the final positional argument, with
   an explicit comment saying so — so DB → `LOOM_AGENT_ROLE` → argv is still provable.
 
@@ -150,11 +157,10 @@ reviews. Every finding was re-verified against source before being folded in. Wh
   launching `loom serve` and registers that same directory. Corrected in both places.
 
 **Accepted — determinism and honesty**
-- The deterministic codex stub has no `app-server` subcommand (`e2e/stubs/codex:27-35` parses
-  only `exec`/`--json`), while controlled codex starts one (`codex_runtime.go:107-135`). So a
-  default-codex **terminal boot** is not deterministic. No deterministic case may assert
-  `pty_alive`, rendered terminal rows, or backend output — only the launch **spec**, which the
-  ensure-session HTTP call writes without spawning anything. Added as **S-7**.
+- The deterministic Codex stub now has a deliberately narrow `app-server` implementation and a
+  remote client that completes a real WebSocket initialize handshake. CUS-D5 may therefore
+  assert a connected controlled Codex process in the mounted terminal and its prompt argv. It still
+  cannot claim thread/turn or model behavior. The remaining boundary is recorded as **S-7**.
 - CUS-D6 is reclassified from a product-correctness case to an explicitly-labelled
   **negative-rendering regression fence**, and is no longer counted as sanitizer coverage.
 - CUS-D11's "no worktree exists under the workspace" is narrowed to the agent-scoped path;
@@ -301,7 +307,7 @@ literal `data-testid=` — see blocker **S-6**.
 |---|---|---|
 | agent row (`name`, `role_name`, `backend`, `repos`, `cross_repo`) | `GET /api/workspaces/{ws}/agents` (**list only**) | `domain.Agent` has **no** `kind`/`prompt` field (`internal/domain/agent.go:42-78`). There is **no `GET …/agents/{name}`** — only list, PATCH, DELETE, `/queue` (`handlers/agents/module.go:25-29`) |
 | resolved role kind | `GET /api/workspaces/{ws}/monitor/status` → `agents[].role_kind` | filled by `ResolveRoleKind` (`internal/cli/serve/metricscmd/monitor_store_data_source.go:178`) |
-| launch argv/env/cwd | `GET /api/workspaces/{ws}/terminal/tabs` | full `TabMetadata` incl. `launch`; live in the e2e stack (seen in `reports/server.log`). Written by the ensure-session call **without spawning a PTY**, so it is deterministic even when the stub cannot boot (see **S-7**) |
+| launch argv/env/cwd | `GET /api/workspaces/{ws}/terminal/tabs` | full `TabMetadata` incl. `launch`; live in the e2e stack (seen in `reports/server.log`). Written by the ensure-session call **without spawning a PTY**, so launch-spec inspection stays deterministic even when the runtime later fails (see **S-7**) |
 | **prompt bytes** | ❌ no HTTP route | there is **no `/roles` endpoint in `internal/webui`** at all |
 | prompt bytes (workaround) | `LOOM_CONFIG_DIR=$AFT_LOOM_CONFIG_DIR $AFT_LOOM_BIN --workspace <WS> role show <name> --json` | `internal/cli/role/role_cmd.go:182-190`; `--workspace` → `LOOM_WORKSPACE` → `ResolveActiveWorkspaceKey` (`internal/bootstrap/mode.go:76-91`). No `LOOM_TESTSUPPORT` gate. Same binary/config the `seed-log` steps already use. |
 
@@ -471,24 +477,29 @@ Common preconditions unless stated: `E2E-WS-CUSTOM` exists with ≥1 repo; brows
   tab launch spec (`session_command.go:17-22`). A single dropped/expanded metacharacter is an
   argv-injection or corruption bug. `$(...)` and backticks are the argv-injection canaries.
 
-### CUS-D5 — Go-template-looking text is stored and rendered verbatim, not expanded
+### CUS-D5 — Go-template-looking text reaches a connected controlled Codex agent verbatim
 
 - **Tier:** product-correctness
 - **Intent:** An operator whose prompt happens to contain Go template syntax gets that text
   delivered to the agent literally, not silently substituted with Loom's internals.
 - **Fixture:** `Refer to {{ .AgentName }} and {{.Role}}. Unclosed: {{ if .SafetyBlock }}`
-- **Steps:** create via UI as in CUS-D1 with name `cust-tmpl-${RUN_ID}`.
+- **Steps:** create via UI as in CUS-D1 with name `cust-tmpl-${RUN_ID}` → open its agent detail.
+  The terminal-state checks below are one grouped Verify card so the identical final UI is shown
+  once while a reviewer can expand the individual checks.
 - **Assertions**
   - `role show --json` `.prompt` equals the fixture verbatim (`{{ .AgentName }}` still present)
-  - chained with **CUS-D14**: the captured launch argv also contains the literal
-    `{{ .AgentName }}` and *not* `cust-tmpl-${RUN_ID}` — this is the assertion that pins
+  - the UI-created terminal's remote client connects to the controlled app-server without an
+    agent-start error and remains mounted under the expected custom-agent identity
+  - a same-origin `/terminal/tabs` readback finds exactly one matching `agent_id`, with
+    `kind=agent`, `role=<agent name>`, `backend=codex`, and `pty_alive=true`
+  - the remote process reports the SHA-256 fingerprint of the prompt prefix it actually received
+    plus `safety-blocks=1`; the expected fingerprint represents the literal `{{ .AgentName }}`
+    fixture rather than `cust-tmpl-${RUN_ID}` — this is the assertion that pins
     `GenerateTerminalPromptText`'s "intentionally not parsed as a Go template"
     (`prompts.go:399-403`), and distinguishes it from the `prompt_file` path, which **is**
     template-rendered (`prompts.go:371-395` → `renderPrompt`/`LoadPromptTemplate`)
   - no 5xx: an unclosed `{{` would panic `renderPrompt` (`prompts.go:63-68`) if the inline
-    path ever routed through the template engine — **expect 201 and no server error**. Revision
-    2 said "and a running lead"; that is unassertable in the deterministic tier, because the
-    stub cannot boot the controlled codex runtime (**S-7**)
+    path ever routed through the template engine — **expect 201 and no server error**
 - **Fixture owner:** this case. Its prompt fixture is written to
   `$AFT_WORK_DIR/cus-d5.prompt` (no terminal newline, same rule as CUS-D4) and is **also read
   by CUS-D14**, which is why both cases must live in the same suite file.
@@ -512,11 +523,9 @@ Common preconditions unless stated: `E2E-WS-CUSTOM` exists with ≥1 repo; brows
   - `wait.fn`: `window.__aftXss === undefined && !document.querySelector('script[data-injected], img[onerror]') && !document.querySelector('a[href^="javascript:"]')`
   - `expect: { notText: "onerror" }` on the agents page
   - reload once and repeat (SSE re-render path)
-  - **not asserted:** anything about the terminal pane. Opening the agent detail mounts
-    `TerminalView`, which fires the ensure-session POST and asks the PTY manager to spawn
-    controlled codex — and the deterministic stub has no `app-server` (**S-7**). The tab
-    metadata is written regardless, but the PTY may die immediately. Treat any terminal
-    content here as noise; assert only DOM safety.
+  - **not asserted:** anything about the terminal pane. CUS-D5 now proves the narrow controlled
+    Codex bootstrap, but this XSS fence intentionally asserts only DOM safety and does not turn
+    backend output into part of its contract.
 - **Edge rationale + honesty note:** **this currently passes vacuously** — the prompt is not
   rendered on any surface (no `/roles` route, `WorkspaceAgentInfo` has no `prompt` field,
   `api/workspace/workspace.ts:33-40`). Write it anyway and say so in the suite comment: it is
@@ -653,12 +662,13 @@ Every workspace is seeded with roles `plan`, `task`, and `lead`
     (`printable`, `testing-app/src/api-step.ts:20-24`). Assert *inclusion only*, never an exact
     set — `backend_external.go:174` can register arbitrary configured names. (`echo` will not
     appear: `backend_echo.go:1` is `//go:build testbackend`.)
-  - **not asserted:** `pty_alive`, terminal rows, or any backend output. The launch spec is
+  - **not asserted:** `pty_alive`, terminal rows, or any backend output. This case is a launch-
+    specification comparison, not a runtime-health case. The launch spec is
     written by the ensure-session handler (`ensureAgentTerminalSession` → `PutTab` → `GetTab`,
-    `agent_session.go:76-137`) with no dependency on a successful spawn; the spawn itself is
-    non-deterministic under the stub (**S-7**). Choose `claude` for the non-default case
-    precisely because it *is* stubbed — **never `gemini`**, which has no stub in any farm and
-    would reach the operator's real CLI
+    `agent_session.go:76-137`) with no dependency on a successful spawn. CUS-D5 separately pins
+    the deterministic Codex bootstrap; this case's non-default Claude path does not implement
+    the same controlled-session handshake. Choose `claude` because its executable is stubbed —
+    **never `gemini`**, which has no stub in any farm and would reach the operator's real CLI
 - **Edge rationale:** the argv+env pair is the *entire* spawn contract for a custom-prompt
   agent, and it is asymmetric (backend in argv, prompt identity in env). It is also
   free to assert — `GET /terminal/tabs` is a read.
@@ -725,10 +735,9 @@ Every workspace is seeded with roles `plan`, `task`, and `lead`
 ### CUS-D14 — the custom prompt actually reaches the backend process argv (non-interactive path)
 
 - **Tier:** surface **in classification, but it must physically live in
-  `suites/zz-custom-prompt.test.yaml`** — see the placement note below. Promotion condition:
-  promote to a full product-correctness scenario once the stubs echo argv from the
-  *server-spawned* PTY (**S-1** + **S-7**), at which point the same assertion can be made about
-  the real UI-triggered launch.
+  `suites/zz-custom-prompt.test.yaml`** — see the placement note below. It remains a focused
+  fallback-path contract. CUS-D5 now makes the corresponding assertion about the UI-triggered,
+  server-spawned controlled Codex process through **S-1/S-7**.
 - **Placement (revision 3, was broken).** Revision 2 put this case in
   `surface-suites/custom-prompt-contracts.test.yaml` while depending on CUS-D5's agent in
   `E2E-WS-CUSTOM`. aft runs each suite's `teardown:` in a `finally` after that suite's tests and
@@ -753,10 +762,10 @@ Every workspace is seeded with roles `plan`, `task`, and `lead`
     `GenerateTerminalPromptText` → **final positional argv element**, byte-exact, guardrails
     appended once. `buildCodexNonInteractiveArgs` passes the prompt positionally with an
     explicit comment saying so (`:108-116`), so the load-bearing chain is fully covered.
-  - ❌ does **not** prove: either *controlled* runtime's positional append
-    (`codex_runtime.go:152` app-server + TUI; `harness_runtime.go:210-216` harness-wrapper),
-    which is what the UI actually uses. That gap is exactly what **S-1** closes; do not
-    describe this case as covering the UI-spawned path.
+  - ❌ does **not** itself prove either *controlled* runtime's positional append. CUS-D5 now
+    covers `codex_runtime.go:152` (app-server + remote client); the harness-wrapper path at
+    `harness_runtime.go:210-216` remains unproved. Do not describe CUS-D14 itself as covering
+    the UI-spawned path.
 - **Intent:** The local runtime resolves the custom agent's stored prompt and hands it to the
   backend as the final positional argument of its boot invocation.
 - **Preconditions:** a CUS-D5 agent exists (`cust-tmpl-${RUN_ID}` is the best subject — it
@@ -1115,8 +1124,8 @@ which is true of every real tier.
      ensure-session POST and starts the PTY)
   4. `run:` + `python3` over `GET /terminal/tabs`, selecting the tab by `agent_id` (arrays are
      positional-only in `api:` asserts) → save `launch.cwd`, assert `pty_alive == true`.
-     `pty_alive` is assertable **here** but not in the deterministic tier, because a real CLI
-     can actually boot (**S-7**)
+     `pty_alive` is required **here** because this tier goes on to prove real CLI behavior;
+     deterministic CUS-D5 proves only controlled bootstrap and connection (**S-7**)
   5. chained `run:` grace polls (≤55 iterations each, ≤120 s per step, as the real tiers do)
      for `MARKER-${RUN_ID}.md` on disk
   6. `run:` assert the file's contents are exactly `AFT-CUSTOM-${RUN_ID}\n`
@@ -1261,25 +1270,22 @@ back, review, or revise what they told their agent — only `loom role show/set`
 monitor status payload) would let CUS-D1/D4/D5/D9 drop the CLI shell-out entirely and would
 make CUS-D6's XSS assertions non-vacuous. This is the single highest-leverage seam in the plan.
 
-### S-1 — Stub argv/stdin echo (needed to observe the *server-spawned* process)
+### S-1 — Stub argv/stdin observation (needed to observe the spawned process contract)
 
-**Severity:** stack · **Status:** needed for CUS-D14 promotion
+**Severity:** stack · **Status:** PARTIAL — codex pilot implemented for CUS-D5
 
-Today only `e2e/stubs/codex`'s epic-runner branch records anything, via `$STUB_CODEX_INVOCATIONS`
-(`e2e/stubs/codex:74-82`). **Spec, following that precedent:** every stub in `e2e/stubs/`
-appends, at entry, a NUL-delimited record `pid \0 argv0 \0 arg1 \0 … \0\0` to `$STUB_ARGV_LOG`
-when that variable is set; `run-aft.sh` exports
-`STUB_ARGV_LOG="$REPO_ROOT/tmp/stub-argv.$RUN_ID.log"` alongside the existing
-`PATH="$REPO_ROOT/e2e/stubs:$PATH"` on the **server** launch only. Tests then read that file
-after triggering a UI-initiated terminal session. NUL delimiting is required — the prompt
-contains newlines by construction.
+`e2e/stubs/codex` now appends an atomic, locked NUL-delimited record
+`pid \0 argv0 \0 arg1 \0 … \0\0` to `$STUB_ARGV_LOG` when set. The focused Go test uses that
+record to pin the exact app-server and remote argv without newline ambiguity. In the AFT pilot,
+the remote stub reports a SHA-256 fingerprint measured from its actual final prompt argument and
+the number of appended safety blocks. A same-origin browser readback pins the owned tab and its
+live PTY. Those browser-visible contracts let all final UI checks live inside one grouped
+terminal-state card instead of adding runner-only cards with duplicate stills.
 
-This seam is what makes the *controlled* runtimes observable. Until it lands, CUS-D14 covers
-only the non-interactive fallback (`backend_codex.go:63-79,108-116`) via a per-test stub, and
-the two code paths the UI actually uses — `codex_runtime.go:152` and
-`harness_runtime.go:210-216` — have **no deterministic coverage of prompt delivery at all**.
-Pairs with **S-7**: argv capture alone is not enough for codex, because the controlled codex
-runtime needs an `app-server` the stub cannot provide.
+These seams make the Codex controlled-runtime argv observable for the CUS-D5 pilot.
+CUS-D14 still covers the non-interactive fallback (`backend_codex.go:63-79,108-116`) via its
+per-test stub, and harness-wrapper prompt delivery (`harness_runtime.go:210-216`) remains
+outside this pilot. Extending the shared capture contract to the other stubs remains open.
 
 ### S-2 — `seed-session` (ADR-0001 family)
 
@@ -1340,27 +1346,26 @@ resolve `testId={IDENT.testId}` and `testId={\`…${x}\`}` against module-level 
 or (cheaper) inline the literal `data-testid` onto `AgentTemplateCard`'s root in addition to
 the prop.
 
-### S-7 — No deterministic stub for controlled-terminal boots (or for an unhealthy backend)
+### S-7 — Deterministic controlled-Codex bootstrap; unhealthy backend still missing
 
-**Severity:** stack · **Status:** OPEN
+**Severity:** stack · **Status:** PARTIAL — bootstrap pilot implemented
 
 Controlled codex starts `codex app-server --listen <endpoint>` and then connects to it
-(`internal/leadcontrol/codex_runtime.go:107-135`), but `e2e/stubs/codex` recognizes only
-`exec`/`--json` and otherwise falls through to a generic "interactive mode" print-and-exit
-(`e2e/stubs/codex:27-35,148-160`). So in the deterministic tier a default-codex agent terminal
-**cannot boot**, and no deterministic case may assert `pty_alive`, rendered rows, or backend
-output — only the launch spec, which the ensure-session handler writes without spawning
-(`agent_session.go:76-137`). Separately, no stub reports *unhealthy*, so the
-backend-unavailable branch (`lead.go:97-103`) is reachable only by relying on a binary being
-absent from the host (see CUS-R4a's guard).
+(`internal/leadcontrol/codex_runtime.go:107-135`). The deterministic Codex stub now delegates
+that command to a bootstrap-only WebSocket helper: it accepts `initialize`, returns an empty
+`thread/list`, and rejects unsupported methods. Its `--remote` mode makes its own WebSocket
+connection, completes `initialize`, emits an agent-specific connection marker, and then keeps
+both that socket and stdin open. CUS-D5 can therefore assert bootstrap, a connected remote
+process, an owned live PTY, and prompt argv without claiming model behavior. The helper
+intentionally does not create a thread or implement `thread/read`, `turn/start`, or message
+delivery.
 
-**Spec:** (a) teach `e2e/stubs/codex` a minimal `app-server` mode — accept the listen endpoint
-and answer the handshake well enough for `RunCodexLeadRuntime` to attach — or add a
-`STUB_CODEX_LEAD_MODE=simple` switch that makes the controlled path fall back to the plain
-interactive launch; and (b) add an `e2e/stubs/unhealthy-<name>` farm entry (or
-`STUB_*_HEALTH=missing`) so the unavailable-backend case becomes host-independent. (a) plus
-**S-1** is what would let CUS-D14 be promoted to assert prompt delivery on the path the UI
-actually uses.
+No stub yet reports *unhealthy*, so the backend-unavailable branch (`lead.go:97-103`) is still
+reachable only by relying on a binary being absent from the host (see CUS-R4a's guard).
+
+**Remaining spec:** add an `e2e/stubs/unhealthy-<name>` farm entry (or
+`STUB_*_HEALTH=missing`) so the unavailable-backend case becomes host-independent. Promote
+additional cases only when their assertions match the bootstrap-only boundary above.
 
 ### S-8 — Productize the real interactive tier (not a blocker)
 
@@ -1394,7 +1399,7 @@ readback filters an array, polls, compares bytes, or fills from a file.
 | CUS-D2 empty prompt → submit disabled | edge | product-correctness | step | C | zz | ready-to-write |
 | CUS-D3 whitespace-only prompt → submit disabled | edge | product-correctness | step | C | zz | ready-to-write |
 | CUS-D4 multiline + metacharacters byte-exact | edge | product-correctness | run (fill + compare) | C | zz | ready-to-write (fixture must have **no** terminal newline) |
-| CUS-D5 `{{ .AgentName }}` not expanded | edge | product-correctness | run | C | zz | ready-to-write; **owns `cus-d5.prompt`**; no "running lead" assertion |
+| CUS-D5 `{{ .AgentName }}` not expanded | edge | product-correctness | run | C | zz | implemented pilot; owns `cus-d5.prompt`; proves controlled bootstrap + remote connection + prompt-contract fingerprint |
 | CUS-D6 XSS-shaped prompt inert in agents UI | edge | product-correctness | step | C | zz | ready-to-write — **negative-rendering fence only, vacuous until P-5; not sanitizer coverage** |
 | CUS-D7a 32 KB prompt via the UI | edge | product-correctness | run (fill + compare) | C | zz | ready-to-write |
 | CUS-D7b 100 000 / 100 001 / >1 MB boundaries | edge | surface | run (curl `--data-binary`) | C | sf | ready-to-write; UI variant needs **S-4** |
@@ -1403,11 +1408,11 @@ readback filters an array, polls, compares bytes, or fills from a file.
 | CUS-D8c `lead` collision → 400 | edge | product-correctness | run | C | zz | ready-to-write |
 | CUS-D8d `orchestrator` → **201, pinned** | edge | product-correctness | run | C | zz | ready-to-write (was an unpinned probe; now deterministic, sharpens **P-1**) |
 | CUS-D9 whitespace trimming semantics | edge | product-correctness | run | C | zz | ready-to-write |
-| CUS-D10 backend select → agent row + launch spec | happy | product-correctness | run (**poll tabs**) | C | zz | ready-to-write (no `pty_alive` — **S-7**) |
+| CUS-D10 backend select → agent row + launch spec | happy | product-correctness | run (**poll tabs**) | C | zz | ready-to-write; deliberately launch-spec only (CUS-D5 owns controlled Codex runtime health) |
 | CUS-D11 repo scoping + empty cwd + no worktree | happy/edge | product-correctness | run (**poll tabs**) | C | zz | ready-to-write (path = `<ws>/worktrees/<repo>/<agent>`) |
 | CUS-D12 prompt not visible/editable after create | edge | product-correctness | step + run | C | zz | ready-to-write (selector excludes `agent-editor-split`) |
 | CUS-D13 recreate-after-delete blocked by orphan role | edge | product-correctness | run | C | zz | ready-to-write |
-| CUS-D14 prompt reaches backend argv (**non-interactive path only**) | happy | surface | run (per-test stub) | C | **zz** | ready-to-write; **moved out of `sf`**; controlled paths need **S-1 + S-7** |
+| CUS-D14 prompt reaches backend argv (**non-interactive path only**) | happy | surface | run (per-test stub) | C | **zz** | retained for fallback coverage; controlled Codex argv is independently pinned by the CUS-D5 pilot |
 | CUS-D15 new agent appears via SSE | happy | product-correctness | step | C | zz | ready-to-write (name-exact `aria-label`, was vacuous) |
 | CUS-D16 duplicate name → 409 in error alert | edge | product-correctness | run | C | zz | ready-to-write |
 | CUS-D17a UI normalizes name **and** role_name | edge | product-correctness | run (**poll tabs**) | C | zz | ready-to-write (client-side invariant) |
@@ -1428,11 +1433,11 @@ readback filters an array, polls, compares bytes, or fills from a file.
 
 **28 deterministic cases** — up one from revision 2 (CUS-D17 split into D17a/D17b):
 **21 product-correctness** (D1–D6, D7a, D8a–d, D9–D13, D15, D16, D17a, D18, D19) +
-**7 surface** (D7b, D14, D17b, D20, S1, S2, S3). All 28 are **ready-to-write** against today's
-single-`loom serve` stack. Three carry explicit scope limits rather than clean coverage —
-CUS-D6 is vacuous until **P-5**, CUS-D7b's UI variant needs **S-4**, CUS-D14 covers only the
-non-interactive backend path until **S-1 + S-7** — and none has an unpinned expected outcome
-any more (CUS-D8d is now pinned to 201).
+**7 surface** (D7b, D14, D17b, D20, S1, S2, S3). All 28 are defined in the current AFT corpus
+against one `loom serve` stack. Three carry explicit scope limits rather than clean coverage —
+CUS-D6 is vacuous until **P-5**, CUS-D7b's UI variant needs **S-4**, and CUS-D14 deliberately
+covers only the non-interactive fallback while CUS-D5 owns the controlled Codex pilot — and
+none has an unpinned expected outcome any more (CUS-D8d is now pinned to 201).
 
 **22 of the 28 need a `run:` step**; 6 are pure step-vocabulary cases (D2, D3, D6, D15, D18, S2).
 **Five of the `run:` cases must poll** rather than read once (D10, D11, D17a, D19, and D20's
@@ -1449,6 +1454,6 @@ opt-in tier** — reclassified from "blocked-on-seam", because `run:`-level gati
 credentials and rate-limit budget, not by missing framework support.
 
 **5 candidate product findings** (**P-1**…**P-5**) and **8 candidate stack/seam items**
-(**S-1**…**S-8**). Only **S-1 + S-7** genuinely block coverage that this plan wants and cannot
-get: deterministic proof that the prompt reaches the *controlled* runtime the UI actually spawns.
-Everything else is ergonomics.
+(**S-1**…**S-8**). The CUS-D5 pilot now proves deterministic controlled-Codex bootstrap and
+prompt delivery. Generalizing argv capture to other backends, modeling Codex threads/turns,
+and deterministic unavailable-backend coverage remain intentionally separate work.

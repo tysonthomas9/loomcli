@@ -41,8 +41,8 @@ states:
     assert:
       - use: terminal-04-multiline-metacharacter-prompt-persists-byte-exact
   verified-05-template-looking-custom-prompt-is-stored-literally:
-    intent: template-looking custom prompt is stored literally
-    testIntent: An operator whose prompt contains Go template syntax gets that text stored literally rather than expanded
+    intent: template-looking prompt starts a connected Codex agent without expansion
+    testIntent: An operator sees a controlled Codex agent connect with Go-template-looking instructions preserved literally
     terminal: true
     assert:
       - use: terminal-05-template-looking-custom-prompt-is-stored-literally

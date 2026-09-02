@@ -181,12 +181,43 @@ blocks:
           assert "{{ .AgentName }}" in got and "{{.Role}}" in got and "{{ if .SafetyBlock }}" in got, got
           PY
         intent: An operator's CLI readback confirms template-looking text stayed literal in storage
+      - open: /ws/E2E-WS-CUSTOM/agents/cust-tmpl-${RUN_ID:-local}
+        intent: An operator opens the new custom agent to review its controlled Codex session
   terminal-05-template-looking-custom-prompt-is-stored-literally:
     steps:
+      - wait:
+          fn: |-
+            (() => {
+              const wrapper = document.querySelector('[data-testid=terminal-wrapper]');
+              if (!wrapper) return false;
+              const rows = Array.from(wrapper.querySelectorAll('.term-row')).map((el) => el.textContent || '').join('\n');
+              const text = rows || wrapper.textContent || '';
+              if (text.includes('Error running agent') || text.includes('backend is not installed')) {
+                throw new Error('custom prompt agent failed to start: ' + text.slice(-400));
+              }
+              return text.includes('Launching controlled Codex lead session...') &&
+                text.includes('Controlled Codex stub connected: cust-tmpl-${RUN_ID:-local}') &&
+                text.includes('Controlled Codex prompt contract: prefix-sha256=b8078611e09da1b89c51c636f9e19b638bfaf0e6c159f3a2f0862e4f5f0bd77e safety-blocks=1');
+            })()
+        intent: Wait until the controlled Codex process connects with the exact literal prompt and one safety block, without an agent-start error
+      - wait:
+          fn: |-
+            (async () => {
+              const response = await fetch('/api/workspaces/E2E-WS-CUSTOM/terminal/tabs', { cache: 'no-store' });
+              if (!response.ok) return false;
+              const payload = await response.json();
+              const tabs = Array.isArray(payload.data) ? payload.data : [];
+              const matches = tabs.filter((tab) =>
+                tab.agent_id === 'cust-tmpl-${RUN_ID:-local}' &&
+                tab.kind === 'agent' &&
+                tab.role === 'cust-tmpl-${RUN_ID:-local}' &&
+                tab.backend === 'codex');
+              return matches.length === 1 && matches[0].pty_alive === true;
+            })()
+        intent: Confirm the connected Codex process still owns exactly one live terminal for this custom agent
       - expect:
-          count:
-            testid: create-agent-overlay
-            equals: 0
+          visible:
+            testid: terminal-wrapper
   case-08-thirty-two-kilobyte-custom-prompt-survives-the-ui-round-:
     steps:
       - run: |
