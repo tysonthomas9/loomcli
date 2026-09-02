@@ -6,7 +6,8 @@
  * Unit tests for useWorkspaceSessionCount.
  * Covers the counting rule (non-agent tabs with a live PTY), the empty-workspace
  * short circuit, the workspace-switch reset that is the PUPPET-123 regression,
- * the stale-response guard, SSE-driven debounced refetch, and silent failure.
+ * the stale-response guard, SSE-driven debounced refetch, the cancellation of a
+ * debounce left pending across a workspace switch, and silent failure.
  */
 
 import { renderHook, waitFor, act } from "@testing-library/react";
@@ -58,6 +59,9 @@ function tab(overrides?: Partial<TabMetadata>): TabMetadata {
 }
 
 const mockList = vi.mocked(terminalApi.listTabMetadata);
+
+/** Mirrors DEBOUNCE_MS in the hook under test. */
+const DEBOUNCE_MS = 200;
 
 describe("useWorkspaceSessionCount", () => {
   beforeEach(() => {
@@ -166,11 +170,46 @@ describe("useWorkspaceSessionCount", () => {
     });
 
     await act(async () => {
-      vi.advanceTimersByTime(200);
+      vi.advanceTimersByTime(DEBOUNCE_MS);
       await Promise.resolve();
     });
 
     expect(mockList).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it("drops a debounce left pending when the workspace changes", async () => {
+    vi.useFakeTimers();
+    mockList.mockResolvedValue([tab()]);
+
+    const { rerender } = renderHook(() => useWorkspaceSessionCount());
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mockList).toHaveBeenCalledTimes(1);
+
+    const handler = vi.mocked(useEventSubscription).mock.calls[0]?.[0] as (
+      m: MutationPayload,
+    ) => void;
+
+    act(() => {
+      handler({ type: "terminal_metadata" } as MutationPayload);
+    });
+
+    // Switching before the debounce elapses must cancel it: firing it would
+    // re-query the workspace we just left.
+    currentWorkspaceId = "ws-2";
+    rerender();
+
+    await act(async () => {
+      vi.advanceTimersByTime(DEBOUNCE_MS);
+      await Promise.resolve();
+    });
+
+    expect(mockList).toHaveBeenCalledTimes(2);
+    expect(mockList).toHaveBeenNthCalledWith(1, "ws-1");
+    expect(mockList).toHaveBeenNthCalledWith(2, "ws-2");
     vi.useRealTimers();
   });
 

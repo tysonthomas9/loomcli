@@ -83,6 +83,16 @@ export function useWorkspaceSessionCount(
   useEffect(() => {
     if (!enabled) return;
     fetchCount();
+    // A debounce armed before this point targets the workspace we just left:
+    // it holds the previous fetchCount closure, so letting it fire would spend
+    // a request on a workspace whose count is no longer displayed. Drop it
+    // whenever the target workspace (and hence fetchCount) changes.
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+      }
+    };
   }, [enabled, fetchCount]);
 
   const handleMutation = useCallback(
