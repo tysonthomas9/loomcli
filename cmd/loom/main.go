@@ -35,6 +35,7 @@ import (
 	_ "github.com/tysonthomas9/loomcli/internal/cli/skill"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/stack"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/trigger"
+	_ "github.com/tysonthomas9/loomcli/internal/cli/uniondebt"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/workflow"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/workspace"
 )
