@@ -46,6 +46,9 @@ pretends to allocate a collision-free local port automatically.
 ## Prerequisites
 
 - `terraform` (or `tofu`), `gcloud`, `docker` (or `podman`), `git`
+- GNU Make 3.82 or newer: the Makefile uses `.ONESHELL`, and macOS ships 3.81
+  as `/usr/bin/make`, which used to hang instead of failing. Run
+  `brew install make` and use `gmake`; the Makefile now refuses 3.81 outright
 - A fleet-db checkout containing the wired workspace-file API and S3 store
   (or set `FLEETDB_SRC`); `make preflight` verifies those files
 - `roles/owner`, or enough to create VMs, buckets, secrets, HMAC keys and IAM
@@ -58,6 +61,10 @@ automatically as part of `make up`.
 If Docker is unavailable but a Podman machine is running, use
 `CONTAINER_CLI=podman`; the Makefile logs Podman into Artifact Registry with
 the active gcloud access token before pushing images.
+
+Images are built for `linux/amd64`, the VM's architecture, whatever the host
+is; on Apple Silicon that uses the emulation Docker Desktop and Podman machine
+both include. `PLATFORM=` overrides it.
 
 The `loom` Artifact Registry repository is a shared project bootstrap resource:
 preflight creates it once (concurrent creators tolerate `ALREADY_EXISTS`), and

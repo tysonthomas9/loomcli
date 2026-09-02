@@ -12,6 +12,14 @@ SHELL := /bin/bash
 .ONESHELL:
 .SHELLFLAGS := -eu -o pipefail -c
 
+# Every recipe below is one shell per target (.ONESHELL). GNU Make 3.81 -- what
+# macOS ships as /usr/bin/make -- silently ignores the directive and runs each
+# line in its own shell, so the image-build lock loop spins forever on
+# `mkdir ""`. Fail at parse time instead.
+ifeq ($(filter oneshell,$(.FEATURES)),)
+$(error GNU Make 3.82+ is required (.ONESHELL); this is $(MAKE_VERSION). macOS: brew install make, then run gmake)
+endif
+
 REPO_ROOT := $(shell git rev-parse --show-toplevel)
 NAME      ?= loom-stack
 PROJECT   ?= $(shell gcloud config get-value project 2>/dev/null)
@@ -21,6 +29,11 @@ REGISTRY  ?= $(REGION)-docker.pkg.dev/$(PROJECT)/loom
 FLEETDB_SRC ?= $(REPO_ROOT)/../fleet-db
 CONTAINER_CLI ?= docker
 CONTAINER_ARGS ?=
+# The VM boots ubuntu-2404-lts-amd64 (vm.tf). Without an explicit platform an
+# Apple Silicon host pushes arm64 images and no container on the VM starts.
+# Cross-building uses the binfmt emulators Docker Desktop and Podman machine
+# both ship.
+PLATFORM ?= linux/amd64
 REGISTRY_HOST = $(word 1,$(subst /, ,$(REGISTRY)))
 REGISTRY_LOCATION = $(patsubst %-docker.pkg.dev,%,$(REGISTRY_HOST))
 REGISTRY_PROJECT = $(word 2,$(subst /, ,$(REGISTRY)))
@@ -173,15 +186,15 @@ images: preflight ## Build and push fleet-db, loom, and the SPA image (CODEX=1 a
 	fleetdb_image="$(REGISTRY)/fleet-db:$${tags[0]}"
 	loom_image="$(REGISTRY)/loom:$${tags[1]}"
 	ui_image="$(REGISTRY)/loom-ui:$${tags[1]}"
-	$(CONTAINER_CLI) $(CONTAINER_ARGS) build -t "$$fleetdb_image" -f $(FLEETDB_SRC)/deploy/docker/Dockerfile $(FLEETDB_SRC)
-	$(CONTAINER_CLI) $(CONTAINER_ARGS) build $(LOOM_BUILD_ARGS) -t "$$loom_image" -f $(REPO_ROOT)/test/local-mode/Dockerfile $(REPO_ROOT)
+	$(CONTAINER_CLI) $(CONTAINER_ARGS) build --platform $(PLATFORM) -t "$$fleetdb_image" -f $(FLEETDB_SRC)/deploy/docker/Dockerfile $(FLEETDB_SRC)
+	$(CONTAINER_CLI) $(CONTAINER_ARGS) build --platform $(PLATFORM) $(LOOM_BUILD_ARGS) -t "$$loom_image" -f $(REPO_ROOT)/test/local-mode/Dockerfile $(REPO_ROOT)
 	@# Context is a tar of exactly the two paths the image needs, streamed on
 	@# stdin. Building from the repo root instead makes the root .dockerignore
 	@# apply, and it excludes internal/webui/frontend/dist/ -- the very bundle
 	@# this image exists to serve -- so the COPY fails however recently you ran
 	@# build-frontend. A stdin tar carries no ignore file, so nothing is dropped.
 	tar -C $(REPO_ROOT) -cf - internal/webui/frontend/dist deploy/terraform/ui \
-	  | $(CONTAINER_CLI) $(CONTAINER_ARGS) build -t "$$ui_image" -f deploy/terraform/ui/Dockerfile -
+	  | $(CONTAINER_CLI) $(CONTAINER_ARGS) build --platform $(PLATFORM) -t "$$ui_image" -f deploy/terraform/ui/Dockerfile -
 	$(CONTAINER_CLI) $(CONTAINER_ARGS) push "$$fleetdb_image"
 	$(CONTAINER_CLI) $(CONTAINER_ARGS) push "$$loom_image"
 	$(CONTAINER_CLI) $(CONTAINER_ARGS) push "$$ui_image"
