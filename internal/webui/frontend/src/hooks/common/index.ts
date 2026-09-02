@@ -25,6 +25,17 @@ export type {
   SubscriptionOptions,
 } from "./useEventProvider";
 
+export { useInvalidatedQuery } from "./useInvalidatedQuery";
+export {
+  InvalidatedQueryRegistryContext,
+  InvalidatedQueryRegistry,
+} from "./invalidatedQueryRegistry";
+export type {
+  UseInvalidatedQueryOptions,
+  UseInvalidatedQueryResult,
+  UseInvalidatedQuerySnapshot,
+} from "./useInvalidatedQuery";
+
 export {
   FileDocumentRegistryProvider,
   useFileDocument,
