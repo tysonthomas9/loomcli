@@ -53,7 +53,7 @@ func catalogCases25To48() []CaseDefinition {
 		app(34, "Downloaded bytes are bounded by declared size and verified by SHA-256 before Loom returns them.", "loom", "transfer-adapter", loomMinIOBackends()...),
 		app(35, "Upload tokens are HMAC-authenticated and bind version, kind, workspace, actor, hash, size, media type, object reference, and expiry.", "fleet", "token-service", fleet()),
 		app(36, "Tampered, wrong-version, wrong-kind, wrong-actor, wrong-workspace, and expired tokens fail with deliberate error/status behavior.", "fleet", "token-api", fleet()),
-		app(37, "A manifest entry supplies exactly one of upload token or blob reference.", "fleet", "service-validation", fleet()),
+		app(37, "Every declared file receives one server-derived transfer grant bound to its canonical object identity.", "fleet", "service-validation", fleet()),
 		app(38, "Fleet-relative transfer URLs receive current Fleet authentication and actor headers.", "loom", "transfer-adapter", loom()),
 		app(39, "Absolute provider URLs never receive Fleet credentials or the Fleet request editor.", "loom", "transfer-adapter", loom()),
 		app(40, "Transfer redirects are disabled.", "shared", "transfer-policy", loom(), fleet()),
