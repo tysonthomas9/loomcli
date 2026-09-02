@@ -514,6 +514,51 @@ describe("IssueDetailView", () => {
       expect(screen.getByTestId("detail-approve-button")).not.toBeDisabled();
     });
 
+    // The optimistic status update stamps a fabricated `updated_at` and the
+    // rollback restores the original, so the detail surface lands back on the
+    // pre-approve revision just after the 409 latches. That revert is not a
+    // new revision and must not re-arm Approve (PUPPET-146).
+    it("keeps the blocked latch when the failed update rolls back", async () => {
+      const original = createReviewIssue({
+        updated_at: "2024-01-15T10:30:00Z",
+      });
+      const optimistic = createReviewIssue({
+        status: "in_progress",
+        updated_at: "2024-01-15T10:31:00Z",
+      });
+
+      let rejectApprove: (err: unknown) => void = () => {};
+      const onApprove = vi.fn(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectApprove = reject;
+          }),
+      );
+      const props = createDefaultProps({ issue: original, onApprove });
+      const { rerender } = render(<IssueDetailView {...props} />);
+
+      fireEvent.click(screen.getByTestId("detail-approve-button"));
+
+      // The optimistic write reaches the detail surface while the PATCH is in
+      // flight, then the server refuses it.
+      rerender(<IssueDetailView {...props} issue={optimistic} />);
+      await act(async () => {
+        rejectApprove(
+          new ApiError(409, "Conflict", { error: "issue is not claimable" }),
+        );
+      });
+
+      // The rollback puts the original revision back.
+      rerender(<IssueDetailView {...props} issue={original} />);
+
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("detail-approve-blocked-reason"),
+        ).toHaveTextContent("issue is not claimable");
+      });
+      expect(screen.getByTestId("detail-approve-button")).toBeDisabled();
+    });
+
     it("shows the error and releases the spinner when reject fails", async () => {
       const onReject = vi
         .fn()
