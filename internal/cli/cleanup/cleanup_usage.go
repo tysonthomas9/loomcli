@@ -31,6 +31,8 @@ func cleanupUsage(runtimeDir string, maxAge time.Duration, dryRun bool) (int, er
 func cleanupUsageDryRun(store *usage.Store, maxAge time.Duration) (int, error) {
 	cutoff := time.Now().UTC().Add(-maxAge)
 
+	// Deliberately unfiltered: maintenance must see every row, including rows
+	// from unconfigured agents that it is about to prune (PUPPET-340).
 	records, err := store.Read(usage.Filter{})
 	if err != nil {
 		return 0, fmt.Errorf("read usage for dry-run: %w", err)
