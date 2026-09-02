@@ -274,9 +274,14 @@ state: stack-required backend ## Select this stack's Terraform workspace and enf
 	@$(TF) init -input=false -backend-config="bucket=$(TF_STATE_BUCKET)" -backend-config="prefix=loom-gcp" >/dev/null
 	@if $(TF) workspace list | sed 's/^[* ]*//' | grep -Fx "$(NAME)" >/dev/null; then
 		$(TF) workspace select "$(NAME)" >/dev/null
-		remote_owner_id="$$($(TF) output -raw owner_id 2>/dev/null || true)"
+		# An empty workspace (first apply never ran) makes `output -raw` print
+		# a "No outputs found" WARNING on stdout with exit 0, so anything that
+		# is not a 12-hex owner id means unowned.
+		remote_owner_id="$$($(TF) output -no-color -raw owner_id 2>/dev/null || true)"
+		[[ "$$remote_owner_id" =~ ^[0-9a-f]{12}$$ ]] || remote_owner_id=""
 		if [ -n "$$remote_owner_id" ] && [ "$$remote_owner_id" != "$(OWNER_ID)" ] && [ "$(ADOPT)" != 1 ]; then
-			remote_owner="$$($(TF) output -raw owner 2>/dev/null || printf unknown)"
+			remote_owner="$$($(TF) output -no-color -raw owner 2>/dev/null || true)"
+			[[ "$$remote_owner" =~ ^[a-z0-9_-]+$$ ]] || remote_owner=unknown
 			echo "NAME=$(NAME) is in use by another checkout (owner_id $$remote_owner_id, owner $$remote_owner): pick another NAME, or pass ADOPT=1 to take it over." >&2
 			exit 1
 		fi
