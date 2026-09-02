@@ -120,6 +120,14 @@ func (m *mockIPCBackend) SearchIssues(context.Context, string, int) ([]backend.I
 func (m *mockIPCBackend) Create(context.Context, backend.CreateParams) (*backend.IssueData, error) {
 	panic("not implemented")
 }
+func (m *mockIPCBackend) Archive(context.Context, string, backend.ArchiveParams) error {
+	panic("not implemented")
+}
+
+func (m *mockIPCBackend) Unarchive(context.Context, string) error {
+	panic("not implemented")
+}
+
 func (m *mockIPCBackend) Reopen(context.Context, string, backend.ReopenParams) error {
 	panic("not implemented")
 }

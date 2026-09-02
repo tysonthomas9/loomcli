@@ -63,6 +63,10 @@ type MockIssueBackend struct {
 	CloseFn                func(ctx context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error)
 	ReopenErr              error
 	ReopenFn               func(ctx context.Context, id string, params backend.ReopenParams) error
+	ArchiveErr             error
+	ArchiveFn              func(ctx context.Context, id string, params backend.ArchiveParams) error
+	UnarchiveErr           error
+	UnarchiveFn            func(ctx context.Context, id string) error
 	DeleteErr              error
 	DeleteFn               func(ctx context.Context, params backend.DeleteParams) error
 	AddDependencyErr       error
@@ -250,6 +254,28 @@ func (m *MockIssueBackend) Close(ctx context.Context, id string, params backend.
 	}
 	return r, e
 }
+func (m *MockIssueBackend) Archive(ctx context.Context, id string, params backend.ArchiveParams) error {
+	m.mu.Lock()
+	m.record("Archive", id, params)
+	fn, e := m.ArchiveFn, m.ArchiveErr
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, id, params)
+	}
+	return e
+}
+
+func (m *MockIssueBackend) Unarchive(ctx context.Context, id string) error {
+	m.mu.Lock()
+	m.record("Unarchive", id, nil)
+	fn, e := m.UnarchiveFn, m.UnarchiveErr
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, id)
+	}
+	return e
+}
+
 func (m *MockIssueBackend) Reopen(ctx context.Context, id string, params backend.ReopenParams) error {
 	m.mu.Lock()
 	m.record("Reopen", id, params)

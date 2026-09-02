@@ -198,6 +198,14 @@ func (b *Backend) Create(_ context.Context, _ backend.CreateParams) (*backend.Is
 	return nil, backend.ErrNotImplemented("AgentIPC.Create", "not supported by agent IPC backend")
 }
 
+func (b *Backend) Archive(_ context.Context, _ string, _ backend.ArchiveParams) error {
+	return backend.ErrNotImplemented("AgentIPC.Archive", "not supported by agent IPC backend")
+}
+
+func (b *Backend) Unarchive(_ context.Context, _ string) error {
+	return backend.ErrNotImplemented("AgentIPC.Unarchive", "not supported by agent IPC backend")
+}
+
 func (b *Backend) Reopen(_ context.Context, _ string, _ backend.ReopenParams) error {
 	return backend.ErrNotImplemented("AgentIPC.Reopen", "not supported by agent IPC backend")
 }

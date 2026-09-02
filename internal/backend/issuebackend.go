@@ -107,6 +107,19 @@ type IssueBackend interface {
 	// the issue does not exist.
 	Close(ctx context.Context, id string, params CloseParams) (*CloseResult, error)
 
+	// Archive moves an issue to the terminal "tombstone" status, hiding it
+	// from the default views without deleting it. Archive is idempotent: an
+	// already-archived issue is success, matching Close. Backends without a
+	// tombstone concept return KindNotImplemented. Returns KindValidation if
+	// id is empty, KindNotFound if the issue does not exist.
+	Archive(ctx context.Context, id string, params ArchiveParams) error
+
+	// Unarchive restores an archived issue to its pre-archive status. Unlike
+	// Archive this is strict — restoring an issue that was never archived is
+	// a real mistake, not a repeated request, and returns KindConflict.
+	// Backends without a tombstone concept return KindNotImplemented.
+	Unarchive(ctx context.Context, id string) error
+
 	// Reopen transitions a closed issue back to open status. If
 	// ReopenParams.Reason is non-empty, it is recorded as a comment on the
 	// issue. Returns KindNotFound if the issue does not exist.

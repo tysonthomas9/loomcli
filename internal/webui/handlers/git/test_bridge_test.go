@@ -83,6 +83,14 @@ func (s *stubGraphBackend) UndeferIssue(_ context.Context, _ string) error {
 func (s *stubGraphBackend) Close(_ context.Context, _ string, _ backend.CloseParams) (*backend.CloseResult, error) {
 	return nil, fmt.Errorf("Close not implemented in stubGraphBackend")
 }
+func (s *stubGraphBackend) Archive(_ context.Context, _ string, _ backend.ArchiveParams) error {
+	return fmt.Errorf("Archive not implemented in stubGraphBackend")
+}
+
+func (s *stubGraphBackend) Unarchive(_ context.Context, _ string) error {
+	return fmt.Errorf("Unarchive not implemented in stubGraphBackend")
+}
+
 func (s *stubGraphBackend) Reopen(_ context.Context, _ string, _ backend.ReopenParams) error {
 	return fmt.Errorf("Reopen not implemented in stubGraphBackend")
 }
