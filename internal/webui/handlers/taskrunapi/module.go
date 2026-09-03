@@ -74,6 +74,9 @@ type IssueBackendFactory func(ws, actor string) (backend.IssueBackend, error)
 // Config wires the module's dependencies.
 type Config struct {
 	Store store.Store
+	// OnSessionOpen receives successful lifecycle opens in the serve process.
+	// It is advisory live visibility only; AgentSessions remains authoritative.
+	OnSessionOpen func(store.SessionRunContext, store.SessionRef)
 	// FleetBaseURL is the fleet-db HTTP base URL used to build issue
 	// backends for the read-only task-get op.
 	FleetBaseURL string
@@ -87,6 +90,7 @@ type Config struct {
 // Module serves the workspace-scoped task-run routes.
 type Module struct {
 	store            store.Store
+	onSessionOpen    func(store.SessionRunContext, store.SessionRef)
 	issueBackends    IssueBackendFactory
 	localSettingsDir string
 	ops              map[string]opHandler
@@ -98,6 +102,7 @@ type Module struct {
 func NewModule(cfg Config) *Module {
 	m := &Module{
 		store:            cfg.Store,
+		onSessionOpen:    cfg.OnSessionOpen,
 		issueBackends:    cfg.IssueBackends,
 		localSettingsDir: strings.TrimSpace(cfg.LocalSettingsDir),
 		now:              func() time.Time { return time.Now().UTC() },
@@ -113,6 +118,8 @@ func NewModule(cfg Config) *Module {
 		"artifact-get":       m.artifactGet,
 		"artifact-list":      m.artifactList,
 		"artifact-finalize":  m.artifactFinalize,
+		"session-open":       m.sessionOpen,
+		"session-close":      m.sessionClose,
 	}
 	if m.issueBackends == nil {
 		m.issueBackends = defaultIssueBackends(cfg.FleetBaseURL)
@@ -449,6 +456,9 @@ func (m *Module) complete(ctx context.Context, ws string, id leaseIdentity, body
 	if err != nil {
 		return nil, err
 	}
+	if err := m.rejectBridgeLeafComplete(ctx, ws, id); err != nil {
+		return nil, err
+	}
 	complete := params.storeComplete(id, m.now())
 	run, err := m.store.TaskRuns().Complete(ctx, ws, id.TaskRunID, complete)
 	if err != nil {
@@ -461,6 +471,23 @@ func (m *Module) complete(ctx context.Context, ws string, id leaseIdentity, body
 		},
 		"taskRun": driverpkg.TaskRunResultFromDomain(run),
 	}, nil
+}
+
+// rejectBridgeLeafComplete preserves IPC result as the sole terminal path for
+// bridge-run task-plane leaves. The legacy complete op remains available to
+// non-bridge topologies, whose sessions are owned by the server backstop.
+func (m *Module) rejectBridgeLeafComplete(ctx context.Context, ws string, id leaseIdentity) error {
+	run, err := m.verifyLease(ctx, ws, id)
+	if err != nil {
+		// Preserve complete's existing store-owned not_owner/transition error
+		// mapping for invalid leases. Only valid bridge owners hit the policy
+		// rejection below.
+		return nil
+	}
+	if run.RuntimeMetadata["bridge_task_plane"] != "true" {
+		return nil
+	}
+	return fmt.Errorf("bridge task-plane leaves must return their IPC result instead of complete: %w", domain.ErrInvalidTransition)
 }
 
 // opError is the structured v2 error envelope, shape-identical to the
@@ -492,6 +519,16 @@ func writeOpErrorDetails(w http.ResponseWriter, status int, code, message string
 // superseded, or the run is no longer live) so runners distinguish "my lease
 // is dead" from op-level conflicts.
 func writeDomainOpError(w http.ResponseWriter, err error) {
+	var lifecycleErr *store.SessionLifecycleError
+	if errors.As(err, &lifecycleErr) {
+		writeOpError(w, http.StatusConflict, lifecycleErr.Code, lifecycleErr.Error(), lifecycleErr.Retryable())
+		return
+	}
+	var lifecycleTransient *store.SessionLifecycleTransientError
+	if errors.As(err, &lifecycleTransient) {
+		writeOpError(w, http.StatusServiceUnavailable, lifecycleTransient.Code, lifecycleTransient.Error(), lifecycleTransient.Retryable())
+		return
+	}
 	switch {
 	case errors.Is(err, errLeaseDenied):
 		writeOpError(w, http.StatusUnauthorized, "lease_denied", err.Error(), false)

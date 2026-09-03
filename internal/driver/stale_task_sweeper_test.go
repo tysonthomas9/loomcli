@@ -179,3 +179,41 @@ func TestStaleTaskSweeperRequiresStore(t *testing.T) {
 		t.Fatal("RunOnce with nil store: expected error, got nil")
 	}
 }
+
+func TestStaleTaskSweeperReconcilesSessionsInRecoveryPass(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
+		t.Fatalf("Create workspace: %v", err)
+	}
+	seedSweeperFixture(t, st, "WS", domain.DriverRunRunning, 10*time.Minute)
+	ref, err := st.AgentSessions().Open(ctx, store.SessionRunContext{
+		WorkspaceKey: "WS", TaskRunID: "task-run-1", Attempt: 1, FencingToken: 0,
+	}, store.SessionDescriptor{InvocationKey: "agent", Backend: "codex", Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("Open agent session: %v", err)
+	}
+	wrongFence, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS", SessionID: "stale-wrong-fence", AgentID: "codex", TaskRunID: "task-run-1",
+		InvocationKey: "wrong-fence", Status: domain.AgentSessionRunning, Attempt: 1,
+		Metadata: map[string]string{store.SessionMetadataFencingToken: "1"},
+	})
+	if err != nil {
+		t.Fatalf("Create wrong-fence session: %v", err)
+	}
+	result, err := (&StaleTaskSweeper{Store: st, WorkspaceKey: "WS", MaxAge: 5 * time.Minute}).RunOnce(ctx)
+	if err != nil || result.Recovered != 1 || result.ReconciledSessions != 1 {
+		t.Fatalf("RunOnce = %+v, %v", result, err)
+	}
+	session, err := st.AgentSessions().Get(ctx, "WS", ref.SessionID)
+	if err != nil {
+		t.Fatalf("Get agent session: %v", err)
+	}
+	if session.Status != domain.AgentSessionFailed || session.ErrorClass != staleTaskRunErrorClass || session.Metadata["finalized_by"] != SessionFinalizedByStale {
+		t.Fatalf("stale-reconciled session = %+v", session)
+	}
+	untouched, err := st.AgentSessions().Get(ctx, "WS", wrongFence.SessionID)
+	if err != nil || untouched.Status != domain.AgentSessionRunning {
+		t.Fatalf("wrong-fence stale session changed: session=%+v err=%v", untouched, err)
+	}
+}

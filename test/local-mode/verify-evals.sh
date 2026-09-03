@@ -234,6 +234,37 @@ assert_session_evals_empty() {
   '
 }
 
+assert_preflight_task_runs_have_no_sessions() {
+  task_runs_json="$(fleet_get "api/v1/${WORKSPACE}/task-runs?task_id=session-eval-preflight&limit=1000")"
+  sessions_json="$(fleet_get "api/v1/${WORKSPACE}/agent-sessions?limit=1000")"
+  assert_jq "preflight TaskRuns produce no sessions" "$sessions_json" \
+    --argjson task_runs "$task_runs_json" '
+      [($task_runs.task_runs // [])[]?.task_run_id | select(type == "string" and length > 0)] as $preflight_ids |
+      ($preflight_ids | length) > 0 and
+      all(.agent_sessions[]?; (.task_run_id // "") as $task_run_id | ($preflight_ids | index($task_run_id)) == null)
+    '
+}
+
+assert_no_legacy_flue_session_ids() {
+  sessions_json="$(fleet_get "api/v1/${WORKSPACE}/agent-sessions?limit=1000")"
+  assert_jq "no session id has the legacy flue- prefix" "$sessions_json" '
+    all(.agent_sessions[]?; ((.session_id // "") | startswith("flue-") | not))
+  '
+}
+
+judge_session_matches_selected() {
+  sid="$1"
+  fleet_get "api/v1/${WORKSPACE}/agent-sessions?kind=judge&status=completed&limit=1000" |
+    jq -e --arg sid "$sid" --arg prompt "$PROMPT_VERSION" '
+      any(
+        .agent_sessions[]?;
+        .kind == "judge" and
+        ((.metadata // {}).judged_session_id // "") == $sid and
+        ((.metadata // {}).judge_prompt_version // "") == $prompt
+      )
+    ' >/dev/null
+}
+
 find_completed_task_session_with_ref() {
   fleet_get "api/v1/${WORKSPACE}/agent-sessions?status=completed&limit=1000" |
     jq -r '
@@ -329,6 +360,15 @@ assert_session_eval_status_done() {
     '
 }
 
+assert_eval_cost_total_tokens() {
+  sid="$1"
+  eval_id="eval-${sid}-${PROMPT_VERSION}"
+  eval_json="$(fleet_get "api/v1/${WORKSPACE}/session-evals/${eval_id}")"
+  assert_jq "codex eval_cost.total_tokens is greater than zero" "$eval_json" '
+    (.eval_cost.total_tokens | type == "number" and . > 0)
+  '
+}
+
 assert_eval_rollup_populated() {
   rollup_json="$(api_get "api/workspaces/${WORKSPACE}/eval-rollup")"
   assert_jq "eval-rollup reflects at least one eval" "$rollup_json" '
@@ -339,6 +379,25 @@ assert_eval_rollup_populated() {
 
 browser_text() {
   agent-browser --profile "$AGENT_BROWSER_PROFILE" get text body
+}
+
+# browser_text_until <grep-args...> — poll the page body until the pattern
+# appears (cold profiles need several seconds for chunks + data to load).
+# Prints the final body; succeeds iff the pattern matched within the budget.
+browser_text_until() {
+  attempt=0
+  body=""
+  while [ "$attempt" -lt 6 ]; do
+    agent-browser --profile "$AGENT_BROWSER_PROFILE" wait 2500 >/dev/null
+    body="$(browser_text)"
+    if printf '%s' "$body" | grep "$@" >/dev/null; then
+      printf '%s' "$body"
+      return 0
+    fi
+    attempt=$((attempt + 1))
+  done
+  printf '%s' "$body"
+  return 1
 }
 
 run_ui_assertions() {
@@ -355,9 +414,7 @@ run_ui_assertions() {
   traces_url="${UI_URL}/ws/${WORKSPACE}/traces?range=30d&status=completed&kind=task"
   log "UI: opening Traces view ${traces_url}"
   agent-browser --profile "$AGENT_BROWSER_PROFILE" open "$traces_url" >/dev/null
-  agent-browser --profile "$AGENT_BROWSER_PROFILE" wait 3000 >/dev/null
-  traces_body="$(browser_text)"
-  if ! printf '%s' "$traces_body" | grep -F "$short_sid" >/dev/null; then
+  if ! traces_body="$(browser_text_until -F "$short_sid")"; then
     printf '%s\n' "$traces_body" >"$EVALS_WORKDIR/traces-body.txt"
     fatal "UI Traces list did not show selected session ${sid}"
   fi
@@ -366,8 +423,7 @@ run_ui_assertions() {
   if agent-browser --profile "$AGENT_BROWSER_PROFILE" find text "$short_sid" click >/dev/null 2>&1; then
     agent-browser --profile "$AGENT_BROWSER_PROFILE" wait 3000 >/dev/null
   fi
-  traces_body="$(browser_text)"
-  if ! printf '%s' "$traces_body" | grep -E "Transcript|assistant|system|tool" >/dev/null; then
+  if ! traces_body="$(browser_text_until -E "Transcript|assistant|system|tool")"; then
     printf '%s\n' "$traces_body" >"$EVALS_WORKDIR/traces-detail-body.txt"
     fatal "UI Traces drill-in did not render transcript content"
   fi
@@ -376,9 +432,7 @@ run_ui_assertions() {
   obs_url="${UI_URL}/ws/${WORKSPACE}/observability"
   log "UI: opening Observability dashboard ${obs_url}"
   agent-browser --profile "$AGENT_BROWSER_PROFILE" open "$obs_url" >/dev/null
-  agent-browser --profile "$AGENT_BROWSER_PROFILE" wait 3000 >/dev/null
-  obs_body="$(browser_text)"
-  if ! printf '%s' "$obs_body" | grep -F "Hourly Completions" >/dev/null ||
+  if ! obs_body="$(browser_text_until -F "Hourly Completions")" ||
     ! printf '%s' "$obs_body" | grep -F "Agent Utilization" >/dev/null; then
     printf '%s\n' "$obs_body" >"$EVALS_WORKDIR/observability-body.txt"
     fatal "UI Observability dashboard did not render populated panels"
@@ -408,6 +462,8 @@ run_plain() {
   wait_for "cron tick produced eval_backend_unavailable driver run" "$CRON_TIMEOUT_SECONDS" eval_backend_unavailable_run_exists
   assert_no_eval_status_stamps
   assert_session_evals_empty
+  wait_for "preflight TaskRuns produce no sessions" "$CRON_TIMEOUT_SECONDS" assert_preflight_task_runs_have_no_sessions
+  assert_no_legacy_flue_session_ids
   wait_for "deterministic completed task session with transcript_ref exists" "$TIMEOUT_SECONDS" find_completed_task_session_with_ref
   select_completed_task_session_with_ref
   assert_workspace_sessions_read_path "$SELECTED_SESSION_ID"
@@ -425,6 +481,10 @@ run_codex() {
   select_completed_task_session_with_ref
   assert_workspace_sessions_read_path "$SELECTED_SESSION_ID"
   wait_for "session eval record exists and has valid scores, tags, model, rationales, and cost" "$CRON_TIMEOUT_SECONDS" session_eval_record_valid "$SELECTED_SESSION_ID"
+  wait_for "preflight TaskRuns produce no sessions" "$CRON_TIMEOUT_SECONDS" assert_preflight_task_runs_have_no_sessions
+  wait_for "judge session has kind=judge and judged-session metadata" "$CRON_TIMEOUT_SECONDS" judge_session_matches_selected "$SELECTED_SESSION_ID"
+  assert_eval_cost_total_tokens "$SELECTED_SESSION_ID"
+  assert_no_legacy_flue_session_ids
   assert_session_eval_status_done "$SELECTED_SESSION_ID"
   assert_eval_rollup_populated
   run_ui_assertions "$SELECTED_SESSION_ID"

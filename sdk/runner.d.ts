@@ -233,12 +233,118 @@ export interface RuntimeCredentialResponse {
   [key: string]: unknown;
 }
 
+export type AgentSessionKind = "task" | "judge" | "orchestration" | "terminal" | "maintenance" | "ad_hoc" | string;
+
+export interface AgentSessionOpenInput {
+  invocationKey: string;
+  backend: string;
+  /** Omit only when the backend truthfully has no model label; SDK sends "unknown". */
+  model?: string;
+  parentSessionId?: string;
+  kind?: AgentSessionKind;
+  tags?: string[];
+  metadata?: Record<string, string | number | boolean>;
+}
+
+export interface AgentSessionOpenResult {
+  sessionId: string;
+  attempt: number;
+}
+
+export interface AgentSessionUsage {
+  tokens?: number | null;
+  cost?: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  cacheReadTokens?: number | null;
+  cacheWriteTokens?: number | null;
+}
+
+export interface AgentSessionCloseInput {
+  sessionId: string;
+  status: "completed" | "failed" | "cancelled" | string;
+  exitCode?: number | null;
+  summary?: string;
+  usage?: AgentSessionUsage | null;
+  transcriptRef?: string | null;
+  /** Set driver_runner_session_id here when the backend exposes its native session id. */
+  metadata?: Record<string, string | number | boolean>;
+}
+
+export interface AgentSessionCloseResult {
+  sessionId: string;
+  status: string;
+}
+
+export interface AgentExecSpec {
+  invocationKey: string;
+  backend: string;
+  model?: string;
+  parentSessionId?: string;
+  kind?: AgentSessionKind;
+  tags?: string[];
+  metadata?: Record<string, string | number | boolean>;
+  /** The process form is deliberately required and disjoint from future invoke. */
+  argv: string[];
+  cwd?: string;
+  env?: Record<string, string | undefined>;
+  stdin?: string | Uint8Array;
+  timeoutMs?: number;
+  live?: boolean;
+  transcript?: "stream-json" | "minimal" | "none";
+  /** Explicit values redacted from transcript entries/upload only; returned stdout/stderr stay raw. The SDK never guesses secrets from env. */
+  redactSecrets?: string[] | Record<string, string>;
+  /** Retries after the first open attempt; default 2. */
+  openRetries?: number;
+  close?: "auto" | "deferred";
+}
+
+export interface AgentExecSession {
+  id: string | null;
+  attempt: number | null;
+  transcriptRef: string | null;
+  opened: boolean;
+  closed: boolean;
+  degraded: boolean;
+  /** Machine-readable first observability failure code, or null when healthy. */
+  degradedReason: string | null;
+}
+
+export interface AgentExecFinalizeInput {
+  status?: "completed" | "failed" | "cancelled" | string;
+  summary?: string;
+  metadata?: Record<string, string | number | boolean>;
+}
+
+export interface AgentExecResult {
+  exitCode: number | null;
+  timedOut: boolean;
+  spawnError: string | null;
+  /** Raw process stdout; redactSecrets does not alter this leaf-facing value. */
+  stdout: string;
+  /** Raw process stderr; redactSecrets does not alter this leaf-facing value. */
+  stderr: string;
+  durationMs: number;
+  entries: Record<string, unknown>[];
+  usage: AgentSessionUsage | null;
+  /** Backend-reported stream failure, when the process itself exited cleanly. */
+  streamError: string;
+  session: AgentExecSession;
+  /** Merge this into the leaf's TaskRun runtimeMetadata on completion. */
+  runtimeMetadata: Record<string, string>;
+  finalize?: (input?: AgentExecFinalizeInput) => Promise<{ ok: boolean }>;
+}
+
 export declare class LoomAPIError extends Error {
   status: number;
   code: string;
+  retryable: boolean;
   details?: unknown;
   responseBody: string;
 }
+
+/** Thrown only for invalid agent.exec caller input, never process failures. */
+export declare class AgentExecSpecError extends Error {}
 
 export declare class TaskRunClient {
   static fromEnv(env?: NodeJS.ProcessEnv | Record<string, string | undefined>, options?: TaskRunClientOptions): TaskRunClient;
@@ -265,6 +371,13 @@ export declare class TaskRunClient {
   readonly runtimeCredentials: {
     get(input: { provider: "daytona" | "github" | string }, options?: { signal?: AbortSignal }): Promise<RuntimeCredentialResponse>;
   };
+  /**
+   * Agent Invocation helpers. agent.exec opens sessions only for AGENT
+   * invocations; never use it to capture deterministic commands.
+   */
+  readonly agent: {
+    exec(spec: AgentExecSpec): Promise<AgentExecResult>;
+  };
 
   constructor(options: TaskRunClientOptions);
   request<T = Record<string, unknown>>(): T;
@@ -279,6 +392,9 @@ export declare class TaskRunClient {
   uploadArtifactContent(artifactId: string, content: RunnerBodyInit, options?: ArtifactUploadOptions): Promise<Artifact>;
   finalizeArtifact(artifactId: string, input?: ArtifactFinalizeInput, options?: { signal?: AbortSignal }): Promise<Artifact>;
   getRuntimeCredential(input: { provider: "daytona" | "github" | string }, options?: { signal?: AbortSignal }): Promise<RuntimeCredentialResponse>;
+  sessionOpen(input: AgentSessionOpenInput, options?: { signal?: AbortSignal }): Promise<AgentSessionOpenResult>;
+  sessionClose(input: AgentSessionCloseInput, options?: { signal?: AbortSignal }): Promise<AgentSessionCloseResult>;
+  /** Non-bridge topologies only; bridge task-plane leaves return an IPC result instead. */
   completeRun(input?: CompleteRunInput, options?: { signal?: AbortSignal }): Promise<CompleteRunResponse>;
 }
 

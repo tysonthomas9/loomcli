@@ -101,8 +101,6 @@ func (app *Server) buildTerminalModules() {
 // buildInfraModules adds fleet, diff, file, and agent control modules
 // when their dependencies are available.
 func (app *Server) buildInfraModules() {
-	storeBacked := app.config.Store != nil
-
 	if app.fleetRegistry != nil {
 		app.wsModules = append(app.wsModules,
 			appinfra.NewFleetModule(app.fleetRegistry, app.tokenCfg,
@@ -122,35 +120,41 @@ func (app *Server) buildInfraModules() {
 		}))
 	}
 
-	if storeBacked {
-		app.connectorDispatcher = app.buildConnectorDispatcher()
-		app.wsModules = append(app.wsModules, agents.NewModule(app.agentSvc, app.hub))
-		app.wsModules = append(app.wsModules, onboarding.NewModule(app.issueSvc, app.agentSvc))
-		app.wsModules = append(app.wsModules, workflows.NewModule(app.config.Store))
-		app.wsModules = append(app.wsModules, webhooks.NewModule(app.config.Store))
-		prReviewModule := modbuilder.NewPRReviewModule(
-			app.config.Store, app.connectorDispatcher, app.agentSvc, app.termSvc, app.config.LocalSettingsDir,
-		)
-		app.prReviewCredentialSeeds = prReviewModule
-		app.wsModules = append(app.wsModules, prReviewModule)
-		app.wsModules = append(app.wsModules, modbuilder.NewApprovalsModule(app.config.Store))
-		app.wsModules = append(app.wsModules, modbuilder.NewEvalAdminModule(app.config.Store))
-		app.wsModules = append(app.wsModules, modbuilder.NewTaskRunAPIModule(app.config.Store, app.config.FleetDBBaseURL, app.config.LocalSettingsDir))
-		app.wsModules = append(app.wsModules, driverapi.NewModule(driverapi.Config{
-			Store:            app.config.Store,
-			FleetBaseURL:     app.config.FleetDBBaseURL,
-			APIBaseURL:       app.config.DriverAPIBaseURL,
-			APIToken:         app.config.DriverAPIToken,
-			RunTokenKey:      app.config.DriverRunTokenKey,
-			LocalSettingsDir: app.config.LocalSettingsDir,
-			Dispatcher:       app.connectorDispatcher,
-		}))
-	} else {
-		// Without a store there is no connector-backed prreview module, so
-		// keep the gh-backed pull-request list route available.
-		app.wsModules = append(app.wsModules, githandlers.NewPullRequestListModule(app.agentSvc))
-		if app.config.AgentControlFn != nil {
-			app.wsModules = append(app.wsModules, webui.NewAgentControlModule(app.config.AgentControlFn))
-		}
+	if app.config.Store != nil {
+		app.buildStoreBackedInfraModules()
+		return
 	}
+	// Without a store there is no connector-backed prreview module, so keep
+	// the gh-backed pull-request list route available.
+	app.wsModules = append(app.wsModules, githandlers.NewPullRequestListModule(app.agentSvc))
+	if app.config.AgentControlFn != nil {
+		app.wsModules = append(app.wsModules, webui.NewAgentControlModule(app.config.AgentControlFn))
+	}
+}
+
+func (app *Server) buildStoreBackedInfraModules() {
+	if app.sessionOpenRegistry == nil {
+		app.sessionOpenRegistry = app.config.EnsureSessionOpenRegistry()
+	}
+	app.connectorDispatcher = app.buildConnectorDispatcher()
+	app.wsModules = append(app.wsModules, agents.NewModule(app.agentSvc, app.hub))
+	app.wsModules = append(app.wsModules, onboarding.NewModule(app.issueSvc, app.agentSvc))
+	app.wsModules = append(app.wsModules, workflows.NewModule(app.config.Store))
+	app.wsModules = append(app.wsModules, webhooks.NewModule(app.config.Store))
+	prReviewModule := modbuilder.NewPRReviewModule(
+		app.config.Store, app.connectorDispatcher, app.agentSvc, app.termSvc, app.config.LocalSettingsDir,
+	)
+	app.prReviewCredentialSeeds = prReviewModule
+	app.wsModules = append(app.wsModules, prReviewModule)
+	app.wsModules = append(app.wsModules, modbuilder.NewApprovalsModule(app.config.Store))
+	app.wsModules = append(app.wsModules, modbuilder.NewEvalAdminModule(app.config.Store))
+	app.wsModules = append(app.wsModules, modbuilder.NewTaskRunAPIModule(
+		app.config.Store, app.config.FleetDBBaseURL, app.config.LocalSettingsDir, app.sessionOpenRegistry.Record,
+	))
+	app.wsModules = append(app.wsModules, driverapi.NewModule(driverapi.Config{
+		Store: app.config.Store, FleetBaseURL: app.config.FleetDBBaseURL, APIBaseURL: app.config.DriverAPIBaseURL,
+		APIToken: app.config.DriverAPIToken, RunTokenKey: app.config.DriverRunTokenKey,
+		LocalSettingsDir: app.config.LocalSettingsDir, Dispatcher: app.connectorDispatcher,
+		SessionOpenRegistry: app.sessionOpenRegistry,
+	}))
 }

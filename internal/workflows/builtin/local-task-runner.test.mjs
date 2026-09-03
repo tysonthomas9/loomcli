@@ -3,19 +3,16 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, it } from "node:test";
+import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 
 import {
   backendArgs,
   parseNumstat,
   parseRepoSlug,
-  parseStreamJSONTranscript,
-  redactSecretsInText,
   resolveBackend,
   resolveBinary,
   run,
   scrubToken,
-  taskUsageFromEntries,
 } from "./local-task-runner.ts";
 
 // A fake backend CLI that (optionally) writes a file into its cwd, emits
@@ -113,10 +110,53 @@ const ENV_KEYS = [
   "LOOM_COST_PER_MTOK_OUTPUT",
   "LOOM_TASK_RUNNER_STREAM_STDERR",
   "LOOM_TASK_RUN_PROMPT",
+  "LOOM_TASK_RUN_API_URL",
+  "LOOM_WORKSPACE",
+  "LOOM_TASK_RUN_ID",
+  "LOOM_TASK_ID",
+  "LOOM_TASK_RUN_NODE_ID",
+  "LOOM_TASK_RUN_LEASE_ID",
+  "LOOM_TASK_RUN_LEASE_TOKEN",
+  "LOOM_TASK_RUN_FENCING_TOKEN",
 ];
 
 // PATH is mutated by some tests; save/restore it separately so git stays callable.
 let savedPath;
+let taskRunAPIURL;
+let savedFetch;
+
+before(() => {
+  savedFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const requestURL = new URL(url);
+    const raw = String(init.body || "");
+    let body = {};
+    try {
+      body = raw ? JSON.parse(raw) : {};
+    } catch {
+      // Transcript uploads are NDJSON rather than a single JSON object.
+    }
+    const reply = (payload) => {
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+    if (requestURL.pathname.endsWith("/task-get")) return reply({ task: { id: "T-1" } });
+    if (requestURL.pathname.endsWith("/session-open")) return reply({ sessionId: "tr-1-a1-agent", attempt: 1 });
+    if (requestURL.pathname.endsWith("/artifact-declare")) return reply({ artifactId: body.artifactId || "transcript-tr-1-a1-agent", type: "agent-transcript", durableStatus: "declared" });
+    if (requestURL.pathname.includes("/artifacts/") && requestURL.pathname.endsWith("/content")) return reply({ artifactId: "transcript-tr-1-a1-agent", durableStatus: "uploaded" });
+    if (requestURL.pathname.endsWith("/artifact-finalize")) return reply({ artifactId: body.artifactId || "transcript-tr-1-a1-agent", durableStatus: "finalized" });
+    if (requestURL.pathname.endsWith("/session-close")) return reply({ sessionId: "tr-1-a1-agent", status: "completed" });
+    if (requestURL.pathname.endsWith("/heartbeat")) return reply({ taskRunId: "tr-1", status: "running" });
+    return new Response("not found", { status: 404 });
+  };
+  taskRunAPIURL = "http://task-run-api.test";
+});
+
+after(() => {
+  globalThis.fetch = savedFetch;
+});
 
 function setEnv(key, value) {
   if (value === undefined) {
@@ -158,6 +198,14 @@ beforeEach(() => {
     workspace_key: "ws",
     input: { title: "Do the thing" },
   }));
+  setEnv("LOOM_TASK_RUN_API_URL", taskRunAPIURL);
+  setEnv("LOOM_WORKSPACE", "ws");
+  setEnv("LOOM_TASK_RUN_ID", "tr-1");
+  setEnv("LOOM_TASK_ID", "T-1");
+  setEnv("LOOM_TASK_RUN_NODE_ID", "node-1");
+  setEnv("LOOM_TASK_RUN_LEASE_ID", "lease-1");
+  setEnv("LOOM_TASK_RUN_LEASE_TOKEN", "lease-token");
+  setEnv("LOOM_TASK_RUN_FENCING_TOKEN", "1");
 });
 
 afterEach(() => {
@@ -280,280 +328,9 @@ describe("local-task-runner pure helpers", () => {
     });
   });
 
-  it("parseStreamJSONTranscript extracts claude assistant text", () => {
-    const line = JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "hi" }] } });
-    const entries = parseStreamJSONTranscript("claude", line + "\n");
-    assert.equal(entries[0].type, "session_meta");
-    assert.ok(entries.some((e) => e.role === "assistant" && e.text === "hi"));
-  });
-
-  it("parseStreamJSONTranscript handles the real codex item.completed shape", () => {
-    // Real `codex exec --json` nests agent output under item.completed; the
-    // simplified flat fake event never matched the original outer-type parser,
-    // which is why the dropped-output gap went unnoticed.
-    const lines = [
-      JSON.stringify({ type: "thread.started", thread_id: "abc" }),
-      JSON.stringify({ type: "turn.started" }),
-      JSON.stringify({
-        type: "item.completed",
-        item: { id: "i1", type: "command_execution", command: "ls", aggregated_output: "x", exit_code: 0, status: "completed" },
-      }),
-      JSON.stringify({
-        type: "item.completed",
-        item: { id: "i2", type: "agent_message", text: "did the work" },
-      }),
-      JSON.stringify({ type: "turn.completed", usage: {} }),
-    ].join("\n");
-    const entries = parseStreamJSONTranscript("codex", lines + "\n");
-    assert.equal(entries[0].type, "session_meta");
-    // agent_message -> assistant/text
-    assert.ok(
-      entries.some((e) => e.role === "assistant" && e.type === "text" && e.text === "did the work"),
-      "expected an assistant text entry from item.completed agent_message",
-    );
-    // command_execution -> assistant/tool_use (shell)
-    const toolUse = entries.find((e) => e.type === "tool_use");
-    assert.ok(toolUse, "expected a tool_use entry from item.completed command_execution");
-    assert.equal(toolUse.role, "assistant");
-    assert.equal(toolUse.tool_name, "shell");
-    assert.equal(toolUse.tool_input.command, "ls");
-    assert.equal(toolUse.output, "x");
-  });
-
-  it("parseStreamJSONTranscript surfaces codex reasoning items", () => {
-    const line = JSON.stringify({ type: "item.completed", item: { type: "reasoning", text: "thinking" } });
-    const entries = parseStreamJSONTranscript("codex", line + "\n");
-    assert.ok(entries.some((e) => e.role === "assistant" && e.type === "reasoning" && e.text === "thinking"));
-  });
-
-  it("parseStreamJSONTranscript still supports the flat codex fallback shape", () => {
-    const line = JSON.stringify({ type: "agent_message", text: "flat output" });
-    const entries = parseStreamJSONTranscript("codex", line + "\n");
-    assert.ok(entries.some((e) => e.role === "assistant" && e.type === "text" && e.text === "flat output"));
-  });
-
-  it("parseStreamJSONTranscript parses cursor assistant text + tool_call events", () => {
-    const lines = [
-      JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "creating it" }] } }),
-      JSON.stringify({
-        type: "tool_call",
-        subtype: "completed",
-        call_id: "tc1",
-        tool_call: { editToolCall: { args: { path: "hello.md" }, result: { success: { message: "wrote hello.md" } } }, toolCallId: "tc1" },
-      }),
-    ].join("\n");
-    const entries = parseStreamJSONTranscript("cursor", lines + "\n");
-    assert.equal(entries[0].type, "session_meta");
-    assert.ok(entries.some((e) => e.role === "assistant" && e.type === "text" && e.text === "creating it"));
-    const tool = entries.find((e) => e.type === "tool_use");
-    assert.ok(tool, "expected a tool_use entry from the cursor tool_call event");
-    assert.equal(tool.tool_name, "edit");
-    assert.equal(tool.tool_input.path, "hello.md");
-    assert.ok(String(tool.output).includes("wrote hello.md"));
-  });
-
-  it("parseStreamJSONTranscript parses opencode text + tool_use events", () => {
-    const lines = [
-      JSON.stringify({ type: "text", part: { type: "text", text: "done" } }),
-      JSON.stringify({
-        type: "tool_use",
-        part: { type: "tool", tool: "apply_patch", callID: "c1", state: { status: "completed", input: { patchText: "X" }, output: "Success" } },
-      }),
-    ].join("\n");
-    const entries = parseStreamJSONTranscript("opencode", lines + "\n");
-    assert.equal(entries[0].type, "session_meta");
-    assert.ok(entries.some((e) => e.role === "assistant" && e.type === "text" && e.text === "done"));
-    const tool = entries.find((e) => e.type === "tool_use");
-    assert.ok(tool, "expected a tool_use entry from the opencode tool_use event");
-    assert.equal(tool.tool_name, "apply_patch");
-    assert.equal(tool.tool_input.patchText, "X");
-    assert.equal(tool.output, "Success");
-  });
-
-  it("parseStreamJSONTranscript records codex file_change, dedupes item.started, and emits usage", () => {
-    const lines = [
-      JSON.stringify({ type: "item.started", item: { type: "command_execution", command: "cat hello.md" } }),
-      JSON.stringify({ type: "item.completed", item: { type: "file_change", changes: [{ path: "hello.md", kind: "add" }], status: "completed" } }),
-      JSON.stringify({ type: "item.completed", item: { type: "command_execution", command: "cat hello.md", aggregated_output: "hi\n", exit_code: 0, status: "completed" } }),
-      JSON.stringify({ type: "turn.completed", usage: { input_tokens: 100, output_tokens: 20, reasoning_output_tokens: 5 } }),
-    ].join("\n");
-    const entries = parseStreamJSONTranscript("codex", lines + "\n");
-    // file_change is recorded as an apply_patch tool_use
-    const fc = entries.find((e) => e.type === "tool_use" && e.tool_name === "apply_patch");
-    assert.ok(fc, "expected file_change to produce an apply_patch tool_use");
-    assert.equal(fc.tool_input.changes[0].path, "hello.md");
-    assert.equal(fc.tool_input.changes[0].kind, "add");
-    // the cat command appears exactly once (item.started deduped), output preserved incl. newline
-    const shells = entries.filter((e) => e.type === "tool_use" && e.tool_name === "shell");
-    assert.equal(shells.length, 1, "item.started must not duplicate the shell call");
-    assert.equal(shells[0].output, "hi\n");
-    // terminal usage entry
-    const result = entries.find((e) => e.type === "result");
-    assert.ok(result && /in=100/.test(result.text) && /out=20/.test(result.text), "expected a usage result entry");
-  });
-
-  it("parseStreamJSONTranscript captures claude tool_result outputs + thinking", () => {
-    const lines = [
-      JSON.stringify({ type: "assistant", message: { content: [{ type: "thinking", thinking: "let me plan" }, { type: "tool_use", id: "t1", name: "Read", input: { file_path: "hello.md" } }] } }),
-      JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "1\thi from claude\n" }] } }),
-      JSON.stringify({ type: "result", subtype: "success", is_error: false, num_turns: 3, total_cost_usd: 0.18, usage: { input_tokens: 8000, output_tokens: 300 } }),
-    ].join("\n");
-    const entries = parseStreamJSONTranscript("claude", lines + "\n");
-    // thinking -> reasoning
-    assert.ok(entries.some((e) => e.type === "reasoning" && e.text === "let me plan"));
-    // tool_result (the read-back content) is captured as a tool/output entry
-    const tr = entries.find((e) => e.type === "tool_result");
-    assert.ok(tr, "expected a tool_result entry");
-    assert.equal(tr.role, "tool");
-    assert.equal(tr.tool_use_id, "t1");
-    assert.ok(tr.output.includes("hi from claude"), "the read-back content must survive");
-    // result entry with usage + cost
-    const result = entries.find((e) => e.type === "result");
-    assert.ok(result && /cost=0.18/.test(result.text) && /turns=3/.test(result.text));
-  });
-
-  it("parseStreamJSONTranscript merges cursor started+completed (keeps read input + invocation order)", () => {
-    const lines = [
-      JSON.stringify({ type: "tool_call", subtype: "started", call_id: "e1", tool_call: { editToolCall: { args: { path: "hello.md", streamContent: "hi\n" } }, toolCallId: "e1" } }),
-      JSON.stringify({ type: "tool_call", subtype: "started", call_id: "r1", tool_call: { readToolCall: { args: { path: "hello.md" } }, toolCallId: "r1" } }),
-      JSON.stringify({ type: "tool_call", subtype: "completed", call_id: "r1", tool_call: { readToolCall: { result: { error: { errorMessage: "File not found" } } }, toolCallId: "r1" } }),
-      JSON.stringify({ type: "tool_call", subtype: "completed", call_id: "e1", tool_call: { editToolCall: { result: { success: { message: "wrote" } } }, toolCallId: "e1" } }),
-    ].join("\n");
-    const entries = parseStreamJSONTranscript("cursor", lines + "\n");
-    const tools = entries.filter((e) => e.type === "tool_use");
-    // exactly two tool entries (merged, not duplicated by started/completed)
-    assert.equal(tools.length, 2);
-    // invocation order: edit issued first, then read (even though read completed first)
-    assert.equal(tools[0].tool_name, "edit");
-    assert.equal(tools[1].tool_name, "read");
-    // the read's input path (only on the started event) is preserved
-    assert.equal(tools[1].tool_input.path, "hello.md");
-    // results merged onto the right calls; the failed read is marked, the edit is not
-    assert.ok(String(tools[0].output).includes("wrote"));
-    assert.ok(!tools[0].output.startsWith("[error] "), "successful edit must not be marked");
-    assert.ok(String(tools[1].output).includes("File not found"));
-    assert.ok(tools[1].output.startsWith("[error] "), "failed read must be marked [error]");
-  });
-
-  it("parseStreamJSONTranscript keeps opencode error tool states (marked, not dropped) + accumulates usage", () => {
-    const lines = [
-      JSON.stringify({ type: "tool_use", part: { type: "tool", tool: "bash", callID: "b1", state: { status: "error", input: { command: "false" }, error: "exit 1" } } }),
-      JSON.stringify({ type: "step_finish", part: { reason: "tool-calls", tokens: { input: 100, output: 10, reasoning: 7, cache: { read: 50 } }, cost: 0.01 } }),
-      JSON.stringify({ type: "step_finish", part: { reason: "stop", tokens: { input: 20, output: 5, reasoning: 0, cache: { read: 50 } }, cost: 0.02 } }),
-    ].join("\n");
-    const entries = parseStreamJSONTranscript("opencode", lines + "\n");
-    // failed tool is present, not dropped, and marked
-    const tool = entries.find((e) => e.type === "tool_use");
-    assert.ok(tool, "error tool state must not be dropped");
-    assert.ok(tool.output.startsWith("[error] "), "error tool must be marked");
-    // usage: input/output/reasoning/cost summed, cache_read taken latest (not doubled)
-    const result = entries.find((e) => e.type === "result");
-    const usage = JSON.parse(result.output);
-    assert.equal(usage.input_tokens, 120);
-    assert.equal(usage.output_tokens, 15);
-    assert.equal(usage.reasoning_tokens, 7);
-    assert.equal(usage.cache_read_tokens, 50, "cache_read must be latest, not summed");
-  });
-
-  it("parseStreamJSONTranscript surfaces an opencode fatal stream error", () => {
-    const entries = parseStreamJSONTranscript("opencode", JSON.stringify({ type: "error", error: { message: "model overloaded" } }) + "\n");
-    const result = entries.find((e) => e.type === "result");
-    assert.ok(result && result.text.startsWith("failed: model overloaded"), "error event must mark the run failed");
-  });
-
-  it("parseStreamJSONTranscript accepts cursor usage in snake_case too", () => {
-    const entries = parseStreamJSONTranscript("cursor", JSON.stringify({ type: "result", is_error: false, usage: { input_tokens: 11, output_tokens: 2 } }) + "\n");
-    const result = entries.find((e) => e.type === "result");
-    assert.ok(result && /in=11/.test(result.text) && /out=2/.test(result.text), "snake_case usage must not be silently dropped");
-  });
-
-  it("parseStreamJSONTranscript parses gemini candidates text + usageMetadata usage", () => {
-    const lines = [
-      JSON.stringify({ candidates: [{ content: { parts: [{ text: "gemini says hi" }] } }] }),
-      JSON.stringify({ candidates: [{ content: { parts: [{ text: " and more" }] } }], usageMetadata: { promptTokenCount: 200, candidatesTokenCount: 40 } }),
-    ].join("\n");
-    const entries = parseStreamJSONTranscript("gemini", lines + "\n");
-    const texts = entries.filter((e) => e.type === "text").map((e) => e.text);
-    assert.deepEqual(texts, ["gemini says hi", " and more"]);
-    // Google-native usageMetadata maps to top-level token fields (was zero before).
-    const usage = taskUsageFromEntries(entries);
-    assert.equal(usage.input_tokens, 200);
-    assert.equal(usage.output_tokens, 40);
-  });
-
-  it("parseStreamJSONTranscript accepts gemini OpenAI-compatible usage too", () => {
-    const entries = parseStreamJSONTranscript("gemini", JSON.stringify({ type: "result", usage: { input_tokens: 12, output_tokens: 3 } }) + "\n");
-    const usage = taskUsageFromEntries(entries);
-    assert.equal(usage.input_tokens, 12);
-    assert.equal(usage.output_tokens, 3);
-  });
-
-  it("parseStreamJSONTranscript never emits a non-RFC3339 timestamp (bad stamp cannot poison the decode)", () => {
-    const entries = parseStreamJSONTranscript("claude", JSON.stringify({ type: "user", timestamp: "not-a-date", message: { content: [{ type: "tool_result", tool_use_id: "t", content: "x" }] } }) + "\n");
-    for (const e of entries) {
-      assert.ok(!Number.isNaN(new Date(e.timestamp).getTime()), `entry timestamp must be valid RFC3339, got ${e.timestamp}`);
-    }
-  });
-
-  it("taskUsageFromEntries surfaces codex usage as top-level token fields", () => {
-    const entries = parseStreamJSONTranscript("codex", JSON.stringify({ type: "turn.completed", usage: { input_tokens: 100, output_tokens: 20, cached_input_tokens: 30, reasoning_output_tokens: 5 } }) + "\n");
-    const usage = taskUsageFromEntries(entries);
-    assert.equal(usage.input_tokens, 100);
-    assert.equal(usage.output_tokens, 20);
-    assert.equal(usage.cache_read_tokens, 30);
-    // reasoning/duration/turns have no fleet-db TaskRun column -> not surfaced top-level
-    assert.equal(usage.reasoning_tokens, undefined);
-  });
-
-  it("taskUsageFromEntries maps claude cost_usd to estimated_cost_usd", () => {
-    const entries = parseStreamJSONTranscript("claude", JSON.stringify({ type: "result", is_error: false, total_cost_usd: 0.18, usage: { input_tokens: 8000, output_tokens: 300, cache_read_input_tokens: 12, cache_creation_input_tokens: 7 } }) + "\n");
-    const usage = taskUsageFromEntries(entries);
-    assert.equal(usage.input_tokens, 8000);
-    assert.equal(usage.output_tokens, 300);
-    assert.equal(usage.cache_read_tokens, 12);
-    assert.equal(usage.cache_write_tokens, 7);
-    assert.equal(usage.estimated_cost_usd, 0.18);
-  });
-
-  it("taskUsageFromEntries returns {} when no usage was reported", () => {
-    // minimal/gemini fallback (and early failures) have no terminal result entry,
-    // so there is nothing to surface — the runner must spread an empty object.
-    assert.deepEqual(taskUsageFromEntries([{ seq: 1, role: "system", type: "session_meta", text: "x" }]), {});
-    assert.deepEqual(taskUsageFromEntries([]), {});
-    assert.deepEqual(taskUsageFromEntries(null), {});
-  });
-
-  it("cost is sourced only from the backend CLI — passthrough incl. 0, never estimated", () => {
-    // claude/opencode report a cost the CLI computed -> surfaced verbatim.
-    const withCost = [{ seq: 1, role: "system", type: "result", output: JSON.stringify({ input_tokens: 10, output_tokens: 2, cost_usd: 0.0723 }) }];
-    assert.equal(taskUsageFromEntries(withCost).estimated_cost_usd, 0.0723);
-    // opencode on a subscription reports a LEGITIMATE 0 -> kept as 0, not fabricated up.
-    const zeroCost = [{ seq: 1, role: "system", type: "result", output: JSON.stringify({ input_tokens: 10, output_tokens: 2, cost_usd: 0 }) }];
-    assert.equal(taskUsageFromEntries(zeroCost).estimated_cost_usd, 0);
-    // codex/cursor/gemini report tokens but NO cost -> estimated_cost_usd left unset
-    // (unknown). We never invent a token x rate number for an unpriceable model.
-    const noCost = [{ seq: 1, role: "system", type: "result", output: JSON.stringify({ input_tokens: 17603, output_tokens: 37 }) }];
-    const u = taskUsageFromEntries(noCost);
-    assert.equal(u.input_tokens, 17603);
-    assert.equal("estimated_cost_usd" in u, false);
-  });
-
   it("scrubToken masks multiple secrets", () => {
     assert.equal(scrubToken("a S1 b S2 c", "S1", "S2"), "a *** b *** c");
     assert.equal(scrubToken("https://x-access-token:abc123@github.com/o/r"), "https://x-access-token:***@github.com/o/r");
-  });
-
-  it("redactSecretsInText redacts high-entropy tokens and known secret shapes, keeps prose/hex", () => {
-    // high-entropy random token (no known prefix) -> entropy layer
-    assert.ok(redactSecretsInText("key Zq7Xr9Tn2Kp5Wm8Lv3Bc6Df1Hg4Js0Ku5Pl8Qa2Mn6").includes("REDACTED"));
-    // known shapes -> pattern layer (low entropy but unambiguous)
-    assert.ok(redactSecretsInText("AKIAIOSFODNN7EXAMPLE").includes("REDACTED"), "AWS key");
-    assert.ok(redactSecretsInText("ghp_" + "a".repeat(36)).includes("REDACTED"), "GitHub token");
-    // ordinary prose is untouched (no >=10-char high-entropy segment)
-    assert.equal(redactSecretsInText("the quick brown fox jumps over the lazy dog"), "the quick brown fox jumps over the lazy dog");
-    // a git SHA is hex (<=16 symbols => entropy <= 4.0) and must NOT be redacted
-    const sha = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0";
-    assert.equal(redactSecretsInText("commit " + sha), "commit " + sha);
   });
 
   it("parseRepoSlug parses ssh, https, token-embedded, and owner/repo forms", () => {
@@ -660,7 +437,7 @@ describe("local-task-runner fail-closed classes", () => {
 });
 
 describe("local-task-runner success", () => {
-  it("completes when the CLI exits 0 and captures the patch + transcript", async () => {
+  it("completes when the CLI exits 0 and leaves transcript capture to agent.exec", async () => {
     process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
     process.env.LOOM_WORKTREE_PATH = worktree;
     process.env.LOOM_CODEX_BIN = fakeBin;
@@ -677,8 +454,7 @@ describe("local-task-runner success", () => {
     // The fake CLI created a new file: patch + files_changed must reflect it.
     assert.ok(out.patch.includes("new-file.txt"), "patch should include the new file");
     assert.equal(out.runtimeMetadata.files_changed, "1");
-    assert.ok(Array.isArray(out.transcript_entries) && out.transcript_entries.length >= 1);
-    assert.ok(out.transcript_entries.some((e) => e.role === "assistant" && e.text === "did the work"));
+    assert.equal(out.transcript_entries, undefined, "the leaf must not duplicate the agent.exec transcript");
   });
 
   it("surfaces top-level token usage on the completed result (Go bridge ingests these)", async () => {
@@ -742,10 +518,7 @@ describe("local-task-runner success", () => {
     assert.ok(!chunks.join("").includes("did the work"), "backend output must NOT be teed to stderr without the flag");
   });
 
-  it("falls back to a minimal transcript when stream-json yields no recognized entries (gemini)", async () => {
-    // gemini is a stream-json backend now, but this fake CLI emits codex-shaped
-    // events the gemini parser does not recognize -> graceful minimal fallback
-    // (session_meta + user prompt + assistant stdout tail), so evidence is preserved.
+  it("delegates unrecognized stream-json transcript fallback to agent.exec", async () => {
     process.env.LOOM_TASK_RUNNER_BACKEND = "gemini";
     process.env.LOOM_WORKTREE_PATH = worktree;
     process.env.LOOM_GEMINI_BIN = fakeBin;
@@ -753,8 +526,7 @@ describe("local-task-runner success", () => {
     const out = await run();
     assert.equal(out.status, "completed");
     assert.equal(out.runtimeMetadata.runtime_strategy, "local-cli-gemini");
-    assert.equal(out.transcript_entries.length, 3);
-    assert.equal(out.transcript_entries[1].role, "user");
+    assert.equal(out.transcript_entries, undefined);
   });
 
   it("delivers the prompt to codex over stdin (and closes stdin)", async () => {
@@ -780,8 +552,7 @@ describe("local-task-runner success", () => {
       captured.includes("implementing one child task"),
       "stdin should carry the built prompt",
     );
-    // And the codex item.completed transcript still flows through.
-    assert.ok(out.transcript_entries.some((e) => e.role === "assistant" && e.text === "read the stdin"));
+    assert.equal(out.transcript_entries, undefined, "agent.exec owns the transcript artifact");
   });
 
   it("uses LOOM_TASK_RUN_PROMPT verbatim over buildPrompt (daemon-leaf prompt fidelity)", async () => {

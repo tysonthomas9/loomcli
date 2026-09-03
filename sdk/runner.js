@@ -1,4 +1,5 @@
 import { pickEnv, trim } from "./internal.js";
+import { spawn } from "node:child_process";
 
 export const RunnerEnv = Object.freeze({
   apiUrl: "LOOM_TASK_RUN_API_URL",
@@ -23,8 +24,19 @@ export class LoomAPIError extends Error {
     this.name = "LoomAPIError";
     this.status = options.status || 0;
     this.code = options.code || "";
+    this.retryable = options.retryable === true;
     this.details = options.details;
     this.responseBody = options.responseBody || "";
+  }
+}
+
+// AgentExecSpecError is reserved for caller mistakes in the process-form
+// agent invocation descriptor. Process/spawn/transport failures are returned
+// by agent.exec instead, so task leaves can map them to their task outcome.
+export class AgentExecSpecError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "AgentExecSpecError";
   }
 }
 
@@ -88,6 +100,12 @@ export class TaskRunClient {
     });
     this.runtimeCredentials = Object.freeze({
       get: (input, requestOptions) => this.getRuntimeCredential(input, requestOptions),
+    });
+    // This namespace intentionally has only the process form today. A future
+    // in-process harness invoke form must be a separate, disjoint operation;
+    // an optional argv on one overloaded form is not a valid contract.
+    this.agent = Object.freeze({
+      exec: (spec) => executeAgentProcess(this, spec),
     });
   }
 
@@ -306,6 +324,39 @@ export class TaskRunClient {
     }, options);
   }
 
+  async sessionOpen(input = {}, options = {}) {
+    this.#requireServeTransport("session-open");
+    return this.#op("session-open", compact({
+      invocationKey: input.invocationKey,
+      backend: input.backend,
+      // The lifecycle store requires an explicit model label. Process callers
+      // may omit it only because the SDK truthfully labels it unknown.
+      model: trim(input.model) || "unknown",
+      parentSessionId: input.parentSessionId,
+      kind: input.kind,
+      tags: input.tags,
+      metadata: metadata(input.metadata),
+    }), options);
+  }
+
+  async sessionClose(input = {}, options = {}) {
+    this.#requireServeTransport("session-close");
+    const usage = input.usage && typeof input.usage === "object"
+      ? compact({ tokens: input.usage.tokens, cost: input.usage.cost })
+      : undefined;
+    return this.#op("session-close", compact({
+      sessionId: input.sessionId,
+      status: input.status,
+      exitCode: input.exitCode,
+      summary: input.summary,
+      usage: usage && Object.keys(usage).length > 0 ? usage : undefined,
+      transcriptRef: input.transcriptRef,
+      metadata: metadata(input.metadata),
+    }), options);
+  }
+
+  // Reserved for non-bridge ownership topologies. A bridge-run task-plane
+  // leaf must return its IPC result; serve rejects self-completion there.
   async completeRun(input = {}, options = {}) {
     const artifactIds = normalizeStringList(input.required_artifact_ids || input.requiredArtifactIDs || input.artifact_ids || input.artifactIds);
     const policy = input.taskStatusPolicy || input.task_status_policy || {};
@@ -361,6 +412,14 @@ export class TaskRunClient {
       fencing_token: this.fencingToken,
       ...fields,
     });
+  }
+
+  #requireServeTransport(operation) {
+    if (!this.serveMode) {
+      throw new LoomAPIError(`${operation} requires the loom serve task-run API`, {
+        code: "serve_transport_required",
+      });
+    }
   }
 
   #taskRunPath(suffix = "") {
@@ -479,6 +538,383 @@ export class ArtifactHandle {
   }
 }
 
+// executeAgentProcess is the SDK's process-form agent-exec helper. It opens
+// sessions only for actual Agent Invocations. It must never be used as a
+// generic deterministic-command capture wrapper (checkout, diff, etc. open
+// no AgentSession by contract).
+async function executeAgentProcess(client, spec) {
+  validateAgentExecSpec(spec);
+  const session = {
+    id: null,
+    attempt: null,
+    transcriptRef: null,
+    opened: false,
+    closed: false,
+    degraded: false,
+    degradedReason: null,
+  };
+  const runtimeMetadata = {};
+
+  await openAgentSession(client, spec, session, runtimeMetadata);
+  const processResult = await runAgentProcess(spec);
+  let entries = captureAgentEntries(spec, processResult);
+  entries = redactAgentEntries(entries, spec.redactSecrets);
+  const usage = extractAgentUsage(entries);
+  const streamError = agentStreamError(spec, processResult.stdout);
+
+  if (session.opened && spec.transcript !== "none") {
+    try {
+      const artifactId = transcriptArtifactID(client.taskRunId, session.attempt, spec.invocationKey);
+      const artifact = await client.artifacts.declare({
+        id: artifactId,
+        type: "agent-transcript",
+        mimeType: "application/x-ndjson",
+      });
+      await artifact.upload(`${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`, {
+        mimeType: "application/x-ndjson",
+      });
+      await artifact.finalize({ summary: `Agent transcript for ${spec.invocationKey}` });
+      session.transcriptRef = `artifact://${artifactId}`;
+    } catch (error) {
+      await markObservabilityDegraded(client, session, runtimeMetadata, observabilityErrorCode(error));
+    }
+  }
+
+  const sendClose = async (input = {}) => {
+    if (!session.opened) {
+      return { ok: false };
+    }
+    try {
+      const closeMetadata = agentCloseMetadata(processResult, input.metadata);
+      await client.sessionClose({
+        sessionId: session.id,
+        status: input.status || agentProcessStatus(processResult),
+        exitCode: processResult.exitCode,
+        summary: input.summary || agentProcessSummary(spec, processResult),
+        usage,
+        transcriptRef: session.transcriptRef,
+        metadata: closeMetadata,
+      });
+      session.closed = true;
+      return { ok: true };
+    } catch (error) {
+      await markObservabilityDegraded(client, session, runtimeMetadata, observabilityErrorCode(error));
+      return { ok: false };
+    }
+  };
+
+  if (spec.close !== "deferred") {
+    await sendClose();
+  }
+  const result = {
+    ...processResult,
+    entries,
+    usage,
+    streamError,
+    session,
+    // Merge this into the leaf's TaskRun completion/runtimeMetadata. The
+    // helper also best-effort heartbeats it while the lease remains live.
+    runtimeMetadata,
+  };
+  if (spec.close === "deferred") {
+    result.finalize = async (input = {}) => sendClose(input);
+  }
+  return result;
+}
+
+async function openAgentSession(client, spec, session, runtimeMetadata) {
+  const retries = spec.openRetries ?? 2;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      const opened = await client.sessionOpen({
+        invocationKey: spec.invocationKey,
+        backend: spec.backend,
+        model: spec.model || "unknown",
+        parentSessionId: spec.parentSessionId,
+        kind: spec.kind,
+        tags: spec.tags,
+        metadata: spec.metadata,
+      });
+      session.id = opened.sessionId;
+      session.attempt = opened.attempt;
+      session.opened = true;
+      return;
+    } catch (error) {
+      const reason = observabilityErrorCode(error);
+      if (!agentSessionOpenRetryable(error) || attempt >= retries) {
+        await markObservabilityDegraded(client, session, runtimeMetadata, reason);
+        return;
+      }
+      await delay(25 * (attempt + 1));
+    }
+  }
+}
+
+async function markObservabilityDegraded(client, session, runtimeMetadata, reason) {
+  session.degraded = true;
+  session.degradedReason ||= reason;
+  runtimeMetadata.observability_degraded = "true";
+  runtimeMetadata.observability_degraded_code ||= reason;
+  try {
+    await client.heartbeat({ runtimeMetadata });
+  } catch {
+    // The result still carries the flag for the leaf to merge into its final
+    // TaskRun result when taskrunapi was unavailable at degradation time.
+  }
+}
+
+function agentSessionOpenRetryable(error) {
+  // A fetch/transport failure has no wire classification and is retryable.
+  // HTTP errors must opt in through the taskrunapi retryable envelope field.
+  return !(error instanceof LoomAPIError) || error.retryable;
+}
+
+function observabilityErrorCode(error) {
+  if (error && typeof error.code === "string" && error.code !== "") return error.code;
+  if (error instanceof LoomAPIError && error.status) return `http_${error.status}`;
+  return "transport_failure";
+}
+
+function validateAgentExecSpec(spec) {
+  if (!spec || typeof spec !== "object" || Array.isArray(spec)) {
+    throw new AgentExecSpecError("agent.exec requires a process-form spec object");
+  }
+  if ("invoke" in spec || "run" in spec || "prompt" in spec) {
+    throw new AgentExecSpecError("agent.exec accepts only the process form; invoke is a future disjoint API");
+  }
+  if (typeof spec.invocationKey !== "string" || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(spec.invocationKey)) {
+    throw new AgentExecSpecError("agent.exec invocationKey must be a strict slug");
+  }
+  if (typeof spec.backend !== "string" || trim(spec.backend) === "") {
+    throw new AgentExecSpecError("agent.exec backend is required");
+  }
+  if (spec.model !== undefined && typeof spec.model !== "string") {
+    throw new AgentExecSpecError("agent.exec model must be a string when supplied");
+  }
+  if (spec.parentSessionId !== undefined && typeof spec.parentSessionId !== "string") {
+    throw new AgentExecSpecError("agent.exec parentSessionId must be a string when supplied");
+  }
+  if (spec.kind !== undefined && typeof spec.kind !== "string") {
+    throw new AgentExecSpecError("agent.exec kind must be a string when supplied");
+  }
+  if (spec.tags !== undefined && (!Array.isArray(spec.tags) || spec.tags.some((tag) => typeof tag !== "string"))) {
+    throw new AgentExecSpecError("agent.exec tags must be a string array when supplied");
+  }
+  if (spec.metadata !== undefined && (!spec.metadata || typeof spec.metadata !== "object" || Array.isArray(spec.metadata))) {
+    throw new AgentExecSpecError("agent.exec metadata must be an object when supplied");
+  }
+  if (!Array.isArray(spec.argv) || spec.argv.length === 0 || spec.argv.some((part) => typeof part !== "string" || part === "")) {
+    throw new AgentExecSpecError("agent.exec argv must be a non-empty string array");
+  }
+  if (spec.cwd !== undefined && typeof spec.cwd !== "string") {
+    throw new AgentExecSpecError("agent.exec cwd must be a string when supplied");
+  }
+  if (spec.env !== undefined && (!spec.env || typeof spec.env !== "object" || Array.isArray(spec.env) || Object.values(spec.env).some((value) => value !== undefined && typeof value !== "string"))) {
+    throw new AgentExecSpecError("agent.exec env must map names to strings when supplied");
+  }
+  if (spec.stdin !== undefined && typeof spec.stdin !== "string" && !(spec.stdin instanceof Uint8Array)) {
+    throw new AgentExecSpecError("agent.exec stdin must be a string or Uint8Array when supplied");
+  }
+  if (spec.timeoutMs !== undefined && (!Number.isFinite(spec.timeoutMs) || spec.timeoutMs < 0)) {
+    throw new AgentExecSpecError("agent.exec timeoutMs must be a non-negative number when supplied");
+  }
+  if (spec.live !== undefined && typeof spec.live !== "boolean") {
+    throw new AgentExecSpecError("agent.exec live must be a boolean when supplied");
+  }
+  if (spec.close !== undefined && spec.close !== "auto" && spec.close !== "deferred") {
+    throw new AgentExecSpecError("agent.exec close must be auto or deferred");
+  }
+  if (spec.transcript !== undefined && !["stream-json", "minimal", "none"].includes(spec.transcript)) {
+    throw new AgentExecSpecError("agent.exec transcript must be stream-json, minimal, or none");
+  }
+  if (spec.openRetries !== undefined && (!Number.isInteger(spec.openRetries) || spec.openRetries < 0 || spec.openRetries > 10)) {
+    throw new AgentExecSpecError("agent.exec openRetries must be an integer from 0 to 10");
+  }
+  if (spec.redactSecrets !== undefined && !isDeclaredSecretList(spec.redactSecrets)) {
+    throw new AgentExecSpecError("agent.exec redactSecrets must declare secret values as a string array or object");
+  }
+}
+
+function runAgentProcess(spec) {
+  const started = Date.now();
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(spec.argv[0], spec.argv.slice(1), {
+        cwd: spec.cwd,
+        env: { ...process.env, ...(spec.env || {}) },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch (error) {
+      resolve(processResult(null, false, errorMessage(error), "", "", started));
+      return;
+    }
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    let settled = false;
+    const timer = spec.timeoutMs > 0 ? setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, spec.timeoutMs) : null;
+    const settle = (exitCode, spawnError) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve(processResult(exitCode, timedOut, spawnError, stdout, stderr, started));
+    };
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      if (spec.live) process.stderr.write(chunk);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+      if (spec.live) process.stderr.write(chunk);
+    });
+    child.on("error", (error) => settle(null, errorMessage(error)));
+    child.on("close", (code) => settle(code, null));
+    if (spec.stdin !== undefined) child.stdin.end(spec.stdin);
+    else child.stdin.end();
+  });
+}
+
+function processResult(exitCode, timedOut, spawnError, stdout, stderr, started) {
+  return { exitCode, timedOut, spawnError, stdout, stderr, durationMs: Date.now() - started };
+}
+
+function captureAgentEntries(spec, result) {
+  if (spec.transcript === "none") return [];
+  const lead = {
+    seq: 0,
+    role: "system",
+    type: "session_meta",
+    backend: spec.backend,
+    model: spec.model || "unknown",
+    invocation_key: spec.invocationKey,
+  };
+  if (spec.transcript === "stream-json") {
+    const entries = [lead];
+    for (const line of result.stdout.split("\n")) {
+      try {
+        const event = JSON.parse(line);
+        if (event && typeof event === "object" && event.type !== "session_meta") {
+          entries.push({ ...event, seq: entries.length });
+        }
+      } catch {
+        // Non-JSON backend chatter is intentionally not promoted to an event.
+      }
+    }
+    if (entries.length > 1) return entries;
+  }
+  const entries = [lead];
+  if (spec.stdin !== undefined && String(spec.stdin) !== "") {
+    entries.push({ seq: entries.length, role: "user", type: "text", text: String(spec.stdin) });
+  }
+  if (result.stdout !== "") {
+    entries.push({ seq: entries.length, role: "assistant", type: "text", text: result.stdout });
+  }
+  if (result.stderr !== "") {
+    entries.push({ seq: entries.length, role: "tool", type: "stderr", text: result.stderr });
+  }
+  return entries;
+}
+
+function redactAgentEntries(entries, declaredSecrets) {
+  const secrets = declaredSecretValues(declaredSecrets);
+  if (secrets.length === 0) return entries;
+  return entries.map((entry) => {
+    let encoded = JSON.stringify(entry);
+    for (const secret of secrets) {
+      encoded = encoded.split(secret).join("[REDACTED]");
+    }
+    return JSON.parse(encoded);
+  });
+}
+
+function isDeclaredSecretList(value) {
+  if (Array.isArray(value)) return value.every((item) => typeof item === "string");
+  return value && typeof value === "object" && !Array.isArray(value) && Object.values(value).every((item) => typeof item === "string");
+}
+
+function declaredSecretValues(value) {
+  const candidates = Array.isArray(value) ? value : value && typeof value === "object" ? Object.values(value) : [];
+  return candidates.filter((item) => typeof item === "string" && item !== "");
+}
+
+function extractAgentUsage(entries) {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const usage = entries[index]?.usage;
+    if (!usage || typeof usage !== "object") continue;
+    const input = finiteNumber(usage.input_tokens ?? usage.inputTokens ?? usage.input);
+    const output = finiteNumber(usage.output_tokens ?? usage.outputTokens ?? usage.output);
+    const cacheRead = finiteNumber(usage.cache_read_tokens ?? usage.cacheReadTokens ?? usage.cached_input_tokens);
+    const cacheWrite = finiteNumber(usage.cache_write_tokens ?? usage.cacheWriteTokens);
+    const tokens = finiteNumber(usage.tokens ?? usage.total_tokens ?? usage.totalTokens) ??
+      (input !== null || output !== null ? (input || 0) + (output || 0) : null);
+    const cost = finiteNumber(usage.cost ?? usage.cost_usd ?? usage.costUsd ?? usage.total_cost_usd);
+    if (tokens !== null || cost !== null || input !== null || output !== null) {
+      return { tokens, cost, inputTokens: input, outputTokens: output, cacheReadTokens: cacheRead, cacheWriteTokens: cacheWrite };
+    }
+  }
+  return null;
+}
+
+function agentStreamError(spec, stdout) {
+  if (spec.backend !== "opencode") return "";
+  for (const line of stdout.split("\n")) {
+    try {
+      const event = JSON.parse(line);
+      if (event?.type !== "error") continue;
+      return String(event.error?.message || event.error?.data?.message || event.message || "opencode reported an error");
+    } catch {
+      // Stream-json capture deliberately ignores backend chatter.
+    }
+  }
+  return "";
+}
+
+function finiteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function transcriptArtifactID(taskRunId, attempt, invocationKey) {
+  return `transcript-${taskRunId}-a${attempt}-${invocationKey}`;
+}
+
+function agentProcessStatus(result) {
+  return result.spawnError || result.timedOut || result.exitCode !== 0 ? "failed" : "completed";
+}
+
+function agentProcessErrorClass(result) {
+  if (result.spawnError) return "agent_spawn_failed";
+  if (result.timedOut) return "agent_timeout";
+  if (result.exitCode !== 0) return "agent_nonzero_exit";
+  return "";
+}
+
+function agentCloseMetadata(result, supplied) {
+  const closeMetadata = { ...(supplied || {}) };
+  const errorClass = agentProcessErrorClass(result);
+  if (errorClass && closeMetadata.error_class === undefined) {
+    closeMetadata.error_class = errorClass;
+  }
+  return Object.keys(closeMetadata).length > 0 ? closeMetadata : undefined;
+}
+
+function agentProcessSummary(spec, result) {
+  if (result.spawnError) return `${spec.backend} spawn failed: ${result.spawnError}`;
+  if (result.timedOut) return `${spec.backend} timed out after ${spec.timeoutMs}ms`;
+  return `${spec.backend} exited ${result.exitCode} in ${result.durationMs}ms`;
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function errorMessage(error) {
+  return error && error.message ? error.message : String(error);
+}
+
 function withLease(options) {
   return { ...options, useLeaseToken: true };
 }
@@ -582,6 +1018,7 @@ function errorFromResponse(response, text) {
   let message = `FleetDB request failed with HTTP ${response.status}`;
   let code = "";
   let details;
+  let retryable = false;
   if (trim(text)) {
     try {
       const body = JSON.parse(text);
@@ -589,10 +1026,12 @@ function errorFromResponse(response, text) {
         message = body.error.message || message;
         code = body.error.code || "";
         details = body.error.details;
+        retryable = body.error.retryable === true;
       } else if (body?.message) {
         message = body.message;
         code = body.code || "";
         details = body.details;
+        retryable = body.retryable === true;
       }
     } catch {
       message = text;
@@ -601,6 +1040,7 @@ function errorFromResponse(response, text) {
   return new LoomAPIError(message, {
     status: response.status,
     code,
+    retryable,
     details,
     responseBody: text,
   });

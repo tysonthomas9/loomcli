@@ -388,6 +388,9 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 	if msg != "" {
 		prefix += ": " + msg
 	}
+	if lifecycleErr := sessionLifecycleHTTPError(code); lifecycleErr != nil {
+		return fmt.Errorf("%s: %w", prefix, lifecycleErr)
+	}
 	switch status {
 	case http.StatusNotFound:
 		return fmt.Errorf("%s: %w", prefix, domain.ErrNotFound)
@@ -429,6 +432,23 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 		return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
 	}
 	return errors.New(prefix)
+}
+
+func sessionLifecycleHTTPError(code string) error {
+	switch code {
+	case store.SessionLifecycleErrDescriptorConflict:
+		return &store.SessionLifecycleError{Code: code, Err: domain.ErrConflict}
+	case store.SessionLifecycleErrOutcomeConflict:
+		return &store.SessionLifecycleError{Code: code, Err: domain.ErrConflict}
+	case store.SessionLifecycleErrAttemptMismatch:
+		return &store.SessionLifecycleError{Code: code, Err: domain.ErrConflict}
+	case store.SessionLifecycleErrTaskRunTerminal:
+		return &store.SessionLifecycleError{Code: code, Err: domain.ErrConflict}
+	case store.SessionLifecycleErrContention:
+		return &store.SessionLifecycleTransientError{Code: code, Err: errors.New("fleet-db lifecycle contention")}
+	default:
+		return nil
+	}
 }
 
 // extractErrorMessage delegates to fleethttp.ExtractErrorMessage and

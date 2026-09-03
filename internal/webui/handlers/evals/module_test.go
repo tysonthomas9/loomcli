@@ -311,13 +311,17 @@ func seedSessionEval(t *testing.T, st *memstore.Store, evalID, sessionID string,
 
 func seedAgentSession(t *testing.T, st *memstore.Store, sessionID string, status domain.AgentSessionStatus, kind domain.AgentSessionKind, startedAt time.Time, metadata map[string]string) {
 	t.Helper()
+	initialStatus := status
+	if status.IsTerminal() {
+		initialStatus = domain.AgentSessionRunning
+	}
 	if _, err := st.AgentSessions().Create(context.Background(), store.AgentSessionCreate{
 		WorkspaceKey: "WS",
 		SessionID:    sessionID,
 		AgentID:      "agent-1",
 		Kind:         kind,
 		TaskID:       "TASK-" + sessionID,
-		Status:       status,
+		Status:       initialStatus,
 		StartedAt:    startedAt.UTC(),
 		Metadata:     metadata,
 	}); err != nil {
@@ -326,7 +330,10 @@ func seedAgentSession(t *testing.T, st *memstore.Store, sessionID string, status
 	if status.IsTerminal() {
 		finishedAt := startedAt.UTC().Add(10 * time.Minute)
 		finishedAtPtr := &finishedAt
-		if _, err := st.AgentSessions().Update(context.Background(), "WS", sessionID, store.AgentSessionUpdate{FinishedAt: &finishedAtPtr}); err != nil {
+		if _, err := st.AgentSessions().Update(context.Background(), "WS", sessionID, store.AgentSessionUpdate{
+			Status:     &status,
+			FinishedAt: &finishedAtPtr,
+		}); err != nil {
 			t.Fatalf("finish session %s: %v", sessionID, err)
 		}
 	}

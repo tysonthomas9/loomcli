@@ -33,7 +33,8 @@ func appendTaskRunEvent(ctx context.Context, s store.Store, run *domain.TaskRun,
 	if s == nil || run == nil {
 		return
 	}
-	attempt := taskRunAttempt(run)
+	// TaskRun events retain their established zero-based scheduler ordinal.
+	attempt := store.TaskRunClaimAttempt(run) - 1
 	in := store.TaskRunEventAppend{
 		WorkspaceKey:   run.WorkspaceKey,
 		EventID:        domain.TaskRunEventID(run.TaskRunID, attempt, typ),

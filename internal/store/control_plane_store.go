@@ -115,12 +115,16 @@ type AgentSessionUpdate struct {
 
 type AgentSessionStore interface {
 	Create(ctx context.Context, in AgentSessionCreate) (*domain.AgentSession, error)
+	// Open atomically creates or returns a task-plane invocation session.
+	Open(ctx context.Context, run SessionRunContext, descriptor SessionDescriptor) (SessionRef, error)
 	Get(ctx context.Context, workspaceKey, sessionID string) (*domain.AgentSession, error)
 	List(ctx context.Context, workspaceKey string, filter AgentSessionFilter) ([]*domain.AgentSession, error)
 	// ListPage returns sessions matching filter plus the pre-truncation match count.
 	ListPage(ctx context.Context, workspaceKey string, filter AgentSessionFilter) (items []*domain.AgentSession, total int, err error)
 	Heartbeat(ctx context.Context, workspaceKey, sessionID string) (*domain.AgentSession, error)
 	Update(ctx context.Context, workspaceKey, sessionID string, patch AgentSessionUpdate) (*domain.AgentSession, error)
+	// Finalize settles one session with first-terminal-wins semantics.
+	Finalize(ctx context.Context, ref SessionRef, outcome SessionOutcome) (*domain.AgentSession, error)
 }
 
 type TerminalSessionCreate struct {

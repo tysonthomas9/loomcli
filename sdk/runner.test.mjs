@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
-import { LoomAPIError, TaskRunClient } from "./runner.js";
+import { AgentExecSpecError, LoomAPIError, TaskRunClient } from "./runner.js";
+
+const surface = JSON.parse(readFileSync(new URL("./api-surface.v1.json", import.meta.url), "utf8"));
 
 describe("TaskRunClient.fromEnv", () => {
   it("uses Loom runner env vars", () => {
@@ -431,6 +434,264 @@ describe("TaskRunClient serve transport", () => {
     assert.equal(client.apiKey, "api-key");
   });
 });
+
+describe("TaskRunClient.agent.exec", () => {
+  it("uses the frozen session wire contract, uploads the composed transcript artifact, and preserves unknown usage", async () => {
+    const calls = [];
+    const client = taskRunClientForAgent((url, init = {}) => {
+      const path = new URL(url).pathname;
+      const body = init.method === "PUT" ? init.body : JSON.parse(init.body);
+      calls.push({ path, method: init.method, body });
+      if (path.endsWith("/session-open")) return json({ sessionId: "task-run-1-a1-agent", attempt: 1 });
+      if (path.endsWith("/artifact-declare")) return json({ artifactId: body.artifactId, type: body.type, durableStatus: "declared" });
+      if (path.endsWith("/content")) return json({ artifactId: "transcript-task-run-1-a1-agent", durableStatus: "uploaded" });
+      if (path.endsWith("/artifact-finalize")) return json({ artifactId: body.artifactId, durableStatus: "finalized" });
+      if (path.endsWith("/session-close")) return json({ sessionId: body.sessionId, status: body.status });
+      throw new Error(`unexpected ${init.method} ${path}`);
+    });
+
+    const result = await client.agent.exec({
+      invocationKey: "agent",
+      backend: "codex",
+      model: "gpt-5",
+      argv: [process.execPath, "-e", "console.log(JSON.stringify({type: 'message', text: 'hello'}))"],
+      transcript: "stream-json",
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.session.id, "task-run-1-a1-agent");
+    assert.equal(result.session.transcriptRef, "artifact://transcript-task-run-1-a1-agent");
+    assert.equal(result.usage, null, "absence stays unknown instead of zero");
+    const open = calls.find((call) => call.path.endsWith("/session-open"));
+    const close = calls.find((call) => call.path.endsWith("/session-close"));
+    const declare = calls.find((call) => call.path.endsWith("/artifact-declare"));
+    assert.deepEqual(Object.keys(open.body).sort(), [...surface.taskRunApi.ops["session-open"].fields].filter((key) => ["invocationKey", "backend", "model"].includes(key)).sort());
+    assert.equal(declare.body.artifactId, "transcript-task-run-1-a1-agent");
+    assert.equal(close.body.usage, undefined, "missing usage must not be serialized as zero");
+    assert.deepEqual(Object.keys(close.body).sort(), ["exitCode", "sessionId", "status", "summary", "transcriptRef"]);
+  });
+
+  it("captures raw stream-json, redacts declared secrets, and extracts reported usage without inventing cost", async () => {
+    const calls = [];
+    const secret = "declared-agent-secret";
+    const stdout = [
+      JSON.stringify({
+        type: "item.completed",
+        item: { type: "command_execution", command: "env", aggregated_output: `token=${secret}` },
+      }),
+      JSON.stringify({
+        type: "turn.completed",
+        usage: {
+          input_tokens: 100,
+          output_tokens: 20,
+          cached_input_tokens: 30,
+          cache_write_tokens: 7,
+          cost_usd: 0,
+        },
+      }),
+    ].join("\n") + "\n";
+    const client = taskRunClientForAgent(agentLifecycleFetch(calls));
+
+    const result = await client.agent.exec({
+      invocationKey: "agent",
+      backend: "codex",
+      argv: [process.execPath, "-e", `process.stdout.write(${JSON.stringify(stdout)})`],
+      transcript: "stream-json",
+      redactSecrets: [secret],
+    });
+
+    assert.equal(result.entries[0].type, "session_meta");
+    assert.equal(result.entries[1].type, "item.completed");
+    assert.equal(result.entries[1].item.aggregated_output, "token=[REDACTED]");
+    assert.deepEqual(result.usage, {
+      tokens: 120,
+      cost: 0,
+      inputTokens: 100,
+      outputTokens: 20,
+      cacheReadTokens: 30,
+      cacheWriteTokens: 7,
+    });
+    const upload = calls.find((call) => call.path.endsWith("/content"));
+    assert.ok(upload.body.includes('"type":"item.completed"'));
+    assert.ok(upload.body.includes("[REDACTED]"));
+    assert.equal(upload.body.includes(secret), false);
+  });
+
+  it("surfaces an opencode fatal stream error from the captured process output", async () => {
+    const calls = [];
+    const stdout = JSON.stringify({ type: "error", error: { message: "model overloaded" } }) + "\n";
+    const client = taskRunClientForAgent(agentLifecycleFetch(calls));
+
+    const result = await client.agent.exec({
+      invocationKey: "agent",
+      backend: "opencode",
+      argv: [process.execPath, "-e", `process.stdout.write(${JSON.stringify(stdout)})`],
+      transcript: "stream-json",
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.streamError, "model overloaded");
+    assert.equal(result.entries[1].type, "error");
+  });
+
+  it("degrades only observability after the default open retries and leaves the process result intact", async () => {
+    let opens = 0;
+    const client = taskRunClientForAgent((url, init = {}) => {
+      const path = new URL(url).pathname;
+      if (path.endsWith("/session-open")) {
+        opens += 1;
+        return json({ error: { code: "session_lifecycle_contention", message: "down", retryable: true } }, { status: 503 });
+      }
+      if (path.endsWith("/heartbeat")) return json({ taskRunId: "task-run-1", status: "running" });
+      throw new Error(`unexpected ${init.method} ${path}`);
+    });
+
+    const result = await client.agent.exec({
+      invocationKey: "agent",
+      backend: "codex",
+      argv: [process.execPath, "-e", "process.stdout.write('intact\\n')"],
+      transcript: "minimal",
+    });
+
+    assert.equal(opens, surface.taskRunApi.agentExec.openRetriesDefault + 1);
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "intact\n");
+    assert.equal(result.session.opened, false);
+    assert.equal(result.session.degraded, true);
+    assert.equal(result.session.degradedReason, "session_lifecycle_contention");
+    assert.deepEqual(result.runtimeMetadata, {
+      observability_degraded: "true",
+      observability_degraded_code: "session_lifecycle_contention",
+    });
+  });
+
+  it("degrades immediately on a non-retryable descriptor conflict and exposes its code", async () => {
+    let opens = 0;
+    const client = taskRunClientForAgent((url, init = {}) => {
+      const path = new URL(url).pathname;
+      if (path.endsWith("/session-open")) {
+        opens += 1;
+        return json({ error: { code: "session_descriptor_conflict", message: "different descriptor", retryable: false } }, { status: 409 });
+      }
+      if (path.endsWith("/heartbeat")) return json({ taskRunId: "task-run-1", status: "running" });
+      throw new Error(`unexpected ${init.method} ${path}`);
+    });
+
+    const result = await client.agent.exec({
+      invocationKey: "agent",
+      backend: "codex",
+      argv: [process.execPath, "-e", "process.stdout.write('intact')"],
+      transcript: "none",
+    });
+
+    assert.equal(opens, 1);
+    assert.equal(result.stdout, "intact");
+    assert.equal(result.session.degradedReason, "session_descriptor_conflict");
+    assert.equal(result.runtimeMetadata.observability_degraded_code, "session_descriptor_conflict");
+  });
+
+  it("retries retryable lifecycle contention and then succeeds", async () => {
+    let opens = 0;
+    const client = taskRunClientForAgent((url, init = {}) => {
+      const path = new URL(url).pathname;
+      const body = JSON.parse(init.body);
+      if (path.endsWith("/session-open")) {
+        opens += 1;
+        if (opens === 1) {
+          return json({ error: { code: "session_lifecycle_contention", message: "retry", retryable: true } }, { status: 503 });
+        }
+        return json({ sessionId: "task-run-1-a1-agent", attempt: 1 });
+      }
+      if (path.endsWith("/session-close")) return json({ sessionId: body.sessionId, status: body.status });
+      throw new Error(`unexpected ${init.method} ${path}`);
+    });
+
+    const result = await client.agent.exec({
+      invocationKey: "agent",
+      backend: "codex",
+      argv: [process.execPath, "-e", "process.exit(0)"],
+      transcript: "none",
+    });
+
+    assert.equal(opens, 2);
+    assert.equal(result.session.opened, true);
+    assert.equal(result.session.closed, true);
+    assert.equal(result.session.degraded, false);
+    assert.equal(result.session.degradedReason, null);
+  });
+
+  it("defers close until finalize and intentionally leaves a crash path open", async () => {
+    const closed = [];
+    const client = taskRunClientForAgent((url, init = {}) => {
+      const path = new URL(url).pathname;
+      const body = init.method === "PUT" ? init.body : JSON.parse(init.body);
+      if (path.endsWith("/session-open")) return json({ sessionId: `task-run-1-a1-${body.invocationKey}`, attempt: 1 });
+      if (path.endsWith("/artifact-declare")) return json({ artifactId: body.artifactId, type: body.type, durableStatus: "declared" });
+      if (path.endsWith("/content")) return json({ artifactId: "any", durableStatus: "uploaded" });
+      if (path.endsWith("/artifact-finalize")) return json({ artifactId: body.artifactId, durableStatus: "finalized" });
+      if (path.endsWith("/session-close")) {
+        closed.push(body);
+        return json({ sessionId: body.sessionId, status: body.status });
+      }
+      throw new Error(`unexpected ${init.method} ${path}`);
+    });
+    const base = {
+      backend: "codex",
+      argv: [process.execPath, "-e", "process.stdout.write('ok')"],
+      transcript: "minimal",
+      close: "deferred",
+    };
+    const deferred = await client.agent.exec({ ...base, invocationKey: "agent" });
+    assert.equal(closed.length, 0);
+    assert.equal(typeof deferred.finalize, "function");
+    assert.deepEqual(await deferred.finalize({ status: "completed", summary: "leaf outcome" }), { ok: true });
+    assert.equal(closed.length, 1);
+    assert.equal(closed[0].summary, "leaf outcome");
+
+    // No finalize call models a leaf crash. Slice 4's reconciler owns this
+    // registered-but-open session; this helper must not quietly close it.
+    const crashPath = await client.agent.exec({ ...base, invocationKey: "crash" });
+    assert.equal(crashPath.session.opened, true);
+    assert.equal(crashPath.session.closed, false);
+    assert.equal(closed.length, 1);
+  });
+
+  it("throws AgentExecSpecError only for invalid process-form caller input", async () => {
+    const client = taskRunClientForAgent(() => json({}));
+    await assert.rejects(
+      () => client.agent.exec({ invocationKey: "agent", backend: "codex", invoke: () => {} }),
+      AgentExecSpecError,
+    );
+  });
+});
+
+function taskRunClientForAgent(fetch) {
+  return new TaskRunClient({
+    apiUrl: "http://127.0.0.1:8080",
+    workspace: "TEST",
+    taskRunId: "task-run-1",
+    taskId: "TEST-1",
+    nodeId: "node-1",
+    leaseId: "lease-1",
+    leaseToken: "lease-token",
+    fencingToken: "42",
+    fetch,
+  });
+}
+
+function agentLifecycleFetch(calls) {
+  return (url, init = {}) => {
+    const path = new URL(url).pathname;
+    const body = init.method === "PUT" ? init.body : JSON.parse(init.body);
+    calls.push({ path, method: init.method, body });
+    if (path.endsWith("/session-open")) return json({ sessionId: "task-run-1-a1-agent", attempt: 1 });
+    if (path.endsWith("/artifact-declare")) return json({ artifactId: body.artifactId, type: body.type, durableStatus: "declared" });
+    if (path.endsWith("/content")) return json({ artifactId: "transcript-task-run-1-a1-agent", durableStatus: "uploaded" });
+    if (path.endsWith("/artifact-finalize")) return json({ artifactId: body.artifactId, durableStatus: "finalized" });
+    if (path.endsWith("/session-close")) return json({ sessionId: body.sessionId, status: body.status });
+    throw new Error(`unexpected ${init.method} ${path}`);
+  };
+}
 
 function json(body, init = {}) {
   return new Response(JSON.stringify(body), {

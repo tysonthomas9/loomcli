@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
@@ -106,6 +107,7 @@ type ServerConfig struct {
 	DriverAPIToken       string                                               // Optional shared bearer token required by the driver-op HTTP API (LOOM_DRIVER_API_TOKEN)
 	DriverAPIBaseURL     string                                               // This serve process's own driver/task-run API base URL, exported to task runners as LOOM_TASK_RUN_API_URL; empty keeps runners on the legacy direct-fleet-db env
 	DriverRunTokenKey    []byte                                               // HS256 signing key for run-scoped driver-op tokens (LOOM_RUN_TOKEN_SIGNING_KEY or ephemeral); nil disables the token auth path
+	SessionOpenRegistry  *driverexecutor.TaskRunSessionOpenRegistry           // Shared serve-process callback view for task-plane session opens
 	DaemonStartupFn      func(ctx context.Context, onReady func(wsID string)) // Starts daemons for secondary workspaces; calls onReady(wsID) when each is reachable
 	Logger               *slog.Logger                                         // Structured logger (optional; nil falls back to slog.Default())
 	SentryDSN            string                                               // Sentry/GlitchTip DSN for error tracking (optional; empty disables)
@@ -162,3 +164,17 @@ func FindAvailablePort(bindAddr string, startPort, maxAttempts int) (net.Listene
 func GetCwd() (string, error) {
 	return os.Getwd()
 }
+
+// EnsureSessionOpenRegistry returns the configured session-open registry,
+// lazily constructing the shared default so callers outside this package
+// need no direct driver dependency.
+func (c *ServerConfig) EnsureSessionOpenRegistry() *driverexecutor.TaskRunSessionOpenRegistry {
+	if c.SessionOpenRegistry == nil {
+		c.SessionOpenRegistry = driverexecutor.NewTaskRunSessionOpenRegistry()
+	}
+	return c.SessionOpenRegistry
+}
+
+// TaskRunSessionOpenRegistry aliases the driver registry type so consumers
+// wired through this config need no direct driver import.
+type TaskRunSessionOpenRegistry = driverexecutor.TaskRunSessionOpenRegistry

@@ -164,7 +164,47 @@ types are the reference. Namespaced surface of `LoomDriverClient`
 
 Flat method aliases (`requestTaskRun`, `watchEpic`, …) exist for older
 workflows; new code should use the namespaces. The runner entry exports
-`TaskRunClient`, `ArtifactHandle`, `RunnerEnv`, `LoomAPIError`.
+`TaskRunClient`, `ArtifactHandle`, `RunnerEnv`, `LoomAPIError`, and
+`AgentExecSpecError`.
+
+### Agent invocation process form
+
+`TaskRunClient.agent.exec` records one **Agent Invocation** at the moment its
+leaf starts the backend process. It is not a generic command-capture helper:
+deterministic checkout, diff, and test commands must not call it and therefore
+create no AgentSession.
+
+```js
+const invocation = await runner.agent.exec({
+  invocationKey: "agent",
+  backend: "codex",
+  model: "gpt-5",
+  argv: ["codex", "exec", "..."],
+  transcript: "stream-json",
+  redactSecrets: [process.env.GITHUB_TOKEN], // explicit values; never inferred
+});
+```
+
+Declared-secret redaction applies to the canonical transcript entries and the
+uploaded transcript artifact. The returned `stdout` and `stderr` are raw so the
+leaf can interpret the backend process result; do not return those fields from
+the leaf unless its own output policy permits them.
+
+Process failures are returned in `invocation` (`exitCode`, `timedOut`,
+`spawnError`) rather than thrown. Only invalid caller input throws
+`AgentExecSpecError`. The helper opens with two retries by default; if all
+opens fail, it still runs the process and returns `session.degraded: true`, a
+machine-readable `session.degradedReason`, and
+`runtimeMetadata.observability_degraded: "true"` plus
+`runtimeMetadata.observability_degraded_code`. Merge that returned metadata into
+the leaf's final TaskRun result; the helper also best-effort heartbeats it while
+the task-run lease is live.
+
+`close: "auto"` uploads the transcript and closes the session before the result
+returns. With `close: "deferred"`, the helper sends no close: the leaf must
+call `await invocation.finalize({ status, summary, metadata })` on every return
+path. A crash before that call intentionally leaves the session open for the
+task-plane reconciler.
 
 ## Errors and retries
 

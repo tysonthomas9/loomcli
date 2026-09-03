@@ -310,7 +310,7 @@ func runDriverRecoverStaleTasks(_ *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		result, err := h.Store.DriverRuns().RecoverStaleTaskRuns(ctx, ws, runID, store.StaleTaskRunRecovery{
+		result, _, err := driverpkg.RecoverStaleTaskRunsAndSessions(ctx, h.Store, ws, runID, store.StaleTaskRunRecovery{
 			StaleBefore:   staleBefore,
 			MaxAgeSeconds: driverRecoverStaleMaxAgeSeconds,
 			ErrorClass:    driverRecoverStaleErrorClass,

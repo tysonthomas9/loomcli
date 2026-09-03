@@ -43,6 +43,8 @@ const envLoomDriverExecutor = "LOOM_DRIVER_EXECUTOR"
 const envLoomDriverTaskWorkerConcurrency = "LOOM_DRIVER_TASK_WORKER_CONCURRENCY"
 const envLoomDriverTaskRunMaxAttempts = "LOOM_DRIVER_TASK_RUN_MAX_ATTEMPTS"
 const envLoomDriverStaleTaskMaxAge = "LOOM_DRIVER_STALE_TASK_MAX_AGE"
+const envLoomSessionReconcileInterval = "LOOM_SESSION_RECONCILE_INTERVAL"
+const envLoomSessionReconcileLimit = "LOOM_SESSION_RECONCILE_LIMIT"
 const envLoomTriggerCronInterval = "LOOM_TRIGGER_CRON_INTERVAL"
 const envLoomIssueBridgeInterval = "LOOM_ISSUE_BRIDGE_INTERVAL"
 const envLoomIssueBridgeDisabled = "LOOM_ISSUE_BRIDGE_DISABLED"
@@ -121,6 +123,8 @@ ENVIRONMENT VARIABLES
   LOOM_DRIVER_EXECUTOR  DriverRun executor toggle (default: on; set 0/false/off/no to disable)
   LOOM_DRIVER_TASK_WORKER_CONCURRENCY  Local TaskRun worker loops (default: 2)
   LOOM_DRIVER_TASK_RUN_MAX_ATTEMPTS     TaskRun attempts before blocking failed (default: 2)
+  LOOM_SESSION_RECONCILE_INTERVAL       Terminal-parent session reconciliation interval in seconds (default: 60)
+  LOOM_SESSION_RECONCILE_LIMIT          Maximum non-terminal sessions examined per pass (default: 500)
   LOOM_TRIGGER_CRON_INTERVAL            Cron trigger sweep interval in seconds (default: 30)
   LOOM_ISSUE_BRIDGE_INTERVAL            Issue-journal bridge poll interval in seconds (default: 2)
   LOOM_ISSUE_BRIDGE_DISABLED            Disable the issue-journal bridge loop (set 1/true)
@@ -225,8 +229,10 @@ func runServe(cmd *cobra.Command, args []string) {
 		log.Fatalf("failed to open fleet-db store: %v", storeErr)
 	}
 	defer func() { _ = storeHandle.Close() }()
-	startDriverExecutorIfEnabled(ctx, storeHandle.Store)
+	sessionOpenRegistry := driverexecutor.NewTaskRunSessionOpenRegistry()
+	startDriverExecutorIfEnabled(ctx, storeHandle.Store, sessionOpenRegistry)
 	startStaleTaskSweeper(ctx, storeHandle.Store)
+	startTaskRunSessionReconciliationLoop(ctx, storeHandle.Store)
 	startOutboxDispatcher(ctx, storeHandle.Store)
 	startTriggerCronScheduler(ctx, storeHandle.Store)
 	startTriggerDeliverySweeper(ctx, storeHandle.Store)
@@ -241,6 +247,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	webuiErr := make(chan error, 1)
 	go func() {
 		cfg := buildServerConfig(monitorHandlers, fleetState, storeHandle)
+		cfg.SessionOpenRegistry = sessionOpenRegistry
 		webuiErr <- webuiapp.StartServer(ctx, cfg)
 	}()
 
@@ -296,7 +303,7 @@ func openServeStore(ctx context.Context, fs fleetState) (*bootstrap.StoreHandle,
 	return cmdstore.OpenStore(ctx)
 }
 
-func startDriverExecutorIfEnabled(ctx context.Context, st store.Store) {
+func startDriverExecutorIfEnabled(ctx context.Context, st store.Store, sessionOpenRegistry *driverexecutor.TaskRunSessionOpenRegistry) {
 	if !driverExecutorEnabled() || st == nil {
 		return
 	}
@@ -312,14 +319,15 @@ func startDriverExecutorIfEnabled(ctx context.Context, st store.Store) {
 	taskWorkerConcurrency := driverTaskWorkerConcurrency()
 	taskRunMaxAttempts := driverTaskRunMaxAttempts()
 	taskWorker := &driverexecutor.TaskWorker{
-		Store:            st,
-		WorkspaceKey:     executor.WorkspaceKey,
-		WorkDir:          workDir,
-		NodeID:           executor.NodeID,
-		RunnerID:         os.Getenv("LOOM_DRIVER_TASK_WORKER_RUNNER_ID"),
-		MaxAttempts:      taskRunMaxAttempts,
-		APIBaseURL:       driverAPIBaseURL(),
-		LocalSettingsDir: bootstrap.LoomDir(),
+		Store:               st,
+		WorkspaceKey:        executor.WorkspaceKey,
+		WorkDir:             workDir,
+		NodeID:              executor.NodeID,
+		RunnerID:            os.Getenv("LOOM_DRIVER_TASK_WORKER_RUNNER_ID"),
+		MaxAttempts:         taskRunMaxAttempts,
+		APIBaseURL:          driverAPIBaseURL(),
+		LocalSettingsDir:    bootstrap.LoomDir(),
+		SessionOpenRegistry: sessionOpenRegistry,
 	}
 	go func() {
 		ticker := time.NewTicker(2 * time.Second)

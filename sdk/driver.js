@@ -379,6 +379,7 @@ export class LoomDriverClient {
       sessionId: input.sessionId || "",
       judgeSessionId: input.judgeSessionId || "",
       promptVersion: input.promptVersion || "",
+      judgeSessionId: input.judgeSessionId || input.judge_session_id || "",
       status: input.status || "",
       errorClass: input.errorClass || "",
       eval: input.eval,

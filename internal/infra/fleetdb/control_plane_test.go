@@ -131,6 +131,44 @@ func TestControlPlaneClientAgentSessionCreateSerializesIdentityFields(t *testing
 	}
 }
 
+func TestControlPlaneClientSessionLifecycleUsesAtomicEndpoints(t *testing.T) {
+	httpClient := newWorkspaceHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/WS/agent-sessions/open":
+			if r.Method != http.MethodPost {
+				t.Fatalf("open method = %s", r.Method)
+			}
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode open: %v", err)
+			}
+			if body["task_run_id"] != "run-1" || body["attempt"] != float64(1) || body["invocation_key"] != "agent" || body["backend"] != "codex" {
+				t.Fatalf("open body = %#v", body)
+			}
+			writeJSON(t, w, domain.AgentSession{WorkspaceKey: "WS", SessionID: "run-1-a1-agent", Attempt: 1, Status: domain.AgentSessionRunning})
+		case "/api/v1/WS/agent-sessions/run-1-a1-agent/finalize":
+			if r.Method != http.MethodPost {
+				t.Fatalf("finalize method = %s", r.Method)
+			}
+			writeJSON(t, w, domain.AgentSession{WorkspaceKey: "WS", SessionID: "run-1-a1-agent", Attempt: 1, Status: domain.AgentSessionCompleted})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	client, err := New(Config{BaseURL: "http://fleet.test", Actor: "tester", HTTPClient: httpClient})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := store.SessionRunContext{WorkspaceKey: "WS", TaskRunID: "run-1", Attempt: 1}
+	ref, err := client.AgentSessions().Open(t.Context(), run, store.SessionDescriptor{InvocationKey: "agent", Backend: "codex", Model: "gpt-5"})
+	if err != nil || ref.SessionID != "run-1-a1-agent" {
+		t.Fatalf("Open = %#v, %v", ref, err)
+	}
+	if _, err := client.AgentSessions().Finalize(t.Context(), ref, store.SessionOutcome{Status: domain.AgentSessionCompleted}); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+}
+
 func TestAgentSessionListSendsKindAndParentServerSide(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/WS/agent-sessions" {

@@ -18,6 +18,32 @@
       ]
     }
   },
+  "taskRunApi": {
+    "path": "/api/workspaces/{workspace}/task-run/{op}",
+    "authHeaders": ["Authorization", "X-Loom-Task-Run-Id", "X-Loom-Task-Run-Node-Id", "X-Loom-Task-Run-Lease-Id", "X-Loom-Task-Run-Fencing-Token"],
+    "lifecycleErrorCodes": ["session_descriptor_conflict", "session_outcome_conflict", "session_attempt_mismatch", "task_run_terminal", "session_lifecycle_contention"],
+    "ops": {
+      "session-open": {
+        "method": "POST",
+        "fields": ["invocationKey", "backend", "model", "parentSessionId", "kind", "tags", "metadata"],
+        "resultFields": ["sessionId", "attempt"]
+      },
+      "session-close": {
+        "method": "POST",
+        "fields": ["sessionId", "status", "exitCode", "summary", "usage", "transcriptRef", "metadata"],
+        "nested": { "usage": ["tokens", "cost"] }
+      }
+    },
+    "agentExec": {
+      "namespace": "TaskRunClient.agent.exec",
+      "form": "process",
+      "argvRequired": true,
+      "futureInvokeForm": "disjoint",
+      "openRetriesDefault": 2,
+      "closeModes": ["auto", "deferred"],
+      "agentInvocationsOnly": true
+    }
+  },
   "errorEnvelope": {
     "fields": ["code", "message", "retryable"],
     "optionalFields": ["details"],
@@ -102,7 +128,7 @@
     "recover-stale-tasks": { "method": "POST", "fields": ["staleBefore", "maxAgeSeconds", "errorClass", "errorMessage"] },
     "sessions-list-unevaluated": { "method": "POST", "fields": ["promptVersion"] },
     "session-transcript-get": { "method": "POST", "fields": ["sessionId", "promptVersion"] },
-    "eval-metric-put": { "method": "POST", "fields": ["sessionId", "judgeSessionId", "promptVersion", "status", "errorClass", "eval"] },
+    "eval-metric-put": { "method": "POST", "fields": ["sessionId", "promptVersion", "judgeSessionId", "status", "errorClass", "eval"] },
     "eval-rejudge": { "method": "POST", "fields": ["sessionId"] },
     "complete-task": {
       "method": "POST",

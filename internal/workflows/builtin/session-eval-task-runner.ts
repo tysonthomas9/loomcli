@@ -3,11 +3,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { defineAgent, defineWorkflow } from "@flue/runtime";
+import { TaskRunClient } from "@loom/sdk/runner";
 
 // Flue HEAD requires every workflow module to default-export a defineWorkflow()
 // definition; a bare `export function run` no longer normalizes (same preamble
-// as local-task-runner.ts). The judge leaf shells out to codex — no LLM agent
-// binding — and its request arrives via the launcher env.
+// as local-task-runner.ts). The judge leaf records the actual Codex process
+// through taskrunapi; preflight remains a deterministic command with no session.
 export default defineWorkflow({
   agent: defineAgent(() => ({ model: false })),
   run: async () => toJsonResult(await run({ payload: leafInvokePayload() })),
@@ -73,9 +74,19 @@ export async function run(ctx = {}) {
   fs.writeFileSync(schemaPath, JSON.stringify(outputSchema()));
 
   const prompt = EVAL_RUBRIC_V1 + "\n\n" + judgeInput + "\n\nReturn ONLY the JSON object matching the output schema.";
-  try {
-    execFileSync(CODEX, [
+  const invocation = await TaskRunClient.fromEnv().agent.exec({
+    invocationKey: "judge",
+    backend: "codex",
+    model,
+    kind: "judge",
+    metadata: {
+      judged_session_id: String(input.sessionId || ""),
+      judge_prompt_version: String(input.promptVersion || ""),
+    },
+    argv: [
+      CODEX,
       "exec",
+      "--json",
       "--skip-git-repo-check",
       "--sandbox", "read-only",
       "-C", work,
@@ -83,36 +94,40 @@ export async function run(ctx = {}) {
       "--output-schema", schemaPath,
       "--output-last-message", outPath,
       "-",
-    ], { input: prompt, stdio: ["pipe", "pipe", "pipe"], timeout: 10 * 60 * 1000 });
-  } catch (err) {
-    const message = errorOutput(err);
+    ],
+    stdin: prompt,
+    timeoutMs: 10 * 60 * 1000,
+    transcript: "stream-json",
+  });
+  if (invocation.spawnError || invocation.timedOut || invocation.exitCode !== 0) {
+    const message = invocationError(invocation);
     const errorClass = contextOverflow(message) ? "transcript_too_large" : "judge_error";
-    return failed(errorClass, "codex eval judge failed: " + message, taskRunId, request, input);
+    return failed(errorClass, "codex eval judge failed: " + message, taskRunId, request, input, invocation);
   }
 
   let result;
   try {
     result = parseLastMessage(fs.readFileSync(outPath, "utf8"));
   } catch (err) {
-    return failed("judge_error", "could not parse codex eval result: " + errorMessage(err), taskRunId, request, input);
+    return failed("judge_error", "could not parse codex eval result: " + errorMessage(err), taskRunId, request, input, invocation);
   }
 
-  const evalCost = zeroEvalCost();
-  // codex exec with --output-last-message does not expose a stable usage
-  // channel on this invocation path. Keep cost present but zeroed rather than
-  // parsing fragile human output.
+  const evalCost = evalCostFromUsage(invocation.usage);
+  const metadata = {
+    task_runner: "session-eval-task-runner",
+    runtime_strategy: "codex-eval",
+    runner: String(request.runner || "session-eval-task-runner"),
+    eval_result: JSON.stringify(result),
+    judge_model: model,
+    judge_session_id: invocation.session.id || "",
+    ...(evalCost ? { eval_cost: JSON.stringify(evalCost) } : {}),
+    ...invocation.runtimeMetadata,
+  };
   return {
     status: "completed",
     exitCode: 0,
     logsRef: "logs://" + taskRunId,
-    runtimeMetadata: {
-      task_runner: "session-eval-task-runner",
-      runtime_strategy: "codex-eval",
-      runner: String(request.runner || "session-eval-task-runner"),
-      eval_result: JSON.stringify(result),
-      judge_model: model,
-      eval_cost: JSON.stringify(evalCost),
-    },
+    runtimeMetadata: metadata,
   };
 }
 
@@ -136,7 +151,7 @@ function requestPayload(ctx) {
   }
 }
 
-function failed(errorClass, message, taskRunId, request = {}, input = {}) {
+function failed(errorClass, message, taskRunId, request = {}, input = {}, invocation = null) {
   return {
     status: "failed",
     exitCode: 1,
@@ -148,6 +163,8 @@ function failed(errorClass, message, taskRunId, request = {}, input = {}) {
       runtime_strategy: "codex-eval",
       runner: String(request.runner || "session-eval-task-runner"),
       judge_model: String(input.model || ""),
+      judge_session_id: invocation?.session?.id || "",
+      ...(invocation?.runtimeMetadata || {}),
     },
   };
 }
@@ -173,26 +190,26 @@ function contextOverflow(text) {
   ].some((needle) => lower.includes(needle));
 }
 
-function errorOutput(err) {
-  const parts = [];
-  if (err && err.message) {
-    parts.push(err.message);
+function invocationError(invocation) {
+  if (invocation.spawnError) {
+    return invocation.spawnError;
   }
-  if (err && err.stdout) {
-    parts.push(String(err.stdout));
+  if (invocation.timedOut) {
+    return "timed out after 600000ms";
   }
-  if (err && err.stderr) {
-    parts.push(String(err.stderr));
-  }
-  return parts.join("\n").trim() || String(err);
+  return [invocation.stderr, invocation.stdout].filter(Boolean).join("\n").trim() || "codex exited " + invocation.exitCode;
 }
 
 function errorMessage(err) {
   return err && err.message ? err.message : String(err);
 }
 
-function zeroEvalCost() {
-  return { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
+function evalCostFromUsage(usage) {
+  const total = Number(usage?.tokens);
+  if (!Number.isFinite(total) || total <= 0) {
+    return null;
+  }
+  return { total_tokens: Math.floor(total) };
 }
 
 const EVAL_RUBRIC_V1 = `You are an evaluation judge for autonomous coding-agent sessions. You will be

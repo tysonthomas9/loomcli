@@ -54,7 +54,12 @@ Prompt values can be:
 
 - **fleet / fleet-db**: The control-plane data service that stores Loom state.
 - **flue**: The external agent harness framework Loom uses to build and run
-  TypeScript agents and workflows.
+  TypeScript agents and workflows. **Flue** is reserved for the framework
+  itself; the Loom plane it powers is the task plane.
+- **task plane**: The Loom execution plane that dispatches work as TaskRuns
+  through the driver/bridge to leaf processes, versus the daemon plane's
+  supervised agents. It is named by role; sessions and ids in this plane carry
+  no framework name.
 - **aether**: The Loom UI/design system terminology used by the web UI.
 - **codex / claude**: AI backends or agent CLIs used by Loom, depending on
   context.
