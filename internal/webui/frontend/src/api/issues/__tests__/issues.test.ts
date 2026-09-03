@@ -823,11 +823,7 @@ describe("issues API", () => {
 
       expect(mockApiGet).toHaveBeenCalledWith(
         "/api/workspaces/{ws}/blocked",
-        expect.objectContaining({
-          params: expect.objectContaining({
-            path: { ws: "test-ws-id" },
-          }),
-        }),
+        { params: { path: { ws: "test-ws-id" }, query: {} } },
       );
     });
 
@@ -947,6 +943,40 @@ describe("issues API", () => {
       );
     });
 
+    it("passes source repos as one comma-separated query parameter", async () => {
+      mockApiGet.mockResolvedValue(
+        okResponse({ success: true, data: mockBlockedIssues }),
+      );
+
+      await getBlockedIssues("test-ws-id", {
+        source_repos: ["repo-a", "repo-b"],
+      });
+
+      expect(mockApiGet).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/blocked",
+        expect.objectContaining({
+          params: expect.objectContaining({
+            query: expect.objectContaining({
+              source_repos: "repo-a,repo-b",
+            }),
+          }),
+        }),
+      );
+    });
+
+    it("omits source_repos when the filter is empty", async () => {
+      mockApiGet.mockResolvedValue(
+        okResponse({ success: true, data: mockBlockedIssues }),
+      );
+
+      await getBlockedIssues("test-ws-id", { source_repos: [] });
+
+      expect(mockApiGet).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/blocked",
+        { params: { path: { ws: "test-ws-id" }, query: {} } },
+      );
+    });
+
     it("passes limit in query params", async () => {
       mockApiGet.mockResolvedValue(
         okResponse({ success: true, data: mockBlockedIssues }),
@@ -991,6 +1021,7 @@ describe("issues API", () => {
         priority: 1,
         type: "bug",
         assignee: "dev1",
+        source_repos: ["repo-a", "repo-b"],
         limit: 5,
       });
 
@@ -1003,6 +1034,7 @@ describe("issues API", () => {
               priority: 1,
               type: "bug",
               assignee: "dev1",
+              source_repos: "repo-a,repo-b",
               limit: 5,
             }),
           }),

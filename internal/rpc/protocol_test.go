@@ -340,6 +340,41 @@ func TestListArgs_JSONRoundTrip(t *testing.T) {
 	}
 }
 
+func TestBlockedArgs_JSONRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	priority := 2
+	original := BlockedArgs{
+		ParentID:    "epic-1",
+		Assignee:    "alice",
+		Priority:    &priority,
+		Type:        "bug",
+		SourceRepos: []string{"repo-a", "repo-b"},
+		Limit:       25,
+	}
+
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("json.Marshal() error: %v", err)
+	}
+
+	var restored BlockedArgs
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatalf("json.Unmarshal() error: %v", err)
+	}
+	if len(restored.SourceRepos) != 2 || restored.SourceRepos[0] != "repo-a" || restored.SourceRepos[1] != "repo-b" {
+		t.Errorf("SourceRepos = %v, want [repo-a repo-b]", restored.SourceRepos)
+	}
+
+	empty, err := json.Marshal(BlockedArgs{})
+	if err != nil {
+		t.Fatalf("json.Marshal(empty) error: %v", err)
+	}
+	if string(empty) != "{}" {
+		t.Errorf("empty BlockedArgs = %s, want byte-identical {}", empty)
+	}
+}
+
 func TestDeleteArgs_JSONRoundTrip(t *testing.T) {
 	t.Parallel()
 

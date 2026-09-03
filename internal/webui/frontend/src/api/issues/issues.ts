@@ -200,6 +200,7 @@ export interface BlockedFilter {
   priority?: number;
   type?: string;
   assignee?: string;
+  source_repos?: string[];
   limit?: number;
 }
 
@@ -216,6 +217,9 @@ export async function getBlockedIssues(
     priority: options?.priority,
     type: options?.type as string | undefined,
     assignee: options?.assignee,
+    source_repos: options?.source_repos?.length
+      ? options.source_repos.join(",")
+      : undefined,
     limit: options?.limit,
   });
   const { data, error, response } = await api.GET(
