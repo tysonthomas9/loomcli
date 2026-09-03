@@ -1,7 +1,7 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { TaskRunClient } from "@loom/sdk/runner";
 
 const CODEX = process.env.LOOM_CODEX_BIN || "codex";
 
@@ -21,27 +21,42 @@ export async function run(ctx = {}) {
   fs.writeFileSync(schemaPath, JSON.stringify(findingsSchema()));
 
   const prompt = reviewPrompt(input, rubric, diff);
-  try {
-    execFileSync(CODEX, [
+  const invocation = await TaskRunClient.fromEnv().agent.exec({
+    invocationKey: "review",
+    backend: "codex",
+    model: String(input.model || "unknown"),
+    argv: [
+      CODEX,
       "exec",
+      "--json",
       "--skip-git-repo-check",
       "--dangerously-bypass-approvals-and-sandbox",
       "-C", work,
       "--output-schema", schemaPath,
       "--output-last-message", outPath,
       "-",
-    ], { input: prompt, stdio: ["pipe", "ignore", "inherit"], timeout: 5 * 60 * 1000 });
-  } catch (err) {
-    return failed("codex_exec_failed", "codex exec failed: " + errorMessage(err), taskRunId, request);
+    ],
+    stdin: prompt,
+    timeoutMs: 5 * 60 * 1000,
+    transcript: "stream-json",
+    close: "deferred",
+  });
+  if (invocation.spawnError || invocation.timedOut || invocation.exitCode !== 0) {
+    const message = invocationError(invocation);
+    await finalizeReview(invocation, "failed", "codex exec failed: " + message, { error_class: "codex_exec_failed" });
+    return failed("codex_exec_failed", "codex exec failed: " + message, taskRunId, request, invocation);
   }
 
   let findings;
   try {
     findings = parseFindings(fs.readFileSync(outPath, "utf8"));
   } catch (err) {
-    return failed("codex_no_findings", "could not parse codex findings: " + errorMessage(err), taskRunId, request);
+    const message = "could not parse codex findings: " + errorMessage(err);
+    await finalizeReview(invocation, "failed", message, { error_class: "codex_no_findings" });
+    return failed("codex_no_findings", message, taskRunId, request, invocation);
   }
 
+  await finalizeReview(invocation, "completed", `review produced ${findings.comments?.length ?? 0} comment(s)`);
   return {
     status: "completed",
     exitCode: 0,
@@ -51,6 +66,8 @@ export async function run(ctx = {}) {
       runtime_strategy: "codex-review",
       runner: String(request.runner || "github-review-task-runner"),
       review_findings: JSON.stringify(findings),
+      review_session_id: invocation.session.id || "",
+      ...invocation.runtimeMetadata,
     },
   };
 }
@@ -66,7 +83,13 @@ function requestPayload(ctx) {
   }
 }
 
-function failed(errorClass, message, taskRunId, request = {}) {
+async function finalizeReview(invocation, status, summary, metadata = undefined) {
+  if (typeof invocation.finalize === "function") {
+    await invocation.finalize({ status, summary, metadata });
+  }
+}
+
+function failed(errorClass, message, taskRunId, request = {}, invocation = null) {
   return {
     status: "failed",
     exitCode: 1,
@@ -77,6 +100,8 @@ function failed(errorClass, message, taskRunId, request = {}) {
       task_runner: "github-review-task-runner",
       runtime_strategy: "codex-review",
       runner: String(request.runner || "github-review-task-runner"),
+      review_session_id: invocation?.session?.id || "",
+      ...(invocation?.runtimeMetadata || {}),
     },
   };
 }
@@ -129,4 +154,10 @@ function parseFindings(raw) {
 
 function errorMessage(err) {
   return err && err.message ? err.message : String(err);
+}
+
+function invocationError(invocation) {
+  if (invocation.spawnError) return invocation.spawnError;
+  if (invocation.timedOut) return "timed out after 300000ms";
+  return [invocation.stderr, invocation.stdout].filter(Boolean).join("\n").trim() || "codex exited " + invocation.exitCode;
 }

@@ -264,6 +264,10 @@ func (s *sessionServiceImpl) sessionListItemsFromAgentSessions(ctx context.Conte
 			SessionRecord: sessionRecordFromAgentSession(rec),
 			IsActive:      isActiveAgentSession(rec.Status),
 			Kind:          rec.Kind,
+			TaskRunID:     agentSessionTaskRunID(rec),
+			InvocationKey: rec.InvocationKey,
+			Attempt:       rec.Attempt,
+			Tags:          append([]string(nil), rec.Tags...),
 		}
 		fillControlPlaneArtifactFlags(&item, stores, rec)
 		items = append(items, item)
@@ -272,6 +276,15 @@ func (s *sessionServiceImpl) sessionListItemsFromAgentSessions(ctx context.Conte
 		return items[i].StartedAt.After(items[j].StartedAt)
 	})
 	return items
+}
+
+// agentSessionTaskRunID keeps historical records displayable while first-class
+// task_run_id adoption rolls out. New records always use the domain field.
+func agentSessionTaskRunID(rec *domain.AgentSession) string {
+	if rec.TaskRunID != "" || rec.Metadata == nil {
+		return rec.TaskRunID
+	}
+	return rec.Metadata["task_run_id"]
 }
 
 // fillControlPlaneArtifactFlags sets HasTranscript/HasDiff from on-disk truth when a
@@ -438,10 +451,12 @@ func (s *sessionServiceImpl) GetSession(ctx context.Context, wsID, taskID, sessi
 		return nil, service.ErrNotFound("session not found")
 	}
 
-	return &service.SessionDetailData{
+	detail := &service.SessionDetailData{
 		SessionMetadata: *meta,
 		IsActive:        meta.Status == sessions.StatusRunning,
-	}, nil
+	}
+	s.attachJudgeSessionLink(ctx, wsID, sessionID, detail)
+	return detail, nil
 }
 
 func (s *sessionServiceImpl) controlPlaneSessionRecord(ctx context.Context, wsID, taskID, sessionID string) (*domain.AgentSession, error) {
@@ -463,13 +478,20 @@ func (s *sessionServiceImpl) controlPlaneSession(ctx context.Context, wsID, task
 	if err != nil {
 		return nil, err
 	}
-	return sessionDetailFromAgentSession(rec), nil
+	detail := sessionDetailFromAgentSession(rec)
+	s.attachJudgeSessionLink(ctx, wsID, sessionID, detail)
+	return detail, nil
 }
 
 func sessionDetailFromAgentSession(rec *domain.AgentSession) *service.SessionDetailData {
+	judgedSessionID := ""
+	if rec.Metadata != nil {
+		judgedSessionID = rec.Metadata["judged_session_id"]
+	}
 	return &service.SessionDetailData{
 		SessionMetadata: sessions.SessionMetadata{SessionRecord: sessionRecordFromAgentSession(rec)},
 		IsActive:        isActiveAgentSession(rec.Status),
+		JudgedSessionID: judgedSessionID,
 	}
 }
 

@@ -3,7 +3,6 @@ package taskrunapi
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -48,14 +47,15 @@ func (m *Module) sessionOpen(ctx context.Context, ws string, id leaseIdentity, b
 		}
 		return nil, err
 	}
-	ref, err := m.store.AgentSessions().Open(ctx, store.SessionRunContext{
+	runContext := store.SessionRunContext{
 		WorkspaceKey: ws,
 		TaskRunID:    run.TaskRunID,
-		Attempt:      taskRunAttempt(run),
+		Attempt:      store.TaskRunClaimAttempt(run),
 		FencingToken: id.FencingToken,
 		DriverRunID:  run.DriverRunID,
 		DriverStepID: run.DriverStepID,
-	}, store.SessionDescriptor{
+	}
+	ref, err := m.store.AgentSessions().Open(ctx, runContext, store.SessionDescriptor{
 		InvocationKey:   params.InvocationKey,
 		Backend:         params.Backend,
 		Model:           params.Model,
@@ -66,6 +66,9 @@ func (m *Module) sessionOpen(ctx context.Context, ws string, id leaseIdentity, b
 	})
 	if err != nil {
 		return nil, fmt.Errorf("open agent session: %w", err)
+	}
+	if m.onSessionOpen != nil && run.RuntimeMetadata["bridge_task_plane"] == "true" {
+		m.onSessionOpen(runContext, ref)
 	}
 	return sessionOpenResult{SessionID: ref.SessionID, Attempt: ref.Attempt}, nil
 }
@@ -116,7 +119,7 @@ func (m *Module) sessionClose(ctx context.Context, ws string, id leaseIdentity, 
 	}
 	// Do not permit one leaf to finalize an invocation owned by another task
 	// run, even if it can guess that session's composed id.
-	if session.TaskRunID != run.TaskRunID || session.Attempt != taskRunAttempt(run) {
+	if session.TaskRunID != run.TaskRunID || session.Attempt != store.TaskRunClaimAttempt(run) {
 		return nil, fmt.Errorf("agent session %q does not belong to task run %q: %w", sessionID, run.TaskRunID, domain.ErrNotFound)
 	}
 	metadata, driverRunnerSessionID := closeMetadata(params.Metadata)
@@ -164,15 +167,4 @@ func closeMetadata(metadata map[string]string) (map[string]string, string) {
 		copy = nil
 	}
 	return copy, driverRunnerSessionID
-}
-
-// taskRunAttempt derives the current dense claim ordinal. This is deliberately
-// server-side because the leaf's headers are proof of claim ownership, not an
-// authority to select an attempt.
-func taskRunAttempt(run *domain.TaskRun) int {
-	attempt, err := strconv.Atoi(run.RuntimeMetadata["scheduler_attempt"])
-	if err != nil || attempt < 0 {
-		attempt = 0
-	}
-	return attempt + 1
 }

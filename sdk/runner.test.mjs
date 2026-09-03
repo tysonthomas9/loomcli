@@ -543,6 +543,70 @@ describe("TaskRunClient.agent.exec", () => {
     assert.deepEqual(Object.keys(close.body).sort(), ["exitCode", "sessionId", "status", "summary", "transcriptRef"]);
   });
 
+  it("captures raw stream-json, redacts declared secrets, and extracts reported usage without inventing cost", async () => {
+    const calls = [];
+    const secret = "declared-agent-secret";
+    const stdout = [
+      JSON.stringify({
+        type: "item.completed",
+        item: { type: "command_execution", command: "env", aggregated_output: `token=${secret}` },
+      }),
+      JSON.stringify({
+        type: "turn.completed",
+        usage: {
+          input_tokens: 100,
+          output_tokens: 20,
+          cached_input_tokens: 30,
+          cache_write_tokens: 7,
+          cost_usd: 0,
+        },
+      }),
+    ].join("\n") + "\n";
+    const client = taskRunClientForAgent(agentLifecycleFetch(calls));
+
+    const result = await client.agent.exec({
+      invocationKey: "agent",
+      backend: "codex",
+      argv: [process.execPath, "-e", `process.stdout.write(${JSON.stringify(stdout)})`],
+      transcript: "stream-json",
+      redactSecrets: [secret],
+    });
+
+    assert.equal(result.entries[0].type, "session_meta");
+    assert.equal(result.entries[1].type, "tool_use");
+    assert.equal(result.entries[2].type, "tool_result");
+    assert.equal(result.entries[2].output, "token=[REDACTED]");
+    assert.deepEqual(result.usage, {
+      tokens: 120,
+      cost: 0,
+      inputTokens: 100,
+      outputTokens: 20,
+      cacheReadTokens: 30,
+      cacheWriteTokens: 7,
+    });
+    const upload = calls.find((call) => call.path.endsWith("/content"));
+    assert.ok(upload.body.includes('"type":"tool_use"'));
+    assert.ok(upload.body.includes("[REDACTED]"));
+    assert.equal(upload.body.includes(secret), false);
+  });
+
+  it("surfaces an opencode fatal stream error from the captured process output", async () => {
+    const calls = [];
+    const stdout = JSON.stringify({ type: "error", error: { message: "model overloaded" } }) + "\n";
+    const client = taskRunClientForAgent(agentLifecycleFetch(calls));
+
+    const result = await client.agent.exec({
+      invocationKey: "agent",
+      backend: "opencode",
+      argv: [process.execPath, "-e", `process.stdout.write(${JSON.stringify(stdout)})`],
+      transcript: "stream-json",
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.streamError, "model overloaded");
+    assert.equal(result.entries[1].type, "error");
+  });
+
   it("degrades only observability after the default open retries and leaves the process result intact", async () => {
     let opens = 0;
     const client = taskRunClientForAgent((url, init = {}) => {
@@ -665,10 +729,112 @@ describe("TaskRunClient.agent.exec", () => {
     assert.equal(closed.length, 1);
   });
 
-  it("throws AgentExecSpecError only for invalid process-form caller input", async () => {
+  it("wraps one in-process prompt in one session, uploads collector entries, and keeps missing response usage unknown", async () => {
+    const calls = [];
+    let promptCalls = 0;
+    const client = taskRunClientForAgent(agentLifecycleFetch(calls));
+    const result = await client.agent.exec.invoke({
+      invocationKey: "agent",
+      backend: "codex",
+      model: "gpt-5",
+      parentSessionId: "parent-session",
+      kind: "judge",
+      tags: ["daytona", "harness"],
+      metadata: { leaf: "daytona" },
+      transcriptCollector: {
+        entries: [
+          { seq: 1, role: "user", type: "text", text: "fix the task" },
+          { seq: 2, role: "assistant", type: "text", text: "done" },
+        ],
+      },
+      invoke: async () => {
+        promptCalls += 1;
+        return { text: "done" };
+      },
+    });
+
+    assert.equal(promptCalls, 1, "one prompt call must be one agent invocation");
+    assert.equal(calls.filter((call) => call.path.endsWith("/session-open")).length, 1);
+    assert.equal(calls.filter((call) => call.path.endsWith("/session-close")).length, 1);
+    assert.equal(result.response.text, "done");
+    assert.equal(result.invokeError, null);
+    assert.equal(result.usage, null, "missing response.usage stays unknown, never zero");
+    assert.equal(result.session.transcriptRef, "artifact://transcript-task-run-1-a1-agent");
+    assert.equal(result.session.closed, true, "auto close completes before invoke returns");
+    const open = calls.find((call) => call.path.endsWith("/session-open"));
+    assert.deepEqual(open.body, {
+      invocationKey: "agent",
+      backend: "codex",
+      model: "gpt-5",
+      parentSessionId: "parent-session",
+      kind: "judge",
+      tags: ["daytona", "harness"],
+      metadata: { leaf: "daytona" },
+    });
+    const uploadIndex = calls.findIndex((call) => call.path.endsWith("/content"));
+    const closeIndex = calls.findIndex((call) => call.path.endsWith("/session-close"));
+    assert.ok(uploadIndex >= 0 && uploadIndex < closeIndex, "artifact upload precedes session close");
+    const close = calls[closeIndex];
+    assert.equal(close.body.usage, undefined, "unknown usage is omitted from the close wire payload");
+  });
+
+  it("returns a prompt rejection as a failed invocation and closes the opened session", async () => {
+    const calls = [];
+    const client = taskRunClientForAgent(agentLifecycleFetch(calls));
+    const result = await client.agent.exec.invoke({
+      invocationKey: "agent",
+      backend: "codex",
+      transcriptCollector: { entries: [] },
+      invoke: async () => {
+        throw new Error("prompt backend down");
+      },
+    });
+
+    assert.equal(result.response, null);
+    assert.equal(result.invokeError, "prompt backend down");
+    assert.equal(result.session.closed, true);
+    const close = calls.find((call) => call.path.endsWith("/session-close"));
+    assert.equal(close.body.status, "failed");
+    assert.equal(close.body.metadata.error_class, "agent_invoke_failed");
+  });
+
+  it("closes without a transcript ref when invoke transcript upload fails", async () => {
+    const calls = [];
+    const client = taskRunClientForAgent((url, init = {}) => {
+      const path = new URL(url).pathname;
+      const body = init.method === "PUT" ? init.body : JSON.parse(init.body);
+      calls.push({ path, method: init.method, body });
+      if (path.endsWith("/session-open")) return json({ sessionId: "task-run-1-a1-agent", attempt: 1 });
+      if (path.endsWith("/artifact-declare")) return json({ artifactId: body.artifactId, type: body.type, durableStatus: "declared" });
+      if (path.endsWith("/content")) return json({ error: { code: "artifact_upload_failed", message: "storage down", retryable: false } }, { status: 503 });
+      if (path.endsWith("/heartbeat")) return json({ taskRunId: "task-run-1", status: "running" });
+      if (path.endsWith("/session-close")) return json({ sessionId: body.sessionId, status: body.status });
+      throw new Error(`unexpected ${init.method} ${path}`);
+    });
+
+    const result = await client.agent.exec.invoke({
+      invocationKey: "agent",
+      backend: "codex",
+      transcriptCollector: { entries: [{ seq: 1, role: "assistant", type: "text", text: "partial" }] },
+      invoke: () => ({ usage: { input: 2, output: 3, cost: { total: 0.01 } } }),
+    });
+
+    assert.equal(result.session.closed, true, "upload failure must not skip close");
+    assert.equal(result.session.transcriptRef, null);
+    assert.equal(result.runtimeMetadata.observability_degraded, "true");
+    const close = calls.find((call) => call.path.endsWith("/session-close"));
+    assert.equal(close.body.transcriptRef, undefined, "close precedes task completion but carries no failed artifact ref");
+    assert.deepEqual(close.body.usage, { tokens: 5, cost: 0.01, inputTokens: 2, outputTokens: 3 });
+  });
+
+  it("rejects invoke-shaped process specs and process-shaped invoke specs", async () => {
     const client = taskRunClientForAgent(() => json({}));
     await assert.rejects(
-      () => client.agent.exec({ invocationKey: "agent", backend: "codex", invoke: () => {} }),
+      () => client.agent.exec({ invocationKey: "agent", backend: "codex", argv: ["codex"], invoke: () => {}, transcriptCollector: { entries: [] } }),
+      AgentExecSpecError,
+    );
+    await assert.rejects(
+      () => client.agent.exec.invoke({ invocationKey: "agent", backend: "codex", argv: ["codex"], transcriptCollector: { entries: [] }, invoke: () => ({}) }),
       AgentExecSpecError,
     );
   });
@@ -686,6 +852,20 @@ function taskRunClientForAgent(fetch) {
     fencingToken: "42",
     fetch,
   });
+}
+
+function agentLifecycleFetch(calls) {
+  return (url, init = {}) => {
+    const path = new URL(url).pathname;
+    const body = init.method === "PUT" ? init.body : JSON.parse(init.body);
+    calls.push({ path, method: init.method, body });
+    if (path.endsWith("/session-open")) return json({ sessionId: "task-run-1-a1-agent", attempt: 1 });
+    if (path.endsWith("/artifact-declare")) return json({ artifactId: body.artifactId, type: body.type, durableStatus: "declared" });
+    if (path.endsWith("/content")) return json({ artifactId: "transcript-task-run-1-a1-agent", durableStatus: "uploaded" });
+    if (path.endsWith("/artifact-finalize")) return json({ artifactId: body.artifactId, durableStatus: "finalized" });
+    if (path.endsWith("/session-close")) return json({ sessionId: body.sessionId, status: body.status });
+    throw new Error(`unexpected ${init.method} ${path}`);
+  };
 }
 
 function json(body, init = {}) {

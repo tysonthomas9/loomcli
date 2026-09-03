@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 
 import { formatTokens } from "@/components/TranscriptView";
-import { useSessionEval } from "@/hooks/evals";
 import { useToast } from "@/hooks/ui";
 import type {
+  EvalRejudgeResult,
   EvalScoreKey,
   SessionEvalRecord,
   SessionEvalState,
@@ -118,8 +118,10 @@ function EvalCostLine({
 
 function DoneEval({
   evalRecord,
+  onOpenJudge,
 }: {
   evalRecord: SessionEvalRecord;
+  onOpenJudge?: (judgeSessionId: string) => void;
 }): JSX.Element {
   return (
     <div className={styles.evalDone}>
@@ -165,20 +167,39 @@ function DoneEval({
         })}
       </div>
       <EvalCostLine evalRecord={evalRecord} />
+      {evalRecord.judge_session_id && onOpenJudge && (
+        <button
+          type="button"
+          className={styles.evalJudgeLink}
+          onClick={() => onOpenJudge(evalRecord.judge_session_id!)}
+        >
+          View judge transcript
+        </button>
+      )}
     </div>
   );
 }
 
 export function TraceEvalPanel({
   sessionId,
-  enabled,
+  kind,
+  evalState,
+  isLoading,
+  isRejudging,
+  error,
+  requestRejudge,
+  onOpenJudge,
 }: {
   sessionId: string | null;
-  enabled: boolean;
+  kind?: string;
+  evalState: SessionEvalState | null;
+  isLoading: boolean;
+  isRejudging: boolean;
+  error: Error | null;
+  requestRejudge: () => Promise<EvalRejudgeResult | null>;
+  onOpenJudge?: (judgeSessionId: string) => void;
 }): JSX.Element {
   const { showToast } = useToast();
-  const { evalState, isLoading, isRejudging, error, requestRejudge } =
-    useSessionEval(sessionId, enabled);
   const [pausedNote, setPausedNote] = useState(false);
   const [requestedOverride, setRequestedOverride] = useState(false);
 
@@ -225,12 +246,14 @@ export function TraceEvalPanel({
           <h3 className={styles.evalPanelTitle}>Eval</h3>
           {evalState && <RequestedBadge requested={evalState.eval_requested} />}
         </div>
-        <RejudgeButton
-          evalState={evalState}
-          isRejudging={isRejudging}
-          requestedOverride={requestedOverride}
-          onClick={() => void handleRejudge()}
-        />
+        {kind !== "judge" && (
+          <RejudgeButton
+            evalState={evalState}
+            isRejudging={isRejudging}
+            requestedOverride={requestedOverride}
+            onClick={() => void handleRejudge()}
+          />
+        )}
       </div>
 
       {pausedNote && (
@@ -268,7 +291,12 @@ export function TraceEvalPanel({
       {!isLoading &&
         !error &&
         evalState?.eval_status === "done" &&
-        evalState.eval && <DoneEval evalRecord={evalState.eval} />}
+        evalState.eval && (
+          <DoneEval
+            evalRecord={evalState.eval}
+            {...(onOpenJudge ? { onOpenJudge } : {})}
+          />
+        )}
     </div>
   );
 }

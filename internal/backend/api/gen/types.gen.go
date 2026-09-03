@@ -2843,15 +2843,22 @@ type SessionEval struct {
 	ImprovementCategories SessionEvalImprovementCategories `json:"improvement_categories"`
 	JudgeModel            string                           `json:"judge_model"`
 	JudgePromptVersion    string                           `json:"judge_prompt_version"`
-	JudgeSummary          string                           `json:"judge_summary"`
-	ScoreRationales       SessionEvalScoreRationales       `json:"score_rationales"`
-	Scores                SessionEvalScores                `json:"scores"`
-	SessionEndedAt        time.Time                        `json:"session_ended_at"`
-	SessionId             string                           `json:"session_id"`
-	SessionStartedAt      time.Time                        `json:"session_started_at"`
-	TaskId                *string                          `json:"task_id,omitempty"`
-	UpdatedAt             time.Time                        `json:"updated_at"`
-	WorkspaceKey          string                           `json:"workspace_key"`
+
+	// JudgeSessionId Judge AgentSession that produced this evaluation, when available.
+	JudgeSessionId *string `json:"judge_session_id,omitempty"`
+	JudgeSummary   string  `json:"judge_summary"`
+
+	// ScoreRationales Dimension-keyed rationale map matching scores.
+	ScoreRationales SessionEvalScoreRationales `json:"score_rationales"`
+
+	// Scores Dimension-keyed score map. Current judge writes still require exactly the canonical four keys.
+	Scores           SessionEvalScores `json:"scores"`
+	SessionEndedAt   time.Time         `json:"session_ended_at"`
+	SessionId        string            `json:"session_id"`
+	SessionStartedAt time.Time         `json:"session_started_at"`
+	TaskId           *string           `json:"task_id,omitempty"`
+	UpdatedAt        time.Time         `json:"updated_at"`
+	WorkspaceKey     string            `json:"workspace_key"`
 }
 
 // SessionEvalCost defines model for SessionEvalCost.
@@ -2869,21 +2876,11 @@ type SessionEvalImprovementCategories struct {
 	Skill   []string `json:"skill"`
 }
 
-// SessionEvalScoreRationales defines model for SessionEvalScoreRationales.
-type SessionEvalScoreRationales struct {
-	Efficiency           string `json:"efficiency"`
-	InstructionAdherence string `json:"instruction_adherence"`
-	OutcomeSuccess       string `json:"outcome_success"`
-	ToolUseQuality       string `json:"tool_use_quality"`
-}
+// SessionEvalScoreRationales Dimension-keyed rationale map matching scores.
+type SessionEvalScoreRationales map[string]string
 
-// SessionEvalScores defines model for SessionEvalScores.
-type SessionEvalScores struct {
-	Efficiency           int `json:"efficiency"`
-	InstructionAdherence int `json:"instruction_adherence"`
-	OutcomeSuccess       int `json:"outcome_success"`
-	ToolUseQuality       int `json:"tool_use_quality"`
-}
+// SessionEvalScores Dimension-keyed score map. Current judge writes still require exactly the canonical four keys.
+type SessionEvalScores map[string]int
 
 // SessionEvalState defines model for SessionEvalState.
 type SessionEvalState struct {
@@ -2929,6 +2926,7 @@ type SessionHistoryRecordStatus string
 // SessionResponse Session audit record from dto.SessionResponse
 type SessionResponse struct {
 	AgentName        string     `json:"agent_name"`
+	Attempt          *int       `json:"attempt,omitempty"`
 	AttemptNum       int        `json:"attempt_num"`
 	Backend          string     `json:"backend"`
 	CacheReadTokens  int64      `json:"cache_read_tokens"`
@@ -2938,24 +2936,37 @@ type SessionResponse struct {
 	EpicId           *string    `json:"epic_id,omitempty"`
 	ErrorClass       *string    `json:"error_class,omitempty"`
 	EstimatedCostUsd float64    `json:"estimated_cost_usd"`
-	ExitCode         int        `json:"exit_code"`
-	FilesChanged     int        `json:"files_changed"`
-	FilesTouched     *[]string  `json:"files_touched,omitempty"`
-	HasDiff          bool       `json:"has_diff"`
-	HasTranscript    bool       `json:"has_transcript"`
-	InputTokens      int64      `json:"input_tokens"`
-	IsActive         bool       `json:"is_active"`
-	Kind             *string    `json:"kind,omitempty"`
-	LastError        *string    `json:"last_error,omitempty"`
-	LinesAdded       int        `json:"lines_added"`
-	LinesRemoved     int        `json:"lines_removed"`
-	Model            *string    `json:"model,omitempty"`
-	OutputTokens     int64      `json:"output_tokens"`
-	Phase            *string    `json:"phase,omitempty"`
-	SessionId        string     `json:"session_id"`
-	StartedAt        time.Time  `json:"started_at"`
-	Status           string     `json:"status"`
-	TaskId           string     `json:"task_id"`
+
+	// EvalScores Dimension-keyed score map. Current judge writes still require exactly the canonical four keys.
+	EvalScores    *SessionEvalScores `json:"eval_scores,omitempty"`
+	EvalStatus    *string            `json:"eval_status,omitempty"`
+	ExitCode      int                `json:"exit_code"`
+	FilesChanged  int                `json:"files_changed"`
+	FilesTouched  *[]string          `json:"files_touched,omitempty"`
+	HasDiff       bool               `json:"has_diff"`
+	HasTranscript bool               `json:"has_transcript"`
+	InputTokens   int64              `json:"input_tokens"`
+	InvocationKey *string            `json:"invocation_key,omitempty"`
+	IsActive      bool               `json:"is_active"`
+
+	// JudgeSessionId Judge session joined from this subject session's displayed eval record.
+	JudgeSessionId *string `json:"judge_session_id,omitempty"`
+
+	// JudgedSessionId Subject session read server-side from judge session metadata.
+	JudgedSessionId *string   `json:"judged_session_id,omitempty"`
+	Kind            *string   `json:"kind,omitempty"`
+	LastError       *string   `json:"last_error,omitempty"`
+	LinesAdded      int       `json:"lines_added"`
+	LinesRemoved    int       `json:"lines_removed"`
+	Model           *string   `json:"model,omitempty"`
+	OutputTokens    int64     `json:"output_tokens"`
+	Phase           *string   `json:"phase,omitempty"`
+	SessionId       string    `json:"session_id"`
+	StartedAt       time.Time `json:"started_at"`
+	Status          string    `json:"status"`
+	Tags            *[]string `json:"tags,omitempty"`
+	TaskId          string    `json:"task_id"`
+	TaskRunId       *string   `json:"task_run_id,omitempty"`
 }
 
 // StaleDetectorStatus defines model for StaleDetectorStatus.
@@ -3046,6 +3057,24 @@ type TerminalSpawnData struct {
 type TerminalSpawnRequest struct {
 	Backend     string `json:"backend"`
 	SessionName string `json:"session_name"`
+}
+
+// TraceTaskRun Control-plane TaskRun truth used by the run header; additional TaskRun fields may be present.
+type TraceTaskRun struct {
+	CacheReadTokens  *int64     `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens *int64     `json:"cache_write_tokens,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	FinishedAt       *time.Time `json:"finished_at,omitempty"`
+	InputTokens      *int64     `json:"input_tokens,omitempty"`
+	OutputTokens     *int64     `json:"output_tokens,omitempty"`
+	StartedAt        *time.Time `json:"started_at,omitempty"`
+
+	// Status Control-plane TaskRun status.
+	Status       string    `json:"status"`
+	TaskId       string    `json:"task_id"`
+	TaskRunId    string    `json:"task_run_id"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	WorkspaceKey string    `json:"workspace_key"`
 }
 
 // TranscriptEntry Single transcript entry from a session
@@ -3274,6 +3303,52 @@ type WorkspaceResponse struct {
 // WorkspaceResponseDesignFormat defines model for WorkspaceResponse.DesignFormat.
 type WorkspaceResponseDesignFormat string
 
+// WorkspaceSessionListItem defines model for WorkspaceSessionListItem.
+type WorkspaceSessionListItem struct {
+	AgentName        string     `json:"agent_name"`
+	Attempt          int        `json:"attempt"`
+	AttemptNum       int        `json:"attempt_num"`
+	Backend          string     `json:"backend"`
+	CacheReadTokens  int64      `json:"cache_read_tokens"`
+	CacheWriteTokens int64      `json:"cache_write_tokens"`
+	DurationS        *float64   `json:"duration_s,omitempty"`
+	EndedAt          *time.Time `json:"ended_at,omitempty"`
+	EpicId           *string    `json:"epic_id,omitempty"`
+	ErrorClass       *string    `json:"error_class,omitempty"`
+	EstimatedCostUsd float64    `json:"estimated_cost_usd"`
+
+	// EvalScores Dimension-keyed score map. Current judge writes still require exactly the canonical four keys.
+	EvalScores    *SessionEvalScores `json:"eval_scores,omitempty"`
+	EvalStatus    *string            `json:"eval_status,omitempty"`
+	ExitCode      int                `json:"exit_code"`
+	FilesChanged  int                `json:"files_changed"`
+	FilesTouched  *[]string          `json:"files_touched,omitempty"`
+	HasDiff       bool               `json:"has_diff"`
+	HasTranscript bool               `json:"has_transcript"`
+	InputTokens   int64              `json:"input_tokens"`
+	InvocationKey string             `json:"invocation_key"`
+	IsActive      bool               `json:"is_active"`
+
+	// JudgeSessionId Judge session joined from this subject session's displayed eval record.
+	JudgeSessionId *string `json:"judge_session_id,omitempty"`
+
+	// JudgedSessionId Subject session read server-side from judge session metadata.
+	JudgedSessionId *string   `json:"judged_session_id,omitempty"`
+	Kind            *string   `json:"kind,omitempty"`
+	LastError       *string   `json:"last_error,omitempty"`
+	LinesAdded      int       `json:"lines_added"`
+	LinesRemoved    int       `json:"lines_removed"`
+	Model           *string   `json:"model,omitempty"`
+	OutputTokens    int64     `json:"output_tokens"`
+	Phase           *string   `json:"phase,omitempty"`
+	SessionId       string    `json:"session_id"`
+	StartedAt       time.Time `json:"started_at"`
+	Status          string    `json:"status"`
+	Tags            *[]string `json:"tags,omitempty"`
+	TaskId          string    `json:"task_id"`
+	TaskRunId       string    `json:"task_run_id"`
+}
+
 // WorkspaceSummary defines model for WorkspaceSummary.
 type WorkspaceSummary struct {
 	Active    bool    `json:"active"`
@@ -3283,6 +3358,28 @@ type WorkspaceSummary struct {
 	Name      string  `json:"name"`
 	Path      string  `json:"path"`
 	RepoCount int     `json:"repo_count"`
+}
+
+// WorkspaceTraceRunData defines model for WorkspaceTraceRunData.
+type WorkspaceTraceRunData struct {
+	AttemptCount    int                        `json:"attempt_count"`
+	DurationSeconds float64                    `json:"duration_seconds"`
+	FilesChanged    int                        `json:"files_changed"`
+	Sessions        []WorkspaceSessionListItem `json:"sessions"`
+	TaskId          *string                    `json:"task_id,omitempty"`
+
+	// TaskRun Control-plane TaskRun truth used by the run header; additional TaskRun fields may be present.
+	TaskRun        *TraceTaskRun `json:"task_run,omitempty"`
+	TaskRunId      string        `json:"task_run_id"`
+	TaskRunMissing bool          `json:"task_run_missing"`
+	TotalTokens    int64         `json:"total_tokens"`
+}
+
+// WorkspaceTraceRunResponse defines model for WorkspaceTraceRunResponse.
+type WorkspaceTraceRunResponse struct {
+	Data    WorkspaceTraceRunData `json:"data"`
+	Error   *string               `json:"error,omitempty"`
+	Success bool                  `json:"success"`
 }
 
 // AgentName defines model for AgentName.
@@ -3735,8 +3832,16 @@ type ListWorkspaceSessionsParams struct {
 	Until   *time.Time `form:"until,omitempty" json:"until,omitempty"`
 	Status  *string    `form:"status,omitempty" json:"status,omitempty"`
 	AgentId *string    `form:"agent_id,omitempty" json:"agent_id,omitempty"`
-	Kind    *string    `form:"kind,omitempty" json:"kind,omitempty"`
-	Limit   *int       `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// TaskRunId Filter sessions by first-class task run identifier.
+	TaskRunId *string `form:"task_run_id,omitempty" json:"task_run_id,omitempty"`
+
+	// Tag Repeatable AND filter; every supplied tag must be present on a session.
+	Tag *[]string `form:"tag,omitempty" json:"tag,omitempty"`
+
+	// Kind Filter by any supported session kind, including judge.
+	Kind  *string `form:"kind,omitempty" json:"kind,omitempty"`
+	Limit *int    `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // GetTaskLogParams defines parameters for GetTaskLog.

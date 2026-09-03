@@ -7,6 +7,7 @@
 
 import {
   ArtifactHandle,
+  AgentExecInvokeResult,
   AgentExecResult,
   CompleteRunResponse,
   DriverApiError,
@@ -213,6 +214,19 @@ export async function exerciseRunnerSurface(): Promise<void> {
   expectType<boolean>(invocation.session.degraded);
   expectType<string | null>(invocation.session.degradedReason);
   expectType<string>(invocation.runtimeMetadata.observability_degraded || "");
+  const harnessCollector: FlueTranscriptCollector = createFlueTranscriptCollector();
+  harnessCollector.push({ type: "turn_request", purpose: "agent", input: { messages: [{ role: "user", content: "hello" }] } });
+  const harnessInvocation: AgentExecInvokeResult<{ usage?: { input: number; output: number }; text: string }> = await serveRunner.agent.exec.invoke({
+    invocationKey: "harness-agent",
+    backend: "codex",
+    model: "gpt-5",
+    transcriptCollector: harnessCollector,
+    invoke: async () => ({ text: "done", usage: { input: 1, output: 2 } }),
+  });
+  expectType<string | null>(harnessInvocation.invokeError);
+  expectType<string>(harnessInvocation.response?.text || "");
+  // @ts-expect-error invoke form deliberately rejects process-form argv
+  await serveRunner.agent.exec.invoke({ invocationKey: "bad", backend: "codex", argv: ["codex"], transcriptCollector: { entries: [] }, invoke: () => ({}) });
   await serveRunner.sessionOpen({ invocationKey: "judge", backend: "codex", model: "gpt-5", kind: "judge" });
   await serveRunner.sessionClose({ sessionId: "task-run-1-a1-judge", status: "completed", usage: { tokens: 1, cost: null } });
 }

@@ -116,11 +116,11 @@ func (e HostBridgeTaskExecutor) registerRunnerArtifact(ctx context.Context, req 
 	return finalized, nil
 }
 
-func (e HostBridgeTaskExecutor) persistRunnerOutputArtifacts(ctx context.Context, req TaskExecRequest, session *flueTaskSession, runner bridgeTaskRunnerResult, result TaskExecResult) (TaskExecResult, error) {
+func (e HostBridgeTaskExecutor) persistRunnerOutputArtifacts(ctx context.Context, req TaskExecRequest, runner bridgeTaskRunnerResult, result TaskExecResult) (TaskExecResult, error) {
 	if result.RuntimeMetadata == nil {
 		result.RuntimeMetadata = map[string]string{}
 	}
-	result = e.persistRunnerTranscript(ctx, req, session, runner, result)
+	result = e.persistRunnerTranscript(ctx, req, runner, result)
 
 	logContent, err := e.runnerFileOrInlineBytes(runner.logsInline(), firstNonEmpty(runner.LogsPath, runner.LogsPathCamel), "logs")
 	if err != nil {
@@ -128,7 +128,7 @@ func (e HostBridgeTaskExecutor) persistRunnerOutputArtifacts(ctx context.Context
 	}
 	if len(logContent) > 0 && result.LogsRef == "" {
 		artifactID := "logs-" + req.TaskRunID
-		finalized, err := e.createContentArtifact(ctx, req, sessionIDFromFlueTaskSession(session), artifactID, "logs", "task run logs", "text/plain; charset=utf-8", logContent)
+		finalized, err := e.createContentArtifact(ctx, req, artifactID, "logs", "task run logs", "text/plain; charset=utf-8", logContent)
 		if err != nil {
 			return TaskExecResult{}, err
 		}
@@ -138,9 +138,6 @@ func (e HostBridgeTaskExecutor) persistRunnerOutputArtifacts(ctx context.Context
 	}
 	if result.LogsRef != "" {
 		result.RuntimeMetadata["logs_ref"] = result.LogsRef
-		if session != nil {
-			session.Metadata["logs_ref"] = result.LogsRef
-		}
 	}
 	if result.ArtifactsRef == "" && len(result.ArtifactIDs) > 0 {
 		result.ArtifactsRef = "artifacts://" + req.TaskRunID
@@ -152,7 +149,7 @@ func (e HostBridgeTaskExecutor) persistRunnerOutputArtifacts(ctx context.Context
 // transcript_ref: a leaf-provided ref wins, otherwise inline/file content is
 // uploaded as a content artifact. Best-effort — an observability write must
 // not fail the task run.
-func (e HostBridgeTaskExecutor) persistRunnerTranscript(ctx context.Context, req TaskExecRequest, session *flueTaskSession, runner bridgeTaskRunnerResult, result TaskExecResult) TaskExecResult {
+func (e HostBridgeTaskExecutor) persistRunnerTranscript(ctx context.Context, req TaskExecRequest, runner bridgeTaskRunnerResult, result TaskExecResult) TaskExecResult {
 	if transcriptRef := firstNonEmpty(runner.TranscriptRef, runner.TranscriptRefCamel); transcriptRef != "" {
 		result.RuntimeMetadata["transcript_ref"] = transcriptRef
 	}
@@ -160,17 +157,15 @@ func (e HostBridgeTaskExecutor) persistRunnerTranscript(ctx context.Context, req
 	if err != nil {
 		slog.WarnContext(ctx, "task run transcript read failed; continuing without transcript_ref",
 			"task_run_id", req.TaskRunID,
-			"session_id", sessionIDFromFlueTaskSession(session),
 			"err", err)
 		transcriptContent = nil
 	}
 	if len(transcriptContent) > 0 && result.RuntimeMetadata["transcript_ref"] == "" {
 		artifactID := "transcript-" + req.TaskRunID
-		finalized, err := e.createContentArtifact(ctx, req, sessionIDFromFlueTaskSession(session), artifactID, "transcript", "task run transcript", "application/x-ndjson", transcriptContent)
+		finalized, err := e.createContentArtifact(ctx, req, artifactID, "transcript", "task run transcript", "application/x-ndjson", transcriptContent)
 		if err != nil {
 			slog.WarnContext(ctx, "task run transcript artifact upload failed; continuing without transcript_ref",
 				"task_run_id", req.TaskRunID,
-				"session_id", sessionIDFromFlueTaskSession(session),
 				"artifact_id", artifactID,
 				"err", err)
 		} else {
@@ -178,9 +173,6 @@ func (e HostBridgeTaskExecutor) persistRunnerTranscript(ctx context.Context, req
 			result.RuntimeMetadata["transcript_ref"] = "artifact://" + finalized.ArtifactID
 			result.RuntimeMetadata["transcript_artifact_id"] = finalized.ArtifactID
 		}
-	}
-	if result.RuntimeMetadata["transcript_ref"] != "" && session != nil {
-		session.Metadata["transcript_ref"] = result.RuntimeMetadata["transcript_ref"]
 	}
 	return result
 }
@@ -237,14 +229,13 @@ func (e HostBridgeTaskExecutor) runnerFileOrInlineBytes(inline []byte, filePath,
 	return content, nil
 }
 
-func (e HostBridgeTaskExecutor) createContentArtifact(ctx context.Context, req TaskExecRequest, sessionID, artifactID, artifactType, summary, mimeType string, content []byte) (*domain.Artifact, error) {
+func (e HostBridgeTaskExecutor) createContentArtifact(ctx context.Context, req TaskExecRequest, artifactID, artifactType, summary, mimeType string, content []byte) (*domain.Artifact, error) {
 	if e.Store == nil {
 		return nil, fmt.Errorf("store required for %s artifact finalization: %w", artifactType, domain.ErrInvalid)
 	}
 	return store.UploadContentArtifact(ctx, e.Store.Artifacts(), store.ArtifactCreate{
 		WorkspaceKey:  req.WorkspaceKey,
 		ArtifactID:    artifactID,
-		SessionID:     sessionID,
 		TaskID:        req.TaskID,
 		OwnerType:     "task_run",
 		OwnerID:       req.TaskRunID,
@@ -268,13 +259,6 @@ func runnerArtifactMetadata(req TaskExecRequest) map[string]string {
 		"runtime":                  "flue",
 		"task_run_id":              req.TaskRunID,
 	}
-}
-
-func sessionIDFromFlueTaskSession(session *flueTaskSession) string {
-	if session == nil {
-		return ""
-	}
-	return session.SessionID
 }
 
 func optionalString(value string) *string {

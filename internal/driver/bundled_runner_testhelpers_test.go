@@ -22,6 +22,7 @@ type bundledResult struct {
 	EstimatedCostUSD  float64           `json:"estimated_cost_usd"`
 	TranscriptEntries []json.RawMessage `json:"transcript_entries"`
 	RuntimeMetadata   map[string]any    `json:"runtime_metadata"`
+	Patch             string            `json:"patch"`
 }
 
 // newGitWorktree initializes a throwaway git repo in dir with one commit, so the

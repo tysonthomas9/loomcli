@@ -206,7 +206,7 @@ func (s *agentSessionStore) Open(_ context.Context, run store.SessionRunContext,
 	if taskRun.Status.IsTerminal() {
 		return store.SessionRef{}, lifecycleError(store.SessionLifecycleErrTaskRunTerminal, domain.ErrConflict)
 	}
-	if run.Attempt != taskRunAttemptForSession(taskRun) {
+	if run.Attempt != store.TaskRunClaimAttempt(taskRun) {
 		return store.SessionRef{}, lifecycleError(store.SessionLifecycleErrAttemptMismatch, domain.ErrConflict)
 	}
 	return s.openSessionLocked(run, descriptor)
@@ -323,8 +323,6 @@ func (s *agentSessionStore) Update(_ context.Context, ws, sessionID string, patc
 	if !ok {
 		return nil, fmt.Errorf("agent session %q in workspace %q: %w", sessionID, ws, domain.ErrNotFound)
 	}
-	// Interim LOOMCLI-160 rule: invocation-key-less legacy bridge sessions may
-	// re-enter; only lifecycle-managed sessions receive generic-update CAS.
 	if store.ProtectAgentSessionTerminalUpdate(session) && store.AgentSessionUpdateTouchesOutcome(patch) {
 		if store.AgentSessionUpdateMatches(session, patch) {
 			return cloneAgentSession(session), nil
@@ -375,16 +373,6 @@ func (s *agentSessionStore) unlockLifecycle() {
 	if s.lifecycleMu != nil {
 		s.lifecycleMu.Unlock()
 	}
-}
-
-func taskRunAttemptForSession(run *domain.TaskRun) int {
-	// scheduler_attempt is persisted when an attempt requeues; the live claim
-	// is therefore the completed/requeued count plus one.
-	attempt, err := strconv.Atoi(run.RuntimeMetadata["scheduler_attempt"])
-	if err != nil || attempt < 0 {
-		attempt = 0
-	}
-	return attempt + 1
 }
 
 func sessionDescriptorMatches(session *domain.AgentSession, descriptor store.SessionDescriptor) bool {
@@ -465,6 +453,9 @@ func sessionMatches(s *domain.AgentSession, filter store.AgentSessionFilter) boo
 	if filter.TaskRunID != "" && s.TaskRunID != filter.TaskRunID {
 		return false
 	}
+	if !sessionHasAllTags(s.Tags, filter.Tags) {
+		return false
+	}
 	if filter.Status != "" && s.Status != filter.Status {
 		return false
 	}
@@ -479,6 +470,22 @@ func sessionMatches(s *domain.AgentSession, filter store.AgentSessionFilter) boo
 	}
 	if filter.ParentSessionID != "" && s.ParentSessionID != filter.ParentSessionID {
 		return false
+	}
+	return true
+}
+
+func sessionHasAllTags(actual, required []string) bool {
+	if len(required) == 0 {
+		return true
+	}
+	have := make(map[string]struct{}, len(actual))
+	for _, tag := range actual {
+		have[tag] = struct{}{}
+	}
+	for _, tag := range required {
+		if _, ok := have[tag]; !ok {
+			return false
+		}
 	}
 	return true
 }

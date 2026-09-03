@@ -181,6 +181,8 @@ export interface LoomEvalSessionInput extends LoomEvalPromptInput {
 }
 
 export interface LoomEvalMetricInput extends LoomEvalSessionInput {
+  judgeSessionId?: string;
+  judge_session_id?: string;
   status?: "done" | "failed" | string;
   errorClass?: string;
   error_class?: string;

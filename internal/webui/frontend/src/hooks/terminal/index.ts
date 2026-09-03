@@ -31,6 +31,9 @@ export type {
 export { useWorkspaceSessions } from "./useWorkspaceSessions";
 export type { UseWorkspaceSessionsResult } from "./useWorkspaceSessions";
 
+export { useWorkspaceTraceRun } from "./useWorkspaceTraceRun";
+export type { UseWorkspaceTraceRunResult } from "./useWorkspaceTraceRun";
+
 export { useWorkspaceSessionTranscript } from "./useWorkspaceSessionTranscript";
 export type { UseWorkspaceSessionTranscriptResult } from "./useWorkspaceSessionTranscript";
 

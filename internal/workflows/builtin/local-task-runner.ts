@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { defineAgent, defineWorkflow } from "@flue/runtime";
+import { TaskRunClient } from "@loom/sdk/runner";
 
 // Flue HEAD (durable-streams) requires every workflow module to default-export a
 // defineWorkflow() definition; a bare `export function run` no longer normalizes.
@@ -57,7 +58,7 @@ const SUPPORTED = {
   cursor: "cursor-agent", // the headless agent CLI; `cursor` is the IDE launcher
 };
 
-// STREAM_JSON_BACKENDS get first-class stream-json -> canonical transcript_entries.
+// STREAM_JSON_BACKENDS emit JSONL that agent.exec captures as transcript entries.
 const STREAM_JSON_BACKENDS = new Set(["codex", "claude", "cursor", "opencode", "gemini"]);
 
 export async function run(ctx = {}) {
@@ -134,6 +135,7 @@ export async function run(ctx = {}) {
   const usesStdinPrompt = backendUsesStdinPrompt(backend);
 
   const openPR = booleanValue(inputValue(request, "openPullRequest"));
+  let invocation;
   let exitCode;
   let stdout = "";
   let stderr = "";
@@ -142,15 +144,22 @@ export async function run(ctx = {}) {
   let stackInfo = null;
   let prFailure = null;
   try {
-    let result;
     try {
-      result = await execBackend(binary, args, {
+      invocation = await TaskRunClient.fromEnv().agent.exec({
+        invocationKey: "agent",
+        backend,
+        model: resolveModel(backend),
+        argv: [binary, ...args],
         cwd: execWorktree,
-        input: usesStdinPrompt ? prompt : undefined,
-        live: true,
+        env: { IS_SANDBOX: "1" },
+        stdin: usesStdinPrompt ? prompt : undefined,
+        timeoutMs: numberValue(process.env.LOOM_LOCAL_TASK_TIMEOUT_MS, 30 * 60 * 1000),
+        live: booleanValue(process.env.LOOM_TASK_RUNNER_STREAM_STDERR),
+        transcript: STREAM_JSON_BACKENDS.has(backend) ? "stream-json" : "minimal",
+        redactSecrets: declaredTranscriptSecrets(),
       });
     } catch (error) {
-      return failed("local_agent_failed", `failed to spawn ${backend} CLI: ${errorMessage(error)}`, {
+      return failed("local_agent_failed", `could not start ${backend} agent invocation: ${errorMessage(error)}`, {
         taskRunId,
         taskId,
         backend,
@@ -159,11 +168,22 @@ export async function run(ctx = {}) {
         headBefore,
       });
     }
-    exitCode = result.code;
-    stdout = result.stdout;
-    stderr = result.stderr;
+    if (invocation.spawnError) {
+      return failed("local_agent_failed", `failed to spawn ${backend} CLI: ${invocation.spawnError}`, {
+        taskRunId,
+        taskId,
+        backend,
+        request,
+        logs,
+        headBefore,
+        invocation,
+      });
+    }
+    exitCode = invocation.exitCode ?? (invocation.timedOut ? 124 : 1);
+    stdout = invocation.stdout;
+    stderr = invocation.stderr;
 
-    logs.push(`${backend} CLI exit=${exitCode}`);
+    logs.push(`${backend} CLI exit=${exitCode}${invocation.timedOut ? " (timeout)" : ""}`);
     if (stdout.trim()) {
       logs.push(textTail(stdout, 4000));
     }
@@ -231,40 +251,11 @@ export async function run(ctx = {}) {
 
   // Fail closed when PR delivery was requested but could not be completed.
   if (prFailure) {
-    return failed(prFailure.class, prFailure.message, { taskRunId, taskId, backend, request, logs, headBefore });
+    return failed(prFailure.class, prFailure.message, { taskRunId, taskId, backend, request, logs, headBefore, invocation });
   }
 
-  let transcriptEntries = STREAM_JSON_BACKENDS.has(backend)
-    ? parseStreamJSONTranscript(backend, stdout)
-    : minimalTranscript(backend, taskId || taskRunId, prompt, stdout);
-  // Fall back to the prompt + stdout tail if a stream-json backend yielded no
-  // parseable content (non-JSON output / early exit), so evidence isn't lost.
-  if (STREAM_JSON_BACKENDS.has(backend) && !transcriptEntries.some((e) => e.role !== "system")) {
-    transcriptEntries = minimalTranscript(backend, taskId || taskRunId, prompt, stdout);
-  }
-  // Tool outputs now persist (the `output` field) and the agent inherits host
-  // secrets — scrub known secret values that may have been echoed into output.
-  transcriptEntries = redactTranscriptSecrets(transcriptEntries);
-  // Lead with a canonical session_meta entry. The stream-json parse paths emit
-  // text/tool_use/tool_result + a terminal result, but not session_meta (only the
-  // minimal fallback did) — and the canonical transcript vocabulary (aether #5d)
-  // requires a session_meta head. The daemon TS leaf surfaces this transcript
-  // verbatim, so adding it here fixes both the leaf and driver transcripts.
-  transcriptEntries = ensureSessionMetaLead(transcriptEntries, backend, taskId || taskRunId);
-  // Surface the token usage the parser computed (embedded in the terminal result
-  // entry) as top-level fields so the Go host-bridge ingests it into the fleet-db
-  // TaskRun — without this, local-CLI runs report zero usage while daytona does not.
-  const taskUsage = taskUsageFromEntries(transcriptEntries);
-  // Cost is taken ONLY from what the backend CLI itself reports — never estimated
-  // from a price table. Verified per backend (real-CLI capture, 2026-06-23):
-  //   claude   -> total_cost_usd (model-accurate: Opus vs Sonnet, cache tiers, web)
-  //   opencode -> per-step `cost` (real when metered; a legitimate 0 on subscription)
-  //   codex    -> NO cost, NOT even a model in `exec --json` output
-  //   cursor   -> NO cost; model is proprietary ("Composer"), no public rate
-  //   gemini   -> NO cost (usageMetadata tokens only)
-  // For the backends that expose no cost we leave estimated_cost_usd unset (unknown)
-  // rather than fabricate a token x rate guess for an unknown/unpriceable model.
-  const streamFailure = streamFailureMessage(backend, stdout);
+  const taskUsage = taskUsageFromInvocation(invocation.usage);
+  const streamFailure = invocation.streamError || "";
 
   const metadata = stringMetadata({
     task_runner: "local-task-runner",
@@ -284,6 +275,8 @@ export async function run(ctx = {}) {
     lines_added: String(patchInfo.linesAdded),
     lines_removed: String(patchInfo.linesRemoved),
     cli_exit_code: String(exitCode),
+    agent_session_id: invocation.session.id || "",
+    agent_session_transcript: invocation.session.transcriptRef || "",
   });
   if (streamFailure) {
     metadata.stream_error = streamFailure;
@@ -322,13 +315,12 @@ export async function run(ctx = {}) {
       logs: logs.join("\n") + "\n",
       logsRef: "logs://" + taskRunId,
       ...taskUsage,
-      transcript_entries: transcriptEntries,
       patch: patchInfo.patch,
       // base_ref lets the driver host-bridge patch-back apply this patch to the
       // (clean) host worktree. Empty when running in place (no patch-back).
       base_ref: baseRef,
       patch_base_ref: baseRef,
-      runtimeMetadata: { ...metadata, phase: "local_agent_failed" },
+      runtimeMetadata: { ...metadata, ...invocation.runtimeMetadata, phase: "local_agent_failed" },
     };
   }
 
@@ -338,8 +330,7 @@ export async function run(ctx = {}) {
     logs: logs.join("\n") + "\n",
     logsRef: "logs://" + taskRunId,
     ...taskUsage,
-    transcript_entries: transcriptEntries,
-    runtimeMetadata: metadata,
+    runtimeMetadata: { ...metadata, ...invocation.runtimeMetadata },
   };
   if (prInfo || stackInfo || stacked) {
     // PR / stacked mode: the pull request or pushed branch IS the delivery (and
@@ -705,132 +696,17 @@ export function scrubToken(text, ...tokens) {
   return out.replace(/x-access-token:[^@\s]+@/g, "x-access-token:***@");
 }
 
-// shannonEntropy is the byte-frequency Shannon entropy of s (bits/symbol), ported
-// verbatim from internal/sessions/redact/redact.go. The secret segments it scores
-// are ASCII by construction, so per-char iteration matches Go's per-byte.
-function shannonEntropy(s) {
-  if (!s) {
-    return 0;
-  }
-  const freq = new Map();
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-    freq.set(ch, (freq.get(ch) || 0) + 1);
-  }
-  let entropy = 0;
-  for (const count of freq.values()) {
-    const p = count / s.length;
-    entropy -= p * Math.log2(p);
-  }
-  return entropy;
-}
-
-// SECRET_PATTERNS is a curated, high-precision subset of the gitleaks default
-// ruleset the Go redactor applies. These prefixed shapes have near-zero false
-// positives and catch structured secrets whose entropy is below threshold (a PEM
-// block, or a JWT broken into low-entropy dot-separated segments). The full
-// 180-rule gitleaks set is a follow-up; the canonical Go redactor (gitleaks +
-// entropy) still runs on the native-transcript path.
-const SECRET_PATTERNS = [
-  /-----BEGIN[A-Z ]*PRIVATE KEY-----[\s\S]*?-----END[A-Z ]*PRIVATE KEY-----/g, // PEM private keys
-  /AKIA[0-9A-Z]{16}/g, // AWS access key id
-  /gh[pousr]_[A-Za-z0-9]{30,}/g, // GitHub tokens (ghp_/gho_/ghu_/ghs_/ghr_)
-  /github_pat_[A-Za-z0-9_]{60,}/g, // GitHub fine-grained PAT
-  /sk-(?:ant-)?[A-Za-z0-9_-]{20,}/g, // OpenAI / Anthropic API keys
-  /AIza[0-9A-Za-z_-]{35}/g, // Google API key
-  /xox[baprs]-[A-Za-z0-9-]{10,}/g, // Slack token
-  /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, // JWT
+const TRANSCRIPT_SECRET_ENV_NAMES = [
+  "GITHUB_TOKEN", "GH_TOKEN", "LOOM_PR_GIT_PASSWORD",
+  "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY",
+  "GEMINI_API_KEY", "GOOGLE_API_KEY", "CURSOR_API_KEY",
+  "LOOM_FLEET_DB_API_KEY", "LOOM_TASK_RUN_LEASE_TOKEN",
 ];
 
-// redactSecretsInText replaces secrets in text with "REDACTED", flagging a
-// substring if EITHER its Shannon entropy exceeds 4.5 OR it matches a known secret
-// shape — the layered approach of internal/sessions/redact/redact.go.
-export function redactSecretsInText(text) {
-  const s = text == null ? "" : String(text);
-  if (!s) {
-    return s;
-  }
-  const regions = [];
-  // Entropy layer: high-entropy [A-Za-z0-9+_=-]{10,} segments (/ excluded so file
-  // paths are not matched as one token).
-  const segment = /[A-Za-z0-9+_=-]{10,}/g;
-  let m;
-  while ((m = segment.exec(s)) !== null) {
-    let start = m.index;
-    const end = start + m[0].length;
-    // Don't consume a character that is part of a JSON escape sequence (e.g. the
-    // 'n' in "\n"), which would leave a dangling backslash before "REDACTED".
-    if (start > 0 && s[start - 1] === "\\" && "ntrbfu\"\\/".includes(s[start])) {
-      start += 1;
-      if (end - start < 10) {
-        continue;
-      }
-    }
-    if (shannonEntropy(s.slice(start, end)) > 4.5) {
-      regions.push([start, end]);
-    }
-  }
-  // Pattern layer: known high-precision secret shapes.
-  for (const pattern of SECRET_PATTERNS) {
-    pattern.lastIndex = 0;
-    let pm;
-    while ((pm = pattern.exec(s)) !== null) {
-      regions.push([pm.index, pm.index + pm[0].length]);
-      if (pm[0].length === 0) {
-        pattern.lastIndex += 1;
-      }
-    }
-  }
-  if (!regions.length) {
-    return s;
-  }
-  regions.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-  const merged = [];
-  for (const [start, end] of regions) {
-    const last = merged[merged.length - 1];
-    if (last && start <= last[1]) {
-      last[1] = Math.max(last[1], end);
-    } else {
-      merged.push([start, end]);
-    }
-  }
-  let out = "";
-  let cursor = 0;
-  for (const [start, end] of merged) {
-    out += s.slice(cursor, start) + "REDACTED";
-    cursor = end;
-  }
-  return out + s.slice(cursor);
-}
-
-// redactTranscriptSecrets scrubs secrets the agent could have echoed into tool
-// output/text — now persisted via the `output` field — before the transcript is
-// written: first the exact values of known secret env vars, then entropy/pattern
-// detection for secrets that are NOT in that env allowlist.
-function redactTranscriptSecrets(entries, env = process.env) {
-  const names = [
-    "GITHUB_TOKEN", "GH_TOKEN", "LOOM_PR_GIT_PASSWORD",
-    "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY",
-    "GEMINI_API_KEY", "GOOGLE_API_KEY", "CURSOR_API_KEY",
-    "LOOM_FLEET_DB_API_KEY", "LOOM_TASK_RUN_LEASE_TOKEN",
-  ];
-  const secrets = [];
-  for (const name of names) {
-    const value = env[name];
-    if (value && String(value).length >= 8) {
-      secrets.push(String(value));
-    }
-  }
-  const redact = (value) => redactSecretsInText(secrets.length ? scrubToken(value, ...secrets) : value);
-  for (const entry of entries) {
-    if (entry.text) {
-      entry.text = redact(entry.text);
-    }
-    if (entry.output) {
-      entry.output = redact(entry.output);
-    }
-  }
-  return entries;
+function declaredTranscriptSecrets(env = process.env) {
+  return TRANSCRIPT_SECRET_ENV_NAMES
+    .map((name) => env[name])
+    .filter((value) => typeof value === "string" && value !== "");
 }
 
 // deliverPullRequest commits the isolated worktree's changes onto a branch,
@@ -999,613 +875,26 @@ export function parseNumstat(numstat) {
   return { filesChanged, linesAdded, linesRemoved };
 }
 
-// parseStreamJSONTranscript turns a backend's stream-json stdout into canonical
-// Loom transcript entries. codex, claude, cursor, and opencode emit JSON-per-line
-// event streams. It parses every line into an event array, then a per-backend
-// transform builds faithful entries: assistant/user text, reasoning, tool CALLS
-// AND tool RESULTS, plus a terminal `result` entry carrying status + token usage.
-// Entry fields match sessions/transcript.Event exactly (note: tool output is the
-// `output` field, not `tool_output`); lines that do not parse as JSON are ignored
-// (the raw stdout is still preserved in logs).
-export function parseStreamJSONTranscript(backend, stdout) {
-  const events = [];
-  for (const line of String(stdout || "").split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) {
-      continue;
-    }
-    const start = trimmed.indexOf("{");
-    if (start < 0) {
-      continue;
-    }
-    try {
-      events.push(JSON.parse(trimmed.slice(start)));
-    } catch {
-      // non-JSON line; preserved in logs, ignored for the transcript
-    }
-  }
-  const build =
-    backend === "claude" ? claudeTranscript
-      : backend === "cursor" ? cursorTranscript
-        : backend === "opencode" ? opencodeTranscript
-          : backend === "gemini" ? geminiTranscript
-            : codexTranscript;
-  const fallbackTs = new Date().toISOString();
-  // Backends stamp only some events (e.g. claude stamps user/tool_result events
-  // but not assistant ones). Resolve each entry's own timestamp, then forward-fill
-  // gaps with the last real timestamp (leading with the first real one) so the
-  // sequence stays monotonic — mixing real and parse-time stamps would scramble
-  // any timestamp-ordered view of the transcript.
-  const resolved = build(events).map((entry) => ({ entry, ts: toISO(entry.timestamp) }));
-  const firstReal = (resolved.find((item) => item.ts) || {}).ts || fallbackTs;
-  const entries = [{ seq: 1, timestamp: firstReal, ...sessionMetaEntry(backend) }];
-  let seq = 2;
-  let cursorTs = firstReal;
-  for (const { entry, ts } of resolved) {
-    // Advance only forward (ISO strings compare chronologically): gaps and any
-    // rare out-of-order stamp inherit the last value, keeping it non-decreasing.
-    if (ts && ts > cursorTs) {
-      cursorTs = ts;
-    }
-    const { timestamp, ...rest } = entry;
-    entries.push({ seq: seq++, timestamp: cursorTs, ...rest });
-  }
-  return entries;
-}
-
-// taskUsageFromEntries recovers the token usage the terminal `result` entry
-// carries (resultEntry serializes the parsed usage object into its `output`
-// field) and maps it onto the snake_case top-level token/cost fields the Go
-// host-bridge reads from the runner result (internal/driver/task_bridge.go) and
-// persists to the fleet-db TaskRun. The daytona runner surfaces the same shape
-// via @loom/sdk/runtime-adapters' flueUsageToTaskUsage; the local runner is kept
-// loadable without the SDK (see loadTask), so it maps here instead. Returns {}
-// when no usage was reported (minimal/gemini fallback, or an early failure).
-export function taskUsageFromEntries(entries) {
-  if (!Array.isArray(entries)) {
-    return {};
-  }
-  let usage = null;
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const entry = entries[i];
-    if (entry && entry.type === "result" && entry.output) {
-      try {
-        usage = JSON.parse(entry.output);
-      } catch {
-        usage = null;
-      }
-      break;
-    }
-  }
+function taskUsageFromInvocation(usage) {
   if (!usage || typeof usage !== "object") {
     return {};
   }
   const out = {};
   const set = (key, value) => {
-    const num = Number(value);
-    if (Number.isFinite(num)) {
-      out[key] = num;
+    if (typeof value === "number" && Number.isFinite(value)) {
+      out[key] = value;
     }
   };
-  set("input_tokens", usage.input_tokens);
-  set("output_tokens", usage.output_tokens);
-  set("cache_read_tokens", usage.cache_read_tokens);
-  set("cache_write_tokens", usage.cache_write_tokens);
-  set("estimated_cost_usd", usage.cost_usd != null ? usage.cost_usd : usage.estimated_cost_usd);
+  set("input_tokens", usage.inputTokens);
+  set("output_tokens", usage.outputTokens);
+  set("cache_read_tokens", usage.cacheReadTokens);
+  set("cache_write_tokens", usage.cacheWriteTokens);
+  set("estimated_cost_usd", usage.cost);
   return out;
 }
 
-// NOTE: per-backend price-table estimation (DEFAULT_PRICING / resolvePricing /
-// estimateCostUSD) was removed 2026-06-23. Cost is now sourced ONLY from the
-// backend CLI's own reporting (see taskUsageFromEntries + the run() cost note):
-// estimating tokens x a per-backend rate was inaccurate (a single backend runs
-// many models at different prices — e.g. claude ran Opus, not the Sonnet rate the
-// table assumed) and codex/cursor/gemini expose no cost to anchor it.
-
-function streamFailureMessage(backend, stdout) {
-  if (backend !== "opencode") {
-    return "";
-  }
-  for (const line of String(stdout || "").split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) {
-      continue;
-    }
-    const start = trimmed.indexOf("{");
-    if (start < 0) {
-      continue;
-    }
-    let event;
-    try {
-      event = JSON.parse(trimmed.slice(start));
-    } catch {
-      continue;
-    }
-    if (!event || typeof event !== "object" || event.type !== "error") {
-      continue;
-    }
-    const msg = rawString(event.error && event.error.message)
-      || rawString(event.error && event.error.data && event.error.data.message)
-      || rawString(event.message);
-    return msg || "opencode reported an error";
-  }
-  return "";
-}
-
-// rawString preserves the exact value (incl. newlines); use for text/output
-// content where fidelity matters. stringValue (trimmed) is for names/ids.
-function rawString(value) {
-  return value === undefined || value === null ? "" : String(value);
-}
-
-// toISO normalizes a per-event timestamp: epoch-ms number -> ISO, ISO string
-// passthrough, else "" (caller falls back to parse time).
-function toISO(ts) {
-  if (typeof ts === "number" && Number.isFinite(ts)) {
-    return new Date(ts).toISOString();
-  }
-  if (typeof ts === "string" && ts.trim()) {
-    // Normalize to strict RFC3339 — Go unmarshals transcript.Event.Timestamp as
-    // time.Time, so a single non-RFC3339 string would fail the whole result
-    // decode and turn a successful run into a task failure. Reject unparseable.
-    const parsed = new Date(ts);
-    return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString();
-  }
-  return "";
-}
-
-// normalizeUsage keeps only finite numeric token/cost fields; null if empty.
-function normalizeUsage(fields) {
-  const out = {};
-  for (const [key, value] of Object.entries(fields)) {
-    if (value == null) {
-      continue;
-    }
-    const num = Number(value);
-    if (Number.isFinite(num)) {
-      out[key] = num;
-    }
-  }
-  return Object.keys(out).length ? out : null;
-}
-
-// accumulateUsage sums per-call usage objects, for backends that report usage per
-// step (e.g. opencode step_finish) so the terminal entry is the session total.
-function accumulateUsage(prev, summed, latest) {
-  const out = { ...(prev || {}) };
-  for (const [key, value] of Object.entries(summed)) {
-    if (value == null) {
-      continue;
-    }
-    const num = Number(value);
-    if (Number.isFinite(num)) {
-      out[key] = (out[key] || 0) + num;
-    }
-  }
-  // `latest` fields (e.g. cache_read, the same cached prompt re-read each step) are
-  // taken from the most recent step rather than summed, to avoid double-counting.
-  for (const [key, value] of Object.entries(latest || {})) {
-    if (value == null) {
-      continue;
-    }
-    const num = Number(value);
-    if (Number.isFinite(num)) {
-      out[key] = num;
-    }
-  }
-  return Object.keys(out).length ? out : null;
-}
-
-// sessionMetaEntry builds the canonical session_meta head — the one definition of
-// the #5d transcript-vocabulary contract shared by every producer path here.
-function sessionMetaEntry(backend, label) {
-  return {
-    role: "system",
-    type: "session_meta",
-    text: `local-cli-${backend} session` + (label ? ` for ${label}` : ""),
-  };
-}
-
-// ensureSessionMetaLead prepends a session_meta entry unless the transcript already
-// leads with one. Its timestamp mirrors the first real entry so it sorts to the head.
-function ensureSessionMetaLead(entries, backend, label) {
-  if (entries[0]?.type === "session_meta") return entries;
-  const meta = sessionMetaEntry(backend, label);
-  const firstTs = entries.find((e) => e && e.timestamp)?.timestamp;
-  if (firstTs) meta.timestamp = firstTs;
-  return [meta, ...entries];
-}
-
-// resultEntry is the terminal transcript entry: completion status + token usage.
-// transcript.Event has no structured usage field, so the readable summary goes in
-// `text` and the raw object in `output`.
-function resultEntry(status, usage, timestamp) {
-  const bits = [];
-  if (status) {
-    bits.push(status);
-  }
-  if (usage) {
-    const parts = [];
-    const labels = {
-      input_tokens: "in", output_tokens: "out", cache_read_tokens: "cache_read", cache_write_tokens: "cache_write",
-      reasoning_tokens: "reasoning", cost_usd: "cost", duration_ms: "duration_ms", num_turns: "turns",
-    };
-    for (const [key, label] of Object.entries(labels)) {
-      if (usage[key] != null) {
-        parts.push(`${label}=${usage[key]}`);
-      }
-    }
-    if (parts.length) {
-      bits.push(parts.join(" "));
-    }
-  }
-  const entry = { role: "system", type: "result", text: bits.join(" | ") || "completed" };
-  if (usage) {
-    entry.output = JSON.stringify(usage);
-  }
-  if (timestamp) {
-    entry.timestamp = timestamp;
-  }
-  return entry;
-}
-
-// toolResultText flattens a tool_result content payload (string or content[]).
-function toolResultText(content) {
-  if (typeof content === "string") {
-    return content;
-  }
-  if (Array.isArray(content)) {
-    return content
-      .map((block) => (typeof block === "string" ? block : rawString(block && block.text)))
-      .filter(Boolean)
-      .join("\n");
-  }
-  return rawString(content);
-}
-
-// claudeTranscript: assistant text/thinking/tool_use, user tool_result (the tool
-// OUTPUTS, which claude emits as separate type:"user" events), and the terminal
-// result event (status + usage + cost).
-function claudeTranscript(events) {
-  const out = [];
-  let usage = null;
-  let status = null;
-  let lastTs;
-  for (const event of events) {
-    if (!event || typeof event !== "object") {
-      continue;
-    }
-    const ts = event.timestamp; // claude stamps user/tool_result events
-    if (ts) {
-      lastTs = ts;
-    }
-    if (event.type === "assistant" && event.message && Array.isArray(event.message.content)) {
-      for (const block of event.message.content) {
-        if (!block || typeof block !== "object") {
-          continue;
-        }
-        if (block.type === "text" && stringValue(block.text)) {
-          out.push({ role: "assistant", type: "text", text: rawString(block.text), timestamp: ts });
-        } else if (block.type === "thinking" && stringValue(block.thinking)) {
-          out.push({ role: "assistant", type: "reasoning", text: rawString(block.thinking), timestamp: ts });
-        } else if (block.type === "tool_use") {
-          out.push({ role: "assistant", type: "tool_use", tool_name: stringValue(block.name), tool_use_id: stringValue(block.id), tool_input: block.input, timestamp: ts });
-        }
-      }
-    } else if (event.type === "user" && event.message && Array.isArray(event.message.content)) {
-      for (const block of event.message.content) {
-        if (block && block.type === "tool_result") {
-          out.push({ role: "tool", type: "tool_result", tool_use_id: stringValue(block.tool_use_id), output: toolResultText(block.content), timestamp: ts });
-        }
-      }
-    } else if (event.type === "result") {
-      usage = normalizeUsage({
-        input_tokens: event.usage && event.usage.input_tokens,
-        output_tokens: event.usage && event.usage.output_tokens,
-        cache_read_tokens: event.usage && event.usage.cache_read_input_tokens,
-        cache_write_tokens: event.usage && event.usage.cache_creation_input_tokens,
-        cost_usd: event.total_cost_usd,
-        duration_ms: event.duration_ms,
-        num_turns: event.num_turns,
-      });
-      status = event.is_error ? "failed" : "completed";
-    }
-  }
-  if (status || usage) {
-    out.push(resultEntry(status, usage, lastTs));
-  }
-  return out;
-}
-
-// codexTranscript: codex `exec --json` nests output under item.completed
-// (agent_message / reasoning / command_execution / file_change). Only the
-// `item.completed` event is emitted (item.started is its in-progress duplicate),
-// file_change records the edit, command_execution preserves output + exit status,
-// and turn.completed yields the usage entry.
-function codexTranscript(events) {
-  const out = [];
-  let usage = null;
-  let status = null;
-  for (const event of events) {
-    if (!event || typeof event !== "object") {
-      continue;
-    }
-    if (event.type === "turn.completed") {
-      usage = normalizeUsage({
-        input_tokens: event.usage && event.usage.input_tokens,
-        output_tokens: event.usage && event.usage.output_tokens,
-        cache_read_tokens: event.usage && event.usage.cached_input_tokens,
-        reasoning_tokens: event.usage && event.usage.reasoning_output_tokens,
-      });
-      status = status || "completed";
-      continue;
-    }
-    if (event.type === "turn.failed" || event.type === "error") {
-      status = "failed";
-      continue;
-    }
-    if (event.type === "item.started") {
-      continue; // dedup: the in-progress half of an item.completed
-    }
-    if (event.type === "item.completed" && event.item && typeof event.item === "object") {
-      const item = event.item;
-      const itemType = stringValue(item.type);
-      if (itemType === "agent_message" || itemType.includes("message")) {
-        const text = rawString(item.text);
-        if (text) {
-          out.push({ role: "assistant", type: "text", text });
-        }
-      } else if (itemType === "reasoning") {
-        const text = rawString(item.text);
-        if (text) {
-          out.push({ role: "assistant", type: "reasoning", text });
-        }
-      } else if (itemType === "command_execution") {
-        const entry = { role: "assistant", type: "tool_use", tool_name: "shell", tool_input: { command: stringValue(item.command) } };
-        const failed = item.exit_code != null && String(item.exit_code) !== "0";
-        const output = (failed ? `[exit ${item.exit_code}]\n` : "") + rawString(item.aggregated_output);
-        if (output) {
-          entry.output = output;
-        }
-        out.push(entry);
-      } else if (itemType === "file_change") {
-        const changes = Array.isArray(item.changes) ? item.changes : [];
-        out.push({
-          role: "assistant",
-          type: "tool_use",
-          tool_name: "apply_patch",
-          tool_input: { changes: changes.map((c) => ({ path: stringValue(c && c.path), kind: stringValue(c && c.kind) })) },
-          output: changes.map((c) => `${stringValue(c && c.kind)} ${stringValue(c && c.path)}`).join("\n"),
-        });
-      }
-      continue;
-    }
-    // Flat fallback (e.g. {type:"agent_message", text}).
-    const type = stringValue(event.type);
-    const text = rawString(event.text) || rawString(event.message) || (event.msg && rawString(event.msg.text)) || "";
-    if (text && (type.includes("message") || type.includes("agent") || type.includes("assistant") || type.includes("output"))) {
-      out.push({ role: "assistant", type: "text", text });
-    }
-  }
-  if (status || usage) {
-    out.push(resultEntry(status, usage));
-  }
-  return out;
-}
-
-// cursorTranscript maps cursor-agent `--output-format stream-json` events.
-// assistant/user messages carry a claude-shaped content[] array. Tool calls split
-// across a `started` event (which holds the args) and a `completed` event (which
-// holds the result); they are merged by call_id so the entry keeps BOTH input and
-// output and stays in invocation order. The terminal result event yields usage.
-function cursorTranscript(events) {
-  const out = [];
-  const byCall = new Map();
-  let usage = null;
-  let status = null;
-  let lastTs;
-  for (const event of events) {
-    if (!event || typeof event !== "object") {
-      continue;
-    }
-    const ts = event.timestamp_ms;
-    if (ts != null) {
-      lastTs = ts;
-    }
-    if ((event.type === "assistant" || event.type === "user") && event.message && Array.isArray(event.message.content)) {
-      const role = event.type === "user" ? "user" : "assistant";
-      for (const block of event.message.content) {
-        if (!block || typeof block !== "object") {
-          continue;
-        }
-        if (block.type === "text" && stringValue(block.text)) {
-          out.push({ role, type: "text", text: rawString(block.text), timestamp: ts });
-        } else if (block.type === "tool_use") {
-          out.push({ role: "assistant", type: "tool_use", tool_name: stringValue(block.name), tool_use_id: stringValue(block.id), tool_input: block.input, timestamp: ts });
-        }
-      }
-    } else if (event.type === "tool_call" && event.tool_call && typeof event.tool_call === "object") {
-      const tc = event.tool_call;
-      const callId = stringValue(event.call_id) || stringValue(tc.toolCallId);
-      let name;
-      let detail;
-      for (const key of Object.keys(tc)) {
-        const match = /^(.+)ToolCall$/.exec(key);
-        if (match && tc[key] && typeof tc[key] === "object") {
-          name = match[1];
-          detail = tc[key];
-          break;
-        }
-      }
-      if (!name) {
-        continue;
-      }
-      let entry = callId ? byCall.get(callId) : undefined;
-      if (!entry) {
-        // first sighting (started, or completed if no started) -> invocation order
-        entry = { role: "assistant", type: "tool_use", tool_name: name, tool_use_id: callId, timestamp: ts };
-        if (detail.args !== undefined) {
-          entry.tool_input = detail.args;
-        }
-        out.push(entry);
-        if (callId) {
-          byCall.set(callId, entry);
-        }
-      } else if (entry.tool_input === undefined && detail.args !== undefined) {
-        entry.tool_input = detail.args; // args live only on the started event
-      }
-      if (event.subtype === "completed" && detail.result !== undefined) {
-        const isError = detail.result && typeof detail.result === "object" && detail.result.error !== undefined;
-        const body = typeof detail.result === "string" ? detail.result : JSON.stringify(detail.result);
-        entry.output = (isError ? "[error] " : "") + body;
-      }
-    } else if (event.type === "result") {
-      // cursor-agent emits camelCase usage; accept snake_case too for resilience.
-      const u = event.usage || {};
-      usage = normalizeUsage({
-        input_tokens: u.inputTokens ?? u.input_tokens,
-        output_tokens: u.outputTokens ?? u.output_tokens,
-        cache_read_tokens: u.cacheReadTokens ?? u.cache_read_tokens,
-        cache_write_tokens: u.cacheWriteTokens ?? u.cache_write_tokens,
-        duration_ms: event.duration_ms,
-      });
-      status = event.is_error ? "failed" : "completed";
-    }
-  }
-  if (status || usage) {
-    out.push(resultEntry(status, usage, lastTs));
-  }
-  return out;
-}
-
-// opencodeTranscript maps opencode `run --format json` events (JSONL):
-// { type:"text", part:{text} } for assistant text and
-// { type:"tool_use", part:{tool, callID, state:{status, input, output}} } for
-// tools (output preserved). step_finish events carry token usage; the final one
-// (reason:"stop") marks completion.
-function opencodeTranscript(events) {
-  const out = [];
-  let usage = null;
-  let status = null;
-  let lastTs;
-  for (const event of events) {
-    if (!event || typeof event !== "object") {
-      continue;
-    }
-    const part = event.part && typeof event.part === "object" ? event.part : event;
-    const ts = (part.time && part.time.start) || event.timestamp;
-    if (ts != null) {
-      lastTs = ts;
-    }
-    if (event.type === "text") {
-      const text = rawString(part.text);
-      if (text) {
-        out.push({ role: "assistant", type: "text", text, timestamp: ts });
-      }
-    } else if (event.type === "tool_use" && part.type === "tool") {
-      const state = part.state && typeof part.state === "object" ? part.state : {};
-      // emit terminal tool states (completed AND error); skip in-progress only,
-      // so a failed tool call is never silently dropped.
-      if (state.status && state.status !== "completed" && state.status !== "error") {
-        continue;
-      }
-      const isError = state.status === "error";
-      const entry = { role: "assistant", type: "tool_use", tool_name: stringValue(part.tool), tool_use_id: stringValue(part.callID), tool_input: state.input, timestamp: ts };
-      const output = rawString(state.output) || rawString(state.error);
-      if (output || isError) {
-        entry.output = (isError ? "[error] " : "") + output;
-      }
-      out.push(entry);
-    } else if (event.type === "step_finish") {
-      const tokens = part.tokens && typeof part.tokens === "object" ? part.tokens : {};
-      // opencode reports usage PER step; sum the additive fields for the session
-      // total. cache_read is the same cached prompt re-read each step -> take latest.
-      usage = accumulateUsage(usage, {
-        input_tokens: tokens.input,
-        output_tokens: tokens.output,
-        reasoning_tokens: tokens.reasoning,
-        cost_usd: part.cost,
-      }, {
-        cache_read_tokens: tokens.cache && tokens.cache.read,
-      });
-      if (part.reason === "stop" && !status) {
-        status = "completed";
-      }
-    } else if (event.type === "error") {
-      // opencode can exit 0 while signalling a fatal stream error; surface it so
-      // the failure is visible in the transcript (parity with the Go backend's
-      // extractOpenCodeStreamError). An error supersedes a later stop.
-      const msg = rawString(event.error && (event.error.message || event.error)) || rawString(event.message);
-      status = msg ? "failed: " + msg : "failed";
-    }
-  }
-  if (status || usage) {
-    out.push(resultEntry(status, usage, lastTs));
-  }
-  return out;
-}
-
-// geminiTranscript maps gemini `-o stream-json` events. Assistant text arrives as
-// Google-native candidates[].content.parts[].text (GenerateContent streaming) or
-// as a flat text/content/response field. Token usage rides on `usage`
-// (OpenAI-compatible {input_tokens,output_tokens}) or `usageMetadata`
-// ({promptTokenCount,candidatesTokenCount}) — mirrors backend_gemini.go's
-// collectGeminiStreamUsage. usageMetadata is cumulative across chunks, so the last
-// value wins (summing would double-count). Before this, gemini got no usage at all.
-function geminiTranscript(events) {
-  const out = [];
-  let usage = null;
-  for (const event of events) {
-    if (!event || typeof event !== "object") {
-      continue;
-    }
-    const candidates = Array.isArray(event.candidates) ? event.candidates : [];
-    for (const candidate of candidates) {
-      const parts = candidate && candidate.content && Array.isArray(candidate.content.parts) ? candidate.content.parts : [];
-      for (const part of parts) {
-        const text = rawString(part && part.text);
-        if (text) {
-          out.push({ role: "assistant", type: "text", text });
-        }
-      }
-    }
-    if (!candidates.length) {
-      const flat = rawString(event.text) || rawString(event.content) || rawString(event.response) || (event.message && rawString(event.message.text)) || "";
-      const type = stringValue(event.type);
-      if (flat && (!type || type.includes("content") || type.includes("text") || type.includes("assistant") || type.includes("message") || type.includes("response"))) {
-        out.push({ role: "assistant", type: "text", text: flat });
-      }
-    }
-    if (event.usage && typeof event.usage === "object") {
-      usage = normalizeUsage({
-        input_tokens: event.usage.input_tokens != null ? event.usage.input_tokens : event.usage.inputTokens,
-        output_tokens: event.usage.output_tokens != null ? event.usage.output_tokens : event.usage.outputTokens,
-      });
-    } else if (event.usageMetadata && typeof event.usageMetadata === "object") {
-      usage = normalizeUsage({
-        input_tokens: event.usageMetadata.promptTokenCount,
-        output_tokens: event.usageMetadata.candidatesTokenCount,
-      });
-    }
-  }
-  if (usage) {
-    out.push(resultEntry(null, usage));
-  }
-  return out;
-}
-
-// minimalTranscript is the fallback when a backend has no structured event stream,
-// or when a stream-json backend emits output the parser does not recognize: a
-// session_meta marker, the user prompt, and a final assistant entry carrying the
-// CLI stdout tail. Real evidence, just unstructured.
-function minimalTranscript(backend, label, prompt, stdout) {
-  const now = new Date().toISOString();
-  return [
-    { seq: 1, timestamp: now, ...sessionMetaEntry(backend, label) },
-    { seq: 2, timestamp: now, role: "user", type: "text", text: textTail(prompt, 4000) },
-    { seq: 3, timestamp: now, role: "assistant", type: "text", text: textTail(stdout, 4000) },
-  ];
-}
+// Cost is sourced only from backend CLI reporting collected by agent.exec.
+// Missing usage and cost stay unknown; this leaf never estimates either value.
 
 // buildPrompt mirrors daytona-task-runner.ts buildPrompt (default mode): a
 // focused instruction to implement the single child task in the worktree.
@@ -1671,6 +960,7 @@ function failed(errorClass, message, info) {
     errorMessage: textTail(message),
     logs: logs.concat([errorClass + ": " + message]).join("\n") + "\n",
     logsRef: "logs://" + info.taskRunId,
+    ...taskUsageFromInvocation(info.invocation?.usage),
     runtimeMetadata: stringMetadata({
       task_runner: "local-task-runner",
       runtime_strategy: info.backend ? "local-cli-" + info.backend : "local",
@@ -1678,6 +968,9 @@ function failed(errorClass, message, info) {
       backend: info.backend,
       task_id: info.taskId,
       repo_head_before: info.headBefore,
+      agent_session_id: info.invocation?.session?.id || "",
+      agent_session_transcript: info.invocation?.session?.transcriptRef || "",
+      ...(info.invocation?.runtimeMetadata || {}),
       phase: errorClass,
     }),
   };

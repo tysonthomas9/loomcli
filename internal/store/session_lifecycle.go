@@ -136,6 +136,20 @@ func TranscriptArtifactID(taskRunID string, attempt int, invocationKey string) s
 	return fmt.Sprintf("transcript-%s-a%d-%s", taskRunID, attempt, invocationKey)
 }
 
+// TaskRunClaimAttempt returns the one-based ordinal of the run's current
+// claim. scheduler_attempt records completed/requeued attempts, so a live
+// claim is always that persisted zero-based count plus one.
+func TaskRunClaimAttempt(run *domain.TaskRun) int {
+	if run == nil {
+		return 1
+	}
+	attempt, err := strconv.Atoi(strings.TrimSpace(run.RuntimeMetadata["scheduler_attempt"]))
+	if err != nil || attempt < 0 {
+		attempt = 0
+	}
+	return attempt + 1
+}
+
 // ValidateSessionDescriptor validates the descriptor before it reaches persistence.
 func ValidateSessionDescriptor(d SessionDescriptor) error {
 	if !invocationKeyPattern.MatchString(d.InvocationKey) {
@@ -363,9 +377,9 @@ func AgentSessionUpdateMatches(session *domain.AgentSession, update AgentSession
 		matchesIntPointer(update.ExitCode, session.ExitCode) && matchesMetadata(update.Metadata, session.Metadata)
 }
 
-// ProtectAgentSessionTerminalUpdate scopes generic-update CAS to lifecycle-managed terminal sessions.
+// ProtectAgentSessionTerminalUpdate applies generic-update CAS to every terminal session.
 func ProtectAgentSessionTerminalUpdate(session *domain.AgentSession) bool {
-	return session != nil && session.InvocationKey != "" && session.Status.IsTerminal()
+	return session != nil && session.Status.IsTerminal()
 }
 
 // AgentSessionUpdateTouchesOutcome reports whether a PATCH carries settled outcome fields.

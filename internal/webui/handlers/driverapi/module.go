@@ -59,6 +59,9 @@ type IssueBackendFactory func(ws, actor string) (backend.IssueBackend, error)
 // Config wires the module's dependencies.
 type Config struct {
 	Store store.Store
+	// SessionOpenRegistry receives taskrunapi's successful session-open callback
+	// in the same serve process and supplies live bridge visibility.
+	SessionOpenRegistry *driverpkg.TaskRunSessionOpenRegistry
 	// FleetBaseURL is the fleet-db HTTP base URL used to build issue
 	// backends for task claim/release and epic reads.
 	FleetBaseURL string
@@ -92,15 +95,16 @@ type Config struct {
 
 // Module serves the workspace-scoped driver-op routes.
 type Module struct {
-	store            store.Store
-	apiToken         string
-	runTokenKey      []byte
-	apiBaseURL       string
-	worktreePath     string
-	localSettingsDir string
-	issueBackends    IssueBackendFactory
-	dispatcher       *connector.Dispatcher
-	ops              map[string]opHandler
+	store               store.Store
+	apiToken            string
+	runTokenKey         []byte
+	apiBaseURL          string
+	worktreePath        string
+	localSettingsDir    string
+	issueBackends       IssueBackendFactory
+	dispatcher          *connector.Dispatcher
+	sessionOpenRegistry *driverpkg.TaskRunSessionOpenRegistry
+	ops                 map[string]opHandler
 
 	// internalEvents is the C14 internal-event loopback ingress backing the
 	// emit-event op (see internal/trigger/internal_source.go).
@@ -121,14 +125,15 @@ type Module struct {
 // a nil store, Register registers nothing.
 func NewModule(cfg Config) *Module {
 	m := &Module{
-		store:            cfg.Store,
-		apiToken:         strings.TrimSpace(cfg.APIToken),
-		runTokenKey:      cfg.RunTokenKey,
-		apiBaseURL:       strings.TrimSpace(cfg.APIBaseURL),
-		worktreePath:     cfg.WorktreePath,
-		localSettingsDir: strings.TrimSpace(cfg.LocalSettingsDir),
-		issueBackends:    cfg.IssueBackends,
-		dispatcher:       cfg.Dispatcher,
+		store:               cfg.Store,
+		apiToken:            strings.TrimSpace(cfg.APIToken),
+		runTokenKey:         cfg.RunTokenKey,
+		apiBaseURL:          strings.TrimSpace(cfg.APIBaseURL),
+		worktreePath:        cfg.WorktreePath,
+		localSettingsDir:    strings.TrimSpace(cfg.LocalSettingsDir),
+		issueBackends:       cfg.IssueBackends,
+		dispatcher:          cfg.Dispatcher,
+		sessionOpenRegistry: cfg.SessionOpenRegistry,
 
 		watchPollInterval:      defaultWatchPollInterval,
 		watchHeartbeatInterval: defaultWatchHeartbeatInterval,
@@ -586,12 +591,13 @@ func (m *Module) execTask(ctx context.Context, ws string, id driverIdentity, bod
 	}
 	opts := params.requestOptions(ws, id, fencingToken)
 	executor := driverpkg.HostBridgeTaskExecutor{
-		Store:            m.store,
-		WorktreePath:     m.worktreePath,
-		APIBaseURL:       m.apiBaseURL,
-		LocalSettingsDir: m.localSettingsDir,
-		WorktreeResolver: driverpkg.LocalTaskWorktreeResolver{Store: m.store, Lineage: driverpkg.DefaultStackLineageLookup()},
-		StackStore:       driverpkg.DefaultStackStore(),
+		Store:             m.store,
+		WorktreePath:      m.worktreePath,
+		APIBaseURL:        m.apiBaseURL,
+		LocalSettingsDir:  m.localSettingsDir,
+		WorktreeResolver:  driverpkg.LocalTaskWorktreeResolver{Store: m.store, Lineage: driverpkg.DefaultStackLineageLookup()},
+		StackStore:        driverpkg.DefaultStackStore(),
+		SessionReconciler: &driverpkg.TaskRunSessionReconciler{Store: m.store, OpenRegistry: m.sessionOpenRegistry},
 	}
 	if params.EnqueueOnly {
 		outcome, err := driverpkg.EnqueueTaskRunWithResult(ctx, m.store, opts, executor)
@@ -689,7 +695,7 @@ func (m *Module) recoverStaleTasks(ctx context.Context, ws string, id driverIden
 	if maxAgeSeconds <= 0 {
 		maxAgeSeconds = 300
 	}
-	result, err := m.store.DriverRuns().RecoverStaleTaskRuns(ctx, ws, parent.RunID, store.StaleTaskRunRecovery{
+	result, _, err := driverpkg.RecoverStaleTaskRunsAndSessions(ctx, m.store, ws, parent.RunID, store.StaleTaskRunRecovery{
 		StaleBefore:   staleBefore,
 		MaxAgeSeconds: maxAgeSeconds,
 		ErrorClass:    firstNonEmpty(params.ErrorClass, "stale_task_run"),

@@ -175,6 +175,19 @@ func TestPutMetricDoneCreatesRecordAndClearsRequested(t *testing.T) {
 	}
 }
 
+func TestPutMetricStampsProvidedJudgeSessionID(t *testing.T) {
+	ctx := context.Background()
+	st := evalStoreFixture(t)
+	seedEvalSession(t, st, "WS", "sess-judge-link", time.Now().UTC(), map[string]string{MetadataTranscriptRef: "artifact://t"})
+	if _, _, err := PutMetric(ctx, st, "WS", PutMetricParams{SessionID: "sess-judge-link", JudgeSessionID: "judge-session-1", PromptVersion: "v1", Status: EvalStatusDone, Eval: validPayload()}); err != nil {
+		t.Fatalf("PutMetric: %v", err)
+	}
+	record, err := st.SessionEvals().Get(ctx, "WS", "eval-sess-judge-link-v1")
+	if err != nil || record.JudgeSessionID != "judge-session-1" {
+		t.Fatalf("judge linkage = %+v, err=%v", record, err)
+	}
+}
+
 func TestPutMetricConflictIsIdempotentAndStampsDone(t *testing.T) {
 	ctx := context.Background()
 	st := evalStoreFixture(t)
@@ -313,12 +326,23 @@ func seedEvalSession(t *testing.T, st *memstore.Store, ws, id string, ended time
 	for _, fn := range mutate {
 		fn(&create)
 	}
+	terminalStatus := create.Status
+	if !terminalStatus.IsTerminal() {
+		if _, err := st.AgentSessions().Create(context.Background(), create); err != nil {
+			t.Fatalf("create session %s: %v", id, err)
+		}
+		return
+	}
+	create.Status = domain.AgentSessionRunning
 	if _, err := st.AgentSessions().Create(context.Background(), create); err != nil {
 		t.Fatalf("create session %s: %v", id, err)
 	}
 	finishedAt := ended.UTC()
 	finishedAtPtr := &finishedAt
-	if _, err := st.AgentSessions().Update(context.Background(), ws, id, store.AgentSessionUpdate{FinishedAt: &finishedAtPtr}); err != nil {
+	if _, err := st.AgentSessions().Update(context.Background(), ws, id, store.AgentSessionUpdate{
+		Status:     &terminalStatus,
+		FinishedAt: &finishedAtPtr,
+	}); err != nil {
 		t.Fatalf("finish session %s: %v", id, err)
 	}
 }

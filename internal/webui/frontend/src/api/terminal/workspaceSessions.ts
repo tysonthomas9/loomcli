@@ -10,6 +10,8 @@ import type {
   WorkspaceSessionListData,
   WorkspaceSessionListResponse,
   WorkspaceSessionListItem,
+  WorkspaceTraceRunData,
+  WorkspaceTraceRunResponse,
 } from "@/types/agent";
 
 import { ApiError, get, getText, unwrapResponse, wsUrl } from "@/api/common";
@@ -22,11 +24,15 @@ type Envelope<T> = {
 
 function appendQuery(
   path: string,
-  params: Record<string, string | number | undefined>,
+  params: Record<string, string | number | string[] | undefined>,
 ): string {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === "") continue;
+    if (Array.isArray(value)) {
+      for (const item of value) query.append(key, item);
+      continue;
+    }
     query.set(key, String(value));
   }
   const qs = query.toString();
@@ -42,6 +48,8 @@ export function buildWorkspaceSessionsUrl(
     until: filters.until,
     status: filters.status,
     agent_id: filters.agent_id,
+    task_run_id: filters.task_run_id,
+    tag: filters.tags,
     kind: filters.kind,
     limit: filters.limit,
   });
@@ -59,7 +67,18 @@ export async function listWorkspaceSessions(
     sessions: data.sessions ?? [],
     total: data.total ?? 0,
     limit: data.limit ?? filters.limit ?? 0,
+    score_dimensions: data.score_dimensions ?? [],
   };
+}
+
+export async function getWorkspaceTraceRun(
+  workspaceId: string,
+  taskRunId: string,
+): Promise<WorkspaceTraceRunData> {
+  const envelope = await get<WorkspaceTraceRunResponse>(
+    wsUrl(workspaceId, `/traces/runs/${encodeURIComponent(taskRunId)}`),
+  );
+  return unwrapResponse(envelope);
 }
 
 export async function getWorkspaceSession(

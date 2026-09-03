@@ -346,7 +346,7 @@ func TestGitHubReviewTaskRunnerSourceContract(t *testing.T) {
 		`review_findings: JSON.stringify(findings)`,
 		`"--output-schema"`,
 		`"--output-last-message"`,
-		`execFileSync(CODEX`,
+		`invocationKey: "review"`,
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("github-review-task-runner source missing %q", want)
@@ -383,10 +383,10 @@ func TestDaytonaTaskRunnerSourceContract(t *testing.T) {
 		`function cloneCommand(`,
 		`imports.runtime.registerProvider("openai-codex"`,
 		`createFlueTranscriptCollector()`,
-		`transcript_entries: transcriptEntries`,
+		`agent.exec.invoke(`,
 		`uploadPatchArtifact(taskContext.client`,
 		`patch_artifact_id`,
-		`loom_task_session_id`,
+		`agent_session_id: invocation && invocation.session && invocation.session.id`,
 		`runtime_strategy: "flue-daytona-codex"`,
 		`task_runner: "daytona-task-runner"`,
 		`daytona_sandbox_env_leak`,

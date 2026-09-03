@@ -2,6 +2,7 @@
 package driver
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -11,6 +12,39 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+func TestTaskWorkerDefaultBridgeUsesServeSessionRegistry(t *testing.T) {
+	ctx, st, run := setupRunningDriverRun(t)
+	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+		WorkspaceKey: "TEST", TaskRunID: "task-run-worker-registry", DriverRunID: run.RunID,
+		TaskID: "TEST-REGISTRY", ProviderProfile: "flue-local", Status: domain.TaskRunQueued,
+	}); err != nil {
+		t.Fatalf("Create queued task run: %v", err)
+	}
+	commandJSON, err := json.Marshal([]string{"sh", "-c", `printf '%s\n' '{"status":"completed","exit_code":0}'`})
+	if err != nil {
+		t.Fatalf("Marshal helper command: %v", err)
+	}
+	t.Setenv(TaskRunnerCommandJSONEnv, string(commandJSON))
+	fixedNow := time.Unix(1_700_000_000, 0).UTC()
+	registry := NewTaskRunSessionOpenRegistry()
+	runContext := store.SessionRunContext{
+		WorkspaceKey: "TEST", TaskRunID: "task-run-worker-registry", Attempt: 1,
+		FencingToken: fixedNow.UnixNano(),
+	}
+	registry.Record(runContext, store.SessionRef{WorkspaceKey: "TEST", SessionID: "registry-only", Attempt: 1})
+	outcome, err := (&TaskWorker{
+		Store: st, WorkspaceKey: "TEST", WorkDir: t.TempDir(), NodeID: "task-worker-node-registry",
+		RunnerID: "task-worker-runner-registry", SupportedProviders: []string{"flue-local"},
+		HeartbeatInterval: -1, MaxAttempts: 1, SessionOpenRegistry: registry, Now: func() time.Time { return fixedNow },
+	}).RunOnce(ctx)
+	if err != nil || outcome.Run.Status != domain.TaskRunCompleted || outcome.Run.RuntimeMetadata["unclosed_sessions"] != "0" {
+		t.Fatalf("RunOnce run = %+v, err=%v", outcome.Run, err)
+	}
+	if live := registry.Live(runContext); len(live) != 0 {
+		t.Fatalf("serve registry not consumed by default worker bridge: %+v", live)
+	}
+}
 
 func TestTaskWorkerRunOnceClaimsQueuedTaskRunAndClosesTask(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
@@ -90,7 +124,7 @@ func TestTaskWorkerRunOnceClaimsQueuedTaskRunAndClosesTask(t *testing.T) {
 	}
 }
 
-func TestTaskWorkerRunOnceMapsFlueSessionUnderParent(t *testing.T) {
+func TestTaskWorkerRunOnceLeavesUnadoptedRunnerWithoutSession(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
 	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
 		WorkspaceKey:     "TEST",
@@ -129,15 +163,8 @@ func TestTaskWorkerRunOnceMapsFlueSessionUnderParent(t *testing.T) {
 	if outcome.Run.Status != domain.TaskRunCompleted {
 		t.Fatalf("outcome status = %s error=%s, want completed", outcome.Run.Status, outcome.Run.ErrorMessage)
 	}
-	session, err := st.AgentSessions().Get(ctx, "TEST", "flue-task-run-worker-flue")
-	if err != nil {
-		t.Fatalf("get flue agent session: %v", err)
-	}
-	if session.Kind != domain.AgentSessionKindTask || session.TaskID != "TEST-12" || session.ParentSessionID != "lead-session-1" {
-		t.Fatalf("session = %+v, want task session under lead-session-1", session)
-	}
-	if session.Metadata["runtime"] != "flue" || session.Metadata["task_run_id"] != "task-run-worker-flue" || session.Metadata["transcript_ref"] == "" {
-		t.Fatalf("session metadata = %+v, want flue transcript metadata", session.Metadata)
+	if _, err := st.AgentSessions().Get(ctx, "TEST", "flue-task-run-worker-flue"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("legacy bridge session err = %v, want not found", err)
 	}
 }
 

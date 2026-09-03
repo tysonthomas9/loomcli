@@ -131,6 +131,48 @@ func TestIssueBridgeInterval(t *testing.T) {
 	}
 }
 
+func TestTaskRunSessionReconcileInterval(t *testing.T) {
+	tests := []struct {
+		value string
+		want  time.Duration
+	}{
+		{"", 60 * time.Second},
+		{"5", 5 * time.Second},
+		{"0", time.Second},
+		{"invalid", 60 * time.Second},
+		{"100000", 3600 * time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			t.Setenv(envLoomSessionReconcileInterval, tt.value)
+			if got := taskRunSessionReconcileInterval(); got != tt.want {
+				t.Fatalf("taskRunSessionReconcileInterval() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTaskRunSessionReconcileLimit(t *testing.T) {
+	tests := []struct {
+		value string
+		want  int
+	}{
+		{"", 500},
+		{"250", 250},
+		{"0", 1},
+		{"invalid", 500},
+		{"100000", 10000},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			t.Setenv(envLoomSessionReconcileLimit, tt.value)
+			if got := taskRunSessionReconcileLimit(); got != tt.want {
+				t.Fatalf("taskRunSessionReconcileLimit() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestIssueBridgeDisabled(t *testing.T) {
 	for _, value := range []string{"1", "true", "TRUE", "yes", "on"} {
 		t.Run("disabled_"+value, func(t *testing.T) {
