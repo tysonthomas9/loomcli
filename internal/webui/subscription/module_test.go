@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/rpc"
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
@@ -24,7 +24,9 @@ func TestModule_RegisterRoutes(t *testing.T) {
 	}
 	defer tokens.Stop()
 
-	getMutations := func(_ string, _ string) []rpc.MutationEvent { return nil }
+	getMutations := func(context.Context, string, string, int) (backend.MutationPage, error) {
+		return backend.MutationPage{}, nil
+	}
 	wsFromCtx := func(_ context.Context) string { return "test-ws" }
 
 	mod := NewModule(hub, getMutations, wsFromCtx, nil, tokens)
@@ -58,7 +60,9 @@ func TestModule_ConditionalRoutes(t *testing.T) {
 	hub := realtime.NewHub()
 	defer hub.Stop()
 
-	getMutations := func(_ string, _ string) []rpc.MutationEvent { return nil }
+	getMutations := func(context.Context, string, string, int) (backend.MutationPage, error) {
+		return backend.MutationPage{}, nil
+	}
 	wsFromCtx := func(_ context.Context) string { return "test-ws" }
 
 	t.Run("nil sseTokens returns disabled token response", func(t *testing.T) {
@@ -104,7 +108,9 @@ func TestModule_WrongMethod_Returns405(t *testing.T) {
 	}
 	defer tokens.Stop()
 
-	getMutations := func(_ string, _ string) []rpc.MutationEvent { return nil }
+	getMutations := func(context.Context, string, string, int) (backend.MutationPage, error) {
+		return backend.MutationPage{}, nil
+	}
 	wsFromCtx := func(_ context.Context) string { return "test-ws" }
 
 	mod := NewModule(hub, getMutations, wsFromCtx, nil, tokens)
@@ -121,7 +127,7 @@ func TestModule_WrongMethod_Returns405(t *testing.T) {
 	}
 }
 
-func TestModule_ActivatesWorkspaceOnTokenRoute(t *testing.T) {
+func TestModule_DoesNotActivateWorkspaceOnTokenRoute(t *testing.T) {
 	hub := realtime.NewHub()
 	defer hub.Stop()
 
@@ -131,11 +137,14 @@ func TestModule_ActivatesWorkspaceOnTokenRoute(t *testing.T) {
 	}
 	defer tokens.Stop()
 
-	getMutations := func(_ string, _ string) []rpc.MutationEvent { return nil }
+	getMutations := func(context.Context, string, string, int) (backend.MutationPage, error) {
+		return backend.MutationPage{}, nil
+	}
 	wsFromCtx := func(_ context.Context) string { return "test-ws" }
 	var activated []string
-	activate := func(_ context.Context, wsID string) {
+	activate := func(_ context.Context, wsID string) (string, error) {
 		activated = append(activated, wsID)
+		return "c1.head", nil
 	}
 
 	mod := NewModule(hub, getMutations, wsFromCtx, activate, tokens)
@@ -154,12 +163,12 @@ func TestModule_ActivatesWorkspaceOnTokenRoute(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("token route: expected 200, got %d", rec.Code)
 	}
-	if len(activated) != 1 || activated[0] != "test-ws" {
-		t.Fatalf("activated = %v, want [test-ws]", activated)
+	if len(activated) != 0 {
+		t.Fatalf("activated = %v, want no token-route activation", activated)
 	}
 }
 
-func TestModule_ActivatesResolvedWorkspacePerTokenRoute(t *testing.T) {
+func TestModule_DoesNotActivateResolvedWorkspacePerTokenRoute(t *testing.T) {
 	hub := realtime.NewHub()
 	defer hub.Stop()
 
@@ -169,10 +178,13 @@ func TestModule_ActivatesResolvedWorkspacePerTokenRoute(t *testing.T) {
 	}
 	defer tokens.Stop()
 
-	getMutations := func(_ string, _ string) []rpc.MutationEvent { return nil }
+	getMutations := func(context.Context, string, string, int) (backend.MutationPage, error) {
+		return backend.MutationPage{}, nil
+	}
 	var activated []string
-	activate := func(_ context.Context, wsID string) {
+	activate := func(_ context.Context, wsID string) (string, error) {
 		activated = append(activated, wsID)
+		return "c1.head", nil
 	}
 
 	mod := NewModule(hub, getMutations, middleware.WorkspaceFromContext, activate, tokens)
@@ -197,9 +209,8 @@ func TestModule_ActivatesResolvedWorkspacePerTokenRoute(t *testing.T) {
 		}
 	}
 
-	want := []string{"ws-alpha", "ws-beta", "ws-alpha"}
-	if strings.Join(activated, ",") != strings.Join(want, ",") {
-		t.Fatalf("activated = %v, want %v", activated, want)
+	if len(activated) != 0 {
+		t.Fatalf("activated = %v, want no token-route activation", activated)
 	}
 }
 
@@ -213,11 +224,14 @@ func TestModule_DoesNotActivateEventsRouteBeforeTokenAuth(t *testing.T) {
 	}
 	defer tokens.Stop()
 
-	getMutations := func(_ string, _ string) []rpc.MutationEvent { return nil }
+	getMutations := func(context.Context, string, string, int) (backend.MutationPage, error) {
+		return backend.MutationPage{}, nil
+	}
 	wsFromCtx := func(_ context.Context) string { return "test-ws" }
 	var activated []string
-	activate := func(_ context.Context, wsID string) {
+	activate := func(_ context.Context, wsID string) (string, error) {
 		activated = append(activated, wsID)
+		return "c1.head", nil
 	}
 
 	mod := NewModule(hub, getMutations, wsFromCtx, activate, tokens)
@@ -248,10 +262,13 @@ func TestModule_ActivatesEachAuthorizedEventsClient(t *testing.T) {
 	}
 	defer tokens.Stop()
 
-	getMutations := func(_ string, _ string) []rpc.MutationEvent { return nil }
+	getMutations := func(context.Context, string, string, int) (backend.MutationPage, error) {
+		return backend.MutationPage{}, nil
+	}
 	activated := make(chan string, 3)
-	activate := func(_ context.Context, wsID string) {
+	activate := func(_ context.Context, wsID string) (string, error) {
 		activated <- wsID
+		return "c1.head", nil
 	}
 
 	mod := NewModule(hub, getMutations, middleware.WorkspaceFromContext, activate, tokens)
@@ -308,11 +325,14 @@ func TestModule_ActivatesWorkspaceOnEventsRoute(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	getMutations := func(_ string, _ string) []rpc.MutationEvent { return nil }
+	getMutations := func(context.Context, string, string, int) (backend.MutationPage, error) {
+		return backend.MutationPage{}, nil
+	}
 	wsFromCtx := func(_ context.Context) string { return "test-ws" }
-	var activated []string
-	activate := func(_ context.Context, wsID string) {
-		activated = append(activated, wsID)
+	activated := make(chan string, 1)
+	activate := func(_ context.Context, wsID string) (string, error) {
+		activated <- wsID
+		return "c1.head", nil
 	}
 
 	mod := NewModule(hub, getMutations, wsFromCtx, activate, nil)
@@ -329,6 +349,14 @@ func TestModule_ActivatesWorkspaceOnEventsRoute(t *testing.T) {
 		mux.ServeHTTP(rec, req)
 	}()
 
+	select {
+	case got := <-activated:
+		if got != "test-ws" {
+			t.Fatalf("activated = %q, want test-ws", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("events route did not activate workspace")
+	}
 	cancel()
 	select {
 	case <-done:
@@ -336,9 +364,6 @@ func TestModule_ActivatesWorkspaceOnEventsRoute(t *testing.T) {
 		t.Fatal("events route did not exit after request cancellation")
 	}
 
-	if len(activated) != 1 || activated[0] != "test-ws" {
-		t.Fatalf("activated = %v, want [test-ws]", activated)
-	}
 }
 
 func containsAll(s string, needles ...string) bool {

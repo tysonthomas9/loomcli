@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/rpc"
+	"github.com/tysonthomas9/loomcli/internal/backend"
 )
 
 func TestHandler_FleetDBOnlyReconnectCatchUpUsesLastEventID(t *testing.T) {
@@ -23,18 +23,18 @@ func TestHandler_FleetDBOnlyReconnectCatchUpUsesLastEventID(t *testing.T) {
 	)
 	h := NewHandler(HandlerConfig{
 		Hub: NewHub(),
-		GetMutationsSince: func(wsID string, since string) []rpc.MutationEvent {
+		GetMutationPage: func(_ context.Context, wsID string, since string, _ int) (backend.MutationPage, error) {
 			mu.Lock()
 			gotWS = wsID
 			gotSince = since
 			mu.Unlock()
-			return []rpc.MutationEvent{{
+			return backend.MutationPage{Events: []backend.MutationData{{
 				Cursor:    "1700000000100-0",
 				Type:      "update",
 				IssueID:   "task-1",
 				Title:     "missed mutation",
 				Timestamp: time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC),
-			}}
+			}}, Cursor: "1700000000100-0"}, nil
 		},
 		WorkspaceFromCtx: func(context.Context) string { return workspaceID },
 	})
@@ -67,15 +67,15 @@ func TestHandler_FleetDBOnlyReconnectCatchUpUsesSinceQuery(t *testing.T) {
 	var gotSince string
 	h := NewHandler(HandlerConfig{
 		Hub: NewHub(),
-		GetMutationsSince: func(wsID string, since string) []rpc.MutationEvent {
+		GetMutationPage: func(_ context.Context, wsID string, since string, _ int) (backend.MutationPage, error) {
 			if wsID != workspaceID {
 				t.Errorf("workspace = %q, want %q", wsID, workspaceID)
 			}
 			gotSince = since
-			return []rpc.MutationEvent{
+			return backend.MutationPage{Events: []backend.MutationData{
 				{Cursor: "1700000000300-0", Type: "update", IssueID: "task-2", Timestamp: time.Date(2026, 5, 1, 12, 1, 0, 0, time.UTC)},
 				{Cursor: "1700000000400-0", Type: "status", IssueID: "task-3", Timestamp: time.Date(2026, 5, 1, 12, 2, 0, 0, time.UTC)},
-			}
+			}, Cursor: "1700000000400-0"}, nil
 		},
 		WorkspaceFromCtx: func(context.Context) string { return workspaceID },
 	})
@@ -101,11 +101,11 @@ func TestHandler_FleetDBOnlyReconnectCatchUpUsesSinceQuery(t *testing.T) {
 func TestHandler_FleetDBOnlyCatchUpAppliesSourceRepoFilter(t *testing.T) {
 	h := NewHandler(HandlerConfig{
 		Hub: NewHub(),
-		GetMutationsSince: func(wsID string, since string) []rpc.MutationEvent {
-			return []rpc.MutationEvent{
+		GetMutationPage: func(_ context.Context, wsID string, since string, _ int) (backend.MutationPage, error) {
+			return backend.MutationPage{Events: []backend.MutationData{
 				{Cursor: "1700000000500-0", Type: "update", IssueID: "repo-a-task", SourceRepo: "repo-a", Timestamp: time.Date(2026, 5, 1, 12, 3, 0, 0, time.UTC)},
 				{Cursor: "1700000000600-0", Type: "update", IssueID: "repo-b-task", SourceRepo: "repo-b", Timestamp: time.Date(2026, 5, 1, 12, 4, 0, 0, time.UTC)},
-			}
+			}, Cursor: "1700000000600-0"}, nil
 		},
 		WorkspaceFromCtx: func(context.Context) string { return "ws-fleet" },
 	})
@@ -130,11 +130,11 @@ func TestHandler_FleetDBOnlyCatchUpFailsClosedWithoutWorkspace(t *testing.T) {
 	called := false
 	h := NewHandler(HandlerConfig{
 		Hub: NewHub(),
-		GetMutationsSince: func(wsID string, since string) []rpc.MutationEvent {
+		GetMutationPage: func(_ context.Context, wsID string, since string, _ int) (backend.MutationPage, error) {
 			called = true
-			return []rpc.MutationEvent{
+			return backend.MutationPage{Events: []backend.MutationData{
 				{Cursor: "1700000000700-0", Type: "update", IssueID: "leaked-task", Timestamp: time.Date(2026, 5, 1, 12, 5, 0, 0, time.UTC)},
-			}
+			}, Cursor: "1700000000700-0"}, nil
 		},
 		WorkspaceFromCtx: func(context.Context) string { return "" },
 	})
@@ -156,27 +156,31 @@ func TestHandler_FleetDBOnlyCatchUpFailsClosedWithoutWorkspace(t *testing.T) {
 
 func TestHandler_FleetDBOnlyReconnectCanMoveBetweenServeProcesses(t *testing.T) {
 	const workspaceID = "ws-fleet"
-	durableEvents := []rpc.MutationEvent{
+	durableEvents := []backend.MutationData{
 		{Cursor: "1700000000800-0", Type: "update", IssueID: "before-disconnect", Timestamp: time.Date(2026, 5, 1, 12, 6, 0, 0, time.UTC)},
 		{Cursor: "1700000000900-0", Type: "update", IssueID: "missed-on-other-process", Timestamp: time.Date(2026, 5, 1, 12, 7, 0, 0, time.UTC)},
 	}
-	getSince := func(wsID string, since string) []rpc.MutationEvent {
+	getSince := func(_ context.Context, wsID string, since string, _ int) (backend.MutationPage, error) {
 		if wsID != workspaceID {
 			t.Errorf("workspace = %q, want %q", wsID, workspaceID)
 		}
-		var out []rpc.MutationEvent
+		var out []backend.MutationData
 		for _, event := range durableEvents {
 			if event.Cursor > since {
 				out = append(out, event)
 			}
 		}
-		return out
+		cursor := since
+		if len(out) > 0 {
+			cursor = out[len(out)-1].Cursor
+		}
+		return backend.MutationPage{Events: out, Cursor: cursor}, nil
 	}
 	newProcess := func() *Handler {
 		h := NewHandler(HandlerConfig{
-			Hub:               NewHub(),
-			GetMutationsSince: getSince,
-			WorkspaceFromCtx:  func(context.Context) string { return workspaceID },
+			Hub:              NewHub(),
+			GetMutationPage:  getSince,
+			WorkspaceFromCtx: func(context.Context) string { return workspaceID },
 		})
 		h.heartbeatInterval = time.Hour
 		return h
@@ -207,6 +211,8 @@ func TestHandler_FleetDBOnlyReconnectCanMoveBetweenServeProcesses(t *testing.T) 
 
 func serveSSEOnce(t *testing.T, h *Handler, mutateReq func(*http.Request)) string {
 	t.Helper()
+	go h.hub.Run()
+	defer h.hub.Stop()
 	ctx, cancel := context.WithCancel(context.Background())
 	req := httptest.NewRequest(http.MethodGet, "/events", nil).WithContext(ctx)
 	if mutateReq != nil {

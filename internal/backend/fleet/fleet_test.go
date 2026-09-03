@@ -2,11 +2,11 @@ package fleet
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"strconv"
 	"strings"
@@ -2332,54 +2332,169 @@ func TestWaitForMutations_ServerError(t *testing.T) {
 	}
 }
 
-func TestGetMutationsAfter_PreservesRedisStreamCursor(t *testing.T) {
-	var gotSince string
+func TestGetMutationsAfter_ReturnsPageAndSendsExplicitLimit(t *testing.T) {
+	now := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
+	var gotQuery url.Values
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		gotSince = r.URL.Query().Get("since")
-		respondOK(w, fleetMutationsResponse{Events: []fleetMutationEvent{}, Cursor: "1700000000000-1"})
+		gotQuery = r.URL.Query()
+		respondOK(w, fleetMutationsResponse{
+			Events:  []fleetMutationEvent{{ID: "c1.event", Timestamp: now, Action: "issue.update", EntityType: "issue", EntityID: "task-1"}},
+			Cursor:  "c1.next",
+			HasMore: true,
+		})
 	})
 	defer ts.Close()
 
-	if _, err := fb.GetMutationsAfter(context.Background(), "1700000000000-0"); err != nil {
+	page, err := fb.GetMutationsAfter(context.Background(), "c1.c3RhcnQ", 100)
+	if err != nil {
 		t.Fatalf("GetMutationsAfter: %v", err)
 	}
-	want := fleetOpaqueCursorPrefix + base64.RawURLEncoding.EncodeToString([]byte("1700000000000-0"))
-	if gotSince != want {
-		t.Fatalf("since = %q, want opaque cursor %q", gotSince, want)
+	if got := gotQuery.Get("since"); got != "c1.c3RhcnQ" {
+		t.Fatalf("since = %q, want opaque token preserved", got)
+	}
+	if got := gotQuery.Get("limit"); got != "100" {
+		t.Fatalf("limit = %q, want 100", got)
+	}
+	if len(page.Events) != 1 || page.Events[0].Cursor != "c1.event" {
+		t.Fatalf("events = %+v, want cursor c1.event", page.Events)
+	}
+	if page.Cursor != "c1.next" || !page.HasMore {
+		t.Fatalf("page = %+v, want cursor c1.next with has_more", page)
 	}
 }
 
-func TestGetMutationsAfter_PreservesOpaqueCursor(t *testing.T) {
-	var gotSince string
-	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		gotSince = r.URL.Query().Get("since")
-		respondOK(w, fleetMutationsResponse{Events: []fleetMutationEvent{}, Cursor: "1700000000000-1"})
+func TestGetMutationsAfter_EmptyTerminalPageKeepsPreviousCursor(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		respondOK(w, fleetMutationsResponse{Events: []fleetMutationEvent{}, Cursor: "", HasMore: false})
 	})
 	defer ts.Close()
 
-	want := fleetOpaqueCursorPrefix + base64.RawURLEncoding.EncodeToString([]byte("1700000000000-0"))
-	if _, err := fb.GetMutationsAfter(context.Background(), want); err != nil {
+	page, err := fb.GetMutationsAfter(context.Background(), "c1.previous", 100)
+	if err != nil {
 		t.Fatalf("GetMutationsAfter: %v", err)
 	}
-	if gotSince != want {
-		t.Fatalf("since = %q, want opaque cursor preserved", gotSince)
+	if page.Cursor != "c1.previous" {
+		t.Fatalf("cursor = %q, want previous cursor", page.Cursor)
+	}
+	if page.Events == nil {
+		t.Fatal("events = nil, want non-nil empty slice")
 	}
 }
 
-func TestWaitForMutationsAfter_IntegerCursorAddsRedisSequence(t *testing.T) {
-	var gotSince string
-	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		gotSince = r.URL.Query().Get("since")
-		respondOK(w, fleetMutationsResponse{Events: []fleetMutationEvent{}, Cursor: "1700000000000-1"})
+func TestMutationCursorNormalizationPreservesSupportedClasses(t *testing.T) {
+	tests := []struct {
+		cursor    string
+		wantSince string
+	}{
+		{cursor: "$", wantSince: "$"},
+		{cursor: "c1.b3BhcXVl", wantSince: "c1.b3BhcXVl"},
+		{cursor: "1700000000000", wantSince: "c1.MTcwMDAwMDAwMDAwMC0w"},
+		{cursor: "0", wantSince: "0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.cursor, func(t *testing.T) {
+			var gotSince string
+			fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				gotSince = r.URL.Query().Get("since")
+				respondOK(w, fleetMutationsResponse{Events: []fleetMutationEvent{}, Cursor: tt.cursor})
+			})
+			defer ts.Close()
+
+			if _, err := fb.WaitForMutationsAfter(context.Background(), tt.cursor, 0, 100); err != nil {
+				t.Fatalf("WaitForMutationsAfter: %v", err)
+			}
+			if gotSince != tt.wantSince {
+				t.Fatalf("since = %q, want %q", gotSince, tt.wantSince)
+			}
+		})
+	}
+}
+
+func TestMutationCursorNormalizationRejectsMalformedCursor(t *testing.T) {
+	for _, cursor := range []string{"", "+1", "-1", "1700000000000-0", "not-a-cursor", " c1.token", "c1.", "c1.not*opaque"} {
+		t.Run(strconv.Quote(cursor), func(t *testing.T) {
+			fb, ts := newTestServer(t, func(http.ResponseWriter, *http.Request) {
+				t.Fatal("malformed cursor must be rejected before sending a request")
+			})
+			defer ts.Close()
+
+			if _, err := fb.GetMutationsAfter(context.Background(), cursor, 100); err == nil {
+				t.Fatal("GetMutationsAfter error = nil, want malformed cursor error")
+			}
+		})
+	}
+}
+
+func TestProbeHead(t *testing.T) {
+	t.Run("supported", func(t *testing.T) {
+		fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+			if got := r.URL.Query(); got.Get("since") != "$" || got.Get("timeout") != "0" || got.Get("limit") != "1" {
+				t.Fatalf("query = %q, want since=$ timeout=0 limit=1", got.Encode())
+			}
+			respondOK(w, fleetMutationsResponse{Events: []fleetMutationEvent{}, Cursor: "c1.head", HasMore: false})
+		})
+		defer ts.Close()
+
+		cursor, supported, err := fb.ProbeHead(context.Background())
+		if err != nil || !supported || cursor != "c1.head" {
+			t.Fatalf("ProbeHead = (%q, %v, %v), want (c1.head, true, nil)", cursor, supported, err)
+		}
+	})
+
+	t.Run("old fleet exact error is unsupported", func(t *testing.T) {
+		fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(apiResponse{Success: false, Code: "invalid_parameter", Error: "invalid since parameter: expected opaque cursor token"})
+		})
+		defer ts.Close()
+
+		cursor, supported, err := fb.ProbeHead(context.Background())
+		if err != nil || supported || cursor != "" {
+			t.Fatalf("ProbeHead = (%q, %v, %v), want (empty, false, nil)", cursor, supported, err)
+		}
+	})
+
+	t.Run("other error is not compatibility fallback", func(t *testing.T) {
+		fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(apiResponse{Success: false, Code: "invalid_parameter", Error: "different message"})
+		})
+		defer ts.Close()
+
+		if _, _, err := fb.ProbeHead(context.Background()); err == nil {
+			t.Fatal("ProbeHead error = nil, want non-compatibility error")
+		}
+	})
+
+	t.Run("non-200 success status is an error", func(t *testing.T) {
+		fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		})
+		defer ts.Close()
+
+		if _, _, err := fb.ProbeHead(context.Background()); err == nil {
+			t.Fatal("ProbeHead error = nil, want non-200 status error")
+		}
+	})
+}
+
+func TestGetMutationsAfter_CursorExpiredPreservesTypedReasonAndFloor(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusGone)
+		_, _ = w.Write([]byte(`{"error":{"code":"cursor_expired","message":"cursor expired","meta":{"cursor":"c1.floor"}}}`))
 	})
 	defer ts.Close()
 
-	if _, err := fb.WaitForMutationsAfter(context.Background(), "1700000000000", 1000); err != nil {
-		t.Fatalf("WaitForMutationsAfter: %v", err)
+	_, err := fb.GetMutationsAfter(context.Background(), "c1.old", 100)
+	if !errors.Is(err, backend.ErrMutationCursorExpired) {
+		t.Fatalf("error = %v, want ErrMutationCursorExpired", err)
 	}
-	want := fleetOpaqueCursorPrefix + base64.RawURLEncoding.EncodeToString([]byte("1700000000000-0"))
-	if gotSince != want {
-		t.Fatalf("since = %q, want integer cursor normalized to opaque stream ID %q", gotSince, want)
+	var be *backend.BackendError
+	if !errors.As(err, &be) || be.Meta["cursor"] != "c1.floor" {
+		t.Fatalf("error meta = %#v, want cursor floor c1.floor", be)
 	}
 }
 
