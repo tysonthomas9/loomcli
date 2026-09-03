@@ -457,20 +457,12 @@ func invokeClaudeRunTurn(ctx context.Context, workDir, prompt, agentName, resume
 	// auto-accept default, which would say yes to a skip-all-permissions screen.
 	inputPolicy, onInputRequest := inputPolicyTurnFields(resolveRoleInputPolicy())
 
-	// RunTurn has no deadline of its own, so a harness parked on a terminal
-	// wall waits here until the supervisor's output-timeout watchdog kills the
-	// whole run — tens of minutes later, and classified as a timeout. The
-	// watcher cancels this turn instead, once the wall has been the last thing
-	// the harness said for the settle window. A zero window disables it
-	// entirely: no goroutine, no cancel, exact pre-change behavior.
+	// The turn's own cancel scope, so everything this call starts unwinds when
+	// it returns. RunTurn has no deadline of its own: a harness parked on a
+	// terminal wall waits here until the supervisor's output-timeout watchdog
+	// kills the run.
 	turnCtx, cancelTurn := context.WithCancel(ctx)
 	defer cancelTurn()
-	var watcher *wallWatcher
-	if settle := wallSettleWindow(); settle > 0 {
-		watcher = newWallWatcher(settle, cancelTurn)
-		raw.watcher = watcher
-		go watcher.run(turnCtx)
-	}
 
 	res, err := claudeRunTurn(turnCtx, claudeRunTurnConfig{
 		Harness:        "claude",
@@ -493,13 +485,6 @@ func invokeClaudeRunTurn(ctx context.Context, workDir, prompt, agentName, resume
 	// accumulateHarnessUsage cannot error, so a missing or unreadable transcript
 	// leaves the turn result and the exit code exactly as they were.
 	accumulateHarnessUsage(collector, "claude", res.Session.HarnessSessionID, workDir)
-	// The wall verdict outranks whatever RunTurn returned. When the watcher
-	// fires it cancels this turn, so RunTurn's error is typically a
-	// ctx.Canceled shape that says nothing about WHY — checking it first is
-	// what keeps the real cause from being overwritten by our own cancel.
-	if kind, line, ok := watcher.result(); ok {
-		return res, wallInvocationError(kind, line, raw.String())
-	}
 	// Carry the harness's rendered screen out with EVERY errored turn, not only
 	// when the turn carries no text. A bare harness exit sets Turn.Reason to
 	// "exit code 1": non-empty, uninformative, and classified as [Unknown], the
@@ -630,7 +615,6 @@ type capturedOutput struct {
 	mu         sync.Mutex
 	buf        bytes.Buffer
 	onActivity func(wrapper.Snapshot)
-	watcher    *wallWatcher
 }
 
 func (c *capturedOutput) Write(p []byte) (int, error) {
@@ -638,11 +622,6 @@ func (c *capturedOutput) Write(p []byte) (int, error) {
 	defer c.mu.Unlock()
 	if c.onActivity != nil {
 		c.onActivity(wrapper.Snapshot{LastOutputAt: time.Now()})
-	}
-	// The watcher only records; it never calls back into this writer, so the
-	// lock this is already holding stays uncontended.
-	if c.watcher != nil {
-		c.watcher.observe(p)
 	}
 	return c.buf.Write(p)
 }
