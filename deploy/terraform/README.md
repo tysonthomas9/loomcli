@@ -6,16 +6,16 @@ works, and tearing it down. Four containers on one VM — Redis, fleet-db, loom
 blobs in GCS.
 
 ```
-make up NAME=loom-pr512 TUNNEL_PORT_BASE=18100  # build + push, apply, wait
-make smoke NAME=loom-pr512   # end-to-end proof, non-zero exit on failure
-make tunnel NAME=loom-pr512 TUNNEL_PORT_BASE=18100  # IAP tunnels + browser URL
-make down NAME=loom-pr512    # destroy everything the stack created
+make up       # mint this checkout's stack, build + push, apply, wait
+make smoke    # end-to-end proof, non-zero exit on failure
+make tunnel   # IAP tunnels + browser URL
+make down     # destroy this checkout's stack and archive its identity
 ```
 
-`NAME` is the isolation boundary, in four senses: it prefixes every resource,
-it names a **VPC of its own** so stacks cannot see each other at all, it is the
-network tag the firewall rules target, and it selects a **Terraform workspace**
-so each stack has its own state. That last one matters -- without it
+`NAME` is the isolation boundary in three senses: it prefixes every resource,
+it is the network tag targeted by the stack's firewall rules, and it selects a
+**Terraform workspace** so each stack has its own state. That last one matters:
+without it,
 `make down NAME=b` reads whatever state the directory happens to hold and
 destroys stack A.
 
@@ -24,24 +24,18 @@ Terraform state is stored in the shared, versioned GCS bucket
 isolated by its workspace prefix, while the bucket's IAM boundary protects the
 credentials held in state from the local checkout.
 
-The per-stack VPC is what makes concurrent stacks actually work, not just a
-tidier boundary. Sharing the project's `default` network meant sharing its
-address space, and Cloud NAT refuses two gateways with overlapping subnet
-coverage in one network and region -- so the first `make up` succeeded and the
-second failed on `NAT gateway ... cannot have overlapping subnetwork ranges`.
-Separate networks make the subnet CIDR a constant (`var.subnet_cidr`, the same
-`10.90.0.0/24` for every stack) instead of something to allocate. The cost is
-quota: a project allows **5 VPC networks** by default, one of which is
-`default`, so about four concurrent stacks before you need a quota bump. That
-surfaces as a clear error at apply time.
+The topology came from two measured failures. Round 1 put a NAT per stack on a
+shared network and the second gateway collided; round 2 gave every stack a VPC
+and hit the five-network quota at four stacks. The current design creates one
+shared custom VPC, subnet, router, and NAT, while each stack keeps its three
+tag-scoped firewall rules; peer traffic to 8280/8282/8283/22 was measured
+blocked by the priority-1100 deny.
 
 Local tunnel ports are owned by Terraform and exported as outputs; `make tunnel`
 reads both the local and remote ports rather than recomputing them, and refuses
-to touch a port it did not open. The default local ports are name-derived for
-Set `TUNNEL_PORT_BASE`/`tunnel_port_base` to a unique UI port for every stack
-tunnelled from the same workstation; API and fleet-db use the next two ports.
-The value is required by the Makefile and Terraform so the deployment never
-pretends to allocate a collision-free local port automatically.
+to touch a port it did not open. `make up` mints a free three-port block and
+stores its base in `.stack`; explicit mode can still set `TUNNEL_PORT_BASE`,
+with API and fleet-db using the next two ports.
 
 ## Prerequisites
 
@@ -84,6 +78,73 @@ Two defaults worth overriding explicitly:
 
 Either `tofu` or `terraform` works; `TF_BIN` picks the binary and prefers
 OpenTofu when both are present.
+
+## Parallel stacks
+
+Every checkout owns one stack. The first plain `make up` creates a gitignored
+`.stack` atomically, then re-runs make so all targets see the new defaults:
+
+```
+NAME=loom-ab12cd
+TUNNEL_PORT_BASE=18123
+CREATED_AT=2026-09-02T12:34:56Z
+```
+
+The name is random; the initial port block is derived from it and advances by
+three until all three local ports are free. Later `make smoke`, `make tunnel`,
+`make status`, and `make down` use the same file. A successful `make down`
+deletes the Terraform workspace and moves `.stack` to `.stack.last`.
+
+Explicit mode does not read or write `.stack`; supply both values as before:
+
+```
+make up NAME=loom-pr512 TUNNEL_PORT_BASE=18100
+```
+
+Each stack records a 12-hex checkout identity derived from hostname and checkout
+path, plus a label-safe user name. `make state` refuses to select a workspace
+owned by another checkout. `ADOPT=1` is the deliberate takeover escape hatch;
+the next apply stamps the new owner. A failed first apply with no readable
+`owner_id` is treated as unowned.
+
+`make list` shows every labelled VM with status, zone, owner, checkout, age,
+and time to expiry, marks this checkout's stack with `*`, and also shows
+Terraform workspaces that have no VM as `state only`.
+
+Stacks have an eight-hour TTL (`TTL_MINUTES=480`). Every `make up` or
+`make apply` moves the expiry forward. `make extend` moves it forward without
+touching anything else: it re-applies the images, codex mode, and auto-stop
+setting the stack was deployed with (read from `tofu output`, not from your
+shell), refuses any plan that would create or destroy a resource, and then
+restarts the guest auto-stop timer. `make reap DRY_RUN=1` previews expired
+cleanup, `make reap` performs it, and `make reap REAP_ALL=1` selects every
+owned or unowned workspace, including one with no recorded expiry (a first
+apply that failed before outputs landed), which plain `make reap` skips.
+
+The VM powers itself off 50 minutes after its auto-stop timer starts, which
+happens at every boot and again at every `make extend`. This leaves the boot
+disk but stops compute billing. `make resume` starts it and waits for health;
+`make up` also restarts a stopped VM because Terraform declares it RUNNING.
+Set `AUTO_STOP_MINUTES=0` to disable the guest timer; `make extend` then only
+moves the expiry.
+
+Capacity in `fleet-db-488801` is currently bounded by E2 CPU: each stack uses
+one VM and two E2 vCPUs, so 24 E2 vCPUs allow 12 stacks. The project allows 24
+instances. Each stack also uses three firewall rules, one service account, five
+secrets, one bucket, and one HMAC key; 100 firewall rules with four used by
+`default` would allow 32 stacks. Shared infrastructure is one network, one
+subnet, one router, and one NAT, so network quota no longer scales with stacks.
+
+Etiquette: one checkout = one stack; never `down` a NAME your checkout did not
+`up`.
+
+Two things seen on the first parallel run, both handled in code: a freshly
+created Cloud NAT takes minutes before it passes traffic, so cloud-init waits
+(up to ten minutes) for real egress before installing packages; and two
+checkouts reconciling `shared/` at the same moment hit the GCS state lock,
+which the Makefile retries. If an apply ends with `Failed to upload state`
+(a client-side read timeout), rerun the same `make` target: the state object
+had normally landed, and the rerun plans no changes.
 
 ## Running real agents (codex)
 
@@ -169,28 +230,11 @@ tunnel fail with `failed to connect to backend`. Redis publishes no host port at
 all. Cloud NAT gives the VM outbound access for image pulls.
 
 Two things keep those ports closed, and it is worth knowing which does what.
-
-The **network** is the primary boundary: each stack gets its own custom-mode
-VPC, which ships no permissive rules at all. Nothing else in the project shares
-it, so there is nothing to be reachable from.
-
-The **deny** rule is the second layer, and it exists because allow rules close
-nothing — GCP firewall rules are additive. It matters most when stacks shared
-the project's `default` network, which carries `default-allow-internal` at
-priority 65534: any other VM could reach fleet-db, which runs with
-`--auth-dev-mode` and `--authz-enabled=false`, so reachable meant fully
-readable and writable. Measured from a peer VM back when the stack lived on the
-default network:
-
-```
-loom-tftest  8280/8282/8283/22  -> blocked      (this stack, deny rule)
-peer VM      8090               -> REACHABLE    (no deny rule, same VPC)
-```
-
-On a per-stack VPC that exposure is gone by construction, so treat the numbers
-above as the reason the rule is there rather than a description of today's
-topology. The rule stays because it is free and still bites if this network is
-ever peered, or if someone adds a broad allow while debugging.
+The VM has no external IP, and each stack's priority-1100 deny targets its own
+network tag on the shared VPC. The deny is the stack-to-stack isolation layer:
+GCP firewall allows are additive, and fleet-db runs with `--auth-dev-mode` and
+`--authz-enabled=false`, so a reachable port is fully readable and writable.
+Only the priority-1000 IAP allows win for SSH and the three application ports.
 
 The priority gap is deliberate: a deliberate allow an operator adds at
 priority < 1100 still takes effect.
@@ -209,10 +253,14 @@ which is the point — opening these ports should be an explicit act.
 | `google_storage_bucket` | Content-addressed workspace files, uniform access, no versioning |
 | `google_storage_hmac_key` | GCS S3-interop credential for fleet-db |
 | 5 × `google_secret_manager_secret` | Redis password, workspace-file token, run-token signing key, S3 id + secret |
-| `google_compute_network` + `google_compute_subnetwork` | Custom-mode VPC per stack; `private_ip_google_access` on |
 | 3 × `google_compute_firewall` | Two IAP allows (priority 1000) plus the deny (1100) that closes everything else |
-| Cloud Router + NAT | Only when the VM has no external IP |
 | Artifact Registry `loom` repository | Shared project bootstrap, created by preflight and retained across stack teardown |
+
+`make shared` separately creates the project-wide custom VPC, regional subnet
+with Private Google Access, Cloud Router, and one Cloud NAT. `make apply` and
+`make up` reconcile it first; `make down` never touches it. Once all stack VMs
+are gone, `make shared-down` removes it. Terraform refuses that destroy while a
+VM still uses the subnet.
 
 Secrets are generated by Terraform, stored in Secret Manager, and fetched by
 the VM at boot. None is baked into an image or the compose file. This includes
@@ -278,12 +326,11 @@ These each cost real debugging time and are now handled in code:
   hashed contents of untracked files, which land in the build context too) and
   the generated UI bundle contents, which are ignored by git but copied into
   the UI image.
-- **Allow rules do not close anything.** GCP firewall rules are additive; a deny
-  rule is what made "IAP only" true while stacks shared the default VPC.
-- **Cloud NAT will not tolerate overlapping coverage.** One
-  `ALL_SUBNETWORKS_ALL_IP_RANGES` gateway per stack on a shared network means
-  the second stack cannot be applied at all. Give each stack its own VPC and
-  the question disappears.
+- **Allow rules do not close anything.** GCP firewall rules are additive; on a
+  VPC shared by every stack, the tag-scoped deny rule is what makes "IAP only"
+  true, and it is the only thing separating one stack from the next.
+- **Cloud NAT wants one gateway for this topology.** The shared bootstrap owns
+  one `ALL_SUBNETWORKS_ALL_IP_RANGES` NAT; stacks must not create their own.
 - **A gate must read the stack, not the command line.** `make smoke` rebuilt
   its expectations from Make arguments, so the documented `make smoke NAME=...`
   after `make up CODEX=1` asserted the wrong plan-role state and failed a
@@ -316,10 +363,28 @@ These each cost real debugging time and are now handled in code:
 - **A failed readiness check leaves paid infrastructure behind.** `make up`
   prints the exact `make down NAME=... PROJECT=...` command to use after a
   post-apply failure; cleanup is explicit so operators can inspect a failed VM
-  before destroying it.
+  before destroying it. The stack's TTL and `make reap` collect it if nobody
+  does.
 - **`ports:` publish on all interfaces, never `127.0.0.1:`.** IAP forwards to
   the VM's network interface, so a loopback bind makes every tunnel fail with
   `failed to connect to backend`. The firewall is what closes these ports.
+- **`make extend` must read the stack, not the shell.** The smoke-gate rule
+  again: re-applying with this shell's `CODEX` or `AUTO_STOP_MINUTES` changed
+  the rendered boot config and replaced the VM it was meant to keep. Extend
+  takes every VM-shaping input from `tofu output` and refuses a plan with any
+  create or destroy action.
+- **`OnBootSec` cannot be re-armed.** A boot-relative timer restarted near its
+  deadline still fires at boot + N. The auto-stop timer uses `OnActiveSec`,
+  which counts from the unit's own activation, so `systemctl restart` opens a
+  fresh window; and a stack with the timer disabled has no unit to restart, so
+  extend checks the deployed setting before trying.
+- **A workspace whose first apply failed has no outputs.** Deciding reaping by
+  `expires_at` skipped exactly the stacks most likely to leak resources;
+  `REAP_ALL=1` takes them regardless. And once it did, `make down` fell over
+  on the same workspace: OpenTofu prints `No outputs found` on stdout with
+  exit 0, so the tunnel-port read captured the warning and destroy refused
+  it as "a number is required". Every `output -raw` whose value is optional
+  is checked for shape, and reap carries on past a failed stack.
 
 ## What `make smoke` proves
 
@@ -344,5 +409,7 @@ them is a code change, not a config change.
 
 ## Cost
 
-`e2-standard-2` is roughly $49/mo running and $2/mo stopped. `make down` is the
-cheap option for a test stack; stop the VM if you want to keep its disk.
+`e2-standard-2` is roughly $49/mo continuously running and $2/mo stopped. The
+50-minute auto-stop bounds accidental compute spend while keeping
+the disk for `make resume`; `make down` is still the cheapest option because it
+destroys the per-stack disk, bucket, secrets, and credentials.

@@ -1,6 +1,25 @@
 #cloud-config
 # Rendered by Terraform (vm.tf). Runs once on first boot.
 
+# A freshly created Cloud NAT takes minutes before it passes traffic. The
+# first stacks after `make shared` booted into that window: apt's IPv4
+# connects timed out, cloud-init fell back to snap, and the stack never
+# started. bootcmd runs before package install, so wait (bounded) for real
+# egress here instead of failing the boot on a gateway that is still warming.
+bootcmd:
+  - - sh
+    - -c
+    - |
+      for i in $(seq 1 120); do
+        if curl -4 -m 5 -sf -o /dev/null http://archive.ubuntu.com/ubuntu/; then
+          echo "egress ok after $i probes" >> /var/log/loom-egress-wait.log
+          exit 0
+        fi
+        sleep 5
+      done
+      echo "no egress after 10 minutes; package install will fail" >> /var/log/loom-egress-wait.log
+      exit 0
+
 package_update: true
 packages:
   - docker.io
@@ -189,6 +208,38 @@ write_files:
       [Install]
       WantedBy=multi-user.target
 
+%{ if auto_stop_minutes > 0 ~}
+  # A guest poweroff leaves the instance TERMINATED: compute billing stops,
+  # but the boot disk remains. The timer counts from its own activation
+  # (OnActiveSec), never from boot: every boot opens a full window, and so
+  # does `make extend`, which restarts the unit. OnBootSec could not be
+  # re-armed -- a restart near the deadline still fired at boot + N.
+  - path: /etc/systemd/system/loom-autostop.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Power off this disposable Loom stack
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/bin/systemctl poweroff
+
+  - path: /etc/systemd/system/loom-autostop.timer
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Auto-stop this disposable Loom stack after a fixed window
+
+      [Timer]
+      OnActiveSec=${auto_stop_minutes}min
+
+      [Install]
+      WantedBy=timers.target
+%{ endif ~}
+
 runcmd:
   - systemctl enable --now docker
   - systemctl enable --now loom-stack.service
+%{ if auto_stop_minutes > 0 ~}
+  - systemctl enable --now loom-autostop.timer
+%{ endif ~}

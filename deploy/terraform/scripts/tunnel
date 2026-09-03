@@ -60,7 +60,7 @@ cleanup() {
     wait "$pid" 2>/dev/null || true
   done
   for log in "${logs[@]}"; do
-    rm -f -- "$log"
+    unlink "$log" 2>/dev/null || true
   done
 }
 trap cleanup EXIT

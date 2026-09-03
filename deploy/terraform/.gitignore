@@ -2,6 +2,8 @@
 .terraform/
 .terraform-data/
 .loom-gcp-image-build.lock
+.stack
+.stack.last
 *.tfstate
 *.tfstate.*
 *.tfplan

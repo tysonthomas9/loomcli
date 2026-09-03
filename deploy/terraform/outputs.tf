@@ -27,10 +27,10 @@ output "ssh_command" {
 
 # Ports publish on ALL interfaces on the VM -- IAP forwards to the NIC, so a
 # loopback bind breaks the tunnel. What keeps them closed is the firewall
-# (source 35.235.240.0/20 only), the absence of an external IP, and the fact
-# that this VPC belongs to this stack alone and carries no permissive default
-# rules. That last part matters: fleet-db runs with auth in dev mode, so
-# anything that CAN reach the port has full read/write.
+# (source 35.235.240.0/20 only), the absence of an external IP, and the
+# tag-scoped deny at priority 1100 on the shared VPC. That deny matters:
+# fleet-db runs with auth in dev mode, so anything that CAN reach the port has
+# full read/write.
 output "iap_tunnel_ui" {
   description = "Run this, then open the local UI port in a browser."
   value       = "gcloud compute start-iap-tunnel ${google_compute_instance.stack.name} ${var.iap_web_ports[2]} --local-host-port=localhost:${local.tunnel_ui_port} --project ${var.project_id} --zone ${var.zone}"
@@ -95,4 +95,50 @@ output "ui_port" {
 output "plan_role_read_only" {
   description = "Whether this stack left the plan role read-only (false under CODEX=1)."
   value       = var.plan_role_read_only
+}
+
+# The secret NAME, not its contents: `make extend` re-applies with it so a
+# codex stack extended from a plain shell stays a codex stack.
+output "codex_auth_secret" {
+  description = "Secret Manager secret holding codex auth.json; empty on localdogfood."
+  value       = var.codex_auth_secret
+}
+
+# The image references this stack runs, so `make extend` can re-apply without
+# rebuilding from the current tree.
+output "fleetdb_image" {
+  value = var.fleetdb_image
+}
+
+output "loom_image" {
+  value = var.loom_image
+}
+
+output "ui_image" {
+  value = var.ui_image
+}
+
+output "expires_at" {
+  description = "Unix timestamp after which `make reap` may destroy this stack."
+  value       = var.expires_at
+}
+
+output "owner_id" {
+  description = "Identifier of the checkout that owns this stack."
+  value       = var.owner_id
+}
+
+output "owner" {
+  description = "Label-safe user name that created this stack."
+  value       = var.owner
+}
+
+output "auto_stop_minutes" {
+  description = "Minutes after boot before the guest powers off; zero disables it."
+  value       = var.auto_stop_minutes
+}
+
+output "network_name" {
+  description = "Shared project-bootstrap network used by this stack."
+  value       = var.network_name
 }
