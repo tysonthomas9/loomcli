@@ -167,7 +167,7 @@ workflows; new code should use the namespaces. The runner entry exports
 `TaskRunClient`, `ArtifactHandle`, `RunnerEnv`, `LoomAPIError`, and
 `AgentExecSpecError`.
 
-### Agent invocation process form
+### Agent invocation forms
 
 `TaskRunClient.agent.exec` records one **Agent Invocation** at the moment its
 leaf starts the backend process. It is not a generic command-capture helper:
@@ -205,6 +205,38 @@ returns. With `close: "deferred"`, the helper sends no close: the leaf must
 call `await invocation.finalize({ status, summary, metadata })` on every return
 path. A crash before that call intentionally leaves the session open for the
 task-plane reconciler.
+
+For a leaf whose agent loop is already in its own process (for example, a Flue
+harness using a sandbox only as its tool backend), use the separately named
+invoke form. It is deliberately not an optional-`argv` variant of the process
+form:
+
+```js
+const collector = createFlueTranscriptCollector();
+const session = await harness.session("task-123");
+const invocation = await runner.agent.exec.invoke({
+  invocationKey: "agent",
+  backend: "codex",
+  model: "gpt-5",
+  transcriptCollector: collector,
+  redactSecrets: [process.env.GITHUB_TOKEN],
+  invoke: () => session.prompt(prompt), // leaf-owned prompt call
+});
+```
+
+`exec.invoke` opens the session immediately before the prompt, snapshots the
+canonical collector entries after it settles, derives usage only from
+`response.usage`, uploads `transcript-<taskRunID>-a<attempt>-<invocationKey>`,
+and auto-closes before it resolves. A rejected prompt returns as
+`invocation.invokeError`; it is not an SDK throw. Missing usage remains
+unknown/null rather than zero. If transcript upload fails, the helper marks
+observability degraded and still closes the session without a transcript ref.
+
+The invoke collector is intentionally held in host memory until the prompt
+returns. A leaf crash or OOM mid-prompt loses the partial transcript/usage; the
+task-plane reconciler stamps the unclosed session. Do not wrap deterministic
+sandbox commands (clone, checkout, diff, tests, and similar setup) in either
+agent-exec form: only agent prompt/process invocations create AgentSessions.
 
 ## Errors and retries
 

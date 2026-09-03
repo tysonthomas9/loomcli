@@ -37,7 +37,10 @@ export {
 
 export {
   AgentExecFinalizeInput,
+  AgentExecInvokeResult,
+  AgentExecInvokeSpec,
   AgentExecResult,
+  AgentExec,
   AgentExecSession,
   AgentExecSpec,
   AgentExecSpecError,

@@ -18,7 +18,15 @@ const SOURCE = path.join(here, "daytona-task-runner.ts");
 let stageRoot;
 let mod;
 const savedEnv = {};
-const ENV_KEYS = ["LOOM_DAYTONA_TASK_RUNNER_ENABLE_DEMO_MODES", "DAYTONA_TASK_MODE", "LOOM_TASK_RUN_REQUEST_JSON"];
+const ENV_KEYS = [
+  "LOOM_DAYTONA_TASK_RUNNER_ENABLE_DEMO_MODES",
+  "DAYTONA_TASK_MODE",
+  "LOOM_TASK_RUN_REQUEST_JSON",
+  "DAYTONA_CREDENTIAL_FILE",
+  "GITHUB_TOKEN_FILE",
+  "LOOM_FLUE_AGENT_MODEL",
+  "KEEP_DAYTONA_SANDBOX",
+];
 
 function stub(dir, relFile, contents = "export default {};\n") {
   const file = path.join(dir, relFile);
@@ -35,18 +43,42 @@ before(async () => {
   const daytona = path.join(nm, "@daytona", "sdk");
   const flue = path.join(nm, "@flue", "runtime");
   const loom = path.join(nm, "@loom", "sdk");
-  stub(daytona, "index.js", "export const Daytona = function () {};\nexport default { Daytona };\n");
+  stub(daytona, "index.js", [
+    "const state = () => globalThis.__loomDaytonaTestState;",
+    "export class Daytona {",
+    "  constructor(config) { this.config = config; }",
+    "  async create(input) { return state().createSandbox(input, this.config); }",
+    "}",
+    "export default { Daytona };",
+  ].join("\n") + "\n");
   fs.writeFileSync(path.join(daytona, "package.json"), JSON.stringify({ name: "@daytona/sdk", type: "module", main: "index.js" }));
-  // defineAgent/defineWorkflow are invoked at module-eval time by the default
-  // export; the test exercises the named exports, so trivial pass-throughs suffice.
-  stub(flue, "index.js", "export const defineAgent = (fn) => ({ __agent: fn });\nexport const defineWorkflow = (def) => def;\n");
-  stub(flue, "internal.js");
+  stub(flue, "index.js", [
+    "export const defineAgent = (fn) => ({ __agent: fn });",
+    "export const defineWorkflow = (def) => def;",
+    "export const createAgent = (fn) => ({ __agent: fn });",
+    "export const createSandboxSessionEnv = (api, cwd) => ({ api, cwd });",
+    "export const registerProvider = () => {};",
+  ].join("\n") + "\n");
+  stub(flue, "internal.js", [
+    "const state = () => globalThis.__loomDaytonaTestState;",
+    "export class InMemorySessionStore {}",
+    "export const resolveModel = (model) => ({ provider: 'test-provider', model });",
+    "export const createFlueContext = (options) => state().createFlueContext(options);",
+  ].join("\n") + "\n");
   fs.writeFileSync(path.join(flue, "package.json"), JSON.stringify({
     name: "@flue/runtime",
     type: "module",
     exports: { ".": "./index.js", "./internal": "./internal.js" },
   }));
-  stub(loom, "runner.js", "export class TaskRunClient { static fromEnv() { throw new Error('stub'); } }\n");
+  stub(loom, "runner.js", [
+    "export class TaskRunClient {",
+    "  static fromEnv() {",
+    "    const state = globalThis.__loomDaytonaTestState;",
+    "    if (!state) throw new Error('stub');",
+    "    return state.taskRunClientFromEnv();",
+    "  }",
+    "}",
+  ].join("\n") + "\n");
   stub(loom, "runtime-adapters.js", [
     "export const createFlueTranscriptCollector = () => ({ entries: [], push() { return []; } });",
     "export const flueUsageToTaskUsage = () => ({});",
@@ -65,6 +97,7 @@ before(async () => {
 });
 
 after(() => {
+  delete globalThis.__loomDaytonaTestState;
   for (const key of ENV_KEYS) {
     if (savedEnv[key] === undefined) {
       delete process.env[key];
@@ -81,6 +114,137 @@ after(() => {
 
 function request(mode) {
   return { task_run_id: "tr-d", task_id: "T-d", runner: "daytona-task-runner", input: { mode } };
+}
+
+function runnerRequest(input = {}) {
+  return {
+    task_run_id: "tr-d",
+    task_id: "T-d",
+    runner: "daytona-task-runner",
+    input: { repoUrl: "https://github.com/o/r.git", ...input },
+  };
+}
+
+function makeRunnerState({ clientAvailable = true, promptError = "", invocationRuntimeMetadata = {} } = {}) {
+  const state = {
+    commands: [],
+    invocationSpecs: [],
+    promptCalls: 0,
+    sessionOpens: 0,
+    sessionOpensDuringCommand: 0,
+    commandDepth: 0,
+  };
+  const commandResponse = (command) => {
+    if (command.includes("rev-parse --short HEAD")) return { exitCode: 0, result: "abc123\n" };
+    if (command.includes("diff --stat")) return { exitCode: 0, result: " file.txt | 1 +\n" };
+    if (command.includes("diff --binary")) return { exitCode: 0, result: "diff --git a/file.txt b/file.txt\n+changed\n" };
+    if (command.includes("process.env") && command.includes("filter")) return { exitCode: 0, result: "0\n" };
+    return { exitCode: 0, result: "" };
+  };
+  state.sandbox = {
+    id: "sandbox-test",
+    getWorkDir: async () => "/work",
+    delete: async () => {},
+    fs: {},
+    process: {
+      executeCommand: async (command) => {
+        state.commandDepth++;
+        state.commands.push(command);
+        try {
+          await Promise.resolve();
+          return commandResponse(command);
+        } finally {
+          state.commandDepth--;
+        }
+      },
+    },
+  };
+  state.createSandbox = async () => state.sandbox;
+  state.createFlueContext = (options) => {
+    let eventCallback = () => {};
+    return {
+      setEventCallback(callback) {
+        eventCallback = callback;
+      },
+      initializeRootHarness() {
+        if (options.id.endsWith("-setup")) {
+          return {
+            shell: async (command) => {
+              const result = await state.sandbox.process.executeCommand(command);
+              return { stdout: result.result || "", stderr: "", exitCode: result.exitCode || 0 };
+            },
+          };
+        }
+        return {
+          session: async () => ({
+            prompt: async (prompt) => {
+              state.promptCalls++;
+              eventCallback({ type: "turn_request", purpose: "agent", input: { messages: [{ role: "user", content: prompt }] } });
+              if (promptError) throw new Error(promptError);
+              return { text: "done" };
+            },
+          }),
+        };
+      },
+    };
+  };
+
+  const artifactClient = {
+    declare: async (spec) => ({
+      id: spec.id,
+      upload: async () => {},
+      finalize: async () => {},
+    }),
+  };
+  state.client = {
+    getTask: async () => ({ id: "T-d", title: "Test task" }),
+    runtimeCredentials: {
+      get: async ({ provider }) => ({ value: provider === "github" ? "github-token" : "daytona-token" }),
+    },
+    artifacts: artifactClient,
+    agent: {
+      exec: {
+        invoke: async (spec) => {
+          state.sessionOpens++;
+          if (state.commandDepth > 0) state.sessionOpensDuringCommand++;
+          state.invocationSpecs.push(spec);
+          try {
+            const response = await spec.invoke();
+            return {
+              response,
+              invokeError: null,
+              session: { id: "tr-d-a1-agent" },
+              runtimeMetadata: invocationRuntimeMetadata,
+            };
+          } catch (error) {
+            return {
+              response: null,
+              invokeError: error.message,
+              session: { id: "tr-d-a1-agent" },
+              runtimeMetadata: invocationRuntimeMetadata,
+            };
+          }
+        },
+      },
+    },
+  };
+  state.taskRunClientFromEnv = () => {
+    if (!clientAvailable) throw new Error("task-run API unavailable");
+    return state.client;
+  };
+  return state;
+}
+
+async function runWithState(state, payload) {
+  globalThis.__loomDaytonaTestState = state;
+  process.env.LOOM_FLUE_AGENT_MODEL = "test-provider/test-model";
+  process.env.DAYTONA_CREDENTIAL_FILE = path.join(stageRoot, "daytona-key");
+  fs.writeFileSync(process.env.DAYTONA_CREDENTIAL_FILE, "daytona-token\n", { mode: 0o600 });
+  try {
+    return await mod.run({ payload });
+  } finally {
+    delete globalThis.__loomDaytonaTestState;
+  }
 }
 
 describe("daytona-task-runner demo-mode gate (design §4.5)", () => {
@@ -121,6 +285,55 @@ describe("daytona-task-runner demo-mode gate (design §4.5)", () => {
     delete process.env.LOOM_DAYTONA_TASK_RUNNER_ENABLE_DEMO_MODES;
     const out = await mod.run({ payload: request("") });
     assert.notEqual(out.errorClass, "daytona_demo_mode_disabled");
+  });
+});
+
+describe("daytona-task-runner agent invoke boundary (LOOMCLI-136)", () => {
+  it("runs real clone/checkout/diff command paths without opening command sessions", async () => {
+    const state = makeRunnerState();
+    const out = await runWithState(state, runnerRequest({ openPullRequest: true }));
+
+    assert.equal(out.status, "failed", "the fake stops honestly at PR publication after diff collection");
+    assert.ok(
+      state.commands.some((command) => command.includes(" clone")),
+      `run() must execute clone through Daytona; class=${out.errorClass} message=${out.errorMessage}`,
+    );
+    assert.ok(state.commands.some((command) => command.includes("checkout -B")), "run() must execute checkout through Daytona");
+    assert.ok(state.commands.some((command) => command.includes("diff --binary")), "run() must execute diff through Daytona");
+    assert.equal(state.sessionOpensDuringCommand, 0, "deterministic executeCommand calls must never open a session");
+    assert.equal(state.sessionOpens, 1, "the single prompt is the only session open in the full run path");
+    assert.equal(state.promptCalls, 1);
+    assert.equal(state.invocationSpecs.length, 1);
+    assert.equal(state.invocationSpecs[0].invocationKey, "agent");
+    assert.equal(state.invocationSpecs[0].backend, "codex");
+  });
+
+  it("propagates degraded invocation metadata into a failure result", async () => {
+    const state = makeRunnerState({
+      promptError: "prompt failed",
+      invocationRuntimeMetadata: {
+        observability_degraded: "true",
+        observability_degraded_code: "artifact_upload_failed",
+      },
+    });
+    const out = await runWithState(state, runnerRequest());
+
+    assert.equal(out.status, "failed");
+    assert.equal(out.errorClass, "daytona_agent_invoke_failed");
+    assert.equal(out.runtimeMetadata.observability_degraded, "true");
+    assert.equal(out.runtimeMetadata.observability_degraded_code, "artifact_upload_failed");
+  });
+
+  it("runs the prompt directly and surfaces an inline patch when the task-run client is unavailable", async () => {
+    const state = makeRunnerState({ clientAvailable: false });
+    const out = await runWithState(state, runnerRequest());
+
+    assert.equal(out.status, "completed");
+    assert.equal(state.promptCalls, 1, "work must still run without the task-run API");
+    assert.equal(state.sessionOpens, 0, "the null-client path cannot open an AgentSession");
+    assert.match(out.patch, /diff --git/);
+    assert.equal(out.runtimeMetadata.observability_degraded, "true");
+    assert.equal(out.runtimeMetadata.observability_degraded_code, "taskrunapi_unavailable");
   });
 });
 

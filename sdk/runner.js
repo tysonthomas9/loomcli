@@ -30,9 +30,9 @@ export class LoomAPIError extends Error {
   }
 }
 
-// AgentExecSpecError is reserved for caller mistakes in the process-form
-// agent invocation descriptor. Process/spawn/transport failures are returned
-// by agent.exec instead, so task leaves can map them to their task outcome.
+// AgentExecSpecError is reserved for caller mistakes in an agent-exec form.
+// Process/spawn/prompt/transport failures are returned by agent.exec instead,
+// so task leaves can map them to their task outcome.
 export class AgentExecSpecError extends Error {
   constructor(message) {
     super(message);
@@ -101,11 +101,15 @@ export class TaskRunClient {
     this.runtimeCredentials = Object.freeze({
       get: (input, requestOptions) => this.getRuntimeCredential(input, requestOptions),
     });
-    // This namespace intentionally has only the process form today. A future
-    // in-process harness invoke form must be a separate, disjoint operation;
-    // an optional argv on one overloaded form is not a valid contract.
+    // agent.exec has two deliberately disjoint invocation forms. The callable
+    // process form owns child-process capture; exec.invoke owns the lifecycle
+    // around a leaf-owned in-process harness prompt. Never turn this into an
+    // optional-argv overload: rejecting each form's keys in the other form is
+    // part of the public agent-exec contract.
+    const exec = (spec) => executeAgentProcess(this, spec);
+    exec.invoke = (spec) => executeAgentInvoke(this, spec);
     this.agent = Object.freeze({
-      exec: (spec) => executeAgentProcess(this, spec),
+      exec,
     });
   }
 
@@ -563,21 +567,7 @@ async function executeAgentProcess(client, spec) {
   const streamError = agentStreamError(spec, processResult.stdout);
 
   if (session.opened && spec.transcript !== "none") {
-    try {
-      const artifactId = transcriptArtifactID(client.taskRunId, session.attempt, spec.invocationKey);
-      const artifact = await client.artifacts.declare({
-        id: artifactId,
-        type: "agent-transcript",
-        mimeType: "application/x-ndjson",
-      });
-      await artifact.upload(`${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`, {
-        mimeType: "application/x-ndjson",
-      });
-      await artifact.finalize({ summary: `Agent transcript for ${spec.invocationKey}` });
-      session.transcriptRef = `artifact://${artifactId}`;
-    } catch (error) {
-      await markObservabilityDegraded(client, session, runtimeMetadata, observabilityErrorCode(error));
-    }
+    await uploadAgentTranscript(client, spec, session, entries, runtimeMetadata);
   }
 
   const sendClose = async (input = {}) => {
@@ -620,6 +610,94 @@ async function executeAgentProcess(client, spec) {
     result.finalize = async (input = {}) => sendClose(input);
   }
   return result;
+}
+
+// executeAgentInvoke is the SDK's in-process harness form. The leaf owns the
+// prompt callback; this helper owns the session lifecycle and transcript
+// artifact. The collector lives in host memory until invoke returns, so a leaf
+// crash/OOM mid-prompt loses its partial entries and leaves reconciliation to
+// stamp agent_session_unclosed. This is intentionally crash-lossy.
+//
+// This form is for Agent Invocations only. Deterministic sandbox commands
+// (clone, checkout, diff, tests, etc.) must never call it or create a session.
+async function executeAgentInvoke(client, spec) {
+  validateAgentInvokeSpec(spec);
+  const session = {
+    id: null,
+    attempt: null,
+    transcriptRef: null,
+    opened: false,
+    closed: false,
+    degraded: false,
+    degradedReason: null,
+  };
+  const runtimeMetadata = {};
+
+  // Opening immediately precedes the leaf-owned prompt call. If the lifecycle
+  // plane is degraded, the agent still runs and its result remains useful.
+  await openAgentSession(client, spec, session, runtimeMetadata);
+  const started = Date.now();
+  let response = null;
+  let invokeError = null;
+  try {
+    response = await spec.invoke();
+  } catch (error) {
+    // A prompt rejection is an invocation outcome, not an SDK exception.
+    invokeError = errorMessage(error);
+  }
+  const durationMs = Date.now() - started;
+  const entries = redactAgentEntries(spec.transcriptCollector.entries, spec.redactSecrets);
+  const usage = extractInvokeUsage(response);
+
+  if (session.opened) {
+    // Upload failure deliberately does not skip close. Match the process form:
+    // mark observability degraded and close without transcriptRef so the
+    // reconciler never sees a silently open successful invocation.
+    await uploadAgentTranscript(client, spec, session, entries, runtimeMetadata);
+    try {
+      await client.sessionClose({
+        sessionId: session.id,
+        status: invokeError ? "failed" : "completed",
+        summary: agentInvokeSummary(spec, invokeError, durationMs),
+        usage,
+        transcriptRef: session.transcriptRef,
+        metadata: agentInvokeCloseMetadata(invokeError),
+      });
+      session.closed = true;
+    } catch (error) {
+      await markObservabilityDegraded(client, session, runtimeMetadata, observabilityErrorCode(error));
+    }
+  }
+
+  return {
+    response,
+    invokeError,
+    durationMs,
+    entries,
+    usage,
+    session,
+    // Merge this into the leaf's TaskRun completion/runtimeMetadata. The
+    // helper also best-effort heartbeats it while the lease remains live.
+    runtimeMetadata,
+  };
+}
+
+async function uploadAgentTranscript(client, spec, session, entries, runtimeMetadata) {
+  try {
+    const artifactId = transcriptArtifactID(client.taskRunId, session.attempt, spec.invocationKey);
+    const artifact = await client.artifacts.declare({
+      id: artifactId,
+      type: "agent-transcript",
+      mimeType: "application/x-ndjson",
+    });
+    await artifact.upload(`${entries.map((entry) => JSON.stringify(entry)).join("\n")}${entries.length > 0 ? "\n" : ""}`, {
+      mimeType: "application/x-ndjson",
+    });
+    await artifact.finalize({ summary: `Agent transcript for ${spec.invocationKey}` });
+    session.transcriptRef = `artifact://${artifactId}`;
+  } catch (error) {
+    await markObservabilityDegraded(client, session, runtimeMetadata, observabilityErrorCode(error));
+  }
 }
 
 async function openAgentSession(client, spec, session, runtimeMetadata) {
@@ -679,30 +757,8 @@ function validateAgentExecSpec(spec) {
   if (!spec || typeof spec !== "object" || Array.isArray(spec)) {
     throw new AgentExecSpecError("agent.exec requires a process-form spec object");
   }
-  if ("invoke" in spec || "run" in spec || "prompt" in spec) {
-    throw new AgentExecSpecError("agent.exec accepts only the process form; invoke is a future disjoint API");
-  }
-  if (typeof spec.invocationKey !== "string" || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(spec.invocationKey)) {
-    throw new AgentExecSpecError("agent.exec invocationKey must be a strict slug");
-  }
-  if (typeof spec.backend !== "string" || trim(spec.backend) === "") {
-    throw new AgentExecSpecError("agent.exec backend is required");
-  }
-  if (spec.model !== undefined && typeof spec.model !== "string") {
-    throw new AgentExecSpecError("agent.exec model must be a string when supplied");
-  }
-  if (spec.parentSessionId !== undefined && typeof spec.parentSessionId !== "string") {
-    throw new AgentExecSpecError("agent.exec parentSessionId must be a string when supplied");
-  }
-  if (spec.kind !== undefined && typeof spec.kind !== "string") {
-    throw new AgentExecSpecError("agent.exec kind must be a string when supplied");
-  }
-  if (spec.tags !== undefined && (!Array.isArray(spec.tags) || spec.tags.some((tag) => typeof tag !== "string"))) {
-    throw new AgentExecSpecError("agent.exec tags must be a string array when supplied");
-  }
-  if (spec.metadata !== undefined && (!spec.metadata || typeof spec.metadata !== "object" || Array.isArray(spec.metadata))) {
-    throw new AgentExecSpecError("agent.exec metadata must be an object when supplied");
-  }
+  rejectAgentExecKeys(spec, ["invoke", "transcriptCollector", "run", "prompt"], "agent.exec accepts only the process form; use agent.exec.invoke for an in-process prompt");
+  validateAgentExecDescriptor(spec, "agent.exec");
   if (!Array.isArray(spec.argv) || spec.argv.length === 0 || spec.argv.some((part) => typeof part !== "string" || part === "")) {
     throw new AgentExecSpecError("agent.exec argv must be a non-empty string array");
   }
@@ -732,6 +788,61 @@ function validateAgentExecSpec(spec) {
   }
   if (spec.redactSecrets !== undefined && !isDeclaredSecretList(spec.redactSecrets)) {
     throw new AgentExecSpecError("agent.exec redactSecrets must declare secret values as a string array or object");
+  }
+}
+
+function validateAgentInvokeSpec(spec) {
+  if (!spec || typeof spec !== "object" || Array.isArray(spec)) {
+    throw new AgentExecSpecError("agent.exec.invoke requires an invoke-form spec object");
+  }
+  rejectAgentExecKeys(
+    spec,
+    ["argv", "cwd", "env", "stdin", "timeoutMs", "live", "transcript", "close"],
+    "agent.exec.invoke accepts only the invoke form; use agent.exec for a child process",
+  );
+  validateAgentExecDescriptor(spec, "agent.exec.invoke");
+  if (typeof spec.invoke !== "function") {
+    throw new AgentExecSpecError("agent.exec.invoke invoke must be a function");
+  }
+  if (!spec.transcriptCollector || typeof spec.transcriptCollector !== "object" || Array.isArray(spec.transcriptCollector) ||
+    !Array.isArray(spec.transcriptCollector.entries) || spec.transcriptCollector.entries.some((entry) => !entry || typeof entry !== "object" || Array.isArray(entry))) {
+    throw new AgentExecSpecError("agent.exec.invoke transcriptCollector must expose canonical entry objects from the in-process collector");
+  }
+  if (spec.openRetries !== undefined && (!Number.isInteger(spec.openRetries) || spec.openRetries < 0 || spec.openRetries > 10)) {
+    throw new AgentExecSpecError("agent.exec.invoke openRetries must be an integer from 0 to 10");
+  }
+  if (spec.redactSecrets !== undefined && !isDeclaredSecretList(spec.redactSecrets)) {
+    throw new AgentExecSpecError("agent.exec.invoke redactSecrets must declare secret values as a string array or object");
+  }
+}
+
+function validateAgentExecDescriptor(spec, operation) {
+  if (typeof spec.invocationKey !== "string" || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(spec.invocationKey)) {
+    throw new AgentExecSpecError(`${operation} invocationKey must be a strict slug`);
+  }
+  if (typeof spec.backend !== "string" || trim(spec.backend) === "") {
+    throw new AgentExecSpecError(`${operation} backend is required`);
+  }
+  if (spec.model !== undefined && typeof spec.model !== "string") {
+    throw new AgentExecSpecError(`${operation} model must be a string when supplied`);
+  }
+  if (spec.parentSessionId !== undefined && typeof spec.parentSessionId !== "string") {
+    throw new AgentExecSpecError(`${operation} parentSessionId must be a string when supplied`);
+  }
+  if (spec.kind !== undefined && typeof spec.kind !== "string") {
+    throw new AgentExecSpecError(`${operation} kind must be a string when supplied`);
+  }
+  if (spec.tags !== undefined && (!Array.isArray(spec.tags) || spec.tags.some((tag) => typeof tag !== "string"))) {
+    throw new AgentExecSpecError(`${operation} tags must be a string array when supplied`);
+  }
+  if (spec.metadata !== undefined && (!spec.metadata || typeof spec.metadata !== "object" || Array.isArray(spec.metadata))) {
+    throw new AgentExecSpecError(`${operation} metadata must be an object when supplied`);
+  }
+}
+
+function rejectAgentExecKeys(spec, keys, message) {
+  if (keys.some((key) => key in spec)) {
+    throw new AgentExecSpecError(message);
   }
 }
 
@@ -843,20 +954,30 @@ function declaredSecretValues(value) {
 
 function extractAgentUsage(entries) {
   for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const usage = entries[index]?.usage;
-    if (!usage || typeof usage !== "object") continue;
-    const input = finiteNumber(usage.input_tokens ?? usage.inputTokens ?? usage.input);
-    const output = finiteNumber(usage.output_tokens ?? usage.outputTokens ?? usage.output);
-    const cacheRead = finiteNumber(usage.cache_read_tokens ?? usage.cacheReadTokens ?? usage.cached_input_tokens);
-    const cacheWrite = finiteNumber(usage.cache_write_tokens ?? usage.cacheWriteTokens);
-    const tokens = finiteNumber(usage.tokens ?? usage.total_tokens ?? usage.totalTokens) ??
-      (input !== null || output !== null ? (input || 0) + (output || 0) : null);
-    const cost = finiteNumber(usage.cost ?? usage.cost_usd ?? usage.costUsd ?? usage.total_cost_usd);
-    if (tokens !== null || cost !== null || input !== null || output !== null) {
-      return { tokens, cost, inputTokens: input, outputTokens: output, cacheReadTokens: cacheRead, cacheWriteTokens: cacheWrite };
-    }
+    const usage = normalizeAgentUsage(entries[index]?.usage);
+    if (usage) return usage;
   }
   return null;
+}
+
+function extractInvokeUsage(response) {
+  return response && typeof response === "object" ? normalizeAgentUsage(response.usage) : null;
+}
+
+function normalizeAgentUsage(usage) {
+  if (!usage || typeof usage !== "object") return null;
+  const input = finiteNumber(usage.input_tokens ?? usage.inputTokens ?? usage.input);
+  const output = finiteNumber(usage.output_tokens ?? usage.outputTokens ?? usage.output);
+  const cacheRead = finiteNumber(usage.cache_read_tokens ?? usage.cacheReadTokens ?? usage.cached_input_tokens ?? usage.cacheRead);
+  const cacheWrite = finiteNumber(usage.cache_write_tokens ?? usage.cacheWriteTokens ?? usage.cacheWrite);
+  const tokens = finiteNumber(usage.tokens ?? usage.total_tokens ?? usage.totalTokens) ??
+    (input !== null || output !== null ? (input || 0) + (output || 0) : null);
+  const structuredCost = usage.cost && typeof usage.cost === "object" ? usage.cost.total : usage.cost;
+  const cost = finiteNumber(structuredCost ?? usage.cost_usd ?? usage.costUsd ?? usage.total_cost_usd);
+  if (tokens === null && cost === null && input === null && output === null && cacheRead === null && cacheWrite === null) {
+    return null;
+  }
+  return { tokens, cost, inputTokens: input, outputTokens: output, cacheReadTokens: cacheRead, cacheWriteTokens: cacheWrite };
 }
 
 function agentStreamError(spec, stdout) {
@@ -905,6 +1026,15 @@ function agentProcessSummary(spec, result) {
   if (result.spawnError) return `${spec.backend} spawn failed: ${result.spawnError}`;
   if (result.timedOut) return `${spec.backend} timed out after ${spec.timeoutMs}ms`;
   return `${spec.backend} exited ${result.exitCode} in ${result.durationMs}ms`;
+}
+
+function agentInvokeSummary(spec, invokeError, durationMs) {
+  if (invokeError) return `${spec.backend} prompt failed: ${invokeError}`;
+  return `${spec.backend} prompt completed in ${durationMs}ms`;
+}
+
+function agentInvokeCloseMetadata(invokeError) {
+  return invokeError ? { error_class: "agent_invoke_failed" } : undefined;
 }
 
 function delay(ms) {
