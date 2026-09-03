@@ -292,7 +292,7 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 	key := webuterminal.SessionKey{Workspace: workspace, Name: session}
 	ensureWorkspacePTYRegistered(reqCtx, p, workspace)
 
-	launch, err := launchSpecForTerminalSession(reqCtx, p, workspace, session)
+	meta, launch, err := terminalSessionMeta(reqCtx, p, workspace, session)
 	if err != nil {
 		return classifyAttachErr(err, session, workspace)
 	}
@@ -313,8 +313,12 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 
 	realtime.BroadcastSessionIssueEvent(p.tabMetaStore, p.hub, workspace, session)
 
+	// A metadata write failure must never cost the user their terminal: warn
+	// and carry on, the frame below still reports the replacement.
 	if !reattach {
-		maybeEmitStaleRestartBanner(reqCtx, conn, p, workspace, session)
+		if _, err := markSessionReplaced(reqCtx, p.tabMetaStore, workspace, session, meta, p.serverStartedAt, time.Now()); err != nil {
+			slog.Warn("session replacement marker write failed", "session", session, "workspace", workspace, "err", err)
+		}
 	}
 
 	// Emit scrollback replay (reset escape + ring bytes) before going live.
@@ -323,6 +327,13 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 			slog.Warn("scrollback replay write failed", "session", session, "err", err)
 		}
 	}
+
+	// The attach control frame goes out AFTER the replay: the replay opens
+	// with \x1b[2J\x1b[H, so anything the client rendered from an earlier
+	// frame would be erased. Both writes are sequential on this connection
+	// before the live-output goroutine below starts, so the order is
+	// structural rather than a timing convention.
+	writeAttachControlFrame(reqCtx, conn, reattach, meta, session)
 
 	ctx, cancel := context.WithCancel(reqCtx)
 	defer cancel()
@@ -367,17 +378,28 @@ func ensureWorkspacePTYRegistered(ctx context.Context, p *terminalWSParams, work
 	}
 }
 
-func launchSpecForTerminalSession(ctx context.Context, p *terminalWSParams, workspace, session string) (*tabmeta.LaunchSpec, error) {
+// terminalSessionMeta loads the tab metadata once and derives the launch spec
+// from it. Both the relay's launch and its replacement marker need the record,
+// and it used to be fetched twice.
+func terminalSessionMeta(ctx context.Context, p *terminalWSParams, workspace, session string) (*tabmeta.TabMetadata, *tabmeta.LaunchSpec, error) {
 	if p.tabMetaStore == nil {
-		if isUUIDTerminalSession(session) {
-			return nil, errTerminalLaunchMetaMissing
-		}
-		return legacyLaunchSpecForSession(session), nil
+		launch, err := launchSpecForMeta(nil, session)
+		return nil, launch, err
 	}
 	meta, err := p.tabMetaStore.Get(ctx, workspace, session)
 	if err != nil {
-		return nil, fmt.Errorf("load terminal metadata: %w", err)
+		return nil, nil, fmt.Errorf("load terminal metadata: %w", err)
 	}
+	launch, err := launchSpecForMeta(meta, session)
+	return meta, launch, err
+}
+
+func launchSpecForTerminalSession(ctx context.Context, p *terminalWSParams, workspace, session string) (*tabmeta.LaunchSpec, error) {
+	_, launch, err := terminalSessionMeta(ctx, p, workspace, session)
+	return launch, err
+}
+
+func launchSpecForMeta(meta *tabmeta.TabMetadata, session string) (*tabmeta.LaunchSpec, error) {
 	if meta == nil {
 		if isUUIDTerminalSession(session) {
 			return nil, errTerminalLaunchMetaMissing
@@ -441,23 +463,18 @@ type attachmentWriter struct{ a webuterminal.Attachment }
 
 func (w attachmentWriter) Write(p []byte) (int, error) { return w.a.WriteInput(p) }
 
-// maybeEmitStaleRestartBanner writes a visible notice to the freshly-spawned
-// shell when the tab's metadata pre-dates the current server process — i.e.
-// the prior PTY died with a previous server. The frontend's attachable gate
-// on the tab DTO is the authoritative block, but browsers drop app-defined
-// WebSocket close codes right after upgrade, so this in-band banner is the
-// reliable fallback for any client that reached this path anyway.
-func maybeEmitStaleRestartBanner(reqCtx context.Context, conn *websocket.Conn, p *terminalWSParams, workspace, session string) { //nolint:staticcheck // SA1019
-	if p.tabMetaStore == nil {
+// writeAttachControlFrame emits the JSON attach control frame as a text
+// message. A failure here is non-fatal — the relay is worth more to the user
+// than the notice — so it only warns.
+func writeAttachControlFrame(ctx context.Context, conn *websocket.Conn, reattached bool, meta *tabmeta.TabMetadata, session string) { //nolint:staticcheck // SA1019
+	raw, err := attachControlFrame(reattached, meta)
+	if err != nil {
+		slog.Warn("attach control frame build failed", "session", session, "err", err)
 		return
 	}
-	meta, err := p.tabMetaStore.Get(reqCtx, workspace, session)
-	if err != nil || meta == nil || !meta.CreatedAt.Before(p.serverStartedAt) {
-		return
+	if err := conn.Write(ctx, websocket.MessageText, raw); err != nil { //nolint:staticcheck // SA1019
+		slog.Warn("attach control frame write failed", "session", session, "err", err)
 	}
-	slog.Info("terminal session stale across server restart; spawning fresh",
-		"session", session, "workspace", workspace, "created_at", meta.CreatedAt)
-	_ = conn.Write(reqCtx, websocket.MessageBinary, []byte("\r\n\x1b[33m[loom] Previous shell did not survive a server restart. This is a fresh session.\x1b[0m\r\n")) //nolint:staticcheck // SA1019
 }
 
 // injectTerminalContextBanner fetches project context from the loom server

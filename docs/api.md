@@ -1930,20 +1930,28 @@ WebSocket endpoint for live terminal relay (tmux-backed). Supports bidirectional
   - `404` — workspace not found
   - `503` — terminal manager not initialized, or maximum terminal sessions reached (default 20)
 
-- **WebSocket Binary Protocol:**
-  - All frames are binary (`MessageBinary`)
-  - **Server → Client:** raw PTY output bytes (read buffer 4096 bytes)
-  - **Client → Server:** raw terminal input bytes OR resize message
-  - **Resize message format (in-band): exactly 5 bytes**
-    - Byte 0: `0x01` (resize marker)
-    - Bytes 1-2: cols as uint16 big-endian
-    - Bytes 3-4: rows as uint16 big-endian
-    - Example: 80×24 = `[0x01, 0x00, 0x50, 0x00, 0x18]`
+- **WebSocket Protocol:**
+  - **Server → Client:** the frame type is the discriminator.
+    - **Binary** frames are raw PTY output bytes (read buffer 4096 bytes) — this includes the scrollback replay, which begins with `\x1b[2J\x1b[H`.
+    - **Text** frames are JSON control messages. Clients must branch on frame type before rendering: a text frame written into the terminal emulator would appear as garbage.
+  - **Attach control frame (server → client, text):** sent once per attach, **after** the scrollback replay. The replay clears the screen, so a frame emitted before it would be erased.
+
+    ```json
+    {"type":"attach","reattached":false,"replaced":true,
+     "replaced_at":"2026-08-14T16:52:03Z","replaced_reason":"server_restart"}
+    ```
+
+    - `reattached` — this connection joined an existing live session (scrollback was replayed) rather than spawning one.
+    - `replaced` — this attach *is* the replacement: the tab's previous shell died with a previous server process and a fresh one was just spawned. True only on the attach that performed the replacement.
+    - `replaced_at` / `replaced_reason` — omitted when the tab has no replacement marker. Present on reattaches too, so a client that joined late learns of a replacement without a REST round-trip. The marker is persisted on the tab (`TabMetadata.replaced_at`) and dismissed with `PATCH /api/workspaces/{ws}/terminal/tabs/{session}` `{"replaced_at": ""}`.
+  - **Client → Server:** every message is read as a UTF-8 string: raw terminal input, or a resize control.
+  - **Resize message format (in-band, text):** `\x1b[RESIZE:{cols};{rows}]`
+    - Example: 80×24 = `\x1b[RESIZE:80;24]`
   - Max terminal size: 500 cols × 200 rows (values exceeding these are silently ignored)
   - Zero values for cols or rows: silently ignored (no resize performed)
   - Read limit: 32 KB per WebSocket message
   - Default terminal size: 80×24 (frontend sends resize immediately after connect)
-  - Non-matching binary messages (wrong length or missing `0x01` marker): treated as regular terminal input, written to PTY
+  - Any client message that is not a well-formed resize control is written to the PTY verbatim
 
 - **Close Codes:**
 
