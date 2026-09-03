@@ -24,7 +24,7 @@ type MutationEvent struct {
 	EntityType string    `json:"entity_type,omitempty"` // Generic changed entity type (issue, dependency, terminal, ...)
 	EntityID   string    `json:"entity_id,omitempty"`   // Generic changed entity identifier
 	Action     string    `json:"action,omitempty"`      // Source action, usually fleet-db action (issue.update, dep.add, ...)
-	IssueID    string    `json:"issue_id,omitempty"`    // Legacy issue identifier for issue-scoped consumers
+	IssueID    string    `json:"issue_id,omitempty"`    // Legacy issue identifier for issue-scoped consumers; set for issue, comment, dependency, label and metadata entities, empty for workspace-level ones
 	Title      string    `json:"title,omitempty"`       // Issue title for display context (may be empty for some operations)
 	Assignee   string    `json:"assignee,omitempty"`    // Issue assignee for display context (may be empty)
 	Actor      string    `json:"actor,omitempty"`       // Who performed the action (may differ from assignee)
