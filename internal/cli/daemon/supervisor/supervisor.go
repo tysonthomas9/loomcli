@@ -985,6 +985,7 @@ func (s *Supervisor) GetAgents() []SupervisedAgentStatus {
 		result[i].CurrentBackend = s.GetEffectiveBackend(ap)
 		// Resolve remote branch (reads immutable config, no mutex needed)
 		result[i].RemoteBranch = ap.ResolveRemoteBranch()
+		result[i].SourceRepos = s.agentSourceRepos(ap) // reads immutable config
 	}
 	return result
 }
