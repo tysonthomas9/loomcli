@@ -814,8 +814,16 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 	// exist, and before finalize/checkpoint/recovery decide the run's fate: a
 	// failed hook write demotes exitCode so the owned task is reopened.
 	exitCode = s.runCompletionHooks(ap, exitCode)
+	// Captured before finalize: takeAgentSessionForFinalize clears
+	// AgentSessionID, and the timeout recorder needs it as its dedupe key.
+	timeoutSessionID := agentSessionIDSnapshot(ap)
 	s.finalizeAgentSession(ap, exitCode)
 	s.handleAgentCheckpoint(ap, exitCode)
+	// After the checkpoint, so the evidence can truthfully point at it, and
+	// BEFORE postMortemRecovery, which clears the worktree lock the task id is
+	// resolved from — recording after recovery would find no task and silently
+	// write nothing.
+	s.recordTimeoutRun(ap, exitCode, timeoutSessionID)
 	s.postMortemRecovery(ap, exitCode)
 	// Sweep AFTER recovery reset the task to open, so the quarantine write
 	// transitions open→blocked.
