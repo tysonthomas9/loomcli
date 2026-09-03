@@ -91,6 +91,8 @@ func leadStartupPrompt(ctx context.Context, registration leadSessionRegistration
 
 //nolint:funlen // The lead startup sequence stays in launch order.
 func runLead(cmd *cobra.Command, args []string) {
+	enforceLeadProfile()
+
 	// Get current working directory
 	workDir, err := os.Getwd()
 	if err != nil {
