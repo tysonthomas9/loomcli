@@ -196,8 +196,8 @@ states:
           })()
       intent: Confirm storage still describes a stopped Plan worker rather than a failed interactive terminal
   scenario-11-planner-can-be-deleted-and-recreated:
-    intent: planner can be deleted and recreated
-    testIntent: An operator removes the Planner through the workspace API and recreates it from the modal under the same name
+    intent: Planner can be archived through the UI and recreated
+    testIntent: An operator archives the Planner from the agents rail, confirms its definition is deleted, and recreates it from the modal under the same name
     terminal: true
     assert:
     - use: planner-info-ready

@@ -677,24 +677,29 @@ transitions:
         first: true
       intent: An operator selects Terminal to review the stopped background worker's no-session explanation
   run-scenario-11-planner-can-be-deleted-and-recreated:
-    intent: An operator removes the Planner through the workspace API and recreates it from the modal under the same name
+    intent: An operator archives the Planner from the agents rail and recreates it from the modal under the same name
     actor: human
     via: ui
     steps:
-    - api:
-        method: DELETE
-        path: "/api/workspaces/E2E-PL-${AFT_CASE_KEY}/agents/planner-${RUN_ID:-local}"
-        status: 200
-        assert:
-        - path: success
-          equals: true
-        - path: message
-          equals: agent deleted
-      intent: An API client removes the Planner assignment because there is no delete-agent UI control
+    - hover:
+        selector: "[data-testid=sortable-agent-row]:has([aria-label='Agent: planner-${RUN_ID:-local}'])"
+      intent: An operator reveals the Planner row actions in the agents rail
+    - click:
+        selector: "[aria-label='Archive planner-${RUN_ID:-local}']"
+      intent: An operator archives the Planner through its visible row action
+    - wait:
+        fn: document.body.textContent.includes('Agent planner-${RUN_ID:-local} archived')
+      intent: Confirm the UI reports that the Planner was archived
+    - wait:
+        fn: |-
+          !document.querySelector(
+            "[data-testid=sortable-agent-row]:has([aria-label='Agent: planner-${RUN_ID:-local}'])"
+          )
+      intent: Confirm the archived Planner disappears from the agents rail
     - run: |
         set -e
         name="planner-${RUN_ID:-local}"
-        # budget: db-persist (10s) - deleted planner must disappear from list readback.
+        # budget: db-persist (10s) - archived planner must disappear from list readback.
         for i in $(seq 1 10); do
           curl -sf "$AFT_BASE_URL/api/workspaces/E2E-PL-${AFT_CASE_KEY}/agents" > "$AFT_WORK_DIR/pln-d11-after-delete.json" &&
           python3 - "$AFT_WORK_DIR/pln-d11-after-delete.json" "$name" <<'PY' && exit 0
@@ -707,10 +712,10 @@ transitions:
         PY
           sleep 1
         done
-        echo "Planner still listed after delete"
+        echo "Planner still listed after archive"
         cat "$AFT_WORK_DIR/pln-d11-after-delete.json" 2>/dev/null || true
         exit 1
-      intent: An operator polls the agent readback before asserting the deleted Planner disappears from the UI
+      intent: Confirm storage no longer lists the Planner archived through the UI
     - open: "/ws/E2E-PL-${AFT_CASE_KEY}/agents"
     - wait:
         fn: |-
@@ -733,7 +738,7 @@ transitions:
             }
             return Date.now() - window.__aftAgentsPageStableAt >= 300;
           })() && !Array.from(document.querySelectorAll("[aria-label='Agent: planner-${RUN_ID:-local}']")).length
-      intent: Wait until the Planner card is gone from the agents rail
+      intent: Wait until the archived Planner remains absent after the agents page settles
     - click:
         role: button
         name: "+ Add agent"
