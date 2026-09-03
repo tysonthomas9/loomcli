@@ -787,3 +787,45 @@ transitions:
         assert matches[0].get("role_name") == "plan", matches[0]
         PY
       intent: An operator filters the unordered agent list and verifies the recreated Planner uses the plan role
+  run-scenario-12-agent-rail-order-persists-after-reload:
+    intent: An operator reorders two background Planners in the agents rail and sees that order survive a page reload
+    actor: human
+    via: ui
+    steps:
+    - use: open-create-agent-dialog
+    - use: choose-planner-template
+    - fill:
+        testid: create-agent-name
+        value: planner-order-${RUN_ID:-local}
+    - click:
+        testid: create-agent-submit
+      intent: An operator creates a second Planner so the background agent list can be reordered
+    - use: show-planner-info
+      with:
+        name: planner-order-${RUN_ID:-local}
+    - wait:
+        fn: |-
+          (() => {
+            const group = document.querySelector('[data-testid=agent-section-background]');
+            const names = Array.from(group?.querySelectorAll('[data-testid=sortable-agent-row]') || [])
+              .map((row) => row.querySelector('[aria-label^="Agent: "]')?.getAttribute('aria-label')?.slice(7));
+            return names.join('|') === 'planner-${RUN_ID:-local}|planner-order-${RUN_ID:-local}';
+          })()
+      intent: Confirm the two Planners begin in creation order in the background agent group
+    - drag:
+        from:
+          selector: "[aria-label='Drag to reorder planner-order-${RUN_ID:-local}']"
+        to:
+          selector: "[data-testid=agent-section-background] [data-testid=sortable-agent-row]:has([aria-label='Agent: planner-${RUN_ID:-local}'])"
+      intent: An operator drags the second Planner above the first Planner
+    - wait:
+        fn: |-
+          (() => {
+            const group = document.querySelector('[data-testid=agent-section-background]');
+            const names = Array.from(group?.querySelectorAll('[data-testid=sortable-agent-row]') || [])
+              .map((row) => row.querySelector('[aria-label^="Agent: "]')?.getAttribute('aria-label')?.slice(7));
+            return names.join('|') === 'planner-order-${RUN_ID:-local}|planner-${RUN_ID:-local}';
+          })()
+      intent: Confirm the background agent group immediately reflects the reordered Planners
+    - reload: true
+      intent: An operator reloads the agents page to confirm the custom order persists

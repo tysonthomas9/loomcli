@@ -50,7 +50,7 @@ teardown: |
   set +e
   run="${RUN_ID:-local}"
   AFT_WS=E2E-PL-${AFT_CASE_KEY} "$AFT_TESTS_DIR/scripts/close-open-issues.sh"
-  for agent in "planner-${RUN_ID:-local}" "planner-be-${RUN_ID:-local}" "planner-scope-${RUN_ID:-local}" "planner-task-${RUN_ID:-local}" "lead-${RUN_ID:-local}"; do
+  for agent in "planner-${RUN_ID:-local}" "planner-order-${RUN_ID:-local}" "planner-be-${RUN_ID:-local}" "planner-scope-${RUN_ID:-local}" "planner-task-${RUN_ID:-local}" "lead-${RUN_ID:-local}"; do
     curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-PL-${AFT_CASE_KEY}/agents/$agent" >/dev/null || true
   done
   "$AFT_TESTS_DIR/scripts/clean-test-workspace.sh" E2E-PE-${AFT_CASE_KEY}
@@ -79,5 +79,6 @@ graph:
     run-scenario-9-assigned-in-progress-planner-renders-act: scenario-9-assigned-in-progress-planner-renders-active-task
     run-scenario-10-stopped-planner-shows-no-terminal-empty-: scenario-10-stopped-planner-shows-no-terminal-empty-state
     run-scenario-11-planner-can-be-deleted-and-recreated: scenario-11-planner-can-be-deleted-and-recreated
+    run-scenario-12-agent-rail-order-persists-after-reload: scenario-12-agent-rail-order-persists-after-reload
 coverage:
   strategy: transition
