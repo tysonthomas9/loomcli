@@ -51,7 +51,7 @@ func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error 
 	if err != nil {
 		return err
 	}
-	appServerLogPath := codexAppServerLogPath(runtimeHome)
+	appServerLogPath := CodexAppServerLogPath(runtimeHome)
 	appCmd, appErr, cancelApp, logFile, err := startCodexAppServer(ctx, cfg, runtimeHome, sqliteHome, endpoint)
 	if err != nil {
 		return err
@@ -112,7 +112,7 @@ func startCodexAppServer(
 	endpoint string,
 ) (*exec.Cmd, chan error, context.CancelFunc, *os.File, error) {
 	// #nosec G304 -- runtimeHome is a lead-scoped cache path derived from Loom workspace/session ids.
-	logFile, err := os.OpenFile(codexAppServerLogPath(runtimeHome), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	logFile, err := os.OpenFile(CodexAppServerLogPath(runtimeHome), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("open codex app-server log: %w", err)
 	}
@@ -136,7 +136,9 @@ func startCodexAppServer(
 	return appCmd, appErr, cancelApp, logFile, nil
 }
 
-func codexAppServerLogPath(runtimeHome string) string {
+// CodexAppServerLogPath is the stable log location shared by runtime metadata
+// consumers and the lead transcript finalizer.
+func CodexAppServerLogPath(runtimeHome string) string {
 	return filepath.Join(runtimeHome, "app-server.log")
 }
 

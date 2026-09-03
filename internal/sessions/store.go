@@ -54,8 +54,9 @@ func NewStore(runtimeDir string) (*Store, error) {
 
 // EnsureSession materializes a caller-supplied session ID for stores that
 // receive a session record from another control plane before local capture.
-// It is idempotent and preserves metadata already written by another owner.
-func (s *Store) EnsureSession(sessionID string) error {
+// Backend matters because it is the only metadata that tells a reader which
+// parser the raw native stream needs. Existing owner metadata is preserved.
+func (s *Store) EnsureSession(sessionID, backend string) error {
 	if err := validateSessionID(sessionID); err != nil {
 		return err
 	}
@@ -65,6 +66,16 @@ func (s *Store) EnsureSession(sessionID string) error {
 	}
 	metaPath := filepath.Join(sessDir, "metadata.json")
 	if _, err := os.Stat(metaPath); err == nil {
+		meta, err := s.LoadMetadata(sessionID)
+		if err != nil {
+			return err
+		}
+		if meta != nil && meta.Backend == "" && backend != "" {
+			meta.Backend = backend
+			if err := s.SaveMetadata(sessionID, meta); err != nil {
+				return fmt.Errorf("stamp session backend: %w", err)
+			}
+		}
 		return nil
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("stat session metadata: %w", err)
@@ -72,6 +83,7 @@ func (s *Store) EnsureSession(sessionID string) error {
 	meta := SessionMetadata{SessionRecord: SessionRecord{
 		SchemaVersion: CurrentSchemaVersion,
 		SessionID:     sessionID,
+		Backend:       backend,
 		StartedAt:     time.Now().UTC(),
 		Status:        StatusRunning,
 	}}

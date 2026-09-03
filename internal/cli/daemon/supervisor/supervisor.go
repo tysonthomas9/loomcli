@@ -772,53 +772,7 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 	s.deregisterWorker(ap)
 }
 
-// localTranscriptFormat reports how the session's on-disk transcript is
-// encoded, so a reader on another host knows how to parse the artifact. The Go
-// leaf mirrors the provider's raw stream and the TS leaf writes canonical
-// events; the local metadata is the only place that distinction is recorded.
-// Returns "" when it cannot be read: guessing canonical over a raw rollout
-// yields events that parse without error and carry nothing.
-func (s *Supervisor) localTranscriptFormat(sessionID string) string {
-	local, err := sessions.NewStore(cli.GetWorkspaceRuntimeDir())
-	if err != nil {
-		return ""
-	}
-	meta, loadErr := local.LoadMetadata(sessionID)
-	if loadErr != nil || meta == nil {
-		return ""
-	}
-	return meta.TranscriptFormat
-}
-
-// uploadTranscriptArtifact stores the leaf transcript as a control-plane
-// artifact and returns its ref. The artifact id is stable per session so a
-// retried finalize reuses it (UploadContentArtifact is idempotent). Owner is the
-// agent session — the daemon leaf has no task_run, which is the driver's owner
-// type.
-func (s *Supervisor) uploadTranscriptArtifact(ctx context.Context, sessionID, taskID, backend, transcriptFormat string, data []byte) string {
-	if s.ControlStore == nil {
-		return ""
-	}
-	finalized, err := store.UploadContentArtifact(ctx, s.ControlStore.Artifacts(), store.ArtifactCreate{
-		WorkspaceKey:  s.WorkspaceID,
-		ArtifactID:    "transcript-" + sessionID,
-		SessionID:     sessionID,
-		TaskID:        taskID,
-		OwnerType:     "session", // fleet-db's valid owner type for a session-owned artifact (OwnerID=sessionID)
-		OwnerID:       sessionID,
-		Type:          "transcript",
-		Summary:       "agent session transcript",
-		MIMEType:      "application/x-ndjson",
-		DurableStatus: "declared",
-		Metadata:      map[string]string{"runtime": "daemon-leaf", "backend": backend, "transcript_format": transcriptFormat, "transcript_backend": backend},
-	}, data)
-	if err != nil {
-		slog.Warn("daemon transcript artifact upload failed", "session_id", sessionID, "err", err)
-		return ""
-	}
-	return "artifact://" + finalized.ArtifactID
-}
-
+// Transcript helpers are implemented in session_transcript.go.
 // spawnAndWait spawns the agent and waits for it to exit. A spawn failure is
 // recorded as a synthetic exit (see markSpawnFailure) so the caller's single
 // restart decision — shouldRestart + sleepBeforeRestart — owns counting and

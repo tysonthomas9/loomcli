@@ -1713,6 +1713,16 @@ Get all transcript entries for a session.
   - `500` — failed to load session or transcript
   - `503` — session store not available
 
+### `GET /api/workspaces/{ws}/sessions/{sessionId}/transcript`
+
+Get a session transcript by session ID.
+
+- **Auth:** Required (standard bearer token)
+- **Path Parameters:** `ws` — workspace ID; `sessionId` — session ID
+- **Behavior:** Returns the session transcript, using the local native transcript when available and the control-plane artifact otherwise. This route does not require a task ID.
+- **Response:** `200 OK`, with `data.session_id` and an `entries` array
+- **Errors:** `400` — invalid session ID; `404` — session or transcript not found; `500` — failed to load the transcript
+
 ### `GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/diff`
 
 Get the raw diff patch content for a session.

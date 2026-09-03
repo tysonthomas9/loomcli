@@ -66,6 +66,9 @@ func TestFinalizeLeadTranscriptUploadsAndStampsMetadata(t *testing.T) {
 	if metadata["transcript_ref"] != "artifact://transcript-"+sessionID || metadata["transcript_path"] != local.NativeTranscriptPath(sessionID) {
 		t.Fatalf("metadata = %#v, want transcript ref and path", metadata)
 	}
+	if metadata["transcript_format"] != sessions.TranscriptFormatRaw || metadata["transcript_backend"] != backendnames.Codex {
+		t.Fatalf("transcript metadata = %#v, want raw codex markers", metadata)
+	}
 	artifact, err := st.Artifacts().Get(t.Context(), "WS", "transcript-"+sessionID)
 	if err != nil {
 		t.Fatalf("uploaded artifact missing: %v", err)

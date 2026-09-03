@@ -488,14 +488,7 @@ func (s *sessionServiceImpl) loadSessionTranscript(ctx context.Context, wsID, ta
 	}
 	events, loadErr := store.LoadNativeEvents(sessionID)
 	if loadErr != nil {
-		var cpEvents []transcript.Event
-		var cpErr error
-		if taskID == "" {
-			cpEvents, cpErr = s.controlPlaneSessionTranscriptByID(ctx, wsID, sessionID)
-		} else {
-			cpEvents, cpErr = s.controlPlaneSessionTranscript(ctx, wsID, taskID, sessionID)
-		}
-		if cpErr == nil {
+		if cpEvents, ok := s.fallbackSessionTranscript(ctx, wsID, taskID, sessionID); ok {
 			return cpEvents, nil
 		}
 		logger.Error("failed to load native transcript", "session_id", sessionID, "err", loadErr)
@@ -504,7 +497,23 @@ func (s *sessionServiceImpl) loadSessionTranscript(ctx context.Context, wsID, ta
 	if events == nil {
 		events = []transcript.Event{}
 	}
+	if len(events) == 0 {
+		if cpEvents, ok := s.fallbackSessionTranscript(ctx, wsID, taskID, sessionID); ok && len(cpEvents) > 0 {
+			return cpEvents, nil
+		}
+	}
 	return events, nil
+}
+
+func (s *sessionServiceImpl) fallbackSessionTranscript(ctx context.Context, wsID, taskID, sessionID string) ([]transcript.Event, bool) {
+	var events []transcript.Event
+	var err error
+	if taskID == "" {
+		events, err = s.controlPlaneSessionTranscriptByID(ctx, wsID, sessionID)
+	} else {
+		events, err = s.controlPlaneSessionTranscript(ctx, wsID, taskID, sessionID)
+	}
+	return events, err == nil
 }
 
 func (s *sessionServiceImpl) controlPlaneSessionTranscriptByID(ctx context.Context, wsID, sessionID string) ([]transcript.Event, error) {
@@ -649,6 +658,9 @@ func parseCanonicalTranscriptBytes(data []byte) ([]transcript.Event, error) {
 		if err := json.Unmarshal(trimmed, &events); err != nil {
 			return nil, err
 		}
+		if !canonicalEvents(events) {
+			return nil, errors.New("transcript is not in canonical format")
+		}
 		return events, nil
 	}
 	lines := bytes.Split(trimmed, []byte("\n"))
@@ -662,9 +674,21 @@ func parseCanonicalTranscriptBytes(data []byte) ([]transcript.Event, error) {
 		if err := json.Unmarshal(line, &event); err != nil {
 			return nil, err
 		}
+		if !transcript.KnownEventTypes[event.Type] || !transcript.KnownRoles[event.Role] {
+			return nil, errors.New("transcript is not in canonical format")
+		}
 		events = append(events, event)
 	}
 	return events, nil
+}
+
+func canonicalEvents(events []transcript.Event) bool {
+	for _, event := range events {
+		if !transcript.KnownEventTypes[event.Type] || !transcript.KnownRoles[event.Role] {
+			return false
+		}
+	}
+	return true
 }
 
 func parseTranscriptBytes(data []byte, format, backend string) ([]transcript.Event, error) {

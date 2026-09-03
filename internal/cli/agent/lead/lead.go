@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -16,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
+	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/agent"
@@ -286,13 +286,20 @@ func (r leadSessionRegistration) Store() store.Store {
 // heartbeat. Best-effort: any error returns a no-op registration so lead always
 // runs.
 func registerLeadOrchestratorSession(ctx context.Context, workDir string) leadSessionRegistration {
-	noop := func() {}
-	empty := leadSessionRegistration{finalize: noop}
 	handle, ws, ok := openLeadSessionStore(ctx)
 	if !ok {
-		return empty
+		return leadSessionRegistration{finalize: func() {}}
 	}
+	return registerLeadOrchestratorSessionOn(ctx, handle, ws, workDir)
+}
 
+// registerLeadOrchestratorSessionOn is the half of registration that runs once
+// fleet-db is reachable. It is split out so a test can drive the whole chain —
+// session write, environment export, heartbeat, finalizer — against a store it
+// controls, which is the only way to prove that a failed metadata write still
+// leaves orchestrator linkage armed.
+func registerLeadOrchestratorSessionOn(ctx context.Context, handle *bootstrap.StoreHandle, ws, workDir string) leadSessionRegistration {
+	empty := leadSessionRegistration{finalize: func() {}}
 	sid := resolveLeadOrchestratorSessionID()
 	agentID := resolveLeadAgentID()
 	if err := createLeadSession(ctx, handle, ws, sid, agentID, workDir); err != nil {
@@ -347,7 +354,8 @@ func createLeadSession(ctx context.Context, handle *bootstrap.StoreHandle, ws, s
 	if errors.Is(err, domain.ErrAlreadyExists) {
 		session, getErr := handle.Store.AgentSessions().Get(createCtx, ws, sid)
 		if getErr != nil {
-			return getErr
+			slog.Warn("lead orchestrator session: existing session lookup failed; lead transcript may not be captured", "session_id", sid, "err", getErr)
+			return nil
 		}
 		metadata := make(map[string]string, len(session.Metadata)+2)
 		for key, value := range session.Metadata {
@@ -356,7 +364,10 @@ func createLeadSession(ctx context.Context, handle *bootstrap.StoreHandle, ws, s
 		metadata["lead_workdir"] = workDir
 		metadata["backend"] = cli.GetBackendName()
 		_, updateErr := handle.Store.AgentSessions().Update(createCtx, ws, sid, store.AgentSessionUpdate{Metadata: &metadata})
-		return updateErr
+		if updateErr != nil {
+			slog.Warn("lead orchestrator session: existing session metadata update failed; lead transcript may not be captured", "session_id", sid, "err", updateErr)
+		}
+		return nil
 	}
 	return err
 }
@@ -387,12 +398,14 @@ func leadSessionFinalizer(handle *bootstrap.StoreHandle, ws, sid string, stopHB 
 	return func() {
 		close(stopHB)
 		wg.Wait()
-		finCtx, finCancel := context.WithTimeout(context.Background(), leadStoreOpTimeout)
-		defer finCancel()
+		// Capture first, then open the lifecycle context. The mirror is a disk
+		// walk that can outlast any deadline we give it, and it must not spend
+		// the budget the completion Update still needs — a lost Update leaves a
+		// session that reads as running forever.
+		metadata := finalizeLeadTranscript(context.Background(), handle.Store, ws, sid)
 		status := domain.AgentSessionCompleted
 		now := time.Now().UTC()
 		finishedAt := &now
-		metadata := finalizeLeadTranscript(finCtx, handle.Store, ws, sid)
 		update := store.AgentSessionUpdate{
 			Status:     &status,
 			FinishedAt: &finishedAt,
@@ -400,9 +413,11 @@ func leadSessionFinalizer(handle *bootstrap.StoreHandle, ws, sid string, stopHB 
 		if metadata != nil {
 			update.Metadata = &metadata
 		}
+		finCtx, finCancel := context.WithTimeout(context.Background(), leadStoreOpTimeout)
 		if _, err := handle.Store.AgentSessions().Update(finCtx, ws, sid, update); err != nil {
-			slog.Debug("lead orchestrator session: finalize failed", "err", err)
+			slog.Warn("lead orchestrator session: finalize failed; session may appear to run forever", "err", err)
 		}
+		finCancel()
 		_ = handle.Close()
 	}
 }
@@ -411,7 +426,9 @@ func leadSessionFinalizer(handle *bootstrap.StoreHandle, ws, sid string, stopHB 
 // copy for control-plane readers. Every step is best-effort so audit capture
 // can never change the lead's exit status or lifecycle.
 func finalizeLeadTranscript(ctx context.Context, st store.Store, ws, sid string) map[string]string {
-	rec, err := st.AgentSessions().Get(ctx, ws, sid)
+	getCtx, getCancel := context.WithTimeout(ctx, leadStoreOpTimeout)
+	rec, err := st.AgentSessions().Get(getCtx, ws, sid)
+	getCancel()
 	if err != nil || rec == nil {
 		slog.Warn("lead transcript: session lookup failed", "session_id", sid, "err", err)
 		return nil
@@ -426,9 +443,9 @@ func finalizeLeadTranscript(ctx context.Context, st store.Store, ws, sid string)
 		slog.Warn("lead transcript: capture skipped, session metadata incomplete", "session_id", sid, "workdir", workDir != "", "backend", backend != "")
 		return metadata
 	}
-	if backend == "codex" {
+	if backend == backendnames.Codex {
 		if runtimeHome := strings.TrimSpace(metadata[leadcontrol.MetadataCodexRuntimeHome]); runtimeHome != "" {
-			metadata["log_path"] = filepath.Join(runtimeHome, "app-server.log")
+			metadata["log_path"] = leadcontrol.CodexAppServerLogPath(runtimeHome)
 		}
 	}
 
@@ -466,7 +483,7 @@ func syncLeadNativeTranscript(sid, workDir, backend string, since time.Time, rec
 		slog.Warn("lead transcript: local store unavailable", "session_id", sid, "err", err)
 		return "", nil
 	}
-	if err := sessStore.EnsureSession(sid); err != nil {
+	if err := sessStore.EnsureSession(sid, backend); err != nil {
 		slog.Warn("lead transcript: local session unavailable", "session_id", sid, "err", err)
 		return "", nil
 	}
@@ -478,10 +495,14 @@ func syncLeadNativeTranscript(sid, workDir, backend string, since time.Time, rec
 			since = runtime.StartedAt
 		}
 	}
+	// opencode is missing on purpose, not by oversight: loom has no locator for
+	// its rollout, so no session kind captures one. A task session's finalize
+	// (sessionfinalize.WithWorktree) has the same two cases. Adding opencode
+	// means adding the locator, and the lead picks it up for free when it lands.
 	switch backend {
-	case "codex":
+	case backendnames.Codex:
 		_, err = sessStore.SyncLatestCodexRollout(sid, workDir, since)
-	case "claude":
+	case backendnames.Claude:
 		_, err = sessStore.SyncLatestClaudeTranscript(sid, workDir, claudeUUID, since)
 	}
 	if err != nil {
