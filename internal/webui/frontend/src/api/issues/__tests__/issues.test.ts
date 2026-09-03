@@ -821,10 +821,9 @@ describe("issues API", () => {
 
       await getBlockedIssues("test-ws-id");
 
-      expect(mockApiGet).toHaveBeenCalledWith(
-        "/api/workspaces/{ws}/blocked",
-        { params: { path: { ws: "test-ws-id" }, query: {} } },
-      );
+      expect(mockApiGet).toHaveBeenCalledWith("/api/workspaces/{ws}/blocked", {
+        params: { path: { ws: "test-ws-id" }, query: {} },
+      });
     });
 
     it("forwards an abort signal to the blocked request", async () => {
@@ -971,10 +970,9 @@ describe("issues API", () => {
 
       await getBlockedIssues("test-ws-id", { source_repos: [] });
 
-      expect(mockApiGet).toHaveBeenCalledWith(
-        "/api/workspaces/{ws}/blocked",
-        { params: { path: { ws: "test-ws-id" }, query: {} } },
-      );
+      expect(mockApiGet).toHaveBeenCalledWith("/api/workspaces/{ws}/blocked", {
+        params: { path: { ws: "test-ws-id" }, query: {} },
+      });
     });
 
     it("passes limit in query params", async () => {
