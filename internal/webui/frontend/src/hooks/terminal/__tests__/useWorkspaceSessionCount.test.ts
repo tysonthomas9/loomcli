@@ -21,6 +21,8 @@ import { useEventSubscription } from "@/hooks/common";
 
 import { useWorkspaceSessionCount } from "../useWorkspaceSessionCount";
 
+const eventMock = vi.hoisted(() => ({ connectionEpoch: 0 }));
+
 vi.mock("@/api/terminal", () => ({
   listTabMetadata: vi.fn(),
 }));
@@ -28,7 +30,11 @@ vi.mock("@/api/terminal", () => ({
 vi.mock("@/hooks/common", async () => {
   const actual =
     await vi.importActual<typeof import("@/hooks/common")>("@/hooks/common");
-  return { ...actual, useEventSubscription: vi.fn() };
+  return {
+    ...actual,
+    useEventSubscription: vi.fn(),
+    useEventContext: () => ({ connectionEpoch: eventMock.connectionEpoch }),
+  };
 });
 
 let currentWorkspaceId = "ws-1";
@@ -69,6 +75,7 @@ const POLL_MS = 5 * 60_000;
 describe("useWorkspaceSessionCount", () => {
   beforeEach(() => {
     currentWorkspaceId = "ws-1";
+    eventMock.connectionEpoch = 0;
     vi.clearAllMocks();
   });
 
@@ -197,6 +204,20 @@ describe("useWorkspaceSessionCount", () => {
 
     expect(mockList).toHaveBeenCalledTimes(2);
     vi.useRealTimers();
+  });
+
+  it("refetches its snapshot once per connection epoch", async () => {
+    mockList.mockResolvedValue([tab()]);
+    const { rerender } = renderHook(() => useWorkspaceSessionCount());
+    await waitFor(() => expect(mockList).toHaveBeenCalledTimes(1));
+
+    eventMock.connectionEpoch = 1;
+    rerender();
+    await waitFor(() => expect(mockList).toHaveBeenCalledTimes(2));
+
+    rerender();
+    await act(async () => Promise.resolve());
+    expect(mockList).toHaveBeenCalledTimes(2);
   });
 
   it("drops a debounce left pending when the workspace changes", async () => {

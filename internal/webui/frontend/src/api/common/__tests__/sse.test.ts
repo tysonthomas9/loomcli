@@ -121,6 +121,16 @@ function pushMutation(
   );
 }
 
+function pushResync(
+  id: string,
+  reason: "cap" | "error" | "expired" | "overflow",
+  request = streamRequests.at(-1),
+): void {
+  request?.push(
+    `id: ${id}\nevent: resync\ndata: ${JSON.stringify({ reason })}\n\n`,
+  );
+}
+
 describe("WorkspaceSSEClient", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -215,6 +225,64 @@ describe("WorkspaceSSEClient", () => {
     expect(client.getLastEventId()).toBe("opaque-cursor-1");
     client.disconnect();
   });
+
+  it("advances its cursor and reports resync without delivering a mutation", async () => {
+    const onMutation = vi.fn();
+    const onResync = vi.fn();
+    const client = new WorkspaceSSEClient("test-ws", {
+      onMutation,
+      onResync,
+    });
+
+    await client.connect("c1.from", ["repo-a"]);
+    await expectRequestCount(1);
+    pushResync("c1.to", "overflow");
+    await flush();
+
+    expect(client.getLastEventId()).toBe("c1.to");
+    expect(onResync).toHaveBeenCalledOnce();
+    expect(onResync).toHaveBeenCalledWith({
+      from: "c1.from",
+      to: "c1.to",
+      reason: "overflow",
+    });
+    expect(onMutation).not.toHaveBeenCalled();
+    client.disconnect();
+  });
+
+  it.each([
+    ["an unrecognized reason", JSON.stringify({ reason: "future-reason" })],
+    ["non-JSON data", "{oops"],
+  ])(
+    "repairs with an error reason when a resync carries %s",
+    async (_description, data) => {
+      const onMutation = vi.fn();
+      const onResync = vi.fn();
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const client = new WorkspaceSSEClient("test-ws", {
+        onMutation,
+        onResync,
+      });
+
+      await client.connect("c1.from");
+      await expectRequestCount(1);
+      streamRequests[0].push(`id: c1.to\nevent: resync\ndata: ${data}\n\n`);
+      await flush();
+
+      expect(client.getLastEventId()).toBe("c1.to");
+      expect(onResync).toHaveBeenCalledOnce();
+      expect(onResync).toHaveBeenCalledWith({
+        from: "c1.from",
+        to: "c1.to",
+        reason: "error",
+      });
+      expect(onMutation).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(
+        "[SSE] Received malformed resync event",
+      );
+      client.disconnect();
+    },
+  );
 
   it("keeps parsing messages when a mutation callback throws", async () => {
     const callbackError = new Error("listener failed");

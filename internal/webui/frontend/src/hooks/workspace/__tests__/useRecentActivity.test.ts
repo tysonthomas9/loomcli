@@ -2,10 +2,11 @@
  * @vitest-environment jsdom
  */
 
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "@/api";
+import { useResyncSubscription } from "@/hooks/common";
 import type { Event, Issue, LoomAgentStatus, MutationPayload } from "@/types";
 
 import {
@@ -18,6 +19,11 @@ import {
 
 vi.mock("@/api", () => ({
   getIssueEvents: vi.fn(),
+}));
+
+vi.mock("@/hooks/common", () => ({
+  useEventSubscription: vi.fn(),
+  useResyncSubscription: vi.fn(),
 }));
 
 const mockGetIssueEvents = vi.mocked(api.getIssueEvents);
@@ -227,6 +233,7 @@ describe("useRecentActivity", () => {
 
   beforeEach(() => {
     mockGetIssueEvents.mockReset();
+    vi.mocked(useResyncSubscription).mockClear();
   });
 
   it("seeds from the issue trails and survives agents arriving mid-fetch", async () => {
@@ -267,5 +274,22 @@ describe("useRecentActivity", () => {
       marker: "default",
     });
     expect(mockGetIssueEvents).toHaveBeenCalledTimes(1);
+  });
+
+  it("rebuilds once when the provider reports a resync", async () => {
+    mockGetIssueEvents
+      .mockResolvedValueOnce([fleetEvent({ id: "before" })])
+      .mockResolvedValueOnce([fleetEvent({ id: "after" })]);
+    const issues = [issue("TASK-1", "2026-08-21T15:48:02.000Z")];
+    renderHook(() => useRecentActivity("WS", issues, []));
+    await waitFor(() => expect(mockGetIssueEvents).toHaveBeenCalledTimes(1));
+
+    const onResync = vi.mocked(useResyncSubscription).mock.calls.at(-1)?.at(0);
+    expect(onResync).toBeTypeOf("function");
+    act(() => {
+      onResync?.({ from: "c1.before", to: "c1.after", reason: "overflow" });
+    });
+
+    await waitFor(() => expect(mockGetIssueEvents).toHaveBeenCalledTimes(2));
   });
 });
