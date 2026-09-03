@@ -229,19 +229,8 @@ func (h *Handler) fetchCatchUp(
 	for pageNumber := 1; pageNumber <= h.catchUpMaxPages; pageNumber++ {
 		page, err := h.getMutationPage(ctx, workspaceID, cursor, catchUpPageLimit)
 		if err != nil {
-			reason := "error"
-			resyncCursor := since
-			if errors.Is(err, backend.ErrMutationCursorExpired) {
-				reason = "expired"
-				var backendErr *backend.BackendError
-				if errors.As(err, &backendErr) && backendErr.Meta["cursor"] != "" {
-					resyncCursor = backendErr.Meta["cursor"]
-				}
-			} else if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				reason = "cap"
-				resyncCursor = cursor
-			}
-			return mutations, seen, &resyncInstruction{cursor: resyncCursor, reason: reason}, fmt.Errorf("catch-up page %d: %w", pageNumber, err)
+			resync := catchUpErrorResync(err, ctx, since, cursor)
+			return mutations, seen, resync, fmt.Errorf("catch-up page %d: %w", pageNumber, err)
 		}
 		if err := ctx.Err(); err != nil {
 			return mutations, seen, &resyncInstruction{cursor: cursor, reason: "cap"}, fmt.Errorf("catch-up exceeded time budget: %w", err)
@@ -272,6 +261,22 @@ func (h *Handler) fetchCatchUp(
 		}
 	}
 	return mutations, seen, &resyncInstruction{cursor: cursor, reason: "cap"}, fmt.Errorf("catch-up exceeded page budget")
+}
+
+func catchUpErrorResync(err error, ctx context.Context, since, cursor string) *resyncInstruction {
+	reason := "error"
+	resyncCursor := since
+	if errors.Is(err, backend.ErrMutationCursorExpired) {
+		reason = "expired"
+		var backendErr *backend.BackendError
+		if errors.As(err, &backendErr) && backendErr.Meta["cursor"] != "" {
+			resyncCursor = backendErr.Meta["cursor"]
+		}
+	} else if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		reason = "cap"
+		resyncCursor = cursor
+	}
+	return &resyncInstruction{cursor: resyncCursor, reason: reason}
 }
 
 func (h *Handler) endHandshakeWriteError(span trace.Span, client *Client, err error, frame string) {
@@ -314,28 +319,12 @@ func (h *Handler) streamLoop(
 			if !ok {
 				return disconnectReasonServerClose, nil
 			}
-			if dropped, pending := client.beginResync(); pending {
-				closed, err := h.writeOverflowResync(sw, client, mutation, dropped, &resyncSeq)
-				if err != nil {
-					slog.Error("SSE client resync write failed", "client_id", client.id, "err", err)
-					return disconnectReasonError, err
-				}
-				if closed {
-					return disconnectReasonServerClose, nil
-				}
-				continue
-			}
-			if mutation.deliverySeq != 0 && mutation.deliverySeq <= resyncSeq {
-				continue
-			}
-			if mutation.Cursor != "" {
-				if _, duplicate := catchUpCursors[mutation.Cursor]; duplicate {
-					continue
-				}
-			}
-			if err := writeSSEEvent(sw, mutation); err != nil {
-				slog.Error("SSE client write failed", "client_id", client.id, "err", err)
+			closed, err := h.writeLiveMutation(sw, client, mutation, catchUpCursors, &resyncSeq)
+			if err != nil {
 				return disconnectReasonError, err
+			}
+			if closed {
+				return disconnectReasonServerClose, nil
 			}
 		case <-heartbeatTicker.C:
 			if err := sw.WriteComment("heartbeat"); err != nil {
@@ -350,6 +339,35 @@ func (h *Handler) streamLoop(
 			return disconnectReasonClientClose, nil
 		}
 	}
+}
+
+func (h *Handler) writeLiveMutation(
+	sw frameWriter,
+	client *Client,
+	mutation *MutationPayload,
+	catchUpCursors map[string]struct{},
+	resyncSeq *uint64,
+) (bool, error) {
+	if dropped, pending := client.beginResync(); pending {
+		closed, err := h.writeOverflowResync(sw, client, mutation, dropped, resyncSeq)
+		if err != nil {
+			slog.Error("SSE client resync write failed", "client_id", client.id, "err", err)
+		}
+		return closed, err
+	}
+	if mutation.deliverySeq != 0 && mutation.deliverySeq <= *resyncSeq {
+		return false, nil
+	}
+	if mutation.Cursor != "" {
+		if _, duplicate := catchUpCursors[mutation.Cursor]; duplicate {
+			return false, nil
+		}
+	}
+	if err := writeSSEEvent(sw, mutation); err != nil {
+		slog.Error("SSE client write failed", "client_id", client.id, "err", err)
+		return false, err
+	}
+	return false, nil
 }
 
 func (h *Handler) writeOverflowResync(
