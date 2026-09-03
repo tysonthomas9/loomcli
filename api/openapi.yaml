@@ -1449,8 +1449,23 @@ paths:
           in: query
           schema:
             type: string
+        - name: task_run_id
+          in: query
+          description: Filter sessions by first-class task run identifier.
+          schema:
+            type: string
+        - name: tag
+          in: query
+          description: Repeatable AND filter; every supplied tag must be present on a session.
+          style: form
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
         - name: kind
           in: query
+          description: Filter by any supported session kind, including judge.
           schema:
             type: string
         - name: limit
@@ -1472,21 +1487,50 @@ paths:
                     type: boolean
                   data:
                     type: object
-                    required: [sessions, total, limit]
+                    required: [sessions, total, limit, score_dimensions]
                     properties:
                       sessions:
                         type: array
                         items:
-                          $ref: "#/components/schemas/SessionResponse"
+                          $ref: "#/components/schemas/WorkspaceSessionListItem"
                       total:
                         type: integer
                         description: Pre-truncation count matching the server-side filters.
                       limit:
                         type: integer
+                      score_dimensions:
+                        type: array
+                        description: Sorted union of eval score keys over the full filtered range before pagination.
+                        items:
+                          type: string
         "400":
           description: Invalid query parameter
         "502":
           description: fleet-db must be upgraded for server-side session time filtering
+
+  /api/workspaces/{ws}/traces/runs/{taskRunId}:
+    get:
+      operationId: getWorkspaceTraceRun
+      tags: [sessions]
+      summary: Get TaskRun truth and joined sessions for a Traces run view
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: taskRunId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Task run trace data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceTraceRunResponse"
+        "400":
+          description: Invalid task run ID
+        "404":
+          description: Neither a TaskRun nor linked sessions exist
 
   /api/workspaces/{ws}/sessions/{sessionId}:
     get:
@@ -6361,6 +6405,9 @@ components:
           type: string
         judge_prompt_version:
           type: string
+        judge_session_id:
+          type: string
+          description: Judge AgentSession that produced this evaluation, when available.
         eval_cost:
           $ref: "#/components/schemas/SessionEvalCost"
         session_started_at:
@@ -6378,29 +6425,15 @@ components:
 
     SessionEvalScores:
       type: object
-      required: [outcome_success, instruction_adherence, efficiency, tool_use_quality]
-      properties:
-        outcome_success:
-          type: integer
-        instruction_adherence:
-          type: integer
-        efficiency:
-          type: integer
-        tool_use_quality:
-          type: integer
+      description: Dimension-keyed score map. Current judge writes still require exactly the canonical four keys.
+      additionalProperties:
+        type: integer
 
     SessionEvalScoreRationales:
       type: object
-      required: [outcome_success, instruction_adherence, efficiency, tool_use_quality]
-      properties:
-        outcome_success:
-          type: string
-        instruction_adherence:
-          type: string
-        efficiency:
-          type: string
-        tool_use_quality:
-          type: string
+      description: Dimension-keyed rationale map matching scores.
+      additionalProperties:
+        type: string
 
     SessionEvalImprovementCategories:
       type: object
@@ -6472,6 +6505,20 @@ components:
           type: string
         kind:
           type: string
+        task_run_id:
+          type: string
+        invocation_key:
+          type: string
+        attempt:
+          type: integer
+        tags:
+          type: array
+          items:
+            type: string
+        eval_status:
+          type: string
+        eval_scores:
+          $ref: "#/components/schemas/SessionEvalScores"
         backend:
           type: string
         model:
@@ -6526,8 +6573,104 @@ components:
           type: boolean
         has_diff:
           type: boolean
+        judge_session_id:
+          type: string
+          description: Judge session joined from this subject session's displayed eval record.
+        judged_session_id:
+          type: string
+          description: Subject session read server-side from judge session metadata.
         last_error:
           type: string
+
+    WorkspaceSessionListItem:
+      allOf:
+        - $ref: "#/components/schemas/SessionResponse"
+        - type: object
+          required: [task_run_id, invocation_key, attempt]
+          properties:
+            task_run_id:
+              type: string
+            invocation_key:
+              type: string
+            attempt:
+              type: integer
+
+    WorkspaceTraceRunResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/WorkspaceTraceRunData"
+        error:
+          type: string
+
+    WorkspaceTraceRunData:
+      type: object
+      required: [task_run_id, task_run_missing, attempt_count, files_changed, total_tokens, duration_seconds, sessions]
+      properties:
+        task_run_id:
+          type: string
+        task_run:
+          $ref: "#/components/schemas/TraceTaskRun"
+        task_run_missing:
+          type: boolean
+        task_id:
+          type: string
+        attempt_count:
+          type: integer
+        files_changed:
+          type: integer
+        total_tokens:
+          type: integer
+          format: int64
+        duration_seconds:
+          type: number
+          format: double
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkspaceSessionListItem"
+
+    TraceTaskRun:
+      type: object
+      description: Control-plane TaskRun truth used by the run header; additional TaskRun fields may be present.
+      required: [workspace_key, task_run_id, task_id, status, created_at, updated_at]
+      properties:
+        workspace_key:
+          type: string
+        task_run_id:
+          type: string
+        task_id:
+          type: string
+        status:
+          type: string
+          description: Control-plane TaskRun status.
+        input_tokens:
+          type: integer
+          format: int64
+        output_tokens:
+          type: integer
+          format: int64
+        cache_read_tokens:
+          type: integer
+          format: int64
+        cache_write_tokens:
+          type: integer
+          format: int64
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: [string, "null"]
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
 
     TranscriptEntry:
       type: object

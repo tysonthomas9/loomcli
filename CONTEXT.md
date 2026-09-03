@@ -67,3 +67,38 @@ version has not yet evaluated, inside the eval lookback window and sampling
 cohort. The unit the eval agent selects each tick.
 _Avoid_: evaluable session, session with transcript (having produced a
 transcript is not the test — having published one is)
+
+### Task-plane session model
+
+**Agent Invocation**:
+One agent invocation attempt within a task-run Attempt (failed spawns
+included); the unit an AgentSession records, exactly one session per
+invocation — and the only unit: deterministic work spawns no agent and
+yields no session, leaving TaskRun/driver-run records only. An OS process
+is one implementation of an invocation (process leaves); one in-process
+harness prompt call is another (daytona harness, LOOMCLI-105).
+_Avoid_: agent run (a run can hold many invocations), execution, agent
+process invocation (too narrow — a harness prompt call invokes an agent
+with no dedicated process), deterministic exec session / exec session (a
+non-concept — sessions are agent invocations by construction; LOOMCLI-106)
+
+**Invocation Key**:
+The leaf-chosen stable slug naming an Agent Invocation within a task-run
+Attempt ("judge", "worker-2"). Re-supplying it re-identifies the same
+invocation; it names, it never sequences — ordering comes from start time.
+_Avoid_: session name, agent id, sequence number
+
+**Attempt**:
+One claim of a TaskRun. Ordinals are dense per claim with fencing order as
+the truth; terminal recovery paths (stale fail, quarantine, park) claim
+nothing and so mint no Attempt.
+_Avoid_: retry, scheduler_attempt (a retry-loop projection of Attempt, not
+its definition)
+
+**Parent Session**:
+The session from whose execution a session was spawned — a workflow session
+spawning a leaf, or an agent spawning a subagent. Empty when the spawner has
+no session of its own. Run grouping is the TaskRun's job, never the parent
+link's.
+_Avoid_: workflow session link, subagent tree (both are instances, not the
+concept)

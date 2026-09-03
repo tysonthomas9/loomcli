@@ -72,7 +72,9 @@ type AgentSessionFilter struct {
 	// store-authority query is over (task_run_id, attempt) non-terminal
 	// sessions (LOOMCLI-97 §1).
 	TaskRunID string
-	Status    domain.AgentSessionStatus
+	// Tags requires every requested tag to be present on the returned session.
+	Tags   []string
+	Status domain.AgentSessionStatus
 	// Attempt narrows TaskRunID results to one claim attempt; nil matches every
 	// attempt. The session reconciler queries this with TaskRunID (LOOMCLI-97 §1).
 	Attempt *int
