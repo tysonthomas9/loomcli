@@ -29,7 +29,6 @@ const BACKOFF_MULTIPLIER = 2;
 const STALE_BANNER_DELAY_MS = 5_000;
 const MAX_FAILURES_AT_CEILING = 5;
 const FETCH_TIMEOUT_MS = 15_000;
-const WATCHDOG_TIMEOUT_MS = 20_000;
 
 // ---------------------------------------------------------------------------
 // Default values (moved from useAgents.ts)
@@ -203,7 +202,7 @@ export function createAgentStore(
   let activeWorkspaceId: string | undefined;
   let staleBannerTimeoutId: ReturnType<typeof setTimeout> | null = null;
   let fetchInProgress = false;
-  let fetchStartTime = 0;
+  let generation = 0;
   let currentRetryDelay = INITIAL_RETRY_DELAY_S;
   let consecutiveFailuresAtCeiling = 0;
   let visibilityHandler: (() => void) | null = null;
@@ -325,7 +324,7 @@ export function createAgentStore(
       if (fetchInProgress) return;
 
       fetchInProgress = true;
-      fetchStartTime = Date.now();
+      const fetchGeneration = generation;
       set({ isLoading: true });
 
       try {
@@ -334,6 +333,8 @@ export function createAgentStore(
           FETCH_TIMEOUT_MS,
           "Status fetch",
         );
+
+        if (fetchGeneration !== generation) return;
 
         // Primary success
         const now = Date.now();
@@ -363,6 +364,8 @@ export function createAgentStore(
           ),
         });
       } catch (err) {
+        if (fetchGeneration !== generation) return;
+
         // Primary failure
         const error = err instanceof Error ? err : new Error(String(err));
         set({
@@ -384,17 +387,26 @@ export function createAgentStore(
           ),
         });
       } finally {
-        fetchInProgress = false;
+        if (fetchGeneration === generation) {
+          fetchInProgress = false;
+        }
       }
     },
 
     startPolling(options?: PollingOptions): void {
+      const nextWorkspaceId = options?.workspaceId;
+      const workspaceChanged = nextWorkspaceId !== activeWorkspaceId;
+
       // If already polling, stop first
       if (isPolling) {
         get().stopPolling();
       }
 
-      activeWorkspaceId = options?.workspaceId;
+      if (workspaceChanged) {
+        generation++;
+        fetchInProgress = false;
+      }
+      activeWorkspaceId = nextWorkspaceId;
       const interval = options?.pollInterval ?? 5000;
       isPolling = true;
 
@@ -403,17 +415,12 @@ export function createAgentStore(
 
       // Setup polling with watchdog (only if interval > 0)
       if (interval > 0) {
+        // No watchdog is needed to recover a stuck lock. withTimeout races
+        // every request against FETCH_TIMEOUT_MS, so the call always settles
+        // even when the underlying promise never does, and the finally block
+        // releases the lock. A watchdog above that timeout could never fire,
+        // and one below it would discard healthy slow requests.
         pollIntervalId = setInterval(() => {
-          // Watchdog: if previous fetch has been running past the timeout
-          if (
-            fetchInProgress &&
-            Date.now() - fetchStartTime > WATCHDOG_TIMEOUT_MS
-          ) {
-            console.warn(
-              "Agent fetch watchdog: force-resetting stale fetch lock",
-            );
-            fetchInProgress = false;
-          }
           void get().fetchData();
         }, interval);
       }
@@ -422,8 +429,6 @@ export function createAgentStore(
       if (typeof document !== "undefined") {
         visibilityHandler = () => {
           if (document.visibilityState === "visible") {
-            // Force-reset in case previous fetch was orphaned during background
-            fetchInProgress = false;
             void get().fetchData();
           }
         };
@@ -475,8 +480,8 @@ export function createAgentStore(
     reset(): void {
       get().stopPolling();
 
+      generation++;
       fetchInProgress = false;
-      fetchStartTime = 0;
       currentRetryDelay = INITIAL_RETRY_DELAY_S;
       consecutiveFailuresAtCeiling = 0;
       isPolling = false;

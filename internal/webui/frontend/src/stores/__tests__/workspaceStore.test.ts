@@ -183,6 +183,28 @@ describe("workspaceStore", () => {
       await vi.advanceTimersByTimeAsync(5000);
       expect(mockFetchWorkspaceApi).toHaveBeenCalledTimes(3);
     });
+
+    it("clears the previous workspace while a different workspace loads", async () => {
+      const nextWorkspace = deferred<WorkspaceData>();
+      mockFetchWorkspaceApi
+        .mockResolvedValueOnce(makeWorkspace({ id: "ws-1", name: "first" }))
+        .mockReturnValueOnce(nextWorkspace.promise);
+
+      store.getState().startPolling({ workspaceId: "ws-1", pollInterval: 0 });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(store.getState().workspace?.id).toBe("ws-1");
+
+      store.getState().startPolling({ workspaceId: "ws-2", pollInterval: 0 });
+
+      expect(store.getState().workspace).toBeNull();
+      expect(store.getState().isLoading).toBe(true);
+
+      nextWorkspace.resolve(makeWorkspace({ id: "ws-2", name: "second" }));
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(store.getState().workspace?.id).toBe("ws-2");
+      expect(store.getState().isLoading).toBe(false);
+    });
   });
 
   describe("stopPolling", () => {
