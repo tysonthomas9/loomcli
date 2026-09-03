@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/olesho/harness-wrapper/pkg/discovery"
+
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
@@ -17,8 +19,24 @@ import (
 // newProfileGateSupervisor builds a supervisor whose project dir and log dir
 // are both throwaway, so the gate can be driven end to end (refusal → state →
 // agent log) without touching anything real.
+//
+// preFlightSetup runs gateBackendAvailable BEFORE the profile gate, so on a
+// machine with no `claude` on PATH — which is what CI is — the cycle stops at
+// backend_unavailable and the profile gate never runs. Stubbing the documented
+// backendcheck.CheckBackend seam reports the harness as installed so the gate
+// under test is the one that decides. The gate ORDER is deliberate and is not
+// changed here: a genuinely missing binary must still surface as
+// backend_unavailable, not as profile_invalid.
 func newProfileGateSupervisor(t *testing.T, projectDir string) *Supervisor {
 	t.Helper()
+	stubCheckBackend(t, func(name string) (discovery.Info, error) {
+		return discovery.Info{
+			Name:              name,
+			Binary:            name,
+			Installed:         true,
+			VersionMatchesPin: true,
+		}, nil
+	})
 	logDir := t.TempDir()
 	return &Supervisor{
 		ProjectDir:  projectDir,
