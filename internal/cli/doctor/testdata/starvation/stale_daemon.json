@@ -1,0 +1,13 @@
+{
+  "pid": -1,
+  "started_at": "2026-09-01T06:00:00Z",
+  "agents": [
+    {
+      "worktree": "integrator",
+      "role": "integrator",
+      "status": "failed",
+      "stop_reason": "fatal_error",
+      "last_error_class": "AuthFailure"
+    }
+  ]
+}
