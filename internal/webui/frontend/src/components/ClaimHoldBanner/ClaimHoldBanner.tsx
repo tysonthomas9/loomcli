@@ -21,6 +21,16 @@ export interface ClaimHoldBannerProps {
   className?: string;
 }
 
+/**
+ * Name the hold's repo scope. An empty scope is workspace-wide — stated as
+ * "all repos" rather than left blank, because "which repos are stopped?" is the
+ * first question a held banner raises.
+ */
+export function formatHoldScope(repos: string[] | undefined): string {
+  if (!repos || repos.length === 0) return "all repos";
+  return `repos ${repos.join(", ")}`;
+}
+
 /** Format an age in ms as `2h14m` / `14m` / `40s`. */
 export function formatHoldAge(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000));
@@ -68,6 +78,9 @@ export function ClaimHoldBanner({
         {" since "}
         <time dateTime={hold.since}>{sinceLabel}</time>
         {` — ${hold.reason}`}
+        <span
+          className={styles.scope}
+        >{` (${formatHoldScope(hold.repos)})`}</span>
         {gated > 0 ? (
           <span
             className={styles.gated}

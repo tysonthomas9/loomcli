@@ -3,11 +3,13 @@ package supervisor
 import (
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/agentpolicy"
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
@@ -351,5 +353,282 @@ func TestClaimHoldReloadErrorKeepsHold(t *testing.T) {
 	h := s.ClaimHoldSnapshot()
 	if h == nil || h.Actor != "union-autodeploy" {
 		t.Fatalf("ClaimHoldSnapshot() = %#v, want the in-memory hold kept", h)
+	}
+}
+
+// ── repo scope ──────────────────────────────────────────────────────────────
+//
+// A scoped hold cannot decide at the gate (there is no candidate yet), so it
+// splits: the gate carries the scope, and the claim path filters the ready
+// queue against it. These drive both halves of that split.
+
+// scopedHold is a held-for-these-repos hold with a generous TTL.
+func scopedHold(actor, reason string, repos ...string) *ClaimHold {
+	h := newHold(actor, reason, time.Hour)
+	h.Repos = repos
+	return h
+}
+
+// runClaimCycle runs the two gates a repo scope spans, in the order
+// preFlightSetup runs them: gateClaimsHeld (which stashes the scope) and then
+// claimTask (which applies it). Returns whether the agent got work.
+func runClaimCycle(s *Supervisor, ap *AgentProcess) bool {
+	if !s.gateClaimsHeld(ap) {
+		return false
+	}
+	return s.claimTask(ap, "")
+}
+
+func scopedAgent(worktree string, repos ...string) *AgentProcess {
+	return &AgentProcess{
+		Entry:      cfgpkg.AgentEntry{Worktree: worktree, Role: "task", Repos: repos},
+		RoleConfig: cfgpkg.RoleConfig{TaskFilter: "has_design"},
+	}
+}
+
+func readyIssue(id, repo string, priority int) backend.IssueData {
+	return backend.IssueData{
+		ID: id, IssueType: "task", Status: "open", Priority: priority,
+		Title: id, Design: "plan", SourceRepo: repo,
+	}
+}
+
+func TestClaimHoldScope_UnheldRepoStillClaims(t *testing.T) {
+	s, mock := heldSupervisor(t, scopedHold("union-autodeploy", "deploy fleet-db", "fleet-db"))
+	mock.ReadyResult = []backend.IssueData{readyIssue("PUPPET-1", "loomcli", 1)}
+	ap := scopedAgent("falcon")
+
+	if !runClaimCycle(s, ap) {
+		t.Fatalf("a loomcli task was refused under a fleet-db-only hold: %#v", ap.LastError)
+	}
+	if ap.AssignedTaskID != "PUPPET-1" {
+		t.Fatalf("AssignedTaskID = %q, want PUPPET-1", ap.AssignedTaskID)
+	}
+}
+
+// The regression the scope must never cause: an UNSCOPED hold is still the
+// zero-backend-call gate, because that is the case it was built for — quiescing
+// the workspace while fleet-db itself is being redeployed.
+func TestClaimHoldScope_UnscopedHoldStillIssuesNoReadyQuery(t *testing.T) {
+	s, mock := heldSupervisor(t, newHold("union-autodeploy", "deploy union tips", time.Hour))
+	mock.ReadyResult = []backend.IssueData{readyIssue("PUPPET-1", "loomcli", 1)}
+	ap := scopedAgent("falcon")
+
+	if runClaimCycle(s, ap) {
+		t.Fatal("an unscoped hold let the agent claim")
+	}
+	if len(mock.Calls) != 0 {
+		t.Fatalf("an unscoped hold consulted the backend: %#v", mock.Calls)
+	}
+	if ap.LastError == nil || !ap.LastError.Class.Is(agenterr.ClaimsHeldOutcome) {
+		t.Fatalf("LastError = %#v, want ClaimsHeld", ap.LastError)
+	}
+	if len(ap.HeldRepos) != 0 {
+		t.Fatalf("HeldRepos = %v; an unscoped hold has no scope to carry", ap.HeldRepos)
+	}
+}
+
+func TestClaimHoldScope_AllCandidatesHeldReportsHeldNotNoWork(t *testing.T) {
+	s, mock := heldSupervisor(t, scopedHold("union-autodeploy", "deploy fleet-db", "fleet-db"))
+	mock.ReadyResult = []backend.IssueData{
+		readyIssue("PUPPET-1", "fleet-db", 1),
+		readyIssue("PUPPET-2", "fleet-db", 2),
+	}
+	ap := scopedAgent("falcon")
+
+	if runClaimCycle(s, ap) {
+		t.Fatal("a held repo's task was claimed")
+	}
+	if ap.LastError == nil || !ap.LastError.Class.Is(agenterr.ClaimsHeldOutcome) {
+		t.Fatalf("LastError = %#v, want ClaimsHeld (an emptied queue is not an empty board)", ap.LastError)
+	}
+	if !strings.Contains(ap.LastError.Message, "fleet-db") {
+		t.Fatalf("message = %q, want it to name the held repo", ap.LastError.Message)
+	}
+	if mock.CallCount("ClaimIssue") != 0 {
+		t.Fatalf("a held candidate was claimed anyway: %#v", mock.Calls)
+	}
+}
+
+// The scope must be a HARD pre-filter. Repo affinity in routing is soft — a
+// mismatch still scores above zero and stays selectable — so a held task that
+// outranks every alternative must be removed before selection, not down-scored.
+func TestClaimHoldScope_HeldTaskNeverSelectedEvenWhenItOutscores(t *testing.T) {
+	s, mock := heldSupervisor(t, scopedHold("union-autodeploy", "deploy fleet-db", "fleet-db"))
+	mock.ReadyResult = []backend.IssueData{
+		readyIssue("PUPPET-HELD", "fleet-db", 0), // top priority, and held
+		readyIssue("PUPPET-FREE", "loomcli", 4),
+	}
+	ap := scopedAgent("falcon")
+
+	if !runClaimCycle(s, ap) {
+		t.Fatalf("claim refused: %#v", ap.LastError)
+	}
+	if ap.AssignedTaskID != "PUPPET-FREE" {
+		t.Fatalf("AssignedTaskID = %q, want PUPPET-FREE; the hold must be a filter, not a score", ap.AssignedTaskID)
+	}
+}
+
+// An issue that names no repo cannot be matched against a repo-named hold.
+// Deliberate: guessing would gate work the hold never claimed to cover.
+func TestClaimHoldScope_IssueWithoutSourceRepoIsClaimable(t *testing.T) {
+	s, mock := heldSupervisor(t, scopedHold("union-autodeploy", "deploy fleet-db", "fleet-db"))
+	mock.ReadyResult = []backend.IssueData{readyIssue("PUPPET-9", "", 1)}
+	ap := scopedAgent("falcon")
+
+	if !runClaimCycle(s, ap) {
+		t.Fatalf("an issue with no source_repo was gated by a repo-scoped hold: %#v", ap.LastError)
+	}
+	if ap.AssignedTaskID != "PUPPET-9" {
+		t.Fatalf("AssignedTaskID = %q, want PUPPET-9", ap.AssignedTaskID)
+	}
+}
+
+// An agent bound only to held repos has nothing claimable whatever the board
+// holds, so it is gated at Level 1 and pays no backend call.
+func TestClaimHoldScope_AgentBoundToHeldReposGatesWithoutBackendCall(t *testing.T) {
+	s, mock := heldSupervisor(t, scopedHold("union-autodeploy", "deploy fleet-db", "fleet-db"))
+	mock.ReadyResult = []backend.IssueData{readyIssue("PUPPET-1", "loomcli", 1)}
+	ap := scopedAgent("falcon", "fleet-db")
+
+	if runClaimCycle(s, ap) {
+		t.Fatal("an agent bound only to a held repo was allowed to claim")
+	}
+	if len(mock.Calls) != 0 {
+		t.Fatalf("Level 1 should gate before any backend call: %#v", mock.Calls)
+	}
+	if ap.LastError == nil || !ap.LastError.Class.Is(agenterr.ClaimsHeldOutcome) {
+		t.Fatalf("LastError = %#v, want ClaimsHeld", ap.LastError)
+	}
+}
+
+// A partially-held agent still proceeds: one of its repos is claimable.
+func TestClaimHoldScope_PartiallyBoundAgentProceedsToTheFilter(t *testing.T) {
+	s, mock := heldSupervisor(t, scopedHold("union-autodeploy", "deploy fleet-db", "fleet-db"))
+	mock.ReadyResult = []backend.IssueData{readyIssue("PUPPET-1", "loomcli", 1)}
+	ap := scopedAgent("falcon", "fleet-db", "loomcli")
+
+	if !runClaimCycle(s, ap) {
+		t.Fatalf("an agent bound to one held and one free repo was gated: %#v", ap.LastError)
+	}
+	if ap.AssignedTaskID != "PUPPET-1" {
+		t.Fatalf("AssignedTaskID = %q, want PUPPET-1", ap.AssignedTaskID)
+	}
+}
+
+// Resume is exempt: re-claiming the task this agent already holds is not
+// starting new work, which is the only thing a hold refuses.
+func TestClaimHoldScope_ResumeSurvivesAHoldOnItsOwnRepo(t *testing.T) {
+	s, mock := heldSupervisor(t, scopedHold("union-autodeploy", "deploy fleet-db", "fleet-db"))
+	ap := scopedAgent("falcon")
+	ap.ResumeTaskID = "PUPPET-RESUME"
+
+	if !runClaimCycle(s, ap) {
+		t.Fatalf("resume was refused under a repo-scoped hold: %#v", ap.LastError)
+	}
+	if ap.AssignedTaskID != "PUPPET-RESUME" {
+		t.Fatalf("AssignedTaskID = %q, want PUPPET-RESUME", ap.AssignedTaskID)
+	}
+	if mock.CallCount("Ready") != 0 {
+		t.Fatalf("resume consulted the ready queue: %#v", mock.Calls)
+	}
+}
+
+// A REQUESTED task is new work, so the hold applies to it exactly as it applies
+// to the queue.
+func TestClaimHoldScope_RequestedTaskInAHeldRepoIsRefused(t *testing.T) {
+	s, mock := heldSupervisor(t, scopedHold("union-autodeploy", "deploy fleet-db", "fleet-db"))
+	mock.ReadyResult = []backend.IssueData{readyIssue("PUPPET-1", "fleet-db", 1)}
+	ap := scopedAgent("falcon")
+	ap.RequestedTaskID = "PUPPET-1"
+
+	if runClaimCycle(s, ap) {
+		t.Fatal("a requested task in a held repo was claimed")
+	}
+	if ap.LastError == nil || !ap.LastError.Class.Is(agenterr.ClaimsHeldOutcome) {
+		t.Fatalf("LastError = %#v, want ClaimsHeld", ap.LastError)
+	}
+	if mock.CallCount("ClaimIssue") != 0 {
+		t.Fatalf("the held requested task was claimed anyway: %#v", mock.Calls)
+	}
+}
+
+func TestClaimHoldScope_ClearedBetweenCycles(t *testing.T) {
+	s, mock := heldSupervisor(t, scopedHold("union-autodeploy", "deploy fleet-db", "fleet-db"))
+	mock.ReadyResult = []backend.IssueData{readyIssue("PUPPET-1", "fleet-db", 1)}
+	ap := scopedAgent("falcon")
+
+	if runClaimCycle(s, ap) {
+		t.Fatal("a held repo's task was claimed")
+	}
+	if len(ap.HeldRepos) != 1 {
+		t.Fatalf("HeldRepos = %v, want the cycle's scope", ap.HeldRepos)
+	}
+	s.clearAgentSessionState(ap)
+	if ap.HeldRepos != nil {
+		t.Fatalf("HeldRepos = %v after clearAgentSessionState; it is per-cycle", ap.HeldRepos)
+	}
+	// With the hold gone the same queue is claimable again.
+	if err := s.ReleaseClaimHold("union-autodeploy", false); err != nil {
+		t.Fatalf("ReleaseClaimHold: %v", err)
+	}
+	if !runClaimCycle(s, ap) {
+		t.Fatalf("the released hold still filtered the queue: %#v", ap.LastError)
+	}
+}
+
+func TestClaimHold_CloneDeepCopiesRepos(t *testing.T) {
+	src := scopedHold("union-autodeploy", "deploy", "fleet-db", "loomcli")
+	clone := src.clone()
+	src.Repos[0] = "mutated"
+
+	if clone.Repos[0] != "fleet-db" {
+		t.Fatalf("clone.Repos = %v; clone aliased the caller's backing array", clone.Repos)
+	}
+	var nilHold *ClaimHold
+	if nilHold.clone() != nil {
+		t.Fatal("cloning a nil hold produced a non-nil hold")
+	}
+}
+
+func TestClaimHold_HoldsRepoAndScoped(t *testing.T) {
+	var nilHold *ClaimHold
+	unscoped := newHold("oleh", "deploy", time.Hour)
+	scoped := scopedHold("oleh", "deploy", "fleet-db")
+	inactive := &ClaimHold{Held: false, Repos: []string{"fleet-db"}}
+
+	cases := []struct {
+		name string
+		hold *ClaimHold
+		repo string
+		want bool
+	}{
+		{"nil hold holds nothing", nilHold, "fleet-db", false},
+		{"a released hold holds nothing", inactive, "fleet-db", false},
+		{"an unscoped hold holds every named repo", unscoped, "fleet-db", true},
+		{"a scoped hold holds its own repo", scoped, "fleet-db", true},
+		{"a scoped hold does not hold another repo", scoped, "loomcli", false},
+		{"no repo is never held", scoped, "", false},
+		{"no repo is never held, even unscoped", unscoped, "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.hold.HoldsRepo(tc.repo); got != tc.want {
+				t.Fatalf("HoldsRepo(%q) = %v, want %v", tc.repo, got, tc.want)
+			}
+		})
+	}
+
+	if nilHold.Scoped() || unscoped.Scoped() {
+		t.Fatal("a nil or unscoped hold reported a scope")
+	}
+	if !scoped.Scoped() {
+		t.Fatal("a hold naming repos reported no scope")
+	}
+	if got := ClaimHoldScopeLabel(unscoped); got != "all" {
+		t.Fatalf("ClaimHoldScopeLabel(unscoped) = %q, want \"all\"", got)
+	}
+	if got := ClaimHoldScopeLabel(scopedHold("oleh", "d", "fleet-db", "loomcli")); got != "fleet-db, loomcli" {
+		t.Fatalf("ClaimHoldScopeLabel = %q", got)
 	}
 }

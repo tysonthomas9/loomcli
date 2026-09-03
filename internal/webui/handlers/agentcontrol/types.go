@@ -76,6 +76,9 @@ type ClaimHoldView struct {
 	Reason    string `json:"reason"`
 	Since     string `json:"since"`
 	ExpiresAt string `json:"expires_at,omitempty"`
+	// Repos is the hold's repo scope. Empty means workspace-wide, which is what
+	// every hold taken before the field existed means.
+	Repos []string `json:"repos,omitempty"`
 }
 
 // ClaimHoldRunningView mirrors cli/daemon.ClaimHoldRunningAgent — an agent
@@ -99,10 +102,11 @@ type ClaimHoldStatusView struct {
 
 // claimHoldSetRequest is the POST body for taking a hold.
 type claimHoldSetRequest struct {
-	Reason     string `json:"reason"`
-	TTLSeconds int64  `json:"ttl_seconds,omitempty"`
-	Actor      string `json:"actor,omitempty"`
-	Force      bool   `json:"force,omitempty"`
+	Reason     string   `json:"reason"`
+	TTLSeconds int64    `json:"ttl_seconds,omitempty"`
+	Actor      string   `json:"actor,omitempty"`
+	Force      bool     `json:"force,omitempty"`
+	Repos      []string `json:"repos,omitempty"` // empty = every repo
 }
 
 // claimHoldReleaseRequest is the optional DELETE body.
@@ -114,9 +118,10 @@ type claimHoldReleaseRequest struct {
 // claimHoldSetArgs is the wire args of the claims_hold_set operation. It is
 // the webui-local mirror of cli/daemon.claimHoldSetArgs.
 type claimHoldSetArgs struct {
-	Held       bool   `json:"held"`
-	Actor      string `json:"actor"`
-	Reason     string `json:"reason,omitempty"`
-	TTLSeconds int64  `json:"ttl_seconds,omitempty"`
-	Force      bool   `json:"force,omitempty"`
+	Held       bool     `json:"held"`
+	Actor      string   `json:"actor"`
+	Reason     string   `json:"reason,omitempty"`
+	TTLSeconds int64    `json:"ttl_seconds,omitempty"`
+	Force      bool     `json:"force,omitempty"`
+	Repos      []string `json:"repos,omitempty"`
 }
