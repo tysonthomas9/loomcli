@@ -1,8 +1,14 @@
 /**
  * SSE (Server-Sent Events) client for real-time mutation events from the workspace event server.
- * Provides injectable token exchange, typed event callbacks, and unified manual reconnect
+ * Provides injectable token exchange, typed event callbacks, and library-managed reconnect
  * with configurable exponential backoff.
  */
+
+import {
+  EventStreamContentType,
+  fetchEventSource,
+  type EventSourceMessage,
+} from "@microsoft/fetch-event-source";
 
 import { get, ApiError, wsUrl, getApiOrigin } from "./client";
 
@@ -10,7 +16,7 @@ import { get, ApiError, wsUrl, getApiOrigin } from "./client";
 export type SseTokenResult =
   | { kind: "token"; token: string }
   | { kind: "disabled" }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string; status?: number };
 
 export async function fetchSseToken(
   workspaceId: string,
@@ -28,7 +34,11 @@ export async function fetchSseToken(
       return { kind: "disabled" };
     }
     const message = err instanceof Error ? err.message : "Unknown error";
-    return { kind: "error", message };
+    return {
+      kind: "error",
+      message,
+      ...(err instanceof ApiError ? { status: err.status } : {}),
+    };
   }
 }
 
@@ -71,12 +81,15 @@ export interface SSEClientOptions {
   maxReconnectDelay?: number;
 }
 
+class FatalSSEError extends Error {}
+
+const FATAL_TOKEN_STATUSES = new Set([401, 403]);
+
 /**
  * SSE client for workspace mutation events.
- * Uses unified manual reconnect with configurable exponential backoff.
+ * Uses fetch-event-source retry handling with configurable exponential backoff.
  */
 export class WorkspaceSSEClient {
-  private eventSource: EventSource | null = null;
   private state: ConnectionState = "disconnected";
   private reconnectAttempts = 0;
   private lastEventId: string | undefined;
@@ -85,7 +98,8 @@ export class WorkspaceSSEClient {
   private workspaceId: string;
   private destroyed = false;
   private connectAbortController: AbortController | null = null;
-  private retryTimerId: ReturnType<typeof setTimeout> | null = null;
+  private connectionGeneration = 0;
+  private connectedFrameSeenForOpen = false;
 
   private onMutation: ((mutation: MutationPayload) => void) | undefined;
   private onError: ((error: string) => void) | undefined;
@@ -111,8 +125,11 @@ export class WorkspaceSSEClient {
 
   /**
    * Connect to the SSE endpoint.
+   * Starts the retry loop and resolves once that loop has been started; it does
+   * not wait for the token exchange or an open connection.
    * @param since Optional cursor to receive events after
-   * @param sourceRepos Optional repo filter for server-side event filtering
+   * @param sourceRepos Optional repo filter for server-side event filtering.
+   * When omitted, the previously configured filter is retained.
    */
   async connect(
     since?: string | number,
@@ -120,8 +137,6 @@ export class WorkspaceSSEClient {
   ): Promise<void> {
     if (this.destroyed) return;
 
-    // Always update stored sourceRepos even if we bail early,
-    // so retryNow() uses the latest filter
     if (sourceRepos !== undefined) {
       this.currentSourceRepos = sourceRepos;
     }
@@ -133,65 +148,77 @@ export class WorkspaceSSEClient {
     this.manualDisconnect = false;
     this.setState("connecting");
 
-    // Create AbortController for this connection attempt
+    // A direct connect while reconnecting replaces the library-owned retry loop.
+    this.connectAbortController?.abort();
     const abortController = new AbortController();
     this.connectAbortController = abortController;
-
-    // Fetch opaque SSE token (injectable or default)
-    let tokenResult: SseTokenResult;
-    try {
-      tokenResult = await this.fetchTokenFn();
-    } catch (err) {
-      // Custom fetchToken threw — treat as error
-      if (abortController.signal.aborted || this.destroyed) return;
-      const message = err instanceof Error ? err.message : "Unknown error";
-      this.onError?.(`SSE auth failed: ${message}`);
-      this.setState("disconnected");
-      return;
-    }
-
-    // Bail out if aborted or destroyed while awaiting token
-    if (
-      abortController.signal.aborted ||
-      this.destroyed ||
-      this.manualDisconnect ||
-      this.state === "disconnected"
-    ) {
-      return;
-    }
-
-    if (tokenResult.kind === "error") {
-      this.onError?.(`SSE auth failed: ${tokenResult.message}`);
-      this.setState("disconnected");
-      return;
-    }
-
-    const opaqueToken =
-      tokenResult.kind === "token" ? tokenResult.token : undefined;
-
-    // Use provided since value or fall back to last received event ID
+    const generation = ++this.connectionGeneration;
     const sinceParam = since ?? this.lastEventId;
     const url = getSSEUrl(
       this.workspaceId,
       sinceParam,
-      sourceRepos,
-      opaqueToken,
+      this.currentSourceRepos,
     );
+    let streamAttempt = 0;
 
-    try {
-      this.eventSource = new EventSource(url);
-      this.eventSource.onopen = () => this.handleOpen();
-      this.eventSource.onerror = () => this.handleError();
-      this.eventSource.addEventListener("mutation", (e) =>
-        this.handleMutation(e as MessageEvent),
-      );
-      this.eventSource.addEventListener("connected", () =>
-        this.handleConnected(),
-      );
-    } catch (err) {
-      console.error("[SSE] Failed to create EventSource:", err);
-      this.scheduleReconnect();
-    }
+    void fetchEventSource(url, {
+      signal: abortController.signal,
+      openWhenHidden: true,
+      fetch: (input, init) =>
+        this.fetchStream(
+          input,
+          init,
+          abortController,
+          generation,
+          streamAttempt++ > 0,
+        ),
+      onopen: (response): Promise<void> => {
+        if (!this.isActive(abortController, generation)) {
+          return Promise.resolve();
+        }
+        const contentType = response.headers.get("content-type");
+        if (!response.ok) {
+          throw new Error(`SSE stream request failed: ${response.status}`);
+        }
+        if (!contentType?.startsWith(EventStreamContentType)) {
+          throw new Error(
+            `Expected content-type to be ${EventStreamContentType}, Actual: ${contentType}`,
+          );
+        }
+        this.handleOpen(abortController, generation);
+        return Promise.resolve();
+      },
+      onmessage: (event) => {
+        if (this.isActive(abortController, generation)) {
+          this.handleMessage(event);
+        }
+      },
+      onclose: () => {
+        if (this.isActive(abortController, generation)) {
+          throw new Error("SSE stream closed");
+        }
+      },
+      // Intentionally return our exponential delay from every error. This
+      // overrides the server's `retry:` directive so token, HTTP, and stream
+      // failures all use one capped reconnect policy.
+      onerror: (error) => this.handleError(error, abortController, generation),
+    }).catch((error: unknown) => {
+      // Fatal errors are reported in handleError. Abort resolves normally, and
+      // this final guard prevents a stale connection from changing new state.
+      if (
+        this.isActive(abortController, generation) &&
+        !(error instanceof FatalSSEError)
+      ) {
+        const message =
+          error instanceof Error ? error.message : "Unknown error";
+        this.callSafely(
+          "onError",
+          this.onError,
+          `SSE connection failed: ${message}`,
+        );
+        this.setState("disconnected");
+      }
+    });
   }
 
   /**
@@ -202,22 +229,9 @@ export class WorkspaceSSEClient {
 
     this.manualDisconnect = true;
 
-    // Abort any in-flight token fetch
-    if (this.connectAbortController) {
-      this.connectAbortController.abort();
-      this.connectAbortController = null;
-    }
-
-    // Clear any pending retry timer
-    if (this.retryTimerId !== null) {
-      clearTimeout(this.retryTimerId);
-      this.retryTimerId = null;
-    }
-
-    if (this.eventSource) {
-      this.eventSource.close();
-      this.eventSource = null;
-    }
+    this.connectionGeneration++;
+    this.connectAbortController?.abort();
+    this.connectAbortController = null;
 
     this.setState("disconnected");
   }
@@ -254,21 +268,11 @@ export class WorkspaceSSEClient {
     if (this.destroyed) return;
     if (this.state !== "reconnecting") return;
 
-    // Clear pending retry timer
-    if (this.retryTimerId !== null) {
-      clearTimeout(this.retryTimerId);
-      this.retryTimerId = null;
-    }
-
-    // Close existing EventSource if any
-    if (this.eventSource) {
-      this.eventSource.close();
-      this.eventSource = null;
-    }
-
+    this.connectAbortController?.abort();
+    this.connectAbortController = null;
     this.reconnectAttempts = 0;
-    this.onReconnect?.(0);
-    this.connect(undefined, this.currentSourceRepos);
+    this.callSafely("onReconnect", this.onReconnect, 0);
+    void this.connect(undefined, this.currentSourceRepos);
   }
 
   /**
@@ -279,17 +283,10 @@ export class WorkspaceSSEClient {
     if (this.destroyed) return;
     this.destroyed = true;
 
-    // Abort any in-flight token fetch
-    if (this.connectAbortController) {
-      this.connectAbortController.abort();
-      this.connectAbortController = null;
-    }
-
-    // Clear any pending retry timer
-    if (this.retryTimerId !== null) {
-      clearTimeout(this.retryTimerId);
-      this.retryTimerId = null;
-    }
+    this.manualDisconnect = true;
+    this.connectionGeneration++;
+    this.connectAbortController?.abort();
+    this.connectAbortController = null;
 
     // Clear callbacks first to prevent any callbacks during cleanup
     this.onMutation = undefined;
@@ -297,52 +294,52 @@ export class WorkspaceSSEClient {
     this.onStateChange = undefined;
     this.onReconnect = undefined;
     this.onConnected = undefined;
-
-    if (this.eventSource) {
-      this.eventSource.close();
-      this.eventSource = null;
-    }
   }
 
   private setState(state: ConnectionState): void {
     if (this.state !== state) {
       this.state = state;
-      this.onStateChange?.(state);
+      this.callSafely("onStateChange", this.onStateChange, state);
     }
   }
 
-  private handleOpen(): void {
+  private handleOpen(
+    abortController: AbortController,
+    generation: number,
+  ): void {
     const wasReconnecting = this.reconnectAttempts > 0;
+    this.connectedFrameSeenForOpen = false;
     this.setState("connected");
+    this.throwIfInactive(abortController, generation);
     this.reconnectAttempts = 0;
     // Only notify about reconnect counter reset if we were actually reconnecting
     if (wasReconnecting) {
-      this.onReconnect?.(0);
+      this.callSafely("onReconnect", this.onReconnect, 0);
     }
   }
 
-  private handleConnected(): void {
-    this.onConnected?.();
-  }
-
-  private handleError(): void {
-    // If manually disconnected, don't process error
-    if (this.manualDisconnect) return;
-    if (this.destroyed) return;
-
-    // Unified manual reconnect: always close EventSource and schedule retry
-    if (this.eventSource) {
-      this.eventSource.close();
-      this.eventSource = null;
+  private handleError(
+    error: unknown,
+    abortController: AbortController,
+    generation: number,
+  ): number {
+    if (!this.isActive(abortController, generation)) {
+      throw new FatalSSEError("SSE connection superseded");
+    }
+    if (error instanceof FatalSSEError) {
+      this.callSafely("onError", this.onError, error.message);
+      this.setState("disconnected");
+      throw error;
     }
 
-    this.scheduleReconnect();
-  }
-
-  private scheduleReconnect(): void {
     this.reconnectAttempts++;
     this.setState("reconnecting");
-    this.onReconnect?.(this.reconnectAttempts);
+    this.throwIfInactive(abortController, generation);
+    this.callSafely("onReconnect", this.onReconnect, this.reconnectAttempts);
+    // A callback may synchronously call retryNow(), which aborts this loop and
+    // starts a new generation. Throwing here prevents fetch-event-source from
+    // scheduling the superseded loop's timer.
+    this.throwIfInactive(abortController, generation);
 
     // Log warning after multiple failures
     if (this.reconnectAttempts === 5) {
@@ -352,27 +349,24 @@ export class WorkspaceSSEClient {
     }
 
     // Exponential backoff: min(initialDelay * 2^(attempts-1), maxDelay)
-    const delay = Math.min(
+    return Math.min(
       this.initialReconnectDelay * Math.pow(2, this.reconnectAttempts - 1),
       this.maxReconnectDelay,
     );
-
-    this.retryTimerId = setTimeout(() => {
-      this.retryTimerId = null;
-      if (
-        !this.manualDisconnect &&
-        !this.destroyed &&
-        this.state === "reconnecting"
-      ) {
-        this.connect(undefined, this.currentSourceRepos);
-      }
-    }, delay);
   }
 
-  private handleMutation(event: MessageEvent): void {
+  private handleMessage(event: EventSourceMessage): void {
+    if (event.event === "connected") {
+      if (this.connectedFrameSeenForOpen) return;
+      this.connectedFrameSeenForOpen = true;
+      this.callSafely("onConnected", this.onConnected);
+      return;
+    }
+    if (event.event !== "mutation") return;
+
     let mutation: MutationPayload;
     try {
-      mutation = JSON.parse(event.data as string);
+      mutation = JSON.parse(event.data) as MutationPayload;
     } catch {
       // Invalid JSON - log and skip
       console.warn("[SSE] Received malformed mutation event");
@@ -381,11 +375,97 @@ export class WorkspaceSSEClient {
 
     // Track the server-provided event ID for reconnection catch-up. Fleet-db
     // emits opaque durable cursors here, so preserve the value as-is.
-    if (event.lastEventId) {
-      this.lastEventId = event.lastEventId;
+    if (event.id) {
+      this.lastEventId = event.id;
     }
 
-    this.onMutation?.(mutation);
+    this.callSafely("onMutation", this.onMutation, mutation);
+  }
+
+  private async fetchStream(
+    input: RequestInfo | URL,
+    init: RequestInit | undefined,
+    abortController: AbortController,
+    generation: number,
+    isRetry: boolean,
+  ): Promise<Response> {
+    let tokenResult: SseTokenResult;
+    try {
+      tokenResult = await this.fetchTokenFn();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      tokenResult = {
+        kind: "error",
+        message,
+        ...(error instanceof ApiError ? { status: error.status } : {}),
+      };
+    }
+
+    if (!this.isActive(abortController, generation)) {
+      throw new FatalSSEError("SSE connection superseded");
+    }
+    if (tokenResult.kind === "error" && tokenResult.status !== 404) {
+      const message = `SSE auth failed: ${tokenResult.message}`;
+      if (
+        tokenResult.status !== undefined &&
+        FATAL_TOKEN_STATUSES.has(tokenResult.status)
+      ) {
+        throw new FatalSSEError(message);
+      }
+      throw new Error(message);
+    }
+
+    const requestUrl = new URL(
+      input instanceof Request ? input.url : String(input),
+      window.location.href,
+    );
+    requestUrl.searchParams.delete("token");
+
+    // The input URL is reused by fetch-event-source. `since` belongs only to
+    // the first request; retries use the library's Last-Event-ID header, which
+    // may also have been explicitly cleared by an empty `id:` line.
+    if (isRetry) {
+      requestUrl.searchParams.delete("since");
+    }
+    if (tokenResult.kind === "token") {
+      requestUrl.searchParams.set("token", tokenResult.token);
+    }
+
+    return window.fetch(requestUrl, init);
+  }
+
+  private isActive(
+    abortController: AbortController,
+    generation: number,
+  ): boolean {
+    return (
+      !abortController.signal.aborted &&
+      !this.destroyed &&
+      !this.manualDisconnect &&
+      generation === this.connectionGeneration
+    );
+  }
+
+  private throwIfInactive(
+    abortController: AbortController,
+    generation: number,
+  ): void {
+    if (!this.isActive(abortController, generation)) {
+      throw new FatalSSEError("SSE connection superseded");
+    }
+  }
+
+  private callSafely<Args extends unknown[]>(
+    name: string,
+    callback: ((...args: Args) => void) | undefined,
+    ...args: Args
+  ): void {
+    if (!callback) return;
+    try {
+      callback(...args);
+    } catch (error) {
+      console.error(`[SSE] ${name} callback threw:`, error);
+    }
   }
 }
 
