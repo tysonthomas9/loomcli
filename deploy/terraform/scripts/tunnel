@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# Open IAP tunnels for the UI, the loom API and fleet-db.
+#
+# Local and remote ports come from Terraform (tunnel_*_port and *_port
+# outputs), not from formulas repeated here. loom's LOOM_FRONTEND_URL has to
+# allow the exact origin the browser will send, so the ports have exactly one
+# owner; when this script derived them independently the two drifted and the
+# file-browser routes started failing with an origin loom did not recognise.
+#
+# Nothing here kills a listener it did not start. A busy port or a tunnel that
+# exits before binding is an error, not a partial success: printing a URL while
+# one of the three tunnels is absent makes browser/API failures look random.
+set -euo pipefail
+
+usage() {
+  echo "usage: $0 --name=STACK --project=PROJECT --zone=ZONE --ui-local=PORT --api-local=PORT --db-local=PORT --ui-remote=PORT --api-remote=PORT --db-remote=PORT --workspace=KEY" >&2
+  exit 2
+}
+
+for arg in "$@"; do
+  case "$arg" in
+    --name=*) NAME="${arg#*=}" ;;
+    --project=*) PROJECT="${arg#*=}" ;;
+    --zone=*) ZONE="${arg#*=}" ;;
+    --ui-local=*) UI_LOCAL="${arg#*=}" ;;
+    --api-local=*) API_LOCAL="${arg#*=}" ;;
+    --db-local=*) DB_LOCAL="${arg#*=}" ;;
+    --ui-remote=*) UI_REMOTE="${arg#*=}" ;;
+    --api-remote=*) API_REMOTE="${arg#*=}" ;;
+    --db-remote=*) DB_REMOTE="${arg#*=}" ;;
+    --workspace=*) WORKSPACE="${arg#*=}" ;;
+    *) usage ;;
+  esac
+done
+
+: "${NAME:?missing --name}"
+: "${PROJECT:?missing --project}"
+: "${ZONE:?missing --zone}"
+: "${UI_LOCAL:?missing --ui-local}"
+: "${API_LOCAL:?missing --api-local}"
+: "${DB_LOCAL:?missing --db-local}"
+: "${UI_REMOTE:?missing --ui-remote}"
+: "${API_REMOTE:?missing --api-remote}"
+: "${DB_REMOTE:?missing --db-remote}"
+: "${WORKSPACE:?missing --workspace}"
+
+declare -a REMOTE=("$UI_REMOTE" "$API_REMOTE" "$DB_REMOTE")
+declare -a LOCAL=("$UI_LOCAL" "$API_LOCAL" "$DB_LOCAL")
+declare -a LABEL=(ui api fleetdb)
+
+pids=()
+logs=()
+
+cleanup() {
+  local pid log
+  for pid in "${pids[@]}"; do
+    kill "$pid" 2>/dev/null || true
+  done
+  for pid in "${pids[@]}"; do
+    wait "$pid" 2>/dev/null || true
+  done
+  for log in "${logs[@]}"; do
+    rm -f -- "$log"
+  done
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM
+
+# Check all ports before launching any child, so a collision cannot leave a
+# confusing subset of tunnels running.
+for i in "${!REMOTE[@]}"; do
+  local_port="${LOCAL[$i]}"
+  if lsof -nP -iTCP:"$local_port" -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "port $local_port busy for ${LABEL[$i]} (not killing a listener I did not start)" >&2
+    exit 1
+  fi
+done
+
+for i in "${!REMOTE[@]}"; do
+  local_port="${LOCAL[$i]}"
+  log="$(mktemp "${TMPDIR:-/tmp}/loom-iap.XXXXXX")"
+  logs+=("$log")
+  gcloud compute start-iap-tunnel "$NAME" "${REMOTE[$i]}" \
+    --local-host-port="localhost:$local_port" \
+    --project "$PROJECT" --zone "$ZONE" >"$log" 2>&1 &
+  pids+=($!)
+done
+
+for i in "${!pids[@]}"; do
+  ready=0
+  for _ in $(seq 1 30); do
+    if lsof -nP -iTCP:"${LOCAL[$i]}" -sTCP:LISTEN >/dev/null 2>&1; then
+      ready=1
+      break
+    fi
+    if ! kill -0 "${pids[$i]}" 2>/dev/null; then
+      wait "${pids[$i]}" 2>/dev/null || true
+      echo "${LABEL[$i]} tunnel exited before binding:" >&2
+      cat "${logs[$i]}" >&2
+      break
+    fi
+    sleep 1
+  done
+  if [ "$ready" -ne 1 ]; then
+    echo "${LABEL[$i]} tunnel did not bind localhost:${LOCAL[$i]} within 30s:" >&2
+    cat "${logs[$i]}" >&2
+    exit 1
+  fi
+  echo "${LABEL[$i]}  http://localhost:${LOCAL[$i]}"
+done
+
+echo
+echo "UI: http://localhost:${UI_LOCAL}/ws/${WORKSPACE}/kanban"
+echo "ctrl-c to close the tunnels"
+
+# A bare wait returns the status of only the last child and can hide a tunnel
+# that died while another one stayed alive. Monitor every child instead.
+while :; do
+  for i in "${!pids[@]}"; do
+    if ! kill -0 "${pids[$i]}" 2>/dev/null; then
+      code=0
+      wait "${pids[$i]}" || code=$?
+      echo "${LABEL[$i]} tunnel exited (status $code):" >&2
+      cat "${logs[$i]}" >&2
+      exit 1
+    fi
+  done
+  sleep 1
+done

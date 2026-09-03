@@ -1,0 +1,24 @@
+project_id = "my-gcp-project"
+region     = "us-central1"
+zone       = "us-central1-a"
+name       = "loom-stack"
+
+# Pin by commit tag or digest. :latest makes a redeploy unreproducible and
+# gives you no way to say which build is running.
+fleetdb_image = "us-central1-docker.pkg.dev/my-gcp-project/loom/fleet-db:ac3412e"
+loom_image    = "us-central1-docker.pkg.dev/my-gcp-project/loom/loom:452a877"
+ui_image      = "us-central1-docker.pkg.dev/my-gcp-project/loom/loom-ui:452a877"
+
+# false keeps the VM off the public internet; Cloud NAT gives it outbound
+# access for image pulls. Set both to true only if you need inbound access
+# without IAP.
+enable_external_ip = false
+enable_cloud_nat   = true
+
+# machine_type = "e2-standard-2"   # ~$49/mo running, ~$2/mo stopped
+# machine_type = "e2-medium"       # ~$24/mo, only if you drop the loom daemon
+
+labels = {
+  owner = "platform"
+  env   = "dev"
+}
