@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -24,6 +25,26 @@ type fakeIssueBackend struct {
 	backend.IssueBackend
 	task  *backend.IssueDetailData
 	actor string
+}
+
+type failingOpenAgentSessionStore struct {
+	store.AgentSessionStore
+}
+
+func (s failingOpenAgentSessionStore) Open(context.Context, store.SessionRunContext, store.SessionDescriptor) (store.SessionRef, error) {
+	return store.SessionRef{}, &store.SessionLifecycleTransientError{
+		Code: store.SessionLifecycleErrContention,
+		Err:  domain.ErrConflict,
+	}
+}
+
+type agentSessionStoreOverride struct {
+	store.Store
+	agentSessions store.AgentSessionStore
+}
+
+func (s agentSessionStoreOverride) AgentSessions() store.AgentSessionStore {
+	return s.agentSessions
 }
 
 func (f *fakeIssueBackend) Get(_ context.Context, _ string) (*backend.IssueDetailData, error) {
@@ -182,6 +203,189 @@ func TestTaskRunOpAuthRejections(t *testing.T) {
 				t.Fatalf("error code = %q, want %q", code, tt.wantCode)
 			}
 		})
+	}
+}
+
+func TestTaskRunSessionOpenAuthRejectedWithoutLease(t *testing.T) {
+	h := newHarness(t)
+	resp, decoded := h.postOp(t, "session-open", map[string]any{
+		"invocationKey": "agent",
+		"backend":       "codex",
+		"model":         "gpt-5",
+	}, identity{noAuth: true})
+	if resp.StatusCode != http.StatusUnauthorized || errorCode(t, decoded) != "unauthenticated" {
+		t.Fatalf("session-open without lease = %d %v, want 401 unauthenticated", resp.StatusCode, decoded)
+	}
+}
+
+func TestTaskRunSessionOpenProjectsLifecycleErrors(t *testing.T) {
+	h := newHarness(t)
+	open := func(body map[string]any) (int, string, map[string]any) {
+		resp, decoded := h.postOp(t, "session-open", body, identity{})
+		if resp.StatusCode == http.StatusOK {
+			return resp.StatusCode, "", decoded
+		}
+		return resp.StatusCode, errorCode(t, decoded), decoded
+	}
+	valid := map[string]any{
+		"invocationKey": "agent",
+		"backend":       "codex",
+		"model":         "gpt-5",
+		"kind":          "judge",
+		"tags":          []string{"eval"},
+		"metadata":      map[string]string{"judged_session_id": "target-1"},
+	}
+	status, code, opened := open(valid)
+	if status != http.StatusOK || code != "" || opened["sessionId"] != "task-run-1-a1-agent" || opened["attempt"] != float64(1) {
+		t.Fatalf("session-open = %d %q %v, want composed id and attempt", status, code, opened)
+	}
+
+	conflict := maps.Clone(valid)
+	conflict["backend"] = "claude"
+	status, code, decoded := open(conflict)
+	if status != http.StatusConflict || code != store.SessionLifecycleErrDescriptorConflict {
+		t.Fatalf("descriptor conflict = %d %q %v", status, code, decoded)
+	}
+
+	status, code, decoded = open(map[string]any{
+		"invocationKey": "Bad Key",
+		"backend":       "codex",
+		"model":         "gpt-5",
+	})
+	if status != http.StatusBadRequest || code != "invalid" {
+		t.Fatalf("invalid invocation key = %d %q %v", status, code, decoded)
+	}
+}
+
+func TestTaskRunSessionOpenOnTerminalRunProjectsLifecycleCode(t *testing.T) {
+	h := newHarness(t)
+	resp, completed := h.postOp(t, "complete", map[string]any{"status": "completed"}, identity{})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("complete task run = %d %v", resp.StatusCode, completed)
+	}
+	resp, decoded := h.postOp(t, "session-open", map[string]any{
+		"invocationKey": "agent",
+		"backend":       "codex",
+		"model":         "gpt-5",
+	}, identity{})
+	if resp.StatusCode != http.StatusConflict || errorCode(t, decoded) != store.SessionLifecycleErrTaskRunTerminal {
+		t.Fatalf("terminal session-open = %d %v, want 409 task_run_terminal", resp.StatusCode, decoded)
+	}
+}
+
+func TestTaskRunSessionOpenProjectsTransientLifecycleError(t *testing.T) {
+	h := newHarness(t)
+	override := agentSessionStoreOverride{
+		Store:         h.store,
+		agentSessions: failingOpenAgentSessionStore{AgentSessionStore: h.store.AgentSessions()},
+	}
+	module := NewModule(Config{Store: override})
+	mux := http.NewServeMux()
+	module.Register(mux)
+	h.server = httptest.NewServer(mux)
+	t.Cleanup(h.server.Close)
+
+	resp, decoded := h.postOp(t, "session-open", map[string]any{
+		"invocationKey": "agent",
+		"backend":       "codex",
+		"model":         "gpt-5",
+	}, identity{})
+	if resp.StatusCode != http.StatusServiceUnavailable || errorCode(t, decoded) != store.SessionLifecycleErrContention {
+		t.Fatalf("transient session-open = %d %v, want 503 session_lifecycle_contention", resp.StatusCode, decoded)
+	}
+}
+
+func TestTaskRunSessionCloseFirstTerminalWins(t *testing.T) {
+	h := newHarness(t)
+	resp, opened := h.postOp(t, "session-open", map[string]any{
+		"invocationKey": "agent",
+		"backend":       "codex",
+		"model":         "gpt-5",
+	}, identity{})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("session-open = %d %v", resp.StatusCode, opened)
+	}
+	sessionID, _ := opened["sessionId"].(string)
+	close := map[string]any{
+		"sessionId":     sessionID,
+		"status":        "completed",
+		"exitCode":      0,
+		"summary":       "done",
+		"transcriptRef": "artifact://transcript-task-run-1-a1-agent",
+		"metadata": map[string]string{
+			"driver_runner_session_id": "backend-session-1",
+		},
+	}
+	resp, closed := h.postOp(t, "session-close", close, identity{})
+	if resp.StatusCode != http.StatusOK || closed["status"] != "completed" {
+		t.Fatalf("session-close = %d %v", resp.StatusCode, closed)
+	}
+	// Same outcome is a no-op success.
+	resp, replay := h.postOp(t, "session-close", close, identity{})
+	if resp.StatusCode != http.StatusOK || replay["status"] != "completed" {
+		t.Fatalf("session-close replay = %d %v", resp.StatusCode, replay)
+	}
+
+	conflict := maps.Clone(close)
+	conflict["status"] = "failed"
+	resp, decoded := h.postOp(t, "session-close", conflict, identity{})
+	if resp.StatusCode != http.StatusConflict || errorCode(t, decoded) != store.SessionLifecycleErrOutcomeConflict {
+		t.Fatalf("conflicting session-close = %d %v", resp.StatusCode, decoded)
+	}
+
+	session, err := h.store.AgentSessions().Get(context.Background(), "WS", sessionID)
+	if err != nil {
+		t.Fatalf("get finalized session: %v", err)
+	}
+	if got := session.Metadata[store.SessionMetadataDriverRunnerSessionID]; got != "backend-session-1" {
+		t.Fatalf("driver runner session stamp = %q, want backend-session-1", got)
+	}
+	if _, ok := session.Metadata[store.SessionMetadataUsageTokens]; ok {
+		t.Fatalf("missing usage was written as tokens=0: %v", session.Metadata)
+	}
+}
+
+func TestTaskRunSessionCloseAuthRejected(t *testing.T) {
+	h := newHarness(t)
+	resp, decoded := h.postOp(t, "session-close", map[string]any{
+		"sessionId": "task-run-1-a1-agent",
+		"status":    "completed",
+	}, identity{noAuth: true})
+	if resp.StatusCode != http.StatusUnauthorized || errorCode(t, decoded) != "unauthenticated" {
+		t.Fatalf("session-close without lease = %d %v, want 401 unauthenticated", resp.StatusCode, decoded)
+	}
+}
+
+func TestTaskRunSessionCloseUnknownSession(t *testing.T) {
+	h := newHarness(t)
+	resp, decoded := h.postOp(t, "session-close", map[string]any{
+		"sessionId": "task-run-1-a1-missing",
+		"status":    "completed",
+	}, identity{})
+	if resp.StatusCode != http.StatusNotFound || errorCode(t, decoded) != "not_found" {
+		t.Fatalf("unknown session-close = %d %v, want 404 not_found", resp.StatusCode, decoded)
+	}
+}
+
+func TestTaskRunSessionCloseRejectsCrossRunOwnership(t *testing.T) {
+	h := newHarness(t)
+	if _, err := h.store.TaskRuns().Create(t.Context(), store.TaskRunCreate{
+		WorkspaceKey: "WS", TaskRunID: "task-run-2", TaskID: "TASK-2", Status: domain.TaskRunRunning,
+	}); err != nil {
+		t.Fatalf("create foreign task run: %v", err)
+	}
+	foreign, err := h.store.AgentSessions().Open(t.Context(), store.SessionRunContext{
+		WorkspaceKey: "WS", TaskRunID: "task-run-2", Attempt: 1, FencingToken: 43,
+	}, store.SessionDescriptor{InvocationKey: "agent", Backend: "codex", Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("open foreign session: %v", err)
+	}
+	resp, decoded := h.postOp(t, "session-close", map[string]any{
+		"sessionId": foreign.SessionID,
+		"status":    "completed",
+	}, identity{})
+	if resp.StatusCode != http.StatusNotFound || errorCode(t, decoded) != "not_found" {
+		t.Fatalf("cross-run session-close = %d %v, want 404 not_found", resp.StatusCode, decoded)
 	}
 }
 

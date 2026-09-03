@@ -7,6 +7,7 @@
 
 import {
   ArtifactHandle,
+  AgentExecResult,
   CompleteRunResponse,
   DriverApiError,
   DriverApiErrorCode,
@@ -202,6 +203,18 @@ export async function exerciseRunnerSurface(): Promise<void> {
   const serveRunner: TaskRunClient = TaskRunClient.fromEnv({}, { apiUrl: "http://127.0.0.1:8080" });
   expectType<boolean>(serveRunner.serveMode);
   expectType<string>(serveRunner.apiUrl);
+  const invocation: AgentExecResult = await serveRunner.agent.exec({
+    invocationKey: "agent",
+    backend: "codex",
+    argv: ["codex", "exec", "hello"],
+    transcript: "minimal",
+    redactSecrets: ["declared-secret"],
+  });
+  expectType<boolean>(invocation.session.degraded);
+  expectType<string | null>(invocation.session.degradedReason);
+  expectType<string>(invocation.runtimeMetadata.observability_degraded || "");
+  await serveRunner.sessionOpen({ invocationKey: "judge", backend: "codex", model: "gpt-5", kind: "judge" });
+  await serveRunner.sessionClose({ sessionId: "task-run-1-a1-judge", status: "completed", usage: { tokens: 1, cost: null } });
 }
 
 export function exerciseRuntimeAdapterSurface(): void {

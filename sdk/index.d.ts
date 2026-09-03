@@ -36,6 +36,17 @@ export {
 } from "./driver.js";
 
 export {
+  AgentExecFinalizeInput,
+  AgentExecResult,
+  AgentExecSession,
+  AgentExecSpec,
+  AgentExecSpecError,
+  AgentSessionCloseInput,
+  AgentSessionCloseResult,
+  AgentSessionKind,
+  AgentSessionOpenInput,
+  AgentSessionOpenResult,
+  AgentSessionUsage,
   Artifact,
   ArtifactDeclareInput,
   ArtifactFinalizeInput,

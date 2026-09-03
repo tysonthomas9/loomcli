@@ -113,6 +113,8 @@ func NewModule(cfg Config) *Module {
 		"artifact-get":       m.artifactGet,
 		"artifact-list":      m.artifactList,
 		"artifact-finalize":  m.artifactFinalize,
+		"session-open":       m.sessionOpen,
+		"session-close":      m.sessionClose,
 	}
 	if m.issueBackends == nil {
 		m.issueBackends = defaultIssueBackends(cfg.FleetBaseURL)
@@ -492,6 +494,16 @@ func writeOpErrorDetails(w http.ResponseWriter, status int, code, message string
 // superseded, or the run is no longer live) so runners distinguish "my lease
 // is dead" from op-level conflicts.
 func writeDomainOpError(w http.ResponseWriter, err error) {
+	var lifecycleErr *store.SessionLifecycleError
+	if errors.As(err, &lifecycleErr) {
+		writeOpError(w, http.StatusConflict, lifecycleErr.Code, lifecycleErr.Error(), lifecycleErr.Retryable())
+		return
+	}
+	var lifecycleTransient *store.SessionLifecycleTransientError
+	if errors.As(err, &lifecycleTransient) {
+		writeOpError(w, http.StatusServiceUnavailable, lifecycleTransient.Code, lifecycleTransient.Error(), lifecycleTransient.Retryable())
+		return
+	}
 	switch {
 	case errors.Is(err, errLeaseDenied):
 		writeOpError(w, http.StatusUnauthorized, "lease_denied", err.Error(), false)
