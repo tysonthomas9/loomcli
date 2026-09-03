@@ -342,7 +342,7 @@ func TestCloseAgentLogs_NoMirror(t *testing.T) {
 	if ap.LogFile != nil || ap.ArchiveLogFile != nil || ap.stopLogMirror != nil {
 		t.Error("closeAgentLogs left handles or the mirror stop func set")
 	}
-	if ap.LogFileStartOffset != 0 {
-		t.Error("closeAgentLogs did not clear LogFileStartOffset")
-	}
+	// LogFileStartOffset is deliberately not asserted here: it outlives the
+	// close so classifyAgentExit can read it. See
+	// TestCloseAgentLogs_PreservesClassificationOffset.
 }
