@@ -846,6 +846,105 @@ describe("useEventProvider", () => {
       );
     });
 
+    it("reconnects the first undefined-to-array change with one handshake epoch and no refresh", async () => {
+      const epochValues: number[] = [];
+      const mutationListener = vi.fn();
+      function EventProbe(): null {
+        const { connectionEpoch } = useEventContext();
+        React.useEffect(() => {
+          epochValues.push(connectionEpoch);
+        }, [connectionEpoch]);
+        useEventSubscription(mutationListener);
+        return null;
+      }
+      const { rerender } = render(
+        <EventProvider sourceRepos={undefined}>
+          <EventProbe />
+        </EventProvider>,
+      );
+      await flushConnect();
+
+      act(() => {
+        MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
+        MockFetchEventSourceAttempt.lastInstance?.simulateConnected();
+      });
+      expect(epochValues).toEqual([0, 1]);
+
+      const firstInstance = MockFetchEventSourceAttempt.lastInstance;
+      rerender(
+        <EventProvider sourceRepos={["repo-a"]}>
+          <EventProbe />
+        </EventProvider>,
+      );
+      await flushConnect();
+
+      expect(firstInstance?.readyState).toBe(
+        MockFetchEventSourceAttempt.CLOSED,
+      );
+      expect(MockFetchEventSourceAttempt.instances).toHaveLength(2);
+      expect(MockFetchEventSourceAttempt.lastInstance?.url).toContain(
+        "source_repos=repo-a",
+      );
+      expect(epochValues).toEqual([0, 1]);
+      expect(mutationListener).not.toHaveBeenCalled();
+
+      act(() => {
+        MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
+        MockFetchEventSourceAttempt.lastInstance?.simulateConnected();
+      });
+
+      expect(epochValues).toEqual([0, 1, 2]);
+      expect(mutationListener).not.toHaveBeenCalled();
+    });
+
+    it("reconnects without source-repository scoping when the filter is cleared", async () => {
+      const { rerender } = render(
+        <EventProvider sourceRepos={["repo-a"]}>
+          <div>child</div>
+        </EventProvider>,
+      );
+      await flushConnect();
+      const firstInstance = MockFetchEventSourceAttempt.lastInstance;
+
+      rerender(
+        <EventProvider sourceRepos={undefined}>
+          <div>child</div>
+        </EventProvider>,
+      );
+      await flushConnect();
+
+      expect(firstInstance?.readyState).toBe(
+        MockFetchEventSourceAttempt.CLOSED,
+      );
+      expect(MockFetchEventSourceAttempt.instances).toHaveLength(2);
+      expect(MockFetchEventSourceAttempt.lastInstance?.url).not.toContain(
+        "source_repos",
+      );
+    });
+
+    it("does not reconnect when sourceRepos are only reordered", async () => {
+      const { rerender } = render(
+        <EventProvider sourceRepos={["repo-a", "repo-b"]}>
+          <div>child</div>
+        </EventProvider>,
+      );
+      await flushConnect();
+      const firstInstance = MockFetchEventSourceAttempt.lastInstance;
+
+      act(() => {
+        firstInstance?.simulateOpen();
+      });
+      rerender(
+        <EventProvider sourceRepos={["repo-b", "repo-a"]}>
+          <div>child</div>
+        </EventProvider>,
+      );
+      await flushConnect();
+
+      expect(MockFetchEventSourceAttempt.instances).toHaveLength(1);
+      expect(firstInstance?.readyState).toBe(MockFetchEventSourceAttempt.OPEN);
+    });
+
     it("reconnects when sourceRepos changes", async () => {
       let epoch = 0;
       function EpochProbe(): null {
