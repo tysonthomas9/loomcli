@@ -76,9 +76,19 @@ func markSessionReplaced(
 	meta.ReplacedAt = now.UTC().Truncate(time.Second)
 	meta.ReplacedReason = replacedReasonServerRestart
 
+	// The shell this attach just spawned belongs to THIS server process, so
+	// created_at has to move with it. Leaving it at the pre-restart value
+	// makes every later spawn re-satisfy the staleness test above: the
+	// session is announced as replaced again, the client draws another
+	// restart boundary, and ptyAttachable keeps reporting false even while a
+	// PTY is live. A shell that dies on startup turns that into one banner
+	// per respawn.
+	meta.CreatedAt = meta.ReplacedAt
+
 	fields := map[string]string{
 		"replaced_at":     meta.ReplacedAt.Format(time.RFC3339),
 		"replaced_reason": meta.ReplacedReason,
+		"created_at":      meta.CreatedAt.Format(time.RFC3339),
 	}
 	if _, err := store.Patch(ctx, workspace, session, fields); err != nil {
 		return true, fmt.Errorf("persist session replacement marker: %w", err)
