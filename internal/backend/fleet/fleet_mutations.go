@@ -95,7 +95,18 @@ func (b *FleetBackend) AddLabel(ctx context.Context, id string, label string) er
 }
 
 func (b *FleetBackend) RemoveLabel(ctx context.Context, id string, label string) error {
-	_, err := b.exec(ctx, "RemoveLabel", "DELETE", "/issues/"+url.PathEscape(id)+"/labels/"+url.PathEscape(label), nil)
+	return b.removeLabel(ctx, id, label, false)
+}
+
+// removeLabel deletes one label. force appends ?force=true, which fleet-db
+// requires to remove a reserved label such as "operator"; without it the
+// server answers 422 reserved_label.
+func (b *FleetBackend) removeLabel(ctx context.Context, id, label string, force bool) error {
+	path := "/issues/" + url.PathEscape(id) + "/labels/" + url.PathEscape(label)
+	if force {
+		path += "?force=true"
+	}
+	_, err := b.exec(ctx, "RemoveLabel", "DELETE", path, nil)
 	return err
 }
 

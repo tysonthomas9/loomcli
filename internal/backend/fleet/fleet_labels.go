@@ -20,7 +20,7 @@ func (b *FleetBackend) applyLabelUpdates(ctx context.Context, id string, params 
 		}
 	}
 	for _, label := range params.RemoveLabels {
-		if err := b.RemoveLabel(ctx, id, label); err != nil {
+		if err := b.removeLabel(ctx, id, label, params.ForceLabelRemoval); err != nil {
 			return err
 		}
 		if err := b.waitForLabelState(ctx, id, label, false); err != nil {
@@ -36,7 +36,7 @@ func (b *FleetBackend) applyLabelUpdates(ctx context.Context, id string, params 
 	}
 	for _, label := range current.Labels {
 		if !containsString(params.SetLabels, label) {
-			if err := b.RemoveLabel(ctx, id, label); err != nil {
+			if err := b.removeLabel(ctx, id, label, params.ForceLabelRemoval); err != nil {
 				return err
 			}
 			if err := b.waitForLabelState(ctx, id, label, false); err != nil {

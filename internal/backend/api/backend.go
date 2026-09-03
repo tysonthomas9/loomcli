@@ -345,6 +345,11 @@ func (b *APIBackend) Update(ctx context.Context, id string, params backend.Updat
 	if params.Claim {
 		return backend.ErrValidation("Update", "Claim field is not supported in APIBackend.Update; use APIBackend.ClaimIssue instead")
 	}
+	// Removals here are folded into PATCH /issues/{id}, which carries no force
+	// override, so an honored-looking request would drop the flag silently.
+	if params.ForceLabelRemoval && (len(params.RemoveLabels) > 0 || len(params.SetLabels) > 0) {
+		return backend.ErrNotImplemented("API.Update", "forced label removal is not supported by the api backend")
+	}
 	req := updateParamsToPatchRequest(params)
 	_, err := b.exec(ctx, "Update", http.MethodPatch, "/issues/"+url.PathEscape(id), req)
 	return err

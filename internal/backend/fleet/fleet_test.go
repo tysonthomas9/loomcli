@@ -1105,6 +1105,48 @@ func TestRemoveLabel_UsesDedicatedEndpoint(t *testing.T) {
 	}
 }
 
+// TestUpdate_ForceLabelRemoval_SendsForceQuery pins the fleet-db contract for
+// un-parking an operator-labeled issue: removing a reserved label requires
+// ?force=true on the delete, and an ordinary removal must not carry it.
+func TestUpdate_ForceLabelRemoval_SendsForceQuery(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		force     bool
+		wantQuery string
+	}{
+		{name: "forced", force: true, wantQuery: "force=true"},
+		{name: "unforced", force: false, wantQuery: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotQuery string
+			var sawDelete bool
+			fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == "DELETE" && strings.HasSuffix(r.URL.Path, "/issues/test-1/labels/operator") {
+					sawDelete = true
+					gotQuery = r.URL.RawQuery
+				}
+				// The read-back after a removal must see the label gone.
+				respondOK(w, json.RawMessage(`{"id":"test-1","labels":[]}`))
+			})
+			defer ts.Close()
+
+			err := fb.Update(context.Background(), "test-1", backend.UpdateParams{
+				RemoveLabels:      []string{"operator"},
+				ForceLabelRemoval: tc.force,
+			})
+			if err != nil {
+				t.Fatalf("Update: %v", err)
+			}
+			if !sawDelete {
+				t.Fatalf("no DELETE issued for the label removal")
+			}
+			if gotQuery != tc.wantQuery {
+				t.Fatalf("delete query = %q, want %q", gotQuery, tc.wantQuery)
+			}
+		})
+	}
+}
+
 // --- Close tests ---
 
 func TestClose_HappyPath(t *testing.T) {

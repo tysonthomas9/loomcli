@@ -26,6 +26,8 @@ var (
 	updateRemoveDeps   []string
 	updateAddLabels    []string
 	updateRemoveLabels []string
+
+	updateForceLabelRemoval bool
 )
 
 var updateCmd = &cobra.Command{
@@ -70,6 +72,9 @@ func updateParamsFromFlags(cmd *cobra.Command) (backend.UpdateParams, bool, erro
 	descFromFile := cmd.Flags().Changed("description-from-file")
 	if descFromFlag && descFromFile {
 		return backend.UpdateParams{}, false, fmt.Errorf("--description and --description-from-file are mutually exclusive")
+	}
+	if cmd.Flags().Changed("force") && !cmd.Flags().Changed("remove-label") {
+		return backend.UpdateParams{}, false, fmt.Errorf("--force only applies to --remove-label")
 	}
 	params := backend.UpdateParams{}
 	changed := false
@@ -151,6 +156,12 @@ func applyLabelFlags(cmd *cobra.Command, params *backend.UpdateParams) bool {
 	if cmd.Flags().Changed("remove-label") {
 		params.RemoveLabels = updateRemoveLabels
 		changed = true
+	}
+	// --force is a modifier on the removal above, not a field update of its
+	// own: marking it changed would fire a no-op Update when it is the only
+	// flag given. The caller rejects that combination outright.
+	if cmd.Flags().Changed("force") {
+		params.ForceLabelRemoval = updateForceLabelRemoval
 	}
 	return changed
 }
@@ -236,6 +247,7 @@ func init() {
 	updateCmd.Flags().StringArrayVar(&updateRemoveDeps, "remove-depends-on", nil, "Remove dependency on issue ID (repeatable)")
 	updateCmd.Flags().StringArrayVar(&updateAddLabels, "add-label", nil, "Add label (repeatable); other labels are preserved")
 	updateCmd.Flags().StringArrayVar(&updateRemoveLabels, "remove-label", nil, "Remove label (repeatable); other labels are preserved")
+	updateCmd.Flags().BoolVar(&updateForceLabelRemoval, "force", false, "Allow removing a reserved label (e.g. operator) with --remove-label")
 }
 
 func readDescriptionFile(path string, stdin io.Reader) (string, error) {

@@ -192,7 +192,7 @@ func resetUpdateFieldFlags(t *testing.T) {
 	for _, name := range []string{
 		"status", "assignee", "notes", "design", "priority",
 		"title", "description", "description-from-file",
-		"add-label", "remove-label",
+		"add-label", "remove-label", "force",
 	} {
 		setTestFlagChanged(t, updateCmd.Flags(), name, false)
 	}
@@ -285,7 +285,9 @@ func resetUpdateLabelFlagVars(t *testing.T) {
 	updateRemoveLabels = nil
 	updateAddDeps = nil
 	updateRemoveDeps = nil
+	updateForceLabelRemoval = false
 	t.Cleanup(func() {
+		updateForceLabelRemoval = false
 		updateAddLabels = nil
 		updateRemoveLabels = nil
 		updateAddDeps = nil
@@ -577,6 +579,89 @@ func TestDataUpdate_UpdateErrorPropagates(t *testing.T) {
 		}
 		if len(stub.calls) != 1 || stub.calls[0].method != "Update" {
 			t.Fatalf("calls = %#v, want only the failed Update (dependency calls must not run)", stub.calls)
+		}
+	})
+}
+
+// TestDataUpdate_RemoveLabelWithForce covers the operator's un-park path:
+// fleet-db refuses to drop a reserved label such as "operator" unless the
+// removal carries a force override, so --force has to reach UpdateParams.
+func TestDataUpdate_RemoveLabelWithForce(t *testing.T) {
+	stub := &localBackendStub{}
+	withLocalBackend(t, stub, func() {
+		resetUpdateFieldFlags(t)
+		resetUpdateLabelFlagVars(t)
+		outputFormat = "text"
+		updateRemoveLabels = []string{"operator"}
+		updateForceLabelRemoval = true
+		setTestFlagChanged(t, updateCmd.Flags(), "remove-label", true)
+		setTestFlagChanged(t, updateCmd.Flags(), "force", true)
+
+		if _, err := captureDataStdout(t, func() error {
+			return updateCmd.RunE(updateCmd, []string{"loom-44"})
+		}); err != nil {
+			t.Fatalf("update: %v", err)
+		}
+		if len(stub.calls) != 1 || stub.calls[0].method != "Update" {
+			t.Fatalf("calls = %#v, want one Update call", stub.calls)
+		}
+		params := stub.calls[0].args.(backend.UpdateParams)
+		if want := []string{"operator"}; !reflect.DeepEqual(params.RemoveLabels, want) {
+			t.Fatalf("Update RemoveLabels = %#v, want %#v", params.RemoveLabels, want)
+		}
+		if !params.ForceLabelRemoval {
+			t.Fatalf("Update ForceLabelRemoval = false, want true")
+		}
+	})
+}
+
+// TestDataUpdate_RemoveLabelWithoutForce_LeavesFlagUnset guards the default:
+// an ordinary removal must not smuggle the override past fleet-db's guard.
+func TestDataUpdate_RemoveLabelWithoutForce_LeavesFlagUnset(t *testing.T) {
+	stub := &localBackendStub{}
+	withLocalBackend(t, stub, func() {
+		resetUpdateFieldFlags(t)
+		resetUpdateLabelFlagVars(t)
+		outputFormat = "text"
+		updateRemoveLabels = []string{"needs-revision"}
+		setTestFlagChanged(t, updateCmd.Flags(), "remove-label", true)
+
+		if _, err := captureDataStdout(t, func() error {
+			return updateCmd.RunE(updateCmd, []string{"loom-45"})
+		}); err != nil {
+			t.Fatalf("update: %v", err)
+		}
+		params := stub.calls[0].args.(backend.UpdateParams)
+		if params.ForceLabelRemoval {
+			t.Fatalf("Update ForceLabelRemoval = true, want false without --force")
+		}
+	})
+}
+
+// TestDataUpdate_ForceWithoutRemoveLabel_Errors: --force is a modifier on
+// --remove-label, so alone it is a user error rather than a no-op Update.
+func TestDataUpdate_ForceWithoutRemoveLabel_Errors(t *testing.T) {
+	stub := &localBackendStub{}
+	withLocalBackend(t, stub, func() {
+		resetUpdateFieldFlags(t)
+		resetUpdateLabelFlagVars(t)
+		outputFormat = "text"
+		updateAddLabels = []string{"criticized"}
+		updateForceLabelRemoval = true
+		setTestFlagChanged(t, updateCmd.Flags(), "add-label", true)
+		setTestFlagChanged(t, updateCmd.Flags(), "force", true)
+
+		_, err := captureDataStdout(t, func() error {
+			return updateCmd.RunE(updateCmd, []string{"loom-46"})
+		})
+		if err == nil {
+			t.Fatalf("update: err = nil, want --force validation error")
+		}
+		if !strings.Contains(err.Error(), "--force only applies to --remove-label") {
+			t.Fatalf("update err = %v, want --force validation error", err)
+		}
+		if len(stub.calls) != 0 {
+			t.Fatalf("calls = %#v, want no backend call", stub.calls)
 		}
 	})
 }
