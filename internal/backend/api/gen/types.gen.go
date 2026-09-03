@@ -2490,7 +2490,8 @@ type MoveResult struct {
 // New consumers should prefer the generic `entity_type`, `entity_id`, and
 // `action` envelope fields when deciding which local state to invalidate.
 // `issue_id` is retained for backward-compatible issue-scoped consumers
-// and may be omitted for non-issue entities. For status events: old_status
+// and is populated for every issue-scoped entity, but omitted for
+// workspace-level entities. For status events: old_status
 // and new_status are present. For bonded events: parent_id and step_count
 // are present. This is documented as a flat schema (no discriminator)
 // because the SSE stream is not validated by generated clients.
@@ -2506,7 +2507,7 @@ type MutationPayload struct {
 	// EntityType Generic changed entity type, for example issue, dependency, comment, label, agent, terminal, session, or workspace.
 	EntityType *string `json:"entity_type,omitempty"`
 
-	// IssueId Legacy issue identifier for issue-scoped consumers; omitted for non-issue entities.
+	// IssueId Issue identifier for issue-scoped consumers. Populated for every issue-scoped entity - issue, comment, dependency, label and metadata events all carry their issue id here as well as in `entity_id`. Omitted for workspace-level entities (workspace, repo, agent, driver_run, role, daemon_profile). New consumers should prefer `entity_type` + `entity_id`.
 	IssueId *string `json:"issue_id,omitempty"`
 
 	// NewStatus Present for status mutation events

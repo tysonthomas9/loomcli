@@ -2239,8 +2239,8 @@ func TestGetMutations_ActionFolding(t *testing.T) {
 			Events: []fleetMutationEvent{
 				{Timestamp: now, Action: "issue.update", EntityType: "issue", EntityID: "a"},
 				{Timestamp: now, Action: "issue.delete", EntityType: "issue", EntityID: "b"},
-				{Timestamp: now, Action: "comment.add", EntityType: "comment", EntityID: "c"},
-				{Timestamp: now, Action: "label.add", EntityType: "label", EntityID: "d"},
+				{Timestamp: now, Action: "comment.add", EntityType: "comment", EntityID: "a"},
+				{Timestamp: now, Action: "label.add", EntityType: "label", EntityID: "a"},
 				{Timestamp: now, Action: "workspace.update", EntityType: "workspace", EntityID: "ws"},
 				{Timestamp: now, Action: "unknown.weird", EntityType: "issue", EntityID: "e"},
 			},
@@ -2267,8 +2267,15 @@ func TestGetMutations_ActionFolding(t *testing.T) {
 			t.Errorf("got[%d] missing generic envelope fields: %+v", i, got[i])
 		}
 	}
-	if got[2].IssueID != "" || got[3].IssueID != "" || got[4].IssueID != "" {
-		t.Errorf("non-issue fleet mutations should not populate legacy issue_id: comment=%q label=%q workspace=%q", got[2].IssueID, got[3].IssueID, got[4].IssueID)
+	// comment.* and label.* are issue-scoped: fleet-db puts the ISSUE id in
+	// entity_id, so the legacy issue_id must be populated from it.
+	if got[2].IssueID != "a" || got[3].IssueID != "a" {
+		t.Errorf("issue-scoped fleet mutations should populate legacy issue_id: comment=%q label=%q", got[2].IssueID, got[3].IssueID)
+	}
+	// workspace.* is not issue-scoped; its entity_id is a workspace, so the
+	// legacy field must stay empty rather than match on a foreign id.
+	if got[4].IssueID != "" {
+		t.Errorf("workspace-level fleet mutations should not populate legacy issue_id: workspace=%q", got[4].IssueID)
 	}
 	if got[0].IssueID != "a" || got[5].IssueID != "e" {
 		t.Errorf("issue fleet mutations should preserve legacy issue_id: update=%q unknown=%q", got[0].IssueID, got[5].IssueID)
