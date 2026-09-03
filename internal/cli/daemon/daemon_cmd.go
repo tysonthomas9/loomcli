@@ -253,6 +253,8 @@ func runDaemonBody() int {
 
 	initPIDFile(paths.pidFile)
 	defer os.Remove(paths.pidFile)
+	initEnvSnapshot(paths.envFile)
+	defer os.Remove(paths.envFile)
 	// runDaemonMainLoop waits for the state updater to stop before returning;
 	// keep that invariant so this deferred cleanup cannot race a state write.
 	defer os.Remove(paths.stateFile)
@@ -281,6 +283,7 @@ func awaitDaemonExit(shutdown <-chan struct{}, fatalCh <-chan error) int {
 // daemonPaths holds resolved filesystem paths for the daemon.
 type daemonPaths struct {
 	pidFile   string
+	envFile   string
 	logDir    string
 	stateFile string
 	lockFile  string
@@ -292,6 +295,7 @@ func resolveDaemonPaths(projectDir string, config *cfgpkg.DaemonConfig) daemonPa
 	pidFile := supervisor.ResolveDaemonPath(projectDir, config.Daemon.PIDFile)
 	return daemonPaths{
 		pidFile:   pidFile,
+		envFile:   cfgpkg.ResolveDaemonEnvSnapshotPath(projectDir),
 		logDir:    supervisor.ResolveDaemonPath(projectDir, config.Daemon.LogDir),
 		stateFile: cfgpkg.ResolveDaemonStatePath(projectDir),
 		lockFile:  filepath.Join(filepath.Dir(pidFile), "daemon.lock"),
@@ -305,6 +309,30 @@ func initPIDFile(pidFilePath string) {
 	if err := writePIDFile(pidFilePath, os.Getpid()); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: writing PID file: %v\n", err)
 		os.Exit(1)
+	}
+}
+
+// initEnvSnapshot records the configuration this daemon actually resolved, so
+// `loom doctor` can diff it against the declared config without reading another
+// process's environment. Best-effort: a daemon must not refuse to start because
+// it could not write a diagnostic — note the deliberate contrast with
+// initPIDFile, which exits.
+func initEnvSnapshot(path string) {
+	snap := cfgpkg.CaptureDaemonEnvSnapshot(os.Environ(), "")
+	if err := cfgpkg.WriteDaemonEnvSnapshot(path, snap); err != nil {
+		log.Printf("[daemon] warning: could not write env snapshot: %v", err)
+	}
+	logResolvedConfig(snap)
+}
+
+// logResolvedConfig emits the resolved configuration one key per line so the
+// runtime value stays recoverable from the daemon log even if the snapshot file
+// is lost. Secrets are logged as a fingerprint, never a value.
+func logResolvedConfig(snap cfgpkg.DaemonEnvSnapshot) {
+	log.Printf("[daemon] resolved config: pid=%d workspace=%s binary=%s cwd=%s (%d vars)",
+		snap.PID, snap.Workspace, snap.Binary, snap.Cwd, len(snap.Env))
+	for _, key := range snap.SortedEnvKeys() {
+		log.Printf("[daemon] resolved config: %s=%s", key, cfgpkg.DisplayEnvValue(snap.Env[key]))
 	}
 }
 
