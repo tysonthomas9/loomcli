@@ -3283,7 +3283,8 @@ export interface components {
      *     New consumers should prefer the generic `entity_type`, `entity_id`, and
      *     `action` envelope fields when deciding which local state to invalidate.
      *     `issue_id` is retained for backward-compatible issue-scoped consumers
-     *     and may be omitted for non-issue entities. For status events: old_status
+     *     and is populated for every issue-scoped entity, but omitted for
+     *     workspace-level entities. For status events: old_status
      *     and new_status are present. For bonded events: parent_id and step_count
      *     are present. This is documented as a flat schema (no discriminator)
      *     because the SSE stream is not validated by generated clients.
@@ -3310,7 +3311,7 @@ export interface components {
       entity_id?: string;
       /** @description Source action for the mutation, usually the fleet-db action such as issue.update or dep.add. */
       action?: string;
-      /** @description Legacy issue identifier for issue-scoped consumers; omitted for non-issue entities. */
+      /** @description Issue identifier for issue-scoped consumers. Populated for every issue-scoped entity - issue, comment, dependency, label and metadata events all carry their issue id here as well as in `entity_id`. Omitted for workspace-level entities (workspace, repo, agent, driver_run, role, daemon_profile). New consumers should prefer `entity_type` + `entity_id`. */
       issue_id?: string;
       title?: string;
       assignee?: string;
