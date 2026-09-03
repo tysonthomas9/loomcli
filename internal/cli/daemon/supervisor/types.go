@@ -71,6 +71,13 @@ type AgentProcess struct {
 	LastNoWork     bool                 // true if last exit was due to no claimable tasks
 	NoWorkCount    int                  // consecutive NoWork exits (reset on non-NoWork exit)
 	BlockCount     int                  // block cycles since the last successful run (drives BlockBudget escalation; display-only in the state file, never hydrated across daemon restarts)
+	// FailoverExhaustedCount is the failover-only retry budget's own counter,
+	// deliberately NOT RestartCount. RestartCount is zeroed by NoWork and by a
+	// backend failover, and is spent by every other counted failure, so sharing
+	// it would make this budget unbounded on a sparse queue and zero after a
+	// couple of unrelated transient exits. Reset only by a clean run and by a
+	// real failover to another backend.
+	FailoverExhaustedCount int
 
 	CurrentBackendIdx int       // 0=primary, 1+=fallback index into Entry.FallbackBackends
 	BackoffUntil      time.Time // when current backoff sleep ends (zero if not in backoff)

@@ -431,6 +431,7 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 	}
 
 	taskID, mode := s.detectRecovery(ap)
+	taskID, mode, guardRefused := s.guardRecovery(ap, taskID, mode)
 	switch mode {
 	case recoverResume:
 		s.prepareResume(ap, taskID)
@@ -441,8 +442,11 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 		ap.ResumeFailures = 0 // cold-starting ⇒ let a future interruption recover again
 		ap.Mu.Unlock()
 		// Cold start: nothing here is being continued, so recovery takes its
-		// fully destructive form (incomplete=false).
-		if err := s.recoverAgent(ap, 0, false); err != nil {
+		// fully destructive form (incomplete=false) — EXCEPT when the guard
+		// refused a recovery that was otherwise ready to run. There the worktree
+		// still holds an interrupted run's uncommitted work, waiting for the
+		// task to be unblocked, so recovery takes the preserving form.
+		if err := s.recoverAgent(ap, 0, guardRefused); err != nil {
 			slog.Warn("pre-flight recovery failed", "worktree", ap.Entry.Worktree, "err", err)
 		}
 	}
@@ -692,8 +696,8 @@ type agentSessionCompletionInput struct {
 	errClass   string
 	taskID     string
 	diffResult sessionfinalize.WithWorktreeResult
-	// transcriptData is the leaf's on-disk transcript (read once in
-	// finalizeAgentSession). When present it is uploaded as a control-plane artifact
+	// transcriptData is the leaf's on-disk transcript read during
+	// finalizeAgentSession. When present it is uploaded as a control-plane artifact
 	// and referenced via metadata["transcript_ref"], so a non-owning serve node can
 	// surface it (controlPlaneSessionTranscript). Empty on the backend-unavailable path.
 	transcriptData []byte

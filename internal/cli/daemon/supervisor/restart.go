@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"log"
+	"log/slog"
 	"os"
 	"strconv"
 	"time"
@@ -26,6 +27,8 @@ const backendUnavailableRecheckInterval = 30 * time.Second
 // transient root cause (a prerequisite landing, a rate-limit window passing,
 // a flaky dependency recovering) lets it self-resume.
 const defaultMaxRetriesBlockInterval = 60 * time.Second
+
+const defaultFailoverExhaustedRetries = 2
 
 // shouldRestart determines if the agent should restart by consulting the
 // policy disposition for the classified outcome of the most recent exit
@@ -70,8 +73,7 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 		return true
 
 	case agentpolicy.Failover:
-		s.applyFailoverExhaustedStop(ap, outcome)
-		return false
+		return s.applyFailoverExhaustedRestart(ap, outcome)
 
 	case agentpolicy.RetryUncounted:
 		if outcome.Is(agenterr.NoWorkOutcome) {
@@ -135,6 +137,33 @@ func (s *Supervisor) applyFailoverExhaustedStop(ap *AgentProcess, outcome agente
 	ap.StopReason = StopReasonFastFail
 }
 
+// applyFailoverExhaustedRestart gives a failover-only error a small, counted
+// retry budget when no fallback backend remains, so one transient provider
+// answer no longer stops the supervisor terminally. The daemon never respawns a
+// terminally stopped supervisor, so that stop stranded every task behind it.
+//
+// The budget rides its OWN counter, not RestartCount. NoWork and a real backend
+// failover both zero RestartCount, which would make this budget unbounded on a
+// sparse queue or across a fallback chain; every other counted failure spends
+// it, which would leave the budget already gone on the first failover-only
+// error. Backoff still reads RestartCount, so retry pacing is unchanged.
+// Caller holds ap.Mu.
+func (s *Supervisor) applyFailoverExhaustedRestart(ap *AgentProcess, outcome agenterr.Outcome) bool {
+	budget := s.failoverExhaustedRetries()
+	ap.FailoverExhaustedCount++
+	ap.RateRetryCount = 0
+	ap.NoWorkCount = 0
+	if ap.FailoverExhaustedCount <= budget {
+		ap.StopReason = ""
+		slog.Info("failover-only error; retrying supervisor",
+			"agent", ap.Entry.Worktree, "outcome", outcome,
+			"attempt", ap.FailoverExhaustedCount, "budget", budget)
+		return true
+	}
+	s.applyFailoverExhaustedStop(ap, outcome)
+	return false
+}
+
 // applyCleanSuccessRestart resets every retry counter after a clean exit —
 // including the block-escalation budget ("progress" ends a block spiral). Long
 // runs (>1 minute) also reset to the primary backend. Caller holds ap.Mu.
@@ -143,6 +172,7 @@ func (s *Supervisor) applyCleanSuccessRestart(ap *AgentProcess) {
 	ap.RateRetryCount = 0
 	ap.NoWorkCount = 0
 	ap.BlockCount = 0
+	ap.FailoverExhaustedCount = 0
 	ap.StopReason = ""
 	if time.Since(ap.LastStart) > time.Minute {
 		ap.CurrentBackendIdx = 0 // reset to primary backend
@@ -357,6 +387,15 @@ func (s *Supervisor) getMaxRetries() int {
 		return *cfg.Daemon.RestartPolicy.MaxRetries
 	}
 	return 3 // default
+}
+
+func (s *Supervisor) failoverExhaustedRetries() int {
+	if v := os.Getenv("LOOM_FAILOVER_EXHAUSTED_RETRIES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			return n
+		}
+	}
+	return defaultFailoverExhaustedRetries
 }
 
 func (s *Supervisor) getBackoffInitial() int {
