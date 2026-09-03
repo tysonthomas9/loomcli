@@ -146,3 +146,45 @@ func TestInvokeClaudeRunTurnDisabledByZeroSettle(t *testing.T) {
 		t.Fatal("turn did not unwind after its context was cancelled")
 	}
 }
+
+// A wall verdict must not outrank a turn that SUCCEEDED. The watcher reads the
+// rendered screen, and a finished turn leaves its own output sitting there
+// unchanged — the same quiescence a parked harness produces. So an agent whose
+// output discusses one of these banners settles into a "wall" the moment it
+// finishes, and before this guard the verdict was applied unconditionally,
+// turning that success into a fatal, non-retryable stop.
+//
+// The stub models exactly that race: it waits for the watcher's own cancel and
+// then reports the turn as complete. TestInvokeClaudeRunTurnFiresOnParkedBillingWall
+// is the converse — a turn that really did fail still reports the wall.
+func TestInvokeClaudeRunTurnKeepsASuccessfulTurn(t *testing.T) {
+	t.Setenv(envWallSettleSeconds, "1")
+
+	prev := claudeRunTurn
+	t.Cleanup(func() { claudeRunTurn = prev })
+	claudeRunTurn = func(ctx context.Context, cfg claudeRunTurnConfig) (claudeRunTurnResult, error) {
+		if cfg.Output != nil {
+			_, _ = cfg.Output.Write([]byte("⏺ Reviewed: the banner it matches on is \"credit balance is too low\".\r\n"))
+		}
+		// The watcher cancels the turn when it fires; by then this turn has
+		// already produced its answer.
+		<-ctx.Done()
+		return claudeRunTurnResult{Turn: chat.Turn{State: chat.TurnStateComplete}}, nil
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := invokeClaudeRunTurn(context.Background(), t.TempDir(), "review it", "agent", "", nil, nil)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("successful turn returned %v; a screen-scraped verdict must not "+
+				"outrank the harness's own completion", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("invokeClaudeRunTurn never returned")
+	}
+}
