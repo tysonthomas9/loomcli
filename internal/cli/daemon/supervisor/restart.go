@@ -33,6 +33,25 @@ const defaultClaimHoldRecheckInterval = 15 * time.Second
 // a flaky dependency recovering) lets it self-resume.
 const defaultMaxRetriesBlockInterval = 60 * time.Second
 
+// setShutdownStopReason unconditionally records that this agent stopped
+// because of supervisor shutdown. Every caller (drain, signal handler,
+// ownership transfer) uses the same reason; if a new code path ever needs
+// a different reason, reintroduce the explicit parameter.
+func (s *Supervisor) setShutdownStopReason(ap *AgentProcess) {
+	ap.Mu.Lock()
+	ap.StopReason = StopReasonShutdown
+	ap.Mu.Unlock()
+}
+
+// setStopReasonDefault sets the agent's stop reason only if not already set.
+func (s *Supervisor) setStopReasonDefault(ap *AgentProcess, reason StopReason) {
+	ap.Mu.Lock()
+	if ap.StopReason == "" {
+		ap.StopReason = reason
+	}
+	ap.Mu.Unlock()
+}
+
 // shouldRestart determines if the agent should restart by consulting the
 // policy disposition for the classified outcome of the most recent exit
 // (agentpolicy.Decide). The table owns the per-class verdict; this layer

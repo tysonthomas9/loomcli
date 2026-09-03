@@ -381,47 +381,6 @@ func (s *Supervisor) checkAgentStopSignals(ap *AgentProcess) bool {
 	}
 }
 
-// setShutdownStopReason unconditionally records that this agent stopped
-// because of supervisor shutdown. Every caller (drain, signal handler,
-// ownership transfer) uses the same reason; if a new code path ever needs
-// a different reason, reintroduce the explicit parameter.
-func (s *Supervisor) setShutdownStopReason(ap *AgentProcess) {
-	ap.Mu.Lock()
-	ap.StopReason = StopReasonShutdown
-	ap.Mu.Unlock()
-}
-
-// SetStopReasonDefault sets the agent's stop reason only if not already set.
-func (s *Supervisor) setStopReasonDefault(ap *AgentProcess, reason StopReason) {
-	ap.Mu.Lock()
-	if ap.StopReason == "" {
-		ap.StopReason = reason
-	}
-	ap.Mu.Unlock()
-}
-
-// clearAgentSessionState resets session state between supervision cycles.
-func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
-	ap.Mu.Lock()
-	ap.Session = nil
-	ap.AgentSessionID = ""
-	ap.AgentLeaseID = ""
-	ap.AgentLeaseToken = ""
-	ap.TranscriptPath = ""
-	ap.BeforeRef = ""
-	ap.AssignedTaskID = ""
-	ap.ResumeTaskID = ""          // per-cycle; re-detected in preFlightSetup (ResumeFailures persists)
-	ap.RecoveryMode = recoverCold // per-cycle; re-classified in preFlightSetup
-	ap.LastActivity = time.Time{}
-	// A child that died while parked on an interactive prompt never sends its
-	// "end", so the in-flight count must not survive into the next cycle: a
-	// stale pending count would suspend the output-timeout watchdog for an
-	// agent that is no longer waiting on anything.
-	ap.InputWaitPending = 0
-	ap.InputWaitSince = time.Time{}
-	ap.Mu.Unlock()
-}
-
 // preFlightSetup verifies the backend is spawnable, then runs recovery,
 // assigns epic, creates session, and clears yield file.
 //
