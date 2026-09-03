@@ -4,6 +4,9 @@ export type EvalScoreKey =
   | "efficiency"
   | "tool_use_quality";
 
+/** Dimension-keyed scores. New rubrics may add dimensions without a UI release. */
+export type EvalScores = Record<string, number>;
+
 export interface EvalScoreAverages {
   outcome_success: number;
   instruction_adherence: number;
@@ -79,7 +82,7 @@ export interface SessionEvalRecord {
   task_id?: string;
   agent_id: string;
   workspace_key: string;
-  scores: EvalScoreAverages;
+  scores: EvalScores;
   score_rationales: SessionEvalScoreRationales;
   error_taxonomy_tags: string[];
   improvement_categories: {
@@ -91,6 +94,8 @@ export interface SessionEvalRecord {
   judge_summary: string;
   judge_model: string;
   judge_prompt_version: string;
+  /** Judge AgentSession that produced this exact eval record, when available. */
+  judge_session_id?: string;
   eval_cost: SessionEvalCost;
   session_started_at: string;
   session_ended_at: string;
