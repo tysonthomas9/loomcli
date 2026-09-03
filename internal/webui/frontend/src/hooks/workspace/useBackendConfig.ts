@@ -54,6 +54,19 @@ export function useBackendConfig(
   const [isSaving, setIsSaving] = useState(false);
   const [isCached, setIsCached] = useState(initialCache !== null);
 
+  // Same stale-read shape as useTerminalMetadata: isLoading is seeded from
+  // `enabled`, so without a render-phase reset a consumer that flips `enabled`
+  // false->true reads configLoading===false in that very commit, before the
+  // effect has had a chance to correct it. Adjusting state during render
+  // re-renders before children and effects run, so that window never exists.
+  const fetchKey = `${enabled ? "1" : "0"}|${workspaceId ?? ""}`;
+  const [syncedKey, setSyncedKey] = useState(fetchKey);
+  if (fetchKey !== syncedKey) {
+    setSyncedKey(fetchKey);
+    setIsLoading(Boolean(enabled));
+    setError(null);
+  }
+
   const mountedRef = useRef(true);
   const configRef = useRef(config);
   configRef.current = config;

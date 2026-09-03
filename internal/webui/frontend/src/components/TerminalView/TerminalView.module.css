@@ -196,3 +196,52 @@
   white-space: nowrap;
   border: 0;
 }
+
+/*
+ * Terminal tab metadata failed to load (a genuine failure — 404/503 is the
+ * supported "no metadata storage" mode and renders as an empty workspace).
+ * Mirrors NoBackendsEmptyState's centred layout.
+ */
+.metaErrorState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  background: var(--terminal-bg, #1e1e1e);
+}
+
+.metaErrorHeading {
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+
+.metaErrorDescription {
+  color: #888;
+  font-size: 13px;
+  margin: 0 0 20px;
+  text-align: center;
+  max-width: 320px;
+}
+
+.metaErrorRetry {
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: transparent;
+  color: #fff;
+  padding: 8px 20px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 150ms;
+}
+
+.metaErrorRetry:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.metaErrorRetry:focus-visible {
+  outline: 2px solid var(--color-primary, #3b82f6);
+  outline-offset: 2px;
+}

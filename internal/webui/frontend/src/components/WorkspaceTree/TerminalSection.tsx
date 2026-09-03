@@ -1,6 +1,8 @@
 /**
- * TerminalSection lists global terminal tabs in the workspace sidebar while
- * the Terminal view is active.
+ * TerminalSection lists global terminal tabs in the workspace sidebar. It
+ * renders whatever TerminalView last published, which is the workspace's real
+ * sessions from the moment its tab list settles — the Terminal view does not
+ * have to be the one on screen.
  */
 
 import { useCallback, useEffect, useState } from "react";
