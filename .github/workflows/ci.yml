@@ -45,6 +45,34 @@ jobs:
       - name: make check-go
         run: make check-go
 
+  fleet-action-contract:
+    name: FleetDB Action Contract (FleetDB main)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout LoomCLI
+        uses: actions/checkout@v4
+
+      # Match the release compatibility job: float with FleetDB main so a new
+      # canonical action fails Loom CI until the generated contract is updated.
+      - name: Checkout FleetDB main
+        uses: actions/checkout@v4
+        with:
+          repository: tysonthomas9/fleet-db
+          ref: main
+          path: fleet-db
+          token: ${{ secrets.FLEET_DB_TOKEN || github.token }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Check FleetDB action contract drift
+        run: |
+          go generate ./internal/backend/fleet/...
+          git diff --exit-code
+
   # Frontend-only quality gate — installs Node toolchain only, no Go.
   frontend-quality-gate:
     name: Frontend Quality Gate
