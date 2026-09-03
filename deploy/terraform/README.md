@@ -132,6 +132,14 @@ subnet, one router, and one NAT, so network quota no longer scales with stacks.
 Etiquette: one checkout = one stack; never `down` a NAME your checkout did not
 `up`.
 
+Two things seen on the first parallel run, both handled in code: a freshly
+created Cloud NAT takes minutes before it passes traffic, so cloud-init waits
+(up to ten minutes) for real egress before installing packages; and two
+checkouts reconciling `shared/` at the same moment hit the GCS state lock,
+which the Makefile retries. If an apply ends with `Failed to upload state`
+(a client-side read timeout), rerun the same `make` target: the state object
+had normally landed, and the rerun plans no changes.
+
 ## Running real agents (codex)
 
 By default the stack runs `localdogfood`, a deterministic backend that needs no

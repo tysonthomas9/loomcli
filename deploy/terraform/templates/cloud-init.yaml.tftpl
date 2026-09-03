@@ -1,6 +1,25 @@
 #cloud-config
 # Rendered by Terraform (vm.tf). Runs once on first boot.
 
+# A freshly created Cloud NAT takes minutes before it passes traffic. The
+# first stacks after `make shared` booted into that window: apt's IPv4
+# connects timed out, cloud-init fell back to snap, and the stack never
+# started. bootcmd runs before package install, so wait (bounded) for real
+# egress here instead of failing the boot on a gateway that is still warming.
+bootcmd:
+  - - sh
+    - -c
+    - |
+      for i in $(seq 1 120); do
+        if curl -4 -m 5 -sf -o /dev/null http://archive.ubuntu.com/ubuntu/; then
+          echo "egress ok after $i probes" >> /var/log/loom-egress-wait.log
+          exit 0
+        fi
+        sleep 5
+      done
+      echo "no egress after 10 minutes; package install will fail" >> /var/log/loom-egress-wait.log
+      exit 0
+
 package_update: true
 packages:
   - docker.io

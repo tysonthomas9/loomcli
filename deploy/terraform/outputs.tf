@@ -97,6 +97,20 @@ output "plan_role_read_only" {
   value       = var.plan_role_read_only
 }
 
+# The image references this stack runs, so `make extend` can re-apply without
+# rebuilding from the current tree.
+output "fleetdb_image" {
+  value = var.fleetdb_image
+}
+
+output "loom_image" {
+  value = var.loom_image
+}
+
+output "ui_image" {
+  value = var.ui_image
+}
+
 output "expires_at" {
   description = "Unix timestamp after which `make reap` may destroy this stack."
   value       = var.expires_at

@@ -8,7 +8,9 @@ NAME="${1:?stack name}"; PROJECT="${2:?project}"; ZONE="${3:?zone}"
 # stack that overrode iap_web_ports sat here for the full 15 minutes and then
 # reported a timeout -- while being completely healthy on a different port.
 API_PORT="${4:?loom api port}"; UI_PORT="${5:?ui port}"
-DEADLINE=$(( $(date +%s) + 900 ))
+# 25 minutes: a cold Cloud NAT can hold cloud-init's egress wait for up to
+# ten of them before package install even starts.
+DEADLINE=$(( $(date +%s) + 1500 ))
 
 ssh_probe() {
   gcloud compute ssh "$NAME" --project "$PROJECT" --zone "$ZONE" \
@@ -36,6 +38,6 @@ while [ "$(date +%s)" -lt "$DEADLINE" ]; do
   sleep 15
 done
 
-echo "timed out after 15m waiting for the stack" >&2
+echo "timed out after 25m waiting for the stack" >&2
 ssh_probe 'journalctl -u loom-stack --no-pager -n 40' >&2 || true
 exit 1

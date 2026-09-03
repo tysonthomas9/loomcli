@@ -80,7 +80,7 @@ tree_delta = $(shell ( cd $(1) 2>/dev/null || exit 0; git diff --quiet HEAD 2>/d
 LOOM_DELTA    = $(call tree_delta,$(REPO_ROOT))
 FLEETDB_DELTA := $(call tree_delta,$(FLEETDB_SRC))
 
-ui_context_hash = $(shell ( cd $(1) 2>/dev/null || exit 0; if [ -d internal/webui/frontend/dist ]; then find internal/webui/frontend/dist -type f -print0 | xargs -0 shasum 2>/dev/null | LC_ALL=C sort | shasum | cut -c1-8; else printf missing; fi ) 2>/dev/null)
+ui_context_hash = $(shell ( cd $(1) 2>/dev/null || exit 0; if [ -d internal/webui/frontend/dist ]; then find internal/webui/frontend/dist -type f ! -name .build-meta -print0 | xargs -0 shasum 2>/dev/null | LC_ALL=C sort | shasum | cut -c1-8; else printf missing; fi ) 2>/dev/null)
 UI_HASH      = $(call ui_context_hash,$(REPO_ROOT))
 
 TAG       ?= $(shell git -C $(REPO_ROOT) rev-parse --short HEAD)-ui.$(UI_HASH)$(LOOM_DELTA)$(TAG_SUFFIX)
@@ -258,7 +258,10 @@ images: preflight ## Build and push fleet-db, loom, and the SPA image (CODEX=1 a
 	@# apply, and it excludes internal/webui/frontend/dist/ -- the very bundle
 	@# this image exists to serve -- so the COPY fails however recently you ran
 	@# build-frontend. A stdin tar carries no ignore file, so nothing is dropped.
-	tar -C $(REPO_ROOT) -cf - internal/webui/frontend/dist deploy/terraform/ui \
+	@# .build-meta carries a build timestamp and nothing reads it; excluding
+	@# it keeps a rebuild of the same source byte-identical, so a rerun of
+	@# `make up` does not replace the VM just to redeploy the same bundle.
+	tar -C $(REPO_ROOT) --exclude=.build-meta -cf - internal/webui/frontend/dist deploy/terraform/ui \
 	  | $(CONTAINER_CLI) $(CONTAINER_ARGS) build --platform $(PLATFORM) -t "$$ui_image" -f deploy/terraform/ui/Dockerfile -
 	$(CONTAINER_CLI) $(CONTAINER_ARGS) push "$$fleetdb_image"
 	$(CONTAINER_CLI) $(CONTAINER_ARGS) push "$$loom_image"
@@ -377,7 +380,14 @@ resume: stack-required state ## Start an auto-stopped VM and wait for stack heal
 extend: stack-required state ## Re-arm guest auto-stop and extend the stack TTL
 	gcloud compute ssh $(NAME) --project $(PROJECT) --zone $(ZONE) --tunnel-through-iap --quiet \
 		--command 'sudo systemctl restart loom-autostop.timer'
-	$(MAKE) --no-print-directory apply
+	@# Re-apply with the images the stack is already running, read from state.
+	@# `make apply` would demand digests for the CURRENT tree's tag and, if
+	@# the tree moved on, rebuild and replace the VM -- not what extend means.
+	$(TF) apply -auto-approve -input=false $(TFVARS) \
+		-var tunnel_port_base="$$($(TF) output -raw tunnel_ui_port)" \
+		-var fleetdb_image="$$($(TF) output -raw fleetdb_image)" \
+		-var loom_image="$$($(TF) output -raw loom_image)" \
+		-var ui_image="$$($(TF) output -raw ui_image)"
 
 fmt:
 	$(TF) fmt -recursive
