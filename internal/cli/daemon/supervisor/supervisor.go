@@ -424,7 +424,9 @@ func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 // attempt's diff injected) before finally cold-starting a fresh task. See
 // detectRecovery.
 func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
-	if err := s.gateBackendAvailable(ap); err != nil {
+	// No span is open on this path; pass an explicit background context so the
+	// absence of a trace parent is visible here rather than hidden in the gate.
+	if err := s.gateBackendAvailable(context.Background(), ap); err != nil {
 		return false
 	}
 	if err := s.gateSafetyKnobsEnforceable(ap); err != nil {
@@ -565,51 +567,6 @@ func (s *Supervisor) createControlPlaneAgentSession(ap *AgentProcess, sessionID,
 		ap.AgentLeaseToken = lease.Token
 	}
 	ap.Mu.Unlock()
-}
-
-// markControlPlaneAgentState persists the given agent state onto the
-// fleet-db Agent record so UIs and `workspace ops diagnose` reflect
-// supervisor lifecycle transitions (currently used by the
-// backend-availability gate to flip between AgentStateBackendUnavailable
-// and AgentStateActive). Best-effort: failures are logged but do not
-// block the supervisor.
-func (s *Supervisor) markControlPlaneAgentState(ap *AgentProcess, state domain.AgentState) {
-	if s.ControlStore == nil || s.WorkspaceID == "" {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
-	defer cancel()
-	if _, err := s.ControlStore.Agents().Update(ctx, s.WorkspaceID, ap.Entry.Worktree, store.AgentUpdate{
-		State: &state,
-	}); err != nil {
-		slog.Warn("control-plane agent state update failed",
-			"worktree", ap.Entry.Worktree, "state", state, "err", err)
-	}
-}
-
-func (s *Supervisor) markControlPlaneAgentSessionRunning(ap *AgentProcess) {
-	if s.ControlStore == nil || s.WorkspaceID == "" {
-		return
-	}
-	backend := s.GetEffectiveBackend(ap)
-	ap.Mu.Lock()
-	sessionID := ap.AgentSessionID
-	metadata := s.agentSessionMetadataLocked(ap, backend)
-	ap.Mu.Unlock()
-	if sessionID == "" {
-		return
-	}
-	now := time.Now().UTC()
-	status := domain.AgentSessionRunning
-	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
-	defer cancel()
-	if _, err := s.ControlStore.AgentSessions().Update(ctx, s.WorkspaceID, sessionID, store.AgentSessionUpdate{
-		Status:        &status,
-		LastHeartbeat: &now,
-		Metadata:      &metadata,
-	}); err != nil {
-		slog.Warn("control-plane agent session running update failed", "worktree", ap.Entry.Worktree, "session_id", sessionID, "err", err)
-	}
 }
 
 func (s *Supervisor) agentSessionMetadata(ap *AgentProcess, epicID string) map[string]string {
