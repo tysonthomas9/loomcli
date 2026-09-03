@@ -26,13 +26,13 @@ func TestHandleGetRollupMathTagsFailuresAndVersions(t *testing.T) {
 	st := newEvalTestStore(t)
 	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	seedSessionEval(t, st, "eval-1", "sess-1", base.Add(34*time.Hour), "v1", domain.SessionEvalScores{
-		OutcomeSuccess: 80, InstructionAdherence: 60, Efficiency: 40, ToolUseQuality: 20,
+		"outcome_success": 80, "instruction_adherence": 60, "efficiency": 40, "tool_use_quality": 20,
 	}, []string{"idle_wait", "verification_skipped"}, domain.SessionEvalImprovementCategories{Harness: []string{"h-third"}})
 	seedSessionEval(t, st, "eval-2", "sess-2", base.Add(44*time.Hour), "v1", domain.SessionEvalScores{
-		OutcomeSuccess: 100, InstructionAdherence: 80, Efficiency: 60, ToolUseQuality: 40,
+		"outcome_success": 100, "instruction_adherence": 80, "efficiency": 60, "tool_use_quality": 40,
 	}, []string{"idle_wait"}, domain.SessionEvalImprovementCategories{Harness: []string{"h-second"}})
 	seedSessionEval(t, st, "eval-3", "sess-3", base.Add(58*time.Hour), "v2", domain.SessionEvalScores{
-		OutcomeSuccess: 60, InstructionAdherence: 40, Efficiency: 20, ToolUseQuality: 0,
+		"outcome_success": 60, "instruction_adherence": 40, "efficiency": 20, "tool_use_quality": 0,
 	}, []string{"scope_creep"}, domain.SessionEvalImprovementCategories{Harness: []string{"h-newest"}})
 	seedFailedStamp(t, st, "failed-1", base.Add(36*time.Hour), "transcript_too_large", domain.AgentSessionKindTask)
 	seedFailedStamp(t, st, "failed-2", base.Add(37*time.Hour), "judge_error", domain.AgentSessionKindTask)
@@ -77,7 +77,7 @@ func TestHandleGetRollupHourlyBucketsEmptyWindowInvalidParamsAndInsightCaps(t *t
 	st := newEvalTestStore(t)
 	created := time.Date(2026, 7, 2, 10, 30, 0, 0, time.UTC)
 	seedSessionEval(t, st, "eval-hour", "sess-hour", created, "v1", domain.SessionEvalScores{
-		OutcomeSuccess: 50, InstructionAdherence: 60, Efficiency: 70, ToolUseQuality: 80,
+		"outcome_success": 50, "instruction_adherence": 60, "efficiency": 70, "tool_use_quality": 80,
 	}, nil, domain.SessionEvalImprovementCategories{Harness: manyInsights(55)})
 
 	rec := serveEvalRequest(t, st, http.MethodGet, "/api/workspaces/WS/eval-rollup?since=2026-07-02T00:00:00Z&until=2026-07-03T00:00:00Z", "")

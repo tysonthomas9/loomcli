@@ -127,11 +127,16 @@ func TestListTaskSessions_WithData(t *testing.T) {
 
 type workspaceListStub struct {
 	service.SessionService
-	items   []service.SessionListItem
-	total   int
-	err     error
-	gotWS   string
-	gotOpts service.WorkspaceSessionListOptions
+	items      []service.SessionListItem
+	total      int
+	dimensions []string
+	err        error
+	gotWS      string
+	gotOpts    service.WorkspaceSessionListOptions
+}
+
+func (s *workspaceListStub) ListWorkspaceSessionScoreDimensions(_ context.Context, _ string, _ service.WorkspaceSessionListOptions) ([]string, error) {
+	return s.dimensions, s.err
 }
 
 func (s *workspaceListStub) ListWorkspaceSessions(_ context.Context, wsID string, opts service.WorkspaceSessionListOptions) ([]service.SessionListItem, int, error) {
@@ -152,12 +157,16 @@ func TestListWorkspaceSessions_DefaultsClampAndResponseShape(t *testing.T) {
 	stub := &workspaceListStub{
 		items: []service.SessionListItem{{
 			SessionRecord: sessions.SessionRecord{SessionID: "sess-1", AgentName: "nova", Status: sessions.StatusCompleted, StartedAt: now},
-			Kind:          domain.AgentSessionKindTask,
+			Kind:          domain.AgentSessionKindJudge,
+			TaskRunID:     "run-1",
+			InvocationKey: "judge",
+			Attempt:       2,
 		}},
-		total: 3,
+		total:      3,
+		dimensions: []string{"efficiency", "novel_dimension"},
 	}
 	handler := handleListWorkspaceSessions(stub)
-	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/sessions?status=completed&agent_id=nova&kind=task&limit=5000", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/sessions?status=completed&agent_id=nova&task_run_id=run-1&tag=eval&tag=judge&kind=judge&limit=5000", nil)
 	rr := httptest.NewRecorder()
 
 	handler.ServeHTTP(rr, req)
@@ -171,7 +180,7 @@ func TestListWorkspaceSessions_DefaultsClampAndResponseShape(t *testing.T) {
 	if !stub.gotOpts.Since.Equal(now.Add(-7*24*time.Hour)) || !stub.gotOpts.Until.IsZero() {
 		t.Fatalf("since/until = %s/%s, want default since and empty until", stub.gotOpts.Since, stub.gotOpts.Until)
 	}
-	if stub.gotOpts.Status != domain.AgentSessionCompleted || stub.gotOpts.AgentID != "nova" || stub.gotOpts.Kind != domain.AgentSessionKindTask {
+	if stub.gotOpts.Status != domain.AgentSessionCompleted || stub.gotOpts.AgentID != "nova" || stub.gotOpts.TaskRunID != "run-1" || stub.gotOpts.Kind != domain.AgentSessionKindJudge || len(stub.gotOpts.Tags) != 2 {
 		t.Fatalf("opts = %+v", stub.gotOpts)
 	}
 	var resp WorkspaceSessionListResponse
@@ -181,8 +190,40 @@ func TestListWorkspaceSessions_DefaultsClampAndResponseShape(t *testing.T) {
 	if !resp.Success || resp.Data == nil {
 		t.Fatalf("response success/data = %v/%#v error=%q", resp.Success, resp.Data, resp.Error)
 	}
-	if resp.Data.Total != 3 || resp.Data.Limit != workspaceSessionsMaxLimit || len(resp.Data.Sessions) != 1 {
+	if resp.Data.Total != 3 || resp.Data.Limit != workspaceSessionsMaxLimit || len(resp.Data.Sessions) != 1 || len(resp.Data.ScoreDimensions) != 2 {
 		t.Fatalf("data = %+v", resp.Data)
+	}
+	if item := resp.Data.Sessions[0]; item.TaskRunID != "run-1" || item.InvocationKey != "judge" || item.Attempt != 2 {
+		t.Fatalf("explicit session identity = %+v", item)
+	}
+}
+
+type traceRunStub struct {
+	data *service.WorkspaceTraceRunData
+	err  error
+}
+
+func (s traceRunStub) GetWorkspaceTraceRun(context.Context, string, string) (*service.WorkspaceTraceRunData, error) {
+	return s.data, s.err
+}
+
+func TestGetWorkspaceTraceRunResponse(t *testing.T) {
+	handler := HandleGetWorkspaceTraceRun(traceRunStub{data: &service.WorkspaceTraceRunData{TaskRunID: "run-1", AttemptCount: 2}})
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/traces/runs/run-1", nil)
+	req.SetPathValue("taskRunId", "run-1")
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var response WorkspaceTraceRunResponse
+	if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !response.Success || response.Data == nil || response.Data.TaskRunID != "run-1" {
+		t.Fatalf("response = %+v", response)
 	}
 }
 
