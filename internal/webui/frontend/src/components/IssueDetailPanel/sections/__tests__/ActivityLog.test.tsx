@@ -218,6 +218,96 @@ describe("ActivityLog", () => {
   });
 
   describe("event description text", () => {
+    it("renders event summary and field changes", () => {
+      const events = [
+        createTestEvent({
+          summary: "Updated title and status",
+          changes: [
+            { field: "title", before: "Old title", after: "New title" },
+            { field: "status", before: "open", after: "closed" },
+          ],
+        }),
+      ];
+      render(
+        <ActivityLog comments={[]} events={events} issueId="test-issue" />,
+      );
+      const row = screen.getByTestId("activity-event");
+      expect(
+        within(row).getByText("alice: Updated title and status"),
+      ).toBeInTheDocument();
+      expect(within(row).getByText("title: Old title → New title")).toBeInTheDocument();
+      expect(within(row).getByText("status: open → closed")).toBeInTheDocument();
+    });
+
+    // fleet-db names its actions in a different vocabulary from the EventType
+    // cases below, so without the summary every fleet event read "performed an
+    // action" and the whole feed said nothing.
+    it("prefers the backend summary over the generic fallback", () => {
+      const events = [
+        createTestEvent({
+          event_type: "issue.update" as EventType,
+          summary: "Moved to review",
+        }),
+      ];
+      render(
+        <ActivityLog comments={[]} events={events} issueId="test-issue" />,
+      );
+      expect(screen.getByText("alice: Moved to review")).toBeInTheDocument();
+      expect(
+        screen.queryByText("alice performed an action"),
+      ).not.toBeInTheDocument();
+    });
+
+    // A field set for the first time has no before, and a cleared one has no
+    // after. Both used to throw on value.length, taking the whole board down.
+    it("renders a field set for the first time and one cleared", () => {
+      const events = [
+        createTestEvent({
+          summary: "Updated description and due date",
+          changes: [
+            { field: "description", after: "Now with detail" },
+            { field: "due_at", before: "2026-03-01" },
+          ],
+        } as Partial<Event>),
+      ];
+      render(
+        <ActivityLog comments={[]} events={events} issueId="test-issue" />,
+      );
+      const row = screen.getByTestId("activity-event");
+      expect(
+        within(row).getByText("description: (empty) → Now with detail"),
+      ).toBeInTheDocument();
+      expect(
+        within(row).getByText("due_at: 2026-03-01 → (empty)"),
+      ).toBeInTheDocument();
+    });
+
+    // fleet-db ids are redis stream entries that do not parse as int64, so
+    // every fleet event lands on id 0. Keying rows on that collapses the feed
+    // onto a single React key.
+    it("keeps rows distinct when every numeric id is 0", () => {
+      const events = [
+        createTestEvent({
+          id: 0,
+          event_id: "1756747205448-0",
+          summary: "First",
+          created_at: "2026-01-20T10:00:00Z",
+        } as Partial<Event>),
+        createTestEvent({
+          id: 0,
+          event_id: "1756747205449-0",
+          summary: "Second",
+          created_at: "2026-01-20T10:00:01Z",
+        } as Partial<Event>),
+      ];
+      render(
+        <ActivityLog comments={[]} events={events} issueId="test-issue" />,
+      );
+      expect(screen.getAllByTestId("activity-event")).toHaveLength(2);
+      expect(screen.getByText("alice: First")).toBeInTheDocument();
+      expect(screen.getByText("alice: Second")).toBeInTheDocument();
+    });
+
     it("describes 'created' events", () => {
       const events = [
         createTestEvent({ id: 1, event_type: "issue.created", actor: "alice" }),

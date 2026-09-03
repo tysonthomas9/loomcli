@@ -168,6 +168,27 @@ func HandleGetSessionTranscript(svc service.SessionService) http.HandlerFunc {
 	}
 }
 
+// HandleGetSessionTranscriptByID returns a transcript without requiring a task ID.
+func HandleGetSessionTranscriptByID(svc service.SessionService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		sessionID := r.PathValue("sessionId")
+		entries, err := svc.GetSessionTranscriptByID(r.Context(), wsID, sessionID)
+		if err != nil {
+			var svcErr *service.ServiceError
+			status := http.StatusInternalServerError
+			msg := "internal server error"
+			if errors.As(err, &svcErr) {
+				status = handler.StatusForKind(svcErr.Kind)
+				msg = svcErr.Message
+			}
+			handler.WriteJSON(w, status, TranscriptResponse{Success: false, Error: msg})
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, TranscriptResponse{Success: true, Data: &TranscriptData{SessionID: sessionID, Entries: entries}})
+	}
+}
+
 // sessionNotifyRequest is the JSON body expected by HandleNotifySessionChange.
 type sessionNotifyRequest struct {
 	TaskID      string `json:"task_id"`

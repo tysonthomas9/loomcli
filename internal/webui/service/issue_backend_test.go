@@ -240,6 +240,59 @@ func newServiceWithFake(fb *fakeIssueBackend) IssueService {
 
 // --- ListEvents ---
 
+func TestEventDataToTypesEvent_SingleChange(t *testing.T) {
+	event := eventDataToTypesEvent(backend.EventData{
+		ID: "7", IssueID: "test-1", Kind: "issue.updated", Actor: "alice",
+		Summary: "Updated title", Category: "field_change",
+		Changes: []backend.FieldChange{{Field: "title", Before: "old", After: "new"}},
+	})
+
+	if event.Summary != "Updated title" || event.Category != "field_change" {
+		t.Fatalf("summary/category = %q/%q", event.Summary, event.Category)
+	}
+	if len(event.Changes) != 1 || event.Changes[0].Field != "title" {
+		t.Fatalf("changes = %+v", event.Changes)
+	}
+	// old_value/new_value are not synthesized from a single change. Their only
+	// consumer is the activity list's per-type sentence, so filling them would
+	// render the same change twice, once in the sentence and once in the
+	// changes list, as soon as the two event vocabularies are mapped.
+	if event.OldValue != nil || event.NewValue != nil {
+		t.Fatalf("old/new = %v/%v, must stay unset", event.OldValue, event.NewValue)
+	}
+}
+
+// fleet-db ids are redis stream entries, which do not parse as int64, so every
+// fleet event lands on the numeric id 0. The backend's own id has to survive the
+// mapping or nothing downstream can tell two events apart.
+func TestEventDataToTypesEvent_KeepsNonNumericID(t *testing.T) {
+	event := eventDataToTypesEvent(backend.EventData{
+		ID: "1756747205448-0", IssueID: "test-1", Kind: "issue.update",
+	})
+
+	if event.ID != 0 {
+		t.Fatalf("ID = %d, want 0 for an id that does not parse", event.ID)
+	}
+	if event.EventID != "1756747205448-0" {
+		t.Fatalf("EventID = %q, want the stream id verbatim", event.EventID)
+	}
+}
+
+func TestEventDataToTypesEvent_MultipleChanges(t *testing.T) {
+	event := eventDataToTypesEvent(backend.EventData{
+		ID: "8", IssueID: "test-1", Kind: "issue.updated",
+		Summary: "Updated title and status",
+		Changes: []backend.FieldChange{
+			{Field: "title", Before: "old", After: "new"},
+			{Field: "status", Before: "open", After: "closed"},
+		},
+	})
+
+	if len(event.Changes) != 2 || event.Changes[1].After != "closed" {
+		t.Fatalf("changes = %+v", event.Changes)
+	}
+}
+
 func TestListEvents_Backend_Success(t *testing.T) {
 	now := time.Now().UTC()
 	fb := &fakeIssueBackend{

@@ -735,9 +735,18 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 	// controlPlaneSessionTranscript. Best-effort: a failed upload must not block the
 	// session completion. Own context so it can't eat the Update's timeout budget.
 	if len(input.transcriptData) > 0 {
+		transcriptFormat := s.localTranscriptFormat(input.sessionID)
 		upCtx, upCancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
-		if ref := s.uploadTranscriptArtifact(upCtx, input.sessionID, input.taskID, backend, input.transcriptData); ref != "" {
+		if ref := s.uploadTranscriptArtifact(upCtx, input.sessionID, input.taskID, backend, transcriptFormat, input.transcriptData); ref != "" {
 			metadata["transcript_ref"] = ref
+			// The reader needs to know how to parse what it just received: the Go
+			// leaf uploads the provider's raw stream, the TS leaf a canonical
+			// event stream. Absent markers mean an older record, which the reader
+			// treats as canonical, so only stamp a format we actually read.
+			if transcriptFormat != "" {
+				metadata["transcript_format"] = transcriptFormat
+				metadata["transcript_backend"] = backend
+			}
 		}
 		upCancel()
 	}
@@ -763,12 +772,30 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 	s.deregisterWorker(ap)
 }
 
-// uploadTranscriptArtifact uploads the daemon leaf's transcript as a content
-// artifact and returns its artifact:// ref (or "" on failure). The artifact id is
-// stable per session so a retried finalize reuses it (UploadContentArtifact is
-// idempotent). Owner is the agent session — the daemon leaf has no task_run, which
-// is the driver's owner type.
-func (s *Supervisor) uploadTranscriptArtifact(ctx context.Context, sessionID, taskID, backend string, data []byte) string {
+// localTranscriptFormat reports how the session's on-disk transcript is
+// encoded, so a reader on another host knows how to parse the artifact. The Go
+// leaf mirrors the provider's raw stream and the TS leaf writes canonical
+// events; the local metadata is the only place that distinction is recorded.
+// Returns "" when it cannot be read: guessing canonical over a raw rollout
+// yields events that parse without error and carry nothing.
+func (s *Supervisor) localTranscriptFormat(sessionID string) string {
+	local, err := sessions.NewStore(cli.GetWorkspaceRuntimeDir())
+	if err != nil {
+		return ""
+	}
+	meta, loadErr := local.LoadMetadata(sessionID)
+	if loadErr != nil || meta == nil {
+		return ""
+	}
+	return meta.TranscriptFormat
+}
+
+// uploadTranscriptArtifact stores the leaf transcript as a control-plane
+// artifact and returns its ref. The artifact id is stable per session so a
+// retried finalize reuses it (UploadContentArtifact is idempotent). Owner is the
+// agent session — the daemon leaf has no task_run, which is the driver's owner
+// type.
+func (s *Supervisor) uploadTranscriptArtifact(ctx context.Context, sessionID, taskID, backend, transcriptFormat string, data []byte) string {
 	if s.ControlStore == nil {
 		return ""
 	}
@@ -783,7 +810,7 @@ func (s *Supervisor) uploadTranscriptArtifact(ctx context.Context, sessionID, ta
 		Summary:       "agent session transcript",
 		MIMEType:      "application/x-ndjson",
 		DurableStatus: "declared",
-		Metadata:      map[string]string{"runtime": "daemon-leaf", "backend": backend},
+		Metadata:      map[string]string{"runtime": "daemon-leaf", "backend": backend, "transcript_format": transcriptFormat, "transcript_backend": backend},
 	}, data)
 	if err != nil {
 		slog.Warn("daemon transcript artifact upload failed", "session_id", sessionID, "err", err)

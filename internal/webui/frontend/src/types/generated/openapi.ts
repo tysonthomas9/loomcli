@@ -646,40 +646,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/workspaces/{ws}/issues/{issueId}/sessions": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** List session history records for an issue */
-    get: operations["listSessionHistory"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/workspaces/{ws}/issues/{issueId}/sessions/{recordId}/scrollback": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Get scrollback content for a session history record */
-    get: operations["getSessionScrollback"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/workspaces/{ws}/tasks/{taskId}/sessions": {
     parameters: {
       query?: never;
@@ -723,6 +689,23 @@ export interface paths {
     };
     /** Get session transcript entries */
     get: operations["getSessionTranscript"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/sessions/{sessionId}/transcript": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get a session transcript by session ID */
+    get: operations["getSessionTranscriptById"];
     put?: never;
     post?: never;
     delete?: never;
@@ -2908,14 +2891,25 @@ export interface components {
     IssueEvent: {
       /** Format: int64 */
       id: number;
+      /** @description The backend's own event id, verbatim. fleet-db ids are redis stream entries that do not parse as int64, so id is 0 for all of them and event_id is what actually identifies one. */
+      event_id?: string;
       issue_id: string;
       event_type: string;
       actor: string;
+      summary?: string;
+      category?: string;
+      changes?: components["schemas"]["IssueEventChange"][];
       old_value?: string | null;
       new_value?: string | null;
       comment?: string | null;
       /** Format: date-time */
       created_at: string;
+    };
+    /** @description A field value change captured by an issue event. before and after are always present: the mapper normalizes fleet-db's omitted-when-empty values to the empty string, so a field set for the first time or cleared stays distinguishable from one this end never reported. */
+    IssueEventChange: {
+      field: string;
+      before: string;
+      after: string;
     };
     Statistics: {
       total_issues: number;
@@ -3179,22 +3173,6 @@ export interface components {
       tool_name?: string;
       tool_input?: string;
       raw?: string;
-    };
-    /** @description Session history record (Redis-backed, per-issue) */
-    SessionHistoryRecord: {
-      id: string;
-      session_name: string;
-      issue_id: string;
-      backend: string;
-      /** @enum {string} */
-      status: "active" | "completed";
-      /** @enum {string} */
-      launcher: "user" | "start-work";
-      /** Format: date-time */
-      started_at: string;
-      /** Format: date-time */
-      ended_at?: string | null;
-      scrollback_path?: string;
     };
     TerminalSessionInfo: {
       name: string;
@@ -5084,65 +5062,6 @@ export interface operations {
       };
     };
   };
-  listSessionHistory: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-        issueId: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Session history */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": {
-            success: boolean;
-            data?: components["schemas"]["SessionHistoryRecord"][];
-          };
-        };
-      };
-    };
-  };
-  getSessionScrollback: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-        issueId: string;
-        recordId: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Scrollback content */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "text/plain": string;
-        };
-      };
-      /** @description Record not found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
   listTaskSessions: {
     parameters: {
       query?: never;
@@ -5216,6 +5135,43 @@ export interface operations {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
         taskId: string;
+        sessionId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Transcript */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data?: {
+              session_id?: string;
+              entries?: components["schemas"]["TranscriptEntry"][];
+            };
+          };
+        };
+      };
+      /** @description Session not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  getSessionTranscriptById: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
         sessionId: string;
       };
       cookie?: never;

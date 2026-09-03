@@ -52,6 +52,35 @@ func NewStore(runtimeDir string) (*Store, error) {
 	return &Store{dir: dir}, nil
 }
 
+// EnsureSession materializes a caller-supplied session ID for stores that
+// receive a session record from another control plane before local capture.
+// It is idempotent and preserves metadata already written by another owner.
+func (s *Store) EnsureSession(sessionID string) error {
+	if err := validateSessionID(sessionID); err != nil {
+		return err
+	}
+	sessDir := filepath.Join(s.dir, sessionID)
+	if err := os.MkdirAll(sessDir, sessDirPerm); err != nil {
+		return fmt.Errorf("create session dir: %w", err)
+	}
+	metaPath := filepath.Join(sessDir, "metadata.json")
+	if _, err := os.Stat(metaPath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat session metadata: %w", err)
+	}
+	meta := SessionMetadata{SessionRecord: SessionRecord{
+		SchemaVersion: CurrentSchemaVersion,
+		SessionID:     sessionID,
+		StartedAt:     time.Now().UTC(),
+		Status:        StatusRunning,
+	}}
+	if err := writeMetadataAtomic(sessDir, meta); err != nil {
+		return fmt.Errorf("write session metadata: %w", err)
+	}
+	return nil
+}
+
 // CreateSession initializes a new session directory with prompt.txt and
 // metadata.json (status=running). Returns a Session handle for the caller
 // to use during the agent run.

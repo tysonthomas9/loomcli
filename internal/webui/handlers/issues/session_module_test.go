@@ -29,8 +29,6 @@ func TestSessionModule_RegisterRoutes(t *testing.T) {
 		method string
 		path   string
 	}{
-		{"GET", "/api/workspaces/test-ws/issues/issue1/sessions"},
-		{"GET", "/api/workspaces/test-ws/issues/issue1/sessions/rec1/scrollback"},
 		{"GET", "/api/workspaces/test-ws/tasks/task1/sessions"},
 		{"GET", "/api/workspaces/test-ws/tasks/task1/sessions/sess1"},
 		{"GET", "/api/workspaces/test-ws/tasks/task1/sessions/sess1/transcript"},
@@ -48,24 +46,6 @@ func TestSessionModule_RegisterRoutes(t *testing.T) {
 		if rec.Code == http.StatusMethodNotAllowed {
 			t.Errorf("%s %s: got 405, wrong method registered", rt.method, rt.path)
 		}
-	}
-}
-
-func TestSessionModule_AllRoutesUnconditional(t *testing.T) {
-	// All 6 routes register regardless of whether the underlying stores are nil.
-	// The SessionService handles nil stores internally.
-	mod := NewSessionModule(&stubSessionService{}, SessionModuleOpts{})
-
-	mux := http.NewServeMux()
-	mod.Register(mux) // must not panic
-
-	// Verify session history routes are always registered (not conditional)
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/api/workspaces/test-ws/issues/issue1/sessions", nil)
-	mux.ServeHTTP(rec, req)
-
-	if rec.Code == http.StatusNotFound {
-		t.Error("session history route should be registered unconditionally")
 	}
 }
 

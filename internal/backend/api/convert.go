@@ -223,15 +223,39 @@ func commentToData(c gen.Comment) backend.CommentData {
 	}
 }
 
-// eventToData converts gen.IssueEvent to backend.EventData.
+// eventToData converts gen.IssueEvent to backend.EventData. This backend reads
+// loom's own API, which carries the event payload, so dropping it here would be
+// a lossy hop rather than an empty one.
 func eventToData(e gen.IssueEvent) backend.EventData {
+	id := strconv.FormatInt(e.Id, 10)
+	if e.EventId != nil && *e.EventId != "" {
+		id = *e.EventId
+	}
+	var changes []backend.FieldChange
+	if e.Changes != nil {
+		changes = make([]backend.FieldChange, 0, len(*e.Changes))
+		for _, c := range *e.Changes {
+			changes = append(changes, backend.FieldChange{Field: c.Field, Before: c.Before, After: c.After})
+		}
+	}
 	return backend.EventData{
-		ID:        strconv.FormatInt(e.Id, 10),
+		ID:        id,
 		IssueID:   e.IssueId,
 		Kind:      e.EventType,
 		Actor:     e.Actor,
+		Summary:   derefOrEmpty(e.Summary),
+		Category:  derefOrEmpty(e.Category),
+		Changes:   changes,
 		CreatedAt: e.CreatedAt,
 	}
+}
+
+// derefOrEmpty reads an optional generated string field.
+func derefOrEmpty(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // statisticsToData converts gen.Statistics to backend.StatsData.

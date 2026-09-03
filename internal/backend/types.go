@@ -118,13 +118,23 @@ type CommentData struct {
 
 // EventData represents an event/history entry for an issue.
 type EventData struct {
-	ID        string    `json:"id"`
-	IssueID   string    `json:"issue_id"`
-	Kind      string    `json:"kind"`
-	Actor     string    `json:"actor,omitempty"`
-	Target    string    `json:"target,omitempty"`
-	Payload   string    `json:"payload,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        string        `json:"id"`
+	IssueID   string        `json:"issue_id"`
+	Kind      string        `json:"kind"`
+	Actor     string        `json:"actor,omitempty"`
+	Target    string        `json:"target,omitempty"`
+	Payload   string        `json:"payload,omitempty"`
+	Summary   string        `json:"summary,omitempty"`
+	Category  string        `json:"category,omitempty"`
+	Changes   []FieldChange `json:"changes,omitempty"`
+	CreatedAt time.Time     `json:"created_at"`
+}
+
+// FieldChange represents a before/after change to a single issue field.
+type FieldChange struct {
+	Field  string `json:"field"`
+	Before string `json:"before,omitempty"`
+	After  string `json:"after,omitempty"`
 }
 
 // StatsData contains aggregate issue statistics.

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -22,6 +23,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
+	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -338,10 +341,22 @@ func createLeadSession(ctx context.Context, handle *bootstrap.StoreHandle, ws, s
 		Metadata: map[string]string{
 			"actor":        leadSessionActor(),
 			"lead_workdir": workDir,
+			"backend":      cli.GetBackendName(),
 		},
 	})
 	if errors.Is(err, domain.ErrAlreadyExists) {
-		return nil
+		session, getErr := handle.Store.AgentSessions().Get(createCtx, ws, sid)
+		if getErr != nil {
+			return getErr
+		}
+		metadata := make(map[string]string, len(session.Metadata)+2)
+		for key, value := range session.Metadata {
+			metadata[key] = value
+		}
+		metadata["lead_workdir"] = workDir
+		metadata["backend"] = cli.GetBackendName()
+		_, updateErr := handle.Store.AgentSessions().Update(createCtx, ws, sid, store.AgentSessionUpdate{Metadata: &metadata})
+		return updateErr
 	}
 	return err
 }
@@ -377,14 +392,127 @@ func leadSessionFinalizer(handle *bootstrap.StoreHandle, ws, sid string, stopHB 
 		status := domain.AgentSessionCompleted
 		now := time.Now().UTC()
 		finishedAt := &now
-		if _, err := handle.Store.AgentSessions().Update(finCtx, ws, sid, store.AgentSessionUpdate{
+		metadata := finalizeLeadTranscript(finCtx, handle.Store, ws, sid)
+		update := store.AgentSessionUpdate{
 			Status:     &status,
 			FinishedAt: &finishedAt,
-		}); err != nil {
+		}
+		if metadata != nil {
+			update.Metadata = &metadata
+		}
+		if _, err := handle.Store.AgentSessions().Update(finCtx, ws, sid, update); err != nil {
 			slog.Debug("lead orchestrator session: finalize failed", "err", err)
 		}
 		_ = handle.Close()
 	}
+}
+
+// finalizeLeadTranscript captures the provider-native transcript and uploads a
+// copy for control-plane readers. Every step is best-effort so audit capture
+// can never change the lead's exit status or lifecycle.
+func finalizeLeadTranscript(ctx context.Context, st store.Store, ws, sid string) map[string]string {
+	rec, err := st.AgentSessions().Get(ctx, ws, sid)
+	if err != nil || rec == nil {
+		slog.Warn("lead transcript: session lookup failed", "session_id", sid, "err", err)
+		return nil
+	}
+	metadata := make(map[string]string, len(rec.Metadata)+2)
+	for key, value := range rec.Metadata {
+		metadata[key] = value
+	}
+	workDir := strings.TrimSpace(metadata["lead_workdir"])
+	backend := strings.TrimSpace(metadata["backend"])
+	if workDir == "" || backend == "" {
+		slog.Warn("lead transcript: capture skipped, session metadata incomplete", "session_id", sid, "workdir", workDir != "", "backend", backend != "")
+		return metadata
+	}
+	if backend == "codex" {
+		if runtimeHome := strings.TrimSpace(metadata[leadcontrol.MetadataCodexRuntimeHome]); runtimeHome != "" {
+			metadata["log_path"] = filepath.Join(runtimeHome, "app-server.log")
+		}
+	}
+
+	since := rec.StartedAt
+	if since.IsZero() {
+		since = rec.CreatedAt
+	}
+	transcriptPath, data := syncLeadNativeTranscript(sid, workDir, backend, since, rec)
+	if len(data) == 0 {
+		return metadata
+	}
+	metadata["transcript_path"] = transcriptPath
+	upCtx, upCancel := context.WithTimeout(context.Background(), leadStoreOpTimeout)
+	finalized, err := uploadLeadTranscript(upCtx, st, ws, sid, backend, data)
+	upCancel()
+	if err != nil {
+		slog.Warn("lead transcript: artifact upload failed", "session_id", sid, "err", err)
+		return metadata
+	}
+	metadata["transcript_ref"] = "artifact://" + finalized.ArtifactID
+	metadata["transcript_format"] = sessions.TranscriptFormatRaw
+	metadata["transcript_backend"] = backend
+	return metadata
+}
+
+// syncLeadNativeTranscript mirrors the provider's own rollout into the lead's
+// session directory and reads it back. The read must follow the sync: like the
+// daemon's Go leaf, the lead's native transcript only lands when the mirror
+// runs, so a read taken first sees nothing and the upload never fires. A failed
+// sync is not conclusive — a hook may already have mirrored the file — so the
+// read decides either way.
+func syncLeadNativeTranscript(sid, workDir, backend string, since time.Time, rec *domain.AgentSession) (string, []byte) {
+	sessStore, err := sessions.NewStore(cli.GetWorkspaceRuntimeDir())
+	if err != nil {
+		slog.Warn("lead transcript: local store unavailable", "session_id", sid, "err", err)
+		return "", nil
+	}
+	if err := sessStore.EnsureSession(sid); err != nil {
+		slog.Warn("lead transcript: local session unavailable", "session_id", sid, "err", err)
+		return "", nil
+	}
+	claudeUUID := ""
+	if rec != nil {
+		runtime := leadcontrol.HarnessRuntimeMetadataFromSession(rec)
+		claudeUUID = runtime.HarnessSessionID
+		if !runtime.StartedAt.IsZero() {
+			since = runtime.StartedAt
+		}
+	}
+	switch backend {
+	case "codex":
+		_, err = sessStore.SyncLatestCodexRollout(sid, workDir, since)
+	case "claude":
+		_, err = sessStore.SyncLatestClaudeTranscript(sid, workDir, claudeUUID, since)
+	}
+	if err != nil {
+		slog.Warn("lead transcript: native transcript sync failed", "session_id", sid, "err", err)
+	}
+	transcriptPath := sessStore.NativeTranscriptPath(sid)
+	data, err := os.ReadFile(transcriptPath) //nolint:gosec // session-owned path
+	if err != nil || len(data) == 0 {
+		if err != nil {
+			slog.Warn("lead transcript: no local transcript", "session_id", sid, "err", err)
+		}
+		return transcriptPath, nil
+	}
+	return transcriptPath, data
+}
+
+// uploadLeadTranscript stores the lead's transcript as a control-plane artifact
+// under the same id shape a task session uses, so one reader serves both.
+func uploadLeadTranscript(ctx context.Context, st store.Store, ws, sid, backend string, data []byte) (*domain.Artifact, error) {
+	return store.UploadContentArtifact(ctx, st.Artifacts(), store.ArtifactCreate{
+		WorkspaceKey:  ws,
+		ArtifactID:    "transcript-" + sid,
+		SessionID:     sid,
+		OwnerType:     "session",
+		OwnerID:       sid,
+		Type:          "transcript",
+		Summary:       "agent session transcript",
+		MIMEType:      "application/x-ndjson",
+		DurableStatus: "declared",
+		Metadata:      map[string]string{"runtime": "lead-orchestration", "backend": backend, "transcript_format": sessions.TranscriptFormatRaw, "transcript_backend": backend},
+	}, data)
 }
 
 func resolveLeadOrchestratorSessionID() string {

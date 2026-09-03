@@ -57,9 +57,6 @@ func TestDumpLoad_RoundTrip(t *testing.T) {
 	if err := m1.Client().Set(ctx, "ws:ws1:issue:tabs:loomcli-abc.1", `{"tabs":[]}`, 24*time.Hour).Err(); err != nil {
 		t.Fatalf("Set issuetabs: %v", err)
 	}
-	if err := m1.Client().Set(ctx, "ws:ws1:issue:sessions:loomcli-abc.1", `[]`, 0).Err(); err != nil {
-		t.Fatalf("Set sessionhistory: %v", err)
-	}
 	// Excluded key — must not survive dump.
 	if err := m1.Client().Set(ctx, "fleet:tasks:claimed:xyz", "worker-1", 0).Err(); err != nil {
 		t.Fatalf("Set excluded: %v", err)

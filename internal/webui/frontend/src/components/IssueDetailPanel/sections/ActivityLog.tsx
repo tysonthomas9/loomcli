@@ -21,10 +21,20 @@ function getTimestamp(item: ActivityItem): number {
   return new Date(item.data.created_at).getTime();
 }
 
-/** Human-readable description for system events. */
+/**
+ * Human-readable description for system events.
+ *
+ * The backend's own summary wins when it has one. fleet-db names the actions it
+ * emits ("issue.update", "dep.add") in a different vocabulary from the
+ * EventType cases below, so without this every fleet event fell through to
+ * "performed an action" and the whole feed said nothing.
+ */
 function describeEvent(event: Event): string {
-  const { event_type, actor, old_value, new_value } = event;
+  const { event_type, actor, old_value, new_value, summary } = event;
   const who = actor || "Someone";
+  if (summary) {
+    return `${who}: ${summary}`;
+  }
 
   switch (event_type as EventType) {
     case "issue.created":
@@ -58,6 +68,20 @@ function describeEvent(event: Event): string {
     default:
       return `${who} performed an action`;
   }
+}
+
+function truncateValue(value: string): string {
+  const maxLength = 80;
+  return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value;
+}
+
+/**
+ * A field being set for the first time has no before, and a field being cleared
+ * has no after. Both arrive as an omitted key, so name the absence rather than
+ * rendering a gap the reader has to guess at.
+ */
+function presentValue(value: string | undefined): string {
+  return value ? value : "(empty)";
 }
 
 /** Icon for each event type. */
@@ -183,14 +207,33 @@ export function ActivityLog({
           const event = item.data;
           return (
             <div
-              key={`e-${event.id}`}
+              key={`e-${event.event_id || event.id}-${event.created_at}`}
               className={styles.eventEntry}
               data-testid="activity-event"
             >
               <EventIcon eventType={event.event_type as EventType} />
-              <span className={styles.eventDescription}>
-                {describeEvent(event)}
-              </span>
+              <div className={styles.eventDetails}>
+                <span className={styles.eventDescription}>
+                  {describeEvent(event)}
+                </span>
+                {event.changes?.length ? (
+                  <div className={styles.eventChanges}>
+                    {event.changes.map((change, i) => {
+                      const before = presentValue(change.before);
+                      const after = presentValue(change.after);
+                      return (
+                        <span
+                          key={`${change.field}-${i}`}
+                          title={`${change.field}: ${before} → ${after}`}
+                        >
+                          {change.field}: {truncateValue(before)} →{" "}
+                          {truncateValue(after)}
+                        </span>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
               <time className={styles.timestamp} dateTime={event.created_at}>
                 {formatDate(event.created_at)}
               </time>

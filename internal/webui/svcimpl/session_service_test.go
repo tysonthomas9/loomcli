@@ -35,12 +35,12 @@ func TestSessionServiceListTaskSessionsUsesControlPlane(t *testing.T) {
 		Status:       domain.AgentSessionRunning,
 		Phase:        "implementation",
 		Metadata: map[string]string{
-			"backend":         "localdogfood",
-			"transcript_path": "/tmp/sess-1/transcript.jsonl",
-			"files_changed":   "1",
-			"lines_added":     "2",
-			"lines_removed":   "3",
-			"files_touched":   "file.txt",
+			"backend":        "localdogfood",
+			"transcript_ref": "artifact://transcript-sess-1",
+			"files_changed":  "1",
+			"lines_added":    "2",
+			"lines_removed":  "3",
+			"files_touched":  "file.txt",
 		},
 	})
 	if err != nil {
@@ -54,7 +54,7 @@ func TestSessionServiceListTaskSessionsUsesControlPlane(t *testing.T) {
 		t.Fatalf("complete control-plane session: %v", err)
 	}
 
-	svc := NewSessionService(st, nil)
+	svc := NewSessionService(st)
 	items, err := svc.ListTaskSessions(t.Context(), "WS", "TASK-1")
 	if err != nil {
 		t.Fatalf("ListTaskSessions: %v", err)
@@ -103,7 +103,7 @@ func TestSessionServiceCloudControlPlaneTranscriptArtifactReadContent(t *testing
 		t.Fatalf("create flue control-plane session: %v", err)
 	}
 
-	svc := NewSessionService(st, nil)
+	svc := NewSessionService(st)
 	items, err := svc.ListTaskSessions(ctx, "WS", "TASK-FLUE-1")
 	if err != nil {
 		t.Fatalf("ListTaskSessions: %v", err)
@@ -117,6 +117,74 @@ func TestSessionServiceCloudControlPlaneTranscriptArtifactReadContent(t *testing
 	}
 	if len(events) != 1 || events[0].Role != "assistant" || events[0].Text != "done" {
 		t.Fatalf("events = %+v, want assistant transcript", events)
+	}
+}
+
+func TestSessionServiceSessionScopedTranscriptLocalAndArtifactFallback(t *testing.T) {
+	ctx := t.Context()
+	runtimeDir := t.TempDir()
+	sessStore, err := sessions.NewStore(runtimeDir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	sess, err := sessStore.CreateSession(sessions.CreateOptions{AgentName: "lead", Backend: "codex"})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	native := filepath.Join(t.TempDir(), "native.jsonl")
+	body := []byte(`{"seq":1,"timestamp":"2026-06-09T12:00:00Z","role":"assistant","type":"text","text":"local"}` + "\n")
+	if err := os.WriteFile(native, body, 0o600); err != nil {
+		t.Fatalf("write native transcript: %v", err)
+	}
+	if err := sessStore.SyncNativeTranscript(sess.SessionID(), native, sessions.TranscriptFormatCanonical); err != nil {
+		t.Fatalf("SyncNativeTranscript: %v", err)
+	}
+	svc := NewSessionServiceWithRuntimeDir(nil, runtimeDir)
+	events, err := svc.GetSessionTranscriptByID(ctx, "WS", sess.SessionID())
+	if err != nil || len(events) != 1 || events[0].Text != "local" {
+		t.Fatalf("local transcript = %+v, err %v", events, err)
+	}
+
+	st := memstore.New()
+	artifactBody := []byte(`{"seq":1,"timestamp":"2026-06-09T12:00:00Z","role":"assistant","type":"text","text":"remote"}` + "\n")
+	createFinalizedArtifact(t, st, "transcript-lead-remote", "lead-remote", "", "lead-remote", "transcript", "application/x-ndjson", artifactBody)
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS", SessionID: "lead-remote", AgentID: "lead",
+		Kind: domain.AgentSessionKindOrchestration, Status: domain.AgentSessionCompleted,
+		Metadata: map[string]string{"transcript_ref": "artifact://transcript-lead-remote"},
+	}); err != nil {
+		t.Fatalf("create remote session: %v", err)
+	}
+	events, err = NewSessionService(st).GetSessionTranscriptByID(ctx, "WS", "lead-remote")
+	if err != nil || len(events) != 1 || events[0].Text != "remote" {
+		t.Fatalf("remote transcript = %+v, err %v", events, err)
+	}
+}
+
+func TestSessionServiceSessionScopedTranscriptNotFound(t *testing.T) {
+	_, err := NewSessionService(memstore.New()).GetSessionTranscriptByID(t.Context(), "WS", "missing-session")
+	assertServiceErrorKind(t, err, service.KindNotFound)
+}
+
+func TestSessionServiceSessionScopedRawCodexArtifactUsesRecordedParser(t *testing.T) {
+	ctx := t.Context()
+	st := memstore.New()
+	body := []byte(`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"raw done"}]}}` + "\n")
+	createFinalizedArtifact(t, st, "transcript-raw-codex", "lead-raw-codex", "", "lead-raw-codex", "transcript", "application/x-ndjson", body)
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS", SessionID: "lead-raw-codex", AgentID: "lead",
+		Kind: domain.AgentSessionKindOrchestration, Status: domain.AgentSessionCompleted,
+		Metadata: map[string]string{
+			"transcript_ref":     "artifact://transcript-raw-codex",
+			"transcript_format":  sessions.TranscriptFormatRaw,
+			"transcript_backend": "codex",
+		},
+	}); err != nil {
+		t.Fatalf("create raw session: %v", err)
+	}
+	events, err := NewSessionService(st).GetSessionTranscriptByID(ctx, "WS", "lead-raw-codex")
+	if err != nil || len(events) != 1 || events[0].Role != "assistant" || events[0].Text != "raw done" {
+		t.Fatalf("raw codex events = %+v, err %v; want assistant content", events, err)
 	}
 }
 
@@ -143,7 +211,7 @@ func TestSessionServiceControlPlaneDiffArtifactReadContent(t *testing.T) {
 		t.Fatalf("create flue control-plane session: %v", err)
 	}
 
-	svc := NewSessionService(st, nil)
+	svc := NewSessionService(st)
 	items, err := svc.ListTaskSessions(ctx, "WS", "TASK-FLUE-1")
 	if err != nil {
 		t.Fatalf("ListTaskSessions: %v", err)
@@ -181,7 +249,7 @@ func TestSessionServiceControlPlaneDiffFallsBackToPatchArtifactByTaskRun(t *test
 		t.Fatalf("create flue control-plane session: %v", err)
 	}
 
-	diff, err := NewSessionService(st, nil).GetSessionDiff(ctx, "WS", "TASK-FLUE-2", "flue-task-run-2")
+	diff, err := NewSessionService(st).GetSessionDiff(ctx, "WS", "TASK-FLUE-2", "flue-task-run-2")
 	if err != nil {
 		t.Fatalf("GetSessionDiff: %v", err)
 	}
@@ -210,7 +278,7 @@ func TestSessionServiceControlPlaneDiffRejectsWrongTask(t *testing.T) {
 		t.Fatalf("create flue control-plane session: %v", err)
 	}
 
-	_, err := NewSessionService(st, nil).GetSessionDiff(ctx, "WS", "TASK-OTHER", "flue-task-run-1")
+	_, err := NewSessionService(st).GetSessionDiff(ctx, "WS", "TASK-OTHER", "flue-task-run-1")
 	assertServiceErrorKind(t, err, service.KindNotFound)
 }
 
@@ -233,7 +301,7 @@ func TestSessionServiceControlPlaneDiffMissingPatchArtifact(t *testing.T) {
 		t.Fatalf("create flue control-plane session: %v", err)
 	}
 
-	_, err := NewSessionService(st, nil).GetSessionDiff(ctx, "WS", "TASK-FLUE-1", "flue-task-run-1")
+	_, err := NewSessionService(st).GetSessionDiff(ctx, "WS", "TASK-FLUE-1", "flue-task-run-1")
 	assertServiceErrorKind(t, err, service.KindNotFound)
 }
 
@@ -275,7 +343,7 @@ func TestSessionServiceLocalDiffMissingFallsBackToControlPlaneArtifact(t *testin
 		t.Fatalf("create control-plane session: %v", err)
 	}
 
-	diff, err := NewSessionServiceWithRuntimeDir(st, nil, runtimeDir).GetSessionDiff(ctx, "WS", "TASK-FLUE-1", sess.SessionID())
+	diff, err := NewSessionServiceWithRuntimeDir(st, runtimeDir).GetSessionDiff(ctx, "WS", "TASK-FLUE-1", sess.SessionID())
 	if err != nil {
 		t.Fatalf("GetSessionDiff: %v", err)
 	}
@@ -302,7 +370,7 @@ func TestSessionServiceLocalDiffMissingWithoutControlPlaneReturnsDiffNotFound(t 
 		t.Fatalf("finalize session: %v", err)
 	}
 
-	_, err = NewSessionServiceWithRuntimeDir(nil, nil, runtimeDir).GetSessionDiff(t.Context(), "WS", "TASK-FLUE-1", sess.SessionID())
+	_, err = NewSessionServiceWithRuntimeDir(nil, runtimeDir).GetSessionDiff(t.Context(), "WS", "TASK-FLUE-1", sess.SessionID())
 	assertServiceError(t, err, service.KindNotFound, "diff not found")
 }
 
@@ -418,7 +486,7 @@ func TestSessionServiceListTaskSessionsEnrichesControlPlaneWithLocalUsage(t *tes
 		t.Fatalf("complete control-plane session: %v", err)
 	}
 
-	svc := NewSessionServiceWithRuntimeDir(st, nil, runtimeDir)
+	svc := NewSessionServiceWithRuntimeDir(st, runtimeDir)
 	items, err := svc.ListTaskSessions(ctx, "WS", "TASK-USAGE-1")
 	if err != nil {
 		t.Fatalf("ListTaskSessions: %v", err)
@@ -500,7 +568,7 @@ func TestSessionServiceListTaskSessionsFallsBackToFileStores(t *testing.T) {
 		t.Fatalf("finalize session: %v", err)
 	}
 
-	svc := NewSessionService(st, nil)
+	svc := NewSessionService(st)
 	items, err := svc.ListTaskSessions(ctx, "WS", "TASK-2")
 	if err != nil {
 		t.Fatalf("ListTaskSessions: %v", err)
@@ -554,7 +622,7 @@ func TestSessionServiceListTaskSessionsSearchesRuntimeDir(t *testing.T) {
 		t.Fatalf("finalize session: %v", err)
 	}
 
-	svc := NewSessionServiceWithRuntimeDir(st, nil, runtimeDir)
+	svc := NewSessionServiceWithRuntimeDir(st, runtimeDir)
 	items, err := svc.ListTaskSessions(ctx, "WS", "DESKTOP-QA-3")
 	if err != nil {
 		t.Fatalf("ListTaskSessions: %v", err)
@@ -598,7 +666,7 @@ func TestSessionServiceEventStoreSubagentsAreDiscoverable(t *testing.T) {
 		t.Fatalf("append eventstore subagent: %v", err)
 	}
 
-	svc := NewSessionServiceWithRuntimeDir(nil, nil, runtimeDir)
+	svc := NewSessionServiceWithRuntimeDir(nil, runtimeDir)
 	ids, err := svc.ListSessionSubagents(t.Context(), "WS", "TASK-3", sessionID)
 	if err != nil {
 		t.Fatalf("ListSessionSubagents: %v", err)
@@ -612,25 +680,5 @@ func TestSessionServiceEventStoreSubagentsAreDiscoverable(t *testing.T) {
 	}
 	if len(events) != 1 || events[0].Text != "subagent from event store" {
 		t.Fatalf("subagent events = %+v", events)
-	}
-}
-
-func TestReadScrollbackFileReturnsInternalWhenHomeDirUnavailable(t *testing.T) {
-	oldUserHomeDir := userHomeDir
-	userHomeDir = func() (string, error) {
-		return "", errors.New("home unavailable")
-	}
-	t.Cleanup(func() { userHomeDir = oldUserHomeDir })
-
-	_, err := readScrollbackFile("/.loom/session-scrollback/session.log")
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	var svcErr *service.ServiceError
-	if !errors.As(err, &svcErr) {
-		t.Fatalf("error = %T %v, want ServiceError", err, err)
-	}
-	if svcErr.Kind != service.KindInternal {
-		t.Fatalf("error kind = %q, want %q", svcErr.Kind, service.KindInternal)
 	}
 }

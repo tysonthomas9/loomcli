@@ -221,14 +221,35 @@ type Comment struct {
 
 // Event represents an audit trail entry
 type Event struct {
-	ID        int64     `json:"id"`
-	IssueID   string    `json:"issue_id"`
-	EventType EventType `json:"event_type"`
-	Actor     string    `json:"actor"`
-	OldValue  *string   `json:"old_value,omitempty"`
-	NewValue  *string   `json:"new_value,omitempty"`
-	Comment   *string   `json:"comment,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	ID int64 `json:"id"`
+	// EventID is the backend's own identifier, kept verbatim. ID is an int64
+	// matching the SQLite primary key, and fleet-db's ids are redis stream
+	// entries like "1756747205448-0", which parse to 0 — so every fleet event
+	// used to arrive with the same ID and nothing could address one.
+	EventID   string        `json:"event_id,omitempty"`
+	IssueID   string        `json:"issue_id"`
+	EventType EventType     `json:"event_type"`
+	Actor     string        `json:"actor"`
+	OldValue  *string       `json:"old_value,omitempty"`
+	NewValue  *string       `json:"new_value,omitempty"`
+	Comment   *string       `json:"comment,omitempty"`
+	Summary   string        `json:"summary,omitempty"`
+	Category  string        `json:"category,omitempty"`
+	Changes   []FieldChange `json:"changes,omitempty"`
+	CreatedAt time.Time     `json:"created_at"`
+}
+
+// FieldChange represents a before/after change to a single issue field.
+//
+// Before and After are deliberately not omitempty. fleet-db drops them when the
+// value is empty, so on its wire "was empty" and "not reported" look identical;
+// carrying that ambiguity forward types them as optional in the generated
+// frontend, where a field being set for the first time then arrives as
+// undefined. This end of the contract always sends both keys.
+type FieldChange struct {
+	Field  string `json:"field"`
+	Before string `json:"before"`
+	After  string `json:"after"`
 }
 
 // EventType categorizes audit trail events

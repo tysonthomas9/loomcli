@@ -89,9 +89,8 @@ type Server struct {
 	fleetRegCfg   *appinfra.FleetRegisterConfig // nil if no fleet API key
 
 	// Redis-backed stores
-	tabMetaStore        *appstores.TabMetaStore        // nil if Redis unconfigured
-	issueTabStore       *appstores.IssueTabStore       // nil if Redis unconfigured
-	sessionHistoryStore *appstores.SessionHistoryStore // nil if Redis unconfigured
+	tabMetaStore  *appstores.TabMetaStore  // nil if Redis unconfigured
+	issueTabStore *appstores.IssueTabStore // nil if Redis unconfigured
 
 	// External auth
 	extAuthMiddleware middleware.Middleware // nil = open mode
@@ -219,9 +218,6 @@ func (app *Server) Close() {
 	}
 	if app.jwksCleanup != nil {
 		app.jwksCleanup()
-	}
-	if app.sessionHistoryStore != nil {
-		_ = app.sessionHistoryStore.Close()
 	}
 	if app.issueTabStore != nil {
 		_ = app.issueTabStore.Close()
