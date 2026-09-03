@@ -156,7 +156,7 @@ func TestAgentSessionUpdateTerminalCoreAndAdvisoryFields(t *testing.T) {
 	}
 }
 
-func TestAgentSessionUpdateAllowsLegacyReentryUntilLOOMCLI160(t *testing.T) {
+func TestAgentSessionUpdateProtectsLegacyTerminalOutcome(t *testing.T) {
 	st := New()
 	legacy, err := st.AgentSessions().Create(t.Context(), store.AgentSessionCreate{
 		WorkspaceKey: "WS", SessionID: "legacy-run", AgentID: "flue", Status: domain.AgentSessionCompleted,
@@ -165,25 +165,10 @@ func TestAgentSessionUpdateAllowsLegacyReentryUntilLOOMCLI160(t *testing.T) {
 		t.Fatalf("Create legacy session: %v", err)
 	}
 	legacySummary := "legacy overwrite"
-	legacy, err = st.AgentSessions().Update(t.Context(), "WS", legacy.SessionID, store.AgentSessionUpdate{Summary: &legacySummary})
-	if err != nil || legacy.Summary != legacySummary {
-		t.Fatalf("legacy status-less outcome Update = %#v, %v", legacy, err)
-	}
+	_, err = st.AgentSessions().Update(t.Context(), "WS", legacy.SessionID, store.AgentSessionUpdate{Summary: &legacySummary})
+	assertLifecycleError(t, err, store.SessionLifecycleErrOutcomeConflict)
 	running := domain.AgentSessionRunning
-	legacy, err = st.AgentSessions().Update(t.Context(), "WS", legacy.SessionID, store.AgentSessionUpdate{Status: &running})
-	if err != nil || legacy.Status != domain.AgentSessionRunning {
-		t.Fatalf("legacy terminal-to-running Update = %#v, %v", legacy, err)
-	}
-
-	managed, run := lifecycleTestStore(t, domain.TaskRunRunning)
-	ref, err := managed.AgentSessions().Open(t.Context(), run, lifecycleDescriptor("agent"))
-	if err != nil {
-		t.Fatalf("Open managed session: %v", err)
-	}
-	if _, err := managed.AgentSessions().Finalize(t.Context(), ref, store.SessionOutcome{Status: domain.AgentSessionCompleted}); err != nil {
-		t.Fatalf("Finalize managed session: %v", err)
-	}
-	_, err = managed.AgentSessions().Update(t.Context(), "WS", ref.SessionID, store.AgentSessionUpdate{Status: &running})
+	_, err = st.AgentSessions().Update(t.Context(), "WS", legacy.SessionID, store.AgentSessionUpdate{Status: &running})
 	assertLifecycleError(t, err, store.SessionLifecycleErrOutcomeConflict)
 }
 

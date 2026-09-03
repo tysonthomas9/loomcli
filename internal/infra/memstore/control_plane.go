@@ -323,8 +323,6 @@ func (s *agentSessionStore) Update(_ context.Context, ws, sessionID string, patc
 	if !ok {
 		return nil, fmt.Errorf("agent session %q in workspace %q: %w", sessionID, ws, domain.ErrNotFound)
 	}
-	// Interim LOOMCLI-160 rule: invocation-key-less legacy bridge sessions may
-	// re-enter; only lifecycle-managed sessions receive generic-update CAS.
 	if store.ProtectAgentSessionTerminalUpdate(session) && store.AgentSessionUpdateTouchesOutcome(patch) {
 		if store.AgentSessionUpdateMatches(session, patch) {
 			return cloneAgentSession(session), nil

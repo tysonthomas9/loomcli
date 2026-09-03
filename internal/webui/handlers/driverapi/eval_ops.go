@@ -107,8 +107,8 @@ func (m *Module) sessionTranscriptGet(ctx context.Context, ws string, id driverI
 func (m *Module) evalMetricPut(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
 	params, err := decodeParams[struct {
 		SessionID      string            `json:"sessionId"`
-		JudgeSessionID string            `json:"judgeSessionId"`
 		PromptVersion  string            `json:"promptVersion"`
+		JudgeSessionID string            `json:"judgeSessionId"`
 		Status         string            `json:"status"`
 		ErrorClass     string            `json:"errorClass"`
 		Eval           evals.EvalPayload `json:"eval"`

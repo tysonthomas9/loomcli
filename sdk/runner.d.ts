@@ -254,6 +254,10 @@ export interface AgentSessionOpenResult {
 export interface AgentSessionUsage {
   tokens?: number | null;
   cost?: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  cacheReadTokens?: number | null;
+  cacheWriteTokens?: number | null;
 }
 
 export interface AgentSessionCloseInput {
@@ -323,6 +327,8 @@ export interface AgentExecResult {
   durationMs: number;
   entries: Record<string, unknown>[];
   usage: AgentSessionUsage | null;
+  /** Backend-reported stream failure, when the process itself exited cleanly. */
+  streamError: string;
   session: AgentExecSession;
   /** Merge this into the leaf's TaskRun runtimeMetadata on completion. */
   runtimeMetadata: Record<string, string>;

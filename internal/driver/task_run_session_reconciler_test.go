@@ -349,28 +349,6 @@ type failingSessionUpdateStore struct {
 
 func (s failingSessionUpdateStore) AgentSessions() store.AgentSessionStore { return s.sessions }
 
-type failingSessionUpdate struct{ store.AgentSessionStore }
-
-func (s failingSessionUpdate) Update(context.Context, string, string, store.AgentSessionUpdate) (*domain.AgentSession, error) {
-	return nil, errors.New("finish session failed")
-}
-
-func TestHostBridgeDoesNotPromoteFinishSessionError(t *testing.T) {
-	f := newSessionReconcilerFixture(t)
-	override := failingSessionUpdateStore{Store: f.st, sessions: failingSessionUpdate{AgentSessionStore: f.st.AgentSessions()}}
-	f.req.Runner = "local-task-runner"
-	f.req.RunnerKind = RunnerKindFlueWorkflow
-	f.req.RunnerEntrypoint = LocalTaskRunnerEntrypoint
-	f.req.RunnerTrustLevel = domain.DriverTrustTrusted
-	result, err := (HostBridgeTaskExecutor{
-		Store: override, WorktreePath: t.TempDir(), Command: hostBridgeHelperCommand(t, "flue-transcript", "", ""),
-		SessionReconciler: &TaskRunSessionReconciler{Store: override},
-	}).ExecuteTask(f.ctx, f.req)
-	if err != nil || result.Status != domain.TaskRunCompleted {
-		t.Fatalf("ExecuteTask promoted finish error: result=%+v err=%v", result, err)
-	}
-}
-
 type failingSessionList struct{ store.AgentSessionStore }
 
 func (s failingSessionList) List(context.Context, string, store.AgentSessionFilter) ([]*domain.AgentSession, error) {

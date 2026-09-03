@@ -291,7 +291,7 @@ func TestHostBridgeTaskExecutorRegistersFinalizedRunnerArtifacts(t *testing.T) {
 	}
 }
 
-func TestHostBridgeTaskExecutorMapsFlueSessionAndTranscript(t *testing.T) {
+func TestHostBridgeTaskExecutorLeavesUnadoptedRunnerWithoutSession(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
 	executor := HostBridgeTaskExecutor{
 		Store:        st,
@@ -320,28 +320,15 @@ func TestHostBridgeTaskExecutorMapsFlueSessionAndTranscript(t *testing.T) {
 	if len(outcome.ArtifactIDs) != 2 || outcome.ArtifactIDs[0] != "transcript-task-run-1" || outcome.ArtifactIDs[1] != "logs-task-run-1" {
 		t.Fatalf("artifact ids = %+v, want transcript and logs artifacts", outcome.ArtifactIDs)
 	}
-	session, err := st.AgentSessions().Get(ctx, "TEST", "flue-task-run-1")
-	if err != nil {
-		t.Fatalf("get flue agent session: %v", err)
-	}
-	if session.Kind != domain.AgentSessionKindTask || session.TaskID != "TEST-1" || session.ParentSessionID != "lead-session-1" {
-		t.Fatalf("session identity = %+v, want task session under lead-session-1", session)
-	}
-	if session.Status != domain.AgentSessionCompleted || session.FinishedAt == nil {
-		t.Fatalf("session status = %s finished=%v, want completed", session.Status, session.FinishedAt)
-	}
-	if session.Metadata["runtime"] != "flue" || session.Metadata["flue_session"] != "flue-task-run-1" || session.Metadata["task_run_id"] != "task-run-1" {
-		t.Fatalf("session metadata = %+v, want flue task-run metadata", session.Metadata)
-	}
-	if session.Metadata["transcript_ref"] != "artifact://transcript-task-run-1" || session.Metadata["logs_ref"] != "artifact://logs-task-run-1" {
-		t.Fatalf("session refs = %+v, want transcript/log artifact refs", session.Metadata)
+	if _, err := st.AgentSessions().Get(ctx, "TEST", "flue-task-run-1"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("legacy bridge session err = %v, want not found", err)
 	}
 	transcriptArtifact, err := st.Artifacts().Get(ctx, "TEST", "transcript-task-run-1")
 	if err != nil {
 		t.Fatalf("get transcript artifact: %v", err)
 	}
-	if transcriptArtifact.DurableStatus != "finalized" || transcriptArtifact.SessionID != "flue-task-run-1" || transcriptArtifact.Type != "transcript" {
-		t.Fatalf("transcript artifact = %+v, want finalized transcript owned by session", transcriptArtifact)
+	if transcriptArtifact.DurableStatus != "finalized" || transcriptArtifact.SessionID != "" || transcriptArtifact.Type != "transcript" {
+		t.Fatalf("transcript artifact = %+v, want finalized task-run transcript without a session", transcriptArtifact)
 	}
 	contentReader, ok := st.Artifacts().(interface {
 		ReadContent(context.Context, string, string) ([]byte, error)
@@ -386,8 +373,7 @@ func TestPersistRunnerOutputArtifactsWarnsWhenTranscriptUploadFails(t *testing.T
 	t.Cleanup(func() { slog.SetDefault(origLogger) })
 
 	req := hostBridgeTaskExecRequest()
-	session := &flueTaskSession{SessionID: "flue-task-run-1", Metadata: map[string]string{}}
-	result, err := (HostBridgeTaskExecutor{}).persistRunnerOutputArtifacts(context.Background(), req, session, bridgeTaskRunnerResult{
+	result, err := (HostBridgeTaskExecutor{}).persistRunnerOutputArtifacts(context.Background(), req, bridgeTaskRunnerResult{
 		TranscriptEntries: []transcript.Event{{
 			Seq:  1,
 			Role: "assistant",
@@ -404,9 +390,6 @@ func TestPersistRunnerOutputArtifactsWarnsWhenTranscriptUploadFails(t *testing.T
 	if len(result.ArtifactIDs) != 0 {
 		t.Fatalf("artifact ids = %+v, want none", result.ArtifactIDs)
 	}
-	if session.Metadata["transcript_ref"] != "" {
-		t.Fatalf("session metadata = %+v, want no transcript_ref", session.Metadata)
-	}
 	if !strings.Contains(logs.String(), "task run transcript artifact upload failed") {
 		t.Fatalf("logs = %q, want transcript upload warning", logs.String())
 	}
@@ -420,7 +403,7 @@ func TestPersistRunnerOutputArtifactsWarnsWhenTranscriptReadFails(t *testing.T) 
 
 	req := hostBridgeTaskExecRequest()
 	executor := HostBridgeTaskExecutor{WorktreePath: t.TempDir()}
-	result, err := executor.persistRunnerOutputArtifacts(context.Background(), req, nil, bridgeTaskRunnerResult{
+	result, err := executor.persistRunnerOutputArtifacts(context.Background(), req, bridgeTaskRunnerResult{
 		TranscriptPath: "missing-transcript.jsonl",
 	}, TaskExecResult{Status: domain.TaskRunCompleted, ExitCode: 0})
 	if err != nil {
@@ -434,7 +417,7 @@ func TestPersistRunnerOutputArtifactsWarnsWhenTranscriptReadFails(t *testing.T) 
 	}
 }
 
-func TestHostBridgeTaskExecutorReusesOutputArtifactsOnRetry(t *testing.T) {
+func TestHostBridgeTaskExecutorReusesOutputArtifactsOnRetryWithoutSession(t *testing.T) {
 	ctx, st, _ := setupRunningDriverRun(t)
 	executor := HostBridgeTaskExecutor{
 		Store:        st,
@@ -462,6 +445,13 @@ func TestHostBridgeTaskExecutorReusesOutputArtifactsOnRetry(t *testing.T) {
 	want := []string{"transcript-task-run-1", "logs-task-run-1"}
 	if !slices.Equal(second.ArtifactIDs, want) {
 		t.Fatalf("second artifact ids = %+v, want %+v", second.ArtifactIDs, want)
+	}
+	sessions, err := st.AgentSessions().List(ctx, "TEST", store.AgentSessionFilter{TaskRunID: req.TaskRunID})
+	if err != nil {
+		t.Fatalf("list task-run sessions: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("retry sessions = %+v, want none without a leaf agent.exec invocation", sessions)
 	}
 }
 

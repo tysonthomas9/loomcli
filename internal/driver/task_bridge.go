@@ -167,12 +167,6 @@ type bridgeArtifact struct {
 	Metadata           map[string]string `json:"metadata"`
 }
 
-type flueTaskSession struct {
-	SessionID string
-	Metadata  map[string]string
-	cancel    context.CancelFunc
-}
-
 func (e HostBridgeTaskExecutor) PreflightTaskProvider(ctx context.Context, opts TaskRunRequestOptions) (TaskRunRequestOptions, error) {
 	if taskRunHasNamedRunner(opts) {
 		if err := refuseUntrustedTaskRunnerPreflight(opts); err != nil {
@@ -203,7 +197,7 @@ func (e HostBridgeTaskExecutor) PreflightTaskProvider(ctx context.Context, opts 
 	return resolveTaskProviderProfile(opts, true)
 }
 
-//nolint:cyclop,funlen,gocognit // ExecuteTask owns the bridge lifecycle so deferred session finalization keeps one error/result scope.
+//nolint:cyclop,funlen,gocognit // ExecuteTask owns the bridge lifecycle and reconciliation scope.
 func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecRequest) (result TaskExecResult, err error) {
 	if taskProviderIsNoop(req.ProviderProfile) {
 		return LocalTaskExecutor{}.ExecuteTask(ctx, req)
@@ -254,24 +248,14 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 		return TaskExecResult{}, err
 	}
 
-	session, err := e.startFlueTaskSession(ctx, req)
-	if err != nil {
-		return TaskExecResult{}, err
-	}
-	var runner *bridgeTaskRunnerResult
 	defer func() {
-		if session != nil {
-			if finishErr := e.finishFlueTaskSession(ctx, req, session, result, runner, err); finishErr != nil {
-				slog.WarnContext(ctx, "finish flue task session failed", "task_run_id", req.TaskRunID, "err", finishErr)
-			}
-		}
 		e.reconcileTaskRunSessions(ctx, req, &result, err)
 	}()
 	runnerResult, err := runBridge()
 	if err != nil {
 		return TaskExecResult{}, err
 	}
-	runner = &runnerResult
+	runner := &runnerResult
 	// Pre-persist validation gate (§4.2): the decoded runner result must be a
 	// non-empty terminal result with a zero exit when completed. An invalid
 	// result fails closed (invalid_task_result, exit 1) and NEVER reaches the
@@ -296,7 +280,7 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 			return TaskExecResult{}, err
 		}
 	}
-	result, err = e.persistRunnerOutputArtifacts(ctx, req, session, runnerResult, result)
+	result, err = e.persistRunnerOutputArtifacts(ctx, req, runnerResult, result)
 	if err != nil {
 		return TaskExecResult{}, err
 	}

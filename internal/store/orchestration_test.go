@@ -118,14 +118,18 @@ func TestOrchestrationSessionFor_IgnoresCompletedSessions(t *testing.T) {
 		SessionID:    "lead-nova-completed",
 		AgentID:      "nova",
 		Kind:         domain.AgentSessionKindOrchestration,
-		Status:       domain.AgentSessionCompleted,
+		Status:       domain.AgentSessionRunning,
 	})
 	if err != nil {
 		t.Fatalf("create completed: %v", err)
 	}
 	finishedAt := time.Now().UTC()
 	finishedAtPtr := &finishedAt
-	if _, err := st.AgentSessions().Update(ctx, "WS", completed.SessionID, store.AgentSessionUpdate{FinishedAt: &finishedAtPtr}); err != nil {
+	completedStatus := domain.AgentSessionCompleted
+	if _, err := st.AgentSessions().Update(ctx, "WS", completed.SessionID, store.AgentSessionUpdate{
+		Status:     &completedStatus,
+		FinishedAt: &finishedAtPtr,
+	}); err != nil {
 		t.Fatalf("finish completed: %v", err)
 	}
 

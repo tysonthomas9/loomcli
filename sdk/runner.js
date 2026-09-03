@@ -560,6 +560,7 @@ async function executeAgentProcess(client, spec) {
   let entries = captureAgentEntries(spec, processResult);
   entries = redactAgentEntries(entries, spec.redactSecrets);
   const usage = extractAgentUsage(entries);
+  const streamError = agentStreamError(spec, processResult.stdout);
 
   if (session.opened && spec.transcript !== "none") {
     try {
@@ -609,6 +610,7 @@ async function executeAgentProcess(client, spec) {
     ...processResult,
     entries,
     usage,
+    streamError,
     session,
     // Merge this into the leaf's TaskRun completion/runtimeMetadata. The
     // helper also best-effort heartbeats it while the lease remains live.
@@ -763,7 +765,7 @@ function runAgentProcess(spec) {
     };
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
-      if (spec.live) process.stdout.write(chunk);
+      if (spec.live) process.stderr.write(chunk);
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
@@ -845,12 +847,30 @@ function extractAgentUsage(entries) {
     if (!usage || typeof usage !== "object") continue;
     const input = finiteNumber(usage.input_tokens ?? usage.inputTokens ?? usage.input);
     const output = finiteNumber(usage.output_tokens ?? usage.outputTokens ?? usage.output);
+    const cacheRead = finiteNumber(usage.cache_read_tokens ?? usage.cacheReadTokens ?? usage.cached_input_tokens);
+    const cacheWrite = finiteNumber(usage.cache_write_tokens ?? usage.cacheWriteTokens);
     const tokens = finiteNumber(usage.tokens ?? usage.total_tokens ?? usage.totalTokens) ??
       (input !== null || output !== null ? (input || 0) + (output || 0) : null);
     const cost = finiteNumber(usage.cost ?? usage.cost_usd ?? usage.costUsd ?? usage.total_cost_usd);
-    if (tokens !== null || cost !== null) return { tokens, cost };
+    if (tokens !== null || cost !== null || input !== null || output !== null) {
+      return { tokens, cost, inputTokens: input, outputTokens: output, cacheReadTokens: cacheRead, cacheWriteTokens: cacheWrite };
+    }
   }
   return null;
+}
+
+function agentStreamError(spec, stdout) {
+  if (spec.backend !== "opencode") return "";
+  for (const line of stdout.split("\n")) {
+    try {
+      const event = JSON.parse(line);
+      if (event?.type !== "error") continue;
+      return String(event.error?.message || event.error?.data?.message || event.message || "opencode reported an error");
+    } catch {
+      // Stream-json capture deliberately ignores backend chatter.
+    }
+  }
+  return "";
 }
 
 function finiteNumber(value) {
