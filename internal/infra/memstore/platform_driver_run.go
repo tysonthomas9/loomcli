@@ -521,9 +521,11 @@ func (s *driverRunStore) RecoverStaleTaskRuns(_ context.Context, ws, runID strin
 		return plan.result, nil
 	}
 
+	s.taskRuns.lockLifecycle()
 	s.taskRuns.mu.Lock()
 	recoveredTaskRunIDs, recoveredStepIDs := recoverStaleTaskRunsLocked(s.taskRuns.items[ws], runID, plan)
 	s.taskRuns.mu.Unlock()
+	s.taskRuns.unlockLifecycle()
 	sort.Strings(plan.result.RecoveredTaskRunIDs)
 
 	s.recoverLinkedDriverStepsMem(ws, runID, recoveredTaskRunIDs, recoveredStepIDs, plan.recoveredAt)

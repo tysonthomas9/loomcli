@@ -72,6 +72,12 @@ func (t *tracedAgentSessionStore) Create(ctx context.Context, in store.AgentSess
 	)
 }
 
+func (t *tracedAgentSessionStore) Open(ctx context.Context, run store.SessionRunContext, descriptor store.SessionDescriptor) (store.SessionRef, error) {
+	return traced(ctx, "AgentSessions", "Open", func(ctx context.Context) (store.SessionRef, error) {
+		return t.inner.Open(ctx, run, descriptor)
+	}, attribute.String("loom.workspace", run.WorkspaceKey))
+}
+
 func (t *tracedAgentSessionStore) Get(ctx context.Context, ws, sessionID string) (*domain.AgentSession, error) {
 	return traced(ctx, "AgentSessions", "Get", func(ctx context.Context) (*domain.AgentSession, error) {
 		return t.inner.Get(ctx, ws, sessionID)
@@ -115,6 +121,12 @@ func (t *tracedAgentSessionStore) Update(ctx context.Context, ws, sessionID stri
 	},
 		attribute.String("loom.workspace", ws),
 	)
+}
+
+func (t *tracedAgentSessionStore) Finalize(ctx context.Context, ref store.SessionRef, outcome store.SessionOutcome) (*domain.AgentSession, error) {
+	return traced(ctx, "AgentSessions", "Finalize", func(ctx context.Context) (*domain.AgentSession, error) {
+		return t.inner.Finalize(ctx, ref, outcome)
+	}, attribute.String("loom.workspace", ref.WorkspaceKey))
 }
 
 // --- TerminalSessionStore ---

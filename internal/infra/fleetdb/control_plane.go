@@ -132,6 +132,35 @@ func (s *agentSessionStore) Create(ctx context.Context, in store.AgentSessionCre
 	return &out, nil
 }
 
+func (s *agentSessionStore) Open(ctx context.Context, run store.SessionRunContext, descriptor store.SessionDescriptor) (store.SessionRef, error) {
+	if err := store.ValidateSessionDescriptor(descriptor); err != nil {
+		return store.SessionRef{}, err
+	}
+	if run.WorkspaceKey == "" || run.TaskRunID == "" || run.Attempt <= 0 {
+		return store.SessionRef{}, fmt.Errorf("session run context is incomplete: %w", domain.ErrInvalid)
+	}
+	body := struct {
+		TaskRunID       string                  `json:"task_run_id"`
+		Attempt         int                     `json:"attempt"`
+		FencingToken    int64                   `json:"fencing_token,omitempty"`
+		DriverRunID     string                  `json:"driver_run_id,omitempty"`
+		DriverStepID    string                  `json:"driver_step_id,omitempty"`
+		InvocationKey   string                  `json:"invocation_key"`
+		Backend         string                  `json:"backend"`
+		Model           string                  `json:"model"`
+		ParentSessionID string                  `json:"parent_session_id,omitempty"`
+		Kind            domain.AgentSessionKind `json:"kind,omitempty"`
+		Tags            []string                `json:"tags,omitempty"`
+		Metadata        map[string]string       `json:"metadata,omitempty"`
+	}{TaskRunID: run.TaskRunID, Attempt: run.Attempt, FencingToken: run.FencingToken, DriverRunID: run.DriverRunID, DriverStepID: run.DriverStepID, InvocationKey: descriptor.InvocationKey, Backend: descriptor.Backend, Model: descriptor.Model, ParentSessionID: descriptor.ParentSessionID, Kind: descriptor.Kind, Tags: descriptor.Tags, Metadata: descriptor.Metadata}
+	var session domain.AgentSession
+	path := "/api/v1/" + pathEscape(run.WorkspaceKey) + "/agent-sessions/open"
+	if err := s.client.do(ctx, "POST", path, body, &session); err != nil {
+		return store.SessionRef{}, err
+	}
+	return store.SessionRef{WorkspaceKey: session.WorkspaceKey, SessionID: session.SessionID, Attempt: session.Attempt}, nil
+}
+
 func (s *agentSessionStore) Get(ctx context.Context, ws, sessionID string) (*domain.AgentSession, error) {
 	var out domain.AgentSession
 	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/agent-sessions/"+pathEscape(sessionID), nil, &out); err != nil {
@@ -227,6 +256,33 @@ func (s *agentSessionStore) Update(ctx context.Context, ws, sessionID string, pa
 		return nil, err
 	}
 	return &out, nil
+}
+
+func (s *agentSessionStore) Finalize(ctx context.Context, ref store.SessionRef, outcome store.SessionOutcome) (*domain.AgentSession, error) {
+	if err := store.ValidateSessionOutcome(outcome); err != nil {
+		return nil, err
+	}
+	body := struct {
+		Status                domain.AgentSessionStatus `json:"status"`
+		ExitCode              *int                      `json:"exit_code,omitempty"`
+		Summary               string                    `json:"summary,omitempty"`
+		ErrorClass            string                    `json:"error_class,omitempty"`
+		TranscriptRef         string                    `json:"transcript_ref,omitempty"`
+		DriverRunnerSessionID string                    `json:"driver_runner_session_id,omitempty"`
+		Usage                 struct {
+			Tokens  *int64   `json:"tokens,omitempty"`
+			CostUSD *float64 `json:"cost_usd,omitempty"`
+		} `json:"usage,omitempty"`
+		Metadata map[string]string `json:"metadata,omitempty"`
+	}{Status: outcome.Status, ExitCode: outcome.ExitCode, Summary: outcome.Summary, ErrorClass: outcome.ErrorClass, TranscriptRef: outcome.TranscriptRef, DriverRunnerSessionID: outcome.DriverRunnerSessionID, Metadata: outcome.Metadata}
+	body.Usage.Tokens = outcome.Usage.Tokens
+	body.Usage.CostUSD = outcome.Usage.CostUSD
+	var session domain.AgentSession
+	path := "/api/v1/" + pathEscape(ref.WorkspaceKey) + "/agent-sessions/" + pathEscape(ref.SessionID) + "/finalize"
+	if err := s.client.do(ctx, "POST", path, body, &session); err != nil {
+		return nil, err
+	}
+	return &session, nil
 }
 
 func ttlSeconds(ttl time.Duration) int {
