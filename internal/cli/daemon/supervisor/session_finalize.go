@@ -31,6 +31,7 @@ func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 	ap.AssignedTaskRepo = ""      // per-cycle, like AssignedTaskID; ap.placement is NOT cleared — it must carry into the next cycle so recovery reads the lock where the crash left it
 	ap.ResumeTaskID = ""          // per-cycle; re-detected in preFlightSetup (ResumeFailures persists)
 	ap.RecoveryMode = recoverCold // per-cycle; re-classified in preFlightSetup
+	ap.HeldRepos = nil            // per-cycle; re-stashed by gateClaimsHeld
 	ap.YieldRequested = false     // per-cycle; re-set by RequestYield
 	ap.YieldEscalated = false     // per-cycle; re-set by DrainWithGrace
 	ap.LastActivity = time.Time{}
