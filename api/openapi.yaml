@@ -1171,6 +1171,11 @@ paths:
             type: integer
             minimum: 0
             maximum: 4
+        - name: source_repos
+          in: query
+          description: Comma-separated source repo filters
+          schema:
+            type: string
         - name: limit
           in: query
           schema:

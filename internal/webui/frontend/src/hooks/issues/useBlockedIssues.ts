@@ -64,7 +64,7 @@ export interface UseBlockedIssuesResult {
 export function useBlockedIssues(
   options?: UseBlockedIssuesOptions,
 ): UseBlockedIssuesResult {
-  const { workspaceId } = useWorkspaceContext();
+  const { workspaceId, sourceReposFilter } = useWorkspaceContext();
   const {
     parentId,
     priority,
@@ -80,14 +80,23 @@ export function useBlockedIssues(
     if (priority !== undefined) next.priority = priority;
     if (type) next.type = type;
     if (assignee) next.assignee = assignee;
+    if (sourceReposFilter?.length) next.source_repos = sourceReposFilter;
     if (limit !== undefined) next.limit = limit;
     return next;
-  }, [assignee, limit, parentId, priority, type]);
+  }, [assignee, limit, parentId, priority, sourceReposFilter, type]);
 
   const key = useMemo(
     () =>
-      `blocked:${workspaceId}:${JSON.stringify({ parentId, priority, type, assignee, limit })}`,
-    [assignee, limit, parentId, priority, type, workspaceId],
+      `blocked:${workspaceId}:${JSON.stringify({ parentId, priority, type, assignee, limit, sourceReposFilter })}`,
+    [
+      assignee,
+      limit,
+      parentId,
+      priority,
+      sourceReposFilter,
+      type,
+      workspaceId,
+    ],
   );
   const fetcher = useCallback(
     (signal: AbortSignal) => getBlockedIssues(workspaceId, filter, { signal }),

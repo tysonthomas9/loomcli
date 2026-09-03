@@ -175,11 +175,12 @@ func serveBlockedViaBackend(w http.ResponseWriter, r *http.Request, backendFn Is
 		return true
 	}
 	opts := backend.BlockedOpts{
-		ParentID: args.ParentID,
-		Assignee: args.Assignee,
-		Priority: args.Priority,
-		Type:     args.Type,
-		Limit:    args.Limit,
+		ParentID:    args.ParentID,
+		Assignee:    args.Assignee,
+		Priority:    args.Priority,
+		Type:        args.Type,
+		SourceRepos: args.SourceRepos,
+		Limit:       args.Limit,
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
@@ -592,6 +593,7 @@ func parseBlockedParams(r *http.Request) (*rpc.BlockedArgs, error) {
 	if v := q.Get("type"); v != "" {
 		args.Type = v
 	}
+	args.SourceRepos = handler.ParseArrayParam(q, "source_repos")
 
 	// Integer parameters
 	if v := q.Get("priority"); v != "" {

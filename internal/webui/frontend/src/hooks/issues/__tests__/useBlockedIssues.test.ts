@@ -18,6 +18,10 @@ import {
 
 import { useBlockedIssues } from "../useBlockedIssues";
 
+const mockWorkspaceContext = vi.hoisted(() => ({
+  sourceReposFilter: undefined as string[] | undefined,
+}));
+
 vi.mock("@/api/issues", () => ({
   getBlockedIssues: vi.fn(),
 }));
@@ -29,7 +33,10 @@ vi.mock("@/hooks/workspace", async () => {
     );
   return {
     ...actual,
-    useWorkspaceContext: () => ({ workspaceId: "test-ws-id" }),
+    useWorkspaceContext: () => ({
+      workspaceId: "test-ws-id",
+      sourceReposFilter: mockWorkspaceContext.sourceReposFilter,
+    }),
   };
 });
 
@@ -102,6 +109,7 @@ describe("useBlockedIssues", () => {
     registry = new InvalidatedQueryRegistry();
     epoch = 0;
     state = "connected";
+    mockWorkspaceContext.sourceReposFilter = undefined;
     subscribe.mockClear();
     Object.defineProperty(document, "visibilityState", {
       configurable: true,
@@ -165,6 +173,33 @@ describe("useBlockedIssues", () => {
       expect(mockGetBlockedIssues).toHaveBeenLastCalledWith(
         "test-ws-id",
         { parent_id: "epic-2" },
+        { signal: expect.any(AbortSignal) },
+      ),
+    );
+  });
+
+  it("includes source repos in the request and query key", async () => {
+    mockWorkspaceContext.sourceReposFilter = ["repo-a"];
+    mockGetBlockedIssues.mockResolvedValue([]);
+    const { result, rerender } = renderHook(() => useBlockedIssues(), {
+      wrapper: Wrapper,
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(mockGetBlockedIssues).toHaveBeenCalledWith(
+      "test-ws-id",
+      { source_repos: ["repo-a"] },
+      { signal: expect.any(AbortSignal) },
+    );
+
+    mockGetBlockedIssues.mockClear();
+    mockWorkspaceContext.sourceReposFilter = ["repo-b"];
+    rerender();
+
+    await waitFor(() =>
+      expect(mockGetBlockedIssues).toHaveBeenCalledWith(
+        "test-ws-id",
+        { source_repos: ["repo-b"] },
         { signal: expect.any(AbortSignal) },
       ),
     );

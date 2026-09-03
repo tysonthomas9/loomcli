@@ -3273,7 +3273,10 @@ type ListBlockedParams struct {
 	Assignee *string                `form:"assignee,omitempty" json:"assignee,omitempty"`
 	Type     *ListBlockedParamsType `form:"type,omitempty" json:"type,omitempty"`
 	Priority *int                   `form:"priority,omitempty" json:"priority,omitempty"`
-	Limit    *int                   `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// SourceRepos Comma-separated source repo filters
+	SourceRepos *string `form:"source_repos,omitempty" json:"source_repos,omitempty"`
+	Limit       *int    `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // ListBlockedParamsType defines parameters for ListBlocked.
