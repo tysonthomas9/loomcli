@@ -110,24 +110,10 @@ func (m *MultiWorkspaceSubscriber) EnsureActive(
 		return "", err
 	}
 
-	m.mu.Lock()
-	if m.closed {
-		m.mu.Unlock()
-		return "", fmt.Errorf("EnsureActive: subscriber manager is stopped")
+	entry, created, err := m.ensureStartingSubscriber(wsID, b)
+	if err != nil {
+		return "", err
 	}
-	entry, exists := m.subscribers[wsID]
-	created := false
-	if !exists {
-		initialHead := m.lastHeads[wsID]
-		entry = &subscriberEntry{
-			sub:      newBackendMutationSubscriber(b, m.hub, wsID, initialHead, m.budgets),
-			starting: true,
-		}
-		m.subscribers[wsID] = entry
-		entry.sub.Start()
-		created = true
-	}
-	m.mu.Unlock()
 
 	head, err := entry.sub.Ready(ctx)
 	if err != nil {
@@ -153,6 +139,29 @@ func (m *MultiWorkspaceSubscriber) EnsureActive(
 		m.logger.Info("workspace backend subscriber started", "workspace", wsID, "reason", reason, "cursor", head)
 	}
 	return head, nil
+}
+
+func (m *MultiWorkspaceSubscriber) ensureStartingSubscriber(
+	wsID string,
+	b backend.IssueBackend,
+) (*subscriberEntry, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return nil, false, fmt.Errorf("EnsureActive: subscriber manager is stopped")
+	}
+	if entry, exists := m.subscribers[wsID]; exists {
+		return entry, false, nil
+	}
+
+	initialHead := m.lastHeads[wsID]
+	entry := &subscriberEntry{
+		sub:      newBackendMutationSubscriber(b, m.hub, wsID, initialHead, m.budgets),
+		starting: true,
+	}
+	m.subscribers[wsID] = entry
+	entry.sub.Start()
+	return entry, true, nil
 }
 
 // Ready waits for an existing workspace subscriber's head cursor.

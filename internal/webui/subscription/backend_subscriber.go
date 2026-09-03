@@ -209,29 +209,32 @@ func (s *BackendMutationSubscriber) loop() {
 			continue
 		}
 
-		if page.Cursor == "" {
-			page.Cursor = cursor
-		}
-		s.setCursor(page.Cursor, page.Events)
-		for _, mutation := range page.Events {
-			if s.hub != nil {
-				s.hub.Broadcast(realtime.BackendMutationToPayload(mutation, s.workspaceID))
-			}
-		}
-		if len(page.Events) > 0 {
-			slog.Info("broadcast backend mutations to SSE clients",
-				"workspace", s.workspaceID, "count", len(page.Events), "clients", s.clientCount())
-		}
+		timeoutMs = s.handlePage(cursor, page)
+	}
+}
 
-		if page.HasMore {
-			timeoutMs = 0
-			continue
-		}
-		timeoutMs = int64(backendWaitTimeout / time.Millisecond)
-		if len(page.Events) == 0 {
-			s.waitWithCancel(backendEmptyPollDelay)
+func (s *BackendMutationSubscriber) handlePage(cursor string, page backend.MutationPage) int64 {
+	if page.Cursor == "" {
+		page.Cursor = cursor
+	}
+	s.setCursor(page.Cursor, page.Events)
+	for _, mutation := range page.Events {
+		if s.hub != nil {
+			s.hub.Broadcast(realtime.BackendMutationToPayload(mutation, s.workspaceID))
 		}
 	}
+	if len(page.Events) > 0 {
+		slog.Info("broadcast backend mutations to SSE clients",
+			"workspace", s.workspaceID, "count", len(page.Events), "clients", s.clientCount())
+	}
+
+	if page.HasMore {
+		return 0
+	}
+	if len(page.Events) == 0 {
+		s.waitWithCancel(backendEmptyPollDelay)
+	}
+	return int64(backendWaitTimeout / time.Millisecond)
 }
 
 func (s *BackendMutationSubscriber) discoverHead() (string, error) {
