@@ -64,6 +64,9 @@ export type { UseIssueSearchReturn } from "./useIssueSearch";
 export { deriveOperatorQueue, useOperatorQueue } from "./useOperatorQueue";
 export type { OperatorQueueItem, OperatorQueueKind } from "./useOperatorQueue";
 
+export { useQueueChildren } from "./useQueueChildren";
+export type { QueueChild, QueueChildIndex } from "./useQueueChildren";
+
 export { useIssueTabPersistence } from "./useIssueTabPersistence";
 export type { UseIssueTabPersistenceReturn } from "./useIssueTabPersistence";
 
