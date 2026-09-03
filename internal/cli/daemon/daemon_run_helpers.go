@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
@@ -27,8 +28,21 @@ func startStateUpdater(shutdown <-chan struct{}, stateFilePath string, startedAt
 			case <-shutdown:
 				return
 			case <-ticker.C:
-				if err := writeStateFile(stateFilePath, startedAt, daemon.Agents(), daemon.QuarantinedTasks(), maxRetries); err != nil {
-					fmt.Printf("Warning: failed to update state file: %v\n", err)
+				// A failed state write used to be a fmt.Printf on a stdout that,
+				// for a daemonized process, may be a closed or redirected fd —
+				// so during the 2026-08-31 outage nothing anywhere recorded that
+				// the daemon's state file had gone stale. Record it as a
+				// first-class degradation instead, and log/publish only on the
+				// transitions so a persistently full disk does not emit twelve
+				// lines a minute.
+				if err := writeStateFile(stateFilePath, startedAt, daemon.Agents(), daemon.QuarantinedTasks(), daemon.sup.Degradations(), maxRetries); err != nil {
+					if daemon.sup.RecordDegradation(supervisor.DegradationStateWrite, err) {
+						slog.Error("daemon state file write failing", "path", stateFilePath, "err", err)
+						daemon.sup.PublishDegradation(supervisor.DegradationStateWrite)
+					}
+				} else if daemon.sup.ClearDegradation(supervisor.DegradationStateWrite) {
+					slog.Info("daemon state file write recovered", "path", stateFilePath)
+					daemon.sup.PublishDegradation(supervisor.DegradationStateWrite)
 				}
 				daemon.sup.RecordTick(supervisor.GoroutineStateUpdater)
 			}

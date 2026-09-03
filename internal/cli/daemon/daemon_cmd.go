@@ -55,6 +55,16 @@ type DaemonState struct {
 	PID       int                 `json:"pid"`
 	StartedAt time.Time           `json:"started_at"`
 	Agents    []DaemonAgentStatus `json:"agents"`
+	// WrittenAt is when this file was last written. It exists because mtime
+	// alone lies: a `cp` of the state file carries a fresh mtime over stale
+	// contents, and during the 2026-08-31 outage the operator was handed
+	// two-hour-old agent data with nothing saying so. Zero for files written
+	// by an older binary — readers fall back to mtime in that case.
+	WrittenAt time.Time `json:"written_at,omitempty"`
+	// Degradations is the daemon's active degradation episodes at write time,
+	// so every out-of-band reader can say the daemon is running but not doing
+	// one of its jobs.
+	Degradations []supervisor.Degradation `json:"degradations,omitempty"`
 	// QuarantinedTasks lists tasks the daemon set to blocked after repeated
 	// no-progress kills (plus pending retries when the write is failing).
 	// Display-only: never hydrated back into supervision across restarts.
@@ -355,7 +365,7 @@ func runDaemonMainLoop(config *cfgpkg.DaemonConfig, projectDir string, paths dae
 	}
 
 	startedAt := time.Now()
-	if err := writeStateFile(paths.stateFile, startedAt, daemon.Agents(), daemon.QuarantinedTasks(), maxRetries); err != nil {
+	if err := writeStateFile(paths.stateFile, startedAt, daemon.Agents(), daemon.QuarantinedTasks(), daemon.sup.Degradations(), maxRetries); err != nil {
 		fmt.Printf("Warning: failed to write initial state file: %v\n", err)
 	}
 
@@ -506,6 +516,10 @@ func runDaemonStatus(cmd *cobra.Command, args []string) {
 
 	fmt.Printf("Started: %s\n", state.StartedAt.Format(time.RFC3339))
 	fmt.Printf("Agents: %d\n", len(state.Agents))
+	// Before the table, never after: a stale or degraded daemon makes
+	// everything below it untrustworthy, and the operator must know that
+	// first.
+	printStateFreshness(state, stateFilePath)
 	fmt.Println("")
 
 	// Pending interactive prompts come from the live daemon, not the state

@@ -4,11 +4,13 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"sort"
 	"syscall"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/cli/daemonregistry"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 
@@ -369,4 +371,195 @@ func (s *Supervisor) checkAgentHealth() {
 	if evt, err := events.NewEvent(events.HealthCheck, "", "", "", events.HealthCheckData{AgentCount: totalAgents, HealthyCount: healthyAgents}); err == nil {
 		s.EmitEvent(evt)
 	}
+
+	s.reannounceDegradations()
+}
+
+// degradedReannounceInterval is how often an ONGOING degradation is re-logged
+// and re-published. The health checker ticks every 30s, so this is applied as a
+// floor rather than a schedule: an episode is re-announced on the first health
+// check at least this long after its previous announcement.
+const degradedReannounceInterval = 5 * time.Minute
+
+// reannounceDegradations re-logs and re-publishes every degradation that has
+// been active without an announcement for degradedReannounceInterval.
+//
+// Without this, a degradation is visible exactly once — at the tick that
+// started it. An operator who attaches to the log an hour into a disk-full
+// episode sees a daemon reporting healthy agents and nothing else, which is the
+// same blindness the transition gating was introduced to fix, only slower.
+func (s *Supervisor) reannounceDegradations() {
+	for _, d := range s.degradationsNeedingReannounce(degradedReannounceInterval) {
+		slog.Error("daemon still degraded",
+			"kind", string(d.Kind), "since", d.Since, "for", time.Since(d.Since).Truncate(time.Second),
+			"failures", d.Count, "err", d.LastErr)
+		s.PublishDegradation(d.Kind)
+	}
+}
+
+// ─── Self-reported degradation ───────────────────────────────────────────────
+//
+// This lives in health.go rather than its own degraded.go because the package
+// sits at its grandfathered file-count ceiling (scripts/package-size-allow.txt,
+// "never raise silently"), and a daemon reporting that one of its own jobs is
+// failing is health checking by another name. The tests are in degraded_test.go.
+
+// DegradationKind names a way the daemon can be running but not doing one of
+// its jobs. Kinds are deliberately coarse: one per handle the daemon writes
+// through, because that is the granularity at which an operator can act.
+type DegradationKind string
+
+const (
+	// DegradationStateWrite: the periodic daemon state file write is failing.
+	// Everything that reads daemon state out-of-band (loom status, diagnose,
+	// the dashboard) is reading a stale file for as long as this is active.
+	DegradationStateWrite DegradationKind = "state_write"
+	// DegradationLogWrite: the daemon cannot write its own log.
+	DegradationLogWrite DegradationKind = "log_write"
+)
+
+// Degradation is one active degradation episode. Since is the start of the
+// CURRENT episode (it is preserved across repeat failures and only reset when
+// the degradation clears and later recurs), and Count is how many failures
+// that episode has seen.
+type Degradation struct {
+	Kind    DegradationKind `json:"kind"`
+	Since   time.Time       `json:"since"`
+	Count   int             `json:"count"`
+	LastErr string          `json:"last_err,omitempty"`
+}
+
+// RecordDegradation registers a failure of kind, returning true only on the
+// 0→1 transition — i.e. only for the failure that STARTED the episode.
+//
+// That return value is the whole point of the type. The failure this exists
+// for (a state file write that fails every 5s tick) would otherwise produce a
+// log line and a node update twelve times a minute for as long as the disk is
+// full, which is how the original `fmt.Printf` warning became noise nobody
+// read. Callers log and publish on true and stay silent otherwise; the repeat
+// failures are still recorded, as Count and LastErr on the existing episode.
+func (s *Supervisor) RecordDegradation(kind DegradationKind, err error) bool {
+	s.degradedMu.Lock()
+	defer s.degradedMu.Unlock()
+
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+	}
+
+	if d, ok := s.degradations[kind]; ok {
+		d.Count++
+		d.LastErr = msg
+		return false
+	}
+
+	s.ensureDegradedMaps()
+	s.degradations[kind] = &Degradation{
+		Kind:    kind,
+		Since:   time.Now(),
+		Count:   1,
+		LastErr: msg,
+	}
+	s.lastDegradedNotice[kind] = time.Now()
+	return true
+}
+
+// ensureDegradedMaps lazily allocates the degradation maps. Supervisor is
+// built as a composite literal (internal/cli/daemon/daemon.go) rather than
+// through a constructor, and tests build their own, so there is no single
+// construction site that could initialize these instead. Callers must hold
+// degradedMu.
+func (s *Supervisor) ensureDegradedMaps() {
+	if s.degradations == nil {
+		s.degradations = make(map[DegradationKind]*Degradation)
+	}
+	if s.lastDegradedNotice == nil {
+		s.lastDegradedNotice = make(map[DegradationKind]time.Time)
+	}
+}
+
+// ClearDegradation ends an episode of kind, returning true only on the 1→0
+// transition. Clearing a kind that is not degraded is a no-op returning false,
+// so the recovery path can be called unconditionally on every success.
+func (s *Supervisor) ClearDegradation(kind DegradationKind) bool {
+	s.degradedMu.Lock()
+	defer s.degradedMu.Unlock()
+
+	if _, ok := s.degradations[kind]; !ok {
+		return false
+	}
+	delete(s.degradations, kind)
+	delete(s.lastDegradedNotice, kind)
+	return true
+}
+
+// Degradation returns the active episode for kind, and whether one is active.
+// The returned value is a copy.
+func (s *Supervisor) Degradation(kind DegradationKind) (Degradation, bool) {
+	s.degradedMu.Lock()
+	defer s.degradedMu.Unlock()
+
+	d, ok := s.degradations[kind]
+	if !ok {
+		return Degradation{}, false
+	}
+	return *d, true
+}
+
+// Degradations returns every active degradation, sorted by Kind so callers
+// (the state file, the events payload, tests) get a deterministic order rather
+// than Go's randomized map iteration. The elements are copies: mutating the
+// result cannot reach the supervisor's own records.
+func (s *Supervisor) Degradations() []Degradation {
+	s.degradedMu.Lock()
+	defer s.degradedMu.Unlock()
+
+	out := make([]Degradation, 0, len(s.degradations))
+	for _, d := range s.degradations {
+		out = append(out, *d)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Kind < out[j].Kind })
+	return out
+}
+
+// DegradedLabels renders the active degradations as domain.Node labels, one
+// per kind. Empty when healthy — and that emptiness is load-bearing: Node
+// labels are a full replace on NodeUpdate, so recovery drops the label without
+// anyone having to remove it explicitly.
+func (s *Supervisor) DegradedLabels() []string {
+	degs := s.Degradations()
+	if len(degs) == 0 {
+		return nil
+	}
+	labels := make([]string, 0, len(degs))
+	for _, d := range degs {
+		labels = append(labels, daemonregistry.LabelDegraded+string(d.Kind))
+	}
+	return labels
+}
+
+// degradationsNeedingReannounce returns the active degradations whose last
+// announcement is older than every, and stamps them as announced now.
+//
+// A degradation is announced once, at its 0→1 transition. For an episode that
+// lasts hours that single line scrolls out of anyone's log tail long before
+// the problem is over, leaving a daemon that is quietly broken and looks fine.
+// Re-arming on an interval keeps a long episode visible without restoring the
+// every-tick noise the transition gating removed.
+func (s *Supervisor) degradationsNeedingReannounce(every time.Duration) []Degradation {
+	s.degradedMu.Lock()
+	defer s.degradedMu.Unlock()
+
+	s.ensureDegradedMaps()
+	now := time.Now()
+	var due []Degradation
+	for kind, d := range s.degradations {
+		if last, ok := s.lastDegradedNotice[kind]; ok && now.Sub(last) < every {
+			continue
+		}
+		s.lastDegradedNotice[kind] = now
+		due = append(due, *d)
+	}
+	sort.Slice(due, func(i, j int) bool { return due[i].Kind < due[j].Kind })
+	return due
 }
