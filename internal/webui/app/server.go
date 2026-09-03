@@ -236,6 +236,26 @@ func (app *Server) Close() {
 	}
 }
 
+// rateLimitConfig resolves the effective HTTP rate-limit configuration and
+// reports it at startup. A nil ServerConfig.RateLimit keeps the historical
+// defaults; anything else is normalized so a zero rate or burst can never
+// reach rate.NewLimiter.
+func (app *Server) rateLimitConfig() middleware.RateLimitConfig {
+	cfg := middleware.DefaultRateLimitConfig()
+	if app.config.RateLimit != nil {
+		cfg = app.config.RateLimit.WithDefaults()
+	}
+	if cfg.Enabled {
+		logger.Info("http rate limiting enabled", "component", "ratelimit",
+			"read_rate", float64(cfg.ReadRate), "read_burst", cfg.ReadBurst,
+			"mutate_rate", float64(cfg.MutateRate), "mutate_burst", cfg.MutateBurst)
+	} else {
+		// Warn, not Info: an operator scanning logs should see a protection is off.
+		logger.Warn("http rate limiting disabled", "component", "ratelimit")
+	}
+	return cfg
+}
+
 // run starts the HTTP server and blocks until the context is canceled or the
 // server encounters a fatal error. It performs graceful shutdown and stops
 // components in reverse-initialization order.
@@ -245,19 +265,7 @@ func (app *Server) run(ctx context.Context) error { //nolint:funlen // server li
 	if authMW == nil {
 		authMW = func(next http.Handler) http.Handler { return next }
 	}
-	rlCfg := middleware.DefaultRateLimitConfig()
-	if app.config.RateLimit != nil {
-		rlCfg = app.config.RateLimit.WithDefaults()
-	}
-	if rlCfg.Enabled {
-		logger.Info("http rate limiting enabled", "component", "ratelimit",
-			"read_rate", float64(rlCfg.ReadRate), "read_burst", rlCfg.ReadBurst,
-			"mutate_rate", float64(rlCfg.MutateRate), "mutate_burst", rlCfg.MutateBurst)
-	} else {
-		// Warn, not Info: an operator scanning logs should see a protection is off.
-		logger.Warn("http rate limiting disabled", "component", "ratelimit")
-	}
-	rl, rateLimitMW := middleware.RateLimit(rlCfg)
+	rl, rateLimitMW := middleware.RateLimit(app.rateLimitConfig())
 	// Prometheus HTTP metrics: outer wraps the chain to record duration+status;
 	// routeCapture must run innermost (after mux routes) to read r.Pattern.
 	metricsOuter, routeCapture := webui.PromMetricsMiddleware()
