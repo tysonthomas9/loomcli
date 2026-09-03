@@ -844,20 +844,43 @@ describe("WorkspaceSSEClient", () => {
     client.disconnect();
   });
 
-  it("rebinds sourceRepos by aborting then connecting with the new filter", async () => {
+  it("updates sourceRepos and reconnects from the retained cursor", async () => {
     const client = new WorkspaceSSEClient("test-ws");
 
     await client.connect(undefined, ["repo-a"]);
     await expectRequestCount(1);
     expect(streamRequests[0].url).toContain("source_repos=repo-a");
+    pushMutation(
+      {
+        type: "update",
+        issue_id: "issue-1",
+        timestamp: "2025-01-23T12:00:00Z",
+      },
+      "cursor-1",
+    );
+    await flush();
 
-    client.disconnect();
-    await client.connect(undefined, ["repo-b"]);
+    client.updateSourceRepos(["repo-b"]);
     await expectRequestCount(2);
 
     expect(streamRequests[0].aborted).toBe(true);
+    expect(streamRequests[1].url).toContain("since=cursor-1");
     expect(streamRequests[1].url).toContain("source_repos=repo-b");
     expect(streamRequests[1].url).not.toContain("repo-a");
+    client.disconnect();
+  });
+
+  it("clears sourceRepos when updateSourceRepos receives undefined", async () => {
+    const client = new WorkspaceSSEClient("test-ws");
+
+    await client.connect(undefined, ["repo-a"]);
+    await expectRequestCount(1);
+
+    client.updateSourceRepos(undefined);
+    await expectRequestCount(2);
+
+    expect(streamRequests[0].aborted).toBe(true);
+    expect(streamRequests[1].url).not.toContain("source_repos");
     client.disconnect();
   });
 

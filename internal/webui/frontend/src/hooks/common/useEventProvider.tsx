@@ -150,7 +150,8 @@ export function EventProvider({
 
   // Track sourceRepos for reconnect detection
   const sourceReposRef = useRef(sourceRepos);
-  const prevSourceReposRef = useRef<string[] | undefined>(undefined);
+  const sourceReposKey = (sourceRepos ?? []).slice().sort().join(",");
+  const prevSourceReposKeyRef = useRef(sourceReposKey);
 
   useEffect(() => {
     sourceReposRef.current = sourceRepos;
@@ -307,7 +308,6 @@ export function EventProvider({
 
     return () => {
       mountedRef.current = false;
-      prevSourceReposRef.current = undefined;
       window.removeEventListener("auth-sign-out", handleSignOut);
       client.destroy();
       clientRef.current = null;
@@ -316,23 +316,15 @@ export function EventProvider({
 
   // Reconnect when sourceRepos changes
   useEffect(() => {
-    const prev = prevSourceReposRef.current;
-    prevSourceReposRef.current = sourceRepos;
-
-    // Skip initial mount (autoConnect handles that)
-    if (prev === undefined) return;
-
-    // Compare arrays (sorted join to ignore reordering)
-    const prevKey = (prev ?? []).slice().sort().join(",");
-    const nextKey = (sourceRepos ?? []).slice().sort().join(",");
-    if (prevKey === nextKey) return;
+    const prevKey = prevSourceReposKeyRef.current;
+    prevSourceReposKeyRef.current = sourceReposKey;
+    if (prevKey === sourceReposKey) return;
 
     const client = clientRef.current;
     if (client) {
-      client.disconnect();
-      client.connect(undefined, sourceRepos);
+      client.updateSourceRepos(sourceRepos);
     }
-  }, [sourceRepos]);
+  }, [sourceRepos, sourceReposKey]);
 
   // Stable control methods
   const retryNow = useCallback(() => {
