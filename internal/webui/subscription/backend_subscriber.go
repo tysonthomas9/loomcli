@@ -3,6 +3,7 @@ package subscription
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -12,42 +13,48 @@ import (
 )
 
 const (
-	// backendWaitTimeout is the long-poll timeout passed to
-	// IssueBackend.WaitForMutations. fleet-db caps the server-side
-	// timeout at 10 s (see fleet-db internal/api/mutations.go
-	// mutationsMaxTimeout) to bound how long XREAD BLOCK 0 holds a
-	// Redis pool connection. Anything > 10 s is rejected as a
-	// validation error. Browser SSE reconnect cadence is dominated by
-	// the FE's exponential backoff anyway, so this 10 s ceiling is
-	// invisible to clients.
-	backendWaitTimeout = 10 * time.Second
-
-	// backendRetryDelay is the backoff applied after a non-cancellation
-	// error from WaitForMutations (e.g., transient HTTP failure).
-	backendRetryDelay = 2 * time.Second
-
-	// backendEmptyPollDelay is a client-side backoff after an empty mutation
-	// poll. Healthy fleet-db long-polls usually return after the server-side
-	// wait timeout, so this is invisible in the steady state. When the
-	// downstream Redis pool is under pressure and empty polls return early,
-	// this prevents the subscriber from immediately re-entering the pool.
-	backendEmptyPollDelay = time.Second
-
-	// backendCatchUpTimeout caps the GetMutations call used by the
-	// SSE reconnect catch-up path. Catch-up runs synchronously inside the
-	// SSE handler; bound it tightly so a slow backend cannot stall the
-	// initial event stream open.
-	backendCatchUpTimeout = 5 * time.Second
+	backendWaitTimeout     = 10 * time.Second
+	backendRetryDelay      = 2 * time.Second
+	backendEmptyPollDelay  = time.Second
+	mutationPageLimit      = 100
+	defaultDrainMaxPages   = 200
+	defaultDrainMaxEvents  = 20_000
+	defaultDrainMaxElapsed = 30 * time.Second
 )
 
-// BackendMutationSubscriber sources mutation events from
-// backend.IssueBackend.WaitForMutations and bridges them onto the shared
-// realtime.Hub. One goroutine runs per active workspace; the loop exits
-// when ctx is canceled (Stop()).
+type subscriberBudgets struct {
+	maxDrainPages  int
+	maxDrainEvents int
+	drainTimeout   time.Duration
+}
+
+func defaultSubscriberBudgets() subscriberBudgets {
+	return subscriberBudgets{
+		maxDrainPages:  defaultDrainMaxPages,
+		maxDrainEvents: defaultDrainMaxEvents,
+		drainTimeout:   defaultDrainMaxElapsed,
+	}
+}
+
+type drainCapError struct {
+	pages  int
+	events int
+	cause  string
+}
+
+func (e *drainCapError) Error() string {
+	return fmt.Sprintf("subscriber head drain exceeded %s after %d pages and %d events", e.cause, e.pages, e.events)
+}
+
+// BackendMutationSubscriber sources mutation pages from a backend and bridges
+// live events onto the shared realtime Hub. Start is asynchronous; callers use
+// Ready before relying on its head cursor.
 type BackendMutationSubscriber struct {
 	backend     backend.IssueBackend
 	hub         *realtime.Hub
 	workspaceID string
+	initialHead string
+	budgets     subscriberBudgets
 
 	wg sync.WaitGroup
 
@@ -55,182 +62,321 @@ type BackendMutationSubscriber struct {
 	lastSince  int64
 	lastCursor string
 
-	startOnce sync.Once
-	stopOnce  sync.Once
+	readyOnce sync.Once
+	ready     chan struct{}
+	readyMu   sync.RWMutex
+	readyHead string
+	readyErr  error
+
+	lifecycleMu sync.Mutex
+	startOnce   sync.Once
+	stopOnce    sync.Once
 
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
-// NewBackendMutationSubscriber creates a subscriber that long-polls the given
-// IssueBackend for mutations and broadcasts them to hub. workspaceID is
-// stamped onto every outgoing MutationPayload so the hub's per-client
-// workspace filter routes events correctly. b and hub must not be nil.
+// NewBackendMutationSubscriber creates a subscriber with production drain
+// budgets. The first unsupported-probe activation drains from cursor "0".
 func NewBackendMutationSubscriber(b backend.IssueBackend, hub *realtime.Hub, workspaceID string) *BackendMutationSubscriber {
-	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // Stop owns cancellation for the subscriber lifetime.
+	return newBackendMutationSubscriber(b, hub, workspaceID, "0", defaultSubscriberBudgets())
+}
+
+func newBackendMutationSubscriber(
+	b backend.IssueBackend,
+	hub *realtime.Hub,
+	workspaceID string,
+	initialHead string,
+	budgets subscriberBudgets,
+) *BackendMutationSubscriber {
+	if initialHead == "" {
+		initialHead = "0"
+	}
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // Stop owns the subscriber lifetime.
 	return &BackendMutationSubscriber{
 		backend:     b,
 		hub:         hub,
 		workspaceID: workspaceID,
+		initialHead: initialHead,
+		budgets:     budgets,
+		ready:       make(chan struct{}),
 		ctx:         ctx,
 		cancel:      cancel,
 	}
 }
 
-// Start begins the long-poll loop in a background goroutine.
-// Safe to call multiple times — only the first call spawns a goroutine.
+// Start begins head discovery and then live long-polling in a background
+// goroutine. It returns immediately and is safe to call more than once.
 func (s *BackendMutationSubscriber) Start() {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.ctx.Err() != nil {
+		s.reportReady("", context.Canceled)
+		return
+	}
 	s.startOnce.Do(func() {
 		s.wg.Add(1)
 		go s.loop()
-		slog.Info("backend mutation subscription started", "workspace", s.workspaceID)
 	})
 }
 
-// Stop gracefully tears down the subscriber. Cancels the embedded context
-// (unblocks any in-flight WaitForMutations) and waits for the goroutine
-// to exit. Safe to call multiple times.
+// Ready waits until Start has found a complete head or failed. The caller's
+// context only bounds this wait; it does not cancel shared subscriber startup.
+func (s *BackendMutationSubscriber) Ready(ctx context.Context) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case <-s.ready:
+		s.readyMu.RLock()
+		defer s.readyMu.RUnlock()
+		return s.readyHead, s.readyErr
+	default:
+	}
+	select {
+	case <-s.ready:
+		s.readyMu.RLock()
+		defer s.readyMu.RUnlock()
+		return s.readyHead, s.readyErr
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+// Head returns the subscriber's latest fully consumed cursor. Before
+// readiness it returns the configured fallback starting cursor.
+func (s *BackendMutationSubscriber) Head() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.lastCursor != "" {
+		return s.lastCursor
+	}
+	return s.initialHead
+}
+
+// Stop cancels discovery or polling, releases readiness waiters, and waits for
+// the subscriber goroutine. It is safe before Start and safe to call repeatedly.
 func (s *BackendMutationSubscriber) Stop() {
 	s.stopOnce.Do(func() {
+		s.lifecycleMu.Lock()
 		s.cancel()
+		s.reportReady("", context.Canceled)
+		s.lifecycleMu.Unlock()
 		s.wg.Wait()
 		slog.Info("backend mutation subscription stopped", "workspace", s.workspaceID)
 	})
 }
 
-// GetMutationDataSince returns mutations from the backend with timestamps
-// strictly greater than since (ms epoch). Used by the SSE reconnect
-// catch-up path; runs synchronously and is bounded by backendCatchUpTimeout.
-// Returns nil on backend error so the caller can fall through to the
-// connected event without aborting the SSE stream.
-//
-// Method name matches the workspaceSubscriber interface in multi.go.
-func (s *BackendMutationSubscriber) GetMutationDataSince(since string) []backend.MutationData {
-	if s.backend == nil {
-		return nil
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), backendCatchUpTimeout)
-	defer cancel()
-	var (
-		muts []backend.MutationData
-		err  error
-	)
-	if cursorBackend, ok := s.backend.(backend.CursorMutationBackend); ok {
-		muts, err = cursorBackend.GetMutationsAfter(ctx, since)
-	} else {
-		muts, err = s.backend.GetMutations(ctx, parseCursorMillis(since))
-	}
-	if err != nil {
-		slog.Error("backend GetMutations error", "workspace", s.workspaceID, "err", err)
-		return nil
-	}
-	return muts
+// GetMutationPage returns one bounded catch-up page and propagates backend
+// errors so the HTTP handshake can fail before opening the SSE stream.
+func (s *BackendMutationSubscriber) GetMutationPage(ctx context.Context, since string, limit int) (backend.MutationPage, error) {
+	return s.getMutationPage(ctx, since, limit)
 }
 
-// loop is the long-poll body. Blocks on WaitForMutations for up to
-// backendWaitTimeout per iteration. On each non-empty response it advances
-// lastSince to the max timestamp BEFORE broadcasting (mirrors the daemon
-// path's invariant: a concurrent reader of lastSince must never see a
-// stale cursor while events from that batch are still being broadcast).
-//
-//nolint:gocognit,funlen // Subscription retry/cursor bookkeeping is easier to audit in one loop.
 func (s *BackendMutationSubscriber) loop() {
 	defer s.wg.Done()
 
+	head, err := s.discoverHead()
+	if err != nil {
+		var capErr *drainCapError
+		if errors.As(err, &capErr) {
+			slog.Warn("backend mutation subscriber head drain capped",
+				"workspace", s.workspaceID, "pages", capErr.pages, "events", capErr.events, "err", err)
+		} else if !errors.Is(err, context.Canceled) {
+			slog.Error("backend mutation subscriber head discovery failed", "workspace", s.workspaceID, "err", err)
+		}
+		s.reportReady("", err)
+		return
+	}
+	s.setCursor(head, nil)
+	s.reportReady(head, nil)
+	slog.Info("backend mutation subscription started at head", "workspace", s.workspaceID, "cursor", head)
+
+	timeoutMs := int64(backendWaitTimeout / time.Millisecond)
 	for {
 		if s.ctx.Err() != nil {
 			return
 		}
-
-		s.mu.RLock()
-		since := s.lastSince
-		cursor := s.lastCursor
-		s.mu.RUnlock()
-		if cursor == "" {
-			cursor = "0"
-		}
-
-		timeoutMs := int64(backendWaitTimeout / time.Millisecond)
-		// Wrap the long-poll in a per-call deadline that exceeds the
-		// server-side timeout by a slack window. With the shared HTTP
-		// client's Timeout set to 65s (see fleet.SharedHTTPClient), this
-		// per-call context is what actually unblocks WaitForMutations on
-		// timeout — eliminating the 30s vs 30s race that surfaced as
-		// `context canceled` log spam on every empty long-poll.
-		muts, err := s.waitForMutations(cursor, since, timeoutMs)
+		cursor := s.Head()
+		page, err := s.waitForMutationPage(cursor, timeoutMs)
 		if err != nil {
-			// Cancellation is the expected exit path on Stop(); don't
-			// retry-spin on it.
 			if errors.Is(err, context.Canceled) || s.ctx.Err() != nil {
 				return
 			}
 			slog.Error("backend WaitForMutations error", "workspace", s.workspaceID, "err", err)
 			s.waitWithCancel(backendRetryDelay)
+			timeoutMs = int64(backendWaitTimeout / time.Millisecond)
 			continue
 		}
 
-		if len(muts) == 0 {
-			// Long-poll returned no mutations. Apply a small client-side
-			// back-off before re-entering: under fleet-db pool pressure
-			// the server returns early empty 200s (well before its 30s
-			// timeout), and a tight loop competes with normal workspace API
-			// traffic for the downstream Redis pool. This caps re-entry in that
-			// degraded mode while still being invisible in the steady
-			// state where the server honors the full long-poll window.
+		if page.Cursor == "" {
+			page.Cursor = cursor
+		}
+		s.setCursor(page.Cursor, page.Events)
+		for _, mutation := range page.Events {
+			if s.hub != nil {
+				s.hub.Broadcast(realtime.BackendMutationToPayload(mutation, s.workspaceID))
+			}
+		}
+		if len(page.Events) > 0 {
+			slog.Info("broadcast backend mutations to SSE clients",
+				"workspace", s.workspaceID, "count", len(page.Events), "clients", s.clientCount())
+		}
+
+		if page.HasMore {
+			timeoutMs = 0
+			continue
+		}
+		timeoutMs = int64(backendWaitTimeout / time.Millisecond)
+		if len(page.Events) == 0 {
 			s.waitWithCancel(backendEmptyPollDelay)
-			continue
 		}
-
-		// Compute max timestamp first so lastSince is advanced before
-		// the first broadcast. A concurrent GetMutationsSince(N) would
-		// otherwise re-fetch events still in flight.
-		var maxMs int64
-		lastCursor := ""
-		for _, m := range muts {
-			ms := m.Timestamp.UnixMilli()
-			if ms > maxMs {
-				maxMs = ms
-			}
-			if m.Cursor != "" {
-				lastCursor = m.Cursor
-			}
-		}
-		if maxMs > 0 || lastCursor != "" {
-			s.mu.Lock()
-			if maxMs > s.lastSince {
-				s.lastSince = maxMs
-			}
-			if lastCursor != "" {
-				s.lastCursor = lastCursor
-			}
-			s.mu.Unlock()
-		}
-
-		for _, m := range muts {
-			payload := realtime.BackendMutationToPayload(m, s.workspaceID)
-			s.hub.Broadcast(payload)
-		}
-		slog.Info("broadcast backend mutations to SSE clients",
-			"workspace", s.workspaceID, "count", len(muts), "clients", s.hub.ClientCount())
 	}
 }
 
-func (s *BackendMutationSubscriber) waitForMutations(cursor string, since, timeoutMs int64) ([]backend.MutationData, error) {
+func (s *BackendMutationSubscriber) discoverHead() (string, error) {
+	if s.backend == nil {
+		return "", fmt.Errorf("discover subscriber head: backend is nil")
+	}
+	if cursorBackend, ok := s.backend.(backend.CursorMutationBackend); ok {
+		head, supported, err := cursorBackend.ProbeHead(s.ctx)
+		if err != nil {
+			return "", err
+		}
+		if supported {
+			if head == "" {
+				return "", fmt.Errorf("discover subscriber head: probe returned an empty cursor")
+			}
+			return head, nil
+		}
+	}
+	return s.drainToHead(s.initialHead)
+}
+
+func (s *BackendMutationSubscriber) drainToHead(start string) (string, error) {
+	ctx, cancel := context.WithTimeout(s.ctx, s.budgets.drainTimeout)
+	defer cancel()
+	cursor := start
+	pages := 0
+	events := 0
+	for {
+		page, err := s.getMutationPage(ctx, cursor, mutationPageLimit)
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return "", &drainCapError{pages: pages, events: events, cause: "time budget"}
+			}
+			return "", err
+		}
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return "", &drainCapError{pages: pages, events: events, cause: "time budget"}
+		}
+		pages++
+		events += len(page.Events)
+		if page.Cursor != "" {
+			cursor = page.Cursor
+		}
+		if events > s.budgets.maxDrainEvents {
+			return "", &drainCapError{pages: pages, events: events, cause: "event budget"}
+		}
+		if !page.HasMore {
+			return cursor, nil
+		}
+		if pages >= s.budgets.maxDrainPages {
+			return "", &drainCapError{pages: pages, events: events, cause: "page budget"}
+		}
+		if events >= s.budgets.maxDrainEvents {
+			return "", &drainCapError{pages: pages, events: events, cause: "event budget"}
+		}
+		select {
+		case <-ctx.Done():
+			return "", &drainCapError{pages: pages, events: events, cause: "time budget"}
+		default:
+		}
+	}
+}
+
+func (s *BackendMutationSubscriber) getMutationPage(ctx context.Context, since string, limit int) (backend.MutationPage, error) {
+	if s.backend == nil {
+		return backend.MutationPage{}, fmt.Errorf("get mutation page: backend is nil")
+	}
+	if cursorBackend, ok := s.backend.(backend.CursorMutationBackend); ok {
+		return cursorBackend.GetMutationsAfter(ctx, since, limit)
+	}
+	events, err := s.backend.GetMutations(ctx, parseCursorMillis(since))
+	if err != nil {
+		return backend.MutationPage{}, err
+	}
+	return legacyMutationPage(since, events), nil
+}
+
+func (s *BackendMutationSubscriber) waitForMutationPage(cursor string, timeoutMs int64) (backend.MutationPage, error) {
 	reqCtx, reqCancel := context.WithTimeout(s.ctx, backendWaitTimeout+10*time.Second)
 	defer reqCancel()
 	if cursorBackend, ok := s.backend.(backend.CursorMutationBackend); ok {
-		return cursorBackend.WaitForMutationsAfter(reqCtx, cursor, timeoutMs)
+		return cursorBackend.WaitForMutationsAfter(reqCtx, cursor, timeoutMs, mutationPageLimit)
 	}
-	return s.backend.WaitForMutations(reqCtx, since, timeoutMs)
+	events, err := s.backend.WaitForMutations(reqCtx, parseCursorMillis(cursor), timeoutMs)
+	if err != nil {
+		return backend.MutationPage{}, err
+	}
+	return legacyMutationPage(cursor, events), nil
 }
 
-// waitWithCancel sleeps for d or until the embedded context is canceled,
-// whichever comes first.
+func legacyMutationPage(previous string, events []backend.MutationData) backend.MutationPage {
+	cursor := previous
+	var maxMs int64
+	for _, event := range events {
+		if event.Cursor != "" {
+			cursor = event.Cursor
+		}
+		if ms := event.Timestamp.UnixMilli(); ms > maxMs {
+			maxMs = ms
+		}
+	}
+	if cursor == previous && maxMs > 0 {
+		cursor = fmt.Sprintf("%d", maxMs)
+	}
+	if events == nil {
+		events = []backend.MutationData{}
+	}
+	return backend.MutationPage{Events: events, Cursor: cursor}
+}
+
+func (s *BackendMutationSubscriber) setCursor(cursor string, events []backend.MutationData) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cursor != "" {
+		s.lastCursor = cursor
+	}
+	for _, event := range events {
+		if ms := event.Timestamp.UnixMilli(); ms > s.lastSince {
+			s.lastSince = ms
+		}
+	}
+}
+
+func (s *BackendMutationSubscriber) reportReady(head string, err error) {
+	s.readyOnce.Do(func() {
+		s.readyMu.Lock()
+		s.readyHead = head
+		s.readyErr = err
+		s.readyMu.Unlock()
+		close(s.ready)
+	})
+}
+
+func (s *BackendMutationSubscriber) clientCount() int {
+	if s.hub == nil {
+		return 0
+	}
+	return s.hub.ClientCount()
+}
+
 func (s *BackendMutationSubscriber) waitWithCancel(d time.Duration) {
-	t := time.NewTimer(d)
-	defer t.Stop()
+	timer := time.NewTimer(d)
+	defer timer.Stop()
 	select {
 	case <-s.ctx.Done():
-	case <-t.C:
+	case <-timer.C:
 	}
 }

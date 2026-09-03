@@ -2,6 +2,7 @@ package app
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/rpc"
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
@@ -189,12 +190,12 @@ func parseMutationPayload(data string) (*realtime.MutationPayload, error) {
 }
 
 // newLiveSSEServer creates an httptest.NewServer wired to realtime.NewHandler with the
-// given hub and getMutationsSince callback. The caller must call server.Close()
+// given hub and mutation-page callback. The caller must call server.Close()
 // and hub.Stop() when done (use t.Cleanup).
-func newLiveSSEServer(t *testing.T, hub *realtime.Hub, getMutationsSince func(wsID string, since string) []rpc.MutationEvent) *httptest.Server {
+func newLiveSSEServer(t *testing.T, hub *realtime.Hub, getMutationPage func(context.Context, string, string, int) (backend.MutationPage, error)) *httptest.Server {
 	t.Helper()
 
-	handler := realtime.NewHandler(realtime.HandlerConfig{Hub: hub, GetMutationsSince: getMutationsSince, WorkspaceFromCtx: middleware.WorkspaceFromContext})
+	handler := realtime.NewHandler(realtime.HandlerConfig{Hub: hub, GetMutationPage: getMutationPage, WorkspaceFromCtx: middleware.WorkspaceFromContext})
 	wsMux := http.NewServeMux()
 	wsMux.Handle("GET /api/workspaces/{ws}/events", handler)
 	// Wrap with a simple workspace existence check that always passes in tests
@@ -443,7 +444,7 @@ func TestSSELive_CatchUpOnReconnect(t *testing.T) {
 	go hub.Run()
 	t.Cleanup(hub.Stop)
 
-	catchUpEvents := []rpc.MutationEvent{
+	catchUpEvents := []backend.MutationData{
 		{
 			Type:      "create",
 			IssueID:   "loom-catchup-1",
@@ -458,11 +459,11 @@ func TestSSELive_CatchUpOnReconnect(t *testing.T) {
 		},
 	}
 
-	getMutationsSince := func(wsID string, since string) []rpc.MutationEvent {
-		return catchUpEvents
+	getMutationPage := func(context.Context, string, string, int) (backend.MutationPage, error) {
+		return backend.MutationPage{Events: catchUpEvents, Cursor: "2000"}, nil
 	}
 
-	server := newLiveSSEServer(t, hub, getMutationsSince)
+	server := newLiveSSEServer(t, hub, getMutationPage)
 
 	// Connect with since= to trigger catch-up
 	client := connectSSEWithQuery(t, server.URL, "since=1000", nil)
@@ -512,12 +513,12 @@ func TestSSELive_LastEventIDHeader(t *testing.T) {
 	t.Cleanup(hub.Stop)
 
 	var capturedSince string
-	getMutationsSince := func(wsID string, since string) []rpc.MutationEvent {
+	getMutationPage := func(_ context.Context, _ string, since string, _ int) (backend.MutationPage, error) {
 		capturedSince = since
-		return nil
+		return backend.MutationPage{Events: []backend.MutationData{}, Cursor: since}, nil
 	}
 
-	server := newLiveSSEServer(t, hub, getMutationsSince)
+	server := newLiveSSEServer(t, hub, getMutationPage)
 
 	client := connectSSE(t, server.URL, map[string]string{
 		"Last-Event-ID": "9876543210",

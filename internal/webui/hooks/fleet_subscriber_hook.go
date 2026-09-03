@@ -2,13 +2,17 @@ package hooks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
 	"github.com/tysonthomas9/loomcli/internal/webui/subscription"
 )
+
+const fleetSubscriberReadinessTimeout = 45 * time.Second
 
 // FleetSubscriberHook implements coordinator.LifecycleHook for per-workspace
 // BackendMutationSubscriber lifecycle. It uses the same deferred-Activate
@@ -22,6 +26,8 @@ type FleetSubscriberHook struct {
 	multiSub *subscription.MultiWorkspaceSubscriber
 	registry *coordinator.WorkspaceRegistry
 	logger   *slog.Logger
+
+	readinessTimeout time.Duration
 }
 
 // NewFleetSubscriberHook constructs a FleetSubscriberHook. multiSub and
@@ -37,9 +43,10 @@ func NewFleetSubscriberHook(multiSub *subscription.MultiWorkspaceSubscriber, reg
 		logger = slog.Default()
 	}
 	return &FleetSubscriberHook{
-		multiSub: multiSub,
-		registry: registry,
-		logger:   logger,
+		multiSub:         multiSub,
+		registry:         registry,
+		logger:           logger,
+		readinessTimeout: fleetSubscriberReadinessTimeout,
 	}
 }
 
@@ -104,9 +111,19 @@ func (h *FleetSubscriberHook) Activate(wsID string) error {
 		return fmt.Errorf("activate fleet subscriber: workspace %q resource is not backend.IssueBackend (got %T)", wsID, res)
 	}
 
-	if err := h.multiSub.EnsureActive(context.Background(), wsID, be, subscription.ActivationReasonRegistry); err != nil {
-		h.logger.Warn("failed to activate fleet subscriber for workspace",
-			"workspace", wsID, "err", err)
+	readinessCtx, cancel := context.WithTimeout(context.Background(), h.readinessTimeout)
+	defer cancel()
+	// WorkspaceRegistry.ActivateSubscriber snapshots its hooks and releases the
+	// registry lock before calling Activate, so this readiness wait holds no
+	// registry lock.
+	if _, err := h.multiSub.EnsureActive(readinessCtx, wsID, be, subscription.ActivationReasonRegistry); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			h.logger.Warn("fleet subscriber activation timed out",
+				"workspace", wsID, "timeout", h.readinessTimeout, "err", err)
+		} else {
+			h.logger.Warn("failed to activate fleet subscriber for workspace",
+				"workspace", wsID, "err", err)
+		}
 		return fmt.Errorf("add workspace fleet subscriber %q: %w", wsID, err)
 	}
 

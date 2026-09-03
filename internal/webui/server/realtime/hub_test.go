@@ -1,6 +1,8 @@
 package realtime
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -8,6 +10,104 @@ import (
 	"testing"
 	"time"
 )
+
+func TestHub_RegisterClientAcknowledgesOnlyAfterDispatch(t *testing.T) {
+	h := NewHub()
+	dispatchStarted := make(chan struct{})
+	releaseDispatch := make(chan struct{})
+	h.dispatchBarrier = func(kind hubDispatchKind) {
+		if kind == hubDispatchRegister {
+			close(dispatchStarted)
+			<-releaseDispatch
+		}
+	}
+	go h.Run()
+	defer h.Stop()
+
+	client := NewClient(1, ClientSendBuf, "0", nil, "ws-1")
+	registered := make(chan error, 1)
+	go func() { registered <- h.RegisterClient(context.Background(), client) }()
+	<-dispatchStarted
+	if got := h.ClientCount(); got != 0 {
+		t.Fatalf("client count before dispatch release = %d, want 0", got)
+	}
+	select {
+	case err := <-registered:
+		t.Fatalf("RegisterClient returned before client was added: %v", err)
+	default:
+	}
+	close(releaseDispatch)
+	if err := <-registered; err != nil {
+		t.Fatalf("RegisterClient: %v", err)
+	}
+	if got := h.ClientCount(); got != 1 {
+		t.Fatalf("client count after ack = %d, want 1", got)
+	}
+}
+
+func TestHub_StopReleasesRegistrationWaiter(t *testing.T) {
+	h := NewHub()
+	dispatchStarted := make(chan struct{})
+	releaseDispatch := make(chan struct{})
+	h.dispatchBarrier = func(kind hubDispatchKind) {
+		if kind == hubDispatchRegister {
+			close(dispatchStarted)
+			<-releaseDispatch
+		}
+	}
+	go h.Run()
+
+	result := make(chan error, 1)
+	go func() {
+		result <- h.RegisterClient(context.Background(), NewClient(1, 1, "0", nil, "ws-1"))
+	}()
+	<-dispatchStarted
+	h.Stop()
+	if err := <-result; !errors.Is(err, errHubStopped) {
+		t.Fatalf("RegisterClient error = %v, want hub stopped", err)
+	}
+	close(releaseDispatch)
+}
+
+func TestHub_RegisterClientCancellationCannotLeakClient(t *testing.T) {
+	h := NewHub()
+	dispatchStarted := make(chan struct{})
+	releaseDispatch := make(chan struct{})
+	h.dispatchBarrier = func(kind hubDispatchKind) {
+		if kind == hubDispatchRegister {
+			close(dispatchStarted)
+			<-releaseDispatch
+		}
+	}
+	go h.Run()
+	t.Cleanup(h.Stop)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		result <- h.RegisterClient(ctx, NewClient(1, 1, "0", nil, "ws-1"))
+	}()
+	<-dispatchStarted
+	cancel()
+	if err := <-result; !errors.Is(err, context.Canceled) {
+		t.Fatalf("RegisterClient error = %v, want context.Canceled", err)
+	}
+	if got := h.ClientCount(); got != 0 {
+		t.Fatalf("client count after canceled registration = %d, want 0", got)
+	}
+	close(releaseDispatch)
+}
+
+func TestHub_BroadcastShortCircuitsWithoutWorkspaceClients(t *testing.T) {
+	h := NewHub()
+	h.Broadcast(&MutationPayload{Cursor: "c1.event", WorkspaceID: "ws-empty"})
+	if got := len(h.broadcast); got != 0 {
+		t.Fatalf("broadcast queue length = %d, want 0", got)
+	}
+	if got := h.GetRetryQueueDepth(); got != 0 {
+		t.Fatalf("retry queue length = %d, want 0", got)
+	}
+}
 
 func TestNewHub(t *testing.T) {
 	h := NewHub()
@@ -25,7 +125,7 @@ func TestHub_RegisterAndUnregister(t *testing.T) {
 	defer h.Stop()
 
 	c := NewClient(1, ClientSendBuf, "0", nil, "ws-1")
-	h.RegisterClient(c)
+	_ = h.RegisterClient(context.Background(), c)
 
 	// Give the run loop time to process
 	time.Sleep(20 * time.Millisecond)
@@ -46,7 +146,7 @@ func TestHub_BroadcastDelivers(t *testing.T) {
 	defer h.Stop()
 
 	c := NewClient(1, ClientSendBuf, "0", nil, "ws-1")
-	h.RegisterClient(c)
+	_ = h.RegisterClient(context.Background(), c)
 	time.Sleep(20 * time.Millisecond)
 
 	h.Broadcast(&MutationPayload{
@@ -71,7 +171,7 @@ func TestHub_BroadcastDropsEmptyWorkspace(t *testing.T) {
 	defer h.Stop()
 
 	c := NewClient(1, ClientSendBuf, "0", nil, "ws-1")
-	h.RegisterClient(c)
+	_ = h.RegisterClient(context.Background(), c)
 	time.Sleep(20 * time.Millisecond)
 
 	// Mutation with empty WorkspaceID should be dropped
@@ -96,8 +196,8 @@ func TestHub_WorkspaceFilter(t *testing.T) {
 
 	c1 := NewClient(1, ClientSendBuf, "0", nil, "ws-1")
 	c2 := NewClient(2, ClientSendBuf, "0", nil, "ws-2")
-	h.RegisterClient(c1)
-	h.RegisterClient(c2)
+	_ = h.RegisterClient(context.Background(), c1)
+	_ = h.RegisterClient(context.Background(), c2)
 	time.Sleep(20 * time.Millisecond)
 
 	h.Broadcast(&MutationPayload{
@@ -129,7 +229,7 @@ func TestHub_SourceRepoFilter(t *testing.T) {
 	defer h.Stop()
 
 	c := NewClient(1, ClientSendBuf, "0", []string{"repoA"}, "ws-1")
-	h.RegisterClient(c)
+	_ = h.RegisterClient(context.Background(), c)
 	time.Sleep(20 * time.Millisecond)
 
 	// Should be delivered (matches filter)
@@ -177,11 +277,10 @@ func TestHub_Stop(t *testing.T) {
 	go h.Run()
 
 	c := NewClient(1, ClientSendBuf, "0", nil, "ws-1")
-	h.RegisterClient(c)
+	_ = h.RegisterClient(context.Background(), c)
 	time.Sleep(20 * time.Millisecond)
 
 	h.Stop()
-	time.Sleep(20 * time.Millisecond)
 
 	// Send channel should be closed after stop
 	_, ok := <-c.send
@@ -194,20 +293,16 @@ func TestHub_RegisterAfterStop(t *testing.T) {
 	h := NewHub()
 	go h.Run()
 	h.Stop()
-	time.Sleep(20 * time.Millisecond)
 
 	c := NewClient(99, ClientSendBuf, "0", nil, "ws-1")
-	h.RegisterClient(c)
-
-	// Client send channel should be closed since hub is stopped
-	_, ok := <-c.send
-	if ok {
-		t.Fatal("expected send channel closed when registering after stop")
+	if err := h.RegisterClient(context.Background(), c); !errors.Is(err, errHubStopped) {
+		t.Fatalf("RegisterClient error = %v, want hub stopped", err)
 	}
 }
 
 func TestHub_RetryQueue(t *testing.T) {
 	h := NewHub()
+	h.addClient(NewClient(1, 1, "0", nil, "ws-1"))
 	// Don't run the hub yet -- broadcast channel will fill up, triggering retry queue
 	for i := 0; i < 256+5; i++ {
 		h.Broadcast(&MutationPayload{
@@ -224,6 +319,7 @@ func TestHub_RetryQueue(t *testing.T) {
 
 func TestHub_RetryQueueBoundedUnderHighFanout(t *testing.T) {
 	h := NewHub()
+	h.addClient(NewClient(1, 1, "0", nil, "ws-1"))
 	for i := 0; i < cap(h.broadcast)+1025; i++ {
 		h.Broadcast(&MutationPayload{
 			Type:        "update",
@@ -246,7 +342,7 @@ func TestHub_SlowClientDisconnectedWhenSendBufferFull(t *testing.T) {
 	defer h.Stop()
 
 	c := NewClient(1, 1, "1700000000000-0", nil, "ws-1")
-	h.RegisterClient(c)
+	_ = h.RegisterClient(context.Background(), c)
 	waitForHubCondition(t, func() bool { return h.ClientCount() == 1 })
 
 	h.Broadcast(&MutationPayload{Type: "update", IssueID: "first", WorkspaceID: "ws-1"})
@@ -271,9 +367,9 @@ func TestHub_GetActiveSourceRepos(t *testing.T) {
 	c1 := NewClient(1, ClientSendBuf, "0", []string{"repoA", "repoB"}, "ws-1")
 	c2 := NewClient(2, ClientSendBuf, "0", []string{"repoB", "repoC"}, "ws-1")
 	c3 := NewClient(3, ClientSendBuf, "0", nil, "ws-1") // no filter
-	h.RegisterClient(c1)
-	h.RegisterClient(c2)
-	h.RegisterClient(c3)
+	_ = h.RegisterClient(context.Background(), c1)
+	_ = h.RegisterClient(context.Background(), c2)
+	_ = h.RegisterClient(context.Background(), c3)
 	time.Sleep(20 * time.Millisecond)
 
 	repos := h.GetActiveSourceRepos()

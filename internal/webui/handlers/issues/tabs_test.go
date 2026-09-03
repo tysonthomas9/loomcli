@@ -303,7 +303,7 @@ func TestHandleSaveIssueTabs_BroadcastsSSE(t *testing.T) {
 
 	// Register an SSE client to verify broadcast
 	client := realtime.NewClient(1, 16, "0", nil, testWSID)
-	hub.RegisterClient(client)
+	_ = hub.RegisterClient(context.Background(), client)
 	// Give the hub goroutine a moment to process
 	// We use a non-blocking approach: try to read after the handler call
 
