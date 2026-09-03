@@ -29,7 +29,7 @@ const expectedGraphs = new Map([
   ['suites/zz-agent-flow.graph/flow.graph.yaml', ['agent-flow', 5]],
   ['suites/zz-custom-prompt.graph/flow.graph.yaml', ['custom-prompts', 22]],
   ['suites/zz-lead-agent.graph/flow.graph.yaml', ['lead-agents', 23]],
-  ['suites/zz-planner-agent.graph/flow.graph.yaml', ['planner-agent', 11]],
+  ['suites/zz-planner-agent.graph/flow.graph.yaml', ['planner-agent', 12]],
   ['suites/zz-pr-review-agents.graph/flow.graph.yaml', ['pr-review-agents', 8]],
   ['suites/zz-task-runner.graph/flow.graph.yaml', ['task-runner', 11]],
   ['surface-suites/agent-lifecycle-contracts.graph/flow.graph.yaml', ['agent-lifecycle-contracts', 5]],
@@ -49,8 +49,8 @@ const expectedPrefixes = [
   ['lead-agents', ['prepare-primary-lead'], 11],
   ['lead-agents', ['prepare-primary-lead', 'connect-primary-lead-runtime'], 4],
   ['lead-agents', ['prepare-second-lead'], 3],
-  ['planner-agent', ['open-planner-dialog', 'choose-planner-template'], 10],
-  ['planner-agent', ['open-planner-dialog', 'choose-planner-template', 'create-default-planner'], 7],
+  ['planner-agent', ['open-planner-dialog', 'choose-planner-template'], 11],
+  ['planner-agent', ['open-planner-dialog', 'choose-planner-template', 'create-default-planner'], 8],
   ['pr-review-agents', ['open-prr-agent-list'], 6],
   ['pr-review-agents', ['open-prr-agent-list', 'create-primary-agent-prerequisite'], 3],
   ['pr-review-agents', ['open-prr-agent-list', 'open-create-agent-dialog'], 2],
@@ -181,10 +181,10 @@ for (const [flow, intent, ariaLabel] of exactMonitorRows) {
 let linearExecutions = 0
 for (const file of linearFiles) linearExecutions += runner.loadSuite(file).tests.length
 
-assert.equal(graphExecutions, 108, 'default graph execution count changed')
+assert.equal(graphExecutions, 109, 'default graph execution count changed')
 assert.equal(caseIds.size, graphExecutions, 'graph case IDs must be unique')
 assert.equal(caseKeys.size, graphExecutions, 'graph case keys must be unique')
 assert.equal(linearExecutions, 44, 'default linear execution count changed')
-assert.equal(graphExecutions + linearExecutions, 152, 'default deterministic corpus count changed')
+assert.equal(graphExecutions + linearExecutions, 153, 'default deterministic corpus count changed')
 
 console.log(`AFT graph corpus: PASS (${graphFiles.length} graphs, ${graphExecutions} graph executions, ${linearExecutions} linear executions)`)
