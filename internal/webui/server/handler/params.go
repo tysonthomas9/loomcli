@@ -41,14 +41,18 @@ func ParseIntParam(q url.Values, key string) (*int, error) {
 	return &n, nil
 }
 
-// ParseArrayParam splits a comma-separated query parameter into trimmed strings.
+// ParseArrayParam splits repeated, comma-separated query parameters into trimmed strings.
 // Returns nil if the key is absent.
 func ParseArrayParam(q url.Values, key string) []string {
-	v := q.Get(key)
-	if v == "" {
+	values, ok := q[key]
+	if !ok {
 		return nil
 	}
-	return SplitAndTrim(v)
+	var result []string
+	for _, value := range values {
+		result = append(result, SplitAndTrim(value)...)
+	}
+	return result
 }
 
 // ParseDateParams validates and extracts date-range query parameters.
