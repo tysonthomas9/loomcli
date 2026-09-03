@@ -88,15 +88,7 @@ export function useBlockedIssues(
   const key = useMemo(
     () =>
       `blocked:${workspaceId}:${JSON.stringify({ parentId, priority, type, assignee, limit, sourceReposFilter })}`,
-    [
-      assignee,
-      limit,
-      parentId,
-      priority,
-      sourceReposFilter,
-      type,
-      workspaceId,
-    ],
+    [assignee, limit, parentId, priority, sourceReposFilter, type, workspaceId],
   );
   const fetcher = useCallback(
     (signal: AbortSignal) => getBlockedIssues(workspaceId, filter, { signal }),
