@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/olesho/harness-wrapper/pkg/chat"
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
@@ -189,5 +190,101 @@ func TestWrapWrapperResult_OutputTailNotDuplicatedWhenReasonEmpty(t *testing.T) 
 	// already contain it.
 	if !strings.Contains(invErr.OutputTail, "harness exited with status failed") {
 		t.Errorf("OutputTail %q missing synthesized reason", invErr.OutputTail)
+	}
+}
+
+// Moved here from backend_claude_wall_test.go when the screen-scrape wall
+// detector was removed. The send-time login wall: pkg/chat refuses to type
+// into an onboarding screen and returns chat.ErrAuthRequired, whose text
+// matches none of the residual auth patterns. Without the arm in
+// wrapInvocationError this classified as Unknown and burned the restart
+// budget. It is a typed sentinel, not inferred screen text, which is why the
+// removal keeps it — now via authRequiredInvocationError.
+func TestWrapInvocationErrorAuthRequired(t *testing.T) {
+	err := wrapInvocationError(chat.ErrAuthRequired, "some screen output")
+	var ie *InvocationError
+	if !errors.As(err, &ie) {
+		t.Fatalf("wrapInvocationError returned %T, want *InvocationError", err)
+	}
+	if !strings.Contains(ie.Error(), agenterr.AuthRequiredMarker) {
+		t.Fatalf("error %q missing the auth marker", ie.Error())
+	}
+	ae := agenterr.ClassifyFromOutput(ie.OutputTail, ie.ExitCode, "claude")
+	if ae.Class != agenterr.OutcomeFromHarness(wrapper.ErrAuth) {
+		t.Fatalf("classified %v, want ErrAuth", ae.Class)
+	}
+}
+
+// The keep path, pinned: a wall the HARNESS named is still detected and
+// classified exactly as before the screen-scrape detector was removed. This is
+// the only route to a wall marker that remains.
+func TestTerminalTurnInvocationErrorHarnessNamedWalls(t *testing.T) {
+	tests := []struct {
+		name       string
+		reason     string
+		wantMarker string
+		wantClass  agenterr.Outcome
+	}{
+		{
+			name:       "auth_required",
+			reason:     chat.ReasonAuthRequired,
+			wantMarker: agenterr.AuthRequiredMarker,
+			wantClass:  agenterr.OutcomeFromHarness(wrapper.ErrAuth),
+		},
+		{
+			name:       "usage_limited",
+			reason:     chat.ReasonUsageLimited,
+			wantMarker: agenterr.UsageLimitedMarker,
+			wantClass:  agenterr.OutcomeFromHarness(wrapper.ErrRateLimited),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ie := terminalTurnInvocationError(tc.reason, "some output tail")
+			if ie == nil {
+				t.Fatalf("terminalTurnInvocationError(%q) = nil, want a marked error", tc.reason)
+			}
+			if !strings.Contains(ie.Error(), tc.wantMarker) {
+				t.Fatalf("error %q missing marker %q", ie.Error(), tc.wantMarker)
+			}
+			ae := agenterr.ClassifyFromOutput(ie.OutputTail, ie.ExitCode, "claude")
+			if ae.Class != tc.wantClass {
+				t.Fatalf("classified %v, want %v", ae.Class, tc.wantClass)
+			}
+		})
+	}
+}
+
+// The deliberate behaviour change from removing the screen-scrape detector:
+// an errored turn whose TEXT contains a billing phrase no longer acquires a
+// wall marker. It classifies as an ordinary errored turn — retryable and
+// non-fatal, which is what the code did before the detector existed. Pinned so
+// it is not "fixed" back into a scrape by accident; the correct fix, if a real
+// billing wall is ever observed here, is a harness-named billing reason.
+func TestConversationTurnErrorBillingTextIsUnmarked(t *testing.T) {
+	err := conversationTurnError(chat.Turn{
+		State: chat.TurnStateErrored,
+		Text:  "⏺ Your credit balance is too low to run this request.",
+	})
+	if err == nil {
+		t.Fatal("conversationTurnError returned nil for an errored turn")
+	}
+	for _, marker := range []string{
+		agenterr.BillingWallMarker,
+		agenterr.AuthRequiredMarker,
+		agenterr.UsageLimitedMarker,
+	} {
+		if strings.Contains(err.Error(), marker) {
+			t.Fatalf("errored turn acquired marker %q from its own text: %q", marker, err.Error())
+		}
+	}
+}
+
+// A turn errored for an ordinary reason keeps the plain path: no marker
+// invented for a wall that is not there.
+func TestConversationTurnErrorPlainReasonIsUnmarked(t *testing.T) {
+	err := conversationTurnError(chat.Turn{State: chat.TurnStateErrored, Reason: "stream closed", Text: "partial output"})
+	if strings.Contains(err.Error(), "loom: harness") {
+		t.Fatalf("plain errored turn acquired a marker: %q", err.Error())
 	}
 }

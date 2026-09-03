@@ -67,7 +67,7 @@ func wrapInvocationError(err error, outputTail string) error {
 	// it classified as Unknown and burned the restart budget on a turn that
 	// could not succeed.
 	if errors.Is(err, chat.ErrAuthRequired) {
-		return wallInvocationError(wallAuth, err.Error(), outputTail)
+		return authRequiredInvocationError(err.Error(), outputTail)
 	}
 
 	exitCode := 1
@@ -148,6 +148,35 @@ func agentLaunchFailedInvocationError(reason, outputTail string) *InvocationErro
 	}
 }
 
+// authRequiredInvocationError is the canonical InvocationError for the
+// send-time login wall: pkg/chat returns chat.ErrAuthRequired rather than
+// typing a prompt into an onboarding screen. That is a typed sentinel, not
+// text inferred from a rendered screen, which is why it survives the removal
+// of the screen-scrape detector. It cannot be routed through
+// terminalTurnInvocationError: that matches on chat.ReasonAuthRequired, and
+// ErrAuthRequired's text does not contain it.
+func authRequiredInvocationError(reason, outputTail string) *InvocationError {
+	msg := strings.TrimSpace(reason)
+	if msg == "" {
+		msg = "harness requires authentication"
+	}
+	combined := agenterr.AuthRequiredMarker + ": " + msg
+	evidence := strings.TrimSpace(outputTail)
+	if evidence == "" {
+		evidence = combined
+	} else if !strings.Contains(evidence, combined) {
+		evidence = combined + "\n" + evidence
+	}
+	return &InvocationError{
+		Err:        errors.New(combined),
+		OutputTail: evidence,
+		// The marker text is the signal the outer classifier reads; the exit
+		// code only has to be non-zero. 1 keeps it uniform with the other
+		// marker-bearing paths.
+		ExitCode: 1,
+	}
+}
+
 // terminalTurnInvocationError returns the canonical InvocationError for a turn
 // the HARNESS declared terminal, carrying the marker that lets the outer
 // classifier act on the harness's verdict instead of re-deriving it from prose.
@@ -159,9 +188,9 @@ func agentLaunchFailedInvocationError(reason, outputTail string) *InvocationErro
 // the guessing this removes.
 //
 // Returns nil when the reason is not one of the two, so callers can fall
-// through to their existing handling with a single nil check. Its sibling
-// wallInvocationError (terminal_wall.go) covers the other direction: a wall
-// loom detected itself because the harness named no reason at all.
+// through to their existing handling with a single nil check. It is now the
+// ONLY way a wall marker is raised from a turn: loom no longer infers a wall
+// from rendered screen or turn text.
 func terminalTurnInvocationError(reason, outputTail string) *InvocationError {
 	var marker string
 	switch {
