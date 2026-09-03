@@ -16,7 +16,9 @@ export TF_DATA_DIR="$TF_ROOT/.terraform-data/list"
   -backend-config="prefix=loom-gcp" >/dev/null
 
 # The label filter is mandatory: never enumerate unrelated project VMs.
-VM_JSON="$(gcloud compute instances list --project="$PROJECT" \
+# --verbosity=error: with no stack VMs gcloud warns that the label key matched
+# nothing, which is the normal empty case, not a problem to report.
+VM_JSON="$(gcloud compute instances list --project="$PROJECT" --verbosity=error \
   --filter="labels.loom-stack:*" --format=json)"
 WORKSPACES="$("$TF_BIN" -chdir="$TF_ROOT" workspace list)"
 export VM_JSON WORKSPACES STACK_FILE
