@@ -53,6 +53,14 @@ fleet-db resource `session-evals` (generic control-plane kind, id field
 
 ## Chosen architecture (pragmatic 3-phase + versioned evals)
 
+*(Amendment, 2026-07-20, LOOMCLI-86: v1's bridge-minted 1:1
+legacy `flue-<taskRunID>` session mechanics (`startFlueTaskSession`,
+`internal/driver/task_bridge_session.go`) are superseded post-v1 by
+`docs/design/task-plane-session-model.md`. That map's migration slice deletes the
+bridge mint and updates v1 e2e expectations in
+`test/local-mode/verify-evals.sh`, while the doctor `transcript_ref` check
+stays task-scoped and unchanged.)*
+
 Selected over a minimal-changes variant and a heavier clean-architecture
 variant after a three-way blueprint comparison. Key properties:
 
@@ -271,7 +279,7 @@ fixes the platform instead of reading around it:
   fleet-db-side filters (terminal state, explicit `kind == task`
   (LOOMCLI-63), no `eval_status` stamp for the current `prompt_version`,
   lookback window, sampling). A pure metadata check — no per-candidate disk
-  stats — and one key covers both daemon-path and flue-path sessions.
+  stats — and one key covers both daemon-path and task-plane sessions.
   Rejected alternatives: `transcript_path` metadata presence (stamped at
   session *creation* regardless of whether transcript bytes ever land, so it
   admits transcript-less sessions) and a driver-op disk-stat "fetchability"

@@ -67,12 +67,14 @@ type SessionService interface {
 }
 
 type WorkspaceSessionListOptions struct {
-	Since   time.Time
-	Until   time.Time
-	Status  domain.AgentSessionStatus
-	AgentID string
-	Kind    domain.AgentSessionKind
-	Limit   int
+	Since     time.Time
+	Until     time.Time
+	Status    domain.AgentSessionStatus
+	AgentID   string
+	TaskRunID string
+	Tags      []string
+	Kind      domain.AgentSessionKind
+	Limit     int
 }
 
 // SessionListItem extends a session record with computed UI fields.
@@ -82,6 +84,10 @@ type SessionListItem struct {
 	HasTranscript bool                    `json:"has_transcript"`
 	HasDiff       bool                    `json:"has_diff"`
 	Kind          domain.AgentSessionKind `json:"kind,omitempty"`
+	TaskRunID     string                  `json:"task_run_id"`
+	InvocationKey string                  `json:"invocation_key"`
+	Attempt       int                     `json:"attempt"`
+	Tags          []string                `json:"tags,omitempty"`
 	// Eval summary for the Traces list: EvalStatus mirrors the session's
 	// eval_status metadata stamp (done|failed); EvalScores is joined from the
 	// session's newest eval record when one exists.
@@ -92,7 +98,33 @@ type SessionListItem struct {
 // SessionDetailData extends session metadata with computed UI fields.
 type SessionDetailData struct {
 	sessions.SessionMetadata
-	IsActive bool `json:"is_active"`
+	IsActive        bool   `json:"is_active"`
+	JudgeSessionID  string `json:"judge_session_id"`
+	JudgedSessionID string `json:"judged_session_id"`
+}
+
+// WorkspaceSessionScoreDimensionService is an optional extension used by the
+// Traces handler to compute dimensions independently of its returned page.
+type WorkspaceSessionScoreDimensionService interface {
+	ListWorkspaceSessionScoreDimensions(ctx context.Context, wsID string, opts WorkspaceSessionListOptions) ([]string, error)
+}
+
+// WorkspaceSessionRunService supplies the backend data needed for one task-run
+// trace page without requiring the frontend to join session metadata itself.
+type WorkspaceSessionRunService interface {
+	GetWorkspaceTraceRun(ctx context.Context, wsID, taskRunID string) (*WorkspaceTraceRunData, error)
+}
+
+type WorkspaceTraceRunData struct {
+	TaskRunID       string            `json:"task_run_id"`
+	TaskRun         *domain.TaskRun   `json:"task_run,omitempty"`
+	TaskRunMissing  bool              `json:"task_run_missing"`
+	TaskID          string            `json:"task_id,omitempty"`
+	AttemptCount    int               `json:"attempt_count"`
+	FilesChanged    int               `json:"files_changed"`
+	TotalTokens     int64             `json:"total_tokens"`
+	DurationSeconds float64           `json:"duration_seconds"`
+	Sessions        []SessionListItem `json:"sessions"`
 }
 
 // SessionScrollbackResult contains scrollback file content.

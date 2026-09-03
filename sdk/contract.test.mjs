@@ -103,6 +103,7 @@ test("contract: every op sends only frozen camelCase wire fields to its frozen p
     await client.evals.getTranscript({ sessionId: "session-1", promptVersion: "v1" });
     await client.evals.putMetric({
       sessionId: "session-1",
+      judgeSessionId: "judge-session-1",
       promptVersion: "v1",
       status: "done",
       eval: {

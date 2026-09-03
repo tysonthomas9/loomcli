@@ -2,19 +2,12 @@ package domain
 
 import "time"
 
-type SessionEvalScores struct {
-	OutcomeSuccess       int `json:"outcome_success"`
-	InstructionAdherence int `json:"instruction_adherence"`
-	Efficiency           int `json:"efficiency"`
-	ToolUseQuality       int `json:"tool_use_quality"`
-}
+// SessionEvalScores is dimension-keyed. Legacy fixed-key records used the same
+// JSON object representation, so decoding them into this map is compatible.
+type SessionEvalScores map[string]int
 
-type SessionEvalScoreRationales struct {
-	OutcomeSuccess       string `json:"outcome_success"`
-	InstructionAdherence string `json:"instruction_adherence"`
-	Efficiency           string `json:"efficiency"`
-	ToolUseQuality       string `json:"tool_use_quality"`
-}
+// SessionEvalScoreRationales is keyed by the corresponding score dimension.
+type SessionEvalScoreRationales map[string]string
 
 type SessionEvalImprovementCategories struct {
 	Harness []string `json:"harness"`
@@ -42,6 +35,7 @@ type SessionEval struct {
 	JudgeSummary          string                           `json:"judge_summary"`
 	JudgeModel            string                           `json:"judge_model"`
 	JudgePromptVersion    string                           `json:"judge_prompt_version"`
+	JudgeSessionID        string                           `json:"judge_session_id,omitempty"`
 	EvalCost              SessionEvalCost                  `json:"eval_cost"`
 	SessionStartedAt      time.Time                        `json:"session_started_at"`
 	SessionEndedAt        time.Time                        `json:"session_ended_at"`

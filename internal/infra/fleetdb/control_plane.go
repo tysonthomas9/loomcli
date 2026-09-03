@@ -183,6 +183,9 @@ func agentSessionListQuery(filter store.AgentSessionFilter) url.Values {
 	if filter.TaskRunID != "" {
 		q.Set("task_run_id", filter.TaskRunID)
 	}
+	for _, tag := range filter.Tags {
+		q.Add("tag", tag)
+	}
 	if filter.Status != "" {
 		q.Set("status", string(filter.Status))
 	}

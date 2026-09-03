@@ -455,6 +455,9 @@ func sessionMatches(s *domain.AgentSession, filter store.AgentSessionFilter) boo
 	if filter.TaskRunID != "" && s.TaskRunID != filter.TaskRunID {
 		return false
 	}
+	if !sessionHasAllTags(s.Tags, filter.Tags) {
+		return false
+	}
 	if filter.Status != "" && s.Status != filter.Status {
 		return false
 	}
@@ -469,6 +472,22 @@ func sessionMatches(s *domain.AgentSession, filter store.AgentSessionFilter) boo
 	}
 	if filter.ParentSessionID != "" && s.ParentSessionID != filter.ParentSessionID {
 		return false
+	}
+	return true
+}
+
+func sessionHasAllTags(actual, required []string) bool {
+	if len(required) == 0 {
+		return true
+	}
+	have := make(map[string]struct{}, len(actual))
+	for _, tag := range actual {
+		have[tag] = struct{}{}
+	}
+	for _, tag := range required {
+		if _, ok := have[tag]; !ok {
+			return false
+		}
 	}
 	return true
 }

@@ -175,6 +175,19 @@ func TestPutMetricDoneCreatesRecordAndClearsRequested(t *testing.T) {
 	}
 }
 
+func TestPutMetricStampsProvidedJudgeSessionID(t *testing.T) {
+	ctx := context.Background()
+	st := evalStoreFixture(t)
+	seedEvalSession(t, st, "WS", "sess-judge-link", time.Now().UTC(), map[string]string{MetadataTranscriptRef: "artifact://t"})
+	if _, _, err := PutMetric(ctx, st, "WS", PutMetricParams{SessionID: "sess-judge-link", JudgeSessionID: "judge-session-1", PromptVersion: "v1", Status: EvalStatusDone, Eval: validPayload()}); err != nil {
+		t.Fatalf("PutMetric: %v", err)
+	}
+	record, err := st.SessionEvals().Get(ctx, "WS", "eval-sess-judge-link-v1")
+	if err != nil || record.JudgeSessionID != "judge-session-1" {
+		t.Fatalf("judge linkage = %+v, err=%v", record, err)
+	}
+}
+
 func TestPutMetricConflictIsIdempotentAndStampsDone(t *testing.T) {
 	ctx := context.Background()
 	st := evalStoreFixture(t)

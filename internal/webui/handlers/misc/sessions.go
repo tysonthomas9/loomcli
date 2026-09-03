@@ -1,6 +1,7 @@
 package misc
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -49,9 +50,17 @@ type WorkspaceSessionListResponse struct {
 
 // WorkspaceSessionListData contains workspace-scoped sessions and truncation metadata.
 type WorkspaceSessionListData struct {
-	Sessions []service.SessionListItem `json:"sessions"`
-	Total    int                       `json:"total"`
-	Limit    int                       `json:"limit"`
+	Sessions        []service.SessionListItem `json:"sessions"`
+	Total           int                       `json:"total"`
+	Limit           int                       `json:"limit"`
+	ScoreDimensions []string                  `json:"score_dimensions"`
+}
+
+// WorkspaceTraceRunResponse is the data envelope for a task-run Traces view.
+type WorkspaceTraceRunResponse struct {
+	Success bool                           `json:"success"`
+	Data    *service.WorkspaceTraceRunData `json:"data,omitempty"`
+	Error   string                         `json:"error,omitempty"`
 }
 
 // SessionDetailResponse is the JSON envelope for a single session's metadata.
@@ -114,24 +123,69 @@ func HandleListWorkspaceSessions(svc service.SessionService) http.HandlerFunc {
 		if items == nil {
 			items = []service.SessionListItem{}
 		}
+		dimensions, err := workspaceSessionScoreDimensions(r.Context(), svc, wsID, opts)
+		if err != nil {
+			writeSessionServiceError(w, err, WorkspaceSessionListResponse{})
+			return
+		}
 		handler.WriteJSON(w, http.StatusOK, WorkspaceSessionListResponse{
 			Success: true,
 			Data: &WorkspaceSessionListData{
-				Sessions: items,
-				Total:    total,
-				Limit:    opts.Limit,
+				Sessions:        items,
+				Total:           total,
+				Limit:           opts.Limit,
+				ScoreDimensions: dimensions,
 			},
 		})
 	}
 }
 
+func workspaceSessionScoreDimensions(ctx context.Context, svc service.SessionService, wsID string, opts service.WorkspaceSessionListOptions) ([]string, error) {
+	dimensionSvc, ok := svc.(service.WorkspaceSessionScoreDimensionService)
+	if !ok {
+		return []string{}, nil
+	}
+	dimensions, err := dimensionSvc.ListWorkspaceSessionScoreDimensions(ctx, wsID, opts)
+	if err != nil {
+		return nil, err
+	}
+	if dimensions == nil {
+		dimensions = []string{}
+	}
+	return dimensions, nil
+}
+
+// HandleGetWorkspaceTraceRun returns backend-composed data for one task-run's
+// Traces page. The route intentionally does not perform client metadata joins.
+func HandleGetWorkspaceTraceRun(svc service.WorkspaceSessionRunService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		data, err := svc.GetWorkspaceTraceRun(r.Context(), wsID, r.PathValue("taskRunId"))
+		if err != nil {
+			writeSessionServiceError(w, err, WorkspaceTraceRunResponse{})
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, WorkspaceTraceRunResponse{Success: true, Data: data})
+	}
+}
+
+func OptionalWorkspaceTraceRunHandler(svc service.SessionService) http.HandlerFunc {
+	runSvc, ok := svc.(service.WorkspaceSessionRunService)
+	if !ok {
+		return nil
+	}
+	return HandleGetWorkspaceTraceRun(runSvc)
+}
+
 func parseWorkspaceSessionListOptions(r *http.Request) (service.WorkspaceSessionListOptions, error) {
 	q := r.URL.Query()
 	opts := service.WorkspaceSessionListOptions{
-		Limit:   workspaceSessionsDefaultLimit,
-		Status:  domain.AgentSessionStatus(strings.TrimSpace(q.Get("status"))),
-		AgentID: strings.TrimSpace(q.Get("agent_id")),
-		Kind:    domain.AgentSessionKind(strings.TrimSpace(q.Get("kind"))),
+		Limit:     workspaceSessionsDefaultLimit,
+		Status:    domain.AgentSessionStatus(strings.TrimSpace(q.Get("status"))),
+		AgentID:   strings.TrimSpace(q.Get("agent_id")),
+		TaskRunID: strings.TrimSpace(q.Get("task_run_id")),
+		Tags:      workspaceSessionTags(q["tag"]),
+		Kind:      domain.AgentSessionKind(strings.TrimSpace(q.Get("kind"))),
 	}
 	sinceRaw := strings.TrimSpace(q.Get("since"))
 	untilRaw := strings.TrimSpace(q.Get("until"))
@@ -167,6 +221,16 @@ func parseWorkspaceSessionListOptions(r *http.Request) (service.WorkspaceSession
 	return opts, nil
 }
 
+func workspaceSessionTags(raw []string) []string {
+	tags := make([]string, 0, len(raw))
+	for _, value := range raw {
+		if tag := strings.TrimSpace(value); tag != "" {
+			tags = append(tags, tag)
+		}
+	}
+	return tags
+}
+
 func writeSessionServiceError(w http.ResponseWriter, err error, response any) {
 	var svcErr *service.ServiceError
 	status := http.StatusInternalServerError
@@ -177,6 +241,10 @@ func writeSessionServiceError(w http.ResponseWriter, err error, response any) {
 	}
 	switch resp := response.(type) {
 	case WorkspaceSessionListResponse:
+		resp.Success = false
+		resp.Error = msg
+		handler.WriteJSON(w, status, resp)
+	case WorkspaceTraceRunResponse:
 		resp.Success = false
 		resp.Error = msg
 		handler.WriteJSON(w, status, resp)
