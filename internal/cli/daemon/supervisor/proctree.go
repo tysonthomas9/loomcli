@@ -2,11 +2,13 @@ package supervisor
 
 import (
 	"log/slog"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
 )
 
 // procInfo is a snapshot of one process for tree-walking.
@@ -154,7 +156,7 @@ func findWorktreeOrphans(worktreePaths []string) []orphanCandidate {
 	// Normalize worktree paths so prefix matching is robust to trailing slashes
 	// and macOS `/var` → `/private/var` symlink redirection (lsof reports the
 	// resolved path; t.TempDir and many configs use the symlinked one).
-	norm := make([]string, 0, len(worktreePaths))
+	norm := make([]normalizedWorktree, 0, len(worktreePaths))
 	for _, w := range worktreePaths {
 		w = strings.TrimRight(w, "/")
 		if w == "" {
@@ -163,7 +165,9 @@ func findWorktreeOrphans(worktreePaths []string) []orphanCandidate {
 		if resolved, err := filepath.EvalSymlinks(w); err == nil && resolved != "" {
 			w = strings.TrimRight(resolved, "/")
 		}
-		norm = append(norm, w)
+		// Probe after EvalSymlinks: the probe must measure the volume the
+		// kernel will actually report a cwd on, not the pre-resolution one.
+		norm = append(norm, normalizedWorktree{Path: w, CaseInsensitive: pathIsCaseInsensitive(w)})
 	}
 	if len(norm) == 0 {
 		return nil
@@ -183,8 +187,8 @@ func findWorktreeOrphans(worktreePaths []string) []orphanCandidate {
 		}
 		cwd = strings.TrimRight(cwd, "/")
 		for _, w := range norm {
-			if cwd == w || strings.HasPrefix(cwd, w+"/") {
-				out = append(out, orphanCandidate{PID: p.PID, PGID: p.PGID, CWD: cwd, Worktree: w})
+			if pathMatches(cwd, w.Path, w.CaseInsensitive) {
+				out = append(out, orphanCandidate{PID: p.PID, PGID: p.PGID, CWD: cwd, Worktree: w.Path})
 				break
 			}
 		}
@@ -248,4 +252,69 @@ func (s *Supervisor) killOrphanedWorktreeProcesses(worktreePaths []string) int {
 		_ = syscall.Kill(-pgid, syscall.SIGKILL)
 	}
 	return len(orphans)
+}
+
+// normalizedWorktree is a worktree path after trailing-slash trimming and
+// symlink resolution, together with whether its filesystem compares names
+// case-insensitively. The kernel reports a process cwd in the directory's
+// canonical on-disk case, which need not match the case in our config.
+type normalizedWorktree struct {
+	Path            string
+	CaseInsensitive bool
+}
+
+// pathMatches reports whether cwd is worktree or a descendant of it. Both
+// arguments must already be trailing-slash-trimmed. When caseInsensitive is
+// true the comparison folds case, because the filesystem does. This is a
+// comparison-only transform: callers keep the original spellings for logging.
+func pathMatches(cwd, worktree string, caseInsensitive bool) bool {
+	if caseInsensitive {
+		cwd, worktree = strings.ToLower(cwd), strings.ToLower(worktree)
+	}
+	return cwd == worktree || strings.HasPrefix(cwd, worktree+"/")
+}
+
+// pathIsCaseInsensitive reports whether path lives on a filesystem that
+// compares names case-insensitively. It flips the case of the first cased
+// letter in the rightmost path component that has one and asks whether that
+// spelling names the same directory. Returns false when it cannot tell —
+// the exact comparison is always the safe answer.
+func pathIsCaseInsensitive(path string) bool {
+	orig, err := os.Lstat(path)
+	if err != nil {
+		return false
+	}
+	// Walk upwards until a component with a cased rune is found; a path made
+	// only of digits/symbols (a numeric TempDir suffix, say) has no case for
+	// the filesystem to fold, so exact matching is trivially correct.
+	dir, base := filepath.Split(path)
+	tail := ""
+	for base != "" {
+		if flipped, ok := flipFirstCasedRune(base); ok {
+			alt := filepath.Join(dir, flipped, tail)
+			st, err := os.Lstat(alt)
+			// SameFile rather than a bare stat success: on a case-sensitive
+			// filesystem a genuinely different sibling may exist under the
+			// flipped spelling. Directories cannot have hard links, so a true
+			// here is only ever the filesystem folding case.
+			return err == nil && os.SameFile(orig, st)
+		}
+		tail = filepath.Join(base, tail)
+		dir, base = filepath.Split(strings.TrimRight(dir, "/"))
+	}
+	return false
+}
+
+// flipFirstCasedRune returns s with the case of its first cased rune flipped,
+// and whether s had one at all.
+func flipFirstCasedRune(s string) (string, bool) {
+	for i, r := range s {
+		switch {
+		case unicode.IsUpper(r):
+			return s[:i] + string(unicode.ToLower(r)) + s[i+len(string(r)):], true
+		case unicode.IsLower(r):
+			return s[:i] + string(unicode.ToUpper(r)) + s[i+len(string(r)):], true
+		}
+	}
+	return s, false
 }
