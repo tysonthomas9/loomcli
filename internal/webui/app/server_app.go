@@ -44,7 +44,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	initLogger(config.Logger)
 
-	app := &Server{config: config, startedAt: time.Now()}
+	app := &Server{config: config, sessionOpenRegistry: config.SessionOpenRegistry, startedAt: time.Now()}
 
 	var cleanups []func()
 	defer func() {

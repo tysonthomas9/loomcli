@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -26,27 +25,12 @@ func taskRunRetryDecision(claimed *domain.TaskRun, opts executeClaimedTaskRunOpt
 	if maxAttempts < 1 {
 		maxAttempts = 1
 	}
-	attempt := taskRunAttempt(claimed) + 1
+	attempt := store.TaskRunClaimAttempt(claimed)
 	decision := taskRunRetryDecisionResult{Attempt: attempt, MaxAttempts: maxAttempts}
 	if completion.Status == domain.TaskRunFailed && attempt < maxAttempts {
 		decision.Retry = true
 	}
 	return decision
-}
-
-func taskRunAttempt(run *domain.TaskRun) int {
-	if run == nil || run.RuntimeMetadata == nil {
-		return 0
-	}
-	raw := strings.TrimSpace(run.RuntimeMetadata["scheduler_attempt"])
-	if raw == "" {
-		return 0
-	}
-	attempt, err := strconv.Atoi(raw)
-	if err != nil || attempt < 0 {
-		return 0
-	}
-	return attempt
 }
 
 func requeueClaimedTaskRun(ctx context.Context, s store.Store, claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, execResult TaskExecResult, completion taskExecCompletion, metadata map[string]string, retry taskRunRetryDecisionResult) (*domain.TaskRun, error) {
@@ -112,7 +96,7 @@ func taskRunBlockedMetadata(claimed *domain.TaskRun, opts executeClaimedTaskRunO
 	if maxAttempts < 1 {
 		maxAttempts = 1
 	}
-	return schedulerMetadata(metadata, "blocked", taskRunAttempt(claimed)+1, maxAttempts, completion)
+	return schedulerMetadata(metadata, "blocked", store.TaskRunClaimAttempt(claimed), maxAttempts, completion)
 }
 
 // schedulerMetadata stamps the retry-then-block scheduler state onto a copy of

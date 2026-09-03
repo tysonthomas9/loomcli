@@ -206,7 +206,7 @@ func (s *agentSessionStore) Open(_ context.Context, run store.SessionRunContext,
 	if taskRun.Status.IsTerminal() {
 		return store.SessionRef{}, lifecycleError(store.SessionLifecycleErrTaskRunTerminal, domain.ErrConflict)
 	}
-	if run.Attempt != taskRunAttemptForSession(taskRun) {
+	if run.Attempt != store.TaskRunClaimAttempt(taskRun) {
 		return store.SessionRef{}, lifecycleError(store.SessionLifecycleErrAttemptMismatch, domain.ErrConflict)
 	}
 	return s.openSessionLocked(run, descriptor)
@@ -375,16 +375,6 @@ func (s *agentSessionStore) unlockLifecycle() {
 	if s.lifecycleMu != nil {
 		s.lifecycleMu.Unlock()
 	}
-}
-
-func taskRunAttemptForSession(run *domain.TaskRun) int {
-	// scheduler_attempt is persisted when an attempt requeues; the live claim
-	// is therefore the completed/requeued count plus one.
-	attempt, err := strconv.Atoi(run.RuntimeMetadata["scheduler_attempt"])
-	if err != nil || attempt < 0 {
-		attempt = 0
-	}
-	return attempt + 1
 }
 
 func sessionDescriptorMatches(session *domain.AgentSession, descriptor store.SessionDescriptor) bool {

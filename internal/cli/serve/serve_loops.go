@@ -55,6 +55,38 @@ func startStaleTaskSweeper(ctx context.Context, st store.Store) {
 	}()
 }
 
+// startTaskRunSessionReconciliationLoop settles invocation sessions whose
+// parent TaskRun is already terminal after a bridge crash. It complements the
+// synchronous bridge reconciler and the stale-task same-pass hook.
+func startTaskRunSessionReconciliationLoop(ctx context.Context, st store.Store) {
+	if st == nil {
+		return
+	}
+	loop := &driverexecutor.TaskRunSessionReconciliationLoop{
+		Store:        st,
+		WorkspaceKey: os.Getenv(bootstrap.EnvWorkspace),
+		Limit:        taskRunSessionReconcileLimit(),
+	}
+	interval := taskRunSessionReconcileInterval()
+	slog.Info("Task-run session reconciliation loop enabled", "workspace", loop.WorkspaceKey, "interval", interval, "limit", loop.Limit)
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			if result, err := loop.RunOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				slog.Error("task-run session reconciliation loop failed", "err", err)
+			} else if result != nil && result.Settled > 0 {
+				slog.Info("task-run session reconciliation loop settled sessions", "count", result.Settled)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+}
+
 // startOutboxDispatcher launches the always-on server-side outbox delivery
 // loop. Like the stale task sweeper it is NOT gated behind
 // LOOM_DRIVER_EXECUTOR: lead-notification delivery with retry/backoff is
@@ -287,6 +319,14 @@ func triggerCronInterval() time.Duration {
 // day).
 func driverStaleTaskMaxAge() time.Duration {
 	return time.Duration(boundedIntEnv(envLoomDriverStaleTaskMaxAge, 300, 86400)) * time.Second
+}
+
+func taskRunSessionReconcileInterval() time.Duration {
+	return time.Duration(boundedIntEnv(envLoomSessionReconcileInterval, 60, 3600)) * time.Second
+}
+
+func taskRunSessionReconcileLimit() int {
+	return boundedIntEnv(envLoomSessionReconcileLimit, 500, 10000)
 }
 
 // issueBridgeInterval reads the issue-journal bridge poll cadence in seconds

@@ -3,6 +3,7 @@ package driver
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -45,6 +46,7 @@ type StaleTaskSweeper struct {
 type StaleTaskSweepResult struct {
 	Recovered           int
 	SkippedFresh        int
+	ReconciledSessions  int
 	RecoveredTaskRunIDs []string
 }
 
@@ -77,7 +79,7 @@ func (s *StaleTaskSweeper) sweepWorkspace(ctx context.Context, ws string, staleB
 		if run == nil {
 			continue
 		}
-		result, err := s.Store.DriverRuns().RecoverStaleTaskRuns(ctx, ws, run.RunID, store.StaleTaskRunRecovery{
+		result, reconciled, err := RecoverStaleTaskRunsAndSessions(ctx, s.Store, ws, run.RunID, store.StaleTaskRunRecovery{
 			StaleBefore:  staleBefore,
 			ErrorClass:   staleTaskRunErrorClass,
 			ErrorMessage: staleTaskRunErrorMessage,
@@ -88,8 +90,42 @@ func (s *StaleTaskSweeper) sweepWorkspace(ctx context.Context, ws string, staleB
 		out.Recovered += result.Recovered
 		out.SkippedFresh += result.SkippedFresh
 		out.RecoveredTaskRunIDs = append(out.RecoveredTaskRunIDs, result.RecoveredTaskRunIDs...)
+		out.ReconciledSessions += reconciled
 	}
 	return nil
+}
+
+// RecoverStaleTaskRunsAndSessions is the shared stale-recovery primitive used
+// by the background sweeper and the manual HTTP/CLI operations. Session
+// settlement deliberately happens in the same pass as TaskRun recovery.
+func RecoverStaleTaskRunsAndSessions(ctx context.Context, st store.Store, ws, driverRunID string, recovery store.StaleTaskRunRecovery) (*store.StaleTaskRunRecoveryResult, int, error) {
+	if st == nil {
+		return nil, 0, fmt.Errorf("store required: %w", domain.ErrInvalid)
+	}
+	result, err := st.DriverRuns().RecoverStaleTaskRuns(ctx, ws, driverRunID, recovery)
+	if err != nil {
+		return nil, 0, err
+	}
+	return result, reconcileRecoveredTaskRunSessions(ctx, st, ws, result.RecoveredTaskRunIDs), nil
+}
+
+func reconcileRecoveredTaskRunSessions(ctx context.Context, st store.Store, ws string, taskRunIDs []string) int {
+	reconciler := TaskRunSessionReconciler{Store: st}
+	settled := 0
+	for _, taskRunID := range taskRunIDs {
+		run, err := st.TaskRuns().Get(ctx, ws, taskRunID)
+		if err != nil {
+			slog.WarnContext(ctx, "load stale task run for session reconciliation failed", "task_run_id", taskRunID, "err", err)
+			continue
+		}
+		result, err := reconciler.ReconcileTerminalTaskRun(ctx, run, SessionFinalizedByStale, SessionFinalizedByStale)
+		if err != nil {
+			slog.WarnContext(ctx, "reconcile stale task-run sessions failed", "task_run_id", taskRunID, "err", err)
+			continue
+		}
+		settled += result.Settled
+	}
+	return settled
 }
 
 // workspaceKeys resolves the sweep targets: the configured workspace, or

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -104,6 +106,77 @@ func newHarnessWithConfig(t *testing.T, localSettingsDir, runner string) *testHa
 	h.server = httptest.NewServer(mux)
 	t.Cleanup(h.server.Close)
 	return h
+}
+
+func TestSessionOpenPostsServeRegistryCallback(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	_, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+		WorkspaceKey: "WS", TaskRunID: "task-run-callback", TaskID: "TASK-1",
+		Status: domain.TaskRunRunning, NodeID: "node-1", LeaseID: "lease-1", FencingToken: 42,
+		RuntimeMetadata: map[string]string{"bridge_task_plane": "true"},
+	})
+	if err != nil {
+		t.Fatalf("Create task run: %v", err)
+	}
+	registry := driverpkg.NewTaskRunSessionOpenRegistry()
+	module := NewModule(Config{Store: st, OnSessionOpen: registry.Record})
+	body, _ := json.Marshal(map[string]any{"invocationKey": "agent", "backend": "codex", "model": "gpt-5"})
+	_, err = module.sessionOpen(ctx, "WS", leaseIdentity{
+		TaskRunID: "task-run-callback", NodeID: "node-1", LeaseID: "lease-1", LeaseToken: "token", FencingToken: 42,
+	}, body)
+	if err != nil {
+		t.Fatalf("sessionOpen: %v", err)
+	}
+	live := registry.Live(store.SessionRunContext{WorkspaceKey: "WS", TaskRunID: "task-run-callback", Attempt: 1, FencingToken: 42})
+	if len(live) != 1 || live[0].SessionID != "task-run-callback-a1-agent" {
+		t.Fatalf("registry Live = %+v", live)
+	}
+	_, err = st.TaskRuns().Create(ctx, store.TaskRunCreate{
+		WorkspaceKey: "WS", TaskRunID: "task-run-non-bridge", TaskID: "TASK-2",
+		Status: domain.TaskRunRunning, NodeID: "node-1", LeaseID: "lease-2", FencingToken: 43,
+	})
+	if err != nil {
+		t.Fatalf("Create non-bridge task run: %v", err)
+	}
+	_, err = module.sessionOpen(ctx, "WS", leaseIdentity{
+		TaskRunID: "task-run-non-bridge", NodeID: "node-1", LeaseID: "lease-2", LeaseToken: "token", FencingToken: 43,
+	}, body)
+	if err != nil {
+		t.Fatalf("non-bridge sessionOpen: %v", err)
+	}
+	nonBridgeLive := registry.Live(store.SessionRunContext{
+		WorkspaceKey: "WS", TaskRunID: "task-run-non-bridge", Attempt: 1, FencingToken: 43,
+	})
+	if len(nonBridgeLive) != 0 {
+		t.Fatalf("non-bridge session leaked into registry: %+v", nonBridgeLive)
+	}
+}
+
+func TestTaskRunCompleteRejectsBridgeLeafSelfComplete(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	_, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+		WorkspaceKey: "WS", TaskRunID: "task-run-bridge", TaskID: "TASK-1",
+		Status: domain.TaskRunRunning, NodeID: "node-1", LeaseID: "lease-1", FencingToken: 42,
+		RuntimeMetadata: map[string]string{"bridge_task_plane": "true"},
+	})
+	if err != nil {
+		t.Fatalf("Create task run: %v", err)
+	}
+	module := NewModule(Config{Store: st})
+	_, err = module.complete(ctx, "WS", leaseIdentity{
+		TaskRunID: "task-run-bridge", NodeID: "node-1", LeaseID: "lease-1", LeaseToken: "token", FencingToken: 42,
+	}, []byte(`{"status":"completed"}`))
+	if !errors.Is(err, domain.ErrInvalidTransition) {
+		t.Fatalf("complete err = %v, want ErrInvalidTransition", err)
+	}
+	_, err = module.complete(ctx, "WS", leaseIdentity{
+		TaskRunID: "task-run-bridge", NodeID: "node-1", LeaseID: "lease-1", LeaseToken: "token", FencingToken: 41,
+	}, []byte(`{"status":"completed"}`))
+	if !errors.Is(err, domain.ErrNotOwner) {
+		t.Fatalf("stale bridge complete err = %v, want ErrNotOwner", err)
+	}
 }
 
 // identity is the header tuple a request authenticates with; the zero-value

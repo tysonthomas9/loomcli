@@ -50,6 +50,7 @@ type Server struct {
 	mux                 *http.ServeMux
 	wsModules           []wsModule // workspace-scoped route modules (registered on wsMux)
 	connectorDispatcher *connector.Dispatcher
+	sessionOpenRegistry *webui.TaskRunSessionOpenRegistry
 
 	// Connection pools
 	pool      appinfra.Pool // may be nil if daemon unavailable at startup

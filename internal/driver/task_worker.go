@@ -38,6 +38,9 @@ type TaskWorker struct {
 	// LocalSettingsDir is passed through to HostBridgeTaskExecutor so bundled
 	// local-task-runner can read desktop-local credentials/settings.
 	LocalSettingsDir string
+	// SessionOpenRegistry is the serve-process live callback view. Standalone
+	// workers leave it nil and use store-only session discovery.
+	SessionOpenRegistry *TaskRunSessionOpenRegistry
 	// WorktreeResolver resolves per-task-run local worktrees for bundled local
 	// task runners. Nil uses the machine-local workspace cache.
 	WorktreeResolver TaskWorktreeResolver
@@ -86,12 +89,13 @@ func (w *TaskWorker) runOnceInWorkspace(ctx context.Context, ws, workDir string)
 	executor := w.Executor
 	if executor == nil {
 		executor = HostBridgeTaskExecutor{
-			Store:            w.Store,
-			WorktreePath:     workDir,
-			APIBaseURL:       w.APIBaseURL,
-			LocalSettingsDir: w.LocalSettingsDir,
-			WorktreeResolver: firstNonNilTaskWorktreeResolver(w.WorktreeResolver, LocalTaskWorktreeResolver{Store: w.Store, Lineage: DefaultStackLineageLookup()}),
-			StackStore:       DefaultStackStore(),
+			Store:             w.Store,
+			SessionReconciler: &TaskRunSessionReconciler{Store: w.Store, OpenRegistry: w.SessionOpenRegistry},
+			WorktreePath:      workDir,
+			APIBaseURL:        w.APIBaseURL,
+			LocalSettingsDir:  w.LocalSettingsDir,
+			WorktreeResolver:  firstNonNilTaskWorktreeResolver(w.WorktreeResolver, LocalTaskWorktreeResolver{Store: w.Store, Lineage: DefaultStackLineageLookup()}),
+			StackStore:        DefaultStackStore(),
 		}
 	}
 	outcome, err := ClaimAndExecuteTaskRunWithResult(ctx, w.Store, TaskRunWorkerOptions{
