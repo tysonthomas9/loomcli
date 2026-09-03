@@ -56,6 +56,7 @@ func NewIssueModules(issueSvc service.IssueService, sessSvc service.SessionServi
 			GetSessionTranscript:                  misc.HandleGetSessionTranscript(sessSvc),
 			GetSessionDiff:                        misc.HandleGetSessionDiff(sessSvc),
 			ListWorkspaceSessions:                 misc.HandleListWorkspaceSessions(sessSvc),
+			GetWorkspaceTraceRun:                  misc.OptionalWorkspaceTraceRunHandler(sessSvc),
 			GetWorkspaceSession:                   misc.HandleGetWorkspaceSession(sessSvc),
 			GetWorkspaceSessionTranscript:         misc.HandleGetWorkspaceSessionTranscript(sessSvc),
 			GetWorkspaceSessionDiff:               misc.HandleGetWorkspaceSessionDiff(sessSvc),

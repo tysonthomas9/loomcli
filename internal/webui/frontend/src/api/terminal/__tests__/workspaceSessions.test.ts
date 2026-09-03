@@ -1,65 +1,72 @@
-/**
- * @vitest-environment jsdom
- */
-
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { get } from "@/api/common";
 
 import {
   buildWorkspaceSessionsUrl,
+  getWorkspaceTraceRun,
   listWorkspaceSessions,
 } from "../workspaceSessions";
 
 vi.mock("@/api/common", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api/common")>();
-  return {
-    ...actual,
-    get: vi.fn(),
-    getText: vi.fn(),
-  };
+  return { ...actual, get: vi.fn() };
 });
 
 const mockGet = vi.mocked(get);
 
-describe("workspace session API", () => {
+describe("workspace Traces API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("builds list query params with encoded since, until, status, agent, kind, and limit", () => {
-    expect(
-      buildWorkspaceSessionsUrl("ws 1", {
-        since: "2026-07-10T00:00:00.000Z",
-        until: "2026-07-17T00:00:00.000Z",
-        status: "completed",
-        agent_id: "nova/lead",
-        kind: "task",
-        limit: 50,
-      }),
-    ).toBe(
-      "/api/workspaces/ws%201/sessions?since=2026-07-10T00%3A00%3A00.000Z&until=2026-07-17T00%3A00%3A00.000Z&status=completed&agent_id=nova%2Flead&kind=task&limit=50",
+  it("serializes run and repeatable AND tag filters", () => {
+    const url = buildWorkspaceSessionsUrl("TEAM A", {
+      task_run_id: "run-1",
+      tags: ["security", "frontend"],
+      kind: "judge",
+      limit: 200,
+    });
+
+    expect(url).toBe(
+      "/api/workspaces/TEAM%20A/sessions?task_run_id=run-1&tag=security&tag=frontend&kind=judge&limit=200",
     );
   });
 
-  it("passes the encoded list URL through get and unwraps sessions metadata", async () => {
+  it("preserves score dimensions returned for the full filtered range", async () => {
     mockGet.mockResolvedValueOnce({
       success: true,
       data: {
         sessions: [],
-        total: 250,
-        limit: 200,
+        total: 3,
+        limit: 2,
+        score_dimensions: ["efficiency", "outcome_success"],
       },
     });
 
-    const result = await listWorkspaceSessions("ws", {
-      since: "2026-07-10T00:00:00.000Z",
-      limit: 200,
+    await expect(listWorkspaceSessions("WS", { limit: 2 })).resolves.toEqual({
+      sessions: [],
+      total: 3,
+      limit: 2,
+      score_dimensions: ["efficiency", "outcome_success"],
     });
+  });
 
+  it("loads the backend-composed run view", async () => {
+    const run = {
+      task_run_id: "run/one",
+      task_run_missing: false,
+      attempt_count: 2,
+      files_changed: 4,
+      total_tokens: 1200,
+      duration_seconds: 30,
+      sessions: [],
+    };
+    mockGet.mockResolvedValueOnce({ success: true, data: run });
+
+    await expect(getWorkspaceTraceRun("WS", "run/one")).resolves.toEqual(run);
     expect(mockGet).toHaveBeenCalledWith(
-      "/api/workspaces/ws/sessions?since=2026-07-10T00%3A00%3A00.000Z&limit=200",
+      "/api/workspaces/WS/traces/runs/run%2Fone",
     );
-    expect(result).toEqual({ sessions: [], total: 250, limit: 200 });
   });
 });

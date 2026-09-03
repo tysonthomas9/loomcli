@@ -127,6 +127,13 @@ const viewRoutes = [
       })),
   },
   {
+    path: "traces/runs/:taskRunId",
+    lazy: () =>
+      import("@/views/TracesPage").then((m) => ({
+        Component: m.TracesPage,
+      })),
+  },
+  {
     path: "traces",
     lazy: () =>
       import("@/views/TracesPage").then((m) => ({

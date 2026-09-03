@@ -11,7 +11,7 @@
 
 import type { components } from "@/types/generated/openapi";
 
-import type { EvalScoreAverages } from "./evals";
+import type { EvalScores } from "./evals";
 
 /** Lifecycle state of a session. */
 export type SessionStatus = "running" | "completed" | "failed" | "aborted";
@@ -35,7 +35,8 @@ export type WorkspaceSessionKind =
   | "orchestration"
   | "terminal"
   | "maintenance"
-  | "ad_hoc";
+  | "ad_hoc"
+  | "judge";
 
 /** A single agent session record. Aliased from generated SessionResponse schema. */
 export type SessionRecord = components["schemas"]["SessionResponse"];
@@ -83,10 +84,22 @@ export interface SessionListResponse {
 
 export type WorkspaceSessionListItem = SessionRecord & {
   kind?: WorkspaceSessionKind;
+  /** First-class task-plane run linkage; empty for daemon sessions. */
+  task_run_id?: string;
+  /** First-class task-plane invocation key; empty for legacy/daemon sessions. */
+  invocation_key?: string;
+  /** First-class task-plane attempt; absent for legacy/daemon sessions. */
+  attempt?: number;
+  /** Leaf-declared tags used by the Traces AND filter. */
+  tags?: string[];
   /** eval_status metadata stamp (absent = never judged). */
   eval_status?: "done" | "failed";
   /** Scores joined from the session's newest eval record. */
-  eval_scores?: EvalScoreAverages;
+  eval_scores?: EvalScores;
+  /** Explicit subject-to-judge link from the displayed eval record. */
+  judge_session_id?: string;
+  /** Explicit judge-to-subject link for judge session details. */
+  judged_session_id?: string;
 };
 
 export interface WorkspaceSessionFilters {
@@ -95,6 +108,8 @@ export interface WorkspaceSessionFilters {
   status?: WorkspaceSessionStatusFilter;
   agent_id?: string;
   kind?: WorkspaceSessionKind;
+  task_run_id?: string;
+  tags?: string[];
   limit?: number;
 }
 
@@ -103,12 +118,48 @@ export interface WorkspaceSessionListData {
   sessions: WorkspaceSessionListItem[];
   total: number;
   limit: number;
+  /** Sorted union over the full server-filtered range, not just this page. */
+  score_dimensions: string[];
 }
 
 /** Response from GET /api/workspaces/{ws}/sessions */
 export interface WorkspaceSessionListResponse {
   success: boolean;
   data: WorkspaceSessionListData;
+  error?: string;
+}
+
+export interface TraceTaskRun {
+  workspace_key: string;
+  task_run_id: string;
+  task_id: string;
+  status: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
+  started_at?: string;
+  finished_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Response data for GET /api/workspaces/{ws}/traces/runs/{taskRunId}. */
+export interface WorkspaceTraceRunData {
+  task_run_id: string;
+  task_run?: TraceTaskRun;
+  task_run_missing: boolean;
+  task_id?: string;
+  attempt_count: number;
+  files_changed: number;
+  total_tokens: number;
+  duration_seconds: number;
+  sessions: WorkspaceSessionListItem[];
+}
+
+export interface WorkspaceTraceRunResponse {
+  success: boolean;
+  data: WorkspaceTraceRunData;
   error?: string;
 }
 

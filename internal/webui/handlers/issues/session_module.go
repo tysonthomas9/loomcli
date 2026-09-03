@@ -26,6 +26,7 @@ type SessionModule struct {
 
 	// Workspace-scoped session handlers injected from the sibling package.
 	listWorkspaceSessionsHandler          http.HandlerFunc
+	getWorkspaceTraceRunHandler           http.HandlerFunc
 	getWorkspaceSessionHandler            http.HandlerFunc
 	getWorkspaceSessionTranscriptHandler  http.HandlerFunc
 	getWorkspaceSessionDiffHandler        http.HandlerFunc
@@ -41,6 +42,7 @@ type SessionModuleOpts struct {
 	GetSessionDiff       http.HandlerFunc
 
 	ListWorkspaceSessions                 http.HandlerFunc
+	GetWorkspaceTraceRun                  http.HandlerFunc
 	GetWorkspaceSession                   http.HandlerFunc
 	GetWorkspaceSessionTranscript         http.HandlerFunc
 	GetWorkspaceSessionDiff               http.HandlerFunc
@@ -58,6 +60,7 @@ func NewSessionModule(sessSvc service.SessionService, opts SessionModuleOpts) *S
 		getSessionTranscriptHandler:           opts.GetSessionTranscript,
 		getSessionDiffHandler:                 opts.GetSessionDiff,
 		listWorkspaceSessionsHandler:          opts.ListWorkspaceSessions,
+		getWorkspaceTraceRunHandler:           opts.GetWorkspaceTraceRun,
 		getWorkspaceSessionHandler:            opts.GetWorkspaceSession,
 		getWorkspaceSessionTranscriptHandler:  opts.GetWorkspaceSessionTranscript,
 		getWorkspaceSessionDiffHandler:        opts.GetWorkspaceSessionDiff,
@@ -89,6 +92,9 @@ func (m *SessionModule) Register(mux *http.ServeMux) {
 	// Session audit trail (workspace-scoped)
 	if m.listWorkspaceSessionsHandler != nil {
 		mux.HandleFunc("GET /api/workspaces/{ws}/sessions", m.listWorkspaceSessionsHandler)
+	}
+	if m.getWorkspaceTraceRunHandler != nil {
+		mux.HandleFunc("GET /api/workspaces/{ws}/traces/runs/{taskRunId}", m.getWorkspaceTraceRunHandler)
 	}
 	if m.getWorkspaceSessionHandler != nil {
 		mux.HandleFunc("GET /api/workspaces/{ws}/sessions/{sessionId}", m.getWorkspaceSessionHandler)

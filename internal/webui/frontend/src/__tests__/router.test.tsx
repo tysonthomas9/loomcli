@@ -123,6 +123,7 @@ describe("router view routes", () => {
       expect(paths).toContain("monitor");
       expect(paths).toContain("observability");
       expect(paths).toContain("traces");
+      expect(paths).toContain("traces/runs/:taskRunId");
       expect(paths).toContain("terminal");
       expect(paths).toContain("settings");
       expect(paths).toContain("workspace");
@@ -145,6 +146,7 @@ describe("router view routes", () => {
       ["monitor", MonitorPage],
       ["observability", ObservabilityPage],
       ["traces", TracesPage],
+      ["traces/runs/:taskRunId", TracesPage],
       ["settings", SettingsPage],
       ["workspace", WorkspacePage],
       ["files", FilesPage],

@@ -377,6 +377,7 @@ export class LoomDriverClient {
   async putEvalMetric(input = {}) {
     return this.#httpCall("eval-metric-put", {
       sessionId: input.sessionId || "",
+      judgeSessionId: input.judgeSessionId || "",
       promptVersion: input.promptVersion || "",
       judgeSessionId: input.judgeSessionId || input.judge_session_id || "",
       status: input.status || "",
