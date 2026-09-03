@@ -46,6 +46,14 @@ func TestDiagnoseFleetDBBinaryEnvNotExecutable(t *testing.T) {
 }
 
 func TestDiagnoseFleetDBBinaryEnvRunnable(t *testing.T) {
+	// The production 2s probe deadline is an interactive-diagnostics choice;
+	// on a loaded CI runner even this shell-script fake can miss it at
+	// fork+exec, which failed the test as "not runnable" (D-63). The test is
+	// about discovery and probe-output classification, not the deadline.
+	old := probeFleetDBBinaryTimeout
+	probeFleetDBBinaryTimeout = 30 * time.Second
+	t.Cleanup(func() { probeFleetDBBinaryTimeout = old })
+
 	dir := t.TempDir()
 	path := filepath.Join(dir, "fleet-db")
 	if err := os.WriteFile(path, []byte("#!/bin/sh\necho 'fleet-db test server help'\n"), 0755); err != nil {

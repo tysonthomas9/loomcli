@@ -3,8 +3,12 @@
  */
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { createMemoryRouter, RouterProvider } from "react-router-dom";
-import { createElement, type ReactNode } from "react";
+import {
+  createMemoryRouter,
+  RouterProvider,
+  useLocation,
+} from "react-router-dom";
+import { createElement, Fragment, type ReactNode } from "react";
 
 import { DEFAULT_VIEW } from "@/types";
 
@@ -22,6 +26,7 @@ function createRouterWrapper(initialPath = "/ws/test-ws/kanban") {
           path: "/ws/:workspaceId",
           children: [
             { index: true, element: children },
+            { path: "home", element: children },
             { path: "kanban", element: children },
             { path: "table", element: children },
             { path: "graph", element: children },
@@ -31,6 +36,9 @@ function createRouterWrapper(initialPath = "/ws/test-ws/kanban") {
             { path: "workspace", element: children },
             { path: "settings", element: children },
             { path: "files", element: children },
+            { path: "prs", element: children },
+            { path: "agents", element: children },
+            { path: "skills", element: children },
             { path: "issues/:issueId", element: children },
           ],
         },
@@ -42,12 +50,78 @@ function createRouterWrapper(initialPath = "/ws/test-ws/kanban") {
   };
 }
 
+/**
+ * Same wrapper, plus a probe that records the router's current location so a
+ * test can assert the URL that was actually navigated to — not just the derived
+ * view. The existing view-only assertions cannot fail on a buildViewPath that
+ * copies the search string verbatim, which is exactly how PUPPET-94 survived.
+ */
+function createLocationProbeWrapper(initialPath: string) {
+  const seen: { pathname: string; search: string } = {
+    pathname: "",
+    search: "",
+  };
+
+  function LocationProbe(): null {
+    const location = useLocation();
+    seen.pathname = location.pathname;
+    seen.search = location.search;
+    return null;
+  }
+
+  const wrapper = function Wrapper({ children }: { children: ReactNode }) {
+    const element = createElement(
+      Fragment,
+      null,
+      children,
+      createElement(LocationProbe),
+    );
+    const router = createMemoryRouter(
+      [
+        {
+          path: "/ws/:workspaceId",
+          children: [
+            { index: true, element },
+            { path: "home", element },
+            { path: "kanban", element },
+            { path: "table", element },
+            { path: "graph", element },
+            { path: "monitor", element },
+            { path: "observability", element },
+            { path: "terminal", element },
+            { path: "workspace", element },
+            { path: "settings", element },
+            { path: "files", element },
+            { path: "prs", element },
+            { path: "agents", element },
+            { path: "skills", element },
+            { path: "issues/:issueId", element },
+          ],
+        },
+      ],
+      { initialEntries: [initialPath] },
+    );
+
+    return createElement(RouterProvider, { router });
+  };
+
+  return { wrapper, location: seen };
+}
+
 describe("useRouteView", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
   describe("initial view derivation", () => {
+    it("returns home for /ws/:id/home", () => {
+      const { result } = renderHook(() => useRouteView(), {
+        wrapper: createRouterWrapper("/ws/test-ws/home"),
+      });
+
+      expect(result.current.view).toBe("home");
+    });
+
     it("returns kanban for /ws/:id/kanban", () => {
       const { result } = renderHook(() => useRouteView(), {
         wrapper: createRouterWrapper("/ws/test-ws/kanban"),
@@ -119,6 +193,14 @@ describe("useRouteView", () => {
 
       expect(result.current.view).toBe("files");
     });
+
+    it("returns skills for /ws/:id/skills", () => {
+      const { result } = renderHook(() => useRouteView(), {
+        wrapper: createRouterWrapper("/ws/test-ws/skills"),
+      });
+
+      expect(result.current.view).toBe("skills");
+    });
   });
 
   describe("issue-detail derivation", () => {
@@ -146,7 +228,7 @@ describe("useRouteView", () => {
       });
 
       expect(result.current.view).toBe(DEFAULT_VIEW);
-      expect(result.current.view).toBe("kanban");
+      expect(result.current.view).toBe("home");
     });
   });
 
@@ -228,7 +310,7 @@ describe("useRouteView", () => {
       expect(result.current.view).toBe("table");
     });
 
-    it("navigating to DEFAULT_VIEW shows kanban", () => {
+    it("navigating to DEFAULT_VIEW shows home", () => {
       const { result } = renderHook(() => useRouteView(), {
         wrapper: createRouterWrapper("/ws/test-ws/table"),
       });
@@ -236,10 +318,10 @@ describe("useRouteView", () => {
       expect(result.current.view).toBe("table");
 
       act(() => {
-        result.current.navigateToView("kanban");
+        result.current.navigateToView(DEFAULT_VIEW);
       });
 
-      expect(result.current.view).toBe("kanban");
+      expect(result.current.view).toBe("home");
     });
 
     it("navigating through multiple views works", () => {
@@ -288,6 +370,117 @@ describe("useRouteView", () => {
       });
 
       expect(result.current.view).toBe("graph");
+    });
+  });
+
+  describe("view-scoped detail params (PUPPET-94)", () => {
+    it("clears ?review= when navigating to the already-active prs view", () => {
+      const { wrapper, location } = createLocationProbeWrapper(
+        "/ws/test-ws/prs?review=LOCALMODE-5",
+      );
+      const { result } = renderHook(() => useRouteView(), { wrapper });
+
+      act(() => {
+        result.current.navigateToView("prs");
+      });
+
+      expect(location.pathname).toBe("/ws/test-ws/prs");
+      expect(location.search).toBe("");
+    });
+
+    it("clears ?review-pr=", () => {
+      const { wrapper, location } = createLocationProbeWrapper(
+        "/ws/test-ws/prs?review-pr=owner%2Frepo%2312",
+      );
+      const { result } = renderHook(() => useRouteView(), { wrapper });
+
+      act(() => {
+        result.current.navigateToView("prs");
+      });
+
+      expect(location.pathname).toBe("/ws/test-ws/prs");
+      expect(location.search).toBe("");
+    });
+
+    it("clears review and discuss together", () => {
+      const { wrapper, location } = createLocationProbeWrapper(
+        "/ws/test-ws/prs?review=LOCALMODE-5&discuss=1",
+      );
+      const { result } = renderHook(() => useRouteView(), { wrapper });
+
+      act(() => {
+        result.current.navigateToView("prs");
+      });
+
+      expect(location.search).toBe("");
+    });
+
+    it("keeps workspace-scoped params while dropping the detail param", () => {
+      const { wrapper, location } = createLocationProbeWrapper(
+        "/ws/test-ws/prs?review=LOCALMODE-5&repoFilter=my-repo",
+      );
+      const { result } = renderHook(() => useRouteView(), { wrapper });
+
+      act(() => {
+        result.current.navigateToView("prs");
+      });
+
+      expect(location.pathname).toBe("/ws/test-ws/prs");
+      expect(location.search).toBe("?repoFilter=my-repo");
+    });
+
+    it("does not leak the detail param into another view", () => {
+      const { wrapper, location } = createLocationProbeWrapper(
+        "/ws/test-ws/prs?review=LOCALMODE-5",
+      );
+      const { result } = renderHook(() => useRouteView(), { wrapper });
+
+      act(() => {
+        result.current.navigateToView("terminal");
+      });
+
+      expect(location.pathname).toBe("/ws/test-ws/terminal");
+      expect(location.search).toBe("");
+    });
+
+    it("strips identically under setView (replace semantics)", () => {
+      const { wrapper, location } = createLocationProbeWrapper(
+        "/ws/test-ws/prs?review=LOCALMODE-5&repoFilter=my-repo",
+      );
+      const { result } = renderHook(() => useRouteView(), { wrapper });
+
+      act(() => {
+        result.current.setView("prs");
+      });
+
+      expect(location.pathname).toBe("/ws/test-ws/prs");
+      expect(location.search).toBe("?repoFilter=my-repo");
+    });
+
+    it("emits no trailing ? for an empty or malformed search string", () => {
+      const { wrapper, location } =
+        createLocationProbeWrapper("/ws/test-ws/prs?&&");
+      const { result } = renderHook(() => useRouteView(), { wrapper });
+
+      act(() => {
+        result.current.navigateToView("files");
+      });
+
+      expect(location.pathname).toBe("/ws/test-ws/files");
+      expect(location.search).toBe("");
+    });
+
+    it("still navigates from another view to the prs list", () => {
+      const { wrapper, location } =
+        createLocationProbeWrapper("/ws/test-ws/files");
+      const { result } = renderHook(() => useRouteView(), { wrapper });
+
+      act(() => {
+        result.current.navigateToView("prs");
+      });
+
+      expect(location.pathname).toBe("/ws/test-ws/prs");
+      expect(location.search).toBe("");
     });
   });
 });

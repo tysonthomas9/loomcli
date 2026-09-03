@@ -6,7 +6,9 @@
 // The supervisor publishes itself as a Node on startup and heartbeats
 // every 30 s; this package parses the loom.daemon.* labels the
 // supervisor attaches and reports whether a live daemon is present
-// for a given workspace.
+// for a given workspace. The registry is shared with non-supervisor
+// local Nodes, so the loom.daemon.pid label is what distinguishes a
+// supervisor advertisement from anything else that heartbeats there.
 package daemonregistry
 
 import (
@@ -49,6 +51,11 @@ type Info struct {
 // supervisor writes these labels when registering its Node; diagnose
 // parses them back out via Detect.
 //
+// LabelPID is the required one: Supervisor.daemonRuntimeLabels always
+// emits it, and Detect treats it as the daemon's identity. LabelCwd
+// and LabelSocket are optional metadata — a Node carrying only those
+// is not a supervisor.
+//
 // "cwd" is the daemon's project directory (its workspace working
 // tree), not strictly the shell cwd at launch time — these usually
 // match, but when they don't, the project directory is the more
@@ -72,13 +79,29 @@ const (
 //     fleet/CI/Kubernetes-provisioned nodes that are not the local
 //     supervisor.
 //  2. ExpiresAt.After(now) — the supervisor heartbeat is fresh.
-//  3. If a loom.daemon.pid label is present AND the Node was
-//     registered by this host (NodeID contains the local hostname),
-//     lockfile.IsProcessRunning must report the PID alive. This
-//     guards against ghost Node rows where the daemon crashed
-//     mid-shutdown and the TTL hasn't elapsed yet. For Nodes from
-//     other hosts we trust the heartbeat alone — we cannot probe a
-//     PID on a different machine.
+//  3. A valid loom.daemon.pid label (positive integer) must be
+//     present — this is the daemon's identity on the wire. Other
+//     local Nodes heartbeat into the same registry (notably the
+//     `loom serve` task worker, which advertises only
+//     loom-driver-executor / loom-task-worker), and without this
+//     check any of them would masquerade as a live supervisor.
+//     loom.daemon.cwd / loom.daemon.socket are optional metadata and
+//     never establish identity on their own.
+//  4. If the qualifying Node claims to be a supervisor on this host
+//     — NodeID of the form "loom-supervisor-<localhost>-<pid>", i.e.
+//     the prefix AND the hostname must both match (see
+//     hostnameMatchesLocal) — lockfile.IsProcessRunning must report
+//     the PID alive. This guards against ghost Node rows where the
+//     daemon crashed mid-shutdown and the TTL hasn't elapsed yet.
+//     Every other qualifying Node is trusted on its heartbeat alone:
+//     a PID on another machine cannot be probed from here, and a
+//     same-host Node using some other NodeID scheme is
+//     indistinguishable from a remote one at this layer. Rule 3 is
+//     what keeps that fallback narrow.
+//
+// Candidate filtering happens before most-recent-heartbeat selection,
+// so a newer non-daemon Node can never displace or suppress a valid
+// supervisor advertisement.
 //
 // On nil store, store errors, or no matching nodes, Running=false is
 // returned with no error surfaced. Diagnose ORs Running across three
@@ -112,9 +135,17 @@ func Detect(ctx context.Context, st store.Store, workspaceKey string) Info {
 			continue
 		}
 		pid, cwd, socket := parseLabels(n.Labels)
-		// If the Node was registered by this host and has a PID label,
-		// require the PID to be alive — defends against ghost rows.
-		if pid > 0 && hostnameMatchesLocal(n.NodeID, localHost) {
+		// Daemon identity is mandatory: only a Node advertising a
+		// valid supervisor PID counts. parseLabels reports zero for a
+		// missing, empty, non-numeric, zero, or negative PID label, so
+		// this one check rejects both generic local Nodes (the `loom
+		// serve` task worker) and malformed daemon advertisements.
+		if pid <= 0 {
+			continue
+		}
+		// If the Node was registered by this host, require the PID to
+		// be alive — defends against ghost rows.
+		if hostnameMatchesLocal(n.NodeID, localHost) {
 			if !lockfile.IsProcessRunning(pid) {
 				continue
 			}
@@ -134,8 +165,14 @@ func Detect(ctx context.Context, st store.Store, workspaceKey string) Info {
 }
 
 // parseLabels extracts the loom.daemon.* labels from a Node's Labels
-// slice. Unparseable values (non-int PIDs, negative PIDs) are treated
-// as absent rather than failing the whole detection.
+// slice. Unparseable values (non-int PIDs, zero/negative PIDs) are
+// skipped rather than failing the whole detection, so a PID of zero is
+// returned only when no label carried a usable one; because Detect
+// requires pid > 0, that means the Node is not a supervisor.
+//
+// Skipping (rather than resetting) makes this last-valid-wins if a Node
+// somehow carries several PID labels. daemonRuntimeLabels emits exactly
+// one, so that case does not arise in practice.
 func parseLabels(labels []string) (pid int, cwd, socket string) {
 	for _, label := range labels {
 		switch {

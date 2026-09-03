@@ -46,6 +46,7 @@ type fakeIssueBackend struct {
 	closeResult         *backend.CloseResult
 	closeErr            error
 	closeCalls          []closeCall
+	reopenCalls         []reopenCall
 	deleteErr           error
 	deleteCalls         []backend.DeleteParams
 	addCommentResult    *backend.CommentData
@@ -72,6 +73,11 @@ type updateCall struct {
 type closeCall struct {
 	id     string
 	params backend.CloseParams
+}
+
+type reopenCall struct {
+	id     string
+	params backend.ReopenParams
 }
 
 type listEventsCall struct {
@@ -178,7 +184,10 @@ func (f *fakeIssueBackend) Close(_ context.Context, id string, params backend.Cl
 	return f.closeResult, f.closeErr
 }
 
-func (f *fakeIssueBackend) Reopen(_ context.Context, _ string, _ backend.ReopenParams) error {
+func (f *fakeIssueBackend) Reopen(_ context.Context, id string, params backend.ReopenParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reopenCalls = append(f.reopenCalls, reopenCall{id: id, params: params})
 	return nil
 }
 
@@ -249,16 +258,15 @@ func TestListEvents_Backend_Success(t *testing.T) {
 	comment := "status changed"
 	fb := &fakeIssueBackend{
 		listEventsResult: []backend.EventData{
-			{ID: "1", IssueID: "test-1", Kind: "issue.created", Actor: "alice", CreatedAt: now},
 			{
-				ID:        "2",
-				IssueID:   "test-1",
-				Kind:      "issue.status_changed",
-				Actor:     "bob",
-				OldValue:  &oldValue,
-				NewValue:  &newValue,
-				Comment:   &comment,
-				CreatedAt: now,
+				ID: "1787177211116-0", IssueID: "test-1", Kind: "issue.update", Actor: "alice",
+				Target: "test-1", Payload: `{"status":"in_progress"}`, Category: "field_change",
+				Summary: "Updated status", Changes: []backend.FieldChange{{Field: "status", Before: "open", After: "in_progress"}},
+				Metadata: map[string]string{"source": "test"}, CreatedAt: now,
+			},
+			{
+				ID: "2", IssueID: "test-1", Kind: "issue.status_changed", Actor: "bob",
+				OldValue: &oldValue, NewValue: &newValue, Comment: &comment, CreatedAt: now,
 			},
 		},
 	}
@@ -271,11 +279,20 @@ func TestListEvents_Backend_Success(t *testing.T) {
 	if len(events) != 2 {
 		t.Fatalf("expected 2 events, got %d", len(events))
 	}
-	if events[0].ID != 1 {
-		t.Errorf("event[0].ID = %d, want 1", events[0].ID)
+	if events[0].ID != "1787177211116-0" {
+		t.Errorf("event[0].ID = %q, want stream ID", events[0].ID)
 	}
-	if events[0].EventType != types.EventCreated {
-		t.Errorf("event[0].EventType = %q, want %q", events[0].EventType, types.EventCreated)
+	if events[0].EventType != types.EventType("issue.update") {
+		t.Errorf("event[0].EventType = %q, want issue.update", events[0].EventType)
+	}
+	if events[0].Target != "test-1" || events[0].Payload != `{"status":"in_progress"}` || events[0].Category != "field_change" || events[0].Summary != "Updated status" {
+		t.Errorf("event[0] widened fields = %+v", events[0])
+	}
+	if len(events[0].Changes) != 1 || events[0].Changes[0] != (types.FieldChange{Field: "status", Before: "open", After: "in_progress"}) {
+		t.Errorf("event[0].Changes = %+v", events[0].Changes)
+	}
+	if events[0].Metadata["source"] != "test" {
+		t.Errorf("event[0].Metadata = %+v", events[0].Metadata)
 	}
 	if events[1].OldValue == nil || *events[1].OldValue != oldValue {
 		t.Errorf("event[1].OldValue = %v, want %q", events[1].OldValue, oldValue)
@@ -294,7 +311,7 @@ func TestListEvents_Backend_Success(t *testing.T) {
 	}
 }
 
-func TestEventDataToTypesEvent_NormalizesFleetDBIssueActions(t *testing.T) {
+func TestEventDataToTypesEvent_PreservesFleetDBIssueActions(t *testing.T) {
 	tests := []struct {
 		name string
 		kind string
@@ -320,8 +337,8 @@ func TestEventDataToTypesEvent_NormalizesFleetDBIssueActions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := eventDataToTypesEvent(backend.EventData{ID: "1", Kind: tt.kind})
-			if got.EventType != tt.want {
-				t.Fatalf("EventType = %q, want %q", got.EventType, tt.want)
+			if got.EventType != types.EventType(tt.kind) {
+				t.Fatalf("EventType = %q, want raw fleet action %q", got.EventType, tt.kind)
 			}
 		})
 	}
@@ -351,28 +368,32 @@ func TestEventDataToTypesEvent_CarriesUpdateFieldDetails(t *testing.T) {
 	}
 }
 
-func TestEventDataToTypesEvent_CommentAddReachesActivityFilterKind(t *testing.T) {
+func TestEventDataToTypesEvent_CommentAddPreservesFleetKind(t *testing.T) {
 	got := eventDataToTypesEvent(backend.EventData{ID: "1", Kind: "comment.add"})
-	if got.EventType != types.EventCommented {
-		t.Fatalf("EventType = %q, want %q", got.EventType, types.EventCommented)
+	if got.EventType != types.EventType("comment.add") {
+		t.Fatalf("EventType = %q, want comment.add", got.EventType)
 	}
 }
 
 func TestFleetEventKindMap_FrontendEventCoverage(t *testing.T) {
 	eventTypesSource := readFrontendSource(t, "src", "types", "workspace", "event.ts")
-	activitySource := readFrontendSource(t, "src", "components", "IssueDetailPanel", "sections", "ActivityLog.tsx")
+	presentationSource := readFrontendSource(t, "src", "components", "IssueDetailPanel", "sections", "eventDescription.ts")
 
 	seen := make(map[types.EventType]bool)
-	for _, eventType := range fleetEventKindMap {
+	for fleetKind, eventType := range fleetEventKindMap {
 		seen[eventType] = true
+		fleetLiteral := `"` + fleetKind + `"`
+		if !strings.Contains(presentationSource, `case `+fleetLiteral+`:`) {
+			t.Errorf("Journey event description is missing fleet action case %s", fleetLiteral)
+		}
 	}
 	for eventType := range seen {
 		literal := `"` + string(eventType) + `"`
 		if !strings.Contains(eventTypesSource, literal) {
 			t.Errorf("frontend EventType union is missing %s", literal)
 		}
-		if !strings.Contains(activitySource, `case `+literal+`:`) {
-			t.Errorf("ActivityLog describeEvent is missing case %s", literal)
+		if !strings.Contains(presentationSource, `case `+literal+`:`) {
+			t.Errorf("Journey event description is missing case %s", literal)
 		}
 	}
 }
@@ -444,6 +465,30 @@ func TestListEvents_Backend_Unavailable_NilBackend(t *testing.T) {
 	}
 	if sErr.Kind != KindUnavailable {
 		t.Errorf("Kind = %q, want unavailable", sErr.Kind)
+	}
+}
+
+func TestListEventHistory_LegacyBackendLeavesTotalUnknown(t *testing.T) {
+	now := time.Now().UTC()
+	fb := &fakeIssueBackend{
+		listEventsResult: []backend.EventData{{
+			ID:        "1",
+			IssueID:   "test-1",
+			Kind:      "issue.created",
+			CreatedAt: now,
+		}},
+	}
+	svc := newServiceWithFake(fb)
+
+	result, err := svc.ListEventHistory(context.Background(), EventListParams{IssueID: "test-1", Limit: 100})
+	if err != nil {
+		t.Fatalf("ListEventHistory: %v", err)
+	}
+	if len(result.Events) != 1 {
+		t.Fatalf("event count = %d, want 1", len(result.Events))
+	}
+	if result.TotalEvents != 0 {
+		t.Errorf("TotalEvents = %d, want 0 when the legacy backend has no total", result.TotalEvents)
 	}
 }
 
@@ -1095,7 +1140,7 @@ func TestPatchIssue_Backend_Success_PassesParams(t *testing.T) {
 	title := "Renamed"
 	status := "in_progress"
 	err := svc.PatchIssue(context.Background(), PatchIssueParams{
-		IssueID: "i-1", Title: &title, Status: &status,
+		IssueID: "i-1", Actor: "operator@local", Title: &title, Status: &status,
 	})
 	if err != nil {
 		t.Fatalf("PatchIssue: %v", err)
@@ -1109,6 +1154,9 @@ func TestPatchIssue_Backend_Success_PassesParams(t *testing.T) {
 	}
 	if got.params.Status == nil || *got.params.Status != "in_progress" {
 		t.Errorf("Status not propagated: %+v", got.params.Status)
+	}
+	if got.params.Actor != "operator@local" {
+		t.Errorf("Actor = %q, want operator@local", got.params.Actor)
 	}
 }
 
@@ -1298,6 +1346,47 @@ func TestCloseIssue_Backend_BlockerConflict_StillFails(t *testing.T) {
 	var sErr *ServiceError
 	if !errors.As(err, &sErr) || sErr.Kind != KindConflict {
 		t.Fatalf("blocker conflicts must keep failing as conflicts, got %v", err)
+	}
+}
+
+func TestOperatorActor_ForwardedToBackendMutations(t *testing.T) {
+	fb := &fakeIssueBackend{
+		closeResult:      &backend.CloseResult{Closed: &backend.IssueData{ID: "close-1"}},
+		addCommentResult: &backend.CommentData{ID: 1, IssueID: "comment-1", Author: "web-ui", Text: "FEEDBACK: revise"},
+	}
+	svc := newServiceWithFake(fb)
+	const actor = "operator@example.com"
+
+	if _, err := svc.CloseIssue(context.Background(), CloseIssueParams{IssueID: "close-1", Actor: actor}); err != nil {
+		t.Fatalf("CloseIssue: %v", err)
+	}
+	if err := svc.ReopenIssue(context.Background(), ReopenIssueParams{IssueID: "reopen-1", Actor: actor, Reason: "needs work"}); err != nil {
+		t.Fatalf("ReopenIssue: %v", err)
+	}
+	if err := svc.AddDependency(context.Background(), AddDependencyParams{IssueID: "add-dep-1", DependsOnID: "dep-1", Actor: actor}); err != nil {
+		t.Fatalf("AddDependency: %v", err)
+	}
+	if err := svc.RemoveDependency(context.Background(), RemoveDependencyParams{IssueID: "remove-dep-1", DepID: "dep-1", Actor: actor}); err != nil {
+		t.Fatalf("RemoveDependency: %v", err)
+	}
+	if _, err := svc.AddComment(context.Background(), AddCommentParams{IssueID: "comment-1", Text: "FEEDBACK: revise", Actor: actor}); err != nil {
+		t.Fatalf("AddComment: %v", err)
+	}
+
+	if len(fb.closeCalls) != 1 || fb.closeCalls[0].params.Actor != actor {
+		t.Errorf("Close actor = %q, want %q", fb.closeCalls[0].params.Actor, actor)
+	}
+	if len(fb.reopenCalls) != 1 || fb.reopenCalls[0].params.Actor != actor {
+		t.Errorf("Reopen actor = %q, want %q", fb.reopenCalls[0].params.Actor, actor)
+	}
+	if len(fb.addDepParams) != 1 || fb.addDepParams[0].Actor != actor {
+		t.Errorf("AddDependency actor = %q, want %q", fb.addDepParams[0].Actor, actor)
+	}
+	if len(fb.removeDepParams) != 1 || fb.removeDepParams[0].Actor != actor {
+		t.Errorf("RemoveDependency actor = %q, want %q", fb.removeDepParams[0].Actor, actor)
+	}
+	if len(fb.addCommentParams) != 1 || fb.addCommentParams[0].Actor != actor {
+		t.Errorf("AddComment actor = %q, want %q", fb.addCommentParams[0].Actor, actor)
 	}
 }
 

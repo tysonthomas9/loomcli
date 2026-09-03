@@ -18,6 +18,21 @@ not the video product or Java Project Loom.
   not grant those capabilities.
 - **Worker**: An autonomous role or agent intended to claim and complete tasks
   under daemon supervision.
+- **Skill**: A workspace-stored document entity — a SKILL.md body plus optional
+  text files — loaded into an agent's worktree so the agent can use it while
+  working. Not the same thing as the role config `skills:` list: that field is
+  a task-routing filter whose tag strings are matched against issue labels to
+  score which tasks a role pulls. The two share a word but not a mechanism;
+  say "skill" for the document entity and "role skills" (or routing tags) for
+  the filter.
+- **Skill scope**: Where a skill applies: workspace-scoped skills load for
+  every loom-managed agent in the workspace; role-scoped skills load only for
+  that role's agents and shadow a same-named workspace skill. Being in scope
+  is what makes a skill load — there is no separate attach list.
+- **Skill pack**: A registered external git source of skills (repo, ref,
+  path) synced into the workspace on demand. Synced skills keep their pack
+  as provenance; a pack updates its own prior imports but never silently
+  overwrites a skill from a different creator or source.
 
 ## Role Kind
 
@@ -103,6 +118,51 @@ isolation-*shaped* features are not isolation:
 `docs/design/execution-isolation.md` has the three-level model, the per-level
 mechanisms, the Daytona remote-isolation path, and an explicit list of what is
 not isolation.
+
+## Blocked, and the word "stage"
+
+**"Blocked" means two things, deliberately.** The alternative was considered and
+rejected: for a while the issue-status sense was displayed as "Stuck", and that
+was reversed — one word, told apart by where you are looking.
+
+- **A task's own status.** The issue status literal `blocked`: a worker parked
+  the task and declared a blocker, so a person or another system has to act.
+  This is what the status pill and the Kanban column show, and what the
+  Journey draws as a halt inside the stage it interrupted; it is `blocked` on
+  the wire, in `PatchIssueRequest`, and in fleet-db.
+- **A dependency relationship.** An issue that cannot start because issues it
+  depends on are still open. `BlockedBadge` renders "Blocked by N issues" on
+  Kanban cards, and bottleneck views derive from the same `blocked_by` edges.
+
+Nothing translates between them, and no UI surface should invent a third word.
+The disambiguator is grammatical: the dependency sense always names what is
+blocking ("Blocked by …"), while the status sense stands alone. The status
+sense also carries an attention marker on the Journey trace, because it is the
+one that needs a human.
+
+A third thing borrows the word without being either:
+
+- **`task.stuck`** (`internal/events`, `TaskStuckData`): a daemon event for a
+  task that failed repeatedly across consecutive auto-mode invocations and was
+  skipped so the loop could make progress elsewhere. The loop gave up; the agent
+  declared nothing. It is not an issue status, it does not set one, and
+  `AgentState` `"stuck"` in the web UI is this and not the above.
+
+The rate-limit circuit breaker emits `circuit.opened` / `circuit.closed`, not a
+fourth kind of "blocked".
+
+### Stage vs phase
+
+- **Stage**: UI-local vocabulary, not a loom domain object. Nothing stores a
+  stage; the Journey section on the issue detail panel derives them from the
+  issue's event history — a stage is a contiguous run of that history with the
+  same status and the same owner. Because it is derived from a bounded event
+  window, a Journey shows the stages that window can support, not necessarily
+  the whole life of the issue.
+- **Phase**: a runtime concept with storage behind it — the log of one stretch
+  of agent work, `planning` or `implementation`, written to
+  `tasks/<id>/<phase>.log` and surfaced as its own tab. A phase is something an
+  agent ran; a stage is something the issue was.
 
 ## Other Overloaded Names
 

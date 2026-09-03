@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
@@ -68,6 +69,7 @@ type MoveIssueResult struct {
 // CloseIssueParams holds the parameters for closing an issue.
 type CloseIssueParams struct {
 	IssueID     string
+	Actor       string
 	Reason      string
 	Session     string
 	SuggestNext bool
@@ -119,6 +121,7 @@ type CreateIssueResult struct {
 // PatchIssueParams mirrors PatchIssueRequest but is not HTTP-bound.
 type PatchIssueParams struct {
 	IssueID            string
+	Actor              string
 	Title              *string
 	Description        *string
 	Status             *string
@@ -145,6 +148,7 @@ type PatchIssueParams struct {
 // AddCommentParams holds the parameters for adding a comment.
 type AddCommentParams struct {
 	IssueID string
+	Actor   string
 	Author  string
 	Text    string
 }
@@ -152,6 +156,7 @@ type AddCommentParams struct {
 // AddDependencyParams holds the parameters for adding a dependency.
 type AddDependencyParams struct {
 	IssueID     string
+	Actor       string
 	DependsOnID string
 	DepType     string // defaults to "blocks"
 }
@@ -159,6 +164,7 @@ type AddDependencyParams struct {
 // RemoveDependencyParams holds the parameters for removing a dependency.
 type RemoveDependencyParams struct {
 	IssueID string
+	Actor   string
 	DepID   string
 }
 
@@ -166,6 +172,81 @@ type RemoveDependencyParams struct {
 type EventListParams struct {
 	IssueID string
 	Limit   int
+	Since   *string
+}
+
+// EventListResult carries issue events and completeness metadata to the HTTP
+// handler without exposing backend wire types.
+type EventListResult struct {
+	Events []*types.Event
+	// Cursor is set only for a forward Since page. Newest-tail responses omit
+	// it; callers start a separate forward walk with an empty Since cursor.
+	Cursor  string
+	HasMore bool
+	// TotalEvents is zero when the backend cannot report an exact history size.
+	TotalEvents int
+}
+
+// Journey describes the durable server-side reconstruction of an issue's
+// stage history and any host-local agent work that can be overlaid on it.
+type Journey struct {
+	Spans        []JourneySpan        `json:"spans"`
+	AgentWindows []JourneyAgentWindow `json:"agent_windows"`
+	LeadTime     JourneyLeadTime      `json:"lead_time"`
+	Honesty      JourneyHonesty       `json:"honesty"`
+}
+
+// JourneySpan is one contiguous status/owner/needs-revision state. End is nil
+// only for the final span of an in-flight issue.
+type JourneySpan struct {
+	Kind          string     `json:"kind"`
+	Stage         string     `json:"stage"`
+	Start         time.Time  `json:"start"`
+	End           *time.Time `json:"end"`
+	Owner         *string    `json:"owner"`
+	Actor         *string    `json:"actor"`
+	NeedsRevision bool       `json:"needs_revision"`
+	Stalled       bool       `json:"stalled"`
+	Approximate   bool       `json:"approximate"`
+	UnknownStart  bool       `json:"unknown_start"`
+}
+
+// JourneyAgentWindow is one host-local task attempt from claim to terminal
+// lifecycle event. End remains nil and outcome is running for an active attempt.
+// A later claim supersedes an unclosed earlier attempt, recording outcome
+// superseded at the later claim timestamp.
+type JourneyAgentWindow struct {
+	TaskID  string     `json:"task_id"`
+	Agent   string     `json:"agent"`
+	Start   time.Time  `json:"start"`
+	End     *time.Time `json:"end"`
+	Outcome string     `json:"outcome"`
+}
+
+// JourneyLeadTime reports millisecond durations so the wire unit is explicit.
+// TotalMS is visible wall-clock lead time. The four named buckets deliberately
+// may sum below it: deferred/open-assigned intervals and gaps between exact
+// lifecycle attempts do not satisfy any settled category and are not forced
+// into a confident but false classification.
+type JourneyLeadTime struct {
+	TotalMS             int64 `json:"total_ms"`
+	QueuedMS            int64 `json:"queued_ms"`
+	AgentWorkingMS      int64 `json:"agent_working_ms"`
+	WaitingOnOperatorMS int64 `json:"waiting_on_operator_ms"`
+	HaltedMS            int64 `json:"halted_ms"`
+}
+
+// JourneyHonesty makes bounded issue history and missing host-local overlays
+// explicit instead of presenting a partial fold as authoritative.
+type JourneyHonesty struct {
+	CompleteHistory       bool   `json:"complete_history"`
+	Bounded               bool   `json:"bounded"`
+	HasMore               bool   `json:"has_more"`
+	EventsSeen            int    `json:"events_seen"`
+	TotalEvents           int    `json:"total_events,omitempty"`
+	Reason                string `json:"reason,omitempty"`
+	AgentWindowsAvailable bool   `json:"agent_windows_available"`
+	AgentWindowsReason    string `json:"agent_windows_reason,omitempty"`
 }
 
 // SearchIssuesParams holds the parameters for full-text search.
@@ -177,6 +258,7 @@ type SearchIssuesParams struct {
 // ReopenIssueParams holds the parameters for reopening a closed issue.
 type ReopenIssueParams struct {
 	IssueID string
+	Actor   string
 	Reason  string
 }
 
@@ -196,6 +278,8 @@ type IssueService interface {
 	RemoveDependency(ctx context.Context, params RemoveDependencyParams) error
 	ListDependencies(ctx context.Context, issueID string) (json.RawMessage, error)
 	ListEvents(ctx context.Context, params EventListParams) ([]*types.Event, error)
+	ListEventHistory(ctx context.Context, params EventListParams) (*EventListResult, error)
+	GetJourney(ctx context.Context, issueID string) (*Journey, error)
 	MoveIssue(ctx context.Context, params MoveIssueParams) (*MoveIssueResult, error)
 	SearchIssues(ctx context.Context, params SearchIssuesParams) (json.RawMessage, error)
 }

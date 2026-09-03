@@ -1230,7 +1230,7 @@ Workspace-scoped variants of all fleet endpoints are also available at `/api/wor
 
 ### Prerequisites
 
-Fleet endpoints are only registered when `fleetEnabled` is true — this requires Redis to be configured (`--fleet-redis`) and a fleet API key (`--fleet-api-key`). When these flags are not set, all fleet routes return `404` (not registered).
+Fleet endpoints are only registered when fleet mode is enabled — `--fleet-mode` (or `LOOM_FLEET_MODE=true`) with Redis configured via `--redis-addr` (or `LOOM_REDIS_ADDR`) and a fleet API key (`--fleet-api-key`). There is no `--fleet-redis` flag. When fleet mode is not enabled, all fleet routes return `404` (not registered).
 
 ### Authentication Model
 
@@ -3754,15 +3754,20 @@ List events for an issue.
 - **Query Parameters:**
   | Parameter | Type | Default | Description |
   |-----------|------|---------|-------------|
-  | `limit` | int | 100 | Max events to return (max 500) |
+  | `limit` | int | 100 | Without `since`, max newest-tail size is 500. With `since`, returns one forward page capped at 200. |
+  | `since` | string | — | Opaque history cursor. Its presence selects oldest-first forward paging; bare `?since=` starts at the beginning. |
 
-Invalid or negative `limit` silently defaults to 100; values above 500 are clamped to 500.
+Invalid or negative `limit` silently defaults to 100. Without `since`, values above 500 are clamped to 500. With `since`, values above fleet-db's 200-event page maximum are clamped to 200.
+
+Without `since`, the endpoint preserves the activity feed's newest-tail behavior. That response never carries a cursor; if `has_more` is true, it was truncated and a client can retrieve history oldest-first by starting a separate request at `?since=`. With `since`, each response is exactly one forward page and its cursor advances the next request.
 
 - **Response `200`:**
 
 ```json
 {
   "success": true,
+  "has_more": true,
+  "total_events": 295,
   "data": [
     {
       "id": "event-id",
@@ -3778,7 +3783,9 @@ Invalid or negative `limit` silently defaults to 100; values above 500 are clamp
 
 Empty events list is returned as `[]` (not null).
 
-- **Errors:** `400` (missing ID), `404` (not found), `503` (pool unavailable), `504` (timeout)
+`has_more` is always present. On a newest-tail response it means that older events were trimmed; on a `since` page it means another forward page is available. `cursor` appears only on `since` pages. `total_events` is the complete count when known; a backend that cannot determine it reports zero internally and omits the field from JSON, so its absence means unknown rather than zero events.
+
+- **Errors:** `400` (missing ID or cursor paging unsupported by the active backend), `404` (not found), `503` (pool unavailable), `504` (timeout)
 
 #### `POST /api/workspaces/{ws}/issues/{id}/dependencies`
 

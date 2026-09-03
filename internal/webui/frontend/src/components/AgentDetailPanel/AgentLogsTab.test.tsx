@@ -86,10 +86,16 @@ describe("AgentLogsTab", () => {
 
     render(<AgentLogsTab agentName="ember" isActive />);
 
+    // findByTestId resolves on the container's FIRST render, which can happen
+    // after the terminal-info resolve but before the archive lines land — the
+    // immediate content/state assertions then race the second update (seen as
+    // a CI-only flake). Await the content and the state themselves.
     const pre = await screen.findByTestId("terminal-container");
-    expect(pre).toHaveTextContent("alpha");
+    await waitFor(() => expect(pre).toHaveTextContent("alpha"));
     expect(pre).toHaveTextContent("beta");
-    expect(statusEl()).toHaveAttribute("data-state", "connected");
+    await waitFor(() =>
+      expect(statusEl()).toHaveAttribute("data-state", "connected"),
+    );
     expect(screen.queryByTestId("archive-empty")).toBeNull();
   });
 

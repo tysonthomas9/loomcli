@@ -219,19 +219,32 @@ type Comment struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// Event represents an audit trail entry
+// FieldChange is one field delta within an audit trail event.
+type FieldChange struct {
+	Field  string `json:"field"`
+	Before string `json:"before,omitempty"`
+	After  string `json:"after,omitempty"`
+}
+
+// Event represents an audit trail entry.
 type Event struct {
-	ID         int64     `json:"id"`
-	IssueID    string    `json:"issue_id"`
-	EventType  EventType `json:"event_type"`
-	Actor      string    `json:"actor"`
-	Field      *string   `json:"field,omitempty"`
-	Fields     []string  `json:"fields,omitempty"`
-	FieldCount int       `json:"field_count,omitempty"`
-	OldValue   *string   `json:"old_value,omitempty"`
-	NewValue   *string   `json:"new_value,omitempty"`
-	Comment    *string   `json:"comment,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID         string            `json:"id"`
+	IssueID    string            `json:"issue_id"`
+	EventType  EventType         `json:"event_type"`
+	Actor      string            `json:"actor"`
+	Target     string            `json:"target,omitempty"`
+	Payload    string            `json:"payload,omitempty"`
+	Category   string            `json:"category,omitempty"`
+	Summary    string            `json:"summary,omitempty"`
+	Changes    []FieldChange     `json:"changes,omitempty"`
+	Metadata   map[string]string `json:"metadata,omitempty"`
+	Field      *string           `json:"field,omitempty"`
+	Fields     []string          `json:"fields,omitempty"`
+	FieldCount int               `json:"field_count,omitempty"`
+	OldValue   *string           `json:"old_value,omitempty"`
+	NewValue   *string           `json:"new_value,omitempty"`
+	Comment    *string           `json:"comment,omitempty"`
+	CreatedAt  time.Time         `json:"created_at"`
 }
 
 // EventType categorizes audit trail events

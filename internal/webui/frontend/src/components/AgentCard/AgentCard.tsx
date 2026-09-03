@@ -5,12 +5,10 @@
 
 import type { LoomAgentStatus } from "@/types";
 import { effectiveAgentStatus, parseLoomStatus } from "@/types";
+import { AgentAvatar } from "@/components/AgentAvatar";
 import { RepoBadge } from "@/components/RepoBadge";
-import { getCompactAvatarInitials } from "@/utils/compactAvatarInitials";
-import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
-import { getStatusDotColor, getStatusLabel } from "@/utils/agent";
+import { getStatusLabel } from "@/utils/agent";
 import {
-  agentCompactAvatarLabel,
   agentDisplayRoleLabel,
   agentDisplayTitle,
   agentUsesLiteralTitle,
@@ -75,8 +73,6 @@ export function AgentCard({
   selected = false,
 }: AgentCardProps): JSX.Element {
   const parsed = parseLoomStatus(normalizeCardStatus(agent));
-  const avatarColor = getAvatarColor(agent.name);
-  const dotColor = getStatusDotColor(parsed.type);
   const statusLabel = getStatusLabel(parsed);
   // When the badge reflects fleet-db's live_status (serve-only deployments,
   // where no task title is loaded), surface the active task/phase on hover.
@@ -85,9 +81,6 @@ export function AgentCard({
       ? [agent.active_task_id, agent.active_phase].filter(Boolean).join(" · ")
       : "";
   const isError = parsed.type === "error";
-  const initial =
-    agentCompactAvatarLabel(agent) || getCompactAvatarInitials(agent.name);
-  const textColor = shouldUseWhiteText(avatarColor) ? "#fff" : "#1f2937";
   const title = agentDisplayTitle(agent);
   const roleLabel = agentDisplayRoleLabel(agent);
   const taskLabel = pickedUpTaskLabel(agent, taskTitle, parsed.taskId);
@@ -132,20 +125,7 @@ export function AgentCard({
           : undefined
       }
     >
-      <div className={styles.avatarContainer}>
-        <div
-          className={styles.avatar}
-          style={{ backgroundColor: avatarColor, color: textColor }}
-          aria-label={`${agent.name} avatar`}
-        >
-          {initial}
-        </div>
-        <span
-          className={styles.statusDot}
-          style={{ backgroundColor: dotColor }}
-          aria-hidden="true"
-        />
-      </div>
+      <AgentAvatar name={agent.name} agent={agent} compact={compact} />
 
       <div className={styles.info}>
         <span className={nameClassName} title={agent.name}>

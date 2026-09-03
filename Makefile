@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-aft test-aft-real test-aft-real-claude test-aft-real-opencode test-aft-real-cursor test-aft-real-all test-aft-terminal test-aft-live-interactive test-aft-live-workers test-aft-live-pr-review test-aft-strict test-aft-heal demo test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend check-product-invariants gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli test-skills-release-compat fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-ci test-aft test-aft-real test-aft-real-claude test-aft-real-opencode test-aft-real-cursor test-aft-real-all test-aft-terminal test-aft-live-interactive test-aft-live-workers test-aft-live-pr-review test-aft-strict test-aft-heal demo test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend check-product-invariants gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify local-mode-skills-verify local-mode-skill-pointer-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -90,6 +90,13 @@ test-playground:
 test-fleetdb-embedded: build
 	@echo "Running fleet-db-only clean checkout embedded smoke..."
 	LOOM_BIN="$(PWD)/loom" scripts/test-fleetdb-clean-checkout.sh
+
+# Release-blocking compatibility proof for a pinned real-world Agent Skills
+# corpus. The release workflow supplies fleet-db main deliberately: Loom and
+# FleetDB are released as one compatibility pair rather than against a stale
+# server pin.
+test-skills-release-compat:
+	@scripts/test-vercel-skills-compat.sh
 
 test-fleetdb-supervisor:
 	@echo "Running fleet-db supervisor control-plane gate..."
@@ -303,6 +310,21 @@ local-mode-routing-verify:
 # `make local-mode-up` stack plus curl, openssl, and python3.
 local-mode-webhook-verify:
 	@test/local-mode/verify-webhook.sh
+
+# Deterministic end-to-end verification of the skills vertical (fleet-db CRUD
+# -> CLI -> materializer -> INDEX.md/catalog projection -> baked backend
+# hook/pointer config) against a running local-mode stack. No model calls.
+local-mode-skills-verify:
+	@test/local-mode/verify-skills.sh
+
+# Live-model smoke: a long-lived agent session must learn about skills
+# added/removed after its session-start snapshot, via the managed
+# UserPromptSubmit hook (files) and the loom-skill-catalog/INDEX.md pointer
+# (awareness). Backend is autodetected from the running stack (codex or claude,
+# override with SKILL_POINTER_BACKEND); needs make local-mode-codex-up or
+# make local-mode-claude-up. Burns real model tokens — keep out of CI.
+local-mode-skill-pointer-verify:
+	@test/local-mode/verify-skill-pointer.sh
 
 local-mode-codex-verify:
 	@LOOM_LOCAL_MODE_PLAN_TASK_ID="$${LOOM_LOCAL_MODE_PLAN_TASK_ID:-LOCALMODE-2}" \
@@ -522,6 +544,18 @@ demo:
 		bash scripts/start-e2e-server.sh
 
 # Run Playwright API e2e tests (self-contained: builds loom, starts server, runs tests)
+# Run the browser e2e suite exactly as CI does: the chromium-ci project, which
+# is the mocked chromium suite minus the quarantined specs listed in
+# playwright.config.ts. --ignore-snapshots because the committed PNGs were
+# generated on the author's machine and snapshotPathTemplate omits {platform},
+# so they cannot match another OS's font rendering; the specs still run.
+# --workers=2 overrides the config's blanket workers:1-under-CI: that setting
+# suits the small API tier, but serialising 360+ browser tests takes hours.
+test-e2e-ci: ensure-frontend-deps
+	@echo "Running Playwright browser e2e tests (mocked, CI selection)..."
+	@cd $(FRONTEND_DIR) && npx playwright install --with-deps chromium 2>/dev/null || true
+	@cd $(FRONTEND_DIR) && npx playwright test --project=chromium-ci --workers=2 --ignore-snapshots
+
 test-e2e-api: ensure-frontend-deps
 	@echo "Running Playwright API e2e tests (self-contained)..."
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 npx playwright test --project=api
@@ -665,9 +699,19 @@ check-go:
 	@echo "=== [12/14] Product truth registry ==="
 	@$(MAKE) check-product-invariants
 	@echo "=== [13/14] Go: test with race detector ==="
-	@./scripts/with-clean-loom-env.sh go test -p 1 -race -covermode=atomic -coverprofile=/tmp/loom.coverage.out -timeout 15m ./...
-	@echo "=== [14/14] Go: coverage threshold ==="
-	@COVERAGE_THRESHOLD=60 ./scripts/check-coverage.sh
+	# Steps 13 and 14 share one shell so they can share a per-run profile path.
+#   A fixed /tmp path is unsafe two ways: two concurrent gates interleave writes
+#   into one file, and a gate killed mid-`go test` leaves a truncated file behind
+#   for the next run to read. Either produces a malformed record and the opaque
+#   failure `cover: line "..." doesn't match expected format`, which looks like a
+#   coverage regression but is a corrupt profile. The trap removes it on every
+#   exit path, so nothing stale survives to poison a later run.
+	@set -e; \
+	 profile="$$(mktemp "$${TMPDIR:-/tmp}/loom.coverage.XXXXXX")"; \
+	 trap 'rm -f "$$profile"' EXIT; \
+	 ./scripts/with-clean-loom-env.sh go test -p 1 -race -covermode=atomic -coverprofile="$$profile" -timeout 15m ./...; \
+	 echo "=== [14/14] Go: coverage threshold ==="; \
+	 COVERAGE_THRESHOLD=60 ./scripts/check-coverage.sh "$$profile"
 	@echo "=== Go quality gates PASSED ==="
 
 check-product-invariants:
@@ -740,9 +784,23 @@ hooks:
 	@pre-commit install
 	@echo "Pre-commit hooks installed"
 
-# Ensure hooks are installed (runs once — skips if pre-push hook already exists)
+# Ensure hooks are installed (skips only when the installed pre-push already
+# matches scripts/hooks/pre-push byte for byte)
+# Reinstall when the hook is missing *or* has drifted from scripts/hooks/pre-push.
+# scripts/hooks/pre-push is the source of truth and the installed hook is a
+# managed artifact: `cmp` sees any difference, so a hand-edited local hook is
+# overwritten on the next `make dev`. That is deliberate — local copies drifting
+# is the whole failure mode below — and `make hooks` announces the reinstall.
+# An existence-only check lets a stale hook survive forever, which is not
+# hypothetical: a pre-push installed before scripts/hooks/pre-push started
+# clearing `git rev-parse --local-env-vars` leaves GIT_DIR exported into
+# `make check`. Every test that drives a throwaway repo under t.TempDir() then
+# resolves git against this checkout instead — `git commit` fires this repo's
+# pre-commit hook ("No .pre-commit-config.yaml file was found") and branch
+# lookups return the branch being pushed. Ten packages fail that way and the
+# gate can never pass, so nothing can be pushed at all.
 ensure-hooks:
-	@test -f '$(GIT_HOOKS_DIR)/pre-push' || $(MAKE) hooks
+	@cmp -s scripts/hooks/pre-push '$(GIT_HOOKS_DIR)/pre-push' || $(MAKE) hooks
 
 # Check dev dependencies
 dev-check:
@@ -789,6 +847,7 @@ help:
 	@echo "  make test-e2e          - Run Playwright mocked e2e tests (no server)"
 	@echo "  make demo              - Start manual e2e stack on :8190/:3190"
 	@echo "  make test-fleetdb-ui   - Run fleet-db-only UI regression suite"
+	@echo "  make test-skills-release-compat - Verify the pinned Vercel corpus against a FleetDB checkout"
 	@echo "  make test-env-up        - Start the disposable fleet-db test backend (workspace LOOMTEST, :53351)"
 	@echo "  make test-env-down      - Stop it and drop its volumes"
 	@echo "                            Point a shell at it: eval \"\$$(scripts/test-env.sh env)\""
@@ -797,6 +856,8 @@ help:
 	@echo "  make local-mode-codex-up - Run local-mode stack with Codex agents"
 	@echo "  make local-mode-verify  - Verify deterministic local-mode stack"
 	@echo "  make local-mode-codex-verify - Verify Codex local-mode stack"
+	@echo "  make local-mode-skills-verify - Verify the skills vertical e2e (no model)"
+	@echo "  make local-mode-skill-pointer-verify - Live-model smoke of the skill catalog pointer"
 	@echo "  make local-mode-logs    - Tail selected local-mode stack logs"
 	@echo "  make local-mode-down    - Stop selected local-mode stack and volumes"
 	@echo "    LOCAL_MODE_COMPOSE='docker compose' LOCAL_MODE_COMPOSE_PROJECT=name LOCAL_MODE_UI_PORT=8383 LOCAL_MODE_API_PORT=8382 LOCAL_MODE_FLEETDB_PORT=8380"

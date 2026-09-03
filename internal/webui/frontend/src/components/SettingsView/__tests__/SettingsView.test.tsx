@@ -170,6 +170,10 @@ describe("SettingsView", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
     mockUseToast.mockReturnValue({
       showToast: mockShowToast,
       toasts: [],
@@ -742,6 +746,31 @@ describe("SettingsView", () => {
         screen.queryByTestId("terminal-font-panel"),
       ).not.toBeInTheDocument();
       expect(screen.queryByText("Terminal Font")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("category navigation", () => {
+    it("shows only panels from the selected category", () => {
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+
+      const { container } = render(<SettingsView />);
+      const backendPanel = container.querySelector(
+        '[data-settings-panel="backend"]',
+      );
+      const cliPanel = container.querySelector(
+        '[data-settings-panel="ai-clis"]',
+      );
+
+      expect(backendPanel).not.toHaveAttribute("data-category-hidden");
+      expect(cliPanel).toHaveAttribute("data-category-hidden", "true");
+
+      fireEvent.click(screen.getByRole("button", { name: /AI CLIs/ }));
+
+      expect(backendPanel).toHaveAttribute("data-category-hidden", "true");
+      expect(cliPanel).not.toHaveAttribute("data-category-hidden");
+      expect(
+        screen.getByRole("heading", { name: "AI CLIs", level: 2 }),
+      ).toBeInTheDocument();
     });
   });
 

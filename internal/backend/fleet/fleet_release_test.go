@@ -268,8 +268,10 @@ func TestUpdate_ReviewOrBlockedFromInProgress_ReleasesClaim(t *testing.T) {
 
 			status := target
 			empty := ""
+			// A non-empty operator Actor must never displace the lock holder on
+			// /release-lock: release identity is the claim's, not the operator's.
 			if err := fb.Update(context.Background(), "test-1",
-				backend.UpdateParams{Status: &status, Assignee: &empty}); err != nil {
+				backend.UpdateParams{Status: &status, Assignee: &empty, Actor: "operator@local"}); err != nil {
 				t.Fatalf("Update: %v", err)
 			}
 			if !sawReleaseLock {

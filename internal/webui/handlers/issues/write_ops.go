@@ -82,6 +82,7 @@ func createParamsFromRequest(r *http.Request, req *IssueCreateRequest) service.C
 
 // handleCloseIssue returns a handler that closes an issue by ID.
 func HandleCloseIssue(svc service.IssueService) http.HandlerFunc {
+	fallbackActor := resolveOperatorActor()
 	return func(w http.ResponseWriter, r *http.Request) {
 		issueID := r.PathValue("id")
 		if issueID == "" {
@@ -107,6 +108,7 @@ func HandleCloseIssue(svc service.IssueService) http.HandlerFunc {
 
 		params := service.CloseIssueParams{
 			IssueID:     issueID,
+			Actor:       operatorActor(r.Context(), fallbackActor),
 			Reason:      req.ResolvedReason(),
 			Session:     req.Session,
 			SuggestNext: req.SuggestNext,
@@ -165,6 +167,7 @@ type ReopenResponse struct {
 // HandleReopenIssue returns a handler that transitions a closed issue back
 // to open status. An empty body or {} is valid.
 func HandleReopenIssue(svc service.IssueService) http.HandlerFunc {
+	fallbackActor := resolveOperatorActor()
 	return func(w http.ResponseWriter, r *http.Request) {
 		issueID := r.PathValue("id")
 		if issueID == "" {
@@ -199,6 +202,7 @@ func HandleReopenIssue(svc service.IssueService) http.HandlerFunc {
 
 		err := svc.ReopenIssue(r.Context(), service.ReopenIssueParams{
 			IssueID: issueID,
+			Actor:   operatorActor(r.Context(), fallbackActor),
 			Reason:  req.Reason,
 		})
 		if err != nil {

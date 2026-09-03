@@ -19,7 +19,7 @@ import { useStore } from "zustand";
 
 import { useParams, useNavigate, Outlet } from "react-router-dom";
 
-import { applyReviewDecision } from "@/api";
+import { applyReviewDecision, updateIssue } from "@/api";
 import {
   fetchWorkspaceApi,
   runOnboardingFirstTask,
@@ -27,7 +27,7 @@ import {
 } from "@/api/workspace";
 import type { IssueContext } from "@/api/terminal";
 import { buildShareUrl } from "@/utils/buildShareUrl";
-import { getReviewType } from "@/utils/issue";
+import { getReviewType, NEEDS_REVISION_LABEL } from "@/utils/issue";
 import { resolvePRReviewRef } from "@/utils/agentDisplay";
 import { ViewSubSwitcher } from "@/components/ViewSubSwitcher/ViewSubSwitcher";
 import {
@@ -93,6 +93,7 @@ import {
 import { useIssueFilter } from "@/hooks/issues/useIssueFilter";
 import { useBlockedIssues } from "@/hooks/issues/useBlockedIssues";
 import { useIssueDetail } from "@/hooks/issues/useIssueDetail";
+import { useOperatorQueue } from "@/hooks/issues/useOperatorQueue";
 import { useSearchScope } from "@/hooks/issues/useSearchScope";
 import { useToast } from "@/hooks/ui/useToast";
 import { useTheme } from "@/hooks/ui/useTheme";
@@ -250,6 +251,7 @@ function App() {
 
   const issuesMap = useStore(issueStore, (s) => s.issuesMap);
   const issues = useMemo(() => [...issuesMap.values()], [issuesMap]);
+  const operatorQueue = useOperatorQueue(issues);
   const hasOnboardingRepo = useMemo(
     () => workspaceRepos.some((repo) => isOnboardingRepo(repo)),
     [workspaceRepos],
@@ -295,6 +297,7 @@ function App() {
   // Drive issue fetching based on active view mode, workspace, and source repos
   const issueModeByView: Partial<Record<ViewMode, "graph" | "kanban">> = {
     graph: "graph",
+    home: "kanban",
     kanban: "kanban",
     list: "kanban",
     table: "kanban",
@@ -314,6 +317,12 @@ function App() {
   };
   const issueMode = issueModeByView[activeView] ?? ("ready" as const);
 
+  // Home is the workspace, never a repo: it reads the whole collection even
+  // when the operator has narrowed Kanban to a subset of repos. Derived here
+  // (not in the deps) so only crossing the Home boundary refetches.
+  const effectiveSourceRepos =
+    activeView === "home" ? undefined : sourceReposFilter;
+
   useEffect(() => {
     const controller = new AbortController();
     const params: Parameters<typeof fetchIssues>[0] = {
@@ -321,10 +330,10 @@ function App() {
       mode: issueMode,
       signal: controller.signal,
     };
-    if (sourceReposFilter) params.sourceRepos = sourceReposFilter;
+    if (effectiveSourceRepos) params.sourceRepos = effectiveSourceRepos;
     fetchIssues(params);
     return () => controller.abort();
-  }, [fetchIssues, workspaceId, issueMode, sourceReposFilter]);
+  }, [fetchIssues, workspaceId, issueMode, effectiveSourceRepos]);
 
   // Filter state with URL synchronization
   const [filters, filterActions] = useFilterState();
@@ -391,15 +400,16 @@ function App() {
     filterOptions,
   );
 
-  // Only fetch blocked issues separately when NOT in kanban mode (kanban mode includes it inline)
+  // Only fetch blocked issues separately when the active issue mode does not
+  // already include the enriched blocked fields inline.
   const { data: blockedIssuesData } = useBlockedIssues({
-    enabled: activeView !== "kanban",
+    enabled: activeView !== "kanban" && activeView !== "home",
   });
 
   // Derive blockedIssuesMap from enriched issue data (kanban mode) or separate fetch
   const blockedIssuesMap = useMemo(() => {
-    if (activeView === "kanban") {
-      // In kanban mode, blocked info is already in the issue data
+    if (activeView === "kanban" || activeView === "home") {
+      // In kanban-fetch modes, blocked info is already in the issue data.
       const map = new Map<string, BlockedInfo>();
       for (const issue of issues) {
         if (issue.is_blocked) {
@@ -458,7 +468,7 @@ function App() {
 
   // Previous view for issue-detail back navigation.
   // Tracks the last "content" view (excludes issue-detail, terminal, settings).
-  const previousViewRef = useRef<ViewMode>("kanban");
+  const previousViewRef = useRef<ViewMode>("home");
   if (
     activeView !== "issue-detail" &&
     activeView !== "terminal" &&
@@ -735,8 +745,26 @@ function App() {
           );
           await refetch();
         } else if (reviewType === "plan") {
-          // Plan review: Move to open (ready for implementation)
-          await updateIssueStatus(issue.id, "open");
+          // Plan review: move to open AND clear the rejection marker.
+          //
+          // Removing the label is what makes the review workflow terminate.
+          // Reject stamps `needs-revision`; the planner selects on it
+          // (taskfilter.go: NeedsPlan = !HasDesign || HasNeedsRevision) and the
+          // worker is excluded by it (ReadyToImplement = HasDesign &&
+          // !HasNeedsRevision). Approving status-only leaves the label on, so
+          // the planner immediately re-claims the issue and the human is asked
+          // to approve the same plan again, forever — independent of how good
+          // the plan is.
+          //
+          // Uses updateIssue + refetch rather than the optimistic
+          // updateIssueStatus path (which carries status only), mirroring
+          // handleReject below. Removal is unconditional and idempotent, so
+          // approving a never-rejected issue is a no-op server-side.
+          await updateIssue(workspaceId, issue.id, {
+            status: "open",
+            remove_labels: [NEEDS_REVISION_LABEL],
+          });
+          await refetch();
         } else if (reviewType === "help") {
           // Needs help: Move to in_progress (unblock)
           await updateIssueStatus(issue.id, "in_progress");
@@ -745,11 +773,13 @@ function App() {
         // Close the detail panel and clean up after successful approve
         handlePanelClose();
       } catch (err) {
-        // updateIssueStatus errors are handled by useOptimisticUpdate rollback
-        // Only show toast for non-updateIssueStatus errors (e.g., closeIssue)
+        // updateIssueStatus errors are handled by useOptimisticUpdate rollback,
+        // so the "help" branch stays silent here. The "code" (closeIssue) and
+        // "plan" (updateIssue) branches do NOT go through that path, so without
+        // a toast a failed approve would look identical to a successful one.
         if (!mountedRef.current) return;
         const reviewType = getReviewType(issue);
-        if (reviewType === "code") {
+        if (reviewType === "code" || reviewType === "plan") {
           const message =
             err instanceof Error ? err.message : "Failed to approve";
           showToast(message, { type: "error" });
@@ -1259,6 +1289,7 @@ function App() {
 
   // Whether the current view depends on issue data (for stale banner suppression)
   const isIssueBasedView =
+    activeView === "home" ||
     activeView === "kanban" ||
     activeView === "list" ||
     activeView === "table" ||
@@ -1401,8 +1432,8 @@ function App() {
     <button
       type="button"
       className={styles.brandButton}
-      onClick={() => navigateToView("kanban")}
-      aria-label="Loom home — return to Kanban board"
+      onClick={() => navigateToView("home")}
+      aria-label="Loom home"
     >
       <span className={styles.brandMark} aria-hidden="true">
         ◇
@@ -1440,6 +1471,14 @@ function App() {
     />
   );
 
+  // Views that bring their own left tree suppress the workspace sidebar, so
+  // the page owns its chrome instead of showing two trees side by side.
+  const viewOwnsChrome =
+    activeView === "files" ||
+    activeView === "skills" ||
+    activeView === "settings" ||
+    activeView === "prs";
+
   const terminalContainerClassName =
     activeView === "terminal"
       ? styles.terminalRouteContainer
@@ -1460,13 +1499,14 @@ function App() {
       <SearchTermProvider value={activeSearchTerm}>
         <AppLayout
           title={headerTitle}
-          onTitleClick={() => navigateToView("kanban")}
+          onTitleClick={() => navigateToView("home")}
           actions={headerActions}
           navRail={
             <NavRail
               activeView={activeView}
               onChange={handleNavChange}
               sessionCount={activeSessionCount}
+              operatorQueueCount={operatorQueue.length}
               badges={{ terminal: hasTerminalUnread }}
               workspaces={(workspace?.workspaces ?? []).map((ws) => ({
                 id: ws.id,
@@ -1477,7 +1517,7 @@ function App() {
               onAddWorkspace={() => setShowCreateWorkspace(true)}
             />
           }
-          sidebar={activeView === "files" ? null : sidebarContent}
+          sidebar={viewOwnsChrome ? null : sidebarContent}
         >
           <div
             className={

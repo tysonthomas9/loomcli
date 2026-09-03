@@ -46,6 +46,7 @@ var handleClaimIssue = HandleClaimIssue
 var handleDeleteIssue = HandleDeleteIssue
 var handleMoveIssue = HandleMoveIssue
 var handleGetIssueEvents = HandleGetIssueEvents
+var handleGetIssueJourney = HandleGetIssueJourney
 var handleAddDependency = HandleAddDependency
 var handleRemoveDependency = HandleRemoveDependency
 var handleReady = HandleReady
@@ -174,6 +175,8 @@ type mockIssueService struct {
 	removeDependencyFunc  func(ctx context.Context, params service.RemoveDependencyParams) error
 	listDependenciesFunc  func(ctx context.Context, issueID string) (json.RawMessage, error)
 	listEventsFunc        func(ctx context.Context, params service.EventListParams) ([]*types.Event, error)
+	listEventHistoryFunc  func(ctx context.Context, params service.EventListParams) (*service.EventListResult, error)
+	getJourneyFunc        func(ctx context.Context, issueID string) (*service.Journey, error)
 	moveIssueFunc         func(ctx context.Context, params service.MoveIssueParams) (*service.MoveIssueResult, error)
 	searchIssuesFunc      func(ctx context.Context, params service.SearchIssuesParams) (json.RawMessage, error)
 }
@@ -268,6 +271,22 @@ func (m *mockIssueService) ListEvents(ctx context.Context, params service.EventL
 		return m.listEventsFunc(ctx, params)
 	}
 	return nil, nil
+}
+func (m *mockIssueService) ListEventHistory(ctx context.Context, params service.EventListParams) (*service.EventListResult, error) {
+	if m.listEventHistoryFunc != nil {
+		return m.listEventHistoryFunc(ctx, params)
+	}
+	events, err := m.ListEvents(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	return &service.EventListResult{Events: events}, nil
+}
+func (m *mockIssueService) GetJourney(ctx context.Context, issueID string) (*service.Journey, error) {
+	if m.getJourneyFunc != nil {
+		return m.getJourneyFunc(ctx, issueID)
+	}
+	return &service.Journey{}, nil
 }
 func (m *mockIssueService) MoveIssue(ctx context.Context, params service.MoveIssueParams) (*service.MoveIssueResult, error) {
 	if m.moveIssueFunc != nil {

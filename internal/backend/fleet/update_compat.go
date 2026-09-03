@@ -53,13 +53,14 @@ func (b *FleetBackend) patchIssueTolerantly(
 	ctx context.Context,
 	id string,
 	req map[string]interface{},
+	actor string,
 ) (dropped []string, err error) {
 	path := "/issues/" + url.PathEscape(id)
 	// Each iteration removes exactly one field, so this cannot spin: it is
 	// bounded by the field count, and any error that is not a named
 	// unknown-field rejection returns immediately.
 	for len(req) > 0 {
-		if _, err = b.exec(ctx, "Update", "PATCH", path, req); err == nil {
+		if _, err = b.execResponseAsActor(ctx, "Update", "PATCH", path, req, actor); err == nil {
 			sort.Strings(dropped)
 			return dropped, nil
 		}

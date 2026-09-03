@@ -280,42 +280,6 @@
   margin-bottom: 24px;
 }
 
-.reviewApproveButton,
-.reviewRejectButton {
-  padding: 8px 16px;
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-  border: none;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition:
-    background-color var(--transition-fast),
-    opacity var(--transition-fast);
-}
-
-.reviewApproveButton {
-  color: white;
-  background-color: var(--color-success);
-}
-
-.reviewApproveButton:hover:not(:disabled) {
-  background-color: color-mix(in srgb, var(--color-success) 85%, black);
-}
-
-.reviewApproveButton:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.reviewRejectButton {
-  color: white;
-  background-color: var(--color-danger);
-}
-
-.reviewRejectButton:hover:not(:disabled) {
-  background-color: color-mix(in srgb, var(--color-danger) 85%, black);
-}
-
 /* ============= Labels ============= */
 
 .labels {
@@ -513,10 +477,5 @@
 
   .contentArea {
     padding: 16px;
-  }
-
-  .reviewApproveButton,
-  .reviewRejectButton {
-    min-height: var(--touch-target-min);
   }
 }

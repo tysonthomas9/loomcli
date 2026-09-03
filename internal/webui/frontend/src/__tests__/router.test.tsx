@@ -8,9 +8,11 @@
  * Verifies that each view route under /ws/:workspaceId resolves to the
  * correct Component via React Router's lazy(), that the terminal route
  * uses a non-lazy Component rendering null, and that index/catch-all
- * routes redirect to kanban.
+ * routes redirect to home.
  */
 
+import { render, screen } from "@testing-library/react";
+import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { describe, it, expect, vi } from "vitest";
 
 // ---------------------------------------------------------------------------
@@ -18,6 +20,9 @@ import { describe, it, expect, vi } from "vitest";
 // Each mock exports the named function that router.tsx references in its
 // .then(m => ({ Component: m.XPage })) callback.
 // ---------------------------------------------------------------------------
+
+const HomePage = () => null;
+vi.mock("@/views/HomePage", () => ({ HomePage }));
 
 const KanbanPage = () => null;
 vi.mock("@/views/KanbanPage", () => ({ KanbanPage }));
@@ -42,6 +47,9 @@ vi.mock("@/views/WorkspacePage", () => ({ WorkspacePage }));
 
 const FilesPage = () => null;
 vi.mock("@/views/FilesPage", () => ({ FilesPage }));
+
+const SkillsPage = () => null;
+vi.mock("@/views/SkillsPage", () => ({ SkillsPage }));
 
 const IssueDetailPage = () => null;
 vi.mock("@/views/IssueDetailPage", () => ({ IssueDetailPage }));
@@ -69,7 +77,7 @@ vi.mock("react-router-dom", async () => {
   };
 });
 
-import { router } from "@/router";
+import { RedirectToWorkspaceHome, router } from "@/router";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -114,6 +122,7 @@ describe("router view routes", () => {
       const viewRoutes = getViewRoutes();
       const paths = viewRoutes.filter((r) => r.path).map((r) => r.path);
 
+      expect(paths).toContain("home");
       expect(paths).toContain("kanban");
       expect(paths).toContain("table");
       expect(paths).toContain("graph");
@@ -123,6 +132,7 @@ describe("router view routes", () => {
       expect(paths).toContain("settings");
       expect(paths).toContain("workspace");
       expect(paths).toContain("files");
+      expect(paths).toContain("skills");
       expect(paths).toContain("issues/:issueId");
       expect(paths).toContain("*");
     });
@@ -135,6 +145,7 @@ describe("router view routes", () => {
 
   describe("lazy routes resolve to the correct Component", () => {
     const lazyCases: [string, React.ComponentType][] = [
+      ["home", HomePage],
       ["kanban", KanbanPage],
       ["table", TablePage],
       ["graph", GraphPage],
@@ -143,6 +154,7 @@ describe("router view routes", () => {
       ["settings", SettingsPage],
       ["workspace", WorkspacePage],
       ["files", FilesPage],
+      ["skills", SkillsPage],
       ["issues/:issueId", IssueDetailPage],
     ];
 
@@ -168,26 +180,43 @@ describe("router view routes", () => {
     });
   });
 
-  describe("index route redirects to kanban", () => {
-    it("renders a Navigate element to kanban with replace", () => {
+  describe("index route redirects to home", () => {
+    it("renders a Navigate element to home with replace", () => {
       const indexRoute = getViewRoutes().find((r) => r.index === true);
       expect(indexRoute).toBeDefined();
       expect(indexRoute!.element).toBeDefined();
 
       const element = indexRoute!.element as React.ReactElement;
-      expect(element.props.to).toBe("kanban");
+      expect(element.props.to).toBe("home");
       expect(element.props.replace).toBe(true);
     });
   });
 
-  describe("catch-all route redirects to kanban", () => {
-    it("renders a Navigate element to kanban with replace", () => {
+  describe("catch-all route redirects to home", () => {
+    it("uses the absolute workspace-home redirect, not a relative Navigate", () => {
       const catchAll = findRoute("*");
       expect(catchAll.element).toBeDefined();
 
       const element = catchAll.element as React.ReactElement;
-      expect(element.props.to).toBe("kanban");
-      expect(element.props.replace).toBe(true);
+      expect(element.type).toBe(RedirectToWorkspaceHome);
+    });
+
+    it("redirects an unknown nested path to /ws/:id/home exactly once", () => {
+      const testRouter = createMemoryRouter(
+        [
+          {
+            path: "/ws/:workspaceId",
+            children: [
+              { path: "home", element: <div>home view</div> },
+              { path: "*", element: <RedirectToWorkspaceHome /> },
+            ],
+          },
+        ],
+        { initialEntries: ["/ws/ws-1/nonsense/deeper"] },
+      );
+      render(<RouterProvider router={testRouter} />);
+      expect(screen.getByText("home view")).toBeTruthy();
+      expect(testRouter.state.location.pathname).toBe("/ws/ws-1/home");
     });
   });
 });

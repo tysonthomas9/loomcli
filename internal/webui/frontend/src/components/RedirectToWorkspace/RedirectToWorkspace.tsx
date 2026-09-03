@@ -53,14 +53,14 @@ export function RedirectToWorkspace() {
         }
 
         if (lastId && workspaces.some((ws) => ws.id === lastId)) {
-          navigate(`/ws/${lastId}/kanban`, { replace: true });
+          navigate(`/ws/${lastId}/home`, { replace: true });
           return;
         }
 
         if (lastId) clearLastWorkspaceId(lastId);
         const firstWorkspace = workspaces[0];
         if (firstWorkspace) {
-          navigate(`/ws/${firstWorkspace.id}/kanban`, { replace: true });
+          navigate(`/ws/${firstWorkspace.id}/home`, { replace: true });
         } else {
           setResolving(false);
         }

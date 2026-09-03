@@ -1,7 +1,6 @@
 package api
 
 import (
-	"strconv"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -219,8 +218,8 @@ func eventToData(e gen.IssueEvent) backend.EventData {
 	if e.FieldCount != nil {
 		fieldCount = *e.FieldCount
 	}
-	return backend.EventData{
-		ID:         strconv.FormatInt(e.Id, 10),
+	d := backend.EventData{
+		ID:         e.Id,
 		IssueID:    e.IssueId,
 		Kind:       e.EventType,
 		Actor:      e.Actor,
@@ -232,6 +231,35 @@ func eventToData(e gen.IssueEvent) backend.EventData {
 		Comment:    e.Comment,
 		CreatedAt:  e.CreatedAt,
 	}
+	if e.Target != nil {
+		d.Target = *e.Target
+	}
+	if e.Payload != nil {
+		d.Payload = *e.Payload
+	}
+	if e.Category != nil {
+		d.Category = *e.Category
+	}
+	if e.Summary != nil {
+		d.Summary = *e.Summary
+	}
+	if e.Changes != nil {
+		d.Changes = make([]backend.FieldChange, 0, len(*e.Changes))
+		for _, change := range *e.Changes {
+			mapped := backend.FieldChange{Field: change.Field}
+			if change.Before != nil {
+				mapped.Before = *change.Before
+			}
+			if change.After != nil {
+				mapped.After = *change.After
+			}
+			d.Changes = append(d.Changes, mapped)
+		}
+	}
+	if e.Metadata != nil {
+		d.Metadata = *e.Metadata
+	}
+	return d
 }
 
 // statisticsToData converts gen.Statistics to backend.StatsData.

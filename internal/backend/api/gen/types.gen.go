@@ -2165,17 +2165,30 @@ type IssueStatus string
 
 // IssueEvent Audit trail entry for an issue
 type IssueEvent struct {
-	Actor      string    `json:"actor"`
-	Comment    *string   `json:"comment,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	EventType  string    `json:"event_type"`
-	Field      *string   `json:"field,omitempty"`
-	FieldCount *int      `json:"field_count,omitempty"`
-	Fields     *[]string `json:"fields,omitempty"`
-	Id         int64     `json:"id"`
-	IssueId    string    `json:"issue_id"`
-	NewValue   *string   `json:"new_value,omitempty"`
-	OldValue   *string   `json:"old_value,omitempty"`
+	Actor      string                   `json:"actor"`
+	Category   *string                  `json:"category,omitempty"`
+	Changes    *[]IssueEventFieldChange `json:"changes,omitempty"`
+	Comment    *string                  `json:"comment,omitempty"`
+	CreatedAt  time.Time                `json:"created_at"`
+	EventType  string                   `json:"event_type"`
+	Field      *string                  `json:"field,omitempty"`
+	FieldCount *int                     `json:"field_count,omitempty"`
+	Fields     *[]string                `json:"fields,omitempty"`
+	Id         string                   `json:"id"`
+	IssueId    string                   `json:"issue_id"`
+	Metadata   *map[string]string       `json:"metadata,omitempty"`
+	NewValue   *string                  `json:"new_value,omitempty"`
+	OldValue   *string                  `json:"old_value,omitempty"`
+	Payload    *string                  `json:"payload,omitempty"`
+	Summary    *string                  `json:"summary,omitempty"`
+	Target     *string                  `json:"target,omitempty"`
+}
+
+// IssueEventFieldChange Before and after values for one field changed by an issue event
+type IssueEventFieldChange struct {
+	After  *string `json:"after,omitempty"`
+	Before *string `json:"before,omitempty"`
+	Field  string  `json:"field"`
 }
 
 // IssueResponse Full issue detail returned by get-single-issue endpoint. Includes dependency/dependent refs, comments, and counts.
@@ -2253,6 +2266,65 @@ type IssueTabState struct {
 	IssueId     string     `json:"issue_id"`
 	Tabs        []IssueTab `json:"tabs"`
 	UpdatedAt   time.Time  `json:"updated_at"`
+}
+
+// Journey defines model for Journey.
+type Journey struct {
+	AgentWindows []JourneyAgentWindow `json:"agent_windows"`
+	Honesty      JourneyHonesty       `json:"honesty"`
+	LeadTime     JourneyLeadTime      `json:"lead_time"`
+	Spans        []JourneySpan        `json:"spans"`
+}
+
+// JourneyAgentWindow defines model for JourneyAgentWindow.
+type JourneyAgentWindow struct {
+	Agent   string     `json:"agent"`
+	End     *time.Time `json:"end"`
+	Outcome string     `json:"outcome"`
+	Start   time.Time  `json:"start"`
+	TaskId  string     `json:"task_id"`
+}
+
+// JourneyHonesty defines model for JourneyHonesty.
+type JourneyHonesty struct {
+	AgentWindowsAvailable bool    `json:"agent_windows_available"`
+	AgentWindowsReason    *string `json:"agent_windows_reason,omitempty"`
+	Bounded               bool    `json:"bounded"`
+	CompleteHistory       bool    `json:"complete_history"`
+	EventsSeen            int     `json:"events_seen"`
+	HasMore               bool    `json:"has_more"`
+	Reason                *string `json:"reason,omitempty"`
+	TotalEvents           *int    `json:"total_events,omitempty"`
+}
+
+// JourneyLeadTime defines model for JourneyLeadTime.
+type JourneyLeadTime struct {
+	AgentWorkingMs      int64 `json:"agent_working_ms"`
+	HaltedMs            int64 `json:"halted_ms"`
+	QueuedMs            int64 `json:"queued_ms"`
+	TotalMs             int64 `json:"total_ms"`
+	WaitingOnOperatorMs int64 `json:"waiting_on_operator_ms"`
+}
+
+// JourneyResponse defines model for JourneyResponse.
+type JourneyResponse struct {
+	Data    *Journey `json:"data,omitempty"`
+	Error   *string  `json:"error,omitempty"`
+	Success bool     `json:"success"`
+}
+
+// JourneySpan defines model for JourneySpan.
+type JourneySpan struct {
+	Actor         *string    `json:"actor"`
+	Approximate   bool       `json:"approximate"`
+	End           *time.Time `json:"end"`
+	Kind          string     `json:"kind"`
+	NeedsRevision bool       `json:"needs_revision"`
+	Owner         *string    `json:"owner"`
+	Stage         string     `json:"stage"`
+	Stalled       bool       `json:"stalled"`
+	Start         time.Time  `json:"start"`
+	UnknownStart  bool       `json:"unknown_start"`
 }
 
 // MessageResponse defines model for MessageResponse.
@@ -3497,6 +3569,15 @@ type GetGraphParams struct {
 
 // GetGraphParamsStatus defines parameters for GetGraph.
 type GetGraphParamsStatus string
+
+// GetIssueEventsParams defines parameters for GetIssueEvents.
+type GetIssueEventsParams struct {
+	// Limit Maximum events to return. Without `since`, Loom returns the most recent tail and accepts up to 500. With `since`, Loom returns one oldest-first page and clamps the limit to fleet-db's 200-event page maximum.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Since Opaque fleet-db history cursor. When present (including an empty value), returns one oldest-first page; a bare `since=` starts at the beginning of the issue history.
+	Since *string `form:"since,omitempty" json:"since,omitempty"`
+}
 
 // ApplyReviewDecisionParams defines parameters for ApplyReviewDecision.
 type ApplyReviewDecisionParams struct {

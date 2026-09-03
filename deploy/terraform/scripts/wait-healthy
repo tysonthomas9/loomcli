@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Block until the stack is actually serving, not merely until the VM boots.
+# cloud-init has to install docker, pull three images and start four
+# containers, so "instance RUNNING" is several minutes early.
+set -euo pipefail
+NAME="${1:?stack name}"; PROJECT="${2:?project}"; ZONE="${3:?zone}"
+# Passed in from a Terraform output, not hardcoded. With 8282 baked in, any
+# stack that overrode iap_web_ports sat here for the full 15 minutes and then
+# reported a timeout -- while being completely healthy on a different port.
+API_PORT="${4:?loom api port}"; UI_PORT="${5:?ui port}"
+# 25 minutes: a cold Cloud NAT can hold cloud-init's egress wait for up to
+# ten of them before package install even starts.
+DEADLINE=$(( $(date +%s) + 1500 ))
+
+ssh_probe() {
+  gcloud compute ssh "$NAME" --project "$PROJECT" --zone "$ZONE" \
+    --tunnel-through-iap --quiet --command "$1" 2>/dev/null
+}
+
+while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+  if out="$(ssh_probe 'systemctl is-active loom-stack 2>/dev/null || true')"; then
+    case "$out" in
+      *active*)
+        # is-active flips to active once compose --wait returns, which already
+        # means every service healthcheck passed. Confirm both externally
+        # reachable HTTP surfaces anyway, including Caddy's SPA response.
+        if ssh_probe "curl -sf http://127.0.0.1:$API_PORT/api/config >/dev/null && curl -sf http://127.0.0.1:$UI_PORT/ | grep -q '<!doctype html>' && echo ok" | grep -q ok; then
+          echo "stack healthy"; exit 0
+        fi
+        ;;
+      *failed*)
+        echo "loom-stack.service FAILED. Last 40 lines:" >&2
+        ssh_probe 'journalctl -u loom-stack --no-pager -n 40' >&2 || true
+        exit 1
+        ;;
+    esac
+  fi
+  sleep 15
+done
+
+echo "timed out after 25m waiting for the stack" >&2
+ssh_probe 'journalctl -u loom-stack --no-pager -n 40' >&2 || true
+exit 1

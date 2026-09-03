@@ -9,7 +9,9 @@
 # split; do not raise it without recording why here.
 internal/cli/daemon/supervisor 28
 # internal/cli gained the daemon input-await seam (agent_input_await.go) with
-# the human answer path; 26th file, same sub-split end state applies.
+# the human answer path; 26th file, same sub-split end state applies. The
+# hook-driven exit-code contract lives in exit.go rather than a file of its own,
+# so this stays at 26.
 internal/cli 26
 # The AFT harness keeps its daemon-only seed commands isolated by capability,
 # while current v5 also carries the input/answer control path in this package.

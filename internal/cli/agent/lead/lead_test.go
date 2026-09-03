@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/skillmat"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
@@ -110,6 +111,13 @@ func TestRunLead_InvokesClaude(t *testing.T) {
 	if inv.agentName != "" {
 		t.Errorf("expected empty agentName for lead mode, got %q", inv.agentName)
 	}
+	hookConfig, err := os.ReadFile(filepath.Join(tmpDir, ".claude", "settings.json"))
+	if err != nil {
+		t.Fatalf("read lead hook config: %v", err)
+	}
+	if !strings.Contains(string(hookConfig), "loom skill materialize") {
+		t.Fatalf("lead hook config = %q", hookConfig)
+	}
 }
 
 func TestRunLeadUsesCustomTerminalPrompt(t *testing.T) {
@@ -161,6 +169,48 @@ func TestRunLeadUsesCustomTerminalPrompt(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "Multi-Agent Safety Rules") {
 		t.Fatalf("prompt missing safety guardrails")
+	}
+}
+
+func TestRunLeadStopsBeforeRuntimeOnSkillMaterializationFailure(t *testing.T) {
+	t.Setenv("LOOM_LEAD_CONTROLLED", "0")
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "missing-shell"))
+
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	cli.TestingResetBackendState(t)
+	mock := &mockBackend{name: "claude"}
+	cli.RegisterBackend(mock)
+	_ = cli.SetBackend("claude")
+
+	localFailure := errors.New("skill target escapes through symlink")
+	originalMaterialize := materializeLeadSkillsAtStart
+	materializeLeadSkillsAtStart = func(context.Context, leadSessionRegistration, string) error {
+		return localFailure
+	}
+	t.Cleanup(func() { materializeLeadSkillsAtStart = originalMaterialize })
+
+	oldStdout, oldStderr := os.Stdout, os.Stderr
+	stdoutR, stdoutW, _ := os.Pipe()
+	stderrR, stderrW, _ := os.Pipe()
+	os.Stdout, os.Stderr = stdoutW, stderrW
+	runLead(nil, nil)
+	stdoutW.Close()
+	stderrW.Close()
+	os.Stdout, os.Stderr = oldStdout, oldStderr
+	var stdout, stderr bytes.Buffer
+	stdout.ReadFrom(stdoutR)
+	stderr.ReadFrom(stderrR)
+
+	if len(mock.interactiveCalls) != 0 {
+		t.Fatalf("runtime invocation count = %d, want 0", len(mock.interactiveCalls))
+	}
+	if got := stderr.String(); !strings.Contains(got, "Error materializing lead skills") || !strings.Contains(got, "Dropping into a shell") {
+		t.Fatalf("stderr = %q, want actionable materialization failure", got)
 	}
 }
 
@@ -264,6 +314,126 @@ func TestResolveLeadAgentIDDefaultsToLead(t *testing.T) {
 
 	if got := resolveLeadAgentID(); got != "lead" {
 		t.Fatalf("resolveLeadAgentID() = %q, want lead", got)
+	}
+}
+
+func TestMaterializeLeadSkillsUsesRegisteredAgentRoleAndWorkDir(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "WS", Name: "operator"}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{WorkspaceKey: "WS", Name: "nova", RoleName: "operator"}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	registration := leadSessionRegistration{
+		handle:    &bootstrap.StoreHandle{Store: st},
+		Workspace: "WS",
+		AgentID:   "nova",
+	}
+	workDir := t.TempDir()
+
+	var gotStore store.Store
+	var gotWorkspace, gotRole, gotTarget string
+	materializeHasDeadline := false
+	err := materializeLeadSkillsWith(ctx, registration, workDir, func(materializeCtx context.Context, got store.Store, workspace, roleName, targetDir string) error {
+		_, materializeHasDeadline = materializeCtx.Deadline()
+		gotStore = got
+		gotWorkspace = workspace
+		gotRole = roleName
+		gotTarget = targetDir
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("materializeLeadSkillsWith() error = %v", err)
+	}
+	if gotStore != st {
+		t.Fatalf("materializer store = %T, want registration store", gotStore)
+	}
+	if !materializeHasDeadline {
+		t.Fatal("materializer context has no deadline")
+	}
+	if gotWorkspace != "WS" || gotRole != "operator" || gotTarget != workDir {
+		t.Fatalf("materializer args = (%q, %q, %q), want (%q, %q, %q)", gotWorkspace, gotRole, gotTarget, "WS", "operator", workDir)
+	}
+}
+
+func TestMaterializeLeadSkillsFallsBackToLeadRole(t *testing.T) {
+	st := memstore.New()
+	registration := leadSessionRegistration{
+		handle:    &bootstrap.StoreHandle{Store: st},
+		Workspace: "WS",
+		AgentID:   "missing-agent",
+	}
+	gotRole := ""
+
+	err := materializeLeadSkillsWith(context.Background(), registration, t.TempDir(), func(_ context.Context, _ store.Store, _, roleName, _ string) error {
+		gotRole = roleName
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("materializeLeadSkillsWith() error = %v", err)
+	}
+	if gotRole != "lead" {
+		t.Fatalf("materializer role = %q, want lead", gotRole)
+	}
+}
+
+func TestMaterializeLeadSkillsSkipsIncompleteRegistration(t *testing.T) {
+	st := memstore.New()
+	tests := []struct {
+		name         string
+		registration leadSessionRegistration
+	}{
+		{name: "no store", registration: leadSessionRegistration{Workspace: "WS"}},
+		{name: "no workspace", registration: leadSessionRegistration{handle: &bootstrap.StoreHandle{Store: st}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			err := materializeLeadSkillsWith(context.Background(), tt.registration, t.TempDir(), func(context.Context, store.Store, string, string, string) error {
+				calls++
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("materializeLeadSkillsWith() error = %v", err)
+			}
+			if calls != 0 {
+				t.Fatalf("materializer calls = %d, want 0", calls)
+			}
+		})
+	}
+}
+
+func TestMaterializeLeadSkillsContinuesWhenStoreUnavailable(t *testing.T) {
+	st := memstore.New()
+	registration := leadSessionRegistration{
+		handle:    &bootstrap.StoreHandle{Store: st},
+		Workspace: "WS",
+	}
+	outage := errors.New("fleet-db unavailable")
+
+	err := materializeLeadSkillsWith(context.Background(), registration, t.TempDir(), func(context.Context, store.Store, string, string, string) error {
+		return &skillmat.StoreUnavailableError{Err: outage}
+	})
+	if err != nil {
+		t.Fatalf("materializeLeadSkillsWith() error = %v, want nil", err)
+	}
+}
+
+func TestMaterializeLeadSkillsSurfacesLocalFailure(t *testing.T) {
+	st := memstore.New()
+	registration := leadSessionRegistration{
+		handle:    &bootstrap.StoreHandle{Store: st},
+		Workspace: "WS",
+	}
+	localFailure := errors.New("skill target escapes through symlink")
+
+	err := materializeLeadSkillsWith(context.Background(), registration, t.TempDir(), func(context.Context, store.Store, string, string, string) error {
+		return localFailure
+	})
+	if !errors.Is(err, localFailure) {
+		t.Fatalf("materializeLeadSkillsWith() error = %v, want local failure", err)
 	}
 }
 

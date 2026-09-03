@@ -283,10 +283,19 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 		return s.maxRetriesBlockBackoff()
 	}
 
-	var outcome agenterr.Outcome
-	if lastErr != nil {
-		outcome = lastErr.Class
+	// A clean success has no failure to back off from — which used to mean it
+	// waited only the small default and could respawn-claim in a tight loop.
+	// Success-loops have budgets nowhere else (a clean exit resets them all),
+	// so the floor below is the ONLY cadence bound on a pathological
+	// success cycle (a hook misroute, a task that "completes" without
+	// consuming its trigger): the next cycle may not START sooner than the
+	// floor after the previous one started. A run longer than the floor pays
+	// nothing.
+	if lastErr == nil {
+		return s.successCadenceRemaining(ap)
 	}
+
+	outcome := lastErr.Class
 	d := agentpolicy.Decide(outcome)
 
 	var initial int
@@ -318,6 +327,43 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 		hint = lastErr.RetryAfter
 	}
 	return exponentialBackoff(initial, retryN, maxBackoff, hint)
+}
+
+// envSuccessCadenceSeconds sets the minimum interval between successful claim
+// cycles per agent. Env-only for the same reason as the input-wait bound:
+// fleet-db's wire schema does not persist daemon restart-policy fields, so an
+// env var is the only knob that reaches a deployed daemon. <=0 disables the
+// floor (restores the pre-floor behavior); absent uses the default.
+const envSuccessCadenceSeconds = "LOOM_DAEMON_SUCCESS_CADENCE_SECONDS"
+
+// defaultSuccessCadenceSeconds: long enough to keep a degenerate
+// success-loop from burning billed turns every couple of seconds, short
+// enough to be irrelevant against any real agent run.
+const defaultSuccessCadenceSeconds = 5
+
+// successCadenceRemaining returns how long the agent must still wait so that
+// successful cycle STARTS are at least the cadence floor apart.
+func (s *Supervisor) successCadenceRemaining(ap *AgentProcess) time.Duration {
+	floor := time.Duration(defaultSuccessCadenceSeconds) * time.Second
+	if v := os.Getenv(envSuccessCadenceSeconds); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			if n <= 0 {
+				return 0
+			}
+			floor = time.Duration(n) * time.Second
+		}
+	}
+	ap.Mu.Lock()
+	lastStart := ap.LastStart
+	ap.Mu.Unlock()
+	if lastStart.IsZero() {
+		return floor
+	}
+	remaining := floor - time.Since(lastStart)
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
 }
 
 // exponentialBackoff computes initial * 2^retryN seconds capped at maxBackoff
@@ -378,9 +424,9 @@ func (s *Supervisor) getBackoffMax() int {
 // GetOutputTimeout returns the configured output timeout in seconds.
 // LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS env var is honored when set — useful
 // for integration tests that need to trip the watchdog quickly (e.g.
-// test/playground/scenarios/). The env var wins over fleet-db config
-// because fleet-db's wire schema does not currently persist this field
-// (see internal/infra/fleetdb/daemon.go).
+// test/playground/scenarios/). fleet-db does persist this field now
+// (see internal/infra/fleetdb/daemon.go), so the env var is a deliberate
+// test override of the stored config, not a workaround for a wire gap.
 func (s *Supervisor) GetOutputTimeout() int {
 	if v := os.Getenv("LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {

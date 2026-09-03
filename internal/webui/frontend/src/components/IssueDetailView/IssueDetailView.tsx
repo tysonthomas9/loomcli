@@ -24,10 +24,12 @@ import {
   ActivityLog,
   CommentForm,
   DesignPanel,
+  Journey,
   MarkdownRenderer,
 } from "@/components/IssueDetailPanel";
 import { getIssueEvents, updateIssue } from "@/hooks/api";
 import { useWorkspaceContext } from "@/hooks/workspace";
+import { decisionButtonStyles } from "@/components/DecisionButton";
 
 import styles from "./IssueDetailView.module.css";
 
@@ -221,7 +223,7 @@ export function IssueDetailView({
     setEvents([]);
     if (!issue?.id) return;
 
-    void getIssueEvents(workspaceId, issue.id)
+    void getIssueEvents(workspaceId, issue.id, 200)
       .then((nextEvents) => {
         if (!cancelled) {
           setEvents(nextEvents);
@@ -594,7 +596,7 @@ export function IssueDetailView({
           >
             <button
               type="button"
-              className={styles.reviewApproveButton}
+              className={`${decisionButtonStyles.button} ${decisionButtonStyles.approve}`}
               onClick={handleApprove}
               disabled={isApproving}
               aria-label="Approve"
@@ -604,7 +606,7 @@ export function IssueDetailView({
             </button>
             <button
               type="button"
-              className={styles.reviewRejectButton}
+              className={`${decisionButtonStyles.button} ${decisionButtonStyles.reject}`}
               onClick={() => setShowRejectForm(true)}
               aria-label="Reject"
               data-testid="detail-reject-button"
@@ -627,7 +629,7 @@ export function IssueDetailView({
             />
             <button
               type="button"
-              className={styles.reviewRejectButton}
+              className={`${decisionButtonStyles.button} ${decisionButtonStyles.reject}`}
               onClick={handleRejectSubmit}
               disabled={isRejecting || !rejectComment.trim()}
               data-testid="detail-reject-submit"
@@ -702,11 +704,8 @@ export function IssueDetailView({
           </section>
         )}
 
-        <ActivityLog
-          comments={localComments}
-          events={events}
-          issueId={issue.id}
-        />
+        <Journey events={events} eventLimit={200} />
+        <ActivityLog comments={localComments} issueId={issue.id} />
         <CommentForm issueId={issue.id} onCommentAdded={handleCommentAdded} />
 
         {/* Labels */}

@@ -4,8 +4,10 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { ApiError } from "../../types/common";
 
 import { createIssueStore, issuesAreEqual } from "../issueStore";
+import { mergeKanbanProjection } from "../issueStoreHelpers";
 import type { IssueStore } from "../issueStore";
 import type { StoreApi } from "zustand/vanilla";
 import type { Issue } from "@/types/issue";
@@ -379,6 +381,34 @@ describe("issueStore", () => {
       expect(s.error).toBeNull();
     });
 
+    it("does not apply a late response from a superseded fetch", async () => {
+      let resolveKanban: (issues: Issue[]) => void;
+      mockGetKanbanIssues.mockImplementationOnce(
+        () =>
+          new Promise<Issue[]>((resolve) => {
+            resolveKanban = resolve;
+          }),
+      );
+      mockFetchGraphIssues.mockResolvedValueOnce([
+        makeIssue({ id: "from-graph" }),
+      ]);
+
+      const kanbanFetch = store.getState().fetchIssues({
+        workspaceId: "ws1",
+        mode: "kanban",
+      });
+      const graphFetch = store.getState().fetchIssues({
+        workspaceId: "ws1",
+        mode: "graph",
+      });
+
+      await graphFetch;
+      resolveKanban!([makeIssue({ id: "from-kanban" })]);
+      await kanbanFetch;
+
+      expect([...store.getState().issuesMap.keys()]).toEqual(["from-graph"]);
+    });
+
     it("passes sourceRepos to filter", async () => {
       mockGetReadyIssues.mockResolvedValue([]);
 
@@ -402,6 +432,41 @@ describe("issueStore", () => {
   // -----------------------------------------------------------------------
 
   describe("auto-retry", () => {
+    it("does not auto-retry a 4xx: the error is shown and retries are exhausted", async () => {
+      mockGetReadyIssues.mockRejectedValueOnce(
+        new ApiError(400, "Bad Request", {
+          error: 'invalid repo format "web": expected "org/repo"',
+        }),
+      );
+
+      await store.getState().fetchIssues({
+        workspaceId: "ws1",
+        mode: "ready",
+      });
+
+      const s = store.getState();
+      expect(s.error).toBe('invalid repo format "web": expected "org/repo"');
+      expect(s.nextRetryAt).toBeNull();
+      expect(s.isLoading).toBe(false);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mockGetReadyIssues).toHaveBeenCalledTimes(1);
+    });
+
+    it("still auto-retries a 5xx and a 429", async () => {
+      mockGetReadyIssues.mockRejectedValueOnce(
+        new ApiError(503, "Service Unavailable", { error: "rate limited" }),
+      );
+      await store.getState().fetchIssues({ workspaceId: "ws1", mode: "ready" });
+      expect(store.getState().nextRetryAt).not.toBeNull();
+
+      store.getState().reset();
+      mockGetReadyIssues.mockRejectedValueOnce(
+        new ApiError(429, "Too Many Requests"),
+      );
+      await store.getState().fetchIssues({ workspaceId: "ws1", mode: "ready" });
+      expect(store.getState().nextRetryAt).not.toBeNull();
+    });
+
     it("schedules an auto-retry when fetch fails with a non-abort error", async () => {
       mockGetReadyIssues.mockRejectedValueOnce(new Error("boom"));
 
@@ -898,6 +963,80 @@ describe("issueStore", () => {
       vi.advanceTimersByTime(1000);
 
       expect(refetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("forces a projection refetch after five seconds of continual mutations", () => {
+      const refetchSpy = vi
+        .spyOn(store.getState(), "refetch")
+        .mockResolvedValue();
+
+      const applyRefreshMutation = () =>
+        store.getState().applyMutation(
+          makeMutation({
+            type: "refresh",
+            issue_id: "",
+          }),
+        );
+
+      applyRefreshMutation();
+      for (let index = 0; index < 5; index++) {
+        vi.advanceTimersByTime(900);
+        applyRefreshMutation();
+      }
+
+      vi.advanceTimersByTime(499);
+      expect(refetchSpy).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(1);
+      expect(refetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("continues refreshing at the five-second ceiling under sustained traffic", () => {
+      const refetchSpy = vi
+        .spyOn(store.getState(), "refetch")
+        .mockResolvedValue();
+
+      const applyRefreshMutation = () =>
+        store.getState().applyMutation(
+          makeMutation({
+            type: "refresh",
+            issue_id: "",
+          }),
+        );
+
+      applyRefreshMutation();
+      for (let index = 0; index < 60; index++) {
+        vi.advanceTimersByTime(900);
+        applyRefreshMutation();
+      }
+
+      expect(refetchSpy).toHaveBeenCalledTimes(10);
+    });
+
+    it("keeps the one-second trailing delay for a burst 4.9 seconds after a refresh", () => {
+      const refetchSpy = vi
+        .spyOn(store.getState(), "refetch")
+        .mockResolvedValue();
+
+      const applyRefreshMutation = () =>
+        store.getState().applyMutation(
+          makeMutation({
+            type: "refresh",
+            issue_id: "",
+          }),
+        );
+
+      applyRefreshMutation();
+      vi.advanceTimersByTime(1_000);
+      expect(refetchSpy).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(4_900);
+      applyRefreshMutation();
+      vi.advanceTimersByTime(999);
+      expect(refetchSpy).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(1);
+      expect(refetchSpy).toHaveBeenCalledTimes(2);
     });
 
     it("schedules projection refetch for generic issue-affecting entity events", () => {
@@ -1711,6 +1850,118 @@ describe("issueStore", () => {
       const b = { ...makeIssue(), derived_projection: 2 } as Issue;
 
       expect(issuesAreEqual(a, b)).toBe(false);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // mergeKanbanProjection
+  // -----------------------------------------------------------------------
+
+  describe("mergeKanbanProjection", () => {
+    it("adopts every fetched projection field while keeping newer core fields", () => {
+      const current = makeIssue({
+        title: "Live title",
+        status: "blocked",
+        updated_at: "2026-01-02T00:00:00Z",
+        is_blocked: false,
+        is_ready: false,
+        is_deferred: true,
+        blocked_by_count: 1,
+        blocked_by: ["old-blocker"],
+        blocked_by_details: [
+          { id: "old-blocker", title: "Old blocker", priority: 1 },
+        ],
+      });
+      const fetched = makeIssue({
+        title: "Fetched title",
+        status: "open",
+        updated_at: "2026-01-01T00:00:00Z",
+        is_blocked: true,
+        is_ready: true,
+        is_deferred: false,
+        blocked_by_count: 2,
+        blocked_by: ["first-blocker", "second-blocker"],
+        blocked_by_details: [
+          { id: "first-blocker", title: "First blocker", priority: 2 },
+          { id: "second-blocker", title: "Second blocker", priority: 3 },
+        ],
+      });
+
+      const merged = mergeKanbanProjection(current, fetched);
+
+      expect(merged).toMatchObject({
+        title: "Live title",
+        status: "blocked",
+        updated_at: "2026-01-02T00:00:00Z",
+        is_blocked: true,
+        is_ready: true,
+        is_deferred: false,
+        blocked_by_count: 2,
+        blocked_by: ["first-blocker", "second-blocker"],
+        blocked_by_details: [
+          { id: "first-blocker", title: "First blocker", priority: 2 },
+          { id: "second-blocker", title: "Second blocker", priority: 3 },
+        ],
+      });
+    });
+
+    it("returns the current reference when every projection field matches", () => {
+      const current = makeIssue({
+        title: "Live title",
+        is_blocked: true,
+        is_ready: false,
+        is_deferred: false,
+        blocked_by_count: 1,
+        blocked_by: ["blocker"],
+        blocked_by_details: [
+          { id: "blocker", title: "Blocking task", priority: 2 },
+        ],
+      });
+      const fetched = makeIssue({
+        title: "Fetched title",
+        is_blocked: true,
+        is_ready: false,
+        is_deferred: false,
+        blocked_by_count: 1,
+        blocked_by: ["blocker"],
+        blocked_by_details: [
+          { id: "blocker", title: "Blocking task", priority: 2 },
+        ],
+      });
+
+      expect(mergeKanbanProjection(current, fetched)).toBe(current);
+    });
+
+    it("backfills projection fields that are undefined on the live issue", () => {
+      const current = makeIssue({
+        is_blocked: undefined,
+        is_ready: undefined,
+        is_deferred: undefined,
+        blocked_by_count: undefined,
+        blocked_by: undefined,
+        blocked_by_details: undefined,
+      });
+      const fetched = makeIssue({
+        is_blocked: true,
+        is_ready: true,
+        is_deferred: true,
+        blocked_by_count: 1,
+        blocked_by: ["blocker"],
+        blocked_by_details: [
+          { id: "blocker", title: "Blocking task", priority: 2 },
+        ],
+      });
+
+      expect(mergeKanbanProjection(current, fetched)).toMatchObject({
+        is_blocked: true,
+        is_ready: true,
+        is_deferred: true,
+        blocked_by_count: 1,
+        blocked_by: ["blocker"],
+        blocked_by_details: [
+          { id: "blocker", title: "Blocking task", priority: 2 },
+        ],
+      });
     });
   });
 

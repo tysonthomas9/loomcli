@@ -16,6 +16,7 @@ import {
   fetchGraphIssues,
 } from "../api/issues";
 import type { Issue, WorkFilter, Status } from "../types";
+import { ApiError } from "../types/common";
 import {
   calculateBackoffDelay,
   type ReconnectConfig,
@@ -27,11 +28,13 @@ import {
   STALE_BANNER_DELAY_MS,
   AUTO_ROLLBACK_TIMEOUT_MS,
   REFRESH_DEBOUNCE_MS,
+  MAX_PROJECTION_REFRESH_WAIT_MS,
   MAX_AUTO_RETRIES,
   RETRY_BASE_DELAY_MS,
   RETRY_MAX_DELAY_MS,
   INITIAL_STATE,
   issuesAreEqual,
+  mergeKanbanProjection,
   extractErrorMessage,
   issueMutationAppliesToLocalIssue,
   issueMutationInvalidatesProjection,
@@ -56,6 +59,16 @@ export type {
   SubscribeFn,
 } from "./issueStoreHelpers";
 
+/**
+ * Whether a failed fetch is worth retrying automatically. Network failures
+ * and 5xx are; 4xx are not, except the two transient ones.
+ */
+export function isRetryableError(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return true;
+  if (err.status === 408 || err.status === 429) return true;
+  return err.status < 400 || err.status >= 500;
+}
+
 export function createIssueStore(
   initialConfig?: IssueStoreConfig,
 ): StoreApi<IssueStore> {
@@ -71,6 +84,7 @@ export function createIssueStore(
   let activeController: AbortController | null = null;
   const deletedDuringFetch = new Set<string>();
   let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
+  let projectionRefreshPendingSince: number | null = null;
   let staleBannerTimeout: ReturnType<typeof setTimeout> | null = null;
   /** Pending auto-retry timer; cleared on new fetch, reset, or success. */
   let retryTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -90,11 +104,25 @@ export function createIssueStore(
   let retryConnectionFn = initialConfig?.retryConnectionFn ?? null;
 
   function scheduleProjectionRefresh(get: () => IssueStore): void {
+    const now = Date.now();
+    if (projectionRefreshPendingSince === null) {
+      projectionRefreshPendingSince = now;
+    }
+
+    const maxWaitRemaining = Math.max(
+      0,
+      MAX_PROJECTION_REFRESH_WAIT_MS - (now - projectionRefreshPendingSince),
+    );
+
     if (refreshTimeout) clearTimeout(refreshTimeout);
-    refreshTimeout = setTimeout(() => {
-      refreshTimeout = null;
-      void get().refetch();
-    }, REFRESH_DEBOUNCE_MS);
+    refreshTimeout = setTimeout(
+      () => {
+        refreshTimeout = null;
+        projectionRefreshPendingSince = null;
+        void get().refetch();
+      },
+      Math.min(REFRESH_DEBOUNCE_MS, maxWaitRemaining),
+    );
   }
 
   /** Apply a mutation to the store, handling side effects from the pure result */
@@ -244,6 +272,10 @@ export function createIssueStore(
           data = await getReadyIssues(workspaceId, effectiveFilter, reqOpts);
         }
 
+        if (activeController !== internalController || mergedSignal.aborted) {
+          return;
+        }
+
         const deletedSnapshot = new Set(deletedDuringFetch);
         const currentMap = get().issuesMap;
         const mergedMap = new Map<string, Issue>();
@@ -284,7 +316,12 @@ export function createIssueStore(
           const currentTime = Date.parse(currentIssue.updated_at);
           const apiTime = Date.parse(apiIssue.updated_at);
           if (!isNaN(currentTime) && !isNaN(apiTime) && currentTime > apiTime) {
-            mergedMap.set(id, currentIssue);
+            mergedMap.set(
+              id,
+              mode === "kanban"
+                ? mergeKanbanProjection(currentIssue, apiIssue)
+                : currentIssue,
+            );
           }
         }
 
@@ -321,6 +358,20 @@ export function createIssueStore(
         // starting, 503+kind=starting) from other 503s like "daemon
         // unavailable" and route to the loading-variant UX accordingly.
         const message = extractErrorMessage(err);
+
+        // A client error (4xx) is deterministic — the same request will fail
+        // the same way — so retrying only hammers the server and hides the
+        // real message behind a countdown. 408 and 429 are the transient
+        // exceptions. Surface the error and stop.
+        if (!isRetryableError(err)) {
+          set({
+            error: message,
+            isLoading: false,
+            retryCount: MAX_AUTO_RETRIES,
+            nextRetryAt: null,
+          });
+          return;
+        }
 
         // Schedule exponential-backoff auto-retry if we haven't exhausted
         // the budget. The retry calls fetchIssues({ isAutoRetry: true }),
@@ -631,6 +682,7 @@ export function createIssueStore(
         clearTimeout(refreshTimeout);
         refreshTimeout = null;
       }
+      projectionRefreshPendingSince = null;
       if (staleBannerTimeout) {
         clearTimeout(staleBannerTimeout);
         staleBannerTimeout = null;

@@ -117,6 +117,10 @@ export function KanbanPage() {
         loadingVariant="columns"
       >
         <div className={styles.kanbanShell}>
+          <p className={styles.scrollCue} role="note">
+            Scroll horizontally to see all statuses{" "}
+            <span aria-hidden="true">→</span>
+          </p>
           <SwimLaneBoard
             issues={filteredIssues}
             allIssues={issues}

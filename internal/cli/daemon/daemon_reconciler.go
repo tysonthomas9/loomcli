@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -42,7 +43,11 @@ func (d *Daemon) configPollingLoop() {
 
 // reloadAndReconcile loads FleetDB config, checks for changes, and reconciles agents.
 func (d *Daemon) reloadAndReconcile() {
-	newConfig, err := config.LoadDaemonConfig(d.projectDir)
+	// Read through the daemon's long-lived store: opening a fleet-db client per
+	// 30s tick was the source of the steady "opened cloud fleet-db client" churn.
+	// d.store is nil in tests and non-fleet paths; LoadDaemonConfigWithStore then
+	// falls back to opening one, so no branch is needed here.
+	newConfig, err := config.LoadDaemonConfigWithStore(cmdstore.RootContext(), d.store, d.projectDir)
 	if err != nil {
 		slog.Warn("config reload failed, keeping current config", "err", err)
 		d.emitConfigReloadError(err)

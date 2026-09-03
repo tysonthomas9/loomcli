@@ -355,7 +355,7 @@ func TestEventToData(t *testing.T) {
 	newValue := "in_progress"
 	comment := "status moved"
 	e := &types.Event{
-		ID:        99,
+		ID:        "1787177211116-0",
 		IssueID:   "test-1",
 		EventType: types.EventCreated,
 		Actor:     "user",
@@ -366,8 +366,8 @@ func TestEventToData(t *testing.T) {
 	}
 
 	d := eventToData(e)
-	if d.ID != "99" {
-		t.Errorf("ID = %q, want %q", d.ID, "99")
+	if d.ID != "1787177211116-0" {
+		t.Errorf("ID = %q, want stream ID", d.ID)
 	}
 	if d.Kind != "issue.created" {
 		t.Errorf("Kind = %q, want %q", d.Kind, "issue.created")

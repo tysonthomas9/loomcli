@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
 )
 
@@ -428,11 +429,21 @@ func TestEventToData(t *testing.T) {
 	field := "status"
 	fieldCount := 1
 	fields := []string{"status"}
+	category := "field_change"
+	summary := "Updated status"
+	before := "open"
+	after := "in_progress"
+	changes := []gen.IssueEventFieldChange{{Field: "status", Before: &before, After: &after}}
+	metadata := map[string]string{"source": "test"}
 	e := gen.IssueEvent{
-		Id:         123,
+		Id:         "1787177211116-0",
 		IssueId:    "loom-1",
-		EventType:  "status_change",
+		EventType:  "issue.update",
 		Actor:      "alice",
+		Category:   &category,
+		Summary:    &summary,
+		Changes:    &changes,
+		Metadata:   &metadata,
 		Field:      &field,
 		FieldCount: &fieldCount,
 		Fields:     &fields,
@@ -442,10 +453,10 @@ func TestEventToData(t *testing.T) {
 		CreatedAt:  now,
 	}
 	d := eventToData(e)
-	if d.ID != "123" {
+	if d.ID != "1787177211116-0" {
 		t.Errorf("ID = %q", d.ID)
 	}
-	if d.IssueID != "loom-1" || d.Kind != "status_change" || d.Actor != "alice" {
+	if d.IssueID != "loom-1" || d.Kind != "issue.update" || d.Actor != "alice" || d.Category != category || d.Summary != summary {
 		t.Errorf("fields: %+v", d)
 	}
 	if d.OldValue == nil || *d.OldValue != oldValue {
@@ -465,6 +476,12 @@ func TestEventToData(t *testing.T) {
 	}
 	if d.Comment == nil || *d.Comment != comment {
 		t.Errorf("Comment = %v, want %q", d.Comment, comment)
+	}
+	if len(d.Changes) != 1 || d.Changes[0] != (backend.FieldChange{Field: "status", Before: before, After: after}) {
+		t.Errorf("Changes = %+v", d.Changes)
+	}
+	if d.Metadata["source"] != "test" {
+		t.Errorf("Metadata = %+v", d.Metadata)
 	}
 	if !d.CreatedAt.Equal(now) {
 		t.Errorf("CreatedAt: %v", d.CreatedAt)

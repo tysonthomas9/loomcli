@@ -172,6 +172,7 @@ describe("IssueDetailView", () => {
       expect(mockGetIssueEvents).toHaveBeenCalledWith(
         "test-ws-id",
         "test-issue-abc123",
+        200,
       );
       expect(
         await screen.findByText("tester created this issue"),

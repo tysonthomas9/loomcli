@@ -90,6 +90,7 @@ type ServerConfig struct {
 	ScrollbackMaxLines   int                                                  // Maximum lines per scrollback buffer (0 = default 10000)
 	NotifyTokenDir       string                                               // Directory to write notify.token (typically runtime dir); empty = token file not written
 	SessionRuntimeDir    string                                               // Runtime dir searched for local agent sessions; empty = workspace/repo stores only
+	JourneyEventsDir     string                                               // Host-local lifecycle JSONL directory used as the optional journey agent-work overlay
 	LocalSettingsDir     string                                               // Desktop-local settings directory; empty disables /api/local/settings
 	AgentControlFn       agentcontrol.AgentControlFn                          // Sends agent lifecycle commands to the daemon control socket; nil in fleet mode or --no-daemon
 	AgentInputFn         agentcontrol.AgentInputFn                            // Reads/answers pending interactive prompts over the same socket; nil disables the answer routes

@@ -953,7 +953,7 @@ describe("App", () => {
     });
     // Set up default store state for issue store selectors
     mockStoreState = createMockUseIssuesReturn({});
-    // Set up default useRouteView mock (kanban is the default view)
+    // Keep board-focused App tests on Kanban unless a case selects another view.
     mockUseRouteView.mockReturnValue(createViewStateReturn("kanban"));
     vi.mocked(useFilterState).mockReturnValue([
       {},
@@ -2401,6 +2401,17 @@ describe("App", () => {
   });
 
   describe("fetchIssues mode parameter based on activeView", () => {
+    it('calls fetchIssues with mode: "kanban" when activeView is "home"', () => {
+      mockStoreState = createMockUseIssuesReturn({});
+      vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("home"));
+
+      render(<App />);
+
+      expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "kanban" }),
+      );
+    });
+
     it('calls fetchIssues with mode: "kanban" when activeView is "kanban"', () => {
       mockStoreState = createMockUseIssuesReturn({});
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("kanban"));
@@ -2526,6 +2537,24 @@ describe("App", () => {
       expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
         expect.objectContaining({ mode: "ready" }),
       );
+    });
+  });
+
+  describe("operator queue navigation badge", () => {
+    it("derives the Home badge from the shared issue collection", () => {
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [
+          createMockIssue({
+            id: "blocked-1",
+            status: "blocked",
+            notes: "BLOCKED: waiting for access",
+          }),
+        ],
+      });
+
+      render(<App />);
+
+      expect(screen.getByTestId("nav-home-badge")).toHaveTextContent("1");
     });
   });
 
@@ -3276,7 +3305,11 @@ describe("App", () => {
       mockApplyReviewDecision.mockResolvedValue({});
     });
 
-    it("plan approve calls updateIssueStatus with open status", async () => {
+    // Plan approve must reopen the issue AND clear needs-revision in one call.
+    // Reopening alone leaves the planner's selection predicate satisfied
+    // (NeedsPlan matches on that label), so the issue is re-claimed and comes
+    // straight back to review — the non-terminating loop this asserts against.
+    it("plan approve reopens the issue and clears needs-revision", async () => {
       const updateIssueStatus = vi.fn().mockResolvedValue(undefined);
       const refetch = vi.fn().mockResolvedValue(undefined);
       const mockReturn = createMockUseIssuesReturn({
@@ -3309,14 +3342,17 @@ describe("App", () => {
       fireEvent.click(approveButton);
 
       await waitFor(() => {
-        expect(updateIssueStatus).toHaveBeenCalledTimes(1);
-        expect(updateIssueStatus).toHaveBeenCalledWith(
-          "plan-issue",
-          "open",
+        expect(mockUpdateIssue).toHaveBeenCalledTimes(1);
+        expect(mockUpdateIssue).toHaveBeenCalledWith(
           "test-ws-id",
+          "plan-issue",
+          { status: "open", remove_labels: ["needs-revision"] },
         );
       });
 
+      // The optimistic status-only path must NOT be used for plan approve —
+      // it cannot carry the label delta.
+      expect(updateIssueStatus).not.toHaveBeenCalled();
       expect(mockCloseIssue).not.toHaveBeenCalled();
     });
 
@@ -3572,10 +3608,13 @@ describe("App", () => {
       mockDecisionFn.mockReset();
     });
 
-    it("approve does not show toast for plan review failures (handled by optimistic rollback)", async () => {
-      const updateIssueStatus = vi
-        .fn()
-        .mockRejectedValue(new Error("Network error"));
+    // Plan approve no longer goes through the optimistic path (it has to carry
+    // a label delta), so nothing rolls back or surfaces the error for it.
+    // Without a toast a failed approve is indistinguishable from a successful
+    // one — and the issue silently stays in review carrying needs-revision.
+    it("approve shows error toast on failure for plan review type", async () => {
+      mockUpdateIssue.mockRejectedValueOnce(new Error("Network error"));
+      const updateIssueStatus = vi.fn();
       const showToast = vi.fn();
       mockUseToast.mockReturnValue({
         toasts: [],
@@ -3613,15 +3652,92 @@ describe("App", () => {
 
       // Wait for the async handler to complete
       await waitFor(() => {
-        expect(updateIssueStatus).toHaveBeenCalled();
+        expect(mockUpdateIssue).toHaveBeenCalled();
       });
 
-      // showToast should NOT be called — error is handled by useOptimisticUpdate rollback
-      expect(showToast).not.toHaveBeenCalled();
+      // The failure must surface: nothing else reports it for this branch.
+      await waitFor(() => {
+        expect(showToast).toHaveBeenCalledWith("Network error", {
+          type: "error",
+        });
+      });
+      expect(updateIssueStatus).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("sidebar suppression for views that own their chrome", () => {
+    function mockWorkspaceForSidebar() {
+      vi.mocked(useWorkspaceContext).mockReturnValue({
+        workspace: { name: "my-workspace" },
+        repos: [],
+        groups: [],
+        agents: [],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        getRepoByName: vi.fn(),
+        getReposByGroup: vi.fn(() => []),
+        getAgentByName: vi.fn(),
+        activeWorkspaceName: "my-workspace",
+        setActiveWorkspace: vi.fn(),
+        defaultWorkspaceName: null,
+        setDefaultWorkspace: vi.fn().mockResolvedValue(undefined),
+        selectedRepoNames: new Set<string>(),
+        activeRepos: [],
+        activeRepoNames: [],
+        isAllSelected: true,
+        selectRepos: vi.fn(),
+        selectAll: vi.fn(),
+        toggleRepo: vi.fn(),
+        sourceReposFilter: undefined,
+        isMultiRepo: true,
+      });
+    }
+
+    // Both views render their own left tree, so the workspace sidebar would be
+    // a second tree competing with it.
+    it.each(["files", "skills"])(
+      "hides the WorkspaceTree sidebar on the %s view",
+      (view) => {
+        mockWorkspaceForSidebar();
+        mockUseRouteView.mockReturnValue(createViewStateReturn(view));
+        const mockReturn = createMockUseIssuesReturn({});
+        mockStoreState = mockReturn;
+
+        render(<App />);
+
+        expect(
+          screen.queryByLabelText(/workspace tree/i),
+        ).not.toBeInTheDocument();
+      },
+    );
+
+    it("keeps the WorkspaceTree sidebar on the kanban view", () => {
+      mockWorkspaceForSidebar();
+      mockUseRouteView.mockReturnValue(createViewStateReturn("kanban"));
+      const mockReturn = createMockUseIssuesReturn({});
+      mockStoreState = mockReturn;
+
+      render(<App />);
+
+      expect(screen.getByLabelText(/workspace tree/i)).toBeInTheDocument();
     });
   });
 
   describe("sidebar isMultiRepo guard", () => {
+    it.each(["settings", "prs"] as const)(
+      "hides the workspace tree on the full-screen %s view",
+      (view) => {
+        mockUseRouteView.mockReturnValue(createViewStateReturn(view));
+
+        render(<App />);
+
+        expect(
+          screen.queryByLabelText(/workspace tree/i),
+        ).not.toBeInTheDocument();
+      },
+    );
+
     it("renders WorkspaceTree sidebar for workspace view regardless of isMultiRepo", () => {
       vi.mocked(useWorkspaceContext).mockReturnValue({
         workspace: null,
@@ -3954,13 +4070,50 @@ describe("App", () => {
       ).not.toBeInTheDocument();
       expect(
         screen.getByRole("button", {
-          name: "Loom home — return to Kanban board",
+          name: "Loom home",
         }),
       ).toBeInTheDocument();
     });
   });
 
   describe("workspace-driven repo filtering", () => {
+    it("never passes sourceRepos on Home, even with a repo subset selected", () => {
+      vi.mocked(useWorkspaceContext).mockReturnValue({
+        workspace: { name: "filtered-workspace" },
+        repos: [{ name: "repo-alpha" }, { name: "repo-beta" }],
+        groups: [],
+        agents: [],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        getRepoByName: vi.fn(),
+        getReposByGroup: vi.fn(() => []),
+        getAgentByName: vi.fn(),
+        activeWorkspaceName: "filtered-workspace",
+        setActiveWorkspace: vi.fn(),
+        selectedRepoNames: new Set(["repo-alpha"]),
+        activeRepos: [{ name: "repo-alpha" }],
+        activeRepoNames: ["repo-alpha"],
+        isAllSelected: false,
+        selectRepos: vi.fn(),
+        selectAll: vi.fn(),
+        toggleRepo: vi.fn(),
+        sourceReposFilter: ["repo-alpha"],
+        isMultiRepo: true,
+      });
+      mockUseRouteView.mockReturnValue(createViewStateReturn("home"));
+      mockStoreState = createMockUseIssuesReturn({});
+
+      render(<App />);
+
+      expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "kanban" }),
+      );
+      expect(mockStoreState.fetchIssues).not.toHaveBeenCalledWith(
+        expect.objectContaining({ sourceRepos: expect.anything() }),
+      );
+    });
+
     it("passes sourceReposFilter from workspace context to fetchIssues", () => {
       const sourceReposFilter = ["repo-alpha", "repo-beta"];
       vi.mocked(useWorkspaceContext).mockReturnValue({

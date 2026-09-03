@@ -14,12 +14,15 @@ import { api, apiErrorFromResponse } from "@/api/common";
 export async function getIssueEvents(
   workspaceId: string,
   issueId: string,
-  _limit = 100,
+  limit = 100,
 ): Promise<Event[]> {
   const { data, error, response } = await api.GET(
     "/api/workspaces/{ws}/issues/{id}/events",
     {
-      params: { path: { ws: workspaceId, id: issueId } },
+      params: {
+        path: { ws: workspaceId, id: issueId },
+        query: { limit },
+      },
     },
   );
   if (error) throw apiErrorFromResponse(error, response);

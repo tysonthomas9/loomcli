@@ -11,9 +11,9 @@
   min-height: 100%;
   flex: 1 0 220px; /* Allow columns to grow and fill space equally */
   background-color: var(--column-bg);
-  border-radius: 0;
+  border-radius: var(--radius-lg);
   overflow: hidden; /* Column handles its own scrolling via .content */
-  border-right: 1px solid var(--color-border);
+  border-right: 0;
 }
 
 .header {
@@ -21,7 +21,8 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 16px;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--color-text-primary) 6%, transparent);
   flex-shrink: 0;
   background-color: var(
     --color-chrome
@@ -129,7 +130,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  border-radius: 0;
+  border-radius: var(--radius-lg);
   transition:
     background-color 0.15s ease,
     border-color 0.15s ease;
@@ -188,7 +189,8 @@
 .footer {
   flex-shrink: 0;
   padding: 8px 16px;
-  border-top: 1px solid var(--color-border);
+  border-top: 1px solid
+    color-mix(in srgb, var(--color-text-primary) 6%, transparent);
   text-align: center;
 }
 
@@ -251,8 +253,8 @@
 /* Responsive: fixed-width columns for horizontal scrolling on mobile */
 @media (width <= 768px) {
   .statusColumn {
-    min-width: 260px;
-    flex: 0 0 260px;
+    min-width: 248px;
+    flex: 0 0 248px;
     scroll-snap-align: start;
   }
 }

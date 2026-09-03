@@ -7,6 +7,7 @@
  */
 
 import {
+  act,
   render,
   screen,
   fireEvent,
@@ -16,13 +17,19 @@ import {
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { Issue, IssueDetails, IssueWithDependencyMetadata } from "@/types";
+import type {
+  Event,
+  Issue,
+  IssueDetails,
+  IssueWithDependencyMetadata,
+} from "@/types";
 import type { SessionRecord } from "@/types/agent";
 import {
   updateIssue,
   startWorkflowRun,
   createWorkspaceAgent,
   deleteWorkspaceAgent,
+  getIssueEvents,
 } from "@/api";
 import { createAgentStore } from "@/stores/agentStore";
 
@@ -220,6 +227,28 @@ function createTestIssueDetails(
   };
 }
 
+function createTestEvent(overrides: Partial<Event> = {}): Event {
+  return {
+    id: "event-1",
+    issue_id: "test-123",
+    event_type: "issue.create",
+    actor: "alice",
+    created_at: "2026-01-23T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 /**
  * Create a test dependency issue.
  */
@@ -387,6 +416,9 @@ describe("IssueDetailPanel", () => {
         ...updates,
       }),
     );
+    const mockGetIssueEvents = vi.mocked(getIssueEvents);
+    mockGetIssueEvents.mockReset();
+    mockGetIssueEvents.mockImplementation(() => new Promise(() => {}));
   });
 
   // Reset body overflow after each test
@@ -418,6 +450,64 @@ describe("IssueDetailPanel", () => {
       expect(screen.getByTestId("header-close-button")).toBeInTheDocument();
       expect(screen.getByTestId("header-copy-link-button")).toBeInTheDocument();
       expect(screen.getByTestId("header-maximize-button")).toBeInTheDocument();
+    });
+
+    it("opens in the shared full-workspace detail model by default", () => {
+      const mockIssue = createTestIssue();
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+      expect(screen.getByTestId("issue-detail-panel")).toHaveAttribute(
+        "data-maximized",
+        "true",
+      );
+      expect(
+        screen.getByRole("button", { name: "Exit full screen" }),
+      ).toBeInTheDocument();
+    });
+
+    // D-57: close_reason has been on the wire (and written by the bulk-close
+    // flow) with nothing rendering it, so "why was this closed?" was only
+    // answerable from the API.
+    it("shows the close reason and closed timestamp on a closed issue", () => {
+      const mockIssue = createTestIssue({
+        status: "closed",
+        closed_at: "2026-02-01T10:30:00Z",
+        close_reason: "superseded by DOGFOOD-42",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+      expect(screen.getByTestId("metadata-close-reason")).toHaveTextContent(
+        "superseded by DOGFOOD-42",
+      );
+      expect(screen.getByTestId("metadata-closed")).toBeInTheDocument();
+    });
+
+    it("renders nothing for an unexplained close", () => {
+      const mockIssue = createTestIssue({
+        status: "closed",
+        closed_at: "2026-02-01T10:30:00Z",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+      // An empty reason must not leave a dangling "Reason:" label.
+      expect(
+        screen.queryByTestId("metadata-close-reason"),
+      ).not.toBeInTheDocument();
+      expect(screen.getByTestId("metadata-closed")).toBeInTheDocument();
+    });
+
+    it("shows neither closing field on an open issue", () => {
+      const mockIssue = createTestIssue({ status: "open" });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+      expect(screen.queryByTestId("metadata-closed")).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("metadata-close-reason"),
+      ).not.toBeInTheDocument();
     });
 
     it("renders children in content area", () => {
@@ -511,6 +601,104 @@ describe("IssueDetailPanel", () => {
         <IssueDetailPanel isOpen={false} issue={null} onClose={() => {}} />,
       );
       expect(screen.getByTestId("issue-detail-panel")).toBeInTheDocument();
+    });
+  });
+
+  describe("event history", () => {
+    it("requests the full event window explicitly", async () => {
+      const mockGetIssueEvents = vi.mocked(getIssueEvents);
+      mockGetIssueEvents.mockResolvedValue([]);
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({ workspaceId: "workspace-1" }),
+      );
+
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={createTestIssueDetails()}
+          onClose={() => {}}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(mockGetIssueEvents).toHaveBeenCalledWith(
+          "workspace-1",
+          "test-123",
+          200,
+        );
+      });
+    });
+
+    it("refreshes on the issue revision and ignores an older response", async () => {
+      const mockGetIssueEvents = vi.mocked(getIssueEvents);
+      const firstRequest = deferred<Event[]>();
+      const secondRequest = deferred<Event[]>();
+      mockGetIssueEvents
+        .mockReturnValueOnce(firstRequest.promise)
+        .mockReturnValueOnce(secondRequest.promise);
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({ workspaceId: "workspace-1" }),
+      );
+      const initialIssue = createTestIssueDetails({
+        status: "in_progress",
+        updated_at: "2026-01-23T00:00:00Z",
+      });
+      const { rerender } = render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={initialIssue}
+          onClose={() => {}}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(mockGetIssueEvents).toHaveBeenCalledTimes(1);
+      });
+
+      rerender(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={{
+            ...initialIssue,
+            status: "closed",
+            updated_at: "2026-01-23T00:00:01Z",
+          }}
+          onClose={() => {}}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(mockGetIssueEvents).toHaveBeenCalledTimes(2);
+      });
+
+      secondRequest.resolve([
+        createTestEvent(),
+        createTestEvent({
+          id: "event-2",
+          event_type: "issue.close",
+          actor: "worker-1",
+          created_at: "2026-01-23T00:00:01Z",
+        }),
+      ]);
+      await waitFor(() => {
+        expect(screen.getByTestId("journey-tail")).toHaveTextContent("Done");
+      });
+
+      await act(async () => {
+        firstRequest.resolve([
+          createTestEvent(),
+          createTestEvent({
+            id: "event-2",
+            event_type: "issue.claim",
+            actor: "worker-1",
+            created_at: "2026-01-23T00:00:01Z",
+          }),
+        ]);
+        await Promise.resolve();
+      });
+
+      expect(screen.getByTestId("journey-tail")).toHaveTextContent("Done");
+      expect(screen.queryByTestId("journey-now-line")).not.toBeInTheDocument();
     });
   });
 
