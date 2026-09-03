@@ -279,7 +279,9 @@ type EvalPayload struct {
 }
 
 type PutMetricParams struct {
-	SessionID      string
+	SessionID string
+	// JudgeSessionID is stamped once the eval workflow itself opens a judge
+	// AgentSession. The current deterministic judge task has no session yet.
 	JudgeSessionID string
 	PromptVersion  string
 	Status         string
@@ -333,7 +335,7 @@ func PutMetric(ctx context.Context, st store.Store, ws string, params PutMetricP
 		if err := ValidateEvalPayload(params.Eval, promptVersion); err != nil {
 			return "", false, err
 		}
-		record := buildSessionEval(ws, session, evalID, promptVersion, params.Eval)
+		record := buildSessionEval(ws, session, evalID, promptVersion, params.Eval, params.JudgeSessionID)
 		created := true
 		if _, err := st.SessionEvals().Create(ctx, record); err != nil {
 			if !isConflict(err) {
@@ -398,7 +400,7 @@ func EvalID(sessionID, promptVersion string) string {
 	return "eval-" + strings.TrimSpace(sessionID) + "-" + strings.TrimSpace(promptVersion)
 }
 
-func buildSessionEval(ws string, session *domain.AgentSession, evalID, promptVersion string, payload EvalPayload) *domain.SessionEval {
+func buildSessionEval(ws string, session *domain.AgentSession, evalID, promptVersion string, payload EvalPayload, judgeSessionID string) *domain.SessionEval {
 	endedAt := time.Time{}
 	if session.FinishedAt != nil {
 		endedAt = session.FinishedAt.UTC()
@@ -416,6 +418,7 @@ func buildSessionEval(ws string, session *domain.AgentSession, evalID, promptVer
 		JudgeSummary:          strings.TrimSpace(payload.JudgeSummary),
 		JudgeModel:            strings.TrimSpace(payload.JudgeModel),
 		JudgePromptVersion:    promptVersion,
+		JudgeSessionID:        strings.TrimSpace(judgeSessionID),
 		EvalCost:              payload.EvalCost,
 		SessionStartedAt:      session.StartedAt.UTC(),
 		SessionEndedAt:        endedAt,
@@ -539,21 +542,27 @@ func validErrorTag(tag string) bool {
 }
 
 func toDomainScores(scores map[string]int) domain.SessionEvalScores {
-	return domain.SessionEvalScores{
-		OutcomeSuccess:       scores["outcome_success"],
-		InstructionAdherence: scores["instruction_adherence"],
-		Efficiency:           scores["efficiency"],
-		ToolUseQuality:       scores["tool_use_quality"],
-	}
+	return cloneScores(scores)
 }
 
 func toDomainRationales(rationales map[string]string) domain.SessionEvalScoreRationales {
-	return domain.SessionEvalScoreRationales{
-		OutcomeSuccess:       strings.TrimSpace(rationales["outcome_success"]),
-		InstructionAdherence: strings.TrimSpace(rationales["instruction_adherence"]),
-		Efficiency:           strings.TrimSpace(rationales["efficiency"]),
-		ToolUseQuality:       strings.TrimSpace(rationales["tool_use_quality"]),
+	return cloneRationales(rationales)
+}
+
+func cloneScores(scores map[string]int) domain.SessionEvalScores {
+	out := make(domain.SessionEvalScores, len(scores))
+	for key, score := range scores {
+		out[key] = score
 	}
+	return out
+}
+
+func cloneRationales(rationales map[string]string) domain.SessionEvalScoreRationales {
+	out := make(domain.SessionEvalScoreRationales, len(rationales))
+	for key, rationale := range rationales {
+		out[key] = strings.TrimSpace(rationale)
+	}
+	return out
 }
 
 func toDomainImprovementCategories(categories map[string][]string) domain.SessionEvalImprovementCategories {

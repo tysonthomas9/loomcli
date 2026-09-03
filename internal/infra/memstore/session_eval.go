@@ -121,10 +121,34 @@ func cloneSessionEval(in *domain.SessionEval) *domain.SessionEval {
 		return nil
 	}
 	out := *in
+	out.Scores = cloneSessionEvalScores(in.Scores)
+	out.ScoreRationales = cloneSessionEvalRationales(in.ScoreRationales)
 	out.ErrorTaxonomyTags = append([]string(nil), in.ErrorTaxonomyTags...)
 	out.ImprovementCategories.Harness = append([]string(nil), in.ImprovementCategories.Harness...)
 	out.ImprovementCategories.Linter = append([]string(nil), in.ImprovementCategories.Linter...)
 	out.ImprovementCategories.Prompt = append([]string(nil), in.ImprovementCategories.Prompt...)
 	out.ImprovementCategories.Skill = append([]string(nil), in.ImprovementCategories.Skill...)
 	return &out
+}
+
+func cloneSessionEvalScores(in domain.SessionEvalScores) domain.SessionEvalScores {
+	if in == nil {
+		return nil
+	}
+	out := make(domain.SessionEvalScores, len(in))
+	for key, score := range in {
+		out[key] = score
+	}
+	return out
+}
+
+func cloneSessionEvalRationales(in domain.SessionEvalScoreRationales) domain.SessionEvalScoreRationales {
+	if in == nil {
+		return nil
+	}
+	out := make(domain.SessionEvalScoreRationales, len(in))
+	for key, rationale := range in {
+		out[key] = rationale
+	}
+	return out
 }
