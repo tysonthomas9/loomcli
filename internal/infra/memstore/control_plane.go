@@ -3,7 +3,10 @@ package memstore
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -134,12 +137,14 @@ func (s *nodeStore) Update(_ context.Context, ws, nodeID string, patch store.Nod
 }
 
 type agentSessionStore struct {
-	mu    sync.RWMutex
-	items map[string]map[string]*domain.AgentSession
+	mu          sync.RWMutex
+	items       map[string]map[string]*domain.AgentSession
+	taskRuns    *taskRunStore
+	lifecycleMu *sync.Mutex
 }
 
-func newAgentSessionStore() *agentSessionStore {
-	return &agentSessionStore{items: make(map[string]map[string]*domain.AgentSession)}
+func newAgentSessionStore(taskRuns *taskRunStore) *agentSessionStore {
+	return &agentSessionStore{items: make(map[string]map[string]*domain.AgentSession), taskRuns: taskRuns, lifecycleMu: taskRuns.lifecycleMu}
 }
 
 var _ store.AgentSessionStore = (*agentSessionStore)(nil)
@@ -181,6 +186,81 @@ func (s *agentSessionStore) Create(_ context.Context, in store.AgentSessionCreat
 		session.StartedAt = now
 	}
 	s.items[in.WorkspaceKey][in.SessionID] = session
+	return cloneAgentSession(session), nil
+}
+
+func (s *agentSessionStore) Open(_ context.Context, run store.SessionRunContext, descriptor store.SessionDescriptor) (store.SessionRef, error) {
+	if err := store.ValidateSessionDescriptor(descriptor); err != nil {
+		return store.SessionRef{}, err
+	}
+	if run.WorkspaceKey == "" || run.TaskRunID == "" || run.Attempt <= 0 {
+		return store.SessionRef{}, fmt.Errorf("session run context is incomplete: %w", domain.ErrInvalid)
+	}
+	descriptor = store.NormalizedSessionDescriptor(descriptor)
+	s.lockLifecycle()
+	defer s.unlockLifecycle()
+	taskRun, err := s.taskRunForOpen(run)
+	if err != nil {
+		return store.SessionRef{}, err
+	}
+	if taskRun.Status.IsTerminal() {
+		return store.SessionRef{}, lifecycleError(store.SessionLifecycleErrTaskRunTerminal, domain.ErrConflict)
+	}
+	if run.Attempt != taskRunAttemptForSession(taskRun) {
+		return store.SessionRef{}, lifecycleError(store.SessionLifecycleErrAttemptMismatch, domain.ErrConflict)
+	}
+	return s.openSessionLocked(run, descriptor)
+}
+
+func (s *agentSessionStore) taskRunForOpen(run store.SessionRunContext) (*domain.TaskRun, error) {
+	if s.taskRuns == nil {
+		return nil, fmt.Errorf("task run store unavailable: %w", domain.ErrNotFound)
+	}
+	s.taskRuns.mu.RLock()
+	defer s.taskRuns.mu.RUnlock()
+	taskRun, ok := s.taskRuns.items[run.WorkspaceKey][run.TaskRunID]
+	if !ok {
+		return nil, fmt.Errorf("task run %q: %w", run.TaskRunID, domain.ErrNotFound)
+	}
+	return cloneTaskRun(taskRun), nil
+}
+
+func (s *agentSessionStore) openSessionLocked(run store.SessionRunContext, descriptor store.SessionDescriptor) (store.SessionRef, error) {
+	sessionID := store.SessionID(run.TaskRunID, run.Attempt, descriptor.InvocationKey)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if existing := s.items[run.WorkspaceKey][sessionID]; existing != nil {
+		if sessionDescriptorMatches(existing, descriptor) {
+			return sessionRefMem(existing), nil
+		}
+		return store.SessionRef{}, lifecycleError(store.SessionLifecycleErrDescriptorConflict, domain.ErrConflict)
+	}
+	if s.items[run.WorkspaceKey] == nil {
+		s.items[run.WorkspaceKey] = make(map[string]*domain.AgentSession)
+	}
+	now := time.Now().UTC()
+	session := &domain.AgentSession{WorkspaceKey: run.WorkspaceKey, SessionID: sessionID, AgentID: descriptor.Backend, Kind: descriptor.Kind, TaskRunID: run.TaskRunID, InvocationKey: descriptor.InvocationKey, ParentSessionID: descriptor.ParentSessionID, Status: domain.AgentSessionRunning, Attempt: run.Attempt, Tags: descriptor.Tags, StartedAt: now, Metadata: storeOpenMetadata(run, descriptor), CreatedAt: now, UpdatedAt: now}
+	s.items[run.WorkspaceKey][sessionID] = session
+	return sessionRefMem(session), nil
+}
+
+func (s *agentSessionStore) Finalize(_ context.Context, ref store.SessionRef, outcome store.SessionOutcome) (*domain.AgentSession, error) {
+	if err := store.ValidateSessionOutcome(outcome); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session := s.items[ref.WorkspaceKey][ref.SessionID]
+	if session == nil {
+		return nil, fmt.Errorf("agent session %q: %w", ref.SessionID, domain.ErrNotFound)
+	}
+	if session.Status.IsTerminal() {
+		if store.SessionOutcomeMatches(session, outcome) {
+			return cloneAgentSession(session), nil
+		}
+		return nil, lifecycleError(store.SessionLifecycleErrOutcomeConflict, domain.ErrConflict)
+	}
+	store.ApplySessionOutcome(session, outcome, time.Now().UTC())
 	return cloneAgentSession(session), nil
 }
 
@@ -243,6 +323,14 @@ func (s *agentSessionStore) Update(_ context.Context, ws, sessionID string, patc
 	if !ok {
 		return nil, fmt.Errorf("agent session %q in workspace %q: %w", sessionID, ws, domain.ErrNotFound)
 	}
+	// Interim LOOMCLI-160 rule: invocation-key-less legacy bridge sessions may
+	// re-enter; only lifecycle-managed sessions receive generic-update CAS.
+	if store.ProtectAgentSessionTerminalUpdate(session) && store.AgentSessionUpdateTouchesOutcome(patch) {
+		if store.AgentSessionUpdateMatches(session, patch) {
+			return cloneAgentSession(session), nil
+		}
+		return nil, lifecycleError(store.SessionLifecycleErrOutcomeConflict, domain.ErrConflict)
+	}
 	if patch.NodeID != nil {
 		session.NodeID = *patch.NodeID
 	}
@@ -271,10 +359,69 @@ func (s *agentSessionStore) Update(_ context.Context, ws, sessionID string, patc
 		session.ExitCode = *patch.ExitCode
 	}
 	if patch.Metadata != nil {
-		session.Metadata = cloneMap(*patch.Metadata)
+		session.Metadata = store.SessionMetadataUpdate(session.Metadata, *patch.Metadata)
 	}
 	session.UpdatedAt = time.Now().UTC()
 	return cloneAgentSession(session), nil
+}
+
+func (s *agentSessionStore) lockLifecycle() {
+	if s.lifecycleMu != nil {
+		s.lifecycleMu.Lock()
+	}
+}
+
+func (s *agentSessionStore) unlockLifecycle() {
+	if s.lifecycleMu != nil {
+		s.lifecycleMu.Unlock()
+	}
+}
+
+func taskRunAttemptForSession(run *domain.TaskRun) int {
+	// scheduler_attempt is persisted when an attempt requeues; the live claim
+	// is therefore the completed/requeued count plus one.
+	attempt, err := strconv.Atoi(run.RuntimeMetadata["scheduler_attempt"])
+	if err != nil || attempt < 0 {
+		attempt = 0
+	}
+	return attempt + 1
+}
+
+func sessionDescriptorMatches(session *domain.AgentSession, descriptor store.SessionDescriptor) bool {
+	if fingerprint := session.Metadata[store.SessionMetadataDescriptorFingerprint]; fingerprint != "" {
+		return fingerprint == store.SessionDescriptorFingerprint(descriptor)
+	}
+	return session.AgentID == descriptor.Backend && session.Kind == descriptor.Kind && session.ParentSessionID == descriptor.ParentSessionID && slices.Equal(session.Tags, descriptor.Tags) && session.Metadata[store.SessionMetadataModel] == descriptor.Model && maps.Equal(leafSessionMetadata(session.Metadata), descriptor.Metadata)
+}
+
+func leafSessionMetadata(metadata map[string]string) map[string]string {
+	clone := cloneMap(metadata)
+	for _, key := range []string{store.SessionMetadataBackend, store.SessionMetadataModel, store.SessionMetadataFencingToken, store.SessionMetadataDriverRunID, store.SessionMetadataDriverStepID, store.SessionMetadataDriverRunnerSessionID, store.SessionMetadataTranscriptRef, store.SessionMetadataUsageTokens, store.SessionMetadataUsageCostUSD, store.SessionMetadataDescriptorFingerprint, store.SessionMetadataOutcomeFingerprint} {
+		delete(clone, key)
+	}
+	return clone
+}
+
+func storeOpenMetadata(run store.SessionRunContext, descriptor store.SessionDescriptor) map[string]string {
+	metadata := cloneMap(descriptor.Metadata)
+	if metadata == nil {
+		metadata = map[string]string{}
+	}
+	metadata[store.SessionMetadataBackend] = descriptor.Backend
+	metadata[store.SessionMetadataModel] = descriptor.Model
+	metadata[store.SessionMetadataFencingToken] = strconv.FormatInt(run.FencingToken, 10)
+	metadata[store.SessionMetadataDriverRunID] = run.DriverRunID
+	metadata[store.SessionMetadataDriverStepID] = run.DriverStepID
+	metadata[store.SessionMetadataDescriptorFingerprint] = store.SessionDescriptorFingerprint(descriptor)
+	return metadata
+}
+
+func sessionRefMem(session *domain.AgentSession) store.SessionRef {
+	return store.SessionRef{WorkspaceKey: session.WorkspaceKey, SessionID: session.SessionID, Attempt: session.Attempt}
+}
+
+func lifecycleError(code string, err error) error {
+	return &store.SessionLifecycleError{Code: code, Err: err}
 }
 
 func cloneNode(n *domain.Node) *domain.Node {

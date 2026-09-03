@@ -27,6 +27,7 @@ type taskRunStore struct {
 	artifacts    *artifactStore
 	profiles     *workerProfileStore
 	nodes        *nodeStore
+	lifecycleMu  *sync.Mutex
 }
 
 func newTaskRunStore(parent *driverRunStore, steps *driverStepStore, artifacts *artifactStore, profiles *workerProfileStore, nodes *nodeStore) *taskRunStore {
@@ -40,6 +41,7 @@ func newTaskRunStore(parent *driverRunStore, steps *driverStepStore, artifacts *
 		artifacts:    artifacts,
 		profiles:     profiles,
 		nodes:        nodes,
+		lifecycleMu:  &sync.Mutex{},
 	}
 }
 
@@ -301,6 +303,8 @@ func (s *taskRunStore) Finish(_ context.Context, ws, taskRunID string, finish st
 	if finish.BlockTask && finish.Status != domain.TaskRunFailed {
 		return nil, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrInvalidTransition)
 	}
+	s.lockLifecycle()
+	defer s.unlockLifecycle()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	run, ok := s.items[ws][taskRunID]
@@ -431,6 +435,8 @@ func (s *taskRunStore) Complete(ctx context.Context, ws, taskRunID string, compl
 		return nil, err
 	}
 
+	s.lockLifecycle()
+	defer s.unlockLifecycle()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if run, handled, err := s.completedTaskRunByCompletionIDLocked(ws, taskRunID, normalized.CompletionID); handled || err != nil {
@@ -459,6 +465,18 @@ func (s *taskRunStore) Complete(ctx context.Context, ws, taskRunID string, compl
 	}
 	s.completions[ws][normalized.CompletionID] = taskRunID
 	return cloneTaskRun(run), nil
+}
+
+func (s *taskRunStore) lockLifecycle() {
+	if s.lifecycleMu != nil {
+		s.lifecycleMu.Lock()
+	}
+}
+
+func (s *taskRunStore) unlockLifecycle() {
+	if s.lifecycleMu != nil {
+		s.lifecycleMu.Unlock()
+	}
 }
 
 func normalizeTaskRunCompleteMem(ws, taskRunID string, complete store.TaskRunComplete) (store.TaskRunComplete, error) {
