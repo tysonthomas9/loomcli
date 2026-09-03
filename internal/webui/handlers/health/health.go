@@ -265,6 +265,8 @@ func serveStatsViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 		BlockedIssues:           data.BlockedIssues,
 		DeferredIssues:          data.DeferredIssues,
 		ReadyIssues:             data.ReadyIssues,
+		ReviewIssues:            data.ReviewIssues,
+		StatusBlockedIssues:     data.StatusBlockedIssues,
 		TombstoneIssues:         data.TombstoneIssues,
 		PinnedIssues:            data.PinnedIssues,
 		EpicsEligibleForClosure: data.EpicsEligibleForClosure,
@@ -273,6 +275,10 @@ func serveStatsViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 }
 
 // HandleStatsWithPool is the implementation that accepts an interface for testing.
+//
+// This path unmarshals whatever the daemon RPC returns. OpStats has no
+// server-side handler in v5, so it is legacy: review_issues and
+// status_blocked_issues simply default to zero here, which is accepted.
 func HandleStatsWithPool(pool StatsConnectionGetter) http.HandlerFunc { //nolint:funlen
 	return func(w http.ResponseWriter, r *http.Request) {
 		if pool == nil {

@@ -211,6 +211,8 @@ describe("Statistics alias", () => {
       blocked_issues: 5,
       deferred_issues: 3,
       ready_issues: 7,
+      review_issues: 4,
+      status_blocked_issues: 6,
       tombstone_issues: 0,
       pinned_issues: 2,
       epics_eligible_for_closure: 1,
@@ -221,6 +223,11 @@ describe("Statistics alias", () => {
     expect(stats.open_issues).toBe(40);
     expect(stats.average_lead_time_hours).toBe(48.5);
     expect(stats.epics_eligible_for_closure).toBe(1);
+    expect(stats.review_issues).toBe(4);
+    // status_blocked_issues is the STATUS count and is allowed to differ from
+    // blocked_issues, the computed dependency-blocked view.
+    expect(stats.status_blocked_issues).toBe(6);
+    expect(stats.blocked_issues).toBe(5);
   });
 });
 
@@ -814,6 +821,8 @@ describe("Structural compatibility", () => {
       blocked_issues: 0,
       deferred_issues: 0,
       ready_issues: 0,
+      review_issues: 0,
+      status_blocked_issues: 0,
       tombstone_issues: 0,
       pinned_issues: 0,
       epics_eligible_for_closure: 0,

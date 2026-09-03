@@ -2802,6 +2802,8 @@ type Statistics struct {
 	OpenIssues              int     `json:"open_issues"`
 	PinnedIssues            int     `json:"pinned_issues"`
 	ReadyIssues             int     `json:"ready_issues"`
+	ReviewIssues            int     `json:"review_issues"`
+	StatusBlockedIssues     int     `json:"status_blocked_issues"`
 	TombstoneIssues         int     `json:"tombstone_issues"`
 	TotalIssues             int     `json:"total_issues"`
 }

@@ -107,6 +107,19 @@ func TestStats_HappyPath(t *testing.T) {
 	if result.AverageLeadTime != 0 {
 		t.Errorf("AverageLeadTime = %f, want 0 (fleet-08yg)", result.AverageLeadTime)
 	}
+	// StatusBlockedIssues is groups["blocked"] (1); BlockedIssues is the
+	// computed dependency-blocked view (2). They are allowed to differ, and
+	// here they do: the card must render the status count, not the view.
+	if result.StatusBlockedIssues != 1 {
+		t.Errorf("StatusBlockedIssues = %d, want 1 (from groups)", result.StatusBlockedIssues)
+	}
+	if result.StatusBlockedIssues == result.BlockedIssues {
+		t.Errorf("StatusBlockedIssues and BlockedIssues both = %d; the fixture makes them differ",
+			result.BlockedIssues)
+	}
+	if result.ReviewIssues != 0 {
+		t.Errorf("ReviewIssues = %d, want 0 (not in groups)", result.ReviewIssues)
+	}
 }
 
 func TestStats_AllStatuses(t *testing.T) {
@@ -143,6 +156,17 @@ func TestStats_AllStatuses(t *testing.T) {
 	}
 	if result.PinnedIssues != 3 {
 		t.Errorf("PinnedIssues = %d, want 3", result.PinnedIssues)
+	}
+	if result.ReviewIssues != 2 {
+		t.Errorf("ReviewIssues = %d, want 2", result.ReviewIssues)
+	}
+	if result.StatusBlockedIssues != 1 {
+		t.Errorf("StatusBlockedIssues = %d, want 1", result.StatusBlockedIssues)
+	}
+	// The canonical views are empty in this fixture, so the computed
+	// dependency-blocked count is 0 while the status count is 1.
+	if result.BlockedIssues != 0 {
+		t.Errorf("BlockedIssues = %d, want 0 (empty computed view)", result.BlockedIssues)
 	}
 }
 
@@ -197,6 +221,12 @@ func TestStats_MissingStatusKeys(t *testing.T) {
 	}
 	if result.BlockedIssues != 0 {
 		t.Errorf("BlockedIssues = %d, want 0", result.BlockedIssues)
+	}
+	if result.ReviewIssues != 0 {
+		t.Errorf("ReviewIssues = %d, want 0", result.ReviewIssues)
+	}
+	if result.StatusBlockedIssues != 0 {
+		t.Errorf("StatusBlockedIssues = %d, want 0", result.StatusBlockedIssues)
 	}
 }
 
