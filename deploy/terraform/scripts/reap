@@ -41,10 +41,16 @@ for name in "${workspaces[@]}"; do
   TF_DATA_DIR="$data_dir" "$TF_BIN" -chdir="$TF_ROOT" workspace select "$name" >/dev/null
 
   expires_at="$(TF_DATA_DIR="$data_dir" "$TF_BIN" -chdir="$TF_ROOT" output -raw expires_at 2>/dev/null || true)"
+  # A workspace with no expiry output is one whose first apply died before
+  # outputs landed. It may still hold billable resources, so REAP_ALL takes
+  # it; plain reap cannot tell whether it is expired and leaves it alone.
   if ! [[ "$expires_at" =~ ^[0-9]+$ ]]; then
-    echo "$name: no expiry recorded, skipped"
-    skipped=$((skipped + 1))
-    continue
+    if [ "$REAP_ALL" != 1 ]; then
+      echo "$name: no expiry recorded (failed first apply?), skipped; REAP_ALL=1 takes it"
+      skipped=$((skipped + 1))
+      continue
+    fi
+    expires_at="none"
   fi
 
   if [ "$REAP_ALL" = 1 ] || [ "$expires_at" -lt "$now" ]; then

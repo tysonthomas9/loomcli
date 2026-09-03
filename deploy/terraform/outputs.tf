@@ -97,6 +97,13 @@ output "plan_role_read_only" {
   value       = var.plan_role_read_only
 }
 
+# The secret NAME, not its contents: `make extend` re-applies with it so a
+# codex stack extended from a plain shell stays a codex stack.
+output "codex_auth_secret" {
+  description = "Secret Manager secret holding codex auth.json; empty on localdogfood."
+  value       = var.codex_auth_secret
+}
+
 # The image references this stack runs, so `make extend` can re-apply without
 # rebuilding from the current tree.
 output "fleetdb_image" {

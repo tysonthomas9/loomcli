@@ -377,17 +377,33 @@ resume: stack-required state ## Start an auto-stopped VM and wait for stack heal
 		$$($(TF) output -raw api_port) \
 		$$($(TF) output -raw ui_port)
 
-extend: stack-required state ## Re-arm guest auto-stop and extend the stack TTL
-	gcloud compute ssh $(NAME) --project $(PROJECT) --zone $(ZONE) --tunnel-through-iap --quiet \
-		--command 'sudo systemctl restart loom-autostop.timer'
-	@# Re-apply with the images the stack is already running, read from state.
-	@# `make apply` would demand digests for the CURRENT tree's tag and, if
-	@# the tree moved on, rebuild and replace the VM -- not what extend means.
-	$(TF) apply -auto-approve -input=false $(TFVARS) \
+extend: stack-required state ## Push the TTL forward and re-arm guest auto-stop; changes nothing else
+	@# Every input that shapes the VM comes from state, not from this shell.
+	@# `make apply` would take the CURRENT tree's digests and this shell's
+	@# CODEX / AUTO_STOP_MINUTES, and any difference in the rendered boot
+	@# config replaces the VM. Extend means "same stack, later deadline", so
+	@# the plan is refused if it would create or destroy anything.
+	auto_stop="$$($(TF) output -raw auto_stop_minutes)"
+	plan="$(CURDIR)/.terraform-data/$(NAME)/extend.tfplan"
+	$(TF) plan -input=false -out="$$plan" $(TFVARS) \
 		-var tunnel_port_base="$$($(TF) output -raw tunnel_ui_port)" \
 		-var fleetdb_image="$$($(TF) output -raw fleetdb_image)" \
 		-var loom_image="$$($(TF) output -raw loom_image)" \
-		-var ui_image="$$($(TF) output -raw ui_image)"
+		-var ui_image="$$($(TF) output -raw ui_image)" \
+		-var codex_auth_secret="$$($(TF) output -raw codex_auth_secret)" \
+		-var plan_role_read_only="$$($(TF) output -raw plan_role_read_only)" \
+		-var auto_stop_minutes="$$auto_stop"
+	$(TF) show -json "$$plan" | $(CURDIR)/scripts/plan-guard
+	$(TF) apply -input=false "$$plan"
+	@# The guest timer counts from its own activation (OnActiveSec), so a
+	@# restart grants another full window. A stack deployed with
+	@# AUTO_STOP_MINUTES=0 has no timer to restart.
+	if [ "$$auto_stop" -gt 0 ]; then
+		gcloud compute ssh $(NAME) --project $(PROJECT) --zone $(ZONE) --tunnel-through-iap --quiet \
+			--command 'sudo systemctl restart loom-autostop.timer'
+	else
+		echo "extend: auto-stop is disabled on this stack; TTL extended, no timer to re-arm"
+	fi
 
 fmt:
 	$(TF) fmt -recursive

@@ -112,15 +112,21 @@ and time to expiry, marks this checkout's stack with `*`, and also shows
 Terraform workspaces that have no VM as `state only`.
 
 Stacks have an eight-hour TTL (`TTL_MINUTES=480`). Every `make up` or
-`make apply` moves the expiry forward. `make extend` also restarts the guest
-auto-stop timer; `make reap DRY_RUN=1` previews expired cleanup,
-`make reap` performs it, and `make reap REAP_ALL=1` selects every owned or
-unowned workspace for cleanup.
+`make apply` moves the expiry forward. `make extend` moves it forward without
+touching anything else: it re-applies the images, codex mode, and auto-stop
+setting the stack was deployed with (read from `tofu output`, not from your
+shell), refuses any plan that would create or destroy a resource, and then
+restarts the guest auto-stop timer. `make reap DRY_RUN=1` previews expired
+cleanup, `make reap` performs it, and `make reap REAP_ALL=1` selects every
+owned or unowned workspace, including one with no recorded expiry (a first
+apply that failed before outputs landed), which plain `make reap` skips.
 
-The VM powers itself off 50 minutes after every boot. This leaves the boot disk
-but stops compute billing. `make resume` starts it and waits for health;
+The VM powers itself off 50 minutes after its auto-stop timer starts, which
+happens at every boot and again at every `make extend`. This leaves the boot
+disk but stops compute billing. `make resume` starts it and waits for health;
 `make up` also restarts a stopped VM because Terraform declares it RUNNING.
-Set `AUTO_STOP_MINUTES=0` to disable the guest timer.
+Set `AUTO_STOP_MINUTES=0` to disable the guest timer; `make extend` then only
+moves the expiry.
 
 Capacity in `fleet-db-488801` is currently bounded by E2 CPU: each stack uses
 one VM and two E2 vCPUs, so 24 E2 vCPUs allow 12 stacks. The project allows 24
@@ -320,8 +326,9 @@ These each cost real debugging time and are now handled in code:
   hashed contents of untracked files, which land in the build context too) and
   the generated UI bundle contents, which are ignored by git but copied into
   the UI image.
-- **Allow rules do not close anything.** GCP firewall rules are additive; a deny
-  rule is what made "IAP only" true while stacks shared the default VPC.
+- **Allow rules do not close anything.** GCP firewall rules are additive; on a
+  VPC shared by every stack, the tag-scoped deny rule is what makes "IAP only"
+  true, and it is the only thing separating one stack from the next.
 - **Cloud NAT wants one gateway for this topology.** The shared bootstrap owns
   one `ALL_SUBNETWORKS_ALL_IP_RANGES` NAT; stacks must not create their own.
 - **A gate must read the stack, not the command line.** `make smoke` rebuilt
@@ -356,10 +363,24 @@ These each cost real debugging time and are now handled in code:
 - **A failed readiness check leaves paid infrastructure behind.** `make up`
   prints the exact `make down NAME=... PROJECT=...` command to use after a
   post-apply failure; cleanup is explicit so operators can inspect a failed VM
-  before destroying it.
+  before destroying it. The stack's TTL and `make reap` collect it if nobody
+  does.
 - **`ports:` publish on all interfaces, never `127.0.0.1:`.** IAP forwards to
   the VM's network interface, so a loopback bind makes every tunnel fail with
   `failed to connect to backend`. The firewall is what closes these ports.
+- **`make extend` must read the stack, not the shell.** The smoke-gate rule
+  again: re-applying with this shell's `CODEX` or `AUTO_STOP_MINUTES` changed
+  the rendered boot config and replaced the VM it was meant to keep. Extend
+  takes every VM-shaping input from `tofu output` and refuses a plan with any
+  create or destroy action.
+- **`OnBootSec` cannot be re-armed.** A boot-relative timer restarted near its
+  deadline still fires at boot + N. The auto-stop timer uses `OnActiveSec`,
+  which counts from the unit's own activation, so `systemctl restart` opens a
+  fresh window; and a stack with the timer disabled has no unit to restart, so
+  extend checks the deployed setting before trying.
+- **A workspace whose first apply failed has no outputs.** Deciding reaping by
+  `expires_at` skipped exactly the stacks most likely to leak resources;
+  `REAP_ALL=1` takes them regardless.
 
 ## What `make smoke` proves
 
@@ -385,6 +406,6 @@ them is a code change, not a config change.
 ## Cost
 
 `e2-standard-2` is roughly $49/mo continuously running and $2/mo stopped. The
-50-minute boot-relative auto-stop bounds accidental compute spend while keeping
+50-minute auto-stop bounds accidental compute spend while keeping
 the disk for `make resume`; `make down` is still the cheapest option because it
 destroys the per-stack disk, bucket, secrets, and credentials.

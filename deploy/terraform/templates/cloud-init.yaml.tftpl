@@ -210,8 +210,10 @@ write_files:
 
 %{ if auto_stop_minutes > 0 ~}
   # A guest poweroff leaves the instance TERMINATED: compute billing stops,
-  # but the boot disk remains. `make resume` or `make up` starts it again and
-  # this boot-relative timer gives it another full working window.
+  # but the boot disk remains. The timer counts from its own activation
+  # (OnActiveSec), never from boot: every boot opens a full window, and so
+  # does `make extend`, which restarts the unit. OnBootSec could not be
+  # re-armed -- a restart near the deadline still fired at boot + N.
   - path: /etc/systemd/system/loom-autostop.service
     permissions: "0644"
     content: |
@@ -226,10 +228,10 @@ write_files:
     permissions: "0644"
     content: |
       [Unit]
-      Description=Auto-stop this disposable Loom stack after boot
+      Description=Auto-stop this disposable Loom stack after a fixed window
 
       [Timer]
-      OnBootSec=${auto_stop_minutes}min
+      OnActiveSec=${auto_stop_minutes}min
 
       [Install]
       WantedBy=timers.target
