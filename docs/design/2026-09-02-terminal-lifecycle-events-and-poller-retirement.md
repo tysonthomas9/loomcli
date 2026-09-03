@@ -377,3 +377,15 @@ then began unbounded catch-up. The client deliberately honors every `id:` line.
 `go-sse` was evaluated for the server hub and rejected: publish is synchronous
 and its topic model does not fit per-client cursors. The custom provider had
 already reimplemented the hub, so this repair leaves that server design alone.
+
+## Transport repair 2a: subscriber starts at the head, ordered handshake (2026-09-03, PR #610)
+
+Server side of the transport repair; companion FleetDB PR BrowserOperator/fleet-db#227 (optional).
+
+What was wrong (all verified live on 2026-09-02): the workspace subscriber kept its cursor in memory and restarted at `0` on every re-activation, replaying the whole FleetDB stream through the hub (2741 events by the evening); loom discarded the `cursor`/`has_more` fields FleetDB returns; the 64-slot client buffer overflowed within milliseconds and the only tab was evicted, so cold loads did two handshakes and the tab's Last-Event-ID regressed by hours; the token route activated the subscriber before any client existed; registration was fire-and-forget; catch-up was one unpaged query with swallowed errors.
+
+What changed: a `MutationPage{Events, Cursor, HasMore}` contract through backend, Fleet client, subscriber, `multi` and handler; the subscriber probes `since=$` (FleetDB #227) and otherwise drains silently from the last known head, capped, with a cap hit failing readiness; a `Ready` barrier that `EnsureActive` waits on outside its mutex; cursor classes `$`, `c1.` tokens and wrapped numeric synthetic ids, anything else an error; the handshake registers the client synchronously, activates, pages the catch-up (10 pages / 5 s) and dedupes catch-up cursors against live frames for the connection; cap, backend error or FleetDB 410 answer HTTP 503 `resync_required` before any frame; the token route no longer activates; `Broadcast` short-circuits with no client; the writer gained a response-controller seam with per-frame flush error propagation.
+
+Proven live on a local-mode stack, both FleetDB flavours (`.scratch/terminal-lifecycle/bv-step2/`): cold load after idle = one activation (head probe with #227, silent drain without it), zero replay pages, zero buffer-full lines, one registration, two blocked-list fetches; an hour-old cursor replays 286 / 322 frames before `connected`; a garbage cursor answers 503 `error`, a cursor older than the retention floor answers 503 `expired`; a restart while a tab is open recovers with a bounded catch-up; one refetch per delivered mutation frame.
+
+Next (PR B, `feat/sse-resync-frame`): in-stream `resync` frames with per-client sequence numbers instead of the 503s and instead of eviction on overflow, writer deadlines, 256-slot buffer, client `onResync` handling and the four consumers that only react to reconnect state.
