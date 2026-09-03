@@ -416,6 +416,41 @@ func TestTaskRunSessionCloseFirstTerminalWins(t *testing.T) {
 	if _, ok := session.Metadata[store.SessionMetadataUsageTokens]; ok {
 		t.Fatalf("missing usage was written as tokens=0: %v", session.Metadata)
 	}
+	for _, key := range []string{"input_tokens", "output_tokens", "estimated_cost_usd"} {
+		if _, ok := session.Metadata[key]; ok {
+			t.Fatalf("missing usage was written as %s=0: %v", key, session.Metadata)
+		}
+	}
+}
+
+func TestTaskRunSessionCloseProjectsSplitUsage(t *testing.T) {
+	h := newHarness(t)
+	_, opened := h.postOp(t, "session-open", map[string]any{
+		"invocationKey": "judge", "backend": "codex", "model": "gpt-5.6-sol",
+	}, identity{})
+	sessionID := opened["sessionId"].(string)
+	resp, closed := h.postOp(t, "session-close", map[string]any{
+		"sessionId": sessionID, "status": "completed",
+		"usage": map[string]any{
+			"tokens": 16949, "inputTokens": 15755, "cacheReadTokens": 0, "outputTokens": 1194, "cost": 1.25,
+		},
+	}, identity{})
+	if resp.StatusCode != http.StatusOK || closed["status"] != "completed" {
+		t.Fatalf("session-close = %d %v", resp.StatusCode, closed)
+	}
+	session, err := h.store.AgentSessions().Get(t.Context(), "WS", sessionID)
+	if err != nil {
+		t.Fatalf("get finalized session: %v", err)
+	}
+	want := map[string]string{
+		store.SessionMetadataUsageTokens: "16949", "input_tokens": "15755", "cache_read_tokens": "0",
+		"output_tokens": "1194", "estimated_cost_usd": "1.25",
+	}
+	for key, value := range want {
+		if got := session.Metadata[key]; got != value {
+			t.Errorf("metadata[%q] = %q, want %q", key, got, value)
+		}
+	}
 }
 
 func TestTaskRunSessionCloseAuthRejected(t *testing.T) {

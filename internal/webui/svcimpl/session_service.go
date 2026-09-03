@@ -371,15 +371,18 @@ func sessionUsageFromMetadata(metadata map[string]string) sessionUsageMetadata {
 	if metadata == nil {
 		return sessionUsageMetadata{}
 	}
-	costKey := "estimated_cost_usd"
+	costKey := store.SessionMetadataEstimatedCostUSD
 	if strings.TrimSpace(metadata[costKey]) == "" {
 		costKey = "cost_usd"
 	}
+	if strings.TrimSpace(metadata[costKey]) == "" {
+		costKey = store.SessionMetadataUsageCostUSD
+	}
 	return sessionUsageMetadata{
-		InputTokens:      metadataInt64(metadata, "input_tokens"),
-		OutputTokens:     metadataInt64(metadata, "output_tokens"),
-		CacheReadTokens:  metadataInt64(metadata, "cache_read_tokens"),
-		CacheWriteTokens: metadataInt64(metadata, "cache_write_tokens"),
+		InputTokens:      metadataInt64(metadata, store.SessionMetadataInputTokens),
+		OutputTokens:     metadataInt64(metadata, store.SessionMetadataOutputTokens),
+		CacheReadTokens:  metadataInt64(metadata, store.SessionMetadataCacheReadTokens),
+		CacheWriteTokens: metadataInt64(metadata, store.SessionMetadataCacheWriteTokens),
 		EstimatedCostUSD: metadataFloat64(metadata, costKey),
 	}
 }

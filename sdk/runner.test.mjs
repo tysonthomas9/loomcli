@@ -5,6 +5,7 @@ import { describe, it } from "node:test";
 import { AgentExecSpecError, LoomAPIError, TaskRunClient } from "./runner.js";
 
 const surface = JSON.parse(readFileSync(new URL("./api-surface.v1.json", import.meta.url), "utf8"));
+const modernCodexFixture = readFileSync(new URL("../docs/design/fixtures/agent-observability/modern-codex-event-stream.jsonl", import.meta.url), "utf8");
 
 describe("TaskRunClient.fromEnv", () => {
   it("uses Loom runner env vars", () => {
@@ -436,6 +437,77 @@ describe("TaskRunClient serve transport", () => {
 });
 
 describe("TaskRunClient.agent.exec", () => {
+  it("maps modern Codex command execution to canonical tool entries", async () => {
+    const client = taskRunClientForAgent((url, init = {}) => {
+      const path = new URL(url).pathname;
+      const body = init.method === "PUT" ? init.body : JSON.parse(init.body);
+      if (path.endsWith("/session-open")) return json({ sessionId: "task-run-1-a1-agent", attempt: 1 });
+      if (path.endsWith("/artifact-declare")) return json({ artifactId: body.artifactId, type: body.type, durableStatus: "declared" });
+      if (path.endsWith("/content")) return json({ artifactId: "transcript-task-run-1-a1-agent", durableStatus: "uploaded" });
+      if (path.endsWith("/artifact-finalize")) return json({ artifactId: body.artifactId, durableStatus: "finalized" });
+      if (path.endsWith("/session-close")) return json({ sessionId: body.sessionId, status: body.status });
+      throw new Error(`unexpected ${init.method} ${path}`);
+    });
+    const stream = `${JSON.stringify({ type: "thread.started" })}\n${JSON.stringify({
+      type: "item.completed",
+      item: { id: "command-1", type: "command_execution", command: "pwd", aggregated_output: "/repo" },
+    })}\n`;
+
+    const result = await client.agent.exec({
+      invocationKey: "agent",
+      backend: "codex",
+      argv: [process.execPath, "-e", "process.stdout.write(process.argv[1])", stream],
+      transcript: "stream-json",
+    });
+
+    assert.deepEqual(result.entries.slice(1), [
+      { seq: 1, role: "assistant", type: "tool_use", tool_name: "command_execution", tool_use_id: "command-1", tool_input: { command: "pwd" } },
+      { seq: 2, role: "tool", type: "tool_result", tool_use_id: "command-1", output: "/repo" },
+    ]);
+  });
+
+  it("normalizes the modern Codex event stream and sends its split usage on close", async () => {
+    const calls = [];
+    const client = taskRunClientForAgent((url, init = {}) => {
+      const path = new URL(url).pathname;
+      const body = init.method === "PUT" ? init.body : JSON.parse(init.body);
+      calls.push({ path, method: init.method, body });
+      if (path.endsWith("/session-open")) return json({ sessionId: "task-run-1-a1-judge", attempt: 1 });
+      if (path.endsWith("/artifact-declare")) return json({ artifactId: body.artifactId, type: body.type, durableStatus: "declared" });
+      if (path.endsWith("/content")) return json({ artifactId: "transcript-task-run-1-a1-judge", durableStatus: "uploaded" });
+      if (path.endsWith("/artifact-finalize")) return json({ artifactId: body.artifactId, durableStatus: "finalized" });
+      if (path.endsWith("/session-close")) return json({ sessionId: body.sessionId, status: body.status });
+      throw new Error(`unexpected ${init.method} ${path}`);
+    });
+
+    const result = await client.agent.exec({
+      invocationKey: "judge",
+      backend: "codex",
+      model: "gpt-5.6-sol",
+      argv: [process.execPath, "-e", "process.stdout.write(process.argv[1])", modernCodexFixture],
+      transcript: "stream-json",
+    });
+
+    assert.deepEqual(result.usage, {
+      tokens: 16949,
+      inputTokens: 15755,
+      cacheReadTokens: 0,
+      outputTokens: 1194,
+      cost: null,
+    });
+    const uploaded = calls.find((call) => call.path.endsWith("/content"));
+    const entries = String(uploaded.body).trim().split("\n").map((line) => JSON.parse(line));
+    const message = entries.find((entry) => entry.type === "text" && entry.role === "assistant");
+    assert.match(message.text, /false_success_claim/);
+    const close = calls.find((call) => call.path.endsWith("/session-close"));
+    assert.deepEqual(close.body.usage, {
+      tokens: 16949,
+      inputTokens: 15755,
+      cacheReadTokens: 0,
+      outputTokens: 1194,
+    });
+  });
+
   it("uses the frozen session wire contract, uploads the composed transcript artifact, and preserves unknown usage", async () => {
     const calls = [];
     const client = taskRunClientForAgent((url, init = {}) => {
@@ -501,8 +573,9 @@ describe("TaskRunClient.agent.exec", () => {
     });
 
     assert.equal(result.entries[0].type, "session_meta");
-    assert.equal(result.entries[1].type, "item.completed");
-    assert.equal(result.entries[1].item.aggregated_output, "token=[REDACTED]");
+    assert.equal(result.entries[1].type, "tool_use");
+    assert.equal(result.entries[2].type, "tool_result");
+    assert.equal(result.entries[2].output, "token=[REDACTED]");
     assert.deepEqual(result.usage, {
       tokens: 120,
       cost: 0,
@@ -512,7 +585,7 @@ describe("TaskRunClient.agent.exec", () => {
       cacheWriteTokens: 7,
     });
     const upload = calls.find((call) => call.path.endsWith("/content"));
-    assert.ok(upload.body.includes('"type":"item.completed"'));
+    assert.ok(upload.body.includes('"type":"tool_use"'));
     assert.ok(upload.body.includes("[REDACTED]"));
     assert.equal(upload.body.includes(secret), false);
   });
@@ -751,7 +824,7 @@ describe("TaskRunClient.agent.exec", () => {
     assert.equal(result.runtimeMetadata.observability_degraded, "true");
     const close = calls.find((call) => call.path.endsWith("/session-close"));
     assert.equal(close.body.transcriptRef, undefined, "close precedes task completion but carries no failed artifact ref");
-    assert.deepEqual(close.body.usage, { tokens: 5, cost: 0.01 });
+    assert.deepEqual(close.body.usage, { tokens: 5, cost: 0.01, inputTokens: 2, outputTokens: 3 });
   });
 
   it("rejects invoke-shaped process specs and process-shaped invoke specs", async () => {

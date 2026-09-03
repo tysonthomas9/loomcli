@@ -33,6 +33,11 @@ const (
 	SessionMetadataTranscriptRef         = "transcript_ref"
 	SessionMetadataUsageTokens           = "usage_tokens"
 	SessionMetadataUsageCostUSD          = "usage_cost_usd"
+	SessionMetadataInputTokens           = "input_tokens"
+	SessionMetadataOutputTokens          = "output_tokens"
+	SessionMetadataCacheReadTokens       = "cache_read_tokens"
+	SessionMetadataCacheWriteTokens      = "cache_write_tokens" //nolint:gosec // Token-usage metadata key, never a credential.
+	SessionMetadataEstimatedCostUSD      = "estimated_cost_usd"
 	SessionMetadataDescriptorFingerprint = "session_descriptor_fingerprint"
 	SessionMetadataOutcomeFingerprint    = "session_outcome_fingerprint"
 )
@@ -44,6 +49,8 @@ var serverSessionMetadataKeys = map[string]struct{}{
 	SessionMetadataDriverRunID: {}, SessionMetadataDriverStepID: {},
 	SessionMetadataDriverRunnerSessionID: {}, SessionMetadataTranscriptRef: {},
 	SessionMetadataUsageTokens: {}, SessionMetadataUsageCostUSD: {},
+	SessionMetadataInputTokens: {}, SessionMetadataOutputTokens: {},
+	SessionMetadataCacheReadTokens: {}, SessionMetadataCacheWriteTokens: {}, SessionMetadataEstimatedCostUSD: {},
 	SessionMetadataDescriptorFingerprint: {}, SessionMetadataOutcomeFingerprint: {},
 }
 
@@ -99,8 +106,12 @@ type SessionRef struct {
 
 // SessionUsage carries optional usage values; nil means unknown rather than zero.
 type SessionUsage struct {
-	Tokens  *int64
-	CostUSD *float64
+	Tokens           *int64
+	InputTokens      *int64
+	OutputTokens     *int64
+	CacheReadTokens  *int64
+	CacheWriteTokens *int64
+	CostUSD          *float64
 }
 
 // SessionOutcome is the terminal result supplied by an invocation owner.
@@ -277,13 +288,26 @@ func sessionMetadataIncludes(actual, expected map[string]string) bool {
 }
 
 func usageMatches(metadata map[string]string, usage SessionUsage) bool {
-	if usage.Tokens != nil && metadata[SessionMetadataUsageTokens] != strconv.FormatInt(*usage.Tokens, 10) {
-		return false
+	return usageIntMatches(metadata, SessionMetadataUsageTokens, usage.Tokens) &&
+		usageIntMatches(metadata, SessionMetadataInputTokens, usage.InputTokens) &&
+		usageIntMatches(metadata, SessionMetadataOutputTokens, usage.OutputTokens) &&
+		usageIntMatches(metadata, SessionMetadataCacheReadTokens, usage.CacheReadTokens) &&
+		usageIntMatches(metadata, SessionMetadataCacheWriteTokens, usage.CacheWriteTokens) &&
+		usageFloatMatches(metadata, SessionMetadataUsageCostUSD, usage.CostUSD)
+}
+
+func usageIntMatches(metadata map[string]string, key string, value *int64) bool {
+	if value == nil {
+		return true
 	}
-	if usage.CostUSD != nil && metadata[SessionMetadataUsageCostUSD] != strconv.FormatFloat(*usage.CostUSD, 'f', -1, 64) {
-		return false
+	return (*value == 0 && strings.TrimSpace(metadata[key]) != "") || metadata[key] == strconv.FormatInt(*value, 10)
+}
+
+func usageFloatMatches(metadata map[string]string, key string, value *float64) bool {
+	if value == nil {
+		return true
 	}
-	return true
+	return (*value == 0 && strings.TrimSpace(metadata[key]) != "") || metadata[key] == strconv.FormatFloat(*value, 'f', -1, 64)
 }
 
 // ApplySessionOutcome stamps outcome onto a non-terminal AgentSession.
@@ -301,12 +325,7 @@ func ApplySessionOutcome(session *domain.AgentSession, outcome SessionOutcome, n
 	if outcome.DriverRunnerSessionID != "" {
 		metadata[SessionMetadataDriverRunnerSessionID] = outcome.DriverRunnerSessionID
 	}
-	if outcome.Usage.Tokens != nil {
-		metadata[SessionMetadataUsageTokens] = strconv.FormatInt(*outcome.Usage.Tokens, 10)
-	}
-	if outcome.Usage.CostUSD != nil {
-		metadata[SessionMetadataUsageCostUSD] = strconv.FormatFloat(*outcome.Usage.CostUSD, 'f', -1, 64)
-	}
+	applySessionUsage(metadata, outcome.Usage)
 	metadata[SessionMetadataOutcomeFingerprint] = SessionOutcomeFingerprint(outcome)
 	session.Status = outcome.Status
 	session.ExitCode = cloneOutcomeExitCode(outcome.ExitCode)
@@ -315,6 +334,30 @@ func ApplySessionOutcome(session *domain.AgentSession, outcome SessionOutcome, n
 	session.Metadata = metadata
 	session.FinishedAt = &now
 	session.UpdatedAt = now
+}
+
+func applySessionUsage(metadata map[string]string, usage SessionUsage) {
+	applyUsageInt(metadata, SessionMetadataUsageTokens, usage.Tokens)
+	applyUsageInt(metadata, SessionMetadataInputTokens, usage.InputTokens)
+	applyUsageInt(metadata, SessionMetadataOutputTokens, usage.OutputTokens)
+	applyUsageInt(metadata, SessionMetadataCacheReadTokens, usage.CacheReadTokens)
+	applyUsageInt(metadata, SessionMetadataCacheWriteTokens, usage.CacheWriteTokens)
+	applyUsageFloat(metadata, SessionMetadataUsageCostUSD, usage.CostUSD)
+	applyUsageFloat(metadata, SessionMetadataEstimatedCostUSD, usage.CostUSD)
+}
+
+func applyUsageInt(metadata map[string]string, key string, value *int64) {
+	if value == nil || (*value == 0 && strings.TrimSpace(metadata[key]) != "") {
+		return
+	}
+	metadata[key] = strconv.FormatInt(*value, 10)
+}
+
+func applyUsageFloat(metadata map[string]string, key string, value *float64) {
+	if value == nil || (*value == 0 && strings.TrimSpace(metadata[key]) != "") {
+		return
+	}
+	metadata[key] = strconv.FormatFloat(*value, 'f', -1, 64)
 }
 
 func cloneOutcomeExitCode(value *int) *int {

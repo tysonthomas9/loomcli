@@ -24,6 +24,9 @@ import (
 // items to harness-wrapper's codex reader and splicing in loom's reasoning
 // event type from raw response_item/reasoning payloads.
 func Events(data []byte) ([]transcript.Event, error) {
+	if events, modern := modernEvents(data); modern {
+		return events, nil
+	}
 	wevs, err := hwcodex.Events(data)
 	if err != nil {
 		return nil, err //nolint:wrapcheck // caller adds context
