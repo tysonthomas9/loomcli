@@ -15,6 +15,8 @@ import type { SessionRecord } from "@/types/agent";
 
 import { useTaskSessions } from "../useTaskSessions";
 
+const eventMock = vi.hoisted(() => ({ connectionEpoch: 0 }));
+
 vi.mock("@/api/terminal", () => ({
   getTaskSessions: vi.fn(),
 }));
@@ -33,7 +35,11 @@ vi.mock("@/hooks/workspace", async () => {
 vi.mock("@/hooks/common", async () => {
   const actual =
     await vi.importActual<typeof import("@/hooks/common")>("@/hooks/common");
-  return { ...actual, useEventSubscription: vi.fn() };
+  return {
+    ...actual,
+    useEventSubscription: vi.fn(),
+    useEventContext: () => ({ connectionEpoch: eventMock.connectionEpoch }),
+  };
 });
 
 const mockGetSessions = vi.mocked(getTaskSessions);
@@ -73,6 +79,7 @@ describe("useTaskSessions", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    eventMock.connectionEpoch = 0;
   });
 
   afterEach(() => {
@@ -110,6 +117,22 @@ describe("useTaskSessions", () => {
       expect(result.current.sessions).toEqual(sessions);
       expect(result.current.isLoading).toBe(false);
       expect(result.current.error).toBeNull();
+    });
+
+    it("refetches its snapshot once per connection epoch", async () => {
+      mockGetSessions.mockResolvedValue([createMockSession()]);
+      const { rerender } = renderHook(() => useTaskSessions("task-1"));
+      await flushPromises();
+      expect(mockGetSessions).toHaveBeenCalledTimes(1);
+
+      eventMock.connectionEpoch = 1;
+      rerender();
+      await flushPromises();
+      expect(mockGetSessions).toHaveBeenCalledTimes(2);
+
+      rerender();
+      await flushPromises();
+      expect(mockGetSessions).toHaveBeenCalledTimes(2);
     });
 
     it("resets sessions and refetches when taskId changes", async () => {

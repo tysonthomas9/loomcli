@@ -49,6 +49,16 @@ export type ConnectionState =
   | "connected"
   | "reconnecting";
 
+/** Server-declared reason that a contiguous mutation stream cannot be delivered. */
+export type ResyncReason = "cap" | "error" | "expired" | "overflow";
+
+/** Cursor transition carried by a resync frame. */
+export interface ResyncEvent {
+  from: string | undefined;
+  to: string;
+  reason: ResyncReason;
+}
+
 // Mutation types: definitions live in src/types/workspace/mutation.ts (the canonical
 // source per the Phase 7 frontend layer DAG). Re-exported here so existing
 // code that imports them from @/api/sse continues to compile.
@@ -73,6 +83,8 @@ export interface SSEClientOptions {
   onReconnect?: (attempt: number) => void;
   /** Called when the server sends the "connected" SSE event (after catch-up events are flushed) */
   onConnected?: () => void;
+  /** Called when the server advances the cursor across a range requiring snapshot refetch. */
+  onResync?: (event: ResyncEvent) => void;
   /** Injectable token provider. Default: fetchSseToken(workspaceId) */
   fetchToken?: () => Promise<SseTokenResult>;
   /** Starting backoff delay in ms for reconnect (default 1000) */
@@ -106,6 +118,7 @@ export class WorkspaceSSEClient {
   private onStateChange: ((state: ConnectionState) => void) | undefined;
   private onReconnect: ((attempt: number) => void) | undefined;
   private onConnected: (() => void) | undefined;
+  private onResync: ((event: ResyncEvent) => void) | undefined;
   private fetchTokenFn: () => Promise<SseTokenResult>;
   private initialReconnectDelay: number;
   private maxReconnectDelay: number;
@@ -117,6 +130,7 @@ export class WorkspaceSSEClient {
     this.onStateChange = options.onStateChange;
     this.onReconnect = options.onReconnect;
     this.onConnected = options.onConnected;
+    this.onResync = options.onResync;
     this.fetchTokenFn =
       options.fetchToken ?? (() => fetchSseToken(this.workspaceId));
     this.initialReconnectDelay = options.initialReconnectDelay ?? 1000;
@@ -143,6 +157,10 @@ export class WorkspaceSSEClient {
 
     if (this.state === "connected" || this.state === "connecting") {
       return;
+    }
+
+    if (since !== undefined) {
+      this.lastEventId = String(since);
     }
 
     this.manualDisconnect = false;
@@ -294,6 +312,7 @@ export class WorkspaceSSEClient {
     this.onStateChange = undefined;
     this.onReconnect = undefined;
     this.onConnected = undefined;
+    this.onResync = undefined;
   }
 
   private setState(state: ConnectionState): void {
@@ -356,6 +375,32 @@ export class WorkspaceSSEClient {
   }
 
   private handleMessage(event: EventSourceMessage): void {
+    if (event.event === "resync") {
+      const from = this.lastEventId;
+      let reason: ResyncReason = "error";
+      try {
+        const parsed = JSON.parse(event.data) as { reason?: unknown };
+        if (
+          parsed.reason !== "cap" &&
+          parsed.reason !== "error" &&
+          parsed.reason !== "expired" &&
+          parsed.reason !== "overflow"
+        ) {
+          throw new Error("invalid resync reason");
+        }
+        reason = parsed.reason;
+      } catch {
+        console.warn("[SSE] Received malformed resync event");
+      }
+
+      this.lastEventId = event.id || undefined;
+      this.callSafely("onResync", this.onResync, {
+        from,
+        to: event.id,
+        reason,
+      });
+      return;
+    }
     if (event.event === "connected") {
       if (this.connectedFrameSeenForOpen) return;
       this.connectedFrameSeenForOpen = true;
