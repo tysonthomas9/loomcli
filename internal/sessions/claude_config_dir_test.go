@@ -28,12 +28,13 @@ func TestClaudeConfigDir_FallsBackToHome(t *testing.T) {
 
 func TestClaudeProjectDir_UsesTheOverride(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "/tmp/custom-claude")
-	got := claudeProjectDir("/work/dir")
+	// No agent context: the process-scoped override is the whole resolution.
+	got := claudeProjectDirFor("", "", "/work/dir")
 	want := filepath.Join("/tmp/custom-claude", "projects", encodeClaudeCWD("/work/dir"))
 	if got != want {
-		t.Fatalf("claudeProjectDir() = %q, want %q", got, want)
+		t.Fatalf("claudeProjectDirFor() = %q, want %q", got, want)
 	}
-	if claudeProjectDir("") != "" {
+	if claudeProjectDirFor("", "", "") != "" {
 		t.Fatal("empty workDir must yield an empty project dir")
 	}
 }
