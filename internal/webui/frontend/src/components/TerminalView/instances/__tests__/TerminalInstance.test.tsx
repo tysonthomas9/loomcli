@@ -260,7 +260,7 @@ describe("TerminalInstance", () => {
     expect(xtermState.handle.scrollToBottom).not.toHaveBeenCalled();
   });
 
-  it("reconnects after a ptyAlive lifecycle transition", async () => {
+  it("reconnects after a attachable lifecycle transition", async () => {
     const { rerender } = render(
       <TerminalInstance
         sessionName="codex-alpha"
@@ -279,7 +279,7 @@ describe("TerminalInstance", () => {
         sessionName="codex-alpha"
         backendName="codex"
         isActive
-        ptyAlive
+        attachable
       />,
     );
     await flushPendingWork();
