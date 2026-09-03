@@ -468,12 +468,22 @@ func invokeClaudeRunTurn(ctx context.Context, workDir, prompt, agentName, resume
 	// leaves the turn result and the exit code exactly as they were.
 	accumulateHarnessUsage(collector, "claude", res.Session.HarnessSessionID, workDir)
 
-	// The wall verdict outranks whatever RunTurn returned. When the watcher
+	// The wall verdict outranks the error RunTurn returned. When the watcher
 	// fires it cancels this turn, so RunTurn's error is typically a
 	// ctx.Canceled shape that says nothing about WHY — checking it first is
 	// what keeps the real cause from being overwritten by our own cancel.
-	if kind, line, ok := watcher.result(); ok {
-		return res, wallInvocationError(kind, line, raw.String())
+	//
+	// It outranks an ERROR only. A turn that returned successfully is not a
+	// wall, whatever the screen shows: the harness answered. The watcher reads
+	// the rendered surface, and a finished turn leaves its own output sitting
+	// there unchanged — the same quiescence a real wall produces — so without
+	// this guard an agent whose output discusses one of these banners converts
+	// its own success into a fatal, non-retryable stop. Evidence loom scraped
+	// off the screen must never outrank the harness's own completion.
+	if err != nil {
+		if kind, line, ok := watcher.result(); ok {
+			return res, wallInvocationError(kind, line, raw.String())
+		}
 	}
 	if err != nil && claudeRunTurnEvidence(res, raw.String()) == "" {
 		res.Turn.Text = raw.String()

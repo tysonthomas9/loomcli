@@ -403,6 +403,15 @@ func (s *Supervisor) setupAgentLogFile(ap *AgentProcess, cmd *exec.Cmd) {
 	daemonLog := s.openDaemonLogFile(ap)
 	if daemonLog != nil {
 		ap.LogFile = daemonLog
+	} else {
+		// No daemon log this cycle means no file whose bytes belong to this
+		// run, so drop both halves of the classification window instead of
+		// leaving a previous cycle's path and offset in place. Tailing another
+		// run's file is exactly the misclassification the offset exists to
+		// prevent, and this is also what makes the archive-only case below true
+		// to its comment.
+		ap.LogFilePath = ""
+		ap.LogFileStartOffset = 0
 	}
 	archive := s.openAgentArchiveLog(ap)
 	if archive != nil {
@@ -595,12 +604,22 @@ func (s *Supervisor) openAgentArchiveLog(ap *AgentProcess) *os.File {
 // archive handle is closed, or the dying agent's last lines are lost and the
 // goroutine writes into a closed file. The drain reads a regular file, so it is
 // bounded even though ap.Mu is held across it.
+//
+// LogFileStartOffset deliberately SURVIVES this call. It has two consumers with
+// different lifetimes: the archive mirror, which captured it by value at start
+// and is already stopped by the line above, and exit classification, which runs
+// AFTER the logs are closed (waitForAgent -> closeAgentLogs, then
+// classifyAgentExit). Clearing it here left classification reading from offset
+// 0 — the whole append-only per-role log — so a marker an earlier run wrote
+// became every later run's verdict, and the agent was fatally stopped for an
+// account wall it never hit. Each spawn re-establishes the offset in
+// openDaemonLogFile, and setupAgentLogFile clears it when there is no daemon
+// log this cycle, so it cannot go stale.
 func closeAgentLogs(ap *AgentProcess) {
 	if ap.stopLogMirror != nil {
 		ap.stopLogMirror()
 		ap.stopLogMirror = nil
 	}
-	ap.LogFileStartOffset = 0
 	if ap.LogFile != nil {
 		if err := ap.LogFile.Close(); err != nil {
 			log.Printf("[daemon] Agent %s: failed to close log file: %v", ap.Entry.Worktree, err)
