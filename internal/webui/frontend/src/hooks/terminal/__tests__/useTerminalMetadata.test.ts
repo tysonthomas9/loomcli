@@ -336,6 +336,47 @@ describe("useTerminalMetadata", () => {
     });
   });
 
+  describe("markTabReplaced", () => {
+    it("records a live-detected replacement without issuing a request", async () => {
+      mockList.mockResolvedValueOnce([
+        createMockTab({ session_name: "a" }),
+        createMockTab({ session_name: "b" }),
+      ]);
+
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
+      await flushPromises();
+
+      act(() => {
+        result.current.markTabReplaced("a", "2026-08-14T16:52:03Z");
+      });
+
+      expect(result.current.tabs[0].replaced_at).toBe("2026-08-14T16:52:03Z");
+      expect(result.current.tabs[0].replaced_reason).toBe("server_restart");
+      // The server already persisted it; this is local state catching up.
+      expect(mockPatch).not.toHaveBeenCalled();
+      expect(result.current.tabs[1].replaced_at).toBeUndefined();
+    });
+
+    it("ignores an unknown session and a repeated timestamp", async () => {
+      mockList.mockResolvedValueOnce([createMockTab({ session_name: "a" })]);
+
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
+      await flushPromises();
+
+      act(() => {
+        result.current.markTabReplaced("a", "2026-08-14T16:52:03Z");
+      });
+      const afterFirst = result.current.tabs;
+
+      act(() => {
+        result.current.markTabReplaced("nope", "2026-08-14T16:52:03Z");
+        result.current.markTabReplaced("a", "2026-08-14T16:52:03Z");
+      });
+
+      expect(result.current.tabs[0]).toBe(afterFirst[0]);
+    });
+  });
+
   describe("linkToIssue / unlinkFromIssue", () => {
     it("optimistically sets issue_id on link", async () => {
       mockList.mockResolvedValueOnce([createMockTab()]);

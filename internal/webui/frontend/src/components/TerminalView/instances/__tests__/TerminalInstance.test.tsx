@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const connectionState = vi.hoisted(() => ({
   writeCallbacks: [] as Array<(data: string | Uint8Array) => void>,
+  attachCallbacks: [] as Array<(frame: unknown) => void>,
   cleanupCount: 0,
   fitCountsAtConnect: [] as number[],
   terminalSizesAtConnect: [] as Array<{ cols: number; rows: number }>,
@@ -15,6 +16,14 @@ const connectionState = vi.hoisted(() => ({
 const xtermState = vi.hoisted(() => {
   const state = {
     fitCount: 0,
+    /**
+     * What the pane would actually be showing. Writes accumulate; a write
+     * containing the erase-display sequence discards everything written
+     * before it, exactly as xterm.js would. Anything drawn ahead of the
+     * scrollback replay therefore disappears from this buffer — which is the
+     * bug the boundary tests below exist to catch.
+     */
+    screen: "",
     onReady: null as null | ((handle: unknown) => void),
     onResize: null as null | ((cols: number, rows: number) => void),
     handle: null as unknown as {
@@ -25,7 +34,15 @@ const xtermState = vi.hoisted(() => {
     },
   };
   state.handle = {
-    write: vi.fn(),
+    write: vi.fn((data: string | Uint8Array) => {
+      const text =
+        typeof data === "string" ? data : new TextDecoder().decode(data);
+      const clearAt = text.lastIndexOf("\x1b[2J");
+      state.screen =
+        clearAt === -1
+          ? state.screen + text
+          : text.slice(clearAt + "\x1b[2J".length);
+    }),
     focus: vi.fn(),
     fit: () => {
       state.fitCount += 1;
@@ -72,8 +89,10 @@ vi.mock("../terminalConnection", () => ({
       _onBackendCrash: (reason: string) => void,
       _onSessionKilled: () => void,
       terminalSize: { cols: number; rows: number },
+      onAttach?: (frame: unknown) => void,
     ): (() => void) => {
       connectionState.writeCallbacks.push(write);
+      if (onAttach) connectionState.attachCallbacks.push(onAttach);
       connectionState.fitCountsAtConnect.push(xtermState.fitCount);
       connectionState.terminalSizesAtConnect.push(terminalSize);
       setConnState("connecting");
@@ -116,10 +135,54 @@ function latestWriteCallback(): (data: string | Uint8Array) => void {
   return callback;
 }
 
+function latestAttachCallback(): (frame: unknown) => void {
+  const callback = connectionState.attachCallbacks.at(-1);
+  if (!callback) throw new Error("no attach callback captured");
+  return callback;
+}
+
+const BOUNDARY_MARKER = "this is a new shell";
+
+function boundaryOccurrences(): number {
+  return xtermState.screen.split(BOUNDARY_MARKER).length - 1;
+}
+
+function attachFrame(overrides: Record<string, unknown> = {}): unknown {
+  return {
+    type: "attach",
+    reattached: false,
+    replaced: true,
+    replaced_at: "2026-08-14T16:52:03Z",
+    replaced_reason: "server_restart",
+    ...overrides,
+  };
+}
+
+/** Mount an active instance with its renderer ready and one live connection. */
+async function mountConnected(
+  props: Record<string, unknown> = {},
+): Promise<void> {
+  render(
+    <TerminalInstance
+      sessionName="codex-alpha"
+      backendName="codex"
+      isActive
+      {...props}
+    />,
+  );
+  await waitFor(() => expect(xtermState.onReady).not.toBeNull());
+  readyRenderer();
+  await waitFor(() => {
+    expect(connectionState.writeCallbacks).toHaveLength(1);
+  });
+}
+
 describe("TerminalInstance", () => {
   beforeEach(() => {
     connectionState.writeCallbacks.length = 0;
+    connectionState.attachCallbacks.length = 0;
     connectionState.cleanupCount = 0;
+    xtermState.screen = "";
     connectionState.fitCountsAtConnect.length = 0;
     connectionState.terminalSizesAtConnect.length = 0;
     xtermState.fitCount = 0;
@@ -286,5 +349,113 @@ describe("TerminalInstance", () => {
 
     expect(connectionState.cleanupCount).toBeGreaterThanOrEqual(1);
     expect(connectionState.writeCallbacks.length).toBeGreaterThanOrEqual(2);
+  });
+
+  describe("session replacement boundary", () => {
+    it("leaves the boundary visible after the scrollback replay's screen clear", async () => {
+      await mountConnected();
+      const write = latestWriteCallback();
+
+      // The server's order on the wire: replay (binary, opening with the
+      // erase-display sequence), then the attach control frame, then live
+      // output from the fresh shell.
+      act(() =>
+        write(new TextEncoder().encode("\x1b[2J\x1b[Hold scrollback\r\n")),
+      );
+      act(() => latestAttachCallback()(attachFrame()));
+      act(() => write("fresh-shell$ "));
+
+      expect(boundaryOccurrences()).toBe(1);
+      expect(xtermState.screen).toContain("server restarted");
+      // And it sits at the seam: replay above it, new output below.
+      expect(xtermState.screen.indexOf("old scrollback")).toBeLessThan(
+        xtermState.screen.indexOf(BOUNDARY_MARKER),
+      );
+      expect(xtermState.screen.indexOf(BOUNDARY_MARKER)).toBeLessThan(
+        xtermState.screen.indexOf("fresh-shell$ "),
+      );
+    });
+
+    it("draws the boundary exactly once when there is no replay frame at all", async () => {
+      await mountConnected();
+      const write = latestWriteCallback();
+
+      // Empty scrollback: the server skips the replay write entirely, so no
+      // erase-display sequence ever arrives.
+      act(() => latestAttachCallback()(attachFrame()));
+      act(() => write("fresh-shell$ "));
+
+      expect(boundaryOccurrences()).toBe(1);
+      expect(xtermState.screen.indexOf(BOUNDARY_MARKER)).toBeLessThan(
+        xtermState.screen.indexOf("fresh-shell$ "),
+      );
+    });
+
+    it("draws no boundary on a reattach", async () => {
+      await mountConnected();
+
+      act(() =>
+        latestAttachCallback()(
+          attachFrame({ reattached: true, replaced: false }),
+        ),
+      );
+
+      expect(boundaryOccurrences()).toBe(0);
+    });
+
+    it("does not draw a second boundary when the socket reconnects", async () => {
+      const onSessionReplaced = vi.fn();
+      await mountConnected({ onSessionReplaced });
+
+      act(() => latestAttachCallback()(attachFrame()));
+      // Reconnect: the server re-announces the same replacement, now as a
+      // reattach. The pane is never unmounted, so its buffer still holds the
+      // first boundary.
+      act(() =>
+        latestAttachCallback()(
+          attachFrame({ reattached: true, replaced: false }),
+        ),
+      );
+      // Even a repeated "this attach is the replacement" frame for the same
+      // timestamp must not stack a second line.
+      act(() => latestAttachCallback()(attachFrame()));
+
+      expect(boundaryOccurrences()).toBe(1);
+      expect(onSessionReplaced).toHaveBeenCalledTimes(1);
+    });
+
+    it("surfaces the replacement timestamp to the metadata owner", async () => {
+      const onSessionReplaced = vi.fn();
+      await mountConnected({ onSessionReplaced });
+
+      act(() => latestAttachCallback()(attachFrame()));
+
+      expect(onSessionReplaced).toHaveBeenCalledWith("2026-08-14T16:52:03Z");
+    });
+
+    it("renders the replacement time in the boundary line", async () => {
+      await mountConnected();
+      const replacedAt = "2026-08-14T16:52:03Z";
+      const local = new Date(replacedAt);
+      const expected = `${String(local.getHours()).padStart(2, "0")}:${String(
+        local.getMinutes(),
+      ).padStart(2, "0")}`;
+
+      act(() =>
+        latestAttachCallback()(attachFrame({ replaced_at: replacedAt })),
+      );
+
+      expect(xtermState.screen).toContain(`server restarted ${expected}`);
+    });
+
+    it("still draws the boundary for a read-only tab", async () => {
+      // The boundary is a client-side render, not PTY input, so the
+      // `writable` gate on handleData must not reach it.
+      await mountConnected({ writable: false });
+
+      act(() => latestAttachCallback()(attachFrame()));
+
+      expect(boundaryOccurrences()).toBe(1);
+    });
   });
 });
