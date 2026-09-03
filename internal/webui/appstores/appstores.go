@@ -7,7 +7,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/tysonthomas9/loomcli/internal/rpc"
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
@@ -43,8 +43,8 @@ const (
 // SessionRecord is a type alias for sessionhistory.SessionRecord.
 type SessionRecord = sessionhistory.SessionRecord
 
-// MutationsSinceFn is the type for the getMutationsSince callback.
-type MutationsSinceFn = func(wsID string, since string) []rpc.MutationEvent
+// MutationPageFn is the type for a workspace-scoped mutation-page callback.
+type MutationPageFn = func(context.Context, string, string, int) (backend.MutationPage, error)
 
 // Hub is a type alias for realtime.Hub.
 type Hub = realtime.Hub
@@ -70,12 +70,12 @@ func NewMultiSub(ctx context.Context, hub *realtime.Hub, logger *slog.Logger) *M
 	return subscription.NewStartedMultiWorkspaceSubscriber(ctx, hub, logger)
 }
 
-// GetMutationsSinceFn returns the mutations-since callback from the subscriber.
-func GetMutationsSinceFn(sub *MultiWorkspaceSubscriber) func(wsID string, since string) []rpc.MutationEvent {
+// GetMutationPageFn returns the mutation-page callback from the subscriber.
+func GetMutationPageFn(sub *MultiWorkspaceSubscriber) MutationPageFn {
 	if sub == nil {
 		return nil
 	}
-	return sub.GetMutationsSinceForWorkspace
+	return sub.GetMutationPageForWorkspace
 }
 
 // InitTabMeta creates the tab metadata store from Redis config.
@@ -116,10 +116,10 @@ type SubscriptionModule = subscription.Module
 // NewSubscriptionModule creates a new SSE subscription module.
 func NewSubscriptionModule(
 	hub *realtime.Hub,
-	getMutationsSince func(string, string) []rpc.MutationEvent,
+	getMutationPage MutationPageFn,
 	wsFromCtx func(context.Context) string,
-	activateWorkspace func(context.Context, string),
+	activateWorkspace func(context.Context, string) (string, error),
 	sseTokens *realtime.TokenStore,
 ) *SubscriptionModule {
-	return subscription.NewModule(hub, getMutationsSince, wsFromCtx, activateWorkspace, sseTokens)
+	return subscription.NewModule(hub, getMutationPage, wsFromCtx, activateWorkspace, sseTokens)
 }

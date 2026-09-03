@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,17 +14,63 @@ import (
 )
 
 // stubFleetBackend is a minimal backend.IssueBackend used by FleetSubscriberHook
-// tests. It returns errors from polling so the BackendMutationSubscriber's
-// loop retries safely without producing real broadcasts. All other methods
+// tests. It returns an empty head page and blocks live polling until canceled,
+// without producing broadcasts. All other methods
 // return errors. We only need a handful for the hook tests; the hook never
 // inspects the backend beyond passing it to MultiWorkspaceSubscriber.
 type stubFleetBackend struct{}
 
-func (stubFleetBackend) WaitForMutations(_ context.Context, _ int64, _ int64) ([]backend.MutationData, error) {
-	return nil, errors.New("stub: not configured")
+type blockingProbeFleetBackend struct {
+	stubFleetBackend
+}
+
+func (blockingProbeFleetBackend) ProbeHead(ctx context.Context) (string, bool, error) {
+	<-ctx.Done()
+	return "", false, ctx.Err()
+}
+
+func (blockingProbeFleetBackend) GetMutationsAfter(context.Context, string, int) (backend.MutationPage, error) {
+	return backend.MutationPage{}, errors.New("unexpected GetMutationsAfter")
+}
+
+func (blockingProbeFleetBackend) WaitForMutationsAfter(context.Context, string, int64, int) (backend.MutationPage, error) {
+	return backend.MutationPage{}, errors.New("unexpected WaitForMutationsAfter")
+}
+
+type hookLogCapture struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (*hookLogCapture) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h *hookLogCapture) Handle(_ context.Context, record slog.Record) error {
+	h.mu.Lock()
+	h.records = append(h.records, record.Clone())
+	h.mu.Unlock()
+	return nil
+}
+
+func (h *hookLogCapture) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *hookLogCapture) WithGroup(string) slog.Handler      { return h }
+
+func (h *hookLogCapture) hasWarn(message string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, record := range h.records {
+		if record.Level == slog.LevelWarn && record.Message == message {
+			return true
+		}
+	}
+	return false
+}
+
+func (stubFleetBackend) WaitForMutations(ctx context.Context, _ int64, _ int64) ([]backend.MutationData, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
 }
 func (stubFleetBackend) GetMutations(_ context.Context, _ int64) ([]backend.MutationData, error) {
-	return nil, errors.New("stub: not configured")
+	return []backend.MutationData{}, nil
 }
 func (stubFleetBackend) Get(_ context.Context, _ string) (*backend.IssueDetailData, error) {
 	return nil, errors.New("stub")
@@ -123,6 +170,12 @@ func newFleetSubscriberHookEnv(t *testing.T) (*FleetSubscriberHook, *MultiWorksp
 func registerFleetWorkspaceWithBackend(t *testing.T, registry *coordinator.WorkspaceRegistry, wsID string) backend.IssueBackend {
 	t.Helper()
 	be := stubFleetBackend{}
+	registerFleetWorkspaceResource(t, registry, wsID, be)
+	return be
+}
+
+func registerFleetWorkspaceResource(t *testing.T, registry *coordinator.WorkspaceRegistry, wsID string, be backend.IssueBackend) {
+	t.Helper()
 
 	// Use a stub hook that just provides the resource — exactly what
 	// FleetBackendHook does in production but without the network call.
@@ -137,7 +190,6 @@ func registerFleetWorkspaceWithBackend(t *testing.T, registry *coordinator.Works
 	if err := registry.Register(wsID, "/tmp/"+wsID); err != nil {
 		t.Fatalf("Register(%q): %v", wsID, err)
 	}
-	return be
 }
 
 // resourceProviderHook is a tiny LifecycleHook that puts a fixed value
@@ -224,6 +276,28 @@ func TestFleetSubscriberHook_Activate_Idempotent(t *testing.T) {
 	ids := multiSub.WorkspaceIDs()
 	if len(ids) != 1 {
 		t.Errorf("expected exactly 1 subscriber after repeated activate, got %v", ids)
+	}
+}
+
+func TestFleetSubscriberHook_ActivateTimesOutWaitingForReadiness(t *testing.T) {
+	hook, _, registry := newFleetSubscriberHookEnv(t)
+	hook.readinessTimeout = 20 * time.Millisecond
+	logs := &hookLogCapture{}
+	hook.logger = slog.New(logs)
+	registerFleetWorkspaceResource(t, registry, "ws-timeout", blockingProbeFleetBackend{})
+
+	result := make(chan error, 1)
+	go func() { result <- hook.Activate("ws-timeout") }()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Activate error = %v, want context deadline exceeded", err)
+		}
+		if !logs.hasWarn("fleet subscriber activation timed out") {
+			t.Fatal("Activate timeout did not emit a warning")
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("Activate did not honor its readiness timeout")
 	}
 }
 

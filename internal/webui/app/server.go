@@ -65,9 +65,9 @@ type Server struct {
 	sessSvc      service.SessionService  // always constructed (stores may be nil internally)
 
 	// Real-time
-	hub               *appstores.Hub
-	multiSub          *appstores.MultiWorkspaceSubscriber
-	getMutationsSince appstores.MutationsSinceFn
+	hub             *appstores.Hub
+	multiSub        *appstores.MultiWorkspaceSubscriber
+	getMutationPage appstores.MutationPageFn
 
 	// Workspace lifecycle
 	registry           *appinfra.WorkspaceRegistry

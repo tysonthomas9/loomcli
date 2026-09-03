@@ -10,17 +10,30 @@ import (
 
 // Writer centralizes SSE wire-format concerns. It is not concurrency-safe.
 type Writer struct {
-	w       io.Writer
-	flusher http.Flusher
+	w          io.Writer
+	controller responseController
+}
+
+type responseController interface {
+	Flush() error
 }
 
 // NewWriter creates a new SSE writer, checking that the ResponseWriter supports Flusher.
 func NewWriter(w http.ResponseWriter) (*Writer, error) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
+	if _, ok := w.(http.Flusher); !ok {
 		return nil, fmt.Errorf("ResponseWriter does not implement http.Flusher")
 	}
-	return &Writer{w: w, flusher: flusher}, nil
+	return newWriter(w, http.NewResponseController(w))
+}
+
+func newWriter(w io.Writer, controller responseController) (*Writer, error) {
+	if w == nil {
+		return nil, fmt.Errorf("SSE writer must not be nil")
+	}
+	if controller == nil {
+		return nil, fmt.Errorf("SSE response controller must not be nil")
+	}
+	return &Writer{w: w, controller: controller}, nil
 }
 
 // WriteRetry writes the retry interval to the SSE stream.
@@ -91,6 +104,5 @@ func (sw *Writer) writeFrame(id, event, data *string, retry *int, comment *strin
 	if _, err := sw.w.Write([]byte(frame.String())); err != nil {
 		return err
 	}
-	sw.flusher.Flush()
-	return nil
+	return sw.controller.Flush()
 }

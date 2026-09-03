@@ -174,6 +174,27 @@ func TestWriterReturnsWriteFailureWithoutFlushing(t *testing.T) {
 	}
 }
 
+func TestWriterReturnsInjectedFlushFailureAfterExactlyOneFlush(t *testing.T) {
+	flushErr := errors.New("flush failed")
+	controller := &recordingResponseController{err: flushErr}
+	var buf bytes.Buffer
+	sw, err := newWriter(&buf, controller)
+	if err != nil {
+		t.Fatalf("newWriter: %v", err)
+	}
+
+	err = sw.WriteEventNoID("event", "data")
+	if !errors.Is(err, flushErr) {
+		t.Fatalf("WriteEventNoID error = %v, want %v", err, flushErr)
+	}
+	if controller.flushes != 1 {
+		t.Fatalf("flushes = %d, want exactly 1", controller.flushes)
+	}
+	if got := buf.String(); got != "event: event\ndata: data\n\n" {
+		t.Fatalf("frame bytes = %q", got)
+	}
+}
+
 func TestNewWriterRejectsUnsupportedFlusher(t *testing.T) {
 	if _, err := NewWriter(&nonFlushingResponseWriter{}); err == nil {
 		t.Fatal("NewWriter() error = nil, want unsupported flusher error")
@@ -225,3 +246,13 @@ func (*nonFlushingResponseWriter) Write(p []byte) (int, error) {
 }
 
 func (*nonFlushingResponseWriter) WriteHeader(int) {}
+
+type recordingResponseController struct {
+	flushes int
+	err     error
+}
+
+func (c *recordingResponseController) Flush() error {
+	c.flushes++
+	return c.err
+}

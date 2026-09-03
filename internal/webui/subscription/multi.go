@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
@@ -29,25 +28,28 @@ const (
 	ActivationReasonSSE      ActivationReason = "sse"
 )
 
-// workspaceSubscriber abstracts a per-workspace backend mutation source.
 type workspaceSubscriber interface {
 	Start()
 	Stop()
-	GetMutationDataSince(since string) []backend.MutationData
+	Ready(context.Context) (string, error)
+	Head() string
+	GetMutationPage(context.Context, string, int) (backend.MutationPage, error)
 }
 
-// subscriberEntry tracks a subscriber and when it last had SSE clients.
 type subscriberEntry struct {
 	sub       workspaceSubscriber
-	idleSince time.Time // when client count first dropped to 0; zero if clients connected
+	starting  bool
+	idleSince time.Time
 }
 
 // MultiWorkspaceSubscriber manages per-workspace backend subscribers and
-// broadcasts workspace-tagged mutations to a shared SSE hub.
+// shares each subscriber's readiness result across concurrent activations.
 type MultiWorkspaceSubscriber struct {
 	hub         *realtime.Hub
 	logger      *slog.Logger
-	subscribers map[string]*subscriberEntry // workspace ID → entry
+	subscribers map[string]*subscriberEntry
+	lastHeads   map[string]string
+	budgets     subscriberBudgets
 
 	idleDeactivationInterval time.Duration
 	idleDeactivationTimeout  time.Duration
@@ -60,15 +62,15 @@ type MultiWorkspaceSubscriber struct {
 	cancel    context.CancelFunc
 }
 
-// NewStartedMultiWorkspaceSubscriber creates a MultiWorkspaceSubscriber and
-// starts its process-lifetime manager loop.
+// NewStartedMultiWorkspaceSubscriber creates and starts a process-lifetime
+// multi-workspace subscriber manager.
 func NewStartedMultiWorkspaceSubscriber(ctx context.Context, hub *realtime.Hub, logger *slog.Logger) *MultiWorkspaceSubscriber {
 	m := NewMultiWorkspaceSubscriber(hub, logger)
 	m.Start(ctx)
 	return m
 }
 
-// NewMultiWorkspaceSubscriber creates a new MultiWorkspaceSubscriber.
+// NewMultiWorkspaceSubscriber creates a subscriber manager.
 func NewMultiWorkspaceSubscriber(hub *realtime.Hub, logger *slog.Logger) *MultiWorkspaceSubscriber {
 	if logger == nil {
 		logger = slog.Default()
@@ -77,52 +79,115 @@ func NewMultiWorkspaceSubscriber(hub *realtime.Hub, logger *slog.Logger) *MultiW
 		hub:                      hub,
 		logger:                   logger,
 		subscribers:              make(map[string]*subscriberEntry),
+		lastHeads:                make(map[string]string),
+		budgets:                  defaultSubscriberBudgets(),
 		idleDeactivationInterval: defaultIdleDeactivationInterval,
 		idleDeactivationTimeout:  defaultIdleDeactivationTimeout,
 	}
 }
 
-// AddWorkspaceWithBackend creates and starts a BackendMutationSubscriber
-// for the given workspace, sourcing mutations from the supplied
-// IssueBackend (typically a *fleet.FleetBackend in fleet mode). Mirrors
-// AddWorkspace's contract: idempotent under wsID, takes the same write
-// lock to close the TOCTOU window between HasSubscriber and insertion.
-// Returns an error if b is nil.
+// AddWorkspaceWithBackend activates a subscriber for legacy callers.
 func (m *MultiWorkspaceSubscriber) AddWorkspaceWithBackend(wsID string, b backend.IssueBackend) error {
-	return m.EnsureActive(context.Background(), wsID, b, ActivationReasonLegacy)
+	_, err := m.EnsureActive(context.Background(), wsID, b, ActivationReasonLegacy)
+	return err
 }
 
-// EnsureActive creates and starts the per-workspace backend subscriber if one
-// is not already active. SSE token/stream traffic activates subscribers;
-// connected SSE clients retain them, and the manager idle loop removes
-// subscribers with no SSE clients after the idle grace period.
-func (m *MultiWorkspaceSubscriber) EnsureActive(ctx context.Context, wsID string, b backend.IssueBackend, reason ActivationReason) error {
+// EnsureActive installs at most one starting subscriber for a workspace and
+// waits outside the manager lock for its complete head cursor.
+func (m *MultiWorkspaceSubscriber) EnsureActive(
+	ctx context.Context,
+	wsID string,
+	b backend.IssueBackend,
+	reason ActivationReason,
+) (string, error) {
 	if b == nil {
-		return fmt.Errorf("EnsureActive: backend must not be nil for workspace %q", wsID)
+		return "", fmt.Errorf("EnsureActive: backend must not be nil for workspace %q", wsID)
 	}
-	if ctx != nil && ctx.Err() != nil {
-		return ctx.Err()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	if m.closed {
-		return fmt.Errorf("EnsureActive: subscriber manager is stopped")
+		m.mu.Unlock()
+		return "", fmt.Errorf("EnsureActive: subscriber manager is stopped")
 	}
-	if _, ok := m.subscribers[wsID]; ok {
-		return nil
+	entry, exists := m.subscribers[wsID]
+	created := false
+	if !exists {
+		initialHead := m.lastHeads[wsID]
+		entry = &subscriberEntry{
+			sub:      newBackendMutationSubscriber(b, m.hub, wsID, initialHead, m.budgets),
+			starting: true,
+		}
+		m.subscribers[wsID] = entry
+		entry.sub.Start()
+		created = true
+	}
+	m.mu.Unlock()
+
+	head, err := entry.sub.Ready(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			m.mu.Lock()
+			if m.subscribers[wsID] == entry {
+				m.rememberHeadLocked(wsID, entry.sub.Head())
+				delete(m.subscribers, wsID)
+			}
+			m.mu.Unlock()
+			entry.sub.Stop()
+			m.rememberHead(wsID, entry.sub.Head())
+		}
+		return "", err
 	}
 
-	sub := NewBackendMutationSubscriber(b, m.hub, wsID)
-	sub.Start()
-	m.subscribers[wsID] = &subscriberEntry{sub: sub}
-
-	m.logger.Info("workspace backend subscriber started", "workspace", wsID, "reason", reason)
-	return nil
+	m.mu.Lock()
+	if m.subscribers[wsID] == entry {
+		entry.starting = false
+	}
+	m.mu.Unlock()
+	if created {
+		m.logger.Info("workspace backend subscriber started", "workspace", wsID, "reason", reason, "cursor", head)
+	}
+	return head, nil
 }
 
-// HasSubscriber returns true if a subscriber is registered for the workspace.
+// Ready waits for an existing workspace subscriber's head cursor.
+func (m *MultiWorkspaceSubscriber) Ready(ctx context.Context, wsID string) (string, error) {
+	m.mu.RLock()
+	entry, ok := m.subscribers[wsID]
+	closed := m.closed
+	m.mu.RUnlock()
+	if !ok {
+		if closed {
+			return "", fmt.Errorf("subscriber manager is stopped")
+		}
+		return "", fmt.Errorf("workspace %q has no active subscriber", wsID)
+	}
+	return entry.sub.Ready(ctx)
+}
+
+// GetMutationPageForWorkspace returns one catch-up page for an active
+// workspace subscriber.
+func (m *MultiWorkspaceSubscriber) GetMutationPageForWorkspace(
+	ctx context.Context,
+	wsID string,
+	since string,
+	limit int,
+) (backend.MutationPage, error) {
+	m.mu.RLock()
+	entry, ok := m.subscribers[wsID]
+	m.mu.RUnlock()
+	if !ok {
+		return backend.MutationPage{}, fmt.Errorf("workspace %q has no active subscriber", wsID)
+	}
+	return entry.sub.GetMutationPage(ctx, since, limit)
+}
+
+// HasSubscriber reports whether a workspace has an active or starting entry.
 func (m *MultiWorkspaceSubscriber) HasSubscriber(wsID string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -130,34 +195,36 @@ func (m *MultiWorkspaceSubscriber) HasSubscriber(wsID string) bool {
 	return ok
 }
 
-// RemoveWorkspace stops and removes the subscriber for the given workspace.
+// RemoveWorkspace stops and removes a workspace subscriber, retaining its
+// last in-memory head for an old-FleetDB reactivation drain.
 func (m *MultiWorkspaceSubscriber) RemoveWorkspace(wsID string) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if entry, ok := m.subscribers[wsID]; ok {
-		entry.sub.Stop()
+	entry, ok := m.subscribers[wsID]
+	if ok {
+		m.rememberHeadLocked(wsID, entry.sub.Head())
 		delete(m.subscribers, wsID)
-		m.logger.Info("workspace subscriber stopped and removed", "workspace", wsID)
 	}
+	m.mu.Unlock()
+	if !ok {
+		return
+	}
+	entry.sub.Stop()
+	m.rememberHead(wsID, entry.sub.Head())
+	m.logger.Info("workspace subscriber stopped and removed", "workspace", wsID)
 }
 
-// Start starts the process-lifetime manager loop. Stop does not make the
-// manager restartable.
+// Start starts the manager's idle-deactivation loop once.
 func (m *MultiWorkspaceSubscriber) Start(ctx context.Context) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-
 	m.startOnce.Do(func() {
 		m.mu.Lock()
 		defer m.mu.Unlock()
 		if m.closed {
 			return
 		}
-
 		m.ctx, m.cancel = context.WithCancel(ctx)
-
 		m.idleWG.Add(1)
 		go func() {
 			defer m.idleWG.Done()
@@ -166,7 +233,7 @@ func (m *MultiWorkspaceSubscriber) Start(ctx context.Context) {
 	})
 }
 
-// Stop gracefully stops all workspace subscribers.
+// Stop stops the manager and all subscribers, releasing any readiness waiters.
 func (m *MultiWorkspaceSubscriber) Stop() {
 	m.mu.Lock()
 	if m.closed {
@@ -175,28 +242,29 @@ func (m *MultiWorkspaceSubscriber) Stop() {
 	}
 	m.closed = true
 	cancel := m.cancel
+	entries := make(map[string]*subscriberEntry, len(m.subscribers))
+	for wsID, entry := range m.subscribers {
+		entries[wsID] = entry
+		m.rememberHeadLocked(wsID, entry.sub.Head())
+	}
+	m.subscribers = make(map[string]*subscriberEntry)
 	m.mu.Unlock()
 
 	if cancel != nil {
 		cancel()
 	}
 	m.idleWG.Wait()
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	for wsID, entry := range m.subscribers {
+	for wsID, entry := range entries {
 		entry.sub.Stop()
+		m.rememberHead(wsID, entry.sub.Head())
 		m.logger.Info("workspace subscriber stopped", "workspace", wsID)
 	}
-	m.subscribers = make(map[string]*subscriberEntry)
 }
 
-// WorkspaceIDs returns a sorted list of active workspace subscription IDs.
+// WorkspaceIDs returns sorted active workspace IDs.
 func (m *MultiWorkspaceSubscriber) WorkspaceIDs() []string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-
 	ids := make([]string, 0, len(m.subscribers))
 	for id := range m.subscribers {
 		ids = append(ids, id)
@@ -205,27 +273,6 @@ func (m *MultiWorkspaceSubscriber) WorkspaceIDs() []string {
 	return ids
 }
 
-// GetMutationsSince retrieves mutations since the given timestamp from all
-// workspace subscribers. Used for SSE client reconnection catch-up.
-func (m *MultiWorkspaceSubscriber) GetMutationsSince(since string) []rpc.MutationEvent {
-	m.mu.RLock()
-	entries := make(map[string]*subscriberEntry, len(m.subscribers))
-	for k, v := range m.subscribers {
-		entries[k] = v
-	}
-	m.mu.RUnlock()
-
-	var all []rpc.MutationEvent
-	for _, entry := range entries {
-		muts := entry.sub.GetMutationDataSince(since)
-		for _, m := range muts {
-			all = append(all, realtime.BackendMutationToRPCEvent(m))
-		}
-	}
-	return all
-}
-
-// idleDeactivationLoop periodically deactivates subscribers with no SSE clients.
 func (m *MultiWorkspaceSubscriber) idleDeactivationLoop() {
 	ticker := time.NewTicker(m.idleDeactivationInterval)
 	defer ticker.Stop()
@@ -234,62 +281,66 @@ func (m *MultiWorkspaceSubscriber) idleDeactivationLoop() {
 		case <-m.ctx.Done():
 			return
 		case now := <-ticker.C:
-			// Snapshot workspace IDs under read lock, then query hub WITHOUT holding m.mu
-			// to avoid lock inversion (m.mu → h.mu).
-			m.mu.RLock()
-			wsIDs := make([]string, 0, len(m.subscribers))
-			for id := range m.subscribers {
-				wsIDs = append(wsIDs, id)
-			}
-			m.mu.RUnlock()
-
-			clientCounts := make(map[string]int, len(wsIDs))
-			for _, id := range wsIDs {
-				clientCounts[id] = m.hub.ClientCountForWorkspace(id)
-			}
-
-			// Now take write lock and apply deactivation decisions.
-			m.mu.Lock()
-			for wsID, entry := range m.subscribers {
-				if clientCounts[wsID] > 0 {
-					entry.idleSince = time.Time{}
-					continue
-				}
-				if entry.idleSince.IsZero() {
-					entry.idleSince = now
-					continue
-				}
-				if now.Sub(entry.idleSince) >= m.idleDeactivationTimeout {
-					m.logger.Info("deactivating idle subscriber",
-						"workspace", wsID, "idle_for", now.Sub(entry.idleSince).Round(time.Second))
-					entry.sub.Stop()
-					delete(m.subscribers, wsID)
-				}
-			}
-			m.mu.Unlock()
+			m.deactivateIdle(now)
 		}
 	}
 }
 
-// GetMutationsSinceForWorkspace retrieves mutations since the given timestamp
-// from a specific workspace's subscriber only. Returns nil if the workspace
-// has no active subscriber.
-func (m *MultiWorkspaceSubscriber) GetMutationsSinceForWorkspace(wsID string, since string) []rpc.MutationEvent {
+func (m *MultiWorkspaceSubscriber) deactivateIdle(now time.Time) {
 	m.mu.RLock()
-	entry, ok := m.subscribers[wsID]
+	wsIDs := make([]string, 0, len(m.subscribers))
+	for id := range m.subscribers {
+		wsIDs = append(wsIDs, id)
+	}
 	m.mu.RUnlock()
-	if !ok {
-		return nil
+
+	clientCounts := make(map[string]int, len(wsIDs))
+	for _, id := range wsIDs {
+		if m.hub != nil {
+			clientCounts[id] = m.hub.ClientCountForWorkspace(id)
+		}
 	}
-	muts := entry.sub.GetMutationDataSince(since)
-	if len(muts) == 0 {
-		return nil
+
+	var stopped map[string]*subscriberEntry
+	m.mu.Lock()
+	for wsID, entry := range m.subscribers {
+		if clientCounts[wsID] > 0 {
+			entry.idleSince = time.Time{}
+			continue
+		}
+		if entry.idleSince.IsZero() {
+			entry.idleSince = now
+			continue
+		}
+		if now.Sub(entry.idleSince) < m.idleDeactivationTimeout {
+			continue
+		}
+		if stopped == nil {
+			stopped = make(map[string]*subscriberEntry)
+		}
+		stopped[wsID] = entry
+		m.rememberHeadLocked(wsID, entry.sub.Head())
+		delete(m.subscribers, wsID)
 	}
-	out := make([]rpc.MutationEvent, len(muts))
-	for i, m := range muts {
-		out[i] = realtime.BackendMutationToRPCEvent(m)
+	m.mu.Unlock()
+
+	for wsID, entry := range stopped {
+		m.logger.Info("deactivating idle subscriber", "workspace", wsID)
+		entry.sub.Stop()
+		m.rememberHead(wsID, entry.sub.Head())
 	}
-	return out
+}
+
+func (m *MultiWorkspaceSubscriber) rememberHeadLocked(wsID, head string) {
+	if head != "" {
+		m.lastHeads[wsID] = head
+	}
+}
+
+func (m *MultiWorkspaceSubscriber) rememberHead(wsID, head string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.rememberHeadLocked(wsID, head)
 }
 
 func parseCursorMillis(cursor string) int64 {
