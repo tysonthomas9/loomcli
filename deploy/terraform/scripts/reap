@@ -31,6 +31,7 @@ done < <(
 reaped=0
 kept=0
 skipped=0
+failed=0
 
 for name in "${workspaces[@]}"; do
   data_dir="$TF_ROOT/.terraform-data/reap/$name"
@@ -58,13 +59,19 @@ for name in "${workspaces[@]}"; do
       echo "$name: would reap (expires_at=$expires_at)"
     else
       echo "$name: reaping (expires_at=$expires_at)"
-      "$MAKE_BIN" --no-print-directory -C "$TF_ROOT" down \
+      # One stack that fails to destroy must not shield the rest: note it,
+      # carry on, and fail the run at the end.
+      if ! "$MAKE_BIN" --no-print-directory -C "$TF_ROOT" down \
         NAME="$name" ADOPT=1 PROJECT="$PROJECT" REGION="$REGION" ZONE="$ZONE" \
         TF_BIN="$TF_BIN" TF_STATE_BUCKET="$TF_STATE_BUCKET" \
         SHARED_NETWORK="${SHARED_NETWORK:-loom}" \
         SHARED_SUBNET_CIDR="${SHARED_SUBNET_CIDR:-10.90.0.0/20}" \
         TTL_MINUTES="${TTL_MINUTES:-480}" \
-        AUTO_STOP_MINUTES="${AUTO_STOP_MINUTES:-50}"
+        AUTO_STOP_MINUTES="${AUTO_STOP_MINUTES:-50}"; then
+        echo "$name: reap FAILED; inspect with: make down NAME=$name ADOPT=1"
+        failed=$((failed + 1))
+        continue
+      fi
     fi
     reaped=$((reaped + 1))
   else
@@ -73,4 +80,5 @@ for name in "${workspaces[@]}"; do
   fi
 done
 
-echo "reaped $reaped, kept $kept, skipped $skipped"
+echo "reaped $reaped, kept $kept, skipped $skipped, failed $failed"
+[ "$failed" -eq 0 ]

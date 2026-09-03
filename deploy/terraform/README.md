@@ -380,7 +380,11 @@ These each cost real debugging time and are now handled in code:
   extend checks the deployed setting before trying.
 - **A workspace whose first apply failed has no outputs.** Deciding reaping by
   `expires_at` skipped exactly the stacks most likely to leak resources;
-  `REAP_ALL=1` takes them regardless.
+  `REAP_ALL=1` takes them regardless. And once it did, `make down` fell over
+  on the same workspace: OpenTofu prints `No outputs found` on stdout with
+  exit 0, so the tunnel-port read captured the warning and destroy refused
+  it as "a number is required". Every `output -raw` whose value is optional
+  is checked for shape, and reap carries on past a failed stack.
 
 ## What `make smoke` proves
 

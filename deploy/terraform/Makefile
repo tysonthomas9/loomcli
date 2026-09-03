@@ -347,7 +347,12 @@ status: stack-required ## Container state on the VM
 		--command 'sudo docker compose -f /opt/loom/docker-compose.yml ps; systemctl is-active loom-stack'
 
 down: stack-required state ## Destroy this stack and archive this checkout's matching .stack
-	tunnel_port_base="$$($(TF) output -raw tunnel_ui_port 2>/dev/null || printf 18000)"
+	@# A workspace whose first apply died has no outputs, and OpenTofu then
+	@# prints "No outputs found" on STDOUT with exit 0 -- so the port read
+	@# must be checked for shape, not just for status, or destroy fails on
+	@# "a number is required" and the orphan can never be cleaned up.
+	tunnel_port_base="$$($(TF) output -raw tunnel_ui_port 2>/dev/null || true)"
+	[[ "$$tunnel_port_base" =~ ^[0-9]+$$ ]] || tunnel_port_base=18000
 	$(TF) destroy -auto-approve -input=false $(TFVARS) \
 		-var tunnel_port_base="$$tunnel_port_base" \
 		-var fleetdb_image=destroy-placeholder \
