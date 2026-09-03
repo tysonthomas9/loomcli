@@ -11,7 +11,7 @@ import {
   NO_WORKSPACE_VIEW_ACTIONS,
   NO_WORKSPACE_VIEW_DATA,
 } from "@/contexts/WorkspaceViewContext";
-import type { Issue } from "@/types";
+import type { Issue, Statistics } from "@/types";
 
 const mockUpdateIssue = vi.hoisted(() => vi.fn());
 
@@ -96,15 +96,40 @@ vi.mock("@/components", () => ({
       </button>
     </article>
   ),
-  deriveThisWorkspaceCounts: (issues: Issue[]) => ({
-    closed: issues.filter((issue) => issue.status === "closed").length,
-  }),
+  workspaceCountsFromStats: (stats: Statistics | null) =>
+    stats ? { closed: stats.closed_issues } : null,
   HomeRail: () => <aside data-testid="home-rail" />,
 }));
 
+// The card's counts come from GET /stats, never from the page's issue array.
+const mockStats: Statistics = {
+  total_issues: 408,
+  open_issues: 52,
+  in_progress_issues: 2,
+  closed_issues: 340,
+  blocked_issues: 6,
+  status_blocked_issues: 10,
+  deferred_issues: 0,
+  ready_issues: 30,
+  review_issues: 4,
+  tombstone_issues: 0,
+  pinned_issues: 0,
+  epics_eligible_for_closure: 0,
+  average_lead_time_hours: 0,
+};
+
 vi.mock("@/hooks/workspace", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/workspace")>();
-  return { ...actual, useRecentActivity: () => [] };
+  return {
+    ...actual,
+    useRecentActivity: () => [],
+    useWorkspaceStats: () => ({
+      stats: mockStats,
+      isLoading: false,
+      error: null,
+      refetch: () => {},
+    }),
+  };
 });
 
 vi.mock("@/components/IssueViewGuard", () => ({
@@ -335,6 +360,9 @@ describe("HomePage", () => {
       "queue-clear",
     );
     expect(screen.queryByTestId("operator-queue")).not.toBeInTheDocument();
+    // 340 is the workspace-wide closed count from /stats. The page collection
+    // holds a single in_progress issue, so a page-derived count would read 0.
+    expect(screen.getByTestId("queue-empty")).toHaveTextContent("340 issues");
   });
 
   it("uses the standard loading and error guard states", () => {

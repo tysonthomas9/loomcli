@@ -760,8 +760,9 @@ describe("issues API", () => {
     };
 
     it("calls api.GET with /api/workspaces/{ws}/stats", async () => {
-      // getStats returns data directly (not via unwrap)
-      mockApiGet.mockResolvedValue(okResponse(mockStats));
+      mockApiGet.mockResolvedValue(
+        okResponse({ success: true, data: mockStats }),
+      );
 
       await getStats("test-ws-id");
 
@@ -773,12 +774,22 @@ describe("issues API", () => {
       );
     });
 
-    it("returns Statistics directly from successful response", async () => {
-      mockApiGet.mockResolvedValue(okResponse(mockStats));
+    it("unwraps the {success, data} envelope the server actually returns", async () => {
+      mockApiGet.mockResolvedValue(
+        okResponse({ success: true, data: mockStats }),
+      );
 
       const result = await getStats("test-ws-id");
 
       expect(result).toEqual(mockStats);
+    });
+
+    it("throws ApiError when the envelope reports failure", async () => {
+      mockApiGet.mockResolvedValue(
+        okResponse({ success: false, error: "stats unavailable" }),
+      );
+
+      await expect(getStats("test-ws-id")).rejects.toThrow(ApiError);
     });
 
     it("throws ApiError on HTTP error response", async () => {

@@ -108,6 +108,8 @@ Project-level statistics.
     "blocked_issues": 2,
     "deferred_issues": 1,
     "ready_issues": 10,
+    "review_issues": 4,
+    "status_blocked_issues": 3,
     "tombstone_issues": 1,
     "pinned_issues": 2,
     "epics_eligible_for_closure": 0,
