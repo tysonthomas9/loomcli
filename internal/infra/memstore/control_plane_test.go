@@ -135,6 +135,71 @@ func TestAgentSessionFilter_KindAndParent(t *testing.T) {
 	}
 }
 
+func TestAgentSessionFilter_TaskRunAttemptAndNonTerminal(t *testing.T) {
+	st := New()
+	ctx := t.Context()
+	create := func(id, taskRunID string, attempt int, status domain.AgentSessionStatus, kind domain.AgentSessionKind, tags []string) {
+		t.Helper()
+		if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+			WorkspaceKey:  "WS",
+			SessionID:     id,
+			AgentID:       "worker-a",
+			Kind:          kind,
+			TaskRunID:     taskRunID,
+			InvocationKey: "agent",
+			Attempt:       attempt,
+			Status:        status,
+			Tags:          tags,
+		}); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+	}
+
+	create("run-1-a1-running", "run-1", 1, domain.AgentSessionRunning, domain.AgentSessionKindTask, nil)
+	create("run-1-a1-completed", "run-1", 1, domain.AgentSessionCompleted, domain.AgentSessionKindTask, nil)
+	create("run-1-a2-judge", "run-1", 2, domain.AgentSessionFailed, domain.AgentSessionKindJudge, []string{"eval", "judge"})
+	create("run-2-a1-running", "run-2", 1, domain.AgentSessionRunning, domain.AgentSessionKindTask, nil)
+	create("run-zero-a0", "run-zero", 0, domain.AgentSessionRunning, domain.AgentSessionKindTask, nil)
+	create("run-zero-a1", "run-zero", 1, domain.AgentSessionRunning, domain.AgentSessionKindTask, nil)
+
+	attempt := 1
+	got, err := st.AgentSessions().List(ctx, "WS", store.AgentSessionFilter{
+		TaskRunID:   "run-1",
+		Attempt:     &attempt,
+		NonTerminal: true,
+	})
+	if err != nil {
+		t.Fatalf("list reconciler authority query: %v", err)
+	}
+	if ids := sessionIDs(got); len(ids) != 1 || ids[0] != "run-1-a1-running" {
+		t.Fatalf("authority query ids = %v, want [run-1-a1-running]", ids)
+	}
+
+	attemptZero := 0
+	zeroAttempt, err := st.AgentSessions().List(ctx, "WS", store.AgentSessionFilter{TaskRunID: "run-zero", Attempt: &attemptZero})
+	if err != nil {
+		t.Fatalf("list attempt zero: %v", err)
+	}
+	if ids := sessionIDs(zeroAttempt); len(ids) != 1 || ids[0] != "run-zero-a0" {
+		t.Fatalf("attempt zero ids = %v, want [run-zero-a0]", ids)
+	}
+	allAttempts, err := st.AgentSessions().List(ctx, "WS", store.AgentSessionFilter{TaskRunID: "run-zero"})
+	if err != nil {
+		t.Fatalf("list all attempts: %v", err)
+	}
+	if len(allAttempts) != 2 {
+		t.Fatalf("nil attempt matched %d sessions, want 2", len(allAttempts))
+	}
+
+	judge, err := st.AgentSessions().List(ctx, "WS", store.AgentSessionFilter{Kind: domain.AgentSessionKindJudge})
+	if err != nil {
+		t.Fatalf("list judge: %v", err)
+	}
+	if len(judge) != 1 || judge[0].SessionID != "run-1-a2-judge" || judge[0].TaskRunID != "run-1" || judge[0].InvocationKey != "agent" || len(judge[0].Tags) != 2 || judge[0].Tags[0] != "eval" || judge[0].Tags[1] != "judge" {
+		t.Fatalf("judge round trip = %+v", judge)
+	}
+}
+
 func TestAgentSessionListPage_TimeFilterSortTotalLimit(t *testing.T) {
 	st := New()
 	ctx := t.Context()
