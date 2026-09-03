@@ -8,6 +8,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -57,6 +60,14 @@ const (
 	// is the dedupe key that collapses the at-least-once pipeline to
 	// exactly-once in practice.
 	abandonedRunMarker = "loom-abandoned-run:"
+	// timeoutRunMarker + <run id> is the dedupe key for a run that hit a
+	// wall-clock ceiling. Deliberately distinct from abandonedRunMarker: an
+	// abandoned run vanished, a timed-out run was killed on purpose, and the
+	// two want different bodies and different board-visible labels.
+	timeoutRunMarker = "loom-timeout-run:"
+	// timeoutPartialLabel marks a task whose last run was cut off by a ceiling
+	// with work possibly half-done. Free-form on fleet-db; no schema change.
+	timeoutPartialLabel = "timeout-partial"
 	// maxAbandonedPerPass bounds one reconcile pass; the remainder is picked up
 	// on the next one.
 	maxAbandonedPerPass = 20
@@ -108,8 +119,16 @@ func (s *Supervisor) abandonedRecorderReady() bool {
 		slog.Debug("abandoned-run recorder disabled (no control plane)", "workspace", s.WorkspaceID)
 		return false
 	}
+	return s.issueEvidenceReady()
+}
+
+// issueEvidenceReady reports whether a ticket write is possible at all. It is
+// the weaker half of abandonedRecorderReady: the timeout recorder runs on the
+// exit path and reads no session rows, so a deployment with an issue backend
+// and no control plane still records its ceiling hits.
+func (s *Supervisor) issueEvidenceReady() bool {
 	if s.IssueBackend == nil {
-		slog.Debug("abandoned-run recorder disabled (no issue backend)", "workspace", s.WorkspaceID)
+		slog.Debug("run-evidence recorder disabled (no issue backend)", "workspace", s.WorkspaceID)
 		return false
 	}
 	return true
@@ -284,56 +303,99 @@ func (s *Supervisor) recordAbandonedRun(ctx context.Context, sess *domain.AgentS
 		// the row must still stop being "running" forever.
 		return s.latchAbandonedSession(ctx, sess.SessionID)
 	}
-	issue, err := s.IssueBackend.Get(ctx, sess.TaskID)
+	recorded, attempt, err := s.writeRunEvidence(ctx, evidenceWrite{
+		taskID:  sess.TaskID,
+		agentID: sess.AgentID,
+		marker:  abandonedRunMarker + sess.SessionID,
+		render: func(attempt int) string {
+			return formatAbandonedRunComment(sess, attempt)
+		},
+	})
+	if err != nil {
+		return err
+	}
+	if recorded {
+		slog.Info("recorded a run that ended without reporting an outcome",
+			"task", sess.TaskID, "agent", sess.AgentID, "session_id", sess.SessionID,
+			"attempt", attempt, "label", attemptLabel(sess.AgentID, attempt))
+	}
+	return s.latchAbandonedSession(ctx, sess.SessionID)
+}
+
+// evidenceWrite is one ticket-visible record of a run that produced no other
+// trace. marker is the dedupe key (a marker constant plus a run-unique id);
+// render turns the attempt number the writer computes into the comment body,
+// which MUST embed marker verbatim.
+type evidenceWrite struct {
+	taskID     string
+	agentID    string
+	marker     string
+	extraLabel string // "" when only the attempt counter is wanted
+	render     func(attempt int) string
+}
+
+// writeRunEvidence performs the shared write: read the issue, skip terminal or
+// unreadable ones, dedupe on the marker, AddComment, AddLabel the attempt
+// counter (plus an optional extra label), then drop superseded counters.
+//
+// Returns (recorded, attempt, err). recorded=false with a nil error means there
+// was nothing to write — the issue is gone, terminal, or already carries this
+// marker — and is never an error for the caller. An error means the ticket was
+// left without its record and, where the caller has one, the source row must
+// NOT be latched.
+func (s *Supervisor) writeRunEvidence(ctx context.Context, w evidenceWrite) (bool, int, error) {
+	issue, err := s.IssueBackend.Get(ctx, w.taskID)
 	if err != nil || issue == nil {
-		slog.Debug("abandoned run's task is unreadable, latching the session only",
-			"task", sess.TaskID, "session_id", sess.SessionID, "err", err)
-		return s.latchAbandonedSession(ctx, sess.SessionID)
+		slog.Debug("run-evidence target is unreadable, skipping",
+			"task", w.taskID, "marker", w.marker, "err", err)
+		return false, 0, nil
 	}
 	if issue.Status == "closed" || issue.Status == "tombstone" {
 		// fleet-db's ValidateModifiable rejects label writes on terminal
 		// issues. blocked and deferred are NOT terminal and do get the
 		// evidence.
-		slog.Debug("abandoned run's task is terminal, latching the session only",
-			"task", sess.TaskID, "status", issue.Status, "session_id", sess.SessionID)
-		return s.latchAbandonedSession(ctx, sess.SessionID)
+		slog.Debug("run-evidence target is terminal, skipping",
+			"task", w.taskID, "status", issue.Status, "marker", w.marker)
+		return false, 0, nil
+	}
+	if s.evidenceRecorded(ctx, w.taskID, w.marker) {
+		return false, 0, nil
 	}
 
-	if s.abandonedEvidenceRecorded(ctx, sess) {
-		return s.latchAbandonedSession(ctx, sess.SessionID)
-	}
-
-	attempt := recordedAttempts(sess.AgentID, issue.Labels) + 1
+	attempt := recordedAttempts(w.agentID, issue.Labels) + 1
 	if _, err := s.IssueBackend.AddComment(ctx, backend.CommentAddParams{
-		IssueID: sess.TaskID,
-		Author:  sess.AgentID,
-		Text:    formatAbandonedRunComment(sess, attempt),
+		IssueID: w.taskID,
+		Author:  w.agentID,
+		Text:    truncateCommentBody(w.render(attempt)),
 	}); err != nil {
-		return fmt.Errorf("add abandoned-run comment to %s: %w", sess.TaskID, err)
+		return false, 0, fmt.Errorf("add run-evidence comment to %s: %w", w.taskID, err)
 	}
-	if err := s.IssueBackend.AddLabel(ctx, sess.TaskID, attemptLabel(sess.AgentID, attempt)); err != nil {
-		return fmt.Errorf("add attempt label to %s: %w", sess.TaskID, err)
+	if err := s.IssueBackend.AddLabel(ctx, w.taskID, attemptLabel(w.agentID, attempt)); err != nil {
+		return false, 0, fmt.Errorf("add attempt label to %s: %w", w.taskID, err)
 	}
-	s.removeSupersededAttemptLabels(ctx, sess, issue.Labels, attempt)
-
-	slog.Info("recorded a run that ended without reporting an outcome",
-		"task", sess.TaskID, "agent", sess.AgentID, "session_id", sess.SessionID,
-		"attempt", attempt, "label", attemptLabel(sess.AgentID, attempt))
-	return s.latchAbandonedSession(ctx, sess.SessionID)
+	if w.extraLabel != "" {
+		// Non-fatal: the counter is the load-bearing label and it already
+		// landed, so a failure here must not re-run the whole pipeline.
+		if err := s.IssueBackend.AddLabel(ctx, w.taskID, w.extraLabel); err != nil {
+			slog.Debug("adding the evidence side label failed (harmless)",
+				"task", w.taskID, "label", w.extraLabel, "err", err)
+		}
+	}
+	s.removeSupersededAttemptLabels(ctx, w.taskID, w.agentID, issue.Labels, attempt)
+	return true, attempt, nil
 }
 
-// abandonedEvidenceRecorded reports whether this session's evidence comment is
-// already on the task. A ListComments failure is treated as "not found" and the
-// pipeline proceeds: at-least-once beats losing the record, and a duplicate
-// comment is visible and harmless.
-func (s *Supervisor) abandonedEvidenceRecorded(ctx context.Context, sess *domain.AgentSession) bool {
-	comments, err := s.IssueBackend.ListComments(ctx, sess.TaskID)
+// evidenceRecorded reports whether a marker is already on the task. A
+// ListComments failure is treated as "not found" and the pipeline proceeds:
+// at-least-once beats losing the record, and a duplicate comment is visible and
+// harmless.
+func (s *Supervisor) evidenceRecorded(ctx context.Context, taskID, marker string) bool {
+	comments, err := s.IssueBackend.ListComments(ctx, taskID)
 	if err != nil {
-		slog.Debug("could not read comments for abandoned-run dedupe, proceeding",
-			"task", sess.TaskID, "session_id", sess.SessionID, "err", err)
+		slog.Debug("could not read comments for run-evidence dedupe, proceeding",
+			"task", taskID, "marker", marker, "err", err)
 		return false
 	}
-	marker := abandonedRunMarker + sess.SessionID
 	for _, c := range comments {
 		if strings.Contains(c.Text, marker) {
 			return true
@@ -342,19 +404,38 @@ func (s *Supervisor) abandonedEvidenceRecorded(ctx context.Context, sess *domain
 	return false
 }
 
+// truncateCommentBody clamps an evidence body to fleet-db's body cap, cutting on
+// a UTF-8 boundary and keeping the TAIL: the marker line is load-bearing and
+// lives at the end, and a head-truncated body would lose the dedupe key and
+// re-comment forever.
+func truncateCommentBody(body string) string {
+	if len(body) <= maxCommentBytes {
+		return body
+	}
+	const prefix = "[truncated]\n"
+	tail := body[len(body)-(maxCommentBytes-len(prefix)):]
+	for i := 0; i < len(tail); i++ {
+		if utf8.RuneStart(tail[i]) {
+			tail = tail[i:]
+			break
+		}
+	}
+	return prefix + tail
+}
+
 // removeSupersededAttemptLabels drops this agent's lower counters once the new
 // one has landed. Best-effort and never fails the pass — recordedAttempts takes
 // the max, so a leftover "=1" beside "=2" is harmless (same rule as the review
 // cycle's counter cleanup).
-func (s *Supervisor) removeSupersededAttemptLabels(ctx context.Context, sess *domain.AgentSession, labels []string, attempt int) {
+func (s *Supervisor) removeSupersededAttemptLabels(ctx context.Context, taskID, agentID string, labels []string, attempt int) {
 	for _, l := range labels {
-		n := parseAttemptCounter(sess.AgentID, l)
+		n := parseAttemptCounter(agentID, l)
 		if n == 0 || n >= attempt {
 			continue
 		}
-		if err := s.IssueBackend.RemoveLabel(ctx, sess.TaskID, l); err != nil {
+		if err := s.IssueBackend.RemoveLabel(ctx, taskID, l); err != nil {
 			slog.Debug("removing superseded attempt label failed (harmless)",
-				"task", sess.TaskID, "label", l, "err", err)
+				"task", taskID, "label", l, "err", err)
 		}
 	}
 }
@@ -408,4 +489,195 @@ func orDash(v string) string {
 		return "-"
 	}
 	return v
+}
+
+// ---------------------------------------------------------------------------
+// Timeout-run recorder
+// ---------------------------------------------------------------------------
+//
+// A run killed by a wall-clock ceiling is invisible to the two reconcilers
+// above: it FINISHES its control-plane session row through the normal exit
+// path, so unfinishedTaskSessions never selects it. It is equally invisible on
+// the ticket, because completionHookTarget refuses to run a completion hook for
+// any non-zero exit — correct (a turn that did not conclude must not stamp
+// in-review) but it leaves no comment, no label and no status change, so a task
+// that burned hours of agent time reads as untouched and the next claim redoes
+// it from scratch.
+//
+// recordTimeoutRun closes that gap from the exit path, reusing the same
+// marker-deduped comment plus attempt-counter primitive as the abandoned-run
+// recorder. It has no session row to latch, so it is the write half only.
+
+// recordTimeoutRun writes ticket-visible evidence for a run that was killed by a
+// wall-clock ceiling. Never fatal: a failure is logged and the run continues its
+// exit path.
+//
+// Unlike the abandoned-run recorder this is NOT at-least-once — there is no
+// durable row that survives to trigger a retry. Retrying here would hold the
+// role's concurrency slot and delay the restart, to cover a fleet-db outage that
+// already loses the AgentStopped event, so the loss is accepted and logged at
+// Warn instead.
+func (s *Supervisor) recordTimeoutRun(ap *AgentProcess, exitCode int, sessionID string) {
+	if ap == nil || !s.issueEvidenceReady() {
+		return
+	}
+	if !isTimeoutExit(ap) {
+		return
+	}
+	// Reads the worktree lock first; must therefore run BEFORE
+	// postMortemRecovery, which clears that lock.
+	taskID := s.taskIDForFinalize(ap)
+	if taskID == "" {
+		slog.Debug("timed-out run held no task, nothing to record", "worktree", ap.Entry.Worktree)
+		return
+	}
+
+	agentID := ap.Entry.Worktree
+	marker := timeoutRunMarker + timeoutRunID(ap, sessionID)
+	facts := s.timeoutRunFactsFor(ap, taskID, sessionID, exitCode, marker)
+
+	ctx, cancel := s.operationContext(abandonedOpTimeout)
+	defer cancel()
+	recorded, attempt, err := s.writeRunEvidence(ctx, evidenceWrite{
+		taskID:     taskID,
+		agentID:    agentID,
+		marker:     marker,
+		extraLabel: timeoutPartialLabel,
+		render: func(attempt int) string {
+			return formatTimeoutRunComment(facts, attempt)
+		},
+	})
+	if err != nil {
+		slog.Warn("recording a timeout run failed",
+			"task", taskID, "agent", agentID, "session_id", sessionID, "err", err)
+		return
+	}
+	if recorded {
+		slog.Info("recorded a run that hit a time ceiling",
+			"task", taskID, "agent", agentID, "session_id", sessionID,
+			"cause", facts.cause, "ceiling", facts.ceiling, "attempt", attempt)
+	}
+}
+
+// agentSessionIDSnapshot reads the control-plane session id under ap.Mu. Only
+// valid before finalizeAgentSession, which clears the field.
+func agentSessionIDSnapshot(ap *AgentProcess) string {
+	ap.Mu.Lock()
+	defer ap.Mu.Unlock()
+	return ap.AgentSessionID
+}
+
+// isTimeoutExit reports whether the classified exit was a ceiling hit. IsClass
+// (not Is) is the harness-class predicate used across this package, and it
+// covers both producers: markRunDurationExceeded's run-duration cap and the
+// silence watchdog's exit-137, which ClassifyFromLog resolves to ErrTimeout.
+func isTimeoutExit(ap *AgentProcess) bool {
+	ap.Mu.Lock()
+	defer ap.Mu.Unlock()
+	return ap.LastError != nil && ap.LastError.Class.IsClass(wrapper.ErrTimeout)
+}
+
+// timeoutRunID is the marker suffix: the control-plane session id when there is
+// one, else "<agent>@<start RFC3339>". Never empty — an empty suffix would make
+// the marker match every earlier timeout comment on the ticket and suppress
+// every future record.
+func timeoutRunID(ap *AgentProcess, sessionID string) string {
+	if sessionID != "" {
+		return sessionID
+	}
+	ap.Mu.Lock()
+	start := ap.LastStart
+	ap.Mu.Unlock()
+	return fmt.Sprintf("%s@%s", ap.Entry.Worktree, start.UTC().Format(time.RFC3339))
+}
+
+// timeoutRunFacts are the facts the evidence body names, snapshotted once.
+type timeoutRunFacts struct {
+	agent    string
+	taskID   string
+	session  string
+	marker   string
+	exitCode int
+	started  time.Time
+	elapsed  time.Duration
+	cause    string
+	ceiling  string
+}
+
+// timeoutRunFactsFor gathers the body's facts under one ap.Mu hold.
+func (s *Supervisor) timeoutRunFactsFor(ap *AgentProcess, taskID, sessionID string, exitCode int, marker string) timeoutRunFacts {
+	ap.Mu.Lock()
+	start := ap.LastStart
+	reason := ap.StopReason
+	ap.Mu.Unlock()
+
+	elapsed := time.Duration(0)
+	if !start.IsZero() {
+		elapsed = time.Since(start).Round(time.Second)
+	}
+	cause, ceiling := s.timeoutRunCause(ap, reason)
+	return timeoutRunFacts{
+		agent:    ap.Entry.Worktree,
+		taskID:   taskID,
+		session:  shortSessionID(sessionID),
+		marker:   marker,
+		exitCode: exitCode,
+		started:  start,
+		elapsed:  elapsed,
+		cause:    cause,
+		ceiling:  ceiling,
+	}
+}
+
+// timeoutRunCause maps the supervisor's stop reason to the human-readable cause
+// and the ceiling that was crossed. Naming the ceiling is what lets the
+// timeout-partial population be re-measured from the board rather than only from
+// the event stream.
+func (s *Supervisor) timeoutRunCause(ap *AgentProcess, reason StopReason) (cause, ceiling string) {
+	switch reason {
+	case StopReasonRunDurationExceeded:
+		return "run-duration cap", formatCeiling(s.maxRunDurationFor(ap))
+	case StopReasonWatchdog:
+		return "output-timeout watchdog (silence)", formatCeiling(time.Duration(s.GetOutputTimeout()) * time.Second)
+	default:
+		// Classified from the harness log with no supervisor stop reason: the
+		// run timed out, but this process did not pick the ceiling.
+		return "harness-reported timeout", "-"
+	}
+}
+
+// formatCeiling renders a disabled (zero) ceiling as "-".
+func formatCeiling(d time.Duration) string {
+	if d <= 0 {
+		return "-"
+	}
+	return d.String()
+}
+
+// formatTimeoutRunComment renders the evidence body. Same house style as
+// formatAbandonedRunComment: ASCII only, a bolded lede, a fact table, and the
+// marker on its own final line — that last line is the dedupe key read back by
+// evidenceRecorded.
+func formatTimeoutRunComment(f timeoutRunFacts, attempt int) string {
+	var b strings.Builder
+	b.WriteString("**Run hit a time ceiling** -- recorded by the loom daemon.\n\n")
+	fmt.Fprintf(&b, "Agent `%s` was holding %s when its run was stopped for exceeding a\n", f.agent, f.taskID)
+	b.WriteString("wall-clock ceiling. The turn did not conclude, so no verdict, hand-back or\n")
+	b.WriteString("delivery was written by that run; any work it did is in the checkpoint, not\n")
+	b.WriteString("on this ticket.\n\n")
+	b.WriteString("| field | value |\n|---|---|\n")
+	fmt.Fprintf(&b, "| agent | %s |\n", f.agent)
+	fmt.Fprintf(&b, "| task | %s |\n", f.taskID)
+	fmt.Fprintf(&b, "| session | %s |\n", orDash(f.session))
+	fmt.Fprintf(&b, "| cause | %s |\n", f.cause)
+	fmt.Fprintf(&b, "| ceiling | %s |\n", orDash(f.ceiling))
+	fmt.Fprintf(&b, "| elapsed | %s |\n", f.elapsed)
+	fmt.Fprintf(&b, "| started (UTC) | %s |\n", f.started.UTC().Format(time.RFC3339))
+	fmt.Fprintf(&b, "| exit code | %d |\n", f.exitCode)
+	fmt.Fprintf(&b, "| attempt | %d |\n\n", attempt)
+	fmt.Fprintf(&b, "Counted as attempt %d for `%s` (label `%s`).\n", attempt, f.agent, attemptLabel(f.agent, attempt))
+	fmt.Fprintf(&b, "Labeled `%s`: the next claim should read the checkpoint before restarting\n", timeoutPartialLabel)
+	b.WriteString("from scratch.\n\n")
+	fmt.Fprintf(&b, "%s\n", f.marker)
+	return b.String()
 }
