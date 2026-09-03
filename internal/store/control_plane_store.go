@@ -52,11 +52,14 @@ type AgentSessionCreate struct {
 	NodeID          string
 	Kind            domain.AgentSessionKind
 	TaskID          string
+	TaskRunID       string
+	InvocationKey   string
 	TerminalID      string
 	ParentSessionID string
 	Status          domain.AgentSessionStatus
 	Phase           string
 	Attempt         int
+	Tags            []string
 	StartedAt       time.Time
 	Metadata        map[string]string
 }
@@ -65,11 +68,21 @@ type AgentSessionFilter struct {
 	AgentID string
 	NodeID  string
 	TaskID  string
-	Status  domain.AgentSessionStatus
-	Since   *time.Time
-	Until   *time.Time
+	// TaskRunID restricts results to one task run. The session reconciler's
+	// store-authority query is over (task_run_id, attempt) non-terminal
+	// sessions (LOOMCLI-97 §1).
+	TaskRunID string
+	Status    domain.AgentSessionStatus
+	// Attempt narrows TaskRunID results to one claim attempt; nil matches every
+	// attempt. The session reconciler queries this with TaskRunID (LOOMCLI-97 §1).
+	Attempt *int
+	// NonTerminal restricts results to sessions whose status is not terminal,
+	// for the session reconciler's authority query (LOOMCLI-97 §1).
+	NonTerminal bool
+	Since       *time.Time
+	Until       *time.Time
 	// Kind narrows the query to one session kind (orchestration, task,
-	// terminal, maintenance, ad_hoc). The data model has always carried
+	// terminal, maintenance, ad_hoc, judge). The data model has always carried
 	// AgentSession.Kind, but the filter interface didn't expose it, so
 	// callers couldn't ask "which orchestration session spawned this
 	// worker?" without listing every session and filtering client-side.

@@ -60,12 +60,13 @@ func TestControlPlaneClientNodeLifecycle(t *testing.T) {
 }
 
 func TestControlPlaneClientAgentSessionListQuery(t *testing.T) {
+	attempt := 0
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/WS/agent-sessions" {
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
 		}
 		q := r.URL.Query()
-		if q.Get("agent_id") != "agent-1" || q.Get("node_id") != "node-1" || q.Get("task_id") != "T-1" || q.Get("status") != "running" || q.Get("limit") != "2" {
+		if q.Get("agent_id") != "agent-1" || q.Get("node_id") != "node-1" || q.Get("task_id") != "T-1" || q.Get("task_run_id") != "run-1" || q.Get("status") != "running" || q.Get("attempt") != "0" || q.Get("non_terminal") != "true" || q.Get("limit") != "2" {
 			t.Fatalf("query = %s", r.URL.RawQuery)
 		}
 		writeJSON(t, w, map[string]any{"agent_sessions": []domain.AgentSession{{WorkspaceKey: "WS", SessionID: "sess-1", AgentID: "agent-1"}}})
@@ -77,11 +78,14 @@ func TestControlPlaneClientAgentSessionListQuery(t *testing.T) {
 		t.Fatal(err)
 	}
 	sessions, err := client.AgentSessions().List(t.Context(), "WS", store.AgentSessionFilter{
-		AgentID: "agent-1",
-		NodeID:  "node-1",
-		TaskID:  "T-1",
-		Status:  domain.AgentSessionRunning,
-		Limit:   2,
+		AgentID:     "agent-1",
+		NodeID:      "node-1",
+		TaskID:      "T-1",
+		TaskRunID:   "run-1",
+		Status:      domain.AgentSessionRunning,
+		Attempt:     &attempt,
+		NonTerminal: true,
+		Limit:       2,
 	})
 	if err != nil {
 		t.Fatalf("list sessions: %v", err)
@@ -91,32 +95,54 @@ func TestControlPlaneClientAgentSessionListQuery(t *testing.T) {
 	}
 }
 
-// TestAgentSessionList_FiltersKindAndParentClientSide guards the client-side
-// filter applied for Kind + ParentSessionID. fleet-db's listAgentSessions
-// doesn't accept those as query params yet, so the loomcli client must NOT
-// send them on the wire and must filter the response locally. Without this
-// the filter would silently no-op and callers would get the full session
-// list back.
-func TestAgentSessionList_FiltersKindAndParentClientSide(t *testing.T) {
+func TestControlPlaneClientAgentSessionCreateSerializesIdentityFields(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/WS/agent-sessions" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode create: %v", err)
+		}
+		if body["task_run_id"] != "run-1" || body["invocation_key"] != "judge" || body["kind"] != "judge" {
+			t.Fatalf("create body identity = %#v", body)
+		}
+		tags, ok := body["tags"].([]any)
+		if !ok || len(tags) != 2 || tags[0] != "eval" || tags[1] != "judge" {
+			t.Fatalf("create body tags = %#v", body["tags"])
+		}
+		writeJSON(t, w, domain.AgentSession{WorkspaceKey: "WS", SessionID: "sess-1", AgentID: "agent-1", Kind: domain.AgentSessionKindJudge, TaskRunID: "run-1", InvocationKey: "judge", Tags: []string{"eval", "judge"}})
+	}))
+	defer ts.Close()
+
+	client, err := New(Config{BaseURL: ts.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := client.AgentSessions().Create(t.Context(), store.AgentSessionCreate{
+		WorkspaceKey: "WS", SessionID: "sess-1", AgentID: "agent-1", Kind: domain.AgentSessionKindJudge,
+		TaskRunID: "run-1", InvocationKey: "judge", Tags: []string{"eval", "judge"},
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if session.Kind != domain.AgentSessionKindJudge || session.TaskRunID != "run-1" || session.InvocationKey != "judge" || len(session.Tags) != 2 {
+		t.Fatalf("session = %+v", session)
+	}
+}
+
+func TestAgentSessionListSendsKindAndParentServerSide(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/WS/agent-sessions" {
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
 		}
 		q := r.URL.Query()
-		for _, forbidden := range []string{"kind", "parent_session_id"} {
-			if q.Has(forbidden) {
-				t.Fatalf("query contains unsupported filter %q=%q; client must filter locally",
-					forbidden, q.Get(forbidden))
-			}
-		}
-		if q.Has("limit") {
-			t.Fatalf("limit must not be set when client-side kind/parent filter is active; got %q", q.Get("limit"))
+		if q.Get("kind") != "task" || q.Get("parent_session_id") != "orch-1" || q.Get("limit") != "5" {
+			t.Fatalf("query = %s", r.URL.RawQuery)
 		}
 		writeJSON(t, w, map[string]any{"agent_sessions": []domain.AgentSession{
-			{WorkspaceKey: "WS", SessionID: "orch-1", Kind: domain.AgentSessionKindOrchestration},
 			{WorkspaceKey: "WS", SessionID: "task-a", Kind: domain.AgentSessionKindTask, ParentSessionID: "orch-1"},
 			{WorkspaceKey: "WS", SessionID: "task-b", Kind: domain.AgentSessionKindTask, ParentSessionID: "orch-1"},
-			{WorkspaceKey: "WS", SessionID: "task-c", Kind: domain.AgentSessionKindTask, ParentSessionID: "orch-other"},
 		}})
 	}))
 	defer ts.Close()
@@ -146,6 +172,7 @@ func TestAgentSessionList_FiltersKindAndParentClientSide(t *testing.T) {
 func TestControlPlaneClientAgentSessionListPageQueryAndTotal(t *testing.T) {
 	since := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
 	until := since.Add(time.Hour)
+	attempt := 3
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/WS/agent-sessions" {
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
@@ -155,7 +182,10 @@ func TestControlPlaneClientAgentSessionListPageQueryAndTotal(t *testing.T) {
 			"agent_id":          "agent-1",
 			"node_id":           "node-1",
 			"task_id":           "T-1",
+			"task_run_id":       "run-1",
 			"status":            "completed",
+			"attempt":           "3",
+			"non_terminal":      "true",
 			"kind":              "task",
 			"parent_session_id": "orch-1",
 			"since":             since.Format(time.RFC3339),
@@ -182,7 +212,10 @@ func TestControlPlaneClientAgentSessionListPageQueryAndTotal(t *testing.T) {
 		AgentID:         "agent-1",
 		NodeID:          "node-1",
 		TaskID:          "T-1",
+		TaskRunID:       "run-1",
 		Status:          domain.AgentSessionCompleted,
+		Attempt:         &attempt,
+		NonTerminal:     true,
 		Kind:            domain.AgentSessionKindTask,
 		ParentSessionID: "orch-1",
 		Since:           &since,
