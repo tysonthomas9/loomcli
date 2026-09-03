@@ -4412,6 +4412,53 @@ not observe a stuck supervisor, and duplicating the failure would only inflate
 the exit summary. A `daemon_stuck` that already warns or fails keeps its own more
 specific message, and one that skipped is never invented — `loom_daemon` owns the
 "daemon is not running" case.
+### `fleet_starvation`
+
+Answers the one question the other checks could not: is there ready work that
+nobody is going to pick up? It is registered whenever the daemon config carries
+at least one agent entry — the condition the metric actually depends on, and
+independent of which issue backend the workspace uses — and it reads two local
+sources in-process — the daemon config (intent)
+and `.loom/daemon-agents.json` (reality) — plus one ready-queue query (demand).
+It deliberately does **not** use the `/agents` API: that vocabulary is
+`idle/active/stopped`, which cannot express "parked" or "fatally stopped", and
+during the incident this check was written for all eleven agents read `idle`.
+
+Per role it reports three raw numbers, never an adjective:
+
+| Symbol | Meaning |
+|--------|---------|
+| `q` | ready, unassigned issues the role's include/exclude labels and its agents' repo/epic scope admit |
+| `c_int` | agents in the role whose desired state is not `stopped` — *intended* capacity |
+| `c_act` | those of `c_int` that are actually alive — *real* capacity |
+
+A role is starved when `q >= 1 && c_int > 0 && c_act == 0`. The `c_int > 0`
+term is what makes the check correct rather than noisy: it separates capacity
+that is *intentionally* zero (an agent parked with `desired_state=stopped`) from
+capacity that is *accidentally* zero (an agent that died on an `AuthFailure`).
+Note also that agent status `stopped` and `blocked` both count as **alive** —
+`stopped` is the normal idle state and `blocked` self-resumes — so an idle fleet
+with nothing to do reports `pass`.
+
+| Condition | Status | Summary |
+|-----------|--------|---------|
+| Any role starved | `fail` | `N role(s) starved: ready work with no live agent (...)` |
+| Unreachable work or config defects only | `warn` | `no starved roles; N unreachable issue(s), M config defect(s)` |
+| Otherwise | `pass` | `no starved roles across N role(s)` |
+| Daemon PID dead or `<= 0` | `fail` | `daemon state file is stale (pid N not running)` — no metric computed |
+| Daemon config, state file or ready queue unavailable | `warn` | no metric computed; an unknown `Q` never asserts starvation |
+
+Two secondary findings ride along. *Unreachable work* is open, unassigned,
+non-`operator` issues that no label-filtered role can claim; when no role
+carries a label filter at all the report sets `unreachable_computed: false`
+rather than reporting a misleading `0`. *Config defects* name a role with no
+label filter (it will claim tickets meant for other roles), an agent whose role
+has no role config, and an agent configured on another node and therefore absent
+from this node's state file.
+
+The full per-role table is published on the check's `data` field in `--json`
+output, for a separate ops runner to consume and integrate over time. `data` is
+`omitempty` on every `CheckResult`, so checks that set nothing are unaffected.
 
 ### `agent_profiles`
 

@@ -43,6 +43,11 @@ type CheckResult struct {
 	Status  CheckStatus `json:"status"`
 	Summary string      `json:"summary"`
 	Detail  string      `json:"detail,omitempty"`
+	// Data carries a check-specific machine-readable payload for --json
+	// consumers (an ops runner reads fleet_starvation's from here). `any` +
+	// omitempty keeps every existing check's JSON byte-identical: a check that
+	// leaves it nil marshals without the key, and renderDoctorHuman ignores it.
+	Data any `json:"data,omitempty"`
 }
 
 // DoctorOutput is the top-level JSON output for loom doctor.
@@ -141,6 +146,9 @@ func collectDoctorChecks(cmd *cobra.Command) []checkFunc {
 		checks = append(checks, checkFleet)
 	} else {
 		checks = append(checks, checkFleetDB)
+	}
+	if fleetStarvationApplies() {
+		checks = append(checks, func() CheckResult { return checkFleetStarvation(deps) })
 	}
 	checks = append(checks, checkBackendCLI, checkProjectConfig, checkGlobalConfig,
 		checkWorktrees, checkStaleLocks, checkStaleSignalFiles, checkStaleSessionRecords,
