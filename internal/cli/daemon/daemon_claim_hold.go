@@ -512,12 +512,8 @@ func resolveClaimHoldEndpoints() (claimHoldEndpoints, error) {
 	if workspace == "" {
 		return ep, nil
 	}
-	rt := detectWorkspaceDaemonRuntime()
-	if !rt.Running || rt.Socket == "" {
-		return ep, nil
-	}
 	info, ok := readWorkspacePIDFile(filepath.Join(cfgpkg.GetWorkspaceDir(workspace), "daemon.pid"))
-	if !ok || info.Socket != rt.Socket || info.Cwd == "" || info.ClaimHold == "" {
+	if !ok || info.Socket == "" || info.Cwd == "" || info.ClaimHold == "" {
 		return ep, nil
 	}
 	return claimHoldEndpoints{

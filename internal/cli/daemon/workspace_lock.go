@@ -86,21 +86,37 @@ func (w *workspaceDaemonLock) UpdatePaths(cwd, socket, claimHold string) error {
 	return updateWorkspacePID(w.pidPath, cwd, socket, claimHold)
 }
 
-// Release drops the lock and removes the PID sidecar. Safe on nil.
+// Release drops the lock and marks the PID sidecar stopped. Safe on nil.
 //
 // The lock file itself intentionally remains on disk. Removing a flocked file
 // after unlock can delete a successor daemon's newly-acquired lock path during
 // handoff, allowing a third daemon to create and lock a different inode.
+// The sidecar's resolved paths also intentionally remain: an offline
+// `daemon release` may run from another cwd after the daemon has stopped and
+// still needs to find the persistent claim-hold file for this workspace.
 func (w *workspaceDaemonLock) Release() {
 	if w == nil {
 		return
 	}
 	if w.lockFile != nil {
-		_ = os.Remove(w.pidPath)
+		_ = markWorkspacePIDStopped(w.pidPath)
 		_ = lockfile.FlockUnlock(w.lockFile)
 		_ = w.lockFile.Close()
 		w.lockFile = nil
 	}
+}
+
+func markWorkspacePIDStopped(path string) error {
+	info, ok := readWorkspacePIDFile(path)
+	if !ok {
+		return nil
+	}
+	info.PID = 0
+	data, err := json.Marshal(info)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644) //nolint:gosec // user-private sidecar
 }
 
 // workspaceLockBusyError carries the existing daemon's PID so callers

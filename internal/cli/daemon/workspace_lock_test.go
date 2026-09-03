@@ -30,7 +30,8 @@ func TestAcquireWorkspaceDaemonLockSkipsWhenUnset(t *testing.T) {
 
 // TestAcquireWorkspaceDaemonLockWritesPID locks the post-acquire state:
 // lock file exists, sidecar daemon.pid contains the current PID, and
-// Release cleans the PID sidecar while keeping the stable lock path.
+// Release marks the PID stopped while keeping the stable lock path and
+// sidecar metadata available to cwd-independent offline commands.
 func TestAcquireWorkspaceDaemonLockWritesPID(t *testing.T) {
 	loomDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
@@ -57,8 +58,8 @@ func TestAcquireWorkspaceDaemonLockWritesPID(t *testing.T) {
 	if _, statErr := os.Stat(wantLock); statErr != nil {
 		t.Errorf("Release should keep daemon.lock as a stable flock path; stat err=%v", statErr)
 	}
-	if _, statErr := os.Stat(wantPID); !os.IsNotExist(statErr) {
-		t.Errorf("Release should remove daemon.pid; stat err=%v", statErr)
+	if got := readWorkspacePID(wantPID); got != 0 {
+		t.Errorf("Release should mark daemon.pid stopped; pid=%d", got)
 	}
 }
 

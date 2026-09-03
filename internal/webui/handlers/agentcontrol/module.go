@@ -10,12 +10,24 @@ type Module struct {
 	holdFn    ClaimHoldFn
 }
 
+// ClaimHoldModule registers only the workspace claim-hold routes. Store-backed
+// servers use their store-backed agent lifecycle module, but claim hold still
+// has to proxy to the local daemon control socket.
+type ClaimHoldModule struct {
+	holdFn ClaimHoldFn
+}
+
 // NewModule returns a Module that proxies agent lifecycle commands to the
 // daemon control socket via the given callback. inputFn and holdFn may each be
 // nil, which leaves the pending-input and claim-hold routes respectively
 // unregistered (older daemon, remote mode).
 func NewModule(controlFn AgentControlFn, inputFn AgentInputFn, holdFn ClaimHoldFn) *Module {
 	return &Module{controlFn: controlFn, inputFn: inputFn, holdFn: holdFn}
+}
+
+// NewClaimHoldModule returns a module containing only claim-hold routes.
+func NewClaimHoldModule(holdFn ClaimHoldFn) *ClaimHoldModule {
+	return &ClaimHoldModule{holdFn: holdFn}
 }
 
 // Register implements webui.Module by registering the agent lifecycle
@@ -45,4 +57,11 @@ func (m *Module) Register(mux *http.ServeMux) {
 		mux.HandleFunc("POST /api/workspaces/{ws}/claims/hold", handleClaimHoldSet(m.holdFn))
 		mux.HandleFunc("DELETE /api/workspaces/{ws}/claims/hold", handleClaimHoldRelease(m.holdFn))
 	}
+}
+
+// Register implements webui.Module for the claim-hold-only surface.
+func (m *ClaimHoldModule) Register(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/workspaces/{ws}/claims/hold", handleClaimHoldGet(m.holdFn))
+	mux.HandleFunc("POST /api/workspaces/{ws}/claims/hold", handleClaimHoldSet(m.holdFn))
+	mux.HandleFunc("DELETE /api/workspaces/{ws}/claims/hold", handleClaimHoldRelease(m.holdFn))
 }
