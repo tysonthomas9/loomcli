@@ -49,12 +49,18 @@ type frameWriter interface {
 	WriteRetry(int) error
 	WriteEventID(string, string, string) error
 	WriteEventNoID(string, string) error
+	WriteResync(string, string) error
 	WriteComment(string) error
 }
 
 type preparedMutation struct {
 	id      string
 	payload *MutationPayload
+}
+
+type resyncInstruction struct {
+	cursor string
+	reason string
 }
 
 // Handler is an http.Handler for the SSE endpoint with configurable heartbeat.
@@ -146,14 +152,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		handshakeSpan.SetAttributes(attribute.String("loom.subscription.head", head))
 	}
 
-	catchUp, catchUpCursors, reason, err := h.fetchCatchUp(r.Context(), lastSince, workspaceID, sourceRepos)
+	catchUp, catchUpCursors, resync, err := h.fetchCatchUp(r.Context(), lastSince, workspaceID, sourceRepos)
 	if err != nil {
-		slog.Warn("SSE catch-up failed before stream open", "workspace", workspaceID, "reason", reason, "err", err)
+		slog.Warn("SSE catch-up requires client resync", "workspace", workspaceID, "reason", resync.reason, "err", err)
 		handshakeSpan.RecordError(err)
-		handshakeSpan.SetStatus(codes.Error, "catch_up")
-		handshakeSpan.End()
-		writeResyncRequired(w, reason)
-		return
+		handshakeSpan.SetAttributes(attribute.String("loom.resync.reason", resync.reason))
 	}
 
 	sw, err := h.writerFactory(w)
@@ -168,16 +171,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
-	if err := http.NewResponseController(w).SetWriteDeadline(time.Time{}); err != nil {
-		slog.Error("SSE: failed to disable write deadline", "err", err)
-	}
 
 	slog.Info("SSE client connected", "client_id", client.id, "remote_addr", r.RemoteAddr,
 		"since", lastSince, "repos", sourceRepos, "workspace_id", workspaceID)
-	for _, mutation := range catchUp {
-		if err := writePreparedMutation(sw, mutation); err != nil {
-			h.endHandshakeWriteError(handshakeSpan, client, err, "catch-up")
+	if resync != nil {
+		if err := sw.WriteResync(resync.cursor, resync.reason); err != nil {
+			h.endHandshakeWriteError(handshakeSpan, client, err, "resync")
 			return
+		}
+	} else {
+		for _, mutation := range catchUp {
+			if err := writePreparedMutation(sw, mutation); err != nil {
+				h.endHandshakeWriteError(handshakeSpan, client, err, "catch-up")
+				return
+			}
 		}
 	}
 	if err := sw.WriteRetry(RetryMs); err != nil {
@@ -210,10 +217,10 @@ func (h *Handler) fetchCatchUp(
 	since string,
 	workspaceID string,
 	sourceRepos []string,
-) ([]preparedMutation, map[string]struct{}, string, error) {
+) ([]preparedMutation, map[string]struct{}, *resyncInstruction, error) {
 	seen := make(map[string]struct{})
 	if since == "" || h.getMutationPage == nil || workspaceID == "" {
-		return nil, seen, "", nil
+		return nil, seen, nil, nil
 	}
 	ctx, cancel := context.WithTimeout(requestCtx, h.catchUpTimeout)
 	defer cancel()
@@ -223,15 +230,21 @@ func (h *Handler) fetchCatchUp(
 		page, err := h.getMutationPage(ctx, workspaceID, cursor, catchUpPageLimit)
 		if err != nil {
 			reason := "error"
+			resyncCursor := since
 			if errors.Is(err, backend.ErrMutationCursorExpired) {
 				reason = "expired"
+				var backendErr *backend.BackendError
+				if errors.As(err, &backendErr) && backendErr.Meta["cursor"] != "" {
+					resyncCursor = backendErr.Meta["cursor"]
+				}
 			} else if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				reason = "cap"
+				resyncCursor = cursor
 			}
-			return nil, nil, reason, fmt.Errorf("catch-up page %d: %w", pageNumber, err)
+			return mutations, seen, &resyncInstruction{cursor: resyncCursor, reason: reason}, fmt.Errorf("catch-up page %d: %w", pageNumber, err)
 		}
 		if err := ctx.Err(); err != nil {
-			return nil, nil, "cap", fmt.Errorf("catch-up exceeded time budget: %w", err)
+			return mutations, seen, &resyncInstruction{cursor: cursor, reason: "cap"}, fmt.Errorf("catch-up exceeded time budget: %w", err)
 		}
 		if page.Cursor == "" {
 			page.Cursor = cursor
@@ -249,16 +262,16 @@ func (h *Handler) fetchCatchUp(
 		}
 		cursor = page.Cursor
 		if !page.HasMore {
-			return mutations, seen, "", nil
+			return mutations, seen, nil, nil
 		}
 		if pageNumber == h.catchUpMaxPages {
-			return nil, nil, "cap", fmt.Errorf("catch-up exceeded %d pages", h.catchUpMaxPages)
+			return mutations, seen, &resyncInstruction{cursor: cursor, reason: "cap"}, fmt.Errorf("catch-up exceeded %d pages", h.catchUpMaxPages)
 		}
 		if err := ctx.Err(); err != nil {
-			return nil, nil, "cap", fmt.Errorf("catch-up exceeded time budget: %w", err)
+			return mutations, seen, &resyncInstruction{cursor: cursor, reason: "cap"}, fmt.Errorf("catch-up exceeded time budget: %w", err)
 		}
 	}
-	return nil, nil, "cap", fmt.Errorf("catch-up exceeded page budget")
+	return mutations, seen, &resyncInstruction{cursor: cursor, reason: "cap"}, fmt.Errorf("catch-up exceeded page budget")
 }
 
 func (h *Handler) endHandshakeWriteError(span trace.Span, client *Client, err error, frame string) {
@@ -266,12 +279,6 @@ func (h *Handler) endHandshakeWriteError(span trace.Span, client *Client, err er
 	span.RecordError(err)
 	span.SetStatus(codes.Error, "network")
 	span.End()
-}
-
-func writeResyncRequired(w http.ResponseWriter, reason string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusServiceUnavailable)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": "resync_required", "reason": reason})
 }
 
 // streamLoop pumps live events until the client, hub, or network closes. The
@@ -289,11 +296,37 @@ func (h *Handler) streamLoop(
 	}
 	heartbeatTicker := time.NewTicker(interval)
 	defer heartbeatTicker.Stop()
+	var resyncSeq uint64
 	for {
+		if dropped, pending := client.beginResync(); pending {
+			closed, err := h.writeOverflowResync(sw, client, nil, dropped, &resyncSeq)
+			if err != nil {
+				slog.Error("SSE client resync write failed", "client_id", client.id, "err", err)
+				return disconnectReasonError, err
+			}
+			if closed {
+				return disconnectReasonServerClose, nil
+			}
+			continue
+		}
 		select {
 		case mutation, ok := <-client.send:
 			if !ok {
 				return disconnectReasonServerClose, nil
+			}
+			if dropped, pending := client.beginResync(); pending {
+				closed, err := h.writeOverflowResync(sw, client, mutation, dropped, &resyncSeq)
+				if err != nil {
+					slog.Error("SSE client resync write failed", "client_id", client.id, "err", err)
+					return disconnectReasonError, err
+				}
+				if closed {
+					return disconnectReasonServerClose, nil
+				}
+				continue
+			}
+			if mutation.deliverySeq != 0 && mutation.deliverySeq <= resyncSeq {
+				continue
 			}
 			if mutation.Cursor != "" {
 				if _, duplicate := catchUpCursors[mutation.Cursor]; duplicate {
@@ -319,6 +352,44 @@ func (h *Handler) streamLoop(
 	}
 }
 
+func (h *Handler) writeOverflowResync(
+	sw frameWriter,
+	client *Client,
+	first *MutationPayload,
+	dropped resyncPoint,
+	resyncSeq *uint64,
+) (bool, error) {
+	highest := dropped
+	consider := func(mutation *MutationPayload) {
+		if mutation != nil && mutation.deliverySeq > highest.seq {
+			highest = resyncPoint{seq: mutation.deliverySeq, cursor: mutation.deliveryCursor}
+		}
+	}
+	consider(first)
+	closed := false
+	for {
+		select {
+		case mutation, ok := <-client.send:
+			if !ok {
+				closed = true
+				goto drained
+			}
+			consider(mutation)
+		default:
+			goto drained
+		}
+	}
+
+drained:
+	if err := sw.WriteResync(highest.cursor, "overflow"); err != nil {
+		return closed, err
+	}
+	if highest.seq > *resyncSeq {
+		*resyncSeq = highest.seq
+	}
+	return closed, nil
+}
+
 func writePreparedMutation(sw frameWriter, mutation preparedMutation) error {
 	data, err := json.Marshal(mutation.payload)
 	if err != nil {
@@ -337,6 +408,9 @@ func writeSSEEvent(sw frameWriter, mutation *MutationPayload) error {
 }
 
 func eventIDForMutation(mutation *MutationPayload) string {
+	if mutation != nil && mutation.deliveryCursor != "" {
+		return mutation.deliveryCursor
+	}
 	if mutation != nil && mutation.Cursor != "" {
 		return mutation.Cursor
 	}

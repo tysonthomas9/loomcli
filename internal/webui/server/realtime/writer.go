@@ -1,21 +1,28 @@
 package realtime
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
+
+const frameWriteTimeout = 2 * time.Second
 
 // Writer centralizes SSE wire-format concerns. It is not concurrency-safe.
 type Writer struct {
 	w          io.Writer
 	controller responseController
+	now        func() time.Time
 }
 
 type responseController interface {
 	Flush() error
+	SetWriteDeadline(time.Time) error
 }
 
 // NewWriter creates a new SSE writer, checking that the ResponseWriter supports Flusher.
@@ -33,7 +40,7 @@ func newWriter(w io.Writer, controller responseController) (*Writer, error) {
 	if controller == nil {
 		return nil, fmt.Errorf("SSE response controller must not be nil")
 	}
-	return &Writer{w: w, controller: controller}, nil
+	return &Writer{w: w, controller: controller, now: time.Now}, nil
 }
 
 // WriteRetry writes the retry interval to the SSE stream.
@@ -55,6 +62,19 @@ func (sw *Writer) WriteEventID(id, event, data string) error {
 // WriteEventNoID writes a named event that does not advance Last-Event-ID.
 func (sw *Writer) WriteEventNoID(event, data string) error {
 	return sw.writeFrame(nil, &event, &data, nil, nil)
+}
+
+// WriteResync writes a resumable transport-repair frame. Its ID advances the
+// connection cursor past a range that must be repaired from authoritative
+// snapshots rather than delivered as mutations.
+func (sw *Writer) WriteResync(id, reason string) error {
+	data, err := json.Marshal(struct {
+		Reason string `json:"reason"`
+	}{Reason: reason})
+	if err != nil {
+		return err
+	}
+	return sw.WriteEventID(id, "resync", string(data))
 }
 
 // WriteComment writes a comment to the SSE stream.
@@ -101,8 +121,25 @@ func (sw *Writer) writeFrame(id, event, data *string, retry *int, comment *strin
 	}
 	frame.WriteByte('\n')
 
-	if _, err := sw.w.Write([]byte(frame.String())); err != nil {
-		return err
+	deadlineErr := sw.controller.SetWriteDeadline(sw.now().Add(frameWriteTimeout))
+	if deadlineErr != nil && !errors.Is(deadlineErr, http.ErrNotSupported) {
+		return deadlineErr
 	}
-	return sw.controller.Flush()
+
+	_, writeErr := sw.w.Write([]byte(frame.String()))
+	var flushErr error
+	if writeErr == nil {
+		flushErr = sw.controller.Flush()
+	}
+	clearErr := sw.controller.SetWriteDeadline(time.Time{})
+	if errors.Is(clearErr, http.ErrNotSupported) {
+		clearErr = nil
+	}
+	if writeErr != nil {
+		return writeErr
+	}
+	if flushErr != nil {
+		return flushErr
+	}
+	return clearErr
 }

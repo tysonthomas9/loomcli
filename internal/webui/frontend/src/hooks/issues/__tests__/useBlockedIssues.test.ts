@@ -67,6 +67,7 @@ function Wrapper({ children }: { children: React.ReactNode }): JSX.Element {
     isConnected: state === "connected",
     connectionEpoch: epoch,
     subscribe,
+    onResync: () => () => {},
     retryNow: vi.fn(),
     disconnect: vi.fn(),
   };

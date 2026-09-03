@@ -18,7 +18,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { listTabMetadata } from "@/api/terminal";
 import type { MutationPayload } from "@/api/common";
 import { isAgentMetadata } from "@/utils/terminalTabMetadata";
-import { useEventSubscription } from "@/hooks/common";
+import { useEventContext, useEventSubscription } from "@/hooks/common";
 import { useWorkspaceContext } from "@/hooks/workspace";
 
 export interface UseWorkspaceSessionCountReturn {
@@ -40,12 +40,14 @@ export function useWorkspaceSessionCount(
 ): UseWorkspaceSessionCountReturn {
   const enabled = options.enabled ?? true;
   const { workspaceId } = useWorkspaceContext();
+  const { connectionEpoch } = useEventContext();
   const [sessionCount, setSessionCount] = useState(0);
   const mountedRef = useRef(true);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Workspace the newest request was issued for; responses for anything else
   // are stale and must not overwrite the current count.
   const currentWorkspaceRef = useRef(workspaceId);
+  const connectionEpochRef = useRef(connectionEpoch);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -116,6 +118,13 @@ export function useWorkspaceSessionCount(
   useEventSubscription(handleMutation, {
     types: ["terminal_session_change", "terminal_metadata"],
   });
+
+  useEffect(() => {
+    const previous = connectionEpochRef.current;
+    connectionEpochRef.current = connectionEpoch;
+    if (!enabled || connectionEpoch <= previous) return;
+    void fetchCount();
+  }, [connectionEpoch, enabled, fetchCount]);
 
   useEffect(() => {
     if (!enabled) return;

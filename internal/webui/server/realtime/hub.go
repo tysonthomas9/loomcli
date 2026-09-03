@@ -21,7 +21,9 @@ const (
 	// HeartbeatInterval is how often heartbeat comments are sent to keep connections alive.
 	HeartbeatInterval = 30 * time.Second
 	// ClientSendBuf is the per-client channel buffer size for outbound mutation events.
-	ClientSendBuf = 64
+	ClientSendBuf = 256
+
+	retryQueueCapacity = 1024
 )
 
 // eventIDCounter provides monotonically increasing event IDs across all SSE connections.
@@ -61,6 +63,12 @@ type MutationPayload struct {
 	ExitReason  string `json:"exit_reason,omitempty"`  // Terminal lifecycle reason: exited, killed, or shutdown
 	Kind        string `json:"kind,omitempty"`         // Terminal runtime kind, for example pty or agent_tmux
 	Agent       *bool  `json:"agent,omitempty"`        // Whether the terminal runtime belongs to an agent
+
+	// deliverySeq and deliveryCursor are per-client transport metadata. The hub
+	// stamps them on a clone so the mutation payload stays byte-identical on the
+	// wire while each connection gets its own contiguous ordering domain.
+	deliverySeq    uint64
+	deliveryCursor string
 }
 
 var errHubStopped = errors.New("SSE hub stopped")
@@ -114,6 +122,17 @@ type Client struct {
 	lastSince   string
 	sourceRepos []string // repos this client wants; empty = all
 	workspaceID string   // workspace this client subscribed to; empty = no mutations (fail-closed)
+	nextSeq     atomic.Uint64
+
+	resyncMu      sync.Mutex
+	lastOffered   resyncPoint
+	dropped       resyncPoint
+	pendingResync atomic.Bool
+}
+
+type resyncPoint struct {
+	seq    uint64
+	cursor string
 }
 
 // NewClient creates a new SSE client with the given parameters.
@@ -125,6 +144,7 @@ func NewClient(id int64, sendBuf int, lastSince string, sourceRepos []string, wo
 		lastSince:   lastSince,
 		sourceRepos: sourceRepos,
 		workspaceID: workspaceID,
+		lastOffered: resyncPoint{cursor: lastSince},
 	}
 }
 
@@ -136,6 +156,45 @@ func (c *Client) Send() <-chan *MutationPayload { return c.send }
 
 // Done returns the client's done channel.
 func (c *Client) Done() chan struct{} { return c.done }
+
+func (c *Client) prepareDelivery(mutation *MutationPayload) *MutationPayload {
+	delivery := *mutation
+	delivery.deliverySeq = c.nextSeq.Add(1)
+	delivery.deliveryCursor = eventIDForMutation(&delivery)
+
+	c.resyncMu.Lock()
+	c.lastOffered = resyncPoint{seq: delivery.deliverySeq, cursor: delivery.deliveryCursor}
+	c.resyncMu.Unlock()
+	return &delivery
+}
+
+func (c *Client) markDropped(point resyncPoint) {
+	c.resyncMu.Lock()
+	c.dropped = point
+	c.pendingResync.Store(true)
+	c.resyncMu.Unlock()
+}
+
+func (c *Client) markCurrentDropped() {
+	c.resyncMu.Lock()
+	c.dropped = c.lastOffered
+	c.pendingResync.Store(true)
+	c.resyncMu.Unlock()
+}
+
+// beginResync atomically claims the current pending-resync generation and its
+// last dropped point. A drop racing after the claim remains pending for the
+// writer's next loop iteration.
+func (c *Client) beginResync() (resyncPoint, bool) {
+	c.resyncMu.Lock()
+	defer c.resyncMu.Unlock()
+	if !c.pendingResync.Swap(false) {
+		return resyncPoint{}, false
+	}
+	dropped := c.dropped
+	c.dropped = resyncPoint{}
+	return dropped, true
+}
 
 // ParseSourceRepos parses a comma-separated source_repos query parameter,
 // trimming whitespace and skipping empty entries.
@@ -243,7 +302,6 @@ func (h *Hub) fanOutMutation(mutation *MutationPayload) {
 		return
 	}
 	h.mu.RLock()
-	var slow []*Client
 	for client := range h.clients {
 		if !MatchesWorkspaceFilter(client.workspaceID, mutation.WorkspaceID) {
 			continue
@@ -251,17 +309,16 @@ func (h *Hub) fanOutMutation(mutation *MutationPayload) {
 		if !MatchesSourceRepoFilter(client.sourceRepos, mutation.SourceRepo) {
 			continue
 		}
+		delivery := client.prepareDelivery(mutation)
 		select {
-		case client.send <- mutation:
+		case client.send <- delivery:
 		default:
-			slog.Warn("SSE client buffer full, disconnecting client", "client_id", client.id, "workspace_id", client.workspaceID)
-			slow = append(slow, client)
+			client.markDropped(resyncPoint{seq: delivery.deliverySeq, cursor: delivery.deliveryCursor})
+			slog.Warn("SSE client buffer full, scheduling resync", "client_id", client.id, "workspace_id", client.workspaceID,
+				"seq", delivery.deliverySeq, "cursor", delivery.deliveryCursor)
 		}
 	}
 	h.mu.RUnlock()
-	for _, client := range slow {
-		h.removeClient(client)
-	}
 }
 
 // closeAllClients closes all client send channels and clears the client map.
@@ -345,16 +402,28 @@ func (h *Hub) Broadcast(mutation *MutationPayload) {
 	case h.broadcast <- mutation:
 	default:
 		h.retryMu.Lock()
-		if len(h.retryQueue) < 1024 {
+		if len(h.retryQueue) < retryQueueCapacity {
 			h.retryQueue = append(h.retryQueue, mutation)
 			slog.Warn("SSE broadcast channel full, queued mutation",
 				"queue_size", len(h.retryQueue), "affected_clients", affectedClients)
 		} else {
 			atomic.AddInt64(&h.droppedCount, 1)
+			h.markMatchingClientsPending(mutation)
 			slog.Warn("SSE retry queue full, dropped mutation",
 				"total_dropped", atomic.LoadInt64(&h.droppedCount), "affected_clients", affectedClients)
 		}
 		h.retryMu.Unlock()
+	}
+}
+
+func (h *Hub) markMatchingClientsPending(mutation *MutationPayload) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for client := range h.clients {
+		if MatchesWorkspaceFilter(client.workspaceID, mutation.WorkspaceID) &&
+			MatchesSourceRepoFilter(client.sourceRepos, mutation.SourceRepo) {
+			client.markCurrentDropped()
+		}
 	}
 }
 

@@ -269,7 +269,7 @@ function FileBrowserInner({
   >({});
   const inlineCommitKeyRef = useRef<string | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const reconnectAttemptsRef = useRef(eventContext.reconnectAttempts);
+  const connectionEpochRef = useRef(eventContext.connectionEpoch);
   const lastLoadedChangeGroupsRef = useRef<Map<string, ChangeCheckoutGroup>>(
     new Map(),
   );
@@ -777,20 +777,15 @@ function FileBrowserInner({
   ]);
 
   useEffect(() => {
-    const previous = reconnectAttemptsRef.current;
-    reconnectAttemptsRef.current = eventContext.reconnectAttempts;
-    if (
-      eventContext.reconnectAttempts > 0 ||
-      (previous > 0 && eventContext.state === "connected")
-    ) {
-      void refreshCheckouts();
-      void refreshGitStatus();
-      void refreshBranchDiffs();
-      invalidateSkillsCatalog();
-    }
+    const previous = connectionEpochRef.current;
+    connectionEpochRef.current = eventContext.connectionEpoch;
+    if (eventContext.connectionEpoch <= previous) return;
+    void refreshCheckouts();
+    void refreshGitStatus();
+    void refreshBranchDiffs();
+    invalidateSkillsCatalog();
   }, [
-    eventContext.reconnectAttempts,
-    eventContext.state,
+    eventContext.connectionEpoch,
     refreshBranchDiffs,
     refreshCheckouts,
     refreshGitStatus,

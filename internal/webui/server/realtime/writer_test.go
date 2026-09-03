@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"time"
 )
 
 func TestWriterFrames(t *testing.T) {
@@ -26,6 +27,13 @@ func TestWriterFrames(t *testing.T) {
 				return sw.WriteEventID("1700000000800-0", "status", "ready")
 			},
 			want: "id: 1700000000800-0\nevent: status\ndata: ready\n\n",
+		},
+		{
+			name: "resync event",
+			write: func(sw *Writer) error {
+				return sw.WriteResync("c1.high-water", "overflow")
+			},
+			want: "id: c1.high-water\nevent: resync\ndata: {\"reason\":\"overflow\"}\n\n",
 		},
 		{
 			name: "ID-less event",
@@ -190,6 +198,12 @@ func TestWriterReturnsInjectedFlushFailureAfterExactlyOneFlush(t *testing.T) {
 	if controller.flushes != 1 {
 		t.Fatalf("flushes = %d, want exactly 1", controller.flushes)
 	}
+	if len(controller.deadlines) != 2 {
+		t.Fatalf("deadline calls = %v, want set and clear", controller.deadlines)
+	}
+	if controller.deadlines[0].IsZero() || !controller.deadlines[1].IsZero() {
+		t.Fatalf("deadlines = %v, want non-zero then zero", controller.deadlines)
+	}
 	if got := buf.String(); got != "event: event\ndata: data\n\n" {
 		t.Fatalf("frame bytes = %q", got)
 	}
@@ -203,10 +217,11 @@ func TestNewWriterRejectsUnsupportedFlusher(t *testing.T) {
 
 type recordingResponseWriter struct {
 	bytes.Buffer
-	header   http.Header
-	flushes  int
-	writes   int
-	writeErr error
+	header    http.Header
+	flushes   int
+	writes    int
+	writeErr  error
+	deadlines []time.Time
 }
 
 func (w *recordingResponseWriter) Header() http.Header {
@@ -230,6 +245,11 @@ func (w *recordingResponseWriter) Flush() {
 	w.flushes++
 }
 
+func (w *recordingResponseWriter) SetWriteDeadline(deadline time.Time) error {
+	w.deadlines = append(w.deadlines, deadline)
+	return nil
+}
+
 type nonFlushingResponseWriter struct {
 	header http.Header
 }
@@ -248,11 +268,17 @@ func (*nonFlushingResponseWriter) Write(p []byte) (int, error) {
 func (*nonFlushingResponseWriter) WriteHeader(int) {}
 
 type recordingResponseController struct {
-	flushes int
-	err     error
+	flushes   int
+	err       error
+	deadlines []time.Time
 }
 
 func (c *recordingResponseController) Flush() error {
 	c.flushes++
 	return c.err
+}
+
+func (c *recordingResponseController) SetWriteDeadline(deadline time.Time) error {
+	c.deadlines = append(c.deadlines, deadline)
+	return nil
 }

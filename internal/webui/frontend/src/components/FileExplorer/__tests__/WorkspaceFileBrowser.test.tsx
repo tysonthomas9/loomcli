@@ -117,6 +117,7 @@ const mocks = vi.hoisted(() => ({
   registryRefresh: vi.fn(() => Promise.resolve()),
   registryRetarget: vi.fn(),
   registryReset: vi.fn(),
+  connectionEpoch: 0,
 }));
 
 vi.mock("@/components/CodeMirrorEditor", async () => {
@@ -436,7 +437,9 @@ vi.mock("@/hooks", async () => {
       reconnectAttempts: 0,
       lastError: null,
       isConnected: true,
+      connectionEpoch: mocks.connectionEpoch,
       subscribe: () => () => {},
+      onResync: () => () => {},
       retryNow: vi.fn(),
       disconnect: vi.fn(),
     }),
@@ -589,6 +592,7 @@ describe("WorkspaceFileBrowser", () => {
     mocks.registryDirtyKeys.clear();
     mocks.registryListeners.clear();
     mocks.registryRevision = 0;
+    mocks.connectionEpoch = 0;
     mocks.workspaceDataId = "ws-1";
     mocks.repos = [
       {
@@ -1748,6 +1752,22 @@ describe("WorkspaceFileBrowser", () => {
     });
     repairButton.focus();
     expect(repairButton).toHaveFocus();
+  });
+
+  it("refetches checkout projections once per connection epoch", async () => {
+    const { rerender } = render(<WorkspaceFileBrowser mode="workspace" />);
+    await waitFor(() => expect(mocks.listFileCheckouts).toHaveBeenCalled());
+    const initialCalls = mocks.listFileCheckouts.mock.calls.length;
+
+    mocks.connectionEpoch = 1;
+    rerender(<WorkspaceFileBrowser mode="workspace" />);
+    await waitFor(() =>
+      expect(mocks.listFileCheckouts).toHaveBeenCalledTimes(initialCalls + 1),
+    );
+
+    rerender(<WorkspaceFileBrowser mode="workspace" />);
+    await act(async () => Promise.resolve());
+    expect(mocks.listFileCheckouts).toHaveBeenCalledTimes(initialCalls + 1);
   });
 
   it("repairs a status_error checkout from the unavailable chip", async () => {
