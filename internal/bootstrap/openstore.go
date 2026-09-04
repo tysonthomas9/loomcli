@@ -97,6 +97,12 @@ func OpenStore(ctx context.Context, dataDir string, logger *slog.Logger) (*Store
 		HTTPClient: fleet.SharedHTTPClient(),
 	}
 
+	// A local store here would be an embedded fleet-db on an empty snapshot,
+	// which then reports the active workspace as missing. Refuse instead.
+	if mode == ModeLocal && ServerWithoutFleetDB() {
+		return nil, ErrServerModeNoFleetDB
+	}
+
 	switch mode {
 	case ModeCloud:
 		return openCloudStore(cfg, logger)
@@ -108,6 +114,27 @@ func OpenStore(ctx context.Context, dataDir string, logger *slog.Logger) (*Store
 		return nil, fmt.Errorf("openstore: unknown mode %s", mode)
 	}
 }
+
+// ErrServerModeNoFleetDB is returned by OpenStore when the invocation targets a
+// remote loom server but no fleet-db URL is configured.
+//
+// `loom data` reaches issues over the server's HTTP API, but workspace, repo and
+// agent metadata are read straight from fleet-db — the server does not proxy
+// them. Before ModeServer existed this fell through to ModeLocal, which started
+// an embedded fleet-db on an empty snapshot and then failed workspace validation
+// with "workspace not found". That message named the wrong problem: the
+// workspace was fine, the CLI was simply asking the wrong store.
+var ErrServerModeNoFleetDB = errors.New(
+	EnvServerURL + " is set but " + EnvFleetDBURL + " is not.\n\n" +
+		"Issue data resolves through the loom server, but workspace, repo and agent\n" +
+		"metadata are read directly from fleet-db, which the server does not proxy.\n" +
+		"Refusing to start an embedded fleet-db, which would answer from an empty\n" +
+		"store and report the active workspace as missing.\n\n" +
+		"Either point the CLI at the same fleet-db the loom server uses:\n\n" +
+		"    export " + EnvFleetDBURL + "=http://<fleet-db-host>:<port>\n" +
+		"    export " + EnvFleetDBActor + "=loom      # or " + EnvFleetDBAPIKey + "\n\n" +
+		"or drop back to the local store, if that is the one you want:\n\n" +
+		"    unset " + EnvServerURL + "      # or pass --server only on `loom data` commands")
 
 func openCloudStore(cfg fleetdb.Config, logger *slog.Logger) (*StoreHandle, error) {
 	cfg.BaseURL = os.Getenv(EnvFleetDBURL)
