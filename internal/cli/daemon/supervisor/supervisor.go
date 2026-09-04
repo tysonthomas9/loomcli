@@ -303,6 +303,20 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 			s.releaseAgentOwnership(ap)
 		}
 
+		if err := s.gateBackendAvailable(ap); err != nil {
+			if errors.Is(err, ErrBackendUnavailable) {
+				releaseOwnership()
+				s.postExitCleanup(ap)
+				if !s.shouldRestart(ap) {
+					return
+				}
+				if !s.sleepBeforeRestart(ap) {
+					return
+				}
+				continue
+			}
+		}
+
 		if !s.Concurrency.Acquire(ap.Entry.Role) {
 			releaseOwnership()
 			slog.Info("concurrency tracker closed, exiting", "worktree", ap.Entry.Worktree)
