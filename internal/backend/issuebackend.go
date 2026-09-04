@@ -181,6 +181,27 @@ type IssueBackend interface {
 	BackendName() string
 }
 
+// ActorClaimer is the actor-scoped claim capability: claiming on behalf of a
+// named worker rather than as whatever actor the client itself is configured
+// with. Optional rather than part of IssueBackend because not every backend
+// can express it — but callers MUST prefer it when both sides have it:
+// fleet-db arbitrates locks BY ACTOR, so a client that falls back to the plain
+// claim makes every sibling worker look like one claimant and concurrent
+// claims all appear to win.
+//
+// Declared next to the interface it extends so the driver and the webui
+// service assert against one definition instead of each keeping a private copy
+// (the private copies are how the serve-mediated path silently lacked it).
+type ActorClaimer interface {
+	ClaimIssueAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error
+}
+
+// ActorReleaser is the symmetric release capability: freeing the lock a named
+// worker holds, so a sibling cannot release a claim it does not own.
+type ActorReleaser interface {
+	ReleaseIssueAsActor(ctx context.Context, id string, actor string) error
+}
+
 // DeferredIssueBackend is an optional extension for backends that expose the
 // canonical deferred view: explicit deferred status or a future defer_until.
 type DeferredIssueBackend interface {
