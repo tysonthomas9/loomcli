@@ -95,9 +95,9 @@ var (
 	usageLimitedRe = regexp.MustCompile(regexp.QuoteMeta(UsageLimitedMarker))
 )
 
-// BillingWallMarker is the stable log marker the inner backend subprocess emits
-// when loom itself detected the harness parked on a billing / credit wall —
-// the case harness-wrapper does NOT model, so no turn reason ever names it.
+// BillingWallMarker is the stable log marker for a harness parked on a billing
+// / credit wall — the case harness-wrapper does NOT model, so no turn reason
+// ever names it.
 //
 // It is the one wall that is neither blameless nor retryable: a spent quota
 // window lifts on its own and an expired login is one command away, but an
@@ -105,8 +105,12 @@ var (
 // it to ErrBilling is what makes agentpolicy stop the supervisor fatally
 // instead of spending the restart budget on turns that cannot succeed.
 //
-// Stable string contract: changing it requires updating the emitter
-// (internal/cli/backends.wallInvocationError).
+// It currently has NO in-tree emitter. The screen-scrape detector that used to
+// raise it was removed (0 true positives in 15 days, and its false positives
+// were fatal); the marker and its classification arm are kept deliberately, as
+// a stable log-text contract for logs already written and for the day
+// harness-wrapper names a billing reason of its own. Changing the string
+// therefore still requires updating whatever emits it next.
 const BillingWallMarker = "loom: harness billing or credit wall reached"
 
 var billingWallRe = regexp.MustCompile(regexp.QuoteMeta(BillingWallMarker))
