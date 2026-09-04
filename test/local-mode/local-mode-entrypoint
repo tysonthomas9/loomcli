@@ -8,6 +8,10 @@ SOURCE_REPO="${LOOM_LOCAL_MODE_SOURCE_REPO:-/workspace/source-repo}"
 ORIGIN_REPO="${LOOM_LOCAL_MODE_ORIGIN_REPO:-/workspace/source-repo-origin.git}"
 WORKSPACE_ROOT="${LOOM_LOCAL_MODE_WORKSPACE_ROOT:-/root/.loom/workspaces/${WORKSPACE}}"
 WORKSPACE_REPO="${WORKSPACE_ROOT}/source-repo"
+# A second, empty workspace so workspace-switching flows are testable out of
+# the box (badge/state loss across switches is invisible with one workspace).
+# Set to "" to skip.
+SECOND_WORKSPACE="${LOOM_LOCAL_MODE_SECOND_WORKSPACE:-WSTWO}"
 AGENT_BACKEND="${LOOM_LOCAL_MODE_BACKEND:-${LOOM_BACKEND:-localdogfood}}"
 case "$AGENT_BACKEND" in
   codex)
@@ -434,6 +438,25 @@ seed_tasks() {
   fi
 }
 
+create_second_workspace() {
+  if [ "$SECOND_WORKSPACE" = "" ] || [ "$SECOND_WORKSPACE" = "$WORKSPACE" ]; then
+    return 0
+  fi
+  api="http://127.0.0.1:${LOOM_PORT}/api/workspaces"
+  if http_get "$api" |
+    jq -e --arg id "$SECOND_WORKSPACE" '.workspaces[] | select(.id == $id)' >/dev/null 2>&1; then
+    echo "[local-mode] second workspace ${SECOND_WORKSPACE} already exists"
+    return 0
+  fi
+  body="$(printf '{"name":"%s","type":"empty"}' "$SECOND_WORKSPACE")"
+  if http_post_json "$api" "$body" >/dev/null 2>&1; then
+    echo "[local-mode] created second workspace ${SECOND_WORKSPACE} (workspace-switch QA fixture)"
+  else
+    # Non-fatal: the primary workspace is the stack; the fixture is a bonus.
+    echo "[local-mode] WARNING: could not create second workspace ${SECOND_WORKSPACE}" >&2
+  fi
+}
+
 start_serve() {
   cd "$WORKSPACE_ROOT"
   loom serve --bind "$LOOM_BIND" --port "$LOOM_PORT" --fleet-mode >/tmp/loom-serve.log 2>&1 &
@@ -565,6 +588,7 @@ create_agent_worktree "$CODE_AGENT"
 trust_codex_local_mode_paths
 register_agents
 start_serve
+create_second_workspace
 seed_tasks
 
 echo "[local-mode] ready"
