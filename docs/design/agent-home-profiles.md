@@ -161,10 +161,11 @@ The split is not cosmetic — it is why `--fix` is safe to run:
   is the repair for an unreadable or empty token file, and the one thing that
   is not provisioning: it writes no profile content and no manifest.
 - **`scripts/provision-profile.sh <agent>` is the only thing that provisions.**
-  It is workspace-owned, outside this repo, creates or replaces the profile's
-  content, seeds the keychain slot the harness authenticates against, and
-  writes the manifest from scratch. It is the operator's tool and stays that
-  way: anything that can mint a profile can mint an agent's credentials.
+  It creates or explicitly replaces (`--force`) the profile's stable,
+  non-secret configuration and writes the manifest from scratch. Credentials
+  are deliberately separate: Claude's identity is installed only by
+  `scripts/setup-profile-token.sh`, while Codex continues to use its external
+  authentication boundary.
 
 Editing a profile file by hand is therefore never the repair. It breaks the
 fingerprint, and the next spawn refuses.
