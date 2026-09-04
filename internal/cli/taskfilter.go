@@ -2,13 +2,26 @@ package cli
 
 // Shared issue categorization predicates.
 // Used by automode.go (agent task selection) and monitor.go (dashboard counts).
-// Frontend equivalent: frontend/src/utils/issueCategory.ts
+// Frontend equivalent: internal/webui/frontend/src/utils/issue/issueCategory.ts
 
 import "github.com/tysonthomas9/loomcli/internal/backend"
 
 // NeedsRevisionLabel is added when a plan review is rejected.
 // Issues with this label are treated as needing re-planning even if they have a design.
 const NeedsRevisionLabel = "needs-revision"
+
+// OperatorLabel parks an issue for a human: it stays open, visible and
+// workable by a person, but no agent may select it. fleet-db enforces this
+// server-side (ready-queue exclusion plus a claim guard); this mirror keeps the
+// agent from offering itself the task in the first place.
+//
+// Exact, lowercase string equality — no prefix matching and no case folding, so
+// "operator-notes" and "Operator" are ordinary labels. fleet-db normalizes
+// nothing, and a looser client-side match would disagree with the server.
+// SYNC: fleet-db internal/models/labels.go (LabelOperator / HasOperatorLabel),
+// enforced in internal/storage/ready_eligible.go and by the claim guard in
+// internal/service/issue_service.go; frontend issueCategory.ts OPERATOR_LABEL.
+const OperatorLabel = "operator"
 
 // --- Level 1: Simple predicates (no context needed) ---
 
@@ -19,8 +32,10 @@ func IsEpic(issue backend.IssueData) bool {
 
 // IsNonWorkType returns true if the issue type is a non-work internal type that
 // agents should never pick up. These are workflow/infrastructure records, not tasks.
-// SYNC: Must stay aligned with ready.go SQL exclusion list (sqlite/ready.go:48)
-// and memory storage (memory/memory.go:1174).
+// This list is loom's own: fleet-db's ready-queue eligibility
+// (internal/storage/ready_eligible.go there) filters on status, type=epic and
+// defer_until, and does not enumerate these internal types. The files this
+// comment used to name (sqlite/ready.go, memory/memory.go) no longer exist.
 func IsNonWorkType(issue backend.IssueData) bool {
 	switch issue.IssueType {
 	case "merge-request", "gate", "molecule", "message", "agent", "role", "rig":
@@ -50,6 +65,17 @@ func HasNeedsRevision(issue backend.IssueData) bool {
 	return false
 }
 
+// HasOperatorLabel returns true if the issue carries the reserved operator
+// label, which parks it for a human and excludes it from agent selection.
+func HasOperatorLabel(issue backend.IssueData) bool {
+	for _, label := range issue.Labels {
+		if label == OperatorLabel {
+			return true
+		}
+	}
+	return false
+}
+
 // --- Level 2: Workflow predicates (combining Level 1) ---
 
 // NeedsPlan returns true if the issue needs planning:
@@ -67,9 +93,11 @@ func ReadyToImplement(issue backend.IssueData) bool {
 }
 
 // IsWorkableTask returns true if the issue can be picked up by an agent:
-// status is open, not an epic, and not a non-work type.
+// status is open, not an epic, not a non-work type, and not parked for an
+// operator. This is the single gate behind IsAvailableForPlanning,
+// IsAvailableForImplementation and IsAvailableForAny.
 func IsWorkableTask(issue backend.IssueData) bool {
-	return IsOpen(issue) && !IsEpic(issue) && !IsNonWorkType(issue)
+	return IsOpen(issue) && !IsEpic(issue) && !IsNonWorkType(issue) && !HasOperatorLabel(issue)
 }
 
 // --- Level 3: Agent predicates ---

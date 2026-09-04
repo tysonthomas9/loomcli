@@ -515,6 +515,11 @@ type UpdateParams struct {
 	DueAt              *string  `json:"due_at,omitempty"`
 	DeferUntil         *string  `json:"defer_until,omitempty"`
 	Claim              bool     `json:"claim,omitempty"`
+	// Force overrides server-side protection of reserved labels (fleet-db
+	// refuses to remove "operator" without it). It applies to the label deltas
+	// only, and is carried by the fleet-db transport, which is where the
+	// reserved-label protection lives.
+	Force bool `json:"force,omitempty"`
 }
 
 // CloseParams contains fields for closing an issue.
