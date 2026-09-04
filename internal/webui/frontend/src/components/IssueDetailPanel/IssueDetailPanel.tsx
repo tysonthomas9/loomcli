@@ -1164,6 +1164,12 @@ function DefaultContent({
   // Determine if this is a review item
   const reviewType = getReviewType(issue);
   const isReviewItem = reviewType !== null;
+  // A "help" card is parked (blocked + notes); approving it un-parks the issue
+  // back to `open` rather than accepting a result, so name the action for what
+  // it does. The data-testid stays stable — tests select on it.
+  const isHelpReview = reviewType === "help";
+  const approveLabel = isHelpReview ? "Unblock" : "Approve";
+  const approveGlyph = isHelpReview ? "\u2191" : "\u2713";
 
   // Calculate open blocker count for banner
   const openBlockerCount =
@@ -1275,10 +1281,10 @@ function DefaultContent({
             className={`${decisionButtonStyles.button} ${decisionButtonStyles.approve}`}
             onClick={handleApprove}
             disabled={isApproving}
-            aria-label="Approve"
+            aria-label={approveLabel}
             data-testid="panel-approve-button"
           >
-            {isApproving ? "..." : "\u2713"} Approve
+            {isApproving ? "..." : approveGlyph} {approveLabel}
           </button>
           <button
             type="button"

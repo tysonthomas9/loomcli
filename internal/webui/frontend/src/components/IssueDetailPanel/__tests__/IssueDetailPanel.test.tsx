@@ -1234,6 +1234,48 @@ describe("IssueDetailPanel", () => {
       expect(screen.getByTestId("panel-reject-button")).toBeInTheDocument();
     });
 
+    it("labels the action Approve for a review item and Unblock for a help item", () => {
+      // A help card (blocked + notes) is parked: the action un-parks it to
+      // `open` rather than accepting a result (PUPPET-156).
+      const onApprove = vi.fn();
+      const onReject = vi.fn();
+      const { rerender } = render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={createTestIssueDetails({
+            title: "Some task",
+            status: "review",
+          })}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={onReject}
+        />,
+      );
+      expect(screen.getByTestId("panel-approve-button")).toHaveAttribute(
+        "aria-label",
+        "Approve",
+      );
+
+      rerender(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={createTestIssueDetails({
+            title: "Stuck task",
+            status: "blocked",
+            notes: "I need help with this task",
+          })}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={onReject}
+        />,
+      );
+      // The testid is unchanged — only the human-facing name moves.
+      expect(screen.getByTestId("panel-approve-button")).toHaveAttribute(
+        "aria-label",
+        "Unblock",
+      );
+    });
+
     it("does NOT render ReviewActionBar for non-review items", () => {
       const mockIssue = createTestIssueDetails({
         title: "Regular task without review",
