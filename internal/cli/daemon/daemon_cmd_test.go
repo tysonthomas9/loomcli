@@ -316,7 +316,7 @@ func TestWriteStateFile_RoundTripsQuarantinedTasks(t *testing.T) {
 			WriteFailed:    true,
 		},
 	}
-	if err := writeStateFile(stateFilePath, time.Now(), nil, quarantined, 3); err != nil {
+	if err := writeStateFile(stateFilePath, time.Now(), nil, nil, quarantined, 3); err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
 	}
 
@@ -339,7 +339,7 @@ func TestWriteStateFile_RoundTripsQuarantinedTasks(t *testing.T) {
 	}
 
 	// Empty quarantine list keeps the field out of the JSON entirely.
-	if err := writeStateFile(stateFilePath, time.Now(), nil, nil, 3); err != nil {
+	if err := writeStateFile(stateFilePath, time.Now(), nil, nil, nil, 3); err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
 	}
 	raw, err := os.ReadFile(stateFilePath)
@@ -348,6 +348,52 @@ func TestWriteStateFile_RoundTripsQuarantinedTasks(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "quarantined_tasks") {
 		t.Errorf("empty quarantine list must be omitted from JSON:\n%s", raw)
+	}
+}
+
+func TestWriteStateFile_IncludesUnavailableAgents(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFilePath := filepath.Join(tmpDir, "daemon-agents.json")
+
+	agents := []supervisor.SupervisedAgentStatus{
+		{Worktree: "falcon", Role: "plan", PID: 4242},
+	}
+	unavailable := []UnavailableAgent{
+		{
+			Worktree: "ghost",
+			Role:     "task",
+			Repo:     "loomcli",
+			Reason:   `agent[1] worktree "ghost": 'ghost' is not a worktree, repo, or workspace name`,
+			Hint:     "create the worktree",
+		},
+	}
+
+	if err := writeStateFile(stateFilePath, time.Now(), agents, unavailable, nil, 3); err != nil {
+		t.Fatalf("writeStateFile() error = %v", err)
+	}
+
+	state, err := ReadStateFile(stateFilePath)
+	if err != nil {
+		t.Fatalf("ReadStateFile() error = %v", err)
+	}
+	if len(state.Agents) != 2 {
+		t.Fatalf("len(Agents) = %d, want 2 (supervised + unavailable)", len(state.Agents))
+	}
+	ghost := state.Agents[1]
+	if ghost.Worktree != "ghost" {
+		t.Fatalf("Agents[1].Worktree = %q, want ghost", ghost.Worktree)
+	}
+	if ghost.Status != "unavailable" {
+		t.Errorf("Agents[1].Status = %q, want unavailable", ghost.Status)
+	}
+	if ghost.Detail == "" {
+		t.Error("Agents[1].Detail is empty; the resolver error must survive the round trip")
+	}
+	if ghost.Hint == "" {
+		t.Error("Agents[1].Hint is empty; the operator next step must survive the round trip")
+	}
+	if state.Agents[0].Status == "unavailable" {
+		t.Error("the supervised agent must not be marked unavailable")
 	}
 }
 
@@ -666,7 +712,7 @@ func TestWriteStateFile_Success(t *testing.T) {
 		},
 	}
 
-	err := writeStateFile(stateFilePath, startedAt, agents, nil, 3)
+	err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, 3)
 
 	if err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
@@ -699,7 +745,7 @@ func TestWriteStateFile_AtomicWrite(t *testing.T) {
 
 	// Write state
 	agents := []SupervisedAgentStatus{{Worktree: "test", Role: "plan"}}
-	if err := writeStateFile(stateFilePath, startedAt, agents, nil, 3); err != nil {
+	if err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, 3); err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
 	}
 
@@ -867,7 +913,7 @@ func TestStateFileLifecycle(t *testing.T) {
 	agents := []SupervisedAgentStatus{
 		{Worktree: "falcon", Role: "plan", PID: os.Getpid()},
 	}
-	if err := writeStateFile(stateFilePath, startedAt, agents, nil, 3); err != nil {
+	if err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, 3); err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
 	}
 
@@ -882,7 +928,7 @@ func TestStateFileLifecycle(t *testing.T) {
 
 	// Update state (add agent)
 	agents = append(agents, SupervisedAgentStatus{Worktree: "nova", Role: "task"})
-	if err := writeStateFile(stateFilePath, startedAt, agents, nil, 3); err != nil {
+	if err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, 3); err != nil {
 		t.Fatalf("writeStateFile() update error = %v", err)
 	}
 
@@ -1300,7 +1346,7 @@ func TestWriteStateFile_WithStopReason(t *testing.T) {
 		},
 	}
 
-	err := writeStateFile(stateFilePath, startedAt, agents, nil, 3)
+	err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, 3)
 	if err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
 	}
@@ -1503,7 +1549,7 @@ func TestWriteStateFile_NewFields_RoundTrip(t *testing.T) {
 		},
 	}
 
-	err := writeStateFile(stateFilePath, startedAt, agents, nil, 3)
+	err := writeStateFile(stateFilePath, startedAt, agents, nil, nil, 3)
 	if err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
 	}
