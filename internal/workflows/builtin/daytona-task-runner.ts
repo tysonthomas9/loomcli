@@ -597,7 +597,11 @@ export function deliveryPlan(request, task, taskRunId) {
   // — the daytona runner pushes the exact same canonical branch the local runner
   // and the publisher use, so the topology matches across runtimes.
   const lineage = lineageCarrier(request);
-  const openPullRequest = !!lineage || mode === "slack-pr-chain" || booleanValue(inputValue(request, "openPullRequest"));
+  const frozenPlan = inputValue(request, "deliveryPlan");
+  const deliveryRequirement = frozenPlan && typeof frozenPlan === "object"
+    ? stringValue(frozenPlan.requirement)
+    : "";
+  const openPullRequest = !!lineage || deliveryRequirement === "pull_request" || mode === "slack-pr-chain" || booleanValue(inputValue(request, "openPullRequest"));
   const configuredBase = stringValue(
     inputValue(request, "baseBranch") ||
       inputValue(request, "targetBranch"),

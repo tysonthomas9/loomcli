@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/taskdelivery"
 )
 
 const (
@@ -210,6 +211,20 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	if failed {
 		return worktreeFailure, nil
 	}
+	var deliveryPlan taskdelivery.Plan
+	if managesTaskDelivery(req) {
+		var planErr error
+		deliveryPlan, planErr = e.resolveTaskDeliveryPlan(ctx, req, resolvedWorktree)
+		if planErr != nil {
+			return taskDeliveryFailure(planErr), nil
+		}
+		if deliveryPlan.PlanID != "" {
+			req.Input, planErr = taskdelivery.WithPlan(req.Input, deliveryPlan)
+			if planErr != nil {
+				return taskDeliveryFailure(planErr), nil
+			}
+		}
+	}
 	// Stacked task? Compute the binding (canonical output branch + base ref) once.
 	// Local runs resolve the repo from the host worktree; daytona/named runs (no
 	// host worktree) resolve it from the task's repo selectors. When set, the
@@ -237,6 +252,9 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	// successors) only afterwards, so a dependent's resolver reads a durable node.
 	if e.StackStore != nil {
 		defer func() { e.finalizeStackNode(ctx, req, resolvedWorktree, result, err) }()
+	}
+	if deliveryPlan.PlanID != "" {
+		defer func() { result = enforceTaskDelivery(deliveryPlan, result, err) }()
 	}
 	runBridge, err := e.bridgeRunner(ctx, req)
 	if err != nil {
