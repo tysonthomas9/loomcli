@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon"
 )
@@ -112,6 +113,13 @@ func evaluateDaemonStuck(state daemon.DaemonState, stateMtime, now time.Time, no
 
 	// Per-agent backoff_until staleness.
 	for _, agent := range state.Agents {
+		if agent.LastErrorClass == agenterr.WorkScanFailureOutcome.String() {
+			cause := strings.TrimSpace(agent.LastErrorMessage)
+			if cause == "" {
+				cause = "ready/work scan failed"
+			}
+			fail = append(fail, fmt.Sprintf("agent %q cannot scan work: %s", agent.Worktree, cause))
+		}
 		if agent.BackoffUntil.IsZero() {
 			continue
 		}

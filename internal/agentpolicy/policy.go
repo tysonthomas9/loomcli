@@ -144,6 +144,11 @@ func decideDomain(d agenterr.DomainOutcome) Disposition {
 	switch d {
 	case agenterr.NoWorkOutcome:
 		return Disposition{Decision: RetryUncounted, Backoff: BPNoWork}
+	case agenterr.WorkScanFailureOutcome:
+		// A failed queue read is not evidence of an empty queue. Use the
+		// ordinary retry/block path so it has separate counters and visible
+		// exponential backoff rather than silently entering the NoWork poll.
+		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}
 	case agenterr.BackendUnavailableOutcome:
 		return Disposition{Decision: Block, Backoff: BPBackendUnavailable}
 	case agenterr.LockConflictOutcome:

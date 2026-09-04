@@ -2,6 +2,18 @@ package agenterr
 
 import "testing"
 
+func TestClassifyFromOutput_WorkScanFailureMarker(t *testing.T) {
+	t.Parallel()
+	cause := "failed to check ready tasks: HTTP 429 rate limit exceeded"
+	aerr := ClassifyFromOutput(WorkScanFailureMarker+": "+cause, 0, "codex")
+	if aerr.Class != OutcomeFromDomain(WorkScanFailureOutcome) {
+		t.Fatalf("class = %s, want WorkScanFailure", aerr.Class)
+	}
+	if aerr.Message != cause {
+		t.Errorf("message = %q, want %q", aerr.Message, cause)
+	}
+}
+
 // TestClassifyFromOutput_ConnectionRefusedIsRetryable is the headline fix: a
 // bare connection-refused / transport error used to fall through to Unknown
 // (not retryable) in both the wrapper and loom's classifier. The wrapper now

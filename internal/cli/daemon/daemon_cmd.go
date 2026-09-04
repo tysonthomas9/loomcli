@@ -40,6 +40,7 @@ type DaemonAgentStatus struct {
 	StoppedAt              time.Time `json:"stopped_at,omitempty"`
 	WorktreePath           string    `json:"worktree_path,omitempty"`
 	LastErrorClass         string    `json:"last_error_class,omitempty"`
+	LastErrorMessage       string    `json:"last_error_message,omitempty"`
 	NoWorkCount            int       `json:"no_work_count,omitempty"`
 	BlockCount             int       `json:"block_count,omitempty"` // display-only: never hydrated back into supervision across daemon restarts
 	BackoffUntil           time.Time `json:"backoff_until,omitempty"`

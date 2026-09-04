@@ -12,6 +12,7 @@ type DomainOutcome int
 const (
 	DomainNone                   DomainOutcome = iota
 	NoWorkOutcome                              // no claimable task / epic exhausted
+	WorkScanFailureOutcome                     // ready/work scan failed before a task could be claimed
 	LockConflictOutcome                        // fleet-db task locked by another agent
 	SpawnFailureOutcome                        // supervisor could not exec the agent subprocess
 	BackendUnavailableOutcome                  // backend CLI binary not on PATH (folded from wrapper ErrBinaryNotFound)
@@ -23,6 +24,8 @@ func (d DomainOutcome) String() string {
 	switch d {
 	case NoWorkOutcome:
 		return "NoWork"
+	case WorkScanFailureOutcome:
+		return "WorkScanFailure"
 	case LockConflictOutcome:
 		return "LockConflict"
 	case SpawnFailureOutcome:

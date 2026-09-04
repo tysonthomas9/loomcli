@@ -2120,8 +2120,11 @@ func TestRunAutoModeLoop_ReadyQueryError(t *testing.T) {
 		t.Error("Should have attempted task check")
 	}
 
-	// The loop eventually exits via consecutive no-progress detection.
-	// The agent may be invoked during error-retry cycles but won't claim tasks.
+	// A failed scan exits through the work-scan-failure path; it must not be
+	// treated as idle and start an agent invocation with no verified work.
+	if claudeInvocations != 0 {
+		t.Errorf("Agent invocations = %d, want 0 after ready-query failure", claudeInvocations)
+	}
 }
 
 func TestRunAutoModeLoop_ShutdownDuringBackoff(t *testing.T) {
