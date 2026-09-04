@@ -428,7 +428,7 @@ func TestShouldRestart(t *testing.T) {
 		ap := &AgentProcess{
 			CurrentBackendIdx: 1,
 			NoWorkCount:       2,
-			LastExitCode:      0,
+			IdleSince:         time.Now().Add(-2 * time.Minute), // idle is measured from here, not NoWorkCount x poll
 			LastError:         &agenterr.AgentError{Class: agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome), Message: "no claimable tasks"},
 		}
 
