@@ -117,6 +117,10 @@ type AgentEntry struct {
 	Parent           string                   `yaml:"parent,omitempty"` // epic ID to scope this agent to; empty = no epic assignment
 	Mode             domain.AgentMode         `yaml:"mode,omitempty"`   // ephemeral: exit cleanly after one successful task; service: loop forever (default)
 	DesiredState     domain.AgentDesiredState `yaml:"desired_state,omitempty"`
+	// Drain metadata mirrored from the store, meaningful only while
+	// DesiredState is "draining". Read them through domain.ResolveDrain.
+	DrainNodeID    string     `yaml:"drain_node_id,omitempty"`
+	DrainExpiresAt *time.Time `yaml:"drain_expires_at,omitempty"`
 	// Hooks are the supervisor-owned post-run pipelines. Nil preserves the
 	// pre-hook behavior (the agent's own prompt does its bookkeeping).
 	Hooks *domain.AgentHooks `yaml:"hooks,omitempty"`
@@ -128,40 +132,60 @@ func (a AgentEntry) Equal(b AgentEntry) bool {
 		a.Auto == b.Auto && a.Backend == b.Backend && a.CrossRepo == b.CrossRepo && a.Parent == b.Parent &&
 		a.Mode == b.Mode &&
 		a.DesiredState == b.DesiredState &&
+		a.DrainNodeID == b.DrainNodeID &&
+		equalTimePtr(a.DrainExpiresAt, b.DrainExpiresAt) &&
 		a.Hooks.Equal(b.Hooks) &&
 		slices.Equal(a.FallbackBackends, b.FallbackBackends) && slices.Equal(a.PathPatterns, b.PathPatterns) &&
 		slices.Equal(a.Repos, b.Repos) && slices.Equal(a.RepoGroups, b.RepoGroups)
 }
 
+// equalTimePtr compares two optional timestamps by instant, so a drain expiry
+// that survived a YAML round-trip in a different location still compares equal.
+func equalTimePtr(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Equal(*b)
+}
+
 // ShouldSupervise reports whether the local daemon should run this agent.
 // Empty desired_state preserves legacy behavior for existing agent definitions.
-func (a AgentEntry) ShouldSupervise() bool {
+//
+// currentNodeID is the asking supervisor's identity and now is its clock; both
+// are needed because a drain is one-shot — see shouldSuperviseByDesiredState.
+// Pass "" for currentNodeID when the identity is genuinely unknown; a drain is
+// then never treated as superseded.
+func (a AgentEntry) ShouldSupervise(currentNodeID string, now time.Time) bool {
 	if domain.IsInteractiveRoleName(a.Role) {
 		return false
 	}
-	return a.shouldSuperviseByDesiredState()
+	return a.shouldSuperviseByDesiredState(currentNodeID, now)
 }
 
 // ShouldSuperviseWithRoles reports whether the local daemon should run this
 // agent, using role kind metadata when the merged daemon config is available.
-func (a AgentEntry) ShouldSuperviseWithRoles(roles map[string]RoleConfig) bool {
+func (a AgentEntry) ShouldSuperviseWithRoles(roles map[string]RoleConfig, currentNodeID string, now time.Time) bool {
 	if rc, ok := roles[a.Role]; ok {
 		role := &domain.Role{Kind: domain.RoleKind(rc.Kind)}
 		if domain.ResolveRoleKind(role, a.Role) == domain.RoleKindInteractive {
 			return false
 		}
-		return a.shouldSuperviseByDesiredState()
+		return a.shouldSuperviseByDesiredState(currentNodeID, now)
 	}
-	return a.ShouldSupervise()
+	return a.ShouldSupervise(currentNodeID, now)
 }
 
-func (a AgentEntry) shouldSuperviseByDesiredState() bool {
-	switch a.DesiredState {
-	case domain.AgentDesiredStopped, domain.AgentDesiredDraining:
+// shouldSuperviseByDesiredState applies the two parking rules.
+//
+// "stopped" is an indefinite, explicit park and is unchanged. "draining" is
+// one-shot: it parks only while the drain still belongs to this supervisor and
+// has not lapsed, so a drain issued to a supervisor that has since restarted
+// stops vetoing supervision instead of silently parking the agent forever.
+func (a AgentEntry) shouldSuperviseByDesiredState(currentNodeID string, now time.Time) bool {
+	if a.DesiredState == domain.AgentDesiredStopped {
 		return false
-	default:
-		return true
 	}
+	return !domain.DrainParks(domain.ResolveDrain(a.DesiredState, a.DrainNodeID, a.DrainExpiresAt, currentNodeID, now))
 }
 
 // DaemonConfig is the merged, resolved configuration used by callers.
@@ -360,6 +384,8 @@ func agentEntryFromDomain(a *domain.Agent) AgentEntry {
 		Parent:           a.Parent,
 		Mode:             a.Mode,
 		DesiredState:     a.DesiredState,
+		DrainNodeID:      a.DrainNodeID,
+		DrainExpiresAt:   a.DrainExpiresAt,
 		Hooks:            a.Hooks.Clone(),
 	}
 }
@@ -423,8 +449,10 @@ func validateAgents(agents []AgentEntry, maxAgents *int, roles map[string]RoleCo
 		return fmt.Errorf("max_agents must be non-negative, got %d", *maxAgents)
 	}
 	runnable := 0
+	// No supervisor identity is available during validation, so "" is passed:
+	// a drain then never reads as superseded and the count stays conservative.
 	for _, a := range agents {
-		if a.ShouldSuperviseWithRoles(roles) {
+		if a.ShouldSuperviseWithRoles(roles, "", time.Now()) {
 			runnable++
 		}
 	}

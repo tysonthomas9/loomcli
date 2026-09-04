@@ -36,6 +36,7 @@ func (d *Daemon) configPollingLoop() {
 			return
 		case <-ticker.C:
 			d.reloadAndReconcile()
+			d.reportParkedAgents()
 			d.sup.RecordTick(supervisor.GoroutineConfigReconciler)
 		}
 	}
@@ -257,9 +258,15 @@ func (d *Daemon) addNewAgents(entries []config.AgentEntry, label string) {
 	if cfg != nil {
 		roles = cfg.Roles
 	}
+	currentNodeID := d.sup.ResolveNodeID()
+	now := time.Now().UTC()
 	for _, entry := range entries {
-		if !entry.ShouldSuperviseWithRoles(roles) {
-			slog.Info("skipping "+label+" of agent with non-running desired state", "worktree", entry.Worktree, "desired_state", entry.DesiredState)
+		if !entry.ShouldSuperviseWithRoles(roles, currentNodeID, now) {
+			slog.Warn("agent parked: not claiming",
+				"worktree", entry.Worktree,
+				"desired_state", string(entry.DesiredState),
+				"drain_expires_at", formatDrainExpiry(entry.DrainExpiresAt),
+				"resume", resumeCommandFor(entry.Worktree))
 			continue
 		}
 		if d.isAgentStopped(entry.Worktree) {
@@ -313,6 +320,10 @@ func includeRoleConfigChanges(oldRoles, newRoles map[string]config.RoleConfig, o
 	for _, entry := range modified {
 		modifiedNames[entry.Worktree] = true
 	}
+	// This asks "was either side supervised at all", not "should this node
+	// claim it now", so no supervisor identity is needed: "" simply never
+	// reads a drain as superseded.
+	now := time.Now().UTC()
 	for _, newEntry := range newAgents {
 		oldEntry, exists := oldByName[newEntry.Worktree]
 		if !exists || modifiedNames[newEntry.Worktree] || oldEntry.Role != newEntry.Role {
@@ -321,7 +332,7 @@ func includeRoleConfigChanges(oldRoles, newRoles map[string]config.RoleConfig, o
 		if reflect.DeepEqual(oldRoles[newEntry.Role], newRoles[newEntry.Role]) {
 			continue
 		}
-		if !oldEntry.ShouldSuperviseWithRoles(oldRoles) && !newEntry.ShouldSuperviseWithRoles(newRoles) {
+		if !oldEntry.ShouldSuperviseWithRoles(oldRoles, "", now) && !newEntry.ShouldSuperviseWithRoles(newRoles, "", now) {
 			continue
 		}
 		modified = append(modified, newEntry)

@@ -126,7 +126,7 @@ func (d *Daemon) handleControlConnection(conn net.Conn) {
 	case ctrlOpAgentList:
 		resp = d.handleAgentControlList()
 	case ctrlOpAgentYield:
-		resp = d.handleAgentControlYield(req.AgentName)
+		resp = d.handleAgentControlYield(req.AgentName, yieldTTLFromArgs(req.Args))
 	case ctrlOpInputGet:
 		resp = d.handleAgentInputGet(req.AgentName)
 	case ctrlOpInputAnswer:
@@ -311,6 +311,13 @@ func (d *Daemon) setConfigAgentDesiredStateLocked(name string, desired domain.Ag
 	for i := range d.config.Agents {
 		if d.config.Agents[i].Worktree == name {
 			d.config.Agents[i].DesiredState = desired
+			// Mirror fleet-db's derived clear: drain metadata is meaningless
+			// outside "draining", so leaving it behind would let a stale stamp
+			// re-park the agent until the next 30s config poll overwrote it.
+			if desired != domain.AgentDesiredDraining {
+				d.config.Agents[i].DrainNodeID = ""
+				d.config.Agents[i].DrainExpiresAt = nil
+			}
 			d.configHash = computeConfigHash(d.config)
 			return
 		}
@@ -385,10 +392,17 @@ func (d *Daemon) handleAgentControlList() DaemonControlResponse {
 }
 
 // handleAgentControlYield handles the agent_yield control socket operation.
-func (d *Daemon) handleAgentControlYield(name string) DaemonControlResponse {
+//
+// The drain is stamped BEFORE the "agent not found" and "not running" early
+// returns below. A yield aimed at an agent with no live process is still a
+// statement of intent, and dropping it there is what let a yield report
+// success while recording nothing.
+func (d *Daemon) handleAgentControlYield(name string, ttl time.Duration) DaemonControlResponse {
 	if name == "" {
 		return DaemonControlResponse{Error: "agent name is required"}
 	}
+
+	d.markAgentYieldAccepted(name, ttl)
 
 	d.sup.AgentsMu.RLock()
 	var target *supervisor.AgentProcess

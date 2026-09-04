@@ -28,7 +28,7 @@ type DaemonAgentStatus struct {
 	Role                   string    `json:"role"`
 	Repo                   string    `json:"repo,omitempty"`
 	PID                    int       `json:"pid"`
-	Status                 string    `json:"status"` // "running", "starting", "stopped", "failed", "blocked"
+	Status                 string    `json:"status"` // "running", "starting", "stopped", "failed", "blocked", "parked"
 	TaskID                 string    `json:"task_id,omitempty"`
 	EpicID                 string    `json:"epic_id,omitempty"`
 	CurrentBackend         string    `json:"current_backend,omitempty"`
@@ -48,6 +48,12 @@ type DaemonAgentStatus struct {
 	OwnershipFencingToken  int64     `json:"ownership_fencing_token,omitempty"`
 	OwnershipLastHeartbeat time.Time `json:"ownership_last_heartbeat,omitempty"`
 	LastActivity           time.Time `json:"last_activity,omitempty"`
+	// DesiredState, DrainExpiresAt and ResumeCommand are set for parked agents,
+	// which have no supervised process to describe. Without them a park renders
+	// as an agent that simply is not there.
+	DesiredState   string     `json:"desired_state,omitempty"`
+	DrainExpiresAt *time.Time `json:"drain_expires_at,omitempty"`
+	ResumeCommand  string     `json:"resume_command,omitempty"`
 }
 
 // DaemonState represents the complete daemon state in daemon-agents.json
@@ -355,7 +361,7 @@ func runDaemonMainLoop(config *cfgpkg.DaemonConfig, projectDir string, paths dae
 	}
 
 	startedAt := time.Now()
-	if err := writeStateFile(paths.stateFile, startedAt, daemon.Agents(), daemon.QuarantinedTasks(), maxRetries); err != nil {
+	if err := writeStateFile(paths.stateFile, startedAt, daemon.Agents(), daemon.ParkedAgents(), daemon.QuarantinedTasks(), maxRetries); err != nil {
 		fmt.Printf("Warning: failed to write initial state file: %v\n", err)
 	}
 
