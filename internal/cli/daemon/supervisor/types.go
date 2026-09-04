@@ -87,7 +87,13 @@ const (
 	StopReasonYielded            StopReason = "yielded"
 	StopReasonWatchdog           StopReason = "watchdog"
 	StopReasonBackendUnavailable StopReason = "backend_unavailable"
-	StopReasonEphemeralDone      StopReason = "ephemeral_done" // ephemeral-mode agent exited cleanly after one successful task
+	// StopReasonAccountWall marks an agent parked by the fleet-wide
+	// account-wall gate: another agent hit an auth/billing/usage wall, which
+	// is an account-level fact, so this one is held back until the recorded
+	// cooldown expires. It is a park, not a failure — the restart budget is
+	// untouched and the supervise loop self-recovers at expiry.
+	StopReasonAccountWall   StopReason = "account_wall"
+	StopReasonEphemeralDone StopReason = "ephemeral_done" // ephemeral-mode agent exited cleanly after one successful task
 	// StopReasonMaxRetriesBlocked marks an agent that exhausted its restart
 	// budget and is now block-and-retrying on a fixed interval (policy
 	// Decision Retry with OnExhaustion Block) instead of being abandoned.
