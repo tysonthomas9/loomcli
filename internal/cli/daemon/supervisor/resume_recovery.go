@@ -40,10 +40,16 @@ func (s *Supervisor) detectRecovery(ap *AgentProcess) (string, recoveryMode) {
 	if err != nil || info == nil || running || info.TaskID == "" {
 		return "", recoverCold // no crash remnant / agent still alive / no task to recover
 	}
-	if ttl := agent.ResumeTTL(); ttl > 0 && !info.TaskStartedAt.IsZero() && time.Since(info.TaskStartedAt) > ttl {
-		slog.Info("interrupted task too old to recover; cold-starting",
+	// Same bound, same clock as the agent-side decision: ResumeTTL is IDLE time
+	// since the last run ended, so this must read LastRunEndedAt (with the same
+	// TaskStartedAt fallback) rather than task age — otherwise the supervisor
+	// and maybeResumeDaemonSession disagree about what "stale" means and one of
+	// them cold-starts a session the other was willing to resume.
+	since, clock := agent.ResumeStalenessClock(info)
+	if ttl := agent.ResumeTTL(); ttl > 0 && !since.IsZero() && time.Since(since) > ttl {
+		slog.Info("interrupted task idle too long to recover; cold-starting",
 			"worktree", ap.Entry.Worktree, "task_id", info.TaskID,
-			"age", time.Since(info.TaskStartedAt).Round(time.Second))
+			"idle", time.Since(since).Round(time.Second), "clock", clock)
 		return "", recoverCold
 	}
 	ap.Mu.Lock()
