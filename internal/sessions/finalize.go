@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 	"github.com/tysonthomas9/loomcli/internal/runtimectx"
@@ -71,6 +72,7 @@ func (s *Session) Finalize(opts FinalizeOptions) error {
 
 	// Set error context.
 	s.Meta.ErrorClass = opts.ErrorClass
+	s.Meta.LastError = truncateLastError(opts.ErrorMessage)
 
 	// Ensure schema version is current before writing to disk.
 	normalizeRecord(&s.Meta.SessionRecord)
@@ -160,4 +162,21 @@ func mergeTokenCost(opts, disk float64) float64 {
 		return opts
 	}
 	return disk
+}
+
+// maxLastErrorBytes bounds the classified error message stored on the session
+// record. A pathological output tail would otherwise bloat metadata.json.
+const maxLastErrorBytes = 2048
+
+// truncateLastError clips msg to maxLastErrorBytes without ever splitting a
+// multi-byte rune.
+func truncateLastError(msg string) string {
+	if len(msg) <= maxLastErrorBytes {
+		return msg
+	}
+	cut := maxLastErrorBytes
+	for cut > 0 && !utf8.RuneStart(msg[cut]) {
+		cut--
+	}
+	return msg[:cut]
 }

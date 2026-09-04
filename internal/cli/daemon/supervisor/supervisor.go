@@ -656,6 +656,7 @@ type agentSessionCompletionInput struct {
 	leaseToken string
 	exitCode   int
 	errClass   string
+	errMessage string
 	taskID     string
 	diffResult sessionfinalize.WithWorktreeResult
 	// transcriptData is the leaf's on-disk transcript (read once in
@@ -711,6 +712,7 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 		TaskID:     taskIDPtr,
 		FinishedAt: &finishedAtPtr,
 		ErrorClass: &input.errClass,
+		Summary:    agentSessionSummary(status, input.errMessage),
 		ExitCode:   &exitCodePtr,
 		Metadata:   &metadata,
 	}); err != nil {
@@ -798,8 +800,9 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 		ap.AgentLeaseID = ""
 		ap.AgentLeaseToken = ""
 		ap.Mu.Unlock()
+		spawnMsg := "agent process failed to spawn: " + err.Error()
 		if orphanSess != nil {
-			_ = orphanSess.Finalize(sessions.FinalizeOptions{ExitCode: -1, ErrorClass: "spawn_failure"})
+			_ = orphanSess.Finalize(sessions.FinalizeOptions{ExitCode: -1, ErrorClass: "spawn_failure", ErrorMessage: spawnMsg})
 		}
 		s.completeControlPlaneAgentSession(ap, agentSessionCompletionInput{
 			sessionID:  orphanSessionID,
@@ -807,6 +810,7 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 			leaseToken: orphanLeaseToken,
 			exitCode:   -1,
 			errClass:   "spawn_failure",
+			errMessage: spawnMsg,
 			taskID:     s.taskIDForLifecycle(ap, nil),
 		})
 		s.Concurrency.Release(ap.Entry.Role)
