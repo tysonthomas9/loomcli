@@ -1019,11 +1019,13 @@ func TestClaudeTurnBackoff(t *testing.T) {
 	}
 }
 
-// TestRunTurnDeadline pins the resolution rules for the per-turn bound. The
-// case that matters operationally is the derived one: with the fleet's
-// LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS=2700 the deadline must land at 2580s —
-// strictly inside the silence watchdog, or the SIGKILL still wins the race and
-// nothing about the old behavior changes.
+// TestRunTurnDeadline pins the resolution rules for the per-turn bound.
+//
+// The case that matters operationally is the last group: with the fleet's
+// LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS=2700 inherited and no explicit knob, the
+// answer must be 0. Deriving 2580s from the silence watchdog there is the
+// PUPPET-443 defect — it bounded working turns with the hang number and killed
+// 27 healthy runs — so these cases are the regression test for it.
 func TestRunTurnDeadline(t *testing.T) {
 	// not parallel: mutates process env via t.Setenv
 	tests := []struct {
@@ -1033,17 +1035,17 @@ func TestRunTurnDeadline(t *testing.T) {
 		want     time.Duration
 	}{
 		{"both unset: inert", "", "", 0},
+		{"explicit knob, no watchdog", "3480", "", 3480 * time.Second},
 		{"explicit knob wins over the watchdog", "300", "2700", 300 * time.Second},
-		{"fleet watchdog minus the margin", "", "2700", 2580 * time.Second},
-		{"watchdog only just past the margin", "", "121", 1 * time.Second},
-		{"watchdog equal to the margin", "", "120", 0},
-		{"watchdog inside the margin", "", "60", 0},
-		{"watchdog zero", "", "0", 0},
-		{"watchdog negative", "", "-90", 0},
+		{"explicit zero disables", "0", "2700", 0},
+		{"explicit negative disables", "-5", "2700", 0},
+		{"explicit malformed disables", "soon", "2700", 0},
+
+		// The watchdog is no longer an input at any magnitude.
+		{"fleet watchdog alone yields no deadline", "", "2700", 0},
+		{"large watchdog alone yields no deadline", "", "86400", 0},
+		{"small watchdog alone yields no deadline", "", "121", 0},
 		{"watchdog malformed", "", "not-a-number", 0},
-		{"explicit zero disables, no fallback", "0", "2700", 0},
-		{"explicit negative disables, no fallback", "-5", "2700", 0},
-		{"explicit malformed disables, no fallback", "soon", "2700", 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1056,23 +1058,18 @@ func TestRunTurnDeadline(t *testing.T) {
 	}
 }
 
-// TestRunTurnDeadline_StrictlyInsideWatchdog states the invariant on its own so
-// a future margin change cannot silently make the deadline useless.
-func TestRunTurnDeadline_StrictlyInsideWatchdog(t *testing.T) {
+// TestRunTurnDeadline_IgnoresSilenceWatchdog states the invariant on its own,
+// because it is an invariant and not merely a table row: the silence watchdog
+// and the run-duration cap answer different questions, and no future change may
+// reintroduce a derivation of one from the other.
+func TestRunTurnDeadline_IgnoresSilenceWatchdog(t *testing.T) {
 	// not parallel: mutates process env via t.Setenv
-	const fleetWatchdog = 2700 * time.Second
 	t.Setenv("LOOM_RUN_TURN_TIMEOUT_SECONDS", "")
-	t.Setenv("LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS", "2700")
-
-	got := runTurnDeadline()
-	if got <= 0 {
-		t.Fatalf("runTurnDeadline() = %v, want a positive deadline", got)
-	}
-	if got >= fleetWatchdog {
-		t.Fatalf("runTurnDeadline() = %v, must be strictly shorter than the watchdog %v", got, fleetWatchdog)
-	}
-	if fleetWatchdog-got != runTurnDeadlineMargin {
-		t.Errorf("margin = %v, want %v", fleetWatchdog-got, runTurnDeadlineMargin)
+	for _, watchdog := range []string{"2700", "900", "121", "60", "0", ""} {
+		t.Setenv("LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS", watchdog)
+		if got := runTurnDeadline(); got != 0 {
+			t.Fatalf("runTurnDeadline() with watchdog %q = %v, want 0 — the deadline must not be derived from the silence watchdog", watchdog, got)
+		}
 	}
 }
 

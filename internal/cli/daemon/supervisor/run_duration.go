@@ -90,7 +90,23 @@ func (s *Supervisor) GetMaxRunDuration() int {
 // says nothing (nil) inherits, so the env var still reaches every agent that has
 // not opted out.
 func (s *Supervisor) maxRunDurationFor(ap *AgentProcess) time.Duration {
-	seconds := s.GetMaxRunDuration()
+	seconds := maxRunDurationSecondsFor(ap, s.GetMaxRunDuration())
+	if seconds <= 0 {
+		return 0
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+// maxRunDurationSecondsFor is the precedence itself, split out from the method
+// so the spawn path can resolve the same number without a *Supervisor. It is
+// deliberately the ONLY place the role-over-daemon rule is written: the cap is
+// enforced by the health checker and mirrored into the child's env at spawn, and
+// a second copy of the rule would let those two ceilings drift apart silently —
+// which is the failure the mirrored value exists to prevent.
+//
+// Returns 0 when the cap is disabled.
+func maxRunDurationSecondsFor(ap *AgentProcess, daemonSeconds int) int {
+	seconds := daemonSeconds
 	// RoleConfig is resolved once at construction and never mutated afterwards
 	// (it is absent from the ap.Mu field list), so it is read unlocked here for
 	// the same reason spawnAgent reads it unlocked.
@@ -100,5 +116,31 @@ func (s *Supervisor) maxRunDurationFor(ap *AgentProcess) time.Duration {
 	if seconds <= 0 {
 		return 0
 	}
-	return time.Duration(seconds) * time.Second
+	return seconds
+}
+
+// runTurnDeadlineMarginSeconds is how far INSIDE the run-duration cap the
+// agent's own per-turn deadline is placed.
+//
+// The margin is the whole point of exporting the deadline at all: it must fire
+// strictly before applyRunDurationKill (health.go) so an over-running turn ends
+// as a classified process exit — error class Timeout, checkpoint saved, recovery
+// armed — instead of the SIGKILL that skips all of it. The child reads the
+// result from LOOM_RUN_TURN_TIMEOUT_SECONDS; see backends.runTurnDeadline.
+const runTurnDeadlineMarginSeconds = 120
+
+// runTurnTimeoutSecondsFor resolves the per-turn deadline to export to one
+// agent, in seconds, or 0 for "export nothing".
+//
+// Zero covers both cases where a deadline would be wrong rather than merely
+// short: a disabled cap (0 means no ceiling — see GetMaxRunDuration) and a cap
+// no further out than the margin, where cap-margin is not a positive duration.
+// The child reads a missing or non-positive value identically, so both ends
+// agree without either having to encode the other's edge cases.
+func runTurnTimeoutSecondsFor(ap *AgentProcess, daemonSeconds int) int {
+	capSeconds := maxRunDurationSecondsFor(ap, daemonSeconds)
+	if capSeconds <= runTurnDeadlineMarginSeconds {
+		return 0
+	}
+	return capSeconds - runTurnDeadlineMarginSeconds
 }
