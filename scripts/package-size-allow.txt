@@ -7,7 +7,13 @@
 # state is sub-packaging (inputwait / runcap / ...); until that split happens,
 # this records the ceiling. Shrink or remove the entry when the package is
 # split; do not raise it without recording why here.
-internal/cli/daemon/supervisor 28
+# Raised 28 -> 29 for diffcapture.go: the checkpoint's git-diff capture was
+# lifted out of concurrency.go (a concurrency tracker it never belonged in)
+# when it grew to cover untracked files and multiple source trees. A
+# sub-package was tried first and is the right end state, but it costs the
+# package an import and pushes its recorded import-fanout ceiling (22) over
+# instead — trading one ratchet for another. Take it in the sub-split.
+internal/cli/daemon/supervisor 29
 # internal/cli gained the daemon input-await seam (agent_input_await.go) with
 # the human answer path; 26th file, same sub-split end state applies. The
 # hook-driven exit-code contract lives in exit.go rather than a file of its own,
