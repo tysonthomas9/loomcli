@@ -872,12 +872,17 @@ paths:
         - $ref: "#/components/parameters/IssueId"
         - name: limit
           in: query
-          description: Maximum number of recent events to return
+          description: Maximum events to return. Without `since`, Loom returns the most recent tail and accepts up to 500. With `since`, Loom returns one oldest-first page and clamps the limit to fleet-db's 200-event page maximum.
           schema:
             type: integer
             minimum: 1
-            maximum: 200
+            maximum: 500
             default: 100
+        - name: since
+          in: query
+          description: Opaque fleet-db history cursor. When present (including an empty value), returns one oldest-first page; a bare `since=` starts at the beginning of the issue history.
+          schema:
+            type: string
       responses:
         "200":
           description: Issue events
@@ -885,7 +890,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [success, data]
+                required: [success, data, has_more]
                 properties:
                   success:
                     type: boolean
@@ -893,8 +898,53 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/IssueEvent"
+                  cursor:
+                    type: string
+                    description: Opaque cursor for the next oldest-first page. Present only on `since`-paged responses; newest-tail responses carry no cursor, so clients restart pagination with `since=`.
+                  has_more:
+                    type: boolean
+                    description: For a `since` page, whether another forward page exists. For a newest-tail response, true means the tail was truncated and older events are available from `since=`.
+                  total_events:
+                    type: integer
+                    minimum: 0
+                    description: Full issue-history count when known. A zero value means unknown and is omitted from the JSON response; clients must not infer completeness when this field is absent.
+        "400":
+          description: Invalid event-history paging request, including cursor paging unsupported by the active backend
         "404":
           description: Issue not found
+
+  /api/workspaces/{ws}/issues/{id}/journey:
+    get:
+      operationId: getIssueJourney
+      tags: [issues]
+      summary: Reconstruct an issue's durable journey
+      description: |
+        Returns status spans reconstructed from the complete fleet-db issue
+        history when available, plus an optional host-local agent lifecycle
+        overlay. The honesty block reports any bounded history or unavailable
+        lifecycle overlay so clients do not treat partial durations as exact.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/IssueId"
+      responses:
+        "200":
+          description: Issue journey
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JourneyResponse"
+        "400":
+          description: Missing issue ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Issue not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/workspaces/{ws}/issues/{id}/git/diff-stat:
     get:
@@ -5309,6 +5359,119 @@ components:
         after:
           type: string
 
+    JourneyResponse:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/Journey"
+        error:
+          type: string
+
+    Journey:
+      type: object
+      required: [spans, agent_windows, lead_time, honesty]
+      properties:
+        spans:
+          type: array
+          items:
+            $ref: "#/components/schemas/JourneySpan"
+        agent_windows:
+          type: array
+          items:
+            $ref: "#/components/schemas/JourneyAgentWindow"
+        lead_time:
+          $ref: "#/components/schemas/JourneyLeadTime"
+        honesty:
+          $ref: "#/components/schemas/JourneyHonesty"
+
+    JourneySpan:
+      type: object
+      required: [kind, stage, start, end, owner, actor, needs_revision, stalled, approximate, unknown_start]
+      properties:
+        kind:
+          type: string
+        stage:
+          type: string
+        start:
+          type: string
+          format: date-time
+        end:
+          type: [string, "null"]
+          format: date-time
+        owner:
+          type: [string, "null"]
+        actor:
+          type: [string, "null"]
+        needs_revision:
+          type: boolean
+        stalled:
+          type: boolean
+        approximate:
+          type: boolean
+        unknown_start:
+          type: boolean
+
+    JourneyAgentWindow:
+      type: object
+      required: [task_id, agent, start, end, outcome]
+      properties:
+        task_id:
+          type: string
+        agent:
+          type: string
+        start:
+          type: string
+          format: date-time
+        end:
+          type: [string, "null"]
+          format: date-time
+        outcome:
+          type: string
+
+    JourneyLeadTime:
+      type: object
+      required: [total_ms, queued_ms, agent_working_ms, waiting_on_operator_ms, halted_ms]
+      properties:
+        total_ms:
+          type: integer
+          format: int64
+        queued_ms:
+          type: integer
+          format: int64
+        agent_working_ms:
+          type: integer
+          format: int64
+        waiting_on_operator_ms:
+          type: integer
+          format: int64
+        halted_ms:
+          type: integer
+          format: int64
+
+    JourneyHonesty:
+      type: object
+      required: [complete_history, bounded, has_more, events_seen, agent_windows_available]
+      properties:
+        complete_history:
+          type: boolean
+        bounded:
+          type: boolean
+        has_more:
+          type: boolean
+        events_seen:
+          type: integer
+        total_events:
+          type: integer
+        reason:
+          type: string
+        agent_windows_available:
+          type: boolean
+        agent_windows_reason:
+          type: string
+
     Statistics:
       type: object
       required:
@@ -5918,7 +6081,7 @@ components:
     TabMetadata:
       type: object
       description: Terminal tab metadata (Redis-backed)
-      required: [session_name, label, notes, sort_order, pinned, created_at, updated_at, pty_alive, attached_clients]
+      required: [session_name, label, notes, sort_order, pinned, created_at, updated_at, attachable, attached_clients]
       properties:
         session_name:
           type: string
@@ -5940,14 +6103,20 @@ components:
         updated_at:
           type: string
           format: date-time
-        pty_alive:
+        attachable:
           type: boolean
           description: |
-            Whether the backend PTY for this tab is currently alive in the
-            server process. False means the tab metadata survived (e.g. a
-            server restart) but the PTY did not; clients should render the
-            tab as "session ended" and prompt before reconnecting (which
-            will spawn a fresh session).
+            Whether connecting to this tab will yield a working PTY. True when a
+            PTY is live in this server process, and also when the tab's metadata
+            was created during this server process — such a tab has no PTY until
+            the first WebSocket connects, and connecting spawns one.
+
+            This is NOT a process-liveness check: true does not guarantee the
+            child process is still running, only that the manager has not
+            released the session. False means the tab metadata outlived its
+            server (e.g. a restart) or its PTY has exited; clients should render
+            the tab as "session ended" and prompt before reconnecting, since
+            reconnecting spawns a fresh session.
         attached_clients:
           type: integer
           description: |
@@ -5956,6 +6125,21 @@ components:
             live, within its grace window). Values ≥2 can be surfaced as
             a "multiple viewers" indicator so users can be warned before
             destructive tab-close actions.
+        replaced_at:
+          type: string
+          format: date-time
+          description: |
+            When this tab's shell was replaced by a fresh one — the previous
+            PTY died with a previous server process. Absent means never
+            replaced, or the marker was dismissed via PATCH. Unlike
+            pty_alive this is persisted, so the marker survives a reload and
+            is visible to every client.
+        replaced_reason:
+          type: string
+          enum: [server_restart]
+          description: |
+            Why the shell was replaced. Server-written only; clients cannot
+            set it. Present only alongside replaced_at.
 
     TabPutRequest:
       type: object
@@ -5984,6 +6168,13 @@ components:
           type: [boolean, "null"]
         issue_id:
           type: [string, "null"]
+        replaced_at:
+          type: [string, "null"]
+          description: |
+            Dismiss the session-replacement marker by sending an empty
+            string. A non-empty value must be an RFC3339 timestamp;
+            anything else is rejected with 400. replaced_reason is not
+            client-settable — the server owns its enum.
 
     # ── Issue Tab Schemas ───────────────────────────────────────────────
     IssueTab:

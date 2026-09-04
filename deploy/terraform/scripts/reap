@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${PROJECT:?PROJECT is required}"
+: "${REGION:?REGION is required}"
+: "${ZONE:?ZONE is required}"
+: "${TF_BIN:?TF_BIN is required}"
+: "${TF_ROOT:?TF_ROOT is required}"
+: "${TF_STATE_BUCKET:?TF_STATE_BUCKET is required}"
+: "${MAKE_BIN:?MAKE_BIN is required}"
+
+DRY_RUN="${DRY_RUN:-0}"
+REAP_ALL="${REAP_ALL:-0}"
+now="$(date +%s)"
+list_data_dir="$TF_ROOT/.terraform-data/reap/list"
+mkdir -p "$list_data_dir"
+
+TF_DATA_DIR="$list_data_dir" "$TF_BIN" -chdir="$TF_ROOT" init -input=false \
+  -backend-config="bucket=$TF_STATE_BUCKET" \
+  -backend-config="prefix=loom-gcp" >/dev/null
+
+workspace_output="$(TF_DATA_DIR="$list_data_dir" "$TF_BIN" -chdir="$TF_ROOT" workspace list)"
+workspaces=()
+while IFS= read -r workspace; do
+  workspaces+=("$workspace")
+done < <(
+  printf '%s\n' "$workspace_output" | sed 's/^[* ]*//' \
+    | sed '/^default$/d; /^$/d'
+)
+
+reaped=0
+kept=0
+skipped=0
+failed=0
+
+for name in "${workspaces[@]}"; do
+  data_dir="$TF_ROOT/.terraform-data/reap/$name"
+  mkdir -p "$data_dir"
+  TF_DATA_DIR="$data_dir" "$TF_BIN" -chdir="$TF_ROOT" init -input=false \
+    -backend-config="bucket=$TF_STATE_BUCKET" \
+    -backend-config="prefix=loom-gcp" >/dev/null
+  TF_DATA_DIR="$data_dir" "$TF_BIN" -chdir="$TF_ROOT" workspace select "$name" >/dev/null
+
+  expires_at="$(TF_DATA_DIR="$data_dir" "$TF_BIN" -chdir="$TF_ROOT" output -raw expires_at 2>/dev/null || true)"
+  # A workspace with no expiry output is one whose first apply died before
+  # outputs landed. It may still hold billable resources, so REAP_ALL takes
+  # it; plain reap cannot tell whether it is expired and leaves it alone.
+  if ! [[ "$expires_at" =~ ^[0-9]+$ ]]; then
+    if [ "$REAP_ALL" != 1 ]; then
+      echo "$name: no expiry recorded (failed first apply?), skipped; REAP_ALL=1 takes it"
+      skipped=$((skipped + 1))
+      continue
+    fi
+    expires_at="none"
+  fi
+
+  if [ "$REAP_ALL" = 1 ] || [ "$expires_at" -lt "$now" ]; then
+    if [ "$DRY_RUN" = 1 ]; then
+      echo "$name: would reap (expires_at=$expires_at)"
+    else
+      echo "$name: reaping (expires_at=$expires_at)"
+      # One stack that fails to destroy must not shield the rest: note it,
+      # carry on, and fail the run at the end.
+      if ! "$MAKE_BIN" --no-print-directory -C "$TF_ROOT" down \
+        NAME="$name" ADOPT=1 PROJECT="$PROJECT" REGION="$REGION" ZONE="$ZONE" \
+        TF_BIN="$TF_BIN" TF_STATE_BUCKET="$TF_STATE_BUCKET" \
+        SHARED_NETWORK="${SHARED_NETWORK:-loom}" \
+        SHARED_SUBNET_CIDR="${SHARED_SUBNET_CIDR:-10.90.0.0/20}" \
+        TTL_MINUTES="${TTL_MINUTES:-480}" \
+        AUTO_STOP_MINUTES="${AUTO_STOP_MINUTES:-50}"; then
+        echo "$name: reap FAILED; inspect with: make down NAME=$name ADOPT=1"
+        failed=$((failed + 1))
+        continue
+      fi
+    fi
+    reaped=$((reaped + 1))
+  else
+    echo "$name: kept (expires_at=$expires_at)"
+    kept=$((kept + 1))
+  fi
+done
+
+echo "reaped $reaped, kept $kept, skipped $skipped, failed $failed"
+[ "$failed" -eq 0 ]

@@ -426,6 +426,29 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/issues/{id}/journey": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Reconstruct an issue's durable journey
+     * @description Returns status spans reconstructed from the complete fleet-db issue
+     *     history when available, plus an optional host-local agent lifecycle
+     *     overlay. The honesty block reports any bounded history or unavailable
+     *     lifecycle overlay so clients do not treat partial durations as exact.
+     */
+    get: operations["getIssueJourney"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/issues/{id}/git/diff-stat": {
     parameters: {
       query?: never;
@@ -2785,6 +2808,62 @@ export interface components {
       before?: string;
       after?: string;
     };
+    JourneyResponse: {
+      success: boolean;
+      data?: components["schemas"]["Journey"];
+      error?: string;
+    };
+    Journey: {
+      spans: components["schemas"]["JourneySpan"][];
+      agent_windows: components["schemas"]["JourneyAgentWindow"][];
+      lead_time: components["schemas"]["JourneyLeadTime"];
+      honesty: components["schemas"]["JourneyHonesty"];
+    };
+    JourneySpan: {
+      kind: string;
+      stage: string;
+      /** Format: date-time */
+      start: string;
+      /** Format: date-time */
+      end: string | null;
+      owner: string | null;
+      actor: string | null;
+      needs_revision: boolean;
+      stalled: boolean;
+      approximate: boolean;
+      unknown_start: boolean;
+    };
+    JourneyAgentWindow: {
+      task_id: string;
+      agent: string;
+      /** Format: date-time */
+      start: string;
+      /** Format: date-time */
+      end: string | null;
+      outcome: string;
+    };
+    JourneyLeadTime: {
+      /** Format: int64 */
+      total_ms: number;
+      /** Format: int64 */
+      queued_ms: number;
+      /** Format: int64 */
+      agent_working_ms: number;
+      /** Format: int64 */
+      waiting_on_operator_ms: number;
+      /** Format: int64 */
+      halted_ms: number;
+    };
+    JourneyHonesty: {
+      complete_history: boolean;
+      bounded: boolean;
+      has_more: boolean;
+      events_seen: number;
+      total_events?: number;
+      reason?: string;
+      agent_windows_available: boolean;
+      agent_windows_reason?: string;
+    };
     Statistics: {
       total_issues: number;
       open_issues: number;
@@ -3100,13 +3179,19 @@ export interface components {
       /** Format: date-time */
       updated_at: string;
       /**
-       * @description Whether the backend PTY for this tab is currently alive in the
-       *     server process. False means the tab metadata survived (e.g. a
-       *     server restart) but the PTY did not; clients should render the
-       *     tab as "session ended" and prompt before reconnecting (which
-       *     will spawn a fresh session).
+       * @description Whether connecting to this tab will yield a working PTY. True when a
+       *     PTY is live in this server process, and also when the tab's metadata
+       *     was created during this server process — such a tab has no PTY until
+       *     the first WebSocket connects, and connecting spawns one.
+       *
+       *     This is NOT a process-liveness check: true does not guarantee the
+       *     child process is still running, only that the manager has not
+       *     released the session. False means the tab metadata outlived its
+       *     server (e.g. a restart) or its PTY has exited; clients should render
+       *     the tab as "session ended" and prompt before reconnecting, since
+       *     reconnecting spawns a fresh session.
        */
-      pty_alive: boolean;
+      attachable: boolean;
       /**
        * @description Count of concurrent WebSocket clients currently viewing this
        *     session. 0 means no one is attached (but the PTY may still be
@@ -3115,6 +3200,21 @@ export interface components {
        *     destructive tab-close actions.
        */
       attached_clients: number;
+      /**
+       * Format: date-time
+       * @description When this tab's shell was replaced by a fresh one — the previous
+       *     PTY died with a previous server process. Absent means never
+       *     replaced, or the marker was dismissed via PATCH. Unlike
+       *     pty_alive this is persisted, so the marker survives a reload and
+       *     is visible to every client.
+       */
+      replaced_at?: string;
+      /**
+       * @description Why the shell was replaced. Server-written only; clients cannot
+       *     set it. Present only alongside replaced_at.
+       * @enum {string}
+       */
+      replaced_reason?: "server_restart";
     };
     TabPutRequest: {
       label: string;
@@ -3129,6 +3229,13 @@ export interface components {
       sort_order?: number | null;
       pinned?: boolean | null;
       issue_id?: string | null;
+      /**
+       * @description Dismiss the session-replacement marker by sending an empty
+       *     string. A non-empty value must be an RFC3339 timestamp;
+       *     anything else is rejected with 400. replaced_reason is not
+       *     client-settable — the server owns its enum.
+       */
+      replaced_at?: string | null;
     };
     IssueTab: {
       /** @description "details", "sessions", "logs", or "terminal-{session}" */
@@ -4535,8 +4642,10 @@ export interface operations {
   getIssueEvents: {
     parameters: {
       query?: {
-        /** @description Maximum number of recent events to return */
+        /** @description Maximum events to return. Without `since`, Loom returns the most recent tail and accepts up to 500. With `since`, Loom returns one oldest-first page and clamps the limit to fleet-db's 200-event page maximum. */
         limit?: number;
+        /** @description Opaque fleet-db history cursor. When present (including an empty value), returns one oldest-first page; a bare `since=` starts at the beginning of the issue history. */
+        since?: string;
       };
       header?: never;
       path: {
@@ -4558,8 +4667,21 @@ export interface operations {
           "application/json": {
             success: boolean;
             data: components["schemas"]["IssueEvent"][];
+            /** @description Opaque cursor for the next oldest-first page. Present only on `since`-paged responses; newest-tail responses carry no cursor, so clients restart pagination with `since=`. */
+            cursor?: string;
+            /** @description For a `since` page, whether another forward page exists. For a newest-tail response, true means the tail was truncated and older events are available from `since=`. */
+            has_more: boolean;
+            /** @description Full issue-history count when known. A zero value means unknown and is omitted from the JSON response; clients must not infer completeness when this field is absent. */
+            total_events?: number;
           };
         };
+      };
+      /** @description Invalid event-history paging request, including cursor paging unsupported by the active backend */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Issue not found */
       404: {
@@ -4567,6 +4689,49 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+    };
+  };
+  getIssueJourney: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Issue identifier */
+        id: components["parameters"]["IssueId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Issue journey */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["JourneyResponse"];
+        };
+      };
+      /** @description Missing issue ID */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Issue not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
       };
     };
   };

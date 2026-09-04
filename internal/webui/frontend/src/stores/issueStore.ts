@@ -28,11 +28,13 @@ import {
   STALE_BANNER_DELAY_MS,
   AUTO_ROLLBACK_TIMEOUT_MS,
   REFRESH_DEBOUNCE_MS,
+  MAX_PROJECTION_REFRESH_WAIT_MS,
   MAX_AUTO_RETRIES,
   RETRY_BASE_DELAY_MS,
   RETRY_MAX_DELAY_MS,
   INITIAL_STATE,
   issuesAreEqual,
+  mergeKanbanProjection,
   extractErrorMessage,
   issueMutationAppliesToLocalIssue,
   issueMutationInvalidatesProjection,
@@ -82,6 +84,7 @@ export function createIssueStore(
   let activeController: AbortController | null = null;
   const deletedDuringFetch = new Set<string>();
   let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
+  let projectionRefreshPendingSince: number | null = null;
   let staleBannerTimeout: ReturnType<typeof setTimeout> | null = null;
   /** Pending auto-retry timer; cleared on new fetch, reset, or success. */
   let retryTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -100,11 +103,25 @@ export function createIssueStore(
   let retryConnectionFn = initialConfig?.retryConnectionFn ?? null;
 
   function scheduleProjectionRefresh(get: () => IssueStore): void {
+    const now = Date.now();
+    if (projectionRefreshPendingSince === null) {
+      projectionRefreshPendingSince = now;
+    }
+
+    const maxWaitRemaining = Math.max(
+      0,
+      MAX_PROJECTION_REFRESH_WAIT_MS - (now - projectionRefreshPendingSince),
+    );
+
     if (refreshTimeout) clearTimeout(refreshTimeout);
-    refreshTimeout = setTimeout(() => {
-      refreshTimeout = null;
-      void get().refetch();
-    }, REFRESH_DEBOUNCE_MS);
+    refreshTimeout = setTimeout(
+      () => {
+        refreshTimeout = null;
+        projectionRefreshPendingSince = null;
+        void get().refetch();
+      },
+      Math.min(REFRESH_DEBOUNCE_MS, maxWaitRemaining),
+    );
   }
 
   /** Apply a mutation to the store, handling side effects from the pure result */
@@ -254,6 +271,10 @@ export function createIssueStore(
           data = await getReadyIssues(workspaceId, effectiveFilter, reqOpts);
         }
 
+        if (activeController !== internalController || mergedSignal.aborted) {
+          return;
+        }
+
         const deletedSnapshot = new Set(deletedDuringFetch);
         const currentMap = get().issuesMap;
         const mergedMap = new Map<string, Issue>();
@@ -281,7 +302,12 @@ export function createIssueStore(
           const currentTime = Date.parse(currentIssue.updated_at);
           const apiTime = Date.parse(apiIssue.updated_at);
           if (!isNaN(currentTime) && !isNaN(apiTime) && currentTime > apiTime) {
-            mergedMap.set(id, currentIssue);
+            mergedMap.set(
+              id,
+              mode === "kanban"
+                ? mergeKanbanProjection(currentIssue, apiIssue)
+                : currentIssue,
+            );
           }
         }
 
@@ -623,6 +649,7 @@ export function createIssueStore(
         clearTimeout(refreshTimeout);
         refreshTimeout = null;
       }
+      projectionRefreshPendingSince = null;
       if (staleBannerTimeout) {
         clearTimeout(staleBannerTimeout);
         staleBannerTimeout = null;

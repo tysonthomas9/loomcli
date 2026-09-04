@@ -56,34 +56,84 @@ type fleetEventWire struct {
 }
 
 type fleetEventHistory struct {
-	History []fleetEventWire `json:"history"`
-	Cursor  string           `json:"cursor"`
-	HasMore bool             `json:"has_more"`
+	History     []fleetEventWire `json:"history"`
+	Cursor      string           `json:"cursor"`
+	HasMore     bool             `json:"has_more"`
+	TotalEvents int              `json:"total_events"`
 }
 
 func (b *FleetBackend) ListEvents(ctx context.Context, id string, limit int) ([]backend.EventData, error) {
+	history, err := b.ListEventHistory(ctx, id, backend.EventHistoryParams{Limit: limit})
+	if err != nil {
+		return nil, err
+	}
+	if history == nil {
+		return []backend.EventData{}, nil
+	}
+	return history.Events, nil
+}
+
+// ListEventHistory returns the newest event tail when Since is nil and one
+// oldest-first fleet-db page when Since is non-nil. Tail responses carry no
+// cursor; HasMore reports whether their oldest events were trimmed.
+func (b *FleetBackend) ListEventHistory(
+	ctx context.Context,
+	id string,
+	params backend.EventHistoryParams,
+) (*backend.EventHistoryData, error) {
 	const (
 		historyPageLimit    = 200
 		defaultHistoryLimit = 50
 	)
+	limit := params.Limit
 	if limit <= 0 {
 		limit = defaultHistoryLimit
 	}
+	if params.Since != nil {
+		if limit > historyPageLimit {
+			limit = historyPageLimit
+		}
+		return b.eventHistoryForwardPage(ctx, id, *params.Since, limit)
+	}
+	return b.eventHistoryTail(ctx, id, limit, historyPageLimit)
+}
 
-	// fleet-db's history endpoint pages forward from the start of the issue
-	// stream. ListEvents promises the most recent entries, so follow its cursor
-	// to the end and retain only the requested tail.
+// eventHistoryForwardPage serves exactly one oldest-first fleet-db page,
+// passing the paging metadata through verbatim.
+func (b *FleetBackend) eventHistoryForwardPage(ctx context.Context, id, since string, limit int) (*backend.EventHistoryData, error) {
+	history, err := b.listEventHistoryPage(ctx, id, since, limit)
+	if err != nil {
+		return nil, err
+	}
+	if history == nil {
+		return &backend.EventHistoryData{Events: []backend.EventData{}}, nil
+	}
+	return &backend.EventHistoryData{
+		Events:      eventDataFromHistory(history.History, id),
+		Cursor:      history.Cursor,
+		HasMore:     history.HasMore,
+		TotalEvents: history.TotalEvents,
+	}, nil
+}
+
+// eventHistoryTail aggregates the most recent limit events. fleet-db's history
+// endpoint pages forward from the start of the issue stream, so follow its
+// cursor to the end and retain only the requested tail. A tail response
+// carries no cursor; has_more reports whether older events were trimmed.
+func (b *FleetBackend) eventHistoryTail(ctx context.Context, id string, limit, pageLimit int) (*backend.EventHistoryData, error) {
 	result := make([]backend.EventData, 0, limit)
+	totalEvents := 0
 	cursor := ""
 	for {
-		history, err := b.listEventHistoryPage(ctx, id, cursor, historyPageLimit)
+		history, err := b.listEventHistoryPage(ctx, id, cursor, pageLimit)
 		if err != nil {
 			return nil, err
 		}
 		if history == nil {
-			return []backend.EventData{}, nil
+			return &backend.EventHistoryData{Events: []backend.EventData{}}, nil
 		}
 		result = append(result, eventDataFromHistory(history.History, id)...)
+		totalEvents = history.TotalEvents
 		if !history.HasMore {
 			break
 		}
@@ -97,10 +147,15 @@ func (b *FleetBackend) ListEvents(ctx context.Context, id string, limit int) ([]
 		cursor = history.Cursor
 	}
 
-	if len(result) > limit {
+	truncated := len(result) > limit
+	if truncated {
 		result = result[len(result)-limit:]
 	}
-	return result, nil
+	return &backend.EventHistoryData{
+		Events:      result,
+		HasMore:     truncated || totalEvents > len(result),
+		TotalEvents: totalEvents,
+	}, nil
 }
 
 func (b *FleetBackend) listEventHistoryPage(

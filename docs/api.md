@@ -1930,20 +1930,28 @@ WebSocket endpoint for live terminal relay (tmux-backed). Supports bidirectional
   - `404` — workspace not found
   - `503` — terminal manager not initialized, or maximum terminal sessions reached (default 20)
 
-- **WebSocket Binary Protocol:**
-  - All frames are binary (`MessageBinary`)
-  - **Server → Client:** raw PTY output bytes (read buffer 4096 bytes)
-  - **Client → Server:** raw terminal input bytes OR resize message
-  - **Resize message format (in-band): exactly 5 bytes**
-    - Byte 0: `0x01` (resize marker)
-    - Bytes 1-2: cols as uint16 big-endian
-    - Bytes 3-4: rows as uint16 big-endian
-    - Example: 80×24 = `[0x01, 0x00, 0x50, 0x00, 0x18]`
+- **WebSocket Protocol:**
+  - **Server → Client:** the frame type is the discriminator.
+    - **Binary** frames are raw PTY output bytes (read buffer 4096 bytes) — this includes the scrollback replay, which begins with `\x1b[2J\x1b[H`.
+    - **Text** frames are JSON control messages. Clients must branch on frame type before rendering: a text frame written into the terminal emulator would appear as garbage.
+  - **Attach control frame (server → client, text):** sent once per attach, **after** the scrollback replay. The replay clears the screen, so a frame emitted before it would be erased.
+
+    ```json
+    {"type":"attach","reattached":false,"replaced":true,
+     "replaced_at":"2026-08-14T16:52:03Z","replaced_reason":"server_restart"}
+    ```
+
+    - `reattached` — this connection joined an existing live session (scrollback was replayed) rather than spawning one.
+    - `replaced` — this attach *is* the replacement: the tab's previous shell died with a previous server process and a fresh one was just spawned. True only on the attach that performed the replacement.
+    - `replaced_at` / `replaced_reason` — omitted when the tab has no replacement marker. Present on reattaches too, so a client that joined late learns of a replacement without a REST round-trip. The marker is persisted on the tab (`TabMetadata.replaced_at`) and dismissed with `PATCH /api/workspaces/{ws}/terminal/tabs/{session}` `{"replaced_at": ""}`.
+  - **Client → Server:** every message is read as a UTF-8 string: raw terminal input, or a resize control.
+  - **Resize message format (in-band, text):** `\x1b[RESIZE:{cols};{rows}]`
+    - Example: 80×24 = `\x1b[RESIZE:80;24]`
   - Max terminal size: 500 cols × 200 rows (values exceeding these are silently ignored)
   - Zero values for cols or rows: silently ignored (no resize performed)
   - Read limit: 32 KB per WebSocket message
   - Default terminal size: 80×24 (frontend sends resize immediately after connect)
-  - Non-matching binary messages (wrong length or missing `0x01` marker): treated as regular terminal input, written to PTY
+  - Any client message that is not a well-formed resize control is written to the PTY verbatim
 
 - **Close Codes:**
 
@@ -3835,15 +3843,20 @@ List events for an issue.
 - **Query Parameters:**
   | Parameter | Type | Default | Description |
   |-----------|------|---------|-------------|
-  | `limit` | int | 100 | Max events to return (max 500) |
+  | `limit` | int | 100 | Without `since`, max newest-tail size is 500. With `since`, returns one forward page capped at 200. |
+  | `since` | string | — | Opaque history cursor. Its presence selects oldest-first forward paging; bare `?since=` starts at the beginning. |
 
-Invalid or negative `limit` silently defaults to 100; values above 500 are clamped to 500.
+Invalid or negative `limit` silently defaults to 100. Without `since`, values above 500 are clamped to 500. With `since`, values above fleet-db's 200-event page maximum are clamped to 200.
+
+Without `since`, the endpoint preserves the activity feed's newest-tail behavior. That response never carries a cursor; if `has_more` is true, it was truncated and a client can retrieve history oldest-first by starting a separate request at `?since=`. With `since`, each response is exactly one forward page and its cursor advances the next request.
 
 - **Response `200`:**
 
 ```json
 {
   "success": true,
+  "has_more": true,
+  "total_events": 295,
   "data": [
     {
       "id": "event-id",
@@ -3859,7 +3872,9 @@ Invalid or negative `limit` silently defaults to 100; values above 500 are clamp
 
 Empty events list is returned as `[]` (not null).
 
-- **Errors:** `400` (missing ID), `404` (not found), `503` (pool unavailable), `504` (timeout)
+`has_more` is always present. On a newest-tail response it means that older events were trimmed; on a `since` page it means another forward page is available. `cursor` appears only on `since` pages. `total_events` is the complete count when known; a backend that cannot determine it reports zero internally and omits the field from JSON, so its absence means unknown rather than zero events.
+
+- **Errors:** `400` (missing ID or cursor paging unsupported by the active backend), `404` (not found), `503` (pool unavailable), `504` (timeout)
 
 #### `POST /api/workspaces/{ws}/issues/{id}/dependencies`
 
@@ -4179,3 +4194,51 @@ Error codes appear in the `code` field of error responses on issue-related endpo
 | `429` | Rate limit exceeded |
 | `503` | Service unavailable (daemon down, fleet not configured) |
 | `504` | Gateway timeout (daemon connection timeout) |
+
+## Doctor Checks (CLI)
+
+`loom doctor` runs local health checks and exits non-zero when any check fails.
+`--json` renders the same results as `{"checks": [...], "summary": {...}}`.
+
+### `agent_profiles`
+
+Verifies every provisioned per-agent harness profile under
+`<workspace runtime dir>/.loom/agent-profiles/<agent>/{claude,codex}` against the
+harness binary on `PATH`. Each profile carries a `.manifest.json` pinning both a
+content fingerprint and an exact harness version; a harness auto-update leaves
+the pin stale, and a stale pin refuses the agent's next spawn.
+
+The check walks the profile directory rather than the daemon's agent roster, so
+it also covers `lead`, which is not supervisor-spawned and which no
+daemon-driven check can see. The harness binary is probed once per distinct
+harness, not once per profile.
+
+| Condition | Status | Summary |
+|-----------|--------|---------|
+| Every profile verifies | `pass` | `N agent profile(s) verified against <version>` |
+| Version drift, no `--fix` | `fail` | `N of M agent profile(s) pin a stale harness version` |
+| Fingerprint mismatch, missing or unreadable manifest | `fail` | `N of M agent profile(s) failed verification` |
+| Harness binary produced no version | `warn` | `cannot verify: <binary> --version produced nothing` |
+| No `.loom/agent-profiles` at all | *(no output)* | the check is skipped entirely |
+
+`Detail` names each failing profile: the agent, its directory, both version
+strings (for drift) or both fingerprints (for a mismatch), and the exact repair
+command.
+
+### `loom doctor --fix` for `agent_profiles`
+
+`--fix` re-blesses every profile whose *only* fault is version drift: it rewrites
+the manifest's `harness_version` field and re-verifies. The result is `warn`, not
+`pass` — something was written and the operator should see it — so the command
+exits 0. Re-blessing a running agent needs no restart: the manifest is read once
+per spawn and no provisioned content is touched, so the agent's next spawn
+succeeds.
+
+Two limits are structural:
+
+- A fingerprint mismatch, a missing manifest and an unreadable manifest are
+  reported **unfixed** and keep the check at `fail`, even under `--fix`. Blessing
+  would launder unverified content past the check the manifest exists to make;
+  the repair there is the operator's provisioner.
+- Nothing in the daemon ever re-blesses. `--fix` is reachable only from an
+  operator-typed command, so a harness upgrade always passes through a human.

@@ -1,0 +1,11 @@
+# BuildKit reads <dockerfile>.dockerignore in preference to the context root's
+# .dockerignore. That indirection is the whole point of this file: the repo root
+# .dockerignore excludes internal/webui/frontend/dist/, which is precisely what
+# this image is built to serve, so a build using the root list fails with a
+# missing COPY source no matter how recently you ran `make build-frontend`.
+#
+# Ignore everything, then re-admit only the two paths the Dockerfile copies.
+# Keeps the context to the SPA bundle instead of the whole repo.
+*
+!deploy/terraform/ui/Caddyfile
+!internal/webui/frontend/dist

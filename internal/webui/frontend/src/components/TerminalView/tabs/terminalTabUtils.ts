@@ -32,6 +32,12 @@ export interface TabState {
   /** When set, this tab represents an agent's PTY-backed terminal session. */
   agentName?: string;
   writable?: boolean;
+  /**
+   * RFC3339 time this tab's shell was last replaced across a server restart.
+   * Seeded from persisted metadata at restore; the tab strip re-reads the
+   * live metadata, so this is the initial value, not the only source.
+   */
+  replacedAt?: string;
 }
 
 /**

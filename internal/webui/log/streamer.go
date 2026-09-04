@@ -96,16 +96,17 @@ func NewLogStreamer(fp string) (*LogStreamer, error) {
 // startOffset is the byte offset to begin replay from.
 // Blocks until context canceled or error.
 func (s *LogStreamer) Stream(ctx context.Context, w http.ResponseWriter, startOffset int64) error {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
+	sw, err := realtime.NewWriter(w)
+	if err != nil {
 		return fmt.Errorf("streaming unsupported")
 	}
 
 	writeSSEHeaders(w)
-	_, _ = fmt.Fprintf(w, "retry: %d\n\n", realtime.RetryMs)
-	flusher.Flush()
+	if err := sw.WriteRetry(realtime.RetryMs); err != nil {
+		return err
+	}
 
-	currentOffset, err := s.replayExistingContent(ctx, w, flusher, startOffset)
+	currentOffset, err := s.replayExistingContent(ctx, sw, startOffset)
 	if err != nil {
 		return err
 	}
@@ -114,7 +115,7 @@ func (s *LogStreamer) Stream(ctx context.Context, w http.ResponseWriter, startOf
 	s.currentSize = currentOffset
 	s.mu.Unlock()
 
-	return s.streamEventLoop(ctx, w, flusher)
+	return s.streamEventLoop(ctx, sw)
 }
 
 // writeSSEHeaders sets standard Server-Sent Events headers.
@@ -127,7 +128,7 @@ func writeSSEHeaders(w http.ResponseWriter) {
 
 // replayExistingContent opens the log file and replays content from startOffset.
 // Returns the final byte offset after replay.
-func (s *LogStreamer) replayExistingContent(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, startOffset int64) (int64, error) {
+func (s *LogStreamer) replayExistingContent(ctx context.Context, sw *realtime.Writer, startOffset int64) (int64, error) {
 	logDir, dirErr := GetLogDir()
 	if dirErr != nil {
 		return 0, dirErr
@@ -148,7 +149,7 @@ func (s *LogStreamer) replayExistingContent(ctx context.Context, w http.Response
 		return 0, err
 	}
 
-	return s.readAndEmitChunks(ctx, w, flusher, file, startOffset)
+	return s.readAndEmitChunks(ctx, sw, file, startOffset)
 }
 
 // clampOffset ensures offset is within [0, fileSize].
@@ -163,7 +164,7 @@ func clampOffset(offset, fileSize int64) int64 {
 }
 
 // readAndEmitChunks reads the file from current position and emits SSE chunks.
-func (s *LogStreamer) readAndEmitChunks(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, file *os.File, currentOffset int64) (int64, error) {
+func (s *LogStreamer) readAndEmitChunks(ctx context.Context, sw *realtime.Writer, file *os.File, currentOffset int64) (int64, error) {
 	reader := bufio.NewReaderSize(file, readChunkSize)
 	buf := make([]byte, readChunkSize)
 	for {
@@ -175,7 +176,9 @@ func (s *LogStreamer) readAndEmitChunks(ctx context.Context, w http.ResponseWrit
 		nRead, readErr := reader.Read(buf)
 		if nRead > 0 {
 			currentOffset += int64(nRead)
-			s.sendLogChunk(w, flusher, buf[:nRead], currentOffset)
+			if err := s.sendLogChunk(sw, buf[:nRead], currentOffset); err != nil {
+				return currentOffset, err
+			}
 		}
 		if readErr == io.EOF {
 			return currentOffset, nil
@@ -187,7 +190,7 @@ func (s *LogStreamer) readAndEmitChunks(ctx context.Context, w http.ResponseWrit
 }
 
 // streamEventLoop handles the watcher-based live streaming loop.
-func (s *LogStreamer) streamEventLoop(ctx context.Context, w http.ResponseWriter, flusher http.Flusher) error {
+func (s *LogStreamer) streamEventLoop(ctx context.Context, sw *realtime.Writer) error {
 	heartbeat := time.NewTicker(logHeartbeatInterval)
 	defer heartbeat.Stop()
 
@@ -213,37 +216,42 @@ func (s *LogStreamer) streamEventLoop(ctx context.Context, w http.ResponseWriter
 			}
 		case <-debounce.C:
 			pendingRead = false
-			s.handleDebouncedRead(w, flusher)
+			if err := s.handleDebouncedRead(sw); err != nil {
+				return err
+			}
 		case err, ok := <-s.watcher.Errors:
 			if !ok {
 				return nil
 			}
 			return fmt.Errorf("watcher error: %w", err)
 		case <-heartbeat.C:
-			if _, err := fmt.Fprint(w, ": heartbeat\n\n"); err != nil {
+			if err := sw.WriteComment("heartbeat"); err != nil {
 				return err
 			}
-			flusher.Flush()
 		}
 	}
 }
 
 // handleDebouncedRead reads new chunks and handles file truncation.
-func (s *LogStreamer) handleDebouncedRead(w http.ResponseWriter, flusher http.Flusher) {
-	if err := s.readNewChunks(w, flusher); err != nil {
-		if err == errFileTruncated {
-			s.sendTruncatedEvent(w, flusher)
-			s.mu.Lock()
-			s.currentSize = 0
-			s.mu.Unlock()
+func (s *LogStreamer) handleDebouncedRead(sw *realtime.Writer) error {
+	if err := s.readNewChunks(sw); err != nil {
+		if err != errFileTruncated {
+			return err
 		}
+		if err := s.sendTruncatedEvent(sw); err != nil {
+			return err
+		}
+		s.mu.Lock()
+		s.currentSize = 0
+		s.mu.Unlock()
 	}
+	return nil
 }
 
 var errFileTruncated = fmt.Errorf("file truncated")
 
 // readNewChunks reads new bytes appended since the last read and emits them.
-func (s *LogStreamer) readNewChunks(w http.ResponseWriter, flusher http.Flusher) error {
+func (s *LogStreamer) readNewChunks(sw *realtime.Writer) error {
 	file, currentSize, err := s.openAndCheckTruncation()
 	if err != nil {
 		return err
@@ -257,7 +265,7 @@ func (s *LogStreamer) readNewChunks(w http.ResponseWriter, flusher http.Flusher)
 		return err
 	}
 
-	newSize, err := s.emitNewData(w, flusher, file, currentSize)
+	newSize, err := s.emitNewData(sw, file, currentSize)
 	if err != nil {
 		return err
 	}
@@ -303,7 +311,7 @@ func (s *LogStreamer) openAndCheckTruncation() (*os.File, int64, error) {
 }
 
 // emitNewData reads from the file at the current position and sends SSE chunks.
-func (s *LogStreamer) emitNewData(w http.ResponseWriter, flusher http.Flusher, file *os.File, offset int64) (int64, error) {
+func (s *LogStreamer) emitNewData(sw *realtime.Writer, file *os.File, offset int64) (int64, error) {
 	reader := bufio.NewReaderSize(file, readChunkSize)
 	buf := make([]byte, readChunkSize)
 	newSize := offset
@@ -311,7 +319,9 @@ func (s *LogStreamer) emitNewData(w http.ResponseWriter, flusher http.Flusher, f
 		nRead, readErr := reader.Read(buf)
 		if nRead > 0 {
 			newSize += int64(nRead)
-			s.sendLogChunk(w, flusher, buf[:nRead], newSize)
+			if err := s.sendLogChunk(sw, buf[:nRead], newSize); err != nil {
+				return newSize, err
+			}
 		}
 		if readErr == io.EOF {
 			return newSize, nil
@@ -323,9 +333,9 @@ func (s *LogStreamer) emitNewData(w http.ResponseWriter, flusher http.Flusher, f
 }
 
 // sendLogChunk sends a raw log byte chunk as an SSE event.
-func (s *LogStreamer) sendLogChunk(w http.ResponseWriter, flusher http.Flusher, chunk []byte, byteOffset int64) {
+func (s *LogStreamer) sendLogChunk(sw *realtime.Writer, chunk []byte, byteOffset int64) error {
 	if len(chunk) == 0 {
-		return
+		return nil
 	}
 
 	payload := LogChunkPayload{
@@ -335,18 +345,16 @@ func (s *LogStreamer) sendLogChunk(w http.ResponseWriter, flusher http.Flusher, 
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return
+		return err
 	}
 	eventID := realtime.NextEventID()
-	_, _ = fmt.Fprintf(w, "id: %d\nevent: log-chunk\ndata: %s\n\n", eventID, string(data))
-	flusher.Flush()
+	return sw.WriteEvent(eventID, "log-chunk", string(data))
 }
 
 // sendTruncatedEvent notifies the client that the file was truncated.
-func (s *LogStreamer) sendTruncatedEvent(w http.ResponseWriter, flusher http.Flusher) {
+func (s *LogStreamer) sendTruncatedEvent(sw *realtime.Writer) error {
 	eventID := realtime.NextEventID()
-	_, _ = fmt.Fprintf(w, "id: %d\nevent: truncated\ndata: {}\n\n", eventID)
-	flusher.Flush()
+	return sw.WriteEvent(eventID, "truncated", "{}")
 }
 
 // Close releases fsnotify resources.
