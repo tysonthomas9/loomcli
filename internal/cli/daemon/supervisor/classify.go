@@ -223,8 +223,10 @@ func (s *Supervisor) markSpawnFailure(ap *AgentProcess, spawnErr error) {
 // only thing that carries it into the next cycle.
 func (s *Supervisor) handleAgentCheckpoint(ap *AgentProcess, exitCode int) {
 	if exitCode == 0 {
-		// Check if this was a yield exit — save checkpoint instead of clearing
-		if IsYieldRequested(ap.WorktreePath) {
+		// Check if this was a yield exit — save checkpoint instead of clearing.
+		// In-memory state, not the file: the drain's defer may already have
+		// removed it (see isGracefulYieldExit).
+		if s.isGracefulYieldExit(ap) {
 			s.saveYieldCheckpoint(ap)
 			return
 		}
