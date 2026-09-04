@@ -11,6 +11,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { ApiError } from "@/api/common";
 import {
   fetchClaimHold,
   releaseClaimHold,
@@ -30,6 +31,8 @@ export interface UseClaimHoldReturn {
   gated: number;
   busy: boolean;
   error: string | null;
+  /** True when release was refused because another actor owns the hold. */
+  canForceRelease: boolean;
   /** Resolves true when the hold was released. */
   release: (force?: boolean) => Promise<boolean>;
   refresh: () => Promise<void>;
@@ -42,6 +45,7 @@ export function useClaimHold(): UseClaimHoldReturn {
   const [gated, setGated] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [canForceRelease, setCanForceRelease] = useState(false);
   const mounted = useRef(true);
 
   const refresh = useCallback(async () => {
@@ -52,6 +56,7 @@ export function useClaimHold(): UseClaimHoldReturn {
       setHold(status.hold ?? null);
       setRunning(status.running ?? []);
       setGated(status.gated ?? 0);
+      if (!status.hold?.held) setCanForceRelease(false);
     } catch {
       // A daemon without the claim-hold route (older build, remote mode, or
       // simply not running) is not an error state for a banner — there is
@@ -79,12 +84,14 @@ export function useClaimHold(): UseClaimHoldReturn {
       if (!workspaceId) return false;
       setBusy(true);
       setError(null);
+      setCanForceRelease(false);
       try {
         const status = await releaseClaimHold(workspaceId, { force });
         if (mounted.current) {
           setHold(status.hold ?? null);
           setRunning(status.running ?? []);
           setGated(status.gated ?? 0);
+          setCanForceRelease(false);
         }
         return true;
       } catch (e) {
@@ -92,6 +99,7 @@ export function useClaimHold(): UseClaimHoldReturn {
         // another's quiesce; surface its wording rather than a generic failure.
         if (mounted.current) {
           setError(e instanceof Error ? e.message : "release failed");
+          setCanForceRelease(e instanceof ApiError && e.status === 409);
         }
         return false;
       } finally {
@@ -101,7 +109,16 @@ export function useClaimHold(): UseClaimHoldReturn {
     [workspaceId],
   );
 
-  return { hold, running, gated, busy, error, release, refresh };
+  return {
+    hold,
+    running,
+    gated,
+    busy,
+    error,
+    canForceRelease,
+    release,
+    refresh,
+  };
 }
 
 export type { ClaimHold, ClaimHoldRunningAgent };

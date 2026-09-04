@@ -62,6 +62,16 @@
     border-color var(--transition-fast);
 }
 
+.forceReleaseButton {
+  composes: releaseButton;
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+.forceReleaseButton:hover:not(:disabled) {
+  background: var(--color-danger-bg);
+}
+
 .releaseButton:hover:not(:disabled) {
   background: var(--color-warning-bg);
 }
