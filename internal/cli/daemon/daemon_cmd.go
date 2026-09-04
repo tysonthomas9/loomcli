@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -259,7 +260,23 @@ func runDaemonBody() int {
 
 	shutdown, daemon := initDaemonServices(config, projectDir, paths)
 
-	return runDaemonMainLoop(config, projectDir, paths, shutdown, daemon, lockFile)
+	return runDaemonMainLoop(config, projectDir, paths, shutdown, daemon, lockFile,
+		lockCleanupFunc(wsLock, lockFile, paths))
+}
+
+// lockCleanupFunc returns runDaemonBody's lock teardown as a closure, for the
+// shutdown force-exit path: os.Exit skips deferred cleanups, so without this
+// a forced exit would leave a stale workspace PID file behind and a later
+// collision message would name a dead PID. Ordering matches the defers (LIFO):
+// workspace lock first, then the cwd lock.
+func lockCleanupFunc(wsLock *workspaceDaemonLock, lockFile *os.File, paths daemonPaths) func() {
+	return func() {
+		wsLock.Release()
+		if err := lockFile.Close(); err != nil {
+			slog.Warn("failed to close daemon lock file during force-exit", "err", err)
+		}
+		removeDaemonFile(paths.lockFile)
+	}
 }
 
 // awaitDaemonExit blocks until the daemon's main loop should exit. Returns 0
@@ -346,7 +363,7 @@ func initDaemonServices(config *cfgpkg.DaemonConfig, projectDir string, paths da
 // Returns a process exit code: 0 on graceful shutdown, 2 if a critical
 // supervisor goroutine died (panic, unexpected return, or liveness watchdog
 // timeout).
-func runDaemonMainLoop(config *cfgpkg.DaemonConfig, projectDir string, paths daemonPaths, shutdown chan struct{}, daemon *Daemon, lockFile *os.File) int {
+func runDaemonMainLoop(config *cfgpkg.DaemonConfig, projectDir string, paths daemonPaths, shutdown chan struct{}, daemon *Daemon, lockFile *os.File, cleanup func()) int {
 	cli.PrintDaemonBanner(config, projectDir)
 
 	maxRetries := 3
@@ -371,18 +388,12 @@ func runDaemonMainLoop(config *cfgpkg.DaemonConfig, projectDir string, paths dae
 	exitCode := awaitDaemonExit(shutdown, daemon.sup.FatalChannel())
 
 	// Bounded graceful drain. If daemon.Stop() hangs (e.g. AgentsMu is
-	// deadlocked), still exit so the user sees the failure rather than a
-	// process that refuses to die.
-	stopDone := make(chan struct{})
-	go func() {
-		daemon.Stop()
-		close(stopDone)
-	}()
-	select {
-	case <-stopDone:
-	case <-time.After(30 * time.Second):
-		log.Printf("[daemon] daemon.Stop() did not return within 30s; forcing exit")
-	}
+	// deadlocked, or a superviseAgent goroutine is wedged in cmd.Wait()),
+	// gracefulShutdown terminates the process at the deadline — for real, and
+	// naming the worktrees that did not yield. The budget is derived from the
+	// drain timeouts it guards, so the watchdog cannot contradict them.
+	budget := daemon.sup.ShutdownBudget()
+	gracefulShutdown(daemon, budget, paths, cleanup, exitCode)
 
 	// stateUpdateDone closes only when the state updater observes shutdown
 	// being closed; on the FatalCh path, shutdown is still open. Close it
@@ -393,10 +404,8 @@ func runDaemonMainLoop(config *cfgpkg.DaemonConfig, projectDir string, paths dae
 	default:
 		close(shutdown)
 	}
-	select {
-	case <-stateUpdateDone:
-	case <-time.After(10 * time.Second):
-		log.Printf("[daemon] state updater did not exit within 10s; forcing exit")
+	if !waitBounded(stateUpdateDone, stateUpdaterBudget) {
+		log.Printf("[daemon] state updater did not exit within %s; continuing exit", stateUpdaterBudget)
 	}
 
 	if exitCode == 0 {

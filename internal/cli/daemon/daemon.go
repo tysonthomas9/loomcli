@@ -146,6 +146,20 @@ func (d *Daemon) Start() error {
 
 // Stop gracefully shuts down the daemon.
 func (d *Daemon) Stop() {
+	_ = d.StopWithBudget(d.sup.ShutdownBudget())
+}
+
+// mutBufStopBudget is the slice of the shutdown budget granted to the mutation
+// buffer's drain. It sits before the supervisor drain and its Stop() is itself
+// unbounded, so without a cap it could silently consume the whole budget.
+const mutBufStopBudget = 5 * time.Second
+
+// StopWithBudget gracefully shuts down the daemon under an explicit wall-clock
+// budget, returning the supervisor's report so the caller can decide whether to
+// force-exit. Every wait inside is bounded.
+func (d *Daemon) StopWithBudget(budget time.Duration) supervisor.StopReport {
+	start := time.Now()
+
 	// Close the control socket listener (if running)
 	if d.controlListener != nil {
 		_ = d.controlListener.Close()
@@ -156,9 +170,18 @@ func (d *Daemon) Stop() {
 		_ = d.ipcListener.Close()
 	}
 
-	// Stop mutation buffer (drains subscription goroutine)
+	// Stop mutation buffer (drains subscription goroutine). Bounded: the drain
+	// waits on a subscription goroutine that can itself block.
 	if d.mutBuf != nil {
-		d.mutBuf.Stop()
+		mutBufDone := make(chan struct{})
+		go func() {
+			d.mutBuf.Stop()
+			close(mutBufDone)
+		}()
+		if !waitBounded(mutBufDone, mutBufStopBudget) {
+			slog.Warn("mutation buffer did not stop within its budget; continuing shutdown",
+				"budget", mutBufStopBudget)
+		}
 	}
 
 	// Close notification bus (closes subscriber channels, no-ops if NopPublisher)
@@ -166,12 +189,14 @@ func (d *Daemon) Stop() {
 		bus.Close()
 	}
 
-	d.sup.Stop()
+	remaining := budget - time.Since(start)
+	report := d.sup.StopWithBudget(remaining)
 
 	if d.storeHandle != nil {
 		_ = d.storeHandle.Close()
 		d.storeHandle = nil
 	}
+	return report
 }
 
 // Agents returns a snapshot of all agent statuses for inspection.
