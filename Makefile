@@ -554,6 +554,13 @@ clean:
 	rm -f loom
 	rm -f /tmp/loom.coverage.out
 
+# Sweep orphaned loom/go sandbox temp dirs left in $TMPDIR by killed test/build
+# runs (SIGKILL escapes the in-script traps in scripts/lib/sandbox.sh). Only
+# removes entries older than the age threshold with no open handles.
+.PHONY: clean-tmp
+clean-tmp:
+	scripts/clean-stale-tmp.sh $(CLEAN_TMP_ARGS)
+
 # Frontend directory
 FRONTEND_DIR := internal/webui/frontend
 LOCAL_FLEET_DB_REPO := $(firstword $(wildcard $(CURDIR)/../fleet-db $(CURDIR)/../../fleet-db))

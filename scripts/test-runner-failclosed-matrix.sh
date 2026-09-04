@@ -39,6 +39,7 @@ set -Eeuo pipefail
 #   env:   KEEP=1  keep the temp workspace + logs on success
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/scripts/lib/sandbox.sh"
 FLEET_DB_REPO="${FLEET_DB_REPO:-$(cd "$ROOT/../fleet-db" 2>/dev/null && pwd || true)}"
 
 WORKSPACE="${LOOM_FAILCLOSED_WORKSPACE:-FAILCLOSED}"
@@ -52,7 +53,7 @@ FLEET_URL="http://127.0.0.1:${FLEET_PORT}"
 LOOM_URL="http://127.0.0.1:${LOOM_PORT}"
 NODE_ID="failclosed-node"
 
-TMP_ROOT="$(mktemp -d -t loom-runner-failclosed.XXXXXX)"
+loom_mktemp_dir test-runner-failclosed-matrix; TMP_ROOT="$LOOM_SANDBOX_DIR"
 BIN_DIR="$TMP_ROOT/bin"
 REPO="$TMP_ROOT/repo"
 STAGE="$TMP_ROOT/dist"
@@ -88,7 +89,7 @@ cleanup() {
     echo "kept fail-closed matrix workspace at $TMP_ROOT"
   fi
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 curl_json() {
   local method="$1" path="$2" body="${3:-}"
