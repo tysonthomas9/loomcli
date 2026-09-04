@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestSaveAndLoadCheckpoint(t *testing.T) {
@@ -155,6 +156,13 @@ func TestTruncateDiff(t *testing.T) {
 	}
 	if !strings.Contains(result, "8000") {
 		t.Error("Truncation notice should include original size")
+	}
+
+	// Multi-byte content must not be cut mid-rune: untracked file contents now
+	// flow through here on their way into the next agent's prompt.
+	multibyte := strings.Repeat("\u00e9", 4000) // 2 bytes each
+	if got := TruncateDiff(multibyte, 4097); !utf8.ValidString(got) {
+		t.Error("TruncateDiff produced invalid UTF-8")
 	}
 }
 
@@ -339,10 +347,43 @@ func TestLoadCheckpoint_BackwardsCompatible(t *testing.T) {
 	if loaded.YieldReason != "" {
 		t.Errorf("YieldReason: got %q, want empty string for old checkpoint", loaded.YieldReason)
 	}
+	if loaded.ScannedPaths != nil {
+		t.Errorf("ScannedPaths: got %v, want nil for old checkpoint", loaded.ScannedPaths)
+	}
 	if loaded.ErrorClass != "RateLimited" {
 		t.Errorf("ErrorClass: got %q, want %q", loaded.ErrorClass, "RateLimited")
 	}
 	if loaded.ExitCode != 1 {
 		t.Errorf("ExitCode: got %d, want 1", loaded.ExitCode)
+	}
+}
+
+func TestSaveAndLoadCheckpoint_WithScannedPaths(t *testing.T) {
+	tmpDir := t.TempDir()
+	want := []string{"/ws/worktrees/loomcli/worker", "/ws/worktrees/fleet-db/worker"}
+
+	cp := &Checkpoint{
+		AgentName:    "worker",
+		TaskID:       "loom-scan-1",
+		GitDiff:      "",
+		ScannedPaths: want,
+		ExitCode:     1,
+		Timestamp:    time.Now(),
+	}
+	if err := SaveCheckpoint(tmpDir, cp); err != nil {
+		t.Fatalf("SaveCheckpoint failed: %v", err)
+	}
+
+	loaded, err := LoadCheckpoint(tmpDir)
+	if err != nil {
+		t.Fatalf("LoadCheckpoint failed: %v", err)
+	}
+	if len(loaded.ScannedPaths) != len(want) {
+		t.Fatalf("ScannedPaths: got %v, want %v", loaded.ScannedPaths, want)
+	}
+	for i := range want {
+		if loaded.ScannedPaths[i] != want[i] {
+			t.Errorf("ScannedPaths[%d]: got %q, want %q", i, loaded.ScannedPaths[i], want[i])
+		}
 	}
 }

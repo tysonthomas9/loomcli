@@ -64,6 +64,28 @@ func TestInjectCheckpointContextNoDiff(t *testing.T) {
 	}
 }
 
+// An empty diff plus a scan list is diagnosable: the next agent can see WHERE
+// the previous attempt was looked for, rather than only that nothing was found.
+func TestInjectCheckpointContextNoDiffListsScannedPaths(t *testing.T) {
+	prompt := `### Step 1: Do something`
+	cp := &config.Checkpoint{
+		TaskID:       "loom-457",
+		ExitCode:     137,
+		Timestamp:    time.Now(),
+		ScannedPaths: []string{"/ws/worktrees/loomcli/worker", "/ws/loomcli"},
+	}
+
+	result := injectCheckpointContext(prompt, cp)
+	if !strings.Contains(result, "no uncommitted changes (scanned: ") {
+		t.Errorf("Result should name the scanned paths, got:\n%s", result)
+	}
+	for _, want := range []string{"/ws/worktrees/loomcli/worker", "/ws/loomcli"} {
+		if !strings.Contains(result, want) {
+			t.Errorf("Result should contain scanned path %q, got:\n%s", want, result)
+		}
+	}
+}
+
 func TestInjectCheckpointContextNoStep1(t *testing.T) {
 	// Fallback: append to end when "### Step 1:" is not found
 	prompt := `Some prompt without steps`

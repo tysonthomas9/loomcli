@@ -544,6 +544,9 @@ func buildCheckpointBlock(cp *config.Checkpoint) string {
 		sb.WriteString("The previous attempt made these uncommitted changes:\n```diff\n")
 		sb.WriteString(cp.GitDiff)
 		sb.WriteString("\n```\n\n")
+	} else if len(cp.ScannedPaths) > 0 {
+		sb.WriteString(fmt.Sprintf("The previous attempt made no uncommitted changes (scanned: %s).\n\n",
+			strings.Join(cp.ScannedPaths, ", ")))
 	} else {
 		sb.WriteString("The previous attempt made no uncommitted changes.\n\n")
 	}
