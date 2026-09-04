@@ -1,6 +1,7 @@
 package git
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -139,7 +140,11 @@ func TestPullWorkspaceWorktrees_IteratesAllRepos(t *testing.T) {
 		{Args: []string{"push", "origin", "feat-b"}, Err: nil},
 	}
 
-	cmdMock := NewCommandMock(t, []CommandStub{})
+	var stubs []CommandStub
+	stubs = append(stubs, verifyStubs("origin", "main", "aaaaaaaaaaaa", "bbbbbbbbbbbb", 0)...)
+	stubs = append(stubs, verifyStubs("origin", "main", "cccccccccccc", "cccccccccccc", 0)...)
+
+	cmdMock := NewCommandMock(t, stubs)
 	cmdMock.InstallOn(deps)
 	outputMock := NewOutputCommandMock(t, outputStubs)
 	outputMock.InstallOn(deps)
@@ -149,7 +154,16 @@ func TestPullWorkspaceWorktrees_IteratesAllRepos(t *testing.T) {
 		return nil
 	}}
 
-	pullWorkspaceWorktrees(deps, worktrees, "main")
+	outcomes := pullWorkspaceWorktrees(deps, worktrees, "main")
+	if len(outcomes) != 2 {
+		t.Fatalf("expected 2 outcomes, got %d", len(outcomes))
+	}
+	if !outcomes[0].InSync() || outcomes[0].State != syncStateAdvanced {
+		t.Errorf("repo-a: expected advanced, got state %v (%s)", outcomes[0].State, outcomes[0].Detail)
+	}
+	if outcomes[1].State != syncStateAlreadyCurrent {
+		t.Errorf("repo-b: expected already-current, got state %v (%s)", outcomes[1].State, outcomes[1].Detail)
+	}
 }
 
 func TestPullWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {
@@ -182,7 +196,11 @@ func TestPullWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {
 		{Args: []string{"push", "origin", "feat-b"}, Err: nil},
 	}
 
-	cmdMock := NewCommandMock(t, []CommandStub{})
+	var stubs []CommandStub
+	stubs = append(stubs, verifyStubs("origin", "develop", "aaaaaaaaaaaa", "bbbbbbbbbbbb", 0)...)
+	stubs = append(stubs, verifyStubs("origin", "staging", "aaaaaaaaaaaa", "bbbbbbbbbbbb", 0)...)
+
+	cmdMock := NewCommandMock(t, stubs)
 	cmdMock.InstallOn(deps)
 	outputMock := NewOutputCommandMock(t, outputStubs)
 	outputMock.InstallOn(deps)
@@ -206,7 +224,7 @@ func TestPullRepoWorktree_CustomRemote(t *testing.T) {
 		{Args: []string{"push", "upstream", "feat-a"}, Err: nil},
 	}
 
-	cmdMock := NewCommandMock(t, []CommandStub{})
+	cmdMock := NewCommandMock(t, verifyStubs("upstream", "main", "aaaaaaaaaaaa", "bbbbbbbbbbbb", 0))
 	cmdMock.InstallOn(deps)
 	outputMock := NewOutputCommandMock(t, outputStubs)
 	outputMock.InstallOn(deps)
@@ -216,9 +234,12 @@ func TestPullRepoWorktree_CustomRemote(t *testing.T) {
 		return nil
 	}}
 
-	err := pullRepoWorktree(deps, "/ws/repo-a", "feat-a", "main", "upstream")
+	outcome, err := pullRepoWorktree(deps, "/ws/repo-a", "feat-a", "main", "upstream")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
+	}
+	if !outcome.InSync() {
+		t.Errorf("expected in-sync outcome, got state %v (%s)", outcome.State, outcome.Detail)
 	}
 }
 
@@ -232,7 +253,7 @@ func TestPullRepoWorktree_EmptyRemoteDefaultsToOrigin(t *testing.T) {
 		{Args: []string{"push", "origin", "feat-a"}, Err: nil},
 	}
 
-	cmdMock := NewCommandMock(t, []CommandStub{})
+	cmdMock := NewCommandMock(t, verifyStubs("origin", "main", "aaaaaaaaaaaa", "bbbbbbbbbbbb", 0))
 	cmdMock.InstallOn(deps)
 	outputMock := NewOutputCommandMock(t, outputStubs)
 	outputMock.InstallOn(deps)
@@ -242,9 +263,12 @@ func TestPullRepoWorktree_EmptyRemoteDefaultsToOrigin(t *testing.T) {
 		return nil
 	}}
 
-	err := pullRepoWorktree(deps, "/ws/repo-a", "feat-a", "main", "")
+	outcome, err := pullRepoWorktree(deps, "/ws/repo-a", "feat-a", "main", "")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
+	}
+	if !outcome.InSync() {
+		t.Errorf("expected in-sync outcome, got state %v (%s)", outcome.State, outcome.Detail)
 	}
 }
 
@@ -274,7 +298,7 @@ func TestPullWorkspaceWorktrees_SkipsNilRepo(t *testing.T) {
 		{Args: []string{"push", "origin", "feat-b"}, Err: nil},
 	}
 
-	cmdMock := NewCommandMock(t, []CommandStub{})
+	cmdMock := NewCommandMock(t, verifyStubs("origin", "main", "aaaaaaaaaaaa", "bbbbbbbbbbbb", 0))
 	cmdMock.InstallOn(deps)
 	outputMock := NewOutputCommandMock(t, outputStubs)
 	outputMock.InstallOn(deps)
@@ -284,7 +308,22 @@ func TestPullWorkspaceWorktrees_SkipsNilRepo(t *testing.T) {
 		return nil
 	}}
 
-	pullWorkspaceWorktrees(deps, worktrees, "main")
+	outcomes := pullWorkspaceWorktrees(deps, worktrees, "main")
+
+	// The repo without metadata is not pulled, but it must still be reported:
+	// silently dropping it is how a repo disappeared from the summary.
+	if len(outcomes) != 2 {
+		t.Fatalf("expected 2 outcomes (including the skipped one), got %d", len(outcomes))
+	}
+	if outcomes[0].State != syncStateSkipped {
+		t.Errorf("repo-a: expected skipped, got state %v", outcomes[0].State)
+	}
+	if outcomes[0].InSync() {
+		t.Error("repo-a: a skipped repo must never count as in sync")
+	}
+	if !outcomes[1].InSync() {
+		t.Errorf("repo-b: expected in sync, got state %v (%s)", outcomes[1].State, outcomes[1].Detail)
+	}
 }
 
 func TestPullWorkspaceWorktrees_CLIArgOverridesConfig(t *testing.T) {
@@ -307,7 +346,7 @@ func TestPullWorkspaceWorktrees_CLIArgOverridesConfig(t *testing.T) {
 		{Args: []string{"push", "origin", "feat-a"}, Err: nil},
 	}
 
-	cmdMock := NewCommandMock(t, []CommandStub{})
+	cmdMock := NewCommandMock(t, verifyStubs("origin", "release", "aaaaaaaaaaaa", "bbbbbbbbbbbb", 0))
 	cmdMock.InstallOn(deps)
 	outputMock := NewOutputCommandMock(t, outputStubs)
 	outputMock.InstallOn(deps)
@@ -367,4 +406,118 @@ func TestPullWorkspaceWorktrees_EmptyList(t *testing.T) {
 
 	// Should not panic or call any commands
 	pullWorkspaceWorktrees(deps, worktrees, "main")
+}
+
+// A merge that reported success while the worktree is still behind must reach
+// the caller as an error — this is the reported incident at the function
+// boundary, where it used to return nil.
+func TestPullRepoWorktree_StillBehindIsAnError(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"push", "origin", "feat-a"}, Err: nil},
+	})
+
+	cmdMock := NewCommandMock(t, verifyStubs("origin", "main", "aaaaaaaaaaaa", "bbbbbbbbbbbb", 8))
+	cmdMock.InstallOn(deps)
+	outputMock.InstallOn(deps)
+
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}}
+
+	outcome, err := pullRepoWorktree(deps, "/ws/repo-a", "feat-a", "main", "")
+	if err == nil {
+		t.Fatal("expected an error when the worktree is still behind after the merge")
+	}
+	if outcome.State != syncStateBehind {
+		t.Errorf("state = %v, want syncStateBehind", outcome.State)
+	}
+	if outcome.InSync() {
+		t.Error("a worktree still behind must never report InSync")
+	}
+	if outcome.Behind != 8 {
+		t.Errorf("Behind = %d, want 8", outcome.Behind)
+	}
+}
+
+// The conflict path used to return nil the moment the agent was launched. If
+// the agent leaves the merge open, that is not a success.
+func TestPullRepoWorktree_ConflictAgentLeavesMergeOpen(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: errors.New("conflict")},
+	})
+
+	cmdMock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"rev-parse", "--verify", "HEAD"}, Stdout: "aaaaaaaaaaaa\n"},
+		// conflict detection after the failed merge
+		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "a.go\n"},
+		// verification: the agent ran but the conflict is still there
+		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "a.go\n"},
+	})
+	cmdMock.InstallOn(deps)
+	outputMock.InstallOn(deps)
+
+	invoked := false
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
+		invoked = true
+		return nil
+	}}
+
+	outcome, err := pullRepoWorktree(deps, "/ws/repo-a", "feat-a", "main", "")
+	if !invoked {
+		t.Error("expected the conflict agent to be invoked")
+	}
+	if err == nil {
+		t.Fatal("expected an error when the agent left the merge unresolved")
+	}
+	if outcome.State != syncStateUnresolved {
+		t.Errorf("state = %v, want syncStateUnresolved", outcome.State)
+	}
+	if outcome.InSync() {
+		t.Error("an unresolved merge must never report InSync")
+	}
+}
+
+func TestPullRepoWorktree_ConflictAgentResolvesCleanly(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: errors.New("conflict")},
+	})
+
+	cmdMock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"rev-parse", "--verify", "HEAD"}, Stdout: "aaaaaaaaaaaa\n"},
+		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "a.go\n"},
+		// verification: the agent resolved and committed
+		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: ""},
+		{Name: "git", Args: []string{"rev-parse", "--verify", "MERGE_HEAD"}, Err: errNoMergeHead},
+		{Name: "git", Args: []string{"rev-parse", "--verify", "refs/remotes/origin/main"}, Stdout: "ccc\n"},
+		{Name: "git", Args: []string{"rev-list", "--count", "HEAD..origin/main"}, Stdout: "0\n"},
+		{Name: "git", Args: []string{"rev-parse", "--verify", "HEAD"}, Stdout: "bbbbbbbbbbbb\n"},
+	})
+	cmdMock.InstallOn(deps)
+	outputMock.InstallOn(deps)
+
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
+		return nil
+	}}
+
+	outcome, err := pullRepoWorktree(deps, "/ws/repo-a", "feat-a", "main", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !outcome.InSync() || outcome.State != syncStateAdvanced {
+		t.Errorf("state = %v, want syncStateAdvanced", outcome.State)
+	}
 }

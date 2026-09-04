@@ -37,7 +37,7 @@ func TestSyncSingleWorkspace_PushAndPull(t *testing.T) {
 		{Args: []string{"push", "origin", "api-branch"}, Err: nil},
 	})
 
-	cmdMock := NewCommandMock(t, []CommandStub{
+	pullPhaseStubs := []CommandStub{
 		// DiscoverWorktrees: GetCurrentBranch for api
 		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "api-branch\n"},
 		// Push phase: stash list x2, GetCurrentBranch, HasCommitsBetweenRemote
@@ -45,7 +45,10 @@ func TestSyncSingleWorkspace_PushAndPull(t *testing.T) {
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "api-branch\n"},
 		{Name: "git", Args: []string{"log", "origin/main..api-branch", "--oneline"}, Stdout: "abc commit\n"},
-	})
+	}
+	// Pull phase: the post-pull verification reads.
+	pullPhaseStubs = append(pullPhaseStubs, verifyStubs("origin", "main", "aaaaaaaaaaaa", "bbbbbbbbbbbb", 0)...)
+	cmdMock := NewCommandMock(t, pullPhaseStubs)
 	cmdMock.Install()
 	outputMock.Install()
 
@@ -67,7 +70,9 @@ func TestSyncSingleWorkspace_PushAndPull(t *testing.T) {
 		t.Fatalf("failed to set workspace: %v", err)
 	}
 
-	syncSingleWorkspace(defaultDeps, resolver, false, false)
+	if err := syncSingleWorkspace(defaultDeps, resolver, false, false); err != nil {
+		t.Errorf("expected nil error for an in-sync workspace, got %v", err)
+	}
 }
 
 func TestSyncSingleWorkspace_PushOnly(t *testing.T) {
@@ -125,7 +130,9 @@ func TestSyncSingleWorkspace_PushOnly(t *testing.T) {
 		t.Fatalf("failed to set workspace: %v", err)
 	}
 
-	syncSingleWorkspace(defaultDeps, resolver, true, false)
+	if err := syncSingleWorkspace(defaultDeps, resolver, true, false); err != nil {
+		t.Errorf("push-only sync must not fail: %v", err)
+	}
 }
 
 func TestSyncSingleWorkspace_PullOnly(t *testing.T) {
@@ -152,9 +159,11 @@ func TestSyncSingleWorkspace_PullOnly(t *testing.T) {
 		{Args: []string{"push", "origin", "api-branch"}, Err: nil},
 	})
 
-	cmdMock := NewCommandMock(t, []CommandStub{
+	stubs := []CommandStub{
 		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "api-branch\n"},
-	})
+	}
+	stubs = append(stubs, verifyStubs("origin", "main", "aaaaaaaaaaaa", "bbbbbbbbbbbb", 0)...)
+	cmdMock := NewCommandMock(t, stubs)
 	cmdMock.Install()
 	outputMock.Install()
 
@@ -175,5 +184,7 @@ func TestSyncSingleWorkspace_PullOnly(t *testing.T) {
 		t.Fatalf("failed to set workspace: %v", err)
 	}
 
-	syncSingleWorkspace(defaultDeps, resolver, false, true)
+	if err := syncSingleWorkspace(defaultDeps, resolver, false, true); err != nil {
+		t.Errorf("expected nil error for an in-sync workspace, got %v", err)
+	}
 }

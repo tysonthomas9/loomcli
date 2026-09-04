@@ -3,6 +3,7 @@ package git
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -75,8 +76,7 @@ func runPull(cmd *cobra.Command, args []string) error {
 		if len(args) == 1 {
 			sourceBranch = args[0]
 		}
-		pullAllWorkspaces(deps, sourceBranch)
-		return nil
+		return pullAllWorkspaces(deps, sourceBranch)
 	}
 
 	worktreeName = args[0]
@@ -102,7 +102,11 @@ func runPull(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func pullAllWorkspaces(deps *cli.Deps, sourceBranch string) {
+// pullAllWorkspaces returns a non-nil error when any workspace ended with a
+// repo that is not in sync. The per-repo lines already say so; the error is
+// what carries that into the exit code, so a script cannot read "All
+// workspaces pulled!" over a repo that is still commits behind.
+func pullAllWorkspaces(deps *cli.Deps, sourceBranch string) error {
 	resolver, err := cli.NewResolver()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
@@ -112,7 +116,7 @@ func pullAllWorkspaces(deps *cli.Deps, sourceBranch string) {
 	wsNames := resolver.WorkspaceNames()
 	if len(wsNames) == 0 {
 		fmt.Println("No workspaces found.")
-		return
+		return nil
 	}
 
 	fmt.Println("=========================================")
@@ -120,6 +124,7 @@ func pullAllWorkspaces(deps *cli.Deps, sourceBranch string) {
 	fmt.Println("=========================================")
 	fmt.Println("")
 
+	notInSync := 0
 	for _, wsName := range wsNames {
 		fmt.Printf("--- Workspace: %s ---\n", wsName)
 		if err := resolver.SetWorkspace(wsName); err != nil {
@@ -138,13 +143,19 @@ func pullAllWorkspaces(deps *cli.Deps, sourceBranch string) {
 			continue
 		}
 
-		pullWorkspaceWorktrees(deps, worktrees, sourceBranch)
+		notInSync += summaryFailures(pullWorkspaceWorktrees(deps, worktrees, sourceBranch))
 		fmt.Println("")
 	}
 
 	fmt.Println("=========================================")
+	if notInSync > 0 {
+		fmt.Fprintf(os.Stderr, "%d repo(s) are not in sync after the pull\n", notInSync)
+		fmt.Println("=========================================")
+		return fmt.Errorf("%d repo(s) are not in sync after the pull", notInSync)
+	}
 	fmt.Println("All workspaces pulled!")
 	fmt.Println("=========================================")
+	return nil
 }
 
 func pullWorkspaceRepo(deps *cli.Deps, resolver *cli.Resolver, worktreeName, sourceBranch string) {
@@ -190,23 +201,32 @@ func pullWorkspaceRepo(deps *cli.Deps, resolver *cli.Resolver, worktreeName, sou
 	fmt.Println("=========================================")
 	fmt.Println("")
 
-	err = pullRepoWorktree(deps, matched.Path, matched.Branch, source, remote)
-	if err != nil {
+	if _, err := pullRepoWorktree(deps, matched.Path, matched.Branch, source, remote); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func pullWorkspaceWorktrees(deps *cli.Deps, worktrees []cli.WorktreeInfo, sourceBranch string) {
-	type result struct {
-		repo    string
-		success bool
-		err     string
-	}
-	var results []result
+func pullWorkspaceWorktrees(deps *cli.Deps, worktrees []cli.WorktreeInfo, sourceBranch string) []pullOutcome {
+	return pullWorkspaceWorktreesWithCoverage(deps, worktrees, sourceBranch, nil)
+}
+
+// pullWorkspaceWorktreesWithCoverage pulls every repo checkout and renders the
+// summary from what git reported afterwards. notCovered names worktrees the run
+// never visited, so the summary cannot imply a coverage it does not have.
+func pullWorkspaceWorktreesWithCoverage(deps *cli.Deps, worktrees []cli.WorktreeInfo, sourceBranch string, notCovered []string) []pullOutcome {
+	var outcomes []pullOutcome
 
 	for _, wt := range worktrees {
 		if wt.Repo == nil {
+			// A worktree the command declined to touch must still be visible:
+			// silently continuing here is how a repo vanished from the summary.
+			outcomes = append(outcomes, pullOutcome{
+				Name:   wt.Name,
+				Path:   wt.Path,
+				State:  syncStateSkipped,
+				Detail: "no repo metadata in workspace config",
+			})
 			continue
 		}
 
@@ -220,72 +240,105 @@ func pullWorkspaceWorktrees(deps *cli.Deps, worktrees []cli.WorktreeInfo, source
 
 		remote := wt.Repo.Remote
 
-		err := pullRepoWorktree(deps, wt.Path, wt.Branch, source, remote)
-		if err != nil {
-			results = append(results, result{repo: wt.Name, success: false, err: err.Error()})
-		} else {
-			results = append(results, result{repo: wt.Name, success: true})
-		}
+		outcome, _ := pullRepoWorktree(deps, wt.Path, wt.Branch, source, remote)
+		outcome.Name = wt.Name
+		outcomes = append(outcomes, outcome)
 		fmt.Println("")
 	}
 
-	// Print summary
-	fmt.Println("--- Summary ---")
-	for _, r := range results {
-		if r.success {
-			fmt.Printf("  ✓ %s\n", r.repo)
-		} else {
-			fmt.Printf("  ✗ %s: %s\n", r.repo, r.err)
-		}
-	}
+	printPullSummary(outcomes, notCovered)
+	return outcomes
 }
 
-func pullRepoWorktree(deps *cli.Deps, repoPath, currentBranch, sourceBranch, remote string) error {
+// pullRepoWorktree pulls sourceBranch into the worktree at repoPath and returns
+// what actually happened there.
+//
+// Contract: the returned outcome always reflects a state read back from git
+// after the last mutation. A nil error alone is not evidence the worktree is in
+// sync — only outcome.InSync() is. The error is non-nil whenever a step failed
+// AND whenever verification found the worktree still behind or mid-merge, so
+// the single-worktree callers that exit on error stay honest too.
+func pullRepoWorktree(deps *cli.Deps, repoPath, currentBranch, sourceBranch, remote string) (pullOutcome, error) {
 	r := resolveRemote(remote)
+
+	o := pullOutcome{
+		Name:   filepath.Base(repoPath),
+		Path:   repoPath,
+		Branch: currentBranch,
+		Source: sourceBranch,
+		Remote: remote,
+	}
 
 	fmt.Println("=========================================")
 	fmt.Printf("Pull: %s <- %s (repo: %s, remote: %s)\n", currentBranch, sourceBranch, repoPath, r)
 	fmt.Println("=========================================")
 
+	// Read HEAD before the merge so the summary can say what moved. A failure
+	// here is not fatal: the verdict comes from the behind-count, not from this.
+	if head, err := gitRevParseDeps(deps, repoPath, "HEAD"); err == nil {
+		o.HeadBefore = head
+	}
+
 	// Fetch latest
 	if err := gitFetchRemote(deps, repoPath, remote); err != nil {
-		return fmt.Errorf("fetching: %v", err)
+		err = fmt.Errorf("fetching: %v", err)
+		return o.failed(err), err
 	}
 
 	// Attempt merge
 	mergeMsg := fmt.Sprintf("Pull from %s\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", sourceBranch)
 	if err := gitMergeRemote(deps, repoPath, remote, sourceBranch, mergeMsg); err != nil {
-		// Check for conflicts
-		conflicts, conflictErr := getConflictedFilesDeps(deps, repoPath)
-		if conflictErr != nil || len(conflicts) == 0 {
-			return fmt.Errorf("merge failed: %v", err)
-		}
-
-		fmt.Println("")
-		fmt.Println("⚠ Merge conflicts detected. Launching AI agent to resolve...")
-		fmt.Println("")
-		fmt.Println("Conflicted files:")
-		for _, f := range conflicts {
-			fmt.Printf("  - %s\n", f)
-		}
-		fmt.Println("")
-
-		// Launch Claude for conflict resolution
-		if err := invokeAgentForConflictsDeps(deps, repoPath, sourceBranch, currentBranch, conflicts); err != nil {
-			return fmt.Errorf("resolving conflicts: %v", err)
-		}
-		return nil
+		return resolveMergeConflicts(deps, o, currentBranch, err)
 	}
-
-	fmt.Println("✓ Pull completed successfully (no conflicts)")
 
 	// Push
 	if err := gitPushRemote(deps, repoPath, remote, currentBranch); err != nil {
-		return fmt.Errorf("pushing: %v", err)
+		err = fmt.Errorf("pushing: %v", err)
+		return o.failed(err), err
 	}
 
 	fmt.Printf("✓ Pushed to %s/%s\n", r, currentBranch)
-	return nil
+	return finishPull(deps, o)
+}
+
+// resolveMergeConflicts handles a merge that did not complete: it launches the
+// conflict agent when there are conflicts to resolve, then measures the
+// worktree. Launching the agent is not evidence the merge finished, so this
+// path verifies like every other one — returning nil here is what produced the
+// reported false ✓.
+func resolveMergeConflicts(deps *cli.Deps, o pullOutcome, currentBranch string, mergeErr error) (pullOutcome, error) {
+	conflicts, conflictErr := getConflictedFilesDeps(deps, o.Path)
+	if conflictErr != nil || len(conflicts) == 0 {
+		err := fmt.Errorf("merge failed: %v", mergeErr)
+		return o.failed(err), err
+	}
+
+	fmt.Println("")
+	fmt.Println("⚠ Merge conflicts detected. Launching AI agent to resolve...")
+	fmt.Println("")
+	fmt.Println("Conflicted files:")
+	for _, f := range conflicts {
+		fmt.Printf("  - %s\n", f)
+	}
+	fmt.Println("")
+
+	if err := invokeAgentForConflictsDeps(deps, o.Path, o.Source, currentBranch, conflicts); err != nil {
+		err = fmt.Errorf("resolving conflicts: %v", err)
+		return o.failed(err), err
+	}
+	return finishPull(deps, o)
+}
+
+// finishPull verifies the worktree and prints the measured per-repo line. The
+// running commentary must not claim more than the summary does.
+func finishPull(deps *cli.Deps, o pullOutcome) (pullOutcome, error) {
+	verifyPulled(deps, &o)
+	fmt.Printf("%s %s\n", o.marker(), o.summaryDetail())
+
+	if o.State == syncStateBehind || o.State == syncStateUnresolved {
+		return o, fmt.Errorf("%s: %s", o.Name, o.summaryDetail())
+	}
+	return o, nil
 }
 
 func sourceBranchDisplay(source string) string {
