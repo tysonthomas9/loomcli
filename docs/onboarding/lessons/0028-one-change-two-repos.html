@@ -1,0 +1,756 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>28. One change, two repos — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 6 <span class="sep">/</span> Lesson 28 <span class="sep">/</span> Cross-repo</p>
+  <h1>One change, two repos</h1>
+  <p class="standfirst">Nothing generates the wire between loomcli and fleet-db. Two
+  hand-written mirrors, shipped from two repositories on two schedules — so the order
+  you land them in is part of the design, not an afterthought.</p>
+
+  <div class="meta">
+    <span><b>Skill</b> sequence a cross-repo change, and name the compatibility window it assumes</span>
+    <span><b>Time</b> 40 min</span>
+    <span><b>Needs</b> <a href="0007-two-clients-one-server.html">07</a>, <a href="0015-shipping-a-vertical-slice.html">15</a>, <a href="0021-the-api-you-already-depend-on.html">21</a></span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span> <span class="repo fleet">fleet-db</span></span>
+  </div>
+
+  <h2>Why this exists</h2>
+
+  <p><a href="0015-shipping-a-vertical-slice.html">Lesson 15</a> walked one field from
+  a YAML schema to a rendered pixel <em>inside</em> loomcli. That worked because one
+  hand-written spec generates a Go type file and a TypeScript type file, and
+  <code>make check-go</code> regenerates the Go one into a temp dir and diffs it
+  (<span class="path">scripts/check-go-api-staleness.sh:1-7</span>, wired in at
+  <span class="path">Makefile:610</span>). Three files change together or the build
+  fails.</p>
+
+  <p>Across the repo boundary, none of that exists. The three things you would reach
+  for first:</p>
+
+  <ul>
+    <li><b>A shared module?</b> No. <code>grep fleet go.mod</code> in loomcli returns
+    zero lines — loomcli does not depend on fleet-db at all.</li>
+    <li><b>The server's Go client?</b> fleet-db ships one at
+    <span class="repo fleet">fleet-db</span> <code>pkg/client/</code>, and its only
+    non-test consumer in either repo is fleet-db's own CLI
+    (<span class="path">cmd/fdb/main.go:17-19</span>).</li>
+    <li><b>The server's OpenAPI spec?</b> It generates nothing, on either side — a
+    search for <code>oapi-codegen</code> or <code>go:generate</code> across fleet-db
+    returns nothing. Its only trace in loomcli is prose: <b>three comments</b> name it
+    by repo-qualified path
+    (<span class="path">internal/backend/fleet/params.go:167</span>,
+    <span class="path">internal/backend/fleet/params_test.go:285</span>,
+    <span class="path">internal/infra/fleetdb/control_plane.go:149</span>), and three
+    more reference it in passing
+    (<span class="path">internal/backend/fleet/params.go:253</span>,
+    <span class="path">internal/backend/fleet/convert.go:490</span>,
+    <span class="path">internal/backend/fleet/params_test.go:52</span>). Not one line
+    of code reads it.</li>
+  </ul>
+
+  <p>So the contract lives in two hand-maintained mirrors facing each other across an
+  HTTP boundary: fleet-db's request structs and models on one side, loomcli's
+  <code>internal/backend/fleet</code> (17 non-test files, of which
+  <code>convert.go</code> is 605 lines) and <code>internal/infra/fleetdb</code> on the
+  other. They agree because people keep them agreeing.</p>
+
+  <div class="callout key">
+    <span class="label">The one idea</span>
+    <p>Before you write either half, name the <b>compatibility window</b>: the set of
+    <em>(loom build, fleet-db build)</em> pairs that must interoperate while your
+    change rolls out. The two repos are never deployed atomically, so at least one
+    mismatched pair always exists. Your ordering exists to make that pair harmless.
+    "We'll ship them together" is not a window — it is a wish.</p>
+  </div>
+
+  <h2>Three deployments, three windows</h2>
+
+  <p>Loom runs in three shapes, and each gives you a different window. Which one you
+  are protecting decides how much ordering discipline the change needs.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Shape</th><th>How the pair is chosen</th><th>Window you must survive</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>Local mode</b></td>
+        <td>loom forks whatever binary discovery finds: <code>FLEET_DB_BIN</code> → <code>PATH</code> → sibling of the loom binary → <code>&lt;LoomDir&gt;/bin/fleet-db</code> (<code>internal/bootstrap/embedded.go:526-532</code>)</td>
+        <td>Any pair at all. Two engineers with different checkout dates are a different pair.</td>
+      </tr>
+      <tr>
+        <td><b>Cloud mode</b></td>
+        <td><code>LOOM_FLEET_DB_URL</code> points the same client at a remote fleet-db (<a href="0007-two-clients-one-server.html">Lesson 07</a>)</td>
+        <td>Every loom build any operator still runs, against the one deployed fleet-db.</td>
+      </tr>
+      <tr>
+        <td><b>Desktop bundle</b></td>
+        <td>One workflow checks out fleet-db and bundles it as a sidecar (<code>.github/workflows/desktop-release.yml:45-50</code>)</td>
+        <td>Exactly one pair, fixed at build time.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>The repo says this in its own words, in the comment above the only cross-repo job
+  that gates a release:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> .github/workflows/release.yml:20-27</figcaption>
+<pre><code>      # Deliberately float with FleetDB main. Loom and FleetDB ship as one
+      # compatibility pair, so a Loom release must prove itself against the
+      # server revision operators will deploy with it rather than an old pin.
+      - name: Checkout FleetDB main
+        uses: actions/checkout@v4
+        with:
+          repository: tysonthomas9/fleet-db
+          ref: main</code></pre>
+  </figure>
+
+  <aside class="sidenote">That job gates the release: <code>goreleaser</code> declares
+  <code>needs: skills-compatibility</code>
+  (<span class="path">.github/workflows/release.yml:50</span>). It runs on
+  <code>v*</code> tags only. Two other loomcli workflows check out fleet-db and neither
+  blocks anything: <code>desktop-release.yml:45-50</code> bundles the sidecar, and
+  <code>nightly.yml:99-107</code> runs the daemon playground against it under
+  <code>continue-on-error: true</code> (<code>:94</code>). fleet-db's five workflows
+  never check out loomcli, so a fleet-db change merges green with no loom in
+  sight.</aside>
+
+  <h2>The asymmetry that decides every ordering</h2>
+
+  <p>One line of Go governs almost all of this. fleet-db decodes every request body
+  strictly:</p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> internal/api/request.go:130-132</figcaption>
+<pre><code>func decodeJSONBytes(body []byte, dst interface{}) error {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()</code></pre>
+  </figure>
+
+  <p>One unrecognised key rejects the <em>entire</em> write with a 400 and the message
+  <code>unknown field "x"</code> (<span class="path">internal/api/request.go:145-146</span>).
+  Query strings are the opposite: <code>parseReadyFilter</code> reads exactly the
+  twelve parameters it knows about and never errors on anything else
+  (<span class="path">internal/api/ready.go:124-225</span>). Headers are laxer still —
+  unknown ones are simply ignored, and fleet-db's own governance doc lists "adding new
+  HTTP headers" as non-breaking (<span class="path">docs/api-governance.md:71</span>).</p>
+
+  <p><b>Body drift fails loudly and totally. Query drift fails silently and wrongly.</b>
+  The best paragraph in either repo about this is the comment on the test that pins
+  fleet-db's request structs to its spec — read it twice:</p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> internal/api/openapi_request_parity_test.go:14-25</figcaption>
+<pre><code>// The request structs are bound by a STRICT decoder (decodeJSON calls
+// DisallowUnknownFields), so the spec is not merely documentation here — a
+// client that trusts it and omits a field it does not list still works, but a
+// client that needs a field the spec omits has no way to know the server takes
+// it, and a client that sends a field the server dropped gets its ENTIRE body
+// rejected rather than that one field ignored.
+//
+// Both failure directions have already happened. `UpdateIssueRequest` accepted
+// `status` and `external_ref` for a long time while the spec listed neither, so
+// a spec-derived client could not have written an external ref at all. In the
+// other direction, a client sending `design_format` before the server had it
+// took down every write in the same body with it.
+// … the reflection test itself elided …</code></pre>
+  </figure>
+
+  <p>That test covers exactly two schemas, <code>UpdateIssueRequest</code> and
+  <code>CreateIssueRequest</code>
+  (<span class="path">internal/api/openapi_request_parity_test.go:51-52</span>). It
+  keeps fleet-db honest with <em>itself</em>. Nothing anywhere keeps fleet-db honest
+  with loomcli.</p>
+
+  <h2>The ordering table</h2>
+
+  <p>This is the lesson. For each kind of change, which repo lands first, and the
+  line of code that forces it.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Change</th><th>Order</th><th>What forces it</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>New <b>response</b> field</td>
+        <td><span class="repo fleet">fleet-db</span> first, loom whenever</td>
+        <td>Old clients ignore unknown JSON keys — <code>encoding/json</code>'s default, and a written client obligation (<code>docs/api-governance.md:48, 107</code>).</td>
+      </tr>
+      <tr>
+        <td>New <b>request-body</b> field</td>
+        <td><span class="repo fleet">fleet-db</span> first, <b>never</b> the reverse</td>
+        <td><code>DisallowUnknownFields</code> (<code>internal/api/request.go:132</code>). A new client against an old server loses the whole write, not the field.</td>
+      </tr>
+      <tr>
+        <td>New <b>query parameter</b></td>
+        <td><span class="repo fleet">fleet-db</span> first</td>
+        <td>Nothing rejects it, so shipping the client first produces a filter that returns wrong rows and no error (<code>internal/api/ready.go:124-225</code>).</td>
+      </tr>
+      <tr>
+        <td>New <b>route</b></td>
+        <td><span class="repo fleet">fleet-db</span> first</td>
+        <td>An old server has no such route, and fleet-db registers no catch-all — its mux is built bare (<code>internal/api/server.go:24</code>) and no <code>Register*Routes</code> function claims the <code>"/"</code> pattern — so <code>http.ServeMux</code> answers with plain-text <code>404 page not found</code>. loom cannot parse that as JSON (<code>internal/backend/fleet/fleet.go:214-216</code>) and reports <code>fleet server communication failed</code> (<code>errors.go:150</code>) — an error about the connection, not about the missing route.</td>
+      </tr>
+      <tr>
+        <td>New <b>header</b></td>
+        <td>Either</td>
+        <td>Unknown headers are ignored both ways. This is why idempotency signals travel as headers — see the pattern below.</td>
+      </tr>
+      <tr>
+        <td><b>Renaming</b> a JSON key</td>
+        <td>Do not rename. Add the alias on <b>both</b> sides and keep both forever.</td>
+        <td>The live example is <code>repo</code> ∥ <code>source_repo</code>, implemented twice — see below.</td>
+      </tr>
+      <tr>
+        <td><b>Removing</b> anything</td>
+        <td><span class="repo loom">loomcli</span> stops using it first; fleet-db removes it later</td>
+        <td>Pre-1.0 removals get a 30-day deprecation window (<code>docs/api-governance.md:29, 46</code>). Read the trap below before you trust that machinery.</td>
+      </tr>
+      <tr>
+        <td><b>Rewording</b> an error message</td>
+        <td>Check the client's string tables first — there are two</td>
+        <td>loom classifies unrecognised codes by English substring (<code>internal/backend/fleet/errors.go:116-132</code>), and <code>backend.IsAlreadyClosedConflict</code> matches on the message even when the code was recognised (<code>internal/backend/errors.go:99-108</code>).</td>
+      </tr>
+      <tr>
+        <td>Renaming a <b>fleet-db CLI flag</b></td>
+        <td>Keep the old flag until every loom on the machine is upgraded</td>
+        <td>loom hard-codes four flags and at least four env vars when it forks the binary (<code>internal/bootstrap/embedded.go:373-383</code>, with the Redis pool defaults appended at <code>:596-599</code>). The identification probe will not catch the rename for you: it accepts a real fleet-db on the <code>Usage of fleet-db:</code> banner alone (<code>:657-661</code>, reached from <code>:634</code>), and the <code>auth-dev-mode</code>/<code>redis-addr</code> clause beside it never fires, because the probe keeps only the first 500 bytes of <code>--help</code> (<code>:630-631</code>) and neither flag is in them.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Read the table's second column again. Almost every row says <b>fleet-db
+  first</b> — because the server is the side that can be strict, and the strict side
+  has to move first. The rule generalises: <i>the participant that can reject goes
+  first; the participant that can only be ignored goes second.</i></p>
+
+  <h2>The trace: a compatibility shim you can run in one second</h2>
+
+  <p>This is not hypothetical. At the two commits this course is pinned to, loomcli
+  sends a create-body field that fleet-db does not accept, gets rejected, and recovers
+  — on every single create that carries an external reference.</p>
+
+  <ol class="trace">
+    <li>
+      <span class="hop-file">internal/cli/data/create.go:98, 128</span>
+      <span class="hop-what"><b>The flag.</b> <code>--external-ref</code> lands on
+      <code>backend.CreateParams.ExternalRef</code>. A thin
+      <a href="0006-anatomy-of-a-command.html">Lesson 06</a>-shaped leaf: no logic
+      here.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/backend/types.go:430-452</span>
+      <span class="hop-what"><b>The body is a hand-built map.</b>
+      <code>FleetCreateBody</code> sets a key only when the caller set the field, so
+      unset fields are <em>absent</em> rather than zero. It puts
+      <code>"external_ref"</code> in at <code>:448</code>. Note what it deliberately
+      leaves out — <code>id</code>, <code>acceptance_criteria</code>,
+      <code>created_by</code>, <code>estimated_minutes</code>,
+      <code>dependencies</code> — pinned by a negative-assertion test at
+      <span class="path">internal/backend/fleet/params_test.go:240-259</span>.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/backend/fleet/fleet.go:532-534</span>
+      <span class="hop-what"><b>The request.</b> <code>createIssueOnce</code> POSTs
+      that map to <code>/issues</code>, with the idempotency values carried as
+      <em>headers</em>.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file"><span class="repo fleet">fleet-db</span> internal/api/issues.go:89-90 → internal/api/request.go:130-132</span>
+      <span class="hop-what"><b>Total rejection.</b> <code>CreateIssueRequest</code>
+      (<code>request.go:36-53</code>) has no <code>ExternalRef</code> field, so the
+      strict decoder fails the whole body: <b>400</b>, code
+      <code>invalid_json</code>, message <code>unknown field "external_ref"</code>
+      (<code>request.go:145-146</code>). Every other key in that body is collateral
+      damage.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/backend/fleet/errors.go:69-73</span>
+      <span class="hop-what"><b>Classification preserves the sentence.</b>
+      <code>classifyErrorCode</code> maps <code>invalid_json</code> onto
+      <code>ErrValidation(op, msg)</code>, and <code>ErrValidation</code> copies the
+      server's message onto <code>BackendError.Message</code> verbatim
+      (<span class="path">internal/backend/errors.go:122-124</span>). The English
+      string is now load-bearing.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/backend/fleet/create_compat.go:12-19 → fleet.go:517-520</span>
+      <span class="hop-what"><b>The shim decides.</b> An exact string comparison
+      against one constant. If it matches — and only then —
+      <code>Create</code> retries.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/backend/fleet/create_compat.go:25-43</span>
+      <span class="hop-what"><b>Recover in two calls.</b> Blank the field, re-derive
+      the idempotency key from the <em>new</em> body (the key is a hash of the exact
+      bytes — <span class="path">internal/backend/types.go:456-466</span>), POST
+      again, then <code>PATCH</code> the external ref on — because
+      <code>UpdateIssueRequest</code> <em>does</em> accept it
+      (<span class="repo fleet">fleet-db</span>
+      <span class="path">internal/api/request.go:68</span>). Create and update
+      disagree about the same field name; the shim exists to bridge that.</span>
+    </li>
+  </ol>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/backend/fleet/create_compat.go:12-19</figcaption>
+<pre><code>const unsupportedCreateExternalRefMessage = `unknown field "external_ref"`
+
+func isCreateExternalRefUnsupported(err error) bool {
+	var backendErr *backend.BackendError
+	return errors.As(err, &amp;backendErr) &amp;&amp;
+		backendErr.Kind == backend.KindValidation &amp;&amp;
+		backendErr.Message == unsupportedCreateExternalRefMessage
+}
+</code></pre>
+  </figure>
+
+  <p>That is what a compatibility window looks like in code: a constant, a predicate
+  and a two-call recovery that make one specific server mismatch survivable — keyed on
+  a sentence the other repo formats. Four tests cover it
+  (<span class="path">internal/backend/fleet/fleet_create_external_ref_test.go:14, 46, 102, 137</span>),
+  and every one of them drives it with a stub server. The unsupported case feeds the
+  shim its own constant (<code>:60</code>); the negative case sends
+  <code>unknown field "foo"</code> (<code>:141</code>) to prove the match is exact. So
+  the tests pin loom's branch. They cannot notice fleet-db rewording the sentence.</p>
+
+  <aside class="sidenote">The sentence is not even produced in one place. The claim
+  handler rolls its own strict decoder and formats the failure as
+  <code>"invalid JSON: " + err.Error()</code>
+  (<span class="repo fleet">fleet-db</span>
+  <span class="path">internal/api/claim.go:55, 57</span>), where the shared path
+  normalises it to <code>unknown field %s</code>
+  (<span class="path">internal/api/request.go:145-146</span>). Same failure, two
+  sentences, depending on the route.</aside>
+
+  <h2>The pattern to copy</h2>
+
+  <ol>
+    <li><b>To rename, alias on both sides.</b> fleet-db emits <code>Repo</code> under
+    <em>two</em> keys and accepts it under either, with <code>repo</code> winning a
+    collision:
+
+    <figure class="src">
+      <figcaption><b>fleet-db</b> internal/models/issue.go:225-236</figcaption>
+<pre><code>// MarshalJSON emits Repo as both `repo` and `source_repo` so a single Issue
+// serialization satisfies both native FleetDB and Loom client styles.
+func (i *Issue) MarshalJSON() ([]byte, error) {
+	type alias Issue
+	return json.Marshal(struct {
+		*alias
+		SourceRepo string `json:"source_repo,omitempty"`
+	}{
+		alias:      (*alias)(i),
+		SourceRepo: i.Repo,
+	})
+}
+</code></pre>
+    </figure>
+
+    <p>loomcli does the mirror image: <code>fleetIssueWire</code> declares both keys
+    and a two-line accessor picks
+    (<span class="path">internal/backend/fleet/convert.go:24-25, 99-104</span>), from
+    commit <code>af23eac3e</code>
+    <code>parity(fleet): accept fleet-db's `repo` json key as source_repo alias</code>.
+    Once both sides accept both spellings, <b>deploy order stops mattering for that
+    field</b> — which is the whole point of paying for an alias.</p></li>
+
+    <li><b>Put anything the other side might not know in a header, not the body.</b>
+    The idempotency values travel that way, and the comment says exactly why:
+    "the <code>X-Idempotency-Key</code> / <code>X-Idempotency-Force</code> values
+    travel as request headers — fleet-db's strict JSON decode rejects unknown body
+    fields" (<span class="path">internal/backend/fleet/idempotency.go:13-17</span>).</li>
+
+    <li><b>Build request bodies as maps keyed on set-ness, never as structs.</b>
+    <code>updateParamsToPatchRequest</code> sets a key only for a non-nil pointer
+    (<span class="path">internal/backend/fleet/params.go:323-338</span>,
+    <code>setStrField</code> at <code>:386-390</code>). Its doc comment states the
+    rule: fields fleet-db's <code>UpdateIssueRequest</code> lacks "must be omitted
+    entirely, not just zeroed" (<code>:314-322</code>).</li>
+
+    <li><b>Pin a query-parameter name with a negative assertion.</b> When loom sent
+    <code>?issue_type=</code> where fleet-db reads <code>?type=</code>, the filter was
+    ignored and <code>--type=epic</code> returned tasks
+    (<span class="path">internal/backend/fleet/params_test.go:284-287</span>). The
+    regression test asserts the <em>wrong</em> key is absent, not just that the right
+    one is present (<code>:289-298</code>). Copy that shape; a positive assertion
+    alone would have passed throughout the bug.</li>
+
+    <li><b>Prefix the commit <code>parity(...)</code> and cite the other repo's issue
+    ID.</b> There are 57 such commits in loomcli
+    (<code>git log --grep='^parity'</code>) and fleet-db uses the same prefix
+    (<code>0712db1</code>). Cross-repo TODOs name an ID —
+    <code>// TODO(fleet-q6ox): fleet-db does not yet return unblocked issues on
+    close</code> at
+    <span class="path">internal/backend/fleet/fleet.go:850-851</span>. It is how the
+    other half of a two-repo change gets found later.</li>
+  </ol>
+
+  <h2>The case study: a change that shipped in the right order</h2>
+
+  <p>loomcli's client used to build ready/blocked paths by appending to its workspace
+  base URL, producing <code>/api/v1/{ws}/ready</code>. fleet-db only served
+  <code>/api/v1/{ws}/issues/ready</code>, so those calls 404'd — and surfaced one
+  layer up as a 503 "workspace not registered", because the canonical
+  <code>/issues</code> path worked and ready did not. That is the route row of the
+  table above, playing out: a missing route does not present as a missing route. Two
+  dates, both readable with <code>git show</code> in your pinned checkouts:</p>
+
+  <ol class="trace">
+    <li class="fleet-hop">
+      <span class="hop-file"><span class="repo fleet">fleet-db</span> 0712db1 — 2026-04-23</span>
+      <span class="hop-what"><b>Server first, additively.</b>
+      <code>parity(fix): add /ready and /blocked workspace-root aliases</code>
+      registers the two extra paths on the same handlers, behind the same middleware
+      and permission (<span class="path">internal/api/ready.go:34-38</span>). Nothing
+      is removed; both shapes now work. The doc comment at <code>:15-26</code> records
+      that the aliases exist only to match a client's URL shape.</span>
+    </li>
+    <li>
+      <span class="hop-file"><span class="repo loom">loomcli</span> 3418bbe70 — 2026-05-04, eleven days later</span>
+      <span class="hop-what"><b>Client second.</b> The client moved to the canonical
+      path, which is what it builds today —
+      <code>"/issues/ready?"</code> at
+      <span class="path">internal/backend/fleet/fleet.go:382</span> and
+      <code>"/issues/blocked"</code> at
+      <span class="path">internal/backend/fleet/blocked.go:12</span>.</span>
+    </li>
+  </ol>
+
+  <p>Now notice the residue. The aliases are still registered and no live loom client
+  uses them. They cannot be deleted on a whim either, because any loom binary from
+  before 2026-05-04 still constructs the old shape, and local mode will happily pair
+  one of those with a fleet-db built today. That
+  is the compatibility window outliving the change that needed it — and the reason the
+  removal row in the table sends loomcli first and fleet-db second, with a written
+  waiting period in between.</p>
+
+  <div class="callout trap">
+    <span class="label">Trap — "non-breaking" is a statement about parsing, not behaviour</span>
+    <p><code>docs/api-governance.md:63-71</code> lists "adding new error codes for new
+    conditions" as non-breaking. It is, in the sense the doc means: an old client still
+    parses the response. But fleet-db declares <b>24</b> <code>ErrorCode</code>
+    constants (<span class="repo fleet">fleet-db</span>
+    <span class="path">internal/api/errors.go:15-52</span>) and loom's
+    <code>classifyErrorCode</code> recognises <b>14</b> of them
+    (<span class="path">internal/backend/fleet/errors.go:69-82</span>). The other ten
+    — including <code>forbidden</code>, <code>precondition_failed</code>,
+    <code>lease_expired</code> and <code>rate_limit_exceeded</code> — fall through to
+    a substring match and then to a status switch, where a 403 becomes
+    <code>ErrUnavailable("authentication failed: …")</code>
+    (<code>errors.go:49-50</code>): the wrong story to tell an operator. Adding a code
+    is non-breaking <em>and</em> ships a client behaviour nobody chose. When you add
+    one, add the arm on the loom side in the same pair of PRs.</p>
+  </div>
+
+  <div class="callout trap">
+    <span class="label">Trap — the deprecation machinery is written down and not wired up</span>
+    <p><code>docs/api-governance.md:73-85</code> specifies the removal process:
+    <code>deprecated: true</code> in the spec, then <code>Deprecation</code>,
+    <code>Sunset</code> and <code>Link</code> response headers, then a 30-day window.
+    At <code>000793b</code>, <code>api/openapi.yaml</code> contains <b>zero</b>
+    occurrences of <code>deprecated: true</code>, and
+    <code>grep -rn Deprecation --include='*.go' internal cmd</code> is empty in
+    <em>both</em> repos: nothing sends those headers and nothing reads them. The
+    window is a promise between people, not a mechanism. Plan on telling the client
+    yourself.</p>
+  </div>
+
+  <h2>What actually proves a pair compatible</h2>
+
+  <p>Two things, and it is worth knowing exactly how far each one reaches.</p>
+
+  <ol>
+    <li><b>The release gate.</b> <code>make test-skills-release-compat</code> builds
+    both binaries and drives a real embedded fleet-db through
+    <code>loom workspace add</code>, eight <code>loom skill import</code> calls, one
+    expected binary rejection, <code>loom skill list</code> and
+    <code>loom skill materialize</code>, comparing bundled files byte for byte
+    (<span class="path">scripts/test-vercel-skills-compat.sh:47-166</span>). It is a
+    genuine end-to-end proof — <b>of the skills path</b>. It never calls
+    <code>loom data</code>, so it proves nothing about the issue seam this lesson
+    traced.</li>
+    <li><b>The conformance suite.</b>
+    <code>TestE2E_IssueBackendConformance_AllModes</code> runs a shared suite against
+    four backend modes — <code>fleetdb-local</code>, <code>fleetdb-cloud</code>,
+    <code>fleet-direct</code>, <code>api-server</code> — with a real fleet-db binary
+    (<span class="path">internal/cli/issue_backend_conformance_e2e_test.go:30, 34, 57, 76, 100</span>).
+    The suite runs three subtests
+    (<span class="path">internal/backend/backendtest/issue_backend_suite.go:34-42</span>)
+    but pins <b>two</b>: <code>CreateListGetUpdateCloseReopen</code> and
+    <code>ReadyAndBlockedAgreeOnUnblockedIssue</code>. The third,
+    <code>ExplicitCreateID</code>, opens with
+    <code>if !cfg.SupportsExplicitCreateID { t.Skip(…) }</code>
+    (<span class="path">:81-83</span>), and nothing in the repository sets that field
+    true — none of the four mode configs do. It is still the closest thing to a
+    contract test either repo has — and it is behind the build tag
+    <code>issuebackend_e2e</code>, which appears in <b>exactly two places in the
+    tracked source at <code>ce4df56fb</code></b>: the two build-tag lines of that file.
+    No Makefile target and no workflow runs it; the only place that hands you the
+    command is this course's own
+    <a href="../reference/first-task-workflow.html">first-task workflow card</a>.</li>
+  </ol>
+
+  <aside class="sidenote">It also calls <code>t.Skip</code> when it cannot find a
+  fleet-db or loom binary
+  (<span class="path">internal/cli/issue_backend_conformance_e2e_test.go:132, 146</span>).
+  A skipped run and a passing run both end in <code>ok</code>. Reaching back to
+  <a href="0016-what-proves-what.html">Lesson 16</a>: read the SKIP lines before you
+  claim <i>real</i> evidence. And note the package it lives in:
+  <code>go test … ./internal/cli</code> is not a read-only command on a shared machine
+  — that package's <code>TestMain</code> calls <code>killTestTmuxSessions</code> before
+  and after the run, killing every tmux session on the <em>host</em> named
+  <code>loom-test-*</code> or <code>loom-e2e-test-*</code>
+  (<span class="path">internal/cli/testmain_test.go:21, 28, 34-46</span>), including
+  another engineer's in-flight run.
+  <a href="0026-roles-skills-and-shaping-work.html">Lesson 26</a> has the full
+  story.</aside>
+
+  <div class="callout trap">
+    <span class="label">Trap — the half-crossed field</span>
+    <p>A cross-repo field can be added at both ends and still do nothing, with both
+    builds green. <code>estimated_minutes</code> is that today. fleet-db declares it on
+    <code>models.Issue</code>, validates it and stores it
+    (<span class="repo fleet">fleet-db</span>
+    <span class="path">internal/models/issue.go:84, 160-161</span>;
+    <span class="path">internal/storage/marshal.go:64-65</span>). loomcli declares it
+    on <code>types.Issue</code> (<span class="path">internal/types/issue.go:33</span>)
+    and on <code>backend.IssueDetailData</code>, <code>CreateParams</code> and
+    <code>UpdateParams</code>
+    (<span class="path">internal/backend/types.go:85, 387, 509</span>), and the
+    projection copies it
+    (<span class="path">internal/backend/fleet/convert.go:257</span>). But no
+    fleet-db request struct accepts it (<code>internal/api/request.go:36-69</code>),
+    and <code>fleetIssueWire</code> — the mirror <code>Get</code>, <code>List</code>,
+    <code>Ready</code> and <code>Blocked</code> read through — never declares it (<span class="path">internal/backend/fleet/convert.go:15-43</span>), so
+    <code>toIssue</code> leaves it nil on every <code>Get</code>,
+    <code>Ready</code> and <code>List</code>. Both ends of the pipe have the field. The
+    pipe has no hole for it, in either direction. Nothing fails; nothing works.</p>
+  </div>
+
+  <aside class="sidenote">The comment at
+  <span class="path">internal/backend/fleet/params_test.go:13-19</span> explains the
+  omission by saying <code>acceptance_criteria</code> and
+  <code>estimated_minutes</code> "have dedicated endpoints". At <code>000793b</code>
+  fleet-db's <code>internal/api/</code> has no route for either. Dropping the keys is
+  still right; the stated reason is stale.</aside>
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory: you are adding an optional field to the body of a
+    fleet-db write endpoint, and loom needs to send it. State the order you land the
+    two PRs, the single line of code that forces that order, and what the wrong order
+    does to a user.</p>
+    <div class="answer">
+      <p><b>fleet-db first, loomcli second.</b> Ship the field on the request struct
+      <em>and</em> in <code>api/openapi.yaml</code> — the reflection test fails
+      otherwise for the two issue schemas
+      (<span class="path">internal/api/openapi_request_parity_test.go:51-52</span>).
+      Only once that server build is everywhere your loom talks to do you start
+      sending the key.</p>
+      <p>The forcing line is <code>dec.DisallowUnknownFields()</code> at
+      <span class="path">internal/api/request.go:132</span>.</p>
+      <p>Wrong order: an old fleet-db rejects the <b>whole body</b> with 400
+      <code>unknown field "x"</code> — not just your new field. Every other key in the
+      same write dies with it, which is the failure already recorded at
+      <span class="path">internal/api/openapi_request_parity_test.go:24-25</span>.
+      The compatibility window you are protecting is every fleet-db build any loom you
+      ship might reach.</p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="0028">
+    <div class="q" data-answer="2">
+      <p class="stem">loomcli starts sending <code>?owner_hint=alice</code> on the
+      ready query. fleet-db does not read that parameter yet. What happens?</p>
+      <ul class="opts">
+        <li>A 400 response naming the query key it did not recognise</li>
+        <li>A 200 response, and the client re-applies the filter itself</li>
+        <li>A 200 response, and the filter has no effect whatsoever</li>
+        <li>A 500 response, because the filter parser fails to parse</li>
+      </ul>
+      <div class="why"><code>parseReadyFilter</code> reads a fixed list of parameters
+      and never inspects the rest
+      (<span class="path">internal/api/ready.go:124-225</span>), and
+      <code>filterReadyIssues</code> only re-applies the fields it is written to know
+      about (<span class="path">internal/backend/fleet/deferred.go:36-47</span>). The
+      second option is the sharp wrong answer: client-side re-filtering is real, but
+      you have to add your field to it. <code>mol_type</code> and
+      <code>unassigned</code> are shipped today by
+      <code>readyOptsToQuery</code> (<code>params.go:222-241</code>), read by nobody,
+      and re-applied by nobody.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <p class="stem">Reaching back to <a href="0015-shipping-a-vertical-slice.html">Lesson
+      15</a>: loomcli's own <code>api/openapi.yaml</code> generates a Go type file and a
+      TypeScript type file. What does fleet-db's <code>api/openapi.yaml</code>
+      generate?</p>
+      <ul class="opts">
+        <li>A Go client package that loomcli imports and calls</li>
+        <li>Nothing at all, on either side of the boundary</li>
+        <li>A Go models file that loomcli's gate diffs</li>
+        <li>A TypeScript types file for the loom web app</li>
+      </ul>
+      <div class="why">No generator runs against it: a search for
+      <code>oapi-codegen</code> or <code>go:generate</code> across fleet-db returns
+      nothing, and every loomcli reference to that spec is a prose comment. The
+      first option is the near miss worth remembering — fleet-db really does ship a Go
+      client at <code>pkg/client/</code>, and loomcli really does not use it
+      (<span class="path">cmd/fdb/main.go:17-19</span> is its only consumer).</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <p class="stem">fleet-db renames one error message from "issue is already closed"
+      to "issue was closed earlier". Which repo's CI fails?</p>
+      <ul class="opts">
+        <li>Neither — loom quietly stops matching the text</li>
+        <li>fleet-db's, because the harness pins messages</li>
+        <li>loomcli's, because its stubs assert the text</li>
+        <li>Both, because the message is a shared constant</li>
+      </ul>
+      <div class="why">Nothing fails, and the damage is subtler than "the error kind
+      changes". The kind survives: fleet-db answers 422 with code
+      <code>invalid_transition</code>
+      (<span class="repo fleet">fleet-db</span>
+      <span class="path">internal/api/errors.go:244-251</span>) and loom maps that code
+      to <code>KindConflict</code>
+      (<span class="path">internal/backend/fleet/errors.go:74-76</span>). What breaks
+      is <code>backend.IsAlreadyClosedConflict</code>, which additionally requires the
+      substring <code>"already closed"</code> or <code>"is closed"</code>
+      (<span class="path">internal/backend/errors.go:99-108</span>) — and
+      <code>loom data close</code> uses exactly that to stay idempotent
+      (<span class="path">internal/cli/data/close.go:33-40</span>). After the reword, a
+      doubled close exits non-zero. loomcli's tests pass because they stub the server
+      with their own strings — the same reason the <code>external_ref</code> shim's
+      four tests would survive a reword
+      (<span class="path">internal/backend/fleet/fleet_create_external_ref_test.go:60</span>).</div>
+    </div>
+  </div>
+
+  <div class="cloze" data-answer="internal/backend/fleet/convert.go|convert.go">
+    <p class="stem">Every fleet-db <code>Get</code>, <code>List</code>,
+    <code>Ready</code> and <code>Blocked</code> response reaches loom's canonical types
+    through one hand-written mirror. Adding a response field to loom means editing
+    <input> — the file that declares <code>fleetIssueWire</code>.</p>
+    <div class="why"><code>fleetIssueWire</code> at
+    <span class="path">internal/backend/fleet/convert.go:15-43</span> and
+    <code>toIssue</code> at <code>:46-73</code>. It exists because
+    <code>types.Issue</code> tags the field as <code>issue_type</code> while fleet-db
+    emits <code>type</code>, so embedding loom's own struct would drop the type on
+    every response (<code>:12-14</code>). Skip this file and your new field is
+    unreachable on those four paths no matter what the server sends. Two paths do not
+    go through it at all — <code>Create</code> and <code>Close</code> unmarshal
+    straight into <code>types.Issue</code>
+    (<span class="path">internal/backend/fleet/fleet.go:544-545, 860-861</span>), which
+    is why a created issue comes back with its type dropped.</div>
+  </div>
+
+  <div class="callout safety">
+    <span class="label">Before the exercise — the standing rule</span>
+    <p>Everything below is <b>read-only</b>: greps, file reads, and one single-package
+    <code>go test</code> that spins up an in-process stub server. Do not bring up a
+    stack for this. When you <em>do</em> need one, the rule from
+    <a href="0003-run-it-without-breaking-anyone.html">Lesson 03</a> stands: local
+    stacks are shared machine state. Run <code>podman ps</code> first, pick your own
+    <code>LOCAL_MODE_COMPOSE_PROJECT</code> and an unclaimed port block, and tear down
+    only the project you created. Never <code>up</code>, <code>down</code> or
+    <code>--build</code> a compose project you did not start.</p>
+  </div>
+
+  <div class="exercise">
+    <h3>Find the drift before it finds you</h3>
+    <p>Run each of these from your loomcli checkout, with fleet-db as its sibling
+    directory.</p>
+    <ol>
+      <li><b>Prove nothing is generated.</b> Run <code>grep -c fleet go.mod</code> and
+      <code>grep -rn 'fleet-db/api/openapi' --include='*.go' internal</code>. Open all
+      three hits from the second command and confirm each is a comment, not code.</li>
+
+      <li><b>Watch the shim fire.</b> Run
+      <code>go test ./internal/backend/fleet -run 'TestCreateExternalRef|TestCreateDifferentUnknownField' -v</code>.
+      Then open <code>create_compat.go:12</code> and write down, in one sentence, the
+      change fleet-db could make that would break the shim while leaving all four of
+      those tests green.</li>
+
+      <li><b>Count the error codes on both sides.</b>
+      <code>grep -c 'ErrorCode = "' ../fleet-db/internal/api/errors.go</code>, then
+      list the cases in <code>classifyErrorCode</code>
+      (<code>internal/backend/fleet/errors.go:69-82</code>). Pick one code that appears
+      only on the server side and trace, through
+      <code>classifyHTTPError</code> (<code>:15-67</code>), what an operator would be
+      told when it arrives.</li>
+
+      <li><b>Find the half-crossed field yourself.</b> Grep
+      <code>estimated_minutes</code> in <code>../fleet-db/internal/models/</code> and
+      in <code>internal/types/</code>. Then name the one file between them where the
+      journey stops, and say which of the ordering-table rows would have to be executed
+      — and in which order — to finish it.</li>
+
+      <li><b>Interleave — <a href="0015-shipping-a-vertical-slice.html">Lesson 15</a>.</b>
+      <code>make check-go</code> catches a stale <code>types.gen.go</code> when
+      loomcli's own spec changes. In two sentences, say why no step of
+      <code>make check-go</code> could catch the drift in step 4, and which of the two
+      proofs in "What actually proves a pair compatible" would have to grow to catch
+      it.</li>
+    </ol>
+    <div class="verify">
+      <b>You succeeded when</b>
+      Step 1 prints <code>0</code>, then exactly three lines; step 2 shows four
+      <code>PASS</code> lines and your sentence names the server's <em>message text</em>
+      (not its status or code) as the fragile part; step 3 gives <b>24</b> on the
+      fleet-db side against <b>14</b> handled cases on the loom side; and step 4 names
+      <code>internal/backend/fleet/convert.go</code> as the stopping point, with
+      "new request-body field, fleet-db first" as the row that finishes the write half.
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><span class="repo fleet">fleet-db</span>
+    <code>docs/api-governance.md</code> — 111 lines, and the only written statement of
+    the rules your cross-repo PRs will be judged against: URL-path versioning, the
+    explicit breaking-versus-non-breaking lists, the 30-day pre-1.0 deprecation window,
+    and the five client expectations at <code>:105-111</code>. Read it beside this
+    lesson's second trap: two of those expectations tell clients to check
+    <code>Deprecation</code> and <code>Sunset</code> headers that nothing in either
+    repo sends. Knowing which parts of this doc are enforced, which are conventions and
+    which are aspirations is the difference between a change that lands and one that
+    gets rewritten in review.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <p>Related: <a href="../reference/glossary.html#names">the glossary</a> — this
+  lesson uses <i>fleet-db</i> in the sense that card fixes, and nothing here is
+  <i>fleet mode</i>, which is a different flag entirely. And
+  <a href="../reference/navigation.html">the navigation card</a> when you need to find
+  the handler behind a path in either repo.</p>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0027-seeing-what-happened.html"><span class="dir">Previous</span>Seeing what happened</a>
+    <a class="next" href="0029-fleet-db-builds-itself.html"><span class="dir">Next</span>fleet-db builds itself</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loom Glossary — reference card</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/reference.css">
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Reference <span class="sep">/</span> Print this one</p>
+  <h1>The Loom Glossary</h1>
+  <p class="standfirst">This codebase uses ordinary English words as precise domain
+  terms. Getting one of them wrong does not produce an error — it produces a
+  confident sentence that means something else. This is the dictionary.</p>
+
+  <div class="meta">
+    <span><b>Use when</b> reading any doc, PR, or issue in either repo</span>
+    <span><b>Source</b> docs/loom-glossary.md, CONTEXT.md, AGENTS.md</span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span> <span class="repo fleet">fleet-db</span></span>
+  </div>
+
+  <div class="callout key">
+    <span class="label">How to read this</span>
+    <p>The <b>Trap words</b> section is not an appendix — it is the reason this
+    document exists. Everything else is a normal glossary. If you read one
+    section before your first PR, read that one.</p>
+  </div>
+
+  <nav class="toc">
+    <ol>
+      <li><a href="#traps">Trap words</a></li>
+      <li><a href="#objects">Core objects</a></li>
+      <li><a href="#roles">Roles and agents</a></li>
+      <li><a href="#execution">Execution language</a></li>
+      <li><a href="#streaming">Streaming language</a></li>
+      <li><a href="#isolation">Isolation and trust</a></li>
+      <li><a href="#testing">Testing vocabulary</a></li>
+      <li><a href="#names">Other overloaded names</a></li>
+    </ol>
+  </nav>
+
+  <!-- ============================================================= -->
+  <h2 id="traps">1. Trap words</h2>
+  <p>Each of these has a general-English meaning, a general-software meaning, and
+  a Loom meaning — and the three disagree. Confirm the Loom meaning before acting
+  on any of them.</p>
+
+  <dl class="danger">
+    <div class="term">
+      <dt>loom</dt>
+      <dd>
+        <p class="def">The AI-agent orchestration platform this repo builds. Not
+        the video product, not Java Project Loom, not a weaving metaphor anyone
+        needs explained.</p>
+        <span class="where">docs/loom-glossary.md:3-5</span>
+      </dd>
+    </div>
+
+    <div class="term">
+      <dt>skill</dt>
+      <dd>
+        <p class="def">A workspace-stored <em>document entity</em> — a SKILL.md
+        body plus optional text files — loaded into an agent's worktree so the
+        agent can use it while working.</p>
+        <p class="avoid"><b>Not</b> the role config's <code>skills:</code> list.
+        That field is a task-<em>routing filter</em>: its tag strings are matched
+        against issue labels to score which tasks a role pulls. Same word, no
+        shared mechanism. Say <b>skill</b> for the document and <b>role skills</b>
+        (or routing tags) for the filter.</p>
+        <span class="where">docs/loom-glossary.md:21-27</span>
+      </dd>
+    </div>
+
+    <div class="term">
+      <dt>blocked</dt>
+      <dd>
+        <p class="def">Deliberately two things, told apart by where you are
+        looking. <b>(a) A task's own status</b> — the literal <code>blocked</code>
+        status: a worker parked the task and declared a blocker, so a human must
+        act. <b>(b) A dependency relationship</b> — an issue that cannot start
+        because issues it depends on are still open.</p>
+        <p class="avoid"><b>Disambiguator</b> is grammatical: the dependency sense
+        always names what is blocking ("Blocked by 3 issues"); the status sense
+        stands alone. Nothing translates between them. Do not invent a third
+        word — "Stuck" was tried for the status sense and deliberately reverted.</p>
+        <span class="where">docs/loom-glossary.md:124-138</span>
+      </dd>
+    </div>
+
+    <div class="term">
+      <dt>stuck</dt>
+      <dd>
+        <p class="def">A third thing that borrows the word without being either
+        sense of <em>blocked</em>. <code>task.stuck</code> is a daemon event for a
+        task that failed repeatedly across consecutive auto-mode invocations and
+        was skipped so the loop could progress elsewhere. <b>The loop gave up; the
+        agent declared nothing.</b> It is not an issue status and does not set one.
+        <code>AgentState "stuck"</code> in the web UI is this sense.</p>
+        <span class="where">docs/loom-glossary.md:145-149 (internal/events, TaskStuckData)</span>
+      </dd>
+    </div>
+
+    <div class="term">
+      <dt>stage</dt>
+      <dd>
+        <p class="def">A <b>derived view, not a stored object</b>. Nothing stores a
+        stage: it is folded out of an issue's event history, where a stage is a
+        contiguous run of that history with the same status and the same owner.
+        Because the window is bounded, a Journey shows the stages that window
+        supports — not necessarily the issue's whole life.</p>
+        <p class="def">It is no longer only a client-side fold. The server derives the
+        same thing under a different name — <code>spans[]</code>, from
+        <code>GET /api/workspaces/{ws}/issues/{id}/journey</code> — so if you go
+        looking for stage code on the Go side, search for <em>span</em>. The
+        load-bearing half of the definition is unchanged: derived, never stored.</p>
+        <span class="where">docs/loom-glossary.md:156-160; internal/webui/service/journey.go:20, 62</span>
+      </dd>
+    </div>
+
+    <div class="term">
+      <dt>phase</dt>
+      <dd>
+        <p class="def">A runtime concept <em>with storage behind it</em>: the log
+        of one stretch of agent work, <code>planning</code> or
+        <code>implementation</code>, written to
+        <code>tasks/&lt;id&gt;/&lt;phase&gt;.log</code> and surfaced as its own tab.</p>
+        <p class="avoid"><b>Remember it as</b> a phase is something an agent
+        <em>ran</em>; a stage is something the issue <em>was</em>.</p>
+        <span class="where">docs/loom-glossary.md:162-166</span>
+      </dd>
+    </div>
+
+    <div class="term">
+      <dt>sandbox</dt>
+      <dd>
+        <p class="def">Almost always the L1 workflow-bundle container
+        (<code>LOOM_DRIVER_SANDBOX=container</code>), which contains <b>the
+        DriverRun bundle only</b>. The TaskRun leaf that runs the LLM and edits
+        your code is <b>not containerized on any local path</b>.</p>
+        <span class="where">docs/loom-glossary.md:107-110</span>
+      </dd>
+    </div>
+
+    <div class="term">
+      <dt>trust level</dt>
+      <dd>
+        <p class="def">An <em>admission</em> decision, not a confinement.
+        <code>untrusted</code> means Loom refuses to run something. It never
+        bounds what an already-running process can reach.</p>
+        <span class="where">docs/loom-glossary.md:111-113</span>
+      </dd>
+    </div>
+
+    <div class="term">
+      <dt>agent</dt>
+      <dd>
+        <p class="def">Three distinct Go types share this word.
+        <b><code>domain.Agent</code></b> is a long-lived <em>assignment</em> of a
+        Role to repos (also called an "agentdef").
+        <b><code>domain.AgentSession</code></b> is <em>one run</em> of that
+        assignment. <b><code>entity.Agent</code></b> is a legacy issue-shaped
+        record with roles named <code>polecat</code>/<code>witness</code>/<code>mayor</code>,
+        used by nothing live.</p>
+        <p class="avoid"><b>Test</b> only a <em>session</em> starts and finishes at
+        a time. If a sentence gives the agent a timestamp, it means AgentSession.</p>
+        <span class="where">internal/domain/agent.go:493-499; internal/domain/control_plane.go:81-102; internal/entity/agent.go:42-66</span>
+      </dd>
+    </div>
+
+    <div class="term">
+      <dt>epic</dt>
+      <dd>
+        <p class="def">Not an object. An <b>issue whose <code>IssueType</code> is
+        <code>"epic"</code></b> — there is no Epic type, table, or service. Tasks
+        belong to it through parent-child dependency edges, and agents never work
+        on epics directly.</p>
+        <span class="where">internal/cli/taskfilter.go:14-17</span>
+      </dd>
+    </div>
+
+    <div class="term">
+      <dt>deterministic / real / live</dt>
+      <dd>
+        <p class="def">The three <b>evidence classes</b> — what a test run actually
+        proves. <b>deterministic</b> = orchestration only. <b>real</b> = a real local
+        backend. <b>live</b> = reaches a real external or paid service, costs
+        money, may mutate external state. Naming the wrong one in a PR is a
+        correctness claim you did not earn.</p>
+        <p class="def">Do not confuse these with the <b>trap words</b>:
+        <code>local</code>, <code>live</code>, <code>real</code>, <code>verify</code>,
+        <code>gate</code>. Two of them overlap the class names and two do not.
+        <code>local</code> in particular is a <em>provisioning</em> word — where the
+        thing runs — and is <b>not</b> an evidence class, so "evidence class: local"
+        is exactly the sentence the handshake exists to stop you writing. See
+        <a href="../lessons/0002-the-words-that-lie.html">Lesson 02</a>.</p>
+        <span class="where">AGENTS.md:22 (trap words), AGENTS.md:29-36 (handshake)</span>
+      </dd>
+    </div>
+  </dl>
+
+  <div class="callout trap">
+    <span class="label">The rule behind all of these</span>
+    <p><b>Before running anything slow or irreversible</b>, AGENTS.md requires you
+    to echo the request back as coordinates — <em>(depth, realness, provisioning,
+    polarity, target)</em> — disambiguate any trap word instead of guessing, and
+    state the evidence class of what you ran. If a real or live path is blocked,
+    report <em>blocked/unverified</em>. Never fabricate state as evidence.</p>
+  </div>
+
+  <!-- ============================================================= -->
+  <h2 id="objects">2. Core objects</h2>
+
+  <dl>
+    <div class="term">
+      <dt>Workspace</dt>
+      <dd><p class="def">A fleet-db-scoped project container. Workspaces own repos,
+      roles, agent definitions, issues, daemon profiles, and local runtime state.</p>
+      <span class="where">docs/loom-glossary.md:9-10</span></dd>
+    </div>
+    <div class="term">
+      <dt>Role</dt>
+      <dd><p class="def">The reusable configuration for an agent: prompt selection,
+      backend, model, task filter, tool policy, and role <code>kind</code>.</p>
+      <span class="where">docs/loom-glossary.md:11-12</span></dd>
+    </div>
+    <div class="term">
+      <dt>Agent</dt>
+      <dd><p class="def">A named assignment that uses a role. Worker agents are
+      supervised by daemon/runtime loops; interactive agents are launched in
+      terminal tabs.</p>
+      <span class="where">docs/loom-glossary.md:13-14</span></dd>
+    </div>
+    <div class="term">
+      <dt>Skill scope</dt>
+      <dd><p class="def">Where a skill applies. Workspace-scoped skills load for
+      every loom-managed agent in the workspace; role-scoped skills load only for
+      that role's agents and <b>shadow</b> a same-named workspace skill. Being in
+      scope is what makes a skill load — there is no separate attach list.</p>
+      <span class="where">docs/loom-glossary.md:28-31</span></dd>
+    </div>
+    <div class="term">
+      <dt>Skill pack</dt>
+      <dd><p class="def">A registered external git source of skills (repo, ref,
+      path) synced into the workspace on demand. Synced skills keep their pack as
+      provenance; a pack updates its own prior imports but never silently
+      overwrites a skill from a different creator or source.</p>
+      <span class="where">docs/loom-glossary.md:32-35</span></dd>
+    </div>
+  </dl>
+
+  <!-- ============================================================= -->
+  <h2 id="roles">3. Roles and agents</h2>
+
+  <dl>
+    <div class="term">
+      <dt>role.kind — <code>interactive</code></dt>
+      <dd><p class="def">A human-in-the-loop terminal/orchestration agent. Opening
+      its terminal runs the lead runtime, usually <code>loom lead</code>. Not
+      daemon-supervised; it runs when its terminal is opened.</p>
+      <span class="where">docs/loom-glossary.md:41-44</span></dd>
+    </div>
+    <div class="term">
+      <dt>role.kind — <code>worker</code></dt>
+      <dd><p class="def">An autonomous task-loop agent launched by
+      <code>loom agent</code>, <code>loom plan</code>, or <code>loom task</code>,
+      and supervised by the daemon/runtime.</p>
+      <span class="where">docs/loom-glossary.md:45-46</span></dd>
+    </div>
+    <div class="term">
+      <dt>Lead</dt>
+      <dd><p class="def">The default interactive role and terminal agent — but not
+      the only possible interactive agent.</p>
+      <p class="avoid"><b>Subtlety</b> Lead/orchestrator role <em>names</em>
+      additionally opt into epic ownership and assignment delivery.
+      <code>kind=interactive</code> alone does <b>not</b> grant those. Role kind
+      selects runtime placement, not product authorization: epic-runner ownership
+      stays name-based via <code>epicrunner.IsLeadRole</code> until Loom has an
+      explicit capability field.</p>
+      <span class="where">docs/loom-glossary.md:15-18, 52-54</span></dd>
+    </div>
+    <div class="term">
+      <dt>Unset <code>kind</code></dt>
+      <dd><p class="def"><code>domain.ResolveRoleKind</code> preserves the legacy
+      naming convention: roles named <code>lead</code> or <code>orchestrator</code>
+      resolve to <code>interactive</code>; every other name resolves to
+      <code>worker</code>.</p>
+      <span class="where">docs/loom-glossary.md:48-50</span></dd>
+    </div>
+  </dl>
+
+  <!-- ============================================================= -->
+  <h2 id="execution">4. Execution language</h2>
+  <p>From <code>CONTEXT.md</code>, the ubiquitous-language doc for task execution.
+  These terms are load-bearing in design docs and PR descriptions.</p>
+
+  <dl>
+    <div class="term">
+      <dt>Repository Set</dt>
+      <dd><p class="def">The exact collection of repository names selected as the
+      preferred working context for a Task. It determines what appears in a
+      TaskRun Root — but is <b>not</b> an authorization or filesystem-isolation
+      boundary.</p>
+      <p class="avoid"><b>Avoid</b> workspace, repository scope, repo allowlist</p>
+      <span class="where">CONTEXT.md:7-9</span></dd>
+    </div>
+    <div class="term">
+      <dt>Repository Access Policy</dt>
+      <dd><p class="def">The independent policy governing which repositories an AI
+      backend may read or modify. <b>Not</b> expressed by Repository Set
+      membership.</p>
+      <span class="where">CONTEXT.md:11-13</span></dd>
+    </div>
+    <div class="term">
+      <dt>TaskRun Root</dt>
+      <dd><p class="def">The directory an AI backend starts in for a TaskRun. It
+      belongs exclusively to that TaskRun, contains one checkout per member of the
+      Task Repository Set, and is reused only by scheduler retries of the same run.</p>
+      <p class="avoid"><b>Avoid</b> workspace, global workspace, cross-repository worktree</p>
+      <span class="where">CONTEXT.md:31-33</span></dd>
+    </div>
+    <div class="term">
+      <dt>Task Change Set</dt>
+      <dd><p class="def">An immutable version of the repository-keyed backend
+      commits produced by an implementation or correction TaskRun and
+      <b>confirmed on shared remotes</b>. Review and correction work always name
+      the exact Task Change Set they consume.</p>
+      <p class="avoid"><b>Avoid</b> shared working directory, patch-only handoff, uncommitted review state</p>
+      <span class="where">CONTEXT.md:43-45</span></dd>
+    </div>
+    <div class="term">
+      <dt>Task Branch</dt>
+      <dd><p class="def">The stable branch a Task owns in each repository it
+      changes. AI backends append Task commits to these branches, which later
+      TaskRuns consume through Task Change Sets.</p>
+      <span class="where">CONTEXT.md:47-49</span></dd>
+    </div>
+    <div class="term">
+      <dt>Valid TaskRun Completion</dt>
+      <dd><p class="def">A completion claim made only when every checkout is clean
+      and every changed repository has a backend-authored commit confirmed on its
+      Task Branch remote. A clean no-change result is valid; unfinished changes
+      require Backend Continuation; an unrecoverable push failure fails the run.</p>
+      <p class="avoid"><b>Avoid</b> loom auto-commit, successful dirty exit, best-effort push</p>
+      <span class="where">CONTEXT.md:51-53</span></dd>
+    </div>
+    <div class="term">
+      <dt>Backend Continuation</dt>
+      <dd><p class="def">Another turn in the <em>same</em> native AI backend session
+      and TaskRun Root, used when completion validation finds unfinished work.</p>
+      <p class="avoid"><b>Avoid</b> cold scheduler retry, replacement backend session</p>
+      <span class="where">CONTEXT.md:55-57</span></dd>
+    </div>
+    <div class="term">
+      <dt>Git Push Proxy</dt>
+      <dd><p class="def">The Loom-owned operation that pushes and verifies
+      backend-authored commits <b>without exposing remote credentials to the AI
+      backend process</b>.</p>
+      <p class="avoid"><b>Avoid</b> loom-authored commit, backend credential access</p>
+      <span class="where">CONTEXT.md:59-61</span></dd>
+    </div>
+    <div class="term">
+      <dt>Review TaskRun / Correction TaskRun</dt>
+      <dd><p class="def">A <b>Review</b> TaskRun evaluates an exact Task Change Set
+      from its own TaskRun Root; whether it may modify code is decided by
+      Repository Access Policy, not by repository selection. A <b>Correction</b>
+      TaskRun starts from a reviewed Task Change Set, appends backend-authored
+      commits to the Task Branches, and produces a new Task Change Set version.</p>
+      <span class="where">CONTEXT.md:63-69</span></dd>
+    </div>
+  </dl>
+
+  <!-- ============================================================= -->
+  <h2 id="streaming">5. Streaming language</h2>
+  <p>Precise enough that the distinctions are enforced in code. Recent work
+  consolidated all SSE frame encoding behind a single writer.</p>
+
+  <dl>
+    <div class="term">
+      <dt>SSE Frame</dt>
+      <dd><p class="def">The unit of transmission on a Server-Sent Events stream,
+      terminated by a blank line. Events, retry directives, and comments are
+      <em>all</em> frames.</p>
+      <p class="avoid"><b>Avoid</b> message, packet, raw SSE write</p>
+      <span class="where">CONTEXT.md:73-75</span></dd>
+    </div>
+    <div class="term">
+      <dt>Resumable Event</dt>
+      <dd><p class="def">An event frame carrying an event ID, advancing the client's
+      Last-Event-ID. <b>A stream is only actually resumable when the server honors
+      that ID on reconnect</b> — that honoring rule is the stream's cursor
+      contract. An ID the server never consults does not make its stream
+      resumable.</p>
+      <span class="where">CONTEXT.md:77-79</span></dd>
+    </div>
+    <div class="term">
+      <dt>Non-resumable Event</dt>
+      <dd><p class="def">An event frame without an event ID. It never moves the
+      client's reconnect cursor — whether it announces stream state or carries a
+      domain payload.</p>
+      <p class="avoid"><b>Avoid</b> control frame, control event</p>
+      <span class="where">CONTEXT.md:81-83</span></dd>
+    </div>
+    <div class="term">
+      <dt>Retry Directive</dt>
+      <dd><p class="def">A frame that only sets the client's reconnection delay. It
+      dispatches no event and carries no data.</p>
+      <p class="avoid"><b>Avoid</b> retry event</p>
+      <span class="where">CONTEXT.md:85-87</span></dd>
+    </div>
+    <div class="term">
+      <dt>Heartbeat Comment</dt>
+      <dd><p class="def">A comment frame sent periodically to keep an idle
+      connection alive. <b>Its cadence belongs to the individual stream</b>, and
+      clients ignore its text.</p>
+      <p class="avoid"><b>Avoid</b> keepalive event, shared heartbeat interval</p>
+      <span class="where">CONTEXT.md:89-91</span></dd>
+    </div>
+  </dl>
+
+  <!-- ============================================================= -->
+  <h2 id="isolation">6. Isolation and trust</h2>
+
+  <div class="callout trap">
+    <span class="label">Three things that sound like a security boundary and are not</span>
+    <p><b>Sandbox</b> contains the workflow bundle, not the agent that edits your
+    code. <b>Trust level</b> decides whether Loom launches something, not what it
+    can reach once running. <b><code>read_only</code> / <code>allowed_tools</code> /
+    <code>denied_tools</code></b> are backend tool and approval policy — real
+    restrictions where the backend has a mechanism, and a <em>prompt preamble</em>
+    where it does not. Never an OS boundary.</p>
+    <p class="avoid"><span class="where">docs/loom-glossary.md:102-121</span></p>
+  </div>
+
+  <p>Loom executes code at three levels and only one — the DriverRun bundle — can
+  be containerized. The TaskRun leaf that runs the LLM and edits code, and
+  daemon-supervised agents, run as host processes with the backend CLI's own
+  sandbox switched off.</p>
+
+  <dl>
+    <div class="term">
+      <dt>Egress mode</dt>
+      <dd><p class="def"><code>LOOM_DRIVER_SANDBOX_EGRESS=all|serve-only|none|delegated</code>
+      bounds what a containerized workflow can reach. Empty resolves per trust
+      level: trusted → <code>all</code>, untrusted → <code>serve-only</code> (fail
+      closed). <code>serve-only</code> runs <code>--network=none</code> plus a unix-socket
+      relay so the workflow can dial serve and nothing else. <code>delegated</code>
+      means a NetworkPolicy or host firewall enforces it <em>outside</em> the
+      launcher.</p>
+      <span class="where">AGENTS.md (Egress modes, SB4)</span></dd>
+    </div>
+  </dl>
+
+  <div class="source">
+    <span class="label">Read in full before you rely on any of this</span>
+    <p><code>docs/design/execution-isolation.md</code> — the three-level model, the
+    per-level mechanisms, the Daytona remote-isolation path, and an explicit list
+    of what is <em>not</em> isolation.</p>
+  </div>
+
+  <!-- ============================================================= -->
+  <h2 id="testing">7. Testing vocabulary</h2>
+
+  <p>Testing claims here are made along <b>four axes</b> — <em>depth, realness,
+  provisioning, polarity</em> — plus a target. The trap words are
+  <code>local</code>, <code>live</code>, <code>real</code>, <code>verify</code>,
+  and <code>gate</code>. Before anything slow or irreversible, echo the request
+  back as those coordinates and state the evidence class of what you ran.</p>
+
+  <div class="callout trap">
+    <span class="label">Known gap — verified 2026-09-03</span>
+    <p><code>AGENTS.md</code> names <code>docs/testing-terminology.md</code> twice
+    as the canonical map of this vocabulary. <b>That file does not exist in the
+    repo</b> at <code>ce4df56fb</code>; a repo-wide search for the word
+    <em>realness</em> matches <code>AGENTS.md</code> and nothing else. The
+    four-axis model summarised above is therefore the whole of the written
+    definition available to you today. Treat the axis names as reliable and the
+    detailed matrix as unwritten — and do not spend an afternoon hunting for the
+    file.</p>
+  </div>
+
+  <!-- ============================================================= -->
+  <h2 id="names">8. Other overloaded names</h2>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Name</th><th>In this codebase it means</th></tr></thead>
+    <tbody>
+      <tr><td><code>fleet</code> / <code>fleet-db</code></td><td>The control-plane data service that stores Loom state.</td></tr>
+      <tr><td><code>flue</code></td><td>The external agent harness framework Loom uses to build and run TypeScript agents and workflows.</td></tr>
+      <tr><td><code>aether</code></td><td>The Loom UI/design-system terminology used by the web UI.</td></tr>
+      <tr><td><code>codex</code> / <code>claude</code></td><td>AI backends or agent CLIs used by Loom, depending on context.</td></tr>
+      <tr><td><code>daytona</code> / <code>atlas</code></td><td>Loom deployment or provider concepts, in design docs and runtime config.</td></tr>
+      <tr><td><code>fleet mode</code></td><td>A <code>loom serve</code> flag for multi-server task coordination — off by default, and unrelated to whether you are using fleet-db.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="stamp" style="margin-top:-0.8rem">Rows 1-5: docs/loom-glossary.md:169-176. Fleet mode: README.md.</p>
+
+  <div class="ask">
+    <b>Found a term this card gets wrong, or one it is missing?</b> Tell your
+    teacher. The glossary is the highest-leverage document in the course — every
+    lesson depends on it — so corrections to it are worth more than corrections
+    anywhere else.
+  </div>
+
+  <p class="stamp">Compiled from <code>docs/loom-glossary.md</code>,
+  <code>CONTEXT.md</code>, and <code>AGENTS.md</code>. Every line citation was
+  re-checked against the pinned trees: loomcli <code>ce4df56fb</code>, fleet-db
+  <code>000793b</code>. Note that <code>CONTEXT.md</code> has uncommitted local
+  edits in some checkouts that add terms not listed here — this card follows the
+  committed file.</p>
+
+</main>
+</body>
+</html>

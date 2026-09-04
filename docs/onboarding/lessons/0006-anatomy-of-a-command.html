@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>06. Anatomy of a command — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 2 <span class="sep">/</span> Lesson 06 <span class="sep">/</span> The spine</p>
+  <h1>Anatomy of a command</h1>
+  <p class="standfirst">One command, all the way down — from a shell argument to an
+  HTTP write and back. This trace is the spine of the whole course; every later
+  lesson attaches to a hop on it.</p>
+
+  <div class="meta">
+    <span><b>Skill</b> follow any CLI command through every layer</span>
+    <span><b>Time</b> 40 min</span>
+    <span><b>Needs</b> <a href="0001-two-repos-one-system.html">01</a>, <a href="0005-where-state-lives.html">05</a></span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span></span>
+  </div>
+
+  <div class="callout key">
+    <span class="label">Why one trace</span>
+    <p>You cannot read 180,000 lines. You can read one path through them. Everything
+    in this codebase is a variation on the path below, so learning it once buys you
+    the ability to predict where anything else lives. We will come back to this
+    trace in later weeks and go deeper at particular hops.</p>
+  </div>
+
+  <p>Our specimen, chosen because it touches every layer:</p>
+
+<pre><code>loom repo add backend git@github.com:acme/backend.git --groups infra</code></pre>
+
+  <h2>The trace</h2>
+
+  <ol class="trace">
+    <li>
+      <span class="hop-file">cmd/loom/main.go:13-38 → internal/cli/repo/repo_cmd.go:71-82</span>
+      <span class="hop-what"><b>Package <code>init()</code>s run.</b> Go initialises
+      every blank-imported package. <code>repo</code>'s <code>init()</code> binds
+      its flags, attaches its five verb subcommands to <code>repoCmd</code>, and
+      calls <code>cli.RegisterCommand(repoCmd)</code>. Nothing is attached to the
+      root command yet — this only appends to a slice.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/cli/root.go:155, 288-290</span>
+      <span class="hop-what"><b><code>Execute</code> flushes the pending
+      registrations</b> into <code>rootCmd</code>. Because the slice holds
+      <em>pointers</em>, <code>init()</code> ordering between files does not matter
+      — one file can register <code>workspaceCmd</code> while another later adds
+      subcommands to the same pointer
+      (<span class="path">internal/cli/workspace/workspace_cmd.go:102-106</span>,
+      <span class="path">workspacev2_cmd.go:91-95</span>).</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/cli/root.go:182, 224-259</span>
+      <span class="hop-what"><b>Tracing and the root context.</b> OTel turns on only
+      when <code>LOOM_TRACE=1</code> or an OTLP endpoint is set. The root span's
+      context is published globally via <code>cmdstore.SetRootContext(ctx)</code> —
+      necessary because the store helpers build their own context and ignore
+      <code>cmd.Context()</code>.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/cli/repo/repo_cmd.go:46</span>
+      <span class="hop-what"><b>Arity validation — earlier than you expect.</b>
+      <code>Args: cobra.ExactArgs(2)</code>. cobra checks arity <em>before</em> it walks
+      up the tree looking for a <code>PersistentPreRunE</code>
+      (<code>ValidateArgs</code> at <span class="path">command.go:968</span>, the
+      hook at <span class="path">command.go:985-986</span> of
+      <code>cobra@v1.10.2</code>). So <code>loom repo add onlyone</code> fails with usage
+      text before the logger exists and before any flag is mirrored into the
+      environment — no setup runs at all.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/cli/root.go:112-145</span>
+      <span class="hop-what"><b><code>PersistentPreRunE</code>.</b> In order: init
+      the logger; mirror <code>--server</code>→<code>LOOM_SERVER_URL</code> and
+      <code>--workspace</code>→<code>LOOM_WORKSPACE</code>; resolve the backend;
+      <b>then rebuild the cached dependencies</b> so they reflect the flags just
+      mirrored. That ordering is load-bearing — see the trap below.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/cli/repo/repo_cmd.go:84 → cmdstore/cmdstore.go:124</span>
+      <span class="hop-what"><b>The wrapper pattern.</b> <code>RunE</code> does not
+      open a store. It immediately delegates to
+      <code>cmdstore.WithActiveWorkspace(func(ctx, h, ws) error {…})</code>. This is
+      <em>the</em> convention for any command that touches state.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/bootstrap/openstore.go:85, 122-123 → mode.go:54 → embedded.go:305, 339</span>
+      <span class="hop-what"><b>Mode detection.</b> <code>DetectMode()</code>:
+      <code>LOOM_FLEET_DB_URL</code> set → <b>cloud</b> (plain HTTP client); unset →
+      <b>local</b>, which reuses or spawns an embedded <code>fleet-db</code>
+      subprocess backed by a miniredis snapshot at
+      <code>&lt;LoomDir&gt;/fleet-db/redis-snapshot.json</code>. This is where
+      Lesson 01's two legal paths become one line of code.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/bootstrap/mode.go:76-91</span>
+      <span class="hop-what"><b>Workspace resolution.</b> Only
+      <code>LOOM_WORKSPACE</code> is consulted — <em>never</em>
+      <code>state.json</code> — and the key is then validated against the store, so
+      a stale value fails loudly with <code>active workspace %q not found in
+      fleet-db</code>.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/cli/repo/repo_cmd.go:96-107 → internal/infra/fleetdb/repo.go:42-69</span>
+      <span class="hop-what"><b>The write — which is two HTTP calls.</b>
+      <code>POST /api/v1/{ws}/repos</code>, then
+      <code>PATCH /api/v1/admin/workspaces/{ws}</code> with <code>add_repos</code>.
+      If the PATCH fails, the repo row is deleted again.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/infra/fleetdb/client.go:445-513</span>
+      <span class="hop-what"><b>Error mapping.</b> <code>classifyHTTPError</code>
+      turns HTTP status plus an error code into domain sentinels: 404 →
+      <code>domain.ErrNotFound</code>, 409 → <code>ErrAlreadyExists</code> (or
+      <code>ErrAlreadyClaimed</code> / <code>ErrInvalidTransition</code> by code),
+      400/422 → <code>ErrInvalid</code>, other 4xx → <code>ErrConflict</code>.
+      Callers compare with <code>errors.Is</code>, never with status codes.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/bootstrap/openstore.go:57-70</span>
+      <span class="hop-what"><b>Unwinding.</b> <code>WithStore</code>'s deferred
+      <code>h.Close()</code> runs. It always closes the client; it stops the embedded
+      fleet-db subprocess <b>only if this command was the one that spawned it</b>.
+      <code>openLocalStore</code> tries reuse first
+      (<span class="path">openstore.go:122-124</span>), and the reuse path returns a
+      handle with no <code>embedded</code> field
+      (<span class="path">openstore.go:145-159</span>), so <code>Close</code>'s
+      <code>if h.embedded != nil</code> guard skips the stop and the subprocess
+      outlives the command.</span>
+    </li>
+  </ol>
+
+  <h2>Three things worth stopping on</h2>
+
+  <h3>The wrapper is the convention</h3>
+
+  <p>Commands that touch state for the length of one call do not open stores,
+  resolve workspaces, or handle signals. They hand a closure to
+  <code>cmdstore.WithActiveWorkspace</code>, which builds a SIGINT/SIGTERM-cancellable
+  context, opens the store, resolves the active workspace, and defers cleanup
+  (<span class="path">internal/cli/cmdstore/cmdstore.go:111-132</span>). The
+  exceptions are the commands that hold the handle past a single closure —
+  <code>serve</code> and <code>daemon</code> for the life of the process,
+  <code>epic run</code> for the life of its own signal context. Those call
+  <code>cmdstore.OpenStore</code> directly and own the <code>Close</code> themselves.
+  <span class="path">internal/cli/serve/serve.go:223-227</span>,
+  <span class="path">internal/cli/daemon/daemon_cmd.go:322</span>,
+  <span class="path">internal/cli/epic/run.go:112-119</span></p>
+
+  <p>Keeping local-vs-cloud selection inside <code>bootstrap</code> is exactly what
+  the control-plane path guard from
+  <a href="0004-the-gate-is-the-spec.html">Lesson 04</a> enforces: it fails any
+  non-test file outside <code>openstore.go</code> that imports
+  <code>internal/infra/fleetdb</code> or calls <code>fleetdb.New(</code>.
+  <span class="path">scripts/check-control-plane-paths.sh:58-71, 76-98</span></p>
+
+  <aside class="sidenote">So "which mode am I in?" is never a question a command
+  asks. If you find yourself wanting to know, you are probably about to violate the
+  guard.</aside>
+
+  <h3>Multi-step commands undo their own mess</h3>
+
+  <p><code>runRepoAdd</code> clones a checkout, creates the store record, and if
+  remembering the local path fails it <b>deletes the record and removes the
+  clone</b>. The two-call write at hop 9 does the same thing one layer down. There
+  is no transaction manager here; compensating rollback written by hand is the
+  house style, and reviewers will expect it.
+  <span class="path">internal/cli/repo/repo_cmd.go:86-112</span></p>
+
+  <h3>The error you return becomes an exit code</h3>
+
+  <p><code>Execute</code> returns the error to <code>main</code>, which prints it to
+  stderr and exits with <code>cli.CommandExitCode(err)</code> — the code carried by
+  a <code>CLIExitCode()</code> error if the error implements it, otherwise 1. So an
+  error type is part of your command's public interface.
+  <span class="path">cmd/loom/main.go:53-57</span>
+  <span class="path">internal/cli/exit.go:36-45</span></p>
+
+  <div class="callout trap">
+    <span class="label">Trap — the ordering inside hop 5</span>
+    <p><code>PersistentPreRunE</code> mirrors flags into environment variables and
+    <em>then</em> rebuilds the cached dependencies. If you add setup that reads
+    configuration, putting it before the mirror step means you read the state the
+    flags were meant to override — and it will work fine in every test that does
+    not pass the flag. Add new resolution <b>after</b> the rebuild, not before.</p>
+  </div>
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory: a command needs to read and write workspace state.
+    Name the wrapper it must use, and the three things that wrapper does for it.</p>
+    <div class="answer">
+      <p><code>cmdstore.WithActiveWorkspace(func(ctx, h, ws) error {…})</code>.</p>
+      <p>It builds a signal-cancellable context from the published root context;
+      opens the store (which is where local-vs-cloud mode is detected and, in local
+      mode, the embedded fleet-db is reused or spawned); resolves and validates the
+      active workspace key; and defers <code>Close()</code>, which stops the embedded
+      fleet-db only if this command was the one that spawned it.
+      <span class="path">internal/cli/cmdstore/cmdstore.go:111-132</span>
+      <span class="path">internal/bootstrap/openstore.go:64-68, 145-159</span></p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="0006">
+    <div class="q" data-answer="1">
+      <p class="stem">Your command gets a 409 from fleet-db. What should the calling
+      code branch on?</p>
+      <ul class="opts">
+        <li>The HTTP status code returned on the response from the client</li>
+        <li>A domain sentinel error compared using <code>errors.Is</code></li>
+        <li>The error string returned by the fleet-db client wrapper</li>
+        <li>The error code field parsed directly from the response body</li>
+      </ul>
+      <div class="why"><code>classifyHTTPError</code> exists precisely so callers
+      never see status codes: it maps 409 onto <code>ErrAlreadyExists</code>,
+      <code>ErrAlreadyClaimed</code>, or <code>ErrInvalidTransition</code> depending
+      on the body's code. Branching on the status re-implements that mapping badly.
+      <span class="path">internal/infra/fleetdb/client.go:445-513</span></div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <p class="stem">You set <code>LOOM_WORKSPACE=GONE</code> for a workspace that
+      no longer exists. What happens?</p>
+      <ul class="opts">
+        <li>Loom falls back to the last workspace recorded in state.json</li>
+        <li>The command runs and fails later with a confusing not-found error</li>
+        <li>Resolution fails immediately: active workspace not found in fleet-db</li>
+        <li>Loom creates the workspace on demand and continues with the command</li>
+      </ul>
+      <div class="why">The key is validated against the store during resolution, so
+      a stale value fails fast and by name. The first option is the trap worth
+      remembering: <code>state.json</code> is a cache and is deliberately
+      <em>never</em> consulted here.
+      <span class="path">internal/bootstrap/mode.go:76-91</span></div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <p class="stem">In local mode, when does a command's deferred
+      <code>h.Close()</code> stop the embedded fleet-db subprocess?</p>
+      <ul class="opts">
+        <li>Only when that command was the one that spawned it</li>
+        <li>Always, because every handle owns the process it uses</li>
+        <li>Never, since the daemon alone supervises that process</li>
+        <li>Only when the runtime file records no other reader</li>
+      </ul>
+      <div class="why">Ownership decides it. <code>openLocalStore</code> tries to reuse a
+      healthy running runtime before spawning one
+      (<span class="path">openstore.go:122-124</span>); the reuse path returns
+      <code>&amp;StoreHandle{…}</code> with <code>embedded</code> left nil
+      (<span class="path">openstore.go:145-159</span>), and <code>Close</code> only calls
+      <code>embedded.Stop()</code> when that field is non-nil
+      (<span class="path">openstore.go:64-68</span>). So a command that reused a runtime
+      closes its client and leaves the subprocess running — which is exactly why
+      <code>loom serve</code> can hold one open across many other commands
+      (<span class="path">internal/cli/serve/serve.go:223-227, 292-296</span>).</div>
+    </div>
+  </div>
+
+  <div class="exercise">
+    <h3>Walk it yourself, then diff a second command against it</h3>
+    <ol>
+      <li>Open <code>internal/cli/repo/repo_cmd.go</code> and land on hops 1, 4, 6
+      and 9 — the four that land in this one file. Do not read the whole file; practise
+      landing on the lines the trace names.</li>
+      <li>Now pick a different store-touching command — <code>loom role set</code>
+      is a good one — and find its equivalent of each hop. Which hops are identical?
+      Which differ, and why?</li>
+      <li>Find a command that does <b>not</b> use
+      <code>cmdstore.WithActiveWorkspace</code>. What is different about what it
+      does? (Hint: not every command touches workspace state.)</li>
+      <li>Reaching back to <a href="0005-where-state-lives.html">Lesson 05</a>: hop
+      9 writes the repo to fleet-db, and the <code>rememberRepoLocalPath</code> call
+      folded into the same hop
+      (<span class="path">internal/cli/repo/repo_cmd.go:108-113</span>) caches a local
+      checkout path. Name the tier each of those lands in, and say which one you could
+      delete without losing anything.</li>
+    </ol>
+    <div class="verify">
+      <b>You succeeded when</b>
+      You can point at the exact line in your second command where the store write
+      happens, and state — without rerunning the trace — what would happen to the
+      embedded fleet-db if that command returned an error halfway through.
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><code>internal/cli/repo/repo_cmd.go</code>. It is the reference
+    implementation of the standard command path: self-registration, noun-verb
+    surface, the <code>WithActiveWorkspace</code> wrapper, and hand-written
+    compensating rollback, all in one readable file. When you add a command, copy
+    this one.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0005-where-state-lives.html"><span class="dir">Previous</span>Where state lives</a>
+    <a class="next" href="0007-two-clients-one-server.html"><span class="dir">Next</span>Two clients, one server</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

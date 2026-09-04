@@ -1,0 +1,700 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>22. Auth at the boundary — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 5 <span class="sep">/</span> Lesson 22 <span class="sep">/</span> fleet-db</p>
+  <h1>Auth at the boundary</h1>
+  <p class="standfirst">Since <a href="0003-run-it-without-breaking-anyone.html">Lesson
+  03</a> you have been running fleet-db with <code>--auth-dev-mode
+  --authz-enabled=false</code>. This lesson says exactly what those two flags
+  switch, one at a time, and exactly what they do not.</p>
+
+  <div class="meta">
+    <span><b>Skill</b> say what authenticates and what authorizes a request, in each mode</span>
+    <span><b>Time</b> 30 min</span>
+    <span><b>Needs</b> <a href="0003-run-it-without-breaking-anyone.html">03</a>, <a href="0006-anatomy-of-a-command.html">06</a>, <a href="0011-things-that-are-not-boundaries.html">11</a></span>
+    <span><b>Repos</b> <span class="repo fleet">fleet-db</span> <span class="repo loom">loomcli</span></span>
+  </div>
+
+  <h2>Why this exists: "auth" is two words</h2>
+
+  <p><span class="repo fleet">fleet-db</span>'s own doc opens by splitting the
+  word, and the split is the whole lesson: <b>authentication</b> answers <i>who is
+  calling</i>, <b>authorization</b> answers <i>may they do this</i>. They are
+  separately switchable, they live in different places in the request path, and —
+  the part people get wrong — their "off" positions are not symmetric.
+  <span class="path">docs/auth.md:1-3</span></p>
+
+  <p>The word belongs on the <a href="../reference/glossary.html#traps">trap
+  words</a> card for the same reason <code>trust level</code> does. "Auth is off in
+  local mode" is a sentence with three possible meanings — one per flag — and the
+  three have different consequences, including one that makes the server
+  <em>stricter</em>.</p>
+
+  <div class="callout key">
+    <span class="label">The one idea</span>
+    <p><b>Authentication is chain middleware; authorization is a per-route
+    wrapper.</b> The auth middleware runs <em>before</em> the mux matches, so it
+    cannot know which route you asked for — it only establishes an
+    <code>Actor</code> and puts it in the context. The authorizer runs
+    <em>after</em> the mux matched, inside the registered handler, so it knows the
+    route and its one permission — and it cannot see the request body. Everything
+    else in this lesson follows from those two positions.</p>
+  </div>
+
+  <p>Concretely, in the chain built by <code>NewServer</code>:
+  <code>RequestID → metricsOuter → Logging → <b>auth</b> → RateLimit → ContentType →
+  Recovery → routeCapture → mux</code>. The auth middleware is one of the
+  <code>extra</code> entries appended by <code>main</code>; the mux sits at the far
+  end. <span class="path">internal/api/server.go:34-41</span>,
+  <span class="path">cmd/fleet-db/main.go:508-535</span></p>
+
+  <aside class="sidenote">The workspace validator is a handler <em>wrapper</em>
+  rather than chain middleware for the same structural reason, and the code says
+  so: "Go 1.22 ServeMux only populates PathValue after route matching."
+  <span class="path">internal/api/workspace_middleware.go:24-25</span></aside>
+
+  <h2>What each flag actually switches</h2>
+
+  <p>Three booleans, all in one struct, all defaulting to the secure position —
+  which for <code>DevMode</code> means <code>false</code>:</p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> internal/config/config.go:63-68, 220-225</figcaption>
+<pre><code>type AuthConfig struct {
+	Enabled      bool     `json:"enabled"`
+	DevMode      bool     `json:"dev_mode"`
+	AuthzEnabled bool     `json:"authz_enabled"`
+	SkipPaths    []string `json:"skip_paths"`
+	SkipPrefixes []string `json:"skip_prefixes"`
+// … bootstrap-admin fields elided …
+
+		Auth: AuthConfig{
+			Enabled:      true,
+			DevMode:      false,
+			AuthzEnabled: true,
+			SkipPaths:    []string{"/healthz", "/readyz", "/metrics"},
+		},</code></pre>
+  </figure>
+
+  <p>The flags are <code>--auth-enabled</code>, <code>--auth-dev-mode</code> and
+  <code>--authz-enabled</code>, and the flag help is unusually honest about the
+  middle one: <i>"enable X-Actor dev-mode header source"</i>.
+  <span class="path">internal/config/config.go:462-464</span>. Environment
+  equivalents are <code>FLEET_AUTH_ENABLED</code>,
+  <code>FLEET_AUTH_DEV_MODE</code>, <code>FLEET_AUTHZ_ENABLED</code>
+  (<span class="path">config.go:1327-1354</span>).</p>
+
+  <h3>Enabled: install the identity middleware</h3>
+
+  <p><code>Enabled</code> is what builds the Redis key store and installs
+  <code>auth.Middleware</code> into the chain. Turn it off and no HTTP code path
+  puts an <code>Actor</code> in a request context — there are exactly two lines in
+  the whole repo that do, and only this middleware is behind this flag. The other
+  is the RPC socket's connection handler, which the flag does not reach —
+  "Two doors", below.
+  <span class="path">cmd/fleet-db/main.go:483-514</span>,
+  <span class="path">internal/auth/middleware.go:95</span>,
+  <span class="path">internal/auth/conn_handler.go:59</span></p>
+
+  <h3>DevMode: append one more identity source</h3>
+
+  <p><code>DevMode</code> is a single <code>if</code> that appends a second entry
+  to the source list. That is its entire footprint:</p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> cmd/fleet-db/main.go:495-502</figcaption>
+<pre><code>		var sources []auth.IdentitySource
+		// Production: Redis-backed API key authentication.
+		sources = append(sources, auth.NewAPIKeySource(keyStore))
+		// TODO: Wire BearerTokenSource when JWT/token validator infrastructure is ready.
+		// Dev mode: X-Actor header source (lowest priority, for backward compatibility).
+		if cfg.Auth.DevMode {
+			sources = append(sources, &amp;auth.HeaderSource{})
+		}</code></pre>
+  </figure>
+
+  <p>And here is that source in full. Read it once and you never need to be told
+  again why dev mode is not a security model:</p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> internal/auth/header.go:19-39</figcaption>
+<pre><code>func (s *HeaderSource) ExtractIdentity(_ context.Context, r *http.Request) (Actor, error) {
+	actor := strings.TrimSpace(r.Header.Get("X-Actor"))
+	if actor == "" {
+		return Actor{}, ErrNoCredentials
+	}
+	// … length cap (256 bytes) and control-character rejection elided …
+	return Actor{
+		ID:         actor,
+		AuthMethod: AuthMethodHeader,
+	}, nil
+}</code></pre>
+  </figure>
+
+  <p>No lookup, no comparison, no secret. The header <em>is</em> the answer. Its
+  own doc comment calls it "the legacy/dev-mode source"
+  (<span class="path">header.go:13-14</span>), and
+  <code>docs/auth.md:47</code> says plainly: "No backend lookup — trusts the header
+  value directly." Contrast <code>APIKeySource</code>, which validates the shape of
+  <code>X-API-Key</code> and then resolves it against Redis
+  (<span class="path">internal/auth/apikey.go:30-57</span> →
+  <span class="path">internal/auth/redis_keystore.go:27-42</span>).</p>
+
+  <h3>AuthzEnabled: construct the Authorizer, or don't</h3>
+
+  <p>One <code>if</code> again, and a startup log line that states the consequence
+  in plain words:</p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> cmd/fleet-db/main.go:554-562</figcaption>
+<pre><code>	// --- Authorization layer ---
+	var authorizer *auth.Authorizer
+	if cfg.Auth.AuthzEnabled {
+		aclStore := auth.NewRedisACLStore(rdb)
+		authorizer = auth.NewAuthorizer(aclStore, logger)
+		logger.Info("workspace authorization enabled")
+	} else {
+		logger.Warn("workspace authorization is DISABLED; all authenticated actors can access all workspaces")
+	}</code></pre>
+  </figure>
+
+  <p>That <code>*auth.Authorizer</code> — nil or not — is then threaded into every
+  <code>Register*Routes</code> call. Nil means the permission named on each route's
+  registration line is never consulted.</p>
+
+  <h2>The four combinations</h2>
+
+  <p><code>docs/auth.md:17-22</code> has a truth table for this. It is the right
+  shape; the row that says "No auth" is the one worth refining, because two other
+  mechanisms keep working underneath.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th><code>--auth-enabled</code></th><th><code>--authz-enabled</code></th><th>Who you are</th><th>What you may do</th><th><code>/api/v1/admin/…</code></th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>true</b><br>(default)</td><td><b>true</b><br>(default)</td>
+        <td>API key resolved in Redis; plus any <code>X-Actor</code> if <code>--auth-dev-mode</code>. No credential at all &rarr; <b>401</b></td>
+        <td>Workspace role, else global role, then the permission table (<code>authz.go:56-97</code>)</td>
+        <td><b>Global</b> role only, and admin-only permissions (<code>authz.go:118-144</code>)</td>
+      </tr>
+      <tr>
+        <td><b>true</b></td><td><b>false</b><br><i>local mode</i></td>
+        <td>Identical to the row above — identity is still required</td>
+        <td>Nothing is checked. <code>AuthzWrap</code> collapses to the workspace validator (<code>authz_wrap.go:14-16</code>)</td>
+        <td>Any actor passes; the permission is not checked (<code>authz_wrap.go:26-38</code>)</td>
+      </tr>
+      <tr>
+        <td><b>false</b></td><td><b>false</b></td>
+        <td>Nobody. No middleware, so no <code>Actor</code> ever reaches a context</td>
+        <td>Reads are open; the 21 call sites of <code>actorFromContext</code> return <b>401</b></td>
+        <td><b>403</b> for everyone. The API-key routes are not even registered (<code>main.go:567-570</code>)</td>
+      </tr>
+      <tr>
+        <td><b>false</b></td><td><b>true</b></td>
+        <td>Nobody</td>
+        <td>Nothing is checked — <code>Require</code> skips itself on the missing actor</td>
+        <td><b>403</b> on the six workspace-admin routes, via <code>RequireGlobal</code> instead; the four API-key routes are unregistered here too and <b>404</b> (<code>main.go:567-570</code>)</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Rows three and four are the asymmetry, and it lives in two nine-line blocks of
+  one file. Same question — "there is no actor here" — opposite answers, both
+  deliberate:</p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> internal/auth/authz.go:37-45, 108-116</figcaption>
+<pre><code>func (a *Authorizer) Require(perm Permission, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		actor, ok := ActorFromContext(r.Context())
+		if !ok {
+			// No actor in context: auth middleware disabled or dev mode.
+			// Skip authz to preserve backward compatibility.
+			next(w, r)
+			return
+		}
+// … permission check elided …
+
+func (a *Authorizer) RequireGlobal(perm Permission, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		actor, ok := ActorFromContext(r.Context())
+		if !ok {
+			// No actor in context on a global/admin route means unauthenticated.
+			// Reject to prevent privilege bypass when auth middleware is misconfigured.
+			respondForbidden(w, "authentication required")
+			return
+		}</code></pre>
+  </figure>
+
+  <aside class="sidenote">The admin side was not always like this. Commit
+  <code>c9b9c7e</code>, "harden admin endpoints against auth bypass", made
+  <code>RequireGlobal</code> and <code>GlobalAuthzWrap(nil)</code> reject
+  actorless requests, gated the API-key routes behind <code>Auth.Enabled</code>,
+  and flipped <code>AuthzEnabled</code>'s default to <code>true</code>. Before it,
+  <code>GlobalAuthzWrap(nil)</code> was <code>return next</code>.</aside>
+
+  <h2>The trace: <code>loom repo add</code>, in local mode</h2>
+
+  <p>Hop 9 of <a href="0006-anatomy-of-a-command.html">Lesson 06</a> was "the write
+  — which is two HTTP calls". Here is what happens to those two calls at fleet-db's
+  front door, under the flags Lesson 03 gave you.</p>
+
+  <ol class="trace">
+    <li>
+      <span class="hop-file">internal/bootstrap/openstore.go:94-98, 176-185</span>
+      <span class="hop-what"><b>One client config, both modes.</b>
+      <code>APIKey</code> comes from <code>LOOM_FLEET_DB_API_KEY</code>;
+      <code>Actor</code> comes from <code>resolveActor()</code> —
+      <code>LOOM_FLEET_DB_ACTOR</code>, else <code>LOOM_AGENT_NAME</code>, else
+      <code>$USER</code>. Local and cloud differ only in <code>BaseURL</code>.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/fleethttp/fleethttp.go:35-46</span>
+      <span class="hop-what"><b>Headers, empty fields skipped.</b>
+      <code>Authorization: Bearer</code> when a token is set;
+      <code>X-API-Key</code> <em>and</em> <code>X-Fleet-API-Key</code> when a key
+      is set; <code>X-Actor</code> when an actor is set. With no key configured —
+      the normal local case — the only identity on the wire is your Unix
+      username.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/bootstrap/embedded.go:366-378</span>
+      <span class="hop-what"><b>loom spawned the server it is talking to.</b> The
+      embedded fleet-db is launched with <code>--auth-dev-mode</code> and
+      <code>--authz-enabled=false</code>, with the reasoning in a comment right
+      above the args ("single-user mode skips RBAC"). Lesson 03's compose stack
+      passes the same two flags
+      (<span class="path">test/local-mode/docker-compose.yml:56-57</span>).</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file"><span class="repo fleet">fleet-db</span> cmd/fleet-db/main.go:483-514</span>
+      <span class="hop-what"><b>Sources assembled once, at boot.</b>
+      <code>Enabled</code> is true (nobody passed <code>--auth-enabled=false</code>),
+      so the key store is built and the middleware installed;
+      <code>DevMode</code> is true, so <code>HeaderSource</code> is appended after
+      <code>APIKeySource</code>. Priority is list order.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file"><span class="repo fleet">fleet-db</span> internal/auth/middleware.go:64-78</span>
+      <span class="hop-what"><b>Skip paths first.</b> The three defaults —
+      <code>/healthz</code>, <code>/readyz</code>, <code>/metrics</code> — pass
+      straight through with <b>no actor in context</b>, which is why an admin route
+      must never be put behind a skip prefix: it would 403 permanently rather than
+      open up (<code>docs/auth.md:91-93</code>). Note the
+      <code>r.Header.Del("X-Actor")</code> on this path too: anti-spoofing is not
+      skipped along with the authentication.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file"><span class="repo fleet">fleet-db</span> internal/auth/middleware.go:81-111</span>
+      <span class="hop-what"><b>First success wins.</b>
+      <code>APIKeySource</code> sees no <code>X-API-Key</code> and returns
+      <code>ErrNoCredentials</code>, so the chain continues;
+      <code>HeaderSource</code> returns
+      <code>Actor{ID: "tyson", AuthMethod: "header"}</code>; the middleware
+      validates it, deletes <code>X-Actor</code> (line 93), and stores the actor in
+      the context. <b>Authentication is now complete and nothing was
+      verified.</b></span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file"><span class="repo fleet">fleet-db</span> internal/api/repos.go:64 → internal/api/authz_wrap.go:12-19</span>
+      <span class="hop-what"><b>Call one:</b>
+      <code>POST /api/v1/{workspace}/repos</code>, registered as
+      <code>wrap(auth.PermRepoCreate, h.create)</code>. <code>authorizer</code> is
+      nil, so <code>AuthzWrap</code> returns <code>mw(next)</code>: the workspace
+      validator runs, and the permission printed on that line is never
+      read.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file"><span class="repo fleet">fleet-db</span> internal/api/workspace.go:53 → internal/api/authz_wrap.go:26-38</span>
+      <span class="hop-what"><b>Call two is an admin route.</b>
+      <code>PATCH /api/v1/admin/workspaces/{key}</code> goes through
+      <code>GlobalAuthzWrap(nil)</code>, which does <em>not</em> check
+      <code>PermWorkspaceUpdate</code> but <em>does</em> check that some actor
+      exists. Dev mode manufactured one, so it passes. That check is the only
+      thing between the caller and the admin API here.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file"><span class="repo fleet">fleet-db</span> internal/api/issues.go:70 → internal/api/request.go:165-173</span>
+      <span class="hop-what"><b>Where a handler needs the identity, it takes it
+      from the context.</b> Twenty-one call sites in eight files reach for
+      <code>actorFromContext(r)</code>, and every one 401s without an actor — that ID becomes
+      <code>Event.Actor</code>. None of them read a header; the middleware already
+      deleted it.</span>
+    </li>
+  </ol>
+
+  <p>Now flip one flag. With <code>--authz-enabled</code> left at its default, call
+  one needs a role holding <code>PermRepoCreate</code> — admin or maintainer, in
+  this workspace or globally — and call two goes through
+  <code>RequireGlobal</code>, which reads <em>only</em> the global role and needs
+  <code>PermWorkspaceUpdate</code>, which only <code>admin</code> holds. So
+  <code>loom repo add</code> is a global-admin operation on a fully configured
+  fleet-db. <span class="path">internal/auth/permissions.go:274-782</span>,
+  <span class="path">internal/infra/fleetdb/repo.go:59, 62</span></p>
+
+  <h2>The pattern to copy</h2>
+
+  <ol>
+    <li><b>One permission, named at the registration site.</b> Of the 259
+    <code>HandleFunc</code> registrations in production code, <b>257</b> read
+    <code>wrap(auth.PermXxx, handler)</code>. The two that do not are
+    <code>/healthz</code> and <code>/readyz</code>, two of the three default skip
+    paths; the third, <code>/metrics</code>, is registered with
+    <code>mux.Handle</code> instead (<span class="path">cmd/fleet-db/main.go:538-539, 552</span>).
+    <code>grep</code> over the registration lines <em>is</em> the authorization
+    matrix; never compute a permission inside a handler. (That grep is also the
+    fastest way into this package — see
+    <a href="../reference/navigation.html">Finding Anything</a> for the rest of
+    the route-to-file shortcuts.)</li>
+    <li><b>Two wrappers, two scopes.</b> <code>AuthzWrap</code> for
+    <code>/api/v1/{workspace}/…</code> (242 routes) and
+    <code>/api/v2/{workspace}/…</code> (5 more), <code>GlobalAuthzWrap</code>
+    for <code>/api/v1/admin/…</code> (10 routes, 3 registration sites). Choosing
+    between them is a real design decision, and
+    <span class="path">internal/api/workspace_scoped.go:10-27</span> is the
+    exemplar: <code>GET /{ws}/workspace</code> exists precisely so a
+    workspace-scoped developer can read its own workspace without a global
+    grant.</li>
+    <li><b>A privileged lane gets its own permission <em>and</em> its own
+    route.</b> The reason is structural, and the team wrote it down:</li>
+  </ol>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> internal/auth/permissions.go:214-220</figcaption>
+<pre><code>	// Two narrower permissions gate the writes decision 10 says an agent must
+	// not make on its own. Both follow PermTriggerBindingSecretRead's shape —
+	// an extra permission on its own route, deliberately not granted to
+	// developer keys — because that is how this model expresses a privileged
+	// lane: Require() takes one permission per route and cannot look at a
+	// request body, so "the same endpoint, but stricter when the payload says
+	// workspace" is not something it can enforce.</code></pre>
+  </figure>
+
+  <p>Fourth: <b>never read identity from a header in a handler.</b> While the
+  middleware is installed it deletes <code>X-Actor</code> on every path that
+  reaches a downstream handler — both skip loops and the success branch
+  (<span class="path">internal/auth/middleware.go:66, 74, 93</span>) — so a handler
+  that reaches for the header gets an empty string. That is a property of the
+  install, not of the code: the middleware exists only under
+  <code>if cfg.Auth.Enabled</code>
+  (<span class="path">cmd/fleet-db/main.go:483, 508</span>), and two production
+  readers still reach for it — <code>ackCommand</code> takes the header directly
+  (<span class="path">internal/api/control_plane.go:1070</span>), and
+  <code>actorRefFromRequest</code> prefers the context but falls back to it
+  (<span class="path">internal/api/platform.go:2669-2673</span>, 13 call sites in
+  <code>skills.go</code> and <code>platform.go</code>). Under
+  <code>--auth-enabled=false</code> both read whatever the client sent. Copy
+  <code>actorFromContext</code>
+  (<span class="path">internal/api/request.go:165-173</span>), not those two: the
+  context is the only authority.</p>
+
+  <div class="callout trap">
+    <span class="label">Trap — "stripped on all code paths"</span>
+    <p><code>docs/auth.md:89</code> says <code>X-Actor</code> "is stripped in
+    <b>all</b> code paths — skip paths, successful auth, and even after failed
+    auth." The last clause is false. There are exactly three
+    <code>r.Header.Del("X-Actor")</code> calls, at
+    <span class="path">middleware.go:66, 74, 93</span>, and line 93 sits inside the
+    <code>err == nil</code> branch. An invalid actor
+    (<span class="path">:85-90</span>), a bad credential
+    (<span class="path">:106-110</span>) and an exhausted source chain
+    (<span class="path">:113-114</span>) all write a 401 and return with the header
+    untouched. No harm follows — nothing downstream runs — but do not write a test
+    that asserts the strip on a failure path, and do not repeat the sentence in a
+    design review. Nor is the fix "no handler ever sees it": the guarantee is
+    "while the middleware is installed, no handler sees a client-supplied value",
+    and two handlers do still read the header
+    (<span class="path">control_plane.go:1070</span>,
+    <span class="path">platform.go:2673</span>).</p>
+  </div>
+
+  <div class="callout trap">
+    <span class="label">Trap — "authz off means the admin API is wide open"</span>
+    <p>It is not open, and it is not closed either. <code>GlobalAuthzWrap(nil)</code>
+    rejects a request with <em>no</em> actor with a 403, but performs no permission
+    check on a request that has one
+    (<span class="path">internal/api/authz_wrap.go:26-38</span>). So on a
+    dev-mode stack the guard stops an anonymous caller and waves through anyone who
+    types a name into a header. Both halves of that sentence are load-bearing:
+    quote only the first half and you will over-trust the deployment, quote only
+    the second and you will file a bug against a deliberate hardening.</p>
+  </div>
+
+  <div class="callout trap">
+    <span class="label">Trap — "X-Actor authorizes the caller"</span>
+    <p>loomcli's own field comment says the actor header is "for audit + (in
+    dev-mode) authorization"
+    (<span class="path">internal/infra/fleetdb/client.go:49-51</span>
+    <span class="repo loom">loomcli</span>). Read that carefully: the header only
+    ever supplies <em>identity</em>. Authorization is a Redis lookup keyed by that
+    identity — <code>fleet-db:{ws}:acl:roles:{actorID}</code>, falling back to
+    <code>fleet-db:acl:global-roles:{actorID}</code>
+    (<span class="path">internal/auth/acl.go:33-56</span>,
+    <span class="path">internal/storage/keys.go:981-987, 1001-1006</span>). With
+    authz on, <code>X-Actor</code> decides <em>whose</em> role is read, never what
+    that role permits.</p>
+  </div>
+
+  <div class="callout trap">
+    <span class="label">Trap — "set a bearer token for production"</span>
+    <p>Two loomcli comments tell you to
+    (<span class="path">internal/infra/fleetdb/client.go:9-13</span> and
+    <span class="path">internal/backend/fleet/config.go:20-23</span>
+    <span class="repo loom">loomcli</span>), and
+    <code>fleethttp.Auth.Apply</code> will happily set the header. fleet-db never
+    constructs <code>BearerTokenSource</code>: <code>main.go:498</code> is a
+    <code>TODO</code>, and <code>NewBearerTokenSource</code> has no non-test caller
+    at <code>000793b</code>. A bearer-only request against a production
+    configuration falls through every source and gets a 401
+    (<span class="path">internal/auth/middleware.go:113-114</span>).
+    <code>X-Fleet-API-Key</code> is a second decoy: loomcli sets it beside
+    <code>X-API-Key</code> (<span class="path">internal/fleethttp/fleethttp.go:40-41</span>),
+    the string appears <b>nowhere</b> in the fleet-db tree, and the server that
+    does read it is <code>loom serve</code>'s own
+    <a href="../reference/glossary.html#names">fleet-mode</a> registration endpoint
+    (<span class="path">internal/webui/fleet/handlers.go:70-85</span>
+    <span class="repo loom">loomcli</span>).</p>
+  </div>
+
+  <aside class="sidenote">A third collision, already on your glossary card: fleet-db's
+  <code>auth.Role</code> is an RBAC tier (<code>admin | maintainer | developer |
+  viewer</code>), while <a href="../reference/glossary.html#roles"><code>Role</code></a>
+  is an agent persona with its own workspace-scoped CRUD at
+  <code>/api/v1/{ws}/roles</code>. Both repos flag the clash in code:
+  <span class="path">docs/glossary.md:247-250</span>,
+  <span class="path">internal/storage/keys.go:1289-1292</span>.</aside>
+
+  <h2>Two doors, and the flags reach them differently</h2>
+
+  <p>fleet-db also serves a line-delimited JSON-RPC surface on a Unix socket, and
+  its authentication is not switchable. When RPC is enabled, the handler is
+  <em>always</em> wrapped in <code>auth.NewAuthConnHandler(..., auth.NewPeerCredSource(), ...)</code>
+  and <code>ConnAuthEnabled: true</code> is a literal in the call
+  (<span class="path">cmd/fleet-db/main.go:1068-1077</span>). Identity comes from
+  kernel peer credentials once per connection, not per request
+  (<span class="path">internal/auth/conn_handler.go:36-61</span>), and a failure
+  closes the socket. Authorization <em>is</em> switchable there — the same
+  possibly-nil <code>authorizer</code> is passed in, and
+  <code>checkPermission</code> returns nil when it is
+  (<span class="path">internal/rpc/methods.go:108-120</span>).</p>
+
+  <p>So "the auth flags" are precisely: <b>flags about the HTTP door's
+  authentication, plus one flag about authorization on both doors.</b> The embedded
+  local-mode fleet-db sidesteps the question entirely by passing
+  <code>--rpc-enabled=false</code>
+  (<span class="path">internal/bootstrap/embedded.go:372, 377</span>
+  <span class="repo loom">loomcli</span>).</p>
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory, without scrolling: name the two mechanisms this
+    lesson separates, say where each one sits relative to the mux, and say what
+    each one can and cannot see.</p>
+    <div class="answer">
+      <p><b>Authentication</b> — <code>auth.Middleware</code>, chain middleware,
+      runs <b>before</b> the mux matches. It sees headers and the path, and it does
+      <em>not</em> know which route will match. Output: an <code>Actor</code> in the
+      request context, or a 401.
+      <span class="path">internal/api/server.go:34-41</span>,
+      <span class="path">internal/auth/middleware.go:61-116</span></p>
+      <p><b>Authorization</b> — <code>Authorizer.Require</code> /
+      <code>RequireGlobal</code>, a handler wrapper composed at registration, runs
+      <b>after</b> the mux matched. It sees the matched route's single
+      <code>Permission</code>, the <code>{workspace}</code> path value where
+      there is one, and the actor's role from Redis — and it <em>cannot</em> see
+      the request body.
+      <span class="path">internal/auth/authz.go:37-104, 108-150</span></p>
+      <p>They are switched by different flags, and with no actor present the first
+      wrapper skips itself while the second returns 403.</p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="0022">
+    <div class="q" data-answer="2">
+      <p class="stem">A stack runs with <code>--auth-dev-mode
+      --authz-enabled=false</code>. A request arrives with no headers at all. What
+      does it get?</p>
+      <ul class="opts">
+        <li>200, because authorization is disabled on this server</li>
+        <li>403, because no actor reached the request context</li>
+        <li>401, because each identity source declined the call</li>
+        <li>500, because the header source found nothing to read</li>
+      </ul>
+      <div class="why"><code>--auth-enabled</code> was never turned off, so the
+      middleware is installed. <code>APIKeySource</code> and
+      <code>HeaderSource</code> both return <code>ErrNoCredentials</code>, the loop
+      falls out of the bottom, and the middleware answers 401 "authentication
+      required" (<span class="path">internal/auth/middleware.go:113-114</span>).
+      The 403 option is the near miss and worth pinning down: 403 is what an
+      <em>admin</em> route returns for a missing actor — but that wrapper sits
+      inside the handler, and the middleware has already answered 401 long before
+      the mux gets to it.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <p class="stem">Which change makes a workspace write handler <em>more</em>
+      likely to reject you, not less?</p>
+      <ul class="opts">
+        <li>Adding <code>--auth-dev-mode</code> to a stack that had authz enabled</li>
+        <li>Adding <code>--auth-enabled=false</code> to a stack in dev mode</li>
+        <li>Adding <code>--authz-enabled=false</code> to a stack in dev mode</li>
+        <li>Adding <code>--rpc-enabled=false</code> to a stack in dev mode</li>
+      </ul>
+      <div class="why">Turning authentication <b>off</b> is stricter here, not
+      looser: with no middleware there is no <code>Actor</code>, and the 21 call
+      sites of <code>actorFromContext</code> return 401 rather than attribute an
+      event to nobody
+      (<span class="path">internal/api/request.go:165-173</span>,
+      <span class="path">internal/api/issues.go:70-74</span>). Dev mode and
+      <code>--authz-enabled=false</code> both only ever remove checks; the RPC flag
+      does not touch the HTTP door at all.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <p class="stem">Reaching back to <a href="0006-anatomy-of-a-command.html">Lesson
+      06</a>: with authz at its default, which role can run <code>loom repo
+      add</code> end to end?</p>
+      <ul class="opts">
+        <li>Only an actor that holds the global <code>admin</code> role</li>
+        <li>Any actor holding the <code>maintainer</code> workspace role</li>
+        <li>Any actor holding the <code>developer</code> workspace role</li>
+        <li>Any actor with a role recorded in that workspace</li>
+      </ul>
+      <div class="why">The command is two calls
+      (<span class="path">internal/infra/fleetdb/repo.go:59, 62</span>). Call one
+      needs <code>PermRepoCreate</code>, which admin and maintainer hold. Call two
+      is <code>PATCH /api/v1/admin/workspaces/{key}</code>, and
+      <code>RequireGlobal</code> consults <b>only</b> the global role and requires
+      <code>PermWorkspaceUpdate</code> — admin-only. Maintainer is the sharp near
+      miss: it clears the first call and fails the second.</div>
+    </div>
+  </div>
+
+  <div class="cloze" data-answer="GlobalAuthzWrap">
+    <p class="stem">The wrapper applied to every <code>/api/v1/admin/…</code>
+    route, and the one that rejects an actorless request even when the authorizer
+    is nil, is <input> .</p>
+    <div class="why"><span class="path">internal/api/authz_wrap.go:24-41</span>.
+    Three production call sites: <code>apikey.go:50</code>,
+    <code>workspace.go:49</code>, <code>workspace.go:259</code>. Its sibling
+    <code>AuthzWrap</code> guards the other 247 workspace-scoped routes — 242
+    under <code>/api/v1/{workspace}/</code> plus 5 under
+    <code>/api/v2/{workspace}/</code> — and does the opposite on a missing
+    actor.</div>
+  </div>
+
+  <div class="exercise">
+    <h3>Read the authorization matrix off the registration lines</h3>
+
+    <div class="callout safety">
+      <span class="label">Before you start</span>
+      <p>Every step below is read-only: greps, file reads, and one
+      <code>go test</code> of a single package. <b>Do not</b> run
+      <code>make local-mode-up</code> or <code>local-mode-down</code>, do not start
+      a server on a fixed port, and do not touch a compose project or
+      agent-browser session you did not create. If you later want a running stack
+      to poke at, pick your own compose project name and an unclaimed port block
+      first — <a href="0003-run-it-without-breaking-anyone.html">Lesson 03</a> has
+      the procedure.</p>
+    </div>
+
+    <ol>
+      <li>In the <span class="repo fleet">fleet-db</span> tree, count the
+      registrations and the ones that name a permission:
+      <code>grep -rn 'HandleFunc("' --include='*.go' internal/api cmd/fleet-db | grep -v '_test\.go' | wc -l</code>
+      then the same pipeline ending in
+      <code>grep -c 'wrap(auth\.Perm'</code>. Invert that last filter to see the
+      two that differ, and say in one sentence why those two need no
+      permission.</li>
+
+      <li>Find the production admin-route wrappers:
+      <code>grep -rn 'wrap := GlobalAuthzWrap' internal/api | grep -v _test</code>.
+      Open one of the three files and list the routes it guards. Then predict, for
+      a dev-mode stack with <code>--authz-enabled=false</code>, what each of those
+      routes does with (a) no headers, (b) <code>X-Actor: nobody</code>.</li>
+
+      <li>Run the two tests that pin the asymmetry:
+      <code>go test ./internal/auth/ -run 'TestRequire_NoActor_SkipsAuthz|TestRequireGlobal_NoActor_Forbidden' -v</code>.
+      Read both bodies (<code>internal/auth/authz_test.go:139</code> and
+      <code>:272</code>) and write the one-sentence rule that makes both correct at
+      the same time.</li>
+
+      <li>Prove the "only two doors" claim:
+      <code>grep -rn 'ContextWithActor(' --include='*.go' internal cmd | grep -v _test</code>.
+      You should get three hits. Name the transport each of the two call sites
+      serves.</li>
+
+      <li>Cross the repos. In <span class="repo loom">loomcli</span>, read
+      <code>internal/fleethttp/fleethttp.go:35-46</code> and list every header it
+      can set. Then, back in fleet-db, grep for each header name and mark which
+      ones the server actually reads. Reaching back to
+      <a href="0016-what-proves-what.html">Lesson 16</a>: given what you found,
+      restate what a green <code>local-mode-verify</code> run proves about
+      authentication — and what it cannot.</li>
+    </ol>
+
+    <div class="verify">
+      <b>You succeeded when</b>
+      Your counts are <b>259</b> and <b>257</b>, and the two leftovers are
+      <code>/healthz</code> and <code>/readyz</code>; the grep in step 2 returns
+      exactly three lines; both tests in step 3 pass; step 4 returns three hits
+      (one definition, plus <code>middleware.go:95</code> for HTTP and
+      <code>conn_handler.go:59</code> for the RPC socket); and in step 5 you can
+      name at least one header loomcli sets whenever an API key is configured
+      (<code>fleethttp.go:39-42</code>) that appears nowhere in the fleet-db
+      tree.
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><code>internal/auth/authz.go</code> — 212 lines holding all three
+    authorization surfaces (<code>Require</code>, <code>RequireGlobal</code>,
+    <code>CheckPermission</code>), both no-actor decisions, and the rule that a
+    Redis outage returns 500 rather than 403. Read it beside
+    <code>internal/auth/middleware.go</code> (122 lines), which is the entire
+    authentication half. Together they are under 350 lines and they are the whole
+    boundary. <code>docs/auth.md</code> is worth a pass afterwards for the intended
+    design — with the correction below in hand.</p>
+  </div>
+
+  <aside class="sidenote">Two numbers in <code>docs/auth.md</code> are stale at
+  <code>000793b</code>: line 105 says admin has "All 23 permissions" —
+  <code>permissions.go</code> declares <b>156</b> <code>Permission</code> constants
+  and admin holds all of them (154 in the literal map, 2 added by
+  <code>init()</code> at <code>permissions.go:784-800</code>). Line 107 says
+  developer is "same as maintainer minus <code>issue.delete</code>"; the real delta
+  is <b>18</b> permissions, including all of <code>agent.*</code>,
+  <code>repo.*</code> and <code>role.*</code> writes. The <em>shape</em> the doc
+  describes is accurate; the counts are not.</aside>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0021-the-api-you-already-depend-on.html"><span class="dir">Previous</span>The API you already depend on</a>
+    <a class="next" href="0023-keeping-the-log-honest.html"><span class="dir">Next</span>Keeping the log honest</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>. Route counts, permission counts and the role delta were
+  recomputed from the pinned trees, not copied from <code>docs/auth.md</code>.</p>
+
+</main>
+</body>
+</html>

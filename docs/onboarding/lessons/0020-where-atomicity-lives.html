@@ -1,0 +1,686 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>20. Where atomicity lives — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 5 <span class="sep">/</span> Lesson 20 <span class="sep">/</span> fleet-db</p>
+  <h1>Where atomicity lives</h1>
+  <p class="standfirst">Redis runs one command at a time. Every promise this system
+  makes across two commands was bought on purpose — with a pipeline, or with a Lua
+  script. Buying the wrong one fails silently, and only under load.</p>
+
+  <div class="meta">
+    <span><b>Skill</b> decide whether an operation needs a Lua script, and locate any state from the key schema</span>
+    <span><b>Time</b> 35 min</span>
+    <span><b>Needs</b> <a href="0005-where-state-lives.html">05</a>, <a href="0008-claiming-without-collisions.html">08</a></span>
+    <span><b>Repos</b> <span class="repo fleet">fleet-db</span></span>
+  </div>
+
+  <h2>Why this exists</h2>
+
+  <p>One issue is not one thing in Redis. Creating <code>FLEET-42</code> writes an
+  issue hash, a status set, a priority ZSET, a type set, an assignee set, one set per
+  label plus the workspace label registry, a repo set, a parent set and a children
+  set, a deferred set, the ready ZSET, and a full-text-search set for every token in
+  its text — how many keys exactly depends on the issue, and the count is never one
+  (<span class="path">internal/projection/handlers.go:68-145</span>). Redis will not
+  roll any of that back for you, and it has no transaction that can read a value and
+  then decide what to write next.</p>
+
+  <p>So every invariant that spans more than one command is paid for explicitly. The
+  repo says so in one sentence, and it is the sentence worth keeping: the platform
+  scripts <q>follow the same pattern — one script per invariant that must hold
+  atomically</q> <span class="path">docs/architecture.md:1222-1223</span>.</p>
+
+  <div class="callout key">
+    <span class="label">The one idea</span>
+    <p>Atomicity is bought <b>per invariant</b>, not per operation. Name the
+    invariant, count the keys it spans, and ask whether any step depends on a value
+    you had to read. That answer picks the tool — not the size of the operation, and
+    not how many keys it happens to touch.</p>
+  </div>
+
+  <h2>Half the skill is finding the state at all</h2>
+
+  <p>You cannot reason about an invariant until you can name the keys it covers.
+  fleet-db makes that cheap by forbidding key construction everywhere except one
+  file:</p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> internal/storage/keys.go:1-6, 433-438</figcaption>
+<pre><code>// keys.go is the canonical source of all Redis key construction.
+//
+// IMPORTANT: All Redis key construction MUST live in this file.
+// No other package may construct Redis keys via string literals or
+// fmt.Sprintf. Import the key-builder functions from this package instead.
+// The Makefile lint-keys target enforces this invariant.
+
+// … 420 lines of builders elided …
+
+// WorkspacePrefixKey returns the namespace prefix for all keys in a workspace.
+// Lua scripts receive this as KEYS[1] and construct specific keys via concatenation.
+// Pattern: fleet-db:{ws}
+func WorkspacePrefixKey(ws string) string {
+	return Prefix + ":" + ws
+}</code></pre>
+  </figure>
+
+  <p>1,694 lines, 216 functions, and 185 of them carry a <code>// Pattern:</code>
+  comment — most of those also a <code>// Redis type:</code> line naming the Redis
+  structure. Read the comments, skip the bodies, and you have the data model.
+  <code>Prefix</code> is the constant <code>"fleet-db"</code>
+  (<span class="path">keys.go:18</span>), and <code>{ws}</code> is an uppercase
+  workspace key — <code>^[A-Z]([A-Z0-9-]{0,30}[A-Z0-9])?$</code>, from
+  <code>models.ValidateKey</code>
+  (<span class="path">internal/models/workspace.go:12, 98</span>). So a real key
+  looks like <code>fleet-db:FLEET:issues:FLEET-42</code>.</p>
+
+  <p><a href="0005-where-state-lives.html">Lesson 05</a> placed fleet-db's Redis in
+  the state tiers. This is what is inside it — the eleven keys you will actually go
+  looking for. Read the fourth and seventh rows with the
+  <a href="../reference/glossary.html">glossary</a> open:
+  <code>idx:assignee:unassigned</code> is a literal key rather than a worker, and
+  <code>blocked</code> here is the transitive set, not the trap word that also names
+  an issue status.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Key</th><th>Type</th><th>Holds</th><th>Builder</th></tr></thead>
+    <tbody>
+      <tr><td><code>…:{ws}:issues:{id}</code></td><td>HASH</td><td>every issue field, flat strings</td><td><code>keys.go:451</code></td></tr>
+      <tr><td><code>…:{ws}:idx:status:{status}</code></td><td>SET</td><td>ids in that status, one set per status</td><td><code>:461</code></td></tr>
+      <tr><td><code>…:{ws}:idx:assignee:{a}</code></td><td>SET</td><td>ids assigned to one worker</td><td><code>:491</code></td></tr>
+      <tr><td><code>…:{ws}:idx:assignee:unassigned</code></td><td>SET</td><td>unassigned ids — a literal key, not a worker named <code>unassigned</code></td><td><code>:499</code></td></tr>
+      <tr><td><code>…:{ws}:idx:deferred</code></td><td>SET</td><td>deferred ids</td><td><code>:555</code></td></tr>
+      <tr><td><code>…:{ws}:queue:ready</code></td><td>ZSET</td><td>pickup-eligible ids, score = priority</td><td><code>:565</code></td></tr>
+      <tr><td><code>…:{ws}:blocked</code></td><td>SET</td><td>transitively blocked ids</td><td><code>:573</code></td></tr>
+      <tr><td><code>…:{ws}:deps:blocked_by:{id}</code></td><td>SET</td><td>ids blocking this issue</td><td><code>:591</code></td></tr>
+      <tr><td><code>…:{ws}:locks:issue:{id}</code></td><td>STRING + TTL</td><td>the claim lock; value is the holder id</td><td><code>:859</code></td></tr>
+      <tr><td><code>…:{ws}:events</code></td><td>STREAM</td><td>every mutation in the workspace</td><td><code>:909</code></td></tr>
+      <tr><td><code>…:{ws}:projector:cursor</code></td><td>STRING</td><td>last event id written into the read model</td><td><code>:1115</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Three steps get you from a noun to every line of code that touches it:</p>
+
+  <ol>
+    <li><b>Find the builder.</b> <code>grep -n 'func .*Key' internal/storage/keys.go</code>
+    and search for your noun. Read its <code>// Redis type:</code> and
+    <code>// Pattern:</code> comments.</li>
+    <li><b>Grep the builder name.</b> <code>grep -rn 'ReadyQueueKey(' --include='*.go' internal/</code>
+    finds every Go reader and writer.</li>
+    <li><b>Grep the key suffix in Lua.</b> Step 2 <em>misses the Lua scripts</em>,
+    because they never call a Go builder. <code>grep -rl 'queue:ready' internal/storage/lua/</code>
+    finds six more scripts that step 2 cannot see.</li>
+  </ol>
+
+  <aside class="sidenote">Nearly every builder that skips
+  <code>assertValidWorkspace</code> — the guard that <b>panics</b> on a malformed
+  workspace key (<span class="path">keys.go:20-28</span>) — is a
+  <code>*Pattern</code> or <code>*Prefix</code> helper for <code>SCAN</code>.
+  <code>WorkspacePrefixKey</code> is the conspicuous exception: it is not a
+  <code>SCAN</code> helper, and of the builders whose output is handed to a script
+  that concatenates freely it is the only one that skips the guard.
+  <code>TriggerEventKeyPrefix</code> (<span class="path">keys.go:184-186</span>,
+  passed at <span class="path">await.go:249</span>) and
+  <code>DriverRunKeyPrefix</code> (<span class="path">keys.go:272-274</span>, passed
+  at <span class="path">platform.go:1376</span>) validate first. Validate
+  upstream.</aside>
+
+  <h2>Three tools, and the question that chooses between them</h2>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Tool</th><th>What it buys</th><th>What it cannot do</th><th>Live example</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>One command</b></td>
+        <td>Atomicity for one key, free.</td>
+        <td>Anything spanning two keys.</td>
+        <td><code>INCR …:seq:issues</code> mints an issue id — <code>sequence.go:36-42</code></td>
+      </tr>
+      <tr>
+        <td><b><code>TxPipeline</code></b><br>(MULTI/EXEC)</td>
+        <td>All queued writes land together, with nothing else interleaved.</td>
+        <td><b>Branch on a read.</b> Reads go to the client and see committed state; writes are buffered and land later.</td>
+        <td>The whole projector: <code>projector.go:259-276</code></td>
+      </tr>
+      <tr>
+        <td><b>Lua script</b></td>
+        <td>Read, decide, and write inside one uninterrupted execution.</td>
+        <td>Nothing — but Redis is single-threaded, so the whole server waits on your script.</td>
+        <td>47 of them, in <code>internal/storage/lua/</code></td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p><b>The question is not "how many keys?"</b> It is: <em>does a later step depend
+  on a value or a decision that came from a read?</em> If yes, Lua. If no, a pipeline
+  is enough however many keys you touch.</p>
+
+  <p>The repo states this itself, in the one place where it kept both
+  implementations of the same algorithm side by side — once in Go over several
+  pipelines, once in Lua:</p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> internal/storage/ready.go:241-251</figcaption>
+<pre><code>// RebuildBlockedCache delegates to the atomic Lua implementation to avoid
+// the TOCTOU race in the multi-pipeline Go version. See rebuildBlockedCacheGo
+// for the original Go reference implementation (kept for testing/comparison).
+func (s *RedisStorage) RebuildBlockedCache(ctx context.Context, ws string) error {
+	return s.RebuildBlockedCacheLua(ctx, ws)
+}
+
+// rebuildBlockedCacheGo is the original Go reference implementation that rebuilds
+// the blocked SET and ready ZSET from scratch. It has a TOCTOU race: issues added
+// between the snapshot read (phases 0-3) and write (phase 4) are silently evicted.
+// Kept for testing and comparison; production callers use RebuildBlockedCache (Lua).</code></pre>
+  </figure>
+
+  <p>Same phases, same output. The Go version reads a snapshot in phases 0–3 and
+  writes it in phase 4; anything created in the gap is deleted. Lua closes the gap
+  because the read and the write are one execution
+  (<span class="path">internal/storage/lua/rebuild_blocked_cache.lua:11-136</span>).
+  Note what did <em>not</em> decide it: both versions write the same two keys,
+  <code>…:blocked</code> and <code>…:queue:ready</code>.</p>
+
+  <h3>One key can still need Lua</h3>
+
+  <p>The clearest counter-example to "multi-key means Lua" touches exactly one key:</p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> internal/storage/lua/metadata_mutation.lua:11-27</figcaption>
+<pre><code>local raw = redis.call('HGET', issue_key, 'metadata')
+local metadata = {}
+if raw and raw ~= '' then
+  metadata = cjson.decode(raw)
+end
+
+if action == 'metadata.remove' then
+  metadata[metadata_key] = nil
+else
+  metadata[metadata_key] = value
+end
+
+local encoded = '{}'
+if next(metadata) ~= nil then
+  encoded = cjson.encode(metadata)
+end
+redis.call('HSET', issue_key, 'metadata', encoded, 'updated_at', updated_at)</code></pre>
+  </figure>
+
+  <p>One key, one field, and unavoidably Lua: the value written is a function of the
+  value read. Two concurrent metadata writes done as HGET-then-HSET in Go would lose
+  one. This is also the only script the projector runs <em>inside</em> its pipeline —
+  <code>pipe.Eval(ctx, storage.MetadataMutationLua, …)</code>
+  (<span class="path">internal/projection/redis_writer.go:123</span>) — an atomic unit
+  nested in a transaction, which is exactly what you want when the value is opaque to
+  the caller.</p>
+
+  <h3>And a dozen keys can be fine without it</h3>
+
+  <p><code>handleIssueCreate</code> writes the issue hash and every index, queue and
+  search key the issue needs, through a plain <code>TxPipeline</code> and no Lua at all
+  (<span class="path">internal/projection/handlers.go:68-145</span>). Look at what it
+  branches on: <code>status</code>, <code>priority</code>, <code>type</code>,
+  <code>labels</code>, <code>parent_id</code> — every one of them read out of the
+  <em>event</em>, never out of Redis. Nothing it writes depends on anything it read
+  from the database, so a pipeline is sufficient and correct.</p>
+
+  <p>Where a handler <em>does</em> read Redis, the seam shows. The
+  <code>ProjectionReader</code> doc comment states the rule plainly — <q>Reads return
+  persisted state, not in-flight buffered writes</q>
+  (<span class="path">internal/projection/writer.go:8-9</span>) — and
+  <code>reevaluateAfterBlockerRemoved</code> pays for it by hand, subtracting one from
+  a count because the <code>SREM</code> that would have changed it is still sitting
+  uncommitted in the pipeline
+  (<span class="path">internal/projection/helpers.go:281-283, 309</span>). That code
+  is correct only because the projector holds a per-workspace mutex across the whole
+  projection — cursor check, handler, <code>pipe.Exec</code>, cursor update —
+  <q>serializing projections within a workspace</q>
+  (<span class="path">internal/projection/projector.go:218-222, 249-285</span>). Not
+  for the whole of <code>ProjectEvent</code>: the lock is released before the
+  post-mutation cache rebuild (<span class="path">projector.go:283-290</span>), and
+  the <code>workspaceLock</code> doc comment that still says otherwise
+  (<span class="path">:40-42</span>) is stale.</p>
+
+  <aside class="sidenote">That mutex is process-local. I found no statement in
+  <code>docs/architecture.md</code> about whether two fleet-db processes may project
+  the same workspace concurrently, and did not verify it either way — treat
+  "single projector per workspace" as an assumption to confirm before you rely on
+  it.</aside>
+
+  <p>So the second input to the decision is <b>who else writes this key, and from
+  which process</b>. In-process serialisation is a real substitute for a script. A
+  race between two agents on two machines is not.</p>
+
+  <h3>The third case: you need the result of your own write</h3>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> internal/storage/lua/append_event.lua:5-13</figcaption>
+<pre><code>-- KEYS[1] = global stream key (fleet-db:{ws}:events)
+-- KEYS[2] = per-issue stream key (fleet-db:{ws}:events:issue:{id})
+-- ARGV    = flat list of field-value pairs for the event
+--
+-- Returns: the stream ID assigned to the global stream entry
+
+local id = redis.call('XADD', KEYS[1], '*', unpack(ARGV))
+redis.call('XADD', KEYS[2], id, unpack(ARGV))
+return id</code></pre>
+  </figure>
+
+  <p>The second <code>XADD</code> needs the id Redis generated for the first. A
+  pipeline cannot express that at any level of cleverness — the arguments of every
+  queued command are fixed before the batch is sent. That is why the two streams
+  share entry ids, and why an event id from one is a valid cursor into the other.
+  <span class="path">internal/storage/redis_eventstore.go:22-26, 65-79</span></p>
+
+  <h2>The trace: what the live claim actually buys</h2>
+
+  <p>Every hop below is in <span class="repo fleet">fleet-db</span>. Watch the atomic
+  units open and close — there are three, and none of them spans another.</p>
+
+  <ol class="trace">
+    <li class="fleet-hop">
+      <span class="hop-file">internal/api/claim.go:34, 79</span>
+      <span class="hop-what"><b>The route.</b>
+      <code>POST /api/v1/{workspace}/issues/{id}/claim</code> builds a
+      <code>ClaimIssueCmd</code> and calls the <em>service</em>, not storage.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">internal/service/issue_service.go:510 → internal/storage/locks.go:19-30, 37</span>
+      <span class="hop-what"><b>Atomic unit 1 — one key.</b>
+      <code>acquireIssueLockLua</code> takes the built lock key as
+      <code>KEYS[1]</code> and does <code>GET</code>; absent ⇒
+      <code>SET … EX</code> ⇒ <code>"OK"</code>; same holder ⇒ <code>EXPIRE</code> ⇒
+      <code>"REFRESH"</code>; anyone else ⇒ <code>"HELD"</code> ⇒
+      <code>ErrLockHeld</code> ⇒ <code>ErrAlreadyClaimed</code>. This is the entire
+      cross-agent guarantee, and it covers exactly one key.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">internal/service/issue_service.go:517-518</span>
+      <span class="hop-what"><b>A read, deliberately outside every atomic unit.</b>
+      The comment says why: <code>Read current state after lock acquired to avoid
+      TOCTOU</code>. Holding the lock is what makes an ordinary unprotected read
+      safe.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">internal/service/issue_service.go:571 → internal/storage/redis_eventstore.go:65</span>
+      <span class="hop-what"><b>Atomic unit 2 — two keys.</b>
+      <code>executeCommand</code> validates the event and appends it with
+      <code>append_event.lua</code>. This is the durable write; everything after it is
+      derived. <span class="path">issue_service.go:76-110</span></span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">internal/projection/projector.go:259-276 → handlers.go:589-621</span>
+      <span class="hop-what"><b>Atomic unit 3 — a pipeline, about a dozen keys.</b>
+      <code>handleIssueClaim</code> HSETs status and assignee, <code>SREM</code>s from
+      every non-terminal status index, moves the assignee index, <code>ZREM</code>s
+      the ready queue and re-<code>SET</code>s the lock with the TTL from the event
+      metadata. No Lua: every value comes from the event. The projector cursor is
+      queued into the <em>same</em> pipeline (<code>:269-271</code>), so read model
+      and cursor commit together or not at all.</span>
+    </li>
+  </ol>
+
+  <p>Three atomic units, fifteen-odd keys, and a claim is still correct — because
+  only one invariant needed protection against another process, and that invariant
+  lives on one key. If projection fails outright, <code>executeCommand</code> logs at
+  ERROR with <code>severity=projection-lag</code> and <b>returns nil anyway</b>
+  (<span class="path">issue_service.go:83-110</span>): the log is the truth and the
+  background projector catches up. Buying atomicity across all three units would buy
+  nothing you do not already have, and would cost a script long enough to stall the
+  server.</p>
+
+  <div class="callout fleet">
+    <span class="label">The rule, as a checklist</span>
+    <p>Before you write a script, answer four questions. <b>1.</b> What is the
+    invariant, in one sentence someone could test? <b>2.</b> Which keys does it span?
+    <b>3.</b> Does any write depend on a value or decision that came from a read?
+    <b>4.</b> Who else writes those keys, and from which process? Only 3 and 4 can
+    force Lua. If both answers are "no" and "only this goroutine", you want a
+    pipeline.</p>
+  </div>
+
+  <h2>Two traps</h2>
+
+  <div class="callout trap">
+    <span class="label">Trap — the file in <code>lua/</code> is not what runs</span>
+    <p>There is no <code>//go:embed</code> of <code>internal/storage/lua/</code>. The
+    only embeds in the repo are SQL migrations
+    (<span class="path">internal/archive/migrate/embed.go:5, 8</span>;
+    <span class="path">internal/storage/postgres/migrate/embed.go:5</span>), and the
+    only Go code that names that directory is a harness checker
+    (<span class="path">scripts/harness/cmd/check_lua_call_arity/main.go:36</span>).
+    What executes is a backtick <code>const</code> in
+    a <code>.go</code> file, compiled in — <code>redis_eventstore.go:21</code> says so
+    outright: <q>Embedded here to avoid filesystem dependency at runtime</q>. The
+    package then contradicts itself about which copy is canonical: thirteen
+    <code>.lua</code> files say the Go constant is
+    (<span class="path">lua/create_workspace.lua:3</span>), while
+    <span class="path">claim.go:13</span>,
+    <span class="path">status_transition.go:12</span>,
+    <span class="path">redis_pubsub.go:61</span> and
+    <span class="path">redis_pubsub_durable.go:28</span> — the last of those heading
+    six constants at once — say the <code>.lua</code> file is.
+    The absence of an embed settles it. Edit the Go constant <em>and</em> the
+    <code>.lua</code> file, or the gate below fails you.</p>
+  </div>
+
+  <p>Three harness gates hold that duplication together, and they are worth knowing
+  by name because they are what will actually stop your PR:</p>
+
+  <ul>
+    <li><code>check_lua_go_sync.sh</code> — pairs each <code>.lua</code> file with a
+    Go constant by lowercasing, stripping a trailing <code>lua</code> and dropping
+    non-alphanumerics (so <code>claim_issue.lua</code> ↔ <code>claimIssueLua</code>),
+    then diffs them with comments and blank lines stripped. It fails in
+    <b>both</b> directions: a constant with no file, or a file with no constant.
+    <span class="path">scripts/harness/check_lua_go_sync.sh:33-42, 165-223</span></li>
+    <li><code>check_lua_key_patterns.sh</code> — extracts every <code>":…"</code>
+    literal from every script and requires it to appear as a string literal in
+    <code>keys.go</code>, or to start with one that ends in <code>:</code>. That is
+    how <code>":idx:status:in_progress"</code> passes on the strength of
+    <code>":idx:status:"</code>.
+    <span class="path">scripts/harness/check_lua_key_patterns.sh:39-51, 78-101</span></li>
+    <li><code>check_lua_call_arity</code> — parses <code>KEYS[n]</code> and
+    <code>ARGV[n]</code> out of each script and compares the maxima against the
+    argument counts at the Go <code>Run()</code> callsite.
+    <span class="path">scripts/harness/cmd/check_lua_call_arity/main.go:16-18, 79-89</span></li>
+  </ul>
+
+  <p>Together with <code>make lint-keys</code>
+  (<span class="path">Makefile:125-146</span>), which forbids a
+  <code>"fleet-db:…"</code> literal in any non-test <code>.go</code> file outside
+  <code>internal/storage/</code> and separately forbids <code>storage.Prefix</code>
+  concatenation there (<span class="path">Makefile:128-131, 137-145</span>), that is a
+  closed loop: Go builds keys only in <code>keys.go</code>, Lua builds keys only from
+  suffixes that exist in <code>keys.go</code>, and the two copies of every script are
+  identical. The loop closes over one directory. The sync and arity gates scan only
+  <code>internal/storage/</code>
+  (<span class="path">scripts/harness/check_lua_go_sync.sh:102</span>;
+  <span class="path">scripts/harness/cmd/check_lua_call_arity/main.go:36-37</span>),
+  and inside it the pairing is exactly 47 scripts to 47 constants. A constant outside
+  it is unchecked: <code>tokenBucketLua</code>
+  (<span class="path">internal/api/ratelimit.go:51</span>) has no mirror file and no
+  gate.</p>
+
+  <div class="callout trap">
+    <span class="label">Trap — a script that exists is not a script that runs</span>
+    <p><a href="0008-claiming-without-collisions.html">Lesson 08</a> read
+    <code>claim_issue.lua</code> as <em>the</em> claim, and as a piece of
+    single-script design it is the clearest example in the repo. It is also not on
+    the path an agent takes. <code>claimIssueLua</code> is run from exactly one
+    place, <code>RedisStorage.ClaimIssue</code>
+    (<span class="path">internal/storage/claim.go:95</span>), and that method has no
+    production caller: every non-test hit for <code>.ClaimIssue(</code> is either the
+    backend-agnostic contract suite in
+    <code>internal/storage/storagetest/worker_tests.go</code> or a differently-typed
+    <code>ClaimIssue</code> on the service or the client SDK. The live path is the
+    five-hop trace above. <code>RedisStorage.TransitionStatus</code> and
+    <code>status_transition.lua</code> are the same story with zero non-test callers
+    at all.</p>
+  </div>
+
+  <p>This matters beyond trivia, because the two implementations have drifted.
+  <code>claim_issue.lua:64-69</code> moves the issue out of its <em>previous
+  assignee's</em> index; <code>handleIssueClaim</code> removes it only from
+  <code>idx:assignee:unassigned</code>
+  (<span class="path">internal/projection/handlers.go:607</span>), even though the
+  claim event carries the old assignee in its <code>Before</code> fields
+  (<span class="path">internal/service/issue_service.go:548-551</span>) and every
+  sibling handler uses it (<span class="path">handlers.go:205, 339, 396, 643,
+  681</span>). I found no other handler that repairs the old index entry. Whether
+  that is a live bug or something the periodic rebuild covers is a good question for
+  your teacher — and it is the reason "which one actually runs?" is a habit, not
+  pedantry.</p>
+
+  <aside class="sidenote">The habit, in two commands: <code>grep -rn '&lt;scriptField&gt;'
+  --include='*.go' .</code> to find the <code>Run()</code> callsite, then grep the
+  callers of the method that owns it. If they are all tests, you are reading
+  documentation, not behaviour. <a href="../reference/navigation.html">Finding
+  Anything</a> has the general version of this move.</aside>
+
+  <h2>The pattern to copy when you do write one</h2>
+
+  <ol>
+    <li><b>Pass built keys unless the key set depends on a read.</b> If you can name
+    every key before the script runs, build them in Go and pass them:
+    <code>AcquireIssueLock</code> passes <code>IssueLockKey(ws, issueID)</code>
+    (<span class="path">locks.go:41, 48</span>) and <code>append_event.lua</code>
+    takes two built stream keys. Only when the key names come out of data the script
+    reads — a status you have not seen, an id you are about to discover — do you pass
+    <code>WorkspacePrefixKey(ws)</code> as <code>KEYS[1]</code> and concatenate
+    inside (<span class="path">claim.go:92, 95</span>;
+    <span class="path">rebuild_cache.go:153, 156</span>). Exactly seven of the 47
+    scripts need the prefix;
+    <code>grep -rl 'workspace prefix' internal/storage/lua/</code> names them.</li>
+    <li><b>Return <code>"OK"</code> or <code>"ERR:CODE[:detail]"</code>, and map it to
+    a sentinel in Go.</b> That is the convention when the caller has to tell failure
+    modes apart — 10 of the 47 scripts carry an <code>ERR:</code> literal, and
+    <span class="path">claim.go:102-121</span> is the reference parse. Not a rule,
+    though: <code>acquireIssueLockLua</code> returns
+    <code>"OK"</code>/<code>"REFRESH"</code>/<code>"HELD"</code>
+    (<span class="path">locks.go:18-30</span>). The cost of skipping it shows in the
+    six scripts that use <code>redis.error_reply</code>
+    (<code>grep -ln error_reply internal/storage/lua/*.lua</code>): their Go sides have
+    to match on a substring of an error message
+    (<span class="path">metadata.go:47-52</span>;
+    <span class="path">redis_pubsub.go:130</span>;
+    <span class="path">redis_pubsub_durable.go:371-377</span>).</li>
+    <li><b>Register the constant once at construction.</b>
+    <code>redis.NewScript(claimIssueLua)</code> in <code>NewRedisStorage</code>
+    (<span class="path">redis.go:1138-1160</span>), so the script is SHA-loaded once
+    rather than shipped per call.</li>
+    <li><b>Write the mirror file, and say which copy is canonical correctly.</b> Copy
+    the wording from <span class="path">lua/create_workspace.lua:3</span>, not from
+    <code>claim.go:13</code>.</li>
+    <li><b>Bound the work.</b> Redis is single-threaded. The rebuild script caps its
+    BFS at depth 50 and batches <code>SADD</code>/<code>ZADD</code> a thousand members
+    at a time (<span class="path">lua/rebuild_blocked_cache.lua:63, 118-136</span>) —
+    an unbounded script is an outage.</li>
+  </ol>
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory: name the three tools this codebase has for making
+    Redis writes hold together, and the one question that chooses between them.</p>
+    <div class="answer">
+      <p><b>One command</b> (atomic for one key, free — e.g. <code>INCR</code> on
+      <code>…:seq:issues</code>, <span class="path">sequence.go:36-42</span>);
+      <b><code>TxPipeline</code></b> (every queued write lands together, nothing
+      interleaves, <span class="path">projection/projector.go:259-276</span>); and a
+      <b>Lua script</b> (read, decide and write in one uninterrupted execution, the 47
+      files in <span class="path">internal/storage/lua/</span>).</p>
+      <p>The question: <b>does any write depend on a value or a decision that came
+      from a read?</b> If yes, Lua. If no, a pipeline, however many keys. Number of
+      keys is not the test — <code>metadata_mutation.lua</code> touches one key and
+      needs Lua; <code>handleIssueCreate</code> touches a dozen and does not.</p>
+      <p>Second input: who else writes those keys, and from which process. The
+      projector gets away with reading inside a pipeline only because a per-workspace
+      mutex serialises it (<span class="path">projector.go:218-222, 249-285</span>).</p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="0020">
+    <div class="q" data-answer="1">
+      <p class="stem">You are adding an operation that writes three keys and reads
+      none — all three values come from the request payload. What do you reach
+      for?</p>
+      <ul class="opts">
+        <li>A Lua script, so the three writes cannot interleave</li>
+        <li>A TxPipeline, since no write depends on a read value</li>
+        <li>Three plain calls, since Redis orders them anyway</li>
+        <li>A Lua script, since more than one key gets written</li>
+      </ul>
+      <div class="why">A <code>TxPipeline</code> already guarantees the three land
+      together with nothing interleaved; Lua would buy nothing and would occupy the
+      single-threaded server. The last option is the trap worth remembering — key
+      count is not the test. <code>handleIssueCreate</code> writes a dozen keys through
+      a pipeline (<span class="path">internal/projection/handlers.go:68-145</span>);
+      <code>metadata_mutation.lua</code> writes one and still needs Lua.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <p class="stem"><code>metadata_mutation.lua</code> touches exactly one key. Why
+      is it a script at all?</p>
+      <ul class="opts">
+        <li>Because a single hash field write is not itself atomic</li>
+        <li>Because it re-encodes a value it had to read first</li>
+        <li>Because a pipeline cannot buffer an HSET on a hash</li>
+        <li>Because the metadata JSON is spread over several keys</li>
+      </ul>
+      <div class="why">It <code>HGET</code>s the metadata JSON, decodes it, edits one
+      entry and writes the re-encoded blob back — the value written is a function of
+      the value read, so two concurrent HGET-then-HSET pairs in Go would lose one.
+      The first option is the plausible miss: a single <code>HSET</code> <em>is</em>
+      atomic, which is exactly why the problem is the read, not the write.
+      <span class="path">internal/storage/lua/metadata_mutation.lua:11-27</span></div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <p class="stem">An agent claims a task via
+      <code>POST /issues/{id}/claim</code>. Which script decides whether that claim
+      wins?</p>
+      <ul class="opts">
+        <li>claim_issue.lua, loaded from internal/storage/lua on boot</li>
+        <li>claimIssueLua, the Go constant declared inside claim.go</li>
+        <li>acquireIssueLockLua, the Go constant declared in locks.go</li>
+        <li>acquire_issue_lock.lua, loaded from internal/storage/lua</li>
+      </ul>
+      <div class="why">The service acquires the lock through
+      <code>acquireIssueLockLua</code>
+      (<span class="path">internal/storage/locks.go:19-30, 37</span>) and then emits an
+      event; the status and index writes happen later, in the projector's pipeline.
+      Both <code>.lua</code> options are wrong for the same reason — nothing reads
+      that directory at runtime, there is no <code>//go:embed</code> of it, and the
+      Go constants are what execute. And <code>claimIssueLua</code>, though real and
+      tested, has no production caller
+      (<span class="path">internal/storage/claim.go:95</span>).</div>
+    </div>
+  </div>
+
+  <div class="cloze" data-answer="WorkspacePrefixKey">
+    <p class="stem">When a script's key <em>names</em> depend on data it has to read,
+    Go cannot build them for it. It is handed the workspace namespace from
+    <input>(ws) as <code>KEYS[1]</code> and concatenates the suffixes itself.</p>
+    <div class="why"><span class="path">internal/storage/keys.go:433-438</span>. Its
+    doc comment states the convention: <q>Lua scripts receive this as KEYS[1] and
+    construct specific keys via concatenation.</q> Seven of the 47 scripts work this
+    way; the rest are handed keys already built, however many — including two-key
+    <code>append_event.lua</code>
+    (<span class="path">internal/storage/redis_eventstore.go:70-73</span>).</div>
+  </div>
+
+  <div class="exercise">
+    <h3>Locate the state, then prove which script owns it</h3>
+
+    <div class="callout safety">
+      <span class="label">Before you start</span>
+      <p>Everything below is read-only: greps, a Makefile target that runs only
+      <code>grep</code>, and one package's tests against an in-memory Redis. Do not
+      start a stack for this. If you ever do need one, the week-1 rule stands — pick
+      your own compose project and your own unclaimed port block, and never
+      <code>up</code>, <code>down</code> or <code>--build</code> a stack you did not
+      create. Nothing here writes to either repo.</p>
+    </div>
+
+    <p>Work in the pinned fleet-db tree.</p>
+    <ol>
+      <li>Run <code>make lint-keys</code>, then
+      <code>grep -c '^func ' internal/storage/keys.go</code>. Now read
+      <span class="path">Makefile:128-131</span> and write down which files are
+      allowed to contain a <code>"fleet-db:"</code> literal. Then answer: how do the
+      Lua scripts build keys without breaking that rule?</li>
+
+      <li>Locate one piece of state end to end. Take
+      <code>fleet-db:{ws}:queue:ready</code>. Find its builder in
+      <code>keys.go</code>, then run
+      <code>grep -rn 'ReadyQueueKey(' --include='*.go' internal/ | grep -v _test</code>,
+      then <code>grep -rl 'queue:ready' internal/storage/lua/</code>. Say why the
+      second command cannot find what the third one does, and which of the six Lua
+      files you would have missed.</li>
+
+      <li>Check the key-pattern gate by hand:
+      <code>grep -oE '":[a-z_]+[a-z_:]*"' internal/storage/lua/claim_issue.lua | sort -u</code>.
+      Confirm each result appears as a literal in <code>keys.go</code>. One of them
+      does not appear literally and still passes — find it, and explain the rule at
+      <span class="path">scripts/harness/check_lua_key_patterns.sh:88-93</span> that
+      lets it through.</li>
+
+      <li>Reaching back to
+      <a href="0008-claiming-without-collisions.html">Lesson 08</a>: re-read
+      <code>claim_issue.lua</code> with the question "who runs this?" Run
+      <code>grep -rn 'claimScript' --include='*.go' . | grep -v _test.go</code>, then
+      <code>grep -rn '\.ClaimIssue(' --include='*.go' . | grep -v _test.go</code>.
+      Classify every hit in the second list as (a) the contract suite, (b) a different
+      <code>ClaimIssue</code> on another type, or (c) a production caller of
+      <code>RedisStorage.ClaimIssue</code>.</li>
+
+      <li>Prove the guarantee the script does carry, without a stack:
+      <code>go test ./internal/storage/ -run 'TestClaimIssue_IndexConsistency|TestClaimIssue_LockCleanupOnNotClaimable' -v</code>.
+      It uses miniredis on an ephemeral loopback port — the shared fixture is at
+      <span class="path">internal/storage/claim_test.go:22-28</span> — so there is no
+      container and no fixed port. Then read
+      <span class="path">internal/storage/lua/claim_issue.lua:38-50</span> and say
+      what would break if either <code>DEL lock_key</code> were removed.</li>
+
+      <li>Now design one. You are asked to add "reserve the next free comment id for
+      an issue and append the comment in one step". Walk the four-question checklist
+      and write down your answer with the keys named. (Start from
+      <code>keys.go:899</code> and <code>keys.go:823</code>.)</li>
+    </ol>
+
+    <div class="verify">
+      <b>You succeeded when</b>
+      <code>make lint-keys</code> prints
+      <code>OK: No key construction outside storage/</code>; the builder count is
+      <b>216</b>; step 2 gives <b>31</b> Go lines across seven files and <b>six</b>
+      Lua files; step 3 yields <b>nine</b> key segments, of which
+      <code>":idx:status:in_progress"</code> is the one carried by a prefix rule;
+      step 4 gives <b>three</b> <code>claimScript</code> lines and <b>18</b>
+      <code>.ClaimIssue(</code> lines, of which <b>15</b> are the contract suite and
+      <b>none</b> is category (c); and both tests in step 5 report PASS.
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><span class="repo fleet">fleet-db</span>
+    <code>internal/storage/keys.go</code>. Read only the comment blocks — every
+    builder carries its Redis type and its key pattern, so 1,694 lines of trivial
+    string concatenation is really a 216-entry catalogue of the entire data model,
+    and it is the fastest map of fleet-db in existence. When you finish, read
+    <code>internal/storage/lua/rebuild_blocked_cache.lua</code> beside
+    <code>internal/storage/ready.go:241-254</code>: the same algorithm stated twice,
+    with the reason one of them had to be Lua written in the doc comment.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0019-rebuilding-the-world.html"><span class="dir">Previous</span>Rebuilding the world</a>
+    <a class="next" href="0021-the-api-you-already-depend-on.html"><span class="dir">Next</span>The API you already depend on</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>. Vocabulary follows the
+  <a href="../reference/glossary.html">course glossary</a>.</p>
+
+</main>
+</body>
+</html>

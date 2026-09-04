@@ -1,0 +1,490 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>30. When the docs are wrong — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 6 <span class="sep">/</span> Lesson 30 <span class="sep">/</span> Judgement</p>
+  <h1>When the docs are wrong</h1>
+  <p class="standfirst">Thirteen claims in these repos' own documentation are false
+  at the commit you are reading. This lesson is the four-step procedure that finds
+  the fourteenth, and the list of the thirteen so you do not lose an afternoon to
+  one of them.</p>
+
+  <div class="meta">
+    <span><b>Skill</b> verify a documentation claim against the code before you act on it</span>
+    <span><b>Time</b> 25 min</span>
+    <span><b>Needs</b> <a href="0001-two-repos-one-system.html">01</a>, <a href="0002-the-words-that-lie.html">02</a>, <a href="0004-the-gate-is-the-spec.html">04</a></span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span> <span class="repo fleet">fleet-db</span></span>
+  </div>
+
+  <!-- ===== KNOWLEDGE ==================================================== -->
+
+  <h2>Why this exists</h2>
+
+  <p><a href="0001-two-repos-one-system.html">Lesson 01</a> told you that a doc in
+  this repo is not automatically true, and gave you one example. That was a
+  warning. This is the method, and the reason the warning generalises.</p>
+
+  <p>Look at where this team spends its enforcement budget. There are fourteen
+  <code>scripts/check-*.sh</code> files in loomcli. <b>Not one of them reads a
+  document.</b> They check line counts, package size, import fan-out, raw
+  <code>exec.Command</code>, <code>log.Printf</code>, control-plane paths, coverage
+  — and one of them, <code>check-go-api-staleness.sh</code>, regenerates
+  <code>internal/backend/api/gen/types.gen.go</code> from
+  <code>api/openapi.yaml</code> into a temp file and fails the build if the two
+  differ (<span class="path">scripts/check-go-api-staleness.sh:31-56</span>). That is
+  gate step 11 of 13 (<span class="path">Makefile:609-610</span>).</p>
+
+  <p>So one machine-readable description of the API cannot drift, by construction.
+  The 4,188-line prose description of the same API in <code>docs/api.md</code> can
+  drift as far as it likes, and has. This is not carelessness; it is the predictable
+  shape of a codebase where the gate is the spec
+  (<a href="0004-the-gate-is-the-spec.html">Lesson 04</a>). A guarded claim stays
+  true. An unguarded claim is exactly as old as the last person who cared about
+  it.</p>
+
+  <aside class="sidenote">The same asymmetry holds on the frontend side:
+  <code>npm run check:generated</code> is frontend gate step 5
+  (<span class="path">Makefile:637-638</span>) and pins the TypeScript types to the
+  same spec. Generated artifacts are the safest text in the repo.</aside>
+
+  <div class="callout key">
+    <span class="label">The one idea</span>
+    <p>A document records what somebody believed on the day they wrote it. The only
+    text the machine ever read is a function body. Before you act on a documented
+    claim, <b>name the function that decides it</b> — and if you cannot name it, you
+    have not checked anything yet.</p>
+  </div>
+
+  <h2>The procedure</h2>
+
+  <p>Four steps, in this order. It costs about ten minutes and it is the difference
+  between "the README says" and "I checked".</p>
+
+  <ol>
+    <li><b>Name the deciding function, not the package.</b> Turn the claim into a
+    <code>grep -rn "func Name"</code> that returns one hit. If the claim does not
+    reduce to a function you can grep for, it is too vague to be true or false, and
+    you should be suspicious of it for that reason alone.</li>
+    <li><b>Read the body, not the doc comment.</b> A comment is a doc that happens
+    to live in a <code>.go</code> file. It drifts the same way — see the first trap
+    below.</li>
+    <li><b>Ask which process runs that function.</b> This is the step people skip,
+    and it is where most "wrong" docs turn out to be right about somewhere else.
+    loomcli has a CLI, a server, a daemon and a task runner in one binary; the same
+    English sentence can be true in one and false in the others.</li>
+    <li><b>Ask whether a guard would have caught the drift.</b>
+    <code>ls scripts/check-*.sh</code>, <code>.golangci.yml</code>, an AST test like
+    the SSE seam test from <a href="0013-realtime-one-frame-at-a-time.html">Lesson
+    13</a>, or a plain unit test. If a guard exists, the code is trustworthy and the
+    doc is the bug. If none exists, neither text is evidence and you go read the
+    code.</li>
+  </ol>
+
+  <p>Then file the finding. Every conflict in the table below is a small,
+  self-contained, verifiable issue — which makes it good practice for the workflow
+  as well as a genuine repair.</p>
+
+  <h2>The trace: one README line, five hops</h2>
+
+  <p>Start with the claim that costs the most to believe, because it is about which
+  AI backend your agents actually run:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> README.md:256-261</figcaption>
+<pre><code>Or set the workspace daemon profile so agents inherit it:
+```bash
+loom daemon profile set --backend codex
+```
+
+**Resolution order:** `--backend` flag &gt; `LOOM_BACKEND` env &gt; workspace daemon profile &gt; default `claude`</code></pre>
+  </figure>
+
+  <ol class="trace">
+    <li>
+      <span class="hop-file">README.md:246, 261</span>
+      <span class="hop-what"><b>The claim, stated twice.</b> A four-term resolution
+      chain ending in <code>claude</code>, and a backend table that also labels
+      <code>claude</code> "(default)". Two mentions in one file feels like
+      corroboration. It is one author, once.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/cli/backend.go:84-94</span>
+      <span class="hop-what"><b>Step 1 of the procedure.</b>
+      <code>grep -rn "func ResolveBackendName" internal/</code> returns exactly one
+      line. The chain is flag, then env, then <code>backendnames.Codex</code>. Three
+      terms, not four; and the default is the other backend.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/cli/root.go:83</span>
+      <span class="hop-what"><b>A second doc, disagreeing with the first.</b> The
+      root command's help text says <code>LOOM_BACKEND — AI backend CLI to use
+      (default: codex)</code>, and <code>root.go:79</code> lists
+      <code>codex</code> first among the valid names. Two documents in one repo,
+      opposite claims. Neither settles it; hop 2 does.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/driver/task_bridge.go:749-772; internal/cli/daemon/supervisor/backend.go:130-147</span>
+      <span class="hop-what"><b>Step 3 — where the daemon profile really is
+      consulted.</b> Two other chains exist, and both belong to code that
+      <em>spawns an agent</em>, not to the command you typed.
+      <code>resolveTaskRunnerBackend</code> reads the worker's agent row
+      <code>Backend</code>, then <code>DaemonProfile.AgentBackend</code>, then
+      <code>defaultTaskRunnerBackend</code> = <code>"codex"</code>
+      (<span class="path">task_bridge.go:37</span>). The daemon supervisor's
+      <code>GetEffectiveBackend</code> reads the agent entry, then the role, then
+      <code>cfg.Backend</code> — which is loaded from that same
+      <code>AgentBackend</code> field
+      (<span class="path">internal/cli/config/project.go:244-248</span>). Neither
+      chain has a flag or an env var in it. The README spliced two of these together
+      into a fourth chain that exists nowhere.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/cli/daemon/profile_cmd.go:36-49, 171-204 → internal/webui/app/routes.go:156</span>
+      <span class="hop-what"><b>And the command it tells you to run cannot do it.</b>
+      <code>loom daemon profile set</code> is <code>set &lt;KEY&gt; &lt;VALUE&gt;</code>
+      with <code>ExactArgs(2)</code>; its nine supported keys are listed in its own
+      <code>Long</code> text and <code>applyProfileField</code> has no
+      <code>agent_backend</code> case. That field is written by
+      <code>PATCH /api/workspaces/{ws}/config/backend</code>
+      (<span class="path">internal/webui/service/workspace_impl.go:526-545</span>) —
+      from the web UI, never from the CLI.</span>
+    </li>
+  </ol>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/cli/backend.go:80-94</figcaption>
+<pre><code>// ResolveBackendName returns the backend name using the precedence chain:
+// --backend flag &gt; LOOM_BACKEND env &gt; default backend. Persistent backend
+// settings now live in FleetDB daemon profiles and are applied by the daemon,
+// not read from local YAML during CLI startup.
+func ResolveBackendName() string {
+	// 1. --backend flag (highest priority)
+	if backendFlag != "" {
+		return backendFlag
+	}
+	// 2. LOOM_BACKEND environment variable
+	if env := os.Getenv("LOOM_BACKEND"); env != "" {
+		return env
+	}
+	return backendnames.Codex
+}</code></pre>
+  </figure>
+
+  <p>Step 4 closes it: four tests pin this behaviour by name
+  (<span class="path">internal/cli/backend_test.go:278-344</span>), two of them
+  asserting that the <em>default</em> is the literal string <code>codex</code>
+  (<span class="path">:324, 341</span>). The code is guarded;
+  <code>README.md:261</code> is the bug.</p>
+
+  <h2>Known-false claims at <code>ce4df56fb</code></h2>
+
+  <p>Each row was re-opened and confirmed for this lesson. This list is a snapshot,
+  not a property of the repo — treat it the way you treat any doc.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Claim, and where</th><th>What the code does</th><th>Check at</th></tr></thead>
+    <tbody>
+      <tr><td>Local mode is "zero install" — <code>README.md:22</code></td><td>The <code>fleet-db</code> binary must already exist: <code>FLEET_DB_BIN</code>, on <code>PATH</code>, beside the <code>loom</code> binary, or in <code>&lt;LoomDir&gt;/bin</code>. Nothing fetches it, and no release archive contains it.</td><td><code>internal/bootstrap/embedded.go:526-580</code>; <code>.goreleaser.yml:27-45</code></td></tr>
+      <tr><td>Default backend is <code>claude</code> — <code>README.md:246, 261</code></td><td>Flag, then <code>LOOM_BACKEND</code>, then <code>codex</code>. No daemon profile in the CLI chain.</td><td><code>internal/cli/backend.go:84-94</code></td></tr>
+      <tr><td><code>daemon profile set --&lt;flag&gt;=&lt;value&gt;</code> — <code>README.md:163, 258, 313</code></td><td><code>set &lt;KEY&gt; &lt;VALUE&gt;</code>, <code>ExactArgs(2)</code>, and no flags of its own. Nine keys, none of them <code>backend</code> or <code>log_level</code>.</td><td><code>internal/cli/daemon/profile_cmd.go:36-49, 64-65, 171-204</code></td></tr>
+      <tr><td><code>repo add --url …</code> — <code>README.md:37, 277</code></td><td><code>add &lt;NAME&gt; &lt;REMOTE_URL&gt;</code>, <code>ExactArgs(2)</code>. Flags are <code>--remote --branch --groups --source-repo-id</code>.</td><td><code>internal/cli/repo/repo_cmd.go:43-48, 72-75</code></td></tr>
+      <tr><td><code>role set --prompt-file</code>, <code>role unset --backend</code> — <code>README.md:38, 283, 287</code></td><td><code>set &lt;NAME&gt; &lt;KEY&gt; &lt;VALUE&gt;</code> and <code>unset &lt;NAME&gt; &lt;KEY&gt;</code>. Those flags belong to <code>role add</code>. <code>README.md:285</code> uses the correct form two lines later.</td><td><code>internal/cli/role/role_cmd.go:73-105, 108-121, 124-130</code></td></tr>
+      <tr><td><code>agentdef add --repo</code> — <code>README.md:39, 300</code></td><td>The flag is <code>--repos</code>, a <code>StringSlice</code>.</td><td><code>internal/cli/agentdef/agentdef_cmd.go:106</code></td></tr>
+      <tr><td><code>loom serve</code> serves the UI on :8080 — <code>README.md:42-43, 56, 59</code></td><td><code>registerFrontendRoutes</code> returns immediately when <code>FrontendDir</code> is empty, which is the default. Non-<code>/api</code> paths hit Go's plain-text 404.</td><td><code>internal/webui/app/frontend.go:11-16</code>; <code>routes.go:27-31</code></td></tr>
+      <tr><td><code>loom task create --title=…</code> — <code>internal/cli/root.go:45-46</code></td><td><code>task</code> takes <code>MaximumNArgs(1)</code> and has no subcommands at all.</td><td><code>internal/cli/agent/task.go:27-28, 58</code></td></tr>
+      <tr><td><code>POST /api/csp-report</code>, 68 lines of it — <code>docs/api.md:31, 4063-4130</code></td><td>No such route. The CSP header string contains no <code>report-uri</code>, despite <code>docs/api.md:4128</code> saying it does.</td><td><code>internal/webui/server/middleware/security.go:34-35</code></td></tr>
+      <tr><td><code>docs/testing-terminology.md</code> is canonical — <code>AGENTS.md:20, 35</code></td><td>The file does not exist. <em>realness</em> matches only <code>AGENTS.md:21</code> and <code>:30</code> repo-wide.</td><td><a href="../reference/glossary.html#testing">Glossary §7</a></td></tr>
+      <tr><td>"Unified quality gate (all 14 checks)" — <code>Makefile:785</code></td><td><code>check-go</code> announces 13 steps and <code>check-frontend</code> announces 6.</td><td><code>Makefile:587-624, 629-640</code></td></tr>
+      <tr><td>Link to <code>fleetdb-acceptance-gates.md</code> — <code>docs/testing/README.md:32</code></td><td>No file of that name anywhere in the repo.</td><td><code>ls docs/testing/</code></td></tr>
+      <tr><td>The route-tree comment — <code>src/router.tsx:4-20</code></td><td>Omits four declared routes: <code>list</code>, <code>agents</code>, <code>prs</code>, <code>agents/:agentName</code>.</td><td><code>router.tsx:117, 148, 153, 189</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout trap">
+    <span class="label">Trap — proximity is not accuracy</span>
+    <p>The instinct is that text nearer the code is safer. Sometimes; not reliably.
+    <code>internal/cli/root.go:46</code> is a Go string literal, compiled into the
+    binary, printed by <code>loom --help</code> — and it advertises
+    <code>loom task create --title="Add login feature"</code>, a subcommand that has
+    never existed (<span class="path">internal/cli/agent/task.go:27-28</span>).
+    <code>src/router.tsx:4-20</code> is a route-tree comment roughly a hundred lines
+    above the routes it describes, in the same file, and it is missing four of them.
+    Nothing compiles a comment. Distance from the code is not the variable —
+    <em>whether a check reads it</em> is.</p>
+  </div>
+
+  <div class="callout trap">
+    <span class="label">Trap — length is not existence</span>
+    <p><code>docs/api.md:4063-4130</code> documents <code>POST /api/csp-report</code>
+    with an auth model, two accepted content types, a per-IP rate limit, a 10 KB
+    body cap, a 415 response, and its exclusion from the global limiter.
+    Sixty-eight lines of confident specificity. <code>grep -rn "csp-report"
+    internal/ cmd/ api/</code> returns nothing, and the entire CSP header is one
+    <code>fmt.Sprintf</code> you can read in fifteen seconds
+    (<span class="path">internal/webui/server/middleware/security.go:34-35</span>) —
+    there is no <code>report-uri</code> in it. Detail is evidence of care at writing
+    time. It says nothing about read time.</p>
+  </div>
+
+  <h2>The honest counterweight</h2>
+
+  <p>Do not walk out of this lesson believing the team writes bad docs. The
+  distribution is sharper and more useful than that.</p>
+
+  <p>In the very conflict traced above, <code>serve</code>'s own <code>Long</code>
+  text is <em>correct</em> where the README is wrong: "The frontend is served
+  externally (reverse proxy, CDN, Vite preview, etc.)"
+  (<span class="path">internal/cli/serve/serve.go:104-108</span>). Somebody who
+  changed that behaviour updated the text they had to touch to ship the change, and
+  did not go looking for the README. That is the whole mechanism. The ADR you read
+  in <a href="0013-realtime-one-frame-at-a-time.html">Lesson 13</a> is accurate for
+  the same reason: it was written as part of the change it describes.</p>
+
+  <div class="callout fleet">
+    <span class="label">The other repo <span class="repo fleet">fleet-db</span></span>
+    <p>Run the same check on fleet-db's <code>AGENTS.md:19-35</code> and every one of
+    its fifteen named paths resolves — four agent docs, the <code>prompts/</code>
+    directory, <code>loom.yaml</code>,
+    three role prompts, <code>harness/policy.yaml</code>,
+    <code>scripts/harness/</code>, two contracts, <code>docs/architecture.md</code>,
+    <code>docs/glossary.md</code>. The one document that moved left a tombstone:
+    <code>ARCHITECTURE.md</code> is thirteen lines that say it is retired, name its
+    replacement, say where the history went, and close with "Do not add content to
+    this file" (<span class="path">ARCHITECTURE.md:1-13</span>) — and
+    <code>AGENTS.md:36</code> lists it as "Retired pointer (do not use)". These two
+    trees are pinned a day apart. The difference is not diligence; it is that this
+    list is the file agents are told to read first, so it gets exercised on every
+    run.</p>
+  </div>
+
+  <p>Back in <span class="repo loom">loomcli</span>, the pattern that falls out of
+  all thirteen rows is worth stating plainly, because it tells you what to trust on
+  sight:</p>
+
+  <ul>
+    <li><b>Generated from a checked artifact</b> — <code>types.gen.go</code>,
+    <code>openapi.ts</code>. Cannot drift; a gate step regenerates and diffs them.</li>
+    <li><b>Written as part of the change</b> — ADRs, a command's <code>Long</code>
+    text, the long Makefile comments. Usually right, and right about the thing they
+    were written for.</li>
+    <li><b>Written once, for a reader</b> — <code>README.md</code>,
+    <code>docs/api.md</code>, top-of-file route comments. Strong evidence of intent,
+    weak evidence of behaviour. This is where all thirteen rows live.</li>
+  </ul>
+
+  <p>The "Where decisions live" table on the
+  <a href="../reference/navigation.html">navigation card</a> sorts some of the same
+  sources (<span class="path">navigation.html:209-222</span>), but by topic, and its
+  six rows cover only the middle tier: no row for a generated artifact, and none for
+  <code>README.md</code> or <code>docs/api.md</code>. The ranking by decay rate is
+  the one above.</p>
+
+  <!-- ===== SKILL ======================================================== -->
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory: state the four steps of the procedure, in order.
+    Then say which step is the one that most often turns "this doc is wrong" into
+    "this doc is describing somewhere else".</p>
+    <div class="answer">
+      <p><b>1.</b> Name the deciding function — a <code>grep -rn "func …"</code>
+      that returns one hit. <b>2.</b> Read its body, not its doc comment.
+      <b>3.</b> Ask which process runs it. <b>4.</b> Ask whether a guard exists that
+      would have caught the drift.</p>
+      <p><b>Step 3</b> is the one. <code>README.md:261</code> puts the workspace
+      daemon profile in the backend resolution chain, and a daemon profile really is
+      consulted for backend selection — by the code that <em>spawns an agent</em>:
+      the server's <code>resolveTaskRunnerBackend</code>
+      (<span class="path">internal/driver/task_bridge.go:749-772</span>) and the
+      daemon supervisor's <code>GetEffectiveBackend</code>
+      (<span class="path">internal/cli/daemon/supervisor/backend.go:130-147</span>).
+      It is never consulted by <code>ResolveBackendName</code>, which is what runs
+      for the command you typed
+      (<span class="path">internal/cli/backend.go:84-94</span>). Skip step 3 and you
+      file a wrong bug report on a doc that was half right.</p>
+    </div>
+  </div>
+
+  <div class="cloze" data-answer="ResolveBackendName">
+    <p class="stem">One function decides which backend the CLI uses. Name it:
+    <code>internal/cli/backend.go</code> holds <code>func</code> <input>.</p>
+    <div class="why">One grep hit across all of <code>internal/</code>
+    (<span class="path">internal/cli/backend.go:84</span>). The spawn-side
+    equivalents are different functions in different packages —
+    <code>resolveTaskRunnerBackend</code>
+    (<span class="path">internal/driver/task_bridge.go:754</span>) and
+    <code>GetEffectiveBackend</code>
+    (<span class="path">internal/cli/daemon/supervisor/backend.go:132</span>) —
+    which is the whole reason the README's single chain reads as plausible.</div>
+  </div>
+
+  <div class="quiz" data-quiz="0030">
+    <div class="q" data-answer="2">
+      <p class="stem">A README line and a command's own <code>Long</code> help text
+      disagree about the same behaviour. Which do you trust?</p>
+      <ul class="opts">
+        <li>The README, because it is the user-facing contract</li>
+        <li>The help text, since it ships inside the binary</li>
+        <li>Neither one — read the function that decides it</li>
+        <li>Whichever of the two was committed most recently</li>
+      </ul>
+      <div class="why">Both are prose and neither is checked. The help text happens
+      to be right for <code>serve</code>
+      (<span class="path">internal/cli/serve/serve.go:104-108</span>) and wrong for
+      the root command's <code>loom task create --title=…</code>
+      (<span class="path">internal/cli/root.go:46</span>), in the same binary. "It
+      ships in the binary" is the tempting wrong answer: compilation checks the
+      string's syntax, never its truth.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <p class="stem"><code>README.md:261</code> puts the workspace daemon profile in
+      the backend resolution chain. What is actually the case?</p>
+      <ul class="opts">
+        <li>No code anywhere reads a profile to choose a backend</li>
+        <li>Agent-spawning code reads it; your command never does</li>
+        <li>The CLI reads it after the flag and before the env</li>
+        <li>It was read once, and the field has since been dropped</li>
+      </ul>
+      <div class="why"><code>ResolveBackendName</code> is flag, env, codex — no
+      profile (<span class="path">internal/cli/backend.go:84-94</span>). But
+      <code>DaemonProfile.AgentBackend</code> is alive and is read wherever an agent
+      is spawned: <code>resolveTaskRunnerBackend</code>
+      (<span class="path">internal/driver/task_bridge.go:754-772</span>),
+      <code>ResolveLocalBackend</code>
+      (<span class="path">internal/runtimepreflight/preflight.go:50-67</span>), and
+      the daemon supervisor's <code>GetEffectiveBackend</code>
+      (<span class="path">internal/cli/daemon/supervisor/backend.go:130-147</span>).
+      The first option is the one worth rejecting carefully: it is what you would
+      conclude by stopping at step 2.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <p class="stem">Reaching back to <a href="0004-the-gate-is-the-spec.html">Lesson
+      04</a>: which of these is protected from drift by the gate?</p>
+      <ul class="opts">
+        <li>The Go types generated from <code>api/openapi.yaml</code></li>
+        <li>The endpoint list written out in <code>docs/api.md</code></li>
+        <li>The command shapes in the <code>README.md</code> quick start</li>
+        <li>The route-tree comment at the top of <code>router.tsx</code></li>
+      </ul>
+      <div class="why"><code>check-go-api-staleness.sh</code> regenerates
+      <code>types.gen.go</code> into a temp file and diffs it — gate step 11 of 13
+      (<span class="path">Makefile:609-610</span>). The other three are prose that no
+      check reads, which is why all three appear in the table above. Fourteen
+      <code>scripts/check-*.sh</code> files exist and none of them greps a
+      document.</div>
+    </div>
+  </div>
+
+  <div class="callout safety">
+    <span class="label">Before the exercise — shared machine</span>
+    <p>Everything below is read-only: greps, <code>sed</code> and <code>ls</code>.
+    Keep it that way — there is no <code>go test</code> in this exercise, for the
+    reason step 2 gives. Do <b>not</b> run
+    <code>make local-mode-up</code> or <code>make local-mode-down</code>, do not
+    start a server on a fixed port, and do not touch a podman stack or an
+    agent-browser session you did not create. If you ever do need a stack, pick your
+    own compose project name and an unclaimed port block, and tear down only your
+    own.</p>
+  </div>
+
+  <div class="exercise">
+    <h3>Falsify one claim, then confirm one</h3>
+    <ol>
+      <li>Run <code>grep -rn "func ResolveBackendName" internal/</code>. One hit.
+      Open it and write down the real chain in three terms.</li>
+      <li>Read the tests instead of running them.
+      <code>grep -n "func TestResolveBackendName" internal/cli/backend_test.go</code>,
+      then <code>sed -n '278,344p' internal/cli/backend_test.go</code>. Two of the
+      four assert that the <em>default</em> is a literal string
+      (<span class="path">internal/cli/backend_test.go:324, 341</span>) — say which
+      line of <code>README.md</code> those two falsify, and why that makes the README
+      the bug rather than the code. Do <b>not</b> run
+      <code>go test ./internal/cli</code>: that package's <code>TestMain</code> calls
+      <code>killTestTmuxSessions</code> before and after the run, and it kills every
+      tmux session on the <em>host</em> whose name starts with
+      <code>loom-test-</code> or <code>loom-e2e-test-</code>
+      (<span class="path">internal/cli/testmain_test.go:21, 28, 34-46</span>),
+      including another engineer's in-flight run. <code>-run</code> does not save you
+      — <code>TestMain</code> runs in full whatever the filter selects. Same hazard as
+      <a href="0026-roles-skills-and-shaping-work.html">Lesson 26</a>.</li>
+      <li>Now step 3 of the procedure. Run
+      <code>grep -rn "AgentBackend" internal/ --include="*.go" | grep -v _test</code>
+      and sort every hit into two piles: code that runs when <em>you type a
+      <code>loom</code> command</em>, and code that runs when <em>something spawns
+      an agent</em>. Which pile is empty of the command you actually ran?</li>
+      <li>Now a claim with no code behind it at all. Compare
+      <code>grep -c "csp-report" docs/api.md</code> with
+      <code>grep -rn "csp-report" internal/ cmd/ api/ --include="*.go" --include="*.yaml" | wc -l</code>.
+      Then open <span class="path">internal/webui/server/middleware/security.go:34-35</span>
+      and decide in under a minute whether <code>docs/api.md:4128</code> is true.</li>
+      <li>Reaching back to <a href="0004-the-gate-is-the-spec.html">Lesson 04</a>:
+      run <code>ls scripts/check-*.sh | wc -l</code> and
+      <code>grep -l "README\|docs/" scripts/check-*.sh | wc -l</code>. Name the one
+      generated file the gate regenerates from <code>api/openapi.yaml</code> and
+      diffs, and its step number.</li>
+      <li>Cross-repo. In the loomcli tree, then in the fleet-db tree, run the same
+      pointer check over each repo's <code>AGENTS.md</code> and compare:
+
+<pre><code># loomcli
+$ sed -n '17,21p' AGENTS.md | grep -o '`[^`]*`' | tr -d '`' \
+    | while read -r p; do [ -e "$p" ] &amp;&amp; echo "ok   $p" || echo "MISS $p"; done
+
+# fleet-db
+$ sed -n '19,35p' AGENTS.md | grep -o '`[^`]*`' | tr -d '`' \
+    | while read -r p; do [ -e "$p" ] &amp;&amp; echo "ok   $p" || echo "MISS $p"; done</code></pre>
+
+      Then answer the interesting question: what is different about how those two
+      lists are used, such that one of them stayed true?</li>
+    </ol>
+    <div class="verify">
+      <b>You succeeded when</b>
+      Your grep returns exactly one line,
+      <code>internal/cli/backend.go:84</code>; the four
+      <code>TestResolveBackendName_*</code> functions are at lines <b>278, 295, 312
+      and 329</b>; your csp-report counts are
+      <b>10</b> in <code>docs/api.md</code> and <b>0</b> in the code; and the two
+      pointer checks print <b>2 lines with one MISS</b> for loomcli and <b>15 lines,
+      all ok</b> for fleet-db.
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><code>AGENTS.md</code> — 195 lines, and the most current single document in
+    loomcli. Read it with this procedure switched on: check each path it names, and
+    for each rule it states, ask which script or lint enforces it. You will find the
+    <code>docs/testing-terminology.md</code> gap in the first two minutes, and you
+    will finish holding the operating manual you are actually expected to work
+    from.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0029-fleet-db-builds-itself.html"><span class="dir">Previous</span>fleet-db builds itself</a>
+    <a class="next" href="0031-your-first-task.html"><span class="dir">Next</span>Your first task</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

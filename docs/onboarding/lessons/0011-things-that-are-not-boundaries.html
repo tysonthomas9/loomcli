@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>11. Things that are not boundaries — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 3 <span class="sep">/</span> Lesson 11 <span class="sep">/</span> Execution</p>
+  <h1>Things that are not boundaries</h1>
+  <p class="standfirst">Loom ships four isolation-shaped features. One is an OS
+  boundary; the others are an admission check, a backend flag, and a sentence in a
+  prompt. Telling them apart is the difference between a design that holds and a
+  design built on a guarantee that does not exist.</p>
+
+  <div class="meta">
+    <span><b>Skill</b> tell a real security boundary from something that only sounds like one</span>
+    <span><b>Time</b> 35 min</span>
+    <span><b>Needs</b> <a href="0010-what-actually-runs-your-code.html">Lesson 10</a></span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span> <span class="repo fleet">fleet-db</span></span>
+  </div>
+
+  <h2>Why this lesson exists</h2>
+
+  <p><code>sandbox</code>. <code>trust_level</code>. <code>read_only</code>.
+  <code>denied_tools</code>. Read as a group they suggest a system in which
+  untrusted agent code is contained. Read as code, they are four unrelated
+  mechanisms at four different layers, and only one of them is a boundary Loom puts
+  around a process. The design doc opens by saying exactly that.
+  <span class="path">docs/design/execution-isolation.md:1-11</span></p>
+
+  <div class="callout key">
+    <span class="label">The one idea</span>
+    <p>The container goes around the program that <em>decides</em> what work exists.
+    It does not go around the process that runs the model and edits your repository.
+    On the driver plane that process is the built-in leaf,
+    <code>exec.CommandContext(ctx, "node", launcherPath)</code> in a host worktree, in
+    every <code>LOOM_DRIVER_SANDBOX</code> mode
+    (<span class="path">internal/driver/task_bridge.go:366</span>); on the daemon
+    plane it is the backend CLI a <code>loom &lt;role&gt; --daemon-mode</code> worker
+    invokes (<span class="path">internal/cli/daemon/supervisor/spawn.go:101-109</span>).
+    Neither is containerized.</p>
+  </div>
+
+  <h2>Three levels, one sandbox</h2>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Level</th><th>What runs there</th><th>Containerizable</th></tr></thead>
+    <tbody>
+      <tr><td><b>L1</b> — DriverRun bundle</td><td>The Flue workflow bundle: the orchestration program that decides what tasks exist</td><td><b>Yes</b> — <code>LOOM_DRIVER_SANDBOX=container</code></td></tr>
+      <tr><td><b>L2</b> — TaskRun leaf</td><td>The process that invokes the backend CLI and edits code</td><td>No — the host bridge spawns <code>node</code> directly</td></tr>
+      <tr><td><b>L3</b> — daemon agent</td><td>The <code>loom &lt;role&gt; --daemon-mode</code> worker the supervisor spawns</td><td>No — plain host process, backend CLI's own sandbox off</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p class="path">docs/design/execution-isolation.md:13-19</p>
+
+  <p>The L1 container is real: rootless podman (docker fallback),
+  <code>--read-only</code>, <code>--security-opt no-new-privileges</code>, mandatory
+  memory/CPU/pids caps, and a host filesystem reachable only through the bundle and
+  launcher identity mounts.
+  <span class="path">internal/driver/sandbox/container.go:159-170, :298-311, :333-347</span>
+  So when someone says "agents run in a sandbox", ask which level they mean.</p>
+
+  <p>You do not have to take the doc's word for the gap. The two executors are the
+  evidence. <code>Executor</code> — the L1 one — carries a launcher seam:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/driver/executor.go:88-93</figcaption>
+<pre><code>	// SandboxLauncher, when set, launches workflow runtimes through the SB1
+	// sandbox seam — e.g. the rootless container launcher selected by
+	// LOOM_DRIVER_SANDBOX=container in serve (ResolveSandboxLauncher). Nil
+	// keeps the default local node-process launcher. Ignored when Runner is
+	// set explicitly.
+	SandboxLauncher SandboxLauncher</code></pre>
+  </figure>
+
+  <p><code>HostBridgeTaskExecutor</code> — the L2 one, the thing that actually runs
+  your model — has <b>no launcher field of any kind</b>.
+  <span class="path">internal/driver/task_bridge.go:47-80</span> There is no flag,
+  no environment variable, and no <code>serve</code> wiring that puts the L2 leaf in
+  a container. That absence <em>is</em> the isolation model. The one escape is
+  remote, not local: the <code>daytona-task-runner</code> named runner clones the
+  repo into someone else's machine.
+  <span class="path">docs/design/execution-isolation.md:138-139, :171-173</span></p>
+
+  <h2><code>trust_level</code> refuses; it does not confine</h2>
+
+  <p><code>untrusted</code> reads like "Loom will contain this". It means "Loom
+  declines to start this here".</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/driver/sandbox/policy.go:71-78</figcaption>
+<pre><code>// RefuseUntrustedPlacement is the pre-launch gate: it returns a terminal
+// failed result (and true) when the run's driver is untrusted and the
+// resolved launcher does not isolate. The launcher is never invoked — no
+// process is spawned. Trusted drivers and isolating launchers pass through.
+func RefuseUntrustedPlacement(req runtypes.RunRequest, launcher SandboxLauncher) (runtypes.RunResult, bool) {
+	if req.TrustLevel.Trusted() || launcherIsolates(launcher) {
+		return runtypes.RunResult{}, false
+	}
+	// … builds a failed result with ErrorClass sandbox_required</code></pre>
+  </figure>
+
+  <p>The refusal happens <em>before</em> <code>Launch</code>:
+  <code>runBuiltFlueServer</code> resolves a launcher, calls the gate, and returns
+  its result directly — nothing spawned, no fallback.
+  <span class="path">internal/driver/executor.go:748-757</span> And it is
+  structured, not a bare error: <code>failed</code>,
+  <code>errorClass=sandbox_required</code>, <code>retryable:"false"</code>, plus a
+  summary naming both ways out. Copy that shape when you write a gate.
+  <span class="path">internal/driver/sandbox/policy.go:22-27, :80-90</span></p>
+
+  <p>Note what the escape actually is at L1. The gate passes when the driver is
+  trusted <b>or</b> when the launcher implements <code>IsolatingLauncher</code> —
+  and only the container launcher does.
+  <span class="path">internal/driver/sandbox/policy.go:39-47</span>,
+  <span class="path">internal/driver/sandbox/container.go:157</span></p>
+
+  <h3>Unknown means untrusted, in both repos</h3>
+
+  <p>Trust is an exact string compare, so empty, misspelled, or
+  from-a-future-release all fail closed; the policy test pins <code>""</code> and
+  <code>"sorta-trusted"</code> as refusals so nobody "fixes" it into a substring
+  match.
+  <span class="path">internal/domain/platform.go:57-62</span>,
+  <span class="path">internal/driver/sandbox_policy_test.go:46-48</span></p>
+
+  <p><span class="repo fleet">fleet-db</span> The field lives on the driver row over
+  there, so the same decision had to be restated in the schema. The Postgres
+  migration is its clearest statement anywhere in either repo:</p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> internal/storage/postgres/migrate/migrations/postgres/030_platform_v2_driver_trust_level.up.sql:5-13</figcaption>
+<pre><code>-- One-time backfill (locked decision): adding the column with DEFAULT
+-- 'trusted' stamps every pre-existing row trusted; the default is then
+-- flipped to 'untrusted' so any future row that somehow misses an explicit
+-- value fails closed into the sandbox.
+ALTER TABLE drivers
+    ADD COLUMN IF NOT EXISTS trust_level TEXT NOT NULL DEFAULT 'trusted';
+
+ALTER TABLE drivers
+    ALTER COLUMN trust_level SET DEFAULT 'untrusted';</code></pre>
+  </figure>
+
+  <ol class="trace">
+    <li class="fleet-hop">
+      <span class="hop-file">internal/storage/platform.go:2866-2869</span>
+      <span class="hop-what"><b>Reading a row does not repair it.</b> A missing
+      <code>trust_level</code> deliberately stays empty, because readers already
+      treat unknown as untrusted.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">internal/models/platform.go:106-111</span>
+      <span class="hop-what"><b>Writing one does.</b> <code>Driver.Validate</code>
+      stamps <code>untrusted</code> when the level is empty, so every post-upgrade
+      write carries an explicit level.</span>
+    </li>
+  </ol>
+
+  <h2>The two gates are not the same gate</h2>
+
+  <p>L2 has trust gates too. They look like the L1 one and are not: neither consults
+  a launcher, because there is no launcher to consult.</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/driver/task_bridge_session.go:127-140</figcaption>
+<pre><code>func refuseUntrustedTaskRunnerExecution(req TaskExecRequest) (TaskExecResult, bool) {
+	if !taskExecHasNamedRunner(req) {
+		return TaskExecResult{}, false
+	}
+	trust := taskRunnerTrustLevel(req.RunnerTrustLevel)
+	if trust.Trusted() {
+		return TaskExecResult{}, false
+	}
+	// … returns failed / ErrorClassSandboxRequired carrying:
+		ErrorMessage: fmt.Sprintf("child runner %q is untrusted and the host bridge does not isolate runner code", runner),</code></pre>
+  </figure>
+
+  <p>Read that error message as documentation. The sibling gate on the request path
+  says the same thing and fails the enqueue before a <code>TaskRun</code> row
+  exists. <span class="path">internal/driver/task_bridge_session.go:119-124</span>
+  Note the first branch too: the gate fires only for a <b>named runner</b> — a
+  request naming a sibling entrypoint in the bundle.</p>
+
+  <div class="callout trap">
+    <span class="label">Trap — "container mode will let my workflow run"</span>
+    <p>The wrong belief: <code>loom workflow build</code> registered an untrusted
+    version, so turning on <code>LOOM_DRIVER_SANDBOX=container</code> will let it
+    run.</p>
+    <p>The reality: container mode unblocks the <em>workflow</em> and nothing else.
+    At L1 the gate passes when the launcher isolates; at L2 the gates check trust
+    and stop. So the bundle starts and every named-runner task it requests dies
+    <code>sandbox_required</code>. Only trust unblocks a named runner — an operator
+    approving the version, which writes an <code>approved_version:&lt;id&gt;</code>
+    metadata key that <code>DriverVersionEffectiveTrust</code> reads back as
+    trusted. <span class="path">internal/cli/workflow/workflow_cmd.go:236</span>,
+    <span class="path">internal/driver/approval.go:13-17, :81-84</span></p>
+  </div>
+
+  <h2><code>read_only</code> and the tool lists</h2>
+
+  <p>These role knobs reach a backend as <code>LOOM_READ_ONLY</code> /
+  <code>LOOM_ALLOWED_TOOLS</code> / <code>LOOM_DENIED_TOOLS</code>. They are backend
+  <em>tool policy</em>, and whether they mean anything depends on which backend
+  resolved. Two predicates decide, over deliberately different sets:
+  <code>SupportsToolControl</code> is <code>claude</code> alone;
+  <code>SupportsHardReadOnly</code> is <code>claude</code>, <code>codex</code>,
+  <code>gemini</code> — those with "a mechanism that makes <code>read_only</code>
+  true regardless of what the model decides to do".
+  <span class="path">internal/cli/backends/backend_safety.go:112-125</span></p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/cli/backends/backend_safety.go:157-164</figcaption>
+<pre><code>	if hasTools && !SupportsToolControl(backendName) {
+		return "", fmt.Errorf("backend %q cannot enforce allowed_tools/denied_tools (%s); refusing to run without the restriction (fail-closed) — remove the knob or use a backend with tool control",
+			backendName, toolControlGap(backendName))
+	}
+	if readOnly && !SupportsHardReadOnly(backendName) {
+		return fmt.Sprintf("backend %q has no hard read-only mechanism: read_only is enforced by prompt preamble only, so the agent CAN still write. Use a backend with a sandbox or tool control for a real restriction", backendName), nil
+	}
+	return "", nil</code></pre>
+  </figure>
+
+  <p>Look at the return types. <b>Tool lists fail closed</b> — an
+  <code>error</code>, refuse the run, because there is no soft version of an
+  allowlist. <b><code>read_only</code> degrades</b> — a warning <code>string</code>,
+  run anyway, on the prompt preamble alone. The asymmetry is deliberate: failing
+  closed on <code>read_only</code> was tried and refused every planner on every soft
+  backend, because <code>seedBuiltInRoles</code> gives the built-in
+  <code>plan</code> role <code>ReadOnly: true</code> on every workspace.
+  <span class="path">internal/cli/backends/backend_safety.go:142-147</span>,
+  <span class="path">internal/cli/serve/workspacemgr/workspace_store.go:479-487</span></p>
+
+  <p>Even on a hard backend, be precise about what you got. Codex's
+  <code>read_only</code> selects <code>--sandbox read-only</code> instead of
+  <code>--dangerously-bypass-approvals-and-sandbox</code>; claude's denies
+  <code>Write,Edit,NotebookEdit,Bash</code> (<code>Bash</code> on purpose — a shell
+  writes through redirection). Real, but it is policy inside a process that still
+  has your whole filesystem.
+  <span class="path">internal/cli/backends/backend_safety.go:56-60, :91-98</span></p>
+
+  <div class="callout trap">
+    <span class="label">Trap — <code>IS_SANDBOX=1</code></span>
+    <p>The wrong belief: the code exports <code>IS_SANDBOX=1</code> onto the agent
+    process, so the agent is in a sandbox. One comment in the tree still says so, and
+    it is wrong.</p>
+    <p>The reality: it is a shim. claude-code refuses
+    <code>--dangerously-skip-permissions</code> under root unless
+    <code>IS_SANDBOX</code> is set, so Loom sets it to stop the refusal. The Go site
+    says so itself — <em>"loom does NOT create a container around an agent … so on a
+    host run this asserts a sandbox that is not there"</em>.
+    <span class="path">internal/cli/backends/backend_claude.go:258-268</span> The L2
+    leaf exports the same variable with a comment claiming the runner runs "inside
+    loom's isolated task-run container". No such container exists — its caller spawns
+    <code>node</code> on the host. The variable is evidence of nothing.
+    <span class="path">internal/workflows/builtin/local-task-runner.ts:518-521, :456</span>
+    The design doc block-quotes an older version of the Go comment, one that did claim
+    a container; that text is gone from the tree, so read the quote as history.
+    <span class="path">docs/design/execution-isolation.md:126-129</span></p>
+  </div>
+
+  <h2>Egress: the part that is real, and its exact shape</h2>
+
+  <p>For a containerized L1 run only, network reach is bounded by
+  <code>LOOM_DRIVER_SANDBOX_EGRESS</code>. An empty value is not "unset, so
+  anything" — it resolves per trust level, fail closed.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Mode</th><th>What the launcher does</th><th>Empty resolves here when</th></tr></thead>
+    <tbody>
+      <tr><td><code>all</code></td><td>Engine default network — unrestricted egress</td><td>trust is exactly <code>trusted</code></td></tr>
+      <tr><td><code>serve-only</code></td><td><code>--network=none</code> plus a unix-socket relay to serve</td><td>anything else, empty included</td></tr>
+      <tr><td><code>none</code></td><td><code>--network=none</code>, no relay — reaches nothing</td><td>never (explicit only)</td></tr>
+      <tr><td><code>delegated</code></td><td>Engine default network; enforcement lives outside the launcher, mode recorded truthfully</td><td>never (explicit only)</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p class="path">internal/driver/sandbox/egress.go:58-73, :95-105</p>
+
+  <p>Only <code>serve-only</code> and <code>none</code> are enforcement.
+  <code>delegated</code> is an honesty mechanism: the launcher applies the default
+  network and records the mode anyway, so a deployment whose NetworkPolicy does the
+  real work keeps a truthful audit trail. Read
+  <code>egress_mode=delegated</code> on a placement record as "somebody else may
+  have bounded this", never as "the launcher bounded it".</p>
+
+  <p>And the property that makes <code>serve-only</code> worth anything lives on the
+  host, not in the container: <code>serveSocketRelay</code> forwards every accepted
+  connection to exactly one TCP address — the serve API address captured at launch.
+  Nothing the container sends can redirect it. A run with no
+  <code>LOOM_DRIVER_API_URL</code> degenerates to plain <code>--network=none</code>,
+  never to the engine default.
+  <span class="path">internal/driver/sandbox/egress.go:266-269, :158-166</span></p>
+
+  <aside class="sidenote">On macOS the relay leg does not function: host unix
+  sockets do not cross the podman-machine VM boundary — virtiofs shares the inode,
+  not the listener. The <code>--network=none</code> half still applies. Do not chase
+  it as a bug on a Mac. <span class="path">internal/driver/sandbox/egress.go:28-32</span></aside>
+
+  <h2>The scoreboard</h2>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Feature</th><th>Sounds like</th><th>Actually is</th><th>Evidence</th></tr></thead>
+    <tbody>
+      <tr><td><code>LOOM_DRIVER_SANDBOX=container</code></td><td>Agents run in containers</td><td><b>A real OS boundary</b> — around the L1 bundle only</td><td><code>execution-isolation.md:13-19</code></td></tr>
+      <tr><td>Egress <code>serve-only</code> / <code>none</code></td><td>The workflow reaches only serve</td><td><b>Real</b>, for a containerized L1 run; relay target pinned host-side</td><td><code>sandbox/egress.go:266-269</code></td></tr>
+      <tr><td><code>trust_level</code></td><td>Untrusted code is confined</td><td>An admission decision: refuse to launch, never confine</td><td><code>sandbox/policy.go:71-78</code></td></tr>
+      <tr><td>Egress <code>delegated</code></td><td>Egress is bounded</td><td>An audit label; enforcement is somebody else's</td><td><code>sandbox/egress.go:69-73</code></td></tr>
+      <tr><td><code>allowed_tools</code> / <code>denied_tools</code></td><td>The agent may use only these tools</td><td>Real flags on claude; a refused run on every other backend</td><td><code>backend_safety.go:112-114, :158</code></td></tr>
+      <tr><td><code>read_only</code></td><td>The agent cannot write</td><td>A real flag on claude/codex/gemini; elsewhere prompt text and a warning</td><td><code>backend_safety.go:116-125, :162</code></td></tr>
+      <tr><td>Per-run git worktrees</td><td>Runs are isolated from each other</td><td>Concurrency; the process still has the whole filesystem</td><td><code>execution-isolation.md:274-278</code></td></tr>
+      <tr><td><code>IS_SANDBOX=1</code></td><td>We are inside a sandbox</td><td>A shim so claude-code stops refusing under root</td><td><code>backend_claude.go:258-268</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory, and be specific: <code>LOOM_DRIVER_SANDBOX=container</code>
+    is set, and a trusted builtin workflow requests a <code>local-task-runner</code>
+    task that runs <code>codex</code> on your repo. What is inside the container, and
+    what does the codex process get?</p>
+    <div class="answer">
+      <p><b>Inside:</b> the workflow bundle, and nothing else — rootless,
+      <code>--read-only</code>, no-new-privileges, capped, and on the engine default
+      network, because the driver is trusted and egress is unset.
+      <span class="path">internal/driver/sandbox/container.go:298-310</span>,
+      <span class="path">internal/driver/sandbox/egress.go:95-105</span></p>
+      <p><b>Outside:</b> everything that matters to your machine. The worker spawns
+      <code>node</code> on the host in a git worktree of your repo
+      (<span class="path">internal/driver/task_bridge.go:366</span>), and
+      <code>local-task-runner</code> is the single entrypoint given the widened env
+      allowlist — so the child inherits <code>ANTHROPIC_API_KEY</code>,
+      <code>OPENAI_API_KEY</code>, <code>GITHUB_TOKEN</code> and the rest, then
+      invokes codex with <code>--dangerously-bypass-approvals-and-sandbox</code>.
+      <span class="path">internal/driver/env.go:82-98</span>,
+      <span class="path">internal/driver/task_bridge_artifacts.go:284-289</span>,
+      <span class="path">internal/workflows/builtin/local-task-runner.ts:456</span></p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="0011">
+    <div class="q" data-answer="0">
+      <p class="stem">You set <code>LOOM_DRIVER_SANDBOX=container</code>. Which
+      process now runs inside a container?</p>
+      <ul class="opts">
+        <li>The workflow bundle that decides what tasks exist</li>
+        <li>The task leaf that runs the model and edits code</li>
+        <li>The daemon agent the supervisor spawns per role</li>
+        <li>Every process the serve run loop spawns for it</li>
+      </ul>
+      <div class="why">Only L1, the orchestration bundle. The second option is the
+      one to be sure about: the L2 leaf is spawned by
+      <code>exec.CommandContext(ctx, "node", launcherPath)</code> in a host worktree,
+      and <code>HostBridgeTaskExecutor</code> has no launcher field that could change
+      that. <span class="path">internal/driver/task_bridge.go:47-80, :366</span></div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <p class="stem">An untrusted <b>named runner</b> is requested while
+      <code>LOOM_DRIVER_SANDBOX=container</code> is on. What happens?</p>
+      <ul class="opts">
+        <li>It runs containerized, because the launcher isolates</li>
+        <li>It is refused: the L2 gate never consults a launcher</li>
+        <li>It runs on the host with a soft-enforcement warning</li>
+        <li>It stays queued until an operator raises the limit</li>
+      </ul>
+      <div class="why">Both L2 gates check trust and stop.
+      <code>refuseUntrustedTaskRunnerExecution</code> never looks at a launcher,
+      because the host bridge has none. The first option is exactly the L1 rule —
+      <code>RefuseUntrustedPlacement</code> does pass when the launcher isolates —
+      and assuming it generalises is the expensive mistake.
+      <span class="path">internal/driver/task_bridge_session.go:127-140</span></div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <p class="stem">A role sets <code>read_only</code> and resolves to the
+      <code>cursor</code> backend. What is actually in force?</p>
+      <ul class="opts">
+        <li>A prompt preamble only — the agent can still write</li>
+        <li>An OS sandbox policy refusing every write attempt</li>
+        <li>A denied-tools list covering Write, Edit and Bash</li>
+        <li>Nothing — the run is refused before anything runs</li>
+      </ul>
+      <div class="why">Cursor is not in <code>SupportsHardReadOnly</code>, so
+      <code>ValidateSafetyKnobs</code> returns a warning and the run proceeds on the
+      preamble. The last option is the sharp wrong answer: refusing is what
+      <em>tool lists</em> do, and collapsing the two knobs into one policy is the
+      trap-word habit from
+      <a href="0002-the-words-that-lie.html">Lesson 02</a>.
+      <span class="path">internal/cli/backends/backend_safety.go:116-125, :152-165</span></div>
+    </div>
+  </div>
+
+  <div class="callout safety">
+    <span class="label">Before the exercise</span>
+    <p>Everything below is <code>go test</code> and <code>grep</code> against the
+    checked-out repos. Do <b>not</b> set <code>LOOM_DRIVER_SANDBOX=container</code>
+    against a running stack to try it: podman stacks and their ports are shared
+    machine state, and <code>up --build</code> on a project name someone else
+    created silently recreates their containers.</p>
+  </div>
+
+  <div class="exercise">
+    <h3>Prove the gate never spawns, then find the seam that is missing</h3>
+    <ol>
+      <li>Run <code>go test ./internal/driver -run TestTrustPlacementPolicy -v</code>.
+      Read <code>internal/driver/sandbox_policy_test.go:97-113</code> and say in one
+      sentence why it sets <code>NodePath: "/nonexistent/loom-test-node"</code>.</li>
+      <li>Run <code>grep -n "Launcher" internal/driver/task_bridge.go</code>, then
+      the same grep on <code>internal/driver/executor.go</code>. Write down what the
+      diff tells you that no comment in either file states.</li>
+      <li>Run <code>go test ./internal/driver/sandbox -run TestResolveSandboxEgress -v</code>
+      and name the two subtests that pin the fail-closed default. Then say what
+      <code>egress_mode=delegated</code> on a placement record does <em>not</em>
+      tell you.</li>
+      <li>Reaching back to <a href="0002-the-words-that-lie.html">Lesson 02</a>:
+      <code>sandbox</code>, <code>trusted</code>, and <code>read_only</code> are all
+      trap words here. Write the one-line disambiguation you would give a teammate
+      who used each of them loosely in a design review.</li>
+    </ol>
+    <div class="verify">
+      <b>You succeeded when</b>
+      You can state that a <code>driver_runtime</code> start-failure result would
+      have proved the launcher ran, so <code>sandbox_required</code> proves it did
+      not — and you can point at <code>internal/driver/task_bridge.go:366</code> as
+      the line where your host shell, your <code>PATH</code>, and — for the bundled
+      <code>local-task-runner</code> — your provider keys reach the model, with
+      <code>LOOM_DRIVER_SANDBOX=container</code> still set.
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><code>docs/design/execution-isolation.md</code>. Read it before you touch
+    anything here. It is the intended design <em>and</em> an honest audit of the gap
+    between that design and the tree; its "What is NOT isolation" section is the
+    canonical version of this lesson. It is also the house model for a design doc:
+    state the mechanism, then state explicitly what it does not cover.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0010-what-actually-runs-your-code.html"><span class="dir">Previous</span>What actually runs your code</a>
+    <a class="next" href="0012-how-serve-is-put-together.html"><span class="dir">Next</span>How serve is put together</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

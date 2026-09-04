@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>13. Realtime, one frame at a time — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 4 <span class="sep">/</span> Lesson 13 <span class="sep">/</span> Web layer</p>
+  <h1>Realtime, one frame at a time</h1>
+  <p class="standfirst">Five SSE streams, one writer, and one question you must be
+  able to answer from the code alone: <b>is this stream resumable?</b> The answer is
+  never "it writes event IDs, so yes".</p>
+
+  <div class="meta">
+    <span><b>Skill</b> reason precisely about SSE frames and stream resumability</span>
+    <span><b>Time</b> 30 min</span>
+    <span><b>Needs</b> <a href="0012-how-serve-is-put-together.html">Lesson 12</a></span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span> <span class="repo fleet">fleet-db</span></span>
+  </div>
+
+  <h2>Why this exists</h2>
+
+  <p>A browser tab watching a kanban board needs to hear about a change made by
+  somebody else, in another process, seconds after it happens — without polling and
+  without a reload. Server-Sent Events is a deliberately tiny protocol for that: a
+  long-lived <code>text/event-stream</code> response, cut into <b>frames</b>
+  separated by blank lines. Because it is tiny, it is easy to write by hand, and
+  five different streams in this repo did exactly that.</p>
+
+  <p>The result was drift. The ADR that ended it is one paragraph long and worth
+  reading in full:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> docs/adr/0001-sse-framing-single-writer-seam.md:3-13</figcaption>
+<pre><code>Five production streams (workspace realtime, driver epic watch, workflow runs,
+log streaming, PR review) encoded Server-Sent Events with a mix of hand-rolled
+framing and partial use of a shared writer, and the resulting drift produced
+silently dropped write errors and a bypassed `connected` frame. We
+consolidated every production SSE frame — resumable and non-resumable events,
+retry directives, and comments (see `CONTEXT.md`, Streaming Language) — behind
+`internal/webui/server/realtime.Writer`, made its underlying writer/flusher
+private, and guarded the seam with an AST-based test that rejects SSE
+field-prefix string literals in production code outside `writer.go` (a
+tripwire for honest mistakes, not an enforcement proof). Stream handlers keep everything that is not framing: auth,
+cursors, polling, heartbeat cadence, headers, deadlines, and payloads.</code></pre>
+  </figure>
+
+  <p>That consolidation is commit <code>ce4df56fb</code> — the commit this whole
+  course is pinned to. Note the split it draws, because it is the map of this
+  lesson: <b>the writer owns bytes; the handler owns meaning.</b> Whether a stream
+  can be resumed is a question about meaning, so the writer cannot answer it and
+  never tries.</p>
+
+  <aside class="sidenote">An earlier attempt (PR #182) shared the writer but left
+  its fields public and kept discarding write errors, so bypass stayed possible.
+  The ADR lists it under Considered Options as "reference only" —
+  <span class="path">docs/adr/0001-sse-framing-single-writer-seam.md:27-30</span>.</aside>
+
+  <div class="callout key">
+    <span class="label">The cursor contract</span>
+    <p>A stream is resumable only when the server <b>honors</b> the client's
+    <code>Last-Event-ID</code> on reconnect — reads it, and uses it to decide where
+    to start. Writing <code>id:</code> lines is necessary and <em>not</em>
+    sufficient. An ID the server never consults does not make a stream resumable;
+    it only makes it look resumable.</p>
+  </div>
+
+  <h2>Five frame kinds, five methods</h2>
+
+  <p><code>CONTEXT.md</code> names the vocabulary, and every <code>Writer</code>
+  method belongs to exactly one term — though Resumable Event has two of them:
+  <code>WriteEvent</code> takes an <code>int64</code>, formats it, and hands off to
+  the string form <code>WriteEventID</code>
+  (<span class="path">internal/webui/server/realtime/writer.go:32, 38</span>). The
+  bytes in the last column are copied from the golden test, which asserts them
+  literally.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Term (CONTEXT.md:71-91)</th><th>Method</th><th>Bytes on the wire</th></tr></thead>
+    <tbody>
+      <tr><td><b>Resumable Event</b> — carries an ID, advances the client's cursor</td><td><code>WriteEventID</code> / <code>WriteEvent</code></td><td><code>id: 42\nevent: mutation\ndata: {…}\n\n</code></td></tr>
+      <tr><td><b>Non-resumable Event</b> — no ID, never moves the cursor</td><td><code>WriteEventNoID</code></td><td><code>event: connected\ndata: {…}\n\n</code></td></tr>
+      <tr><td><b>Retry Directive</b> — sets reconnect delay, dispatches nothing</td><td><code>WriteRetry</code></td><td><code>retry: 5000\n\n</code></td></tr>
+      <tr><td><b>Heartbeat Comment</b> — keeps an idle connection alive</td><td><code>WriteComment</code></td><td><code>: heartbeat\n\n</code></td></tr>
+      <tr><td><b>SSE Frame</b> — any of the above, terminated by a blank line</td><td><code>writeFrame</code> (private)</td><td>the trailing <code>\n</code> on every row</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Those exact strings are pinned at
+  <span class="path">internal/webui/server/realtime/writer_test.go:16-50</span>.
+  The method set is five lines of API surface:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/webui/server/realtime/writer.go:11-15, 36-45</figcaption>
+<pre><code>// Writer centralizes SSE wire-format concerns. It is not concurrency-safe.
+type Writer struct {
+	w       io.Writer
+	flusher http.Flusher
+}
+// … constructor and WriteRetry/WriteEvent elided …
+
+// WriteEventID writes a named event with a string event ID. SSE event IDs are
+// opaque strings, which lets fleet-db cursors round-trip through Last-Event-ID.
+func (sw *Writer) WriteEventID(id, event, data string) error {
+	return sw.writeFrame(&amp;id, &amp;event, &amp;data, nil, nil)
+}
+
+// WriteEventNoID writes a named event that does not advance Last-Event-ID.
+func (sw *Writer) WriteEventNoID(event, data string) error {
+	return sw.writeFrame(nil, &amp;event, &amp;data, nil, nil)
+}</code></pre>
+  </figure>
+
+  <p>Both fields are lower-case, so no caller outside the package can reach the
+  socket. Everything funnels into one private encoder, which rejects CR/LF/NUL in
+  IDs and CR/LF in event names, normalises <code>\r\n</code> and <code>\r</code>
+  to <code>\n</code>, emits one <code>data: </code> line per segment, writes the
+  frame in a single <code>Write</code>, <b>returns the write error</b>, and only
+  then flushes. <span class="path">internal/webui/server/realtime/writer.go:52-95</span></p>
+
+  <p>The seam has a tripwire, not a proof — the ADR's own words. An AST test parses
+  every non-test <code>.go</code> file under <code>internal/</code> and
+  <code>cmd/</code> — except <code>writer.go</code> itself — and fails on any string
+  literal with a line starting <code>id:</code>, <code>event:</code>,
+  <code>data:</code> or <code>retry:</code>. A comment marker trips it only when the
+  same literal also carries a newline, so a bare <code>": heartbeat"</code> walks
+  past (<span class="path">writer_seam_test.go:69</span>); and it reads string
+  literals only, so a prefix assembled at runtime is invisible to it — which is what
+  the exercise asks you to work out.
+  <span class="path">internal/webui/server/realtime/writer_seam_test.go:15, 24-30, 61-73</span></p>
+
+  <h2>The trace: one mutation, and the ID it carries</h2>
+
+  <ol class="trace">
+    <li>
+      <span class="hop-file">internal/webui/subscription/module.go:45-52</span>
+      <span class="hop-what"><b>The route.</b>
+      <code>GET /api/workspaces/{ws}/events</code> is served by
+      <code>realtime.NewHandler</code>, wired with the hub, the catch-up function,
+      the workspace-from-context function, the SSE token store, and the activation
+      callback.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/webui/server/realtime/handler.go:74-88</span>
+      <span class="hop-what"><b>Commit to the stream.</b> Four headers
+      (<code>text/event-stream</code>, <code>no-cache</code>,
+      <code>keep-alive</code>, <code>X-Accel-Buffering: no</code>), then
+      <code>NewWriter(w)</code> — a 500 if the <code>ResponseWriter</code> is not a
+      <code>Flusher</code> — then <code>SetWriteDeadline(time.Time{})</code> so the
+      server-wide write timeout does not kill a long-lived stream.</span>
+    </li>
+    <li>
+      <span class="hop-file">handler.go:90 → hub.go:360-379</span>
+      <span class="hop-what"><b>Read the cursor. This is the hop that makes the
+      stream resumable.</b> <code>ParseLastSince</code> merges the
+      <code>Last-Event-ID</code> header and the <code>?since=</code> query:
+      whichever is present wins; if both are present and both parse as int64, the
+      larger header wins; otherwise the query wins. Opaque cursors are preserved
+      as-is.</span>
+    </li>
+    <li>
+      <span class="hop-file">handler.go:134, 179-194 → subscription/multi.go:277-293</span>
+      <span class="hop-what"><b>Catch up before anything else.</b>
+      <code>sendCatchUp</code> returns immediately if <code>since</code> is empty,
+      the workspace is empty, or no catch-up callback is wired
+      (<code>handler.go:180</code>); otherwise it asks the workspace's subscriber for
+      the mutations after that cursor and writes each one that passes the
+      connection's <code>?source_repos=</code> filter (<code>handler.go:186</code>)
+      as a resumable event.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">subscription/backend_subscriber.go:108-122 → <span class="repo fleet">fleet-db</span> internal/api/mutations.go:83-97</span>
+      <span class="hop-what"><b>The cursor's real home.</b> Catch-up is not served
+      from an in-process ring buffer: <code>GetMutationDataSince</code> calls back
+      out to the workspace's issue backend under a timeout — a fresh read, over the
+      wire. On the fleet-db side that read decodes the opaque token (400
+      <code>invalid since parameter</code> if it is not one), serves the workspace's
+      events after it, and returns the next <code>cursor</code>
+      (<code>mutations.go:24-29</code>); its long-poll timeout is capped at
+      <code>mutationsMaxTimeout = 10000</code> (<code>mutations.go:19</code>).</span>
+    </li>
+    <li>
+      <span class="hop-file">handler.go:141, 149</span>
+      <span class="hop-what"><b>Then, and only then, the handshake tail.</b>
+      <code>WriteRetry(RetryMs)</code> — 5000 ms, from
+      <code>hub.go:17-24</code> — followed by a <b>non-resumable</b>
+      <code>connected</code> event written with <code>WriteEventNoID</code>. The
+      order catch-up → retry → connected is a contract; see the trap below.</span>
+    </li>
+    <li>
+      <span class="hop-file">handler.go:201-235, 237-244</span>
+      <span class="hop-what"><b>The loop.</b> Three cases: a payload from the
+      client's channel, written by <code>writeSSEEvent</code> as
+      <code>event: mutation</code> with an ID; a 30-second tick that writes
+      <code>: heartbeat</code>; and request-context cancellation, the normal close
+      path. Any write error ends the stream — the error is no longer swallowed.</span>
+    </li>
+    <li>
+      <span class="hop-file">handler.go:246-267</span>
+      <span class="hop-what"><b>Which ID?</b> <code>eventIDForMutation</code> uses
+      the payload's opaque fleet-db <code>Cursor</code> when it has one — set on the
+      payload at <code>realtime/backend_adapter.go:19-21</code> — and otherwise
+      falls back to a monotonic <em>millisecond-scale</em> counter, which is exactly
+      what the numeric catch-up path expects to be handed back.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/webui/frontend/src/api/common/sse.ts:382-386, 172-179</span>
+      <span class="hop-what"><b>The browser closes the loop.</b> The
+      <code>mutation</code> listener stores <code>event.lastEventId</code> verbatim
+      ("Fleet-db emits opaque durable cursors here, so preserve the value as-is"),
+      and the next <code>connect()</code> passes it as the <code>since</code>
+      parameter of the URL. The cursor rides the query string, because the client
+      builds a fresh <code>EventSource</code> on every reconnect.</span>
+    </li>
+  </ol>
+
+  <aside class="sidenote">Why manual reconnect at all? The <code>?token=</code> is
+  single-use, so native <code>EventSource</code> auto-reconnect would replay a burnt
+  token forever. <code>handleError</code> closes the source and re-runs the whole
+  connect with a fresh token on exponential backoff —
+  <span class="path">internal/webui/frontend/src/api/common/sse.ts:328-340, 342-370</span>.</aside>
+
+  <h2>Now answer the question: is this stream resumable?</h2>
+
+  <p>Two greps and a read. First, does the handler write IDs? Second — the one
+  people skip — does anything on the server <b>read</b>
+  <code>Last-Event-ID</code>? Across all production Go, exactly two files do:</p>
+
+<pre><code>$ grep -rn "Last-Event-ID" internal cmd --include="*.go" | grep -v _test.go
+# eleven hits; the three that actually read the header are:
+internal/webui/server/realtime/hub.go:365:	lastEventID := r.Header.Get("Last-Event-ID")
+internal/webui/server/realtime/hub.go:383:	if lastEventID := r.Header.Get("Last-Event-ID"); lastEventID != "" {
+internal/webui/handlers/driverapi/watch.go:190:	raw := strings.TrimSpace(r.Header.Get("Last-Event-ID"))</code></pre>
+
+  <p>Apply that to the ADR's five streams:</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Stream</th><th>Writes an ID?</th><th>Server honors it?</th><th>Resumable</th></tr></thead>
+    <tbody>
+      <tr><td>workspace realtime<br><code>…/events</code></td><td>Yes — fleet-db cursor, else a counter (<code>handler.go:243, 246-267</code>)</td><td>Yes — <code>ParseLastSince</code> → <code>sendCatchUp</code> (<code>handler.go:90, 179-194</code>)</td><td><b>Yes</b></td></tr>
+      <tr><td>driver epic watch<br><code>…/driver/watch/epic</code></td><td>Yes — the journal event's <code>Seq</code> (<code>watch.go:240</code>)</td><td>Yes — <code>watchCursor</code>, exclusive seq (<code>watch.go:189-202</code>)</td><td><b>Yes</b></td></tr>
+      <tr><td>PR review reviewer<br><code>…/{number}/stream</code></td><td>Yes — item ID and state (<code>stream.go:206, 249</code>)</td><td>No — nothing reads the header; <code>seen</code> is per-connection (<code>stream.go:100-101</code>)</td><td><b>No</b></td></tr>
+      <tr><td>workflow run<br><code>…/runs/{runId}/stream</code></td><td>No — <code>WriteEventNoID</code> for every frame (<code>module.go:309-315</code>)</td><td>No — only an explicit <code>?after=</code> query (<code>module.go:236-239</code>)</td><td><b>No</b></td></tr>
+      <tr><td>log streamer<br>(no route registered)</td><td>Yes — <code>realtime.NextEventID()</code> (<code>log/streamer.go:350-351</code>)</td><td>No — resume is a byte <code>startOffset</code> argument (<code>streamer.go:98, 147</code>)</td><td><b>No</b></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>The bottom row is the most instructive. Its IDs are a process-global counter
+  and its resume position is a file byte offset; the two are unrelated, so even if
+  someone routed the header into <code>startOffset</code> the numbers would mean
+  nothing to each other. And nothing routes it: <code>internal/webui/log/module.go:26-34</code>
+  registers two or three non-streaming log routes — the agent-log route is
+  conditional on <code>agentSvc</code> (<code>module.go:28</code>) — and no stream at
+  all; a repo-wide grep finds no caller of <code>LogStreamer</code> outside its own
+  package.</p>
+
+  <div class="callout trap">
+    <span class="label">Trap — "it has IDs, so the client can resume"</span>
+    <p>The PR review stream writes a well-formed <code>id:</code> on every message
+    frame (<span class="path">internal/webui/handlers/prreview/stream.go:206</span>).
+    A browser will dutifully remember it and send it back. Nothing on the server
+    reads it: <code>prepareReviewerStream</code> resolves a workspace, a pull
+    request and an agent, and nothing else
+    (<span class="path">stream.go:81-98</span>), and the de-duplication set is
+    created fresh inside <code>runReviewerStream</code>
+    (<span class="path">stream.go:100-101</span>). After a drop the client is
+    re-sent the whole conversation from the beginning. That is a fine design for a
+    stream whose payload is a full snapshot — it is <em>not</em> resumability, and
+    calling it that will send someone hunting for a replay bug that does not exist.</p>
+  </div>
+
+  <div class="callout trap">
+    <span class="label">Trap — reordering the handshake</span>
+    <p>It is tempting to greet the client first: <code>connected</code>, then
+    <code>retry</code>, then the backlog. Do not. Catch-up events go out
+    <b>before</b> the <code>retry</code> directive and the <code>connected</code>
+    event (<span class="path">internal/webui/server/realtime/handler.go:134, 141, 149</span>),
+    and <code>connected</code> is written with <code>WriteEventNoID</code> so it
+    cannot move the reconnect cursor past events the client has not seen. The
+    comment on that line says exactly this, the golden test pins the ID-less bytes
+    (<span class="path">writer_test.go:31-36</span>), and two live tests split the
+    ordering between them: catch-up before <code>connected</code>
+    (<span class="path">internal/webui/app/sse_live_test.go:471-503</span>) and
+    <code>retry</code> before <code>connected</code>
+    (<span class="path">sse_live_test.go:685-687</span>). Neither pins all three
+    hops — the catch-up test's reader drops <code>retry:</code> lines before it ever
+    sees them (<span class="path">sse_live_test.go:148-151</span>).</p>
+  </div>
+
+  <h2>The pattern to copy when you add a stream</h2>
+
+  <ol>
+    <li><b>Do every fallible thing before the headers.</b> The driver watch resolves
+    auth, the parent run, the epic, the cursor, the backend and the snapshot inside
+    <code>prepareWatch</code>, so a failure is a structured JSON error instead of a
+    dead <code>text/event-stream</code>.
+    <span class="path">internal/webui/handlers/driverapi/watch.go:82-131</span></li>
+    <li><b><code>realtime.NewWriter(w)</code>, four headers,
+    <code>SetWriteDeadline(time.Time{})</code>.</b> Skip the deadline and the
+    server-wide write timeout kills your stream mid-life.</li>
+    <li><b>Decide the cursor contract explicitly and write it in the doc comment.</b>
+    The watch handler's comment states the frame names, what the ID <em>is</em>, and
+    that <code>Last-Event-ID</code> (or <code>?afterSeq=</code>) is an exclusive seq
+    cursor. <span class="path">watch.go:43-55</span></li>
+    <li><b>Pick a cadence per stream.</b> There is no shared heartbeat constant by
+    design: the workspace stream beats every 30 s (<code>hub.go:17-24</code>), the
+    driver watch every 15 s (<code>watch.go:24-27</code>). <code>CONTEXT.md:89-91</code>
+    says cadence belongs to the individual stream.</li>
+    <li><b>Never format a frame yourself</b> — not in a helper, not in a log line.
+    The seam test walks all of <code>internal/</code> and <code>cmd/</code>.</li>
+  </ol>
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory: you are handed an unfamiliar SSE handler. State the
+    two questions that decide whether the stream is resumable, and name the file
+    that answers each one for the workspace <code>…/events</code> stream.</p>
+    <div class="answer">
+      <p><b>1. Does it write event IDs, and what are they?</b> For
+      <code>…/events</code>: <code>writeSSEEvent</code> →
+      <code>eventIDForMutation</code>, which prefers the opaque fleet-db
+      <code>Cursor</code> and falls back to a millisecond-scale counter.
+      <span class="path">internal/webui/server/realtime/handler.go:237-267</span></p>
+      <p><b>2. Does the server read <code>Last-Event-ID</code> and start from it?</b>
+      For <code>…/events</code>: <code>ParseLastSince</code> merges header and
+      <code>?since=</code>, and <code>sendCatchUp</code> replays from it before the
+      retry and connected frames.
+      <span class="path">handler.go:90, 134, 179-194; hub.go:360-379</span></p>
+      <p>Only both together mean resumable. Question 1 alone is satisfied by the PR
+      review stream, which is not resumable.</p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="0013">
+    <div class="q" data-answer="2">
+      <p class="stem">A stream writes <code>id:</code> on every event frame, but no
+      file in the handler's package mentions <code>Last-Event-ID</code>. What is
+      it?</p>
+      <ul class="opts">
+        <li>Resumable, since the browser resends the ID it last saw</li>
+        <li>Resumable, provided the client also passes a query cursor</li>
+        <li>Not resumable — nothing on the server consults that ID</li>
+        <li>Not resumable, because event IDs must be numeric to work</li>
+      </ul>
+      <div class="why">Honoring the ID is the whole contract
+      (<code>CONTEXT.md:77-79</code>). The first option is the sharp wrong answer:
+      the browser really does resend it, which is precisely why an unread ID is so
+      convincing. IDs are opaque strings by design, so the last option is false too
+      — fleet-db cursors are not numeric.
+      <span class="path">internal/webui/server/realtime/writer.go:36-40</span></div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <p class="stem">Why is the <code>connected</code> event written with
+      <code>WriteEventNoID</code> rather than with an ID?</p>
+      <ul class="opts">
+        <li>Because a handshake frame has no payload worth identifying later</li>
+        <li>Because an ID there would move the cursor past unreplayed events</li>
+        <li>Because the hub has not yet assigned this client its stream cursor</li>
+        <li>Because clients ignore identifiers on frames they did not subscribe</li>
+      </ul>
+      <div class="why">It is a Non-resumable Event on purpose: it arrives after
+      catch-up and after <code>retry</code>, and any ID on it would become the
+      client's new reconnect position
+      (<span class="path">internal/webui/server/realtime/handler.go:148-149</span>).
+      The first option sounds right and is not the reason — the frame does carry a
+      payload, <code>{"clientId":N}</code>.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <p class="stem">Reaching back to <a href="0005-where-state-lives.html">Lesson
+      05</a>: when a browser reconnects with a cursor, where do the replayed
+      mutations come from?</p>
+      <ul class="opts">
+        <li>From the issue backend, re-read over the wire after the cursor</li>
+        <li>From the hub's 1024-entry broadcast retry queue in memory</li>
+        <li>From the per-client 64-slot send buffer kept after the drop</li>
+        <li>From a replay file the subscriber writes for each workspace</li>
+      </ul>
+      <div class="why"><code>GetMutationDataSince</code> calls back out to the
+      workspace's issue backend under a timeout — catch-up is a fresh read, not a
+      memory replay
+      (<span class="path">internal/webui/subscription/backend_subscriber.go:101-122</span>).
+      The retry queue is real but is an <em>outbound</em> buffer for a full
+      broadcast channel (<code>hub.go:266-282</code>), and a dropped client's
+      channel is closed, not retained (<code>hub.go:180-189</code>).</div>
+    </div>
+  </div>
+
+  <div class="exercise">
+    <h3>Classify all five streams, then watch the contract hold</h3>
+    <ol>
+      <li>Run the seam test and the golden frame test:
+      <code>go test ./internal/webui/server/realtime -run 'TestProductionSSEFramingUsesWriter|TestWriterFrames'</code>.
+      Then open <code>writer_seam_test.go:61-73</code> and say, in one sentence, what
+      <code>fmt.Sprintf("id%s", ":")</code> would do to it.</li>
+      <li>Run
+      <code>grep -rn "Last-Event-ID" internal cmd --include="*.go" | grep -v _test.go</code>.
+      Separate the hits that <em>read the header</em> from the hits that only
+      mention it in a comment.</li>
+      <li>For each of the ADR's five streams, open the handler and fill in the two
+      columns yourself — <b>writes an ID?</b> and <b>honors the header?</b> — before
+      looking back at the table above. Start from
+      <code>internal/webui/handlers/workflows/module.go:219</code> and
+      <code>internal/webui/handlers/prreview/stream.go:62</code>.</li>
+      <li>Run <code>go test ./internal/webui/app -run TestSSELive_CatchUpOnReconnect -v</code>
+      and read the test body at <code>sse_live_test.go:441-505</code>. Identify the
+      assertion that would fail if someone moved the <code>connected</code> frame
+      ahead of catch-up.</li>
+      <li>Reaching back to <a href="0002-the-words-that-lie.html">Lesson 02</a>: read
+      <code>CONTEXT.md:71-91</code> and note the <i>Avoid</i> line under each term.
+      Which everyday phrase for a heartbeat does the vocabulary forbid, and what
+      wrong design does that phrase quietly suggest?</li>
+    </ol>
+    <div class="verify">
+      <b>You succeeded when</b>
+      Both <code>go test</code> commands pass; your grep shows exactly
+      <b>two</b> production files reading the <code>Last-Event-ID</code> header
+      (<code>realtime/hub.go</code> and <code>handlers/driverapi/watch.go</code>);
+      and your five-row table matches the one above, including the two streams that
+      write IDs and are still not resumable.
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><code>internal/webui/server/realtime/writer.go</code> — 96 lines, and the
+    entire wire format of every production stream in the system. Read it beside
+    <code>CONTEXT.md</code>'s Streaming Language section (21 lines): one term per
+    method, and the definition of Resumable Event that this lesson is built on.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0012-how-serve-is-put-together.html"><span class="dir">Previous</span>How serve is put together</a>
+    <a class="next" href="0014-the-react-app.html"><span class="dir">Next</span>The React app</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

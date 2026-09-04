@@ -1,0 +1,490 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>10. What actually runs your code — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 3 <span class="sep">/</span> Lesson 10 <span class="sep">/</span> Execution</p>
+  <h1>What actually runs your code</h1>
+  <p class="standfirst">Five objects in this domain read like a thing that runs. Only
+  two ever become an operating-system process. Learn which, and you can answer the
+  question every incident starts with: where is this actually running?</p>
+
+  <div class="meta">
+    <span><b>Skill</b> name the three execution levels and place any running thing on one</span>
+    <span><b>Time</b> 40 min</span>
+    <span><b>Needs</b> <a href="0009-when-a-run-dies.html">09</a></span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span> <span class="repo fleet">fleet-db</span></span>
+  </div>
+
+  <h2>Why this exists</h2>
+
+  <p>Loom runs other people's programs: a TypeScript workflow that decides what work
+  exists, and an AI CLI that does the work. Different programs, different lifetimes — so
+  Loom keeps two run objects, two queues and two claim loops, plus a third path, the
+  daemon-supervised agent, that predates both. The cost is vocabulary:
+  <code>DriverRun</code>, <code>DriverStep</code> and <code>TaskRun</code> sit within a
+  few dozen lines of each other in <code>internal/domain/platform.go</code> and all read
+  as "a thing that runs". One of them runs nothing at all.</p>
+
+  <div class="callout key">
+    <span class="label">The one idea</span>
+    <p>Loom runs code at <b>three levels</b>, and <b>only the outermost can be
+    containerized</b>. L1 is the workflow bundle that decides what tasks exist; L2 is
+    the task leaf that invokes the backend CLI and edits your repository; L3 is the
+    daemon-supervised agent. Every "where does this run?" resolves to one of those
+    three. <span class="path">docs/design/execution-isolation.md:9-19</span></p>
+  </div>
+
+  <h2>The three levels</h2>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Level</th><th>What runs there</th><th>Spawned by</th><th>Containerizable (local)</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>L1</b><br>DriverRun bundle</td>
+        <td>The built Flue workflow — the orchestration program that decides which tasks exist</td>
+        <td>A <code>SandboxLauncher</code>, behind a seam <span class="path">internal/driver/sandbox/launcher.go:236</span></td>
+        <td><b>Yes</b></td>
+      </tr>
+      <tr>
+        <td><b>L2</b><br>TaskRun leaf</td>
+        <td>The Node runner that <code>execFile</code>s the backend CLI and edits code</td>
+        <td>A literal spawn <span class="path">internal/driver/task_bridge.go:366</span></td>
+        <td>No</td>
+      </tr>
+      <tr>
+        <td><b>L3</b><br>daemon agent</td>
+        <td>The <code>loom &lt;role&gt; --daemon-mode</code> worker the supervisor owns</td>
+        <td>A literal spawn <span class="path">internal/cli/daemon/supervisor/spawn.go:109</span></td>
+        <td>No</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>"Behind a seam" versus "a literal spawn" is the entire mechanism, and it is
+  visible in the Go without reading a word of prose. <code>Executor</code> carries a
+  swappable launcher:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/driver/executor.go:88-93</figcaption>
+<pre><code>	// SandboxLauncher, when set, launches workflow runtimes through the SB1
+	// sandbox seam — e.g. the rootless container launcher selected by
+	// LOOM_DRIVER_SANDBOX=container in serve (ResolveSandboxLauncher). Nil
+	// keeps the default local node-process launcher. Ignored when Runner is
+	// set explicitly.
+	SandboxLauncher SandboxLauncher</code></pre>
+  </figure>
+
+  <p><code>HostBridgeTaskExecutor</code>, the L2 equivalent, has no launcher field of
+  any kind (<span class="path">internal/driver/task_bridge.go:47-81</span>). That struct
+  diff is the whole L1/L2 story.</p>
+
+  <aside class="sidenote">Worth knowing, not memorising:
+  <code>RunBundledTaskRunner</code> (<code>internal/driver/bundled_runner.go:79</code>)
+  is the one-shot path the daemon leaf uses to delegate a backend run to the same TS
+  runner — same spawn, no worktree provisioning, no patch-back.</aside>
+
+  <h2>The five objects</h2>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Object</th><th>Is</th><th>Becomes a process?</th></tr></thead>
+    <tbody>
+      <tr><td><code>Driver</code> <span class="path">platform.go:64</span></td>
+        <td>A named program, with an <code>ActiveVersionID</code> and a <code>TrustLevel</code></td>
+        <td>No — a pointer</td></tr>
+      <tr><td><code>DriverVersion</code> <span class="path">platform.go:87</span></td>
+        <td>One immutable built bundle: <code>BundleRef</code>, <code>BundleDigest</code>, <code>ValidationStatus</code></td>
+        <td>No — an artifact</td></tr>
+      <tr><td><code>DriverRun</code> <span class="path">platform.go:396</span></td>
+        <td>One execution of one pinned version, with node, lease and fencing token</td>
+        <td><b>Yes — L1</b></td></tr>
+      <tr><td><code>DriverStep</code> <span class="path">platform.go:462</span></td>
+        <td>A ledger row inside a run, optionally naming the <code>TaskRunID</code> it produced</td>
+        <td><b>No — see the trap</b></td></tr>
+      <tr><td><code>TaskRun</code> <span class="path">platform.go:498</span></td>
+        <td>One execution attempt of one FleetDB task, with its own lease and placement</td>
+        <td><b>Yes — L2</b></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>The nesting is <code>Driver → DriverVersion → DriverRun → TaskRun</code>, with
+  <code>DriverStep</code> off to the side: a <code>TaskRun</code> carries both
+  <code>DriverRunID</code> and <code>DriverStepID</code> as optional back-links
+  (<span class="path">internal/domain/platform.go:498-502</span>).</p>
+
+  <div class="callout trap">
+    <span class="label">Trap — <code>DriverStep</code> is not an execution level</span>
+    <p>It has a status enum containing <code>running</code>
+    (<span class="path">internal/domain/platform.go:442-450</span>) and a store
+    interface with a <code>Create</code> method
+    (<span class="path">internal/store/platform_store.go:610-617</span>), so it reads
+    like something Loom runs. At the pinned commit, <b>no production code in loomcli
+    creates one</b>. Every production call site is an <code>Update</code>, each guarded
+    by a step id the <em>workflow</em> supplied:
+    <code>if opts.DriverStepID == "" { return nil }</code>
+    <span class="path">internal/driver/task_request.go:601-604</span>. It is
+    bookkeeping the workflow opts into. Prove it in the exercise.</p>
+  </div>
+
+  <h2>The trace: from a POST to a running <code>codex</code></h2>
+
+  <ol class="trace">
+    <li>
+      <span class="hop-file">internal/webui/handlers/workflows/module.go:36, 135, 173</span>
+      <span class="hop-what"><b>Route, then resolve.</b>
+      <code>POST /api/workspaces/{ws}/workflows/{name}</code> →
+      <code>createWorkflowRun</code> → <code>resolveWorkflowDriverID</code>, which for a
+      builtin name runs <code>EnsureBuiltinWorkflow</code> — a lazy self-heal, not a
+      lookup.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/workflows/workflows.go:337, 368 → internal/driver/register.go:412-444</span>
+      <span class="hop-what"><b>Build and register a version.</b>
+      <code>BuildAndRegister</code> runs <code>flue build --target node</code>
+      (<code>workflows.go:737</code>) in a temp npm project; <code>stageFlueBundle</code>
+      stamps <code>manifest["trust_level"]</code> (<code>register.go:433</code>), digests
+      the manifest plus every file under <code>dist/</code> in sorted order
+      (<code>register.go:796</code>), and derives
+      <code>versionID = &lt;driverID&gt;-v-&lt;digest12&gt;</code>. <b>The identifier is
+      the digest</b>, so re-registering identical sources is idempotent.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/driver/run.go:38, 76, 98</span>
+      <span class="hop-what"><b>Create the run, pinning the version.</b>
+      <code>CreateDriverRun</code> refuses a version whose
+      <code>ValidationStatus</code> is not <code>passed</code>, then writes
+      <code>DriverVersionID</code> onto the row; the handler returns
+      <code>202 Accepted</code> (<code>module.go:170</code>). <b>Nothing has executed
+      yet.</b></span>
+    </li>
+    <li>
+      <span class="hop-file">internal/cli/serve/serve.go:325-333 → internal/driver/executor.go:125, 627-631, 160</span>
+      <span class="hop-what"><b>Claim, verify, mint.</b> A 2-second ticker calls
+      <code>Executor.RunOnce</code>, which claims one queued run with a node id and lease
+      id (<code>ErrAlreadyClaimed</code> is a skip, not an error — the
+      losing-the-race-is-normal shape from
+      <a href="0008-claiming-without-collisions.html">Lesson 08</a>), re-computes the
+      bundle digest against the one pinned on the version and fails the run
+      <code>bundle_verification</code> if it differs (<code>:156-158</code>), and only
+      then mints the run token (<code>:160</code>). A tampered bundle never reaches the
+      mint.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/driver/executor.go:743-758 → internal/driver/sandbox/launcher.go:236</span>
+      <span class="hop-what"><b>Launch — this is L1.</b> <code>runBuiltFlueServer</code>
+      picks <code>r.Launcher</code>, else the default process launcher. In
+      <code>process</code> mode that is
+      <code>exec.CommandContext(ctx, node, launcherPath)</code> with
+      <code>cmd.Env = spec.Env</code> — the launcher adds and drops nothing, because
+      the runner already reduced the host env to an allowlist
+      (<code>executor.go:802</code>); in
+      <code>container</code> mode the identical spec goes to the container launcher.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/workflows/builtin/epic-runner.ts:298 → sdk/driver.js:295, 309</span>
+      <span class="hop-what"><b>The workflow asks for work.</b>
+      <code>loom.taskRuns.request(...)</code> POSTs to <code>…/driver/exec-task</code>
+      with <code>enqueueOnly: true</code> and <code>deferCompletion: true</code> — a
+      request, not an execution. Serve creates a <code>queued</code>
+      <code>TaskRun</code> row and returns
+      (<code>module.go:594-599</code> → <code>task_request.go:265</code>).</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/cli/serve/serve.go:385, 457 → internal/driver/task_request.go:300-313</span>
+      <span class="hop-what"><b>A different loop claims it.</b>
+      <code>startDriverTaskWorkers</code> runs N goroutines (default 2) on a 1-second
+      ticker; each claims a queued <code>TaskRun</code> with <b>its own</b> lease id and
+      lease token, not the parent's.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/driver/task_bridge.go:366 → internal/workflows/builtin/local-task-runner.ts:456, 513</span>
+      <span class="hop-what"><b>Spawn — this is L2.</b>
+      <code>exec.CommandContext(ctx, "node", launcherPath)</code> in the worktree: a
+      string literal, not a variable, because there is no launcher to substitute. The
+      runner then <code>execFile</code>s the backend binary — for codex,
+      <code>["exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "-"]</code>.
+      That process reads and writes your repository.</span>
+    </li>
+  </ol>
+
+  <p>Hops 4 and 7 are the two claim loops; hops 5 and 8 are the two spawns. Everything
+  else is bookkeeping — and that ratio is the point.</p>
+
+  <h2>Run-scoped auth: <code>LOOM_RUN_TOKEN</code></h2>
+
+  <p>An L1 bundle is someone else's TypeScript in a process Loom started, and it must
+  call back into serve. Its credential is scoped to exactly one run:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/driver/run.go:230-240</figcaption>
+<pre><code>// RunTokenClaims bind a bearer token to one DriverRun for one lease window.
+// A stolen token is therefore bounded to a single run and rejected once the
+// lease moves on (fenced verification) or the TTL — the maximum run duration
+// — elapses. Tokens are stateless and never persisted; idempotent re-claims
+// mint fresh ones.
+type RunTokenClaims struct {
+	WorkspaceKey string `json:"workspaceKey"`
+	RunID        string `json:"runId"`
+	NodeID       string `json:"nodeId"`
+	LeaseID      string `json:"leaseId"`
+	FencingToken int64  `json:"fencingToken"`</code></pre>
+  </figure>
+
+  <p>Because the <b>lease</b> is inside the claims, fenced verification doubles as
+  revocation: a superseded lease rejects the token regardless of expiry, with no
+  denylist anywhere. It is minted at <em>claim</em>, not at create
+  (<span class="path">internal/driver/executor.go:160, 184</span>) and reaches the child
+  only as an env var (<span class="path">:827-828</span>). Nothing inherited rides along
+  with it: the workflow env is assembled from an allowlist of names rather than by
+  stripping suspicious ones — <code>scopedSubprocessBaseEnv</code> keeps only
+  <code>PATH</code>, <code>HOME</code>, <code>TERM</code>, <code>LANG</code>,
+  <code>TZ</code>, <code>LC_*</code> and a handful of named <code>LOOM_*</code> vars, and
+  rejects outright any name containing <code>SECRET</code>, <code>TOKEN</code>,
+  <code>PASSWORD</code>, <code>PRIVATE_KEY</code>, <code>ACCESS_KEY</code> or
+  <code>API_KEY</code>
+  (<span class="path">internal/driver/env.go:67-74, 125-151</span>). It is not yet the
+  <em>only</em> token there: serve appends its static bearer alongside it whenever it has
+  one and the legacy fallback below is on
+  (<span class="path">internal/driver/executor.go:795-796</span>). On the wire it does
+  travel alone: with
+  a run token set, <code>#identityHeaders</code> returns
+  <code>{ Authorization: "Bearer " + this.runToken }</code> and nothing else
+  (<span class="path">sdk/driver.js:587-590</span>), and serve derives identity from the
+  claims, treating a conflicting <code>X-Loom-Driver-Run-Id</code> as
+  <code>401 identity_mismatch</code>
+  (<span class="path">internal/webui/handlers/driverapi/token_auth.go:64-68</span>).</p>
+
+  <div class="callout trap">
+    <span class="label">Trap — <code>LOOM_DRIVER_API_TOKEN</code> still works, and is still deprecated</span>
+    <p>"Workflows authenticate with a run token" reads as "the node-wide static bearer
+    is gone". It is not. A token-carrying run drops it only while
+    <code>LOOM_DRIVER_LEGACY_AUTH_ENV</code> is off, and that switch <b>defaults ON</b> —
+    <code>legacyDriverAuthEnvEnabled</code> returns true for everything except
+    <code>0/false/off/no</code> (<span class="path">internal/driver/executor.go:697-703</span>).
+    A run with no minted token always gets the legacy env, because it is that run's only
+    auth (<span class="path">:688-692</span>). The deprecation is also scoped: deprecated
+    <em>for workflow runtimes</em>, while the CLI/ops header quad
+    (<code>X-Loom-Driver-Run-Id / -Node-Id / -Lease-Id / -Fencing-Token</code>,
+    <span class="path">internal/webui/handlers/driverapi/module.go:49-52</span>) is
+    unaffected. <span class="path">AGENTS.md:71-77</span></p>
+  </div>
+
+  <h2>The other way a DriverRun is born</h2>
+
+  <p>Hop 3 above is the operator path. The event path produces the same object through
+  three rows, in a contractual order — <code>TriggerRouteDispatcher</code> "persists ONE
+  TriggerEvent, then per matched binding enqueues a queued DriverRun and records a
+  TriggerDelivery, in that order"
+  (<span class="path">internal/store/platform_store.go:398-402</span>):</p>
+
+  <ol class="trace">
+    <li>
+      <span class="hop-file">internal/domain/platform.go:214, 227-228</span>
+      <span class="hop-what"><b><code>TriggerBinding</code></b> — standing config,
+      pairing a route key or event-type pattern with a <code>DriverID</code> and
+      <code>DriverVersionID</code>.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">internal/api/platform.go:86, 1302</span>
+      <span class="hop-what">In <span class="repo fleet">fleet-db</span>,
+      <code>POST /api/v1/{workspace}/trigger-routes/{route_key}</code> lands on
+      <code>createTriggerRouteRun</code>, which fans out to every matched binding and
+      answers with <code>deliveries[]</code> (<code>:1332</code>).</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/domain/platform.go:274-277, 348-361</span>
+      <span class="hop-what"><b><code>TriggerEvent</code></b> is the durable record of
+      what happened, persisted before any dispatch;
+      <b><code>TriggerDelivery</code></b> is one binding's reaction to it, carrying the
+      <code>DriverRunID</code> it enqueued.</span>
+    </li>
+  </ol>
+
+  <p>Note what that produces: a <code>queued</code> <code>DriverRun</code>, identical to
+  the one hop 3 created. From hop 4 onward the two paths are the same code.
+  <b>Triggers are a source, not a level.</b></p>
+
+  <h2>The pattern to copy</h2>
+
+  <p>Put the swappable part behind an interface and let the wiring choose once, at
+  startup. <code>ResolveSandboxLauncher</code> is called in exactly one production place
+  (<span class="path">internal/cli/serve/serve.go:353</span>), and an invalid
+  configuration <b>disables the executor</b> rather than degrading to a host process
+  (<span class="path">:347-357</span>). Isolation is declared by an interface, not a
+  boolean — <code>IsolatingLauncher{ SandboxLauncher; Isolates() bool }</code>
+  (<span class="path">internal/driver/sandbox/policy.go:39-47</span>) — and only the
+  container launcher implements it
+  (<span class="path">internal/driver/sandbox/container.go:157</span>). That marker is
+  the hinge of the trust policy, which is
+  <a href="0011-things-that-are-not-boundaries.html">the next lesson</a>. For now note
+  where the hinge is, and that L2 and L3 have no <em>local</em> equivalent: their only
+  isolation option is remote, selected by runner entrypoint rather than by launcher
+  (<code>daytona-task-runner</code>,
+  <span class="path">internal/driver/bundled_runner.go:16-20</span>;
+  <span class="path">docs/design/execution-isolation.md:136-151</span>).</p>
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory, without scrolling: name the three execution levels and
+    what runs at each. Then place these four — <code>epic-runner</code>,
+    <code>local-task-runner</code>, a <code>DriverStep</code>, and
+    <code>loom task &lt;worktree&gt; --auto --daemon-mode</code>.</p>
+    <div class="answer">
+      <p><b>L1</b> the DriverRun bundle (the orchestration program), <b>L2</b> the
+      TaskRun leaf that invokes the backend CLI and edits code, <b>L3</b> the
+      daemon-supervised agent. Only L1 can be containerized.
+      <span class="path">docs/design/execution-isolation.md:9-19</span></p>
+      <p><code>epic-runner</code> → L1, through the sandbox seam
+      (<code>sandbox/launcher.go:236</code>). <code>local-task-runner</code> → L2,
+      spawned at <code>task_bridge.go:366</code>, which <code>execFile</code>s the
+      backend CLI (<code>builtin/local-task-runner.ts:513</code>).
+      <code>loom task &lt;worktree&gt; --auto --daemon-mode</code> → L3,
+      <code>cli/daemon/supervisor/spawn.go:101-109</code> — that form is gated on
+      <code>BuiltInRoles</code>, which is exactly <code>{plan, task}</code>
+      (<code>supervisor/types.go:170-173</code>); any other role is spawned as
+      <code>loom agent …</code> instead. <b>A <code>DriverStep</code> has
+      no level</b> — a ledger row production code only ever updates
+      (<code>task_request.go:601-604</code>).</p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="0010">
+    <div class="q" data-answer="0">
+      <p class="stem">You set <code>LOOM_DRIVER_SANDBOX=container</code>. Which process
+      ends up inside the container?</p>
+      <ul class="opts">
+        <li>The workflow bundle that decides which tasks exist</li>
+        <li>The task leaf that invokes the CLI and edits code</li>
+        <li>The daemon agent the supervisor spawns per role</li>
+        <li>Every node subprocess the driver package spawns</li>
+      </ul>
+      <div class="why">Only L1 goes through the launcher seam, so only L1 can be swapped
+      for a container. The second option is the tempting one, and it is why this lesson
+      exists: the L2 spawn is a string literal with no launcher to substitute, and its
+      executor struct has no launcher field at all.
+      <span class="path">internal/driver/task_bridge.go:47-81, :366</span></div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <p class="stem">A <code>DriverRun</code> and the <code>TaskRun</code> it requests
+      both reach a runner by being claimed. What is true of those two claims?</p>
+      <ul class="opts">
+        <li>Separate loops, each minting its own lease and fence</li>
+        <li>One loop; the task claim reuses the parent's lease</li>
+        <li>The task run inherits the parent run's fencing token</li>
+        <li>Both are claimed by the same goroutine inside serve</li>
+      </ul>
+      <div class="why">Two loops: a 2-second ticker calling <code>Executor.RunOnce</code>
+      (<span class="path">internal/cli/serve/serve.go:325-333</span>) and N task-worker
+      goroutines, default 2 (<span class="path">:385, :457</span>). The task claim
+      generates its own lease id <em>and</em> lease token
+      (<span class="path">internal/driver/task_request.go:300-313</span>). The last option
+      is the near-miss: the driver-run loop really is one goroutine, but the task workers
+      are separate ones. The <a href="0008-claiming-without-collisions.html">Lesson 08</a>
+      claim shape, applied twice at different granularities rather than shared.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <p class="stem">A token-carrying workflow bundle calls <code>exec-task</code> on
+      serve. What does the SDK put on the request?</p>
+      <ul class="opts">
+        <li>The node-wide static bearer and the four identity headers</li>
+        <li>Only an <code>Authorization: Bearer</code> header with the run token</li>
+        <li>The run token as a header plus the lease id for fencing</li>
+        <li>The task-run lease token issued when a worker claimed it</li>
+      </ul>
+      <div class="why">With a run token present the SDK returns exactly one header and
+      ignores everything else (<span class="path">sdk/driver.js:587-590</span>); a
+      conflicting <code>X-Loom-Driver-Run-Id</code> is <code>401 identity_mismatch</code>
+      (<span class="path">internal/webui/handlers/driverapi/token_auth.go:64-68</span>).
+      The first option is the sharp wrong answer because it is still live — it is the
+      legacy header quad plus <code>LOOM_DRIVER_API_TOKEN</code>, which serve still
+      accepts for CLI and ops — but it is not what a token-carrying runtime sends.
+      <span class="path">AGENTS.md:71-77</span></div>
+    </div>
+  </div>
+
+  <div class="exercise">
+    <h3>Find the levels in the tree, then place two things on them</h3>
+    <p>Read-only greps and one test, all from the loomcli root — nothing here starts a
+    stack, so the shared-state rules from
+    <a href="0003-run-it-without-breaking-anyone.html">Lesson 03</a> do not bite.</p>
+    <ol>
+      <li>Run
+      <code>grep -rn 'exec.CommandContext(ctx, "node"' internal --include="*.go" | grep -v _test</code>
+      (two hits), then the same grep with the argument unquoted,
+      <code>exec.CommandContext(ctx, node</code> (one hit, different package). Name the
+      level of each, and explain the literal-versus-variable difference in one
+      sentence. That sentence is the lesson.</li>
+      <li><code>grep -rn "ResolveSandboxLauncher" internal --include="*.go" | grep -v _test</code>.
+      Ignoring the definition and the re-export wrapper, how many places actually
+      <em>call</em> it — and what does that tell you about L2 and L3?</li>
+      <li><code>go test ./internal/driver -run TestStep9WorkflowEnvHoldsOnlyRunToken -v</code>.
+      Read <code>step9EnvForbidden</code> (<code>step9_e2e_test.go:213-225</code>) and the
+      <code>t.Setenv</code> on line 233. Which three forbidden variables would reappear
+      in the workflow env if that line were deleted? Check yourself at
+      <code>internal/driver/executor.go:812-817</code> and <code>:795-796</code>.</li>
+      <li><code>grep -rn "DriverSteps()" internal --include="*.go" | grep -v _test | grep -v "^internal/infra/\|^internal/store/"</code>.
+      Count the <code>Create</code> calls, and you can defend the trap above from the
+      tree rather than from this page.</li>
+      <li>Reaching back to <a href="0005-where-state-lives.html">Lesson 05</a>: a
+      registered <code>DriverVersion</code> exists both as a row and as a directory under
+      <code>&lt;workDir&gt;/.loom/drivers/</code>. Name the tier each lands in, then read
+      <code>internal/driver/executor.go:604-633</code> (all of
+      <code>verifyBundleManifest</code>) with the caller's early return at
+      <code>:156-158</code>, and say what happens at launch when the row survives without
+      the directory (<code>:605-608</code>) — and when the directory survives with
+      changed contents (<code>:627-631</code>).</li>
+    </ol>
+    <div class="verify">
+      <b>You succeeded when</b>
+      Your greps return <code>task_bridge.go:366</code> and
+      <code>bundled_runner.go:79</code> for the literal,
+      <code>sandbox/launcher.go:236</code> for the variable, and exactly one production
+      caller of <code>ResolveSandboxLauncher</code>
+      (<code>internal/cli/serve/serve.go:353</code>); the step-9 test passes; and
+      <code>DriverSteps().Create</code> has <b>zero</b> production call sites. You can
+      then say in one breath which of those three spawn sites a container could ever
+      wrap.
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><code>docs/design/execution-isolation.md</code> — 320 lines, the primary source
+    for everything above, and this team's model for a design doc: state the mechanism,
+    then state plainly what it does <em>not</em> cover. Read it before any code in
+    <code>internal/driver/sandbox/</code>. Its "What is NOT isolation" half is the next
+    lesson, so stop at line 206 if you want to keep the surprise. Unfamiliar terms are in
+    the <a href="../reference/glossary.html">glossary</a>.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0009-when-a-run-dies.html"><span class="dir">Previous</span>When a run dies</a>
+    <a class="next" href="0011-things-that-are-not-boundaries.html"><span class="dir">Next</span>Things that are not boundaries</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,667 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>29. fleet-db builds itself — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 6 <span class="sep">/</span> Lesson 29 <span class="sep">/</span> Cross-repo</p>
+  <h1>fleet-db builds itself</h1>
+  <p class="standfirst">Three quarters of this repo's commits were written by an
+  agent, so its architecture could not stay in prose. It lives in a 165-line policy
+  file, and that file — not a reviewer — is what will reject your first change.</p>
+
+  <div class="meta">
+    <span><b>Skill</b> read <code>harness/policy.yaml</code> and predict what fleet-db's gate rejects</span>
+    <span><b>Time</b> 35 min</span>
+    <span><b>Needs</b> <a href="0004-the-gate-is-the-spec.html">Lesson 04</a>, <a href="0018-the-event-log-is-the-truth.html">Lesson 18</a></span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span> <span class="repo fleet">fleet-db</span></span>
+  </div>
+
+  <h2>Why this exists</h2>
+
+  <p>Count the authorship of <span class="repo fleet">fleet-db</span> at the commit
+  this course is pinned to: <b>709 of 932 commits</b> carry a
+  <code>Co-Authored-By: Claude</code> trailer. The repo's own guide says so in its
+  first sentence — "an agent-first repository that uses Loom for role execution and
+  FleetDB as the canonical task source"
+  (<span class="path">AGENTS.md:4</span>) — and <code>loom.yaml</code> names the
+  five roles and the two standing worktree agents that do the work
+  (<span class="path">loom.yaml:13-47</span>).</p>
+
+  <p>That fact drives everything else in this lesson. A convention that lives in a
+  markdown file is a convention a fresh agent context may or may not have read. A
+  convention that exits non-zero is one nobody can miss. So fleet-db took the move
+  you already saw in <a href="0004-the-gate-is-the-spec.html">Lesson 04</a> —
+  <em>make the rule mechanical</em> — and pushed it one step further. Where loomcli's
+  Go gate calls nine hand-written guard scripts, each with its thresholds wired into
+  the Makefile one line at a time (<span class="repo loom">loomcli</span>
+  <span class="path">Makefile:596-610, 624</span>), fleet-db has <b>one
+  machine-readable policy file</b> plus programs that read it.</p>
+
+  <div class="callout key">
+    <span class="label">The one idea</span>
+    <p><code>harness/policy.yaml</code> is fleet-db's constitution: 14 named rules
+    and an import DAG, in 165 lines. The <code>scripts/harness/check_*.sh</code>
+    wrappers are the courts that apply it, and <code>harness/evals/</code> is the
+    test suite for the courts. Read the constitution before you write code, not
+    after your first failed gate.</p>
+  </div>
+
+  <p>And a warning about the word itself, from
+  <a href="0002-the-words-that-lie.html">Lesson 02</a>: <code>gate</code> is one of
+  the five trap words (<span class="repo loom">loomcli</span>
+  <span class="path">AGENTS.md:22</span>;
+  <a href="../reference/glossary.html#testing">glossary</a>). In loomcli,
+  <code>make gate</code> is a
+  one-line alias. In fleet-db it is a six-step target that runs containers. Same
+  word, different blast radius.</p>
+
+  <h2>The two gates, side by side</h2>
+
+  <p>What a repo chooses to enforce is a statement of what it is afraid of. Read
+  this table that way.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Question</th><th><span class="repo loom">loomcli</span></th><th><span class="repo fleet">fleet-db</span></th></tr></thead>
+    <tbody>
+      <tr>
+        <td>What is <code>make gate</code>?</td>
+        <td>An alias: <code>gate: check</code> (<code>Makefile:667-668</code>)</td>
+        <td>A real six-step target (<code>Makefile:171-179</code>)</td>
+      </tr>
+      <tr>
+        <td>Does the gate run e2e?</td>
+        <td>No — that is <code>gate-e2e</code> (<code>Makefile:670-674</code>)</td>
+        <td><b>Yes</b> — <code>make test-e2e</code> is step 5 (<code>Makefile:177</code>)</td>
+      </tr>
+      <tr>
+        <td>Coverage bar</td>
+        <td>60% total (<code>Makefile:624</code>)</td>
+        <td>75% total <em>and</em> 50% per package (<code>Makefile:10-11, 76, 84</code>)</td>
+      </tr>
+      <tr>
+        <td>Where the rules live</td>
+        <td>Shell scripts wired into the Makefile by hand (<code>Makefile:586-642</code>)</td>
+        <td>One YAML file, 14 rules + a layer DAG (<code>harness/policy.yaml:3-165</code>)</td>
+      </tr>
+      <tr>
+        <td>What the custom checks measure</td>
+        <td><b>Size and shape</b>: file LOC, package file count, import fanout, legal control-plane paths</td>
+        <td><b>Invariants</b>: import layers, key centralisation, Lua↔Go sync, action↔handler coverage</td>
+      </tr>
+      <tr>
+        <td>Are docs checked against code?</td>
+        <td>No — only generated-code staleness (<code>Makefile:609-610</code>)</td>
+        <td><b>Yes</b> — two rules compare docs to code (<code>event_schema</code>, <code>status_model</code>: <code>policy.yaml:115-128, 151-165</code>); two more only keep docs from rotting (<code>:135-150</code>)</td>
+      </tr>
+      <tr>
+        <td>Does the gate test its own checks?</td>
+        <td>Nothing in <code>check</code> does (<code>Makefile:586-642</code>)</td>
+        <td><b>Yes</b> — 32 eval specs, <code>make harness-eval</code> (<code>Makefile:178</code>)</td>
+      </tr>
+      <tr>
+        <td>Escape hatch</td>
+        <td>Ratchet allowlists with recorded ceilings — <b>8 entries</b> across three files (<code>.loc-allowlist</code>, <code>scripts/package-size-allow.txt</code>, <code>scripts/import-fanout-allow.txt</code>)</td>
+        <td>Inline pragmas + <code>suppressions</code> — the policy allowlist is empty (<code>policy.yaml:110-114</code>); <b>one</b> pragma is live, <code>harness:noop-ok</code> (<code>internal/projection/handlers.go:1337</code>)</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>The shape of the difference: <b>loomcli is afraid of getting too big to
+  navigate</b> — its ceilings are 1,000 lines per source file and 2,500 per
+  <code>_test.go</code>, 25 non-test files per <code>internal/</code> package, and 18
+  module-internal imports per package (<span class="repo loom">loomcli</span>
+  <span class="path">Makefile:598-602</span>,
+  <span class="path">scripts/check-loc.sh:71-76</span>).
+  <b>fleet-db is afraid of an invariant
+  being broken invisibly</b> — a Redis key spelled by hand in the wrong package, an
+  event action with no projector handler, a Lua script whose <code>KEYS</code>
+  indices drifted from its Go caller. Those failures do not look like failures until
+  production. Neither repo enforces the other's list, and both are right.</p>
+
+  <aside class="sidenote">fleet-db has no LOC ceiling, no package-size limit and no
+  import-fanout limit — which is why <code>cmd/fleet-db/main.go</code>'s
+  <code>run()</code> is a single 1,011-line function
+  (<span class="path">cmd/fleet-db/main.go:119-1129</span>) and passes the gate. The
+  one rule that could have caught it, <code>cmd_bloat</code>, skips any function named
+  <code>run</code> in a <code>*/main.go</code> — hardcoded in the checker, not written
+  in the policy
+  (<span class="path">scripts/harness/cmd/check_cmd_bloat/main.go:67-69</span>).</aside>
+
+  <h2>The trace: one policy line to a blocked push</h2>
+
+  <p>You edit <code>internal/recovery/service.go</code>, add an import, and push.</p>
+
+  <ol class="trace">
+    <li>
+      <span class="hop-file">Makefile:667-668</span>
+      <span class="hop-what"><b>The habit you built in Lesson 04.</b> In
+      <span class="repo loom">loomcli</span>, <code>gate: check</code> — one line,
+      and <code>check</code> runs Go and frontend gates concurrently. Nothing below
+      this hop is true in that repo.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file"><span class="repo fleet">fleet-db</span> scripts/hooks/pre-push:12-16</span>
+      <span class="hop-what"><b>The push hook.</b> It runs <code>make gate</code>
+      and aborts the push on failure. One escape hatch, checked first:
+      <code>SKIP_GATE</code> set to anything skips the whole gate and prints a
+      warning to stderr (<code>:7-10</code>).</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">Makefile:171-179</span>
+      <span class="hop-what"><b><code>gate</code> is six sequential sub-makes.</b>
+      <code>gate-static</code>, <code>gate-tests</code>,
+      <code>coverage-merge</code>, <code>coverage-pkg</code>,
+      <code>test-e2e</code>, <code>harness-eval</code>. No aliasing, no
+      shortcut.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">Makefile:182-186</span>
+      <span class="hop-what"><b><code>gate-static</code> seeds the build cache, then
+      forks.</b> <code>go build ./...</code> once, then <code>make -j5</code> across
+      <code>vet</code>, <code>lint-keys</code>, <code>lint-deadcode</code>,
+      <code>lint</code> and <code>harness-lint</code>.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">scripts/harness/run_checks_parallel.sh:22-38, 40</span>
+      <span class="hop-what"><b>Compile the checkers once.</b> Every directory under
+      <code>scripts/harness/cmd/</code> — thirteen of them, twelve checkers and one
+      autofixer — is built in parallel into a <code>mktemp -d</code> and the path is
+      exported as <code>HARNESS_BIN_DIR</code>.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">run_checks_parallel.sh:43-59, 68-74</span>
+      <span class="hop-what"><b>Sixteen checks fan out.</b> Each runs as a
+      background job from the repo root with its stdout and stderr captured to its
+      own file. Only a failing check's output is ever printed.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">scripts/harness/check_import_layers.sh:10-13</span>
+      <span class="hop-what"><b>The wrapper is the stable interface.</b> If
+      <code>HARNESS_BIN_DIR</code> holds a prebuilt binary it <code>exec</code>s it;
+      otherwise it <code>go run</code>s the source. That two-tier shape is the
+      documented contract — "shell wrappers … are the stable interface used by Make
+      and evals" (<span class="path">harness/README.md:18</span>) — so you can run
+      any single check by hand.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">scripts/harness/cmd/check_import_layers/main.go:37-55</span>
+      <span class="hop-what"><b>Read go.mod, then the policy.</b> The module path
+      comes from <code>go.mod</code>; the layer list from
+      <code>$HARNESS_POLICY_FILE</code>, defaulting to
+      <code>harness/policy.yaml</code> (<code>:42-45</code>). A broken policy exits
+      <b>2</b>, a violation exits <b>1</b> — config error and rule breach are
+      different failures.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">main.go:85-113, 115-124</span>
+      <span class="hop-what"><b>Parse every file's imports.</b>
+      <code>parser.ParseFile(…, parser.ImportsOnly)</code> on each
+      <code>.go</code> file; each module-local import is mapped to a layer and
+      tested against that file's <code>allow</code> set. Any violation prints and
+      exits 1.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">run_checks_parallel.sh:78-89</span>
+      <span class="hop-what"><b>The collector.</b> It prints the failed check's
+      captured output, lists the failed names, and exits 1 —
+      <code>harness-lint</code> fails, <code>gate-static</code> fails,
+      <code>gate</code> fails, the push never happens.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">Makefile:178 → scripts/harness/run_evals.sh:14, 267-270</span>
+      <span class="hop-what"><b>And then the gate checks the checkers.</b> Even with
+      all sixteen green, <code>gate</code>'s last step runs 32 eval specs. The
+      default minimum score is <b>100</b>, and one failed <code>blocker</code>
+      scenario fails the suite regardless of score.</span>
+    </li>
+  </ol>
+
+  <h2>What the policy actually constrains</h2>
+
+  <p>Fourteen rules, grouped by the fear behind them. Every number in the Lines column
+  is in <span class="repo fleet">fleet-db</span> <code>harness/policy.yaml</code>; where
+  a rule's real behaviour lives in the checker rather than the policy, the cell says
+  so and cites it.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Rule(s)</th><th>Lines</th><th>What it refuses to let you do</th></tr></thead>
+    <tbody>
+      <tr><td><code>layers</code>, <code>import_layers</code></td><td>3-56, 81-90</td><td>Point an arrow the wrong way in the dependency graph. <code>internal/api</code> may reach <code>service</code>, <code>models</code>, <code>logging</code>, <code>config</code>, <code>resolution</code> — and not <code>storage</code>.</td></tr>
+      <tr><td><code>redis_keys</code></td><td>59-77</td><td>Write a Redis key in production code anywhere but <code>internal/storage/keys.go</code>. Catches the literal <code>"fleet-db:"</code> and twelve bare segment tokens such as <code>":issues:"</code>; <code>_test.go</code> files and <code>scripts/harness/</code> are exempt (<code>scripts/harness/cmd/check_key_construction/main.go:71-76</code>).</td></tr>
+      <tr><td><code>lua_key_patterns</code>, <code>lua_go_sync</code>, <code>lua_call_arity</code></td><td>91-94, 105-106</td><td>Let a Lua script drift from the Go that embeds and calls it — key stems, the embedded copy, and <code>KEYS/ARGV</code> arity.</td></tr>
+      <tr><td><code>action_handler_coverage</code></td><td>103-104</td><td>Declare an event action with no projector handler, or register a handler for an action that no longer exists.</td></tr>
+      <tr><td><code>hgetall_nil_guard</code></td><td>107-114</td><td>Dereference an <code>HGetAll</code> result without checking it came back non-empty, within 15 lines of the call.</td></tr>
+      <tr><td><code>cmd_bloat</code></td><td>129-134</td><td>Hide logic in <code>cmd/</code>. No function over 12 significant lines — except <code>main</code> itself and any function named <code>run</code> in a <code>*/main.go</code>, both exempted in the checker, not the policy (<code>scripts/harness/cmd/check_cmd_bloat/main.go:64-69</code>).</td></tr>
+      <tr><td><code>openapi_coverage</code>, <code>module_path</code></td><td>78-80, 95-102</td><td>Register an HTTP route with no entry in <code>api/openapi.yaml</code>, or import your own module by a stale path.</td></tr>
+      <tr><td><code>docs_links</code>, <code>docs_drift</code>, <code>event_schema</code>, <code>status_model</code></td><td>115-128, 135-165</td><td>Break a markdown link, delete one of eleven required docs, or let <code>docs/architecture.md</code>'s action table or status list disagree with <code>internal/models/</code>.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>The layer block is the part worth reading twice, because it is the only place
+  the intended architecture is written down in a form that can be checked:</p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> harness/policy.yaml:3-10, 38-43</figcaption>
+<pre><code>layers:
+  - from: internal/api
+    allow:
+      - internal/service
+      - internal/models
+      - internal/logging
+      - internal/config
+      - internal/resolution
+# … internal/rpc, resolution, middleware, service, projection elided …
+  - from: internal/compaction
+    allow:
+      - internal/storage
+      - internal/models
+  - from: internal/storage
+    allow: [internal/models, internal/logging, internal/config]</code></pre>
+  </figure>
+
+  <p>Note <code>include_tests: true</code> at
+  <span class="path">policy.yaml:83</span>: unit tests obey the DAG too. The named
+  exemptions are by filename pattern —
+  <code>*integration_test.go</code>, <code>*integration_setup_test.go</code>,
+  <code>*_e2e_test.go</code> — and two path
+  fragments (<span class="path">policy.yaml:84-90</span>). That is not decoration.
+  <code>internal/projection/pipeline_integration_test.go:15</code> imports
+  <code>internal/service</code>, which the DAG forbids for
+  <code>internal/projection</code>; it passes only because of the filename.</p>
+
+  <h2>The pattern to copy: a rule is five files</h2>
+
+  <p>Adding an architectural rule here is not "write a script". It is a fixed
+  five-part shape, and the shape is what makes the rule survive:</p>
+
+  <ol>
+    <li><b>A block under <code>rules:</code> in <code>harness/policy.yaml</code></b>
+    — the tunable parts, so a fork of the harness can change them without touching Go.</li>
+    <li><b><code>scripts/harness/cmd/check_x/main.go</code></b> — the implementation.
+    Exit 1 for a violation, exit 2 for a broken configuration.</li>
+    <li><b><code>scripts/harness/check_x.sh</code></b> — the wrapper: prebuilt binary
+    if available, else <code>go run</code>.</li>
+    <li><b>A line in the <code>checks=()</code> array</b>
+    (<span class="path">run_checks_parallel.sh:43-59</span>) so
+    <code>make harness-lint</code> runs it.</li>
+    <li><b>A pair of eval specs in <code>harness/evals/</code></b> — one asserting
+    the check passes on this repo, one asserting it fails on a deliberately broken
+    fixture.</li>
+  </ol>
+
+  <p>Step 5 is the one that does not exist in loomcli, and it is the interesting
+  one. <code>eval_002_self_import_layers.yaml</code> runs the real check against the
+  real repo and requires exit zero. <code>eval_002_layer_violation.yaml</code> copies
+  a three-file fixture repo into a tempdir, <code>git init</code>s it, points
+  <code>HARNESS_POLICY_FILE</code> back at the real policy
+  (<span class="path">run_evals.sh:126-138</span>) and requires <b>non-zero</b>. The
+  fixture is the whole violation:</p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> harness/evals/fixtures/eval_002_layer_violation/internal/api/api.go:1-3</figcaption>
+<pre><code>package api
+
+import _ "github.com/example/fleet-db/internal/storage"</code></pre>
+  </figure>
+
+  <p>A check that has never been observed to fail is not a check. This is that idea
+  made routine — and it is close kin to the evidence-class discipline from
+  <a href="0016-what-proves-what.html">Lesson 16</a>: the eval names, in the spec,
+  exactly what it proves.</p>
+
+  <p>The checker itself is usually small and blunt. This is all of the
+  <code>action_handler_coverage</code> logic — the rule from
+  <a href="0018-the-event-log-is-the-truth.html">Lesson 18</a> that every event
+  action must land in <code>internal/projection/handlers.go</code>, enforced in both
+  directions:</p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> scripts/harness/cmd/check_action_handler_coverage/main.go:48-57</figcaption>
+<pre><code>	for constName, action := range actions {
+		if !handlers[constName] {
+			violations = append(violations, fmt.Sprintf("missing projector handler for %s (%s)", constName, action))
+		}
+	}
+	for constName := range handlers {
+		if _, ok := actions[constName]; !ok {
+			violations = append(violations, fmt.Sprintf("handler registered for unknown action constant %s", constName))
+		}
+	}</code></pre>
+  </figure>
+
+  <p>Two hardcoded paths (<code>internal/models/event.go</code> and
+  <code>internal/projection/handlers.go</code>,
+  <span class="path">main.go:18-19</span>), two regexes, two loops. Today both sides
+  hold <b>43</b> entries — <span class="path">internal/models/event.go:18-92</span>
+  and <span class="path">internal/projection/handlers.go:16-63</span> — and the check
+  exists to keep that equality true after somebody adds the 44th.</p>
+
+  <div class="callout fleet">
+    <span class="label">Where the map lies to you</span>
+    <p>"Which checks run" is not answerable from any one file, and both directions
+    of the mismatch are live today. <code>check_module_path</code> has a policy rule
+    (<code>policy.yaml:78-80</code>), a Go binary, a wrapper and three eval specs — but
+    it is <b>not</b> in the <code>checks=()</code> array, so
+    <code>make harness-lint</code> never runs it; the only one of the three that points
+    it at this repo rather than a fixture is
+    <code>eval_005_self_module_path.yaml</code>, a blocker eval. Going the other way,
+    <code>check_service_error_coverage</code>,
+    <code>check_rpc_method_coverage</code> and
+    <code>check_projector_handler_noop</code> run in
+    <code>harness-lint</code> (<span class="path">run_checks_parallel.sh:57-59</span>)
+    with no policy rule and no eval of their own — nothing has ever watched them fail.
+    They reach the eval suite only through
+    <code>eval_102_repo_harness_lint.yaml</code>, which re-runs
+    <code>make harness-lint</code> and expects zero. Of the three, only
+    <code>check_projector_handler_noop</code> has an escape hatch: the inline
+    <code>harness:noop-ok</code> pragma.</p>
+  </div>
+
+  <h2>Three traps</h2>
+
+  <div class="callout trap">
+    <span class="label">Trap — <code>make harness-gate</code> does not exist</span>
+    <p>Four checked-in places tell you to run it: <span class="path">AGENTS.md:49</span>,
+    <span class="path">docs/agents/index.md:33</span> ("<code>harness.yml</code>
+    enforces <code>harness-gate</code>"), <span class="path">harness/README.md:40</span>,
+    and the review-evidence generator. The Makefile has no such target — CI runs
+    <code>make gate</code> (<span class="path">.github/workflows/harness.yml:28</span>)
+    and so does the push hook. This was <em>already found and half-fixed</em>: commit
+    <code>80b62e7</code>, "post_task_gate.sh called <code>make harness-gate</code>
+    which doesn't exist in the Makefile — the correct target is
+    <code>make gate</code>. Fixed the script." The script was fixed; the four
+    documents were not. Worse, the untouched generator writes the
+    dead command into the artifact the review gate then blesses:</p>
+  </div>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> scripts/harness/generate_review_evidence.sh:58-64</figcaption>
+<pre><code>    echo "## Commands run for validation"
+    echo '```text'
+    echo "make harness-gate"
+    echo "make loom-daemon-dry-run"
+    echo "make harness-eval"
+    echo "make harness-review-gate"
+    echo '```'</code></pre>
+  </figure>
+
+  <p>In CI — or with <code>STRICT_REVIEW_GATE=1</code> — the review gate reads that
+  file and requires seven exact H2 headings, each with a non-empty body, and no
+  <code>TODO|TBD|FIXME|PLACEHOLDER</code> anywhere
+  (<span class="path">scripts/harness/review_gate.sh:82-107</span>); on a developer
+  machine it never opens the evidence file at all
+  (<span class="path">:5-12, 24-27, 77</span>). It never asks
+  whether the commands are real. <b>Machine checks verify shape, not truth</b> — which
+  is the argument the next lesson is built on, arriving here as a working
+  example.</p>
+
+  <div class="callout trap">
+    <span class="label">Trap — the layer DAG only constrains packages it names</span>
+    <p>The natural reading of <code>layers:</code> is "this is the dependency graph."
+    It is not. It is an allowlist over <em>listed</em> packages, and a file in an
+    unlisted package is skipped before any import is examined:</p>
+  </div>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> scripts/harness/cmd/check_import_layers/main.go:89-92, 104-107</figcaption>
+<pre><code>		from := layerForFile(file, rules)
+		if from == nil {
+			continue
+		}
+// … parse the file, then for each module-local import: …
+			to := layerForImport(local, rules)
+			if to == "" || to == from.name {
+				continue
+			}</code></pre>
+  </figure>
+
+  <p><code>internal/</code> holds 23 packages; the policy names 12 of them. So
+  <code>archive</code>, <code>auth</code>, <code>cursor</code>, <code>graph</code>,
+  <code>history</code>, <code>migrate</code>, <code>recovery</code>,
+  <code>resilience</code>, <code>retention</code>, <code>routing</code> and
+  <code>testutil</code> are unconstrained in <em>both</em> directions — nothing checks
+  what they import, and nothing checks who imports them. Concretely:
+  <code>internal/recovery/service.go:16</code> imports <code>internal/projection</code>,
+  and <code>internal/retention</code> imports <code>internal/recovery</code>, while
+  its sibling sweeper <code>internal/compaction</code> — which <em>is</em> listed — may
+  import only <code>storage</code> and <code>models</code>
+  (<span class="path">policy.yaml:38-41</span>). <code>cmd/</code> is unlisted too,
+  which is why <code>main.go</code> can import everything. Before you cite the layer
+  block as proof that an edge is illegal, check that both ends are named in it.</p>
+
+  <div class="callout trap">
+    <span class="label">Trap — the prompt's coverage number is not the gate's</span>
+    <p>The implementer role prompt says "The project enforces 90% statement coverage"
+    and "Coverage must stay at or above 90%"
+    (<span class="path">prompts/fleet-task.md:27, 67</span>). The Makefile enforces
+    <code>COVERAGE_TOTAL_MIN ?= 75.0</code> aggregate and
+    <code>COVERAGE_PKG_MIN ?= 50</code> per package
+    (<span class="path">Makefile:10-11</span>, checked at
+    <span class="path">:76</span> and <span class="path">:84</span>). Same prompt,
+    same file, one line apart from the sentence that is true:
+    "<code>make gate</code> must pass. This is the single definition of 'done'"
+    (<span class="path">prompts/fleet-task.md:68</span>). When a prompt and the
+    Makefile disagree, the Makefile is what runs.</p>
+  </div>
+
+  <aside class="sidenote">One more, found by reading rather than running:
+  <code>make hooks</code> copies four files —
+  <code>pre-commit pre-push post-checkout post-merge</code>
+  (<span class="path">Makefile:245-253</span>) — but
+  <code>scripts/hooks/</code> contains only <code>pre-push</code> and
+  <code>test_hooks.sh</code>. Three of the four <code>cp</code>s cannot succeed, so
+  the recipe exits non-zero after installing the one hook that matters. Do not run it
+  to check: it writes into <code>.git/hooks</code>, which is shared by every
+  worktree.</aside>
+
+  <div class="callout safety">
+    <span class="label">Before you run anything in fleet-db</span>
+    <p><b>Do not run <code>make gate</code>, <code>make test-e2e</code> or
+    <code>make test-integration</code> for this lesson.</b> The gate's fifth step is
+    <code>make test-e2e</code> (<span class="path">Makefile:177</span>), and both
+    <code>test-integration</code> and <code>gate-tests</code> run
+    <code>podman rm -f $(podman ps -a --filter name=reaper -q)</code>
+    (<span class="path">Makefile:49, 210</span>) — a name filter over
+    <b>every reaper container on the machine</b>, not just this run's. That will
+    delete containers belonging to a colleague's testcontainers run. Same rule as
+    <a href="0003-run-it-without-breaking-anyone.html">Lesson 03</a>: pick your own
+    compose project and your own port block, and never touch a stack, container or
+    browser session you did not create. Everything in the exercise below is a read,
+    a grep, or a check script that only reads files.</p>
+  </div>
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory: name fleet-db's architecture contract file, three
+    distinct rules it encodes, and the two make targets that carry those rules into
+    a failing build.</p>
+    <div class="answer">
+      <p><code>harness/policy.yaml</code> — 165 lines, an import DAG plus 14 named
+      rules.</p>
+      <p>Any three of: <b>layers / import_layers</b> (the dependency DAG,
+      <code>:3-56, 81-90</code>); <b>redis_keys</b> (key construction only in
+      <code>internal/storage/keys.go</code>, <code>:59-77</code>);
+      <b>action_handler_coverage</b> (every event action has a projector handler,
+      <code>:103-104</code>); <b>hgetall_nil_guard</b> (<code>:107-114</code>);
+      <b>cmd_bloat</b> (12 significant lines, <code>:129-134</code>);
+      <b>lua_go_sync</b> / <b>lua_call_arity</b> / <b>lua_key_patterns</b>;
+      <b>openapi_coverage</b>; <b>module_path</b>; <b>docs_links</b> /
+      <b>docs_drift</b> / <b>event_schema</b> / <b>status_model</b>.</p>
+      <p><code>make harness-lint</code> runs sixteen checks
+      (<span class="path">run_checks_parallel.sh:43-59</span>) and
+      <code>make harness-eval</code> runs 32 eval specs; both are steps of
+      <code>make gate</code> (<span class="path">Makefile:185, 200-201</span> and
+      <span class="path">:178</span>), which is
+      what the pre-push hook runs
+      (<span class="path">scripts/hooks/pre-push:13</span>).</p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="0029">
+    <div class="q" data-answer="1">
+      <p class="stem"><code>AGENTS.md</code> tells you to run
+      <code>make harness-gate</code> in fleet-db. What happens?</p>
+      <ul class="opts">
+        <li>It runs the harness lint checks and skips the test suites</li>
+        <li>It fails, because there is no such target in the Makefile</li>
+        <li>It runs the whole gate, being an alias for make gate</li>
+        <li>It runs the eval suite only, which is what CI uses</li>
+      </ul>
+      <div class="why">There is no <code>harness-gate</code> target; CI and the push
+      hook both run <code>make gate</code>
+      (<span class="path">.github/workflows/harness.yml:28</span>,
+      <span class="path">scripts/hooks/pre-push:13</span>). The third option is the
+      sharp near-miss because that <em>is</em> the shape in loomcli, where
+      <code>gate</code> really is an alias (<code>Makefile:667-668</code>) — carrying
+      that expectation across the repo boundary is exactly how this trap catches
+      you.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <p class="stem"><code>internal/retention</code> is not named in
+      <code>harness/policy.yaml</code>'s <code>layers:</code>. What does the
+      import-layer check enforce for it?</p>
+      <ul class="opts">
+        <li>Nothing, because a package the policy does not name is skipped</li>
+        <li>Only the default allow list of models, logging, and config</li>
+        <li>Exactly the rules that its nearest listed parent package has</li>
+        <li>Only that it must not import any other unlisted package</li>
+      </ul>
+      <div class="why"><code>layerForFile</code> returns nil for an unmatched path
+      and the file is skipped before its imports are read
+      (<span class="path">cmd/check_import_layers/main.go:89-92</span>); an import
+      that resolves to no layer is skipped too (<code>:104-107</code>). There is no
+      default and no inheritance — prefix matching is longest-first over the listed
+      names only (<code>:327-329, 353-362</code>).</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <p class="stem">Reaching back to <a href="0004-the-gate-is-the-spec.html">Lesson
+      04</a>: what does fleet-db's <code>make gate</code> include that loomcli's
+      <code>make gate</code> does not?</p>
+      <ul class="opts">
+        <li>End-to-end tests, plus a self-test of its own checks</li>
+        <li>A frontend typecheck, plus a frontend architecture lint</li>
+        <li>A race-detector test run, plus a line-count ceiling</li>
+        <li>A staleness check on generated code, plus a coverage floor</li>
+      </ul>
+      <div class="why"><code>test-e2e</code> and <code>harness-eval</code> are steps
+      5 and 6 (<span class="path">Makefile:177-178</span>); in loomcli e2e lives in
+      the separate <code>gate-e2e</code> target
+      (<code>Makefile:670-674</code>) and nothing tests the guards. Each of the last
+      two options pairs something <em>both</em> gates run — a race-detector test
+      (fleet-db <code>Makefile:41</code>, loomcli <code>Makefile:622</code>) and a
+      coverage floor — with something only loomcli has: a line-count ceiling
+      (<code>Makefile:598</code>) and a generated-code staleness check
+      (<code>Makefile:610</code>). Neither pair is an addition fleet-db makes.</div>
+    </div>
+  </div>
+
+  <div class="cloze" data-answer="harness/policy.yaml|policy.yaml">
+    <p class="stem">A checker reads its tunable configuration from
+    <code>$HARNESS_POLICY_FILE</code>, defaulting to <input> — and exits 2, not 1,
+    when that file cannot be parsed.</p>
+    <div class="why">Every policy-driven checker does this; see
+    <span class="path">cmd/check_import_layers/main.go:42-50</span> and
+    <span class="path">cmd/check_cmd_bloat/main.go:22-31</span>. Exit 2 means "I
+    could not evaluate the rule", which is a different bug from exit 1, "you broke
+    the rule".</div>
+  </div>
+
+  <div class="exercise">
+    <h3>Read the constitution, then make it answer questions</h3>
+    <p><b>Read-only throughout.</b> No <code>make gate</code>, no
+    <code>test-e2e</code>, no containers, no servers on fixed ports. If you later run
+    a stack for something else, pick your own compose project and unclaimed port
+    block, and never touch one you did not create.</p>
+    <ol>
+      <li>Read <code>harness/policy.yaml</code> end to end — 165 lines, ten minutes.
+      For each of the 14 rules, write one sentence: <em>what would a change of mine
+      have to do to trip this?</em> If you cannot answer for a rule, open its
+      <code>scripts/harness/check_*.sh</code> and then its
+      <code>cmd/check_*/main.go</code> — the same landing-on-a-line habit
+      <a href="../reference/navigation.html">Finding Anything</a> drills for
+      loomcli, applied to a repo whose map you do not have yet.</li>
+      <li>Run the four checks that need no compiler and no containers, from the
+      fleet-db repo root:
+      <code>./scripts/harness/check_repo_identity.sh</code>,
+      <code>check_status_doc_sync.sh</code>, <code>check_docs_links.sh</code>,
+      <code>check_lua_go_sync.sh</code>.</li>
+      <li>Run one policy-driven Go checker:
+      <code>./scripts/harness/check_action_handler_coverage.sh</code> (about a
+      second). Then count both sides it compares, by hand:
+      <code>grep -cE '^[[:space:]]*Action[A-Za-z0-9_]+[[:space:]]+Action[[:space:]]*=' internal/models/event.go</code>
+      and
+      <code>grep -cE 'models\.Action[A-Za-z0-9_]+[[:space:]]*:' internal/projection/handlers.go</code>.
+      Reaching back to <a href="0018-the-event-log-is-the-truth.html">Lesson 18</a>:
+      which two handler functions are registered for more than one action apiece,
+      and why that does not break the count?</li>
+      <li>Find the doc/code conflict yourself:
+      <code>grep -rn "harness-gate" --include="*.md" --include="*.sh" --include="Makefile" . | grep -v fixtures</code>.
+      Then <code>grep -n "^gate" Makefile</code>. Decide which of the four hits is
+      the dangerous one and say why in a sentence.</li>
+      <li>Interleave with <a href="0004-the-gate-is-the-spec.html">Lesson 04</a>: run
+      <code>grep -n "^gate" Makefile</code> in <em>loomcli</em> too, and read the two
+      target bodies side by side. Write one sentence per repo defining the word
+      <code>gate</code> there — this is the terminology handshake from
+      <a href="0002-the-words-that-lie.html">Lesson 02</a>, applied to a word you now
+      know is overloaded across the repo boundary.</li>
+      <li>Confirm the premise of the lesson:
+      <code>git log --grep="Co-Authored-By: Claude" --format=%H | wc -l</code> and
+      <code>git rev-list --count HEAD</code>.</li>
+    </ol>
+    <div class="verify">
+      <b>You succeeded when</b>
+      All five check scripts print <code>… check passed</code> and exit 0; both greps
+      in step 3 print <code>43</code>; step 4 returns exactly <b>four</b> lines
+      (<code>AGENTS.md:49</code>, <code>docs/agents/index.md:33</code>,
+      <code>harness/README.md:40</code>,
+      <code>scripts/harness/generate_review_evidence.sh:60</code>) and you can say
+      that the fourth is the dangerous one because it writes a non-existent command
+      into an artifact the review gate then approves; <code>^gate</code> returns three
+      hits in each repo, the target itself being line 171 in fleet-db
+      (<code>gate:</code>, six sub-makes) and line 668 in loomcli
+      (<code>gate: check</code>, an alias with no recipe); and step 6 prints
+      <b>709</b> and <b>932</b>.
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><code>harness/policy.yaml</code> (165 lines) beside
+    <code>harness/README.md</code> (51 lines). The policy is the rule set; the README
+    is the map from each rule to the script that enforces it and the config keys that
+    script reads (<code>:17-35</code>). Together they are twenty minutes and they are
+    the difference between a first fleet-db pull request that lands and one that
+    bounces four times. Read them <em>before</em> you write code in this repo.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0028-one-change-two-repos.html"><span class="dir">Previous</span>One change, two repos</a>
+    <a class="next" href="0030-when-the-docs-are-wrong.html"><span class="dir">Next</span>When the docs are wrong</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

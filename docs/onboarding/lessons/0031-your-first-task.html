@@ -1,0 +1,654 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>31. Your first task — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 6 <span class="sep">/</span> Lesson 31 <span class="sep">/</span> Landing the plane</p>
+  <h1>Your first task</h1>
+  <p class="standfirst">One real task, from the ready queue to an open pull request,
+  using nothing you have not already been taught. Then: where to go when this course
+  stops.</p>
+
+  <div class="meta">
+    <span><b>Skill</b> take a task from claim to opened PR without help</span>
+    <span><b>Time</b> 60 min</span>
+    <span><b>Needs</b> <a href="0002-the-words-that-lie.html">02</a>, <a href="0003-run-it-without-breaking-anyone.html">03</a>, <a href="0016-what-proves-what.html">16</a></span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span> <span class="repo fleet">fleet-db</span></span>
+  </div>
+
+  <!-- ===== KNOWLEDGE ===================================================== -->
+
+  <h2>Why this exists</h2>
+
+  <p>You now know where things are. That is not the same as knowing the order to do
+  them in, and the order is what a first task actually tests. Everything below has
+  appeared in an earlier lesson; this one is the sequence, written down once, with
+  the file that is the authority for each step.</p>
+
+  <p>The reason the sequence matters here more than in most codebases is that four
+  of the steps are enforced by something other than your judgement. The base branch
+  is a fact about the remote. The gate is a Makefile. The PR evidence schema is a
+  contract file in the other repo, with a shell script holding fleet-db's CI to the
+  same seven headings. And the local stack is shared machine state that other people
+  are using while you work.</p>
+
+  <div class="callout key">
+    <span class="label">The one idea</span>
+    <p>Nothing in this lesson is new knowledge. The capstone is the <b>order</b>:
+    dictionary, task, isolate, change, gate, evidence, PR, push. Skipping a step
+    does not fail fast — it fails at review, or in somebody else's stack.</p>
+  </div>
+
+  <h2>The run sheet</h2>
+
+  <p>Fourteen hops. Two of them cross into <span class="repo fleet">fleet-db</span>:
+  one is a contract document, the other is a contract document plus the shell script
+  that enforces it — the process contract for this work lives in the other repo even
+  when the change does not.</p>
+
+  <ol class="trace">
+    <li>
+      <span class="hop-file"><span class="repo loom">loomcli</span> AGENTS.md:5-10</span>
+      <span class="hop-what"><b>Read the dictionary before the ticket.</b> The first
+      instruction in the repo's operating manual is to read
+      <code>docs/loom-glossary.md</code> (176 lines) — because <code>loom</code>,
+      <code>flue</code>, <code>fleet</code>, <code>aether</code>, <code>codex</code>,
+      <code>daytona</code>, <code>atlas</code> and <code>claude</code> all mean
+      something specific here (<span class="path">AGENTS.md:6-8</span>);
+      <code>skill</code> is one more, from the glossary's own entry
+      (<span class="path">docs/loom-glossary.md:21-27</span>). If the issue text uses a
+      word from <a href="../reference/glossary.html#traps">the trap list</a>,
+      resolve it now.</span>
+    </li>
+    <li>
+      <span class="hop-file">AGENTS.md:163-170 → internal/cli/data/ready.go:18-40</span>
+      <span class="hop-what"><b>Find work, read work.</b>
+      <code>loom data ready --limit 10</code>, then
+      <code>loom data show &lt;id&gt;</code>. The <code>ready</code> leaf builds a
+      <code>backend.ReadyOpts</code>, calls <code>ib.Ready</code>, and prints — the
+      thin-leaf shape from <a href="0006-anatomy-of-a-command.html">Lesson 06</a>.
+      Note this command is <em>not</em> read-only in local mode; see the safety
+      callout below.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file"><span class="repo fleet">fleet-db</span> docs/agents/contracts/task-contract.md:3-10, 18-20</span>
+      <span class="hop-what"><b>Decide whether the task is workable.</b> Every
+      implementation task must state six things: goal and explicit scope boundaries,
+      files expected to change, invariants, required validation commands, rollback
+      plan, risks and assumptions. The same file warns that <code>open</code> does
+      not mean ready — "ready for pickup" is a derived ready-queue property. The
+      contract requires all six (<span class="path">task-contract.md:3</span>); the
+      more of them a task leaves unstated, the more the right move is a comment
+      asking for them rather than a commit.</span>
+    </li>
+    <li>
+      <span class="hop-file"><span class="repo loom">loomcli</span> Makefile:559-565</span>
+      <span class="hop-what"><b>Isolate the checkout — with fleet-db beside it.</b>
+      Make a worktree per task, and if the task touches both repos, put both
+      worktrees in one parent directory as siblings. That is not taste:
+      <span class="path">Makefile:559</span> wildcards <code>../fleet-db</code> and
+      <code>../../fleet-db</code> relative to your checkout for the repo directory,
+      and <span class="path">Makefile:560</span> wildcards those same two places again
+      for a <em>built</em> <code>fleet-db</code> binary inside them — only that second
+      hit exports <code>FLEET_DB_BIN</code>. The compose stack is stricter:
+      <code>context: ../../../fleet-db</code>
+      (<span class="path">test/local-mode/docker-compose.yml:40</span>) resolves
+      relative to the compose file, so it accepts the sibling layout and nothing
+      else.</span>
+    </li>
+    <li>
+      <span class="hop-file">.github/workflows/ci.yml:3-9</span>
+      <span class="hop-what"><b>Confirm the base branch with a human.</b> CI runs on
+      pushes to <code>main</code> <em>and</em> <code>v5</code>, and on pull requests
+      to any base, so the workflow will not tell you which one is right.
+      <code>git rev-list --left-right --count origin/main...origin/v5</code> prints
+      <code>1&nbsp;&nbsp;&nbsp;1786</code> at this pin. Branch policy is a human
+      fact — ask before you branch, not after you rebase.</span>
+    </li>
+    <li>
+      <span class="hop-file">Makefile:683-692 → scripts/hooks/pre-push:4-11</span>
+      <span class="hop-what"><b>Find out where the pre-push gate would land — do not
+      install it from a shared tree.</b> <code>make hooks</code> copies
+      <code>scripts/hooks/pre-push</code> into
+      <code>git rev-parse --git-path hooks</code>
+      (<span class="path">Makefile:571, 686-687</span>). Run that command inside a
+      worktree and it prints the <em>parent clone's</em> <code>.git/hooks</code> — one
+      directory shared by every worktree of that clone and everyone working in one, so
+      <code>make hooks</code> changes <code>git push</code> behaviour for all of them
+      at once. The copy also happens before the
+      <code>pre-commit</code>/<code>golangci-lint</code> <code>PATH</code> checks
+      (<span class="path">Makefile:689-690</span>), so a run that errors out still
+      leaves the hook behind. Installing it is a decision for a clone you own. Read it
+      instead — eleven lines: unset everything
+      <code>git rev-parse --local-env-vars</code> names, so a nested git command in a
+      temp repo cannot mutate this checkout
+      (<span class="path">pre-push:4-8</span>), then <code>make check</code>
+      (<span class="path">pre-push:10-11</span>).</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/cli/data/claim.go:14-29</span>
+      <span class="hop-what"><b>Claim it.</b> <code>loom data claim &lt;id&gt;</code>
+      calls <code>ib.ClaimIssue(ctx, args[0], 0)</code> and prints. The
+      <code>--actor</code> flag is "captured for command-line parity" and never read
+      (<span class="path">claim.go:9-12, 32</span>) — the effective actor comes from
+      the backend's configured identity, so you cannot claim as somebody else by
+      flag. <a href="0008-claiming-without-collisions.html">Lesson 08</a> is where
+      the race actually lives.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/cli/repo/repo_cmd.go, .golangci.yml</span>
+      <span class="hop-what"><b>Write the change by copying the nearest exemplar.</b>
+      Not by inventing a shape. <a href="0006-anatomy-of-a-command.html">Lesson
+      06</a> names the reference command; <a href="0004-the-gate-is-the-spec.html">Lesson
+      04</a> makes the point that the 687-line <code>.golangci.yml</code> is the
+      style guide nobody will hand you.</span>
+    </li>
+    <li>
+      <span class="hop-file">AGENTS.md:29-35</span>
+      <span class="hop-what"><b>Handshake before anything slow or irreversible.</b>
+      Echo the request back as <em>(depth, realness, provisioning, polarity,
+      target)</em>, disambiguate the trap word instead of guessing, and state the
+      evidence class of what you are about to run. This is the practice from
+      <a href="0002-the-words-that-lie.html">Lesson 02</a>, and it is cheapest
+      immediately before the expensive thing.</span>
+    </li>
+    <li>
+      <span class="hop-file">Makefile:644-665, 668, 586-625</span>
+      <span class="hop-what"><b>Run the gate.</b> <code>make check</code> runs
+      <code>check-go</code> and <code>check-frontend</code> in parallel and prints
+      each log only on failure; <code>make gate</code> is a backward-compatible
+      alias for it (<span class="path">:668</span>). <code>check-go</code> is
+      thirteen numbered steps: step 11 regenerates and diffs the API types, steps 12
+      and 13 are <code>go test -race</code> and a 60% coverage floor. Touched no
+      frontend code? Run <code>make check-go</code> — and say which one you ran.</span>
+    </li>
+    <li>
+      <span class="hop-file">.agent-skills/loom-pr-test/SKILL.md:94-123</span>
+      <span class="hop-what"><b>Runtime evidence, only if the change is
+      user-visible.</b> Your own <code>LOCAL_MODE_COMPOSE_PROJECT</code>, your own
+      <code>LOCAL_MODE_FLEETDB_PORT</code> / <code>_API_PORT</code> /
+      <code>_UI_PORT</code>, verified through the matching verifier
+      (<span class="path">:110-113</span>) and torn down by that project name and
+      nothing else (<span class="path">:117-121</span>). Full rules in
+      <a href="0003-run-it-without-breaking-anyone.html">Lesson 03</a>.</span>
+    </li>
+    <li>
+      <span class="hop-file">.agent-skills/loom-pr-test/SKILL.md:232-244</span>
+      <span class="hop-what"><b>Write the report before you write the PR.</b> The
+      runbook lists what a report must always contain — exact command path, stack
+      URLs and ports, whether the backend was deterministic or a real CLI, browser
+      evidence when UI behaviour matters, any blocked condition — and its last line
+      opens with the three words that are the whole ethic of this repo:
+      <b>"Do not overclaim."</b> (<span class="path">:244</span>)</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file"><span class="repo fleet">fleet-db</span> docs/agents/contracts/pr-contract.md:3-11 → scripts/harness/review_gate.sh:15, 82-90</span>
+      <span class="hop-what"><b>The PR evidence has a schema.</b> Seven items, and on
+      the fleet-db side a shell script greps for them as literal Markdown headings and
+      fails the build when one is missing or empty — but what it greps is
+      <code>artifacts/harness/review-evidence.md</code>
+      (<span class="path">review_gate.sh:15</span>), a file CI regenerates from
+      scratch immediately beforehand (<span class="path">harness.yml:33-34</span> →
+      <span class="path">generate_review_evidence.sh:46-94</span>). Nothing
+      machine-reads the prose you write. Neither repo has a
+      <code>PULL_REQUEST_TEMPLATE</code> — <code>.github/</code> holds only
+      <code>workflows/</code> in loomcli and <code>workflows/</code> plus
+      <code>badges/</code> in fleet-db — so the contract file is the template, and
+      reviewers are what enforce it.</span>
+    </li>
+    <li>
+      <span class="hop-file"><span class="repo loom">loomcli</span> AGENTS.md:172-195</span>
+      <span class="hop-what"><b>Land the plane.</b> File follow-up issues, run the
+      gates, update issue status, <b>push</b>, clean up, verify, hand off. I diffed
+      this block against <span class="repo fleet">fleet-db</span>
+      <span class="path">AGENTS.md:55-78</span>: byte-identical, all 24 lines. It is
+      the one process document both repos agree on exactly.</span>
+    </li>
+  </ol>
+
+  <aside class="sidenote">Hop 1 has a wrinkle worth knowing before it wastes your
+  afternoon: <span class="path">AGENTS.md:20-23</span> cites
+  <code>docs/testing-terminology.md</code> as "the canonical map of this repo's
+  testing vocabulary", and that file does not exist on this branch. The practice it
+  describes is still expected. This is the <a href="0030-when-the-docs-are-wrong.html">Lesson
+  30</a> reflex: check, then act.</aside>
+
+  <h2>The worktree, and why it has a sibling</h2>
+
+  <p>Two lines of the Makefile decide whether half the repo's tooling can find
+  fleet-db at all:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> Makefile:559-565</figcaption>
+<pre><code>LOCAL_FLEET_DB_REPO := $(firstword $(wildcard $(CURDIR)/../fleet-db $(CURDIR)/../../fleet-db))
+LOCAL_FLEET_DB_BIN := $(firstword $(wildcard $(CURDIR)/../fleet-db/fleet-db $(CURDIR)/../../fleet-db/fleet-db))
+FLEET_DB_REPO ?= $(if $(LOCAL_FLEET_DB_REPO),$(LOCAL_FLEET_DB_REPO),../../fleet-db)
+ifneq ($(LOCAL_FLEET_DB_BIN),)
+FLEET_DB_BIN ?= $(LOCAL_FLEET_DB_BIN)
+export FLEET_DB_BIN
+endif</code></pre>
+  </figure>
+
+  <p>Read it as a rule about directory layout, and notice that the two wildcards look
+  for different things. Line 559 accepts the fleet-db <em>repo</em> one level up or
+  two levels up and sets <code>FLEET_DB_REPO</code>; line 560 looks in those same two
+  places for a <em>built</em> <code>fleet-db</code> binary, and only that hit exports
+  <code>FLEET_DB_BIN</code>. Anywhere else and neither resolves, so the tests and
+  stacks that need a real fleet-db binary do not find one. The course's own pinned
+  trees satisfy the first branch of the repo wildcard —
+  <code>.worktrees/onboarding/loomcli</code> and
+  <code>.worktrees/onboarding/fleet-db</code>, siblings under one task directory — but
+  not the binary wildcard: nothing is built in them, so at this pin
+  <code>FLEET_DB_BIN</code> stays empty and
+  <code>TestE2E_IssueBackendConformance_AllModes</code> skips
+  (<span class="path">internal/cli/issue_backend_conformance_e2e_test.go:127-134</span>).
+  Copy the sibling shape for your own task, then build fleet-db inside it or set
+  <code>FLEET_DB_BIN</code> yourself.</p>
+
+  <p>The unhelpful shape is the one <code>.gitignore:57-58</code> quietly invites:
+  <code>&lt;loomcli&gt;/worktrees/mytask</code>. That path ignores cleanly, and from
+  inside it <code>../fleet-db</code> is <code>&lt;loomcli&gt;/worktrees/fleet-db</code>
+  and <code>../../fleet-db</code> is <code>&lt;loomcli&gt;/fleet-db</code> — neither
+  of which exists. It works until the first test that needs the other repo.</p>
+
+  <div class="callout safety">
+    <span class="label">Shared machine — this is not a formality</span>
+    <p>Other people's stacks are running while you work, and the podman compose
+    projects are <b>machine state, not session state</b>. <code>up --build</code> on
+    an existing project name recreates somebody else's containers. So: run
+    <code>podman ps</code> first, treat every stack you did not start as owned,
+    always pass your own <code>LOCAL_MODE_COMPOSE_PROJECT</code> and your own
+    unclaimed port block, and tear down only that project by name
+    (<span class="path">.agent-skills/loom-pr-test/SKILL.md:94-123, 256-260</span>).
+    Never <code>make local-mode-down</code> bare: with no
+    <code>LOCAL_MODE_COMPOSE_PROJECT</code> it defaults to
+    <code>loomcli-local-mode</code> (<span class="path">Makefile:8</span>) and stops
+    whoever owns that stack. The runbook still shows the bare form as its default
+    cleanup (<span class="path">SKILL.md:250-254</span>) — treat that as a runbook bug
+    and always pass your own project name.</p>
+    <p>Two more that catch people on their first day of real work.
+    <b>fleet-db's <code>make gate</code> starts containers</b> — it calls
+    <code>test-e2e</code>, which is <code>go test -tags e2e</code> against real
+    containers and is documented as requiring podman or docker
+    (<span class="path">fleet-db Makefile:171-179, 59-62</span>). And
+    <b><code>loom data ready</code> is not a read-only command</b> in local mode: it
+    forks an embedded fleet-db, which <code>MkdirAll</code>s a <code>fleet-db/</code>
+    directory under your data dir and writes a Redis snapshot into it
+    (<span class="path">internal/bootstrap/embedded.go:324-327, 339</span>). The
+    runbook's rule is to keep your real <code>~/.loom</code> safe and use a throwaway
+    <code>LOOM_CONFIG_DIR</code> (<span class="path">SKILL.md:23</span>).</p>
+  </div>
+
+  <h2>The evidence, and what actually checks it</h2>
+
+  <p>fleet-db's PR contract is seven items long. It is also, uniquely in these two
+  repos, <em>machine-checked</em>: <code>make harness-review-gate</code> runs on
+  every fleet-db pull request with <code>STRICT_REVIEW_GATE=1</code>
+  (<span class="path">fleet-db .github/workflows/harness.yml:33-39</span>), and the
+  script behind it greps the generated evidence file — not your PR body — for exact
+  headings.</p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> scripts/harness/review_gate.sh:82-90, 104-107</figcaption>
+<pre><code>        required_headings=(
+            "## Summary of behavior change"
+            "## Commands run for validation"
+            "## Test results and affected coverage areas"
+            "## Files changed and rationale"
+            "## Risk assessment"
+            "## Rollback strategy"
+            "## Autofix operations performed by agents"
+        )
+# … the loop that requires each heading to exist and to be non-empty, elided …
+        if grep -Eiq '\b(TODO|TBD|FIXME|PLACEHOLDER)\b' "$evidence_file"; then
+            echo "[harness] review evidence contains placeholder text" &gt;&amp;2
+            violations=$((violations + 1))
+        fi</code></pre>
+  </figure>
+
+  <p>Those seven headings map one-to-one onto the seven items of
+  <span class="path">docs/agents/contracts/pr-contract.md:5-11</span>, in the same
+  order — but two are worded differently, and
+  <span class="path">review_gate.sh:93</span> matches with <code>grep -Fqx</code>,
+  literal and whole-line. Copy headings from the script, not the contract: it wants
+  <code>## Commands run for validation</code> (the contract says "Exact commands run
+  for validation") and <code>## Autofix operations performed by agents</code> (the
+  contract says "Any autofix operations performed by agents"). loomcli has no
+  equivalent script, and its commit bodies do not use these headings — none of the
+  last 200 do (<code>git log -200 --format=%B</code>, grepped for each of the seven).
+  What they share is the substance: <code>5eb3e5843</code> runs Problem / Change /
+  Tests / known remaining surfaces, <code>ce4df56fb</code> a Verification block naming
+  exactly what was run. Treat the seven items as the checklist your prose has to
+  answer in both repos, and fill them in like this:</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Contract item (pr-contract.md)</th><th>Where your answer comes from in loomcli</th></tr></thead>
+    <tbody>
+      <tr><td><b>Summary of behaviour change</b> (:5)</td><td>The issue you claimed, plus the diff. Symptom, mechanism, fix — one paragraph.</td></tr>
+      <tr><td><b>Exact commands run for validation</b> (:6)</td><td>Literally what you typed: <code>make check</code> or <code>make check-go</code> (<code>Makefile:644-665, 586-625</code>), plus any single-package <code>go test</code>.</td></tr>
+      <tr><td><b>Test results and affected coverage areas</b> (:7)</td><td><code>check-go</code> step 13 enforces a 60% floor (<code>Makefile:623-624</code>). Name the packages you moved, not the number alone.</td></tr>
+      <tr><td><b>Files changed and rationale</b> (:8)</td><td><code>git diff --stat</code> against your base, one clause per file. Files you touched only to satisfy the linter count.</td></tr>
+      <tr><td><b>Risk assessment</b> (:9)</td><td>Which seam you touched. <a href="0007-two-clients-one-server.html">Lesson 07</a> for the two clients; <a href="0028-one-change-two-repos.html">Lesson 28</a> for what fails loudly versus silently across the repos.</td></tr>
+      <tr><td><b>Rollback strategy</b> (:10)</td><td>Is reverting the commit enough, or does a fleet-db deploy have to move first? If ordering matters, say the order.</td></tr>
+      <tr><td><b>Autofix operations by agents</b> (:11)</td><td>The pre-commit hooks rewrite files: <code>trailing-whitespace</code> and <code>end-of-file-fixer</code> (<code>.pre-commit-config.yaml:28-29</code>). If they touched your diff, that is an autofix.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout trap">
+    <span class="label">Trap — "the review gate passed, so my evidence is good"</span>
+    <p>The gate checks <b>shape, not truth</b>. It asserts that seven headings exist,
+    that each has at least one alphanumeric character under it, and that the file
+    contains no <code>TODO</code>/<code>TBD</code>/<code>FIXME</code>/<code>PLACEHOLDER</code>
+    (<span class="path">fleet-db scripts/harness/review_gate.sh:92-107</span>). It
+    cannot tell whether "Commands run for validation" lists a command you actually
+    ran. The generator even fills the summary and autofix sections with defaults
+    when the environment does not override them
+    (<span class="path">scripts/harness/generate_review_evidence.sh:13-14</span>) —
+    and <span class="path">harness.yml:33-34</span> sets neither variable, so in CI
+    both sections are canned. Those defaults contain no placeholder word, so they sail
+    through. Honest evidence is a thing you write for a reviewer, not a thing the gate
+    extracts.</p>
+  </div>
+
+  <div class="callout trap">
+    <span class="label">Trap — "the conformance suite is green"</span>
+    <p>The closest thing to a cross-repo contract test in loomcli is
+    <code>TestE2E_IssueBackendConformance_AllModes</code>, four subtests —
+    <code>fleetdb-local</code>, <code>fleetdb-cloud</code>, <code>fleet-direct</code>,
+    <code>api-server</code> — behind the <code>issuebackend_e2e</code> build tag
+    (<span class="path">internal/cli/issue_backend_conformance_e2e_test.go:1-2, 30, 34, 57, 76, 100</span>).
+    If it cannot find a fleet-db binary it calls <code>t.Skip</code> with the message
+    "fleet-db binary unavailable; set FLEET_DB_BIN or install fleet-db on PATH"
+    (<span class="path">:127-134</span>) — and a run that skips everything still
+    prints <code>ok</code>. This is the failure mode
+    <a href="0016-what-proves-what.html">Lesson 16</a> is built around: the exit
+    status is not the evidence class. Read the skip lines.</p>
+  </div>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> AGENTS.md:191-195</figcaption>
+<pre><code>**CRITICAL RULES:**
+- Work is NOT complete until `git push` succeeds
+- NEVER stop before pushing - that leaves work stranded locally
+- NEVER say "ready to push when you are" - YOU must push
+- If push fails, resolve and retry until it succeeds</code></pre>
+  </figure>
+
+  <!-- ===== RETRIEVAL ===================================================== -->
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory: the code is written and <code>make check</code> is
+    green. List everything that still has to happen before the task is done, and
+    name the file that is the authority for each.</p>
+    <div class="answer">
+      <p><b>Runtime evidence, if the change is user-visible</b> — your own compose
+      project and port block, torn down by name.
+      <span class="path">.agent-skills/loom-pr-test/SKILL.md:94-123, 256-260</span></p>
+      <p><b>An honest report</b> — exact command path, ports, whether the backend was
+      deterministic or a real CLI, any blocked condition, and no overclaiming.
+      <span class="path">SKILL.md:232-244</span></p>
+      <p><b>A PR body carrying seven items</b> — summary, exact validation commands,
+      test results and coverage areas, files changed with rationale, risk, rollback,
+      agent autofixes. <span class="path">fleet-db docs/agents/contracts/pr-contract.md:3-11</span></p>
+      <p><b>Landing the Plane, all seven steps</b> — file follow-ups, run gates,
+      update issue status, push, clean up, verify, hand off. Work is not complete
+      until <code>git push</code> succeeds.
+      <span class="path">AGENTS.md:172-195</span>, byte-identical to
+      <span class="path">fleet-db AGENTS.md:55-78</span></p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="0031">
+    <div class="q" data-answer="0">
+      <p class="stem">You are about to cut a branch for your first loomcli change.
+      What do you establish first?</p>
+      <ul class="opts">
+        <li>How far origin/main and origin/v5 have diverged, then ask</li>
+        <li>Which branch the repo config lists as its default branch</li>
+        <li>Which branch the most recently merged pull request targeted</li>
+        <li>Whether the pre-push hook is installed in this new worktree</li>
+      </ul>
+      <div class="why"><code>git rev-list --left-right --count
+      origin/main...origin/v5</code> prints <code>1&nbsp;&nbsp;&nbsp;1786</code> at
+      this pin, so the two branches are not interchangeable — and
+      <span class="path">.github/workflows/ci.yml:3-9</span> runs CI on pushes to
+      both and on pull requests to any base, so the workflow file will not decide it
+      for you. Measuring the divergence tells you the question is live; only a human
+      can answer it. The last-merged-PR option is the sharp near-miss: it is
+      evidence, not policy, and one cherry-pick makes it lie.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <p class="stem"><code>make check</code> passed and you started no stack. What
+      may the PR body claim?</p>
+      <ul class="opts">
+        <li>That the change is proven against a real local backend</li>
+        <li>That the change passed the repo gate, and nothing more</li>
+        <li>That the change was verified end to end in local mode</li>
+        <li>That the change is safe to merge without more review</li>
+      </ul>
+      <div class="why"><code>make check</code> is <code>check-go</code> plus
+      <code>check-frontend</code> — build, lint, unit tests with the race detector,
+      coverage floors (<span class="path">Makefile:644-665, 586-625</span>). That is
+      the <em>deterministic</em> evidence class from
+      <a href="0016-what-proves-what.html">Lesson 16</a>: no real backend was
+      reached, so the first and third options are the overclaim the runbook forbids
+      in three words at <span class="path">SKILL.md:244</span>.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <p class="stem">A colleague reports that
+      <code>go test -tags issuebackend_e2e ./internal/cli</code> printed
+      <code>ok</code>. What has that established?</p>
+      <ul class="opts">
+        <li>Nothing when the fleet-db binary is absent and it skips</li>
+        <li>That all four backend modes agree on the shared suite</li>
+        <li>That the fleet and api backends return identical errors</li>
+        <li>That the embedded fleet-db subprocess started and stopped</li>
+      </ul>
+      <div class="why">The helper calls <code>t.Skip</code> when no fleet-db binary
+      can be diagnosed
+      (<span class="path">internal/cli/issue_backend_conformance_e2e_test.go:127-134</span>),
+      and a fully skipped package still exits zero and prints <code>ok</code>. The
+      second option is what a green run <em>would</em> mean, which is exactly why it
+      is the tempting one — ask for the skip lines before you believe it.</div>
+    </div>
+  </div>
+
+  <div class="cloze" data-answer="artifacts/harness/review-evidence.md">
+    <p class="stem">fleet-db's strict review gate reads your evidence from
+    <input> and fails the build if any of the seven required headings is missing or
+    empty.</p>
+    <div class="why">The path is set at
+    <span class="path">fleet-db scripts/harness/review_gate.sh:15</span> and written
+    by <span class="path">scripts/harness/generate_review_evidence.sh:5-6</span>. In
+    CI the artifact is uploaded alongside the eval results
+    (<span class="path">.github/workflows/harness.yml:41-49</span>).</div>
+  </div>
+
+  <!-- ===== THE TASK ====================================================== -->
+
+  <div class="exercise">
+    <h3>Dry-run the whole run sheet, touching nothing</h3>
+    <p><b>Read-only, and stays that way.</b> Do not run <code>make local-mode-up</code>
+    or <code>local-mode-down</code>, do not start a server on a fixed port, do not
+    run <code>loom data ready</code> (hop 2 — it forks a fleet-db and writes under
+    your data dir), and write your notes outside both repos. If you ever do bring a
+    stack up for real work: <code>podman ps</code> first, your own
+    <code>LOCAL_MODE_COMPOSE_PROJECT</code> and your own unclaimed port block, and
+    tear down only the project you created.</p>
+    <ol>
+      <li><b>Base branch.</b> In the loomcli tree run
+      <code>git rev-list --left-right --count origin/main...origin/v5</code>. Write
+      down both numbers, and write the one-sentence question you would put to a
+      teammate.</li>
+      <li><b>Layout.</b> Run <code>ls -d ../fleet-db</code> from the loomcli tree,
+      then read <code>Makefile:559-565</code>. In one sentence: what stops working if
+      you put your worktree at <code>&lt;loomcli&gt;/worktrees/mytask</code>
+      instead?</li>
+      <li><b>The gate, without running it.</b>
+      <code>grep -n '/13\]' Makefile</code> lists all thirteen steps of
+      <code>check-go</code>. Name the step that would catch a stale generated API
+      type, and the step that enforces the coverage floor.</li>
+      <li><b>One package, for real.</b> <code>go test ./internal/cli/data</code> —
+      it finishes in under a second. Then open
+      <code>internal/cli/data/close.go:32-40</code> and say, in one sentence, why
+      running <code>loom data close</code> twice does not exit 1.</li>
+      <li><b>The evidence contract.</b> Read
+      <code>../fleet-db/docs/agents/contracts/pr-contract.md</code> and
+      <code>../fleet-db/scripts/harness/review_gate.sh:82-107</code>. In a scratch
+      file <em>outside both repos</em>, write the seven headings and fill them in for
+      the imaginary change "add a <code>--json</code> alias to
+      <code>loom data ready</code>".</li>
+      <li><b>Reaching back to <a href="0016-what-proves-what.html">Lesson 16</a>.</b>
+      Under your "Test results" heading, name the evidence class of step 4's run, and
+      name two things <code>go test ./internal/cli/data</code> did <em>not</em>
+      prove.</li>
+      <li><b>Reaching back to <a href="0002-the-words-that-lie.html">Lesson 02</a>.</b>
+      Do the handshake out loud for the run you would need to promote that evidence
+      one class: state <em>(depth, realness, provisioning, polarity, target)</em> and
+      the resource it would consume on this shared machine.</li>
+    </ol>
+    <div class="verify">
+      <b>You succeeded when</b>
+      <code>git rev-list</code> printed <code>1</code> and <code>1786</code>;
+      <code>go test ./internal/cli/data</code> printed <code>ok</code>; your grep
+      returned exactly thirteen lines; and your scratch file contains all seven
+      headings from <code>review_gate.sh:82-90</code>, each with at least one true
+      sentence under it, and none of them containing the word <code>TODO</code> —
+      which is the exact string <code>review_gate.sh:104</code> rejects.
+    </div>
+  </div>
+
+  <!-- ===== AFTER THE COURSE ============================================== -->
+
+  <h2>Where to go when this course stops</h2>
+
+  <h3>The documents that stay useful</h3>
+
+  <p>Ranked by how often you will come back to them, not by length.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Document</th><th>Why it keeps earning its place</th></tr></thead>
+    <tbody>
+      <tr><td><span class="repo loom">loomcli</span> <code>AGENTS.md</code> (195 lines)</td><td>The operating manual, and the one that changes most. Reread it when a release note mentions sandboxes, egress, or driver auth. It is also the document you will be held to at review.</td></tr>
+      <tr><td><span class="repo loom">loomcli</span> <code>CONTEXT.md</code> (91 lines) + <code>docs/loom-glossary.md</code> (176 lines)</td><td>The vocabulary, in define-then-forbid form. <code>CONTEXT.md</code> lists the words to <em>avoid</em> under each term, which is the half that stops arguments.</td></tr>
+      <tr><td><span class="repo fleet">fleet-db</span> <code>docs/api-governance.md</code> (111 lines)</td><td>Read before you add or change a route. It is what a fleet-db reviewer will hold you to.</td></tr>
+      <tr><td><span class="repo fleet">fleet-db</span> <code>harness/policy.yaml</code> (165 lines)</td><td>The layering rules as data — <code>internal/api</code> may import service, models, logging, config, resolution and nothing else (<code>:3-10</code>). A linter enforces it, so it is a constitution rather than advice.</td></tr>
+      <tr><td><span class="repo loom">loomcli</span> <code>.golangci.yml</code> (687 lines)</td><td>The most precise statement of this repo's Go conventions that exists. <a href="0004-the-gate-is-the-spec.html">Lesson 04</a> is the reading instructions.</td></tr>
+      <tr><td><code>docs/adr/</code>, both repos</td><td>Decision records: the <em>why</em> behind a shape. Read one next to the code it produced and you learn what this team considers a good trade-off.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Two course files outlive the course itself:
+  <a href="../reference/navigation.html">reference/navigation.html</a>, which is the
+  under-two-minutes finder, and
+  <a href="../reference/glossary.html">reference/glossary.html</a>, which is the trap
+  words compressed. <a href="../index.html">The course map</a> stays the index of
+  everything else.</p>
+
+  <h3>Who to ask</h3>
+
+  <p>The course's own resource list is blunt about where the unwritten answers are
+  (<span class="path">docs/onboarding/RESOURCES.md:115-127</span>): <b>code review on
+  your own PRs</b> is the highest-bandwidth feedback loop available and the only one
+  that corrects judgement rather than facts — so open PRs early and small. After
+  that, <b>existing issues</b>: <code>loom data show &lt;id&gt;</code> on a closed
+  task teaches the working norms faster than any document, because you see how it was
+  scoped, argued and closed. And practise the terminology handshake out loud with a
+  colleague — <span class="path">RESOURCES.md:125-127</span> calls that the fastest way
+  to internalise the trap words. The protocol itself is one-sided
+  (<span class="path">AGENTS.md:29-35</span>): you state the coordinates before the
+  expensive thing, audience or not.</p>
+
+  <p>There is one gap you are now the right person to close.
+  <span class="path">RESOURCES.md:137-139</span> records that <b>no team
+  communication channels are written down anywhere in this workspace</b> — no
+  channels, no standups, no review rotation. For an internal codebase those are the
+  real community. Ask on your first day back, and add them to
+  <code>RESOURCES.md</code>. That is a legitimate first PR against this course.</p>
+
+  <h3>Outside the building</h3>
+
+  <p>Your skills will be tested where nobody has read this course. For the
+  general technologies under this system, the durable places to go deep:</p>
+
+  <ul>
+    <li><b>Redis and event sourcing.</b> The official Redis documentation for
+    Streams, Lua scripting and Functions is the primary source for the mechanics that
+    <a href="0018-the-event-log-is-the-truth.html">Lesson 18</a> and
+    <a href="0020-where-atomicity-lives.html">Lesson 20</a> depend on. For the
+    pattern rather than the tool, Martin Fowler's <i>Event Sourcing</i> article
+    (martinfowler.com/eaaDev/EventSourcing.html) and Greg Young's talks are still the
+    reference statements, and the DDD/CQRS/ES community Slack is where the awkward
+    questions get argued — projection rebuild cost, snapshotting, and what to do when
+    the log outlives its schema.</li>
+    <li><b>Agent orchestration.</b> Anthropic's engineering writing on building
+    effective agents is the closest thing to a shared vocabulary in this space, and
+    the Claude Agent SDK documentation is the concrete counterpart. Beyond that the
+    field mostly publishes in conference talks and preprints rather than books; treat
+    anything older than about a year as history.</li>
+  </ul>
+
+  <aside class="sidenote"><b>Unverified.</b> Nothing in "Outside the building" was
+  checked against the pinned trees, because it is not in them.
+  <span class="path">RESOURCES.md:140-143</span> records the absence of external
+  references as a deliberate gap — "add them only where a lesson actually needs one".
+  If one of these earns its place for you, add it there with a sentence saying which
+  question it answered.</aside>
+
+  <h3>What you should now be able to do alone</h3>
+
+  <p>Check yourself against the goals this course was built from
+  (<a href="../MISSION.md">MISSION.md</a>): trace one request end to end naming the
+  file at each hop; use the overloaded vocabulary precisely and notice when someone
+  else is not; find the code behind any CLI command, HTTP route or UI screen in under
+  two minutes; stand up a local stack safely alongside your teammates'; add a
+  command, an endpoint and a screen following the conventions that already exist; and
+  take a task from <code>loom data ready</code> through <code>make gate</code> to a
+  landed PR. If one of those still needs a colleague, that is the lesson to re-read,
+  not a reason to wait.</p>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><span class="repo loom">loomcli</span> <code>AGENTS.md</code> — all 195 lines,
+    top to bottom, now that every section of it means something. On a first read it
+    is a wall of deploy notes; after thirty lessons it is the shortest complete
+    statement of what this team expects from you, from the glossary-first rule at
+    <code>:5-10</code> to the Landing the Plane sequence at <code>:172-195</code>
+    that every session you ever run here has to end with. Read
+    <span class="repo fleet">fleet-db</span> <code>AGENTS.md</code> (78 lines)
+    straight afterwards as its short constitution — the last 24 lines are the same
+    lines.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0030-when-the-docs-are-wrong.html"><span class="dir">Previous</span>When the docs are wrong</a>
+    <a class="next" href="../index.html"><span class="dir">Next</span>Course map</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

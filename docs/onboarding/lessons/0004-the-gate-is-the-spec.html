@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>04. The gate is the spec — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 1 <span class="sep">/</span> Lesson 04 <span class="sep">/</span> Conventions</p>
+  <h1>The gate is the spec</h1>
+  <p class="standfirst">Nobody will hand you this repo's style guide, because it is
+  executable. By the end of this lesson you can read <code>make gate</code> as a
+  statement of the team's conventions, and predict which check your change will
+  trip before you run it.</p>
+
+  <div class="meta">
+    <span><b>Skill</b> read the gate as the coding standard</span>
+    <span><b>Time</b> 30 min</span>
+    <span><b>Needs</b> <a href="0001-two-repos-one-system.html">01</a>, <a href="0003-run-it-without-breaking-anyone.html">03</a></span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span></span>
+  </div>
+
+  <h2>Where the conventions actually live</h2>
+
+  <p>You asked, reasonably, "what are this repo's implementation patterns?" There
+  is no document that answers that. There is something better: <b>nineteen
+  automated checks, most of them written by this team for this codebase</b>, that
+  fail your build when you violate a convention. Reading them is the fastest way
+  to learn what good code looks like here.</p>
+
+  <p>The entry point is a one-line alias:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> Makefile:667-668</figcaption>
+<pre><code># Backward-compatible alias for 'make check'
+gate: check</code></pre>
+  </figure>
+
+  <p>And <code>check</code> runs the Go and frontend gates <em>concurrently</em>,
+  each captured to a temp log, printing output only for whichever side fails —
+  so a green run is quiet and a red run shows you just the broken half.
+  <span class="path">Makefile:644-665</span></p>
+
+  <div class="callout key">
+    <span class="label">The one idea</span>
+    <p><b>Thirteen Go checks, six frontend checks.</b> The first three or four on
+    each side are the industry-standard ones you already expect. Everything after
+    that is this team encoding a lesson it learned the hard way. Those are the
+    interesting ones.</p>
+  </div>
+
+  <h2>The Go side: 13 checks</h2>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>#</th><th>Check</th><th>What convention it encodes</th></tr></thead>
+    <tbody>
+      <tr><td>1-3</td><td><code>gofmt</code>, <code>go vet</code>, <code>go build</code></td><td>The usual.</td></tr>
+      <tr><td>4</td><td><code>golangci-lint</code> + depguard + <b>control-plane path guard</b></td><td>See below — this one enforces Lesson 01's architecture.</td></tr>
+      <tr><td>5</td><td><code>check-loc.sh 1000 2500</code></td><td>No Go source file over <b>1000 lines</b> (tests 2500).</td></tr>
+      <tr><td>6</td><td><code>check-package-size.sh 25</code></td><td>No package under <code>internal/</code> with more than <b>25 non-test source files</b>.</td></tr>
+      <tr><td>7</td><td><code>check-import-fanout.sh 18</code></td><td>No package <b>under <code>internal/</code></b> importing more than <b>18</b> other module-internal packages — unless it carries a recorded ceiling in <code>scripts/import-fanout-allow.txt</code>. <span class="path">check-import-fanout.sh:29,58-60</span></td></tr>
+      <tr><td>8</td><td><code>check-no-raw-exec.sh</code></td><td>No raw <code>exec.Command</code> <b>in unit tests</b> — forces DI interfaces.</td></tr>
+      <tr><td>9</td><td><code>check-no-log-printf.sh</code></td><td>No stdlib <code>log.Print</code>/<code>Printf</code>/<code>Println</code>/<code>Fatal</code>/<code>Fatalf</code>/<code>Fatalln</code> in new <b>non-test</b> files — use <code>log/slog</code>. <span class="path">check-no-log-printf.sh:44,51-53</span></td></tr>
+      <tr><td>10</td><td><code>check-no-beads-prod.sh</code></td><td>No new production <code>beads</code>/<code>bd</code> references.</td></tr>
+      <tr><td>11</td><td><code>check-go-api-staleness.sh</code></td><td>Generated API code must match its source.</td></tr>
+      <tr><td>12</td><td><code>go test -p 1 -race</code>, via <code>with-clean-loom-env.sh</code></td><td>Race detector, serialised packages, sanitised env.</td></tr>
+      <tr><td>13</td><td><code>check-coverage.sh</code></td><td><b>60%</b> coverage threshold.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="stamp" style="margin-top:-0.9rem">Makefile:586-626.</p>
+
+  <h3>Check 4 turns Lesson 01 into a build failure</h3>
+
+  <p>Remember the two legal control-plane paths? They are not a description in a
+  README. They are compiled into a guard script that fails the build:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> scripts/check-control-plane-paths.sh:12-16</figcaption>
+<pre><code>Valid runtime control-plane paths are:
+  local: loomcli -&gt; HTTP client -&gt; fleet-db subprocess -&gt; RedisStorage -&gt; ...</code></pre>
+  </figure>
+
+  <p>This is the single most useful thing to know about this gate. When an
+  architectural rule matters here, the team's habit is to <b>make it mechanical</b>
+  rather than write it down and hope. If you find yourself wondering whether some
+  invariant is real, grep <code>scripts/</code> before you grep <code>docs/</code>.</p>
+
+  <h3>The ratchet pattern</h3>
+
+  <p>Checks 5, 6, 7 and 9 would fail today on code that already exists. Rather than
+  weaken the rule or rewrite the world, 5, 6 and 7 each carry an allowlist of
+  grandfathered entries with a <em>recorded ceiling</em>:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> .loc-allowlist:1-9</figcaption>
+<pre><code># Go files grandfathered above the LOC limits (source: 1000, test: 2500).
+# Format: &lt;ceiling&gt; &lt;repo-relative-path&gt;
+# Files may shrink but never grow past their recorded ceiling.
+# Remove entries as files are refactored below threshold.
+#
+# NOTE: No new entries allowed. Split large files instead.
+
+# Test files above 2500 LOC ceiling
+2965 internal/cli/monitor/monitor_test.go</code></pre>
+  </figure>
+
+  <p>The same shape appears for package size and for import fanout. There
+  the rationale lives in the guard script's own header rather than in the list
+  file: <code>check-package-size.sh</code> says the default answer to a violation
+  "is still <em>split the package</em>", and that a recorded ceiling is "a ratchet
+  to shrink or remove when the package is sub-split, <b>never to raise
+  silently</b>". <span class="path">scripts/check-package-size.sh:3-5</span></p>
+
+  <p>Check 9 is the odd one out. Its grandfather file is a flat list of exempt
+  paths with no ceiling column — a file is either baselined or it is not, and once
+  baselined it is exempt outright rather than capped.
+  <span class="path">scripts/log-printf-baseline.txt:1-4; scripts/check-no-log-printf.sh:20</span></p>
+
+  <div class="callout trap">
+    <span class="label">Trap</span>
+    <p>When check 5 fails on your change, the tempting fix is to add your file
+    to <code>.loc-allowlist</code>. <b>That one is explicitly forbidden</b> — "No new
+    entries allowed. Split large files instead."
+    <span class="path">.loc-allowlist:6</span> The package-size and fanout lists are
+    not closed, but they are close: each takes a new or raised entry only with the
+    reason written into the file itself, which means defending it in review.
+    <span class="path">scripts/package-size-allow.txt:8-9; scripts/import-fanout-allow.txt:9-10</span>
+    The other escapes are the per-line <code>//nolint:norawexec</code> and
+    <code>//nolint:nologprintf</code> pragmas for checks 8 and 9 — type them exactly.
+    <span class="path">scripts/check-no-raw-exec.sh:4,27; scripts/check-no-log-printf.sh:5,39</span></p>
+  </div>
+
+  <h3>Check 12 explains a bug report you will otherwise file</h3>
+
+  <p>Steps 12 and 13 deliberately share one shell, and the Makefile carries an
+  unusually long comment explaining why:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> Makefile:612-617</figcaption>
+<pre><code>#   A fixed /tmp path is unsafe two ways: two concurrent gates interleave writes
+#   into one file, and a gate killed mid-`go test` leaves a truncated file behind
+#   for the next run to read. Either produces a malformed record and the opaque
+#   failure `cover: line "..." doesn't match expected format`, which looks like a
+#   coverage regression but is a corrupt profile.</code></pre>
+  </figure>
+
+  <p>Worth reading twice, because it generalises: on a machine where several people
+  and several agents run gates at once, <em>any</em> fixed temp path is a race.
+  That is the same shared-machine-state hazard you met in
+  <a href="0003-run-it-without-breaking-anyone.html">Lesson 03</a>, in a third costume.</p>
+
+  <h3>Check 12 also explains why your gate fails and CI's does not</h3>
+
+  <p>The test step runs through <code>scripts/with-clean-loom-env.sh</code>, and
+  <code>AGENTS.md</code> has a whole section on why. If you launch a shell from the
+  Loom desktop app, you inherit variables — <code>LOOM_WORKSPACE</code>,
+  <code>LOOM_CONFIG_DIR</code>, <code>LOOM_FRONTEND_DIR</code>,
+  <code>LOOM_NOTIFY_TOKEN</code> and friends — that make tests resolve <em>your real
+  desktop workspace</em> instead of their isolated fixtures.
+  <span class="path">Makefile:622; AGENTS.md:44-61; scripts/with-clean-loom-env.sh:4-16</span>
+  A local-only failure is very often this, not your code.</p>
+
+  <aside class="sidenote">AGENTS.md documents a manual <code>env -u …</code>
+  incantation, and it is not the same job: it also runs the gate under a throwaway
+  <code>HOME</code>, so tests cannot reach real home-directory state. The script only
+  unsets the thirteen <code>LOOM_*</code> variables. Prefer the script, and reach for
+  the manual version when a failure survives the gate and you suspect your home
+  directory. <span class="path">AGENTS.md:54-61; scripts/with-clean-loom-env.sh:4-18</span></aside>
+
+  <h2>The frontend side: 6 checks</h2>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>#</th><th>Command</th><th>Note</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td><code>npm run format:check</code></td><td></td></tr>
+      <tr><td>2</td><td><code>npm run typecheck</code></td><td></td></tr>
+      <tr><td>3</td><td><code>npm run lint</code></td><td></td></tr>
+      <tr><td>4</td><td><code>npm run check:arch</code></td><td><b>Architectural checks</b> — the frontend has structural rules too, enforced the same way.</td></tr>
+      <tr><td>5</td><td><code>npm run check:generated</code></td><td>Generated code staleness, mirroring Go check 11.</td></tr>
+      <tr><td>6</td><td><code>npm run test:coverage</code></td><td>60% threshold, same as Go.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="stamp" style="margin-top:-0.9rem">Makefile:628-642.</p>
+
+  <h2>The wider family</h2>
+
+  <ul>
+    <li><code>make gate</code> — what you run before every push.</li>
+    <li><code>make gate-e2e</code> — gate plus <code>test-e2e-real-smoke</code>.</li>
+    <li><code>make gate-e2e-full</code> — adds container e2e (<code>go test -tags container ./e2e/</code>, 15-minute timeout).</li>
+    <li><code>make hooks</code> — installs the pre-push hook <b>for all worktrees</b>, and requires <code>pre-commit</code> and <code>golangci-lint</code> on your PATH.</li>
+  </ul>
+  <p class="stamp" style="margin-top:-0.9rem">Makefile:670-694.</p>
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory: name four of the eight custom Go guards (checks
+    4-11) and, for each, the convention it exists to enforce.</p>
+    <div class="answer">
+      <p>Any four of: <b>control-plane paths</b> (only the two legal runtime paths);
+      <b>LOC</b> (≤1000 source, ≤2500 test); <b>package size</b> (≤25 non-test files
+      per <code>internal/</code> package); <b>import fanout</b> (≤18 module-internal
+      imports per <code>internal/</code> package, bar recorded ceilings);
+      <b>no raw exec</b> (DI interfaces in unit tests);
+      <b>no log.Printf</b> (use <code>log/slog</code>); <b>no beads in prod</b>;
+      <b>generated API staleness</b>. (Coverage ≥60% is real but is check 13, outside
+      the 4-11 range.)</p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="0004">
+    <div class="q" data-answer="2">
+      <p class="stem">Your new file is 1,100 lines and check 5 fails. What does the
+      repo expect you to do?</p>
+      <ul class="opts">
+        <li>Add the file and its ceiling to the <code>.loc-allowlist</code> ratchet</li>
+        <li>Add a per-line nolint pragma above the declarations that push it over</li>
+        <li>Split the file, because the allowlist takes no new entries at all</li>
+        <li>Raise the threshold argument the Makefile passes to the check script</li>
+      </ul>
+      <div class="why">The allowlist header is explicit: "No new entries allowed.
+      Split large files instead." It is a record of existing debt, not a mechanism
+      for adding more. The nolint pragmas are real but belong to checks 8 and 9,
+      not this one. <span class="path">.loc-allowlist:6</span></div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <p class="stem"><code>make gate</code> fails on your machine and passes in
+      CI, with tests reading unexpected workspace state. Most likely cause?</p>
+      <ul class="opts">
+        <li>Your coverage profile was corrupted by a concurrent gate run</li>
+        <li>Your shell inherited LOOM_* vars pointing at a real workspace</li>
+        <li>Your generated API code drifted from the source it derives from</li>
+        <li>Your package exceeded the module-internal import fanout ceiling</li>
+      </ul>
+      <div class="why">Inherited desktop/runtime env makes tests resolve the real
+      workspace instead of isolated fixtures — which is why step 12 runs through
+      <code>with-clean-loom-env.sh</code>. The first option is the sharp near-miss:
+      it is also a real local-only failure, but it shows up as
+      <code>cover: line "..." doesn't match expected format</code>, not as tests
+      reading the wrong state.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <p class="stem">You want to know whether an architectural invariant is really
+      enforced. Where do you look first?</p>
+      <ul class="opts">
+        <li>In <code>scripts/</code>, for a guard the gate runs against it</li>
+        <li>In <code>docs/adr/</code>, for the decision record that declares it</li>
+        <li>In <code>AGENTS.md</code>, which collects the operating rules</li>
+        <li>In <code>docs/design/</code>, for the document that specifies it</li>
+      </ul>
+      <div class="why">All three docs are worth reading, but only the guard scripts
+      tell you what is <em>enforced</em> rather than intended — and you have already
+      seen a doc in this repo cite a file that does not exist.</div>
+    </div>
+  </div>
+
+  <div class="exercise">
+    <h3>Make the gate teach you</h3>
+    <ol>
+      <li>Open <code>scripts/check-import-fanout.sh</code>. The gate passes it 18,
+      but the script's own default is 10. Work out what that gap tells you about
+      the repo's direction of travel.
+      <span class="path">scripts/check-import-fanout.sh:10; Makefile:602</span></li>
+      <li>Read <code>scripts/import-fanout-allow.txt</code>, then run the fanout
+      check by hand at the stricter default:
+      <code>./scripts/check-import-fanout.sh 10</code>. Which packages fail? Note
+      what the run cannot show you: a package with a recorded ceiling is measured
+      against that ceiling, not against the number you pass, so the four most
+      cross-cutting packages in the repo never appear no matter how low you go.
+      Read those four in the allow file, pick one from either place, and form an
+      opinion on whether it is genuinely cross-cutting or just overgrown.
+      <span class="path">scripts/check-import-fanout.sh:58-60</span></li>
+      <li>Do the same with <code>./scripts/check-package-size.sh 15</code>, reading
+      <code>scripts/package-size-allow.txt</code> alongside it for the same reason —
+      the two biggest packages by file count are in that file, not in the run's
+      output. Then compare against the package-size list you saw in
+      <a href="0001-two-repos-one-system.html">Lesson 01</a> — do the biggest
+      packages by line count match the biggest by file count?
+      <span class="path">scripts/check-package-size.sh:60-62; scripts/package-size-allow.txt:10,15</span></li>
+      <li>Time the static half of the gate, which only reads files:
+      <code>time ./scripts/check-loc.sh 1000 2500</code>,
+      <code>time ./scripts/check-package-size.sh 25</code>,
+      <code>time ./scripts/check-import-fanout.sh 18</code> — the last shells out to
+      <code>go list</code>, so it is the slow one. That is the fast half of your
+      feedback loop; step 12 adds a race suite with a 15-minute timeout on top.
+      <span class="path">Makefile:598,600,602,622</span></li>
+    </ol>
+
+    <div class="callout safety">
+      <span class="label">Not in this checkout</span>
+      <p>Do not run <code>make gate</code> here. This is a shared course checkout
+      holding other people's uncommitted work, and <code>check-frontend</code>
+      depends on <code>ensure-frontend-deps</code>, which fires an
+      <code>npm install</code> into <code>internal/webui/frontend/</code> whenever
+      the <code>node_modules/.package-lock.json</code> marker is missing or older
+      than the lockfile — it is missing here. Step 12 then runs a 15-minute race
+      suite in the same tree. Time the full gate later, in your own clone.
+      <span class="path">Makefile:194-201,628,622</span></p>
+    </div>
+    <div class="verify">
+      <b>You succeeded when</b>
+      You can name at least one package that passes at 18 and fails at 10, name the
+      four packages the fanout run can never report, and say in one sentence why the
+      team set the ceiling above its own default. Steps 1-4 all exit without touching
+      the tree, and step 4's three guards finish in seconds, not minutes. (The
+      fanout guard is a ratchet: the shipped 18 is where the codebase is
+      <em>now</em>, its own default of 10 is where it is <em>going</em>. Note that
+      <code>check-package-size.sh</code> has no such gap — its default is 25, exactly
+      what the gate passes — so step 3 is you inventing a stricter bar, not
+      discovering one. <span class="path">scripts/check-package-size.sh:11; Makefile:600</span>)
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><code>.golangci.yml</code>. At ~28k it is the largest and most precise
+    statement of this repo's Go conventions that exists — far more specific than
+    any prose doc. Skim the enabled linters and read every custom rule and
+    exclusion; each exclusion is a decision someone argued for.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0003-run-it-without-breaking-anyone.html"><span class="dir">Previous</span>Run it without breaking anyone</a>
+    <a class="next" href="0005-where-state-lives.html"><span class="dir">Next</span>Where state lives</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

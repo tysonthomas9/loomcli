@@ -1,0 +1,524 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>16. What proves what — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 4 <span class="sep">/</span> Lesson 16 <span class="sep">/</span> Testing</p>
+  <h1>What proves what</h1>
+  <p class="standfirst">Every test run in this repo is a claim about reality, and the
+  tiers differ in what they are allowed to claim. This lesson is about picking the
+  cheapest tier that can settle your question — and then writing down, honestly, what
+  the run did and did not establish.</p>
+
+  <div class="meta">
+    <span><b>Skill</b> choose the right test tier and state honestly what your run proved</span>
+    <span><b>Time</b> 35 min</span>
+    <span><b>Needs</b> <a href="0004-the-gate-is-the-spec.html">04</a>, <a href="0003-run-it-without-breaking-anyone.html">03</a></span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span> <span class="repo fleet">fleet-db</span></span>
+  </div>
+
+  <h2>Why this exists</h2>
+
+  <p>Loom orchestrates AI agents. Almost nothing it does can be proved by inspection,
+  so the team's whole quality story rests on runs — and a run is only as good as the
+  sentence you write about it afterwards. The failure mode this repo is organised
+  against is not a flaky test. It is <b>an honest engineer reporting more than they
+  measured</b>: "tested locally", "verified on a real stack", "the e2e suite passed".</p>
+
+  <p>The runbook says so in as many words, twice. Do not overclaim; if a behaviour
+  cannot be reached through the product's own workflow, report it blocked or
+  unverified rather than manufacturing state that looks like evidence.</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> .agent-skills/loom-pr-test/SKILL.md:20-22</figcaption>
+<pre><code>- Do not manually create or edit `.agent.lock`, FleetDB Redis keys, workspace state files, session records, transcript records, or diff records.
+- Do not use synthetic fixtures or hand-seeded stand-ins to prove behavior.
+- If a behavior cannot be reached through the product workflow, report it as blocked or unverified.</code></pre>
+  </figure>
+
+  <div class="callout key">
+    <span class="label">The one idea</span>
+    <p>A test tier is not a quality level, it is an <b>evidence class</b>. Moving up
+    the ladder does not make your result "better" — it changes which sentences you are
+    entitled to write. Pick the lowest tier that can settle the question, then say
+    exactly what it settled.</p>
+  </div>
+
+  <h2>The four axes, as commands</h2>
+
+  <p><a href="0002-the-words-that-lie.html">Lesson 02</a> gave you the vocabulary:
+  <em>depth</em>, <em>realness</em>, <em>provisioning</em>, <em>polarity</em>, and the
+  five trap words <code>local</code>, <code>live</code>, <code>real</code>,
+  <code>verify</code>, <code>gate</code>. That vocabulary is mandated by
+  <code>AGENTS.md</code>, which points at <code>docs/testing-terminology.md</code> as
+  its canonical definition — <b>and that file does not exist at
+  <code>ce4df56fb</code></b>. The axis names are real; the dictionary behind them is
+  not checked in. <span class="path">AGENTS.md:20-23, :29-35</span></p>
+
+  <p>So the coordinates have to be recovered from the commands. Here is the ladder as
+  it actually exists, with the two columns that matter.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Command</th><th>Coordinates</th><th>Licenses the claim</th><th>Says nothing about</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>make test</code><br><span class="path">Makefile:45-47</span></td>
+        <td>unit / mocked / none</td>
+        <td>Pure logic, error mapping, flag parsing.</td>
+        <td>Wiring, processes, HTTP, the model.</td>
+      </tr>
+      <tr>
+        <td><code>make test-integration</code><br><span class="path">Makefile:50-52</span></td>
+        <td>a <em>label</em>, not a tier</td>
+        <td>Exactly what <code>make test</code> licenses — see the trap below.</td>
+        <td>Everything <code>make test</code> is silent on.</td>
+      </tr>
+      <tr>
+        <td><code>make test-e2e</code><br><span class="path">Makefile:453-456</span></td>
+        <td>e2e / mocked / self-contained</td>
+        <td>The React app renders and behaves against intercepted routes.</td>
+        <td>Any server. There is only a Vite dev server on :3000.</td>
+      </tr>
+      <tr>
+        <td><code>make test-e2e-real-smoke</code><br><span class="path">Makefile:501-503</span></td>
+        <td>e2e / real backend / self-contained</td>
+        <td>Real <code>loom serve</code> and real fleet-db answer the browser and API specs.</td>
+        <td>The agent runtime, the daemon, any model.</td>
+      </tr>
+      <tr>
+        <td><code>make local-mode-up</code> + <code>local-mode-verify</code><br><span class="path">Makefile:258-262, :296-297</span></td>
+        <td>full-stack / deterministic / containerised</td>
+        <td>Daemon, claim, session, transcript and diff recording, end to end.</td>
+        <td>Model behaviour. Authorization — it is switched off.</td>
+      </tr>
+      <tr>
+        <td><code>make local-mode-codex-up</code><br><span class="path">Makefile:264-268</span></td>
+        <td>full-stack / real backend / containerised</td>
+        <td>A real Codex CLI process under real supervision.</td>
+        <td>Anything outside the container's mounted credentials.</td>
+      </tr>
+      <tr>
+        <td><code>make test-e2e-github-webhook-live</code><br><span class="path">Makefile:487-490</span></td>
+        <td>e2e / <b>live</b> / self-contained</td>
+        <td>The webhook path against real GitHub.</td>
+        <td>— it opens and closes a real PR. Costs and mutates.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <aside class="sidenote">The <code>*-local</code> variants
+  (<code>test-e2e-real-smoke-local</code> and friends,
+  <span class="path">Makefile:506-508</span>) hand you the <em>provisioning</em> axis:
+  <code>LOOM_LOCAL_SERVER=1</code> makes Playwright start nothing and talk to a server
+  you already run
+  <span class="path">internal/webui/frontend/playwright.config.ts:15, :158-161</span>.
+  They are not the same run, though. Under
+  <code>internal/webui/frontend/tests/e2e/integration/</code>, two describes holding a
+  <code>@smoke</code> test skip themselves on that variable
+  <span class="path">skills.integration.spec.ts:62-65</span> ·
+  <span class="path">workspace-files.integration.spec.ts:99-102</span>, and the API base
+  URL and key stop being the self-contained ones and fall back to
+  <code>LOOM_BASE_URL</code> and <code>~/.loom/webui-api-key</code>
+  <span class="path">playwright.config.ts:31-42, :45-47</span>. Narrower depth, and a
+  realness you have to state yourself.</aside>
+
+  <h2>The trace: what a green dogfood run actually says</h2>
+
+  <p><a href="0003-run-it-without-breaking-anyone.html">Lesson 03</a> taught you to
+  bring this stack up without wrecking a colleague's. This is the other half: what a
+  clean run of it is worth. Follow the evidence, not the containers.</p>
+
+  <ol class="trace">
+    <li>
+      <span class="hop-file">Makefile:258-262</span>
+      <span class="hop-what"><b>Four services come up</b> under your compose project:
+      redis, fleet-db, <code>loom-local</code>, and a Caddy UI. Everything below is
+      real Loom code running as real processes — that part of "real" is earned.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">test/local-mode/docker-compose.yml:56-57</span>
+      <span class="hop-what"><b>fleet-db starts with <code>--auth-dev-mode</code> and
+      <code>--authz-enabled=false</code>.</b> Authorization is off in this stack. A
+      green run is silent about every permission question, and a permissions
+      regression cannot fail here.</span>
+    </li>
+    <li>
+      <span class="hop-file">test/local-mode/docker-compose.yml:80</span>
+      <span class="hop-what"><b><code>LOOM_BACKEND: localdogfood</code>.</b> This is the
+      realness axis, set in one line. The thing standing in for the model is a shell
+      script on the container's PATH.</span>
+    </li>
+    <li>
+      <span class="hop-file">test/local-mode/loom-backend-localdogfood:25</span>
+      <span class="hop-what"><b>The planner's "design" is a string literal.</b> Not
+      generated, not evaluated — typed into the harness by a human. No run of this
+      stack can say anything about planning quality.</span>
+    </li>
+    <li>
+      <span class="hop-file">test/local-mode/loom-backend-localdogfood:43-55</span>
+      <span class="hop-what"><b>The coder claims, appends, commits, closes.</b>
+      <code>loom claim</code>, append to <code>local-mode-agent-output.txt</code>,
+      <code>git commit</code>, then <code>loom data close</code>. Every one of those is
+      a genuine product command — the plumbing under them is under test even though
+      the decision to run them is not.</span>
+    </li>
+    <li>
+      <span class="hop-file">test/local-mode/verify-local-mode.sh:179-194</span>
+      <span class="hop-what"><b>Thirteen polled assertions, over the HTTP API only.</b>
+      API reachable → tasks exist → planner in <code>review</code> → planner has a
+      design → planner completed session → planner transcript flag → planner transcript
+      entries → coder closed → coder session → coder transcript flag → coder transcript
+      entries → coder diff flag → and last, the one that matters.</span>
+    </li>
+    <li>
+      <span class="hop-file">test/local-mode/verify-local-mode.sh:161-167</span>
+      <span class="hop-what"><b>The diff must literally contain the artifact name.</b>
+      This is the assertion that upgrades "the daemon ran" to "the daemon produced a
+      recorded code change". Drop it and a stack that recorded a diff of something else
+      still goes green — the check before it asks only whether diff metadata exists,
+      never what is in it <span class="path">:145-151</span>.</span>
+    </li>
+  </ol>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> test/local-mode/verify-local-mode.sh:161-167</figcaption>
+<pre><code>code_diff_mentions_output_file() {
+  session_id="$(code_diff_session_id)"
+  [ "$session_id" != "" ]
+  curl -fsS --max-time 10 \
+    "${API_URL}/api/workspaces/${WORKSPACE}/tasks/${CODE_TASK_ID}/sessions/${session_id}/diff" |
+    grep -F "local-mode-agent-output.txt" &gt;/dev/null
+}</code></pre>
+  </figure>
+
+  <p>So the honest sentence after a green run is: <em>"Deterministic: real Loom and
+  fleet-db processes, scripted model substitute, authz disabled. Proves the claim →
+  session → transcript → diff loop records correctly. Says nothing about model
+  behaviour or permissions."</em> That is one sentence longer than "verified locally",
+  and it is the entire skill.</p>
+
+  <div class="callout trap">
+    <span class="label">Trap — "real" is two different words</span>
+    <p>You will read "real" in two senses and they do not imply each other.
+    <b>Real backend process</b> means a real <code>loom serve</code> and a real
+    fleet-db behind the specs — that is what <code>test-e2e-real-smoke</code> buys, and
+    the script builds fleet-db from the sibling checkout to get it
+    <span class="path">scripts/start-e2e-server.sh:86-94</span>. <b>Real AI backend</b>
+    means an actual agent CLI, which needs <code>make local-mode-codex-up</code> and
+    mounted host credentials <span class="path">test/local-mode/docker-compose.codex.yml:14, :25</span>.
+    A <code>localdogfood</code> stack is real in the first sense and not the second;
+    <code>test-e2e-real-smoke</code> is real in the first sense only. If auth for the
+    real path is missing, the runbook's instruction is to report the blocker, not to
+    fall back and keep the word. <span class="path">.agent-skills/loom-pr-test/SKILL.md:92</span></p>
+  </div>
+
+  <h2>Where a Go test sits on the ladder</h2>
+
+  <p>The unit tier is deliberately hermetic, and three mechanisms hold it there.</p>
+
+  <p><b>Dependencies are injected, never discovered.</b> One constructor hands you a
+  <code>*cli.Deps</code> with its collaborators mocked and the clock frozen at
+  2026-01-01, so anything reading time through <code>Deps.Clock</code> is deterministic.
+  The freeze buys nothing outside that path: <code>Logger</code> is the real
+  <code>slog.Default()</code>, and nothing stops a test calling <code>time.Now()</code>
+  itself.</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/cli/clitest/clitest.go:264-280 (trimmed)</figcaption>
+<pre><code>// NewTestDeps returns a *cli.Deps with all fields set to mock implementations.
+func NewTestDeps(t *testing.T) (*cli.Deps, *MockGitRunner, *MockExecRunner, *MockFileSystem, *MockIssueBackend) {
+	// … construct git, execR, fs, tracker …
+	deps := &amp;cli.Deps{
+		Git:          git,
+		Exec:         execR,
+		FS:           fs,
+		Logger:       slog.Default(),
+		IssueBackend: tracker,
+		Clock:        func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) },
+		// … LookPath, ExecCtx, Agent …
+	}</code></pre>
+  </figure>
+
+  <p><b>The gate enforces the boundary.</b> <code>check-no-raw-exec.sh</code> flags
+  <code>exec.Command</code> in test files, but a file escapes three ways: its name ends
+  in <code>_e2e_test.go</code> or <code>_integration_test.go</code>, so the
+  <code>find</code> never hands it over; its first five lines carry an
+  <code>integration</code>, <code>e2e</code>, <code>container</code> or
+  <code>playground</code> build tag; or the offending line carries
+  <code>//nolint:norawexec</code>.
+  <span class="path">scripts/check-no-raw-exec.sh:19, :27, :40-43</span> Shelling out is
+  how a "unit" test quietly becomes something else, so the tier is a gate check rather
+  than a convention — but a porous one. <code>makefile_test.go:29</code> is an untagged
+  unit test that shells out to <code>make</code> behind a nolint, and
+  <code>internal/driver/flue_integration_test.go</code> carries no build tag at all and
+  is exempt purely by its filename.</p>
+
+  <p><b>Redis is in-process.</b> Eighteen Go test files take the same shape —
+  <code>miniredis.RunT(t)</code>, a client from <code>mr.Addr()</code>, cleanup
+  registered on <code>t</code>.
+  <span class="path">internal/kv/scripts_test.go:13-19</span> It is not a test-only
+  library here, though: eleven production files embed it as the in-process Redis behind
+  <code>loom serve</code>
+  <span class="path">internal/webui/localredis/manager.go:148</span>, so the import on
+  its own tells you nothing about the tier. And
+  <code>testutil.ClearLoomEnv(t)</code> blanks the thirteen desktop variables that
+  would otherwise make a test resolve your real workspace.
+  <span class="path">internal/testutil/testutil.go:13-37</span></p>
+
+  <div class="callout trap">
+    <span class="label">Trap — the green test that proves nothing</span>
+    <p><code>TestConcurrentClaims</code> fires ten goroutines at one task through the
+    real Lua claim script <span class="path">internal/kv/scripts.go:46</span>. It looks
+    like a proof of mutual exclusion. It is not: the assertion is
+    <code>successCount &lt; 1</code> → fail, i.e. <b>at least one winner</b>. The comment
+    above it claims miniredis is single-threaded so the Lua executes atomically, then
+    allows that "multiple can succeed … due to serialization", and settles for at least
+    one. Whatever the reasoning, the assertion that ships does not test
+    exactly-one-wins. That is established two tiers up, by the
+    distributed smoke stack: "two supervisor actors contend for one issue and exactly
+    one wins" on shared Redis with two <code>loom serve</code> processes.
+    <span class="path">internal/kv/scripts_test.go:396-401</span> ·
+    <span class="path">test/distributed/README.md:21</span> This is the guarantee from
+    <a href="0008-claiming-without-collisions.html">Lesson 08</a> — and the unit test
+    named after it does not test it.</p>
+  </div>
+
+  <h2>Where a frontend test sits</h2>
+
+  <p>The Playwright <em>project</em> is the tier selector, and the projects are not
+  interchangeable. <code>chromium</code> and <code>chromium-ci</code> run with only a
+  Vite dev server behind them <span class="path">internal/webui/frontend/playwright.config.ts:163-168</span>;
+  the specs intercept their own API routes. <code>integration*</code> and
+  <code>api*</code> only mean anything when <code>RUN_INTEGRATION_TESTS=1</code> flips
+  <code>isSelfContained</code> and Playwright starts a real server on ports 8090 and
+  3100 <span class="path">internal/webui/frontend/playwright.config.ts:15, :26-28, :146-156</span>.
+  The <code>-smoke</code> and <code>-regression</code> variants are the same project
+  narrowed by <code>grep: /@smoke/</code> and <code>grep: /@regression/</code>
+  <span class="path">internal/webui/frontend/playwright.config.ts:244, :262</span>.</p>
+
+  <p>Vitest defaults to a <b>node</b> environment; any test touching the DOM opts in
+  per file with a <code>@vitest-environment jsdom</code> docblock, which 339 files
+  under <code>src/</code> do. Coverage thresholds are 60 across all four metrics.
+  <span class="path">internal/webui/frontend/vite.config.ts:219-239</span></p>
+
+  <div class="callout trap">
+    <span class="label">Trap — "the browser suite passed"</span>
+    <p><code>make test-e2e</code> runs the <code>chromium</code> project;
+    <code>make test-e2e-ci</code> runs <code>chromium-ci</code>, which is the same
+    suite <b>minus a checked-in quarantine list</b> of specs that currently fail, and
+    with <code>--ignore-snapshots</code> because the committed PNGs were generated on
+    one machine. <span class="path">Makefile:459-469</span> ·
+    <span class="path">internal/webui/frontend/playwright.config.ts:64-74</span> The
+    two commands give different verdicts on the same code, so naming the project is
+    part of reporting the result. The list may only shrink — repairing a spec means
+    deleting its line.</p>
+  </div>
+
+  <p>One real-stack suite enforces the opposite discipline — <b>fail, never skip</b>.
+  <code>test/fleetdb/ui</code> runs a preflight that aborts the whole run rather than
+  skipping, because a suite that quietly passes when no stack was there is a silent
+  fallback.</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> test/fleetdb/ui/_support/preflight.ts:4-6</figcaption>
+<pre><code> * before any spec runs. If ANY check fails, the entire suite aborts — we
+ * do NOT support a "skip because no stack" mode, since that's a silent
+ * fallback vector (see ui-test-plan.md §0).</code></pre>
+  </figure>
+
+  <p>The Playwright real-stack projects do not hold that line. Under
+  <code>internal/webui/frontend/tests/e2e/</code>, twenty-four of the twenty-six
+  <code>api/</code> and <code>integration/</code> specs open with a top-level skip keyed
+  on an environment variable
+  <span class="path">api/issue-lifecycle.api.spec.ts:11</span>, and some skip mid-test on
+  state they did not find
+  <span class="path">api/realtime-updates.api.spec.ts:438</span> ·
+  <span class="path">integration/skills.integration.spec.ts:133, :218</span>. Which is
+  why "the smoke suite passed" needs the skip count attached to it.</p>
+
+  <h2>The pattern to copy: report in coordinates</h2>
+
+  <p>The handshake from <a href="0002-the-words-that-lie.html">Lesson 02</a> is the
+  input side — echo the request back as <em>(depth, realness, provisioning, polarity,
+  target)</em> before you run anything slow. The output side is the same coordinates
+  plus the evidence class, and the runbook lists what a report must contain: the exact
+  command path, the stack URLs and ports, <b>whether the backend was deterministic or a
+  real CLI</b>, the API or browser evidence, any blocked condition, and how to stop
+  anything you left running. <span class="path">.agent-skills/loom-pr-test/SKILL.md:236-244</span></p>
+
+  <p>Two methodology rules ride along with it, both cheap and both learned the hard
+  way. Never let the CLI verify its own writes — <code>loom role show</code> reads
+  through the same client path as <code>loom role set</code>, so a stale cache
+  round-trips silently; cross-check against fleet-db over HTTP. And anchor your
+  success patterns: <code>grep -qE "^Created workspace ACME$"</code>, never
+  <code>grep -q Created</code>, which matches the startup line "Created embedded
+  fleet-db". <span class="path">docs/testing/known-issues.md:35-39</span></p>
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory: you ran <code>make local-mode-up</code> and then
+    <code>make local-mode-verify</code>, and both were green. Write the one-sentence
+    report — name the evidence class, and name two things the run did <em>not</em>
+    establish.</p>
+    <div class="answer">
+      <p>Evidence class <b>deterministic</b>: real Loom and fleet-db processes in
+      containers, with a scripted shell substitute standing in for the model
+      (<code>LOOM_BACKEND: localdogfood</code>,
+      <span class="path">test/local-mode/docker-compose.yml:80</span>).</p>
+      <p>It proves the claim → session → transcript → diff loop records correctly,
+      ending at the assertion that the coder's recorded diff contains
+      <code>local-mode-agent-output.txt</code>
+      <span class="path">test/local-mode/verify-local-mode.sh:161-167</span>.</p>
+      <p>It establishes nothing about (1) model or planning behaviour — the design
+      string is a literal at <code>loom-backend-localdogfood:25</code> — and (2)
+      authorization, which fleet-db runs with disabled in this stack
+      <span class="path">test/local-mode/docker-compose.yml:56-57</span>. A third
+      acceptable answer: nothing about a second concurrent actor.</p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="0016">
+    <div class="q" data-answer="1">
+      <p class="stem">In <span class="repo loom">loomcli</span>, what does the
+      <code>integration</code> build tag select when you run
+      <code>make test-integration</code>?</p>
+      <ul class="opts">
+        <li>Every spec in the Playwright integration and api projects</li>
+        <li>Nothing extra — no Go file carries that build tag today</li>
+        <li>The tests under test/testenv that need a real fleet-db</li>
+        <li>Each test file that shells out through exec.Command</li>
+      </ul>
+      <div class="why">Zero files in loomcli carry <code>//go:build integration</code>
+      at <code>ce4df56fb</code>, yet <code>Makefile:50-52</code> still passes
+      <code>TEST_TAGS=integration</code>, so the target runs the same set as
+      <code>make test</code>. Treat "integration" here as a <em>depth</em> word, not a
+      guarantee. The third option is the sharp miss: <code>test/testenv</code> is a
+      real disposable fleet-db stack driven by <code>scripts/test-env.sh</code>, but
+      nothing tags Go tests to select it — you point tests at it with env vars
+      instead. And the word is not empty everywhere:
+      <span class="repo fleet">fleet-db</span> has 20 files behind that same tag, and
+      its own <code>make test-integration</code> really does run
+      <code>go test -tags integration</code> — over five named package paths
+      <span class="path">fleet-db Makefile:44-52</span>, which reach 14 of those 20. The
+      tagged tests in <code>internal/rpc</code>, <code>internal/storage</code> and
+      <code>internal/testutil</code> are not in the list.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <p class="stem"><code>make gate</code> passed on your branch. Which claim have
+      you earned?</p>
+      <ul class="opts">
+        <li>A real fleet-db process served the frontend during the run</li>
+        <li>The browser suite ran every spec, quarantined ones included</li>
+        <li>Unit tests plus the repo's custom architecture guards passed</li>
+        <li>The daemon claimed a task and recorded a real session diff</li>
+      </ul>
+      <div class="why"><code>gate</code> is a plain alias for <code>check</code>
+      <span class="path">Makefile:668</span>, which runs <code>check-go</code>'s
+      thirteen steps and <code>check-frontend</code>'s six in parallel
+      <span class="path">Makefile:644-666</span> — the standard you read as a spec in
+      <a href="0004-the-gate-is-the-spec.html">Lesson 04</a>. No browser, no stack, no
+      server process. The second option is the sharpest miss: frontend step 6 is
+      <code>npm run test:coverage</code>, i.e. vitest, not Playwright
+      <span class="path">Makefile:639-640</span>.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <p class="stem">A teammate writes: "Verified on a real stack — the coder agent
+      produced a diff." They ran <code>make local-mode-up</code> then
+      <code>make local-mode-verify</code>. What is wrong with the sentence?</p>
+      <ul class="opts">
+        <li>The model was a shell script, so the class is deterministic</li>
+        <li>The verifier polls containers, so the API was never exercised</li>
+        <li>The verifier skips its assertions when the stack is unreachable</li>
+        <li>The diff assertion is disabled unless authz has been enabled</li>
+      </ul>
+      <div class="why">The stack is real Loom and real fleet-db, so "real stack" is
+      half-earned — but <code>LOOM_BACKEND: localdogfood</code>
+      <span class="path">test/local-mode/docker-compose.yml:80</span> makes the agent a
+      shell script that appends a known filename and commits it, so the run is
+      evidence class <em>deterministic</em> and "the coder agent produced" overclaims.
+      The second option is the plausible one to reject carefully: polling the API
+      rather than the containers is exactly what the verifier does, and it is the
+      <em>right</em> method — <code>wait_for</code> loops with a 240-second deadline
+      against HTTP endpoints. <span class="path">test/local-mode/verify-local-mode.sh:30-51, :179-194</span>
+      The method was fine; the realness label was not.</div>
+    </div>
+  </div>
+
+  <div class="exercise">
+    <h3>Count the evidence yourself</h3>
+    <ol>
+      <li>In <span class="repo loom">loomcli</span>, run
+      <code>grep -rl "go:build integration" --include='*.go' . | wc -l</code>. Then run
+      the identical command in the <span class="repo fleet">fleet-db</span> worktree.
+      Write both numbers down. Which repo's <code>make test-integration</code> means
+      what it says?</li>
+      <li>Run <code>go test ./internal/kv/ -run 'TestClaimTask_Success$' -v</code>. It
+      passes in under a second with no Redis on your machine. Name the mechanism, then
+      open <code>internal/kv/scripts_test.go:365-401</code> and state, in one sentence,
+      what <code>TestConcurrentClaims</code> asserts and what it therefore cannot
+      prove.</li>
+      <li>Read <code>test/local-mode/verify-local-mode.sh:179-194</code> and list the
+      thirteen assertions. Mark every one that would <b>still pass</b> if the coder
+      wrote its output to a different filename. Now you know why the last line exists.</li>
+      <li>Reaching back to <a href="0004-the-gate-is-the-spec.html">Lesson 04</a>: find
+      the gate step that would fail if you added <code>exec.Command</code> to a new
+      unit test, then read the three exemption routes at
+      <code>scripts/check-no-raw-exec.sh:19, :27, :40-43</code>. Say which route is the
+      weakest, and what a reviewer therefore has to check that the gate does not.</li>
+      <li><b>Optional, and only with the safety rule from
+      <a href="0003-run-it-without-breaking-anyone.html">Lesson 03</a>:</b> if you bring
+      a stack up to check the trace, run <code>podman ps</code> first, treat every
+      existing stack as someone else's, launch with your own
+      <code>LOCAL_MODE_COMPOSE_PROJECT</code> and an unclaimed port block, and tear
+      down only your own project. Never
+      <code>podman system prune</code>. <span class="path">.agent-skills/loom-pr-test/SKILL.md:94-121, :283</span></li>
+    </ol>
+    <div class="verify">
+      <b>You succeeded when</b>
+      Your two grep counts are 0 (loomcli) and 20 (fleet-db) from your own terminal,
+      <code>TestClaimTask_Success</code> passes with no Redis running, and you can
+      write the honest one-sentence report for a green
+      <code>make local-mode-verify</code> — naming the evidence class and at least two
+      claims it does not license — without scrolling back up.
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><code>.agent-skills/loom-pr-test/SKILL.md</code>. It is short and normative: the
+    non-negotiables on fabricated evidence, the parallel-stack discipline that keeps
+    engineers from destroying each other's runs, and the list of things a runtime
+    report must contain. Read <b>Non-Negotiables</b> (<code>:17-24</code>) and
+    <b>Cleanup</b> (<code>:246-283</code>) twice. Pair it with
+    <code>docs/testing/known-issues.md</code> (43 lines) for the methodology pitfalls.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0015-shipping-a-vertical-slice.html"><span class="dir">Previous</span>Shipping a vertical slice</a>
+    <a class="next" href="0017-the-edges.html"><span class="dir">Next</span>The edges</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

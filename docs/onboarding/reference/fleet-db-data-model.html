@@ -1,0 +1,846 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fleet-db Data Model — reference card</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/reference.css">
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Reference <span class="sep">/</span> Keep this by the keyboard</p>
+  <h1>fleet-db data model</h1>
+  <p class="standfirst">The key schema, what is authoritative and what is derived, the
+  event shape, and the Lua scripts — every row carrying its own citation.</p>
+
+  <div class="meta">
+    <span><b>Use when</b> you are reading a key, writing a projector handler, or debugging a wrong queue</span>
+    <span><b>Pairs with</b> <a href="glossary.html">Glossary</a> and <a href="navigation.html">Finding Anything</a></span>
+    <span><b>Paths</b> <span class="repo fleet">fleet-db</span> unless a row is badged <span class="repo loom">loomcli</span></span>
+  </div>
+
+  <nav class="toc">
+    <ol>
+      <li><a href="#rule">The one rule</a></li>
+      <li><a href="#auth">Authoritative vs derived</a></li>
+      <li><a href="#event">The event</a></li>
+      <li><a href="#actions">Actions and entity types</a></li>
+      <li><a href="#keys">Key schema</a></li>
+      <li><a href="#ready">Ready queue and blocked set</a></li>
+      <li><a href="#status">Status model</a></li>
+      <li><a href="#deps">Dependency edges</a></li>
+      <li><a href="#lua">The Lua scripts</a></li>
+      <li><a href="#gates">What the harness enforces</a></li>
+      <li><a href="#traps">Traps</a></li>
+      <li><a href="#inspect">Reading a live keyspace</a></li>
+      <li><a href="#conflicts">Doc/code conflicts</a></li>
+    </ol>
+  </nav>
+
+  <!-- ============================================================= -->
+  <h2 id="rule">1. The one rule</h2>
+
+  <div class="callout fleet">
+    <span class="label">Everything on this card follows from this</span>
+    <p><b>The event is the write. Everything queryable is a projection of it.</b>
+    <code>executeCommand</code> validates the event, appends it, then <em>tries</em> to
+    project it — and returns <code>nil</code> even when projection fails, because the
+    log is the truth and a background projector will catch up
+    (<span class="path">internal/service/issue_service.go:76-111</span>, the bare
+    <code>return nil</code> at <span class="path">:110</span>). No service method writes
+    an issue hash.</p>
+  </div>
+
+  <p>Two consequences you will trip over within a week. First: on the Redis backend the
+  write methods on <code>RedisStorage</code> — <code>ClaimIssue</code>,
+  <code>AddDependency</code>, <code>ReleaseIssue</code>, <code>CompleteIssue</code> —
+  <b>are not the write path</b>. They exist to satisfy the composed <code>Storage</code>
+  interface (32 sub-interfaces,
+  <span class="path">internal/storage/storage.go:13-45</span>) and to be driven by the
+  backend-agnostic contract suite in <code>internal/storage/storagetest/</code>.
+  <code>TransitionStatus</code> is not even that: it appears in no interface in
+  <span class="path">storage.go</span>, and every caller in the repo is a
+  <code>_test.go</code> file inside <code>internal/storage/</code>. Second:
+  the same semantics therefore exist twice — once in
+  <code>internal/projection/handlers.go</code> (Redis) and once through those
+  <code>Storage</code> interfaces in <code>internal/projection/pg_handlers.go</code>
+  (Postgres). A new action must be handled in both.</p>
+
+  <p>The read/write seam handlers actually see is <code>ProjectionContext</code> —
+  <code>ProjectionReader</code> (reads hit <em>committed</em> state) plus
+  <code>ProjectionWriter</code> (writes buffer into a <code>TxPipeline</code>):
+  <span class="path">internal/projection/writer.go:10, 22, 38</span>, Redis implementation
+  at <span class="path">internal/projection/redis_writer.go</span>. That indirection is
+  the only reason a second backend was possible.</p>
+
+  <aside class="sidenote">The whole tracker command surface is 20-odd methods in one file,
+  all the same shape: validate, build a <code>*models.Event</code>, call
+  <code>executeCommand</code>. Copy one wholesale when you add another —
+  <span class="path">internal/service/issue_service.go</span>, 1,424 lines.</aside>
+
+  <!-- ============================================================= -->
+  <h2 id="auth">2. Authoritative vs derived</h2>
+
+  <p>The question this table answers: <b>if I delete this key, does a rebuild bring it
+  back?</b> If the right column says no, deleting it loses data.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Structure</th><th>Written by</th><th>Rebuilt from events?</th></tr></thead>
+    <tbody>
+      <tr><td><code>{ws}:events</code>, <code>{ws}:events:issue:{eid}</code></td>
+          <td>One Lua script, both streams, one atomic call — <span class="path">internal/storage/redis_eventstore.go:22-26, 65-80</span></td>
+          <td><b>It is the log.</b></td></tr>
+      <tr><td>issue hashes, every <code>idx:*</code>, <code>queue:ready</code>, <code>blocked</code>, <code>deps:*</code>, <code>comments:*</code>, <code>labels</code>, <code>fts:*</code></td>
+          <td>Projection handlers only — registration table at <span class="path">internal/projection/handlers.go:15-63</span>; FTS at <span class="path">internal/projection/fts.go:13-24</span></td>
+          <td><b>Yes.</b> This is the read model.</td></tr>
+      <tr><td><code>{ws}:seq:issues</code>, <code>{ws}:seq:comments</code></td>
+          <td><code>INCR</code> at command time — <span class="path">internal/storage/sequence.go:36-42</span>, <span class="path">internal/storage/comment.go:47</span></td>
+          <td><b>No.</b> No handler names a sequence key. Restored by <code>SetIssueSequence</code>/<code>SetCommentSequence</code> during recovery (<span class="path">internal/recovery/service.go:312, 319</span>); audited by <span class="path">internal/storage/invariants.go:849-910</span>.</td></tr>
+      <tr><td><code>{ws}:idempotency:{digest}</code>, <code>{ws}:softdup:{fp}</code></td>
+          <td>Command time — <span class="path">internal/storage/idempotency.go:55, 162</span></td>
+          <td><b>No.</b> Both are TTL'd guards, not state.</td></tr>
+      <tr><td><code>{ws}:workers:{id}</code>, <code>:workers:active</code>, <code>:workers:heartbeats</code></td>
+          <td>Best-effort <code>RegisterWorker</code> on claim <em>and release</em> — <span class="path">internal/service/issue_service.go:579-595, :653-660</span>. Also written by the heartbeat endpoint (<span class="path">internal/api/workers.go:33</span> → <span class="path">internal/storage/worker.go:109-118</span>) and removed by <code>DELETE /workers/{id}</code> and the stale sweep (<span class="path">worker.go:233-235, :380</span>)</td>
+          <td><b>No.</b> There is no <code>worker.*</code> action, and the projection package never names a worker key.</td></tr>
+      <tr><td><code>{ws}:locks:issue:{id}</code></td>
+          <td>Acquired at command time (<span class="path">internal/storage/locks.go:37-60</span>) <em>and</em> re-<code>SET</code> from event metadata by the claim handler (<span class="path">internal/projection/handlers.go:613-618</span>)</td>
+          <td><b>Both</b> — deliberately, so a replay reconstructs the lease too.</td></tr>
+      <tr><td>driver-run / task-run / trigger read model</td>
+          <td>Fenced Lua at command time in <span class="path">internal/storage/platform.go</span></td>
+          <td><b>No.</b> The seven <code>driver_run.*</code> events are audit records; their handler is a documented no-op — <span class="path">internal/projection/handlers.go:1324-1339</span>.</td></tr>
+      <tr><td><code>{ws}:projector:cursor</code></td>
+          <td>Queued into the same pipeline as the read-model writes — <span class="path">internal/projection/projector.go:269-273</span></td>
+          <td>Bookkeeping. Forward-only.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout trap">
+    <span class="label">The CQRS direction inverts halfway through the repo</span>
+    <p>Tracker core is event-sourced: command → event → projection. The <b>platform
+    half</b> (driver runs, task runs, triggers, leases —
+    <span class="path">internal/storage/platform.go</span>, 4,054 lines) writes its read
+    model transactionally at command time and emits events <em>afterwards</em> as audit.
+    Re-applying a stale heartbeat snapshot asynchronously would overwrite newer state,
+    which is exactly why <code>handleDriverRunLifecycle</code> returns nil and carries a
+    <code>// harness:noop-ok</code> marker for
+    <code>scripts/harness/check_projector_handler_noop.sh</code>
+    (<span class="path">internal/projection/handlers.go:1336-1338</span>). Do not "fix"
+    it, and do not assume tracker-core rules apply to <code>platform.go</code>.</p>
+  </div>
+
+  <!-- ============================================================= -->
+  <h2 id="event">3. The event</h2>
+
+  <p><code>models.Event</code> — <span class="path">internal/models/event.go:414-448</span>.
+  Ten Go fields; nine of them persist as stream entry fields under deliberately short
+  names. <b>Those names are on disk. Renaming one breaks replay of every existing
+  event.</b></p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> internal/models/event.go:357-369</figcaption>
+<pre><code>// Event stream field name constants.
+// Short names minimize storage since they are stored per-event.
+const (
+	FieldTimestamp   = "ts"
+	FieldActor       = "actor"
+	FieldAction      = "action"
+	FieldEntityType  = "et"
+	FieldEntityID    = "eid"
+	FieldWorkspaceID = "ws"
+	FieldBefore      = "before"
+	FieldAfter       = "after"
+	FieldMetadata    = "meta"
+)</code></pre>
+  </figure>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Go field</th><th>On the stream</th><th>What it holds</th></tr></thead>
+    <tbody>
+      <tr><td><code>ID</code></td><td>the entry ID itself</td><td><code>"&lt;ms&gt;-&lt;seq&gt;"</code>, assigned by <code>XADD</code> and written back onto the struct at <span class="path">redis_eventstore.go:78</span>. Compared numerically by <code>EventID.Before</code> (<span class="path">models/event.go:225</span>).</td></tr>
+      <tr><td><code>Timestamp</code></td><td><code>ts</code></td><td>Unix <b>milliseconds</b>, as a string — <span class="path">redis_eventstore.go:229</span>.</td></tr>
+      <tr><td><code>Actor</code></td><td><code>actor</code></td><td>User ID, worker ID, or <code>"system"</code>. Required — <span class="path">models/event.go:452</span>.</td></tr>
+      <tr><td><code>Action</code></td><td><code>action</code></td><td>One of 43 constants — <span class="path">models/event.go:16-93</span>.</td></tr>
+      <tr><td><code>EntityType</code></td><td><code>et</code></td><td>One of 13 — <span class="path">models/event.go:154-168</span>. Must match the action: <code>actionEntityMap</code> (<span class="path">:259</span>) is enforced by <code>Validate</code> at <span class="path">:473-477</span>.</td></tr>
+      <tr><td><code>EntityID</code></td><td><code>eid</code></td><td>Required. Also picks the per-entity stream key — see the trap below.</td></tr>
+      <tr><td><code>WorkspaceID</code></td><td><code>ws</code></td><td>Must pass <code>ValidateKey</code> — <span class="path">models/event.go:467</span>.</td></tr>
+      <tr><td><code>Before</code></td><td><code>before</code></td><td>JSON. <b>Changed fields only</b> for updates; empty for creates — <span class="path">models/event.go:437-439</span>. Omitted from the stream entirely when empty (<span class="path">redis_eventstore.go:236</span>).</td></tr>
+      <tr><td><code>After</code></td><td><code>after</code></td><td>JSON. <b>Full state</b> for creates, changed fields for updates — <span class="path">models/event.go:441-444</span>.</td></tr>
+      <tr><td><code>Metadata</code></td><td><code>meta</code></td><td>JSON <code>map[string]string</code>, written only when non-empty — <span class="path">redis_eventstore.go:242-249</span>. Carries what does not fit in before/after.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Metadata keys, by action</h3>
+
+  <p>All from <span class="path">internal/models/event.go:372-410</span>.
+  <code>issue.close</code> → <code>reason</code>. <code>issue.claim</code> →
+  <code>lock_ttl_seconds</code>. <code>issue.assign</code> → <code>assignee</code>.
+  <code>dep.add</code> / <code>dep.remove</code> → <code>depends_on_id</code>,
+  <code>dep_type</code>. <code>label.*</code> → <code>label</code>.
+  <code>metadata.*</code> → <code>meta_key</code>, <code>meta_value</code>.
+  <code>comment.add</code> → <code>comment_id</code>, <code>text</code>.
+  <code>issue.defer</code> → <code>defer_until</code>. <code>workspace.update</code> →
+  <code>repos_added</code>, <code>repos_removed</code>. Reverts carry
+  <code>reverts</code>, the event ID being reverted.</p>
+
+  <div class="callout key">
+    <span class="label">Why <code>comment.add</code> says <code>text</code> and the model says <code>Body</code></span>
+    <p>The <code>Comment</code> model field was renamed <code>Text</code> →
+    <code>Body</code>; the event metadata key could not follow, because it is persisted and
+    renaming it would break replay of existing events. The reasoning is written down at
+    <span class="path">internal/models/event.go:395-399</span>, and the mismatch is visible
+    in the handler, which reads <code>MetaCommentText</code> into a hash field called
+    <code>"body"</code> (<span class="path">internal/projection/handlers.go:1014-1020</span>).
+    <b>This is the worked example of the rule above.</b> Persisted names are frozen.</p>
+  </div>
+
+  <h3>Two streams, one entry ID</h3>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> internal/storage/lua/append_event.lua:11-13</figcaption>
+<pre><code>local id = redis.call('XADD', KEYS[1], '*', unpack(ARGV))
+redis.call('XADD', KEYS[2], id, unpack(ARGV))
+return id</code></pre>
+  </figure>
+
+  <p><code>KEYS[1]</code> is <code>fleet-db:{ws}:events</code>, <code>KEYS[2]</code> is
+  <code>fleet-db:{ws}:events:issue:{eid}</code>. The second <code>XADD</code> reuses the
+  first's generated ID, so a cursor is meaningful against either stream. Field order in
+  <code>ARGV</code> is deterministic (<code>fieldOrder</code>,
+  <span class="path">redis_eventstore.go:47-51</span>). The identical script is the Go
+  const <code>appendEventLua</code> at <span class="path">redis_eventstore.go:22-26</span> —
+  and that is the copy that runs. See §9.</p>
+
+  <div class="callout trap">
+    <span class="label">The "per-issue" stream is not only for issues</span>
+    <p><code>Append</code> builds <code>KEYS[2]</code> from <code>event.EntityID</code>
+    unconditionally (<span class="path">internal/storage/redis_eventstore.go:70-73</span>).
+    A <code>role.create</code> or <code>skill.update</code> event therefore lands in a key
+    named <code>fleet-db:{ws}:events:issue:&lt;role-or-skill-name&gt;</code>. The word
+    <code>issue</code> in that key is the historical name of the pattern, not a type
+    claim — do not read it as one when you are scanning a keyspace.</p>
+  </div>
+
+  <!-- ============================================================= -->
+  <h2 id="actions">4. Actions and entity types</h2>
+
+  <p><b>43 actions</b> (<span class="path">internal/models/event.go:16-93</span>),
+  <b>13 entity types</b> (<span class="path">:154-168</span>), <b>43 handler
+  registrations</b> across <b>36 distinct handler functions</b>
+  (<span class="path">internal/projection/handlers.go:16-63</span>). The seven-entry gap is
+  exactly two shared handlers: the seven <code>driver_run.*</code> actions all point at one
+  no-op, and <code>metadata.set</code> / <code>metadata.remove</code> share
+  <code>handleMetadataMutation</code>.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Entity type</th><th>Actions</th><th>n</th></tr></thead>
+    <tbody>
+      <tr><td><code>issue</code></td><td><code>issue.create · update · close · reopen · delete · claim · release · assign · defer · undefer</code></td><td>10</td></tr>
+      <tr><td><code>dependency</code></td><td><code>dep.add · dep.remove</code></td><td>2</td></tr>
+      <tr><td><code>label</code></td><td><code>label.add · label.remove</code></td><td>2</td></tr>
+      <tr><td><code>metadata</code></td><td><code>metadata.set · metadata.remove</code></td><td>2</td></tr>
+      <tr><td><code>comment</code></td><td><code>comment.add</code></td><td>1</td></tr>
+      <tr><td><code>workspace</code></td><td><code>workspace.create · update · delete</code></td><td>3</td></tr>
+      <tr><td><code>repo</code></td><td><code>repo.create · update · delete</code></td><td>3</td></tr>
+      <tr><td><code>agent</code></td><td><code>agent.create · update · delete</code></td><td>3</td></tr>
+      <tr><td><code>driver_run</code></td><td><code>driver_run.create · claim · heartbeat · finish · recover · suspend · resume</code></td><td>7</td></tr>
+      <tr><td><code>role</code></td><td><code>role.create · update · delete</code></td><td>3</td></tr>
+      <tr><td><code>skill</code></td><td><code>skill.create · update · delete</code></td><td>3</td></tr>
+      <tr><td><code>skill_pack</code></td><td><code>skill_pack.create · update · delete</code></td><td>3</td></tr>
+      <tr><td><code>daemon_profile</code></td><td><code>daemon.update</code></td><td>1</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>There is no <code>skill.upsert</code>, on purpose: a provenance-guarded upsert
+  resolves to a create or an update <em>before</em> it is recorded, because a log entry
+  saying "upsert" would leave a reader unable to tell which happened without replaying the
+  whole stream (<span class="path">internal/models/event.go:77-84</span>). Good precedent
+  to copy when you are naming a new action.</p>
+
+  <!-- ============================================================= -->
+  <h2 id="keys">5. Key schema</h2>
+
+  <p>Prefix is <code>fleet-db</code> (<span class="path">internal/storage/keys.go:18</span>).
+  <b><code>keys.go</code> is the only file allowed to build a key</b> — 215 builders (216
+  funcs, one of which is the <code>assertValidWorkspace</code> helper); 185 carry a
+  <code>// Pattern:</code> line and 132 of those also carry <code>// Redis type:</code>.
+  <b>Most</b> builders that take a workspace call <code>assertValidWorkspace</code>, which
+  <b>panics</b> on a malformed key (<span class="path">keys.go:24-28</span>) — but 47 of
+  the 205 never reach it, directly or through a helper: the whole
+  <code>*Pattern</code> / <code>*Prefix</code> family, plus
+  <code>WorkspacePrefixKey</code> (<span class="path">:436</span>), the builder the last
+  table in this section cites. Those return a key built from an unvalidated workspace.</p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> internal/storage/keys.go:562-568</figcaption>
+<pre><code>// ReadyQueueKey returns the key for the ready queue sorted set.
+// Redis type: ZSET (score = priority, member = issue_id)
+// Pattern: fleet-db:{ws}:queue:ready
+func ReadyQueueKey(ws string) string {
+	assertValidWorkspace(ws)
+	return Prefix + ":" + ws + ":queue:ready"
+}</code></pre>
+  </figure>
+
+  <p>Copy that shape exactly when you add one: doc line, <code>Redis type:</code>,
+  <code>Pattern:</code>, assert, concatenate. The comment block is not decoration — it is
+  how the next person reads the schema without running anything.</p>
+
+  <h3>Tracker core</h3>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Key</th><th>Type</th><th>Holds</th><th>Builder</th></tr></thead>
+    <tbody>
+      <tr><td><code>fleet-db:{ws}:issues:{id}</code></td><td>HASH</td><td>Every issue field, flat strings. <code>labels</code> and <code>metadata</code> are JSON strings.</td><td><span class="path">keys.go:451</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:seq:issues</code><br><code>fleet-db:{ws}:seq:comments</code></td><td>STRING</td><td><code>INCR</code> counters. <code>FLEET-42</code> is <code>ws + "-" + n</code> (<span class="path">sequence.go:36-42</span>).</td><td><span class="path">:891, :899</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:idx:status:{status}</code></td><td>SET</td><td>IDs in that status — one key per <b>all nine</b> statuses.</td><td><span class="path">:461</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:idx:priority</code></td><td>ZSET</td><td>score = priority 0–4.</td><td><span class="path">:469</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:idx:type:{type}</code></td><td>SET</td><td>IDs by issue type.</td><td><span class="path">:477</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:idx:assignee:{actor}</code></td><td>SET</td><td>IDs per assignee.</td><td><span class="path">:491</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:idx:assignee:unassigned</code></td><td>SET</td><td>Unassigned IDs. A <b>literal</b> key, not an actor named <code>unassigned</code>.</td><td><span class="path">:499</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:idx:label:{label}</code></td><td>SET</td><td>IDs per label.</td><td><span class="path">:507</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:idx:repo:{org/repo}</code></td><td>SET</td><td>IDs per source repo.</td><td><span class="path">:515</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:idx:parent:{id}</code></td><td>SET</td><td>Children of that parent.</td><td><span class="path">:523</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:idx:deferred</code></td><td>SET</td><td>Deferred IDs.</td><td><span class="path">:555</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:queue:ready</code></td><td><b>ZSET</b></td><td><b>The ready queue.</b> score = priority.</td><td><span class="path">:565</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:blocked</code></td><td>SET</td><td><b>Transitively</b> blocked IDs.</td><td><span class="path">:573</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:labels</code></td><td>SET</td><td>Workspace label registry.</td><td><span class="path">:813</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:comments:{issue}</code></td><td>LIST</td><td>Comment JSON, <code>LPUSH</code> — <b>newest first</b> (<span class="path">projection/redis_writer.go:118-124</span>).</td><td><span class="path">:823</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:locks:issue:{id}</code></td><td>STRING + TTL</td><td>Claim lease. Value is the holder ID.</td><td><span class="path">:859</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:idempotency:{digest}</code></td><td>STRING + TTL</td><td>digest = <code>sha256(actor \x00 client-key)</code> — <span class="path">internal/api/idempotency.go:84</span>.</td><td><span class="path">:871</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:softdup:{fp}</code></td><td>STRING + TTL</td><td>fp = <code>sha256(actor \x00 title \x00 type)</code> — <span class="path">internal/service/issue_service.go:286-289</span>. Distinct from idempotency.</td><td><span class="path">:881</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:workers:{id}</code><br><code>fleet-db:{ws}:workers:active</code><br><code>fleet-db:{ws}:workers:heartbeats</code></td><td>HASH<br>SET<br>ZSET</td><td>Worker record, active set, heartbeat times (score = unix time).</td><td><span class="path">:833, :841, :849</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:events</code></td><td><b>STREAM</b></td><td>All workspace mutations.</td><td><span class="path">:909</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:events:issue:{eid}</code></td><td><b>STREAM</b></td><td>Per-entity mutations, same entry IDs.</td><td><span class="path">:917</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:projector:cursor</code></td><td>STRING</td><td>Last event ID committed to the read model.</td><td><span class="path">:1115</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:snapshots:{id}:{version}</code><br><code>fleet-db:{ws}:snapshots:idx:{id}</code></td><td>STRING<br>ZSET</td><td>Point-in-time issue JSON, plus a version index.</td><td><span class="path">:925, :933</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:fts:tok:{token}</code><br><code>fleet-db:{ws}:fts:issue:{id}</code><br><code>fleet-db:{ws}:fts:registry</code></td><td>SET<br>SET<br>ZSET</td><td>Inverted index, per-issue token set, token registry (all scores 0).</td><td><span class="path">:943, :952, :968</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Dependency edges</h3>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Key</th><th>Type</th><th>Holds</th><th>Builder</th></tr></thead>
+    <tbody>
+      <tr><td><code>fleet-db:{ws}:deps:blocks:{id}</code></td><td>SET</td><td>IDs this issue blocks.</td><td><span class="path">keys.go:583</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:deps:blocked_by:{id}</code></td><td>SET</td><td>IDs blocking this issue. <b>Parent-child writes here too</b> — see §8.</td><td><span class="path">:591</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:deps:parent:{child}</code></td><td>STRING</td><td>The child's single parent.</td><td><span class="path">:599</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:deps:children:{parent}</code></td><td>SET</td><td>Children. Walked by the rebuild's BFS.</td><td><span class="path">:607</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:deps:related:{id}</code></td><td>SET</td><td>Bidirectional — both edges <em>and</em> both metadata hashes written.</td><td><span class="path">:651</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:deps:duplicate_of:{id}</code><br><code>fleet-db:{ws}:deps:duplicated_by:{id}</code></td><td>SET</td><td>Informational directed pair.</td><td><span class="path">:685, :693</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:deps:superseded_by:{id}</code><br><code>fleet-db:{ws}:deps:supersedes:{id}</code></td><td>SET</td><td>Informational directed pair.</td><td><span class="path">:727, :735</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:deps:meta:{a}:{b}:{type}</code></td><td>HASH</td><td><code>created_at</code>, <code>created_by</code>, per edge.</td><td><span class="path">:767</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Global and workspace registry</h3>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Key</th><th>Type</th><th>Holds</th><th>Builder</th></tr></thead>
+    <tbody>
+      <tr><td><code>fleet-db:workspaces</code></td><td>SET</td><td>Every workspace key.</td><td><span class="path">keys.go:35</span></td></tr>
+      <tr><td><code>fleet-db:workspace:{ws}</code></td><td>HASH</td><td>Workspace metadata. Note: <b>singular</b>, and no <code>{ws}:</code> segment — it does not follow the per-workspace shape.</td><td><span class="path">:42</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:repos</code></td><td>SET</td><td>Legacy <code>org/repo</code> membership set.</td><td><span class="path">:50</span></td></tr>
+      <tr><td><code>fleet-db:repo-to-ws:{repo}</code></td><td>STRING</td><td>Reverse map, global.</td><td><span class="path">:58</span></td></tr>
+      <tr><td><code>fleet-db:{ws}:acl:roles:{actor}</code></td><td>STRING</td><td>One of <code>admin</code>, <code>maintainer</code>, <code>developer</code>, <code>viewer</code>.</td><td><span class="path">:984</span></td></tr>
+      <tr><td><code>fleet-db:{ws}</code></td><td>—</td><td>Not a key: the <b>workspace prefix</b> that Lua scripts receive as <code>KEYS[1]</code> and concatenate suffixes against.</td><td><span class="path">:436</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Everything above is roughly a sixth of <code>keys.go</code>. The rest covers drivers,
+  driver versions, driver runs and steps, task runs and their logs, triggers and
+  deliveries, the action ledger, awaits, connectors, the outbox, control-plane
+  leases/sessions/nodes, skills, skill packs, agents, roles, API keys and pub/sub topics —
+  plus a <code>*Pattern</code> / <code>*Prefix</code> pair for nearly every family, used by
+  <code>SCAN</code>-based cleanup and recovery flush.</p>
+
+  <!-- ============================================================= -->
+  <h2 id="ready">6. Ready queue and blocked set</h2>
+
+  <p><b>The score is the priority</b>, 0 (critical) … 4 (backlog), default 2
+  (<span class="path">internal/models/priority.go:5-15</span>). Lower score is higher
+  priority, so a plain ascending <code>ZRANGE</code> is priority order.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Predicate</th><th>Conditions</th><th>Where</th></tr></thead>
+    <tbody>
+      <tr><td><code>IsReadyEligible</code></td><td><code>status == open</code> <b>and</b> <code>type != epic</code> <b>and</b> not future-<code>defer_until</code></td><td><span class="path">internal/storage/ready_eligible.go:35-49</span></td></tr>
+      <tr><td><code>IsReadyEligibleFull</code></td><td>all of the above, <b>and</b> <code>DirectBlockerCount + BlockedByDelta &lt;= 0</code> — <span class="path">:58</span> rejects only a sum <code>&gt; 0</code>, which is what the <code>-1</code> delta trap below relies on — <b>and</b> not a member of <code>{ws}:blocked</code></td><td><span class="path">:54-64</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Both take a plain value struct — <code>ReadyInput</code>: no context, no client
+  (<span class="path">ready_eligible.go:11-28</span>). A pure predicate factored out of
+  I/O, so it can be stated once and mirrored. The whole file is 65 lines.</p>
+
+  <div class="callout key">
+    <span class="label">Assignment is not an eligibility rule</span>
+    <p>Assigned issues sit in the ZSET. The <em>default query</em> filters them out at read
+    time by setting <code>Assignee</code> to a pointer-to-empty-string
+    (<span class="path">internal/storage/ready.go:449-455</span>). So "why is this assigned
+    issue in <code>queue:ready</code>" has the answer: because it is supposed to be. See
+    <a href="../lessons/0008-claiming-without-collisions.html">Lesson 08</a>.</p>
+  </div>
+
+  <h3>Who maintains the queue — five ways, and only these five</h3>
+
+  <ol class="check">
+    <li><span class="what">Inline field-level check on create</span>
+      <span class="how">A brand-new issue can have no blockers, so <code>handleIssueCreate</code> calls the cheap predicate and <code>ZADD</code>s. <span class="path">internal/projection/handlers.go:128-139</span></span></li>
+    <li><span class="what"><code>readyState</code> then <code>updateReadyQueue</code></span>
+      <span class="how">On update, reopen, release, assign and undefer. <span class="path">internal/projection/helpers.go:191, 259</span></span></li>
+    <li><span class="what"><code>reevaluateAfterBlockerRemoved</code></span>
+      <span class="how">On close, delete and dep-remove. <span class="path">internal/projection/helpers.go:284-313</span>, called from <span class="path">handlers.go:360</span> (close), <span class="path">:526</span> (delete) and <span class="path">:886</span> (dep-remove)</span></li>
+    <li><span class="what">A full atomic Lua rebuild, after the pipeline commits</span>
+      <span class="how"><code>shouldRebuildCache</code> (<span class="path">internal/projection/rebuild_trigger.go:19-45</span>) → <span class="path">projector.go:288-297</span> → <code>RebuildBlockedCache</code> (<span class="path">internal/storage/ready.go:244-246</span>) → <code>rebuild_blocked_cache.lua</code></span></li>
+    <li><span class="what">A direct, unconditional <code>ZREM</code> in the handler</span>
+      <span class="how">The subject issue leaves the queue outright, no predicate consulted: close (<span class="path">internal/projection/handlers.go:344</span>), delete (<span class="path">:472</span>), claim (<span class="path">:611</span>), defer (<span class="path">:721</span>), dep-add (<span class="path">:824</span>). This is the "handlers update the queue inline" path referred to just below.</span></li>
+  </ol>
+
+  <p><code>shouldRebuildCache</code> is true for <code>issue.close</code>,
+  <code>issue.reopen</code>, <code>issue.delete</code>, <code>issue.defer</code> and
+  <code>issue.undefer</code>; for <code>dep.add</code> / <code>dep.remove</code> only when
+  the <code>dep_type</code> metadata <code>AffectsReadyWork()</code>; and for
+  <code>issue.update</code> only when the <code>After</code> payload carries a
+  <code>status</code> key. It is <b>false</b> for claim, release and assign — those move
+  between non-terminal statuses, and the handlers update the queue inline
+  (<span class="path">rebuild_trigger.go:20-44</span>).</p>
+
+  <h3>The rebuild, in four phases</h3>
+
+  <p><span class="path">internal/storage/lua/rebuild_blocked_cache.lua</span>, 138 lines.
+  Read it end to end once — it is the clearest single statement of the whole model.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Phase</th><th>Does</th><th>Lines</th></tr></thead>
+    <tbody>
+      <tr><td>0</td><td>Enumerate every ID by walking the nine <code>idx:status:*</code> SETs; first seen wins. An issue missing from all nine is <b>invisible</b> to the rebuild.</td><td><span class="path">:11-24</span></td></tr>
+      <tr><td>1</td><td>Directly blocked = any member of <code>deps:blocked_by:{id}</code> whose status is missing, or is neither <code>closed</code> nor <code>tombstone</code>.</td><td><span class="path">:33-45</span></td></tr>
+      <tr><td>2</td><td>BFS-propagate blocking down <code>deps:children:*</code>, depth capped at 50.</td><td><span class="path">:47-73</span></td></tr>
+      <tr><td>3</td><td>Re-derive ready membership: open, not blocked, not epic, not future-deferred; score = priority, defaulting to 2.</td><td><span class="path">:75-106</span></td></tr>
+      <tr><td>4</td><td><code>DEL</code> both structures, then batched <code>SADD</code> / <code>ZADD</code>, 1000 members per call.</td><td><span class="path">:108-136</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> internal/storage/lua/rebuild_blocked_cache.lua:75-83</figcaption>
+<pre><code>-- Phase 3: Evaluate ready issues (only open, non-blocked).
+-- Ready eligibility logic must match storage.IsReadyEligible in ready_eligible.go.
+-- Any changes to eligibility rules must be mirrored here.
+-- Note: defer_until comparison uses lexicographic string ordering, which is
+-- correct for RFC3339Nano (year-first, zero-padded). Malformed defer_until
+-- values may compare differently than Go's time.Parse-based check.
+local ready_members = {}
+for _, id in ipairs(all_ids) do
+    if id_status[id] == 'open' and not all_blocked[id] then</code></pre>
+  </figure>
+
+  <p>A Go reference implementation is kept beside it —
+  <code>rebuildBlockedCacheGo</code> (<span class="path">internal/storage/ready.go:254</span>) —
+  and its doc comment says plainly that it has the TOCTOU race the Lua version exists to
+  remove (<span class="path">ready.go:248-251</span>). Production always takes the Lua path
+  (<span class="path">ready.go:244-246</span>).
+  <a href="../lessons/0019-rebuilding-the-world.html">Lesson 19</a> walks this.</p>
+
+  <div class="callout trap">
+    <span class="label">A handler's reads do not see the handler's own writes</span>
+    <p><code>ProjectionReader</code> reads <b>committed</b> state; the handler's writes are
+    still buffered in the uncommitted <code>TxPipeline</code>. So
+    <code>reevaluateAfterBlockerRemoved</code> counts remaining blockers and then applies a
+    <code>-1</code> by hand, with the reason in the code:
+    <code>remaining-1 &lt;= 0 // -1: the blocker edge SRem above has not committed yet</code>
+    (<span class="path">internal/projection/helpers.go:309</span>). If you write a handler
+    that reads back something it just wrote, you get the old value and no error.</p>
+  </div>
+
+  <!-- ============================================================= -->
+  <h2 id="status">7. Status model</h2>
+
+  <p>Nine statuses, not four — <span class="path">internal/models/status.go:11-21</span>.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Status</th><th>Claimable <span class="path">:98</span></th><th>Terminal <span class="path">:108</span></th><th>Active <span class="path">:113</span></th><th>Suspended <span class="path">:123</span></th><th><code>ValidateSettableStatus</code> <span class="path">:77</span></th></tr></thead>
+    <tbody>
+      <tr><td><code>open</code></td><td>yes</td><td>—</td><td>yes</td><td>—</td><td>settable</td></tr>
+      <tr><td><code>in_progress</code></td><td>—</td><td>—</td><td>yes</td><td>—</td><td><b>refused</b> — "must use claim endpoint"</td></tr>
+      <tr><td><code>blocked</code></td><td>yes</td><td>—</td><td>—</td><td>yes</td><td>settable</td></tr>
+      <tr><td><code>deferred</code></td><td>yes</td><td>—</td><td>—</td><td>yes</td><td>settable</td></tr>
+      <tr><td><code>review</code></td><td>yes</td><td>—</td><td>yes</td><td>—</td><td>settable</td></tr>
+      <tr><td><code>closed</code></td><td>—</td><td>yes</td><td>—</td><td>—</td><td><b>refused</b> — "must use close endpoint"</td></tr>
+      <tr><td><code>tombstone</code></td><td>—</td><td>yes</td><td>—</td><td>—</td><td><b>refused</b> — system-managed</td></tr>
+      <tr><td><code>pinned</code></td><td>—</td><td>—</td><td>—</td><td>yes</td><td><b>refused</b> — system-managed</td></tr>
+      <tr><td><code>hooked</code></td><td>—</td><td>—</td><td>—</td><td>yes</td><td><b>refused</b> — system-managed</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>The <code>blocked</code> in that table is the <em>status</em> sense of the word — a
+  worker parked the task and declared a blocker. The dependency sense lives in
+  <code>{ws}:blocked</code>, and nothing translates between them. The
+  <a href="glossary.html#traps">glossary</a> is explicit about this; it is the
+  highest-frequency vocabulary mistake in this repo.</p>
+
+  <h4>Where each transition rule is enforced</h4>
+  <ul>
+    <li><b>Create</b> may set only <code>open</code> or <code>deferred</code> — <span class="path">internal/service/commands.go:72-81</span>.</li>
+    <li><b>PATCH</b> goes through <code>ValidateSettableStatus</code>, which is the single definition of what a plain status write may set, shared with the agent <code>set_status</code> completion hook so the two cannot drift — the reasoning is written out at <span class="path">internal/models/status.go:59-94</span>.</li>
+    <li><b>Claim</b> accepts any <code>IsClaimable</code> status, plus the stale-takeover branch when this actor won the lock on an issue that is <code>in_progress</code> under someone else — <span class="path">internal/service/issue_service.go:535-545</span>.</li>
+    <li><b>Terminal guard</b>: <code>ValidateModifiable</code> (<span class="path">internal/service/status.go:19</span>) rejects writes against a terminal status; wired into nine <code>issueService</code> methods — update, assign, defer, add/remove-dependency, add/remove-label, set/remove-metadata (<span class="path">internal/service/issue_service.go:303, 783, 827, 917, 987, 1035, 1087, 1141, 1208</span>) — plus four revert paths (<span class="path">internal/service/revert.go:92, 379, 428, 489</span>). Its own doc comment at <span class="path">status.go:14</span> names only four of those and is stale.</li>
+    <li><b>Derived set</b>: <code>allNonTerminalStatuses</code> is computed from <code>BuiltinStatuses()</code> at init, in two independent copies — <span class="path">internal/projection/helpers.go:318</span> and <span class="path">internal/storage/indexer.go:49</span> — so handlers can <code>SREM</code> from every non-terminal index without a pre-read (<span class="path">handlers.go:600-604</span>).</li>
+  </ul>
+
+  <div class="callout trap">
+    <span class="label">Adding a tenth status updates the Go lists and not the Lua</span>
+    <p>Both copies of <code>allNonTerminalStatuses</code> derive themselves from
+    <code>BuiltinStatuses()</code>, so both pick up a new status automatically. But
+    <span class="path">internal/storage/lua/rebuild_blocked_cache.lua:12</span> hard-codes
+    the nine names in a Lua table. Issues in the new status become invisible to Phase 0, so
+    they vanish from <code>{ws}:blocked</code> and <code>queue:ready</code> on the next
+    sweep. The <code>status_model</code> harness gate
+    (<span class="path">harness/policy.yaml:151-165</span>) compares
+    <code>docs/architecture.md</code> to <code>status.go</code> — <b>not this
+    script</b>.</p>
+  </div>
+
+  <!-- ============================================================= -->
+  <h2 id="deps">8. Dependency edges</h2>
+
+  <p>Edge identity is the composite <code>(IssueID, DependsOnID, Type)</code> — there is no
+  edge ID, and the same pair may carry several types
+  (<span class="path">internal/models/dependency.go:88-90</span>). Direction is documented
+  once, at <span class="path">:80-86</span>: <b><em>IssueID depends on DependsOnID.</em></b>
+  For <code>blocks</code>, <code>DependsOnID</code> is the blocker.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Type</th><th><code>AffectsReadyWork()</code> <span class="path">:51</span></th><th>What the Redis handler writes</th></tr></thead>
+    <tbody>
+      <tr><td><code>blocks</code></td><td><b>yes</b></td><td><code>deps:blocks:{blocker}</code> + <code>deps:blocked_by:{issue}</code>; then <code>ZREM</code> from ready and <code>SADD</code> to blocked — <span class="path">handlers.go:806-825</span></td></tr>
+      <tr><td><code>parent-child</code></td><td><b>yes</b></td><td>The same two blocking sets, <em>plus</em> <code>deps:children:{parent}</code>, <code>deps:parent:{child}</code>, the hash's <code>parent_id</code>, and <code>idx:parent:{parent}</code> — <span class="path">handlers.go:806-815</span></td></tr>
+      <tr><td><code>related</code></td><td>no</td><td>Both edges and <b>both</b> metadata hashes — <span class="path">handlers.go:769-781</span></td></tr>
+      <tr><td><code>duplicate-of</code></td><td>no</td><td><code>deps:duplicate_of</code> + <code>deps:duplicated_by</code>, one metadata hash — <span class="path">handlers.go:784-792</span></td></tr>
+      <tr><td><code>superseded-by</code></td><td>no</td><td><code>deps:superseded_by</code> + <code>deps:supersedes</code>, one metadata hash — <span class="path">handlers.go:795-803</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout trap">
+    <span class="label">A parent-child edge <em>is</em> a blocking edge</span>
+    <p><code>handleDepAdd</code> falls through the three informational branches and writes
+    <code>deps:blocks:{parent}</code> and <code>deps:blocked_by:{child}</code> for
+    <b>both</b> <code>blocks</code> and <code>parent-child</code>, then removes the child
+    from <code>queue:ready</code> and adds it to <code>{ws}:blocked</code>
+    (<span class="path">internal/projection/handlers.go:805-825</span>). Adding a
+    parent-child edge through <code>dep.add</code> therefore takes the child out of the
+    ready queue until the parent closes. <b>Creating an issue with <code>parent_id</code>
+    set does not</b>: <code>handleIssueCreate</code> writes only <code>idx:parent</code> and
+    <code>deps:children</code> (<span class="path">handlers.go:117-121</span>), no
+    <code>blocked_by</code> edge, and still <code>ZADD</code>s the child straight into
+    <code>queue:ready</code> (<span class="path">:137-139</span>). The repo's own
+    test says so in as many words —
+    <code>// CHILD should be blocked (parent-child is blocking)</code>,
+    <span class="path">internal/projection/handlers_coverage_test.go:1880</span>.</p>
+  </div>
+
+  <ul>
+    <li><b>One parent per child — on Postgres only.</b> <span class="path">internal/storage/postgres/dependency.go:62-71</span> returns <code>ErrParentExists</code>. Redis has no such check: <code>service.AddDependency</code> rejects terminal targets, duplicate <code>(target, type)</code> pairs and cycles, and nothing else (<span class="path">internal/service/issue_service.go:904-971</span>), and <code>handleDepAdd</code> then overwrites <code>deps:parent:{child}</code> outright (<span class="path">internal/projection/handlers.go:812</span>), leaving the child in the old parent's <code>deps:children</code> and <code>idx:parent</code> sets. The <code>ERR:PARENT_EXISTS</code> branch at <span class="path">internal/storage/redis.go:80-84</span> is in the contract-suite-only script — see §9.</li>
+    <li><b>Blocking propagates parent → child, transitively, capped at 50.</b> Lua at <span class="path">lua/rebuild_blocked_cache.lua:57-73</span>; the Go mirror uses <code>maxTransitiveDepth = 50</code> at <span class="path">internal/storage/ready.go:36</span>.</li>
+    <li><b>Closing a blocker unblocks its dependents inline.</b> <code>handleIssueClose</code> reads <code>deps:blocks:{closed}</code>, <code>SREM</code>s both edge sets, and re-evaluates each dependent — <span class="path">handlers.go:349-365</span>.</li>
+    <li><b>Informational types touch no ready or blocked state at all.</b> Each of the three returns early — <span class="path">handlers.go:769-803</span>.</li>
+  </ul>
+
+  <!-- ============================================================= -->
+  <h2 id="lua">9. The Lua scripts</h2>
+
+  <div class="callout key">
+    <span class="label">Every script exists twice, and the copy is not the one that runs</span>
+    <p>47 files in <code>internal/storage/lua/</code>; 47 backtick <code>const …Lua</code>
+    strings in <code>internal/storage/*.go</code>. <b>The Go const is what runs</b> — it is
+    compiled into a <code>redis.NewScript</code>. There is no <code>//go:embed</code> of the
+    <code>lua/</code> directory; the only embeds in the repo are SQL migrations
+    (<span class="path">internal/archive/migrate/embed.go</span>,
+    <span class="path">internal/storage/postgres/migrate/embed.go</span>). Edit both, or
+    <code>scripts/harness/check_lua_go_sync.sh</code> fails — it diffs them after stripping
+    comments and blank lines, matching file to const by a lowercase-alphanumeric
+    normalisation (<span class="path">check_lua_go_sync.sh:33-42</span>).</p>
+  </div>
+
+  <p>Three doc comments say the opposite — "the canonical version lives in lua/…" at
+  <span class="path">internal/storage/claim.go:13</span>,
+  <span class="path">status_transition.go:12</span> and
+  <span class="path">redis_pubsub.go:61</span>. The harness keeps the two copies equal, so
+  the practical risk is low; the wording will still send you to edit the wrong file
+  first.</p>
+
+  <h3>Tracker-core scripts, and whether they run</h3>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Script</th><th>Go const</th><th>On a production path?</th></tr></thead>
+    <tbody>
+      <tr><td><code>append_event.lua</code></td><td><code>appendEventLua</code> <span class="path">redis_eventstore.go:22</span></td><td><b>Yes</b> — every single write.</td></tr>
+      <tr><td><code>acquire_issue_lock.lua</code></td><td><code>acquireIssueLockLua</code> <span class="path">locks.go:19</span></td><td><b>Yes</b> — every claim.</td></tr>
+      <tr><td><code>release_lock.lua</code></td><td><code>releaseLockLua</code> <span class="path">redis.go:123</span></td><td><b>Yes</b> — compare-and-delete on release.</td></tr>
+      <tr><td><code>rebuild_blocked_cache.lua</code></td><td><code>rebuildBlockedCacheLua</code> <span class="path">rebuild_cache.go:18</span></td><td><b>Yes</b> — after graph-affecting events.</td></tr>
+      <tr><td><code>metadata_mutation.lua</code></td><td><code>MetadataMutationLua</code> <span class="path">metadata.go:13</span></td><td><b>Yes</b> — the one script the projector itself runs, queued inside the pipeline (<span class="path">projection/redis_writer.go:122-124</span>).</td></tr>
+      <tr><td><code>sweep_stale_worker.lua</code></td><td><code>sweepStaleWorkerLua</code> <span class="path">worker.go:275</span></td><td><b>Yes</b> — <span class="path">worker.go:380</span>, driven from <span class="path">cmd/fleet-db/main.go:1212</span>.</td></tr>
+      <tr><td><code>set_sequence.lua</code></td><td><code>setSequenceLua</code> <span class="path">sequence.go:17</span></td><td><b>Yes</b>, but recovery and import only — <span class="path">internal/recovery/service.go:312, 319</span>.</td></tr>
+      <tr><td><code>claim_issue.lua</code></td><td><code>claimIssueLua</code> <span class="path">claim.go:14</span></td><td><b>No.</b> <code>RedisStorage.ClaimIssue</code> is reached only from <code>_test.go</code> files and the contract suite at <span class="path">storagetest/worker_tests.go</span>.</td></tr>
+      <tr><td><code>release_issue.lua</code><br><code>complete_issue.lua</code></td><td><code>releaseIssueLua</code> <span class="path">claim.go:129</span><br><code>completeIssueLua</code> <span class="path">claim.go:243</span></td><td><b>No.</b> Same shape — contract suite only.</td></tr>
+      <tr><td><code>add_dependency.lua</code></td><td><code>addDependencyLua</code> <span class="path">redis.go:58</span></td><td><b>No</b> on Redis — <code>RedisStorage.AddDependency</code> is reached only by tests and the contract suite. The same <em>interface</em> method is live on Postgres, where the projector's <code>p.deps</code> is the Postgres store (<span class="path">projection/pg_handlers.go:283</span>, wired with <code>pgStore</code> for every argument at <span class="path">cmd/fleet-db/main.go:358</span>).</td></tr>
+      <tr><td><code>status_transition.lua</code></td><td><code>statusTransitionLua</code> <span class="path">status_transition.go:13</span></td><td><b>No.</b> <code>TransitionStatus</code> has <b>zero</b> non-test callers anywhere in the repo.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>The return protocol</h3>
+  <p>Repo-wide convention: a script returns <code>"OK"</code> or
+  <code>"ERR:&lt;CODE&gt;[:&lt;detail&gt;]"</code>, and the Go wrapper parses it back into
+  sentinel errors. Exemplars to copy:
+  <span class="path">internal/storage/claim.go:102-121</span> and
+  <span class="path">locks.go:52-59</span>.</p>
+
+  <h3>The atomicity guarantee, exactly</h3>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> internal/storage/locks.go:20-29</figcaption>
+<pre><code>local current = redis.call("GET", KEYS[1])
+if current == false then
+    redis.call("SET", KEYS[1], ARGV[1], "EX", ARGV[2])
+    return "OK"
+end
+if current == ARGV[1] then
+    redis.call("EXPIRE", KEYS[1], ARGV[2])
+    return "REFRESH"
+end
+return "HELD"</code></pre>
+  </figure>
+
+  <p><b>At most one actor holds <code>{ws}:locks:issue:{id}</code>, and re-acquisition by
+  the current holder is a TTL refresh, never a failure.</b> That is the whole guarantee.
+  The status and assignee change that follows is <em>not</em> in the same atomic unit — it
+  is a separate event and a separate pipeline. What makes it safe is ordering: the lock is
+  taken first and the issue state is read <em>after</em>
+  (<span class="path">internal/service/issue_service.go:510-518</span>, comment: "to avoid
+  TOCTOU"). Default TTL is 300 seconds (<span class="path">:500-503</span>).
+  <a href="../lessons/0020-where-atomicity-lives.html">Lesson 20</a> is the long
+  version.</p>
+
+  <!-- ============================================================= -->
+  <h2 id="gates">10. What the harness enforces</h2>
+
+  <p>This repo defends its data model with checkers, not conventions — 19 of them under
+  <code>scripts/harness/</code> (<code>ls scripts/harness/check_*.sh</code>), 16 of which
+  the parallel runner executes
+  (<span class="path">scripts/harness/run_checks_parallel.sh:43-60</span>), configured by
+  <code>harness/policy.yaml</code>. The ones that will catch <em>you</em>:</p>
+
+  <dl class="decide">
+    <dt>You added a Redis key literal outside <code>keys.go</code></dt>
+    <dd><code>make lint-keys</code> greps for <code>"fleet-db:</code> and for
+    <code>storage.Prefix +</code> concatenation outside <code>internal/storage/</code>
+    (<span class="path">Makefile:126-146</span>); <code>check_key_construction.sh</code> is
+    the AST version. Rule and allowed paths:
+    <span class="path">harness/policy.yaml:58-77</span>.</dd>
+
+    <dt>You edited a Go <code>…Lua</code> const and not its <code>.lua</code> file</dt>
+    <dd><code>check_lua_go_sync.sh</code>. Alongside it,
+    <code>check_lua_key_patterns.sh</code> (a script's key suffixes must match
+    <code>keys.go</code>) and <code>check_lua_call_arity.sh</code>
+    (<code>KEYS</code>/<code>ARGV</code> indexes must match the Go <code>Run()</code>
+    arity — <span class="path">policy.yaml:105-106</span>).</dd>
+
+    <dt>You added an action without a projector handler</dt>
+    <dd><code>check_action_handler_coverage.sh</code>: "Every declared event action must
+    have a projector handler registration"
+    (<span class="path">policy.yaml:103-104</span>). A deliberate no-op needs the
+    <code>// harness:noop-ok</code> marker that
+    <code>check_projector_handler_noop.sh</code> looks for.</dd>
+
+    <dt>You changed the status model</dt>
+    <dd><code>check_status_doc_sync.sh</code> compares <code>docs/architecture.md</code>
+    against <code>internal/models/status.go</code>
+    (<span class="path">policy.yaml:151-165</span>).</dd>
+
+    <dt>You read an <code>HGETALL</code> result without checking for empty</dt>
+    <dd><code>check_hgetall_nil_guard.sh</code>, 15-line lookahead
+    (<span class="path">policy.yaml:107-109</span>). A missing hash returns an empty map,
+    not an error.</dd>
+
+    <dt>You want to know whether the read model is actually consistent</dt>
+    <dd><code>make verify-invariants</code> — which is a <code>go test</code> run, not a
+    server call (<span class="path">Makefile:87-89</span>). Violations carry IDs like
+    <code>RQ-1</code> and <code>DEP-3</code>, the keys involved, and a suggested repair
+    (<span class="path">internal/storage/invariants.go:33-41</span>).</dd>
+  </dl>
+
+  <!-- ============================================================= -->
+  <h2 id="traps">11. Traps</h2>
+
+  <ul>
+    <li><b><code>assertValidWorkspace</code> panics.</b> Any path that reaches an <em>asserting</em> key builder with an unvalidated workspace crashes the request goroutine instead of returning an error. Validate upstream — and do not read a clean call through a <code>*Pattern</code> / <code>*Prefix</code> builder as evidence the workspace was valid; those skip the assert (§5). <span class="path">keys.go:24-28</span></li>
+    <li><b><code>idx:assignee:unassigned</code> is a literal key.</b> An actor genuinely named <code>unassigned</code> collides with it. <span class="path">keys.go:491</span> vs <span class="path">:499</span></li>
+    <li><b>Projector dedup is strict equality, not <code>&lt;=</code>.</b> A range check would silently drop the out-of-order inline projections that concurrent <code>executeCommand</code> calls legitimately produce; the comment says so. <span class="path">internal/projection/projector.go:251-257</span></li>
+    <li><b>A failed projection advances only the <em>in-memory</em> cursor.</b> <code>advanceCursor</code> touches <code>wl.cursor</code> and nothing else (<span class="path">projector.go:329-340</span>); <code>{ws}:projector:cursor</code> is written only inside the successful pipeline (<span class="path">:269-271</span>). So a poison event is skipped for the life of the process and retried after restart.</li>
+    <li><b>An <em>unknown</em> action does persist the cursor.</b> Different path, different behaviour: log a warning, <code>SET</code> the Redis cursor, return nil. <span class="path">projector.go:226-247</span></li>
+    <li><b><code>acceptance_criteria</code> cannot be written through any API.</b> It is on the model (<span class="path">models/issue.go:60</span>), stored (<span class="path">marshal.go:38</span>), FTS-indexed (<span class="path">handlers.go:266</span>) and supported by <code>storage.IssueUpdate</code> (<span class="path">filter.go:116</span>) — but absent from both <code>CreateIssueCmd</code> (<span class="path">service/commands.go:24-46</span>) and <code>UpdateIssueCmd</code> (<span class="path">:90-105</span>).</li>
+    <li><b><code>UpdateIssueCmd</code> covers 11 fields, not the issue.</b> Title, Description, Status, Priority, Type, Design, DesignFormat, Notes, Owner, DueAt, ExternalRef. Assignee, Labels, Metadata, ParentID, Repo, DeferUntil and EstimatedMinutes each have their own endpoint — or none. <span class="path">service/commands.go:90-105</span></li>
+    <li><b><code>ReadyFilter</code> exists twice, with different fields.</b> <span class="path">internal/service/ready.go:33</span> has <code>IncludeAssigned bool</code>; <span class="path">internal/storage/ready.go:40</span> has an <code>Assignee *string</code> tri-state. Confusing them inverts the default.</li>
+    <li><b>"Integrity" means two different things.</b> <code>GET /api/v1/admin/workspaces/{key}/integrity</code> (<span class="path">internal/api/workspace.go:260</span>) runs <code>service.CheckIntegrity</code>, which checks <em>referential</em> integrity only — dangling <code>parent_id</code>, unmapped <code>repo</code>, dangling dep refs (<span class="path">internal/service/integrity.go:28-100</span>). Ready-queue, blocked-set and index/hash parity live in <code>RedisStorage.VerifyInvariants</code> (<span class="path">internal/storage/invariants.go:51</span>), which <b>has no HTTP route and no production caller at all</b>.</li>
+    <li><b>The dead-code linter cannot see those unused exported methods.</b> <code>make lint-deadcode</code> only ever considers names starting with a lowercase letter — <code>grep -E 'unreachable func: [a-z]'</code>, <span class="path">Makefile:158</span>. <code>deadcode</code> prints a method as <code>&lt;receiver type&gt;.&lt;method&gt;</code>, so <code>RedisStorage.ClaimIssue</code> and <code>RedisStorage.VerifyInvariants</code> are dropped there and never reach the exclusion on <span class="path">:159</span> — which targets exported methods on <em>unexported</em> types, as <span class="path">Makefile:151-152</span> says in as many words. Exported methods on exported types are outside the linter's remit by construction.</li>
+    <li><b>Labels may not contain <code>,</code> or <code>;</code> — but not for the stated reason.</b> The comment says "labels are stored comma-separated" (<span class="path">models/issue.go:17-20</span>); in Redis they are a JSON array (<span class="path">marshal.go:91-94</span>). The real constraint is the comma-separated <code>label</code> / <code>label_any</code> query parameters — <span class="path">internal/api/ready.go:176-181</span>, flattened by <code>collectMultiValues</code> → <code>splitCSV</code> (<span class="path">:229-258</span>), with <span class="repo loom">loomcli</span> joining on commas before it sends (<span class="path">internal/backend/fleet/params.go:233-238</span>). Nothing in either tree splits a label on <code>;</code>, so that half of <code>LabelSeparatorChars</code> is unexplained by any code.</li>
+    <li><b>Empty collections are written, not omitted.</b> <code>marshalIssue</code> deliberately writes <code>"[]"</code> and <code>"{}"</code> so the non-nil invariant is visible in a raw <code>HGETALL</code>, not only after passing through <code>UnmarshalIssue</code>. <span class="path">marshal.go:77-103</span></li>
+    <li><b>Metadata is bounded, labels are not indexed the same way.</b> Metadata keys are URL-path-safe and ≤128 bytes, values ≤1024 bytes, ≤64 entries per issue — a best-effort command-time bound that concurrent writers can briefly exceed. <span class="path">internal/models/metadata.go:9-24</span></li>
+  </ul>
+
+  <!-- ============================================================= -->
+  <h2 id="inspect">12. Reading a live keyspace</h2>
+
+  <div class="callout safety">
+    <span class="label">Shared machine — read this before you run anything</span>
+    <p>Compose stacks, ports and podman state on this machine are <b>shared</b>. Never run
+    <code>make local-mode-up</code> or <code>make local-mode-down</code> against a compose
+    project you did not create — <code>up --build</code> on an existing project name
+    silently recreates someone else's containers. Before starting anything, run
+    <code>podman ps</code>, treat every stack you find as owned by someone else, and pick
+    your <b>own</b> compose project name and an unclaimed port block. Tear down only your
+    own. Everything in this section is read-only, and the greps need no stack at all. See
+    <a href="../lessons/0003-run-it-without-breaking-anyone.html">Lesson 03</a>.</p>
+  </div>
+
+  <h3>Against the source tree — no stack, no risk</h3>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Command, run in the fleet-db checkout</th><th>Answers</th><th>At this pin</th></tr></thead>
+    <tbody>
+      <tr><td><code>grep -c '^// Pattern:' internal/storage/keys.go</code></td><td>How many keys are documented.</td><td><code>185</code></td></tr>
+      <tr><td><code>grep -n '^// Pattern:' internal/storage/keys.go</code></td><td><b>The whole key schema, in one screenful of scrolling.</b></td><td>—</td></tr>
+      <tr><td><code>grep -cE '^\tAction[A-Za-z]+ +Action = ' internal/models/event.go</code></td><td>How many actions exist.</td><td><code>43</code></td></tr>
+      <tr><td><code>sed -n '17,62p' internal/projection/handlers.go | grep -c 'models\.Action'</code></td><td>How many are registered with a Redis handler.</td><td><code>43</code></td></tr>
+      <tr><td><code>ls internal/storage/lua | wc -l</code></td><td>How many <code>.lua</code> mirror files exist.</td><td><code>47</code></td></tr>
+      <tr><td><code>grep -rn '\.ClaimIssue(' --include='*.go' . | grep -v '_test\.go'</code></td><td>Which "claim" is the real one.</td><td>15 hits in <code>storagetest/worker_tests.go</code>, plus <code>api/claim.go:79</code>, <code>rpc/worker_methods.go:40</code> and <code>pkg/client/commands/workers.go:29</code> — the <em>service</em> method. Escape the dot: a bare <code>grep -v _test</code> also swallows <code>worker_tests.go</code> and leaves only those last three.</td></tr>
+      <tr><td><code>go test ./internal/projection/</code></td><td>The read-model rules, exercised. One package, miniredis, no Docker.</td><td>—</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Against a Redis you started yourself</h3>
+
+  <p>Read-only verbs only, and prefer <code>--scan</code> over <code>KEYS</code>:</p>
+
+<pre><code>redis-cli -p &lt;your-port&gt; --scan --pattern 'fleet-db:FLEET:idx:*'
+redis-cli -p &lt;your-port&gt; TYPE      fleet-db:FLEET:queue:ready
+redis-cli -p &lt;your-port&gt; ZRANGE    fleet-db:FLEET:queue:ready 0 -1 WITHSCORES
+redis-cli -p &lt;your-port&gt; SMEMBERS  fleet-db:FLEET:blocked
+redis-cli -p &lt;your-port&gt; HGETALL   fleet-db:FLEET:issues:FLEET-1
+redis-cli -p &lt;your-port&gt; XRANGE    fleet-db:FLEET:events - + COUNT 5
+redis-cli -p &lt;your-port&gt; GET       fleet-db:FLEET:projector:cursor</code></pre>
+
+  <p>The scores in that <code>ZRANGE</code> are priorities, not timestamps. The
+  <code>HGETALL</code> shows <code>labels</code> as <code>[]</code> and
+  <code>metadata</code> as <code>{}</code> when empty — that is the invariant being
+  deliberately observable, not a bug.</p>
+
+  <h3>From the loomcli side</h3>
+
+  <p><span class="repo loom">loomcli</span> never speaks Redis to fleet-db; it speaks HTTP
+  or RPC. <code>loom data ready</code>
+  (<span class="path">internal/cli/data/ready.go:18-40</span>) and
+  <code>loom data blocked</code>
+  (<span class="path">internal/cli/data/blocked.go:17-38</span>) are the read-only surface
+  onto the ZSET and the SET on this card — both say "(HTTP)" in their own help text.
+  <code>--assignee</code> on <code>ready</code> is what lands on the storage-side
+  <code>Assignee</code> tri-state described in §6.</p>
+
+  <div class="callout trap">
+    <span class="label">In local mode the whole keyspace lives in a snapshot file</span>
+    <p><span class="repo loom">loomcli</span> local mode runs an in-process miniredis and
+    persists <b>the entire <code>fleet-db:</code> prefix</b> to a snapshot, so the embedded
+    fleet-db subprocess that each <code>loom</code> invocation spawns can pick the data back
+    up (<span class="path">internal/webui/localredis/manager.go:80-89</span>). But
+    <code>maxStreamEntriesPerKey = 10000</code> caps how much of any one stream is
+    serialized: newest entries are kept, older ones stay in the live miniredis and <b>do not
+    survive a restart</b> (<span class="path">manager.go:64-70</span>). If your local event
+    history is shorter than you expected, that is why — and it is a local-mode property, not
+    a fleet-db one. See <a href="../lessons/0005-where-state-lives.html">Lesson 05</a>.</p>
+  </div>
+
+  <!-- ============================================================= -->
+  <h2 id="conflicts">13. Doc/code conflicts</h2>
+
+  <p><code>docs/architecture.md</code> is unusually good on rationale and worth trusting on
+  intent. These statements are wrong about the Redis write path as implemented at this pin.
+  Re-checked 2026-09-03.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>The doc says</th><th>The code does</th></tr></thead>
+    <tbody>
+      <tr><td><span class="path">docs/architecture.md:622</span> — ready is <code>status=open AND type != epic AND not future-deferred AND blocked_by count = 0</code>.</td><td><code>IsReadyEligibleFull</code> adds a fifth condition: <b>not a member of <code>{ws}:blocked</code></b>, the transitive parent-propagated set. <span class="path">ready_eligible.go:54-64</span></td></tr>
+      <tr><td><span class="path">docs/architecture.md:849</span> — failed events are skipped and "the cursor advances".</td><td>Only the in-memory cursor advances. <span class="path">projector.go:139, 178, 329-340</span></td></tr>
+      <tr><td><span class="path">docs/architecture.md:1258</span> — <code>rebuild_blocked_cache.lua</code> "scans all dependency keys".</td><td>It never <code>SCAN</code>s. It enumerates IDs from the nine <code>idx:status:*</code> SETs, then reads <code>deps:blocked_by:{id}</code> and <code>deps:children:{id}</code> per ID — so an issue missing from every status index is invisible to it. <span class="path">lua/rebuild_blocked_cache.lua:11-73</span></td></tr>
+      <tr><td><span class="path">docs/architecture.md:783-809</span> — the Event Actions table.</td><td>Omits <code>skill.create/update/delete</code> and <code>skill_pack.create/update/delete</code>, which exist at <span class="path">models/event.go:82-89</span> with registered handlers at <span class="path">handlers.go:56-61</span>. The <code>event_schema</code> gate only checks the prefixes listed at <span class="path">harness/policy.yaml:120-128</span>, and <code>skill.</code> is not among them — so nothing catches the omission.</td></tr>
+      <tr><td><span class="path">docs/glossary.md:175</span> — the Postgres backend uses a <code>NoopProjector</code>.</td><td><span class="path">cmd/fleet-db/main.go:358</span> wires <code>projection.NewPostgresProjector</code>. <span class="path">docs/architecture.md:831</span> already corrects this; the glossary was not updated.</td></tr>
+      <tr><td><span class="path">docs/glossary.md:101</span>, <span class="path">docs/agents/codebase-map.md:16</span> and <span class="path">internal/storage/claim.go:13</span> all name the file <code>internal/storage/lua/claim.lua</code>.</td><td>No such file. It is <code>lua/claim_issue.lua</code> — whose own first line still reads <code>-- claim.lua</code>.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout trap">
+    <span class="label">And the largest one</span>
+    <p><span class="path">docs/architecture.md:1225-1240</span> presents
+    <code>claim_issue.lua</code> as <em>the</em> claim, and the key design decision at
+    <span class="path">docs/architecture.md:18</span> says Lua scripts are used "for claims,
+    status transitions, and dependency additions". <b>None of those three scripts is reached
+    from an HTTP or RPC request on the Redis backend.</b> The real claim path is
+    <span class="path">internal/service/issue_service.go:495</span> →
+    <code>acquire_issue_lock.lua</code> → an <code>issue.claim</code> event →
+    <span class="path">internal/projection/handlers.go:589</span>. Fixing a bug in
+    <code>claim_issue.lua</code> for the Redis backend changes nothing that runs.</p>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><code>internal/projection/handlers.go</code> — 1,574 lines, and the actual Redis
+    write model. Every index rule, every ready-queue decision and every dependency-set
+    mutation on this card is a line in that file. Read it once end to end and the rest of
+    this card stops being something to learn and becomes a lookup table. Second, and only
+    second: <code>internal/storage/keys.go</code>, the same schema stated as 215 one-line
+    builders.</p>
+  </div>
+
+  <div class="ask">
+    <b>A row here not matching what you see?</b> Tell your teacher. This card is pinned to
+    specific commits and the repo moves faster than its own docs — §13 is the proof. A
+    correction to a cited line here is worth more than a correction almost anywhere else in
+    the course, because people act on this card without re-checking it.
+  </div>
+
+  <p class="stamp">Every <code>path:line</code> on this card was opened and confirmed
+  against the pinned trees: fleet-db <code>000793b</code> and loomcli
+  <code>ce4df56fb</code>. Paths are relative to a repo root — fleet-db unless the row
+  carries a <span class="repo loom">loomcli</span> badge.</p>
+
+</main>
+</body>
+</html>

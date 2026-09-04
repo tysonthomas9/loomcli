@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>08. Claiming without collisions — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 3 <span class="sep">/</span> Lesson 08 <span class="sep">/</span> Concurrency</p>
+  <h1>Claiming without collisions</h1>
+  <p class="standfirst">This is the problem Loom exists to solve. Many agents, one
+  queue, no coordinator — and no two agents may ever work the same task. Here is
+  exactly how that is guaranteed, across both repos.</p>
+
+  <div class="meta">
+    <span><b>Skill</b> reason about the claim race and where its guarantees live</span>
+    <span><b>Time</b> 40 min</span>
+    <span><b>Needs</b> <a href="0005-where-state-lives.html">05</a>, <a href="0007-two-clients-one-server.html">07</a></span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span> <span class="repo fleet">fleet-db</span></span>
+  </div>
+
+  <h2>Two assignment problems, deliberately separated</h2>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th></th><th>Placement</th><th>Task assignment</th></tr></thead>
+    <tbody>
+      <tr><td><b>Answers</b></td><td>Where does this agent's process run?</td><td>Which task does this running agent take?</td></tr>
+      <tr><td><b>Owned by</b></td><td>A runtime provider — today the local daemon; tomorrow, in principle, Kubernetes.</td><td>Nobody. It is decentralised.</td></tr>
+      <tr><td><b>Mechanism</b></td><td>An ownership lease in fleet-db.</td><td>Every runner lists ready tasks, scores them locally, and races everyone else through an atomic claim.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout key">
+    <span class="label">There is no assignment service, on purpose</span>
+    <p>No central <code>assign-next</code> endpoint hands work out: the product
+    design says Loom should not start with one, and lists building it as out of
+    scope for the MVP and the first cloud implementation
+    <span class="path">docs/product/daemon-agent-runtime-architecture.md:34-37, 451-457</span>.
+    Every runner independently decides what it
+    wants and then <b>races</b> for it. Correctness comes from the race being
+    <em>atomic</em>, not from the race being avoided. If you catch yourself designing
+    a coordinator, you are working against the architecture.</p>
+  </div>
+
+  <h2>Layer 1: who may run this agent at all</h2>
+
+  <p>The invariant is <code>(workspace_id, agent_id) → at most one active
+  owner</code> <span class="path">docs/product/daemon-agent-runtime-architecture.md:44</span>,
+  held as an <b>agent ownership lease</b> in fleet-db with a 30-minute TTL
+  <span class="path">internal/cli/daemon/supervisor/supervisor.go:248</span>. The
+  supervisor acquires it at the top of every supervise iteration, before it takes a
+  concurrency slot or runs preflight
+  <span class="path">internal/cli/daemon/supervisor/supervisor.go:294, 306, 313</span>,
+  then heartbeats it every <code>ttl/4</code> capped at 30 seconds
+  <span class="path">internal/cli/daemon/supervisor/ownership.go:160-166</span> — at a
+  30-minute TTL the cap always wins, so in practice it is always 30 seconds.</p>
+
+  <p>Acquisition distinguishes <b>three</b> outcomes, not two: acquired,
+  held-by-other, and <b>inconclusive</b>
+  <span class="path">internal/cli/daemon/supervisor/ownership.go:19-28</span>. That third
+  one exists because the verify-before-kill path must branch on it
+  <span class="path">internal/cli/daemon/supervisor/ownership.go:263-275</span> — "I could
+  not reach the server" is emphatically not "nobody owns this."</p>
+
+  <div class="callout trap">
+    <span class="label">Trap — clocks</span>
+    <p>PID files, flocks, and "is the process still alive?" checks are
+    <em>conveniences</em>. Where the control plane is wired up, only a
+    server-arbitrated lease decides who may run — with two deliberate escapes: no
+    <code>ControlStore</code> or no resolved workspace, and a server that 404s the
+    lease endpoint, both return <em>acquired</em> and let the supervisor proceed
+    unguarded on purpose
+    <span class="path">internal/cli/daemon/supervisor/ownership.go:31-35, 57-61</span>.
+    Where the lease does apply, the code is deliberately paranoid about never comparing
+    a server-returned timestamp against the local clock:
+    <code>ownershipWithinValidity</code> permits fail-open only while the local
+    monotonic <em>and</em> the local wall clock both agree that less than
+    <code>ttl</code> has elapsed since the last confirmed renewal, and either clause
+    expiring ends it.
+    <span class="path">internal/cli/daemon/supervisor/ownership.go:294-322</span></p>
+  </div>
+
+  <h2>Layer 2: the atomic step inside a non-atomic claim</h2>
+
+  <p>Now the interesting half. A runner picks a candidate task and POSTs
+  <code>/issues/{id}/claim</code>
+  <span class="path">internal/backend/fleet/claim_release.go:27</span>; fleet-db routes
+  that to the issue service
+  <span class="path">fleet-db internal/api/claim.go:34, 79</span>. The whole race is
+  settled in that service's <em>first</em> step, and <b>nothing after it is atomic</b>.
+  The step is one small Lua script that takes the issue lock:</p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> internal/storage/locks.go:19-30 — the script that actually runs</figcaption>
+<pre><code>const acquireIssueLockLua = `
+local current = redis.call("GET", KEYS[1])
+if current == false then
+    redis.call("SET", KEYS[1], ARGV[1], "EX", ARGV[2])
+    return "OK"
+end
+if current == ARGV[1] then
+    redis.call("EXPIRE", KEYS[1], ARGV[2])
+    return "REFRESH"
+end
+return "HELD"
+`</code></pre>
+  </figure>
+
+  <p>Then, in ordinary Go, under the protection of that lock:</p>
+
+  <ol class="trace">
+    <li class="fleet-hop">
+      <span class="hop-file">issue_service.go:510-515</span>
+      <span class="hop-what"><b>Take the lock.</b> <code>HELD</code> becomes
+      <code>ErrLockHeld</code> becomes <code>ErrAlreadyClaimed</code>. This is the
+      tie-break — everything below runs under the lock it took.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">issue_service.go:517-526</span>
+      <span class="hop-what"><b>Validate existence.</b> Read the issue <em>after</em>
+      the lock — the comment says "to avoid TOCTOU". If it does not exist,
+      <b>release the lock again</b> and return <code>ErrNotFound</code>.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">issue_service.go:527-545</span>
+      <span class="hop-what"><b>Validate claimability</b>, with two escape hatches
+      first: the same actor re-claiming its own <code>in_progress</code> task returns
+      immediately with no event, and an <code>in_progress</code> task under a
+      <em>different</em> assignee whose lock has expired is a stale takeover that skips
+      the check. Otherwise only <code>open</code>, <code>blocked</code>,
+      <code>deferred</code>, and <code>review</code> pass, and a failure releases the
+      lock <span class="path">fleet-db internal/models/status.go:98-105</span>.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">issue_service.go:557-574</span>
+      <span class="hop-what"><b>Append the claim event, then project it.</b> The
+      projection is what moves the issue between status sets and assignee sets and
+      <code>ZREM</code>s it from the ready queue — a separate step, after the event is
+      already durable.</span>
+    </li>
+  </ol>
+
+  <div class="callout fleet">
+    <span class="label">The lock is the guarantee; the rest is not atomic</span>
+    <p>Taking the lock and repairing the indexes are separate steps, so there <b>is</b> a
+    window. Between them the issue is still <code>open</code> and still a member of
+    <code>queue:ready</code>, and a competitor's ready query — which reads the ZSET
+    directly and only filters on status when the caller asks it to — will still list it
+    <span class="path">fleet-db internal/storage/ready.go:501-506, 594-600</span>. What the
+    competitor cannot do is take the lock, and that is enough. Projection sits on top as
+    best-effort: a failure is logged and left for the background catch-up rather than
+    failing the claim, so the ready queue can lag a claim that already succeeded
+    <span class="path">fleet-db internal/service/issue_service.go:83-109</span>.</p>
+  </div>
+
+  <aside class="sidenote">fleet-db does carry the tidier design: a single claim script that
+  takes the lock, validates, mutates, and repairs all five index families in one atomic shot
+  <span class="path">fleet-db internal/storage/claim.go:14-65</span>, mirrored for reading at
+  <code>internal/storage/lua/claim_issue.lua</code>. The server never runs it —
+  <code>grep -rn '\.ClaimIssue(' --include='*.go' .</code> in fleet-db returns only
+  <code>_test.go</code> files, the <code>storagetest</code> helper package, and
+  <code>internal/api/claim.go:79</code>, which calls the <em>service</em>, not the storage.
+  Read it as the guarantee it documents, not as the code that ran.</aside>
+
+  <p>Notice too that <code>blocked</code> and <code>review</code> are claimable. That
+  is the <a href="0002-the-words-that-lie.html">Lesson 02</a> vocabulary paying off:
+  <code>blocked</code>-the-status means "a human should look", not "no agent may
+  touch it".</p>
+
+  <div class="callout key">
+    <span class="label">Claimable is not the same as offered</span>
+    <p>There are <b>two independent gates</b> here, and conflating them will mislead you
+    for months. The claimability check decides what a claim is <em>allowed</em> to take —
+    four statuses. The <b>ready queue</b> decides what an agent is ever <em>shown</em>,
+    and it is far narrower: <code>IsReadyEligible</code> returns false for anything that
+    is not <code>open</code>, for epics, and for a future <code>defer_until</code>
+    <span class="path">fleet-db internal/storage/ready_eligible.go:35-48</span>. The
+    queue itself is maintained to nearly the same rule: the status-transition script
+    <code>ZADD</code>s an issue onto <code>queue:ready</code> only when the new status is
+    <code>open</code> and it is not blocked, not deferred, and not an epic, and
+    <code>ZREM</code>s it whenever the old or the new status is one of
+    <code>open</code>/<code>in_progress</code>/<code>review</code>
+    <span class="path">fleet-db internal/storage/status_transition.go:49-69</span>.
+    <em>Nearly</em>: the script rejects any non-empty <code>defer_until</code> where the
+    Go helper rejects only a future one, and a transition between two inactive statuses —
+    <code>deferred</code> to <code>blocked</code>, say — does not touch the queue at all.</p>
+    <p>So a daemon picking work never auto-selects a <code>blocked</code> task: it only
+    ever sees <code>open</code> ones. But a <em>targeted</em> claim by id succeeds,
+    because that path goes straight to the claim endpoint and skips the queue entirely.
+    Remember this pair — it is the whole mechanism behind quarantine in
+    <a href="0009-when-a-run-dies.html">Lesson 09</a>, which writes
+    <code>status=blocked</code> precisely to pull a task out of the ready queue while
+    leaving it claimable by hand
+    <span class="path">internal/cli/daemon/supervisor/quarantine.go:22-34, 440-452, 511</span>.</p>
+  </div>
+
+  <h2>Losing the race is normal</h2>
+
+  <p>On the loomcli side, a claim conflict is not an error path — it is the expected
+  path. The runner drops that candidate and tries the next best one, up to
+  <code>claimConflictRetryLimit = 16</code> conflicts before giving up. That retry
+  loop <em>is</em> the decentralised assignment algorithm.
+  <span class="path">internal/cli/daemon/supervisor/claim.go:39</span></p>
+
+  <p>Candidate order comes from <code>SelectBestTask</code>: score descending,
+  then priority ascending, then ID ascending — deterministic, so two runners with
+  identical inputs make identical choices and then let the lock break the
+  tie. <span class="path">internal/cli/task_router.go:147</span></p>
+
+  <aside class="sidenote">When an agent has a worktree and no requested task, the ready
+  queue is read up to twice: first scoped to <code>Assignee=&lt;worktree&gt;</code> so an
+  agent prefers work already earmarked for it, then — only if that attempt reached no
+  decision — unscoped
+  <span class="path">internal/cli/daemon/supervisor/claim.go:78-91</span>. A requested
+  task takes its own single-read path <span class="path">claim.go:74-76, 141-167</span>.
+  Resume is checked before any of them <span class="path">claim.go:48-63</span>: an
+  <code>in_progress</code> task is never "ready", so resuming claims by id and bypasses
+  the queue entirely.</aside>
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory: two runners simultaneously pick the same task as
+    their best candidate. Walk through what each one observes, and say where the
+    tie is broken.</p>
+    <div class="answer">
+      <p>Both POST claim. In fleet-db, one <code>AcquireIssueLock</code> returns
+      <code>OK</code> and the other <code>HELD</code> — that is the tie-break, and it
+      happens inside a single atomic Lua script.</p>
+      <p>The winner proceeds through validation, sets the issue to
+      <code>in_progress</code>, and appends a claim event whose projection repairs the
+      indexes. The loser gets HTTP 409 <code>already_claimed</code>, with the holder
+      attached as <code>meta.existing_owner</code> when the server can read it back
+      <span class="path">fleet-db internal/api/claim.go:83-90</span>; loomcli reads exactly
+      that field <span class="path">internal/cli/daemon/supervisor/claim.go:227-235</span>,
+      drops that candidate, and moves to its next-best task — up to 16 conflicts before it
+      gives up. The loser may still see the task listed as ready until the winner's
+      projection lands; what it cannot do is take the lock.</p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="0008">
+    <div class="q" data-answer="0">
+      <p class="stem">Two runners claim the same task at the same instant. What
+      actually decides the winner?</p>
+      <ul class="opts">
+        <li>The atomic lock script: exactly one caller gets OK</li>
+        <li>The ready queue: it lists each task only once</li>
+        <li>The projection: it repairs every index in one pass</li>
+        <li>The router: the higher local score wins the task</li>
+      </ul>
+      <div class="why">The race is settled entirely by <code>AcquireIssueLock</code>, one
+      atomic Lua script returning <code>OK</code> to the first caller,
+      <code>REFRESH</code> to that same caller again, and <code>HELD</code> to everyone
+      else <span class="path">fleet-db internal/storage/locks.go:19-30, 48-56</span>.
+      Everything after it — the status read, the claimability check, the event, the index
+      repair — is ordinary Go running under that lock
+      <span class="path">fleet-db internal/service/issue_service.go:510-574</span>. The
+      ready queue is no tie-break: it can still list a task whose lock is already taken.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <p class="stem">A lease acquire returns <b>inconclusive</b> rather than
+      acquired or held-by-other. What does that mean?</p>
+      <ul class="opts">
+        <li>The server could not be reached, so ownership is simply unknown</li>
+        <li>The lease exists but its remaining validity window has expired</li>
+        <li>Another owner holds it but has not heartbeated it in one cycle</li>
+        <li>The lease was acquired but the fence token failed to increment</li>
+      </ul>
+      <div class="why">"I could not find out" is a distinct third outcome from "no
+      one owns it", and conflating the two is how you get two live owners. The
+      verify-before-kill path branches on exactly this distinction.
+      <span class="path">internal/cli/daemon/supervisor/ownership.go:19-28, 263-275</span></div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <p class="stem">Which of these statuses can an agent claim?</p>
+      <ul class="opts">
+        <li>Only <code>open</code>, since any other status implies prior work</li>
+        <li><code>open</code> and <code>deferred</code>, but never <code>blocked</code></li>
+        <li><code>open</code>, <code>deferred</code>, and <code>in_progress</code></li>
+        <li><code>open</code>, <code>blocked</code>, <code>deferred</code>, <code>review</code></li>
+      </ul>
+      <div class="why">All four are claimable. <code>blocked</code>-the-status means
+      a human should look at it, not that agents are barred — the vocabulary lesson
+      pays off here. <code>in_progress</code> is the one the claimability check rejects
+      <span class="path">fleet-db internal/models/status.go:98-105</span> — though not
+      absolutely: the service lets the same actor re-claim its own
+      <code>in_progress</code> task, and lets a new actor take one over once the old
+      lock has expired
+      <span class="path">fleet-db internal/service/issue_service.go:527-545</span>.
+      <br><br>Read the question precisely: it asks what an agent <em>can claim</em>, not
+      what it will be <em>offered</em>. Only <code>open</code> issues reach the ready
+      queue <span class="path">fleet-db internal/storage/ready_eligible.go:35-38</span>,
+      so the other three are reachable only by a claim that names the id.</div>
+    </div>
+  </div>
+
+  <div class="exercise">
+    <h3>Read the guarantee, then find its siblings</h3>
+    <ol>
+      <li>Read <code>issueService.ClaimIssue</code> end to end in the fleet-db
+      worktree — the claim as it actually runs. Then read
+      <code>internal/storage/lua/claim_issue.lua</code> (80 lines) beside it: the same
+      guarantee written as one atomic script, which the server does not call.</li>
+      <li>Note every place the service <b>releases the lock before returning an
+      error</b> — there are four. What would break if one of those releases were
+      missing?</li>
+      <li>List the other Lua scripts in <code>internal/storage/lua/</code>. Pick two
+      whose names suggest they guard a similar race and confirm your guess by
+      reading their headers. What is the common shape? (They are mirrors too: of the
+      47 files there, 20 say so outright —
+      <code>grep -lie 'canonical' -e 'keep in sync' internal/storage/lua/*.lua</code>.)</li>
+      <li>Back in loomcli, open <code>claim.go</code> and find the test that pins
+      the conflict cap. Reason about what happens on a very busy workspace when a
+      runner exhausts all 16 — does it fail the run, or go idle and try again next
+      cycle?</li>
+      <li>Reaching back to <a href="0007-two-clients-one-server.html">Lesson 07</a>:
+      claiming is an <em>issue</em> operation. Which of the two client stacks
+      carries it, and therefore what error type does a conflict arrive as on the Go
+      side?</li>
+    </ol>
+    <div class="verify">
+      <b>You succeeded when</b>
+      You can state what a competing runner observes at each step of the claim, and
+      name the Go error kind a claim conflict produces. (It is the issue-backend
+      stack, so a <code>*backend.BackendError</code> — a conflict kind, not
+      <code>domain.ErrAlreadyClaimed</code>.)
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><span class="repo fleet">fleet-db</span>
+    <code>internal/service/issue_service.go:495-574</code> — the claim command as it
+    actually runs, lock to event. Then
+    <code>internal/storage/lua/claim_issue.lua</code>: short, heavily commented, and the
+    same guarantee written as one atomic script — the documented mirror of a storage
+    primitive <span class="path">fleet-db internal/storage/claim.go:82</span> that today
+    only the test suite exercises. Read it beside
+    <code>acquire_ownership_lease.lua</code> (another mirror) to see the same discipline
+    applied to the other layer.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0007-two-clients-one-server.html"><span class="dir">Previous</span>Two clients, one server</a>
+    <a class="next" href="0009-when-a-run-dies.html"><span class="dir">Next</span>When a run dies</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

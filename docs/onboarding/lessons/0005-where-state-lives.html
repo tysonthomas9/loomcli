@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>05. Where state lives — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 1 <span class="sep">/</span> Lesson 05 <span class="sep">/</span> Object model</p>
+  <h1>Where state lives</h1>
+  <p class="standfirst">By the end of this lesson you can name every core object in
+  Loom, say which of three storage tiers holds it, and know which of those tiers
+  you are allowed to delete.</p>
+
+  <div class="meta">
+    <span><b>Skill</b> place any piece of state in the right tier</span>
+    <span><b>Time</b> 35 min</span>
+    <span><b>Needs</b> <a href="0001-two-repos-one-system.html">01</a>, <a href="0002-the-words-that-lie.html">02</a></span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span></span>
+  </div>
+
+  <h2>Start by unlearning something</h2>
+
+  <p>Every tool like this has a config file. This one does not.</p>
+
+  <p>Workspaces, repos, roles, agent definitions, daemon profiles — all of it lives
+  in fleet-db. There is no loom YAML to edit. This matters on day one because the
+  code will actively mislead you: the config structs still carry YAML tags.</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/cli/config/project.go:67-72</figcaption>
+<pre><code>// RoleConfig defines an agent role (built-in like "plan"/"task", or custom).
+type RoleConfig struct {
+	Kind         string   `yaml:"kind,omitempty"`
+	Description  string   `yaml:"description,omitempty"`
+	Prompt       string   `yaml:"prompt,omitempty"`
+	PromptFile   string   `yaml:"prompt_file,omitempty"`</code></pre>
+  </figure>
+
+  <p>Those tags are a fossil. Nothing parses a loom YAML file. Where the config
+  actually comes from:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/cli/config/project.go:236-246</figcaption>
+<pre><code>func loadDaemonConfigFromStore(ctx context.Context, st store.Store, wsKey string, ...) {
+	...
+	profile, err := st.Daemon().Get(ctx, wsKey)
+	...
+	OverlayDaemonSettings(&dc.Daemon, daemonSettingsFromDomain(profile))</code></pre>
+  </figure>
+
+  <div class="callout trap">
+    <span class="label">Trap</span>
+    <p>You <em>will</em> at some point go looking for the YAML file those tags
+    imply, or worse, add a field with a <code>yaml:</code> tag and expect it to be
+    loadable. The tags survive from a pre-fleet-db era. The only YAML decoding in
+    non-test code under <code>internal/</code> and <code>cmd/</code> is
+    <code>SKILL.md</code> frontmatter
+    (<span class="path">internal/cli/skill/github_install.go:941, 945</span>);
+    repo-wide you also hit <span class="path">scripts/openapi-to-30/main.go:36</span>,
+    a build script that rewrites the OpenAPI spec. Nothing anywhere decodes loom's
+    own configuration from YAML. Check for yourself:
+    <code>grep -rn "yaml\.Unmarshal" --include="*.go" internal cmd</code>.</p>
+  </div>
+
+  <h2>Three tiers, one truth</h2>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Tier</th><th>Holds</th><th>If you delete it</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>fleet-db</b></td>
+        <td>Shared truth: everything in <code>internal/domain</code>, plus issues.</td>
+        <td>You have lost real data. This is the authoritative tier.</td>
+      </tr>
+      <tr>
+        <td><b>Node-local</b></td>
+        <td>"Where is it on <em>this</em> machine": <code>~/.loom/state.json</code> (<span class="path">internal/bootstrap/statecache.go:19-32</span>), <code>stacks.json</code> (<span class="path">internal/stackstore/stackstore.go:86</span>), desktop <code>local-settings.json</code> (<span class="path">internal/localsettings/settings.go:24</span>).</td>
+        <td>Regenerates. A missing <code>state.json</code> is recoverable and never load-bearing (<span class="path">internal/bootstrap/statecache.go:30-32</span>).</td>
+      </tr>
+      <tr>
+        <td><b>Worktree-local</b></td>
+        <td>Materialized artifacts: the skill projection under <code>.agents/skills</code>, which Loom owns outright (<span class="path">internal/skillmat/materialize.go:35, 38-39</span>), and the Loom-managed hook entries <em>inside</em> <code>.claude/settings.json</code> / <code>.codex/hooks.json</code>, which Loom merges into rather than owns (<span class="path">internal/hookcfg/hookcfg.go:38-46</span>).</td>
+        <td>The projection regenerates on the next run. The hook files do not: Loom rewrites only commands beginning <code>"loom "</code> and preserves everything else (<span class="path">internal/hookcfg/hookcfg.go:75-76, 266-297</span>).</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout key">
+    <span class="label">The one idea</span>
+    <p><b>Only fleet-db is authoritative. The other two tiers are caches you are
+    allowed to throw away.</b> When you are debugging weird state, that is the
+    order to suspect things in. Clear them only in a checkout of your own, and
+    per-entry rather than per-file: <code>.claude/settings.json</code> is tracked
+    by git here (<code>git ls-files .claude/settings.json</code>) and holds entries
+    Loom neither wrote nor restores.</p>
+  </div>
+
+  <aside class="sidenote">This is also why <code>~/.loom/state.json</code> is a
+  cache and not config: runtime commands deliberately do not treat it as an implicit
+  default, so they cannot silently cross workspace boundaries
+  (<span class="path">internal/cli/cmdstore/cmdstore.go:82-85</span>). Set
+  <code>LOOM_WORKSPACE</code> or pass <code>--workspace</code>.</aside>
+
+  <h2>The object graph</h2>
+
+  <p>Everything hangs off a Workspace, whose key is uppercase and immutable:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/domain/ — the control-plane objects</figcaption>
+<pre><code>Workspace  (key: "MYWS")                       domain/workspace.go:26
+│
+├── Repo          unique by name in workspace   domain/repo.go:15
+│     └── Groups[]  → agent repo-group affinity
+│
+├── Role          the reusable config           domain/role.go:169
+│     ├── Kind: interactive | worker
+│     ├── Skills[]    ← ROUTING TAGS, not documents
+│     └── InputPolicy ← deny-by-default prompt policy
+│
+├── Agent         a named assignment of one Role   domain/agent.go:500
+│     ├── RoleName → Role.Name
+│     ├── Repos[] / RepoGroups[] / CrossRepo
+│     ├── Mode: ephemeral | service
+│     ├── DesiredState: stopped|idle|running|draining
+│     └── Hooks.OnComplete[] → supervisor post-run pipeline
+│
+├── Skill         DOCUMENT entity (SKILL.md + files)  domain/skill.go:288
+│     ├── Scope: workspace | role
+│     └── Source: "manual" | "agent:&lt;n&gt;" | "import:&lt;dir&gt;" | "pack:&lt;n&gt;"   domain/skill.go:331
+│
+├── SkillPack     git source that syncs Skills    domain/skill.go:435
+├── DaemonProfile 1:1 with Workspace             domain/daemon_profile.go:13
+├── Node          a machine that can run agents   domain/control_plane.go:39
+│
+├── AgentSession  ONE RUN of an Agent             domain/control_plane.go:81
+│     └── AgentLease (fencing token)
+│
+├── Driver        a registered workflow bundle owner  domain/platform.go:64
+│     └── TrustLevel: trusted | untrusted
+│
+├── DriverRun     one workflow execution          domain/platform.go:396
+│     └── DriverStep[] → TaskRunID
+│
+└── TaskRun       one LLM-backed unit of work     domain/platform.go:498
+      └── TaskRunEvent[]  (append-only journal)</code></pre>
+  </figure>
+
+  <h2>Issues live on a different axis</h2>
+
+  <p>Notice what is <em>not</em> in that tree: issues. They are not
+  <code>domain</code> types at all. They come from fleet-db's issue tracker and
+  carry their own vocabulary.</p>
+
+  <p>And the single most useful fact about them:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/cli/taskfilter.go:14-17</figcaption>
+<pre><code>// IsEpic returns true if the issue is an epic. Agents never work on epics directly.
+func IsEpic(issue backend.IssueData) bool {
+	return issue.IssueType == "epic"
+}</code></pre>
+  </figure>
+
+  <div class="callout key">
+    <span class="label">Epics are not a separate object</span>
+    <p>An <b>epic is just an issue whose <code>IssueType</code> is
+    <code>"epic"</code></b>. A <b>task</b> is just the ordinary work item. Nothing
+    stores an epic as its own record: <code>grep -rn "type Epic" internal</code>
+    returns nine hits, but every one is a projection or a call argument derived from
+    ordinary issues (<span class="path">internal/types/types.go:157</span>,
+    <span class="path">internal/driver/epic_snapshot.go:41</span>,
+    <span class="path">internal/cli/epic/epic_stack.go:131</span>). The parent-child
+    dependency edge is what makes an epic contain tasks — one of the five dependency
+    types fleet-db will store
+    (<span class="path">internal/backend/fleet/fleet_mutations.go:28-34</span>). And
+    per that comment: agents never work on epics directly.</p>
+  </div>
+
+  <p>The other thing linking the two axes is <b>labels</b>. A role's
+  <code>Skills[]</code> routing tags are matched against an <em>issue's labels</em>
+  to score which tasks that role pulls
+  (<span class="path">internal/domain/skill.go:282-284</span>,
+  <span class="path">internal/cli/task_router.go:106-113</span>) — which is the mechanism behind the
+  <code>skill</code> vs <code>role skills</code> distinction from
+  <a href="0002-the-words-that-lie.html">Lesson 02</a>. One is a document loaded
+  into a worktree; the other is a string compared against a label.</p>
+
+  <h2>"Agent" means three different things</h2>
+
+  <p>You met one overloaded word in Lesson 02. Here is the one that will bite you
+  in code review:</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Type</th><th>Is</th><th>Defined</th></tr></thead>
+    <tbody>
+      <tr><td><code>domain.Agent</code></td><td>A long-lived <b>assignment</b> of a Role to repos. Also called an "agentdef".</td><td><span class="path">domain/agent.go:493-499</span></td></tr>
+      <tr><td><code>domain.AgentSession</code></td><td><b>One run</b> of that assignment.</td><td><span class="path">domain/control_plane.go:81-102</span></td></tr>
+      <tr><td><code>entity.Agent</code></td><td>A legacy issue-shaped record with roles named <code>polecat</code>/<code>witness</code>/<code>mayor</code>. <b>Not used by anything live.</b></td><td><span class="path">internal/entity/agent.go:42-66</span> (role constants at 12-19)</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Say which one you mean, every time. And if you find yourself in
+  <code>internal/entity</code> wondering why nothing calls it — that is expected.
+  Its doc comment claims to be the single source of truth for all downstream
+  packages (<span class="path">internal/entity/doc.go:7-9</span>), but
+  <code>grep -rl 'internal/entity"' --include='*.go' . | grep -v '^./internal/entity/'</code>
+  returns 12 files against 51 for <code>internal/types</code> — tests included; drop
+  those and it is 7 against 23. And the converters that build <code>entity</code>
+  values are not in <code>entity</code> at all: nine of them have no non-test caller,
+  three in <span class="path">internal/backend/fleet/entity_convert.go:112, 125, 308</span>
+  and six in <span class="path">internal/backend/mapping/</span>.
+  <b>Do not "wire up entity" as a side quest.</b></p>
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory: name the three storage tiers, one example of what
+    each holds, and which ones you may safely delete.</p>
+    <div class="answer">
+      <p><b>fleet-db</b> — shared truth: workspaces, repos, roles, agents, skills,
+      daemon profiles, issues. <b>Never</b> safe to delete; it is the only
+      authoritative tier.</p>
+      <p><b>Node-local</b> — where things are on this machine:
+      <code>~/.loom/state.json</code>, <code>stacks.json</code>, desktop
+      <code>local-settings.json</code>. Safe; regenerates.</p>
+      <p><b>Worktree-local</b> — materialized artifacts: <code>.agents/skills</code>,
+      which Loom owns and regenerates, plus the <code>"loom "</code>-prefixed hook
+      entries inside <code>.claude/settings.json</code> / <code>.codex/hooks.json</code>.
+      Those entries are all Loom rewrites; the rest of both files is not its to
+      restore.</p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="0005">
+    <div class="q" data-answer="3">
+      <p class="stem">You want to change the fields on a role. Which file do you
+      edit to change what is <em>stored</em>?</p>
+      <ul class="opts">
+        <li>A workspace YAML file that the daemon config loader parses</li>
+        <li>The <code>RoleConfig</code> struct tags in <code>internal/cli/config</code></li>
+        <li>The role record cached under the node-local <code>~/.loom</code> directory</li>
+        <li>The domain type, since roles are stored in fleet-db not on disk</li>
+      </ul>
+      <div class="why">Roles live in fleet-db. The YAML tags on
+      <code>RoleConfig</code> are a fossil from a pre-fleet-db era and no loom YAML
+      is parsed anywhere — which makes option two the trap this lesson exists to
+      defuse. <span class="path">internal/cli/config/project.go:236-246</span></div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <p class="stem">How does Loom represent an epic?</p>
+      <ul class="opts">
+        <li>A dedicated Epic domain type stored alongside Role and Agent</li>
+        <li>An ordinary issue whose <code>IssueType</code> field equals "epic"</li>
+        <li>An issue carrying the reserved label "epic" among its label set</li>
+        <li>A workspace-scoped grouping object that owns a list of task IDs</li>
+      </ul>
+      <div class="why">There is no Epic type, table, or service — just
+      <code>IssueType == "epic"</code>, with parent-child dependency edges doing the
+      containing. The label option is the sharp near-miss: labels are real and
+      load-bearing here, but for <em>routing</em>, not for epic-ness.
+      <span class="path">internal/cli/taskfilter.go:14-17</span></div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <p class="stem">A colleague's PR description says "the agent finished at
+      14:03". Which type are they almost certainly talking about?</p>
+      <ul class="opts">
+        <li><code>domain.Agent</code>, the assignment of a role to repos</li>
+        <li><code>entity.Agent</code>, the canonical issue-shaped agent record</li>
+        <li><code>domain.AgentSession</code>, a single run of an assignment</li>
+        <li>All three are the same object viewed at different layers</li>
+      </ul>
+      <div class="why">Only a <em>run</em> finishes at a time. The assignment is
+      long-lived, and <code>entity.Agent</code> is legacy with no live users. This
+      is exactly the ambiguity to flag in review rather than assume away.</div>
+    </div>
+  </div>
+
+  <div class="exercise">
+    <h3>Draw it, then find where it is wrong</h3>
+    <ol>
+      <li>Close this lesson. On paper, draw the object graph from memory: Workspace
+      at the root, and as many of its children as you can place. Then reopen and
+      compare — the gaps are your study list.</li>
+      <li>Open <code>internal/domain/repo.go</code> and read the first 25 lines.
+      The field comments explain that local checkout paths deliberately do
+      <em>not</em> live there. Given the three tiers, say which tier does hold them
+      and why that separation exists.</li>
+      <li>Verify the epic claim yourself: grep for other definitions of epic-ness
+      across <code>internal/</code>. Is <code>IsEpic</code> the only rule, or are
+      there competing ones?</li>
+      <li>Reaching back to <a href="0004-the-gate-is-the-spec.html">Lesson 04</a>:
+      find out whether the gate actually <em>enforces</em> this. Open
+      <code>.golangci.yml</code>, read the <code>files:</code> globs of the
+      <code>sdk-leaf</code> rule (<span class="path">.golangci.yml:83-92</span>),
+      and answer two things &mdash; is <code>internal/domain</code> in that list, and
+      what would the rule stop you doing in the packages that <em>are</em>?</li>
+    </ol>
+    <div class="verify">
+      <b>You succeeded when</b>
+      You can state, without looking, which tier holds a repo's local checkout path
+      and why it is not in fleet-db &mdash; and you can say why nothing in the gate
+      would stop you giving <code>internal/domain</code> an HTTP client. It is not in
+      <code>sdk-leaf</code>'s globs, nor in any other depguard rule; its leafness is a
+      convention held up by code review, not a machine-checked one. That gap is worth
+      remembering: <a href="0004-the-gate-is-the-spec.html">Lesson 04</a> taught that the
+      gate is the spec, and this is the boundary of that claim.
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><code>internal/domain/repo.go</code> — only about 25 lines of declarations,
+    but the field comments are unusually explicit about what deliberately does
+    <em>not</em> belong in the domain layer. It is the shortest way to absorb this
+    codebase's instinct for where a piece of state belongs.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0004-the-gate-is-the-spec.html"><span class="dir">Previous</span>The gate is the spec</a>
+    <a class="next" href="0006-anatomy-of-a-command.html"><span class="dir">Next</span>Anatomy of a command</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

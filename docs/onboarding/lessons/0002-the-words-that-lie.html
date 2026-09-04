@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>02. The words that lie — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 1 <span class="sep">/</span> Lesson 02 <span class="sep">/</span> Orientation</p>
+  <h1>The words that lie</h1>
+  <p class="standfirst">By the end of this lesson you can use this codebase's
+  overloaded terms precisely — and, more usefully, notice when a doc, a ticket, or
+  a colleague is using one of them loosely.</p>
+
+  <div class="meta">
+    <span><b>Skill</b> disambiguate a trap word before acting on it</span>
+    <span><b>Time</b> 30 min</span>
+    <span><b>Needs</b> <a href="0001-two-repos-one-system.html">Lesson 01</a></span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span></span>
+  </div>
+
+  <h2>Why this is lesson two and not lesson twenty</h2>
+
+  <p>Most onboarding treats vocabulary as a glossary you skim once. Here it is the
+  load-bearing lesson, for a specific structural reason: <b>this codebase reuses
+  ordinary English words as precise domain terms.</b> A wrong assumption about a
+  type produces a compile error. A wrong assumption about a <em>word</em> produces
+  a confident, fluent, wrong sentence — in a design doc, in a ticket, in a PR
+  description — that nobody catches, because it reads perfectly well.</p>
+
+  <p>The repo knows this about itself. <code>AGENTS.md</code> opens by telling you
+  to read the glossary <em>first</em>, and lists the words it considers dangerous:
+  <code>loom</code>, <code>flue</code>, <code>fleet</code>, <code>aether</code>,
+  <code>codex</code>, <code>daytona</code>, <code>atlas</code>, <code>claude</code>.
+  That instruction is not boilerplate — it is a scar.
+  <span class="path">AGENTS.md:5-10</span></p>
+
+  <div class="callout key">
+    <span class="label">The one idea</span>
+    <p>When you meet one of these words, you are not reading a description — you
+    are reading a <b>claim about which of several mechanisms is involved</b>.
+    Resolve which one before you act, and never resolve it by guessing from
+    context.</p>
+  </div>
+
+  <h2>How this team writes definitions</h2>
+
+  <p>Notice the format used in <code>CONTEXT.md</code>. Every term is defined and
+  then followed by the words you must <em>not</em> use for it:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> CONTEXT.md:7-9</figcaption>
+<pre><code>**Repository Set**:
+The exact collection of repository names selected as the preferred working
+context for a Task. It determines what appears in a TaskRun Root, but is not
+an authorization or filesystem-isolation boundary; repository groups are
+expanded to exact names before being stored.
+_Avoid_: Workspace, repository scope, repo allowlist</code></pre>
+  </figure>
+
+  <p>That <code>_Avoid_</code> line is doing real work. It is not style guidance —
+  it is a list of the wrong mental models people actually brought to this concept,
+  written down so the next person does not bring them too. All 21 terms in
+  <code>CONTEXT.md</code> carry one — <code>grep -c '^_Avoid_' CONTEXT.md</code>
+  returns 21 — and no rule anywhere says they must, so the convention holds by
+  consistency alone. Match it when you add a term.
+  <span class="path">CONTEXT.md:7-91</span></p>
+
+  <aside class="sidenote">Read the <code>_Avoid_</code> lines as a fossil record of
+  past confusion. "Avoid: repo allowlist" tells you that someone once assumed
+  Repository Set was a permission boundary — and the definition explicitly says it
+  is not one.</aside>
+
+  <h2>The four worst offenders</h2>
+
+  <h3>1. <code>skill</code> — one word, two unrelated mechanisms</h3>
+
+  <p>A <b>skill</b> is a document entity: a SKILL.md body plus optional text files,
+  stored in the workspace and loaded into an agent's worktree so the agent can use
+  it while working.</p>
+
+  <p>A role's config also has a <code>skills:</code> field. That field is <b>not a
+  list of skills</b>. It is a task-routing filter whose tag strings are matched
+  against issue labels to score which tasks the role pulls.</p>
+
+  <div class="callout trap">
+    <span class="label">Trap</span>
+    <p>Same word, <em>no shared mechanism whatsoever</em>. Adding a document named
+    <code>review.md</code> does not make a role with <code>skills: [review]</code>
+    load it, and does not change task routing. Say <b>skill</b> for the document
+    and <b>role skills</b> (or routing tags) for the filter — the glossary makes
+    that naming an instruction, not a suggestion.
+    <span class="path">docs/loom-glossary.md:21-27</span></p>
+  </div>
+
+  <p>The related term is <b>skill scope</b>: workspace-scoped skills load for every
+  loom-managed agent in the workspace; role-scoped skills load only for that role's
+  agents and <em>shadow</em> a same-named workspace skill. Being in scope is what
+  makes a skill load — <b>there is no separate attach list</b>. If you go looking
+  for the place where skills get attached to an agent, you will not find it,
+  because scope is the whole mechanism.
+  <span class="path">docs/loom-glossary.md:28-31</span></p>
+
+  <h3>2. <code>blocked</code> — deliberately two things</h3>
+
+  <p>This is the one that most rewards care, because the ambiguity is
+  <em>intentional and was defended</em>:</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Sense</th><th>What it is</th><th>How you recognise it</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>Status</b></td>
+        <td>The literal <code>blocked</code> issue status. A worker parked the task and declared a blocker, so a <b>human must act</b>. On the wire, in <code>PatchIssueRequest</code>, and in fleet-db.</td>
+        <td>Stands alone: "this issue is blocked".</td>
+      </tr>
+      <tr>
+        <td><b>Dependency</b></td>
+        <td>An issue that cannot start because issues it depends on are still open. Derived from <code>blocked_by</code> edges; rendered by <code>BlockedBadge</code>.</td>
+        <td>Always names what is blocking: "Blocked by 3 issues".</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p><b>Nothing translates between them.</b> The disambiguator is grammatical, and
+  the team chose that over renaming: the status sense was displayed as "Stuck" for
+  a while, and that was deliberately reversed. So do not helpfully introduce a
+  third word in your PR — that argument has already been had.
+  <span class="path">docs/loom-glossary.md:124-138</span></p>
+
+  <h3>3. <code>stuck</code> — a third thing that borrows the word</h3>
+
+  <p><code>task.stuck</code> (<code>internal/events</code>,
+  <code>TaskStuckData</code>) is a <em>daemon event</em> for a task that failed
+  repeatedly across consecutive auto-mode invocations and was skipped so the loop
+  could make progress elsewhere.</p>
+
+  <div class="callout key">
+    <span class="label">The distinction worth memorising</span>
+    <p><b>The loop gave up; the agent declared nothing.</b> That is what separates
+    <code>stuck</code> from <code>blocked</code>-the-status. It is not an issue
+    status, it does not set one, and <code>AgentState "stuck"</code> in the web UI
+    is this sense — not either sense of blocked.
+    <span class="path">docs/loom-glossary.md:145-149</span></p>
+  </div>
+
+  <h3>4. <code>stage</code> vs <code>phase</code> — derived vs stored</h3>
+
+  <p>These sound like synonyms and are opposites in the way that matters:</p>
+
+  <ul>
+    <li><b>Stage</b> — Journey vocabulary, derived rather than stored.
+    <b>Nothing stores a stage.</b> It is computed from an issue's event history: a
+    stage is a contiguous run of that history with the same status and the same
+    owner. Because the window is bounded, a Journey shows the stages that window
+    can support — <em>not necessarily the issue's whole life</em>.
+    <br><em>Note:</em> the repo glossary still calls this "UI-local", but that has
+    drifted — a server-side journey model now computes the same spans
+    (<span class="path">internal/webui/service/journey.go:292</span>). The
+    load-bearing half — nothing <em>stores</em> a stage — still holds.</li>
+    <li><b>Phase</b> — a runtime concept <em>with storage behind it</em>: the log
+    of one stretch of agent work, <code>planning</code> or
+    <code>implementation</code>, written to
+    <code>tasks/&lt;id&gt;/&lt;phase&gt;.log</code> and surfaced as its own tab.</li>
+  </ul>
+
+  <p>The compression: <b>a phase is something an agent ran; a stage is something
+  the issue was.</b> <span class="path">docs/loom-glossary.md:156-166</span></p>
+
+  <h2>The dangerous ones: words that sound like guarantees</h2>
+
+  <div class="callout trap">
+    <span class="label">Three things that are not a security boundary</span>
+    <p><b>sandbox</b> — almost always the L1 workflow-bundle container. It contains
+    the <em>DriverRun bundle</em> only. The TaskRun leaf that runs the LLM and edits
+    your code is not containerized on any local path.</p>
+    <p><b>trust level</b> (<code>trusted</code>/<code>untrusted</code>) —
+    primarily an <em>admission</em> decision: Loom refuses to launch an untrusted
+    bundle outside an isolating launcher. It does not confine the agent process
+    that edits your code. <b>One narrow exception</b>: for a containerized
+    DriverRun with no explicit egress setting, trust level selects the network
+    mode — trusted resolves to <code>all</code>, anything else to
+    <code>serve-only</code>, failing closed.
+    <span class="path">internal/driver/sandbox/egress.go:95-105</span></p>
+    <p><b><code>read_only</code> / <code>allowed_tools</code> /
+    <code>denied_tools</code></b> — backend tool and approval policy. Real
+    restrictions where the backend has a mechanism, and a <em>prompt preamble</em>
+    where it does not. Never an OS boundary.</p>
+    <p><span class="path">docs/loom-glossary.md:102-121</span></p>
+  </div>
+
+  <p>This is the highest-stakes group in the glossary. Each of these words carries
+  an industry meaning that implies containment, and here none of them do. If you
+  design a feature on the assumption that <code>read_only</code> stops an agent
+  from writing, you will ship something that does not do what its own config says.</p>
+
+  <h2>The practice: the terminology handshake</h2>
+
+  <p>Knowing the definitions is not the skill. The skill is a habit
+  <code>AGENTS.md</code> makes mandatory: <b>before running anything slow or
+  irreversible</b>, echo the request back as coordinates —
+  <em>(depth, realness, provisioning, polarity, target)</em> — disambiguate any
+  trap word instead of guessing, and state the evidence class of what you ran:</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Evidence class</th><th>Means</th></tr></thead>
+    <tbody>
+      <tr><td><code>deterministic</code></td><td>Orchestration only.</td></tr>
+      <tr><td><code>real</code></td><td>A real local backend.</td></tr>
+      <tr><td><code>live</code></td><td>Reaches a real external or paid service. Costs money, may mutate external state.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p class="path">AGENTS.md:29-33</p>
+
+  <p>And if a real or live path is blocked, you report <b>blocked/unverified</b>.
+  You never fabricate state as evidence. The trap words in this axis are
+  <code>local</code>, <code>live</code>, <code>real</code>, <code>verify</code>,
+  and <code>gate</code>.
+  <span class="path">AGENTS.md:22, 33-34</span></p>
+
+  <div class="callout trap">
+    <span class="label">Known gap — do not hunt for this file</span>
+    <p><code>AGENTS.md</code> points twice at <code>docs/testing-terminology.md</code>
+    as the canonical map of this vocabulary <span class="path">AGENTS.md:20, 35</span>.
+    <b>It does not exist</b> at <code>ce4df56fb</code> —
+    <code>git grep -in realness</code> matches only <code>AGENTS.md</code> itself,
+    at lines 21 and 30. The axis names are reliable; the detailed matrix is
+    unwritten. This is your first live example of the Lesson 01
+    trap: a doc asserting something the repo does not contain.</p>
+  </div>
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory: give the one-line compression that separates a
+    <em>stage</em> from a <em>phase</em>, and say which one has storage behind it.</p>
+    <div class="answer">
+      <p>A <b>phase</b> is something an agent <em>ran</em>; a <b>stage</b> is
+      something the issue <em>was</em>.</p>
+      <p>The phase has storage — <code>tasks/&lt;id&gt;/&lt;phase&gt;.log</code>.
+      The stage is derived on the fly from a bounded window of the issue's event
+      history and is stored nowhere.
+      <span class="path">docs/loom-glossary.md:156-166</span></p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="0002">
+    <div class="q" data-answer="3">
+      <p class="stem">A ticket says "the agent is stuck on FLEET-42". Which reading
+      does the codebase's vocabulary actually support?</p>
+      <ul class="opts">
+        <li>The issue carries the literal blocked status and needs a human</li>
+        <li>The issue cannot start because its dependencies remain open</li>
+        <li>The worker declared a blocker and parked the task for review</li>
+        <li>The daemon skipped the task after repeated consecutive failures</li>
+      </ul>
+      <div class="why"><code>stuck</code> is the daemon's word: the loop gave up so
+      it could progress elsewhere. The agent declared nothing. The first and third
+      options both describe <code>blocked</code>-the-status, and the second
+      describes <code>blocked</code>-the-dependency — three plausible readings the
+      word does not mean. <span class="path">docs/loom-glossary.md:145-149</span></div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <p class="stem">A role's config contains <code>skills: [review]</code>. What
+      does that field do?</p>
+      <ul class="opts">
+        <li>Matches its tag strings against issue labels to score task routing</li>
+        <li>Loads the workspace skill document named review into the worktree</li>
+        <li>Grants the role permission to run review-scoped tools and commands</li>
+        <li>Attaches the review skill so the role shadows the workspace version</li>
+      </ul>
+      <div class="why">It is a routing filter, sharing nothing with the skill
+      document mechanism but the word. The fourth option is the sharpest near-miss:
+      shadowing is real, but it comes from <em>skill scope</em>, not from this
+      field. <span class="path">docs/loom-glossary.md:21-31</span></div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <p class="stem">Which of these bounds what an already-running agent process
+      can reach on the host?</p>
+      <ul class="opts">
+        <li>Setting the driver trust level for that run to untrusted</li>
+        <li>Setting <code>read_only</code> on the role's backend tool policy</li>
+        <li>None of these — each is an admission or policy decision only</li>
+        <li>Running the agent under the L1 workflow-bundle container sandbox</li>
+      </ul>
+      <div class="why">Trust level is admission, <code>read_only</code> is backend
+      policy (sometimes only a prompt preamble), and the sandbox contains the
+      DriverRun bundle — not the TaskRun leaf that edits code. Note the question
+      says <em>agent process</em>: trust level does bound the network of a
+      containerized DriverRun by selecting its egress mode, but that is a different
+      thing from the agent, and it is the only place trust does any bounding at all.
+      <span class="path">docs/loom-glossary.md:102-121; internal/driver/sandbox/egress.go:95-105</span></div>
+    </div>
+  </div>
+
+  <div class="exercise">
+    <h3>Hunt a loose usage, then run a handshake</h3>
+    <ol>
+      <li>Pick one trap word — <code>skill</code>, <code>blocked</code>, or
+      <code>sandbox</code> — and grep for it across <code>docs/</code> in loomcli.</li>
+      <li>Find <b>one</b> occurrence where you cannot tell which sense is meant
+      from the sentence alone. Write down the <code>path:line</code> and both
+      readings it could carry.</li>
+      <li>Now practise the handshake on a task you might actually be given: <em>"verify
+      the claim loop works locally."</em> Write out the coordinates
+      <em>(depth, realness, provisioning, polarity, target)</em> you would echo
+      back, and name which trap words in that sentence you would refuse to guess at.</li>
+      <li>Reaching back to <a href="0001-two-repos-one-system.html">Lesson 01</a>:
+      for the sense of <code>blocked</code> that lives in fleet-db, which repo
+      would you expect to hold its definition — and why does that follow from
+      "loomcli orchestrates, fleet-db remembers"?</li>
+    </ol>
+    <div class="verify">
+      <b>You succeeded when</b>
+      You can state both readings of your ambiguous line without looking anything
+      up, and your handshake names at least two words in "verify the claim loop
+      works locally" as needing disambiguation. (<code>locally</code> and
+      <code>verify</code> are both on the trap list; <code>claim</code> is worth
+      questioning too.)
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><code>docs/loom-glossary.md</code> — all 176 lines, in one sitting. It is
+    short, it is unusually well written, and it is the single highest
+    return-on-time document in either repo. Keep
+    <a href="../reference/glossary.html">the glossary reference card</a> open
+    beside it; that card is the compressed version you will actually come back to.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0001-two-repos-one-system.html"><span class="dir">Previous</span>Two repos, one system</a>
+    <a class="next" href="0003-run-it-without-breaking-anyone.html"><span class="dir">Next</span>Run it without breaking anyone</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

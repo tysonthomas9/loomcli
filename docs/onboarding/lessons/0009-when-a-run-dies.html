@@ -1,0 +1,562 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>09. When a run dies — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 3 <span class="sep">/</span> Lesson 09 <span class="sep">/</span> Runtime</p>
+  <h1>When a run dies</h1>
+  <p class="standfirst">Lesson 08 got a task claimed. This one is about everything
+  that happens when the agent holding it crashes, hangs, runs for four hours, or
+  exits zero without finishing. By the end you can predict where the task lands.</p>
+
+  <div class="meta">
+    <span><b>Skill</b> predict what happens to a task when its agent run fails</span>
+    <span><b>Time</b> 35 min</span>
+    <span><b>Needs</b> <a href="0008-claiming-without-collisions.html">08</a></span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span> <span class="repo fleet">fleet-db</span></span>
+  </div>
+
+  <h2>Why this exists</h2>
+
+  <p>An LLM run is not a function call. It can wedge, loop, exhaust a context
+  window, print nothing for an hour while thinking, or announce it is finished and
+  then exit with the task still claimed. None of those are exceptional; all of them
+  happen in a week of production. So the question the daemon has to answer is not
+  "did it work" but <b>"what is true about the task now"</b> — and that answer can
+  never come from the agent's prompt, because the failure modes that matter are
+  exactly the ones where the agent stopped being able to tell you anything.</p>
+
+  <div class="callout key">
+    <span class="label">The one idea</span>
+    <p>The supervisor, not the agent, owns every state transition that matters.
+    The agent produces text; the supervisor decides what that means for the task,
+    the session record, and the retry budget. A run that dies mid-turn must not
+    leave a task ambiguous — so the code buys unambiguity with <em>ordering</em>.</p>
+  </div>
+
+  <h2>The exit sequence, and why its order is load-bearing</h2>
+
+  <p>Everything in this lesson hangs off nineteen lines. After
+  <code>cmd.Wait()</code> returns, the supervisor runs this — in this order,
+  every time:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/cli/daemon/supervisor/supervisor.go:817-835</figcaption>
+<pre><code>	exitCode := s.waitForAgent(ap)
+	s.classifyAgentExit(ap, exitCode)
+	// …
+	s.recordTaskExitForQuarantine(ap, exitCode)
+	// Completion hooks run while the session id, claim, and transcript still
+	// exist, and before finalize/checkpoint/recovery decide the run's fate: a
+	// failed hook write demotes exitCode so the owned task is reopened.
+	exitCode = s.runCompletionHooks(ap, exitCode)
+	s.finalizeAgentSession(ap, exitCode)
+	s.handleAgentCheckpoint(ap, exitCode)
+	s.postMortemRecovery(ap, exitCode)
+	// Sweep AFTER recovery reset the task to open, so the quarantine write
+	// transitions open→blocked.
+	s.sweepQuarantineDue(ap)</code></pre>
+  </figure>
+
+  <ol class="trace">
+    <li>
+      <span class="hop-file">supervisor.go:818 → classify.go:17</span>
+      <span class="hop-what"><b>Classify.</b> Reads the worktree
+      <code>.agent.lock</code> <em>before</em> recovery deletes it. Branches, in
+      order: a run-duration kill (from the stop reason); no task and exit 0 or a
+      watchdog stop → <code>NoWork</code>; non-zero → classify the log tail; exit 0
+      with the fleet claim still held → <code>IncompleteRun</code>; otherwise clean
+      success. <span class="path">classify.go:45-66</span></span>
+    </li>
+    <li>
+      <span class="hop-file">supervisor.go:825 → quarantine.go:136</span>
+      <span class="hop-what"><b>Ledger the kill</b>, with the <em>factual</em> exit
+      code. This is the only point where the classified error, the lock file, and
+      the fleet session id are all still observable together.</span>
+    </li>
+    <li>
+      <span class="hop-file">supervisor.go:829 → session_finalize.go:241</span>
+      <span class="hop-what"><b>Completion hooks.</b> The supervisor performs the
+      agent's issue writes. A failure here <b>rewrites <code>exitCode</code></b> for
+      everything below it.</span>
+    </li>
+    <li>
+      <span class="hop-file">supervisor.go:830-831</span>
+      <span class="hop-what"><b>Finalize and checkpoint.</b> The session record
+      lands on disk and in fleet-db; a non-zero exit (or an
+      <code>IncompleteRun</code>) saves a checkpoint of the worktree diff before
+      recovery can touch it. <span class="path">classify.go:224-247</span></span>
+    </li>
+    <li>
+      <span class="hop-file">supervisor.go:832 → internal/cli/agent/recover.go:186</span>
+      <span class="hop-what"><b>Post-mortem recovery.</b> Kill survivors, release
+      the fleet issue lock, and — on a non-zero exit — reset the task to
+      <code>open</code>. That reset is conditional: <code>resetTask</code> reads the
+      current status first and refuses to stomp <code>review</code>,
+      <code>closed</code>, or a quarantined <code>blocked</code>.
+      <span class="path">internal/cli/agent/recover_helpers.go:149-165</span></span>
+    </li>
+    <li>
+      <span class="hop-file">supervisor.go:835 → quarantine.go:319</span>
+      <span class="hop-what"><b>Sweep quarantine</b>, deliberately last: recovery
+      has just put the task back to <code>open</code>, so the quarantine write is a
+      legal <code>open→blocked</code> transition rather than a fight with
+      <code>in_progress</code>.</span>
+    </li>
+  </ol>
+
+  <p>There is no transaction against the issue store. Sequence <em>is</em> the
+  crash-safety mechanism, and each of those comments is a bug that was paid for
+  once.</p>
+
+  <h2>Tier one: the recovery ladder</h2>
+
+  <p>Next cycle, before anything is claimed, <code>preFlightSetup</code> asks a
+  different question: what did the last crash leave behind? The worktree
+  <code>.agent.lock</code> is the oracle — a surviving lock plus a <em>dead</em> PID
+  is a crash remnant. Three answers, escalating:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/cli/daemon/supervisor/resume_recovery.go:52-68</figcaption>
+<pre><code>	switch {
+	case fails &gt; maxResumeFailures:
+		// resume (×maxResumeFailures) + checkpoint (×1) both exhausted → stop
+		// retrying this task and claim a fresh one.
+		slog.Warn("recovery exhausted; cold-starting a fresh task",
+			"worktree", ap.Entry.Worktree, "task_id", info.TaskID, "failures", fails)
+		return "", recoverCold
+	case fails == maxResumeFailures:
+		// `--resume` kept failing → one checkpoint retry of the SAME task.
+		return info.TaskID, recoverCheckpoint
+	case info.ClaudeSessionID != "":
+		return info.TaskID, recoverResume
+	default:
+		// A task remnant with no captured session can't be `--resume`d; that is
+		// out of scope for resume-recovery — cold-start.
+		return "", recoverCold
+	}</code></pre>
+  </figure>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th></th><th>resume</th><th>checkpoint</th><th>cold</th></tr></thead>
+    <tbody>
+      <tr><td><b>When</b></td><td>Crash remnant with a carried session id, under <code>maxResumeFailures</code> (2)</td><td>Exactly at the ceiling — one retry of the same task</td><td>Beyond it, no session id, no lock, or the task is past its resume TTL</td></tr>
+      <tr><td><b>Task</b></td><td>Re-claims the same task</td><td>Re-claims the same task</td><td>Claims a fresh one</td></tr>
+      <tr><td><b>Lock</b></td><td>Preserved, carrying the session id</td><td>Preserved, session id cleared</td><td>Force-released</td></tr>
+      <tr><td><b>Worktree</b></td><td>Untouched</td><td>Untouched — the checkpoint needs the diff</td><td><b>git clean</b></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Counting is per-cycle and persistent: <code>recordResumeOutcome</code> runs
+  after every supervised run, clears <code>ResumeFailures</code> on a clean exit and
+  advances it otherwise, and ignores cycles that were not recoveries at all.
+  <span class="path">resume_recovery.go:120-131</span></p>
+
+  <aside class="sidenote">The resume TTL defaults to 30 minutes
+  (<code>LOOM_RESUME_TTL</code> overrides it) — a carried backend session older than
+  that is not worth resuming.
+  <span class="path">internal/cli/agent/daemon_resume.go:12-27</span></aside>
+
+  <div class="callout trap">
+    <span class="label">Trap — "recovery" sounds like it recovers things</span>
+    <p>The cold branch calls <code>s.recoverAgent(ap, 0, false)</code>, and that
+    <code>false</code> is the destructive flag. Inside
+    <code>RecoverWorktree</code>, the final step is
+    <code>cleanUntrackedFiles(worktreePath, true)</code>, whose own comment says it
+    excludes only <code>cli.ProtectedRuntimePaths</code>, so "everything the turn
+    produced but had not committed yet — new files, scratch notes, generated
+    fixtures — is exactly what it deletes."</p>
+    <p>That is correct for a crash you are abandoning and catastrophic for a run you
+    meant to continue, which is precisely why <code>incomplete</code> is an explicit
+    argument rather than a read of the last classification.
+    <span class="path">supervisor.go:440-448</span>,
+    <span class="path">internal/cli/agent/recover.go:250-260</span></p>
+  </div>
+
+  <h2>Tier two: the policy table decides, the supervisor counts</h2>
+
+  <p>Classification produces an <code>agenterr.Outcome</code> — a single value that
+  is <em>either</em> a harness error class (<code>AuthFailure</code>,
+  <code>RateLimited</code>, <code>Timeout</code>, <code>ContextOverflow</code>, …)
+  <em>or</em> a loom domain outcome (<code>NoWork</code>,
+  <code>LockConflict</code>, <code>SpawnFailure</code>,
+  <code>BackendUnavailable</code>, <code>CompletionHookFailure</code>,
+  <code>IncompleteRun</code>). Exactly one side is meaningful, and that value is the
+  key into one table. <span class="path">internal/agenterr/outcome.go:12-20, 41-53</span></p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/agentpolicy/policy.go:19-26</figcaption>
+<pre><code>const (
+	Retry          Decision = iota // restart; counts toward the layer's retry budget
+	RetryUncounted                 // restart; does NOT erode the budget (rate-limit, no-work)
+	Block                          // budget exhausted: fixed-interval re-attempt instead of giving up
+	Failover                       // try the next configured backend
+	FastFail                       // deterministic failure: stop now, surface as failed
+	StopFatal                      // auth/billing: stop; needs human intervention
+)</code></pre>
+  </figure>
+
+  <p>The <code>Disposition</code> the table returns carries more than a verdict: a
+  backoff <em>bucket</em> (not a duration), whether to honour the harness's
+  <code>Retry-After</code> hint, what a counted retry becomes
+  <code>OnExhaustion</code>, and a <code>BlockBudget</code> — the number of block
+  cycles without progress before an agent escalates to <code>FastFail</code>.
+  <span class="path">internal/agentpolicy/policy.go:62-76</span></p>
+
+  <h3>The split, stated in both files</h3>
+
+  <p>The package doc says the layers "keep their own attempt counters and configured
+  backoff values; they consult this table only for the verdict + the backoff bucket
+  to use" <span class="path">internal/agentpolicy/policy.go:1-7</span>. The
+  supervisor's side says the same thing from the other end: "The table owns the
+  per-class verdict; this layer owns its counters
+  (RestartCount/RateRetryCount/NoWorkCount/BlockCount) and its configured budgets."
+  <span class="path">internal/cli/daemon/supervisor/restart.go:30-34</span></p>
+
+  <p>So <code>shouldRestart</code> reads as a switch over
+  <code>agentpolicy.Decide(outcome).Decision</code> with one apply-function per arm,
+  and the arithmetic lives entirely on the supervisor side —
+  <code>applyCountedRestart</code> increments <code>RestartCount</code>, compares it
+  to the configured <code>max_retries</code>, and only then consults
+  <code>d.OnExhaustion</code> and <code>d.BlockBudget</code>.
+  <span class="path">restart.go:35-93, 168-198</span></p>
+
+  <div class="callout trap">
+    <span class="label">Trap — <code>shouldRestart</code> returning true does not mean healthy</span>
+    <p>A blocked agent returns <b>true</b>: <code>applyMaxRetriesBlock</code> resets
+    <code>RestartCount</code>, increments <code>BlockCount</code>, sets
+    <code>StopReasonMaxRetriesBlocked</code>, and lets the goroutine keep retrying
+    on a fixed 60-second interval rather than being abandoned. False is the loaded
+    direction too: <code>StopFatal</code>, <code>FastFail</code> (a spent
+    <code>BlockBudget</code> included), an exhausted <code>Failover</code>, the
+    <code>max_retries == 0</code> opt-out, a counted class whose
+    <code>OnExhaustion</code> is neither <code>Block</code> nor <code>FastFail</code>
+    — and <code>stopAfterEphemeralTask</code>, the one case where false means an
+    ephemeral agent finished its single task cleanly. Read <code>StopReason</code>,
+    not the boolean.
+    <span class="path">restart.go:22-28, 41-43, 98-108, 183-198, 201-219</span></p>
+  </div>
+
+  <p>One worked example, because it is the one people get wrong.
+  <code>IncompleteRun</code> — exit 0, claim never released — is a <b>counted</b>
+  retry, while <code>NoWork</code> is uncounted. The table explains itself: "an
+  agent that keeps handing back unfinished turns without ever signaling completion
+  is the exact spiral max_retries exists to catch, and the clean-success reset would
+  otherwise zero the budget every cycle."
+  <span class="path">internal/agentpolicy/policy.go:159-169</span></p>
+
+  <h2>Tier three: three ceilings, each blind to what the others catch</h2>
+
+  <p>Nothing in the two tiers above bounds a run that never exits. Three separate
+  mechanisms do, and none of them subsumes another.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th></th><th>Silence watchdog</th><th>Run-duration cap</th><th>Task quarantine</th></tr></thead>
+    <tbody>
+      <tr><td><b>Asks</b></td><td>Has it said anything lately?</td><td>How long has this run been alive?</td><td>Has this <em>task</em> ever made progress?</td></tr>
+      <tr><td><b>Scope</b></td><td>One run</td><td>One run</td><td>One task, across agents</td></tr>
+      <tr><td><b>Default</b></td><td>900 s of silence</td><td>4 hours wall clock</td><td>3 consecutive no-progress kills</td></tr>
+      <tr><td><b>Suspended by a pending human prompt?</b></td><td>Yes, bounded at 900 s</td><td><b>No, deliberately</b></td><td>n/a</td></tr>
+      <tr><td><b>Blind to</b></td><td>An agent that chatters forever</td><td>Anything shorter than the cap</td><td>Everything inside one run</td></tr>
+      <tr><td><b>Where</b></td><td><span class="path">health.go:236-258</span></td><td><span class="path">health.go:280-303</span></td><td><span class="path">quarantine.go:136-173</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p><b>The silence watchdog</b> takes the freshest of three liveness signals — the
+  live PTY heartbeat delivered over agent IPC, the session transcript's mtime, and
+  the stdout log's mtime — and kills if the newest is older than
+  <code>output_timeout</code>. Tier 0 exists because the interactive
+  <code>RunTurn</code> path updates neither file, so a busy agent would look silent.
+  <span class="path">health.go:143-157</span></p>
+
+  <p>But silence is only evidence of a hang when nobody asked the agent to be quiet.
+  A harness parked on a dialog emits no output by design, so
+  <code>applyIdleKill</code> suspends itself while an interactive request is
+  outstanding. The signal is a <b>counter, not a flag</b> — with a boolean, the first
+  answer in a multi-question dialog would clear the suspension underneath a still
+  waiting agent — and the suspension carries its own 15-minute bound anchored to the
+  0→1 transition, so a harness that re-prompts on a timer cannot hold the watchdog
+  off one question at a time. <span class="path">input_wait.go:21-44, 109-115, 146-161</span></p>
+
+  <p><b>The run-duration cap</b> exists because of that suspension. Its comment is
+  explicit that the asymmetry is the point: <code>applyIdleKill</code> suspends
+  during a wait, "so during a wait this cap is the only bound left standing over the
+  run; suspending it too would rebuild, one layer up, exactly the open-ended
+  hold-off that inputWaitMax exists to prevent."
+  <span class="path">health.go:267-275</span> It lives in the supervisor rather than
+  the child's context on the same logic — "a wedged agent is precisely the one that
+  may never observe its own cancellation."
+  <span class="path">run_duration.go:25-29</span></p>
+
+  <div class="callout trap">
+    <span class="label">Trap — why a four-hour kill gets its own StopReason</span>
+    <p>It would be tidy to fold the duration kill into <code>StopReasonWatchdog</code>.
+    It is also wrong, and <code>classifyAgentExit</code> shows why: a watchdog stop
+    with no claimed task lands in the <code>NoWork</code> arm, and
+    <code>NoWork</code>'s disposition is an <b>uncounted</b> retry on a fixed poll
+    interval. The cap would then fire every four hours forever and change nothing.
+    So <code>StopReasonRunDurationExceeded</code> is checked first, before every
+    exit-shaped branch, and classified as <code>Timeout</code> — counted, on the
+    timeout backoff, and quarantine-eligible.
+    <span class="path">classify.go:42-48, 86-119</span>,
+    <span class="path">types.go:102-112</span></p>
+  </div>
+
+  <p><b>Task quarantine</b> catches what neither run-scoped ceiling can see: a
+  backend that silently stalls, gets killed, has its task reset to <code>open</code>
+  by recovery, and is immediately re-picked by a sibling — an infinite boomerang in
+  which every individual run looks like an ordinary timeout. The ledger counts
+  consecutive quarantine-eligible kills <em>per task, across agents</em>, and evicts
+  the record the moment the task shows progress (a clean exit, a new commit, or a
+  changed design/notes hash). At the threshold, the sweep writes
+  <code>blocked</code> + unassigned + the <code>loom:quarantined</code> label + a
+  kill-timeline comment. <span class="path">quarantine.go:22-34, 152-173, 444-466</span></p>
+
+  <p>Eligibility is declared in the policy seat and counted here — the same split as
+  <code>BlockBudget</code>. Domain outcomes are never eligible, on the grounds that
+  they are coordination signals rather than task-fault; <code>IncompleteRun</code> is
+  the instructive case, since it neither increments the ledger nor resets it.
+  <span class="path">internal/agentpolicy/policy.go:119-141</span>,
+  <span class="path">quarantine.go:152-162</span></p>
+
+  <h2>The on_complete pipeline, and the demotion</h2>
+
+  <p><span class="repo loom">loomcli</span> A clean, self-concluded, task-bearing
+  run is the only shape that earns hooks — <code>completionHookTarget</code> refuses
+  a non-zero exit, a classified error, a yield, and any stop reason meaning the turn
+  was cut short. <span class="path">session_finalize.go:220-229, 404-438</span></p>
+
+  <p>The vocabulary is closed on purpose — agent definitions are remotely writable
+  control-plane data, so "accepting an executable path or shell string would be
+  daemon-host code execution." Seven actions:
+  <code>comment</code>, <code>write_design</code>, <code>add_label</code>,
+  <code>remove_label</code>, <code>set_status</code>, <code>close</code>,
+  <code>cycle</code>. <span class="path">internal/domain/agent.go:42-46, 209-217</span>
+  <span class="repo fleet">fleet-db</span> mirrors the same seven in
+  <span class="path">internal/models/agent.go:150-155</span>; when you change one,
+  change the other.</p>
+
+  <p><code>executeCompletionHooks</code> runs them in stored order, stops at the
+  first error, and re-validates the pipeline before executing it rather than
+  silently reordering a definition written by an older peer. The rule it enforces is
+  <b>write before stamp</b>: every body write (<code>comment</code>,
+  <code>write_design</code>) precedes every stamp (<code>add_label</code>,
+  <code>remove_label</code>, <code>set_status</code>, <code>cycle</code>), so a
+  routing label is never observable without the artifact it certifies.
+  <span class="path">session_finalize.go:441-455</span>,
+  <span class="path">internal/domain/agent.go:261-268</span></p>
+
+  <p>And then the part that makes this a lesson about failure:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/cli/daemon/supervisor/session_finalize.go:771-781</figcaption>
+<pre><code>// markCompletionHookFailure converts the clean run into a synthetic failure so
+// session finalize, the checkpoint, and post-mortem recovery all see a failed
+// run and the owned task returns to open for a bounded retry.
+func (s *Supervisor) markCompletionHookFailure(ap *AgentProcess, cause error) {
+	ap.Mu.Lock()
+	defer ap.Mu.Unlock()
+	ap.LastExitCode = -1
+	ap.LastNoWork = false
+	ap.LastError = &amp;agenterr.AgentError{
+		Class:     agenterr.OutcomeFromDomain(agenterr.CompletionHookFailureOutcome),
+		ExitCode:  -1,</code></pre>
+  </figure>
+
+  <p>The agent did everything right. One label write failed. The whole run is
+  demoted, the task goes back on the queue, and the retry is bounded by the same
+  policy table as any other failure — <code>CompletionHookFailure</code> is a counted
+  retry escalating to a capped block, because a transient write error clears and a
+  permanent one must stop rather than spin.
+  <span class="path">internal/agentpolicy/policy.go:153-158</span></p>
+
+  <div class="callout trap">
+    <span class="label">Trap — the events stream and the session status disagree, by design</span>
+    <p>The <code>AgentStopped</code> process event is emitted inside
+    <code>waitForAgent</code>, carrying the <em>factual</em> exit code — which for a
+    hook failure is <b>0</b>. The demotion happens two calls later. So the event
+    says the run succeeded and the session record says <code>failed</code> with
+    class <code>CompletionHookFailure</code>, and both are correct. Debug hook
+    failures via <code>last_error_class</code>, never via the event.
+    <span class="path">spawn.go:516-518</span>,
+    <span class="path">session_finalize.go:238-240</span></p>
+  </div>
+
+  <aside class="sidenote">Where failing closed would create an unbreakable loop, the
+  code skips loudly instead: hooks configured with <em>no issue backend at all</em>
+  log a warning and skip, because "no retry can conjure a backend: demoting would
+  only reopen the task and loop until the agent's block budget is gone."
+  <span class="path">session_finalize.go:412-421</span></aside>
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory: name the three independent ceilings on a single
+    run. For each, say what it is blind to, and say which one a pending human prompt
+    suspends.</p>
+    <div class="answer">
+      <p><b>Silence watchdog</b> — no liveness signal newer than
+      <code>output_timeout</code> (default 900 s) across three tiers: IPC heartbeat,
+      transcript mtime, log mtime. Blind to an agent that keeps producing output
+      forever. This is the one a pending interactive prompt suspends, and the
+      suspension is itself bounded at 15 minutes.
+      <span class="path">health.go:143-157, 236-258</span></p>
+      <p><b>Run-duration cap</b> — wall clock since spawn, default 4 hours.
+      Deliberately not suspended by a pending prompt, because during a wait it is the
+      only bound left standing. Blind to anything shorter than the cap.
+      <span class="path">health.go:280-303</span>,
+      <span class="path">run_duration.go:46-61</span></p>
+      <p><b>Task quarantine</b> — 3 consecutive no-progress kills of the same task,
+      counted across agents, ending in <code>blocked</code> + unassigned + label +
+      kill timeline. Blind to everything happening inside a single run; it only sees
+      the pattern between them. <span class="path">quarantine.go:22-42, 444-466</span></p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="0009">
+    <div class="q" data-answer="1">
+      <p class="stem">An agent finishes cleanly, exits 0, and its configured
+      <code>add_label</code> hook fails against the issue backend. What happens to
+      the task?</p>
+      <ul class="opts">
+        <li>The run stays successful and the label write is retried later</li>
+        <li>The run is demoted to a failure and the task returns to open</li>
+        <li>The run is demoted but the task keeps its in_progress status</li>
+        <li>The run stays successful and the failed hook is logged only</li>
+      </ul>
+      <div class="why"><code>markCompletionHookFailure</code> sets
+      <code>LastExitCode = -1</code> and class <code>CompletionHookFailure</code>
+      <em>before</em> finalize, checkpoint and post-mortem recovery run — so recovery
+      sees a non-zero exit and resets the task to <code>open</code>. The last option
+      is the sharp near-miss: skipping loudly is exactly what happens when there is
+      no issue backend at all, because no retry could fix that — but a failed
+      <em>write</em> is retryable and therefore demotes.
+      <span class="path">session_finalize.go:771-781, 412-421</span></div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <p class="stem">Quarantine sets the task to <code>blocked</code> and
+      unassigns it. What stops another agent from picking it straight back up?</p>
+      <ul class="opts">
+        <li>The picker's ready query only ever returns status=open tasks</li>
+        <li>The loom:quarantined label is excluded from every ready query</li>
+        <li>The claim script rejects blocked as a non-claimable status</li>
+        <li>The supervisor holds the fleet-db issue lock until it expires</li>
+      </ul>
+      <div class="why">The interlock is the ready query, not the label and not the
+      claim script. fleet-db's <code>IsReadyEligible</code> returns false for any
+      status but <code>open</code>, and loomcli's <code>ReadyOpts</code> has no status
+      field to widen it — every untargeted claim goes through <code>Ready</code>, so
+      the picker never sees a blocked task. The third option is the sharp near-miss:
+      from <a href="0008-claiming-without-collisions.html">Lesson 08</a>,
+      <code>claim_issue.lua</code> lists <code>open</code>, <code>blocked</code>,
+      <code>deferred</code> and <code>review</code> as claimable, which is exactly why
+      the quarantine comment says a manual claim "works (blocked is claimable) -- it
+      will re-quarantine after 3 fresh no-progress kills". Quarantine bars the
+      automatic boomerang, not a human with a task id.
+      <span class="path">fleet-db internal/storage/ready_eligible.go:35-38</span>,
+      <span class="path">internal/backend/types.go:290-302</span>,
+      <span class="path">quarantine.go:508-512</span>,
+      <span class="path">fleet-db internal/storage/lua/claim_issue.lua:44-46</span></div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <p class="stem">A daemon agent crashed mid-task. The lock survives with a dead
+      PID and a carried session id, and <code>ResumeFailures</code> is 1. What does
+      the next supervise cycle do?</p>
+      <ul class="opts">
+        <li>Cold-starts: destructive recovery, then claims a fresh task</li>
+        <li>Resumes: preserves the lock, the worktree, and the fleet claim</li>
+        <li>Checkpoints: re-claims the task after clearing the session id</li>
+        <li>Blocks: waits on a fixed interval for a human to release it</li>
+      </ul>
+      <div class="why"><code>detectRecovery</code>'s switch checks the counter
+      before the session id, and 1 is under <code>maxResumeFailures</code> (2), so
+      this is a resume. The third option is the sharp near-miss: it is what happens
+      at <em>exactly</em> two failures, and it deliberately clears the carried
+      session id so the agent cold-starts from the saved checkpoint instead of
+      arming <code>--resume</code>.
+      <span class="path">resume_recovery.go:52-68, 91-104</span></div>
+    </div>
+  </div>
+
+  <div class="exercise">
+    <h3>Read the order, then predict two failures</h3>
+    <ol>
+      <li>In the loomcli worktree, run
+      <code>grep -n 's\.\(classifyAgentExit\|recordTaskExitForQuarantine\|runCompletionHooks\|finalizeAgentSession\|handleAgentCheckpoint\|postMortemRecovery\|sweepQuarantineDue\)(' internal/cli/daemon/supervisor/supervisor.go</code>
+      — anchoring on <code>s.</code> and the open paren is what keeps a doc comment
+      and <code>postMortemRecovery</code>'s own declaration out of the results.
+      Write the seven line numbers down in order. For each adjacent pair, state what
+      breaks if you swap them — the code comments hand you three of the six answers,
+      so work out the rest.</li>
+      <li>Read <code>internal/agentpolicy/policy.go</code> end to end (173 lines) and
+      build a table: Outcome → Decision → OnExhaustion → BlockBudget. Then, for each
+      <code>Decision</code>, find the <code>apply…</code> function in
+      <code>internal/cli/daemon/supervisor/restart.go</code> that implements it, and
+      note which counter it touches. That mapping is the "table decides, supervisor
+      counts" split made concrete.</li>
+      <li>Run <code>grep -n 'LastExitCode = -1' internal/cli/daemon/supervisor/session_finalize.go</code>
+      and open the surrounding function. Then find where <code>AgentStopped</code> is
+      emitted (<code>grep -n AgentStopped internal/cli/daemon/supervisor/spawn.go</code>)
+      and confirm for yourself that it runs earlier in the sequence.</li>
+      <li>Reaching back to <a href="0008-claiming-without-collisions.html">Lesson
+      08</a>: in the fleet-db worktree, open
+      <code>internal/storage/lua/claim_issue.lua</code> at the claimable-status check
+      and confirm <code>blocked</code> is on the list. Now read
+      <code>formatKillTimeline</code> in <code>quarantine.go</code> and answer in one
+      sentence what quarantine actually guarantees.</li>
+      <li>Prediction drill, no running required. For each, name the classified
+      Outcome, the Decision, and where the task ends up: (a) the agent exits 0 but
+      never releases its claim; (b) the run is killed at four hours while a human
+      prompt is outstanding; (c) the backend CLI vanished from PATH.</li>
+    </ol>
+    <div class="verify">
+      <b>You succeeded when</b>
+      Step 3's first grep prints line 777 and the second prints line 517 — and you
+      can say in one sentence why a hook failure makes the events stream and the
+      session record disagree without either being wrong. For step 5 your answers
+      should be <code>IncompleteRun</code>/counted Retry/back to <code>open</code>;
+      <code>Timeout</code>/counted Retry on the timeout backoff, quarantine-eligible;
+      and <code>BackendUnavailable</code>/<code>Block</code> on a fixed 30-second
+      recheck that never erodes <code>max_retries</code>.
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><code>internal/agentpolicy/policy.go</code>. It is 173 lines, it is the entire
+    retry philosophy of the system, and every apply-function in
+    <code>restart.go</code> is meaningless without it. Read it before
+    <code>supervisor.go</code>, not after — the big file is much easier once you can
+    already predict the verdict for any Outcome.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0008-claiming-without-collisions.html"><span class="dir">Previous</span>Claiming without collisions</a>
+    <a class="next" href="0010-what-actually-runs-your-code.html"><span class="dir">Next</span>What actually runs your code</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

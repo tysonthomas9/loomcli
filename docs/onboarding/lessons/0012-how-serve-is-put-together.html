@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>12. How serve is put together — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 4 <span class="sep">/</span> Lesson 12 <span class="sep">/</span> Web layer</p>
+  <h1>How serve is put together</h1>
+  <p class="standfirst">There is no framework here. <code>loom serve</code> is a
+  composition root: a config struct, a pile of nil checks, and two muxes. Learn its
+  four-file shape and you can add an endpoint without asking anyone where things go.</p>
+
+  <div class="meta">
+    <span><b>Skill</b> add an API endpoint that follows the module and service layering</span>
+    <span><b>Time</b> 30 min</span>
+    <span><b>Needs</b> <a href="0006-anatomy-of-a-command.html">Lesson 06</a></span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span></span>
+  </div>
+
+  <!-- ===== KNOWLEDGE ===================================================== -->
+
+  <h2>Why this exists</h2>
+
+  <p>The web layer has no DI container and no <code>init()</code>-registered route
+  table; the single use of reflection is <code>normalizePool</code>
+  (<span class="path">internal/webui/handlermux/handlermux.go:47-59</span>), which
+  turns a typed-nil <code>daemon.Pool</code> into a real nil so the handlers'
+  <code>pool == nil</code> checks fire. Everything the server can do is decided by
+  one struct — <code>webui.ServerConfig</code> — which the CLI fills in and hands to
+  <code>NewServer</code>. Optional features are literally <code>if x != nil</code>.
+  <span class="path">internal/webui/server_config.go:47-48</span></p>
+
+  <p>The consequence is the thing you have to internalise: <b>the wiring is the
+  documentation</b>. A route exists because some line of Go appended a module to a
+  slice, and that line usually sits behind a condition. You cannot answer "is this
+  endpoint mounted?" from a doc. You answer it by reading three short files.</p>
+
+  <div class="callout key">
+    <span class="label">The one idea</span>
+    <p>A route is <em>one line</em> — a pattern mapped to a handler — inside some
+    module's <code>Register</code>. The handler is a closure over a
+    <code>service</code> interface and does nothing but translate HTTP. So adding an
+    endpoint is always the same four edits, in the same order, and <b>finding</b> one
+    is always the same move: grep the URL path string, never the package name.</p>
+  </div>
+
+  <h2>The trace: from <code>loom serve</code> to a route that answers</h2>
+
+  <p>Specimen endpoint, chosen because every layer is visible in it:</p>
+
+<pre><code>GET /api/workspaces/{ws}/terminal/tabs</code></pre>
+
+  <ol class="trace">
+    <li>
+      <span class="hop-file">internal/cli/serve/serve.go:182-194</span>
+      <span class="hop-what"><b><code>runServe</code> starts.</b> Sets the local
+      runtime mode, installs a SIGINT/SIGTERM handler, and calls
+      <code>ensureIssueBackend</code> — which is a no-op:
+      <code>cli.EnsureIssueBackendRunning</code> returns <code>false, nil</code>
+      because FleetDB owns issue storage directly, so no daemon is ever launched.
+      <span class="path">internal/cli/daemon_ensure.go:5-10</span></span>
+    </li>
+    <li>
+      <span class="hop-file">internal/cli/serve/serve.go:223-234</span>
+      <span class="hop-what"><b>The store handle, then the sweepers.</b>
+      <code>openServeStore</code> opens the fleet-db-backed store — a failure here is
+      <code>log.Fatalf</code>. Then seven background loops start: driver executor,
+      stale-task sweeper, outbox dispatcher, trigger cron, trigger delivery, await
+      timeouts, issue-journal bridge. <b><code>loom serve</code> is a scheduler as
+      well as an API server</b>; that surprises people.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/cli/serve/serve.go:242-245</span>
+      <span class="hop-what"><b>Hand-off.</b> <code>buildServerConfig(…)</code>
+      assembles the <code>ServerConfig</code> and
+      <code>webuiapp.StartServer(ctx, cfg)</code> runs on a goroutine. Everything
+      after this point is inside <code>internal/webui</code>.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/webui/app/server.go:182-197</span>
+      <span class="hop-what"><b><code>StartServer</code>.</b> Optionally installs
+      Sentry, calls <code>NewServer</code>, defers <code>app.Close()</code>, and
+      blocks in <code>app.run(ctx)</code> until the context is cancelled.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/webui/app/server_app.go:110</span>
+      <span class="hop-what"><b>The listener is taken early.</b>
+      <code>webui.FindAvailablePort</code> walks up to <code>MaxPortAttempts</code>
+      consecutive ports and returns the listener already open, so nothing can steal
+      the port between check and bind.
+      <span class="path">internal/webui/server_config.go:149-160</span></span>
+    </li>
+    <li>
+      <span class="hop-file">internal/webui/app/server_app.go:464-470</span>
+      <span class="hop-what"><b>Four calls, in this order:</b>
+      <code>buildHandlers()</code>, <code>buildModules()</code>, then a fresh
+      <code>http.NewServeMux()</code>, then <code>registerRoutes()</code> and
+      <code>registerWorkerAPIRoutes()</code>. That is the whole route system.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/webui/app/server_modules.go:27-56, 78-99</span>
+      <span class="hop-what"><b><code>buildModules</code> decides what exists.</b> It
+      appends modules to <code>app.wsModules</code> behind nil checks —
+      <code>if app.issueTabStore != nil</code> is what puts the issue-tab module in
+      the slice at all, and that store is nil whenever no Redis is configured. No
+      store, no routes, no error. The <code>app.termSvc != nil</code> guard beside it
+      has the same shape but is defensive: that service is constructed
+      unconditionally.
+      <span class="path">internal/webui/app/server_app.go:446</span></span>
+    </li>
+    <li>
+      <span class="hop-file">internal/webui/app/routes.go:172-175</span>
+      <span class="hop-what"><b>Every module registers on a <em>nested</em>
+      mux.</b> <code>wsMux := http.NewServeMux()</code>, then
+      <code>mod.Register(wsMux)</code> in a loop. This second mux is the one almost
+      every browser-facing route lives on.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/webui/app/routes.go:187-199</span>
+      <span class="hop-what"><b>The nested mux is mounted once</b> at
+      <code>/api/workspaces/{ws}/</code> on the outer mux, wrapped in workspace
+      middleware. One exact-path exception is carved out for
+      <code>…/readyz</code> so it can report diagnostics for a workspace that is not
+      registered yet.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/webui/app/server.go:257-271</span>
+      <span class="hop-what"><b>The middleware chain wraps the outer mux</b>,
+      outermost first: tracing, <code>Recover</code>, <code>RequestLog</code>,
+      Prometheus, rate limit, security headers, auth, CORS, then two inner
+      route-name capture middlewares.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/webui/handlers/terminal/tab_module.go:27 → tabs.go:24-39</span>
+      <span class="hop-what"><b>Arrival.</b> The pattern line hands off to
+      <code>HandleListTerminalTabs(m.termSvc)</code> — a closure that reads the
+      workspace from context, calls one service method, and writes JSON. Nothing
+      else happens in the handler.</span>
+    </li>
+  </ol>
+
+  <aside class="sidenote">Hop 5 is why your <code>curl localhost:8080</code> can hit
+  a different <code>serve</code> process than the one you just started. The port the
+  server actually took is in its <code>server listening</code> log line
+  (<code>internal/webui/app/server.go:298</code>).</aside>
+
+  <h2>The three shapes to copy</h2>
+
+  <h3>1. A module is pattern lines and nothing else</h3>
+
+  <p>A module is a struct of dependencies, a <code>New…Module</code> constructor,
+  and a <code>Register</code> that contains only registrations plus nil guards. If
+  you find yourself writing an <code>if</code> about request data inside
+  <code>Register</code>, you are in the wrong file.</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/webui/handlers/agents/module.go:20-34</figcaption>
+<pre><code>func (m *Module) Register(mux *http.ServeMux) {
+	if m.agentSvc == nil {
+		return
+	}
+	mux.HandleFunc("GET /api/workspaces/{ws}/interactive-prompts", HandleInteractivePrompts())
+	mux.HandleFunc("GET /api/workspaces/{ws}/agents", HandleList(m.agentSvc))
+	mux.HandleFunc("POST /api/workspaces/{ws}/agents", HandleCreate(m.agentSvc, m.hub))
+	mux.HandleFunc("PATCH /api/workspaces/{ws}/agents/{name}", HandleUpdate(m.agentSvc, m.hub))
+	// … delete, queue, stop, start, restart, yield</code></pre>
+  </figure>
+
+  <p>The registration protocol is a single-method interface, and deliberately a
+  <b>type alias</b> rather than a defined type, so the facade packages'
+  <code>[]interface{ Register(*http.ServeMux) }</code> return values stay assignable
+  to <code>[]wsModule</code>
+  (<span class="path">internal/webui/modbuilder/modbuilder.go:48, 78</span>) — with a
+  defined type, <code>append(app.wsModules, modbuilder.NewIssueModules(…)...)</code>
+  would not compile:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/webui/app/module.go:5-8</figcaption>
+<pre><code>// wsModule is the interface for a group of related HTTP routes that can register
+// themselves on a [*http.ServeMux].
+// Defined as a named type so all facade packages' return types are compatible.
+type wsModule = interface{ Register(mux *http.ServeMux) }</code></pre>
+  </figure>
+
+  <h3>2. A handler is a closure over a service</h3>
+
+  <p>The dominant signature is <code>func HandleX(svc service.T)
+  http.HandlerFunc</code> — 80 of the 124 exported handler constructors under
+  <code>internal/webui/handlers</code> have exactly that shape, and ten more take a
+  service plus a hub or store. The other 34 take no service at all and close over a
+  pool, a hub or a cache instead — among them <code>HandleBlockedWithBackend</code>
+  and <code>HandleStatsWithBackend</code>, the two handlers behind the grep trap
+  below. Write new ones in the service shape.
+  <span class="path">internal/webui/handlers/git/graph.go:140, internal/webui/handlers/health/health.go:225</span></p>
+
+  <p>The body does four things: read the workspace and path
+  values, decode with <code>handler.ReadJSON</code>, call one service method, write
+  with <code>handler.WriteJSON</code> or <code>handler.HandleServiceError</code>.</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/webui/handlers/terminal/tabs.go:24-39</figcaption>
+<pre><code>func HandleListTerminalTabs(svc service.TerminalService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		workspace := middleware.WorkspaceFromContext(r.Context())
+
+		tabs, err := svc.ListTabs(r.Context(), workspace)
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+
+		handler.WriteJSON(w, http.StatusOK, tabMetadataResponse{
+			Success: true,
+			Data:    tabs,
+		})
+	}
+}</code></pre>
+  </figure>
+
+  <p>Note <code>middleware.WorkspaceFromContext</code>, not
+  <code>r.PathValue("ws")</code>. The <code>{ws}</code> in the URL may be a name;
+  the middleware resolves it and the context holds the canonical value.</p>
+
+  <h3>3. Services return kinds, handlers return status codes</h3>
+
+  <p>A service never mentions HTTP. It returns a <code>*service.ServiceError</code>
+  carrying an <code>ErrorKind</code>, and the handler layer owns the one table that
+  turns kinds into statuses.</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/webui/service/errors.go:6-8</figcaption>
+<pre><code>// ErrorKind categorizes service-layer errors into domain-level failure modes.
+// The handler layer maps these to HTTP status codes; services never reference HTTP.
+type ErrorKind string</code></pre>
+  </figure>
+
+  <p>Sixteen kinds, one map. <code>KindUnavailable</code> and
+  <code>KindStarting</code> both become 503; <code>KindValidation</code> becomes 400.
+  Constructors are <code>service.ErrNotFound</code>,
+  <code>service.ErrUnavailable</code>, and friends — the "no Redis" guard at
+  <code>internal/webui/terminal/service_tabs.go:21-24</code> is the pattern to copy
+  for a missing dependency. <span class="path">internal/webui/server/handler/errors.go:13-30</span></p>
+
+  <h2>The two muxes</h2>
+
+  <p>There is the outer mux (<code>app.mux</code>, the one the middleware chain
+  wraps) and the nested workspace mux (<code>wsMux</code>, mounted once at
+  <code>/api/workspaces/{ws}/</code>). Nearly every workspace-scoped route belongs on
+  the nested one. Four routes are the deliberate exception — three PATCH plus the
+  <code>GET …/config/backend</code> that rides along with them
+  (<span class="path">internal/webui/app/routes.go:155</span>), which is the duplicate
+  the trap below is about. The code says why:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/webui/app/routes.go:151-157</figcaption>
+<pre><code>	// PATCH handlers are registered on the outer mux (not the nested wsMux)
+	// because Go 1.22+ http.ServeMux has a bug where r.Body.Read() hangs for
+	// PATCH requests routed through a nested mux via wildcard subtree pattern.
+	app.mux.Handle("PATCH /api/workspaces/{ws}/name", workspaceMW(handlermux.HandleWorkspaceRename(app.workspaceSvc)))
+	app.mux.Handle("GET /api/workspaces/{ws}/config/backend", workspaceMW(handlermux.HandleWorkspaceBackendGet(app.workspaceSvc)))
+	app.mux.Handle("PATCH /api/workspaces/{ws}/config/backend", workspaceMW(handlermux.HandleWorkspaceBackendPatch(app.workspaceSvc)))
+	app.mux.Handle("PATCH /api/workspaces/{ws}/config/design-format", workspaceMW(handlermux.HandleWorkspaceDesignFormatPatch(app.workspaceSvc)))</code></pre>
+  </figure>
+
+  <p>Two things to take from that comment. First, the failure mode it names is a
+  <b>hang, not a 404</b> — so if you add a workspace-scoped PATCH and the request
+  never returns, look here before you suspect your handler. Second, it is not a
+  blanket law: <code>PATCH …/terminal/tabs/{session}</code> and
+  <code>PATCH …/terminal/state</code> are registered on the nested mux and are live
+  routes. <span class="path">internal/webui/handlers/terminal/tab_module.go:30, 38</span></p>
+
+  <aside class="sidenote">Unverified here: I could not reproduce the hang with a
+  minimal nested-mux PATCH on Go 1.26. Treat the comment as a recorded symptom with a
+  known workaround, not as a rule you can derive from.</aside>
+
+  <div class="callout trap">
+    <span class="label">Trap — the same pattern on both muxes does not panic</span>
+    <p>You know Go 1.22 panics on duplicate <code>ServeMux</code> patterns, so you
+    assume a clash would be loud. <b>Duplicate detection is per-mux.</b> Two
+    <code>ServeMux</code> values share no registration table, so registering the same
+    pattern on the outer mux and on <code>wsMux</code> is silently fine — and the
+    outer registration wins, because an exact pattern beats the
+    <code>/api/workspaces/{ws}/</code> subtree mount. Your nested route becomes dead
+    code that every test on the module still passes.</p>
+    <p>This is not hypothetical: <code>GET /api/workspaces/{ws}/config/backend</code>
+    is registered twice — <span class="path">internal/webui/app/routes.go:155</span>
+    and <span class="path">internal/webui/handlermux/handlermux.go:98</span>. Only the
+    first one ever serves a request.</p>
+  </div>
+
+  <p>The codebase avoids the <em>same</em>-mux version of this by making the two
+  registrations of <code>GET …/agents/{name}/queue</code> mutually exclusive:
+  <code>agentQueueH</code> is only built when the server is <b>not</b> store-backed
+  (<code>server_modules.go:32</code>), and <code>agents.NewModule</code> is only
+  appended when it <b>is</b> (<code>server_modules.go:129-131</code>). Break that
+  condition and you get a startup panic, not a silent override.</p>
+
+  <div class="callout trap">
+    <span class="label">Trap — the depguard rule is narrower than its name</span>
+    <p>The <code>handler-layer-isolation</code> rule in <code>.golangci.yml</code>
+    denies <code>internal/store</code>, <code>internal/webui/store</code>,
+    <code>internal/backend</code>, <code>internal/notify</code> and
+    <code>internal/webui/daemon</code>, each with the message "use the service layer
+    (internal/webui/service)". It is easy to read that as "the gate stops me reaching
+    past the service layer from a handler". It does not.</p>
+    <p>Its file glob is <code>"**/handler/**"</code>
+    (<span class="path">.golangci.yml:62-66</span>), and <code>handler</code> is a
+    literal path segment: <code>find . -type d -name handler</code> returns exactly
+    one directory, <code>internal/webui/server/handler</code> — the shared
+    request/response plumbing. The domain packages under
+    <code>internal/webui/handlers/</code> are <em>not</em> matched, which is why
+    <code>internal/webui/handlers/health</code> imports
+    <code>internal/backend</code> and <code>golangci-lint run --enable-only
+    depguard</code> reports <code>0 issues</code> for it. The layering is a
+    convention your reviewer enforces; the gate only backstops one package.</p>
+  </div>
+
+  <div class="callout trap">
+    <span class="label">Trap — grep the path, not the package</span>
+    <p>You want the code behind <code>GET /api/workspaces/{ws}/blocked</code>, so you
+    open <code>internal/webui/handlers/issues/</code>. It is not there. That route is
+    registered by <code>WorkspaceOpsModule</code> in
+    <span class="path">internal/webui/handlermux/handlermux.go:92</span> and served by
+    <code>githandlers.HandleBlockedWithBackend</code> — a blocked-issues query living
+    in the <em>git</em> handler package. Its neighbours are just as scattered:
+    <code>…/stats</code> goes to <code>healthhandlers</code>,
+    <code>…/ready</code> to <code>issues</code>, <code>…/issues/graph</code> back to
+    <code>githandlers</code>.</p>
+    <p>Package names predict nothing here. The URL string is the only reliable index,
+    and it appears verbatim in the source, so
+    <code>grep -rn 'workspaces/{ws}/blocked' --include='*.go' internal/</code> is a
+    one-hit search.</p>
+  </div>
+
+  <h2>The recipe</h2>
+
+  <p>To add <code>GET /api/workspaces/{ws}/terminal/tabs/summary</code>, in order:</p>
+
+  <ol>
+    <li><b>Interface.</b> Add the method to the service interface —
+    <code>internal/webui/service/terminal.go:15</code> — and any result struct beside
+    <code>PatchTabResult</code> (<code>terminal.go:36-39</code>).</li>
+    <li><b>Implementation.</b> Implement it in
+    <code>internal/webui/terminal/service_tabs.go</code>, guarding a missing
+    dependency with <code>service.ErrUnavailable(…)</code> exactly as
+    <code>ListTabs</code> does at line 22.</li>
+    <li><b>Handler.</b> Add the closure to
+    <code>internal/webui/handlers/terminal/tabs.go</code>, reading the workspace from
+    context and writing through <code>handler.WriteJSON</code> /
+    <code>handler.HandleServiceError</code>.</li>
+    <li><b>Route.</b> One line in <code>tab_module.go</code>'s
+    <code>Register</code>.</li>
+    <li><b>Fakes and tests.</b> Every test double implementing
+    <code>TerminalService</code> needs the new method, then a route-registration test
+    and a handler test.</li>
+  </ol>
+
+  <p>The route test is the cheap one people skip. It asserts a pattern is registered
+  <em>at all</em> and with the <em>right method</em>, by checking the two codes a
+  mux produces on its own:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/webui/subscription/module_test.go:43-53</figcaption>
+<pre><code>	for _, rt := range routes {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(rt.method, rt.path, nil)
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code == http.StatusNotFound {
+			t.Errorf("%s %s: got 404, route not registered", rt.method, rt.path)
+		}
+		if rec.Code == http.StatusMethodNotAllowed {
+			t.Errorf("%s %s: got 405, wrong method registered", rt.method, rt.path)
+		}</code></pre>
+  </figure>
+
+  <p>For a whole-server test, <code>setupTestRoutes(t, app)</code> runs
+  <code>buildHandlers</code>, <code>buildModules</code> and <code>registerRoutes</code>
+  against a real mux — the same three calls as hop 6.
+  <span class="path">internal/webui/app/routes_test.go:34-50</span></p>
+
+  <!-- ===== SKILL ========================================================= -->
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory: name the four files you edit, in order, to add a
+    workspace-scoped GET endpoint — and say what a <code>Register</code> method is
+    allowed to contain.</p>
+    <div class="answer">
+      <p>The service interface
+      (<span class="path">internal/webui/service/terminal.go:15</span>), the
+      implementation that returns <code>service.ServiceError</code> kinds
+      (<span class="path">internal/webui/terminal/service_tabs.go:21-24</span>), the
+      handler closure over that interface
+      (<span class="path">internal/webui/handlers/terminal/tabs.go:24-39</span>), and
+      one pattern line in the module's <code>Register</code>
+      (<span class="path">internal/webui/handlers/terminal/tab_module.go:27</span>).</p>
+      <p><code>Register</code> may contain <em>only</em> pattern-to-handler lines and
+      nil guards on its dependencies — see
+      <span class="path">internal/webui/handlers/agents/module.go:20-23</span>, where
+      a nil service returns early and silently omits the whole route family rather
+      than panicking.</p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="0012">
+    <div class="q" data-answer="2">
+      <p class="stem">You register a pattern in a module's <code>Register</code>, and
+      the same pattern is already registered on the outer mux in
+      <code>routes.go</code>. What happens?</p>
+      <ul class="opts">
+        <li>The server panics on the duplicate pattern while registering routes</li>
+        <li>Neither route matches and requests fall through to the JSON 404</li>
+        <li>No panic: the outer registration wins and yours is never reached</li>
+        <li>Both handlers run in registration order and the last one responds</li>
+      </ul>
+      <div class="why">Go 1.22 duplicate detection is per-mux, and the two
+      registrations live on different <code>ServeMux</code> values, so there is
+      nothing to conflict; the exact outer pattern then beats the
+      <code>/api/workspaces/{ws}/</code> subtree mount. The panic option is the
+      near-miss worth remembering — a duplicate on the <em>same</em> mux does panic,
+      which is why the two <code>…/agents/{name}/queue</code> registrations are made
+      mutually exclusive. <span class="path">internal/webui/app/routes.go:155 and internal/webui/handlermux/handlermux.go:98</span></div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <p class="stem">Where do you look first for the code behind
+      <code>GET /api/workspaces/{ws}/blocked</code>?</p>
+      <ul class="opts">
+        <li>grep the route path string across internal/webui with grep -rn</li>
+        <li>open internal/webui/handlers/issues and read its module file</li>
+        <li>open internal/webui/service and follow the interface method</li>
+        <li>read internal/webui/app/routes.go for the registered pattern</li>
+      </ul>
+      <div class="why">It is registered by <code>WorkspaceOpsModule</code> in
+      <code>handlermux.go:92</code> and served from the <em>git</em> handler package,
+      so the domain-named package is a dead end. Reading <code>routes.go</code> is the
+      sharpest wrong answer: that file holds the non-workspace routes, the mount, and
+      seven workspace-scoped exceptions (<code>routes.go:146-159</code>) — every other
+      workspace-scoped pattern is registered inside a module file, and
+      <code>/blocked</code> is one of those.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <p class="stem">In <a href="0006-anatomy-of-a-command.html">Lesson 06</a> a CLI
+      command reached state through <code>cmdstore.WithActiveWorkspace</code>. What is
+      the equivalent seam for a webui handler in the service shape, such as
+      <code>HandleListTerminalTabs</code>?</p>
+      <ul class="opts">
+        <li>The store handle that internal/cli/serve opened at boot time</li>
+        <li>A method on the internal/webui/service interface it closes over</li>
+        <li>The IssueBackend that middleware attaches to the request context</li>
+        <li>A daemon pool connection resolved from the workspace local path</li>
+      </ul>
+      <div class="why">That handler is a <code>func HandleX(svc service.T)
+      http.HandlerFunc</code> closure; the service interface is its only door to
+      state. The first option is the near-miss: <code>serve</code> really does open one
+      store handle at <code>serve.go:223</code> and put it on
+      <code>ServerConfig</code>, and <code>buildModules</code> both gates modules on
+      <code>config.Store != nil</code> and hands the raw handle to the store-native
+      modules — skills, workflows, webhooks, approvals, task-run, driver — whose
+      handlers query it directly. It just never reaches this one.
+      <span class="path">internal/webui/app/server_modules.go:129-132 and internal/webui/handlers/skills/handlers.go:108</span></div>
+    </div>
+  </div>
+
+  <div class="exercise">
+    <h3>Find four routes, then prove two of the traps</h3>
+    <p>All read-only, from the loomcli worktree root. Nothing here starts a stack or
+    touches a shared port.</p>
+    <ol>
+      <li>Run <code>grep -rn 'workspaces/{ws}/blocked' --include='*.go' internal/ |
+      grep -v _test.go</code>. One hit. Name the module that registers it and the
+      package the handler function comes from.</li>
+      <li>Run the same grep for <code>workspaces/{ws}/config/backend</code>. Four
+      hits, one of them a doc comment. Say which three are route registrations, which
+      mux each is on, and which of the two <code>GET</code> registrations actually
+      serves the request.</li>
+      <li>Run <code>golangci-lint run --config .golangci.yml --enable-only depguard
+      ./internal/webui/handlers/health/...</code>. Then run <code>grep -n
+      'internal/backend' internal/webui/handlers/health/health.go</code> and
+      <code>find . -type d -name handler</code>. Explain the combination in one
+      sentence.</li>
+      <li>Run <code>go test ./internal/webui/subscription -run
+      TestModule_RegisterRoutes -v</code>, then read
+      <code>module_test.go:43-53</code>. What does the 404 assertion catch that the
+      405 assertion does not?</li>
+      <li>Reaching back to <a href="0006-anatomy-of-a-command.html">Lesson 06</a>:
+      there, a store handle lived exactly as long as one command. In
+      <code>serve.go:223-227</code> one handle lives for the whole process. Find the
+      two lines in <code>server_modules.go</code> where <code>storeBacked</code> is
+      computed (28 and 107) and the branch at 129 that decides which route modules are
+      built, then name two route families that disappear without the handle.</li>
+    </ol>
+    <div class="verify">
+      <b>You succeeded when</b>
+      you can state which of the two <code>config/backend</code> GET registrations
+      serves the request and why the other one does not panic; and when
+      <code>golangci-lint</code> prints <code>0 issues</code> for the health handlers
+      even though that package imports <code>internal/backend</code> — and you can say
+      why in terms of the glob.
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><code>internal/webui/app/routes.go</code> — 209 lines, and it answers "why is
+    my endpoint 404ing" most of the time. Read it beside
+    <code>internal/webui/app/server_modules.go</code> (160 lines): together they are
+    the mount map plus every condition that decides whether a module is wired at all.
+    The workspace-scoped patterns themselves live in the module files those conditions
+    name, and the worker API routes in <code>server_workspace.go:124</code>.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0011-things-that-are-not-boundaries.html"><span class="dir">Previous</span>Things that are not boundaries</a>
+    <a class="next" href="0013-realtime-one-frame-at-a-time.html"><span class="dir">Next</span>Realtime, one frame at a time</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

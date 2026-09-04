@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>07. Two clients, one server — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 2 <span class="sep">/</span> Lesson 07 <span class="sep">/</span> Control plane</p>
+  <h1>Two clients, one server</h1>
+  <p class="standfirst">loomcli talks to fleet-db through two entirely separate client
+  stacks with two different error models. Knowing which one you are in is the
+  difference between a five-minute change and an afternoon of confusion.</p>
+
+  <div class="meta">
+    <span><b>Skill</b> pick the right client stack and error model</span>
+    <span><b>Time</b> 30 min</span>
+    <span><b>Needs</b> <a href="0006-anatomy-of-a-command.html">06</a></span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span></span>
+  </div>
+
+  <h2>loomcli is a client, not a store</h2>
+
+  <p>You established this in <a href="0005-where-state-lives.html">Lesson 05</a>:
+  workspaces, repos, roles, agent definitions, daemon profiles, issues, sessions,
+  leases, drivers, skills — all rows in fleet-db, reached over HTTP/JSON.</p>
+
+  <p>It was not always so. A migration commit — <code>4d37ff8cb</code>,
+  "migration(fleet-db): clean architecture, no yaml config" — moved the config-file
+  half of that list out of YAML and into fleet-db as first-class entities:
+  workspaces, repos, agents, roles, daemon profiles. Sessions, leases, drivers and
+  skills arrived later, as further sub-stores of <code>store.Store</code>
+  <span class="path">internal/store/store.go:21-56</span>. <b>Most of the architectural
+  oddities in this area are scars from that migration</b>, including the fossil YAML
+  tags from Lesson 05. When something here looks strange, "it used to be a config
+  file" is a good first hypothesis.</p>
+
+  <h2>Local and cloud are the same code</h2>
+
+  <div class="callout key">
+    <span class="label">The one idea</span>
+    <p>Local mode and cloud mode are <b>not different storage engines</b>. They
+    differ only in <em>where fleet-db is running</em>. Local runs the
+    <code>fleet-db</code> binary as a child process on a loopback port
+    <span class="path">internal/bootstrap/embedded.go:360,373</span> — or, when a
+    healthy one already owns this data directory, reuses it instead of spawning a
+    second <span class="path">internal/bootstrap/openstore.go:124-126,145-160</span>.
+    That subprocess is backed <em>by default</em> by a miniredis running inside
+    loom's own process, snapshotting to
+    <code>&lt;dataDir&gt;/fleet-db/redis-snapshot.json</code>; local settings can
+    point it at an external Redis instead
+    <span class="path">internal/bootstrap/embedded.go:339-357</span>,
+    <span class="path">internal/localsettings/settings.go:48-55</span>. Cloud points
+    the identical HTTP client at a URL. The switch is one env var, read by one
+    function <span class="path">internal/bootstrap/mode.go:51-59</span>, and
+    <code>OpenStore</code> builds the same <code>fleetdb.Config</code> either way —
+    only the base URL differs
+    <span class="path">internal/bootstrap/openstore.go:94-119</span>.</p>
+  </div>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/bootstrap/mode.go:15-24</figcaption>
+<pre><code>const (
+	// EnvWorkspace selects the active workspace for one process. Set in
+	// shell to scope a session to a specific workspace:
+	// `LOOM_WORKSPACE=MYWS loom agent list`.
+	EnvWorkspace = "LOOM_WORKSPACE"
+
+	// EnvFleetDBURL switches loom into cloud mode — the embedded
+	// fleet-db is not started; loom talks to the URL directly.
+	EnvFleetDBURL = "LOOM_FLEET_DB_URL"
+)</code></pre>
+  </figure>
+
+  <p>That is why local-mode reproductions are trustworthy, and why "does this work in
+  cloud mode?" is usually not an interesting question about your change. The
+  <em>store client</em> is the part that does not branch. A handful of call sites
+  outside bootstrap still do, for non-storage reasons — <code>loom doctor</code>'s
+  fleet-db check <span class="path">internal/cli/doctor/doctor_fleetdb.go:120</span>,
+  and the per-workspace issue backend, which caches one backend per workspace in
+  cloud and degenerates to the global backend in local
+  <span class="path">internal/cli/issue_backend_workspace.go:28-34</span>. Neither
+  threads a <code>Mode</code> through; each re-derives it at the call site.</p>
+
+  <h2>The split that actually matters</h2>
+
+  <p>Here is what nobody tells you on day one. There are <b>two</b> client stacks
+  against fleet-db:</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th></th><th><code>internal/infra/fleetdb</code></th><th><code>internal/backend/fleet</code></th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>Implements</b></td>
+        <td><code>store.Store</code> <span class="path">internal/infra/fleetdb/client.go:169</span></td>
+        <td><code>backend.IssueBackend</code> <span class="path">internal/backend/fleet/fleet.go:43</span></td>
+      </tr>
+      <tr>
+        <td><b>Owns</b></td>
+        <td>Control-plane entities: workspaces, repos, agents, nodes, sessions, leases, drivers, skills <span class="path">internal/store/store.go:21-56</span></td>
+        <td>Issue tracking: issues, comments, dependencies, labels, mutations <span class="path">internal/backend/issuebackend.go:19-182</span></td>
+      </tr>
+      <tr>
+        <td><b>Errors map to</b></td>
+        <td><code>domain.Err*</code> sentinels — compare with <code>errors.Is</code> <span class="path">internal/domain/errors.go:16-50</span></td>
+        <td><code>*backend.BackendError</code> kinds <span class="path">internal/backend/errors.go:20-34</span></td>
+      </tr>
+      <tr>
+        <td><b>You reach it via</b></td>
+        <td><code>cmdstore.WithActiveWorkspace</code> → <code>h.Store</code> <span class="path">internal/cli/cmdstore/cmdstore.go:124-131</span></td>
+        <td>The issue backend on the command's deps <span class="path">internal/cli/deps.go:73</span></td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>They talk to the <em>same fleet-db server</em> and share request plumbing through
+  <code>internal/fleethttp</code>. But they <b>deliberately do not share error
+  classification</b> — the package doc says so in as many words, and lists exactly
+  what is shared (header construction, body marshaling, error-message extraction)
+  and what is not (status→sentinel mapping)
+  <span class="path">internal/fleethttp/fleethttp.go:1-14</span>. That is the
+  trap:</p>
+
+  <div class="callout trap">
+    <span class="label">Trap</span>
+    <p>Code that reaches for <code>domain.ErrNotFound</code> after an
+    <em>issue</em> operation will never match, and vice versa. The two stacks are
+    parallel, not layered — neither wraps the other. Before writing an error branch,
+    check which stack produced the error. This maps directly onto the object model
+    from <a href="0005-where-state-lives.html">Lesson 05</a>: control-plane objects
+    hang off Workspace, and <b>issues live on a different axis</b>. Two axes, two
+    clients, two error models.</p>
+  </div>
+
+  <h2>The boundary is machine-enforced</h2>
+
+  <p>The "only two control-plane paths" rule from
+  <a href="0001-two-repos-one-system.html">Lesson 01</a> is not aspirational.
+  <code>scripts/check-control-plane-paths.sh</code> runs inside <code>make check</code>
+  — step 4 of 13, via <code>check-go</code>
+  <span class="path">Makefile:594-596</span> — and fails the build on five things:</p>
+
+  <ol class="trace">
+    <li>
+      <span class="hop-file">check-control-plane-paths.sh:36-53</span>
+      <span class="hop-what">Any non-test file under <code>cmd/</code> or
+      <code>internal/</code> that imports the <b>test-only in-memory store</b>
+      <code>internal/infra/memstore</code>.</span>
+    </li>
+    <li>
+      <span class="hop-file">check-control-plane-paths.sh:55-71</span>
+      <span class="hop-what">Any non-test file that imports
+      <code>internal/infra/fleetdb</code> — with exactly two exemptions:
+      <code>internal/bootstrap/openstore.go</code>, and the package itself.</span>
+    </li>
+    <li>
+      <span class="hop-file">check-control-plane-paths.sh:73-98</span>
+      <span class="hop-what">Any call to <code>fleetdb.New(</code> in a non-test file
+      under <code>cmd/</code> or <code>internal/</code>, outside
+      <code>internal/bootstrap/openstore.go</code>.</span>
+    </li>
+    <li>
+      <span class="hop-file">check-control-plane-paths.sh:100-110</span>
+      <span class="hop-what">Any <code>Mode<em>Xxx</em></code> identifier in
+      <code>internal/bootstrap/mode.go</code> other than <code>ModeLocal</code> and
+      <code>ModeCloud</code>. The enum is closed on purpose.</span>
+    </li>
+    <li>
+      <span class="hop-file">check-control-plane-paths.sh:112-129</span>
+      <span class="hop-what">Six literal <b>topology anchors</b> that must all still
+      appear in <code>openstore.go</code> — including
+      <code>case ModeLocal:</code>, <code>StartEmbedded(ctx, dataDir, logger)</code>
+      and <code>fleetdb.New(cfg)</code>. Change the shape and the guard demands an
+      explicit architecture decision.</span>
+    </li>
+  </ol>
+
+  <div class="callout key">
+    <span class="label">Worth saying plainly</span>
+    <p><b>Exactly one non-test file is allowed to construct the fleet-db store
+    client</b>: <code>internal/bootstrap/openstore.go</code>
+    <span class="path">scripts/check-control-plane-paths.sh:76-98</span>. That is
+    what keeps mode selection centralised, and it is why every command goes through
+    the <code>cmdstore</code> wrapper instead of opening its own client. If you find
+    yourself needing a client, you have taken a wrong turn several steps earlier.
+    Tests are outside the rule and do build their own against an embedded server
+    <span class="path">internal/bootstrap/embedded_smoke_test.go:33</span> — do not
+    read those as precedent.</p>
+  </div>
+
+  <h2>Two packages that are historical residue</h2>
+
+  <p>You will find these and try to build a mental model around them. Do not:</p>
+
+  <ul>
+    <li><code>internal/rpc</code> — a client for a Unix-socket issue daemon that this
+    repo no longer ships a server for (the only <code>listenRPC</code> is reached
+    from a test <span class="path">internal/rpc/transport_unix.go:12</span>), and
+    that <code>loom serve</code> disables whenever a store is wired
+    <span class="path">internal/cli/serve/serve.go:709</span>,
+    <span class="path">internal/webui/app/server.go:175</span>. Note the shape: the
+    <em>types</em> are still compiled into live code — <code>ListIssues</code>,
+    <code>ListKanban</code> and cross-workspace <code>MoveIssue</code> have not been
+    migrated off the pool <span class="path">internal/webui/service/issue_impl.go:54-57</span>
+    — but there is no daemon on the other end of the socket.</li>
+    <li><code>internal/kv</code> — direct Redis. Its one runtime use is the
+    multi-node stale detector under <code>--fleet-mode</code>
+    <span class="path">internal/cli/serve/daemonwire/stale.go:17-33</span>, gated at
+    <span class="path">internal/cli/serve/serve.go:217</span>; the rest is
+    diagnostics — <code>loom doctor</code>
+    <span class="path">internal/cli/doctor/doctor_checks_redis.go:23</span> and
+    <code>loom workspace status</code>
+    <span class="path">internal/cli/workspace/status.go:249</span>. <b>Never</b> for
+    control-plane data.</li>
+  </ul>
+
+  <aside class="sidenote">This is a recurring shape in this codebase: something that
+  looks central, is well written, and is no longer on any live path. Lesson 05 met
+  another one in the type <code>entity.Agent</code>
+  <span class="path">internal/entity/agent.go:42-66</span> — and note that it is the
+  <em>type</em> that is dead, not the <code>internal/entity</code> package, which
+  still carries <code>entity.Issue</code>, <code>entity.Comment</code> and
+  <code>entity.Dependency</code> through the whole issue path. Check for callers
+  before you build on something, and check at the right granularity.</aside>
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory: name the two client stacks, what each owns, and the
+    error type each produces.</p>
+    <div class="answer">
+      <p><code>internal/infra/fleetdb</code> implements <code>store.Store</code> for
+      control-plane entities (workspaces, repos, agents, nodes, sessions, leases,
+      drivers, skills) and maps failures onto <code>domain.Err*</code> sentinels.</p>
+      <p><code>internal/backend/fleet</code> implements
+      <code>backend.IssueBackend</code> for issue tracking (issues, comments,
+      dependencies, labels, mutations) and produces
+      <code>*backend.BackendError</code> kinds.</p>
+      <p>Same server, shared plumbing via <code>internal/fleethttp</code>,
+      deliberately separate error classification.</p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="0007">
+    <div class="q" data-answer="3">
+      <p class="stem">You need a fleet-db store client inside a new web UI service.
+      How do you get one?</p>
+      <ul class="opts">
+        <li>Import <code>internal/infra/fleetdb</code> and call its constructor</li>
+        <li>Copy the construction code from openstore.go into your service</li>
+        <li>Add your file to the guard script's exclusion glob list first</li>
+        <li>You do not — take the store handle bootstrap already gives you</li>
+      </ul>
+      <div class="why">Exactly one non-test file may construct the client, and the
+      guard fails the build on the other three approaches — rule 3 filters on the
+      file name, so widening rule 2's glob does not help. Needing a client is a
+      signal you took a wrong turn upstream; the handle is passed down to you.
+      <span class="path">scripts/check-control-plane-paths.sh:55-98</span></div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <p class="stem">An issue-fetch fails. Your code checks
+      <code>errors.Is(err, domain.ErrNotFound)</code> and never matches. Why?</p>
+      <ul class="opts">
+        <li>Issue reads bypass classification and return the raw HTTP error</li>
+        <li>Issues come from the other client stack with its own error type</li>
+        <li>The sentinel is only set for writes, never for read operations</li>
+        <li>The embedded fleet-db returns a different status code in local mode</li>
+      </ul>
+      <div class="why">Issues are served by <code>internal/backend/fleet</code>,
+      which produces <code>*backend.BackendError</code> kinds
+      <span class="path">internal/backend/errors.go:20-34</span>. The
+      <code>domain.Err*</code> sentinels belong to the control-plane store stack
+      <span class="path">internal/domain/errors.go:16-50</span>. The two are parallel
+      and neither wraps the other — the shared plumbing deliberately stops short of
+      classification <span class="path">internal/fleethttp/fleethttp.go:11-14</span>.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <p class="stem">What is the difference between local mode and cloud mode, from
+      the store client's point of view?</p>
+      <ul class="opts">
+        <li>Only where fleet-db runs — the store client code is the same</li>
+        <li>Local uses an embedded store; cloud uses the HTTP client stack</li>
+        <li>Local talks to fleet-db over gRPC; cloud talks to it over HTTP</li>
+        <li>Local skips auth headers; cloud adds the API key and actor quad</li>
+      </ul>
+      <div class="why">One env var, read by <code>DetectMode</code>, decides whether
+      fleet-db is a child process or a URL; <code>OpenStore</code> then builds the
+      same <code>fleetdb.Config</code> either way and only swaps the base URL — which
+      is exactly why a local reproduction is worth something.
+      <span class="path">internal/bootstrap/openstore.go:94-119</span></div>
+    </div>
+  </div>
+
+  <div class="callout safety">
+    <span class="label">Read-only — and it has to be</span>
+    <p>The obvious way to learn this guard is to plant a violation and watch it fire.
+    <b>Do not.</b> This checkout is shared with other people and other agents and
+    usually carries uncommitted work; "edit it, then revert" is how somebody else's
+    afternoon disappears. Every step below reads the repo or runs a
+    <em>copy</em> of the script outside it. Nothing under either checkout changes.</p>
+  </div>
+
+  <div class="exercise">
+    <h3>Try to break the boundary</h3>
+    <ol>
+      <li>The guard is ripgrep, so you can run its rules by hand. Rule 2, verbatim:
+      <code>rg -n 'github\.com/tysonthomas9/loomcli/internal/infra/fleetdb' cmd
+      internal --glob '*.go' --glob '!**/*_test.go' --glob
+      '!internal/bootstrap/openstore.go' --glob '!internal/infra/fleetdb/**'</code>.
+      No output — that is what passing looks
+      like. Now drop the last two globs and re-run. Exactly one file comes back:
+      that is the only exemption that matches anything, and you have just read it
+      off the tree instead of the script.</li>
+      <li>Now rule 3: <code>rg -n 'fleetdb\.New\(' cmd internal --glob '*.go' --glob
+      '!**/*_test.go'</code>. Four hits, all in one file. Drop
+      <code>'!**/*_test.go'</code> and count what comes back — that is the boundary
+      the guard actually draws, and it is narrower than "one file in the
+      repository".</li>
+      <li>Want to see it fail? Copy, never edit. In a throwaway directory outside
+      both repos, make <code>scripts/</code>, <code>cmd/</code> and
+      <code>internal/bootstrap/</code>; copy in
+      <code>check-control-plane-paths.sh</code>, <code>openstore.go</code> and
+      <code>mode.go</code>; write a stub Go file under
+      <code>internal/probe/</code> whose only content is a blank import of the
+      fleetdb path; run the copied script. It prints the real rule-2 failure and
+      exits 1.
+      Then delete your throwaway directory.</li>
+      <li>Find one caller of each client stack in the wild. For each, note the error
+      type it branches on. Are there any files that touch both?</li>
+      <li>Reaching back to <a href="0004-the-gate-is-the-spec.html">Lesson 04</a>:
+      this guard is check 4 of 13. Name two other guards from that lesson that, like
+      this one, encode an architectural rule rather than a style rule.</li>
+    </ol>
+    <div class="verify">
+      <b>You succeeded when</b>
+      Rule 2 returns nothing on the real tree, rule 3 returns four non-test hits and
+      more than that with tests included, your throwaway copy fails with
+      <code>fleet-db store client imported outside
+      internal/bootstrap/openstore.go</code>, and you can name a file that uses each
+      stack. If you found a file touching both, read it carefully — that is where the
+      two error models meet, and it is the most interesting code in this domain.
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><code>internal/bootstrap/openstore.go</code> — 185 lines, the one non-test
+    file allowed to construct the store client. It is short on purpose: it dispatches
+    on <code>DetectMode</code> <span class="path">internal/bootstrap/mode.go:51-59</span>,
+    hands the subprocess to <code>StartEmbedded</code>
+    <span class="path">internal/bootstrap/embedded.go:310</span>, and resolves the
+    actor and API key into a <code>fleetdb.Config</code> that
+    <code>fleethttp</code> turns into headers
+    <span class="path">internal/fleethttp/fleethttp.go:34-45</span>. Read it first,
+    then follow those three edges — that is the whole domain.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0006-anatomy-of-a-command.html"><span class="dir">Previous</span>Anatomy of a command</a>
+    <a class="next" href="0008-claiming-without-collisions.html"><span class="dir">Next</span>Claiming without collisions</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

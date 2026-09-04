@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>19. Rebuilding the world — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 5 <span class="sep">/</span> Lesson 19 <span class="sep">/</span> fleet-db</p>
+  <h1>Rebuilding the world</h1>
+  <p class="standfirst">One create, eleven derived structures, and the question you will
+  eventually be asked at 2am: <b>if I flush this workspace and replay the log, what
+  comes back?</b> The answer is not "everything", and the parts that do not come back
+  are the interesting ones.</p>
+
+  <div class="meta">
+    <span><b>Skill</b> trace a mutation to every structure it derives, and predict what a replay restores</span>
+    <span><b>Time</b> 35 min</span>
+    <span><b>Needs</b> <a href="0018-the-event-log-is-the-truth.html">Lesson 18</a>, <a href="0005-where-state-lives.html">05</a></span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span> <span class="repo fleet">fleet-db</span></span>
+  </div>
+
+  <h2>Why this exists</h2>
+
+  <p><a href="0018-the-event-log-is-the-truth.html">Lesson 18</a> left you with the
+  rule: the event is the write, everything else is derived. This lesson makes that
+  rule <em>operational</em>. "Derived" is not a mood — in this repo it is a property
+  you can check in two places, and a key that satisfies only one of them will betray
+  you the first time someone runs a recovery.</p>
+
+  <p>The word is already in the course
+  <a href="../reference/glossary.html">glossary</a>, used of <b>stage</b>: "a derived
+  view, not a stored object … folded out of an issue's event history". Same idea, one
+  level down. There, the thing folded out is a view a client renders; here it is every
+  queryable structure in Redis.</p>
+
+  <p>The whole write path is three calls. Every command method in the tracker ends in
+  the same function, and that function never touches an issue hash:</p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> internal/service/issue_service.go:75-83, 109-111</figcaption>
+<pre><code>// executeCommand validates, appends, and projects an event.
+func (s *issueService) executeCommand(ctx context.Context, event *models.Event) error {
+	if err := event.Validate(); err != nil {
+		return fmt.Errorf("invalid event: %w", err)
+	}
+	if err := s.events.Append(ctx, event); err != nil {
+		return fmt.Errorf("append event: %w", err)
+	}
+	if err := s.projector.ProjectEvent(ctx, event); err != nil {
+		// … if ctx is still valid, retry once; either way log at ERROR with severity=projection-lag …
+	}
+	return nil
+}</code></pre>
+  </figure>
+
+  <p>Note the shape of the third call: a projection failure is logged and swallowed.
+  <code>executeCommand</code> returns <code>nil</code> even when the read model was
+  never updated, because the append already succeeded and the log is the thing that
+  matters. That is only a defensible trade if the read model can be reconstructed
+  from the log on demand. So it can — mostly.</p>
+
+  <aside class="sidenote">The background projector is the "mostly". One goroutine per
+  workspace catches up from the stored cursor in batches of 100 and then tails the
+  in-process event hub — <span class="path">internal/projection/manager.go:112-145</span>,
+  <span class="path">internal/projection/projector.go:103, 121-143, 158-182</span>. It
+  re-projects events the inline call already handled; the dedup at
+  <code>projector.go:254</code> makes that a no-op.</aside>
+
+  <div class="callout key">
+    <span class="label">The two-part test for "derived"</span>
+    <p>A Redis key is derived only if <b>both</b> are true: it is matched by a pattern
+    in <code>FlushDerivedState</code>
+    (<span class="path">internal/storage/redis_recovery_store.go:58-77</span>), and
+    some handler in <code>internal/projection/handlers.go</code> writes it. Fail the
+    first and a replay leaves stale state behind. Fail the second and a replay deletes
+    it and only a hand-written post-pass can bring it back — steps 4 and 6 of
+    <code>FullReplay</code> do that for two key families, and nothing does it for the
+    worker registry or snapshots.</p>
+  </div>
+
+  <h2>The trace: one create, all the way to the ready queue</h2>
+
+  <p>Our specimen is the command you will run a hundred times:</p>
+
+<pre><code>loom data create --title "Fix the retry budget" --type task</code></pre>
+
+  <ol class="trace">
+    <li>
+      <span class="hop-file"><span class="repo loom">loomcli</span> internal/cli/data/create.go:63-77</span>
+      <span class="hop-what"><b>The command.</b> <code>RunE</code> builds
+      <code>CreateParams</code> from flags, resolves the issue backend, and calls
+      <code>ib.Create(ctx, params)</code> — the wrapper shape from
+      <a href="0006-anatomy-of-a-command.html">Lesson 06</a>. By default it sends an
+      <code>X-Idempotency-Key</code>: sha256 over today's UTC date and the marshalled
+      create body (<code>create.go:139-146</code> →
+      <span class="path">internal/backend/types.go:456-465</span>).</span>
+    </li>
+    <li>
+      <span class="hop-file"><span class="repo loom">loomcli</span> internal/backend/fleet/fleet.go:79, 516, 532-534</span>
+      <span class="hop-what"><b>One of the two client stacks.</b>
+      <code>FleetBackend</code> builds its base as
+      <code>baseURL + "/api/v1/" + workspace</code> at construction time, so
+      <code>createIssueOnce</code> only has to <code>POST "/issues"</code>, carrying
+      the idempotency headers.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file"><span class="repo fleet">fleet-db</span> internal/api/issues.go:57, 68-78</span>
+      <span class="hop-what"><b>The route.</b>
+      <code>POST /api/v1/{workspace}/issues</code>, wrapped in the
+      <code>PermIssueCreate</code> authz check. The handler reads the <em>raw bytes</em>
+      before decoding, so the idempotency layer can fingerprint exactly what the client
+      sent; and it validates the command <b>before</b> reserving an idempotency key
+      (<code>issues.go:116-122</code>).</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/service/issue_service.go:157 → internal/storage/sequence.go:36-42</span>
+      <span class="hop-what"><b>The ID — and the first thing that is not in the
+      log.</b> <code>NextIssueID</code> is a plain
+      <code>INCR fleet-db:{ws}:seq:issues</code>, formatted as
+      <code>"FLEET-42"</code>. No event describes this. Hold that thought; it is half
+      of this lesson.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/service/issue_service.go:204-241</span>
+      <span class="hop-what"><b>The event.</b> The service builds the
+      <code>models.Issue</code>, forcing the non-nil <code>Labels</code>/
+      <code>Metadata</code> invariants, marshals it, and sets that JSON as the event's
+      <code>After</code>. Action <code>issue.create</code>, entity type
+      <code>issue</code>, entity ID <code>FLEET-42</code>.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/storage/redis_eventstore.go:22-26, 65-79</span>
+      <span class="hop-what"><b>Append.</b> One Lua script does two
+      <code>XADD</code>s: <code>fleet-db:{ws}:events</code> with <code>*</code>, then
+      <code>fleet-db:{ws}:events:issue:FLEET-42</code> with the ID Redis just
+      generated. The two streams therefore share entry IDs. That ID is written back
+      onto <code>event.ID</code> at <code>:78</code> — which is what makes the next
+      hop's dedup possible.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/projection/projector.go:223-276</span>
+      <span class="hop-what"><b>The projector.</b> Look up the handler by action; take
+      the <em>per-workspace</em> mutex (<code>:249</code>); skip only if the cursor is
+      <b>exactly</b> this event ID (<code>:254</code> — strict equality, not a range
+      check, so out-of-order inline projections are not silently dropped); open a
+      <code>TxPipeline</code>; run the handler; queue the cursor
+      <code>SET</code> <em>into the same pipeline</em> (<code>:269-271</code>); one
+      <code>Exec</code>. Read model and cursor commit together or not at all.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/projection/handlers.go:68-145</span>
+      <span class="hop-what"><b>The handler.</b> <code>handleIssueCreate</code> is the
+      only code in this whole trace that writes a queryable structure. It writes the
+      eleven families in the table below, with no fixed key count: the FTS index alone
+      writes one SET per unique token across five text fields
+      (<span class="path">internal/storage/search.go:51-65</span>), so the create above
+      lands eleven keys and an issue with a description lands dozens. It sees no Redis
+      client: it writes through a
+      <code>ProjectionContext</code>
+      (<span class="path">internal/projection/writer.go:22-41</span>), which buffers
+      into the pipeline. That indirection is why a Postgres projector could be added
+      later without touching a single handler.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/service/issue_service.go:247 → internal/storage/idempotency.go:162</span>
+      <span class="hop-what"><b>And one more write outside the log.</b> After the
+      event, the service remembers a soft-duplicate fingerprint at
+      <code>fleet-db:{ws}:softdup:{fp}</code> with a TTL. Like the ID counter, no event
+      carries it and no handler writes it.</span>
+    </li>
+  </ol>
+
+  <h2>Everything hop 8 writes</h2>
+
+  <p>Every key below is built by a function in
+  <span class="path">internal/storage/keys.go</span>; <code>make lint-keys</code> fails
+  the build on any <code>"fleet-db:</code> literal in non-test Go source outside
+  <code>internal/storage/</code> — <code>_test.go</code> and <code>vendor/</code> are
+  exempt (<span class="path">Makefile:128-131</span>). Line
+  numbers in the last column are
+  <code>internal/projection/handlers.go</code>.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Key</th><th>Redis type</th><th>Written at</th></tr></thead>
+    <tbody>
+      <tr><td><code>fleet-db:{ws}:issues:FLEET-42</code></td><td>HASH</td><td><code>:78-81</code> — every field of <code>After</code>, plus <code>id</code> and <code>workspace</code></td></tr>
+      <tr><td><code>fleet-db:{ws}:idx:status:open</code></td><td>SET</td><td><code>:84-88</code> — defaults to <code>open</code> if the event omits it</td></tr>
+      <tr><td><code>fleet-db:{ws}:idx:priority</code></td><td>ZSET</td><td><code>:91-95</code> — score is the priority, 0–4</td></tr>
+      <tr><td><code>fleet-db:{ws}:idx:type:task</code></td><td>SET</td><td><code>:98-100</code></td></tr>
+      <tr><td><code>fleet-db:{ws}:idx:assignee:unassigned</code></td><td>SET</td><td><code>:103-104</code> — a literal key, via <code>assigneeKeyForValue</code> (<code>helpers.go:18-23</code>)</td></tr>
+      <tr><td><code>…:idx:label:{l}</code> and <code>…:labels</code></td><td>SET, SET</td><td><code>:107-110</code> — per label, plus the workspace label registry</td></tr>
+      <tr><td><code>fleet-db:{ws}:idx:repo:{org/repo}</code></td><td>SET</td><td><code>:113-115</code></td></tr>
+      <tr><td><code>…:idx:parent:{p}</code> and <code>…:deps:children:{p}</code></td><td>SET, SET</td><td><code>:118-121</code> — only when the create names a parent</td></tr>
+      <tr><td><code>fleet-db:{ws}:idx:deferred</code></td><td>SET</td><td><code>:123-126</code> — if status is <code>deferred</code> <em>or</em> <code>defer_until</code> is set</td></tr>
+      <tr><td><code>fleet-db:{ws}:queue:ready</code></td><td>ZSET</td><td><code>:128-139</code> — see the trap below</td></tr>
+      <tr><td><code>…:fts:tok:{token}</code>, <code>…:fts:issue:{id}</code>, <code>…:fts:registry</code></td><td>SET, SET, ZSET</td><td><code>:143</code> → <code>fts.go:13-25</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Two things are <em>not</em> in that list and are worth naming out loud. There is
+  no write to <code>fleet-db:{ws}:blocked</code> — a brand-new issue cannot have
+  blockers, which is also why <code>shouldRebuildCache</code> returns
+  <code>false</code> for <code>issue.create</code>
+  (<span class="path">internal/projection/rebuild_trigger.go:19-45</span>). And there
+  is no write to the sequence counter, the streams, the soft-dup key or the
+  idempotency record: every one of those happened on the command side, in hops 3, 4, 6
+  and 9.</p>
+
+  <h2>Now the real question</h2>
+
+  <p><code>POST /api/v1/{workspace}/admin/replay</code> exists
+  (<span class="path">internal/api/recovery.go:43-47</span>). It returns 202 and runs
+  <code>FullReplay</code> in a goroutine. That function is 100 lines and it is the
+  entire answer to this lesson's question — six steps, in this order:</p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> internal/recovery/service.go:86-99, 155-168 (step 3 and its loop elided)</figcaption>
+<pre><code>func (s *RecoveryService) FullReplay(ctx context.Context, workspace string, progress func(ReplayProgress)) (*ReplayResult, error) {
+	start := time.Now()
+	s.logger.Info("starting full replay", "workspace", workspace)
+
+	// Step 1: Flush all derived state.
+	if err := s.flushDerivedState(ctx, workspace); err != nil {
+		return nil, fmt.Errorf("recovery: flush: %w", err)
+	}
+
+	// Step 2: Reset the projector cursor (both Redis and in-memory).
+	if _, err := s.store.DeleteKeys(ctx, storage.ProjectorCursorKey(workspace)); err != nil {
+		return nil, fmt.Errorf("recovery: reset cursor: %w", err)
+	}
+	s.projector.ResetCursor(workspace)
+
+	// … Step 3: read the global stream in batches of 500 and ProjectEvent each one …
+
+	// Step 4: Rebuild per-issue event streams.
+	if err := s.rebuildPerIssueStreams(ctx, workspace, progress); err != nil {
+		return nil, fmt.Errorf("recovery: rebuild per-issue streams: %w", err)
+	}
+
+	// Step 5: Rebuild blocked cache for consistency.
+	if err := s.cacheRebuilder.RebuildBlockedCache(ctx, workspace); err != nil {
+		return nil, fmt.Errorf("recovery: rebuild blocked cache: %w", err)
+	}
+
+	// Step 6: Recover sequence counters.
+	if err := s.recoverSequences(ctx, workspace); err != nil {
+		return nil, fmt.Errorf("recovery: recover sequences: %w", err)
+	}</code></pre>
+  </figure>
+
+  <p>Read steps 4, 5 and 6 as a confession. If replaying the log rebuilt the world,
+  the function would end at step 3. Three post-passes exist precisely because the
+  projector cannot produce those structures from events alone.</p>
+
+  <p>Step 1 is the other half of the two-part test, and it is a hand-maintained list:</p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> internal/storage/redis_recovery_store.go:48-78</figcaption>
+<pre><code>// FlushDerivedState deletes all derived/projected state for a workspace,
+// preserving only the global event stream and workspace metadata.
+//
+// NOTE: If a new derived key pattern is added to the storage layer, this
+// method must be updated to include it. The complete list of derived key
+// patterns is maintained here to keep key knowledge in the storage layer.
+//
+// ACL role assignments (ACLKeyPattern) are intentionally excluded. ACL state
+// is not derived from the event stream and is not rebuilt by replay. It is
+// preserved across disaster recovery to avoid locking out all users.
+func (s *RedisRecoveryStore) FlushDerivedState(ctx context.Context, workspace string) (int64, error) {
+	patterns := []string{
+		IssueKeyPattern(workspace),
+		IndexKeyPattern(workspace),
+		QueueKeyPattern(workspace),
+		DepsKeyPattern(workspace),
+		CommentsKeyPattern(workspace),
+		WorkersKeyPattern(workspace),
+		LocksKeyPattern(workspace),
+		SeqKeyPattern(workspace),
+		IssueEventStreamPattern(workspace),
+		SnapshotsKeyPattern(workspace),
+		FTSKeyPattern(workspace),
+	}
+
+	// Also delete specific non-pattern keys.
+	specificKeys := []string{
+		BlockedSetKey(workspace),
+		LabelsKey(workspace),
+	}</code></pre>
+  </figure>
+
+  <p>Eleven glob patterns and two exact keys, against the 175 workspace-scoped key
+  patterns <code>keys.go</code> documents across some sixty top-level families
+  (<code>grep -c '^// Pattern: fleet-db:{ws}' internal/storage/keys.go</code>).
+  Everything not on this list is left
+  exactly as it was — which is deliberate for
+  <code>fleet-db:{ws}:acl:*</code>, and something you have to reason about for
+  everything else.</p>
+
+  <h2>The table you came for</h2>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Structure</th><th>Flushed?</th><th>After the replay</th></tr></thead>
+    <tbody>
+      <tr><td>Issue hashes, all eight <code>idx:</code> families, <code>comments:</code>, <code>fts:</code></td><td>Yes</td><td><b>Restored</b> by the handlers, event by event (<code>handlers.go:68-145</code> and its siblings)</td></tr>
+      <tr><td><code>fleet-db:{ws}:blocked</code> and <code>queue:ready</code></td><td>Yes (<code>blocked</code> as an exact key)</td><td><b>Restored</b> twice over: inline by the handlers — only <code>handleDepAdd</code> adds to <code>blocked</code> (<code>handlers.go:825</code>), the close and delete paths just remove (<code>helpers.go:310</code>) — then both <code>DEL</code>ed and rebuilt from the read model by step 5's Lua (<span class="path">internal/storage/rebuild_cache.go:115-116, 134-142</span>)</td></tr>
+      <tr><td><code>fleet-db:{ws}:events:issue:{id}</code></td><td>Yes</td><td><b>Restored by step 4, not by any handler</b> — every event re-<code>XADD</code>ed under its original ID (<code>service.go:204-256</code>)</td></tr>
+      <tr><td><code>fleet-db:{ws}:seq:issues</code>, <code>seq:comments</code></td><td>Yes</td><td><b>Restored by step 6</b>, and derived from the <em>read model</em> — <code>ScanIssueIDs</code> over surviving issue hashes (<code>service.go:262-285</code>)</td></tr>
+      <tr><td><code>fleet-db:{ws}:locks:issue:{id}</code></td><td>Yes</td><td><b>Sometimes restored</b>, with a brand-new TTL — see the trap below</td></tr>
+      <tr><td><code>fleet-db:{ws}:workers:*</code></td><td>Yes</td><td><b>Gone.</b> There is no <code>worker.*</code> action; the registry is written directly at claim time (<code>issue_service.go:576-595</code>)</td></tr>
+      <tr><td><code>fleet-db:{ws}:snapshots:*</code></td><td>Yes</td><td><b>Gone</b> until the compactor next sweeps — snapshots are written by <code>internal/compaction</code>, never by a handler</td></tr>
+      <tr><td><code>…:idempotency:{digest}</code>, <code>…:softdup:{fp}</code></td><td><b>No</b></td><td>Untouched — but they are TTL'd and nothing rebuilds them, so if the Redis instance itself was lost they are gone for good</td></tr>
+      <tr><td><code>fleet-db:{ws}:acl:*</code></td><td><b>No</b></td><td>Deliberately preserved so a recovery cannot lock every user out (<code>redis_recovery_store.go:55-57</code>)</td></tr>
+      <tr><td>Driver runs, task runs, leases, outbox, triggers, connectors, topics</td><td><b>No</b></td><td>Untouched and unrebuilt. For driver runs this is explicit: the handler is a documented no-op (<code>handlers.go:1324-1338</code>)</td></tr>
+      <tr><td><code>fleet-db:{ws}:events</code></td><td><b>No</b></td><td>It is the input. A test pins that the flush preserves it (<code>internal/recovery/service_test.go:178-202</code>)</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout fleet">
+    <span class="label">Backend note</span>
+    <p>All of this is the Redis backend. In Postgres mode the recovery routes are not
+    registered at all —
+    <span class="path">cmd/fleet-db/main.go:740-746</span> logs
+    <code>disaster recovery routes not available for postgres backend</code>. "Replay
+    the workspace" is not an answer you can give an operator without first asking which
+    backend they are on.</p>
+  </div>
+
+  <div class="callout trap">
+    <span class="label">Trap — "a replay is a pure function of the log"</span>
+    <p>It is not. The ready-queue decision reads the wall clock:</p>
+<pre><code>	readyInput := storage.ReadyInput{
+		Status:     models.Status(status),
+		Type:       models.IssueType(issueType),
+		Assignee:   assignee,
+		DeferUntil: deferUntil,
+		Now:        time.Now().UTC(),
+	}
+	if storage.IsReadyEligible(readyInput) {
+		pc.AddToSortedSet(ctx, storage.ReadyQueueKey(ws), float64(priority), id)
+	}</code></pre>
+    <p><span class="path">internal/projection/handlers.go:130-139</span>, and
+    <code>IsReadyEligible</code> compares <code>DeferUntil</code> against that
+    <code>Now</code> (<span class="path">internal/storage/ready_eligible.go:42-47</span>).
+    An issue created last month with <code>defer_until</code> set to last Tuesday was
+    <em>excluded</em> from the queue when the event was first projected and is
+    <em>included</em> when the same event is replayed today. Same log, same handler,
+    different answer. Meanwhile the deferred <em>index</em> replays faithfully, because
+    <code>isDeferredIndexState</code> asks no question about time
+    (<span class="path">internal/projection/helpers.go:123-125</span>). Two structures
+    that look like they encode the same fact do not replay the same way.</p>
+  </div>
+
+  <div class="callout trap">
+    <span class="label">Trap — "locks are runtime state, a replay cannot resurrect one"</span>
+    <p>Exactly three lines in <code>handlers.go</code> touch the lock key:
+    <code>:582</code> (delete, on <code>issue.delete</code>), <code>:648</code>
+    (delete, on <code>issue.release</code>), and this one:</p>
+<pre><code>	// Set lock if TTL specified.
+	if ttlStr := event.Metadata[models.MetaLockTTL]; ttlStr != "" {
+		if ttl, err := strconv.Atoi(ttlStr); err == nil &amp;&amp; ttl &gt; 0 {
+			pc.SetValue(ctx, storage.IssueLockKey(ws, id), actor, time.Duration(ttl)*time.Second)
+		}
+	}</code></pre>
+    <p><span class="path">internal/projection/handlers.go:613-618</span>. The claim
+    event carries <code>lock_ttl_seconds</code> in its metadata, defaulting to 300
+    (<span class="path">internal/service/issue_service.go:500-503, 566-568</span>). So a
+    claim from three hours ago is replayed into a <b>live lock with a fresh 300-second
+    TTL</b>, measured from the replay. And nothing clears it on close:
+    <code>handleIssueClose</code> (<span class="path">handlers.go:305-367</span>) never
+    mentions the lock key, because in normal operation the lock is simply left to
+    expire. A replay restores a lock whose real-world life ended long ago — the ghost
+    of <a href="0008-claiming-without-collisions.html">Lesson 08</a>'s race.</p>
+  </div>
+
+  <div class="callout trap">
+    <span class="label">Trap — "verify says consistent, so the replay was clean"</span>
+    <p><code>GET /api/v1/{workspace}/admin/verify</code> replays the log into an
+    in-memory map and diffs it against Redis
+    (<span class="path">internal/recovery/verify.go:32-116</span>). Read what it
+    actually compares: five fields — <code>status</code>, <code>priority</code>,
+    <code>type</code>, <code>title</code>, <code>assignee</code> — on issue hashes,
+    plus orphan detection (<code>verify.go:86, 101-116</code>). It never looks at an
+    index, the ready queue, the blocked set, a dependency edge or the FTS sets. Worse,
+    <code>applyEventToState</code> (<code>verify.go:140-226</code>) is a
+    <em>second, simpler</em> implementation of the fold that handles ten issue actions
+    and ignores every other one. <code>"consistent": true</code> means those five fields agree with
+    that simplified model. The real structural checker is
+    <code>RedisStorage.VerifyInvariants</code>
+    (<span class="path">internal/storage/invariants.go:51</span>), which has no HTTP
+    route: its only invocation is the test target at
+    <span class="path">Makefile:86-89</span>.</p>
+  </div>
+
+  <h2>The pattern to copy when you add an event</h2>
+
+  <ol>
+    <li><b>Write the handler, or the gate stops you.</b> Every
+    <code>ActionXxx Action = "…"</code> constant in
+    <code>internal/models/event.go</code> must appear in the handler map in
+    <code>internal/projection/handlers.go</code> — 43 constants, 43 registrations, checked
+    by <span class="path">scripts/harness/cmd/check_action_handler_coverage/main.go:48-57</span>.
+    A deliberate no-op is legal; it must say so and carry the
+    <code>harness:noop-ok</code> marker.</li>
+    <li><b>Then update the flush list.</b> If your handler writes a new key family,
+    <code>FlushDerivedState</code> is the second half of the contract and nothing
+    enforces it — the source comment asks you by hand
+    (<span class="path">redis_recovery_store.go:51-53</span>).</li>
+    <li><b>Keep the handler a function of the event.</b> Every <code>time.Now()</code>
+    and every read of unprojected state is a place where replay and live projection
+    diverge. Where the event carries the value —
+    <code>close_reason</code>, <code>lock_ttl_seconds</code>, the assignee in
+    <code>Before</code>/<code>After</code> — use it.</li>
+    <li><b>Write through <code>ProjectionContext</code>, never a raw pipeline.</b>
+    Reads see committed state, writes buffer into the transaction
+    (<span class="path">internal/projection/writer.go:8-35</span>). It is the seam that
+    lets one handler serve two backends.</li>
+  </ol>
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory: a workspace has just been flushed and replayed. Name
+    three Redis structures that come back and three that do not — and state the test
+    that decides which list a key lands in.</p>
+    <div class="answer">
+      <p><b>The test, both halves.</b> Matched by a pattern in
+      <code>FlushDerivedState</code>
+      (<span class="path">internal/storage/redis_recovery_store.go:58-77</span>)
+      <em>and</em> written by a handler in
+      <span class="path">internal/projection/handlers.go</span>.</p>
+      <p><b>Come back:</b> issue hashes, the <code>idx:</code> families, comments, FTS
+      — all from handlers; <code>queue:ready</code> and <code>blocked</code> from the
+      handlers and then again from step 5's wholesale rebuild.
+      Also the per-issue streams and the sequence counters, but from post-passes 4 and 6
+      of <code>FullReplay</code>, not from any handler
+      (<span class="path">internal/recovery/service.go:155-168</span>).</p>
+      <p><b>Do not:</b> the worker registry (flushed, no <code>worker.*</code> action
+      exists), snapshots (flushed, written only by <code>internal/compaction</code>),
+      and the whole control-plane half — driver runs, task runs, leases, outbox —
+      which is neither flushed nor rebuilt; <code>handleDriverRunLifecycle</code> is an
+      intentional no-op (<span class="path">handlers.go:1324-1338</span>).</p>
+      <p><b>Half credit for:</b> idempotency and soft-dup records, which are on neither
+      list — untouched by the flush, never rebuilt.</p>
+    </div>
+  </div>
+
+  <div class="cloze" data-answer="internal/storage/redis_recovery_store.go|redis_recovery_store.go">
+    <p class="stem">The authoritative list of what counts as derived state is the
+    <code>patterns</code> slice in <input>.</p>
+    <div class="why">Eleven glob patterns plus two exact keys, at
+    <span class="path">internal/storage/redis_recovery_store.go:58-77</span>. It lives
+    in the storage layer on purpose: key knowledge stays where the key builders are
+    (<code>:51-53</code>). Nothing generates or checks it, so it is the first place to
+    look when a recovery leaves something stale.</div>
+  </div>
+
+  <div class="quiz" data-quiz="0019">
+    <div class="q" data-answer="2">
+      <p class="stem">Which of these keys is flushed by a full replay and rebuilt by
+      no projection handler?</p>
+      <ul class="opts">
+        <li>fleet-db:{ws}:idx:status:open</li>
+        <li>fleet-db:{ws}:fts:registry</li>
+        <li>fleet-db:{ws}:workers:active</li>
+        <li>fleet-db:{ws}:queue:ready</li>
+      </ul>
+      <div class="why"><code>workers:*</code> is in the flush list
+      (<span class="path">redis_recovery_store.go:65</span>) but there is no
+      <code>worker.*</code> action in <code>internal/models/event.go</code> at all —
+      the registry is written directly by the service on claim
+      (<span class="path">internal/service/issue_service.go:579-595</span>). The other
+      three are all written by <code>handleIssueCreate</code>
+      (<code>handlers.go:88, 143, 138</code>). The FTS registry is the sharp near-miss:
+      it looks like an auxiliary cache, and it is fully derived.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <p class="stem">FLEET-7 was claimed at 08:00 with the default TTL and never
+      released. You replay the workspace at 10:00. Its lock key is now:</p>
+      <ul class="opts">
+        <li>absent: the flush removed it, no handler rewrites it</li>
+        <li>present: the claim handler rewrote it, expiring 10:05</li>
+        <li>present: rewritten by the handler, still expiring 08:05</li>
+        <li>absent: locks are outside the flushed key namespace</li>
+      </ul>
+      <div class="why"><code>handleIssueClaim</code> re-<code>SET</code>s the lock with
+      the TTL from the event's metadata, applied at projection time
+      (<span class="path">internal/projection/handlers.go:613-618</span>; default 300s
+      at <span class="path">issue_service.go:500-503</span>). The third option is the
+      tempting one — the event does carry a TTL, but it carries a
+      <em>duration</em>, not a deadline, so the clock restarts.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <p class="stem">Reaching back to <a href="0013-realtime-one-frame-at-a-time.html">Lesson
+      13</a>: a browser holding an opaque mutations cursor reconnects after a full
+      replay. What happens?</p>
+      <ul class="opts">
+        <li>It resumes: replay never writes the global event stream</li>
+        <li>It 400s: replay renumbers events and invalidates cursors</li>
+        <li>It resumes: the projector rewrites client cursors on replay</li>
+        <li>It 400s: the flush deleted the stream that cursor indexes</li>
+      </ul>
+      <div class="why">The cursor is a <code>fleet-db:{ws}:events</code> entry ID, and
+      the mutations endpoint reads that stream through <code>GetEvents</code>
+      (<span class="path">internal/api/mutations.go:129</span>,
+      <span class="path">internal/storage/redis_eventstore.go:83-84</span>).
+      <code>FullReplay</code> only ever reads it; the flush list contains no pattern
+      matching it, and a test pins that
+      (<span class="path">internal/recovery/service_test.go:178-202</span>). The
+      per-issue streams <em>are</em> deleted and rewritten — under their original IDs
+      (<span class="path">internal/recovery/service.go:228-236</span>).</div>
+    </div>
+  </div>
+
+  <div class="exercise">
+    <h3>Prove the ID counter is not derived, then predict a replay</h3>
+
+    <div class="callout safety">
+      <span class="label">Before you start</span>
+      <p>Every step here is read-only: greps, file reads, and one <code>go test</code>
+      of a single package against an in-process miniredis. Do <b>not</b> run
+      <code>make local-mode-up</code> or <code>local-mode-down</code>, do not start a
+      server on a fixed port, and do not touch a podman stack or agent-browser session
+      you did not create. If you ever do bring a stack up, pick your own compose
+      project name and an unclaimed port block first. These machines are shared.</p>
+    </div>
+
+    <ol>
+      <li>In the pinned <span class="repo fleet">fleet-db</span> checkout, read the
+      derived-state list:
+      <code>sed -n '48,78p' internal/storage/redis_recovery_store.go</code>. Write down
+      the eleven patterns and two exact keys. Which one surprises you?</li>
+      <li>Now prove the issue-ID counter is on the wrong side of the line:
+      <code>grep -rn "IssueSeqKey" --include="*.go" internal/ | grep -v _test.go</code>.
+      Read every hit. Which package is conspicuously absent from the results?</li>
+      <li>Run the two tests that pin both halves of this lesson:
+      <code>go test ./internal/recovery/ -run 'TestFullReplay_SequenceRecovery|TestFlushDerivedState_PreservesGlobalEventStream' -v</code>.
+      Then open <code>internal/recovery/service_test.go:334-369</code> and name the
+      <em>step number</em> of <code>FullReplay</code> that makes the assertion at
+      <code>:366</code> pass.</li>
+      <li><b>Predict before you read.</b> A workspace has FLEET-1 through FLEET-9, all
+      still open. Someone deletes FLEET-9, then runs a full replay. What is
+      <code>fleet-db:{ws}:seq:issues</code> afterwards, and what ID does the next
+      create mint? Justify it from exactly two lines:
+      <code>internal/recovery/service.go:267</code> and
+      <code>internal/projection/handlers.go:462</code>.</li>
+      <li>Reaching back to <a href="0008-claiming-without-collisions.html">Lesson 08</a>:
+      a claim writes the issue lock twice — once on the command side, once on the
+      projection side. Find both (<code>internal/service/issue_service.go:510</code> and
+      <code>internal/projection/handlers.go:616</code>) and say which one a replay
+      repeats, and which one it cannot.</li>
+      <li>Finally, run the two-part test yourself on a key you have never seen:
+      <code>fleet-db:{ws}:idx:deferred</code>. Find the builder in
+      <code>internal/storage/keys.go</code>, find the handler that writes it, and decide
+      in under two minutes whether a replay restores it.</li>
+    </ol>
+
+    <div class="verify">
+      <b>You succeeded when</b>
+      Your grep returns <b>8 hits across exactly 3 files</b> —
+      <code>storage/keys.go</code>, <code>storage/sequence.go</code>,
+      <code>storage/invariants.go</code> — and <b>none under
+      <code>internal/projection/</code></b>; both tests report PASS; you named step 6
+      (<code>recoverSequences</code>) for the assertion; and your answer to step 4 is
+      <b>8, and the next create re-mints FLEET-9</b> — because
+      <code>recoverSequences</code> scans surviving <em>issue hashes</em>, and
+      <code>handleIssueDelete</code> deleted FLEET-9's hash, so the log's memory of that
+      ID is not consulted.
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><code>internal/recovery/service.go</code> — 326 lines, and the only file in
+    either repo that states, as executable code, what "rebuild the world" means here.
+    Read <code>FullReplay</code> once for the six steps, then read
+    <code>recoverSequences</code> (<code>:262-326</code>) slowly: it derives the issue
+    counter from the read model and the comment counter from the log, and the reason
+    for that asymmetry is the whole lesson.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0018-the-event-log-is-the-truth.html"><span class="dir">Previous</span>The event log is the truth</a>
+    <a class="next" href="0020-where-atomicity-lives.html"><span class="dir">Next</span>Where atomicity lives</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

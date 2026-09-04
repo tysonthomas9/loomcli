@@ -1,0 +1,118 @@
+/* reference.css — shared layout for the cards in reference/.
+ *
+ * Load AFTER course.css. Reference cards are a different document type from
+ * lessons: denser, scanned rather than read, and printed. Everything here is
+ * about getting more on a page without losing the ability to find one row.
+ *
+ * Used by: glossary.html, navigation.html, fleet-db-data-model.html,
+ * first-task-workflow.html. If a third card wants a new idiom, add it here
+ * rather than inlining a <style> block.
+ */
+
+/* ---- Table of contents: two columns, never split an entry across them ---- */
+.toc {
+  font-family: var(--sans);
+  font-size: 0.83rem;
+  columns: 2;
+  column-gap: 2.5rem;
+  padding: 1rem 1.25rem;
+  background: var(--paper-sunk);
+  border-radius: 6px;
+  margin-bottom: 2.5rem;
+}
+.toc ol { margin: 0; padding-left: 1.2rem; }
+.toc li { margin-bottom: 0.3rem; break-inside: avoid; }
+
+/* ---- Term list: the glossary idiom. The term carries the visual weight. ---- */
+.term { margin: 0 0 1.15rem; }
+.term dt {
+  font-family: var(--sans);
+  font-weight: 700;
+  font-size: 0.92rem;
+  color: var(--ink);
+  margin-bottom: 0.2rem;
+}
+.term dd { margin: 0; }
+.term .def { margin: 0 0 0.25rem; }
+.term .avoid {
+  font-family: var(--sans);
+  font-size: 0.75rem;
+  color: var(--ink-faint);
+}
+.term .avoid b {
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 0.66rem;
+}
+/* Where the thing is defined in source — always path:line, always monospace. */
+.term .where,
+.pat .ex {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+  display: block;
+  margin-top: 0.15rem;
+}
+
+/* A term whose misuse costs you something. */
+.danger dt { color: var(--warn); }
+
+/* ---- Decision list: "if you want X, go to Y" ---- */
+.decide { font-family: var(--sans); font-size: 0.86rem; margin: 0 0 1.6rem; }
+.decide dt {
+  font-weight: 700;
+  color: var(--ink);
+  padding: 0.5rem 0 0.15rem;
+  border-top: 1px solid var(--rule-soft);
+}
+.decide dd { margin: 0 0 0.5rem; color: var(--ink-soft); }
+.decide dd code { font-size: 0.86em; }
+
+/* ---- Pattern list: a named shape plus the file to copy it from ---- */
+.pat { margin: 0 0 1rem; }
+.pat dt {
+  font-family: var(--sans);
+  font-weight: 700;
+  font-size: 0.88rem;
+  margin-bottom: 0.15rem;
+}
+.pat dd { margin: 0; font-size: 0.95rem; }
+
+/* ---- Checklist: the first-task idiom. Steps you tick off, in order. ---- */
+ol.check { list-style: none; padding: 0; margin: 0 0 1.6rem; counter-reset: step; }
+ol.check > li {
+  counter-increment: step;
+  position: relative;
+  padding: 0.5rem 0 0.5rem 2.4rem;
+  border-bottom: 1px solid var(--rule-soft);
+  margin: 0;
+}
+ol.check > li:last-child { border-bottom: 0; }
+ol.check > li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 0.5rem;
+  width: 1.6rem;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  line-height: 1.5rem;
+  color: var(--paper);
+  background: var(--accent);
+  border-radius: 3px;
+}
+ol.check .what { font-family: var(--sans); font-weight: 600; font-size: 0.92rem; }
+ol.check .how { display: block; margin-top: 0.2rem; }
+ol.check .how code { font-size: 0.86em; }
+
+/* ---- Print ---- */
+@media print {
+  .toc { columns: 2; }
+  .term,
+  .pat,
+  .decide dt,
+  ol.check > li { break-inside: avoid; }
+}

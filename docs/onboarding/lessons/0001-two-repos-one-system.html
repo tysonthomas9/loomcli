@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>01. Two repos, one system — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 1 <span class="sep">/</span> Lesson 01 <span class="sep">/</span> Orientation</p>
+  <h1>Two repos, one system</h1>
+  <p class="standfirst">By the end of this lesson you can say what each repo owns,
+  and find the source file for any <code>loom</code> command in under two minutes
+  without asking anyone.</p>
+
+  <div class="meta">
+    <span><b>Skill</b> locate the code behind any CLI command</span>
+    <span><b>Time</b> 25 min</span>
+    <span><b>Needs</b> nothing — start here</span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span> <span class="repo fleet">fleet-db</span></span>
+  </div>
+
+  <h2>What Loom is</h2>
+
+  <p>One sentence, from the README:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> README.md:3</figcaption>
+<pre><code>Agent management CLI for parallel AI coding workflows backed by fleet-db.</code></pre>
+  </figure>
+
+  <p>Unpacked: Loom runs many AI coding agents at once. Each gets its own git
+  worktree and its own branch. Each picks tasks from a shared issue tracker,
+  works independently, and integrates back through a structured push/pull/sync
+  workflow. The hard problem is not calling a model — it is that <em>N agents
+  sharing one issue tracker must never both claim the same task</em>, and that
+  when one dies mid-run you must be able to tell what it actually did.</p>
+
+  <aside class="sidenote">That framing explains most of the architecture you are
+  about to meet. Atomic claiming, ownership leases, event sourcing, and the
+  session-artifact contract all exist to answer "who owns this work?" and "what
+  really happened?" under concurrency.</aside>
+
+  <div class="callout key">
+    <span class="label">The one idea</span>
+    <p><b>loomcli orchestrates. fleet-db remembers.</b> Every piece of durable
+    shared state lives in fleet-db; loomcli is the thing that decides what to run,
+    runs it, and shows you what happened. When you cannot remember where something
+    belongs, ask which of those two sentences it fits.</p>
+  </div>
+
+  <h2>The split</h2>
+
+  <div class="scroll-x">
+  <table>
+    <thead>
+      <tr><th></th><th>loomcli</th><th>fleet-db</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>Owns</b></td>
+        <td>The CLI, the daemon and agent runtime, the driver/workflow executor, the web UI (server + React app), the desktop app</td>
+        <td>Issues, epics, dependencies, the ready queue, the event log, workspaces, auth</td>
+      </tr>
+      <tr>
+        <td><b>Shape</b></td>
+        <td>Go control plane + React frontend</td>
+        <td>Go service over Redis (default) or Postgres</td>
+      </tr>
+      <tr>
+        <td><b>Scale</b></td>
+        <td>~190k LOC Go — 51 top-level packages under <code>internal/</code>, 158 counting nested ones — plus ~252k LOC TypeScript in 1,033 frontend files</td>
+        <td>~90k LOC Go across 23 packages</td>
+      </tr>
+      <tr>
+        <td><b>Biggest package</b></td>
+        <td><code>internal/cli</code> (~67k), then <code>internal/webui</code> (~48k)</td>
+        <td><code>internal/storage</code> (~41k), then <code>internal/api</code> (~13k)</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Those numbers are the point of the table. You are not going to read this
+  codebase. You are going to learn to <em>navigate</em> it, which is a different
+  skill and the one this lesson teaches.</p>
+
+  <p>Where they come from: non-test Go under <code>internal/</code> in each repo,
+  <code>find internal -name '*.go' ! -name '*_test.go' | xargs wc -l</code>, and the
+  same command per package for the row below it. The TypeScript figure is every
+  <code>.ts</code>/<code>.tsx</code> under
+  <code>internal/webui/frontend/src</code> and, unlike the Go one, counts tests.
+  The ownership row: <span class="path">internal/driver/</span>,
+  <span class="path">internal/webui/frontend/package.json:71</span>,
+  <span class="path">desktop/src-tauri/</span>,
+  <span class="path">fleet-db README.md:5-7</span>,
+  <span class="path">fleet-db internal/models/workspace.go</span>,
+  <span class="path">fleet-db internal/auth/</span>; the backend default is
+  <span class="path">fleet-db internal/config/config.go:17,185</span>.</p>
+
+  <h2>The two legal paths</h2>
+
+  <p>There are exactly two valid control-plane paths, and the README states them
+  as a rule rather than a description — runtime code that invents a third is
+  wrong:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> README.md:25-33</figcaption>
+<pre><code>local mode:
+loomcli -&gt; HTTP client -&gt; fleet-db subprocess -&gt; RedisStorage -&gt; miniredis or external Redis
+
+cloud mode:
+loomcli -&gt; HTTP client -&gt; fleet-db service -&gt; Redis/Postgres</code></pre>
+  </figure>
+
+  <p>Read what those two lines have in common: <b>HTTP client</b> appears in both.
+  loomcli never reaches into fleet-db's storage directly. Even in local mode — where
+  fleet-db is a subprocess Loom spawned itself and Redis may be an in-process
+  miniredis — the call still goes out over HTTP to fleet-db.</p>
+
+  <aside class="sidenote">You will grep for "redis" in loomcli and find hits — an
+  optional client in <code>internal/kv</code>, and an in-process miniredis that
+  <code>loom serve</code> boots for terminal state. Those are a <em>different</em>
+  Redis from fleet-db's, used for node-local concerns.
+  <span class="path">internal/kv/client.go:36-42</span>
+  <span class="path">internal/webui/localredis/manager.go:1-4</span>
+  <span class="path">internal/cli/serve/daemonwire/localredis.go:17</span>
+  The rule above is about the control plane, and it holds — CI enforces it.
+  <span class="path">scripts/check-control-plane-paths.sh:12-18</span></aside>
+
+  <div class="callout key">
+    <span class="label">Why this matters on day one</span>
+    <p>Local mode is not a mock. It is the same service, the same HTTP surface,
+    the same storage layer — just spawned for you and pointed at an embedded
+    Redis. So a bug you reproduce locally is usually a real bug, and code you
+    write against local mode usually works in cloud mode. That is a deliberate
+    design property, and it is why "it worked locally" carries weight here.</p>
+  </div>
+
+  <p>Local mode is the default and needs no Redis or Postgres installed — the
+  README's "zero install" means that, not zero binaries. It still needs a
+  <code>fleet-db</code> executable, resolved in order from
+  <code>FLEET_DB_BIN</code>, <code>PATH</code>, a sibling of the <code>loom</code>
+  binary, then <code>&lt;loom-dir&gt;/bin/fleet-db</code>; miss all four and the
+  first command fails with <code>fleet-db binary not found</code>.
+  <span class="path">internal/bootstrap/embedded.go:526-542</span></p>
+
+  <p>Cloud mode is selected by setting <code>LOOM_FLEET_DB_URL</code> before
+  running any command, and <code>DetectMode</code> is the only place in the tree
+  that distinction is made.
+  <span class="path">internal/bootstrap/mode.go:51-58</span></p>
+
+  <h2>Finding anything: the CLI</h2>
+
+  <p>Start with the question you will actually have — <em>"where is the code for
+  <code>loom task</code>?"</em> The answer comes from one convention.</p>
+
+  <p><code>internal/cli</code> holds <b>31 subdirectories</b>
+  (<code>ls -d internal/cli/*/ | wc -l</code>) alongside 87 files at its own top
+  level, every one of them a <code>.go</code> file
+  (<code>ls internal/cli/*.go | wc -l</code>). <b>Most</b> of those subdirectories
+  are command families — though nine of them (<code>automode</code>,
+  <code>backendcheck</code>, <code>clitest</code>, <code>cmdstore</code>,
+  <code>config</code>, <code>daemonregistry</code>, <code>envfilter</code>,
+  <code>sessionfinalize</code>, <code>testdata</code>) are shared plumbing or
+  fixtures and define no command at all — <code>grep -rn 'cobra.Command{'</code>
+  finds nothing in any of the nine, and none of them calls
+  <code>cli.RegisterCommand</code>:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/cli/ — subpackages</figcaption>
+<pre><code>agent/      agentdef/   automode/   backendcheck/  backends/
+cleanup/    clitest/    cmdstore/   config/        connector/
+daemon/     daemonregistry/  data/  doctor/        driver/
+envfilter/  epic/       git/        hooks/         local/
+monitor/    repo/       role/       serve/         sessionfinalize/
+skill/      stack/      testdata/   trigger/       workflow/
+workspace/</code></pre>
+  </figure>
+
+  <p>Each family registers itself. There is no central list of commands to grep —
+  which is exactly why newcomers get stuck. The mechanism:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/cli/root.go:278-290</figcaption>
+<pre><code>// pendingCmds accumulates commands registered by sub-packages via init().
+var pendingCmds []*cobra.Command
+
+// RegisterCommand adds a command to the pending list.
+// Sub-packages call this in their init() functions.
+func RegisterCommand(cmd *cobra.Command) {
+	pendingCmds = append(pendingCmds, cmd)
+}
+
+// registerPendingCommands adds all pending commands to rootCmd.
+func registerPendingCommands() {
+	rootCmd.AddCommand(pendingCmds...)
+}</code></pre>
+  </figure>
+
+  <p>So the full wiring for any command is:</p>
+
+  <ol class="trace">
+    <li>
+      <span class="hop-file">internal/cli/&lt;family&gt;/&lt;name&gt;.go — func init()</span>
+      <span class="hop-what">The subpackage builds its <code>*cobra.Command</code>
+      and calls <code>cli.RegisterCommand(cmd)</code>. There are <b>39</b> such
+      call sites under <code>internal/</code>, plus the loop in
+      <code>cmd/loom/main.go:49</code> that registers the <code>data</code>
+      family.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/cli/root.go:284</span>
+      <span class="hop-what"><code>RegisterCommand</code> appends it to the
+      package-level <code>pendingCmds</code> slice. Nothing is wired to the root
+      command yet — Go has only run <code>init()</code>.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/cli/root.go:288-290</span>
+      <span class="hop-what"><code>registerPendingCommands()</code> attaches the
+      whole slice to <code>rootCmd</code> in one shot, at startup.</span>
+    </li>
+  </ol>
+
+  <p>Which raises the obvious question: if each package registers itself in
+  <code>init()</code>, what makes <code>init()</code> run? Go only runs it if
+  something imports the package — so <code>main</code> imports all of them, for
+  no reason except the side effect:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> cmd/loom/main.go:12-16</figcaption>
+<pre><code>// Sub-package registrations — each package's init() calls cli.RegisterCommand().
+_ "github.com/tysonthomas9/loomcli/internal/cli/agent"
+_ "github.com/tysonthomas9/loomcli/internal/cli/agent/lead"
+_ "github.com/tysonthomas9/loomcli/internal/cli/agentdef"
+_ "github.com/tysonthomas9/loomcli/internal/cli/automode"</code></pre>
+  </figure>
+
+  <p>That blank-import block is the closest thing to a master list of commands
+  that exists: <b>26 entries</b>, inside <code>cmd/loom</code> — the only
+  <code>main</code> package that builds the <code>loom</code> binary — whose
+  <code>main.go</code> is 58 lines long in total.
+  <span class="path">cmd/loom/main.go:13-38</span> The repo's other two
+  <code>package main</code> files, <code>internal/harness/fakeharness/mock</code>
+  and <code>scripts/openapi-to-30</code>, build something else. The block's own
+  comment overstates it, though: <code>automode</code> is blank-imported at
+  <span class="path">cmd/loom/main.go:16</span> and has no <code>init()</code> at
+  all.</p>
+
+  <div class="callout trap">
+    <span class="label">Trap</span>
+    <p>You will be tempted to look for a file that <em>declares</em> every command.
+    There isn't one; there is only the blank-import block that <em>activates</em>
+    them. So if you add a subpackage and its command never appears, the cause is
+    almost always a missing blank import in <code>cmd/loom/main.go</code> — not a
+    bug in your <code>cobra.Command</code>. Nothing will warn you: a package
+    nobody imports simply never runs.</p>
+  </div>
+
+  <div class="callout key">
+    <span class="label">The exception that teaches the rule</span>
+    <p><code>internal/cli/data</code> does <b>not</b> self-register. It is an
+    sdk-only command surface and the depguard <code>data-isolation</code> lint
+    rule forbids it from importing its own parent
+    <code>internal/cli</code> — so it cannot call
+    <code>cli.RegisterCommand</code> at all. Instead it exports
+    <code>Commands()</code>, and <code>main</code>'s own <code>init()</code> loops
+    over them and registers each by hand.
+    <span class="path">cmd/loom/main.go:41-51</span>
+    <span class="path">.golangci.yml:174-180</span>
+    <span class="path">internal/cli/data/doc.go:15-19</span></p>
+    <p>Remember this one. <code>loom data</code> is the command family you will use
+    most — it is how you find, claim, and close work — and it is the one command
+    family that is wired differently from all the others.</p>
+  </div>
+
+  <h4>The recipe</h4>
+  <p>To find the code behind <code>loom &lt;X&gt;</code>, in order of speed:</p>
+  <ol>
+    <li><code>ls internal/cli/</code> — if <code>X</code> names a subdirectory,
+      start there. Confirm rather than assume: <code>internal/cli/config/</code>
+      exists but declares no command at all — it is the config loader. The only
+      <code>config</code> command is <code>loom daemon config</code>, and it lives
+      in a different package.
+      <span class="path">internal/cli/daemon/daemon_cmd.go:131</span></li>
+    <li>Otherwise grep for the command string in its <code>Use:</code> field:
+      <code>grep -rn 'Use:\s*"X' internal/cli/</code></li>
+    <li>For a subcommand (<code>loom data ready</code>), the family is the first
+      word: look in <code>internal/cli/data/</code>.</li>
+  </ol>
+
+  <h2>Finding anything: the docs</h2>
+
+  <p>Both repos have more docs than anyone reads. <code>docs/</code> has seven
+  subdirectories at <code>ce4df56fb</code> — <code>adr</code>, <code>arch</code>,
+  <code>design</code>, <code>epics</code>, <code>observability</code>,
+  <code>product</code>, <code>testing</code>; the eighth one in your worktree is
+  <code>docs/onboarding/</code>, this course, which is not in the commit.
+  <span class="path">git ls-tree -d --name-only ce4df56fb:docs</span>
+  These four are the ones that sound interchangeable and are not:</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Directory</th><th>Answers</th></tr></thead>
+    <tbody>
+      <tr><td><code>docs/adr/</code></td><td><b>Why</b> a decision was made, and what was rejected. Read when you disagree with the current shape.</td></tr>
+      <tr><td><code>docs/design/</code></td><td><b>How</b> something was or will be built. Working documents; some describe unshipped plans.</td></tr>
+      <tr><td><code>docs/product/</code></td><td><b>What</b> the product should do. Has its own ordered reading list in <code>docs/product/README.md</code> — use that as the index rather than browsing.</td></tr>
+      <tr><td><code>docs/arch/</code></td><td>Structural overviews.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Plus three loose files that are worth more than the directories:
+  <code>AGENTS.md</code> (195 lines — the operating manual),
+  <code>docs/loom-glossary.md</code> (176 lines — the dictionary), and
+  <code>CONTEXT.md</code> (91 lines — the ubiquitous language). Those are
+  <code>wc -l</code> at <code>ce4df56fb</code>; a working tree with uncommitted
+  edits will differ. Lesson 02 is entirely about those last two.</p>
+
+  <div class="callout trap">
+    <span class="label">Trap</span>
+    <p>A doc in this repo is not automatically true. <code>AGENTS.md</code> cites
+    <code>docs/testing-terminology.md</code> twice as canonical
+    <span class="path">AGENTS.md:20,35</span> — <b>and that file does not exist</b>
+    at <code>ce4df56fb</code>: <code>git ls-files | grep testing-terminology</code>
+    returns nothing. Treat checked-in docs as strong
+    evidence of intent and weak evidence of current behaviour. When a doc and the
+    code disagree, the code wins and the doc is a bug worth filing.</p>
+  </div>
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory, without scrolling: what are the two valid
+    control-plane paths, and what do they have in common?</p>
+    <div class="answer">
+      <p>Local mode: <code>loomcli → HTTP client → fleet-db subprocess →
+      RedisStorage → miniredis or external Redis</code>. Cloud mode:
+      <code>loomcli → HTTP client → fleet-db service → Redis/Postgres</code>.</p>
+      <p>Both go through the <b>HTTP client</b> — loomcli never touches storage
+      directly, so local mode exercises the real service rather than a mock.
+      <span class="path">README.md:25-33</span></p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="0001">
+    <div class="q" data-answer="2">
+      <p class="stem">You add a new subpackage under <code>internal/cli/</code>
+      with a correct <code>cobra.Command</code> and an <code>init()</code> that
+      calls <code>cli.RegisterCommand</code>. The command does not appear. Most
+      likely cause?</p>
+      <ul class="opts">
+        <li>The command was added after <code>registerPendingCommands</code> ran</li>
+        <li>The command needs adding to a central command list file</li>
+        <li>Nothing imports the package, so its <code>init()</code> never ran</li>
+        <li>The command name collides with an existing registered command</li>
+      </ul>
+      <div class="why">Registration is decentralised: <code>init()</code> only runs
+      if something imports the package. The near-miss is the central-list option —
+      it feels right because most CLIs work that way, but here no such file
+      exists, and looking for it is the classic newcomer time sink.
+      <span class="path">internal/cli/root.go:278-290</span></div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <p class="stem">Which statement about local mode is correct?</p>
+      <ul class="opts">
+        <li>It replaces fleet-db with an in-process mock of the HTTP surface</li>
+        <li>It spawns a real fleet-db subprocess reached over the HTTP client</li>
+        <li>It lets loomcli read and write the Redis read model directly</li>
+        <li>It requires an external Redis server to be running beforehand</li>
+      </ul>
+      <div class="why">Local mode spawns the real service and still goes through
+      HTTP. Storage underneath may be miniredis, but the service and its API are
+      real — which is why local reproductions are trustworthy here.
+      <span class="path">README.md:25-33</span></div>
+    </div>
+  </div>
+
+  <div class="exercise">
+    <h3>Find three commands cold</h3>
+    <p>Reading — not editing — your onboarding worktree, locate the file that
+    defines each of these, and write down the <code>path:line</code> of its
+    <code>cli.RegisterCommand</code> call:</p>
+    <ol>
+      <li><code>loom doctor</code></li>
+      <li><code>loom monitor</code></li>
+      <li><code>loom serve</code> — this one is bigger than the others; note which
+        subpackage owns it.</li>
+    </ol>
+    <p>Then answer without opening the file: for <code>loom data ready</code>,
+    which directory would you open first, and why?</p>
+    <div class="verify">
+      <b>You succeeded when</b>
+      <code>grep -rn "RegisterCommand(" internal/ --include="*.go" | grep -v "func RegisterCommand"</code>
+      returns 39 call sites, and your three paths are among them. <code>loom data
+      ready</code> is a real command, so the directory is
+      <code>internal/cli/data/</code> <span class="path">internal/cli/data/ready.go:18</span>.
+      If you found all three in under two minutes without opening the README, you
+      have the skill this lesson was for.
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><code>AGENTS.md</code> (195 lines). It is the densest and most current
+    document in the repo — the terminology handshake, the sandbox and egress
+    model, and the mandatory "Landing the Plane" sequence you will be held to at
+    the end of every session. It rewards a second reading later, once the
+    vocabulary from Lesson 02 has landed.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="../index.html"><span class="dir">Previous</span>Course map</a>
+    <a class="next" href="0002-the-words-that-lie.html"><span class="dir">Next</span>The words that lie</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

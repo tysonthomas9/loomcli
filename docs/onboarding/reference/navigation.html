@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Finding Anything — reference card</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/reference.css">
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Reference <span class="sep">/</span> Keep this open</p>
+  <h1>Finding Anything</h1>
+  <p class="standfirst">Where the code for a thing lives, how to get to it fast, and
+  the conventions you are expected to copy once you are there.</p>
+
+  <div class="meta">
+    <span><b>Use when</b> you know what you want to change but not where it is</span>
+    <span><b>Pairs with</b> <a href="glossary.html">Glossary</a></span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span> <span class="repo fleet">fleet-db</span></span>
+  </div>
+
+  <h2>The 60-second decision tree</h2>
+
+  <dl class="decide">
+    <dt>A CLI command — <code>loom &lt;noun&gt; &lt;verb&gt;</code></dt>
+    <dd><code>internal/cli/&lt;noun&gt;/</code>. If that directory does not exist,
+    <code>grep -rn 'Use:\s*"&lt;verb&gt;' internal/cli/</code>. For
+    <code>loom data …</code> see the exception below.</dd>
+
+    <dt>An HTTP route</dt>
+    <dd>Grep for the <b>path string</b>, never the package name — routes are not
+    always registered by the module you would expect. Start at
+    <code>internal/webui/app/routes.go</code> (outer mux) and
+    <code>internal/webui/handlermux/handlermux.go</code> (nested workspace mux).</dd>
+
+    <dt>A UI screen</dt>
+    <dd><code>internal/webui/frontend/src/router.tsx</code> is the declared single
+    source of truth for routes; it maps to a file in <code>src/views/</code>.</dd>
+
+    <dt>The shape of an API request or response</dt>
+    <dd><code>api/openapi.yaml</code>. It is the contract; the Go and TypeScript
+    types are both generated from it, and both have staleness gates.</dd>
+
+    <dt>A core domain type</dt>
+    <dd><code>internal/domain</code> for control-plane objects (workspace, repo,
+    role, agent, skill, connector, daemon profile) and the <code>Err…</code>
+    sentinels. <code>internal/entity</code> for canonical issue/comment/dependency
+    types. <code>internal/types</code> for the oldest layer — status enum, IDs.</dd>
+
+    <dt>How something is persisted</dt>
+    <dd><code>internal/store</code> holds <b>interfaces only</b>. The implementation
+    is in <code>internal/infra/fleetdb</code>.</dd>
+
+    <dt>Why something is the way it is</dt>
+    <dd><code>docs/adr/</code> first, then <code>git log -S'&lt;symbol&gt;'</code> and
+    <code>git blame</code>. Commit messages carry more reasoning than the docs do.</dd>
+
+    <dt>Whether a rule is actually enforced</dt>
+    <dd><code>scripts/check-*.sh</code> and <code>.golangci.yml</code>. If it is not
+    mechanised, treat it as intent rather than fact.</dd>
+  </dl>
+
+  <h2>loomcli top level</h2>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Path</th><th>What it holds</th></tr></thead>
+    <tbody>
+      <tr><td><code>cmd/loom/</code></td><td>The only <code>main</code> package that builds the <code>loom</code> binary, 58 lines. (Others exist — a codegen helper in <code>scripts/openapi-to-30/</code> and a test mock in <code>internal/harness/fakeharness/mock/</code> — but neither ships.) Blank-imports 26 CLI sub-packages so their <code>init()</code> registrations run.</td></tr>
+      <tr><td><code>internal/</code></td><td>All Go code. 51 top-level packages, 158 counting nested. Layered and lint-enforced.</td></tr>
+      <tr><td><code>internal/webui/frontend/</code></td><td>The React SPA. Not a separate repo — own <code>package.json</code>, own lint/test/arch checks.</td></tr>
+      <tr><td><code>api/</code></td><td><code>openapi.yaml</code> — <b>the contract</b> — plus codegen config.</td></tr>
+      <tr><td><code>scripts/</code></td><td>Two families: gate scripts (<code>check-*.sh</code>) and runtime harness scripts (<code>test-*.sh</code>). Ratchet allowlists live here.</td></tr>
+      <tr><td><code>test/</code></td><td>Compose stacks and fixtures for real runtimes — <code>test/local-mode/</code> is the dogfood stack.</td></tr>
+      <tr><td><code>e2e/</code></td><td>Containerised e2e image + Go container tests, behind <code>-tags container</code>.</td></tr>
+      <tr><td><code>sdk/</code></td><td>Published JS/TS SDK. What workflow bundles and task runners import.</td></tr>
+      <tr><td><code>desktop/</code></td><td>Tauri macOS shell. Deliberately thin — the bundled <code>loom</code> sidecar owns the runtime.</td></tr>
+      <tr><td><code>services/auth/</code></td><td>External auth service; <code>loom serve --auth-url</code> proxies to it.</td></tr>
+      <tr><td><code>deploy/</code>, <code>npm/</code></td><td>Deployment artifacts; npm distribution wrapper.</td></tr>
+      <tr><td><code>.agent-skills/</code></td><td>Repo-local agent runbooks — currently <code>loom-pr-test/SKILL.md</code>.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h2>The layering, and the lint rules that enforce it</h2>
+
+  <p>Dependencies flow <b>sdk → infra → webui → cli</b>. This is not a convention
+  you can quietly break — five named depguard rules in <code>.golangci.yml</code>
+  fail the build:</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Rule</th><th>Says</th></tr></thead>
+    <tbody>
+      <tr><td><code>sdk-leaf</code></td><td>The leaf packages (<code>types</code>, <code>entity</code>, <code>notify</code>, <code>agenterr</code>, <code>httpclient</code>, <code>ops</code>, …) may import <b>nothing</b> from infra, webui, or cli.</td></tr>
+      <tr><td><code>infra-isolation</code></td><td>Infra packages (<code>rpc</code>, <code>sessions</code>, <code>lockfile</code>, <code>kv</code>, …) may not import webui or cli.</td></tr>
+      <tr><td><code>webui-isolation</code></td><td><code>internal/webui/**</code> may not import <code>internal/cli</code>. Dependencies run the other way.</td></tr>
+      <tr><td><code>handler-layer-isolation</code></td><td>Anything under <code>**/handler/**</code> may not import <code>store</code>, <code>backend</code>, <code>notify</code>, or <code>webui/daemon</code>. <b>Handlers go through <code>internal/webui/service</code>.</b></td></tr>
+      <tr><td><code>data-isolation</code></td><td><code>internal/cli/data</code> is an sdk-only surface and may not import its own parent <code>internal/cli</code>.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout key">
+    <span class="label">The exception you will hit first</span>
+    <p>Because of <code>data-isolation</code>, <code>internal/cli/data</code> cannot
+    call <code>cli.RegisterCommand</code> like every other command family. It
+    exports <code>Commands()</code> instead, and <code>cmd/loom/main.go</code>
+    registers them by hand. <code>loom data</code> is the family you will use most —
+    and it is the one wired differently.</p>
+  </div>
+
+  <h2>The web layer</h2>
+
+  <ul>
+    <li><code>internal/webui/app/</code> — the <code>Server</code> struct, startup, and the route table.</li>
+    <li><code>internal/webui/handlers/&lt;domain&gt;/</code> — HTTP handlers, one directory per domain (issues, agents, terminal, git, skills, workflows, webhooks, prreview, approvals, driverapi, taskrunapi, onboarding, health, localsettings, workspace, misc, agentcontrol). One exception to the rule: <code>handlers/connectors/</code> holds only <code>connectors_e2e_test.go</code> — the connector HTTP handlers live in <code>handlers/driverapi/connectors.go</code>.</li>
+    <li><code>internal/webui/service/</code> — the service layer handlers are required to call.</li>
+    <li><code>internal/webui/server/handler/</code> — shared request/response/error plumbing.</li>
+    <li><code>internal/webui/server/realtime/</code> — the single SSE writer seam.</li>
+    <li><code>internal/webui/handlermux/</code>, <code>modbuilder/</code>, <code>svcimpl/</code> — module construction and wiring glue.</li>
+  </ul>
+
+  <h2>The frontend</h2>
+
+  <ul>
+    <li><code>src/api/</code> — <b>the only place allowed to make HTTP calls.</b> An AST linter bans <code>fetch()</code> everywhere else under <code>src/</code>. Long-lived connections are the exception and are <em>not</em> policed: <code>check-no-raw-fetch.mjs</code> matches only bare/<code>window</code>/<code>globalThis</code> <code>fetch</code>, so <code>EventSource</code> and <code>WebSocket</code> are opened straight from hooks and components (<code>src/hooks/workflows/useWorkflowRunStreams.ts:207</code>, <code>src/components/TerminalView/instances/terminalConnection.ts:180</code>). If you are chasing a stream or a terminal, do not search <code>src/api/</code>.</li>
+    <li><code>src/views/</code> — one file per route page, barrel-exported.</li>
+    <li><code>src/components/</code> — ~96 component directories. A component may only import another through its directory's <code>index.ts</code> barrel; enforced by a second AST linter with a five-entry allowlist.</li>
+    <li><code>src/stores/</code> (zustand), <code>src/hooks/</code>, <code>src/contexts/</code>, <code>src/types/</code> (including <code>types/generated/openapi.ts</code>).</li>
+    <li><code>src/router.tsx</code> — declares itself the single source of truth for routes.</li>
+  </ul>
+
+  <h2>Patterns you are expected to copy</h2>
+
+  <dl class="pat">
+    <div><dt>Command self-registration</dt>
+    <dd>Package-level <code>*cobra.Command</code> vars, flags and subcommands wired in <code>init()</code>, ending in <code>cli.RegisterCommand(root)</code>.
+    <span class="ex">exemplar: internal/cli/repo/repo_cmd.go:32-81</span></dd></div>
+
+    <div><dt>Noun-verb surface</dt>
+    <dd><code>loom &lt;noun&gt; add|list|show|remove</code>, plus <code>set &lt;NAME&gt; &lt;KEY&gt; &lt;VALUE&gt;</code> / <code>unset</code> for field edits. Creation-time flags live on <code>add</code>, never on <code>set</code>.
+    <span class="ex">exemplar: internal/cli/role/role_cmd.go:73-136</span></dd></div>
+
+    <div><dt>Commands do not open stores</dt>
+    <dd>Wrap the body in <code>cmdstore.WithActiveWorkspace(func(ctx, h, ws) error {…})</code>. This keeps local/cloud selection inside <code>bootstrap</code> — which is what the control-plane path guard enforces.
+    <span class="ex">exemplar: internal/cli/repo/repo_cmd.go:83-116</span></dd></div>
+
+    <div><dt>Compensating rollback</dt>
+    <dd>A multi-step command undoes its own partial work. <code>repo add</code> clones, creates the record, and on failure deletes both.
+    <span class="ex">exemplar: internal/cli/repo/repo_cmd.go:86-112</span></dd></div>
+
+    <div><dt>HTTP module objects</dt>
+    <dd><code>New&lt;Thing&gt;Module(deps…)</code> plus <code>Register(mux)</code> containing <b>only</b> pattern-to-handler lines. No logic in the module.
+    <span class="ex">exemplar: internal/webui/handlers/issues/module.go:27-64</span></dd></div>
+
+    <div><dt>Handler = closure over a service</dt>
+    <dd><code>func Handle&lt;X&gt;(svc service.XService) http.HandlerFunc</code>. Never reach past the service layer.</dd></div>
+
+    <div><dt>One contract, two generated clients</dt>
+    <dd><code>api/openapi.yaml</code> generates Go models and TS types. Both directions are staleness-gated, so regenerate rather than hand-editing.</dd></div>
+
+    <div><dt>Ratchet, never exempt</dt>
+    <dd>Architectural checks carry allowlists of grandfathered ceilings that may shrink but never grow. Splitting the file or package is the expected fix.</dd></div>
+
+    <div><dt>Structured logging only</dt>
+    <dd><code>log/slog</code>. <code>log.Printf</code> is banned in new Go files.</dd></div>
+
+    <div><dt>No raw <code>exec.Command</code> in unit tests</dt>
+    <dd>Use DI interfaces. Integration/e2e/container-tagged files are exempt.</dd></div>
+  </dl>
+
+  <h2>Traps worth knowing before they cost you an afternoon</h2>
+
+  <div class="callout trap">
+    <span class="label">Verified doc/code conflicts</span>
+    <p><b>The default AI backend is <code>codex</code>, not <code>claude</code>.</b>
+    <code>ResolveBackendName()</code> falls back to <code>backendnames.Codex</code>
+    (<span class="path">internal/cli/backend.go:84-94</span>), while
+    <span class="path">README.md:261</span> states the default is
+    <code>claude</code>. The code is what runs.</p>
+  </div>
+
+  <div class="callout trap">
+    <span class="label"><code>loom serve</code> alone serves no web UI</span>
+    <p><code>registerFrontendRoutes</code> returns immediately when
+    <code>FrontendDir</code> is empty, and that is the default
+    (<span class="path">internal/webui/app/frontend.go:11-16</span>). Non-<code>/api</code>
+    paths then fall through to Go's plain-text 404 — the frontend is expected to be
+    served externally by a reverse proxy or Vite
+    (<span class="path">internal/webui/app/routes.go:26-30</span>). Use
+    <code>make dev</code>, or pass
+    <code>--frontend-dir internal/webui/frontend/dist</code>.</p>
+  </div>
+
+  <ul>
+    <li><b>Grep for the path string, not the package.</b> Some routes are registered by a different module than you would guess — <code>…/issues/graph</code> is registered by the workspace-ops module.</li>
+    <li><b>PATCH routes must go on the outer mux.</b> Registered inside a nested workspace module, a PATCH route <em>hangs</em> rather than 404s.</li>
+    <li><b>Modules are conditional.</b> A <code>Register</code> you found may never run — most require a non-nil store, terminal service, or SSE hub. A test pins the exact module count per configuration, so adding one means updating that test.</li>
+    <li><b><code>git push</code> runs the full gate</b> via the pre-push hook, which <code>make dev</code> installs whether you asked or not. Budget the time.</li>
+    <li><b>A fresh worktree always reinstalls npm deps</b>, because worktrees do not inherit the parent's ignored files. Your first <code>make gate</code> in a new worktree is slow — that is expected, not broken.</li>
+    <li><b><code>~/.loom/state.json</code> is a cache, not config.</b> Runtime commands do not use it as an implicit default; set <code>LOOM_WORKSPACE</code> or pass <code>--workspace</code>.</li>
+    <li><b><code>make test</code> is not the gate's tests.</b> The gate runs <code>go test -p 1 -race</code> over everything with a 60% floor; <code>make test</code> is a lighter script.</li>
+    <li><b>Local-mode compose stacks are shared machine state.</b> See <a href="../lessons/0003-run-it-without-breaking-anyone.html">Lesson 03</a> — this one can destroy a colleague's data.</li>
+  </ul>
+
+  <h2>Where decisions live</h2>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Location</th><th>Answers</th></tr></thead>
+    <tbody>
+      <tr><td><code>docs/adr/</code></td><td>Why, and what was rejected.</td></tr>
+      <tr><td><code>docs/design/</code></td><td>How — working documents, some describing unshipped plans.</td></tr>
+      <tr><td><code>docs/product/</code></td><td>What the product should do. Has its own ordered index in <code>docs/product/README.md</code>.</td></tr>
+      <tr><td><code>AGENTS.md</code></td><td>How to work here. The most current single document in the repo.</td></tr>
+      <tr><td>Long Makefile comments</td><td>The build system's only documentation. Several explain non-obvious failure modes in detail.</td></tr>
+      <tr><td><code>git log</code> / <code>git blame</code></td><td>Everything else.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="ask">
+    <b>Something here not matching what you see?</b> Tell your teacher. This card is
+    pinned to specific commits and the repo moves fast — corrections keep it worth
+    trusting.
+  </div>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

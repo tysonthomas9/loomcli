@@ -1,0 +1,709 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>21. The API you already depend on — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 5 <span class="sep">/</span> Lesson 21 <span class="sep">/</span> fleet-db</p>
+  <h1>The API you already depend on</h1>
+  <p class="standfirst">Every path string in loomcli is a bet on a route table you
+  did not write. Here is how to find the line that route is registered on, and how
+  to read what it actually answers — before you call it.</p>
+
+  <div class="meta">
+    <span><b>Skill</b> find the fleet-db route behind any loomcli call and read its real contract</span>
+    <span><b>Time</b> 30 min</span>
+    <span><b>Needs</b> <a href="0006-anatomy-of-a-command.html">06</a>, <a href="0007-two-clients-one-server.html">07</a></span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span> <span class="repo fleet">fleet-db</span></span>
+  </div>
+
+  <h2>Why this exists</h2>
+
+  <p><a href="0007-two-clients-one-server.html">Lesson 07</a> gave you the client
+  half of this boundary: two stacks, two error models, one server. It stopped at the
+  wire. This is the other side of the same wire.</p>
+
+  <p>Look at what a store call actually is:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/infra/fleetdb/repo.go:59</figcaption>
+<pre><code>	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/repos", body, &amp;resp); err != nil {</code></pre>
+  </figure>
+
+  <p>Nothing type-checks that. It is a string, concatenated at runtime, asserting
+  three things at once: that a Go <code>http.ServeMux</code> in another repository
+  has that exact pattern registered; that it answers with a body rather than a
+  <code>204</code>; and that the body decodes into <code>repoWire</code>, the local
+  struct whose comment claims it "mirrors fleet-db's <code>models.Repo</code> JSON
+  shape" (<span class="path">internal/infra/fleetdb/repo.go:15-26</span>). Get any of
+  the three wrong and you find out in production, or in an integration test if you
+  are lucky.</p>
+
+  <p>The good news is that all three are cheap to check, because fleet-db's edge is
+  one flat, greppable table.</p>
+
+  <div class="callout key">
+    <span class="label">The one idea</span>
+    <p><code>api/openapi.yaml</code> is the <em>index</em>. The handler is the
+    <em>contract</em>. A harness check machine-verifies that every registered route
+    appears in the spec — bar one hard-coded exemption — so the spec is a reliable map
+    of what exists. Nothing ties a route's documented <b>responses</b> to what its
+    handler writes, so its status codes and body shapes are prose except where someone
+    pinned one by hand. For what actually comes back, read the handler.</p>
+  </div>
+
+  <h2>The route table is one grep <span class="repo fleet">fleet-db</span></h2>
+
+  <p>Every route in fleet-db is registered in one of the top-level files of
+  <code>internal/api/</code>, one file per route group, each exposing one or two
+  <code>RegisterXxxRoutes</code> functions — <code>workspace.go</code> exports
+  <code>RegisterWorkspaceRoutes</code> at <span class="path">:43</span> and
+  <code>RegisterIntegrityRoutes</code> at <span class="path">:253</span>, and
+  <code>issues.go</code>, <code>skills.go</code>, <code>revert.go</code>,
+  <code>history.go</code> and <code>v2_routes.go</code> each export a pair too. The
+  registration line carries everything you need to identify a route: method, pattern,
+  permission, handler.</p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> internal/api/repos.go:57-69</figcaption>
+<pre><code>func RegisterRepoRoutes(mux *http.ServeMux, svc RepoService, logger *slog.Logger, mw func(http.HandlerFunc) http.HandlerFunc, authz ...*auth.Authorizer) {
+	h := &amp;repoHandler{svc: svc, logger: logger}
+	// … four lines unpacking the variadic authorizer, elided (repos.go:59-62) …
+	wrap := AuthzWrap(mw, az)
+	mux.HandleFunc("POST /api/v1/{workspace}/repos", wrap(auth.PermRepoCreate, h.create))
+	mux.HandleFunc("GET /api/v1/{workspace}/repos", wrap(auth.PermRepoList, h.list))
+	mux.HandleFunc("GET /api/v1/{workspace}/repos/{name}", wrap(auth.PermRepoRead, h.get))
+	mux.HandleFunc("PATCH /api/v1/{workspace}/repos/{name}", wrap(auth.PermRepoUpdate, h.update))
+	mux.HandleFunc("DELETE /api/v1/{workspace}/repos/{name}", wrap(auth.PermRepoDelete, h.delete))
+}</code></pre>
+  </figure>
+
+  <p>That shape repeats 260 times, and the whole surface sorts into four groups: 242
+  workspace-scoped routes under <code>/api/v1/{workspace}/…</code>, where the path
+  parameter is the
+  <a href="../reference/glossary.html#objects">Workspace</a> key; 10 admin routes
+  under <code>/api/v1/admin/…</code>; 5 under <code>/api/v2/</code>; and three
+  infrastructure routes registered outside <code>internal/api/</code> —
+  <code>GET /healthz</code> and <code>GET /readyz</code>
+  (<span class="path">cmd/fleet-db/main.go:538-539</span>) and
+  <code>GET /metrics</code> (<span class="path">main.go:552</span>). There is no
+  router package, no annotation, no code generation — the literal string in the
+  source is the route.</p>
+
+  <aside class="sidenote">Count it yourself in the exercise. The number matters less
+  than the fact that it is countable: an edge you can enumerate with
+  <code>grep</code> is an edge you can audit.</aside>
+
+  <h4>The lookup table</h4>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>You have</th><th>Do this</th><th>You land on</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>A path built in <code>internal/infra/fleetdb</code>, e.g. <code>"/api/v1/"+ws+"/repos"</code></td>
+        <td>Take everything after the workspace segment; grep the templated literal in fleet-db: <code>grep -rn '"POST /api/v1/{workspace}/repos"' internal/api/</code></td>
+        <td>The registration line: method, pattern, permission, handler method</td>
+      </tr>
+      <tr>
+        <td>A bare suffix in <code>internal/backend/fleet</code>, e.g. <code>"/issues/ready"</code></td>
+        <td>The prefix is added once at construction — <code>baseURL + "/api/v1/" + workspace</code> (<span class="path">internal/backend/fleet/fleet.go:79</span>). Rebuild the templated path, then grep as above</td>
+        <td>Same registration line</td>
+      </tr>
+      <tr>
+        <td>A handler name from a stack trace</td>
+        <td>Grep it in <code>internal/api/</code>; the <em>nearest</em> <code>RegisterXxxRoutes</code> above it — not the top of the file, which may hold a second one — names the routes it serves</td>
+        <td>Every URL that reaches that function</td>
+      </tr>
+      <tr>
+        <td>A registration line, and the question "is this live?"</td>
+        <td><code>grep -n 'RegisterRepoRoutes' cmd/fleet-db/main.go</code></td>
+        <td>The one call site that wires the group, with its middleware, its authorizer, and any <code>if</code> wrapped around it</td>
+      </tr>
+      <tr>
+        <td>The question "what query parameters does it take?"</td>
+        <td>The path entry in <code>api/openapi.yaml</code> — names, types, defaults, caps</td>
+        <td>The documented parameter list, including the ones marked <b>Status: planned</b> that the handler ignores (<span class="path">api/openapi.yaml:448-466</span>)</td>
+      </tr>
+      <tr>
+        <td>The question "what comes back?"</td>
+        <td>Read the handler body to its <code>WriteJSON</code> / <code>WriteNoContent</code> calls, plus <code>MapServiceError</code> (<span class="path">internal/api/errors.go:139-271</span>)</td>
+        <td>The real status codes and the real body</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout fleet">
+    <span class="label">Both repos have an api/openapi.yaml</span>
+    <p>They describe different servers. loomcli's is titled <b>Loom CLI API</b>, has
+    129 paths, and covers the web UI and daemon surface under
+    <code>/api/workspaces/…</code> — it contains <b>zero</b>
+    <code>/api/v1/</code> paths. fleet-db's is titled <b>fleet-db</b>, 12,235 lines,
+    183 paths, 259 operations. <a href="../reference/navigation.html">Navigation</a>'s
+    decision tree entry for "the shape of an API request or response" means the
+    loomcli one. Searching it for a fleet-db route will always come up empty, and it
+    will feel like the route is undocumented.</p>
+  </div>
+
+  <h2>The trace: one write, across the boundary</h2>
+
+  <p><a href="0006-anatomy-of-a-command.html">Lesson 06</a> ended hop 9 at "the write
+  — which is two HTTP calls". This is that hop, opened up.</p>
+
+  <ol class="trace">
+    <li>
+      <span class="hop-file">internal/infra/fleetdb/repo.go:42-69</span>
+      <span class="hop-what"><b>The call.</b> <code>repoStore.Create</code> builds an
+      anonymous request struct, then <code>POST /api/v1/{ws}/repos</code>. On success
+      it makes a second call, <code>PATCH /api/v1/admin/workspaces/{ws}</code>, and
+      if <em>that</em> fails it <code>DELETE</code>s the repo it just made
+      (<span class="path">repo.go:62-67</span>) — the hand-written compensating
+      rollback from Lesson 06.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file"><span class="repo fleet">fleet-db</span> internal/api/repos.go:64 ← the grep lands here</span>
+      <span class="hop-what"><b>The registration.</b>
+      <code>wrap(auth.PermRepoCreate, h.create)</code>. Two facts for free: the
+      permission this route demands, and the handler that serves it. Note that the
+      second call in hop 1 goes to a different family —
+      <code>/api/v1/admin/…</code> routes are registered with
+      <code>GlobalAuthzWrap</code> instead
+      (<span class="path">internal/api/workspace.go:53</span>), and the workspace
+      admin routes spell their path parameter <code>{key}</code>, not
+      <code>{workspace}</code>. The admin family is not uniform — the four apikey
+      routes spell theirs <code>{id}</code>
+      (<span class="path">internal/api/apikey.go:51-54</span>) — so grep the literal
+      you actually built.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">cmd/fleet-db/main.go:650</span>
+      <span class="hop-what"><b>The wiring.</b>
+      <code>api.RegisterRepoRoutes(srv.Mux(), repoSvc, logger, wsValidator, authorizer)</code>.
+      A <code>Register</code> function nobody calls compiles fine and serves nothing,
+      so this line is the proof that the route exists at runtime — provided the call
+      is not inside a conditional. Some are: the apikey group is registered only when
+      <code>cfg.Auth.Enabled</code> (<span class="path">main.go:568-570</span>). The
+      fourth argument is the workspace validator built at
+      <span class="path">main.go:580</span>.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">internal/api/authz_wrap.go:12-19</span>
+      <span class="hop-what"><b>Order of the wrappers.</b>
+      <code>AuthzWrap</code> returns <code>mw(authz.Require(perm, next))</code>, so
+      the <b>workspace validator runs first</b>, then the permission check, then your
+      handler. Anything those two write, your handler never sees.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">internal/api/workspace_middleware.go:46-91</span>
+      <span class="hop-what"><b>Three statuses before the handler.</b> A malformed
+      workspace key is <code>400 invalid_parameter</code>
+      (<span class="path">:76-79</span>); a key that does not exist is
+      <code>404</code> from <code>NotFound("workspace", key)</code>
+      (<span class="path">:81-86</span>); a lookup that fails for any other reason is
+      <code>500 internal_error</code> (<span class="path">:87-89</span>). All three
+      are produced by a wrapper, so none appears anywhere in <code>repos.go</code>. A
+      request carrying <code>X-Fleet-Repo</code> or <code>?repo=</code> takes the
+      resolver branch instead (<span class="path">:46-73</span>) and answers through
+      <code>writeResolverError</code> (<span class="path">:100-108</span>).</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">internal/api/repos.go:71-114</span>
+      <span class="hop-what"><b>The handler, and the house skeleton.</b> Path values
+      → <code>decodeJSON</code> (<code>400 invalid_json</code>, or
+      <code>413 body_too_large</code> past the 1 MB cap at
+      <span class="path">internal/api/json.go:7</span>) → <code>repo.Validate()</code>
+      (<code>400 validation_failed</code>) → the service call → on success
+      <code>WriteJSON(w, http.StatusCreated, repo)</code>. The other four handlers in
+      this file are variations on those steps.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">internal/api/errors.go:139-271 → response.go:87-93</span>
+      <span class="hop-what"><b>One table turns sentinels into statuses.</b>
+      <code>writeServiceError</code> calls <code>MapServiceError</code>, the switch
+      every route on the shared error path goes through — the control-plane and await
+      routes carry their own (<code>writeStorageError</code>,
+      <span class="path">internal/api/control_plane.go:1235-1254</span>). A
+      duplicate repo returns <code>service.ErrAlreadyExists</code>
+      (<span class="path">internal/service/repo_service.go:74-75</span>), which
+      becomes <code>409 already_exists</code>
+      (<span class="path">errors.go:214-215</span>). For every sentinel the switch
+      matches, the message is the sentinel's own <code>Error()</code> string,
+      deliberately stripped of wrapping context so internal detail cannot leak
+      (<span class="path">errors.go:132-138</span>); four typed errors are peeled off
+      by <code>errors.As</code> before the switch and carry their own message and
+      <code>Meta</code> (<span class="path">errors.go:146-161</span>).</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">internal/api/response.go:60-77</span>
+      <span class="hop-what"><b>The error envelope.</b> <code>WriteError</code> wraps
+      the <code>APIError</code> under an <code>"error"</code> key, always. The shape
+      on the wire is <code>{"error":{"code":…,"message":…,"meta":…}}</code>. The
+      package declares 30 <code>ErrorCode</code> constants — 24 at
+      <span class="path">errors.go:15-52</span>, six for the await routes at
+      <span class="path">await.go:24-35</span> — and the workspace validator forwards
+      six more verbatim, the UPPER_SNAKE resolution codes
+      (<span class="path">internal/resolution/errors.go:8-15</span>, via
+      <span class="path">workspace_middleware.go:108</span>).</span>
+    </li>
+    <li>
+      <span class="hop-file">loomcli internal/infra/fleetdb/client.go:422-428, 445-513</span>
+      <span class="hop-what"><b>Back across the wire.</b> Any status ≥ 400 goes to
+      <code>classifyHTTPError</code>, which reads
+      <code>error.code</code> out of that envelope
+      (<span class="path">client.go:549-559</span>) and turns status + code into a
+      <code>domain.Err*</code> sentinel: 404 → <code>ErrNotFound</code>, 409 with no
+      recognised code → <code>ErrAlreadyExists</code>, 400/422 →
+      <code>ErrInvalid</code>. Anything 4xx it has no arm for —
+      <code>413</code>, for one — falls through to <code>ErrConflict</code>
+      (<span class="path">client.go:509-511</span>).</span>
+    </li>
+  </ol>
+
+  <p>Nine hops, nothing inferred. That is the whole method: grep the literal, confirm
+  the wiring, read the handler down to its writes, then read the mapping table at
+  each end of the wire.</p>
+
+  <h2>Reading the contract: three questions</h2>
+
+  <h3>1. Which statuses can this route return?</h3>
+
+  <p>Not "which does the spec list" — which can the code write. For
+  <code>POST /api/v1/{workspace}/repos</code>, the full ledger on the plain path — a
+  request carrying <code>X-Fleet-Repo</code> or <code>?repo=</code> adds the resolver
+  branch's own statuses and codes — and what each one becomes by the time your
+  calling code sees it:</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Status &amp; code</th><th>Written by</th><th>loomcli turns it into</th></tr></thead>
+    <tbody>
+      <tr><td><code>400 invalid_parameter</code></td><td>Workspace validator (<code>workspace_middleware.go:76-79</code>)</td><td><code>domain.ErrInvalid</code></td></tr>
+      <tr><td><code>404 not_found</code></td><td>Workspace validator (<code>workspace_middleware.go:81-86</code>)</td><td><code>domain.ErrNotFound</code></td></tr>
+      <tr><td><code>500 internal_error</code></td><td>Workspace validator, lookup failed (<code>workspace_middleware.go:87-89</code>)</td><td>a plain error, no sentinel (<code>client.go:512</code>)</td></tr>
+      <tr><td><code>400 invalid_json</code></td><td>Handler, strict decode (<code>repos.go:80</code>)</td><td><code>domain.ErrInvalid</code></td></tr>
+      <tr><td><code>413 body_too_large</code></td><td>Handler, 1 MB cap (<code>repos.go:77</code>)</td><td><code>domain.ErrConflict</code> — no 413 arm</td></tr>
+      <tr><td><code>400 validation_failed</code></td><td>Handler, <code>repo.Validate()</code> (<code>repos.go:106</code>)</td><td><code>domain.ErrInvalid</code></td></tr>
+      <tr><td><code>409 already_exists</code></td><td><code>MapServiceError</code> (<code>errors.go:214-215</code>)</td><td><code>domain.ErrAlreadyExists</code></td></tr>
+      <tr><td><code>500 internal_error</code></td><td><code>MapServiceError</code> default (<code>errors.go:268-269</code>)</td><td>a plain error, no sentinel (<code>client.go:512</code>)</td></tr>
+      <tr><td><code>201</code> + the repo</td><td>Handler (<code>repos.go:114</code>)</td><td>decoded into <code>repoWire</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>The spec entry for this route documents three of those: <code>201</code>,
+  <code>400</code>, <code>409</code>
+  (<span class="path">api/openapi.yaml:4931-4941</span>). It is not lying — it
+  documents what the handler writes deliberately. It simply does not know about the
+  wrappers. Whatever the auth chain answers before any of this is a separate
+  question, and the subject of
+  <a href="0022-auth-at-the-boundary.html">Lesson 22</a>.</p>
+
+  <h3>2. What does an error body look like?</h3>
+
+  <p>Always the same object, from every route that goes through
+  <code>WriteError</code>. Which makes the spec's schema for it a problem:</p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> api/openapi.yaml:8515-8520</figcaption>
+<pre><code>    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string</code></pre>
+  </figure>
+
+  <p>The wire shape is not a string. It is
+  <code>ErrorResponse{Error *APIError}</code>
+  (<span class="path">internal/api/errors.go:57-79</span>), and the hard-coded 500
+  fallback in <code>WriteJSON</code> spells the bytes out:
+  <code>{"error":{"code":"internal_error","message":"internal server error"}}</code>
+  (<span class="path">internal/api/response.go:66</span>). Both loomcli client stacks
+  agree with the code and not with the spec — they parse
+  <code>error.code</code> as a nested field
+  (<span class="path">internal/infra/fleetdb/client.go:549-559</span>,
+  <span class="path">internal/backend/fleet/fleet.go:194-209</span>). That one schema
+  is referenced 21 times in the spec.</p>
+
+  <aside class="sidenote">Fixing it would make a contained first fleet-db PR. Nothing
+  in fleet-db generates code from the spec — the file's only consumers in the repo
+  are three tests in <code>internal/api/</code> and the coverage check — so the blast
+  radius is whatever reads it outside these two repos. Read
+  <code>internal/api/errors.go:57-69</code> for the real fields;
+  <code>details</code> and <code>meta</code> belong in the shape too.</aside>
+
+  <h3>3. Is it paginated, and what is the default?</h3>
+
+  <p>The spec marks this explicitly, but on only 20 of its 259 operations, with three
+  values: <code>x-pagination: none</code> (16), <code>limit-only</code> (2), and
+  <code>cursor</code> (2 — the v1 and v2 mutation-event endpoints you crossed in
+  <a href="0013-realtime-one-frame-at-a-time.html">Lesson 13</a>, at
+  <span class="path">api/openapi.yaml:1873</span> and
+  <span class="path">:2197</span>). Where the marker is absent, read the
+  handler.</p>
+
+  <aside class="sidenote">loomcli mostly treats the spec this way. It names
+  fleet-db's <code>api/openapi.yaml</code> in four comments outside tests, and three
+  are about query parameters — "fleet-db's listIssues endpoint expects
+  <code>type</code>, not <code>issue_type</code>"
+  (<span class="path">internal/backend/fleet/params.go:166-169</span>), the count
+  endpoint's filters (<span class="path">params.go:252-255</span>), and the params
+  <code>listAgentSessions</code> does not yet accept
+  (<span class="path">internal/infra/fleetdb/control_plane.go:148-151</span>). The
+  fourth cites it for a response shape: <code>fleetMutationEvent</code> mirrors
+  <code>components.schemas.Event</code>
+  (<span class="path">internal/backend/fleet/convert.go:490-494</span>).</aside>
+
+  <p><code>GET /api/v1/{workspace}/issues</code> is the one to know, because
+  everything lists issues. It has no marker, and it silently truncates:</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Layer</th><th>What <code>limit</code> = 0 means there</th><th>Evidence</th></tr></thead>
+    <tbody>
+      <tr><td>Redis storage</td><td>Everything — full scan, no cap</td><td><code>internal/storage/issue.go:385-389</code></td></tr>
+      <tr><td>Service</td><td>"0 = default (50)"</td><td><code>internal/service/options.go:22</code></td></tr>
+      <tr><td>HTTP handler</td><td>Unreachable: absent or non-positive <code>limit</code> becomes 50, and anything over 200 is clamped to 200</td><td><code>internal/api/issues.go:17-19, 652-665</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>So the storage layer's "give me everything" mode cannot be requested over HTTP
+  at all. And the response envelope will not tell you it happened:
+  <code>ListResponse</code> carries <code>issues</code> and <code>count</code>, where
+  <code>count</code> is the length of <em>this page</em>
+  (<span class="path">internal/api/json.go:31-34</span>,
+  <span class="path">issues.go:252-255</span>). The spec's
+  <code>IssueListResponse</code> schema does show <code>total</code>, <code>offset</code>
+  and <code>limit</code> — described as planned or echoed-back, and absent from the
+  schema's <code>required: [issues, count]</code>
+  (<span class="path">api/openapi.yaml:8125-8152</span>).</p>
+
+  <div class="callout trap">
+    <span class="label">Trap — "no limit parameter means no limit"</span>
+    <p>loomcli's issue backend post-filters client-side when it asks for more than
+    one label or more than one source repo. To do that it needs the unfiltered set,
+    so it deliberately clears the limit:
+    <code>if needsListClientFilter(opts) { server.Limit = 0 }</code>
+    (<span class="path">internal/backend/fleet/params.go:145-157</span>), and
+    <code>addListCoreFilters</code> only emits <code>limit</code> when it is positive
+    (<span class="path">params.go:176-178</span>). Sending no <code>limit</code>
+    reads as "everything" in loomcli and as "50" in fleet-db. The multi-label filter
+    therefore runs over the first 50 rows, and returns a short answer that looks like
+    a complete one.</p>
+  </div>
+
+  <div class="callout trap">
+    <span class="label">Trap — trusting the spec's response codes</span>
+    <p><code>PATCH /api/v1/{workspace}/repos/{name}</code> is documented as
+    <code>204</code>:</p>
+<pre><code>    patch:
+      tags: [Repos]
+      summary: Update a Repo
+      operationId: updateRepo
+      # … requestBody elided …
+      responses:
+        "204":
+          description: Repo updated
+        "404":
+          $ref: "#/components/responses/NotFound"</code></pre>
+    <p>The handler re-reads the record and returns it with <code>200</code>:</p>
+<pre><code>	repo, err := h.svc.GetRepo(r.Context(), workspace, name)
+	if err != nil {
+		writeServiceError(w, r, err, "read updated repo failed")
+		return
+	}
+	WriteJSON(w, http.StatusOK, repo)</code></pre>
+    <p><span class="path">api/openapi.yaml:4972-4986</span> against
+    <span class="path">internal/api/repos.go:174-179</span>. loomcli depends on the
+    code, not the document: <code>repoStore.Update</code> decodes a body
+    (<span class="path">internal/infra/fleetdb/repo.go:107-111</span>), and the
+    client returns early on a real <code>204</code> without decoding anything
+    (<span class="path">client.go:429-431</span>) — so a server that honoured its own
+    spec would hand every caller a zero-valued repo and no error.</p>
+  </div>
+
+  <h2>Why the spec drifts in exactly this way</h2>
+
+  <p>Because of what is gated and what is not. Four mechanisms, and each covers
+  precisely one thing:</p>
+
+  <ul>
+    <li><b>Route existence — gated, hard.</b>
+    <code>scripts/harness/cmd/check_openapi_coverage/main.go</code> regex-scans every
+    <code>HandleFunc(</code>/<code>Handle(</code> in <code>internal/api</code> and
+    <code>cmd/fleet-db</code>, normalises <code>{param}</code> names away
+    (<span class="path">main.go:217-221</span>, which is why <code>{key}</code> and
+    <code>{workspace}</code> both match), and exits 1 on any
+    <code>undocumented route:</code>. The scan is non-recursive and skips
+    <code>_test.go</code> (<span class="path">main.go:112-113, :124</span>), so what
+    it gates is the top-level files of those two directories — and it carries one
+    hard-coded exemption, <code>GET /metrics</code>
+    (<span class="path">main.go:26-28</span>), which is registered at
+    <span class="path">cmd/fleet-db/main.go:552</span> and documented nowhere.</li>
+    <li><b>Stale spec entries — a warning, not a failure.</b> A documented path with
+    no code route prints to stderr and the check still passes
+    (<span class="path">main.go:82-88</span>). The spec is a superset by design.</li>
+    <li><b>Request fields — gated, for two schemas.</b>
+    <code>TestOpenAPIRequestSchemasMatchTheirStructs</code> reflects over
+    <code>CreateIssueRequest</code> and <code>UpdateIssueRequest</code> only. Every
+    JSON body in the package is strictly decoded — <code>decodeJSONBytes</code> calls
+    <code>DisallowUnknownFields</code> for all of them
+    (<span class="path">internal/api/request.go:130-132</span>), so one unknown field
+    rejects the entire body anywhere — but only these two schemas are pinned to their
+    struct. Its own comment says why response schemas are out
+    of scope: "A response schema may legitimately expose a narrower or wider view"
+    (<span class="path">internal/api/openapi_request_parity_test.go:45-53</span>).</li>
+    <li><b>Documented responses — gated only where someone pinned them by hand.</b>
+    A few tests assert one fact each: that the issue-metadata <code>DELETE</code>
+    entry documents a <code>400</code>
+    (<span class="path">internal/api/openapi_test.go:352-371</span>), and that the
+    <code>Issue</code>, <code>Role</code> and <code>TaskRun</code> schemas carry
+    particular properties and enums (<span class="path">openapi_test.go:14</span>,
+    <span class="path">:51</span>, <span class="path">:105</span>,
+    <span class="path">:378</span>). Nothing compares a route's documented responses
+    against the handler that answers it.</li>
+  </ul>
+
+  <p>So a route nobody thought to pin drifts freely. Neither of the two drifts above
+  is pinned, and both are on green builds right now.</p>
+
+  <h2>The pattern to copy when you add a route</h2>
+
+  <ol>
+    <li><b>One <code>RegisterXxxRoutes</code> per route group, the permission named
+    on the registration line.</b> Never compute a permission inside a handler — the point of
+    the convention is that <code>grep 'HandleFunc(' internal/api</code> is a readable
+    authorization matrix.</li>
+    <li><b>Declare the narrow interface your handlers need, at the top of your
+    file</b> — <code>RepoService</code> at
+    <span class="path">internal/api/repos.go:15-23</span> lists five methods and
+    names its real implementation in a comment. <code>internal/api</code> may import
+    only <code>service</code>, <code>models</code>, <code>logging</code>,
+    <code>config</code> and <code>resolution</code>
+    (<span class="path">harness/policy.yaml:4-10</span>) — never
+    <code>internal/storage</code>. The concrete store is passed in from
+    <code>main.go</code>.</li>
+    <li><b>Return errors as sentinels from the service and map them once.</b> If your
+    handler is choosing a status code from a service error inline, you are
+    duplicating <code>MapServiceError</code>.</li>
+    <li><b>Add the path entry with a unique <code>operationId</code>, and set
+    <code>x-pagination</code> if it lists anything.</b> The coverage check forces the
+    path entry and <code>TestOpenAPIHasNoDuplicateOperationIDs</code> forces the id to
+    be unique
+    (<span class="path">internal/api/openapi_uniqueness_test.go:55-86</span>); nothing
+    forces <code>x-pagination</code>, which is why the marker is on 20 operations and
+    not 259.</li>
+    <li><b>Write down the response codes you chose</b> — in the spec entry, and in a
+    test if a client depends on them. As you have just seen, that is the only place
+    the choice is recorded.</li>
+  </ol>
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory: you are looking at a loomcli line that calls a path
+    under <code>/api/v1/</code>. Name the four things you open, in order, to learn
+    what that endpoint returns — and say which one you must <em>not</em> trust for
+    the answer.</p>
+    <div class="answer">
+      <p><b>1.</b> The registration line — grep the templated literal in fleet-db
+      <code>internal/api/</code>. Gives you the file, the permission, and the handler
+      name.</p>
+      <p><b>2.</b> <code>cmd/fleet-db/main.go</code> — the
+      <code>Register…Routes</code> call, which proves the group is wired and shows
+      which validator and authorizer wrap it.</p>
+      <p><b>3.</b> The handler body, down to its <code>WriteJSON</code> /
+      <code>WriteNoContent</code> calls, plus the wrappers that can answer before it
+      (<span class="path">internal/api/workspace_middleware.go:76-91</span>).</p>
+      <p><b>4.</b> <code>MapServiceError</code>
+      (<span class="path">internal/api/errors.go:139-271</span>) for every status a
+      service sentinel can produce.</p>
+      <p><code>api/openapi.yaml</code> is trustworthy for <em>which routes exist</em>
+      and <em>what query parameters they take</em> — its route list is machine-checked.
+      Do not trust it for response codes or body shapes; no check compares those
+      against the handler.</p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="0021">
+    <div class="q" data-answer="1">
+      <p class="stem">What does <code>PATCH /api/v1/{workspace}/repos/{name}</code>
+      actually return on success?</p>
+      <ul class="opts">
+        <li>204 and no body at all, exactly as the spec entry says</li>
+        <li>200 and the re-read repo, though the spec says 204</li>
+        <li>200 and the patch echoed back, as the spec's schema says</li>
+        <li>204 and the repo in an X-Repo header, not in the body</li>
+      </ul>
+      <div class="why">The handler updates, re-reads, and writes
+      <code>WriteJSON(w, http.StatusOK, repo)</code>
+      (<span class="path">internal/api/repos.go:174-179</span>); the spec documents
+      <code>"204": Repo updated</code>
+      (<span class="path">api/openapi.yaml:4982-4984</span>). The first option is the
+      one to feel the sting of — it is what the document says, and it is wrong. Note
+      what depends on this: <code>repoStore.Update</code> decodes a body, and the
+      client short-circuits on a real 204 without decoding
+      (<span class="path">internal/infra/fleetdb/client.go:429-431</span>).</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <p class="stem">Where do you learn what an error body from fleet-db looks
+      like?</p>
+      <ul class="opts">
+        <li>api/openapi.yaml, whose ErrorResponse schema is the contract</li>
+        <li>internal/service/errors.go, where the sentinel errors live</li>
+        <li>internal/api/response.go, whose WriteError sets the status</li>
+        <li>internal/api/errors.go, where APIError and its codes live</li>
+      </ul>
+      <div class="why">The spec's <code>ErrorResponse</code> types
+      <code>error</code> as a <b>string</b>
+      (<span class="path">api/openapi.yaml:8515-8520</span>) and is referenced 21
+      times; the wire shape is an object with <code>code</code>,
+      <code>message</code>, optional <code>details</code> and <code>meta</code>
+      (<span class="path">internal/api/errors.go:57-79</span>).
+      <code>internal/service/errors.go</code> declares the sentinels but says nothing
+      about status codes — that mapping is <code>MapServiceError</code>.
+      <code>response.go</code> only wraps and writes what it is handed.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <p class="stem">Reaching back to <a href="0007-two-clients-one-server.html">Lesson
+      07</a>: <code>GET /api/v1/{ws}/issues</code> with no <code>limit</code>
+      parameter returns…</p>
+      <ul class="opts">
+        <li>every matching issue, since an absent limit means no cap</li>
+        <li>at most 200 issues, the hard cap the API layer enforces</li>
+        <li>at most 50 issues, the default the API layer substitutes</li>
+        <li>every matching issue, since storage treats a 0 as "all"</li>
+      </ul>
+      <div class="why"><code>parseListOptions</code> sets
+      <code>opts.Limit = defaultLimit</code> before it looks at the query, and clamps
+      anything above <code>maxLimit</code>
+      (<span class="path">internal/api/issues.go:17-19, 652-665</span>). The last
+      option is true one layer down and unreachable from here: storage does treat 0
+      as a full scan (<span class="path">internal/storage/issue.go:385-389</span>),
+      but the handler never passes a 0. This is why loomcli's multi-label list —
+      which clears the limit precisely to get everything
+      (<span class="path">internal/backend/fleet/params.go:153-155</span>) — filters
+      over 50 rows.</div>
+    </div>
+  </div>
+
+  <div class="cloze" data-answer="internal/api/errors.go|errors.go">
+    <p class="stem">Every sentinel that reaches <code>writeServiceError</code> becomes
+    an HTTP status in one switch, in the file <input> — the same file that declares 24
+    of the API's 30 <code>ErrorCode</code> constants.</p>
+    <div class="why"><code>MapServiceError</code> at
+    <span class="path">internal/api/errors.go:139-271</span>, reached through
+    <code>writeServiceError</code>
+    (<span class="path">internal/api/response.go:87-93</span>). Its RPC twin is
+    <code>(*methods).mapServiceError</code>
+    (<span class="path">internal/rpc/methods.go:192</span>), and a harness check
+    compares both against <code>internal/service/errors.go</code>
+    (<span class="path">scripts/harness/cmd/check_service_error_coverage/main.go:47-50</span>)
+    — unless the sentinel is on the 11-entry RPC waiver list
+    (<span class="path">:23-35</span>).</div>
+  </div>
+
+  <div class="exercise">
+    <h3>Read a contract you have already been calling</h3>
+
+    <div class="callout safety">
+      <span class="label">Before you start</span>
+      <p>Every step here is a read: greps, file reads, one single-package
+      <code>go test</code>, one <code>go run</code> of a harness script. <b>Do not
+      start a stack for this lesson.</b> This is a shared machine. If you later want
+      to <code>curl</code> a live fleet-db, use a stack <em>you</em> started, with
+      your own compose project name and an unclaimed port block — never
+      <code>up</code>, <code>down</code> or <code>--build</code> a compose project
+      you did not create.</p>
+    </div>
+
+    <ol>
+      <li>In loomcli, open <code>internal/infra/fleetdb/repo.go:114-121</code>
+      (<code>repoStore.Delete</code>). Write down both paths it calls, in order.</li>
+      <li>In fleet-db, find the first one:
+      <code>grep -rn '"DELETE /api/v1/{workspace}/repos/{name}"' internal/api/</code>.
+      Note the file, the line, the permission and the handler method. Then prove it is
+      live: <code>grep -n 'RegisterRepoRoutes' cmd/fleet-db/main.go</code>.</li>
+      <li>Read that handler, then write the full status ledger for it — every status
+      the handler can write, <b>plus</b> the three the workspace validator can write
+      first on the plain path
+      (<code>internal/api/workspace_middleware.go:76-91</code>). Compare it
+      against the spec entry at <code>api/openapi.yaml:4987-4995</code>. Which of
+      your statuses are missing there?</li>
+      <li>Do the same for the <code>PATCH</code> on the same path and find the
+      disagreement in the other direction, where the document claims something the
+      code does not do.</li>
+      <li>Run both gates:
+      <code>go test ./internal/api/ -run 'TestOpenAPI'</code> and
+      <code>go run ./scripts/harness/cmd/check_openapi_coverage/</code>. Both pass.
+      In one sentence each, say why neither one catches step 3 or step 4.</li>
+      <li>Reaching back to <a href="0007-two-clients-one-server.html">Lesson 07</a>:
+      which of the two client stacks does <code>repoStore</code> belong to, which
+      error model does it produce, and which sentinel does the 404 from step 3 arrive
+      as? Then answer the same three questions for
+      <code>GET /api/v1/{ws}/issues/ready</code>, which is served by the
+      <em>other</em> stack.</li>
+      <li>Count the table:
+      <code>ls internal/api/*.go cmd/fleet-db/*.go | grep -v _test.go | xargs grep -hoE '(HandleFunc|Handle)\("[A-Z]+ /[^"]+"' | sort -u | wc -l</code></li>
+    </ol>
+    <div class="verify">
+      <b>You succeeded when</b>
+      Your grep in step 2 lands on <code>internal/api/repos.go:68</code>
+      (<code>PermRepoDelete</code>, <code>h.delete</code>) and on
+      <code>cmd/fleet-db/main.go:650</code>; your step-3 ledger has seven entries
+      against the spec's two, including <b>two different 400s</b> — one from the
+      validator for a bad workspace key, one from the handler for a bad repo name —
+      neither of which the spec entry lists; step 4 gives you <code>200</code> in the
+      code against <code>204</code> in the document; both commands in step 5 pass; and
+      step 7 prints <b>260</b>. Drop the <code>grep -v _test.go</code> and you get
+      267 instead — the test files register routes of their own, which is exactly why
+      the coverage check skips them
+      (<code>check_openapi_coverage/main.go:124</code>).
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><span class="repo fleet">fleet-db</span> <code>internal/api/errors.go</code>.
+    It is most of the client-visible error contract of the route table in one
+    file: 24 of the API's 30 <code>ErrorCode</code> constants, with comments
+    explaining why the awkward ones exist; the <code>APIError</code> shape; and
+    <code>MapServiceError</code> — the switch that decides what a service failure
+    looks like from outside on every route that goes through
+    <code>writeServiceError</code>.
+    Read it beside loomcli's two receivers,
+    <code>internal/infra/fleetdb/client.go:445-513</code> and
+    <code>internal/backend/fleet/errors.go:15-82</code>; the second one hard-codes
+    fleet-db's code strings as literals, which tells you exactly how much this file
+    is load-bearing. If you want a second, shorter read,
+    <code>internal/api/repos.go</code> is 194 lines and contains one complete route
+    group end to end.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0020-where-atomicity-lives.html"><span class="dir">Previous</span>Where atomicity lives</a>
+    <a class="next" href="0022-auth-at-the-boundary.html"><span class="dir">Next</span>Auth at the boundary</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

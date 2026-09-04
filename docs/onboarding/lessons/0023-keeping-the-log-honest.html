@@ -1,0 +1,768 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>23. Keeping the log honest — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 5 <span class="sep">/</span> Lesson 23 <span class="sep">/</span> fleet-db</p>
+  <h1>Keeping the log honest</h1>
+  <p class="standfirst">Three background subsystems decide how much of the log
+  survives in Redis — two of them delete, one only copies — and they are not
+  interchangeable. By the end you can answer "how much history does this deployment
+  actually have?" from its config alone — and you will never write a trim that can
+  walk past the archive fence.</p>
+
+  <div class="meta">
+    <span><b>Skill</b> state a deployment's real history horizon, and fence any trim you write</span>
+    <span><b>Time</b> 40 min</span>
+    <span><b>Needs</b> <a href="0005-where-state-lives.html">05</a>, <a href="0002-the-words-that-lie.html">02</a></span>
+    <span><b>Repos</b> <span class="repo fleet">fleet-db</span> <span class="repo loom">loomcli</span></span>
+  </div>
+
+  <!-- ===================================================================== -->
+
+  <h2>Why this exists</h2>
+
+  <p>The event log is the truth, and the event log lives in RAM. Those two facts
+  are in permanent tension, and everything in this lesson is the settlement between
+  them. A workspace that has been busy for a year cannot keep every event in a
+  Redis STREAM forever, so three separate subsystems exist to make it smaller —
+  and each one answers a <em>different</em> question about the same bytes.</p>
+
+  <p>fleet-db writes the settlement down, which is unusual and worth reading before
+  anything else. This paragraph is what a client is entitled to assume:</p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> docs/architecture.md:1350-1354</figcaption>
+<pre><code>&gt; The most recent `compaction.stream_threshold` (default 100) events per issue
+&gt; are retained. Older events are discarded once a snapshot has captured the
+&gt; derived state. **Complete per-issue history is a property of the PostgreSQL
+&gt; backend, not the Redis one** — there, compaction and archival are both
+&gt; skipped and the full event log is kept indefinitely.</code></pre>
+  </figure>
+
+  <p>Note what that sentence is <b>not</b>. It is not "we keep 100 events". It is
+  a floor, on one backend, under one configuration, for one of the two read paths.
+  Change the backend or turn on a flag and the number changes — in both
+  directions. Your job in this lesson is to be able to compute the real number
+  rather than quote the doc.</p>
+
+  <aside class="sidenote">That guarantee is regression-tested through HTTP rather
+  than through the compactor's internals, and the test lives outside
+  <code>internal/</code> on purpose: <span class="path">test/durability/doc.go:5-9</span>
+  explains that <code>harness/policy.yaml</code> forbids <code>internal/api</code>
+  from importing <code>internal/storage</code>, and that misnaming a file to slip
+  past the layering rule would be worse than moving the test.</aside>
+
+  <div class="callout key">
+    <span class="label">The archive fence</span>
+    <p>The <b>archive fence</b> is one function value — <code>models.ArchiveFenceFunc</code>,
+    a closure returning the last event ID confirmed written to cold storage for a
+    workspace. Nothing may trim past it, and when it cannot be resolved the
+    sweepers <b>skip trimming entirely</b> rather than guess. Trimming <em>past
+    the fence</em> is not gated by a config flag; it is gated by proof that a
+    durable copy exists. Whether a sweeper runs at all is still a flag — and on the
+    default, fence-less path the compactor deletes below a 100-event floor with no
+    durable copy anywhere (<span class="path">cmd/fleet-db/main.go:864</span>,
+    <span class="path">internal/compaction/compactor.go:192-197</span>).
+    <span class="path">internal/models/event.go:217-220</span></p>
+  </div>
+
+  <!-- ===================================================================== -->
+
+  <h2>Three subsystems, three questions</h2>
+
+  <p>Read the table by the second column. Each sweeper is triggered by a different
+  property of the data, so they fire at different times, on different keys, with
+  different consequences. Calling any of them "cleanup" will cost you an
+  afternoon.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th></th><th><code>internal/archive/</code></th><th><code>internal/compaction/</code></th><th><code>internal/retention/</code></th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>Question it answers</b></td>
+        <td>Is there a durable copy outside Redis?</td>
+        <td>Is any per-issue stream too big?</td>
+        <td>Is any event older than the policy TTL?</td>
+      </tr>
+      <tr>
+        <td><b>Trigger</b></td>
+        <td>Every event, continuously — it tails the global stream (<code>worker.go:57-84</code>)</td>
+        <td>Size: <code>XLEN &gt;= StreamThreshold</code>, default 100 (<code>compactor.go:404-426</code>); swept every 5 m (<code>config.go:235</code>)</td>
+        <td>Age: <code>now - HotEventsTTL</code>, default 30 d (<code>manager.go:186-187</code>); swept every 1 h (<code>config.go:246</code>)</td>
+      </tr>
+      <tr>
+        <td><b>What it deletes</b></td>
+        <td><b>Nothing, ever.</b> The interface has no delete (<code>archive.go:15-48</code>)</td>
+        <td>Per-issue stream entries only; the global stream needs an opt-in (<code>compactor.go:313</code>)</td>
+        <td>Per-issue <em>and</em> global stream entries, both by default (<code>manager.go:191, 221</code>)</td>
+      </tr>
+      <tr>
+        <td><b>Floor when unfenced</b></td>
+        <td>—</td>
+        <td>The most recent 100 events (<code>XTRIM MAXLEN ~</code>)</td>
+        <td><b>None.</b> It trims to the age cutoff (<code>manager.go:325-328</code>)</td>
+      </tr>
+      <tr>
+        <td><b>Workspaces covered</b></td>
+        <td>Those known at process start (<code>main.go:751-769, 972</code>)</td>
+        <td>All, rediscovered every sweep (<code>compactor.go:363-389</code>)</td>
+        <td><code>DEFAULT</code> only (<code>main.go:308, 1037</code>)</td>
+      </tr>
+      <tr>
+        <td><b>Writes to</b></td>
+        <td>SQL — SQLite or Postgres (<code>sqlite/</code>, <code>postgres/</code>)</td>
+        <td>Redis snapshot keys (<code>internal/storage/redis_snapshot_store.go:50-56</code>)</td>
+        <td>Filesystem JSONL + SHA-256 manifest (<code>archive.go:90-91, 107</code>)</td>
+      </tr>
+      <tr>
+        <td><b>Default</b></td>
+        <td>off (<code>config.go:258</code>)</td>
+        <td><b>on</b> (<code>config.go:233</code>)</td>
+        <td>off (<code>config.go:244</code>)</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>The last row is the one people get wrong in review. Of these three, the only
+  one running on a stock fleet-db is the one that <em>deletes</em>; the one that
+  makes a durable copy is off. That is a decision, not an oversight — but it means
+  the default deployment's history horizon is exactly the compaction floor and
+  nothing more. (A fourth sweeper outside this table — pub/sub topic retention — is
+  also on by default and also deletes:
+  <span class="path">internal/config/config.go:272</span>,
+  <span class="path">internal/storage/redis_pubsub.go:323</span>. See the trap
+  below.)</p>
+
+  <aside class="sidenote">Why the archive is off: an earlier revision of commit
+  <code>d5945f8</code> enabled the SQLite archive by default, and review found two
+  P0 defects it would have activated. Archive rows are keyed by
+  <code>event_id</code> alone
+  (<span class="path">internal/archive/migrate/migrations/sqlite/001_initial.up.sql:3</span>),
+  which collides across workspaces because Redis assigns stream IDs per stream —
+  and <code>INSERT OR IGNORE</code>
+  (<span class="path">internal/archive/sqlite/sqlite.go:107</span>) then silently
+  drops the loser while the worker advances the cursor the compactor trusts. The
+  second: ordinary workspace deletion purges the Redis ID counter while leaving the
+  archive intact, so a recreated workspace reissues IDs the archive still holds
+  events for. That commit message is the best prose in the repo on what compaction
+  may and may not destroy; read it before you propose turning the archive on.</aside>
+
+  <div class="callout trap">
+    <span class="label">Trap — "archive" names two unrelated things, and "retention" three</span>
+    <p>This is <a href="0002-the-words-that-lie.html">Lesson 02</a>'s problem again,
+    inside one repo:</p>
+    <ul>
+      <li><code>archive.EventArchive</code> (<span class="path">internal/archive/archive.go:15</span>)
+      is SQL cold storage. It feeds the fence and the point-in-time reads.</li>
+      <li><code>retention.ArchiveStore</code> (<span class="path">internal/retention/archive.go:39</span>)
+      writes JSONL files and manifests to a directory. <b>Only the retention sweep
+      writes to it</b> (<span class="path">internal/retention/manager.go:285</span>);
+      the restore-drill validator reads and verifies the same manifests
+      (<span class="path">internal/retention/restore.go:42, 72, 83</span>), and is
+      constructed only in tests today. The two share no interface, no storage and no
+      cursor.</li>
+      <li><code>retention.RetentionPolicy</code> (<span class="path">internal/retention/policy.go:15</span>)
+      is about events: <code>HotEventsTTL</code>, <code>ArchiveBeforeTrim</code>,
+      <code>VerifyBeforeDelete</code>, <code>SnapshotBeforeTrim</code>.</li>
+      <li><code>storage.RetentionPolicy</code> (<span class="path">internal/storage/storage.go:661</span>)
+      is <code>{MaxAge, MaxLen}</code> and applies to <b>pub/sub topics</b>, not to
+      events. It is on by default (<span class="path">internal/config/config.go:272</span>) —
+      a completely different sweeper from the one that is off.</li>
+      <li><code>SnapshotRetention</code> (<span class="path">internal/compaction/compactor.go:24-25</span>)
+      is neither: it is how many snapshots to keep per issue (3).</li>
+    </ul>
+    <p>Disambiguate the way this repo's own glossary does — by naming the package.
+    Say "the event archive" or "the retention archive"; "the archive" alone is not
+    a statement. <span class="path">docs/glossary.md:194-204</span>. None of these
+    five are in the course's
+    <a href="../reference/glossary.html#traps">trap-word card</a> yet, because that
+    card covers loomcli's vocabulary — so add them to your own copy.</p>
+  </div>
+
+  <!-- ===================================================================== -->
+
+  <h2>Why one workspace cursor can fence a per-issue stream</h2>
+
+  <p>The fence is a <b>workspace</b>-level cursor: the archive worker tails the
+  global stream <code>fleet-db:{ws}:events</code> and saves its position there
+  (<span class="path">internal/archive/worker.go:135</span> →
+  <code>Subscribe</code> at <span class="path">internal/storage/redis_eventstore.go:157-160</span>).
+  The compactor then uses that ID to trim a <em>different</em> stream,
+  <code>fleet-db:{ws}:events:issue:{id}</code>. That is only sound because of one
+  line of Lua:</p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> internal/storage/redis_eventstore.go:20-26</figcaption>
+<pre><code>// appendEventLua is the Lua script for atomic dual-stream write.
+// Embedded here to avoid filesystem dependency at runtime.
+const appendEventLua = `
+local id = redis.call('XADD', KEYS[1], '*', unpack(ARGV))
+redis.call('XADD', KEYS[2], id, unpack(ARGV))
+return id
+`</code></pre>
+  </figure>
+
+  <p>The server assigns the ID <b>once</b>, on the global stream, and the per-issue
+  copy is written with that same ID. So "this ID is archived" is a claim that
+  transfers across stream families, and comparing the two is meaningful. Compare
+  them with <code>EventID.Before</code>, never as strings — the format is
+  <code>&lt;ms&gt;-&lt;seq&gt;</code> and the comparison is numeric, so
+  <code>"999-0" &lt; "1000-0"</code> is true in code and false in
+  <code>strings.Compare</code>. <span class="path">internal/models/event.go:225-247</span></p>
+
+  <aside class="sidenote">There are five things called "cursor" in this repo
+  (<span class="path">docs/glossary.md:178-182</span>), and two of them appear in
+  this lesson: the projector cursor (<code>fleet-db:{ws}:projector:cursor</code>)
+  and the <b>workspace</b> archive cursor that <em>is</em> the fence
+  (<code>LoadCursor</code>,
+  <span class="path">internal/archive/archive.go:39-41</span>). Do not confuse the
+  second with the <b>per-issue</b> archive high-water mark
+  <code>LatestArchivedID</code>
+  (<span class="path">internal/archive/archive.go:31-33</span>), which the hybrid
+  read splits on — the glossary does not count it among the five, and it is not a
+  cursor. The <code>Last-Event-ID</code> you met in
+  <a href="0013-realtime-one-frame-at-a-time.html">Lesson 13</a> is a use of an
+  <code>EventID</code>, not a sixth
+  (<span class="path">docs/glossary.md:166-167</span>).</aside>
+
+  <!-- ===================================================================== -->
+
+  <h2>The trace: your local stack eats its own history</h2>
+
+  <p>Nine hops, starting on your laptop. The specimen is an issue that has just
+  received its 101st event in a <code>loom</code> local-mode stack.</p>
+
+  <ol class="trace">
+    <li>
+      <span class="hop-file"><span class="repo loom">loomcli</span> internal/bootstrap/embedded.go:366-383</span>
+      <span class="hop-what"><b>The spawn decides nothing.</b> Local mode starts the
+      <code>fleet-db</code> subprocess with exactly four flags —
+      <code>--redis-durability-profile=managed</code>, <code>--auth-dev-mode</code>,
+      <code>--authz-enabled=false</code>, <code>--rpc-enabled=false</code> — plus
+      env vars for the HTTP address, the Redis address and pool sizing. Not one of
+      them mentions compaction, archive or retention. The subprocess does inherit
+      your whole shell environment (<code>embedded.go:379</code>) and env beats
+      defaults (<span class="path">fleet-db internal/config/config.go:281</span>),
+      so the shipped defaults apply unless you have a
+      <code>FLEET_COMPACTION_*</code>, <code>FLEET_ARCHIVE_*</code>,
+      <code>FLEET_RETENTION_*</code> or <code>FLEET_BACKEND</code> exported
+      (<span class="path">config.go:1392, 1441, 1499, 1105</span>). This is the hop from
+      <a href="0006-anatomy-of-a-command.html">Lesson 06</a>, seen from the other
+      side.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file"><span class="repo fleet">fleet-db</span> internal/config/config.go:232-263</span>
+      <span class="hop-what"><b><code>Default()</code> settles it.</b>
+      <code>Compaction.Enabled: true</code>, threshold 100, sweep 5 m;
+      <code>Retention.Enabled: false</code>; <code>Archive.Enabled: false</code>.
+      Your laptop is running a compactor with no fence.</span>
+    </li>
+    <li>
+      <span class="hop-file">cmd/fleet-db/main.go:864-872</span>
+      <span class="hop-what"><b>Wiring, and the one conditional that matters.</b>
+      The compactor is built only when the backend is not Postgres. The fence
+      option is appended <em>only</em> if <code>cfg.Archive.Enabled</code> and an
+      archive backend actually initialised. No archive, no fence — and
+      <code>archiveFence == nil</code> is a different code path from "the fence
+      returned nothing".</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/storage/redis_eventstore.go:65-79</span>
+      <span class="hop-what"><b>The 101st event lands.</b> One Lua call, two
+      <code>XADD</code>s, one ID. The per-issue stream is now 101 entries long.
+      Nothing has been deleted yet; compaction is a sweep, not a write hook.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/compaction/compactor.go:404-426</span>
+      <span class="hop-what"><b>The sweep finds it.</b> <code>findOversizedStreams</code>
+      SCANs <code>events:issue:*</code>, pipelines <code>XLEN</code> over the hits,
+      and returns every ID whose length is <code>&gt;= StreamThreshold</code>.
+      101 ≥ 100, so this issue is a candidate. <code>StartAll</code> runs a sweep
+      immediately at boot, before the first tick
+      (<span class="path">compactor.go:338-343</span>) — which is why a one-shot
+      <code>loom</code> command can compact.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/compaction/compactor.go:254-273</span>
+      <span class="hop-what"><b>The fence is resolved once per workspace per
+      sweep</b>, not once per issue, and the <code>(fence, fenceValid)</code> pair
+      is passed down explicitly. If the closure errors, <code>fenceValid</code>
+      stays <code>false</code> and every trim in this sweep is skipped — snapshots
+      still happen. On your laptop the closure is nil, so both values are
+      zero.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/compaction/compactor.go:126-180</span>
+      <span class="hop-what"><b>Write, verify, then delete.</b> Read the issue hash
+      (empty hash ⇒ skip entirely); read the stream tip with
+      <code>XREVRANGE + - COUNT 1</code>; return early if a snapshot already exists
+      at that exact tip; marshal the hash to JSON and <code>Save</code>; then
+      <b>read the snapshot back and compare <code>LastEventID</code></b> before any
+      trim runs. Copy this order into anything destructive you write.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/compaction/compactor.go:192-203</span>
+      <span class="hop-what"><b>The branch this whole lesson is about.</b> No fence
+      configured ⇒ <code>TrimStreamMaxLen(…, 100)</code>. Fence configured ⇒
+      <code>computeTrimPoint</code>, then <code>XTRIM MINID</code>. Two different
+      Redis commands with two different survivor counts. See the figure
+      below.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/service/issueevents.go:104</span>
+      <span class="hop-what"><b>What the client gets back.</b>
+      <code>GetHistory</code> calls <code>s.store.GetIssueEvents</code> and nothing
+      else. Whatever survived step 8 in Redis <em>is</em> the timeline —
+      <code>/history</code> has no second source.</span>
+    </li>
+  </ol>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> internal/compaction/compactor.go:182-203</figcaption>
+<pre><code>	// 7. Trim per-issue stream.
+	//
+	// With an archive fence, trim up to the fence: everything below it is
+	// already durable in the event archive, and the merged history read
+	// stitches the archived prefix back onto the Redis tail.
+	//
+	// Without a fence there is no durable copy, so trimming to the stream tip
+	// would destroy the timeline outright. Instead keep a floor of the most
+	// recent StreamThreshold events (see "What Compaction Guarantees" in
+	// docs/architecture.md).
+	var eventsRemoved int64
+	if c.archiveFence == nil {
+		eventsRemoved, err = c.store.TrimStreamMaxLen(ctx, workspace, issueID, c.config.StreamThreshold)
+		if err != nil {
+			return true, 0, fmt.Errorf("compactor: trim %s/%s: %w", workspace, issueID, err)
+		}
+	} else if trimPoint := c.computeTrimPoint(workspace, issueID, streamTip, fence, fenceValid); trimPoint != "" {
+		eventsRemoved, err = c.store.TrimStream(ctx, workspace, issueID, trimPoint)
+		if err != nil {
+			return true, 0, fmt.Errorf("compactor: trim %s/%s: %w", workspace, issueID, err)
+		}
+	}</code></pre>
+  </figure>
+
+  <p><code>TrimStreamMaxLen</code> is <code>XTRIM MAXLEN ~</code>, which keeps
+  <em>at least</em> that many entries and is a no-op for
+  <code>maxLen &lt;= 0</code>. <code>TrimStream</code> is <code>XTRIM MINID</code>,
+  which removes everything strictly below the given ID and keeps the fence entry
+  itself. <span class="path">internal/storage/redis_compactor_store.go:46-66</span></p>
+
+  <div class="callout fleet">
+    <span class="label">The counter-intuitive consequence</span>
+    <p>Turning the archive <b>on</b> makes <code>GET /issues/{id}/history</code>
+    return <b>less</b>, not more. With the fence configured and the archive worker
+    caught up, the fence is at or beyond the issue's stream tip, so
+    <code>computeTrimPoint</code> returns the tip
+    (<span class="path">compactor.go:235-241</span>) and <code>XTRIM MINID tip</code>
+    leaves the stream holding one entry, until the next append. The floor only
+    exists on the
+    <code>archiveFence == nil</code> branch. The archived events are safe — they
+    just are not reachable through that endpoint.</p>
+  </div>
+
+  <aside class="sidenote">Nothing pins that survivor count.
+  <code>TestCompactIssueFenceAboveTip</code> asserts only <code>trimmed &gt; 0</code>
+  and its comment calls the case "same as no fence"
+  (<span class="path">internal/compaction/compactor_test.go:1491-1494</span>) — which
+  is true of the trim <em>direction</em> and false of the survivor count. If you
+  ever ship the archive on by default, that is the assertion to tighten first.</aside>
+
+  <!-- ===================================================================== -->
+
+  <h2>The pattern to copy: how a fenced trim is written</h2>
+
+  <p>There are exactly two consumers of <code>ArchiveFenceFunc</code> in the tree,
+  and they were written to the same shape on purpose. Learn the shape once:</p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> internal/compaction/compactor.go:221-242</figcaption>
+<pre><code>func (c *Compactor) computeTrimPoint(workspace, issueID string, streamTip, fence models.EventID, fenceValid bool) models.EventID {
+	if c.archiveFence == nil {
+		return streamTip
+	}
+	if !fenceValid {
+		c.logger.Debug("compactor: archive fence not valid, skipping trim",
+			"workspace", workspace, "issue_id", issueID)
+		return ""
+	}
+	if fence == "" {
+		c.logger.Debug("compactor: archive fence empty, skipping trim",
+			"workspace", workspace, "issue_id", issueID)
+		return ""
+	}
+	if fence.Before(streamTip) {
+		c.logger.Debug("compactor: fence constrains trim",
+			"workspace", workspace, "issue_id", issueID,
+			"stream_tip", streamTip, "fence", fence)
+		return fence
+	}
+	return streamTip
+}</code></pre>
+  </figure>
+
+  <p>Four guards, in this order, and the retention manager's
+  <code>constrainTrim</code> repeats them line for line with one addition — it
+  also treats the Redis maximum sentinel <code>"+"</code> as "constrain me"
+  (<span class="path">internal/retention/manager.go:325-347</span>). The rules the
+  shape encodes:</p>
+
+  <ol>
+    <li><b>Resolve the invariant once, then pass it down.</b> The fence is fetched
+    per workspace per sweep and threaded through <code>CompactIssue</code> /
+    <code>ArchiveAndTrim</code> / <code>computeTrimPoint</code> /
+    <code>constrainTrim</code> as an explicit <code>(fence, fenceValid)</code>
+    pair. Never re-fetch it in a loop.</li>
+    <li><b>Distinguish "no fence" from "fence unknown" from "fence empty".</b>
+    Three states, three branches. Collapsing them into one nil check is how you
+    turn a config question into data loss.</li>
+    <li><b>Fail closed.</b> Unknown ⇒ return the skip sentinel, never the tip.
+    <code>TrimStreamMaxLen(maxLen &lt;= 0)</code> is a no-op rather than "trim
+    everything" (<span class="path">internal/storage/redis_compactor_store.go:57-60</span>).
+    The pub/sub trimmer does the same with an empty floor
+    (<span class="path">internal/storage/redis_pubsub.go:313-315</span>).</li>
+    <li><b>Never call <code>XTrim*</code> from a policy layer.</b> Retention depends
+    on a two-method <code>StreamTrimmer</code> interface it declares itself, with a
+    comment saying exactly this (<span class="path">internal/retention/manager.go:41-46</span>).</li>
+  </ol>
+
+  <div class="callout trap">
+    <span class="label">Trap — the unfenced trim you can write by accident</span>
+    <p><code>storage.EventStore</code> — the interface almost every service already
+    holds — exposes <code>TrimStream(ctx, workspace, issueID, minID)</code>
+    (<span class="path">internal/storage/storage.go:648-650</span>), implemented as a
+    bare <code>XTRIM MINID</code> at
+    <span class="path">internal/storage/redis_eventstore.go:390-398</span>. It has
+    <b>no production caller</b>: both real trims go through
+    <code>RedisCompactorStore</code>. So the fence is not a wall around Redis; it is
+    a convention observed by two call sites, and an unfenced <code>XTRIM</code> is
+    one method call away on a dependency your service already holds.</p>
+    <p>And <a href="0004-the-gate-is-the-spec.html">Lesson 04</a>'s gate will not
+    save you: <code>harness/policy.yaml</code> defines rules for key construction,
+    import layers, Lua arity, handler coverage and doc drift, and <b>nothing</b>
+    about trimming. Verify that yourself in the exercise — it is the difference
+    between a rule the machine enforces and a rule you have to hold.</p>
+  </div>
+
+  <div class="callout trap">
+    <span class="label">Trap — "enabling the archive extends the timeline"</span>
+    <p>It does not. <code>GET /issues/{id}/history</code> reads
+    <code>s.store.GetIssueEvents</code> and stops
+    (<span class="path">internal/service/issueevents.go:104</span>). Only the
+    point-in-time endpoint <code>GET /api/v1/{ws}/issues/{id}/at/{timestamp}</code>
+    goes through a reconstructor, and only that reconstructor is swapped for
+    <code>ArchiveReconstructor</code> when an archive backend exists
+    (<span class="path">cmd/fleet-db/main.go:725-729</span>,
+    <span class="path">internal/api/history.go:48-49</span>). Its
+    <code>mergedEvents</code> reads all archived events for the issue, then the
+    Redis tail strictly after the <b>per-issue</b> high-water mark, and
+    concatenates without dedup because the split is exclusive
+    (<span class="path">internal/history/archive_reconstructor.go:79-111</span>).</p>
+    <p>The doc states this correctly at
+    <span class="path">docs/architecture.md:1365-1369</span>. A code comment in the
+    compactor does not: <span class="path">internal/compaction/compactor.go:34-35</span>
+    says per-issue streams' "timeline endpoint does stitch the archive back on."
+    That comment is a fossil: the merging <code>/history</code> it describes was
+    written on the dropped revision of <code>d5945f8</code> and never shipped.
+    Believe the handler, not the comment.</p>
+  </div>
+
+  <!-- ===================================================================== -->
+
+  <h2>Answering the question</h2>
+
+  <p>Four config reads, then one question about the caller. In order, because each
+  answer makes the later ones irrelevant:</p>
+
+  <ol>
+    <li><b><code>--backend</code> / <code>FLEET_BACKEND</code>.</b> Postgres skips
+    compaction, retention and the archive worker outright
+    (<span class="path">cmd/fleet-db/main.go:864, 966-999, 1002</span>) and keeps the
+    full log. Stop here if it says <code>postgres</code>; default is
+    <code>redis</code> (<span class="path">internal/config/config.go:185</span>).</li>
+    <li><b>Compaction enabled, and its threshold.</b> On by default at 100. This is
+    your floor <em>only while no fence exists</em>.</li>
+    <li><b>Archive enabled, <em>and</em> an archive backend that initialised.</b>
+    Both, or the fence is nil — and with <code>--archive-enabled</code> but no
+    <code>--archive-backend</code> you get a startup WARN and no fence
+    (<span class="path">cmd/fleet-db/main.go:997-998</span>). If the fence exists,
+    the floor is gone and the horizon becomes "whatever the archive worker has not
+    yet confirmed".</li>
+    <li><b>Retention enabled.</b> If yes, an age cutoff also applies — to the global
+    stream as well — but only for the workspace literally named
+    <code>DEFAULT</code>.</li>
+  </ol>
+
+  <p>Then: which endpoint is the caller using? <code>/history</code> sees only what
+  is in Redis. <code>/at/{timestamp}</code> can be seeded by a snapshot when the
+  <code>issue.create</code> event has been trimmed away
+  (<span class="path">internal/history/reconstructor.go:87-107</span>) — and only
+  three snapshots survive per issue
+  (<span class="path">internal/compaction/compactor.go:24-25</span>,
+  <span class="path">internal/storage/redis_snapshot_store.go:141-151</span>).</p>
+
+  <p>Run that procedure over the three deployments you will actually meet:</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Deployment</th><th>Config evidence</th><th>What <code>/history</code> returns</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>Local mode</b><br>(embedded fleet-db)</td>
+        <td>Four flags, none about history — <span class="path">loomcli internal/bootstrap/embedded.go:373-378</span>; defaults apply</td>
+        <td>At least the last 100 events per issue. No copy outside the miniredis snapshot at <code>&lt;LoomDir&gt;/fleet-db/redis-snapshot.json</code> (<span class="path">embedded.go:339, 347-350</span>)</td>
+      </tr>
+      <tr>
+        <td><b>Cloud Run</b></td>
+        <td><code>FLEET_RETENTION_ENABLED=false</code> set explicitly; compaction and archive left at defaults — <span class="path">deploy/terraform/modules/cloud-run/main.tf:72</span></td>
+        <td>The same 100-event floor, and <b>no cold storage at all</b>. Durability is <code>managed</code>, i.e. whatever the Redis provider does (<code>main.tf:74</code>)</td>
+      </tr>
+      <tr>
+        <td><b><code>--backend postgres</code></b></td>
+        <td>Compaction, retention and the archive worker are all skipped; each logs "not applicable for postgres backend" when it was enabled — <span class="path">cmd/fleet-db/main.go:899-900, 995-996, 1051-1052</span></td>
+        <td>Everything. The SQL tables are both the log and the read model (<span class="path">docs/architecture.md:1352-1354</span>)</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>One operational shortcut when you have logs but not the config: the compactor
+  logs <code>archive_fence</code> as a boolean on its very first line
+  (<span class="path">internal/compaction/compactor.go:331-336</span>). That single
+  field separates "floor of 100" from "trims to the fence".</p>
+
+  <p>All four config reads live in one function, <code>config.Default()</code>, and
+  one file, <code>cmd/fleet-db/main.go</code>. When you need the loomcli half of the
+  answer instead — which command opened which store, in which mode — the decision
+  tree on the <a href="../reference/navigation.html">Finding Anything</a> card gets
+  you there faster than grep.</p>
+
+  <aside class="sidenote">A consequence worth predicting rather than discovering: a
+  workspace created <em>after</em> startup gets a projector, because workspace
+  creation notifies the projector manager
+  (<span class="path">internal/api/workspace.go:123-124</span>,
+  <span class="path">cmd/fleet-db/main.go:573</span>), but it gets no archive worker
+  — the archive manager is handed a startup snapshot of workspace keys
+  (<span class="path">cmd/fleet-db/main.go:751-769, 972</span>) and is not wired as a
+  notifier. With the archive on, that workspace's <code>LoadCursor</code> returns
+  <code>""</code> with no error (<span class="path">internal/archive/sqlite/sqlite.go:304-315</span>),
+  so <code>fenceValid</code> is true, the fence is empty, and every trim is skipped
+  forever. Redis grows; nothing is lost. Fail-closed, working exactly as
+  designed.</aside>
+
+  <!-- ===================================================================== -->
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory: you are handed a fleet-db deployment you have never
+    seen and asked how far back an issue's timeline goes. State the four things you
+    check, in order, and what each one changes about the answer.</p>
+    <div class="answer">
+      <p><b>1. The backend.</b> <code>postgres</code> ⇒ the full event log, kept
+      indefinitely; compaction, retention and the archive worker are all skipped.
+      <span class="path">cmd/fleet-db/main.go:864, 966-999, 1002</span></p>
+      <p><b>2. Compaction, and its threshold.</b> On by default, threshold 100. That
+      is the floor — <code>XTRIM MAXLEN ~</code> keeps at least that many.
+      <span class="path">internal/config/config.go:232-237</span>,
+      <span class="path">internal/compaction/compactor.go:193-197</span></p>
+      <p><b>3. Archive enabled <em>and</em> a backend that initialised.</b> Both, or
+      there is no fence. With a fence the floor disappears and the trim goes to
+      <code>min(fence, tip)</code>.
+      <span class="path">cmd/fleet-db/main.go:866-872</span>,
+      <span class="path">internal/compaction/compactor.go:198-203</span></p>
+      <p><b>4. Retention enabled.</b> Adds a 30-day age cutoff with no floor, over
+      per-issue <em>and</em> global streams — but only for the workspace
+      <code>DEFAULT</code>.
+      <span class="path">cmd/fleet-db/main.go:308, 1002, 1037</span>,
+      <span class="path">internal/retention/manager.go:186-191</span></p>
+      <p>Then ask which endpoint the caller uses: <code>/history</code> reads Redis
+      only; <code>/at/{timestamp}</code> can be seeded from a snapshot or, with the
+      archive on, from archived events.</p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="0023">
+    <div class="q" data-answer="0">
+      <p class="stem">The archive fence closure returns an error during a sweep.
+      What happens to that workspace for the rest of the sweep?</p>
+      <ul class="opts">
+        <li>Snapshots still run; every trim in the sweep is skipped</li>
+        <li>Snapshots are skipped; every trim runs to the stream tip</li>
+        <li>Snapshots still run; every trim falls back to the floor</li>
+        <li>Snapshots are skipped; the whole sweep aborts with an error</li>
+      </ul>
+      <div class="why">The fence is resolved once per workspace; on error
+      <code>fenceValid</code> stays <code>false</code> and
+      <code>computeTrimPoint</code> returns the skip sentinel, while the
+      snapshot-and-verify steps run unchanged
+      (<span class="path">internal/compaction/compactor.go:263-273, 225-229</span>).
+      The third option is the sharp near-miss: the <code>StreamThreshold</code> floor
+      lives on the <code>archiveFence == nil</code> branch only, so a configured
+      fence never falls back to it. Asserted at
+      <code>compactor_test.go:1541-1553</code>.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <p class="stem">You set <code>FLEET_ARCHIVE_ENABLED=true</code> with a working
+      SQLite backend. What changes for <code>GET /issues/{id}/history</code>?</p>
+      <ul class="opts">
+        <li>It reads the archive first, then appends the Redis tail</li>
+        <li>It reads the newest snapshot, then replays the Redis tail</li>
+        <li>Nothing: it reads the Redis per-issue stream and only that</li>
+        <li>It reads the archive only if the create event was trimmed</li>
+      </ul>
+      <div class="why"><code>GetHistory</code> calls
+      <code>s.store.GetIssueEvents</code> and has no other source
+      (<span class="path">internal/service/issueevents.go:104</span>). The first two
+      options describe real code — <code>ArchiveReconstructor.mergedEvents</code> and
+      the snapshot-seeded replay — but both are wired behind
+      <code>/at/{timestamp}</code>, not the timeline
+      (<span class="path">internal/api/history.go:48-49</span>). In practice the
+      endpoint returns <em>fewer</em> events afterwards, because the fence replaces
+      the 100-event floor.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <p class="stem">Reaching back to <a href="0006-anatomy-of-a-command.html">Lesson
+      06</a>: a plain <code>loom</code> command spawns the embedded fleet-db. Which
+      history subsystems are live inside it?</p>
+      <ul class="opts">
+        <li>Compaction off, archive off, retention off — nothing sweeps here</li>
+        <li>Compaction on, archive off, retention off — the shipped defaults</li>
+        <li>Compaction on, archive on, retention off — a fence is wired</li>
+        <li>Compaction on, archive off, retention on — an hourly age sweep</li>
+      </ul>
+      <div class="why">The spawn passes four flags and a handful of env vars, none
+      of them about history (<span class="path">loomcli internal/bootstrap/embedded.go:373-383</span>),
+      so <code>config.Default()</code> decides
+      (<span class="path">fleet-db internal/config/config.go:232-263</span>). And
+      because <code>StartAll</code> sweeps immediately before its first tick
+      (<span class="path">compactor.go:338-343</span>), a short-lived CLI process is
+      long enough to trim.</div>
+    </div>
+  </div>
+
+  <div class="cloze" data-answer="retention">
+    <p class="stem">Exactly two production subsystems consume
+    <code>models.ArchiveFenceFunc</code>: the compactor, and the
+    <input> manager.</p>
+    <div class="why">Both are constructed with a
+    <code>WithArchiveFence</code> option from the same closure over
+    <code>archiveBackend.LoadCursor</code>
+    (<span class="path">cmd/fleet-db/main.go:867-870, 1016-1019</span>), and both
+    apply it with the same four-guard shape
+    (<span class="path">internal/compaction/compactor.go:221-242</span>,
+    <span class="path">internal/retention/manager.go:325-347</span>).</div>
+  </div>
+
+  <!-- ===================================================================== -->
+
+  <div class="exercise">
+    <h3>Compute the horizon, then prove the floor</h3>
+
+    <div class="callout safety">
+      <span class="label">Before you start</span>
+      <p>Every step here is read-only: greps, file reads, and <code>go test</code> of
+      a single package against an in-process miniredis. Do <b>not</b> run
+      <code>make local-mode-up</code> or <code>down</code>, start a server on a fixed
+      port, or touch a podman or agent-browser stack for this lesson. If you ever do
+      bring a stack up on this machine: pick your own compose project and your own
+      unclaimed port block, and never touch a stack you did not create.</p>
+    </div>
+
+    <ol>
+      <li>In <span class="repo fleet">fleet-db</span>, enumerate the fence's
+      consumers:
+      <code>grep -rn --include="*.go" "ArchiveFenceFunc" . | grep -v _test.go</code>.
+      Name the two subsystems and the one file that defines the type.</li>
+
+      <li>Now enumerate every trim:
+      <code>grep -rn --include="*.go" "XTrim" . | grep -v _test.go</code>. Six hits:
+      five calls and one comment. Classify each call as <b>fenced</b>,
+      <b>floored</b>, <b>fenced by something else</b>, or <b>reachable but
+      unused</b> — and for the last one, name the interface that puts it within
+      reach of an ordinary service.</li>
+
+      <li>Prove the floor:
+      <code>go test ./test/durability/ -run TestCompactionFloor -v</code>. Read the
+      two <code>t.Logf</code> lines, then open
+      <code>compaction_floor_test.go:52-64</code> and say what each of those four
+      <code>t.Fatal</code>s defends against — every one of them refuses to run
+      rather than pass vacuously if a shipped default changes.</li>
+
+      <li>Prove fail-closed:
+      <code>go test ./internal/compaction/ -run 'TestCompactIssueFence' -v</code>.
+      Four tests pass. Say which two demonstrate that an unresolvable fence skips the
+      trim, and what each one passes as the <code>fenceValid</code> argument.</li>
+
+      <li>Check the gate's blind spot (interleaves
+      <a href="0004-the-gate-is-the-spec.html">Lesson 04</a>):
+      <code>grep -n "trim\|XTrim" harness/policy.yaml</code>. Then read the
+      <code>rules:</code> block from line 58 and write one sentence saying which
+      machine-checked rule <em>would</em> fire if you built a Redis key by hand
+      inside a new trim helper, and which would not fire on the trim itself.</li>
+
+      <li>Back in <span class="repo loom">loomcli</span>, read
+      <code>internal/bootstrap/embedded.go:366-383</code>, confirm with
+      <code>env | grep ^FLEET_</code> that nothing in your own shell overrides the
+      defaults the subprocess inherits, then state, with the
+      fleet-db line that decides it, which of the three subsystems is running in your
+      own local stack right now — and therefore how far back
+      <code>/history</code> goes for an issue you have touched 400 times.</li>
+    </ol>
+
+    <div class="verify">
+      <b>You succeeded when</b>
+      Step 1 prints <b>6 lines across 3 files</b> and you can name
+      <code>compaction</code> and <code>retention</code>; step 2's six hits resolve to
+      five real calls plus one comment; step 3 prints
+      <code>per-issue stream trimmed to the floor: 150 -&gt; 100 events (threshold 100)</code>
+      followed by <code>history over HTTP after compaction: 100 entries, total_events=100</code>;
+      step 4 shows <code>ok  github.com/tysonthomas9/fleet-db/internal/compaction</code>
+      with four <code>PASS</code> lines; step 5's grep returns <b>nothing</b>; and, with
+      no <code>FLEET_</code> variables exported, your answer to step 6 is
+      "compaction only — at least the last 100 events, and no
+      durable copy outside the miniredis snapshot."
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><code>internal/compaction/compactor.go</code> — 426 lines, the whole package,
+    and the clearest single expression of every pattern in this domain: fence
+    resolution once per sweep, write-verify-delete, fail-closed defaults, workspace
+    discovery with a cached fallback. Read it beside
+    <code>docs/architecture.md:1345-1379</code>, "What Compaction Guarantees" — three
+    paragraphs that state the promise and then list the three things it deliberately
+    does not cover.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0022-auth-at-the-boundary.html"><span class="dir">Previous</span>Auth at the boundary</a>
+    <a class="next" href="0024-when-redis-dies.html"><span class="dir">Next</span>When Redis dies</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

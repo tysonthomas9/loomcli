@@ -1,0 +1,699 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>25. Who owns this agent — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 6 <span class="sep">/</span> Lesson 25 <span class="sep">/</span> Control plane</p>
+  <h1>Who owns this agent</h1>
+  <p class="standfirst">Ownership has three answers, not two. The third one —
+  <i>I could not find out</i> — is the one that decides whether you kill a running
+  agent or let it finish, and it is the only one you have to design for.</p>
+
+  <div class="meta">
+    <span><b>Skill</b> determine who owns a given agent right now — including when the answer is <i>inconclusive</i></span>
+    <span><b>Time</b> 35 min</span>
+    <span><b>Needs</b> <a href="0007-two-clients-one-server.html">07</a>, <a href="0008-claiming-without-collisions.html">08</a>, <a href="0017-the-edges.html">17</a></span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span> <span class="repo fleet">fleet-db</span></span>
+  </div>
+
+  <!-- ===================== KNOWLEDGE ===================== -->
+
+  <h2>Why this exists</h2>
+
+  <p>An <a href="../reference/glossary.html#objects">agent</a> is a named assignment
+  that uses a role; a worker agent runs as a process in a worktree, started by a
+  supervisor inside a <code>loom</code> daemon. Nothing stops you from starting a
+  second daemon — a stale one from another terminal, a desktop-managed one, a
+  container that was never reaped — and nothing stops that second daemon from
+  reading the same config and deciding it too should run <code>planner</code>. Two
+  processes in the same worktree, both committing, both pushing.</p>
+
+  <p><a href="0008-claiming-without-collisions.html">Lesson 08</a> named the
+  invariant that prevents it: <code>(workspace_id, agent_id) → at most one active
+  owner</code>, held as an <b>agent ownership lease</b> in fleet-db. This lesson is
+  that lease at full depth, because the interesting part is not the happy path. It
+  is what a supervisor does the moment it stops being sure.</p>
+
+  <div class="callout key">
+    <span class="label">The one idea</span>
+    <p>Ownership is the result of an <b>operation</b>, never the value of a field.
+    You learn who owns an agent by asking fleet-db to arbitrate — an acquire, or a
+    heartbeat — and if that call does not complete you have learned <em>nothing</em>.
+    "Could not reach the server" and "nobody owns it" are different facts, and the
+    entire kill/keep decision hangs on not confusing them.</p>
+  </div>
+
+  <p>You met the same principle one lesson family over. In
+  <a href="0017-the-edges.html">Lesson 17</a>, <code>serve</code> proves a TaskRun
+  lease by issuing a <em>real fenced no-op heartbeat</em> rather than comparing
+  fields it already has in hand
+  (<span class="path">internal/webui/handlers/taskrunapi/module.go:244-259</span>).
+  Same instinct, different object.</p>
+
+  <h2>Three control-plane records, three different questions</h2>
+
+  <p><span class="repo loom">loomcli</span> The control plane keeps three records
+  per running agent, and newcomers conflate them constantly. They have different
+  keys, different TTLs, and different lifetimes. All three interfaces live in
+  <span class="path">internal/store/control_plane_store.go</span>; all three are
+  written by the daemon supervisor.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Record</th><th>Key</th><th>TTL and refresh</th><th>The question it answers</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>Node</b><br><code>store.NodeStore</code></td>
+        <td><code>(workspace, node_id)</code>, where <code>node_id</code> is
+        <code>loom-supervisor-&lt;host&gt;-&lt;pid&gt;</code>
+        (<code>control_plane.go:145-153</code>)</td>
+        <td>2 min TTL, heartbeat every 30 s
+        (<code>supervisor.go:241-242</code>, <code>control_plane.go:54-71</code>)</td>
+        <td>Is this <em>supervisor process</em> alive?</td>
+      </tr>
+      <tr>
+        <td><b>Agent session</b><br><code>store.AgentSessionStore</code></td>
+        <td><code>(workspace, session_id)</code>, one per supervision cycle
+        (<code>supervisor.go:529-541</code>)</td>
+        <td>No TTL of its own; the paired <code>AgentLease</code> gets 30 min and is
+        renewed <b>only</b> by daemon IPC mutations
+        (<code>supervisor.go:243-247</code>, <code>daemon_ipc.go:433-435</code>)</td>
+        <td>What is this agent doing <em>right now</em>, on which attempt?</td>
+      </tr>
+      <tr>
+        <td><b>Agent ownership lease</b><br><code>store.AgentOwnershipLeaseStore</code></td>
+        <td><code>(workspace, agent_id)</code> — and <code>agent_id</code> is the
+        <b>worktree name</b> (<code>ownership.go:46</code>)</td>
+        <td>30 min TTL, heartbeat every 30 s
+        (<code>supervisor.go:248</code>, <code>ownership.go:160-166</code>)</td>
+        <td>Which supervisor may run this agent <em>at all</em>?</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Only the third one is a mutual-exclusion device. The interface is five methods
+  and no <code>Create</code> — the write is an upsert-with-guard called
+  <code>Acquire</code>, which is the whole design in one name:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/store/control_plane_store.go:284-290</figcaption>
+<pre><code>type AgentOwnershipLeaseStore interface {
+	Acquire(ctx context.Context, in AgentOwnershipLeaseAcquire) (*domain.AgentOwnershipLease, error)
+	Get(ctx context.Context, workspaceKey, agentID string) (*domain.AgentOwnershipLease, error)
+	List(ctx context.Context, workspaceKey string, filter AgentOwnershipLeaseFilter) ([]*domain.AgentOwnershipLease, error)
+	Heartbeat(ctx context.Context, workspaceKey, agentID, token string, ttl time.Duration) (*domain.AgentOwnershipLease, error)
+	Release(ctx context.Context, workspaceKey, agentID, token string) (*domain.AgentOwnershipLease, error)
+}</code></pre>
+  </figure>
+
+  <aside class="sidenote">Note the sibling above it,
+  <code>AgentLeaseStore</code> (<span class="path">control_plane_store.go:258-264</span>),
+  keyed by <code>lease_id</code> rather than <code>agent_id</code>. Two things in
+  this file are called a lease. Only the <code>agent_id</code>-keyed one enforces
+  single ownership; the other fences a session's IPC writes.</aside>
+
+  <h2>Three outcomes, declared as a type</h2>
+
+  <p>The tri-state is not implicit in error handling — it is an enum with a comment
+  telling you why it exists:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/cli/daemon/supervisor/ownership.go:19-28</figcaption>
+<pre><code>// ownershipAcquireOutcome classifies an ownership acquire attempt so callers
+// can distinguish "someone else verifiably holds it" from "could not tell"
+// (network/5xx) — the verify-before-kill path branches on exactly that.
+type ownershipAcquireOutcome int
+
+const (
+	ownershipAcquired ownershipAcquireOutcome = iota
+	ownershipHeldByOther
+	ownershipAcquireInconclusive
+)</code></pre>
+  </figure>
+
+  <p>And here is the classifier that produces it. Read the middle arm twice — it is
+  a fourth outcome hiding inside the first:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/cli/daemon/supervisor/ownership.go:52-64</figcaption>
+<pre><code>	if err != nil {
+		if errors.Is(err, domain.ErrAlreadyExists) || errors.Is(err, domain.ErrConflict) {
+			slog.Info("agent ownership held by another daemon", "worktree", ap.Entry.Worktree, "workspace", s.WorkspaceID, "err", err)
+			return ownershipHeldByOther
+		}
+		if errors.Is(err, domain.ErrNotFound) {
+			clearAgentOwnershipLeaseState(ap)
+			slog.Info("agent ownership leases unavailable; continuing without ownership guard", "worktree", ap.Entry.Worktree, "workspace", s.WorkspaceID, "err", err)
+			return ownershipAcquired
+		}
+		slog.Warn("agent ownership acquire failed", "worktree", ap.Entry.Worktree, "workspace", s.WorkspaceID, "err", err)
+		return ownershipAcquireInconclusive
+	}</code></pre>
+  </figure>
+
+  <p>Nothing in fleet-db's acquire path produces a 404 — the storage call either
+  writes or answers CLAIMED
+  (<span class="path">fleet-db internal/storage/control_plane.go:694-713</span>),
+  and <code>writeStorageError</code> issues 404 only for
+  <code>ErrStorageNotFound</code>
+  (<span class="path">internal/api/control_plane.go:1237-1238</span>) — so a 404
+  here means the <em>endpoint</em> is not there: an older fleet-db, or something in
+  front of it that does not route <code>/agent-ownership-leases</code>. The
+  supervisor reads that as "this backend does not support ownership leases",
+  clears its lease state, and runs
+  <b>unguarded</b>. That is a deliberate back-compat fail-open, and a test pins
+  it: <code>TestAcquireAgentOwnershipContinuesWhenBackendDoesNotSupportOwnershipLeases</code>
+  feeds <code>Acquire</code> a wrapped <code>domain.ErrNotFound</code> and asserts
+  the outcome is <code>ownershipAcquired</code> with the lease state cleared
+  (<span class="path">ownership_test.go:15-40, 46-48</span>). It has a twin at the
+  top of the function: with no control store or no workspace, the answer is also
+  <code>ownershipAcquired</code>, "so non-control-plane supervision keeps today's
+  behavior exactly" (<span class="path">ownership.go:31-35</span>). When you ask
+  "who owns this agent" and the answer is "nobody", check first that ownership is
+  switched on at all.</p>
+
+  <h2>The arbiter is a dozen lines of Lua</h2>
+
+  <p><span class="repo fleet">fleet-db</span> The acquire endpoint runs one script.
+  Everything the guard needs is read and written inside it, so two daemons acquiring
+  at the same instant cannot both win:</p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> internal/storage/redis.go:201-212</figcaption>
+<pre><code>local live_same_owner_token = nil
+local existing_status = redis.call('HGET', KEYS[1], 'status')
+if existing_status == 'active' then
+    local existing_owner = redis.call('HGET', KEYS[1], 'owner_id')
+    local existing_expires = redis.call('HGET', KEYS[1], 'expires_at_unix')
+    if existing_owner and existing_expires and tonumber(existing_expires) and tonumber(existing_expires) &gt; tonumber(ARGV[2]) then
+        if existing_owner ~= ARGV[1] then
+            return {'CLAIMED', ''}
+        end
+        live_same_owner_token = redis.call('HGET', KEYS[1], 'token')
+    end
+end
+-- fence INCR, token preservation and HSET elided (redis.go:213-225)</code></pre>
+  </figure>
+
+  <p>Three properties fall out of those lines, and all three matter to you:</p>
+
+  <ul>
+    <li><b>Expiry is a field comparison, not a Redis TTL.</b> The script compares
+    <code>expires_at_unix</code> against a server-supplied "now"
+    (<code>ARGV[2]</code>, stamped at
+    <span class="path">internal/storage/control_plane.go:683</span>). The hash key
+    itself is never given an <code>EXPIRE</code> — the only writes the acquire and
+    renew scripts issue are <code>INCR</code>/<code>SADD</code>/<code>HSET</code>
+    (<code>redis.go:213-224</code>, <code>:252-256</code>), and nothing writes
+    <code>expired</code> back into the hash — so an expired lease is still a row you
+    can read.</li>
+    <li><b>Same-owner re-acquire preserves the token</b>
+    (<code>redis.go:210</code>, <code>:215-222</code>) — though the fence still
+    advances, because the <code>INCR</code> at <code>redis.go:213</code> sits below
+    the only early return. Preserving the token is what makes "re-acquire to find
+    out" a safe probe rather than a destructive one.</li>
+    <li><b>Different owner plus live lease is the only refusal.</b> Everything else —
+    no row, expired, released, or the same owner re-acquiring — overwrites and bumps
+    the fencing token
+    (<span class="path">internal/storage/control_plane.go:665-671</span>).</li>
+  </ul>
+
+  <aside class="sidenote">There is a copy of this script at
+  <span class="path">internal/storage/lua/acquire_ownership_lease.lua</span>, and its
+  header says the Go constant is canonical (lines 6-7). Believe it: nothing in
+  fleet-db <code>go:embed</code>s the <code>lua/</code> directory, so only the string
+  in <code>redis.go</code> is ever executed. The two are byte-identical today. The
+  comment on <code>claimIssueLua</code> (<span class="path">internal/storage/claim.go:12-13</span>)
+  points the other way and names a file — <code>lua/claim.lua</code> — that does not
+  exist under that name.</aside>
+
+  <h2>The trace: a heartbeat fails</h2>
+
+  <p>This is the path the lesson is really about. The supervisor is running an agent
+  and holds a lease. One heartbeat round trip comes back with an error. Nothing here
+  is allowed to conclude anything from a timestamp.</p>
+
+  <ol class="trace">
+    <li>
+      <span class="hop-file">internal/cli/daemon/supervisor/supervisor.go:294-304</span>
+      <span class="hop-what"><b>Where the lease sits in the loop.</b> Every iteration
+      of <code>superviseAgent</code> acquires ownership <em>before</em> taking a
+      concurrency slot or doing pre-flight setup. Anything other than
+      <code>ownershipAcquired</code> means sleep 5 s and try again
+      (<code>ownership.go:354-372</code>). On success it starts the heartbeat
+      goroutine and builds a <code>releaseOwnership</code> closure that is called on
+      every normal exit path.</span>
+    </li>
+    <li>
+      <span class="hop-file">ownership.go:189-210</span>
+      <span class="hop-what"><b>The heartbeat itself.</b>
+      <code>doOwnershipHeartbeat</code> captures <code>sentAt := time.Now()</code>
+      <em>before</em> the request, then on success stores the server's
+      <code>LastHeartbeat</code> for display and <code>sentAt</code> as
+      <code>OwnershipRenewedAt</code>. The comments on lines 205 and 207 label which
+      field is which — "display/telemetry only" against "local-clock anchor". That
+      split is load-bearing at hop 8.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file"><span class="repo fleet">fleet-db</span> internal/api/control_plane.go:968-980 → internal/storage/redis.go:239-258</span>
+      <span class="hop-what"><b>The server's verdict.</b> The handler requires an
+      <code>X-Agent-Ownership-Lease-Token</code> header and calls
+      <code>RenewAgentOwnershipLease</code>. The Lua returns one of four strings, and
+      the Go layer turns them into typed errors:
+      <code>NOT_FOUND</code>, <code>NOT_OWNER</code>, <code>INVALID</code> (exists,
+      token matches, not live), or <code>OK</code>
+      (<span class="path">internal/storage/control_plane.go:778-791</span>).</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/infra/fleetdb/client.go:283-292, 452-512</span>
+      <span class="hop-what"><b>Status becomes sentinel.</b> The store stack's
+      <code>classifyHTTPError</code> maps the response onto a
+      <code>domain.Err*</code> — the <a href="0007-two-clients-one-server.html">Lesson
+      07</a> currency, not <code>*backend.BackendError</code>. 404 →
+      <code>ErrNotFound</code>, 403 → <code>ErrConflict</code>, 410 →
+      <code>ErrGone</code>. A 5xx or a transport failure gets no sentinel at
+      all.</span>
+    </li>
+    <li>
+      <span class="hop-file">ownership.go:325-334</span>
+      <span class="hop-what"><b>Typed or untyped — the first fork.</b>
+      <code>isTypedDomainError</code> asks one question: did the <em>server</em>
+      classify this, or did the wire fail? It matches five sentinels and nothing
+      else.</span>
+    </li>
+    <li>
+      <span class="hop-file">ownership.go:218-241</span>
+      <span class="hop-what"><b>Verify before kill.</b> Untyped ⇒ one immediate
+      heartbeat retry, because "one immediate retry IS the false-alarm verification,
+      and it is server-side proof (no client clock involved)"
+      (<code>ownership.go:222-224</code>). Retry succeeds ⇒ carry on, and the
+      renewal anchor advances naturally. Retry fails untyped again ⇒ bounded
+      fail-open (hop 8). Typed ⇒ skip the retry
+      and go straight to re-acquire arbitration.</span>
+    </li>
+    <li>
+      <span class="hop-file">ownership.go:247-276</span>
+      <span class="hop-what"><b>Arbitration — and the branch that is the lesson.</b>
+      First a dead-process guard read from supervisor state rather than
+      <code>kill(pid, 0)</code> (lines 250-257 explain why signal-0 is worse). Then
+      one tri-state re-acquire: <code>ownershipAcquired</code> ⇒ keep running with a
+      new fence; <code>ownershipHeldByOther</code> ⇒
+      <code>killAgentForOwnership(..., "verifiably_lost", ...)</code>;
+      <code>ownershipAcquireInconclusive</code> ⇒ hop 8.</span>
+    </li>
+    <li>
+      <span class="hop-file">ownership.go:282-292, 294-323</span>
+      <span class="hop-what"><b>Bounded fail-open.</b> Keep running only while the
+      last <em>confirmed</em> renewal proves the lease is still live server-side.
+      Past that bound, kill with reason
+      <code>ownership_unverifiable</code>.</span>
+    </li>
+  </ol>
+
+  <h2>Every way a lease call can fail, and where it lands</h2>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>What actually happened</th><th><span class="repo fleet">fleet-db</span> returns</th><th>HTTP + <code>error.code</code></th><th><span class="repo loom">loomcli</span> sentinel</th><th>Branch taken</th></tr></thead>
+    <tbody>
+      <tr><td>Lease row is gone entirely</td><td><code>ErrNotFound</code> (<code>control_plane.go:781-782</code>)</td><td>404 <code>not_found</code></td><td><code>ErrNotFound</code></td><td>typed → re-acquire arbitration</td></tr>
+      <tr><td>Token is not ours — someone else took it</td><td><code>ErrNotOwner</code> (<code>:783-784</code>)</td><td>403 <code>forbidden</code></td><td><code>ErrConflict</code></td><td>typed → re-acquire arbitration</td></tr>
+      <tr><td>Our token, but the lease is expired or released</td><td><code>ErrLeaseExpired</code> (<code>:785-788</code>)</td><td>410 <code>lease_expired</code></td><td><code>ErrGone</code></td><td>typed → re-acquire arbitration</td></tr>
+      <tr><td>Timeout, connection reset, 5xx</td><td>—</td><td>—</td><td>untyped error</td><td>one retry, then bounded fail-open</td></tr>
+      <tr><td>Acquire refused: live lease, different owner</td><td><code>ErrAlreadyClaimed</code> (<code>:702-704</code>)</td><td>409 <code>already_claimed</code></td><td><code>ErrAlreadyClaimed</code> (<code>client.go:461-462</code>)</td><td><b>see the trap below</b></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Notice that the three typed heartbeat failures all converge on the same place.
+  That is deliberate: the code does not try to infer ownership from <em>which</em>
+  typed error it got. It asks again, with an operation whose answer is
+  authoritative.</p>
+
+  <h2>The fail-open window, and why it never reads <code>ExpiresAt</code></h2>
+
+  <p>Here is the predicate the inconclusive branch rides on. The comment is longer
+  than the function, and it should be:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/cli/daemon/supervisor/ownership.go:310-323</figcaption>
+<pre><code>// ownershipWithinValidity: fail-open is permitted only while BOTH clocks
+// agree less than ttl has elapsed since the last confirmed renewal. The
+// server stamps expires_at = server_processing_time + ttl, and processing
+// necessarily happens after the client sent, so "elapsed-since-send &lt; ttl"
+// is a conservative lower bound on server-side validity that involves no
+// cross-host clock comparison (never use the server-returned ExpiresAt
+// here). The wall clause counts suspend gaps even where the monotonic clock
+// freezes across sleep; the monotonic clause counts backward wall-clock
+// steps. Either clause expiring ends fail-open — over-counting is safe.
+// Residual assumption: the monotonic clock does not freeze during the same
+// window in which the wall clock steps backward.
+func ownershipWithinValidity(renewedAt time.Time, ttl time.Duration) bool {
+	return ownershipRemainingValidity(renewedAt, ttl) &gt; 0
+}</code></pre>
+  </figure>
+
+  <p>Unpack the argument, because it is the reusable part. The anchor
+  <code>renewedAt</code> is a <em>local</em> timestamp taken just before a request
+  that the server later confirmed. The server set the lease to expire at its own
+  processing time plus the TTL, and its processing came after our send. Therefore
+  "less than TTL has elapsed on my clock since I sent" implies "the lease was still
+  live on the server" — with no comparison between two machines' clocks anywhere.
+  <code>ownershipRemainingValidity</code> then computes it twice, once monotonic and
+  once wall (<code>Round(0)</code> strips the monotonic reading), and takes the
+  smaller (<span class="path">ownership.go:294-308</span>).</p>
+
+  <div class="callout trap">
+    <span class="label">Trap — "held by another daemon" does not arrive as you expect</span>
+    <p>The classifier at <span class="path">ownership.go:53</span> recognises
+    <code>ErrAlreadyExists</code> and <code>ErrConflict</code> as held-by-other. But
+    a real refusal from fleet-db is a 409 carrying
+    <code>"code":"already_claimed"</code>
+    (<span class="path">fleet-db internal/api/control_plane.go:1241-1242</span>),
+    and <code>classifyHTTPError</code> gives that its own sentinel,
+    <code>domain.ErrAlreadyClaimed</code>
+    (<span class="path">internal/infra/fleetdb/client.go:461-462</span>), which is an
+    independent <code>errors.New</code> that wraps neither of the other two
+    (<span class="path">internal/domain/errors.go:20, 28, 32</span>). So a genuine
+    CLAIMED lands in the <em>inconclusive</em> arm, and arbitration rides out the
+    validity window instead of killing at once.</p>
+    <p>Why nobody notices: the fake used by the tri-state test returns
+    <code>ErrAlreadyExists</code> for held-by-other
+    (<span class="path">ownership_verify_test.go:487-488</span>), and so does
+    <code>memstore</code>
+    (<span class="path">internal/infra/memstore/terminal_artifact.go:571-573</span>).
+    Compare the house pattern one directory over, which matches all three sentinels
+    together: <span class="path">internal/webui/handlers/driverapi/module.go:822</span>.
+    At the top of the supervise loop the mistake is invisible — both outcomes just
+    sleep and retry (<span class="path">supervisor.go:294-299</span>). It only bites
+    on the verify-before-kill path.</p>
+  </div>
+
+  <aside class="sidenote">Every citation in that trap was opened and checked, but the
+  conclusion is a reading of code in the two pinned trees — <b>not</b> an observed
+  runtime failure. Treat it as a worked example of how to reason across the seam, and
+  reproduce the reading yourself in step 3 of the exercise before you repeat it to
+  anyone.</aside>
+
+  <h2>So how do you actually answer the question?</h2>
+
+  <p>No <code>loom</code> command answers this for an arbitrary agent.
+  <code>loom daemon status</code> comes closest — it prints
+  <code>Ownership: fence N</code> per agent, and the JSON carries
+  <code>ownership_lease_id</code>, <code>ownership_fencing_token</code> and
+  <code>ownership_last_heartbeat</code>
+  (<span class="path">internal/cli/daemon/daemon_display.go:34-36</span>,
+  <span class="path">daemon_cmd.go:47-49</span>) — but that is one daemon reporting
+  the lease <em>it</em> holds, read out of its own state file
+  (<span class="path">daemon_state.go:146-148</span>, via <code>ReadStateFile</code>
+  at <span class="path">daemon_cmd.go:501</span>). It never asks fleet-db, so it
+  cannot tell you that some <em>other</em> daemon owns the agent. Grep for consumers
+  of <code>AgentOwnershipLeases()</code> and you get the supervisor, the tracing
+  wrapper, and the two store implementations — nothing operator-facing. (That grep
+  is the standard move; if it did not come to you first, re-read the decision tree
+  in <a href="../reference/navigation.html">the navigation reference</a>.) You
+  answer the question by reading fleet-db, and there is a right way and a wrong
+  way.</p>
+
+  <div class="callout trap">
+    <span class="label">Trap — <code>GET</code> returns a <code>status</code> you must not trust</span>
+    <p><code>GetAgentOwnershipLease</code> is an <code>HGETALL</code> and an
+    unmarshal. Nothing normalises the stored <code>status</code>, so a lease whose
+    <code>expires_at</code> passed an hour ago still reads
+    <code>"status":"active"</code>:</p>
+<pre><code>func (s *RedisStorage) GetAgentOwnershipLease(ctx context.Context, ws, agentID string) (*models.AgentOwnershipLease, error) {
+	data, err := s.client.HGetAll(ctx, AgentOwnershipLeaseKey(ws, agentID)).Result()
+	if err != nil {
+		return nil, err
+	}
+	return unmarshalAgentOwnershipLease(data)
+}</code></pre>
+    <p><span class="path">fleet-db internal/storage/control_plane.go:716-722</span>.
+    <code>List</code> does normalise — it runs every row through
+    <code>agentOwnershipLeaseEffectiveStatus</code>, which downgrades
+    <code>active</code> to <code>expired</code> when <code>ExpiresAt</code> is not in
+    the future (<span class="path">:747</span> and <span class="path">:1942-1947</span>).
+    Grep for that helper and you get exactly three hits, none of them in
+    <code>Get</code>.</p>
+  </div>
+
+  <p>Which gives the procedure. In order of decreasing trust:</p>
+
+  <ol>
+    <li><b>List, filtered.</b>
+    <code>GET /api/v1/{ws}/agent-ownership-leases?status=active</code> — the filter is
+    applied to the <em>effective</em> status
+    (<span class="path">fleet-db internal/storage/control_plane.go:1936</span>), and
+    the rows come back with <code>status</code> already corrected. Every row is a
+    live owner; the <code>owner_id</code> and <code>node_id</code> tell you which
+    supervisor.</li>
+    <li><b>Get, then do the expiry check yourself.</b> If you fetch one agent's lease
+    directly, compare <code>expires_at</code> against now before believing
+    <code>status</code>. That is precisely what the daemon's IPC validator does for
+    the <em>session</em> lease — status check and expiry check as two separate
+    guards (<span class="path">internal/cli/daemon/daemon_ipc.go:473-484</span>).</li>
+    <li><b>Attempt an acquire.</b> The only fully authoritative answer, because it is
+    the arbiter itself. Reserve it for the runtime: it is a write, it bumps the
+    fencing token, and a stranger's acquire is how an agent gets killed.</li>
+  </ol>
+
+  <div class="callout safety">
+    <span class="label">Before you point any of that at a running stack</span>
+    <p>These stacks are shared machine state. Pick your own compose project and your
+    own unclaimed port block; never <code>up</code>, <code>down</code> or
+    <code>--build</code> a stack you did not create, and never touch someone else's
+    podman or agent-browser session. Reading is fine; the acquire in step 3 is a
+    write against whatever workspace you aimed it at. Nothing in this lesson's
+    exercise starts a stack.</p>
+  </div>
+
+  <div class="callout trap">
+    <span class="label">Trap — the PID is inside the owner's name</span>
+    <p><code>resolveNodeID</code> returns
+    <code>loom-supervisor-&lt;hostname&gt;-&lt;pid&gt;</code>
+    (<span class="path">internal/cli/daemon/supervisor/control_plane.go:145-153</span>),
+    and that string is the lease's <code>owner_id</code>
+    (<span class="path">ownership.go:44-51</span>). So a restarted daemon is a
+    <em>different owner</em> — same host, same workspace, same agent, new PID. The
+    lease is released on the normal unwind paths
+    (<span class="path">supervisor.go:301-304, 307, 316, 330</span>), but a
+    <code>SIGKILL</code>ed daemon releases nothing, and the next daemon's acquire is
+    refused until the old lease expires. With
+    <code>defaultLeaseTTL = 30 * time.Minute</code>
+    (<span class="path">supervisor.go:248</span>) that is a long time to watch an
+    agent refuse to start for no visible reason.</p>
+    <p>The log line is your tell, and it is the one the previous trap predicts: a
+    refusal that reached the <code>ErrAlreadyExists</code>/<code>ErrConflict</code>
+    arm logs <code>agent ownership held by another daemon</code> at Info
+    (<span class="path">ownership.go:54</span>); one that fell past it logs
+    <code>agent ownership acquire failed</code> at Warn
+    (<span class="path">ownership.go:62</span>). Same cause, different line.</p>
+    <p>And <code>loom workspace ops diagnose</code> will not tell you: its
+    <code>duplicate_daemon_ownership</code> warning compares two daemon
+    <em>PID files</em> and never reads a lease
+    (<span class="path">internal/cli/workspace/ops_cmd.go:683-692</span>). That is
+    <a href="0008-claiming-without-collisions.html">Lesson 08</a>'s rule again — PID
+    files are a convenience, the lease is the authority — showing up as a gap between
+    two tools that sound like they answer the same question.</p>
+  </div>
+
+  <!-- ===================== SKILL ===================== -->
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory: a supervisor's ownership heartbeat returns an
+    error. Walk the whole decision to one of three ends — keep running, re-acquire,
+    kill — and say what makes each step safe without comparing two machines'
+    clocks.</p>
+    <div class="answer">
+      <p><b>1. Typed or untyped?</b> <code>isTypedDomainError</code> matches
+      <code>ErrGone</code>, <code>ErrNotFound</code>, <code>ErrAlreadyExists</code>,
+      <code>ErrConflict</code>, <code>ErrInvalid</code> — a sentinel means the server
+      classified it; anything else means the wire failed.
+      <span class="path">ownership.go:325-334</span></p>
+      <p><b>2. Untyped ⇒ retry once.</b> The retry goes through the same heartbeat
+      plumbing, so a success is a genuine renewal and the anchor advances. Still
+      untyped ⇒ step 4. <span class="path">ownership.go:221-237</span></p>
+      <p><b>3. Typed ⇒ one tri-state re-acquire.</b> Dead-process guard first, from
+      supervisor state rather than signal-0. Acquired ⇒ continue with a new fence.
+      Held-by-other ⇒ kill, reason <code>verifiably_lost</code>. Inconclusive ⇒ step
+      4. <span class="path">ownership.go:247-276</span></p>
+      <p><b>4. Bounded fail-open.</b> Continue only while both the monotonic and the
+      wall clause say less than the TTL has elapsed since the last <em>confirmed</em>
+      renewal — a local anchor taken before a request the server acknowledged, never
+      the server's <code>ExpiresAt</code>. Past it, kill with reason
+      <code>ownership_unverifiable</code>.
+      <span class="path">ownership.go:282-292, 294-323</span></p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="0025">
+    <div class="q" data-answer="0">
+      <p class="stem">In re-acquire arbitration, what separates
+      <code>ownershipHeldByOther</code> from
+      <code>ownershipAcquireInconclusive</code>?</p>
+      <ul class="opts">
+        <li>held-by-other kills now; inconclusive rides out the validity window</li>
+        <li>held-by-other rides out the window; inconclusive kills immediately</li>
+        <li>both kill at once, but only inconclusive records a LastError reason</li>
+        <li>both ride out the window; only held-by-other emits a warning line</li>
+      </ul>
+      <div class="why">Verifiable loss is the only thing that justifies killing a
+      running agent immediately (<code>ownership.go:270-272</code>). Inconclusive
+      means the server's verdict is unknown, so the supervisor keeps running until
+      the last confirmed renewal can no longer prove the lease is live, then fails
+      closed with reason <code>ownership_unverifiable</code>
+      (<code>ownership.go:282-292</code>). Both do set <code>LastError</code> — the
+      reason string is what differs (<code>ownership.go:338-352</code>).</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <p class="stem">fleet-db refuses an acquire because another daemon holds a live
+      lease. Which sentinel reaches <code>acquireAgentOwnership</code>?</p>
+      <ul class="opts">
+        <li><code>domain.ErrConflict</code>, the generic leftover-4xx sentinel</li>
+        <li><code>domain.ErrAlreadyExists</code>, the uncoded-409 default sentinel</li>
+        <li><code>domain.ErrAlreadyClaimed</code>, the coded-409 claim sentinel</li>
+        <li><code>domain.ErrNotOwner</code>, the 403-forbidden owner sentinel</li>
+      </ul>
+      <div class="why">The Lua returns <code>CLAIMED</code>, storage turns that into
+      <code>ErrAlreadyClaimed</code>, the API writes 409 with
+      <code>code: already_claimed</code>, and
+      <code>classifyHTTPError</code>'s coded arm maps it to
+      <code>domain.ErrAlreadyClaimed</code>
+      (<span class="path">client.go:461-462</span>).
+      <code>ErrAlreadyExists</code> is the sharp near-miss: a 409 with <em>no</em>
+      recognised code really does fall through to it
+      (<code>client.go:476</code>) — which is exactly the sentinel
+      <code>ownership.go:53</code> is written against.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <p class="stem">You want to know whether agent <code>planner</code> is owned
+      right now. Which read can you trust on its own?</p>
+      <ul class="opts">
+        <li>GET the lease row and trust the status field it returns</li>
+        <li>LIST the leases and trust the status filter it applies</li>
+        <li>GET the node row and trust the last_heartbeat it returns</li>
+        <li>Read the two daemon PID files that ops diagnose compares</li>
+      </ul>
+      <div class="why"><code>List</code> rewrites each row's status through
+      <code>agentOwnershipLeaseEffectiveStatus</code> before filtering
+      (<span class="path">fleet-db internal/storage/control_plane.go:747, 1936</span>).
+      <code>Get</code> does not (<span class="path">:716-722</span>), so its
+      <code>active</code> can be arbitrarily stale. The node row answers a different
+      question — is that supervisor process alive — and the PID files are the
+      convenience the lease exists to replace.</div>
+    </div>
+  </div>
+
+  <div class="cloze" data-answer="410|410 gone|gone">
+    <p class="stem">Your heartbeat token still matches the stored lease, but the
+    lease is no longer live. fleet-db answers HTTP <input> with code
+    <code>lease_expired</code>, and loomcli turns that into
+    <code>domain.ErrGone</code>.</p>
+    <div class="why">The Lua's <code>INVALID</code> result — exists, token matches,
+    not live — is isolated precisely so it can become 410 rather than a generic
+    conflict, because 410 tells the client that re-acquiring is safe.
+    <span class="path">fleet-db internal/storage/control_plane.go:785-788;
+    internal/api/control_plane.go:1247-1250;
+    loomcli internal/infra/fleetdb/client.go:495-498</span></div>
+  </div>
+
+  <div class="exercise">
+    <h3>Reproduce the classification, end to end</h3>
+    <p><b>Read-only throughout.</b> Two single-package <code>go test</code> runs and
+    some greps — nothing here starts a server, writes to either repo, or touches a
+    stack. If you later want to try this against a live stack, the shared-machine
+    rule stands: your own compose project, your own unclaimed port block, and never
+    a stack you did not create.</p>
+    <ol>
+      <li>Run the tri-state and fail-open tests:<br>
+      <code>go test ./internal/cli/daemon/supervisor -run 'TestAcquireAgentOwnership_TriStateOutcomes|TestVerifyAgentOwnership_InconclusiveWithinValidityDoesNotKill|TestVerifyAgentOwnership_InconclusivePastValidityFailsClosed' -v</code><br>
+      Write down the four subtest names from the first test. Which two sentinels does
+      the table treat as held-by-other?</li>
+
+      <li>Run the classification tests:
+      <code>go test ./internal/infra/fleetdb -run TestClassifyHTTPError -v</code>.
+      Open <code>classify_http_error_test.go:24-42</code> and note what the 409 case
+      passes as a body.</li>
+
+      <li>Now join the two halves.
+      <code>grep -n "already_claimed" internal/infra/fleetdb/client.go</code> and
+      <code>grep -n "errors.Is(err, domain\." internal/cli/daemon/supervisor/ownership.go</code>.
+      Name the sentinel a real fleet-db CLAIMED produces, and the outcome
+      <code>ownership.go</code> returns for it. Then find the one place in
+      <code>internal/webui</code> that matches all three conflict sentinels together
+      and say which of the two shapes you would copy.</li>
+
+      <li>In the fleet-db worktree, run
+      <code>grep -n "agentOwnershipLeaseEffectiveStatus" internal/storage/control_plane.go</code>.
+      Three hits. Read <code>GetAgentOwnershipLease</code> and state, in one
+      sentence, what a <code>GET</code> reports for a lease that expired an hour
+      ago.</li>
+
+      <li>Reaching back to <a href="0017-the-edges.html">Lesson 17</a>: open
+      <code>internal/webui/handlers/taskrunapi/module.go:244-259</code>. Say in one
+      sentence what <code>verifyLease</code> and
+      <code>arbitrateOwnershipByReacquire</code> have in common, and what each would
+      have to do instead if it were allowed to trust a timestamp.</li>
+
+      <li>Reaching back to <a href="0008-claiming-without-collisions.html">Lesson
+      08</a>: open fleet-db's <code>internal/storage/lua/claim_issue.lua</code> beside
+      the acquire script at <code>internal/storage/redis.go:200-226</code>. The claim
+      script takes a separate lock key and has to release it on every error return;
+      the ownership script takes no lock at all. Say what the ownership script
+      contends on instead, and what makes its read-then-write safe without one.</li>
+    </ol>
+    <div class="verify">
+      <b>You succeeded when</b>
+      Both <code>go test</code> commands pass; your step-3 greps show
+      <code>already_claimed</code> at <code>client.go:286</code> and
+      <code>:461</code>, and the <code>ErrAlreadyExists</code>/<code>ErrConflict</code>
+      pair at <code>ownership.go:53</code>; you can say out loud which of the three
+      outcomes a real held-by-other acquire actually returns, which log line it
+      produces, and what that changes on the verify-before-kill path; and you can
+      state what <code>GetAgentOwnershipLease</code> reports for an hour-expired
+      lease without re-opening the file.
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><span class="repo loom">loomcli</span>
+    <code>internal/cli/daemon/supervisor/ownership.go</code> — 373 lines, and the
+    most carefully reasoned file in either repo about acting under uncertainty.
+    Nearly every comment records a distinction someone got wrong first: which
+    timestamp may feed a decision, why a retry counts as proof, why a dead-process
+    check reads supervisor state instead of <code>kill(pid, 0)</code>. Read it
+    beside its test file <code>ownership_verify_test.go</code>, whose header
+    (lines 24-29) explains why the shared <code>memstore</code> double was rejected
+    for these tests — that paragraph is the whole lesson in miniature.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0024-when-redis-dies.html"><span class="dir">Previous</span>When Redis dies</a>
+    <a class="next" href="0026-roles-skills-and-shaping-work.html"><span class="dir">Next</span>Roles, skills, and shaping work</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

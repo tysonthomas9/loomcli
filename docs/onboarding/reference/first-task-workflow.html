@@ -1,0 +1,703 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>First-Task Workflow — reference card</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/reference.css">
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Reference <span class="sep">/</span> Claim to pull request</p>
+  <h1>First-Task Workflow</h1>
+  <p class="standfirst">Every step of a task in either repo, in order, with the exact
+  command and the file that proves it. The two repos are 80% the same process and
+  20% different in ways that cost an afternoon — the differences are marked.</p>
+
+  <div class="meta">
+    <span><b>Use when</b> you have a task and want to land it without asking</span>
+    <span><b>Pairs with</b> <a href="navigation.html">Finding Anything</a>, <a href="glossary.html">Glossary</a></span>
+    <span><b>Long form</b> <a href="../lessons/0031-your-first-task.html">Lesson 31</a></span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span> <span class="repo fleet">fleet-db</span></span>
+  </div>
+
+  <div class="callout safety">
+    <span class="label">Read this before any step that starts a process</span>
+    <p><b>This machine is shared. Compose projects, ports and container state
+    belong to whoever created them.</b> Before any <code>up</code>: run
+    <code>podman ps</code>, treat every stack you see as someone else's, and pick
+    an unclaimed port block. Launch with <em>your own</em> project name and ports.
+    Tear down only the project you started.</p>
+    <ul>
+      <li><code>make local-mode-up</code> defaults to project
+      <code>loomcli-local-mode</code> on ports <b>8280 / 8282 / 8283</b>
+      (<span class="path">Makefile:8</span>,
+      <span class="path">test/local-mode/docker-compose.yml:60,96,116</span>). An
+      <code>up --build</code> on a project name that already exists <em>recreates
+      that project's containers</em>. Override all four:
+      <code>LOCAL_MODE_COMPOSE_PROJECT</code>,
+      <code>LOCAL_MODE_FLEETDB_PORT</code>, <code>LOCAL_MODE_API_PORT</code>,
+      <code>LOCAL_MODE_UI_PORT</code>
+      (<span class="path">.agent-skills/loom-pr-test/SKILL.md:98-106</span>).</li>
+      <li><code>make fleetdb-regression-up</code> has <b>no override at all</b>:
+      the project name is hard-coded <code>loomcli-fleetdb-regression</code> and
+      the ports are 8080 / 8082 / 8083
+      (<span class="path">test/fleetdb/docker-compose.regression.yml:34,90,164,196</span>).
+      It cannot be run in parallel, and <code>make fleetdb-regression-down</code>
+      runs <code>down -v --remove-orphans</code>, destroying the volumes
+      (<span class="path">Makefile:252</span>). Ask before you start it.</li>
+      <li><code>make dev</code> binds fixed ports <b>:8080 and :3000</b>
+      (<span class="path">Makefile:718-720</span>). Check
+      <code>lsof -nP -iTCP:3000 -sTCP:LISTEN</code> first; a listener you did not
+      start belongs to another checkout.</li>
+      <li>The two pinned course trees are <b>read-only</b>. Do not run
+      <code>make hooks</code>, <code>make dev</code>, or any <code>up</code> in
+      them — they write to <code>node_modules</code>, to the machine, and to
+      <code>.git/hooks</code>, which is <em>per-clone</em> and so reaches every
+      other worktree of that clone (step 0.4). Build binaries into a scratch
+      directory, never in place: the outputs are gitignored, so
+      <code>git status</code> will not warn you. Do your task in your own working
+      clone.</li>
+    </ul>
+  </div>
+
+  <nav class="toc">
+    <ol>
+      <li><a href="#differences">The differences, in one table</a></li>
+      <li><a href="#setup">0. Once, before your first task</a></li>
+      <li><a href="#claim">1. Take the task</a></li>
+      <li><a href="#work">2. Work it</a></li>
+      <li><a href="#prove">3. Prove it</a></li>
+      <li><a href="#pr">4. Commit and open the PR</a></li>
+      <li><a href="#land">5. Land the plane</a></li>
+      <li><a href="#traps">Traps on this exact path</a></li>
+    </ol>
+  </nav>
+
+  <!-- ============================================================= -->
+  <h2 id="differences">The differences, in one table</h2>
+
+  <p>Same shape, different constants. Everything in this column pair was checked
+  in both repos at the pinned commits.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th></th><th><span class="repo loom">loomcli</span></th><th><span class="repo fleet">fleet-db</span></th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>Base branch</b></td>
+        <td><code>v5</code> on this line — CI pushes on <code>[main, v5]</code> (<span class="path">.github/workflows/ci.yml:5</span>), and <code>origin/main</code> is <b>1786 commits behind</b> <code>origin/v5</code>. Confirm with a human.</td>
+        <td><code>main</code>. Both CI workflows trigger on push to <code>main</code> only (<span class="path">.github/workflows/ci.yml:6-7</span>, <span class="path">harness.yml:6-7</span>).</td>
+      </tr>
+      <tr>
+        <td><b>Issue CLI</b></td>
+        <td><code>loom data …</code> (<span class="path">internal/cli/data/root.go:58-71</span>)</td>
+        <td><code>fdb …</code> (<span class="path">cmd/fdb/main.go:33-95</span>)</td>
+      </tr>
+      <tr>
+        <td><b>Local gate</b></td>
+        <td><code>make check</code>; <code>make gate</code> is an alias (<span class="path">Makefile:644-668</span>)</td>
+        <td><code>make gate</code> (<span class="path">Makefile:171-179</span>)</td>
+      </tr>
+      <tr>
+        <td><b>Coverage floor</b></td>
+        <td>60% total, Go and frontend separately (<span class="path">Makefile:624</span>, <span class="path">:639</span>)</td>
+        <td>75% total <em>and</em> 50% per package (<span class="path">Makefile:10-11</span>)</td>
+      </tr>
+      <tr>
+        <td><b>Pre-push hook</b></td>
+        <td><code>make hooks</code> works; <code>make dev</code> installs it whether you asked or not (<span class="path">Makefile:709-710,719</span>)</td>
+        <td><code>make hooks</code> installs the hook <em>and</em> exits non-zero — see step 0.4</td>
+      </tr>
+      <tr>
+        <td><b>Hook bypass</b></td>
+        <td>None. The hook runs <code>make check</code> unconditionally (<span class="path">scripts/hooks/pre-push:10-11</span>)</td>
+        <td><code>SKIP_GATE=1 git push</code> (<span class="path">scripts/hooks/pre-push:6-10</span>)</td>
+      </tr>
+      <tr>
+        <td><b>PR body contract</b></td>
+        <td>Unwritten. No pull-request template in the repo — borrow fleet-db's.</td>
+        <td>Seven required items (<span class="path">docs/agents/contracts/pr-contract.md:3-16</span>)</td>
+      </tr>
+      <tr>
+        <td><b>Cross-repo proof</b></td>
+        <td>Three jobs, none of them on a PR. <code>skills-compatibility</code> gates goreleaser on <code>v*</code> tags (<span class="path">.github/workflows/release.yml:3-6,12-50</span>); <code>desktop-release.yml</code> pulls fleet-db on <code>desktop-v*</code> tags (<span class="path">:21-24,45-50</span>); <code>nightly.yml</code>'s <code>playground</code> job runs cross-repo at 02:00 UTC but is <code>continue-on-error: true</code> (<span class="path">:4-7,63,94,99-107</span>), so it gates nothing.</td>
+        <td><b>None.</b> No workflow in <code>.github/workflows/</code> mentions loomcli. Prove it yourself.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <!-- ============================================================= -->
+  <h2 id="setup">0. Once, before your first task</h2>
+
+  <ol class="check">
+    <li>
+      <span class="what">Put the two repos side by side.</span>
+      <span class="how">Not a preference. <code>Makefile:559-560</code> looks for
+      <code>../fleet-db</code> or <code>../../fleet-db</code> and exports
+      <code>FLEET_DB_BIN</code> when it finds a built binary there
+      (<span class="path">Makefile:562-565</span>); the compose stacks hard-code
+      the build context <code>../../../fleet-db</code>
+      (<span class="path">test/local-mode/docker-compose.yml:40</span>). Clone them
+      anywhere else and you will chase this for an hour.</span>
+    </li>
+    <li>
+      <span class="what">Read the two orientation documents for the repo you are in.</span>
+      <span class="how"><span class="repo loom">loomcli</span>
+      <code>AGENTS.md</code> then <code>docs/loom-glossary.md</code> — AGENTS.md
+      opens by telling you to
+      (<span class="path">AGENTS.md:5-10</span>).<br>
+      <span class="repo fleet">fleet-db</span> <code>AGENTS.md</code>, then
+      <code>docs/agents/index.md</code>,
+      <code>docs/agents/domain-primer.md</code>,
+      <code>docs/agents/codebase-map.md</code>
+      (<span class="path">AGENTS.md:17-26</span>). Canonical architecture is
+      <code>docs/architecture.md</code>; root <code>ARCHITECTURE.md</code> is
+      marked "Retired pointer (do not use)"
+      (<span class="path">AGENTS.md:34-36</span>).</span>
+    </li>
+    <li>
+      <span class="what">Confirm the base branch with a human, then branch.</span>
+      <span class="how">Run it yourself — this is read-only and it is the fastest
+      way to see why the question matters:</span>
+<pre><code>git rev-list --left-right --count origin/main...origin/v5
+# loomcli at ce4df56fb prints:  1   1786</code></pre>
+      <span class="how">Prefixes actually in use on <code>origin</code>
+      (632 branches): <code>feat/</code> 144, <code>loom/</code> 133,
+      <code>fix/</code> 111, <code>codex/</code> 13, <code>test/</code> 11,
+      <code>docs/</code> 10, <code>bot/</code> 8, <code>refactor/</code> 6,
+      <code>epic/</code> 5, <code>chore/</code> 5, <code>ci/</code> 3.
+      Pick <code>feat/</code>, <code>fix/</code>, <code>chore/</code>,
+      <code>docs/</code> or <code>ci/</code>. Leave <code>loom/</code> and
+      <code>bot/</code> alone: the whole <code>loom/</code> namespace is machine
+      naming, not yours — <code>loom/PUPPET-N</code> 93,
+      <code>loom/stack/epic-…</code> 20, <code>loom/profiles-v2/…</code> 9,
+      <code>loom/stack/task-…</code> 6, <code>loom/task/…</code> 3, plus two
+      one-offs. Never hand-write one.
+      In <span class="repo fleet">fleet-db</span>
+      (162 branches): <code>feat/</code> 59, <code>loom/</code> 27,
+      <code>fix/</code> 26, <code>docs/</code> 5, plus
+      <code>epic/fleet-db-&lt;id&gt;</code> and <code>integration/</code>.</span>
+    </li>
+    <li>
+      <span class="what">Read the pre-push gate. Do not install it from a pinned tree.</span>
+      <span class="how"><b>Git hooks are per-clone, not per-worktree.</b> Both
+      <code>make hooks</code> targets write to
+      <code>$(git rev-parse --git-common-dir)/hooks</code> — the parent clone's
+      directory, not yours. loomcli's Makefile says so out loud, "applies to all
+      worktrees" (<span class="path">Makefile:682,688</span>). The two pinned
+      trees hang off clones carrying 83 and 48 live worktrees owned by other
+      people, and neither hooks directory has a hook installed today, so
+      installing one changes <code>git push</code> for all of them. Inspect
+      instead — this is read-only:</span>
+<pre><code>cat scripts/hooks/pre-push
+ls "$(git rev-parse --git-common-dir)/hooks" | grep -v sample   # empty = none installed
+git worktree list | wc -l                                       # who else you would change</code></pre>
+      <span class="how"><span class="repo loom">loomcli</span> 11 lines, runs
+      <code>make check</code> unconditionally
+      (<span class="path">scripts/hooks/pre-push:10-11</span>);
+      <code>make hooks</code> additionally needs <code>pre-commit</code> and
+      <code>golangci-lint</code> on <code>PATH</code> and errors if either is
+      missing (<span class="path">Makefile:683-692</span>, checks at
+      <span class="path">:689-690</span>).<br>
+      <span class="repo fleet">fleet-db</span> 17 lines, runs
+      <code>make gate</code>, honours <code>SKIP_GATE</code>
+      (<span class="path">scripts/hooks/pre-push:6-16</span>). Its
+      <code>make hooks</code> <b>installs the hook and still exits non-zero</b>:
+      the loop copies <code>pre-commit pre-push post-checkout post-merge</code>
+      (<span class="path">Makefile:249-252</span>) but
+      <code>scripts/hooks/</code> holds only <code>pre-push</code> and
+      <code>test_hooks.sh</code>, so three <code>cp</code>s print
+      <code>No such file or directory</code>, the last one sets the status, and
+      make reports <code>Error 1</code> — after <code>pre-push</code> is already
+      installed. No hand copy is needed. Installing is a decision for a clone you
+      own outright, not a step on this card.</span>
+    </li>
+    <li>
+      <span class="what">Build both binaries — into a scratch directory outside both repos.</span>
+      <span class="how">Almost everything downstream — the embedded fleet-db, the
+      conformance suite, <code>loom doctor</code> — needs a real
+      <code>fleet-db</code> executable it can find. Do not build in place:
+      <code>./loom</code> and <code>./fleet-db</code> are both gitignored
+      (<span class="path">loomcli/.gitignore:3</span>,
+      <span class="path">fleet-db/.gitignore:6</span>), so a build into a pinned
+      tree writes to a read-only checkout and <code>git status</code> never shows
+      it.</span>
+<pre><code>mkdir -p /tmp/loom-scratch
+go build -o /tmp/loom-scratch/loom ./cmd/loom
+(cd ../fleet-db &amp;&amp; go build -o /tmp/loom-scratch/fleet-db ./cmd/fleet-db)
+export FLEET_DB_BIN=/tmp/loom-scratch/fleet-db</code></pre>
+    </li>
+    <li>
+      <span class="what">Ask <code>loom doctor</code> whether it can see fleet-db.</span>
+      <span class="how">In local mode it prints the exact paths it checked and a
+      remediation string
+      (<span class="path">internal/cli/doctor/doctor_fleetdb.go:132-147</span>).
+      The search order is <code>FLEET_DB_BIN</code> → <code>PATH</code> → sibling
+      of the <code>loom</code> binary → <code>&lt;LoomDir&gt;/bin/fleet-db</code>,
+      documented at
+      <span class="path">internal/bootstrap/embedded.go:526-532</span> and
+      implemented at <span class="path">:542-580</span>.</span>
+    </li>
+  </ol>
+
+  <!-- ============================================================= -->
+  <h2 id="claim">1. Take the task</h2>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Step</th><th><span class="repo loom">loomcli</span></th><th><span class="repo fleet">fleet-db</span></th></tr></thead>
+    <tbody>
+      <tr><td>Find work</td><td><code>loom data ready --limit 10</code></td><td><code>fdb ready</code></td></tr>
+      <tr><td>Read it</td><td><code>loom data show &lt;id&gt;</code></td><td><code>fdb show &lt;id&gt;</code></td></tr>
+      <tr><td>Take it</td><td><code>loom data claim &lt;id&gt;</code></td><td><code>fdb claim &lt;id&gt;</code></td></tr>
+      <tr><td>Finish it</td><td><code>loom data close &lt;id&gt; --reason "done"</code></td><td><code>fdb close &lt;id&gt;</code></td></tr>
+      <tr><td>File follow-up</td><td><code>loom data create --title "…" --type task</code></td><td><code>fdb create …</code></td></tr>
+      <tr><td>Source</td><td><span class="path">AGENTS.md:163-170</span>, <span class="path">internal/cli/data/root.go:58-71</span></td><td><span class="path">cmd/fdb/main.go:33-95</span>, descriptions at <span class="path">:100-137</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Telling each CLI which workspace you mean</h3>
+
+  <ul>
+    <li><span class="repo loom">loomcli</span> <code>--workspace</code> is a
+    <b>root</b> persistent flag, mirrored into <code>LOOM_WORKSPACE</code>
+    in <code>PersistentPreRunE</code>
+    (<span class="path">internal/cli/root.go:108,112-128</span>). The
+    <code>data</code> subtree deliberately does not redeclare it: a duplicate flag
+    would shadow the root one and leave <code>LOOM_WORKSPACE</code> unset, which
+    the fleet backend needs at construction time
+    (<span class="path">internal/cli/data/root.go:10-14</span>). So
+    <code>loom --workspace X data ready</code> and
+    <code>LOOM_WORKSPACE=X loom data ready</code> both work. That rule is about
+    <code>data</code>, not the whole CLI — eight other subcommands do declare
+    their own <code>--workspace</code>, including
+    <code>git pull/sync/pr/push</code> as <code>-W</code>
+    (<code>grep -rn 'StringVarP\?(&amp;[A-Za-z]*, "workspace"' --include='*.go'
+    internal/cli | grep -v _test.go</code> lists all nine).</li>
+
+    <li><span class="repo fleet">fleet-db</span> <code>fdb</code> is stdlib
+    <code>flag</code>, so <b>flags come before the command</b>:
+    <code>fdb [flags] &lt;command&gt; [args]</code>
+    (<span class="path">cmd/fdb/main.go:164-186</span>, usage at
+    <span class="path">:345</span>). <code>fdb ready -json</code> will not parse
+    that flag. Env fallbacks are <code>FLEET_SERVER</code>,
+    <code>FLEET_SOCKET</code>, <code>FLEET_WORKSPACE</code>,
+    <code>FLEET_ACTOR</code>, <code>FLEET_API_KEY</code>,
+    <code>FLEET_TRANSPORT</code> (<span class="path">:290-299</span>), plus
+    <code>FLEET_TIMEOUT</code> (<span class="path">:301-310</span>), and an unset
+    actor silently becomes <code>$USER</code>
+    (<span class="path">:285-287</span>).</li>
+  </ul>
+
+  <div class="callout trap">
+    <span class="label">Trap — <code>~/.loom/state.json</code> is not config</span>
+    <p>It is a per-user cache. Its <code>last_workspace</code> is documented as
+    "a UI hint only; runtime commands require <code>LOOM_WORKSPACE</code> or
+    <code>--workspace</code>"
+    (<span class="path">internal/bootstrap/statecache.go:19-32</span>). If a
+    command picks the wrong workspace, you did not set one — you did not inherit
+    one.</p>
+  </div>
+
+  <div class="callout trap">
+    <span class="label">Trap — two <code>loom data</code> flags do nothing</span>
+    <p><code>loom data claim &lt;id&gt; --actor someone-else</code> claims as
+    <b>you</b>. The flag is "captured for command-line parity" and never read by
+    <code>RunE</code>
+    (<span class="path">internal/cli/data/claim.go:9-12,18-28,32</span>) — the
+    effective actor is the backend's configured <code>X-Actor</code>.</p>
+    <p><code>loom data close --session</code> and <code>--force</code> are built
+    into <code>CloseParams</code>
+    (<span class="path">internal/cli/data/close.go:27-31</span>) and then dropped:
+    the fleet backend marshals a body with <code>Reason</code> only
+    (<span class="path">internal/backend/fleet/fleet.go:834-840</span>). Closing
+    twice is fine on purpose — an already-closed conflict is swallowed
+    (<span class="path">internal/cli/data/close.go:32-40</span>).</p>
+  </div>
+
+  <!-- ============================================================= -->
+  <h2 id="work">2. Work it</h2>
+
+  <ol class="check">
+    <li>
+      <span class="what">Find the code before you write any.</span>
+      <span class="how">Use the decision tree on
+      <a href="navigation.html">Finding Anything</a> — CLI command, HTTP route, UI
+      screen, domain type, persistence, each has one answer. Do not grep for the
+      package name of a route; grep for its path string.</span>
+    </li>
+    <li>
+      <span class="what">Copy the pattern that is already there.</span>
+      <span class="how">The exemplar list is on
+      <a href="navigation.html">Finding Anything</a> under "Patterns you are
+      expected to copy". A change that invents its own shape fails review before
+      it fails the gate.</span>
+    </li>
+    <li>
+      <span class="what"><span class="repo loom">loomcli</span> Touched <code>api/openapi.yaml</code>? Regenerate.</span>
+      <span class="how"><code>make gen-go-api</code>
+      (<span class="path">Makefile:426-432</span>). Step 11 of 13 in
+      <code>make check-go</code> regenerates the file into a temp dir and diffs it
+      (<span class="path">Makefile:609-610</span>), so a hand-edit fails the gate
+      rather than shipping. This is loom's <em>own</em> API, not the fleet-db
+      contract.</span>
+    </li>
+    <li>
+      <span class="what"><span class="repo fleet">fleet-db</span> Adding a route? Three files move together.</span>
+      <span class="how">Register it on the mux with the literal form
+      <code>mux.HandleFunc("METHOD /path", …)</code> — the coverage checker
+      matches that regex over <code>internal/api</code> and
+      <code>cmd/fleet-db</code>
+      (<span class="path">scripts/harness/cmd/check_openapi_coverage/main.go:12-14,30-35</span>).
+      Add the path <em>and</em> the method to <code>api/openapi.yaml</code>. Keep
+      any request struct's fields in exact sync with its schema: a reflection test
+      pins them together, and its comment is the best paragraph in either repo on
+      why (<span class="path">internal/api/openapi_request_parity_test.go:14-29</span>).</span>
+    </li>
+    <li>
+      <span class="what"><span class="repo fleet">fleet-db</span> Respect the declared layering and the key rule.</span>
+      <span class="how"><code>internal/api</code> may import only
+      <code>service</code>, <code>models</code>, <code>logging</code>,
+      <code>config</code>, <code>resolution</code>; <code>internal/models</code>
+      may import nothing (<span class="path">harness/policy.yaml:3-56</span>). Any
+      new Redis key literal goes in <code>internal/storage/keys.go</code> and
+      nowhere else (<span class="path">harness/policy.yaml:58-77</span>). Both are
+      linted by <code>make harness-lint</code> and
+      <code>make lint-keys</code>.</span>
+    </li>
+    <li>
+      <span class="what">Do not set a status the API refuses to set.</span>
+      <span class="how">Nine built-in statuses exist
+      (<span class="path">internal/models/status.go:11-27</span>), but a plain
+      update may write only <code>open</code>, <code>blocked</code>,
+      <code>deferred</code>, <code>review</code>. <code>closed</code> needs the
+      close endpoint, <code>in_progress</code> needs claim, and
+      <code>tombstone</code>/<code>pinned</code>/<code>hooked</code> are
+      server-managed (<span class="path">:77-94</span>).</span>
+    </li>
+  </ol>
+
+  <div class="callout fleet">
+    <span class="label">If your change touches the wire between the repos</span>
+    <p>There is <b>no generated client and no shared code</b> — loomcli
+    hand-maintains its mirror of fleet-db's JSON in
+    <span class="path">internal/backend/fleet/convert.go:12-15</span>, and fleet-db
+    rejects an entire request body over one unknown key
+    (<code>DisallowUnknownFields</code>,
+    <span class="path">fleet-db/internal/api/request.go:130-132</span>). That
+    asymmetry sets the deploy order: <b>server first, then client.</b> Adding a
+    field to a request body before fleet-db knows it takes down every write that
+    shares that body. Cross-repo compatibility commits are prefixed
+    <code>parity(scope):</code> — 51 of those, plus six older bare
+    <code>parity:</code>, so 57 in loomcli
+    (<code>git rev-list --count --grep='^parity' HEAD</code>). Use the prefix; it
+    is how these get found later. Full detail in
+    <a href="../lessons/0028-one-change-two-repos.html">Lesson 28</a>.</p>
+  </div>
+
+  <!-- ============================================================= -->
+  <h2 id="prove">3. Prove it</h2>
+
+  <p>Pick the cheapest tier that settles your question, then claim only what it
+  earned — see <a href="../lessons/0016-what-proves-what.html">Lesson 16</a>.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>What you changed</th><th>Run</th><th>What it actually does</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>One Go package</td>
+        <td><code>go test ./internal/backend/fleet/...</code></td>
+        <td>Seconds. Do this in a loop; save the gate for the end.</td>
+      </tr>
+      <tr>
+        <td><span class="repo loom">loomcli</span> Go only</td>
+        <td><code>make check-go</code></td>
+        <td>13 numbered steps: gofmt, vet, build, golangci-lint + control-plane path guard, LOC 1000/2500, package size 25, import fanout 18, exec guard, <code>log.Printf</code> guard, beads guard, generated-API staleness, <code>go test -p 1 -race</code>, coverage ≥ 60 (<span class="path">Makefile:586-625</span>).</td>
+      </tr>
+      <tr>
+        <td><span class="repo loom">loomcli</span> Frontend</td>
+        <td><code>make check-frontend</code></td>
+        <td>6 steps: prettier, <code>tsc</code>, eslint, architectural checks, generated-code staleness, vitest + 60% coverage (<span class="path">Makefile:628-641</span>).</td>
+      </tr>
+      <tr>
+        <td><span class="repo loom">loomcli</span> Both</td>
+        <td><code>make check</code></td>
+        <td>Runs the two above in parallel and prints only the failing side's log (<span class="path">Makefile:644-665</span>). <code>make gate</code> is the same target (<span class="path">:668</span>).</td>
+      </tr>
+      <tr>
+        <td><span class="repo fleet">fleet-db</span> Anything</td>
+        <td><code>make gate</code></td>
+        <td>Six phases in order: <code>gate-static</code>, <code>gate-tests</code>, <code>coverage-merge</code> (≥75%), <code>coverage-pkg</code> (≥50%), <code>test-e2e</code>, <code>harness-eval</code> (<span class="path">Makefile:171-179</span>). <code>test-e2e</code> drives real containers (<span class="path">:59-62</span>).</td>
+      </tr>
+      <tr>
+        <td>The loomcli↔fleet-db seam</td>
+        <td>Conformance suite, below</td>
+        <td>The closest thing either repo has to a contract test.</td>
+      </tr>
+      <tr>
+        <td>User-visible runtime behaviour</td>
+        <td>A local-mode stack</td>
+        <td>Shared machine state. Re-read the safety box at the top before you start one.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>The cross-repo contract test</h3>
+
+  <div class="callout safety">
+    <span class="label">This suite is not read-only on a shared machine</span>
+    <p><code>./internal/cli</code>'s <code>TestMain</code> calls
+    <code>killTestTmuxSessions</code> before and after the run, and that function
+    kills every tmux session on the <em>host</em> whose name starts with
+    <code>loom-test-</code> or <code>loom-e2e-test-</code>
+    (<span class="path">internal/cli/testmain_test.go:21, 28, 34-46</span>),
+    including another engineer's in-flight run. <code>-run</code> does not save
+    you: <code>TestMain</code> executes in full regardless of which tests the
+    filter selects. Sub-packages such as <code>./internal/cli/data</code> are
+    different packages and have no such <code>TestMain</code>. Same hazard as
+    <a href="../lessons/0026-roles-skills-and-shaping-work.html">Lesson 26</a>.</p>
+  </div>
+
+  <p>From the loomcli root, with both binaries built into the scratch directory
+  from step 0.5:</p>
+
+<pre><code>FLEET_DB_BIN=/tmp/loom-scratch/fleet-db LOOM_BIN=/tmp/loom-scratch/loom \
+  go test -tags issuebackend_e2e ./internal/cli \
+  -run TestE2E_IssueBackendConformance_AllModes -v</code></pre>
+
+  <p>Four subtests — <code>fleetdb-local</code>, <code>fleetdb-cloud</code>,
+  <code>fleet-direct</code>, <code>api-server</code> — run the shared conformance
+  suite against a real fleet-db process
+  (<span class="path">internal/cli/issue_backend_conformance_e2e_test.go:30,34,57,76,100</span>).</p>
+
+  <div class="callout trap">
+    <span class="label">Trap — this test passes when it runs nothing</span>
+    <p>If either binary is missing it calls <code>t.Skip</code>, not
+    <code>t.Fatal</code>
+    (<span class="path">internal/cli/issue_backend_conformance_e2e_test.go:127-149</span>).
+    A green exit code is <b>not</b> evidence. Look for the four named subtests in
+    the <code>-v</code> output before you write "verified" in a PR body.</p>
+  </div>
+
+  <h3>Three things that make a local gate lie</h3>
+
+  <ul>
+    <li><b>Inherited desktop and runtime env.</b> Variables like
+    <code>LOOM_WORKSPACE</code>, <code>LOOM_CONFIG_DIR</code>,
+    <code>LOOM_FRONTEND_DIR</code> and <code>LOOM_NOTIFY_TOKEN</code> make tests
+    resolve your real desktop workspace instead of their fixtures. Re-run any
+    suspect failure with a cleared env and a temp <code>HOME</code> — AGENTS.md
+    gives the exact <code>env -u …</code> line
+    (<span class="path">AGENTS.md:44-61</span>).</li>
+
+    <li><b>A fresh worktree.</b> <code>check-frontend</code> depends on
+    <code>ensure-frontend-deps</code>, which runs <code>npm install</code>
+    whenever <code>node_modules/.package-lock.json</code> is missing or stale
+    (<span class="path">Makefile:194-201,628</span>). A new worktree does not
+    inherit ignored files, so your first gate there is slow. That is expected, not
+    broken.</li>
+
+    <li><b>A stale installed hook.</b> <code>make dev</code> runs
+    <code>ensure-hooks</code>, which <code>cmp</code>s the installed pre-push
+    against <code>scripts/hooks/pre-push</code> and reinstalls on any difference
+    (<span class="path">Makefile:709-710,719</span>). The long comment above it
+    (<span class="path">:694-708</span>) explains the failure it exists to
+    prevent: an old hook that leaks <code>GIT_DIR</code> into
+    <code>make check</code> and makes ten packages fail forever.</li>
+  </ul>
+
+  <aside class="sidenote">In <span class="repo fleet">fleet-db</span> the pre-push
+  hook runs the full <code>make gate</code>, and that includes
+  <code>test-e2e</code> against real containers
+  (<span class="path">scripts/hooks/pre-push:12-16</span>,
+  <span class="path">Makefile:177</span>). On a machine with no container runtime
+  every push fails. <code>SKIP_GATE=1 git push</code> is the documented escape
+  hatch (<span class="path">scripts/hooks/pre-push:6-10</span>) — use it only when
+  you know CI will cover you, because <code>harness.yml</code> re-runs
+  <code>make gate</code> on the PR
+  (<span class="path">.github/workflows/harness.yml:27-28</span>).</aside>
+
+  <div class="callout safety">
+    <span class="label">Runtime evidence, safely</span>
+    <p>If the claim needs a real stack, follow
+    <code>.agent-skills/loom-pr-test/SKILL.md</code>. Its non-negotiables
+    (<span class="path">:17-24</span>): use real <code>make</code>/<code>loom</code>
+    workflows, never hand-create <code>.agent.lock</code>, FleetDB keys, sessions,
+    transcripts or diffs as evidence, keep the real <code>~/.loom</code> safe with
+    a throwaway <code>LOOM_CONFIG_DIR</code>, and report blocked rather than
+    fabricate. <b>Your own project name and your own port block, every time</b>
+    (<span class="path">:98-106</span>); tear down only that project
+    (<span class="path">:256-260</span>). Then report what you ran, the ports, and
+    whether the backend was deterministic or a real CLI — and do not overclaim
+    (<span class="path">:232-244</span>).</p>
+  </div>
+
+  <!-- ============================================================= -->
+  <h2 id="pr">4. Commit and open the PR</h2>
+
+  <ol class="check">
+    <li>
+      <span class="what">Prefix the commit if it is a cross-repo compatibility fix.</span>
+      <span class="how"><code>parity(scope): what changed</code>. 57 such commits
+      in loomcli. Put the symptom, the mechanism, the fix and the tests in the
+      body.</span>
+    </li>
+    <li>
+      <span class="what">Write the PR body to fleet-db's contract — in both repos.</span>
+      <span class="how">Neither repo ships a pull-request template, and only
+      fleet-db writes the rule down
+      (<span class="path">docs/agents/contracts/pr-contract.md:3-11</span>). Treat
+      it as house style for both:</span>
+      <span class="how">1. Summary of behaviour change. 2. Exact commands run for
+      validation. 3. Test results and affected coverage areas. 4. Files changed
+      and rationale. 5. Risk assessment. 6. Rollback strategy. 7. Any agent
+      autofixes performed.</span>
+      <span class="how">Mandatory alongside it: harness gates pass, no unresolved
+      legibility violations, review feedback addressed before merge
+      (<span class="path">:13-16</span>).</span>
+    </li>
+    <li>
+      <span class="what">State the evidence class, do not imply a stronger one.</span>
+      <span class="how"><em>deterministic</em> = orchestration only,
+      <em>real</em> = real local backend, <em>live</em> = reaches a real external
+      paid service (<span class="path">AGENTS.md:29-35</span>). If a real path was
+      blocked, say blocked — never fabricate state
+      (<span class="path">.agent-skills/loom-pr-test/SKILL.md:22,244</span>).</span>
+    </li>
+    <li>
+      <span class="what">Target the branch a human confirmed.</span>
+      <span class="how">Not the one <code>gh</code> defaults to.
+      <code>origin/main</code> in loomcli is 1786 commits behind
+      <code>origin/v5</code>.</span>
+    </li>
+  </ol>
+
+  <!-- ============================================================= -->
+  <h2 id="land">5. Land the plane</h2>
+
+  <p>Seven steps, mandatory, and <b>byte-identical in both repos</b>
+  (<span class="path">loomcli/AGENTS.md:172-195</span> ==
+  <span class="path">fleet-db/AGENTS.md:55-78</span>). Work is not complete until
+  <code>git push</code> succeeds.</p>
+
+  <ol class="check">
+    <li><span class="what">File issues for remaining work.</span>
+    <span class="how">Anything that needs follow-up gets an issue now, not a TODO
+    in your head. A cross-repo TODO in code cites the other repo's issue ID —
+    e.g. <code>// TODO(fleet-q6ox): …</code>
+    (<span class="path">internal/backend/fleet/fleet.go:850-851</span>).</span></li>
+
+    <li><span class="what">Run quality gates, if code changed.</span>
+    <span class="how">Tests, linters, builds — section 3 above.</span></li>
+
+    <li><span class="what">Update issue status.</span>
+    <span class="how"><code>loom data close &lt;id&gt; --reason "…"</code> or
+    <code>fdb close &lt;id&gt;</code>; update anything still in
+    progress.</span></li>
+
+    <li><span class="what">Push to remote. This is the step people skip.</span>
+<pre><code>git pull --rebase
+git push
+git status   # MUST show "up to date with origin"</code></pre>
+    </li>
+
+    <li><span class="what">Clean up.</span>
+    <span class="how">Clear stashes, prune remote branches.</span></li>
+
+    <li><span class="what">Verify.</span>
+    <span class="how">Everything committed <em>and</em> pushed.</span></li>
+
+    <li><span class="what">Hand off.</span>
+    <span class="how">Context for the next session.</span></li>
+  </ol>
+
+  <div class="callout key">
+    <span class="label">The four rules under the checklist, verbatim</span>
+    <p>Work is NOT complete until <code>git push</code> succeeds · NEVER stop
+    before pushing — that leaves work stranded locally · NEVER say "ready to push
+    when you are" — YOU must push · If push fails, resolve and retry until it
+    succeeds. (<span class="path">loomcli/AGENTS.md:191-195</span>,
+    <span class="path">fleet-db/AGENTS.md:74-78</span>.)</p>
+  </div>
+
+  <!-- ============================================================= -->
+  <h2 id="traps">Traps on this exact path</h2>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>You will believe</th><th>Actually</th><th>Evidence</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>"<code>make test</code> is the gate's tests."</td>
+        <td>It is a lighter script. The gate runs <code>go test -p 1 -race</code> over everything with a 60% floor.</td>
+        <td><span class="path">Makefile:45-47</span> vs <span class="path">:611-624</span></td>
+      </tr>
+      <tr>
+        <td>"AGENTS.md points at the testing vocabulary doc, so I should read it."</td>
+        <td><code>docs/testing-terminology.md</code> <b>does not exist</b> on this branch, though AGENTS.md cites it twice. The four axis names are the whole written definition. Do not go hunting.</td>
+        <td><span class="path">AGENTS.md:20-23,29-35</span>; <code>find . -name testing-terminology.md</code> returns nothing</td>
+      </tr>
+      <tr>
+        <td>"The compose stack sets <code>LOOM_ISSUE_BACKEND</code>, so that is a valid value."</td>
+        <td><code>test/fleetdb/docker-compose.regression.yml:106</code> sets <code>fleet-db</code>, which is not one of the three accepted values — it is warned about and ignored, not rejected.</td>
+        <td>valid set at <span class="path">internal/cli/issue_backend_resolve.go:23-28</span>; the warn-and-ignore at <span class="path">:44-50</span></td>
+      </tr>
+      <tr>
+        <td>"<code>LOOM_FLEET_REQUIRED=1</code> makes it fail fast."</td>
+        <td>No Go file reads it. It is set in six places across three compose stacks and a script, and is a comment, not a guard.</td>
+        <td><span class="path">test/distributed/docker-compose.smoke.yml:68,111,230</span>, <span class="path">test/fleetdb/docker-compose.empty.yml:93</span>, <span class="path">docker-compose.regression.yml:121</span>, <span class="path">test/fleetdb/empty-daemon-manager.sh:60</span>; <code>grep -rn LOOM_FLEET_REQUIRED --include='*.go'</code> is empty</td>
+      </tr>
+      <tr>
+        <td>"fleet-db lives at one GitHub org."</td>
+        <td>The checkout has two remotes — <code>tysonthomas9/fleet-db</code> and <code>BrowserOperator/fleet-db</code> — and loomcli's workflows disagree about which to use. Ask a human which is canonical before you push there.</td>
+        <td><code>git remote -v</code> in fleet-db; <span class="path">loomcli/.github/workflows/release.yml:26</span> and <span class="path">desktop-release.yml:48</span> use <code>tysonthomas9</code>, <span class="path">nightly.yml:102</span> uses <code>BrowserOperator</code></td>
+      </tr>
+      <tr>
+        <td>"A green fleet-db CI means loom still works."</td>
+        <td>No fleet-db workflow checks out loomcli. A breaking change merges green and is found by a human, by loom's nightly <code>playground</code> job (which is <code>continue-on-error</code> and fails nothing), or by loom's next release tag.</td>
+        <td><code>grep -rn loomcli .github/workflows/</code> in fleet-db is empty; <span class="path">loomcli/.github/workflows/release.yml:12-50</span></td>
+      </tr>
+      <tr>
+        <td>"<code>git push</code> is quick."</td>
+        <td>The pre-push hook runs the full gate in both repos. Budget the time; do not discover it at 6pm.</td>
+        <td><span class="path">loomcli/scripts/hooks/pre-push:10-11</span>, <span class="path">fleet-db/scripts/hooks/pre-push:12-16</span></td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><b><span class="repo loom">loomcli</span> <code>AGENTS.md</code> (195 lines)
+    and <span class="repo fleet">fleet-db</span> <code>AGENTS.md</code> (78 lines),
+    as a pair.</b> Everything on this card is a compression of those two files
+    plus the two Makefiles. loomcli's is a dense operational document — driver
+    auth, sandbox modes, gate environment; fleet-db's is a short constitution —
+    root versus worktree, the status model, the commands. Both are binding, they
+    end with the same seven steps, and they are the documents a reviewer will hold
+    you to.</p>
+  </div>
+
+  <div class="ask">
+    <b>A command here failed, or a line number moved?</b> Tell your teacher. This
+    card is pinned to two specific commits and it describes the part of the repo
+    that changes most often — a stale step in a workflow card costs more than a
+    stale sentence in a lesson.
+  </div>
+
+  <p class="stamp">Every command and citation on this card was opened and checked
+  against loomcli <code>ce4df56fb</code> and fleet-db <code>000793b</code>. Branch
+  counts and the <code>parity</code> commit count were measured with
+  <code>git branch -r</code> and <code>git rev-list --count --grep</code> in those same trees
+  and will drift; the file citations will not, until someone edits the file.</p>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>03. Run it without breaking anyone — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 1 <span class="sep">/</span> Lesson 03 <span class="sep">/</span> Environment</p>
+  <h1>Run it without breaking anyone</h1>
+  <p class="standfirst">By the end of this lesson you can bring up a full local
+  Loom stack that is provably yours — and you will know exactly which two commands
+  can destroy a colleague's work if you type them with the defaults.</p>
+
+  <div class="meta">
+    <span><b>Skill</b> stand up an isolated local stack safely</span>
+    <span><b>Time</b> 35 min</span>
+    <span><b>Needs</b> <a href="0001-two-repos-one-system.html">01</a>, <a href="0002-the-words-that-lie.html">02</a></span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span></span>
+  </div>
+
+  <div class="callout safety">
+    <span class="label">Read this before you run anything</span>
+    <p>Local stacks on this team are <b>shared machine state, not per-session
+    sandboxes</b>. Several people and several agents run them on the same host at
+    once. Two commands in this lesson will silently destroy someone else's running
+    work if you take the defaults. Both are named below. Do not skim past them.</p>
+  </div>
+
+  <h2>Two different things called "running it locally"</h2>
+
+  <p>This is the first trap, and it is a vocabulary trap of exactly the kind
+  <a href="0002-the-words-that-lie.html">Lesson 02</a> warned about. "Run it
+  locally" means two unrelated setups here:</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th></th><th>Local mode (the product feature)</th><th>The local-mode stack (the test rig)</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>What</b></td>
+        <td>How <code>loom</code> runs by default: it spawns an embedded fleet-db subprocess for you. No containers — but you do need a <code>fleet-db</code> binary (see below). <span class="path">internal/bootstrap/openstore.go:72-85; internal/bootstrap/embedded.go:300-310</span></td>
+        <td>A compose stack of four containers: <code>redis</code>, <code>fleet-db</code>, <code>loom-local</code> (serve + the daemon manager, with the deterministic backend running <em>inside</em> it), and <code>ui-local</code>. <span class="path">test/local-mode/docker-compose.yml:25-116; test/local-mode/local-mode-entrypoint:439, 577; test/local-mode/Dockerfile:68-70</span></td>
+      </tr>
+      <tr>
+        <td><b>You get it by</b></td>
+        <td>Just running <code>loom</code>. It is the default.</td>
+        <td><code>make local-mode-up</code></td>
+      </tr>
+      <tr>
+        <td><b>Use it to</b></td>
+        <td>Develop and debug the CLI and its packages.</td>
+        <td>Prove the orchestration end to end. The base stack sets <code>LOOM_BACKEND: localdogfood</code>, a shell script that writes canned planner/coder transcripts — so it is the <em>deterministic</em> evidence class, not <em>real</em>. <span class="path">test/local-mode/docker-compose.yml:80; test/local-mode/loom-backend-localdogfood</span> The Codex, Claude and Daytona variants each swap in a real model backend — Daytona is Codex plus a live external sandbox. <span class="path">test/local-mode/docker-compose.codex.yml:14; docker-compose.claude.yml:26; docker-compose.daytona.yml:23, 31</span></td>
+      </tr>
+      <tr>
+        <td><b>Shared state risk</b></td>
+        <td>Low.</td>
+        <td><b>High.</b> Host ports are host-global; container names, volumes and image tags are namespaced by the compose project name — which is why you must change both. <span class="path">test/local-mode/docker-compose.yml:10; Makefile:12-15, 17</span></td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <aside class="sidenote">Note that neither is a mock. Local mode spawns the real
+  fleet-db service and talks to it over the real HTTP client — the property you
+  learned in <a href="0001-two-repos-one-system.html">Lesson 01</a>. What
+  <em>is</em> substituted in the compose stack is the AI backend, which is why its
+  evidence class is only <em>deterministic</em>.</aside>
+
+  <div class="callout trap">
+    <span class="label">Trap — "zero install" is not quite true</span>
+    <p>The README describes local mode as zero-install
+    <span class="path">README.md:22, 322</span>. It is not: loom does not
+    bundle fleet-db, it <em>discovers</em> it. <code>DiscoverFleetDBBinary</code>
+    checks, in order, <code>FLEET_DB_BIN</code>, then <code>fleet-db</code> on
+    <code>PATH</code>, then a sibling of the loom binary, then
+    <code>&lt;LoomDir&gt;/bin/fleet-db</code> — and if none exists it fails with
+    <code>fleet-db binary not found; checked …</code> plus a remediation line.
+    Your first local-mode run on a fresh machine will hit exactly this.
+    <span class="path">internal/bootstrap/embedded.go:526-532, 575-579</span></p>
+  </div>
+
+  <h2>The two dangerous defaults</h2>
+
+  <p>Everything about the compose stack is driven by variables at the top of the
+  Makefile, and their <em>defaults are shared names</em>:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> Makefile:8, 11</figcaption>
+<pre><code>LOCAL_MODE_COMPOSE_PROJECT ?= loomcli-local-mode
+LOCAL_MODE_COMPOSE_UP_FLAGS ?= --build</code></pre>
+  </figure>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> test/local-mode/docker-compose.yml:60, 96, 116</figcaption>
+<pre><code>- "${LOCAL_MODE_FLEETDB_PORT:-8280}:8080"
+- "${LOCAL_MODE_API_PORT:-8282}:8080"
+- "${LOCAL_MODE_UI_PORT:-8283}:8080"</code></pre>
+  </figure>
+
+  <p>Read those two facts together and the hazard is exact:</p>
+
+  <div class="callout trap">
+    <span class="label">Danger 1 — <code>make local-mode-up</code></span>
+    <p>Compose identifies a stack by <b>project name</b>, and every local-mode
+    target passes one with <code>-p</code>.
+    <span class="path">Makefile:17; test/local-mode/docker-compose.yml:10</span>
+    The default project name
+    is a fixed string, and the default up flags include <code>--build</code>. So
+    running <code>make local-mode-up</code> with the defaults, while somebody else
+    already has a stack under that name, <b>silently rebuilds and recreates their
+    containers</b> — killing their running work. You will see no warning, because
+    from compose's point of view you asked for exactly that.</p>
+  </div>
+
+  <div class="callout trap">
+    <span class="label">Danger 2 — <code>make local-mode-down</code></span>
+    <p>Look at what down actually runs:</p>
+<pre><code>$$compose $(LOCAL_MODE_COMPOSE_ARGS) down -v --remove-orphans</code></pre>
+    <p><code>-v</code> removes volumes. Tearing down a project you did not create
+    does not just stop it — it <b>destroys its data</b>.
+    <span class="path">Makefile:286-289</span></p>
+  </div>
+
+  <h2>The rule</h2>
+
+  <p>Three steps, every time, no exceptions:</p>
+
+  <ol class="trace">
+    <li>
+      <span class="hop-file">before anything</span>
+      <span class="hop-what">Run <code>podman ps</code>. Treat <b>every</b> stack
+      you see as owned by someone else. Note which ports are bound.</span>
+    </li>
+    <li>
+      <span class="hop-file">choose your own coordinates</span>
+      <span class="hop-what">Pick an unclaimed port block and a project name with
+      your run in it. The Makefile's own help text shows the shape:
+      <code>LOCAL_MODE_COMPOSE_PROJECT=name LOCAL_MODE_UI_PORT=8383
+      LOCAL_MODE_API_PORT=8382 LOCAL_MODE_FLEETDB_PORT=8380</code>
+      <span class="path">Makefile:769</span></span>
+    </li>
+    <li>
+      <span class="hop-file">tear down only yours</span>
+      <span class="hop-what">Pass the <em>same</em> project name to down.
+      <code>LOCAL_MODE_COMPOSE_PROJECT=&lt;yours&gt; make local-mode-down</code>.
+      Never <code>down</code> a project you did not create this session.</span>
+    </li>
+  </ol>
+
+  <figure class="src">
+    <figcaption>When you actually need a stack: bringing up one that is provably yours</figcaption>
+<pre><code>podman ps                       # 1. who else is here?
+
+LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-alice \
+LOCAL_MODE_FLEETDB_PORT=8480 \
+LOCAL_MODE_API_PORT=8482 \
+LOCAL_MODE_UI_PORT=8483 \
+make local-mode-up              # 2. your name, your ports
+
+# UI: http://localhost:8483/ws/LOCALMODE/kanban</code></pre>
+  </figure>
+
+  <p>The 8380 block in the Makefile help is an <em>example</em>, not a reserved
+  slot for you — someone may already be on it. That is what step 1 is for. The
+  default 8280/8282/8283 block should be treated as taken.</p>
+
+  <div class="callout safety">
+    <span class="label">The same principle, three more places</span>
+    <ul>
+      <li><b>Dev servers on fixed ports.</b> Vite's 3000 is host-global. Before
+      trusting a Playwright run with <code>reuseExistingServer</code>, check
+      <code>lsof -nP -iTCP:3000 -sTCP:LISTEN</code> and confirm the listener is
+      <em>your</em> checkout — otherwise your e2e silently tests someone else's
+      build. Never kill a process you did not start.
+      <span class="path">internal/webui/frontend/vite.config.ts:177-180; internal/webui/frontend/playwright.config.ts:163-166</span></li>
+      <li><b>Browser automation profiles and sessions</b> are shared host state
+      too. Pass a dedicated <code>--profile</code> per stack and close only that
+      profile. Never close all.
+      <span class="path">.agent-skills/loom-pr-test/SKILL.md:179, 274</span></li>
+      <li><b>The git stash stack is shared across every worktree of a repo</b> —
+      <code>refs/stash</code> is not one of git's per-worktree refs
+      (git-worktree(1), REFS: only <code>refs/bisect</code>,
+      <code>refs/worktree</code> and <code>refs/rewritten</code> are). So a bare
+      <code>git stash</code> / <code>git stash pop</code> can pop a colleague's
+      work; the agent task prompt bans running it outside your own worktree.
+      <span class="path">internal/cli/agent/prompts/task.md:12</span> Prefer a
+      temporary WIP commit.</li>
+    </ul>
+  </div>
+
+  <h2>What the stack gives you</h2>
+
+  <p>Once up, the useful targets are:</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Target</th><th>Does</th></tr></thead>
+    <tbody>
+      <tr><td><code>local-mode-up</code></td><td>Builds the frontend dist <b>only if it is missing</b> (the check is just for <code>dist/index.html</code>), then brings the stack up. After changing frontend code, run <code>make build-frontend</code> yourself — <code>up</code> will not rebuild an existing dist. <span class="path">Makefile:172-176</span></td></tr>
+      <tr><td><code>local-mode-logs</code></td><td>Follows logs for <code>loom-local</code> and <code>ui-local</code>. <span class="path">Makefile:291-294</span></td></tr>
+      <tr><td><code>local-mode-verify</code></td><td>Runs <code>test/local-mode/verify-local-mode.sh</code> — the scripted proof the stack works. <b>Pass your port:</b> the Makefile injects no env, and the script defaults to <code>:8282</code> — the shared default block. Run it as <code>LOCAL_MODE_API_PORT=&lt;yours&gt; make local-mode-verify</code>. <span class="path">Makefile:296-297; test/local-mode/verify-local-mode.sh:4</span></td></tr>
+      <tr><td><code>local-mode-down</code></td><td>Stops and <b>deletes volumes</b>. Yours only.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>There are also backend-specific variants — <code>local-mode-codex-up</code>,
+  <code>local-mode-claude-up</code>, <code>local-mode-daytona-up</code> — which
+  layer an extra compose file onto the same base. The Daytona one reaches a real
+  external paid service and needs <code>DAYTONA_API_KEY</code>: that is the
+  <em>live</em> evidence class from <a href="0002-the-words-that-lie.html">Lesson
+  02</a>, and it costs money. <span class="path">Makefile:264-284</span></p>
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory: name the three environment variables you must set
+    before <code>make local-mode-up</code>, plus the project-name variable, and say
+    what each protects you from.</p>
+    <div class="answer">
+      <p><code>LOCAL_MODE_COMPOSE_PROJECT</code> — protects against recreating
+      someone else's containers, because compose identifies a stack by project
+      name and <code>up</code> defaults to <code>--build</code>.</p>
+      <p><code>LOCAL_MODE_FLEETDB_PORT</code> (default 8280),
+      <code>LOCAL_MODE_API_PORT</code> (8282), <code>LOCAL_MODE_UI_PORT</code>
+      (8283) — protect against colliding with ports another stack already binds.</p>
+      <p>And the project name has a second job: it is what you pass back to
+      <code>local-mode-down</code> so you tear down only your own.</p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="0003">
+    <div class="q" data-answer="3">
+      <p class="stem">A colleague's stack is running. You run <code>make
+      local-mode-down</code> with no variables set. What happens?</p>
+      <ul class="opts">
+        <li>Compose refuses, because the project was created by another user</li>
+        <li>Your own stack stops; theirs is untouched under its project name</li>
+        <li>Their containers stop but their volumes and data are preserved</li>
+        <li>Their containers stop and their volumes are deleted with them</li>
+      </ul>
+      <div class="why">You inherit the default project name, so you address
+      <em>their</em> stack — and down runs <code>-v</code>, which removes volumes.
+      The third option is the near-miss worth remembering: a plain
+      <code>down</code> would preserve data, but this one does not.
+      <span class="path">Makefile:286-289</span></div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <p class="stem">Your Playwright e2e passes against <code>localhost:3000</code>
+      with <code>reuseExistingServer</code>. What must you check first?</p>
+      <ul class="opts">
+        <li>That the listener on that port belongs to your own checkout</li>
+        <li>That the port is free and no listener is bound to it yet</li>
+        <li>That the frontend dist was rebuilt before the test run started</li>
+        <li>That no other compose project has claimed that same port</li>
+      </ul>
+      <div class="why">With <code>reuseExistingServer</code>, a listener owned by a
+      different checkout means your test silently exercised someone else's build
+      and told you nothing about your change. Check with <code>lsof</code> and, if
+      the port is taken, start your own server on a unique port rather than
+      killing theirs.</div>
+    </div>
+  </div>
+
+  <div class="exercise">
+    <h3>Read the addressing mechanism without starting anything</h3>
+    <p>This exercise starts no containers, binds no ports and deletes no volumes.
+    Standing up a real stack belongs to the runbook below, with your coordinates
+    claimed out loud first — not to a lesson every reader runs at once.</p>
+    <ol>
+      <li>Run <code>podman ps --format '{{.Names}} {{.Ports}}'</code> and save the
+      output to a scratch file outside both repos. This is your map of who else is
+      on the machine, and your before-picture.</li>
+      <li>Read it. Every container name carries its compose project as a prefix,
+      and every <code>0.0.0.0:8xxx-&gt;8080/tcp</code> is a host port you cannot
+      have. Which of <code>8280</code>/<code>8282</code>/<code>8283</code> and the
+      Makefile's <code>8380</code> example block are already taken, and by which
+      project?</li>
+      <li>Run <code>make -n local-mode-down</code>. <code>-n</code> prints the
+      recipe and executes nothing. Read the last line: that is the exact command
+      that would delete a stack, project name and all. Dry-run <code>down</code>
+      rather than <code>up</code> — the up target's dist check is a recipe line
+      containing <code>$(MAKE)</code>, and make runs those even under
+      <code>-n</code>. <span class="path">Makefile:173-175</span></li>
+      <li>Run it again with coordinates of your own:
+      <code>LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-&lt;you&gt; make -n
+      local-mode-down</code>. Diff the two printed lines. Exactly one string
+      changed, and that string is the entire difference between tearing down your
+      stack and tearing down someone else's.</li>
+      <li>Reaching back to <a href="0002-the-words-that-lie.html">Lesson 02</a>:
+      write the one-line evidence-class claim you could honestly make about what
+      you just did. It is not even <em>deterministic</em> — say what it actually
+      is, and what you would have had to run to earn <em>deterministic</em>.</li>
+    </ol>
+    <div class="verify">
+      <b>You succeeded when</b>
+      Your two printed <code>down</code> commands differ only in the string after
+      <code>-p</code>, and a second <code>podman ps</code> in the same format is
+      identical to step 1's — same containers, same ports, nothing started and
+      nothing gone. You learned the addressing mechanism and left the host exactly
+      as you found it.
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><code>docs/testing/local-mode-podman-e2e.md</code> — the runbook for this
+    stack, and the reference for what each verify script actually proves. Pair it
+    with <code>.agent-skills/loom-pr-test/SKILL.md</code>, which is the procedure
+    the team follows for real Loom PR runtime testing.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0002-the-words-that-lie.html"><span class="dir">Previous</span>The words that lie</a>
+    <a class="next" href="0004-the-gate-is-the-spec.html"><span class="dir">Next</span>The gate is the spec</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

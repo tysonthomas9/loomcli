@@ -1,0 +1,579 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>26. Roles, skills, and shaping work — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 6 <span class="sep">/</span> Lesson 26 <span class="sep">/</span> Control plane</p>
+  <h1>Roles, skills, and shaping work</h1>
+  <p class="standfirst">A role is a scoring function over one shared ready queue.
+  Learn which of its fields reject a task and which merely prefer one, and you can
+  answer the question people actually ask you: <b>why did that agent pick that
+  task?</b></p>
+
+  <div class="meta">
+    <span><b>Skill</b> configure a role so the right agent claims the right task — and predict what it will refuse</span>
+    <span><b>Time</b> 30 min</span>
+    <span><b>Needs</b> <a href="0005-where-state-lives.html">Lesson 05</a>, <a href="0008-claiming-without-collisions.html">Lesson 08</a></span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span> <span class="repo fleet">fleet-db</span></span>
+  </div>
+
+  <h2>Why this exists</h2>
+
+  <p>A workspace has <em>one</em> ready queue and many agents pulling from it. No
+  dispatcher pushes work at a runner: every runner reads the same list, ranks it
+  locally, and races for the top item — which is the claim protocol you already
+  know from <a href="0008-claiming-without-collisions.html">Lesson 08</a>. The
+  daemon tries two directed cases ahead of the shared queue — a task explicitly
+  requested for this agent, and one already assigned to its worktree
+  (<span class="path">internal/cli/daemon/supervisor/claim.go:70-86</span>) — and
+  falls back to the queue for everything else.</p>
+
+  <p>So "shaping work" is not routing in the network sense. It is choosing a
+  <b>ranking function</b> that each runner applies to the shared list. That function
+  is a role, and it is one function —
+  <code>MatchTask</code> at
+  <span class="path">internal/cli/task_router.go:74-142</span>. Everything a role
+  can say about which task it wants is expressed there, and nowhere else.</p>
+
+  <div class="callout key">
+    <span class="label">The one idea</span>
+    <p>Role fields do not partition the queue — they <b>rank</b> it. Exactly five
+    conditions reject a task outright. Everything else is a preference, and a
+    preference loses to an empty queue: a role with skills that match nothing will
+    still claim an unrelated task rather than idle.</p>
+  </div>
+
+  <h2>The five rejections</h2>
+
+  <p><code>MatchTask</code> scores one issue against one role. It opens with five
+  guard clauses, and only these five produce <code>Score: 0</code>:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/cli/task_router.go:74-98</figcaption>
+<pre><code>func MatchTask(issue backend.IssueData, constraints RoleConstraints) TaskMatch {
+	// Reject epics
+	if IsEpic(issue) {
+		return TaskMatch{Issue: issue, Score: 0, Reason: "epic"}
+	}
+
+	// Reject non-work types (infrastructure records like merge-request, gate, etc.)
+	if IsNonWorkType(issue) {
+		return TaskMatch{Issue: issue, Score: 0, Reason: "non-work type"}
+	}
+
+	// Reject non-open
+	if !IsOpen(issue) {
+		return TaskMatch{Issue: issue, Score: 0, Reason: "not open"}
+	}
+
+	// Apply TaskFilter
+	if reason := applyTaskFilter(issue, constraints.TaskFilter); reason != "" {
+		return TaskMatch{Issue: issue, Score: 0, Reason: reason}
+	}
+
+	// Reject if priority exceeds MaxPriority
+	if constraints.MaxPriority != nil &amp;&amp; issue.Priority &gt; *constraints.MaxPriority {
+		return TaskMatch{Issue: issue, Score: 0, Reason: fmt.Sprintf("priority %d exceeds max %d", issue.Priority, *constraints.MaxPriority)}
+	}</code></pre>
+  </figure>
+
+  <p>Two of those five are properties of the issue and cannot be configured
+  (<code>IsEpic</code>, <code>IsNonWorkType</code>, both at
+  <span class="path">internal/cli/taskfilter.go:15-30</span>). One is status. That
+  leaves precisely <b>two configurable hard filters</b>:
+  <code>task_filter</code> and <code>max_priority</code>.</p>
+
+  <p><code>task_filter</code> has three understood values, and the type's own
+  comment is the shortest specification of it you will find:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/cli/task_router.go:20</figcaption>
+<pre><code>	TaskFilter   string   // "needs_plan", "has_design", "any", or "" (defaults to "has_design")</code></pre>
+  </figure>
+
+  <p>The implementation at <span class="path">internal/cli/task_router.go:248-267</span>
+  matches: <code>needs_plan</code> keeps issues with no design or a
+  <code>needs-revision</code> label; <code>has_design</code> keeps the inverse;
+  <code>any</code> keeps everything. The <code>default:</code> arm behaves exactly
+  like <code>has_design</code> — which is the trap below.</p>
+
+  <h2>Skills are a preference, not a filter</h2>
+
+  <p>Past the five gates the score starts at 100 and accumulates. The skill branch
+  is the whole reason people misread this file:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/cli/task_router.go:105-114</figcaption>
+<pre><code>	// Skill matching
+	skillMatches := countSkillMatches(issue.Labels, constraints.Skills)
+	if len(constraints.Skills) &gt; 0 &amp;&amp; skillMatches == 0 {
+		return TaskMatch{Issue: issue, Score: 10, Reason: "fallback: no skill match"}
+	}
+	if skillMatches &gt; 0 {
+		bonus := skillMatches * 50
+		score += bonus
+		parts = append(parts, fmt.Sprintf("skills:+%d(%d match)", bonus, skillMatches))
+	}</code></pre>
+  </figure>
+
+  <p>Score <b>10</b>, not 0. And <code>SelectBestTask</code> keeps every candidate
+  with <code>m.Score &gt; 0</code>
+  (<span class="path">internal/cli/task_router.go:149-153</span>), so a task no skill
+  matched is still claimable — it just sorts below every task that did.</p>
+
+  <p><code>countSkillMatches</code> itself is set membership over raw strings:
+  labels go into a <code>map[string]bool</code> and each skill tag is looked up
+  verbatim (<span class="path">internal/cli/task_router.go:282-297</span>). No
+  lowercasing, no trimming, no prefix or glob matching. <code>Go</code> does not
+  match the label <code>go</code>, and <code>backend</code> does not match
+  <code>backend-api</code>.</p>
+
+  <aside class="sidenote">These are the <em>role skills</em> of
+  <a href="0002-the-words-that-lie.html">Lesson 02</a>, not the
+  <a href="../reference/glossary.html#traps">skill</a> document entity. One is a
+  string compared against an issue label; the other is a <code>SKILL.md</code>
+  loaded into a worktree. Nothing connects them.</aside>
+
+  <h2>The whole ladder</h2>
+
+  <p>Every possible outcome of <code>MatchTask</code>, ordered by score — the two
+  soft outcomes are <em>evaluated</em> in the opposite order, which is the note
+  under the table:</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Score</th><th><code>Reason</code></th><th>Reached when</th><th>Claimable?</th></tr></thead>
+    <tbody>
+      <tr><td><b>0</b></td><td><code>epic</code></td><td><code>issue_type == "epic"</code></td><td>No</td></tr>
+      <tr><td><b>0</b></td><td><code>non-work type</code></td><td>type is <code>merge-request</code>, <code>gate</code>, <code>molecule</code>, <code>message</code>, <code>agent</code>, <code>role</code>, <code>rig</code></td><td>No</td></tr>
+      <tr><td><b>0</b></td><td><code>not open</code></td><td><code>status != "open"</code></td><td>No</td></tr>
+      <tr><td><b>0</b></td><td><code>filter: …</code></td><td><code>task_filter</code> rejects it</td><td>No</td></tr>
+      <tr><td><b>0</b></td><td><code>priority N exceeds max M</code></td><td><code>issue.Priority &gt; max_priority</code></td><td>No</td></tr>
+      <tr><td><b>5</b></td><td><code>repo mismatch</code></td><td>role has source repos and the issue's <em>non-empty</em> repo is not one; an issue with no source repo skips the block entirely and scores normally (<code>:117</code>)</td><td><b>Yes</b></td></tr>
+      <tr><td><b>10</b></td><td><code>fallback: no skill match</code></td><td>role has skills, zero labels match</td><td><b>Yes</b></td></tr>
+      <tr><td><b>≥100</b></td><td><code>base:100 skills:+50(1 match) priority:+12</code></td><td>everything else</td><td><b>Yes</b></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>The accumulating half is <code>100 + 50×matches + 30 if the repo matches +
+  (20 − 4×priority)</code>, with the priority term clamped to
+  <code>[0, 20]</code> (<span class="path">internal/cli/task_router.go:117-135</span>).
+  Read the constants against each other and the design falls out: one skill match is
+  worth <b>50</b>, a repo match <b>30</b>, and the priority term — capped at 20 —
+  swings only <b>16</b> across the legal P0-to-P4 range, 20 at P0 down to 4 at P4
+  (<span class="path"><span class="repo fleet">fleet-db</span> internal/models/priority.go:17-20</span>).
+  <b>A skill match outranks every priority difference there is.</b>
+  The tests pin the arithmetic — a P2 task with one match scores 162, with two
+  matches 212 (<span class="path">internal/cli/task_router_test.go:241, 260</span>).</p>
+
+  <p>Note the ordering of the two soft outcomes. The skill check returns
+  <em>before</em> the repo check, so "right repo, wrong skills" scores 10 and "right
+  skills, wrong repo" scores 5. The lower-value thing sorts higher.</p>
+
+  <aside class="sidenote">In the daemon's own claim path the score-5 branch rarely
+  fires, because the ready query was already narrowed: <code>buildClaimOpts</code>
+  puts the agent's resolved repos in <code>ReadyOpts.SourceRepos</code>
+  (<span class="path">internal/cli/daemon/supervisor/claim.go:108-110</span>) and
+  <code>FleetBackend.Ready</code> applies that as a hard client-side filter before
+  scoring (<span class="path">internal/backend/fleet/fleet.go:394</span> →
+  <span class="path">internal/backend/fleet/deferred.go:124-126</span>). Same field,
+  two mechanisms.</aside>
+
+  <h2>Which field does what</h2>
+
+  <p>Six things shape an agent's queue, and they are not all set in the same place —
+  three are role fields, three belong to the agent definition that <em>uses</em> the
+  role.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Field</th><th>Set on</th><th>Reaches the router as</th><th>Kind</th></tr></thead>
+    <tbody>
+      <tr><td><code>task_filter</code></td><td>role</td><td><code>applyTaskFilter</code> — <code>needs_plan</code> / <code>has_design</code> / <code>any</code> <span class="path">task_router.go:248-267</span></td><td><b>Hard</b> — Score 0</td></tr>
+      <tr><td><code>max_priority</code></td><td>role</td><td>reject if <code>issue.Priority</code> exceeds it <span class="path">task_router.go:96-98</span></td><td><b>Hard</b> — Score 0</td></tr>
+      <tr><td><code>skills</code></td><td>role</td><td>counted against <code>issue.Labels</code> <span class="path">task_router.go:106</span></td><td><b>Soft</b> — +50 each, else 10</td></tr>
+      <tr><td><code>repos</code> / <code>repo_groups</code></td><td>agent</td><td>resolved to <code>SourceRepos</code> <span class="path">claim.go:98-110</span></td><td>Hard pre-filter <em>and</em> soft +30</td></tr>
+      <tr><td><code>repo</code></td><td>agent</td><td><code>ReadyOpts.Labels = ["repo:&lt;name&gt;"]</code> <span class="path">claim.go:105-107</span></td><td><b>Hard</b> — never in the list</td></tr>
+      <tr><td><code>parent</code></td><td>agent</td><td><code>ReadyOpts.ParentID</code>, scoping to one epic <span class="path">supervisor.go:467-472</span> → <span class="path">claim.go:104</span></td><td><b>Hard</b> — never in the list</td></tr>
+      <tr><td><code>path_patterns</code></td><td>either</td><td>nothing — <em>“not used in routing decisions”</em> <span class="path">task_router.go:22</span></td><td>None</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>The role half is merged with the agent half by
+  <code>MergeRoleConstraints</code>, which is deliberately blunt: an agent's
+  <code>PathPatterns</code> and <code>Backend</code> <em>replace</em> the role's,
+  and <code>SourceRepos</code> is always agent-level, never role-level
+  (<span class="path">internal/cli/task_router.go:45-69</span>). There is no field
+  where the two are unioned.</p>
+
+  <aside class="sidenote">Role and agent definitions are both fleet-db entities
+  (<a href="../reference/glossary.html#objects">glossary, Core objects</a>); the
+  <code>yaml:</code> tags on <code>config.RoleConfig</code> and
+  <code>config.AgentEntry</code> (<span class="path">internal/cli/config/project.go:68-123</span>)
+  are vestigial — that package imports no YAML library at all. If you need to find
+  which layer reads a given field, <a href="../reference/navigation.html">the
+  navigation reference</a>'s decision tree is faster than a grep.</aside>
+
+  <h2>The trace: from <code>loom role set</code> to a claimed task</h2>
+
+  <ol class="trace">
+    <li>
+      <span class="hop-file">internal/cli/role/role_cmd.go:73-106, 397-398</span>
+      <span class="hop-what"><b>You set the field.</b>
+      <code>loom role set reviewer skills go,daemon</code> maps the key
+      <code>skills</code> onto <code>patch.Skills</code> via
+      <code>sliceCSVPtr</code>. The <code>Long</code> help at
+      <code>:76-95</code> is the authoritative list of settable keys.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file"><span class="repo fleet">fleet-db</span> internal/api/roles.go:107, 206-238</span>
+      <span class="hop-what"><b>The write, and what it does not check.</b>
+      <code>PATCH /api/v1/{workspace}/roles/{name}</code>. The handler validates
+      <code>effort</code>, <code>kind</code>, <code>executor</code>,
+      <code>input_policy</code>, <code>max_run_duration</code> and
+      <code>prompt</code> (<code>:233-238</code>) —
+      <b>not <code>skills</code>, not <code>task_filter</code></b>. Both are stored
+      as whatever you typed.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/cli/config/project.go:254-275</span>
+      <span class="hop-what"><b>The daemon reads it back.</b>
+      <code>st.Roles().List(ctx, wsKey)</code> fills
+      <code>DaemonConfig.Roles</code>, and <code>st.Agents().List</code> fills
+      <code>DaemonConfig.Agents</code>. This is the
+      <a href="0005-where-state-lives.html">Lesson 05</a> tier boundary: role
+      config is fleet-db state, read fresh, not a file on disk.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/cli/daemon/supervisor/role.go:15-28, 59-68</span>
+      <span class="hop-what"><b>Built-in defaults first.</b> For the two built-in
+      role names (<code>plan</code>, <code>task</code> —
+      <span class="path">supervisor/types.go:169-173</span>),
+      <code>builtInRoleConfig</code> seeds <code>task_filter</code> as
+      <code>needs_plan</code> and <code>has_design</code> respectively, and your
+      stored role is merged <em>over</em> that. A custom role gets no defaults and
+      must supply a <code>prompt_file</code> that exists on disk
+      (<code>:38-48</code>).</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/cli/daemon/supervisor/claim.go:96-112</span>
+      <span class="hop-what"><b>Constraints and query, built together.</b>
+      <code>buildClaimOpts</code> resolves the agent's repos, calls
+      <code>MergeRoleConstraints</code>, and builds the <code>ReadyOpts</code> —
+      epic scope, <code>repo:</code> label, source repos. Note what is <em>not</em>
+      in the query: skills and task filter. Those are applied after the fetch.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file"><span class="repo fleet">fleet-db</span> internal/storage/ready_eligible.go:35-49</span>
+      <span class="hop-what"><b>The queue is already narrow.</b>
+      <code>IsReadyEligible</code> admits an issue only if it is <code>open</code>,
+      <b>not an epic</b>, and not deferred into the future;
+      <code>IsReadyEligibleFull</code> (<code>:54-64</code>) adds the blocker
+      checks. So two of loomcli's five rejections are enforced on both sides — and
+      the <code>non-work type</code> list is not one of them.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/cli/task_router.go:74-142</span>
+      <span class="hop-what"><b>Scoring.</b> Every survivor goes through
+      <code>MatchTask</code>. <code>SelectBestTask</code>
+      (<code>:147-173</code>) sorts by score descending, then priority ascending,
+      then ID ascending — deterministic, so two runners with the same inputs pick
+      the same task.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/cli/daemon/supervisor/claim.go:193-220</span>
+      <span class="hop-what"><b>Claim, and lose gracefully.</b>
+      <code>tryClaimBestTask</code> claims the top candidate; a
+      <code>KindConflict</code> drops that issue from the slice and re-runs
+      <code>SelectBestTask</code>, up to <code>claimConflictRetryLimit</code>
+      times. This is <a href="0008-claiming-without-collisions.html">Lesson 08</a>'s
+      race, with the scoring function supplying the candidate order.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/cli/daemon/supervisor/spawn.go:180-198 → internal/cli/task_router.go:191-222</span>
+      <span class="hop-what"><b>The constraints ride along.</b> The supervisor
+      exports <code>LOOM_ROLE_SKILLS</code>, <code>LOOM_ROLE_TASK_FILTER</code>,
+      <code>LOOM_ROLE_MAX_PRIORITY</code> and <code>LOOM_ROLE_PATH_PATTERNS</code>
+      into the child, and <code>RoleConfigFromEnv</code> rebuilds a partial
+      <code>RoleConfig</code> from them so the agent's own poll loop scores the
+      queue the same way its supervisor did.</span>
+    </li>
+  </ol>
+
+  <div class="callout trap">
+    <span class="label">Trap — a <code>task_filter</code> value nothing parses</span>
+    <p>fleet-db's own model documents the field as a filter
+    <em>expression</em> — “a filter string (e.g.,
+    <code>"type=bug,label=urgent"</code>). The format is consumed by the agent
+    runtime; storage treats it as opaque.”
+    (<span class="path"><span class="repo fleet">fleet-db</span> internal/models/role.go:182-185</span>)</p>
+    <p>No such format exists. The only consumer is <code>applyTaskFilter</code>,
+    whose <code>switch</code> knows three values and whose <code>default:</code> arm
+    is byte-for-byte the <code>has_design</code> arm
+    (<span class="path">internal/cli/task_router.go:257-266</span>). Nothing
+    validates the field on the way in — not the CLI, not the PATCH handler
+    (<span class="path"><span class="repo fleet">fleet-db</span> internal/api/roles.go:206-238</span>).
+    So <code>loom role set reviewer task_filter "type=bug"</code> succeeds, is
+    stored verbatim, and silently means <code>has_design</code>. A role that appears
+    to be scoped to bugs is scoped to everything with a design — and plain
+    <code>loom role show</code> will not even tell you the value is there, because
+    it prints no <code>task_filter</code> line
+    (<span class="path">internal/cli/role/role_cmd.go:214-255</span>); only
+    <code>--json</code> (<code>:211-213</code>) echoes it back.</p>
+  </div>
+
+  <div class="callout trap">
+    <span class="label">Trap — <code>max_priority</code> reads backwards</span>
+    <p>Priorities are numbers where <b>smaller is more urgent</b>: <code>P0</code>
+    is critical, <code>P4</code> is backlog, <code>P2</code> is the default
+    (<span class="path"><span class="repo fleet">fleet-db</span> internal/models/priority.go:5-15</span>).
+    <code>max_priority</code> caps the <em>number</em>
+    (<span class="path">internal/cli/task_router.go:96-98</span>), so
+    <code>max_priority: 1</code> does not mean "at most one priority level" and
+    does not mean "low priority work only" — it means <b>P0 and P1 only, and
+    nothing else, ever</b>. Set it to 0 on a role and that role idles unless
+    somebody files a critical bug. fleet-db's own field comment ("caps the highest
+    priority issue this role may claim",
+    <span class="path"><span class="repo fleet">fleet-db</span> internal/models/role.go:219-221</span>)
+    reads as the opposite of what it does.</p>
+  </div>
+
+  <div class="callout fleet">
+    <span class="label">A role field that goes nowhere</span>
+    <p>fleet-db's <code>Role</code> carries <code>labels</code> and
+    <code>exclude_labels</code> with a fully specified semantics — AND over
+    required labels, OR over excluded ones, exclusion evaluated first
+    (<span class="path">internal/models/role.go:200-211</span>). They are accepted
+    by the API, persisted, and projected. They are read by <b>no</b> query or claim
+    path in either pinned tree, and loomcli does not even carry them: the client's
+    <code>roleWire</code> has no such fields
+    (<span class="path"><span class="repo loom">loomcli</span> internal/infra/fleetdb/role.go:21-45</span>),
+    and the string <code>exclude_labels</code> appears zero times in the whole
+    loomcli repo. Setting them does nothing. Do not build a routing story on them
+    without wiring them first.</p>
+  </div>
+
+  <h2>What "no matching role" looks like</h2>
+
+  <p>Two silent no-ops are worth knowing before you debug an idle agent.</p>
+
+  <p>First, an agent whose role is neither built-in nor carries a
+  <code>task_filter</code> is never pre-claimed at all:
+  <code>shouldClaimTaskForRole</code> returns
+  <code>BuiltInRoles[role] || RoleConfig.TaskFilter != ""</code>, and
+  <code>claimTask</code> returns early when it is false
+  (<span class="path">internal/cli/daemon/supervisor/claim.go:44-46, 294-296</span>).
+  Skills alone do not qualify a role for the claim path.</p>
+
+  <p>Second, in the agent's own in-process poll loop,
+  <code>BuildRouterTaskCheck</code> returns <code>nil</code> — meaning "no routing,
+  use the generic availability check" — when skills, max priority, task filter,
+  repo label and source repos are <em>all</em> empty
+  (<span class="path">internal/cli/task_router.go:324-326</span>). An entirely
+  unconfigured role does not score anything.</p>
+
+  <p>On a running stack the tool for all of this is
+  <code>loom daemon queue &lt;agent&gt;</code>, which loads the agent's role from
+  fleet-db, scores the real ready queue, prints the top five with their
+  <code>Reason</code> strings and tallies the rejections by reason
+  (<span class="path">internal/cli/daemon/daemon_queue.go:17-33, 121-145, 147-184</span>).
+  It needs no daemon and no socket.</p>
+
+  <div class="callout safety">
+    <span class="label">Shared machine</span>
+    <p><code>loom daemon queue</code> reads fleet-db, which in local mode means
+    starting or reusing an embedded runtime under a config directory other people's
+    agents may be using. Nothing in this lesson's exercise requires it, and you
+    should not reach for it here. When you do run a stack later: pick your own
+    compose project and your own port block, and never <code>up</code>,
+    <code>down</code> or <code>--build</code> a stack you did not create.</p>
+  </div>
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory: name the five conditions that make
+    <code>MatchTask</code> return <code>Score: 0</code>, and the two that return a
+    non-zero score without a real match. Which of the five can you configure?</p>
+    <div class="answer">
+      <p><b>Score 0:</b> epic; non-work issue type; status not <code>open</code>;
+      the <code>task_filter</code> rejected it; priority greater than
+      <code>max_priority</code>.
+      <span class="path">internal/cli/task_router.go:74-98</span></p>
+      <p><b>Non-zero without a match:</b> <code>Score: 5</code> "repo mismatch"
+      (<code>:117-124</code>) and <code>Score: 10</code> "fallback: no skill match"
+      (<code>:107-109</code>). Both stay in the candidate list because
+      <code>SelectBestTask</code> keeps everything above zero
+      (<code>:149-153</code>).</p>
+      <p><b>Configurable:</b> only two — <code>task_filter</code> and
+      <code>max_priority</code>. Epic-ness, issue type and status are properties of
+      the issue.</p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="0026">
+    <div class="q" data-answer="2">
+      <p class="stem">A role sets <code>skills: [go, daemon]</code>. The only ready
+      task is labelled <code>frontend</code>. What happens?</p>
+      <ul class="opts">
+        <li>Skips it: a role with skills claims only tasks whose labels match</li>
+        <li>Claims it once the no-work backoff lapses and nothing better lands</li>
+        <li>Claims it: the task scores 10, and 10 still counts as a candidate</li>
+        <li>Skips it, logging a routing warning that names the unmatched labels</li>
+      </ul>
+      <div class="why">The skill branch returns <code>Score: 10</code>, not 0
+      (<span class="path">internal/cli/task_router.go:107-109</span>), and
+      <code>SelectBestTask</code> keeps every candidate with
+      <code>Score &gt; 0</code> (<code>:149-153</code>). Skills bias the ranking;
+      they never remove a task from consideration. "Skips it" is the belief the
+      field's name invites, and it is the one that produces surprised agents.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <p class="stem">You run <code>loom role set reviewer task_filter
+      "type=bug"</code>. Which tasks does the role now take?</p>
+      <ul class="opts">
+        <li>type=bug — fleet-db parses it before returning a ready queue</li>
+        <li>any — an unrecognised filter value disables filtering entirely</li>
+        <li>needs_plan — the default the router applies when parsing fails</li>
+        <li>has_design — unknown filter values fall through to that branch</li>
+      </ul>
+      <div class="why">The <code>switch</code> knows three values and its
+      <code>default:</code> arm duplicates the <code>has_design</code> arm
+      (<span class="path">internal/cli/task_router.go:257-266</span>). The command
+      succeeds because nothing validates the field: not the CLI, and not fleet-db's
+      PATCH handler, which checks effort, kind, executor, input policy, run
+      duration and prompt — no routing field among them
+      (<span class="path"><span class="repo fleet">fleet-db</span> internal/api/roles.go:206-238</span>).</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <p class="stem">Score two ready tasks with <code>MatchTask</code>, for a role
+      that sets both skills and source repos. One matches the repo but no skill; the
+      other matches a skill but not the repo. Which ranks higher?</p>
+      <ul class="opts">
+        <li>The skill match, at 50 — a skill bonus outranks any repo mismatch</li>
+        <li>The repo match, at 10 — the skill check returns before the repo one</li>
+        <li>Neither — both score zero and never enter the candidate list at all</li>
+        <li>The skill match, at 30 — repo affinity is only a tie-breaking bonus</li>
+      </ul>
+      <div class="why">Order of evaluation decides it. The skill branch returns
+      <code>Score: 10</code> before the repo branch is ever reached
+      (<span class="path">internal/cli/task_router.go:107-109</span>), and the repo
+      branch returns a flat <code>Score: 5</code> that discards the +50 already
+      accumulated (<code>:117-124</code>). So the lower-value task sorts higher —
+      and both are still claimable.</div>
+    </div>
+  </div>
+
+  <div class="cloze" data-answer="10">
+    <p class="stem">A role with <code>skills</code> set meets a ready task whose
+    labels match none of them. <code>MatchTask</code> returns a score of
+    <input> — not 0.</p>
+    <div class="why">The fallback branch at
+    <span class="path">internal/cli/task_router.go:107-109</span>. Keep the number
+    itself: it is what tells you, when you read a
+    <code>loom daemon queue</code> listing, that an agent took an off-skill task
+    because there was nothing else rather than because its skills matched.</div>
+  </div>
+
+  <div class="exercise">
+    <h3>Predict eight scores, then let the tests mark you</h3>
+    <p>Read-only throughout. No stack, no daemon, no test run, no writes to either
+    repo.</p>
+    <ol>
+      <li>Open <span class="path">internal/cli/task_router.go:74-142</span> and,
+      <b>on paper</b>, score these four against a role with
+      <code>task_filter: has_design</code> and <code>skills: [go, daemon]</code>:
+      (a) P2 open task, design set, labels <code>[go, routing, daemon]</code>;
+      (b) the same but labels <code>[frontend, css]</code>;
+      (c) P0 open task, design set, labels <code>[daemon]</code>;
+      (d) P2 open <em>epic</em>, design set, labels <code>[go]</code>.</li>
+
+      <li>Now check yourself against the table tests, which state the expected
+      arithmetic in their own comments — <b>read them, do not run them</b>.
+      <code>go test ./internal/cli</code> is not a read-only command on a shared
+      machine: this package's <code>TestMain</code> calls
+      <code>killTestTmuxSessions</code> before and after the run, and that function
+      kills every tmux session on the <em>host</em> whose name starts with
+      <code>loom-test-</code> or <code>loom-e2e-test-</code>
+      (<span class="path">internal/cli/testmain_test.go:21, 28, 34-46</span>),
+      including another engineer's in-flight run. Read them with
+      <code>grep -n "base(100)" internal/cli/task_router_test.go</code>, which lists
+      every pinned sum in the file. Two of your four are pinned outright — (a) at
+      <span class="path">internal/cli/task_router_test.go:260</span> and (b), which
+      asserts its score directly rather than in a comment, at
+      <span class="path">:279</span>. For (c), the closest test is the P2 single-match
+      case at <span class="path">:241</span>; work out what changes when the
+      priority is 0.</li>
+
+      <li>Prove the rejection count without reading the whole file:
+      <code>grep -n "Score: 0" internal/cli/task_router.go</code>, then
+      <code>grep -n "Score: 5\|Score: 10" internal/cli/task_router.go</code>.
+      Write down which of the first set you can change from a role definition.</li>
+
+      <li>Reaching back to <a href="0008-claiming-without-collisions.html">Lesson
+      08</a>: open
+      <span class="path">internal/cli/daemon/supervisor/claim.go:193-220</span> and
+      say what happens to the <em>second-best</em> candidate when the best one is
+      already claimed by another worktree. Does the runner reuse its sorted list, or
+      score again?</li>
+
+      <li>Reaching back to <a href="0005-where-state-lives.html">Lesson 05</a>: open
+      <span class="repo fleet">fleet-db</span>
+      <span class="path">internal/storage/ready_eligible.go:35-49</span> and decide
+      which of loomcli's five rejections are <em>also</em> enforced there — and
+      therefore which ones exist purely because the client does not trust the queue
+      to be free of them.</li>
+    </ol>
+    <div class="verify">
+      <b>You succeeded when</b>
+      Your <code>base(100)</code> grep lists <b>eight</b> pinned sums, among them
+      <code>= 212</code> at <code>:260</code>; your other grep shows exactly
+      <b>five</b> <code>Score: 0</code> returns and one each of <code>Score: 5</code>
+      and <code>Score: 10</code>; your four predicted scores are <b>212, 10, 170,
+      0</b>; and you can say in one sentence why case (b) is still claimable and
+      case (d) is not.
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><code>internal/cli/task_router.go</code> — 335 lines and the complete
+    definition of what a role can say about the work it wants. Read it top to
+    bottom: the <code>RoleConstraints</code> comments (<code>:19-32</code>) document
+    every field's real effect, including the three that are carried for downstream
+    use and do nothing here. Nothing else in either repo <em>scores</em> a task, so
+    a ranking behaviour that is not in this file does not exist. What reaches the
+    scorer is decided elsewhere:
+    <span class="path">internal/cli/daemon/supervisor/claim.go:104-110</span>,
+    <span class="path">internal/backend/fleet/params.go:243-250</span> and fleet-db's
+    <span class="path">internal/storage/ready_eligible.go:35-49</span>.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0025-who-owns-this-agent.html"><span class="dir">Previous</span>Who owns this agent</a>
+    <a class="next" href="0027-seeing-what-happened.html"><span class="dir">Next</span>Seeing what happened</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

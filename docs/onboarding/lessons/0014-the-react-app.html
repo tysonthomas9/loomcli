@@ -1,0 +1,603 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>14. The React app — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 4 <span class="sep">/</span> Lesson 14 <span class="sep">/</span> Frontend</p>
+  <h1>The React app</h1>
+  <p class="standfirst">A quarter of a million lines of TypeScript you are about to
+  have to change. You do not need to be fluent in modern React to change it safely —
+  you need four rules. Three of them a linter or a build gate fails you on the moment
+  you break them; the fourth only a reviewer catches.</p>
+
+  <div class="meta">
+    <span><b>Skill</b> find and safely modify any part of the frontend</span>
+    <span><b>Time</b> 35 min</span>
+    <span><b>Needs</b> <a href="0012-how-serve-is-put-together.html">Lesson 12</a></span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span></span>
+  </div>
+
+  <p><code>internal/webui/frontend/src</code> holds <b>1,033</b> TypeScript files and
+  <b>251,753</b> lines. Nobody here has read all of it. What makes it navigable is that
+  the directory layout is not a style preference — it is a dependency graph a linter will
+  not let you violate. Paths below are relative to
+  <code>internal/webui/frontend/</code> unless they begin with <code>internal/</code>.</p>
+
+  <div class="callout key">
+    <span class="label">The one idea</span>
+    <p>Every question you will have here — where a file goes, why some indirection
+    exists, why an import will not compile — is answered by the layer DAG in the
+    header comment of <code>eslint.config.js</code>. Read it once and the rest of the
+    codebase stops looking arbitrary.
+    <span class="path">internal/webui/frontend/eslint.config.js:1-47</span></p>
+  </div>
+
+  <h2>How the SPA reaches a browser</h2>
+
+  <p>Start here, because this is what people get wrong first. <b>The frontend is not
+  compiled into the Go binary.</b> There is no <code>//go:embed</code> of the built
+  bundle anywhere under <code>internal/webui</code>. The server serves a
+  <em>directory</em>, and only if you name one:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/webui/app/frontend.go:11-16</figcaption>
+<pre><code>func (app *Server) registerFrontendRoutes() {
+	if app.config.FrontendDir == "" {
+		return
+	}
+	app.mux.HandleFunc("/", serveFrontend(app.config.FrontendDir))
+}</code></pre>
+  </figure>
+
+  <p>So <code>loom serve</code> with <code>LOOM_FRONTEND_DIR</code> unset registers no
+  <code>/</code> route and serves <b>zero</b> frontend — it is a JSON/SSE/WebSocket API
+  and nothing else. It says which mode it is in on startup:
+  <code>api-only mode — frontend served externally</code>, or
+  <code>serving bundled frontend</code>.
+  <span class="path">internal/webui/app/server_app.go:99-103</span> The flag is
+  <code>--frontend-dir</code>, defaulting to <code>$LOOM_FRONTEND_DIR</code>.
+  <span class="path">internal/cli/serve/serve.go:162</span> Because that default is an
+  inherited variable, "bare" is a claim about your shell, not about the command line:
+  <code>loom local</code> exports <code>LOOM_FRONTEND_DIR</code> into the
+  <code>loom serve</code> child it spawns, and a desktop-launched shell inherits it.
+  <span class="path">internal/cli/local/runtime.go:456-459</span> Run
+  <code>env | grep LOOM_FRONTEND_DIR</code> before you trust either startup line. When a
+  directory <em>is</em> named, requests matching no file fall back to
+  <code>index.html</code> — that fallback is
+  what lets <code>/ws/&lt;id&gt;/kanban</code> survive a hard refresh.
+  <span class="path">internal/webui/app/frontend.go:18-37</span></p>
+
+  <div class="callout trap">
+    <span class="label">Trap — <code>loom serve --help</code> lies by omission</span>
+    <p>The command's long description says "The frontend is served externally (reverse
+    proxy, CDN, Vite preview, etc.)" and then lists sixteen environment variables —
+    <b><code>LOOM_FRONTEND_DIR</code> is not among them</b>. Read only the help text and
+    you would conclude in-process serving does not exist. It does; the flag registration
+    a few dozen lines further down reads that exact variable.
+    <span class="path">internal/cli/serve/serve.go:104-128 vs :162</span></p>
+  </div>
+
+  <p>Day to day you use neither path: <code>make dev</code> runs
+  <code>scripts/dev.sh</code>, bringing up Vite on <code>:3000</code> proxying
+  <code>/api</code> to the Go server. The Makefile says it flatly — "Post-Phase-5 there
+  is no Loom-served UI; use <code>make dev</code> (Vite on :3000)."
+  <span class="path">Makefile:719-732</span></p>
+
+  <h2>The directory contract</h2>
+
+  <p>Ten layers and an explicit list of permitted edges — not a strict stack.
+  <code>eslint-plugin-boundaries</code> is configured with
+  <code>default: "disallow"</code> and no allowlist, so any edge not explicitly listed
+  is a lint error. <span class="path">eslint.config.js:182-186</span></p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/webui/frontend/eslint.config.js:21-29 (excerpt of the header table)</figcaption>
+<pre><code> * | components | src/components/**            | components, contexts, hooks, utils,    |
+ * |            |                              |  types (NO api, NO stores, NO views)   |
+ * | hooks      | src/hooks/**                 | hooks, contexts, stores, api, utils,   |
+ * |            |                              |  types (NO components, NO views)       |
+ * | stores     | src/stores/**                | api, utils, types                      |
+ * | api        | src/api/**                   | utils, types                           |
+ * | utils      | src/utils/**                 | types                                  |
+ * | styles     | src/styles/**                | types                                  |
+ * | types      | src/types/**                 | (nothing — leaf)                       |</code></pre>
+  </figure>
+
+  <p>Above those in the table sit <code>contexts</code>, then <code>views</code> (one
+  page component per route), then <code>app</code> — <code>App.tsx</code>,
+  <code>main.tsx</code>, <code>router.tsx</code> — which may import from everything. Row
+  order is rough altitude, not a rule the linter enforces: <code>components</code> may
+  import <code>contexts</code> from above it, and <code>contexts</code> and
+  <code>hooks</code> may import <em>each other</em>. Read the <code>allow</code> blocks,
+  never the row order. <span class="path">eslint.config.js:235-283</span> In terms you
+  already have:</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Directory</th><th>What lives there</th><th>Go analogy</th></tr></thead>
+    <tbody>
+      <tr><td><code>src/types</code></td><td>Type declarations only, including the generated OpenAPI file. Imports nothing.</td><td>A leaf package of struct definitions.</td></tr>
+      <tr><td><code>src/utils</code></td><td>Pure helpers, no I/O.</td><td>A helpers package with no dependencies.</td></tr>
+      <tr><td><code>src/api</code></td><td>Every HTTP call in the app. The linter behind that rule only knows <code>fetch</code> — see rule 1.</td><td><code>internal/infra/fleetdb</code> — the client layer.</td></tr>
+      <tr><td><code>src/stores</code></td><td>Zustand stores: the in-memory state machines that own fetched data.</td><td>A struct with methods, built by a constructor.</td></tr>
+      <tr><td><code>src/hooks</code></td><td>Reusable stateful logic; the usual layer through which a component reaches the api. <code>contexts</code> is the other.</td><td>Service functions the handlers call.</td></tr>
+      <tr><td><code>src/contexts</code></td><td>Four React contexts that hand values down a subtree without threading props.</td><td>Values carried on a <code>context.Context</code>.</td></tr>
+      <tr><td><code>src/components</code></td><td>Presentational building blocks. May <b>not</b> import <code>@/api</code> or reach a store — though 31 of them do fetch, through the <code>@/hooks/api</code> re-export.</td><td>Templates that may call a service function, but own no state.</td></tr>
+      <tr><td><code>src/views</code></td><td>One page per route. Usually thin: read context, render components.</td><td>A handler that only assembles a response.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p><code>src/api</code>, <code>src/hooks</code> and <code>src/types</code> are each
+  split into domain sub-directories — not for taste, but because
+  <code>scripts/check-dir-size.mjs</code> fails the build when any directory holds more
+  than 15 <code>.ts</code>/<code>.tsx</code> files at depth 1.
+  <span class="path">scripts/check-dir-size.mjs:1-5</span></p>
+
+  <div class="callout key">
+    <span class="label">The escape hatch, and why it is safe</span>
+    <p>Type-only imports are legal across <em>every</em> edge, because TypeScript erases
+    them and no runtime coupling appears. That is why
+    <code>@typescript-eslint/consistent-type-imports</code> is an <b>error</b>, not a
+    warning: the hatch is only trustworthy if you cannot smuggle a value import through
+    it. <span class="path">eslint.config.js:143-150, 344-355</span></p>
+  </div>
+
+  <h2>The trace: one wire frame to one repainted card</h2>
+
+  <p>An agent elsewhere changes an issue's status; an operator has the Kanban board
+  open. Every hop:</p>
+
+  <ol class="trace">
+    <li>
+      <span class="hop-file">src/router.tsx:201-210 → src/components/WorkspaceLayout/WorkspaceLayout.tsx:92-93</span>
+      <span class="hop-what"><b>The URL is the state machine.</b>
+      <code>/ws/:workspaceId</code> renders <code>WorkspaceLayout</code> →
+      <code>App</code> → the pages; there is no "current view" variable. The layout mounts
+      <code>&lt;WorkspaceProvider&gt;&lt;StoreProvider&gt;</code>, scoping everything
+      below to one workspace.</span>
+    </li>
+    <li>
+      <span class="hop-file">src/hooks/common/useStoreContext.tsx:225-234, 243-253</span>
+      <span class="hop-what"><b>Stores are built once, then wired.</b>
+      <code>useState(() =&gt; createIssueStore({…}))</code> — the lazy initialiser runs on
+      first render only, so the store's identity survives every later one. The provider
+      nests <code>StoreContext.Provider → EventProvider → StoreWiring → children</code>.</span>
+    </li>
+    <li>
+      <span class="hop-file">src/api/common/sse.ts:143 → :15-33</span>
+      <span class="hop-what"><b>A JWT is exchanged for an opaque SSE token</b> via
+      <code>GET /api/workspaces/{ws}/events/token</code>, because
+      <code>EventSource</code> cannot send an <code>Authorization</code> header and a JWT
+      in a query string would land in access logs. A <b>404 is not an error</b>: it means
+      <code>{ kind: "disabled" }</code>, the normal local-dev path.</span>
+    </li>
+    <li>
+      <span class="hop-file">src/api/common/sse.ts:182-190</span>
+      <span class="hop-what"><b>One <code>EventSource</code> opens</b> on
+      <code>/api/workspaces/{ws}/events?since=…&amp;token=…</code>, with listeners for
+      two named events: <code>mutation</code> and <code>connected</code>. Exactly one
+      <em>mutation</em> stream per workspace, for the whole app — not the app's only
+      <code>EventSource</code>, though: <code>useWorkflowRunStreams</code> opens one per
+      active workflow run, capped at eight.
+      <span class="path">src/hooks/workflows/useWorkflowRunStreams.ts:42, 207</span></span>
+    </li>
+    <li>
+      <span class="hop-file">src/api/common/sse.ts:372-388</span>
+      <span class="hop-what"><b>A frame arrives.</b> <code>handleMutation</code>
+      <code>JSON.parse</code>s it, records <code>event.lastEventId</code> as the reconnect
+      cursor, and calls <code>onMutation</code>. Malformed JSON is warned about and
+      dropped, never thrown.</span>
+    </li>
+    <li>
+      <span class="hop-file">src/hooks/common/useEventProvider.tsx:184-212</span>
+      <span class="hop-what"><b>Fan-out, with no React state touched.</b> The provider
+      walks a ref-held subscriber map and calls matching callbacks directly — nothing
+      re-renders <em>here</em>, which is why the app absorbs a fast stream.</span>
+    </li>
+    <li>
+      <span class="hop-file">src/hooks/common/useStoreContext.tsx:125 → src/stores/issueStore.ts:426-441</span>
+      <span class="hop-what"><b>issueStore is one of those subscribers.</b>
+      <code>StoreWiring</code>'s effect calls
+      <code>issueStore.getState().connectToEvents(subscribe)</code>, registering a
+      callback that funnels every mutation into <code>applyMutation</code>.</span>
+    </li>
+    <li>
+      <span class="hop-file">src/stores/issueStore.ts:443-470 → :127-161 → src/stores/issueStoreHelpers.ts:340</span>
+      <span class="hop-what"><b>Three gates, then a pure reducer.</b> Optimistic (a local
+      write is in flight → buffer it), workspace (wrong workspace → drop), source-repo
+      (filtered out → drop). Then the reducer — <code>processMutation</code>, which
+      <code>issueStore.ts:41</code> imports under the alias
+      <code>applyMutationPure</code> — takes the current map and <em>returns</em> a new
+      one plus flags; the wrapper does the <code>set()</code>. The reducer is testable
+      with no store and no renderer.</span>
+    </li>
+    <li>
+      <span class="hop-file">src/App.tsx:247-248</span>
+      <span class="hop-what"><b>React finds out.</b>
+      <code>useStore(issueStore, (s) =&gt; s.issuesMap)</code> is a subscription with a
+      selector: <code>App</code> re-renders only when that one field's identity changes.
+      It did, because the reducer returned a fresh <code>Map</code>.</span>
+    </li>
+    <li>
+      <span class="hop-file">src/App.tsx:1464-1471 → src/views/KanbanPage.tsx:16-35 → src/components/IssueCard/IssueCard.tsx:150</span>
+      <span class="hop-what"><b>Shell publishes, page consumes, one card repaints.</b>
+      <code>App</code> owns and filters the data and hands it down via
+      <code>&lt;WorkspaceViewProvider data actions&gt;</code>; <code>KanbanPage</code>
+      calls <code>useWorkspaceViewData()</code> and renders — pages almost never fetch.
+      <code>IssueCard</code> is <code>memo(...)</code>, so only the card whose
+      <code>Issue</code> identity changed re-renders.</span>
+    </li>
+  </ol>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/webui/frontend/src/hooks/common/useEventProvider.tsx:187-211</figcaption>
+<pre><code>        // Fan out to all subscribers
+        for (const entry of subscribersRef.current.values()) {
+          if (entry.types &amp;&amp; !entry.types.includes(mutation.type)) {
+            continue;
+          }
+          // … two more filters, on entity_type and action, elided …
+          try {
+            entry.callback(mutation);
+          } catch (err) {
+            console.error("[EventProvider] Subscriber callback threw:", err);
+          }
+        }</code></pre>
+  </figure>
+
+  <p>One bad subscriber cannot poison the others, and the stream is a <b>broadcast bus,
+  not a state container</b> — in Go terms, one goroutine reading a channel and calling
+  registered handlers, not a channel per consumer.</p>
+
+  <h2>Zustand, in one paragraph</h2>
+
+  <p>A store is built by a factory that returns a plain object. The interesting part is
+  what is deliberately <em>not</em> in the state:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/webui/frontend/src/stores/issueStore.ts:72-92 (trimmed)</figcaption>
+<pre><code>export function createIssueStore(
+  initialConfig?: IssueStoreConfig,
+): StoreApi&lt;IssueStore&gt; {
+  // --- Closure state (not in Zustand — doesn't trigger re-renders) ---
+  const optimisticEntries = new Map&lt;string, OptimisticEntry&gt;();
+  let fetchTimestamp = 0;
+  // … AbortController, timers, deleted-during-fetch set, elided …
+  let activeWorkspaceId: string | null = null;</code></pre>
+  </figure>
+
+  <p>Anything React must repaint for goes in the store state (<code>issuesMap</code>,
+  <code>isLoading</code>, <code>error</code>, <code>pendingIds</code>). Bookkeeping —
+  abort controllers, timers, optimistic snapshots, the active workspace id — lives in the
+  closure, where changing it triggers nothing. That split is the most-copied pattern in
+  <code>src/stores</code>. And because it is a factory, not a package-level global, the
+  store is unit-testable with no renderer and every provider gets its own instance. The
+  running app does not exercise that on a workspace switch: <code>WorkspaceLayout</code>
+  never unmounts across <code>/ws/A</code> → <code>/ws/B</code>, so the lazy initialiser
+  does not re-run and the one instance is retargeted by reassigning
+  <code>activeWorkspaceId</code> — which is exactly why <code>applyMutation</code> needs
+  a workspace gate.
+  <span class="path">src/hooks/common/useStoreContext.tsx:224, src/stores/issueStore.ts:204, 451-458</span>
+  Read it as a Go constructor returning a struct.</p>
+
+  <h2>The four rules a reviewer will hold you to</h2>
+
+  <h3>1. Only <code>src/api</code> touches the network</h3>
+
+  <p>Enforced by an AST linter, not by convention:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/webui/frontend/scripts/check-no-raw-fetch.mjs:2-3, 13-15</figcaption>
+<pre><code>// AST-based linter that bans direct fetch() calls outside src/api/.
+// Components, hooks, and utils must use the API client (src/api/client.ts).
+
+// Allowlist of "relPath:line" entries permitted to use raw fetch().
+// Currently empty — the codebase is clean.
+export const ALLOWLIST = new Set([]);</code></pre>
+  </figure>
+
+  <p>It parses each file with the TypeScript compiler and flags any call resolving to
+  <code>fetch</code>, <code>window.fetch</code> or <code>globalThis.fetch</code>,
+  unwrapping parentheses and <code>as</code> casts on the way — so
+  <code>(fetch as any)(…)</code> does not hide. Its sibling
+  <code>check-no-hardcoded-urls.mjs</code> bans literal <code>/api/</code> strings outside
+  the same directory. The check is narrower than the rule, though: only <code>fetch</code>
+  is banned, so two long-lived sockets live outside <code>src/api</code> — a
+  <code>new WebSocket</code> in the terminal component and a per-run
+  <code>new EventSource</code> in a workflow hook. Grepping for <code>fetch</code> does
+  not find every socket in this app.
+  <span class="path">src/components/TerminalView/instances/terminalConnection.ts:180, src/hooks/workflows/useWorkflowRunStreams.ts:207</span>
+  Inside <code>src/api</code>, copy this shape:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/webui/frontend/src/api/issues/issues.ts:263-271</figcaption>
+<pre><code>  const { data, error, response } = await api.GET(
+    "/api/workspaces/{ws}/issues",
+    {
+      params: { path: { ws: workspaceId }, query },
+      ...(requestOptions?.signal ? { signal: requestOptions.signal } : {}),
+    },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
+  return normalizeIssueRepos(unwrap(data, response) as unknown as Issue[]);</code></pre>
+  </figure>
+
+  <p><code>api</code> is <code>createClient&lt;paths&gt;({ baseUrl: API_BASE_URL })</code>
+  <span class="path">src/api/common/client.ts:272</span>, where <code>paths</code> is the
+  generated OpenAPI type — so the URL string, the path params and the response body are
+  all checked at compile time.</p>
+
+  <h3>2. Cross-component imports go through the barrel</h3>
+
+  <p>A component directory is a module with exactly one public surface. A second AST
+  linter decides what counts:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/webui/frontend/scripts/check-component-boundaries.mjs:73-79</figcaption>
+<pre><code>  // Bare import (e.g. @/components/KanbanBoard or ../KanbanBoard) → barrel import, OK
+  if (segments.length === 1) return null;
+
+  // Explicit /index import — equivalent to barrel, OK
+  if (segments.length === 2 &amp;&amp; segments[1] === "index") return null;
+
+  // Cross-component internal import — violation</code></pre>
+  </figure>
+
+  <p>So <code>@/components/KanbanBoard</code> and
+  <code>@/components/KanbanBoard/index</code> are legal;
+  <code>@/components/KanbanBoard/columnConfigs</code> is not, and the message names the
+  path to use instead. Five grandfathered pairs sit in that script's
+  <code>ALLOWLIST</code> <span class="path">scripts/check-component-boundaries.mjs:14-35</span>
+  — do not add a sixth. Most components are re-exported from
+  <code>src/components/index.ts</code>, which is why most files import
+  <code>{ ErrorBoundary, SwimLaneBoard }</code> from plain <code>@/components</code>. The
+  barrel is not exhaustive: 28 of the 95 directories under <code>src/components</code>
+  are absent, four of them by an explicit comment so a lazy-loaded chunk stays split.
+  Import those by directory, the way <code>KanbanPage</code> imports
+  <code>@/components/IssueViewGuard</code>.
+  <span class="path">src/components/index.ts:42-46, src/views/KanbanPage.tsx:4</span></p>
+
+  <h3>3. Types come from <code>api/openapi.yaml</code>, both sides</h3>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Side</th><th>Command</th><th>Output</th></tr></thead>
+    <tbody>
+      <tr><td>Go</td><td><code>make gen-go-api</code> <span class="path">Makefile:426-432</span></td><td><code>internal/backend/api/gen/types.gen.go</code></td></tr>
+      <tr><td>TypeScript</td><td><code>npm run generate:types</code> <span class="path">package.json:35</span></td><td><code>src/types/generated/openapi.ts</code> (8,358 lines)</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p><code>npm run check:generated</code> regenerates into a temp directory and diffs, so
+  a spec edit without a regeneration fails the gate.
+  <span class="path">scripts/check-openapi-staleness.mjs:53, 85-86</span> Hand-written
+  types <em>extend</em> the generated ones: <code>Issue</code> is
+  <code>Omit&lt;components["schemas"]["Issue"], …&gt; &amp; IssueExtensions</code>, dropping
+  the fields whose spec types are too narrow and re-declaring them wider.
+  <span class="path">src/types/issue/issue.ts:120-136</span></p>
+
+  <h3>4. Never call <code>localStorage</code> directly</h3>
+
+  <p>Browser storage should be workspace-scoped: use <code>wsGet</code> /
+  <code>wsSet</code> / <code>wsRemove</code>, which build a
+  <code>loom:{wsId}:{key}</code> key and swallow quota and private-browsing errors
+  instead of throwing mid-render.
+  <span class="path">src/utils/scopedStorage.ts:7-37</span> It is one more rung on the
+  ladder from <a href="0005-where-state-lives.html">Lesson 05</a> — per-browser,
+  per-workspace, and always safe to delete.</p>
+
+  <p>This is the one rule of the four with no machine behind it: nothing in
+  <code>eslint.config.js</code> or <code>scripts/</code> so much as mentions
+  <code>localStorage</code>. It shows — theme, split ratio, terminal font and recent
+  assignees all still read and write unscoped global keys.
+  <span class="path">src/hooks/ui/useTheme.ts:25, src/hooks/ui/useSplitRatio.ts:20, src/hooks/terminal/useTerminalFont.ts:47, src/hooks/issues/useRecentAssignees.ts:29</span>
+  Only a reviewer catches this one, and those callers are debt, not precedent.</p>
+
+  <div class="callout trap">
+    <span class="label">Trap — the indirection is not accidental</span>
+    <p>You will find <code>src/hooks/api.ts</code>, whose body is
+    <code>export * from "@/api"</code> plus a few named re-exports, and assume someone was
+    being clever. Its header explains: components may not import <code>@/api</code> at all,
+    so they reach it through the hooks layer; 38 component→api call sites had to move,
+    and a <code>useCreateIssue</code>-style wrapper per api function would have been
+    ceremony with no runtime benefit. Before you "simplify" an
+    odd re-export here, check whether it is a DAG edge in disguise.
+    <span class="path">src/hooks/api.ts:4-8, 20</span></p>
+  </div>
+
+  <h2>Running just the frontend tests</h2>
+
+  <p>No Go toolchain, no stack, no browser needed for the unit suite.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Goal</th><th>Command</th></tr></thead>
+    <tbody>
+      <tr><td>Whole unit suite</td><td><code>make test-frontend</code> — installs deps if stale, then <code>npx vitest run</code> <span class="path">Makefile:446-448</span></td></tr>
+      <tr><td>One file</td><td><code>npx vitest run src/stores/__tests__/issueStore.test.ts</code></td></tr>
+      <tr><td>Watch mode</td><td><code>npx vitest</code></td></tr>
+      <tr><td>The full gate</td><td><code>make check-frontend</code> — six steps: format, typecheck, eslint, <code>check:arch</code>, <code>check:generated</code>, tests at 60% coverage <span class="path">Makefile:628-641</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Every one of those targets depends on <code>ensure-frontend-deps</code>, because
+  <code>node_modules</code> is gitignored and <b>a fresh git worktree does not inherit
+  it</b>. Without the guard the gate dies with a bare
+  <code>sh: prettier: command not found</code> from inside the pre-push hook, which
+  presents to a newcomer as "git push is broken."
+  <span class="path">Makefile:178-201</span></p>
+
+  <div class="callout trap">
+    <span class="label">Trap — vitest runs in <code>node</code>, not a browser</span>
+    <p>The natural assumption is that a React test suite hands you a DOM. It does not:
+    <code>vite.config.ts:221</code> sets <code>environment: "node"</code>. A test touching
+    <code>document</code> must opt in with a docblock at the top of the file —</p>
+<pre><code>/**
+ * @vitest-environment jsdom
+ */</code></pre>
+    <p>— which 338 of the 401 test files under <code>src</code> carry, plus
+    <code>src/test-utils/a11y-helpers.ts</code>, which needs it for the same reason.
+    Forget it and you get an opaque <code>document is not defined</code> pointing nowhere near the cause.
+    A quieter sibling: <code>npm run typecheck</code> does <em>not</em> check tests.
+    <code>tsconfig.json</code>'s <code>exclude</code> lists <code>**/*.test.ts</code>,
+    <code>**/*.test.tsx</code>, <code>**/*.spec.ts</code>, <code>**/*.spec.tsx</code>,
+    <code>tests</code> and <code>playwright.config.ts</code>, so "typecheck passed" is a
+    claim about production
+    code only. <span class="path">tsconfig.json:33</span></p>
+  </div>
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory: you must add a button to an existing component that
+    calls a new backend endpoint and shows the result. Name every directory you will
+    touch, in dependency order, and say why the component itself cannot hold the
+    <code>fetch</code>.</p>
+    <div class="answer">
+      <p><code>api/openapi.yaml</code> → regenerate both sides (<code>make
+      gen-go-api</code>, <code>npm run generate:types</code>) →
+      <code>src/api/&lt;domain&gt;/</code> for the facade using <code>api.GET</code> →
+      <code>src/hooks/</code> for the hook (or <code>src/hooks/api.ts</code>'s
+      re-export) → <code>src/components/&lt;Name&gt;/</code> for the button, exported
+      through that directory's <code>index.ts</code>.</p>
+      <p>Two independent, separately enforced reasons:
+      <code>eslint-plugin-boundaries</code> forbids the <code>components → api</code>
+      runtime edge (<span class="path">eslint.config.js:247-264</span>), and
+      <code>check-no-raw-fetch.mjs</code> flags the call itself anywhere outside
+      <code>src/api/</code>, with an empty allowlist.</p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="0014">
+    <div class="q" data-answer="2">
+      <p class="stem">You run <code>loom serve</code> with no flags, in a shell where
+      <code>LOOM_FRONTEND_DIR</code> is unset, and open
+      <code>http://localhost:8080/</code> in a browser. What do you get?</p>
+      <ul class="opts">
+        <li>The SPA, served from the copy embedded in the Go binary at build time</li>
+        <li>The SPA, but only after the server has built the dist directory once</li>
+        <li>Nothing — no route is registered for <code>/</code> unless a directory is named</li>
+        <li>A redirect to the Vite dev server, which the API proxies through to</li>
+      </ul>
+      <div class="why"><code>registerFrontendRoutes</code> returns early when
+      <code>FrontendDir</code> is empty, so <code>/</code> is never registered and the
+      process logs <code>api-only mode — frontend served externally</code>. The first
+      option is the one worth killing: there is no <code>//go:embed</code> of the bundle
+      anywhere under <code>internal/webui</code> on this branch, so "it's embedded" is
+      simply false here. <span class="path">internal/webui/app/frontend.go:11-16</span></div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <p class="stem">A component needs the current issue list. Where does it get it?</p>
+      <ul class="opts">
+        <li>By importing the store from <code>@/stores</code> and calling <code>getState()</code></li>
+        <li>From props or context, passed down by a hook or shell</li>
+        <li>By calling <code>getKanbanIssues</code> from the <code>@/api/issues</code> barrel</li>
+        <li>From a module singleton exported by <code>src/stores/index.ts</code></li>
+      </ul>
+      <div class="why">Components may import components, contexts, hooks, utils, styles
+      and types — no <code>api</code>, no <code>stores</code>. The shell computes and
+      publishes through <code>WorkspaceViewContext</code>; a hook may reach a store on a
+      component's behalf. The fourth option is the sharpest miss, because such singletons
+      genuinely exist (<code>editorStore</code>, <code>backendsStore</code>,
+      <code>skillsStore</code>) — but a component importing one still crosses a forbidden
+      edge. <span class="path">eslint.config.js:247-264</span></div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <p class="stem">How many <code>EventSource</code> connections carry a workspace's
+      mutation stream?</p>
+      <ul class="opts">
+        <li>One, owned by the provider and shared by all subscribers</li>
+        <li>One per store that has registered a mutation subscriber</li>
+        <li>One per mounted page component that renders live data</li>
+        <li>One per source repo currently selected in the filter</li>
+      </ul>
+      <div class="why"><code>EventProvider</code> constructs a single
+      <code>WorkspaceSSEClient</code> per <code>workspaceId</code> and fans mutations out
+      to a subscriber map by direct callback. Subscribers are map entries, not
+      connections — which is why adding a live view costs nothing at the transport layer.
+      The workspace can hold other streams — <code>useWorkflowRunStreams</code> opens up
+      to eight, one per active workflow run — but none of them carries mutations.
+      <span class="path">src/hooks/common/useEventProvider.tsx:184-212</span></div>
+    </div>
+  </div>
+
+  <div class="exercise">
+    <h3>Break each rule on purpose, then read the failure</h3>
+    <p><b>Safety first:</b> work on a scratch branch and revert between steps. If a step
+    tempts you to start a dev server, check
+    <code>lsof -nP -iTCP:3000 -sTCP:LISTEN</code> first — Vite uses
+    <code>strictPort: true</code> on 3000 (<code>vite.config.ts:178-180</code>) and that
+    port is shared host state.</p>
+    <ol>
+      <li>From the repo root: <code>cd internal/webui/frontend &amp;&amp; npm install</code>,
+      then <code>npm run check:arch</code> once, clean, so you know what passing looks
+      like.</li>
+      <li>Add <code>const r = await fetch("/api/health");</code> inside any component
+      under <code>src/components/</code> and re-run <code>npm run check:arch</code>. Note
+      which of its four sub-checks fired and what the message tells you to use instead.
+      Revert.</li>
+      <li>Add <code>import { DEFAULT_COLUMNS } from "@/components/KanbanBoard/columnConfigs";</code>
+      to a component in a <em>different</em> directory and re-run. Then change it to
+      <code>@/components/KanbanBoard</code> and re-run. Revert.</li>
+      <li>Add <code>import { getKanbanIssues } from "@/api/issues";</code> — a value
+      import — to a component and run <code>npm run lint</code>. Change it to
+      <code>import type { GraphFilter } from "@/api/issues";</code> and run again. Say in
+      one sentence why the second is allowed. Revert.</li>
+      <li>Delete the <code>@vitest-environment jsdom</code> docblock from the top of
+      <code>src/contexts/__tests__/WorkspaceViewContext.test.tsx</code>, run
+      <code>npx vitest run</code> on that one file, write down the exact error, and
+      restore it.</li>
+      <li>Reaching back to <a href="0012-how-serve-is-put-together.html">Lesson 12</a>:
+      run <code>loom serve --help</code> and confirm <code>LOOM_FRONTEND_DIR</code> is
+      absent from its environment-variable list. Then find the line in
+      <code>internal/cli/serve/serve.go</code> that reads it anyway.</li>
+    </ol>
+    <div class="verify">
+      <b>You succeeded when</b>
+      For each of steps 2-4 you can name the script or ESLint rule that caught it and
+      quote its message; <code>npm run check:arch</code> and <code>npm run lint</code>
+      both pass again on your branch; and you can say which of the two startup log lines
+      (<code>api-only mode — frontend served externally</code> /
+      <code>serving bundled frontend</code>) your <code>loom serve</code> emits, and why
+      that turns on <code>LOOM_FRONTEND_DIR</code> rather than on the command line.
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><code>internal/webui/frontend/eslint.config.js</code> — above all the header
+    comment on lines 1-47. It is the most load-bearing document in this domain: it
+    defines the layer DAG, states the six rules, and explains the type-only escape hatch.
+    Almost every "why is this indirection here?" question in the frontend resolves to it.
+    Read it before you read any component.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0013-realtime-one-frame-at-a-time.html"><span class="dir">Previous</span>Realtime, one frame at a time</a>
+    <a class="next" href="0015-shipping-a-vertical-slice.html"><span class="dir">Next</span>Shipping a vertical slice</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

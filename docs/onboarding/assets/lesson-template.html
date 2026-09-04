@@ -1,0 +1,166 @@
+<!doctype html>
+<!--
+  LESSON TEMPLATE — copy this file to ../lessons/NNNN-slug.html and fill it in.
+
+  Non-negotiables, in rough order of how badly it hurts to get them wrong:
+
+  1. CITE OR CUT. Every factual claim names a file you actually opened, as
+     path:line relative to a repo root. Mark which repo with a .repo badge the
+     first time each section changes repos. If you could not verify it, do not
+     say it — say "unverified" in the sidenote, or leave it out.
+  2. ONE SKILL. A lesson teaches exactly one thing the learner can DO after.
+     Write that skill into the .meta block before writing anything else. If you
+     cannot state it in one clause, the lesson is two lessons.
+  3. SHORT. 15-40 minutes. Working memory is the binding constraint, not
+     enthusiasm. Knowledge sections should carry the minimum needed for the
+     skill — difficulty in the *knowledge* half is pure cost.
+  4. RETRIEVE BEFORE REVEAL. Every lesson ends with retrieval practice, and at
+     least one .recall card (free recall beats multiple choice for retention).
+     Multiple-choice options must be near-equal in word and character count —
+     a longer option is a tell, and a tell turns recall into pattern matching.
+  5. INTERLEAVE. At least one question or exercise step must reach back to an
+     earlier lesson. Spacing and interleaving are the whole game for retention.
+  6. VERIFIABLE EXERCISE. The exercise runs against the real repos and states
+     how the learner knows they succeeded — a command whose output they can
+     check, not "make sure you understand X".
+  7. LINK OUT. Anchor to prerequisite lessons, to reference docs, and to the
+     glossary. A lesson is a node in a graph, not a page in a pile.
+  8. RESPECT SHARED STATE. Any exercise touching podman stacks, ports, dev
+     servers, or worktrees repeats the safety rule inline. Do not assume the
+     learner remembers it from week 1.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NN. Lesson title — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week N <span class="sep">/</span> Lesson NN <span class="sep">/</span> Theme</p>
+  <h1>The lesson title</h1>
+  <p class="standfirst">One sentence that says what the learner will be able to do
+  by the end, in plain language.</p>
+
+  <div class="meta">
+    <span><b>Skill</b> the one thing they can do afterwards</span>
+    <span><b>Time</b> 25 min</span>
+    <span><b>Needs</b> <a href="0000-slug.html">Lesson NN</a></span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span></span>
+  </div>
+
+  <!-- ===== KNOWLEDGE — the minimum required for the skill, no more ======= -->
+
+  <h2>Why this exists</h2>
+  <p>Open with the problem the subsystem solves, not with its structure. A
+  newcomer who knows why it exists can predict its shape; one who memorised its
+  shape cannot predict anything.</p>
+
+  <aside class="sidenote">Sidenotes carry the aside that would break the main
+  argument — history, a related file, a caveat. Never put load-bearing
+  information here.</aside>
+
+  <div class="callout key">
+    <span class="label">The one idea</span>
+    <p>If the learner keeps one sentence from this lesson, it is this one.</p>
+  </div>
+
+  <h2>The trace</h2>
+  <p>A numbered walk through real files. This is the highest-value block in the
+  template — a newcomer learns more from one verified end-to-end trace than from
+  any amount of description.</p>
+
+  <ol class="trace">
+    <li>
+      <span class="hop-file">internal/cli/example.go:42</span>
+      <span class="hop-what">What happens here, in one sentence.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">internal/service/example.go:88</span>
+      <span class="hop-what">Add class <code>fleet-hop</code> when the hop crosses
+      into <span class="repo fleet">fleet-db</span>, so the repo boundary is
+      visible at a glance.</span>
+    </li>
+  </ol>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/cli/example.go:42-48</figcaption>
+<pre><code>// Paste only the lines that carry the point. Trim the rest with an
+// elided comment rather than pasting a whole function.</code></pre>
+  </figure>
+
+  <h2>The pattern to copy</h2>
+  <p>Name the convention explicitly and point at the exemplar the learner should
+  imitate. "Implementation patterns" is an explicit goal of this course — do not
+  leave the convention implicit and hope they infer it.</p>
+
+  <div class="callout trap">
+    <span class="label">Trap</span>
+    <p>State the wrong belief first, then the reality, then the evidence at
+    <span class="path">path:line</span>. Traps are the highest-retention content
+    in a lesson because they attach to a prediction error.</p>
+  </div>
+
+  <!-- ===== SKILL — effortful retrieval, then the real task ============== -->
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory: state the thing, without scrolling up.</p>
+    <div class="answer">
+      <p>The answer, with the file references.</p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="NNNN">
+    <div class="q" data-answer="1">
+      <p class="stem">A question whose wrong answers are all plausible.</p>
+      <ul class="opts">
+        <li>internal/backend spawns and supervises it</li>
+        <li>internal/bootstrap spawns and supervises it</li>
+        <li>internal/infra spawns and supervises it</li>
+      </ul>
+      <div class="why">Why, with the citation. Also say why the near-miss option
+      is wrong — that distinction is usually the real lesson.</div>
+    </div>
+  </div>
+
+  <div class="exercise">
+    <h3>Do the thing</h3>
+    <ol>
+      <li>A concrete step in the real repo.</li>
+      <li>A step that reaches back to an earlier lesson.</li>
+    </ol>
+    <div class="verify">
+      <b>You succeeded when</b>
+      A command whose output the learner can check, or a specific observable
+      state. Not "you understand X".
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p>The single highest-trust primary source for this topic — a checked-in doc,
+    an ADR, or the definitive file. One, ranked, with why it is worth the time.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0000-slug.html"><span class="dir">Previous</span>Lesson title</a>
+    <a class="next" href="0000-slug.html"><span class="dir">Next</span>Lesson title</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>REPLACE-SHA</code> and fleet-db
+  <code>REPLACE-SHA</code>.</p>
+
+</main>
+</body>
+</html>

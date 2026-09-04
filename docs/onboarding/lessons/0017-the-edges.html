@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>17. The edges — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 4 <span class="sep">/</span> Lesson 17 <span class="sep">/</span> Surroundings</p>
+  <h1>The edges</h1>
+  <p class="standfirst">Everything that is not the CLI, the web layer, or fleet-db:
+  <code>sdk/</code>, <code>services/auth/</code>, <code>desktop/</code>, and the
+  shipping channels. One of them you need in week one. The rest you can ignore until
+  something forces you to care — and knowing which is which is the whole lesson.</p>
+
+  <div class="meta">
+    <span><b>Skill</b> place the SDK, task runners, desktop app and packaging in the system</span>
+    <span><b>Time</b> 30 min</span>
+    <span><b>Needs</b> <a href="0010-what-actually-runs-your-code.html">10</a></span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span> <span class="repo fleet">fleet-db</span></span>
+  </div>
+
+  <h2>Why these exist</h2>
+
+  <p>The centre of Loom is Go. Every directory here is a <b>boundary drawn around
+  it</b>, and each boundary faces a different way. <code>sdk/</code> is the contract
+  leaving the Go process going <em>down</em> into JavaScript subprocesses.
+  <code>services/auth/</code> is an identity provider sitting <em>above</em> it.
+  <code>desktop/</code> wraps the same <code>cmd/loom</code> binary in a macOS shell.
+  The packaging files are different ways to hand that binary to someone.</p>
+
+  <p>Read them in directory order and you meet a Tauri Rust file before you meet the
+  one edge that carries a real invariant. So triage first.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Directory</th><th>Who executes it</th><th>When you need it</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>sdk/</code> — <code>@loom/sdk</code>, two dependency-free JS clients</td>
+        <td>Node subprocesses serve spawns: workflow bundles and task-runner harnesses</td>
+        <td><b>Week one.</b> The runner credential invariant lives in one file here.</td>
+      </tr>
+      <tr>
+        <td><code>services/auth/</code> — a Node/Hono/Better&nbsp;Auth identity provider</td>
+        <td>Nobody, unless deployed. No Go file imports it.</td>
+        <td>Only for <em>human</em> auth, and only when <code>--auth-url</code> is set.</td>
+      </tr>
+      <tr>
+        <td><code>desktop/</code> — a Tauri macOS shell (332 lines TS, 638 Rust)</td>
+        <td>A user double-clicking. It shells out to a bundled <code>loom</code>.</td>
+        <td>Rarely. The half that matters is Go and lives elsewhere.</td>
+      </tr>
+      <tr>
+        <td><code>npm/</code>, <code>scripts/install.sh</code>, <code>.goreleaser.yml</code></td>
+        <td>CI, on a tag push</td>
+        <td>Not until you cut a release — but know the SPA ships separately.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout key">
+    <span class="label">The one idea</span>
+    <p>Only <code>loom serve</code> holds fleet-db credentials. Everything that looks
+    odd out here — a <code>serveMode</code> branch on every SDK method, a deny-list
+    that runs before an allow-list, a launcher whose env <em>blanks</em>
+    <code>LOOM_FLEET_DB_URL</code> — exists to keep that sentence true.</p>
+  </div>
+
+  <h2><code>sdk/</code>: two clients, three credentials</h2>
+
+  <p>Loom executes code at three levels and each gets its own credential. A workflow
+  bundle uses a run-scoped <code>LOOM_RUN_TOKEN</code> and imports the <b>driver</b>
+  client (<span class="path">sdk/driver.js:68-75</span>). A task runner — the leaf
+  that drives an LLM CLI over a worktree — uses a <b>per-task-run lease token</b> and
+  imports the <b>runner</b> client. A human uses an RS256 JWT and imports nothing.
+  Both clients ship under separate entry points of one package
+  (<span class="path">sdk/package.json:6-25</span>).</p>
+
+  <p>Only the bundled workflows import it statically: <code>epic-runner.ts</code> and
+  <code>github-review-agent.ts</code> take the driver client on line 1,
+  <code>daytona-task-runner.ts</code> the runner client on line 6. The built-in local
+  runner imports it <em>lazily, inside a <code>try</code></em>, so the module stays
+  loadable and testable outside a bundle — copy that shape, not a top-level import.
+  <span class="path">internal/workflows/builtin/local-task-runner.ts:1630-1642</span></p>
+
+  <aside class="sidenote">The package is unpublished
+  (<span class="path">sdk/README.md:223</span>) and consumed by <b>symlink</b>: a
+  generated workflow build gets <code>node_modules/@loom/sdk</code> pointed at
+  <code>LOOM_SDK_ROOT</code> or <code>$CWD/sdk</code>. Run serve from a directory with
+  no <code>sdk/</code> sibling and every build fails with "local @loom/sdk package not
+  found". <span class="path">internal/workflows/workflows.go:618-627, 674-686</span></aside>
+
+  <h2>The trace: a runner that holds no fleet-db credentials</h2>
+
+  <ol class="trace">
+    <li>
+      <span class="hop-file">internal/cli/serve/serve.go:414-425, 314-321</span>
+      <span class="hop-what"><b>Serve computes its own URL and hands it down.</b>
+      <code>driverAPIBaseURL()</code> returns <code>LOOM_DRIVER_API_URL</code> if set,
+      else <code>http://&lt;bind&gt;:&lt;port&gt;</code> with <code>0.0.0.0</code> and
+      <code>::</code> normalised to loopback. It becomes
+      <code>TaskWorker.APIBaseURL</code>, then
+      <code>HostBridgeTaskExecutor.APIBaseURL</code>
+      (<code>internal/driver/task_worker.go:88-91</code>).</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/driver/env.go:137-139</span>
+      <span class="hop-what"><b>The subprocess env is filtered deny-first.</b>
+      <code>subprocessEnvAllowed</code> consults <code>subprocessEnvSensitive</code>
+      <em>before</em> the allow-list, so the allow-list can never re-admit a denied
+      name. <code>LOOM_FLEET_DB_URL</code> and <code>LOOM_FLEET_DB_API_KEY</code> are
+      denied by name (<code>env.go:44-45</code>), the whole <code>FLEET_</code> prefix
+      by prefix (<code>env.go:63</code>). A denied name comes back only if something
+      re-adds it after the filter, by name: the local-task-runner entrypoint re-adds
+      the provider credentials (<code>env.go:111-123</code>), and no fleet-db name is
+      among them.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/driver/task_bridge.go:661-688</span>
+      <span class="hop-what"><b>Then the LOOM_* set is added back.</b>
+      <code>taskRunnerEnv</code> injects the request as JSON, the lease tuple
+      including <code>LOOM_TASK_RUN_LEASE_TOKEN</code> (line 682), and — only when
+      <code>APIBaseURL</code> is non-empty — <code>LOOM_TASK_RUN_API_URL</code>
+      (line 688).</span>
+    </li>
+    <li>
+      <span class="hop-file">sdk/runner.js:34-61, 374-384, 411-419</span>
+      <span class="hop-what"><b>The runner branches on that one variable.</b>
+      Serve mode posts to <code>/api/workspaces/{ws}/task-run/&lt;op&gt;</code> with
+      <code>Authorization: Bearer &lt;lease token&gt;</code> plus four identity
+      headers, and <b>no</b> <code>X-API-Key</code>, <b>no</b> <code>X-Actor</code>.
+      Legacy mode posts to fleet-db's own <code>/api/v1/{ws}…</code> routes with a
+      deployment key.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/webui/server/middleware/auth_routes.go:74-86</span>
+      <span class="hop-what"><b>Those routes skip the human-JWT middleware.</b>
+      <code>/api/task-run/</code> is in <code>hasOwnAuthPrefix</code>, and
+      <code>stripWorkspacePrefix</code> normalises the workspace-scoped path down to
+      it — so even with <code>--auth-url</code> set, a lease token never reaches the
+      RS256 validator.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/webui/handlers/taskrunapi/module.go:145-148, 202, 248-259</span>
+      <span class="hop-what"><b>Serve authenticates, then <em>proves</em>
+      ownership.</b> Two routes; <code>authenticate</code> parses the lease tuple; and
+      for any op without a fenced store call of its own, <code>verifyLease</code>
+      issues a <b>real no-op fenced heartbeat</b> rather than re-implementing the
+      check.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">internal/api/platform.go:2499-2507</span>
+      <span class="hop-what"><b><span class="repo fleet">fleet-db</span> has the
+      last word.</b> It hashes the
+      <code>X-Lease-Token</code> header and passes
+      <code>{LeaseTokenHash, NodeID, LeaseID, FencingToken}</code> to the store — the
+      plaintext token exists only in serve's memory and the runner's env
+      (<code>internal/api/control_plane.go:1230-1233</code>).</span>
+    </li>
+  </ol>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> sdk/runner.js:53-61</figcaption>
+<pre><code>    // Serve transport: when LOOM_TASK_RUN_API_URL (or the apiUrl option) is
+    // set, all operations target the loom serve task-run API authenticated
+    // by the per-task-run lease token alone — no LOOM_FLEET_DB_URL, no
+    // LOOM_FLEET_DB_API_KEY. Otherwise the legacy direct-fleet-db transport
+    // is used unchanged.
+    this.apiUrl = trim(options.apiUrl);
+    this.serveMode = this.apiUrl !== "";
+    this.baseUrl = this.serveMode ? this.apiUrl.replace(/\/+$/, "") : normalizeBaseUrl(options.baseUrl);</code></pre>
+  </figure>
+
+  <p>The operational consequence is written where operators read it: <b>stop
+  provisioning <code>LOOM_FLEET_DB_URL</code> and <code>LOOM_FLEET_DB_API_KEY</code>
+  to task runner wrappers.</b> Serve exports the serve URL automatically; direct
+  fleet-db survives only as the fallback when that URL is absent.
+  <span class="path">AGENTS.md:78-83</span></p>
+
+  <div class="callout trap">
+    <span class="label">Trap — the silent downgrade</span>
+    <p>You will assume a missing <code>LOOM_TASK_RUN_API_URL</code> is an error. It is
+    not: <code>serveMode</code> is simply <code>false</code>, with no warning
+    (<span class="path">sdk/runner.js:60</span>). The client then reaches for
+    <code>LOOM_FLEET_DB_URL</code>, which hop 2 already stripped, and throws
+    <code>TypeError: baseUrl is required</code>
+    (<span class="path">sdk/runner.js:486-489</span>) — naming neither the real cause
+    nor the real variable. The question to ask is <em>"why is
+    <code>APIBaseURL</code> empty on this serve process?"</em></p>
+  </div>
+
+  <div class="callout">
+    <span class="label">The pattern to copy — the SDK is optional</span>
+    <p>A harness owes the bridge two things only: read
+    <code>LOOM_TASK_RUN_REQUEST_JSON</code>, and print one terminal JSON object as the
+    last stdout line. <code>deploy/podman-stack/e2e/task-runner.mjs</code> does it in
+    60 lines importing nothing but <code>node:fs</code> and <code>node:path</code>.
+    Copy that when you need a new harness; reach for the SDK only for mid-run
+    reporting — heartbeats, streamed logs, artifacts. Note it reads
+    <code>request.task_run_id</code>: the request JSON is <b>snake_case</b>, and so
+    is every legacy direct-fleet-db body — only serve's task-run API is camelCase on
+    the wire
+    (<span class="path">internal/webui/handlers/taskrunapi/module.go:9-10</span>).</p>
+  </div>
+
+  <h2><code>services/auth/</code>: off by default</h2>
+
+  <p>No Go file imports it — the only in-repo references are a Makefile test target
+  (<span class="path">Makefile:536-538</span>) and an e2e script. Loom reaches it over
+  HTTP or not at all, and everything is gated on one value:
+  <code>loom serve --auth-url</code>, defaulting from <code>LOOM_AUTH_URL</code>
+  (<span class="path">internal/cli/serve/serve.go:175</span>). Set, it builds a JWKS
+  cache against <code>&lt;auth-url&gt;/api/auth/jwks</code> and installs the JWT
+  middleware (<span class="path">internal/webui/app/server_app_helpers.go:13-16</span>),
+  and serve <b>reverse-proxies</b> <code>/api/auth/*</code> to the service so cookies
+  stay same-origin (<span class="path">internal/webui/app/routes.go:68-80</span>).
+  Unset, <code>middleware.Auth</code> returns a passthrough — "open mode" — and
+  binding to a non-loopback address then produces a <code>Warn</code> log and nothing
+  more. <span class="path">internal/webui/server/middleware/auth.go:113-118</span>,
+  <span class="path">internal/webui/app/server_app.go:93-94</span></p>
+
+  <div class="callout trap">
+    <span class="label">Trap — the <code>role</code> claim is not authorization</span>
+    <p>Better Auth puts a <code>role</code> claim in every JWT it mints
+    (<span class="path">services/auth/src/auth.ts:153-159</span>), which is tempting to
+    build on. Do not: the Go side declares exactly two custom claims,
+    <code>email</code> and <code>name</code>, so <code>role</code> is parsed and
+    dropped, and <code>UserIdentity</code> carries only
+    <code>{UserID, Email, Name}</code>.
+    <span class="path">internal/webui/server/middleware/auth.go:21-25, 44-48</span></p>
+  </div>
+
+  <h2><code>desktop/</code>: a launcher, and where it stops</h2>
+
+  <p>"The desktop app is a shell and controller, not a second Loom implementation"
+  (<span class="path">docs/product/desktop-app-runtime-spec.md:25</span>) — and the
+  code holds. Rust exposes four commands
+  (<span class="path">desktop/src-tauri/src/lib.rs:56-61</span>); TypeScript calls the
+  bundled <code>loom</code> sidecar exactly twice, ever: <code>local status
+  --json</code> and <code>local start</code>
+  (<span class="path">desktop/src/main.ts:133-138, 159</span>).</p>
+
+  <p><b>The half that matters is Go, in <code>internal/cli/local/</code>.</b>
+  <code>loom local start</code> re-execs the same binary as <code>loom local
+  service</code>, detached
+  (<span class="path">internal/cli/local/local_cmd.go:501-509</span>), which spawns
+  <code>loom serve --bind 127.0.0.1 --port N --fleet-mode</code> as another detached
+  child (<span class="path">local_cmd.go:236-244</span>) — with an env that blanks
+  <code>LOOM_FLEET_DB_URL</code>, prepends the bundle's own directory to
+  <code>PATH</code>, and points <code>FLEET_DB_BIN</code> and
+  <code>LOOM_FRONTEND_DIR</code> at siblings inside the <code>.app</code>
+  (<span class="path">internal/cli/local/runtime.go:434-461</span>). That is two
+  long-lived processes from one binary, plus a third from a different one: the
+  embedded <code>fleet-db</code>, resolved <code>FLEET_DB_BIN</code>-first
+  (<span class="path">internal/bootstrap/embedded.go:526-533</span>).</p>
+
+  <p>The <b>LaunchAgent</b> keeps that alive across logout and reboot: a per-user
+  <code>~/Library/LaunchAgents/com.loom.local.plist</code> with
+  <code>RunAtLoad</code> and <code>KeepAlive</code> on non-zero exit
+  (<span class="path">internal/cli/local/launchagent.go:15, 55-61, 183</span>) —
+  deliberately not a system-wide LaunchDaemon
+  (<span class="path">desktop-app-runtime-spec.md:257-258</span>). The app never
+  installs it — only <code>loom local install-service</code> does — and the rendered
+  argv is <code>loom local --data-dir &lt;dir&gt; service</code>, not the bare
+  <code>loom local service</code> the docs print
+  (<span class="path">launchagent.go:43-51</span>).</p>
+
+  <div class="callout trap">
+    <span class="label">Trap — <code>loom local drain</code> does not drain</span>
+    <p>The spec says it will "stop new claims, let active agents finish"
+    (<span class="path">desktop-app-runtime-spec.md:233</span>) and both docs make it
+    step 2 of the update flow (<span class="path">spec:203</span>,
+    <span class="path">desktop-installation-runbook.md:320</span>). All the subcommand
+    does is write <code>ClaimsPaused</code> into <code>runtime.json</code> and return
+    (<span class="path">internal/cli/local/local_cmd.go:694-703</span>). Grep
+    <code>ClaimsPaused</code> across <code>internal/</code>: four hits — the writer,
+    two struct fields, one copy, and <b>no consumer</b>
+    (<span class="path">internal/cli/local/runtime.go:43, 69, 99</span>). Both product
+    docs are marked <b>Draft</b> on line 3. Read them for intent, the code for
+    truth.</p>
+  </div>
+
+  <h2>How <code>loom</code> gets onto a machine</h2>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Channel</th><th>Trigger</th><th>Produces</th><th>Checksum?</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>GoReleaser</td>
+        <td>a <code>v*</code> tag (<span class="path">.github/workflows/release.yml:4-6</span>)</td>
+        <td><code>loom</code> for linux+darwin × amd64+arm64, <b>plus a separate frontend archive</b></td>
+        <td>publishes <code>checksums.txt</code></td>
+      </tr>
+      <tr>
+        <td><code>scripts/install.sh</code></td>
+        <td>a human running <code>curl … | bash</code></td>
+        <td>the binary in <code>~/.local/bin</code> (macOS) or <code>/usr/local/bin</code> (Linux)</td>
+        <td><b>yes</b>, verified (<span class="path">install.sh:84-99</span>)</td>
+      </tr>
+      <tr>
+        <td>Tauri DMG</td>
+        <td>a <code>desktop-v*</code> tag (<span class="path">desktop-release.yml:20-23</span>)</td>
+        <td>a signed, notarized <code>Loom Agents.app</code> for <code>aarch64-apple-darwin</code></td>
+        <td>Apple notarization</td>
+      </tr>
+      <tr>
+        <td><code>npm/</code> wrapper</td>
+        <td>nothing — no workflow publishes it</td>
+        <td>a <code>postinstall</code> hardcoded to release <code>v0.1.0</code> (<span class="path">npm/install.js:6, 62-63</span>)</td>
+        <td><b>none at all</b></td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>The fact to carry away: <b>the SPA is not inside the binary's archive.</b>
+  GoReleaser builds two — <code>loom-binaries</code>, and a metadata-only
+  <code>loom-frontend</code> holding <code>internal/webui/frontend/dist</code> — and
+  the release notes tell operators to extract it to a static host and proxy
+  <code>/api/*</code> to a running <code>loom serve</code>.
+  <span class="path">.goreleaser.yml:27-45, 86-91</span>.
+  <code>deploy/docker-compose.yml</code> is the checked-in reference for that shape.</p>
+
+  <aside class="sidenote">Building the DMG yourself wants a sibling
+  <code>fleet-db</code> checkout: <code>desktop/scripts/prepare-sidecar.sh:8</code>
+  defaults <code>FLEET_DB_REPO</code> to <code>../fleet-db</code> and only
+  <em>warns</em> when it is missing (<code>prepare-sidecar.sh:68</code>), so you get
+  an app whose runtime cannot start.</aside>
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory: a task runner subprocess appends a log line to its
+    task run. Name the credential it sends, the variable that decides which server
+    receives it, and the two things that would both have to be true for it to reach
+    fleet-db directly instead.</p>
+    <div class="answer">
+      <p>Its <b>per-task-run lease token</b>, as
+      <code>Authorization: Bearer</code> plus four <code>X-Loom-Task-Run-*</code>
+      identity headers and no API key
+      (<span class="path">sdk/runner.js:411-419</span>).</p>
+      <p>The decider is <code>LOOM_TASK_RUN_API_URL</code>: present means
+      <code>serveMode</code>, and the request goes to <code>POST
+      /api/workspaces/{ws}/task-run/log-append</code> on serve
+      (<span class="path">sdk/runner.js:60, 374-384</span>).</p>
+      <p>Legacy needs that variable <em>absent</em> <b>and</b>
+      <code>LOOM_FLEET_DB_URL</code> present — but the deny-first filter strips
+      exactly that name, so on a bridge-spawned runner the second cannot hold. You get
+      <code>TypeError: baseUrl is required</code>.
+      <span class="path">internal/driver/env.go:44, 137-139</span></p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="0017">
+    <div class="q" data-answer="2">
+      <p class="stem">In <a href="0006-anatomy-of-a-command.html">Lesson 06</a>,
+      <code>LOOM_FLEET_DB_URL</code> being set is what selects cloud mode for a CLI
+      command. What does the same variable do for a bridge-spawned task runner?</p>
+      <ul class="opts">
+        <li>The same thing — it selects the direct fleet-db transport for the runner</li>
+        <li>It is renamed by the bridge and arrives as the serve task-run API URL</li>
+        <li>Nothing — the bridge strips it, so the runner never sees the variable</li>
+        <li>It is forwarded, but only for the bundled local-task-runner entrypoint</li>
+      </ul>
+      <div class="why">The filter denies it by name before the allow-list is
+      consulted, so the runner's environment has no such variable
+      (<span class="path">internal/driver/env.go:44, 137-139</span>). The first option
+      is the trap: that branch <em>does</em> still exist in the SDK and would fire if
+      the variable were present — it just cannot be, on this path. The fourth
+      describes a real mechanism aimed elsewhere: the local-task-runner widening
+      admits provider credentials such as <code>ANTHROPIC_API_KEY</code>, and
+      pointedly no fleet-db ones (<code>env.go:76-83</code>).</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <p class="stem">An op on the task-run API has no fenced store call of its own —
+      <code>artifact-list</code>, say. How does serve establish that the caller owns
+      the run?</p>
+      <ul class="opts">
+        <li>It issues a real fenced heartbeat and lets fleet-db reject it</li>
+        <li>It reads the task-run row and compares the lease id itself</li>
+        <li>It validates the bearer token against the JWKS cache first</li>
+        <li>It trusts the identity headers the task bridge injected earlier</li>
+      </ul>
+      <div class="why"><code>verifyLease</code> performs a no-op heartbeat through the
+      store so fleet-db's lease-hash and <code>{node, lease, fencing}</code> checks
+      stay the single authority — serve proxies that authority rather than
+      duplicating it
+      (<span class="path">internal/webui/handlers/taskrunapi/module.go:243-259</span>).
+      Reading and comparing is the near-miss, and the package doc says not to. The
+      JWKS option fails twice over: <code>/api/task-run/</code> bypasses the human-JWT
+      middleware entirely.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <p class="stem">You deploy a tagged release and the web UI is a blank page,
+      though <code>loom serve</code> answers on <code>/api/*</code>. Most likely
+      cause?</p>
+      <ul class="opts">
+        <li>The desktop release workflow ran instead of the GoReleaser one</li>
+        <li>The npm wrapper installed a stale binary from an older release</li>
+        <li>The frontend build needs <code>--auth-url</code> set before it renders</li>
+        <li>The separate frontend archive was never extracted to a static host</li>
+      </ul>
+      <div class="why">GoReleaser publishes the SPA as its own
+      <code>loomcli-frontend_&lt;version&gt;.tar.gz</code>, not inside the binary
+      archive (<span class="path">.goreleaser.yml:36-45, 86-91</span>). The second
+      option is sharpest because the npm wrapper really is pinned to
+      <code>v0.1.0</code> (<span class="path">npm/install.js:6</span>) — but nothing
+      publishes that package, so it is on no deploy path at all.</div>
+    </div>
+  </div>
+
+  <div class="exercise">
+    <h3>Watch the invariant hold, then place each edge</h3>
+    <ol>
+      <li>Run the credential-removal end-to-end test: <code>go test
+      ./internal/webui/handlers/taskrunapi/ -run
+      TestBridgeRunnerCompletesTaskRunViaServeSurface -count=1</code>. It spawns a
+      real node process running the real <code>sdk/runner.js</code>. (Needs
+      <code>node</code> on <code>PATH</code>; it skips otherwise.)</li>
+      <li>Open <code>runner_e2e_test.go:27-42</code> and find the two guards in the
+      embedded runner script that <em>are</em> the invariant: one exits 2 if any
+      <code>LOOM_FLEET_DB*</code> variable is visible, the other exits 2 if the client
+      did not select the serve transport.</li>
+      <li>Isolate the SDK half: <code>cd sdk &amp;&amp; node --test
+      runner.test.mjs</code>, then read <code>runner.test.mjs:422-432</code> and say
+      in one sentence what it pins. (Use <code>node --test</code>, not <code>npm
+      test</code> — the latter also runs <code>tsc</code>, which needs
+      <code>npm install</code> first.)</li>
+      <li>Reaching back to <a href="0010-what-actually-runs-your-code.html">Lesson
+      10</a>: name the three processes in the desktop chain and cite where each is
+      started. Two are in <code>internal/cli/local/local_cmd.go</code>; the third is a
+      different binary, and <code>internal/cli/local/runtime.go:451-455</code> is
+      where the launcher tells serve which copy to use.</li>
+      <li>From memory, for each of <code>sdk/</code>, <code>services/auth/</code>,
+      <code>desktop/</code> and <code>npm/</code>: which process executes it, and does
+      a backend-first newcomer need it in week one? Check against the table above.</li>
+    </ol>
+    <div class="verify">
+      <b>You succeeded when</b>
+      The Go test prints <code>ok</code> for
+      <code>internal/webui/handlers/taskrunapi</code>, <code>node --test
+      runner.test.mjs</code> prints <code>pass 11</code> and <code>fail 0</code>, and
+      you can name — without scrolling — the single environment variable whose absence
+      turns a working runner into <code>TypeError: baseUrl is required</code>.
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><code>internal/webui/handlers/taskrunapi/module.go</code>, starting with the
+    package doc on lines 1-28. Those 28 lines are the clearest written statement of
+    Loom's runner trust model in either repo: why task harnesses must never hold
+    fleet-db credentials, and why serve proves ownership with a real fenced write
+    rather than a comparison. Then <code>authenticate</code> (line 202) and
+    <code>verifyLease</code> (line 248) give you the whole server half.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0016-what-proves-what.html"><span class="dir">Previous</span>What proves what</a>
+    <a class="next" href="0018-the-event-log-is-the-truth.html"><span class="dir">Next</span>The event log is the truth</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

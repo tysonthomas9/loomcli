@@ -1,0 +1,621 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>27. Seeing what happened — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 6 <span class="sep">/</span> Lesson 27 <span class="sep">/</span> Observability</p>
+  <h1>Seeing what happened</h1>
+  <p class="standfirst">The process is gone and someone is asking what the agent
+  did. Everything you have left was written by a different writer at a different
+  moment — and each piece can be missing on its own.</p>
+
+  <div class="meta">
+    <span><b>Skill</b> reconstruct one agent run from the artifacts it left behind</span>
+    <span><b>Time</b> 35 min</span>
+    <span><b>Needs</b> <a href="0009-when-a-run-dies.html">Lesson 09</a>, <a href="0016-what-proves-what.html">Lesson 16</a></span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span> <span class="repo fleet">fleet-db</span></span>
+  </div>
+
+  <h2>Why this exists</h2>
+
+  <p><a href="0016-what-proves-what.html">Lesson 16</a> asked what a test proves.
+  This is the harder version of the same question, asked at 9pm: what does a
+  <em>run</em> leave? You cannot attach a debugger to a subprocess that exited
+  yesterday, and you cannot ask the agent — the failures that make you care are
+  exactly the ones where the agent stopped being able to tell you anything
+  (<a href="0009-when-a-run-dies.html">Lesson 09</a>).</p>
+
+  <p>So the system writes evidence as it goes, at moments chosen so that the
+  evidence survives the failure. That is the whole design, and it has one
+  consequence that costs people hours: there is no single log. A run's record is
+  scattered across a session directory, two log files, a host-local event stream,
+  and two rows in fleet-db — written by three different processes.</p>
+
+  <div class="callout key">
+    <span class="label">The one idea</span>
+    <p>Every artifact has a <b>writer</b>, a <b>moment</b>, and a way of being
+    absent. Name the writer before you believe the record. Several of these files
+    are written by a process that is not the one you are investigating, and two of
+    them are written by a <em>reader</em>, long after the run ended.</p>
+  </div>
+
+  <h2>The inventory</h2>
+
+  <p>Everything one supervised run can leave behind. The session directory is
+  <code>&lt;workspace runtime dir&gt;/sessions/&lt;session id&gt;/</code>, and the
+  session id is
+  <code>YYYYMMDD-HHMMSS-&lt;agent&gt;-&lt;taskshort&gt;-&lt;8 hex&gt;</code>
+  (<span class="path">internal/sessions/id.go:13-18, 36</span>). The
+  <code>taskshort</code> is hardcoded empty at the one call site
+  (<span class="path">internal/sessions/store.go:66-68</span>), so <em>every</em>
+  session id carries the double dash and it tells you nothing about who created
+  the session.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Artifact</th><th>Who writes it</th><th>When</th><th>Defined at</th></tr></thead>
+    <tbody>
+      <tr><td><code>prompt.txt</code>, <code>metadata.json</code> (<code>status: running</code>)</td><td>the supervisor, in the daemon process</td><td>before the model is invoked</td><td><code>sessions/store.go:58-98</code></td></tr>
+      <tr><td><code>index.jsonl</code> — one level <em>up</em>, shared by every session</td><td>the supervisor, append-only under flock</td><td>at create <b>and</b> again at finalize</td><td><code>sessions/store.go:93</code>; <code>sessions/finalize.go:95-98, 106-131</code></td></tr>
+      <tr><td><code>transcript.jsonl</code> — lifecycle breadcrumbs</td><td><b>nothing in this tree</b>: <code>AppendTranscript</code> would flock it and stamp <code>seq</code> from a counter file, but neither it nor <code>LoadTranscript</code> has a non-test caller</td><td>never, today</td><td><code>sessions/store.go:145-188</code>; <code>sessions/query.go:170-221</code></td></tr>
+      <tr><td><code>agent_transcript.jsonl</code> — the backend's own stream</td><td><code>SyncNativeTranscript</code>: a <b>mirror</b>, re-copied whole each time — from the child's hook subprocess, from the TS leaf, and again from the <em>daemon</em> at finalize</td><td>during the run, then again after the child exits</td><td><code>sessions/native_transcript.go:25, 44, 72-81</code>; <code>cli/hooks/hooks_dispatch.go:37-41</code>; <code>cli/agent/tsruntime/tsruntime.go:328</code>; <code>cli/sessionfinalize/finalize_worktree.go:54-59</code></td></tr>
+      <tr><td><code>subagents/agent-&lt;id&gt;.jsonl</code></td><td>one file per completed Claude Code subagent Task</td><td>on the PostToolUse hook</td><td><code>sessions/subagent_transcript.go:15-32</code></td></tr>
+      <tr><td><code>events.jsonl</code> — harness event envelopes</td><td>the <code>eventstore</code> sink; append-only, last-writer-wins resolved on read</td><td>during the run</td><td><code>sessions/eventstore/eventstore.go:1-19, 36</code></td></tr>
+      <tr><td><code>diff.patch</code> and the final <code>metadata.json</code></td><td><code>Session.Finalize</code>; the patch only when the git diff was non-empty</td><td>after the child exits</td><td><code>sessions/finalize.go:16-101</code>; <code>cli/sessionfinalize/finalize_worktree.go:35-49</code></td></tr>
+      <tr><td><code>&lt;workspace runtime dir&gt;/usage.jsonl</code> — beside <code>sessions/</code>, shared by every run</td><td>the agent child's automode loop, append-only under flock</td><td>after each backend invocation</td><td><code>usage/store.go:21-28, 32-56</code>; <code>cli/automode/automode.go:277, 422, 482</code></td></tr>
+      <tr><td><code>&lt;eventsDir&gt;/events-&lt;YYYY-MM-DD&gt;.jsonl</code></td><td>the process-wide <code>events.Bus</code>, day-rotated</td><td>on each lifecycle event</td><td><code>cli/agent_event_bus.go:40-50</code>; <code>events/jsonl_writer.go:59</code></td></tr>
+      <tr><td>daemon log <code>&lt;daemon.LogDir&gt;/&lt;ws&gt;/&lt;role&gt;-&lt;worktree&gt;.log</code></td><td><code>os/exec</code>, straight from the child's stdout and stderr</td><td>while it runs</td><td><code>daemon/supervisor/spawn.go:407-435</code></td></tr>
+      <tr><td>agent archive <code>~/.loom/logs/&lt;ws&gt;/agents/&lt;worktree&gt;.log</code></td><td>the same bytes, fanned out to a second sink</td><td>while it runs</td><td><code>spawn.go:370-401, 447-453</code>; <code>webui/log/paths.go:44-63</code></td></tr>
+      <tr><td><span class="repo fleet">fleet-db</span> <code>AgentSession</code> row</td><td>the supervisor over HTTP, best-effort under a 2 s timeout</td><td>at create and at completion</td><td><code>supervisor.go:522-541, 669-726</code></td></tr>
+      <tr><td><span class="repo fleet">fleet-db</span> <code>Artifact</code> <code>transcript-&lt;session id&gt;</code></td><td>the supervisor; the id is stable, so a retried finalize reuses it</td><td>at completion</td><td><code>supervisor.go:733-754</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <aside class="sidenote">Four of those names contain <i>transcript</i> or
+  <i>events</i> and end in <code>.jsonl</code>, and they are four different things
+  — three with different writers, one with none at all. This is the failure mode
+  <a href="0002-the-words-that-lie.html">Lesson 02</a> is about, in its purest
+  form: say which file you mean, by path.</aside>
+
+  <p><code>index.jsonl</code> is append-only and <b>normally</b> collects two rows
+  per run — one <code>running</code> at create
+  (<span class="path">store.go:93-96</span>, best-effort: a failed append is only a
+  warning on stderr), one terminal at finalize
+  (<span class="path">finalize.go:95-98</span>). One row means nothing finalized;
+  three means a reader healed it (<span class="path">query.go:127-129</span>) or
+  <code>doctor --fix</code> re-indexed it
+  (<span class="path">finalize.go:136-147</span>). Readers
+  deduplicate by session id and keep the last row seen.
+  <span class="path">internal/sessions/query.go:57-68</span> If any of those paths
+  is unfamiliar, <a href="../reference/navigation.html">Finding Anything</a> is the
+  card for locating the package behind it.</p>
+
+  <div class="callout trap">
+    <span class="label">Trap — <code>daemon-agents.json</code> is not evidence</span>
+    <p>It looks like the obvious place to start and it is the wrong one. The state
+    file is rewritten wholesale every five seconds
+    (<span class="path">internal/cli/daemon/daemon_run_helpers.go:23-33</span>) and
+    <code>os.Remove</code>d when the daemon exits
+    (<span class="path">internal/cli/daemon/daemon_cmd.go:258</span>). It is a
+    dashboard of what is running <em>now</em>, and the incident you are
+    investigating is usually one where the daemon is no longer running. It carries
+    one field worth remembering — <code>last_error_class</code>
+    (<span class="path">daemon_cmd.go:42</span>) — and that same value is durable in
+    the fleet-db session row.</p>
+  </div>
+
+  <h2>The trace: reconstructing one run</h2>
+
+  <p>Start from the task: the endpoint and the fleet-db row are both task-keyed
+  (<span class="path">fleet-db internal/api/control_plane.go:47, 235-251</span>).
+  It is not a universal key. The session record carries no task id until
+  <code>Finalize</code> stamps it
+  (<span class="path">internal/sessions/store.go:100-114</span> against
+  <span class="path">finalize.go:27</span>), so <code>prompt.txt</code>, the
+  <code>running</code> index row and the first <code>metadata.json</code> have
+  none; both log files are keyed by role and worktree instead
+  (<span class="path">spawn.go:432</span>;
+  <span class="path">webui/log/paths.go:55</span>).</p>
+
+  <ol class="trace">
+    <li>
+      <span class="hop-file">internal/webui/handlers/issues/module.go:58 → issues/journey.go:19-40</span>
+      <span class="hop-what"><b>One endpoint folds most of it for you.</b>
+      <code>GET /api/workspaces/{ws}/issues/{id}/journey</code>, added by commit
+      <code>7d1be8249</code>. Call it yourself: the React timeline is a
+      <em>separate</em>, client-side fold
+      (<code>internal/webui/frontend/src/components/IssueDetailPanel/sections/Journey.tsx:210</code>
+      → <code>journeyFold.ts</code> beside it) whose only caveat is a one-line
+      window note (<code>Journey.tsx:449-453</code>), not the structured block
+      below.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/webui/service/journey.go:51-73</span>
+      <span class="hop-what"><b>Four blocks from two sources.</b>
+      <code>spans[]</code> is folded from the issue's fleet-db event history;
+      <code>agent_windows[]</code> is an overlay read from a host-local JSONL;
+      <code>lead_time</code> is decomposed from both; <code>honesty</code> says how
+      much of the first two you are allowed to believe.</span>
+    </li>
+    <li>
+      <span class="hop-file">journey.go:16-19, 84-99, 161-163</span>
+      <span class="hop-what"><b>The history read is bounded on purpose.</b> A tail
+      of 500 first; if that does not <em>prove</em> completeness
+      (<code>hasKnownCompleteJourneyHistory</code>) it pages forward, up to 100 pages
+      of 200. A truncated read is always labelled — never served as if it were
+      whole.</span>
+    </li>
+    <li>
+      <span class="hop-file">journey.go:196-227 → internal/webui/service/issue.go:191-204</span>
+      <span class="hop-what"><b>A span is a stage.</b> One contiguous run of the
+      same status, owner and needs-revision flag, plus the actor of the event that
+      <em>opened</em> it — a boundary event closes the previous span and becomes
+      the new one's <code>actor</code>
+      (<code>journey.go:288-295</code>). Derived, never stored —
+      the <a href="../reference/glossary.html#traps">glossary's <i>stage</i></a>
+      entry is the definition, and on the Go side the word is <em>span</em>.</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file">journey.go:297 → <span class="repo fleet">fleet-db</span> internal/service/claim_reaper.go:23-25, 34-40</span>
+      <span class="hop-what"><b><code>stalled</code> is the highest-signal field in
+      the whole fold.</b> It is true only for an <code>issue.release</code> whose
+      actor matches <code>system</code> case-insensitively, after trimming
+      (<code>journey.go:297</code>) — in practice fleet-db's
+      <code>ClaimReaper</code>, the only emitter that puts that actor on a release
+      (<code>internal/service/issue_service.go:736-745</code>), taking the task
+      back because <em>neither</em> a claim
+      lock <em>nor</em> a live agent session vouched for it
+      (<code>claim_reaper.go:42-56</code>). Nobody released that task. It was
+      confiscated.</span>
+    </li>
+    <li>
+      <span class="hop-file">journey.go:346-353, 385-387, 399-418</span>
+      <span class="hop-what"><b>The agent-window overlay.</b>
+      <code>task.claimed</code> opens a window, <code>task.completed</code> or
+      <code>task.failed</code> closes it, and a second claim marks the earlier
+      window <code>superseded</code>. It is read from this host's events JSONL,
+      resolved at <code>internal/cli/serve/serve.go:646</code> →
+      <code>observability.ResolveEventsDir</code>
+      (<code>cli/serve/observability/observability.go:235-248</code>).</span>
+    </li>
+    <li class="fleet-hop">
+      <span class="hop-file"><span class="repo fleet">fleet-db</span> internal/api/control_plane.go:47, 235-251</span>
+      <span class="hop-what"><b>Task to session.</b>
+      <code>GET /api/v1/{workspace}/agent-sessions?task_id=&lt;id&gt;</code>. This
+      row is the run index that outlives the worktree, the daemon and the host:
+      <code>status</code>, <code>exit_code</code>, <code>error_class</code>,
+      <code>finished_at</code>, <code>node_id</code>, and a free-form
+      <code>metadata</code> map
+      (<code>internal/models/control_plane.go:195-216</code>).</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/cli/daemon/supervisor/supervisor.go:626-650, 692, 699-705</span>
+      <span class="hop-what"><b>What the supervisor put in that map.</b>
+      <code>backend</code>, <code>task_id</code>, <code>epic_id</code>,
+      <code>repo</code>, <code>attempt_kind</code>, <code>transcript_path</code>,
+      <code>log_path</code>; then the diff stats
+      (<code>internal/sessions/diff_metadata.go:24-34</code>); then
+      <code>transcript_ref</code>, whose value is
+      <code>artifact://transcript-&lt;session id&gt;</code>
+      (<code>supervisor.go:733-754</code>). Those two path fields are your bridge
+      back to the disk.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/sessions/finalize.go:16-101</span>
+      <span class="hop-what"><b>On the owning host, the session directory.</b>
+      <code>metadata.json</code> is rewritten with task id, exit code, error class,
+      <code>ended_at</code>, duration, diff stats, files touched and token counts;
+      <code>diff.patch</code> lands beside it when files changed. The diff is
+      <em>recomputed</em> from git against the HEAD captured before the spawn
+      (<code>supervisor.go:511-516</code>), not streamed — which is exactly why
+      finalize has to run before post-mortem recovery touches the worktree.</span>
+    </li>
+    <li>
+      <span class="hop-file">spawn.go:354-368, 407-435, 447-453</span>
+      <span class="hop-what"><b>The two logs, last.</b> Same bytes, two files: the
+      daemon log whose mtime the watchdog stats and whose tail the crash classifier
+      reads, and the archive the web UI Logs tab serves. If both sinks fail to open,
+      the child's output goes to <code>/dev/null</code> and the daemon prints a loud
+      <code>NO LOG SINK</code> line — because the silent version of that state once
+      made a real bug undiagnosable (<code>spawn.go:382-395</code>).</span>
+    </li>
+  </ol>
+
+  <h2>Read the honesty block before you read the fold</h2>
+
+  <p>This is the part of the design worth stealing. The journey endpoint does not
+  present a partial reconstruction as a complete one; it ships a block that states
+  what it could not see.</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/webui/service/issue.go:231-242</figcaption>
+<pre><code>// JourneyHonesty makes bounded issue history and missing host-local overlays
+// explicit instead of presenting a partial fold as authoritative.
+type JourneyHonesty struct {
+	CompleteHistory       bool   `json:"complete_history"`
+	Bounded               bool   `json:"bounded"`
+	HasMore               bool   `json:"has_more"`
+	EventsSeen            int    `json:"events_seen"`
+	TotalEvents           int    `json:"total_events,omitempty"`
+	Reason                string `json:"reason,omitempty"`
+	AgentWindowsAvailable bool   `json:"agent_windows_available"`
+	AgentWindowsReason    string `json:"agent_windows_reason,omitempty"`
+}</code></pre>
+  </figure>
+
+  <p>Six reason strings mean the issue history was bounded:
+  <code>history_page_cap_reached</code> (<code>journey.go:125</code>),
+  <code>history_paging_unavailable</code> (<code>:134</code>),
+  <code>history_paging_failed</code> (<code>:136</code>),
+  <code>history_page_missing</code> (<code>:139</code>),
+  <code>history_count_mismatch</code> (<code>:148</code>) and
+  <code>history_cursor_stalled</code> (<code>:155</code>). Four more mean the
+  agent-window overlay is unavailable: <code>events_dir_not_configured</code> and
+  <code>events_read_failed</code> (<code>:357, :361</code>) — the reader could not
+  look — and <code>no_task_lifecycle_events</code> and
+  <code>no_claimed_window</code> (<code>:377, :380</code>) — it looked, and this
+  host had nothing. All four set <code>agent_windows_available: false</code>, so the
+  flag alone distinguishes none of them.</p>
+
+  <p>Two further admissions ride on the data itself. When the history was bounded,
+  or when the earliest event is not an <code>issue.create</code>, the first span is
+  stamped <code>approximate</code> and <code>unknown_start</code>
+  (<span class="path">journey.go:222-225</span>). And the four lead-time buckets
+  may sum to <em>less</em> than the total: deferred and open-but-assigned
+  intervals, and the gaps between attempts, satisfy no settled category, so they
+  fall out of the classifying switch
+  (<span class="path">journey.go:498-514</span>) rather than being forced into a
+  confident but false bucket
+  (<span class="path">internal/webui/service/issue.go:218-222</span>). On a clean
+  closed trace they do sum exactly to the total
+  (<span class="path">journey_test.go:133-141</span>) — an exact decomposition is
+  not a bug.</p>
+
+  <div class="callout fleet">
+    <span class="label">Where the two halves come from</span>
+    <p>The <code>spans[]</code> half is folded from
+    <span class="repo fleet">fleet-db</span>'s durable issue event log, so it
+    describes the task wherever it ran. The <code>agent_windows[]</code> half is
+    read from a JSONL file on <em>this</em> machine
+    (<span class="path">journey.go:63, 75-82</span>). A run supervised by another
+    node leaves no window here, and the fold says so rather than implying the
+    attempt never happened.</p>
+  </div>
+
+  <h2>Where the evidence lies to you</h2>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/sessions/stale.go:10-19, 30-33</figcaption>
+<pre><code>// StaleSessionThreshold is the duration after which a running session
+// with no EndedAt is considered orphaned and will be auto-healed to aborted.
+const StaleSessionThreshold = 4 * time.Hour
+
+// isStale returns true when a session is still marked as running,
+// has no EndedAt, and was started more than StaleSessionThreshold ago.
+func isStale(rec SessionRecord) bool {
+	return rec.Status == StatusRunning &amp;&amp;
+		rec.EndedAt == nil &amp;&amp;
+		time.Since(rec.StartedAt) &gt; StaleSessionThreshold
+// … and healStaleRecords, which synthesises the missing ending: …
+		ended := rec.StartedAt.Add(StaleSessionThreshold)
+		rec.Status = StatusAborted
+		rec.EndedAt = &amp;ended
+		rec.DurationS = ended.Sub(rec.StartedAt).Seconds()</code></pre>
+  </figure>
+
+  <div class="callout trap">
+    <span class="label">Trap — the four-hour run that never ran four hours</span>
+    <p>A record reading <code>status: aborted</code>, <code>duration_s: 14400</code>
+    and <code>ended_at</code> exactly four hours after <code>started_at</code> was
+    not written by the run. It was written by a <b>reader</b>: any
+    <code>Store.Query</code> heals stale rows on the way past
+    (<span class="path">internal/sessions/query.go:98-99</span>), and so does
+    <code>SweepOrphans</code> at daemon start
+    (<span class="path">stale.go:41-59</span>). The timestamp is an invention. What
+    it actually tells you is that <em>nothing ever finalized this session</em> — the
+    process died between <code>CreateSession</code> and <code>Finalize</code>. The
+    near-miss that makes this dangerous: there really is a four-hour ceiling on a
+    run (<span class="path">daemon/supervisor/run_duration.go:44-46, 61</span>), and
+    it is an unrelated number that happens to be equal. A duration kill goes through
+    <code>markRunDurationExceeded</code> and lands as
+    <code>error_class: Timeout</code> with a genuine <code>ended_at</code>
+    (<span class="path">supervisor/classify.go:42-48, 119-131</span>). Its
+    <code>status</code> is not fixed: status is derived from the child's exit code
+    alone (<span class="path">internal/sessions/finalize.go:29-33</span>;
+    <span class="path">supervisor.go:673-676</span>) and the kill sends SIGTERM
+    first, so a harness that handles it exits 0 and leaves a
+    <code>completed</code> record carrying <code>error_class: Timeout</code>
+    (<span class="path">classify.go:93-103</span>). The class is the tell, not the
+    status.</p>
+  </div>
+
+  <div class="callout trap">
+    <span class="label">Trap — the session says failed, the event stream says exit 0</span>
+    <p>Both are correct. When a run exits cleanly but one of its
+    <code>on_complete</code> hook writes fails, the supervisor demotes the run to a
+    synthetic failure — <code>LastExitCode = -1</code>, class
+    <code>CompletionHookFailure</code>
+    (<span class="path">session_finalize.go:771-785</span>) — so the owned task
+    reopens and retries under normal policy. The <code>agent.stopped</code> event
+    had already gone out carrying the <em>factual</em> exit code
+    (<span class="path">spawn.go:495-519</span>), and nothing rewrites an emitted
+    event. The comment at
+    <span class="path">session_finalize.go:234-240</span> says exactly this. Debug
+    hook failures through <code>error_class</code>, never through the event's exit
+    code.</p>
+  </div>
+
+  <div class="callout trap">
+    <span class="label">Trap — the run that used zero tokens</span>
+    <p>The fleet-db session row has no token or cost fields. The update struct's
+    ten are <code>NodeID</code>, <code>TaskID</code>, <code>Status</code>,
+    <code>Phase</code>, <code>LastHeartbeat</code>, <code>FinishedAt</code>,
+    <code>Summary</code>, <code>ErrorClass</code>, <code>ExitCode</code> and
+    <code>Metadata</code>, identical in both repos
+    (<span class="path">internal/store/control_plane_store.go:82-93</span>;
+    <span class="repo fleet">fleet-db</span>
+    <span class="path">internal/storage/storage.go:342-353</span>); the completion
+    path sets six of them (<span class="path">supervisor.go:709-716</span>). Usage
+    stays on disk — the session's <code>metadata.json</code>, plus an appended row
+    in <code>&lt;workspace runtime dir&gt;/usage.jsonl</code> for automode and
+    daemon runs
+    (<span class="path">internal/cli/automode/automode_usage.go:45-48</span>).
+    Neither reaches the control plane. A UI showing 0 tokens for a daemon run is
+    reporting an absent field, not an idle model.</p>
+  </div>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/cli/daemon/supervisor/session_finalize.go:103-110</figcaption>
+<pre><code>	// KNOWN GAP — local session only. leafTokens lands on the on-disk session
+	// record; it does NOT reach the control plane, because store.AgentSessionUpdate
+	// has no token or cost fields (only Status/TaskID/FinishedAt/ErrorClass/
+	// ExitCode/Metadata). The one hole it would fit through is the untyped
+	// Metadata map, and smuggling stringified token counts through there would
+	// invent a wire contract fleet-db does not agree to. Carrying usage to the
+	// control plane needs typed fields on AgentSessionUpdate first; that is a
+	// fleet-db schema change, deliberately not made here.</code></pre>
+  </figure>
+
+  <aside class="sidenote">Two more places the contract doc outruns the code.
+  <code>docs/product/session-artifact-contract.md:265-268</code> requires a
+  <code>?parent_session_id=</code> query; the fleet-db filter accepts only
+  <code>agent_id</code>, <code>node_id</code>, <code>task_id</code>,
+  <code>status</code> and <code>limit</code>
+  (<span class="repo fleet">fleet-db</span>
+  <span class="path">internal/storage/storage.go:334-340</span>), though the model
+  does store <code>parent_session_id</code>. And its stable error-class list
+  (<code>:200-216</code>) is not what lands in <code>error_class</code>: that field
+  gets <code>Outcome.String()</code>, a different set of strings that the code
+  commits to keeping byte-stable
+  (<span class="path">internal/agenterr/outcome.go:22-39, 73-82</span>).</aside>
+
+  <h2>What <code>LOOM_TRACE=1</code> actually does</h2>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/cli/root.go:220-229</figcaption>
+<pre><code>// initCLITracing installs the OTel tracer for the current CLI invocation
+// and returns the shutdown closure. Off unless OTEL_EXPORTER_OTLP_ENDPOINT
+// is set or LOOM_TRACE=1. CLI runs are short-lived; we init + shutdown per
+// invocation. See docs/observability/tracing-contract.md §8.
+func initCLITracing() tracing.Shutdown {
+	traceEnabled := os.Getenv("LOOM_TRACE") == "1" || os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != ""
+	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	if traceEnabled &amp;&amp; endpoint == "" {
+		endpoint = "localhost:4318"
+	}</code></pre>
+  </figure>
+
+  <p>Four things follow from those ten lines. The service name is chosen from
+  <code>os.Args[1]</code>, so a dashboard can separate long-running daemons from
+  one-shot invocations: <code>serve</code> → <code>loom-serve</code>,
+  <code>daemon</code> → <code>loom-daemon</code>,
+  <code>plan|task|agent|lead</code> → <code>loom-agent</code>, everything else
+  <code>loom-cli</code> (<span class="path">root.go:261-274</span>). Export is
+  <b>synchronous</b> for <code>loom-cli</code> and <code>loom-agent</code>, because
+  those processes can leave via <code>os.Exit</code> and skip a batched flush
+  (<span class="path">root.go:231-234</span>;
+  <span class="path">internal/observability/tracing/tracing.go:86-90, 186-189</span>).
+  The whole invocation is one root span, renamed to
+  <code>loom.cli.&lt;subcommand&gt;</code>
+  (<span class="path">root.go:179, 190-192</span>). And the trace crosses a process
+  boundary by environment variable: the daemon injects
+  <code>LOOM_TRACE_PARENT</code> when it spawns an agent
+  (<span class="path">daemon/supervisor/spawn.go:78-83</span>), and the child's
+  <code>BootstrapContext</code> extracts it before opening its own root span
+  (<span class="path">tracing.go:33-49</span>).</p>
+
+  <div class="callout trap">
+    <span class="label">Trap — <code>LOOM_TRACE=1</code> prints nothing</span>
+    <p>It is not a verbose flag. It turns on an OTLP exporter aimed at
+    <code>localhost:4318</code>, and with no collector listening there you get no
+    output, no error you will notice, and no trace. Setting it <em>after</em> the
+    incident is equally useless: tracing is per-process and nothing is retained.
+    What <b>is</b> durable is the <code>traceparent</code> field on every emitted
+    event row (<span class="path">internal/events/event.go:51-73</span>), filled
+    from the ambient context at emit time
+    (<span class="path">internal/events/emitter.go:50-52</span>) and left empty when
+    the emitter had no active span. So the JSONL can still name the trace id long
+    after the collector is gone — which is the only reason writing a trace id down
+    during an incident is worth anything.</p>
+  </div>
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory: a run finished two days ago on a machine you do not
+    have, and its worktree has been deleted. Name the one record that still ties the
+    task to that run, the request that lists it, and the fields on it that tell you
+    how the run ended and where the rest of the evidence went.</p>
+    <div class="answer">
+      <p>The <span class="repo fleet">fleet-db</span> <code>AgentSession</code> row.
+      <code>GET /api/v1/{workspace}/agent-sessions?task_id=&lt;id&gt;</code> —
+      <span class="path">fleet-db internal/api/control_plane.go:47, 235-251</span>.</p>
+      <p>How it ended: <code>status</code>, <code>exit_code</code>,
+      <code>error_class</code>, <code>finished_at</code>
+      (<span class="path">fleet-db internal/models/control_plane.go:195-216</span>).
+      Where the rest went: the <code>metadata</code> map's <code>log_path</code>,
+      <code>transcript_path</code> and <code>transcript_ref</code>, written at
+      <span class="path">internal/cli/daemon/supervisor/supervisor.go:626-650, 699-705</span>
+      — plus <code>node_id</code>, which tells you whose machine to ask.</p>
+      <p>What it will <em>not</em> tell you: token usage. That field does not exist
+      on the wire (<span class="path">session_finalize.go:103-110</span>).</p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="0027">
+    <div class="q" data-answer="1">
+      <p class="stem">A session record reads <code>status: aborted</code>,
+      <code>duration_s: 14400</code>, <code>ended_at</code> exactly four hours after
+      <code>started_at</code>. What happened?</p>
+      <ul class="opts">
+        <li>The run hit the four-hour duration ceiling and was stopped</li>
+        <li>A reader found it still running and invented the ending</li>
+        <li>The supervisor finalized it once the watchdog had killed it</li>
+        <li>The daemon restarted and closed out the run it had orphaned</li>
+      </ul>
+      <div class="why">Nothing finalized this session. A later <code>Query</code> or
+      <code>SweepOrphans</code> healed the row and synthesised
+      <code>ended_at = started_at + 4h</code>
+      (<span class="path">internal/sessions/stale.go:24-39</span>). The first option
+      is the sharp one: a real four-hour run cap does exist
+      (<span class="path">run_duration.go:61</span>), but it lands as
+      <code>error_class: Timeout</code> with a genuine end time
+      (<span class="path">classify.go:119-131</span>) and a status derived from the
+      child's exit code — never <code>aborted</code>, which only stale healing
+      writes (<span class="path">stale.go:31</span>). The two four-hour numbers
+      are unrelated constants.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <p class="stem">A journey response has <code>agent_windows: []</code> and
+      <code>agent_windows_available: false</code>. What have you learned?</p>
+      <ul class="opts">
+        <li>Only that the local overlay is missing; read its reason string</li>
+        <li>Only that no agent ever claimed this task on any node at all</li>
+        <li>Only that the fold stopped at its page cap before any claim</li>
+        <li>Only that the events file exists but its rows were unreadable</li>
+      </ul>
+      <div class="why">Four different reasons set that flag false: two mean the
+      reader could not look at all, two mean it looked and this host had nothing
+      (<span class="path">internal/webui/service/journey.go:346-383</span>). The
+      second option is the trap — the overlay is read from <em>this machine's</em>
+      JSONL (<code>journey.go:63, 75-82</code>), so it can say nothing about another
+      node. The page cap belongs to the history half and surfaces in
+      <code>honesty.reason</code>, not here.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <p class="stem">The event stream records exit 0, the session says
+      <code>failed</code>, and the task went back to open. Which one is wrong?</p>
+      <ul class="opts">
+        <li>The session record, demoted by a finalize that ran too late</li>
+        <li>The event, whose exit code the supervisor failed to rewrite</li>
+        <li>Neither — a completion hook failed after a clean process exit</li>
+        <li>The task status, reset by recovery before the hooks had a turn</li>
+      </ul>
+      <div class="why">A failed <code>on_complete</code> write demotes the run to
+      exit <code>-1</code> with class <code>CompletionHookFailure</code> so the task
+      reopens (<span class="path">session_finalize.go:241-262, 771-785</span>), while
+      the already-emitted <code>agent.stopped</code> event keeps the factual 0
+      (<span class="path">spawn.go:495-519</span>). The disagreement is designed. The
+      second option is the one worth arguing with: an emitted event is immutable, and
+      rewriting it would destroy the only record of what the subprocess actually
+      did.</div>
+    </div>
+  </div>
+
+  <div class="callout safety">
+    <span class="label">Before you go looking at a real stack</span>
+    <p>Every step below is read-only and touches no running system. When you do go
+    poking at a live stack later: this is a <b>shared machine</b>. Never
+    <code>make local-mode-up</code> or <code>local-mode-down</code> a compose
+    project you did not create — pick your own project name and an unclaimed port
+    block, check <code>podman ps</code> first, and treat every stack you find as
+    someone else's. The same rule covers <code>agent-browser</code> sessions and dev
+    servers on fixed ports. Reading files your own stack wrote is fine; podman and
+    port state is not yours to change.</p>
+  </div>
+
+  <div class="exercise">
+    <h3>Inventory the evidence, then prove two of its lies</h3>
+    <ol>
+      <li>Run this, and read the output as a list of writers rather than of paths:
+      <code>grep -rn '"[a-z_-]*\.jsonl"' internal/sessions internal/events | grep -v _test</code>.
+      Name the four <code>.jsonl</code> files it turns up <em>inside</em> one
+      session directory, plus the one that lives a level up and is shared by every
+      session. For three of them, name a different writing process — then say which
+      of the five nothing in this tree writes, and prove it with
+      <code>grep -rn AppendTranscript --include='*.go' . | grep -v _test.go</code>.</li>
+      <li>Run
+      <code>go test ./internal/sessions -run 'TestIsStale_Old|TestQuery_HealsStaleSession' -count=1 -v</code>,
+      then read <code>internal/sessions/stale_test.go:82-89</code>. Write one
+      sentence saying why <code>duration_s: 14400</code> on an <code>aborted</code>
+      record is not a fact about the run.</li>
+      <li>Run
+      <code>go test ./internal/webui/service -run TestGetJourney_HistoryHonestyReasons -count=1 -v</code>,
+      then <code>grep -n 'history_' internal/webui/service/journey.go</code>. List
+      all six bounded reasons. Which of them mean the server asked and got a broken
+      answer, and which mean it stopped asking?</li>
+      <li>Reaching back to <a href="0009-when-a-run-dies.html">Lesson 09</a>: open
+      <code>internal/cli/daemon/supervisor/supervisor.go:817-835</code> and, for each
+      step of the exit sequence, name the artifact it writes or destroys. Which
+      single reordering would leave you with no <code>diff.patch</code>? (Hint: the
+      patch is recomputed from git, not streamed —
+      <code>cli/sessionfinalize/finalize_worktree.go:35-49</code>.)</li>
+      <li>Reaching back to <a href="0016-what-proves-what.html">Lesson 16</a>: take
+      the claim "this run changed three files". Name the artifact that supports it,
+      say which evidence class that artifact belongs to, and name one thing it is
+      still not proof of.</li>
+    </ol>
+    <div class="verify">
+      <b>You succeeded when</b>
+      Both <code>go test</code> commands pass; your list reads
+      <code>transcript.jsonl</code>, <code>agent_transcript.jsonl</code>,
+      <code>events.jsonl</code> and <code>subagents/agent-&lt;id&gt;.jsonl</code>
+      inside the session directory plus <code>index.jsonl</code> one level up, with
+      <code>transcript.jsonl</code> marked as the one whose only writer has no
+      non-test caller; you
+      can name all six <code>history_*</code> reasons; and you can say which step of
+      the exit sequence writes <code>diff.patch</code> and which later step would
+      have destroyed the working tree it is computed from.
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><code>docs/product/session-artifact-contract.md</code> — 290 lines, still
+    marked <b>Draft</b>, and the checklist a reviewer will hold your run against:
+    required metadata, transcript, logs, usage, diff, cleanup, and the fleet-db
+    session fields. Read it beside this lesson's traps, because two of its sections
+    have been overtaken by the code — the stable error-class list
+    (<code>:200-216</code>) and the <code>parent_session_id</code> query
+    (<code>:267</code>) are both aspirational. Its <em>shape</em> is exactly right,
+    and is what the supervisor's ordering implements: evidence must survive process
+    exit, and cleanup may only delete what has already been persisted.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0026-roles-skills-and-shaping-work.html"><span class="dir">Previous</span>Roles, skills, and shaping work</a>
+    <a class="next" href="0028-one-change-two-repos.html"><span class="dir">Next</span>One change, two repos</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

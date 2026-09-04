@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>15. Shipping a vertical slice — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 4 <span class="sep">/</span> Lesson 15 <span class="sep">/</span> Frontend</p>
+  <h1>Shipping a vertical slice</h1>
+  <p class="standfirst">One field, from a line of YAML to a rendered pixel. Every
+  layer you met separately in weeks 2 to 4, in the order you will actually touch
+  them, with the two gates that fail if you skip a step.</p>
+
+  <div class="meta">
+    <span><b>Skill</b> take one field from OpenAPI schema to rendered pixel</span>
+    <span><b>Time</b> 40 min</span>
+    <span><b>Needs</b> <a href="0013-realtime-one-frame-at-a-time.html">13</a>, <a href="0014-the-react-app.html">14</a></span>
+    <span><b>Repos</b> <span class="repo loom">loomcli</span></span>
+  </div>
+
+  <h2>Why one YAML</h2>
+
+  <p>The Go server and the TypeScript app are two programs that have to agree on
+  the shape of every JSON body they exchange. Loom does not solve that with
+  discipline. It solves it with <b>one hand-written file that generates a type
+  file on each side</b>: <code>api/openapi.yaml</code> produces a Go models file
+  and a TypeScript types file, and a gate step per side refuses the build if
+  either committed file has drifted from the YAML.</p>
+
+  <div class="callout key">
+    <span class="label">The one idea</span>
+    <p>Three files change together or the build fails: the spec, and the two
+    generated files it produces. You never edit the generated two — you edit the
+    spec and rerun both generators. Everything else in this lesson is just the
+    order in which you touch the layers after that.</p>
+  </div>
+
+  <p>Our specimen is the smallest thing in the PR review screen: the
+  <b><code>additions</code> count on one changed file</b>. It is a number in a
+  YAML schema, a Go struct field, a JSON key, a TypeScript property, and finally
+  a green <code>+3</code> next to a filename. Here is every hop it makes.</p>
+
+  <h2>The trace</h2>
+
+  <ol class="trace">
+    <li>
+      <span class="hop-file">api/openapi.yaml:4852-4865</span>
+      <span class="hop-what"><b>The schema.</b> <code>PullRequestDiffFile</code>
+      declares five properties, all of them in <code>required</code>. This YAML is
+      hand-maintained — nothing generates it, and it is the only place the field
+      is <em>decided</em>.</span>
+    </li>
+    <li>
+      <span class="hop-file">Makefile:426-432</span>
+      <span class="hop-what"><b><code>make gen-go-api</code>.</b>
+      <code>scripts/openapi-to-30</code> downgrades the 3.1 spec to 3.0 (oapi-codegen
+      v2.6.0 does not fully support 3.1), then oapi-codegen runs against
+      <code>api/oapi-codegen.yaml</code> — <code>generate: models: true</code>, so
+      types only, no server or client scaffolding.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/backend/api/gen/types.gen.go:2619-2625</span>
+      <span class="hop-what"><b>The Go struct.</b> <code>gen.PullRequestDiffFile</code>,
+      fields alphabetised by the generator, JSON tags taken from the property names.
+      Line 3 of that file says <code>DO NOT EDIT</code> and means it.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/connector/providers/github.go:396-402</span>
+      <span class="hop-what"><b>Where the data comes from.</b> The GitHub connector
+      projects the upstream <code>/compare</code> response's <code>files[]</code>
+      into a sanitised map with exactly five keys. Nothing outside that set
+      survives the connector boundary — remember this for the trap below.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/webui/handlers/prreview/module.go:101 → handlers.go:59-105</span>
+      <span class="hop-what"><b>The handler.</b>
+      <code>GET …/pull-requests/{owner}/{repo}/{number}/diff</code> resolves and
+      authorises the PR, dispatches a PR read, then a compare read pinned to the
+      head sha it just learned, and hands the response body to the mapper.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/webui/handlers/prreview/handlers.go:254-266</span>
+      <span class="hop-what"><b>Untyped map to generated struct.</b>
+      <code>pullRequestDiffFileFromBody</code> is the seam where the connector's
+      <code>map[string]any</code> becomes the spec's type. This is the function you
+      edit when you add a field.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/webui/handlers/prreview/errors.go:17-27</span>
+      <span class="hop-what"><b>The envelope.</b> <code>writeJSON</code> wraps the
+      payload as <code>{"success":true,"data":…}</code> — which the spec also
+      declares, at <code>api/openapi.yaml:2744-2751</code>, so the generated
+      TypeScript knows to expect it.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/webui/frontend/package.json:35</span>
+      <span class="hop-what"><b><code>npm run generate:types</code>.</b>
+      <code>openapi-typescript</code> reads <em>the same YAML</em> — via the
+      relative path <code>../../../api/openapi.yaml</code> — writes
+      <code>src/types/generated/openapi.ts</code>, then reformats it with prettier
+      so the committed file is byte-comparable.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/webui/frontend/src/types/generated/openapi.ts:2534-2540</span>
+      <span class="hop-what"><b>The TypeScript type.</b> Reachable as
+      <code>components["schemas"]["PullRequestDiffFile"]</code>. This generated
+      file sits at the bottom of the frontend DAG: it imports nothing.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/webui/frontend/src/api/workspace/prReview.ts:5, 33-47</span>
+      <span class="hop-what"><b>The api facade.</b> One line aliases the generated
+      schema into a usable name; the function calls <code>api.GET</code> with the
+      literal spec path, throws on <code>error</code>, and strips the envelope with
+      <code>unwrapResponse</code>. No hand-written URL, no hand-written
+      shape.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/webui/frontend/src/hooks/workspace/usePullRequestDiff.ts:25-59</span>
+      <span class="hop-what"><b>The hook.</b> Three pieces of state, one effect
+      keyed on <code>workspaceId/owner/repo/number/refreshKey</code>, and a
+      <code>cancelled</code> flag in the cleanup so a late response cannot write
+      into an unmounted component.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/webui/frontend/src/components/IssueDetailPanel/PRCompareDiffPane.tsx:4, 18, 63-69</span>
+      <span class="hop-what"><b>The component.</b> It takes the <em>data</em> from
+      the hook and the <em>type</em> from <code>@/api/workspace</code> — a
+      <code>import type</code>, which is what makes naming the api layer from a
+      component legal at all.</span>
+    </li>
+    <li>
+      <span class="hop-file">internal/webui/frontend/src/components/IssueDetailPanel/PRCompareDiffPane.tsx:139-163</span>
+      <span class="hop-what"><b>Pixel.</b> One button per file: a status badge, the
+      path, and <code>+{file.additions}</code> rendered only when it is above zero.
+      That span is where the YAML line ends up.</span>
+    </li>
+  </ol>
+
+  <aside class="sidenote">The screen this lands on is
+  <code>/ws/:workspaceId/prs</code> → <code>PRsPage</code> →
+  <code>PRReviewWorkspace</code> → <code>PRCompareDiffPane</code>
+  (<code>src/router.tsx:152-156</code>, <code>src/views/PRsPage.tsx:469</code>,
+  <code>src/views/PRReviewWorkspace.tsx:544</code>).</aside>
+
+  <h2>The three files that must agree</h2>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> api/openapi.yaml:4852-4865</figcaption>
+<pre><code>    PullRequestDiffFile:
+      type: object
+      required: [path, status, additions, deletions, patch]
+      properties:
+        path:
+          type: string
+        status:
+          type: string
+        additions:
+          type: integer
+        deletions:
+          type: integer
+        patch:
+          type: string</code></pre>
+  </figure>
+
+  <p>That produces <code>gen.PullRequestDiffFile</code> on the Go side and
+  <code>components["schemas"]["PullRequestDiffFile"]</code> on the TypeScript side.
+  A property listed in <code>required</code> becomes a plain field
+  (<code>Additions int</code>, <code>additions: number</code>); one left out
+  becomes a pointer with <code>omitempty</code> in Go and a <code>?:</code>
+  property in TypeScript — compare <code>PullRequestReviewRequest.body</code>,
+  which is optional in the spec and arrives as <code>Body *string</code> at
+  <span class="path">internal/backend/api/gen/types.gen.go:2629</span>.</p>
+
+  <h2>The pattern to copy: spec first, then outward</h2>
+
+  <p>Every vertical slice in this repo goes in the same order, and the order is
+  what keeps the two generated files honest:</p>
+
+  <ol>
+    <li>Edit <code>api/openapi.yaml</code>.</li>
+    <li><code>make gen-go-api</code> — regenerates
+    <code>internal/backend/api/gen/types.gen.go</code>.</li>
+    <li><code>npm run generate:types</code> in <code>internal/webui/frontend</code>
+    — regenerates <code>src/types/generated/openapi.ts</code>.</li>
+    <li>Populate the field where the untyped upstream body becomes the generated
+    struct — for this endpoint, <code>pullRequestDiffFileFromBody</code>.</li>
+    <li>Surface it in the <code>src/api/</code> facade (usually nothing to do: the
+    facade returns the generated type, so a new property arrives for free).</li>
+    <li>Render it in the component, and add a test at each layer you touched.</li>
+  </ol>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/webui/handlers/prreview/handlers.go:254-266</figcaption>
+<pre><code>func pullRequestDiffFileFromBody(body map[string]any) gen.PullRequestDiffFile {
+	path := stringValue(body["path"])
+	if path == "" {
+		path = stringValue(body["filename"])
+	}
+	return gen.PullRequestDiffFile{
+		Path:      path,
+		Status:    stringValue(body["status"]),
+		Additions: intValue(body["additions"]),
+		Deletions: intValue(body["deletions"]),
+		Patch:     stringValue(body["patch"]),
+	}
+}</code></pre>
+  </figure>
+
+  <p>And the facade, which is the shape every typed call in
+  <code>src/api/</code> copies:</p>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/webui/frontend/src/api/workspace/prReview.ts:33-47</figcaption>
+<pre><code>export async function getPullRequestDiff(
+  ws: string,
+  owner: string,
+  repo: string,
+  number: number,
+): Promise&lt;PullRequestDiff&gt; {
+  const { data, error, response } = await api.GET(
+    "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/diff",
+    {
+      params: { path: { ws, owner, repo, number } },
+    },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
+  return unwrapResponse(data, response);
+}</code></pre>
+  </figure>
+
+  <p>The path string is not a URL you invented — it is a key of the generated
+  <code>paths</code> type, so a typo, a missing path parameter, or a renamed
+  endpoint is a compile error rather than a 404 at runtime.</p>
+
+  <div class="callout trap">
+    <span class="label">Trap — "I'll just add the field to the generated file"</span>
+    <p>Both generated files are readable, both are committed, and editing one
+    directly appears to work: the Go compiles, the TypeScript typechecks, the app
+    runs. Then the gate rejects it. <b>Each generator has its own staleness
+    check</b>, and each one regenerates into a temp directory and diffs against
+    what you committed: step 11 of thirteen on the Go side
+    (<span class="path">Makefile:609-610</span> →
+    <code>scripts/check-go-api-staleness.sh</code>, which prints
+    <code>FAIL: … is stale relative to api/openapi.yaml</code> and
+    <code>Run: make gen-go-api</code>) and step 5 of six on the frontend side
+    (<span class="path">Makefile:637-638</span> →
+    <code>scripts/check-openapi-staleness.mjs</code>, which prints
+    <code>Run: npm run generate:types</code>). Both run under
+    <code>make check</code>, which <code>make gate</code> is an alias for
+    (<span class="path">Makefile:644, 668</span>). There is no path where you edit
+    a generated file and keep it.</p>
+  </div>
+
+  <div class="callout trap">
+    <span class="label">Trap — regenerating types does not create data</span>
+    <p>The natural belief after a clean regeneration is that the field now flows.
+    It does not: the types describe the contract, they do not populate it. On this
+    endpoint the data crosses a connector boundary that rebuilds each file as a
+    fixed five-key map, so anything you did not add <em>there</em> is gone before
+    the handler ever sees it.</p>
+  </div>
+
+  <figure class="src">
+    <figcaption><b>loomcli</b> internal/connector/providers/github.go:393-402</figcaption>
+<pre><code>		filename, _ := obj["filename"].(string)
+		status, _ := obj["status"].(string)
+		patch, _ := obj["patch"].(string)
+		files = append(files, map[string]any{
+			"filename":  filename,
+			"status":    status,
+			"additions": obj["additions"],
+			"deletions": obj["deletions"],
+			"patch":     patch,
+		})</code></pre>
+  </figure>
+
+  <p>Its doc comment says so outright — "projects the <code>/compare</code>
+  response's <code>files[]</code> array into a sanitized camelCase list (filename,
+  status, additions, deletions, patch)"
+  <span class="path">internal/connector/providers/github.go:377-380</span>. Note
+  also that it emits <code>filename</code>, not <code>path</code>: that is why the
+  mapper at hop 6 has a fallback, and the fallback is the branch that actually
+  fires.</p>
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory: you changed <code>api/openapi.yaml</code>. Name the
+    two commands you must now run, the two files they write, and the two gate steps
+    that fail if you skip either one.</p>
+    <div class="answer">
+      <p><code>make gen-go-api</code> from the repo root writes
+      <code>internal/backend/api/gen/types.gen.go</code>
+      <span class="path">Makefile:426-432</span>. <code>npm run generate:types</code>
+      from <code>internal/webui/frontend</code> writes
+      <code>src/types/generated/openapi.ts</code>
+      <span class="path">internal/webui/frontend/package.json:35</span>.</p>
+      <p>The gates are <code>check-go</code> step 11
+      (<span class="path">Makefile:609-610</span>) and <code>check-frontend</code>
+      step 5 (<span class="path">Makefile:637-638</span>). Both regenerate into a
+      temp directory and diff against the committed file, so "it compiles" tells
+      you nothing about whether they will pass.</p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="0015">
+    <div class="q" data-answer="1">
+      <p class="stem">You add a property to a schema in <code>api/openapi.yaml</code>
+      and regenerate the TypeScript types only. What fails?</p>
+      <ul class="opts">
+        <li>Nothing; the Go gate only inspects hand-written source</li>
+        <li>Step 11 of check-go, the generated Go staleness check</li>
+        <li>Step 4 of check-go, the golangci-lint and depguard run</li>
+        <li>Step 5 of check-frontend, the generated TS staleness</li>
+      </ul>
+      <div class="why">The Go generator never ran, so the committed
+      <code>types.gen.go</code> no longer matches the spec and step 11 diffs them
+      apart. The last option is the near-miss worth remembering: that gate exists
+      and is real, but you <em>did</em> regenerate the TypeScript side, so it is the
+      one step that still passes.
+      <span class="path">Makefile:609-610, 637-638</span></div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <p class="stem"><code>PRCompareDiffPane</code> lives in
+      <code>src/components/</code> and imports from <code>@/api/workspace</code>.
+      Why does the boundaries lint allow that?</p>
+      <ul class="opts">
+        <li>The import is type-only, and type edges are legal everywhere</li>
+        <li>Components may import api as long as they import no store</li>
+        <li>The file sits in a barrel directory, which lint treats apart</li>
+        <li>An allowlist entry grandfathers this particular import path</li>
+      </ul>
+      <div class="why">Rule 2 of the DAG: type-only imports are allowed across every
+      edge, because <code>import type</code> is erased and adds no runtime coupling
+      — which is why <code>consistent-type-imports</code> is an error, so the escape
+      hatch can be trusted. The last option is the sharp wrong answer: rule 4 says
+      there is no allowlist at all.
+      <span class="path">internal/webui/frontend/eslint.config.js:20-22, 33-41</span></div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <p class="stem">You add <code>previous_path</code> to the schema, regenerate
+      both sides, and map it in <code>pullRequestDiffFileFromBody</code>. It is
+      always empty. Where did the value go?</p>
+      <ul class="opts">
+        <li>unwrapResponse discards keys missing from the envelope type</li>
+        <li>compareFiles rebuilds each file as a fixed five-key map</li>
+        <li>openapi-typescript omits any property absent from required</li>
+        <li>The dispatcher strips fields outside the connector grant</li>
+      </ul>
+      <div class="why">The connector sanitises before the handler runs, so the key
+      never reaches <code>body</code>. The first option is the plausible one and is
+      wrong on the facts: <code>unwrapResponse</code> checks
+      <code>success</code> and returns <code>envelope.data</code> as it stands — it
+      filters nothing.
+      <span class="path">internal/connector/providers/github.go:396-402;
+      internal/webui/frontend/src/api/common/client.ts:295-321</span></div>
+    </div>
+  </div>
+
+  <div class="exercise">
+    <h3>Add one field, end to end, and make the gates prove it</h3>
+    <p>Work in your own loomcli checkout on a scratch branch, not in the pinned
+    course worktree. This exercise needs <b>no podman stack and no dev server</b> —
+    do not start one. If you later want <code>make dev</code>, check
+    <code>lsof -nP -iTCP:3000 -sTCP:LISTEN</code> first: Vite binds 3000 with
+    <code>strictPort: true</code>
+    (<span class="path">internal/webui/frontend/vite.config.ts:177-180</span>) and
+    another checkout may already own it.</p>
+    <ol>
+      <li><b>Prepare.</b> <code>cd internal/webui/frontend &amp;&amp; npm install</code>.
+      A git worktree does not inherit <code>node_modules</code>; without it
+      <code>npm run check:generated</code> reports
+      <code>openapi-typescript is not installed</code> rather than anything about
+      your spec
+      (<span class="path">internal/webui/frontend/scripts/check-openapi-staleness.mjs:42-49</span>).</li>
+
+      <li><b>Edit the spec.</b> In <code>api/openapi.yaml:4852-4865</code>, add a
+      <code>previous_path</code> property of <code>type: string</code> to
+      <code>PullRequestDiffFile</code>. Leave it out of <code>required</code> —
+      GitHub only sends a previous filename for renames.</li>
+
+      <li><b>Watch a gate catch you.</b> From the repo root, run
+      <code>./scripts/check-go-api-staleness.sh</code>. Read the failure text and the
+      command it tells you to run. Then run <code>make gen-go-api</code> and rerun
+      the check until it prints
+      <code>OK: generated Go types match api/openapi.yaml</code>.</li>
+
+      <li><b>Predict, then look.</b> Before opening the file, write down what shape
+      your optional property took in Go. Now open
+      <code>internal/backend/api/gen/types.gen.go:2619</code> and check, using
+      <code>PullRequestReviewRequest.Body</code> at line 2629 as the precedent.</li>
+
+      <li><b>The other side.</b> In <code>internal/webui/frontend</code>, run
+      <code>npm run check:generated</code> (it fails as stale), then
+      <code>npm run generate:types</code>, then rerun it. Open
+      <code>src/types/generated/openapi.ts:2534</code> and find your property.</li>
+
+      <li><b>Populate it.</b> Set the new field in
+      <code>pullRequestDiffFileFromBody</code>
+      (<code>internal/webui/handlers/prreview/handlers.go:259-265</code>) from
+      <code>body["previous_filename"]</code>. Add <code>"previous_filename"</code> to
+      the fake GitHub compare payload at
+      <code>internal/webui/handlers/prreview/handlers_test.go:117-132</code> and an
+      assertion for it in <code>TestGetPullRequestDiff</code> (line 1089). Run
+      <code>go test ./internal/webui/handlers/prreview/ -run TestGetPullRequestDiff</code>.</li>
+
+      <li><b>It still fails. Find out why before reading further.</b> When you have
+      found it, add the key at
+      <code>internal/connector/providers/github.go:396-402</code> and rerun the
+      test.</li>
+
+      <li><b>Render it.</b> In
+      <code>src/components/IssueDetailPanel/PRCompareDiffPane.tsx:154</code>, show
+      the previous path beside the file name when it is present. Extend the
+      <code>makeDiff</code> fixture at
+      <code>src/components/IssueDetailPanel/__tests__/PRCompareDiffPane.test.tsx:19-40</code>
+      and assert the rendered text, then run
+      <code>npx vitest run src/components/IssueDetailPanel/__tests__/PRCompareDiffPane.test.tsx</code>.
+      That file's first three lines are a <code>@vitest-environment jsdom</code>
+      docblock — vitest's default environment is <code>node</code>
+      (<span class="path">internal/webui/frontend/vite.config.ts:221</span>), so
+      without it you get <code>document is not defined</code>.</li>
+
+      <li>Reaching back to <a href="0004-the-gate-is-the-spec.html">Lesson 04</a>:
+      before you run anything else, list every numbered gate step your change
+      touched — on both sides. Then run <code>make check</code> and compare your
+      list against what it actually ran.</li>
+
+      <li>Revert your scratch branch when you are done.</li>
+    </ol>
+    <div class="verify">
+      <b>You succeeded when</b>
+      <code>./scripts/check-go-api-staleness.sh</code> prints
+      <code>OK: generated Go types match api/openapi.yaml</code>,
+      <code>npm run check:generated</code> prints its up-to-date line,
+      <code>go test ./internal/webui/handlers/prreview/ -run TestGetPullRequestDiff</code>
+      passes with your new assertion, and your vitest run asserts the previous path
+      appears in the rendered file row — and you can name, without looking, the one
+      file outside the spec-and-generators chain that had to change before any of
+      the data arrived.
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><code>internal/webui/frontend/src/api/workspace/prReview.ts</code>. 121
+    lines, and the reference shape for a spec-backed endpoint: alias a generated
+    schema, call <code>api.GET</code>/<code>api.POST</code> with a literal spec
+    path, throw <code>apiErrorFromResponse</code> on error, return
+    <code>unwrapResponse</code>. Not every file under <code>src/api/</code> looks
+    like this — <code>issues/diff.ts</code> uses the untyped <code>get</code>
+    wrapper with hand-written interfaces, and <code>agents/usage.ts</code> casts to
+    a <code>@/types</code> type instead of unwrapping
+    (<span class="path">internal/webui/frontend/src/api/issues/diff.ts:1-6;
+    internal/webui/frontend/src/api/agents/usage.ts:13-27</span>) — but when you
+    add an endpoint to the frontend, copy a function out of this file.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0014-the-react-app.html"><span class="dir">Previous</span>The React app</a>
+    <a class="next" href="0016-what-proves-what.html"><span class="dir">Next</span>What proves what</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,597 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>24. When Redis dies — Loom Onboarding</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Week 5 <span class="sep">/</span> Lesson 24 <span class="sep">/</span> fleet-db</p>
+  <h1>When Redis dies</h1>
+  <p class="standfirst">Four recovery paths, and the only property that matters
+  about each one: what it deletes before it rebuilds. Say the deletion out loud
+  before you run the command.</p>
+
+  <div class="meta">
+    <span><b>Skill</b> choose a recovery path and state what it destroys first</span>
+    <span><b>Time</b> 35 min</span>
+    <span><b>Needs</b> <a href="0009-when-a-run-dies.html">09</a>, <a href="0005-where-state-lives.html">05</a></span>
+    <span><b>Repos</b> <span class="repo fleet">fleet-db</span> <span class="repo loom">loomcli</span></span>
+  </div>
+
+  <h2>Why this exists</h2>
+
+  <p><a href="0009-when-a-run-dies.html">Lesson 09</a> was this lesson one layer
+  up. A run dies; the supervisor answers "what is true about the task now" by
+  walking an escalating ladder — resume, checkpoint, cold — where only the last
+  rung is destructive, and where the destruction is a deliberate argument rather
+  than a side effect: <code>s.recoverAgent(ap, 0, false)</code>, and that
+  <code>false</code> is what lets <code>git clean</code> run.</p>
+
+  <p>Now the store dies instead. Same ladder shape, one layer down, with two
+  differences that make it more dangerous. There is no supervisor — <b>you</b> are
+  the thing that classifies the failure and picks the rung. And where loomcli hides
+  its destructive step behind a boolean parameter, fleet-db puts it in the first
+  two statements of the function body, where it is easy to skim past.</p>
+
+  <aside class="sidenote">Everything here is Redis-backend-only. With
+  <code>--backend postgres</code> the recovery routes are not registered at all and
+  the server logs "disaster recovery routes not available for postgres backend" —
+  <span class="path">cmd/fleet-db/main.go:739-746</span>.</aside>
+
+  <div class="callout key">
+    <span class="label">The one idea</span>
+    <p>Every recovery path in fleet-db is defined by what it <b>deletes</b> before
+    it rebuilds. Nothing here is transactional and nothing takes a backup for you,
+    so the deletion is the whole risk. Before you run one, say the sentence: "this
+    deletes ___, and if it fails halfway I am left with ___."</p>
+  </div>
+
+  <h2>First: is there a log left to replay from?</h2>
+
+  <p><span class="repo fleet">fleet-db</span> Replay rebuilds the read model from
+  the global event stream (<a href="0005-where-state-lives.html">Lesson 05</a>: the
+  only authoritative tier). If Redis came back empty, every path below rebuilds
+  nothing from nothing. What decides that is one config value applied once at
+  startup, before any writes:</p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> internal/storage/durability.go:36-42</figcaption>
+<pre><code>	// ProfileManaged delegates persistence to the managed Redis provider
+	// (e.g. Upstash, ElastiCache). Skips all CONFIG SET calls since managed
+	// services reject them.
+	ProfileManaged DurabilityProfile = "managed"
+
+	// DefaultProfile is the profile used when none is explicitly configured.
+	DefaultProfile = ProfileDurable</code></pre>
+  </figure>
+
+  <p>Six profiles exist (<code>none</code>, <code>development</code>,
+  <code>balanced</code>, <code>durable</code>, <code>critical</code>,
+  <code>managed</code>), each a concrete AOF/RDB pair in the same map — five of
+  them applied with <code>CONFIG SET</code>, and <code>managed</code> applied with
+  nothing at all — <span class="path">durability.go:15-43, 61-92,
+  132-182</span>. Two facts about that call are worth more than the table:</p>
+
+  <ul>
+    <li><b>A profile mismatch is a boot failure, not a degradation.</b>
+    <code>ApplyDurabilityProfile</code> returns an error if
+    <code>CONFIG SET appendonly</code> or <code>save</code> is rejected, and
+    <code>run()</code> propagates it — the process refuses to start.
+    <span class="path">durability.go:160-178</span>,
+    <span class="path">cmd/fleet-db/main.go:247-254</span></li>
+    <li><b><code>managed</code> means fleet-db configures nothing and verifies
+    nothing.</b> It returns before the first <code>CONFIG SET</code>, having logged
+    one WARN. <span class="path">durability.go:149-153</span> Cloud Run ships with
+    it: <code>FLEET_REDIS_DURABILITY_PROFILE = "managed"</code> at
+    <span class="path">deploy/terraform/modules/cloud-run/main.tf:74</span>, and
+    the runbook spells out the consequence — free-tier Upstash is best-effort
+    persistence. <span class="path">docs/deployment-gcp.md:416-423</span></li>
+  </ul>
+
+  <div class="callout trap">
+    <span class="label">Trap — the checker that would have caught this never runs</span>
+    <p><code>docs/architecture.md:1540</code> says the persistence health checker
+    "Runs at startup and logs warnings for mismatches."
+    <code>storage.RunPersistenceChecks</code>
+    (<span class="path">internal/storage/redis.go:1198</span>) has <b>no non-test
+    caller</b> — <code>main.go</code> calls only
+    <code>ApplyDurabilityProfile</code>. Its own failure message says "aborting
+    startup", from a function that never runs at startup, and
+    <code>FLEET_REDIS_PERSISTENCE_LAG_THRESHOLD</code> is parsed into config
+    (<span class="path">internal/config/config.go:1269-1275</span>) and then never
+    read outside that dead path. Verify persistence at the provider; do not expect
+    fleet-db to tell you.</p>
+  </div>
+
+  <aside class="sidenote"><span class="repo loom">loomcli</span> By default the
+  embedded stack has no Redis at all: unless local settings enable an external one
+  (<span class="path">internal/bootstrap/embedded.go:239-245, 346</span>),
+  <code>internal/bootstrap</code> starts miniredis. Either way it passes
+  <code>--redis-durability-profile=managed</code> because "miniredis
+  rejects CONFIG SET"
+  (<span class="path">embedded.go:366-378</span>). In that default mode durability
+  is loomcli's own JSON snapshot — atomic rename plus a <code>.bak</code> generation,
+  and a sweep that cannot read every key aborts rather than write a truncated file
+  (<span class="path">internal/webui/localredis/manager.go:1-11, 275-283</span>).
+  It keeps only the newest <b>10,000</b> entries per stream; older ones "remain in
+  the running miniredis but won't survive a restart"
+  (<span class="path">manager.go:64-70, 632-637</span>).</aside>
+
+  <h2>Tier zero: what heals with nobody driving</h2>
+
+  <p>Three things happen on every boot, before you have decided anything. Try a
+  restart before you reach for the ladder.</p>
+
+  <ol>
+    <li><b>Projector catch-up.</b> <code>Start</code> reads the persisted cursor,
+    replays every event after it in batches of 100, then subscribes. This is what
+    repairs an inline projection that failed during a write.
+    <span class="path">internal/projection/projector.go:102-143</span></li>
+    <li><b>In-Redis data migrations.</b> <code>MigrateAllDepMetaKeys</code> and
+    <code>MigrateAllDriverTrustLevels</code> run unconditionally on the Redis
+    backend and log-and-continue on failure. On this backend, "schema migration"
+    means an idempotent startup sweep over live keys — there is no version table.
+    <span class="path">cmd/fleet-db/main.go:771-788</span></li>
+    <li><b>Blocked-set reconciliation</b>, and its comment names our exact
+    situation: a "snapshot-restored or otherwise-diverged blocked set" would
+    otherwise stay wrong until the next close or dependency event in that
+    workspace.
+    <span class="path">cmd/fleet-db/main.go:790-796</span></li>
+  </ol>
+
+  <p>Catch-up has one sharp edge worth carrying: a catch-up event whose handler
+  fails is <em>skipped</em>, with only the in-memory cursor advanced
+  (<span class="path">projector.go:131-141, 329-340</span>), so the read model
+  silently misses it for the life of the process. The skip itself does not advance
+  the Redis cursor — but the next event that projects successfully writes its own,
+  later ID over it (<span class="path">projector.go:269-271</span>), so a restart
+  retries the failed event only if nothing after it succeeded. In a workspace still
+  taking writes, the gap is permanent until a full replay.</p>
+
+  <h2>The four paths</h2>
+
+  <p>Everything else is one of these. The middle column is the one you have to be
+  able to recite.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Path</th><th>Deletes, before anything else</th><th>Keeps</th><th>Reachable via</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>Verify</b><br><code>GET …/admin/verify</code></td>
+        <td><b>Nothing.</b> Reads events and issue hashes only</td>
+        <td>Everything</td>
+        <td>HTTP <span class="path">api/recovery.go:47</span></td>
+      </tr>
+      <tr>
+        <td><b>Full replay</b><br><code>POST …/admin/replay</code></td>
+        <td>11 derived key patterns + 2 named keys + the projector cursor — including <code>locks:*</code>, <code>snapshots:*</code> and every per-issue stream</td>
+        <td>The global event stream, the ACL keys, and anything not on the list</td>
+        <td>HTTP <span class="path">api/recovery.go:43</span></td>
+      </tr>
+      <tr>
+        <td><b>Import</b><br><code>POST …/admin/import</code></td>
+        <td><b>Nothing.</b> Refuses with 409 unless the global stream is empty</td>
+        <td>Everything</td>
+        <td>HTTP <span class="path">api/recovery.go:46</span></td>
+      </tr>
+      <tr>
+        <td><b>Import-and-replay</b><br><code>ImportAndReplay()</code></td>
+        <td><b>The global event stream itself</b>, then the same 13 families</td>
+        <td>The ACL keys, and anything not on the list</td>
+        <td>Go only — <b>no route</b> <span class="path">recovery/import.go:286</span></td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>That last row is not an oversight. The only non-test callers of
+  <code>ImportAndReplay</code> in the whole repo are the two restore-drill
+  functions (<span class="path">internal/retention/restore.go:91, 142</span>), both
+  of which point it at a throwaway workspace. The most destructive operation in
+  fleet-db has no HTTP surface, and the five registered routes are the complete
+  list. <span class="path">internal/api/recovery.go:43-47</span></p>
+
+  <h3>What "derived" actually means, in one function</h3>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> internal/storage/redis_recovery_store.go:48-71</figcaption>
+<pre><code>// FlushDerivedState deletes all derived/projected state for a workspace,
+// preserving only the global event stream and workspace metadata.
+//
+// NOTE: If a new derived key pattern is added to the storage layer, this
+// method must be updated to include it. The complete list of derived key
+// patterns is maintained here to keep key knowledge in the storage layer.
+//
+// ACL role assignments (ACLKeyPattern) are intentionally excluded. ACL state
+// is not derived from the event stream and is not rebuilt by replay. It is
+// preserved across disaster recovery to avoid locking out all users.
+func (s *RedisRecoveryStore) FlushDerivedState(ctx context.Context, workspace string) (int64, error) {
+	patterns := []string{
+		IssueKeyPattern(workspace),
+		IndexKeyPattern(workspace),
+		QueueKeyPattern(workspace),
+		DepsKeyPattern(workspace),
+		CommentsKeyPattern(workspace),
+		WorkersKeyPattern(workspace),
+		LocksKeyPattern(workspace),
+		SeqKeyPattern(workspace),
+		IssueEventStreamPattern(workspace),
+		SnapshotsKeyPattern(workspace),
+		FTSKeyPattern(workspace),
+	}</code></pre>
+  </figure>
+
+  <p>Two more go by name rather than pattern —
+  <code>fleet-db:{ws}:blocked</code> and <code>fleet-db:{ws}:labels</code>
+  (<span class="path">redis_recovery_store.go:74-77</span>). Then SCAN + DEL,
+  batch by batch, no transaction (<span class="path">:91-128</span>). Read that
+  NOTE at <span class="path">:50-53</span> as a live hazard rather than a
+  housekeeping remark: the list is maintained by hand, so a derived key family
+  added without touching this function survives the flush and is then <em>stale</em>
+  rather than rebuilt — which is worse than being deleted.</p>
+
+  <h2>The trace: one POST to <code>/admin/replay</code></h2>
+
+  <ol class="trace">
+    <li class="fleet-hop">
+      <span class="hop-file"><span class="repo fleet">fleet-db</span> internal/api/recovery.go:42-43</span>
+      <span class="hop-what"><b>The route.</b>
+      <code>POST /api/v1/{workspace}/admin/replay</code>, wrapped by
+      <code>AuthzWrap(mw, az)</code> and required permission
+      <code>workspace.update</code> — which appears in exactly one role block,
+      <code>RoleAdmin</code>
+      (<span class="path">internal/auth/permissions.go:177, 275, 397</span>). See
+      the trap below for when that check is not there at all.</span>
+    </li>
+    <li>
+      <span class="hop-file">recovery.go:54-66</span>
+      <span class="hop-what"><b>One replay per process.</b> A second POST while one
+      is running gets 409 <code>replay already in progress</code>. The replay's
+      context descends from the <em>server-lifetime</em> context, not the request's
+      — closing your <code>curl</code> does not stop it. (Export is the opposite:
+      it runs on <code>r.Context()</code>, <span class="path">:123</span>.)</span>
+    </li>
+    <li>
+      <span class="hop-file">recovery.go:68-95</span>
+      <span class="hop-what"><b>202 Accepted, immediately</b>, with a
+      <code>status_url</code>. Every destructive step below runs in the goroutine
+      launched at <span class="path">:68</span>; the 202 is written at
+      <span class="path">:92-95</span>, and nothing orders the two — by the time the
+      response reaches you the flush may already be done.</span>
+    </li>
+    <li>
+      <span class="hop-file">recovery/service.go:90-93 → redis_recovery_store.go:58-99</span>
+      <span class="hop-what"><b>The deletion.</b> This is the only irreversible
+      moment in the whole path, and it is step 1 of 6. Nothing is snapshotted
+      first; the return value is a count of deleted keys.</span>
+    </li>
+    <li>
+      <span class="hop-file">service.go:95-99</span>
+      <span class="hop-what"><b>Both cursors, not one.</b> <code>DeleteKeys</code>
+      on <code>fleet-db:{ws}:projector:cursor</code>
+      (<span class="path">internal/storage/keys.go:1115</span>) <em>and</em>
+      <code>projector.ResetCursor</code> for the in-memory dedup value. The
+      interface comment says why: it "Must be called alongside Redis cursor
+      deletion during replay/recovery to prevent the dedup check from silently
+      skipping replayed events."
+      <span class="path">internal/projection/projector.go:29-32, 251-257</span></span>
+    </li>
+    <li>
+      <span class="hop-file">service.go:110-153</span>
+      <span class="hop-what"><b>Replay</b> in batches of 500
+      (<span class="path">:22</span>) through the same
+      <code>ProjectEvent</code> the write path uses. The <em>first</em> handler
+      error returns immediately with <code>EventsFailed: 1</code> — leaving the
+      workspace flushed and only partly rebuilt.</span>
+    </li>
+    <li>
+      <span class="hop-file">service.go:155-158 → :204-257</span>
+      <span class="hop-what"><b>Per-issue streams rebuilt</b> from the global
+      stream with <code>AppendWithID</code>, preserving original IDs. Note the
+      direction: after a replay, each per-issue stream contains exactly what the
+      <em>global</em> stream still holds — no more, no less.</span>
+    </li>
+    <li>
+      <span class="hop-file">service.go:160-168 → :262-326</span>
+      <span class="hop-what"><b>Blocked cache, then sequence counters.</b> The
+      issue sequence is recovered from the numeric suffix of projected issue keys,
+      the comment sequence from <code>comment.add</code> event metadata; both are
+      set forward-only.</span>
+    </li>
+  </ol>
+
+  <div class="callout trap">
+    <span class="label">Trap — "replay only rebuilds, it cannot lose anything"</span>
+    <p><code>LocksKeyPattern</code> is on the flush list, and an issue claim lock is
+    <code>fleet-db:{ws}:locks:issue:{id}</code>
+    (<span class="path">internal/storage/keys.go:859-861, 1097-1099</span>). A
+    replay deletes every claim lock in the workspace. They come back — the
+    <code>issue.claim</code> projection handler re-creates the lock from the
+    event's <code>lock_ttl</code> metadata
+    (<span class="path">internal/projection/handlers.go:613-618</span>) — but with
+    the TTL <b>restarted at replay time</b>, for every claim the log does not show
+    being released or deleted. Closing is not releasing:
+    <code>handleIssueClose</code> never touches the lock — only
+    <code>handleIssueRelease</code> and <code>handleIssueDelete</code> delete it
+    (<span class="path">handlers.go:648, 582</span>) — so a replay resurrects the
+    claim lock on a closed issue too. From <a href="0008-claiming-without-collisions.html">Lesson
+    08</a>: a lock with 20 seconds left on it comes back with the full TTL, so a
+    replay can quietly extend a dead agent's hold on a task.</p>
+  </div>
+
+  <div class="callout trap">
+    <span class="label">Trap — "202 Accepted, so it worked"</span>
+    <p>The 202 tells you nothing about the flush — it races it. If the replay
+    fails at event 40,000 of 50,000, the derived state is already gone and there
+    is no rollback; your only
+    signal is <code>GET …/admin/replay/status</code>, which returns the string
+    <code>"replay failed"</code>. The real error is deliberately not serialized —
+    <code>internalErr error // raw error for server-side logging; not serialized</code>
+    (<span class="path">internal/api/recovery.go:30, 79-88</span>) — so the
+    diagnosis is in the server log, not in the response. Poll the status endpoint
+    until <code>done</code> is true, and read <code>result.EventsProcessed</code>:
+    <code>ReplayResult</code> carries no JSON tags, so its fields go over the wire
+    in Go case (<span class="path">internal/recovery/service.go:36-41</span>).
+    <code>pkg/client</code>'s <code>ReplayStatusResponse</code> asks for
+    <code>events_processed</code>
+    (<span class="path">pkg/client/client.go:210-216</span>), a key the server never
+    emits.</p>
+  </div>
+
+  <div class="callout trap">
+    <span class="label">Trap — "verify came back consistent, so the projection is fine"</span>
+    <p><code>VerifyProjection</code> is genuinely read-only, and genuinely narrow.
+    It compares exactly five fields — <code>status, priority, type, title,
+    assignee</code> (<span class="path">internal/recovery/verify.go:86</span>) —
+    against its <em>own</em> simplified in-memory applier, not against the
+    projector's handlers; in that applier, "dep.*, label.*, comment.*, workspace.*
+    actions don't affect issue state"
+    (<span class="path">verify.go:224-226</span>). A dependency graph or label set
+    that diverged is reported as <code>consistent: true</code>. It does detect
+    missing and orphaned issues (<span class="path">verify.go:75-83, 101-116</span>).
+    And <code>docs/architecture.md:1428</code> describes it as checking "archive
+    consistency against the live event stream" — it never touches any
+    archive.</p>
+  </div>
+
+  <div class="callout trap">
+    <span class="label">Trap — "<code>/admin/</code> is an authorization boundary"</span>
+    <p>Straight out of <a href="0011-things-that-are-not-boundaries.html">Lesson
+    11</a>. <code>AuthzWrap</code> drops the permission check entirely when the
+    authorizer is nil (<span class="path">internal/api/authz_wrap.go:12-19</span>),
+    and a nil authorizer is exactly what <code>--authz-enabled=false</code>
+    produces (<span class="path">cmd/fleet-db/main.go:555-562</span>) — which is
+    what loomcli's embedded fleet-db passes
+    (<span class="path">internal/bootstrap/embedded.go:373-378</span>). Compare
+    <code>GlobalAuthzWrap</code>, whose comment says it rejects unauthenticated
+    requests even with authz off "to prevent open admin access on misconfigured
+    deployments" (<span class="path">authz_wrap.go:21-32</span>). The recovery
+    routes do not use that one. <code>admin</code> in the path is a naming
+    convention.</p>
+  </div>
+
+  <h2>The pattern to copy: rehearse it in a workspace nobody owns</h2>
+
+  <p>The repo's own answer to "how do I test a destructive path" is the drill: mint
+  a throwaway workspace, register its cleanup in the very next line, and run the
+  real destructive code against it.</p>
+
+  <figure class="src">
+    <figcaption><b>fleet-db</b> internal/retention/restore.go:119-122</figcaption>
+<pre><code>	drillWS := "DRILL-" + strings.ToUpper(strings.ReplaceAll(uuid.New().String(), "-", "")[:24])
+	defer v.cleanupDrillWorkspace(ctx, drillWS)
+
+	// Phase 1: Export current workspace events.</code></pre>
+  </figure>
+
+  <p><code>FullDrill</code> then exports the live workspace, calls
+  <code>ImportAndReplay</code> into <code>drillWS</code>, verifies, and reports
+  (<span class="path">restore.go:115-176</span>). The live workspace is only ever
+  <em>read</em>. Copy the shape whenever you add a destructive operation: the
+  precondition, the throwaway target, the deferred cleanup, and a report rather
+  than a boolean.</p>
+
+  <div class="callout fleet">
+    <span class="label">…and read its exit conditions</span>
+    <p><code>FullDrill</code> returns <code>Passed: true</code> immediately when the
+    export produced zero events
+    (<span class="path">internal/retention/restore.go:134-138</span>). A drill
+    against an empty or wrong workspace passes vacuously. Check
+    <code>EventCount</code>, not <code>Passed</code> — the same lesson as
+    <a href="0016-what-proves-what.html">Lesson 16</a>: a green result is only worth
+    what its preconditions assert.</p>
+  </div>
+
+  <h2>Check yourself</h2>
+
+  <div class="recall">
+    <p class="stem">From memory, without scrolling: name the four recovery paths in
+    order of what they destroy, and for each one say the deletion in a single
+    clause.</p>
+    <div class="answer">
+      <p><b>1. Verify</b> — deletes nothing. Replays events in memory and compares
+      five fields against the projected issue hashes.
+      <span class="path">internal/recovery/verify.go:32, 86</span></p>
+      <p><b>2. Import</b> — deletes nothing, and refuses to run at all unless the
+      global stream is empty: <code>ErrStreamNotEmpty</code>, surfaced as 409.
+      <span class="path">recovery/import.go:57-63</span>,
+      <span class="path">api/recovery.go:146-149</span></p>
+      <p><b>3. Full replay</b> — deletes 11 derived key patterns plus
+      <code>:blocked</code> and <code>:labels</code>, plus the projector cursor;
+      keeps the global event stream and the ACL keys. Rebuilds the read model,
+      per-issue streams, blocked cache and sequences.
+      <span class="path">internal/storage/redis_recovery_store.go:48-77</span>,
+      <span class="path">recovery/service.go:86-168</span></p>
+      <p><b>4. Import-and-replay</b> — deletes the global event stream first, then
+      everything full replay deletes. It is a cold-start replace, not a merge, and
+      it has no HTTP route.
+      <span class="path">recovery/import.go:286-297</span></p>
+    </div>
+  </div>
+
+  <div class="quiz" data-quiz="0024">
+    <div class="q" data-answer="0">
+      <p class="stem">A full replay calls <code>FlushDerivedState</code> first.
+      Which of these does that call actually do?</p>
+      <ul class="opts">
+        <li>It deletes every issue claim lock in the workspace</li>
+        <li>It deletes the global event stream of the workspace</li>
+        <li>It deletes the ACL role assignments of the workspace</li>
+        <li>It deletes the SQL archive rows for that workspace</li>
+      </ul>
+      <div class="why"><code>LocksKeyPattern(workspace)</code> is on the list
+      (<span class="path">redis_recovery_store.go:66</span>) and an issue lock is
+      <code>fleet-db:{ws}:locks:issue:{id}</code>
+      (<span class="path">keys.go:859-861</span>). The global stream is preserved
+      by design — only <code>ImportAndReplay</code> deletes it
+      (<span class="path">recovery/import.go:292</span>). ACL keys are excluded
+      deliberately, with the reason stated in the doc comment
+      (<span class="path">redis_recovery_store.go:55-57</span>). The archive is a
+      separate subsystem that recovery never touches.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <p class="stem">You hold a JSONL export and a workspace that already has
+      events. Which operation replaces that workspace's history with the file?</p>
+      <ul class="opts">
+        <li>Import — it appends the file after the events already present</li>
+        <li>Import-and-replay — it deletes the stream, then loads the file</li>
+        <li>Full replay — it reads the file back through the projector once</li>
+        <li>Verify — it compares the file against the live projected state</li>
+      </ul>
+      <div class="why"><code>ImportEvents</code> checks <code>StreamLen</code> and
+      returns <code>ErrStreamNotEmpty</code> → 409
+      (<span class="path">import.go:57-63</span>); it is designed "for disaster
+      recovery into a truly fresh Redis, not workspace-to-workspace copying"
+      (<span class="path">MANUAL_TESTING.md:455</span>). Full replay and verify
+      never read a file — both work only from the stream already in Redis. And note
+      the sting: the right answer has no HTTP route
+      (<span class="path">api/recovery.go:43-47</span>), so over the wire the honest
+      answer is "you cannot".</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <p class="stem">Reaching back to <a href="0009-when-a-run-dies.html">Lesson
+      09</a>: what protects a worktree from <code>cleanUntrackedFiles</code>, and
+      what protects a workspace's ACL keys from <code>FlushDerivedState</code>?</p>
+      <ul class="opts">
+        <li>A caller-passed flag; an exclusion the code states in writing</li>
+        <li>A caller-passed flag; a lock the recovery service takes first</li>
+        <li>A dry-run pass first; an exclusion the code states in writing</li>
+        <li>A dry-run pass first; a lock the recovery service takes first</li>
+      </ul>
+      <div class="why">loomcli skips the clean when <code>incomplete</code> is true
+      — "destruction of live work when the agent simply ran out of turn"
+      (<span class="path">internal/cli/agent/recover.go:250-259</span>). fleet-db
+      has no flag and no lock: <code>ACLKeyPattern</code> is simply left off the
+      list, with the reason written above the function — ACL state "is not derived
+      from the event stream and is not rebuilt by replay"
+      (<span class="path">redis_recovery_store.go:55-57</span>). Neither path has a
+      dry run, and the only workspace-level recovery lock in the repo belongs to the
+      retention sweep, not to this code.</div>
+    </div>
+  </div>
+
+  <div class="cloze" data-answer="FlushDerivedState">
+    <p class="stem">The thirteen key families a full replay destroys are listed in
+    exactly one function: <code>RedisRecoveryStore.</code><input>.</p>
+    <div class="why">Eleven SCAN patterns plus two named keys, all in
+    <span class="path">internal/storage/redis_recovery_store.go:59-77</span>. That
+    list, and not the docs, is the definition of "derived state" in this repo.</div>
+  </div>
+
+  <div class="exercise">
+    <h3>Enumerate the blast radius, then prove two preconditions</h3>
+
+    <p>All read-only, in the pinned <span class="repo fleet">fleet-db</span>
+    worktree unless a step says otherwise. <b>Do not start a stack for this.</b> If
+    you later want to watch a replay against a live server, that is a separate
+    session: pick your own compose project and your own port block, and never touch
+    a stack you did not create.</p>
+
+    <ol>
+      <li>Run
+      <code>grep -n "Pattern(workspace),\|Key(workspace)," internal/storage/redis_recovery_store.go</code>.
+      Write down the count. For each entry, say in three words what a user would
+      notice missing if it were deleted and never rebuilt.</li>
+      <li>Run
+      <code>go test ./internal/recovery/ -run 'TestFlushDerivedState_PreservesGlobalEventStream|TestImportEvents_RejectsNonEmptyStream' -v</code>.
+      Two tests, two preconditions: one says replay keeps the log, the other says
+      import will not touch a populated workspace. Open
+      <code>internal/recovery/export_test.go:600-651</code> and find the comment
+      explaining why <code>ImportAndReplay</code> is exempt from the second.</li>
+      <li>Run
+      <code>grep -rn "ImportAndReplay(" --include="*.go" . | grep -v _test.go</code>
+      and then
+      <code>grep -rn "RunPersistenceChecks" --include="*.go" . | grep -v _test.go</code>.
+      One of these is a function with two production callers; the other is a
+      function with none. Say which is which, and what
+      <code>docs/architecture.md:1540</code> claims about the second.</li>
+      <li>Reaching back to <a href="0009-when-a-run-dies.html">Lesson 09</a>: in the
+      loomcli worktree, read
+      <code>internal/cli/agent/recover.go:250-259</code> beside
+      <code>internal/storage/redis_recovery_store.go:48-57</code>. Both are
+      "recovery" that deletes. In two sentences, state where each one puts the
+      decision to destroy — an argument, or a hard-coded exclusion list — and which
+      you would rather review.</li>
+      <li>Prediction drill, nothing to run. For each, name the path you would pick
+      and the sentence you would say first: (a) the ready queue is missing three
+      issues that <code>fdb show</code> displays correctly; (b) Redis restarted
+      empty and you have yesterday's JSONL export; (c) an agent reports a claim it
+      cannot release and you want to know whether the read model or the log is
+      wrong.</li>
+    </ol>
+
+    <div class="verify">
+      <b>You succeeded when</b>
+      Step 1 prints exactly <b>13</b> lines. Step 2 prints two
+      <code>PASS</code> lines and <code>ok</code>. Step 3's first grep prints
+      exactly three lines — the definition at
+      <code>internal/recovery/import.go:286</code> and two calls, both in
+      <code>internal/retention/restore.go</code> — while the second prints three
+      lines that are all inside <code>internal/storage/redis.go</code> and none of
+      which is a call. And for step 5 your answers are (a) full replay, "this
+      deletes every derived key including the claim locks"; (b) import, "this
+      deletes nothing and will 409 if the stream is not empty"; (c) verify, "this
+      deletes nothing at all". Extra credit on (a): the ready queue is not one of
+      verify's five fields, so verify would have reported
+      <code>consistent: true</code> on that workspace.
+    </div>
+  </div>
+
+  <div class="source">
+    <span class="label">Read next, in full</span>
+    <p><code>internal/storage/redis_recovery_store.go</code> — 202 lines, and the
+    entire destructive surface of fleet-db recovery in one file: the flush list, the
+    SCAN/DEL loop, and the import Lua that treats a duplicate stream ID as success.
+    Read it beside <code>internal/recovery/service.go:83-200</code>, which is the
+    six-step order those deletions sit inside. Between them you can answer "what
+    does this destroy" for any path without opening anything else. The
+    <a href="../reference/navigation.html">navigation reference</a> and the
+    <a href="../reference/glossary.html">glossary</a> place both files in the wider
+    map.</p>
+  </div>
+
+  <div class="ask">
+    <b>Stuck, or something here does not match what you see?</b> Ask your teacher —
+    that is what the agent in this workspace is for. A lesson that disagrees with
+    the code is a bug in the lesson: report it and it gets fixed.
+  </div>
+
+  <nav class="lesson-nav">
+    <a class="prev" href="0023-keeping-the-log-honest.html"><span class="dir">Previous</span>Keeping the log honest</a>
+    <a class="next" href="0025-who-owns-this-agent.html"><span class="dir">Next</span>Who owns this agent</a>
+  </nav>
+
+  <p class="stamp">Verified against loomcli <code>ce4df56fb</code> and fleet-db
+  <code>000793b</code>.</p>
+
+</main>
+</body>
+</html>

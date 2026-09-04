@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loom Onboarding — course map</title>
+<link rel="stylesheet" href="assets/course.css">
+<style>
+  .week { margin: 0 0 2.5rem; }
+  .week-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.9rem;
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 0.4rem;
+    margin-bottom: 1rem;
+  }
+  .week-head h2 { border: 0; margin: 0; padding: 0; font-size: 1.3rem; }
+  .week-head .num {
+    font-family: var(--sans);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--paper);
+    background: var(--accent);
+    padding: 0.2em 0.55em;
+    border-radius: 3px;
+  }
+  .week .outcome {
+    font-family: var(--sans);
+    font-size: 0.82rem;
+    color: var(--ink-faint);
+    margin: -0.6rem 0 1rem;
+  }
+  .week .outcome b { color: var(--ink-soft); }
+  ol.lessons { list-style: none; padding: 0; margin: 0; counter-reset: none; }
+  ol.lessons li {
+    display: flex;
+    gap: 0.9rem;
+    padding: 0.55rem 0;
+    border-bottom: 1px solid var(--rule-soft);
+    margin: 0;
+    align-items: baseline;
+  }
+  ol.lessons li:last-child { border-bottom: 0; }
+  ol.lessons .n {
+    font-family: var(--mono);
+    font-size: 0.76rem;
+    color: var(--ink-faint);
+    min-width: 1.9rem;
+  }
+  ol.lessons .body { flex: 1; }
+  ol.lessons a { font-family: var(--sans); font-weight: 600; font-size: 0.95rem; text-decoration: none; }
+  ol.lessons a:hover { text-decoration: underline; background: none; }
+  ol.lessons .skill {
+    display: block;
+    font-family: var(--sans);
+    font-size: 0.8rem;
+    color: var(--ink-soft);
+    margin-top: 0.1rem;
+  }
+  ol.lessons .mins {
+    font-family: var(--sans);
+    font-size: 0.72rem;
+    color: var(--ink-faint);
+    white-space: nowrap;
+  }
+  li.todo .body { color: var(--ink-faint); }
+  li.todo .title { font-family: var(--sans); font-weight: 600; font-size: 0.95rem; color: var(--ink-faint); }
+  .shelf { display: grid; gap: 0.8rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); margin: 0 0 1.5rem; }
+  .shelf a {
+    display: block;
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 5px 5px 0;
+    padding: 0.75rem 0.95rem;
+    text-decoration: none;
+    font-family: var(--sans);
+  }
+  .shelf a:hover { background: var(--paper-sunk); }
+  .shelf .t { display: block; font-weight: 700; font-size: 0.92rem; color: var(--ink); }
+  .shelf .d { display: block; font-size: 0.8rem; color: var(--ink-soft); margin-top: 0.15rem; }
+</style>
+</head>
+<body>
+<main class="page">
+
+  <p class="kicker">Loom <span class="sep">/</span> Engineering onboarding</p>
+  <h1>Six weeks to shipping</h1>
+  <p class="standfirst">A dependency-ordered path through loomcli and fleet-db, built
+  for an engineer who is fluent in Go and new to this system. Every lesson ends with
+  something you run against the real repos.</p>
+
+  <div class="meta">
+    <span><b>Track</b> full-stack, backend-first</span>
+    <span><b>Shape</b> 15-40 min lessons, part-time</span>
+    <span><b>Pinned to</b> loomcli <code>ce4df56fb</code> · fleet-db <code>000793b</code></span>
+  </div>
+
+  <div class="callout key">
+    <span class="label">How to use this</span>
+    <p>Read in order — the sequence is by dependency, not by repo, so each lesson
+    assumes only what came before it. Do the exercises; they are where the learning
+    actually happens. Keep the two reference cards open in tabs. And when something
+    here disagrees with the code, <b>the code wins</b> — tell your teacher so the
+    lesson gets fixed.</p>
+  </div>
+
+  <h2>The reference shelf</h2>
+  <p>These four are the documents you will come back to long after the lessons are
+  done. Print them.</p>
+
+  <div class="shelf">
+    <a href="reference/glossary.html">
+      <span class="t">The Loom Glossary</span>
+      <span class="d">The trap words &mdash; ordinary English used as precise domain terms, and the mechanism behind each.</span>
+    </a>
+    <a href="reference/navigation.html">
+      <span class="t">Finding Anything</span>
+      <span class="d">Where the code for a thing lives, the layering rules, and the patterns you are expected to copy.</span>
+    </a>
+    <a href="reference/fleet-db-data-model.html">
+      <span class="t">fleet-db Data Model</span>
+      <span class="d">The key schema, what is authoritative versus derived, the event shape, and the Lua scripts.</span>
+    </a>
+    <a href="reference/first-task-workflow.html">
+      <span class="t">First-Task Workflow</span>
+      <span class="d">Claim to pull request, in either repo, with every shared-machine safety rule inline.</span>
+    </a>
+  </div>
+
+
+  <!-- ================= WEEK 1 ================= -->
+  <section class="week">
+    <div class="week-head"><span class="num">Week 1</span><h2>Orientation and environment</h2></div>
+    <p class="outcome"><b>By Friday you can</b> find the code behind any command, use the vocabulary precisely, run a full local stack without disturbing a colleague, read the gate as the team's coding standard, and place any piece of state in the tier that owns it. <span class="mins">&nbsp;&middot;&nbsp; 5 lessons, about 2.4 hours</span></p>
+    <ol class="lessons">
+      <li>
+        <span class="n">01</span>
+        <span class="body">
+          <a href="lessons/0001-two-repos-one-system.html">Two repos, one system</a>
+          <span class="skill">Locate the code behind any CLI command, in under two minutes.</span>
+        </span>
+        <span class="mins">25 min</span>
+      </li>
+      <li>
+        <span class="n">02</span>
+        <span class="body">
+          <a href="lessons/0002-the-words-that-lie.html">The words that lie</a>
+          <span class="skill">Disambiguate this codebase's overloaded terms — and notice when someone else has not.</span>
+        </span>
+        <span class="mins">25 min</span>
+      </li>
+      <li>
+        <span class="n">03</span>
+        <span class="body">
+          <a href="lessons/0003-run-it-without-breaking-anyone.html">Run it without breaking anyone</a>
+          <span class="skill">Stand up a local stack that is provably yours, on a shared machine.</span>
+        </span>
+        <span class="mins">35 min</span>
+      </li>
+      <li>
+        <span class="n">04</span>
+        <span class="body">
+          <a href="lessons/0004-the-gate-is-the-spec.html">The gate is the spec</a>
+          <span class="skill">Read <code>make gate</code> as the team's executable style guide.</span>
+        </span>
+        <span class="mins">30 min</span>
+      </li>
+      <li>
+        <span class="n">05</span>
+        <span class="body">
+          <a href="lessons/0005-where-state-lives.html">Where state lives</a>
+          <span class="skill">Name every core object and say which of three storage tiers holds it.</span>
+        </span>
+        <span class="mins">30 min</span>
+      </li>
+    </ol>
+  </section>
+
+  <!-- ================= WEEK 2 ================= -->
+  <section class="week">
+    <div class="week-head"><span class="num">Week 2</span><h2>The spine</h2></div>
+    <p class="outcome"><b>By Friday you can</b> trace any command from a shell argument to an HTTP write and back, and know which of the two client stacks you are standing in before you touch an error. <span class="mins">&nbsp;&middot;&nbsp; 2 lessons, about 1.2 hours</span></p>
+    <ol class="lessons">
+      <li>
+        <span class="n">06</span>
+        <span class="body">
+          <a href="lessons/0006-anatomy-of-a-command.html">Anatomy of a command</a>
+          <span class="skill">Follow one command through all eleven hops — the trace every later lesson attaches to.</span>
+        </span>
+        <span class="mins">40 min</span>
+      </li>
+      <li>
+        <span class="n">07</span>
+        <span class="body">
+          <a href="lessons/0007-two-clients-one-server.html">Two clients, one server</a>
+          <span class="skill">Pick the right client stack and the right error model for a change.</span>
+        </span>
+        <span class="mins">30 min</span>
+      </li>
+    </ol>
+  </section>
+
+  <!-- ================= WEEK 3 ================= -->
+  <section class="week">
+    <div class="week-head"><span class="num">Week 3</span><h2>The runtime</h2></div>
+    <p class="outcome"><b>By Friday you can</b> explain how many agents share one queue with no coordinator, predict where a task lands when its run dies, and say what is actually isolated from what. <span class="mins">&nbsp;&middot;&nbsp; 4 lessons, about 2.2 hours</span></p>
+    <ol class="lessons">
+      <li>
+        <span class="n">08</span>
+        <span class="body">
+          <a href="lessons/0008-claiming-without-collisions.html">Claiming without collisions</a>
+          <span class="skill">Explain — across both repos — why two agents never take the same task.</span>
+        </span>
+        <span class="mins">35 min</span>
+      </li>
+      <li>
+        <span class="n">09</span>
+        <span class="body">
+          <a href="lessons/0009-when-a-run-dies.html">When a run dies</a>
+          <span class="skill">Predict where a task ends up when its agent crashes, hangs, or lies.</span>
+        </span>
+        <span class="mins">40 min</span>
+      </li>
+      <li>
+        <span class="n">10</span>
+        <span class="body">
+          <a href="lessons/0010-what-actually-runs-your-code.html">What actually runs your code</a>
+          <span class="skill">Answer the first question of every incident: where is this running?</span>
+        </span>
+        <span class="mins">30 min</span>
+      </li>
+      <li>
+        <span class="n">11</span>
+        <span class="body">
+          <a href="lessons/0011-things-that-are-not-boundaries.html">Things that are not boundaries</a>
+          <span class="skill">Tell an OS boundary from an admission check, a flag, and a sentence in a prompt.</span>
+        </span>
+        <span class="mins">30 min</span>
+      </li>
+    </ol>
+  </section>
+
+  <!-- ================= WEEK 4 ================= -->
+  <section class="week">
+    <div class="week-head"><span class="num">Week 4</span><h2>The web layer, and what proves it</h2></div>
+    <p class="outcome"><b>By Friday you can</b> add an endpoint that follows the layering, decide from the code alone whether a stream is resumable, change the frontend safely, carry a field from schema to pixel — and then state honestly what your tests proved. <span class="mins">&nbsp;&middot;&nbsp; 6 lessons, about 3.5 hours</span></p>
+    <ol class="lessons">
+      <li>
+        <span class="n">12</span>
+        <span class="body">
+          <a href="lessons/0012-how-serve-is-put-together.html">How <code>serve</code> is put together</a>
+          <span class="skill">Add an API endpoint without asking anyone where things go.</span>
+        </span>
+        <span class="mins">35 min</span>
+      </li>
+      <li>
+        <span class="n">13</span>
+        <span class="body">
+          <a href="lessons/0013-realtime-one-frame-at-a-time.html">Realtime, one frame at a time</a>
+          <span class="skill">Answer “is this stream resumable?” by reading the handler.</span>
+        </span>
+        <span class="mins">35 min</span>
+      </li>
+      <li>
+        <span class="n">14</span>
+        <span class="body">
+          <a href="lessons/0014-the-react-app.html">The React app</a>
+          <span class="skill">Change a quarter-million lines of TypeScript safely, on four rules.</span>
+        </span>
+        <span class="mins">35 min</span>
+      </li>
+      <li>
+        <span class="n">15</span>
+        <span class="body">
+          <a href="lessons/0015-shipping-a-vertical-slice.html">Shipping a vertical slice</a>
+          <span class="skill">Take one field from a line of YAML to a rendered pixel.</span>
+        </span>
+        <span class="mins">40 min</span>
+      </li>
+      <li>
+        <span class="n">16</span>
+        <span class="body">
+          <a href="lessons/0016-what-proves-what.html">What proves what</a>
+          <span class="skill">Choose the cheapest test tier that settles your question, then claim only what it earned.</span>
+        </span>
+        <span class="mins">35 min</span>
+      </li>
+      <li>
+        <span class="n">17</span>
+        <span class="body">
+          <a href="lessons/0017-the-edges.html">The edges</a>
+          <span class="skill">Place the four directories that are neither the CLI, the web layer, nor fleet-db.</span>
+        </span>
+        <span class="mins">30 min</span>
+      </li>
+    </ol>
+  </section>
+
+  <!-- ================= WEEK 5 ================= -->
+  <section class="week">
+    <div class="week-head"><span class="num">Week 5</span><h2>The other repo</h2></div>
+    <p class="outcome"><b>By Friday you can</b> work inside fleet-db: say what is authoritative and what is derived, find any state in Redis, read the API contract you have been calling all along, and know what your deployment's history guarantee actually is. <span class="mins">&nbsp;&middot;&nbsp; 7 lessons, about 4.0 hours</span></p>
+    <ol class="lessons">
+      <li>
+        <span class="n">18</span>
+        <span class="body">
+          <a href="lessons/0018-the-event-log-is-the-truth.html">The event log is the truth</a>
+          <span class="skill">Say whether any piece of fleet-db state is authoritative or derived.</span>
+        </span>
+        <span class="mins">35 min</span>
+      </li>
+      <li>
+        <span class="n">19</span>
+        <span class="body">
+          <a href="lessons/0019-rebuilding-the-world.html">Rebuilding the world</a>
+          <span class="skill">Predict exactly what a replay restores, and what it silently does not.</span>
+        </span>
+        <span class="mins">35 min</span>
+      </li>
+      <li>
+        <span class="n">20</span>
+        <span class="body">
+          <a href="lessons/0020-where-atomicity-lives.html">Where atomicity lives</a>
+          <span class="skill">Decide when an operation needs a Lua script, and find any key in the schema.</span>
+        </span>
+        <span class="mins">35 min</span>
+      </li>
+      <li>
+        <span class="n">21</span>
+        <span class="body">
+          <a href="lessons/0021-the-api-you-already-depend-on.html">The API you already depend on</a>
+          <span class="skill">Find the endpoint behind any store call, and read its contract first.</span>
+        </span>
+        <span class="mins">30 min</span>
+      </li>
+      <li>
+        <span class="n">22</span>
+        <span class="body">
+          <a href="lessons/0022-auth-at-the-boundary.html">Auth at the boundary</a>
+          <span class="skill">Say what authenticates and what authorizes, in each mode — and what dev mode is not.</span>
+        </span>
+        <span class="mins">30 min</span>
+      </li>
+      <li>
+        <span class="n">23</span>
+        <span class="body">
+          <a href="lessons/0023-keeping-the-log-honest.html">Keeping the log honest</a>
+          <span class="skill">Answer “how much history do I have?” and never trim past the fence.</span>
+        </span>
+        <span class="mins">40 min</span>
+      </li>
+      <li>
+        <span class="n">24</span>
+        <span class="body">
+          <a href="lessons/0024-when-redis-dies.html">When Redis dies</a>
+          <span class="skill">Choose a recovery path, and state what it destroys before running it.</span>
+        </span>
+        <span class="mins">35 min</span>
+      </li>
+    </ol>
+  </section>
+
+  <!-- ================= WEEK 6 ================= -->
+  <section class="week">
+    <div class="week-head"><span class="num">Week 6</span><h2>Across both repos, and shipping</h2></div>
+    <p class="outcome"><b>By Friday you can</b> reason about ownership and configuration in the control plane, reconstruct what an agent did after the fact, sequence a change that spans both repos, and take a real task from claim to open pull request without help. <span class="mins">&nbsp;&middot;&nbsp; 7 lessons, about 4.3 hours</span></p>
+    <ol class="lessons">
+      <li>
+        <span class="n">25</span>
+        <span class="body">
+          <a href="lessons/0025-who-owns-this-agent.html">Who owns this agent</a>
+          <span class="skill">Determine who owns an agent now — including the third answer, inconclusive.</span>
+        </span>
+        <span class="mins">35 min</span>
+      </li>
+      <li>
+        <span class="n">26</span>
+        <span class="body">
+          <a href="lessons/0026-roles-skills-and-shaping-work.html">Roles, skills, and shaping work</a>
+          <span class="skill">Configure a role so the right agent claims the right task.</span>
+        </span>
+        <span class="mins">30 min</span>
+      </li>
+      <li>
+        <span class="n">27</span>
+        <span class="body">
+          <a href="lessons/0027-seeing-what-happened.html">Seeing what happened</a>
+          <span class="skill">Reconstruct what an agent did from the artifacts it left behind.</span>
+        </span>
+        <span class="mins">35 min</span>
+      </li>
+      <li>
+        <span class="n">28</span>
+        <span class="body">
+          <a href="lessons/0028-one-change-two-repos.html">One change, two repos</a>
+          <span class="skill">Sequence a cross-repo change so neither side is ever broken.</span>
+        </span>
+        <span class="mins">40 min</span>
+      </li>
+      <li>
+        <span class="n">29</span>
+        <span class="body">
+          <a href="lessons/0029-fleet-db-builds-itself.html">fleet-db builds itself</a>
+          <span class="skill">Pass the other repo's gate, and read its policy file as its constitution.</span>
+        </span>
+        <span class="mins">35 min</span>
+      </li>
+      <li>
+        <span class="n">30</span>
+        <span class="body">
+          <a href="lessons/0030-when-the-docs-are-wrong.html">When the docs are wrong</a>
+          <span class="skill">Verify a documentation claim against code before you act on it.</span>
+        </span>
+        <span class="mins">25 min</span>
+      </li>
+      <li>
+        <span class="n">31</span>
+        <span class="body">
+          <a href="lessons/0031-your-first-task.html">Your first task</a>
+          <span class="skill">Claim, build, prove, and open a pull request — then know where to go next.</span>
+        </span>
+        <span class="mins">60 min</span>
+      </li>
+    </ol>
+  </section>
+
+
+  <h2>How this workspace is organised</h2>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Path</th><th>What it is</th></tr></thead>
+    <tbody>
+      <tr><td><code>MISSION.md</code></td><td>Why this course exists and what "done" means. Every lesson traces back to it.</td></tr>
+      <tr><td><code>lessons/</code></td><td>The course, in order. One skill each.</td></tr>
+      <tr><td><code>reference/</code></td><td>Compressed cards you return to. Built to print.</td></tr>
+      <tr><td><code>RESOURCES.md</code></td><td>Every trusted source in both repos, with a reading order and the known gaps.</td></tr>
+      <tr><td><code>learning-records/</code></td><td>What has been established, and what that rules in or out for later lessons.</td></tr>
+      <tr><td><code>NOTES.md</code></td><td>Teaching decisions and learner preferences.</td></tr>
+      <tr><td><code>assets/</code></td><td>Shared stylesheets, the retrieval-practice component, and the lesson template. Anything a second lesson would duplicate lives here.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="ask">
+    <b>Your teacher is an agent in this workspace.</b> Ask it to go deeper on any
+    lesson, to build you a lesson on something not covered here, or to re-verify a
+    claim you think has gone stale. That is what it is for.
+  </div>
+
+  <p class="stamp">Course verified against loomcli <code>ce4df56fb</code> and
+  fleet-db <code>000793b</code>. Re-pin and re-verify when refreshing.</p>
+
+</main>
+</body>
+</html>
