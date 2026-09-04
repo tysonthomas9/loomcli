@@ -16,9 +16,9 @@ interface ExpectReactFlowEdgeCountOptions {
  * React Flow cannot compute edge paths until its ResizeObserver has committed
  * node dimensions and handle bounds to the internal store. Reading a positive
  * DOM rectangle does not prove that commit happened. If positive edges remain
- * absent after measurement, perform a real one-pixel viewport resize so the
- * browser runs layout and notifies the observer. A synthetic `resize` event is
- * insufficient because it does not change any observed dimensions.
+ * absent after measurement, temporarily change each observed node wrapper by
+ * one pixel so the browser runs layout and notifies that observer. Window and
+ * viewport resize events are insufficient when fixed-size nodes do not change.
  */
 export async function expectReactFlowEdgeCount(
   page: Page,
@@ -70,14 +70,26 @@ export async function expectReactFlowEdgeCount(
     // Only recover the observed initialization failure. A non-zero wrong count
     // is a product/test-data failure and must reach the final assertion below.
     if ((await edges.count()) === 0) {
-      const viewport = page.viewportSize();
-      if (viewport) {
-        await page.setViewportSize({
-          width: viewport.width + 1,
-          height: viewport.height,
+      await page.evaluate(async (nodeSelector) => {
+        const nextFrame = () =>
+          new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const renderedNodes = Array.from(
+          document.querySelectorAll<HTMLElement>(nodeSelector),
+        );
+        const previousWidths = renderedNodes.map((node) => node.style.width);
+
+        for (const node of renderedNodes) {
+          node.style.width = `${node.getBoundingClientRect().width + 1}px`;
+        }
+        await nextFrame();
+        await nextFrame();
+
+        renderedNodes.forEach((node, index) => {
+          node.style.width = previousWidths[index] ?? "";
         });
-        await page.setViewportSize(viewport);
-      }
+        await nextFrame();
+        await nextFrame();
+      }, REACT_FLOW_NODE_SELECTOR);
     }
   }
 
