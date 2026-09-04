@@ -135,6 +135,7 @@ describe("sandboxLeakProbeCommand covers the full widened provider-cred set", ()
     "LOOM_TASK_RUN_LEASE_TOKEN",
     "LOOM_DRIVER_TASK_RUNNER_CMD_JSON",
     "ANTHROPIC_API_KEY",
+    "CLAUDE_CODE_OAUTH_TOKEN",
     "OPENAI_API_KEY",
     "CODEX_API_KEY",
     "GEMINI_API_KEY",
