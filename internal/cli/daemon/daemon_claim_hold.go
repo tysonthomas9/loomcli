@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -83,11 +85,12 @@ type ClaimHoldStatus struct {
 
 // claimHoldSetArgs is the args object of the claims_hold_set operation.
 type claimHoldSetArgs struct {
-	Held       bool   `json:"held"`
-	Actor      string `json:"actor"`
-	Reason     string `json:"reason"`
-	TTLSeconds int64  `json:"ttl_seconds"`
-	Force      bool   `json:"force"`
+	Held       bool     `json:"held"`
+	Actor      string   `json:"actor"`
+	Reason     string   `json:"reason"`
+	TTLSeconds int64    `json:"ttl_seconds"`
+	Force      bool     `json:"force"`
+	Repos      []string `json:"repos,omitempty"` // empty = workspace-wide
 }
 
 // resolveClaimHoldPath returns the claim-hold file path for a daemon whose PID
@@ -246,6 +249,9 @@ func loadClaimHoldAtStartup(path string) *supervisor.ClaimHold {
 	slog.Error("claim-hold file unreadable; holding claims on a short fail-safe expiry",
 		"path", path, "ttl", corruptClaimHoldTTL, "err", err)
 	now := time.Now()
+	// Deliberately UNSCOPED. A corrupt record may have named repos we can no
+	// longer read, so the fail-safe must be the strictest hold available —
+	// never a narrower one synthesized from a guess.
 	return &supervisor.ClaimHold{
 		Held:      true,
 		Actor:     "unknown",
@@ -270,11 +276,18 @@ func hydrateClaimHold(d *Daemon, path string) {
 }
 
 // claimHoldStatus builds the payload both socket operations return.
+//
+// Running is filtered to the hold's scope. A workspace-wide wait under a
+// repo-scoped hold could never reach idle: agents on un-held repos keep
+// claiming, so every --wait-idle would burn its whole timeout.
 func (d *Daemon) claimHoldStatus() ClaimHoldStatus {
 	status := ClaimHoldStatus{Hold: d.sup.ClaimHoldSnapshot(), Running: []ClaimHoldRunningAgent{}}
 	for _, a := range d.sup.GetAgents() {
 		if a.ClaimsGated {
 			status.Gated++
+		}
+		if !holdCoversAgent(status.Hold, a) {
+			continue
 		}
 		if a.PID > 0 && lockfile.IsProcessRunning(a.PID) {
 			status.Running = append(status.Running, ClaimHoldRunningAgent{
@@ -288,6 +301,33 @@ func (d *Daemon) claimHoldStatus() ClaimHoldStatus {
 	return status
 }
 
+// holdCoversAgent reports whether a running agent falls inside the hold's
+// scope, for the quiesce signal Running feeds.
+//
+// It FAILS SAFE in both directions that matter: no hold or an unscoped one
+// covers everything, and a repo-UNBOUND agent is covered too — nothing says
+// which repo it is working, so a quiesce must assume it could be the held one.
+// On a repo-unbound fleet that degenerates to the current fleet-wide wait,
+// which is correct rather than a bug: the scope simply has nothing to bite on.
+func holdCoversAgent(h *supervisor.ClaimHold, a supervisor.SupervisedAgentStatus) bool {
+	if !h.Scoped() {
+		return true
+	}
+	repos := a.SourceRepos
+	if len(repos) == 0 && a.Repo != "" {
+		repos = []string{a.Repo}
+	}
+	if len(repos) == 0 {
+		return true
+	}
+	for _, repo := range repos {
+		if h.HoldsRepo(repo) {
+			return true
+		}
+	}
+	return false
+}
+
 // claimHoldResponse marshals a ClaimHoldStatus into a control response.
 func claimHoldResponse(status ClaimHoldStatus) DaemonControlResponse {
 	data, err := json.Marshal(status)
@@ -299,6 +339,71 @@ func claimHoldResponse(status ClaimHoldStatus) DaemonControlResponse {
 
 // handleClaimHoldGet answers the claims_hold_get operation.
 func (d *Daemon) handleClaimHoldGet() DaemonControlResponse {
+	return claimHoldResponse(d.claimHoldStatus())
+}
+
+// normalizeHoldRepos canonicalises a requested repo scope and rejects names the
+// workspace does not define. Trim, drop blanks, de-duplicate, sort — so the
+// persisted record has one shape whatever the caller typed.
+//
+// A typo'd repo name is an ERROR, not an empty scope: silently accepting
+// `--repos flet-db` would hold nothing while telling the operator the quiesce
+// is up. Validation is skipped when the daemon knows of no repos at all (a
+// non-workspace daemon has no list to check against).
+func normalizeHoldRepos(in []string, known []cfgpkg.RepoConfig) ([]string, error) {
+	seen := make(map[string]bool, len(in))
+	out := make([]string, 0, len(in))
+	for _, raw := range in {
+		repo := strings.TrimSpace(raw)
+		if repo == "" || seen[repo] {
+			continue
+		}
+		seen[repo] = true
+		out = append(out, repo)
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	if len(known) > 0 {
+		valid := make(map[string]bool, len(known)*2)
+		for _, rc := range known {
+			valid[rc.Name] = true
+			if rc.SourceRepoID != "" {
+				valid[rc.SourceRepoID] = true
+			}
+		}
+		for _, repo := range out {
+			if !valid[repo] {
+				return nil, fmt.Errorf("unknown repo %q; the workspace defines %s", repo, strings.Join(knownRepoNames(known), ", "))
+			}
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// knownRepoNames lists the workspace repo identifiers, for the error above.
+func knownRepoNames(known []cfgpkg.RepoConfig) []string {
+	names := make([]string, 0, len(known))
+	for _, rc := range known {
+		if rc.SourceRepoID != "" {
+			names = append(names, rc.SourceRepoID)
+			continue
+		}
+		names = append(names, rc.Name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// releaseClaimHold is the Held=false half of claims_hold_set. A foreign holder
+// is refused without force by the supervisor, so the error is passed straight
+// through rather than reworded here.
+func (d *Daemon) releaseClaimHold(args claimHoldSetArgs) DaemonControlResponse {
+	if err := d.sup.ReleaseClaimHold(args.Actor, args.Force); err != nil {
+		return DaemonControlResponse{Error: err.Error()}
+	}
+	slog.Info("claim hold released", "actor", args.Actor, "force", args.Force)
 	return claimHoldResponse(d.claimHoldStatus())
 }
 
@@ -319,18 +424,18 @@ func (d *Daemon) handleClaimHoldSet(raw json.RawMessage) DaemonControlResponse {
 	}
 
 	if !args.Held {
-		if err := d.sup.ReleaseClaimHold(args.Actor, args.Force); err != nil {
-			return DaemonControlResponse{Error: err.Error()}
-		}
-		slog.Info("claim hold released", "actor", args.Actor, "force", args.Force)
-		return claimHoldResponse(d.claimHoldStatus())
+		return d.releaseClaimHold(args)
 	}
 
 	if args.Reason == "" {
 		return DaemonControlResponse{Error: "reason is required to hold claims"}
 	}
+	repos, err := normalizeHoldRepos(args.Repos, d.sup.Repos)
+	if err != nil {
+		return DaemonControlResponse{Error: err.Error()}
+	}
 	now := time.Now()
-	hold := &supervisor.ClaimHold{Held: true, Actor: args.Actor, Reason: args.Reason, Since: now}
+	hold := &supervisor.ClaimHold{Held: true, Actor: args.Actor, Reason: args.Reason, Since: now, Repos: repos}
 	if args.TTLSeconds > 0 {
 		hold.ExpiresAt = now.Add(time.Duration(args.TTLSeconds) * time.Second)
 	}
@@ -341,7 +446,11 @@ func (d *Daemon) handleClaimHoldSet(raw json.RawMessage) DaemonControlResponse {
 				"claims held by %s since %s; use --force to replace", current.Actor, current.Since.Format(time.RFC3339))}
 		}
 		if current.Actor == args.Actor {
-			hold.Since = current.Since // idempotent refresh
+			// Idempotent refresh: only Since is preserved. Reason, TTL and the
+			// repo scope all take the new request's values, so re-holding with
+			// a different scope narrows or widens the hold rather than being
+			// silently ignored.
+			hold.Since = current.Since
 		}
 	}
 
@@ -356,7 +465,8 @@ func (d *Daemon) handleClaimHoldSet(raw json.RawMessage) DaemonControlResponse {
 		return resp
 	}
 	slog.Info("claim hold set", "actor", hold.Actor, "reason", hold.Reason,
-		"expires", hold.ExpiresAt, "running", len(status.Running))
+		"expires", hold.ExpiresAt, "repos", supervisor.ClaimHoldScopeLabel(hold),
+		"running", len(status.Running))
 	return claimHoldResponse(status)
 }
 
@@ -369,6 +479,7 @@ var (
 	daemonHoldWaitIdle bool
 	daemonHoldTimeout  time.Duration
 	daemonHoldForce    bool
+	daemonHoldRepos    []string
 
 	daemonReleaseActor string
 	daemonReleaseForce bool
@@ -383,15 +494,25 @@ var daemonHoldCmd = &cobra.Command{
 agents, while every run already in flight continues untouched.
 
 No yield file is written, no signal is sent, and no deadline is imposed on a
-running agent — the hold gates the claim path only, and performs no fleet-db
-calls, so it works while fleet-db itself is being redeployed.
+running agent — the hold gates the claim path only.
+
+By default the hold covers EVERY repo in the workspace and performs no fleet-db
+calls, so it works while fleet-db itself is being redeployed. --repos narrows it
+to the named repos: agents on other repos keep claiming, which necessarily costs
+one ready query per agent cycle to find out what a candidate's repo is. A scoped
+hold is therefore NOT safe while fleet-db itself is down — use an unscoped one.
+
+Scope by BLAST RADIUS, not by which repo the deploy names: a deploy that
+restarts the supervisors or the issue backend stops every agent in the fleet
+however few repos it touches, and must stay unscoped.
 
 The hold survives a daemon restart and applies to THIS daemon (this workspace),
 not to the fleet.
 
 Examples:
   loom daemon hold --reason "deploy union tips"
-  loom daemon hold --actor union-autodeploy --reason "deploy $SHA" --ttl 45m --wait-idle`,
+  loom daemon hold --actor union-autodeploy --reason "deploy $SHA" --ttl 45m --wait-idle
+  loom daemon hold --reason "quiesce one repo" --repos fleet-db`,
 	RunE: runDaemonHold,
 }
 
@@ -416,6 +537,7 @@ func init() {
 	daemonHoldCmd.Flags().BoolVar(&daemonHoldWaitIdle, "wait-idle", false, "after setting the hold, wait until no agent is running")
 	daemonHoldCmd.Flags().DurationVar(&daemonHoldTimeout, "timeout", defaultClaimHoldWaitLimit, "how long --wait-idle waits before giving up")
 	daemonHoldCmd.Flags().BoolVar(&daemonHoldForce, "force", false, "replace a hold owned by a different actor")
+	daemonHoldCmd.Flags().StringSliceVar(&daemonHoldRepos, "repos", nil, "limit the hold to these repos (default: all)")
 
 	daemonReleaseCmd.Flags().StringVar(&daemonReleaseActor, "actor", "", "who is releasing (default: $LOOM_ACTOR, else the OS user)")
 	daemonReleaseCmd.Flags().BoolVar(&daemonReleaseForce, "force", false, "release a hold owned by a different actor")
@@ -655,6 +777,7 @@ func runDaemonHold(cmd *cobra.Command, args []string) error {
 		Reason:     daemonHoldReason,
 		TTLSeconds: int64(ttl / time.Second),
 		Force:      daemonHoldForce,
+		Repos:      daemonHoldRepos,
 	})
 	if err != nil {
 		// Deliberately NO offline write path here: a hold written to a file no
@@ -691,7 +814,8 @@ func waitForClaimHoldIdle(ep claimHoldEndpoints, timeout time.Duration) error {
 			return nil
 		}
 		if !time.Now().Before(deadline) {
-			fmt.Fprintf(os.Stderr, "Timed out after %s with %d agent(s) still running (hold left in place):\n", timeout, len(status.Running))
+			fmt.Fprintf(os.Stderr, "Timed out after %s with %d agent(s) still running in repos %s (hold left in place):\n",
+				timeout, len(status.Running), supervisor.ClaimHoldScopeLabel(status.Hold))
 			for _, r := range status.Running {
 				fmt.Fprintf(os.Stderr, "  %s (PID %d) task %s\n", r.Agent, r.PID, orDash(r.TaskID))
 			}
@@ -821,8 +945,9 @@ func claimHoldBanner(h *supervisor.ClaimHold) string {
 	if !h.ExpiresAt.IsZero() {
 		expires = fmt.Sprintf("%s (in %s)", h.ExpiresAt.Format(time.RFC3339), formatDaemonDuration(time.Until(h.ExpiresAt)))
 	}
-	return fmt.Sprintf("Claims: %s by %s since %s — %s; expires %s",
-		marker, h.Actor, h.Since.Format(time.RFC3339), h.Reason, expires)
+	return fmt.Sprintf("Claims: %s by %s since %s — %s; repos %s; expires %s",
+		marker, h.Actor, h.Since.Format(time.RFC3339), h.Reason,
+		supervisor.ClaimHoldScopeLabel(h), expires)
 }
 
 // printClaimHoldReleaseHint tells the operator how to clear an active hold and
@@ -854,6 +979,14 @@ func printClaimHoldBanner(h *supervisor.ClaimHold) {
 		return
 	}
 	fmt.Println(claimHoldBanner(h))
-	fmt.Println("  Hold applies to THIS daemon (this workspace), not the fleet.")
+	if h.Scoped() {
+		fmt.Printf("  Hold applies to THIS daemon (this workspace), and only to repos: %s.\n",
+			supervisor.ClaimHoldScopeLabel(h))
+		fmt.Println("  A scoped hold still queries fleet-db to learn each candidate's repo,")
+		fmt.Println("  so it is NOT safe while fleet-db itself is being redeployed.")
+		fmt.Println("  Running agents are untouched; no new work in those repos will be claimed until release.")
+		return
+	}
+	fmt.Println("  Hold applies to THIS daemon (this workspace), not the fleet, and covers all repos.")
 	fmt.Println("  Running agents are untouched; no new work will be claimed until release.")
 }

@@ -41,6 +41,10 @@
   color: var(--color-text-muted);
 }
 
+.scope {
+  color: var(--color-text-muted);
+}
+
 .error {
   flex-shrink: 0;
   color: var(--color-danger);

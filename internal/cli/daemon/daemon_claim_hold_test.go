@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 )
 
@@ -602,5 +604,220 @@ func TestHydrateClaimHold_WiresBothHooks(t *testing.T) {
 	}
 	if d.sup.ClaimHoldSnapshot() == nil {
 		t.Fatal("the hold was dropped by its own persist round trip")
+	}
+}
+
+// ── repo scope ──────────────────────────────────────────────────────────────
+
+// scopedHoldDaemon is newHoldTestDaemon with a workspace repo list, so the
+// unknown-repo validation in handleClaimHoldSet has something to check against.
+func scopedHoldDaemon(t *testing.T) (*Daemon, string) {
+	t.Helper()
+	d, path := newHoldTestDaemon(t)
+	d.sup.Repos = []cfgpkg.RepoConfig{
+		{Name: "fleet-db", SourceRepoID: "fleet-db"},
+		{Name: "loomcli", SourceRepoID: "loomcli"},
+	}
+	return d, path
+}
+
+func TestHandleClaimHoldSet_NormalisesAndPersistsRepos(t *testing.T) {
+	d, path := scopedHoldDaemon(t)
+
+	resp := d.handleClaimHoldSet(setArgs(t, claimHoldSetArgs{
+		Held: true, Actor: "union-autodeploy", Reason: "deploy", TTLSeconds: 600,
+		Repos: []string{" loomcli ", "fleet-db", "", "loomcli"},
+	}))
+	if !resp.Success {
+		t.Fatalf("set failed: %s", resp.Error)
+	}
+	status := decodeHoldStatus(t, resp)
+	want := []string{"fleet-db", "loomcli"}
+	if !reflect.DeepEqual(status.Hold.Repos, want) {
+		t.Fatalf("Repos = %v, want %v (trimmed, de-duplicated, sorted)", status.Hold.Repos, want)
+	}
+	onDisk, err := readClaimHoldFile(path)
+	if err != nil || onDisk == nil {
+		t.Fatalf("hold not persisted: (%v, %v)", onDisk, err)
+	}
+	if !reflect.DeepEqual(onDisk.Repos, want) {
+		t.Fatalf("persisted Repos = %v, want %v", onDisk.Repos, want)
+	}
+}
+
+// A typo'd repo must fail loudly. Accepting it would report a quiesce that
+// holds nothing.
+func TestHandleClaimHoldSet_RejectsUnknownRepo(t *testing.T) {
+	d, path := scopedHoldDaemon(t)
+
+	resp := d.handleClaimHoldSet(setArgs(t, claimHoldSetArgs{
+		Held: true, Actor: "union-autodeploy", Reason: "deploy", Repos: []string{"flet-db"},
+	}))
+	if resp.Success {
+		t.Fatal("an unknown repo was accepted")
+	}
+	if !strings.Contains(resp.Error, "flet-db") {
+		t.Fatalf("error = %q, want it to name the unknown repo", resp.Error)
+	}
+	if h := d.sup.ClaimHoldSnapshot(); h != nil {
+		t.Fatalf("a rejected request still set a hold: %#v", h)
+	}
+	if onDisk, _ := readClaimHoldFile(path); onDisk != nil {
+		t.Fatalf("a rejected request still persisted a hold: %#v", onDisk)
+	}
+}
+
+func TestHandleClaimHoldSet_ReHoldUpdatesReposAndKeepsSince(t *testing.T) {
+	d, _ := scopedHoldDaemon(t)
+
+	first := decodeHoldStatus(t, d.handleClaimHoldSet(setArgs(t, claimHoldSetArgs{
+		Held: true, Actor: "union-autodeploy", Reason: "deploy", TTLSeconds: 600,
+		Repos: []string{"fleet-db"},
+	})))
+	second := decodeHoldStatus(t, d.handleClaimHoldSet(setArgs(t, claimHoldSetArgs{
+		Held: true, Actor: "union-autodeploy", Reason: "deploy", TTLSeconds: 600,
+		Repos: []string{"loomcli"},
+	})))
+
+	if !second.Hold.Since.Equal(first.Hold.Since) {
+		t.Fatalf("Since moved on re-hold: %s → %s", first.Hold.Since, second.Hold.Since)
+	}
+	if !reflect.DeepEqual(second.Hold.Repos, []string{"loomcli"}) {
+		t.Fatalf("Repos = %v, want the refreshed scope", second.Hold.Repos)
+	}
+	// Widening back to the whole workspace must work the same way.
+	third := decodeHoldStatus(t, d.handleClaimHoldSet(setArgs(t, claimHoldSetArgs{
+		Held: true, Actor: "union-autodeploy", Reason: "deploy", TTLSeconds: 600,
+	})))
+	if len(third.Hold.Repos) != 0 {
+		t.Fatalf("Repos = %v, want an unscoped hold", third.Hold.Repos)
+	}
+}
+
+// A record written before `repos` existed must load as workspace-wide. This is
+// the whole no-migration claim, so it is pinned against the literal old bytes.
+func TestClaimHoldFile_PreScopeRecordLoadsUnscoped(t *testing.T) {
+	path := filepath.Join(t.TempDir(), claimHoldFileName)
+	legacy := `{
+  "held": true,
+  "actor": "union-autodeploy",
+  "reason": "deploy union tips",
+  "since": "2026-08-19T01:00:00Z",
+  "expires_at": "2126-08-19T02:00:00Z"
+}`
+	if err := os.WriteFile(path, []byte(legacy), 0600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	h, err := readClaimHoldFile(path)
+	if err != nil || h == nil {
+		t.Fatalf("readClaimHoldFile = (%v, %v)", h, err)
+	}
+	if h.Repos != nil {
+		t.Fatalf("Repos = %v, want nil (workspace-wide)", h.Repos)
+	}
+	if h.Scoped() {
+		t.Fatal("a pre-scope record reported a scope")
+	}
+	if !h.HoldsRepo("anything") {
+		t.Fatal("a pre-scope record stopped holding a repo; that is the regression")
+	}
+
+	// And a scoped record round-trips through the same file.
+	scoped := &supervisor.ClaimHold{
+		Held: true, Actor: "oleh", Reason: "deploy", Since: time.Now().Truncate(time.Second),
+		Repos: []string{"fleet-db"},
+	}
+	if err := writeClaimHoldFile(path, scoped); err != nil {
+		t.Fatalf("writeClaimHoldFile: %v", err)
+	}
+	back, err := readClaimHoldFile(path)
+	if err != nil {
+		t.Fatalf("readClaimHoldFile: %v", err)
+	}
+	if !reflect.DeepEqual(back.Repos, []string{"fleet-db"}) {
+		t.Fatalf("Repos = %v after a round trip", back.Repos)
+	}
+}
+
+// A corrupt record may name repos that can no longer be read, so the fail-safe
+// must be the strictest hold there is.
+func TestLoadClaimHoldAtStartup_FailSafeHoldIsUnscoped(t *testing.T) {
+	path := filepath.Join(t.TempDir(), claimHoldFileName)
+	if err := os.WriteFile(path, []byte("{not json"), 0600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	h := loadClaimHoldAtStartup(path)
+	if h == nil || !h.Held {
+		t.Fatalf("corrupt record did not produce a fail-safe hold: %#v", h)
+	}
+	if h.Scoped() {
+		t.Fatalf("fail-safe hold is scoped to %v; it must hold everything", h.Repos)
+	}
+}
+
+func TestClaimHoldBanner_NamesTheRepoScope(t *testing.T) {
+	unscoped := &supervisor.ClaimHold{
+		Held: true, Actor: "oleh", Reason: "deploy",
+		Since: time.Now(), ExpiresAt: time.Now().Add(time.Hour),
+	}
+	if b := claimHoldBanner(unscoped); !strings.Contains(b, "repos all") {
+		t.Fatalf("unscoped banner = %q, want it to say every repo is held", b)
+	}
+	scoped := &supervisor.ClaimHold{
+		Held: true, Actor: "oleh", Reason: "deploy", Since: time.Now(),
+		Repos: []string{"fleet-db", "loomcli"},
+	}
+	if b := claimHoldBanner(scoped); !strings.Contains(b, "repos fleet-db, loomcli") {
+		t.Fatalf("scoped banner = %q, want it to name the scope", b)
+	}
+}
+
+// A workspace-wide `running` list under a scoped hold could never reach idle:
+// agents on un-held repos keep claiming, so every --wait-idle would burn its
+// whole timeout.
+func TestClaimHoldStatus_RunningIsFilteredToTheScope(t *testing.T) {
+	d, _ := scopedHoldDaemon(t)
+	d.sup.Agents[0].Entry.Repos = []string{"loomcli"}
+	d.sup.Agents[0].Pid = os.Getpid()
+	d.sup.Agents[1].Entry.Repos = []string{"fleet-db"}
+	d.sup.Agents[1].Pid = os.Getpid()
+
+	if resp := d.handleClaimHoldSet(setArgs(t, claimHoldSetArgs{
+		Held: true, Actor: "union-autodeploy", Reason: "deploy", TTLSeconds: 600,
+		Repos: []string{"fleet-db"},
+	})); !resp.Success {
+		t.Fatalf("set: %s", resp.Error)
+	}
+
+	status := d.claimHoldStatus()
+	if len(status.Running) != 1 || status.Running[0].Agent != "beta" {
+		t.Fatalf("running = %#v, want only the fleet-db agent", status.Running)
+	}
+
+	// Unscoped, both agents are back in the wait.
+	if resp := d.handleClaimHoldSet(setArgs(t, claimHoldSetArgs{
+		Held: true, Actor: "union-autodeploy", Reason: "deploy", TTLSeconds: 600,
+	})); !resp.Success {
+		t.Fatalf("set: %s", resp.Error)
+	}
+	if len(d.claimHoldStatus().Running) != 2 {
+		t.Fatalf("running = %#v, want both agents under an unscoped hold", d.claimHoldStatus().Running)
+	}
+}
+
+// A repo-UNBOUND agent is counted as running whatever the scope: nothing says
+// which repo it is working, so a quiesce must assume it could be the held one.
+func TestClaimHoldStatus_UnboundAgentAlwaysBlocksTheWait(t *testing.T) {
+	d, _ := scopedHoldDaemon(t)
+	d.sup.Agents[0].Pid = os.Getpid() // no Repos: unbound
+
+	if resp := d.handleClaimHoldSet(setArgs(t, claimHoldSetArgs{
+		Held: true, Actor: "union-autodeploy", Reason: "deploy", TTLSeconds: 600,
+		Repos: []string{"fleet-db"},
+	})); !resp.Success {
+		t.Fatalf("set: %s", resp.Error)
+	}
+	if len(d.claimHoldStatus().Running) != 1 {
+		t.Fatal("a repo-unbound agent was excluded from a scoped quiesce; it must fail safe")
 	}
 }

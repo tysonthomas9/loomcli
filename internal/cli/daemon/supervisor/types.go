@@ -53,6 +53,7 @@ type AgentProcess struct {
 	RequestedTaskID        string            // task requested by a lifecycle command before normal queue selection
 	ResumeTaskID           string            // interrupted task to re-claim this cycle (detected from a surviving crash-remnant lock); drives claimResumeTask for BOTH resume and checkpoint recovery. Per-cycle: cleared in clearAgentSessionState, re-detected in preFlightSetup
 	ResumeFailures         int               // consecutive failed RECOVERY attempts — resume AND checkpoint fallback (PERSISTS across cycles); escalation: resume×maxResumeFailures → checkpoint×1 → cold-start
+	HeldRepos              []string          // this cycle's repo-scoped claim-hold set (nil = no scoped hold); per-cycle: set by gateClaimsHeld, read by claimTask's candidate filter, cleared in clearAgentSessionState
 	RecoveryMode           recoveryMode      // this cycle's recovery classification (resume|checkpoint|cold); per-cycle, set in preFlightSetup, read by recordResumeOutcome to decide whether the run's outcome advances ResumeFailures
 	YieldRequested         bool              // a yield file was written for this run (RequestYield succeeded). Per-cycle: cleared in clearAgentSessionState
 	YieldEscalated         bool              // the yield deadline expired (or the yield write failed) and DrainWithGrace escalated to SIGTERM — so this exit is a KILL, not a graceful yield. Per-cycle: cleared in clearAgentSessionState
@@ -106,7 +107,7 @@ type AgentProcess struct {
 	// task. False for every other stop reason.
 	RunSilentAtStop bool
 
-	Mu sync.Mutex // protects Cmd, Pid, LogFile, LogFileStartOffset, SoftKnobWarning, ProfileError, restart tracking, IdleSince, AssignedEpicID, AssignedTaskID, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, YieldRequested, YieldEscalated, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, RunSilentAtStop, LastActivity, InputWaitPending, InputWaitSince, AbandonedRunsChecked, CredentialKey
+	Mu sync.Mutex // protects Cmd, Pid, LogFile, LogFileStartOffset, SoftKnobWarning, ProfileError, restart tracking, IdleSince, AssignedEpicID, AssignedTaskID, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, HeldRepos, YieldRequested, YieldEscalated, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, RunSilentAtStop, LastActivity, InputWaitPending, InputWaitSince, AbandonedRunsChecked, CredentialKey
 }
 
 // StopReason identifies why an agent was stopped.
@@ -235,6 +236,7 @@ type SupervisedAgentStatus struct {
 	OwnershipLeaseID       string
 	OwnershipFencingToken  int64
 	OwnershipLastHeartbeat time.Time
+	SourceRepos            []string  // repos this agent is bound to (nil = unbound, i.e. eligible for every repo); resolved from the agent entry and the workspace repo list
 	AssignedTaskID         string    // task currently claimed by this agent (empty when between tasks)
 	LastActivity           time.Time // most recent PTY output observed by the wrapper; zero if no observation yet
 	ClaimsGated            bool      // agent is cycling but gated by an active claim hold

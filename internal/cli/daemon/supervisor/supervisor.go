@@ -450,6 +450,7 @@ func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 	ap.RecoveryMode = recoverCold // per-cycle; re-classified in preFlightSetup
 	ap.YieldRequested = false     // per-cycle; re-set by RequestYield
 	ap.YieldEscalated = false     // per-cycle; re-set by DrainWithGrace
+	ap.HeldRepos = nil            // per-cycle; re-stashed by gateClaimsHeld
 	ap.LastActivity = time.Time{}
 	// A child that died while parked on an interactive prompt never sends its
 	// "end", so the in-flight count must not survive into the next cycle: a
@@ -766,6 +767,7 @@ func (s *Supervisor) GetAgents() []SupervisedAgentStatus {
 		result[i].CurrentBackend = s.GetEffectiveBackend(ap)
 		// Resolve remote branch (reads immutable config, no mutex needed)
 		result[i].RemoteBranch = ap.ResolveRemoteBranch()
+		result[i].SourceRepos = s.agentSourceRepos(ap) // reads immutable config
 	}
 	return result
 }

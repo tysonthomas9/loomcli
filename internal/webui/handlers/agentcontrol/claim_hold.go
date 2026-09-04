@@ -62,6 +62,10 @@ func handleClaimHoldSet(holdFn ClaimHoldFn) http.HandlerFunc {
 			Reason:     req.Reason,
 			TTLSeconds: req.TTLSeconds,
 			Force:      req.Force,
+			// Unvalidated here on purpose: the daemon owns the repo list and
+			// rejects an unknown name, and a second opinion in this proxy could
+			// only diverge from it.
+			Repos: req.Repos,
 		})
 	}
 }

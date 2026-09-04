@@ -3581,7 +3581,8 @@ All three routes answer with the same payload.
     "actor": "deployer",
     "reason": "loom redeploy",
     "since": "2026-08-19T01:00:00Z",
-    "expires_at": "2026-08-19T02:00:00Z"
+    "expires_at": "2026-08-19T02:00:00Z",
+    "repos": ["fleet-db"]
   },
   "running": [
     {"agent": "falcon", "task_id": "PUPPET-1", "pid": 4242, "started_at": "2026-08-19T00:41:00Z"}
@@ -3592,8 +3593,14 @@ All three routes answer with the same payload.
 
 - `hold` is `null` when claims are free.
 - `expires_at` is omitted for an indefinite hold.
+- `repos` is the hold's repo scope; it is **omitted for a workspace-wide hold**,
+  which is also what a hold taken before the field existed means. A scoped hold
+  is a partial hold: it lets the ready query run and filters the candidates, so
+  unlike an unscoped hold it is *not* safe while fleet-db itself is redeploying.
 - `running` lists agents whose runs were already in flight; a hold never touches
-  them, so this is what a quiesce is still waiting on.
+  them, so this is what a quiesce is still waiting on. Under a scoped hold it is
+  filtered to agents that may be working a held repo (a repo-unbound agent
+  counts, fail-safe).
 - `gated` counts agents that are cycling but refused at the claim gate.
 
 ### `GET /api/workspaces/{ws}/claims/hold`
@@ -3605,12 +3612,12 @@ All three routes answer with the same payload.
 ### `POST /api/workspaces/{ws}/claims/hold`
 
 Take, or idempotently refresh, the hold. A refresh by the same actor preserves
-the original `since` while updating `reason` and `expires_at`.
+the original `since` while updating `reason`, `expires_at` and `repos`.
 
 - **Request body:**
 
 ```json
-{"reason": "loom redeploy", "ttl_seconds": 3600, "actor": "deployer", "force": false}
+{"reason": "loom redeploy", "ttl_seconds": 3600, "actor": "deployer", "force": false, "repos": ["fleet-db"]}
 ```
 
 | Field | Required | Description |
@@ -3619,9 +3626,11 @@ the original `since` while updating `reason` and `expires_at`.
 | `ttl_seconds` | no | Self-release after this many seconds (daemon default 3600, clamped to 60…86400). Omit for indefinite |
 | `actor` | no | Overrides the resolved actor |
 | `force` | no | Replace a hold owned by a different actor |
+| `repos` | no | Limit the hold to these repos. Omit (or `[]`) for a workspace-wide hold. Names are trimmed, de-duplicated and sorted; an unknown repo name is rejected |
 
 - **Response `200 OK`:** `ClaimHoldStatus`
 - **Response `400`:** missing `reason`, negative `ttl_seconds`, or a malformed body
+- **Response `502`:** the daemon rejected the request, e.g. an unknown repo in `repos`
 - **Response `409`:** another actor holds the claims and `force` was not set
 - **Response `503` / `504`:** supervisor unreachable / did not answer in time
 

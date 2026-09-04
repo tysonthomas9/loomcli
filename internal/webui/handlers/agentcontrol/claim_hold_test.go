@@ -264,3 +264,49 @@ func TestHandleClaimHoldRelease_QueryParamsCarryActorAndForce(t *testing.T) {
 		t.Errorf("args = %+v, want alice with force", args)
 	}
 }
+
+// --- repo scope ---
+
+func TestHandleClaimHoldSet_ForwardsRepoScope(t *testing.T) {
+	fn, calls := newMockHoldFn(&AgentControlResult{Success: true, Data: holdStatusData(t, "alice")}, nil)
+
+	rec := serveRequest(handleClaimHoldSet(fn), "POST", "/api/workspaces/ws1/claims/hold",
+		`{"reason":"redeploy","actor":"alice","repos":["fleet-db"]}`)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+	var args claimHoldSetArgs
+	if err := json.Unmarshal((*calls)[0].args, &args); err != nil {
+		t.Fatalf("unmarshal args: %v", err)
+	}
+	if len(args.Repos) != 1 || args.Repos[0] != "fleet-db" {
+		t.Fatalf("args.Repos = %v, want [fleet-db]", args.Repos)
+	}
+}
+
+// Omitting repos must stay a workspace-wide hold, and must not put an empty
+// list on the wire where the daemon would have to tell it from "unset".
+func TestHandleClaimHoldSet_NoReposIsWorkspaceWide(t *testing.T) {
+	fn, calls := newMockHoldFn(&AgentControlResult{Success: true, Data: holdStatusData(t, "alice")}, nil)
+
+	serveRequest(handleClaimHoldSet(fn), "POST", "/api/workspaces/ws1/claims/hold",
+		`{"reason":"redeploy","actor":"alice"}`)
+
+	if strings.Contains(string((*calls)[0].args), "repos") {
+		t.Fatalf("args = %s, want no repos field at all", (*calls)[0].args)
+	}
+}
+
+func TestHandleClaimHoldGet_EchoesTheRepoScope(t *testing.T) {
+	fn, _ := newMockHoldFn(&AgentControlResult{Success: true, Data: json.RawMessage(
+		`{"hold":{"held":true,"actor":"deployer","reason":"redeploy",` +
+			`"since":"2026-08-19T01:00:00Z","repos":["fleet-db"]},"running":[],"gated":0}`)}, nil)
+
+	rec := serveRequest(handleClaimHoldGet(fn), "GET", "/api/workspaces/ws1/claims/hold", "")
+
+	got := decodeHoldStatus(t, rec)
+	if got.Hold == nil || len(got.Hold.Repos) != 1 || got.Hold.Repos[0] != "fleet-db" {
+		t.Fatalf("hold = %+v, want the scope echoed through", got.Hold)
+	}
+}
