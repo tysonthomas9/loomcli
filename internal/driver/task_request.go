@@ -30,6 +30,8 @@ type TaskRunRequestOptions struct {
 	DriverStepID       string
 	TaskRunID          string
 	TaskID             string
+	ExecutionClass     domain.TaskRunExecutionClass
+	ChangeSetVersion   int
 	WorkerProfileID    string
 	Runner             string
 	RunnerRef          string
@@ -79,26 +81,32 @@ type TaskRunWorkerOptions struct {
 }
 
 type TaskExecRequest struct {
-	WorkspaceKey     string                  `json:"workspace_key"`
-	DriverRunID      string                  `json:"driver_run_id"`
-	DriverStepID     string                  `json:"driver_step_id,omitempty"`
-	TaskRunID        string                  `json:"task_run_id"`
-	TaskID           string                  `json:"task_id"`
-	WorkerProfileID  string                  `json:"worker_profile_id,omitempty"`
-	Runner           string                  `json:"runner,omitempty"`
-	RunnerRef        string                  `json:"runner_ref,omitempty"`
-	RunnerKind       string                  `json:"runner_kind,omitempty"`
-	RunnerEntrypoint string                  `json:"runner_entrypoint,omitempty"`
-	RunnerVersionID  string                  `json:"runner_driver_version_id,omitempty"`
-	RunnerTrustLevel domain.DriverTrustLevel `json:"runner_trust_level,omitempty"`
-	ProviderProfile  string                  `json:"provider_profile,omitempty"`
-	ParentSessionID  string                  `json:"parent_session_id,omitempty"`
-	NodeID           string                  `json:"node_id,omitempty"`
-	LeaseID          string                  `json:"lease_id,omitempty"`
-	LeaseToken       string                  `json:"lease_token,omitempty"`
-	FencingToken     int64                   `json:"fencing_token,omitempty"`
-	RunnerPlacement  domain.TaskRunPlacement `json:"runner_placement,omitempty"`
-	SandboxPlacement domain.TaskRunPlacement `json:"sandbox_placement,omitempty"`
+	WorkspaceKey       string                       `json:"workspace_key"`
+	DriverRunID        string                       `json:"driver_run_id"`
+	DriverStepID       string                       `json:"driver_step_id,omitempty"`
+	TaskRunID          string                       `json:"task_run_id"`
+	TaskID             string                       `json:"task_id"`
+	ExecutionClass     domain.TaskRunExecutionClass `json:"execution_class"`
+	ChangeSetVersion   int                          `json:"change_set_version,omitempty"`
+	RepositorySet      []string                     `json:"repository_set"`
+	RootGeneration     int64                        `json:"root_generation,omitempty"`
+	BackendSessionRef  string                       `json:"backend_session_ref,omitempty"`
+	ContinuationPrompt string                       `json:"continuation_prompt,omitempty"`
+	WorkerProfileID    string                       `json:"worker_profile_id,omitempty"`
+	Runner             string                       `json:"runner,omitempty"`
+	RunnerRef          string                       `json:"runner_ref,omitempty"`
+	RunnerKind         string                       `json:"runner_kind,omitempty"`
+	RunnerEntrypoint   string                       `json:"runner_entrypoint,omitempty"`
+	RunnerVersionID    string                       `json:"runner_driver_version_id,omitempty"`
+	RunnerTrustLevel   domain.DriverTrustLevel      `json:"runner_trust_level,omitempty"`
+	ProviderProfile    string                       `json:"provider_profile,omitempty"`
+	ParentSessionID    string                       `json:"parent_session_id,omitempty"`
+	NodeID             string                       `json:"node_id,omitempty"`
+	LeaseID            string                       `json:"lease_id,omitempty"`
+	LeaseToken         string                       `json:"lease_token,omitempty"`
+	FencingToken       int64                        `json:"fencing_token,omitempty"`
+	RunnerPlacement    domain.TaskRunPlacement      `json:"runner_placement,omitempty"`
+	SandboxPlacement   domain.TaskRunPlacement      `json:"sandbox_placement,omitempty"`
 	// Input is the task-run payload delivered verbatim to the runner via
 	// LOOM_TASK_RUN_REQUEST_JSON. Optional (omitempty) for back-compat.
 	Input json.RawMessage `json:"input,omitempty"`
@@ -510,30 +518,9 @@ func newTaskRunRequestRefs(opts TaskRunRequestOptions, parent *domain.DriverRun)
 }
 
 func createQueuedTaskRun(ctx context.Context, s store.Store, opts TaskRunRequestOptions, refs taskRunRequestRefs) (*domain.TaskRun, error) {
-	runtimeMetadata := map[string]string{
-		"driver_run_id": opts.DriverRunID,
-		"requested_by":  "driver",
-	}
-	if opts.Runner != "" {
-		runtimeMetadata["runner"] = opts.Runner
-	}
-	if opts.RunnerRef != "" {
-		runtimeMetadata["runner_ref"] = opts.RunnerRef
-	}
-	if opts.RunnerKind != "" {
-		runtimeMetadata["runner_kind"] = opts.RunnerKind
-	}
-	if opts.RunnerEntrypoint != "" {
-		runtimeMetadata["runner_entrypoint"] = opts.RunnerEntrypoint
-	}
-	if opts.RunnerVersionID != "" {
-		runtimeMetadata["runner_driver_version_id"] = opts.RunnerVersionID
-	}
-	if opts.RunnerTrustLevel != "" {
-		runtimeMetadata["runner_trust_level"] = string(opts.RunnerTrustLevel)
-	}
-	if opts.ParentSessionID != "" {
-		runtimeMetadata["parent_session_id"] = opts.ParentSessionID
+	executionClass := opts.ExecutionClass
+	if executionClass == "" {
+		executionClass = domain.TaskRunExecutionImplementation
 	}
 	return s.TaskRuns().Create(ctx, store.TaskRunCreate{
 		WorkspaceKey:     opts.WorkspaceKey,
@@ -541,6 +528,10 @@ func createQueuedTaskRun(ctx context.Context, s store.Store, opts TaskRunRequest
 		DriverRunID:      opts.DriverRunID,
 		DriverStepID:     opts.DriverStepID,
 		TaskID:           opts.TaskID,
+		ExecutionClass:   executionClass,
+		ChangeSetVersion: opts.ChangeSetVersion,
+		RootGeneration:   1,
+		BackendKind:      opts.ProviderProfile,
 		WorkerProfileID:  opts.WorkerProfileID,
 		Runner:           opts.Runner,
 		RunnerRef:        opts.RunnerRef,
@@ -552,9 +543,27 @@ func createQueuedTaskRun(ctx context.Context, s store.Store, opts TaskRunRequest
 		NodeID:           opts.NodeID,
 		RunnerPlacement:  opts.RunnerPlacement,
 		SandboxPlacement: opts.SandboxPlacement,
-		RuntimeMetadata:  runtimeMetadata,
+		RuntimeMetadata:  taskRunRuntimeMetadata(opts),
 		Input:            opts.Input,
 	})
+}
+
+func taskRunRuntimeMetadata(opts TaskRunRequestOptions) map[string]string {
+	metadata := map[string]string{"driver_run_id": opts.DriverRunID, "requested_by": "driver"}
+	for _, field := range []struct{ key, value string }{
+		{"runner", opts.Runner},
+		{"runner_ref", opts.RunnerRef},
+		{"runner_kind", opts.RunnerKind},
+		{"runner_entrypoint", opts.RunnerEntrypoint},
+		{"runner_driver_version_id", opts.RunnerVersionID},
+		{"runner_trust_level", string(opts.RunnerTrustLevel)},
+		{"parent_session_id", opts.ParentSessionID},
+	} {
+		if field.value != "" {
+			metadata[field.key] = field.value
+		}
+	}
+	return metadata
 }
 
 func claimQueuedTaskRunRequest(ctx context.Context, s store.Store, opts TaskRunRequestOptions, queued *domain.TaskRun, refs taskRunRequestRefs) (*domain.TaskRun, error) {
@@ -657,7 +666,8 @@ func executeClaimedTaskRunWithResult(ctx context.Context, s store.Store, claimed
 	if opts.DeferCompletion && completion.Status == domain.TaskRunCompleted {
 		return deferClaimedTaskRunCompletion(ctx, s, claimed, opts, execResult, completion, metadata)
 	}
-	if opts.CloseTaskOnSuccess && completion.Status == domain.TaskRunCompleted {
+	closeTaskOnSuccess := opts.CloseTaskOnSuccess && taskRunMayCloseTask(claimed, execResult)
+	if closeTaskOnSuccess && completion.Status == domain.TaskRunCompleted {
 		return completeAndCloseClaimedTaskRun(ctx, s, claimed, opts, refs, execResult, completion, metadata, evctx)
 	}
 	if retryTaskRun := taskRunRetryDecision(claimed, opts, completion); retryTaskRun.Retry {
@@ -685,6 +695,13 @@ func executeClaimedTaskRunWithResult(ctx context.Context, s store.Store, claimed
 		return nil, err
 	}
 	return &TaskRunRequestOutcome{Run: final, LeaseToken: opts.LeaseToken, ArtifactIDs: normalizeArtifactIDs(execResult.ArtifactIDs)}, nil
+}
+
+func taskRunMayCloseTask(run *domain.TaskRun, result TaskExecResult) bool {
+	if run == nil || run.ExecutionClass == "" || run.ExecutionClass == domain.TaskRunExecutionReview {
+		return true
+	}
+	return run.ExecutionClass == domain.TaskRunExecutionImplementation && result.RuntimeMetadata["change_handoff_outcome"] == string(changeHandoffNoChange)
 }
 
 type claimedTaskRunRefs struct {
@@ -745,27 +762,32 @@ func startClaimedTaskRunHeartbeat(ctx context.Context, s store.Store, claimed *d
 
 func taskExecRequest(claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, refs claimedTaskRunRefs) TaskExecRequest {
 	return TaskExecRequest{
-		WorkspaceKey:     refs.WorkspaceKey,
-		DriverRunID:      refs.DriverRunID,
-		DriverStepID:     refs.DriverStepID,
-		TaskRunID:        claimed.TaskRunID,
-		TaskID:           refs.TaskID,
-		WorkerProfileID:  claimed.WorkerProfileID,
-		Runner:           refs.Runner,
-		RunnerRef:        refs.RunnerRef,
-		RunnerKind:       refs.RunnerKind,
-		RunnerEntrypoint: refs.RunnerEntrypoint,
-		RunnerVersionID:  refs.RunnerVersionID,
-		RunnerTrustLevel: refs.RunnerTrustLevel,
-		ProviderProfile:  refs.ProviderProfile,
-		ParentSessionID:  refs.ParentSessionID,
-		NodeID:           claimed.NodeID,
-		LeaseID:          claimed.LeaseID,
-		LeaseToken:       opts.LeaseToken,
-		FencingToken:     claimed.FencingToken,
-		RunnerPlacement:  claimed.RunnerPlacement,
-		SandboxPlacement: claimed.SandboxPlacement,
-		Input:            claimed.Input,
+		WorkspaceKey:      refs.WorkspaceKey,
+		DriverRunID:       refs.DriverRunID,
+		DriverStepID:      refs.DriverStepID,
+		TaskRunID:         claimed.TaskRunID,
+		TaskID:            refs.TaskID,
+		ExecutionClass:    claimed.ExecutionClass,
+		ChangeSetVersion:  claimed.ChangeSetVersion,
+		RepositorySet:     append([]string(nil), claimed.RepositorySet...),
+		RootGeneration:    claimed.RootGeneration,
+		BackendSessionRef: claimed.BackendSessionRef,
+		WorkerProfileID:   claimed.WorkerProfileID,
+		Runner:            refs.Runner,
+		RunnerRef:         refs.RunnerRef,
+		RunnerKind:        refs.RunnerKind,
+		RunnerEntrypoint:  refs.RunnerEntrypoint,
+		RunnerVersionID:   refs.RunnerVersionID,
+		RunnerTrustLevel:  refs.RunnerTrustLevel,
+		ProviderProfile:   refs.ProviderProfile,
+		ParentSessionID:   refs.ParentSessionID,
+		NodeID:            claimed.NodeID,
+		LeaseID:           claimed.LeaseID,
+		LeaseToken:        opts.LeaseToken,
+		FencingToken:      claimed.FencingToken,
+		RunnerPlacement:   claimed.RunnerPlacement,
+		SandboxPlacement:  claimed.SandboxPlacement,
+		Input:             claimed.Input,
 	}
 }
 

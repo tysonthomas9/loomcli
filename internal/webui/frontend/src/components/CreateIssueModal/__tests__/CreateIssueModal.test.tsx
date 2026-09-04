@@ -414,7 +414,7 @@ describe("CreateIssueModal", () => {
       expect(callArgs).not.toHaveProperty("description");
     });
 
-    it("includes selected source_repo in multi-repo workspaces", async () => {
+    it("submits a primary repository and exact additional repository set", async () => {
       mockCreateIssue.mockResolvedValue(MOCK_ISSUE);
       mockUseWorkspaceContext.mockReturnValue({
         workspaceId: "test-ws-id",
@@ -438,6 +438,7 @@ describe("CreateIssueModal", () => {
       fireEvent.change(screen.getByTestId("create-issue-source-repo"), {
         target: { value: "e2e-lib" },
       });
+      fireEvent.click(screen.getByTestId("create-issue-selected-repo-e2e-app"));
       fireEvent.click(screen.getByTestId("create-issue-submit"));
 
       await waitFor(() => {
@@ -446,6 +447,8 @@ describe("CreateIssueModal", () => {
           issue_type: "task",
           priority: 2,
           source_repo: "e2e-lib",
+          primary_repository: "e2e-lib",
+          selected_repositories: ["e2e-app"],
         });
       });
     });
@@ -477,6 +480,7 @@ describe("CreateIssueModal", () => {
           issue_type: "task",
           priority: 2,
           source_repo: "hello-world",
+          primary_repository: "hello-world",
         });
       });
     });

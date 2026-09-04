@@ -495,66 +495,6 @@ func (s TaskRunStatus) IsTerminal() bool {
 	}
 }
 
-type TaskRun struct {
-	WorkspaceKey     string           `json:"workspace_key"`
-	TaskRunID        string           `json:"task_run_id"`
-	DriverRunID      string           `json:"driver_run_id,omitempty"`
-	DriverStepID     string           `json:"driver_step_id,omitempty"`
-	TaskID           string           `json:"task_id"`
-	WorkerProfileID  string           `json:"worker_profile_id,omitempty"`
-	Runner           string           `json:"runner,omitempty"`
-	RunnerRef        string           `json:"runner_ref,omitempty"`
-	RunnerKind       string           `json:"runner_kind,omitempty"`
-	RunnerEntrypoint string           `json:"runner_entrypoint,omitempty"`
-	RunnerVersionID  string           `json:"runner_driver_version_id,omitempty"`
-	ProviderProfile  string           `json:"provider_profile,omitempty"`
-	Status           TaskRunStatus    `json:"status"`
-	NodeID           string           `json:"node_id,omitempty"`
-	LeaseID          string           `json:"lease_id,omitempty"`
-	FencingToken     int64            `json:"fencing_token,omitempty"`
-	RunnerPlacement  TaskRunPlacement `json:"runner_placement,omitempty"`
-	SandboxPlacement TaskRunPlacement `json:"sandbox_placement,omitempty"`
-	// Input is the optional task-run payload supplied by the requester
-	// (e.g. a github-review-agent's diff+rubric). It is persisted verbatim
-	// and delivered to the runner so the task harness can act on it.
-	// Optional / back-compat: runs created without it behave as before.
-	Input            json.RawMessage   `json:"input,omitempty"`
-	ExitCode         *int              `json:"exit_code,omitempty"`
-	LogsRef          string            `json:"logs_ref,omitempty"`
-	ArtifactsRef     string            `json:"artifacts_ref,omitempty"`
-	InputTokens      int64             `json:"input_tokens,omitempty"`
-	OutputTokens     int64             `json:"output_tokens,omitempty"`
-	CacheReadTokens  int64             `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens int64             `json:"cache_write_tokens,omitempty"`
-	EstimatedCostUSD float64           `json:"estimated_cost_usd,omitempty"`
-	RuntimeMetadata  map[string]string `json:"runtime_metadata,omitempty"`
-	NextEligibleAt   time.Time         `json:"next_eligible_at,omitempty"`
-	StartedAt        time.Time         `json:"started_at,omitempty"`
-	LastHeartbeat    time.Time         `json:"last_heartbeat,omitempty"`
-	FinishedAt       *time.Time        `json:"finished_at,omitempty"`
-	ErrorClass       string            `json:"error_class,omitempty"`
-	ErrorMessage     string            `json:"error_message,omitempty"`
-	CreatedAt        time.Time         `json:"created_at"`
-	UpdatedAt        time.Time         `json:"updated_at"`
-}
-
-type TaskRunPlacement struct {
-	Provider        string     `json:"provider,omitempty"`
-	NodeID          string     `json:"node_id,omitempty"`
-	RunnerID        string     `json:"runner_id,omitempty"`
-	ProcessRef      string     `json:"process_ref,omitempty"`
-	SandboxID       string     `json:"sandbox_id,omitempty"`
-	ImageOrSnapshot string     `json:"image_or_snapshot,omitempty"`
-	CWD             string     `json:"cwd,omitempty"`
-	RepoRef         string     `json:"repo_ref,omitempty"`
-	CleanupPolicy   string     `json:"cleanup_policy,omitempty"`
-	EgressMode      string     `json:"egress_mode,omitempty"`
-	EgressMechanism string     `json:"egress_mechanism,omitempty"`
-	StartedAt       time.Time  `json:"started_at,omitempty"`
-	HeartbeatAt     time.Time  `json:"heartbeat_at,omitempty"`
-	RetainedUntil   *time.Time `json:"retained_until,omitempty"`
-}
-
 func (p TaskRunPlacement) Empty() bool {
 	return p.Provider == "" &&
 		p.NodeID == "" &&

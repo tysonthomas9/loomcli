@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -24,6 +25,7 @@ const (
 	BuiltinEpicRunnerWorkflowName        = "epic-runner"
 	BuiltinGitHubReviewAgentWorkflowName = "github-review-agent"
 	BuiltinGitHubReviewTaskRunnerName    = "github-review-task-runner"
+	EnvBuiltinWorkflowBundleDir          = "LOOM_BUILTIN_WORKFLOW_BUNDLE_DIR"
 )
 
 //go:embed builtin/epic-runner.ts
@@ -299,6 +301,11 @@ func BuildBuiltinBundle(ctx context.Context, name, destDir string) (string, stri
 	if err := os.RemoveAll(destDir); err != nil {
 		return "", "", fmt.Errorf("clean builtin bundle dest %q: %w", destDir, err)
 	}
+	if packaged, err := copyPackagedBuiltinBundle(name, spec.Files, destDir); err != nil {
+		return "", "", err
+	} else if packaged {
+		return filepath.Join(destDir, "server.mjs"), "packaged builtin bundle", nil
+	}
 	buildRoot, err := os.MkdirTemp(filepath.Dir(destDir), name+"-source-build-*")
 	if err != nil {
 		return "", "", fmt.Errorf("create builtin source build root: %w", err)
@@ -361,19 +368,29 @@ func BuildAndRegister(ctx context.Context, st store.Store, opts BuildAndRegister
 		return nil, "", fmt.Errorf("create workflow build project: %w", err)
 	}
 	defer os.RemoveAll(buildRoot) //nolint:errcheck
-	if err := writeWorkflowBuildProject(buildRoot, opts.Files); err != nil {
-		return nil, "", err
-	}
 	outputDir := filepath.Join(buildRoot, "dist")
-	output, err := runFlueBuild(ctx, buildRoot, outputDir)
-	if err != nil {
-		redacted := RedactBuildDiagnostics(output)
-		if redacted != "" {
-			return nil, redacted, fmt.Errorf("flue build failed: %s", redacted)
+	output := "packaged builtin bundle"
+	packaged := false
+	if opts.Trust == domain.DriverTrustTrusted && strings.HasPrefix(opts.SourceRef, "builtin://") {
+		packaged, err = copyPackagedBuiltinBundle(opts.Name, opts.Files, outputDir)
+		if err != nil {
+			return nil, "", err
 		}
-		return nil, "", err
 	}
-	output = RedactBuildDiagnostics(output)
+	if !packaged {
+		if err := writeWorkflowBuildProject(buildRoot, opts.Files); err != nil {
+			return nil, "", err
+		}
+		output, err = runFlueBuild(ctx, buildRoot, outputDir)
+		if err != nil {
+			redacted := RedactBuildDiagnostics(output)
+			if redacted != "" {
+				return nil, redacted, fmt.Errorf("flue build failed: %s", redacted)
+			}
+			return nil, "", err
+		}
+		output = RedactBuildDiagnostics(output)
+	}
 	result, err := driver.RegisterFlueDriver(ctx, st, driver.RegisterFlueOptions{
 		WorkspaceKey:     opts.WorkspaceKey,
 		WorkDir:          workDir,
@@ -393,6 +410,79 @@ func BuildAndRegister(ctx context.Context, st store.Store, opts BuildAndRegister
 		return nil, output, err
 	}
 	return result, output, nil
+}
+
+// copyPackagedBuiltinBundle copies a build-time bundled workflow into destDir.
+// The source digest is checked against the embedded source before any artifact
+// is trusted, so a stale desktop package fails visibly instead of running code
+// from a different Loom revision. Symlinks are rejected to keep the copy rooted
+// inside the signed application resource directory.
+func copyPackagedBuiltinBundle(name string, files map[string]string, destDir string) (bool, error) {
+	root := strings.TrimSpace(os.Getenv(EnvBuiltinWorkflowBundleDir))
+	if root == "" {
+		return false, nil
+	}
+	sourceDir := filepath.Join(root, name)
+	digestBytes, err := os.ReadFile(filepath.Join(sourceDir, "source-digest.txt")) //nolint:gosec // path is rooted in the configured application resource directory
+	if err != nil {
+		return false, fmt.Errorf("read packaged builtin bundle digest for %q: %w", name, err)
+	}
+	wantDigest := SourceDigest(files)
+	if gotDigest := strings.TrimSpace(string(digestBytes)); gotDigest != wantDigest {
+		return false, fmt.Errorf("packaged builtin bundle digest for %q is %q, want %q", name, gotDigest, wantDigest)
+	}
+	if err := copyBundleTree(sourceDir, destDir); err != nil {
+		return false, fmt.Errorf("copy packaged builtin bundle %q: %w", name, err)
+	}
+	if _, err := os.Stat(filepath.Join(destDir, "server.mjs")); err != nil {
+		return false, fmt.Errorf("packaged builtin bundle %q missing server.mjs: %w", name, err)
+	}
+	return true, nil
+}
+
+func copyBundleTree(sourceDir, destDir string) error {
+	return filepath.WalkDir(sourceDir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(sourceDir, path)
+		if err != nil {
+			return err
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("symlink %q is not allowed", rel)
+		}
+		target := filepath.Join(destDir, rel)
+		if entry.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("non-regular file %q is not allowed", rel)
+		}
+		input, err := os.Open(path) //nolint:gosec // path was emitted by WalkDir under sourceDir
+		if err != nil {
+			return err
+		}
+		output, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, info.Mode().Perm()) //nolint:gosec // target is rooted under destDir
+		if err != nil {
+			_ = input.Close()
+			return err
+		}
+		_, copyErr := io.Copy(output, input)
+		inputCloseErr := input.Close()
+		closeErr := output.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if inputCloseErr != nil {
+			return inputCloseErr
+		}
+		return closeErr
+	})
 }
 
 // deprecatedWorkflowRunners are sibling runner files that must never be

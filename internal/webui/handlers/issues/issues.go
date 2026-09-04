@@ -87,23 +87,25 @@ type IssueCreateRequest struct {
 	Priority  int    `json:"priority"`
 
 	// Optional fields - match rpc.CreateArgs
-	ID                 string   `json:"id,omitempty"`
-	Parent             string   `json:"parent,omitempty"`
-	Description        string   `json:"description,omitempty"`
-	Status             string   `json:"status,omitempty"`
-	Design             string   `json:"design,omitempty"`
-	AcceptanceCriteria string   `json:"acceptance_criteria,omitempty"`
-	Notes              string   `json:"notes,omitempty"`
-	Assignee           string   `json:"assignee,omitempty"`
-	Owner              string   `json:"owner,omitempty"`
-	CreatedBy          string   `json:"created_by,omitempty"`
-	ExternalRef        string   `json:"external_ref,omitempty"`
-	EstimatedMinutes   *int     `json:"estimated_minutes,omitempty"`
-	Labels             []string `json:"labels,omitempty"`
-	Dependencies       []string `json:"dependencies,omitempty"`
-	DueAt              string   `json:"due_at,omitempty"`
-	DeferUntil         string   `json:"defer_until,omitempty"`
-	SourceRepo         string   `json:"source_repo,omitempty"`
+	ID                   string   `json:"id,omitempty"`
+	Parent               string   `json:"parent,omitempty"`
+	Description          string   `json:"description,omitempty"`
+	Status               string   `json:"status,omitempty"`
+	Design               string   `json:"design,omitempty"`
+	AcceptanceCriteria   string   `json:"acceptance_criteria,omitempty"`
+	Notes                string   `json:"notes,omitempty"`
+	Assignee             string   `json:"assignee,omitempty"`
+	Owner                string   `json:"owner,omitempty"`
+	CreatedBy            string   `json:"created_by,omitempty"`
+	ExternalRef          string   `json:"external_ref,omitempty"`
+	EstimatedMinutes     *int     `json:"estimated_minutes,omitempty"`
+	Labels               []string `json:"labels,omitempty"`
+	Dependencies         []string `json:"dependencies,omitempty"`
+	DueAt                string   `json:"due_at,omitempty"`
+	DeferUntil           string   `json:"defer_until,omitempty"`
+	SourceRepo           string   `json:"source_repo,omitempty"`
+	PrimaryRepository    string   `json:"primary_repository,omitempty"`
+	SelectedRepositories []string `json:"selected_repositories,omitempty"`
 }
 
 // writeIssuesError writes a JSON error response for the issues endpoint.

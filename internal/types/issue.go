@@ -45,9 +45,11 @@ type Issue struct {
 	DeferUntil *time.Time `json:"defer_until,omitempty"` // Hide from ready work queues until this time
 
 	// ===== External Integration =====
-	ExternalRef  *string `json:"external_ref,omitempty"`  // e.g., "gh-9", "jira-ABC"
-	SourceSystem string  `json:"source_system,omitempty"` // Adapter/system that created this issue (federation)
-	SourceRepo   string  `json:"source_repo,omitempty"`   // Which repo owns this issue (multi-repo support)
+	ExternalRef          *string  `json:"external_ref,omitempty"`  // e.g., "gh-9", "jira-ABC"
+	SourceSystem         string   `json:"source_system,omitempty"` // Adapter/system that created this issue (federation)
+	SourceRepo           string   `json:"source_repo,omitempty"`   // Which repo owns this issue (multi-repo support)
+	PrimaryRepository    string   `json:"primary_repository,omitempty"`
+	SelectedRepositories []string `json:"selected_repositories,omitempty"`
 
 	// ===== Compaction Metadata =====
 	CompactionLevel   int        `json:"compaction_level,omitempty"`

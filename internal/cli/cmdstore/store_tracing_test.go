@@ -49,6 +49,18 @@ func TestTracedArtifactStore_ForwardsReadContent(t *testing.T) {
 	}
 }
 
+func TestWrapStoreWithTracingExposesInnerStoreForOptionalCapabilities(t *testing.T) {
+	inner := memstore.New()
+	wrapped := WrapStoreWithTracing(inner)
+	unwrapper, ok := wrapped.(store.StoreUnwrapper)
+	if !ok {
+		t.Fatal("traced Store does not implement StoreUnwrapper")
+	}
+	if got := unwrapper.UnwrapStore(); got != inner {
+		t.Fatalf("UnwrapStore = %T, want original %T", got, inner)
+	}
+}
+
 // TestWrapStoreWithTracing_Smoke exercises every traced substore method so
 // the span-decorator paths are reached. We don't assert behavior — the
 // underlying memstore already has its own coverage; this is a guard

@@ -370,12 +370,10 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 	//   --auth-dev-mode                     accept X-Actor as identity (no JWT setup)
 	//   --authz-enabled=false               single-user mode skips RBAC
 	//   --rpc-enabled=false                 embedded mode uses HTTP only; avoid binding /var/run
-	cmd := exec.CommandContext(ctx, binPath, //nolint:gosec // binPath is from controlled discovery
-		"--redis-durability-profile=managed",
-		"--auth-dev-mode",
-		"--authz-enabled=false",
-		"--rpc-enabled=false",
-	)
+	//   --rate-limit-enabled=false          this process is a private, single-user desktop
+	//                                       sidecar; Loom's own workspace polling and task
+	//                                       workers must not throttle one another
+	cmd := exec.CommandContext(ctx, binPath, embeddedFleetDBArgs()...) //nolint:gosec // binPath is from controlled discovery
 	cmd.Env = append(os.Environ(),
 		"FLEET_SERVER_ADDR="+httpAddr,
 		"FLEET_REDIS_ADDR="+redisAddr,
@@ -454,6 +452,16 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 
 	releaseLockOnError = false
 	return emb, nil
+}
+
+func embeddedFleetDBArgs() []string {
+	return []string{
+		"--redis-durability-profile=managed",
+		"--auth-dev-mode",
+		"--authz-enabled=false",
+		"--rpc-enabled=false",
+		"--rate-limit-enabled=false",
+	}
 }
 
 // URL returns the base HTTP URL of the embedded fleet-db (no trailing slash).

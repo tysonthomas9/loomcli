@@ -3,12 +3,10 @@ import type { RepoInfo, WorkspaceAgentInfo } from "@/api/workspace/workspace";
 import {
   createWorkspaceAgent,
   deleteWorkspaceAgent,
-} from "@/api/workspace/workspace";
-import {
   EPIC_RUNNER_WORKFLOW_NAME,
   startWorkflowRun,
   type WorkflowRun,
-} from "@/api/workflows/workflows";
+} from "@/api";
 import type { Issue } from "@/types";
 import {
   epicRunnerRuntimePayload,
@@ -63,14 +61,21 @@ function isAgentNameConflict(error: unknown): boolean {
 
 export interface StartEpicRunnerForIssueParams {
   workspaceId: string;
-  issue: Issue;
+  issue: Pick<Issue, "id" | "issue_type" | "repo" | "source_repo" | "labels">;
   repos: Pick<
     RepoInfo,
     "name" | "source_repo_id" | "remote" | "remote_url" | "default_branch"
   >[];
-  workspaceAgentNames: Iterable<string>;
+  agents: Iterable<EpicLeadCandidate>;
   localSettings: LocalSettingsData | null | undefined;
   upsertAgent?: ((agent: WorkspaceAgentInfo) => void) | undefined;
+}
+
+export interface EpicLeadCandidate {
+  name: string;
+  parent?: string;
+  role?: string;
+  role_name?: string;
 }
 
 export interface StartEpicRunnerForIssueResult {
@@ -82,7 +87,7 @@ export async function startEpicRunnerForIssue({
   workspaceId,
   issue,
   repos,
-  workspaceAgentNames,
+  agents,
   localSettings,
   upsertAgent,
 }: StartEpicRunnerForIssueParams): Promise<StartEpicRunnerForIssueResult> {
@@ -97,14 +102,23 @@ export async function startEpicRunnerForIssue({
     currentRepo,
   });
   const repoNames = leadAgentRepoNames(repos, currentRepo);
-  const leadNames = new Set<string>(
-    Array.from(workspaceAgentNames, (name) => name),
-  );
+  const knownAgents = Array.from(agents);
+  const existingLead = knownAgents.find((agent) => {
+    const role = (agent.role_name ?? agent.role ?? "").trim().toLowerCase();
+    return (
+      agent.parent === issue.id && (role === "lead" || role === "orchestrator")
+    );
+  });
+  const leadNames = new Set<string>(knownAgents.map((agent) => agent.name));
   let leadAgentName = "";
   let createdLeadAgentName = "";
   let lastCreateError: unknown = null;
 
-  for (let attempt = 0; attempt < 5; attempt += 1) {
+  if (existingLead) {
+    leadAgentName = existingLead.name;
+  }
+
+  for (let attempt = 0; !leadAgentName && attempt < 5; attempt += 1) {
     const candidate = nextEpicLeadName(issue.id, leadNames);
     leadNames.add(candidate);
 

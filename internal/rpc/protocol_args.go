@@ -46,7 +46,9 @@ type CreateArgs struct {
 	DueAt      string `json:"due_at,omitempty"`      // Relative or ISO format due date
 	DeferUntil string `json:"defer_until,omitempty"` // Relative or ISO format defer date
 	// Multi-repo support
-	SourceRepo string `json:"source_repo,omitempty"` // Source repository for multi-repo workspaces
+	SourceRepo           string   `json:"source_repo,omitempty"` // Source repository for multi-repo workspaces
+	PrimaryRepository    string   `json:"primary_repository,omitempty"`
+	SelectedRepositories []string `json:"selected_repositories,omitempty"`
 }
 
 // UpdateArgs represents arguments for the update operation

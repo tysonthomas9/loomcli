@@ -44,15 +44,11 @@ export function useRunEpicWorkflow({ showToast }: UseRunEpicWorkflowOptions): {
       inFlightRef.current.add(issue.id);
       setRunningEpicIds((prev) => new Set(prev).add(issue.id));
       try {
-        const workspaceAgentNames = new Set<string>([
-          ...workspaceAgents.map((agent) => agent.name),
-          ...fleetAgents.map((agent) => agent.name),
-        ]);
         const { run, leadAgentName } = await startEpicRunnerForIssue({
           workspaceId,
           issue,
           repos,
-          workspaceAgentNames,
+          agents: [...workspaceAgents, ...fleetAgents],
           localSettings,
           upsertAgent,
         });
