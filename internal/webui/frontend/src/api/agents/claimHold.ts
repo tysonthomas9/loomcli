@@ -21,6 +21,11 @@ export interface ClaimHold {
   since: string;
   /** RFC3339 timestamp the hold self-releases; absent = indefinite. */
   expires_at?: string;
+  /**
+   * Repos the hold covers. Absent or empty = every repo in the workspace,
+   * which is also what a hold taken before this field existed means.
+   */
+  repos?: string[];
 }
 
 /** An agent whose run was already in flight when the hold went up. */
@@ -44,6 +49,8 @@ export interface SetClaimHoldBody {
   ttl_seconds?: number;
   actor?: string;
   force?: boolean;
+  /** Limit the hold to these repos; omit for a workspace-wide hold. */
+  repos?: string[];
 }
 
 export interface ReleaseClaimHoldBody {

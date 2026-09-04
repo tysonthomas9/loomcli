@@ -15,7 +15,11 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 
-import { ClaimHoldBanner, formatHoldAge } from "../ClaimHoldBanner";
+import {
+  ClaimHoldBanner,
+  formatHoldAge,
+  formatHoldScope,
+} from "../ClaimHoldBanner";
 
 const mockRelease = vi.fn();
 const mockUseClaimHold = vi.fn();
@@ -28,6 +32,7 @@ interface HoldOverrides {
   actor?: string;
   reason?: string;
   since?: string;
+  repos?: string[];
 }
 
 function holdState(
@@ -40,6 +45,7 @@ function holdState(
       actor: overrides.actor ?? "deployer",
       reason: overrides.reason ?? "loom redeploy",
       since: overrides.since ?? "2026-01-15T11:46:00.000Z",
+      ...(overrides.repos ? { repos: overrides.repos } : {}),
     },
     running: [],
     gated: 0,
@@ -144,5 +150,42 @@ describe("formatHoldAge", () => {
     [-5_000, "0s"],
   ])("formats %ims as %s", (ms, want) => {
     expect(formatHoldAge(ms as number)).toBe(want);
+  });
+});
+
+describe("repo scope", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-15T12:00:00.000Z"));
+    mockRelease.mockReset();
+    mockUseClaimHold.mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // "Which repos are stopped?" is the first question a held banner raises, so
+  // a workspace-wide hold says so rather than leaving it blank.
+  it("names every repo when the hold is unscoped", () => {
+    mockUseClaimHold.mockReturnValue(holdState());
+    render(<ClaimHoldBanner />);
+    expect(screen.getByRole("status")).toHaveTextContent("all repos");
+  });
+
+  it("names the held repos when the hold is scoped", () => {
+    mockUseClaimHold.mockReturnValue(
+      holdState({ repos: ["fleet-db", "loomcli"] }),
+    );
+    render(<ClaimHoldBanner />);
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "repos fleet-db, loomcli",
+    );
+  });
+
+  it("formats a missing or empty scope as every repo", () => {
+    expect(formatHoldScope(undefined)).toBe("all repos");
+    expect(formatHoldScope([])).toBe("all repos");
+    expect(formatHoldScope(["fleet-db"])).toBe("repos fleet-db");
   });
 });

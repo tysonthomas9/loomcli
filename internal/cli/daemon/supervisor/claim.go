@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -67,13 +68,17 @@ func (s *Supervisor) claimTask(ap *AgentProcess, epicID string) bool {
 
 	ap.Mu.Lock()
 	requestedTaskID := ap.RequestedTaskID
+	// Level 2 of the claim hold: gateClaimsHeld stashed this cycle's scope when
+	// the hold named repos. Empty (no hold, or an unscoped one that already
+	// gated the agent above) makes the filter a no-op.
+	filter := claimHoldFilter{repos: ap.HeldRepos}
 	ap.Mu.Unlock()
 	if ap.Entry.Mode == domain.AgentModeEphemeral && requestedTaskID == "" {
 		s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome), "ephemeral worker requires a requested task")
 		return false
 	}
 	if requestedTaskID != "" {
-		return s.claimRequestedTask(ap, opts, requestedTaskID)
+		return s.claimRequestedTask(ap, opts, requestedTaskID, &filter)
 	}
 
 	// First try issues already assigned to this agent's worktree before
@@ -84,23 +89,84 @@ func (s *Supervisor) claimTask(ap *AgentProcess, epicID string) bool {
 	if ap.Entry.Worktree != "" {
 		assignedOpts := opts
 		assignedOpts.Assignee = ap.Entry.Worktree
-		if claimed, decided := s.tryClaimFromReady(ap, assignedOpts, constraints, &conflicts); decided {
+		if claimed, decided := s.tryClaimFromReady(ap, assignedOpts, constraints, &conflicts, &filter); decided {
 			return claimed
 		}
 	}
-	if claimed, decided := s.tryClaimFromReady(ap, opts, constraints, &conflicts); decided {
+	if claimed, decided := s.tryClaimFromReady(ap, opts, constraints, &conflicts, &filter); decided {
 		return claimed
 	}
+	s.reportNothingClaimed(ap, &conflicts, &filter)
+	return false
+}
+
+// reportNothingClaimed records WHY a cycle claimed nothing. The three outcomes
+// are deliberately distinct: an operator reading status must be able to tell a
+// genuinely empty board from lock contention and from a quiesced repo.
+func (s *Supervisor) reportNothingClaimed(ap *AgentProcess, conflicts *claimConflicts, filter *claimHoldFilter) {
 	// The candidate list can empty through conflicts before the retry limit is
 	// reached. Reporting the generic no-work message there would discard the
 	// conflict detail and make a pure lock-contention stall indistinguishable
 	// from an empty board.
 	if conflicts.count > 0 {
 		s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.LockConflictOutcome), conflicts.message())
-		return false
+		return
+	}
+	// The queue was not empty — the hold emptied it. Reporting no-work here
+	// would make a quiesced repo read as an empty board in status and in
+	// gated_agents, which is the one distinction the hold exists to show.
+	if filter.blocked() {
+		s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.ClaimsHeldOutcome), filter.message())
+		return
 	}
 	s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome), "no claimable tasks")
-	return false
+}
+
+// claimHoldFilter is Level 2 of a repo-scoped claim hold: it drops ready
+// candidates whose source repo is held, before SelectBestTask ever sees them.
+// The zero value is a no-op, which is what both "no hold" and "an unscoped
+// hold" produce.
+type claimHoldFilter struct {
+	repos   []string
+	dropped []string // held repos actually seen on the queue, first-seen order
+}
+
+// blocked reports whether the hold removed at least one candidate this cycle.
+func (f *claimHoldFilter) blocked() bool { return len(f.dropped) > 0 }
+
+// holds reports whether a candidate's source repo is inside the scope. An issue
+// with an EMPTY source repo is never held — see ClaimHold.HoldsRepo.
+func (f *claimHoldFilter) holds(repo string) bool {
+	return len(f.repos) > 0 && repo != "" && matchesHeldRepo(f.repos, repo)
+}
+
+// apply returns the candidates the hold leaves claimable, recording which held
+// repos were seen so the caller can tell "held" from "empty board".
+func (f *claimHoldFilter) apply(issues []backend.IssueData) []backend.IssueData {
+	if len(f.repos) == 0 {
+		return issues
+	}
+	kept := make([]backend.IssueData, 0, len(issues))
+	for _, issue := range issues {
+		if f.holds(issue.SourceRepo) {
+			f.record(issue.SourceRepo)
+			continue
+		}
+		kept = append(kept, issue)
+	}
+	return kept
+}
+
+func (f *claimHoldFilter) record(repo string) {
+	if matchesHeldRepo(f.dropped, repo) {
+		return
+	}
+	f.dropped = append(f.dropped, repo)
+}
+
+func (f *claimHoldFilter) message() string {
+	return fmt.Sprintf("claims held for %s; every ready candidate is in a held repo",
+		strings.Join(f.dropped, ", "))
 }
 
 // claimConflicts accumulates lock-conflict detail across every claim attempt of
@@ -143,16 +209,28 @@ func (s *Supervisor) buildClaimOpts(ap *AgentProcess, epicID string) (backend.Re
 	return opts, constraints
 }
 
+// agentSourceRepos resolves the repos an agent is bound to, nil when it is
+// bound to none. A resolution error is reported as "unbound", which every
+// consumer already treats as the widest — and therefore fail-safe — answer.
+func (s *Supervisor) agentSourceRepos(ap *AgentProcess) []string {
+	repos, err := config.ResolveAgentRepos(ap.Entry, s.Repos)
+	if err != nil {
+		return nil
+	}
+	return repos
+}
+
 // tryClaimFromReady runs Ready+claim against the given opts. Returns
 // (claimed, decided): decided=false means "no decision, caller may try
 // another opts variant"; decided=true means we either succeeded or hit a
 // failure we've already recorded.
-func (s *Supervisor) tryClaimFromReady(ap *AgentProcess, opts backend.ReadyOpts, constraints cli.RoleConstraints, conflicts *claimConflicts) (claimed, decided bool) {
+func (s *Supervisor) tryClaimFromReady(ap *AgentProcess, opts backend.ReadyOpts, constraints cli.RoleConstraints, conflicts *claimConflicts, filter *claimHoldFilter) (claimed, decided bool) {
 	issues, err := s.readyIssues(opts)
 	if err != nil {
 		s.setIssueBackendError(ap, "ready query failed", err)
 		return false, true
 	}
+	issues = filter.apply(issues)
 	claimed, failed := s.tryClaimBestTask(ap, issues, constraints, conflicts)
 	if claimed {
 		return true, true
@@ -170,7 +248,7 @@ func (s *Supervisor) readyIssues(opts backend.ReadyOpts) ([]backend.IssueData, e
 	return issues, err
 }
 
-func (s *Supervisor) claimRequestedTask(ap *AgentProcess, opts backend.ReadyOpts, taskID string) bool {
+func (s *Supervisor) claimRequestedTask(ap *AgentProcess, opts backend.ReadyOpts, taskID string, filter *claimHoldFilter) bool {
 	issues, err := s.readyIssues(opts)
 	if err != nil {
 		s.setIssueBackendError(ap, "ready query failed", err)
@@ -179,6 +257,14 @@ func (s *Supervisor) claimRequestedTask(ap *AgentProcess, opts backend.ReadyOpts
 	for _, issue := range issues {
 		if issue.ID != taskID {
 			continue
+		}
+		// A requested task IS new work, so the hold applies to it exactly as it
+		// applies to the queue. (Resume is the deliberate exemption: re-claiming
+		// a task this agent already holds is not starting anything new.)
+		if filter.holds(issue.SourceRepo) {
+			s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.ClaimsHeldOutcome),
+				fmt.Sprintf("claims held for %s; requested task %s is in a held repo", issue.SourceRepo, taskID))
+			return false
 		}
 		if !cli.IsWorkableTask(issue) {
 			s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome), fmt.Sprintf("requested task %s is not claimable", taskID))
@@ -205,6 +291,11 @@ func (s *Supervisor) claimRequestedTask(ap *AgentProcess, opts backend.ReadyOpts
 // to resume: a successful (re-)claim, or a conflict whose holder is THIS
 // worktree (our own claim still within its TTL). Any other failure returns
 // false so the caller cold-starts rather than stranding the agent.
+//
+// A repo-scoped claim hold deliberately does NOT apply here. The hold refuses
+// to START new work; recovering the task this agent already holds is not new
+// work, and abandoning it mid-flight is the very thing the hold promises not to
+// do to a run in flight.
 func (s *Supervisor) claimResumeTask(ap *AgentProcess, taskID string) bool {
 	err := s.claimIssueForAgent(ap, taskID, "resume interrupted task")
 	if err == nil {
@@ -556,6 +647,53 @@ type ClaimHold struct {
 	Reason    string    `json:"reason"`
 	Since     time.Time `json:"since"`
 	ExpiresAt time.Time `json:"expires_at,omitempty"` // zero = indefinite
+
+	// Repos narrows the hold to these workspace repo IDs. EMPTY means
+	// workspace-wide — the zero value, and therefore what every record written
+	// before this field existed already means. No migration is needed.
+	//
+	// A scoped hold is a PARTIAL hold and costs what an unscoped one does not.
+	// The gate runs before the Ready query, so at gate time there is no
+	// candidate and no source repo to compare against; a scoped hold therefore
+	// lets the query run and filters the CANDIDATES instead. Only an unscoped
+	// hold keeps the zero-backend-call invariant, so only an unscoped hold is
+	// safe while fleet-db itself is being redeployed.
+	Repos []string `json:"repos,omitempty"`
+}
+
+// Scoped reports whether the hold names repos. Nil-safe. An unscoped hold is
+// workspace-wide and is the only form that gates without touching the backend.
+func (h *ClaimHold) Scoped() bool {
+	return h != nil && len(h.Repos) > 0
+}
+
+// HoldsRepo reports whether repo falls inside this hold's scope. Nil-safe, and
+// false for a hold that is not held. An unscoped hold covers every named repo;
+// a scoped one matches exactly, in the same namespace as issue.SourceRepo.
+//
+// An EMPTY repo is never held: an issue that names no repo cannot be matched
+// against a repo-named hold, and guessing would gate work the hold never
+// claimed to cover.
+func (h *ClaimHold) HoldsRepo(repo string) bool {
+	if h == nil || !h.Held || repo == "" {
+		return false
+	}
+	if len(h.Repos) == 0 {
+		return true
+	}
+	return matchesHeldRepo(h.Repos, repo)
+}
+
+// matchesHeldRepo is the exact-match rule the router's repo affinity uses
+// (cli.matchesRepo). Repo scoping must be a HARD filter: routing scores a repo
+// mismatch 5 and still accepts it, so a scope can never be expressed there.
+func matchesHeldRepo(repos []string, repo string) bool {
+	for _, r := range repos {
+		if r == repo {
+			return true
+		}
+	}
+	return false
 }
 
 // Active reports whether the hold should gate work at the given instant.
@@ -578,6 +716,12 @@ func (h *ClaimHold) clone() *ClaimHold {
 		return nil
 	}
 	c := *h
+	// Deep-copy the scope: a shallow copy would alias the caller's backing
+	// array into the supervisor's mutex-guarded state, which is exactly what
+	// clone exists to prevent.
+	if h.Repos != nil {
+		c.Repos = append([]string(nil), h.Repos...)
+	}
 	return &c
 }
 
@@ -737,12 +881,58 @@ func (s *Supervisor) LoadClaimHold(h *ClaimHold) {
 func (s *Supervisor) gateClaimsHeld(ap *AgentProcess) bool {
 	h := s.ClaimHoldSnapshot()
 	if !h.Active(time.Now()) {
+		s.setHeldRepos(ap, nil)
 		return true
 	}
+	// A scoped hold cannot decide here. There is no candidate yet — claimTask
+	// runs after this gate — so the only repo fact available is the agent's own
+	// static binding, and a repo-unbound agent has none. Carry the scope on the
+	// cycle and let claimTask filter the candidates (Level 2) instead.
+	//
+	// The scope is read ONCE per cycle, from this snapshot, deliberately:
+	// ClaimHoldSnapshot has a throttled disk reload and one-shot expiry side
+	// effects, so a second read could disagree with this one across an expiry
+	// boundary and leave the gate and the filter applying different holds.
+	if h.Scoped() && !s.agentStaticallyHeld(ap, h) {
+		s.setHeldRepos(ap, h.Repos)
+		return true
+	}
+	s.setHeldRepos(ap, nil)
 	s.logStillHeld(h)
 	s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.ClaimsHeldOutcome),
 		fmt.Sprintf("claims held by %s since %s (%s)", h.Actor, h.Since.Format(time.RFC3339), h.Reason))
 	return false
+}
+
+// agentStaticallyHeld reports whether EVERY repo this agent is bound to is
+// named by the hold. Such an agent has nothing claimable regardless of what the
+// board holds, so it is gated at Level 1 and issues no backend call at all.
+//
+// A repo-unbound agent resolves to no repos and is never statically held — on a
+// repo-unbound fleet this is every agent, which is why Level 2 exists.
+func (s *Supervisor) agentStaticallyHeld(ap *AgentProcess, h *ClaimHold) bool {
+	repos := s.agentSourceRepos(ap)
+	if len(repos) == 0 {
+		return false
+	}
+	for _, repo := range repos {
+		if !h.HoldsRepo(repo) {
+			return false
+		}
+	}
+	return true
+}
+
+// setHeldRepos records this cycle's repo scope on the agent. Cleared on every
+// ungated path so a lifted hold cannot leak into the next cycle's filter.
+func (s *Supervisor) setHeldRepos(ap *AgentProcess, repos []string) {
+	ap.Mu.Lock()
+	if len(repos) == 0 {
+		ap.HeldRepos = nil
+	} else {
+		ap.HeldRepos = append([]string(nil), repos...)
+	}
+	ap.Mu.Unlock()
 }
 
 // logStillHeld emits the rate-limited "still held" INFO line. Rate limiting
@@ -761,7 +951,16 @@ func (s *Supervisor) logStillHeld(h *ClaimHold) {
 	gated, running := s.claimHoldGateCounts()
 	slog.Info("claims held", "actor", h.Actor, "reason", h.Reason,
 		"since", h.Since.Format(time.RFC3339), "expires", claimHoldExpiryLabel(h),
-		"gated_agents", gated, "running", running)
+		"repos", ClaimHoldScopeLabel(h), "gated_agents", gated, "running", running)
+}
+
+// ClaimHoldScopeLabel renders a hold's repo scope for logs and status output.
+// "all" for an unscoped (workspace-wide) hold, else the named repos.
+func ClaimHoldScopeLabel(h *ClaimHold) string {
+	if !h.Scoped() {
+		return "all"
+	}
+	return strings.Join(h.Repos, ", ")
 }
 
 // claimHoldExpiryLabel renders a hold's expiry for logs and status output.

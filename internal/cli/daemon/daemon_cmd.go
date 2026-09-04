@@ -67,8 +67,10 @@ type DaemonState struct {
 	// no-progress kills (plus pending retries when the write is failing).
 	// Display-only: never hydrated back into supervision across restarts.
 	QuarantinedTasks []supervisor.QuarantinedTaskInfo `json:"quarantined_tasks,omitempty"`
-	// ClaimHold is the workspace-level refusal to START new work, when one is
-	// active. Runs already in flight are unaffected by it.
+	// ClaimHold is the explicitly-owned refusal to START new work, when one is
+	// active. It covers the whole workspace unless it names repos in Repos, in
+	// which case only those repos are held. Runs already in flight are
+	// unaffected either way.
 	ClaimHold *supervisor.ClaimHold `json:"claim_hold,omitempty"`
 	// ProfileDrifts lists agent profiles whose manifest pins a different
 	// harness version than the binary reports, and which booted anyway. The
@@ -110,7 +112,7 @@ Commands:
   loom daemon start <agent>        Start a previously stopped agent
   loom daemon restart <agent>      Restart a single agent with fresh state
   loom daemon queue <agent>        Preview an agent's filtered work queue
-  loom daemon hold                 Stop claiming new work (running agents untouched)
+  loom daemon hold                 Stop claiming new work, all repos or --repos
   loom daemon release              Release the claim hold
 
 Configuration is managed with FleetDB-backed daemon, role, and agent commands.`,
