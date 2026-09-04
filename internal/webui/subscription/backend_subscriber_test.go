@@ -413,7 +413,10 @@ func TestBackendMutationSubscriber_GetMutationDataSince_HappyPath(t *testing.T) 
 		}, nil
 	}
 
-	got := sub.GetMutationDataSince("100")
+	got, err := sub.GetMutationDataSince("100")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 2 {
 		t.Fatalf("got %d, want 2", len(got))
 	}
@@ -423,9 +426,7 @@ func TestBackendMutationSubscriber_GetMutationDataSince_HappyPath(t *testing.T) 
 }
 
 // TestBackendMutationSubscriber_GetMutationDataSince_BackendError verifies
-// that an error from GetMutations is swallowed (returns nil) so the SSE
-// catch-up path can proceed to the connected event without aborting the
-// stream.
+// that replay errors propagate so the handler cannot report synchronization.
 func TestBackendMutationSubscriber_GetMutationDataSince_BackendError(t *testing.T) {
 	sub, fb, _ := newTestSubscriberEnv(t)
 
@@ -433,8 +434,8 @@ func TestBackendMutationSubscriber_GetMutationDataSince_BackendError(t *testing.
 		return nil, errors.New("simulated network failure")
 	}
 
-	got := sub.GetMutationDataSince("0")
-	if got != nil {
+	got, err := sub.GetMutationDataSince("0")
+	if err == nil || got != nil {
 		t.Errorf("expected nil on backend error, got %v", got)
 	}
 }
@@ -451,7 +452,7 @@ func TestBackendMutationSubscriber_GetMutationDataSince_NilBackend(t *testing.T)
 	sub := NewBackendMutationSubscriber(nil, hub, "ws-x")
 	t.Cleanup(sub.Stop)
 
-	if got := sub.GetMutationDataSince("0"); got != nil {
+	if got, err := sub.GetMutationDataSince("0"); err == nil || got != nil {
 		t.Errorf("expected nil with nil backend, got %v", got)
 	}
 }

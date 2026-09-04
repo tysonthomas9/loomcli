@@ -91,6 +91,12 @@ class MockEventSource {
     }
   }
 
+  simulateCheckpoint(id: string): void {
+    for (const listener of this.eventListeners.get("checkpoint") ?? []) {
+      listener({ data: "{}", lastEventId: id } as MessageEvent);
+    }
+  }
+
   simulateConnectedEvent(): void {
     const listeners = this.eventListeners.get("connected") ?? [];
     const event = { data: "" } as MessageEvent;
@@ -124,6 +130,66 @@ describe("WorkspaceSSEClient", () => {
     vi.useRealTimers();
     global.EventSource = originalEventSource;
     vi.restoreAllMocks();
+  });
+
+  it("waits for the replay barrier before reporting synchronized", async () => {
+    const received: string[] = [];
+    const client = new WorkspaceSSEClient("test-ws-id", {
+      onMutation: (m) => received.push(m.issue_id!),
+    });
+    await client.connect();
+    const first = MockEventSource.lastInstance!;
+    first.simulateOpen();
+    expect(client.getState()).toBe("connecting");
+    first.simulateConnectedEvent();
+    first.simulateRawMutation(
+      JSON.stringify({
+        type: "update",
+        issue_id: "seed",
+        timestamp: "2026-09-04T00:00:00Z",
+      }),
+      "seed-cursor",
+    );
+    first.simulateError();
+    await vi.advanceTimersByTimeAsync(1000);
+    const resumed = MockEventSource.lastInstance!;
+    expect(resumed.url).toContain("since=seed-cursor");
+    resumed.simulateOpen();
+    for (let n = 1; n <= 201; n++) {
+      resumed.simulateRawMutation(
+        JSON.stringify({
+          type: "update",
+          issue_id: `issue-${n}`,
+          timestamp: "2026-09-04T00:00:00Z",
+        }),
+        `cursor-${n}`,
+      );
+      expect(client.getState()).not.toBe("connected");
+    }
+    resumed.simulateConnectedEvent();
+    expect(client.getState()).toBe("connected");
+    expect(received).toEqual([
+      "seed",
+      ...Array.from({ length: 201 }, (_, n) => `issue-${n + 1}`),
+    ]);
+    expect(client.getLastEventId()).toBe("cursor-201");
+    client.destroy();
+  });
+
+  it("resumes filtered replay from checkpoint without emitting a mutation", async () => {
+    const onMutation = vi.fn();
+    const client = new WorkspaceSSEClient("test-ws-id", { onMutation });
+    await client.connect(undefined, ["included"]);
+    MockEventSource.lastInstance!.simulateCheckpoint("filtered-prefix");
+    expect(client.getState()).toBe("connecting");
+    expect(client.getLastEventId()).toBe("filtered-prefix");
+    expect(onMutation).not.toHaveBeenCalled();
+    MockEventSource.lastInstance!.simulateError();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(MockEventSource.lastInstance!.url).toContain(
+      "since=filtered-prefix",
+    );
+    client.destroy();
   });
 
   describe("Initialization", () => {
@@ -185,6 +251,7 @@ describe("WorkspaceSSEClient", () => {
       expect(onStateChange).toHaveBeenCalledWith("connecting");
 
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       expect(client.getState()).toBe("connected");
       expect(onStateChange).toHaveBeenCalledWith("connected");
@@ -196,6 +263,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       expect(client.getState()).toBe("connected");
 
@@ -213,6 +281,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       expect(MockEventSource.instances.length).toBe(1);
 
@@ -305,6 +374,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       const mutation: MutationPayload = {
         type: "create",
@@ -324,6 +394,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       const mutation: MutationPayload = {
         type: "status",
@@ -352,6 +423,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       MockEventSource.lastInstance?.simulateRawMutation("not valid json");
 
@@ -386,6 +458,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       const esInstance = MockEventSource.lastInstance;
 
@@ -408,6 +481,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       // Consecutive errors without successful opens — attempts accumulate
       MockEventSource.lastInstance?.simulateError();
@@ -424,7 +498,7 @@ describe("WorkspaceSSEClient", () => {
       expect(client.getReconnectAttempts()).toBe(3);
     });
 
-    it("reconnectAttempts resets to 0 on successful open", async () => {
+    it("reconnectAttempts resets to 0 after successful replay", async () => {
       const onReconnect = vi.fn();
       const client = new WorkspaceSSEClient("test-ws-id", {
         onReconnect,
@@ -433,6 +507,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       // Simulate error
       MockEventSource.lastInstance?.simulateError();
@@ -443,6 +518,7 @@ describe("WorkspaceSSEClient", () => {
 
       // Simulate successful reconnection
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       expect(client.getReconnectAttempts()).toBe(0);
       expect(onReconnect).toHaveBeenCalledWith(0);
@@ -459,6 +535,7 @@ describe("WorkspaceSSEClient", () => {
       await client.connect();
       const esInstance = MockEventSource.lastInstance;
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       // Clear mocks after open
       onError.mockClear();
@@ -481,6 +558,7 @@ describe("WorkspaceSSEClient", () => {
       // First connection
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       // Disconnect (sets manualDisconnect = true)
       client.disconnect();
@@ -488,6 +566,7 @@ describe("WorkspaceSSEClient", () => {
       // Reconnect (should reset manualDisconnect = false)
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       onReconnect.mockClear();
 
@@ -510,6 +589,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       // Consecutive errors without successful opens accumulate attempts
       for (let i = 0; i < 5; i++) {
@@ -541,6 +621,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       const mutation: MutationPayload = {
         type: "create",
@@ -560,6 +641,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       const mutation: MutationPayload = {
         type: "create",
@@ -585,6 +667,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       const mutation1: MutationPayload = {
         type: "create",
@@ -617,6 +700,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       const mutation: MutationPayload = {
         type: "create",
@@ -640,6 +724,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       const mutation: MutationPayload = {
         type: "create",
@@ -658,6 +743,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       const mutation: MutationPayload = {
         type: "create",
@@ -676,6 +762,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       const mutation: MutationPayload = {
         type: "create",
@@ -694,6 +781,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       const mutation1: MutationPayload = {
         type: "create",
@@ -720,6 +808,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       const mutation: MutationPayload = {
         type: "create",
@@ -739,6 +828,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       const mutation = {
         type: "create",
@@ -766,6 +856,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       expect(client.getState()).toBe("connected");
 
@@ -780,6 +871,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       // Trigger reconnecting state
       MockEventSource.lastInstance?.simulateError();
@@ -803,6 +895,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       // Trigger error
       MockEventSource.lastInstance?.simulateError();
@@ -821,6 +914,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       // Trigger error — starts a 5s retry timer
       MockEventSource.lastInstance?.simulateError();
@@ -850,6 +944,7 @@ describe("WorkspaceSSEClient", () => {
       await client.connect();
       const esInstance = MockEventSource.lastInstance;
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       client.destroy();
 
@@ -877,6 +972,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       client.destroy();
 
@@ -892,6 +988,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       // Put in reconnecting state
       MockEventSource.lastInstance?.simulateError();
@@ -909,6 +1006,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       client.destroy();
 
@@ -921,6 +1019,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
       expect(client.getState()).toBe("connected");
 
       client.destroy();
@@ -936,6 +1035,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       // Trigger error — starts a retry timer
       MockEventSource.lastInstance?.simulateError();
@@ -1063,6 +1163,7 @@ describe("WorkspaceSSEClient", () => {
       const client = new WorkspaceSSEClient("test-ws-id");
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       const esInstance = MockEventSource.lastInstance;
       esInstance?.simulateError();
@@ -1079,6 +1180,7 @@ describe("WorkspaceSSEClient", () => {
       const client = new WorkspaceSSEClient("test-ws-id", { onReconnect });
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       const esInstance = MockEventSource.lastInstance;
       esInstance?.simulateError();
@@ -1101,6 +1203,7 @@ describe("WorkspaceSSEClient", () => {
       });
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       expect(MockEventSource.lastInstance?.url).toContain(
         "token=opaque-token-1",
@@ -1126,6 +1229,7 @@ describe("WorkspaceSSEClient", () => {
       const client = new WorkspaceSSEClient("test-ws-id");
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       // First error: 1000ms delay
       MockEventSource.lastInstance?.simulateError();
@@ -1147,6 +1251,7 @@ describe("WorkspaceSSEClient", () => {
       });
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       // Consecutive errors without opens — backoff escalates:
       // attempt 1: 500 * 2^0 = 500ms
@@ -1278,6 +1383,7 @@ describe("WorkspaceSSEClient", () => {
       const client = new WorkspaceSSEClient("test-ws-id");
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       expect(MockEventSource.lastInstance?.url).toContain(
         "token=opaque-token-1",
@@ -1321,6 +1427,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       // Trigger error → starts retry timer
       MockEventSource.lastInstance?.simulateError();
@@ -1341,6 +1448,7 @@ describe("WorkspaceSSEClient", () => {
 
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
+      MockEventSource.lastInstance?.simulateConnectedEvent();
 
       // Trigger error → starts retry timer
       MockEventSource.lastInstance?.simulateError();
@@ -1478,6 +1586,7 @@ describe("WorkspaceSSEClient sourceRepos support", () => {
 
     await client.connect(undefined, ["repo-a", "repo-b"]);
     MockEventSource.lastInstance?.simulateOpen();
+    MockEventSource.lastInstance?.simulateConnectedEvent();
 
     // Trigger reconnecting state
     MockEventSource.lastInstance?.simulateError();
@@ -1499,6 +1608,7 @@ describe("WorkspaceSSEClient sourceRepos support", () => {
 
     await client.connect();
     MockEventSource.lastInstance?.simulateOpen();
+    MockEventSource.lastInstance?.simulateConnectedEvent();
 
     // Trigger reconnecting state
     MockEventSource.lastInstance?.simulateError();

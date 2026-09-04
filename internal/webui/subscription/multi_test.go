@@ -28,7 +28,10 @@ func TestGetMutationsSinceForWorkspace_KnownWorkspace(t *testing.T) {
 		}, nil
 	}})
 
-	got := multi.GetMutationsSinceForWorkspace("ws-1", "0")
+	got, err := multi.GetMutationsSinceForWorkspace("ws-1", "0")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 2 {
 		t.Fatalf("expected 2 mutations, got %d", len(got))
 	}
@@ -49,7 +52,10 @@ func TestGetMutationsSinceForWorkspace_UnknownWorkspace(t *testing.T) {
 
 	multi := NewMultiWorkspaceSubscriber(hub, nil)
 
-	got := multi.GetMutationsSinceForWorkspace("no-such-ws", "0")
+	got, err := multi.GetMutationsSinceForWorkspace("no-such-ws", "0")
+	if err == nil {
+		t.Fatal("expected missing subscriber error")
+	}
 	if got != nil {
 		t.Errorf("expected nil for unknown workspace, got %v", got)
 	}
@@ -74,7 +80,10 @@ func TestGetMutationsSinceForWorkspace_OnlyQueriesCorrectSubscriber(t *testing.T
 	}})
 
 	// Query ws-1 only
-	got := multi.GetMutationsSinceForWorkspace("ws-1", "0")
+	got, err := multi.GetMutationsSinceForWorkspace("ws-1", "0")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 1 {
 		t.Fatalf("expected 1 mutation from ws-1, got %d", len(got))
 	}
@@ -83,7 +92,10 @@ func TestGetMutationsSinceForWorkspace_OnlyQueriesCorrectSubscriber(t *testing.T
 	}
 
 	// Query ws-2 only
-	got = multi.GetMutationsSinceForWorkspace("ws-2", "0")
+	got, err = multi.GetMutationsSinceForWorkspace("ws-2", "0")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 1 {
 		t.Fatalf("expected 1 mutation from ws-2, got %d", len(got))
 	}
@@ -251,7 +263,11 @@ func TestGetMutationsSinceForWorkspace_ConcurrentStop(t *testing.T) {
 
 	gotLen := make(chan int, 1)
 	go func() {
-		gotLen <- len(multi.GetMutationsSinceForWorkspace("ws-stop-race", "0"))
+		muts, err := multi.GetMutationsSinceForWorkspace("ws-stop-race", "0")
+		if err != nil {
+			t.Error(err)
+		}
+		gotLen <- len(muts)
 	}()
 	<-getStarted
 
@@ -291,9 +307,9 @@ func (s *trackingWorkspaceSubscriber) Stop() {
 	s.stopCalls.Add(1)
 }
 
-func (s *trackingWorkspaceSubscriber) GetMutationDataSince(string) []backend.MutationData {
+func (s *trackingWorkspaceSubscriber) GetMutationDataSince(string) ([]backend.MutationData, error) {
 	s.getCalls.Add(1)
-	return nil
+	return nil, nil
 }
 
 func waitForMultiCondition(t *testing.T, cond func() bool) {

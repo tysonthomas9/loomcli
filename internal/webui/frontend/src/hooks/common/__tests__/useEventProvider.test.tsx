@@ -80,6 +80,12 @@ class MockEventSource {
     this.onopen?.();
   }
 
+  simulateConnected(): void {
+    for (const listener of this.eventListeners.get("connected") ?? []) {
+      listener({ data: "{}" } as MessageEvent);
+    }
+  }
+
   simulateError(readyState: number = MockEventSource.CONNECTING): void {
     this.readyState = readyState;
     this.onerror?.();
@@ -205,6 +211,8 @@ describe("useEventProvider", () => {
         MockEventSource.lastInstance?.simulateOpen();
       });
 
+      expect(result.current.state).toBe("connecting");
+      act(() => MockEventSource.lastInstance?.simulateConnected());
       expect(result.current.state).toBe("connected");
       expect(result.current.isConnected).toBe(true);
     });
@@ -215,6 +223,7 @@ describe("useEventProvider", () => {
 
       act(() => {
         MockEventSource.lastInstance?.simulateOpen();
+        MockEventSource.lastInstance?.simulateConnected();
       });
 
       expect(result.current.reconnectAttempts).toBe(0);
@@ -232,6 +241,7 @@ describe("useEventProvider", () => {
 
       act(() => {
         MockEventSource.lastInstance?.simulateOpen();
+        MockEventSource.lastInstance?.simulateConnected();
       });
 
       act(() => {
@@ -268,6 +278,7 @@ describe("useEventProvider", () => {
 
       act(() => {
         MockEventSource.lastInstance?.simulateOpen();
+        MockEventSource.lastInstance?.simulateConnected();
       });
 
       const mutation: MutationPayload = {
@@ -304,6 +315,7 @@ describe("useEventProvider", () => {
 
       act(() => {
         MockEventSource.lastInstance?.simulateOpen();
+        MockEventSource.lastInstance?.simulateConnected();
       });
 
       // Should receive
@@ -359,6 +371,7 @@ describe("useEventProvider", () => {
 
       act(() => {
         MockEventSource.lastInstance?.simulateOpen();
+        MockEventSource.lastInstance?.simulateConnected();
       });
 
       act(() => {
@@ -400,6 +413,7 @@ describe("useEventProvider", () => {
 
       act(() => {
         MockEventSource.lastInstance?.simulateOpen();
+        MockEventSource.lastInstance?.simulateConnected();
       });
 
       act(() => {
@@ -448,6 +462,7 @@ describe("useEventProvider", () => {
 
       act(() => {
         MockEventSource.lastInstance?.simulateOpen();
+        MockEventSource.lastInstance?.simulateConnected();
       });
 
       act(() => {
@@ -502,6 +517,7 @@ describe("useEventProvider", () => {
 
       act(() => {
         MockEventSource.lastInstance?.simulateOpen();
+        MockEventSource.lastInstance?.simulateConnected();
       });
 
       let unsubscribe: () => void;
@@ -553,6 +569,7 @@ describe("useEventProvider", () => {
 
       act(() => {
         MockEventSource.lastInstance?.simulateOpen();
+        MockEventSource.lastInstance?.simulateConnected();
       });
 
       // Send mutation — callback should fire
@@ -607,6 +624,7 @@ describe("useEventProvider", () => {
 
       act(() => {
         MockEventSource.lastInstance?.simulateOpen();
+        MockEventSource.lastInstance?.simulateConnected();
       });
 
       act(() => {
@@ -668,6 +686,7 @@ describe("useEventProvider", () => {
 
       act(() => {
         MockEventSource.lastInstance?.simulateOpen();
+        MockEventSource.lastInstance?.simulateConnected();
       });
 
       act(() => {
@@ -756,6 +775,7 @@ describe("useEventProvider", () => {
 
       act(() => {
         MockEventSource.lastInstance?.simulateOpen();
+        MockEventSource.lastInstance?.simulateConnected();
       });
 
       const esInstance = MockEventSource.lastInstance;
@@ -787,6 +807,7 @@ describe("useEventProvider", () => {
 
       act(() => {
         MockEventSource.lastInstance?.simulateOpen();
+        MockEventSource.lastInstance?.simulateConnected();
       });
 
       // Send mutation with first callback
@@ -828,6 +849,7 @@ describe("useEventProvider", () => {
 
       act(() => {
         MockEventSource.lastInstance?.simulateOpen();
+        MockEventSource.lastInstance?.simulateConnected();
       });
 
       act(() => {
@@ -850,6 +872,7 @@ describe("useEventProvider", () => {
 
       act(() => {
         MockEventSource.lastInstance?.simulateOpen();
+        MockEventSource.lastInstance?.simulateConnected();
       });
 
       expect(result.current.isConnected).toBe(true);

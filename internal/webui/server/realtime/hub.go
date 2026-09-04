@@ -61,7 +61,6 @@ type MutationPayload struct {
 // Hub manages connected SSE clients and broadcasts mutations to them.
 type Hub struct {
 	clients      map[*Client]bool
-	register     chan *Client
 	unregister   chan *Client
 	broadcast    chan *MutationPayload
 	mu           sync.RWMutex
@@ -78,8 +77,9 @@ type Client struct {
 	send        chan *MutationPayload
 	done        chan struct{}
 	lastSince   string
-	sourceRepos []string // repos this client wants; empty = all
-	workspaceID string   // workspace this client subscribed to; empty = no mutations (fail-closed)
+	replayed    map[string]bool // Owned by the handler; durable IDs replayed on this connection.
+	sourceRepos []string        // repos this client wants; empty = all
+	workspaceID string          // workspace this client subscribed to; empty = no mutations (fail-closed)
 }
 
 // NewClient creates a new SSE client with the given parameters.
@@ -89,6 +89,7 @@ func NewClient(id int64, sendBuf int, lastSince string, sourceRepos []string, wo
 		send:        make(chan *MutationPayload, sendBuf),
 		done:        make(chan struct{}),
 		lastSince:   lastSince,
+		replayed:    make(map[string]bool),
 		sourceRepos: sourceRepos,
 		workspaceID: workspaceID,
 	}
@@ -139,7 +140,6 @@ func MatchesSourceRepoFilter(sourceRepos []string, sourceRepo string) bool {
 func NewHub() *Hub {
 	return &Hub{
 		clients:    make(map[*Client]bool),
-		register:   make(chan *Client, 16),
 		unregister: make(chan *Client, 16),
 		broadcast:  make(chan *MutationPayload, 256),
 		done:       make(chan struct{}),
@@ -154,8 +154,6 @@ func (h *Hub) Run() {
 
 	for {
 		select {
-		case client := <-h.register:
-			h.addClient(client)
 		case client := <-h.unregister:
 			h.removeClient(client)
 		case mutation := <-h.broadcast:
@@ -173,8 +171,9 @@ func (h *Hub) Run() {
 func (h *Hub) addClient(client *Client) {
 	h.mu.Lock()
 	h.clients[client] = true
+	count := len(h.clients)
 	h.mu.Unlock()
-	slog.Info("SSE client registered", "client_id", client.id, "count", len(h.clients))
+	slog.Info("SSE client registered", "client_id", client.id, "count", count)
 }
 
 // removeClient unregisters an SSE client and closes its send channel.
@@ -184,8 +183,9 @@ func (h *Hub) removeClient(client *Client) {
 		delete(h.clients, client)
 		close(client.send)
 	}
+	count := len(h.clients)
 	h.mu.Unlock()
-	slog.Info("SSE client unregistered", "client_id", client.id, "count", len(h.clients))
+	slog.Info("SSE client unregistered", "client_id", client.id, "count", count)
 }
 
 // fanOutMutation sends a mutation to all matching connected clients.
@@ -234,19 +234,17 @@ func (h *Hub) Stop() {
 // RegisterClient adds a new client to the hub.
 // Non-blocking if the hub has been stopped -- closes the client's send channel instead.
 func (h *Hub) RegisterClient(client *Client) {
-	// Check done first to avoid writing to the buffered register channel
-	// after Run() has exited (nobody would process it).
+	// Register synchronously before replay reads storage, so mutations
+	// committed after the read cannot miss an unprocessed registration.
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	select {
 	case <-h.done:
 		close(client.send)
-		return
 	default:
+		h.clients[client] = true
 	}
-	select {
-	case h.register <- client:
-	case <-h.done:
-		close(client.send)
-	}
+
 }
 
 // UnregisterClient removes a client from the hub.
