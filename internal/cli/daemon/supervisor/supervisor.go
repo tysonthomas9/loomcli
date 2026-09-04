@@ -118,6 +118,12 @@ type Supervisor struct {
 	quarantine     *taskQuarantine
 	quarantineOnce sync.Once
 
+	// quarantineStatePathCache is the resolved daemon-quarantine.json path
+	// (cache + test seam). Resolved from ProjectDir on the first qrec call, so
+	// a test that redirects it MUST set it BEFORE any ledger access — setting
+	// it afterwards is a silent no-op. Empty disables persistence entirely.
+	quarantineStatePathCache string
+
 	// ControlStore is the fleet-db-backed control plane used for node,
 	// session, lease, terminal, artifact, and command records.
 	ControlStore store.Store
