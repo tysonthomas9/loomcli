@@ -115,13 +115,9 @@ func TestSyncNativeTranscript_OverwritesOnChange(t *testing.T) {
 	}
 }
 
-// TestSyncNativeTranscript_RedactsRawNotCanonical pins the single-redaction policy:
-// a raw backend stream is redacted here (its only redaction), while a canonical
-// stream is left untouched because the TS leaf already redacted it at the source —
-// re-redacting would be a duplicate pass. The raw branch also proves the chosen
-// secret is one the redactor actually catches, so the canonical branch's "survives"
-// assertion can't pass for the wrong reason.
-func TestSyncNativeTranscript_RedactsRawNotCanonical(t *testing.T) {
+// TestSyncNativeTranscript_RedactsRawAndCanonical pins the host-side persistence
+// boundary: Go redaction applies to both raw and canonical streams.
+func TestSyncNativeTranscript_RedactsRawAndCanonical(t *testing.T) {
 	const secret = "sk-ant-api03-xK9mZ2vL8nQ5rT1wY4bC7dF0gH3jE6pA" // Anthropic key shape the redactor catches
 	payload := []byte(`{"role":"assistant","type":"text","text":"key is ` + secret + `"}` + "\n")
 
@@ -145,8 +141,38 @@ func TestSyncNativeTranscript_RedactsRawNotCanonical(t *testing.T) {
 	if raw := read(t, "20260417-120000-codex-aaaa-0123abcd", TranscriptFormatRaw); strings.Contains(raw, secret) {
 		t.Errorf("raw transcript must be redacted; secret leaked through: %s", raw)
 	}
-	if canon := read(t, "20260417-120000-codex-bbbb-0123abcd", TranscriptFormatCanonical); !strings.Contains(canon, secret) {
-		t.Errorf("canonical transcript must NOT be re-redacted (leaf already did); want the bytes verbatim, got: %s", canon)
+	if canon := read(t, "20260417-120000-codex-bbbb-0123abcd", TranscriptFormatCanonical); strings.Contains(canon, secret) {
+		t.Errorf("canonical transcript must be redacted; secret leaked through: %s", canon)
+	}
+}
+
+func TestSyncNativeTranscript_RedactionDisabledLeavesRawAndCanonicalVerbatim(t *testing.T) {
+	t.Setenv("LOOM_REDACT_TRANSCRIPTS", "off")
+	const secret = "sk-ant-api03-xK9mZ2vL8nQ5rT1wY4bC7dF0gH3jE6pA"
+	payload := []byte(`{"role":"assistant","type":"text","text":"key is ` + secret + `"}` + "\n")
+
+	read := func(t *testing.T, sid, format string) string {
+		t.Helper()
+		store, sessDir := newStoreWithSession(t, sid)
+		src := filepath.Join(t.TempDir(), "src.jsonl")
+		if err := os.WriteFile(src, payload, 0o600); err != nil {
+			t.Fatalf("write src: %v", err)
+		}
+		if err := store.SyncNativeTranscript(sid, src, format); err != nil {
+			t.Fatalf("SyncNativeTranscript(%s): %v", format, err)
+		}
+		got, err := os.ReadFile(filepath.Join(sessDir, NativeTranscriptFile))
+		if err != nil {
+			t.Fatalf("read dst: %v", err)
+		}
+		return string(got)
+	}
+
+	if raw := read(t, "20260417-120000-codex-cccc-0123abcd", TranscriptFormatRaw); raw != string(payload) {
+		t.Errorf("raw transcript changed with redaction off: got %q want %q", raw, payload)
+	}
+	if canon := read(t, "20260417-120000-codex-dddd-0123abcd", TranscriptFormatCanonical); canon != string(payload) {
+		t.Errorf("canonical transcript changed with redaction off: got %q want %q", canon, payload)
 	}
 }
 

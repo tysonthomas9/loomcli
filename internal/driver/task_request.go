@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/sessions/redact"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -780,6 +781,9 @@ func normalizeTaskExecCompletion(execResult TaskExecResult, execErr error) taskE
 		completion.applyExecutorError(execErr)
 	}
 	completion.requireTerminalStatus()
+	if redact.Enabled() {
+		completion.ErrorMessage = redact.String(completion.ErrorMessage)
+	}
 	return completion
 }
 
@@ -853,6 +857,7 @@ func taskExecRuntimeMetadata(execResult TaskExecResult, refs claimedTaskRunRefs)
 	}
 	metadata["provider_profile"] = refs.ProviderProfile
 	metadata["task_run_executor"] = refs.HeartbeatSource
+	redact.RedactRuntimeMetadataText(metadata)
 	return metadata
 }
 
