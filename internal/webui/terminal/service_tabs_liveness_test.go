@@ -3,6 +3,7 @@ package terminal
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -51,6 +52,24 @@ func (f *fakePTYSource) AttachmentCount(key SessionKey) int {
 func (f *fakePTYSource) SessionCount() int            { return len(f.alive) }
 func (f *fakePTYSource) SessionCountFor(_ string) int { return len(f.alive) }
 func (f *fakePTYSource) MaxSessions() int             { return 100 }
+
+// SessionNamesFor makes the fake a PTYSessionLister: it reports the live
+// sessions of wsID, the same way a real PTYManager enumerates its map.
+func (f *fakePTYSource) SessionNamesFor(wsID string) []string {
+	names := make([]string, 0, len(f.alive))
+	for key, live := range f.alive {
+		if live && key.Workspace == wsID {
+			names = append(names, key.Name)
+		}
+	}
+	return names
+}
+
+// bareFakePTYSource is a PTYSource that deliberately does NOT implement
+// PTYSessionLister — it embeds the interface, so only PTYSource's own methods
+// are promoted. Stands in for backends (a remote agentd client) that cannot
+// enumerate their sessions.
+type bareFakePTYSource struct{ PTYSource }
 
 // newLivenessTestSvc wires a terminalServiceImpl over miniredis + a fake PTY
 // source so each test can arrange metadata and liveness independently.
@@ -422,5 +441,111 @@ func TestTerminalState_WorkspaceIsolation(t *testing.T) {
 	}
 	if gotB != "tab-b" {
 		t.Errorf("ws-b active_tab: got %q, want %q", gotB, "tab-b")
+	}
+}
+
+// TestListTabs_ResurfacesLivePTYWithoutMetadata — the failure this task
+// exists for: a PTY that outlived (or never got) its metadata row was
+// invisible in the tab list forever, because ListTabs passed nil live
+// sessions to EnsureDefaults.
+func TestListTabs_ResurfacesLivePTYWithoutMetadata(t *testing.T) {
+	svc, fake, _ := newLivenessTestSvc(t)
+	ctx := context.Background()
+	const ws = "w"
+
+	putTestTab(t, svc, ws, "has-metadata")
+	fake.alive[SessionKey{Workspace: ws, Name: "has-metadata"}] = true
+	// Live PTY with no metadata row at all.
+	fake.alive[SessionKey{Workspace: ws, Name: "orphan"}] = true
+	// A live PTY in another workspace must not leak into this list.
+	fake.alive[SessionKey{Workspace: "other", Name: "elsewhere"}] = true
+
+	tabs, err := svc.ListTabs(ctx, ws)
+	if err != nil {
+		t.Fatalf("ListTabs: %v", err)
+	}
+	got := map[string]bool{}
+	for _, tb := range tabs {
+		got[tb.SessionName] = true
+	}
+	if !got["orphan"] {
+		t.Errorf("orphan session missing from ListTabs: %v", got)
+	}
+	if !got["has-metadata"] {
+		t.Errorf("has-metadata session missing from ListTabs: %v", got)
+	}
+	if got["elsewhere"] {
+		t.Errorf("session from another workspace leaked into ListTabs: %v", got)
+	}
+
+	// The resurfaced row is persisted, so a second call is stable and the
+	// tab is annotated live like any other.
+	again, err := svc.ListTabs(ctx, ws)
+	if err != nil {
+		t.Fatalf("second ListTabs: %v", err)
+	}
+	if len(again) != len(tabs) {
+		t.Errorf("second ListTabs returned %d tabs, want %d (metadata should persist)", len(again), len(tabs))
+	}
+	for _, tb := range again {
+		if tb.SessionName == "orphan" && !tb.PTYAlive {
+			t.Errorf("resurfaced orphan tab: pty_alive=false, want true")
+		}
+	}
+}
+
+// TestListTabs_ResurfacedTabsHaveDeterministicOrder — session names come out
+// of a Go map, so ListTabs sorts them before EnsureDefaults assigns
+// sort_order. Without the sort the tab order shuffles between calls.
+func TestListTabs_ResurfacedTabsHaveDeterministicOrder(t *testing.T) {
+	svc, fake, _ := newLivenessTestSvc(t)
+	ctx := context.Background()
+	const ws = "w"
+
+	for _, name := range []string{"delta", "alpha", "charlie", "bravo"} {
+		fake.alive[SessionKey{Workspace: ws, Name: name}] = true
+	}
+
+	tabs, err := svc.ListTabs(ctx, ws)
+	if err != nil {
+		t.Fatalf("ListTabs: %v", err)
+	}
+	var order []string
+	for _, tb := range tabs {
+		order = append(order, tb.SessionName)
+	}
+	want := []string{"alpha", "bravo", "charlie", "delta"}
+	if !reflect.DeepEqual(order, want) {
+		t.Errorf("tab order = %v, want %v", order, want)
+	}
+}
+
+// TestListTabs_SourceWithoutSessionListerIsUnchanged — PTYSessionLister is
+// optional; a source that does not implement it must keep today's behavior
+// (nil live sessions, metadata-only listing) rather than failing.
+func TestListTabs_SourceWithoutSessionListerIsUnchanged(t *testing.T) {
+	svc, fake, _ := newLivenessTestSvc(t)
+	ctx := context.Background()
+	const ws = "w"
+
+	putTestTab(t, svc, ws, "has-metadata")
+	fake.alive[SessionKey{Workspace: ws, Name: "has-metadata"}] = true
+	fake.alive[SessionKey{Workspace: ws, Name: "orphan"}] = true
+
+	var bare PTYSource = &bareFakePTYSource{PTYSource: fake}
+	if _, ok := bare.(PTYSessionLister); ok {
+		t.Fatal("bareFakePTYSource implements PTYSessionLister; the test asserts the opposite")
+	}
+	svc.ptyMgr = bare
+
+	tabs, err := svc.ListTabs(ctx, ws)
+	if err != nil {
+		t.Fatalf("ListTabs: %v", err)
+	}
+	if len(tabs) != 1 || tabs[0].SessionName != "has-metadata" {
+		t.Fatalf("tabs = %+v, want only has-metadata", tabs)
+	}
+	if !tabs[0].PTYAlive {
+		t.Errorf("has-metadata: pty_alive=false, want true")
 	}
 }
