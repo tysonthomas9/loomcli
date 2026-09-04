@@ -69,6 +69,16 @@ func RunGitCommand(dir string, args ...string) (string, error) {
 	return RunGit(ensureDefaultDeps(), dir, args...)
 }
 
+// RunGitCommandRaw executes a git command and returns stdout EVEN WHEN git
+// exits non-zero. RunGitCommand discards stdout on a non-zero exit, which is
+// wrong for the porcelain commands whose "difference found" answer IS exit 1 —
+// `git diff --no-index` most of all. Callers that treat a non-zero exit as a
+// normal result must use this and decide for themselves.
+func RunGitCommandRaw(dir string, args ...string) (string, error) {
+	result := ensureDefaultDeps().Git.Run(dir, args...)
+	return result.Stdout, result.Err
+}
+
 func defaultRunGitWithOutput(dir string, args ...string) error {
 	cmd := exec.Command("git", args...) //nolint:gosec // G204 — args from internal callers
 	cmd.Dir = dir
