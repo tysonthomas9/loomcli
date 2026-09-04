@@ -47,6 +47,7 @@ const envLoomTriggerCronInterval = "LOOM_TRIGGER_CRON_INTERVAL"
 const envLoomIssueBridgeInterval = "LOOM_ISSUE_BRIDGE_INTERVAL"
 const envLoomIssueBridgeDisabled = "LOOM_ISSUE_BRIDGE_DISABLED"
 const envLoomIssueBridgeStatePath = "LOOM_ISSUE_BRIDGE_STATE_PATH"
+const envLoomIssueBridgeActions = "LOOM_ISSUE_BRIDGE_ACTIONS"
 
 const monitorCollectionCacheTTL = 10 * time.Second
 
@@ -126,6 +127,7 @@ ENVIRONMENT VARIABLES
   LOOM_ISSUE_BRIDGE_DISABLED            Disable the issue-journal bridge loop (set 1/true)
   LOOM_ISSUE_BRIDGE_STATE_PATH          Bridge cursor state file (default: <state dir>/issue-bridge-cursor.json)
   LOOM_ISSUE_BRIDGE_REPLAY              Replay journal from zero on first observation (set 1/true)
+  LOOM_ISSUE_BRIDGE_ACTIONS             Comma-separated journal actions to re-emit (default: issue.create)
 
 EXAMPLES
   loom serve                                              # Default port 8080

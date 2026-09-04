@@ -585,3 +585,88 @@ func countEvents(t *testing.T, s *memstore.Store, ws string) int {
 	}
 	return len(evs)
 }
+
+// TestIssueJournalBridgeLabelWriteReachesRouter is the Gate-2 proof, keyed on
+// the event fleet-db ACTUALLY emits for a label write: issue_service.AddLabel
+// journals action "label.add" with entity_type "label", entity_id the ISSUE id
+// and the label in metadata — NOT a whole-entity issue.update. The bridge
+// re-emits it verbatim as internal.label.add, addressing the issue subject and
+// lifting the label into {{attrs.label}}.
+func TestIssueJournalBridgeLabelWriteReachesRouter(t *testing.T) {
+	labelAdd := store.JournalEvent{
+		ID: "40", Action: trigger.IssueLabelAddAction, Actor: "daemon", EntityID: "DOGFOOD-42",
+		After:    json.RawMessage(`{"labels":["p1","needs-review"]}`),
+		Metadata: map[string]string{"label": "needs-review"},
+	}
+	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
+		"": {events: []store.JournalEvent{labelAdd}, next: "40"},
+	}}
+	cursors := newFixedCursorStore()
+	seenStart(cursors, "WS")
+	bridge, s := newBridge(t, reader, cursors)
+	bridge.ActionAllowlist = []string{trigger.IssueLabelAddAction}
+	if _, err := s.TriggerBindings().Create(t.Context(), store.TriggerBindingCreate{
+		WorkspaceKey: "WS", BindingID: "b-label-add", Name: "b-label-add",
+		SourceKind: "internal", RouteKey: "internal.label.add",
+		DriverID: "issue-bot", DriverVersionID: "v1", TargetEntrypoint: "run",
+		ConcurrencyPolicy: domain.TriggerBindingConcurrencyAllow, Enabled: true,
+	}); err != nil {
+		t.Fatalf("create internal.label.add binding: %v", err)
+	}
+
+	out, err := bridge.RunOnce(t.Context())
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if out.Emitted != 1 || out.Skipped != 0 {
+		t.Fatalf("result = %+v, want the label write emitted", out)
+	}
+
+	evs, _ := s.TriggerEvents().List(t.Context(), "WS", store.TriggerEventFilter{})
+	if len(evs) != 1 {
+		t.Fatalf("events = %+v, want exactly one", evs)
+	}
+	ev := evs[0]
+	// "add" is not in the verb-normalization table, so the type passes through.
+	if ev.EventType != "label.add" {
+		t.Fatalf("event type = %q, want label.add", ev.EventType)
+	}
+	// entity_type is "label" but entity_id is the issue: the subject stays the
+	// issue, so an await on the issue matches a label write against it.
+	if ev.SubjectRef != "issue:DOGFOOD-42" {
+		t.Fatalf("subject ref = %q, want issue:DOGFOOD-42", ev.SubjectRef)
+	}
+	if got, want := domain.AwaitEventKey(ev.EventType, ev.SubjectRef), "label.add:issue:DOGFOOD-42"; got != want {
+		t.Fatalf("await key = %q, want %q", got, want)
+	}
+	if ev.ActorRef != "daemon" {
+		t.Fatalf("actor = %q, want daemon (verbatim)", ev.ActorRef)
+	}
+}
+
+// TestIssueJournalBridgeLabelWriteIsOptIn proves label traffic stays dark under
+// the default allowlist — a deployment that has not asked for label events does
+// not start receiving them on upgrade.
+func TestIssueJournalBridgeLabelWriteIsOptIn(t *testing.T) {
+	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
+		"": {events: []store.JournalEvent{{
+			ID: "40", Action: trigger.IssueLabelAddAction, Actor: "daemon", EntityID: "DOGFOOD-42",
+			After:    json.RawMessage(`{"labels":["needs-review"]}`),
+			Metadata: map[string]string{"label": "needs-review"},
+		}}, next: "40"},
+	}}
+	cursors := newFixedCursorStore()
+	seenStart(cursors, "WS")
+	bridge, s := newBridge(t, reader, cursors) // default allowlist: issue.create
+
+	out, err := bridge.RunOnce(t.Context())
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if out.Emitted != 0 || out.Skipped != 1 {
+		t.Fatalf("result = %+v, want the label write skipped by the default roster", out)
+	}
+	if events, _ := internalCounts(t, s); events != 0 {
+		t.Fatalf("events = %d, want 0", events)
+	}
+}
