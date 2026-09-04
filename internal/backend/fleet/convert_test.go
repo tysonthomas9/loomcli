@@ -394,6 +394,22 @@ func TestReadyIssuesToData(t *testing.T) {
 	}
 }
 
+func TestReadyPayloadSourceRepoSurvivesDecodeAndMapping(t *testing.T) {
+	const payload = `[{"id":"test-1","title":"Ready","status":"open","source_repo":"github.com/acme/repo"}]`
+
+	var issues []*readyIssueWithParent
+	if err := json.Unmarshal([]byte(payload), &issues); err != nil {
+		t.Fatalf("decode ready payload: %v", err)
+	}
+	got := readyIssuesToData(issues)
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1", len(got))
+	}
+	if got[0].SourceRepo != "github.com/acme/repo" {
+		t.Errorf("SourceRepo = %q, want github.com/acme/repo", got[0].SourceRepo)
+	}
+}
+
 func TestBlockedIssuesToData(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	issues := []*blockedIssueWire{
