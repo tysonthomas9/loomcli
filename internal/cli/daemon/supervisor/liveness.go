@@ -182,6 +182,13 @@ func (s *Supervisor) collectStaleTicks(now time.Time) []string {
 	staleNow := make(map[string]struct{})
 
 	s.RangeTicks(func(name string, t time.Time) {
+		// A retired goroutine has ended on purpose, so its frozen tick is
+		// expected, not evidence of a hang. Checked before the threshold so a
+		// retirement also clears any streak the tick had already accumulated
+		// on the way to stopping.
+		if s.tickRetired(name) {
+			return
+		}
 		threshold := s.thresholdFor(name)
 		age := now.Sub(t)
 		if age <= threshold {
@@ -314,6 +321,37 @@ func agentThreshold(s *Supervisor) time.Duration {
 		threshold = minLivenessThreshold
 	}
 	return threshold
+}
+
+// retireAgentSupervision excuses an agent's supervise tick from the liveness
+// watchdog once that goroutine has returned.
+//
+// Every return from superviseAgent is a decision, not a failure: a fatal
+// auth/billing stop, a fast-fail, the agent's removal from config, or daemon
+// shutdown. The goroutine records WHY in ap.StopReason on its way out, and
+// from that moment its tick is frozen for good — so the watchdog, which knows
+// only "how long since this name last ticked", eventually reads the agent's
+// correct terminal state as a hang and takes the whole daemon down with it.
+//
+// Retirement is unconditional rather than gated on a list of terminal stop
+// reasons. The reason is not the point: a goroutine that has RETURNED cannot
+// be wedged, whatever it recorded, and an unrecognized or missing reason must
+// not be the thing that resurrects a false fatal. An agent that is genuinely
+// hung has not returned, so it never reaches here and stays watched — which is
+// the property that matters, and the one this must not trade away.
+func (s *Supervisor) retireAgentSupervision(ap *AgentProcess, tickName string) {
+	ap.Mu.Lock()
+	reason := ap.StopReason
+	ap.Mu.Unlock()
+	if reason == "" {
+		// Not expected — every return path above records a reason — but worth
+		// hearing about, because an unexplained stop is a supervision bug even
+		// though it is not a liveness one.
+		slog.Warn("agent supervision ended without a stop reason", "worktree", ap.Entry.Worktree)
+	}
+	s.RetireTick(tickName)
+	slog.Info("agent supervision retired from the liveness watchdog",
+		"worktree", ap.Entry.Worktree, "stop_reason", string(reason))
 }
 
 // agentTickName returns the liveness tick name for an agent's supervise goroutine.

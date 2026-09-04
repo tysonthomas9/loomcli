@@ -103,10 +103,17 @@ func (s *Supervisor) RunCritical(name string, fn func()) {
 // Panics inside superviseAgent are caught and routed to SignalFatal so the
 // daemon process exits non-zero rather than silently losing supervision.
 // Normal returns are expected (max retries, config removed, shutdown) and not
-// treated as failures.
+// treated as failures — and every one of them freezes this goroutine's tick,
+// so the return also retires that tick from the liveness watchdog.
+//
+// Defer order is load-bearing: the retirement must land BEFORE ap.Done closes.
+// DrainAgent waits on Done and a re-add under the same worktree re-registers
+// (and thereby un-retires) the same tick name, so retiring after the close
+// could silently retire the NEW goroutine's tick.
 func (s *Supervisor) supervisedAgentBody(name string, ap *AgentProcess) {
 	defer s.Wg.Done()
 	defer close(ap.Done)
+	defer s.retireAgentSupervision(ap, name)
 	defer s.RecoverAndSignal(name)
 	s.superviseAgent(ap)
 }
@@ -114,10 +121,43 @@ func (s *Supervisor) supervisedAgentBody(name string, ap *AgentProcess) {
 // RegisterTick allocates a tick slot for a goroutine name and primes it with
 // the current time. Call this before starting the goroutine so the watchdog
 // does not see a zero-valued tick on its first scan.
+//
+// Registering also un-retires the name: an agent that is drained and added
+// back under the same worktree gets a fresh goroutine, and that goroutine is
+// watched again.
 func (s *Supervisor) RegisterTick(name string) {
 	tick := new(atomic.Int64)
 	tick.Store(time.Now().UnixNano())
 	s.Ticks.Store(name, tick)
+	s.retiredTicks.Delete(name)
+}
+
+// RetireTick tells the liveness watchdog to stop holding a goroutine to its
+// staleness threshold, because that goroutine has intentionally ended.
+//
+// The watchdog's whole premise is "this loop should be ticking and is not, so
+// it is wedged, so crash the daemon and let pm2 rebuild it". That premise is
+// false for a goroutine that RETURNED — an agent stopped for a fatal auth
+// error, a fast-fail, a config removal or shutdown. There is nothing to
+// rebuild and nothing wedged; the tick simply stopped because the loop it
+// belonged to is gone. Before this existed, one correctly-stopped agent took
+// the entire daemon down ~12 minutes later, killing every healthy sibling's
+// in-flight run with it.
+//
+// The tick slot itself is left in place so operator surfaces and goroutine
+// dumps still show when the agent last ticked; only the fatal decision skips
+// it. Retirement is reversed by RegisterTick.
+func (s *Supervisor) RetireTick(name string) {
+	s.retiredTicks.Store(name, struct{}{})
+}
+
+// tickRetired reports whether the named goroutine has intentionally ended and
+// is therefore exempt from the staleness check. Lock-free by construction: the
+// watchdog must stay responsive even when the supervisor is deadlocked, so it
+// may never take AgentsMu or an AgentProcess mutex to answer this.
+func (s *Supervisor) tickRetired(name string) bool {
+	_, ok := s.retiredTicks.Load(name)
+	return ok
 }
 
 // RecordTick stamps the current time on the named goroutine's tick slot. Call

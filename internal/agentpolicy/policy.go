@@ -167,6 +167,17 @@ func decideDomain(d agenterr.DomainOutcome) Disposition {
 		// never be finished surfaces as failed instead of consuming turns
 		// forever; a run that does complete resets the budget as usual.
 		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}
+	case agenterr.SupervisorStopOutcome:
+		// Nothing failed: WE ended the run — daemon shutdown, an operator stop,
+		// or the agent's removal from config. The supervise goroutine is on its
+		// way out on every one of those paths, so this verdict is rarely acted
+		// on at all; it exists so the run carries an honest class instead of
+		// whatever the log tail happened to look like when we killed it.
+		//
+		// Uncounted, because a kill we performed is not evidence against the
+		// agent or its task, and must not erode the restart budget that a real
+		// failure needs.
+		return Disposition{Decision: RetryUncounted, Backoff: BPDefault}
 	default:
 		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}
 	}

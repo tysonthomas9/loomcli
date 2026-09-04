@@ -55,10 +55,11 @@ type Supervisor struct {
 	FatalCh   chan error
 	FatalOnce sync.Once
 
-	// Ticks holds *atomic.Int64 UnixNano timestamps keyed by goroutine name.
-	// Watched goroutines call RecordTick at each loop iteration; the liveness
-	// watchdog flags any tick older than the per-name threshold.
-	Ticks sync.Map
+	// Ticks holds *atomic.Int64 UnixNano timestamps keyed by goroutine name; the
+	// watchdog flags any older than its threshold unless retiredTicks holds the
+	// name, meaning that goroutine ended on purpose (RetireTick). Lock-free both.
+	Ticks        sync.Map
+	retiredTicks sync.Map
 
 	// LivenessTimeout overrides the default per-goroutine staleness threshold
 	// for the liveness watchdog. Zero means use built-in defaults.
