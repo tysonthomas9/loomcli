@@ -59,6 +59,7 @@ type AgentProcess struct {
 	RateRetryCount int                  // consecutive rate-limit retries (separate from RestartCount)
 	LastNoWork     bool                 // true if last exit was due to no claimable tasks
 	NoWorkCount    int                  // consecutive NoWork exits (reset on non-NoWork exit)
+	IdleSince      time.Time            // when the current NoWork streak began (zero when not idle); set on the 0→1 transition and cleared with NoWorkCount by resetNoWork
 	BlockCount     int                  // block cycles since the last successful run (drives BlockBudget escalation; display-only in the state file, never hydrated across daemon restarts)
 
 	CurrentBackendIdx int       // 0=primary, 1+=fallback index into Entry.FallbackBackends
@@ -70,7 +71,7 @@ type AgentProcess struct {
 
 	StopReason StopReason // why the agent was stopped (set at decision site, empty while running)
 
-	Mu sync.Mutex // protects Cmd, Pid, LogFile, SoftKnobWarning, restart tracking, AssignedEpicID, AssignedTaskID, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, LastActivity, InputWaitPending, InputWaitSince
+	Mu sync.Mutex // protects Cmd, Pid, LogFile, SoftKnobWarning, restart tracking, IdleSince, AssignedEpicID, AssignedTaskID, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, LastActivity, InputWaitPending, InputWaitSince
 }
 
 // StopReason identifies why an agent was stopped.

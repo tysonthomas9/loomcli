@@ -12,7 +12,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
-	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
@@ -20,8 +19,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/store"
-
-	"go.opentelemetry.io/otel/attribute"
 )
 
 // EventEmitter is the interface for emitting observability events.
@@ -876,22 +873,14 @@ func (s *Supervisor) sleepBeforeRestart(ap *AgentProcess) bool {
 	ap.Mu.Lock()
 	count := ap.RestartCount
 	errType := errorTypeFromAgentErr(ap.LastError)
+	lastErr := ap.LastError
+	noWorkCount := ap.NoWorkCount
+	idleSince := ap.IdleSince
 	ap.BackoffUntil = time.Now().Add(backoff)
 	ap.Mu.Unlock()
-	slog.Info("waiting before restart", "worktree", ap.Entry.Worktree, "backoff", backoff, "attempt", count)
 
-	_, span := startSpan(cmdstore.RootContext(),
-		"daemon.supervisor.restart",
-		attribute.String("loom.agent", ap.Entry.Worktree),
-		attribute.String("loom.role", ap.Entry.Role),
-		attribute.String("loom.workspace", s.WorkspaceID),
-		attribute.Int("loom.restart_count", count),
-		attribute.String("loom.error_type", errType),
-	)
-	defer span.End()
-
-	if evt, err := events.NewEvent(events.AgentRestarted, ap.Entry.Worktree, ap.Entry.Role, "", events.AgentRestartedData{PID: 0, RestartCount: count}); err == nil {
-		s.EmitEvent(evt)
+	if logBackoffWait(ap, backoff, count, lastErr, noWorkCount, idleSince) {
+		defer s.announceRestartWait(ap, count, errType)()
 	}
 
 	// Keep the agent's liveness tick fresh during a long wait (a block, or a
