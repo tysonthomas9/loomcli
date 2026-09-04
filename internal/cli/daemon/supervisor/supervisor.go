@@ -501,6 +501,7 @@ func (s *Supervisor) createAgentSession(ap *AgentProcess, epicID string) {
 
 	sess, err := sessStore.CreateSession(sessions.CreateOptions{
 		AgentName: ap.Entry.Worktree, Backend: s.GetEffectiveBackend(ap),
+		TaskID: s.taskIDForLifecycle(ap, nil),
 		EpicID: epicID, Phase: phase, AttemptNum: restartCount,
 	})
 	if err != nil {
