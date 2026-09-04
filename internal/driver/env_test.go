@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/secrets/names"
 )
 
 func TestScopedSubprocessBaseEnvFiltersBroadCredentials(t *testing.T) {
@@ -62,6 +63,18 @@ func TestScopedSubprocessBaseEnvFiltersBroadCredentials(t *testing.T) {
 	} {
 		if _, ok := got[key]; ok {
 			t.Fatalf("%s leaked into filtered env: %+v", key, got)
+		}
+	}
+}
+
+func TestProviderCredentialLocalWideningVsRemoteDenial(t *testing.T) {
+	for _, n := range names.ProviderCredentialNames {
+		entry := n + "=secret-value"
+		if _, leaked := envMap(scopedSubprocessBaseEnv([]string{entry}))[n]; leaked {
+			t.Errorf("remote-denial invariant broken: %s leaked through scopedSubprocessBaseEnv", n)
+		}
+		if _, kept := envMap(localTaskRunnerBaseEnv([]string{entry}))[n]; !kept {
+			t.Errorf("local widening broken: %s missing from localTaskRunnerBaseEnv", n)
 		}
 	}
 }
