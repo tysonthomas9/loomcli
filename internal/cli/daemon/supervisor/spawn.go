@@ -45,7 +45,7 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 		fmt.Sprintf("LOOM_EVENTS_DIR=%s", ResolveDaemonPath(s.ProjectDir, cfg.Daemon.EventsDir)),
 	)
 
-	cmd.Env = appendRoleEnv(cmd.Env, ap)
+	cmd.Env = appendRoleEnv(cmd.Env, ap, s.GetMaxRunDuration())
 	cmd.Env = appendRoutingEnv(cmd.Env, ap)
 	// Both ends of a human answer wait need the same clock: the child's ask
 	// deadline runs slightly inside this bound so an unanswered prompt ends in
@@ -122,8 +122,14 @@ func buildAgentExecCmd(ap *AgentProcess, backend, epicID string) (*exec.Cmd, err
 	return exec.Command(loomPath, args...), nil //nolint:gosec // G204: intentional loom subprocess launch
 }
 
-// appendRoleEnv adds role constraint env vars (allowed/denied tools, read-only, repo).
-func appendRoleEnv(env []string, ap *AgentProcess) []string {
+// appendRoleEnv adds role constraint env vars (allowed/denied tools, read-only,
+// repo), plus the per-turn deadline derived from this agent's run-duration cap.
+//
+// daemonMaxRunSeconds is the daemon-wide cap the role's own max_run_duration
+// overrides; it is passed in rather than read here so the precedence stays in
+// maxRunDurationSecondsFor alone.
+func appendRoleEnv(env []string, ap *AgentProcess, daemonMaxRunSeconds int) []string {
+	env = appendRunTurnTimeoutEnv(env, ap, daemonMaxRunSeconds)
 	if ap.Entry.Repo != "" {
 		env = append(env, fmt.Sprintf("LOOM_AGENT_REPO=%s", ap.Entry.Repo))
 	}
@@ -170,6 +176,53 @@ func appendRoleEnv(env []string, ap *AgentProcess) []string {
 		env = append(env, fmt.Sprintf("LOOM_AGENT_MODEL=%s", ap.RoleConfig.Model))
 	}
 	return env
+}
+
+// appendRunTurnTimeoutEnv sets LOOM_RUN_TURN_TIMEOUT_SECONDS to this agent's
+// run-duration cap minus the margin, and is authoritative about it: any value
+// inherited from the daemon's own environment is dropped first.
+//
+// Dropping rather than merely appending is the point. Every LOOM_ variable is
+// inherited by the child (see envfilter), so an operator who set this by hand on
+// the daemon would otherwise hand every agent the same blanket number — exactly
+// the shape of the bug this export exists to fix, where one fleet-wide value
+// stood in for a per-role one and every role's max_run_duration was inert. The
+// supervisor has resolved the correct number for THIS agent; a blanket override
+// has no claim to overrule it, the same precedence maxRunDurationSecondsFor
+// already applies to the cap itself.
+//
+// A disabled cap exports nothing and inherits nothing: 0 means no ceiling, and
+// leaving an inherited deadline standing would quietly reinstate one.
+func appendRunTurnTimeoutEnv(env []string, ap *AgentProcess, daemonMaxRunSeconds int) []string {
+	const key = "LOOM_RUN_TURN_TIMEOUT_SECONDS"
+	seconds := runTurnTimeoutSecondsFor(ap, daemonMaxRunSeconds)
+
+	kept := env[:0:0]
+	inherited := ""
+	for _, entry := range env {
+		if v, ok := strings.CutPrefix(entry, key+"="); ok {
+			inherited = v
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	if inherited != "" {
+		name := ""
+		if ap != nil {
+			name = ap.Entry.Worktree
+		}
+		if seconds > 0 {
+			log.Printf("[daemon] Agent %s: %s=%s inherited from the daemon env, overridden with %d (this role's run-duration cap minus %ds)",
+				name, key, inherited, seconds, runTurnDeadlineMarginSeconds)
+		} else {
+			log.Printf("[daemon] Agent %s: %s=%s inherited from the daemon env, dropped — this role's run-duration cap is disabled",
+				name, key, inherited)
+		}
+	}
+	if seconds <= 0 {
+		return kept
+	}
+	return append(kept, fmt.Sprintf("%s=%d", key, seconds))
 }
 
 // appendRoutingEnv adds routing constraint env vars (skills, path patterns, priority, role).
