@@ -200,6 +200,44 @@ func (s *Supervisor) wallActiveFor(key string) (time.Duration, string, agenterr.
 	return 0, "", agenterr.Outcome{}, wallScopeNone, false
 }
 
+// wallShieldsCountedRetry reports whether a counted-retry failure must be
+// treated as uncounted because a wall is live for this agent's credential,
+// and how much of that wall is left.
+//
+// A wall means the credential is known to be refusing or throttling work. A
+// timeout or transient failure raised inside that window is evidence about the
+// upstream condition, not about the agent — and max_retries exists to catch a
+// broken AGENT. Counting it blocks the agent AFTER the wall clears: the cause
+// self-heals, the effect does not (PUPPET-435).
+//
+// Only the classes whose exhaustion is an UNBOUNDED block are shielded
+// (Timeout, Transient: OnExhaustion Block with BlockBudget 0). Unknown and the
+// domain outcomes escalate to FastFail after defaultBlockBudget cycles —
+// bounded and terminal, not an effect that outlives its cause — and Unknown is
+// also where a deterministic crash lands, so its budget erosion is signal
+// worth keeping.
+//
+// Scope is deliberately either: wallActiveFor answers "is THIS AGENT walled",
+// which is the question being asked, and the logic holds at profile scope for
+// the same reason it holds at account scope. Caller holds ap.Mu;
+// wallActiveFor takes only s.WallMu (see the lock-ordering note in
+// applyFatalStop).
+func (s *Supervisor) wallShieldsCountedRetry(ap *AgentProcess, o agenterr.Outcome) (time.Duration, bool) {
+	if o.IsDomain() {
+		return 0, false
+	}
+	switch o.Harness {
+	case wrapper.ErrTimeout, wrapper.ErrTransient:
+	default:
+		return 0, false
+	}
+	remaining, _, _, _, ok := s.wallActiveFor(ap.CredentialKey)
+	if !ok {
+		return 0, false
+	}
+	return remaining, true
+}
+
 // accountWallActive reports the time remaining on a live ACCOUNT wall and the
 // message recorded with it. Profile walls are deliberately invisible here:
 // this answers "is the whole fleet parked", which is a different question from

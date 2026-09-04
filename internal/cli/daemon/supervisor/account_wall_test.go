@@ -11,6 +11,7 @@ import (
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/agentpolicy"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/events"
 )
@@ -787,5 +788,162 @@ func TestWall_ConcurrentAccessAcrossKeys(t *testing.T) {
 		if _, _, _, _, ok := s.wallActiveFor(key); !ok {
 			t.Errorf("key %q must be walled after concurrent records", key)
 		}
+	}
+}
+
+// TestDecideRestart_TimeoutDuringWallIsUncounted is the regression test for
+// PUPPET-435: on 2026-09-03 two agents were still cycling "restart budget
+// exhausted, blocking" six minutes after the account wall that caused their
+// timeouts had expired. A Timeout raised inside a live wall must leave the
+// budget exactly where the wall park would have left it.
+func TestDecideRestart_TimeoutDuringWallIsUncounted(t *testing.T) {
+	s := newAccountWallSupervisor(nil)
+	ap := newAccountWallAgent()
+	ap.RestartCount = 2
+	ap.LastExitCode = 1
+	ap.LastError = &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrTimeout)}
+
+	s.WallUntil = time.Now().Add(5 * time.Minute)
+	s.WallClass = agenterr.OutcomeFromHarness(wrapper.ErrRateLimited)
+
+	if !s.shouldRestart(ap) {
+		t.Fatal("shouldRestart() = false, want true (a shielded failure still restarts)")
+	}
+	if ap.RestartCount != 2 {
+		t.Errorf("RestartCount = %d, want 2 (a wall-shielded failure must not erode the budget)", ap.RestartCount)
+	}
+	if ap.BlockCount != 0 {
+		t.Errorf("BlockCount = %d, want 0", ap.BlockCount)
+	}
+	if ap.StopReason != "" {
+		t.Errorf("StopReason = %q, want cleared so the next cycle hits the pre-flight gate", ap.StopReason)
+	}
+}
+
+// TestDecideRestart_TimeoutWithNoWallStillCounts pins the behavior the shield
+// must not disturb: with no wall live, a timeout is ordinary evidence about the
+// agent, counts, and blocks once the budget is spent.
+func TestDecideRestart_TimeoutWithNoWallStillCounts(t *testing.T) {
+	s := newAccountWallSupervisor(nil)
+	ap := newAccountWallAgent()
+	ap.RestartCount = 2
+	ap.LastExitCode = 1
+	ap.LastError = &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrTimeout)}
+
+	if !s.shouldRestart(ap) {
+		t.Fatal("shouldRestart() = false, want true (still inside the budget)")
+	}
+	if ap.RestartCount != 3 {
+		t.Fatalf("RestartCount = %d, want 3 (a timeout with no wall counts)", ap.RestartCount)
+	}
+
+	// One more failure spends the budget (getMaxRetries defaults to 3) and must
+	// take the block path — the exhaustion behavior the shield sidesteps.
+	if !s.shouldRestart(ap) {
+		t.Fatal("shouldRestart() = false, want true (Timeout blocks rather than stopping)")
+	}
+	if ap.StopReason != StopReasonMaxRetriesBlocked {
+		t.Errorf("StopReason = %q, want %q", ap.StopReason, StopReasonMaxRetriesBlocked)
+	}
+	if ap.BlockCount != 1 {
+		t.Errorf("BlockCount = %d, want 1", ap.BlockCount)
+	}
+}
+
+// TestDecideRestart_ProfileWallAlsoShields covers the scope decision: the
+// shield asks "is THIS AGENT walled" (wallActiveFor), so a profile wall on the
+// agent's own credential shields it — and an agent on a different credential is
+// untouched.
+func TestDecideRestart_ProfileWallAlsoShields(t *testing.T) {
+	projectDir := t.TempDir()
+	walledRoot := provisionProfile(t, projectDir, "worker-2", "claude")
+	provisionProfile(t, projectDir, "planner", "claude")
+
+	s := newAccountWallSupervisor(nil)
+	s.ProjectDir = projectDir
+
+	s.recordWall(walledRoot, agenterr.OutcomeFromHarness(wrapper.ErrAuth), &agenterr.AgentError{
+		Class: agenterr.OutcomeFromHarness(wrapper.ErrAuth), Message: "invalid API key",
+	})
+
+	walled := newProfiledAgent("worker-2")
+	walled.CredentialKey = walledRoot
+	walled.RestartCount = 2
+	walled.LastExitCode = 1
+	walled.LastError = &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrTransient)}
+
+	if !s.shouldRestart(walled) {
+		t.Fatal("shouldRestart(worker-2) = false, want true")
+	}
+	if walled.RestartCount != 2 {
+		t.Errorf("worker-2 RestartCount = %d, want 2 (a profile wall shields its own credential)", walled.RestartCount)
+	}
+
+	// The negative half: a different credential is not walled, so its timeout
+	// is ordinary evidence and counts.
+	healthy := newProfiledAgent("planner")
+	healthy.CredentialKey = filepath.Join(projectDir, ".loom", "agent-profiles", "planner")
+	healthy.RestartCount = 2
+	healthy.LastExitCode = 1
+	healthy.LastError = &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrTimeout)}
+
+	if !s.shouldRestart(healthy) {
+		t.Fatal("shouldRestart(planner) = false, want true")
+	}
+	if healthy.RestartCount != 3 {
+		t.Errorf("planner RestartCount = %d, want 3 (another profile's wall shields nothing)", healthy.RestartCount)
+	}
+}
+
+// TestWallShield_MatchesUnboundedBlockClasses pins the shielded set to exactly
+// the dispositions whose exhaustion is an UNBOUNDED block (Retry / OnExhaustion
+// Block / BlockBudget 0) — today {Timeout, Transient}. If a future table entry
+// acquires that shape, this fails and forces an explicit decision rather than
+// silently inheriting or missing the shield.
+func TestWallShield_MatchesUnboundedBlockClasses(t *testing.T) {
+	s := newAccountWallSupervisor(nil)
+	ap := newAccountWallAgent()
+	s.WallUntil = time.Now().Add(5 * time.Minute)
+	s.WallClass = agenterr.OutcomeFromHarness(wrapper.ErrRateLimited)
+
+	outcomes := []agenterr.Outcome{}
+	for c := wrapper.ErrNone; c <= wrapper.ErrUnknown; c++ {
+		outcomes = append(outcomes, agenterr.OutcomeFromHarness(c))
+	}
+	for d := agenterr.DomainNone + 1; d <= agenterr.IssueBackendOutageOutcome; d++ {
+		outcomes = append(outcomes, agenterr.OutcomeFromDomain(d))
+	}
+
+	for _, o := range outcomes {
+		disp := agentpolicy.Decide(o)
+		want := disp.Decision == agentpolicy.Retry &&
+			disp.OnExhaustion == agentpolicy.Block &&
+			disp.BlockBudget == 0
+		if _, got := s.wallShieldsCountedRetry(ap, o); got != want {
+			t.Errorf("wallShieldsCountedRetry(%s) = %v, want %v (unbounded-block shape: %v)",
+				o, got, want, want)
+		}
+	}
+
+	// Stated explicitly because it is a deliberate exclusion, not a fallout of
+	// the table: Unknown escalates to FastFail after defaultBlockBudget cycles
+	// — bounded and terminal — and it is where a deterministic crash lands, so
+	// its budget erosion is the only signal a genuinely broken agent produces.
+	if _, ok := s.wallShieldsCountedRetry(ap, agenterr.OutcomeFromHarness(wrapper.ErrUnknown)); ok {
+		t.Error("wallShieldsCountedRetry(Unknown) = true, want false")
+	}
+}
+
+// TestWallShield_NoWallDoesNotShield: the shield is a live-window check. A wall
+// that expired between the failure and the decision resolves to the
+// pre-existing counted behavior.
+func TestWallShield_NoWallDoesNotShield(t *testing.T) {
+	s := newAccountWallSupervisor(nil)
+	ap := newAccountWallAgent()
+	s.WallUntil = time.Now().Add(-time.Second)
+	s.WallClass = agenterr.OutcomeFromHarness(wrapper.ErrRateLimited)
+
+	if _, ok := s.wallShieldsCountedRetry(ap, agenterr.OutcomeFromHarness(wrapper.ErrTimeout)); ok {
+		t.Error("wallShieldsCountedRetry(Timeout) = true with an expired wall, want false")
 	}
 }
