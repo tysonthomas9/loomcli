@@ -82,6 +82,7 @@ func TestQuarantineEligible(t *testing.T) {
 		{"spawn-failure → not eligible", agenterr.OutcomeFromDomain(agenterr.SpawnFailureOutcome), false},
 		{"backend-unavailable → not eligible", agenterr.OutcomeFromDomain(agenterr.BackendUnavailableOutcome), false},
 		{"completion-hook-failure → not eligible (supervisor write fault, not task fault)", agenterr.OutcomeFromDomain(agenterr.CompletionHookFailureOutcome), false},
+		{"issue-backend-outage → not eligible (the store is down, the task is fine)", agenterr.OutcomeFromDomain(agenterr.IssueBackendOutageOutcome), false},
 		// zero value (clean success)
 		{"zero outcome → not eligible", agenterr.Outcome{}, false},
 	}
@@ -112,5 +113,22 @@ func TestDecide_DeterministicNeverBlocks(t *testing.T) {
 	u := Decide(agenterr.OutcomeFromHarness(wrapper.ErrUnknown))
 	if u.OnExhaustion == Block && u.BlockBudget <= 0 {
 		t.Errorf("Unknown blocks unbounded (BlockBudget=%d), want a finite cap", u.BlockBudget)
+	}
+}
+
+// An issue-backend outage is shared by every agent in the fleet and clears on
+// its own, so it must be uncounted: a counted retry escalates through Block
+// into FastFail and takes the whole fleet down over infrastructure no agent
+// can influence. See PUPPET-210.
+func TestDecide_IssueBackendOutage_IsUncountedAndNeverTerminal(t *testing.T) {
+	d := Decide(agenterr.OutcomeFromDomain(agenterr.IssueBackendOutageOutcome))
+	if d.Decision != RetryUncounted {
+		t.Fatalf("Decision = %v, want RetryUncounted", d.Decision)
+	}
+	if d.Backoff != BPIssueBackendOutage {
+		t.Errorf("Backoff = %v, want BPIssueBackendOutage (a fixed recheck, not an exponential ramp)", d.Backoff)
+	}
+	if d.OnExhaustion == Block || d.OnExhaustion == FastFail {
+		t.Errorf("OnExhaustion = %v, want no exhaustion path at all", d.OnExhaustion)
 	}
 }
