@@ -147,3 +147,114 @@ func TestDetectDaemonRuntimeForCommandFallsBackToWorkspaceLock(t *testing.T) {
 		t.Fatalf("runtime PID = %d, want %d", rt.PID, os.Getpid())
 	}
 }
+
+// TestDetectWorkspaceDaemonRuntime_CarriesProvenance is the PUPPET-57 half of
+// the workspace fallback: when this probe is what proves liveness, it must
+// also say WHICH daemon it proved (Dir) and when that daemon started, because
+// the caller's cwd describes a different — possibly dead — daemon.
+func TestDetectWorkspaceDaemonRuntime_CarriesProvenance(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+	t.Setenv("LOOM_WORKSPACE", "provenance")
+
+	lock, err := acquireWorkspaceDaemonLock()
+	if err != nil {
+		t.Fatalf("acquireWorkspaceDaemonLock: %v", err)
+	}
+	if lock == nil {
+		t.Fatal("expected a lock when LOOM_WORKSPACE is set")
+	}
+	defer lock.Release()
+
+	wsDir := filepath.Join(loomDir, "workspaces", "provenance")
+	want := readWorkspacePIDFile(filepath.Join(wsDir, "daemon.pid"))
+	if want.PID != os.Getpid() {
+		t.Fatalf("daemon.pid PID = %d, want %d", want.PID, os.Getpid())
+	}
+	if want.StartedAt.IsZero() {
+		t.Fatal("daemon.pid started_at is zero; the workspace fallback would have no start time to report")
+	}
+
+	rt := detectWorkspaceDaemonRuntime()
+	if !rt.Running || rt.PID != os.Getpid() {
+		t.Fatalf("expected the held workspace lock to be detected live, got %+v", rt)
+	}
+	if rt.Dir != wsDir {
+		t.Errorf("Dir = %q, want %q — sidecar files must be located under the workspace dir", rt.Dir, wsDir)
+	}
+	if !rt.StartedAt.Equal(want.StartedAt) {
+		t.Errorf("StartedAt = %v, want %v (from daemon.pid)", rt.StartedAt, want.StartedAt)
+	}
+	if rt.Source != "workspace-lock" {
+		t.Errorf("Source = %q, want %q", rt.Source, "workspace-lock")
+	}
+}
+
+// TestDetectWorkspaceDaemonRuntime_DeadPIDHasZeroStartedAt: a sidecar naming a
+// dead PID identifies nothing, so the probe keeps its historical
+// Running=true/PID=0 shape and must not report that corpse's start time.
+func TestDetectWorkspaceDaemonRuntime_DeadPIDHasZeroStartedAt(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+	t.Setenv("LOOM_WORKSPACE", "deadpid")
+
+	wsDir := filepath.Join(loomDir, "workspaces", "deadpid")
+	if err := os.MkdirAll(wsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The exact corpse from the PUPPET-57 report: a dead PID with a start
+	// time six days old.
+	if err := os.WriteFile(filepath.Join(wsDir, "daemon.pid"),
+		[]byte(`{"pid":999999999,"started_at":"2026-08-09T18:23:08+02:00"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Hold the workspace flock from a separate open file description so the
+	// probe observes a genuinely locked file.
+	lockPath := filepath.Join(wsDir, "daemon.lock")
+	lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lf.Close() }()
+	if err := lockfile.TryLockExclusive(lf); err != nil {
+		t.Fatalf("acquire test lock: %v", err)
+	}
+
+	rt := detectWorkspaceDaemonRuntime()
+	if !rt.Running {
+		t.Fatalf("a held workspace lock means a daemon is running, got %+v", rt)
+	}
+	if rt.PID != 0 {
+		t.Errorf("PID = %d, want 0 — a dead sidecar PID identifies nothing", rt.PID)
+	}
+	if !rt.StartedAt.IsZero() {
+		t.Errorf("StartedAt = %v, want zero — the corpse's start time must not be reported", rt.StartedAt)
+	}
+	if rt.Dir != wsDir {
+		t.Errorf("Dir = %q, want %q", rt.Dir, wsDir)
+	}
+}
+
+// TestReadWorkspacePIDFile_MissingAndGarbage: the single parser must never
+// return half-parsed metadata that a caller could mistake for evidence.
+func TestReadWorkspacePIDFile_MissingAndGarbage(t *testing.T) {
+	dir := t.TempDir()
+
+	if got := readWorkspacePIDFile(filepath.Join(dir, "absent.pid")); got.PID != 0 || !got.StartedAt.IsZero() {
+		t.Errorf("missing file = %+v, want zero value", got)
+	}
+
+	garbage := filepath.Join(dir, "garbage.pid")
+	if err := os.WriteFile(garbage, []byte("<<<not json>>>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := readWorkspacePIDFile(garbage); got.PID != 0 || !got.StartedAt.IsZero() {
+		t.Errorf("garbage file = %+v, want zero value", got)
+	}
+
+	// readWorkspacePID stays a thin view over the same parser.
+	if got := readWorkspacePID(garbage); got != 0 {
+		t.Errorf("readWorkspacePID(garbage) = %d, want 0", got)
+	}
+}
