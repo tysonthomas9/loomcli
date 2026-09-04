@@ -366,35 +366,29 @@ type claudeRunTurnFn func(ctx context.Context, cfg claudeRunTurnConfig) (claudeR
 
 var claudeRunTurn claudeRunTurnFn = hwharness.RunTurn
 
-// runTurnDeadlineMargin is how far INSIDE the supervisor's silence watchdog the
-// per-turn deadline is placed when it is derived from that watchdog. The margin
-// is the whole point of deriving it: the deadline must fire strictly before
-// applyIdleKill (internal/cli/daemon/supervisor/health.go) so a drifted turn
-// ends as a normal process exit — classified, completion hooks run — instead of
-// the SIGKILL that skips both.
-const runTurnDeadlineMargin = 120 * time.Second
-
 // runTurnDeadline resolves the wall-clock bound on a single RunTurn call.
 //
-// LOOM_RUN_TURN_TIMEOUT_SECONDS is the explicit knob and wins outright when
-// set, including when it is malformed or non-positive — that reads as "no
-// deadline", not "fall back to something else". With it unset the bound is
-// derived from the daemon's silence watchdog (LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS,
-// exported into the agent env) minus runTurnDeadlineMargin.
+// LOOM_RUN_TURN_TIMEOUT_SECONDS is the only input. The supervisor exports it per
+// agent as that agent's run-duration cap minus a margin (appendRunTurnTimeoutEnv
+// in internal/cli/daemon/supervisor/spawn.go), so the deadline fires strictly
+// before applyRunDurationKill and the turn ends as a classified exit —
+// checkpoint saved, recovery armed — rather than a SIGKILL that skips both.
+// Unset, malformed or non-positive all read as "no deadline"; there is no
+// fallback, which is what makes standalone and interactive use inert.
 //
-// Returns 0 — deadline disabled — whenever neither var yields a usable value, or
-// when the watchdog is not further out than the margin. Zero is the answer for
-// standalone and interactive use, where neither var is set, so this is inert
-// unless a daemon configured it.
+// It deliberately does NOT fall back to the daemon's silence watchdog
+// (LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS), which is what it did until PUPPET-443.
+// That derivation bounded a WORKING turn with the SILENCE number: the daemon
+// exports the watchdog to every child, so every agent of every role was capped
+// at watchdog-margin (2580s on this fleet) no matter what its role's
+// max_run_duration said, and 27 healthy, still-printing runs over four days were
+// killed at exactly that mark while the watchdog itself never fired once. The
+// two ceilings answer different questions — silence detects a hang, the cap
+// bounds work — and neither may be derived from the other. With the supervisor
+// exporting the cap explicitly, an unset variable now means what it says: no
+// run-duration cap is configured, so this turn has no deadline.
 func runTurnDeadline() time.Duration {
-	if raw := strings.TrimSpace(os.Getenv("LOOM_RUN_TURN_TIMEOUT_SECONDS")); raw != "" {
-		return positiveSecondsDuration(raw)
-	}
-	watchdog := positiveSecondsDuration(strings.TrimSpace(os.Getenv("LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS")))
-	if watchdog <= runTurnDeadlineMargin {
-		return 0
-	}
-	return watchdog - runTurnDeadlineMargin
+	return positiveSecondsDuration(strings.TrimSpace(os.Getenv("LOOM_RUN_TURN_TIMEOUT_SECONDS")))
 }
 
 // positiveSecondsDuration parses a whole-second count, returning 0 for anything
