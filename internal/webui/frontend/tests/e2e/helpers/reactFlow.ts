@@ -13,10 +13,12 @@ interface ExpectReactFlowEdgeCountOptions {
 /**
  * Wait for React Flow to mount and measure its nodes before asserting edges.
  *
- * React Flow cannot compute edge paths until node dimensions are available. If
- * positive edges remain absent after measurement, dispatch one resize event to
- * recover from a zero-size-at-mount layout without hiding a genuinely wrong
- * final edge count.
+ * React Flow cannot compute edge paths until its ResizeObserver has committed
+ * node dimensions and handle bounds to the internal store. Reading a positive
+ * DOM rectangle does not prove that commit happened. If positive edges remain
+ * absent after measurement, perform a real one-pixel viewport resize so the
+ * browser runs layout and notifies the observer. A synthetic `resize` event is
+ * insufficient because it does not change any observed dimensions.
  */
 export async function expectReactFlowEdgeCount(
   page: Page,
@@ -54,29 +56,32 @@ export async function expectReactFlowEdgeCount(
   );
 
   const edges = page.locator(edgeSelector);
-  const edgeCountAssertion = expect(edges).toHaveCount(expectedEdgeCount, {
-    timeout: EDGE_TIMEOUT_MS,
-  });
-
   if (expectedEdgeCount === 0) {
-    await edgeCountAssertion;
+    await expect(edges).toHaveCount(0, { timeout: EDGE_TIMEOUT_MS });
     return;
   }
 
-  let nudgeTimer: ReturnType<typeof setTimeout> | undefined;
-  const nudgeFailure = new Promise<never>((_resolve, reject) => {
-    nudgeTimer = setTimeout(() => {
-      void (async () => {
-        if ((await edges.count()) === 0) {
-          await page.evaluate(() => window.dispatchEvent(new Event("resize")));
-        }
-      })().catch(reject);
-    }, EDGE_LAYOUT_NUDGE_DELAY_MS);
-  });
-
   try {
-    await Promise.race([edgeCountAssertion, nudgeFailure]);
-  } finally {
-    if (nudgeTimer !== undefined) clearTimeout(nudgeTimer);
+    await expect(edges).toHaveCount(expectedEdgeCount, {
+      timeout: EDGE_LAYOUT_NUDGE_DELAY_MS,
+    });
+    return;
+  } catch {
+    // Only recover the observed initialization failure. A non-zero wrong count
+    // is a product/test-data failure and must reach the final assertion below.
+    if ((await edges.count()) === 0) {
+      const viewport = page.viewportSize();
+      if (viewport) {
+        await page.setViewportSize({
+          width: viewport.width + 1,
+          height: viewport.height,
+        });
+        await page.setViewportSize(viewport);
+      }
+    }
   }
+
+  await expect(edges).toHaveCount(expectedEdgeCount, {
+    timeout: EDGE_TIMEOUT_MS - EDGE_LAYOUT_NUDGE_DELAY_MS,
+  });
 }
