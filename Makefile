@@ -36,10 +36,24 @@ LOCAL_MODE_COMPOSE_SELECT = \
 	  exit 127; \
 	fi
 
+# Build provenance (D-48). One definition so `make build` and `make install`
+# cannot stamp differently. LOOM_SOURCE_PRS is for the deployer: it is the only
+# thing that knows which PRs a deploy was assembled from, and `loom version`
+# reports whatever is absent as absent rather than guessing.
+LOOM_PKG      := github.com/tysonthomas9/loomcli/internal/cli
+LOOM_COMMIT   ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+LOOM_REF      ?= $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)
+LOOM_BUILT_AT ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LOOM_SOURCE_PRS ?=
+LOOM_LDFLAGS  := -X $(LOOM_PKG).Build=$(LOOM_COMMIT) \
+                 -X $(LOOM_PKG).Ref=$(LOOM_REF) \
+                 -X $(LOOM_PKG).BuildTime=$(LOOM_BUILT_AT) \
+                 -X $(LOOM_PKG).SourcePRs=$(LOOM_SOURCE_PRS)
+
 # Build the loom binary (Go-only; no frontend dependency)
 build:
 	@echo "Building loom..."
-	go build -ldflags="-X github.com/tysonthomas9/loomcli/internal/cli.Build=$$(git rev-parse --short HEAD)" -o loom ./cmd/loom
+	@bash -c 'go build -ldflags="$(LOOM_LDFLAGS)" -o loom ./cmd/loom'
 
 # Run all tests with coverage
 test:
@@ -545,8 +559,7 @@ test-auth-e2e:
 # Install loom to GOPATH/bin (Go-only; no frontend dependency)
 install:
 	@echo "Installing loom to $$(go env GOPATH)/bin..."
-	@bash -c 'build=$$(git rev-parse --short HEAD 2>/dev/null || echo "unknown"); \
-		go install -ldflags="-X github.com/tysonthomas9/loomcli/internal/cli.Build=$$build" ./cmd/loom'
+	@bash -c 'go install -ldflags="$(LOOM_LDFLAGS)" ./cmd/loom'
 
 # Clean build artifacts
 clean:

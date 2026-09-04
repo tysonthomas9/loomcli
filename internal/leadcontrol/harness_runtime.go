@@ -52,6 +52,12 @@ type HarnessLeadRuntimeConfig struct {
 	// HarnessName selects the harness-wrapper adapter. Defaults from Backend
 	// via HarnessNameForBackend.
 	HarnessName string
+	// StartupWarning, when non-empty, is printed above the launch banner. The
+	// caller supplies it (cli.VersionSkewWarning) rather than this package
+	// computing it: leadcontrol must not import internal/cli, and a stale-PATH
+	// warning is exactly the kind of thing an operator needs at the top of the
+	// session rather than buried in a log.
+	StartupWarning string
 	// BinaryPath and Args launch the harness. Prompt is appended as the final
 	// positional argument unless PromptFlag is set, in which case the runtime
 	// appends PromptFlag followed by Prompt. This supports CLIs such as OpenCode
@@ -118,7 +124,7 @@ func RunHarnessLeadRuntime(ctx context.Context, cfg HarnessLeadRuntimeConfig) er
 	handle, unregister := registerLeadConversation(cfg.SessionID, conv)
 	defer unregister()
 
-	_, _ = fmt.Fprintf(cfg.Stdout, "Launching controlled %s lead session...\n\n", cfg.Backend)
+	printLeadStartupBanner(cfg)
 	detach := conv.AttachOutput(cfg.Stdout)
 	defer detach()
 	restoreTerminal := forwardHarnessStdin(ctx, cfg, conv)
@@ -144,6 +150,15 @@ func RunHarnessLeadRuntime(ctx context.Context, cfg HarnessLeadRuntimeConfig) er
 	unregister()
 	restoreTerminal()
 	return finalizeHarnessLeadRuntime(cfg, conv, runtime, result, waitErr)
+}
+
+// printLeadStartupBanner writes the operator-facing banner, preceded by any
+// startup warning the caller supplied (the D-44 version-skew tripwire).
+func printLeadStartupBanner(cfg HarnessLeadRuntimeConfig) {
+	if cfg.StartupWarning != "" {
+		_, _ = fmt.Fprintf(cfg.Stdout, "%s\n\n", cfg.StartupWarning)
+	}
+	_, _ = fmt.Fprintf(cfg.Stdout, "Launching controlled %s lead session...\n\n", cfg.Backend)
 }
 
 // openHarnessLeadConversation starts the harness under harness-wrapper PTY
