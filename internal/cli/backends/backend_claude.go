@@ -21,7 +21,9 @@ import (
 	_ "github.com/olesho/harness-wrapper/pkg/harness/claude" // register the "claude" profile
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
+	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -324,9 +326,19 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 		return runClaudeConversation(ctx, workDir, prompt, agentName, resumeID, collector)
 	}
 
+	startedAt := time.Now()
 	res, err := runClaudeTurnWithRetry(ctx, func() (claudeRunTurnResult, error) {
 		return invokeClaudeRunTurn(ctx, workDir, prompt, agentName, resumeID, cli.DaemonActivityObserver(), collector)
 	})
+	// Persist the session id BEFORE the error arms, not after them. A run that
+	// dies on the per-turn deadline is precisely the run whose work is worth
+	// resuming, and it used to be the one run that recorded nothing: RunTurn
+	// captures Claude's session id from the "claude --resume <uuid>" hint the
+	// TUI prints on its GRACEFUL quit, and a context-cancelled turn returns
+	// before that quit ever happens. Measured on a forced 15s deadline: the
+	// lock survived the exit with its task id intact and an EMPTY
+	// claude_session_id, so the next attempt cold-started and redid the task.
+	persistClaudeTurnSessionID(workDir, res, resumeID, startedAt)
 	outputTail := claudeRunTurnEvidence(res, "")
 	if err != nil {
 		if errors.Is(err, hwharness.ErrTurnErrored) {
@@ -350,7 +362,6 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	}
 
 	displayClaudeTurn(res)
-	persistClaudeTurnSessionID(workDir, res)
 
 	// NOTE: the lock's Claude session ID is intentionally NOT cleared per-invoke.
 	// It must survive a failed/killed run so a daemon restart can carry it forward
@@ -571,8 +582,26 @@ func (c *capturedOutput) String() string {
 	return c.buf.String()
 }
 
-func persistClaudeTurnSessionID(workDir string, res claudeRunTurnResult) {
+// persistClaudeTurnSessionID records the turn's Claude session id on the
+// worktree lock so a next attempt can `--resume` it. It is called on EVERY exit
+// from the RunTurn path, including the error arms.
+//
+// resumeID and startedAt exist for the exit this ticket is about. A turn ended
+// by the per-turn deadline never reaches the harness's graceful quit, so
+// res.Session.HarnessSessionID is empty and there is nothing to write — the
+// resume machinery was unreachable for exactly the failure it was built for.
+// Two fallbacks close that: the id we were RESUMING (a resumed session keeps
+// its id, so it is still the right thing to carry forward), and failing that
+// Claude's own newest transcript for workDir, which is where the supervisor
+// already recovers an id it no longer has in process.
+func persistClaudeTurnSessionID(workDir string, res claudeRunTurnResult, resumeID string, startedAt time.Time) {
 	sid := strings.TrimSpace(res.Session.HarnessSessionID)
+	if sid == "" {
+		sid = strings.TrimSpace(resumeID)
+	}
+	if sid == "" {
+		sid = sessions.LatestHarnessSessionID(backendnames.Claude, workDir, "", startedAt)
+	}
 	if sid == "" {
 		return
 	}
