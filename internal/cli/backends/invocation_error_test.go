@@ -255,7 +255,7 @@ func TestTerminalTurnInvocationErrorHarnessNamedWalls(t *testing.T) {
 	}
 }
 
-// The deliberate behaviour change from removing the screen-scrape detector:
+// The deliberate behavior change from removing the screen-scrape detector:
 // an errored turn whose TEXT contains a billing phrase no longer acquires a
 // wall marker. It classifies as an ordinary errored turn — retryable and
 // non-fatal, which is what the code did before the detector existed. Pinned so
