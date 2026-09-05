@@ -9,6 +9,9 @@
  * oversight rather than a deploy.
  */
 
+import { useState } from "react";
+
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useClaimHold } from "@/hooks/agents";
 
 import styles from "./ClaimHoldBanner.module.css";
@@ -33,7 +36,8 @@ export function formatHoldAge(ms: number): string {
 export function ClaimHoldBanner({
   className,
 }: ClaimHoldBannerProps): JSX.Element | null {
-  const { hold, gated, busy, error, release } = useClaimHold();
+  const { hold, gated, busy, error, canForceRelease, release } = useClaimHold();
+  const [confirmForceRelease, setConfirmForceRelease] = useState(false);
 
   if (!hold?.held) return null;
 
@@ -75,6 +79,17 @@ export function ClaimHoldBanner({
         ) : null}
       </span>
       {error && <span className={styles.error}>{error}</span>}
+      {canForceRelease ? (
+        <button
+          type="button"
+          className={styles.forceReleaseButton}
+          onClick={() => setConfirmForceRelease(true)}
+          disabled={busy}
+          aria-label="Force release the claim hold"
+        >
+          Force release
+        </button>
+      ) : null}
       <button
         type="button"
         className={styles.releaseButton}
@@ -84,6 +99,25 @@ export function ClaimHoldBanner({
       >
         {busy ? "Releasing…" : "Release"}
       </button>
+      <ConfirmDialog
+        isOpen={confirmForceRelease}
+        title="Force release claim hold?"
+        message={
+          <>
+            This hold belongs to <strong>{hold.actor}</strong>. Force releasing
+            it allows agents to claim new work without that actor&apos;s
+            consent.
+          </>
+        }
+        confirmLabel="Force release"
+        variant="danger"
+        onConfirm={() => {
+          void release(true).then((released) => {
+            if (released) setConfirmForceRelease(false);
+          });
+        }}
+        onCancel={() => setConfirmForceRelease(false)}
+      />
     </div>
   );
 }

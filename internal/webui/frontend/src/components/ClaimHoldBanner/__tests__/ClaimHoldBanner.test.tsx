@@ -11,14 +11,23 @@
  * an oversight; and its Release button actually reaches the mutation.
  */
 
-import { render, screen, fireEvent } from "@testing-library/react";
+import { act, render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 
+import { KeyboardShortcutProvider } from "@/hooks";
 import { ClaimHoldBanner, formatHoldAge } from "../ClaimHoldBanner";
 
 const mockRelease = vi.fn();
 const mockUseClaimHold = vi.fn();
+
+function renderBanner() {
+  return render(
+    <KeyboardShortcutProvider>
+      <ClaimHoldBanner />
+    </KeyboardShortcutProvider>,
+  );
+}
 
 vi.mock("@/hooks/agents", () => ({
   useClaimHold: () => mockUseClaimHold(),
@@ -45,6 +54,7 @@ function holdState(
     gated: 0,
     busy: false,
     error: null,
+    canForceRelease: false,
     release: mockRelease,
     refresh: vi.fn(),
     ...extra,
@@ -58,6 +68,7 @@ function freeState() {
     gated: 0,
     busy: false,
     error: null,
+    canForceRelease: false,
     release: mockRelease,
     refresh: vi.fn(),
   };
@@ -78,13 +89,13 @@ describe("ClaimHoldBanner", () => {
 
   it("renders nothing when there is no active hold", () => {
     mockUseClaimHold.mockReturnValue(freeState());
-    const { container } = render(<ClaimHoldBanner />);
+    const { container } = renderBanner();
     expect(container).toBeEmptyDOMElement();
   });
 
   it("renders the holder and the reason", () => {
     mockUseClaimHold.mockReturnValue(holdState());
-    render(<ClaimHoldBanner />);
+    renderBanner();
 
     expect(screen.getByRole("status")).toBeInTheDocument();
     expect(screen.getByText("deployer")).toBeInTheDocument();
@@ -93,14 +104,14 @@ describe("ClaimHoldBanner", () => {
 
   it("reports how many agents the hold is gating", () => {
     mockUseClaimHold.mockReturnValue(holdState({}, { gated: 6 }));
-    render(<ClaimHoldBanner />);
+    renderBanner();
 
     expect(screen.getByText(/6 agents gated/)).toBeInTheDocument();
   });
 
   it("stays unescalated for a young hold", () => {
     mockUseClaimHold.mockReturnValue(holdState());
-    render(<ClaimHoldBanner />);
+    renderBanner();
 
     expect(screen.getByRole("status")).not.toHaveAttribute("data-stale");
     expect(screen.queryByText(/forgotten\?/)).not.toBeInTheDocument();
@@ -110,7 +121,7 @@ describe("ClaimHoldBanner", () => {
     mockUseClaimHold.mockReturnValue(
       holdState({ since: "2026-01-15T09:46:00.000Z" }),
     );
-    render(<ClaimHoldBanner />);
+    renderBanner();
 
     expect(screen.getByRole("status")).toHaveAttribute("data-stale", "true");
     expect(screen.getByText(/HELD 2h14m — forgotten\?/)).toBeInTheDocument();
@@ -118,7 +129,7 @@ describe("ClaimHoldBanner", () => {
 
   it("calls the release mutation when Release is clicked", () => {
     mockUseClaimHold.mockReturnValue(holdState());
-    render(<ClaimHoldBanner />);
+    renderBanner();
 
     fireEvent.click(screen.getByRole("button", { name: /release/i }));
     expect(mockRelease).toHaveBeenCalledTimes(1);
@@ -128,10 +139,35 @@ describe("ClaimHoldBanner", () => {
     mockUseClaimHold.mockReturnValue(
       holdState({}, { busy: true, error: "claims held by someone-else" }),
     );
-    render(<ClaimHoldBanner />);
+    renderBanner();
 
     expect(screen.getByRole("button", { name: /release/i })).toBeDisabled();
     expect(screen.getByText(/claims held by someone-else/)).toBeInTheDocument();
+  });
+
+  it("offers a confirmed force release after an ownership conflict", async () => {
+    mockUseClaimHold.mockReturnValue(
+      holdState(
+        {},
+        {
+          error:
+            "claims held by someone-else since 2026-01-15T11:46:00Z; use --force to release",
+          canForceRelease: true,
+        },
+      ),
+    );
+    renderBanner();
+
+    fireEvent.click(screen.getByRole("button", { name: /force release/i }));
+    expect(
+      screen.getByRole("alertdialog", { name: /force release claim hold/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/someone-else/)).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Force release" }));
+    });
+    expect(mockRelease).toHaveBeenCalledWith(true);
   });
 });
 
