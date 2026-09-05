@@ -239,7 +239,7 @@ agents:
 }
 
 // No presence data (malformed or empty YAML) must degrade to the old
-// whole-spec behaviour rather than silently applying nothing.
+// whole-spec behavior rather than silently applying nothing.
 func TestParsePresence_UnparseableFallsBackToWholeSpec(t *testing.T) {
 	p := parsePresence([]byte("\t not: [valid"))
 	if !p.roleHas("anything", "labels") || !p.agentHas("anything", "hooks") {
