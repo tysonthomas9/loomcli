@@ -162,8 +162,13 @@ export function createWorkspaceStore(): StoreApi<WorkspaceStore> {
       // Clean up any existing polling
       stopPolling();
 
-      if (options.workspaceId !== activeWorkspaceId) {
+      const workspaceChanged = options.workspaceId !== activeWorkspaceId;
+      if (workspaceChanged) {
         pendingAgents.clear();
+        // The provider exposes its route workspaceId alongside this data. Drop
+        // the previous workspace before fetching so those values cannot refer
+        // to different workspaces during a route transition.
+        set({ workspace: null, isLoading: true, error: null });
       }
       activeWorkspaceId = options.workspaceId;
       activePollInterval = options.pollInterval ?? DEFAULT_POLL_INTERVAL;
