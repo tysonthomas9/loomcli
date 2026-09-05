@@ -15,8 +15,19 @@ import (
 // on a slow / unreachable backend.
 const releaseClaimTimeout = 5 * time.Second
 
-// releaseClaimOnComplete drops the fleet-db claim lock on the task referenced
-// by the worktree's .agent.lock file, best-effort. Safe to call when:
+// releaseClaimOnComplete releases the fleet-db claim on the task referenced by
+// the worktree's .agent.lock file, best-effort. When the task is still
+// in_progress this puts it back to open/unassigned — not merely dropping the
+// operational lock — so the next agent can claim it within one poll interval
+// instead of waiting out fleet-db's claim reaper (~5 min, PUPPET-467).
+//
+// The actor passed is info.AgentName, the agent's own name. That is usually NOT
+// the issue's assignee: with an API key configured, fleet-db strips the X-Actor
+// override header and attributes every claim to the process's configured actor.
+// ReleaseClaim accepts either identity as proof of ownership, which is what
+// makes this path effective; resolving the two belongs there, not here.
+//
+// Safe to call when:
 //   - the lock file is missing or unreadable (no-op)
 //   - the lock has no TaskID or AgentName (agent exited before claiming, no-op)
 //   - the release call itself returns an error (logged, but not surfaced)
