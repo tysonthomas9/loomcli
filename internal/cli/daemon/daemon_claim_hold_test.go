@@ -259,7 +259,10 @@ func TestClaimHold_ExpiryClearsTheFile(t *testing.T) {
 		Since:     time.Now().Add(-time.Hour),
 		ExpiresAt: time.Now().Add(-time.Second),
 	})
-	if err := writeClaimHoldFile(path, &supervisor.ClaimHold{Held: true, Actor: "oleh", Reason: "stale", Since: time.Now()}); err != nil {
+	// Seed through the persist hook, not writeClaimHoldFile: the file must
+	// mirror what this daemon believes, or the reload would (correctly) treat
+	// it as someone else's write and adopt it instead.
+	if err := d.sup.PersistClaimHold(&supervisor.ClaimHold{Held: true, Actor: "oleh", Reason: "stale", Since: time.Now()}); err != nil {
 		t.Fatalf("seed file: %v", err)
 	}
 
@@ -481,5 +484,111 @@ func TestWaitForClaimHoldIdle_TimesOutWithoutReleasingTheHold(t *testing.T) {
 	// operator's decision, not this command's.
 	if h := d.sup.ClaimHoldSnapshot(); !h.Active(time.Now()) {
 		t.Fatal("wait-idle timeout released the hold")
+	}
+}
+
+// ── claimHoldStore ──────────────────────────────────────────────────────────
+
+func TestClaimHoldStore_OwnWriteIsNotAnExternalChange(t *testing.T) {
+	path := filepath.Join(t.TempDir(), claimHoldFileName)
+	store := newClaimHoldStore(path)
+
+	if err := store.Write(&supervisor.ClaimHold{
+		Held: true, Actor: "union-autodeploy", Reason: "deploy", Since: time.Now(),
+	}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if _, changed, err := store.ReloadIfChanged(); err != nil || changed {
+		t.Fatalf("ReloadIfChanged() = (changed=%v, err=%v) after our own write, want (false, nil)", changed, err)
+	}
+}
+
+func TestClaimHoldStore_ForeignWriteAndDeletionAreChanges(t *testing.T) {
+	path := filepath.Join(t.TempDir(), claimHoldFileName)
+	store := newClaimHoldStore(path)
+	if err := store.Write(&supervisor.ClaimHold{
+		Held: true, Actor: "union-autodeploy", Reason: "deploy", Since: time.Now(),
+	}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	// Someone else replaces the record. mtime granularity is coarse on some
+	// filesystems, so back-date the write to make the change unambiguous.
+	foreign := &supervisor.ClaimHold{Held: true, Actor: "oleh", Reason: "maintenance", Since: time.Now()}
+	data, err := json.MarshalIndent(foreign, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatalf("foreign write: %v", err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	h, changed, err := store.ReloadIfChanged()
+	if err != nil || !changed {
+		t.Fatalf("ReloadIfChanged() = (changed=%v, err=%v) after a foreign write, want (true, nil)", changed, err)
+	}
+	if h == nil || h.Actor != "oleh" {
+		t.Fatalf("reloaded hold = %#v, want the foreign record", h)
+	}
+	if _, changed, err := store.ReloadIfChanged(); err != nil || changed {
+		t.Fatalf("ReloadIfChanged() = (changed=%v, err=%v) on a second look, want (false, nil)", changed, err)
+	}
+
+	// `rm claim-hold.json` — the release path that has no control socket.
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	h, changed, err = store.ReloadIfChanged()
+	if err != nil || !changed {
+		t.Fatalf("ReloadIfChanged() = (changed=%v, err=%v) after rm, want (true, nil)", changed, err)
+	}
+	if h != nil {
+		t.Fatalf("reloaded hold = %#v after rm, want nil (no hold)", h)
+	}
+}
+
+func TestClaimHoldStore_CorruptFileKeepsTheHold(t *testing.T) {
+	path := filepath.Join(t.TempDir(), claimHoldFileName)
+	store := newClaimHoldStore(path)
+	if err := os.WriteFile(path, []byte("{not json"), 0600); err != nil {
+		t.Fatalf("write corrupt file: %v", err)
+	}
+
+	h, changed, err := store.ReloadIfChanged()
+	if err == nil {
+		t.Fatal("a corrupt file reloaded without error; the supervisor must fail closed")
+	}
+	if changed || h != nil {
+		t.Fatalf("ReloadIfChanged() = (%#v, changed=%v) on a corrupt file, want (nil, false)", h, changed)
+	}
+}
+
+func TestHydrateClaimHold_WiresBothHooks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), claimHoldFileName)
+	d := &Daemon{sup: &supervisor.Supervisor{}}
+	hydrateClaimHold(d, path)
+
+	if d.sup.PersistClaimHold == nil {
+		t.Fatal("PersistClaimHold not wired")
+	}
+	if d.sup.ReloadClaimHold == nil {
+		t.Fatal("ReloadClaimHold not wired")
+	}
+	// A hold set through the supervisor must not read back as an external change.
+	if err := d.sup.SetClaimHold(&supervisor.ClaimHold{
+		Held: true, Actor: "union-autodeploy", Reason: "deploy", Since: time.Now(),
+		ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("SetClaimHold: %v", err)
+	}
+	if _, changed, err := d.sup.ReloadClaimHold(); err != nil || changed {
+		t.Fatalf("ReloadClaimHold() = (changed=%v, err=%v) after SetClaimHold, want (false, nil)", changed, err)
+	}
+	if d.sup.ClaimHoldSnapshot() == nil {
+		t.Fatal("the hold was dropped by its own persist round trip")
 	}
 }

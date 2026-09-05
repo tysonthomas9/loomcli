@@ -141,6 +141,9 @@ type Supervisor struct {
 	claimHoldLastHeldLog     time.Time
 	claimHoldRecheckInterval time.Duration          // test override; 0 ⇒ package default
 	PersistClaimHold         func(*ClaimHold) error // injected by the daemon package
+	claimHoldLastReload      time.Time              // rate-limits ReloadClaimHold; see maybeReloadClaimHold
+	// ReloadClaimHold re-reads the hold when the FILE changed under this process. Injected by the daemon.
+	ReloadClaimHold func() (*ClaimHold, bool, error) // (hold, changed, err)
 
 	// maxRetriesBlockInterval is the fixed delay computeBackoff returns once an
 	// agent has exhausted its restart budget and blocked (StopReasonMaxRetriesBlocked).
