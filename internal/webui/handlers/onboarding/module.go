@@ -1,8 +1,7 @@
 package onboarding
 
 import (
-	"net/http"
-
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -16,7 +15,7 @@ func NewModule(issueSvc service.IssueService, agentSvc service.AgentService) *Mo
 	return &Module{issueSvc: issueSvc, agentSvc: agentSvc}
 }
 
-func (m *Module) Register(mux *http.ServeMux) {
+func (m *Module) Register(mux route.Router) {
 	if m.issueSvc == nil || m.agentSvc == nil {
 		return
 	}

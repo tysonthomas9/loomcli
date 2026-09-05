@@ -19,6 +19,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/types"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
@@ -26,7 +27,7 @@ import (
 
 // Module is a local interface matching webui.Module for compile-time assertions.
 type Module interface {
-	Register(mux *http.ServeMux)
+	Register(mux route.Router)
 }
 
 // MaxListLimit from handler package

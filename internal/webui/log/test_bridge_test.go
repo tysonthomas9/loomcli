@@ -2,16 +2,16 @@ package log
 
 import (
 	"context"
-	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // module is a local interface matching webui.Module for compile-time assertions.
 type module interface {
-	Register(mux *http.ServeMux)
+	Register(mux route.Router)
 }
 
 // LogModule → Module (struct alias)

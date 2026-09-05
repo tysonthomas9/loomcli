@@ -12,6 +12,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/webui"
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
@@ -36,7 +37,7 @@ func TestServer_Close_NilPointer(t *testing.T) {
 // stores, and managers should be handled gracefully.
 func TestServer_RegisterRoutes_ZeroValue(t *testing.T) {
 	var app Server
-	app.mux = http.NewServeMux()
+	app.mux = route.NewRecorder()
 	app.buildHandlers()
 	app.registerRoutes()
 
@@ -60,7 +61,7 @@ func TestServer_RegisterRoutes_ZeroValue(t *testing.T) {
 // registers the /api/health endpoint on the mux.
 func TestServer_RegisterRoutes_HealthRegistered(t *testing.T) {
 	var app Server
-	app.mux = http.NewServeMux()
+	app.mux = route.NewRecorder()
 	app.buildHandlers()
 	app.registerRoutes()
 	defer app.handlers.ClientErrLimiter.Stop()
