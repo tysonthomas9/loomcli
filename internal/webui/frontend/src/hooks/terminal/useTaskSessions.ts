@@ -17,7 +17,7 @@ import { getTaskSessions } from "@/api/terminal";
 import type { MutationPayload } from "@/api/common";
 import type { SessionRecord } from "@/types/agent";
 import { useEventContext, useEventSubscription } from "@/hooks/common";
-import { ScopedQueryRequest } from "@/hooks/common/scopedQueryRequest";
+import { ScopedQueryRequest } from "@/utils/scopedQueryRequest";
 import { QueryRecoveryContext } from "@/hooks/common/queryRecovery";
 import { useWorkspaceContext } from "@/hooks/workspace";
 

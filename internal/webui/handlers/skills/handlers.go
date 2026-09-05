@@ -110,6 +110,16 @@ func (h *Handler) getCatalog(w http.ResponseWriter, r *http.Request) {
 		writeSkillError(w, err)
 		return
 	}
+	for _, skill := range skills {
+		if skill == nil || skill.WorkspaceKey != requestWorkspaceID(r) {
+			handler.HandleServiceError(w, service.ErrInternal("skill catalog contains an invalid skill", nil))
+			return
+		}
+		if err := skill.Ref().Validate(); err != nil {
+			handler.HandleServiceError(w, service.ErrInternal("skill catalog contains an invalid identity", err))
+			return
+		}
+	}
 	handler.WriteJSON(w, http.StatusOK, projectCatalog(skills))
 }
 

@@ -319,9 +319,19 @@ func (s *skillStore) List(ctx context.Context, ws string, filter store.SkillFilt
 	if err := s.client.do(ctx, http.MethodGet, path, nil, &resp); err != nil {
 		return nil, err
 	}
+	if resp.Skills == nil {
+		return nil, fmt.Errorf("fleetdb: skill list requires an explicit skills array")
+	}
 	out := make([]*domain.Skill, 0, len(resp.Skills))
 	for _, sk := range resp.Skills {
-		out = append(out, sk.toDomain())
+		skill := sk.toDomain()
+		if skill.WorkspaceKey != ws {
+			return nil, fmt.Errorf("fleetdb: skill list workspace mismatch")
+		}
+		if err := skill.Ref().Validate(); err != nil {
+			return nil, fmt.Errorf("fleetdb: invalid listed skill: %w", err)
+		}
+		out = append(out, skill)
 	}
 	return out, nil
 }

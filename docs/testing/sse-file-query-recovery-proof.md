@@ -1,5 +1,8 @@
 # File metadata and Git status recovery
 
+The subsequent [skills recovery proof](sse-skills-recovery-proof.md) covers
+the shared skills catalog and capability reads.
+
 This milestone enrolls enabled agent Git status, mounted file capabilities, and
 checkout metadata in strict query recovery. Request owners fence workspace,
 agent, enabled-state and unmount changes, including ignored cancellation.
