@@ -56,6 +56,8 @@ tags:
     description: Git operations (status, push, pull, sync, PR, reset)
   - name: pull-requests
     description: Pull request review read APIs
+  - name: approvals
+    description: Approval decisions on awaiting subjects
   - name: diff
     description: Diff and commit inspection
   - name: files
@@ -3159,6 +3161,54 @@ paths:
                 type: object
 
   # ── Pull Requests ───────────────────────────────────────────────────────
+  /api/workspaces/{ws}/pull-requests:
+    get:
+      operationId: listPullRequests
+      tags: [pull-requests]
+      summary: List pull requests across every repo in the workspace
+      description: |
+        Aggregated across the workspace's repos. Per-repo failures (non-GitHub
+        remote, missing auth, connector errors) are reported in `warnings`
+        rather than failing the whole listing.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: state
+          in: query
+          description: |
+            Which pull requests to include. `merged` is always served from
+            the `gh` CLI, since the connector pulls API cannot express it.
+          schema:
+            type: string
+            enum: [all, open, merged, review]
+            default: all
+      responses:
+        "200":
+          description: Pull request list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/PullRequestListData"
+                  error:
+                    type: string
+        "502":
+          description: Listing failed for the workspace
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  error:
+                    type: string
+
   /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}:
     get:
       operationId: getPullRequestDetail
@@ -3573,6 +3623,69 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+
+  # ── Approvals ───────────────────────────────────────────────────────────
+  /api/workspaces/{ws}/approvals:
+    post:
+      operationId: postApproval
+      tags: [approvals]
+      summary: Record an approval decision on a subject
+      description: |
+        Journals an approval (or rejection) against a rendered subject key and
+        dispatches it to any pending awaits on that key. The approver is taken
+        from the verified session identity only — it is never read from the
+        body. A decision recorded with no pending await is still journaled, so
+        a later await registration on the same key resolves against it.
+
+        Error bodies on this route are `{error: {code, message}}`, not the
+        `{success:false, error}` envelope used elsewhere.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApprovalRequest"
+      responses:
+        "200":
+          description: Approval journaled, with the awaits it resolved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalResponse"
+        "400":
+          description: |
+            Undecodable body, a decision other than approved/rejected, or a
+            subjectRef/eventType pair that does not render a subject-scoped key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalError"
+        "401":
+          description: No verified session identity on the request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalError"
+        "403":
+          description: The session actor is not an eligible approver for the subject
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalError"
+        "500":
+          description: Await lookup or journal append failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalError"
+        "501":
+          description: The configured backend has no await store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalError"
 
   /api/workspaces/{ws}/agents/{name}/git/diff-stat:
     get:
@@ -5310,6 +5423,135 @@ components:
           type: string
 
     # ── Pull Request Schemas ────────────────────────────────────────────
+    PullRequestListData:
+      type: object
+      required: [pull_requests]
+      properties:
+        pull_requests:
+          type: array
+          items:
+            $ref: "#/components/schemas/PullRequestSummary"
+        warnings:
+          type: array
+          description: Per-repo failures that did not prevent the rest of the listing.
+          items:
+            type: string
+
+    PullRequestSummary:
+      type: object
+      description: One pull request as listed across the workspace's repos.
+      required: [number, title, url, state, is_draft, head_ref_name, base_ref_name, repo_name]
+      properties:
+        number:
+          type: integer
+        title:
+          type: string
+        url:
+          type: string
+        state:
+          type: string
+        is_draft:
+          type: boolean
+        head_ref_name:
+          type: string
+        base_ref_name:
+          type: string
+        author_login:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
+        review_decision:
+          type: string
+        repo_name:
+          type: string
+        source_repo:
+          type: string
+        additions:
+          type: integer
+        deletions:
+          type: integer
+        changed_files:
+          type: integer
+
+    ApprovalRequest:
+      type: object
+      description: |
+        The approver is deliberately absent: it comes from the verified
+        session identity only.
+      required: [subjectRef]
+      properties:
+        subjectRef:
+          type: string
+          description: The rendered subject the approval targets, e.g. "acme/widgets#7@shaA".
+        eventType:
+          type: string
+          default: approval
+        decision:
+          type: string
+          enum: [approved, rejected]
+          default: approved
+        note:
+          type: string
+          description: Optional free-form reviewer note carried on the payload.
+
+    ApprovalResponse:
+      type: object
+      required: [status, eventId, actor, subjectKey, pendingMatched]
+      properties:
+        status:
+          type: string
+          description: The recorded decision.
+          enum: [approved, rejected]
+        eventId:
+          type: string
+        actor:
+          type: string
+          description: The verified approver ref (session email, else user id).
+        subjectKey:
+          type: string
+          description: eventType and subjectRef rendered into one await key.
+        pendingMatched:
+          type: integer
+          description: |
+            Pending awaits on the key at decision time. Zero means the event
+            was journaled for a future registration.
+        resolutions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApprovalResolution"
+
+    ApprovalResolution:
+      type: object
+      description: One await instance this approval touched.
+      required: [instanceKey, runId, outcome]
+      properties:
+        instanceKey:
+          type: string
+        runId:
+          type: string
+        outcome:
+          type: string
+          enum: [resolved, actor_rejected, already_resolved, resume_deferred, failed]
+
+    ApprovalError:
+      type: object
+      description: |
+        The approvals route's error wire. Distinct from ErrorResponse: the
+        code and message are nested under `error`.
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [unauthenticated, invalid, await_actor_forbidden, internal, unsupported]
+            message:
+              type: string
+
     PullRequestDetail:
       type: object
       required:

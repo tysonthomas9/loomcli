@@ -1664,6 +1664,28 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/pull-requests": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List pull requests across every repo in the workspace
+     * @description Aggregated across the workspace's repos. Per-repo failures (non-GitHub
+     *     remote, missing auth, connector errors) are reported in `warnings`
+     *     rather than failing the whole listing.
+     */
+    get: operations["listPullRequests"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}": {
     parameters: {
       query?: never;
@@ -1777,6 +1799,33 @@ export interface paths {
     get: operations["getPullRequestReviewerConversation"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/approvals": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Record an approval decision on a subject
+     * @description Journals an approval (or rejection) against a rendered subject key and
+     *     dispatches it to any pending awaits on that key. The approver is taken
+     *     from the verified session identity only — it is never read from the
+     *     body. A decision recorded with no pending await is still journaled, so
+     *     a later await registration on the same key resolves against it.
+     *
+     *     Error bodies on this route are `{error: {code, message}}`, not the
+     *     `{success:false, error}` envelope used elsewhere.
+     */
+    post: operations["postApproval"];
     delete?: never;
     options?: never;
     head?: never;
@@ -2726,6 +2775,93 @@ export interface components {
       mode: "daemon" | "fleet";
       workspace: string;
       reason?: string;
+    };
+    PullRequestListData: {
+      pull_requests: components["schemas"]["PullRequestSummary"][];
+      /** @description Per-repo failures that did not prevent the rest of the listing. */
+      warnings?: string[];
+    };
+    /** @description One pull request as listed across the workspace's repos. */
+    PullRequestSummary: {
+      number: number;
+      title: string;
+      url: string;
+      state: string;
+      is_draft: boolean;
+      head_ref_name: string;
+      base_ref_name: string;
+      author_login?: string;
+      created_at?: string;
+      updated_at?: string;
+      review_decision?: string;
+      repo_name: string;
+      source_repo?: string;
+      additions?: number;
+      deletions?: number;
+      changed_files?: number;
+    };
+    /**
+     * @description The approver is deliberately absent: it comes from the verified
+     *     session identity only.
+     */
+    ApprovalRequest: {
+      /** @description The rendered subject the approval targets, e.g. "acme/widgets#7@shaA". */
+      subjectRef: string;
+      /** @default approval */
+      eventType: string;
+      /**
+       * @default approved
+       * @enum {string}
+       */
+      decision: "approved" | "rejected";
+      /** @description Optional free-form reviewer note carried on the payload. */
+      note?: string;
+    };
+    ApprovalResponse: {
+      /**
+       * @description The recorded decision.
+       * @enum {string}
+       */
+      status: "approved" | "rejected";
+      eventId: string;
+      /** @description The verified approver ref (session email, else user id). */
+      actor: string;
+      /** @description eventType and subjectRef rendered into one await key. */
+      subjectKey: string;
+      /**
+       * @description Pending awaits on the key at decision time. Zero means the event
+       *     was journaled for a future registration.
+       */
+      pendingMatched: number;
+      resolutions?: components["schemas"]["ApprovalResolution"][];
+    };
+    /** @description One await instance this approval touched. */
+    ApprovalResolution: {
+      instanceKey: string;
+      runId: string;
+      /** @enum {string} */
+      outcome:
+        | "resolved"
+        | "actor_rejected"
+        | "already_resolved"
+        | "resume_deferred"
+        | "failed";
+    };
+    /**
+     * @description The approvals route's error wire. Distinct from ErrorResponse: the
+     *     code and message are nested under `error`.
+     */
+    ApprovalError: {
+      error: {
+        /** @enum {string} */
+        code:
+          | "unauthenticated"
+          | "invalid"
+          | "await_actor_forbidden"
+          | "internal"
+          | "unsupported";
+        message: string;
+      };
     };
     PullRequestDetail: {
       number: number;
@@ -7672,6 +7808,51 @@ export interface operations {
       };
     };
   };
+  listPullRequests: {
+    parameters: {
+      query?: {
+        /**
+         * @description Which pull requests to include. `merged` is always served from
+         *     the `gh` CLI, since the connector pulls API cannot express it.
+         */
+        state?: "all" | "open" | "merged" | "review";
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Pull request list */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data: components["schemas"]["PullRequestListData"];
+            error?: string;
+          };
+        };
+      };
+      /** @description Listing failed for the workspace */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            error?: string;
+          };
+        };
+      };
+    };
+  };
   getPullRequestDetail: {
     parameters: {
       query?: never;
@@ -8107,6 +8288,81 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  postApproval: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ApprovalRequest"];
+      };
+    };
+    responses: {
+      /** @description Approval journaled, with the awaits it resolved */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApprovalResponse"];
+        };
+      };
+      /**
+       * @description Undecodable body, a decision other than approved/rejected, or a
+       *     subjectRef/eventType pair that does not render a subject-scoped key.
+       */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApprovalError"];
+        };
+      };
+      /** @description No verified session identity on the request */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApprovalError"];
+        };
+      };
+      /** @description The session actor is not an eligible approver for the subject */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApprovalError"];
+        };
+      };
+      /** @description Await lookup or journal append failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApprovalError"];
+        };
+      };
+      /** @description The configured backend has no await store */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApprovalError"];
         };
       };
     };

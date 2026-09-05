@@ -182,6 +182,96 @@ func (e AgentStatusResponseAgentState) Valid() bool {
 	}
 }
 
+// Defines values for ApprovalErrorErrorCode.
+const (
+	AwaitActorForbidden ApprovalErrorErrorCode = "await_actor_forbidden"
+	Internal            ApprovalErrorErrorCode = "internal"
+	Invalid             ApprovalErrorErrorCode = "invalid"
+	Unauthenticated     ApprovalErrorErrorCode = "unauthenticated"
+	Unsupported         ApprovalErrorErrorCode = "unsupported"
+)
+
+// Valid indicates whether the value is a known member of the ApprovalErrorErrorCode enum.
+func (e ApprovalErrorErrorCode) Valid() bool {
+	switch e {
+	case AwaitActorForbidden:
+		return true
+	case Internal:
+		return true
+	case Invalid:
+		return true
+	case Unauthenticated:
+		return true
+	case Unsupported:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApprovalRequestDecision.
+const (
+	ApprovalRequestDecisionApproved ApprovalRequestDecision = "approved"
+	ApprovalRequestDecisionRejected ApprovalRequestDecision = "rejected"
+)
+
+// Valid indicates whether the value is a known member of the ApprovalRequestDecision enum.
+func (e ApprovalRequestDecision) Valid() bool {
+	switch e {
+	case ApprovalRequestDecisionApproved:
+		return true
+	case ApprovalRequestDecisionRejected:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApprovalResolutionOutcome.
+const (
+	ActorRejected   ApprovalResolutionOutcome = "actor_rejected"
+	AlreadyResolved ApprovalResolutionOutcome = "already_resolved"
+	Failed          ApprovalResolutionOutcome = "failed"
+	Resolved        ApprovalResolutionOutcome = "resolved"
+	ResumeDeferred  ApprovalResolutionOutcome = "resume_deferred"
+)
+
+// Valid indicates whether the value is a known member of the ApprovalResolutionOutcome enum.
+func (e ApprovalResolutionOutcome) Valid() bool {
+	switch e {
+	case ActorRejected:
+		return true
+	case AlreadyResolved:
+		return true
+	case Failed:
+		return true
+	case Resolved:
+		return true
+	case ResumeDeferred:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApprovalResponseStatus.
+const (
+	ApprovalResponseStatusApproved ApprovalResponseStatus = "approved"
+	ApprovalResponseStatusRejected ApprovalResponseStatus = "rejected"
+)
+
+// Valid indicates whether the value is a known member of the ApprovalResponseStatus enum.
+func (e ApprovalResponseStatus) Valid() bool {
+	switch e {
+	case ApprovalResponseStatusApproved:
+		return true
+	case ApprovalResponseStatusRejected:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BlockedIssueAgentState.
 const (
 	BlockedIssueAgentStateDead     BlockedIssueAgentState = "dead"
@@ -1595,6 +1685,30 @@ func (e GetGraphParamsStatus) Valid() bool {
 	}
 }
 
+// Defines values for ListPullRequestsParamsState.
+const (
+	All    ListPullRequestsParamsState = "all"
+	Merged ListPullRequestsParamsState = "merged"
+	Open   ListPullRequestsParamsState = "open"
+	Review ListPullRequestsParamsState = "review"
+)
+
+// Valid indicates whether the value is a known member of the ListPullRequestsParamsState enum.
+func (e ListPullRequestsParamsState) Valid() bool {
+	switch e {
+	case All:
+		return true
+	case Merged:
+		return true
+	case Open:
+		return true
+	case Review:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListReadyParamsType.
 const (
 	ListReadyParamsTypeBug     ListReadyParamsType = "bug"
@@ -1871,6 +1985,65 @@ type AgentUpdateRequest struct {
 	// the daemon reconciler.
 	State *AgentState `json:"state,omitempty"`
 }
+
+// ApprovalError The approvals route's error wire. Distinct from ErrorResponse: the
+// code and message are nested under `error`.
+type ApprovalError struct {
+	Error struct {
+		Code    ApprovalErrorErrorCode `json:"code"`
+		Message string                 `json:"message"`
+	} `json:"error"`
+}
+
+// ApprovalErrorErrorCode defines model for ApprovalError.Error.Code.
+type ApprovalErrorErrorCode string
+
+// ApprovalRequest The approver is deliberately absent: it comes from the verified
+// session identity only.
+type ApprovalRequest struct {
+	Decision  *ApprovalRequestDecision `json:"decision,omitempty"`
+	EventType *string                  `json:"eventType,omitempty"`
+
+	// Note Optional free-form reviewer note carried on the payload.
+	Note *string `json:"note,omitempty"`
+
+	// SubjectRef The rendered subject the approval targets, e.g. "acme/widgets#7@shaA".
+	SubjectRef string `json:"subjectRef"`
+}
+
+// ApprovalRequestDecision defines model for ApprovalRequest.Decision.
+type ApprovalRequestDecision string
+
+// ApprovalResolution One await instance this approval touched.
+type ApprovalResolution struct {
+	InstanceKey string                    `json:"instanceKey"`
+	Outcome     ApprovalResolutionOutcome `json:"outcome"`
+	RunId       string                    `json:"runId"`
+}
+
+// ApprovalResolutionOutcome defines model for ApprovalResolution.Outcome.
+type ApprovalResolutionOutcome string
+
+// ApprovalResponse defines model for ApprovalResponse.
+type ApprovalResponse struct {
+	// Actor The verified approver ref (session email, else user id).
+	Actor   string `json:"actor"`
+	EventId string `json:"eventId"`
+
+	// PendingMatched Pending awaits on the key at decision time. Zero means the event
+	// was journaled for a future registration.
+	PendingMatched int                   `json:"pendingMatched"`
+	Resolutions    *[]ApprovalResolution `json:"resolutions,omitempty"`
+
+	// Status The recorded decision.
+	Status ApprovalResponseStatus `json:"status"`
+
+	// SubjectKey eventType and subjectRef rendered into one await key.
+	SubjectKey string `json:"subjectKey"`
+}
+
+// ApprovalResponseStatus The recorded decision.
+type ApprovalResponseStatus string
 
 // BackendConfigResponse defines model for BackendConfigResponse.
 type BackendConfigResponse struct {
@@ -2956,6 +3129,14 @@ type PullRequestDiffFile struct {
 	Status    string `json:"status"`
 }
 
+// PullRequestListData defines model for PullRequestListData.
+type PullRequestListData struct {
+	PullRequests []PullRequestSummary `json:"pull_requests"`
+
+	// Warnings Per-repo failures that did not prevent the rest of the listing.
+	Warnings *[]string `json:"warnings,omitempty"`
+}
+
 // PullRequestReviewRequest defines model for PullRequestReviewRequest.
 type PullRequestReviewRequest struct {
 	Body            *string                       `json:"body,omitempty"`
@@ -2970,6 +3151,26 @@ type PullRequestReviewRequestEvent string
 type PullRequestReviewResult struct {
 	ReviewId *int    `json:"review_id,omitempty"`
 	State    *string `json:"state,omitempty"`
+}
+
+// PullRequestSummary One pull request as listed across the workspace's repos.
+type PullRequestSummary struct {
+	Additions      *int    `json:"additions,omitempty"`
+	AuthorLogin    *string `json:"author_login,omitempty"`
+	BaseRefName    string  `json:"base_ref_name"`
+	ChangedFiles   *int    `json:"changed_files,omitempty"`
+	CreatedAt      *string `json:"created_at,omitempty"`
+	Deletions      *int    `json:"deletions,omitempty"`
+	HeadRefName    string  `json:"head_ref_name"`
+	IsDraft        bool    `json:"is_draft"`
+	Number         int     `json:"number"`
+	RepoName       string  `json:"repo_name"`
+	ReviewDecision *string `json:"review_decision,omitempty"`
+	SourceRepo     *string `json:"source_repo,omitempty"`
+	State          string  `json:"state"`
+	Title          string  `json:"title"`
+	UpdatedAt      *string `json:"updated_at,omitempty"`
+	Url            string  `json:"url"`
 }
 
 // ReopenRequest Optional body for the reopen endpoint. An empty body is valid.
@@ -3886,6 +4087,16 @@ type RunOnboardingFirstTaskJSONBody struct {
 	Title       string  `json:"title"`
 }
 
+// ListPullRequestsParams defines parameters for ListPullRequests.
+type ListPullRequestsParams struct {
+	// State Which pull requests to include. `merged` is always served from
+	// the `gh` CLI, since the connector pulls API cannot express it.
+	State *ListPullRequestsParamsState `form:"state,omitempty" json:"state,omitempty"`
+}
+
+// ListPullRequestsParamsState defines parameters for ListPullRequests.
+type ListPullRequestsParamsState string
+
 // ListReadyParams defines parameters for ListReady.
 type ListReadyParams struct {
 	Assignee *string `form:"assignee,omitempty" json:"assignee,omitempty"`
@@ -4011,6 +4222,9 @@ type UpdateGitTargetJSONRequestBody UpdateGitTargetJSONBody
 
 // StopAgentJSONRequestBody defines body for StopAgent for application/json ContentType.
 type StopAgentJSONRequestBody StopAgentJSONBody
+
+// PostApprovalJSONRequestBody defines body for PostApproval for application/json ContentType.
+type PostApprovalJSONRequestBody = ApprovalRequest
 
 // PatchWorkspaceBackendJSONRequestBody defines body for PatchWorkspaceBackend for application/json ContentType.
 type PatchWorkspaceBackendJSONRequestBody = WorkspaceBackendPatchRequest
