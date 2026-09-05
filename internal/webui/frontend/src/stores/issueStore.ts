@@ -46,6 +46,7 @@ import type {
   FetchIssuesParams,
   SubscribeFn,
   OptimisticEntry,
+  UpdateIssueStatusOptions,
 } from "./issueStoreHelpers";
 
 // Re-export public types and utilities
@@ -57,6 +58,7 @@ export type {
   IssueStoreConfig,
   FetchIssuesParams,
   SubscribeFn,
+  UpdateIssueStatusOptions,
 } from "./issueStoreHelpers";
 
 /**
@@ -474,6 +476,7 @@ export function createIssueStore(
       issueId: string,
       newStatus: Status,
       workspaceId: string,
+      options?: UpdateIssueStatusOptions,
     ): Promise<void> {
       const existingIssue = get().issuesMap.get(issueId);
       if (!existingIssue) {
@@ -549,9 +552,13 @@ export function createIssueStore(
             applyMutationToStore(m, set, get);
           }
 
-          const message =
-            err instanceof Error ? err.message : "Failed to update status";
-          onToast?.(message, { type: "error" });
+          // Suppressed when the caller renders the rejection itself; the
+          // error is re-thrown either way, so opting out loses nothing.
+          if (options?.toastOnRollback !== false) {
+            const message =
+              err instanceof Error ? err.message : "Failed to update status";
+            onToast?.(message, { type: "error" });
+          }
         }
         removeOptimisticEntry(issueId, get, set);
         throw err;

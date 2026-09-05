@@ -37,7 +37,7 @@ interface TabMetadata {
   notes: string;
   created_at: string;
   updated_at: string;
-  pty_alive: boolean;
+  attachable: boolean;
   attached_clients: number;
 }
 
@@ -50,7 +50,7 @@ function makeTab(sessionName: string, sortOrder: number): TabMetadata {
     notes: "",
     created_at: "2026-03-28T00:00:00Z",
     updated_at: "2026-03-28T00:00:00Z",
-    pty_alive: true,
+    attachable: true,
     attached_clients: 0,
   };
 }

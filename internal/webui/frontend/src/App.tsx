@@ -100,6 +100,7 @@ import { useSearchScope } from "@/hooks/issues/useSearchScope";
 import { useToast } from "@/hooks/ui/useToast";
 import { useTheme } from "@/hooks/ui/useTheme";
 import { useTerminalFont } from "@/hooks/terminal/useTerminalFont";
+import { useWorkspaceSessionCount } from "@/hooks/terminal/useWorkspaceSessionCount";
 import { usePanelManager } from "@/hooks/ui/usePanelManager";
 import { KeyboardShortcutProvider } from "@/hooks/ui/useKeyboardShortcuts";
 import { useWorkspaceContext } from "@/hooks/workspace/useWorkspaceContext";
@@ -494,8 +495,9 @@ function App() {
     undefined,
   );
 
-  // Active terminal session count for badge display
-  const [activeSessionCount, setActiveSessionCount] = useState(0);
+  // Live terminal session count for badge display. Server-backed and always
+  // on, so the badge is correct on every route and survives workspace switches.
+  const { sessionCount } = useWorkspaceSessionCount();
 
   // Terminal unread output indicator
   const [hasTerminalUnread, setHasTerminalUnread] = useState(false);
@@ -1486,7 +1488,7 @@ function App() {
             <NavRail
               activeView={activeView}
               onChange={handleNavChange}
-              sessionCount={activeSessionCount}
+              sessionCount={sessionCount}
               operatorQueueCount={operatorQueue.length}
               badges={{ terminal: hasTerminalUnread }}
               workspaces={(workspace?.workspaces ?? []).map((ws) => ({
@@ -1536,7 +1538,6 @@ function App() {
                       onIssueContextConsumed={handleIssueContextConsumed}
                       pendingAgentName={pendingAgentName}
                       onAgentNameConsumed={handleAgentNameConsumed}
-                      onActiveSessionCountChange={setActiveSessionCount}
                       onUnreadChange={setHasTerminalUnread}
                       onTabLimitReached={(message) =>
                         showToast(message, { type: "error" })

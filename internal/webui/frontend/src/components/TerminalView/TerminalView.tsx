@@ -65,7 +65,6 @@ interface TerminalViewProps {
   onIssueContextConsumed?: (() => void) | undefined;
   pendingTerminalInput?: TerminalInputRequest | undefined;
   onTerminalInputConsumed?: (() => void) | undefined;
-  onActiveSessionCountChange?: (count: number) => void;
   onUnreadChange?: (hasAnyUnread: boolean) => void;
   onTabLimitReached?: (message: string) => void;
   onNavigateToSettings?: () => void;
@@ -131,7 +130,6 @@ export function TerminalView({
   onIssueContextConsumed,
   pendingTerminalInput,
   onTerminalInputConsumed,
-  onActiveSessionCountChange,
   onUnreadChange,
   onTabLimitReached,
   onNavigateToSettings,
@@ -363,14 +361,6 @@ export function TerminalView({
     };
   }, [activeTabId, workspaceId]);
 
-  // Report active (connected) session count to parent
-  useEffect(() => {
-    const count = visibleTabs.filter(
-      (t) => t.connectionState === "connected",
-    ).length;
-    onActiveSessionCountChange?.(count);
-  }, [visibleTabs, onActiveSessionCountChange]);
-
   // Drop agent tabs from the active selection in global Terminal view.
   useEffect(() => {
     if (hideTabs) return;
@@ -379,12 +369,6 @@ export function TerminalView({
     const fallback = visibleTabs[0];
     if (fallback) setActiveTabId(fallback.id);
   }, [hideTabs, activeTabId, tabs, visibleTabs, setActiveTabId]);
-
-  useEffect(() => {
-    return () => {
-      onActiveSessionCountChange?.(0);
-    };
-  }, [onActiveSessionCountChange]);
 
   const handleTabChange = useCallback(
     (tabId: string) => {

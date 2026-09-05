@@ -189,13 +189,23 @@ export function useTerminalMetadata(
           pinned: false,
         });
       } catch (err) {
+        if (err instanceof ApiError && err.status === 409) {
+          // The session already exists server-side with a live PTY — another
+          // browser tab created it, or this PUT lost the race with the first
+          // WS attach. Not an error: keep the optimistic tab and adopt the
+          // server's truth on the reconciling refetch (PUPPET-125).
+          if (mountedRef.current && keyRef.current === workspace) {
+            void fetchTabs();
+          }
+          return;
+        }
         if (mountedRef.current) {
           setTabs(prev);
           setError(err instanceof Error ? err : new Error(String(err)));
         }
       }
     },
-    [workspace],
+    [workspace, fetchTabs],
   );
 
   const updateLabel = useCallback(

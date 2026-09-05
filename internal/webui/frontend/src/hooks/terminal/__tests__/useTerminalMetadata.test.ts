@@ -172,6 +172,49 @@ describe("useTerminalMetadata", () => {
       expect(result.current.tabs).toEqual([]);
       expect(result.current.error?.message).toBe("Create failed");
     });
+
+    it("rolls back on a non-409 ApiError", async () => {
+      mockList.mockResolvedValueOnce([]);
+      mockPut.mockRejectedValueOnce(new ApiError(500, "Internal Server Error"));
+
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
+      await flushPromises();
+
+      await act(async () => {
+        await result.current.createTab("new-sess", "New Tab", 0);
+      });
+
+      expect(result.current.tabs).toEqual([]);
+      expect(result.current.error).toBeInstanceOf(ApiError);
+    });
+
+    it("keeps the tab and refetches on 409 instead of erroring", async () => {
+      mockList.mockResolvedValueOnce([]);
+      mockPut.mockRejectedValueOnce(
+        new ApiError(409, "Conflict", {
+          error:
+            "tab metadata already exists with a live PTY; use PATCH to update",
+        }),
+      );
+      // The reconciling refetch the 409 branch issues.
+      mockList.mockResolvedValueOnce([
+        createMockTab({ session_name: "new-sess", label: "Server Label" }),
+      ]);
+
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
+      await flushPromises();
+      expect(mockList).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        await result.current.createTab("new-sess", "New Tab", 0);
+      });
+      await flushPromises();
+
+      expect(result.current.error).toBeNull();
+      expect(mockList).toHaveBeenCalledTimes(2);
+      expect(result.current.tabs).toHaveLength(1);
+      expect(result.current.tabs[0].label).toBe("Server Label");
+    });
   });
 
   describe("updateLabel", () => {
