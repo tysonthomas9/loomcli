@@ -70,8 +70,8 @@ func (e *ExternalBackend) InvokeNonInteractive(workDir, prompt, agentName string
 // returns the captured stdout; a non-nil error means the subcommand failed
 // without usable output. Callers unmarshal and build their own fallback — this
 // owns only the fiddly exec + ErrWaitDelay tolerance the probes shared.
-func probeSubcommandJSON(binPath, sub string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), externalCmdTimeout)
+func probeSubcommandJSON(ctx context.Context, binPath, sub string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, externalCmdTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, binPath, sub, "--json")
 	cmd.WaitDelay = time.Second
@@ -87,7 +87,7 @@ func probeSubcommandJSON(binPath, sub string) ([]byte, error) {
 // subcommand fails or is not implemented.
 func (e *ExternalBackend) Meta() BackendMeta {
 	fallback := BackendMeta{DisplayName: e.name, BinaryName: filepath.Base(e.binPath)}
-	out, err := probeSubcommandJSON(e.binPath, "meta")
+	out, err := probeSubcommandJSON(context.Background(), e.binPath, "meta")
 	if err != nil {
 		return fallback
 	}
@@ -102,6 +102,15 @@ func (e *ExternalBackend) Meta() BackendMeta {
 // backend by invoking the "health --json" subcommand. Returns an unhealthy
 // status if the subcommand fails or is not implemented.
 func (e *ExternalBackend) HealthCheck() HealthStatus {
+	return e.healthCheck(context.Background(), true)
+}
+
+// HealthCheckForAdmission reports readiness using the caller's launch context.
+func (e *ExternalBackend) HealthCheckForAdmission(ctx context.Context) HealthStatus {
+	return e.healthCheck(ctx, false)
+}
+
+func (e *ExternalBackend) healthCheck(ctx context.Context, includeVersion bool) HealthStatus {
 	if _, err := os.Stat(e.binPath); err != nil {
 		return HealthStatus{
 			Installed: false,
@@ -109,7 +118,7 @@ func (e *ExternalBackend) HealthCheck() HealthStatus {
 			Message:   fmt.Sprintf("binary no longer found at %s", e.binPath),
 		}
 	}
-	out, err := probeSubcommandJSON(e.binPath, "health")
+	out, err := probeSubcommandJSON(ctx, e.binPath, "health")
 	if err != nil {
 		return HealthStatus{
 			Installed: true, // the binary was found on PATH during discovery
@@ -124,6 +133,9 @@ func (e *ExternalBackend) HealthCheck() HealthStatus {
 			Healthy:   false,
 			Message:   fmt.Sprintf("health check returned invalid JSON: %v", err),
 		}
+	}
+	if !includeVersion {
+		hs.Version = ""
 	}
 	return hs
 }

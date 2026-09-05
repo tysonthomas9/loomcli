@@ -95,12 +95,23 @@ func (c *ClaudeBackend) Meta() BackendMeta {
 
 // HealthCheck reports the installation and readiness status of the Claude backend.
 func (c *ClaudeBackend) HealthCheck() HealthStatus {
+	return c.healthCheck(true)
+}
+
+// HealthCheckForAdmission reports readiness without collecting the CLI version.
+func (c *ClaudeBackend) HealthCheckForAdmission(context.Context) HealthStatus {
+	return c.healthCheck(false)
+}
+
+func (c *ClaudeBackend) healthCheck(includeVersion bool) HealthStatus {
 	var hs HealthStatus
 	var issues []string
 
 	if _, err := exec.LookPath("claude"); err == nil {
 		hs.Installed = true
-		hs.Version = detectBinaryVersion("claude")
+		if includeVersion {
+			hs.Version = detectBinaryVersion("claude")
+		}
 	} else {
 		issues = append(issues, "claude binary not found on PATH")
 	}

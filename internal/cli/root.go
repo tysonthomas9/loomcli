@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
@@ -110,37 +111,7 @@ func init() {
 	// Resolve and set active backend before any subcommand runs,
 	// then inject the Deps container into the command context.
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		if err := InitLogger(logFormat, logOutput); err != nil {
-			return err
-		}
-		// Mirror --server / --workspace flags into env vars so that
-		// resolveIssueBackendFromEnv and the factory helpers see the same
-		// value whether the caller used the flag or the env var directly.
-		if serverFlag != "" {
-			if err := os.Setenv("LOOM_SERVER_URL", serverFlag); err != nil {
-				return err
-			}
-		}
-		if workspaceFlag != "" {
-			if err := os.Setenv("LOOM_WORKSPACE", workspaceFlag); err != nil {
-				return err
-			}
-		}
-		if err := ResolveAndSetBackend(); err != nil {
-			return err
-		}
-		// Rebuild the package-level defaultDeps now that --workspace /
-		// --server have been mirrored into the env. The eager
-		// `var defaultDeps = DefaultDeps()` in deps.go runs at process
-		// load time, before Cobra has parsed any flags, so its cached
-		// IssueBackend would otherwise be locked to whatever env was
-		// inherited from the shell. resolveDirectIssueBackend() reads
-		// defaultDeps.IssueBackend, so refresh it here before any
-		// subcommand runs.
-		deps := DefaultDeps()
-		defaultDeps = deps
-		cmd.SetContext(WithDeps(cmd.Context(), deps))
-		return nil
+		return prepareCommand(cmd, ResolveAndSetBackend, slog.LevelInfo)
 	}
 
 	// Add command groups for organized help
@@ -148,6 +119,50 @@ func init() {
 	rootCmd.AddGroup(&cobra.Group{ID: "git", Title: "Git Operations:"})
 	rootCmd.AddGroup(&cobra.Group{ID: "config", Title: "Configuration:"})
 	rootCmd.AddGroup(&cobra.Group{ID: "workspace", Title: "Workspace Commands:"})
+}
+
+// PrepareCommand performs the root command's shared setup without resolving
+// the active AI backend. Diagnostic commands use it so they can report backend
+// failures through their own stable output contracts.
+func PrepareCommand(cmd *cobra.Command, _ []string) error {
+	return prepareCommand(cmd, nil, slog.LevelInfo)
+}
+
+// PrepareQuietCommand performs the same shared setup as PrepareCommand while
+// suppressing informational logs that would corrupt a diagnostic's stderr.
+func PrepareQuietCommand(cmd *cobra.Command, _ []string) error {
+	return prepareCommand(cmd, nil, slog.LevelWarn)
+}
+
+func prepareCommand(cmd *cobra.Command, resolveBackend func() error, logLevel slog.Level) error {
+	if err := initLogger(logFormat, logOutput, logLevel); err != nil {
+		return err
+	}
+	// Mirror --server / --workspace flags into env vars so that
+	// resolveIssueBackendFromEnv and the factory helpers see the same value
+	// whether the caller used the flag or the env var directly.
+	if serverFlag != "" {
+		if err := os.Setenv("LOOM_SERVER_URL", serverFlag); err != nil {
+			return err
+		}
+	}
+	if workspaceFlag != "" {
+		if err := os.Setenv("LOOM_WORKSPACE", workspaceFlag); err != nil {
+			return err
+		}
+	}
+	if resolveBackend != nil {
+		if err := resolveBackend(); err != nil {
+			return err
+		}
+	}
+	// Rebuild the package-level defaultDeps now that --workspace / --server
+	// have been mirrored into the environment. The eager initialization in
+	// deps.go runs before Cobra parses flags.
+	deps := DefaultDeps()
+	defaultDeps = deps
+	cmd.SetContext(WithDeps(cmd.Context(), deps))
+	return nil
 }
 
 // Execute runs the root command

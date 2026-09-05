@@ -325,10 +325,8 @@ func runWorkflowRun(_ *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		if workflowRunRequiresLocalPreflight(driverID, payload) {
-			if err := runtimepreflight.PreflightLocalTaskRunner(ctx, h.Store, ws); err != nil {
-				return err
-			}
+		if err := preflightWorkflowRun(ctx, h.Store, ws, driverID, payload); err != nil {
+			return err
 		}
 		run, err := driverpkg.CreateDriverRun(ctx, h.Store, driverpkg.RunOptions{
 			WorkspaceKey:    ws,
@@ -350,6 +348,13 @@ func runWorkflowRun(_ *cobra.Command, args []string) error {
 		fmt.Printf("Workflow: %s version %s\n", run.DriverID, run.DriverVersionID)
 		return nil
 	})
+}
+
+func preflightWorkflowRun(ctx context.Context, st store.Store, workspace, driverID string, payload json.RawMessage) error {
+	if !workflows.RunNeedsLocalTaskRunnerPreflight(driverID, payload) {
+		return nil
+	}
+	return runtimepreflight.RequireLocalTaskRunner(ctx, st, runtimepreflight.Request{WorkspaceKey: workspace})
 }
 
 func runWorkflowList(_ *cobra.Command, _ []string) error {
@@ -475,27 +480,6 @@ func workflowMissingPrerequisites(source *workflows.LocalSource) []string {
 		}
 	}
 	return missing
-}
-
-func workflowRunRequiresLocalPreflight(driverID string, payload json.RawMessage) bool {
-	if strings.TrimSpace(driverID) != workflows.BuiltinEpicRunnerWorkflowName {
-		return false
-	}
-	runner := strings.TrimSpace(payloadRunner(payload))
-	return runner == "" || runner == runtimepreflight.LocalTaskRunnerEntrypoint
-}
-
-func payloadRunner(payload json.RawMessage) string {
-	if len(payload) == 0 {
-		return ""
-	}
-	var fields struct {
-		Runner string `json:"runner"`
-	}
-	if err := json.Unmarshal(payload, &fields); err != nil {
-		return ""
-	}
-	return fields.Runner
 }
 
 func workflowPayload(values []string, epicID string) (json.RawMessage, error) {

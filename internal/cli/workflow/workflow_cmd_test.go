@@ -18,6 +18,7 @@ import (
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
+	"github.com/tysonthomas9/loomcli/internal/runtimepreflight/preflighttest"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/workflows"
 )
@@ -268,8 +269,9 @@ func TestWorkflowRunLocalRunnerPreflightFailureDoesNotCreateRun(t *testing.T) {
 	_, err := captureWorkflowStdout(t, func() error {
 		return runWorkflowRun(&cobra.Command{}, []string{workflows.BuiltinEpicRunnerWorkflowName})
 	})
-	if err == nil || !strings.Contains(err.Error(), "local_backend_unavailable") {
-		t.Fatalf("runWorkflowRun err = %v, want local backend preflight failure", err)
+	var notReady *runtimepreflight.NotReadyError
+	if !errors.As(err, &notReady) || notReady.Result.ErrorClass != runtimepreflight.ErrorClassUnavailable {
+		t.Fatalf("runWorkflowRun err = %T %v, want typed local backend preflight failure", err, err)
 	}
 	runs, listErr := st.DriverRuns().List(ctx, "TEST", store.DriverRunFilter{})
 	if listErr != nil {
@@ -278,6 +280,23 @@ func TestWorkflowRunLocalRunnerPreflightFailureDoesNotCreateRun(t *testing.T) {
 	if len(runs) != 0 {
 		t.Fatalf("runs = %+v, want no persisted run after preflight failure", runs)
 	}
+}
+
+func TestStepOneGateParityWorkflow(t *testing.T) {
+	fixture := preflighttest.LoadGateParityFixture(t)
+	_, st := setupWorkflowCommandStore(t)
+	if _, err := st.Daemon().Upsert(context.Background(), &domain.DaemonProfile{
+		WorkspaceKey: fixture.Workspace,
+		AgentBackend: fixture.Backend,
+	}); err != nil {
+		t.Fatalf("upsert daemon profile: %v", err)
+	}
+	restore := runtimepreflight.SetHealthCheckerForTest(func(string) (runtimepreflight.HealthStatus, bool) {
+		return fixture.Health, true
+	})
+	t.Cleanup(restore)
+	err := preflightWorkflowRun(context.Background(), st, fixture.Workspace, workflows.BuiltinEpicRunnerWorkflowName, json.RawMessage(`{}`))
+	preflighttest.AssertGateParityError(t, err, fixture)
 }
 
 func TestWorkflowVersionsUnknownWorkflowReturnsError(t *testing.T) {

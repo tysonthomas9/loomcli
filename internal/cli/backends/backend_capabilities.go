@@ -30,6 +30,12 @@ type HealthCheckableBackend interface {
 	HealthCheck() HealthStatus
 }
 
+// AdmissionHealthCheckableBackend reports readiness facts without collecting
+// display-only metadata such as a CLI version.
+type AdmissionHealthCheckableBackend interface {
+	HealthCheckForAdmission(ctx context.Context) HealthStatus
+}
+
 // ConfigurableBackend is an optional interface for backends that expose
 // runtime-configurable options.
 type ConfigurableBackend interface {
@@ -190,6 +196,26 @@ func CheckBackendHealth(name string) (HealthStatus, bool) {
 	caps := InspectCapabilities(b)
 	if !caps.HasHealthCheck {
 		return HealthStatus{}, false
+	}
+	return caps.Health.HealthCheck(), true
+}
+
+// CheckBackendHealthForAdmission returns the readiness facts needed to admit a
+// launch without collecting display-only version metadata.
+func CheckBackendHealthForAdmission(ctx context.Context, name string) (HealthStatus, bool) {
+	b, ok := cli.GetBackendByName(name)
+	if !ok {
+		return HealthStatus{}, false
+	}
+	caps := InspectCapabilities(b)
+	if !caps.HasHealthCheck {
+		return HealthStatus{}, false
+	}
+	if ctx.Err() != nil {
+		return HealthStatus{}, true
+	}
+	if checker, ok := b.(AdmissionHealthCheckableBackend); ok {
+		return checker.HealthCheckForAdmission(ctx), true
 	}
 	return caps.Health.HealthCheck(), true
 }

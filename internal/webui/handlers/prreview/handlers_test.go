@@ -1590,16 +1590,16 @@ func TestGetReviewerConversationSnapshot(t *testing.T) {
 	}
 }
 
-func TestEnsureReviewerCreatesAgentWorktreeAndSeed(t *testing.T) {
+func prepareReviewerHandlerCheckout(t *testing.T, h *prReviewHarness) (workspacePath, headSHA string) {
+	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
 
-	h := newPRReviewHarness(t, true)
 	root := t.TempDir()
 	remote := filepath.Join(root, "remote.git")
 	seed := filepath.Join(root, "seed")
-	workspacePath := filepath.Join(root, "workspace")
+	workspacePath = filepath.Join(root, "workspace")
 	repoPath := filepath.Join(workspacePath, "hello")
 
 	git(t, "", "init", "--bare", remote)
@@ -1616,7 +1616,7 @@ func TestEnsureReviewerCreatesAgentWorktreeAndSeed(t *testing.T) {
 	writeTestFile(t, filepath.Join(seed, "pr.txt"), "pr head\n")
 	git(t, seed, "add", "pr.txt")
 	git(t, seed, "commit", "-m", "pr head")
-	headSHA := gitOutput(t, seed, "rev-parse", "HEAD")
+	headSHA = gitOutput(t, seed, "rev-parse", "HEAD")
 	git(t, seed, "push", "origin", "HEAD:refs/pull/7/head")
 
 	if err := os.MkdirAll(workspacePath, 0o755); err != nil {
@@ -1626,6 +1626,12 @@ func TestEnsureReviewerCreatesAgentWorktreeAndSeed(t *testing.T) {
 	git(t, repoPath, "checkout", "main")
 	h.rememberLocalPaths(t, workspacePath, "hello", repoPath)
 	h.github.setHead(headSHA)
+	return workspacePath, headSHA
+}
+
+func TestEnsureReviewerCreatesAgentWorktreeAndSeed(t *testing.T) {
+	h := newPRReviewHarness(t, true)
+	workspacePath, headSHA := prepareReviewerHandlerCheckout(t, h)
 
 	status, raw := h.post(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/reviewer", `{}`)
 	if status != http.StatusOK {
@@ -1689,6 +1695,44 @@ func TestEnsureReviewerCreatesAgentWorktreeAndSeed(t *testing.T) {
 	}
 	if got := strings.TrimSpace(gitOutput(t, worktreePath, "config", "loom.reviewBase")); got != base {
 		t.Fatalf("loom.reviewBase after second ensure = %q, want %q", got, base)
+	}
+}
+
+func TestEnsureReviewerBackendErrorsUseDomainStatus(t *testing.T) {
+	h := newPRReviewHarness(t, true)
+	prepareReviewerHandlerCheckout(t, h)
+	if _, err := h.store.Daemon().Upsert(context.Background(), &domain.DaemonProfile{
+		WorkspaceKey: prReviewTestWorkspace,
+		AgentBackend: "not-a-real-backend",
+	}); err != nil {
+		t.Fatalf("upsert unsupported workspace backend: %v", err)
+	}
+
+	status, raw := h.post(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/reviewer", `{}`)
+	if status != http.StatusBadRequest {
+		t.Fatalf("unsupported backend status = %d, want 400 (body %s)", status, raw)
+	}
+	var invalidResponse struct {
+		Code  string `json:"code"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &invalidResponse); err != nil {
+		t.Fatalf("decode unsupported backend response: %v (body %s)", err, raw)
+	}
+	if invalidResponse.Code != "invalid" ||
+		!strings.Contains(invalidResponse.Error, `reviewer backend "not-a-real-backend"`) ||
+		!strings.Contains(invalidResponse.Error, "supported backends: codex, claude, gemini, opencode, cursor") {
+		t.Fatalf("unsupported backend response = %+v, want invalid error naming backend and supported set", invalidResponse)
+	}
+
+	storeFailure := errors.New("fleet unavailable")
+	h.module.store = failingDaemonTargetStore{Store: h.store, err: storeFailure}
+	status, raw = h.post(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/reviewer", `{}`)
+	if status != http.StatusInternalServerError {
+		t.Fatalf("operational failure status = %d, want 500 (body %s)", status, raw)
+	}
+	if code := decodeErrorCode(t, raw); code != "internal" {
+		t.Fatalf("operational failure code = %q, want internal (body %s)", code, raw)
 	}
 }
 
