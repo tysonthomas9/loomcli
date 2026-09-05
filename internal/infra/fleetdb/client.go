@@ -449,6 +449,13 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 	if msg != "" {
 		prefix += ": " + msg
 	}
+	// Route missing, before every status arm below so a fleet-db that never
+	// deployed the lease handlers degrades instead of hard-failing. Keyed on
+	// status alone, so a cancelled request can never reach it.
+	if (status == http.StatusNotFound || status == http.StatusMethodNotAllowed) &&
+		isSkillMaterializationLeasePath(path) && code == "" && fleethttp.ExtractErrorMessage(body) == "" {
+		return fmt.Errorf("%s: %w", prefix, domain.ErrSkillMaterializationLeaseRouteMissing)
+	}
 	switch status {
 	case http.StatusNotFound:
 		return fmt.Errorf("%s: %w", prefix, domain.ErrNotFound)
@@ -526,6 +533,18 @@ func isSkillAPIPath(requestPath string) bool {
 		return true
 	}
 	return len(segments) >= 6 && segments[3] == "roles" && segments[5] == "skills"
+}
+
+// isSkillMaterializationLeasePath narrows isSkillAPIPath to the lease route
+// family alone. Matched by segment for the same reason: a resource legitimately
+// named "skill-materialization-leases" deeper in some other path must not be
+// mistaken for the lease collection, and only this family may have its
+// route-missing 404 read as an unavailable lease store.
+func isSkillMaterializationLeasePath(requestPath string) bool {
+	requestPath, _, _ = strings.Cut(requestPath, "?")
+	segments := strings.Split(strings.Trim(requestPath, "/"), "/")
+	return len(segments) >= 4 && segments[0] == "api" && segments[1] == "v1" &&
+		segments[3] == "skill-materialization-leases"
 }
 
 // extractErrorMessage delegates to fleethttp.ExtractErrorMessage and

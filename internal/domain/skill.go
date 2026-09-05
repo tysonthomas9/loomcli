@@ -127,6 +127,17 @@ var (
 	// ErrSkillMaterializationLeaseStoreUnavailable preserves fleet-db's
 	// dedicated 503 classification for the ephemeral lease store.
 	ErrSkillMaterializationLeaseStoreUnavailable = errors.New("domain: skill materialization lease store unavailable")
+
+	// ErrSkillMaterializationLeaseRouteMissing reports that the deployed
+	// fleet-db does not serve the lease route family at all. It wraps
+	// ErrSkillMaterializationLeaseStoreUnavailable so every caller that already
+	// degrades on an unavailable lease store degrades here too: "the store is
+	// down" and "the endpoint was never deployed" are one operational
+	// condition. Wrapping rather than aliasing keeps that errors.Is true while
+	// still letting a log name the route-missing case exactly.
+	ErrSkillMaterializationLeaseRouteMissing = fmt.Errorf(
+		"domain: skill materialization lease route not served by fleet-db: %w",
+		ErrSkillMaterializationLeaseStoreUnavailable)
 )
 
 // SkillRef is the scope-qualified identity of a Skill within a workspace.
