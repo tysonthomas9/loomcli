@@ -86,3 +86,25 @@ func TestLoadFixture(t *testing.T) {
 		t.Errorf("LoadFixture() = %q, want %q", got, "fixture content")
 	}
 }
+
+func TestTempClaudeHome_NeutralizesAmbientOverride(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "/tmp/ambient-claude-config")
+
+	t.Run("clears override and pins HOME", func(t *testing.T) {
+		home := TempClaudeHome(t)
+
+		if got := os.Getenv("CLAUDE_CONFIG_DIR"); got != "" {
+			t.Errorf("CLAUDE_CONFIG_DIR = %q, want empty", got)
+		}
+		if got := os.Getenv("HOME"); got != home {
+			t.Errorf("HOME = %q, want %q", got, home)
+		}
+		if info, err := os.Stat(home); err != nil || !info.IsDir() {
+			t.Errorf("temp home %q is not a directory: %v", home, err)
+		}
+	})
+
+	if got := os.Getenv("CLAUDE_CONFIG_DIR"); got != "/tmp/ambient-claude-config" {
+		t.Errorf("after subtest CLAUDE_CONFIG_DIR = %q, want the outer value restored", got)
+	}
+}
