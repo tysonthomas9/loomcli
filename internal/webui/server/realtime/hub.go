@@ -26,16 +26,15 @@ const (
 	retryQueueCapacity = 1024
 )
 
-// eventIDCounter provides monotonically increasing event IDs across all SSE connections.
-// Initialized to current time in milliseconds so IDs remain roughly time-ordered,
-// which is important for the Last-Event-ID catch-up mechanism.
+// eventIDCounter supplies process-local IDs for the separate log stream.
+// These IDs must never be used as durable mutation resume checkpoints.
 var eventIDCounter atomic.Int64
 
 func init() {
 	eventIDCounter.Store(time.Now().UnixMilli())
 }
 
-// NextEventID returns the next monotonically increasing event ID.
+// NextEventID returns a process-local log event ID, not a durable mutation cursor.
 func NextEventID() int64 {
 	return eventIDCounter.Add(1)
 }
@@ -144,7 +143,7 @@ func NewClient(id int64, sendBuf int, lastSince string, sourceRepos []string, wo
 		lastSince:   lastSince,
 		sourceRepos: sourceRepos,
 		workspaceID: workspaceID,
-		lastOffered: resyncPoint{cursor: lastSince},
+		lastOffered: resyncPoint{},
 	}
 }
 

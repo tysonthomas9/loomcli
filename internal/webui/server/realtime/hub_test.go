@@ -376,8 +376,8 @@ func TestHub_GlobalDropMarksEveryMatchingClientForResync(t *testing.T) {
 	}
 
 	dropped, pending := matching.beginResync()
-	if !pending || dropped.seq != 0 || dropped.cursor != "c1.matching" {
-		t.Fatalf("matching client resync = (%v, %d, %q), want (true, 0, c1.matching)", pending, dropped.seq, dropped.cursor)
+	if !pending || dropped.seq != 0 || dropped.cursor != "" {
+		t.Fatalf("matching client resync = (%v, %d, %q), want (true, 0, empty cursor)", pending, dropped.seq, dropped.cursor)
 	}
 	if _, pending := otherRepo.beginResync(); pending {
 		t.Fatal("non-matching source-repo client marked for resync")

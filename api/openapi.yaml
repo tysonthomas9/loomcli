@@ -1248,11 +1248,15 @@ paths:
         Not expressible as a standard REST operation in OpenAPI.
         The frontend's `useSSE` hook consumes this stream directly.
 
-        **Frames**: `mutation` carries a JSON `MutationPayload`. A `checkpoint`
+        **Frames**: `mutation` carries a JSON `MutationPayload`. Only mutations
+        with a durable source cursor carry an `id`; transient notifications omit
+        the field and preserve the current resume checkpoint. A `checkpoint`
         frame carries `{}` and an opaque `id` covering successfully scanned,
         filtered-out replay records; it advances resume state without a mutation.
-        A `resync` frame carries an `id` and a JSON `reason` of `cap`, `error`,
+        A `resync` frame carries a JSON `reason` of `cap`, `error`,
         `expired`, or `overflow`, instructing authoritative snapshot refetch.
+        Its `id` sets the resume checkpoint when present. Transient overflow
+        omits `id` to preserve that checkpoint; an explicit empty `id` resets it.
         `connected` has no `id` and
         follows completed replay or the resync instruction. HTTP response headers
         alone do not signal completion. Replay is bounded; a failed or capped
