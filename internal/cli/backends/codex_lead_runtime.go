@@ -3,6 +3,7 @@ package backends
 import (
 	"context"
 
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -24,5 +25,8 @@ func RunCodexLeadRuntime(
 		SessionID: sessionID,
 		WorkDir:   workDir,
 		Prompt:    prompt,
+		// leadcontrol must not import internal/cli, so the workspace runtime
+		// root is resolved here and passed in explicitly.
+		RuntimeDir: cli.GetWorkspaceRuntimeDir(),
 	})
 }
