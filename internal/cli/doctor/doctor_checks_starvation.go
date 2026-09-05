@@ -41,10 +41,6 @@ const starvationReadyLimit = 1000
 // runs its checks serially, so a hung backend must not hold the whole report.
 const starvationReadyTimeout = 5 * time.Second
 
-// operatorLabel marks work that is deliberately reserved for a human, so it is
-// excluded from the unreachable-work metric: nobody is expected to claim it.
-const operatorLabel = "operator"
-
 // aliveStatuses are the daemon agent statuses that mean "the supervise loop is
 // still there and will pick work up".
 //
@@ -542,7 +538,12 @@ func unreachableIssues(
 ) []string {
 	var unreachable []string
 	for _, issue := range ready {
-		if issue.Assignee != "" || hasLabel(issue.Labels, operatorLabel) {
+		// cli.OperatorLabel marks work deliberately reserved for a human, so it
+		// is excluded from the unreachable-work metric: nobody is expected to
+		// claim it. It is core vocabulary — fleet-db enforces it server-side —
+		// so it is read from the one declaration in internal/cli, never respelt
+		// here.
+		if issue.Assignee != "" || hasLabel(issue.Labels, cli.OperatorLabel) {
 			continue
 		}
 		reachable := false

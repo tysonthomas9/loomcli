@@ -167,7 +167,7 @@ func TestStarvation_StoppedIsAlive(t *testing.T) {
 	cfg := &cfgpkg.DaemonConfig{
 		Roles: map[string]cfgpkg.RoleConfig{
 			"decomposer": {Labels: []string{"needs-decomposition"}},
-			"observer":   {ExcludeLabels: []string{"operator"}},
+			"observer":   {ExcludeLabels: []string{cli.OperatorLabel}},
 			"plan":       {Labels: []string{"needs-plan"}},
 			"tester":     {Labels: []string{"in-review"}},
 			"coder":      {Labels: []string{"ready-to-implement"}},
@@ -232,9 +232,9 @@ func TestStarvation_LabelFilters(t *testing.T) {
 	cfg := &cfgpkg.DaemonConfig{
 		Roles: map[string]cfgpkg.RoleConfig{
 			// Include labels, plus an exclusion that must win over them.
-			"coder": {Labels: []string{"ready-to-implement"}, ExcludeLabels: []string{"operator"}},
+			"coder": {Labels: []string{"ready-to-implement"}, ExcludeLabels: []string{cli.OperatorLabel}},
 			// Empty include set: vacuously true, matches everything.
-			"observer":   {ExcludeLabels: []string{"operator"}},
+			"observer":   {ExcludeLabels: []string{cli.OperatorLabel}},
 			"epic-coder": {Labels: []string{"ready-to-implement"}},
 		},
 		Agents: []cfgpkg.AgentEntry{
@@ -247,7 +247,7 @@ func TestStarvation_LabelFilters(t *testing.T) {
 	ready := []backend.IssueData{
 		{ID: "A", Labels: []string{"ready-to-implement"}, SourceRepo: "loomcli", Parent: "PUPPET-423"},
 		{ID: "B", Labels: []string{"ready-to-implement"}, SourceRepo: "fleet-db"},                     // wrong repo for coder
-		{ID: "C", Labels: []string{"ready-to-implement", "operator"}, SourceRepo: "loomcli"},          // excluded label
+		{ID: "C", Labels: []string{"ready-to-implement", cli.OperatorLabel}, SourceRepo: "loomcli"},   // excluded label
 		{ID: "D", Labels: []string{"needs-plan"}, SourceRepo: "loomcli"},                              // missing required label
 		{ID: "E", Labels: []string{"ready-to-implement"}, SourceRepo: "loomcli", Assignee: "someone"}, // already claimed
 	}

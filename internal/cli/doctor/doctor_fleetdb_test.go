@@ -308,6 +308,12 @@ func TestCheckOrphanedFleetLocks_StaleIssueWarns(t *testing.T) {
 	}
 }
 
+// testDecomposedLabel is the workspace label the decomposed tests pretend is
+// configured. It is deliberately NOT the old hardcoded word: the check must work
+// off whatever the workspace declares, and a fixture that reused the old
+// hardcoded literal would pass just as well against the bug this replaced.
+const testDecomposedLabel = "split"
+
 // decomposedListFn builds a ListFn that answers the label query with parents
 // and the ParentID query from kids, so a test only has to declare the shape of
 // the board it wants.
@@ -316,7 +322,7 @@ func decomposedListFn(parents []backend.IssueData, kids map[string][]backend.Iss
 		if opts.ParentID != "" {
 			return kids[opts.ParentID], nil
 		}
-		if len(opts.Labels) == 1 && opts.Labels[0] == "decomposed" {
+		if len(opts.Labels) == 1 && opts.Labels[0] == testDecomposedLabel {
 			return parents, nil
 		}
 		return nil, fmt.Errorf("unexpected list opts: %+v", opts)
@@ -344,7 +350,7 @@ func TestCheckDecomposedWithoutChildren(t *testing.T) {
 		deps, _, _, _, mockBackend := NewTestDeps(t)
 		mockBackend.ListErr = errors.New("fleet-db unreachable")
 
-		if result := checkDecomposedWithoutChildren(deps); result != (CheckResult{}) {
+		if result := decomposedCheck(deps, testDecomposedLabel); result != (CheckResult{}) {
 			t.Errorf("expected empty (skipped) result, got %+v", result)
 		}
 	})
@@ -354,7 +360,7 @@ func TestCheckDecomposedWithoutChildren(t *testing.T) {
 		deps, _, _, _, mockBackend := NewTestDeps(t)
 		mockBackend.ListFn = decomposedListFn(nil, nil)
 
-		if result := checkDecomposedWithoutChildren(deps); result != (CheckResult{}) {
+		if result := decomposedCheck(deps, testDecomposedLabel); result != (CheckResult{}) {
 			t.Errorf("expected empty (skipped) result, got %+v", result)
 		}
 	})
@@ -367,7 +373,7 @@ func TestCheckDecomposedWithoutChildren(t *testing.T) {
 			map[string][]backend.IssueData{"PUPPET-1": {{ID: "PUPPET-2", Status: "open"}}},
 		)
 
-		result := checkDecomposedWithoutChildren(deps)
+		result := decomposedCheck(deps, testDecomposedLabel)
 		if result.Status != StatusPass {
 			t.Fatalf("expected pass, got %v: %s", result.Status, result.Summary)
 		}
@@ -390,7 +396,7 @@ func TestCheckDecomposedWithoutChildren(t *testing.T) {
 			nil,
 		)
 
-		result := checkDecomposedWithoutChildren(deps)
+		result := decomposedCheck(deps, testDecomposedLabel)
 		if result.Status != StatusPass {
 			t.Fatalf("expected pass, got %v: %s", result.Status, result.Summary)
 		}
@@ -412,7 +418,7 @@ func TestCheckDecomposedWithoutChildren(t *testing.T) {
 			map[string][]backend.IssueData{"PUPPET-300": {{ID: "PUPPET-301"}}},
 		)
 
-		result := checkDecomposedWithoutChildren(deps)
+		result := decomposedCheck(deps, testDecomposedLabel)
 		if result.Status != StatusWarn {
 			t.Fatalf("expected warn, got %v: %s", result.Status, result.Summary)
 		}
@@ -450,7 +456,7 @@ func TestCheckDecomposedWithoutChildren(t *testing.T) {
 			return base(ctx, opts)
 		}
 
-		result := checkDecomposedWithoutChildren(deps)
+		result := decomposedCheck(deps, testDecomposedLabel)
 		if result.Status != StatusWarn {
 			t.Fatalf("expected warn, got %v: %s", result.Status, result.Summary)
 		}
@@ -464,4 +470,55 @@ func TestCheckDecomposedWithoutChildren(t *testing.T) {
 			t.Errorf("detail does not name the truncation:\n%s", result.Detail)
 		}
 	})
+}
+
+func TestDecomposedLabelFromContract(t *testing.T) {
+	t.Run("reads defaults.labels.decomposed", func(t *testing.T) {
+		setupUnionWorkspace(t, "defaults:\n  labels:\n    decomposed: split\n")
+		if got := decomposedLabel(); got != "split" {
+			t.Fatalf("expected the configured label, got %q", got)
+		}
+	})
+
+	t.Run("empty when the key is absent", func(t *testing.T) {
+		setupUnionWorkspace(t, "defaults:\n  labels:\n    marker: union-pending\n")
+		if got := decomposedLabel(); got != "" {
+			t.Fatalf("expected no label, got %q", got)
+		}
+	})
+
+	t.Run("empty when there is no workspace", func(t *testing.T) {
+		orig := unionWorkspacePath
+		unionWorkspacePath = func() string { return "" }
+		t.Cleanup(func() { unionWorkspacePath = orig })
+		if got := decomposedLabel(); got != "" {
+			t.Fatalf("expected no label, got %q", got)
+		}
+	})
+}
+
+// TestCheckDecomposedWithoutChildrenUnconfigured is the point of the change: an
+// unconfigured workspace must SEE that the check did not run. Reporting pass
+// here is the silent-green failure the hardcoded literal used to produce.
+func TestCheckDecomposedWithoutChildrenUnconfigured(t *testing.T) {
+	setupUnionWorkspace(t, "defaults:\n  labels:\n    marker: union-pending\n")
+	deps, _, _, _, mockBackend := NewTestDeps(t)
+	mockBackend.ListFn = func(_ context.Context, opts backend.ListOpts) ([]backend.IssueData, error) {
+		t.Fatalf("the backend must not be queried without a label: %+v", opts)
+		return nil, nil
+	}
+
+	result := checkDecomposedWithoutChildren(deps)
+	if result.Status != StatusWarn {
+		t.Fatalf("expected warn (skipped), got %v: %s", result.Status, result.Summary)
+	}
+	if result.Name != decomposedCheckName {
+		t.Errorf("unexpected name: %s", result.Name)
+	}
+	if !strings.Contains(result.Summary, "skipped") {
+		t.Errorf("summary does not say the check was skipped: %s", result.Summary)
+	}
+	if !strings.Contains(result.Detail, "defaults.labels.decomposed") {
+		t.Errorf("detail does not name the config key:\n%s", result.Detail)
+	}
 }
