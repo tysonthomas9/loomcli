@@ -10,6 +10,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentcontrol"
@@ -109,5 +110,23 @@ func TestSendControlRequest_MissingSocketIsSupervisorUnavailable(t *testing.T) {
 	}
 	if _, err := sendControlRequestArgs(missing, "claims_hold_get", "", nil, time.Second); !errors.Is(err, agentcontrol.ErrSupervisorUnavailable) {
 		t.Errorf("sendControlRequestArgs err = %v, want ErrSupervisorUnavailable", err)
+	}
+}
+
+// The fleet-mode config path must produce an explicit Auto: a nil here reads as
+// "unset", which stays enabled, and would silently re-enable the whole fleet's
+// disabled agents on every config poll.
+func TestAgentEntryFromDomainCarriesExplicitAuto(t *testing.T) {
+	for _, auto := range []bool{true, false} {
+		entry := agentEntryFromDomain(&domain.Agent{Name: "w", RoleName: "task", Auto: auto})
+		if entry.Auto == nil {
+			t.Fatalf("auto=%v: expected an explicit Auto, got nil", auto)
+		}
+		if *entry.Auto != auto {
+			t.Errorf("auto=%v: Auto = %v", auto, *entry.Auto)
+		}
+		if entry.AutoEnabled() != auto {
+			t.Errorf("auto=%v: AutoEnabled() = %v", auto, entry.AutoEnabled())
+		}
 	}
 }

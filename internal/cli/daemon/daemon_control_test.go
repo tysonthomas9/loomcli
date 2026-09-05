@@ -991,3 +991,65 @@ func TestSendDaemonControlRequestFull_RoundTrip(t *testing.T) {
 		t.Error("isAgentRunning(beta) = false, want true")
 	}
 }
+
+// A durably disabled agent must be refused by every start path: reversing the
+// owner's policy from the control socket is exactly the bug this guards.
+func TestControlServer_StartRefusesDisabledAgent(t *testing.T) {
+	d := newTestDaemonWithAgents([]AgentEntry{
+		{Worktree: "ci-verifier", Role: "task", Auto: boolPtr(false)},
+	})
+	defer d.sup.ShutdownOnce.Do(func() { close(d.sup.Shutdown) })
+
+	// Park it first so the refusal is not just the "already running" check.
+	if resp := d.handleAgentControlStop("ci-verifier", false); !resp.Success {
+		t.Fatalf("stop failed: %s", resp.Error)
+	}
+
+	resp := d.handleAgentControlStart("ci-verifier")
+	if resp.Success {
+		t.Fatal("expected start of a disabled agent to be refused")
+	}
+	if !strings.Contains(resp.Error, "ci-verifier") || !strings.Contains(resp.Error, "auto: false") {
+		t.Errorf("error should name the agent and the reason, got %q", resp.Error)
+	}
+	if !strings.Contains(resp.Error, "loom agentdef update ci-verifier --auto") {
+		t.Errorf("error should name the remedy, got %q", resp.Error)
+	}
+	// The agent was never handed to the supervisor.
+	if d.AgentCount() != 0 {
+		t.Errorf("AgentCount() = %d after a refused start, want 0", d.AgentCount())
+	}
+	if !d.isAgentStopped("ci-verifier") {
+		t.Error("expected the refused agent to stay stopped")
+	}
+}
+
+func TestControlServer_RestartRefusesDisabledAgent(t *testing.T) {
+	d := newTestDaemonWithAgents([]AgentEntry{
+		{Worktree: "ci-verifier", Role: "task", Auto: boolPtr(false)},
+	})
+	defer d.sup.ShutdownOnce.Do(func() { close(d.sup.Shutdown) })
+
+	resp := d.handleAgentControlRestart("ci-verifier")
+	if resp.Success {
+		t.Fatal("expected restart of a disabled agent to be refused")
+	}
+	if !strings.Contains(resp.Error, "auto: false") ||
+		!strings.Contains(resp.Error, "loom agentdef update ci-verifier --auto") {
+		t.Errorf("error should explain the refusal and the remedy, got %q", resp.Error)
+	}
+	// Refused, not silently converted into a stop.
+	if !d.isAgentRunning("ci-verifier") {
+		t.Error("expected the running agent to be left alone by a refused restart")
+	}
+}
+
+// An agent with no explicit auto (a pre-auto config) keeps its old behavior.
+func TestControlServer_RestartAllowsUnsetAuto(t *testing.T) {
+	d := newTestDaemonWithAgents([]AgentEntry{{Worktree: "alpha", Role: "task"}})
+	defer d.sup.ShutdownOnce.Do(func() { close(d.sup.Shutdown) })
+
+	if err := validateAutoEnabled(d.config.Agents[0]); err != nil {
+		t.Fatalf("expected an unset auto to pass the guard, got %v", err)
+	}
+}

@@ -7,8 +7,8 @@ import (
 func TestPrintDryRunInfo_DefaultValues(t *testing.T) {
 	config := &DaemonConfig{
 		Agents: []AgentEntry{
-			{Worktree: "alpha", Role: "plan", Auto: true},
-			{Worktree: "beta", Role: "task", Auto: false},
+			{Worktree: "alpha", Role: "plan", Auto: boolPtr(true)},
+			{Worktree: "beta", Role: "task", Auto: boolPtr(false)},
 		},
 	}
 
@@ -32,7 +32,7 @@ func TestPrintDryRunInfo_CustomValues(t *testing.T) {
 			MaxAgents: &maxAgents,
 		},
 		Agents: []AgentEntry{
-			{Worktree: "gamma", Role: "task", Auto: true},
+			{Worktree: "gamma", Role: "task", Auto: boolPtr(true)},
 		},
 	}
 
