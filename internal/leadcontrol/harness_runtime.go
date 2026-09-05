@@ -10,11 +10,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/olesho/harness-wrapper/pkg/chat"
 	"github.com/olesho/harness-wrapper/pkg/chat/memstore"
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 	"golang.org/x/term"
 
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -65,6 +67,10 @@ type HarnessLeadRuntimeConfig struct {
 	// metadata so transcript readers can locate the harness's log from boot;
 	// empty means the watcher's TUI scrape is the only source.
 	HarnessSessionID string
+	// ResumedFromSessionID is the provider-side id this launch asked the
+	// harness to resume (claude --resume <uuid>). Empty for a fresh session.
+	// Recorded so a harness that rejects the id can say WHICH id it rejected.
+	ResumedFromSessionID string
 
 	Stdin  io.Reader
 	Stdout io.Writer
@@ -184,9 +190,27 @@ func finalizeHarnessLeadRuntime(cfg HarnessLeadRuntimeConfig, conv harnessConver
 		return waitErr
 	}
 	if result.ExitCode != 0 && result.ExitCode != -1 {
-		return fmt.Errorf("%s exited with status %d", cfg.BinaryPath, result.ExitCode)
+		return fmt.Errorf("%s exited with status %d%s", cfg.BinaryPath, result.ExitCode, resumeFailureHint(cfg))
 	}
 	return nil
+}
+
+// resumeFailureHint annotates an early non-zero exit on a resumed launch. A
+// harness that cannot find the conversation (claude prints "No conversation
+// found" and exits within seconds) otherwise surfaces as a bare exit status,
+// which cannot distinguish a wrong id from a deleted transcript. Naming both
+// the id and the directory the transcript would live in makes that a one-look
+// diagnosis.
+func resumeFailureHint(cfg HarnessLeadRuntimeConfig) string {
+	id := strings.TrimSpace(cfg.ResumedFromSessionID)
+	if id == "" {
+		return ""
+	}
+	hint := fmt.Sprintf(" while resuming session %s", id)
+	if dir := sessions.ClaudeProjectDir(cfg.WorkDir); dir != "" && cfg.Backend == "claude" {
+		hint += fmt.Sprintf(" (transcript dir: %s)", dir)
+	}
+	return hint
 }
 
 func normalizeHarnessLeadRuntimeConfig(cfg HarnessLeadRuntimeConfig) HarnessLeadRuntimeConfig {
@@ -412,13 +436,31 @@ func (w *harnessLeadRuntimeWatcher) poll(ctx context.Context) {
 	w.logWedgedTurn(snap)
 }
 
+// backfillHarnessSessionID reconciles the pinned harness session id against
+// the one the TUI actually reports.
+//
+// It used to return early whenever a launch pinned an id (claude --session-id),
+// treating the pin as authoritative. It is not: claude ROTATES its session id
+// on a first boot that clears the folder-trust dialog, and on resume it may
+// fork the conversation into a new id. The id whose transcript exists on disk
+// is the scraped one, so when the scrape disagrees we adopt it — otherwise the
+// next `loom lead --continue` resumes an id with no transcript behind it.
+//
+// Two guards keep a garbled scrape from overwriting a good pin: the scrape must
+// parse as a UUID, and the runtime must already have recorded its launch
+// instant (StartedAt), which is the marker transcript readers use to tell this
+// run's transcripts from an earlier run's.
 func (w *harnessLeadRuntimeWatcher) backfillHarnessSessionID(ctx context.Context) {
-	if w.runtime.HarnessSessionID != "" {
+	hsid := strings.TrimSpace(w.conv.HarnessSessionID())
+	if hsid == "" || hsid == w.runtime.HarnessSessionID {
 		return
 	}
-	hsid := w.conv.HarnessSessionID()
-	if hsid == "" {
-		return
+	if w.runtime.HarnessSessionID != "" {
+		if uuid.Validate(hsid) != nil || w.runtime.StartedAt.IsZero() {
+			return
+		}
+		w.cfg.Logger.Info("harness rotated its session id; adopting the scraped id",
+			"lead", w.cfg.LeadName, "pinned", w.runtime.HarnessSessionID, "scraped", hsid)
 	}
 	w.runtime.HarnessSessionID = hsid
 	if err := UpdateHarnessRuntimeMetadata(ctx, w.cfg.Store, w.cfg.Workspace, w.cfg.SessionID, w.runtime); err != nil {
