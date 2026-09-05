@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
@@ -145,8 +148,62 @@ const maxDecomposedScan = 50
 
 const decomposedCheckName = "decomposed_without_children"
 
-// checkDecomposedWithoutChildren warns when a non-terminal issue labeled
-// `decomposed` has no children at all. A decomposer that creates children
+// decomposedLabel returns the workspace's own name for the "this issue was
+// split into children" label, or "" when the workspace declares none.
+//
+// It is read from `defaults.labels.decomposed` in the workspace's
+// integration.yaml rather than hardcoded, because nothing in loomcli or
+// fleet-db ever WRITES that label — a workspace prompt does. The word is
+// therefore workspace vocabulary, not core vocabulary like cli.OperatorLabel,
+// and a literal here made the check pass forever for any workspace that spells
+// the concept differently: a health check that is silently green is worse than
+// no check at all.
+//
+// A var so tests can supply a label without a workspace on disk, the same seam
+// unionWorkspacePath uses.
+var decomposedLabel = func() string {
+	wsPath := unionWorkspacePath()
+	if wsPath == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(wsPath, "integration.yaml")) //nolint:gosec // G304 — path is derived from the resolved workspace
+	if err != nil {
+		return ""
+	}
+	// Only the one key is decoded: integration.yaml is large and
+	// operator-owned, so a stricter view would turn every unrelated addition
+	// into a doctor failure.
+	var parsed struct {
+		Defaults struct {
+			Labels struct {
+				Decomposed string `yaml:"decomposed"`
+			} `yaml:"labels"`
+		} `yaml:"defaults"`
+	}
+	if err := yaml.Unmarshal(data, &parsed); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(parsed.Defaults.Labels.Decomposed)
+}
+
+// decomposedUnconfiguredResult is what the check reports when the workspace
+// names no decomposed label. It warns rather than passing: the check did not
+// run, and the one failure mode this whole change exists to remove is a check
+// that reports health it never measured.
+func decomposedUnconfiguredResult() CheckResult {
+	return CheckResult{
+		Name:    decomposedCheckName,
+		Status:  StatusWarn,
+		Summary: "decomposed_without_children skipped: no decomposed label configured",
+		Detail: "nothing in loom writes the \"this issue was split\" label — a workspace prompt does — " +
+			"so this check cannot guess the word.\n" +
+			"remediation: set `defaults.labels.decomposed` in <workspace>/integration.yaml to the " +
+			"label your decomposer applies, or drop this check from the run list.",
+	}
+}
+
+// checkDecomposedWithoutChildren warns when a non-terminal issue carrying the
+// workspace's decomposed label (see decomposedLabel) has no children at all. A decomposer that creates children
 // without `--parent` leaves such a parent behind: the children run and close
 // normally while the parent sits in decomposed + blocked forever, because the
 // integrator only un-parks a parent "when every child is closed" and a parent
@@ -154,16 +211,27 @@ const decomposedCheckName = "decomposed_without_children"
 // legitimately waiting on work, so nothing else surfaces it.
 //
 // Report-only. Returns an empty CheckResult (skipped) when no IssueBackend is
-// configured, when listing fails, or when no decomposed issues exist.
+// configured, when listing fails, or when no decomposed issues exist, and a
+// visible skipped-warning when the workspace configures no label.
 func checkDecomposedWithoutChildren(deps *cli.Deps) CheckResult {
 	if deps == nil || deps.IssueBackend == nil {
 		return CheckResult{}
 	}
 
+	label := decomposedLabel()
+	if label == "" {
+		return decomposedUnconfiguredResult()
+	}
+	return decomposedCheck(deps, label)
+}
+
+// decomposedCheck is the check proper, with the label already resolved. It is
+// split out so tests can exercise the scan without standing up a workspace.
+func decomposedCheck(deps *cli.Deps, label string) CheckResult {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	issues, err := deps.IssueBackend.List(ctx, backend.ListOpts{Labels: []string{"decomposed"}})
+	issues, err := deps.IssueBackend.List(ctx, backend.ListOpts{Labels: []string{label}})
 	if err != nil || len(issues) == 0 {
 		return CheckResult{}
 	}
