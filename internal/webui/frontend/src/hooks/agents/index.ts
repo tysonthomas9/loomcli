@@ -37,3 +37,10 @@ export type {
   PendingInput,
   UsePendingInputReturn,
 } from "./usePendingInput";
+
+export { useClaimHold } from "./useClaimHold";
+export type {
+  ClaimHold,
+  ClaimHoldRunningAgent,
+  UseClaimHoldReturn,
+} from "./useClaimHold";
