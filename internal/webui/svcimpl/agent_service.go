@@ -442,6 +442,9 @@ func (s *agentServiceImpl) loadAgentRoleForKind(ctx context.Context, workspaceKe
 	if errors.Is(err, domain.ErrNotFound) {
 		return nil, nil
 	}
+	if errors.Is(err, domain.ErrInvalid) {
+		return nil, service.ErrValidation(fmt.Sprintf("invalid role name %q", roleName))
+	}
 	if err != nil {
 		return nil, service.ErrInternal("load agent role", err)
 	}
@@ -449,9 +452,15 @@ func (s *agentServiceImpl) loadAgentRoleForKind(ctx context.Context, workspaceKe
 }
 
 func (s *agentServiceImpl) ensureAgentRole(ctx context.Context, workspaceKey, roleName, kind, prompt, promptFile string) error {
-	if existing, err := s.store.Roles().Get(ctx, workspaceKey, roleName); err == nil {
+	existing, err := s.store.Roles().Get(ctx, workspaceKey, roleName)
+	switch {
+	case err == nil:
 		return reconcileExistingAgentRole(existing, roleName, kind, prompt, promptFile)
-	} else if !errors.Is(err, domain.ErrNotFound) {
+	case errors.Is(err, domain.ErrNotFound):
+		// Fall through to the create-if-interactive path below.
+	case errors.Is(err, domain.ErrInvalid):
+		return service.ErrValidation(fmt.Sprintf("invalid role name %q", roleName))
+	default:
 		return service.ErrInternal("load agent role", err)
 	}
 
