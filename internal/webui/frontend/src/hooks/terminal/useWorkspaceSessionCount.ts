@@ -47,6 +47,7 @@ export function useWorkspaceSessionCount(
   // Workspace the newest request was issued for; responses for anything else
   // are stale and must not overwrite the current count.
   const currentWorkspaceRef = useRef(workspaceId);
+  const requestGenerationRef = useRef(0);
   const connectionEpochRef = useRef(connectionEpoch);
 
   useEffect(() => {
@@ -62,10 +63,12 @@ export function useWorkspaceSessionCount(
   const fetchCount = useCallback(async () => {
     if (!enabled) return;
     if (!workspaceId) return; // Wait until the route workspace ID is known
+    const generation = ++requestGenerationRef.current;
     try {
       const tabs = await listTabMetadata(workspaceId);
       if (!mountedRef.current) return;
       if (currentWorkspaceRef.current !== workspaceId) return; // stale response
+      if (requestGenerationRef.current !== generation) return;
       setSessionCount(
         tabs.filter((meta) => !isAgentMetadata(meta) && meta.pty_alive).length,
       );
@@ -89,7 +92,9 @@ export function useWorkspaceSessionCount(
     // it holds the previous fetchCount closure, so letting it fire would spend
     // a request on a workspace whose count is no longer displayed. Drop it
     // whenever the target workspace (and hence fetchCount) changes.
+    const requestGeneration = requestGenerationRef;
     return () => {
+      requestGeneration.current++;
       if (debounceRef.current) {
         clearTimeout(debounceRef.current);
         debounceRef.current = null;

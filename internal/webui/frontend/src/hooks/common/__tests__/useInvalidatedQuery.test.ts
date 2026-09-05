@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 
-import { render, renderHook, act, waitFor } from "@testing-library/react";
+import { renderHook, act, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
 
@@ -458,22 +458,26 @@ describe("useInvalidatedQuery", () => {
     const fetcher = vi
       .fn<(_: AbortSignal) => Promise<string>>()
       .mockReturnValueOnce(first.promise)
-      .mockReturnValueOnce(second.promise);
-    function Probe(): null {
-      useInvalidatedQuery(fetcher, { key: "strict" });
-      return null;
-    }
-    render(
-      React.createElement(
-        React.StrictMode,
-        null,
-        React.createElement(Wrapper, null, React.createElement(Probe)),
-      ),
+      .mockReturnValueOnce(second.promise)
+      .mockResolvedValueOnce("manually refreshed");
+    const { result } = renderHook(
+      () => useInvalidatedQuery(fetcher, { key: "strict" }),
+      {
+        wrapper: ({ children }) =>
+          React.createElement(
+            React.StrictMode,
+            null,
+            React.createElement(Wrapper, null, children),
+          ),
+      },
     );
-    expect(fetcher).toHaveBeenCalled();
-    await act(async () => first.resolve("fresh"));
-    if (fetcher.mock.calls.length > 1) {
-      await act(async () => second.resolve("fresh"));
-    }
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls[0][0].aborted).toBe(true);
+    await act(async () => second.resolve("fresh"));
+    expect(result.current.data).toBe("fresh");
+    await act(async () => first.resolve("stale aborted result"));
+    expect(result.current.data).toBe("fresh");
+    await act(async () => result.current.refetch());
+    expect(result.current.data).toBe("manually refreshed");
   });
 });

@@ -84,6 +84,24 @@ describe("useWorkspaceSessionCount", () => {
     vi.restoreAllMocks();
   });
 
+  it("ignores an older response for the same workspace", async () => {
+    let resolveOlder!: (tabs: TabMetadata[]) => void;
+    mockList
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveOlder = resolve;
+        }),
+      )
+      .mockResolvedValueOnce([]);
+    const { result } = renderHook(() => useWorkspaceSessionCount());
+
+    await act(async () => result.current.refetch());
+    expect(mockList).toHaveBeenCalledTimes(2);
+    expect(result.current.sessionCount).toBe(0);
+    await act(async () => resolveOlder([tab()]));
+    expect(result.current.sessionCount).toBe(0);
+  });
+
   it("counts only non-agent tabs with a live PTY", async () => {
     mockList.mockResolvedValue([
       tab({ session_name: "lead-shell-1" }),
