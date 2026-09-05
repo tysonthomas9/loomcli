@@ -2,10 +2,12 @@ package app
 
 import (
 	"net/http"
+	"sort"
 
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
 	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder"
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -169,7 +171,8 @@ func (app *Server) registerWorkspaceRoutes() {
 		})))
 	}
 
-	wsMux := http.NewServeMux()
+	wsMux := route.NewRecorder()
+	app.wsMuxRec = wsMux
 	for _, mod := range app.wsModules {
 		mod.Register(wsMux)
 	}
@@ -206,4 +209,37 @@ func (app *Server) workspaceMiddleware() middleware.Middleware {
 	return middleware.Workspace(func(id string) bool {
 		return app.wsExistsFn != nil && app.wsExistsFn(id)
 	})
+}
+
+// registeredRoutes returns every pattern registered on the server, merged from
+// all three muxes, deduplicated and sorted.
+//
+// There are three because routing is layered: app.mux is the outer mux, wsMux
+// holds the workspace-scoped modules mounted under /api/workspaces/{ws}/, and
+// the internal worker API keeps its own sub-mux behind an auth wrapper. A
+// caller reading only app.mux would miss the other two entirely.
+//
+// Unexported on purpose: its consumer is the openapi drift test, which lives in
+// this package.
+func (app *Server) registeredRoutes() []string {
+	var all []string
+	if app.mux != nil {
+		all = append(all, app.mux.Patterns()...)
+	}
+	if app.wsMuxRec != nil {
+		all = append(all, app.wsMuxRec.Patterns()...)
+	}
+	all = append(all, app.workerRoutes...)
+
+	seen := make(map[string]struct{}, len(all))
+	out := make([]string, 0, len(all))
+	for _, p := range all {
+		if _, dup := seen[p]; dup {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
 }

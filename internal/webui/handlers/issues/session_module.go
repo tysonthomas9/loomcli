@@ -3,6 +3,7 @@ package issues
 import (
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -46,7 +47,7 @@ func NewSessionModule(sessSvc service.SessionService, opts SessionModuleOpts) *S
 }
 
 // Register implements [Module] by registering 6 session routes.
-func (m *SessionModule) Register(mux *http.ServeMux) {
+func (m *SessionModule) Register(mux route.Router) {
 	// Session history (issue-scoped)
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{issueId}/sessions", handleListSessionHistory(m.sessSvc))
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{issueId}/sessions/{recordId}/scrollback", handleGetSessionScrollback(m.sessSvc))

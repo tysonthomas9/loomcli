@@ -3,6 +3,7 @@ package misc
 import (
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -27,7 +28,7 @@ func NewModule(fileSvc service.FileService, accessCfg ...middleware.FileAccessCo
 }
 
 // Register implements [Module] by registering the file operation routes.
-func (m *Module) Register(mux *http.ServeMux) {
+func (m *Module) Register(mux route.Router) {
 	handle := func(pattern string, h http.HandlerFunc) {
 		mux.Handle(pattern, m.access(h))
 	}

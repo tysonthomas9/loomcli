@@ -12,5 +12,13 @@ internal/cli/daemon/supervisor 22
 internal/cli 19
 # The skills webui module adds the skills handler package to the app's module
 # wiring and the domain skill path policy to svcimpl's file index.
-internal/webui/app 19
-internal/webui/svcimpl 19
+#
+# Both went 19 -> 20 when route registration moved from *http.ServeMux to the
+# internal/webui/route abstraction, so that the served routes can be enumerated
+# from the built mux instead of grepped out of source. That package is a
+# stdlib-only leaf (net/http + sort) with no onward module deps, so this is one
+# more edge in the counter but no new coupling: it replaces a standard-library
+# type in the same position. Shrink these back if the route abstraction is ever
+# folded into a package these two already import.
+internal/webui/app 20
+internal/webui/svcimpl 20

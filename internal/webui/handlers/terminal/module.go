@@ -1,10 +1,10 @@
 package terminal
 
 import (
-	"net/http"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
@@ -67,7 +67,7 @@ func NewModule(
 }
 
 // Register registers the surviving terminal routes on mux.
-func (m *Module) Register(mux *http.ServeMux) {
+func (m *Module) Register(mux route.Router) {
 	// Agent terminal (tmux-backed, for live view of auto-mode agent sessions).
 	if m.agentSvc != nil {
 		mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/info", HandleGetAgentTerminalInfo(m.agentSvc))

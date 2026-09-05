@@ -1,6 +1,8 @@
 package agentcontrol
 
-import "net/http"
+import (
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
+)
 
 // Module registers the 5 workspace-scoped agent lifecycle control routes.
 // Constructed only when AgentControlFn is non-nil (local daemon mode).
@@ -35,7 +37,7 @@ func NewClaimHoldModule(holdFn ClaimHoldFn) *ClaimHoldModule {
 // reads /api/monitor/agents for its agent panel, but the bare list is
 // the daemon-socket projection consumed by the `loom data agents list`
 // CLI subcommand (internal/cli/data/agents.go).
-func (m *Module) Register(mux *http.ServeMux) {
+func (m *Module) Register(mux route.Router) {
 	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/stop", handleAgentStop(m.controlFn))
 	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/start", handleAgentStart(m.controlFn))
 	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/restart", handleAgentRestart(m.controlFn))
@@ -60,7 +62,7 @@ func (m *Module) Register(mux *http.ServeMux) {
 }
 
 // Register implements webui.Module for the claim-hold-only surface.
-func (m *ClaimHoldModule) Register(mux *http.ServeMux) {
+func (m *ClaimHoldModule) Register(mux route.Router) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/claims/hold", handleClaimHoldGet(m.holdFn))
 	mux.HandleFunc("POST /api/workspaces/{ws}/claims/hold", handleClaimHoldSet(m.holdFn))
 	mux.HandleFunc("DELETE /api/workspaces/{ws}/claims/hold", handleClaimHoldRelease(m.holdFn))
