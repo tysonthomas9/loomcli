@@ -2392,6 +2392,37 @@ export interface components {
       retryable?: boolean;
       details?: Record<string, never>;
     };
+    /**
+     * @description The error wire written by handler.HandleServiceError: the service
+     *     error's message plus its structured kind, so a client can branch on
+     *     the kind instead of substring-matching the English message. Note it
+     *     carries NO `success` field.
+     */
+    ServiceErrorResponse: {
+      error: string;
+      /** @enum {string} */
+      kind?:
+        | "not_found"
+        | "validation_error"
+        | "unavailable"
+        | "timeout"
+        | "conflict"
+        | "internal"
+        | "forbidden"
+        | "unauthorized"
+        | "locked"
+        | "payload_too_large"
+        | "rate_limited"
+        | "bad_gateway"
+        | "not_implemented"
+        | "starting"
+        | "precondition_failed"
+        | "precondition_required";
+    };
+    /** @description The bare error wire written by handler.RespondError. */
+    SimpleErrorResponse: {
+      error: string;
+    };
     MessageResponse: {
       /** @constant */
       success: true;
@@ -3187,9 +3218,11 @@ export interface components {
       name: string;
       path: string;
       default_branch: string;
+      current_branch?: string;
       remote: string;
       remote_url?: string;
       source_repo_id?: string;
+      is_linked_worktree?: boolean;
       /** @default [] */
       groups: string[];
     };
@@ -4336,14 +4369,18 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
       };
       /** @description Workspace not found */
       404: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["ServiceErrorResponse"];
+        };
       };
     };
   };
@@ -4377,21 +4414,27 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
       };
       /** @description Workspace not found */
       404: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["ServiceErrorResponse"];
+        };
       };
       /** @description Request body too large */
       413: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
       };
     };
   };
@@ -4849,6 +4892,15 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
+      /** @description Issue backend unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ServiceErrorResponse"];
+        };
+      };
     };
   };
   getIssue: {
@@ -5048,7 +5100,9 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["ServiceErrorResponse"];
+        };
       };
       /** @description Request body too large (max 1MB) */
       413: {
@@ -5320,7 +5374,9 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["ServiceErrorResponse"];
+        };
       };
     };
   };
@@ -5413,7 +5469,9 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["ServiceErrorResponse"];
+        };
       };
     };
   };
@@ -6409,7 +6467,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ErrorResponse"];
+          "application/json": components["schemas"]["ServiceErrorResponse"];
         };
       };
       /** @description Agent or role not found */
@@ -6418,7 +6476,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ErrorResponse"];
+          "application/json": components["schemas"]["ServiceErrorResponse"];
         };
       };
       /** @description Terminal service or agent store not initialized */
@@ -6725,7 +6783,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ErrorResponse"];
+          "application/json": components["schemas"]["ServiceErrorResponse"];
         };
       };
     };
@@ -6763,7 +6821,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ErrorResponse"];
+          "application/json": components["schemas"]["ServiceErrorResponse"];
         };
       };
       /** @description Agent not found */
@@ -6772,7 +6830,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ErrorResponse"];
+          "application/json": components["schemas"]["ServiceErrorResponse"];
         };
       };
     };
@@ -6819,7 +6877,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ErrorResponse"];
+          "application/json": components["schemas"]["ServiceErrorResponse"];
         };
       };
       /** @description Daemon unavailable */
@@ -7361,16 +7419,18 @@ export interface operations {
           };
         };
       };
-      /** @description Listing failed for the workspace */
+      /**
+       * @description Listing failed for the workspace. A service error carries its
+       *     kind; anything else is reported as a bare message.
+       */
       502: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": {
-            success: boolean;
-            error?: string;
-          };
+          "application/json":
+            | components["schemas"]["ServiceErrorResponse"]
+            | components["schemas"]["SimpleErrorResponse"];
         };
       };
     };
