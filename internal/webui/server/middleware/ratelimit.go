@@ -13,6 +13,11 @@ import (
 
 // RateLimitConfig holds configuration for per-IP rate limiting.
 type RateLimitConfig struct {
+	// Enabled gates the whole middleware. False installs a pass-through and
+	// starts no cleanup goroutine. Default deployments leave this true;
+	// it exists so test harnesses and single-IP automation can opt out.
+	Enabled bool
+
 	ReadRate    rate.Limit // Requests per second for read operations (GET/HEAD/OPTIONS)
 	ReadBurst   int        // Maximum burst size for read operations
 	MutateRate  rate.Limit // Requests per second for mutating operations (POST/PUT/PATCH/DELETE)
@@ -25,6 +30,7 @@ type RateLimitConfig struct {
 // DefaultRateLimitConfig returns sensible defaults for a local development tool.
 func DefaultRateLimitConfig() RateLimitConfig {
 	return RateLimitConfig{
+		Enabled:         true,
 		ReadRate:        100,
 		ReadBurst:       200,
 		MutateRate:      20,
@@ -32,6 +38,42 @@ func DefaultRateLimitConfig() RateLimitConfig {
 		CleanupInterval: 5 * time.Minute,
 		EntryTTL:        10 * time.Minute,
 	}
+}
+
+// WithDefaults returns c with any unset or non-positive field replaced by the
+// package default. Callers that build a config from flags/env use it so a
+// zero or malformed value can never produce rate.NewLimiter(0, 0), which
+// would reject every request. Enabled is passed through untouched: it is an
+// explicit choice, not an "unset" case.
+func (c RateLimitConfig) WithDefaults() RateLimitConfig {
+	d := DefaultRateLimitConfig()
+	if c.ReadRate <= 0 {
+		c.ReadRate = d.ReadRate
+	}
+	if c.MutateRate <= 0 {
+		c.MutateRate = d.MutateRate
+	}
+	if c.ReadBurst <= 0 {
+		c.ReadBurst = d.ReadBurst
+	}
+	if c.MutateBurst <= 0 {
+		c.MutateBurst = d.MutateBurst
+	}
+	// A burst below the sustained rate would throttle below the configured
+	// rate, so raise it to hold one second's worth of requests.
+	if minBurst := int(math.Ceil(float64(c.ReadRate))); c.ReadBurst < minBurst {
+		c.ReadBurst = minBurst
+	}
+	if minBurst := int(math.Ceil(float64(c.MutateRate))); c.MutateBurst < minBurst {
+		c.MutateBurst = minBurst
+	}
+	if c.CleanupInterval <= 0 {
+		c.CleanupInterval = d.CleanupInterval
+	}
+	if c.EntryTTL <= 0 {
+		c.EntryTTL = d.EntryTTL
+	}
+	return c
 }
 
 // ipLimiterEntry holds per-IP rate limiters and a last-seen timestamp.
@@ -52,6 +94,15 @@ type RateLimiter struct {
 // RateLimit creates a per-IP rate limiting middleware and returns
 // both the RateLimiter (for graceful shutdown via Stop()) and the middleware function.
 func RateLimit(config RateLimitConfig) (*RateLimiter, Middleware) {
+	if !config.Enabled {
+		// Return a live (if inert) limiter so the caller's two-value
+		// signature and rl.Stop() stay unchanged; no goroutine is started.
+		rl := &RateLimiter{config: config, stopCleanup: make(chan struct{})}
+		return rl, func(next http.Handler) http.Handler { return next }
+	}
+
+	config = config.WithDefaults()
+
 	rl := &RateLimiter{
 		config:      config,
 		stopCleanup: make(chan struct{}),
