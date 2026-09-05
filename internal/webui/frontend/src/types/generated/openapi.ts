@@ -2918,6 +2918,8 @@ export interface components {
       blocked_issues: number;
       deferred_issues: number;
       ready_issues: number;
+      review_issues: number;
+      status_blocked_issues: number;
       tombstone_issues: number;
       pinned_issues: number;
       epics_eligible_for_closure: number;
@@ -3880,7 +3882,10 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["Statistics"];
+          "application/json": {
+            success: boolean;
+            data: components["schemas"]["Statistics"];
+          };
         };
       };
     };
