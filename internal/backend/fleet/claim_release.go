@@ -72,3 +72,15 @@ func claimIssueBody(lockTTL time.Duration) (interface{}, error) {
 		LockTTL int `json:"lock_ttl"`
 	}{LockTTL: seconds}, nil
 }
+
+// ConfiguredActor returns the identity this backend authenticates as. With an
+// API key configured this is the actor fleet-db attributes every call to,
+// because the X-Actor override header is stripped server-side by fleet-db's
+// anti-spoofing auth middleware. It is therefore the identity that lands in
+// `assignee` on claim, and the one ReleaseClaim must accept as proof of
+// ownership. Returns "" when no actor is configured.
+func (b *FleetBackend) ConfiguredActor() string {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.actor
+}

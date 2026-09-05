@@ -34,6 +34,60 @@ type actorReleaseBackend interface {
 	ReleaseIssueAsActor(ctx context.Context, id string, actor string) error
 }
 
+// claimReleaseBackend is the stronger release: it puts the issue back to
+// open/unassigned when it is still in_progress, and drops only the lock
+// otherwise. Preferred over actorReleaseBackend on clean exit — releasing the
+// lock alone leaves the task in_progress and unclaimable until fleet-db's
+// claim reaper reverts it on lock-TTL expiry (~5 min), which is the ~5 minute
+// tax every label-only hand-off used to pay. See PUPPET-467.
+type claimReleaseBackend interface {
+	ReleaseClaim(ctx context.Context, id, actor string) error
+}
+
+// configuredActorBackend exposes the fleet-db identity the backend
+// authenticates as — the id ClaimIssue auto-registers the worker under, which
+// is NOT the agent's worktree name whenever an API key is in play.
+type configuredActorBackend interface {
+	ConfiguredActor() string
+}
+
+// claimActorFor resolves the identity fleet-db attributed this agent's claim
+// to, falling back to the worktree name when the backend cannot tell us.
+func (s *Supervisor) claimActorFor(ap *AgentProcess) string {
+	if b, ok := s.IssueBackend.(configuredActorBackend); ok {
+		if a := b.ConfiguredActor(); a != "" {
+			return a
+		}
+	}
+	return ap.Entry.Worktree
+}
+
+// anotherAgentHolds reports whether a DIFFERENT agent process supervised by
+// this daemon currently has taskID assigned. Because every agent authenticates
+// to fleet-db as the same actor, the server-side assignee check cannot tell an
+// exiting agent apart from the one that just reclaimed its task; this check
+// can, for the realistic case of a single daemon owning every agent on a node.
+// Cross-daemon reclaims remain out of reach and are not a scenario here.
+func (s *Supervisor) anotherAgentHolds(taskID string, self *AgentProcess) bool {
+	s.AgentsMu.RLock()
+	snapshot := make([]*AgentProcess, len(s.Agents))
+	copy(snapshot, s.Agents)
+	s.AgentsMu.RUnlock()
+
+	for _, other := range snapshot {
+		if other == nil || other == self {
+			continue
+		}
+		other.Mu.Lock()
+		held := other.AssignedTaskID
+		other.Mu.Unlock()
+		if held == taskID {
+			return true
+		}
+	}
+	return false
+}
+
 const (
 	claimReadyLimit         = 256
 	claimConflictRetryLimit = 16
@@ -314,26 +368,46 @@ func removeIssueByID(issues []backend.IssueData, id string) []backend.IssueData 
 	return out
 }
 
-// releaseAssignedTaskClaim releases the issue-claim lock held by this agent on
-// the given task. Called from completeControlPlaneAgentSession when the agent
-// process exits. Without this, fleet-db's per-issue claim lock leaks until its
-// TTL expires (~5 min), so the next agent — even with a fresh assignee — gets
-// HTTP 409 KindConflict on every ClaimIssue attempt and silently NoWorks in
-// the supervisor's restart backoff. The release is best-effort: if the backend
-// does not support actor-scoped release, or if the lock is already gone (e.g.
-// the agent already moved status to closed which auto-releases), this logs at
-// debug level and returns without affecting the cleanup path.
+// releaseAssignedTaskClaim releases the claim this agent holds on the given
+// task. Called from completeControlPlaneAgentSession when the agent process
+// exits. Without it the issue stays in_progress with the claim lock held until
+// fleet-db's claim reaper reverts it on lock-TTL expiry (~5 min), so the next
+// agent gets HTTP 409 KindConflict on every ClaimIssue attempt and silently
+// NoWorks in the supervisor's restart backoff — a ~5 minute tax on every
+// label-only hand-off (PUPPET-467).
+//
+// ReleaseClaim is preferred over ReleaseIssueAsActor: the latter drops only
+// the operational lock, leaving the issue in_progress and still unclaimable.
+//
+// The release is best-effort and must never block agent cleanup, but every
+// branch that declines to release now says so at Warn — the three silent skips
+// this function used to have are exactly what hid the bug.
 func (s *Supervisor) releaseAssignedTaskClaim(ap *AgentProcess, taskID string) {
 	if taskID == "" || ap.Entry.Worktree == "" || s.IssueBackend == nil {
 		return
 	}
-	releaser, ok := s.IssueBackend.(actorReleaseBackend)
-	if !ok {
+	if s.anotherAgentHolds(taskID, ap) {
+		slog.Info("agent task claim release skipped: reclaimed by another agent",
+			"task_id", taskID, "worktree", ap.Entry.Worktree)
 		return
 	}
 	ctx, cancel := s.operationContext(claimOperationTimeout)
 	defer cancel()
-	if err := releaser.ReleaseIssueAsActor(ctx, taskID, ap.Entry.Worktree); err != nil {
-		slog.Debug("agent task claim release skipped", "worktree", ap.Entry.Worktree, "task_id", taskID, "err", err)
+	if releaser, ok := s.IssueBackend.(claimReleaseBackend); ok {
+		if err := releaser.ReleaseClaim(ctx, taskID, ap.Entry.Worktree); err != nil {
+			slog.Warn("agent task claim release failed",
+				"worktree", ap.Entry.Worktree, "task_id", taskID, "err", err)
+		}
+		return
 	}
+	if releaser, ok := s.IssueBackend.(actorReleaseBackend); ok {
+		if err := releaser.ReleaseIssueAsActor(ctx, taskID, ap.Entry.Worktree); err != nil {
+			slog.Warn("agent task lock release failed",
+				"worktree", ap.Entry.Worktree, "task_id", taskID, "err", err)
+		}
+		return
+	}
+	slog.Warn("agent task claim not released: issue backend supports neither ReleaseClaim nor ReleaseIssueAsActor",
+		"worktree", ap.Entry.Worktree, "task_id", taskID,
+		"backend_type", fmt.Sprintf("%T", s.IssueBackend))
 }
