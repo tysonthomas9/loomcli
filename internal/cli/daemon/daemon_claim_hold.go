@@ -2,16 +2,21 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"os/user"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/tysonthomas9/loomcli/internal/cli"
+	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
@@ -39,7 +44,25 @@ const (
 
 	claimHoldWaitPollInterval = 5 * time.Second
 	defaultClaimHoldWaitLimit = 30 * time.Minute
+
+	claimHoldSocketPoll = 500 * time.Millisecond
 )
+
+// claimHoldSocketWait is how long a control request waits for a daemon that is
+// starting up to bind its control socket. The daemon writes daemon.pid before
+// cmdstore.OpenStore and the supervisor start, so the socket can lag the PID
+// file by several seconds (measured 9s, PUPPET-200); 30s is headroom over that.
+//
+// A var, not a const, only so a test can shorten it; nothing at runtime writes
+// to it.
+var claimHoldSocketWait = 30 * time.Second
+
+// errNoDaemonRunning reports that no daemon process is believed alive for this
+// workspace, so waiting for a control socket is pointless and the caller may
+// fall back to the file. Callers MUST match it with errors.Is, never on the
+// message: the offline path clears an operator's hold, and a string compare
+// against an unrelated error is how that happens by accident.
+var errNoDaemonRunning = errors.New("no daemon is running for this workspace")
 
 // ClaimHoldRunningAgent describes one agent whose process is still alive while
 // a hold is active. A hold never touches a running agent; these are reported so
@@ -378,7 +401,11 @@ var daemonReleaseCmd = &cobra.Command{
 	Short: "Release the workspace claim hold",
 	Long: `Clear the workspace claim hold so agents resume claiming work.
 
-Releasing a hold owned by a different actor requires --force.`,
+Releasing a hold owned by a different actor requires --force.
+
+A hold outlives the daemon, so releasing one does not require a running daemon:
+with none alive the claim-hold file is cleared directly, and releasing when
+nothing is held succeeds. A daemon that is still starting up is waited for.`,
 	RunE: runDaemonRelease,
 }
 
@@ -432,12 +459,111 @@ func validateHoldTTL(ttl time.Duration) (time.Duration, error) {
 	return ttl, nil
 }
 
-// requestClaimHold sends one claims_hold_set / claims_hold_get round trip.
+// claimHoldEndpoints names the three daemon paths a claim-hold command acts on.
+// They are resolved TOGETHER, from one project directory, so the file the
+// offline release clears is the file belonging to the daemon the socket would
+// have reached — resolving them separately is how a release silently clears
+// some other workspace's hold.
+type claimHoldEndpoints struct {
+	projectDir string
+	pidFile    string
+	socketPath string
+}
+
+// holdPath is the claim-hold record beside this daemon's PID file.
+func (e claimHoldEndpoints) holdPath() string { return resolveClaimHoldPath(e.pidFile) }
+
+// resolveClaimHoldEndpoints resolves the daemon paths from the working
+// directory, mirroring resolveControlSocketFromCwd's fallback to the default
+// PID file when no daemon config can be read.
+func resolveClaimHoldEndpoints() (claimHoldEndpoints, error) {
+	projectDir, err := os.Getwd()
+	if err != nil {
+		return claimHoldEndpoints{}, fmt.Errorf("cannot determine working directory: %w", err)
+	}
+	config, cfgErr := cfgpkg.LoadDaemonConfig(projectDir)
+	if cfgErr != nil {
+		config = &cfgpkg.DaemonConfig{Daemon: cfgpkg.DaemonSettings{PIDFile: ".loom/daemon.pid"}}
+	}
+	pidFile := supervisor.ResolveDaemonPath(projectDir, config.Daemon.PIDFile)
+	return claimHoldEndpoints{
+		projectDir: projectDir,
+		pidFile:    pidFile,
+		socketPath: filepath.Join(filepath.Dir(pidFile), "daemon.sock"),
+	}, nil
+}
+
+// claimHoldDaemonRuntime reports whether a daemon process is believed alive:
+// the per-cwd lock/state first, then the workspace-scoped lock for a daemon
+// started from a different cwd.
+func claimHoldDaemonRuntime(projectDir string) cli.DaemonRuntimeInfo {
+	if rt := cli.DetectDaemonRuntime(projectDir); rt.Running {
+		return rt
+	}
+	return detectWorkspaceDaemonRuntime()
+}
+
+// dialClaimHoldSocket sends one control request, waiting up to
+// claimHoldSocketWait for a daemon that is STARTING to bind its socket. The daemon writes daemon.pid
+// before it binds daemon.sock, so a command issued in that window used to fail
+// with "daemon is not running" against a daemon that was very much running.
+//
+// It gives up early in the one case where waiting is pointless: no daemon
+// process is alive at all. That is reported as errNoDaemonRunning so a caller
+// with an offline fallback can take it, and every other caller can say so.
+func dialClaimHoldSocket(ep claimHoldEndpoints, req DaemonControlRequest) (*DaemonControlResponse, error) {
+	wait := claimHoldSocketWait
+	resp, err := sendDaemonControlRequestFull(ep.socketPath, req)
+	if err == nil {
+		return resp, nil
+	}
+
+	rt := claimHoldDaemonRuntime(ep.projectDir)
+	if !rt.Running {
+		return nil, errNoDaemonRunning
+	}
+
+	// One line, once: the silence here is what made a starting daemon look
+	// like a stopped one during triage.
+	if rt.PID > 0 {
+		fmt.Fprintf(os.Stderr, "Waiting up to %s for the daemon control socket at %s (daemon PID %d is starting)...\n",
+			wait, ep.socketPath, rt.PID)
+	} else {
+		fmt.Fprintf(os.Stderr, "Waiting up to %s for the daemon control socket at %s (a daemon is starting)...\n",
+			wait, ep.socketPath)
+	}
+
+	deadline := time.Now().Add(wait)
+	for {
+		time.Sleep(claimHoldSocketPoll)
+		if resp, err := sendDaemonControlRequestFull(ep.socketPath, req); err == nil {
+			return resp, nil
+		}
+		if rt.PID > 0 && !lockfile.IsProcessRunning(rt.PID) {
+			return nil, errNoDaemonRunning
+		}
+		if !time.Now().Before(deadline) {
+			return nil, fmt.Errorf(
+				"timed out after %s waiting for the daemon control socket at %s (daemon PID %d is alive but has not bound it); "+
+					"%s was deliberately NOT cleared, because that daemon may already hold a hydrated copy",
+				wait, ep.socketPath, rt.PID, ep.holdPath())
+		}
+	}
+}
+
+// requestClaimHold sends one claims_hold_set / claims_hold_get round trip,
+// resolving the daemon paths from the working directory.
 func requestClaimHold(op string, args any) (*ClaimHoldStatus, error) {
-	socketPath, err := resolveControlSocketFromCwd()
+	ep, err := resolveClaimHoldEndpoints()
 	if err != nil {
 		return nil, err
 	}
+	return requestClaimHoldAt(ep, op, args)
+}
+
+// requestClaimHoldAt is requestClaimHold against already-resolved endpoints, so
+// a caller with an offline fallback clears the file those same endpoints name.
+func requestClaimHoldAt(ep claimHoldEndpoints, op string, args any) (*ClaimHoldStatus, error) {
 	req := DaemonControlRequest{Operation: op}
 	if args != nil {
 		raw, mErr := json.Marshal(args)
@@ -446,7 +572,7 @@ func requestClaimHold(op string, args any) (*ClaimHoldStatus, error) {
 		}
 		req.Args = raw
 	}
-	resp, err := sendDaemonControlRequestFull(socketPath, req)
+	resp, err := dialClaimHoldSocket(ep, req)
 	if err != nil {
 		return nil, err
 	}
@@ -481,6 +607,11 @@ func runDaemonHold(cmd *cobra.Command, args []string) error {
 		Force:      daemonHoldForce,
 	})
 	if err != nil {
+		// Deliberately NO offline write path here: a hold written to a file no
+		// daemon will read is a quiesce that silently did not happen.
+		if errors.Is(err, errNoDaemonRunning) {
+			return fmt.Errorf("%w; start the daemon before holding claims (release works without one)", err)
+		}
 		return err
 	}
 
@@ -520,17 +651,85 @@ func waitForClaimHoldIdle(timeout time.Duration) error {
 func runDaemonRelease(cmd *cobra.Command, args []string) error {
 	_, _ = cmd, args
 	actor := resolveHoldActor(daemonReleaseActor)
-	status, err := requestClaimHold(ctrlOpClaimHoldSet, claimHoldSetArgs{
+	ep, err := resolveClaimHoldEndpoints()
+	if err != nil {
+		return err
+	}
+	status, err := requestClaimHoldAt(ep, ctrlOpClaimHoldSet, claimHoldSetArgs{
 		Held:  false,
 		Actor: actor,
 		Force: daemonReleaseForce,
 	})
 	if err != nil {
+		// A hold outlives the daemon by design, so releasing it must not
+		// require one. With no daemon alive the file IS the hold.
+		if errors.Is(err, errNoDaemonRunning) {
+			return releaseClaimHoldOffline(ep.holdPath(), actor, daemonReleaseForce)
+		}
 		return err
 	}
 	fmt.Printf("Claim hold released by %s. Agents resume claiming within ~%s.\n", actor, defaultClaimHoldRecheckHint)
 	printClaimHoldStatus(*status)
 	return nil
+}
+
+// releaseClaimHoldOffline clears the claim-hold record directly, for the case
+// where no daemon is running to be asked. It enforces the SAME ownership rule
+// the socket path enforces, with the same wording as
+// supervisor.ReleaseClaimHold: a file path that quietly skipped that check
+// would let any actor lift someone else's quiesce just by stopping the daemon.
+func releaseClaimHoldOffline(path, actor string, force bool) error {
+	hold, err := readClaimHoldFile(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrPermission) {
+			// The record is 0600; this is another UID, not a missing daemon.
+			return fmt.Errorf("cannot read the claim-hold record at %s: permission denied%s",
+				path, claimHoldOwnerHint(path))
+		}
+		// Unreadable or unparseable. Releasable, but only deliberately: the
+		// record may describe a hold whose owner cannot be checked.
+		if !force {
+			return fmt.Errorf("the claim-hold record at %s is unparseable (%v); "+
+				"its owner cannot be checked, so use --force to clear it", path, err)
+		}
+		if wErr := writeClaimHoldFile(path, nil); wErr != nil {
+			return fmt.Errorf("clear %s: %w", path, wErr)
+		}
+		fmt.Printf("Claim hold released by %s (no daemon running; cleared unparseable record at %s).\n", actor, path)
+		return nil
+	}
+
+	if hold == nil {
+		// Idempotent: no file, or a file that says "not held".
+		fmt.Println("Claims: not held")
+		return nil
+	}
+	// An expired hold is released by anyone, matching ReleaseClaimHold's
+	// !Active fast path.
+	if hold.Active(time.Now()) && !force && hold.Actor != actor {
+		return fmt.Errorf("claims held by %s since %s; use --force to release",
+			hold.Actor, hold.Since.Format(time.RFC3339))
+	}
+	if err := writeClaimHoldFile(path, nil); err != nil {
+		return fmt.Errorf("clear %s: %w", path, err)
+	}
+	fmt.Printf("Claim hold released by %s (no daemon running; cleared %s).\n", actor, path)
+	return nil
+}
+
+// claimHoldOwnerHint names the UID that owns an unreadable record, so the
+// operator sees "re-run as that user" rather than "daemon is not running". An
+// ownership that cannot be determined is omitted rather than guessed.
+func claimHoldOwnerHint(path string) string {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return ""
+	}
+	stat, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf(" (the record is 0600 and owned by UID %d; re-run as that user)", stat.Uid)
 }
 
 // defaultClaimHoldRecheckHint mirrors the supervisor's fixed re-check interval
