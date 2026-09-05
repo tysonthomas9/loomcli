@@ -4,7 +4,7 @@
 
 /**
  * Unit tests for useWorkspaceSessionCount.
- * Covers the counting rule (non-agent tabs with a live PTY), the empty-workspace
+ * Covers the counting rule (non-agent tabs with an attachable PTY), the empty-workspace
  * short circuit, the workspace-switch reset that is the PUPPET-123 regression,
  * the stale-response guard, SSE-driven debounced refetch, the cancellation of a
  * debounce left pending across a workspace switch, and silent failure.
@@ -52,7 +52,7 @@ function tab(overrides?: Partial<TabMetadata>): TabMetadata {
     pinned: false,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
-    pty_alive: true,
+    attachable: true,
     attached_clients: 0,
     ...overrides,
   };
@@ -73,7 +73,7 @@ describe("useWorkspaceSessionCount", () => {
     mockList.mockResolvedValue([
       tab({ session_name: "lead-shell-1" }),
       tab({ session_name: "lead-shell-2" }),
-      tab({ session_name: "lead-shell-3", pty_alive: false }),
+      tab({ session_name: "lead-shell-3", attachable: false }),
       tab({ session_name: "agent-observer", kind: "agent" }),
     ]);
 

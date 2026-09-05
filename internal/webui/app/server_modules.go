@@ -127,6 +127,9 @@ func (app *Server) buildInfraModules() {
 	}
 
 	if storeBacked {
+		if app.config.ClaimHoldFn != nil {
+			app.wsModules = append(app.wsModules, webui.NewClaimHoldModule(app.config.ClaimHoldFn))
+		}
 		app.connectorDispatcher = app.buildConnectorDispatcher()
 		app.wsModules = append(app.wsModules, agents.NewModule(app.agentSvc, app.hub))
 		app.wsModules = append(app.wsModules, skills.NewModule(app.config.Store, fileAccessCfg))
@@ -154,7 +157,7 @@ func (app *Server) buildInfraModules() {
 		// keep the gh-backed pull-request list route available.
 		app.wsModules = append(app.wsModules, githandlers.NewPullRequestListModule(app.agentSvc))
 		if app.config.AgentControlFn != nil {
-			app.wsModules = append(app.wsModules, webui.NewAgentControlModule(app.config.AgentControlFn, app.config.AgentInputFn))
+			app.wsModules = append(app.wsModules, webui.NewAgentControlModule(app.config.AgentControlFn, app.config.AgentInputFn, app.config.ClaimHoldFn))
 		}
 	}
 }
