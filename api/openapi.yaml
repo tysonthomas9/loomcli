@@ -304,6 +304,57 @@ paths:
         "404":
           description: Workspace not found
 
+  /api/workspaces/{ws}/repos:
+    get:
+      operationId: listWorkspaceRepos
+      tags: [workspaces]
+      summary: List the repositories attached to a workspace
+      description: |
+        Lightweight alternative to `getWorkspace` for clients that only need the
+        repo list and not the full workspace topology.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Repository list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceReposResponse"
+        "400":
+          description: Workspace ID is required
+        "404":
+          description: Workspace not found
+    post:
+      operationId: addWorkspaceRepos
+      tags: [workspaces]
+      summary: Attach repositories to an existing workspace
+      description: |
+        Attaches existing local repositories by path and/or clones remote git
+        URLs into the workspace. Returns the workspace topology after the
+        repos have been attached.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceAddReposRequest"
+      responses:
+        "201":
+          description: Repositories attached; updated workspace topology
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceResponse"
+        "400":
+          description: Workspace ID is required, or invalid request body
+        "404":
+          description: Workspace not found
+        "413":
+          description: Request body too large
+
   /api/workspaces/{ws}/monitor/status:
     get:
       operationId: getWorkspaceMonitorStatus
@@ -5767,6 +5818,36 @@ components:
           default: []
         cross_repo:
           type: boolean
+
+    WorkspaceReposResponse:
+      type: object
+      required: [success, repos]
+      properties:
+        success:
+          type: boolean
+        repos:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkspaceRepo"
+
+    WorkspaceAddReposRequest:
+      type: object
+      description: |
+        At least one of `repos` or `clone_urls` must be non-empty.
+      properties:
+        repos:
+          type: array
+          description: Absolute paths of existing local repositories to attach.
+          items:
+            type: string
+        clone_urls:
+          type: array
+          description: Remote git URLs to clone into the workspace.
+          items:
+            type: string
+        branch:
+          type: string
+          description: Branch to check out for cloned repositories.
 
     WorkspaceRenameRequest:
       type: object

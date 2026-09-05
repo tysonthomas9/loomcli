@@ -176,6 +176,33 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/repos": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the repositories attached to a workspace
+     * @description Lightweight alternative to `getWorkspace` for clients that only need the
+     *     repo list and not the full workspace topology.
+     */
+    get: operations["listWorkspaceRepos"];
+    put?: never;
+    /**
+     * Attach repositories to an existing workspace
+     * @description Attaches existing local repositories by path and/or clones remote git
+     *     URLs into the workspace. Returns the workspace topology after the
+     *     repos have been attached.
+     */
+    post: operations["addWorkspaceRepos"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/monitor/status": {
     parameters: {
       query?: never;
@@ -3009,6 +3036,19 @@ export interface components {
       repo_groups: string[];
       cross_repo: boolean;
     };
+    WorkspaceReposResponse: {
+      success: boolean;
+      repos: components["schemas"]["WorkspaceRepo"][];
+    };
+    /** @description At least one of `repos` or `clone_urls` must be non-empty. */
+    WorkspaceAddReposRequest: {
+      /** @description Absolute paths of existing local repositories to attach. */
+      repos?: string[];
+      /** @description Remote git URLs to clone into the workspace. */
+      clone_urls?: string[];
+      /** @description Branch to check out for cloned repositories. */
+      branch?: string;
+    };
     WorkspaceRenameRequest: {
       new_name: string;
     };
@@ -3968,6 +4008,91 @@ export interface operations {
       };
       /** @description Workspace not found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  listWorkspaceRepos: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Repository list */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WorkspaceReposResponse"];
+        };
+      };
+      /** @description Workspace ID is required */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Workspace not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  addWorkspaceRepos: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WorkspaceAddReposRequest"];
+      };
+    };
+    responses: {
+      /** @description Repositories attached; updated workspace topology */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WorkspaceResponse"];
+        };
+      };
+      /** @description Workspace ID is required, or invalid request body */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Workspace not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Request body too large */
+      413: {
         headers: {
           [name: string]: unknown;
         };

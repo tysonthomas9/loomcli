@@ -3055,6 +3055,18 @@ type WorkerStateRequest struct {
 	TaskTitle *string `json:"task_title,omitempty"`
 }
 
+// WorkspaceAddReposRequest At least one of `repos` or `clone_urls` must be non-empty.
+type WorkspaceAddReposRequest struct {
+	// Branch Branch to check out for cloned repositories.
+	Branch *string `json:"branch,omitempty"`
+
+	// CloneUrls Remote git URLs to clone into the workspace.
+	CloneUrls *[]string `json:"clone_urls,omitempty"`
+
+	// Repos Absolute paths of existing local repositories to attach.
+	Repos *[]string `json:"repos,omitempty"`
+}
+
 // WorkspaceAgentInfo defines model for WorkspaceAgentInfo.
 type WorkspaceAgentInfo struct {
 	CrossRepo  bool     `json:"cross_repo"`
@@ -3090,6 +3102,12 @@ type WorkspaceRepo struct {
 	Remote        string   `json:"remote"`
 	RemoteUrl     *string  `json:"remote_url,omitempty"`
 	SourceRepoId  *string  `json:"source_repo_id,omitempty"`
+}
+
+// WorkspaceReposResponse defines model for WorkspaceReposResponse.
+type WorkspaceReposResponse struct {
+	Repos   []WorkspaceRepo `json:"repos"`
+	Success bool            `json:"success"`
 }
 
 // WorkspaceResponse defines model for WorkspaceResponse.
@@ -3705,6 +3723,9 @@ type PostPullRequestReviewerMessageJSONRequestBody = ReviewerMessageRequest
 
 // PostPullRequestReviewJSONRequestBody defines body for PostPullRequestReview for application/json ContentType.
 type PostPullRequestReviewJSONRequestBody = PullRequestReviewRequest
+
+// AddWorkspaceReposJSONRequestBody defines body for AddWorkspaceRepos for application/json ContentType.
+type AddWorkspaceReposJSONRequestBody = WorkspaceAddReposRequest
 
 // SeedTerminalSessionJSONRequestBody defines body for SeedTerminalSession for application/json ContentType.
 type SeedTerminalSessionJSONRequestBody = SeedRequest
