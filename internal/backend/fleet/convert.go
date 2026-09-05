@@ -543,6 +543,25 @@ func actionToMutationType(action, entityType string) string {
 	return backend.MutationUpdate
 }
 
+// issueScopedEntityTypes lists the fleet-db entity types whose event
+// entity_id is, by fleet-db's own contract, an ISSUE id rather than the id of
+// the named sub-entity. See fleet-db internal/service/issue_service.go: the
+// comment/dep/label/metadata command paths all set EntityID = cmd.IssueID and
+// carry the sub-entity id (e.g. comment_id) in Metadata instead.
+//
+// Workspace-level entities (workspace, repo, agent, driver_run, role,
+// daemon_profile) are deliberately absent: their entity_id is not
+// an issue, and copying it into the legacy issue_id field would make
+// issue-scoped consumers match on a foreign id. A new fleet-db entity type
+// therefore fails closed, and needs one line added here if it is issue-scoped.
+var issueScopedEntityTypes = map[string]bool{
+	"issue":      true,
+	"comment":    true,
+	"dependency": true,
+	"label":      true,
+	"metadata":   true,
+}
+
 // fleetEventToMutationData converts a single fleet mutation event into
 // backend.MutationData. Title/status/parent fields come from the event's
 // after-snapshot JSON when present; fields absent from fleet's event model
@@ -557,7 +576,12 @@ func fleetEventToMutationData(e *fleetMutationEvent) backend.MutationData {
 		Actor:      e.Actor,
 		Timestamp:  e.Timestamp,
 	}
-	if e.EntityType == "issue" || (e.EntityType == "" && strings.HasPrefix(e.Action, "issue.")) {
+	// Legacy issue_id: fleet-db's issue-scoped events (issue.*, comment.add,
+	// dep.*, label.*, metadata.*) all carry the issue id in entity_id, so the
+	// legacy field is a straight copy for those. The empty-entity_type arm
+	// covers older producers that emitted only an action.
+	if issueScopedEntityTypes[e.EntityType] ||
+		(e.EntityType == "" && strings.HasPrefix(e.Action, "issue.")) {
 		md.IssueID = e.EntityID
 	}
 	// Best-effort extraction from before/after snapshots. Errors are ignored —
