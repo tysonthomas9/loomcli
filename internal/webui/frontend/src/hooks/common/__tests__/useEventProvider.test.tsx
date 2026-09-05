@@ -80,6 +80,12 @@ class MockEventSource {
     this.onopen?.();
   }
 
+  simulateConnected(): void {
+    const listeners = this.eventListeners.get("connected") ?? [];
+    const event = {} as MessageEvent;
+    for (const listener of listeners) listener(event);
+  }
+
   simulateError(readyState: number = MockEventSource.CONNECTING): void {
     this.readyState = readyState;
     this.onerror?.();
@@ -207,6 +213,23 @@ describe("useEventProvider", () => {
 
       expect(result.current.state).toBe("connected");
       expect(result.current.isConnected).toBe(true);
+      expect(result.current.connectionEpoch).toBe(0);
+    });
+
+    it("increments connectionEpoch after each completed handshake", async () => {
+      const { result } = renderHook(() => useEventContext(), { wrapper });
+      await flushConnect();
+
+      act(() => {
+        MockEventSource.lastInstance?.simulateOpen();
+        MockEventSource.lastInstance?.simulateConnected();
+      });
+      expect(result.current.connectionEpoch).toBe(1);
+
+      act(() => {
+        MockEventSource.lastInstance?.simulateConnected();
+      });
+      expect(result.current.connectionEpoch).toBe(2);
     });
 
     it("exposes reconnectAttempts", async () => {
@@ -734,6 +757,7 @@ describe("useEventProvider", () => {
       expect(result.current.reconnectAttempts).toBe(0);
       expect(result.current.lastError).toBeNull();
       expect(result.current.isConnected).toBe(false);
+      expect(result.current.connectionEpoch).toBe(0);
       expect(typeof result.current.subscribe).toBe("function");
       expect(typeof result.current.retryNow).toBe("function");
       expect(typeof result.current.disconnect).toBe("function");

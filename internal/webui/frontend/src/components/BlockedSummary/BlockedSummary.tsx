@@ -48,13 +48,7 @@ export function BlockedSummary({
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const {
-    data: blockedIssues,
-    loading,
-    error,
-  } = useBlockedIssues({
-    pollInterval: 30000, // Poll every 30 seconds
-  });
+  const { data: blockedIssues, loading, error } = useBlockedIssues();
 
   const blockedCount = blockedIssues?.length ?? 0;
   const hasBlocked = blockedCount > 0;
