@@ -626,6 +626,7 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 	// write nothing.
 	s.recordTimeoutRun(ap, exitCode, timeoutSessionID)
 	s.postMortemRecovery(ap, exitCode)
+	s.reportSharedWorktreeState(ap)
 	// Sweep AFTER recovery reset the task to open, so the quarantine write
 	// transitions open→blocked.
 	s.sweepQuarantineDue(ap)
