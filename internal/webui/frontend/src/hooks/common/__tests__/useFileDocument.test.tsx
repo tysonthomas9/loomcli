@@ -1,5 +1,10 @@
 /** @vitest-environment jsdom */
 
+import {
+  QueryRecoveryContext,
+  QueryRecoveryCoordinator,
+} from "../queryRecovery";
+
 import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -671,6 +676,183 @@ describe("FileDocumentRegistry coordination", () => {
       "lib",
     );
     expect(registry.get(moved)).toMatchObject({ content: "", dirty: false });
+    registry.dispose();
+  });
+});
+
+describe("document recovery", () => {
+  it("preserves dirty draft and base while recording external content", async () => {
+    const read = vi
+      .fn()
+      .mockResolvedValueOnce(file("base", "v1"))
+      .mockResolvedValueOnce(file("external", "v2"));
+    const { registry } = setup({ read });
+    await registry.refresh(workspaceRef);
+    registry.edit(workspaceRef, "draft");
+    const before = registry.get(workspaceRef);
+    await registry.refreshForRecovery(
+      workspaceRef,
+      new AbortController().signal,
+    );
+    expect(registry.get(workspaceRef)).toMatchObject({
+      content: "draft",
+      baseContent: "base",
+      baseVersion: "v1",
+      draftRevision: before.draftRevision,
+      dirty: true,
+      externalConflict: { content: "external", version: "v2" },
+    });
+    registry.dispose();
+  });
+  it("preserves edits during recovery and ordinary refresh joins", async () => {
+    const pending = deferred<FileReadData>();
+    const read = vi
+      .fn()
+      .mockResolvedValueOnce(file("base", "v1"))
+      .mockReturnValueOnce(pending.promise);
+    const { registry } = setup({ read });
+    await registry.refresh(workspaceRef);
+    const recovery = registry.refreshForRecovery(
+      workspaceRef,
+      new AbortController().signal,
+    );
+    await Promise.resolve();
+    registry.edit(workspaceRef, "typed");
+    const ordinary = registry.refresh(workspaceRef);
+    pending.resolve(file("external", "v2"));
+    await Promise.all([ordinary, recovery]);
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(registry.get(workspaceRef)).toMatchObject({
+      content: "typed",
+      baseVersion: "v1",
+      dirty: true,
+      externalConflict: { version: "v2" },
+    });
+    registry.dispose();
+  });
+  it("rejects recovery during save without canceling write", async () => {
+    const pending = deferred<FileMutationData>();
+    const write = vi.fn().mockReturnValue(pending.promise);
+    const { registry } = setup({ write });
+    await registry.refresh(workspaceRef);
+    registry.edit(workspaceRef, "draft");
+    const saving = registry.save(workspaceRef);
+    await expect(
+      registry.refreshForRecovery(workspaceRef, new AbortController().signal),
+    ).rejects.toThrow("save in progress");
+    expect(write.mock.calls[0][2].aborted).toBe(false);
+    pending.resolve({ success: true, version: "v2" });
+    await saving;
+    expect(registry.get(workspaceRef)).toMatchObject({
+      baseVersion: "v2",
+      dirty: false,
+    });
+    registry.dispose();
+  });
+  it("rejects failure and abort even when transport ignores signal", async () => {
+    const pending = deferred<FileReadData>();
+    const read = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("unavailable"))
+      .mockReturnValueOnce(pending.promise);
+    const { registry } = setup({ read });
+    await expect(
+      registry.refreshForRecovery(workspaceRef, new AbortController().signal),
+    ).rejects.toThrow("unavailable");
+    const controller = new AbortController();
+    const recovery = registry.refreshForRecovery(
+      workspaceRef,
+      controller.signal,
+    );
+    const rejected = expect(recovery).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    await Promise.resolve();
+    controller.abort();
+    await rejected;
+    pending.resolve(file("late", "v9"));
+    await Promise.resolve();
+    expect(registry.get(workspaceRef).baseVersion).toBeNull();
+    registry.dispose();
+  });
+  it("fences reset and reused document keys", async () => {
+    const old = deferred<FileReadData>();
+    const read = vi
+      .fn()
+      .mockReturnValueOnce(old.promise)
+      .mockResolvedValue(file("new", "v2"));
+    const { registry } = setup({ read });
+    const recovery = registry.refreshForRecovery(
+      workspaceRef,
+      new AbortController().signal,
+    );
+    const rejected = expect(recovery).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    await Promise.resolve();
+    registry.reset(workspaceRef);
+    await registry.refreshForRecovery(
+      workspaceRef,
+      new AbortController().signal,
+    );
+    await rejected;
+    old.resolve(file("old", "v1"));
+    await Promise.resolve();
+    expect(registry.get(workspaceRef).content).toBe("new");
+    registry.dispose();
+  });
+  it("supersedes pre-recovery reads and rejects synchronous invalidation at commit", async () => {
+    const old = deferred<FileReadData>();
+    const read = vi
+      .fn()
+      .mockReturnValueOnce(old.promise)
+      .mockResolvedValue(file("fresh", "v2"));
+    const { registry } = setup({ read });
+    const ordinary = registry.refresh(workspaceRef);
+    await registry.refreshForRecovery(
+      workspaceRef,
+      new AbortController().signal,
+    );
+    old.resolve(file("stale", "v1"));
+    await ordinary;
+    expect(registry.get(workspaceRef).content).toBe("fresh");
+    let reset = false;
+    const unsubscribe = registry.subscribe(workspaceRef, () => {
+      if (!reset && !registry.get(workspaceRef).isLoading) {
+        reset = true;
+        registry.reset(workspaceRef);
+      }
+    });
+    await expect(
+      registry.refreshForRecovery(workspaceRef, new AbortController().signal),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    unsubscribe();
+    registry.dispose();
+  });
+  it("deduplicates mounted documents and excludes retained closed drafts", async () => {
+    const read = vi.fn().mockResolvedValue(file("server", "v1"));
+    const { registry } = setup({ read });
+    const coordinator = new QueryRecoveryCoordinator("ws-1");
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryRecoveryContext.Provider value={coordinator}>
+        <FileDocumentRegistryProvider registry={registry}>
+          {children}
+        </FileDocumentRegistryProvider>
+      </QueryRecoveryContext.Provider>
+    );
+    const useDocument = () =>
+      useFileDocument("ws-1", workspaceRef.ref, workspaceRef.path);
+    const first = renderHook(useDocument, { wrapper }),
+      second = renderHook(useDocument, { wrapper });
+    await act(async () => coordinator.refresh());
+    expect(read).toHaveBeenCalledTimes(1);
+    act(() => first.result.current.edit("retained"));
+    first.unmount();
+    second.unmount();
+    read.mockClear();
+    await act(async () => coordinator.refresh());
+    expect(read).not.toHaveBeenCalled();
+    expect(registry.get(workspaceRef).content).toBe("retained");
     registry.dispose();
   });
 });

@@ -62,7 +62,7 @@ describe("files API", () => {
     });
 
     it("lists repo scope with target and path", async () => {
-      mockGet.mockResolvedValue({ path: "src", entries: [] });
+      mockGet.mockResolvedValue({ path: "src/my dir", entries: [] });
 
       await listScopedDir(
         "test-ws-id",
@@ -81,6 +81,8 @@ describe("files API", () => {
         content: "package main\n",
         size: 13,
         binary: false,
+        truncated: false,
+        version: "opaque",
       });
 
       await readScopedFile(

@@ -2,10 +2,13 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useSyncExternalStore,
   type ReactNode,
 } from "react";
+
+import { QueryRecoveryContext } from "./queryRecovery";
 
 import { readScopedFile, writeScopedFile } from "@/api/workspace";
 import {
@@ -81,6 +84,7 @@ export function useFileDocument(
   path: string,
 ): UseFileDocumentReturn {
   const registry = useContext(FileDocumentRegistryContext);
+  const recovery = useContext(QueryRecoveryContext);
   const kind = explorerRef.kind;
   const checkout = kind === "checkout" ? explorerRef.checkout : null;
   const group = kind === "skills" ? explorerRef.group : null;
@@ -115,6 +119,10 @@ export function useFileDocument(
   );
   const getSnapshot = useCallback(() => registry.get(ref), [ref, registry]);
   const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  useEffect(() => {
+    if (!workspaceId || !path || !recovery) return;
+    return registry.enrollRecovery(ref, recovery);
+  }, [registry, ref, workspaceId, path, recovery]);
 
   return useMemo(
     () => ({
