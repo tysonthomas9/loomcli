@@ -240,6 +240,20 @@ export class WorkspaceSSEClient {
   }
 
   /**
+   * Replace the saved source-repository filter and reconnect from the cursor
+   * already held by this client. Unlike `connect(undefined, undefined)`, which
+   * retains the saved filter, `updateSourceRepos(undefined)` explicitly clears
+   * it and reconnects without source-repository scoping.
+   */
+  updateSourceRepos(sourceRepos: string[] | undefined): void {
+    if (this.destroyed) return;
+
+    this.currentSourceRepos = sourceRepos;
+    this.disconnect();
+    void this.connect();
+  }
+
+  /**
    * Disconnect from the SSE endpoint.
    */
   disconnect(): void {
