@@ -48,4 +48,8 @@ var (
 	// lease_expired). Distinct from ErrNotFound (never existed here) and
 	// ErrConflict (someone else holds it): re-acquire is safe.
 	ErrGone = errors.New("domain: gone")
+
+	// ErrIntegrity indicates stored data no longer matches its immutable
+	// identity metadata. Retrying the same read cannot make corrupt bytes safe.
+	ErrIntegrity = errors.New("domain: integrity failure")
 )
