@@ -1698,6 +1698,13 @@ type Comment struct {
 	Text      string    `json:"text"`
 }
 
+// CommentListResponse defines model for CommentListResponse.
+type CommentListResponse struct {
+	Data    []Comment `json:"data"`
+	Error   *string   `json:"error,omitempty"`
+	Success bool      `json:"success"`
+}
+
 // CommentRequest defines model for CommentRequest.
 type CommentRequest struct {
 	Text string `json:"text"`
@@ -2099,6 +2106,22 @@ type IssueIssueType string
 // IssueStatus User-facing statuses. Internal statuses (tombstone, pinned, hooked)
 // are not settable via the API and excluded from this enum.
 type IssueStatus string
+
+// IssueDependencyEntry One dependency relation as emitted by the dependency list endpoint and
+// embedded in the issue detail payload. `id` is the id of the OTHER
+// issue in the relation.
+type IssueDependencyEntry struct {
+	CreatedAt time.Time `json:"created_at"`
+	CreatedBy *string   `json:"created_by,omitempty"`
+
+	// DependencyType Relation type (e.g. "blocks").
+	DependencyType string  `json:"dependency_type"`
+	Id             string  `json:"id"`
+	IssueType      *string `json:"issue_type,omitempty"`
+	Priority       int     `json:"priority"`
+	Status         string  `json:"status"`
+	Title          string  `json:"title"`
+}
 
 // IssueEvent Audit trail entry for an issue
 type IssueEvent struct {
@@ -2653,6 +2676,18 @@ type PullRequestReviewRequestEvent string
 type PullRequestReviewResult struct {
 	ReviewId *int    `json:"review_id,omitempty"`
 	State    *string `json:"state,omitempty"`
+}
+
+// ReopenRequest Optional body for the reopen endpoint. An empty body is valid.
+type ReopenRequest struct {
+	// Reason Free-text reason recorded on the reopen event.
+	Reason *string `json:"reason,omitempty"`
+}
+
+// ReopenResponse defines model for ReopenResponse.
+type ReopenResponse struct {
+	Error   *string `json:"error,omitempty"`
+	Success bool    `json:"success"`
 }
 
 // ReviewerConversation defines model for ReviewerConversation.
@@ -3522,6 +3557,16 @@ type GetGraphParams struct {
 // GetGraphParamsStatus defines parameters for GetGraph.
 type GetGraphParamsStatus string
 
+// SearchIssuesParams defines parameters for SearchIssues.
+type SearchIssuesParams struct {
+	// Q Search query. A missing or empty value is rejected with `MISSING_QUERY`.
+	Q string `form:"q" json:"q"`
+
+	// Limit Result cap. Invalid or non-positive values fall back to the default
+	// of 100; values above 500 are clamped down to 500.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // GetIssueEventsParams defines parameters for GetIssueEvents.
 type GetIssueEventsParams struct {
 	// Limit Maximum events to return. Without `since`, Loom returns the most recent tail and accepts up to 500. With `since`, Loom returns one oldest-first page and clamps the limit to fleet-db's 200-event page maximum.
@@ -3708,6 +3753,9 @@ type AddDependencyJSONRequestBody = AddDependencyRequest
 
 // MoveIssueJSONRequestBody defines body for MoveIssue for application/json ContentType.
 type MoveIssueJSONRequestBody = MoveIssueRequest
+
+// ReopenIssueJSONRequestBody defines body for ReopenIssue for application/json ContentType.
+type ReopenIssueJSONRequestBody = ReopenRequest
 
 // SaveIssueTabsJSONRequestBody defines body for SaveIssueTabs for application/json ContentType.
 type SaveIssueTabsJSONRequestBody SaveIssueTabsJSONBody

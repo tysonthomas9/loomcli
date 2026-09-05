@@ -359,6 +359,27 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/issues/search": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Full-text search across issues
+     * @description Full-text search delegated to the issue backend. Returns the same
+     *     `{success, data: [...]}` envelope as `listIssues`.
+     */
+    get: operations["searchIssues"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/issues/{id}": {
     parameters: {
       query?: never;
@@ -389,6 +410,27 @@ export interface paths {
     put?: never;
     /** Close an issue with optional reason */
     post: operations["closeIssue"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/issues/{id}/reopen": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Reopen a closed issue
+     * @description Transitions a closed issue back to open status. The request body is
+     *     optional — an empty body or `{}` is valid.
+     */
+    post: operations["reopenIssue"];
     delete?: never;
     options?: never;
     head?: never;
@@ -500,7 +542,12 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    get?: never;
+    /**
+     * List the comments on an issue
+     * @description Always returns a list shape: an issue with no comments yields
+     *     `{success: true, data: []}`, never `null`.
+     */
+    get: operations["listComments"];
     put?: never;
     /** Add a comment to an issue */
     post: operations["addComment"];
@@ -517,7 +564,12 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    get?: never;
+    /**
+     * List the dependencies of an issue
+     * @description Returns the same wire shape embedded in the issue detail payload:
+     *     one slim entry per dependency relation.
+     */
+    get: operations["listDependencies"];
     put?: never;
     /** Add a dependency to an issue */
     post: operations["addDependency"];
@@ -2971,6 +3023,37 @@ export interface components {
         | "dead"
         | null;
     };
+    /** @description Optional body for the reopen endpoint. An empty body is valid. */
+    ReopenRequest: {
+      /** @description Free-text reason recorded on the reopen event. */
+      reason?: string;
+    };
+    ReopenResponse: {
+      success: boolean;
+      error?: string;
+    };
+    CommentListResponse: {
+      success: boolean;
+      data: components["schemas"]["Comment"][];
+      error?: string;
+    };
+    /**
+     * @description One dependency relation as emitted by the dependency list endpoint and
+     *     embedded in the issue detail payload. `id` is the id of the OTHER
+     *     issue in the relation.
+     */
+    IssueDependencyEntry: {
+      id: string;
+      title: string;
+      status: string;
+      priority: number;
+      /** Format: date-time */
+      created_at: string;
+      /** @description Relation type (e.g. "blocks"). */
+      dependency_type: string;
+      issue_type?: string;
+      created_by?: string;
+    };
     CloseRequest: {
       reason?: string;
       session?: string;
@@ -4507,6 +4590,49 @@ export interface operations {
       };
     };
   };
+  searchIssues: {
+    parameters: {
+      query: {
+        /** @description Search query. A missing or empty value is rejected with `MISSING_QUERY`. */
+        q: string;
+        /**
+         * @description Result cap. Invalid or non-positive values fall back to the default
+         *     of 100; values above 500 are clamped down to 500.
+         */
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Matching issues */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data: components["schemas"]["Issue"][];
+          };
+        };
+      };
+      /** @description Missing search query */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
   getIssue: {
     parameters: {
       query?: never;
@@ -4660,6 +4786,60 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+    };
+  };
+  reopenIssue: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Issue identifier */
+        id: components["parameters"]["IssueId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ReopenRequest"];
+      };
+    };
+    responses: {
+      /** @description Issue reopened */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ReopenResponse"];
+        };
+      };
+      /** @description Missing issue ID, or invalid request body */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ReopenResponse"];
+        };
+      };
+      /** @description Issue not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Request body too large (max 1MB) */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ReopenResponse"];
+        };
       };
     };
   };
@@ -4885,6 +5065,47 @@ export interface operations {
       };
     };
   };
+  listComments: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Issue identifier */
+        id: components["parameters"]["IssueId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Comment list */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CommentListResponse"];
+        };
+      };
+      /** @description Missing issue ID */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CommentListResponse"];
+        };
+      };
+      /** @description Issue not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
   addComment: {
     parameters: {
       query?: never;
@@ -4921,6 +5142,53 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Issue not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  listDependencies: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Issue identifier */
+        id: components["parameters"]["IssueId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Dependency list */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data: components["schemas"]["IssueDependencyEntry"][];
+          };
+        };
+      };
+      /** @description Missing issue ID */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            error?: string;
+          };
+        };
       };
       /** @description Issue not found */
       404: {

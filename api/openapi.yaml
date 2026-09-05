@@ -728,6 +728,54 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/workspaces/{ws}/issues/search:
+    get:
+      operationId: searchIssues
+      tags: [issues]
+      summary: Full-text search across issues
+      description: |
+        Full-text search delegated to the issue backend. Returns the same
+        `{success, data: [...]}` envelope as `listIssues`.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: q
+          in: query
+          required: true
+          description: Search query. A missing or empty value is rejected with `MISSING_QUERY`.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: |
+            Result cap. Invalid or non-positive values fall back to the default
+            of 100; values above 500 are clamped down to 500.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        "200":
+          description: Matching issues
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Issue"
+        "400":
+          description: Missing search query
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/workspaces/{ws}/issues/{id}:
     get:
       operationId: getIssue
@@ -834,6 +882,45 @@ paths:
                     type: object
         "404":
           description: Issue not found
+
+  /api/workspaces/{ws}/issues/{id}/reopen:
+    post:
+      operationId: reopenIssue
+      tags: [issues]
+      summary: Reopen a closed issue
+      description: |
+        Transitions a closed issue back to open status. The request body is
+        optional — an empty body or `{}` is valid.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/IssueId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReopenRequest"
+      responses:
+        "200":
+          description: Issue reopened
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReopenResponse"
+        "400":
+          description: Missing issue ID, or invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReopenResponse"
+        "404":
+          description: Issue not found
+        "413":
+          description: Request body too large (max 1MB)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReopenResponse"
 
   /api/workspaces/{ws}/issues/{id}/claim:
     post:
@@ -1015,6 +1102,31 @@ paths:
 
   # ── Comments ────────────────────────────────────────────────────────────
   /api/workspaces/{ws}/issues/{id}/comments:
+    get:
+      operationId: listComments
+      tags: [comments]
+      summary: List the comments on an issue
+      description: |
+        Always returns a list shape: an issue with no comments yields
+        `{success: true, data: []}`, never `null`.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/IssueId"
+      responses:
+        "200":
+          description: Comment list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommentListResponse"
+        "400":
+          description: Missing issue ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommentListResponse"
+        "404":
+          description: Issue not found
     post:
       operationId: addComment
       tags: [comments]
@@ -1048,6 +1160,45 @@ paths:
 
   # ── Dependencies ────────────────────────────────────────────────────────
   /api/workspaces/{ws}/issues/{id}/dependencies:
+    get:
+      operationId: listDependencies
+      tags: [dependencies]
+      summary: List the dependencies of an issue
+      description: |
+        Returns the same wire shape embedded in the issue detail payload:
+        one slim entry per dependency relation.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/IssueId"
+      responses:
+        "200":
+          description: Dependency list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/IssueDependencyEntry"
+        "400":
+          description: Missing issue ID
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  error:
+                    type: string
+        "404":
+          description: Issue not found
     post:
       operationId: addDependency
       tags: [dependencies]
@@ -5669,6 +5820,63 @@ components:
         agent_state:
           type: [string, "null"]
           enum: [idle, spawning, running, working, stuck, done, stopped, dead, null]
+
+    ReopenRequest:
+      type: object
+      description: Optional body for the reopen endpoint. An empty body is valid.
+      properties:
+        reason:
+          type: string
+          description: Free-text reason recorded on the reopen event.
+
+    ReopenResponse:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+        error:
+          type: string
+
+    CommentListResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Comment"
+        error:
+          type: string
+
+    IssueDependencyEntry:
+      type: object
+      description: |
+        One dependency relation as emitted by the dependency list endpoint and
+        embedded in the issue detail payload. `id` is the id of the OTHER
+        issue in the relation.
+      required: [id, title, status, priority, created_at, dependency_type]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        status:
+          type: string
+        priority:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        dependency_type:
+          type: string
+          description: Relation type (e.g. "blocks").
+        issue_type:
+          type: string
+        created_by:
+          type: string
 
     CloseRequest:
       type: object
