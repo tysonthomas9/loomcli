@@ -1,5 +1,9 @@
 # Session query recovery and read failures
 
+Bounded recent activity is covered by the subsequent
+[activity recovery proof](sse-activity-recovery-proof.md). The scope below
+describes the session milestone.
+
 The recovery coordinator now enrolls enabled task sessions, workspace session
 count and issue-to-session mapping. Their shared scoped request owner starts a
 fresh request for recovery and rejects failure, cancellation or supersession.

@@ -456,7 +456,29 @@ func TestHandleGetIssueEvents_EmptyList(t *testing.T) {
 		t.Errorf("expected success=true, got false")
 	}
 
-	if len(resp.Data) != 0 {
-		t.Errorf("expected 0 events, got %d", len(resp.Data))
+	if resp.Data == nil || len(resp.Data) != 0 {
+		t.Errorf("expected canonical empty events array, got %#v", resp.Data)
+	}
+}
+
+func TestHandleGetIssueEvents_NilListEncodesEmptyArray(t *testing.T) {
+	svc := &mockIssueService{
+		listEventsFunc: func(context.Context, service.EventListParams) ([]*types.Event, error) {
+			return nil, nil
+		},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/issues/test-123/events", nil)
+	req.SetPathValue("id", "test-123")
+	response := httptest.NewRecorder()
+	handleGetIssueEvents(svc).ServeHTTP(response, req)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
+	}
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if string(body["data"]) != "[]" {
+		t.Fatalf("expected data: [], got %s", response.Body.String())
 	}
 }
