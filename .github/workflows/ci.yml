@@ -53,47 +53,45 @@ jobs:
       - name: Checkout LoomCLI
         uses: actions/checkout@v4
 
-      # FleetDB is a private repo in another org, so this job can only run
-      # where a read token is configured. Without one it reports that it could
-      # not check rather than passing silently, because a drift job that
-      # quietly does nothing is worse than no job at all.
-      - name: Check for FleetDB read token
-        id: token
+      - name: Require FleetDB read access
         env:
           FLEET_DB_REPO_TOKEN: ${{ secrets.FLEET_DB_REPO_TOKEN }}
-        run: |
-          if [ -n "$FLEET_DB_REPO_TOKEN" ]; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "::warning title=FleetDB action contract not checked::FLEET_DB_REPO_TOKEN is not configured, so drift against FleetDB main was not verified. The committed contract and its parity test still run in the Go quality gate."
-            echo "### FleetDB action contract: NOT CHECKED" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "\`FLEET_DB_REPO_TOKEN\` is not configured on this repository, so a new action added upstream would not fail this build. Add a read-scoped token for \`BrowserOperator/fleet-db\` to enable it." >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      # Float with FleetDB main so a new canonical action fails Loom CI until
-      # the generated contract is regenerated.
-      - name: Checkout FleetDB main
-        if: steps.token.outputs.available == 'true'
-        uses: actions/checkout@v4
-        with:
-          repository: BrowserOperator/fleet-db
-          ref: main
-          path: fleet-db
-          token: ${{ secrets.FLEET_DB_REPO_TOKEN }}
+        run: bash scripts/check-fleet-contract-access.sh
 
       - name: Set up Go
-        if: steps.token.outputs.available == 'true'
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
 
-      - name: Check FleetDB action contract drift
-        if: steps.token.outputs.available == 'true'
+      - name: Validate producer manifest
+        id: producer
         run: |
-          go generate ./internal/backend/fleet/...
-          git diff --exit-code
+          revision=$(go run ./internal/backend/fleet/internal/gen -print-producer-revision)
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout pinned FleetDB producer
+        uses: actions/checkout@v4
+        with:
+          repository: BrowserOperator/fleet-db
+          ref: ${{ steps.producer.outputs.revision }}
+          path: fleet-db-pinned
+          token: ${{ secrets.FLEET_DB_REPO_TOKEN }}
+          persist-credentials: false
+
+      - name: Verify pinned producer contract
+        run: go run ./internal/backend/fleet/internal/gen -fleet-db ./fleet-db-pinned -check
+
+      - name: Checkout FleetDB main for drift comparison
+        uses: actions/checkout@v4
+        with:
+          repository: BrowserOperator/fleet-db
+          ref: main
+          path: fleet-db-main
+          token: ${{ secrets.FLEET_DB_REPO_TOKEN }}
+          persist-credentials: false
+
+      - name: Compare upstream semantic contract
+        run: go run ./internal/backend/fleet/internal/gen -fleet-db ./fleet-db-main -check-upstream
 
   # Frontend-only quality gate — installs Node toolchain only, no Go.
   frontend-quality-gate:

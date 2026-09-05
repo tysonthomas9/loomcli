@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "repository": "BrowserOperator/fleet-db",
+  "revision": "b6f958bc68c04e70e25eeb6bccb84da743800e2f",
+  "source": "internal/models/event.go",
+  "contract_sha256": "baa4358363b8eb8c6697bda74f71981628a35579538a8a027e13611b5aca2dd0"
+}
