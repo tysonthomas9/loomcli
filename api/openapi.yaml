@@ -563,9 +563,15 @@ paths:
             type: string
         - name: limit
           in: query
+          description: |
+            Maximum number of issues to return. Values above the maximum are
+            clamped to it, not rejected: a request for 1000 returns at most
+            200 rows with HTTP 200. The response body does not currently
+            distinguish a clamped page from an exhaustive one.
           schema:
             type: integer
-            maximum: 1000
+            minimum: 0
+            maximum: 200
         - name: title_contains
           in: query
           schema:
@@ -1173,9 +1179,15 @@ paths:
             maximum: 4
         - name: limit
           in: query
+          description: |
+            Maximum number of blocked issues to return. Values above the
+            maximum are clamped to it, not rejected: a request for 1000
+            returns at most 200 rows with HTTP 200. The response body does
+            not currently distinguish a clamped page from an exhaustive one.
           schema:
             type: integer
-            maximum: 1000
+            minimum: 0
+            maximum: 200
       responses:
         "200":
           description: Blocked issues

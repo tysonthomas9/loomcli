@@ -26,12 +26,13 @@ func parseListParams(r *http.Request) (*rpc.ListArgs, error) { //nolint:funlen
 	args.Labels = handler.ParseArrayParam(q, "labels")
 	args.SourceRepos = handler.ParseArrayParam(q, "source_repos")
 
-	// Limit (capped at MaxListLimit to prevent DoS, silently ignore invalid)
+	// Limit (capped at MaxIssueListLimit to prevent DoS and to match the
+	// ceiling the FleetDB backend enforces, silently ignore invalid)
 	limitPtr, _ := handler.ParseIntParam(q, "limit")
 	if limitPtr != nil && *limitPtr > 0 {
 		limit := *limitPtr
-		if limit > handler.MaxListLimit {
-			limit = handler.MaxListLimit
+		if limit > handler.MaxIssueListLimit {
+			limit = handler.MaxIssueListLimit
 		}
 		args.Limit = limit
 	}

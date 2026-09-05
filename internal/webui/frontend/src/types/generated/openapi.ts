@@ -4290,6 +4290,12 @@ export interface operations {
         labels?: string;
         /** @description Comma-separated source repo filters */
         source_repos?: string;
+        /**
+         * @description Maximum number of issues to return. Values above the maximum are
+         *     clamped to it, not rejected: a request for 1000 returns at most
+         *     200 rows with HTTP 200. The response body does not currently
+         *     distinguish a clamped page from an exhaustive one.
+         */
         limit?: number;
         title_contains?: string;
         description_contains?: string;
@@ -4942,6 +4948,12 @@ export interface operations {
         assignee?: string;
         type?: "bug" | "feature" | "task" | "epic" | "chore";
         priority?: number;
+        /**
+         * @description Maximum number of blocked issues to return. Values above the
+         *     maximum are clamped to it, not rejected: a request for 1000
+         *     returns at most 200 rows with HTTP 200. The response body does
+         *     not currently distinguish a clamped page from an exhaustive one.
+         */
         limit?: number;
       };
       header?: never;
