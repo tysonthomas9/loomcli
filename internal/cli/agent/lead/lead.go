@@ -92,6 +92,9 @@ func leadStartupPrompt(ctx context.Context, registration leadSessionRegistration
 //nolint:funlen // The lead startup sequence stays in launch order.
 func runLead(cmd *cobra.Command, args []string) {
 	enforceLeadProfile()
+	// Non-fatal, and it belongs here: the profile's config root is only
+	// settled once enforceLeadProfile has injected or verified it.
+	warnClaudeTranscriptCleanup(os.Stderr)
 
 	// Get current working directory
 	workDir, err := os.Getwd()
