@@ -330,41 +330,60 @@ func (e *LockedError) Error() string {
 
 // GetGitStatusSummary returns comprehensive git status for a worktree.
 func GetGitStatusSummary(worktreePath, targetBranch string) (*GitStatusSummary, error) {
-	branch, err := cli.GetCurrentBranch(worktreePath)
+	return readGitStatusSummary(worktreePath, targetBranch, cli.RunGitCommand)
+}
+
+type statusReadRunner func(string, ...string) (string, error)
+
+func readGitStatusSummary(dir, target string, run statusReadRunner) (*GitStatusSummary, error) {
+	if target == "" {
+		return nil, fmt.Errorf("git status comparison target is required")
+	}
+	branch, err := run(dir, "branch", "--show-current")
 	if err != nil {
+		return nil, fmt.Errorf("reading branch: %w", err)
+	}
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
 		branch = "(detached)"
 	}
-
-	clean, err := IsCleanWorkingTree(worktreePath)
+	porcelain, err := run(dir, "status", "--porcelain")
 	if err != nil {
-		return nil, fmt.Errorf("checking working tree: %v", err)
+		return nil, fmt.Errorf("reading changed files: %w", err)
 	}
-
-	conflicted, _ := GetConflictedFiles(worktreePath)
-	if conflicted == nil {
-		conflicted = []string{}
+	conflicts, err := run(dir, "diff", "--name-only", "--diff-filter=U")
+	if err != nil {
+		return nil, fmt.Errorf("reading conflicted files: %w", err)
 	}
-
-	changed, _ := getChangedFiles(worktreePath)
-	if changed == nil {
-		changed = []string{}
+	counts, err := run(dir, "rev-list", "--left-right", "--count", "HEAD...refs/remotes/origin/"+target)
+	if err != nil {
+		return nil, fmt.Errorf("reading ahead/behind comparison: %w", err)
 	}
-
-	ahead, behind := getAheadBehind(worktreePath, branch, targetBranch)
-
-	stashCount, _ := getStashCount(worktreePath)
-
+	ahead, behind, err := parseAheadBehind(counts)
+	if err != nil {
+		return nil, err
+	}
+	stashes, err := run(dir, "stash", "list")
+	if err != nil {
+		return nil, fmt.Errorf("reading stash count: %w", err)
+	}
+	conflicted := statusLines(conflicts)
 	return &GitStatusSummary{
-		Branch:          branch,
-		TargetBranch:    targetBranch,
-		IsClean:         clean,
-		Ahead:           ahead,
-		Behind:          behind,
-		ChangedFiles:    changed,
-		ConflictedFiles: conflicted,
-		HasConflicts:    len(conflicted) > 0,
-		StashCount:      stashCount,
+		Branch: branch, TargetBranch: target,
+		IsClean: strings.TrimSpace(porcelain) == "",
+		Ahead:   ahead, Behind: behind,
+		ChangedFiles:    changedFilesFromPorcelain(porcelain),
+		ConflictedFiles: conflicted, HasConflicts: len(conflicted) > 0,
+		StashCount: len(statusLines(stashes)),
 	}, nil
+}
+
+func statusLines(output string) []string {
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		return []string{}
+	}
+	return strings.Split(trimmed, "\n")
 }
 
 // CheckGhInstalled checks if the gh CLI is available.
@@ -378,9 +397,13 @@ func getChangedFiles(dir string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	return changedFilesFromPorcelain(output), nil
+}
+
+func changedFilesFromPorcelain(output string) []string {
 	trimmed := strings.Trim(output, "\r\n")
 	if trimmed == "" {
-		return nil, nil
+		return []string{}
 	}
 	lines := strings.Split(trimmed, "\n")
 	files := make([]string, 0, len(lines))
@@ -395,7 +418,7 @@ func getChangedFiles(dir string) ([]string, error) {
 			files = append(files, strings.TrimSpace(line))
 		}
 	}
-	return files, nil
+	return files
 }
 
 // GetPorcelainStatus returns root-relative changed file paths with their raw
@@ -436,21 +459,19 @@ func ParsePorcelainStatus(output string) PorcelainStatus {
 	return status
 }
 
-// getAheadBehind returns the ahead/behind counts relative to remote tracking branch.
-func getAheadBehind(dir, localBranch, remoteBranch string) (ahead, behind int) {
-	if localBranch == "" || localBranch == "(detached)" {
-		return 0, 0
+// parseAheadBehind never represents an unavailable comparison as zero counts.
+func parseAheadBehind(output string) (int, int, error) {
+	parts := strings.Fields(output)
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("invalid ahead/behind response %q", output)
 	}
-	upstream := "origin/" + remoteBranch
-	output, err := cli.RunGitCommand(dir, "rev-list", "--left-right", "--count", localBranch+"..."+upstream)
-	if err != nil {
-		return 0, 0
+	ahead, err := strconv.Atoi(parts[0])
+	if err != nil || ahead < 0 {
+		return 0, 0, fmt.Errorf("invalid ahead count %q", parts[0])
 	}
-	parts := strings.Fields(strings.TrimSpace(output))
-	if len(parts) == 2 {
-		a, _ := strconv.Atoi(parts[0])
-		b, _ := strconv.Atoi(parts[1])
-		return a, b
+	behind, err := strconv.Atoi(parts[1])
+	if err != nil || behind < 0 {
+		return 0, 0, fmt.Errorf("invalid behind count %q", parts[1])
 	}
-	return 0, 0
+	return ahead, behind, nil
 }

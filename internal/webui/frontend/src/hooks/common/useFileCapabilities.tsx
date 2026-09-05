@@ -12,6 +12,9 @@ import {
   getFileCapabilities,
   type FileCapabilitiesResponse,
 } from "@/api/workspace";
+import { ScopedQueryRequest } from "./scopedQueryRequest";
+import { QueryRecoveryContext } from "./queryRecovery";
+import { useEventContext } from "./useEventProvider";
 
 export interface FileCapabilitiesState {
   capabilities: FileCapabilitiesResponse | null;
@@ -54,31 +57,53 @@ export function FileCapabilitiesProvider({
     useState<FileCapabilitiesResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [requestToken, setRequestToken] = useState(0);
-  const retry = useCallback(() => setRequestToken((token) => token + 1), []);
+  const recovery = useContext(QueryRecoveryContext);
+  const { connectionEpoch } = useEventContext();
+  const request = useMemo(
+    () =>
+      new ScopedQueryRequest({
+        load: (signal) => {
+          if (!enabled || !workspaceId)
+            return Promise.reject(new Error("File capabilities disabled"));
+          return getFileCapabilities(workspaceId, { signal });
+        },
+        commit: (next) => {
+          setCapabilities(next);
+          setError(null);
+        },
+        onError: (reason) => {
+          setCapabilities(null);
+          setError(reason.message);
+        },
+        onLoading: (loading) => {
+          if (loading) {
+            setCapabilities(null);
+            setError(null);
+          }
+          setIsLoading(loading);
+        },
+      }),
+    [workspaceId, enabled],
+  );
+  const retry = useCallback(() => {
+    void request.run({ fresh: true }).catch(() => {});
+  }, [request]);
 
   useEffect(() => {
-    if (!enabled) return;
-    let canceled = false;
     setCapabilities(null);
-    setIsLoading(true);
     setError(null);
-    getFileCapabilities(workspaceId)
-      .then((next) => {
-        if (!canceled) setCapabilities(next);
-      })
-      .catch((reason) => {
-        if (!canceled) {
-          setError(reason instanceof Error ? reason.message : String(reason));
-        }
-      })
-      .finally(() => {
-        if (!canceled) setIsLoading(false);
-      });
-    return () => {
-      canceled = true;
-    };
-  }, [enabled, requestToken, workspaceId]);
+    setIsLoading(enabled);
+    return () => request.cancel();
+  }, [request, enabled]);
+  useEffect(() => {
+    if (enabled && workspaceId) retry();
+  }, [enabled, workspaceId, retry, connectionEpoch]);
+  useEffect(() => {
+    if (!enabled || !workspaceId || !recovery) return;
+    return recovery.register("file capabilities", (signal) =>
+      request.run({ signal, fresh: true }),
+    );
+  }, [enabled, workspaceId, recovery, request]);
 
   const value = useMemo(
     () =>

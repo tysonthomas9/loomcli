@@ -696,6 +696,9 @@ describe("WorkspaceFileBrowser", () => {
       truncated: false,
     });
     mocks.listFileCheckouts.mockResolvedValue({
+      partial: false,
+      limit_hit: false,
+      errors: [],
       checkouts: [
         {
           kind: "agent",
@@ -1251,6 +1254,9 @@ describe("WorkspaceFileBrowser", () => {
   it("agent mode renders only the selected agent roots and scopes Changes", async () => {
     storeWorkingCompareMode();
     mocks.listFileCheckouts.mockResolvedValue({
+      partial: false,
+      limit_hit: false,
+      errors: [],
       checkouts: [
         {
           kind: "agent",
@@ -1389,6 +1395,9 @@ describe("WorkspaceFileBrowser", () => {
       },
     ];
     mocks.listFileCheckouts.mockResolvedValue({
+      partial: false,
+      limit_hit: false,
+      errors: [],
       checkouts: [
         {
           kind: "agent",
@@ -1581,6 +1590,9 @@ describe("WorkspaceFileBrowser", () => {
   it("toggles the Changes lens, aggregates checkout counts, and persists per workspace", async () => {
     storeWorkingCompareMode();
     mocks.listFileCheckouts.mockResolvedValue({
+      partial: false,
+      limit_hit: false,
+      errors: [],
       checkouts: [
         {
           kind: "agent",
@@ -1631,6 +1643,9 @@ describe("WorkspaceFileBrowser", () => {
   it("skips unavailable checkouts in Changes counts and shows a notice", async () => {
     storeWorkingCompareMode();
     mocks.listFileCheckouts.mockResolvedValue({
+      partial: false,
+      limit_hit: false,
+      errors: [],
       checkouts: [
         {
           kind: "repo",
@@ -1676,6 +1691,9 @@ describe("WorkspaceFileBrowser", () => {
 
   it("shows an unavailable repair chip for status_error checkouts and still expands files", async () => {
     mocks.listFileCheckouts.mockResolvedValue({
+      partial: false,
+      limit_hit: false,
+      errors: [],
       checkouts: [
         {
           kind: "agent",
@@ -1705,6 +1723,9 @@ describe("WorkspaceFileBrowser", () => {
 
   it("expands exists:false checkouts to a friendly unavailable state", async () => {
     mocks.listFileCheckouts.mockResolvedValue({
+      partial: false,
+      limit_hit: false,
+      errors: [],
       checkouts: [
         {
           kind: "agent",
@@ -1733,6 +1754,9 @@ describe("WorkspaceFileBrowser", () => {
 
   it("renders the unavailable chip as a keyboard-focusable repair button", async () => {
     mocks.listFileCheckouts.mockResolvedValue({
+      partial: false,
+      limit_hit: false,
+      errors: [],
       checkouts: [
         {
           kind: "agent",
@@ -1771,7 +1795,10 @@ describe("WorkspaceFileBrowser", () => {
   });
 
   it("repairs a status_error checkout from the unavailable chip", async () => {
-    mocks.listFileCheckouts.mockResolvedValue({
+    mocks.listFileCheckouts.mockResolvedValueOnce({
+      partial: false,
+      limit_hit: false,
+      errors: [],
       checkouts: [
         {
           kind: "agent",
@@ -1780,6 +1807,21 @@ describe("WorkspaceFileBrowser", () => {
           exists: true,
           change_count: 0,
           status_error: true,
+        },
+      ],
+    });
+
+    mocks.listFileCheckouts.mockResolvedValue({
+      partial: false,
+      limit_hit: false,
+      errors: [],
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 0,
         },
       ],
     });
@@ -1809,8 +1851,43 @@ describe("WorkspaceFileBrowser", () => {
     expect(mocks.gitStatusScoped).toHaveBeenCalled();
   });
 
-  it("prompts for force and retries checkout repair with force", async () => {
+  it("does not announce repair success when checkout metadata remains incomplete", async () => {
     mocks.listFileCheckouts.mockResolvedValue({
+      partial: false,
+      limit_hit: false,
+      errors: [],
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 0,
+          status_error: true,
+        },
+      ],
+    });
+    render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /Repair checkout for atlas loomcli: Git status unavailable/,
+      }),
+    );
+    await waitFor(() =>
+      expect(mocks.showToast).toHaveBeenCalledWith(
+        "Repair failed for atlas loomcli.",
+        { type: "error" },
+      ),
+    );
+    expect(mocks.showToast).not.toHaveBeenCalledWith("Repaired checkout", {
+      type: "success",
+    });
+  });
+  it("prompts for force and retries checkout repair with force", async () => {
+    mocks.listFileCheckouts.mockResolvedValueOnce({
+      partial: false,
+      limit_hit: false,
+      errors: [],
       checkouts: [
         {
           kind: "agent",
@@ -1835,6 +1912,21 @@ describe("WorkspaceFileBrowser", () => {
         backup_path: "/tmp/atlas.broken-123",
         message: "recreated",
       });
+
+    mocks.listFileCheckouts.mockResolvedValue({
+      partial: false,
+      limit_hit: false,
+      errors: [],
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 0,
+        },
+      ],
+    });
 
     render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
 
@@ -1873,6 +1965,9 @@ describe("WorkspaceFileBrowser", () => {
 
   it("offers repair from the checkout row context menu", async () => {
     mocks.listFileCheckouts.mockResolvedValue({
+      partial: false,
+      limit_hit: false,
+      errors: [],
       checkouts: [
         {
           kind: "agent",
@@ -1899,6 +1994,9 @@ describe("WorkspaceFileBrowser", () => {
 
   it("shows an inline repair error without dumping backend text into the tree", async () => {
     mocks.listFileCheckouts.mockResolvedValue({
+      partial: false,
+      limit_hit: false,
+      errors: [],
       checkouts: [
         {
           kind: "agent",
@@ -1930,6 +2028,9 @@ describe("WorkspaceFileBrowser", () => {
 
   it("expands status_error checkouts even when repair is available", async () => {
     mocks.listFileCheckouts.mockResolvedValue({
+      partial: false,
+      limit_hit: false,
+      errors: [],
       checkouts: [
         {
           kind: "agent",
@@ -1954,6 +2055,9 @@ describe("WorkspaceFileBrowser", () => {
 
   it("keeps missing checkouts visually distinct from git status errors", async () => {
     mocks.listFileCheckouts.mockResolvedValue({
+      partial: false,
+      limit_hit: false,
+      errors: [],
       checkouts: [
         {
           kind: "agent",
@@ -2002,6 +2106,9 @@ describe("WorkspaceFileBrowser", () => {
 
   it("shows the default branch change count while the Files lens is active", async () => {
     mocks.listFileCheckouts.mockResolvedValue({
+      partial: false,
+      limit_hit: false,
+      errors: [],
       checkouts: [
         {
           kind: "agent",
@@ -2035,6 +2142,9 @@ describe("WorkspaceFileBrowser", () => {
 
   it("uses branch compare mode by default and opens agent diff API patches", async () => {
     mocks.listFileCheckouts.mockResolvedValue({
+      partial: false,
+      limit_hit: false,
+      errors: [],
       checkouts: [
         {
           kind: "agent",
@@ -2089,6 +2199,9 @@ describe("WorkspaceFileBrowser", () => {
       binary: false,
     };
     mocks.listFileCheckouts.mockResolvedValue({
+      partial: false,
+      limit_hit: false,
+      errors: [],
       checkouts: [
         {
           kind: "agent",
@@ -2148,6 +2261,9 @@ describe("WorkspaceFileBrowser", () => {
   it("keeps deleted files diff-only in the Changes lens", async () => {
     storeWorkingCompareMode();
     mocks.listFileCheckouts.mockResolvedValue({
+      partial: false,
+      limit_hit: false,
+      errors: [],
       checkouts: [
         {
           kind: "repo",
@@ -2869,6 +2985,9 @@ describe("WorkspaceFileBrowser", () => {
     localStorage.setItem("loom:ws-1:file-explorer-lens", "changes");
     mocks.skillGroups = reviewerSkillGroups();
     mocks.listFileCheckouts.mockResolvedValue({
+      partial: false,
+      limit_hit: false,
+      errors: [],
       checkouts: [
         {
           kind: "agent",

@@ -3,7 +3,10 @@
  * Follows a polling pattern with backoff.
  */
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useMemo, useContext, useCallback } from "react";
+
+import { ScopedQueryRequest } from "@/hooks/common/scopedQueryRequest";
+import { QueryRecoveryContext } from "@/hooks/common/queryRecovery";
 
 import type { GitStatus } from "@/api/workspace";
 import { fetchGitStatus } from "@/api/workspace";
@@ -32,56 +35,49 @@ export function useGitStatus({
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
-  const fetchInProgressRef = useRef(false);
-  const mountedRef = useRef(true);
+  const recovery = useContext(QueryRecoveryContext);
+  const request = useMemo(
+    () =>
+      new ScopedQueryRequest<GitStatus>({
+        load: (signal) => {
+          if (!enabled || !agentName)
+            return Promise.reject(new Error("Git status scope disabled"));
+          return fetchGitStatus(workspaceId, agentName, { signal });
+        },
+        commit: (result) => {
+          setStatus(result);
+          setError(null);
+        },
+        onError: setError,
+        onLoading: setLoading,
+      }),
+    [workspaceId, agentName, enabled],
+  );
+  const doFetch = useCallback(async () => {
+    if (!enabled || !agentName) return;
+    await request.run().catch(() => {});
+  }, [request, enabled, agentName]);
 
-  // Reset state when agent changes
   useEffect(() => {
     setStatus(null);
     setError(null);
     setLoading(false);
-  }, [agentName]);
-
-  const doFetch = useCallback(async () => {
-    if (!agentName || fetchInProgressRef.current) return;
-
-    fetchInProgressRef.current = true;
-    setLoading((prev) => (prev ? prev : true));
-
-    try {
-      const result = await fetchGitStatus(workspaceId, agentName);
-      if (mountedRef.current) {
-        setStatus(result);
-        setError(null);
-      }
-    } catch (err) {
-      if (mountedRef.current) {
-        setError(err instanceof Error ? err : new Error(String(err)));
-      }
-    } finally {
-      fetchInProgressRef.current = false;
-      if (mountedRef.current) {
-        setLoading(false);
-      }
-    }
-  }, [workspaceId, agentName]);
-
-  useEffect(() => {
-    mountedRef.current = true;
-
-    if (!enabled || !agentName) return;
-
-    // Fetch immediately
+    if (!enabled || !agentName) return () => request.cancel();
     void doFetch();
-
-    // Poll on interval
     const intervalId = setInterval(doFetch, POLL_INTERVAL);
-
     return () => {
-      mountedRef.current = false;
+      request.cancel();
       clearInterval(intervalId);
     };
-  }, [enabled, agentName, doFetch]);
+  }, [enabled, agentName, request, doFetch]);
+
+  useEffect(() => {
+    if (!enabled || !agentName || !recovery) return;
+    return recovery.register(
+      `git-status:${workspaceId}:${agentName}`,
+      (signal) => request.run({ signal, fresh: true }),
+    );
+  }, [recovery, request, enabled, workspaceId, agentName]);
 
   return { status, loading, error, refetch: doFetch };
 }

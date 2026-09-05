@@ -86,8 +86,31 @@ function agentGitUrl(
 export async function fetchGitStatus(
   workspaceId: string,
   agentName: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<GitStatus> {
-  return get<GitStatus>(agentGitUrl(workspaceId, agentName, "status"));
+  const url = agentGitUrl(workspaceId, agentName, "status");
+  const value = await (options.signal
+    ? get<unknown>(url, options)
+    : get<unknown>(url));
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error("Invalid git status response");
+  const data = value as Record<string, unknown>;
+  if (
+    typeof data.branch !== "string" ||
+    typeof data.target_branch !== "string" ||
+    typeof data.is_clean !== "boolean" ||
+    typeof data.has_conflicts !== "boolean" ||
+    ![data.ahead, data.behind, data.stash_count].every(
+      (n) => typeof n === "number" && Number.isSafeInteger(n) && n >= 0,
+    ) ||
+    ![data.changed_files, data.conflicted_files].every(
+      (files) =>
+        Array.isArray(files) && files.every((file) => typeof file === "string"),
+    )
+  ) {
+    throw new Error("Invalid git status response");
+  }
+  return value as GitStatus;
 }
 
 /** POST /api/workspaces/{ws}/agents/{name}/git/push */
