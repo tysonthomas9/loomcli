@@ -1,0 +1,277 @@
+# {{workspace}} workspace — rendered from templates/agent-pipeline/pipeline.yaml.tmpl
+#
+# model {{model}} on every role (params decide: opus in real workspaces, sonnet in TEST).
+#
+# This workspace holds the DEVELOPMENT REPOS THEMSELVES (loomcli, fleet-db,
+# harness-wrapper, meta-harness), so every repo is PR-only: the integrator
+# publishes a branch and opens a pull request, and never lands anything. See
+# integration.yaml — that rule is the owner's, and it is not negotiable by a
+# green gate.
+#
+# Budgets are the template's. The gates here are slow (loomcli's `make check` is
+# a 13-gate suite measured at over ten minutes), which is what the coder,
+# tester and integrator durations are sized for.
+#
+#   planner → critic → decomposer → coder → tester → integrator → trunk
+#                ↑ bounded re-arm         ↑ reject      ↑ integration
+#                                   removes in-review    failure hands back
+#   observer runs in its own lane on `observe`.
+#
+# Copy this file, prompts/ and integration.yaml into a workspace, adjust the
+# THREE marked places, then:
+#
+#   loom workspace apply -f pipeline.yaml --dry-run    # validates before writing
+#   loom workspace apply -f pipeline.yaml              # supervisor STOPPED
+#
+# Everything below that is not obvious was learned by breaking it in a live run.
+# The comments say which, because a rule whose reason is lost gets "simplified"
+# back out within a month.
+#
+# ── THE LADDER ───────────────────────────────────────────────────────────────
+#
+#   (no labels) → plan-draft → verdict-ready → ready-to-implement
+#               → in-review → approved → delivered
+#
+# A role requires its own rung's label and EXCLUDES EVERY RUNG ABOVE IT. Then a
+# task that has climbed can never be re-claimed from below, and each open task
+# matches exactly one role. Two failures taught both halves:
+#
+#   * excluding only your own stamp is not enough — the tester hands off by
+#     removing `in-review` and adding `approved`, which leaves
+#     `ready-to-implement` in place, so a coder excluding only `in-review`
+#     re-claims work that was already approved;
+#   * a role with NO required label is a catch-all — `plan` was claiming
+#     approved tasks and re-planning them, because it excluded three labels
+#     rather than all of them.
+#
+# ── WHY THE MODELS ARE SPLIT THE WAY THEY ARE ────────────────────────────────
+#
+# Production runs Opus everywhere. The thinking stages (plan/critic/decomposer)
+# decide WHAT to do and whether a plan is sound; the executing stages still
+# benefit, because "run the gate, read the failure, fix it" is where a weaker
+# model quietly gives up and reports success. The testing template
+# (pipeline.testing.yaml) is this file with sonnet and smaller budgets.
+#
+# ── THREE THINGS TO ADJUST PER WORKSPACE ─────────────────────────────────────
+#   1. daemon.log_dir            → this workspace's path
+#   2. every agent's `repos:`    → the repos this fleet may touch. This is a
+#                                  REAL boundary: the claim query filters on it
+#                                  (buildClaimOpts sets opts.SourceRepos and
+#                                  both claim attempts carry it), so a fleet
+#                                  cannot reach a repo it does not list.
+#   3. prompts/*.md `LOOM=`      → this workspace's bin/loom
+# ─────────────────────────────────────────────────────────────────────────────
+
+backend: {{backend}}
+
+daemon:
+  max_agents: 9              # seven auto agents + headroom; the default of 2 fails daemon creation
+  issue_backend: fleetdb
+  startup_timeout: 30
+  log_dir: {{workspace_dir}}/.loom/daemon-logs
+
+roles:
+  # Built-in plan role. task_filter MUST be "any": the built-in default
+  # (needs_plan) drops the revision pass as soon as a design exists, so the
+  # critic's hand-back would never be re-planned.
+  plan:
+    task_filter: any
+    model: {{model}}
+    max_budget_usd: 10
+    # 1800 was not enough on real work. A research-heavy plan produced a 13k
+    # design and was killed at the cap; because a kill is not a clean exit its
+    # completion hooks never ran, so the task sat in `review` with no routing
+    # label and was unclaimable until recovered by hand. Planning the hard
+    # tasks is exactly when this role needs room.
+    max_run_duration: 2700
+    exclude_labels: [plan-draft, verdict-ready, decomposed, ready-to-implement, in-review, approved, delivered, review-exhausted, integration-blocked]
+    input_policy:
+      default: deny
+      kinds: {trust_prompt: allow, approval_prompt: allow}
+
+  # The quality gate. Its hook owns the counter and the hand-back; the agent's
+  # only write is `verdict-ready`, and only when promoting. That asymmetry is
+  # deliberate: promotion is the irreversible step, so it is the only one the
+  # agent performs.
+  critic:
+    kind: worker
+    prompt_file: prompts/critic.md
+    task_filter: any
+    model: {{model}}
+    max_budget_usd: 10
+    max_run_duration: 2700
+    labels: [plan-draft]
+    exclude_labels: [verdict-ready, decomposed, ready-to-implement, in-review, approved, delivered, review-exhausted, integration-blocked]
+    input_policy:
+      default: deny
+      kinds: {trust_prompt: allow, approval_prompt: allow}
+
+  # Split-or-promote gate. Both branches are proven: multi-STEP work that shares
+  # files is promoted whole, genuinely independent units are split into children.
+  decomposer:
+    kind: worker
+    prompt_file: prompts/decomposer.md
+    task_filter: any
+    model: {{model}}
+    max_budget_usd: 10
+    max_run_duration: 2700
+    labels: [verdict-ready]
+    exclude_labels: [ready-to-implement, decomposed, in-review, approved, delivered, integration-blocked]
+    input_policy:
+      default: deny
+      kinds: {trust_prompt: allow, approval_prompt: allow}
+
+  # A CUSTOM implementer, not the built-in `task` role: that protocol closes the
+  # task itself, which skips the tester entirely.
+  coder:
+    kind: worker
+    prompt_file: prompts/worker.md
+    task_filter: any
+    model: {{model}}
+    max_budget_usd: 15
+    max_run_duration: 3600
+    labels: [ready-to-implement]
+    exclude_labels: [in-review, approved, delivered, integration-blocked]
+    input_policy:
+      default: deny
+      kinds: {trust_prompt: allow, approval_prompt: allow}
+
+  # Owns the accept/reject decision, so it owns its own transitions. Never
+  # closes: approval hands off to the integrator.
+  tester:
+    kind: worker
+    prompt_file: prompts/tester.md
+    task_filter: any
+    model: {{model}}
+    max_budget_usd: 10
+    # Must be able to WAIT for the repo's gate in the foreground. At 2700 a
+    # tester facing a three-track eval under load put the gate in the background
+    # and ended its turn — recording no verdict, which (this role has no hooks,
+    # deliberately) left the task unchanged to be re-claimed and re-run forever.
+    max_run_duration: 3600
+    labels: [in-review]
+    exclude_labels: [approved, delivered, integration-blocked]
+    input_policy:
+      default: deny
+      kinds: {trust_prompt: allow, approval_prompt: allow}
+
+  # Delivery. Without this stage the pipeline closes tickets whose code never
+  # leaves its branch: a board reading "done" over an untouched trunk. It
+  # re-runs the gate on the MERGED tree, which is the only place a conflict
+  # between two separately-approved tasks can appear.
+  integrator:
+    kind: worker
+    prompt_file: prompts/integrator.md
+    task_filter: any
+    model: {{model}}
+    max_budget_usd: 10
+    max_run_duration: 3600
+    labels: [approved]
+    exclude_labels: [delivered]      # self-exclusion: never re-claim what it shipped
+    input_policy:
+      default: deny
+      kinds: {trust_prompt: allow, approval_prompt: allow}
+
+  # Health digest. Ticket-driven, because the daemon has no cron→agent path:
+  # trigger bindings dispatch to pinned driver versions, not to agents.
+  observer:
+    kind: worker
+    prompt_file: prompts/observer.md
+    task_filter: any
+    model: {{model}}
+    max_budget_usd: 5
+    max_run_duration: 1800
+    labels: [observe]
+    input_policy:
+      default: deny
+      kinds: {trust_prompt: allow, approval_prompt: allow}
+
+agents:
+  - worktree: planner
+    role: plan
+    auto: true
+    backend: {{backend}}
+    repos: {{repos}}
+    hooks:
+      on_complete:
+        # NOT write_design: the built-in plan protocol writes the plan into
+        # `design` itself, and write_design overwrites it with the agent's
+        # closing chat message (a 782-char summary replaced a 7263-char plan).
+        - type: comment
+          source: final_reply
+        - type: add_label
+          value: plan-draft
+        - type: set_status
+          value: open
+
+  - worktree: critic
+    role: critic
+    auto: true
+    backend: {{backend}}
+    repos: {{repos}}
+    hooks:
+      on_complete:
+        - type: comment
+          source: final_reply
+        # A deterministic counter: below the threshold it removes plan-draft
+        # (handing back to the planner) and bumps review-cycle=N; at the
+        # threshold it stamps review-exhausted, which routes NOWHERE — an
+        # exhausted review stops instead of shipping an unimplementable plan.
+        - type: cycle
+          cycle:
+            threshold: 3
+            rearm_label: plan-draft
+            ship_label: review-exhausted
+
+  - worktree: decomposer
+    role: decomposer
+    auto: true
+    backend: {{backend}}
+    repos: {{repos}}
+    hooks:
+      on_complete:
+        - type: comment
+          source: final_reply
+
+  - worktree: worker
+    role: coder
+    auto: true
+    backend: {{backend}}
+    repos: {{repos}}
+    hooks:
+      on_complete:
+        - type: comment
+          source: final_reply
+        - type: add_label
+          value: in-review
+        - type: set_status
+          value: open
+
+  - worktree: tester
+    role: tester
+    auto: true
+    backend: {{backend}}
+    repos: {{repos}}
+    # NO HOOKS, on purpose: the verdict branches and hooks fire unconditionally.
+    # The cost of this choice is that an agent which ends without deciding
+    # changes nothing and gets re-claimed forever — which is why its prompt
+    # forbids backgrounding the gate and requires a verdict on every path.
+
+  - worktree: integrator
+    role: integrator
+    auto: true
+    backend: {{backend}}
+    repos: {{repos}}
+    # No hooks, same reason: delivering and handing back are different terminal
+    # states, and only the agent knows which one happened.
+
+  - worktree: observer
+    role: observer
+    auto: true
+    backend: {{backend}}
+    repos: {{repos}}
+    hooks:
+      on_complete:
+        - type: comment
+          source: final_reply
+        - type: close

@@ -1,0 +1,10 @@
+repos:
+  sandbox:
+    target_branch: main
+    push: origin              # bare repo in ../origins, nothing has it checked out
+    # The fixture's own gate: python3 stdlib tests plus a lint pass. No
+    # PYTHONPATH pin is needed here because nothing in the fixture is installed
+    # editable — the production template pins it in every command precisely
+    # because that assumption does NOT hold for a real repo.
+    gate_command: make gate
+    gate_timeout: 600
