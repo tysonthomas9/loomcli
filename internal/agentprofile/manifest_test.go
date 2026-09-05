@@ -432,13 +432,21 @@ func rm(t *testing.T, path string) {
 // ordinary byte-hashed files the caller asks for.
 func writeManagedProfile(t *testing.T, root, version string, files map[string]string, rel, baseline, live string) string {
 	t.Helper()
+	return writeManagedProfileFor(t, root, "claude", version, files, rel, baseline, live)
+}
+
+// writeManagedProfileFor is writeManagedProfile with the harness subdirectory
+// named, because the managed scheme is not claude-only any more: codex's
+// config.toml is the file that made it format-aware.
+func writeManagedProfileFor(t *testing.T, root, harness, version string, files map[string]string, rel, baseline, live string) string {
+	t.Helper()
 	all := map[string]string{}
 	for k, v := range files {
 		all[k] = v
 	}
 	all[filepath.Join(ProvisionedDirName, rel)] = baseline
 
-	dir := filepath.Join(root, "claude")
+	dir := filepath.Join(root, harness)
 	if err := os.MkdirAll(filepath.Join(dir, ProvisionedDirName), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -639,5 +647,66 @@ func TestMarshalManifest_OmitsManagedWhenAbsent(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "managed") {
 		t.Fatalf("marshalManifest emitted a managed key for a manifest that has none:\n%s", raw)
+	}
+}
+
+// The codex outage, end to end through Verify. `loom lead` refused to boot
+// because config.toml was byte-hashed and codex appends [hooks.state] and
+// [tui.model_availability_nux] to it on essentially every run — and since
+// enforceLeadProfile walks every harness and exits on the first failure, the
+// drifted CODEX profile also blocked `loom lead --backend claude`. With
+// config.toml moved out of `files` and into `managed`, the append is a pass.
+func TestVerify_CodexConfigTOMLSurvivesTheHooksStateAppend(t *testing.T) {
+	const codexVersion = "codex-cli 0.153.2"
+	dir := writeManagedProfileFor(t, t.TempDir(), "codex", codexVersion, nil, "config.toml",
+		codexBaselineTOML, codexBaselineTOML+codexRuntimeAppendTOML)
+
+	m, err := LoadManifest(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The manifest shape the provisioner must produce: the BASELINE is hashed,
+	// the live config.toml is not in `files` at all.
+	if got := m.Managed; len(got) != 1 || got[0] != "config.toml" {
+		t.Fatalf("Managed = %v, want [config.toml]", got)
+	}
+	for _, f := range m.Files {
+		if f == "config.toml" {
+			t.Fatal("config.toml must not be byte-hashed once it is managed")
+		}
+	}
+	if err := Verify(dir, codexVersion); err != nil {
+		t.Fatalf("Verify = %v, want nil: codex's own runtime tables must not brick the lead", err)
+	}
+
+	// And the trust boundary still holds through the same path.
+	tampered := strings.Replace(codexBaselineTOML+codexRuntimeAppendTOML,
+		`trust_level = "trusted"`, `trust_level = "untrusted"`, 1)
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(tampered), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Verify(dir, codexVersion); !errors.Is(err, ErrManagedContentDrift) {
+		t.Fatalf("Verify = %v, want ErrManagedContentDrift", err)
+	}
+}
+
+// Bless shares verifyManaged, so the repair path has to be unblocked too:
+// re-blessing a codex profile whose config.toml only gained tables must succeed
+// rather than refuse the way the byte scheme did.
+func TestBless_SucceedsWhenCodexConfigOnlyGainedTables(t *testing.T) {
+	dir := writeManagedProfileFor(t, t.TempDir(), "codex", "codex-cli 0.153.2", nil, "config.toml",
+		codexBaselineTOML, codexBaselineTOML+codexRuntimeAppendTOML)
+	if err := Bless(dir, "codex-cli 0.154.0"); err != nil {
+		t.Fatalf("Bless = %v, want nil", err)
+	}
+	m, err := LoadManifest(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.HarnessVersion != "codex-cli 0.154.0" {
+		t.Fatalf("HarnessVersion = %q, want the blessed version", m.HarnessVersion)
+	}
+	if got := m.Managed; len(got) != 1 || got[0] != "config.toml" {
+		t.Fatalf("Bless dropped the managed list: %v", got)
 	}
 }
