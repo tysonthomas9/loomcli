@@ -79,6 +79,27 @@ func TestGateClaimsHeld_LeavesEveryCounterUntouched(t *testing.T) {
 	}
 }
 
+func TestGateClaimsHeld_ReleaseClearsGatedStatus(t *testing.T) {
+	s, _ := heldSupervisor(t, newHold("oleh", "maintenance", time.Hour))
+	ap := &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "falcon", Role: "task"}}
+
+	if s.gateClaimsHeld(ap) {
+		t.Fatal("gateClaimsHeld returned true while held")
+	}
+	if ap.LastError == nil || !ap.LastError.Class.Is(agenterr.ClaimsHeldOutcome) {
+		t.Fatalf("LastError = %#v, want ClaimsHeld", ap.LastError)
+	}
+	if err := s.SetClaimHold(nil); err != nil {
+		t.Fatalf("SetClaimHold(nil): %v", err)
+	}
+	if !s.gateClaimsHeld(ap) {
+		t.Fatal("gateClaimsHeld returned false after release")
+	}
+	if ap.LastError != nil {
+		t.Fatalf("LastError = %#v, want nil after release", ap.LastError)
+	}
+}
+
 func TestClaimHold_NeverWritesYieldFileOrTouchesProcess(t *testing.T) {
 	dir := t.TempDir()
 	s, _ := heldSupervisor(t, nil)

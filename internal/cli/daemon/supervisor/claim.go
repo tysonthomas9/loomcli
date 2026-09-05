@@ -543,6 +543,14 @@ func (s *Supervisor) LoadClaimHold(h *ClaimHold) {
 func (s *Supervisor) gateClaimsHeld(ap *AgentProcess) bool {
 	h := s.ClaimHoldSnapshot()
 	if !h.Active(time.Now()) {
+		// A ClaimsHeld error describes the current pre-flight gate, not a
+		// historical run failure. Clear it as soon as the hold is gone so status
+		// cannot report a running agent as still claim-gated after release.
+		ap.Mu.Lock()
+		if ap.LastError != nil && ap.LastError.Class.Is(agenterr.ClaimsHeldOutcome) {
+			ap.LastError = nil
+		}
+		ap.Mu.Unlock()
 		return true
 	}
 	s.logStillHeld(h)
