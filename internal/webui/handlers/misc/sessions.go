@@ -184,29 +184,29 @@ func HandleNotifySessionChange(hub *realtime.Hub, notifyToken string) http.Handl
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Validate bearer token — fail-closed if server token is empty.
 		if notifyToken == "" {
-			http.Error(w, "Forbidden", http.StatusForbidden)
+			handler.RespondError(w, http.StatusForbidden, "forbidden")
 			return
 		}
 		authHeader := r.Header.Get("Authorization")
 		const prefix = "Bearer "
 		if !strings.HasPrefix(authHeader, prefix) {
-			http.Error(w, "Forbidden", http.StatusForbidden)
+			handler.RespondError(w, http.StatusForbidden, "forbidden")
 			return
 		}
 		token := authHeader[len(prefix):]
 		if subtle.ConstantTimeCompare([]byte(token), []byte(notifyToken)) != 1 {
-			http.Error(w, "Forbidden", http.StatusForbidden)
+			handler.RespondError(w, http.StatusForbidden, "forbidden")
 			return
 		}
 
 		var req sessionNotifyRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Bad Request", http.StatusBadRequest)
+			handler.RespondError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
 
 		if req.TaskID == "" || req.SessionID == "" {
-			http.Error(w, "Bad Request: task_id and session_id required", http.StatusBadRequest)
+			handler.RespondError(w, http.StatusBadRequest, "task_id and session_id required")
 			return
 		}
 
