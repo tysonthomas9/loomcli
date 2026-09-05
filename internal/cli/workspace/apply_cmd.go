@@ -483,7 +483,8 @@ func stampedLabels(h *domain.AgentHooks) []string {
 func validateCapacity(spec *cfgpkg.DaemonConfig) []string {
 	auto := 0
 	for _, a := range spec.Agents {
-		if a.Auto {
+		// A disabled agent is never supervised, so it does not consume capacity.
+		if a.AutoEnabled() {
 			auto++
 		}
 	}
@@ -515,7 +516,7 @@ func printPlan(spec *cfgpkg.DaemonConfig) {
 			hooks = len(a.Hooks.OnComplete)
 		}
 		fmt.Printf("  agent %-10s role=%-10s backend=%-10s auto=%-5t hooks=%d\n",
-			a.Worktree, a.Role, orDash(a.Backend), a.Auto, hooks)
+			a.Worktree, a.Role, orDash(a.Backend), a.AutoEnabled(), hooks)
 	}
 	if spec.Daemon.MaxAgents != nil {
 		fmt.Printf("  daemon max_agents=%d\n", *spec.Daemon.MaxAgents)
@@ -619,7 +620,7 @@ func applyAgent(ctx context.Context, h *bootstrap.StoreHandle, ws string, a cfgp
 	existing, err := h.Store.Agents().Get(ctx, ws, a.Worktree)
 	if err != nil || existing == nil {
 		in := store.AgentCreate{
-			WorkspaceKey: ws, Name: a.Worktree, RoleName: a.Role, Auto: a.Auto,
+			WorkspaceKey: ws, Name: a.Worktree, RoleName: a.Role, Auto: a.AutoEnabled(),
 			Backend: a.Backend, Repos: a.Repos, RepoGroups: a.RepoGroups,
 			CrossRepo: a.CrossRepo, Parent: a.Parent, Mode: a.Mode, Hooks: a.Hooks,
 		}
@@ -634,7 +635,9 @@ func applyAgent(ctx context.Context, h *bootstrap.StoreHandle, ws string, a cfgp
 		patch.RoleName = &a.Role
 	}
 	if presence.agentHas(a.Worktree, "auto") {
-		patch.Auto = &a.Auto
+		// a.Auto is already *bool and non-nil when the key is present; pass it
+		// through so an explicit false reaches the store as a disable.
+		patch.Auto = a.Auto
 	}
 	if presence.agentHas(a.Worktree, "hooks") {
 		patch.Hooks = a.Hooks

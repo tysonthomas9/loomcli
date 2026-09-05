@@ -29,10 +29,10 @@ func pipelineSpec() *cfgpkg.DaemonConfig {
 			"task": {TaskFilter: "any", Labels: []string{"drafted"}, ExcludeLabels: []string{"done"}, InputPolicy: allowTrust()},
 		},
 		Agents: []cfgpkg.AgentEntry{
-			{Worktree: "planner", Role: "plan", Auto: true, Backend: "claude", Hooks: &domain.AgentHooks{
+			{Worktree: "planner", Role: "plan", Auto: cfgpkg.BoolPtr(true), Backend: "claude", Hooks: &domain.AgentHooks{
 				OnComplete: []domain.AgentHookAction{{Type: domain.AgentHookActionAddLabel, Value: "drafted"}},
 			}},
-			{Worktree: "worker", Role: "task", Auto: true, Backend: "claude", Hooks: &domain.AgentHooks{
+			{Worktree: "worker", Role: "task", Auto: cfgpkg.BoolPtr(true), Backend: "claude", Hooks: &domain.AgentHooks{
 				OnComplete: []domain.AgentHookAction{{Type: domain.AgentHookActionAddLabel, Value: "done"}},
 			}},
 		},
@@ -164,7 +164,7 @@ func TestValidateSpec_BuiltinRoleCannotSetPromptFile(t *testing.T) {
 
 func TestValidateSpec_AgentRoleMustExist(t *testing.T) {
 	spec := pipelineSpec()
-	spec.Agents = append(spec.Agents, cfgpkg.AgentEntry{Worktree: "tester", Role: "tester", Auto: false, Backend: "claude"})
+	spec.Agents = append(spec.Agents, cfgpkg.AgentEntry{Worktree: "tester", Role: "tester", Auto: cfgpkg.BoolPtr(false), Backend: "claude"})
 
 	if problems := validateSpec(spec, t.TempDir()); !problemsContaining(t, problems, "neither built-in nor defined in this spec") {
 		t.Fatalf("expected an unknown-role problem, got: %v", problems)
@@ -180,7 +180,7 @@ func TestValidateSpec_CycleShipLabelIsAStamp(t *testing.T) {
 		Labels: []string{"drafted"}, InputPolicy: allowTrust(),
 	}
 	spec.Agents = append(spec.Agents, cfgpkg.AgentEntry{
-		Worktree: "critic", Role: "critic", Auto: false, Backend: "claude",
+		Worktree: "critic", Role: "critic", Auto: cfgpkg.BoolPtr(false), Backend: "claude",
 		Hooks: &domain.AgentHooks{OnComplete: []domain.AgentHookAction{{
 			Type:  domain.AgentHookActionCycle,
 			Cycle: &domain.AgentHookCycle{Threshold: 2, RearmLabel: "drafted", ShipLabel: "shipped"},

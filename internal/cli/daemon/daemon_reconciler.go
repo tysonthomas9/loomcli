@@ -261,6 +261,14 @@ func (d *Daemon) addNewAgents(entries []config.AgentEntry, label string) {
 	currentNodeID := d.sup.ResolveNodeID()
 	now := time.Now().UTC()
 	for _, entry := range entries {
+		if !entry.AutoEnabled() {
+			// A disabled agent is a standing policy decision, not a transient
+			// park, so this is Debug: it would otherwise repeat every poll for
+			// the life of the daemon.
+			slog.Debug("skipping "+label+" of disabled agent", "worktree", entry.Worktree,
+				"reason", "auto: false", "resume", "loom agentdef update "+entry.Worktree+" --auto")
+			continue
+		}
 		if !entry.ShouldSuperviseWithRoles(roles, currentNodeID, now) {
 			slog.Warn("agent parked: not claiming",
 				"worktree", entry.Worktree,

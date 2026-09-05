@@ -98,7 +98,7 @@ func storeIsEmpty(t *testing.T, h *bootstrap.StoreHandle) bool {
 
 func TestApply_ProvisionsMissingWorktrees(t *testing.T) {
 	h, wsPath := applyFixture(t, "alpha")
-	spec := worktreeSpec(cfgpkg.AgentEntry{Worktree: "planner", Role: "task", Auto: true})
+	spec := worktreeSpec(cfgpkg.AgentEntry{Worktree: "planner", Role: "task", Auto: cfgpkg.BoolPtr(true)})
 
 	err := captureApplyErr(t, func() error {
 		if err := ensureSpecWorktrees(context.Background(), h, testWorkspaceKey, spec); err != nil {
