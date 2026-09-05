@@ -115,13 +115,16 @@ type Hub struct {
 
 // Client represents a single SSE connection.
 type Client struct {
-	id          int64
-	send        chan *MutationPayload
-	done        chan struct{}
-	lastSince   string
-	sourceRepos []string // repos this client wants; empty = all
-	workspaceID string   // workspace this client subscribed to; empty = no mutations (fail-closed)
-	nextSeq     atomic.Uint64
+	// Set before registration; durable source payloads become coalesced wakeups.
+	authoritative bool
+	wake          chan struct{}
+	id            int64
+	send          chan *MutationPayload
+	done          chan struct{}
+	lastSince     string
+	sourceRepos   []string // repos this client wants; empty = all
+	workspaceID   string   // workspace this client subscribed to; empty = no mutations (fail-closed)
+	nextSeq       atomic.Uint64
 
 	resyncMu      sync.Mutex
 	lastOffered   resyncPoint
@@ -138,6 +141,7 @@ type resyncPoint struct {
 func NewClient(id int64, sendBuf int, lastSince string, sourceRepos []string, workspaceID string) *Client {
 	return &Client{
 		id:          id,
+		wake:        make(chan struct{}, 1),
 		send:        make(chan *MutationPayload, sendBuf),
 		done:        make(chan struct{}),
 		lastSince:   lastSince,
@@ -193,6 +197,15 @@ func (c *Client) beginResync() (resyncPoint, bool) {
 	dropped := c.dropped
 	c.dropped = resyncPoint{}
 	return dropped, true
+}
+
+// notifyDurable coalesces wakeups without losing a wake arriving during a read:
+// the handler takes the token before reading, so that concurrent token remains.
+func (c *Client) notifyDurable() {
+	select {
+	case c.wake <- struct{}{}:
+	default:
+	}
 }
 
 // ParseSourceRepos parses a comma-separated source_repos query parameter,
@@ -302,6 +315,9 @@ func (h *Hub) fanOutMutation(mutation *MutationPayload) {
 	}
 	h.mu.RLock()
 	for client := range h.clients {
+		if client.authoritative && mutation.Cursor != "" {
+			continue
+		}
 		if !MatchesWorkspaceFilter(client.workspaceID, mutation.WorkspaceID) {
 			continue
 		}
@@ -394,6 +410,9 @@ func (h *Hub) Broadcast(mutation *MutationPayload) {
 		slog.Warn("SSE: dropping mutation with empty workspace_id", "type", mutation.Type, "issue_id", mutation.IssueID)
 		return
 	}
+	if mutation.Cursor != "" {
+		h.wakeAuthoritativeClients(mutation.WorkspaceID)
+	}
 	affectedClients := h.matchingClientCount(mutation)
 	if affectedClients == 0 {
 		return
@@ -426,9 +445,24 @@ func (h *Hub) markMatchingClientsPending(mutation *MutationPayload) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for client := range h.clients {
+		if client.authoritative && mutation.Cursor != "" {
+			continue
+		}
 		if MatchesWorkspaceFilter(client.workspaceID, mutation.WorkspaceID) &&
 			MatchesSourceRepoFilter(client.sourceRepos, mutation.SourceRepo) {
 			client.markCurrentDropped()
+		}
+	}
+}
+
+// Wake all readers in this workspace. Each reader applies its own source-repo
+// filter after scanning the authoritative page, including filtered checkpoints.
+func (h *Hub) wakeAuthoritativeClients(workspaceID string) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for client := range h.clients {
+		if client.authoritative && MatchesWorkspaceFilter(client.workspaceID, workspaceID) {
+			client.notifyDurable()
 		}
 	}
 }
@@ -438,6 +472,9 @@ func (h *Hub) matchingClientCount(mutation *MutationPayload) int {
 	defer h.mu.RUnlock()
 	count := 0
 	for client := range h.clients {
+		if client.authoritative && mutation.Cursor != "" {
+			continue
+		}
 		if MatchesWorkspaceFilter(client.workspaceID, mutation.WorkspaceID) &&
 			MatchesSourceRepoFilter(client.sourceRepos, mutation.SourceRepo) {
 			count++

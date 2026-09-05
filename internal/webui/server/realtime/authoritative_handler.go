@@ -1,0 +1,167 @@
+package realtime
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"time"
+
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/tysonthomas9/loomcli/internal/backend"
+)
+
+type authoritativeSession struct {
+	handler *Handler
+	client  *Client
+	writer  frameWriter
+	reader  *authoritativeReader
+	ctx     context.Context
+}
+
+// serveAuthoritative uses one source cursor for replay and live reconciliation.
+// A fresh head means subscribe-from, not acknowledgment of a query snapshot.
+func (h *Handler) serveAuthoritative(w http.ResponseWriter, r *http.Request, client *Client, cursor string, handshake trace.Span) {
+	sw, err := h.writerFactory(w)
+	if err != nil {
+		handshake.End()
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	session := authoritativeSession{handler: h, client: client, writer: sw, ctx: r.Context()}
+	if err := session.initialize(cursor); err != nil {
+		session.fail(err)
+		handshake.End()
+		return
+	}
+	interval := h.heartbeatInterval
+	if interval <= 0 {
+		interval = HeartbeatInterval
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	if err := session.catchUp(ticker.C); err != nil {
+		session.fail(err)
+		handshake.End()
+		return
+	}
+	if err := sw.WriteRetry(RetryMs); err != nil {
+		handshake.End()
+		return
+	}
+	if err := sw.WriteEventNoID("connected", fmt.Sprintf(`{"clientId":%d}`, client.id)); err != nil {
+		handshake.End()
+		return
+	}
+	handshake.End()
+	for {
+		if err := session.wait(ticker.C, false); err != nil {
+			return
+		}
+		if err := session.catchUp(ticker.C); err != nil {
+			session.fail(err)
+			return
+		}
+	}
+}
+
+func (s *authoritativeSession) initialize(cursor string) error {
+	if s.client.workspaceID == "" {
+		return errors.New("missing workspace")
+	}
+	if cursor == "" {
+		ctx, cancel := context.WithTimeout(s.ctx, s.handler.catchUpTimeout)
+		defer cancel()
+		page, err := s.handler.getMutationPage(ctx, s.client.workspaceID, "$", 1)
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if page.Cursor == "" || page.Cursor == "$" || page.HasMore || len(page.Events) != 0 {
+			return errors.New("invalid authoritative head")
+		}
+		cursor = page.Cursor
+		if err := s.writer.WriteEventID(cursor, "checkpoint", "{}"); err != nil {
+			return &authoritativeWriteError{cause: err}
+		}
+	}
+	reader, err := newAuthoritativeReader(s.client.workspaceID, cursor, s.client.sourceRepos, s.handler.getMutationPage)
+	s.reader = reader
+	return err
+}
+
+func (s *authoritativeSession) fail(err error) {
+	if s.ctx.Err() != nil || isAuthoritativeWriteError(err) {
+		return
+	}
+	reason := "error"
+	if errors.Is(err, backend.ErrMutationCursorExpired) {
+		reason = "expired"
+	}
+	_ = s.writer.WriteEventNoID("resync", fmt.Sprintf(`{"reason":%q}`, reason))
+}
+
+func (s *authoritativeSession) catchUp(ticks <-chan time.Time) error {
+	for {
+		ctx, cancel := context.WithTimeout(s.ctx, s.handler.catchUpTimeout)
+		more, err := s.reader.readPage(ctx, s.writer, catchUpPageLimit)
+		cancel()
+		if err != nil {
+			return err
+		}
+		if !more {
+			return nil
+		}
+		// Each bounded page yields to control and transient work without skipping.
+		if err := s.wait(ticks, true); err != nil {
+			return err
+		}
+	}
+}
+
+// wait services hints and control frames. In yielding mode an idle queue returns
+// immediately so continuous source pagination can continue on the next turn.
+func (s *authoritativeSession) wait(ticks <-chan time.Time, yielding bool) error {
+	if _, dropped := s.client.beginResync(); dropped {
+		if err := s.writer.WriteEventNoID("resync", `{"reason":"overflow"}`); err != nil {
+			return &authoritativeWriteError{cause: err}
+		}
+	}
+	var idle <-chan struct{}
+	if yielding {
+		ready := make(chan struct{})
+		close(ready)
+		idle = ready
+	}
+	select {
+	case <-s.ctx.Done():
+		return s.ctx.Err()
+	case <-s.handler.hub.done:
+		return &authoritativeWriteError{cause: errors.New("hub stopped")}
+	case <-s.client.wake:
+		return nil
+	case mutation, ok := <-s.client.send:
+		if !ok {
+			return &authoritativeWriteError{cause: errors.New("client closed")}
+		}
+		if mutation.Cursor != "" {
+			return nil
+		}
+		if err := writeSSEEvent(s.writer, mutation); err != nil {
+			return &authoritativeWriteError{cause: err}
+		}
+	case <-ticks:
+		if err := s.writer.WriteComment("heartbeat"); err != nil {
+			return &authoritativeWriteError{cause: err}
+		}
+	case <-idle:
+	}
+	return nil
+}

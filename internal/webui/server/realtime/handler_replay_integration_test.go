@@ -31,22 +31,28 @@ func TestHandler_FleetHTTPReplay201BeforeConnectedWithQueuedOverlap(t *testing.T
 	fleetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		page := int(calls.Add(1))
 		start := (page - 1) * 100
-		if page > 3 || r.URL.Query().Get("since") != cursor(start) || r.URL.Query().Get("limit") != "100" {
+		if page == 4 {
+			start = 201
+		}
+		if page > 4 || r.URL.Query().Get("since") != cursor(start) || r.URL.Query().Get("limit") != "100" {
 			t.Errorf("unexpected Fleet request page=%d path=%s query=%s", page, r.URL.Path, r.URL.RawQuery)
 			http.Error(w, "unexpected cursor/page", http.StatusBadRequest)
 			return
 		}
 		end := min(start+100, 201)
+		if page == 4 {
+			end = 202
+		}
 		if page == 3 {
 			for _, n := range []int{1, 201, 202} {
 				hub.Broadcast(&MutationPayload{Cursor: cursor(n), Type: backend.MutationUpdate, IssueID: fmt.Sprintf("issue-%d", n), WorkspaceID: workspace})
 			}
-			// Replay has not returned: prove overlap is already queued for this client.
+			// Replay has not returned: prove durable overlap has queued an authoritative read wakeup.
 			require.Eventually(t, func() bool {
 				hub.mu.RLock()
 				defer hub.mu.RUnlock()
 				for client := range hub.clients {
-					if client.workspaceID == workspace && len(client.send) == 3 {
+					if client.workspaceID == workspace && len(client.wake) == 1 {
 						return true
 					}
 				}
@@ -96,7 +102,7 @@ func TestHandler_FleetHTTPReplay201BeforeConnectedWithQueuedOverlap(t *testing.T
 	case <-time.After(2 * time.Second):
 		t.Fatal("handler did not stop")
 	}
-	require.Equal(t, int32(3), calls.Load())
+	require.Equal(t, int32(4), calls.Load())
 	next, barriers := 1, 0
 	for _, frame := range writer.snapshot() {
 		switch frame.event {

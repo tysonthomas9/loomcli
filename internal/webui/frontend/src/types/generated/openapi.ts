@@ -595,19 +595,22 @@ export interface paths {
      *     Not expressible as a standard REST operation in OpenAPI.
      *     The frontend's `useSSE` hook consumes this stream directly.
      *
-     *     **Frames**: `mutation` carries a JSON `MutationPayload`. Only mutations
-     *     with a durable source cursor carry an `id`; transient notifications omit
-     *     the field and preserve the current resume checkpoint. A `checkpoint`
-     *     frame carries `{}` and an opaque `id` covering successfully scanned,
-     *     filtered-out replay records; it advances resume state without a mutation.
-     *     A `resync` frame carries a JSON `reason` of `cap`, `error`,
-     *     `expired`, or `overflow`, instructing authoritative snapshot refetch.
-     *     Its `id` sets the resume checkpoint when present. Transient overflow
-     *     omits `id` to preserve that checkpoint; an explicit empty `id` resets it.
-     *     `connected` has no `id` and
-     *     follows completed replay or the resync instruction. HTTP response headers
-     *     alone do not signal completion. Replay is bounded; a failed or capped
-     *     replay emits resync instead of publishing its buffered partial mutations.
+     *     **Frames**: `mutation` carries a JSON `MutationPayload`. Durable mutations
+     *     and filtered `checkpoint` frames advance one authoritative source cursor
+     *     per connection. Transient notifications omit `id` and preserve it.
+     *     A fresh connection selects the current source head and emits a checkpoint;
+     *     this means subscribe-from, not successful query snapshot synchronization.
+     *     `connected` has no `id` and follows the first completed source drain.
+     *     HTTP headers alone do not signal completion. Reads use bounded pages;
+     *     another page continues from the last successfully written checkpoint.
+     *     Durable notifications only wake authoritative reads, with periodic
+     *     reconciliation covering missing notifications.
+     *     `resync` carries a JSON `reason`. Source `error` or `expired` emits no
+     *     `id` and ends delivery without advancing to a retention floor. Transient
+     *     `overflow` also preserves the cursor and requests query refresh. Snapshot
+     *     recovery requires a separate successful reset contract; receiving resync
+     *     does not certify query freshness. An explicit empty `id` resets resume
+     *     state when used by the protocol.
      *
      *     **Mutation format**:
      *     ```json
