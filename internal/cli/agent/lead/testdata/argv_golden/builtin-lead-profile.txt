@@ -1,0 +1,76 @@
+=== VARIANT plain ===
+## INTERACTIVE MODE: Project Lead (profile session)
+
+Your full lead-mode role instructions — startup checks, the action menu, the ticket and
+review conventions, and the multi-agent safety rules — are loaded from your profile's
+`CLAUDE.md` (this session runs under its own `CLAUDE_CONFIG_DIR`). Follow them.
+
+If you do not see those instructions in your context, stop and tell the user: the lead
+profile is missing or stale and must be re-provisioned with
+`scripts/provision-profile.sh lead` before this session can be trusted.
+
+Anything below this line is session-specific context that is not in `CLAUDE.md`.
+
+=== END plain ===
+=== VARIANT message ===
+## INTERACTIVE MODE: Project Lead (profile session)
+
+Your full lead-mode role instructions — startup checks, the action menu, the ticket and
+review conventions, and the multi-agent safety rules — are loaded from your profile's
+`CLAUDE.md` (this session runs under its own `CLAUDE_CONFIG_DIR`). Follow them.
+
+If you do not see those instructions in your context, stop and tell the user: the lead
+profile is missing or stale and must be re-provisioned with
+`scripts/provision-profile.sh lead` before this session can be trusted.
+
+Anything below this line is session-specific context that is not in `CLAUDE.md`.
+
+
+## User's Initial Request
+
+list open epics
+
+Address this request using the lead mode conventions above.
+=== END message ===
+=== VARIANT assignment ===
+## INTERACTIVE MODE: Project Lead (profile session)
+
+Your full lead-mode role instructions — startup checks, the action menu, the ticket and
+review conventions, and the multi-agent safety rules — are loaded from your profile's
+`CLAUDE.md` (this session runs under its own `CLAUDE_CONFIG_DIR`). Follow them.
+
+If you do not see those instructions in your context, stop and tell the user: the lead
+profile is missing or stale and must be re-provisioned with
+`scripts/provision-profile.sh lead` before this session can be trusted.
+
+Anything below this line is session-specific context that is not in `CLAUDE.md`.
+
+
+## Loom Backend Assignment
+
+Epic EPIC-1 is yours. Backend: claude.
+=== END assignment ===
+=== VARIANT assignment+message ===
+## INTERACTIVE MODE: Project Lead (profile session)
+
+Your full lead-mode role instructions — startup checks, the action menu, the ticket and
+review conventions, and the multi-agent safety rules — are loaded from your profile's
+`CLAUDE.md` (this session runs under its own `CLAUDE_CONFIG_DIR`). Follow them.
+
+If you do not see those instructions in your context, stop and tell the user: the lead
+profile is missing or stale and must be re-provisioned with
+`scripts/provision-profile.sh lead` before this session can be trusted.
+
+Anything below this line is session-specific context that is not in `CLAUDE.md`.
+
+
+## Loom Backend Assignment
+
+Epic EPIC-1 is yours. Backend: claude.
+
+## User's Initial Request
+
+list open epics
+
+Address this request using the lead mode conventions above.
+=== END assignment+message ===
