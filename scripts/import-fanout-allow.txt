@@ -11,6 +11,12 @@
 internal/cli/daemon/supervisor 22
 internal/cli 19
 # The skills webui module adds the skills handler package to the app's module
-# wiring and the domain skill path policy to svcimpl's file index.
-internal/webui/app 19
+# wiring and the domain skill path policy to svcimpl's file index. app then took
+# one more (19 -> 20) for internal/webui/server/handler: the nested workspace mux
+# has to answer unmatched requests with the same JSON error envelope as the outer
+# catch-all, and that helper lives in server/handler because handlers/misc needs
+# it too and cannot import app. Route registration is where the app package is
+# supposed to reach for shared HTTP responders, so this is wiring, not new
+# coupling.
+internal/webui/app 20
 internal/webui/svcimpl 19
