@@ -477,14 +477,22 @@ func invokeClaudeRunTurn(ctx context.Context, workDir, prompt, agentName, resume
 	// accumulateHarnessUsage cannot error, so a missing or unreadable transcript
 	// leaves the turn result and the exit code exactly as they were.
 	accumulateHarnessUsage(collector, "claude", res.Session.HarnessSessionID, workDir)
-	// Park the captured PTY output on the turn whenever the turn itself carries
-	// no text. It used to be parked only when the WHOLE evidence was empty,
-	// which meant a terminal auth turn — Reason set, Text blanked by the
-	// wrapper's authRelabel — kept the raw screen out of reach of the
-	// classifier, on precisely the verdict that needs a screen to be judged.
-	// Capped, because this text ends up in a logged and stored error.
-	if err != nil && strings.TrimSpace(res.Turn.Text) == "" {
-		res.Turn.Text = claudeRawTail(raw.String())
+	// Carry the harness's rendered screen out with EVERY errored turn, not only
+	// when the turn carries no text. A bare harness exit sets Turn.Reason to
+	// "exit code 1": non-empty, uninformative, and classified as [Unknown], the
+	// verdict that burns a task's no-progress budget and quarantines it. A
+	// terminal auth turn has its Text blanked by the wrapper's authRelabel. The
+	// screen is what tells a folder-trust dialog from an auth wall from a genuine
+	// crash, so it must always reach InvocationError.OutputTail. Capped, because
+	// this text ends up in a logged and stored error.
+	if err != nil {
+		if screen := strings.TrimSpace(claudeRawTail(raw.String())); screen != "" {
+			if strings.TrimSpace(res.Turn.Text) == "" {
+				res.Turn.Text = screen
+			} else {
+				res.Turn.Text = res.Turn.Text + "\n" + screen
+			}
+		}
 	}
 	// Our own deadline fired. Guarded on deadlineCtx being non-nil, which is
 	// exactly the `deadline > 0` condition that created it, so a turn with no
