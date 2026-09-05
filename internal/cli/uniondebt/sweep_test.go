@@ -125,7 +125,7 @@ func testContract(t *testing.T) *Contract {
 func closedIssue(id, repo string, priority int) backend.IssueData {
 	return backend.IssueData{
 		ID: id, Status: "closed", SourceRepo: repo, Priority: priority,
-		Labels: []string{MarkerLabel, "delivered"},
+		Labels: []string{defaultLabels.Marker, "delivered"},
 	}
 }
 
@@ -190,7 +190,7 @@ func TestSweep_FilesDebtTicketForConflict(t *testing.T) {
 	if got.Priority != 2 {
 		t.Errorf("Priority = %d, want the floor of 2", got.Priority)
 	}
-	wantLabels := []string{ApprovedLabel, DebtLabel, DebtOfPrefix + "PUPPET-103"}
+	wantLabels := []string{defaultLabels.Route, defaultLabels.Debt, defaultLabels.DebtOfPrefix + "PUPPET-103"}
 	if !hasAll(got.Labels, wantLabels) || len(got.Labels) != len(wantLabels) {
 		t.Errorf("Labels = %v, want exactly %v", got.Labels, wantLabels)
 	}
@@ -252,7 +252,7 @@ func TestSweep_InUnionRetiresMarker(t *testing.T) {
 	if len(f.created) != 0 {
 		t.Errorf("in-union debt is illusory; nothing should be filed, got %+v", f.created)
 	}
-	if want := "PUPPET-9:" + MarkerLabel; len(f.removed) != 1 || f.removed[0] != want {
+	if want := "PUPPET-9:" + defaultLabels.Marker; len(f.removed) != 1 || f.removed[0] != want {
 		t.Errorf("removed = %v, want [%s]", f.removed, want)
 	}
 	if len(f.added) != 0 {
@@ -272,10 +272,10 @@ func TestSweep_NoBranchStampsUnreachable(t *testing.T) {
 	if item.Action != ActionUnreachable {
 		t.Fatalf("Action = %s, want unreachable", item.Action)
 	}
-	if want := "PUPPET-11:" + UnreachableLabel; len(f.added) != 1 || f.added[0] != want {
+	if want := "PUPPET-11:" + defaultLabels.Unreachable; len(f.added) != 1 || f.added[0] != want {
 		t.Errorf("added = %v, want [%s]", f.added, want)
 	}
-	if want := "PUPPET-11:" + MarkerLabel; len(f.removed) != 1 || f.removed[0] != want {
+	if want := "PUPPET-11:" + defaultLabels.Marker; len(f.removed) != 1 || f.removed[0] != want {
 		t.Errorf("removed = %v, want [%s]", f.removed, want)
 	}
 	c := f.comments["PUPPET-11"]
@@ -318,7 +318,7 @@ func TestSweep_DedupesExistingDebtTicket(t *testing.T) {
 	f.add(closedIssue("PUPPET-103", "loomcli", 2))
 	f.add(backend.IssueData{
 		ID: "PUPPET-500", Status: "in_progress", SourceRepo: "loomcli",
-		Labels: []string{ApprovedLabel, DebtLabel, DebtOfPrefix + "PUPPET-103"},
+		Labels: []string{defaultLabels.Route, defaultLabels.Debt, defaultLabels.DebtOfPrefix + "PUPPET-103"},
 	})
 	p := &stubProber{results: map[string]ProbeResult{
 		"PUPPET-103": {Class: ClassConflict, Ref: "origin/loom/PUPPET-103", TipSHA: "abc"},
@@ -339,7 +339,7 @@ func TestSweep_DedupesAgainstClosedDebtTicket(t *testing.T) {
 	f.add(closedIssue("PUPPET-103", "loomcli", 2))
 	f.add(backend.IssueData{
 		ID: "PUPPET-501", Status: "closed", SourceRepo: "loomcli",
-		Labels: []string{DebtLabel, DebtOfPrefix + "PUPPET-103"},
+		Labels: []string{defaultLabels.Debt, defaultLabels.DebtOfPrefix + "PUPPET-103"},
 	})
 	p := &stubProber{results: map[string]ProbeResult{
 		"PUPPET-103": {Class: ClassConflict, Ref: "origin/loom/PUPPET-103", TipSHA: "abc"},
@@ -444,8 +444,8 @@ func TestSweep_EnumeratesLedgerPerStatus(t *testing.T) {
 		if call.status != ledgerStatuses[i] {
 			t.Errorf("List %d status = %q, want %q", i, call.status, ledgerStatuses[i])
 		}
-		if len(call.labels) != 1 || call.labels[0] != MarkerLabel {
-			t.Errorf("List %d labels = %v, want [%s]", i, call.labels, MarkerLabel)
+		if len(call.labels) != 1 || call.labels[0] != defaultLabels.Marker {
+			t.Errorf("List %d labels = %v, want [%s]", i, call.labels, defaultLabels.Marker)
 		}
 	}
 }
@@ -471,8 +471,8 @@ func TestSweep_RepoFilter(t *testing.T) {
 func TestSweep_DeduplicatesAcrossStatuses(t *testing.T) {
 	// The same ID surfacing under two status queries must be swept once.
 	f := newFakeBackend()
-	f.add(backend.IssueData{ID: "PUPPET-77", Status: "open", SourceRepo: "loomcli", Labels: []string{MarkerLabel}})
-	f.byStatus["review"] = append(f.byStatus["review"], backend.IssueData{ID: "PUPPET-77", Status: "review", SourceRepo: "loomcli", Labels: []string{MarkerLabel}})
+	f.add(backend.IssueData{ID: "PUPPET-77", Status: "open", SourceRepo: "loomcli", Labels: []string{defaultLabels.Marker}})
+	f.byStatus["review"] = append(f.byStatus["review"], backend.IssueData{ID: "PUPPET-77", Status: "review", SourceRepo: "loomcli", Labels: []string{defaultLabels.Marker}})
 	p := &stubProber{results: map[string]ProbeResult{"PUPPET-77": {Class: ClassNoBranch}}}
 
 	rep := run(t, f, p, Options{})
@@ -513,5 +513,89 @@ func TestDebtPriority(t *testing.T) {
 		if got := debtPriority(tc.in); got != tc.want {
 			t.Errorf("debtPriority(%d) = %d, want %d", tc.in, got, tc.want)
 		}
+	}
+}
+
+// TestSweep_UsesContractLabels pins the whole point of the label block: the
+// vocabulary is the workspace's, not the binary's. A contract that renames all
+// five must be obeyed everywhere — the ledger query, the derived ticket's
+// labels, the dedupe lookup and the prose written into the design body.
+func TestSweep_UsesContractLabels(t *testing.T) {
+	custom := withLabels(`  labels:
+    marker: merge-pending
+    unreachable: merge-unreachable
+    debt: merge-debt
+    debt_of_prefix: merge-debt-for/
+    route: integrate
+`)
+	c, err := LoadContract(writeContract(t, custom))
+	if err != nil {
+		t.Fatalf("LoadContract: %v", err)
+	}
+
+	f := newFakeBackend()
+	iss := closedIssue("PUPPET-103", "loomcli", 1)
+	iss.Labels = []string{"merge-pending", "delivered"}
+	f.add(iss)
+	p := &stubProber{results: map[string]ProbeResult{
+		"PUPPET-103": {Class: ClassClean, Ref: "origin/loom/PUPPET-103", TipSHA: "abc123"},
+	}}
+
+	rep := run(t, f, p, Options{Contract: c})
+	if item := onlyItem(t, rep); item.Action != ActionFiled {
+		t.Fatalf("item = %+v, want filed", item)
+	}
+
+	for i, call := range f.listed {
+		for _, label := range call.labels {
+			if strings.HasPrefix(label, "union-") {
+				t.Errorf("List %d queried the default vocabulary %v, not the contract's", i, call.labels)
+				break
+			}
+		}
+	}
+
+	if len(f.created) != 1 {
+		t.Fatalf("expected 1 create, got %d", len(f.created))
+	}
+	got := f.created[0]
+	wantLabels := []string{"integrate", "merge-debt", "merge-debt-for/PUPPET-103"}
+	if !hasAll(got.Labels, wantLabels) || len(got.Labels) != len(wantLabels) {
+		t.Errorf("Labels = %v, want exactly %v", got.Labels, wantLabels)
+	}
+	if !strings.Contains(got.Design, "merge-pending") {
+		t.Errorf("design body should name the configured marker:\n%s", got.Design)
+	}
+	if strings.Contains(got.Design, "union-pending") {
+		t.Errorf("design body still names the default marker:\n%s", got.Design)
+	}
+	if c := f.comments["PUPPET-103"]; len(c) != 1 || !strings.Contains(c[0], "merge-pending") {
+		t.Errorf("comment should name the configured marker, got %v", c)
+	}
+}
+
+// TestSweep_UnreachableUsesContractLabel covers the other write path: the
+// swap-the-marker branch must use the configured replacement too.
+func TestSweep_UnreachableUsesContractLabel(t *testing.T) {
+	c, err := LoadContract(writeContract(t, withLabels("  labels:\n    marker: merge-pending\n    unreachable: merge-unreachable\n")))
+	if err != nil {
+		t.Fatalf("LoadContract: %v", err)
+	}
+
+	f := newFakeBackend()
+	iss := closedIssue("PUPPET-11", "loomcli", 2)
+	iss.Labels = []string{"merge-pending"}
+	f.add(iss)
+	p := &stubProber{results: map[string]ProbeResult{"PUPPET-11": {Class: ClassNoBranch}}}
+
+	rep := run(t, f, p, Options{Contract: c})
+	if item := onlyItem(t, rep); item.Action != ActionUnreachable {
+		t.Fatalf("item = %+v, want unreachable", item)
+	}
+	if want := "PUPPET-11:merge-unreachable"; len(f.added) != 1 || f.added[0] != want {
+		t.Errorf("added = %v, want [%s]", f.added, want)
+	}
+	if want := "PUPPET-11:merge-pending"; len(f.removed) != 1 || f.removed[0] != want {
+		t.Errorf("removed = %v, want [%s]", f.removed, want)
 	}
 }

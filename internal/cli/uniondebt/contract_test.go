@@ -3,6 +3,7 @@ package uniondebt
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -37,6 +38,12 @@ func writeContract(t *testing.T, body string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// withLabels splices a labels block into the fixture's defaults section, which
+// is where the sweep reads it from.
+func withLabels(block string) string {
+	return strings.Replace(contractFixture, "defaults:\n", "defaults:\n"+block, 1)
 }
 
 func TestLoadContract(t *testing.T) {
@@ -99,5 +106,36 @@ func TestLookup_NoClone(t *testing.T) {
 	}
 	if _, ok := c.Lookup("x"); ok {
 		t.Error("a local_integration with no clone path has nothing to probe")
+	}
+}
+
+func TestLabels_DefaultsWhenUnconfigured(t *testing.T) {
+	c, err := LoadContract(writeContract(t, contractFixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Labels(); got != defaultLabels {
+		t.Errorf("Labels() = %+v, want the defaults %+v", got, defaultLabels)
+	}
+	// A caller holding no contract at all must still get a usable vocabulary.
+	var nilContract *Contract
+	if got := nilContract.Labels(); got != defaultLabels {
+		t.Errorf("nil Contract Labels() = %+v, want the defaults", got)
+	}
+}
+
+func TestLabels_PartialBlockFallsBackPerField(t *testing.T) {
+	c, err := LoadContract(writeContract(t, withLabels("  labels:\n    route: integrate\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := c.Labels()
+	if got.Route != "integrate" {
+		t.Errorf("Route = %q, want the configured integrate", got.Route)
+	}
+	want := defaultLabels
+	want.Route = "integrate"
+	if got != want {
+		t.Errorf("Labels() = %+v, want the other four defaulted: %+v", got, want)
 	}
 }
