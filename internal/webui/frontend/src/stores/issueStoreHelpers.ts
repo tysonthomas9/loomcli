@@ -113,6 +113,11 @@ export interface IssueStoreState {
 }
 
 export interface IssueStoreActions {
+  /** Resolves only after a new request commits to the still-current scope. */
+  refreshForRecovery: (
+    signal: AbortSignal,
+    expectedWorkspaceId?: string,
+  ) => Promise<void>;
   fetchIssues: (params: FetchIssuesParams) => Promise<void>;
   refetch: () => Promise<void>;
   connectToEvents: (subscribe: SubscribeFn) => () => void;
