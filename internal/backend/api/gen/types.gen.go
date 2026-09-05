@@ -206,6 +206,51 @@ func (e CreateIssueRequestStatus) Valid() bool {
 	}
 }
 
+// Defines values for DriverOwnerType.
+const (
+	DriverOwnerTypeLeadAgent DriverOwnerType = "lead_agent"
+	DriverOwnerTypeSystem    DriverOwnerType = "system"
+	DriverOwnerTypeTeam      DriverOwnerType = "team"
+	DriverOwnerTypeUser      DriverOwnerType = "user"
+)
+
+// Valid indicates whether the value is a known member of the DriverOwnerType enum.
+func (e DriverOwnerType) Valid() bool {
+	switch e {
+	case DriverOwnerTypeLeadAgent:
+		return true
+	case DriverOwnerTypeSystem:
+		return true
+	case DriverOwnerTypeTeam:
+		return true
+	case DriverOwnerTypeUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DriverStatus.
+const (
+	DriverStatusActive   DriverStatus = "active"
+	DriverStatusDisabled DriverStatus = "disabled"
+	DriverStatusDraft    DriverStatus = "draft"
+)
+
+// Valid indicates whether the value is a known member of the DriverStatus enum.
+func (e DriverStatus) Valid() bool {
+	switch e {
+	case DriverStatusActive:
+		return true
+	case DriverStatusDisabled:
+		return true
+	case DriverStatusDraft:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DriverRunStatus.
 const (
 	DriverRunStatusCancelled              DriverRunStatus = "cancelled"
@@ -233,6 +278,27 @@ func (e DriverRunStatus) Valid() bool {
 	case DriverRunStatusRunning:
 		return true
 	case DriverRunStatusSuspendedAwaitingEvent:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DriverVersionValidationStatus.
+const (
+	DriverVersionValidationStatusFailed  DriverVersionValidationStatus = "failed"
+	DriverVersionValidationStatusPassed  DriverVersionValidationStatus = "passed"
+	DriverVersionValidationStatusPending DriverVersionValidationStatus = "pending"
+)
+
+// Valid indicates whether the value is a known member of the DriverVersionValidationStatus enum.
+func (e DriverVersionValidationStatus) Valid() bool {
+	switch e {
+	case DriverVersionValidationStatusFailed:
+		return true
+	case DriverVersionValidationStatusPassed:
+		return true
+	case DriverVersionValidationStatusPending:
 		return true
 	default:
 		return false
@@ -895,16 +961,16 @@ func (e SessionHistoryRecordLauncher) Valid() bool {
 
 // Defines values for SessionHistoryRecordStatus.
 const (
-	Active    SessionHistoryRecordStatus = "active"
-	Completed SessionHistoryRecordStatus = "completed"
+	SessionHistoryRecordStatusActive    SessionHistoryRecordStatus = "active"
+	SessionHistoryRecordStatusCompleted SessionHistoryRecordStatus = "completed"
 )
 
 // Valid indicates whether the value is a known member of the SessionHistoryRecordStatus enum.
 func (e SessionHistoryRecordStatus) Valid() bool {
 	switch e {
-	case Active:
+	case SessionHistoryRecordStatusActive:
 		return true
-	case Completed:
+	case SessionHistoryRecordStatusCompleted:
 		return true
 	default:
 		return false
@@ -973,34 +1039,34 @@ func (e TranscriptEntryType) Valid() bool {
 
 // Defines values for TreeNodeAgentState.
 const (
-	TreeNodeAgentStateDead     TreeNodeAgentState = "dead"
-	TreeNodeAgentStateDone     TreeNodeAgentState = "done"
-	TreeNodeAgentStateIdle     TreeNodeAgentState = "idle"
-	TreeNodeAgentStateRunning  TreeNodeAgentState = "running"
-	TreeNodeAgentStateSpawning TreeNodeAgentState = "spawning"
-	TreeNodeAgentStateStopped  TreeNodeAgentState = "stopped"
-	TreeNodeAgentStateStuck    TreeNodeAgentState = "stuck"
-	TreeNodeAgentStateWorking  TreeNodeAgentState = "working"
+	Dead     TreeNodeAgentState = "dead"
+	Done     TreeNodeAgentState = "done"
+	Idle     TreeNodeAgentState = "idle"
+	Running  TreeNodeAgentState = "running"
+	Spawning TreeNodeAgentState = "spawning"
+	Stopped  TreeNodeAgentState = "stopped"
+	Stuck    TreeNodeAgentState = "stuck"
+	Working  TreeNodeAgentState = "working"
 )
 
 // Valid indicates whether the value is a known member of the TreeNodeAgentState enum.
 func (e TreeNodeAgentState) Valid() bool {
 	switch e {
-	case TreeNodeAgentStateDead:
+	case Dead:
 		return true
-	case TreeNodeAgentStateDone:
+	case Done:
 		return true
-	case TreeNodeAgentStateIdle:
+	case Idle:
 		return true
-	case TreeNodeAgentStateRunning:
+	case Running:
 		return true
-	case TreeNodeAgentStateSpawning:
+	case Spawning:
 		return true
-	case TreeNodeAgentStateStopped:
+	case Stopped:
 		return true
-	case TreeNodeAgentStateStuck:
+	case Stuck:
 		return true
-	case TreeNodeAgentStateWorking:
+	case Working:
 		return true
 	default:
 		return false
@@ -1084,37 +1150,37 @@ func (e TreeNodeStatus) Valid() bool {
 
 // Defines values for TriggerDeliveryStatus.
 const (
-	Accepted   TriggerDeliveryStatus = "accepted"
-	Dispatched TriggerDeliveryStatus = "dispatched"
-	Duplicate  TriggerDeliveryStatus = "duplicate"
-	Failed     TriggerDeliveryStatus = "failed"
-	Held       TriggerDeliveryStatus = "held"
-	Queued     TriggerDeliveryStatus = "queued"
-	Rejected   TriggerDeliveryStatus = "rejected"
-	Replayed   TriggerDeliveryStatus = "replayed"
-	Superseded TriggerDeliveryStatus = "superseded"
+	TriggerDeliveryStatusAccepted   TriggerDeliveryStatus = "accepted"
+	TriggerDeliveryStatusDispatched TriggerDeliveryStatus = "dispatched"
+	TriggerDeliveryStatusDuplicate  TriggerDeliveryStatus = "duplicate"
+	TriggerDeliveryStatusFailed     TriggerDeliveryStatus = "failed"
+	TriggerDeliveryStatusHeld       TriggerDeliveryStatus = "held"
+	TriggerDeliveryStatusQueued     TriggerDeliveryStatus = "queued"
+	TriggerDeliveryStatusRejected   TriggerDeliveryStatus = "rejected"
+	TriggerDeliveryStatusReplayed   TriggerDeliveryStatus = "replayed"
+	TriggerDeliveryStatusSuperseded TriggerDeliveryStatus = "superseded"
 )
 
 // Valid indicates whether the value is a known member of the TriggerDeliveryStatus enum.
 func (e TriggerDeliveryStatus) Valid() bool {
 	switch e {
-	case Accepted:
+	case TriggerDeliveryStatusAccepted:
 		return true
-	case Dispatched:
+	case TriggerDeliveryStatusDispatched:
 		return true
-	case Duplicate:
+	case TriggerDeliveryStatusDuplicate:
 		return true
-	case Failed:
+	case TriggerDeliveryStatusFailed:
 		return true
-	case Held:
+	case TriggerDeliveryStatusHeld:
 		return true
-	case Queued:
+	case TriggerDeliveryStatusQueued:
 		return true
-	case Rejected:
+	case TriggerDeliveryStatusRejected:
 		return true
-	case Replayed:
+	case TriggerDeliveryStatusReplayed:
 		return true
-	case Superseded:
+	case TriggerDeliveryStatusSuperseded:
 		return true
 	default:
 		return false
@@ -1123,19 +1189,34 @@ func (e TriggerDeliveryStatus) Valid() bool {
 
 // Defines values for TriggerEventOrigin.
 const (
-	External TriggerEventOrigin = "external"
-	System   TriggerEventOrigin = "system"
-	Workflow TriggerEventOrigin = "workflow"
+	TriggerEventOriginExternal TriggerEventOrigin = "external"
+	TriggerEventOriginSystem   TriggerEventOrigin = "system"
+	TriggerEventOriginWorkflow TriggerEventOrigin = "workflow"
 )
 
 // Valid indicates whether the value is a known member of the TriggerEventOrigin enum.
 func (e TriggerEventOrigin) Valid() bool {
 	switch e {
-	case External:
+	case TriggerEventOriginExternal:
 		return true
-	case System:
+	case TriggerEventOriginSystem:
 		return true
-	case Workflow:
+	case TriggerEventOriginWorkflow:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WebhookDispatchResultStatus.
+const (
+	WebhookDispatchResultStatusAccepted WebhookDispatchResultStatus = "accepted"
+)
+
+// Valid indicates whether the value is a known member of the WebhookDispatchResultStatus enum.
+func (e WebhookDispatchResultStatus) Valid() bool {
+	switch e {
+	case WebhookDispatchResultStatusAccepted:
 		return true
 	default:
 		return false
@@ -1649,6 +1730,21 @@ func (e StartTerminalSetupJSONBodyAction) Valid() bool {
 	}
 }
 
+// Defines values for ReceiveWebhookParamsName.
+const (
+	Github ReceiveWebhookParamsName = "github"
+)
+
+// Valid indicates whether the value is a known member of the ReceiveWebhookParamsName enum.
+func (e ReceiveWebhookParamsName) Valid() bool {
+	switch e {
+	case Github:
+		return true
+	default:
+		return false
+	}
+}
+
 // AddDependencyRequest defines model for AddDependencyRequest.
 type AddDependencyRequest struct {
 	DepType     *string `json:"dep_type,omitempty"`
@@ -1835,6 +1931,20 @@ type CreateIssueRequestIssueType string
 // CreateIssueRequestStatus defines model for CreateIssueRequest.Status.
 type CreateIssueRequestStatus string
 
+// CreateWorkflowVersionRequest defines model for CreateWorkflowVersionRequest.
+type CreateWorkflowVersionRequest struct {
+	// Activate Whether to make the new version the driver's active one.
+	Activate *bool `json:"activate,omitempty"`
+
+	// Entrypoint Entrypoint path. Defaults to `workflows/{name}.ts` and must live
+	// under the workflow's own directory.
+	Entrypoint *string `json:"entrypoint,omitempty"`
+
+	// Files Workflow sources keyed by repo-relative path. At least one entry is
+	// required and the entrypoint must be among them.
+	Files map[string]string `json:"files"`
+}
+
 // Dependency Full dependency relation from types.Dependency
 type Dependency struct {
 	CreatedAt   time.Time `json:"created_at"`
@@ -1856,6 +1966,39 @@ type DependencyRef struct {
 
 	// Type Dependency type (e.g. "blocks")
 	Type string `json:"type"`
+}
+
+// Driver A registered workflow driver.
+type Driver struct {
+	ActiveVersionId *string            `json:"active_version_id,omitempty"`
+	CreatedAt       time.Time          `json:"created_at"`
+	Description     *string            `json:"description,omitempty"`
+	DriverId        string             `json:"driver_id"`
+	Metadata        *map[string]string `json:"metadata,omitempty"`
+	Name            string             `json:"name"`
+	OwnerRef        *string            `json:"owner_ref,omitempty"`
+	OwnerType       DriverOwnerType    `json:"owner_type"`
+	Status          DriverStatus       `json:"status"`
+	TrustLevel      *string            `json:"trust_level,omitempty"`
+	UpdatedAt       time.Time          `json:"updated_at"`
+	WorkspaceKey    string             `json:"workspace_key"`
+}
+
+// DriverOwnerType defines model for Driver.OwnerType.
+type DriverOwnerType string
+
+// DriverStatus defines model for Driver.Status.
+type DriverStatus string
+
+// DriverBundle The built bundle produced for a driver version.
+type DriverBundle struct {
+	BundleDigest string            `json:"bundle_digest"`
+	BundleRef    string            `json:"bundle_ref"`
+	Diagnostics  *string           `json:"diagnostics,omitempty"`
+	Manifest     map[string]string `json:"manifest"`
+	Root         string            `json:"root"`
+	SourceDigest string            `json:"source_digest"`
+	SourceRef    string            `json:"source_ref"`
 }
 
 // DriverRun One execution of a driver (workflow) version. Created by the workflow
@@ -1910,6 +2053,29 @@ type DriverRun struct {
 
 // DriverRunStatus defines model for DriverRun.Status.
 type DriverRunStatus string
+
+// DriverVersion One content-addressed version of a driver's bundled sources.
+type DriverVersion struct {
+	BuildDiagnostics *string                       `json:"build_diagnostics,omitempty"`
+	BundleDigest     string                        `json:"bundle_digest"`
+	BundleRef        string                        `json:"bundle_ref"`
+	CreatedAt        time.Time                     `json:"created_at"`
+	CreatedBy        *string                       `json:"created_by,omitempty"`
+	DriverId         string                        `json:"driver_id"`
+	Manifest         *map[string]string            `json:"manifest,omitempty"`
+	Runtime          *string                       `json:"runtime,omitempty"`
+	SourceDigest     string                        `json:"source_digest"`
+	SourceRef        string                        `json:"source_ref"`
+	ValidationStatus DriverVersionValidationStatus `json:"validation_status"`
+
+	// Version Monotonic version number within the driver.
+	Version      int    `json:"version"`
+	VersionId    string `json:"version_id"`
+	WorkspaceKey string `json:"workspace_key"`
+}
+
+// DriverVersionValidationStatus defines model for DriverVersion.ValidationStatus.
+type DriverVersionValidationStatus string
 
 // EditorInfo defines model for EditorInfo.
 type EditorInfo struct {
@@ -3294,6 +3460,36 @@ type UsageSessionRecord struct {
 	TaskId           *string   `json:"task_id,omitempty"`
 }
 
+// WebhookDelivery One fan-out leg of a webhook dispatch, as reported on ingest.
+type WebhookDelivery struct {
+	DeliveryId      string  `json:"delivery_id"`
+	DriverRunId     string  `json:"driver_run_id"`
+	RejectionReason *string `json:"rejection_reason,omitempty"`
+
+	// Status Lifecycle of one delivery leg. `superseded` marks a delivery replaced
+	// by a newer event for the same subject key; `held` marks one queued
+	// behind an active run for its subject key.
+	Status           TriggerDeliveryStatus `json:"status"`
+	TriggerBindingId string                `json:"trigger_binding_id"`
+}
+
+// WebhookDispatchResult The 202 ingest wire. Legs are in dispatch order: the exact route-key
+// binding first when present and enabled, then pattern matches in
+// binding-id order.
+type WebhookDispatchResult struct {
+	Deliveries []WebhookDelivery `json:"deliveries"`
+
+	// IdempotencyKey `{adapter}:{delivery-id}`.
+	IdempotencyKey string `json:"idempotency_key"`
+
+	// RouteKey Derived route key, e.g. `github.pull_request.opened`.
+	RouteKey string                      `json:"route_key"`
+	Status   WebhookDispatchResultStatus `json:"status"`
+}
+
+// WebhookDispatchResultStatus defines model for WebhookDispatchResult.Status.
+type WebhookDispatchResultStatus string
+
 // WorkerRegisterRequest defines model for WorkerRegisterRequest.
 type WorkerRegisterRequest struct {
 	Agent     string  `json:"agent"`
@@ -3308,6 +3504,29 @@ type WorkerStateRequest struct {
 	State     *string `json:"state,omitempty"`
 	TaskId    *string `json:"task_id,omitempty"`
 	TaskTitle *string `json:"task_title,omitempty"`
+}
+
+// WorkflowVersionResult Outcome of a version registration. Exactly one of `created_version` and
+// `reused_version` is true — re-posting identical sources reuses the
+// existing version.
+type WorkflowVersionResult struct {
+	// Activated Whether this version is now the driver's active version.
+	Activated bool `json:"activated"`
+
+	// BuildDiagnostics Bundler output, empty on a clean build.
+	BuildDiagnostics *string `json:"build_diagnostics,omitempty"`
+
+	// Bundle The built bundle produced for a driver version.
+	Bundle         *DriverBundle `json:"bundle,omitempty"`
+	CreatedDriver  bool          `json:"created_driver"`
+	CreatedVersion bool          `json:"created_version"`
+
+	// Driver A registered workflow driver.
+	Driver        Driver `json:"driver"`
+	ReusedVersion bool   `json:"reused_version"`
+
+	// Version One content-addressed version of a driver's bundled sources.
+	Version DriverVersion `json:"version"`
 }
 
 // WorkspaceAgentInfo defines model for WorkspaceAgentInfo.
@@ -3383,6 +3602,9 @@ type IssueId = string
 
 // RunId defines model for RunId.
 type RunId = string
+
+// WorkflowName defines model for WorkflowName.
+type WorkflowName = string
 
 // WorkspaceId defines model for WorkspaceId.
 type WorkspaceId = string
@@ -3905,6 +4127,37 @@ type ListTriggerEventsParams struct {
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// ReceiveWebhookJSONBody defines parameters for ReceiveWebhook.
+type ReceiveWebhookJSONBody map[string]interface{}
+
+// ReceiveWebhookParams defines parameters for ReceiveWebhook.
+type ReceiveWebhookParams struct {
+	// XGitHubEvent GitHub event name; part of the derived route key.
+	XGitHubEvent string `json:"X-GitHub-Event"`
+
+	// XGitHubDelivery GitHub delivery id. Used as the idempotency anchor, so an empty
+	// one is rejected rather than collapsing every delivery onto one key.
+	XGitHubDelivery string `json:"X-GitHub-Delivery"`
+
+	// XHubSignature256 `sha256=<hex>` HMAC over the raw body, verified against the
+	// source connector's inbound secret (the previous secret is accepted
+	// inside the rotation window).
+	XHubSignature256 string `json:"X-Hub-Signature-256"`
+}
+
+// ReceiveWebhookParamsName defines parameters for ReceiveWebhook.
+type ReceiveWebhookParamsName string
+
+// CreateWorkflowRunJSONBody defines parameters for CreateWorkflowRun.
+type CreateWorkflowRunJSONBody map[string]interface{}
+
+// CreateWorkflowRunParams defines parameters for CreateWorkflowRun.
+type CreateWorkflowRunParams struct {
+	// IdempotencyKey Repeat key. A second request carrying the same key returns the
+	// already-admitted run instead of creating a second one.
+	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
+}
+
 // ReportClientErrorJSONRequestBody defines body for ReportClientError for application/json ContentType.
 type ReportClientErrorJSONRequestBody = ReportClientErrorJSONBody
 
@@ -4024,3 +4277,12 @@ type PatchTerminalTabJSONRequestBody = TabPatchRequest
 
 // PutTerminalTabJSONRequestBody defines body for PutTerminalTab for application/json ContentType.
 type PutTerminalTabJSONRequestBody = TabPutRequest
+
+// ReceiveWebhookJSONRequestBody defines body for ReceiveWebhook for application/json ContentType.
+type ReceiveWebhookJSONRequestBody ReceiveWebhookJSONBody
+
+// CreateWorkflowRunJSONRequestBody defines body for CreateWorkflowRun for application/json ContentType.
+type CreateWorkflowRunJSONRequestBody CreateWorkflowRunJSONBody
+
+// CreateWorkflowVersionJSONRequestBody defines body for CreateWorkflowVersion for application/json ContentType.
+type CreateWorkflowVersionJSONRequestBody = CreateWorkflowVersionRequest

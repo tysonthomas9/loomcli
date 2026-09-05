@@ -2473,6 +2473,91 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/workflows/{name}/versions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Build and register a new workflow version
+     * @description Bundles the supplied TypeScript sources, registers them as a new
+     *     version of the workflow's driver, and (by default) activates that
+     *     version. Registration is content-addressed: re-posting identical
+     *     sources reuses the existing version instead of creating a new one,
+     *     which is reported back as `reused_version`.
+     */
+    post: operations["createWorkflowVersion"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/workflows/{name}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Start a workflow run
+     * @description Enqueues a run of the workflow's active driver version. The whole
+     *     request body is passed through to the run as its payload; an empty
+     *     body becomes `{}`. Builtin workflows are registered on demand, so a
+     *     first run of one does not need a prior version upload.
+     *
+     *     Before the run is created the resolved runner backend is checked
+     *     (installed and authenticated), so a misconfigured runner fails here
+     *     rather than deep inside the worker.
+     */
+    post: operations["createWorkflowRun"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/webhooks/{name}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Ingest an inbound provider webhook
+     * @description Provider-facing ingest endpoint. `{name}` selects the adapter;
+     *     `github` is the only one registered today.
+     *
+     *     The handler normalizes headers and body into a route key, resolves the
+     *     enabled binding for it, verifies the signature, then dispatches
+     *     durably: one `TriggerEvent` plus one queued `DriverRun` and
+     *     `TriggerDelivery` per matched binding. It never executes work inline.
+     *
+     *     Dispatch is idempotent on `{adapter}:{delivery-id}`, so provider
+     *     redelivery heals each fan-out leg independently rather than
+     *     duplicating runs.
+     *
+     *     **Wire note**: the 202 body carries `deliveries[]` only. There is no
+     *     top-level `driver_run_id` or `driver_run` — fetch the run by
+     *     `deliveries[i].driver_run_id`.
+     */
+    post: operations["receiveWebhook"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3991,6 +4076,119 @@ export interface components {
       trigger_deliveries: components["schemas"]["TriggerDelivery"][];
       count: number;
     };
+    CreateWorkflowVersionRequest: {
+      /**
+       * @description Workflow sources keyed by repo-relative path. At least one entry is
+       *     required and the entrypoint must be among them.
+       */
+      files: {
+        [key: string]: string;
+      };
+      /**
+       * @description Entrypoint path. Defaults to `workflows/{name}.ts` and must live
+       *     under the workflow's own directory.
+       */
+      entrypoint?: string;
+      /**
+       * @description Whether to make the new version the driver's active one.
+       * @default true
+       */
+      activate: boolean;
+    };
+    /** @description A registered workflow driver. */
+    Driver: {
+      workspace_key: string;
+      driver_id: string;
+      name: string;
+      /** @enum {string} */
+      owner_type: "user" | "team" | "lead_agent" | "system";
+      owner_ref?: string;
+      description?: string;
+      active_version_id?: string;
+      /** @enum {string} */
+      status: "draft" | "active" | "disabled";
+      trust_level?: string;
+      metadata?: {
+        [key: string]: string;
+      };
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    /** @description One content-addressed version of a driver's bundled sources. */
+    DriverVersion: {
+      workspace_key: string;
+      version_id: string;
+      driver_id: string;
+      /** @description Monotonic version number within the driver. */
+      version: number;
+      source_ref: string;
+      source_digest: string;
+      bundle_ref: string;
+      bundle_digest: string;
+      runtime?: string;
+      manifest?: {
+        [key: string]: string;
+      };
+      build_diagnostics?: string;
+      /** @enum {string} */
+      validation_status: "pending" | "passed" | "failed";
+      created_by?: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    /** @description The built bundle produced for a driver version. */
+    DriverBundle: {
+      root: string;
+      bundle_ref: string;
+      source_ref: string;
+      source_digest: string;
+      bundle_digest: string;
+      manifest: {
+        [key: string]: string;
+      };
+      diagnostics?: string;
+    };
+    /**
+     * @description Outcome of a version registration. Exactly one of `created_version` and
+     *     `reused_version` is true — re-posting identical sources reuses the
+     *     existing version.
+     */
+    WorkflowVersionResult: {
+      driver: components["schemas"]["Driver"];
+      version: components["schemas"]["DriverVersion"];
+      bundle?: components["schemas"]["DriverBundle"];
+      created_driver: boolean;
+      created_version: boolean;
+      reused_version: boolean;
+      /** @description Whether this version is now the driver's active version. */
+      activated: boolean;
+      /** @description Bundler output, empty on a clean build. */
+      build_diagnostics?: string;
+    };
+    /** @description One fan-out leg of a webhook dispatch, as reported on ingest. */
+    WebhookDelivery: {
+      delivery_id: string;
+      trigger_binding_id: string;
+      driver_run_id: string;
+      status: components["schemas"]["TriggerDeliveryStatus"];
+      rejection_reason?: string;
+    };
+    /**
+     * @description The 202 ingest wire. Legs are in dispatch order: the exact route-key
+     *     binding first when present and enabled, then pattern matches in
+     *     binding-id order.
+     */
+    WebhookDispatchResult: {
+      /** @constant */
+      status: "accepted";
+      /** @description Derived route key, e.g. `github.pull_request.opened`. */
+      route_key: string;
+      /** @description `{adapter}:{delivery-id}`. */
+      idempotency_key: string;
+      deliveries: components["schemas"]["WebhookDelivery"][];
+    };
   };
   responses: never;
   parameters: {
@@ -4002,6 +4200,8 @@ export interface components {
     AgentName: string;
     /** @description Driver run identifier */
     RunId: string;
+    /** @description Workflow name */
+    WorkflowName: string;
   };
   requestBodies: never;
   headers: never;
@@ -9085,6 +9285,221 @@ export interface operations {
       };
       /** @description Lookup failed */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+    };
+  };
+  createWorkflowVersion: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Workflow name */
+        name: components["parameters"]["WorkflowName"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateWorkflowVersionRequest"];
+      };
+    };
+    responses: {
+      /** @description Version registered */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WorkflowVersionResult"];
+        };
+      };
+      /**
+       * @description Invalid body, empty `files`, an entrypoint outside the workflow's
+       *     own directory, a missing entrypoint file, or a build failure.
+       */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+    };
+  };
+  createWorkflowRun: {
+    parameters: {
+      query?: never;
+      header?: {
+        /**
+         * @description Repeat key. A second request carrying the same key returns the
+         *     already-admitted run instead of creating a second one.
+         */
+        "Idempotency-Key"?: string;
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Workflow name */
+        name: components["parameters"]["WorkflowName"];
+      };
+      cookie?: never;
+    };
+    /**
+     * @description Arbitrary JSON payload handed to the workflow. `epic_id`, when
+     *     present, is lifted onto the run.
+     */
+    requestBody?: {
+      content: {
+        "application/json": {
+          [key: string]: unknown;
+        };
+      };
+    };
+    responses: {
+      /** @description Run accepted and queued */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverRun"];
+        };
+      };
+      /** @description Payload is not valid JSON, or the runner preflight failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description Workflow not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description Run creation failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+    };
+  };
+  receiveWebhook: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description GitHub event name; part of the derived route key. */
+        "X-GitHub-Event": string;
+        /**
+         * @description GitHub delivery id. Used as the idempotency anchor, so an empty
+         *     one is rejected rather than collapsing every delivery onto one key.
+         */
+        "X-GitHub-Delivery": string;
+        /**
+         * @description `sha256=<hex>` HMAC over the raw body, verified against the
+         *     source connector's inbound secret (the previous secret is accepted
+         *     inside the rotation window).
+         */
+        "X-Hub-Signature-256": string;
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Adapter name. `github` is the only registered adapter. */
+        name: "github";
+      };
+      cookie?: never;
+    };
+    /** @description The raw provider payload. Must be valid JSON; an empty body becomes `{}`. */
+    requestBody: {
+      content: {
+        "application/json": {
+          [key: string]: unknown;
+        };
+      };
+    };
+    responses: {
+      /** @description Delivery accepted and dispatched */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WebhookDispatchResult"];
+        };
+      };
+      /**
+       * @description Unreadable body, a missing required header, an empty delivery id,
+       *     or a payload that is not valid JSON.
+       */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description Signature missing, malformed, or not matching */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /**
+       * @description No adapter registered for `{name}`, or no enabled trigger binding
+       *     for the derived route key.
+       */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description Conflicting dispatch state */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description Dispatch failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description The configured store does not implement trigger dispatch */
+      501: {
         headers: {
           [name: string]: unknown;
         };

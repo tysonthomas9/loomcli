@@ -72,6 +72,10 @@ tags:
     description: Daemon monitor dashboard and metrics
   - name: triggers
     description: Trigger event and delivery audit trail
+  - name: workflows
+    description: Workflow version registration and run creation
+  - name: webhooks
+    description: Inbound provider webhook ingest
   - name: runs
     description: Driver (workflow) run reads and event streaming
   - name: observability
@@ -4656,6 +4660,214 @@ paths:
               schema:
                 $ref: "#/components/schemas/SimpleErrorResponse"
 
+  # ── Workflows ───────────────────────────────────────────────────────────
+  /api/workspaces/{ws}/workflows/{name}/versions:
+    post:
+      operationId: createWorkflowVersion
+      tags: [workflows]
+      summary: Build and register a new workflow version
+      description: |
+        Bundles the supplied TypeScript sources, registers them as a new
+        version of the workflow's driver, and (by default) activates that
+        version. Registration is content-addressed: re-posting identical
+        sources reuses the existing version instead of creating a new one,
+        which is reported back as `reused_version`.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkflowName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkflowVersionRequest"
+      responses:
+        "201":
+          description: Version registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowVersionResult"
+        "400":
+          description: |
+            Invalid body, empty `files`, an entrypoint outside the workflow's
+            own directory, a missing entrypoint file, or a build failure.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+
+  /api/workspaces/{ws}/workflows/{name}:
+    post:
+      operationId: createWorkflowRun
+      tags: [workflows]
+      summary: Start a workflow run
+      description: |
+        Enqueues a run of the workflow's active driver version. The whole
+        request body is passed through to the run as its payload; an empty
+        body becomes `{}`. Builtin workflows are registered on demand, so a
+        first run of one does not need a prior version upload.
+
+        Before the run is created the resolved runner backend is checked
+        (installed and authenticated), so a misconfigured runner fails here
+        rather than deep inside the worker.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkflowName"
+        - name: Idempotency-Key
+          in: header
+          description: |
+            Repeat key. A second request carrying the same key returns the
+            already-admitted run instead of creating a second one.
+          schema:
+            type: string
+      requestBody:
+        required: false
+        description: |
+          Arbitrary JSON payload handed to the workflow. `epic_id`, when
+          present, is lifted onto the run.
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "202":
+          description: Run accepted and queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverRun"
+        "400":
+          description: Payload is not valid JSON, or the runner preflight failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "404":
+          description: Workflow not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "500":
+          description: Run creation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+
+  # ── Inbound Webhooks ────────────────────────────────────────────────────
+  /api/workspaces/{ws}/webhooks/{name}:
+    post:
+      operationId: receiveWebhook
+      tags: [webhooks]
+      summary: Ingest an inbound provider webhook
+      description: |
+        Provider-facing ingest endpoint. `{name}` selects the adapter;
+        `github` is the only one registered today.
+
+        The handler normalizes headers and body into a route key, resolves the
+        enabled binding for it, verifies the signature, then dispatches
+        durably: one `TriggerEvent` plus one queued `DriverRun` and
+        `TriggerDelivery` per matched binding. It never executes work inline.
+
+        Dispatch is idempotent on `{adapter}:{delivery-id}`, so provider
+        redelivery heals each fan-out leg independently rather than
+        duplicating runs.
+
+        **Wire note**: the 202 body carries `deliveries[]` only. There is no
+        top-level `driver_run_id` or `driver_run` — fetch the run by
+        `deliveries[i].driver_run_id`.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: name
+          in: path
+          required: true
+          description: Adapter name. `github` is the only registered adapter.
+          schema:
+            type: string
+            enum: [github]
+        - name: X-GitHub-Event
+          in: header
+          required: true
+          description: GitHub event name; part of the derived route key.
+          schema:
+            type: string
+        - name: X-GitHub-Delivery
+          in: header
+          required: true
+          description: |
+            GitHub delivery id. Used as the idempotency anchor, so an empty
+            one is rejected rather than collapsing every delivery onto one key.
+          schema:
+            type: string
+        - name: X-Hub-Signature-256
+          in: header
+          required: true
+          description: |
+            `sha256=<hex>` HMAC over the raw body, verified against the
+            source connector's inbound secret (the previous secret is accepted
+            inside the rotation window).
+          schema:
+            type: string
+      requestBody:
+        required: true
+        description: The raw provider payload. Must be valid JSON; an empty body becomes `{}`.
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "202":
+          description: Delivery accepted and dispatched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookDispatchResult"
+        "400":
+          description: |
+            Unreadable body, a missing required header, an empty delivery id,
+            or a payload that is not valid JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "401":
+          description: Signature missing, malformed, or not matching
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "404":
+          description: |
+            No adapter registered for `{name}`, or no enabled trigger binding
+            for the derived route key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "409":
+          description: Conflicting dispatch state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "500":
+          description: Dispatch failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "501":
+          description: The configured store does not implement trigger dispatch
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+
 components:
   securitySchemes:
     BearerAuth:
@@ -4720,6 +4932,14 @@ components:
       in: path
       required: true
       description: Driver run identifier
+      schema:
+        type: string
+
+    WorkflowName:
+      name: name
+      in: path
+      required: true
+      description: Workflow name
       schema:
         type: string
 
@@ -7638,3 +7858,186 @@ components:
             $ref: "#/components/schemas/TriggerDelivery"
         count:
           type: integer
+
+    CreateWorkflowVersionRequest:
+      type: object
+      required: [files]
+      properties:
+        files:
+          type: object
+          description: |
+            Workflow sources keyed by repo-relative path. At least one entry is
+            required and the entrypoint must be among them.
+          additionalProperties:
+            type: string
+        entrypoint:
+          type: string
+          description: |
+            Entrypoint path. Defaults to `workflows/{name}.ts` and must live
+            under the workflow's own directory.
+        activate:
+          type: boolean
+          default: true
+          description: Whether to make the new version the driver's active one.
+
+    Driver:
+      type: object
+      description: A registered workflow driver.
+      required: [workspace_key, driver_id, name, owner_type, status, created_at, updated_at]
+      properties:
+        workspace_key:
+          type: string
+        driver_id:
+          type: string
+        name:
+          type: string
+        owner_type:
+          type: string
+          enum: [user, team, lead_agent, system]
+        owner_ref:
+          type: string
+        description:
+          type: string
+        active_version_id:
+          type: string
+        status:
+          type: string
+          enum: [draft, active, disabled]
+        trust_level:
+          type: string
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    DriverVersion:
+      type: object
+      description: One content-addressed version of a driver's bundled sources.
+      required: [workspace_key, version_id, driver_id, version, source_ref, source_digest, bundle_ref, bundle_digest, validation_status, created_at]
+      properties:
+        workspace_key:
+          type: string
+        version_id:
+          type: string
+        driver_id:
+          type: string
+        version:
+          type: integer
+          description: Monotonic version number within the driver.
+        source_ref:
+          type: string
+        source_digest:
+          type: string
+        bundle_ref:
+          type: string
+        bundle_digest:
+          type: string
+        runtime:
+          type: string
+        manifest:
+          type: object
+          additionalProperties:
+            type: string
+        build_diagnostics:
+          type: string
+        validation_status:
+          type: string
+          enum: [pending, passed, failed]
+        created_by:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    DriverBundle:
+      type: object
+      description: The built bundle produced for a driver version.
+      required: [root, bundle_ref, source_ref, source_digest, bundle_digest, manifest]
+      properties:
+        root:
+          type: string
+        bundle_ref:
+          type: string
+        source_ref:
+          type: string
+        source_digest:
+          type: string
+        bundle_digest:
+          type: string
+        manifest:
+          type: object
+          additionalProperties:
+            type: string
+        diagnostics:
+          type: string
+
+    WorkflowVersionResult:
+      type: object
+      description: |
+        Outcome of a version registration. Exactly one of `created_version` and
+        `reused_version` is true — re-posting identical sources reuses the
+        existing version.
+      required: [driver, version, created_driver, created_version, reused_version, activated]
+      properties:
+        driver:
+          $ref: "#/components/schemas/Driver"
+        version:
+          $ref: "#/components/schemas/DriverVersion"
+        bundle:
+          $ref: "#/components/schemas/DriverBundle"
+        created_driver:
+          type: boolean
+        created_version:
+          type: boolean
+        reused_version:
+          type: boolean
+        activated:
+          type: boolean
+          description: Whether this version is now the driver's active version.
+        build_diagnostics:
+          type: string
+          description: Bundler output, empty on a clean build.
+
+    WebhookDelivery:
+      type: object
+      description: One fan-out leg of a webhook dispatch, as reported on ingest.
+      required: [delivery_id, trigger_binding_id, driver_run_id, status]
+      properties:
+        delivery_id:
+          type: string
+        trigger_binding_id:
+          type: string
+        driver_run_id:
+          type: string
+        status:
+          $ref: "#/components/schemas/TriggerDeliveryStatus"
+        rejection_reason:
+          type: string
+
+    WebhookDispatchResult:
+      type: object
+      description: |
+        The 202 ingest wire. Legs are in dispatch order: the exact route-key
+        binding first when present and enabled, then pattern matches in
+        binding-id order.
+      required: [status, route_key, idempotency_key, deliveries]
+      properties:
+        status:
+          type: string
+          const: accepted
+        route_key:
+          type: string
+          description: Derived route key, e.g. `github.pull_request.opened`.
+        idempotency_key:
+          type: string
+          description: '`{adapter}:{delivery-id}`.'
+        deliveries:
+          type: array
+          items:
+            $ref: "#/components/schemas/WebhookDelivery"
