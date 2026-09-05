@@ -9,7 +9,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { getTaskSessions } from "@/api/terminal";
 import type { MutationPayload } from "@/api/common";
 import type { SessionRecord } from "@/types/agent";
-import { useEventSubscription } from "@/hooks/common";
+import { useEventContext, useEventSubscription } from "@/hooks/common";
 import { useWorkspaceContext } from "@/hooks/workspace";
 
 /** Return type for the useTaskSessions hook. */
@@ -31,6 +31,7 @@ const POLL_INTERVAL_ACTIVE = 3_000;
 
 export function useTaskSessions(taskId: string | null): UseTaskSessionsResult {
   const { workspaceId } = useWorkspaceContext();
+  const { connectionEpoch } = useEventContext();
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -38,6 +39,7 @@ export function useTaskSessions(taskId: string | null): UseTaskSessionsResult {
   const mountedRef = useRef(true);
   const fetchInProgressRef = useRef(false);
   const sessionsRef = useRef(sessions);
+  const connectionEpochRef = useRef(connectionEpoch);
   sessionsRef.current = sessions; // always keep ref in sync with latest state
 
   const fetchData = useCallback(async () => {
@@ -83,6 +85,13 @@ export function useTaskSessions(taskId: string | null): UseTaskSessionsResult {
   useEventSubscription(handleMutation, {
     types: ["session_change"],
   });
+
+  useEffect(() => {
+    const previous = connectionEpochRef.current;
+    connectionEpochRef.current = connectionEpoch;
+    if (!taskId || connectionEpoch <= previous) return;
+    void fetchData();
+  }, [connectionEpoch, fetchData, taskId]);
 
   useEffect(() => {
     mountedRef.current = true;

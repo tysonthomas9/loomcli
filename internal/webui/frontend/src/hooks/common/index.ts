@@ -15,6 +15,7 @@ export {
   EventProvider,
   useEventContext,
   useEventSubscription,
+  useResyncSubscription,
   EventContext,
   NO_EVENT_CONTEXT,
 } from "./useEventProvider";

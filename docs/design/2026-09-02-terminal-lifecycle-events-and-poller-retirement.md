@@ -389,3 +389,24 @@ What changed: a `MutationPage{Events, Cursor, HasMore}` contract through backend
 Proven live on a local-mode stack, both FleetDB flavours (`.scratch/terminal-lifecycle/bv-step2/`): cold load after idle = one activation (head probe with #227, silent drain without it), zero replay pages, zero buffer-full lines, one registration, two blocked-list fetches; an hour-old cursor replays 286 / 322 frames before `connected`; a garbage cursor answers 503 `error`, a cursor older than the retention floor answers 503 `expired`; a restart while a tab is open recovers with a bounded catch-up; one refetch per delivered mutation frame.
 
 Next (PR B, `feat/sse-resync-frame`): in-stream `resync` frames with per-client sequence numbers instead of the 503s and instead of eviction on overflow, writer deadlines, 256-slot buffer, client `onResync` handling and the four consumers that only react to reconnect state.
+
+## Transport repair 2b: resync frames and writer deadlines (2026-09-03, PR B)
+
+The hub numbers every offered frame per client. A full client channel keeps
+the client registered, records the latest dropped sequence and cursor, and
+sets a pending-resync flag; a global queue drop marks every matching client.
+The sole writer drains pending frames, advances to the highest observed
+sequence, emits one repair frame, and rejects stale queued sequences.
+
+The frame contract is `event: resync`, `id: <repair cursor>`, and
+`data: {"reason":"cap|error|expired|overflow"}`. Catch-up repair uses the last
+bounded cursor, requested cursor, or FleetDB retention floor as appropriate.
+Every SSE frame has a two-second write deadline, one error-returning flush,
+and a cleared deadline; a timeout ends the connection.
+
+The client records the repair ID, reports `{from,to,reason}`, advances the
+connection epoch once, and sends the legacy `refresh` invalidation so snapshot
+consumers refetch once. Recent activity reruns its bounded issue-trail rebuild.
+
+Remaining work: step 3 adds the projection fence. A client-facing
+mutations-range endpoint is still needed for global recent-activity backfill.

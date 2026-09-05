@@ -1,21 +1,28 @@
 package realtime
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
+
+const frameWriteTimeout = 2 * time.Second
 
 // Writer centralizes SSE wire-format concerns. It is not concurrency-safe.
 type Writer struct {
 	w          io.Writer
 	controller responseController
+	now        func() time.Time
 }
 
 type responseController interface {
 	Flush() error
+	SetWriteDeadline(time.Time) error
 }
 
 // NewWriter creates a new SSE writer, checking that the ResponseWriter supports Flusher.
@@ -33,7 +40,7 @@ func newWriter(w io.Writer, controller responseController) (*Writer, error) {
 	if controller == nil {
 		return nil, fmt.Errorf("SSE response controller must not be nil")
 	}
-	return &Writer{w: w, controller: controller}, nil
+	return &Writer{w: w, controller: controller, now: time.Now}, nil
 }
 
 // WriteRetry writes the retry interval to the SSE stream.
@@ -57,12 +64,25 @@ func (sw *Writer) WriteEventNoID(event, data string) error {
 	return sw.writeFrame(nil, &event, &data, nil, nil)
 }
 
+// WriteResync writes a resumable transport-repair frame. Its ID advances the
+// connection cursor past a range that must be repaired from authoritative
+// snapshots rather than delivered as mutations.
+func (sw *Writer) WriteResync(id, reason string) error {
+	data, err := json.Marshal(struct {
+		Reason string `json:"reason"`
+	}{Reason: reason})
+	if err != nil {
+		return err
+	}
+	return sw.WriteEventID(id, "resync", string(data))
+}
+
 // WriteComment writes a comment to the SSE stream.
 func (sw *Writer) WriteComment(text string) error {
 	return sw.writeFrame(nil, nil, nil, nil, &text)
 }
 
-func (sw *Writer) writeFrame(id, event, data *string, retry *int, comment *string) error {
+func validateFrame(id, event *string, retry *int) error {
 	if id != nil {
 		if strings.ContainsAny(*id, "\r\n") {
 			return fmt.Errorf("SSE event ID must not contain a carriage return or newline")
@@ -77,7 +97,10 @@ func (sw *Writer) writeFrame(id, event, data *string, retry *int, comment *strin
 	if retry != nil && *retry < 0 {
 		return fmt.Errorf("SSE retry must not be negative")
 	}
+	return nil
+}
 
+func buildFrame(id, event, data *string, retry *int, comment *string) string {
 	var frame strings.Builder
 	writeMultiline := func(prefix, text string) {
 		text = strings.ReplaceAll(text, "\r\n", "\n")
@@ -100,9 +123,33 @@ func (sw *Writer) writeFrame(id, event, data *string, retry *int, comment *strin
 		writeMultiline("data: ", *data)
 	}
 	frame.WriteByte('\n')
+	return frame.String()
+}
 
-	if _, err := sw.w.Write([]byte(frame.String())); err != nil {
+func (sw *Writer) writeFrame(id, event, data *string, retry *int, comment *string) error {
+	if err := validateFrame(id, event, retry); err != nil {
 		return err
 	}
-	return sw.controller.Flush()
+	frame := buildFrame(id, event, data, retry, comment)
+	deadlineErr := sw.controller.SetWriteDeadline(sw.now().Add(frameWriteTimeout))
+	if deadlineErr != nil && !errors.Is(deadlineErr, http.ErrNotSupported) {
+		return deadlineErr
+	}
+
+	_, writeErr := sw.w.Write([]byte(frame))
+	var flushErr error
+	if writeErr == nil {
+		flushErr = sw.controller.Flush()
+	}
+	clearErr := sw.controller.SetWriteDeadline(time.Time{})
+	if errors.Is(clearErr, http.ErrNotSupported) {
+		clearErr = nil
+	}
+	if writeErr != nil {
+		return writeErr
+	}
+	if flushErr != nil {
+		return flushErr
+	}
+	return clearErr
 }

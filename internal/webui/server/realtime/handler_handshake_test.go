@@ -1,11 +1,14 @@
 package realtime
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -26,6 +29,31 @@ type recordingFrameWriter struct {
 	written   chan recordedFrame
 	connected chan struct{}
 	once      sync.Once
+}
+
+type blockingFrameWriter struct {
+	*recordingFrameWriter
+	blocked chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func newBlockingFrameWriter() *blockingFrameWriter {
+	return &blockingFrameWriter{
+		recordingFrameWriter: newRecordingFrameWriter(),
+		blocked:              make(chan struct{}),
+		release:              make(chan struct{}),
+	}
+}
+
+func (w *blockingFrameWriter) WriteEventID(id, event, data string) error {
+	if event == "mutation" {
+		w.once.Do(func() {
+			close(w.blocked)
+			<-w.release
+		})
+	}
+	return w.recordingFrameWriter.WriteEventID(id, event, data)
 }
 
 func newRecordingFrameWriter() *recordingFrameWriter {
@@ -50,6 +78,11 @@ func (w *recordingFrameWriter) WriteEventNoID(event, data string) error {
 	if event == "connected" {
 		w.once.Do(func() { close(w.connected) })
 	}
+	return nil
+}
+
+func (w *recordingFrameWriter) WriteResync(id, reason string) error {
+	w.record(recordedFrame{id: id, event: "resync", data: fmt.Sprintf(`{"reason":%q}`, reason)})
 	return nil
 }
 
@@ -206,12 +239,209 @@ func TestHandler_CatchUpPagesAndDeduplicatesEveryQueuedCursor(t *testing.T) {
 	}
 }
 
-func TestHandler_CatchUpFailuresReturnResyncRequiredBeforeStreaming(t *testing.T) {
+func TestHandler_OverflowResyncDrainsToHighestOfferedFrameAndKeepsClient(t *testing.T) {
+	hub := NewHub()
+	dispatchStarted := make(chan struct{})
+	releaseDispatch := make(chan struct{})
+	hub.dispatchBarrier = func(kind hubDispatchKind) {
+		if kind == hubDispatchBroadcast {
+			dispatchStarted <- struct{}{}
+			<-releaseDispatch
+		}
+	}
+	go hub.Run()
+	t.Cleanup(hub.Stop)
+
+	client := NewClient(1, ClientSendBuf, "c1.start", nil, "ws-1")
+	if err := hub.RegisterClient(context.Background(), client); err != nil {
+		t.Fatalf("RegisterClient: %v", err)
+	}
+	writer := newBlockingFrameWriter()
+	h := NewHandler(HandlerConfig{Hub: hub})
+	h.heartbeatInterval = time.Hour
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_, _ = h.streamLoop(writer, client, ctx, nil)
+		close(done)
+	}()
+
+	dispatch := func(n int) {
+		t.Helper()
+		hub.Broadcast(&MutationPayload{
+			Cursor:      fmt.Sprintf("c1.%03d", n),
+			Type:        "update",
+			IssueID:     fmt.Sprintf("F%d", n),
+			WorkspaceID: "ws-1",
+		})
+		<-dispatchStarted
+		releaseDispatch <- struct{}{}
+	}
+	dispatch(1)
+	<-writer.blocked
+	for n := 2; n <= 300; n++ {
+		dispatch(n)
+	}
+
+	// Holding the next hub dispatch proves F300 has completed fan-out without
+	// polling or sleeping, while ensuring F301 cannot enter the client queue.
+	hub.Broadcast(&MutationPayload{Cursor: "c1.301", Type: "update", IssueID: "F301", WorkspaceID: "ws-1"})
+	<-dispatchStarted
+	client.resyncMu.Lock()
+	dropped := client.dropped
+	client.resyncMu.Unlock()
+	if !client.pendingResync.Load() || dropped.seq != 300 || dropped.cursor != "c1.300" {
+		t.Fatalf("pending drop = (%v, %d, %q), want (true, 300, c1.300)", client.pendingResync.Load(), dropped.seq, dropped.cursor)
+	}
+	if got := hub.ClientCount(); got != 1 {
+		t.Fatalf("client count during burst = %d, want 1", got)
+	}
+
+	close(writer.release)
+	for frame := range writer.written {
+		if frame.event == "resync" {
+			if frame.id != "c1.300" || frame.data != `{"reason":"overflow"}` {
+				t.Fatalf("resync frame = %#v, want overflow at c1.300", frame)
+			}
+			break
+		}
+	}
+	releaseDispatch <- struct{}{}
+	for frame := range writer.written {
+		if frame.id == "c1.301" {
+			break
+		}
+	}
+	cancel()
+	<-done
+
+	frames := writer.snapshot()
+	if got := countRecordedEvent(frames, "resync"); got != 1 {
+		t.Fatalf("resync frame count = %d, want exactly 1; frames=%#v", got, frames)
+	}
+	resyncIndex := -1
+	for i, frame := range frames {
+		if frame.event == "resync" {
+			resyncIndex = i
+			continue
+		}
+		if resyncIndex >= 0 && frame.event == "mutation" && frame.id != "c1.301" {
+			t.Fatalf("stale frame written after resync: %#v", frame)
+		}
+	}
+}
+
+func countRecordedEvent(frames []recordedFrame, event string) int {
+	count := 0
+	for _, frame := range frames {
+		if frame.event == event {
+			count++
+		}
+	}
+	return count
+}
+
+type timeoutResponseController struct {
+	mu        sync.Mutex
+	flushes   int
+	deadlines []time.Time
+	flushed   chan int
+}
+
+func (c *timeoutResponseController) Flush() error {
+	c.mu.Lock()
+	c.flushes++
+	flushes := c.flushes
+	c.mu.Unlock()
+	c.flushed <- flushes
+	if flushes == 3 {
+		return os.ErrDeadlineExceeded
+	}
+	return nil
+}
+
+func (c *timeoutResponseController) SetWriteDeadline(deadline time.Time) error {
+	c.mu.Lock()
+	c.deadlines = append(c.deadlines, deadline)
+	c.mu.Unlock()
+	return nil
+}
+
+func TestHandler_WriterDeadlineTimeoutEndsStreamAndUnregisters(t *testing.T) {
+	hub := NewHub()
+	unregisterStarted := make(chan struct{})
+	releaseUnregister := make(chan struct{})
+	var unregisterOnce sync.Once
+	hub.dispatchBarrier = func(kind hubDispatchKind) {
+		if kind == hubDispatchUnregister {
+			unregisterOnce.Do(func() { close(unregisterStarted) })
+			<-releaseUnregister
+		}
+	}
+	go hub.Run()
+	t.Cleanup(hub.Stop)
+
+	controller := &timeoutResponseController{flushed: make(chan int, 4)}
+	var output bytes.Buffer
+	h := NewHandler(HandlerConfig{
+		Hub:              hub,
+		WorkspaceFromCtx: func(context.Context) string { return "ws-1" },
+	})
+	h.heartbeatInterval = time.Hour
+	h.writerFactory = func(http.ResponseWriter) (frameWriter, error) {
+		writer, err := newWriter(&output, controller)
+		if writer != nil {
+			writer.now = func() time.Time { return time.Unix(123, 0) }
+		}
+		return writer, err
+	}
+
+	done := make(chan struct{})
+	go func() {
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/events", nil))
+		close(done)
+	}()
+	if got := <-controller.flushed; got != 1 {
+		t.Fatalf("first flush = %d, want retry frame", got)
+	}
+	if got := <-controller.flushed; got != 2 {
+		t.Fatalf("second flush = %d, want connected frame", got)
+	}
+	hub.Broadcast(&MutationPayload{Cursor: "c1.timeout", Type: "update", IssueID: "timeout", WorkspaceID: "ws-1"})
+	if got := <-controller.flushed; got != 3 {
+		t.Fatalf("third flush = %d, want live mutation", got)
+	}
+	<-done
+	<-unregisterStarted
+	close(releaseUnregister)
+
+	dummy := NewClient(2, 1, "", nil, "ws-1")
+	if err := hub.RegisterClient(context.Background(), dummy); err != nil {
+		t.Fatalf("register ordering client: %v", err)
+	}
+	if got := hub.ClientCount(); got != 1 {
+		t.Fatalf("client count after timed-out handler cleanup = %d, want only ordering client", got)
+	}
+	controller.mu.Lock()
+	deadlines := append([]time.Time(nil), controller.deadlines...)
+	controller.mu.Unlock()
+	if len(deadlines) != 6 {
+		t.Fatalf("deadline calls = %v, want set and clear around each of 3 frames", deadlines)
+	}
+	for i := 0; i < len(deadlines); i += 2 {
+		if want := time.Unix(123, 0).Add(frameWriteTimeout); !deadlines[i].Equal(want) || !deadlines[i+1].IsZero() {
+			t.Fatalf("frame %d deadlines = (%v, %v), want (%v, zero)", i/2+1, deadlines[i], deadlines[i+1], want)
+		}
+	}
+}
+
+func TestHandler_CatchUpFailuresOpenWithResyncThenConnected(t *testing.T) {
 	tests := []struct {
 		name       string
 		configure  func(*Handler)
 		page       func(context.Context, string, string, int) (backend.MutationPage, error)
 		wantReason string
+		wantID     string
 	}{
 		{
 			name: "page cap",
@@ -225,6 +455,7 @@ func TestHandler_CatchUpFailuresReturnResyncRequiredBeforeStreaming(t *testing.T
 				return backend.MutationPage{Events: []backend.MutationData{}, Cursor: since + ".next", HasMore: true}, nil
 			},
 			wantReason: "cap",
+			wantID:     "c1.old.next.next",
 		},
 		{
 			name: "backend error",
@@ -232,13 +463,17 @@ func TestHandler_CatchUpFailuresReturnResyncRequiredBeforeStreaming(t *testing.T
 				return backend.MutationPage{}, errors.New("unavailable")
 			},
 			wantReason: "error",
+			wantID:     "c1.old",
 		},
 		{
 			name: "expired cursor",
 			page: func(context.Context, string, string, int) (backend.MutationPage, error) {
-				return backend.MutationPage{}, backend.NewBackendError(backend.KindValidation, "catchup", "expired", backend.ErrMutationCursorExpired)
+				err := backend.NewBackendError(backend.KindValidation, "catchup", "expired", backend.ErrMutationCursorExpired)
+				err.Meta = map[string]string{"cursor": "c1.floor"}
+				return backend.MutationPage{}, err
 			},
 			wantReason: "expired",
+			wantID:     "c1.floor",
 		},
 	}
 
@@ -253,23 +488,35 @@ func TestHandler_CatchUpFailuresReturnResyncRequiredBeforeStreaming(t *testing.T
 				GetMutationPage:  tt.page,
 				WorkspaceFromCtx: func(context.Context) string { return "ws-1" },
 			})
+			writer := newRecordingFrameWriter()
+			h.writerFactory = func(http.ResponseWriter) (frameWriter, error) { return writer, nil }
+			h.heartbeatInterval = time.Hour
 			if tt.configure != nil {
 				tt.configure(h)
 			}
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan struct{})
 			rr := httptest.NewRecorder()
-			h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/events?since=c1.old", nil))
-			if rr.Code != http.StatusServiceUnavailable {
-				t.Fatalf("status = %d, want 503", rr.Code)
+			go func() {
+				h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/events?since=c1.old", nil).WithContext(ctx))
+				close(done)
+			}()
+			<-writer.connected
+			cancel()
+			<-done
+
+			frames := writer.snapshot()
+			if len(frames) < 3 {
+				t.Fatalf("frames = %#v, want resync, retry, connected", frames)
 			}
-			var body map[string]string
-			if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
-				t.Fatalf("decode body %q: %v", rr.Body.String(), err)
+			if frames[0] != (recordedFrame{id: tt.wantID, event: "resync", data: fmt.Sprintf(`{"reason":%q}`, tt.wantReason)}) {
+				t.Fatalf("first frame = %#v, want resync id=%q reason=%q", frames[0], tt.wantID, tt.wantReason)
 			}
-			if body["error"] != "resync_required" || body["reason"] != tt.wantReason {
-				t.Fatalf("body = %v, want resync_required/%s", body, tt.wantReason)
+			if frames[1].event != "retry" || frames[2].event != "connected" {
+				t.Fatalf("frame order = %#v, want resync, retry, connected", frames[:3])
 			}
-			if got := rr.Header().Get("Content-Type"); got != "application/json" {
-				t.Fatalf("Content-Type = %q, want application/json", got)
+			if got := rr.Header().Get("Content-Type"); got != "text/event-stream" {
+				t.Fatalf("Content-Type = %q, want open event stream", got)
 			}
 		})
 	}
