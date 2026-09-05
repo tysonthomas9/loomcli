@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"slices"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/test/skills-e2e/registry"
 )
 
 func TestBuildSkillFileTreeRendersCanonicalDocumentAndPreservesBinaryFiles(t *testing.T) {
@@ -76,6 +78,7 @@ func TestBuildSkillFileTreeReturnsDefensiveDeterministicCopies(t *testing.T) {
 
 func TestValidateSkillFileTreeRequiresOneNonExecutableRootDocument(t *testing.T) {
 	t.Parallel()
+	registry.MarkEvidence(t, 5, 10, 11)
 
 	validDocument := []byte("---\nname: valid-tool\ndescription: Valid tool\n---\nbody\n")
 	tests := []struct {
@@ -83,7 +86,12 @@ func TestValidateSkillFileTreeRequiresOneNonExecutableRootDocument(t *testing.T)
 		files []SkillFileTreeFile
 	}{
 		{name: "missing", files: []SkillFileTreeFile{{Path: "README.md", Bytes: []byte("readme")}}},
+		{name: "duplicate", files: []SkillFileTreeFile{
+			{Path: SkillFileNameSKILLMD, Bytes: validDocument},
+			{Path: SkillFileNameSKILLMD, Bytes: validDocument},
+		}},
 		{name: "executable", files: []SkillFileTreeFile{{Path: SkillFileNameSKILLMD, Bytes: validDocument, Executable: true}}},
+		{name: "invalid metadata", files: []SkillFileTreeFile{{Path: SkillFileNameSKILLMD, Bytes: []byte("not skill frontmatter")}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -143,6 +151,7 @@ func TestValidateSkillFileTreeEnforcesSkillSizeLimits(t *testing.T) {
 
 func TestValidateSkillFileTreeReusesWorkspacePathCollisionRules(t *testing.T) {
 	t.Parallel()
+	registry.MarkEvidence(t, 6, 7)
 
 	document := []byte("---\nname: paths-tool\ndescription: Paths tool\n---\n")
 	tests := []struct {
@@ -185,6 +194,7 @@ func TestValidateSkillFileTreeReusesWorkspacePathCollisionRules(t *testing.T) {
 
 func TestValidateSkillFileTreeAcceptsExactLimits(t *testing.T) {
 	t.Parallel()
+	registry.MarkEvidence(t, 17)
 
 	documentPrefix := []byte("---\nname: limits-tool\ndescription: Limits tool\n---\n")
 	document := append([]byte(nil), documentPrefix...)
@@ -216,6 +226,7 @@ func bundleFiles(count, size int) []SkillFileTreeFile {
 
 func TestValidateSkillFileTreePreservesCompleteImportedDocument(t *testing.T) {
 	t.Parallel()
+	registry.MarkEvidence(t, 13)
 
 	document := []byte("---\r\nname: imported-tool\r\ndescription: Use <ViewTransition> without rewriting metadata\r\nlicense: MIT\r\nmetadata:\r\n  owner: tools\r\n---\r\n# Imported\r\n")
 	wantDocument := append([]byte(nil), document...)

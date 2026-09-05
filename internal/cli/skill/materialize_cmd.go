@@ -49,12 +49,10 @@ func runSkillMaterialize(cmd *cobra.Command) error {
 	ctx, cancel := context.WithTimeout(ctx, skillMaterializeTimeout)
 	defer cancel()
 
-	err := materializeCurrentWorkdir(ctx)
-	if skillmat.IsStoreUnavailable(err) {
-		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Warning: skill store unavailable; continuing with existing materialization: %v\n", err)
-		return nil
-	}
-	if err != nil {
+	if err := materializeCurrentWorkdir(ctx); err != nil {
+		if skillmat.IsStoreUnavailable(err) {
+			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Warning: Fleet skill storage is unavailable; the existing Skill projection was preserved.")
+		}
 		return cli.NewCommandExitError(2, fmt.Errorf("skill materialization was refused: %w", err))
 	}
 	return nil

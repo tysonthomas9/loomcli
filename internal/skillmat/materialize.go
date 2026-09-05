@@ -13,7 +13,6 @@ import (
 	"io/fs"
 	"net"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -117,6 +116,15 @@ func IsStoreUnavailable(err error) bool {
 //
 //nolint:cyclop,funlen // The reconcile pipeline reads as one ordered sequence of gates.
 func materialize(ctx context.Context, st store.Store, workspace, roleName, targetDir string) error {
+	return materializeWithRootOpener(ctx, st, workspace, roleName, targetDir, openSecureRoot)
+}
+
+type secureRootOpener func(string) (secureRoot, error)
+
+//nolint:cyclop,funlen // The reconcile pipeline reads as one ordered sequence of gates.
+func materializeWithRootOpener(
+	ctx context.Context, st store.Store, workspace, roleName, targetDir string, openRoot secureRootOpener,
+) error {
 	if err := ensurePlatformSupported(); err != nil {
 		return err
 	}
@@ -144,7 +152,7 @@ func materialize(ctx context.Context, st store.Store, workspace, roleName, targe
 	}
 	paths := entryPaths(entries)
 
-	root, err := openSecureRoot(targetDir)
+	root, err := openRoot(targetDir)
 	if err != nil {
 		return fmt.Errorf("open skill target %q: %w", targetDir, err)
 	}
@@ -171,10 +179,33 @@ func materialize(ctx context.Context, st store.Store, workspace, roleName, targe
 	if err := detectExistingCollisions(root, targetDir, entries, previous); err != nil {
 		return err
 	}
+	if err := ensureSkillGitExcludes(ctx, targetDir); err != nil {
+		return err
+	}
+	previousEntries, err := snapshotManagedEntries(root, previous)
+	if err != nil {
+		return fmt.Errorf("snapshot previous skill projection: %w", err)
+	}
+	markerBytes, err := json.MarshalIndent(marker{Version: markerVersion, Hash: projectionHash, Paths: paths}, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode skill marker: %w", err)
+	}
+	markerBytes = append(markerBytes, '\n')
+	// Rollback materially reduces partial projections for transient local
+	// failures, but it is deliberately best-effort: a persistent filesystem
+	// failure can also prevent restoration. The old marker is not replaced
+	// until every projection mutation succeeds, so a later invocation will
+	// detect and reconcile any mixed tree rather than accepting it as current.
+	rollback := func(cause error) error {
+		if err := restoreProjection(root, previousEntries, paths); err != nil {
+			return errors.Join(cause, fmt.Errorf("restore previous skill projection: %w", err))
+		}
+		return cause
+	}
 	stalePaths := findStalePaths(previous, paths)
 	preDeleted := make(map[string]bool)
 	if err := writeProjection(root, entries, stalePaths, preDeleted); err != nil {
-		return err
+		return rollback(err)
 	}
 	remainingStale := stalePaths[:0]
 	for _, stale := range stalePaths {
@@ -183,17 +214,12 @@ func materialize(ctx context.Context, st store.Store, workspace, roleName, targe
 		}
 	}
 	if err := cleanupStale(root, remainingStale); err != nil {
-		return err
+		return rollback(err)
 	}
-	markerBytes, err := json.MarshalIndent(marker{Version: markerVersion, Hash: projectionHash, Paths: paths}, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode skill marker: %w", err)
-	}
-	markerBytes = append(markerBytes, '\n')
 	if err := writeMarkerAtomically(root, markerBytes); err != nil {
-		return fmt.Errorf("write skill marker: %w", err)
+		return rollback(fmt.Errorf("write skill marker: %w", err))
 	}
-	return ensureSkillGitExcludes(ctx, targetDir)
+	return nil
 }
 
 func ensureSkillGitExcludes(ctx context.Context, targetDir string) error {
@@ -240,6 +266,54 @@ func findStalePaths(previous *marker, desiredPaths []string) []string {
 		}
 	}
 	return paths
+}
+
+func snapshotManagedEntries(root secureRoot, previous *marker) ([]desiredEntry, error) {
+	if previous == nil {
+		return nil, nil
+	}
+	entries := make([]desiredEntry, 0, len(previous.Paths))
+	for _, recorded := range previous.Paths {
+		info, err := root.Lstat(recorded)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		entry := desiredEntry{Path: recorded, Mode: info.Mode.Perm(), Skill: "rollback", SourcePath: recorded}
+		switch {
+		case info.Mode.IsRegular():
+			entry.Kind = entryFile
+			entry.Content, _, err = root.ReadFile(recorded, info.Size+1)
+		case info.Mode&os.ModeSymlink != 0:
+			entry.Kind = entrySymlink
+			entry.LinkTarget = info.LinkTarget
+		default:
+			// Structural drift is repaired by the normal projection writer. It
+			// is not a prior readable entry that rollback can restore.
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, entry)
+	}
+	return entries, nil
+}
+
+func restoreProjection(root secureRoot, previousEntries []desiredEntry, attemptedPaths []string) error {
+	preDeleted := make(map[string]bool)
+	if err := writeProjection(root, previousEntries, attemptedPaths, preDeleted); err != nil {
+		return err
+	}
+	remaining := make([]string, 0, len(attemptedPaths))
+	for _, attempted := range attemptedPaths {
+		if !preDeleted[attempted] {
+			remaining = append(remaining, attempted)
+		}
+	}
+	return cleanupStale(root, remaining)
 }
 
 func cleanupStale(root secureRoot, paths []string) error {
@@ -917,82 +991,4 @@ func desiredFileAncestor(desired map[string]desiredNode, name string) (desiredNo
 		}
 	}
 	return desiredNode{}, false
-}
-
-//nolint:funlen // Exclude-file reconciliation keeps its read/merge/write steps inline.
-func ensureGitExcludes(ctx context.Context, targetDir string) error {
-	inside := gitCommandContext(ctx, targetDir, "rev-parse", "--is-inside-work-tree")
-	out, err := inside.Output()
-	if err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		return nil
-	}
-	if strings.TrimSpace(string(out)) != "true" {
-		return nil
-	}
-	resolve := gitCommandContext(ctx, targetDir, "rev-parse", "--git-path", "info/exclude")
-	out, err = resolve.Output()
-	if err != nil {
-		return fmt.Errorf("resolve git info/exclude: %w", err)
-	}
-	excludePath := strings.TrimSpace(string(out))
-	if !filepath.IsAbs(excludePath) {
-		excludePath = filepath.Join(targetDir, excludePath)
-	}
-	excludePath = filepath.Clean(excludePath)
-	excludeRootPath := filepath.Dir(filepath.Dir(excludePath))
-	excludeName, err := filepath.Rel(excludeRootPath, excludePath)
-	if err != nil {
-		return fmt.Errorf("resolve git exclude relative path: %w", err)
-	}
-	excludeName = filepath.ToSlash(excludeName)
-	excludeRoot, err := openSecureRoot(excludeRootPath)
-	if err != nil {
-		return fmt.Errorf("open git metadata root %q: %w", excludeRootPath, err)
-	}
-	defer excludeRoot.Close()
-	b, _, err := excludeRoot.ReadFile(excludeName, 0)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
-	}
-	wanted := []string{AgentsSkillsDir + "/", ClaudeSkillsDir + "/"}
-	present := make(map[string]bool, len(wanted))
-	for _, line := range strings.Split(strings.ReplaceAll(string(b), "\r\n", "\n"), "\n") {
-		present[line] = true
-	}
-	var addition strings.Builder
-	if len(b) > 0 && b[len(b)-1] != '\n' {
-		addition.WriteByte('\n')
-	}
-	for _, line := range wanted {
-		if !present[line] {
-			addition.WriteString(line)
-			addition.WriteByte('\n')
-		}
-	}
-	if addition.Len() == 0 {
-		return nil
-	}
-	return excludeRoot.AppendFile(excludeName, []byte(addition.String()), 0o644)
-}
-
-func gitCommandContext(ctx context.Context, targetDir string, args ...string) *exec.Cmd {
-	commandArgs := append([]string{"-C", targetDir}, args...)
-	cmd := exec.CommandContext(ctx, "git", commandArgs...) //nolint:gosec,norawexec // fixed git inspection command
-	cmd.Env = sanitizedGitEnv(os.Environ())
-	return cmd
-}
-
-func sanitizedGitEnv(env []string) []string {
-	clean := make([]string, 0, len(env))
-	for _, item := range env {
-		key, _, _ := strings.Cut(item, "=")
-		if strings.HasPrefix(strings.ToUpper(key), "GIT_") {
-			continue
-		}
-		clean = append(clean, item)
-	}
-	return clean
 }

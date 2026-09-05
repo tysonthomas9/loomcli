@@ -5,10 +5,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -21,6 +24,16 @@ import (
 type workspaceFileStore struct{ client *Client }
 
 var _ store.WorkspaceFileStore = (*workspaceFileStore)(nil)
+
+const (
+	pendingTreePollInterval = 25 * time.Millisecond
+	pendingTreeWaitTimeout  = 10 * time.Second
+)
+
+type pendingTreeWaitPolicy struct {
+	PollInterval time.Duration
+	Timeout      time.Duration
+}
 
 // These wire types are temporary local mirrors of FleetDB's workspace-file
 // JSON contract. Keep them private so the later generated-client cutover can
@@ -118,9 +131,49 @@ func (s *workspaceFileStore) Publish(ctx context.Context, workspaceKey string, f
 	if err != nil {
 		return nil, fmt.Errorf("publish workspace file tree returned invalid tree: %w", err)
 	}
+	if status == domain.WorkspaceFileTreeProjectionPending {
+		domainTree, err = s.waitForTree(ctx, workspaceKey, domainTree.Revision)
+		if err != nil {
+			return nil, fmt.Errorf("wait for published workspace file tree: %w", err)
+		}
+		status = domain.WorkspaceFileTreePublished
+	}
 	return &domain.WorkspaceFileTreePublishResult{
 		Tree: domainTree, Status: status, ETag: headers.Get("ETag"), Location: headers.Get("Location"),
 	}, nil
+}
+
+func (s *workspaceFileStore) waitForTree(ctx context.Context, workspaceKey, revision string) (*domain.WorkspaceFileTree, error) {
+	return s.waitForTreeWithPolicy(ctx, workspaceKey, revision, pendingTreeWaitPolicy{
+		PollInterval: pendingTreePollInterval,
+		Timeout:      pendingTreeWaitTimeout,
+	})
+}
+
+func (s *workspaceFileStore) waitForTreeWithPolicy(ctx context.Context, workspaceKey, revision string, policy pendingTreeWaitPolicy) (*domain.WorkspaceFileTree, error) {
+	waitCtx, cancel := context.WithTimeout(ctx, policy.Timeout)
+	defer cancel()
+	for {
+		tree, err := s.GetTree(waitCtx, workspaceKey, revision)
+		if err == nil {
+			return tree, nil
+		}
+		if !errors.Is(err, domain.ErrNotFound) {
+			return nil, err
+		}
+		timer := time.NewTimer(policy.PollInterval)
+		select {
+		case <-waitCtx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return nil, waitCtx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 func (s *workspaceFileStore) beginUpload(ctx context.Context, workspaceKey string, request workspaceFileUploadRequestWire) (*workspaceFileTransferGrantWire, error) {
@@ -129,7 +182,7 @@ func (s *workspaceFileStore) beginUpload(ctx context.Context, workspaceKey strin
 	if err := s.client.do(ctx, http.MethodPost, path, request, &grant); err != nil {
 		return nil, fmt.Errorf("begin workspace file upload: %w", err)
 	}
-	if err := validateWorkspaceFileGrant(&grant); err != nil {
+	if err := validateWorkspaceFileGrant(&grant, http.MethodPut, time.Now(), s.client.workspaceFileGrantMaxTTL); err != nil {
 		return nil, fmt.Errorf("begin workspace file upload: %w", err)
 	}
 	return &grant, nil
@@ -202,7 +255,7 @@ func (s *workspaceFileStore) resolveDownload(ctx context.Context, workspaceKey, 
 	if err := s.client.do(ctx, http.MethodPost, path, nil, &grant); err != nil {
 		return nil, fmt.Errorf("resolve workspace file download: %w", err)
 	}
-	if err := validateWorkspaceFileGrant(&grant); err != nil {
+	if err := validateWorkspaceFileGrant(&grant, http.MethodGet, time.Now(), s.client.workspaceFileGrantMaxTTL); err != nil {
 		return nil, fmt.Errorf("resolve workspace file download: %w", err)
 	}
 	return &grant, nil
@@ -233,7 +286,7 @@ func (c *Client) openWorkspaceFileDownload(ctx context.Context, grant *workspace
 }
 
 func (c *Client) workspaceFileTransfer(ctx context.Context, grant *workspaceFileTransferGrantWire, body io.Reader) (*http.Response, bool, error) {
-	if err := validateWorkspaceFileGrant(grant); err != nil {
+	if err := validateWorkspaceFileGrant(grant, "", time.Now(), c.workspaceFileGrantMaxTTL); err != nil {
 		return nil, false, err
 	}
 	target := grant.URL
@@ -266,6 +319,7 @@ func (c *Client) workspaceFileTransfer(ctx context.Context, grant *workspaceFile
 }
 
 func workspaceFileTransferStatusError(method, target string, local bool, resp *http.Response) error {
+	target = redactedWorkspaceFileTransferTarget(target)
 	if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
 		return nil
 	}
@@ -276,24 +330,71 @@ func workspaceFileTransferStatusError(method, target string, local bool, resp *h
 	if local {
 		return classifyHTTPError(method, target, resp.StatusCode, body)
 	}
-	message := strings.TrimSpace(string(body))
-	if len(message) > 200 {
-		message = message[:200] + "..."
-	}
-	if message != "" {
-		return fmt.Errorf("workspace file provider transfer %s %s: HTTP %d: %s", method, target, resp.StatusCode, message)
-	}
+	// Provider response bodies are untrusted and may echo signed header or
+	// query values. Keep external transfer errors deliberately body-free so
+	// callers can safely log them without disclosing capabilities.
 	return fmt.Errorf("workspace file provider transfer %s %s: HTTP %d", method, target, resp.StatusCode)
 }
 
-func validateWorkspaceFileGrant(grant *workspaceFileTransferGrantWire) error {
+func validateWorkspaceFileGrant(grant *workspaceFileTransferGrantWire, expectedMethod string, now time.Time, maxTTL time.Duration) error {
 	if grant == nil {
 		return fmt.Errorf("workspace file transfer grant is required")
 	}
 	if strings.TrimSpace(grant.Method) == "" || strings.TrimSpace(grant.URL) == "" {
 		return fmt.Errorf("workspace file transfer grant requires method and URL")
 	}
+	if expectedMethod != "" && grant.Method != expectedMethod {
+		return fmt.Errorf("workspace file transfer grant method is %q, want %q", grant.Method, expectedMethod)
+	}
+	if err := validateWorkspaceFileGrantExpiry(grant.ExpiresAt, now, maxTTL); err != nil {
+		return err
+	}
+	parsed, err := url.Parse(grant.URL)
+	if err != nil || parsed.User != nil || parsed.Fragment != "" {
+		return fmt.Errorf("workspace file transfer grant URL is invalid")
+	}
+	if strings.HasPrefix(grant.URL, "/") {
+		if parsed.IsAbs() || strings.HasPrefix(grant.URL, "//") {
+			return fmt.Errorf("workspace file transfer grant URL is invalid")
+		}
+		return nil
+	}
+	if !parsed.IsAbs() || parsed.Host == "" {
+		return fmt.Errorf("workspace file transfer grant URL must be absolute or root-relative")
+	}
+	if parsed.Scheme == "https" {
+		return nil
+	}
+	if parsed.Scheme == "http" && isLoopbackWorkspaceFileHost(parsed.Hostname()) {
+		return nil
+	}
+	return fmt.Errorf("workspace file transfer grant URL must use HTTPS (HTTP is allowed only for loopback test providers)")
+}
+
+func validateWorkspaceFileGrantExpiry(expiresAt, now time.Time, maxTTL time.Duration) error {
+	if expiresAt.IsZero() || !expiresAt.After(now) {
+		return fmt.Errorf("workspace file transfer grant is expired")
+	}
+	if maxTTL <= 0 || expiresAt.After(now.Add(maxTTL)) {
+		return fmt.Errorf("workspace file transfer grant expiry exceeds maximum TTL %s", maxTTL)
+	}
 	return nil
+}
+
+func isLoopbackWorkspaceFileHost(host string) bool {
+	address := net.ParseIP(host)
+	return strings.EqualFold(host, "localhost") || address != nil && address.IsLoopback()
+}
+
+func redactedWorkspaceFileTransferTarget(target string) string {
+	parsed, err := url.Parse(target)
+	if err != nil {
+		return "[invalid transfer URL]"
+	}
+	parsed.RawQuery = ""
+	parsed.ForceQuery = false
+	parsed.User = nil
+	return parsed.String()
 }
 
 func canonicalWorkspaceFileInputs(files []domain.WorkspaceFileInput) ([]domain.WorkspaceFileInput, error) {

@@ -1,6 +1,7 @@
 package skill
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net"
@@ -14,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/test/skills-e2e/registry"
 )
 
 func TestSkillMaterializeMaterializesCurrentWorkdir(t *testing.T) {
@@ -68,8 +70,24 @@ func TestSkillMaterializeResolvesRoleFromAgentName(t *testing.T) {
 	}
 }
 
-func TestSkillMaterializeStoreUnavailableWarnsAndSucceeds(t *testing.T) {
+func TestSkillMaterializeStoreUnavailableReturnsBlockingExitCode(t *testing.T) {
 	st := materializeTestStore(t)
+	createMaterializeTestSkill(t, st, domain.WorkspaceSkillRef("safe-skill"), "Safe skill", "prior body\n")
+	withMaterializeStore(t, st)
+	t.Setenv(bootstrap.EnvWorkspace, testWorkspace)
+	t.Setenv("LOOM_AGENT_ROLE", "")
+	t.Setenv(bootstrap.EnvAgentName, "")
+	target := t.TempDir()
+	t.Chdir(target)
+	if output, err := executeSkillCommand(t, "", "materialize"); err != nil {
+		t.Fatalf("initial materialize error = %v; output = %s", err, output)
+	}
+	projected := filepath.Join(target, ".agents", "skills", "safe-skill", "SKILL.md")
+	before, err := os.ReadFile(projected)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	unavailable := storeWithSkills{
 		Store: st,
 		skills: unavailableListSkillStore{
@@ -78,17 +96,24 @@ func TestSkillMaterializeStoreUnavailableWarnsAndSucceeds(t *testing.T) {
 		},
 	}
 	withMaterializeStore(t, unavailable)
-	t.Setenv(bootstrap.EnvWorkspace, testWorkspace)
-	t.Setenv("LOOM_AGENT_ROLE", "")
-	t.Setenv(bootstrap.EnvAgentName, "")
-	t.Chdir(t.TempDir())
+	registry.MarkEvidence(t, 69)
 
 	output, err := executeSkillCommand(t, "", "materialize")
-	if err != nil {
-		t.Fatalf("materialize error = %v, want nil; output = %s", err, output)
+	if err == nil {
+		t.Fatalf("materialize error = nil, want failure; output = %s", output)
 	}
-	if !strings.Contains(output, "Warning: skill store unavailable") || !strings.Contains(output, "temporary failure") {
-		t.Fatalf("warning output = %q", output)
+	if got := cli.CommandExitCode(err); got != 2 {
+		t.Fatalf("exit code = %d, want 2; error = %v", got, err)
+	}
+	if !strings.Contains(err.Error(), "skill materialization was refused") || !strings.Contains(err.Error(), "temporary failure") {
+		t.Fatalf("materialization error = %v", err)
+	}
+	if !strings.Contains(output, "Warning:") || !strings.Contains(output, "existing Skill projection was preserved") {
+		t.Fatalf("materialization warning = %q", output)
+	}
+	after, readErr := os.ReadFile(projected)
+	if readErr != nil || !bytes.Equal(after, before) {
+		t.Fatalf("safe projection changed during store outage: before=%q after=%q err=%v", before, after, readErr)
 	}
 }
 
@@ -184,10 +209,13 @@ func TestSkillMaterializeOpenFailureIsUnavailable(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	output, err := executeSkillCommand(t, "", "materialize")
-	if err != nil {
-		t.Fatalf("materialize error = %v, want nil", err)
+	if err == nil {
+		t.Fatalf("materialize error = nil, want failure; output = %s", output)
 	}
-	if !strings.Contains(output, "fleet-db is down") {
-		t.Fatalf("warning output = %q", output)
+	if got := cli.CommandExitCode(err); got != 2 {
+		t.Fatalf("exit code = %d, want 2; error = %v", got, err)
+	}
+	if !strings.Contains(err.Error(), "fleet-db is down") {
+		t.Fatalf("materialization error = %v", err)
 	}
 }

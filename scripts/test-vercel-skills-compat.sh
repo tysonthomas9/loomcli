@@ -5,6 +5,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FLEET_DB_REPO="${FLEET_DB_REPO:?set FLEET_DB_REPO to a fleet-db checkout}"
 VERCEL_SKILLS_REPO="${VERCEL_SKILLS_REPO:?set VERCEL_SKILLS_REPO to the pinned vercel-labs/agent-skills checkout}"
 VERCEL_SKILLS_REF="${VERCEL_SKILLS_REF:-dd089a8c752c966dee8bf0f27cb625ba193ffd9e}"
+FLEET_E2E_BACKEND="${FLEET_E2E_BACKEND:-redis}"
+LOOM_E2E_REDIS_ADDR="${LOOM_E2E_REDIS_ADDR:?set LOOM_E2E_REDIS_ADDR to the run-owned real Redis address}"
+if [[ "$FLEET_E2E_BACKEND" == "postgres" ]]; then
+  FLEET_E2E_POSTGRES_DSN="${FLEET_E2E_POSTGRES_DSN:?set FLEET_E2E_POSTGRES_DSN to the run-owned real PostgreSQL database}"
+elif [[ "$FLEET_E2E_BACKEND" != "redis" ]]; then
+  echo "unsupported FLEET_E2E_BACKEND: $FLEET_E2E_BACKEND" >&2
+  exit 2
+fi
 
 if [[ ! -d "$FLEET_DB_REPO/cmd/fleet-db" ]]; then
   echo "fleet-db checkout not found at $FLEET_DB_REPO" >&2
@@ -24,9 +32,15 @@ fi
 loom_sha="$(git -C "$ROOT" rev-parse HEAD)"
 fleet_db_sha="$(git -C "$FLEET_DB_REPO" rev-parse HEAD)"
 echo "Compatibility revisions: loomcli=$loom_sha fleetdb=$fleet_db_sha vercel_skills=$actual_vercel_ref"
+echo "Real-service topology: loom-cli fleet-db redis projector http object-store=${FLEET_WORKSPACE_FILE_STORE:-local}"
 
 tmp="$(mktemp -d -t loom-vercel-skills-compat.XXXXXX)"
+fleet_db_pid=""
 cleanup() {
+  if [[ -n "$fleet_db_pid" ]]; then
+    kill "$fleet_db_pid" 2>/dev/null || true
+    wait "$fleet_db_pid" 2>/dev/null || true
+  fi
   rm -rf "$tmp"
 }
 trap cleanup EXIT
@@ -36,7 +50,7 @@ fleet_db_bin="$tmp/fleet-db"
 echo "Building loomcli $loom_sha"
 (cd "$ROOT" && go build -o "$loom_bin" ./cmd/loom)
 echo "Building fleet-db $fleet_db_sha"
-(cd "$FLEET_DB_REPO" && go build -o "$fleet_db_bin" ./cmd/fleet-db)
+(cd "$FLEET_DB_REPO" && go build -tags=e2e -o "$fleet_db_bin" ./cmd/fleet-db)
 
 export HOME="$tmp/home"
 export LOOM_CONFIG_DIR="$tmp/loom-config"
@@ -46,11 +60,67 @@ export LOOM_LOG_FORMAT="text"
 export LOOM_WORKSPACE="SKILLSRELEASE"
 export FLEET_DB_BIN="$fleet_db_bin"
 mkdir -p "$HOME" "$LOOM_CONFIG_DIR"
+printf '{"version":1,"fleetdb_redis":{"enabled":true,"addr":"%s"},"agent_runtime":{"default":"local"}}\n' \
+  "$LOOM_E2E_REDIS_ADDR" >"$LOOM_CONFIG_DIR/local-settings.json"
+
+fleet_port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
+fleet_args=(-addr "127.0.0.1:$fleet_port" -backend "$FLEET_E2E_BACKEND" -auth-dev-mode -authz-enabled=false -rpc-enabled=false)
+if [[ "$FLEET_E2E_BACKEND" == "redis" ]]; then
+  fleet_args+=(-redis-addr "$LOOM_E2E_REDIS_ADDR" -redis-durability-profile managed -redis-max-retries 0 -redis-cb-fail-threshold 0)
+else
+  fleet_args+=(-pg-dsn "$FLEET_E2E_POSTGRES_DSN" -redis-addr "$LOOM_E2E_REDIS_ADDR" -redis-durability-profile managed)
+fi
+"$fleet_db_bin" "${fleet_args[@]}" >"$tmp/fleet-db.log" 2>&1 &
+fleet_db_pid=$!
+export LOOM_FLEET_DB_URL="http://127.0.0.1:$fleet_port"
+fleet_ready=false
+for _ in $(seq 1 120); do
+  if curl --fail --silent --show-error "$LOOM_FLEET_DB_URL/healthz" >/dev/null; then
+    fleet_ready=true
+    break
+  fi
+  sleep 0.25
+done
+if [[ "$fleet_ready" != "true" ]]; then
+  echo "shared FleetDB did not become healthy" >&2
+  cat "$tmp/fleet-db.log" >&2
+  exit 1
+fi
 
 workspace_log="$tmp/workspace-add.log"
 if ! "$loom_bin" workspace add "$LOOM_WORKSPACE" --description "release compatibility corpus" >"$workspace_log" 2>&1; then
   cat "$workspace_log" >&2
   exit 1
+fi
+
+skills_e2e_log="$tmp/skills-e2e.log"
+if ! (cd "$ROOT" && SKILLS_E2E_LOOM_BIN="$loom_bin" SKILLS_EDGE_REVISION="$loom_sha" \
+  go test -tags=e2e -count=1 -v -skip '^TestSkillImportWaitsForDelayedTreeVisibility$' ./test/skills-e2e) >"$skills_e2e_log" 2>&1; then
+  cat "$skills_e2e_log" >&2
+  exit 1
+fi
+cat "$skills_e2e_log"
+
+# Redis projection recovery runs with a dedicated embedded Fleet process so
+# the named startup failpoints control the only projector for the workspace.
+# PostgreSQL materializes the tree in the publication transaction and has no
+# asynchronous projection path.
+if [[ "$FLEET_E2E_BACKEND" == "redis" ]]; then
+  kill "$fleet_db_pid"
+  wait "$fleet_db_pid" 2>/dev/null || true
+  fleet_db_pid=""
+  unset LOOM_FLEET_DB_URL
+  projection_coverage=""
+  if [[ -n "${E2E_COVERAGE_OUTPUT:-}" ]]; then
+    projection_coverage="${E2E_COVERAGE_OUTPUT%.json}-projection.json"
+  fi
+  projection_log="$tmp/skills-e2e-projection.log"
+  if ! (cd "$ROOT" && SKILLS_E2E_LOOM_BIN="$loom_bin" SKILLS_EDGE_REVISION="$loom_sha" E2E_COVERAGE_OUTPUT="$projection_coverage" \
+    go test -tags=e2e -count=1 -v -run '^TestSkillImportWaitsForDelayedTreeVisibility$' ./test/skills-e2e) >"$projection_log" 2>&1; then
+    cat "$projection_log" >&2
+    exit 1
+  fi
+  cat "$projection_log"
 fi
 
 import_ok() {
@@ -79,7 +149,7 @@ if ! "$loom_bin" skill list >"$list_log" 2>"$list_stderr"; then
   cat "$list_stderr" >&2
   exit 1
 fi
-persisted_count="$(grep -c 'scope=workspace' "$list_log")"
+persisted_count="$(grep 'scope=workspace' "$list_log" | grep -vc '^exact-round-trip ')"
 if [[ "$persisted_count" != "9" ]]; then
   echo "persisted skill count is $persisted_count, want 9" >&2
   cat "$list_log" >&2

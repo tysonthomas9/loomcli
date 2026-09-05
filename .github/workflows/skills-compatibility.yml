@@ -11,12 +11,26 @@ on:
         description: FleetDB git ref or commit to test
         required: true
         type: string
+      edge_readiness:
+        description: Generate both repositories' v2 evidence and enforce exact 1-95 readiness
+        required: false
+        default: false
+        type: boolean
     secrets:
       LOOMCLI_TOKEN:
         description: Token that can read the LoomCLI repository
         required: false
       FLEET_DB_TOKEN:
         description: Token that can read the FleetDB repository
+        required: false
+      GCS_TEST_BUCKET:
+        description: Existing bucket used only by the release provider gate
+        required: false
+      GCS_HMAC_ACCESS_KEY_ID:
+        description: HMAC access key for the GCS XML API test bucket
+        required: false
+      GCS_HMAC_SECRET_ACCESS_KEY:
+        description: HMAC secret for the GCS XML API test bucket
         required: false
   workflow_dispatch:
     inputs:
@@ -30,6 +44,11 @@ on:
         required: true
         default: main
         type: string
+      edge_readiness:
+        description: Generate both repositories' v2 evidence and enforce exact 1-95 readiness
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -114,14 +133,20 @@ jobs:
           retention-days: 90
 
   proof:
-    name: LoomCLI / FleetDB compatibility (${{ matrix.storage }})
+    name: LoomCLI / FleetDB compatibility (${{ matrix.backend }}-${{ matrix.storage }})
     needs: resolve
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        storage: [local, s3]
+        include:
+          - backend: redis
+            storage: local
+          - backend: redis
+            storage: s3
+          - backend: postgres
+            storage: s3
     steps:
       - name: Checkout LoomCLI
         uses: actions/checkout@v4
@@ -158,11 +183,16 @@ jobs:
           EXPECTED_FLEETDB_SHA: ${{ needs.resolve.outputs.fleetdb_sha }}
           EXPECTED_CORPUS_SHA: ${{ needs.resolve.outputs.corpus_sha }}
           STORAGE_MODE: ${{ matrix.storage }}
+          PERSISTENCE_BACKEND: ${{ matrix.backend }}
         run: |
           set -euo pipefail
           loom_sha="$(git -C loomcli rev-parse HEAD)"
           fleetdb_sha="$(git -C fleet-db rev-parse HEAD)"
           corpus_sha="$(git -C vercel-agent-skills rev-parse HEAD)"
+          object_provider=local
+          if [[ "$STORAGE_MODE" == "s3" ]]; then
+            object_provider=minio
+          fi
           if [[ "$loom_sha" != "$EXPECTED_LOOM_SHA" ||
             "$fleetdb_sha" != "$EXPECTED_FLEETDB_SHA" ||
             "$corpus_sha" != "$EXPECTED_CORPUS_SHA" ]]; then
@@ -176,6 +206,9 @@ jobs:
             echo "fleetdb_sha=$fleetdb_sha"
             echo "vercel_skills_sha=$corpus_sha"
             echo "storage_mode=$STORAGE_MODE"
+            echo "persistence_backend=$PERSISTENCE_BACKEND"
+            echo "object_provider=$object_provider"
+            echo "real_processes=loom-cli,fleet-db,$PERSISTENCE_BACKEND,redis,projector,http,$object_provider"
           } | tee skills-compatibility-revisions.txt
           {
             echo '### Skills compatibility revision pair'
@@ -186,6 +219,8 @@ jobs:
             echo "| FleetDB | \`$REQUESTED_FLEETDB_REF\` | \`$fleetdb_sha\` |"
             echo "| Vercel Agent Skills | pinned | \`$corpus_sha\` |"
             echo "| Workspace-file storage | matrix | \`$STORAGE_MODE\` |"
+            echo "| Persistence backend | real service | \`$PERSISTENCE_BACKEND\` |"
+            echo "| Object provider | real service | \`$object_provider\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Set up Go
@@ -197,6 +232,7 @@ jobs:
         shell: bash
         env:
           STORAGE_MODE: ${{ matrix.storage }}
+          PERSISTENCE_BACKEND: ${{ matrix.backend }}
         run: |
           set -euo pipefail
           transfer_secret="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')"
@@ -207,6 +243,13 @@ jobs:
           # coverage and would make this storage/compatibility proof timing
           # dependent rather than test either adapter.
           echo "FLEET_RATE_LIMIT_ENABLED=false" >> "$GITHUB_ENV"
+          echo "REDIS_CONTAINER=loom-skills-redis-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$PERSISTENCE_BACKEND-$STORAGE_MODE" >> "$GITHUB_ENV"
+          echo "LOOM_E2E_REDIS_ADDR=127.0.0.1:6379" >> "$GITHUB_ENV"
+          if [[ "$PERSISTENCE_BACKEND" == "postgres" ]]; then
+            echo "POSTGRES_CONTAINER=loom-skills-postgres-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$STORAGE_MODE" >> "$GITHUB_ENV"
+            echo "POSTGRES_PASSWORD=loom-skills-postgres" >> "$GITHUB_ENV"
+            echo "FLEET_E2E_POSTGRES_DSN=postgres://postgres:loom-skills-postgres@127.0.0.1:5432/fleetdb?sslmode=disable" >> "$GITHUB_ENV"
+          fi
 
           if [[ "$STORAGE_MODE" == "local" ]]; then
             local_dir="$RUNNER_TEMP/skills-workspace-files-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
@@ -229,6 +272,54 @@ jobs:
           echo "FLEET_WORKSPACE_FILE_S3_PATH_STYLE=true" >> "$GITHUB_ENV"
           echo "FLEET_WORKSPACE_FILE_S3_ACCESS_KEY_ID=loom-skills" >> "$GITHUB_ENV"
           echo "FLEET_WORKSPACE_FILE_S3_SECRET_ACCESS_KEY=$minio_password" >> "$GITHUB_ENV"
+
+      - name: Start isolated real Redis persistence
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --detach \
+            --name "$REDIS_CONTAINER" \
+            --publish 127.0.0.1:6379:6379 \
+            redis:7.4.2-alpine@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952 \
+            redis-server --save '' --appendonly no
+
+          ready=false
+          for _ in $(seq 1 30); do
+            if [[ "$(docker exec "$REDIS_CONTAINER" redis-cli ping 2>/dev/null || true)" == "PONG" ]]; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$ready" != "true" ]]; then
+            docker logs "$REDIS_CONTAINER" >&2
+            exit 1
+          fi
+
+      - name: Start isolated real PostgreSQL persistence
+        if: matrix.backend == 'postgres'
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --detach \
+            --name "$POSTGRES_CONTAINER" \
+            --publish 127.0.0.1:5432:5432 \
+            --env POSTGRES_PASSWORD \
+            --env POSTGRES_DB=fleetdb \
+            postgres:16-alpine@sha256:738d1359df5aa0b6d50a9071e989c49fdd39152a2a805c6ff131bf5e2243e0b3
+
+          ready=false
+          for _ in $(seq 1 60); do
+            if docker exec "$POSTGRES_CONTAINER" pg_isready -U postgres -d fleetdb >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$ready" != "true" ]]; then
+            docker logs "$POSTGRES_CONTAINER" >&2
+            exit 1
+          fi
 
       - name: Start isolated MinIO storage
         if: matrix.storage == 's3'
@@ -272,9 +363,98 @@ jobs:
           VERCEL_SKILLS_REPO: ${{ github.workspace }}/vercel-agent-skills
           FLEET_WORKSPACE_FILE_STORE: ${{ matrix.storage }}
           STORAGE_MODE: ${{ matrix.storage }}
+          FLEET_E2E_BACKEND: ${{ matrix.backend }}
+          E2E_COVERAGE_OUTPUT: ${{ github.workspace }}/e2e-coverage-${{ matrix.backend }}-${{ matrix.storage }}.json
         run: |
           set -o pipefail
-          make test-skills-release-compat 2>&1 | tee "../skills-compatibility-$STORAGE_MODE.log"
+          make test-skills-release-compat 2>&1 | tee "../skills-compatibility-$FLEET_E2E_BACKEND-$STORAGE_MODE.log"
+
+      - name: Extract Loom owning-package evidence
+        if: inputs.edge_readiness && matrix.backend == 'redis' && matrix.storage == 'local'
+        working-directory: loomcli
+        shell: bash
+        env:
+          LOOM_SHA: ${{ needs.resolve.outputs.loom_sha }}
+        run: |
+          set -euo pipefail
+          export GOCACHE="$RUNNER_TEMP/loom-edge-coverage-cache"
+          go test -json ./internal/domain ./internal/cli/skill ./internal/infra/fleetdb ./internal/skillmat ./test/skills-e2e |
+            go run ./cmd/skills-edge-coverage extract -repository=loom -revision "$LOOM_SHA" \
+              > "$GITHUB_WORKSPACE/loom-domain-evidence-v2.json"
+
+      - name: Extract Fleet API evidence
+        if: inputs.edge_readiness && matrix.backend == 'redis' && matrix.storage == 'local'
+        working-directory: fleet-db
+        shell: bash
+        env:
+          FLEET_SHA: ${{ needs.resolve.outputs.fleetdb_sha }}
+        run: |
+          set -euo pipefail
+          export GOCACHE="$RUNNER_TEMP/fleet-edge-api-cache"
+          go test -json ./pkg/client ./internal/api \
+            -run 'Test(WorkspaceFileAPIRejectsMutatedTransferTokensWithDeliberateStatus|WorkspaceFileAPIConformance_ProjectionPendingIsAccepted|HTTPClientWorkspaceFileTransfer.*)$' |
+            go run ./cmd/edge-case-coverage -revision "$FLEET_SHA" \
+              > "$GITHUB_WORKSPACE/fleet-api-evidence-v2.json"
+
+      - name: Extract Fleet Redis evidence
+        if: inputs.edge_readiness && matrix.backend == 'redis' && matrix.storage == 'local'
+        working-directory: fleet-db
+        shell: bash
+        env:
+          FLEET_SHA: ${{ needs.resolve.outputs.fleetdb_sha }}
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+        run: |
+          set -euo pipefail
+          export GOCACHE="$RUNNER_TEMP/fleet-edge-redis-cache"
+          go test -json -tags integration ./internal/storage/integrationtest ./internal/projection \
+            -run 'Test(RedisWorkspaceFilePublicationAcceptsOneConcurrentCreation|RedisWorkspaceFilePublicationRetryAfterLostResponse|WorkspaceFileProjectionRestartRetriesFailedEvent)$' |
+            go run ./cmd/edge-case-coverage -revision "$FLEET_SHA" \
+              > "$GITHUB_WORKSPACE/fleet-redis-evidence-v2.json"
+
+      - name: Extract Fleet PostgreSQL evidence
+        if: inputs.edge_readiness && matrix.backend == 'postgres' && matrix.storage == 's3'
+        working-directory: fleet-db
+        shell: bash
+        env:
+          FLEET_SHA: ${{ needs.resolve.outputs.fleetdb_sha }}
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+        run: |
+          set -euo pipefail
+          export GOCACHE="$RUNNER_TEMP/fleet-edge-postgres-cache"
+          go test -json -tags integration ./internal/storage/postgres ./internal/projection \
+            -run 'Test(PostgresWorkspaceFilePublicationAcceptsOneConcurrentCreation|PostgresWorkspaceFilePublicationRetryAfterLostResponse|PostgresWorkspaceFileProjectionRestartRetriesFailedEvent)$' |
+            go run ./cmd/edge-case-coverage -revision "$FLEET_SHA" \
+              > "$GITHUB_WORKSPACE/fleet-postgres-evidence-v2.json"
+
+      - name: Extract Fleet MinIO evidence
+        if: inputs.edge_readiness && matrix.backend == 'redis' && matrix.storage == 's3'
+        working-directory: fleet-db
+        shell: bash
+        env:
+          FLEET_SHA: ${{ needs.resolve.outputs.fleetdb_sha }}
+          FLEET_WORKSPACE_FILE_EVIDENCE_PROVIDER: minio
+        run: |
+          set -euo pipefail
+          export GOCACHE="$RUNNER_TEMP/fleet-edge-minio-cache"
+          go test -json ./internal/api -run '^TestWorkspaceFileAPIConformance_S3Compatible$' |
+            go run ./cmd/edge-case-coverage -revision "$FLEET_SHA" \
+              > "$GITHUB_WORKSPACE/fleet-minio-evidence-v2.json"
+
+      - name: Upload v2 edge evidence shards
+        if: inputs.edge_readiness
+        uses: actions/upload-artifact@v4
+        with:
+          name: skills-edge-evidence-${{ matrix.backend }}-${{ matrix.storage }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            e2e-coverage-${{ matrix.backend }}-${{ matrix.storage }}.json
+            e2e-coverage-${{ matrix.backend }}-${{ matrix.storage }}-projection.json
+            loom-domain-evidence-v2.json
+            fleet-api-evidence-v2.json
+            fleet-redis-evidence-v2.json
+            fleet-postgres-evidence-v2.json
+            fleet-minio-evidence-v2.json
+          if-no-files-found: warn
+          retention-days: 90
 
       - name: Capture and stop MinIO
         if: always() && matrix.storage == 's3'
@@ -315,14 +495,324 @@ jobs:
             docker network rm "$MINIO_NETWORK"
           fi
 
+      - name: Capture and stop Redis
+        if: always()
+        shell: bash
+        env:
+          STORAGE_MODE: ${{ matrix.storage }}
+        run: |
+          set -u
+          diagnostics="skills-compatibility-$STORAGE_MODE-redis-diagnostics.txt"
+          {
+            echo "storage_mode=$STORAGE_MODE"
+            echo "redis_backend=real-container"
+            echo "redis_image=redis:7.4.2-alpine@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952"
+            echo
+            echo "### Redis server log"
+            if [[ -n "${REDIS_CONTAINER:-}" ]] && docker inspect "$REDIS_CONTAINER" >/dev/null 2>&1; then
+              docker logs "$REDIS_CONTAINER" 2>&1
+            else
+              echo "Redis container was not created"
+            fi
+          } > "$diagnostics"
+
+          if [[ -n "${REDIS_CONTAINER:-}" ]] && docker inspect "$REDIS_CONTAINER" >/dev/null 2>&1; then
+            docker stop "$REDIS_CONTAINER"
+            docker rm "$REDIS_CONTAINER"
+          fi
+
+      - name: Capture and stop PostgreSQL
+        if: always() && matrix.backend == 'postgres'
+        shell: bash
+        env:
+          STORAGE_MODE: ${{ matrix.storage }}
+        run: |
+          set -u
+          diagnostics="skills-compatibility-postgres-$STORAGE_MODE-diagnostics.txt"
+          if [[ -n "${POSTGRES_CONTAINER:-}" ]] && docker inspect "$POSTGRES_CONTAINER" >/dev/null 2>&1; then
+            docker logs "$POSTGRES_CONTAINER" > "$diagnostics" 2>&1
+            docker stop "$POSTGRES_CONTAINER"
+            docker rm "$POSTGRES_CONTAINER"
+          else
+            echo "PostgreSQL container was not created" > "$diagnostics"
+          fi
+
       - name: Upload revision evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: skills-compatibility-${{ matrix.storage }}-revisions-${{ github.run_id }}-${{ github.run_attempt }}
+          name: skills-compatibility-${{ matrix.backend }}-${{ matrix.storage }}-revisions-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             skills-compatibility-revisions.txt
-            skills-compatibility-${{ matrix.storage }}.log
+            skills-compatibility-${{ matrix.backend }}-${{ matrix.storage }}.log
             skills-compatibility-${{ matrix.storage }}-diagnostics.txt
+            skills-compatibility-${{ matrix.storage }}-redis-diagnostics.txt
+            skills-compatibility-postgres-${{ matrix.storage }}-diagnostics.txt
+            e2e-coverage-${{ matrix.backend }}-${{ matrix.storage }}.json
+            e2e-coverage-${{ matrix.backend }}-${{ matrix.storage }}-projection.json
+          if-no-files-found: error
+          retention-days: 90
+
+  gcs-provider:
+    name: Existing GCS bucket provider gate
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout LoomCLI
+        uses: actions/checkout@v4
+        with:
+          repository: tysonthomas9/loomcli
+          ref: ${{ needs.resolve.outputs.loom_sha }}
+          path: loomcli
+          token: ${{ secrets.LOOMCLI_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Checkout FleetDB
+        uses: actions/checkout@v4
+        with:
+          repository: tysonthomas9/fleet-db
+          ref: ${{ needs.resolve.outputs.fleetdb_sha }}
+          path: fleet-db
+          token: ${{ secrets.FLEET_DB_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Checkout pinned Vercel Agent Skills corpus
+        uses: actions/checkout@v4
+        with:
+          repository: vercel-labs/agent-skills
+          ref: ${{ needs.resolve.outputs.corpus_sha }}
+          path: vercel-agent-skills
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: loomcli/go.mod
+
+      - name: Configure exact run-owned GCS prefix
+        shell: bash
+        env:
+          TEST_BUCKET: ${{ secrets.GCS_TEST_BUCKET }}
+          HMAC_ACCESS_KEY: ${{ secrets.GCS_HMAC_ACCESS_KEY_ID }}
+          HMAC_SECRET_KEY: ${{ secrets.GCS_HMAC_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$TEST_BUCKET" || -z "$HMAC_ACCESS_KEY" || -z "$HMAC_SECRET_KEY" ]]; then
+            echo "::error::GCS_TEST_BUCKET and both GCS HMAC secrets are required for release evidence"
+            exit 1
+          fi
+          suffix="$(openssl rand -hex 8)"
+          prefix="loom-skills-e2e/$GITHUB_RUN_ID/$GITHUB_RUN_ATTEMPT/$suffix"
+          if [[ ! "$prefix" =~ ^loom-skills-e2e/[0-9]+/[0-9]+/[0-9a-f]{16}$ ]]; then
+            echo "::error::Refusing unresolved GCS test prefix"
+            exit 1
+          fi
+          transfer_secret="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')"
+          echo "::add-mask::$HMAC_ACCESS_KEY"
+          echo "::add-mask::$HMAC_SECRET_KEY"
+          echo "::add-mask::$transfer_secret"
+          {
+            echo "AWS_ACCESS_KEY_ID=$HMAC_ACCESS_KEY"
+            echo "AWS_SECRET_ACCESS_KEY=$HMAC_SECRET_KEY"
+            echo "AWS_DEFAULT_REGION=auto"
+            echo "FLEET_WORKSPACE_FILE_STORE=s3"
+            echo "FLEET_WORKSPACE_FILE_S3_BUCKET=$TEST_BUCKET"
+            echo "FLEET_WORKSPACE_FILE_S3_PREFIX=$prefix"
+            echo "FLEET_WORKSPACE_FILE_S3_REGION=auto"
+            echo "FLEET_WORKSPACE_FILE_S3_ENDPOINT=https://storage.googleapis.com"
+            echo "FLEET_WORKSPACE_FILE_S3_PATH_STYLE=true"
+            echo "FLEET_WORKSPACE_FILE_S3_ACCESS_KEY_ID=$HMAC_ACCESS_KEY"
+            echo "FLEET_WORKSPACE_FILE_S3_SECRET_ACCESS_KEY=$HMAC_SECRET_KEY"
+            echo "FLEET_WORKSPACE_FILE_TOKEN_SECRET=$transfer_secret"
+            echo "FLEET_RATE_LIMIT_ENABLED=false"
+            echo "LOOM_E2E_REDIS_ADDR=127.0.0.1:6379"
+            echo "GCS_REDIS_CONTAINER=loom-skills-gcs-redis-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          } >> "$GITHUB_ENV"
+          {
+            echo "loomcli_sha=${{ needs.resolve.outputs.loom_sha }}"
+            echo "fleetdb_sha=${{ needs.resolve.outputs.fleetdb_sha }}"
+            echo "vercel_skills_sha=${{ needs.resolve.outputs.corpus_sha }}"
+            echo "persistence_backend=redis"
+            echo "object_provider=gcs"
+            echo "bucket=$TEST_BUCKET"
+            echo "prefix=$prefix"
+          } > gcs-provider-revisions.txt
+
+      - name: Start isolated real Redis persistence
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --detach \
+            --name "$GCS_REDIS_CONTAINER" \
+            --publish 127.0.0.1:6379:6379 \
+            redis:7.4.2-alpine@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952 \
+            redis-server --save '' --appendonly no
+          for _ in $(seq 1 30); do
+            if [[ "$(docker exec "$GCS_REDIS_CONTAINER" redis-cli ping 2>/dev/null || true)" == "PONG" ]]; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs "$GCS_REDIS_CONTAINER" >&2
+          exit 1
+
+      - name: Run public GCS Skill journeys
+        working-directory: loomcli
+        shell: bash
+        env:
+          FLEET_DB_REPO: ${{ github.workspace }}/fleet-db
+          VERCEL_SKILLS_REPO: ${{ github.workspace }}/vercel-agent-skills
+          FLEET_E2E_BACKEND: redis
+          SKILLS_E2E_PROVIDER: gcs
+          E2E_COVERAGE_OUTPUT: ${{ github.workspace }}/e2e-coverage-redis-gcs.json
+        run: |
+          set -o pipefail
+          make test-skills-release-compat 2>&1 | tee ../skills-compatibility-redis-gcs.log
+
+      - name: Run real GCS signed-grant enforcement
+        working-directory: fleet-db
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -v ./internal/api \
+            -run '^TestWorkspaceFile(APIConformance_S3Compatible|S3SignedUploadRejectsTamperingAndWrongMethod|S3SignedUploadExpires)$' \
+            2>&1 | tee ../gcs-signed-grants.log
+
+      - name: Extract Fleet GCS evidence
+        if: inputs.edge_readiness
+        working-directory: fleet-db
+        shell: bash
+        env:
+          FLEET_SHA: ${{ needs.resolve.outputs.fleetdb_sha }}
+          FLEET_WORKSPACE_FILE_EVIDENCE_PROVIDER: gcs
+        run: |
+          set -euo pipefail
+          export GOCACHE="$RUNNER_TEMP/fleet-edge-gcs-cache"
+          go test -json ./internal/api -run '^TestWorkspaceFileAPIConformance_S3Compatible$' |
+            go run ./cmd/edge-case-coverage -revision "$FLEET_SHA" \
+              > "$GITHUB_WORKSPACE/fleet-gcs-evidence-v2.json"
+
+      - name: Upload GCS v2 edge evidence shards
+        if: inputs.edge_readiness
+        uses: actions/upload-artifact@v4
+        with:
+          name: skills-edge-evidence-gcs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            e2e-coverage-redis-gcs.json
+            e2e-coverage-redis-gcs-projection.json
+            fleet-gcs-evidence-v2.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Record and delete only run-owned GCS generations
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "${FLEET_WORKSPACE_FILE_S3_PREFIX:-}" =~ ^loom-skills-e2e/[0-9]+/[0-9]+/[0-9a-f]{16}$ ]]; then
+            echo "Refused cleanup: unresolved GCS prefix" > gcs-cleanup.txt
+            exit 1
+          fi
+          aws --endpoint-url https://storage.googleapis.com s3api list-object-versions \
+            --bucket "$FLEET_WORKSPACE_FILE_S3_BUCKET" \
+            --prefix "$FLEET_WORKSPACE_FILE_S3_PREFIX/" > gcs-created-objects.json
+          : > gcs-cleanup.txt
+          jq -r '(.Versions // []) + (.DeleteMarkers // []) | .[] | [.Key, (.VersionId // "")] | @tsv' \
+            gcs-created-objects.json |
+          while IFS=$'\t' read -r key version; do
+            [[ "$key" == "$FLEET_WORKSPACE_FILE_S3_PREFIX/"* ]] || {
+              echo "Refused out-of-prefix key: $key" >> gcs-cleanup.txt
+              exit 1
+            }
+            if [[ -n "$version" && "$version" != "null" ]]; then
+              aws --endpoint-url https://storage.googleapis.com s3api delete-object \
+                --bucket "$FLEET_WORKSPACE_FILE_S3_BUCKET" --key "$key" --version-id "$version" >/dev/null
+            else
+              aws --endpoint-url https://storage.googleapis.com s3api delete-object \
+                --bucket "$FLEET_WORKSPACE_FILE_S3_BUCKET" --key "$key" >/dev/null
+            fi
+            printf 'deleted key=%s version=%s\n' "$key" "${version:-current}" >> gcs-cleanup.txt
+          done
+
+      - name: Capture and stop GCS Redis
+        if: always()
+        shell: bash
+        run: |
+          set -u
+          if [[ -n "${GCS_REDIS_CONTAINER:-}" ]] && docker inspect "$GCS_REDIS_CONTAINER" >/dev/null 2>&1; then
+            docker logs "$GCS_REDIS_CONTAINER" > gcs-redis-diagnostics.txt 2>&1
+            docker stop "$GCS_REDIS_CONTAINER"
+            docker rm "$GCS_REDIS_CONTAINER"
+          else
+            echo "GCS Redis container was not created" > gcs-redis-diagnostics.txt
+          fi
+
+      - name: Upload GCS provider evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: skills-gcs-provider-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            gcs-provider-revisions.txt
+            skills-compatibility-redis-gcs.log
+            gcs-signed-grants.log
+            gcs-created-objects.json
+            gcs-cleanup.txt
+            gcs-redis-diagnostics.txt
+            e2e-coverage-redis-gcs.json
+            e2e-coverage-redis-gcs-projection.json
+          if-no-files-found: error
+          retention-days: 90
+
+  edge-readiness:
+    name: Exact 1-95 edge-case readiness
+    if: ${{ always() && inputs.edge_readiness }}
+    needs: [resolve, proof, gcs-provider]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact Loom revision
+        uses: actions/checkout@v4
+        with:
+          repository: tysonthomas9/loomcli
+          ref: ${{ needs.resolve.outputs.loom_sha }}
+          token: ${{ secrets.LOOMCLI_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Download Loom and Fleet evidence shards
+        id: download-edge-evidence
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: skills-edge-evidence-*
+          path: edge-evidence
+          merge-multiple: true
+
+      - name: Enforce canonical readiness
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GOCACHE="$RUNNER_TEMP/loom-edge-readiness-cache"
+          if [[ "${{ steps.download-edge-evidence.outcome }}" != "success" ]]; then
+            printf '%s\n' '{"ready":false,"evidence":[],"not_applicable":[],"missing":[],"infrastructure_failure":"evidence artifact download failed"}' > skills-edge-readiness.json
+            echo "::error::Loom/Fleet evidence artifact download failed"
+            exit 1
+          fi
+          mapfile -t reports < <(find edge-evidence -type f -name '*.json' -print | sort)
+          if (( ${#reports[@]} == 0 )); then
+            printf '%s\n' '{"ready":false,"evidence":[],"not_applicable":[],"missing":[],"infrastructure_failure":"no evidence reports downloaded"}' > skills-edge-readiness.json
+            echo "::error::No v2 Loom/Fleet evidence shards were downloaded"
+            exit 1
+          fi
+          go run ./cmd/skills-edge-coverage readiness "${reports[@]}" | tee skills-edge-readiness.json
+
+      - name: Upload readiness result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: skills-edge-readiness-${{ github.run_id }}-${{ github.run_attempt }}
+          path: skills-edge-readiness.json
           if-no-files-found: error
           retention-days: 90

@@ -23,6 +23,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/test/skills-e2e/registry"
 )
 
 type skillFixtureFile struct {
@@ -174,6 +175,180 @@ func (r *markerRecordingRoot) Rename(oldName, newName string) error {
 }
 
 func (r *markerRecordingRoot) Remove(string) error { return nil }
+
+type failNthMutationRoot struct {
+	secureRoot
+	failAt                         int
+	persistent                     bool
+	mutations                      int
+	faultTriggered                 bool
+	replacementOccurredBeforeFault bool
+}
+
+func (r *failNthMutationRoot) fail() error {
+	r.mutations++
+	if r.failAt > 0 && r.mutations >= r.failAt && (r.persistent || !r.faultTriggered) {
+		r.faultTriggered = true
+		return fmt.Errorf("injected filesystem failure at operation %d", r.mutations)
+	}
+	return nil
+}
+
+func (r *failNthMutationRoot) MkdirAll(name string, perm os.FileMode) error {
+	if err := r.fail(); err != nil {
+		return err
+	}
+	return r.secureRoot.MkdirAll(name, perm)
+}
+
+func (r *failNthMutationRoot) CreateFile(name string, content []byte, perm os.FileMode) error {
+	if err := r.fail(); err != nil {
+		return err
+	}
+	return r.secureRoot.CreateFile(name, content, perm)
+}
+
+func (r *failNthMutationRoot) Symlink(target, name string) error {
+	if err := r.fail(); err != nil {
+		return err
+	}
+	return r.secureRoot.Symlink(target, name)
+}
+
+func (r *failNthMutationRoot) Rename(oldName, newName string) error {
+	if err := r.fail(); err != nil {
+		return err
+	}
+	if !r.faultTriggered && !isTemporaryBase(path.Base(newName)) {
+		r.replacementOccurredBeforeFault = true
+	}
+	return r.secureRoot.Rename(oldName, newName)
+}
+
+func (r *failNthMutationRoot) Remove(name string) error {
+	if err := r.fail(); err != nil {
+		return err
+	}
+	return r.secureRoot.Remove(name)
+}
+
+func TestMaterializeOneShotFilesystemFailuresRestoreEntirePreviousProjection(t *testing.T) {
+	countTarget := t.TempDir()
+	countSkill, countStore := atomicityFixture()
+	mustMaterialize(t, countStore, countTarget, "operation-count initial Materialize")
+	updateAtomicityFixture(countSkill)
+	var counter *failNthMutationRoot
+	err := materializeWithRootOpener(t.Context(), countStore, "WS", "lead", countTarget, func(rootPath string) (secureRoot, error) {
+		root, openErr := openSecureRoot(rootPath)
+		if openErr != nil {
+			return nil, openErr
+		}
+		counter = &failNthMutationRoot{secureRoot: root}
+		return counter, nil
+	})
+	if err != nil {
+		t.Fatalf("count replacement operations: %v", err)
+	}
+	if counter == nil || counter.mutations == 0 {
+		t.Fatal("replacement performed no injectable filesystem mutations")
+	}
+
+	postReplacementFaults := 0
+	for failAt := 1; failAt <= counter.mutations; failAt++ {
+		t.Run(fmt.Sprintf("operation-%02d", failAt), func(t *testing.T) {
+			target := t.TempDir()
+			skill, st := atomicityFixture()
+			mustMaterialize(t, st, target, "initial Materialize")
+			want := snapshotMaterializedProjection(t, target)
+			updateAtomicityFixture(skill)
+
+			var injected *failNthMutationRoot
+			err := materializeWithRootOpener(t.Context(), st, "WS", "lead", target, func(rootPath string) (secureRoot, error) {
+				root, openErr := openSecureRoot(rootPath)
+				if openErr != nil {
+					return nil, openErr
+				}
+				injected = &failNthMutationRoot{secureRoot: root, failAt: failAt}
+				return injected, nil
+			})
+			if err == nil || !strings.Contains(err.Error(), "injected filesystem failure") {
+				t.Fatalf("Materialize error = %v, want injected filesystem failure", err)
+			}
+			if injected == nil || !injected.faultTriggered {
+				t.Fatalf("fault handshake = %#v, want operation %d to fail", injected, failAt)
+			}
+			if injected.replacementOccurredBeforeFault {
+				postReplacementFaults++
+			}
+			if got := snapshotMaterializedProjection(t, target); !reflect.DeepEqual(got, want) {
+				t.Fatalf("failed replacement changed the materialized projection:\n got: %#v\nwant: %#v", got, want)
+			}
+		})
+	}
+	if postReplacementFaults == 0 {
+		t.Fatal("fault matrix never failed after a managed replacement")
+	}
+}
+
+func TestMaterializeRollbackFailureLeavesOldMarkerForRecovery(t *testing.T) {
+	target := t.TempDir()
+	skill, st := atomicityFixture()
+	mustMaterialize(t, st, target, "initial Materialize")
+	markerFile := filepath.Join(target, filepath.FromSlash(markerPath))
+	oldMarker, err := os.ReadFile(markerFile)
+	if err != nil {
+		t.Fatalf("read old marker: %v", err)
+	}
+	updateAtomicityFixture(skill)
+
+	err = materializeWithRootOpener(t.Context(), st, "WS", "lead", target, func(rootPath string) (secureRoot, error) {
+		root, openErr := openSecureRoot(rootPath)
+		if openErr != nil {
+			return nil, openErr
+		}
+		return &failNthMutationRoot{secureRoot: root, failAt: 7, persistent: true}, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "operation 7") || !strings.Contains(err.Error(), "restore previous skill projection") || !strings.Contains(err.Error(), "operation 8") {
+		t.Fatalf("Materialize error = %v, want original and rollback filesystem failures", err)
+	}
+	afterFailureMarker, readErr := os.ReadFile(markerFile)
+	if readErr != nil || !bytes.Equal(afterFailureMarker, oldMarker) {
+		t.Fatalf("marker advanced after failed rollback: content=%q err=%v", afterFailureMarker, readErr)
+	}
+
+	mustMaterialize(t, st, target, "recovery Materialize")
+	newMarker, readErr := os.ReadFile(markerFile)
+	if readErr != nil || bytes.Equal(newMarker, oldMarker) {
+		t.Fatalf("recovery marker = %q, err=%v, want new projection marker", newMarker, readErr)
+	}
+	for relative, want := range map[string]string{
+		"SKILL.md":           "---\nname: alpha\ndescription: alpha\n---\nnew body\n",
+		"references/add.md":  "new add\n",
+		"references/keep.md": "new keep\n",
+	} {
+		got, readErr := os.ReadFile(filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "alpha", filepath.FromSlash(relative)))
+		if readErr != nil || string(got) != want {
+			t.Fatalf("recovered %s = %q, err=%v, want %q", relative, got, readErr, want)
+		}
+	}
+	removed := filepath.Join(target, filepath.FromSlash(AgentsSkillsDir), "alpha", "references", "remove.md")
+	if _, statErr := os.Stat(removed); !os.IsNotExist(statErr) {
+		t.Fatalf("removed old path survived recovery: %v", statErr)
+	}
+}
+
+func atomicityFixture() (*skillFixture, materializeStore) {
+	skill := &skillFixture{
+		Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "old body\n",
+		Files: []skillFixtureFile{{Path: "references/keep.md", Content: "old keep\n"}, {Path: "references/remove.md", Content: "old remove\n"}},
+	}
+	return skill, materializeStore{skills: &staticSkillStore{skills: []*skillFixture{skill}}}
+}
+
+func updateAtomicityFixture(skill *skillFixture) {
+	skill.Content = "new body\n"
+	skill.Files = []skillFixtureFile{{Path: "references/keep.md", Content: "new keep\n"}, {Path: "references/add.md", Content: "new add\n"}}
+}
 
 func TestMaterializeResolvesRoleSkillAndWritesAgentLayout(t *testing.T) {
 	target := t.TempDir()
@@ -1241,6 +1416,7 @@ func TestMaterializeWorkspaceFileOutageLeavesProjectionUntouched(t *testing.T) {
 }
 
 func TestMaterializeWorkspaceFileIntegrityAndNotFoundRemainFatal(t *testing.T) {
+	registry.MarkEvidence(t, 71)
 	tests := []struct {
 		name  string
 		files func(store.WorkspaceFileStore) store.WorkspaceFileStore
@@ -1263,19 +1439,25 @@ func TestMaterializeWorkspaceFileIntegrityAndNotFoundRemainFatal(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			target := t.TempDir()
 			skills := &staticSkillStore{skills: []*skillFixture{{
-				Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body\n",
+				Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "prior\n",
 			}}}
-			if _, err := skills.List(t.Context(), "WS", store.SkillFilter{}); err != nil {
-				t.Fatalf("publish fixture tree: %v", err)
-			}
+			mustMaterialize(t, materializeStore{skills: skills}, target, "initial Materialize")
+			before := snapshotMaterializedProjection(t, target)
+
+			skills.skills[0].Content = "replacement\n"
 			st := materializeStore{skills: skills, files: tt.files(skills.workspaceFiles())}
-			err := materialize(t.Context(), st, "WS", "lead", t.TempDir())
+			err := materialize(t.Context(), st, "WS", "lead", target)
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("Materialize error = %v, want %v", err, tt.want)
 			}
 			if IsStoreUnavailable(err) {
 				t.Fatalf("fatal workspace-file error classified as unavailable: %v", err)
+			}
+			after := snapshotMaterializedProjection(t, target)
+			if !reflect.DeepEqual(after, before) {
+				t.Fatalf("projection changed after download failure:\nbefore=%#v\nafter=%#v", before, after)
 			}
 		})
 	}
@@ -1548,6 +1730,54 @@ func TestMaterializeRefusesManagedFileToNonemptyDirectoryBeforeCleanup(t *testin
 	if got, readErr := os.ReadFile(zzz); readErr != nil || string(got) != "must remain" {
 		t.Fatalf("lexically later managed file changed before collision refusal: content=%q err=%v", got, readErr)
 	}
+}
+
+type projectedPathSnapshot struct {
+	Mode       os.FileMode
+	Content    string
+	LinkTarget string
+}
+
+func snapshotMaterializedProjection(t *testing.T, target string) map[string]projectedPathSnapshot {
+	t.Helper()
+	snapshot := make(map[string]projectedPathSnapshot)
+	for _, root := range []string{AgentsSkillsDir, ClaudeSkillsDir} {
+		absoluteRoot := filepath.Join(target, filepath.FromSlash(root))
+		err := filepath.WalkDir(absoluteRoot, func(name string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			relative, err := filepath.Rel(target, name)
+			if err != nil {
+				return err
+			}
+			relative = filepath.ToSlash(relative)
+			info, err := os.Lstat(name)
+			if err != nil {
+				return err
+			}
+			node := projectedPathSnapshot{Mode: info.Mode()}
+			switch {
+			case info.Mode()&os.ModeSymlink != 0:
+				node.LinkTarget, err = os.Readlink(name)
+			case info.Mode().IsRegular():
+				var content []byte
+				// #nosec G122 -- this is a test-only snapshot rooted in t.TempDir;
+				// Lstat above deliberately records symlinks without opening them.
+				content, err = os.ReadFile(name)
+				node.Content = string(content)
+			}
+			if err != nil {
+				return err
+			}
+			snapshot[relative] = node
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("snapshot materialized projection: %v", err)
+		}
+	}
+	return snapshot
 }
 
 func runGit(t *testing.T, dir string, args ...string) string {
