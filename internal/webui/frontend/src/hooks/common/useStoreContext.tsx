@@ -24,6 +24,7 @@ import { useWorkspaceContext } from "@/hooks/workspace";
 import { useToast } from "@/hooks/ui";
 import type { MutationPayload } from "@/types/workspace";
 import { EventProvider, useEventContext } from "./useEventProvider";
+import { QueryRecoveryContext } from "./queryRecovery";
 
 // ---------------------------------------------------------------------------
 // Context types
@@ -116,6 +117,21 @@ function StoreWiring({
     state: connectionState,
     reconnectAttempts,
   } = useEventContext();
+
+  const queryRecovery = useContext(QueryRecoveryContext);
+  useEffect(() => {
+    if (!queryRecovery) return;
+    const removeIssues = queryRecovery.register("issues", (signal) =>
+      issueStore.getState().refreshForRecovery(signal, workspaceId),
+    );
+    const removeAgents = queryRecovery.register("agents", (signal) =>
+      agentStore.getState().refreshForRecovery(signal, workspaceId),
+    );
+    return () => {
+      removeIssues();
+      removeAgents();
+    };
+  }, [agentStore, issueStore, queryRecovery, workspaceId]);
 
   // 1. Wire retryNow ref
   retryNowRef.current = retryNow;

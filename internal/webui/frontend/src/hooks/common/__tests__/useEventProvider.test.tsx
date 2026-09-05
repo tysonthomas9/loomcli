@@ -12,6 +12,7 @@ import {
   useResyncSubscription,
 } from "../useEventProvider";
 import type { MutationPayload } from "@/api/common";
+import { QueryRecoveryContext } from "../queryRecovery";
 
 const mockFetchEventSource = vi.hoisted(() => vi.fn());
 vi.mock("@microsoft/fetch-event-source", () => ({
@@ -312,6 +313,53 @@ describe("useEventProvider", () => {
       });
 
       expect(result.current.connectionEpoch).toBe(1);
+    });
+
+    it("starts registered recovery on resync and cancels it on repo scope change", async () => {
+      let finish!: () => void;
+      const pending = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      let signal: AbortSignal | undefined;
+      const refresh = vi.fn((value: AbortSignal) => {
+        signal = value;
+        return pending;
+      });
+      function Participant(): null {
+        const recovery = React.useContext(QueryRecoveryContext);
+        React.useEffect(
+          () => recovery?.register("test query", refresh),
+          [recovery],
+        );
+        return null;
+      }
+      const view = render(
+        <EventProvider sourceRepos={["repo-a"]}>
+          <Participant />
+        </EventProvider>,
+      );
+      await flushConnect();
+      await act(async () => {
+        MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
+        MockFetchEventSourceAttempt.lastInstance?.simulateResync(
+          "c1.saved",
+          "overflow",
+        );
+        await Promise.resolve();
+      });
+      expect(refresh).toHaveBeenCalledTimes(1);
+      expect(signal?.aborted).toBe(false);
+      view.rerender(
+        <EventProvider sourceRepos={["repo-b"]}>
+          <Participant />
+        </EventProvider>,
+      );
+      expect(signal?.aborted).toBe(true);
+      await act(async () => {
+        finish();
+        await pending;
+      });
+      view.unmount();
     });
 
     it("handles handshake resync as one epoch and one legacy refresh", async () => {

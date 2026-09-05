@@ -27,6 +27,10 @@ import {
 } from "@/api/common";
 import { useWorkspaceContext } from "@/hooks/workspace";
 import {
+  QueryRecoveryCoordinator,
+  QueryRecoveryContext,
+} from "./queryRecovery";
+import {
   InvalidatedQueryRegistry,
   InvalidatedQueryRegistryContext,
 } from "./invalidatedQueryRegistry";
@@ -152,6 +156,26 @@ export function EventProvider({
   const sourceReposRef = useRef(sourceRepos);
   const sourceReposKey = (sourceRepos ?? []).slice().sort().join(",");
   const prevSourceReposKeyRef = useRef(sourceReposKey);
+  const queryRecovery = useMemo(
+    () =>
+      new QueryRecoveryCoordinator(
+        JSON.stringify([workspaceId, sourceReposKey]),
+      ),
+    [workspaceId, sourceReposKey],
+  );
+  const queryRecoveryRef = useRef(queryRecovery);
+  useEffect(() => {
+    queryRecoveryRef.current = queryRecovery;
+    const unregister = queryRecovery.register(
+      "blocked issue queries",
+      (signal) => invalidatedQueryRegistry.refreshForRecovery(signal),
+      () => invalidatedQueryRegistry.getRecoveryRevision(),
+    );
+    return () => {
+      unregister();
+      queryRecovery.cancel();
+    };
+  }, [invalidatedQueryRegistry, queryRecovery]);
 
   useEffect(() => {
     sourceReposRef.current = sourceRepos;
@@ -286,6 +310,12 @@ export function EventProvider({
           timestamp: new Date().toISOString(),
           workspace_id: workspaceId,
         });
+        // This covers registered surfaces, not a committed source snapshot.
+        // Successful query refresh never resets the SSE checkpoint here.
+        void queryRecoveryRef.current.refresh().catch((error: unknown) => {
+          if (error instanceof Error && error.name === "AbortError") return;
+          console.error("[EventProvider] Query recovery failed:", error);
+        });
         for (const callback of resyncSubscribersRef.current.values()) {
           try {
             callback(event);
@@ -364,7 +394,9 @@ export function EventProvider({
 
   return (
     <InvalidatedQueryRegistryContext.Provider value={invalidatedQueryRegistry}>
-      <EventContext.Provider value={value}>{children}</EventContext.Provider>
+      <QueryRecoveryContext.Provider value={queryRecovery}>
+        <EventContext.Provider value={value}>{children}</EventContext.Provider>
+      </QueryRecoveryContext.Provider>
     </InvalidatedQueryRegistryContext.Provider>
   );
 }

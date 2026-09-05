@@ -1482,16 +1482,16 @@ describe("issueStore", () => {
       expect(store.getState().showStaleBanner).toBe(true);
     });
 
-    it("clears stale banner on reconnection", () => {
+    it("keeps stale banner until a successful refresh after reconnection", () => {
       store.getState().setConnectionState("reconnecting");
       vi.advanceTimersByTime(5000);
       expect(store.getState().showStaleBanner).toBe(true);
 
       store.getState().setConnectionState("connected");
-      expect(store.getState().showStaleBanner).toBe(false);
+      expect(store.getState().showStaleBanner).toBe(true);
     });
 
-    it("clears stale banner when reconnecting passes through connecting", () => {
+    it("does not trust a swallowed refetch promise to clear stale state", () => {
       const refetchSpy = vi
         .spyOn(store.getState(), "refetch")
         .mockResolvedValue();
@@ -1506,9 +1506,9 @@ describe("issueStore", () => {
       expect(store.getState().showStaleBanner).toBe(true);
 
       store.getState().setConnectionState("connected");
-      expect(store.getState().showStaleBanner).toBe(false);
+      expect(store.getState().showStaleBanner).toBe(true);
       expect(store.getState().connectionLost).toBe(false);
-      expect(store.getState().disconnectedSince).toBeNull();
+      expect(store.getState().disconnectedSince).not.toBeNull();
       expect(refetchSpy).toHaveBeenCalled();
       expect(toastFn).toHaveBeenCalledWith("Connection restored.", {
         type: "info",
@@ -1589,10 +1589,10 @@ describe("issueStore", () => {
       expect(store.getState().disconnectedSince).toBe(now);
     });
 
-    it("clears disconnectedSince on reconnection", () => {
+    it("retains disconnectedSince until refresh succeeds", () => {
       store.getState().setConnectionState("reconnecting");
       store.getState().setConnectionState("connected");
-      expect(store.getState().disconnectedSince).toBeNull();
+      expect(store.getState().disconnectedSince).not.toBeNull();
     });
 
     it("clears stale banner timer on transition to disconnected", () => {
@@ -2056,4 +2056,167 @@ describe("issueStore", () => {
       s.getState().reset();
     });
   });
+});
+
+describe("issue recovery refresh", () => {
+  it("requires configuration and rejects an already aborted recovery", async () => {
+    const store = createIssueStore();
+    await expect(
+      store.getState().refreshForRecovery(new AbortController().signal),
+    ).rejects.toThrow("not configured");
+    mockGetReadyIssues.mockResolvedValue([]);
+    await store.getState().fetchIssues({ workspaceId: "WS", mode: "ready" });
+    const controller = new AbortController();
+    controller.abort();
+    const count = mockGetReadyIssues.mock.calls.length;
+    await expect(
+      store.getState().refreshForRecovery(controller.signal),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(mockGetReadyIssues).toHaveBeenCalledTimes(count);
+    store.getState().reset();
+  });
+
+  it("starts a new post-invocation request and waits for its committed result", async () => {
+    const store = createIssueStore();
+    let finishOld!: (issues: Issue[]) => void;
+    let finishNew!: (issues: Issue[]) => void;
+    mockGetReadyIssues.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishOld = resolve;
+        }),
+    );
+    const old = store
+      .getState()
+      .fetchIssues({ workspaceId: "WS", mode: "ready", sourceRepos: ["repo"] });
+    const oldSignal = mockGetReadyIssues.mock.calls.at(-1)?.[2]?.signal;
+    mockGetReadyIssues.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishNew = resolve;
+        }),
+    );
+    let settled = false;
+    const recovered = store
+      .getState()
+      .refreshForRecovery(new AbortController().signal)
+      .then(() => {
+        settled = true;
+      });
+    expect(oldSignal?.aborted).toBe(true);
+    finishOld([makeIssue({ id: "old" })]);
+    await old;
+    expect(settled).toBe(false);
+    expect(store.getState().getIssue("old")).toBeUndefined();
+    store.setState({
+      showStaleBanner: true,
+      connectionLost: true,
+      disconnectedSince: 1,
+    });
+    finishNew([makeIssue({ id: "fresh" })]);
+    await recovered;
+    expect(store.getState().getIssue("fresh")).toBeDefined();
+    expect(store.getState().showStaleBanner).toBe(false);
+    expect(store.getState().disconnectedSince).toBeNull();
+    store.getState().reset();
+  });
+
+  it("rejects API failure without a success acknowledgement or automatic recovery retry", async () => {
+    const store = createIssueStore();
+    mockGetReadyIssues.mockResolvedValue([]);
+    await store.getState().fetchIssues({ workspaceId: "WS", mode: "ready" });
+    store.setState({ showStaleBanner: true });
+    mockGetReadyIssues.mockRejectedValueOnce(new Error("offline"));
+    await expect(
+      store.getState().refreshForRecovery(new AbortController().signal),
+    ).rejects.toThrow("offline");
+    expect(store.getState().showStaleBanner).toBe(true);
+    expect(store.getState().nextRetryAt).toBeNull();
+    store.getState().reset();
+  });
+
+  it.each(["abort", "workspace", "repos", "reset"])(
+    "rejects %s while an ignored-signal request is in flight",
+    async (change) => {
+      const store = createIssueStore();
+      mockGetReadyIssues.mockResolvedValue([]);
+      await store
+        .getState()
+        .fetchIssues({ workspaceId: "WS", mode: "ready", sourceRepos: ["a"] });
+      let finish!: (issues: Issue[]) => void;
+      mockGetReadyIssues.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const controller = new AbortController();
+      const recovery = store.getState().refreshForRecovery(controller.signal);
+      const rejected = expect(recovery).rejects.toMatchObject({
+        name: "AbortError",
+      });
+      if (change === "abort") controller.abort();
+      else if (change === "reset") store.getState().reset();
+      else
+        await store.getState().fetchIssues({
+          workspaceId: change === "workspace" ? "OTHER" : "WS",
+          mode: "ready",
+          sourceRepos: change === "repos" ? ["b"] : ["a"],
+        });
+      await rejected;
+      finish([makeIssue({ id: "late" })]);
+      await Promise.resolve();
+      expect(store.getState().getIssue("late")).toBeUndefined();
+      store.getState().reset();
+    },
+  );
+});
+
+describe("issue recovery legacy scheduling", () => {
+  it("joins same-scope refreshes without allowing swallowed errors to acknowledge recovery", async () => {
+    const store = createIssueStore();
+    mockGetReadyIssues.mockResolvedValue([]);
+    await store.getState().fetchIssues({
+      workspaceId: "WS",
+      mode: "ready",
+      sourceRepos: ["a", "b"],
+    });
+    let fail!: (error: Error) => void;
+    mockGetReadyIssues.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          fail = reject;
+        }),
+    );
+    const strict = store
+      .getState()
+      .refreshForRecovery(new AbortController().signal);
+    const rejected = expect(strict).rejects.toThrow("failed recovery");
+    const calls = mockGetReadyIssues.mock.calls.length;
+    const legacy = store.getState().fetchIssues({
+      workspaceId: "WS",
+      mode: "ready",
+      sourceRepos: ["b", "a"],
+    });
+    expect(mockGetReadyIssues).toHaveBeenCalledTimes(calls);
+    fail(new Error("failed recovery"));
+    await rejected;
+    await expect(legacy).resolves.toBeUndefined();
+    store.getState().reset();
+  });
+});
+
+it("rejects recovery for a caller workspace before its new store fetch is configured", async () => {
+  const store = createIssueStore();
+  mockGetReadyIssues.mockResolvedValue([]);
+  await store.getState().fetchIssues({ workspaceId: "OLD", mode: "ready" });
+  const calls = mockGetReadyIssues.mock.calls.length;
+  await expect(
+    store.getState().refreshForRecovery(new AbortController().signal, "NEW"),
+  ).rejects.toThrow("workspace changed");
+  expect(mockGetReadyIssues).toHaveBeenCalledTimes(calls);
+  await expect(
+    store.getState().refreshForRecovery(new AbortController().signal, "OLD"),
+  ).resolves.toBeUndefined();
+  store.getState().reset();
 });
