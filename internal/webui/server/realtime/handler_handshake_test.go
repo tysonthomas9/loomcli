@@ -169,7 +169,7 @@ func TestHandler_CatchUpPagesAndDeduplicatesEveryQueuedCursor(t *testing.T) {
 		OnAuthenticated: func(context.Context, string) (string, error) {
 			return "c1.head", nil
 		},
-		GetMutationPage: func(_ context.Context, _ string, since string, limit int) (backend.MutationPage, error) {
+		OpenMutationSource: openFixtureMutationSource(func(_ context.Context, _ string, since string, limit int) (backend.MutationPage, error) {
 			if since != "$" || limit != 1 {
 				t.Errorf("invalid head request")
 			}
@@ -177,8 +177,7 @@ func TestHandler_CatchUpPagesAndDeduplicatesEveryQueuedCursor(t *testing.T) {
 				return backend.MutationPage{Cursor: "c1.b"}, nil
 			}
 			return backend.MutationPage{Cursor: "c1.live"}, nil
-		},
-		GetMutationPageThrough: func(_ context.Context, wsID, since, through string, limit int) (backend.MutationPage, error) {
+		}, func(_ context.Context, wsID, since, through string, limit int) (backend.MutationPage, error) {
 			if wsID != "ws-1" || limit != catchUpPageLimit {
 				t.Fatalf("catch-up request workspace/limit = %q/%d", wsID, limit)
 			}
@@ -217,7 +216,8 @@ func TestHandler_CatchUpPagesAndDeduplicatesEveryQueuedCursor(t *testing.T) {
 			default:
 				return backend.MutationPage{Cursor: since}, nil
 			}
-		},
+		}),
+
 		WorkspaceFromCtx: func(context.Context) string { return "ws-1" },
 	})
 	h.writerFactory = func(http.ResponseWriter) (frameWriter, error) { return writer, nil }
@@ -460,14 +460,14 @@ func TestHandler_SourceFailuresResyncWithoutAdvancingOrConnected(t *testing.T) {
 			if expired {
 				reason = "expired"
 			}
-			h := NewHandler(HandlerConfig{Hub: hub, WorkspaceFromCtx: func(context.Context) string { return "ws-1" }, GetMutationPage: fixedReplayHead(t, "c1.head"), GetMutationPageThrough: func(context.Context, string, string, string, int) (backend.MutationPage, error) {
+			h := NewHandler(HandlerConfig{Hub: hub, WorkspaceFromCtx: func(context.Context) string { return "ws-1" }, OpenMutationSource: openFixtureMutationSource(fixedReplayHead(t, "c1.head"), func(context.Context, string, string, string, int) (backend.MutationPage, error) {
 				if expired {
 					err := backend.NewBackendError(backend.KindValidation, "catchup", "expired", backend.ErrMutationCursorExpired)
 					err.Meta = map[string]string{"cursor": "c1.floor"}
 					return backend.MutationPage{}, err
 				}
 				return backend.MutationPage{}, errors.New("unavailable")
-			}})
+			})})
 			writer := newRecordingFrameWriter()
 			h.writerFactory = func(http.ResponseWriter) (frameWriter, error) { return writer, nil }
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -486,10 +486,10 @@ func TestHandler_PageBudgetSchedulesRemainingSource(t *testing.T) {
 	go hub.Run()
 	t.Cleanup(hub.Stop)
 	calls := 0
-	h := NewHandler(HandlerConfig{Hub: hub, WorkspaceFromCtx: func(context.Context) string { return "ws-1" }, GetMutationPage: fixedReplayHead(t, "c1.start"+strings.Repeat(".next", 12)), GetMutationPageThrough: func(_ context.Context, _ string, since, through string, _ int) (backend.MutationPage, error) {
+	h := NewHandler(HandlerConfig{Hub: hub, WorkspaceFromCtx: func(context.Context) string { return "ws-1" }, OpenMutationSource: openFixtureMutationSource(fixedReplayHead(t, "c1.start"+strings.Repeat(".next", 12)), func(_ context.Context, _ string, since, through string, _ int) (backend.MutationPage, error) {
 		calls++
 		return backend.MutationPage{Cursor: since + ".next", HasMore: calls < 12}, nil
-	}})
+	})})
 	writer := newRecordingFrameWriter()
 	h.writerFactory = func(http.ResponseWriter) (frameWriter, error) { return writer, nil }
 	h.heartbeatInterval = time.Hour
@@ -525,10 +525,10 @@ func TestHandler_NumericHeaderLargerThanNumericQueryWinsCatchUp(t *testing.T) {
 	h := NewHandler(HandlerConfig{
 		Hub:             hub,
 		OnAuthenticated: func(context.Context, string) (string, error) { return "1000", nil },
-		GetMutationPage: fixedReplayHead(t, "300"), GetMutationPageThrough: func(_ context.Context, _ string, since, through string, _ int) (backend.MutationPage, error) {
+		OpenMutationSource: openFixtureMutationSource(fixedReplayHead(t, "300"), func(_ context.Context, _ string, since, through string, _ int) (backend.MutationPage, error) {
 			gotSince = since
 			return backend.MutationPage{Events: []backend.MutationData{}, Cursor: since}, nil
-		},
+		}),
 		WorkspaceFromCtx: func(context.Context) string { return "ws-1" },
 	})
 	writer := newRecordingFrameWriter()
@@ -592,12 +592,12 @@ func TestHandler_NumericLastEventIDFailsClosedForBoundedFleetReplay(t *testing.T
 	writer := newRecordingFrameWriter()
 	h := NewHandler(HandlerConfig{
 		Hub: hub,
-		GetMutationPage: func(ctx context.Context, _ string, since string, limit int) (backend.MutationPage, error) {
+		OpenMutationSource: openFixtureMutationSource(func(ctx context.Context, _ string, since string, limit int) (backend.MutationPage, error) {
 			return fleetBackend.GetMutationsAfter(ctx, since, limit)
-		},
-		GetMutationPageThrough: func(ctx context.Context, _ string, since, through string, limit int) (backend.MutationPage, error) {
+		}, func(ctx context.Context, _ string, since, through string, limit int) (backend.MutationPage, error) {
 			return fleetBackend.GetMutationsThrough(ctx, since, through, limit)
-		},
+		}),
+
 		WorkspaceFromCtx: func(context.Context) string { return "ws-1" },
 	})
 	h.writerFactory = func(http.ResponseWriter) (frameWriter, error) { return writer, nil }

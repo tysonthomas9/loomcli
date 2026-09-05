@@ -29,7 +29,7 @@ func TestModule_RegisterRoutes(t *testing.T) {
 	}
 	wsFromCtx := func(_ context.Context) string { return "test-ws" }
 
-	mod := NewModule(hub, getMutations, boundedModulePage(getMutations), wsFromCtx, nil, tokens)
+	mod := NewModule(hub, moduleSourceFactory(getMutations), wsFromCtx, nil, tokens)
 
 	mux := http.NewServeMux()
 	mod.Register(mux)
@@ -66,7 +66,7 @@ func TestModule_ConditionalRoutes(t *testing.T) {
 	wsFromCtx := func(_ context.Context) string { return "test-ws" }
 
 	t.Run("nil sseTokens returns disabled token response", func(t *testing.T) {
-		mod := NewModule(hub, getMutations, boundedModulePage(getMutations), wsFromCtx, nil, nil)
+		mod := NewModule(hub, moduleSourceFactory(getMutations), wsFromCtx, nil, nil)
 
 		mux := http.NewServeMux()
 		mod.Register(mux)
@@ -113,7 +113,7 @@ func TestModule_WrongMethod_Returns405(t *testing.T) {
 	}
 	wsFromCtx := func(_ context.Context) string { return "test-ws" }
 
-	mod := NewModule(hub, getMutations, boundedModulePage(getMutations), wsFromCtx, nil, tokens)
+	mod := NewModule(hub, moduleSourceFactory(getMutations), wsFromCtx, nil, tokens)
 
 	mux := http.NewServeMux()
 	mod.Register(mux)
@@ -147,7 +147,7 @@ func TestModule_DoesNotActivateWorkspaceOnTokenRoute(t *testing.T) {
 		return "c1.head", nil
 	}
 
-	mod := NewModule(hub, getMutations, boundedModulePage(getMutations), wsFromCtx, activate, tokens)
+	mod := NewModule(hub, moduleSourceFactory(getMutations), wsFromCtx, activate, tokens)
 
 	mux := http.NewServeMux()
 	mod.Register(mux)
@@ -187,7 +187,7 @@ func TestModule_DoesNotActivateResolvedWorkspacePerTokenRoute(t *testing.T) {
 		return "c1.head", nil
 	}
 
-	mod := NewModule(hub, getMutations, boundedModulePage(getMutations), middleware.WorkspaceFromContext, activate, tokens)
+	mod := NewModule(hub, moduleSourceFactory(getMutations), middleware.WorkspaceFromContext, activate, tokens)
 
 	wsMux := http.NewServeMux()
 	mod.Register(wsMux)
@@ -234,7 +234,7 @@ func TestModule_DoesNotActivateEventsRouteBeforeTokenAuth(t *testing.T) {
 		return "c1.head", nil
 	}
 
-	mod := NewModule(hub, getMutations, boundedModulePage(getMutations), wsFromCtx, activate, tokens)
+	mod := NewModule(hub, moduleSourceFactory(getMutations), wsFromCtx, activate, tokens)
 
 	mux := http.NewServeMux()
 	mod.Register(mux)
@@ -271,7 +271,7 @@ func TestModule_ActivatesEachAuthorizedEventsClient(t *testing.T) {
 		return "c1.head", nil
 	}
 
-	mod := NewModule(hub, getMutations, boundedModulePage(getMutations), middleware.WorkspaceFromContext, activate, tokens)
+	mod := NewModule(hub, moduleSourceFactory(getMutations), middleware.WorkspaceFromContext, activate, tokens)
 
 	wsMux := http.NewServeMux()
 	mod.Register(wsMux)
@@ -335,7 +335,7 @@ func TestModule_ActivatesWorkspaceOnEventsRoute(t *testing.T) {
 		return "c1.head", nil
 	}
 
-	mod := NewModule(hub, getMutations, boundedModulePage(getMutations), wsFromCtx, activate, nil)
+	mod := NewModule(hub, moduleSourceFactory(getMutations), wsFromCtx, activate, nil)
 
 	mux := http.NewServeMux()
 	mod.Register(mux)
@@ -375,9 +375,19 @@ func containsAll(s string, needles ...string) bool {
 	return true
 }
 
-// boundedModulePage adapts finite deterministic route-test pages to a fixed fence.
-func boundedModulePage(read func(context.Context, string, string, int) (backend.MutationPage, error)) func(context.Context, string, string, string, int) (backend.MutationPage, error) {
-	return func(ctx context.Context, ws, since, through string, limit int) (backend.MutationPage, error) {
-		return read(ctx, ws, since, limit)
+type moduleMutationSource struct {
+	read      func(context.Context, string, string, int) (backend.MutationPage, error)
+	workspace string
+}
+
+func (s moduleMutationSource) ReadHead(ctx context.Context) (backend.MutationPage, error) {
+	return s.read(ctx, s.workspace, "$", 1)
+}
+func (s moduleMutationSource) ReadPage(ctx context.Context, since, through string, limit int) (backend.MutationPage, error) {
+	return s.read(ctx, s.workspace, since, limit)
+}
+func moduleSourceFactory(read func(context.Context, string, string, int) (backend.MutationPage, error)) func(context.Context, string) (realtime.MutationSource, error) {
+	return func(_ context.Context, ws string) (realtime.MutationSource, error) {
+		return moduleMutationSource{read: read, workspace: ws}, nil
 	}
 }
