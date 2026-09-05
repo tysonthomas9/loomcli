@@ -611,6 +611,11 @@ func agentEffectiveBackend(agent *domain.Agent) string {
 }
 
 func agentDesiredRunnable(agent *domain.Agent) bool {
+	// auto: false durably disables the agent, so it is not runnable whatever
+	// its desired state says.
+	if !agent.Auto {
+		return false
+	}
 	switch agent.DesiredState {
 	case domain.AgentDesiredStopped, domain.AgentDesiredDraining:
 		return false

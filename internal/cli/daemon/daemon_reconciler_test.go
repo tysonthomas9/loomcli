@@ -132,12 +132,12 @@ func TestDiffAgents_Mixed(t *testing.T) {
 	old := []AgentEntry{
 		{Worktree: "keep", Role: "task"},
 		{Worktree: "remove", Role: "plan"},
-		{Worktree: "change", Role: "task", Auto: false},
+		{Worktree: "change", Role: "task", Auto: boolPtr(false)},
 	}
 	new := []AgentEntry{
 		{Worktree: "keep", Role: "task"},
 		{Worktree: "add", Role: "plan"},
-		{Worktree: "change", Role: "task", Auto: true},
+		{Worktree: "change", Role: "task", Auto: boolPtr(true)},
 	}
 	added, removed, modified := diffAgents(old, new)
 	if len(added) != 1 {
@@ -234,7 +234,7 @@ func TestAgentEntry_Equal(t *testing.T) {
 		Worktree:         "w1",
 		Role:             "task",
 		Repo:             "backend",
-		Auto:             true,
+		Auto:             boolPtr(true),
 		Backend:          "anthropic",
 		FallbackBackends: []string{"openai"},
 		PathPatterns:     []string{"*.go"},
@@ -285,7 +285,7 @@ func TestAgentEntry_Equal(t *testing.T) {
 
 	t.Run("differs_Auto", func(t *testing.T) {
 		other := base
-		other.Auto = false
+		other.Auto = boolPtr(false)
 		if base.Equal(other) {
 			t.Error("expected Equal to return false when Auto differs")
 		}
@@ -517,4 +517,30 @@ func TestConcurrentDrainAdd_Serialized(t *testing.T) {
 // serialization via drainAddMu prevents duplicate agent entries.
 func TestConcurrentDrainAdd_AddNoDuplicate(t *testing.T) {
 	t.Skip("test moved to supervisor package — tests supervisor concurrent add/drain")
+}
+
+// Flipping auto true -> false is a config change, so the reconciler drains the
+// agent and then declines to re-add it. Disabling a running agent therefore
+// takes effect on the next config poll with no extra code.
+func TestReconcile_AutoFlipToFalseDrainsAndDoesNotReAdd(t *testing.T) {
+	oldEntry := AgentEntry{Worktree: "ci-verifier", Role: "task", Auto: boolPtr(true)}
+	newEntry := AgentEntry{Worktree: "ci-verifier", Role: "task", Auto: boolPtr(false)}
+
+	_, _, modified := diffAgents([]AgentEntry{oldEntry}, []AgentEntry{newEntry})
+	if len(modified) != 1 || modified[0].Worktree != "ci-verifier" {
+		t.Fatalf("expected the auto flip to show up as a modified agent, got %+v", modified)
+	}
+
+	d := newTestDaemonWithAgents([]AgentEntry{oldEntry})
+	defer d.sup.ShutdownOnce.Do(func() { close(d.sup.Shutdown) })
+	if d.AgentCount() != 1 {
+		t.Fatalf("AgentCount() = %d before reconcile, want 1", d.AgentCount())
+	}
+
+	d.drainAgents(modified, "restart")
+	d.addNewAgents(modified, "restart")
+
+	if d.AgentCount() != 0 {
+		t.Errorf("AgentCount() = %d after disabling, want 0 (drained and not re-added)", d.AgentCount())
+	}
 }

@@ -43,11 +43,12 @@ var (
 	agentUpdateParent string
 	agentUpdateRole   string
 	agentUpdateMode   string
+	agentUpdateAuto   bool
 )
 
 var agentUpdateCmd = &cobra.Command{
 	Use:   "update <NAME>",
-	Short: "Update an agent's hooks, epic scope, role, or mode",
+	Short: "Update an agent's hooks, epic scope, role, mode, or auto flag",
 	Long: `Update an existing agent definition.
 
 Completion hooks: the supervisor — not the agent's prompt — performs these
@@ -60,13 +61,19 @@ clears the scope), --role and --mode change how the daemon runs it. Changes
 apply on the daemon's next config poll; a running attempt keeps the entry it
 started with.
 
+--auto is the durable enable switch. --auto=false stops the daemon supervising
+the agent and makes "loom agentdef start" and "loom data agent start" refuse
+it; a running agent is drained on the next config poll. --auto re-enables it.
+
   loom agentdef update critic --on-complete-comment-reply --on-complete-add-label criticized
   loom agentdef update critic --on-complete-remove-label needs-review --on-complete-add-label reviewed
   loom agentdef update planner --on-complete-write-design --on-complete-set-status review
   loom agentdef update planner --on-complete-set-status "blocked:upstream API decision pending"
   loom agentdef update critic --clear-on-complete
   loom agentdef update worker --parent EPIC-7
-  loom agentdef update worker --parent ""`,
+  loom agentdef update worker --parent ""
+  loom agentdef update ci-verifier --auto=false
+  loom agentdef update ci-verifier --auto`,
 	Args: cobra.ExactArgs(1),
 	RunE: runAgentUpdate,
 }
@@ -289,7 +296,7 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 			if parent == "" {
 				parent = "(none)"
 			}
-			fmt.Printf("Updated agent %s/%s (role=%s mode=%s parent=%s)\n", ws, a.Name, a.RoleName, a.Mode, parent)
+			fmt.Printf("Updated agent %s/%s (role=%s mode=%s parent=%s auto=%t)\n", ws, a.Name, a.RoleName, a.Mode, parent, a.Auto)
 		}
 		switch {
 		case hooks == nil:
@@ -323,6 +330,11 @@ func agentUpdateIdentityPatch(changed func(string) bool) (store.AgentUpdate, boo
 		patch.RoleName = &r
 		touched = true
 	}
+	if changed("auto") {
+		v := agentUpdateAuto
+		patch.Auto = &v
+		touched = true
+	}
 	if changed("mode") {
 		m := strings.TrimSpace(agentUpdateMode)
 		if m != "" && m != string(domain.AgentModeEphemeral) && m != string(domain.AgentModeService) {
@@ -352,7 +364,7 @@ func agentUpdateHooksPatch(identityChanged bool) (*domain.AgentHooks, error) {
 	case !setRequested && identityChanged:
 		return nil, nil // identity-only update; leave the pipeline untouched
 	case !setRequested:
-		return nil, fmt.Errorf("nothing to update: pass --parent/--role/--mode, --on-complete-comment-reply, " +
+		return nil, fmt.Errorf("nothing to update: pass --parent/--role/--mode/--auto, --on-complete-comment-reply, " +
 			"--on-complete-write-design, --on-complete-add-label, --on-complete-remove-label, " +
 			"--on-complete-set-status, --on-complete-close and/or --on-complete-cycle, or --clear-on-complete")
 	}
