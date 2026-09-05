@@ -57,6 +57,8 @@ func ReadCodexSessionIndex(codexHome string) (map[string]CodexSessionIndexEntry,
 		return entries, nil
 	}
 
+	// #nosec G304 -- codexHome is the lead's own CODEX_HOME, resolved and
+	// verified by enforceLeadProfile; the file name is a constant.
 	file, err := os.Open(filepath.Join(codexHome, CodexSessionIndexFile))
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {

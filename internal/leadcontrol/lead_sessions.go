@@ -33,12 +33,16 @@ const leadLivenessWindow = 60 * time.Second
 // CodexThreadID are the provider-side handles that actually reopen a
 // conversation.
 type LeadSessionRecord struct {
-	SessionID        string
-	AgentID          string
-	Status           domain.AgentSessionStatus
-	StartedAt        time.Time
-	LastHeartbeat    time.Time
-	Finished         bool
+	SessionID     string
+	AgentID       string
+	Status        domain.AgentSessionStatus
+	StartedAt     time.Time
+	LastHeartbeat time.Time
+	Finished      bool
+	// FinishedAt is when the row was finalized, zero while it is unfinished.
+	// Finished stays the flag resume reasons about; this is the timestamp a
+	// listing shows beside it.
+	FinishedAt       time.Time
 	WorkDir          string
 	Provider         string
 	HarnessSessionID string
@@ -68,11 +72,21 @@ func LeadSessionRecordFromSession(session *domain.AgentSession) LeadSessionRecor
 		StartedAt:        session.StartedAt,
 		LastHeartbeat:    session.LastHeartbeat,
 		Finished:         session.FinishedAt != nil,
+		FinishedAt:       leadSessionFinishedAt(session),
 		WorkDir:          strings.TrimSpace(m[MetadataLeadWorkDir]),
 		Provider:         strings.TrimSpace(m[MetadataRuntimeProvider]),
 		HarnessSessionID: strings.TrimSpace(m[MetadataHarnessSessionID]),
 		CodexThreadID:    strings.TrimSpace(m[MetadataCodexThreadID]),
 	}
+}
+
+// leadSessionFinishedAt dereferences the optional finish time into the zero
+// value, so callers render one field instead of testing a pointer.
+func leadSessionFinishedAt(session *domain.AgentSession) time.Time {
+	if session == nil || session.FinishedAt == nil {
+		return time.Time{}
+	}
+	return *session.FinishedAt
 }
 
 // LeadSessionListOptions narrows the orchestration scan.
