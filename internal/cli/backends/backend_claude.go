@@ -465,8 +465,28 @@ func invokeClaudeRunTurn(ctx context.Context, workDir, prompt, agentName, resume
 	// leaves the turn result and the exit code exactly as they were.
 	accumulateHarnessUsage(collector, "claude", res.Session.HarnessSessionID, workDir)
 
-	if err != nil && claudeRunTurnEvidence(res, raw.String()) == "" {
-		res.Turn.Text = raw.String()
+	// Carry the harness's rendered screen out with EVERY errored turn, not just
+	// when there is no other evidence. The old guard was
+	// `claudeRunTurnEvidence(res, raw.String()) == ""`, which is true only when
+	// raw is itself empty — so it assigned "" and dropped the screen in exactly
+	// the case the screen was the only thing worth having. Even the corrected
+	// form (evidence WITHOUT raw) is not enough: a bare harness exit sets
+	// Turn.Reason to "exit code 1", which is non-empty, uninformative, and
+	// classifies as [Unknown] — the verdict that burns a task's no-progress
+	// budget and quarantines it. The screen is what distinguishes a folder-trust
+	// dialog from an auth wall from a genuine crash, so it must always reach
+	// InvocationError.OutputTail.
+	if err != nil {
+		if screen := strings.TrimSpace(raw.String()); screen != "" {
+			if len(screen) > maxTurnScreenEvidence {
+				screen = screen[len(screen)-maxTurnScreenEvidence:]
+			}
+			if strings.TrimSpace(res.Turn.Text) == "" {
+				res.Turn.Text = screen
+			} else {
+				res.Turn.Text = res.Turn.Text + "\n" + screen
+			}
+		}
 	}
 	return res, err
 }
@@ -474,6 +494,10 @@ func invokeClaudeRunTurn(ctx context.Context, workDir, prompt, agentName, resume
 // Retry tunables for the RunTurn path. The in-tree harness.RunWithRetry wraps
 // the older hwharness.Run API and can't be reused for RunTurn, so these are
 // kept in sync with harness.DefaultRetryPolicy (Max 3, 2s base, 60s cap).
+// maxTurnScreenEvidence bounds the rendered-screen tail attached to an errored
+// turn. Large enough to hold a full dialog, small enough not to flood the log.
+const maxTurnScreenEvidence = 8192
+
 const (
 	claudeTurnMaxRetries  = 3
 	claudeTurnBaseBackoff = 2 * time.Second
