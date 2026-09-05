@@ -2558,6 +2558,106 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/config/terminal": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Terminal lifecycle limits
+     * @description Serves the server's terminal lifecycle snapshot. The frontend uses it
+     *     to bound auto-reconnect: the client's retry ceiling must stay at or
+     *     under `grace_period_ms`, or it gives up while the server still holds
+     *     the shell open. A zero millisecond value means that limit is disabled.
+     */
+    get: operations["getTerminalConfig"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/daemon/supervisor": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Supervisor state and supervised agents
+     * @description Reads the daemon's state file. Registered only when the server was
+     *     built with a supervisor reader; otherwise the path 404s as an unknown
+     *     API route.
+     */
+    get: operations["getDaemonSupervisor"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/daemon/config": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Effective resolved daemon config
+     * @description Returns the daemon's effective configuration verbatim, embedded under
+     *     `data` as raw JSON. The shape follows the daemon's config file rather
+     *     than a fixed API schema, so it is deliberately unconstrained here.
+     *     Registered only when the server was built with a config loader.
+     */
+    get: operations["getDaemonConfig"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/local/settings": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Read desktop-local runtime settings
+     * @description Returns the sanitized desktop-local settings: secrets are never echoed,
+     *     only whether each one is set. Registered only when the server has a
+     *     local settings directory configured.
+     */
+    get: operations["getLocalSettings"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Update desktop-local runtime settings
+     * @description Partial update: only the sections present in the body are touched, and
+     *     within a section only the fields present. Credential values are sealed
+     *     before they are written and are never returned — the response is the
+     *     same sanitized view as the GET.
+     *
+     *     Redis changes take effect on the next restart, because embedded
+     *     fleet-db reads them at startup.
+     */
+    patch: operations["patchLocalSettings"];
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -4188,6 +4288,172 @@ export interface components {
       /** @description `{adapter}:{delivery-id}`. */
       idempotency_key: string;
       deliveries: components["schemas"]["WebhookDelivery"][];
+    };
+    /** @description Terminal lifecycle limits. A zero millisecond value disables that limit. */
+    TerminalLifecycleConfig: {
+      /**
+       * Format: int64
+       * @description How long a detached session is held before it is killed.
+       */
+      grace_period_ms: number;
+      /**
+       * Format: int64
+       * @description How long an idle session is held before it is reaped.
+       */
+      idle_timeout_ms: number;
+      max_sessions: number;
+    };
+    TerminalLifecycleConfigResponse: {
+      /** @constant */
+      success: true;
+      data: components["schemas"]["TerminalLifecycleConfig"];
+    };
+    /**
+     * @description A workspace-level refusal to start new work. Carried on the supervisor
+     *     response so the banner costs no extra round trip.
+     */
+    DaemonClaimHold: {
+      held: boolean;
+      actor: string;
+      reason: string;
+      /** Format: date-time */
+      since: string;
+      /** Format: date-time */
+      expires_at?: string;
+    };
+    /** @description One supervised agent in the supervisor snapshot. */
+    DaemonAgentEntry: {
+      worktree: string;
+      role: string;
+      repo?: string;
+      pid: number;
+      status: string;
+      task_id?: string;
+      epic_id?: string;
+      current_backend?: string;
+      restart_count: number;
+      /** Format: date-time */
+      last_start?: string;
+      /** Format: date-time */
+      last_exit?: string;
+      last_exit_code?: number;
+      stop_reason?: string;
+      /** Format: date-time */
+      stopped_at?: string;
+      worktree_path?: string;
+      last_error_class?: string;
+      no_work_count?: number;
+      /** Format: date-time */
+      backoff_until?: string;
+      remote_branch?: string;
+      /** @description Cycling, but gated by an active claim hold. */
+      claims_gated?: boolean;
+    };
+    DaemonSupervisorData: {
+      pid: number;
+      /** Format: date-time */
+      started_at: string;
+      uptime_seconds: number;
+      agents: components["schemas"]["DaemonAgentEntry"][];
+      claim_hold?: components["schemas"]["DaemonClaimHold"];
+    };
+    DaemonSupervisorResponse: {
+      /** @constant */
+      success: true;
+      data: components["schemas"]["DaemonSupervisorData"];
+    };
+    DaemonConfigResponse: {
+      /** @constant */
+      success: true;
+      /**
+       * @description The effective daemon config, embedded verbatim. Its shape follows
+       *     the daemon config file, not a fixed API schema.
+       */
+      data: {
+        [key: string]: unknown;
+      };
+    };
+    /** @description Redis settings for embedded fleet-db, with the password reduced to a flag. */
+    SanitizedRedisConfig: {
+      enabled: boolean;
+      addr?: string;
+      db: number;
+      tls: boolean;
+      password_set: boolean;
+    };
+    SanitizedAgentRuntimeConfig: {
+      /** @description Where app-triggered task agents run by default. */
+      default: string;
+    };
+    SanitizedLocalTaskRunnerConfig: {
+      opencode_model?: string;
+    };
+    /** @description Credential presence only — the value itself is never returned. */
+    SanitizedRuntimeCredential: {
+      configured: boolean;
+      updated_at?: string;
+    };
+    SanitizedRuntimeCredentialSet: {
+      daytona: components["schemas"]["SanitizedRuntimeCredential"];
+      github: components["schemas"]["SanitizedRuntimeCredential"];
+    };
+    SanitizedLocalSettings: {
+      version: number;
+      fleetdb_redis: components["schemas"]["SanitizedRedisConfig"];
+      agent_runtime: components["schemas"]["SanitizedAgentRuntimeConfig"];
+      local_task_runner: components["schemas"]["SanitizedLocalTaskRunnerConfig"];
+      runtime_credentials: components["schemas"]["SanitizedRuntimeCredentialSet"];
+    };
+    LocalSettingsResponse: {
+      /** @constant */
+      success: true;
+      data?: components["schemas"]["SanitizedLocalSettings"];
+      /** @description Set on a successful PATCH. */
+      message?: string;
+    };
+    /**
+     * @description `redis_url`, when non-empty, is parsed first and supplies the whole
+     *     config; the discrete fields then override what it set.
+     */
+    LocalSettingsRedisPatch: {
+      enabled?: boolean;
+      redis_url?: string;
+      addr?: string;
+      /** @description Ignored when empty. Use `clear_password` to unset. */
+      password?: string;
+      clear_password?: boolean;
+      db?: number;
+      tls?: boolean;
+    };
+    LocalSettingsAgentRuntimePatch: {
+      /** @description Normalized and validated before it is stored. */
+      default?: string;
+    };
+    LocalSettingsTaskRunnerPatch: {
+      opencode_model?: string;
+    };
+    /**
+     * @description Supply the credential under whichever field the provider uses; GitHub
+     *     prefers `token`, Daytona prefers `api_key`, and each falls back to the
+     *     other. An empty value is a no-op. The value is sealed before it is
+     *     written and never returned.
+     */
+    LocalSettingsCredentialPatch: {
+      api_key?: string;
+      token?: string;
+      /** @description Removes the stored credential; takes precedence over any value. */
+      clear?: boolean;
+    };
+    LocalSettingsCredentialsPatch: {
+      daytona?: components["schemas"]["LocalSettingsCredentialPatch"];
+      github?: components["schemas"]["LocalSettingsCredentialPatch"];
+    };
+    /** @description Only the sections present are applied; omitted ones are untouched. */
+    LocalSettingsPatchRequest: {
+      fleetdb_redis?: components["schemas"]["LocalSettingsRedisPatch"];
+      agent_runtime?: components["schemas"]["LocalSettingsAgentRuntimePatch"];
+      local_task_runner?: components["schemas"]["LocalSettingsTaskRunnerPatch"];
+      runtime_credentials?: components["schemas"]["LocalSettingsCredentialsPatch"];
     };
   };
   responses: never;
@@ -9505,6 +9771,173 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+    };
+  };
+  getTerminalConfig: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Lifecycle config */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TerminalLifecycleConfigResponse"];
+        };
+      };
+    };
+  };
+  getDaemonSupervisor: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Supervisor snapshot */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DaemonSupervisorResponse"];
+        };
+      };
+      /** @description The state file exists but could not be read or parsed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Daemon is not running (no state file) */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getDaemonConfig: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Effective config */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DaemonConfigResponse"];
+        };
+      };
+      /** @description Config could not be loaded */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getLocalSettings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Sanitized settings */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LocalSettingsResponse"];
+        };
+      };
+      /** @description Settings directory unconfigured or unreadable */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  patchLocalSettings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["LocalSettingsPatchRequest"];
+      };
+    };
+    responses: {
+      /** @description Saved; body carries the sanitized settings and a message */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LocalSettingsResponse"];
+        };
+      };
+      /** @description Malformed body, or a rejected value (bad Redis URL, unknown agent runtime) */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Request body too large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Settings directory unconfigured or unreadable */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
         };
       };
     };

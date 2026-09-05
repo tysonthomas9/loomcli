@@ -206,6 +206,36 @@ func (e CreateIssueRequestStatus) Valid() bool {
 	}
 }
 
+// Defines values for DaemonConfigResponseSuccess.
+const (
+	DaemonConfigResponseSuccessTrue DaemonConfigResponseSuccess = true
+)
+
+// Valid indicates whether the value is a known member of the DaemonConfigResponseSuccess enum.
+func (e DaemonConfigResponseSuccess) Valid() bool {
+	switch e {
+	case DaemonConfigResponseSuccessTrue:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DaemonSupervisorResponseSuccess.
+const (
+	DaemonSupervisorResponseSuccessTrue DaemonSupervisorResponseSuccess = true
+)
+
+// Valid indicates whether the value is a known member of the DaemonSupervisorResponseSuccess enum.
+func (e DaemonSupervisorResponseSuccess) Valid() bool {
+	switch e {
+	case DaemonSupervisorResponseSuccessTrue:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DriverOwnerType.
 const (
 	DriverOwnerTypeLeadAgent DriverOwnerType = "lead_agent"
@@ -653,15 +683,30 @@ func (e IssueTabType) Valid() bool {
 	}
 }
 
+// Defines values for LocalSettingsResponseSuccess.
+const (
+	LocalSettingsResponseSuccessTrue LocalSettingsResponseSuccess = true
+)
+
+// Valid indicates whether the value is a known member of the LocalSettingsResponseSuccess enum.
+func (e LocalSettingsResponseSuccess) Valid() bool {
+	switch e {
+	case LocalSettingsResponseSuccessTrue:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MessageResponseSuccess.
 const (
-	True MessageResponseSuccess = true
+	MessageResponseSuccessTrue MessageResponseSuccess = true
 )
 
 // Valid indicates whether the value is a known member of the MessageResponseSuccess enum.
 func (e MessageResponseSuccess) Valid() bool {
 	switch e {
-	case True:
+	case MessageResponseSuccessTrue:
 		return true
 	default:
 		return false
@@ -986,6 +1031,21 @@ const (
 func (e TabMetadataReplacedReason) Valid() bool {
 	switch e {
 	case ServerRestart:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TerminalLifecycleConfigResponseSuccess.
+const (
+	True TerminalLifecycleConfigResponseSuccess = true
+)
+
+// Valid indicates whether the value is a known member of the TerminalLifecycleConfigResponseSuccess enum.
+func (e TerminalLifecycleConfigResponseSuccess) Valid() bool {
+	switch e {
+	case True:
 		return true
 	default:
 		return false
@@ -1945,6 +2005,74 @@ type CreateWorkflowVersionRequest struct {
 	Files map[string]string `json:"files"`
 }
 
+// DaemonAgentEntry One supervised agent in the supervisor snapshot.
+type DaemonAgentEntry struct {
+	BackoffUntil *time.Time `json:"backoff_until,omitempty"`
+
+	// ClaimsGated Cycling, but gated by an active claim hold.
+	ClaimsGated    *bool      `json:"claims_gated,omitempty"`
+	CurrentBackend *string    `json:"current_backend,omitempty"`
+	EpicId         *string    `json:"epic_id,omitempty"`
+	LastErrorClass *string    `json:"last_error_class,omitempty"`
+	LastExit       *time.Time `json:"last_exit,omitempty"`
+	LastExitCode   *int       `json:"last_exit_code,omitempty"`
+	LastStart      *time.Time `json:"last_start,omitempty"`
+	NoWorkCount    *int       `json:"no_work_count,omitempty"`
+	Pid            int        `json:"pid"`
+	RemoteBranch   *string    `json:"remote_branch,omitempty"`
+	Repo           *string    `json:"repo,omitempty"`
+	RestartCount   int        `json:"restart_count"`
+	Role           string     `json:"role"`
+	Status         string     `json:"status"`
+	StopReason     *string    `json:"stop_reason,omitempty"`
+	StoppedAt      *time.Time `json:"stopped_at,omitempty"`
+	TaskId         *string    `json:"task_id,omitempty"`
+	Worktree       string     `json:"worktree"`
+	WorktreePath   *string    `json:"worktree_path,omitempty"`
+}
+
+// DaemonClaimHold A workspace-level refusal to start new work. Carried on the supervisor
+// response so the banner costs no extra round trip.
+type DaemonClaimHold struct {
+	Actor     string     `json:"actor"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	Held      bool       `json:"held"`
+	Reason    string     `json:"reason"`
+	Since     time.Time  `json:"since"`
+}
+
+// DaemonConfigResponse defines model for DaemonConfigResponse.
+type DaemonConfigResponse struct {
+	// Data The effective daemon config, embedded verbatim. Its shape follows
+	// the daemon config file, not a fixed API schema.
+	Data    map[string]interface{}      `json:"data"`
+	Success DaemonConfigResponseSuccess `json:"success"`
+}
+
+// DaemonConfigResponseSuccess defines model for DaemonConfigResponse.Success.
+type DaemonConfigResponseSuccess bool
+
+// DaemonSupervisorData defines model for DaemonSupervisorData.
+type DaemonSupervisorData struct {
+	Agents []DaemonAgentEntry `json:"agents"`
+
+	// ClaimHold A workspace-level refusal to start new work. Carried on the supervisor
+	// response so the banner costs no extra round trip.
+	ClaimHold     *DaemonClaimHold `json:"claim_hold,omitempty"`
+	Pid           int              `json:"pid"`
+	StartedAt     time.Time        `json:"started_at"`
+	UptimeSeconds float32          `json:"uptime_seconds"`
+}
+
+// DaemonSupervisorResponse defines model for DaemonSupervisorResponse.
+type DaemonSupervisorResponse struct {
+	Data    DaemonSupervisorData            `json:"data"`
+	Success DaemonSupervisorResponseSuccess `json:"success"`
+}
+
+// DaemonSupervisorResponseSuccess defines model for DaemonSupervisorResponse.Success.
+type DaemonSupervisorResponseSuccess bool
+
 // Dependency Full dependency relation from types.Dependency
 type Dependency struct {
 	CreatedAt   time.Time `json:"created_at"`
@@ -2573,6 +2701,81 @@ type JourneySpan struct {
 	UnknownStart  bool       `json:"unknown_start"`
 }
 
+// LocalSettingsAgentRuntimePatch defines model for LocalSettingsAgentRuntimePatch.
+type LocalSettingsAgentRuntimePatch struct {
+	// Default Normalized and validated before it is stored.
+	Default *string `json:"default,omitempty"`
+}
+
+// LocalSettingsCredentialPatch Supply the credential under whichever field the provider uses; GitHub
+// prefers `token`, Daytona prefers `api_key`, and each falls back to the
+// other. An empty value is a no-op. The value is sealed before it is
+// written and never returned.
+type LocalSettingsCredentialPatch struct {
+	ApiKey *string `json:"api_key,omitempty"`
+
+	// Clear Removes the stored credential; takes precedence over any value.
+	Clear *bool   `json:"clear,omitempty"`
+	Token *string `json:"token,omitempty"`
+}
+
+// LocalSettingsCredentialsPatch defines model for LocalSettingsCredentialsPatch.
+type LocalSettingsCredentialsPatch struct {
+	// Daytona Supply the credential under whichever field the provider uses; GitHub
+	// prefers `token`, Daytona prefers `api_key`, and each falls back to the
+	// other. An empty value is a no-op. The value is sealed before it is
+	// written and never returned.
+	Daytona *LocalSettingsCredentialPatch `json:"daytona,omitempty"`
+
+	// Github Supply the credential under whichever field the provider uses; GitHub
+	// prefers `token`, Daytona prefers `api_key`, and each falls back to the
+	// other. An empty value is a no-op. The value is sealed before it is
+	// written and never returned.
+	Github *LocalSettingsCredentialPatch `json:"github,omitempty"`
+}
+
+// LocalSettingsPatchRequest Only the sections present are applied; omitted ones are untouched.
+type LocalSettingsPatchRequest struct {
+	AgentRuntime *LocalSettingsAgentRuntimePatch `json:"agent_runtime,omitempty"`
+
+	// FleetdbRedis `redis_url`, when non-empty, is parsed first and supplies the whole
+	// config; the discrete fields then override what it set.
+	FleetdbRedis       *LocalSettingsRedisPatch       `json:"fleetdb_redis,omitempty"`
+	LocalTaskRunner    *LocalSettingsTaskRunnerPatch  `json:"local_task_runner,omitempty"`
+	RuntimeCredentials *LocalSettingsCredentialsPatch `json:"runtime_credentials,omitempty"`
+}
+
+// LocalSettingsRedisPatch `redis_url`, when non-empty, is parsed first and supplies the whole
+// config; the discrete fields then override what it set.
+type LocalSettingsRedisPatch struct {
+	Addr          *string `json:"addr,omitempty"`
+	ClearPassword *bool   `json:"clear_password,omitempty"`
+	Db            *int    `json:"db,omitempty"`
+	Enabled       *bool   `json:"enabled,omitempty"`
+
+	// Password Ignored when empty. Use `clear_password` to unset.
+	Password *string `json:"password,omitempty"`
+	RedisUrl *string `json:"redis_url,omitempty"`
+	Tls      *bool   `json:"tls,omitempty"`
+}
+
+// LocalSettingsResponse defines model for LocalSettingsResponse.
+type LocalSettingsResponse struct {
+	Data *SanitizedLocalSettings `json:"data,omitempty"`
+
+	// Message Set on a successful PATCH.
+	Message *string                      `json:"message,omitempty"`
+	Success LocalSettingsResponseSuccess `json:"success"`
+}
+
+// LocalSettingsResponseSuccess defines model for LocalSettingsResponse.Success.
+type LocalSettingsResponseSuccess bool
+
+// LocalSettingsTaskRunnerPatch defines model for LocalSettingsTaskRunnerPatch.
+type LocalSettingsTaskRunnerPatch struct {
+	OpencodeModel *string `json:"opencode_model,omitempty"`
+}
+
 // MessageResponse defines model for MessageResponse.
 type MessageResponse struct {
 	Message string                 `json:"message"`
@@ -3054,6 +3257,52 @@ type RuntimeReadyResponse struct {
 // RuntimeReadyResponseMode defines model for RuntimeReadyResponse.Mode.
 type RuntimeReadyResponseMode string
 
+// SanitizedAgentRuntimeConfig defines model for SanitizedAgentRuntimeConfig.
+type SanitizedAgentRuntimeConfig struct {
+	// Default Where app-triggered task agents run by default.
+	Default string `json:"default"`
+}
+
+// SanitizedLocalSettings defines model for SanitizedLocalSettings.
+type SanitizedLocalSettings struct {
+	AgentRuntime SanitizedAgentRuntimeConfig `json:"agent_runtime"`
+
+	// FleetdbRedis Redis settings for embedded fleet-db, with the password reduced to a flag.
+	FleetdbRedis       SanitizedRedisConfig           `json:"fleetdb_redis"`
+	LocalTaskRunner    SanitizedLocalTaskRunnerConfig `json:"local_task_runner"`
+	RuntimeCredentials SanitizedRuntimeCredentialSet  `json:"runtime_credentials"`
+	Version            int                            `json:"version"`
+}
+
+// SanitizedLocalTaskRunnerConfig defines model for SanitizedLocalTaskRunnerConfig.
+type SanitizedLocalTaskRunnerConfig struct {
+	OpencodeModel *string `json:"opencode_model,omitempty"`
+}
+
+// SanitizedRedisConfig Redis settings for embedded fleet-db, with the password reduced to a flag.
+type SanitizedRedisConfig struct {
+	Addr        *string `json:"addr,omitempty"`
+	Db          int     `json:"db"`
+	Enabled     bool    `json:"enabled"`
+	PasswordSet bool    `json:"password_set"`
+	Tls         bool    `json:"tls"`
+}
+
+// SanitizedRuntimeCredential Credential presence only — the value itself is never returned.
+type SanitizedRuntimeCredential struct {
+	Configured bool    `json:"configured"`
+	UpdatedAt  *string `json:"updated_at,omitempty"`
+}
+
+// SanitizedRuntimeCredentialSet defines model for SanitizedRuntimeCredentialSet.
+type SanitizedRuntimeCredentialSet struct {
+	// Daytona Credential presence only — the value itself is never returned.
+	Daytona SanitizedRuntimeCredential `json:"daytona"`
+
+	// Github Credential presence only — the value itself is never returned.
+	Github SanitizedRuntimeCredential `json:"github"`
+}
+
 // SeedRequest defines model for SeedRequest.
 type SeedRequest struct {
 	Blockers *[]struct {
@@ -3214,6 +3463,26 @@ type TabPutRequest struct {
 	Pinned    bool   `json:"pinned"`
 	SortOrder int    `json:"sort_order"`
 }
+
+// TerminalLifecycleConfig Terminal lifecycle limits. A zero millisecond value disables that limit.
+type TerminalLifecycleConfig struct {
+	// GracePeriodMs How long a detached session is held before it is killed.
+	GracePeriodMs int64 `json:"grace_period_ms"`
+
+	// IdleTimeoutMs How long an idle session is held before it is reaped.
+	IdleTimeoutMs int64 `json:"idle_timeout_ms"`
+	MaxSessions   int   `json:"max_sessions"`
+}
+
+// TerminalLifecycleConfigResponse defines model for TerminalLifecycleConfigResponse.
+type TerminalLifecycleConfigResponse struct {
+	// Data Terminal lifecycle limits. A zero millisecond value disables that limit.
+	Data    TerminalLifecycleConfig                `json:"data"`
+	Success TerminalLifecycleConfigResponseSuccess `json:"success"`
+}
+
+// TerminalLifecycleConfigResponseSuccess defines model for TerminalLifecycleConfigResponse.Success.
+type TerminalLifecycleConfigResponseSuccess bool
 
 // TerminalSessionInfo defines model for TerminalSessionInfo.
 type TerminalSessionInfo struct {
@@ -4175,6 +4444,9 @@ type PushWorkerLogsJSONRequestBody = PushWorkerLogsJSONBody
 
 // UpdateWorkerStateJSONRequestBody defines body for UpdateWorkerState for application/json ContentType.
 type UpdateWorkerStateJSONRequestBody = WorkerStateRequest
+
+// PatchLocalSettingsJSONRequestBody defines body for PatchLocalSettings for application/json ContentType.
+type PatchLocalSettingsJSONRequestBody = LocalSettingsPatchRequest
 
 // NotifySessionChangeJSONRequestBody defines body for NotifySessionChange for application/json ContentType.
 type NotifySessionChangeJSONRequestBody NotifySessionChangeJSONBody

@@ -76,6 +76,10 @@ tags:
     description: Workflow version registration and run creation
   - name: webhooks
     description: Inbound provider webhook ingest
+  - name: daemon
+    description: Daemon supervisor state and effective config
+  - name: local-settings
+    description: Desktop-local runtime settings
   - name: runs
     description: Driver (workflow) run reads and event streaming
   - name: observability
@@ -4868,6 +4872,146 @@ paths:
               schema:
                 $ref: "#/components/schemas/SimpleErrorResponse"
 
+  # ── Terminal Lifecycle Config ───────────────────────────────────────────
+  /api/config/terminal:
+    get:
+      operationId: getTerminalConfig
+      tags: [config]
+      summary: Terminal lifecycle limits
+      description: |
+        Serves the server's terminal lifecycle snapshot. The frontend uses it
+        to bound auto-reconnect: the client's retry ceiling must stay at or
+        under `grace_period_ms`, or it gives up while the server still holds
+        the shell open. A zero millisecond value means that limit is disabled.
+      responses:
+        "200":
+          description: Lifecycle config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TerminalLifecycleConfigResponse"
+
+  # ── Daemon ──────────────────────────────────────────────────────────────
+  /api/daemon/supervisor:
+    get:
+      operationId: getDaemonSupervisor
+      tags: [daemon]
+      summary: Supervisor state and supervised agents
+      description: |
+        Reads the daemon's state file. Registered only when the server was
+        built with a supervisor reader; otherwise the path 404s as an unknown
+        API route.
+      responses:
+        "200":
+          description: Supervisor snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DaemonSupervisorResponse"
+        "500":
+          description: The state file exists but could not be read or parsed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Daemon is not running (no state file)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/daemon/config:
+    get:
+      operationId: getDaemonConfig
+      tags: [daemon]
+      summary: Effective resolved daemon config
+      description: |
+        Returns the daemon's effective configuration verbatim, embedded under
+        `data` as raw JSON. The shape follows the daemon's config file rather
+        than a fixed API schema, so it is deliberately unconstrained here.
+        Registered only when the server was built with a config loader.
+      responses:
+        "200":
+          description: Effective config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DaemonConfigResponse"
+        "503":
+          description: Config could not be loaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ── Desktop-Local Settings ──────────────────────────────────────────────
+  /api/local/settings:
+    get:
+      operationId: getLocalSettings
+      tags: [local-settings]
+      summary: Read desktop-local runtime settings
+      description: |
+        Returns the sanitized desktop-local settings: secrets are never echoed,
+        only whether each one is set. Registered only when the server has a
+        local settings directory configured.
+      responses:
+        "200":
+          description: Sanitized settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocalSettingsResponse"
+        "500":
+          description: Settings directory unconfigured or unreadable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: patchLocalSettings
+      tags: [local-settings]
+      summary: Update desktop-local runtime settings
+      description: |
+        Partial update: only the sections present in the body are touched, and
+        within a section only the fields present. Credential values are sealed
+        before they are written and are never returned — the response is the
+        same sanitized view as the GET.
+
+        Redis changes take effect on the next restart, because embedded
+        fleet-db reads them at startup.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LocalSettingsPatchRequest"
+      responses:
+        "200":
+          description: Saved; body carries the sanitized settings and a message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocalSettingsResponse"
+        "400":
+          description: Malformed body, or a rejected value (bad Redis URL, unknown agent runtime)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Request body too large
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Settings directory unconfigured or unreadable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   securitySchemes:
     BearerAuth:
@@ -8041,3 +8185,291 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/WebhookDelivery"
+
+    TerminalLifecycleConfig:
+      type: object
+      description: Terminal lifecycle limits. A zero millisecond value disables that limit.
+      required: [grace_period_ms, idle_timeout_ms, max_sessions]
+      properties:
+        grace_period_ms:
+          type: integer
+          format: int64
+          description: How long a detached session is held before it is killed.
+        idle_timeout_ms:
+          type: integer
+          format: int64
+          description: How long an idle session is held before it is reaped.
+        max_sessions:
+          type: integer
+
+    TerminalLifecycleConfigResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/TerminalLifecycleConfig"
+
+    DaemonClaimHold:
+      type: object
+      description: |
+        A workspace-level refusal to start new work. Carried on the supervisor
+        response so the banner costs no extra round trip.
+      required: [held, actor, reason, since]
+      properties:
+        held:
+          type: boolean
+        actor:
+          type: string
+        reason:
+          type: string
+        since:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+
+    DaemonAgentEntry:
+      type: object
+      description: One supervised agent in the supervisor snapshot.
+      required: [worktree, role, pid, status, restart_count]
+      properties:
+        worktree:
+          type: string
+        role:
+          type: string
+        repo:
+          type: string
+        pid:
+          type: integer
+        status:
+          type: string
+        task_id:
+          type: string
+        epic_id:
+          type: string
+        current_backend:
+          type: string
+        restart_count:
+          type: integer
+        last_start:
+          type: string
+          format: date-time
+        last_exit:
+          type: string
+          format: date-time
+        last_exit_code:
+          type: integer
+        stop_reason:
+          type: string
+        stopped_at:
+          type: string
+          format: date-time
+        worktree_path:
+          type: string
+        last_error_class:
+          type: string
+        no_work_count:
+          type: integer
+        backoff_until:
+          type: string
+          format: date-time
+        remote_branch:
+          type: string
+        claims_gated:
+          type: boolean
+          description: Cycling, but gated by an active claim hold.
+
+    DaemonSupervisorData:
+      type: object
+      required: [pid, started_at, uptime_seconds, agents]
+      properties:
+        pid:
+          type: integer
+        started_at:
+          type: string
+          format: date-time
+        uptime_seconds:
+          type: number
+        agents:
+          type: array
+          items:
+            $ref: "#/components/schemas/DaemonAgentEntry"
+        claim_hold:
+          $ref: "#/components/schemas/DaemonClaimHold"
+
+    DaemonSupervisorResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/DaemonSupervisorData"
+
+    DaemonConfigResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          type: object
+          additionalProperties: true
+          description: |
+            The effective daemon config, embedded verbatim. Its shape follows
+            the daemon config file, not a fixed API schema.
+
+    SanitizedRedisConfig:
+      type: object
+      description: Redis settings for embedded fleet-db, with the password reduced to a flag.
+      required: [enabled, db, tls, password_set]
+      properties:
+        enabled:
+          type: boolean
+        addr:
+          type: string
+        db:
+          type: integer
+        tls:
+          type: boolean
+        password_set:
+          type: boolean
+
+    SanitizedAgentRuntimeConfig:
+      type: object
+      required: [default]
+      properties:
+        default:
+          type: string
+          description: Where app-triggered task agents run by default.
+
+    SanitizedLocalTaskRunnerConfig:
+      type: object
+      properties:
+        opencode_model:
+          type: string
+
+    SanitizedRuntimeCredential:
+      type: object
+      description: Credential presence only — the value itself is never returned.
+      required: [configured]
+      properties:
+        configured:
+          type: boolean
+        updated_at:
+          type: string
+
+    SanitizedRuntimeCredentialSet:
+      type: object
+      required: [daytona, github]
+      properties:
+        daytona:
+          $ref: "#/components/schemas/SanitizedRuntimeCredential"
+        github:
+          $ref: "#/components/schemas/SanitizedRuntimeCredential"
+
+    SanitizedLocalSettings:
+      type: object
+      required: [version, fleetdb_redis, agent_runtime, local_task_runner, runtime_credentials]
+      properties:
+        version:
+          type: integer
+        fleetdb_redis:
+          $ref: "#/components/schemas/SanitizedRedisConfig"
+        agent_runtime:
+          $ref: "#/components/schemas/SanitizedAgentRuntimeConfig"
+        local_task_runner:
+          $ref: "#/components/schemas/SanitizedLocalTaskRunnerConfig"
+        runtime_credentials:
+          $ref: "#/components/schemas/SanitizedRuntimeCredentialSet"
+
+    LocalSettingsResponse:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/SanitizedLocalSettings"
+        message:
+          type: string
+          description: Set on a successful PATCH.
+
+    LocalSettingsRedisPatch:
+      type: object
+      description: |
+        `redis_url`, when non-empty, is parsed first and supplies the whole
+        config; the discrete fields then override what it set.
+      properties:
+        enabled:
+          type: boolean
+        redis_url:
+          type: string
+        addr:
+          type: string
+        password:
+          type: string
+          description: Ignored when empty. Use `clear_password` to unset.
+        clear_password:
+          type: boolean
+        db:
+          type: integer
+        tls:
+          type: boolean
+
+    LocalSettingsAgentRuntimePatch:
+      type: object
+      properties:
+        default:
+          type: string
+          description: Normalized and validated before it is stored.
+
+    LocalSettingsTaskRunnerPatch:
+      type: object
+      properties:
+        opencode_model:
+          type: string
+
+    LocalSettingsCredentialPatch:
+      type: object
+      description: |
+        Supply the credential under whichever field the provider uses; GitHub
+        prefers `token`, Daytona prefers `api_key`, and each falls back to the
+        other. An empty value is a no-op. The value is sealed before it is
+        written and never returned.
+      properties:
+        api_key:
+          type: string
+        token:
+          type: string
+        clear:
+          type: boolean
+          description: Removes the stored credential; takes precedence over any value.
+
+    LocalSettingsCredentialsPatch:
+      type: object
+      properties:
+        daytona:
+          $ref: "#/components/schemas/LocalSettingsCredentialPatch"
+        github:
+          $ref: "#/components/schemas/LocalSettingsCredentialPatch"
+
+    LocalSettingsPatchRequest:
+      type: object
+      description: Only the sections present are applied; omitted ones are untouched.
+      properties:
+        fleetdb_redis:
+          $ref: "#/components/schemas/LocalSettingsRedisPatch"
+        agent_runtime:
+          $ref: "#/components/schemas/LocalSettingsAgentRuntimePatch"
+        local_task_runner:
+          $ref: "#/components/schemas/LocalSettingsTaskRunnerPatch"
+        runtime_credentials:
+          $ref: "#/components/schemas/LocalSettingsCredentialsPatch"
