@@ -41,6 +41,8 @@ vi.mock("@/hooks/workspace", async () => {
 });
 
 interface MockFetchEventSourceOptions {
+  headers: Record<string, string>;
+  fetch?: typeof fetch;
   signal?: AbortSignal;
   onopen?: (response: Response) => Promise<void> | void;
   onmessage?: (event: { id: string; event: string; data: string }) => void;
@@ -63,6 +65,14 @@ class MockFetchEventSourceAttempt {
   constructor(url: string, options: MockFetchEventSourceOptions) {
     this.url = url;
     this.options = options;
+    // The library hands custom fetch its mutable resume headers before parsing.
+    // Exercise that seam so message callbacks observe the effective checkpoint.
+    void options
+      .fetch?.(url, {
+        headers: options.headers,
+        signal: options.signal,
+      })
+      .catch(() => {});
     MockFetchEventSourceAttempt.instances.push(this);
     options.signal?.addEventListener("abort", () => {
       this.readyState = MockFetchEventSourceAttempt.CLOSED;
@@ -83,10 +93,16 @@ class MockFetchEventSourceAttempt {
     this.options.onmessage?.({ id: "", event: "connected", data: "" });
   }
 
+  private simulateId(id: string): void {
+    if (id) this.options.headers["last-event-id"] = id;
+    else delete this.options.headers["last-event-id"];
+  }
+
   simulateResync(
     id: string,
     reason: "cap" | "error" | "expired" | "overflow",
   ): void {
+    this.simulateId(id);
     this.options.onmessage?.({
       id,
       event: "resync",
@@ -112,6 +128,7 @@ class MockFetchEventSourceAttempt {
     const eventId =
       lastEventId ??
       (parsed.timestamp ? String(Date.parse(parsed.timestamp)) : "");
+    this.simulateId(eventId);
     this.options.onmessage?.({
       event: "mutation",
       id: eventId,
@@ -120,6 +137,7 @@ class MockFetchEventSourceAttempt {
   }
 
   simulateRawMutation(data: string, lastEventId = ""): void {
+    this.simulateId(lastEventId);
     try {
       this.options.onmessage?.({ event: "mutation", id: lastEventId, data });
     } catch (error) {
@@ -154,6 +172,12 @@ describe("useEventProvider", () => {
     mockWorkspaceId = "test-ws-id";
     MockFetchEventSourceAttempt.reset();
     mockFetchEventSource.mockReset();
+    vi.spyOn(window, "fetch").mockResolvedValue(
+      new Response(null, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      }),
+    );
     mockFetchEventSource.mockImplementation(
       (input: RequestInfo, options: MockFetchEventSourceOptions) => {
         const source = new MockFetchEventSourceAttempt(String(input), options);

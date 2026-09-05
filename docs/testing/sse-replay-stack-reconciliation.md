@@ -76,7 +76,7 @@ unlimited replay. That browser proof remains unverified on this branch.
 
 This is not a claim that every SSE bug is fixed. The larger goal still requires
 a committed-source feed, durable retention/incarnation handling, an ordered live
-delivery frontier across retry queues, cursor-free transient hints, a stable
+delivery frontier across retry queues, a stable
 snapshot boundary during replay, dependency-aware invalidation and query-freshness
 recovery, storage-server restart tests, and paired Loom/FleetDB browser proof.
 The live cursor-cycle guard detects only cycles within its bounded recent window;
@@ -93,3 +93,6 @@ exposed a fixture without durable mutation IDs; after supplying its actual page
 cursor on the fixture events, that package passed with the race detector in
 13.798 seconds. Changed Go code passed lint. Independent review found no
 remaining blocker in this increment's scope.
+
+Transient notification cursor isolation is now covered separately in
+[sse-transient-cursor-proof.md](sse-transient-cursor-proof.md).
