@@ -12,7 +12,7 @@ import (
 // EventListResponse wraps the event list data for JSON response.
 type EventListResponse struct {
 	Success bool           `json:"success"`
-	Data    []*types.Event `json:"data,omitempty"`
+	Data    []*types.Event `json:"data"`
 	// Cursor is present only for a since-paged response. A newest-tail response
 	// has no cursor; clients page forward from since="" to retrieve its history.
 	Cursor  string `json:"cursor,omitempty"`
@@ -78,6 +78,9 @@ func HandleGetIssueEvents(svc service.IssueService) http.HandlerFunc {
 		if result == nil {
 			handler.HandleServiceError(w, service.ErrInternal("event history result missing", nil))
 			return
+		}
+		if result.Events == nil {
+			result.Events = []*types.Event{}
 		}
 		handler.WriteJSON(w, http.StatusOK, EventListResponse{
 			Success:     true,

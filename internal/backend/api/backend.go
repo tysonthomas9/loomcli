@@ -562,15 +562,21 @@ func (b *APIBackend) ListEvents(ctx context.Context, id string, limit int) ([]ba
 		return nil, err
 	}
 	if !hasData(resp) {
-		return []backend.EventData{}, nil
+		return nil, backend.ErrInternal("ListEvents", "missing events data", nil)
 	}
-	var events []gen.IssueEvent
+	var events []*gen.IssueEvent
 	if err := json.Unmarshal(resp.Data, &events); err != nil {
 		return nil, backend.ErrInternal("ListEvents", "unmarshal response", err)
 	}
+	if events == nil {
+		return nil, backend.ErrInternal("ListEvents", "missing events array", nil)
+	}
 	result := make([]backend.EventData, 0, len(events))
 	for _, e := range events {
-		result = append(result, eventToData(e))
+		if e == nil || e.Id == "" || e.IssueId != id || e.EventType == "" || e.CreatedAt.IsZero() {
+			return nil, backend.ErrInternal("ListEvents", "invalid event record", nil)
+		}
+		result = append(result, eventToData(*e))
 	}
 	return result, nil
 }
