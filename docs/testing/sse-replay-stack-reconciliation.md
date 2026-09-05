@@ -1,5 +1,9 @@
 # SSE replay reconciliation with the transport stack
 
+Current implementation update: [authoritative reader proof](sse-authoritative-reader-proof.md)
+supersedes the payload-driven replay/live delivery described below. Prior
+validation remains evidence for its recorded revision only.
+
 This integrates the remaining code-level replay fixes from PR #626
 (`51b0dd2d7`) onto the existing transport stack, through PR #639
 (`301732c17`). It preserves the stack's paged backend interface, bounded catch-up,

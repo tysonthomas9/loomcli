@@ -27,9 +27,8 @@ const (
 	disconnectReasonServerClose = "server_close"
 	disconnectReasonError       = "error"
 
-	catchUpPageLimit       = 100
-	defaultCatchUpMaxPages = 10
-	defaultCatchUpTimeout  = 5 * time.Second
+	catchUpPageLimit      = 100
+	defaultCatchUpTimeout = 5 * time.Second
 )
 
 type mutationPageFn func(context.Context, string, string, int) (backend.MutationPage, error)
@@ -53,17 +52,6 @@ type frameWriter interface {
 	WriteComment(string) error
 }
 
-type preparedMutation struct {
-	id         string
-	payload    *MutationPayload
-	checkpoint bool
-}
-
-type resyncInstruction struct {
-	cursor string
-	reason string
-}
-
 // Handler is an http.Handler for the SSE endpoint with configurable heartbeat.
 type Handler struct {
 	hub               *Hub
@@ -74,9 +62,8 @@ type Handler struct {
 	onAuthenticated   func(context.Context, string) (string, error)
 	clientIDCounter   atomic.Int64
 
-	catchUpMaxPages int
-	catchUpTimeout  time.Duration
-	writerFactory   func(http.ResponseWriter) (frameWriter, error)
+	catchUpTimeout time.Duration
+	writerFactory  func(http.ResponseWriter) (frameWriter, error)
 }
 
 // NewHandler creates an SSE Handler from the given config.
@@ -88,7 +75,6 @@ func NewHandler(cfg HandlerConfig) *Handler {
 		tokenStore:        cfg.TokenStore,
 		workspaceFromCtx:  cfg.WorkspaceFromCtx,
 		onAuthenticated:   cfg.OnAuthenticated,
-		catchUpMaxPages:   defaultCatchUpMaxPages,
 		catchUpTimeout:    defaultCatchUpTimeout,
 		writerFactory: func(w http.ResponseWriter) (frameWriter, error) {
 			return NewWriter(w)
@@ -126,6 +112,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		),
 	)
 	client := NewClient(clientID, ClientSendBuf, lastSince, sourceRepos, workspaceID)
+	client.authoritative = h.getMutationPage != nil
 	if err := h.hub.RegisterClient(r.Context(), client); err != nil {
 		handshakeSpan.RecordError(err)
 		handshakeSpan.SetStatus(codes.Error, "registration")
@@ -153,11 +140,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		handshakeSpan.SetAttributes(attribute.String("loom.subscription.head", head))
 	}
 
-	catchUp, catchUpCursors, resync, err := h.fetchCatchUp(r.Context(), lastSince, workspaceID, sourceRepos)
-	if err != nil {
-		slog.Warn("SSE catch-up requires client resync", "workspace", workspaceID, "reason", resync.reason, "err", err)
-		handshakeSpan.RecordError(err)
-		handshakeSpan.SetAttributes(attribute.String("loom.resync.reason", resync.reason))
+	if client.authoritative {
+		h.serveAuthoritative(w, r, client, lastSince, handshakeSpan)
+		return
 	}
 
 	sw, err := h.writerFactory(w)
@@ -175,19 +160,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("SSE client connected", "client_id", client.id, "remote_addr", r.RemoteAddr,
 		"since", lastSince, "repos", sourceRepos, "workspace_id", workspaceID)
-	if resync != nil {
-		if err := sw.WriteResync(resync.cursor, resync.reason); err != nil {
-			h.endHandshakeWriteError(handshakeSpan, client, err, "resync")
-			return
-		}
-	} else {
-		for _, mutation := range catchUp {
-			if err := writePreparedMutation(sw, mutation); err != nil {
-				h.endHandshakeWriteError(handshakeSpan, client, err, "catch-up")
-				return
-			}
-		}
-	}
 	if err := sw.WriteRetry(RetryMs); err != nil {
 		h.endHandshakeWriteError(handshakeSpan, client, err, "retry")
 		return
@@ -198,7 +170,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	handshakeSpan.End()
 
-	reason, loopErr := h.streamLoop(sw, client, r.Context(), catchUpCursors)
+	reason, loopErr := h.streamLoop(sw, client, r.Context(), nil)
 	_, discSpan := otel.Tracer(tracerName).Start(context.Background(), "sse.disconnect",
 		trace.WithLinks(trace.LinkFromContext(handshakeCtx)),
 		trace.WithAttributes(
@@ -211,96 +183,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		discSpan.SetStatus(codes.Error, "network")
 	}
 	discSpan.End()
-}
-
-func (h *Handler) fetchCatchUp(
-	requestCtx context.Context,
-	since string,
-	workspaceID string,
-	sourceRepos []string,
-) ([]preparedMutation, map[string]struct{}, *resyncInstruction, error) {
-	seen := make(map[string]struct{})
-	if since == "" || h.getMutationPage == nil || workspaceID == "" {
-		return nil, seen, nil, nil
-	}
-	ctx, cancel := context.WithTimeout(requestCtx, h.catchUpTimeout)
-	defer cancel()
-	cursor := since
-	pageCursors := map[string]struct{}{since: {}}
-	mutations := make([]preparedMutation, 0, catchUpPageLimit)
-	for pageNumber := 1; pageNumber <= h.catchUpMaxPages; pageNumber++ {
-		page, err := h.getMutationPage(ctx, workspaceID, cursor, catchUpPageLimit)
-		if err != nil {
-			resync := catchUpErrorResync(err, ctx, since, cursor)
-			return mutations, seen, resync, fmt.Errorf("catch-up page %d: %w", pageNumber, err)
-		}
-		if err := ctx.Err(); err != nil {
-			return mutations, seen, &resyncInstruction{cursor: cursor, reason: "cap"}, fmt.Errorf("catch-up exceeded time budget: %w", err)
-		}
-		if page.Cursor == "" && !page.HasMore && len(page.Events) == 0 {
-			page.Cursor = cursor
-		}
-		_, repeated := pageCursors[page.Cursor]
-		idle := !page.HasMore && len(page.Events) == 0 && page.Cursor == cursor
-		if page.Cursor == "" || (repeated && !idle) {
-			return mutations, seen, &resyncInstruction{cursor: since, reason: "error"}, fmt.Errorf("catch-up page %d did not advance its cursor", pageNumber)
-		}
-		pageCursors[page.Cursor] = struct{}{}
-		mutations = appendReplayMutations(mutations, page.Events, workspaceID, sourceRepos, seen)
-		cursor = page.Cursor
-		if !page.HasMore {
-			mutations = appendReplayCheckpoint(mutations, since, cursor)
-			return mutations, seen, nil, nil
-		}
-		if pageNumber == h.catchUpMaxPages {
-			return mutations, seen, &resyncInstruction{cursor: cursor, reason: "cap"}, fmt.Errorf("catch-up exceeded %d pages", h.catchUpMaxPages)
-		}
-		if err := ctx.Err(); err != nil {
-			return mutations, seen, &resyncInstruction{cursor: cursor, reason: "cap"}, fmt.Errorf("catch-up exceeded time budget: %w", err)
-		}
-	}
-	return mutations, seen, &resyncInstruction{cursor: cursor, reason: "cap"}, fmt.Errorf("catch-up exceeded page budget")
-}
-
-// appendReplayMutations prepares matching records and tracks their replay IDs.
-func appendReplayMutations(mutations []preparedMutation, events []backend.MutationData, workspaceID string, sourceRepos []string, seen map[string]struct{}) []preparedMutation {
-	for _, mutation := range events {
-		payload := BackendMutationToPayload(mutation, workspaceID)
-		if !MatchesSourceRepoFilter(sourceRepos, payload.SourceRepo) {
-			continue
-		}
-		id := eventIDForMutation(payload)
-		mutations = append(mutations, preparedMutation{id: id, payload: payload})
-		if payload.Cursor != "" {
-			seen[payload.Cursor] = struct{}{}
-		}
-	}
-	return mutations
-}
-
-// appendReplayCheckpoint covers filtered-out records after successful replay.
-// Failed or incomplete replay must use resync instead.
-func appendReplayCheckpoint(mutations []preparedMutation, since, cursor string) []preparedMutation {
-	if cursor != since && (len(mutations) == 0 || mutations[len(mutations)-1].id != cursor) {
-		return append(mutations, preparedMutation{id: cursor, checkpoint: true})
-	}
-	return mutations
-}
-
-func catchUpErrorResync(err error, ctx context.Context, since, cursor string) *resyncInstruction {
-	reason := "error"
-	resyncCursor := since
-	if errors.Is(err, backend.ErrMutationCursorExpired) {
-		reason = "expired"
-		var backendErr *backend.BackendError
-		if errors.As(err, &backendErr) && backendErr.Meta["cursor"] != "" {
-			resyncCursor = backendErr.Meta["cursor"]
-		}
-	} else if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		reason = "cap"
-		resyncCursor = cursor
-	}
-	return &resyncInstruction{cursor: resyncCursor, reason: reason}
 }
 
 func (h *Handler) endHandshakeWriteError(span trace.Span, client *Client, err error, frame string) {
@@ -438,20 +320,6 @@ drained:
 		*resyncSeq = highest.seq
 	}
 	return closed, nil
-}
-
-func writePreparedMutation(sw frameWriter, mutation preparedMutation) error {
-	if mutation.checkpoint {
-		return sw.WriteEventID(mutation.id, "checkpoint", "{}")
-	}
-	data, err := json.Marshal(mutation.payload)
-	if err != nil {
-		return nil
-	}
-	if mutation.id == "" {
-		return sw.WriteEventNoID("mutation", string(data))
-	}
-	return sw.WriteEventID(mutation.id, "mutation", string(data))
 }
 
 func writeSSEEvent(sw frameWriter, mutation *MutationPayload) error {
