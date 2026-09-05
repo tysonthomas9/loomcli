@@ -1082,6 +1082,66 @@ func (e TreeNodeStatus) Valid() bool {
 	}
 }
 
+// Defines values for TriggerDeliveryStatus.
+const (
+	Accepted   TriggerDeliveryStatus = "accepted"
+	Dispatched TriggerDeliveryStatus = "dispatched"
+	Duplicate  TriggerDeliveryStatus = "duplicate"
+	Failed     TriggerDeliveryStatus = "failed"
+	Held       TriggerDeliveryStatus = "held"
+	Queued     TriggerDeliveryStatus = "queued"
+	Rejected   TriggerDeliveryStatus = "rejected"
+	Replayed   TriggerDeliveryStatus = "replayed"
+	Superseded TriggerDeliveryStatus = "superseded"
+)
+
+// Valid indicates whether the value is a known member of the TriggerDeliveryStatus enum.
+func (e TriggerDeliveryStatus) Valid() bool {
+	switch e {
+	case Accepted:
+		return true
+	case Dispatched:
+		return true
+	case Duplicate:
+		return true
+	case Failed:
+		return true
+	case Held:
+		return true
+	case Queued:
+		return true
+	case Rejected:
+		return true
+	case Replayed:
+		return true
+	case Superseded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TriggerEventOrigin.
+const (
+	External TriggerEventOrigin = "external"
+	System   TriggerEventOrigin = "system"
+	Workflow TriggerEventOrigin = "workflow"
+)
+
+// Valid indicates whether the value is a known member of the TriggerEventOrigin enum.
+func (e TriggerEventOrigin) Valid() bool {
+	switch e {
+	case External:
+		return true
+	case System:
+		return true
+	case Workflow:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for WorkspaceDesignFormatPatchRequestDesignFormat.
 const (
 	WorkspaceDesignFormatPatchRequestDesignFormatHtml     WorkspaceDesignFormatPatchRequestDesignFormat = "html"
@@ -3096,6 +3156,88 @@ type TreeNodeIssueType string
 // are not settable via the API and excluded from this enum.
 type TreeNodeStatus string
 
+// TriggerDeliveriesResponse defines model for TriggerDeliveriesResponse.
+type TriggerDeliveriesResponse struct {
+	Count             int               `json:"count"`
+	TriggerDeliveries []TriggerDelivery `json:"trigger_deliveries"`
+}
+
+// TriggerDelivery One fan-out leg of a dispatched trigger event: the binding that matched
+// it and the driver run it enqueued.
+type TriggerDelivery struct {
+	Attempt     int       `json:"attempt"`
+	CreatedAt   time.Time `json:"created_at"`
+	DeliveryId  string    `json:"delivery_id"`
+	DriverRunId *string   `json:"driver_run_id,omitempty"`
+
+	// ErrorClass Terminal error class. `retries_exhausted` marks a failed delivery
+	// whose binding retry budget is spent; it leaves the retry due-index.
+	ErrorClass      *string    `json:"error_class,omitempty"`
+	NextRetryAt     *time.Time `json:"next_retry_at,omitempty"`
+	RejectionReason *string    `json:"rejection_reason,omitempty"`
+
+	// Status Lifecycle of one delivery leg. `superseded` marks a delivery replaced
+	// by a newer event for the same subject key; `held` marks one queued
+	// behind an active run for its subject key.
+	Status TriggerDeliveryStatus `json:"status"`
+
+	// SubjectKey Rendered concurrency subject key — the binding's subject key
+	// template output, or `binding_id|subject_ref` when it has none.
+	SubjectKey       *string   `json:"subject_key,omitempty"`
+	TriggerBindingId string    `json:"trigger_binding_id"`
+	TriggerEventId   string    `json:"trigger_event_id"`
+	UpdatedAt        time.Time `json:"updated_at"`
+	WorkspaceKey     string    `json:"workspace_key"`
+}
+
+// TriggerDeliveryStatus Lifecycle of one delivery leg. `superseded` marks a delivery replaced
+// by a newer event for the same subject key; `held` marks one queued
+// behind an active run for its subject key.
+type TriggerDeliveryStatus string
+
+// TriggerEvent A durable record of one event ingested by the trigger layer, written
+// before any dispatch. Records persisted before structural provenance
+// existed normalize to `origin: external` on read.
+type TriggerEvent struct {
+	ActorRef  *string `json:"actor_ref,omitempty"`
+	EventId   string  `json:"event_id"`
+	EventType string  `json:"event_type"`
+
+	// HopDepth Workflow re-trigger hops from the originating external or system
+	// event, which sit at depth 0.
+	HopDepth       *int      `json:"hop_depth,omitempty"`
+	IdempotencyKey *string   `json:"idempotency_key,omitempty"`
+	OccurredAt     time.Time `json:"occurred_at"`
+
+	// Origin Server-stamped provenance.
+	Origin *TriggerEventOrigin `json:"origin,omitempty"`
+
+	// RawPayloadDigest `sha256:<hex>` digest of the raw delivery body.
+	RawPayloadDigest *string   `json:"raw_payload_digest,omitempty"`
+	RawPayloadRef    *string   `json:"raw_payload_ref,omitempty"`
+	ReceivedAt       time.Time `json:"received_at"`
+	ReplayOfEventId  *string   `json:"replay_of_event_id,omitempty"`
+	SignatureStatus  *string   `json:"signature_status,omitempty"`
+
+	// SourceEventId The source's own delivery id, used as the idempotency anchor.
+	SourceEventId *string `json:"source_event_id,omitempty"`
+
+	// SourceKind Ingest source, e.g. `github`.
+	SourceKind       string  `json:"source_kind"`
+	SubjectRef       *string `json:"subject_ref,omitempty"`
+	TriggerBindingId *string `json:"trigger_binding_id,omitempty"`
+	WorkspaceKey     string  `json:"workspace_key"`
+}
+
+// TriggerEventOrigin Server-stamped provenance.
+type TriggerEventOrigin string
+
+// TriggerEventsResponse defines model for TriggerEventsResponse.
+type TriggerEventsResponse struct {
+	Count         int            `json:"count"`
+	TriggerEvents []TriggerEvent `json:"trigger_events"`
+}
+
 // UsageAgentSummary defines model for UsageAgentSummary.
 type UsageAgentSummary struct {
 	InputTokens  int64   `json:"input_tokens"`
@@ -3734,6 +3876,33 @@ type ConnectTerminalWSParams struct {
 
 	// Session Terminal session name
 	Session *string `form:"session,omitempty" json:"session,omitempty"`
+}
+
+// ListTriggerDeliveriesParams defines parameters for ListTriggerDeliveries.
+type ListTriggerDeliveriesParams struct {
+	// TriggerEventId Filter to the legs of one trigger event.
+	TriggerEventId *string `form:"trigger_event_id,omitempty" json:"trigger_event_id,omitempty"`
+
+	// TriggerBindingId Filter by the matched binding.
+	TriggerBindingId *string `form:"trigger_binding_id,omitempty" json:"trigger_binding_id,omitempty"`
+
+	// Status Filter by delivery status.
+	Status *TriggerDeliveryStatus `form:"status,omitempty" json:"status,omitempty"`
+
+	// Limit Maximum records to return. Must be 1-1000 when supplied.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListTriggerEventsParams defines parameters for ListTriggerEvents.
+type ListTriggerEventsParams struct {
+	// SourceKind Filter by ingest source, e.g. `github`.
+	SourceKind *string `form:"source_kind,omitempty" json:"source_kind,omitempty"`
+
+	// TriggerBindingId Filter by the binding that matched the event.
+	TriggerBindingId *string `form:"trigger_binding_id,omitempty" json:"trigger_binding_id,omitempty"`
+
+	// Limit Maximum records to return. Must be 1-1000 when supplied.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // ReportClientErrorJSONRequestBody defines body for ReportClientError for application/json ContentType.

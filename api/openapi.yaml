@@ -70,6 +70,8 @@ tags:
     description: Issue detail tab state (Redis-backed)
   - name: monitor
     description: Daemon monitor dashboard and metrics
+  - name: triggers
+    description: Trigger event and delivery audit trail
   - name: runs
     description: Driver (workflow) run reads and event streaming
   - name: observability
@@ -4474,6 +4476,186 @@ paths:
               schema:
                 $ref: "#/components/schemas/SimpleErrorResponse"
 
+  # ── Trigger Audit Trail ─────────────────────────────────────────────────
+  /api/workspaces/{ws}/trigger-events:
+    get:
+      operationId: listTriggerEvents
+      tags: [triggers]
+      summary: List ingested trigger events
+      description: |
+        Read-only listing of the durable `TriggerEvent` records written at
+        ingest — one per admitted external delivery, persisted before any
+        dispatch happens.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: source_kind
+          in: query
+          description: Filter by ingest source, e.g. `github`.
+          schema:
+            type: string
+        - name: trigger_binding_id
+          in: query
+          description: Filter by the binding that matched the event.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Maximum records to return. Must be 1-1000 when supplied.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+      responses:
+        "200":
+          description: Matching trigger events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TriggerEventsResponse"
+        "400":
+          description: Invalid limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "500":
+          description: Listing failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+
+  /api/workspaces/{ws}/trigger-events/{eventId}:
+    get:
+      operationId: getTriggerEvent
+      tags: [triggers]
+      summary: Fetch one trigger event
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: eventId
+          in: path
+          required: true
+          description: Trigger event identifier
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The trigger event
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TriggerEvent"
+        "400":
+          description: Malformed event identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "404":
+          description: Trigger event not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "500":
+          description: Lookup failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+
+  /api/workspaces/{ws}/trigger-deliveries:
+    get:
+      operationId: listTriggerDeliveries
+      tags: [triggers]
+      summary: List trigger deliveries
+      description: |
+        Read-only listing of `TriggerDelivery` records — one per fan-out leg of
+        a dispatched trigger event, linking the event to the binding that
+        matched it and the driver run it enqueued.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: trigger_event_id
+          in: query
+          description: Filter to the legs of one trigger event.
+          schema:
+            type: string
+        - name: trigger_binding_id
+          in: query
+          description: Filter by the matched binding.
+          schema:
+            type: string
+        - name: status
+          in: query
+          description: Filter by delivery status.
+          schema:
+            $ref: "#/components/schemas/TriggerDeliveryStatus"
+        - name: limit
+          in: query
+          description: Maximum records to return. Must be 1-1000 when supplied.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+      responses:
+        "200":
+          description: Matching trigger deliveries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TriggerDeliveriesResponse"
+        "400":
+          description: Invalid limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "500":
+          description: Listing failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+
+  /api/workspaces/{ws}/trigger-deliveries/{deliveryId}:
+    get:
+      operationId: getTriggerDelivery
+      tags: [triggers]
+      summary: Fetch one trigger delivery
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: deliveryId
+          in: path
+          required: true
+          description: Trigger delivery identifier
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The trigger delivery
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TriggerDelivery"
+        "400":
+          description: Malformed delivery identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "404":
+          description: Trigger delivery not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "500":
+          description: Lookup failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+
 components:
   securitySchemes:
     BearerAuth:
@@ -7320,3 +7502,139 @@ components:
         cursor:
           type: string
           description: Opaque cursor to pass as `after` for the next page.
+
+    TriggerEvent:
+      type: object
+      description: |
+        A durable record of one event ingested by the trigger layer, written
+        before any dispatch. Records persisted before structural provenance
+        existed normalize to `origin: external` on read.
+      required: [workspace_key, event_id, source_kind, event_type, occurred_at, received_at]
+      properties:
+        workspace_key:
+          type: string
+        event_id:
+          type: string
+        trigger_binding_id:
+          type: string
+        source_kind:
+          type: string
+          description: Ingest source, e.g. `github`.
+        source_event_id:
+          type: string
+          description: The source's own delivery id, used as the idempotency anchor.
+        event_type:
+          type: string
+        subject_ref:
+          type: string
+        actor_ref:
+          type: string
+        origin:
+          type: string
+          description: Server-stamped provenance.
+          enum: [external, workflow, system]
+        hop_depth:
+          type: integer
+          description: |
+            Workflow re-trigger hops from the originating external or system
+            event, which sit at depth 0.
+        occurred_at:
+          type: string
+          format: date-time
+        received_at:
+          type: string
+          format: date-time
+        idempotency_key:
+          type: string
+        raw_payload_ref:
+          type: string
+        raw_payload_digest:
+          type: string
+          description: '`sha256:<hex>` digest of the raw delivery body.'
+        signature_status:
+          type: string
+        replay_of_event_id:
+          type: string
+
+    TriggerDeliveryStatus:
+      type: string
+      description: |
+        Lifecycle of one delivery leg. `superseded` marks a delivery replaced
+        by a newer event for the same subject key; `held` marks one queued
+        behind an active run for its subject key.
+      enum:
+        - accepted
+        - rejected
+        - duplicate
+        - queued
+        - dispatched
+        - failed
+        - replayed
+        - superseded
+        - held
+
+    TriggerDelivery:
+      type: object
+      description: |
+        One fan-out leg of a dispatched trigger event: the binding that matched
+        it and the driver run it enqueued.
+      required: [workspace_key, delivery_id, trigger_event_id, trigger_binding_id, status, attempt, created_at, updated_at]
+      properties:
+        workspace_key:
+          type: string
+        delivery_id:
+          type: string
+        trigger_event_id:
+          type: string
+        trigger_binding_id:
+          type: string
+        status:
+          $ref: "#/components/schemas/TriggerDeliveryStatus"
+        subject_key:
+          type: string
+          description: |
+            Rendered concurrency subject key — the binding's subject key
+            template output, or `binding_id|subject_ref` when it has none.
+        rejection_reason:
+          type: string
+        driver_run_id:
+          type: string
+        attempt:
+          type: integer
+        next_retry_at:
+          type: string
+          format: date-time
+          nullable: true
+        error_class:
+          type: string
+          description: |
+            Terminal error class. `retries_exhausted` marks a failed delivery
+            whose binding retry budget is spent; it leaves the retry due-index.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    TriggerEventsResponse:
+      type: object
+      required: [trigger_events, count]
+      properties:
+        trigger_events:
+          type: array
+          items:
+            $ref: "#/components/schemas/TriggerEvent"
+        count:
+          type: integer
+
+    TriggerDeliveriesResponse:
+      type: object
+      required: [trigger_deliveries, count]
+      properties:
+        trigger_deliveries:
+          type: array
+          items:
+            $ref: "#/components/schemas/TriggerDelivery"
+        count:
+          type: integer

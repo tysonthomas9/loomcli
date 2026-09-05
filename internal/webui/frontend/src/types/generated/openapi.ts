@@ -2395,6 +2395,84 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/trigger-events": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List ingested trigger events
+     * @description Read-only listing of the durable `TriggerEvent` records written at
+     *     ingest — one per admitted external delivery, persisted before any
+     *     dispatch happens.
+     */
+    get: operations["listTriggerEvents"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/trigger-events/{eventId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Fetch one trigger event */
+    get: operations["getTriggerEvent"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/trigger-deliveries": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List trigger deliveries
+     * @description Read-only listing of `TriggerDelivery` records — one per fan-out leg of
+     *     a dispatched trigger event, linking the event to the binding that
+     *     matched it and the driver run it enqueued.
+     */
+    get: operations["listTriggerDeliveries"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/trigger-deliveries/{deliveryId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Fetch one trigger delivery */
+    get: operations["getTriggerDelivery"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3821,6 +3899,97 @@ export interface components {
       events: components["schemas"]["PlatformEvent"][];
       /** @description Opaque cursor to pass as `after` for the next page. */
       cursor: string;
+    };
+    /**
+     * @description A durable record of one event ingested by the trigger layer, written
+     *     before any dispatch. Records persisted before structural provenance
+     *     existed normalize to `origin: external` on read.
+     */
+    TriggerEvent: {
+      workspace_key: string;
+      event_id: string;
+      trigger_binding_id?: string;
+      /** @description Ingest source, e.g. `github`. */
+      source_kind: string;
+      /** @description The source's own delivery id, used as the idempotency anchor. */
+      source_event_id?: string;
+      event_type: string;
+      subject_ref?: string;
+      actor_ref?: string;
+      /**
+       * @description Server-stamped provenance.
+       * @enum {string}
+       */
+      origin?: "external" | "workflow" | "system";
+      /**
+       * @description Workflow re-trigger hops from the originating external or system
+       *     event, which sit at depth 0.
+       */
+      hop_depth?: number;
+      /** Format: date-time */
+      occurred_at: string;
+      /** Format: date-time */
+      received_at: string;
+      idempotency_key?: string;
+      raw_payload_ref?: string;
+      /** @description `sha256:<hex>` digest of the raw delivery body. */
+      raw_payload_digest?: string;
+      signature_status?: string;
+      replay_of_event_id?: string;
+    };
+    /**
+     * @description Lifecycle of one delivery leg. `superseded` marks a delivery replaced
+     *     by a newer event for the same subject key; `held` marks one queued
+     *     behind an active run for its subject key.
+     * @enum {string}
+     */
+    TriggerDeliveryStatus:
+      | "accepted"
+      | "rejected"
+      | "duplicate"
+      | "queued"
+      | "dispatched"
+      | "failed"
+      | "replayed"
+      | "superseded"
+      | "held";
+    /**
+     * @description One fan-out leg of a dispatched trigger event: the binding that matched
+     *     it and the driver run it enqueued.
+     */
+    TriggerDelivery: {
+      workspace_key: string;
+      delivery_id: string;
+      trigger_event_id: string;
+      trigger_binding_id: string;
+      status: components["schemas"]["TriggerDeliveryStatus"];
+      /**
+       * @description Rendered concurrency subject key — the binding's subject key
+       *     template output, or `binding_id|subject_ref` when it has none.
+       */
+      subject_key?: string;
+      rejection_reason?: string;
+      driver_run_id?: string;
+      attempt: number;
+      /** Format: date-time */
+      next_retry_at?: string | null;
+      /**
+       * @description Terminal error class. `retries_exhausted` marks a failed delivery
+       *     whose binding retry budget is spent; it leaves the retry due-index.
+       */
+      error_class?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    TriggerEventsResponse: {
+      trigger_events: components["schemas"]["TriggerEvent"][];
+      count: number;
+    };
+    TriggerDeliveriesResponse: {
+      trigger_deliveries: components["schemas"]["TriggerDelivery"][];
+      count: number;
     };
   };
   responses: never;
@@ -8714,6 +8883,208 @@ export interface operations {
       };
       /** @description The configured store does not implement run event reads */
       501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+    };
+  };
+  listTriggerEvents: {
+    parameters: {
+      query?: {
+        /** @description Filter by ingest source, e.g. `github`. */
+        source_kind?: string;
+        /** @description Filter by the binding that matched the event. */
+        trigger_binding_id?: string;
+        /** @description Maximum records to return. Must be 1-1000 when supplied. */
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Matching trigger events */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TriggerEventsResponse"];
+        };
+      };
+      /** @description Invalid limit */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description Listing failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+    };
+  };
+  getTriggerEvent: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Trigger event identifier */
+        eventId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The trigger event */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TriggerEvent"];
+        };
+      };
+      /** @description Malformed event identifier */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description Trigger event not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description Lookup failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+    };
+  };
+  listTriggerDeliveries: {
+    parameters: {
+      query?: {
+        /** @description Filter to the legs of one trigger event. */
+        trigger_event_id?: string;
+        /** @description Filter by the matched binding. */
+        trigger_binding_id?: string;
+        /** @description Filter by delivery status. */
+        status?: components["schemas"]["TriggerDeliveryStatus"];
+        /** @description Maximum records to return. Must be 1-1000 when supplied. */
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Matching trigger deliveries */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TriggerDeliveriesResponse"];
+        };
+      };
+      /** @description Invalid limit */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description Listing failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+    };
+  };
+  getTriggerDelivery: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Trigger delivery identifier */
+        deliveryId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The trigger delivery */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TriggerDelivery"];
+        };
+      };
+      /** @description Malformed delivery identifier */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description Trigger delivery not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description Lookup failed */
+      500: {
         headers: {
           [name: string]: unknown;
         };
