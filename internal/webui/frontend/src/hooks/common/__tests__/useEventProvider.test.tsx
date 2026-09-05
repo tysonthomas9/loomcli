@@ -362,7 +362,7 @@ describe("useEventProvider", () => {
       view.unmount();
     });
 
-    it("handles handshake resync as one epoch and one legacy refresh", async () => {
+    it("handles handshake resync as one epoch and one legacy refresh without accepting its checkpoint", async () => {
       const mutationListener = vi.fn();
       const resyncListener = vi.fn();
 
@@ -395,7 +395,8 @@ describe("useEventProvider", () => {
       expect(resyncListener).toHaveBeenCalledOnce();
       expect(resyncListener).toHaveBeenCalledWith({
         from: undefined,
-        to: "c1.floor",
+        // Scheduling refresh does not prove that the floor was observed.
+        to: "",
         reason: "expired",
       });
       expect(mutationListener).toHaveBeenCalledOnce();
