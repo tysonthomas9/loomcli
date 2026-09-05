@@ -206,6 +206,39 @@ func (e CreateIssueRequestStatus) Valid() bool {
 	}
 }
 
+// Defines values for DriverRunStatus.
+const (
+	DriverRunStatusCancelled              DriverRunStatus = "cancelled"
+	DriverRunStatusCompleted              DriverRunStatus = "completed"
+	DriverRunStatusFailed                 DriverRunStatus = "failed"
+	DriverRunStatusNeedsReview            DriverRunStatus = "needs_review"
+	DriverRunStatusQueued                 DriverRunStatus = "queued"
+	DriverRunStatusRunning                DriverRunStatus = "running"
+	DriverRunStatusSuspendedAwaitingEvent DriverRunStatus = "suspended_awaiting_event"
+)
+
+// Valid indicates whether the value is a known member of the DriverRunStatus enum.
+func (e DriverRunStatus) Valid() bool {
+	switch e {
+	case DriverRunStatusCancelled:
+		return true
+	case DriverRunStatusCompleted:
+		return true
+	case DriverRunStatusFailed:
+		return true
+	case DriverRunStatusNeedsReview:
+		return true
+	case DriverRunStatusQueued:
+		return true
+	case DriverRunStatusRunning:
+		return true
+	case DriverRunStatusSuspendedAwaitingEvent:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ErrorResponseSuccess.
 const (
 	False ErrorResponseSuccess = false
@@ -940,34 +973,34 @@ func (e TranscriptEntryType) Valid() bool {
 
 // Defines values for TreeNodeAgentState.
 const (
-	Dead     TreeNodeAgentState = "dead"
-	Done     TreeNodeAgentState = "done"
-	Idle     TreeNodeAgentState = "idle"
-	Running  TreeNodeAgentState = "running"
-	Spawning TreeNodeAgentState = "spawning"
-	Stopped  TreeNodeAgentState = "stopped"
-	Stuck    TreeNodeAgentState = "stuck"
-	Working  TreeNodeAgentState = "working"
+	TreeNodeAgentStateDead     TreeNodeAgentState = "dead"
+	TreeNodeAgentStateDone     TreeNodeAgentState = "done"
+	TreeNodeAgentStateIdle     TreeNodeAgentState = "idle"
+	TreeNodeAgentStateRunning  TreeNodeAgentState = "running"
+	TreeNodeAgentStateSpawning TreeNodeAgentState = "spawning"
+	TreeNodeAgentStateStopped  TreeNodeAgentState = "stopped"
+	TreeNodeAgentStateStuck    TreeNodeAgentState = "stuck"
+	TreeNodeAgentStateWorking  TreeNodeAgentState = "working"
 )
 
 // Valid indicates whether the value is a known member of the TreeNodeAgentState enum.
 func (e TreeNodeAgentState) Valid() bool {
 	switch e {
-	case Dead:
+	case TreeNodeAgentStateDead:
 		return true
-	case Done:
+	case TreeNodeAgentStateDone:
 		return true
-	case Idle:
+	case TreeNodeAgentStateIdle:
 		return true
-	case Running:
+	case TreeNodeAgentStateRunning:
 		return true
-	case Spawning:
+	case TreeNodeAgentStateSpawning:
 		return true
-	case Stopped:
+	case TreeNodeAgentStateStopped:
 		return true
-	case Stuck:
+	case TreeNodeAgentStateStuck:
 		return true
-	case Working:
+	case TreeNodeAgentStateWorking:
 		return true
 	default:
 		return false
@@ -1764,6 +1797,59 @@ type DependencyRef struct {
 	// Type Dependency type (e.g. "blocks")
 	Type string `json:"type"`
 }
+
+// DriverRun One execution of a driver (workflow) version. Created by the workflow
+// run endpoint or by trigger dispatch, then advanced by the executor that
+// holds its lease.
+type DriverRun struct {
+	// CancelRequestedAt Set when a cooperative cancel was requested against a running run.
+	// The run still terminalizes through its normal fenced finish.
+	CancelRequestedAt     *time.Time `json:"cancel_requested_at,omitempty"`
+	CancelRequestedReason *string    `json:"cancel_requested_reason,omitempty"`
+	CreatedAt             time.Time  `json:"created_at"`
+	DriverId              string     `json:"driver_id"`
+	DriverVersionId       string     `json:"driver_version_id"`
+	Entrypoint            *string    `json:"entrypoint,omitempty"`
+	EpicId                *string    `json:"epic_id,omitempty"`
+	ErrorClass            *string    `json:"error_class,omitempty"`
+
+	// FencingToken Monotonic token that fences stale lease holders out of writes.
+	FencingToken   *int64     `json:"fencing_token,omitempty"`
+	FinishedAt     *time.Time `json:"finished_at,omitempty"`
+	IdempotencyKey *string    `json:"idempotency_key,omitempty"`
+	LastHeartbeat  *time.Time `json:"last_heartbeat,omitempty"`
+	LeaseId        *string    `json:"lease_id,omitempty"`
+
+	// NodeId Executor node currently holding the run.
+	NodeId *string            `json:"node_id,omitempty"`
+	Output *map[string]string `json:"output,omitempty"`
+
+	// ParentRunId Parent workflow run when this run was spawned by composition.
+	// Empty means a root/detached run.
+	ParentRunId *string `json:"parent_run_id,omitempty"`
+
+	// Payload The raw JSON payload the run was created with.
+	Payload interface{} `json:"payload,omitempty"`
+
+	// ResumeSourceEventId Trigger event that resolved the await and resumed the run.
+	ResumeSourceEventId *string `json:"resume_source_event_id,omitempty"`
+	RunId               string  `json:"run_id"`
+
+	// SourceKind What created the run, e.g. `api` or `trigger`.
+	SourceKind *string `json:"source_kind,omitempty"`
+
+	// SourceRef Request path or trigger route that created the run.
+	SourceRef    *string         `json:"source_ref,omitempty"`
+	StartedAt    *time.Time      `json:"started_at,omitempty"`
+	Status       DriverRunStatus `json:"status"`
+	Summary      *string         `json:"summary,omitempty"`
+	SuspendedAt  *time.Time      `json:"suspended_at,omitempty"`
+	UpdatedAt    time.Time       `json:"updated_at"`
+	WorkspaceKey string          `json:"workspace_key"`
+}
+
+// DriverRunStatus defines model for DriverRun.Status.
+type DriverRunStatus string
 
 // EditorInfo defines model for EditorInfo.
 type EditorInfo struct {
@@ -2612,6 +2698,28 @@ type PatchIssueRequestDesignFormat string
 // PatchIssueRequestStatus defines model for PatchIssueRequest.Status.
 type PatchIssueRequestStatus string
 
+// PlatformEvent defines model for PlatformEvent.
+type PlatformEvent struct {
+	// Action Dotted action name, e.g. `run.started`.
+	Action      string             `json:"action"`
+	Actor       string             `json:"actor"`
+	After       *string            `json:"after,omitempty"`
+	Before      *string            `json:"before,omitempty"`
+	EntityId    string             `json:"entity_id"`
+	EntityType  string             `json:"entity_type"`
+	Id          string             `json:"id"`
+	Metadata    *map[string]string `json:"metadata,omitempty"`
+	Timestamp   time.Time          `json:"timestamp"`
+	WorkspaceId string             `json:"workspace_id"`
+}
+
+// PlatformEventsPage defines model for PlatformEventsPage.
+type PlatformEventsPage struct {
+	// Cursor Opaque cursor to pass as `after` for the next page.
+	Cursor string          `json:"cursor"`
+	Events []PlatformEvent `json:"events"`
+}
+
 // PullRequestDetail defines model for PullRequestDetail.
 type PullRequestDetail struct {
 	BaseRefName string `json:"base_ref_name"`
@@ -2780,6 +2888,11 @@ type SessionResponse struct {
 	StartedAt        time.Time  `json:"started_at"`
 	Status           string     `json:"status"`
 	TaskId           string     `json:"task_id"`
+}
+
+// SimpleErrorResponse The bare error wire written by handler.RespondError.
+type SimpleErrorResponse struct {
+	Error string `json:"error"`
 }
 
 // StaleDetectorStatus defines model for StaleDetectorStatus.
@@ -3125,6 +3238,9 @@ type AgentName = string
 
 // IssueId defines model for IssueId.
 type IssueId = string
+
+// RunId defines model for RunId.
+type RunId = string
 
 // WorkspaceId defines model for WorkspaceId.
 type WorkspaceId = string
@@ -3560,6 +3676,22 @@ type ListReadyParamsMolType string
 
 // ListReadyParamsSort defines parameters for ListReady.
 type ListReadyParamsSort string
+
+// GetDriverRunEventsParams defines parameters for GetDriverRunEvents.
+type GetDriverRunEventsParams struct {
+	// After Opaque cursor from a previous page. Omit to start at the beginning.
+	After *string `form:"after,omitempty" json:"after,omitempty"`
+
+	// Limit Page size. Must be 1-1000; defaults to 100.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// StreamDriverRunEventsParams defines parameters for StreamDriverRunEvents.
+type StreamDriverRunEventsParams struct {
+	// After Opaque cursor to resume from. Defaults to `"0"`, i.e. the start of
+	// the run's event log.
+	After *string `form:"after,omitempty" json:"after,omitempty"`
+}
 
 // GetTaskLogParams defines parameters for GetTaskLog.
 type GetTaskLogParams struct {

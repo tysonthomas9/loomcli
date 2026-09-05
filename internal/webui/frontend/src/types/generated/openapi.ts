@@ -2308,6 +2308,93 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/runs/{runId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Fetch one driver (workflow) run
+     * @description Returns the persisted `DriverRun` record for a run created by
+     *     `POST /api/workspaces/{ws}/workflows/{name}` or by trigger dispatch.
+     */
+    get: operations["getDriverRun"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/runs/{runId}/events": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Page through a run's platform events
+     * @description Cursor-paginated read of the run's event log. Pass the previous page's
+     *     `cursor` back as `after` to fetch the next page; an empty `events`
+     *     array with an unchanged cursor means the run has produced nothing new.
+     */
+    get: operations["getDriverRunEvents"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/runs/{runId}/stream": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * SSE stream of a run's platform events
+     * @description Server-Sent Events endpoint. The handler polls the run's event log once
+     *     a second and emits every newly appended event; it never terminates on
+     *     its own, so clients close the connection when the run reaches a
+     *     terminal status. The response is committed (flushed) before the first
+     *     poll, so the stream reads as open even when the first page is empty.
+     *
+     *     **Event names**
+     *
+     *     - `event` — `data:` is one JSON `PlatformEvent`:
+     *       ```json
+     *       {
+     *         "id": "evt-4",
+     *         "timestamp": "2026-09-05T12:00:00Z",
+     *         "actor": "driver",
+     *         "action": "run.started",
+     *         "entity_type": "driver_run",
+     *         "entity_id": "run-abc",
+     *         "workspace_id": "default"
+     *       }
+     *       ```
+     *     - `error` — `data:` is `{"error": "<message>"}`, emitted when a poll
+     *       fails; the stream ends after it.
+     *
+     *     No SSE `id:` field is written, so `Last-Event-ID` resumption does not
+     *     apply — resume with the `after` query parameter instead.
+     */
+    get: operations["streamDriverRunEvents"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2319,6 +2406,10 @@ export interface components {
       code?: string;
       retryable?: boolean;
       details?: Record<string, never>;
+    };
+    /** @description The bare error wire written by handler.RespondError. */
+    SimpleErrorResponse: {
+      error: string;
     };
     MessageResponse: {
       /** @constant */
@@ -3642,6 +3733,95 @@ export interface components {
       /** @description Event-type-specific data (JSON object) */
       data?: Record<string, never>;
     };
+    /**
+     * @description One execution of a driver (workflow) version. Created by the workflow
+     *     run endpoint or by trigger dispatch, then advanced by the executor that
+     *     holds its lease.
+     */
+    DriverRun: {
+      workspace_key: string;
+      run_id: string;
+      driver_id: string;
+      driver_version_id: string;
+      entrypoint?: string;
+      /** @description What created the run, e.g. `api` or `trigger`. */
+      source_kind?: string;
+      /** @description Request path or trigger route that created the run. */
+      source_ref?: string;
+      epic_id?: string;
+      /** @enum {string} */
+      status:
+        | "queued"
+        | "running"
+        | "completed"
+        | "failed"
+        | "needs_review"
+        | "cancelled"
+        | "suspended_awaiting_event";
+      /** @description Executor node currently holding the run. */
+      node_id?: string;
+      lease_id?: string;
+      /**
+       * Format: int64
+       * @description Monotonic token that fences stale lease holders out of writes.
+       */
+      fencing_token?: number;
+      idempotency_key?: string;
+      /** @description The raw JSON payload the run was created with. */
+      payload?: unknown;
+      output?: {
+        [key: string]: string;
+      };
+      summary?: string;
+      error_class?: string;
+      /** Format: date-time */
+      started_at?: string;
+      /** Format: date-time */
+      last_heartbeat?: string;
+      /** Format: date-time */
+      finished_at?: string | null;
+      /**
+       * @description Parent workflow run when this run was spawned by composition.
+       *     Empty means a root/detached run.
+       */
+      parent_run_id?: string;
+      /** Format: date-time */
+      suspended_at?: string | null;
+      /**
+       * Format: date-time
+       * @description Set when a cooperative cancel was requested against a running run.
+       *     The run still terminalizes through its normal fenced finish.
+       */
+      cancel_requested_at?: string | null;
+      cancel_requested_reason?: string;
+      /** @description Trigger event that resolved the await and resumed the run. */
+      resume_source_event_id?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    PlatformEvent: {
+      id: string;
+      /** Format: date-time */
+      timestamp: string;
+      actor: string;
+      /** @description Dotted action name, e.g. `run.started`. */
+      action: string;
+      entity_type: string;
+      entity_id: string;
+      workspace_id: string;
+      before?: string;
+      after?: string;
+      metadata?: {
+        [key: string]: string;
+      };
+    };
+    PlatformEventsPage: {
+      events: components["schemas"]["PlatformEvent"][];
+      /** @description Opaque cursor to pass as `after` for the next page. */
+      cursor: string;
+    };
   };
   responses: never;
   parameters: {
@@ -3651,6 +3831,8 @@ export interface components {
     IssueId: string;
     /** @description Agent worktree name */
     AgentName: string;
+    /** @description Driver run identifier */
+    RunId: string;
   };
   requestBodies: never;
   headers: never;
@@ -8379,6 +8561,164 @@ export interface operations {
         };
         content: {
           "application/json": Record<string, never>;
+        };
+      };
+    };
+  };
+  getDriverRun: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Driver run identifier */
+        runId: components["parameters"]["RunId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The run */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DriverRun"];
+        };
+      };
+      /** @description Run not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description Run lookup failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+    };
+  };
+  getDriverRunEvents: {
+    parameters: {
+      query?: {
+        /** @description Opaque cursor from a previous page. Omit to start at the beginning. */
+        after?: string;
+        /** @description Page size. Must be 1-1000; defaults to 100. */
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Driver run identifier */
+        runId: components["parameters"]["RunId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description One page of run events */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PlatformEventsPage"];
+        };
+      };
+      /** @description Invalid limit */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description Run not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description The configured store does not implement run event reads */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+    };
+  };
+  streamDriverRunEvents: {
+    parameters: {
+      query?: {
+        /**
+         * @description Opaque cursor to resume from. Defaults to `"0"`, i.e. the start of
+         *     the run's event log.
+         */
+        after?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Driver run identifier */
+        runId: components["parameters"]["RunId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description SSE stream of run events */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/event-stream": string;
+        };
+      };
+      /** @description Run not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description The response writer does not support streaming */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
+        };
+      };
+      /** @description The configured store does not implement run event reads */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimpleErrorResponse"];
         };
       };
     };

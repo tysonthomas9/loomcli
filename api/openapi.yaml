@@ -70,6 +70,8 @@ tags:
     description: Issue detail tab state (Redis-backed)
   - name: monitor
     description: Daemon monitor dashboard and metrics
+  - name: runs
+    description: Driver (workflow) run reads and event streaming
   - name: observability
     description: Event metrics and paginated event log
 
@@ -4318,6 +4320,160 @@ paths:
               schema:
                 type: object
 
+  # ── Driver Runs ─────────────────────────────────────────────────────────
+  /api/workspaces/{ws}/runs/{runId}:
+    get:
+      operationId: getDriverRun
+      tags: [runs]
+      summary: Fetch one driver (workflow) run
+      description: |
+        Returns the persisted `DriverRun` record for a run created by
+        `POST /api/workspaces/{ws}/workflows/{name}` or by trigger dispatch.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: The run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverRun"
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "500":
+          description: Run lookup failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+
+  /api/workspaces/{ws}/runs/{runId}/events:
+    get:
+      operationId: getDriverRunEvents
+      tags: [runs]
+      summary: Page through a run's platform events
+      description: |
+        Cursor-paginated read of the run's event log. Pass the previous page's
+        `cursor` back as `after` to fetch the next page; an empty `events`
+        array with an unchanged cursor means the run has produced nothing new.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/RunId"
+        - name: after
+          in: query
+          description: Opaque cursor from a previous page. Omit to start at the beginning.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Page size. Must be 1-1000; defaults to 100.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+      responses:
+        "200":
+          description: One page of run events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformEventsPage"
+        "400":
+          description: Invalid limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "501":
+          description: The configured store does not implement run event reads
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+
+  /api/workspaces/{ws}/runs/{runId}/stream:
+    get:
+      operationId: streamDriverRunEvents
+      tags: [runs]
+      summary: SSE stream of a run's platform events
+      description: |
+        Server-Sent Events endpoint. The handler polls the run's event log once
+        a second and emits every newly appended event; it never terminates on
+        its own, so clients close the connection when the run reaches a
+        terminal status. The response is committed (flushed) before the first
+        poll, so the stream reads as open even when the first page is empty.
+
+        **Event names**
+
+        - `event` — `data:` is one JSON `PlatformEvent`:
+          ```json
+          {
+            "id": "evt-4",
+            "timestamp": "2026-09-05T12:00:00Z",
+            "actor": "driver",
+            "action": "run.started",
+            "entity_type": "driver_run",
+            "entity_id": "run-abc",
+            "workspace_id": "default"
+          }
+          ```
+        - `error` — `data:` is `{"error": "<message>"}`, emitted when a poll
+          fails; the stream ends after it.
+
+        No SSE `id:` field is written, so `Last-Event-ID` resumption does not
+        apply — resume with the `after` query parameter instead.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/RunId"
+        - name: after
+          in: query
+          description: |
+            Opaque cursor to resume from. Defaults to `"0"`, i.e. the start of
+            the run's event log.
+          schema:
+            type: string
+            default: "0"
+      responses:
+        "200":
+          description: SSE stream of run events
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  Newline-delimited SSE frames; `event: event` frames carry a
+                  JSON PlatformEvent, `event: error` frames carry {"error"}.
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "500":
+          description: The response writer does not support streaming
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+        "501":
+          description: The configured store does not implement run event reads
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorResponse"
+
 components:
   securitySchemes:
     BearerAuth:
@@ -4377,6 +4533,14 @@ components:
       schema:
         type: string
 
+    RunId:
+      name: runId
+      in: path
+      required: true
+      description: Driver run identifier
+      schema:
+        type: string
+
   schemas:
     # ── Response Envelopes ──────────────────────────────────────────────
     ErrorResponse:
@@ -4394,6 +4558,14 @@ components:
           type: boolean
         details:
           type: object
+
+    SimpleErrorResponse:
+      type: object
+      description: The bare error wire written by handler.RespondError.
+      required: [error]
+      properties:
+        error:
+          type: string
 
     MessageResponse:
       type: object
@@ -7012,3 +7184,139 @@ components:
         data:
           type: object
           description: Event-type-specific data (JSON object)
+
+    DriverRun:
+      type: object
+      description: |
+        One execution of a driver (workflow) version. Created by the workflow
+        run endpoint or by trigger dispatch, then advanced by the executor that
+        holds its lease.
+      required: [workspace_key, run_id, driver_id, driver_version_id, status, created_at, updated_at]
+      properties:
+        workspace_key:
+          type: string
+        run_id:
+          type: string
+        driver_id:
+          type: string
+        driver_version_id:
+          type: string
+        entrypoint:
+          type: string
+        source_kind:
+          type: string
+          description: What created the run, e.g. `api` or `trigger`.
+        source_ref:
+          type: string
+          description: Request path or trigger route that created the run.
+        epic_id:
+          type: string
+        status:
+          type: string
+          enum:
+            - queued
+            - running
+            - completed
+            - failed
+            - needs_review
+            - cancelled
+            - suspended_awaiting_event
+        node_id:
+          type: string
+          description: Executor node currently holding the run.
+        lease_id:
+          type: string
+        fencing_token:
+          type: integer
+          format: int64
+          description: Monotonic token that fences stale lease holders out of writes.
+        idempotency_key:
+          type: string
+        payload:
+          description: The raw JSON payload the run was created with.
+        output:
+          type: object
+          additionalProperties:
+            type: string
+        summary:
+          type: string
+        error_class:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        last_heartbeat:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+        parent_run_id:
+          type: string
+          description: |
+            Parent workflow run when this run was spawned by composition.
+            Empty means a root/detached run.
+        suspended_at:
+          type: string
+          format: date-time
+          nullable: true
+        cancel_requested_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            Set when a cooperative cancel was requested against a running run.
+            The run still terminalizes through its normal fenced finish.
+        cancel_requested_reason:
+          type: string
+        resume_source_event_id:
+          type: string
+          description: Trigger event that resolved the await and resumed the run.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    PlatformEvent:
+      type: object
+      required: [id, timestamp, actor, action, entity_type, entity_id, workspace_id]
+      properties:
+        id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        actor:
+          type: string
+        action:
+          type: string
+          description: Dotted action name, e.g. `run.started`.
+        entity_type:
+          type: string
+        entity_id:
+          type: string
+        workspace_id:
+          type: string
+        before:
+          type: string
+        after:
+          type: string
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+
+    PlatformEventsPage:
+      type: object
+      required: [events, cursor]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformEvent"
+        cursor:
+          type: string
+          description: Opaque cursor to pass as `after` for the next page.
