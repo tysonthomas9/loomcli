@@ -46,6 +46,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 )
 
 // maxTaskRunOpBodyBytes caps inbound task-run op payloads (matches the
@@ -138,7 +139,7 @@ func defaultIssueBackends(baseURL string) IssueBackendFactory {
 	}
 }
 
-func (m *Module) Register(mux *http.ServeMux) {
+func (m *Module) Register(mux route.Router) {
 	if m.store == nil {
 		return
 	}

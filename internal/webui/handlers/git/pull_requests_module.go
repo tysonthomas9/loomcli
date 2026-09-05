@@ -1,8 +1,7 @@
 package git
 
 import (
-	"net/http"
-
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -20,7 +19,7 @@ func NewPullRequestListModule(agentSvc service.AgentService) *PullRequestListMod
 }
 
 // Register adds the workspace-scoped pull-request list route.
-func (m *PullRequestListModule) Register(mux *http.ServeMux) {
+func (m *PullRequestListModule) Register(mux route.Router) {
 	if m == nil || m.agentSvc == nil {
 		return
 	}

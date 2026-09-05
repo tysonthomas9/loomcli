@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -133,7 +133,7 @@ var NewGitModule = NewModule
 // module is a local interface matching webui.Module for compile-time assertions.
 // The root webui.Module interface cannot be imported here without creating a cycle.
 type module interface {
-	Register(mux *http.ServeMux)
+	Register(mux route.Router)
 }
 
 // handleAgentDiffStat → HandleAgentDiffStat

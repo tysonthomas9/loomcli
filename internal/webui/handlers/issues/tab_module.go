@@ -1,9 +1,8 @@
 package issues
 
 import (
-	"net/http"
-
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
@@ -28,7 +27,7 @@ func NewIssueTabModule(issueTabStore *issuetabs.Store, hub *realtime.Hub) *Issue
 }
 
 // Register registers the 3 issue tab persistence routes.
-func (m *IssueTabModule) Register(mux *http.ServeMux) {
+func (m *IssueTabModule) Register(mux route.Router) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{issueId}/tabs", handleGetIssueTabs(m.issueTabStore))
 	mux.HandleFunc("PUT /api/workspaces/{ws}/issues/{issueId}/tabs", handleSaveIssueTabs(m.issueTabStore, m.hub))
 	mux.HandleFunc("DELETE /api/workspaces/{ws}/issues/{issueId}/tabs", handleDeleteIssueTabs(m.issueTabStore))

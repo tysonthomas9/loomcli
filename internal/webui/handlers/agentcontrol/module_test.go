@@ -5,10 +5,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/route"
 )
 
 // Compile-time assertion: *Module implements the module interface.
-type module interface{ Register(*http.ServeMux) }
+type module interface{ Register(route.Router) }
 
 var _ module = (*Module)(nil)
 

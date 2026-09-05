@@ -18,8 +18,17 @@ internal/cli 19
 # it too and cannot import app. Route registration is where the app package is
 # supposed to reach for shared HTTP responders, so this is wiring, not new
 # coupling.
-internal/webui/app 20
-internal/webui/svcimpl 19
+#
+# app (20 -> 21) and svcimpl (19 -> 20) then each took one more when route
+# registration moved from *http.ServeMux to the internal/webui/route
+# abstraction, so that the served routes can be enumerated from the built mux
+# instead of grepped out of source. That package is a stdlib-only leaf
+# (net/http + sort) with no onward module deps, so this is one more edge in the
+# counter but no new coupling: it replaces a standard-library type in the same
+# position. Shrink these back if the route abstraction is ever folded into a
+# package these two already import.
+internal/webui/app 21
+internal/webui/svcimpl 20
 # serve is where a process-wide Prometheus registration has to happen: the
 # spawn/session collector is read at scrape time by the /metrics handler serve
 # owns, so serve imports internal/metrics/agentmetrics directly. That is one
