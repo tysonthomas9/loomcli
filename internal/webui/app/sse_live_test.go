@@ -259,9 +259,20 @@ func TestSSELive_MutationDelivery(t *testing.T) {
 	go hub.Run()
 	t.Cleanup(hub.Stop)
 
-	server := newLiveSSEServer(t, hub, nil)
+	committed := make(chan struct{})
+	server := newLiveSSEServer(t, hub, func(_ context.Context, _ string, since string, _ int) (backend.MutationPage, error) {
+		if since == "c1.live-durable" {
+			return backend.MutationPage{Cursor: since}, nil
+		}
+		select {
+		case <-committed:
+			return backend.MutationPage{Events: []backend.MutationData{{Type: "create", IssueID: "loom-live-1", Cursor: "c1.live-durable", Title: "Live Test Issue", Timestamp: time.Now().UTC()}}, Cursor: "c1.live-durable"}, nil
+		default:
+			return backend.MutationPage{Cursor: since}, nil
+		}
+	})
 
-	client := connectSSE(t, server.URL, nil)
+	client := connectSSE(t, server.URL, map[string]string{"Last-Event-ID": "c1.start"})
 	defer client.close()
 
 	// Read and discard the connected event
@@ -279,12 +290,13 @@ func TestSSELive_MutationDelivery(t *testing.T) {
 		t.Fatal("client not registered in hub")
 	}
 
-	// Broadcast a mutation
+	// Commit the authoritative source, then send a deliberately stale wakeup payload.
+	close(committed)
 	hub.Broadcast(&realtime.MutationPayload{
 		Type:        "create",
 		IssueID:     "loom-live-1",
 		Cursor:      "c1.live-durable",
-		Title:       "Live Test Issue",
+		Title:       "untrusted notification title",
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 		WorkspaceID: testWorkspaceID,
 	})
@@ -461,7 +473,10 @@ func TestSSELive_CatchUpOnReconnect(t *testing.T) {
 		},
 	}
 
-	getMutationPage := func(context.Context, string, string, int) (backend.MutationPage, error) {
+	getMutationPage := func(_ context.Context, _ string, since string, _ int) (backend.MutationPage, error) {
+		if since == "c1.last" {
+			return backend.MutationPage{Cursor: since}, nil
+		}
 		return backend.MutationPage{Events: catchUpEvents, Cursor: "c1.last"}, nil
 	}
 

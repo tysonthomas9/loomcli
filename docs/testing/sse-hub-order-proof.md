@@ -1,5 +1,9 @@
 # Hub admission order and the remaining source frontier
 
+Current implementation update: [authoritative reader proof](sse-authoritative-reader-proof.md)
+supersedes the payload-driven replay/live delivery described below. Prior
+validation remains evidence for its recorded revision only.
+
 ## Reproduced defect and repair
 
 `Hub.Broadcast` previously sent directly to the broadcast channel whenever it

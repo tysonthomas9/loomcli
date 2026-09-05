@@ -71,16 +71,16 @@ func TestOverflowBeforeAnyOfferDoesNotReuseInitialResume(t *testing.T) {
 	}
 }
 
-func TestPreparedTransientMutationOmitsID(t *testing.T) {
+func TestTransientMutationWriterOmitsID(t *testing.T) {
 	rr := httptest.NewRecorder()
 	writer, err := NewWriter(rr)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writePreparedMutation(writer, preparedMutation{payload: &MutationPayload{Type: "refresh"}}); err != nil {
+	if err := writeSSEEvent(writer, &MutationPayload{Type: "refresh"}); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(rr.Body.String(), "id:") || !strings.Contains(rr.Body.String(), "event: mutation") {
-		t.Fatalf("prepared transient changed checkpoint: %q", rr.Body.String())
+		t.Fatalf("transient changed checkpoint: %q", rr.Body.String())
 	}
 }
