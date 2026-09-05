@@ -67,7 +67,10 @@ const (
 	timeoutRunMarker = "loom-timeout-run:"
 	// timeoutPartialLabel marks a task whose last run was cut off by a ceiling
 	// with work possibly half-done. Free-form on fleet-db; no schema change.
-	timeoutPartialLabel = "timeout-partial"
+	// Namespaced like attemptLabelPrefix: a label the supervisor writes about
+	// its own runs shares the board with workspace vocabulary a pipeline
+	// defines, and only the prefix says which layer owns the word.
+	timeoutPartialLabel = "loom:timeout-partial"
 	// maxAbandonedPerPass bounds one reconcile pass; the remainder is picked up
 	// on the next one.
 	maxAbandonedPerPass = 20
@@ -631,8 +634,8 @@ func (s *Supervisor) timeoutRunFactsFor(ap *AgentProcess, taskID, sessionID stri
 
 // timeoutRunCause maps the supervisor's stop reason to the human-readable cause
 // and the ceiling that was crossed. Naming the ceiling is what lets the
-// timeout-partial population be re-measured from the board rather than only from
-// the event stream.
+// loom:timeout-partial population be re-measured from the board rather than
+// only from the event stream.
 func (s *Supervisor) timeoutRunCause(ap *AgentProcess, reason StopReason) (cause, ceiling string) {
 	switch reason {
 	case StopReasonRunDurationExceeded:
