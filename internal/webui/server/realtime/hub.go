@@ -384,7 +384,8 @@ func (h *Hub) UnregisterClient(client *Client) {
 }
 
 // Broadcast sends a mutation to all connected clients.
-// If the broadcast channel is full, mutations are queued for retry.
+// If the broadcast channel is full or a backlog exists, mutations join the
+// retry tail. Accepted offers cannot bypass earlier queued offers.
 func (h *Hub) Broadcast(mutation *MutationPayload) {
 	if mutation == nil {
 		return
@@ -397,21 +398,27 @@ func (h *Hub) Broadcast(mutation *MutationPayload) {
 	if affectedClients == 0 {
 		return
 	}
-	select {
-	case h.broadcast <- mutation:
-	default:
-		h.retryMu.Lock()
-		if len(h.retryQueue) < retryQueueCapacity {
-			h.retryQueue = append(h.retryQueue, mutation)
-			slog.Warn("SSE broadcast channel full, queued mutation",
-				"queue_size", len(h.retryQueue), "affected_clients", affectedClients)
-		} else {
-			atomic.AddInt64(&h.droppedCount, 1)
-			h.markMatchingClientsPending(mutation)
-			slog.Warn("SSE retry queue full, dropped mutation",
-				"total_dropped", atomic.LoadInt64(&h.droppedCount), "affected_clients", affectedClients)
+	// Admission and retry draining share one lock. Once a backlog exists,
+	// newer offers must join its tail even when the fast channel has room.
+	// This preserves admission order, not order across independent sources.
+	h.retryMu.Lock()
+	defer h.retryMu.Unlock()
+	if len(h.retryQueue) == 0 {
+		select {
+		case h.broadcast <- mutation:
+			return
+		default:
 		}
-		h.retryMu.Unlock()
+	}
+	if len(h.retryQueue) < retryQueueCapacity {
+		h.retryQueue = append(h.retryQueue, mutation)
+		slog.Warn("SSE mutation queued behind broadcast backlog",
+			"queue_size", len(h.retryQueue), "affected_clients", affectedClients)
+	} else {
+		atomic.AddInt64(&h.droppedCount, 1)
+		h.markMatchingClientsPending(mutation)
+		slog.Warn("SSE retry queue full, dropped mutation",
+			"total_dropped", atomic.LoadInt64(&h.droppedCount), "affected_clients", affectedClients)
 	}
 }
 
