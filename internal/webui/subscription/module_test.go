@@ -25,11 +25,11 @@ func TestModule_RegisterRoutes(t *testing.T) {
 	defer tokens.Stop()
 
 	getMutations := func(context.Context, string, string, int) (backend.MutationPage, error) {
-		return backend.MutationPage{}, nil
+		return backend.MutationPage{Cursor: "0"}, nil
 	}
 	wsFromCtx := func(_ context.Context) string { return "test-ws" }
 
-	mod := NewModule(hub, getMutations, wsFromCtx, nil, tokens)
+	mod := NewModule(hub, getMutations, boundedModulePage(getMutations), wsFromCtx, nil, tokens)
 
 	mux := http.NewServeMux()
 	mod.Register(mux)
@@ -61,12 +61,12 @@ func TestModule_ConditionalRoutes(t *testing.T) {
 	defer hub.Stop()
 
 	getMutations := func(context.Context, string, string, int) (backend.MutationPage, error) {
-		return backend.MutationPage{}, nil
+		return backend.MutationPage{Cursor: "0"}, nil
 	}
 	wsFromCtx := func(_ context.Context) string { return "test-ws" }
 
 	t.Run("nil sseTokens returns disabled token response", func(t *testing.T) {
-		mod := NewModule(hub, getMutations, wsFromCtx, nil, nil)
+		mod := NewModule(hub, getMutations, boundedModulePage(getMutations), wsFromCtx, nil, nil)
 
 		mux := http.NewServeMux()
 		mod.Register(mux)
@@ -109,11 +109,11 @@ func TestModule_WrongMethod_Returns405(t *testing.T) {
 	defer tokens.Stop()
 
 	getMutations := func(context.Context, string, string, int) (backend.MutationPage, error) {
-		return backend.MutationPage{}, nil
+		return backend.MutationPage{Cursor: "0"}, nil
 	}
 	wsFromCtx := func(_ context.Context) string { return "test-ws" }
 
-	mod := NewModule(hub, getMutations, wsFromCtx, nil, tokens)
+	mod := NewModule(hub, getMutations, boundedModulePage(getMutations), wsFromCtx, nil, tokens)
 
 	mux := http.NewServeMux()
 	mod.Register(mux)
@@ -138,7 +138,7 @@ func TestModule_DoesNotActivateWorkspaceOnTokenRoute(t *testing.T) {
 	defer tokens.Stop()
 
 	getMutations := func(context.Context, string, string, int) (backend.MutationPage, error) {
-		return backend.MutationPage{}, nil
+		return backend.MutationPage{Cursor: "0"}, nil
 	}
 	wsFromCtx := func(_ context.Context) string { return "test-ws" }
 	var activated []string
@@ -147,7 +147,7 @@ func TestModule_DoesNotActivateWorkspaceOnTokenRoute(t *testing.T) {
 		return "c1.head", nil
 	}
 
-	mod := NewModule(hub, getMutations, wsFromCtx, activate, tokens)
+	mod := NewModule(hub, getMutations, boundedModulePage(getMutations), wsFromCtx, activate, tokens)
 
 	mux := http.NewServeMux()
 	mod.Register(mux)
@@ -179,7 +179,7 @@ func TestModule_DoesNotActivateResolvedWorkspacePerTokenRoute(t *testing.T) {
 	defer tokens.Stop()
 
 	getMutations := func(context.Context, string, string, int) (backend.MutationPage, error) {
-		return backend.MutationPage{}, nil
+		return backend.MutationPage{Cursor: "0"}, nil
 	}
 	var activated []string
 	activate := func(_ context.Context, wsID string) (string, error) {
@@ -187,7 +187,7 @@ func TestModule_DoesNotActivateResolvedWorkspacePerTokenRoute(t *testing.T) {
 		return "c1.head", nil
 	}
 
-	mod := NewModule(hub, getMutations, middleware.WorkspaceFromContext, activate, tokens)
+	mod := NewModule(hub, getMutations, boundedModulePage(getMutations), middleware.WorkspaceFromContext, activate, tokens)
 
 	wsMux := http.NewServeMux()
 	mod.Register(wsMux)
@@ -225,7 +225,7 @@ func TestModule_DoesNotActivateEventsRouteBeforeTokenAuth(t *testing.T) {
 	defer tokens.Stop()
 
 	getMutations := func(context.Context, string, string, int) (backend.MutationPage, error) {
-		return backend.MutationPage{}, nil
+		return backend.MutationPage{Cursor: "0"}, nil
 	}
 	wsFromCtx := func(_ context.Context) string { return "test-ws" }
 	var activated []string
@@ -234,7 +234,7 @@ func TestModule_DoesNotActivateEventsRouteBeforeTokenAuth(t *testing.T) {
 		return "c1.head", nil
 	}
 
-	mod := NewModule(hub, getMutations, wsFromCtx, activate, tokens)
+	mod := NewModule(hub, getMutations, boundedModulePage(getMutations), wsFromCtx, activate, tokens)
 
 	mux := http.NewServeMux()
 	mod.Register(mux)
@@ -263,7 +263,7 @@ func TestModule_ActivatesEachAuthorizedEventsClient(t *testing.T) {
 	defer tokens.Stop()
 
 	getMutations := func(context.Context, string, string, int) (backend.MutationPage, error) {
-		return backend.MutationPage{}, nil
+		return backend.MutationPage{Cursor: "0"}, nil
 	}
 	activated := make(chan string, 3)
 	activate := func(_ context.Context, wsID string) (string, error) {
@@ -271,7 +271,7 @@ func TestModule_ActivatesEachAuthorizedEventsClient(t *testing.T) {
 		return "c1.head", nil
 	}
 
-	mod := NewModule(hub, getMutations, middleware.WorkspaceFromContext, activate, tokens)
+	mod := NewModule(hub, getMutations, boundedModulePage(getMutations), middleware.WorkspaceFromContext, activate, tokens)
 
 	wsMux := http.NewServeMux()
 	mod.Register(wsMux)
@@ -326,7 +326,7 @@ func TestModule_ActivatesWorkspaceOnEventsRoute(t *testing.T) {
 	defer hub.Stop()
 
 	getMutations := func(context.Context, string, string, int) (backend.MutationPage, error) {
-		return backend.MutationPage{}, nil
+		return backend.MutationPage{Cursor: "0"}, nil
 	}
 	wsFromCtx := func(_ context.Context) string { return "test-ws" }
 	activated := make(chan string, 1)
@@ -335,7 +335,7 @@ func TestModule_ActivatesWorkspaceOnEventsRoute(t *testing.T) {
 		return "c1.head", nil
 	}
 
-	mod := NewModule(hub, getMutations, wsFromCtx, activate, nil)
+	mod := NewModule(hub, getMutations, boundedModulePage(getMutations), wsFromCtx, activate, nil)
 
 	mux := http.NewServeMux()
 	mod.Register(mux)
@@ -373,4 +373,11 @@ func containsAll(s string, needles ...string) bool {
 		}
 	}
 	return true
+}
+
+// boundedModulePage adapts finite deterministic route-test pages to a fixed fence.
+func boundedModulePage(read func(context.Context, string, string, int) (backend.MutationPage, error)) func(context.Context, string, string, string, int) (backend.MutationPage, error) {
+	return func(ctx context.Context, ws, since, through string, limit int) (backend.MutationPage, error) {
+		return read(ctx, ws, since, limit)
+	}
 }

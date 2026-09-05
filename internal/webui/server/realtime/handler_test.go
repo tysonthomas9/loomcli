@@ -22,8 +22,9 @@ func TestHandler_FleetDBOnlyReconnectCatchUpUsesLastEventID(t *testing.T) {
 		gotSince string
 	)
 	h := NewHandler(HandlerConfig{
-		Hub: NewHub(),
-		GetMutationPage: func(_ context.Context, wsID string, since string, _ int) (backend.MutationPage, error) {
+		Hub:             NewHub(),
+		GetMutationPage: fixedReplayHead(t, "1700000000100-0"),
+		GetMutationPageThrough: func(_ context.Context, wsID string, since, through string, _ int) (backend.MutationPage, error) {
 			mu.Lock()
 			gotWS = wsID
 			gotSince = since
@@ -66,8 +67,9 @@ func TestHandler_FleetDBOnlyReconnectCatchUpUsesSinceQuery(t *testing.T) {
 
 	var gotSince string
 	h := NewHandler(HandlerConfig{
-		Hub: NewHub(),
-		GetMutationPage: func(_ context.Context, wsID string, since string, _ int) (backend.MutationPage, error) {
+		Hub:             NewHub(),
+		GetMutationPage: fixedReplayHead(t, "1700000000400-0"),
+		GetMutationPageThrough: func(_ context.Context, wsID string, since, through string, _ int) (backend.MutationPage, error) {
 			if wsID != workspaceID {
 				t.Errorf("workspace = %q, want %q", wsID, workspaceID)
 			}
@@ -100,8 +102,9 @@ func TestHandler_FleetDBOnlyReconnectCatchUpUsesSinceQuery(t *testing.T) {
 
 func TestHandler_FleetDBOnlyCatchUpAppliesSourceRepoFilter(t *testing.T) {
 	h := NewHandler(HandlerConfig{
-		Hub: NewHub(),
-		GetMutationPage: func(_ context.Context, wsID string, since string, _ int) (backend.MutationPage, error) {
+		Hub:             NewHub(),
+		GetMutationPage: fixedReplayHead(t, "1700000000600-0"),
+		GetMutationPageThrough: func(_ context.Context, wsID string, since, through string, _ int) (backend.MutationPage, error) {
 			return backend.MutationPage{Events: []backend.MutationData{
 				{Cursor: "1700000000500-0", Type: "update", IssueID: "repo-a-task", SourceRepo: "repo-a", Timestamp: time.Date(2026, 5, 1, 12, 3, 0, 0, time.UTC)},
 				{Cursor: "1700000000600-0", Type: "update", IssueID: "repo-b-task", SourceRepo: "repo-b", Timestamp: time.Date(2026, 5, 1, 12, 4, 0, 0, time.UTC)},
@@ -129,8 +132,9 @@ func TestHandler_FleetDBOnlyCatchUpAppliesSourceRepoFilter(t *testing.T) {
 func TestHandler_FleetDBOnlyCatchUpFailsClosedWithoutWorkspace(t *testing.T) {
 	called := false
 	h := NewHandler(HandlerConfig{
-		Hub: NewHub(),
-		GetMutationPage: func(_ context.Context, wsID string, since string, _ int) (backend.MutationPage, error) {
+		Hub:             NewHub(),
+		GetMutationPage: fixedReplayHead(t, "1700000000700-0"),
+		GetMutationPageThrough: func(_ context.Context, wsID string, since, through string, _ int) (backend.MutationPage, error) {
 			called = true
 			return backend.MutationPage{Events: []backend.MutationData{
 				{Cursor: "1700000000700-0", Type: "update", IssueID: "leaked-task", Timestamp: time.Date(2026, 5, 1, 12, 5, 0, 0, time.UTC)},
@@ -160,7 +164,7 @@ func TestHandler_FleetDBOnlyReconnectCanMoveBetweenServeProcesses(t *testing.T) 
 		{Cursor: "1700000000800-0", Type: "update", IssueID: "before-disconnect", Timestamp: time.Date(2026, 5, 1, 12, 6, 0, 0, time.UTC)},
 		{Cursor: "1700000000900-0", Type: "update", IssueID: "missed-on-other-process", Timestamp: time.Date(2026, 5, 1, 12, 7, 0, 0, time.UTC)},
 	}
-	getSince := func(_ context.Context, wsID string, since string, _ int) (backend.MutationPage, error) {
+	getSince := func(_ context.Context, wsID string, since, through string, _ int) (backend.MutationPage, error) {
 		if wsID != workspaceID {
 			t.Errorf("workspace = %q, want %q", wsID, workspaceID)
 		}
@@ -178,9 +182,10 @@ func TestHandler_FleetDBOnlyReconnectCanMoveBetweenServeProcesses(t *testing.T) 
 	}
 	newProcess := func() *Handler {
 		h := NewHandler(HandlerConfig{
-			Hub:              NewHub(),
-			GetMutationPage:  getSince,
-			WorkspaceFromCtx: func(context.Context) string { return workspaceID },
+			Hub:                    NewHub(),
+			GetMutationPage:        fixedReplayHead(t, "1700000000900-0"),
+			GetMutationPageThrough: getSince,
+			WorkspaceFromCtx:       func(context.Context) string { return workspaceID },
 		})
 		h.heartbeatInterval = time.Hour
 		return h
@@ -233,4 +238,15 @@ func serveSSEOnce(t *testing.T, h *Handler, mutateReq func(*http.Request)) strin
 		t.Fatal("SSE handler did not return after request cancellation")
 	}
 	return rr.Body.String()
+}
+
+// fixedReplayHead is an explicit head endpoint fixture, separate from page data.
+func fixedReplayHead(t *testing.T, head string) mutationPageFn {
+	t.Helper()
+	return func(_ context.Context, _ string, since string, limit int) (backend.MutationPage, error) {
+		if since != "$" || limit != 1 {
+			t.Errorf("head query since=%q limit=%d", since, limit)
+		}
+		return backend.MutationPage{Cursor: head}, nil
+	}
 }

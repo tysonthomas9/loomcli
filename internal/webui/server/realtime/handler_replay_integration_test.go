@@ -29,6 +29,14 @@ func TestHandler_FleetHTTPReplay201BeforeConnectedWithQueuedOverlap(t *testing.T
 	t.Cleanup(hub.Stop)
 	var calls atomic.Int32
 	fleetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("since") == "c1.JA" {
+			head := 201
+			if calls.Load() >= 3 {
+				head = 202
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"events": []any{}, "cursor": cursor(head), "has_more": false})
+			return
+		}
 		page := int(calls.Add(1))
 		start := (page - 1) * 100
 		if page == 4 {
@@ -38,6 +46,13 @@ func TestHandler_FleetHTTPReplay201BeforeConnectedWithQueuedOverlap(t *testing.T
 			t.Errorf("unexpected Fleet request page=%d path=%s query=%s", page, r.URL.Path, r.URL.RawQuery)
 			http.Error(w, "unexpected cursor/page", http.StatusBadRequest)
 			return
+		}
+		wantFence := 201
+		if page == 4 {
+			wantFence = 202
+		}
+		if r.URL.Query().Get("through") != cursor(wantFence) {
+			t.Errorf("wrong fixed replay fence %q", r.URL.Query().Get("through"))
 		}
 		end := min(start+100, 201)
 		if page == 4 {
@@ -78,6 +93,11 @@ func TestHandler_FleetHTTPReplay201BeforeConnectedWithQueuedOverlap(t *testing.T
 			return backend.MutationPage{}, fmt.Errorf("wrong workspace %s", ws)
 		}
 		return fleetBackend.GetMutationsAfter(ctx, since, limit)
+	}, GetMutationPageThrough: func(ctx context.Context, ws, since, through string, limit int) (backend.MutationPage, error) {
+		if ws != workspace {
+			return backend.MutationPage{}, fmt.Errorf("wrong workspace %s", ws)
+		}
+		return fleetBackend.GetMutationsThrough(ctx, since, through, limit)
 	}})
 	handler.writerFactory = func(http.ResponseWriter) (frameWriter, error) { return writer, nil }
 	handler.heartbeatInterval = time.Hour
