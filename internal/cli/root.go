@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/observability/tracing"
@@ -152,6 +153,7 @@ func init() {
 
 // Execute runs the root command
 func Execute() error {
+	bootstrap.EnsureUserPATH()
 	registerPendingCommands()
 
 	traceShutdown := initCLITracing()
