@@ -14,6 +14,138 @@ const (
 	WorkerTokenScopes = "WorkerToken.Scopes"
 )
 
+// Defines values for AgentLiveStatus.
+const (
+	AgentLiveStatusIdle    AgentLiveStatus = "idle"
+	AgentLiveStatusWorking AgentLiveStatus = "working"
+)
+
+// Valid indicates whether the value is a known member of the AgentLiveStatus enum.
+func (e AgentLiveStatus) Valid() bool {
+	switch e {
+	case AgentLiveStatusIdle:
+		return true
+	case AgentLiveStatusWorking:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentMode.
+const (
+	Ephemeral AgentMode = "ephemeral"
+	Service   AgentMode = "service"
+)
+
+// Valid indicates whether the value is a known member of the AgentMode enum.
+func (e AgentMode) Valid() bool {
+	switch e {
+	case Ephemeral:
+		return true
+	case Service:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentDesiredState.
+const (
+	AgentDesiredStateDraining AgentDesiredState = "draining"
+	AgentDesiredStateIdle     AgentDesiredState = "idle"
+	AgentDesiredStateRunning  AgentDesiredState = "running"
+	AgentDesiredStateStopped  AgentDesiredState = "stopped"
+)
+
+// Valid indicates whether the value is a known member of the AgentDesiredState enum.
+func (e AgentDesiredState) Valid() bool {
+	switch e {
+	case AgentDesiredStateDraining:
+		return true
+	case AgentDesiredStateIdle:
+		return true
+	case AgentDesiredStateRunning:
+		return true
+	case AgentDesiredStateStopped:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentHookActionSource.
+const (
+	FinalReply AgentHookActionSource = "final_reply"
+)
+
+// Valid indicates whether the value is a known member of the AgentHookActionSource enum.
+func (e AgentHookActionSource) Valid() bool {
+	switch e {
+	case FinalReply:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentHookActionType.
+const (
+	AgentHookActionTypeAddLabel    AgentHookActionType = "add_label"
+	AgentHookActionTypeClose       AgentHookActionType = "close"
+	AgentHookActionTypeComment     AgentHookActionType = "comment"
+	AgentHookActionTypeCycle       AgentHookActionType = "cycle"
+	AgentHookActionTypeRemoveLabel AgentHookActionType = "remove_label"
+	AgentHookActionTypeSetStatus   AgentHookActionType = "set_status"
+	AgentHookActionTypeWriteDesign AgentHookActionType = "write_design"
+)
+
+// Valid indicates whether the value is a known member of the AgentHookActionType enum.
+func (e AgentHookActionType) Valid() bool {
+	switch e {
+	case AgentHookActionTypeAddLabel:
+		return true
+	case AgentHookActionTypeClose:
+		return true
+	case AgentHookActionTypeComment:
+		return true
+	case AgentHookActionTypeCycle:
+		return true
+	case AgentHookActionTypeRemoveLabel:
+		return true
+	case AgentHookActionTypeSetStatus:
+		return true
+	case AgentHookActionTypeWriteDesign:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentState.
+const (
+	AgentStateActive             AgentState = "active"
+	AgentStateBackendUnavailable AgentState = "backend_unavailable"
+	AgentStateIdle               AgentState = "idle"
+	AgentStateStopped            AgentState = "stopped"
+)
+
+// Valid indicates whether the value is a known member of the AgentState enum.
+func (e AgentState) Valid() bool {
+	switch e {
+	case AgentStateActive:
+		return true
+	case AgentStateBackendUnavailable:
+		return true
+	case AgentStateIdle:
+		return true
+	case AgentStateStopped:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AgentStatusResponseAgentState.
 const (
 	AgentStatusResponseAgentStateDead     AgentStatusResponseAgentState = "dead"
@@ -940,34 +1072,34 @@ func (e TranscriptEntryType) Valid() bool {
 
 // Defines values for TreeNodeAgentState.
 const (
-	Dead     TreeNodeAgentState = "dead"
-	Done     TreeNodeAgentState = "done"
-	Idle     TreeNodeAgentState = "idle"
-	Running  TreeNodeAgentState = "running"
-	Spawning TreeNodeAgentState = "spawning"
-	Stopped  TreeNodeAgentState = "stopped"
-	Stuck    TreeNodeAgentState = "stuck"
-	Working  TreeNodeAgentState = "working"
+	TreeNodeAgentStateDead     TreeNodeAgentState = "dead"
+	TreeNodeAgentStateDone     TreeNodeAgentState = "done"
+	TreeNodeAgentStateIdle     TreeNodeAgentState = "idle"
+	TreeNodeAgentStateRunning  TreeNodeAgentState = "running"
+	TreeNodeAgentStateSpawning TreeNodeAgentState = "spawning"
+	TreeNodeAgentStateStopped  TreeNodeAgentState = "stopped"
+	TreeNodeAgentStateStuck    TreeNodeAgentState = "stuck"
+	TreeNodeAgentStateWorking  TreeNodeAgentState = "working"
 )
 
 // Valid indicates whether the value is a known member of the TreeNodeAgentState enum.
 func (e TreeNodeAgentState) Valid() bool {
 	switch e {
-	case Dead:
+	case TreeNodeAgentStateDead:
 		return true
-	case Done:
+	case TreeNodeAgentStateDone:
 		return true
-	case Idle:
+	case TreeNodeAgentStateIdle:
 		return true
-	case Running:
+	case TreeNodeAgentStateRunning:
 		return true
-	case Spawning:
+	case TreeNodeAgentStateSpawning:
 		return true
-	case Stopped:
+	case TreeNodeAgentStateStopped:
 		return true
-	case Stuck:
+	case TreeNodeAgentStateStuck:
 		return true
-	case Working:
+	case TreeNodeAgentStateWorking:
 		return true
 	default:
 		return false
@@ -1562,6 +1694,65 @@ type AddDependencyRequest struct {
 	DependsOnId string  `json:"depends_on_id"`
 }
 
+// Agent A stored agent assignment (domain.Agent), as returned by the agent
+// update endpoint.
+type Agent struct {
+	// ActivePhase Set only while live_status is "working".
+	ActivePhase *string `json:"active_phase,omitempty"`
+
+	// ActiveTaskId Set only while live_status is "working".
+	ActiveTaskId     *string            `json:"active_task_id,omitempty"`
+	Auto             *bool              `json:"auto,omitempty"`
+	Backend          *string            `json:"backend,omitempty"`
+	BudgetPolicy     *string            `json:"budget_policy,omitempty"`
+	CreatedAt        time.Time          `json:"created_at"`
+	CrossRepo        *bool              `json:"cross_repo,omitempty"`
+	DesiredState     *AgentDesiredState `json:"desired_state,omitempty"`
+	FallbackBackends *[]string          `json:"fallback_backends,omitempty"`
+
+	// Hooks Supervisor-owned post-run pipelines for an agent.
+	Hooks *AgentHooks `json:"hooks,omitempty"`
+
+	// LastErrorClass Derived, read-only: the error class of the agent's most recent
+	// terminal session when that run failed. Surfaced only while idle.
+	LastErrorClass *string `json:"last_error_class,omitempty"`
+
+	// LiveStatus Derived, read-only liveness signal carried from fleet-db.
+	LiveStatus     *AgentLiveStatus `json:"live_status,omitempty"`
+	MaxConcurrency *int             `json:"max_concurrency,omitempty"`
+	Mode           *AgentMode       `json:"mode,omitempty"`
+	Name           string           `json:"name"`
+	Parent         *string          `json:"parent,omitempty"`
+	RepoGroups     []string         `json:"repo_groups"`
+	Repos          []string         `json:"repos"`
+	RoleName       string           `json:"role_name"`
+
+	// State loom's coarse stored view of an agent assignment. Only idle, active
+	// and stopped are accepted on a write; backend_unavailable is set by
+	// the daemon reconciler.
+	State        *AgentState `json:"state,omitempty"`
+	TaskFilter   *string     `json:"task_filter,omitempty"`
+	UpdatedAt    time.Time   `json:"updated_at"`
+	WorkspaceKey string      `json:"workspace_key"`
+}
+
+// AgentLiveStatus Derived, read-only liveness signal carried from fleet-db.
+type AgentLiveStatus string
+
+// AgentMode defines model for Agent.Mode.
+type AgentMode string
+
+// AgentAnswerRequest At least one of `option_id`, `text` or `decline` must be set;
+// a body with none of the three is rejected.
+type AgentAnswerRequest struct {
+	Decline  *bool   `json:"decline,omitempty"`
+	OptionId *string `json:"option_id,omitempty"`
+
+	// RequestId The prompt to answer. Defaults to the agent's oldest pending request.
+	RequestId *string `json:"request_id,omitempty"`
+	Text      *string `json:"text,omitempty"`
+}
+
 // AgentBackendOverride defines model for AgentBackendOverride.
 type AgentBackendOverride struct {
 	Backend  string `json:"backend"`
@@ -1575,6 +1766,74 @@ type AgentControlEntry struct {
 	Role   string `json:"role"`
 	Status string `json:"status"`
 }
+
+// AgentDesiredState defines model for AgentDesiredState.
+type AgentDesiredState string
+
+// AgentHookAction One step of a completion pipeline. Only the fields appropriate to
+// `type` may be set.
+type AgentHookAction struct {
+	// Cycle Required when the action type is `cycle`, and unset otherwise.
+	Cycle *AgentHookCycle `json:"cycle,omitempty"`
+
+	// Reason Required when `type` is set_status and `value` is blocked;
+	// rejected otherwise.
+	Reason *string `json:"reason,omitempty"`
+
+	// Source Which run artifact supplies the body (comment, write_design).
+	Source *AgentHookActionSource `json:"source,omitempty"`
+	Type   AgentHookActionType    `json:"type"`
+
+	// Value The label name or target status, depending on `type`.
+	Value *string `json:"value,omitempty"`
+}
+
+// AgentHookActionSource Which run artifact supplies the body (comment, write_design).
+type AgentHookActionSource string
+
+// AgentHookActionType defines model for AgentHookAction.Type.
+type AgentHookActionType string
+
+// AgentHookCycle Required when the action type is `cycle`, and unset otherwise.
+type AgentHookCycle struct {
+	// Prefix Overrides the default cycle label prefix.
+	Prefix *string `json:"prefix,omitempty"`
+
+	// RearmLabel Removed to hand the task back to the previous stage.
+	RearmLabel string `json:"rearm_label"`
+
+	// ShipLabel Stamped once the threshold is reached.
+	ShipLabel string `json:"ship_label"`
+
+	// Threshold Rounds to run before shipping. 1 ships on the first pass.
+	Threshold int `json:"threshold"`
+}
+
+// AgentHooks Supervisor-owned post-run pipelines for an agent.
+type AgentHooks struct {
+	// OnComplete Runs in slice order after a successful agent turn. Every
+	// body-writing action (comment, write_design) must precede every
+	// stamping action (add_label, remove_label, set_status, close, cycle).
+	OnComplete *[]AgentHookAction `json:"on_complete,omitempty"`
+}
+
+// AgentQueueEntry One ranked backlog entry from the daemon's queue projection.
+type AgentQueueEntry struct {
+	IssueId  string   `json:"issue_id"`
+	Labels   []string `json:"labels"`
+	Parent   *string  `json:"parent,omitempty"`
+	Priority int      `json:"priority"`
+
+	// Reason Why the entry ranked where it did.
+	Reason string `json:"reason"`
+	Score  int    `json:"score"`
+	Title  string `json:"title"`
+}
+
+// AgentState loom's coarse stored view of an agent assignment. Only idle, active
+// and stopped are accepted on a write; backend_unavailable is set by
+// the daemon reconciler.
+type AgentState string
 
 // AgentStatusResponse Agent entity from dto.AgentStatusResponse
 type AgentStatusResponse struct {
@@ -1593,6 +1852,25 @@ type AgentStatusResponse struct {
 
 // AgentStatusResponseAgentState defines model for AgentStatusResponse.AgentState.
 type AgentStatusResponseAgentState string
+
+// AgentUpdateRequest Partial agent update. Every field is optional; absent fields are left
+// unchanged.
+type AgentUpdateRequest struct {
+	Auto             *bool              `json:"auto,omitempty"`
+	Backend          *string            `json:"backend,omitempty"`
+	CrossRepo        *bool              `json:"cross_repo,omitempty"`
+	DesiredState     *AgentDesiredState `json:"desired_state,omitempty"`
+	FallbackBackends *[]string          `json:"fallback_backends,omitempty"`
+	Parent           *string            `json:"parent,omitempty"`
+	RepoGroups       *[]string          `json:"repo_groups,omitempty"`
+	Repos            *[]string          `json:"repos,omitempty"`
+	RoleName         *string            `json:"role_name,omitempty"`
+
+	// State loom's coarse stored view of an agent assignment. Only idle, active
+	// and stopped are accepted on a write; backend_unavailable is set by
+	// the daemon reconciler.
+	State *AgentState `json:"state,omitempty"`
+}
 
 // BackendConfigResponse defines model for BackendConfigResponse.
 type BackendConfigResponse struct {
@@ -2634,6 +2912,22 @@ type PatchIssueRequestDesignFormat string
 
 // PatchIssueRequestStatus defines model for PatchIssueRequest.Status.
 type PatchIssueRequestStatus string
+
+// PendingInput One interactive prompt an agent is currently blocked on.
+type PendingInput struct {
+	Agent     string                `json:"agent"`
+	AskedAt   string                `json:"asked_at"`
+	Kind      string                `json:"kind"`
+	Options   *[]PendingInputOption `json:"options,omitempty"`
+	Prompt    string                `json:"prompt"`
+	RequestId string                `json:"request_id"`
+}
+
+// PendingInputOption defines model for PendingInputOption.
+type PendingInputOption struct {
+	Id    string  `json:"id"`
+	Label *string `json:"label,omitempty"`
+}
 
 // PullRequestDetail defines model for PullRequestDetail.
 type PullRequestDetail struct {
@@ -3699,6 +3993,12 @@ type ReorderWorkspacesJSONRequestBody ReorderWorkspacesJSONBody
 
 // CreateAgentJSONRequestBody defines body for CreateAgent for application/json ContentType.
 type CreateAgentJSONRequestBody CreateAgentJSONBody
+
+// UpdateAgentJSONRequestBody defines body for UpdateAgent for application/json ContentType.
+type UpdateAgentJSONRequestBody = AgentUpdateRequest
+
+// AnswerAgentPromptJSONRequestBody defines body for AnswerAgentPrompt for application/json ContentType.
+type AnswerAgentPromptJSONRequestBody = AgentAnswerRequest
 
 // GitPullJSONRequestBody defines body for GitPull for application/json ContentType.
 type GitPullJSONRequestBody GitPullJSONBody

@@ -1233,6 +1233,28 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/agents/{name}/terminal/session": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Ensure a live terminal session exists for an agent
+     * @description Idempotent: reuses the agent's existing tab when its PTY is still
+     *     attachable and its cached launch spec is still valid, otherwise
+     *     spawns a fresh session. Returns the resulting tab metadata.
+     */
+    post: operations["ensureAgentTerminalSession"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/agents/{name}/terminal/info": {
     parameters: {
       query?: never;
@@ -1306,6 +1328,28 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/pending-inputs": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List every agent's pending interactive-input requests
+     * @description Workspace-wide view of the prompts agents are blocked on. Registered
+     *     only when the daemon exposes the interactive-input surface. The body
+     *     is a bare array, not the usual `{success, data}` envelope.
+     */
+    get: operations["listPendingInputs"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/agents": {
     parameters: {
       query?: never;
@@ -1318,6 +1362,93 @@ export interface paths {
     put?: never;
     /** Create an agent assignment */
     post: operations["createAgent"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/agents/{name}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Delete an agent assignment */
+    delete: operations["deleteAgent"];
+    options?: never;
+    head?: never;
+    /**
+     * Update an agent assignment
+     * @description Partial update. Only the fields present in the body are changed;
+     *     every field is optional.
+     */
+    patch: operations["updateAgent"];
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/agents/{name}/queue": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Ranked task queue for a single agent
+     * @description The daemon's ranked backlog projection for one agent. Only served in
+     *     local daemon mode; in fleet-db store mode the route responds 501 and
+     *     callers should read the monitor task queues instead.
+     */
+    get: operations["getAgentQueue"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/agents/{name}/input": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Pending interactive-input requests for one agent
+     * @description The subset of `listPendingInputs` scoped to a single agent. Registered
+     *     only when the daemon exposes the interactive-input surface.
+     */
+    get: operations["getAgentPendingInput"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/agents/{name}/answer": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Answer an agent's pending interactive prompt
+     * @description Resolves a pending prompt by selecting an option, supplying free text,
+     *     or declining. At least one of `option_id`, `text` or `decline` must be
+     *     set. Shares the agent-control authz boundary with start/stop.
+     */
+    post: operations["answerAgentPrompt"];
     delete?: never;
     options?: never;
     head?: never;
@@ -3156,6 +3287,156 @@ export interface components {
       worktree: string;
       role: string;
       backend: string;
+    };
+    /**
+     * @description A stored agent assignment (domain.Agent), as returned by the agent
+     *     update endpoint.
+     */
+    Agent: {
+      workspace_key: string;
+      name: string;
+      role_name: string;
+      auto?: boolean;
+      backend?: string;
+      fallback_backends?: string[];
+      repos: string[];
+      repo_groups: string[];
+      cross_repo?: boolean;
+      parent?: string;
+      state?: components["schemas"]["AgentState"];
+      /** @enum {string} */
+      mode?: "ephemeral" | "service";
+      task_filter?: string;
+      max_concurrency?: number;
+      budget_policy?: string;
+      desired_state?: components["schemas"]["AgentDesiredState"];
+      hooks?: components["schemas"]["AgentHooks"];
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+      /**
+       * @description Derived, read-only liveness signal carried from fleet-db.
+       * @enum {string}
+       */
+      live_status?: "working" | "idle";
+      /** @description Set only while live_status is "working". */
+      active_task_id?: string;
+      /** @description Set only while live_status is "working". */
+      active_phase?: string;
+      /**
+       * @description Derived, read-only: the error class of the agent's most recent
+       *     terminal session when that run failed. Surfaced only while idle.
+       */
+      last_error_class?: string;
+    };
+    /**
+     * @description loom's coarse stored view of an agent assignment. Only idle, active
+     *     and stopped are accepted on a write; backend_unavailable is set by
+     *     the daemon reconciler.
+     * @enum {string}
+     */
+    AgentState: "idle" | "active" | "stopped" | "backend_unavailable";
+    /** @enum {string} */
+    AgentDesiredState: "stopped" | "idle" | "running" | "draining";
+    /**
+     * @description Partial agent update. Every field is optional; absent fields are left
+     *     unchanged.
+     */
+    AgentUpdateRequest: {
+      role_name?: string;
+      auto?: boolean;
+      backend?: string;
+      fallback_backends?: string[];
+      repos?: string[];
+      repo_groups?: string[];
+      cross_repo?: boolean;
+      parent?: string;
+      state?: components["schemas"]["AgentState"];
+      desired_state?: components["schemas"]["AgentDesiredState"];
+    };
+    /** @description Supervisor-owned post-run pipelines for an agent. */
+    AgentHooks: {
+      /**
+       * @description Runs in slice order after a successful agent turn. Every
+       *     body-writing action (comment, write_design) must precede every
+       *     stamping action (add_label, remove_label, set_status, close, cycle).
+       */
+      on_complete?: components["schemas"]["AgentHookAction"][];
+    };
+    /**
+     * @description One step of a completion pipeline. Only the fields appropriate to
+     *     `type` may be set.
+     */
+    AgentHookAction: {
+      /** @enum {string} */
+      type:
+        | "comment"
+        | "write_design"
+        | "add_label"
+        | "remove_label"
+        | "set_status"
+        | "close"
+        | "cycle";
+      /**
+       * @description Which run artifact supplies the body (comment, write_design).
+       * @enum {string}
+       */
+      source?: "final_reply";
+      /** @description The label name or target status, depending on `type`. */
+      value?: string;
+      /**
+       * @description Required when `type` is set_status and `value` is blocked;
+       *     rejected otherwise.
+       */
+      reason?: string;
+      cycle?: components["schemas"]["AgentHookCycle"];
+    };
+    /** @description Required when the action type is `cycle`, and unset otherwise. */
+    AgentHookCycle: {
+      /** @description Rounds to run before shipping. 1 ships on the first pass. */
+      threshold: number;
+      /** @description Removed to hand the task back to the previous stage. */
+      rearm_label: string;
+      /** @description Stamped once the threshold is reached. */
+      ship_label: string;
+      /** @description Overrides the default cycle label prefix. */
+      prefix?: string;
+    };
+    /** @description One ranked backlog entry from the daemon's queue projection. */
+    AgentQueueEntry: {
+      issue_id: string;
+      title: string;
+      priority: number;
+      score: number;
+      /** @description Why the entry ranked where it did. */
+      reason: string;
+      labels: string[];
+      parent?: string;
+    };
+    /** @description One interactive prompt an agent is currently blocked on. */
+    PendingInput: {
+      request_id: string;
+      agent: string;
+      kind: string;
+      prompt: string;
+      options?: components["schemas"]["PendingInputOption"][];
+      asked_at: string;
+    };
+    PendingInputOption: {
+      id: string;
+      label?: string;
+    };
+    /**
+     * @description At least one of `option_id`, `text` or `decline` must be set;
+     *     a body with none of the three is rejected.
+     */
+    AgentAnswerRequest: {
+      /** @description The prompt to answer. Defaults to the agent's oldest pending request. */
+      request_id?: string;
+      option_id?: string;
+      text?: string;
+      decline?: boolean;
     };
     /** @description Agent entity from dto.AgentStatusResponse */
     AgentStatusResponse: {
@@ -6434,6 +6715,68 @@ export interface operations {
       };
     };
   };
+  ensureAgentTerminalSession: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent worktree name */
+        name: components["parameters"]["AgentName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Tab metadata for the live agent session */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data?: components["schemas"]["TabMetadata"];
+            error?: string;
+          };
+        };
+      };
+      /**
+       * @description Invalid agent name, or a daemon-owned ephemeral worker whose
+       *     terminal cannot be started from the agents page.
+       */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Agent or role not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Terminal service or agent store not initialized */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            error?: string;
+          };
+        };
+      };
+    };
+  };
   getAgentTerminalInfo: {
     parameters: {
       query?: never;
@@ -6546,6 +6889,56 @@ export interface operations {
       };
     };
   };
+  listPendingInputs: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Pending input requests (bare array, no envelope) */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PendingInput"][];
+        };
+      };
+      /** @description Malformed pending-input payload from the daemon */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Agent supervisor is not running */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Agent supervisor did not respond in time */
+      504: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
   listAgents: {
     parameters: {
       query?: never;
@@ -6642,6 +7035,278 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+    };
+  };
+  deleteAgent: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent worktree name */
+        name: components["parameters"]["AgentName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Agent deleted */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MessageResponse"];
+        };
+      };
+      /** @description Agent not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  updateAgent: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent worktree name */
+        name: components["parameters"]["AgentName"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AgentUpdateRequest"];
+      };
+    };
+    responses: {
+      /** @description Updated agent */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Agent"];
+        };
+      };
+      /** @description Invalid request body, state, or desired_state */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Agent not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getAgentQueue: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent worktree name */
+        name: components["parameters"]["AgentName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Ranked queue entries */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data: components["schemas"]["AgentQueueEntry"][];
+            total: number;
+          };
+        };
+      };
+      /** @description Agent not found in daemon config */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Not available in fleet-db store mode */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Daemon unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getAgentPendingInput: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent worktree name */
+        name: components["parameters"]["AgentName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Pending input requests (bare array, no envelope) */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PendingInput"][];
+        };
+      };
+      /** @description Agent not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Malformed pending-input payload from the daemon */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Agent supervisor is not running */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Agent supervisor did not respond in time */
+      504: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  answerAgentPrompt: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent worktree name */
+        name: components["parameters"]["AgentName"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AgentAnswerRequest"];
+      };
+    };
+    responses: {
+      /** @description Answer delivered to the agent */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MessageResponse"];
+        };
+      };
+      /** @description Invalid body, or no option_id / text / decline supplied */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Agent not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Agent is not in a state that can accept an answer */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Agent supervisor is not running */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Agent supervisor did not respond in time */
+      504: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
       };
     };
   };

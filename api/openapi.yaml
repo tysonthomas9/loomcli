@@ -2437,6 +2437,60 @@ paths:
           description: Agent lifecycle backend unavailable
 
   # ── Agent Terminal ──────────────────────────────────────────────────────
+  /api/workspaces/{ws}/agents/{name}/terminal/session:
+    post:
+      operationId: ensureAgentTerminalSession
+      tags: [agent-terminal]
+      summary: Ensure a live terminal session exists for an agent
+      description: |
+        Idempotent: reuses the agent's existing tab when its PTY is still
+        attachable and its cached launch spec is still valid, otherwise
+        spawns a fresh session. Returns the resulting tab metadata.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: Tab metadata for the live agent session
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/TabMetadata"
+                  error:
+                    type: string
+        "400":
+          description: |
+            Invalid agent name, or a daemon-owned ephemeral worker whose
+            terminal cannot be started from the agents page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Agent or role not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Terminal service or agent store not initialized
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  error:
+                    type: string
+
   /api/workspaces/{ws}/agents/{name}/terminal/info:
     get:
       operationId: getAgentTerminalInfo
@@ -2523,6 +2577,45 @@ paths:
                           type: string
                         label:
                           type: string
+
+  /api/workspaces/{ws}/pending-inputs:
+    get:
+      operationId: listPendingInputs
+      tags: [agent-control]
+      summary: List every agent's pending interactive-input requests
+      description: |
+        Workspace-wide view of the prompts agents are blocked on. Registered
+        only when the daemon exposes the interactive-input surface. The body
+        is a bare array, not the usual `{success, data}` envelope.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Pending input requests (bare array, no envelope)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PendingInput"
+        "502":
+          description: Malformed pending-input payload from the daemon
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Agent supervisor is not running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "504":
+          description: Agent supervisor did not respond in time
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/workspaces/{ws}/agents:
     get:
@@ -2612,6 +2705,212 @@ paths:
           description: Agent already exists
         "503":
           description: Agent service unavailable
+
+  /api/workspaces/{ws}/agents/{name}:
+    patch:
+      operationId: updateAgent
+      tags: [agent-control]
+      summary: Update an agent assignment
+      description: |
+        Partial update. Only the fields present in the body are changed;
+        every field is optional.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentUpdateRequest"
+      responses:
+        "200":
+          description: Updated agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        "400":
+          description: Invalid request body, state, or desired_state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteAgent
+      tags: [agent-control]
+      summary: Delete an agent assignment
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: Agent deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "404":
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/agents/{name}/queue:
+    get:
+      operationId: getAgentQueue
+      tags: [agent-control]
+      summary: Ranked task queue for a single agent
+      description: |
+        The daemon's ranked backlog projection for one agent. Only served in
+        local daemon mode; in fleet-db store mode the route responds 501 and
+        callers should read the monitor task queues instead.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: Ranked queue entries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data, total]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AgentQueueEntry"
+                  total:
+                    type: integer
+        "404":
+          description: Agent not found in daemon config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "501":
+          description: Not available in fleet-db store mode
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Daemon unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/agents/{name}/input:
+    get:
+      operationId: getAgentPendingInput
+      tags: [agent-control]
+      summary: Pending interactive-input requests for one agent
+      description: |
+        The subset of `listPendingInputs` scoped to a single agent. Registered
+        only when the daemon exposes the interactive-input surface.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: Pending input requests (bare array, no envelope)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PendingInput"
+        "404":
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Malformed pending-input payload from the daemon
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Agent supervisor is not running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "504":
+          description: Agent supervisor did not respond in time
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/agents/{name}/answer:
+    post:
+      operationId: answerAgentPrompt
+      tags: [agent-control]
+      summary: Answer an agent's pending interactive prompt
+      description: |
+        Resolves a pending prompt by selecting an option, supplying free text,
+        or declining. At least one of `option_id`, `text` or `decline` must be
+        set. Shares the agent-control authz boundary with start/stop.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentAnswerRequest"
+      responses:
+        "200":
+          description: Answer delivered to the agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: Invalid body, or no option_id / text / decline supplied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Agent is not in a state that can accept an answer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Agent supervisor is not running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "504":
+          description: Agent supervisor did not respond in time
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/workspaces/{ws}/agents/{name}/stop:
     post:
@@ -6116,6 +6415,246 @@ components:
           type: string
 
     # ── Agent Schemas ───────────────────────────────────────────────────
+    Agent:
+      type: object
+      description: |
+        A stored agent assignment (domain.Agent), as returned by the agent
+        update endpoint.
+      required: [workspace_key, name, role_name, repos, repo_groups, created_at, updated_at]
+      properties:
+        workspace_key:
+          type: string
+        name:
+          type: string
+        role_name:
+          type: string
+        auto:
+          type: boolean
+        backend:
+          type: string
+        fallback_backends:
+          type: array
+          items:
+            type: string
+        repos:
+          type: array
+          items:
+            type: string
+        repo_groups:
+          type: array
+          items:
+            type: string
+        cross_repo:
+          type: boolean
+        parent:
+          type: string
+        state:
+          $ref: "#/components/schemas/AgentState"
+        mode:
+          type: string
+          enum: [ephemeral, service]
+        task_filter:
+          type: string
+        max_concurrency:
+          type: integer
+        budget_policy:
+          type: string
+        desired_state:
+          $ref: "#/components/schemas/AgentDesiredState"
+        hooks:
+          $ref: "#/components/schemas/AgentHooks"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        live_status:
+          type: string
+          description: Derived, read-only liveness signal carried from fleet-db.
+          enum: [working, idle]
+        active_task_id:
+          type: string
+          description: Set only while live_status is "working".
+        active_phase:
+          type: string
+          description: Set only while live_status is "working".
+        last_error_class:
+          type: string
+          description: |
+            Derived, read-only: the error class of the agent's most recent
+            terminal session when that run failed. Surfaced only while idle.
+
+    AgentState:
+      type: string
+      description: |
+        loom's coarse stored view of an agent assignment. Only idle, active
+        and stopped are accepted on a write; backend_unavailable is set by
+        the daemon reconciler.
+      enum: [idle, active, stopped, backend_unavailable]
+
+    AgentDesiredState:
+      type: string
+      enum: [stopped, idle, running, draining]
+
+    AgentUpdateRequest:
+      type: object
+      description: |
+        Partial agent update. Every field is optional; absent fields are left
+        unchanged.
+      properties:
+        role_name:
+          type: string
+        auto:
+          type: boolean
+        backend:
+          type: string
+        fallback_backends:
+          type: array
+          items:
+            type: string
+        repos:
+          type: array
+          items:
+            type: string
+        repo_groups:
+          type: array
+          items:
+            type: string
+        cross_repo:
+          type: boolean
+        parent:
+          type: string
+        state:
+          $ref: "#/components/schemas/AgentState"
+        desired_state:
+          $ref: "#/components/schemas/AgentDesiredState"
+
+    AgentHooks:
+      type: object
+      description: Supervisor-owned post-run pipelines for an agent.
+      properties:
+        on_complete:
+          type: array
+          description: |
+            Runs in slice order after a successful agent turn. Every
+            body-writing action (comment, write_design) must precede every
+            stamping action (add_label, remove_label, set_status, close, cycle).
+          items:
+            $ref: "#/components/schemas/AgentHookAction"
+
+    AgentHookAction:
+      type: object
+      description: |
+        One step of a completion pipeline. Only the fields appropriate to
+        `type` may be set.
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [comment, write_design, add_label, remove_label, set_status, close, cycle]
+        source:
+          type: string
+          description: Which run artifact supplies the body (comment, write_design).
+          enum: [final_reply]
+        value:
+          type: string
+          description: The label name or target status, depending on `type`.
+        reason:
+          type: string
+          description: |
+            Required when `type` is set_status and `value` is blocked;
+            rejected otherwise.
+        cycle:
+          $ref: "#/components/schemas/AgentHookCycle"
+
+    AgentHookCycle:
+      type: object
+      description: Required when the action type is `cycle`, and unset otherwise.
+      required: [threshold, rearm_label, ship_label]
+      properties:
+        threshold:
+          type: integer
+          minimum: 1
+          description: Rounds to run before shipping. 1 ships on the first pass.
+        rearm_label:
+          type: string
+          description: Removed to hand the task back to the previous stage.
+        ship_label:
+          type: string
+          description: Stamped once the threshold is reached.
+        prefix:
+          type: string
+          description: Overrides the default cycle label prefix.
+
+    AgentQueueEntry:
+      type: object
+      description: One ranked backlog entry from the daemon's queue projection.
+      required: [issue_id, title, priority, score, reason, labels]
+      properties:
+        issue_id:
+          type: string
+        title:
+          type: string
+        priority:
+          type: integer
+        score:
+          type: integer
+        reason:
+          type: string
+          description: Why the entry ranked where it did.
+        labels:
+          type: array
+          items:
+            type: string
+        parent:
+          type: string
+
+    PendingInput:
+      type: object
+      description: One interactive prompt an agent is currently blocked on.
+      required: [request_id, agent, kind, prompt, asked_at]
+      properties:
+        request_id:
+          type: string
+        agent:
+          type: string
+        kind:
+          type: string
+        prompt:
+          type: string
+        options:
+          type: array
+          items:
+            $ref: "#/components/schemas/PendingInputOption"
+        asked_at:
+          type: string
+
+    PendingInputOption:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+
+    AgentAnswerRequest:
+      type: object
+      description: |
+        At least one of `option_id`, `text` or `decline` must be set;
+        a body with none of the three is rejected.
+      properties:
+        request_id:
+          type: string
+          description: The prompt to answer. Defaults to the agent's oldest pending request.
+        option_id:
+          type: string
+        text:
+          type: string
+        decline:
+          type: boolean
+
     AgentStatusResponse:
       type: object
       description: Agent entity from dto.AgentStatusResponse
