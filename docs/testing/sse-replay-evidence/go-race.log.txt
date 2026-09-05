@@ -1,0 +1,4 @@
+ok  	github.com/tysonthomas9/loomcli/internal/webui/subscription	4.282s
+ok  	github.com/tysonthomas9/loomcli/internal/webui/server/realtime	3.228s
+ok  	github.com/tysonthomas9/loomcli/internal/backend/fleet	2.153s
+ok  	github.com/tysonthomas9/loomcli/internal/webui/app	13.321s

@@ -33,7 +33,7 @@ const (
 type workspaceSubscriber interface {
 	Start()
 	Stop()
-	GetMutationDataSince(since string) []backend.MutationData
+	GetMutationDataSince(since string) ([]backend.MutationData, error)
 }
 
 // subscriberEntry tracks a subscriber and when it last had SSE clients.
@@ -207,7 +207,7 @@ func (m *MultiWorkspaceSubscriber) WorkspaceIDs() []string {
 
 // GetMutationsSince retrieves mutations since the given timestamp from all
 // workspace subscribers. Used for SSE client reconnection catch-up.
-func (m *MultiWorkspaceSubscriber) GetMutationsSince(since string) []rpc.MutationEvent {
+func (m *MultiWorkspaceSubscriber) GetMutationsSince(since string) ([]rpc.MutationEvent, error) {
 	m.mu.RLock()
 	entries := make(map[string]*subscriberEntry, len(m.subscribers))
 	for k, v := range m.subscribers {
@@ -217,12 +217,15 @@ func (m *MultiWorkspaceSubscriber) GetMutationsSince(since string) []rpc.Mutatio
 
 	var all []rpc.MutationEvent
 	for _, entry := range entries {
-		muts := entry.sub.GetMutationDataSince(since)
+		muts, err := entry.sub.GetMutationDataSince(since)
+		if err != nil {
+			return nil, err
+		}
 		for _, m := range muts {
 			all = append(all, realtime.BackendMutationToRPCEvent(m))
 		}
 	}
-	return all
+	return all, nil
 }
 
 // idleDeactivationLoop periodically deactivates subscribers with no SSE clients.
@@ -271,25 +274,25 @@ func (m *MultiWorkspaceSubscriber) idleDeactivationLoop() {
 	}
 }
 
-// GetMutationsSinceForWorkspace retrieves mutations since the given timestamp
-// from a specific workspace's subscriber only. Returns nil if the workspace
-// has no active subscriber.
-func (m *MultiWorkspaceSubscriber) GetMutationsSinceForWorkspace(wsID string, since string) []rpc.MutationEvent {
+// GetMutationsSinceForWorkspace retrieves the replay prefix from one workspace.
+// A partial prefix may accompany an error; callers may emit its checkpoints
+// but must not report synchronization. Missing subscribers are errors.
+func (m *MultiWorkspaceSubscriber) GetMutationsSinceForWorkspace(wsID string, since string) ([]rpc.MutationEvent, error) {
 	m.mu.RLock()
 	entry, ok := m.subscribers[wsID]
 	m.mu.RUnlock()
 	if !ok {
-		return nil
+		return nil, fmt.Errorf("no active mutation subscriber for workspace %q", wsID)
 	}
-	muts := entry.sub.GetMutationDataSince(since)
+	muts, err := entry.sub.GetMutationDataSince(since)
 	if len(muts) == 0 {
-		return nil
+		return nil, err
 	}
 	out := make([]rpc.MutationEvent, len(muts))
 	for i, m := range muts {
 		out[i] = realtime.BackendMutationToRPCEvent(m)
 	}
-	return out
+	return out, err
 }
 
 func parseCursorMillis(cursor string) int64 {
