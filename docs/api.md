@@ -4242,3 +4242,55 @@ Two limits are structural:
   the repair there is the operator's provisioner.
 - Nothing in the daemon ever re-blesses. `--fix` is reachable only from an
   operator-typed command, so a harness upgrade always passes through a human.
+
+### `merge_in_progress`
+
+Reports any worktree left sitting in an unfinished `merge`, `rebase`,
+`cherry-pick`, `revert` or `bisect`. It covers three sources:
+
+- the shared `local/union` worktrees declared as
+  `repos.<name>.local_integration.worktree` in the workspace's
+  `integration.yaml` (override the file with `$LOOM_INTEGRATION_CONTRACT`);
+- the workspace repo clones (`loom` discovers these already);
+- the agent worktrees.
+
+The shared worktrees are the reason the check exists. They are linked worktrees
+of clones that appear in no loom config, so no other code path can reach them —
+and a poisoned one fails step 1 of every later integrator run, silently
+disabling union merges fleet-wide.
+
+An operation younger than `LOOM_DOCTOR_MERGE_STALE` (default `10m`) is skipped
+entirely: an integrator mid-merge is normal, and a presence gate would be noise.
+An operation whose age cannot be determined is reported, not suppressed.
+
+| Condition | Status | Summary |
+|-----------|--------|---------|
+| Nothing stuck | `pass` | `no stalled merges (N worktree(s) checked)` |
+| A shared worktree stuck past the threshold | `fail` | `N worktree(s) stuck mid-operation (M shared)` |
+| Only agent/clone worktrees stuck | `warn` | same summary, `0 shared` |
+| The contract cannot be read | `warn` | `could not read the integration contract` |
+| Nothing to inspect at all | *(no output)* | the check is skipped entirely |
+
+`Detail` names each offender: whether it is `[shared]` or `[local]`, the path,
+the operation, the `MERGE_HEAD`/`REBASE_HEAD` sha, the unmerged path count and
+the age.
+
+### `loom doctor --fix` for `merge_in_progress`
+
+`--fix` aborts **shared worktrees only**, and only after writing a snapshot to
+`<workspace>/rescue/<name>-<op>-<timestamp>/` containing `status.txt`,
+`worktree.diff`, `unmerged.txt`, the `*_HEAD` files and a `README.txt`. A
+snapshot that cannot be written downgrades the fix to report-only rather than
+aborting unsnapshotted — an abort throws away every conflict resolution in the
+tree.
+
+An agent worktree is never aborted by `--fix`: a live agent may be mid-run
+inside it and no lock covers that decision. Agent worktrees are instead handled
+by `loom recover`, which already aborts an in-progress operation before its
+`git clean` (aborting there is strictly less destructive than the clean that
+follows it).
+
+Nothing in the daemon ever aborts a shared worktree. The supervisor logs the
+same condition to `daemon.log` on every agent exit — `shared integration
+worktree is stuck mid-operation` — and stops there: a live sibling integrator
+may own that merge, and ownership is unprovable from a worktree alone.

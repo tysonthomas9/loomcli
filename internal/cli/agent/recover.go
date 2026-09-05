@@ -11,6 +11,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/git"
 )
 
 // strPtr returns a pointer to s. Used for UpdateOpts.Assignee where
@@ -88,6 +89,7 @@ func runRecover(cmd *cobra.Command, args []string) {
 	if lockInfo == nil {
 		fmt.Println("No lock file found - checking for orphaned tasks...")
 		resetOrphanedAgentTasks(deps, worktreePath, worktreeName, "", !recoverNoAnalyze)
+		reportStalledSharedWorktrees()
 		fmt.Println("Agent is ready for new work.")
 		return
 	}
@@ -106,6 +108,7 @@ func runRecover(cmd *cobra.Command, args []string) {
 
 	resetOrphanedAgentTasks(deps, worktreePath, lockInfo.AgentName, lockInfo.TaskID, !recoverNoAnalyze)
 	cleanUntrackedFiles(worktreePath, recoverForce)
+	reportStalledSharedWorktrees()
 
 	fmt.Println("")
 	fmt.Println("=========================================")
@@ -247,17 +250,66 @@ func RecoverWorktree(worktreePath, agentName string, exitCode int, incomplete bo
 	}
 	resetOrphanedAgentTasks(deps, worktreePath, agentName, lockTaskID, false)
 
-	// 6. Clean untracked files (force=true, no prompting).
-	//
-	// Skipped for an incomplete run. `git clean` here excludes only
-	// cli.ProtectedRuntimePaths, so everything the turn produced but had not
-	// committed yet — new files, scratch notes, generated fixtures — is exactly
-	// what it deletes. That is correct after a crash we are abandoning; it is
-	// destruction of live work when the agent simply ran out of turn and the
-	// next cycle is meant to continue from where it stopped.
+	// 6. Abort any in-progress git operation, clean untracked files, and
+	// report on the shared integration worktrees.
+	finishWorktreeCleanup(worktreePath, incomplete)
+
+	return nil
+}
+
+// finishWorktreeCleanup runs the destructive tail of recovery.
+//
+// The clean is skipped for an incomplete run. `git clean` here excludes only
+// cli.ProtectedRuntimePaths, so everything the turn produced but had not
+// committed yet — new files, scratch notes, generated fixtures — is exactly
+// what it deletes. That is correct after a crash we are abandoning; it is
+// destruction of live work when the agent simply ran out of turn and the next
+// cycle is meant to continue from where it stopped.
+func finishWorktreeCleanup(worktreePath string, incomplete bool) {
 	if !incomplete {
+		// Abort BEFORE cleaning. `git clean` would otherwise delete the
+		// untracked files the merge introduced and hand the abort a dirtier
+		// tree than it started with. Aborting here is strictly less
+		// destructive than the clean that follows it, which is why it is
+		// allowed in an agent worktree and never in a shared one.
+		abortInProgressGitOp(worktreePath)
 		cleanUntrackedFiles(worktreePath, true)
 	}
 
-	return nil
+	// Report-only, whatever the run's fate: a shared integration worktree left
+	// mid-merge is invisible from an agent worktree, and nothing else here
+	// looks at it.
+	reportStalledSharedWorktrees()
+}
+
+// abortInProgressGitOp undoes a merge/rebase/cherry-pick left behind in an
+// agent worktree. An abort failure is a warning, never a returned error:
+// recovery must not fail the whole run over it.
+func abortInProgressGitOp(worktreePath string) {
+	line, err := git.AbortInProgressOp(worktreePath)
+	if err != nil {
+		fmt.Printf("[recover] warning: %v\n", err)
+		return
+	}
+	if line != "" {
+		fmt.Printf("[recover] %s\n", line)
+	}
+}
+
+// reportStalledSharedWorktrees warns about shared `local/union` worktrees stuck
+// mid-operation. It never repairs one — a live sibling integrator may own that
+// merge, and the sanctioned repair is an operator running `loom doctor --fix`.
+func reportStalledSharedWorktrees() {
+	for _, sw := range StalledSharedWorktrees() {
+		fmt.Printf("[recover] warning: shared worktree %s is stuck mid-%s — %s\n"+
+			"[recover] not repairing it here; run: loom doctor --fix\n",
+			sw.Repo, sw.Op, sw.Summary)
+	}
+}
+
+// StalledSharedWorktrees exposes the shared-worktree scan to the daemon
+// supervisor, which already depends on this package and must not grow a
+// dependency on the git plumbing underneath it.
+func StalledSharedWorktrees() []git.StalledWorktree {
+	return git.StalledSharedWorktrees()
 }
