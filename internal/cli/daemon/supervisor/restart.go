@@ -1,13 +1,19 @@
 package supervisor
 
 import (
+	"context"
+	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"strconv"
 	"time"
 
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
+
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/agentpolicy"
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
@@ -27,26 +33,56 @@ const backendUnavailableRecheckInterval = 30 * time.Second
 // a flaky dependency recovering) lets it self-resume.
 const defaultMaxRetriesBlockInterval = 60 * time.Second
 
+// agentAuthStoppedLabel marks the task an agent was holding when it
+// fatal-stopped on an AuthFailure. It is the durable, queryable half of the
+// signal (`loom data list --label loom:agent-auth-stopped`): the daemon only
+// ever ADDS it, never removes it. Whoever fixes the auth and confirms the agent
+// healthy again is the one who clears it.
+//
+// Namespaced like attemptLabelPrefix and quarantineLabel: a label the
+// supervisor writes about its own runs shares the board with the vocabulary a
+// pipeline defines, and only the prefix says which layer owns the word.
+const agentAuthStoppedLabel = "loom:agent-auth-stopped"
+
+// authStopWriteTimeout bounds the two best-effort board writes that report an
+// auth fatal stop. The supervisor is on its way out either way, so a slow or
+// unreachable backend must not hold the goroutine open.
+const authStopWriteTimeout = 10 * time.Second
+
 // shouldRestart determines if the agent should restart by consulting the
 // policy disposition for the classified outcome of the most recent exit
 // (agentpolicy.Decide). The table owns the per-class verdict; this layer
 // owns its counters (RestartCount/RateRetryCount/NoWorkCount/BlockCount) and
 // its configured budgets.
 func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
+	restart, authStopTask := s.decideRestart(ap)
+	// Reported outside ap.Mu on purpose: these are network writes to the
+	// issue backend and must not stall anything reading agent state.
+	if authStopTask != "" {
+		s.reportAuthFatalStop(ap, authStopTask)
+	}
+	return restart
+}
+
+// decideRestart is shouldRestart's locked half: it applies the policy verdict
+// and updates the agent's counters. The second return value is the task the
+// agent was holding when an AuthFailure stopped it fatally (empty otherwise),
+// which the caller reports once the lock is released.
+func (s *Supervisor) decideRestart(ap *AgentProcess) (bool, string) {
 	maxRetries := s.getMaxRetries()
 
 	ap.Mu.Lock()
 	defer ap.Mu.Unlock()
 
 	if stopAfterEphemeralTask(ap) {
-		return false
+		return false, ""
 	}
 
 	// Clean success (exit 0, no error): always restart, reset counters —
 	// including the block-escalation budget ("progress" ends a block spiral).
 	if ap.LastExitCode == 0 && ap.LastError == nil {
 		s.applyCleanSuccessRestart(ap)
-		return true
+		return true, ""
 	}
 
 	var outcome agenterr.Outcome
@@ -56,39 +92,38 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 
 	switch d := agentpolicy.Decide(outcome); d.Decision {
 	case agentpolicy.StopFatal:
-		s.applyFatalStop(ap, outcome)
-		return false
+		return false, s.applyFatalStop(ap, outcome)
 
 	case agentpolicy.FastFail:
 		s.applyFastFailStop(ap, outcome)
-		return false
+		return false, ""
 
 	case agentpolicy.Block:
 		// BackendUnavailable: fixed recheck without eroding the restart
 		// budget — recoverable once the binary returns.
 		s.applyBackendUnavailableRestart(ap)
-		return true
+		return true, ""
 
 	case agentpolicy.Failover:
 		s.applyFailoverExhaustedStop(ap, outcome)
-		return false
+		return false, ""
 
 	case agentpolicy.RetryUncounted:
 		if outcome.Is(agenterr.NoWorkOutcome) {
 			s.applyNoWorkRestart(ap)
-			return true
+			return true, ""
 		}
 		// Rate limits: unlimited uncounted retries by default; the
 		// rate_limit_no_count config opt-out routes them through the
 		// counted budget instead (the layer's config wins, pt7).
 		if s.getRateLimitNoCount() {
 			s.applyRateLimitedRestart(ap)
-			return true
+			return true, ""
 		}
-		return s.applyCountedRestart(ap, d, maxRetries)
+		return s.applyCountedRestart(ap, d, maxRetries), ""
 
 	default: // Retry
-		return s.applyCountedRestart(ap, d, maxRetries)
+		return s.applyCountedRestart(ap, d, maxRetries), ""
 	}
 }
 
@@ -109,11 +144,69 @@ func stopAfterEphemeralTask(ap *AgentProcess) bool {
 
 // applyFatalStop stops for auth/billing errors that need human intervention.
 // Caller holds ap.Mu.
-func (s *Supervisor) applyFatalStop(ap *AgentProcess, outcome agenterr.Outcome) {
+//
+// It returns the task the agent was holding when an AuthFailure stopped it, so
+// the caller can report the stop on the board once the lock is released. Only
+// AuthFailure qualifies: a billing stop has a different remediation and does
+// not mean the agent's login broke.
+func (s *Supervisor) applyFatalStop(ap *AgentProcess, outcome agenterr.Outcome) string {
 	log.Printf("[daemon] Agent %s: fatal error (%s), stopping supervisor",
 		ap.Entry.Worktree, outcome)
 	ap.NoWorkCount = 0
 	ap.StopReason = StopReasonFatalError
+	if !outcome.IsClass(wrapper.ErrAuth) {
+		return ""
+	}
+	return ap.AssignedTaskID
+}
+
+// reportAuthFatalStop turns an auth fatal stop into a board-level signal on the
+// task the agent was holding: the durable loom:agent-auth-stopped label plus a
+// comment naming the remediation. Without it the only trace is a line in the
+// daemon log, and the task sits at in_progress looking abandoned rather than
+// explicitly blocked on an operator.
+//
+// Best-effort by design, and in this order: the label is the queryable signal,
+// so it goes first and a comment failure cannot cost it. The stop has already
+// been decided — nothing here can undo it, so a failed write only warns.
+// Called with ap.Mu released.
+func (s *Supervisor) reportAuthFatalStop(ap *AgentProcess, taskID string) {
+	if s.IssueBackend == nil {
+		return
+	}
+	agent := ap.Entry.Worktree
+	ctx, cancel := context.WithTimeout(context.Background(), authStopWriteTimeout)
+	defer cancel()
+
+	if err := s.IssueBackend.AddLabel(ctx, taskID, agentAuthStoppedLabel); err != nil {
+		slog.Warn("auth-stop label write failed, task carries no board signal",
+			"task", taskID, "agent", agent, "label", agentAuthStoppedLabel, "err", err)
+	}
+	// fleet-db drops the Author param on the wire; attribution lives in the text.
+	if _, err := s.IssueBackend.AddComment(ctx, backend.CommentAddParams{
+		IssueID: taskID,
+		Author:  agent,
+		Text:    formatAuthStopComment(agent),
+	}); err != nil {
+		slog.Warn("auth-stop comment failed", "task", taskID, "agent", agent, "err", err)
+	}
+	slog.Info("agent auth fatal stop reported on task",
+		"task", taskID, "agent", agent, "label", agentAuthStoppedLabel)
+}
+
+// formatAuthStopComment renders the operator-facing note. Daemon-generated
+// operational text: ASCII only, no emoji.
+func formatAuthStopComment(agent string) string {
+	return fmt.Sprintf(
+		"**AGENT STOPPED** -- `%s` fatal-stopped on AuthFailure: harness login expired,\n"+
+			"or re-authentication is required.\n\n"+
+			"The agent supervisor is now fully stopped (desired_state_not_running). It needs a\n"+
+			"manual re-auth followed by `loom agentdef start %s` -- the daemon deliberately does\n"+
+			"not restart it, because a blind restart against still-broken auth just loops.\n\n"+
+			"This task was left at its current status; reclaim it once the agent is confirmed\n"+
+			"healthy. It carries the `%s` label until whoever fixes the auth clears it -- the\n"+
+			"daemon never removes that label itself.\n",
+		agent, agent, agentAuthStoppedLabel)
 }
 
 // applyFastFailStop stops for deterministic errors retrying cannot fix.
