@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -284,6 +283,7 @@ func TestSSELive_MutationDelivery(t *testing.T) {
 	hub.Broadcast(&realtime.MutationPayload{
 		Type:        "create",
 		IssueID:     "loom-live-1",
+		Cursor:      "c1.live-durable",
 		Title:       "Live Test Issue",
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 		WorkspaceID: testWorkspaceID,
@@ -297,8 +297,8 @@ func TestSSELive_MutationDelivery(t *testing.T) {
 	if evt.Event != "mutation" {
 		t.Errorf("expected event type 'mutation', got %q", evt.Event)
 	}
-	if evt.ID == "" {
-		t.Error("expected event to have an id")
+	if evt.ID != "c1.live-durable" {
+		t.Errorf("expected durable cursor, got %q", evt.ID)
 	}
 
 	payload, err := parseMutationPayload(evt.Data)
@@ -538,9 +538,9 @@ func TestSSELive_LastEventIDHeader(t *testing.T) {
 	}
 }
 
-// TestSSELive_MonotonicEventIDs sends multiple mutations and verifies each
-// event's id field is strictly greater than the previous.
-func TestSSELive_MonotonicEventIDs(t *testing.T) {
+// TestSSELive_SourceCursorIDs preserves opaque durable cursors and omits
+// IDs for interleaved transient notifications.
+func TestSSELive_SourceCursorIDs(t *testing.T) {
 	hub := realtime.NewHub()
 	go hub.Run()
 	t.Cleanup(hub.Stop)
@@ -562,30 +562,25 @@ func TestSSELive_MonotonicEventIDs(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	const numMutations = 5
-	for i := 0; i < numMutations; i++ {
+	cursors := []string{"c1.z", "", "c1.a", "", "c1.next"}
+	for i, cursor := range cursors {
 		hub.Broadcast(&realtime.MutationPayload{
 			Type:        "create",
-			IssueID:     fmt.Sprintf("loom-mono-%d", i),
+			IssueID:     fmt.Sprintf("loom-cursor-%d", i),
+			Cursor:      cursor,
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),
 			WorkspaceID: testWorkspaceID,
 		})
 	}
 
-	var prevID int64
-	for i := 0; i < numMutations; i++ {
+	for i, cursor := range cursors {
 		evt, err := client.readEvent(3 * time.Second)
 		if err != nil {
 			t.Fatalf("mutation %d: failed to read: %v", i, err)
 		}
-		id, err := strconv.ParseInt(evt.ID, 10, 64)
-		if err != nil {
-			t.Fatalf("mutation %d: failed to parse id %q: %v", i, evt.ID, err)
+		if evt.Event != "mutation" || evt.ID != cursor {
+			t.Errorf("mutation %d: event=%q id=%q, want mutation with id=%q", i, evt.Event, evt.ID, cursor)
 		}
-		if i > 0 && id <= prevID {
-			t.Errorf("mutation %d: id %d not greater than previous %d", i, id, prevID)
-		}
-		prevID = id
 	}
 }
 

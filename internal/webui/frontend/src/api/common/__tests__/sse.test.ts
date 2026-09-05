@@ -254,6 +254,66 @@ describe("WorkspaceSSEClient", () => {
   });
 
   it.each([
+    ["omitted ID", "", "durable-cursor"],
+    ["explicit empty ID", "id:\n", ""],
+  ])(
+    "retains or resets the transport checkpoint on overflow with %s",
+    async (_description, idField, expectedCursor) => {
+      const onMutation = vi.fn();
+      const onResync = vi.fn();
+      const client = new WorkspaceSSEClient("test-ws", {
+        onMutation,
+        onResync,
+      });
+      const durable: MutationPayload = {
+        type: "update",
+        issue_id: "issue-1",
+        timestamp: "2026-09-02T12:00:00Z",
+      };
+      const transient: MutationPayload = {
+        ...durable,
+        issue_id: "issue-2",
+      };
+
+      await client.connect();
+      await expectRequestCount(1);
+      pushMutation(durable, "durable-cursor");
+      await flush();
+      streamRequests[0].push(
+        `event: mutation\ndata: ${JSON.stringify(transient)}\n\n`,
+      );
+      await flush();
+      expect(onMutation).toHaveBeenNthCalledWith(1, durable);
+      expect(onMutation).toHaveBeenNthCalledWith(2, transient);
+      expect(client.getLastEventId()).toBe("durable-cursor");
+
+      streamRequests[0].push(
+        `${idField}event: resync\ndata: {"reason":"overflow"}\n\n`,
+      );
+      await flush();
+      expect(onResync).toHaveBeenCalledExactlyOnceWith({
+        from: "durable-cursor",
+        to: expectedCursor,
+        reason: "overflow",
+      });
+      expect(onMutation).toHaveBeenCalledTimes(2);
+      expect(client.getLastEventId()).toBe(expectedCursor || undefined);
+
+      streamRequests[0].fail();
+      await flush();
+      await vi.advanceTimersByTimeAsync(1000);
+      await expectRequestCount(2);
+      expect(streamRequests[1].headers.get("Last-Event-ID")).toBe(
+        expectedCursor || null,
+      );
+      expect(
+        new URL(streamRequests[1].url).searchParams.get("since"),
+      ).toBeNull();
+      client.disconnect();
+    },
+  );
+
+  it.each([
     ["an unrecognized reason", JSON.stringify({ reason: "future-reason" })],
     ["non-JSON data", "{oops"],
   ])(
