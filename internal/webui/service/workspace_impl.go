@@ -336,7 +336,10 @@ func (s *workspaceServiceImpl) GetWorkspaceJob(ctx context.Context, jobID string
 func (s *workspaceServiceImpl) workspaceJobFromStore(ctx context.Context, key string) (*WorkspaceJob, error) {
 	ws, err := s.store.Workspaces().Get(ctx, key)
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
+		// A malformed key cannot name a job any more than an unknown
+		// well-formed one can; fleet-db answers 400 invalid workspace key,
+		// which the client maps to domain.ErrInvalid.
+		if errors.Is(err, domain.ErrNotFound) || errors.Is(err, domain.ErrInvalid) {
 			return nil, ErrNotFound("job not found")
 		}
 		return nil, ErrInternal("failed to load workspace job", err)
