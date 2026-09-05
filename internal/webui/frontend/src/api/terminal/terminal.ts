@@ -158,29 +158,37 @@ export async function startTerminalSetup(
 
 /**
  * List all tab metadata from GET /api/workspaces/{workspace}/terminal/tabs.
- * Returns an empty array when tab metadata is unavailable (404 = no Redis, 503 = Redis down).
+ * Unavailable storage is an error, not a successful empty snapshot.
  */
 export async function listTabMetadata(
   workspaceId: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<TabMetadata[]> {
-  try {
-    const { data, error, response } = await api.GET(
-      "/api/workspaces/{ws}/terminal/tabs",
-      {
-        params: { path: { ws: workspaceId } },
-      },
-    );
-    if (error) throw apiErrorFromResponse(error, response);
-    return (unwrapResponse(data, response) ?? []) as unknown as TabMetadata[];
-  } catch (error) {
-    if (
-      error instanceof ApiError &&
-      (error.status === 404 || error.status === 503)
-    ) {
-      return [];
-    }
-    throw error;
-  }
+  const { data, error, response } = await api.GET(
+    "/api/workspaces/{ws}/terminal/tabs",
+    { params: { path: { ws: workspaceId } }, ...options },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
+  const tabs = unwrapResponse(data, response);
+  if (
+    !Array.isArray(tabs) ||
+    !tabs.every(
+      (item) =>
+        item !== null &&
+        typeof item === "object" &&
+        typeof item.session_name === "string" &&
+        item.session_name !== "" &&
+        typeof item.pty_alive === "boolean" &&
+        (!("kind" in item) ||
+          item.kind === undefined ||
+          typeof item.kind === "string") &&
+        (!("agent_id" in item) ||
+          item.agent_id === undefined ||
+          typeof item.agent_id === "string"),
+    )
+  )
+    throw new Error("Invalid terminal tab list response");
+  return tabs as unknown as TabMetadata[];
 }
 
 /**
@@ -266,23 +274,27 @@ export async function deleteTabMetadata(
  */
 export async function listSessionsByIssue(
   workspaceId: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<Record<string, string[]>> {
-  try {
-    const response = await get<{
-      success: boolean;
-      data: Record<string, string[]>;
-    }>(wsUrl(workspaceId, "/terminal/sessions/by-issue"));
-    if (!response.success) return {};
-    return response.data ?? {};
-  } catch (error) {
-    if (
-      error instanceof ApiError &&
-      (error.status === 404 || error.status === 503)
-    ) {
-      return {};
-    }
-    throw error;
+  const response = await get<{ success: boolean; data: unknown }>(
+    wsUrl(workspaceId, "/terminal/sessions/by-issue"),
+    options,
+  );
+  const data = response.data;
+  if (
+    !response.success ||
+    data === null ||
+    typeof data !== "object" ||
+    Array.isArray(data) ||
+    !Object.values(data).every(
+      (value) =>
+        Array.isArray(value) &&
+        value.every((session) => typeof session === "string"),
+    )
+  ) {
+    throw new Error("Invalid sessions-by-issue response");
   }
+  return data as Record<string, string[]>;
 }
 
 /**

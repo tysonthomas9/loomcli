@@ -11,6 +11,11 @@
  * minute safety poll, and silent failure.
  */
 
+import { createElement, type ReactNode } from "react";
+import {
+  QueryRecoveryContext,
+  QueryRecoveryCoordinator,
+} from "@/hooks/common/queryRecovery";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
@@ -77,6 +82,7 @@ describe("useWorkspaceSessionCount", () => {
     currentWorkspaceId = "ws-1";
     eventMock.connectionEpoch = 0;
     vi.clearAllMocks();
+    mockList.mockReset();
   });
 
   afterEach(() => {
@@ -93,9 +99,18 @@ describe("useWorkspaceSessionCount", () => {
         }),
       )
       .mockResolvedValueOnce([]);
-    const { result } = renderHook(() => useWorkspaceSessionCount());
+    const recovery = new QueryRecoveryCoordinator("ws-1");
+    const { result } = renderHook(() => useWorkspaceSessionCount(), {
+      wrapper: ({ children }: { children: ReactNode }) =>
+        createElement(
+          QueryRecoveryContext.Provider,
+          { value: recovery },
+          children,
+        ),
+    });
 
-    await act(async () => result.current.refetch());
+    await waitFor(() => expect(mockList).toHaveBeenCalledTimes(1));
+    await act(async () => recovery.refresh());
     expect(mockList).toHaveBeenCalledTimes(2);
     expect(result.current.sessionCount).toBe(0);
     await act(async () => resolveOlder([tab()]));
@@ -154,7 +169,11 @@ describe("useWorkspaceSessionCount", () => {
     rerender();
 
     expect(result.current.sessionCount).toBe(0);
-    expect(mockList).toHaveBeenLastCalledWith("ws-2");
+    await waitFor(() =>
+      expect(mockList).toHaveBeenLastCalledWith("ws-2", {
+        signal: expect.any(AbortSignal),
+      }),
+    );
 
     await act(async () => {
       resolveNew([tab(), tab({ session_name: "lead-shell-2" })]);
@@ -175,6 +194,7 @@ describe("useWorkspaceSessionCount", () => {
 
     const { result, rerender } = renderHook(() => useWorkspaceSessionCount());
 
+    await waitFor(() => expect(mockList).toHaveBeenCalledTimes(1));
     currentWorkspaceId = "ws-2";
     mockList.mockResolvedValue([tab()]);
     rerender();
@@ -268,8 +288,12 @@ describe("useWorkspaceSessionCount", () => {
     });
 
     expect(mockList).toHaveBeenCalledTimes(2);
-    expect(mockList).toHaveBeenNthCalledWith(1, "ws-1");
-    expect(mockList).toHaveBeenNthCalledWith(2, "ws-2");
+    expect(mockList).toHaveBeenNthCalledWith(1, "ws-1", {
+      signal: expect.any(AbortSignal),
+    });
+    expect(mockList).toHaveBeenNthCalledWith(2, "ws-2", {
+      signal: expect.any(AbortSignal),
+    });
     vi.useRealTimers();
   });
 
@@ -340,5 +364,93 @@ describe("useWorkspaceSessionCount", () => {
     });
 
     expect(result.current.sessionCount).toBe(2);
+  });
+  it("rejects required recovery on API failure while ordinary refresh remains noncritical", async () => {
+    mockList.mockResolvedValueOnce([tab()]);
+    const recovery = new QueryRecoveryCoordinator("ws-1");
+    const { result } = renderHook(() => useWorkspaceSessionCount(), {
+      wrapper: ({ children }: { children: ReactNode }) =>
+        createElement(
+          QueryRecoveryContext.Provider,
+          { value: recovery },
+          children,
+        ),
+    });
+    await waitFor(() => expect(result.current.sessionCount).toBe(1));
+    mockList.mockRejectedValue(new Error("unavailable"));
+    await act(async () => {
+      await expect(recovery.refresh()).rejects.toThrow("unavailable");
+    });
+    expect(result.current.sessionCount).toBe(1);
+    await act(async () => result.current.refetch());
+    expect(result.current.sessionCount).toBe(1);
+  });
+
+  it("does not enroll disabled counts, but enabling requires a fresh recovery request", async () => {
+    mockList.mockResolvedValue([]);
+    const recovery = new QueryRecoveryCoordinator("ws-1");
+    const { rerender } = renderHook(
+      ({ enabled }) => useWorkspaceSessionCount({ enabled }),
+      {
+        initialProps: { enabled: false },
+        wrapper: ({ children }: { children: ReactNode }) =>
+          createElement(
+            QueryRecoveryContext.Provider,
+            { value: recovery },
+            children,
+          ),
+      },
+    );
+    await act(async () => recovery.refresh());
+    expect(mockList).not.toHaveBeenCalled();
+    rerender({ enabled: true });
+    await waitFor(() => expect(mockList).toHaveBeenCalledTimes(1));
+    await act(async () => recovery.refresh());
+    expect(mockList).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects stale responses across workspace A to B to A", async () => {
+    let resolveOld!: (tabs: TabMetadata[]) => void;
+    mockList
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveOld = resolve;
+        }),
+      )
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([tab(), tab()]);
+    const { result, rerender } = renderHook(() => useWorkspaceSessionCount());
+    await waitFor(() => expect(mockList).toHaveBeenCalledTimes(1));
+    currentWorkspaceId = "ws-2";
+    rerender();
+    await waitFor(() => expect(mockList).toHaveBeenCalledTimes(2));
+    currentWorkspaceId = "ws-1";
+    rerender();
+    await waitFor(() => expect(result.current.sessionCount).toBe(2));
+    await act(async () => resolveOld([tab()]));
+    expect(result.current.sessionCount).toBe(2);
+  });
+  it("disabling cancels an outstanding request and blocks its late result", async () => {
+    let resolveOld!: (tabs: TabMetadata[]) => void;
+    mockList
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveOld = resolve;
+        }),
+      )
+      .mockResolvedValueOnce([]);
+    const { result, rerender } = renderHook(
+      ({ enabled }) => useWorkspaceSessionCount({ enabled }),
+      { initialProps: { enabled: true } },
+    );
+    await waitFor(() => expect(mockList).toHaveBeenCalledTimes(1));
+    const signal = mockList.mock.calls[0][1]?.signal;
+    rerender({ enabled: false });
+    expect(signal?.aborted).toBe(true);
+    await act(async () => resolveOld([tab()]));
+    expect(result.current.sessionCount).toBe(0);
+    rerender({ enabled: true });
+    await waitFor(() => expect(mockList).toHaveBeenCalledTimes(2));
+    expect(result.current.sessionCount).toBe(0);
   });
 });

@@ -545,7 +545,9 @@ describe("IssueDetailPanel", () => {
       );
 
       await waitFor(() => {
-        expect(mockGetTaskSessions).toHaveBeenCalledWith("", "test-123");
+        expect(mockGetTaskSessions).toHaveBeenCalledWith("", "test-123", {
+          signal: expect.any(AbortSignal),
+        });
       });
       expect(
         screen.queryByTestId("latest-run-failure-banner"),
