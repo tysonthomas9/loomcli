@@ -76,6 +76,33 @@ func TestMergeRoleConstraints_AgentTaskFilterOverride(t *testing.T) {
 	}
 }
 
+func TestValidateTaskFilterCanonicalizesAliases(t *testing.T) {
+	for input, want := range map[string]string{
+		"needs_design": "needs_plan",
+		"needs_plan":   "needs_plan",
+		"has_design":   "has_design",
+		"any":          "any",
+		"":             "",
+	} {
+		got, err := ValidateTaskFilter(input)
+		if err != nil || got != want {
+			t.Errorf("ValidateTaskFilter(%q) = %q, %v; want %q", input, got, err, want)
+		}
+	}
+	if _, err := ValidateTaskFilter("bogus"); err == nil {
+		t.Fatal("ValidateTaskFilter should reject unknown values")
+	}
+}
+
+func TestMatchTask_TaskFilterNeedsDesignAlias(t *testing.T) {
+	issue := backend.IssueData{ID: "T-1", Status: "open"}
+	needsPlan := MatchTask(issue, RoleConstraints{TaskFilter: "needs_plan"})
+	needsDesign := MatchTask(issue, RoleConstraints{TaskFilter: "needs_design"})
+	if needsDesign.Score != needsPlan.Score || needsDesign.Reason != needsPlan.Reason {
+		t.Fatalf("needs_design result = %+v, needs_plan result = %+v; aliases must match", needsDesign, needsPlan)
+	}
+}
+
 func TestMergeRoleConstraints_AgentBackendOverride(t *testing.T) {
 	rc := RoleConfig{Backend: "claude"}
 	ae := AgentEntry{Backend: "codex"}
