@@ -51,6 +51,7 @@ func NewSessionServiceWithRuntimeDir(st store.Store, histStore *sessionhistory.S
 // search across all repos to find sessions for a given task.
 func (s *sessionServiceImpl) storesForWorkspace(ctx context.Context, wsID string) ([]*sessions.Store, error) {
 	var stores []*sessions.Store
+	var openErr error
 	seen := make(map[string]struct{})
 	addStore := func(runtimeDir string) {
 		if runtimeDir == "" {
@@ -66,6 +67,8 @@ func (s *sessionServiceImpl) storesForWorkspace(ctx context.Context, wsID string
 		seen[key] = struct{}{}
 		if st, err := sessions.NewStore(runtimeDir); err == nil {
 			stores = append(stores, st)
+		} else {
+			openErr = errors.Join(openErr, err)
 		}
 	}
 
@@ -73,6 +76,9 @@ func (s *sessionServiceImpl) storesForWorkspace(ctx context.Context, wsID string
 
 	if s.store != nil {
 		wsData, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, wsID)
+		if err != nil && !errors.Is(err, domain.ErrNotFound) {
+			return nil, service.ErrInternal("failed to resolve session stores", err)
+		}
 		if err != nil || wsData == nil {
 			if len(stores) == 0 {
 				return nil, service.ErrNotFound("workspace not found")
@@ -89,6 +95,9 @@ func (s *sessionServiceImpl) storesForWorkspace(ctx context.Context, wsID string
 		return nil, service.ErrUnavailable("session store not available")
 	}
 
+	if openErr != nil {
+		return nil, service.ErrInternal("failed to open session store", openErr)
+	}
 	if len(stores) == 0 {
 		return nil, service.ErrInternal("no session stores available", nil)
 	}
@@ -122,7 +131,11 @@ func (s *sessionServiceImpl) ListTaskSessions(ctx context.Context, wsID, taskID 
 	if taskID == "" || !validTaskID.MatchString(taskID) {
 		return nil, service.ErrValidation("invalid task ID: must match [a-zA-Z0-9._-]+")
 	}
-	if items, err := s.controlPlaneTaskSessions(ctx, wsID, taskID); err == nil && len(items) > 0 {
+	items, err := s.controlPlaneTaskSessions(ctx, wsID, taskID)
+	if err != nil {
+		return nil, service.ErrInternal("failed to list task sessions", err)
+	}
+	if len(items) > 0 {
 		s.enrichSessionListItemsFromFileStores(ctx, wsID, taskID, items)
 		return items, nil
 	}
@@ -132,11 +145,11 @@ func (s *sessionServiceImpl) ListTaskSessions(ctx context.Context, wsID, taskID 
 		return nil, err
 	}
 
-	var items []service.SessionListItem
+	items = make([]service.SessionListItem, 0)
 	for _, sessStore := range stores {
-		records, err := sessStore.SessionsByTask(taskID)
+		records, err := sessStore.QueryStrict(sessions.Filter{TaskID: taskID})
 		if err != nil {
-			continue
+			return nil, service.ErrInternal("failed to list local task sessions", err)
 		}
 		for _, rec := range records {
 			item := service.SessionListItem{

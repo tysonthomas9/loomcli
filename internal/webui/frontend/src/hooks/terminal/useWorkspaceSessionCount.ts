@@ -13,8 +13,17 @@
  * normal PTY spawn, exit, and kill transitions arrive through SSE.
  */
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import {
+  useState,
+  useCallback,
+  useEffect,
+  useRef,
+  useMemo,
+  useContext,
+} from "react";
 
+import { QueryRecoveryContext } from "@/hooks/common/queryRecovery";
+import { ScopedQueryRequest } from "@/hooks/common/scopedQueryRequest";
 import { listTabMetadata } from "@/api/terminal";
 import type { MutationPayload } from "@/api/common";
 import { isAgentMetadata } from "@/utils/terminalTabMetadata";
@@ -42,65 +51,52 @@ export function useWorkspaceSessionCount(
   const { workspaceId } = useWorkspaceContext();
   const { connectionEpoch } = useEventContext();
   const [sessionCount, setSessionCount] = useState(0);
-  const mountedRef = useRef(true);
+  const recovery = useContext(QueryRecoveryContext);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Workspace the newest request was issued for; responses for anything else
-  // are stale and must not overwrite the current count.
-  const currentWorkspaceRef = useRef(workspaceId);
-  const requestGenerationRef = useRef(0);
   const connectionEpochRef = useRef(connectionEpoch);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-      }
-    };
-  }, []);
+  const request = useMemo(
+    () =>
+      enabled
+        ? new ScopedQueryRequest({
+            load: (signal) => listTabMetadata(workspaceId, { signal }),
+            commit: (tabs) =>
+              setSessionCount(
+                tabs.filter((meta) => !isAgentMetadata(meta) && meta.pty_alive)
+                  .length,
+              ),
+          })
+        : null,
+    [workspaceId, enabled],
+  );
 
   const fetchCount = useCallback(async () => {
-    if (!enabled) return;
-    if (!workspaceId) return; // Wait until the route workspace ID is known
-    const generation = ++requestGenerationRef.current;
+    if (!enabled || !workspaceId || !request) return;
     try {
-      const tabs = await listTabMetadata(workspaceId);
-      if (!mountedRef.current) return;
-      if (currentWorkspaceRef.current !== workspaceId) return; // stale response
-      if (requestGenerationRef.current !== generation) return;
-      setSessionCount(
-        tabs.filter((meta) => !isAgentMetadata(meta) && meta.pty_alive).length,
-      );
+      await request.run();
     } catch {
-      // Silently fail — the badge is a non-critical UI enhancement, and keeping
-      // the last known count beats flashing to 0 on a transient failure.
+      // Ordinary badge refresh is noncritical; recovery uses the strict promise.
     }
-  }, [enabled, workspaceId]);
+  }, [enabled, workspaceId, request]);
 
-  // Reset synchronously on a workspace change so the badge never shows the
-  // previous workspace's count while the new fetch is in flight.
   useEffect(() => {
-    currentWorkspaceRef.current = workspaceId;
     setSessionCount(0);
   }, [workspaceId]);
 
   useEffect(() => {
-    if (!enabled) return;
-    fetchCount();
-    // A debounce armed before this point targets the workspace we just left:
-    // it holds the previous fetchCount closure, so letting it fire would spend
-    // a request on a workspace whose count is no longer displayed. Drop it
-    // whenever the target workspace (and hence fetchCount) changes.
-    const requestGeneration = requestGenerationRef;
+    if (enabled && workspaceId) void fetchCount();
     return () => {
-      requestGeneration.current++;
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-        debounceRef.current = null;
-      }
+      request?.cancel();
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = null;
     };
-  }, [enabled, fetchCount]);
+  }, [enabled, workspaceId, fetchCount, request]);
+
+  useEffect(() => {
+    if (!enabled || !workspaceId || !recovery || !request) return;
+    return recovery.register("workspace-session-count", (signal) =>
+      request.run({ signal, fresh: true }),
+    );
+  }, [enabled, workspaceId, recovery, request]);
 
   const handleMutation = useCallback(
     (mutation: MutationPayload) => {
@@ -127,9 +123,10 @@ export function useWorkspaceSessionCount(
   useEffect(() => {
     const previous = connectionEpochRef.current;
     connectionEpochRef.current = connectionEpoch;
-    if (!enabled || connectionEpoch <= previous) return;
-    void fetchCount();
-  }, [connectionEpoch, enabled, fetchCount]);
+    if (!enabled || !workspaceId || !request || connectionEpoch <= previous)
+      return;
+    void request.run({ fresh: true }).catch(() => {});
+  }, [connectionEpoch, enabled, workspaceId, request]);
 
   useEffect(() => {
     if (!enabled) return;

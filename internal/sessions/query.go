@@ -18,6 +18,10 @@ import (
 // readDedupedIndex reads index.jsonl, applies the filter, and deduplicates
 // by SessionID (last-seen record wins). Returns the deduplicated slice.
 func (s *Store) readDedupedIndex(f Filter) ([]SessionRecord, error) {
+	return s.readIndex(f, false)
+}
+
+func (s *Store) readIndex(f Filter, strict bool) ([]SessionRecord, error) {
 	indexPath := filepath.Join(s.dir, "index.jsonl")
 
 	// #nosec G304 — controlled path from Store
@@ -42,8 +46,14 @@ func (s *Store) readDedupedIndex(f Filter) ([]SessionRecord, error) {
 		}
 		var rec SessionRecord
 		if err := json.Unmarshal(line, &rec); err != nil {
+			if strict {
+				return nil, fmt.Errorf("corrupt session index line %d: %w", lineNum, err)
+			}
 			log.Printf("[sessions] skipping corrupt line %d: %v", lineNum, err)
 			continue
+		}
+		if strict && rec.SessionID == "" {
+			return nil, fmt.Errorf("session index line %d has no session ID", lineNum)
 		}
 		normalizeRecord(&rec)
 		if matchesSessionFilter(rec, f) {
@@ -54,6 +64,10 @@ func (s *Store) readDedupedIndex(f Filter) ([]SessionRecord, error) {
 		return records, fmt.Errorf("read index file: %w", err)
 	}
 
+	return deduplicateSessionRecords(records), nil
+}
+
+func deduplicateSessionRecords(records []SessionRecord) []SessionRecord {
 	// Deduplicate by SessionID — keep the last-seen record per ID.
 	// Finalized records are appended after running records, so last wins.
 	seen := make(map[string]int, len(records))
@@ -66,13 +80,23 @@ func (s *Store) readDedupedIndex(f Filter) ([]SessionRecord, error) {
 			deduped = append(deduped, rec)
 		}
 	}
-	return deduped, nil
+	return deduped
 }
 
 // Query reads index.jsonl and returns all SessionRecords matching the filter.
 // If the index file does not exist, it returns an empty slice (not an error).
 // Corrupt lines are skipped with a log warning.
 func (s *Store) Query(f Filter) ([]SessionRecord, error) {
+	return s.query(f, false)
+}
+
+// QueryStrict requires a complete readable index for query recovery. Diagnostic
+// Query and index compaction retain their explicit best-effort repair behavior.
+func (s *Store) QueryStrict(f Filter) ([]SessionRecord, error) {
+	return s.query(f, true)
+}
+
+func (s *Store) query(f Filter, strict bool) ([]SessionRecord, error) {
 	// Filter values (TaskID, AgentName, Backend) are caller-supplied but
 	// drawn from the same allowlist as direct attrs — agent name, task ID,
 	// backend enum. Status is an enum. Time bounds are not attrs.
@@ -89,7 +113,7 @@ func (s *Store) Query(f Filter) ([]SessionRecord, error) {
 	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.Query", attrs...)
 	defer span.End()
 
-	deduped, err := s.readDedupedIndex(f)
+	deduped, err := s.readIndex(f, strict)
 	if err != nil {
 		recordErr(span, err)
 		return deduped, err

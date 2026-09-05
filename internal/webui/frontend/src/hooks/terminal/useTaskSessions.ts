@@ -4,12 +4,21 @@
  * Also subscribes to SSE session_change events for immediate refetch.
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+  useContext,
+} from "react";
 
 import { getTaskSessions } from "@/api/terminal";
 import type { MutationPayload } from "@/api/common";
 import type { SessionRecord } from "@/types/agent";
 import { useEventContext, useEventSubscription } from "@/hooks/common";
+import { ScopedQueryRequest } from "@/hooks/common/scopedQueryRequest";
+import { QueryRecoveryContext } from "@/hooks/common/queryRecovery";
 import { useWorkspaceContext } from "@/hooks/workspace";
 
 /** Return type for the useTaskSessions hook. */
@@ -36,35 +45,41 @@ export function useTaskSessions(taskId: string | null): UseTaskSessionsResult {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
-  const mountedRef = useRef(true);
-  const fetchInProgressRef = useRef(false);
+  const recovery = useContext(QueryRecoveryContext);
   const sessionsRef = useRef(sessions);
   const connectionEpochRef = useRef(connectionEpoch);
   sessionsRef.current = sessions; // always keep ref in sync with latest state
 
+  const request = useMemo(
+    () =>
+      new ScopedQueryRequest<SessionRecord[]>({
+        load: (signal) => {
+          if (!taskId)
+            return Promise.reject(new Error("Task session scope disabled"));
+          return getTaskSessions(workspaceId, taskId, { signal });
+        },
+        commit: (result) => {
+          setSessions(result);
+          setError(null);
+        },
+        onError: setError,
+        onLoading: setIsLoading,
+      }),
+    [workspaceId, taskId],
+  );
+
   const fetchData = useCallback(async () => {
     if (!taskId) return;
-    if (fetchInProgressRef.current) return;
-    fetchInProgressRef.current = true;
-    setIsLoading(true);
+    await request.run().catch(() => {});
+  }, [request, taskId]);
 
-    try {
-      const result = await getTaskSessions(workspaceId, taskId);
-      if (mountedRef.current) {
-        setSessions(result);
-        setError(null);
-      }
-    } catch (err) {
-      if (mountedRef.current) {
-        setError(err instanceof Error ? err : new Error(String(err)));
-      }
-    } finally {
-      if (mountedRef.current) {
-        setIsLoading(false);
-      }
-      fetchInProgressRef.current = false;
-    }
-  }, [workspaceId, taskId]);
+  useEffect(() => {
+    if (!taskId || !recovery) return;
+    return recovery.register(
+      `task-sessions:${workspaceId}:${taskId}`,
+      (signal) => request.run({ signal, fresh: true }),
+    );
+  }, [recovery, request, workspaceId, taskId]);
 
   const refetch = useCallback(() => {
     void fetchData();
@@ -90,16 +105,19 @@ export function useTaskSessions(taskId: string | null): UseTaskSessionsResult {
     const previous = connectionEpochRef.current;
     connectionEpochRef.current = connectionEpoch;
     if (!taskId || connectionEpoch <= previous) return;
-    void fetchData();
-  }, [connectionEpoch, fetchData, taskId]);
+    void request.run({ fresh: true }).catch(() => {});
+  }, [connectionEpoch, request, taskId]);
 
   useEffect(() => {
-    mountedRef.current = true;
+    let active = true;
+    setSessions([]);
+    setError(null);
 
     if (!taskId) {
       setSessions([]);
       setError(null);
-      return;
+      setIsLoading(false);
+      return () => request.cancel();
     }
 
     void fetchData();
@@ -113,7 +131,7 @@ export function useTaskSessions(taskId: string | null): UseTaskSessionsResult {
     let timer: ReturnType<typeof setTimeout> | null = null;
 
     const scheduleNext = () => {
-      if (!mountedRef.current) return;
+      if (!active) return;
       timer = setTimeout(() => {
         void fetchData().then(scheduleNext);
       }, getPollInterval());
@@ -122,10 +140,11 @@ export function useTaskSessions(taskId: string | null): UseTaskSessionsResult {
     scheduleNext();
 
     return () => {
-      mountedRef.current = false;
+      active = false;
+      request.cancel();
       if (timer) clearTimeout(timer);
     };
-  }, [workspaceId, taskId, fetchData]);
+  }, [workspaceId, taskId, fetchData, request]);
 
   return { sessions, isLoading, error, refetch };
 }

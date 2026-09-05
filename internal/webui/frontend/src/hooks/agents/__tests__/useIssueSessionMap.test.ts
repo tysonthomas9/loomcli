@@ -1,11 +1,21 @@
 /**
  * @vitest-environment jsdom
  */
+import { createElement, type ReactNode } from "react";
+import {
+  QueryRecoveryCoordinator,
+  QueryRecoveryContext,
+} from "@/hooks/common/queryRecovery";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { useIssueSessionMap } from "../useIssueSessionMap";
 import * as terminalApi from "@/api/terminal";
+
+const scope = vi.hoisted(() => ({
+  workspaceId: "test-ws",
+  connectionEpoch: 0,
+}));
 
 vi.mock("@/api/terminal", () => ({
   listSessionsByIssue: vi.fn(),
@@ -14,7 +24,11 @@ vi.mock("@/api/terminal", () => ({
 vi.mock("@/hooks/common", async () => {
   const actual =
     await vi.importActual<typeof import("@/hooks/common")>("@/hooks/common");
-  return { ...actual, useEventSubscription: vi.fn() };
+  return {
+    ...actual,
+    useEventSubscription: vi.fn(),
+    useEventContext: () => ({ connectionEpoch: scope.connectionEpoch }),
+  };
 });
 
 vi.mock("@/hooks/workspace", async () => {
@@ -24,13 +38,15 @@ vi.mock("@/hooks/workspace", async () => {
     );
   return {
     ...actual,
-    useWorkspaceContext: () => ({ workspaceId: "test-ws" }),
+    useWorkspaceContext: () => ({ workspaceId: scope.workspaceId }),
   };
 });
 
 describe("useIssueSessionMap", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
+    scope.workspaceId = "test-ws";
+    scope.connectionEpoch = 0;
   });
 
   it("starts with an empty map", () => {
@@ -255,4 +271,132 @@ describe("useIssueSessionMap", () => {
       { timeout: 2000 },
     );
   }, 10000);
+  it("requires a fresh successful recovery and rejects source failure", async () => {
+    let finishOld!: (data: Record<string, string[]>) => void;
+    vi.mocked(terminalApi.listSessionsByIssue)
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          finishOld = resolve;
+        }),
+      )
+      .mockRejectedValueOnce(new Error("session source unavailable"));
+    const coordinator = new QueryRecoveryCoordinator();
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(
+        QueryRecoveryContext.Provider,
+        { value: coordinator },
+        children,
+      );
+    const { result } = renderHook(() => useIssueSessionMap(), { wrapper });
+    await waitFor(() =>
+      expect(terminalApi.listSessionsByIssue).toHaveBeenCalledTimes(1),
+    );
+    await act(async () => {
+      await expect(coordinator.refresh()).rejects.toThrow(
+        "session source unavailable",
+      );
+      finishOld({ old: ["stale"] });
+    });
+    expect(terminalApi.listSessionsByIssue).toHaveBeenCalledTimes(2);
+    expect(result.current.issueSessionMap).toEqual({});
+  });
+
+  it("does not let an old workspace response replace the new session map", async () => {
+    let finishOld!: (data: Record<string, string[]>) => void;
+    vi.mocked(terminalApi.listSessionsByIssue)
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          finishOld = resolve;
+        }),
+      )
+      .mockResolvedValueOnce({ new: ["current"] });
+    const { result, rerender } = renderHook(() => useIssueSessionMap());
+    await waitFor(() =>
+      expect(terminalApi.listSessionsByIssue).toHaveBeenCalledTimes(1),
+    );
+    scope.workspaceId = "new-workspace";
+    rerender();
+    await waitFor(() =>
+      expect(result.current.issueSessionMap).toEqual({ new: ["current"] }),
+    );
+    await act(async () => finishOld({ old: ["stale"] }));
+    expect(result.current.issueSessionMap).toEqual({ new: ["current"] });
+    expect(terminalApi.listSessionsByIssue).toHaveBeenLastCalledWith(
+      "new-workspace",
+      { signal: expect.any(AbortSignal) },
+    );
+  });
+
+  it("withdraws disabled queries and ignores their late results", async () => {
+    let finish!: (data: Record<string, string[]>) => void;
+    vi.mocked(terminalApi.listSessionsByIssue).mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const coordinator = new QueryRecoveryCoordinator();
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(
+        QueryRecoveryContext.Provider,
+        { value: coordinator },
+        children,
+      );
+    const { result, rerender } = renderHook(
+      ({ enabled }) => useIssueSessionMap({ enabled }),
+      { wrapper, initialProps: { enabled: true } },
+    );
+    await waitFor(() =>
+      expect(terminalApi.listSessionsByIssue).toHaveBeenCalledTimes(1),
+    );
+    rerender({ enabled: false });
+    await act(async () => {
+      await coordinator.refresh();
+      finish({ old: ["stale"] });
+    });
+    expect(terminalApi.listSessionsByIssue).toHaveBeenCalledTimes(1);
+    expect(result.current.issueSessionMap).toEqual({});
+  });
+
+  it("refetches after reconnect epoch and generic refresh hints", async () => {
+    vi.mocked(terminalApi.listSessionsByIssue).mockResolvedValue({});
+    const { result, rerender } = renderHook(() => useIssueSessionMap());
+    await waitFor(() =>
+      expect(terminalApi.listSessionsByIssue).toHaveBeenCalledTimes(1),
+    );
+    scope.connectionEpoch++;
+    rerender();
+    await waitFor(() =>
+      expect(terminalApi.listSessionsByIssue).toHaveBeenCalledTimes(2),
+    );
+    act(() =>
+      result.current.handleMutation({
+        type: "refresh",
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    await waitFor(() =>
+      expect(terminalApi.listSessionsByIssue).toHaveBeenCalledTimes(3),
+    );
+  });
+  it("starts a post-reconnect request instead of accepting the old in-flight read", async () => {
+    let finishOld!: (data: Record<string, string[]>) => void;
+    vi.mocked(terminalApi.listSessionsByIssue)
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          finishOld = resolve;
+        }),
+      )
+      .mockResolvedValueOnce({ fresh: ["session"] });
+    const { result, rerender } = renderHook(() => useIssueSessionMap());
+    await waitFor(() =>
+      expect(terminalApi.listSessionsByIssue).toHaveBeenCalledTimes(1),
+    );
+    scope.connectionEpoch++;
+    rerender();
+    await waitFor(() =>
+      expect(result.current.issueSessionMap).toEqual({ fresh: ["session"] }),
+    );
+    await act(async () => finishOld({ old: ["stale"] }));
+    expect(result.current.issueSessionMap).toEqual({ fresh: ["session"] });
+  });
 });

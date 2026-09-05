@@ -15,22 +15,28 @@ import { api, ApiError, apiErrorFromResponse } from "@/api/common";
 export async function getTaskSessions(
   workspaceId: string,
   taskId: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<SessionRecord[]> {
-  try {
-    const { data, error, response } = await api.GET(
-      "/api/workspaces/{ws}/tasks/{taskId}/sessions",
-      {
-        params: { path: { ws: workspaceId, taskId } },
-      },
-    );
-    if (error) throw apiErrorFromResponse(error, response);
-    return (data!.data?.sessions ?? []) as unknown as SessionRecord[];
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) {
-      return [];
-    }
-    throw err;
+  const { data, error, response } = await api.GET(
+    "/api/workspaces/{ws}/tasks/{taskId}/sessions",
+    { params: { path: { ws: workspaceId, taskId } }, ...options },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
+  if (
+    !data?.success ||
+    !Array.isArray(data.data?.sessions) ||
+    !data.data.sessions.every(
+      (item) =>
+        item !== null &&
+        typeof item === "object" &&
+        typeof item.session_id === "string" &&
+        item.session_id !== "" &&
+        typeof item.is_active === "boolean",
+    )
+  ) {
+    throw new Error("Invalid task sessions response");
   }
+  return data.data.sessions as unknown as SessionRecord[];
 }
 
 /**

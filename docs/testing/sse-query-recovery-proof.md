@@ -1,5 +1,8 @@
 # Success-bearing query recovery
 
+Session surfaces are now covered by [session recovery](sse-session-recovery-proof.md).
+The scope and validation below describe the original core-query milestone.
+
 ## Why the old refresh promises cannot acknowledge recovery
 
 The query registry's ordinary `refetch()` promise resolves when work settles,

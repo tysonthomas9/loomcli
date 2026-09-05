@@ -48,10 +48,23 @@ describe("sessions API", () => {
   // ============= getTaskSessions =============
 
   describe("getTaskSessions", () => {
+    it.each([null, { session_id: "s", is_active: "false" }])(
+      "rejects malformed session records",
+      async (item) => {
+        mockApiGet.mockResolvedValueOnce({
+          data: { success: true, data: { sessions: [item] } },
+          response: new Response(),
+        } as never);
+        await expect(getTaskSessions("ws", "task")).rejects.toThrow(
+          "Invalid task sessions response",
+        );
+      },
+    );
+
     it("returns sessions from response data", async () => {
       const sessions = [
         {
-          id: "s1",
+          session_id: "s1",
           agent_name: "ember",
           backend: "claude",
           status: "completed",
@@ -74,6 +87,7 @@ describe("sessions API", () => {
 
       mockApiGet.mockResolvedValueOnce({
         data: {
+          success: true,
           data: { sessions },
         },
         error: undefined,
@@ -91,19 +105,19 @@ describe("sessions API", () => {
       );
     });
 
-    it("returns empty array when data is null", async () => {
+    it("rejects missing session data", async () => {
       mockApiGet.mockResolvedValueOnce({
         data: { data: null },
         error: undefined,
         response: new Response(),
       } as never);
 
-      const result = await getTaskSessions("test-ws-id", "loom-abc123");
-
-      expect(result).toEqual([]);
+      await expect(
+        getTaskSessions("test-ws-id", "loom-abc123"),
+      ).rejects.toThrow("Invalid task sessions response");
     });
 
-    it("returns empty array when sessions is null", async () => {
+    it("rejects a null session list", async () => {
       mockApiGet.mockResolvedValueOnce({
         data: {
           data: { sessions: null },
@@ -112,21 +126,21 @@ describe("sessions API", () => {
         response: new Response(),
       } as never);
 
-      const result = await getTaskSessions("test-ws-id", "loom-abc123");
-
-      expect(result).toEqual([]);
+      await expect(
+        getTaskSessions("test-ws-id", "loom-abc123"),
+      ).rejects.toThrow("Invalid task sessions response");
     });
 
-    it("returns empty array on 404 error", async () => {
+    it("propagates 404 instead of acknowledging an empty snapshot", async () => {
       mockApiGet.mockResolvedValueOnce({
         data: undefined,
         error: { error: "Not Found" },
         response: new Response(null, { status: 404, statusText: "Not Found" }),
       } as never);
 
-      const result = await getTaskSessions("test-ws-id", "loom-nonexistent");
-
-      expect(result).toEqual([]);
+      await expect(
+        getTaskSessions("test-ws-id", "loom-nonexistent"),
+      ).rejects.toThrow(ApiError);
     });
 
     it("throws on non-404 API errors", async () => {
@@ -154,7 +168,7 @@ describe("sessions API", () => {
 
     it("passes workspace and task IDs as path params", async () => {
       mockApiGet.mockResolvedValueOnce({
-        data: { data: { sessions: [] } },
+        data: { success: true, data: { sessions: [] } },
         error: undefined,
         response: new Response(),
       } as never);
