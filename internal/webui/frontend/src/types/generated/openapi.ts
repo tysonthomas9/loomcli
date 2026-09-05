@@ -595,7 +595,17 @@ export interface paths {
      *     Not expressible as a standard REST operation in OpenAPI.
      *     The frontend's `useSSE` hook consumes this stream directly.
      *
-     *     **Event format**: Each SSE `data:` line contains a JSON `MutationPayload`:
+     *     **Frames**: `mutation` carries a JSON `MutationPayload`. A `checkpoint`
+     *     frame carries `{}` and an opaque `id` covering successfully scanned,
+     *     filtered-out replay records; it advances resume state without a mutation.
+     *     A `resync` frame carries an `id` and a JSON `reason` of `cap`, `error`,
+     *     `expired`, or `overflow`, instructing authoritative snapshot refetch.
+     *     `connected` has no `id` and
+     *     follows completed replay or the resync instruction. HTTP response headers
+     *     alone do not signal completion. Replay is bounded; a failed or capped
+     *     replay emits resync instead of publishing its buffered partial mutations.
+     *
+     *     **Mutation format**:
      *     ```json
      *     {
      *       "type": "update",

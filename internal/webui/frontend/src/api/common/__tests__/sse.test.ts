@@ -176,6 +176,8 @@ describe("WorkspaceSSEClient", () => {
 
     resolveToken({ kind: "token", token: "ready" });
     await expectRequestCount(1);
+    pushConnected();
+    await flush();
     expect(client.getState()).toBe("connected");
     client.disconnect();
   });
@@ -191,12 +193,13 @@ describe("WorkspaceSSEClient", () => {
     await client.connect();
     expect(client.getState()).toBe("connecting");
     await expectRequestCount(1);
-    expect(client.getState()).toBe("connected");
+    expect(client.getState()).toBe("connecting");
     expect(streamRequests[0].url).toContain("/api/workspaces/test-ws/events");
 
     pushConnected();
     await flush();
 
+    expect(client.getState()).toBe("connected");
     expect(onConnected).toHaveBeenCalledOnce();
     expect(states.mock.calls.map(([state]) => state)).toEqual([
       "connecting",
@@ -305,6 +308,8 @@ describe("WorkspaceSSEClient", () => {
 
     expect(onMutation).toHaveBeenCalledTimes(2);
     expect(client.getLastEventId()).toBe("cursor-2");
+    pushConnected();
+    await flush();
     expect(client.getState()).toBe("connected");
     expect(client.getReconnectAttempts()).toBe(0);
     expect(error).toHaveBeenCalledWith(
@@ -384,6 +389,8 @@ describe("WorkspaceSSEClient", () => {
     await expectRequestCount(1);
 
     expect(streamRequests[0].url).toContain("token=fresh-token");
+    pushConnected();
+    await flush();
     expect(client.getState()).toBe("connected");
     expect(client.getReconnectAttempts()).toBe(0);
     expect(onReconnect).toHaveBeenLastCalledWith(0);
@@ -401,6 +408,8 @@ describe("WorkspaceSSEClient", () => {
     expect(new URL(streamRequests[0].url).searchParams.has("token")).toBe(
       false,
     );
+    pushConnected();
+    await flush();
     expect(client.getState()).toBe("connected");
     expect(onError).not.toHaveBeenCalled();
     client.disconnect();
@@ -419,6 +428,8 @@ describe("WorkspaceSSEClient", () => {
     expect(new URL(streamRequests[0].url).searchParams.has("token")).toBe(
       false,
     );
+    pushConnected();
+    await flush();
     expect(client.getState()).toBe("connected");
     expect(onError).not.toHaveBeenCalled();
     client.disconnect();
@@ -437,6 +448,8 @@ describe("WorkspaceSSEClient", () => {
     expect(new URL(streamRequests[0].url).searchParams.has("token")).toBe(
       false,
     );
+    pushConnected();
+    await flush();
     expect(client.getState()).toBe("connected");
     expect(onError).not.toHaveBeenCalled();
     client.disconnect();
@@ -506,6 +519,8 @@ describe("WorkspaceSSEClient", () => {
 
     await vi.advanceTimersByTimeAsync(1000);
     await expectRequestCount(2);
+    pushConnected();
+    await flush();
     expect(client.getState()).toBe("connected");
     client.disconnect();
   });
@@ -521,6 +536,8 @@ describe("WorkspaceSSEClient", () => {
 
     await vi.advanceTimersByTimeAsync(1000);
     await expectRequestCount(2);
+    pushConnected();
+    await flush();
     expect(client.getState()).toBe("connected");
     client.disconnect();
   });
@@ -537,6 +554,8 @@ describe("WorkspaceSSEClient", () => {
     await vi.advanceTimersByTimeAsync(1000);
     await expectRequestCount(1);
     expect(mockStreamFetch).toHaveBeenCalledTimes(2);
+    pushConnected();
+    await flush();
     expect(client.getState()).toBe("connected");
     client.disconnect();
   });
@@ -716,7 +735,145 @@ describe("WorkspaceSSEClient", () => {
     client.disconnect();
   });
 
-  it("resets exponential backoff after a successful open", async () => {
+  it("preserves exponential backoff across interrupted replay streams", async () => {
+    const onReconnect = vi.fn();
+    const client = new WorkspaceSSEClient("test-ws", {
+      onReconnect,
+      initialReconnectDelay: 10,
+    });
+    await client.connect("saved");
+    await expectRequestCount(1);
+    expect(client.getState()).toBe("connecting");
+    pushMutation(
+      {
+        type: "update",
+        issue_id: "issue-1",
+        timestamp: "2026-09-05T00:00:00Z",
+      },
+      "replayed-1",
+    );
+    streamRequests[0].push("id: filtered-checkpoint\n\n");
+    await flush();
+    expect(client.getLastEventId()).toBe("filtered-checkpoint");
+    expect(client.getState()).toBe("connecting");
+    streamRequests[0].fail();
+    await flush();
+    expect(client.getReconnectAttempts()).toBe(1);
+    await vi.advanceTimersByTimeAsync(10);
+    await expectRequestCount(2);
+    expect(client.getState()).toBe("reconnecting");
+    expect(client.getReconnectAttempts()).toBe(1);
+    expect(streamRequests[1].headers.get("Last-Event-ID")).toBe(
+      "filtered-checkpoint",
+    );
+    streamRequests[1].close();
+    await flush();
+    expect(client.getReconnectAttempts()).toBe(2);
+    await vi.advanceTimersByTimeAsync(19);
+    expect(streamRequests).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    await expectRequestCount(3);
+    expect(client.getReconnectAttempts()).toBe(2);
+    pushConnected();
+    await flush();
+    expect(client.getState()).toBe("connected");
+    expect(client.getReconnectAttempts()).toBe(0);
+    expect(onReconnect.mock.calls.map(([attempt]) => attempt)).toEqual([
+      1, 2, 0,
+    ]);
+    client.disconnect();
+  });
+
+  it("waits for connected after all 201 replay frames before synchronizing", async () => {
+    const onMutation = vi.fn();
+    const onConnected = vi.fn(() => {
+      expect(onMutation).toHaveBeenCalledTimes(201);
+    });
+    const states = vi.fn();
+    const client = new WorkspaceSSEClient("test-ws", {
+      onMutation,
+      onConnected,
+      onStateChange: states,
+    });
+    await client.connect();
+    await expectRequestCount(1);
+    streamRequests[0].push(
+      Array.from(
+        { length: 201 },
+        (_, index) =>
+          `id: replay-${index}\nevent: mutation\ndata: {"type":"update","issue_id":"issue-${index}","timestamp":"2026-09-05T00:00:00Z"}\n\n`,
+      ).join(""),
+    );
+    await flush();
+    expect(onMutation).toHaveBeenCalledTimes(201);
+    expect(client.getLastEventId()).toBe("replay-200");
+    streamRequests[0].push("id: filtered-tail\n\n");
+    await flush();
+    expect(client.getLastEventId()).toBe("filtered-tail");
+    expect(onConnected).not.toHaveBeenCalled();
+    expect(client.getState()).toBe("connecting");
+    expect(states.mock.calls.map(([state]) => state)).toEqual(["connecting"]);
+    pushConnected();
+    await flush();
+    expect(client.getState()).toBe("connected");
+    expect(onConnected).toHaveBeenCalledOnce();
+    expect(client.getLastEventId()).toBe("filtered-tail");
+    client.disconnect();
+  });
+
+  it.each(["onStateChange", "onReconnect", "onConnected"] as const)(
+    "a reentrant %s callback cannot synchronize the replacement generation",
+    async (callback) => {
+      queueResponse(503, "text/plain");
+      const onConnected = vi.fn();
+      const onReconnect = vi.fn();
+      let replaced = false;
+      const replace = () => {
+        if (replaced) return;
+        replaced = true;
+        client.updateSourceRepos(["replacement"]);
+      };
+      const client = new WorkspaceSSEClient("test-ws", {
+        initialReconnectDelay: 10,
+        onStateChange: (state) => {
+          if (callback === "onStateChange" && state === "connected") replace();
+        },
+        onReconnect: (attempt) => {
+          onReconnect(attempt);
+          if (callback === "onReconnect" && attempt === 0) replace();
+        },
+        onConnected: () => {
+          onConnected();
+          if (callback === "onConnected") replace();
+        },
+      });
+      await client.connect();
+      await flush();
+      await vi.advanceTimersByTimeAsync(10);
+      await expectRequestCount(2);
+      pushConnected(streamRequests[1]);
+      await expectRequestCount(3);
+      expect(streamRequests[1].aborted).toBe(true);
+      expect(client.getState()).toBe("connecting");
+      expect(onConnected).toHaveBeenCalledTimes(
+        callback === "onConnected" ? 1 : 0,
+      );
+      expect(client.getReconnectAttempts()).toBe(
+        callback === "onStateChange" ? 1 : 0,
+      );
+      // The new stream needs its own barrier; the old handler must not mark it seen.
+      pushConnected(streamRequests[2]);
+      await flush();
+      expect(client.getState()).toBe("connected");
+      expect(client.getReconnectAttempts()).toBe(0);
+      expect(onConnected).toHaveBeenCalledTimes(
+        callback === "onConnected" ? 2 : 1,
+      );
+      client.disconnect();
+    },
+  );
+
+  it("resets exponential backoff after a connected synchronization frame", async () => {
     const onReconnect = vi.fn();
     const client = new WorkspaceSSEClient("test-ws", {
       onReconnect,
@@ -730,6 +887,8 @@ describe("WorkspaceSSEClient", () => {
     await flush();
     await vi.advanceTimersByTimeAsync(100);
     await expectRequestCount(2);
+    pushConnected();
+    await flush();
 
     expect(client.getReconnectAttempts()).toBe(0);
     streamRequests[1].fail();
@@ -738,6 +897,8 @@ describe("WorkspaceSSEClient", () => {
     expect(streamRequests).toHaveLength(2);
     await vi.advanceTimersByTimeAsync(1);
     await expectRequestCount(3);
+    pushConnected();
+    await flush();
     expect(onReconnect.mock.calls.map(([attempt]) => attempt)).toEqual([
       1, 0, 1, 0,
     ]);
@@ -763,6 +924,8 @@ describe("WorkspaceSSEClient", () => {
 
     await vi.advanceTimersByTimeAsync(25);
     await expectRequestCount(2);
+    pushConnected();
+    await flush();
     expect(client.getState()).toBe("connected");
     expect(error).toHaveBeenCalledWith(
       "[SSE] onReconnect callback threw:",
@@ -793,6 +956,8 @@ describe("WorkspaceSSEClient", () => {
 
     expect(fetchToken).toHaveBeenCalledTimes(2);
     expect(streamRequests).toHaveLength(2);
+    pushConnected();
+    await flush();
     expect(client.getState()).toBe("connected");
     expect(onReconnect.mock.calls.map(([attempt]) => attempt)).toEqual([1, 0]);
 
@@ -817,6 +982,8 @@ describe("WorkspaceSSEClient", () => {
 
     client.retryNow();
     await expectRequestCount(2);
+    pushConnected();
+    await flush();
     expect(client.getState()).toBe("connected");
     expect(onReconnect).toHaveBeenCalledWith(0);
 
@@ -1092,6 +1259,8 @@ describe("WorkspaceSSEClient", () => {
     const client = new WorkspaceSSEClient("test-ws");
     await client.connect();
     await expectRequestCount(1);
+    pushConnected();
+    await flush();
     expect(client.getState()).toBe("connected");
 
     client.destroy();
