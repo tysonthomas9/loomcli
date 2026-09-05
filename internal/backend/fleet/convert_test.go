@@ -467,3 +467,47 @@ func TestFleetIssueWire_ExternalRefProjection(t *testing.T) {
 		t.Errorf("empty ExternalRef = %v, want nil", got)
 	}
 }
+
+// TestFleetEventToMutationData_IssueIDScoping pins which fleet-db entity types
+// get the legacy issue_id filled in from entity_id. fleet-db carries the ISSUE
+// id in entity_id for every issue-scoped entity (see issueScopedEntityTypes);
+// workspace-level entities carry their own id there and must stay empty.
+func TestFleetEventToMutationData_IssueIDScoping(t *testing.T) {
+	cases := []struct {
+		name        string
+		action      string
+		entityType  string
+		entityID    string
+		wantIssueID string
+	}{
+		{"issue create", "issue.create", "issue", "WS-1", "WS-1"},
+		{"comment add", "comment.add", "comment", "WS-1", "WS-1"},
+		{"dep add", "dep.add", "dependency", "WS-1", "WS-1"},
+		{"label add", "label.add", "label", "WS-1", "WS-1"},
+		{"metadata set", "metadata.set", "metadata", "WS-1", "WS-1"},
+		{"workspace update", "workspace.update", "workspace", "ws", ""},
+		{"agent update", "agent.update", "agent", "agent-1", ""},
+		{"driver run claim", "driver_run.claim", "driver_run", "run-9", ""},
+		{"repo create", "repo.create", "repo", "repo-1", ""},
+		{"empty entity_type falls back to issue. action prefix", "issue.update", "", "WS-2", "WS-2"},
+		{"empty entity_type, non-issue action", "workspace.update", "", "ws", ""},
+		{"issue-scoped type with empty entity_id stays empty", "comment.add", "comment", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := fleetEventToMutationData(&fleetMutationEvent{
+				Action:     tc.action,
+				EntityType: tc.entityType,
+				EntityID:   tc.entityID,
+			})
+			if md.IssueID != tc.wantIssueID {
+				t.Errorf("IssueID = %q, want %q (action=%q entity_type=%q entity_id=%q)",
+					md.IssueID, tc.wantIssueID, tc.action, tc.entityType, tc.entityID)
+			}
+			// The generic envelope is unaffected by the legacy-field fill-in.
+			if md.EntityID != tc.entityID || md.EntityType != tc.entityType {
+				t.Errorf("envelope changed: entity_type=%q entity_id=%q", md.EntityType, md.EntityID)
+			}
+		})
+	}
+}
