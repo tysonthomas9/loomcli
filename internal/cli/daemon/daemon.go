@@ -104,6 +104,7 @@ func NewDaemon(config *cfgpkg.DaemonConfig, projectDir string, eventBus events.E
 	sup := &supervisor.Supervisor{
 		ConfigSnapshot: d.configSnapshot,
 		ProjectDir:     projectDir,
+		BootedAt:       time.Now(),
 		Concurrency:    supervisor.NewConcurrencyTracker(config.Roles),
 		EventBus:       eventBus,
 		StoppedAgents:  make(map[string]struct{}),

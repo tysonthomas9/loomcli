@@ -159,7 +159,7 @@ func (s *Supervisor) checkWatchdog(ap *AgentProcess, outputTimeout int, logPath 
 	// has said lately, and the duration cap must not inherit any of it: not the
 	// activitySource early return (a run that produced no signal at all is the
 	// one most in need of a ceiling), and not the input-wait suspension.
-	if s.applyRunDurationKill(ap, lastStart, worktreeName) {
+	if s.applyRunDurationKill(ap, outputTimeout, logPath, lastStart, worktreeName) {
 		return
 	}
 
@@ -172,6 +172,28 @@ func (s *Supervisor) checkWatchdog(ap *AgentProcess, outputTimeout int, logPath 
 		return
 	}
 
+	lastActivity, activitySource := s.latestActivity(ap, logPath)
+
+	// Apply timeout if we found any activity signal
+	if activitySource == "none" {
+		return
+	}
+	// Use lastStart if activity signal predates agent spawn
+	if lastActivity.Before(lastStart) {
+		lastActivity = lastStart
+	}
+	s.applyIdleKill(ap, time.Since(lastActivity), outputTimeout, activitySource, worktreeName)
+}
+
+// latestActivity returns the freshest of the three liveness signals described
+// on checkWatchdog, together with the tier it came from ("heartbeat",
+// "transcript", "log", or "none" when nothing was observable at all).
+//
+// A "none" result carries a ZERO time, not a very old one: callers must decide
+// what silence-with-no-signal means for them rather than reading the zero as an
+// activity instant. checkWatchdog declines to kill on it; applyRunDurationKill
+// clamps to the run's start.
+func (s *Supervisor) latestActivity(ap *AgentProcess, logPath string) (time.Time, string) {
 	var lastActivity time.Time
 	activitySource := "none"
 	// consider records t as the activity signal when it is the newest seen.
@@ -208,15 +230,7 @@ func (s *Supervisor) checkWatchdog(ap *AgentProcess, outputTimeout int, logPath 
 		}
 	}
 
-	// Apply timeout if we found any activity signal
-	if activitySource == "none" {
-		return
-	}
-	// Use lastStart if activity signal predates agent spawn
-	if lastActivity.Before(lastStart) {
-		lastActivity = lastStart
-	}
-	s.applyIdleKill(ap, time.Since(lastActivity), outputTimeout, activitySource, worktreeName)
+	return lastActivity, activitySource
 }
 
 // applyIdleKill kills the agent when it has been silent past outputTimeout,
@@ -277,7 +291,14 @@ func (s *Supervisor) applyIdleKill(ap *AgentProcess, silent time.Duration, outpu
 // Ordering also matters against the shutdown path: a duration kill sets the stop
 // reason via setStopReasonDefault, which never overwrites, so a manual stop or
 // drain that already claimed the agent keeps its own reason.
-func (s *Supervisor) applyRunDurationKill(ap *AgentProcess, lastStart time.Time, worktreeName string) bool {
+//
+// It does record one extra fact on the way out. "Was the run also SILENT?" is
+// already computed here and was previously thrown away, yet it is the whole
+// difference between a wedged run (the no-progress signal task quarantine
+// watches for) and one whose transcript shows writes right up to the kill. It
+// is stamped on ap.RunSilentAtStop for the ledger to read, and changes nothing
+// about the decision above.
+func (s *Supervisor) applyRunDurationKill(ap *AgentProcess, outputTimeout int, logPath string, lastStart time.Time, worktreeName string) bool {
 	maxRun := s.maxRunDurationFor(ap)
 	// A zero lastStart means the spawn time was never recorded, not that the run
 	// began at the epoch — time.Since would read it as decades and kill on the
@@ -290,13 +311,26 @@ func (s *Supervisor) applyRunDurationKill(ap *AgentProcess, lastStart time.Time,
 		return false
 	}
 
+	// A run that produced no signal at all has been silent since it started, so
+	// the zero from latestActivity clamps to lastStart exactly like a stale one.
+	lastActivity, _ := s.latestActivity(ap, logPath)
+	if lastActivity.Before(lastStart) {
+		lastActivity = lastStart
+	}
+	silent := time.Since(lastActivity)
+
 	ap.Mu.Lock()
 	pending := ap.InputWaitPending
+	// outputTimeout <= 0 means the operator switched the silence check off, so
+	// there is no threshold to be silent against and no verdict to record.
+	ap.RunSilentAtStop = outputTimeout > 0 && silent > time.Duration(outputTimeout)*time.Second
+	runSilent := ap.RunSilentAtStop
 	ap.Mu.Unlock()
 
 	slog.Error("killing agent, run exceeded its maximum duration",
 		"worktree", worktreeName, "ran", ran.Truncate(time.Second),
-		"max_run_duration", maxRun, "input_wait_pending", pending)
+		"max_run_duration", maxRun, "input_wait_pending", pending,
+		"silent_duration", silent.Truncate(time.Second), "run_silent", runSilent)
 	s.setStopReasonDefault(ap, StopReasonRunDurationExceeded)
 	s.StopAgent(ap, 10*time.Second)
 	return true

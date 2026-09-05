@@ -70,7 +70,16 @@ type AgentProcess struct {
 
 	StopReason StopReason // why the agent was stopped (set at decision site, empty while running)
 
-	Mu sync.Mutex // protects Cmd, Pid, LogFile, SoftKnobWarning, restart tracking, AssignedEpicID, AssignedTaskID, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, LastActivity, InputWaitPending, InputWaitSince
+	// RunSilentAtStop records whether the run was ALSO silent past its output
+	// timeout at the moment the run-duration cap stopped it. Stamped only by
+	// applyRunDurationKill, and purely a record: the cap fires regardless (see
+	// the asymmetry documented there). The task-quarantine ledger reads it to
+	// tell a wedged run (silent AND over the cap — the no-progress signal) from
+	// one that was writing right up to the kill, which says nothing about the
+	// task. False for every other stop reason.
+	RunSilentAtStop bool
+
+	Mu sync.Mutex // protects Cmd, Pid, LogFile, SoftKnobWarning, restart tracking, AssignedEpicID, AssignedTaskID, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, RunSilentAtStop, LastActivity, InputWaitPending, InputWaitSince
 }
 
 // StopReason identifies why an agent was stopped.
