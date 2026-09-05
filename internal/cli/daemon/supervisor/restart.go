@@ -140,6 +140,13 @@ func (s *Supervisor) decideRestart(ap *AgentProcess) (bool, string) {
 		return s.applyUncountedRestart(ap, d, outcome, maxRetries), ""
 
 	default: // Retry
+		// A wall on this agent's credential means the upstream is known to be
+		// refusing work: an unbounded-block class raised inside that window is
+		// not evidence the agent is broken (see wallShieldsCountedRetry).
+		if remaining, ok := s.wallShieldsCountedRetry(ap, outcome); ok {
+			s.applyWallShieldedRestart(ap, outcome, remaining)
+			return true, ""
+		}
 		return s.applyCountedRestart(ap, d, maxRetries), ""
 	}
 }
@@ -303,6 +310,21 @@ func (s *Supervisor) applyRateLimitedRestart(ap *AgentProcess) {
 	ap.StopReason = ""
 	log.Printf("[daemon] Agent %s: rate limited (retry %d, not counted toward max_retries)",
 		ap.Entry.Worktree, ap.RateRetryCount)
+}
+
+// applyWallShieldedRestart restarts without eroding max_retries because a wall
+// is live for this agent's credential (see wallShieldsCountedRetry). Counters
+// are left exactly as the wall park leaves them — RestartCount, BlockCount and
+// RateRetryCount all intact — because this failure carries no information
+// about the agent. RestartCount is deliberately not RESET either: erosion that
+// happened before the wall happened for real reasons. StopReason clears so the
+// next cycle runs the pre-flight gate, which parks the agent properly for
+// whatever the wall has left. Caller holds ap.Mu.
+func (s *Supervisor) applyWallShieldedRestart(ap *AgentProcess, outcome agenterr.Outcome, remaining time.Duration) {
+	resetNoWork(ap)
+	ap.StopReason = ""
+	log.Printf("[daemon] Agent %s: %s during an active wall (%s remaining), not counted toward max_retries",
+		ap.Entry.Worktree, outcome, remaining.Round(time.Second))
 }
 
 // applyUncountedRestart handles the policy classes that retry without eroding
