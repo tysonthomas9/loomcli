@@ -156,9 +156,8 @@ export type FileCheckoutRepairRequest =
 export type FileCheckoutRepairResponse =
   components["schemas"]["FileCheckoutRepairResponse"];
 
-export interface FileCheckoutsResponse {
-  checkouts: FileCheckout[];
-}
+export type FileCheckoutsResponse =
+  components["schemas"]["FileCheckoutsResponse"];
 
 export type FileCapabilitiesResponse =
   components["schemas"]["FileCapabilitiesResponse"];
@@ -276,17 +275,72 @@ export async function indexScopedFiles(
  */
 export async function listFileCheckouts(
   workspaceId: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<FileCheckoutsResponse> {
-  return get<FileCheckoutsResponse>(wsUrl(workspaceId, "/files/checkouts"));
+  const url = wsUrl(workspaceId, "/files/checkouts");
+  const data = await (options.signal
+    ? get<FileCheckoutsResponse>(url, options)
+    : get<FileCheckoutsResponse>(url));
+  if (
+    !data ||
+    !Array.isArray(data.checkouts) ||
+    typeof data.partial !== "boolean" ||
+    typeof data.limit_hit !== "boolean" ||
+    !Array.isArray(data.errors)
+  )
+    throw new Error("Invalid file checkout metadata");
+  for (const checkout of data.checkouts) {
+    if (
+      !checkout ||
+      !["agent", "repo"].includes(checkout.kind) ||
+      typeof checkout.repo !== "string" ||
+      !checkout.repo ||
+      typeof checkout.exists !== "boolean" ||
+      !Number.isInteger(checkout.change_count) ||
+      checkout.change_count < 0 ||
+      (checkout.kind === "agent" &&
+        (typeof checkout.agent !== "string" || !checkout.agent))
+    )
+      throw new Error("Invalid file checkout record");
+    for (const field of ["partial", "limit_hit", "status_error"] as const) {
+      if (checkout[field] !== undefined && typeof checkout[field] !== "boolean")
+        throw new Error("Invalid file checkout flag");
+    }
+    for (const field of ["agent", "branch", "error"] as const) {
+      if (checkout[field] !== undefined && typeof checkout[field] !== "string")
+        throw new Error("Invalid file checkout text");
+    }
+  }
+  for (const error of data.errors) {
+    if (
+      !error ||
+      !["agent", "repo"].includes(error.kind) ||
+      typeof error.repo !== "string" ||
+      typeof error.error !== "string" ||
+      (error.agent !== undefined && typeof error.agent !== "string")
+    )
+      throw new Error("Invalid file checkout error");
+  }
+  return data;
 }
 
 /** GET /api/workspaces/{ws}/files/capabilities */
 export async function getFileCapabilities(
   workspaceId: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<FileCapabilitiesResponse> {
-  return get<FileCapabilitiesResponse>(
-    wsUrl(workspaceId, "/files/capabilities"),
-  );
+  const url = wsUrl(workspaceId, "/files/capabilities");
+  const data = await (options.signal
+    ? get<FileCapabilitiesResponse>(url, options)
+    : get<FileCapabilitiesResponse>(url));
+  if (
+    !data ||
+    [data.read, data.write, data.sensitive].some(
+      (value) => typeof value !== "boolean",
+    )
+  )
+    throw new Error("Invalid file capabilities");
+  return data;
 }
 
 /**
