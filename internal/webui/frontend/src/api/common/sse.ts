@@ -52,7 +52,7 @@ export type ConnectionState =
 /** Server-declared reason that a contiguous mutation stream cannot be delivered. */
 export type ResyncReason = "cap" | "error" | "expired" | "overflow";
 
-/** Cursor transition carried by a resync frame. */
+/** Recovery notification; resync never changes the resume checkpoint. */
 export interface ResyncEvent {
   from: string | undefined;
   /** Effective resume checkpoint after the frame; empty means no checkpoint. */
@@ -84,7 +84,7 @@ export interface SSEClientOptions {
   onReconnect?: (attempt: number) => void;
   /** Called when the server sends the "connected" SSE event (after catch-up events are flushed) */
   onConnected?: () => void;
-  /** Called when the server advances the cursor across a range requiring snapshot refetch. */
+  /** Called when the server requests query recovery without changing the cursor. */
   onResync?: (event: ResyncEvent) => void;
   /** Injectable token provider. Default: fetchSseToken(workspaceId) */
   fetchToken?: () => Promise<SseTokenResult>;
@@ -183,8 +183,8 @@ export class WorkspaceSSEClient {
 
     void fetchEventSource(url, {
       signal: abortController.signal,
-      // The library owns resume state from the first attempt, including token
-      // and HTTP failures before any wire ID, and explicit empty-ID resets.
+      // Seed the parser header from the accepted checkpoint, including before
+      // token/HTTP failures. Complete empty-ID frames may explicitly reset it.
       headers:
         sinceParam === undefined ? {} : { "last-event-id": String(sinceParam) },
       openWhenHidden: true,
@@ -265,7 +265,6 @@ export class WorkspaceSSEClient {
   disconnect(): void {
     if (this.destroyed) return;
 
-    this.lastEventId = this.getLastEventId();
     this.resumeHeaders = undefined;
     this.manualDisconnect = true;
 
@@ -291,14 +290,22 @@ export class WorkspaceSSEClient {
   }
 
   /**
-   * Get the observed transport checkpoint, including ID-only frames and resets.
-   * This is resume state, not an acknowledgment that query state was applied.
+   * Get the accepted checkpoint from complete frames, including ID-only frames
+   * and resets. Partial parser IDs and resync IDs never become resume state.
+   * This is not an acknowledgment that query state was applied.
    * Returns undefined if no checkpoint is held or the server explicitly reset it.
    */
   getLastEventId(): string | undefined {
-    return this.resumeHeaders === undefined
-      ? this.lastEventId
-      : new Headers(this.resumeHeaders).get("last-event-id") || undefined;
+    return this.lastEventId;
+  }
+
+  private restoreResumeHeader(): void {
+    // fetch-event-source 2.x owns this plain object and mutates it on ID lines,
+    // before the frame is complete. Only completed accepted frames may resume.
+    const headers = this.resumeHeaders as Record<string, string> | undefined;
+    if (headers === undefined) return;
+    if (this.lastEventId === undefined) delete headers["last-event-id"];
+    else headers["last-event-id"] = this.lastEventId;
   }
 
   /**
@@ -395,8 +402,16 @@ export class WorkspaceSSEClient {
     generation: number,
   ): void {
     const previousEventId = this.lastEventId;
-    this.lastEventId = this.getLastEventId();
+    this.lastEventId =
+      this.resumeHeaders === undefined
+        ? previousEventId
+        : new Headers(this.resumeHeaders).get("last-event-id") || undefined;
     if (event.event === "resync") {
+      // The pinned parser updates its live header before delivering a frame.
+      // A recovery notification cannot acknowledge skipped source records:
+      // restore that same object before callbacks can reconnect or rebind.
+      this.lastEventId = previousEventId;
+      this.restoreResumeHeader();
       let reason: ResyncReason = "error";
       try {
         const parsed = JSON.parse(event.data) as { reason?: unknown };
@@ -415,8 +430,7 @@ export class WorkspaceSSEClient {
 
       this.callSafely("onResync", this.onResync, {
         from: previousEventId,
-        // A missing ID preserves the transport checkpoint; an explicit empty
-        // ID resets it. The parser message ID cannot distinguish these cases.
+        // Even explicit IDs on resync are not accepted checkpoints.
         to: this.lastEventId ?? "",
         reason,
       });
@@ -445,7 +459,7 @@ export class WorkspaceSSEClient {
       // The parser has already advanced its transport header. Stop this loop
       // and retain the prior checkpoint so reconnect cannot silently skip it.
       this.lastEventId = previousEventId;
-      this.resumeHeaders = undefined;
+      this.restoreResumeHeader();
       console.warn("[SSE] Received malformed mutation event");
       throw new FatalSSEError("Malformed SSE mutation payload");
     }
@@ -462,10 +476,11 @@ export class WorkspaceSSEClient {
   ): Promise<Response> {
     this.throwIfInactive(abortController, generation);
     // fetch-event-source 2.x passes its live headers object to custom fetch.
-    // Its parser updates/deletes last-event-id on explicit ID fields, while
-    // onmessage.id cannot distinguish an absent ID from an empty reset. Keep
-    // this reference (not a Headers copy), including during token failures.
+    // Keep that reference: onmessage.id cannot distinguish no ID from a reset.
+    // Discard any unterminated frame's candidate ID before this attempt starts,
+    // including while token acquisition is pending.
     this.resumeHeaders = init?.headers;
+    this.restoreResumeHeader();
     let tokenResult: SseTokenResult;
     try {
       tokenResult = await this.fetchTokenFn();

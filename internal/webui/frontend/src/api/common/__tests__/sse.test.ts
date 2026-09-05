@@ -229,7 +229,7 @@ describe("WorkspaceSSEClient", () => {
     client.disconnect();
   });
 
-  it("advances its cursor and reports resync without delivering a mutation", async () => {
+  it("preserves its cursor and reports resync without delivering a mutation", async () => {
     const onMutation = vi.fn();
     const onResync = vi.fn();
     const client = new WorkspaceSSEClient("test-ws", {
@@ -242,11 +242,11 @@ describe("WorkspaceSSEClient", () => {
     pushResync("c1.to", "overflow");
     await flush();
 
-    expect(client.getLastEventId()).toBe("c1.to");
+    expect(client.getLastEventId()).toBe("c1.from");
     expect(onResync).toHaveBeenCalledOnce();
     expect(onResync).toHaveBeenCalledWith({
       from: "c1.from",
-      to: "c1.to",
+      to: "c1.from",
       reason: "overflow",
     });
     expect(onMutation).not.toHaveBeenCalled();
@@ -255,9 +255,9 @@ describe("WorkspaceSSEClient", () => {
 
   it.each([
     ["omitted ID", "", "durable-cursor"],
-    ["explicit empty ID", "id:\n", ""],
+    ["explicit empty ID", "id:\n", "durable-cursor"],
   ])(
-    "retains or resets the transport checkpoint on overflow with %s",
+    "retains the transport checkpoint on overflow with %s",
     async (_description, idField, expectedCursor) => {
       const onMutation = vi.fn();
       const onResync = vi.fn();
@@ -332,11 +332,11 @@ describe("WorkspaceSSEClient", () => {
       streamRequests[0].push(`id: c1.to\nevent: resync\ndata: ${data}\n\n`);
       await flush();
 
-      expect(client.getLastEventId()).toBe("c1.to");
+      expect(client.getLastEventId()).toBe("c1.from");
       expect(onResync).toHaveBeenCalledOnce();
       expect(onResync).toHaveBeenCalledWith({
         from: "c1.from",
-        to: "c1.to",
+        to: "c1.from",
         reason: "error",
       });
       expect(onMutation).not.toHaveBeenCalled();
@@ -346,6 +346,165 @@ describe("WorkspaceSSEClient", () => {
       client.disconnect();
     },
   );
+
+  it.each(["expired", "error", "cap", "overflow", "unknown", "malformed"])(
+    "never accepts resync IDs for %s, including automatic retries",
+    async (reason) => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const onResync = vi.fn();
+      const client = new WorkspaceSSEClient("test-ws", { onResync });
+      await client.connect("accepted");
+      await expectRequestCount(1);
+      for (const idField of ["id: skipped\n", "id:\n", ""]) {
+        const active = streamRequests.at(-1)!;
+        const data =
+          reason === "malformed" ? "{oops" : JSON.stringify({ reason });
+        active.push(`${idField}event: resync\ndata: ${data}\n\n`);
+        await flush();
+        expect(client.getLastEventId()).toBe("accepted");
+        expect(onResync).toHaveBeenLastCalledWith({
+          from: "accepted",
+          to: "accepted",
+          reason:
+            reason === "unknown" || reason === "malformed" ? "error" : reason,
+        });
+        const nextCount = streamRequests.length + 1;
+        active.fail();
+        await flush();
+        await vi.advanceTimersByTimeAsync(30000);
+        await expectRequestCount(nextCount);
+        const next = streamRequests.at(-1)!;
+        expect(next.headers.get("Last-Event-ID")).toBe("accepted");
+        expect(new URL(next.url).searchParams.has("since")).toBe(false);
+      }
+      client.disconnect();
+    },
+  );
+
+  it.each(["retryNow", "rebind", "reconnect"])(
+    "restores the live checkpoint before resync callbacks can %s",
+    async (transition) => {
+      const onMutation = vi.fn();
+      const client = new WorkspaceSSEClient("test-ws", {
+        onMutation,
+        onResync: () => {
+          if (transition === "rebind") client.updateSourceRepos(["repo-b"]);
+          else if (transition === "reconnect") {
+            client.disconnect();
+            void client.connect();
+          }
+        },
+      });
+      await client.connect("initial");
+      await expectRequestCount(1);
+      // A legitimate ID-only checkpoint in the same chunk is the resume point.
+      const staleTail =
+        transition === "retryNow"
+          ? ""
+          : 'id: stale-old-buffer\nevent: mutation\ndata: {"type":"update"}\n\n';
+      streamRequests[0].push(
+        'id: accepted\n\nid:\nevent: resync\ndata: {"reason":"expired"}\n\n' +
+          staleTail,
+      );
+      await flush();
+      if (transition === "retryNow") {
+        streamRequests[0].fail();
+        await flush();
+        client.retryNow();
+      }
+      await expectRequestCount(2);
+      expect(streamRequests[1].headers.get("Last-Event-ID")).toBe("accepted");
+      expect(client.getLastEventId()).toBe("accepted");
+      expect(onMutation).not.toHaveBeenCalled();
+      client.disconnect();
+    },
+  );
+
+  it.each(["accepted", undefined])(
+    "does not accept unterminated IDs after %s",
+    async (accepted) => {
+      for (const id of ["skipped", ""]) {
+        for (const transition of ["automatic", "reconnect", "rebind"]) {
+          const client = new WorkspaceSSEClient("test-ws");
+          await client.connect(accepted);
+          await flush();
+          const active = streamRequests.at(-1)!;
+          active.push(`id: ${id}\nevent: mutation\ndata: {"type":"update"}\n`);
+          await flush();
+          expect(client.getLastEventId()).toBe(accepted);
+          const nextCount = streamRequests.length + 1;
+          if (transition === "automatic") {
+            active.fail();
+            await flush();
+            await vi.advanceTimersByTimeAsync(1000);
+          } else if (transition === "rebind") {
+            client.updateSourceRepos(["repo-b"]);
+          } else {
+            client.disconnect();
+            await client.connect();
+          }
+          await expectRequestCount(nextCount);
+          const next = streamRequests.at(-1)!;
+          expect(next.headers.get("Last-Event-ID")).toBe(accepted ?? null);
+          if (transition === "automatic")
+            expect(new URL(next.url).searchParams.has("since")).toBe(false);
+          client.disconnect();
+        }
+      }
+    },
+  );
+
+  it.each(["no prior cursor", "prior empty reset"])(
+    "does not invent a resume cursor after resync with %s",
+    async (mode) => {
+      const client = new WorkspaceSSEClient("test-ws");
+      await client.connect(
+        mode === "prior empty reset" ? "initial" : undefined,
+      );
+      await expectRequestCount(1);
+      const reset = mode === "prior empty reset" ? "id:\n\n" : "";
+      streamRequests[0].push(
+        `${reset}id: skipped\nevent: resync\ndata: {"reason":"expired"}\n\n`,
+      );
+      await flush();
+      expect(client.getLastEventId()).toBeUndefined();
+      streamRequests[0].fail();
+      await flush();
+      await vi.advanceTimersByTimeAsync(1000);
+      await expectRequestCount(2);
+      expect(streamRequests[1].headers.has("Last-Event-ID")).toBe(false);
+      expect(new URL(streamRequests[1].url).searchParams.has("since")).toBe(
+        false,
+      );
+      client.disconnect();
+    },
+  );
+
+  it("continues valid same-chunk checkpoints after rejecting resync IDs", async () => {
+    const onResync = vi.fn();
+    const client = new WorkspaceSSEClient("test-ws", { onResync });
+    await client.connect();
+    await expectRequestCount(1);
+    streamRequests[0].push(
+      'id: skipped\nevent: resync\ndata: {"reason":"expired"}\n\nid: valid\nevent: checkpoint\ndata: {}\n\n',
+    );
+    await flush();
+    expect(onResync).toHaveBeenCalledWith({
+      from: undefined,
+      to: "",
+      reason: "expired",
+    });
+    expect(client.getLastEventId()).toBe("valid");
+    streamRequests[0].fail();
+    await flush();
+    await vi.advanceTimersByTimeAsync(1000);
+    await expectRequestCount(2);
+    expect(streamRequests[1].headers.get("Last-Event-ID")).toBe("valid");
+    expect(new URL(streamRequests[1].url).searchParams.has("since")).toBe(
+      false,
+    );
+    client.disconnect();
+  });
 
   it("keeps parsing messages when a mutation callback throws", async () => {
     const callbackError = new Error("listener failed");
