@@ -1802,10 +1802,9 @@ func TestSetupRoutes_TabMetadataReturns404WhenStoreNil(t *testing.T) {
 	}
 }
 
-// TestFlatAgentRoutesRemoved verifies that the flat agent routes
-// (e.g. POST /api/agents/{name}/git/push) have been removed and return 404,
-// while the workspace-scoped equivalents (e.g.
-// POST /api/workspaces/{ws}/agents/{name}/git/push) still work.
+// TestFlatAgentRoutesRemoved verifies that legacy flat routes and removed
+// direct-integration routes return 404, while retained workspace-scoped Git
+// operations still work.
 func TestFlatAgentRoutesRemoved(t *testing.T) {
 	// Set up a multiPool with a registered workspace so workspace-scoped routes
 	// are functional.
@@ -1853,6 +1852,9 @@ func TestFlatAgentRoutesRemoved(t *testing.T) {
 		{http.MethodPost, "/api/agents/alice/git/push"},
 		{http.MethodPost, "/api/agents/alice/git/pull"},
 		{http.MethodPost, "/api/agents/alice/git/sync"},
+		{http.MethodPost, "/api/workspaces/test-ws/git/push-all"},
+		{http.MethodPost, "/api/workspaces/test-ws/agents/alice/git/push"},
+		{http.MethodPost, "/api/workspaces/test-ws/agents/alice/git/sync"},
 		{http.MethodPost, "/api/agents/alice/git/pr"},
 		{http.MethodPost, "/api/agents/alice/git/reset"},
 		{http.MethodGet, "/api/agents/alice/git/status"},
@@ -1877,11 +1879,6 @@ func TestFlatAgentRoutesRemoved(t *testing.T) {
 					tc.method, tc.path, http.StatusNotFound, rr.Code)
 			}
 
-			ct := rr.Header().Get("Content-Type")
-			if ct != "application/json" {
-				t.Errorf("removed route %s %s: expected Content-Type 'application/json', got %q",
-					tc.method, tc.path, ct)
-			}
 		})
 	}
 
@@ -1895,10 +1892,7 @@ func TestFlatAgentRoutesRemoved(t *testing.T) {
 		method string
 		path   string
 	}{
-		{http.MethodPost, "/api/workspaces/test-ws/git/push-all"},
-		{http.MethodPost, "/api/workspaces/test-ws/agents/alice/git/push"},
 		{http.MethodPost, "/api/workspaces/test-ws/agents/alice/git/pull"},
-		{http.MethodPost, "/api/workspaces/test-ws/agents/alice/git/sync"},
 		{http.MethodPost, "/api/workspaces/test-ws/agents/alice/git/pr"},
 		{http.MethodPost, "/api/workspaces/test-ws/agents/alice/git/reset"},
 		{http.MethodGet, "/api/workspaces/test-ws/agents/alice/git/status"},

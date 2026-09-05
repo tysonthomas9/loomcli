@@ -2519,30 +2519,6 @@ paths:
               schema:
                 type: object
 
-  /api/workspaces/{ws}/agents/{name}/git/push:
-    post:
-      operationId: gitPush
-      tags: [git]
-      summary: Push agent worktree to remote
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-        - $ref: "#/components/parameters/AgentName"
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                target:
-                  type: string
-                  description: Remote branch target
-      responses:
-        "200":
-          description: Push result
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MessageResponse"
 
   /api/workspaces/{ws}/agents/{name}/git/pull:
     post:
@@ -2569,21 +2545,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/MessageResponse"
 
-  /api/workspaces/{ws}/agents/{name}/git/sync:
-    post:
-      operationId: gitSync
-      tags: [git]
-      summary: Sync agent worktree (pull + push)
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-        - $ref: "#/components/parameters/AgentName"
-      responses:
-        "200":
-          description: Sync result
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MessageResponse"
 
   /api/workspaces/{ws}/agents/{name}/git/pr:
     post:
@@ -2642,20 +2603,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/MessageResponse"
 
-  /api/workspaces/{ws}/git/push-all:
-    post:
-      operationId: gitPushAll
-      tags: [git]
-      summary: Push all agent worktrees to remote
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-      responses:
-        "200":
-          description: Push results
-          content:
-            application/json:
-              schema:
-                type: object
 
   # ── Pull Requests ───────────────────────────────────────────────────────
   /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}:

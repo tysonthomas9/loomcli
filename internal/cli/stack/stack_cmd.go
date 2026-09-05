@@ -18,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	gh "github.com/tysonthomas9/loomcli/internal/github"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
 	"github.com/tysonthomas9/loomcli/internal/stackpublish"
@@ -33,9 +34,71 @@ var stackCmd = &cobra.Command{
 func init() {
 	stackCmd.AddCommand(
 		initCmd(), listCmd(), showCmd(), statusCmd(), validateCmd(),
-		addCmd(), moveCmd(), setBaseCmd(), removeCmd(), publishCmd(), restackCmd(),
+		addCmd(), moveCmd(), setBaseCmd(), removeCmd(), publishCmd(), restackCmd(), mergeCmd(),
 	)
 	cli.RegisterCommand(stackCmd)
+}
+
+func mergeCmd() *cobra.Command {
+	var squash, merge, rebase bool
+	c := &cobra.Command{
+		Use: "merge <stack-or-pr>", Short: "Merge a stack through the official gh-stack extension",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			selected := 0
+			for _, enabled := range []bool{squash, merge, rebase} {
+				if enabled {
+					selected++
+				}
+			}
+			if selected != 1 {
+				return errors.New("exactly one of --squash, --merge, or --rebase is required")
+			}
+			deps := cli.GetDeps(cmd)
+			if err := requireOfficialGhStack(deps); err != nil {
+				return err
+			}
+			if err := gh.RepositoryProtection(cmd.Context(), func(_ context.Context, name string, args ...string) (string, string, error) {
+				result := deps.Exec.Run(".", name, args...)
+				return result.Stdout, result.Stderr, result.Err
+			}); err != nil {
+				return err
+			}
+			method := "--squash"
+			if merge {
+				method = "--merge"
+			} else if rebase {
+				method = "--rebase"
+			}
+			ghArgs := []string{"stack", "merge", args[0], "--yes", method}
+			outResult := deps.Exec.Run(".", "gh", ghArgs...)
+			if outResult.Err != nil {
+				return fmt.Errorf("gh stack merge failed: %s", strings.TrimSpace(outResult.Stderr))
+			}
+			fmt.Print(outResult.Stdout)
+			return nil
+		},
+	}
+	c.Flags().BoolVar(&squash, "squash", false, "squash merge")
+	c.Flags().BoolVar(&merge, "merge", false, "merge commit")
+	c.Flags().BoolVar(&rebase, "rebase", false, "rebase merge")
+	return c
+}
+
+func requireOfficialGhStack(deps *cli.Deps) error {
+	if result := deps.Exec.Run(".", "gh", "--version"); result.Err != nil {
+		return errors.New("gh CLI is required for stack merges")
+	}
+	result := deps.Exec.Run(".", "gh", "extension", "list")
+	if result.Err != nil {
+		return errors.New("cannot inspect GitHub CLI extensions")
+	}
+	for _, field := range strings.Fields(result.Stdout + "\n" + result.Stderr) {
+		if field == "github/gh-stack" {
+			return nil
+		}
+	}
+	return errors.New("official github/gh-stack extension is required; install it before merging")
 }
 
 // helpers --------------------------------------------------------------------

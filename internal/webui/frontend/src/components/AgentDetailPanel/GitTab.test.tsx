@@ -30,15 +30,11 @@ const mockRefetch = vi.fn().mockResolvedValue(undefined);
 
 // Mock useGitActions to provide a no-op actions object
 const mockActions = {
-  push: vi.fn(),
   pull: vi.fn(),
-  sync: vi.fn(),
   createPR: vi.fn(),
   reset: vi.fn(),
   updateTarget: vi.fn(),
-  pushState: { isLoading: false, error: null },
   pullState: { isLoading: false, error: null },
-  syncState: { isLoading: false, error: null },
   prState: { isLoading: false, error: null },
   resetState: { isLoading: false, error: null },
   targetState: { isLoading: false, error: null },

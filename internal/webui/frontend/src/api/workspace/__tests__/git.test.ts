@@ -12,9 +12,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import {
   fetchGitStatus,
-  gitPush,
   gitPull,
-  gitSync,
   gitCreatePR,
   gitReset,
   gitUpdateTarget,
@@ -76,50 +74,6 @@ describe("git API functions", () => {
     });
   });
 
-  describe("gitPush", () => {
-    it("calls POST with correct URL, body, and timeout", async () => {
-      const mockResult = {
-        success: true,
-        message: "Pushed",
-        already_up_to_date: false,
-      };
-      mockPost.mockResolvedValue(mockResult);
-
-      const result = await gitPush("test-ws-id", "nova", "main");
-
-      expect(mockPost).toHaveBeenCalledWith(
-        "/api/workspaces/test-ws-id/agents/nova/git/push",
-        { target: "main" },
-        { timeout: 60000 },
-      );
-      expect(result).toEqual(mockResult);
-    });
-
-    it("passes undefined target when not specified", async () => {
-      mockPost.mockResolvedValue({});
-
-      await gitPush("test-ws-id", "nova");
-
-      expect(mockPost).toHaveBeenCalledWith(
-        "/api/workspaces/test-ws-id/agents/nova/git/push",
-        { target: undefined },
-        { timeout: 60000 },
-      );
-    });
-
-    it("encodes agent name in URL", async () => {
-      mockPost.mockResolvedValue({});
-
-      await gitPush("test-ws-id", "special/agent");
-
-      expect(mockPost).toHaveBeenCalledWith(
-        "/api/workspaces/test-ws-id/agents/special%2Fagent/git/push",
-        { target: undefined },
-        { timeout: 60000 },
-      );
-    });
-  });
-
   describe("gitPull", () => {
     it("calls POST with correct URL, body, and timeout", async () => {
       const mockResult = {
@@ -149,25 +103,6 @@ describe("git API functions", () => {
         { source: undefined },
         { timeout: 60000 },
       );
-    });
-  });
-
-  describe("gitSync", () => {
-    it("calls POST with correct URL, empty body, and timeout", async () => {
-      const mockResult = {
-        push_result: { success: true },
-        pull_result: { success: true },
-      };
-      mockPost.mockResolvedValue(mockResult);
-
-      const result = await gitSync("test-ws-id", "ember");
-
-      expect(mockPost).toHaveBeenCalledWith(
-        "/api/workspaces/test-ws-id/agents/ember/git/sync",
-        {},
-        { timeout: 60000 },
-      );
-      expect(result).toEqual(mockResult);
     });
   });
 

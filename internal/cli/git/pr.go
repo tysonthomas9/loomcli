@@ -18,25 +18,12 @@ var prCmd = &cobra.Command{
 	Short:             "Create GitHub PR from worktree branch",
 	GroupID:           "git",
 	ValidArgsFunction: cli.BranchCompletion,
-	Long: `Create a GitHub pull request from a worktree branch to a target branch.
-
-Unlike 'loom push' which directly merges, 'loom pr' creates a PR for code
-review before merging. Uses 'gh pr create' under the hood.
-
-Arguments:
-  worktree    Source worktree to create PR from (e.g., falcon)
-  target      Target branch for the PR (default: main or per-repo default)
-
-Flags:
-  -a, --all          Create PRs for all worktree branches
-  -W, --workspace    Workspace to operate on
-
-Examples:
-  loom pr falcon                        # Create PR from falcon to main
-  loom pr falcon develop                # Create PR from falcon to develop
-  loom pr --all                         # Create PRs for all worktrees
-  loom pr --all main                    # Create PRs for all worktrees to main
-  loom pr -W myworkspace falcon         # Create PR in specific workspace`,
+	Long: "Create a GitHub pull request from a worktree branch to a target branch.\n\n" +
+		"loom pr publishes a feature branch and creates a pull request for review.\n" +
+		"It uses gh pr create under the hood; GitHub owns the merge.\n\n" +
+		"Arguments:\n  worktree    Source worktree to create PR from (e.g., falcon)\n  target      Target branch for the PR (default: main or per-repo default)\n\n" +
+		"Flags:\n  -a, --all          Create PRs for all worktree branches\n  -W, --workspace    Workspace to operate on\n\n" +
+		"Examples:\n  loom pr falcon                        # Create PR from falcon to main\n  loom pr falcon develop                # Create PR from falcon to develop\n  loom pr --all                         # Create PRs for all worktrees\n  loom pr --all main                    # Create PRs for all worktrees to main\n  loom pr -W myworkspace falcon         # Create PR in specific workspace",
 	Args: func(cmd *cobra.Command, args []string) error {
 		if prAll {
 			if len(args) > 1 {
@@ -153,6 +140,13 @@ func prAllWorkspaces(deps *cli.Deps, targetBranch string) {
 	fmt.Println("=========================================")
 	fmt.Println("All workspace PRs created!")
 	fmt.Println("=========================================")
+}
+
+func targetBranchDisplay(targetBranch string) string {
+	if targetBranch == "" {
+		return "per-repo default"
+	}
+	return targetBranch
 }
 
 func prWorkspaceRepos(deps *cli.Deps, resolver *cli.Resolver, sourceBranch, targetBranch string) {

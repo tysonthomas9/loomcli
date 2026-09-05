@@ -231,7 +231,6 @@ func (m *mockFileOps) RepairCheckout(_, _, _, _ string, _ bool) (ops.RepairResul
 // mockGitOps implements ops.GitOps for testing in the root package.
 type mockGitOps struct {
 	resolveFunc            func(name string) (*ops.AgentWorktree, error)
-	pushFunc               func(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPushResult, error)
 	pullFunc               func(worktreePath, currentBranch, sourceBranch, remote string) (*ops.GitPullResult, error)
 	createPRFunc           func(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPRResult, error)
 	resetFunc              func(worktreePath, worktreeName, targetBranch string, force, push bool) (*ops.GitResetResult, error)
@@ -252,12 +251,6 @@ func (m *mockGitOps) ResolveAgentWorktree(_, name string) (*ops.AgentWorktree, e
 		return m.resolveFunc(name)
 	}
 	return nil, errors.New("not found")
-}
-func (m *mockGitOps) Push(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPushResult, error) {
-	if m.pushFunc != nil {
-		return m.pushFunc(worktreePath, sourceBranch, targetBranch, remote)
-	}
-	return &ops.GitPushResult{Success: true, Message: "pushed"}, nil
 }
 func (m *mockGitOps) Pull(worktreePath, currentBranch, sourceBranch, remote string) (*ops.GitPullResult, error) {
 	if m.pullFunc != nil {
