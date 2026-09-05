@@ -301,6 +301,12 @@ loom agentdef add falcon --role reviewer --repo frontend
 loom agentdef update falcon --auto
 loom agentdef list
 
+# `auto` is the durable enable switch, not a start-once flag. `--auto=false`
+# stops the daemon supervising the agent — it is drained on the next config
+# poll, and `loom agentdef start` / `loom data agent start` refuse it until
+# `--auto` puts it back. Agents created without the flag are enabled.
+loom agentdef update ci-verifier --auto=false
+
 # Post-run completion hooks: the DAEMON, not the agent's prompt, does the
 # bookkeeping after a successful run. Writes happen in order, and a failed
 # write reopens the task instead of leaving it half-finished.
