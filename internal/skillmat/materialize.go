@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -24,7 +23,6 @@ import (
 
 	"golang.org/x/text/cases"
 	"golang.org/x/text/unicode/norm"
-	"gopkg.in/yaml.v3"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -136,7 +134,10 @@ func materialize(ctx context.Context, st store.Store, workspace, roleName, targe
 		}
 		return fmt.Errorf("load skills: %w", err)
 	}
-	entries := desiredEntries(domain.ResolveSkillChainDetail(skills, roleName))
+	entries, err := desiredEntries(ctx, st.WorkspaceFiles(), workspace, domain.ResolveSkillChainDetail(skills, roleName))
+	if err != nil {
+		return err
+	}
 	projectionHash, err := hashEntries(entries)
 	if err != nil {
 		return fmt.Errorf("hash skill projection: %w", err)
@@ -384,78 +385,51 @@ func isUnavailableStoreError(err error) bool {
 	return isTransportError(err) || fleetDBServerErrorPattern.MatchString(err.Error())
 }
 
-// desiredEntries derives the whole projection, skipping any single skill it
-// cannot project rather than failing.
-//
-// The skip is deliberate and load-bearing. Every caller of Materialize treats a
-// non-StoreUnavailable error as fatal — worker spawn aborts, lead turn delivery
-// is refused, the pre-turn hook exits 2 — so returning an error here would let
-// one malformed stored record stop skills for every agent in the workspace
-// until someone deleted it. fleet-db rejects these shapes at write time, so a
-// record that fails validation here is already an anomaly; dropping it and
-// warning keeps the rest of the workspace working. The dropped skill is left
-// out of the catalog index too, so the index never advertises a skill that was
-// not written.
-func desiredEntries(resolved []domain.ResolvedSkill) []desiredEntry {
+// The complete desired projection is fetched and validated before any local
+// mutation. A missing byte or integrity failure therefore leaves the previous
+// materialization intact instead of replacing it with a partial projection.
+func desiredEntries(ctx context.Context, files store.WorkspaceFileStore, workspace string, resolved []domain.ResolvedSkill) ([]desiredEntry, error) {
 	entries := make([]desiredEntry, 0, len(resolved)*2+3)
-	projected := make([]domain.ResolvedSkill, 0, len(resolved))
 	for _, item := range resolved {
 		if item.Skill == nil {
 			continue
 		}
-		skillEntries, err := entriesForSkill(item.Skill)
+		snapshot, err := loadMaterializedSkillTree(ctx, files, workspace, item.Skill)
 		if err != nil {
-			slog.Warn("skipping skill that cannot be materialized",
-				"skill", item.Skill.Name, "scope", item.Skill.Scope, "error", err)
-			continue
+			if isUnavailableStoreError(err) {
+				return nil, &StoreUnavailableError{Err: err}
+			}
+			return nil, err
+		}
+		skillEntries, err := entriesForSkill(item.Skill, snapshot)
+		if err != nil {
+			return nil, err
 		}
 		entries = append(entries, skillEntries...)
-		projected = append(projected, item)
 	}
-	entries = append(entries, catalogEntries(projected)...)
+	entries = append(entries, catalogEntries(resolved)...)
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
-	return entries
+	return entries, nil
 }
 
 // entriesForSkill derives the projection entries for one skill: its SKILL.md,
 // one entry per bundled file, and the .claude symlink that points at the
 // directory. An error means the skill is unprojectable as stored.
-func entriesForSkill(skill *domain.Skill) ([]desiredEntry, error) {
+func entriesForSkill(skill *domain.Skill, snapshot domain.SkillFileTreeSnapshot) ([]desiredEntry, error) {
 	if err := domain.ValidateSkillName(skill.Name); err != nil {
 		return nil, fmt.Errorf("skill name: %w", err)
 	}
-	frontmatter, err := yaml.Marshal(struct {
-		Name        string `yaml:"name"`
-		Description string `yaml:"description"`
-	}{Name: skill.Name, Description: skill.Description})
-	if err != nil {
-		return nil, fmt.Errorf("render frontmatter: %w", err)
-	}
 	skillDir := path.Join(AgentsSkillsDir, skill.Name)
-	entries := make([]desiredEntry, 0, len(skill.Files)+2)
-	entries = append(entries, desiredEntry{
-		Path:       path.Join(skillDir, domain.SkillFileNameSKILLMD),
-		Kind:       entryFile,
-		Content:    []byte("---\n" + string(frontmatter) + "---\n" + skill.Content),
-		Mode:       0o644,
-		Skill:      skill.Name,
-		SourcePath: domain.SkillFileNameSKILLMD,
-	})
-	for _, file := range skill.Files {
-		// The stronger domain rule, not a local subset: this is the filesystem
-		// boundary, and it also catches the length caps, DOS device names and
-		// the SKILL.md reservation that a stored record could carry.
-		if err := domain.ValidateSkillFilePath(file.Path); err != nil {
-			return nil, fmt.Errorf("bundled file %q: %w", file.Path, err)
-		}
+	entries := make([]desiredEntry, 0, len(snapshot.Files)+1)
+	for _, file := range snapshot.Files {
 		mode := os.FileMode(0o644)
-		if file.Executable {
+		if file.Path != domain.SkillFileNameSKILLMD && file.Executable {
 			mode = 0o755
 		}
 		entries = append(entries, desiredEntry{
 			Path:       path.Join(skillDir, file.Path),
 			Kind:       entryFile,
-			Content:    []byte(file.Content),
+			Content:    append([]byte(nil), file.Bytes...),
 			Mode:       mode,
 			Skill:      skill.Name,
 			SourcePath: file.Path,
@@ -477,6 +451,39 @@ func entriesForSkill(skill *domain.Skill) ([]desiredEntry, error) {
 		return nil, err
 	}
 	return entries, nil
+}
+
+func loadMaterializedSkillTree(ctx context.Context, files store.WorkspaceFileStore, workspace string, skill *domain.Skill) (domain.SkillFileTreeSnapshot, error) {
+	if files == nil || skill.FileTreeRevision == "" {
+		return domain.SkillFileTreeSnapshot{}, fmt.Errorf("load skill %q tree: %w", skill.Name, domain.ErrIntegrity)
+	}
+	tree, err := files.GetTree(ctx, workspace, skill.FileTreeRevision)
+	if err != nil {
+		return domain.SkillFileTreeSnapshot{}, fmt.Errorf("load skill %q tree %q: %w", skill.Name, skill.FileTreeRevision, err)
+	}
+	if tree == nil || tree.Revision != skill.FileTreeRevision || tree.WorkspaceKey != workspace {
+		return domain.SkillFileTreeSnapshot{}, fmt.Errorf("skill %q tree identity mismatch: %w", skill.Name, domain.ErrIntegrity)
+	}
+	manifest := make([]domain.SkillFileTreeFile, 0, len(tree.Files))
+	for _, file := range tree.Files {
+		body, err := files.Download(ctx, workspace, tree.Revision, file.Path)
+		if err != nil {
+			return domain.SkillFileTreeSnapshot{}, fmt.Errorf("download skill %q file %q: %w", skill.Name, file.Path, err)
+		}
+		digest := sha256.Sum256(body)
+		if int64(len(body)) != file.SizeBytes || fmt.Sprintf("sha256:%x", digest) != file.ContentHash {
+			return domain.SkillFileTreeSnapshot{}, fmt.Errorf("skill %q file %q bytes do not match immutable metadata: %w", skill.Name, file.Path, domain.ErrIntegrity)
+		}
+		manifest = append(manifest, domain.SkillFileTreeFile{Path: file.Path, Bytes: body, MediaType: file.MediaType, Executable: file.Executable})
+	}
+	snapshot, err := domain.ValidateSkillFileTree(manifest)
+	if err != nil {
+		return domain.SkillFileTreeSnapshot{}, fmt.Errorf("validate skill %q tree: %w", skill.Name, err)
+	}
+	if snapshot.Name != skill.Name || snapshot.Description != skill.Description {
+		return domain.SkillFileTreeSnapshot{}, fmt.Errorf("skill %q metadata does not match SKILL.md: %w", skill.Name, domain.ErrIntegrity)
+	}
+	return *snapshot, nil
 }
 
 func catalogEntries(resolved []domain.ResolvedSkill) []desiredEntry {

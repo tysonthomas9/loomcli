@@ -10,7 +10,10 @@ export type SkillsScopeGroup =
 export interface SkillCatalogFile {
   path: string;
   revision: string;
+  size_bytes: number;
+  media_type?: string | undefined;
   executable: boolean;
+  text_editable: boolean;
 }
 
 export interface SkillCatalogSkill {
@@ -18,7 +21,7 @@ export interface SkillCatalogSkill {
   scope: SkillScope;
   role?: string | undefined;
   description: string;
-  content_revision: string;
+  file_tree_revision: string;
   files: SkillCatalogFile[];
   created_by?: string | undefined;
   updated_by?: string | undefined;

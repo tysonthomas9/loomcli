@@ -43,7 +43,7 @@ func TestClassifyHTTPError_ExistingMappingsUnchanged(t *testing.T) {
 
 func TestClassifyHTTPError_SkillForbiddenStaysDistinct(t *testing.T) {
 	t.Parallel()
-	err := classifyHTTPError(http.MethodPut, "/api/v1/WS/roles/reviewer/skills/code-review/files/SKILL.md", http.StatusForbidden, nil)
+	err := classifyHTTPError(http.MethodPatch, "/api/v1/WS/roles/reviewer/skills/code-review", http.StatusForbidden, nil)
 	if !errors.Is(err, domain.ErrSkillForbidden) {
 		t.Fatalf("err = %v, want errors.Is ErrSkillForbidden", err)
 	}
@@ -61,7 +61,7 @@ func TestClassifyHTTPError_SkillForbiddenMatchesOnlySkillRouteFamilies(t *testin
 	}{
 		{name: "workspace collection", path: "/api/v1/WS/skills", wantSkill: true},
 		{name: "workspace item", path: "/api/v1/WS/skills/code-review", wantSkill: true},
-		{name: "role file", path: "/api/v1/WS/roles/reviewer/skills/code-review/files/SKILL.md", wantSkill: true},
+		{name: "role skill", path: "/api/v1/WS/roles/reviewer/skills/code-review", wantSkill: true},
 		{name: "repo named skills", path: "/api/v1/WS/repos/skills", wantSkill: false},
 		{name: "unrelated suffix", path: "/api/v1/WS/things/skills", wantSkill: false},
 	}

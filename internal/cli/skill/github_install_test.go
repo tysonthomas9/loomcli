@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -110,12 +111,13 @@ func TestParseGitHubSource(t *testing.T) {
 func TestSkillInstallCommandFetchesAndCreates(t *testing.T) {
 	withoutAgentName(t)
 	t.Setenv("GITHUB_TOKEN", "fixture-token")
+	sourceDocument := []byte("---\nname: fetched-skill\ndescription: Use this fetched skill\nlicense: MIT\nmetadata: fixture\n---\n# Fetched body\n")
 	tarball := buildSkillTarball(t,
 		tarFixtureEntry{name: "repo-main/", kind: tar.TypeDir, mode: 0o755},
 		tarFixtureEntry{
 			name: "repo-main/SKILL.md",
 			mode: 0o644,
-			body: "---\nname: fetched-skill\ndescription: Use this fetched skill\nlicense: MIT\nmetadata: fixture\n---\n# Fetched body\n",
+			body: string(sourceDocument),
 		},
 		tarFixtureEntry{
 			name: "repo-main/scripts/check.sh",
@@ -153,8 +155,8 @@ func TestSkillInstallCommandFetchesAndCreates(t *testing.T) {
 	if !strings.Contains(out, "Installed skill TEST/workspace:fetched-skill") {
 		t.Fatalf("install output = %q", out)
 	}
-	if !strings.Contains(out, "Notice: dropped SKILL.md frontmatter keys: license, metadata") {
-		t.Fatalf("install output is missing dropped-key notice: %q", out)
+	if strings.Contains(out, "dropped SKILL.md frontmatter keys") {
+		t.Fatalf("preserved install incorrectly reported dropped metadata: %q", out)
 	}
 	if !strings.Contains(out, "Notice: skipped hidden skill paths: .env, .git") {
 		t.Fatalf("install output is missing hidden-path notice: %q", out)
@@ -167,14 +169,23 @@ func TestSkillInstallCommandFetchesAndCreates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get installed skill: %v", err)
 	}
-	if sk.Description != "Use this fetched skill" || sk.Content != "# Fetched body\n" {
+	snapshot, err := loadSkillSnapshot(context.Background(), st.WorkspaceFiles(), sk)
+	if err != nil {
+		t.Fatalf("load installed tree: %v", err)
+	}
+	if sk.Description != "Use this fetched skill" || string(snapshot.Body) != "# Fetched body\n" {
 		t.Fatalf("installed skill = %+v", sk)
+	}
+	storedDocument, err := st.WorkspaceFiles().Download(context.Background(), testWorkspace, sk.FileTreeRevision, domain.SkillFileNameSKILLMD)
+	if err != nil || !bytes.Equal(storedDocument, sourceDocument) {
+		t.Fatalf("stored SKILL.md changed: %q, %v", storedDocument, err)
 	}
 	if sk.Source != "github.com/owner/repo@HEAD" || sk.SourceRef != "" {
 		t.Fatalf("installed provenance = source %q source_ref %q", sk.Source, sk.SourceRef)
 	}
-	if len(sk.Files) != 1 || sk.Files[0].Path != "scripts/check.sh" || !sk.Files[0].Executable || sk.Files[0].Content != "#!/bin/sh\necho checked\n" {
-		t.Fatalf("installed files = %+v", sk.Files)
+	files := bundledTreeFiles(snapshot.Files)
+	if len(files) != 1 || files[0].Path != "scripts/check.sh" || !files[0].Executable || string(files[0].Bytes) != "#!/bin/sh\necho checked\n" {
+		t.Fatalf("installed files = %+v", files)
 	}
 
 	_, collisionErr := executeSkillCommand(t, "", "install", "owner/repo")
@@ -206,14 +217,15 @@ func TestGitHubSkillInstallerSelectsExplicitSubpath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fetch explicit subpath: %v", err)
 	}
-	if got.Name != "renamed-skill" || got.Description != "Second skill" || got.Content != "second body\n" {
+	if got.Name != "renamed-skill" || got.Description != "Second skill" || string(got.Snapshot.Body) != "second body\n" {
 		t.Fatalf("fetched skill = %+v", got)
 	}
 	if got.Source != "github.com/owner/repo/skills/two@v1" {
 		t.Fatalf("source = %q", got.Source)
 	}
-	if len(got.Files) != 1 || got.Files[0].Path != "guide.txt" {
-		t.Fatalf("files = %+v", got.Files)
+	files := bundledTreeFiles(got.Snapshot.Files)
+	if len(files) != 1 || files[0].Path != "guide.txt" {
+		t.Fatalf("files = %+v", files)
 	}
 }
 
@@ -307,7 +319,7 @@ func TestGitHubSkillInstallerRejectsDecodedBinaryFrontmatter(t *testing.T) {
 	}
 }
 
-func TestGitHubSkillInstallerAllowsMultilineDescription(t *testing.T) {
+func TestGitHubSkillInstallerRejectsMultilineDescription(t *testing.T) {
 	tarball := buildSkillTarball(t,
 		tarFixtureEntry{
 			name: "repo-main/SKILL.md",
@@ -318,12 +330,9 @@ func TestGitHubSkillInstallerAllowsMultilineDescription(t *testing.T) {
 	server := serveTarball(t, tarball, nil)
 	installer := githubSkillInstaller{HTTPClient: server.Client(), CodeloadBaseURL: server.URL}
 
-	got, err := installer.Fetch(context.Background(), "owner/repo", "")
-	if err != nil {
-		t.Fatalf("fetch multiline description: %v", err)
-	}
-	if got.Description != "First line\nSecond line" {
-		t.Fatalf("description = %q, want preserved newlines", got.Description)
+	_, err := installer.Fetch(context.Background(), "owner/repo", "")
+	if !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), "control characters") {
+		t.Fatalf("fetch multiline description = %v, want invalid control character", err)
 	}
 }
 
@@ -394,23 +403,26 @@ func TestGitHubSkillInstallerOmitsEmptyTokenHeader(t *testing.T) {
 	}
 }
 
-func TestGitHubSkillInstallerRejectsBinaryFiles(t *testing.T) {
+func TestGitHubSkillInstallerPreservesBinaryFiles(t *testing.T) {
 	tarball := buildSkillTarball(t,
 		tarFixtureEntry{name: "repo-main/tool/SKILL.md", mode: 0o644, body: skillDocument("tool", "Tool")},
-		tarFixtureEntry{name: "repo-main/tool/assets/nul.dat", mode: 0o644, body: "has\x00nul"},
+		tarFixtureEntry{name: "repo-main/tool/assets/archive.bin", mode: 0o644, body: "has\x00nul"},
 		tarFixtureEntry{name: "repo-main/tool/assets/utf8.dat", mode: 0o644, data: []byte{0xff, 0xfe}},
 	)
 	server := serveTarball(t, tarball, nil)
 	installer := githubSkillInstaller{HTTPClient: server.Client(), CodeloadBaseURL: server.URL}
 
-	_, err := installer.Fetch(context.Background(), "owner/repo", "")
-	if err == nil {
-		t.Fatal("binary file error = nil")
+	got, err := installer.Fetch(context.Background(), "owner/repo", "")
+	if err != nil {
+		t.Fatalf("fetch binary skill: %v", err)
 	}
-	for _, want := range []string{"binary content is not supported", "assets/nul.dat", "assets/utf8.dat"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("binary error %q does not contain %q", err, want)
-		}
+	files := bundledTreeFiles(got.Snapshot.Files)
+	byPath := make(map[string][]byte, len(files))
+	for _, file := range files {
+		byPath[file.Path] = file.Bytes
+	}
+	if !bytes.Equal(byPath["assets/archive.bin"], []byte("has\x00nul")) || !bytes.Equal(byPath["assets/utf8.dat"], []byte{0xff, 0xfe}) {
+		t.Fatalf("binary files changed: %+v", files)
 	}
 }
 

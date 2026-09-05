@@ -2,8 +2,6 @@ package memstore
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"sort"
 	"sync"
@@ -22,13 +20,15 @@ type skillStore struct {
 	mu    sync.RWMutex
 	items map[string]map[string]*domain.Skill // wsKey → ref → Skill
 	roles *roleStore
+	files *workspaceFileStore
 	actor string
 }
 
-func newSkillStore(roles *roleStore) *skillStore {
+func newSkillStore(roles *roleStore, files *workspaceFileStore) *skillStore {
 	return &skillStore{
 		items: make(map[string]map[string]*domain.Skill),
 		roles: roles,
+		files: files,
 		actor: defaultSkillActor,
 	}
 }
@@ -54,42 +54,6 @@ func (s *skillStore) setActor(actor string) {
 	s.mu.Lock()
 	s.actor = actor
 	s.mu.Unlock()
-}
-
-// --- revisions ---
-//
-// Derived, never stored: a revision is a function of the content, so keeping a
-// copy would create a second value that can disagree with the first. Stamped
-// on the way out only, exactly as fleet-db does it, and with the same
-// derivation so a revision a test captures here has the same shape as one off
-// the wire.
-
-func skillRevision(content string, executable bool) string {
-	h := sha256.New()
-	if executable {
-		h.Write([]byte{1})
-	} else {
-		h.Write([]byte{0})
-	}
-	h.Write([]byte(content))
-	return hex.EncodeToString(h.Sum(nil))[:16]
-}
-
-func skillFileRevision(f domain.SkillFile) string { return skillRevision(f.Content, f.Executable) }
-
-func skillContentRevision(content string) string { return skillRevision(content, false) }
-
-// withRevisions clones a skill with every derived revision filled in.
-func withRevisions(s *domain.Skill) *domain.Skill {
-	out := s.Clone()
-	if out == nil {
-		return nil
-	}
-	out.ContentRevision = skillContentRevision(out.Content)
-	for i := range out.Files {
-		out.Files[i].Revision = skillFileRevision(out.Files[i])
-	}
-	return out
 }
 
 // --- ownership guard ---
@@ -118,8 +82,8 @@ func (s *skillStore) checkProvenance(existing *domain.Skill, source string, forc
 
 // --- SkillStore ---
 
-func (s *skillStore) Create(_ context.Context, in store.SkillCreate) (*domain.Skill, error) {
-	if err := s.validateWrite(in.WorkspaceKey, in.Ref, in.Files); err != nil {
+func (s *skillStore) Create(ctx context.Context, in store.SkillCreate) (*domain.Skill, error) {
+	if err := s.validateWrite(ctx, in.WorkspaceKey, in.Ref, in.Description, in.FileTreeRevision); err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
@@ -133,25 +97,24 @@ func (s *skillStore) Create(_ context.Context, in store.SkillCreate) (*domain.Sk
 	}
 	sk := s.newSkill(in)
 	s.items[in.WorkspaceKey][key] = sk
-	return withRevisions(sk), nil
+	return sk.Clone(), nil
 }
 
 func (s *skillStore) newSkill(in store.SkillCreate) *domain.Skill {
 	now := time.Now().UTC()
 	return &domain.Skill{
-		WorkspaceKey: in.WorkspaceKey,
-		Name:         in.Ref.Name,
-		Scope:        in.Ref.Scope,
-		RoleName:     in.Ref.RoleName,
-		Description:  in.Description,
-		Content:      in.Content,
-		Files:        append([]domain.SkillFile(nil), in.Files...),
-		CreatedBy:    s.actor,
-		UpdatedBy:    s.actor,
-		Source:       in.Source,
-		SourceRef:    in.SourceRef,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		WorkspaceKey:     in.WorkspaceKey,
+		Name:             in.Ref.Name,
+		Scope:            in.Ref.Scope,
+		RoleName:         in.Ref.RoleName,
+		Description:      in.Description,
+		FileTreeRevision: in.FileTreeRevision,
+		CreatedBy:        s.actor,
+		UpdatedBy:        s.actor,
+		Source:           in.Source,
+		SourceRef:        in.SourceRef,
+		CreatedAt:        now,
+		UpdatedAt:        now,
 	}
 }
 
@@ -161,18 +124,43 @@ func (s *skillStore) newSkill(in store.SkillCreate) *domain.Skill {
 // the server would refuse is a test that passes on data production cannot
 // produce. The bundled-file rules are the ones worth mirroring: a path fleet-db
 // refuses is a path the materializer would then have to defend against.
-func (s *skillStore) validateWrite(ws string, ref domain.SkillRef, files []domain.SkillFile) error {
+func (s *skillStore) validateWrite(ctx context.Context, ws string, ref domain.SkillRef, description, revision string) error {
 	if err := s.validateTarget(ws, ref); err != nil {
 		return err
 	}
-	return validateSkillFiles(files)
+	if err := domain.ValidateSkillDescription(description); err != nil {
+		return err
+	}
+	if revision == "" {
+		return fmt.Errorf("skill file_tree_revision is required: %w", domain.ErrInvalid)
+	}
+	if s.files == nil {
+		return fmt.Errorf("workspace file store unavailable: %w", domain.ErrNotFound)
+	}
+	return s.validateReferencedTree(ctx, ws, ref, description, revision)
 }
 
-func validateSkillFiles(files []domain.SkillFile) error {
-	for _, file := range files {
-		if err := domain.ValidateSkillFilePath(file.Path); err != nil {
+func (s *skillStore) validateReferencedTree(ctx context.Context, ws string, ref domain.SkillRef, description, revision string) error {
+	tree, err := s.files.GetTree(ctx, ws, revision)
+	if err != nil {
+		return err
+	}
+	manifest := make([]domain.SkillFileTreeFile, 0, len(tree.Files))
+	for _, file := range tree.Files {
+		body, err := s.files.Download(ctx, ws, revision, file.Path)
+		if err != nil {
 			return err
 		}
+		manifest = append(manifest, domain.SkillFileTreeFile{
+			Path: file.Path, Bytes: body, MediaType: file.MediaType, Executable: file.Executable,
+		})
+	}
+	snapshot, err := domain.ValidateSkillFileTree(manifest)
+	if err != nil {
+		return err
+	}
+	if snapshot.Name != ref.Name || snapshot.Description != description {
+		return fmt.Errorf("skill metadata does not match referenced SKILL.md: %w", domain.ErrIntegrity)
 	}
 	return nil
 }
@@ -204,7 +192,7 @@ func (s *skillStore) Get(_ context.Context, ws string, ref domain.SkillRef) (*do
 	if err != nil {
 		return nil, err
 	}
-	return withRevisions(sk), nil
+	return sk.Clone(), nil
 }
 
 func (s *skillStore) lookup(ws string, ref domain.SkillRef) (*domain.Skill, error) {
@@ -226,7 +214,7 @@ func (s *skillStore) List(_ context.Context, ws string, filter store.SkillFilter
 		if filter.RoleName != "" && sk.RoleName != filter.RoleName {
 			continue
 		}
-		out = append(out, withRevisions(sk))
+		out = append(out, sk.Clone())
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Name != out[j].Name {
@@ -237,8 +225,8 @@ func (s *skillStore) List(_ context.Context, ws string, filter store.SkillFilter
 	return out, nil
 }
 
-func (s *skillStore) Upsert(_ context.Context, in store.SkillUpsert) (*domain.Skill, bool, error) {
-	if err := s.validateWrite(in.Skill.WorkspaceKey, in.Skill.Ref, in.Skill.Files); err != nil {
+func (s *skillStore) Upsert(ctx context.Context, in store.SkillUpsert) (*domain.Skill, bool, error) {
+	if err := s.validateWrite(ctx, in.Skill.WorkspaceKey, in.Skill.Ref, in.Skill.Description, in.Skill.FileTreeRevision); err != nil {
 		return nil, false, err
 	}
 	s.mu.Lock()
@@ -254,23 +242,25 @@ func (s *skillStore) Upsert(_ context.Context, in store.SkillUpsert) (*domain.Sk
 		}
 		sk := s.newSkill(in.Skill)
 		s.items[ws][key] = sk
-		return withRevisions(sk), true, nil
+		return sk.Clone(), true, nil
 	}
 	// CreatedBy deliberately does not move: force is a privileged, audited act,
 	// not a transfer of title, so the next overwrite costs the same permission.
 	existing.Description = in.Skill.Description
-	existing.Content = in.Skill.Content
-	existing.Files = append([]domain.SkillFile(nil), in.Skill.Files...)
+	existing.FileTreeRevision = in.Skill.FileTreeRevision
 	existing.Source = in.Skill.Source
 	existing.SourceRef = in.Skill.SourceRef
 	existing.UpdatedBy = s.actor
 	existing.UpdatedAt = time.Now().UTC()
-	return withRevisions(existing), false, nil
+	return existing.Clone(), false, nil
 }
 
-func (s *skillStore) Update(_ context.Context, ws string, ref domain.SkillRef, patch store.SkillUpdate) (*domain.Skill, error) {
+func (s *skillStore) Update(ctx context.Context, ws string, ref domain.SkillRef, patch store.SkillUpdate) (*domain.Skill, error) {
 	if err := ref.Validate(); err != nil {
 		return nil, err
+	}
+	if patch.Description != nil && patch.FileTreeRevision == nil {
+		return nil, fmt.Errorf("skill description change requires a file_tree_revision CAS: %w", domain.ErrInvalid)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -281,21 +271,38 @@ func (s *skillStore) Update(_ context.Context, ws string, ref domain.SkillRef, p
 	if err := s.checkProvenance(sk, patch.Source, false); err != nil {
 		return nil, err
 	}
+	if patch.Description != nil {
+		if err := domain.ValidateSkillDescription(*patch.Description); err != nil {
+			return nil, err
+		}
+	}
+	if patch.FileTreeRevision != nil {
+		if *patch.FileTreeRevision == "" {
+			return nil, fmt.Errorf("skill file_tree_revision is required: %w", domain.ErrInvalid)
+		}
+		if patch.ExpectedFileTreeRevision != sk.FileTreeRevision {
+			return nil, &domain.SkillPreconditionError{Ref: ref, Expected: patch.ExpectedFileTreeRevision, Stored: sk.FileTreeRevision}
+		}
+		description := sk.Description
+		if patch.Description != nil {
+			description = *patch.Description
+		}
+		if err := s.validateReferencedTree(ctx, ws, ref, description, *patch.FileTreeRevision); err != nil {
+			return nil, err
+		}
+	}
 	applySkillPatch(sk, patch)
 	sk.UpdatedBy = s.actor
 	sk.UpdatedAt = time.Now().UTC()
-	return withRevisions(sk), nil
+	return sk.Clone(), nil
 }
 
 func applySkillPatch(sk *domain.Skill, patch store.SkillUpdate) {
 	if patch.Description != nil {
 		sk.Description = *patch.Description
 	}
-	if patch.Content != nil {
-		sk.Content = *patch.Content
-	}
-	if patch.Files != nil {
-		sk.Files = append([]domain.SkillFile(nil), (*patch.Files)...)
+	if patch.FileTreeRevision != nil {
+		sk.FileTreeRevision = *patch.FileTreeRevision
 	}
 	if patch.SourceRef != nil {
 		sk.SourceRef = *patch.SourceRef
@@ -335,183 +342,6 @@ func (s *skillStore) hasRole(ws, roleName string) bool {
 		}
 	}
 	return false
-}
-
-// --- per-document lane ---
-
-func (s *skillStore) GetFile(_ context.Context, ws string, ref domain.SkillRef, filePath string) (*domain.SkillDocument, error) {
-	if err := ref.Validate(); err != nil {
-		return nil, err
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	sk, err := s.lookup(ws, ref)
-	if err != nil {
-		return nil, err
-	}
-	doc, ok := skillDocument(sk, filePath)
-	if !ok {
-		return nil, fmt.Errorf("skill %q file %q: %w", ref, filePath, domain.ErrNotFound)
-	}
-	return doc, nil
-}
-
-// skillDocument projects one document out of a skill. SKILL.md addresses the
-// body, which exists as soon as the skill does.
-func skillDocument(sk *domain.Skill, filePath string) (*domain.SkillDocument, bool) {
-	if filePath == domain.SkillFileNameSKILLMD {
-		return &domain.SkillDocument{
-			Ref:      sk.Ref(),
-			Path:     domain.SkillFileNameSKILLMD,
-			Content:  sk.Content,
-			Revision: skillContentRevision(sk.Content),
-		}, true
-	}
-	f, ok := sk.FindFile(filePath)
-	if !ok {
-		return nil, false
-	}
-	return &domain.SkillDocument{
-		Ref:        sk.Ref(),
-		Path:       f.Path,
-		Content:    f.Content,
-		Executable: f.Executable,
-		Revision:   skillFileRevision(f),
-	}, true
-}
-
-func (s *skillStore) PutFile(_ context.Context, ws string, ref domain.SkillRef, write store.SkillFileWrite) (*domain.SkillDocument, error) {
-	if err := ref.Validate(); err != nil {
-		return nil, err
-	}
-	// SKILL.md is the body, addressed by name on this route; every other path
-	// is a bundled file and has to survive the same rules fleet-db applies.
-	if write.Path != domain.SkillFileNameSKILLMD {
-		if err := domain.ValidateSkillFilePath(write.Path); err != nil {
-			return nil, err
-		}
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	sk, err := s.lookup(ws, ref)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.checkProvenance(sk, write.Source, false); err != nil {
-		return nil, err
-	}
-	ifMatch, err := domain.NormalizeSkillRevision(write.IfMatch)
-	if err != nil {
-		return nil, err
-	}
-	stored, exists := storedRevision(sk, write.Path)
-	if err := checkPrecondition(ref, write.Path, ifMatch, write.IfNoneMatchAny, stored, exists); err != nil {
-		return nil, err
-	}
-	if write.Path == domain.SkillFileNameSKILLMD {
-		sk.Content = write.Content
-	} else {
-		sk.Files = replaceSkillFile(sk.Files, domain.SkillFile{
-			Path: write.Path, Content: write.Content, Executable: write.Executable,
-		})
-	}
-	sk.UpdatedBy = s.actor
-	sk.UpdatedAt = time.Now().UTC()
-	doc, _ := skillDocument(sk, write.Path)
-	return doc, nil
-}
-
-func (s *skillStore) DeleteFile(_ context.Context, ws string, ref domain.SkillRef, del store.SkillFileDelete) error {
-	if err := ref.Validate(); err != nil {
-		return err
-	}
-	if del.Path == domain.SkillFileNameSKILLMD {
-		// The body IS the skill; removing it means deleting the skill.
-		return fmt.Errorf("%s cannot be deleted; delete the skill instead: %w",
-			domain.SkillFileNameSKILLMD, domain.ErrInvalid)
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	sk, err := s.lookup(ws, ref)
-	if err != nil {
-		return err
-	}
-	if err := s.checkProvenance(sk, del.Source, false); err != nil {
-		return err
-	}
-	ifMatch, err := domain.NormalizeSkillRevision(del.IfMatch)
-	if err != nil {
-		return err
-	}
-	stored, exists := storedRevision(sk, del.Path)
-	if !exists {
-		return fmt.Errorf("skill %q file %q: %w", ref, del.Path, domain.ErrNotFound)
-	}
-	if err := checkPrecondition(ref, del.Path, ifMatch, false, stored, exists); err != nil {
-		return err
-	}
-	files := make([]domain.SkillFile, 0, len(sk.Files))
-	for _, f := range sk.Files {
-		if f.Path != del.Path {
-			files = append(files, f)
-		}
-	}
-	sk.Files = files
-	sk.UpdatedBy = s.actor
-	sk.UpdatedAt = time.Now().UTC()
-	return nil
-}
-
-func storedRevision(sk *domain.Skill, filePath string) (revision string, exists bool) {
-	doc, ok := skillDocument(sk, filePath)
-	if !ok {
-		return "", false
-	}
-	return doc.Revision, true
-}
-
-// checkPrecondition mirrors fleet-db's conditional-write rule: If-None-Match
-// any refuses an existing document, and a non-empty If-Match must equal the
-// stored revision of a document that exists. ifMatch arrives already
-// normalized to a bare revision, as it is on the HTTP client.
-func checkPrecondition(ref domain.SkillRef, filePath, ifMatch string, ifNoneMatchAny bool, stored string, exists bool) error {
-	if exists && ifNoneMatchAny {
-		return &domain.SkillPreconditionError{Ref: ref, Path: filePath, Stored: stored}
-	}
-	if ifMatch == "" {
-		return nil
-	}
-	// "*" is the wildcard precondition: any revision, but it must exist —
-	// which the exists check above already established.
-	if ifMatch == "*" {
-		return nil
-	}
-	if !exists {
-		return &domain.SkillPreconditionError{Ref: ref, Path: filePath, Expected: ifMatch}
-	}
-	if ifMatch == stored {
-		return nil
-	}
-	return &domain.SkillPreconditionError{Ref: ref, Path: filePath, Expected: ifMatch, Stored: stored}
-}
-
-// replaceSkillFile swaps the entry at the same path or appends a new one,
-// keeping the existing order so an unrelated edit never reshuffles the set.
-func replaceSkillFile(files []domain.SkillFile, replacement domain.SkillFile) []domain.SkillFile {
-	out := make([]domain.SkillFile, 0, len(files)+1)
-	replaced := false
-	for _, f := range files {
-		if f.Path == replacement.Path {
-			out = append(out, replacement)
-			replaced = true
-			continue
-		}
-		out = append(out, f)
-	}
-	if !replaced {
-		out = append(out, replacement)
-	}
-	return out
 }
 
 // --- SkillPackStore ---

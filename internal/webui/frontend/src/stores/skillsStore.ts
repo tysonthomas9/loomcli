@@ -114,14 +114,14 @@ function immediateEntries(
   relativeDir: string,
 ): FileEntry[] {
   const entries = new Map<string, FileEntry>();
-  const add = (name: string, isDir: boolean) => {
+  const add = (name: string, isDir: boolean, size = 0) => {
     const key = skillPathKey(name);
     const existing = entries.get(key);
     if (existing?.is_dir || (!isDir && existing)) return;
     entries.set(key, {
       name,
       is_dir: isDir,
-      size: 0,
+      size,
       mod_time: skill.updated_at,
     });
   };
@@ -132,7 +132,11 @@ function immediateEntries(
     const remainder = file.path.slice(prefix.length);
     if (!remainder) continue;
     const slash = remainder.indexOf("/");
-    add(slash === -1 ? remainder : remainder.slice(0, slash), slash !== -1);
+    add(
+      slash === -1 ? remainder : remainder.slice(0, slash),
+      slash !== -1,
+      slash === -1 ? file.size_bytes : 0,
+    );
   }
   return [...entries.values()].sort(
     (a, b) =>
@@ -360,7 +364,7 @@ export class SkillsStore {
         group,
         name,
         { description },
-        skill.content_revision,
+        skill.file_tree_revision,
       );
       this.invalidate(workspaceId);
     } catch (error) {
@@ -381,7 +385,7 @@ export class SkillsStore {
         workspaceId,
         group,
         name,
-        skill.content_revision,
+        skill.file_tree_revision,
       );
       this.invalidate(workspaceId);
     } catch (error) {
@@ -438,6 +442,18 @@ export class SkillsStore {
         const parsed = parseSkillPath(ref.path);
         if (!parsed)
           throw new Error(`Invalid skill document path: ${ref.path}`);
+        if (parsed.file !== SKILL_MD) {
+          const file = this.skill(
+            ref.workspaceId,
+            ref.ref.group,
+            parsed.skill,
+          )?.files.find((candidate) => candidate.path === parsed.file);
+          if (file?.text_editable !== true) {
+            throw new Error(
+              `Binary skill file ${parsed.file} is metadata-only and cannot be opened in the text editor`,
+            );
+          }
+        }
         const data = await getSkillFile(
           ref.workspaceId,
           ref.ref.group,

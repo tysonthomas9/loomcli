@@ -288,12 +288,7 @@ type packSyncRun struct {
 func (r packSyncRun) syncSkill(ctx context.Context, candidate fetchedGitHubSkillResult) (packSkillOutcome, string) {
 	out := r.cmd.OutOrStdout()
 	if candidate.Err != nil {
-		label := candidate.Directory
-		if label == "" {
-			label = "."
-		}
-		_, _ = fmt.Fprintf(out, "pack %s: %s: failed: %v\n", r.pack.Name, label, candidate.Err)
-		return packSkillFailed, ""
+		return r.reportFetchFailure(candidate), ""
 	}
 	name := candidate.Skill.Name
 	if len(candidate.Skill.SkippedHiddenPaths) > 0 {
@@ -313,15 +308,24 @@ func (r packSyncRun) syncSkill(ctx context.Context, candidate fetchedGitHubSkill
 		return packSkillFailed, ""
 	}
 
-	_, created, err := r.h.Store.Skills().Upsert(ctx, store.SkillUpsert{Skill: store.SkillCreate{
-		WorkspaceKey: r.ws,
-		Ref:          ref,
-		Description:  candidate.Skill.Description,
-		Content:      candidate.Skill.Content,
-		Files:        candidate.Skill.Files,
-		Source:       r.source,
-		SourceRef:    r.commit,
-	}})
+	revision, err := publishSkillSnapshot(ctx, r.h.Store.WorkspaceFiles(), r.ws, candidate.Skill.Snapshot)
+	if err != nil {
+		return r.reportUpsertFailure(name, err), ""
+	}
+	created := existing == nil
+	if created {
+		_, err = r.h.Store.Skills().Create(ctx, store.SkillCreate{
+			WorkspaceKey: r.ws, Ref: ref, Description: candidate.Skill.Description,
+			FileTreeRevision: revision, Source: r.source, SourceRef: r.commit,
+		})
+	} else {
+		description, sourceRef := candidate.Skill.Description, r.commit
+		_, err = r.h.Store.Skills().Update(ctx, r.ws, ref, store.SkillUpdate{
+			Description: &description, FileTreeRevision: &revision,
+			ExpectedFileTreeRevision: existing.FileTreeRevision,
+			Source:                   r.source, SourceRef: &sourceRef,
+		})
+	}
 	if err != nil {
 		return r.reportUpsertFailure(name, err), ""
 	}
@@ -332,6 +336,15 @@ func (r packSyncRun) syncSkill(ctx context.Context, candidate fetchedGitHubSkill
 	}
 	_, _ = fmt.Fprintf(out, "pack %s: %s: %s\n", r.pack.Name, name, outcome)
 	return packSkillWritten, name
+}
+
+func (r packSyncRun) reportFetchFailure(candidate fetchedGitHubSkillResult) packSkillOutcome {
+	label := candidate.Directory
+	if label == "" {
+		label = "."
+	}
+	_, _ = fmt.Fprintf(r.cmd.OutOrStdout(), "pack %s: %s: failed: %v\n", r.pack.Name, label, candidate.Err)
+	return packSkillFailed
 }
 
 func syncSkillPack(ctx context.Context, cmd *cobra.Command, h *bootstrap.StoreHandle, ws string, pack *domain.SkillPack) error {

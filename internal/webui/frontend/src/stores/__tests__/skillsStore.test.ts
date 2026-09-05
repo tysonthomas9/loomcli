@@ -44,9 +44,30 @@ function groups(): SkillCatalogGroup[] {
     created_at: "2026-08-14T00:00:00Z",
     updated_at: "2026-08-14T00:00:00Z",
     files: [
-      { path: "z.txt", revision: "z1", executable: false },
-      { path: "scripts/run.sh", revision: "s1", executable: true },
-      { path: "scripts/lib/helper.sh", revision: "h1", executable: true },
+      {
+        path: "z.txt",
+        revision: "z1",
+        size_bytes: 4,
+        media_type: "text/plain",
+        executable: false,
+        text_editable: true,
+      },
+      {
+        path: "scripts/run.sh",
+        revision: "s1",
+        size_bytes: 8,
+        media_type: "text/x-shellscript",
+        executable: true,
+        text_editable: true,
+      },
+      {
+        path: "scripts/lib/helper.sh",
+        revision: "h1",
+        size_bytes: 6,
+        media_type: "text/x-shellscript",
+        executable: true,
+        text_editable: true,
+      },
     ],
   };
   return [
@@ -57,7 +78,7 @@ function groups(): SkillCatalogGroup[] {
           ...base,
           name: "audit",
           scope: "workspace",
-          content_revision: "w1",
+          file_tree_revision: "w1",
         },
       ],
     },
@@ -70,7 +91,7 @@ function groups(): SkillCatalogGroup[] {
           name: "audit",
           scope: "role",
           role: "reviewer",
-          content_revision: "r1",
+          file_tree_revision: "r1",
         },
       ],
     },
@@ -85,7 +106,10 @@ describe("skillsStore", () => {
     catalog[0]!.skills[0]!.files.push({
       path: "skill.md",
       revision: "legacy",
+      size_bytes: 1,
+      media_type: "text/markdown",
       executable: false,
+      text_editable: true,
     });
     expect(
       synthesizeSkillDirectory(catalog, { kind: "workspace" }, "").map(
@@ -194,6 +218,8 @@ describe("skillsStore", () => {
       skill_ref: "role:reviewer:audit",
     });
     const store = new SkillsStore();
+    mockList.mockResolvedValue({ groups: groups() });
+    await store.loadCatalog("ws-1");
     const transport = store.documentTransport();
     const ref = {
       workspaceId: "ws-1",
@@ -217,6 +243,36 @@ describe("skillsStore", () => {
       { ifMatch: "file-v1" },
       { signal: expect.any(AbortSignal) },
     );
+  });
+
+  it("keeps binary skill files visible but refuses to open them as text", async () => {
+    const catalog = groups();
+    catalog[1]!.skills[0]!.files.push({
+      path: "assets/archive.zip",
+      revision: "zip1",
+      size_bytes: 4096,
+      media_type: "application/zip",
+      executable: false,
+      text_editable: false,
+    });
+    mockList.mockResolvedValue({ groups: catalog });
+    const store = new SkillsStore();
+    await store.loadCatalog("ws-1");
+
+    expect(
+      store.listIndexPaths("ws-1", { kind: "role", role: "reviewer" }),
+    ).toContain("audit/assets/archive.zip");
+    await expect(
+      store.documentTransport().read(
+        {
+          workspaceId: "ws-1",
+          ref: skillsExplorerRef({ kind: "role", role: "reviewer" }),
+          path: "audit/assets/archive.zip",
+        },
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow("metadata-only");
+    expect(mockGetFile).not.toHaveBeenCalled();
   });
 
   it("serializes writes to sibling documents in one skill", async () => {

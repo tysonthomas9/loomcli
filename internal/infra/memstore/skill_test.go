@@ -1,15 +1,14 @@
 package memstore
 
 import (
+	"bytes"
 	"errors"
-	"fmt"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-// newSkillFixture builds a store with the roles a role-scoped skill needs.
 func newSkillFixture(t *testing.T, roles ...string) *Store {
 	t.Helper()
 	s := New()
@@ -21,10 +20,32 @@ func newSkillFixture(t *testing.T, roles ...string) *Store {
 	return s
 }
 
-func mustCreateSkill(t *testing.T, s *Store, ref domain.SkillRef, content string) *domain.Skill {
+func publishSkillTree(t *testing.T, s *Store, name, body string, bundles ...domain.SkillFileTreeFile) string {
+	return publishSkillTreeWithDescription(t, s, name, "does a thing", body, bundles...)
+}
+
+func publishSkillTreeWithDescription(t *testing.T, s *Store, name, description, body string, bundles ...domain.SkillFileTreeFile) string {
 	t.Helper()
+	snapshot, err := domain.BuildSkillFileTree(name, description, []byte(body), bundles)
+	if err != nil {
+		t.Fatalf("BuildSkillFileTree: %v", err)
+	}
+	inputs := make([]domain.WorkspaceFileInput, 0, len(snapshot.Files))
+	for _, file := range snapshot.Files {
+		inputs = append(inputs, domain.WorkspaceFileInput(file))
+	}
+	published, err := s.WorkspaceFiles().Publish(t.Context(), "WS", inputs)
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	return published.Tree.Revision
+}
+
+func mustCreateSkill(t *testing.T, s *Store, ref domain.SkillRef, body string) *domain.Skill {
+	t.Helper()
+	revision := publishSkillTree(t, s, ref.Name, body)
 	sk, err := s.Skills().Create(t.Context(), store.SkillCreate{
-		WorkspaceKey: "WS", Ref: ref, Description: "does a thing", Content: content, Source: "manual",
+		WorkspaceKey: "WS", Ref: ref, Description: "does a thing", FileTreeRevision: revision, Source: "manual",
 	})
 	if err != nil {
 		t.Fatalf("Create %v: %v", ref, err)
@@ -32,554 +53,220 @@ func mustCreateSkill(t *testing.T, s *Store, ref domain.SkillRef, content string
 	return sk
 }
 
-func TestSkillStoreCRUD(t *testing.T) {
-	s := newSkillFixture(t, "lead")
-	skills := s.Skills()
+func TestSkillStoreCRUDUsesImmutableTreePointer(t *testing.T) {
+	s := newSkillFixture(t)
 	ref := domain.WorkspaceSkillRef("pr-review")
-
 	created := mustCreateSkill(t, s, ref, "body")
-	if created.CreatedBy != defaultSkillActor {
-		t.Errorf("created_by = %q, want the authenticated actor", created.CreatedBy)
+	if created.CreatedBy != defaultSkillActor || created.FileTreeRevision == "" {
+		t.Fatalf("created = %+v", created)
 	}
-	if created.ContentRevision == "" {
-		t.Errorf("content_revision was not stamped on the way out")
-	}
-
-	if _, err := skills.Create(t.Context(), store.SkillCreate{
-		WorkspaceKey: "WS", Ref: ref, Description: "dup",
+	if _, err := s.Skills().Create(t.Context(), store.SkillCreate{
+		WorkspaceKey: "WS", Ref: ref, Description: "does a thing", FileTreeRevision: created.FileTreeRevision,
 	}); !errors.Is(err, domain.ErrAlreadyExists) {
-		t.Errorf("duplicate Create = %v, want ErrAlreadyExists", err)
+		t.Fatalf("duplicate Create = %v, want ErrAlreadyExists", err)
 	}
-
-	got, err := skills.Get(t.Context(), "WS", ref)
-	if err != nil || got.Content != "body" {
+	got, err := s.Skills().Get(t.Context(), "WS", ref)
+	if err != nil || got.FileTreeRevision != created.FileTreeRevision {
 		t.Fatalf("Get = %+v, %v", got, err)
 	}
-
-	if _, err := skills.Get(t.Context(), "WS", domain.WorkspaceSkillRef("nope")); !errors.Is(err, domain.ErrNotFound) {
-		t.Errorf("Get unknown = %v, want ErrNotFound", err)
-	}
-
 	description := "edited"
-	updated, err := skills.Update(t.Context(), "WS", ref, store.SkillUpdate{Description: &description})
-	if err != nil || updated.Description != "edited" {
-		t.Fatalf("Update = %+v, %v", updated, err)
+	if _, err := s.Skills().Update(t.Context(), "WS", ref, store.SkillUpdate{Description: &description}); !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("description-only Update = %v, want ErrInvalid", err)
 	}
-
-	if err := skills.Delete(t.Context(), "WS", ref, store.SkillDelete{}); err != nil {
+	editedRevision := publishSkillTreeWithDescription(t, s, ref.Name, description, "body")
+	updated, err := s.Skills().Update(t.Context(), "WS", ref, store.SkillUpdate{
+		Description: &description, FileTreeRevision: &editedRevision,
+		ExpectedFileTreeRevision: created.FileTreeRevision,
+	})
+	if err != nil || updated.Description != description || updated.FileTreeRevision != editedRevision {
+		t.Fatalf("metadata Update = %+v, %v", updated, err)
+	}
+	if err := s.Skills().Delete(t.Context(), "WS", ref, store.SkillDelete{}); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
-	if _, err := skills.Get(t.Context(), "WS", ref); !errors.Is(err, domain.ErrNotFound) {
-		t.Errorf("Get after Delete = %v, want ErrNotFound", err)
+	if _, err := s.Skills().Get(t.Context(), "WS", ref); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Get after Delete = %v, want ErrNotFound", err)
 	}
 }
 
-// The two scopes must be able to carry the same name — shadowing is not
-// possible otherwise, and a store keyed on the bare name would silently
-// collapse them.
-func TestSkillStore_ScopesShareANameAndResolveThroughTheChain(t *testing.T) {
+func TestSkillStoreRejectsMissingTree(t *testing.T) {
+	s := newSkillFixture(t)
+	_, err := s.Skills().Create(t.Context(), store.SkillCreate{
+		WorkspaceKey: "WS", Ref: domain.WorkspaceSkillRef("alpha"), Description: "d", FileTreeRevision: "missing",
+	})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Create with missing tree = %v, want ErrNotFound", err)
+	}
+}
+
+func TestSkillStoreRejectsInvalidOrMismatchedReferencedTree(t *testing.T) {
+	s := newSkillFixture(t)
+	published, err := s.WorkspaceFiles().Publish(t.Context(), "WS", []domain.WorkspaceFileInput{{Path: "notes.md", Bytes: []byte("not a skill")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.Skills().Create(t.Context(), store.SkillCreate{
+		WorkspaceKey: "WS", Ref: domain.WorkspaceSkillRef("alpha"), Description: "d",
+		FileTreeRevision: published.Tree.Revision,
+	})
+	if !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("Create with invalid tree = %v, want ErrInvalid", err)
+	}
+	mismatched := publishSkillTree(t, s, "other", "body")
+	_, err = s.Skills().Create(t.Context(), store.SkillCreate{
+		WorkspaceKey: "WS", Ref: domain.WorkspaceSkillRef("alpha"), Description: "does a thing",
+		FileTreeRevision: mismatched,
+	})
+	if !errors.Is(err, domain.ErrIntegrity) {
+		t.Fatalf("Create with mismatched tree = %v, want ErrIntegrity", err)
+	}
+}
+
+func TestSkillStoreTreeCASLeavesPublishedOrphanReadable(t *testing.T) {
+	s := newSkillFixture(t)
+	ref := domain.WorkspaceSkillRef("alpha")
+	oldRevision := publishSkillTreeWithDescription(t, s, "alpha", "d", "old")
+	if _, err := s.Skills().Create(t.Context(), store.SkillCreate{
+		WorkspaceKey: "WS", Ref: ref, Description: "d", FileTreeRevision: oldRevision,
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	winningRevision := publishSkillTreeWithDescription(t, s, "alpha", "d", "winner")
+	if _, err := s.Skills().Update(t.Context(), "WS", ref, store.SkillUpdate{
+		FileTreeRevision: &winningRevision, ExpectedFileTreeRevision: oldRevision,
+	}); err != nil {
+		t.Fatalf("winning Update: %v", err)
+	}
+	orphanRevision := publishSkillTreeWithDescription(t, s, "alpha", "d", "loser")
+	_, err := s.Skills().Update(t.Context(), "WS", ref, store.SkillUpdate{
+		FileTreeRevision: &orphanRevision, ExpectedFileTreeRevision: oldRevision,
+	})
+	if !errors.Is(err, domain.ErrSkillPreconditionFailed) {
+		t.Fatalf("stale Update = %v, want ErrSkillPreconditionFailed", err)
+	}
+	var stale *domain.SkillPreconditionError
+	if !errors.As(err, &stale) || stale.Expected != oldRevision || stale.Stored != winningRevision {
+		t.Fatalf("precondition detail = %+v", stale)
+	}
+	current, err := s.Skills().Get(t.Context(), "WS", ref)
+	if err != nil || current.FileTreeRevision != winningRevision {
+		t.Fatalf("current = %+v, %v", current, err)
+	}
+	if _, err := s.WorkspaceFiles().GetTree(t.Context(), "WS", orphanRevision); err != nil {
+		t.Fatalf("orphan tree was not retained: %v", err)
+	}
+	body, err := s.WorkspaceFiles().Download(t.Context(), "WS", orphanRevision, domain.SkillFileNameSKILLMD)
+	if err != nil || !bytes.Contains(body, []byte("loser")) {
+		t.Fatalf("orphan SKILL.md = %q, %v", body, err)
+	}
+}
+
+func TestSkillStoreScopesResolveThroughTheChain(t *testing.T) {
 	s := newSkillFixture(t, "lead", "task")
 	mustCreateSkill(t, s, domain.WorkspaceSkillRef("review"), "workspace copy")
-	mustCreateSkill(t, s, domain.RoleSkillRef("lead", "review"), "lead copy")
+	lead := mustCreateSkill(t, s, domain.RoleSkillRef("lead", "review"), "lead copy")
 	mustCreateSkill(t, s, domain.RoleSkillRef("task", "review"), "task copy")
 	mustCreateSkill(t, s, domain.WorkspaceSkillRef("shared"), "everyone")
-
 	all, err := s.Skills().List(t.Context(), "WS", store.SkillFilter{})
-	if err != nil {
-		t.Fatalf("List: %v", err)
+	if err != nil || len(all) != 4 {
+		t.Fatalf("List = %d, %v", len(all), err)
 	}
-	if len(all) != 4 {
-		t.Fatalf("List returned %d skills, want 4", len(all))
-	}
-
 	resolved := domain.ResolveSkillChain(all, "lead")
-	if len(resolved) != 2 {
-		t.Fatalf("lead resolved %d skills, want 2", len(resolved))
-	}
-	if resolved[0].Name != "review" || resolved[0].Content != "lead copy" {
-		t.Errorf("review resolved to %q, want the lead copy", resolved[0].Content)
-	}
-	if resolved[1].Content != "everyone" {
-		t.Errorf("shared resolved to %q", resolved[1].Content)
+	if len(resolved) != 2 || resolved[0].FileTreeRevision != lead.FileTreeRevision || resolved[1].Name != "shared" {
+		t.Fatalf("resolved = %+v", resolved)
 	}
 }
 
-func TestSkillStore_ListFilters(t *testing.T) {
+func TestSkillStoreListFilters(t *testing.T) {
 	s := newSkillFixture(t, "lead", "task")
 	mustCreateSkill(t, s, domain.WorkspaceSkillRef("shared"), "w")
 	mustCreateSkill(t, s, domain.RoleSkillRef("lead", "review"), "r")
 	mustCreateSkill(t, s, domain.RoleSkillRef("task", "triage"), "r")
-
-	role, err := s.Skills().List(t.Context(), "WS", store.SkillFilter{
-		Scope: domain.SkillScopeRole, RoleName: "lead",
-	})
-	if err != nil {
-		t.Fatalf("List: %v", err)
+	role, err := s.Skills().List(t.Context(), "WS", store.SkillFilter{Scope: domain.SkillScopeRole, RoleName: "lead"})
+	if err != nil || len(role) != 1 || role[0].Name != "review" {
+		t.Fatalf("role listing = %+v, %v", role, err)
 	}
-	if len(role) != 1 || role[0].Name != "review" {
-		t.Errorf("role listing = %+v, want just lead's review", role)
-	}
-
 	workspace, err := s.Skills().List(t.Context(), "WS", store.SkillFilter{Scope: domain.SkillScopeWorkspace})
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(workspace) != 1 || workspace[0].Name != "shared" {
-		t.Errorf("workspace listing = %+v", workspace)
+	if err != nil || len(workspace) != 1 || workspace[0].Name != "shared" {
+		t.Fatalf("workspace listing = %+v, %v", workspace, err)
 	}
 }
 
-// A role-scoped skill pointing at a role that is not there is a 404 on the
-// server, not a record with a dangling reference.
-func TestSkillStore_RoleScopedSkillNeedsItsRole(t *testing.T) {
-	s := newSkillFixture(t)
-	_, err := s.Skills().Create(t.Context(), store.SkillCreate{
-		WorkspaceKey: "WS", Ref: domain.RoleSkillRef("ghost", "alpha"), Description: "d",
-	})
-	if !errors.Is(err, domain.ErrNotFound) {
-		t.Errorf("Create against a missing role = %v, want ErrNotFound", err)
-	}
-}
-
-// Deleting a role that still owns skills is refused rather than cascading: a
-// cascade would destroy hand-written documents that may be the only copy.
-func TestRoleStore_DeleteRefusedWhileItOwnsSkills(t *testing.T) {
+func TestSkillStoreRoleAndOwnershipGuards(t *testing.T) {
 	s := newSkillFixture(t, "lead")
-	mustCreateSkill(t, s, domain.RoleSkillRef("lead", "review"), "r")
+	revision := publishSkillTree(t, s, "alpha", "body")
+	if _, err := s.Skills().Create(t.Context(), store.SkillCreate{
+		WorkspaceKey: "WS", Ref: domain.RoleSkillRef("ghost", "alpha"), Description: "d", FileTreeRevision: revision,
+	}); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Create against missing role = %v, want ErrNotFound", err)
+	}
+	ref := domain.RoleSkillRef("lead", "alpha")
+	s.SetSkillActor("alice")
+	mustCreateSkill(t, s, ref, "alice")
+	s.SetSkillActor("bob")
+	bobRevision := publishSkillTreeWithDescription(t, s, "alpha", "bob", "bob")
+	in := store.SkillUpsert{Skill: store.SkillCreate{
+		WorkspaceKey: "WS", Ref: ref, Description: "bob", FileTreeRevision: bobRevision, Source: "manual",
+	}}
+	if _, _, err := s.Skills().Upsert(t.Context(), in); !errors.Is(err, domain.ErrSkillProvenanceConflict) {
+		t.Fatalf("Upsert as bob = %v", err)
+	}
+	in.Force = true
+	forced, created, err := s.Skills().Upsert(t.Context(), in)
+	if err != nil || created || forced.CreatedBy != "alice" || forced.UpdatedBy != "bob" {
+		t.Fatalf("forced Upsert = %+v, created=%v, %v", forced, created, err)
+	}
+}
 
-	err := s.Roles().Delete(t.Context(), "WS", "lead")
-	if !errors.Is(err, domain.ErrInvalidTransition) {
+func TestRoleDeleteRefusedWhileItOwnsSkills(t *testing.T) {
+	s := newSkillFixture(t, "lead")
+	ref := domain.RoleSkillRef("lead", "review")
+	mustCreateSkill(t, s, ref, "r")
+	if err := s.Roles().Delete(t.Context(), "WS", "lead"); !errors.Is(err, domain.ErrInvalidTransition) {
 		t.Fatalf("Delete role = %v, want ErrInvalidTransition", err)
 	}
-
-	if err := s.Skills().Delete(t.Context(), "WS", domain.RoleSkillRef("lead", "review"), store.SkillDelete{}); err != nil {
+	if err := s.Skills().Delete(t.Context(), "WS", ref, store.SkillDelete{}); err != nil {
 		t.Fatalf("Delete skill: %v", err)
 	}
 	if err := s.Roles().Delete(t.Context(), "WS", "lead"); err != nil {
-		t.Errorf("Delete role after its skills went = %v, want nil", err)
+		t.Fatalf("Delete role after skill = %v", err)
 	}
 }
 
-func TestSkillStore_UpsertCreatesThenUpdates(t *testing.T) {
-	s := newSkillFixture(t)
-	in := store.SkillUpsert{Skill: store.SkillCreate{
-		WorkspaceKey: "WS", Ref: domain.WorkspaceSkillRef("alpha"), Description: "first", Content: "one",
-	}}
-
-	sk, created, err := s.Skills().Upsert(t.Context(), in)
-	if err != nil || !created || sk.Content != "one" {
-		t.Fatalf("first Upsert = %+v, created=%v, %v", sk, created, err)
-	}
-
-	in.Skill.Content = "two"
-	sk, created, err = s.Skills().Upsert(t.Context(), in)
-	if err != nil || created || sk.Content != "two" {
-		t.Fatalf("second Upsert = %+v, created=%v, %v", sk, created, err)
-	}
-}
-
-// A skill is owned by its created_by. Only that actor — or a forcing caller —
-// may overwrite or delete it, and source is not consulted, because source
-// arrives from the caller and every read discloses it.
-func TestSkillStore_OwnershipGuard(t *testing.T) {
+func TestSkillStoreHandsOutCopies(t *testing.T) {
 	s := newSkillFixture(t)
 	ref := domain.WorkspaceSkillRef("alpha")
-	s.SetSkillActor("alice")
-	mustCreateSkill(t, s, ref, "alice's")
-
-	s.SetSkillActor("bob")
-	upsert := store.SkillUpsert{Skill: store.SkillCreate{
-		WorkspaceKey: "WS", Ref: ref, Description: "bob's", Content: "bob's",
-		// Copying the owner's source must not help: it is a claim, not a
-		// credential.
-		Source: "manual",
-	}}
-
-	_, _, err := s.Skills().Upsert(t.Context(), upsert)
-	if !errors.Is(err, domain.ErrSkillProvenanceConflict) {
-		t.Fatalf("Upsert as another actor = %v, want ErrSkillProvenanceConflict", err)
-	}
-	var conflict *domain.SkillProvenanceConflictError
-	if !errors.As(err, &conflict) || conflict.ExistingCreatedBy != "alice" || conflict.IncomingCreatedBy != "bob" {
-		t.Errorf("conflict detail = %+v, want alice/bob", conflict)
-	}
-
-	// A delete is guarded too, because delete-then-recreate is an overwrite in
-	// two steps and would otherwise transfer ownership for free.
-	if err := s.Skills().Delete(t.Context(), "WS", ref, store.SkillDelete{}); !errors.Is(err, domain.ErrSkillProvenanceConflict) {
-		t.Errorf("Delete as another actor = %v, want ErrSkillProvenanceConflict", err)
-	}
-
-	// Force gets through — and does NOT move the title, so the next overwrite
-	// costs the same permission again.
-	upsert.Force = true
-	forced, created, err := s.Skills().Upsert(t.Context(), upsert)
-	if err != nil || created {
-		t.Fatalf("forced Upsert = created:%v, %v", created, err)
-	}
-	if forced.CreatedBy != "alice" {
-		t.Errorf("created_by = %q after a force, want it to stay with alice", forced.CreatedBy)
-	}
-	if forced.UpdatedBy != "bob" {
-		t.Errorf("updated_by = %q, want bob", forced.UpdatedBy)
-	}
-	if _, _, err := s.Skills().Upsert(t.Context(), store.SkillUpsert{Skill: upsert.Skill}); !errors.Is(err, domain.ErrSkillProvenanceConflict) {
-		t.Errorf("second unforced Upsert = %v, want the guard to hold again", err)
-	}
-}
-
-func TestSkillStore_GetFile(t *testing.T) {
-	s := newSkillFixture(t)
-	ref := domain.WorkspaceSkillRef("alpha")
-	if _, err := s.Skills().Create(t.Context(), store.SkillCreate{
-		WorkspaceKey: "WS", Ref: ref, Description: "d", Content: "the body",
-		Files: []domain.SkillFile{{Path: "scripts/run.sh", Content: "#!/bin/sh", Executable: true}},
-	}); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	// SKILL.md addresses the skill's own body through the same route shape a
-	// bundled file uses.
-	body, err := s.Skills().GetFile(t.Context(), "WS", ref, domain.SkillFileNameSKILLMD)
-	if err != nil {
-		t.Fatalf("GetFile SKILL.md: %v", err)
-	}
-	if body.Content != "the body" || body.Revision == "" || body.Ref != ref {
-		t.Errorf("SKILL.md document = %+v", body)
-	}
-
-	script, err := s.Skills().GetFile(t.Context(), "WS", ref, "scripts/run.sh")
-	if err != nil {
-		t.Fatalf("GetFile script: %v", err)
-	}
-	if !script.Executable || script.Revision == body.Revision {
-		t.Errorf("script document = %+v, want its own revision and the executable bit", script)
-	}
-
-	if _, err := s.Skills().GetFile(t.Context(), "WS", ref, "missing.md"); !errors.Is(err, domain.ErrNotFound) {
-		t.Errorf("GetFile missing = %v, want ErrNotFound", err)
-	}
-}
-
-// A per-document write touches one document and leaves its siblings alone —
-// the whole reason the lane exists.
-func TestSkillStore_PutFileLeavesSiblingsAlone(t *testing.T) {
-	s := newSkillFixture(t)
-	ref := domain.WorkspaceSkillRef("alpha")
-	if _, err := s.Skills().Create(t.Context(), store.SkillCreate{
-		WorkspaceKey: "WS", Ref: ref, Description: "d", Content: "body",
-		Files: []domain.SkillFile{{Path: "a.md", Content: "A"}, {Path: "b.md", Content: "B"}},
-	}); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	a, err := s.Skills().GetFile(t.Context(), "WS", ref, "a.md")
-	if err != nil {
-		t.Fatalf("GetFile: %v", err)
-	}
-	written, err := s.Skills().PutFile(t.Context(), "WS", ref, store.SkillFileWrite{
-		Path: "a.md", Content: "A2", IfMatch: a.Revision,
-	})
-	if err != nil {
-		t.Fatalf("PutFile: %v", err)
-	}
-	if written.Content != "A2" || written.Revision == a.Revision {
-		t.Errorf("written document = %+v, want new content and a new revision", written)
-	}
-
-	sk, err := s.Skills().Get(t.Context(), "WS", ref)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if b, _ := sk.FindFile("b.md"); b.Content != "B" {
-		t.Errorf("sibling b.md = %q, want it untouched", b.Content)
-	}
-	if sk.Content != "body" {
-		t.Errorf("SKILL.md body = %q, want it untouched", sk.Content)
-	}
-	// Order is stable: an unrelated edit must not reshuffle the set.
-	if len(sk.Files) != 2 || sk.Files[0].Path != "a.md" || sk.Files[1].Path != "b.md" {
-		t.Errorf("file order = %+v, want a.md then b.md", sk.Files)
-	}
-}
-
-func TestSkillStore_PreconditionFailures(t *testing.T) {
-	s := newSkillFixture(t)
-	ref := domain.WorkspaceSkillRef("alpha")
-	if _, err := s.Skills().Create(t.Context(), store.SkillCreate{
-		WorkspaceKey: "WS", Ref: ref, Description: "d", Content: "body",
-		Files: []domain.SkillFile{{Path: "a.md", Content: "A"}},
-	}); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	current, err := s.Skills().GetFile(t.Context(), "WS", ref, "a.md")
-	if err != nil {
-		t.Fatalf("GetFile: %v", err)
-	}
-
-	tests := []struct {
-		name  string
-		write store.SkillFileWrite
-	}{
-		{
-			name:  "stale revision",
-			write: store.SkillFileWrite{Path: "a.md", Content: "x", IfMatch: "0000000000000000"},
-		},
-		{
-			name:  "if-none-match on an existing document",
-			write: store.SkillFileWrite{Path: "a.md", Content: "x", IfNoneMatchAny: true},
-		},
-		{
-			name:  "if-match on a document that is not there",
-			write: store.SkillFileWrite{Path: "gone.md", Content: "x", IfMatch: current.Revision},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := s.Skills().PutFile(t.Context(), "WS", ref, tt.write)
-			if !errors.Is(err, domain.ErrSkillPreconditionFailed) {
-				t.Fatalf("PutFile = %v, want ErrSkillPreconditionFailed", err)
-			}
-			// The two failure modes must not blur into each other.
-			if errors.Is(err, domain.ErrSkillProvenanceConflict) {
-				t.Errorf("a stale revision must not read as an ownership refusal: %v", err)
-			}
-			var stale *domain.SkillPreconditionError
-			if !errors.As(err, &stale) || stale.Path != tt.write.Path {
-				t.Errorf("detail = %+v, want it to name %q", stale, tt.write.Path)
-			}
-		})
-	}
-
-	// An unconditional write still goes through — a caller with no revision to
-	// offer has nothing else available to it.
-	if _, err := s.Skills().PutFile(t.Context(), "WS", ref, store.SkillFileWrite{
-		Path: "a.md", Content: "unconditional",
-	}); err != nil {
-		t.Errorf("unconditional PutFile = %v, want nil", err)
-	}
-}
-
-func TestSkillStore_DeleteFile(t *testing.T) {
-	s := newSkillFixture(t)
-	ref := domain.WorkspaceSkillRef("alpha")
-	if _, err := s.Skills().Create(t.Context(), store.SkillCreate{
-		WorkspaceKey: "WS", Ref: ref, Description: "d", Content: "body",
-		Files: []domain.SkillFile{{Path: "a.md", Content: "A"}},
-	}); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	// SKILL.md is not removable through the file lane — the body IS the skill.
-	if err := s.Skills().DeleteFile(t.Context(), "WS", ref, store.SkillFileDelete{
-		Path: domain.SkillFileNameSKILLMD,
-	}); !errors.Is(err, domain.ErrInvalid) {
-		t.Errorf("DeleteFile SKILL.md = %v, want ErrInvalid", err)
-	}
-
-	if err := s.Skills().DeleteFile(t.Context(), "WS", ref, store.SkillFileDelete{
-		Path: "a.md", IfMatch: "0000000000000000",
-	}); !errors.Is(err, domain.ErrSkillPreconditionFailed) {
-		t.Errorf("DeleteFile with a stale revision = %v, want ErrSkillPreconditionFailed", err)
-	}
-
-	doc, err := s.Skills().GetFile(t.Context(), "WS", ref, "a.md")
-	if err != nil {
-		t.Fatalf("GetFile: %v", err)
-	}
-	if err := s.Skills().DeleteFile(t.Context(), "WS", ref, store.SkillFileDelete{
-		Path: "a.md", IfMatch: doc.Revision, Source: "manual",
-	}); err != nil {
-		t.Fatalf("DeleteFile: %v", err)
-	}
-	if _, err := s.Skills().GetFile(t.Context(), "WS", ref, "a.md"); !errors.Is(err, domain.ErrNotFound) {
-		t.Errorf("GetFile after DeleteFile = %v, want ErrNotFound", err)
-	}
-	if err := s.Skills().DeleteFile(t.Context(), "WS", ref, store.SkillFileDelete{Path: "a.md"}); !errors.Is(err, domain.ErrNotFound) {
-		t.Errorf("second DeleteFile = %v, want ErrNotFound", err)
-	}
-}
-
-// Handing out the stored pointer would let a caller edit the store's copy in
-// place, skipping the ownership guard entirely.
-func TestSkillStore_HandsOutCopies(t *testing.T) {
-	s := newSkillFixture(t)
-	ref := domain.WorkspaceSkillRef("alpha")
-	if _, err := s.Skills().Create(t.Context(), store.SkillCreate{
-		WorkspaceKey: "WS", Ref: ref, Description: "d",
-		Files: []domain.SkillFile{{Path: "a.md", Content: "A"}},
-	}); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	mustCreateSkill(t, s, ref, "body")
 	got, err := s.Skills().Get(t.Context(), "WS", ref)
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatal(err)
 	}
-	got.Files[0].Content = "tampered"
 	got.Description = "tampered"
-
 	again, err := s.Skills().Get(t.Context(), "WS", ref)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if again.Files[0].Content != "A" || again.Description != "d" {
-		t.Errorf("stored skill was mutated through a returned copy: %+v", again)
+	if err != nil || again.Description != "does a thing" {
+		t.Fatalf("stored skill mutated through copy: %+v, %v", again, err)
 	}
 }
 
 func TestSkillPackStoreCRUD(t *testing.T) {
 	s := New()
 	packs := s.SkillPacks()
-
 	created, err := packs.Create(t.Context(), store.SkillPackCreate{
 		WorkspaceKey: "WS", Name: "design", RepoURL: "https://example.test/design.git", Ref: "main",
 	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
+	if err != nil || created.Source() != "pack:design" {
+		t.Fatalf("Create = %+v, %v", created, err)
 	}
-	if created.Source() != "pack:design" {
-		t.Errorf("Source() = %q, want pack:design", created.Source())
+	synced, err := packs.Update(t.Context(), "WS", "design", store.SkillPackUpdate{RecordSync: &domain.SkillPackSync{
+		Status: domain.SkillPackSyncOK, Commit: "abc123", Skills: []string{"pr-review"},
+	}})
+	if err != nil || synced.LastSyncedCommit != "abc123" || synced.LastSyncedAt.IsZero() {
+		t.Fatalf("Update = %+v, %v", synced, err)
 	}
-	if created.LastSyncStatus != "" {
-		t.Errorf("a new pack reported a sync status: %q", created.LastSyncStatus)
-	}
-
-	if _, err := packs.Create(t.Context(), store.SkillPackCreate{
-		WorkspaceKey: "WS", Name: "design", RepoURL: "https://example.test/other.git",
-	}); !errors.Is(err, domain.ErrAlreadyExists) {
-		t.Errorf("duplicate Create = %v, want ErrAlreadyExists", err)
-	}
-
-	if _, err := packs.Create(t.Context(), store.SkillPackCreate{
-		WorkspaceKey: "WS", Name: "Design Pack", RepoURL: "https://example.test/x.git",
-	}); !errors.Is(err, domain.ErrInvalid) {
-		t.Errorf("Create with a bad name = %v, want ErrInvalid", err)
-	}
-
-	synced, err := packs.Update(t.Context(), "WS", "design", store.SkillPackUpdate{
-		RecordSync: &domain.SkillPackSync{
-			Status: domain.SkillPackSyncOK, Commit: "abc123", Skills: []string{"pr-review"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("Update: %v", err)
-	}
-	if synced.LastSyncedCommit != "abc123" || synced.LastSyncStatus != domain.SkillPackSyncOK {
-		t.Errorf("sync record = %+v", synced)
-	}
-	if synced.LastSyncedAt.IsZero() {
-		t.Errorf("last_synced_at was not stamped")
-	}
-
-	// A failed refresh must not rewrite what is installed: the commit on
-	// record is still the one that actually landed.
-	failed, err := packs.Update(t.Context(), "WS", "design", store.SkillPackUpdate{
-		RecordSync: &domain.SkillPackSync{Status: domain.SkillPackSyncFailed, Error: "auth denied"},
-	})
-	if err != nil {
-		t.Fatalf("Update: %v", err)
-	}
-	if failed.LastSyncedCommit != "abc123" || failed.LastSyncError != "auth denied" {
-		t.Errorf("after a failed sync = %+v", failed)
-	}
-
-	list, err := packs.List(t.Context(), "WS")
-	if err != nil || len(list) != 1 {
-		t.Fatalf("List = %v, %v", list, err)
-	}
-
 	if err := packs.Delete(t.Context(), "WS", "design"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 	if _, err := packs.Get(t.Context(), "WS", "design"); !errors.Is(err, domain.ErrNotFound) {
-		t.Errorf("Get after Delete = %v, want ErrNotFound", err)
-	}
-}
-
-// The in-memory double accepts the same revision forms the HTTP client does,
-// so a caller that works against one works against the other. Without this a
-// handler passing a browser's quoted If-Match would pass every memstore test
-// and 412 in production.
-func TestSkillStore_AcceptsEveryRevisionFormACallerHolds(t *testing.T) {
-	s := newSkillFixture(t)
-	ref := domain.WorkspaceSkillRef("alpha")
-	if _, err := s.Skills().Create(t.Context(), store.SkillCreate{
-		WorkspaceKey: "WS", Ref: ref, Description: "d",
-		Files: []domain.SkillFile{{Path: "a.md", Content: "A"}},
-	}); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	forms := []struct{ name, wrap string }{
-		{name: "bare revision", wrap: "%s"},
-		{name: "quoted entity-tag", wrap: `"%s"`},
-		{name: "weak entity-tag", wrap: `W/"%s"`},
-	}
-	for i, form := range forms {
-		t.Run(form.name, func(t *testing.T) {
-			doc, err := s.Skills().GetFile(t.Context(), "WS", ref, "a.md")
-			if err != nil {
-				t.Fatalf("GetFile: %v", err)
-			}
-			if _, err := s.Skills().PutFile(t.Context(), "WS", ref, store.SkillFileWrite{
-				Path: "a.md", Content: fmt.Sprintf("edit %d", i), IfMatch: fmt.Sprintf(form.wrap, doc.Revision),
-			}); err != nil {
-				t.Fatalf("conditional PutFile with a %s = %v, want it to succeed", form.name, err)
-			}
-		})
-	}
-
-	// A multi-tag header is refused rather than reduced to one of its tags.
-	_, err := s.Skills().PutFile(t.Context(), "WS", ref, store.SkillFileWrite{
-		Path: "a.md", Content: "x", IfMatch: `"aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb"`,
-	})
-	if !errors.Is(err, domain.ErrInvalid) {
-		t.Errorf("multi-tag If-Match = %v, want ErrInvalid", err)
-	}
-}
-
-// memstore stands in for fleet-db in tests, so a write it accepts that the real
-// server refuses is a test passing on data production cannot produce. These
-// pin the bundled-path rules on both write routes.
-func TestSkillStoreRejectsBundledPathsFleetDBRefuses(t *testing.T) {
-	ctx := t.Context()
-	unsafe := []string{"../escape.md", "/absolute.md", "nested/../../escape.md", "skill.md"}
-
-	for _, badPath := range unsafe {
-		t.Run("create "+badPath, func(t *testing.T) {
-			st := New()
-			if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "WS"}); err != nil {
-				t.Fatalf("create workspace: %v", err)
-			}
-			_, err := st.Skills().Create(ctx, store.SkillCreate{
-				WorkspaceKey: "WS",
-				Ref:          domain.WorkspaceSkillRef("alpha"),
-				Description:  "alpha",
-				Content:      "body\n",
-				Files:        []domain.SkillFile{{Path: badPath, Content: "x"}},
-			})
-			if !errors.Is(err, domain.ErrInvalid) {
-				t.Fatalf("Create with bundled path %q = %v, want ErrInvalid", badPath, err)
-			}
-		})
-
-		t.Run("put file "+badPath, func(t *testing.T) {
-			st := New()
-			if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "WS"}); err != nil {
-				t.Fatalf("create workspace: %v", err)
-			}
-			ref := domain.WorkspaceSkillRef("alpha")
-			if _, err := st.Skills().Create(ctx, store.SkillCreate{
-				WorkspaceKey: "WS", Ref: ref, Description: "alpha", Content: "body\n",
-			}); err != nil {
-				t.Fatalf("create skill: %v", err)
-			}
-			_, err := st.Skills().PutFile(ctx, "WS", ref, store.SkillFileWrite{
-				Path: badPath, Content: "x", IfNoneMatchAny: true,
-			})
-			if !errors.Is(err, domain.ErrInvalid) {
-				t.Fatalf("PutFile at %q = %v, want ErrInvalid", badPath, err)
-			}
-		})
+		t.Fatalf("Get after Delete = %v", err)
 	}
 }

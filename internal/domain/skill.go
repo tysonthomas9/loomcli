@@ -31,12 +31,8 @@ const (
 	SkillScopeRole SkillScope = "role"
 )
 
-// SkillFileNameSKILLMD is the document that addresses a Skill's own Content
-// rather than a bundled file. It is reserved: a bundled file may not claim the
-// same path, because the writer would have to choose between the two silently.
-// The per-document API routes use it as a path, which is deliberately the same
-// shape the runtime materializes on disk, so an editor browsing a skill
-// directory saves back through the path it read.
+// SkillFileNameSKILLMD is the required root instruction document in a Skill's
+// immutable workspace file tree.
 const SkillFileNameSKILLMD = "SKILL.md"
 
 // MaxSkillNameLength is the Agent Skills limit on a skill name, mirrored from
@@ -97,19 +93,19 @@ var skillDeviceNames = map[string]bool{
 var (
 	// ErrSkillProvenanceConflict is fleet-db's 409 skill_provenance_conflict:
 	// the stored skill was created by a different actor, and this write would
-	// overwrite (or delete) someone else's document. No retry helps — the
+	// overwrite (or delete) someone else's bundle. No retry helps — the
 	// caller needs the force route, which costs skill.force_overwrite.
 	// Unwrap the error with errors.As into *SkillProvenanceConflictError for
 	// both owners, which is what a bulk import needs to report what it skipped.
 	ErrSkillProvenanceConflict = errors.New("domain: skill is owned by a different actor")
 
 	// ErrSkillPreconditionFailed is fleet-db's 412 precondition_failed: the
-	// If-Match revision on a per-document write did not hold, so the document
+	// If-Match revision on a whole-tree write did not hold, so the bundle
 	// changed since the caller read it. Recoverable — re-read, merge, write
 	// again. errors.As into *SkillPreconditionError for the revision the
 	// caller held and the one on record, enough to offer a diff without a
 	// second round trip.
-	ErrSkillPreconditionFailed = errors.New("domain: skill document changed since it was read")
+	ErrSkillPreconditionFailed = errors.New("domain: skill file tree changed since it was read")
 
 	// ErrSkillForbidden preserves fleet-db's authoritative 403 across the
 	// Store boundary. It is skills-specific because the legacy generic client
@@ -203,10 +199,9 @@ func ParseSkillRef(ref string) (SkillRef, error) {
 	return out, nil
 }
 
-// NormalizeSkillRevision returns the bare revision from either form a caller
-// may be holding: the unquoted token this package's types carry, or the quoted
-// (optionally weak) entity-tag an HTTP layer read off an ETag or If-Match
-// header.
+// NormalizeSkillTreeRevision returns the bare opaque revision from either form
+// a caller may be holding: the unquoted token this package's types carry, or a
+// quoted strong entity-tag read from ETag or If-Match.
 //
 // It exists because the two forms meet in exactly one place and the meeting is
 // where the bug lives. fleet-db sends a revision twice — unquoted in the JSON
@@ -219,72 +214,35 @@ func ParseSkillRef(ref string) (SkillRef, error) {
 // server sees `""abc""`. Normalizing at the boundary is what makes both forms
 // mean the same thing.
 //
-// The wildcard "*" passes through: it is a legal If-Match meaning "any
-// revision, but the document must exist".
-//
-// A comma-separated LIST is rejected rather than collapsed. A revision is a
-// hex hash and never contains a comma, so a comma is unambiguously a
-// multi-tag header, and silently picking one of its tags would change what the
-// caller asked for.
-func NormalizeSkillRevision(value string) (string, error) {
+// Weak tags, wildcard conditions and comma-separated lists are rejected:
+// Fleet's Skill tree PATCH accepts exactly one quoted strong current revision.
+func NormalizeSkillTreeRevision(value string) (string, error) {
 	tag := strings.TrimSpace(value)
-	if tag == "" || tag == "*" {
+	if tag == "" {
 		return tag, nil
 	}
-	if strings.Contains(tag, ",") {
-		return "", fmt.Errorf("skill revision %q carries more than one entity-tag; pass a single revision: %w", value, ErrInvalid)
+	if tag == "*" || strings.Contains(tag, ",") || strings.HasPrefix(tag, "W/") {
+		return "", fmt.Errorf("skill tree revision %q must be one opaque revision or one quoted strong ETag: %w", value, ErrInvalid)
 	}
-	tag = strings.TrimPrefix(tag, "W/")
 	if len(tag) >= 2 && strings.HasPrefix(tag, `"`) && strings.HasSuffix(tag, `"`) {
 		tag = tag[1 : len(tag)-1]
 	}
-	if strings.Contains(tag, `"`) {
-		return "", fmt.Errorf("skill revision %q is not a well-formed entity-tag: %w", value, ErrInvalid)
+	if tag == "" || strings.Contains(tag, `"`) {
+		return "", fmt.Errorf("skill tree revision %q is not a well-formed entity-tag: %w", value, ErrInvalid)
 	}
 	return tag, nil
 }
 
-// SkillFile is one bundled file inside a skill directory — a reference
-// document or a script the harness reads or runs on demand.
-//
-// Content is text, not bytes: v1 stores no binary assets.
-type SkillFile struct {
-	// Path is the file's location relative to the skill directory, e.g.
-	// "references/api.md". Relative and normalized; fleet-db is the authority
-	// on what a legal path is and rejects traversal, absolute and
-	// case/normalization-colliding paths at the write.
-	Path string `json:"path"`
-
-	// Content is the file's text.
-	Content string `json:"content"`
-
-	// Executable asks the writer to set the executable bit. Scripts only.
-	Executable bool `json:"executable,omitempty"`
-
-	// Revision is the opaque per-file concurrency token, derived server-side
-	// from the file's content and returned on every read path including the
-	// listing. Hand it back as SkillFileWrite.IfMatch on the next write to
-	// this file. Read-only: a value sent on a write is ignored.
-	//
-	// It is stored here UNQUOTED — the bare hash, as the JSON `revision`
-	// field carries it. The HTTP layer is what wraps it in the quotes RFC 9110
-	// requires of an entity-tag and unwraps them again on the way in; keeping
-	// exactly one representation above that layer is what stops a caller from
-	// comparing a quoted token against an unquoted one and getting a
-	// permanent, genuine-looking conflict.
-	Revision string `json:"revision,omitempty"`
-}
-
-// Skill is a workspace-scoped instruction document in the Agent Skills
-// (SKILL.md) format, stored centrally and materialized into agent working
-// directories at spawn.
+// Skill is the metadata record for a workspace-scoped Agent Skills bundle,
+// stored centrally and materialized into agent working directories at spawn.
 //
 // Distinct from Role.Skills, which is a list of routing tags matched against
 // issue labels and has nothing to do with this type — the two senses of the
 // word coexist by decision (fleet-db ADR-005 §1).
 //
-// A Skill is mutable and unversioned: one record, edited in place. Spawns get
-// whatever is current; history and rollback come from the event log.
+// A Skill's metadata record is mutable. Its complete content is an immutable
+// workspace file tree selected by FileTreeRevision; changing that pointer is
+// CAS-guarded so concurrent whole-tree edits cannot silently lose siblings.
 type Skill struct {
 	WorkspaceKey string `json:"workspace_key"`
 
@@ -307,17 +265,9 @@ type Skill struct {
 	// a skill without one can never be selected.
 	Description string `json:"description"`
 
-	// Content is the SKILL.md body. The frontmatter is generated from Name
-	// and Description at materialization, so Content must not repeat it.
-	Content string `json:"content"`
-
-	// Files are the optional bundled files written alongside SKILL.md.
-	Files []SkillFile `json:"files,omitempty"`
-
-	// ContentRevision is the concurrency token for Content — SkillFile's
-	// Revision for the one document that is not in Files. Unquoted, read-only,
-	// derived server-side.
-	ContentRevision string `json:"content_revision,omitempty"`
+	// FileTreeRevision is the opaque identity of the complete immutable
+	// workspace file tree currently attached to this Skill.
+	FileTreeRevision string `json:"file_tree_revision"`
 
 	// CreatedBy is the actor that first wrote the skill, taken from the
 	// authenticated credential and never from a request body. It is the sole
@@ -351,51 +301,13 @@ func (s *Skill) Ref() SkillRef {
 	return SkillRef{Scope: s.Scope, RoleName: s.RoleName, Name: s.Name}
 }
 
-// FindFile returns the bundled file at path. The lookup is byte-exact, as
-// fleet-db's is; the server is what guarantees no two stored paths collide
-// once case-folded and normalized.
-func (s *Skill) FindFile(path string) (SkillFile, bool) {
-	if s == nil {
-		return SkillFile{}, false
-	}
-	for _, f := range s.Files {
-		if f.Path == path {
-			return f, true
-		}
-	}
-	return SkillFile{}, false
-}
-
-// Clone deep-copies a skill so a stored value can be handed out without the
-// caller being able to mutate the Files slice behind the store's back.
+// Clone returns a detached copy.
 func (s *Skill) Clone() *Skill {
 	if s == nil {
 		return nil
 	}
 	out := *s
-	out.Files = append([]SkillFile(nil), s.Files...)
 	return &out
-}
-
-// SkillDocument is one addressable document inside a skill: a bundled file,
-// or SKILL.md, which addresses the skill's own Content.
-//
-// It is what the per-document API returns, and it is deliberately the unit an
-// editor works in — a client with several of a skill's documents open needs
-// each to carry its own precondition, which a record-level version could not
-// give it.
-type SkillDocument struct {
-	// Ref is the skill this document belongs to, so a document-oriented
-	// caller can find its way back to the record.
-	Ref SkillRef
-
-	Path       string
-	Content    string
-	Executable bool
-
-	// Revision is the unquoted concurrency token for this document — see
-	// SkillFile.Revision.
-	Revision string
 }
 
 // SkillPack sync outcomes. Empty means never synced, which is a third state
@@ -410,7 +322,7 @@ const (
 // asserting a status with no time and no commit behind it is not a record of
 // anything.
 // The fields carry fleet-db's JSON tags and travel to the server as this
-// struct, the way SkillFile does. They describe one event and are only ever
+// struct. They describe one event and are only ever
 // written together — a record asserting a status with no time and no commit
 // behind it is not a record of anything — so a separate wire mirror would only
 // be this type spelled twice.
@@ -517,19 +429,18 @@ func (e *SkillProvenanceConflictError) Error() string {
 // Unwrap makes errors.Is(err, ErrSkillProvenanceConflict) hold.
 func (e *SkillProvenanceConflictError) Unwrap() error { return ErrSkillProvenanceConflict }
 
-// SkillPreconditionError reports a per-document write whose If-Match did not
-// hold — the caller was working from an older copy. Unlike a provenance
+// SkillPreconditionError reports a whole-tree write whose If-Match did not
+// hold — the caller was working from an older tree. Unlike a provenance
 // conflict, a re-read and a merge fixes it, which is why the two are
 // different errors.
 type SkillPreconditionError struct {
 	Ref     SkillRef
-	Path    string
 	Message string
 
 	// Expected is the revision the caller said it was editing; empty when the
-	// condition was existence rather than a revision.
+	// condition did not name a revision.
 	Expected string
-	// Stored is the revision on record now; empty when the document is absent.
+	// Stored is the tree revision on record now.
 	Stored string
 }
 
@@ -537,8 +448,8 @@ func (e *SkillPreconditionError) Error() string {
 	if e.Message != "" {
 		return e.Message
 	}
-	return fmt.Sprintf("skill %s document %q changed: expected revision %s, stored revision is %s",
-		e.Ref, e.Path, orUnknownActor(e.Expected), orUnknownActor(e.Stored))
+	return fmt.Sprintf("skill %s file tree changed: expected revision %s, stored revision is %s",
+		e.Ref, orUnknownActor(e.Expected), orUnknownActor(e.Stored))
 }
 
 // Unwrap makes errors.Is(err, ErrSkillPreconditionFailed) hold.

@@ -18,13 +18,13 @@ not the video product or Java Project Loom.
   not grant those capabilities.
 - **Worker**: An autonomous role or agent intended to claim and complete tasks
   under daemon supervision.
-- **Skill**: A workspace-stored document entity — a SKILL.md body plus optional
-  text files — loaded into an agent's worktree so the agent can use it while
-  working. Not the same thing as the role config `skills:` list: that field is
-  a task-routing filter whose tag strings are matched against issue labels to
-  score which tasks a role pulls. The two share a word but not a mechanism;
-  say "skill" for the document entity and "role skills" (or routing tags) for
-  the filter.
+- **Skill**: A workspace-stored bundle — one root `SKILL.md` plus optional
+  files whose bytes and executable modes are preserved — loaded into an
+  agent's worktree. It is not the same as the role config `skills:` list; that
+  field is a task-routing filter whose tag strings are matched against issue
+  labels to score which tasks a role pulls. The two share a word but not a
+  mechanism; say "skill" for the stored bundle and "role skills" (or routing
+  tags) for the filter.
 - **Skill scope**: Where a skill applies: workspace-scoped skills load for
   every loom-managed agent in the workspace; role-scoped skills load only for
   that role's agents and shadow a same-named workspace skill. Being in scope

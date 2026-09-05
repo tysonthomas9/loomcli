@@ -16,6 +16,7 @@ import (
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -39,6 +40,30 @@ func (s supervisorMaterializeStore) SkillMaterializationLeases() store.SkillMate
 	return nil
 }
 
+func supervisorSkillTestStore(t *testing.T, name, description, body string, bundles []domain.SkillFileTreeFile) *memstore.Store {
+	t.Helper()
+	st := memstore.New()
+	snapshot, err := domain.BuildSkillFileTree(name, description, []byte(body), bundles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputs := make([]domain.WorkspaceFileInput, 0, len(snapshot.Files))
+	for _, file := range snapshot.Files {
+		inputs = append(inputs, domain.WorkspaceFileInput(file))
+	}
+	published, err := st.WorkspaceFiles().Publish(t.Context(), "WS", inputs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Skills().Create(t.Context(), store.SkillCreate{
+		WorkspaceKey: "WS", Ref: domain.WorkspaceSkillRef(name), Description: description,
+		FileTreeRevision: published.Tree.Revision, Source: "test",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return st
+}
+
 func TestSpawnAndWaitMaterializationCollisionUsesSpawnFailurePath(t *testing.T) {
 	stubCheckBackend(t, func(name string) (discovery.Info, error) {
 		return discovery.Info{Name: name, Binary: name, Installed: true, Path: "/bin/false", VersionMatchesPin: true}, nil
@@ -51,10 +76,9 @@ func TestSpawnAndWaitMaterializationCollisionUsesSpawnFailurePath(t *testing.T) 
 	if err := os.WriteFile(filepath.Join(skillDir, "README.md"), []byte("user file\n"), 0o644); err != nil {
 		t.Fatalf("write collision: %v", err)
 	}
-	st := supervisorMaterializeStore{skills: supervisorSkillStore{skills: []*domain.Skill{{
-		Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body",
-		Files: []domain.SkillFile{{Path: "readme.md", Content: "managed"}},
-	}}}}
+	st := supervisorSkillTestStore(t, "alpha", "alpha", "body", []domain.SkillFileTreeFile{{
+		Path: "readme.md", Bytes: []byte("managed"), MediaType: "text/markdown",
+	}})
 	s := newTestSupervisorWithConfig(&cfgpkg.DaemonConfig{Backend: "codex"})
 	s.WorkspaceID = "WS"
 	s.ControlStore = st
@@ -167,9 +191,7 @@ func TestMaterializeSkillsWarnsWhenControlStoreIsMissing(t *testing.T) {
 
 func TestMaterializeIdleSkillsConvergesNoWorkWorktree(t *testing.T) {
 	target := t.TempDir()
-	st := supervisorMaterializeStore{skills: supervisorSkillStore{skills: []*domain.Skill{{
-		Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body",
-	}}}}
+	st := supervisorSkillTestStore(t, "alpha", "alpha", "body", nil)
 	s := newTestSupervisorWithConfig(&cfgpkg.DaemonConfig{Backend: "codex"})
 	s.WorkspaceID = "WS"
 	s.ControlStore = st
@@ -189,9 +211,7 @@ func TestMaterializeIdleSkillsConvergesNoWorkWorktree(t *testing.T) {
 
 func TestMaterializeIdleSkillsSkipsNonNoWorkFailures(t *testing.T) {
 	target := t.TempDir()
-	st := supervisorMaterializeStore{skills: supervisorSkillStore{skills: []*domain.Skill{{
-		Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body",
-	}}}}
+	st := supervisorSkillTestStore(t, "alpha", "alpha", "body", nil)
 	s := newTestSupervisorWithConfig(&cfgpkg.DaemonConfig{Backend: "codex"})
 	s.WorkspaceID = "WS"
 	s.ControlStore = st

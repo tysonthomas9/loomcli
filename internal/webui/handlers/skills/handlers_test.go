@@ -36,34 +36,40 @@ func newSkillsHarness(t *testing.T) *skillsHarness {
 		t.Fatalf("create role: %v", err)
 	}
 	st.SetSkillActor("alice")
-	if _, err := st.Skills().Create(ctx, store.SkillCreate{
-		WorkspaceKey: testWorkspace,
-		Ref:          domain.WorkspaceSkillRef("workspace-guide"),
-		Description:  "Workspace guidance",
-		Content:      "CATALOG-BODY-SECRET",
-		Files: []domain.SkillFile{{
-			Path: "references/guide.md", Content: "CATALOG-FILE-SECRET",
-		}},
-		Source: "manual", SourceRef: "workspace-v1",
-	}); err != nil {
-		t.Fatalf("create workspace skill: %v", err)
-	}
-	if _, err := st.Skills().Create(ctx, store.SkillCreate{
-		WorkspaceKey: testWorkspace,
-		Ref:          domain.RoleSkillRef("reviewer", "review-code"),
-		Description:  "Review code",
-		Content:      "review body v1",
-		Files: []domain.SkillFile{{
-			Path: "scripts/run.sh", Content: "#!/bin/sh\necho review\n", Executable: true,
-		}},
-		Source: "pack:team", SourceRef: "abc123",
-	}); err != nil {
-		t.Fatalf("create role skill: %v", err)
-	}
+	publishTestSkill(t, st, domain.WorkspaceSkillRef("workspace-guide"), "Workspace guidance", "CATALOG-BODY-SECRET", []domain.SkillFileTreeFile{{
+		Path: "references/guide.md", Bytes: []byte("CATALOG-FILE-SECRET"), MediaType: "text/markdown",
+	}}, "manual", "workspace-v1")
+	publishTestSkill(t, st, domain.RoleSkillRef("reviewer", "review-code"), "Review code", "review body v1", []domain.SkillFileTreeFile{{
+		Path: "scripts/run.sh", Bytes: []byte("#!/bin/sh\necho review\n"), MediaType: "text/x-shellscript", Executable: true,
+	}}, "pack:team", "abc123")
 
 	mux := http.NewServeMux()
 	NewModule(st, middleware.FileAccessConfig{FrontendOrigins: []string{"http://localhost"}}).Register(mux)
 	return &skillsHarness{store: st, mux: mux}
+}
+
+func publishTestSkill(t *testing.T, st *memstore.Store, ref domain.SkillRef, description, body string, bundled []domain.SkillFileTreeFile, source, sourceRef string) *domain.Skill {
+	t.Helper()
+	snapshot, err := domain.BuildSkillFileTree(ref.Name, description, []byte(body), bundled)
+	if err != nil {
+		t.Fatalf("build %s tree: %v", ref, err)
+	}
+	inputs := make([]domain.WorkspaceFileInput, 0, len(snapshot.Files))
+	for _, file := range snapshot.Files {
+		inputs = append(inputs, domain.WorkspaceFileInput(file))
+	}
+	published, err := st.WorkspaceFiles().Publish(t.Context(), testWorkspace, inputs)
+	if err != nil {
+		t.Fatalf("publish %s tree: %v", ref, err)
+	}
+	skill, err := st.Skills().Create(t.Context(), store.SkillCreate{
+		WorkspaceKey: testWorkspace, Ref: ref, Description: description,
+		FileTreeRevision: published.Tree.Revision, Source: source, SourceRef: sourceRef,
+	})
+	if err != nil {
+		t.Fatalf("create %s skill: %v", ref, err)
+	}
+	return skill
 }
 
 func (h *skillsHarness) request(t *testing.T, method, path string, body string, headers map[string]string) *httptest.ResponseRecorder {
@@ -97,7 +103,7 @@ func TestCatalogProjectionStripsContents(t *testing.T) {
 		t.Fatalf("workspace group = %+v", workspace)
 	}
 	entry := workspace.Skills[0]
-	if entry.Name != "workspace-guide" || entry.ContentRevision == "" || len(entry.Files) != 1 || entry.Files[0].Revision == "" {
+	if entry.Name != "workspace-guide" || entry.FileTreeRevision == "" || len(entry.Files) != 1 || entry.Files[0].Revision == "" {
 		t.Fatalf("catalog entry = %+v, want revisions and file metadata", entry)
 	}
 }
@@ -110,7 +116,7 @@ func TestSkillDetailCarriesBodyButNotBundledContents(t *testing.T) {
 	}
 	var got skillDetailResponse
 	decodeResponse(t, rr, &got)
-	if got.Content != "CATALOG-BODY-SECRET" || got.ContentRevision == "" {
+	if got.Content != "CATALOG-BODY-SECRET" || got.FileTreeRevision == "" {
 		t.Fatalf("detail = %+v, want SKILL.md body and revision", got)
 	}
 	if bytes.Contains(rr.Body.Bytes(), []byte("CATALOG-FILE-SECRET")) {
@@ -177,12 +183,54 @@ func TestPutRoleSkillFileNormalizesQuotedETagAndAdvancesRevision(t *testing.T) {
 	if got.Executable {
 		t.Fatal("SKILL.md executable bit must remain false")
 	}
-	stored, err := h.store.Skills().GetFile(context.Background(), testWorkspace, domain.RoleSkillRef("reviewer", "review-code"), domain.SkillFileNameSKILLMD)
-	if err != nil {
-		t.Fatalf("read stored body: %v", err)
+	stored := readTestSkillFile(t, h.store, domain.RoleSkillRef("reviewer", "review-code"), domain.SkillFileNameSKILLMD)
+	if stored != "review body v2" {
+		t.Fatalf("stored body = %q, response = %+v", stored, got)
 	}
-	if stored.Content != "review body v2" || stored.Revision != got.Revision {
-		t.Fatalf("stored = %+v, response = %+v", stored, got)
+}
+
+func TestPutRoleSkillBodyPreservesVendorFrontmatter(t *testing.T) {
+	h := newSkillsHarness(t)
+	ref := domain.RoleSkillRef("reviewer", "review-code")
+	skill, err := h.store.Skills().Get(t.Context(), testWorkspace, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := (&Handler{Store: h.store}).loadTree(t.Context(), testWorkspace, skill.FileTreeRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix := []byte("---\nname: review-code\ndescription: Review code\nlicense: MIT\nmetadata:\n  vendor: acme\n---\n")
+	vendorDocument := append(append([]byte(nil), prefix...), []byte("vendor body")...)
+	files := replaceTreeFile(loaded.snapshot.Files, domain.SkillFileTreeFile{
+		Path: domain.SkillFileNameSKILLMD, Bytes: vendorDocument, MediaType: "text/markdown",
+	})
+	if _, err := domain.ValidateSkillFileTree(files); err != nil {
+		t.Fatalf("validate vendor tree: %v", err)
+	}
+	tree, err := (&Handler{Store: h.store}).publishTree(t.Context(), testWorkspace, files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.store.Skills().Update(t.Context(), testWorkspace, ref, store.SkillUpdate{
+		FileTreeRevision: &tree.Revision, ExpectedFileTreeRevision: skill.FileTreeRevision,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	path := "/api/workspaces/SKILLS/roles/reviewer/skills/review-code/files/SKILL.md"
+	rr := h.request(t, http.MethodPut, path, `{"content":"edited body"}`, map[string]string{"If-Match": strconv.Quote(tree.Revision)})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rr.Code, rr.Body.String())
+	}
+	updated, err := h.store.Skills().Get(t.Context(), testWorkspace, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := h.store.WorkspaceFiles().Download(t.Context(), testWorkspace, updated.FileTreeRevision, domain.SkillFileNameSKILLMD)
+	want := append(append([]byte(nil), prefix...), []byte("edited body")...)
+	if err != nil || !bytes.Equal(stored, want) {
+		t.Fatalf("stored SKILL.md = %q, want %q, err=%v", stored, want, err)
 	}
 }
 
@@ -212,7 +260,11 @@ func TestPutAndDeleteBundledRoleSkillFile(t *testing.T) {
 	if deleted.Code != http.StatusNoContent {
 		t.Fatalf("DELETE status = %d body = %s, want 204", deleted.Code, deleted.Body.String())
 	}
-	_, err := h.store.Skills().GetFile(context.Background(), testWorkspace, domain.RoleSkillRef("reviewer", "review-code"), "scripts/run.sh")
+	skill, err := h.store.Skills().Get(context.Background(), testWorkspace, domain.RoleSkillRef("reviewer", "review-code"))
+	if err != nil {
+		t.Fatalf("get skill after delete: %v", err)
+	}
+	_, err = h.store.WorkspaceFiles().Stat(context.Background(), testWorkspace, skill.FileTreeRevision, "scripts/run.sh")
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("stored file after delete error = %v, want ErrNotFound", err)
 	}
@@ -232,9 +284,8 @@ func TestPutRoleSkillFileCreatesBundledFileWithIfNoneMatch(t *testing.T) {
 	if doc.Path != "references/new.md" || doc.Content != "new reference" || doc.Revision == "" {
 		t.Fatalf("created document = %+v", doc)
 	}
-	stored, err := h.store.Skills().GetFile(context.Background(), testWorkspace, domain.RoleSkillRef("reviewer", "review-code"), "references/new.md")
-	if err != nil || stored.Content != "new reference" {
-		t.Fatalf("stored document = %+v err = %v", stored, err)
+	if stored := readTestSkillFile(t, h.store, domain.RoleSkillRef("reviewer", "review-code"), "references/new.md"); stored != "new reference" {
+		t.Fatalf("stored document = %q", stored)
 	}
 
 	collision := h.request(t, http.MethodPut, path, body, map[string]string{"If-None-Match": "*"})
@@ -303,21 +354,14 @@ func TestPatchRoleSkillWithStaleIfMatchReturnsCurrentRevision(t *testing.T) {
 	path := "/api/workspaces/SKILLS/roles/reviewer/skills/review-code"
 	read := h.request(t, http.MethodGet, path, "", nil)
 	originalETag := read.Header().Get("ETag")
-	var original skillDetailResponse
-	decodeResponse(t, read, &original)
-	current, err := h.store.Skills().PutFile(context.Background(), testWorkspace, ref, store.SkillFileWrite{
-		Path: domain.SkillFileNameSKILLMD, Content: "concurrent body", IfMatch: original.ContentRevision, Source: webuiSkillSource,
-	})
-	if err != nil {
-		t.Fatalf("advance skill body: %v", err)
-	}
+	current := advanceTestSkillFile(t, h.store, ref, domain.SkillFileNameSKILLMD, "concurrent body", false)
 
 	patched := h.request(t, http.MethodPatch, path, `{"description":"stale edit"}`, map[string]string{"If-Match": originalETag})
 	assertErrorCode(t, patched, http.StatusPreconditionFailed, "precondition_failed")
 	var body map[string]string
 	decodeResponse(t, patched, &body)
-	if body["revision"] != current.Revision {
-		t.Fatalf("revision = %q, want %q", body["revision"], current.Revision)
+	if body["revision"] != current.FileTreeRevision {
+		t.Fatalf("revision = %q, want %q", body["revision"], current.FileTreeRevision)
 	}
 }
 
@@ -405,7 +449,7 @@ func TestRoleTraversalCannotReachWorkspaceSkillMutationLane(t *testing.T) {
 		for _, method := range []string{http.MethodPut, http.MethodDelete} {
 			t.Run(method+"_"+encodedRole, func(t *testing.T) {
 				path := "/api/workspaces/SKILLS/roles/" + encodedRole + "/skills/workspace-guide/files/SKILL.md"
-				rr := h.request(t, method, path, `{"content":"TRAVERSAL-OVERWRITE"}`, map[string]string{"If-Match": strconv.Quote(before.ContentRevision)})
+				rr := h.request(t, method, path, `{"content":"TRAVERSAL-OVERWRITE"}`, map[string]string{"If-Match": strconv.Quote(before.FileTreeRevision)})
 				assertErrorCode(t, rr, http.StatusBadRequest, "skill_validation_failed")
 			})
 		}
@@ -415,7 +459,7 @@ func TestRoleTraversalCannotReachWorkspaceSkillMutationLane(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read workspace skill after traversal attempts: %v", err)
 	}
-	if after.Content != before.Content || after.ContentRevision != before.ContentRevision {
+	if after.FileTreeRevision != before.FileTreeRevision {
 		t.Fatalf("workspace skill mutated through role traversal: before=%+v after=%+v", before, after)
 	}
 }
@@ -425,21 +469,17 @@ func TestPutRoleSkillFileStaleIfMatchReturnsCurrentRevision(t *testing.T) {
 	ref := domain.RoleSkillRef("reviewer", "review-code")
 	path := "/api/workspaces/SKILLS/roles/reviewer/skills/review-code/files/SKILL.md"
 	read := h.request(t, http.MethodGet, path, "", nil)
-	var original skillFileResponse
-	decodeResponse(t, read, &original)
-	current, err := h.store.Skills().PutFile(context.Background(), testWorkspace, ref, store.SkillFileWrite{
-		Path: domain.SkillFileNameSKILLMD, Content: "concurrent body", IfMatch: original.Revision, Source: "test",
-	})
-	if err != nil {
-		t.Fatalf("advance stored body: %v", err)
-	}
+	current := advanceTestSkillFile(t, h.store, ref, "scripts/run.sh", "concurrent sibling", true)
 
 	write := h.request(t, http.MethodPut, path, `{"content":"stale body"}`, map[string]string{"If-Match": read.Header().Get("ETag")})
 	assertErrorCode(t, write, http.StatusPreconditionFailed, "precondition_failed")
 	var body map[string]string
 	decodeResponse(t, write, &body)
-	if body["revision"] != current.Revision {
-		t.Fatalf("revision = %q, want current %q", body["revision"], current.Revision)
+	if body["error"] != "the skill file tree changed since it was read" {
+		t.Fatalf("error = %q, want whole-tree terminology", body["error"])
+	}
+	if body["revision"] != current.FileTreeRevision {
+		t.Fatalf("revision = %q, want current %q", body["revision"], current.FileTreeRevision)
 	}
 }
 
@@ -473,6 +513,24 @@ func TestPutRoleSkillFileRejectsMultiETagIfMatchClearly(t *testing.T) {
 	assertErrorCode(t, write, http.StatusBadRequest, "invalid_precondition")
 	if !strings.Contains(write.Body.String(), "single ETag") {
 		t.Fatalf("response lacks single-ETag guidance: %s", write.Body.String())
+	}
+}
+
+func TestRoleSkillMutationsRejectWildcardIfMatch(t *testing.T) {
+	h := newSkillsHarness(t)
+	for _, request := range []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{method: http.MethodPatch, path: "/api/workspaces/SKILLS/roles/reviewer/skills/review-code", body: `{"description":"ambiguous"}`},
+		{method: http.MethodDelete, path: "/api/workspaces/SKILLS/roles/reviewer/skills/review-code"},
+		{method: http.MethodPut, path: "/api/workspaces/SKILLS/roles/reviewer/skills/review-code/files/SKILL.md", body: `{"content":"ambiguous"}`},
+	} {
+		t.Run(request.method, func(t *testing.T) {
+			rr := h.request(t, request.method, request.path, request.body, map[string]string{"If-Match": "*"})
+			assertErrorCode(t, rr, http.StatusBadRequest, "invalid_precondition")
+		})
 	}
 }
 
@@ -571,6 +629,34 @@ func TestSkillErrorBridgePreservesBackingForbidden(t *testing.T) {
 	}
 }
 
+func TestBinarySkillFileReturnsMetadataWithoutJSONTextCoercion(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		binary    []byte
+		mediaType string
+	}{
+		{name: "invalid UTF-8 bytes", binary: []byte{0x50, 0x4b, 0x03, 0x04, 0x00, 0xff}, mediaType: "application/zip"},
+		{name: "non-text media with valid UTF-8 bytes", binary: []byte("valid UTF-8 binary payload"), mediaType: "application/octet-stream"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newSkillsHarness(t)
+			ref := domain.RoleSkillRef("reviewer", "review-code")
+			advanceTestSkillFileBytes(t, h.store, ref, "assets/archive.zip", tt.binary, false, tt.mediaType)
+
+			rr := h.request(t, http.MethodGet, "/api/workspaces/SKILLS/roles/reviewer/skills/review-code/files/assets/archive.zip", "", nil)
+			assertErrorCode(t, rr, http.StatusUnsupportedMediaType, "binary_skill_file")
+			if bytes.Contains(rr.Body.Bytes(), tt.binary) {
+				t.Fatalf("binary bytes were coerced into JSON text: %q", rr.Body.Bytes())
+			}
+			var body map[string]any
+			decodeResponse(t, rr, &body)
+			if body["path"] != "assets/archive.zip" || body["media_type"] != tt.mediaType || body["size_bytes"] != float64(len(tt.binary)) {
+				t.Fatalf("binary metadata = %+v", body)
+			}
+		})
+	}
+}
+
 // The 404 lane had no coverage at all: every other status the module can return
 // is asserted somewhere in this file, but nothing reached skill_not_found, so a
 // regression in the ErrNotFound mapping would have surfaced only in the UI.
@@ -621,6 +707,67 @@ func TestMissingSkillsAndFilesMapToNotFound(t *testing.T) {
 			assertErrorCode(t, rr, http.StatusNotFound, "skill_not_found")
 		})
 	}
+}
+
+func readTestSkillFile(t *testing.T, st *memstore.Store, ref domain.SkillRef, path string) string {
+	t.Helper()
+	skill, err := st.Skills().Get(t.Context(), testWorkspace, ref)
+	if err != nil {
+		t.Fatalf("get %s: %v", ref, err)
+	}
+	body, err := st.WorkspaceFiles().Download(t.Context(), testWorkspace, skill.FileTreeRevision, path)
+	if err != nil {
+		t.Fatalf("download %s %s: %v", ref, path, err)
+	}
+	if path != domain.SkillFileNameSKILLMD {
+		return string(body)
+	}
+	loaded, err := (&Handler{Store: st}).loadTree(t.Context(), testWorkspace, skill.FileTreeRevision)
+	if err != nil {
+		t.Fatalf("load %s tree: %v", ref, err)
+	}
+	return string(loaded.snapshot.Body)
+}
+
+func advanceTestSkillFile(t *testing.T, st *memstore.Store, ref domain.SkillRef, path, content string, executable bool) *domain.Skill {
+	t.Helper()
+	return advanceTestSkillFileBytes(t, st, ref, path, []byte(content), executable, mediaTypeForPath(path))
+}
+
+func advanceTestSkillFileBytes(t *testing.T, st *memstore.Store, ref domain.SkillRef, path string, body []byte, executable bool, mediaType string) *domain.Skill {
+	t.Helper()
+	h := &Handler{Store: st}
+	skill, err := st.Skills().Get(t.Context(), testWorkspace, ref)
+	if err != nil {
+		t.Fatalf("get %s: %v", ref, err)
+	}
+	loaded, err := h.loadTree(t.Context(), testWorkspace, skill.FileTreeRevision)
+	if err != nil {
+		t.Fatalf("load %s tree: %v", ref, err)
+	}
+	files := replaceTreeFile(loaded.snapshot.Files, domain.SkillFileTreeFile{
+		Path: path, Bytes: body, Executable: executable, MediaType: mediaType,
+	})
+	if path == domain.SkillFileNameSKILLMD {
+		snapshot, buildErr := domain.BuildSkillFileTree(skill.Name, skill.Description, body, bundledFiles(files))
+		if buildErr != nil {
+			t.Fatalf("rebuild %s: %v", ref, buildErr)
+		}
+		files = snapshot.Files
+	} else if _, err := domain.ValidateSkillFileTree(files); err != nil {
+		t.Fatalf("validate %s tree: %v", ref, err)
+	}
+	tree, err := h.publishTree(t.Context(), testWorkspace, files)
+	if err != nil {
+		t.Fatalf("publish %s tree: %v", ref, err)
+	}
+	updated, err := st.Skills().Update(t.Context(), testWorkspace, ref, store.SkillUpdate{
+		FileTreeRevision: &tree.Revision, ExpectedFileTreeRevision: skill.FileTreeRevision, Source: "test",
+	})
+	if err != nil {
+		t.Fatalf("advance %s tree: %v", ref, err)
+	}
+	return updated
 }
 
 func decodeResponse(t *testing.T, rr *httptest.ResponseRecorder, dst any) {

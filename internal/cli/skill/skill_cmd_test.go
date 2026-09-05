@@ -54,11 +54,16 @@ func TestSkillCRUDCommandsWithMemstore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get created workspace skill: %v", err)
 	}
-	if workspaceSkill.Content != "workspace body\n" || workspaceSkill.Description != "Review code changes" {
+	workspaceSnapshot, err := loadSkillSnapshot(context.Background(), st.WorkspaceFiles(), workspaceSkill)
+	if err != nil {
+		t.Fatalf("load created tree: %v", err)
+	}
+	if string(workspaceSnapshot.Body) != "workspace body\n" || workspaceSkill.Description != "Review code changes" {
 		t.Fatalf("created skill = %+v", workspaceSkill)
 	}
-	if len(workspaceSkill.Files) != 1 || workspaceSkill.Files[0].Path != "scripts/check.sh" || !workspaceSkill.Files[0].Executable {
-		t.Fatalf("created files = %+v, want executable scripts/check.sh", workspaceSkill.Files)
+	workspaceFiles := bundledTreeFiles(workspaceSnapshot.Files)
+	if len(workspaceFiles) != 1 || workspaceFiles[0].Path != "scripts/check.sh" || !workspaceFiles[0].Executable {
+		t.Fatalf("created files = %+v, want executable scripts/check.sh", workspaceFiles)
 	}
 	if workspaceSkill.Source != manualSkillSource {
 		t.Fatalf("created source = %q, want %q", workspaceSkill.Source, manualSkillSource)
@@ -91,12 +96,12 @@ func TestSkillCRUDCommandsWithMemstore(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Scope:             workspace",
-		"Content revision:",
+		"File tree revision:",
 		"workspace body",
 		"Path:            scripts/check.sh",
 		"Executable:      true",
-		"Revision:",
-		"#!/bin/sh",
+		"Media type:",
+		"Size:",
 	} {
 		if !strings.Contains(showOut, want) {
 			t.Errorf("show output does not contain %q:\n%s", want, showOut)
@@ -117,11 +122,16 @@ func TestSkillCRUDCommandsWithMemstore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get updated workspace skill: %v", err)
 	}
-	if workspaceSkill.Description != "Updated review guidance" || workspaceSkill.Content != "replacement body\n" {
+	workspaceSnapshot, err = loadSkillSnapshot(context.Background(), st.WorkspaceFiles(), workspaceSkill)
+	if err != nil {
+		t.Fatalf("load updated tree: %v", err)
+	}
+	if workspaceSkill.Description != "Updated review guidance" || string(workspaceSnapshot.Body) != "replacement body\n" {
 		t.Fatalf("updated skill = %+v", workspaceSkill)
 	}
-	if len(workspaceSkill.Files) != 1 || workspaceSkill.Files[0].Path != "references/guide.txt" || workspaceSkill.Files[0].Executable {
-		t.Fatalf("replacement files = %+v", workspaceSkill.Files)
+	workspaceFiles = bundledTreeFiles(workspaceSnapshot.Files)
+	if len(workspaceFiles) != 1 || workspaceFiles[0].Path != "references/guide.txt" || workspaceFiles[0].Executable {
+		t.Fatalf("replacement files = %+v", workspaceFiles)
 	}
 
 	deleteOut, err := executeSkillCommand(t, "", "delete", "review-code", "--scope", "role=reviewer")
@@ -239,30 +249,9 @@ func TestSkillProvenanceConflictAndForceDelete(t *testing.T) {
 func TestSkillPreconditionErrorSuggestsReread(t *testing.T) {
 	withoutAgentName(t)
 	st := memstore.New()
-	ctx := context.Background()
-	created, err := st.Skills().Create(ctx, store.SkillCreate{
-		WorkspaceKey: testWorkspace,
-		Ref:          domain.WorkspaceSkillRef("stale-skill"),
-		Description:  "Stale",
-		Content:      "first",
-	})
-	if err != nil {
-		t.Fatalf("create skill: %v", err)
-	}
-	if _, err := st.Skills().PutFile(ctx, testWorkspace, created.Ref(), store.SkillFileWrite{
-		Path:    domain.SkillFileNameSKILLMD,
-		Content: "second",
-		IfMatch: created.ContentRevision,
-	}); err != nil {
-		t.Fatalf("advance content revision: %v", err)
-	}
-	_, staleErr := st.Skills().PutFile(ctx, testWorkspace, created.Ref(), store.SkillFileWrite{
-		Path:    domain.SkillFileNameSKILLMD,
-		Content: "third",
-		IfMatch: created.ContentRevision,
-	})
-	if !errors.Is(staleErr, domain.ErrSkillPreconditionFailed) {
-		t.Fatalf("stale write error = %v, want ErrSkillPreconditionFailed", staleErr)
+	createMaterializeTestSkill(t, st, domain.WorkspaceSkillRef("stale-skill"), "Stale", "first")
+	staleErr := &domain.SkillPreconditionError{
+		Ref: domain.WorkspaceSkillRef("stale-skill"), Expected: "tree-old", Stored: "tree-current",
 	}
 
 	wrappedSkills := &updateErrorSkillStore{SkillStore: st.Skills(), err: staleErr}
@@ -272,8 +261,8 @@ func TestSkillPreconditionErrorSuggestsReread(t *testing.T) {
 		t.Fatal("command stale error = nil")
 	}
 	for _, want := range []string{
-		"stale revision",
-		"SKILL.md",
+		"stale whole-tree revision",
+		"whole-tree",
 		"re-read with \"loom skill show stale-skill --scope workspace\"",
 		"merge the latest content",
 	} {
@@ -319,6 +308,9 @@ func TestSkillCommandSurfaceIncludesInstall(t *testing.T) {
 	if got := create.Flags().Lookup("file").Value.Type(); got != "stringArray" {
 		t.Errorf("create --file type = %q, want repeatable stringArray", got)
 	}
+	if got := create.Flags().Lookup("file").Usage; got != "Bundled file as <source>[:<destination>] (repeatable)" {
+		t.Errorf("create --file help = %q", got)
+	}
 	install, _, _ := cmd.Find([]string{"install"})
 	for _, flag := range []string{"scope", "name"} {
 		if install.Flags().Lookup(flag) == nil {
@@ -361,6 +353,9 @@ func TestSkillCommandSurfaceIncludesInstall(t *testing.T) {
 		if update.Flags().Lookup(flag) == nil {
 			t.Errorf("update is missing --%s", flag)
 		}
+	}
+	if got := update.Flags().Lookup("file").Usage; got != "Replacement bundled file as <source>[:<destination>] (repeatable)" {
+		t.Errorf("update --file help = %q", got)
 	}
 	if update.Flags().Lookup("force") != nil {
 		t.Error("update unexpectedly exposes --force")

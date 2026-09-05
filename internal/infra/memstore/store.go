@@ -66,7 +66,8 @@ type Store struct {
 func New() *Store {
 	requireTestProcess()
 
-	drivers, versions, profiles, roles, services, bindings, skills := newCatalogGraph()
+	files := newWorkspaceFileStore()
+	drivers, versions, profiles, roles, services, bindings, skills := newCatalogGraph(files)
 	nodes := newNodeStore()
 	artifacts := newArtifactStore()
 	runs := newDriverRunStore(versions, bindings)
@@ -106,7 +107,7 @@ func New() *Store {
 		workers:    newWorkerStore(),
 		roles:      roles,
 		skills:     skills,
-		files:      newWorkspaceFileStore(),
+		files:      files,
 		skillPacks: newSkillPackStore(),
 		daemon:     newDaemonStore(),
 		conns:      newConnectorStore(),
@@ -129,14 +130,14 @@ func linkRunGraph(runs *driverRunStore, steps *driverStepStore, taskRuns *taskRu
 // newCatalogGraph wires the mutually-referencing catalog stores (drivers,
 // versions, profiles, roles, services, bindings, skills) and returns the
 // handles New needs for the rest of the dependency graph.
-func newCatalogGraph() (*driverStore, *driverVersionStore, *workerProfileStore, *roleStore, *agentServiceStore, *triggerBindingStore, *skillStore) {
+func newCatalogGraph(files *workspaceFileStore) (*driverStore, *driverVersionStore, *workerProfileStore, *roleStore, *agentServiceStore, *triggerBindingStore, *skillStore) {
 	drivers := newDriverStore()
 	versions := newDriverVersionStore(drivers)
 	profiles := newWorkerProfileStore()
 	roles := newRoleStore()
 	services := newAgentServiceStore(roles, profiles)
 	bindings := newTriggerBindingStore(versions, services)
-	skills := newSkillStore(roles)
+	skills := newSkillStore(roles, files)
 	services.bindings = bindings
 	roles.services = services
 	profiles.services = services

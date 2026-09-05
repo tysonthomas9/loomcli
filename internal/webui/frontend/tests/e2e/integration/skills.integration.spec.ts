@@ -32,7 +32,7 @@ async function deleteRoleSkillIfPresent(
   const detail = await request.get(`${API}/roles/${role}/skills/${name}`);
   if (detail.status() === 404) return;
   expect(detail.ok(), await detail.text()).toBeTruthy();
-  const revision = (await detail.json()).content_revision as string;
+  const revision = (await detail.json()).file_tree_revision as string;
   const deleted = await request.delete(`${API}/roles/${role}/skills/${name}`, {
     headers: { "If-Match": quoted(revision) },
   });
@@ -85,7 +85,9 @@ test.describe("Skills tree", () => {
       data: { name: "nope", description: "should fail" },
     });
     expect(workspaceCreate.status()).toBe(403);
-    expect((await workspaceCreate.json()).code).toBe("workspace_scope_readonly");
+    expect((await workspaceCreate.json()).code).toBe(
+      "workspace_scope_readonly",
+    );
 
     const workspacePatch = await request.patch(`${API}/skills/whatever`, {
       data: { description: "should fail" },
@@ -134,7 +136,11 @@ test.describe("Skills tree", () => {
 
     // The new skill surfaces in the catalog under its role group.
     const groups = (await (await request.get(`${API}/skills`)).json())
-      .groups as Array<{ scope: string; role?: string; skills: { name: string }[] }>;
+      .groups as Array<{
+      scope: string;
+      role?: string;
+      skills: { name: string }[];
+    }>;
     const roleGroup = groups.find((g) => g.scope === "role" && g.role === ROLE);
     expect(roleGroup?.skills.map((s) => s.name)).toContain("audit");
 
@@ -185,7 +191,7 @@ test.describe("Skills tree", () => {
     // Whole-skill mutations require the current content revision (428 without).
     const contentRevision = (
       await (await request.get(`${API}/roles/${ROLE}/skills/audit`)).json()
-    ).content_revision as string;
+    ).file_tree_revision as string;
     const patchNoPrecondition = await request.patch(
       `${API}/roles/${ROLE}/skills/audit`,
       { data: { description: "no precondition" } },
@@ -200,7 +206,11 @@ test.describe("Skills tree", () => {
     // Delete removes it from the catalog.
     await deleteRoleSkillIfPresent(request, ROLE, "audit");
     const after = (await (await request.get(`${API}/skills`)).json())
-      .groups as Array<{ scope: string; role?: string; skills: { name: string }[] }>;
+      .groups as Array<{
+      scope: string;
+      role?: string;
+      skills: { name: string }[];
+    }>;
     const roleAfter = after.find((g) => g.scope === "role" && g.role === ROLE);
     expect(roleAfter?.skills.map((s) => s.name) ?? []).not.toContain("audit");
   });
