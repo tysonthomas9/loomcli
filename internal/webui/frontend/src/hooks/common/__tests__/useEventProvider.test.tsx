@@ -238,9 +238,17 @@ describe("useEventProvider", () => {
         MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
       });
 
+      expect(result.current.state).toBe("connecting");
+      expect(result.current.isConnected).toBe(false);
+      expect(result.current.connectionEpoch).toBe(0);
+
+      act(() => {
+        MockFetchEventSourceAttempt.lastInstance?.simulateConnected();
+      });
+
       expect(result.current.state).toBe("connected");
       expect(result.current.isConnected).toBe(true);
-      expect(result.current.connectionEpoch).toBe(0);
+      expect(result.current.connectionEpoch).toBe(1);
     });
 
     it("increments connectionEpoch after each completed retry handshake", async () => {
@@ -1123,7 +1131,16 @@ describe("useEventProvider", () => {
         MockFetchEventSourceAttempt.lastInstance?.simulateOpen();
       });
 
+      expect(result.current.state).toBe("connecting");
+      expect(result.current.isConnected).toBe(false);
+      expect(result.current.connectionEpoch).toBe(0);
+
+      act(() => {
+        MockFetchEventSourceAttempt.lastInstance?.simulateConnected();
+      });
+
       expect(result.current.isConnected).toBe(true);
+      expect(result.current.connectionEpoch).toBe(1);
 
       act(() => {
         result.current.disconnect();

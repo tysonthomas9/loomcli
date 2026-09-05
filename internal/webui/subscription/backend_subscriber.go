@@ -62,6 +62,11 @@ type BackendMutationSubscriber struct {
 	lastSince  int64
 	lastCursor string
 
+	// Owned by the polling goroutine; bounded recent history survives retries.
+	// It detects short cycles, not arbitrary historical cursor regressions.
+	livePageCursors map[string]struct{}
+	livePageOrder   []string
+
 	readyOnce sync.Once
 	ready     chan struct{}
 	readyMu   sync.RWMutex
@@ -209,11 +214,39 @@ func (s *BackendMutationSubscriber) loop() {
 			continue
 		}
 
-		timeoutMs = s.handlePage(cursor, page)
+		timeoutMs, err = s.handlePage(cursor, page)
+		if err != nil {
+			slog.Error("backend mutation page rejected", "workspace", s.workspaceID, "cursor", cursor, "err", err)
+			s.waitWithCancel(backendRetryDelay)
+			timeoutMs = int64(backendWaitTimeout / time.Millisecond)
+		}
 	}
 }
 
-func (s *BackendMutationSubscriber) handlePage(cursor string, page backend.MutationPage) int64 {
+func (s *BackendMutationSubscriber) handlePage(cursor string, page backend.MutationPage) (int64, error) {
+	if s.livePageCursors == nil {
+		s.livePageCursors = map[string]struct{}{cursor: {}}
+		s.livePageOrder = []string{cursor}
+	}
+	if err := validateMutationPageProgress(cursor, page, s.livePageCursors); err != nil {
+		return 0, err
+	}
+	// Live traffic may never reach an idle page. Bound cycle history instead
+	// of imposing the startup drain cap on a healthy sustained stream.
+	window := s.budgets.maxDrainPages
+	if window <= 0 {
+		window = defaultDrainMaxPages
+	}
+	if len(s.livePageOrder) >= window {
+		delete(s.livePageCursors, s.livePageOrder[0])
+		s.livePageOrder = s.livePageOrder[1:]
+	}
+	s.livePageCursors[page.Cursor] = struct{}{}
+	s.livePageOrder = append(s.livePageOrder, page.Cursor)
+	if !page.HasMore {
+		s.livePageCursors = nil
+		s.livePageOrder = nil
+	}
 	if page.Cursor == "" {
 		page.Cursor = cursor
 	}
@@ -229,12 +262,12 @@ func (s *BackendMutationSubscriber) handlePage(cursor string, page backend.Mutat
 	}
 
 	if page.HasMore {
-		return 0
+		return 0, nil
 	}
 	if len(page.Events) == 0 {
 		s.waitWithCancel(backendEmptyPollDelay)
 	}
-	return int64(backendWaitTimeout / time.Millisecond)
+	return int64(backendWaitTimeout / time.Millisecond), nil
 }
 
 func (s *BackendMutationSubscriber) discoverHead() (string, error) {
@@ -260,6 +293,7 @@ func (s *BackendMutationSubscriber) drainToHead(start string) (string, error) {
 	ctx, cancel := context.WithTimeout(s.ctx, s.budgets.drainTimeout)
 	defer cancel()
 	cursor := start
+	seen := map[string]struct{}{start: {}}
 	pages := 0
 	events := 0
 	for {
@@ -273,6 +307,10 @@ func (s *BackendMutationSubscriber) drainToHead(start string) (string, error) {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return "", &drainCapError{pages: pages, events: events, cause: "time budget"}
 		}
+		if err := validateMutationPageProgress(cursor, page, seen); err != nil {
+			return "", fmt.Errorf("discover subscriber head: %w", err)
+		}
+		seen[page.Cursor] = struct{}{}
 		pages++
 		events += len(page.Events)
 		if page.Cursor != "" {
@@ -382,4 +420,20 @@ func (s *BackendMutationSubscriber) waitWithCancel(d time.Duration) {
 	case <-s.ctx.Done():
 	case <-timer.C:
 	}
+}
+
+// Cursors are opaque identities: reject cycles without interpreting timestamps
+// or lexical order. An empty terminal idle page may legitimately retain its
+// input cursor. A page claiming records or more work must advance explicitly.
+func validateMutationPageProgress(previous string, page backend.MutationPage, seen map[string]struct{}) error {
+	requiresProgress := page.HasMore || len(page.Events) > 0
+	if requiresProgress && (page.Cursor == "" || page.Cursor == previous) {
+		return fmt.Errorf("mutation pagination did not advance from %q", previous)
+	}
+	if page.Cursor != "" && page.Cursor != previous {
+		if _, duplicate := seen[page.Cursor]; duplicate {
+			return fmt.Errorf("mutation pagination repeated cursor %q", page.Cursor)
+		}
+	}
+	return nil
 }

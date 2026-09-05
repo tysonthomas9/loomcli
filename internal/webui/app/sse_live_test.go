@@ -448,19 +448,21 @@ func TestSSELive_CatchUpOnReconnect(t *testing.T) {
 		{
 			Type:      "create",
 			IssueID:   "loom-catchup-1",
+			Cursor:    "c1.first",
 			Title:     "Catchup Issue 1",
 			Timestamp: time.Now().UTC().Add(-2 * time.Minute),
 		},
 		{
 			Type:      "update",
 			IssueID:   "loom-catchup-2",
+			Cursor:    "c1.last",
 			Title:     "Catchup Issue 2",
 			Timestamp: time.Now().UTC().Add(-1 * time.Minute),
 		},
 	}
 
 	getMutationPage := func(context.Context, string, string, int) (backend.MutationPage, error) {
-		return backend.MutationPage{Events: catchUpEvents, Cursor: "2000"}, nil
+		return backend.MutationPage{Events: catchUpEvents, Cursor: "c1.last"}, nil
 	}
 
 	server := newLiveSSEServer(t, hub, getMutationPage)
