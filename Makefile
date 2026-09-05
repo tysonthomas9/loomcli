@@ -95,7 +95,11 @@ test-fleetdb-embedded: build
 # corpus. The release workflow supplies fleet-db main deliberately: Loom and
 # FleetDB are released as one compatibility pair rather than against a stale
 # server pin.
-test-skills-release-compat:
+.PHONY: test-skills-release-contract
+test-skills-release-contract:
+	@scripts/test-vercel-skills-release-contract.sh
+
+test-skills-release-compat: test-skills-release-contract
 	@scripts/test-vercel-skills-compat.sh
 
 test-fleetdb-supervisor:
