@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
@@ -531,4 +532,59 @@ type workspaceCountingDaemonStore struct {
 func (s *workspaceCountingDaemonStore) Get(ctx context.Context, workspaceKey string) (*domain.DaemonProfile, error) {
 	s.getByWorkspace[workspaceKey]++
 	return s.DaemonProfileStore.Get(ctx, workspaceKey)
+}
+
+// invalidWorkspaceGetStore drives workspaceJobFromStore with a chosen sentinel:
+// memstore never returns domain.ErrInvalid, but fleet-db answers a malformed
+// workspace key with 400, which the client maps to ErrInvalid.
+type invalidWorkspaceGetStore struct {
+	store.Store
+	err error
+}
+
+func (s invalidWorkspaceGetStore) Workspaces() store.WorkspaceStore {
+	return errWorkspaceStore{WorkspaceStore: s.Store.Workspaces(), err: s.err}
+}
+
+type errWorkspaceStore struct {
+	store.WorkspaceStore
+	err error
+}
+
+func (s errWorkspaceStore) Get(context.Context, string) (*domain.Workspace, error) {
+	return nil, s.err
+}
+
+func TestGetWorkspaceJob_MalformedKeyReturnsNotFound(t *testing.T) {
+	st := invalidWorkspaceGetStore{
+		Store: memstore.New(),
+		err:   fmt.Errorf("get workspace: %w", domain.ErrInvalid),
+	}
+
+	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st})
+	job, err := svc.GetWorkspaceJob(context.Background(), "does-not-exist")
+	if job != nil {
+		t.Fatalf("job = %+v, want nil", job)
+	}
+	var serr *ServiceError
+	if !errors.As(err, &serr) || serr.Kind != KindNotFound {
+		t.Fatalf("GetWorkspaceJob err = %v, want not-found ServiceError", err)
+	}
+	if serr.Message != "job not found" {
+		t.Fatalf("message = %q, want job not found", serr.Message)
+	}
+}
+
+func TestGetWorkspaceJob_StoreErrorStaysInternal(t *testing.T) {
+	st := invalidWorkspaceGetStore{Store: memstore.New(), err: errors.New("boom")}
+
+	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st})
+	if _, err := svc.GetWorkspaceJob(context.Background(), "ANYWS"); err != nil {
+		var serr *ServiceError
+		if !errors.As(err, &serr) || serr.Kind != KindInternal {
+			t.Fatalf("GetWorkspaceJob err = %v, want internal ServiceError", err)
+		}
+	} else {
+		t.Fatal("GetWorkspaceJob err = nil, want internal ServiceError")
+	}
 }
