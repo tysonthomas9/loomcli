@@ -89,6 +89,10 @@ services:
       LOOM_WORKSPACE: DEFAULT
       LOOM_FLEET_ACTOR: local-user
       LOOM_FLEET_DB_ACTOR: local-user
+      # A serial E2E suite hits this single serve process from one IP and trips
+      # the per-IP HTTP rate limiter (100 read/s, 20 mutate/s). Off here only;
+      # the default stays on for real deployments.
+      LOOM_RATE_LIMIT_ENABLED: "0"
       LOOM_AGENT_NAME: local-user
       LOOM_FLEET_REQUIRED: "1"
       LOOM_FRONTEND_URL: "http://localhost:${LOOM_UI_PORT:-8091}"

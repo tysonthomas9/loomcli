@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/time/rate"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
@@ -48,6 +49,14 @@ const envLoomIssueBridgeInterval = "LOOM_ISSUE_BRIDGE_INTERVAL"
 const envLoomIssueBridgeDisabled = "LOOM_ISSUE_BRIDGE_DISABLED"
 const envLoomIssueBridgeStatePath = "LOOM_ISSUE_BRIDGE_STATE_PATH"
 
+// LOOM_RATE_LIMIT_* configure the per-IP HTTP rate limiter installed by the
+// webui middleware chain. Defaults leave it on at the package limits.
+const envLoomRateLimitEnabled = "LOOM_RATE_LIMIT_ENABLED"
+const envLoomRateLimitReadRate = "LOOM_RATE_LIMIT_READ_RATE"
+const envLoomRateLimitReadBurst = "LOOM_RATE_LIMIT_READ_BURST"
+const envLoomRateLimitMutateRate = "LOOM_RATE_LIMIT_MUTATE_RATE"
+const envLoomRateLimitMutateBurst = "LOOM_RATE_LIMIT_MUTATE_BURST"
+
 const monitorCollectionCacheTTL = 10 * time.Second
 
 const (
@@ -76,6 +85,12 @@ var (
 	serveAuthAudience      string
 	serveAuthAllowInsecure bool
 	serveSentryDSN         string
+
+	serveRateLimitEnabled     bool
+	serveRateLimitReadRate    int
+	serveRateLimitReadBurst   int
+	serveRateLimitMutateRate  int
+	serveRateLimitMutateBurst int
 
 	// usageHandler holds the initialized usage HTTP handler.
 	usageHandler http.HandlerFunc
@@ -126,11 +141,17 @@ ENVIRONMENT VARIABLES
   LOOM_ISSUE_BRIDGE_DISABLED            Disable the issue-journal bridge loop (set 1/true)
   LOOM_ISSUE_BRIDGE_STATE_PATH          Bridge cursor state file (default: <state dir>/issue-bridge-cursor.json)
   LOOM_ISSUE_BRIDGE_REPLAY              Replay journal from zero on first observation (set 1/true)
+  LOOM_RATE_LIMIT_ENABLED      Per-IP HTTP rate limiting (default: on; set 0/false/off/no to disable)
+  LOOM_RATE_LIMIT_READ_RATE    Sustained read req/s per IP (default: 100)
+  LOOM_RATE_LIMIT_READ_BURST   Read burst per IP (default: 200)
+  LOOM_RATE_LIMIT_MUTATE_RATE  Sustained mutating req/s per IP (default: 20)
+  LOOM_RATE_LIMIT_MUTATE_BURST Mutating burst per IP (default: 40)
 
 EXAMPLES
   loom serve                                              # Default port 8080
   loom serve --bind 0.0.0.0 --auth-url https://auth.co   # Exposed with JWT auth
-  loom serve --frontend-url https://app.example.com       # Cross-origin frontend`,
+  loom serve --frontend-url https://app.example.com       # Cross-origin frontend
+  loom serve --rate-limit-enabled=false                   # Local/E2E: no 429s`,
 	Args: cobra.NoArgs,
 	Run:  runServe,
 }
@@ -138,6 +159,7 @@ EXAMPLES
 func init() {
 	registerServeFlags()
 	registerServeAuthFlags()
+	registerServeRateLimitFlags()
 	cli.RegisterCommand(serveCmd)
 }
 
@@ -176,6 +198,28 @@ func registerServeAuthFlags() {
 	serveCmd.Flags().StringVar(&serveAuthIssuer, "auth-issuer", os.Getenv("LOOM_AUTH_ISSUER"), "Expected JWT issuer (defaults to --auth-url)")
 	serveCmd.Flags().StringVar(&serveAuthAudience, "auth-audience", os.Getenv("LOOM_AUTH_AUDIENCE"), "Expected JWT audience (defaults to \"loom\")")
 	serveCmd.Flags().BoolVar(&serveAuthAllowInsecure, "auth-allow-insecure", false, "Allow HTTP for non-loopback --auth-url (INSECURE, for Docker internal networks only)")
+}
+
+// registerServeRateLimitFlags binds the per-IP HTTP rate limiter flags. Each
+// default folds in its LOOM_RATE_LIMIT_* env var, so the env alone works
+// without passing the flag (same shape as --fleet-mode).
+func registerServeRateLimitFlags() {
+	d := middleware.DefaultRateLimitConfig()
+	serveCmd.Flags().BoolVar(&serveRateLimitEnabled, "rate-limit-enabled",
+		rateLimitEnabledDefault(),
+		"Enable per-IP HTTP rate limiting. Env: "+envLoomRateLimitEnabled)
+	serveCmd.Flags().IntVar(&serveRateLimitReadRate, "rate-limit-read-rate",
+		intEnvDefault(envLoomRateLimitReadRate, int(d.ReadRate)),
+		"Sustained read requests per second per client IP. Env: "+envLoomRateLimitReadRate)
+	serveCmd.Flags().IntVar(&serveRateLimitReadBurst, "rate-limit-read-burst",
+		intEnvDefault(envLoomRateLimitReadBurst, d.ReadBurst),
+		"Read burst capacity per client IP. Env: "+envLoomRateLimitReadBurst)
+	serveCmd.Flags().IntVar(&serveRateLimitMutateRate, "rate-limit-mutate-rate",
+		intEnvDefault(envLoomRateLimitMutateRate, int(d.MutateRate)),
+		"Sustained mutating requests per second per client IP. Env: "+envLoomRateLimitMutateRate)
+	serveCmd.Flags().IntVar(&serveRateLimitMutateBurst, "rate-limit-mutate-burst",
+		intEnvDefault(envLoomRateLimitMutateBurst, d.MutateBurst),
+		"Mutating burst capacity per client IP. Env: "+envLoomRateLimitMutateBurst)
 }
 
 //nolint:funlen // Serve startup wires process-wide dependencies in a fixed order.
@@ -454,6 +498,36 @@ func driverExecutorEnabled() bool {
 	}
 }
 
+// rateLimitEnabledDefault reports whether the per-IP HTTP rate limiter is on
+// when no --rate-limit-enabled flag is passed. Default on; mirrors
+// driverExecutorEnabled's accepted spellings, so an unrecognized value leaves
+// the protection enabled.
+func rateLimitEnabledDefault() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(envLoomRateLimitEnabled))) {
+	case "0", "false", "off", "no":
+		return false
+	default:
+		return true
+	}
+}
+
+// intEnvDefault reads a positive integer env var, falling back to def when
+// unset, unparseable, or non-positive. A bad value logs rather than aborting
+// serve — and never reaches rate.NewLimiter, where 0 rejects every request.
+// Unlike boundedIntEnv it has no upper clamp: rate limits have no sensible max.
+func intEnvDefault(name string, def int) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return def
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		slog.Warn("ignoring invalid rate limit env var", "env", name, "value", raw, "default", def)
+		return def
+	}
+	return n
+}
+
 func driverTaskWorkerConcurrency() int {
 	return boundedIntEnv(envLoomDriverTaskWorkerConcurrency, 2, 32)
 }
@@ -634,6 +708,7 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		AgentQueueFn:          daemonwire.BuildAgentQueueFn(),
 		TerminalCmd:           fmt.Sprintf("loom lead --backend %s", backend),
 		HSTSEnabled:           serveHSTS,
+		RateLimit:             buildRateLimitConfig(),
 		ExtAuthURL:            serveAuthURL,
 		ExtAuthIssuer:         serveAuthIssuer,
 		ExtAuthAudience:       serveAuthAudience,
@@ -661,6 +736,19 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		// process-global fleet-db backend.
 		IssueBackendFn: cli.WorkspaceAwareIssueBackend(),
 	}
+}
+
+// buildRateLimitConfig assembles the per-IP rate limiter config from the
+// --rate-limit-* flags (whose defaults already fold in LOOM_RATE_LIMIT_*).
+// Cleanup/TTL stay at package defaults — they are not worth a flag.
+func buildRateLimitConfig() *middleware.RateLimitConfig {
+	cfg := middleware.DefaultRateLimitConfig()
+	cfg.Enabled = serveRateLimitEnabled
+	cfg.ReadRate = rate.Limit(serveRateLimitReadRate)
+	cfg.ReadBurst = serveRateLimitReadBurst
+	cfg.MutateRate = rate.Limit(serveRateLimitMutateRate)
+	cfg.MutateBurst = serveRateLimitMutateBurst
+	return &cfg
 }
 
 // buildFileBrowserRoleResolver returns a WorkspaceRoleResolver that grants every
