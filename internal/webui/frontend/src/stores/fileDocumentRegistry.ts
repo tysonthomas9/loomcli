@@ -160,7 +160,70 @@ function isPreconditionFailure(error: unknown): boolean {
   );
 }
 
+interface DocumentRecoveryCoordinator {
+  register(
+    name: string,
+    refresh: (signal: AbortSignal) => Promise<void>,
+  ): () => void;
+}
+
 export class FileDocumentRegistry {
+  private readonly recoveryReads = new Map<string, Promise<void>>();
+  private readonly recoveryMembers = new Map<
+    DocumentRecoveryCoordinator,
+    Map<string, { count: number; dispose: () => void }>
+  >();
+
+  enrollRecovery(
+    ref: FileDocumentRef,
+    coordinator: DocumentRecoveryCoordinator,
+  ): () => void {
+    const key = fileDocumentKey(ref);
+    let members = this.recoveryMembers.get(coordinator);
+    if (!members) {
+      members = new Map();
+      this.recoveryMembers.set(coordinator, members);
+    }
+    let member = members.get(key);
+    if (!member) {
+      member = {
+        count: 0,
+        dispose: coordinator.register(`document:${key}`, (signal) =>
+          this.refreshForRecovery(ref, signal),
+        ),
+      };
+      members.set(key, member);
+    }
+    member.count++;
+    let active = true;
+    return () => {
+      if (!active) return;
+      active = false;
+      if (--member.count === 0) {
+        member.dispose();
+        members.delete(key);
+        if (members.size === 0) this.recoveryMembers.delete(coordinator);
+      }
+    };
+  }
+
+  refreshForRecovery(ref: FileDocumentRef, signal: AbortSignal): Promise<void> {
+    if (signal.aborted) return Promise.reject(signal.reason);
+    if (this.get(ref).isSaving)
+      return Promise.reject(new Error("Document save in progress"));
+    const key = fileDocumentKey(ref);
+    const promise = Promise.resolve().then(() =>
+      this.readDocument(ref, signal),
+    );
+    this.recoveryReads.set(key, promise);
+    const finish = () => {
+      if (this.recoveryReads.get(key) === promise)
+        this.recoveryReads.delete(key);
+    };
+    void promise.then(finish, finish);
+    return promise;
+  }
+
   private readonly states = new Map<string, FileDocumentState>();
   private readonly runtimes = new Map<string, DocumentRuntime>();
   private readonly listeners = new Set<() => void>();
@@ -234,12 +297,44 @@ export class FileDocumentRegistry {
   }
 
   async refresh(ref: FileDocumentRef): Promise<void> {
-    if (this.get(ref).isSaving) return;
+    const recovery = this.recoveryReads.get(fileDocumentKey(ref));
+    if (recovery) return recovery.catch(() => {});
+    return this.readDocument(ref);
+  }
+
+  private async readDocument(
+    ref: FileDocumentRef,
+    recoverySignal?: AbortSignal,
+  ): Promise<void> {
+    recoverySignal?.throwIfAborted();
+    if (this.get(ref).isSaving) {
+      if (recoverySignal) throw new Error("Document save in progress");
+      return;
+    }
     const started = this.beginRequest(ref, "read");
+    const signal = recoverySignal
+      ? AbortSignal.any([started.signal, recoverySignal])
+      : started.signal;
+    let onAbort = () => {};
+    const assertCurrent = () => {
+      signal.throwIfAborted();
+      if (
+        this.states.get(started.key)?.requestGeneration !== started.generation
+      )
+        throw new DOMException("Document request superseded", "AbortError");
+    };
     try {
-      const data = await this.operations.read(started.ref, started.signal);
-      const current = this.states.get(started.key);
-      if (!current || current.requestGeneration !== started.generation) return;
+      const aborted = new Promise<never>((_, reject) => {
+        onAbort = () => reject(signal.reason);
+        signal.addEventListener("abort", onAbort, { once: true });
+        if (signal.aborted) onAbort();
+      });
+      const data = await Promise.race([
+        this.operations.read(started.ref, signal),
+        aborted,
+      ]);
+      assertCurrent();
+      const current = this.states.get(started.key)!;
 
       const serverContent = data.binary ? "" : (data.content ?? "");
       if (current.dirty) {
@@ -257,6 +352,7 @@ export class FileDocumentRegistry {
                   version: data.version,
                 },
         });
+        assertCurrent();
         return;
       }
 
@@ -271,15 +367,21 @@ export class FileDocumentRegistry {
         error: null,
         externalConflict: null,
       });
+      assertCurrent();
     } catch (error) {
       const current = this.states.get(started.key);
-      if (!current || current.requestGeneration !== started.generation) return;
+      if (!current || current.requestGeneration !== started.generation) {
+        if (recoverySignal) throw error;
+        return;
+      }
       this.replace(started.key, {
         ...current,
         isLoading: false,
         error: isAbortError(error) ? current.error : errorMessage(error),
       });
+      if (recoverySignal) throw error;
     } finally {
+      signal.removeEventListener("abort", onAbort);
       this.finishRequest(started.key, started.generation);
     }
   }
@@ -565,6 +667,10 @@ export class FileDocumentRegistry {
   }
 
   dispose(): void {
+    for (const members of this.recoveryMembers.values()) {
+      for (const member of members.values()) member.dispose();
+    }
+    this.recoveryMembers.clear();
     for (const key of [...this.states.keys()]) this.forceDelete(key);
     this.listeners.clear();
     if (this.beforeUnloadInstalled) {

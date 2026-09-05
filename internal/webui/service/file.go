@@ -103,7 +103,7 @@ type FileTreeResult struct {
 // FileReadResult contains file read content and metadata.
 type FileReadResult struct {
 	Path      string `json:"path"`
-	Content   string `json:"content,omitempty"`
+	Content   string `json:"content"`
 	Size      int64  `json:"size"`
 	Binary    bool   `json:"binary"`
 	Truncated bool   `json:"truncated"`

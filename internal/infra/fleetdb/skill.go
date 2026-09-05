@@ -2,6 +2,7 @@ package fleetdb
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -399,13 +400,52 @@ func (s *skillStore) GetFile(ctx context.Context, ws string, ref domain.SkillRef
 	if err := validateSkillDocumentRoute(ws, ref, filePath); err != nil {
 		return nil, err
 	}
-	var resp skillDocumentWire
+	var raw json.RawMessage
 	path := skillDocumentPath(ws, ref, filePath)
-	_, headers, err := s.client.doWithResponse(ctx, http.MethodGet, path, nil, &resp, nil)
+	_, headers, err := s.client.doWithResponse(ctx, http.MethodGet, path, nil, &raw, nil)
 	if err != nil {
 		return nil, err
 	}
-	return resp.toDomain(headers.Get(etagHeader))
+	return decodeSkillDocumentRead(raw, headers.Get(etagHeader), ref, filePath)
+}
+
+// decodeSkillDocumentRead validates the source before zero-value decoding can
+// turn an absent document body into an apparently valid empty document.
+func decodeSkillDocumentRead(raw json.RawMessage, etag string, ref domain.SkillRef, filePath string) (*domain.SkillDocument, error) {
+	var required struct {
+		Content    *string         `json:"content"`
+		Path       *string         `json:"path"`
+		Revision   *string         `json:"revision"`
+		SkillRef   *string         `json:"skill_ref"`
+		Executable json.RawMessage `json:"executable"`
+	}
+	if err := json.Unmarshal(raw, &required); err != nil {
+		return nil, fmt.Errorf("decode skill document: %w", err)
+	}
+	if required.Content == nil || required.Path == nil || required.Revision == nil || strings.TrimSpace(*required.Revision) == "" || required.SkillRef == nil {
+		return nil, fmt.Errorf("skill document response lacks required content or identity")
+	}
+	if string(required.Executable) == "null" {
+		return nil, fmt.Errorf("skill document executable flag is null")
+	}
+	var wire skillDocumentWire
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		return nil, fmt.Errorf("decode skill document: %w", err)
+	}
+	doc, err := wire.toDomain(etag)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(doc.Revision) == "" {
+		return nil, fmt.Errorf("skill document response lacks revision")
+	}
+	if doc.Ref != ref || doc.Path != filePath {
+		return nil, fmt.Errorf("skill document response identity does not match requested file")
+	}
+	if etag != "" && parseETag(etag) != doc.Revision {
+		return nil, fmt.Errorf("skill document response revision disagrees with ETag")
+	}
+	return doc, nil
 }
 
 func (s *skillStore) PutFile(ctx context.Context, ws string, ref domain.SkillRef, write store.SkillFileWrite) (*domain.SkillDocument, error) {
