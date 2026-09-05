@@ -167,7 +167,7 @@ export function EventProvider({
   useEffect(() => {
     queryRecoveryRef.current = queryRecovery;
     const unregister = queryRecovery.register(
-      "blocked issue queries",
+      "invalidated queries",
       (signal) => invalidatedQueryRegistry.refreshForRecovery(signal),
       () => invalidatedQueryRegistry.getRecoveryRevision(),
     );

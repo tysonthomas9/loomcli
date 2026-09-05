@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useMemo, useContext, useCallback } from "react";
 
-import { ScopedQueryRequest } from "@/hooks/common/scopedQueryRequest";
+import { ScopedQueryRequest } from "@/utils/scopedQueryRequest";
 import { QueryRecoveryContext } from "@/hooks/common/queryRecovery";
 
 import type { GitStatus } from "@/api/workspace";

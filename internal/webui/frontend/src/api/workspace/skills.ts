@@ -155,14 +155,22 @@ export function mapSkillApiError(error: unknown): SkillApiFailure | null {
   };
 }
 
-export function listSkills(
+export async function listSkills(
   workspaceId: string,
   options: { signal?: AbortSignal } = {},
 ): Promise<SkillsCatalogResponse> {
   const url = wsUrl(workspaceId, "/skills");
-  return options.signal
+  const data = await (options.signal
     ? get<SkillsCatalogResponse>(url, options)
-    : get<SkillsCatalogResponse>(url);
+    : get<SkillsCatalogResponse>(url));
+  if (
+    !data ||
+    !Array.isArray(data.groups) ||
+    !data.groups.every(validCatalogGroup)
+  ) {
+    throw new Error("Invalid skills catalog");
+  }
+  return data;
 }
 
 export function getSkill(
@@ -254,10 +262,82 @@ export async function deleteSkillFile(
   });
 }
 
-export function getSkillCapabilities(
+export async function getSkillCapabilities(
   workspaceId: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<SkillCapabilitiesResponse> {
-  return get<SkillCapabilitiesResponse>(
-    wsUrl(workspaceId, "/skill-capabilities"),
+  const url = wsUrl(workspaceId, "/skill-capabilities");
+  const data = await (options.signal
+    ? get<SkillCapabilitiesResponse>(url, options)
+    : get<SkillCapabilitiesResponse>(url));
+  if (
+    !data ||
+    typeof data.can_edit_role_scope !== "boolean" ||
+    data.workspace_scope !== "read_only"
+  ) {
+    throw new Error("Invalid skill capabilities");
+  }
+  return data;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validCatalogGroup(value: unknown): value is SkillCatalogGroup {
+  if (
+    !isRecord(value) ||
+    (value.scope !== "workspace" && value.scope !== "role")
+  )
+    return false;
+  if (value.scope === "role" && (typeof value.role !== "string" || !value.role))
+    return false;
+  if (value.scope === "workspace" && value.role !== undefined) return false;
+  return (
+    Array.isArray(value.skills) &&
+    value.skills.every((skill: unknown) => {
+      if (
+        !isRecord(skill) ||
+        skill.scope !== value.scope ||
+        skill.role !== value.role
+      )
+        return false;
+      if (
+        typeof skill.name !== "string" ||
+        !skill.name ||
+        typeof skill.description !== "string" ||
+        typeof skill.content_revision !== "string" ||
+        !skill.content_revision
+      )
+        return false;
+      for (const field of ["created_at", "updated_at"]) {
+        if (
+          typeof skill[field] !== "string" ||
+          !Number.isFinite(Date.parse(skill[field]))
+        )
+          return false;
+      }
+      for (const field of [
+        "created_by",
+        "updated_by",
+        "source",
+        "source_ref",
+      ]) {
+        if (skill[field] !== undefined && typeof skill[field] !== "string")
+          return false;
+      }
+      return (
+        Array.isArray(skill.files) &&
+        skill.files.every(
+          (file: unknown) =>
+            isRecord(file) &&
+            typeof file.path === "string" &&
+            !!file.path &&
+            typeof file.revision === "string" &&
+            !!file.revision &&
+            typeof file.executable === "boolean",
+        )
+      );
+    })
   );
 }

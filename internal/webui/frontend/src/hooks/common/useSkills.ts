@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 
 import type { SkillsScopeGroup } from "@/api/workspace";
+import { useInvalidatedQuery } from "./useInvalidatedQuery";
 import { skillsStore } from "@/stores/skillsStore";
 import { explorerRefKey, type SkillsExplorerRef } from "@/utils/explorerRefs";
 
@@ -11,6 +12,19 @@ import { explorerRefKey, type SkillsExplorerRef } from "@/utils/explorerRefs";
  *   skills must not issue it.
  */
 export function useSkillsCatalog(workspaceId: string, enabled = true) {
+  const fetchCatalog = useCallback(
+    async (signal: AbortSignal) => {
+      await skillsStore.refreshCatalogForRecovery(workspaceId, signal);
+      return skillsStore.catalog(workspaceId);
+    },
+    [workspaceId],
+  );
+  useInvalidatedQuery(fetchCatalog, {
+    key: JSON.stringify(["skills-catalog", workspaceId]),
+    enabled: enabled && !!workspaceId,
+    entityTypes: ["skill", "role", "skill_pack"],
+    resetOnKeyChange: true,
+  });
   const snapshot = useSyncExternalStore(
     skillsStore.subscribe,
     () => skillsStore.catalog(workspaceId),
@@ -18,7 +32,7 @@ export function useSkillsCatalog(workspaceId: string, enabled = true) {
   );
 
   useEffect(() => {
-    if (enabled && snapshot.status === "idle") {
+    if (enabled && workspaceId && snapshot.status === "idle") {
       void skillsStore.loadCatalog(workspaceId);
     }
   }, [enabled, snapshot.revision, snapshot.status, workspaceId]);
@@ -75,17 +89,30 @@ export function useSkill(
   };
 }
 
-export function useSkillCapabilities(workspaceId: string) {
+export function useSkillCapabilities(workspaceId: string, enabled = true) {
+  const fetchCapabilities = useCallback(
+    async (signal: AbortSignal) => {
+      await skillsStore.refreshCapabilitiesForRecovery(workspaceId, signal);
+      return skillsStore.capability(workspaceId);
+    },
+    [workspaceId],
+  );
+  useInvalidatedQuery(fetchCapabilities, {
+    key: JSON.stringify(["skills-capabilities", workspaceId]),
+    enabled: enabled && !!workspaceId,
+    entityTypes: ["skill", "role", "skill_pack"],
+    resetOnKeyChange: true,
+  });
   const snapshot = useSyncExternalStore(
     skillsStore.subscribe,
     () => skillsStore.capability(workspaceId),
     () => skillsStore.capability(workspaceId),
   );
   useEffect(() => {
-    if (snapshot.status === "idle") {
+    if (enabled && workspaceId && snapshot.status === "idle") {
       void skillsStore.loadCapabilities(workspaceId);
     }
-  }, [snapshot.status, workspaceId]);
+  }, [enabled, snapshot.status, workspaceId]);
   const retry = useCallback(
     () => skillsStore.loadCapabilities(workspaceId, true),
     [workspaceId],
